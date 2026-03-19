@@ -6,7 +6,7 @@
 ///
 /// Architecture:
 ///   ProtocolReader (background thread) → decodes commands → dispatches to main thread
-///   CommandDispatcher (main thread) → updates CellGrid → triggers MetalRenderer
+///   CommandDispatcher (main thread) → updates LineBuffer → triggers CoreTextMetalRenderer
 ///   EditorNSView (main thread) → keyboard/mouse → ProtocolEncoder → stdout
 
 import SwiftUI
@@ -187,6 +187,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var encoder: ProtocolEncoder?
     private var dispatcher: CommandDispatcher?
     private var fontFace: FontFace?
+    private var fontManager: FontManager?
     private var editorNSView: EditorNSView?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -202,21 +203,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Initialize font.
         let face = FontFace(name: defaultFontName, size: defaultFontSize, scale: scale)
-        face.preloadAscii()
         self.fontFace = face
+
+        // Font manager for CoreText rendering.
+        let fm = FontManager(name: defaultFontName, size: defaultFontSize, scale: scale)
+        self.fontManager = fm
 
         // Initial grid dimensions.
         let cols = UInt16(defaultWindowWidth / CGFloat(face.cellWidth))
         let rows = UInt16(defaultWindowHeight / CGFloat(face.cellHeight))
-        let grid = CellGrid(cols: cols, rows: rows)
 
-        // Metal renderer.
-        guard let metalRenderer = MetalRenderer() else {
-            // PortLogger isn't set up yet, fall back to NSLog.
-            NSLog("Failed to initialize Metal renderer")
+        // CoreText renderer.
+        guard let ctRenderer = CoreTextMetalRenderer() else {
+            NSLog("Failed to initialize CoreText Metal renderer")
             NSApp.terminate(nil)
             return
         }
+        ctRenderer.setupLineRenderer(fontManager: fm)
 
         // Protocol encoder (writes to stdout).
         let enc = ProtocolEncoder()
@@ -229,15 +232,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         PortLogger.info("Font: \(defaultFontName) \(Int(defaultFontSize))pt, cell: \(face.cellWidth)x\(face.cellHeight), scale: \(scale)x")
         PortLogger.info("Initial grid: \(cols)x\(rows) cells")
 
+        // Command dispatcher.
+        let disp = CommandDispatcher(cols: cols, rows: rows, guiState: appState.gui)
+        disp.fontManager = fm
+        disp.onFontChanged = { [weak self] family, size, ligatures, weight in
+            self?.handleFontChange(family: family, size: CGFloat(size), ligatures: ligatures, weight: weight)
+        }
+        self.dispatcher = disp
+
         // Create the editor view.
-        let nsView = EditorNSView(encoder: enc, metalRenderer: metalRenderer, fontFace: face, cellGrid: grid)
+        let nsView = EditorNSView(encoder: enc, fontFace: face, lineBuffer: disp.lineBuffer,
+                                   coreTextRenderer: ctRenderer, fontManager: fm)
         self.editorNSView = nsView
         appState.editorNSView = nsView
 
-        // Command dispatcher.
-        let disp = CommandDispatcher(grid: grid, guiState: appState.gui)
         disp.onFrameReady = { [weak nsView] in
             nsView?.renderFrame()
+        }
+        disp.onModeChanged = { [weak nsView] modeName in
+            guard let nsView else { return }
+            NSAccessibility.post(
+                element: nsView,
+                notification: .announcementRequested,
+                userInfo: [.announcement: "\(modeName) mode"]
+            )
         }
         disp.onTitleChanged = { [weak appState] title in
             Task { @MainActor in
@@ -253,19 +271,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 appState.windowBgColor = Color(red: r, green: g, blue: b)
                 let isDark = (r * 0.299 + g * 0.587 + b * 0.114) < 0.5
                 appState.windowBgIsDark = isDark
-                // Also set the NSWindow appearance directly. SwiftUI's
-                // toolbarColorScheme doesn't always update the title text
-                // color reliably, but NSAppearance does.
                 for window in NSApp.windows {
                     window.appearance = NSAppearance(named: isDark ? .darkAqua : .aqua)
                 }
             }
         }
-        disp.fontFace = face
-        disp.onFontChanged = { [weak self] family, size, ligatures, weight in
-            self?.handleFontChange(family: family, size: CGFloat(size), ligatures: ligatures, weight: weight)
-        }
-        self.dispatcher = disp
 
         // The ready event is deferred: EditorNSView.setFrameSize sends it
         // once SwiftUI assigns the real frame dimensions. This avoids
@@ -300,17 +310,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Font change
 
     private func handleFontChange(family: String, size: CGFloat, ligatures: Bool, weight: UInt8) {
-        guard let nsView = editorNSView, let dispatcher else { return }
+        guard let nsView = editorNSView else { return }
 
         let scale = NSScreen.main?.backingScaleFactor ?? 2.0
         let newFace = FontFace(name: family, size: size, scale: scale, ligatures: ligatures, weight: weight)
-        newFace.preloadAscii()
 
         let fontName = CTFontCopyPostScriptName(newFace.ctFont) as String
         PortLogger.info("Font changed: \(fontName) \(Int(size))pt, ligatures: \(ligatures), cell: \(newFace.cellWidth)x\(newFace.cellHeight)")
 
         self.fontFace = newFace
-        dispatcher.fontFace = newFace
+
+        // Update FontManager and CoreText renderer for the new font.
+        fontManager?.setPrimaryFont(name: family, size: size, scale: scale,
+                                     ligatures: ligatures, weight: weight)
+        if let fm = fontManager {
+            nsView.coreTextRenderer.setupLineRenderer(fontManager: fm)
+        }
+
         nsView.updateFont(newFace)
     }
 
