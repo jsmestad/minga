@@ -31,8 +31,7 @@ defmodule Minga.Input.AgentMouse do
   alias Minga.Editor.Window.Content
   alias Minga.Editor.WindowTree
 
-  @default_scroll_lines 1
-
+  # Mouse event fields grouped for dispatch without exceeding max arity.
   @typep mouse_event :: %{
            button: atom(),
            mods: non_neg_integer(),
@@ -279,7 +278,5 @@ defmodule Minga.Input.AgentMouse do
   @spec scroll_lines() :: pos_integer()
   defp scroll_lines do
     Options.get(:scroll_lines)
-  catch
-    :exit, _ -> @default_scroll_lines
   end
 end

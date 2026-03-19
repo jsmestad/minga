@@ -107,12 +107,7 @@ defmodule Minga.Application do
 
   @spec prune_old_sessions() :: :ok
   defp prune_old_sessions do
-    retention_days =
-      try do
-        Options.get(:agent_session_retention_days)
-      rescue
-        _ -> 30
-      end
+    retention_days = Options.get(:agent_session_retention_days)
 
     pruned = SessionStore.prune(retention_days)
 
