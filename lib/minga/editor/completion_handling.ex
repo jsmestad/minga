@@ -11,7 +11,6 @@ defmodule Minga.Editor.CompletionHandling do
   alias Minga.Editor.CompletionTrigger
   alias Minga.Editor.SignatureHelp
   alias Minga.Editor.State, as: EditorState
-  alias Minga.Git.Tracker, as: GitTracker
   alias Minga.LSP.Client
   alias Minga.LSP.SyncServer
 
@@ -160,9 +159,7 @@ defmodule Minga.Editor.CompletionHandling do
       BufferServer.insert_text(buf, text)
     end
 
-    Minga.Events.broadcast(:buffer_changed, %Minga.Events.BufferChangedEvent{buffer: buf})
-    SyncServer.notify_change(buf)
-    GitTracker.notify_change(buf)
+    Minga.Events.notify_buffer_changed(buf)
     state
   end
 
@@ -179,9 +176,7 @@ defmodule Minga.Editor.CompletionHandling do
       edit.new_text
     )
 
-    Minga.Events.broadcast(:buffer_changed, %Minga.Events.BufferChangedEvent{buffer: buf})
-    SyncServer.notify_change(buf)
-    GitTracker.notify_change(buf)
+    Minga.Events.notify_buffer_changed(buf)
     state
   end
 

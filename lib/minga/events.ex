@@ -79,6 +79,9 @@ defmodule Minga.Events do
     @type t :: %__MODULE__{old: atom(), new: atom()}
   end
 
+  alias Minga.Git.Tracker, as: GitTracker
+  alias Minga.LSP.SyncServer
+
   # ── Types ───────────────────────────────────────────────────────────────────
 
   @typedoc "Known event topics."
@@ -173,6 +176,20 @@ defmodule Minga.Events do
         send(pid, {:minga_event, topic, payload})
       end
     end)
+  end
+
+  @doc """
+  Broadcasts `:buffer_changed` and notifies LSP sync and Git tracker.
+
+  This is the single call site for the buffer-changed notification sequence.
+  Callers that modify buffer content should call this instead of manually
+  broadcasting + notifying each subscriber.
+  """
+  @spec notify_buffer_changed(pid()) :: :ok
+  def notify_buffer_changed(buf) when is_pid(buf) do
+    broadcast(:buffer_changed, %BufferChangedEvent{buffer: buf})
+    SyncServer.notify_change(buf)
+    GitTracker.notify_change(buf)
   end
 
   # ── Query ───────────────────────────────────────────────────────────────────
