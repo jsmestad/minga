@@ -129,6 +129,9 @@ final class CommandDispatcher {
         case .setFont(let family, let size, let ligatures, let weight):
             onFontChanged?(family, size, ligatures, weight)
 
+        case .setFontFallback(let families):
+            fontFace?.setFallbackFonts(families)
+
         case .guiTheme(let slots):
             guiState.themeColors.applySlots(slots)
 

@@ -119,6 +119,7 @@ defmodule Minga.Port.Protocol do
 
   # Config commands (BEAM → frontend)
   @op_set_font 0x50
+  @op_set_font_fallback 0x51
 
   # Log messages (Zig → BEAM)
   @op_log_message 0x60
@@ -386,6 +387,28 @@ defmodule Minga.Port.Protocol do
     weight_byte = Map.get(@font_weight_map, weight, 2)
 
     <<@op_set_font, size::16, weight_byte::8, lig_byte::8, byte_size(family)::16, family::binary>>
+  end
+
+  @doc """
+  Encodes a set_font_fallback command to configure the GUI's font fallback chain.
+
+  The fallback chain is tried in order when the primary font (set via `set_font`)
+  doesn't have a glyph. Each entry is a font family name resolved by the frontend
+  via NSFontManager. After the configured fallbacks, the system fallback
+  (CTFontCreateForString) is used as a last resort.
+
+  Format: `opcode:8, count:8, [name_len:16, name:bytes]*`
+  """
+  @spec encode_set_font_fallback([String.t()]) :: binary()
+  def encode_set_font_fallback(families) when is_list(families) do
+    count = length(families)
+
+    entries =
+      Enum.map(families, fn name ->
+        <<byte_size(name)::16, name::binary>>
+      end)
+
+    IO.iodata_to_binary([@op_set_font_fallback, count | entries])
   end
 
   # ── Encoding: region commands (BEAM → Zig) ──
@@ -841,6 +864,13 @@ defmodule Minga.Port.Protocol do
     {:ok, {:set_font, name, size, weight, lig == 1}}
   end
 
+  def decode_command(<<@op_set_font_fallback, count::8, rest::binary>>) do
+    case decode_font_fallback_entries(rest, count, []) do
+      {:ok, families} -> {:ok, {:set_font_fallback, families}}
+      :error -> {:error, :malformed}
+    end
+  end
+
   def decode_command(<<_opcode::8, _rest::binary>>) do
     {:error, :unknown_opcode}
   end
@@ -933,6 +963,21 @@ defmodule Minga.Port.Protocol do
   defp bits_to_ul_style(3), do: :dotted
   defp bits_to_ul_style(4), do: :double
   defp bits_to_ul_style(_), do: :line
+
+  @spec decode_font_fallback_entries(binary(), non_neg_integer(), [String.t()]) ::
+          {:ok, [String.t()]} | :error
+  defp decode_font_fallback_entries(_rest, 0, acc), do: {:ok, Enum.reverse(acc)}
+
+  defp decode_font_fallback_entries(
+         <<name_len::16, name::binary-size(name_len), rest::binary>>,
+         remaining,
+         acc
+       )
+       when remaining > 0 do
+    decode_font_fallback_entries(rest, remaining - 1, [name | acc])
+  end
+
+  defp decode_font_fallback_entries(_rest, _remaining, _acc), do: :error
 
   @spec decode_attrs(non_neg_integer()) :: [atom()]
   defp decode_attrs(attrs) do

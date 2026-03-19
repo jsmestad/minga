@@ -44,6 +44,7 @@ pub const OP_DRAW_STYLED_TEXT: u8 = 0x1C;
 
 // Config commands (BEAM → frontend, TUI ignores)
 pub const OP_SET_FONT: u8 = 0x50;
+pub const OP_SET_FONT_FALLBACK: u8 = 0x51;
 
 // Incremental content sync (BEAM → Zig)
 pub const OP_EDIT_BUFFER: u8 = 0x26;
@@ -854,6 +855,21 @@ pub fn decodeCommand(data: []const u8) DecodeError!RenderCommand {
             // TUI ignores font config; just return a no-op clear.
             return .clear;
         },
+        OP_SET_FONT_FALLBACK => {
+            // count:1, then count * (name_len:2, name:bytes)
+            if (rest.len < 1) return error.Malformed;
+            const count = rest[0];
+            var offset: usize = 1;
+            var i: u8 = 0;
+            while (i < count) : (i += 1) {
+                if (rest.len < offset + 2) return error.Malformed;
+                const name_len = std.mem.readInt(u16, rest[offset..][0..2], .big);
+                offset += 2 + name_len;
+                if (rest.len < offset) return error.Malformed;
+            }
+            // TUI ignores font fallback; just return a no-op clear.
+            return .clear;
+        },
         else => return error.UnknownOpcode,
     }
 }
@@ -952,6 +968,19 @@ pub fn commandSize(payload: []const u8) usize {
             if (payload.len < 7) break :blk payload.len;
             const name_len = std.mem.readInt(u16, payload[5..7], .big);
             break :blk 7 + name_len;
+        },
+        OP_SET_FONT_FALLBACK => blk: {
+            // opcode(1) + count(1), then count * (name_len:2, name:bytes)
+            if (payload.len < 2) break :blk payload.len;
+            const count = payload[1];
+            var offset: usize = 2;
+            var i: u8 = 0;
+            while (i < count) : (i += 1) {
+                if (payload.len < offset + 2) break :blk payload.len;
+                const name_len = std.mem.readInt(u16, payload[offset..][0..2], .big);
+                offset += 2 + name_len;
+            }
+            break :blk offset;
         },
         // Unknown opcode: skip 1 byte so the loop always makes progress.
         else => 1,

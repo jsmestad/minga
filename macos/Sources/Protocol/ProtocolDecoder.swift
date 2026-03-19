@@ -22,6 +22,7 @@ enum RenderCommand: Sendable {
     case destroyRegion(id: UInt16)
     case setActiveRegion(id: UInt16)
     case setFont(family: String, size: UInt16, ligatures: Bool, weight: UInt8)
+    case setFontFallback(families: [String])
     case guiTheme(slots: [(slotId: UInt8, r: UInt8, g: UInt8, b: UInt8)])
     case guiTabBar(activeIndex: UInt8, tabs: [GUITabEntry])
     case guiFileTree(selectedIndex: UInt16, treeWidth: UInt16, entries: [GUIFileTreeEntry])
@@ -244,6 +245,24 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         let nameData = data[(rest + 6)..<(rest + 6 + nameLen)]
         let family = String(data: nameData, encoding: .utf8) ?? "Menlo"
         return (.setFont(family: family, size: fontSize, ligatures: ligatures, weight: weight), 1 + 6 + nameLen)
+
+    case OP_SET_FONT_FALLBACK:
+        // count:1, then count * (name_len:2, name:bytes)
+        guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
+        let count = Int(data[rest])
+        var families: [String] = []
+        var offset = rest + 1
+        for _ in 0..<count {
+            guard data.count >= offset + 2 else { throw ProtocolDecodeError.malformed }
+            let nameLen = Int(readU16(data, offset))
+            offset += 2
+            guard data.count >= offset + nameLen else { throw ProtocolDecodeError.malformed }
+            let nameData = data[offset..<(offset + nameLen)]
+            let name = String(data: nameData, encoding: .utf8) ?? ""
+            families.append(name)
+            offset += nameLen
+        }
+        return (.setFontFallback(families: families), offset - rest + 1)
 
     // Highlight and parser opcodes: skip them (variable length).
     case OP_SET_LANGUAGE:

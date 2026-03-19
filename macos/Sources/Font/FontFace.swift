@@ -101,6 +101,11 @@ final class FontFace {
     /// The font family name (for resolving weight variants via NSFontManager).
     private let familyName: String
 
+    /// User-configured font fallback chain. Tried in order before the system
+    /// fallback (CTFontCreateForString) when the primary font doesn't have a glyph.
+    /// Populated by the set_font_fallback protocol command.
+    private var fallbackFonts: [CTFont] = []
+
     /// Protocol weight byte → NSFontManager weight (0-15 scale).
     /// NSFontManager uses: 2=ultralight, 3=thin, 4=light, 5=regular,
     /// 6=medium, 7=semibold, 8=bold, 9=heavy, 10+=black.
@@ -288,6 +293,37 @@ final class FontFace {
 
     /// Pre-rasterize all printable ASCII glyphs for the regular variant.
     /// Other variants are rasterized lazily on first use.
+    /// Configure the font fallback chain from a list of family names.
+    ///
+    /// Each name is resolved via NSFontManager at the same size as the primary font.
+    /// Names that can't be resolved are skipped with a warning. The fallback chain
+    /// is tried in order when the primary font doesn't have a glyph, before falling
+    /// through to the system fallback (CTFontCreateForString).
+    func setFallbackFonts(_ families: [String]) {
+        let size = CTFontGetSize(ctFont)
+        fallbackFonts = families.compactMap { name in
+            let fm = NSFontManager.shared
+            // Try fixed-pitch first, then any trait.
+            if let nsFont = fm.font(withFamily: name, traits: .fixedPitchFontMask, weight: 5, size: size) {
+                PortLogger.info("Font fallback: loaded '\(name)'")
+                return nsFont as CTFont
+            }
+            if let nsFont = fm.font(withFamily: name, traits: [], weight: 5, size: size) {
+                PortLogger.info("Font fallback: loaded '\(name)' (non-fixed-pitch)")
+                return nsFont as CTFont
+            }
+            // Try direct CTFont creation (PostScript name).
+            let direct = CTFontCreateWithName(name as CFString, size, nil)
+            let directName = CTFontCopyPostScriptName(direct) as String
+            if directName.lowercased().contains(name.lowercased().prefix(6).lowercased()) {
+                PortLogger.info("Font fallback: loaded '\(name)' (PostScript)")
+                return direct
+            }
+            PortLogger.warn("Font fallback: '\(name)' not found, skipping")
+            return nil
+        }
+    }
+
     func preloadAscii() {
         for cp: UInt32 in 0x20...0x7E {
             _ = getGlyph(cp, style: 0)
@@ -471,22 +507,33 @@ final class FontFace {
             utf16 = [UniChar(0xD800 + (cp >> 10)), UniChar(0xDC00 + (cp & 0x3FF))]
         }
 
-        // Look up glyph ID using the requested font variant, with fallback for emoji.
+        // Look up glyph ID using the requested font variant, with fallback chain.
+        // Order: primary font → configured fallbacks → system fallback (CTFontCreateForString).
         var glyphs: [CGGlyph] = Array(repeating: 0, count: utf16.count)
         var renderFont = primaryFont
-        var ownsFallback = false
 
         if !CTFontGetGlyphsForCharacters(primaryFont, &utf16, &glyphs, utf16.count) {
-            // Variant font doesn't have this glyph; ask CoreText for a fallback.
-            let cfStr = CFStringCreateWithCharacters(nil, &utf16, utf16.count)!
-            let range = CFRange(location: 0, length: utf16.count)
-            let fallback = CTFontCreateForString(primaryFont, cfStr, range)
-            if CTFontGetGlyphsForCharacters(fallback, &utf16, &glyphs, utf16.count) {
-                renderFont = fallback
-                ownsFallback = true
+            var found = false
+
+            // Try configured fallback fonts in order.
+            for fb in fallbackFonts {
+                if CTFontGetGlyphsForCharacters(fb, &utf16, &glyphs, utf16.count) {
+                    renderFont = fb
+                    found = true
+                    break
+                }
+            }
+
+            // System fallback: ask CoreText to find any font with this glyph.
+            if !found {
+                let cfStr = CFStringCreateWithCharacters(nil, &utf16, utf16.count)!
+                let range = CFRange(location: 0, length: utf16.count)
+                let systemFallback = CTFontCreateForString(primaryFont, cfStr, range)
+                if CTFontGetGlyphsForCharacters(systemFallback, &utf16, &glyphs, utf16.count) {
+                    renderFont = systemFallback
+                }
             }
         }
-        _ = ownsFallback // ARC handles lifetime
 
         let glyphId = glyphs[0]
 
