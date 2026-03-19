@@ -12,15 +12,26 @@ const query_loader = @import("query_loader.zig");
 const protocol = @import("protocol.zig");
 pub const Span = protocol.Span;
 
+/// A conceal span: byte range + replacement text from `#set! conceal "X"`.
+pub const ConcealSpan = struct {
+    start_byte: u32,
+    end_byte: u32,
+    /// Replacement text (from the query's string table, not owned).
+    /// Empty string means hide entirely (no replacement character).
+    replacement: []const u8,
+};
+
 /// Result of a highlight operation.
 pub const HighlightResult = struct {
     spans: []Span,
     capture_names: [][]const u8,
+    conceal_spans: []ConcealSpan,
     allocator: std.mem.Allocator,
 
     pub fn deinit(self: *HighlightResult) void {
         self.allocator.free(self.spans);
         self.allocator.free(self.capture_names);
+        self.allocator.free(self.conceal_spans);
     }
 };
 
@@ -885,7 +896,7 @@ pub const Highlighter = struct {
         self.current_source = new_source;
     }
 
-    /// Run highlight query on the current tree, returning spans.
+    /// Run highlight query on the current tree, returning spans and conceal spans.
     pub fn highlight(self: *Highlighter) !HighlightResult {
         const tree = self.tree orelse return error.NoTree;
         const query = self.query orelse return error.NoQuery;
@@ -897,9 +908,11 @@ pub const Highlighter = struct {
 
         c.ts_query_cursor_exec(cursor, query, root);
 
-        // Collect spans
+        // Collect spans and conceal spans
         var spans: std.ArrayListUnmanaged(Span) = .empty;
         errdefer spans.deinit(alloc);
+        var conceals: std.ArrayListUnmanaged(ConcealSpan) = .empty;
+        errdefer conceals.deinit(alloc);
 
         const source = self.current_source orelse &.{};
 
@@ -909,24 +922,43 @@ pub const Highlighter = struct {
             if (self.current_predicates) |preds| {
                 if (!preds.evaluate(match, source)) continue;
             }
+
+            // Check for #set! conceal directive on this pattern.
+            const conceal_replacement: ?[]const u8 = if (self.current_predicates) |preds|
+                preds.getConcealReplacement(@intCast(match.pattern_index))
+            else
+                null;
+
             const captures = if (match.captures == null) continue else match.captures[0..match.capture_count];
             for (captures) |cap| {
                 const node = cap.node;
                 const start = c.ts_node_start_byte(node);
                 const end = c.ts_node_end_byte(node);
-                try spans.append(alloc, .{
-                    .start_byte = start,
-                    .end_byte = end,
-                    .capture_id = @intCast(cap.index),
-                    .pattern_index = @intCast(match.pattern_index),
-                });
+
+                // Check if this capture is @conceal (or has a conceal directive).
+                var cap_len: u32 = 0;
+                const cap_name = c.ts_query_capture_name_for_id(query, @intCast(cap.index), &cap_len);
+                const is_conceal_capture = std.mem.eql(u8, cap_name[0..cap_len], "conceal");
+
+                if (is_conceal_capture and conceal_replacement != null) {
+                    // Emit a conceal span instead of a regular highlight span.
+                    try conceals.append(alloc, .{
+                        .start_byte = start,
+                        .end_byte = end,
+                        .replacement = conceal_replacement.?,
+                    });
+                } else {
+                    try spans.append(alloc, .{
+                        .start_byte = start,
+                        .end_byte = end,
+                        .capture_id = @intCast(cap.index),
+                        .pattern_index = @intCast(match.pattern_index),
+                    });
+                }
             }
         }
 
         // Sort by (start_byte ASC, layer DESC, pattern_index DESC, end_byte ASC).
-        // Layer ensures injection spans always win over outer spans at the
-        // same byte position. Within a layer, higher pattern_index = more
-        // specific rule. The BEAM side's first-wins walk picks the correct span.
         std.mem.sortUnstable(Span, spans.items, {}, spanLessThan);
 
         // Collect capture names
@@ -941,6 +973,7 @@ pub const Highlighter = struct {
         return .{
             .spans = try spans.toOwnedSlice(alloc),
             .capture_names = names,
+            .conceal_spans = try conceals.toOwnedSlice(alloc),
             .allocator = alloc,
         };
     }
@@ -966,6 +999,8 @@ pub const Highlighter = struct {
 
         var spans: std.ArrayListUnmanaged(Span) = .empty;
         errdefer spans.deinit(alloc);
+        var conceals: std.ArrayListUnmanaged(ConcealSpan) = .empty;
+        errdefer conceals.deinit(alloc);
 
         var match: c.TSQueryMatch = undefined;
         while (c.ts_query_cursor_next_match(cursor, &match)) {
@@ -973,15 +1008,38 @@ pub const Highlighter = struct {
             if (self.current_predicates) |preds| {
                 if (!preds.evaluate(match, source)) continue;
             }
+
+            // Check for #set! conceal directive on this pattern.
+            const conceal_replacement: ?[]const u8 = if (self.current_predicates) |preds|
+                preds.getConcealReplacement(@intCast(match.pattern_index))
+            else
+                null;
+
             const captures = if (match.captures == null) continue else match.captures[0..match.capture_count];
             for (captures) |cap| {
-                try spans.append(alloc, .{
-                    .start_byte = c.ts_node_start_byte(cap.node),
-                    .end_byte = c.ts_node_end_byte(cap.node),
-                    .capture_id = @intCast(cap.index),
-                    .pattern_index = @intCast(match.pattern_index),
-                    .layer = 0,
-                });
+                const start = c.ts_node_start_byte(cap.node);
+                const end = c.ts_node_end_byte(cap.node);
+
+                // Check if this is a @conceal capture with a replacement directive.
+                var cap_len: u32 = 0;
+                const cap_name = c.ts_query_capture_name_for_id(query, @intCast(cap.index), &cap_len);
+                const is_conceal = std.mem.eql(u8, cap_name[0..cap_len], "conceal");
+
+                if (is_conceal and conceal_replacement != null) {
+                    try conceals.append(alloc, .{
+                        .start_byte = start,
+                        .end_byte = end,
+                        .replacement = conceal_replacement.?,
+                    });
+                } else {
+                    try spans.append(alloc, .{
+                        .start_byte = start,
+                        .end_byte = end,
+                        .capture_id = @intCast(cap.index),
+                        .pattern_index = @intCast(match.pattern_index),
+                        .layer = 0,
+                    });
+                }
             }
         }
 
@@ -1026,6 +1084,7 @@ pub const Highlighter = struct {
             return .{
                 .spans = try spans.toOwnedSlice(alloc),
                 .capture_names = names,
+                .conceal_spans = try conceals.toOwnedSlice(alloc),
                 .allocator = alloc,
             };
         }
@@ -1265,6 +1324,7 @@ pub const Highlighter = struct {
         return .{
             .spans = try spans.toOwnedSlice(alloc),
             .capture_names = names,
+            .conceal_spans = try conceals.toOwnedSlice(alloc),
             .allocator = alloc,
         };
     }

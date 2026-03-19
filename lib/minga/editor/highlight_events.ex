@@ -9,11 +9,12 @@ defmodule Minga.Editor.HighlightEvents do
   in `highlight.highlights`. There is no separate "current" field.
   """
 
+  alias Minga.Buffer.Decorations
   alias Minga.Buffer.Server, as: BufferServer
-
   alias Minga.Editor.HighlightSync
   alias Minga.Editor.Renderer
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Face
   alias Minga.Filetype
   alias Minga.Git.Tracker, as: GitTracker
   alias Minga.LSP.SyncServer
@@ -108,6 +109,75 @@ defmodule Minga.Editor.HighlightEvents do
     else
       state
     end
+  end
+
+  @doc """
+  Handles `:conceal_spans` events from the parser.
+
+  Applies ConcealRange decorations from tree-sitter @conceal captures with
+  `#set! conceal "X"` directives. Clears the `:ts_conceal` group before
+  applying new conceals to handle re-parses correctly.
+  """
+  @spec handle_conceal_spans(EditorState.t(), pid(), [map()]) :: :ok
+  def handle_conceal_spans(_state, buf, spans) when is_pid(buf) do
+    content = BufferServer.content(buf)
+    lines = String.split(content, "\n")
+
+    BufferServer.batch_decorations(buf, fn decs ->
+      decs
+      |> Decorations.remove_conceal_group(:ts_conceal)
+      |> add_conceal_spans(spans, lines)
+    end)
+
+    :ok
+  end
+
+  @spec add_conceal_spans(Decorations.t(), [map()], [String.t()]) :: Decorations.t()
+  defp add_conceal_spans(decs, spans, lines) do
+    Enum.reduce(spans, decs, fn span, acc ->
+      {start_line, start_col} = byte_to_position(lines, span.start_byte)
+      {end_line, end_col} = byte_to_position(lines, span.end_byte)
+      replacement = if span.replacement == "", do: nil, else: span.replacement
+
+      {_id, new_decs} =
+        Decorations.add_conceal(acc, {start_line, start_col}, {end_line, end_col},
+          replacement: replacement,
+          replacement_style: %Face{name: "_"},
+          group: :ts_conceal,
+          priority: 5
+        )
+
+      new_decs
+    end)
+  end
+
+  # Converts a byte offset to {line, col} position.
+  @spec byte_to_position([String.t()], non_neg_integer()) ::
+          {non_neg_integer(), non_neg_integer()}
+  defp byte_to_position(lines, byte_offset) do
+    do_byte_to_position(lines, byte_offset, 0)
+  end
+
+  @spec do_byte_to_position([String.t()], non_neg_integer(), non_neg_integer()) ::
+          {non_neg_integer(), non_neg_integer()}
+  defp do_byte_to_position([], _remaining, line_idx), do: {max(line_idx - 1, 0), 0}
+
+  defp do_byte_to_position([line | rest], remaining, line_idx) do
+    line_bytes = byte_size(line) + 1
+
+    if remaining < line_bytes do
+      col = grapheme_col(line, remaining)
+      {line_idx, col}
+    else
+      do_byte_to_position(rest, remaining - line_bytes, line_idx + 1)
+    end
+  end
+
+  # Converts a byte offset within a line to a grapheme column.
+  @spec grapheme_col(String.t(), non_neg_integer()) :: non_neg_integer()
+  defp grapheme_col(line, byte_offset) do
+    prefix = binary_part(line, 0, min(byte_offset, byte_size(line)))
+    String.length(prefix)
   end
 
   # Applies prettify-symbol conceals after highlights update.

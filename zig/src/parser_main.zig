@@ -475,7 +475,7 @@ fn sendFoldResults(
     try stdout.flush();
 }
 
-/// Send highlight results (names, spans, injection ranges) to stdout.
+/// Send highlight results (names, spans, conceal spans, injection ranges) to stdout.
 fn sendHighlightResults(
     hl: *highlighter_mod.Highlighter,
     buffer_id: u32,
@@ -493,6 +493,12 @@ fn sendHighlightResults(
     const spans_buf = try protocol.encodeHighlightSpans(alloc, buffer_id, version, result.spans);
     defer alloc.free(spans_buf);
     try protocol.writeMessage(stdout, spans_buf);
+
+    if (result.conceal_spans.len > 0) {
+        const conceal_buf = try protocol.encodeConcealSpans(alloc, buffer_id, version, result.conceal_spans);
+        defer alloc.free(conceal_buf);
+        try protocol.writeMessage(stdout, conceal_buf);
+    }
 
     if (hl.injection_ranges.len > 0) {
         const inj_buf = try protocol.encodeInjectionRanges(alloc, buffer_id, hl.injection_ranges);

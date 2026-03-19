@@ -6,11 +6,14 @@ defmodule Mix.Tasks.Queries.Sync do
   languages Minga ships, and applies these transformations:
 
   1. `#lua-match?` → `#match?` with Lua pattern → regex conversion
-  2. Strips `@spell`, `@nospell`, `@conceal`, `@none` captures
-  3. Strips `#set! conceal`, `#set! priority`, `#set! conceal_lines` directives
+  2. Strips `@spell`, `@nospell`, `@none` captures (but preserves `@conceal`)
+  3. Strips `#set! priority`, `#set! conceal_lines` directives
      (moves trailing closing parens to the previous line to keep S-expressions valid)
   4. Strips `#set! ... url ...` directives
   5. Cleans up empty patterns and excess blank lines
+
+  `@conceal` captures and `#set! conceal` directives are preserved so the
+  Zig highlighter can emit conceal spans for prettify-symbols rendering.
 
   Records the source commit in `priv/queries/VERSION`.
 
@@ -118,7 +121,6 @@ defmodule Mix.Tasks.Queries.Sync do
   @spec transform_query(String.t()) :: String.t()
   defp transform_query(content) do
     content
-    |> remove_conceal_only_blocks()
     |> String.split("\n")
     |> process_lines([])
     |> Enum.reverse()
@@ -126,62 +128,6 @@ defmodule Mix.Tasks.Queries.Sync do
     |> Enum.join("\n")
     |> String.trim_trailing()
     |> Kernel.<>("\n")
-  end
-
-  # Remove entire top-level S-expression blocks where @conceal is the only
-  # meaningful capture. These patterns exist solely for nvim's conceal feature
-  # and become broken (or no-ops) when @conceal is stripped. Example:
-  #
-  #   ("\"" @conceal
-  #     (#set! conceal ""))
-  #
-  # We split the file into blocks (separated by blank lines), check each
-  # block, and drop the conceal-only ones before line-level processing.
-  @spec remove_conceal_only_blocks(String.t()) :: String.t()
-  defp remove_conceal_only_blocks(content) do
-    lines = String.split(content, "\n")
-    {blocks, current} = chunk_into_blocks(lines, [], [])
-    blocks = if current != [], do: blocks ++ [Enum.reverse(current)], else: blocks
-
-    blocks
-    |> Enum.reject(&conceal_only_block?/1)
-    |> Enum.intersperse([""])
-    |> List.flatten()
-    |> Enum.join("\n")
-  end
-
-  @spec chunk_into_blocks([String.t()], [[String.t()]], [String.t()]) ::
-          {[[String.t()]], [String.t()]}
-  defp chunk_into_blocks([], blocks, current), do: {blocks, current}
-
-  defp chunk_into_blocks([line | rest], blocks, current) do
-    if String.trim(line) == "" and current != [] do
-      chunk_into_blocks(rest, blocks ++ [Enum.reverse(current)], [])
-    else
-      chunk_into_blocks(rest, blocks, [line | current])
-    end
-  end
-
-  # A block is conceal-only if it contains @conceal as a capture AND
-  # #set! conceal, AND no other meaningful captures (non-@conceal, non-nvim).
-  @spec conceal_only_block?([String.t()]) :: boolean()
-  defp conceal_only_block?(block) do
-    text = Enum.join(block, "\n")
-    has_conceal_capture = String.contains?(text, "@conceal")
-    has_set_conceal = Regex.match?(~r/#set!\s+conceal/, text)
-
-    if has_conceal_capture and has_set_conceal do
-      captures =
-        Regex.scan(~r/@(\w[\w.]*)/, text)
-        |> Enum.map(fn [_, name] -> name end)
-        |> Enum.reject(fn name ->
-          name in ~w(conceal spell nospell none) or String.starts_with?(name, "_")
-        end)
-
-      captures == []
-    else
-      false
-    end
   end
 
   @spec process_lines([String.t()], [String.t()]) :: [String.t()]
@@ -220,12 +166,15 @@ defmodule Mix.Tasks.Queries.Sync do
 
   @spec strip_nvim_captures(String.t()) :: String.t()
   defp strip_nvim_captures(line) do
-    Regex.replace(~r/\s+@(?:spell|nospell|conceal|none)\b/, line, "")
+    # Preserve @conceal captures (used by the Zig highlighter for prettify-symbols).
+    Regex.replace(~r/\s+@(?:spell|nospell|none)\b/, line, "")
   end
 
   @spec removable_set_directive?(String.t()) :: boolean()
   defp removable_set_directive?(trimmed) do
-    Regex.match?(~r/^\(#set!\s+(?:conceal|conceal_lines|priority)\b/, trimmed) or
+    # Preserve #set! conceal (used by the Zig highlighter for prettify-symbols).
+    # Only strip conceal_lines, priority, and url directives.
+    Regex.match?(~r/^\(#set!\s+(?:conceal_lines|priority)\b/, trimmed) or
       Regex.match?(~r/^\(#set!\s+@\w+\s+url\b/, trimmed)
   end
 
