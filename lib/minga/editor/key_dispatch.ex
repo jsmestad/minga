@@ -49,15 +49,12 @@ defmodule Minga.Editor.KeyDispatch do
     # Record keys into macro register if actively recording (and not replaying).
     state = MacroReplay.maybe_record_key(state, key, commands)
 
-    # Guard: block insert/replace transitions on read-only buffers.
-    # Check the active window's buffer (which may differ from state.buffers.active
-    # when a popup window is focused).
+    # Guard: block mutating mode transitions on read-only buffers.
+    # Covers insert, replace, and operator-pending for mutating operators
+    # (delete, change, indent, dedent, reindent, comment). Yank is allowed
+    # because it doesn't modify the buffer.
     {new_mode, commands, new_mode_state, state} =
-      if new_mode in [:insert, :replace] and active_buffer_read_only?(state) do
-        {:normal, [], Mode.initial_state(), %{state | status_msg: "Buffer is read-only"}}
-      else
-        {new_mode, commands, new_mode_state, state}
-      end
+      guard_read_only(new_mode, commands, new_mode_state, state)
 
     # When transitioning INTO visual or command mode, adjust mode_state.
     new_mode_state =
@@ -145,4 +142,39 @@ defmodule Minga.Editor.KeyDispatch do
   catch
     :exit, _ -> false
   end
+
+  # ── Read-only guard for mode transitions ──────────────────────────────────
+
+  @read_only_msg "Buffer is read-only"
+
+  @spec guard_read_only(Mode.mode(), [Mode.command()], Mode.state(), EditorState.t()) ::
+          {Mode.mode(), [Mode.command()], Mode.state(), EditorState.t()}
+  defp guard_read_only(mode, commands, mode_state, state)
+       when mode in [:insert, :replace] do
+    if active_buffer_read_only?(state) do
+      {:normal, [], Mode.initial_state(), %{state | status_msg: @read_only_msg}}
+    else
+      {mode, commands, mode_state, state}
+    end
+  end
+
+  defp guard_read_only(:operator_pending, commands, mode_state, state) do
+    if mutating_operator?(mode_state) and active_buffer_read_only?(state) do
+      {:normal, [], Mode.initial_state(), %{state | status_msg: @read_only_msg}}
+    else
+      {:operator_pending, commands, mode_state, state}
+    end
+  end
+
+  defp guard_read_only(mode, commands, mode_state, state) do
+    {mode, commands, mode_state, state}
+  end
+
+  @mutating_operators [:delete, :change, :indent, :dedent, :reindent, :comment]
+
+  @spec mutating_operator?(Mode.state()) :: boolean()
+  defp mutating_operator?(%Minga.Mode.OperatorPendingState{operator: op}),
+    do: op in @mutating_operators
+
+  defp mutating_operator?(_), do: false
 end

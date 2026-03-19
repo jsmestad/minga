@@ -150,6 +150,13 @@ defmodule Minga.Editor.Layout.TUI do
         {agent_rect, editor_height}
       end
 
+    # Final clamp: ensure editor area never has zero dimensions.
+    # When the terminal is too small for all regions (even after collapsing
+    # panels), clamp to minimums so Window.resize and the render pipeline
+    # don't receive impossible values.
+    editor_width = max(editor_width, 1)
+    editor_height = max(editor_height, 1)
+
     {file_tree_rect, agent_rect, editor_col, editor_width, editor_height}
   end
 

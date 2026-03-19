@@ -165,22 +165,19 @@ defmodule Minga.Chaos.EditorFuzzerTest do
       {1, {:page_down, []}},
       {1, {:page_up, []}},
       {1, {:wheel_up, []}},
-      {1, {:wheel_down, []}}
-      # NOTE: Window splits, file tree, agent view, buffer/tab switching are
-      # temporarily excluded because they trigger known crashes (#782, #783, #784).
-      # Uncomment these once those bugs are fixed:
-      # {1, {:split_vertical, []}},
-      # {1, {:split_horizontal, []}},
-      # {1, {:window_left, []}},
-      # {1, {:window_right, []}},
-      # {1, {:window_down, []}},
-      # {1, {:window_up, []}},
-      # {1, {:buffer_next, []}},
-      # {1, {:buffer_prev, []}},
-      # {1, {:toggle_file_tree, []}},
-      # {1, {:toggle_agent_view, []}},
-      # {1, {:tab_next, []}},
-      # {1, {:tab_prev, []}}
+      {1, {:wheel_down, []}},
+      # Multi-surface commands
+      {1, {:split_vertical, []}},
+      {1, {:split_horizontal, []}},
+      {1, {:window_left, []}},
+      {1, {:window_right, []}},
+      {1, {:window_down, []}},
+      {1, {:window_up, []}},
+      {1, {:buffer_next, []}},
+      {1, {:buffer_prev, []}},
+      {1, {:toggle_file_tree, []}},
+      {1, {:tab_next, []}},
+      {1, {:tab_prev, []}}
     ])
   end
 
