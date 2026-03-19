@@ -24,7 +24,7 @@ defmodule Minga.Input.AgentPanel do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.AgentAccess
   alias Minga.Input
-  alias Minga.Input.AgentChatNav
+  alias Minga.Input.AgentNav
   alias Minga.Keymap.Scope
 
   @impl true
@@ -172,7 +172,7 @@ defmodule Minga.Input.AgentPanel do
         state = Minga.Editor.do_handle_key(state, cp, mods)
 
         # Only restore if a command didn't legitimately change buffers.active.
-        # Same guard as AgentChatNav.delegate_to_mode_fsm/4.
+        # Same guard as AgentNav.delegate_to_mode_fsm/4.
         if state.buffers.active == prompt_pid do
           put_in(state.buffers.active, real_active)
         else
@@ -193,7 +193,7 @@ defmodule Minga.Input.AgentPanel do
     end
   end
 
-  # Delegates to the shared AgentChatNav dispatch, which swaps the active
+  # Delegates to the shared AgentNav dispatch, which swaps the active
   # buffer to the agent buffer, runs through Mode FSM, blocks mode
   # transitions, syncs cursor to scroll, and restores the original buffer.
   @spec delegate_to_mode_fsm(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
@@ -202,7 +202,7 @@ defmodule Minga.Input.AgentPanel do
     buf = AgentAccess.agent(state).buffer
 
     if is_pid(buf) do
-      AgentChatNav.delegate_to_mode_fsm(state, buf, cp, mods)
+      AgentNav.delegate_to_mode_fsm(state, buf, cp, mods)
     else
       state
     end

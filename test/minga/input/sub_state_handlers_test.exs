@@ -1,11 +1,14 @@
 defmodule Minga.Input.SubStateHandlersTest do
   @moduledoc """
   Tests for the extracted sub-state Input.Handler modules:
-  AgentSearch, MentionCompletion, ToolApproval, DiffReview.
+  MentionCompletion, ToolApproval, DiffReview.
 
   These modules were extracted from Input.Scoped in Phase 4 of the
   Surface refactoring. Each test verifies the handler intercepts the
   correct keys and passes through otherwise.
+
+  AgentSearch was removed in the agent input handler cleanup (#631).
+  Standard vim `/` search now works on the `*Agent*` buffer directly.
   """
 
   use ExUnit.Case, async: true
@@ -22,7 +25,6 @@ defmodule Minga.Input.SubStateHandlersTest do
   alias Minga.Editor.State.TabBar
   alias Minga.Editor.Viewport
   alias Minga.Editor.VimState
-  alias Minga.Input.AgentSearch
   alias Minga.Input.DiffReview
   alias Minga.Input.MentionCompletion
   alias Minga.Input.ToolApproval
@@ -74,25 +76,8 @@ defmodule Minga.Input.SubStateHandlersTest do
     }
   end
 
-  # ══════════════════════════════════════════════════════════════════════════
-  # AgentSearch
-  # ══════════════════════════════════════════════════════════════════════════
-
-  describe "AgentSearch.handle_key/3" do
-    test "handles keys when search is active" do
-      state = base_state(keymap_scope: :agent, agentic_active: true)
-
-      state =
-        AgentAccess.update_agent_ui(state, fn agentic -> UIState.start_search(agentic, 0) end)
-
-      {:handled, _new_state} = AgentSearch.handle_key(state, ?h, 0)
-    end
-
-    test "passes through when search is not active" do
-      state = base_state(keymap_scope: :agent, agentic_active: true)
-      {:passthrough, _} = AgentSearch.handle_key(state, ?h, 0)
-    end
-  end
+  # AgentSearch was removed in #631. Standard vim `/` search works
+  # on the `*Agent*` buffer directly.
 
   # ══════════════════════════════════════════════════════════════════════════
   # MentionCompletion

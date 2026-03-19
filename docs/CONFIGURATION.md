@@ -474,6 +474,55 @@ Queries use tree-sitter's [query syntax](https://tree-sitter.github.io/tree-sitt
 
 No restart is needed after changing a query file; `SPC h r` (hot reload) picks up the change.
 
+### Custom captures with custom face styling
+
+The full highlight customization flow lets you define your own capture names in a query file, then style them with custom faces in a theme. This is how you'd highlight something the default query doesn't distinguish.
+
+**Example: highlight Elixir pipe operators differently from other operators.**
+
+1. **Add a custom capture in your query.** Copy the default Elixir query and add a specific capture:
+
+```
+; ~/.config/minga/queries/elixir/highlights.scm
+; (copy of the default query, plus:)
+
+(binary_operator
+  operator: "|>" @operator.pipe)
+```
+
+The capture `@operator.pipe` is a new name you invented. It follows the dotted naming convention so it inherits from `@operator` by default.
+
+2. **Define a face for the capture in your theme file.** In your config:
+
+```elixir
+# In config.exs
+Minga.Face.Registry.put(face_registry, %Minga.Face{
+  name: "operator.pipe",
+  inherit: "operator",
+  fg: 0x51AFEF,
+  bold: true
+})
+```
+
+Or in a theme TOML file (when theme file loading is available):
+
+```toml
+[faces."operator.pipe"]
+inherit = "operator"
+fg = "51AFEF"
+bold = true
+```
+
+3. **Reload.** Press `SPC h r` to pick up the query change. The pipe operator now renders in blue bold, while other operators keep their default style.
+
+**How it works under the hood:**
+
+- Tree-sitter matches `@operator.pipe` captures in the query and sends them to the BEAM.
+- The face registry resolves `"operator.pipe"` by walking the inheritance chain: `operator.pipe` → `operator` → `default`. Your custom face overrides fg and bold; everything else inherits from the parent.
+- The render pipeline uses the resolved face for styling. No special registration needed for new capture names; the dotted-name convention handles inheritance automatically.
+
+**Built-in capture names** that themes can style include: `keyword`, `keyword.function`, `keyword.operator`, `string`, `string.special`, `comment`, `comment.documentation`, `function`, `function.method`, `function.builtin`, `function.macro`, `type`, `type.builtin`, `variable`, `variable.builtin`, `variable.parameter`, `constant`, `constant.builtin`, `number`, `boolean`, `operator`, `punctuation.delimiter`, `punctuation.bracket`, `punctuation.special`, `attribute`, `property`, `tag`, `label`, `namespace`, `module`, `constructor`, and more. Any dotted sub-capture (e.g., `keyword.return`) inherits from its parent (e.g., `keyword`) if no explicit face is defined.
+
 ### Registering custom filetypes
 
 If Minga doesn't recognize a file extension, you can register it in your config so the right grammar is used:
@@ -499,6 +548,33 @@ Adding a grammar for a language Minga doesn't ship requires building from source
 After rebuilding (`mix compile`), the grammar is compiled into the binary and available immediately.
 
 If you add a grammar for a popular language, consider opening a PR so everyone gets it.
+
+### Prettify symbols
+
+When enabled, prettify-symbols replaces common operator text with Unicode equivalents in the display without modifying the buffer. For example, `->` renders as `→`, `!=` as `≠`, and `fn` as `λ` in Elixir.
+
+```elixir
+# In config.exs
+set :prettify_symbols, true
+```
+
+This is off by default since it's a matter of taste. The substitutions are filetype-aware and only apply to actual operators (not text inside strings or comments), because they use tree-sitter highlight captures to identify what's an operator.
+
+**Built-in substitutions include:**
+
+| Source | Display | Languages |
+|--------|---------|-----------|
+| `->` | `→` | All |
+| `=>` | `⇒` | All |
+| `<-` | `←` | All |
+| `!=` | `≠` | All |
+| `>=` | `≥` | All |
+| `<=` | `≤` | All |
+| `\|>` | `▷` | All |
+| `fn` | `λ` | Elixir, Rust |
+| `lambda` | `λ` | Python |
+
+The buffer content is never modified; only the display changes. Cursor movement skips over concealed text in normal mode and reveals it in insert mode (same as Neovim's `conceallevel=2`).
 
 ## Keybindings
 

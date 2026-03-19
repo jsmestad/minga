@@ -80,6 +80,8 @@ defmodule Minga.Config.OptionsTest do
                font_size: 13,
                font_weight: :regular,
                font_ligatures: true,
+               font_fallback: [],
+               prettify_symbols: false,
                log_level: :info,
                log_level_render: :default,
                log_level_lsp: :default,

@@ -266,8 +266,13 @@ defmodule Minga.Face do
         do: [{:underline_color, face.underline_color} | style],
         else: style
 
-    if face.blend && face.blend < 100,
-      do: [{:blend, face.blend} | style],
+    style =
+      if face.blend && face.blend < 100,
+        do: [{:blend, face.blend} | style],
+        else: style
+
+    if face.font_weight && face.font_weight != :regular,
+      do: [{:font_weight, face.font_weight} | style],
       else: style
   end
 

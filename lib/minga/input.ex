@@ -18,10 +18,9 @@ defmodule Minga.Input do
   `surface_handlers/0` to build the split dispatch.
   """
 
-  alias Minga.Input.AgentChatNav
   alias Minga.Input.AgentMouse
+  alias Minga.Input.AgentNav
   alias Minga.Input.AgentPanel
-  alias Minga.Input.AgentSearch
   alias Minga.Input.Completion
   alias Minga.Input.ConflictPrompt
   alias Minga.Input.Dashboard
@@ -100,7 +99,6 @@ defmodule Minga.Input do
   def surface_handlers do
     [
       Dashboard,
-      AgentSearch,
       MentionCompletion,
       ToolApproval,
       DiffReview,
@@ -108,7 +106,7 @@ defmodule Minga.Input do
       FileTreeHandler,
       Popup,
       Scoped,
-      AgentChatNav,
+      AgentNav,
       GlobalBindings,
       AgentMouse,
       ModeFSM

@@ -1,4 +1,4 @@
-defmodule Minga.Input.AgentChatNavTest do
+defmodule Minga.Input.AgentNavTest do
   use ExUnit.Case, async: true
 
   alias Minga.Agent.BufferSync, as: AgentBufferSync
@@ -9,9 +9,11 @@ defmodule Minga.Input.AgentChatNavTest do
   alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.Buffers
   alias Minga.Editor.State.FileTree, as: FileTreeState
+  alias Minga.Editor.State.Windows
   alias Minga.Editor.Viewport
   alias Minga.Editor.VimState
-  alias Minga.Input.AgentChatNav
+  alias Minga.Editor.Window
+  alias Minga.Input.AgentNav
   @ctrl Minga.Port.Protocol.mod_ctrl()
 
   defp make_state(opts \\ []) do
@@ -77,11 +79,15 @@ defmodule Minga.Input.AgentChatNavTest do
     test "j moves cursor down in agent buffer" do
       state = make_state()
       buf = AgentAccess.agent(state).buffer
-
-      # Move cursor to top first
       BufferServer.move_to(buf, {0, 0})
 
-      {:handled, _new_state} = AgentChatNav.handle_key(state, ?j, 0)
+      # AgentNav processes the key through Mode FSM directly (no buffer swap
+      # needed since buffers.active is already set by focus_window in prod).
+      # In tests, buffers.active is the file buffer. Put the agent buffer as
+      # active to simulate the real focus_window behavior.
+      state = put_in(state.buffers.active, buf)
+
+      {:handled, _new_state} = AgentNav.handle_key(state, ?j, 0)
 
       {line, _col} = BufferServer.cursor(buf)
       assert line == 1
@@ -90,11 +96,11 @@ defmodule Minga.Input.AgentChatNavTest do
     test "k moves cursor up in agent buffer" do
       state = make_state()
       buf = AgentAccess.agent(state).buffer
-
-      # Start at line 5
       BufferServer.move_to(buf, {5, 0})
 
-      {:handled, _new_state} = AgentChatNav.handle_key(state, ?k, 0)
+      state = put_in(state.buffers.active, buf)
+
+      {:handled, _new_state} = AgentNav.handle_key(state, ?k, 0)
 
       {line, _col} = BufferServer.cursor(buf)
       assert line == 4
@@ -105,11 +111,81 @@ defmodule Minga.Input.AgentChatNavTest do
       buf = AgentAccess.agent(state).buffer
       BufferServer.move_to(buf, {0, 0})
 
-      {:handled, _new_state} = AgentChatNav.handle_key(state, ?G, 0)
+      state = put_in(state.buffers.active, buf)
+
+      {:handled, _new_state} = AgentNav.handle_key(state, ?G, 0)
 
       {line, _col} = BufferServer.cursor(buf)
       total = BufferServer.line_count(buf)
       assert line == total - 1
+    end
+
+    test "unpins agent chat window when user navigates" do
+      state = make_state()
+      buf = AgentAccess.agent(state).buffer
+      BufferServer.move_to(buf, {0, 0})
+
+      state = put_in(state.buffers.active, buf)
+
+      # Set up a window tree with an agent chat window to test unpinning
+      window = %Window{
+        id: 1,
+        buffer: buf,
+        content: {:agent_chat, buf},
+        cursor: {0, 0},
+        viewport: %Viewport{rows: 20, cols: 80, top: 0, left: 0},
+        pinned: true
+      }
+
+      state = %{
+        state
+        | windows: %Windows{
+            tree: {:leaf, 1},
+            map: %{1 => window},
+            active: 1,
+            next_id: 2
+          }
+      }
+
+      {:handled, new_state} = AgentNav.handle_key(state, ?j, 0)
+
+      # The window should be unpinned after navigation
+      win = Map.get(new_state.windows.map, 1)
+      assert win.pinned == false
+    end
+  end
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # delegate_to_mode_fsm/4: used by AgentPanel for side panel chat nav
+  # ══════════════════════════════════════════════════════════════════════════
+
+  describe "delegate_to_mode_fsm/4" do
+    test "swaps buffer, processes key, and restores original active buffer" do
+      state = make_state()
+      original_buf = state.buffers.active
+      chat_buf = AgentAccess.agent(state).buffer
+      BufferServer.move_to(chat_buf, {0, 0})
+
+      new_state = AgentNav.delegate_to_mode_fsm(state, chat_buf, ?j, 0)
+
+      # Original buffer should be restored
+      assert new_state.buffers.active == original_buf
+
+      # Cursor should have moved in the chat buffer
+      {line, _col} = BufferServer.cursor(chat_buf)
+      assert line == 1
+    end
+
+    test "blocks insert mode transitions on read-only chat buffer" do
+      state = make_state()
+      buf = AgentAccess.agent(state).buffer
+      BufferServer.move_to(buf, {0, 0})
+
+      # 's' (substitute) would enter insert mode in normal vim,
+      # but the chat buffer is read-only so mode stays normal.
+      new_state = AgentNav.delegate_to_mode_fsm(state, buf, ?s, 0)
+
+      assert new_state.vim.mode == :normal
     end
 
     test "syncs scroll offset to cursor line" do
@@ -117,7 +193,7 @@ defmodule Minga.Input.AgentChatNavTest do
       buf = AgentAccess.agent(state).buffer
       BufferServer.move_to(buf, {0, 0})
 
-      {:handled, new_state} = AgentChatNav.handle_key(state, ?j, 0)
+      new_state = AgentNav.delegate_to_mode_fsm(state, buf, ?j, 0)
 
       scroll = AgentAccess.panel(new_state).scroll
       {cursor_line, _} = BufferServer.cursor(buf)
@@ -127,7 +203,6 @@ defmodule Minga.Input.AgentChatNavTest do
     test "unpins scroll when user navigates" do
       state = make_state()
 
-      # Pin scroll first (simulating streaming auto-scroll)
       state =
         AgentAccess.update_agent_ui(state, fn ui ->
           UIState.engage_auto_scroll(ui)
@@ -135,102 +210,32 @@ defmodule Minga.Input.AgentChatNavTest do
 
       assert AgentAccess.panel(state).scroll.pinned == true
 
-      {:handled, new_state} = AgentChatNav.handle_key(state, ?j, 0)
+      buf = AgentAccess.agent(state).buffer
+      new_state = AgentNav.delegate_to_mode_fsm(state, buf, ?j, 0)
 
       assert AgentAccess.panel(new_state).scroll.pinned == false
     end
 
-    test "blocks mode transitions on read-only buffer for keys that fall through to FSM" do
+    test "preserves buffers.active when a command changes it" do
       state = make_state()
-
-      # Keys like 's' (substitute) would enter insert mode in normal vim,
-      # but the chat buffer is read-only so the mode stays normal.
-      buf = AgentAccess.agent(state).buffer
-      BufferServer.move_to(buf, {0, 0})
-
-      new_state = AgentChatNav.delegate_to_mode_fsm(state, buf, ?s, 0)
-
-      assert new_state.vim.mode == :normal
-    end
-
-    test "i in chat nav mode focuses prompt and enters insert mode" do
-      state = make_state()
-
-      {:handled, new_state} = AgentChatNav.handle_key(state, ?i, 0)
-
-      assert new_state.vim.mode == :insert
-      assert AgentAccess.panel(new_state).input_focused == true
-    end
-
-    test "a in chat nav mode focuses prompt and enters insert mode" do
-      state = make_state()
-
-      {:handled, new_state} = AgentChatNav.handle_key(state, ?a, 0)
-
-      assert new_state.vim.mode == :insert
-      assert AgentAccess.panel(new_state).input_focused == true
-    end
-
-    test "A in chat nav mode focuses prompt and enters insert mode" do
-      state = make_state()
-
-      {:handled, new_state} = AgentChatNav.handle_key(state, ?A, 0)
-
-      assert new_state.vim.mode == :insert
-      assert AgentAccess.panel(new_state).input_focused == true
-    end
-
-    test "restores original active buffer after dispatch" do
-      state = make_state()
-      original_buf = state.buffers.active
-
-      {:handled, new_state} = AgentChatNav.handle_key(state, ?j, 0)
-
-      assert new_state.buffers.active == original_buf
-    end
-  end
-
-  # ══════════════════════════════════════════════════════════════════════════
-  # Buffer swap restore guard: commands that change buffers.active
-  # ══════════════════════════════════════════════════════════════════════════
-
-  describe "buffer swap restore guard" do
-    test "preserves buffers.active when a command changes it (e.g. :new_buffer)" do
-      state = make_state()
-      original_buf = state.buffers.active
       chat_buf = AgentAccess.agent(state).buffer
 
-      # Simulate a leader command that creates a new buffer.
-      # We can't easily run :new_buffer through delegate_to_mode_fsm in a
-      # unit test (it needs the full leader trie walk), so we test the
-      # restore guard directly: after do_handle_key, if buffers.active is
-      # no longer the chat_buffer (meaning a command changed it), the
-      # restore should be skipped.
       {:ok, new_buf} =
         DynamicSupervisor.start_child(
           Minga.Buffer.Supervisor,
           {BufferServer, content: "", buffer_name: "[new 99]"}
         )
 
-      # Manually do what delegate_to_mode_fsm does, but skip the key dispatch
-      # and directly set buffers.active to the new buffer (simulating what
-      # :new_buffer would do via Buffers.add).
+      # Simulate the restore guard: if buffers.active changed away from
+      # chat_buf (because a command like :new_buffer ran), don't restore.
       state_after_swap = put_in(state.buffers.active, chat_buf)
-
-      # Pretend the command ran and changed buffers.active to new_buf
       state_after_command = put_in(state_after_swap.buffers.active, new_buf)
 
-      # The restore guard: if buffers.active != chat_buffer, don't restore
       assert state_after_command.buffers.active != chat_buf
-      assert state_after_command.buffers.active != original_buf
-      assert state_after_command.buffers.active == new_buf
 
-      # Verify delegate_to_mode_fsm's guard logic: since buffers.active
-      # changed away from chat_buf, the original buffer should NOT be
-      # restored. (This matches the conditional in the production code.)
       restored =
         if state_after_command.buffers.active == chat_buf do
-          put_in(state_after_command.buffers.active, original_buf)
+          put_in(state_after_command.buffers.active, state.buffers.active)
         else
           state_after_command
         end
@@ -238,16 +243,6 @@ defmodule Minga.Input.AgentChatNavTest do
       assert restored.buffers.active == new_buf
 
       DynamicSupervisor.terminate_child(Minga.Buffer.Supervisor, new_buf)
-    end
-
-    test "restores buffers.active when no command changed it (normal nav)" do
-      state = make_state()
-      original_buf = state.buffers.active
-
-      # Normal navigation (j key) should still restore the original buffer
-      {:handled, new_state} = AgentChatNav.handle_key(state, ?j, 0)
-
-      assert new_state.buffers.active == original_buf
     end
   end
 
@@ -259,7 +254,7 @@ defmodule Minga.Input.AgentChatNavTest do
     test "j scrolls preview down" do
       state = make_state(focus: :file_viewer)
 
-      {:handled, new_state} = AgentChatNav.handle_key(state, ?j, 0)
+      {:handled, new_state} = AgentNav.handle_key(state, ?j, 0)
 
       preview = AgentAccess.view(new_state).preview
       assert preview.scroll.offset == 1
@@ -268,18 +263,17 @@ defmodule Minga.Input.AgentChatNavTest do
     test "k scrolls preview up from offset 1" do
       state = make_state(focus: :file_viewer)
 
-      # Scroll down first
-      {:handled, state} = AgentChatNav.handle_key(state, ?j, 0)
+      {:handled, state} = AgentNav.handle_key(state, ?j, 0)
       assert AgentAccess.view(state).preview.scroll.offset == 1
 
-      {:handled, new_state} = AgentChatNav.handle_key(state, ?k, 0)
+      {:handled, new_state} = AgentNav.handle_key(state, ?k, 0)
       assert AgentAccess.view(new_state).preview.scroll.offset == 0
     end
 
     test "k at offset 0 stays at 0" do
       state = make_state(focus: :file_viewer)
 
-      {:handled, new_state} = AgentChatNav.handle_key(state, ?k, 0)
+      {:handled, new_state} = AgentNav.handle_key(state, ?k, 0)
 
       assert AgentAccess.view(new_state).preview.scroll.offset == 0
     end
@@ -287,7 +281,7 @@ defmodule Minga.Input.AgentChatNavTest do
     test "Ctrl-D scrolls preview down by 10" do
       state = make_state(focus: :file_viewer)
 
-      {:handled, new_state} = AgentChatNav.handle_key(state, ?d, @ctrl)
+      {:handled, new_state} = AgentNav.handle_key(state, ?d, @ctrl)
 
       assert AgentAccess.view(new_state).preview.scroll.offset == 10
     end
@@ -295,18 +289,17 @@ defmodule Minga.Input.AgentChatNavTest do
     test "Ctrl-U scrolls preview up by 10" do
       state = make_state(focus: :file_viewer)
 
-      # Scroll down first
-      {:handled, state} = AgentChatNav.handle_key(state, ?d, @ctrl)
+      {:handled, state} = AgentNav.handle_key(state, ?d, @ctrl)
       assert AgentAccess.view(state).preview.scroll.offset == 10
 
-      {:handled, new_state} = AgentChatNav.handle_key(state, ?u, @ctrl)
+      {:handled, new_state} = AgentNav.handle_key(state, ?u, @ctrl)
       assert AgentAccess.view(new_state).preview.scroll.offset == 0
     end
 
     test "G pins preview to bottom" do
       state = make_state(focus: :file_viewer)
 
-      {:handled, new_state} = AgentChatNav.handle_key(state, ?G, 0)
+      {:handled, new_state} = AgentNav.handle_key(state, ?G, 0)
 
       assert AgentAccess.view(new_state).preview.scroll.pinned == true
     end
@@ -314,7 +307,7 @@ defmodule Minga.Input.AgentChatNavTest do
     test "unbound key passes through" do
       state = make_state(focus: :file_viewer)
 
-      assert {:passthrough, _} = AgentChatNav.handle_key(state, ?x, 0)
+      assert {:passthrough, _} = AgentNav.handle_key(state, ?x, 0)
     end
   end
 
@@ -326,21 +319,14 @@ defmodule Minga.Input.AgentChatNavTest do
     test "passthrough when input is focused" do
       state = make_state(input_focused: true)
 
-      assert {:passthrough, _} = AgentChatNav.handle_key(state, ?j, 0)
+      assert {:passthrough, _} = AgentNav.handle_key(state, ?j, 0)
     end
 
     test "passthrough when keymap_scope is not :agent" do
       state = make_state()
       state = %{state | keymap_scope: :editor}
 
-      assert {:passthrough, _} = AgentChatNav.handle_key(state, ?j, 0)
-    end
-
-    test "passthrough when agent buffer is nil" do
-      state = make_state()
-      state = AgentAccess.update_agent(state, fn agent -> %{agent | buffer: nil} end)
-
-      assert {:passthrough, _} = AgentChatNav.handle_key(state, ?j, 0)
+      assert {:passthrough, _} = AgentNav.handle_key(state, ?j, 0)
     end
   end
 
@@ -349,15 +335,12 @@ defmodule Minga.Input.AgentChatNavTest do
 
     test "insert mode allowed when agent input is focused despite read-only active buffer" do
       state = make_state(input_focused: true)
-      # Put the read-only agent buffer as buffers.active so the read-only
-      # guard would fire WITHOUT the input_focused bypass.
       agent_buf = AgentAccess.agent(state).buffer
       assert BufferServer.read_only?(agent_buf)
       state = put_in(state.buffers.active, agent_buf)
 
       new_state = KeyDispatch.handle_key(state, ?A, 0)
 
-      # input_focused bypasses the read-only check, so insert succeeds
       assert new_state.vim.mode == :insert
       refute new_state.status_msg == "Buffer is read-only"
     end

@@ -181,11 +181,15 @@ final class MetalRenderer {
                 continue
             }
 
-            let fontStyle = cell.attrs & FONT_STYLE_MASK
+            // Per-span font weight: use the explicit font_weight if set,
+            // otherwise fall back to the bold attr bit for backward compatibility.
+            let isBold = (cell.attrs & ATTR_BOLD) != 0
+            let cellWeight: UInt8 = (cell.fontWeight == 2 && isBold) ? 5 : cell.fontWeight
+            let cellItalic = (cell.attrs & ATTR_ITALIC) != 0
 
             // Ligature head cell: use the shaped ligature glyph.
             if cell.ligatureCellCount > 1, !cell.ligatureText.isEmpty,
-               let lig = face.shapeLigature(cell.ligatureText, style: fontStyle) {
+               let lig = face.shapeLigature(cell.ligatureText, weight: cellWeight, italic: cellItalic) {
                 gpu.hasGlyph = 1.0
                 gpu.isColor = 0.0
                 gpu.uvOrigin = SIMD2<Float>(Float(lig.glyph.atlasX) / atlasSize,
@@ -202,7 +206,7 @@ final class MetalRenderer {
             // Normal single-cell glyph.
             else if !cell.grapheme.isEmpty, cell.grapheme != " " {
                 if let scalar = cell.grapheme.unicodeScalars.first,
-                   let glyph = face.getGlyph(scalar.value, style: fontStyle) {
+                   let glyph = face.getGlyph(scalar.value, weight: cellWeight, italic: cellItalic) {
                     gpu.hasGlyph = 1.0
                     gpu.isColor = glyph.isColor ? 1.0 : 0.0
                     gpu.uvOrigin = SIMD2<Float>(Float(glyph.atlasX) / atlasSize,

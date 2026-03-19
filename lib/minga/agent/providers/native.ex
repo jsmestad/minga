@@ -1600,16 +1600,7 @@ defmodule Minga.Agent.Providers.Native do
     %{state | context: %{state.context | messages: updated_messages}}
   end
 
-  defp detect_project_root do
-    case Minga.Project.root() do
-      nil -> File.cwd!()
-      root -> root
-    end
-  rescue
-    _ -> File.cwd!()
-  catch
-    :exit, _ -> File.cwd!()
-  end
+  defdelegate detect_project_root, to: Minga.Project, as: :resolve_root
 
   # Estimates token usage for the current context and emits a ContextUsage event.
   # The model name is stripped of the provider prefix for ModelLimits lookup.
