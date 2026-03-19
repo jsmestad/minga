@@ -5,12 +5,10 @@
 /// texture composited as a textured quad over background color fills.
 ///
 /// Passes:
-/// 1. Background fill: one colored quad per line (using run bg colors)
+/// 1. Background fill: per-row default bg, per-run bg, gutter fill, gutter separator
 /// 2. Block cursor background (drawn before text so text shows on top)
 /// 3. Line texture blit: one textured quad per line (CoreText-rendered text)
-/// 4. Gutter gap fill: colored rect to cover gutter padding gap
-/// 5. Gutter separator line
-/// 6. Beam/underline cursor overlay (drawn after text)
+/// 4. Beam/underline cursor overlay (drawn after text)
 
 import Metal
 import QuartzCore
@@ -133,6 +131,29 @@ final class CoreTextMetalRenderer {
         var bgQuads: [QuadGPU] = []
         var lineInstances: [(LineGPU, MTLTexture)] = []
 
+        // Gutter gap fill: add as the FIRST bg quad so it's drawn under
+        // text (not over it). The gutter fill covers the pixel gap between
+        // line numbers and code created by shifting content cells right.
+        if lineBuffer.gutterCol > 0 && gutterPaddingPx > 0 {
+            var fillQuad = QuadGPU()
+            fillQuad.position = SIMD2<Float>(Float(lineBuffer.gutterCol) * cellW * scale, 0)
+            fillQuad.size = SIMD2<Float>(gutterPaddingPx, Float(viewportSize.height))
+            fillQuad.color = defaultBg
+            fillQuad.alpha = 1.0
+            bgQuads.append(fillQuad)
+        }
+
+        // Gutter separator line (also drawn as a bg quad, under text).
+        if lineBuffer.gutterCol > 0 && lineBuffer.gutterSeparatorColor != 0 {
+            var sepQuad = QuadGPU()
+            let sepX = (Float(lineBuffer.gutterCol) * cellW + gutterPaddingPt) * scale - 1.0
+            sepQuad.position = SIMD2<Float>(sepX, 0)
+            sepQuad.size = SIMD2<Float>(1.0, Float(viewportSize.height))
+            sepQuad.color = colorFromU24(lineBuffer.gutterSeparatorColor, default: SIMD3<Float>(0.3, 0.3, 0.3))
+            sepQuad.alpha = 1.0
+            bgQuads.append(sepQuad)
+        }
+
         for row: UInt16 in 0..<lineBuffer.rows {
             let rowF = Float(row)
             let yPos = rowF * cellH * scale
@@ -253,36 +274,10 @@ final class CoreTextMetalRenderer {
             }
         }
 
-        // Pass 4: Gutter gap fill.
-        if lineBuffer.gutterCol > 0 && gutterPaddingPx > 0 {
-            var fillQuad = QuadGPU()
-            fillQuad.position = SIMD2<Float>(Float(lineBuffer.gutterCol) * cellW * scale, 0)
-            fillQuad.size = SIMD2<Float>(gutterPaddingPx, Float(viewportSize.height))
-            fillQuad.color = defaultBg
-            fillQuad.alpha = 1.0
+        // Gutter fill and separator are now drawn as bg quads in pass 1
+        // (before text) so they don't cover text content.
 
-            encoder.setRenderPipelineState(bgPipeline)
-            encoder.setVertexBytes(&fillQuad, length: MemoryLayout<QuadGPU>.stride, index: 0)
-            encoder.setVertexBytes(&uniforms, length: MemoryLayout<CTUniformsGPU>.size, index: 1)
-            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: 1)
-        }
-
-        // Pass 5: Gutter separator line.
-        if lineBuffer.gutterCol > 0 && lineBuffer.gutterSeparatorColor != 0 {
-            var sepQuad = QuadGPU()
-            let sepX = (Float(lineBuffer.gutterCol) * cellW + gutterPaddingPt) * scale - 1.0
-            sepQuad.position = SIMD2<Float>(sepX, 0)
-            sepQuad.size = SIMD2<Float>(1.0, Float(viewportSize.height))
-            sepQuad.color = colorFromU24(lineBuffer.gutterSeparatorColor, default: SIMD3<Float>(0.3, 0.3, 0.3))
-            sepQuad.alpha = 1.0
-
-            encoder.setRenderPipelineState(bgPipeline)
-            encoder.setVertexBytes(&sepQuad, length: MemoryLayout<QuadGPU>.stride, index: 0)
-            encoder.setVertexBytes(&uniforms, length: MemoryLayout<CTUniformsGPU>.size, index: 1)
-            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: 1)
-        }
-
-        // Pass 6: Cursor overlay for beam and underline shapes.
+        // Pass 4: Cursor overlay for beam and underline shapes.
         // Block cursor is drawn in pass 2 (before text) so text shows on top.
         // Beam and underline are drawn AFTER text so they overlay it.
         if lineBuffer.cursorVisible && lineBuffer.cursorShape != .block {
