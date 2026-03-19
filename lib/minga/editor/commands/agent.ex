@@ -15,6 +15,7 @@ defmodule Minga.Editor.Commands.Agent do
   alias Minga.Agent.Markdown
   alias Minga.Agent.Message
   alias Minga.Agent.Session
+  alias Minga.Agent.SessionStore
   alias Minga.Agent.SlashCommand
   alias Minga.Agent.UIState
   alias Minga.Agent.View.Preview
@@ -494,8 +495,8 @@ defmodule Minga.Editor.Commands.Agent do
   @doc "Clears all saved agent sessions from disk."
   @spec clear_session_history(state()) :: state()
   def clear_session_history(state) do
-    count = length(Minga.Agent.SessionStore.list())
-    Minga.Agent.SessionStore.clear_all()
+    count = length(SessionStore.list())
+    SessionStore.clear_all()
 
     msg =
       case count do
