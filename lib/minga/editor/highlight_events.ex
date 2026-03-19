@@ -118,17 +118,24 @@ defmodule Minga.Editor.HighlightEvents do
 
   defp maybe_apply_prettify_symbols(state) do
     if PrettifySymbols.enabled?() do
-      buf = state.buffers.active
-      hl = HighlightSync.get_active_highlight(state)
+      spawn_prettify_task(state)
+    end
 
-      if hl.capture_names != {} and tuple_size(hl.spans) > 0 do
-        file_path = BufferServer.file_path(buf)
-        filetype = Filetype.detect(file_path)
+    :ok
+  end
 
-        Task.start(fn ->
-          PrettifySymbols.apply(buf, hl, filetype)
-        end)
-      end
+  @spec spawn_prettify_task(EditorState.t()) :: :ok
+  defp spawn_prettify_task(state) do
+    buf = state.buffers.active
+    hl = HighlightSync.get_active_highlight(state)
+
+    if hl.capture_names != {} and tuple_size(hl.spans) > 0 do
+      file_path = BufferServer.file_path(buf)
+      filetype = Filetype.detect(file_path)
+
+      Task.start(fn ->
+        PrettifySymbols.apply(buf, hl, filetype)
+      end)
     end
 
     :ok
