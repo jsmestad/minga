@@ -65,6 +65,7 @@ defmodule Minga.Port.Protocol do
   @op_set_active_region 0x1A
   @op_scroll_region 0x1B
   @op_draw_styled_text 0x1C
+  @op_draw_proportional 0x1D
 
   # ── Font weight encoding (shared between set_font and draw_styled_text) ──
 
@@ -324,6 +325,64 @@ defmodule Minga.Port.Protocol do
       Keyword.has_key?(style, :blend) ||
       Keyword.has_key?(style, :font_weight) ||
       Keyword.has_key?(style, :font_id)
+  end
+
+  @typedoc "A styled text segment for proportional rendering."
+  @type proportional_segment :: %{
+          text: String.t(),
+          fg: non_neg_integer(),
+          bg: non_neg_integer(),
+          font_id: non_neg_integer(),
+          font_weight: non_neg_integer(),
+          italic: boolean()
+        }
+
+  @typedoc "A line of styled text segments for proportional rendering."
+  @type proportional_line :: [proportional_segment()]
+
+  @doc """
+  Encodes a draw_proportional command for a region of proportional text.
+
+  The GUI creates a ProportionalLayer from this data and renders it using
+  CoreText line shaping (CTLine) with per-segment fonts and styles.
+
+  Format:
+    opcode:8, row:16, col:16, width:16, height:16,
+    line_count:16,
+      [segment_count:16,
+        [fg:24, bg:24, font_id:8, font_weight:8, italic:8, text_len:16, text]*
+      ]*
+  """
+  @spec encode_draw_proportional(
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          [proportional_line()]
+        ) :: binary()
+  def encode_draw_proportional(row, col, width, height, lines) do
+    header = <<@op_draw_proportional, row::16, col::16, width::16, height::16, length(lines)::16>>
+    line_data = Enum.map(lines, &encode_proportional_line/1)
+    IO.iodata_to_binary([header | line_data])
+  end
+
+  @spec encode_proportional_line(proportional_line()) :: binary()
+  defp encode_proportional_line(segments) do
+    seg_header = <<length(segments)::16>>
+    seg_data = Enum.map(segments, &encode_proportional_segment/1)
+    IO.iodata_to_binary([seg_header | seg_data])
+  end
+
+  @spec encode_proportional_segment(proportional_segment()) :: binary()
+  defp encode_proportional_segment(seg) do
+    fg = Map.get(seg, :fg, 0xFFFFFF)
+    bg = Map.get(seg, :bg, 0x000000)
+    font_id = Map.get(seg, :font_id, 0)
+    font_weight = Map.get(seg, :font_weight, 2)
+    italic = if Map.get(seg, :italic, false), do: 1, else: 0
+    text = Map.get(seg, :text, "")
+
+    <<fg::24, bg::24, font_id::8, font_weight::8, italic::8, byte_size(text)::16, text::binary>>
   end
 
   @doc "Encodes a set_cursor command."

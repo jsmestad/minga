@@ -152,11 +152,13 @@ final class MetalRenderer {
                    scrollOffset: scrollOffset, proportionalLayers: proportionalLayers)
     }
 
-    /// Render using a single FontFace (backward compatible).
+    /// Render using a single FontFace (backward compatible, with optional proportional layers).
     func render(grid: CellGrid, face: FontFace, drawable: CAMetalDrawable,
-                viewportSize: CGSize, contentScale: Float, scrollOffset: SIMD2<Float> = .zero) {
+                viewportSize: CGSize, contentScale: Float, scrollOffset: SIMD2<Float> = .zero,
+                proportionalLayers: [ProportionalLayer]? = nil) {
         renderImpl(grid: grid, fontManager: nil, primaryFace: face, drawable: drawable,
-                   viewportSize: viewportSize, contentScale: contentScale, scrollOffset: scrollOffset)
+                   viewportSize: viewportSize, contentScale: contentScale,
+                   scrollOffset: scrollOffset, proportionalLayers: proportionalLayers)
     }
 
     private func renderImpl(grid: CellGrid, fontManager: FontManager? = nil, primaryFace: FontFace? = nil,

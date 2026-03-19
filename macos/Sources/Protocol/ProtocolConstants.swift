@@ -25,6 +25,7 @@ let OP_CLEAR_REGION: UInt8 = 0x18
 let OP_DESTROY_REGION: UInt8 = 0x19
 let OP_SET_ACTIVE_REGION: UInt8 = 0x1A
 let OP_DRAW_STYLED_TEXT: UInt8 = 0x1C
+let OP_DRAW_PROPORTIONAL: UInt8 = 0x1D
 
 // MARK: - GUI chrome opcodes (BEAM → frontend, contiguous range 0x70-0x78)
 

@@ -38,6 +38,11 @@ final class CommandDispatcher {
     /// this to trigger a GPU frame.
     var onFrameReady: (() -> Void)?
 
+    /// Proportional text layers for the current frame. Cleared on `clear`,
+    /// populated by `drawProportional` commands, consumed by `MetalRenderer`
+    /// during the `batchEnd` frame render.
+    var proportionalLayers: [ProportionalLayer] = []
+
     /// Called when the window title should change.
     var onTitleChanged: ((String) -> Void)?
 
@@ -62,6 +67,7 @@ final class CommandDispatcher {
         switch command {
         case .clear:
             grid.clear()
+            proportionalLayers.removeAll()
 
         case .drawText(let row, let col, let fg, let bg, let attrs, let text):
             drawText(row: row, col: col, fg: fg, bg: bg, attrs: attrs, text: text)
@@ -86,6 +92,9 @@ final class CommandDispatcher {
 
         case .setCursorShape(let shape):
             grid.cursorShape = shape
+
+        case .drawProportional(let propRow, let propCol, let propW, let propH, let propLines):
+            handleDrawProportional(row: propRow, col: propCol, width: propW, height: propH, lines: propLines)
 
         case .batchEnd:
             onFrameReady?()
@@ -192,6 +201,52 @@ final class CommandDispatcher {
             grid.gutterCol = col
             grid.gutterSeparatorColor = (UInt32(r) << 16) | (UInt32(g) << 8) | UInt32(b)
         }
+    }
+
+    // MARK: - Proportional text
+
+    private func handleDrawProportional(
+        row: UInt16, col: UInt16, width: UInt16, height: UInt16,
+        lines: [[(fg: UInt32, bg: UInt32, fontId: UInt8, fontWeight: UInt8, italic: Bool, text: String)]]
+    ) {
+        guard let face = fontFace else { return }
+
+        let layer = ProportionalLayer()
+        // Convert cell coordinates to point coordinates.
+        layer.originX = CGFloat(col) * CGFloat(face.cellWidth)
+        layer.originY = CGFloat(row) * CGFloat(face.cellHeight)
+        layer.width = CGFloat(width) * CGFloat(face.cellWidth)
+        layer.height = CGFloat(height) * CGFloat(face.cellHeight)
+
+        // Convert protocol segments to TextRuns.
+        layer.lines = lines.map { segments in
+            // Concatenate all segments into one attributed string per line.
+            // Each segment may have different font/color.
+            let fullText = segments.map(\.text).joined()
+            let fg = segments.first.map { colorToSIMD($0.fg) } ?? SIMD3<Float>(1, 1, 1)
+            let bg = segments.first.map { colorToSIMD($0.bg) } ?? SIMD3<Float>(0.12, 0.12, 0.14)
+
+            // For V1, use the primary font's proportional equivalent.
+            // Per-segment font selection comes in a later PR.
+            let fontName = "SF Pro"
+            let fontSize = CTFontGetSize(face.ctFont)
+            let font = CTFontCreateWithName(fontName as CFString, fontSize, nil)
+
+            return TextRun.create(text: fullText, font: font, fgColor: fg, bgColor: bg)
+        }
+
+        // Rasterize and add to the frame's proportional layers.
+        layer.rasterize(scale: face.scale)
+        proportionalLayers.append(layer)
+    }
+
+    private func colorToSIMD(_ color: UInt32) -> SIMD3<Float> {
+        if color == 0 { return SIMD3<Float>(0, 0, 0) }
+        return SIMD3<Float>(
+            Float((color >> 16) & 0xFF) / 255.0,
+            Float((color >> 8) & 0xFF) / 255.0,
+            Float(color & 0xFF) / 255.0
+        )
     }
 
     // MARK: - Private

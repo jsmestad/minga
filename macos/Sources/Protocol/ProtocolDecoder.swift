@@ -13,6 +13,7 @@ enum RenderCommand: Sendable {
     case batchEnd
     case drawText(row: UInt16, col: UInt16, fg: UInt32, bg: UInt32, attrs: UInt8, text: String)
     case drawStyledText(row: UInt16, col: UInt16, fg: UInt32, bg: UInt32, attrs: UInt16, underlineColor: UInt32, blend: UInt8, fontWeight: UInt8, fontId: UInt8, text: String)
+    case drawProportional(row: UInt16, col: UInt16, width: UInt16, height: UInt16, lines: [[(fg: UInt32, bg: UInt32, fontId: UInt8, fontWeight: UInt8, italic: Bool, text: String)]])
     case setCursor(row: UInt16, col: UInt16)
     case setCursorShape(CursorShape)
     case setTitle(String)
@@ -186,6 +187,41 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         let textData = data[(rest + 20)..<(rest + 20 + textLen)]
         let text = String(data: textData, encoding: .utf8) ?? ""
         return (.drawStyledText(row: row, col: col, fg: fg, bg: bg, attrs: attrs16, underlineColor: ulColor, blend: blend, fontWeight: fontWeight, fontId: fontId, text: text), 1 + 20 + textLen)
+
+    case OP_DRAW_PROPORTIONAL:
+        // row:2, col:2, width:2, height:2, line_count:2 = 10 bytes header
+        guard data.count >= rest + 10 else { throw ProtocolDecodeError.malformed }
+        let propRow = readU16(data, rest)
+        let propCol = readU16(data, rest + 2)
+        let propW = readU16(data, rest + 4)
+        let propH = readU16(data, rest + 6)
+        let lineCount = Int(readU16(data, rest + 8))
+        var offset = rest + 10
+        var propLines: [[(fg: UInt32, bg: UInt32, fontId: UInt8, fontWeight: UInt8, italic: Bool, text: String)]] = []
+        for _ in 0..<lineCount {
+            guard data.count >= offset + 2 else { throw ProtocolDecodeError.malformed }
+            let segCount = Int(readU16(data, offset))
+            offset += 2
+            var segments: [(fg: UInt32, bg: UInt32, fontId: UInt8, fontWeight: UInt8, italic: Bool, text: String)] = []
+            for _ in 0..<segCount {
+                // fg:3, bg:3, font_id:1, font_weight:1, italic:1, text_len:2 = 11 bytes min
+                guard data.count >= offset + 11 else { throw ProtocolDecodeError.malformed }
+                let segFg = readU24(data, offset)
+                let segBg = readU24(data, offset + 3)
+                let segFontId = data[offset + 6]
+                let segFontWeight = data[offset + 7]
+                let segItalic = data[offset + 8] != 0
+                let segTextLen = Int(readU16(data, offset + 9))
+                offset += 11
+                guard data.count >= offset + segTextLen else { throw ProtocolDecodeError.malformed }
+                let segTextData = data[offset..<(offset + segTextLen)]
+                let segText = String(data: segTextData, encoding: .utf8) ?? ""
+                offset += segTextLen
+                segments.append((fg: segFg, bg: segBg, fontId: segFontId, fontWeight: segFontWeight, italic: segItalic, text: segText))
+            }
+            propLines.append(segments)
+        }
+        return (.drawProportional(row: propRow, col: propCol, width: propW, height: propH, lines: propLines), offset - rest + 1)
 
     case OP_SET_CURSOR:
         guard data.count >= rest + 4 else { throw ProtocolDecodeError.malformed }

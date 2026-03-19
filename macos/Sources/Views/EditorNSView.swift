@@ -44,6 +44,10 @@ final class EditorNSView: MTKView {
     private(set) var agentChatVisible: Bool = false
     private var agentKeyMonitor: Any?
 
+    /// Proportional text layers for the current frame. Set by the AppDelegate
+    /// from CommandDispatcher before triggering a frame render.
+    var proportionalLayers: [ProportionalLayer] = []
+
     init(encoder: InputEncoder, metalRenderer: MetalRenderer, fontFace: FontFace, cellGrid: CellGrid) {
         self.encoder = encoder
         self.metalRenderer = metalRenderer
@@ -89,8 +93,10 @@ final class EditorNSView: MTKView {
         // offsets in the shader so only the editor viewport shifts.
         // The MTKView coalescing + 1-line-per-event accumulation already
         // gives smooth scrolling without the fractional offset.
+        let layers = proportionalLayers.isEmpty ? nil : proportionalLayers
         metalRenderer.render(grid: cellGrid, face: fontFace, drawable: drawable,
-                             viewportSize: drawableSize, contentScale: scale)
+                             viewportSize: drawableSize, contentScale: scale,
+                             proportionalLayers: layers)
         cellGrid.dirty = false
     }
 

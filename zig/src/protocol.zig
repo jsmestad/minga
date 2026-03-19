@@ -41,6 +41,7 @@ pub const OP_DESTROY_REGION: u8 = 0x19;
 pub const OP_SET_ACTIVE_REGION: u8 = 0x1A;
 pub const OP_SCROLL_REGION: u8 = 0x1B;
 pub const OP_DRAW_STYLED_TEXT: u8 = 0x1C;
+pub const OP_DRAW_PROPORTIONAL: u8 = 0x1D;
 
 // Config commands (BEAM → frontend, TUI ignores)
 pub const OP_SET_FONT: u8 = 0x50;
@@ -639,6 +640,28 @@ pub fn decodeCommand(data: []const u8) DecodeError!RenderCommand {
                 .text = text,
             } };
         },
+        OP_DRAW_PROPORTIONAL => {
+            // Variable-length proportional text region. TUI ignores this; skip the entire command.
+            // Header: row:2, col:2, width:2, height:2, line_count:2 = 10 bytes
+            if (rest.len < 10) return error.Malformed;
+            const line_count = std.mem.readInt(u16, rest[8..10], .big);
+            var offset: usize = 10;
+            var line_i: u16 = 0;
+            while (line_i < line_count) : (line_i += 1) {
+                if (rest.len < offset + 2) return error.Malformed;
+                const seg_count = std.mem.readInt(u16, rest[offset..][0..2], .big);
+                offset += 2;
+                var seg_i: u16 = 0;
+                while (seg_i < seg_count) : (seg_i += 1) {
+                    // fg:3, bg:3, font_id:1, font_weight:1, italic:1, text_len:2 = 11 bytes header
+                    if (rest.len < offset + 11) return error.Malformed;
+                    const text_len = std.mem.readInt(u16, rest[offset + 9 ..][0..2], .big);
+                    offset += 11 + text_len;
+                }
+            }
+            // TUI ignores proportional text; return no-op.
+            return .clear;
+        },
         OP_SET_CURSOR => {
             if (rest.len < 4) return error.Malformed;
             const row = std.mem.readInt(u16, rest[0..2], .big);
@@ -979,6 +1002,25 @@ pub fn commandSize(payload: []const u8) usize {
             if (payload.len < 7) break :blk payload.len;
             const name_len = std.mem.readInt(u16, payload[5..7], .big);
             break :blk 7 + name_len;
+        },
+        OP_DRAW_PROPORTIONAL => blk: {
+            // Variable-length: header(10) + lines(variable)
+            if (payload.len < 11) break :blk payload.len;
+            const line_count = std.mem.readInt(u16, payload[9..11], .big);
+            var offset: usize = 11;
+            var line_i: u16 = 0;
+            while (line_i < line_count) : (line_i += 1) {
+                if (payload.len < offset + 2) break :blk payload.len;
+                const seg_count = std.mem.readInt(u16, payload[offset..][0..2], .big);
+                offset += 2;
+                var seg_i: u16 = 0;
+                while (seg_i < seg_count) : (seg_i += 1) {
+                    if (payload.len < offset + 11) break :blk payload.len;
+                    const text_len = std.mem.readInt(u16, payload[offset + 9 ..][0..2], .big);
+                    offset += 11 + text_len;
+                }
+            }
+            break :blk offset;
         },
         OP_REGISTER_FONT => blk: {
             // opcode(1) + font_id(1) + name_len(2) + name

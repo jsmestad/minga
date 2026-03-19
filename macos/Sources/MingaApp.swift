@@ -236,7 +236,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Command dispatcher.
         let disp = CommandDispatcher(grid: grid, guiState: appState.gui)
-        disp.onFrameReady = { [weak nsView] in
+        disp.onFrameReady = { [weak nsView, weak disp] in
+            // Pass proportional layers to the view for rendering.
+            if let disp = disp, let nsView = nsView {
+                nsView.proportionalLayers = disp.proportionalLayers
+            }
             nsView?.renderFrame()
         }
         disp.onTitleChanged = { [weak appState] title in
