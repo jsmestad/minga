@@ -288,14 +288,25 @@ final class CoreTextLineRenderer {
             RunSpan(run: run, startCol: run.col, endCol: run.col + UInt16(run.text.count))
         }
 
-        // Process from last to first. Later runs have priority (they overwrote
-        // earlier runs in the cell grid). Mark columns claimed by later runs.
+        // Build a per-column map of background colors from ALL runs (first writer
+        // sets the bg, matching cell-grid semantics where the fill draw sets the
+        // cell bg before the text draw overwrites only the glyph and fg).
+        var bgAtCol: [UInt16: UInt32] = [:]
+        for span in spans {
+            for col in span.startCol..<span.endCol {
+                if bgAtCol[col] == nil && span.run.bg != 0 {
+                    bgAtCol[col] = span.run.bg
+                }
+            }
+        }
+
+        // Process from last to first. Later runs have priority for fg/glyph
+        // (they overwrote earlier runs in the cell grid).
         var claimed = Set<UInt16>()
         var result: [StyledRun] = []
 
         for i in stride(from: spans.count - 1, through: 0, by: -1) {
             let span = spans[i]
-            // Check if any columns in this span are NOT yet claimed.
             var unclaimed: [UInt16] = []
             for col in span.startCol..<span.endCol {
                 if !claimed.contains(col) {
@@ -303,22 +314,36 @@ final class CoreTextLineRenderer {
                 }
             }
 
-            if unclaimed.isEmpty {
-                // Fully overwritten by later runs. Skip entirely.
-                continue
-            }
+            if unclaimed.isEmpty { continue }
 
-            // Claim all columns in this span's range.
             for col in span.startCol..<span.endCol {
                 claimed.insert(col)
             }
 
+            // Inherit bg from earlier runs at the same columns (cell-grid
+            // semantics: fill sets bg, text overwrites glyph/fg only).
+            let inheritedBg: UInt32 = {
+                if span.run.bg != 0 { return span.run.bg }
+                // Check if any earlier run set a bg at this run's start column.
+                return bgAtCol[span.startCol] ?? 0
+            }()
+
             if unclaimed.count == Int(span.endCol - span.startCol) {
-                // No overlap. Keep the run as-is.
-                result.append(span.run)
+                // No overlap. Keep the run, possibly with inherited bg.
+                if inheritedBg != span.run.bg {
+                    let updated = StyledRun(
+                        col: span.run.col, text: span.run.text,
+                        fg: span.run.fg, bg: inheritedBg, attrs: span.run.attrs,
+                        underlineColor: span.run.underlineColor,
+                        underlineStyle: span.run.underlineStyle,
+                        fontWeight: span.run.fontWeight, fontId: span.run.fontId
+                    )
+                    result.append(updated)
+                } else {
+                    result.append(span.run)
+                }
             } else {
                 // Partial overlap. Extract the unclaimed portion.
-                // Find the contiguous unclaimed range starting from the beginning.
                 let firstUnclaimed = unclaimed.first!
                 let text = span.run.text
                 let startOffset = Int(firstUnclaimed - span.startCol)
@@ -332,7 +357,7 @@ final class CoreTextLineRenderer {
                     if !clippedText.isEmpty {
                         let clipped = StyledRun(
                             col: firstUnclaimed, text: clippedText,
-                            fg: span.run.fg, bg: span.run.bg, attrs: span.run.attrs,
+                            fg: span.run.fg, bg: inheritedBg, attrs: span.run.attrs,
                             underlineColor: span.run.underlineColor,
                             underlineStyle: span.run.underlineStyle,
                             fontWeight: span.run.fontWeight, fontId: span.run.fontId
@@ -343,9 +368,7 @@ final class CoreTextLineRenderer {
             }
         }
 
-        // Reverse to restore draw order (we processed back-to-front).
         result.reverse()
-        // Sort by column for buildAttributedString's gap-filling logic.
         result.sort { $0.col < $1.col }
         return result
     }
