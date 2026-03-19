@@ -8,7 +8,6 @@ defmodule Minga.Picker.FileSource do
 
   @behaviour Minga.Picker.Source
 
-  alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Devicon
   alias Minga.Editor.State, as: EditorState
   alias Minga.Filetype
@@ -59,7 +58,7 @@ defmodule Minga.Picker.FileSource do
 
     Log.debug(:editor, "[file_picker] on_select path=#{rel_path}")
 
-    case find_buffer_by_path(state, abs_path) do
+    case EditorState.find_buffer_by_path(state, abs_path) do
       nil ->
         case start_buffer(abs_path) do
           {:ok, pid} ->
@@ -135,17 +134,6 @@ defmodule Minga.Picker.FileSource do
     end
   catch
     :exit, _ -> File.cwd!()
-  end
-
-  @spec find_buffer_by_path(map(), String.t()) :: non_neg_integer() | nil
-  defp find_buffer_by_path(%{buffers: %{list: buffers}}, file_path) do
-    Enum.find_index(buffers, fn buf ->
-      try do
-        BufferServer.file_path(buf) == file_path
-      catch
-        :exit, _ -> false
-      end
-    end)
   end
 
   @spec start_buffer(String.t()) :: {:ok, pid()} | {:error, term()}

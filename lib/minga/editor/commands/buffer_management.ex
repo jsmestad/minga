@@ -232,7 +232,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   end
 
   def execute(state, {:execute_ex_command, {:edit, file_path}}) do
-    case find_buffer_by_path(state, file_path) do
+    case EditorState.find_buffer_by_path(state, file_path) do
       nil ->
         case Commands.start_buffer(file_path) do
           {:ok, pid} ->
@@ -922,17 +922,6 @@ defmodule Minga.Editor.Commands.BufferManagement do
       _ ->
         state
     end
-  end
-
-  @spec find_buffer_by_path(state(), String.t()) :: non_neg_integer() | nil
-  defp find_buffer_by_path(%{buffers: %{list: buffers}}, file_path) do
-    Enum.find_index(buffers, fn buf ->
-      try do
-        BufferServer.file_path(buf) == file_path
-      catch
-        :exit, _ -> false
-      end
-    end)
   end
 
   @spec next_new_buffer_number([pid()]) :: pos_integer()
