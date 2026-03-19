@@ -26,7 +26,12 @@ defmodule Minga.LoggerHandler do
 
       Minga.LoggerHandler.install()
 
-  The editor's `terminate/2` calls `uninstall/0` to restore defaults.
+  The handler stays installed across Editor restarts so that crash reports
+  are captured in the ETS buffer. `uninstall/0` is called only during
+  clean application shutdown (`Application.stop/1`).
+
+  `install/0` is idempotent: safe to call on every `Editor.init/1` even
+  when the handlers are already in place from a previous Editor lifetime.
   """
 
   @handler_id :minga_messages
@@ -57,6 +62,10 @@ defmodule Minga.LoggerHandler do
   @doc """
   Install the custom handlers and redirect stderr to a log file.
 
+  Idempotent: skips any handler or redirect that is already in place.
+  Safe to call on every `Editor.init/1`, including restarts after a crash
+  where the handlers survived because `terminate/2` no longer tears them down.
+
   Returns the log file path for display in `*Messages*`.
   """
   @spec install() :: String.t()
@@ -65,21 +74,29 @@ defmodule Minga.LoggerHandler do
     File.mkdir_p!(@log_dir)
 
     # 1. Replace the default handler with a file-based one.
-    #    Can't change type on a live handler, so remove + re-add.
-    :logger.remove_handler(:default)
+    #    Idempotent: skip if already installed (Editor restarting after a
+    #    crash while the LoggerHandler stayed in place).
+    unless handler_installed?(@file_handler_id) do
+      :logger.remove_handler(:default)
 
-    :logger.add_handler(@file_handler_id, :logger_std_h, %{
-      config: %{type: {:file, String.to_charlist(log_path)}},
-      level: :all
-    })
+      :logger.add_handler(@file_handler_id, :logger_std_h, %{
+        config: %{type: {:file, String.to_charlist(log_path)}},
+        level: :all
+      })
+    end
 
     # 2. Add our custom handler that sends to *Messages*.
-    :logger.add_handler(@handler_id, __MODULE__, %{level: :all})
+    unless handler_installed?(@handler_id) do
+      :logger.add_handler(@handler_id, __MODULE__, %{level: :all})
+    end
 
     # 3. Redirect :standard_error to the log file so IO.warn and raw BEAM
     #    warnings don't paint over the TUI. We open a unicode-mode file device
     #    and register it as :standard_error (the OTP IO protocol convention).
-    redirect_standard_error(log_path)
+    #    Idempotent: skip if already redirected.
+    unless stderr_redirected?() do
+      redirect_standard_error(log_path)
+    end
 
     log_path
   end
@@ -260,5 +277,17 @@ defmodule Minga.LoggerHandler do
 
   defp format_message(level, {format, args}, _meta) do
     "[#{level}] #{:io_lib.format(format, args) |> IO.iodata_to_binary()}"
+  end
+
+  # ── Idempotency helpers ────────────────────────────────────────────────────
+
+  @spec handler_installed?(atom()) :: boolean()
+  defp handler_installed?(handler_id) do
+    match?({:ok, _}, :logger.get_handler_config(handler_id))
+  end
+
+  @spec stderr_redirected?() :: boolean()
+  defp stderr_redirected? do
+    :persistent_term.get(:minga_original_stderr, nil) != nil
   end
 end

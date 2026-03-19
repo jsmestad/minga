@@ -184,13 +184,12 @@ defmodule Minga.Editor do
   @impl true
   @spec terminate(term(), state()) :: :ok
   def terminate(_reason, _state) do
-    # Only uninstall if we installed (i.e. real TUI, not headless test).
-    # Check for our handler presence rather than storing state.
-    case :logger.get_handler_config(:minga_messages) do
-      {:ok, _} -> Minga.LoggerHandler.uninstall()
-      _ -> :ok
-    end
-
+    # Do NOT uninstall the LoggerHandler here. OTP emits crash reports
+    # AFTER terminate returns, so uninstalling would restore the default
+    # stderr handler and the crash report would corrupt the TUI. The
+    # LoggerHandler stays installed across Editor restarts; its ETS buffer
+    # captures crash reports and flush_buffer/0 replays them on the next
+    # init. Cleanup happens in Application.stop/1 (clean shutdown only).
     :ok
   end
 
