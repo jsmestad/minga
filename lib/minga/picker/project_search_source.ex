@@ -58,7 +58,7 @@ defmodule Minga.Picker.ProjectSearchSource do
     line = max(match.line - 1, 0)
     col = match.col
 
-    case find_buffer_by_path(state, abs_path) do
+    case EditorState.find_buffer_by_path(state, abs_path) do
       nil -> open_new_buffer(state, abs_path, line, col)
       buf_idx -> jump_to_buffer(state, buf_idx, line, col)
     end
@@ -95,17 +95,6 @@ defmodule Minga.Picker.ProjectSearchSource do
   def on_cancel(state), do: state
 
   # ── Private ─────────────────────────────────────────────────────────────────
-
-  @spec find_buffer_by_path(map(), String.t()) :: non_neg_integer() | nil
-  defp find_buffer_by_path(%{buffers: %{list: buffers}}, file_path) do
-    Enum.find_index(buffers, fn buf ->
-      try do
-        BufferServer.file_path(buf) == file_path
-      catch
-        :exit, _ -> false
-      end
-    end)
-  end
 
   @spec start_buffer(String.t()) :: {:ok, pid()} | {:error, term()}
   defp start_buffer(file_path) do

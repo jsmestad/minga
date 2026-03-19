@@ -188,6 +188,23 @@ defmodule Minga.Editor.State do
   @spec active_buffer(t()) :: non_neg_integer()
   def active_buffer(%__MODULE__{buffers: %{active_index: idx}}), do: idx
 
+  @doc """
+  Returns the index of the buffer whose file path matches `file_path`, or nil.
+
+  Catches `:exit` for each buffer in case a process has died but not yet been
+  removed from the buffer list.
+  """
+  @spec find_buffer_by_path(t() | map(), String.t()) :: non_neg_integer() | nil
+  def find_buffer_by_path(%{buffers: %{list: buffers}}, file_path) do
+    Enum.find_index(buffers, fn buf ->
+      try do
+        BufferServer.file_path(buf) == file_path
+      catch
+        :exit, _ -> false
+      end
+    end)
+  end
+
   # ── Buffer monitoring ──────────────────────────────────────────────────────
 
   @doc """
