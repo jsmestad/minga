@@ -25,7 +25,6 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
   alias Minga.Editor.Viewport
   alias Minga.Editor.VimState
   alias Minga.Editor.Window
-  alias Minga.Face
   alias Minga.Input
   alias Minga.Test.StubServer
 

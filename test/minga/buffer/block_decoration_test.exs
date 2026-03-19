@@ -6,7 +6,6 @@ defmodule Minga.Buffer.BlockDecorationTest do
   alias Minga.Editor.DisplayMap
   alias Minga.Editor.FoldMap
   alias Minga.Editor.FoldRange
-  alias Minga.Face
 
   # ── CRUD ─────────────────────────────────────────────────────────────────
 

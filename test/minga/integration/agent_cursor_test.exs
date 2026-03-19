@@ -18,7 +18,6 @@ defmodule Minga.Integration.AgentCursorTest do
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
   alias Minga.Editor.Window
-  alias Minga.Face
   alias Minga.Test.HeadlessPort
   alias Minga.Test.StubServer
 

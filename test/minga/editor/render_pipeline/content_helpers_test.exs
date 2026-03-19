@@ -6,7 +6,6 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpersTest do
   alias Minga.Editor.RenderPipeline.ContentHelpers
   alias Minga.Editor.Viewport
   alias Minga.Editor.Window
-  alias Minga.Face
 
   @search_colors %Minga.Theme.Search{
     highlight_bg: 0xECBE7B,

@@ -1,7 +1,6 @@
 defmodule Minga.Port.ProtocolTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Face
   alias Minga.Port.Protocol
 
   # ── Modifier helpers ──

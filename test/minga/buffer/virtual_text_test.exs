@@ -3,7 +3,6 @@ defmodule Minga.Buffer.VirtualTextTest do
 
   alias Minga.Buffer.Decorations
   alias Minga.Buffer.Decorations.VirtualText
-  alias Minga.Face
 
   # ── CRUD ─────────────────────────────────────────────────────────────────
 

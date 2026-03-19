@@ -7,7 +7,6 @@ defmodule Minga.Editor.DashboardTest do
   alias Minga.Editor.State.Buffers
   alias Minga.Editor.State.Picker, as: PickerState
   alias Minga.Editor.Viewport
-  alias Minga.Face
   alias Minga.Picker
   alias Minga.Picker.Item
 

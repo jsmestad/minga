@@ -7,7 +7,6 @@ defmodule Minga.Editor.DisplayMapTest do
   alias Minga.Editor.FoldMap
   alias Minga.Editor.FoldRange
 
-
   # ── No folds or decorations ──────────────────────────────────────────────
 
   describe "compute/5 with no folds or decorations" do

@@ -25,7 +25,6 @@ defmodule Minga.Integration.FileOpenFromAgentTabTest do
   alias Minga.Editor.State.TabBar
   alias Minga.Editor.Window
   alias Minga.Editor.Window.Content
-  alias Minga.Face
   alias Minga.Test.HeadlessPort
   alias Minga.Test.StubServer
 

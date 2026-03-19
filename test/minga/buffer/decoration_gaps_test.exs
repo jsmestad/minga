@@ -6,7 +6,6 @@ defmodule Minga.Buffer.DecorationGapsTest do
   alias Minga.Buffer.IntervalTree
   alias Minga.Buffer.Server, as: BufferServer
 
-
   describe "content replacement clears decorations" do
     test "replace_content_force resets decorations" do
       {:ok, pid} = BufferServer.start_link(content: "hello world")
