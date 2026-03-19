@@ -68,6 +68,7 @@ jobs:
           restore-keys: deps-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-
 
       - run: mix deps.get
+      - run: mix deps.compile
       - run: mix test --warnings-as-errors
 
   test-zig:
