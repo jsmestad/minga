@@ -49,9 +49,11 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
     }
 
     agentic = %UIState{
-      visible: Keyword.get(opts, :panel_visible, true),
-      input_focused: Keyword.get(opts, :input_focused, false),
-      prompt_buffer: prompt_buf
+      panel: %UIState.Panel{
+        visible: Keyword.get(opts, :panel_visible, true),
+        input_focused: Keyword.get(opts, :input_focused, false),
+        prompt_buffer: prompt_buf
+      }
     }
 
     file_tab = Tab.new_file(1, "test.ex")
@@ -89,7 +91,7 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
       state =
         AgentAccess.update_agent_ui(state, fn ui ->
           ui = UIState.ensure_prompt_buffer(ui)
-          BufferServer.replace_content(ui.prompt_buffer, "hello agent")
+          BufferServer.replace_content(ui.panel.prompt_buffer, "hello agent")
           ui
         end)
 
@@ -225,26 +227,26 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
       state = base_state(panel_visible: true)
 
       state =
-        AgentAccess.update_agent_ui(state, fn agentic ->
-          %{agentic | active: true, focus: :chat}
+        AgentAccess.update_view(state, fn v ->
+          %{v | active: true, focus: :chat}
         end)
 
       new_state = AgentCommands.scope_switch_focus(state)
 
-      assert AgentAccess.agent_ui(new_state).focus == :file_viewer
+      assert AgentAccess.view(new_state).focus == :file_viewer
     end
 
     test "switches from non-chat back to chat" do
       state = base_state(panel_visible: true)
 
       state =
-        AgentAccess.update_agent_ui(state, fn agentic ->
-          %{agentic | active: true, focus: :file_viewer}
+        AgentAccess.update_view(state, fn v ->
+          %{v | active: true, focus: :file_viewer}
         end)
 
       new_state = AgentCommands.scope_switch_focus(state)
 
-      assert AgentAccess.agent_ui(new_state).focus == :chat
+      assert AgentAccess.view(new_state).focus == :chat
     end
   end
 

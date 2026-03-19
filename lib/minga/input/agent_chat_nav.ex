@@ -61,9 +61,9 @@ defmodule Minga.Input.AgentChatNav do
     if panel.input_focused do
       {:passthrough, state}
     else
-      agent_ui = AgentAccess.agent_ui(state)
+      view = AgentAccess.view(state)
 
-      case agent_ui.focus do
+      case view.focus do
         :chat -> handle_chat_nav(state, cp, mods)
         :file_viewer -> handle_viewer_nav(state, cp, mods)
       end
@@ -184,8 +184,8 @@ defmodule Minga.Input.AgentChatNav do
   @spec sync_scroll_to_cursor(EditorState.t(), non_neg_integer()) :: EditorState.t()
   defp sync_scroll_to_cursor(state, cursor_line) do
     state =
-      AgentAccess.update_agent_ui(state, fn ui ->
-        %{ui | scroll: %{ui.scroll | offset: cursor_line, pinned: false}}
+      AgentAccess.update_panel(state, fn p ->
+        %{p | scroll: %{p.scroll | offset: cursor_line, pinned: false}}
       end)
 
     # Also unpin the agent chat window so the render pipeline doesn't

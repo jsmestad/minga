@@ -45,14 +45,18 @@ defmodule Minga.Editor.Commands.AgentSplitToggleTest do
     active = Keyword.get(opts, :active, false)
 
     agentic = %UIState{
-      visible: false,
-      input_focused: false,
-      prompt_buffer: prompt_buf,
-      active: active,
-      focus: :chat,
-      preview: Preview.new(),
-      saved_windows: Keyword.get(opts, :saved_windows, nil),
-      saved_file_tree: Keyword.get(opts, :saved_file_tree, nil)
+      panel: %UIState.Panel{
+        visible: false,
+        input_focused: false,
+        prompt_buffer: prompt_buf
+      },
+      view: %UIState.View{
+        active: active,
+        focus: :chat,
+        preview: Preview.new(),
+        saved_windows: Keyword.get(opts, :saved_windows, nil),
+        saved_file_tree: Keyword.get(opts, :saved_file_tree, nil)
+      }
     }
 
     # Build a tab bar: file tab always exists, agent tab if starting active
@@ -88,7 +92,12 @@ defmodule Minga.Editor.Commands.AgentSplitToggleTest do
       # Switch back to file tab so switch_tab properly snapshots it
       tb = TabBar.switch_to(tb, file_tab.id)
 
-      state = %{state | tab_bar: tb, agent_ui: %{agentic | active: true, focus: :chat}}
+      state = %{
+        state
+        | tab_bar: tb,
+          agent_ui: %{agentic | view: %{agentic.view | active: true, focus: :chat}}
+      }
+
       EditorState.switch_tab(state, at.id)
     else
       # Always store an agent tab so AgentAccess can find it.

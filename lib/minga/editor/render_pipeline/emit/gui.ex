@@ -269,11 +269,11 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
 
       # Use cached styled runs for assistant messages when available.
       # This avoids recomputing tree-sitter/markdown styling per frame.
-      styled_cache = state.agent_ui.cached_styled_messages
+      styled_cache = state.agent_ui.panel.cached_styled_messages
       gui_messages = build_gui_messages(messages, styled_cache)
 
       prompt_text =
-        case state.agent_ui.prompt_buffer do
+        case state.agent_ui.panel.prompt_buffer do
           nil -> ""
           buf -> BufferServer.content(buf) |> String.trim_trailing("\n")
         end
@@ -284,7 +284,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
         visible: true,
         messages: gui_messages,
         status: state.agent.status || :idle,
-        model: state.agent_ui.model_name,
+        model: state.agent_ui.panel.model_name,
         prompt: prompt_text,
         pending_approval: pending
       }

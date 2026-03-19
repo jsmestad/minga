@@ -49,7 +49,8 @@ defmodule Minga.Editor.LayoutTest do
 
   defp with_agent_panel(state) do
     agent = %AgentState{}
-    agentic = %{UIState.new() | visible: true}
+    base = UIState.new()
+    agentic = %{base | panel: %{base.panel | visible: true}}
     agent_ctx = %{keymap_scope: :agent}
 
     # Ensure a file tab exists and is active, then add a background agent tab.

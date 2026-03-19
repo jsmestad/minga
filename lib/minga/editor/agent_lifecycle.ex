@@ -58,7 +58,7 @@ defmodule Minga.Editor.AgentLifecycle do
     cli_flags = Minga.CLI.startup_flags()
     auto_context = ConfigOptions.get(:agent_auto_context)
     agent_visible = LayoutPreset.has_agent_chat?(state)
-    preview_empty = AgentAccess.agent_ui(state).preview.content == :empty
+    preview_empty = AgentAccess.view(state).preview.content == :empty
 
     if agent_visible and preview_empty and auto_context and not cli_flags.no_context do
       content = BufferServer.content(buffer_pid)
@@ -136,8 +136,8 @@ defmodule Minga.Editor.AgentLifecycle do
     # Cache the line index and styled messages in the UI state so
     # callers can read them without recomputing.
     state =
-      AgentAccess.update_agent_ui(state, fn ui ->
-        %{ui | cached_line_index: line_index, cached_styled_messages: styled}
+      AgentAccess.update_panel(state, fn p ->
+        %{p | cached_line_index: line_index, cached_styled_messages: styled}
       end)
 
     # Trigger tree-sitter reparse for markdown highlighting.
@@ -257,8 +257,8 @@ defmodule Minga.Editor.AgentLifecycle do
          messages when messages != [] <- safe_messages(agent.session) do
       styled = compute_styled_messages(state, agent.buffer, messages)
 
-      AgentAccess.update_agent_ui(state, fn ui ->
-        %{ui | cached_styled_messages: styled}
+      AgentAccess.update_panel(state, fn p ->
+        %{p | cached_styled_messages: styled}
       end)
     else
       _ -> state

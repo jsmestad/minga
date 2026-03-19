@@ -50,7 +50,9 @@ defmodule Minga.Credo.DomainBoundaryCheck do
   # cross-domain references are deliberate and unavoidable.
   @allowed_agent_buffer_modules [
     "Minga.Agent.View.Renderer",
+    # Macro.camelize turns "ui_state" → "UiState", not "UIState"
     "Minga.Agent.UiState",
+    "Minga.Agent.UiState.Panel",
     "Minga.Agent.BufferSync",
     "Minga.Agent.ChatDecorations"
   ]

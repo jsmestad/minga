@@ -149,7 +149,7 @@ defmodule Minga.Picker.AgentSessionSourceTest do
 
     agent_ctx = %{
       agent: %AgentState{session: session_pid, status: :idle},
-      agent_ui: %UIState{active: true, focus: :chat},
+      agent_ui: %UIState{view: %UIState.View{active: true, focus: :chat}},
       windows: %Windows{},
       file_tree: nil,
       vim: VimState.new(),
@@ -161,7 +161,7 @@ defmodule Minga.Picker.AgentSessionSourceTest do
     tb = TabBar.update_context(tb, agent_tab.id, agent_ctx)
 
     agent = %AgentState{session: session_pid, status: :idle}
-    agentic = %UIState{active: true, focus: :chat}
+    agentic = %UIState{view: %UIState.View{active: true, focus: :chat}}
 
     %EditorState{
       port_manager: self(),
@@ -187,7 +187,7 @@ defmodule Minga.Picker.AgentSessionSourceTest do
     tb = TabBar.switch_to(tb, tab1.id)
 
     agent = %AgentState{session: session1, status: :idle}
-    agentic = %UIState{active: true, focus: :chat}
+    agentic = %UIState{view: %UIState.View{active: true, focus: :chat}}
 
     %EditorState{
       port_manager: self(),
@@ -210,7 +210,7 @@ defmodule Minga.Picker.AgentSessionSourceTest do
 
     agent_ctx = %{
       agent: %AgentState{session: session_pid, status: :idle},
-      agent_ui: %UIState{active: true, focus: :chat},
+      agent_ui: %UIState{view: %UIState.View{active: true, focus: :chat}},
       windows: %Windows{},
       file_tree: nil,
       vim: VimState.new(),

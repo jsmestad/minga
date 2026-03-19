@@ -36,7 +36,7 @@ defmodule Minga.Agent.PromptCharacterizationTest do
 
   defp with_text(text) do
     panel = new_panel()
-    BufferServer.replace_content(panel.prompt_buffer, text)
+    BufferServer.replace_content(panel.panel.prompt_buffer, text)
     panel
   end
 
@@ -68,7 +68,7 @@ defmodule Minga.Agent.PromptCharacterizationTest do
       panel = UIState.insert_char(panel, "x")
       panel = UIState.clear_input(panel)
       assert UIState.prompt_text(panel) == ""
-      assert panel.prompt_history == ["x"]
+      assert panel.panel.prompt_history == ["x"]
     end
 
     test "delete_char removes last character" do
@@ -127,7 +127,7 @@ defmodule Minga.Agent.PromptCharacterizationTest do
       panel = UIState.clear_input(panel)
       panel = UIState.history_prev(panel)
       panel = UIState.insert_char(panel, "y")
-      assert panel.history_index == -1
+      assert panel.panel.history_index == -1
     end
   end
 
@@ -138,14 +138,14 @@ defmodule Minga.Agent.PromptCharacterizationTest do
       panel = new_panel()
       panel = UIState.insert_paste(panel, "short")
       assert UIState.prompt_text(panel) == "short"
-      assert panel.pasted_blocks == []
+      assert panel.panel.pasted_blocks == []
     end
 
     test "long paste creates collapsed block" do
       panel = new_panel()
       panel = UIState.insert_paste(panel, "line1\nline2\nline3")
-      assert length(panel.pasted_blocks) == 1
-      assert hd(panel.pasted_blocks).text == "line1\nline2\nline3"
+      assert length(panel.panel.pasted_blocks) == 1
+      assert hd(panel.panel.pasted_blocks).text == "line1\nline2\nline3"
       # prompt_text substitutes placeholder
       assert UIState.prompt_text(panel) == "line1\nline2\nline3"
     end
@@ -154,7 +154,7 @@ defmodule Minga.Agent.PromptCharacterizationTest do
       panel = new_panel()
       panel = UIState.insert_paste(panel, "a\nb\nc")
       panel = UIState.clear_input(panel)
-      assert panel.pasted_blocks == []
+      assert panel.panel.pasted_blocks == []
     end
   end
 
@@ -164,15 +164,15 @@ defmodule Minga.Agent.PromptCharacterizationTest do
     test "focusing starts prompt buffer" do
       panel = UIState.new()
       panel = UIState.set_input_focused(panel, true)
-      assert panel.input_focused
-      assert is_pid(panel.prompt_buffer)
+      assert panel.panel.input_focused
+      assert is_pid(panel.panel.prompt_buffer)
     end
 
     test "unfocusing preserves buffer content" do
       panel = new_panel()
       panel = UIState.insert_char(panel, "x")
       panel = UIState.set_input_focused(panel, false)
-      refute panel.input_focused
+      refute panel.panel.input_focused
       assert UIState.prompt_text(panel) == "x"
     end
   end
@@ -192,7 +192,7 @@ defmodule Minga.Agent.PromptCharacterizationTest do
 
     test "backspace joins lines" do
       panel = with_text("ab\ncd")
-      BufferServer.set_cursor(panel.prompt_buffer, {1, 0})
+      BufferServer.set_cursor(panel.panel.prompt_buffer, {1, 0})
       panel = UIState.delete_char(panel)
       assert UIState.input_lines(panel) == ["abcd"]
     end

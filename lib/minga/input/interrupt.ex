@@ -135,7 +135,7 @@ defmodule Minga.Input.Interrupt do
 
   @spec maybe_clear_agent_prefix(EditorState.t(), [String.t()]) :: {EditorState.t(), [String.t()]}
   defp maybe_clear_agent_prefix(state, resets) do
-    case AgentAccess.agent_ui(state).pending_prefix do
+    case AgentAccess.view(state).pending_prefix do
       nil ->
         {state, resets}
 

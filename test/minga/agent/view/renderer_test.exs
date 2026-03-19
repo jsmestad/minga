@@ -35,11 +35,15 @@ defmodule Minga.Agent.View.RendererTest do
     }
 
     agentic = %UIState{
-      visible: true,
-      input_focused: Keyword.get(opts, :input_focused, false),
-      prompt_buffer: prompt_buf,
-      active: true,
-      focus: Keyword.get(opts, :focus, :chat)
+      panel: %UIState.Panel{
+        visible: true,
+        input_focused: Keyword.get(opts, :input_focused, false),
+        prompt_buffer: prompt_buf
+      },
+      view: %UIState.View{
+        active: true,
+        focus: Keyword.get(opts, :focus, :chat)
+      }
     }
 
     %EditorState{

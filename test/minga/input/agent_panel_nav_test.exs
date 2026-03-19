@@ -44,7 +44,12 @@ defmodule Minga.Input.AgentPanelNavTest do
       spinner_timer: nil
     }
 
-    agentic = %{UIState.new() | visible: true, input_focused: false, prompt_buffer: prompt_buf}
+    base = UIState.new()
+
+    agentic = %{
+      base
+      | panel: %{base.panel | visible: true, input_focused: false, prompt_buffer: prompt_buf}
+    }
 
     %EditorState{
       port_manager: self(),
@@ -85,7 +90,7 @@ defmodule Minga.Input.AgentPanelNavTest do
 
     test "passthrough when panel not visible" do
       state = make_state()
-      state = AgentAccess.update_agent_ui(state, fn ui -> put_in(ui.visible, false) end)
+      state = AgentAccess.update_agent_ui(state, fn ui -> put_in(ui.panel.visible, false) end)
       {:passthrough, _state} = AgentPanel.handle_key(state, ?j, 0)
     end
 
@@ -142,7 +147,7 @@ defmodule Minga.Input.AgentPanelNavTest do
       state = make_state()
 
       state =
-        AgentAccess.update_agent_ui(state, fn ui -> put_in(ui.input_focused, true) end)
+        AgentAccess.update_agent_ui(state, fn ui -> put_in(ui.panel.input_focused, true) end)
 
       {:handled, new_state} = walk_surface_handlers(state, 27, 0)
       assert AgentAccess.input_focused?(new_state) == true
@@ -153,7 +158,7 @@ defmodule Minga.Input.AgentPanelNavTest do
       state = make_state()
 
       state =
-        AgentAccess.update_agent_ui(state, fn ui -> put_in(ui.input_focused, true) end)
+        AgentAccess.update_agent_ui(state, fn ui -> put_in(ui.panel.input_focused, true) end)
 
       state = %{state | vim: %{state.vim | mode: :insert}}
       {:handled, new_state} = walk_surface_handlers(state, ?a, 0)
@@ -164,7 +169,7 @@ defmodule Minga.Input.AgentPanelNavTest do
       state = make_state()
 
       state =
-        AgentAccess.update_agent_ui(state, fn ui -> put_in(ui.input_focused, true) end)
+        AgentAccess.update_agent_ui(state, fn ui -> put_in(ui.panel.input_focused, true) end)
 
       {:handled, _new_state} = walk_surface_handlers(state, ?d, 0x02)
       # Doesn't crash; scroll may or may not change depending on content
@@ -174,7 +179,7 @@ defmodule Minga.Input.AgentPanelNavTest do
       state = make_state()
 
       state =
-        AgentAccess.update_agent_ui(state, fn ui -> put_in(ui.input_focused, true) end)
+        AgentAccess.update_agent_ui(state, fn ui -> put_in(ui.panel.input_focused, true) end)
 
       {:handled, _new_state} = walk_surface_handlers(state, ?u, 0x02)
     end
@@ -183,7 +188,7 @@ defmodule Minga.Input.AgentPanelNavTest do
       state = make_state()
 
       state =
-        AgentAccess.update_agent_ui(state, fn ui -> put_in(ui.input_focused, true) end)
+        AgentAccess.update_agent_ui(state, fn ui -> put_in(ui.panel.input_focused, true) end)
 
       {:handled, new_state} = walk_surface_handlers(state, 13, 0)
       # Empty prompt is a no-op
@@ -194,7 +199,7 @@ defmodule Minga.Input.AgentPanelNavTest do
       state = make_state()
 
       state =
-        AgentAccess.update_agent_ui(state, fn ui -> put_in(ui.input_focused, true) end)
+        AgentAccess.update_agent_ui(state, fn ui -> put_in(ui.panel.input_focused, true) end)
 
       state = %{state | vim: %{state.vim | mode: :insert}}
       {:handled, new_state} = walk_surface_handlers(state, 13, 0x01)
@@ -206,7 +211,7 @@ defmodule Minga.Input.AgentPanelNavTest do
       state = make_state()
 
       state =
-        AgentAccess.update_agent_ui(state, fn ui -> put_in(ui.input_focused, true) end)
+        AgentAccess.update_agent_ui(state, fn ui -> put_in(ui.panel.input_focused, true) end)
 
       {:handled, _new_state} = walk_surface_handlers(state, 127, 0)
     end

@@ -21,8 +21,8 @@ defmodule Minga.Editor.StartupTest do
       {scope, agentic} = Startup.startup_view_state(PortManager)
 
       assert scope == :agent
-      assert agentic.active == true
-      assert agentic.focus == :chat
+      assert agentic.view.active == true
+      assert agentic.view.focus == :chat
     end
 
     test "returns :editor scope when force_editor flag is set" do
@@ -31,7 +31,7 @@ defmodule Minga.Editor.StartupTest do
       {scope, agentic} = Startup.startup_view_state(PortManager)
 
       assert scope == :editor
-      assert agentic.active == false
+      assert agentic.view.active == false
     after
       Application.delete_env(:minga, :cli_startup_flags)
     end
