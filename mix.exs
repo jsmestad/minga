@@ -215,6 +215,7 @@ defmodule Minga.MixProject do
       {:burrito, github: "burrito-elixir/burrito", branch: "main"},
       {:file_system, "~> 1.0"},
       {:stream_data, "~> 1.0", only: [:test, :dev]},
+      {:propcheck, "~> 1.5", only: :test},
       {:ex_doc, "~> 0.35", only: :dev, runtime: false},
       {:req_llm, "~> 1.6"},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},

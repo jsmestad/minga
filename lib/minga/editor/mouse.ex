@@ -854,6 +854,10 @@ defmodule Minga.Editor.Mouse do
        when target_line >= total,
        do: nil
 
+  defp resolve_buffer_pos(_buf, _row, _visible, target_line, _col, _total)
+       when target_line < 0,
+       do: nil
+
   defp resolve_buffer_pos(buf, _row, _visible, target_line, target_col, _total) do
     # Adjust for inline virtual text: the target_col is a display column,
     # but if inline virtual text is present, the buffer column is different.
