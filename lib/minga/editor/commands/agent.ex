@@ -491,6 +491,22 @@ defmodule Minga.Editor.Commands.Agent do
     AgentSession.start_agent_session(state)
   end
 
+  @doc "Clears all saved agent sessions from disk."
+  @spec clear_session_history(state()) :: state()
+  def clear_session_history(state) do
+    count = length(Minga.Agent.SessionStore.list())
+    Minga.Agent.SessionStore.clear_all()
+
+    msg =
+      case count do
+        0 -> "No saved agent sessions"
+        1 -> "Cleared 1 agent session"
+        n -> "Cleared #{n} agent sessions"
+      end
+
+    %{state | status_msg: msg}
+  end
+
   @doc "Switches to an existing session by pid."
   @spec switch_to_session(state(), pid()) :: state()
   def switch_to_session(state, pid) when is_pid(pid) do
@@ -1275,6 +1291,7 @@ defmodule Minga.Editor.Commands.Agent do
     {:agent_toggle_help, "Toggle agent help", :scope_toggle_help},
     {:agent_close, "Close agent panel", :scope_close},
     {:agent_dismiss_or_noop, "Dismiss agent or no-op", :scope_dismiss_or_noop},
+    {:agent_clear_history, "Clear all saved agent sessions", :clear_session_history},
     {:agent_clear_chat, "Clear agent chat", :scope_clear_chat},
     {:agent_submit_or_newline, "Submit or newline", :scope_submit_or_newline},
     {:agent_insert_newline, "Insert newline in agent input", :scope_insert_newline},
