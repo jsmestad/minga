@@ -38,10 +38,10 @@ defmodule Minga.Popup.Lifecycle do
   alias Minga.Editor.Viewport
   alias Minga.Editor.Window
   alias Minga.Editor.WindowTree
+  alias Minga.Face
   alias Minga.Popup.Active, as: PopupActive
   alias Minga.Popup.Registry, as: PopupRegistry
   alias Minga.Popup.Rule
-  alias Minga.Face
 
   @type state :: EditorState.t()
 

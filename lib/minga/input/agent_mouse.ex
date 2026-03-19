@@ -34,7 +34,6 @@ defmodule Minga.Input.AgentMouse do
   alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.Window.Content
   alias Minga.Editor.WindowTree
-  alias Minga.Mode
 
   # Scroll 3 lines per wheel tick (matches Editor.Mouse TUI behavior).
   @default_scroll_lines 1
@@ -248,7 +247,7 @@ defmodule Minga.Input.AgentMouse do
 
     if row >= input_start_row do
       state = AgentAccess.update_agent_ui(state, &UIState.set_input_focused(&1, true))
-      put_in(state.vim, %{state.vim | mode: :insert, mode_state: Mode.initial_state()})
+      EditorState.transition_mode(state, :insert)
     else
       AgentAccess.update_agent_ui(state, &UIState.set_input_focused(&1, false))
     end

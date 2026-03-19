@@ -42,7 +42,6 @@ defmodule Minga.Editor.Mouse do
   alias Minga.Editor.Window
   alias Minga.Editor.WindowTree
   alias Minga.Git.Tracker, as: GitTracker
-  alias Minga.Mode
   alias Minga.Mode.VisualState
   alias Minga.Port.Capabilities
 
@@ -135,7 +134,7 @@ defmodule Minga.Editor.Mouse do
           {target_line, target_col} ->
             BufferServer.move_to(state.buffers.active, {target_line, target_col})
             state = cancel_mode_for_mouse(state)
-            state = %{state | vim: %{state.vim | mode: :normal, mode_state: Mode.initial_state()}}
+            state = EditorState.transition_mode(state, :normal)
             Minga.Editor.dispatch_command(state, :paste_after)
         end
     end
@@ -310,11 +309,8 @@ defmodule Minga.Editor.Mouse do
               visual_type: :char
             }
 
-            %{
-              state
-              | vim: %{state.vim | mode: :visual, mode_state: visual_state},
-                mouse: MouseState.start_drag(state.mouse, {line, word_start})
-            }
+            state = EditorState.transition_mode(state, :visual, visual_state)
+            %{state | mouse: MouseState.start_drag(state.mouse, {line, word_start})}
 
           nil ->
             state
@@ -347,11 +343,8 @@ defmodule Minga.Editor.Mouse do
           visual_type: :line
         }
 
-        %{
-          state
-          | vim: %{state.vim | mode: :visual, mode_state: visual_state},
-            mouse: MouseState.start_drag(state.mouse, {line, 0})
-        }
+        state = EditorState.transition_mode(state, :visual, visual_state)
+        %{state | mouse: MouseState.start_drag(state.mouse, {line, 0})}
     end
   end
 
@@ -383,7 +376,7 @@ defmodule Minga.Editor.Mouse do
           visual_type: :char
         }
 
-        %{state | vim: %{state.vim | mode: :visual, mode_state: visual_state}}
+        EditorState.transition_mode(state, :visual, visual_state)
     end
   end
 
@@ -399,7 +392,7 @@ defmodule Minga.Editor.Mouse do
         buf = state.buffers.active
         BufferServer.move_to(buf, {target_line, target_col})
         state = cancel_mode_for_mouse(state)
-        state = %{state | vim: %{state.vim | mode: :normal, mode_state: Mode.initial_state()}}
+        state = EditorState.transition_mode(state, :normal)
         Minga.Editor.dispatch_command(state, :goto_definition)
     end
   end
@@ -463,7 +456,7 @@ defmodule Minga.Editor.Mouse do
       visual_type: :line
     }
 
-    %{state | vim: %{state.vim | mode: :visual, mode_state: visual_state}}
+    EditorState.transition_mode(state, :visual, visual_state)
   end
 
   # ── Word boundary detection ────────────────────────────────────────────────
@@ -618,12 +611,8 @@ defmodule Minga.Editor.Mouse do
             BufferServer.move_to(state.buffers.active, {target_line, target_col})
 
             state = cancel_mode_for_mouse(state)
-
-            %{
-              state
-              | vim: %{state.vim | mode: :normal, mode_state: Mode.initial_state()},
-                mouse: MouseState.start_drag(state.mouse, {target_line, target_col})
-            }
+            state = EditorState.transition_mode(state, :normal)
+            %{state | mouse: MouseState.start_drag(state.mouse, {target_line, target_col})}
         end
     end
   end
@@ -1007,7 +996,7 @@ defmodule Minga.Editor.Mouse do
 
   defp enter_visual_if_needed(state, anchor) do
     visual_state = %VisualState{visual_anchor: anchor, visual_type: :char}
-    %{state | vim: %{state.vim | mode: :visual, mode_state: visual_state}}
+    EditorState.transition_mode(state, :visual, visual_state)
   end
 
   @spec clamp_col_to_line(pid(), non_neg_integer(), non_neg_integer()) :: non_neg_integer()

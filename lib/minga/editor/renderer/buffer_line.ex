@@ -441,7 +441,7 @@ defmodule Minga.Editor.Renderer.BufferLine do
       text
       |> String.graphemes()
       |> Enum.reduce({0, 0, []}, fn grapheme, {pos, collected, acc} ->
-        w = Minga.Buffer.Unicode.display_width(grapheme)
+        w = Unicode.display_width(grapheme)
 
         cond do
           pos + w <= offset -> {pos + w, collected, acc}
@@ -475,7 +475,7 @@ defmodule Minga.Editor.Renderer.BufferLine do
   end
 
   @spec display_width(String.t()) :: non_neg_integer()
-  defp display_width(text), do: Minga.Buffer.Unicode.display_width(text)
+  defp display_width(text), do: Unicode.display_width(text)
 
   # Removes inline virtual texts for a specific line from the decorations.
   # Used during wrapped rendering to prevent the VT from interfering with

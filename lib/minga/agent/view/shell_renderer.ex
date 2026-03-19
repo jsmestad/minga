@@ -7,8 +7,8 @@ defmodule Minga.Agent.View.ShellRenderer do
   """
 
   alias Minga.Editor.DisplayList
-  alias Minga.Theme
   alias Minga.Face
+  alias Minga.Theme
 
   @typedoc "Bounding rectangle: `{row, col, width, height}`."
   @type rect :: {non_neg_integer(), non_neg_integer(), pos_integer(), pos_integer()}

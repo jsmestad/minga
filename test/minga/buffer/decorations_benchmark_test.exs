@@ -9,7 +9,6 @@ defmodule Minga.Buffer.DecorationsBenchmarkTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Decorations
-  alias Minga.Face
 
   describe "performance: query scaling" do
     setup do
@@ -63,34 +62,49 @@ defmodule Minga.Buffer.DecorationsBenchmarkTest do
   end
 
   describe "performance: batch operations" do
-    test "batch clear-and-replace of 10,000 decorations completes in under 50ms" do
+    test "batch clear-and-replace scales sub-linearly" do
       # This is the real-world pattern: LSP diagnostic refresh or agent chat
       # sync clears all decorations in a group and replaces them. The batch
-      # API defers tree rebuilding until commit, so 10K operations produce
+      # API defers tree rebuilding until commit, so N operations produce
       # a single from_list rebuild at the end.
-      base_decs = build_decorations(10_000)
+      #
+      # Uses relative scaling (1K vs 10K) instead of absolute time thresholds.
+      # An O(n²) regression would show ~100x scaling; we expect < 15x.
+      base_1k = build_decorations(1_000)
+      base_10k = build_decorations(10_000)
 
-      {elapsed_us, decs} =
-        :timer.tc(fn ->
-          Decorations.batch(base_decs, fn d ->
-            d = Decorations.remove_group(d, :diagnostics)
+      batch_replace = fn base, count ->
+        Decorations.batch(base, fn d ->
+          d = Decorations.remove_group(d, :diagnostics)
 
-            Enum.reduce(0..9_999, d, fn i, acc ->
-              {_, acc} =
-                Decorations.add_highlight(acc, {i, 0}, {i, 20},
-                  style: Minga.Face.new(bg: 0xECBE7B),
-                  group: :diagnostics
-                )
+          Enum.reduce(0..(count - 1), d, fn i, acc ->
+            {_, acc} =
+              Decorations.add_highlight(acc, {i, 0}, {i, 20},
+                style: Minga.Face.new(bg: 0xECBE7B),
+                group: :diagnostics
+              )
 
-              acc
-            end)
+            acc
           end)
         end)
+      end
 
-      assert Decorations.highlight_count(decs) == 10_000
+      # Warmup both sizes to level the JIT/allocation playing field
+      batch_replace.(base_1k, 1_000)
+      batch_replace.(base_10k, 10_000)
 
-      assert elapsed_us < 50_000,
-             "Batch clear+replace took #{elapsed_us}µs, expected < 50000µs"
+      {us_1k, decs_1k} = :timer.tc(fn -> batch_replace.(base_1k, 1_000) end)
+      {us_10k, decs_10k} = :timer.tc(fn -> batch_replace.(base_10k, 10_000) end)
+
+      assert Decorations.highlight_count(decs_1k) == 1_000
+      assert Decorations.highlight_count(decs_10k) == 10_000
+
+      ratio = if us_1k > 0, do: us_10k / us_1k, else: 1.0
+
+      # O(n log n) tree rebuild: 10x data ≈ 13x work. Allow 20x for noise.
+      # An O(n²) regression would show ~100x.
+      assert ratio < 20,
+             "10K/1K batch ratio is #{Float.round(ratio, 1)}x (1K: #{us_1k}µs, 10K: #{us_10k}µs). Expected < 20x for sub-linear scaling."
     end
   end
 

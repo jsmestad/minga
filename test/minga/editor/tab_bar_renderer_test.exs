@@ -4,8 +4,8 @@ defmodule Minga.Editor.TabBarRendererTest do
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
   alias Minga.Editor.TabBarRenderer
-  alias Minga.Theme
   alias Minga.Face
+  alias Minga.Theme
 
   defp doom_theme, do: Theme.get!(:doom_one)
 

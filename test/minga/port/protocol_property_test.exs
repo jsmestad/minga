@@ -10,8 +10,8 @@ defmodule Minga.Port.ProtocolPropertyTest do
   use ExUnit.Case, async: true
   use ExUnitProperties
 
-  alias Minga.Port.Protocol
   alias Minga.Face
+  alias Minga.Port.Protocol
 
   import Minga.Test.Generators
 

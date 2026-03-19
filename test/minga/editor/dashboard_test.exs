@@ -7,9 +7,9 @@ defmodule Minga.Editor.DashboardTest do
   alias Minga.Editor.State.Buffers
   alias Minga.Editor.State.Picker, as: PickerState
   alias Minga.Editor.Viewport
+  alias Minga.Face
   alias Minga.Picker
   alias Minga.Picker.Item
-  alias Minga.Face
 
   describe "new_state/1" do
     test "creates state with quick actions when no recent files" do

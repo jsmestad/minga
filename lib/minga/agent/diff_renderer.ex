@@ -9,8 +9,8 @@ defmodule Minga.Agent.DiffRenderer do
 
   alias Minga.Agent.DiffReview
   alias Minga.Editor.DisplayList
-  alias Minga.Theme
   alias Minga.Face
+  alias Minga.Theme
 
   @typedoc "A draw command for the display list."
   @type draw :: DisplayList.draw()

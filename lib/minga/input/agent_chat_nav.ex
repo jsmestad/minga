@@ -51,7 +51,6 @@ defmodule Minga.Input.AgentChatNav do
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.AgentAccess
-  alias Minga.Mode
 
   @impl true
   @spec handle_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
@@ -83,8 +82,7 @@ defmodule Minga.Input.AgentChatNav do
   defp handle_chat_nav(state, cp, _mods) when cp in [?i, ?a, ?A] and state.vim.mode == :normal do
     state = AgentAccess.update_agent_ui(state, &UIState.set_input_focused(&1, true))
 
-    {:handled,
-     %{state | vim: %{state.vim | mode: :insert, mode_state: Minga.Mode.initial_state()}}}
+    {:handled, EditorState.transition_mode(state, :insert)}
   end
 
   defp handle_chat_nav(state, cp, mods) do
@@ -164,7 +162,7 @@ defmodule Minga.Input.AgentChatNav do
     # and command are also allowed since they're needed for full vim grammar.
     state =
       if state.vim.mode == :insert do
-        %{state | vim: %{state.vim | mode: :normal, mode_state: Mode.initial_state()}}
+        EditorState.transition_mode(state, :normal)
       else
         state
       end

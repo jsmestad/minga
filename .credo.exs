@@ -28,6 +28,7 @@
           {Minga.Credo.DomainBoundaryCheck, [exit_status: 0]},
           {Minga.Credo.NoProcessSleepCheck, []},
           {Minga.Credo.NoDirectLoggerCheck, [exit_status: 0]},
+          {Minga.Credo.NoDirectStateMachineWriteCheck, []},
 
           # ── Readability ────────────────────────────────────────────────────
           {Credo.Check.Readability.AliasOrder, []},

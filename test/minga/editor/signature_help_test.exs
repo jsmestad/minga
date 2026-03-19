@@ -2,8 +2,8 @@ defmodule Minga.Editor.SignatureHelpTest do
   use ExUnit.Case, async: true
 
   alias Minga.Editor.SignatureHelp
-  alias Minga.Theme
   alias Minga.Face
+  alias Minga.Theme
 
   @theme Theme.get!(:doom_one)
   @viewport {24, 80}

@@ -3,8 +3,9 @@ defmodule Minga.Buffer.DecorationGapsTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Decorations
+  alias Minga.Buffer.IntervalTree
   alias Minga.Buffer.Server, as: BufferServer
-  alias Minga.Face
+
 
   describe "content replacement clears decorations" do
     test "replace_content_force resets decorations" do
@@ -28,7 +29,7 @@ defmodule Minga.Buffer.DecorationGapsTest do
 
       # Decorations should be cleared
       decs = BufferServer.decorations(pid)
-      assert decs.highlights == nil || Minga.Buffer.IntervalTree.size(decs.highlights) == 0
+      assert decs.highlights == nil || IntervalTree.size(decs.highlights) == 0
       assert decs.virtual_texts == []
     end
 
@@ -108,7 +109,7 @@ defmodule Minga.Buffer.DecorationGapsTest do
       assert decs.fold_regions == []
 
       # other_group highlight survives
-      highlights = Minga.Buffer.IntervalTree.to_list(decs.highlights)
+      highlights = IntervalTree.to_list(decs.highlights)
       assert length(highlights) == 1
     end
 
@@ -128,7 +129,7 @@ defmodule Minga.Buffer.DecorationGapsTest do
         )
 
       decs = Decorations.remove_group(decs, {:lsp, :elixir_ls})
-      highlights = Minga.Buffer.IntervalTree.to_list(decs.highlights)
+      highlights = IntervalTree.to_list(decs.highlights)
       assert length(highlights) == 1
     end
   end
@@ -150,7 +151,7 @@ defmodule Minga.Buffer.DecorationGapsTest do
 
       assert BufferServer.content(pid) == "new content"
       decs = BufferServer.decorations(pid)
-      highlights = Minga.Buffer.IntervalTree.to_list(decs.highlights)
+      highlights = IntervalTree.to_list(decs.highlights)
       assert length(highlights) == 1
     end
 

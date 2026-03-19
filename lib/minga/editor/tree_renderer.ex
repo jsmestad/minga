@@ -13,10 +13,10 @@ defmodule Minga.Editor.TreeRenderer do
   alias Minga.Editor.DisplayList
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.WindowTree
+  alias Minga.Face
   alias Minga.FileTree
   alias Minga.Filetype
   alias Minga.Theme
-  alias Minga.Face
 
   # Box-drawing characters for indent guides
   @guide_pipe "│ "
