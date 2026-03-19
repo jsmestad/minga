@@ -56,6 +56,7 @@ final class MetalRenderer {
     private let bgPipeline: MTLRenderPipelineState
     private let glyphPipeline: MTLRenderPipelineState
     private let underlinePipeline: MTLRenderPipelineState
+    private let blitPipeline: MTLRenderPipelineState
 
     /// Reusable Metal buffer for cell data (avoids setVertexBytes 4KB limit).
     private var cellBuffer: MTLBuffer?
@@ -112,9 +113,21 @@ final class MetalRenderer {
         ulDesc.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
 
         do {
+            // Blit pipeline for proportional text layers (premultiplied alpha blending).
+            let blitDesc = MTLRenderPipelineDescriptor()
+            blitDesc.vertexFunction = library.makeFunction(name: "blit_vertex")
+            blitDesc.fragmentFunction = library.makeFunction(name: "blit_fragment")
+            blitDesc.colorAttachments[0].pixelFormat = .bgra8Unorm_srgb
+            blitDesc.colorAttachments[0].isBlendingEnabled = true
+            blitDesc.colorAttachments[0].sourceRGBBlendFactor = .one
+            blitDesc.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
+            blitDesc.colorAttachments[0].sourceAlphaBlendFactor = .one
+            blitDesc.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
+
             self.bgPipeline = try device.makeRenderPipelineState(descriptor: bgDesc)
             self.glyphPipeline = try device.makeRenderPipelineState(descriptor: glyphDesc)
             self.underlinePipeline = try device.makeRenderPipelineState(descriptor: ulDesc)
+            self.blitPipeline = try device.makeRenderPipelineState(descriptor: blitDesc)
         } catch {
             NSLog("Failed to create Metal pipeline: \(error)")
             return nil
@@ -130,11 +143,13 @@ final class MetalRenderer {
     /// `layer.nextDrawable()` call that caused scroll lag.
     ///
     /// `scrollOffset` is the sub-cell-height pixel offset for smooth scrolling.
-    /// Render using a FontManager (supports per-cell font_id).
+    /// Render using a FontManager (supports per-cell font_id and proportional layers).
     func render(grid: CellGrid, fontManager: FontManager, drawable: CAMetalDrawable,
-                viewportSize: CGSize, contentScale: Float, scrollOffset: SIMD2<Float> = .zero) {
+                viewportSize: CGSize, contentScale: Float, scrollOffset: SIMD2<Float> = .zero,
+                proportionalLayers: [ProportionalLayer]? = nil) {
         renderImpl(grid: grid, fontManager: fontManager, drawable: drawable,
-                   viewportSize: viewportSize, contentScale: contentScale, scrollOffset: scrollOffset)
+                   viewportSize: viewportSize, contentScale: contentScale,
+                   scrollOffset: scrollOffset, proportionalLayers: proportionalLayers)
     }
 
     /// Render using a single FontFace (backward compatible).
@@ -146,7 +161,8 @@ final class MetalRenderer {
 
     private func renderImpl(grid: CellGrid, fontManager: FontManager? = nil, primaryFace: FontFace? = nil,
                             drawable: CAMetalDrawable, viewportSize: CGSize, contentScale: Float,
-                            scrollOffset: SIMD2<Float> = .zero) {
+                            scrollOffset: SIMD2<Float> = .zero,
+                            proportionalLayers: [ProportionalLayer]? = nil) {
         let face = primaryFace ?? fontManager!.primary
         let atlas = fontManager?.atlas ?? face.atlas
         let cellW = Float(face.cellWidth)
@@ -392,9 +408,59 @@ final class MetalRenderer {
             }
         }
 
+        // ── Proportional text layers ────────────────────────────────────
+        // Render any proportional text layers on top of the cell grid.
+        // These are self-contained textured quads positioned at screen coordinates.
+        if let layers = proportionalLayers {
+            for layer in layers {
+                renderProportionalLayer(layer, encoder: encoder,
+                                        uniforms: &uniforms, contentScale: contentScale)
+            }
+        }
+
         encoder.endEncoding()
         cmdBuf.present(drawable)
         cmdBuf.commit()
+    }
+
+    // MARK: - Proportional text rendering
+
+    /// GPU data for a blit quad (must match BlitData in Shaders.metal).
+    struct BlitGPU {
+        var position: SIMD2<Float> = .zero
+        var size: SIMD2<Float> = .zero
+    }
+
+    /// Render a proportional text layer as a textured quad.
+    ///
+    /// The layer's bitmap is uploaded to a texture and drawn at the
+    /// layer's screen position. Call within an active render encoder.
+    func renderProportionalLayer(
+        _ layer: ProportionalLayer,
+        encoder: MTLRenderCommandEncoder,
+        uniforms: inout Uniforms,
+        contentScale: Float
+    ) {
+        guard layer.bitmapWidth > 0, layer.bitmapHeight > 0 else { return }
+
+        guard let texture = layer.createTexture(device: device) else { return }
+
+        var blit = BlitGPU(
+            position: SIMD2<Float>(
+                Float(layer.originX) * contentScale,
+                Float(layer.originY) * contentScale
+            ),
+            size: SIMD2<Float>(
+                Float(layer.bitmapWidth),
+                Float(layer.bitmapHeight)
+            )
+        )
+
+        encoder.setRenderPipelineState(blitPipeline)
+        encoder.setVertexBytes(&blit, length: MemoryLayout<BlitGPU>.stride, index: 0)
+        encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.size, index: 1)
+        encoder.setFragmentTexture(texture, index: 0)
+        encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: 1)
     }
 
     // MARK: - Private

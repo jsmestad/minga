@@ -246,3 +246,48 @@ fragment float4 underline_fragment(UnderlineOut in [[stage_in]]) {
     // Fallback: solid.
     return float4(linear_color, 1.0);
 }
+
+// ── Blit pass (proportional text layers) ──────────────────────────────────────
+
+/// Per-instance data for blitting a proportional text texture.
+struct BlitData {
+    /// Position in pixels (top-left corner).
+    float2 position;
+    /// Size in pixels.
+    float2 size;
+};
+
+struct BlitOut {
+    float4 position [[position]];
+    float2 tex_coord;
+};
+
+vertex BlitOut blit_vertex(
+    uint vertex_id [[vertex_id]],
+    uint instance_id [[instance_id]],
+    constant BlitData* blits [[buffer(0)]],
+    constant Uniforms& uniforms [[buffer(1)]]
+) {
+    constant BlitData& b = blits[instance_id];
+    float2 pos = quadPositions[vertex_id];
+    float2 pixel_pos = b.position + pos * b.size;
+
+    BlitOut out;
+    out.position = float4(pixelToNDC(pixel_pos, uniforms.viewport_size), 0.0, 1.0);
+    out.tex_coord = pos;
+    return out;
+}
+
+/// Fragment shader for proportional text layers.
+/// The texture is pre-rendered BGRA from CoreGraphics, already in sRGB.
+/// Since the framebuffer is bgra8Unorm_srgb, the GPU handles the
+/// sRGB-to-linear conversion automatically on texture read and the
+/// linear-to-sRGB conversion on framebuffer write.
+fragment float4 blit_fragment(
+    BlitOut in [[stage_in]],
+    texture2d<float> tex [[texture(0)]]
+) {
+    constexpr sampler s(mag_filter::linear, min_filter::linear, address::clamp_to_edge);
+    float4 texel = tex.sample(s, in.tex_coord);
+    return texel;
+}
