@@ -261,8 +261,24 @@ defmodule Minga.Editor.State do
         help: help
     }
 
-    %{state | buffers: new_bs, buffer_monitors: monitors}
-    |> sync_active_window_buffer()
+    state = %{state | buffers: new_bs, buffer_monitors: monitors}
+
+    # Clear agent buffer or prompt buffer if the dead pid matches
+    state =
+      if state.agent != nil and state.agent.buffer == pid do
+        AgentAccess.update_agent(state, fn a -> %{a | buffer: nil} end)
+      else
+        state
+      end
+
+    state =
+      if state.agent_ui != nil and state.agent_ui.prompt_buffer == pid do
+        AgentAccess.update_agent_ui(state, fn ui -> %{ui | prompt_buffer: nil} end)
+      else
+        state
+      end
+
+    sync_active_window_buffer(state)
   end
 
   # ── Active content context ───────────────────────────────────────────────────

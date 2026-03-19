@@ -202,11 +202,7 @@ defmodule Minga.Input.AgentPanel do
     buf = AgentAccess.agent(state).buffer
 
     if is_pid(buf) do
-      try do
-        AgentChatNav.delegate_to_mode_fsm(state, buf, cp, mods)
-      catch
-        :exit, _ -> state
-      end
+      AgentChatNav.delegate_to_mode_fsm(state, buf, cp, mods)
     else
       state
     end
