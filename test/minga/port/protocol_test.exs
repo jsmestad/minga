@@ -84,17 +84,15 @@ defmodule Minga.Port.ProtocolTest do
       assert caps.unicode_width == :unicode_15
       assert caps.image_support == :kitty
       assert caps.float_support == :emulated
-      assert caps.text_rendering == :monospace
     end
 
     test "decodes an extended ready with native GUI capabilities" do
-      payload = <<0x03, 200::16, 60::16, 1, 6, 1, 2, 1, 3, 1, 1>>
+      payload = <<0x03, 200::16, 60::16, 1, 6, 1, 2, 1, 3, 1, 0>>
 
       assert {:ok, {:ready, 200, 60, caps}} = Protocol.decode_event(payload)
       assert caps.frontend_type == :native_gui
       assert caps.image_support == :native
       assert caps.float_support == :native
-      assert caps.text_rendering == :proportional
     end
   end
 
@@ -779,18 +777,6 @@ defmodule Minga.Port.ProtocolTest do
     test "encode_edit_buffer with empty edits list" do
       result = Protocol.encode_edit_buffer(0, 1, [])
       assert <<0x26, 0::32, 1::32, 0::16>> = result
-    end
-  end
-
-  describe "text measurement" do
-    test "encode_measure_text" do
-      result = Protocol.encode_measure_text(42, "hello")
-      assert <<0x27, 42::32, 5::16, "hello">> = result
-    end
-
-    test "decode text_width response" do
-      payload = <<0x35, 42::32, 5::16>>
-      assert {:ok, {:text_width, 42, 5}} = Protocol.decode_event(payload)
     end
   end
 

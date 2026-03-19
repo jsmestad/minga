@@ -18,7 +18,6 @@ defmodule Minga.FaceTest do
       assert d.blend == 100
       assert d.font_weight == :regular
       assert d.font_slant == :roman
-      assert d.font_size_delta == 0
     end
   end
 

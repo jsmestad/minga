@@ -5,7 +5,7 @@ defmodule Minga.Port.Capabilities do
   When a frontend starts, it sends a `ready` event with optional capability
   fields. The BEAM uses these to adapt rendering strategy: skipping image
   commands on terminals without image support, using native floating windows
-  on GUIs, adjusting text measurement for proportional fonts, etc.
+  on GUIs, using native floating windows, etc.
 
   Frontends that send the short 5-byte `ready` format get `default/0` caps
   (TUI, RGB, wcwidth, no images, emulated floats, monospace).
@@ -16,23 +16,20 @@ defmodule Minga.Port.Capabilities do
             color_depth: :rgb,
             unicode_width: :wcwidth,
             image_support: :none,
-            float_support: :emulated,
-            text_rendering: :monospace
+            float_support: :emulated
 
   @type frontend_type :: :tui | :native_gui | :web
   @type color_depth :: :mono | :color_256 | :rgb
   @type unicode_width :: :wcwidth | :unicode_15
   @type image_support :: :none | :kitty | :sixel | :native
   @type float_support :: :emulated | :native
-  @type text_rendering :: :monospace | :proportional
 
   @type t :: %__MODULE__{
           frontend_type: frontend_type(),
           color_depth: color_depth(),
           unicode_width: unicode_width(),
           image_support: image_support(),
-          float_support: float_support(),
-          text_rendering: text_rendering()
+          float_support: float_support()
         }
 
   @doc "Returns the default capabilities (TUI with full RGB, monospace)."
@@ -43,15 +40,14 @@ defmodule Minga.Port.Capabilities do
   @spec from_binary(binary()) :: t()
   def from_binary(
         <<frontend_type::8, color_depth::8, unicode_width::8, image_support::8, float_support::8,
-          text_rendering::8>>
+          _reserved::8>>
       ) do
     %__MODULE__{
       frontend_type: decode_frontend_type(frontend_type),
       color_depth: decode_color_depth(color_depth),
       unicode_width: decode_unicode_width(unicode_width),
       image_support: decode_image_support(image_support),
-      float_support: decode_float_support(float_support),
-      text_rendering: decode_text_rendering(text_rendering)
+      float_support: decode_float_support(float_support)
     }
   end
 
@@ -68,11 +64,6 @@ defmodule Minga.Port.Capabilities do
   @spec native_floats?(t()) :: boolean()
   def native_floats?(%__MODULE__{float_support: :native}), do: true
   def native_floats?(%__MODULE__{}), do: false
-
-  @doc "Returns true if the frontend uses proportional (variable-width) fonts."
-  @spec proportional?(t()) :: boolean()
-  def proportional?(%__MODULE__{text_rendering: :proportional}), do: true
-  def proportional?(%__MODULE__{}), do: false
 
   @doc "Returns true if the frontend supports full 24-bit RGB color."
   @spec rgb?(t()) :: boolean()
@@ -114,9 +105,4 @@ defmodule Minga.Port.Capabilities do
   defp decode_float_support(0), do: :emulated
   defp decode_float_support(1), do: :native
   defp decode_float_support(_), do: :emulated
-
-  @spec decode_text_rendering(non_neg_integer()) :: text_rendering()
-  defp decode_text_rendering(0), do: :monospace
-  defp decode_text_rendering(1), do: :proportional
-  defp decode_text_rendering(_), do: :monospace
 end
