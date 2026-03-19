@@ -18,10 +18,15 @@ struct Region {
     let zOrder: UInt8
 }
 
-/// Dispatches render commands to a CellGrid and notifies when a frame is complete.
+/// Dispatches render commands to a CellGrid and LineBuffer, and notifies when a frame is complete.
 @MainActor
 final class CommandDispatcher {
     let grid: CellGrid
+
+    /// Line-based styled run buffer for CoreText rendering.
+    /// Populated alongside CellGrid during the CoreText migration.
+    let lineBuffer: LineBuffer
+
     private var regions: [UInt16: Region] = [:]
     private var activeRegion: Region?
 
@@ -54,6 +59,7 @@ final class CommandDispatcher {
 
     init(grid: CellGrid, guiState: GUIState) {
         self.grid = grid
+        self.lineBuffer = LineBuffer(cols: grid.cols, rows: grid.rows)
         self.guiState = guiState
     }
 
@@ -62,6 +68,7 @@ final class CommandDispatcher {
         switch command {
         case .clear:
             grid.clear()
+            lineBuffer.clear()
 
         case .drawText(let row, let col, let fg, let bg, let attrs, let text):
             drawText(row: row, col: col, fg: fg, bg: bg, attrs: attrs, text: text)
@@ -83,9 +90,15 @@ final class CommandDispatcher {
                 absCol &+= region.col
             }
             grid.showCursor(col: absCol, row: absRow)
+            lineBuffer.showCursor(col: absCol, row: absRow)
 
         case .setCursorShape(let shape):
             grid.cursorShape = shape
+            switch shape {
+            case .block: lineBuffer.cursorShape = .block
+            case .beam: lineBuffer.cursorShape = .beam
+            case .underline: lineBuffer.cursorShape = .underline
+            }
 
         case .batchEnd:
             onFrameReady?()
@@ -94,10 +107,11 @@ final class CommandDispatcher {
             onTitleChanged?(title)
 
         case .setWindowBg(let r, let g, let b):
-            // Store as the grid's default bg so the Metal renderer uses it
-            // for cells that don't specify an explicit background (bg=0).
+            // Store as the grid's/lineBuffer's default bg so the renderer uses it
+            // for cells/runs that don't specify an explicit background (bg=0).
             let rgb: UInt32 = (UInt32(r) << 16) | (UInt32(g) << 8) | UInt32(b)
             grid.defaultBg = rgb
+            lineBuffer.defaultBg = rgb
             let color = NSColor(
                 red: CGFloat(r) / 255.0,
                 green: CGFloat(g) / 255.0,
@@ -114,11 +128,13 @@ final class CommandDispatcher {
         case .clearRegion(let id):
             if let region = regions[id] {
                 grid.clearRect(col: region.col, row: region.row, width: region.width, height: region.height)
+                lineBuffer.clearRect(col: region.col, row: region.row, width: region.width, height: region.height)
             }
 
         case .destroyRegion(let id):
             if let region = regions[id] {
                 grid.clearRect(col: region.col, row: region.row, width: region.width, height: region.height)
+                lineBuffer.clearRect(col: region.col, row: region.row, width: region.width, height: region.height)
             }
             regions.removeValue(forKey: id)
             if activeRegion?.id == id {
@@ -189,8 +205,11 @@ final class CommandDispatcher {
             }
 
         case .guiGutterSeparator(let col, let r, let g, let b):
+            let rgb: UInt32 = (UInt32(r) << 16) | (UInt32(g) << 8) | UInt32(b)
             grid.gutterCol = col
-            grid.gutterSeparatorColor = (UInt32(r) << 16) | (UInt32(g) << 8) | UInt32(b)
+            grid.gutterSeparatorColor = rgb
+            lineBuffer.gutterCol = col
+            lineBuffer.gutterSeparatorColor = rgb
         }
     }
 
@@ -245,6 +264,15 @@ final class CommandDispatcher {
             if absRow >= region.row &+ region.height { return }
             maxCol = min(grid.cols, region.col &+ region.width)
         }
+
+        // Populate LineBuffer: append the full text run without cell decomposition.
+        // CoreText handles shaping, ligatures, and glyph layout natively.
+        lineBuffer.appendRun(
+            row: absRow, col: absCol, text: text,
+            fg: fg, bg: bg, attrs: attrs,
+            underlineColor: underlineColor, underlineStyle: underlineStyle,
+            fontWeight: fontWeight, fontId: fontId
+        )
 
         // Fast path: no ligature shaping needed. Iterate characters directly
         // without converting to Array or scanning for sequences.

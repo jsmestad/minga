@@ -267,6 +267,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         self.dispatcher = disp
 
+        // Wire the line buffer from the dispatcher to the editor view
+        // so resize events keep both data structures in sync.
+        nsView.lineBuffer = disp.lineBuffer
+
         // The ready event is deferred: EditorNSView.setFrameSize sends it
         // once SwiftUI assigns the real frame dimensions. This avoids
         // the BEAM rendering at hardcoded 800x600 defaults.

@@ -18,6 +18,10 @@ final class EditorNSView: MTKView {
     private(set) var fontFace: FontFace
     let cellGrid: CellGrid
 
+    /// Line-based styled run buffer for CoreText rendering.
+    /// Resized alongside cellGrid to keep dimensions in sync.
+    var lineBuffer: LineBuffer?
+
     private var trackingArea: NSTrackingArea?
 
     /// Cell dimensions in points (used for mouse → cell coordinate mapping).
@@ -112,6 +116,7 @@ final class EditorNSView: MTKView {
 
         if newCols != cellGrid.cols || newRows != cellGrid.rows {
             cellGrid.resize(newCols: newCols, newRows: newRows)
+            lineBuffer?.resize(newCols: newCols, newRows: newRows)
             encoder.sendResize(cols: newCols, rows: newRows)
         }
 
@@ -175,10 +180,12 @@ final class EditorNSView: MTKView {
             // window dimensions so the BEAM never sees wrong defaults.
             readySent = true
             cellGrid.resize(newCols: newCols, newRows: newRows)
+            lineBuffer?.resize(newCols: newCols, newRows: newRows)
             encoder.sendReady(cols: newCols, rows: newRows)
             PortLogger.info("Window ready: \(newCols)x\(newRows) cells (\(Int(newSize.width))x\(Int(newSize.height))pt)")
         } else if newCols != cellGrid.cols || newRows != cellGrid.rows {
             cellGrid.resize(newCols: newCols, newRows: newRows)
+            lineBuffer?.resize(newCols: newCols, newRows: newRows)
             encoder.sendResize(cols: newCols, rows: newRows)
             PortLogger.info("Window resized: \(newCols)x\(newRows) cells")
         }

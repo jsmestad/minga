@@ -35,6 +35,7 @@
 		5CADBD593C49EE44EBBD854E /* PortLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E23DC6E0ACB156F21293E87 /* PortLogger.swift */; };
 		613F5EE586EE20F4E2F163E0 /* CompletionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEA9C2BB0C840BE88B0FEA52 /* CompletionState.swift */; };
 		614587A457DCB2C3A316BD0B /* Shaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = 4E24F882E54DB6D88ABEBBC6 /* Shaders.metal */; };
+		63A874F653524DCE4E046BDD /* LineBuffer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F87D78FA2B8AA133DDD3141B /* LineBuffer.swift */; };
 		6442AF895C03F5AEF2D4500F /* FontManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79F5D551302873BE8F7240ED /* FontManager.swift */; };
 		6474095F95F4DA480AFE91B7 /* WhichKeyOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF8ACE680725ECE21E6E03B4 /* WhichKeyOverlay.swift */; };
 		6537088048F398D30737E6C3 /* GlyphAtlas.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F56CBF3A086193F8775262B /* GlyphAtlas.swift */; };
@@ -49,6 +50,7 @@
 		7FD39613E25BB0588ADBECCC /* FileTreeState.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC2F98D07FE0F56DDBCD9525 /* FileTreeState.swift */; };
 		8A49BB76E6FF8EF18632DD4C /* CellGrid.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0968F397CDDD3F99C06F5BC9 /* CellGrid.swift */; };
 		8B944E100C80DFF282D25D4C /* MingaWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D02E1034A8BFBDB7E15FCE9 /* MingaWindow.swift */; };
+		8D4AE4D5778E872B2FAF4A07 /* LineBuffer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F87D78FA2B8AA133DDD3141B /* LineBuffer.swift */; };
 		8F6865441CD813045F071273 /* BreadcrumbBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFA9D8D41BCA4E6CB45243A2 /* BreadcrumbBar.swift */; };
 		939991DD65293C6C796EAA66 /* FontManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79F5D551302873BE8F7240ED /* FontManager.swift */; };
 		93E7D214A27256CF06571EFE /* ProtocolDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56750F0AAE58AF9A98BF5841 /* ProtocolDecoder.swift */; };
@@ -64,6 +66,7 @@
 		C17647BBA01612BBFC7DCC04 /* ProtocolReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4AF6BEBA233BA1169CF8C642 /* ProtocolReader.swift */; };
 		C607CC562920162A87010EA9 /* CompletionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEA9C2BB0C840BE88B0FEA52 /* CompletionState.swift */; };
 		C715D937E8591D8BA46A29CD /* FontTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD2DE335B00721CBB29329F9 /* FontTests.swift */; };
+		C7F0701B0E9FCF7E0293E84D /* LineBufferTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F5F10DF600E92632AD966A5 /* LineBufferTests.swift */; };
 		C8FAD7BE37506758A1DBF8F6 /* FileTreeState.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC2F98D07FE0F56DDBCD9525 /* FileTreeState.swift */; };
 		CF09E23141DB0E6D9B65826A /* WhichKeyState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70D5765529645C5D860576B7 /* WhichKeyState.swift */; };
 		CF5F4DBB1A1D5B7152BC0ADE /* ProtocolDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56750F0AAE58AF9A98BF5841 /* ProtocolDecoder.swift */; };
@@ -95,6 +98,7 @@
 		52F606681DE9AA9D502A42AA /* PickerOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PickerOverlay.swift; sourceTree = "<group>"; };
 		5458552EC58E44C7CD15A98A /* FileTreeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTreeView.swift; sourceTree = "<group>"; };
 		56750F0AAE58AF9A98BF5841 /* ProtocolDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolDecoder.swift; sourceTree = "<group>"; };
+		5F5F10DF600E92632AD966A5 /* LineBufferTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LineBufferTests.swift; sourceTree = "<group>"; };
 		64CEFB02A774E5E8EF19029F /* MingaTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MingaTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		70D5765529645C5D860576B7 /* WhichKeyState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhichKeyState.swift; sourceTree = "<group>"; };
 		79F5D551302873BE8F7240ED /* FontManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FontManager.swift; sourceTree = "<group>"; };
@@ -117,6 +121,7 @@
 		E892F827AFBE959F9DF25C05 /* StatusBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBarView.swift; sourceTree = "<group>"; };
 		F220A60775A252A728477659 /* ProtocolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolTests.swift; sourceTree = "<group>"; };
 		F57909975ED8C2222150ABE2 /* MetalRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetalRenderer.swift; sourceTree = "<group>"; };
+		F87D78FA2B8AA133DDD3141B /* LineBuffer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LineBuffer.swift; sourceTree = "<group>"; };
 		FD66FBCBFC20D50D22A969C8 /* SymbolsNerdFontMono-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "SymbolsNerdFontMono-Regular.ttf"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -126,6 +131,7 @@
 			children = (
 				0968F397CDDD3F99C06F5BC9 /* CellGrid.swift */,
 				C21AB9021A9BCB034C13109A /* CommandDispatcher.swift */,
+				F87D78FA2B8AA133DDD3141B /* LineBuffer.swift */,
 				F57909975ED8C2222150ABE2 /* MetalRenderer.swift */,
 				4E24F882E54DB6D88ABEBBC6 /* Shaders.metal */,
 			);
@@ -240,6 +246,7 @@
 			isa = PBXGroup;
 			children = (
 				BD2DE335B00721CBB29329F9 /* FontTests.swift */,
+				5F5F10DF600E92632AD966A5 /* LineBufferTests.swift */,
 				F220A60775A252A728477659 /* ProtocolTests.swift */,
 				211424F30BBE8A57852D5630 /* ScrollAccumulatorTests.swift */,
 			);
@@ -369,6 +376,7 @@
 				6442AF895C03F5AEF2D4500F /* FontManager.swift in Sources */,
 				538E6D52EBF51B7D360A5A0A /* GUIState.swift in Sources */,
 				6537088048F398D30737E6C3 /* GlyphAtlas.swift in Sources */,
+				8D4AE4D5778E872B2FAF4A07 /* LineBuffer.swift in Sources */,
 				50D6C9CF0A874431A7969CD4 /* MetalRenderer.swift in Sources */,
 				16E32CF32A4AE261F717B823 /* MingaApp.swift in Sources */,
 				27236A210603A4548A56F072 /* MingaWindow.swift in Sources */,
@@ -410,6 +418,8 @@
 				C715D937E8591D8BA46A29CD /* FontTests.swift in Sources */,
 				36E0C059965477465E15CC02 /* GUIState.swift in Sources */,
 				F63E0FDECD3B636C893B164E /* GlyphAtlas.swift in Sources */,
+				63A874F653524DCE4E046BDD /* LineBuffer.swift in Sources */,
+				C7F0701B0E9FCF7E0293E84D /* LineBufferTests.swift in Sources */,
 				1DF2EE070C5D3722084CBFFE /* MetalRenderer.swift in Sources */,
 				8B944E100C80DFF282D25D4C /* MingaWindow.swift in Sources */,
 				F560D385A1FB0A46824F7B1F /* PickerOverlay.swift in Sources */,
