@@ -51,11 +51,7 @@ defmodule Minga.Editor.Commands.FileTree do
         # Opening a file buffer always uses :editor scope (not restore_scope)
         # because the new buffer becomes the active window content.
         state = %{state | keymap_scope: :editor}
-
-        case Commands.start_buffer(path) do
-          {:ok, pid} -> Minga.Editor.do_file_tree_open(state, pid, path, tree)
-          {:error, _} -> state
-        end
+        open_file_from_tree(state, path, tree)
 
       nil ->
         state
@@ -109,6 +105,26 @@ defmodule Minga.Editor.Commands.FileTree do
     }
 
   # ── Private helpers ───────────────────────────────────────────────────────
+
+  # Opens a file from the tree, reusing an existing buffer when one exists
+  # for the same path. Without the dedup check, the file tree creates
+  # duplicate Buffer.Server processes for the same file, which causes stale
+  # tree-sitter highlight spans from the old buffer's parse to be misrouted
+  # to the new buffer (garbled text on first render).
+  @spec open_file_from_tree(state(), String.t(), FileTree.t()) :: state()
+  defp open_file_from_tree(state, path, tree) do
+    case EditorState.find_buffer_by_path(state, path) do
+      nil ->
+        case Commands.start_buffer(path) do
+          {:ok, pid} -> Minga.Editor.do_file_tree_open(state, pid, path, tree)
+          {:error, _} -> state
+        end
+
+      idx ->
+        state = EditorState.switch_buffer(state, idx)
+        put_in(state.file_tree.tree, FileTree.reveal(tree, path))
+    end
+  end
 
   @spec open(state()) :: state()
   defp open(state) do
