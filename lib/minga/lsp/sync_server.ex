@@ -14,14 +14,12 @@ defmodule Minga.LSP.SyncServer do
 
   ## Event subscriptions
 
-  | Event            | Action                                         |
-  |------------------|-------------------------------------------------|
-  | `:buffer_opened` | Detect filetype, start LSP clients, send didOpen |
-  | `:buffer_saved`  | Send didSave to attached clients                 |
-  | `:buffer_closed` | Send didClose, remove tracking                   |
-
-  Content changes (`:buffer_changed`) are handled via `notify_change/1`,
-  which debounces didChange notifications per-buffer.
+  | Event              | Action                                           |
+  |--------------------|--------------------------------------------------|
+  | `:buffer_opened`   | Detect filetype, start LSP clients, send didOpen  |
+  | `:buffer_saved`    | Send didSave to attached clients                   |
+  | `:buffer_closed`   | Send didClose, remove tracking                     |
+  | `:buffer_changed`  | Debounce and send didChange to attached clients    |
   """
 
   use GenServer
@@ -66,18 +64,6 @@ defmodule Minga.LSP.SyncServer do
     ArgumentError -> []
   end
 
-  @doc """
-  Notifies the sync server that a buffer's content changed.
-
-  Debounces didChange notifications: rapid edits coalesce into a single
-  notification after #{@debounce_ms}ms of quiet. Call this after any
-  editing operation (insert, delete, paste, undo, completion accept).
-  """
-  @spec notify_change(pid()) :: :ok
-  def notify_change(buffer_pid) when is_pid(buffer_pid) do
-    GenServer.cast(__MODULE__, {:buffer_changed, buffer_pid})
-  end
-
   # ── GenServer callbacks ────────────────────────────────────────────────
 
   @impl true
@@ -93,16 +79,19 @@ defmodule Minga.LSP.SyncServer do
     Events.subscribe(:buffer_opened)
     Events.subscribe(:buffer_saved)
     Events.subscribe(:buffer_closed)
+    Events.subscribe(:buffer_changed)
 
     {:ok, %{debounce_timers: %{}}}
   end
 
   @impl true
-  def handle_cast({:buffer_changed, buffer_pid}, state) do
-    {:noreply, schedule_did_change(state, buffer_pid)}
+  def handle_info(
+        {:minga_event, :buffer_changed, %Events.BufferChangedEvent{buffer: buf}},
+        state
+      ) do
+    {:noreply, schedule_did_change(state, buf)}
   end
 
-  @impl true
   def handle_info(
         {:minga_event, :buffer_opened, %Events.BufferEvent{buffer: buf, path: _path}},
         state

@@ -70,7 +70,7 @@ defmodule Minga.Git.TrackerTest do
     end
   end
 
-  describe "notify_change/1" do
+  describe "buffer_changed event" do
     test "updates git buffer diff when content changes", %{root: dir} do
       path = Path.join(dir, "tracker_change_#{:rand.uniform(100_000)}.ex")
       File.write!(path, "line1\nline2\n")
@@ -81,7 +81,10 @@ defmodule Minga.Git.TrackerTest do
       assert_until(fn -> Tracker.tracked?(buf) end)
 
       BufferServer.insert_text(buf, "new line\n")
-      Tracker.notify_change(buf)
+      Events.notify_buffer_changed(buf)
+
+      # Sync to flush the event through Tracker's mailbox.
+      :sys.get_state(Tracker)
 
       git_pid = Tracker.lookup(buf)
       assert is_pid(git_pid)
@@ -89,13 +92,8 @@ defmodule Minga.Git.TrackerTest do
 
     test "no-op for untracked buffer" do
       {:ok, buf} = BufferServer.start_link(content: "hello")
-      assert :ok = Tracker.notify_change(buf)
-    end
-
-    test "logs warning for non-pid argument" do
-      import ExUnit.CaptureLog
-      log = capture_log(fn -> assert :ok = Tracker.notify_change(:not_a_pid) end)
-      assert log =~ "[Git.Tracker] notify_change called with non-pid"
+      Events.notify_buffer_changed(buf)
+      :sys.get_state(Tracker)
     end
   end
 
