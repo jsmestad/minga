@@ -26,6 +26,7 @@ defmodule Minga.Port.Protocol.GUI do
   | 0x7A   | gui_cursorline  | Cursorline row + bg color      |
   | 0x7B   | gui_gutter      | Structured gutter data         |
   | 0x7C   | gui_bottom_panel| Bottom panel container state   |
+  | 0x7D   | gui_picker_preview | Picker preview content      |
 
   ## GUI Actions (Frontend → BEAM)
 
@@ -69,6 +70,7 @@ defmodule Minga.Port.Protocol.GUI do
   @op_gui_cursorline 0x7A
   @op_gui_gutter 0x7B
   @op_gui_bottom_panel 0x7C
+  @op_gui_picker_preview 0x7D
 
   # ── GUI action sub-opcodes (Frontend → BEAM) ──
 
@@ -715,31 +717,144 @@ defmodule Minga.Port.Protocol.GUI do
 
   # ── Picker ──
 
-  @doc "Encodes a gui_picker command."
-  @spec encode_gui_picker(Minga.Picker.t() | nil) :: binary()
-  def encode_gui_picker(nil), do: <<@op_gui_picker, 0::8>>
+  @doc """
+  Encodes a gui_picker command.
 
-  def encode_gui_picker(%Minga.Picker{} = picker) do
+  Wire format (v2, extended):
+  ```
+  opcode(1) + visible(1) + selected_index(2) + filtered_count(2) + total_count(2)
+  + title_len(2) + title + query_len(2) + query + has_preview(1) + item_count(2) + items...
+
+  Per item:
+    icon_color(3) + flags(1) + label_len(2) + label + desc_len(2) + desc
+    + annotation_len(2) + annotation + match_pos_count(1) + match_positions(each 2 bytes)
+
+  Flags bits:
+    bit 0: two_line (file-style two-line layout)
+    bit 1: marked (multi-select checkmark)
+  ```
+  """
+  @typedoc "Action menu state: `{actions, selected_index}` or nil."
+  @type action_menu_state ::
+          {[{String.t(), atom()}], non_neg_integer()} | nil
+
+  @spec encode_gui_picker(Minga.Picker.t() | nil, boolean(), action_menu_state()) :: binary()
+  def encode_gui_picker(picker, has_preview \\ false, action_menu \\ nil)
+  def encode_gui_picker(nil, _has_preview, _action_menu), do: <<@op_gui_picker, 0::8>>
+
+  def encode_gui_picker(%Minga.Picker{} = picker, has_preview, action_menu) do
     items = Enum.take(picker.filtered, picker.max_visible)
     title_bytes = :erlang.iolist_to_binary([picker.title])
     query_bytes = :erlang.iolist_to_binary([picker.query])
+    filtered_count = length(picker.filtered)
+    total_count = length(picker.items)
+    has_preview_byte = if has_preview, do: 1, else: 0
 
     entries =
       Enum.map(items, fn item ->
         label_bytes = :erlang.iolist_to_binary([item.label])
         desc_bytes = :erlang.iolist_to_binary([item.description || ""])
+        annotation_bytes = :erlang.iolist_to_binary([item.annotation || ""])
         icon_color = item.icon_color || 0
 
-        <<icon_color::24, byte_size(label_bytes)::16, label_bytes::binary,
-          byte_size(desc_bytes)::16, desc_bytes::binary>>
+        flags = encode_picker_item_flags(item, picker)
+
+        # Match positions: list of uint16 character indices
+        positions = item.match_positions
+        pos_count = min(length(positions), 255)
+
+        pos_bytes =
+          Enum.take(positions, pos_count) |> Enum.map(&<<&1::16>>) |> IO.iodata_to_binary()
+
+        <<icon_color::24, flags::8, byte_size(label_bytes)::16, label_bytes::binary,
+          byte_size(desc_bytes)::16, desc_bytes::binary, byte_size(annotation_bytes)::16,
+          annotation_bytes::binary, pos_count::8, pos_bytes::binary>>
       end)
+
+    action_menu_bytes = encode_picker_action_menu(action_menu)
 
     IO.iodata_to_binary([
       @op_gui_picker,
-      <<1::8, picker.selected::16, byte_size(title_bytes)::16, title_bytes::binary,
-        byte_size(query_bytes)::16, query_bytes::binary, length(items)::16>>
-      | entries
+      <<1::8, picker.selected::16, filtered_count::16, total_count::16,
+        byte_size(title_bytes)::16, title_bytes::binary, byte_size(query_bytes)::16,
+        query_bytes::binary, has_preview_byte::8, length(items)::16>>,
+      entries,
+      action_menu_bytes
     ])
+  end
+
+  @spec encode_picker_action_menu(action_menu_state()) :: binary()
+  defp encode_picker_action_menu(nil), do: <<0::8>>
+
+  defp encode_picker_action_menu({actions, selected}) do
+    action_bins =
+      Enum.map(actions, fn {name, _id} ->
+        name_bytes = :erlang.iolist_to_binary([name])
+        <<byte_size(name_bytes)::16, name_bytes::binary>>
+      end)
+
+    IO.iodata_to_binary([
+      <<1::8, selected::8, length(actions)::8>>,
+      action_bins
+    ])
+  end
+
+  @spec encode_picker_item_flags(Minga.Picker.Item.t(), Minga.Picker.t()) :: non_neg_integer()
+  defp encode_picker_item_flags(item, picker) do
+    two_line = if item.two_line, do: 1, else: 0
+    marked = if Minga.Picker.marked?(picker, item), do: 1, else: 0
+    bor(two_line, marked <<< 1)
+  end
+
+  # ── Picker preview ──
+
+  @typedoc "A styled text segment for preview content: {text, fg_color, bold?}."
+  @type preview_segment :: {String.t(), non_neg_integer(), boolean()}
+
+  @doc """
+  Encodes a gui_picker_preview command.
+
+  Wire format:
+  ```
+  opcode(1) + visible(1)
+
+  When visible:
+    opcode(1) + 1(1) + line_count(2) + lines...
+
+  Per line:
+    segment_count(1) + segments...
+
+  Per segment:
+    fg_color(3) + flags(1) + text_len(2) + text
+
+  Flags bits:
+    bit 0: bold
+  ```
+  """
+  @spec encode_gui_picker_preview([[preview_segment()]] | nil) :: binary()
+  def encode_gui_picker_preview(nil), do: <<@op_gui_picker_preview, 0::8>>
+
+  def encode_gui_picker_preview(lines) when is_list(lines) do
+    line_binaries = Enum.map(lines, &encode_preview_line/1)
+
+    IO.iodata_to_binary([
+      @op_gui_picker_preview,
+      <<1::8, length(lines)::16>>
+      | line_binaries
+    ])
+  end
+
+  @spec encode_preview_line([preview_segment()]) :: iodata()
+  defp encode_preview_line(segments) do
+    seg_bins = Enum.map(segments, &encode_preview_segment/1)
+    [<<length(segments)::8>> | seg_bins]
+  end
+
+  @spec encode_preview_segment(preview_segment()) :: binary()
+  defp encode_preview_segment({text, fg_color, bold}) do
+    text_bytes = :erlang.iolist_to_binary([text])
+    flags = if bold, do: 1, else: 0
+    <<fg_color::24, flags::8, byte_size(text_bytes)::16, text_bytes::binary>>
   end
 
   # ── Agent chat ──

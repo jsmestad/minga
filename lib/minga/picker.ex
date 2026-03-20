@@ -40,21 +40,23 @@ defmodule Minga.Picker do
             selected: 0,
             filtered: [],
             max_visible: 10,
-            title: ""
+            title: "",
+            marked: %{}
 
   alias Minga.Picker.Item
 
   @typedoc "A picker item struct."
   @type item :: Item.t()
 
-  @typedoc "Picker state."
+  @typedoc "Picker state. The `marked` map uses item ids as keys (values are `true`)."
   @type t :: %__MODULE__{
           items: [Item.t()],
           query: String.t(),
           selected: non_neg_integer(),
           filtered: [Item.t()],
           max_visible: pos_integer(),
-          title: String.t()
+          title: String.t(),
+          marked: %{optional(term()) => true}
         }
 
   @type option :: {:title, String.t()} | {:max_visible, pos_integer()}
@@ -192,6 +194,44 @@ defmodule Minga.Picker do
   @spec total(t()) :: non_neg_integer()
   def total(%__MODULE__{items: items}), do: length(items)
 
+  @doc "Toggles the mark on the currently selected item (for multi-select)."
+  @spec toggle_mark(t()) :: t()
+  def toggle_mark(%__MODULE__{filtered: []} = picker), do: picker
+
+  def toggle_mark(%__MODULE__{marked: marked} = picker) do
+    case selected_item(picker) do
+      nil ->
+        picker
+
+      %Item{id: id} ->
+        new_marked =
+          if Map.has_key?(marked, id),
+            do: Map.delete(marked, id),
+            else: Map.put(marked, id, true)
+
+        %{picker | marked: new_marked}
+    end
+  end
+
+  @doc "Returns all marked items. If none are marked, returns the selected item in a list."
+  @spec marked_items(t()) :: [Item.t()]
+  def marked_items(%__MODULE__{marked: marked, filtered: filtered} = picker) do
+    if map_size(marked) == 0 do
+      case selected_item(picker) do
+        nil -> []
+        item -> [item]
+      end
+    else
+      Enum.filter(filtered, fn %Item{id: id} -> Map.has_key?(marked, id) end)
+    end
+  end
+
+  @doc "Returns whether an item is marked."
+  @spec marked?(t(), Item.t()) :: boolean()
+  def marked?(%__MODULE__{marked: marked}, %Item{id: id}) do
+    Map.has_key?(marked, id)
+  end
+
   # ── Fuzzy matching (public API for rendering) ────────────────────────────────
 
   @typedoc "0-based character indices of matched characters in a string."
@@ -236,27 +276,40 @@ defmodule Minga.Picker do
 
   @spec refilter(t()) :: t()
   defp refilter(%__MODULE__{items: items, query: ""} = picker) do
-    %{picker | filtered: items, selected: clamp_selection(picker.selected, length(items))}
+    # Clear any stale match positions when query is empty
+    cleared = Enum.map(items, &%{&1 | match_positions: []})
+    %{picker | filtered: cleared, selected: clamp_selection(picker.selected, length(items))}
   end
 
   defp refilter(%__MODULE__{items: items, query: query} = picker) do
     segments = split_query(query)
 
-    if segments == [] do
-      %{picker | filtered: items, selected: clamp_selection(picker.selected, length(items))}
-    else
-      scored =
-        items
-        |> Enum.map(fn %Item{label: label, description: desc} = item ->
-          score = score_item(label, desc, segments)
-          {item, score}
-        end)
-        |> Enum.filter(fn {_item, score} -> score > 0 end)
-        |> Enum.sort_by(fn {_item, score} -> -score end)
-        |> Enum.map(fn {item, _score} -> item end)
+    case segments do
+      [] ->
+        cleared = Enum.map(items, &%{&1 | match_positions: []})
+        %{picker | filtered: cleared, selected: clamp_selection(picker.selected, length(items))}
 
-      %{picker | filtered: scored, selected: clamp_selection(picker.selected, length(scored))}
+      _ ->
+        scored = score_and_highlight(items, segments, query)
+        %{picker | filtered: scored, selected: clamp_selection(picker.selected, length(scored))}
     end
+  end
+
+  @spec score_and_highlight([Item.t()], [String.t()], String.t()) :: [Item.t()]
+  defp score_and_highlight(items, segments, query) do
+    items
+    |> Enum.map(&score_item_with_positions(&1, segments, query))
+    |> Enum.filter(fn {_item, score} -> score > 0 end)
+    |> Enum.sort_by(fn {_item, score} -> -score end)
+    |> Enum.map(fn {item, _score} -> item end)
+  end
+
+  @spec score_item_with_positions(Item.t(), [String.t()], String.t()) ::
+          {Item.t(), non_neg_integer()}
+  defp score_item_with_positions(%Item{label: label, description: desc} = item, segments, query) do
+    score = score_item(label, desc, segments)
+    positions = if score > 0, do: match_positions(label, query), else: []
+    {%{item | match_positions: positions}, score}
   end
 
   # Split query into lowercase segments on whitespace, dropping empty segments.

@@ -189,16 +189,55 @@ Session status: 0=idle, 1=thinking, 2=tool_executing, 3=error
 
 ### 0x77 — gui_picker
 
-Fuzzy finder / command palette state.
+Fuzzy finder / command palette state (v2 extended format).
 
 ```
 When visible:
-  opcode(1) + 1(1) + selected_index(2) + title_len(2) + title(title_len) + query_len(2) + query(query_len) + item_count(2) + items...
+  opcode(1) + 1(1) + selected_index(2) + filtered_count(2) + total_count(2)
+  + title_len(2) + title(title_len) + query_len(2) + query(query_len)
+  + has_preview(1) + item_count(2) + items...
 
 Per item:
-  icon_color(3) + label_len(2) + label(label_len) + desc_len(2) + desc(desc_len)
+  icon_color(3) + flags(1) + label_len(2) + label(label_len)
+  + desc_len(2) + desc(desc_len) + annotation_len(2) + annotation(annotation_len)
+  + match_pos_count(1) + match_positions(match_pos_count * 2)
+
+After all items, action menu:
+  action_visible(1)
+  When action_visible == 1:
+    selected_action(1) + action_count(1) + actions...
+    Per action: name_len(2) + name(name_len)
 
 icon_color is a 24-bit RGB value for the item's icon.
+flags bits:
+  bit 0: two_line (render description on second line)
+  bit 1: marked (multi-select checkmark)
+annotation is a right-aligned string (e.g., keybinding "SPC f s").
+match_positions is a list of uint16 character indices for highlighting matched characters.
+has_preview indicates whether the picker source supports preview (triggers split layout).
+filtered_count and total_count enable "X/Y" display in the search field.
+action menu shows source-specific actions (e.g., "Open", "Delete", "Open in split").
+
+When hidden:
+  opcode(1) + 0(1)
+```
+
+### 0x7D — gui_picker_preview
+
+Preview content for the currently selected picker item. Sent alongside gui_picker when has_preview is true.
+
+```
+When visible:
+  opcode(1) + 1(1) + line_count(2) + lines...
+
+Per line:
+  segment_count(1) + segments...
+
+Per segment:
+  fg_color(3) + flags(1) + text_len(2) + text(text_len)
+
+flags bits:
+  bit 0: bold
 
 When hidden:
   opcode(1) + 0(1)

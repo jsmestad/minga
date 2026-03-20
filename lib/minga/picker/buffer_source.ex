@@ -182,7 +182,8 @@ defmodule Minga.Picker.BufferSource do
       id: key,
       label: "#{icon} #{name}#{dirty}#{ro}",
       description: desc,
-      icon_color: color
+      icon_color: color,
+      two_line: true
     }
   end
 

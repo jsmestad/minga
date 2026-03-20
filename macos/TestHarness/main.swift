@@ -74,13 +74,13 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
         }
         return ["type": "gui_tab_bar", "active_index": Int(activeIndex), "tabs": tabArray]
 
-    case .guiFileTree(let selectedIndex, let treeWidth, let entries):
+    case .guiFileTree(let selectedIndex, let treeWidth, let rootPath, let entries):
         let entryArray = entries.map { e -> [String: Any] in
             ["name": e.name, "depth": Int(e.depth),
              "is_dir": e.isDir, "is_expanded": e.isExpanded, "is_selected": e.isSelected,
              "git_status": Int(e.gitStatus), "icon": e.icon]
         }
-        return ["type": "gui_file_tree", "selected_index": Int(selectedIndex), "tree_width": Int(treeWidth), "entries": entryArray]
+        return ["type": "gui_file_tree", "selected_index": Int(selectedIndex), "tree_width": Int(treeWidth), "root_path": rootPath, "entries": entryArray]
 
     case .guiCompletion(let visible, let anchorRow, let anchorCol, let selectedIndex, let items):
         let itemArray = items.map { i -> [String: Any] in
@@ -100,11 +100,23 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
     case .guiStatusBar(let contentKind, let mode, let cursorLine, let cursorCol, let lineCount, let flags, let lspStatus, let gitBranch, let message, let filetype, let errorCount, let warningCount, let modelName, let messageCount, let sessionStatus):
         return ["type": "gui_status_bar", "content_kind": Int(contentKind), "mode": Int(mode), "cursor_line": Int(cursorLine), "cursor_col": Int(cursorCol), "line_count": Int(lineCount), "flags": Int(flags), "lsp_status": Int(lspStatus), "git_branch": gitBranch, "message": message, "filetype": filetype, "error_count": Int(errorCount), "warning_count": Int(warningCount), "model_name": modelName, "message_count": Int(messageCount), "session_status": Int(sessionStatus)]
 
-    case .guiPicker(let visible, let selectedIndex, let title, let query, let items):
+    case .guiPicker(let visible, let selectedIndex, let filteredCount, let totalCount, let title, let query, let hasPreview, let items, let actionMenu):
         let itemArray = items.map { i -> [String: Any] in
-            ["label": i.label, "description": i.description, "icon_color": Int(i.iconColor)]
+            ["label": i.label, "description": i.description, "icon_color": Int(i.iconColor), "annotation": i.annotation, "flags": Int(i.flags), "match_positions": i.matchPositions.map { Int($0) }]
         }
-        return ["type": "gui_picker", "visible": visible, "selected_index": Int(selectedIndex), "title": title, "query": query, "items": itemArray]
+        var result: [String: Any] = ["type": "gui_picker", "visible": visible, "selected_index": Int(selectedIndex), "filtered_count": Int(filteredCount), "total_count": Int(totalCount), "title": title, "query": query, "has_preview": hasPreview, "items": itemArray]
+        if let am = actionMenu {
+            result["action_menu"] = ["selected_index": Int(am.selectedIndex), "actions": am.actions]
+        }
+        return result
+
+    case .guiPickerPreview(let visible, let lines):
+        let lineArray = lines.map { segments -> [[String: Any]] in
+            segments.map { seg in
+                ["text": seg.text, "fg_color": Int(seg.fgColor), "bold": seg.bold]
+            }
+        }
+        return ["type": "gui_picker_preview", "visible": visible, "lines": lineArray]
 
     case .guiAgentChat(let visible, let status, let model, let prompt, let pendingToolName, let pendingToolSummary, let messages):
         let msgArray = messages.map { chatMessageToJSON($0) }

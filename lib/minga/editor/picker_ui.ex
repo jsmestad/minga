@@ -40,6 +40,22 @@ defmodule Minga.Editor.PickerUI do
   @typedoc "Action the GenServer should dispatch after handle_key/3."
   @type action :: {:execute_command, term()}
 
+  # Mode-switching prefix map: first character → source module.
+  # When a prefix character is typed as the first query char in a switchable
+  # source (file picker, recent files), the picker swaps to the mapped source
+  # and strips the prefix from the fuzzy query.
+  @mode_prefixes %{
+    ">" => Minga.Picker.CommandSource,
+    "#" => Minga.Picker.ProjectSearchSource,
+    "@" => Minga.Picker.BufferSource
+  }
+
+  # Sources that support mode switching via prefix.
+  @switchable_sources [
+    Minga.Picker.FileSource,
+    Minga.Picker.RecentFileSource
+  ]
+
   defmodule RenderInput do
     @moduledoc """
     Focused input struct for picker rendering.
@@ -228,6 +244,12 @@ defmodule Minga.Editor.PickerUI do
     maybe_preview_selection(state)
   end
 
+  # Tab → toggle multi-select mark on current item, then move down
+  def handle_key(%{picker_ui: %{picker: picker} = pui} = state, 9, _mods) do
+    new_picker = picker |> Picker.toggle_mark() |> Picker.move_down()
+    %{state | picker_ui: %{pui | picker: new_picker}}
+  end
+
   # C-o → open action menu for the selected item
   def handle_key(%{picker_ui: %{picker: picker, source: source}} = state, ?o, mods)
       when band(mods, @ctrl) != 0 do
@@ -245,15 +267,25 @@ defmodule Minga.Editor.PickerUI do
     end
   end
 
-  # Backspace
-  def handle_key(%{picker_ui: %{picker: picker} = pui} = state, cp, _mods)
+  # Backspace (with mode-switch detection: if query becomes empty and we're in a switched mode, switch back)
+  def handle_key(
+        %{picker_ui: %{picker: picker, mode_prefix: prefix, original_source: orig} = pui} = state,
+        cp,
+        _mods
+      )
       when cp in [8, 127] do
     new_picker = Picker.backspace(picker)
-    state = %{state | picker_ui: %{pui | picker: new_picker}}
-    maybe_preview_selection(state)
+
+    # If query is now empty and we had mode-switched, switch back to original source
+    if new_picker.query == "" and prefix != "" and orig != nil do
+      switch_back_to_original(state)
+    else
+      state = %{state | picker_ui: %{pui | picker: new_picker}}
+      maybe_preview_selection(state)
+    end
   end
 
-  # Printable characters → filter
+  # Printable characters → filter (with mode-switch detection)
   def handle_key(%{picker_ui: %{picker: picker} = pui} = state, codepoint, 0)
       when codepoint >= 32 and codepoint <= 0x10FFFF do
     char =
@@ -268,9 +300,16 @@ defmodule Minga.Editor.PickerUI do
         state
 
       c ->
-        new_picker = Picker.type_char(picker, c)
-        state = %{state | picker_ui: %{pui | picker: new_picker}}
-        maybe_preview_selection(state)
+        # Check if this is a mode-switching prefix (first char, empty query, switchable source)
+        case maybe_switch_mode(state, c, picker.query) do
+          {:switched, new_state} ->
+            new_state
+
+          :no_switch ->
+            new_picker = Picker.type_char(picker, c)
+            state = %{state | picker_ui: %{pui | picker: new_picker}}
+            maybe_preview_selection(state)
+        end
     end
   end
 
@@ -611,6 +650,67 @@ defmodule Minga.Editor.PickerUI do
 
   @spec resolve_percent(pos_integer(), pos_integer()) :: pos_integer()
   defp resolve_percent(pct, total), do: max(div(total * pct, 100), 1)
+
+  # ── Mode switching ──────────────────────────────────────────────────────────
+
+  # Check if typing a character should trigger a mode switch.
+  # Only triggers on the first character in an empty query, for switchable sources.
+  @spec maybe_switch_mode(state(), String.t(), String.t()) ::
+          {:switched, state()} | :no_switch
+  defp maybe_switch_mode(%{picker_ui: %{source: source}} = state, char, query) do
+    if query == "" and source in @switchable_sources and Map.has_key?(@mode_prefixes, char) do
+      target_source = Map.fetch!(@mode_prefixes, char)
+      {:switched, switch_to_source(state, target_source, char)}
+    else
+      :no_switch
+    end
+  end
+
+  # Switch the picker to a new source module, preserving the original source for switch-back.
+  @spec switch_to_source(state(), module(), String.t()) :: state()
+  defp switch_to_source(%{picker_ui: %{source: current_source} = pui} = state, new_source, prefix) do
+    items = new_source.candidates(state)
+    max_vis = state.viewport.rows - 3
+    max_vis = max(5, min(max_vis, state.viewport.rows - 3))
+    picker = Picker.new(items, title: new_source.title(), max_visible: max_vis)
+    layout = Minga.Picker.Source.layout(new_source)
+
+    original = pui.original_source || current_source
+
+    %{
+      state
+      | picker_ui: %{
+          pui
+          | picker: picker,
+            source: new_source,
+            layout: layout,
+            original_source: original,
+            mode_prefix: prefix
+        }
+    }
+  end
+
+  # Switch back to the original source after the prefix is deleted.
+  @spec switch_back_to_original(state()) :: state()
+  defp switch_back_to_original(%{picker_ui: %{original_source: orig} = pui} = state) do
+    items = orig.candidates(state)
+    max_vis = state.viewport.rows - 3
+    max_vis = max(5, min(max_vis, state.viewport.rows - 3))
+    picker = Picker.new(items, title: orig.title(), max_visible: max_vis)
+    layout = Minga.Picker.Source.layout(orig)
+
+    %{
+      state
+      | picker_ui: %{
+          pui
+          | picker: picker,
+            source: orig,
+            layout: layout,
+            original_source: nil,
+            mode_prefix: ""
+        }
+    }
+  end
 
   # ── Private helpers ──────────────────────────────────────────────────────────
 

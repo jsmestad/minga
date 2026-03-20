@@ -31,7 +31,8 @@ enum RenderCommand: Sendable {
     case guiWhichKey(visible: Bool, prefix: String, page: UInt8, pageCount: UInt8, bindings: [GUIWhichKeyBinding])
     case guiBreadcrumb(segments: [String])
     case guiStatusBar(contentKind: UInt8, mode: UInt8, cursorLine: UInt32, cursorCol: UInt32, lineCount: UInt32, flags: UInt8, lspStatus: UInt8, gitBranch: String, message: String, filetype: String, errorCount: UInt16, warningCount: UInt16, modelName: String, messageCount: UInt32, sessionStatus: UInt8)
-    case guiPicker(visible: Bool, selectedIndex: UInt16, title: String, query: String, items: [GUIPickerItem])
+    case guiPicker(visible: Bool, selectedIndex: UInt16, filteredCount: UInt16, totalCount: UInt16, title: String, query: String, hasPreview: Bool, items: [GUIPickerItem], actionMenu: GUIPickerActionMenu?)
+    case guiPickerPreview(visible: Bool, lines: [GUIPickerPreviewLine])
     case guiAgentChat(visible: Bool, status: UInt8, model: String, prompt: String, pendingToolName: String?, pendingToolSummary: String, messages: [GUIChatMessage])
     case guiGutterSeparator(col: UInt16, r: UInt8, g: UInt8, b: UInt8)
     case guiCursorline(row: UInt16, r: UInt8, g: UInt8, b: UInt8)
@@ -138,12 +139,34 @@ enum GUIChatMessage: Sendable {
     case usage(input: UInt32, output: UInt32, cacheRead: UInt32, cacheWrite: UInt32, costMicros: UInt32)
 }
 
-/// A picker item from gui_picker.
+/// A picker item from gui_picker (v2 extended format).
 struct GUIPickerItem: Sendable {
     let iconColor: UInt32  // 24-bit RGB
+    let flags: UInt8       // bit 0: two_line, bit 1: marked
     let label: String
     let description: String
+    let annotation: String
+    let matchPositions: [UInt16]  // 0-based character indices of matched chars in label
+
+    var isTwoLine: Bool { flags & 0x01 != 0 }
+    var isMarked: Bool { flags & 0x02 != 0 }
 }
+
+/// An action menu for the picker (C-o menu).
+struct GUIPickerActionMenu: Sendable {
+    let selectedIndex: UInt8
+    let actions: [String]
+}
+
+/// A styled text segment for picker preview content.
+struct GUIPickerPreviewSegment: Sendable {
+    let fgColor: UInt32   // 24-bit RGB
+    let bold: Bool
+    let text: String
+}
+
+/// A line of preview content (array of styled segments).
+typealias GUIPickerPreviewLine = [GUIPickerPreviewSegment]
 
 /// A completion item from gui_completion.
 struct GUICompletionItem: Sendable {
@@ -622,33 +645,104 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
         let visible = data[rest] != 0
         if !visible {
-            return (.guiPicker(visible: false, selectedIndex: 0, title: "", query: "", items: []), 2)
+            return (.guiPicker(visible: false, selectedIndex: 0, filteredCount: 0, totalCount: 0, title: "", query: "", hasPreview: false, items: [], actionMenu: nil), 2)
         }
-        guard data.count >= rest + 3 else { throw ProtocolDecodeError.malformed }
+        // v2 header: selected(2) + filtered_count(2) + total_count(2) + title_len(2) + title + query_len(2) + query + has_preview(1) + item_count(2)
+        guard data.count >= rest + 7 else { throw ProtocolDecodeError.malformed }
         let selectedIndex = readU16(data, rest + 1)
-        let titleLen = Int(readU16(data, rest + 3))
-        guard data.count >= rest + 5 + titleLen + 2 else { throw ProtocolDecodeError.malformed }
-        let title = String(data: data[(rest + 5)..<(rest + 5 + titleLen)], encoding: .utf8) ?? ""
-        let queryLen = Int(readU16(data, rest + 5 + titleLen))
-        guard data.count >= rest + 7 + titleLen + queryLen + 2 else { throw ProtocolDecodeError.malformed }
-        let query = String(data: data[(rest + 7 + titleLen)..<(rest + 7 + titleLen + queryLen)], encoding: .utf8) ?? ""
-        let itemCount = Int(readU16(data, rest + 7 + titleLen + queryLen))
+        let filteredCount = readU16(data, rest + 3)
+        let totalCount = readU16(data, rest + 5)
+        let titleLen = Int(readU16(data, rest + 7))
+        guard data.count >= rest + 9 + titleLen + 2 else { throw ProtocolDecodeError.malformed }
+        let title = String(data: data[(rest + 9)..<(rest + 9 + titleLen)], encoding: .utf8) ?? ""
+        let queryLen = Int(readU16(data, rest + 9 + titleLen))
+        guard data.count >= rest + 11 + titleLen + queryLen + 3 else { throw ProtocolDecodeError.malformed }
+        let query = String(data: data[(rest + 11 + titleLen)..<(rest + 11 + titleLen + queryLen)], encoding: .utf8) ?? ""
+        let hasPreview = data[rest + 11 + titleLen + queryLen] != 0
+        let itemCount = Int(readU16(data, rest + 12 + titleLen + queryLen))
         var items: [GUIPickerItem] = []
         items.reserveCapacity(itemCount)
-        var pos = rest + 9 + titleLen + queryLen
+        var pos = rest + 14 + titleLen + queryLen
         for _ in 0..<itemCount {
-            guard data.count >= pos + 7 else { throw ProtocolDecodeError.malformed }
+            // Per item: icon_color(3) + flags(1) + label_len(2) + label + desc_len(2) + desc + annotation_len(2) + annotation + match_pos_count(1) + positions
+            guard data.count >= pos + 6 else { throw ProtocolDecodeError.malformed }
             let iconColor = readU24(data, pos)
-            let labelLen = Int(readU16(data, pos + 3))
-            guard data.count >= pos + 5 + labelLen + 2 else { throw ProtocolDecodeError.malformed }
-            let label = String(data: data[(pos + 5)..<(pos + 5 + labelLen)], encoding: .utf8) ?? ""
-            let descLen = Int(readU16(data, pos + 5 + labelLen))
-            guard data.count >= pos + 7 + labelLen + descLen else { throw ProtocolDecodeError.malformed }
-            let desc = String(data: data[(pos + 7 + labelLen)..<(pos + 7 + labelLen + descLen)], encoding: .utf8) ?? ""
-            items.append(GUIPickerItem(iconColor: UInt32(iconColor), label: label, description: desc))
-            pos += 7 + labelLen + descLen
+            let itemFlags = data[pos + 3]
+            let labelLen = Int(readU16(data, pos + 4))
+            guard data.count >= pos + 6 + labelLen + 2 else { throw ProtocolDecodeError.malformed }
+            let label = String(data: data[(pos + 6)..<(pos + 6 + labelLen)], encoding: .utf8) ?? ""
+            let descLen = Int(readU16(data, pos + 6 + labelLen))
+            guard data.count >= pos + 8 + labelLen + descLen + 2 else { throw ProtocolDecodeError.malformed }
+            let desc = String(data: data[(pos + 8 + labelLen)..<(pos + 8 + labelLen + descLen)], encoding: .utf8) ?? ""
+            let annotationLen = Int(readU16(data, pos + 8 + labelLen + descLen))
+            guard data.count >= pos + 10 + labelLen + descLen + annotationLen + 1 else { throw ProtocolDecodeError.malformed }
+            let annotation = String(data: data[(pos + 10 + labelLen + descLen)..<(pos + 10 + labelLen + descLen + annotationLen)], encoding: .utf8) ?? ""
+            let matchPosCount = Int(data[pos + 10 + labelLen + descLen + annotationLen])
+            guard data.count >= pos + 11 + labelLen + descLen + annotationLen + matchPosCount * 2 else { throw ProtocolDecodeError.malformed }
+            var matchPositions: [UInt16] = []
+            matchPositions.reserveCapacity(matchPosCount)
+            var mpos = pos + 11 + labelLen + descLen + annotationLen
+            for _ in 0..<matchPosCount {
+                matchPositions.append(readU16(data, mpos))
+                mpos += 2
+            }
+            items.append(GUIPickerItem(iconColor: UInt32(iconColor), flags: itemFlags, label: label, description: desc, annotation: annotation, matchPositions: matchPositions))
+            pos = mpos
         }
-        return (.guiPicker(visible: true, selectedIndex: selectedIndex, title: title, query: query, items: items), pos - offset)
+        // Parse action menu: visible(1), if visible: selected(1) + count(1) + actions
+        var actionMenu: GUIPickerActionMenu? = nil
+        guard data.count >= pos + 1 else { throw ProtocolDecodeError.malformed }
+        let actionMenuVisible = data[pos] != 0
+        pos += 1
+        if actionMenuVisible {
+            guard data.count >= pos + 2 else { throw ProtocolDecodeError.malformed }
+            let actionSelected = data[pos]
+            let actionCount = Int(data[pos + 1])
+            pos += 2
+            var actionNames: [String] = []
+            actionNames.reserveCapacity(actionCount)
+            for _ in 0..<actionCount {
+                guard data.count >= pos + 2 else { throw ProtocolDecodeError.malformed }
+                let nameLen = Int(readU16(data, pos))
+                guard data.count >= pos + 2 + nameLen else { throw ProtocolDecodeError.malformed }
+                let name = String(data: data[(pos + 2)..<(pos + 2 + nameLen)], encoding: .utf8) ?? ""
+                actionNames.append(name)
+                pos += 2 + nameLen
+            }
+            actionMenu = GUIPickerActionMenu(selectedIndex: actionSelected, actions: actionNames)
+        }
+        return (.guiPicker(visible: true, selectedIndex: selectedIndex, filteredCount: filteredCount, totalCount: totalCount, title: title, query: query, hasPreview: hasPreview, items: items, actionMenu: actionMenu), pos - offset)
+
+    case OP_GUI_PICKER_PREVIEW:
+        guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
+        let visible = data[rest] != 0
+        if !visible {
+            return (.guiPickerPreview(visible: false, lines: []), 2)
+        }
+        guard data.count >= rest + 3 else { throw ProtocolDecodeError.malformed }
+        let lineCount = Int(readU16(data, rest + 1))
+        var lines: [GUIPickerPreviewLine] = []
+        lines.reserveCapacity(lineCount)
+        var pos2 = rest + 3
+        for _ in 0..<lineCount {
+            guard data.count >= pos2 + 1 else { throw ProtocolDecodeError.malformed }
+            let segCount = Int(data[pos2])
+            pos2 += 1
+            var segments: GUIPickerPreviewLine = []
+            segments.reserveCapacity(segCount)
+            for _ in 0..<segCount {
+                guard data.count >= pos2 + 6 else { throw ProtocolDecodeError.malformed }
+                let fgColor = readU24(data, pos2)
+                let segFlags = data[pos2 + 3]
+                let textLen = Int(readU16(data, pos2 + 4))
+                guard data.count >= pos2 + 6 + textLen else { throw ProtocolDecodeError.malformed }
+                let text = String(data: data[(pos2 + 6)..<(pos2 + 6 + textLen)], encoding: .utf8) ?? ""
+                segments.append(GUIPickerPreviewSegment(fgColor: UInt32(fgColor), bold: segFlags & 0x01 != 0, text: text))
+                pos2 += 6 + textLen
+            }
+            lines.append(segments)
+        }
+        return (.guiPickerPreview(visible: true, lines: lines), pos2 - offset)
 
     case OP_GUI_AGENT_CHAT:
         guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }

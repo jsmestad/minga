@@ -30,6 +30,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
   alias Minga.Editor.StatusBar.Data, as: StatusBarData
   alias Minga.Editor.Viewport
   alias Minga.Git.Tracker, as: GitTracker
+  alias Minga.Picker
   alias Minga.Port.Manager, as: PortManager
   alias Minga.Port.Protocol.GUI, as: ProtocolGUI
 
@@ -224,10 +225,173 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
   # ── Picker ──
 
   @spec send_gui_picker(state()) :: :ok
-  defp send_gui_picker(%{picker_ui: %{picker: picker}, port_manager: pm}) do
-    cmd = ProtocolGUI.encode_gui_picker(picker)
-    PortManager.send_commands(pm, [cmd])
+  defp send_gui_picker(
+         %{
+           picker_ui: %{picker: picker, source: source, action_menu: action_menu},
+           port_manager: pm
+         } =
+           state
+       ) do
+    case picker do
+      nil ->
+        picker_cmd = ProtocolGUI.encode_gui_picker(nil)
+        preview_cmd = ProtocolGUI.encode_gui_picker_preview(nil)
+        PortManager.send_commands(pm, [picker_cmd, preview_cmd])
+
+      _ ->
+        has_preview = source != nil and Picker.Source.preview?(source)
+
+        preview_lines =
+          if has_preview do
+            build_picker_preview(state)
+          else
+            nil
+          end
+
+        picker_cmd = ProtocolGUI.encode_gui_picker(picker, has_preview, action_menu)
+        preview_cmd = ProtocolGUI.encode_gui_picker_preview(preview_lines)
+        PortManager.send_commands(pm, [picker_cmd, preview_cmd])
+    end
+
     :ok
+  end
+
+  # Build preview content for the currently selected picker item.
+  # Returns a list of lines, where each line is a list of {text, fg_color, bold} segments.
+  @spec build_picker_preview(state()) :: [[ProtocolGUI.preview_segment()]] | nil
+  defp build_picker_preview(%{picker_ui: %{picker: picker}} = state) do
+    case Minga.Picker.selected_item(picker) do
+      nil ->
+        nil
+
+      %Minga.Picker.Item{id: id} ->
+        build_preview_for_item(state, id)
+    end
+  end
+
+  # Build preview lines for a file path item.
+  # Uses syntax highlighting from an open buffer when available, falls back to plain text.
+  @spec build_preview_for_item(state(), term()) :: [[ProtocolGUI.preview_segment()]] | nil
+  defp build_preview_for_item(state, id) when is_binary(id) do
+    abs_path = resolve_preview_path(id)
+
+    # Check if the file is already open in a buffer with highlights
+    case find_buffer_for_path(state, abs_path) do
+      {buf_pid, highlight} when highlight != nil ->
+        build_highlighted_preview(buf_pid, highlight, state)
+
+      _ ->
+        read_file_preview(abs_path, state)
+    end
+  end
+
+  # For buffer index items, use the buffer directly.
+  defp build_preview_for_item(state, idx) when is_integer(idx) do
+    case Enum.at(state.buffers.list, idx) do
+      nil -> nil
+      buf_pid -> preview_from_buffer(state, buf_pid)
+    end
+  end
+
+  defp build_preview_for_item(_state, _id), do: nil
+
+  @spec preview_from_buffer(state(), pid()) :: [[ProtocolGUI.preview_segment()]] | nil
+  defp preview_from_buffer(state, buf_pid) do
+    case Map.get(state.highlight.highlights, buf_pid) do
+      nil ->
+        path = safe_file_path(buf_pid)
+        if path, do: read_file_preview(path, state), else: nil
+
+      highlight ->
+        build_highlighted_preview(buf_pid, highlight, state)
+    end
+  end
+
+  # Find a buffer PID for a given file path, along with its highlight state.
+  @spec find_buffer_for_path(state(), String.t()) :: {pid(), Minga.Highlight.t() | nil} | nil
+  defp find_buffer_for_path(state, abs_path) do
+    Enum.find_value(state.buffers.list, fn buf_pid ->
+      try do
+        case BufferServer.file_path(buf_pid) do
+          ^abs_path ->
+            highlight = Map.get(state.highlight.highlights, buf_pid)
+            {buf_pid, highlight}
+
+          _ ->
+            nil
+        end
+      catch
+        :exit, _ -> nil
+      end
+    end)
+  end
+
+  @preview_max_lines 50
+
+  # Build syntax-highlighted preview from a buffer with tree-sitter highlights.
+  @spec build_highlighted_preview(pid(), Minga.Highlight.t(), state()) ::
+          [[ProtocolGUI.preview_segment()]] | nil
+  defp build_highlighted_preview(buf_pid, highlight, state) do
+    content = BufferServer.content(buf_pid)
+    lines = content |> String.split("\n") |> Enum.take(@preview_max_lines)
+    default_fg = Map.get(state.theme, :fg, 0xCCCCCC)
+
+    # Build {line_text, byte_offset} tuples for batch highlighting
+    {line_tuples, _} =
+      Enum.map_reduce(lines, 0, fn line, offset ->
+        # +1 for the newline byte
+        {{line, offset}, offset + byte_size(line) + 1}
+      end)
+
+    styled_lines = Minga.Highlight.styles_for_visible_lines(highlight, line_tuples)
+
+    Enum.map(styled_lines, fn segments ->
+      Enum.map(segments, fn {text, face} ->
+        fg = face_to_rgb(face, default_fg)
+        bold = face.bold || false
+        {text, fg, bold}
+      end)
+    end)
+  catch
+    :exit, _ -> nil
+  end
+
+  # Convert a Face's fg color to a 24-bit RGB integer.
+  @spec face_to_rgb(Minga.Face.t(), non_neg_integer()) :: non_neg_integer()
+  defp face_to_rgb(%{fg: nil}, default), do: default
+  defp face_to_rgb(%{fg: fg}, _default) when is_integer(fg), do: fg
+  defp face_to_rgb(_, default), do: default
+
+  @spec resolve_preview_path(String.t()) :: String.t()
+  defp resolve_preview_path(path) do
+    case Path.type(path) do
+      :absolute -> path
+      _ -> Path.join(Minga.Project.resolve_root(), path)
+    end
+  end
+
+  # Read file from disk and return plain-text styled segments (no syntax highlighting).
+  @spec read_file_preview(String.t(), state()) :: [[ProtocolGUI.preview_segment()]] | nil
+  defp read_file_preview(abs_path, state) do
+    case File.read(abs_path) do
+      {:ok, content} ->
+        fg_color = Map.get(state.theme, :fg, 0xCCCCCC)
+
+        content
+        |> String.split("\n")
+        |> Enum.take(@preview_max_lines)
+        |> Enum.map(&[{&1, fg_color, false}])
+
+      {:error, _} ->
+        nil
+    end
+  end
+
+  @spec safe_file_path(pid()) :: String.t() | nil
+  defp safe_file_path(pid) do
+    BufferServer.file_path(pid)
+  catch
+    :exit, _ -> nil
   end
 
   # ── Agent chat ──

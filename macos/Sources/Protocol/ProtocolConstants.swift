@@ -41,6 +41,7 @@ let OP_GUI_GUTTER_SEP: UInt8 = 0x79
 let OP_GUI_CURSORLINE: UInt8 = 0x7A
 let OP_GUI_GUTTER: UInt8 = 0x7B
 let OP_GUI_BOTTOM_PANEL: UInt8 = 0x7C
+let OP_GUI_PICKER_PREVIEW: UInt8 = 0x7D
 
 // GUI window content opcode (semantic rendering data for buffer windows)
 let OP_GUI_WINDOW_CONTENT: UInt8 = 0x80
