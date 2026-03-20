@@ -1057,7 +1057,8 @@ defmodule Minga.Editor.LspActions do
       end)
       |> Enum.filter(fn l -> l.title != nil end)
 
-    %{state | code_lenses: parsed}
+    state = %{state | code_lenses: parsed}
+    Minga.Editor.LspDecorations.apply_code_lenses(state)
   end
 
   # ── Inlay hint response ──────────────────────────────────────────────────
@@ -1095,7 +1096,8 @@ defmodule Minga.Editor.LspActions do
         }
       end)
 
-    %{state | inlay_hints: parsed}
+    state = %{state | inlay_hints: parsed}
+    Minga.Editor.LspDecorations.apply_inlay_hints(state)
   end
 
   # ── WorkspaceEdit application ─────────────────────────────────────────────
