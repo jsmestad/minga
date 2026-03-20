@@ -5,6 +5,28 @@
 
 import SwiftUI
 
+/// Typed snapshot of status bar data from the BEAM. Constructed by
+/// CommandDispatcher, consumed by StatusBarState.update(). Named fields
+/// prevent the transposition bugs that a 15-parameter function invites.
+struct StatusBarUpdate: Sendable {
+    let contentKind: UInt8
+    let mode: UInt8
+    let cursorLine: UInt32
+    let cursorCol: UInt32
+    let lineCount: UInt32
+    let flags: UInt8
+    let lspStatus: UInt8
+    let gitBranch: String
+    let message: String
+    let filetype: String
+    let errorCount: UInt16
+    let warningCount: UInt16
+    // Agent-only fields
+    let modelName: String
+    let messageCount: UInt32
+    let sessionStatus: UInt8
+}
+
 @MainActor
 @Observable
 final class StatusBarState {
@@ -26,25 +48,22 @@ final class StatusBarState {
     var messageCount: UInt32 = 0
     var sessionStatus: UInt8 = 0
 
-    func update(contentKind: UInt8, mode: UInt8, cursorLine: UInt32, cursorCol: UInt32,
-                lineCount: UInt32, flags: UInt8, lspStatus: UInt8, gitBranch: String,
-                message: String, filetype: String, errorCount: UInt16, warningCount: UInt16,
-                modelName: String, messageCount: UInt32, sessionStatus: UInt8) {
-        self.contentKind = contentKind
-        self.mode = mode
-        self.cursorLine = cursorLine
-        self.cursorCol = cursorCol
-        self.lineCount = lineCount
-        self.flags = flags
-        self.lspStatus = lspStatus
-        self.gitBranch = gitBranch
-        self.message = message
-        self.filetype = filetype
-        self.errorCount = errorCount
-        self.warningCount = warningCount
-        self.modelName = modelName
-        self.messageCount = messageCount
-        self.sessionStatus = sessionStatus
+    func update(from data: StatusBarUpdate) {
+        self.contentKind = data.contentKind
+        self.mode = data.mode
+        self.cursorLine = data.cursorLine
+        self.cursorCol = data.cursorCol
+        self.lineCount = data.lineCount
+        self.flags = data.flags
+        self.lspStatus = data.lspStatus
+        self.gitBranch = data.gitBranch
+        self.message = data.message
+        self.filetype = data.filetype
+        self.errorCount = data.errorCount
+        self.warningCount = data.warningCount
+        self.modelName = data.modelName
+        self.messageCount = data.messageCount
+        self.sessionStatus = data.sessionStatus
     }
 
     var modeName: String {
