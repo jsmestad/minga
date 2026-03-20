@@ -14,7 +14,9 @@ defmodule Minga.Services.Independent do
       ├── Minga.Eval.TaskSupervisor      Task.Supervisor for eval/async work
       ├── Minga.Command.Registry         Named command lookup
       ├── Minga.Fold.Registry            Fold state
-      └── Minga.Diagnostics              ETS-backed diagnostics store
+      ├── Minga.Diagnostics              ETS-backed diagnostics store
+      ├── Minga.Tool.Recipe.Registry     Tool install recipe catalog
+      └── Minga.Tool.Manager             Tool install/uninstall manager
   """
 
   use Supervisor
@@ -34,7 +36,9 @@ defmodule Minga.Services.Independent do
       {Task.Supervisor, name: Minga.Eval.TaskSupervisor},
       Minga.Command.Registry,
       Minga.Fold.Registry,
-      Minga.Diagnostics
+      Minga.Diagnostics,
+      Minga.Tool.Recipe.Registry,
+      Minga.Tool.Manager
     ]
 
     Supervisor.init(children, strategy: :one_for_one)

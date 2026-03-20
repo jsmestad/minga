@@ -1340,6 +1340,45 @@ defmodule Minga.Editor do
     end
   end
 
+  defp handle_gui_action(state, {:tool_install, name_str}) do
+    name = String.to_existing_atom(name_str)
+
+    case Minga.Tool.Manager.install(name) do
+      :ok -> %{state | status_msg: "Installing #{name_str}..."}
+      {:error, reason} -> %{state | status_msg: "Cannot install #{name_str}: #{reason}"}
+    end
+  rescue
+    ArgumentError -> %{state | status_msg: "Unknown tool: #{name_str}"}
+  end
+
+  defp handle_gui_action(state, {:tool_uninstall, name_str}) do
+    name = String.to_existing_atom(name_str)
+
+    case Minga.Tool.Manager.uninstall(name) do
+      :ok -> %{state | status_msg: "Uninstalled #{name_str}"}
+      {:error, reason} -> %{state | status_msg: "Cannot uninstall #{name_str}: #{reason}"}
+    end
+  rescue
+    ArgumentError -> %{state | status_msg: "Unknown tool: #{name_str}"}
+  end
+
+  defp handle_gui_action(state, {:tool_update, name_str}) do
+    name = String.to_existing_atom(name_str)
+
+    case Minga.Tool.Manager.update(name) do
+      :ok -> %{state | status_msg: "Updating #{name_str}..."}
+      {:error, reason} -> %{state | status_msg: "Cannot update #{name_str}: #{reason}"}
+    end
+  rescue
+    ArgumentError -> %{state | status_msg: "Unknown tool: #{name_str}"}
+  end
+
+  defp handle_gui_action(state, :tool_dismiss) do
+    # The tool manager panel is closed; no state change needed since
+    # visibility is driven by the BEAM's render cycle
+    state
+  end
+
   # Moves the file tree cursor to the given index and performs the action.
   @spec gui_tree_action(state(), non_neg_integer(), :click | :toggle) :: state()
   defp gui_tree_action(%{file_tree: %{tree: nil}} = state, _index, _action), do: state

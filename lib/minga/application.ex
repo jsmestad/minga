@@ -52,6 +52,7 @@ defmodule Minga.Application do
   alias Minga.Config.Options
   alias Minga.Highlight.Grammar
   alias Minga.Telemetry.DevHandler
+  alias Minga.Tool.Manager, as: ToolManager
 
   @impl true
   @spec start(Application.start_type(), term()) :: {:ok, pid()} | {:error, term()}
@@ -62,6 +63,17 @@ defmodule Minga.Application do
     Minga.LoggerHandler.ensure_buffer_table()
     Grammar.init_registry()
     DevHandler.attach()
+
+    # Prepend managed tools bin directory to PATH so System.find_executable
+    # discovers managed tools. Done before supervisors start so LSP and
+    # formatter code can find tools immediately.
+    tools_bin = ToolManager.bin_dir()
+    File.mkdir_p!(tools_bin)
+    current_path = System.get_env("PATH") || ""
+
+    unless String.contains?(current_path, tools_bin) do
+      System.put_env("PATH", "#{tools_bin}:#{current_path}")
+    end
 
     base_children = [
       Minga.Foundation.Supervisor,

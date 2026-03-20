@@ -71,6 +71,7 @@ defmodule Minga.Port.Protocol.GUI do
   @op_gui_gutter 0x7B
   @op_gui_bottom_panel 0x7C
   @op_gui_picker_preview 0x7D
+  @op_gui_tool_manager 0x7E
 
   # ── GUI action sub-opcodes (Frontend → BEAM) ──
 
@@ -90,6 +91,10 @@ defmodule Minga.Port.Protocol.GUI do
   @gui_action_file_tree_new_folder 0x0E
   @gui_action_file_tree_collapse_all 0x0F
   @gui_action_file_tree_refresh 0x10
+  @gui_action_tool_install 0x11
+  @gui_action_tool_uninstall 0x12
+  @gui_action_tool_update 0x13
+  @gui_action_tool_dismiss 0x14
 
   # ── Types ──
 
@@ -111,6 +116,10 @@ defmodule Minga.Port.Protocol.GUI do
           | :file_tree_new_folder
           | :file_tree_collapse_all
           | :file_tree_refresh
+          | {:tool_install, name :: String.t()}
+          | {:tool_uninstall, name :: String.t()}
+          | {:tool_update, name :: String.t()}
+          | :tool_dismiss
 
   # ═══════════════════════════════════════════════════════════════════════════
   # Encoding (BEAM → Frontend)
@@ -1073,5 +1082,171 @@ defmodule Minga.Port.Protocol.GUI do
 
   def decode_gui_action(@gui_action_file_tree_refresh, <<>>), do: {:ok, :file_tree_refresh}
 
+  def decode_gui_action(@gui_action_tool_install, <<name_len::16, name::binary-size(name_len)>>),
+    do: {:ok, {:tool_install, name}}
+
+  def decode_gui_action(
+        @gui_action_tool_uninstall,
+        <<name_len::16, name::binary-size(name_len)>>
+      ),
+      do: {:ok, {:tool_uninstall, name}}
+
+  def decode_gui_action(@gui_action_tool_update, <<name_len::16, name::binary-size(name_len)>>),
+    do: {:ok, {:tool_update, name}}
+
+  def decode_gui_action(@gui_action_tool_dismiss, <<>>), do: {:ok, :tool_dismiss}
+
   def decode_gui_action(_, _), do: :error
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Tool Manager (BEAM → Frontend)
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  @doc """
+  Encodes the tool manager panel state.
+
+  Sends a rich structured view of all available tools with their install
+  status, versions, categories, and progress info. The GUI frontend
+  renders this as a native management panel.
+
+  ## Wire format
+
+      When visible:
+        opcode(1) + 1(1) + filter(1) + selected_index(2) + tool_count(2) + tools...
+
+      Per tool:
+        name_len(1) + name(name_len) + label_len(1) + label(label_len)
+        + desc_len(2) + desc(desc_len) + category(1) + status(1)
+        + method(1) + language_count(1) + languages...
+        + version_len(1) + version(version_len)
+        + homepage_len(2) + homepage(homepage_len)
+        + provides_count(1) + provides...
+
+      Per language:
+        lang_len(1) + lang(lang_len)
+
+      Per provides:
+        cmd_len(1) + cmd(cmd_len)
+
+      When hidden:
+        opcode(1) + 0(1)
+
+  ## Status values
+
+  | Value | Status          |
+  |-------|-----------------|
+  | 0     | not_installed   |
+  | 1     | installed       |
+  | 2     | installing      |
+  | 3     | update_available|
+
+  ## Category values
+
+  | Value | Category    |
+  |-------|-------------|
+  | 0     | lsp_server  |
+  | 1     | formatter   |
+  | 2     | linter      |
+  | 3     | debugger    |
+
+  ## Method values
+
+  | Value | Method          |
+  |-------|-----------------|
+  | 0     | npm             |
+  | 1     | pip             |
+  | 2     | cargo           |
+  | 3     | go_install      |
+  | 4     | github_release  |
+
+  ## Filter values
+
+  | Value | Filter        |
+  |-------|---------------|
+  | 0     | all           |
+  | 1     | installed     |
+  | 2     | not_installed |
+  | 3     | lsp_servers   |
+  | 4     | formatters    |
+  """
+  @spec encode_gui_tool_manager(map() | nil) :: binary()
+  def encode_gui_tool_manager(nil), do: <<@op_gui_tool_manager, 0::8>>
+
+  def encode_gui_tool_manager(%{visible: false}), do: <<@op_gui_tool_manager, 0::8>>
+
+  def encode_gui_tool_manager(%{
+        visible: true,
+        filter: filter,
+        selected_index: selected,
+        tools: tools
+      }) do
+    filter_byte = encode_tool_filter(filter)
+    tool_count = length(tools)
+
+    tool_data =
+      Enum.map(tools, fn tool ->
+        name_str = Atom.to_string(tool.name)
+        name_len = byte_size(name_str)
+        label_len = byte_size(tool.label)
+        desc_len = byte_size(tool.description)
+        category = encode_tool_category(tool.category)
+        status = encode_tool_status(tool.status)
+        method = encode_tool_method(tool.method)
+        version = tool.version || ""
+        version_len = byte_size(version)
+        homepage = tool.homepage || ""
+        homepage_len = byte_size(homepage)
+
+        lang_data =
+          Enum.map(tool.languages, fn lang ->
+            lang_str = Atom.to_string(lang)
+            <<byte_size(lang_str)::8, lang_str::binary>>
+          end)
+
+        provides_data =
+          Enum.map(tool.provides, fn cmd ->
+            <<byte_size(cmd)::8, cmd::binary>>
+          end)
+
+        <<name_len::8, name_str::binary, label_len::8, tool.label::binary, desc_len::16,
+          tool.description::binary, category::8, status::8, method::8, length(tool.languages)::8>> <>
+          IO.iodata_to_binary(lang_data) <>
+          <<version_len::8, version::binary, homepage_len::16, homepage::binary,
+            length(tool.provides)::8>> <>
+          IO.iodata_to_binary(provides_data)
+      end)
+
+    <<@op_gui_tool_manager, 1::8, filter_byte::8, selected::16, tool_count::16>> <>
+      IO.iodata_to_binary(tool_data)
+  end
+
+  @spec encode_tool_filter(atom()) :: non_neg_integer()
+  defp encode_tool_filter(:all), do: 0
+  defp encode_tool_filter(:installed), do: 1
+  defp encode_tool_filter(:not_installed), do: 2
+  defp encode_tool_filter(:lsp_servers), do: 3
+  defp encode_tool_filter(:formatters), do: 4
+  defp encode_tool_filter(_), do: 0
+
+  @spec encode_tool_category(atom()) :: non_neg_integer()
+  defp encode_tool_category(:lsp_server), do: 0
+  defp encode_tool_category(:formatter), do: 1
+  defp encode_tool_category(:linter), do: 2
+  defp encode_tool_category(:debugger), do: 3
+  defp encode_tool_category(_), do: 0
+
+  @spec encode_tool_status(atom()) :: non_neg_integer()
+  defp encode_tool_status(:not_installed), do: 0
+  defp encode_tool_status(:installed), do: 1
+  defp encode_tool_status(:installing), do: 2
+  defp encode_tool_status(:update_available), do: 3
+  defp encode_tool_status(_), do: 0
+
+  @spec encode_tool_method(atom()) :: non_neg_integer()
+  defp encode_tool_method(:npm), do: 0
+  defp encode_tool_method(:pip), do: 1
+  defp encode_tool_method(:cargo), do: 2
+  defp encode_tool_method(:go_install), do: 3
+  defp encode_tool_method(:github_release), do: 4
+  defp encode_tool_method(_), do: 0
 end

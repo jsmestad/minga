@@ -374,6 +374,66 @@ When hidden:
 
 `filter_preset` is a hint for the Messages tab. When the panel auto-opens for warnings, the BEAM sets `filter_preset=1`. The frontend should apply a warnings+errors level filter on the visibility transition (hidden to visible). If the user has already changed filters manually, don't override.
 
+### 0x7E — gui_tool_manager
+
+Tool manager panel for browsing, installing, updating, and uninstalling LSP servers and formatters.
+
+```
+When visible:
+  opcode(1) + 1(1) + filter(1) + selected_index(2) + tool_count(2) + tools...
+
+Per tool:
+  name_len(1) + name(name_len) + label_len(1) + label(label_len)
+  + desc_len(2) + desc(desc_len) + category(1) + status(1)
+  + method(1) + language_count(1) + languages...
+  + version_len(1) + version(version_len)
+  + homepage_len(2) + homepage(homepage_len)
+  + provides_count(1) + provides...
+
+Per language:
+  lang_len(1) + lang(lang_len)
+
+Per provides:
+  cmd_len(1) + cmd(cmd_len)
+
+When hidden:
+  opcode(1) + 0(1)
+```
+
+Filter values:
+| Value | Filter |
+|-------|--------|
+| 0 | all |
+| 1 | installed |
+| 2 | not_installed |
+| 3 | lsp_servers |
+| 4 | formatters |
+
+Category values:
+| Value | Category |
+|-------|----------|
+| 0 | lsp_server |
+| 1 | formatter |
+| 2 | linter |
+| 3 | debugger |
+
+Status values:
+| Value | Status |
+|-------|--------|
+| 0 | not_installed |
+| 1 | installed |
+| 2 | installing |
+| 3 | update_available |
+
+Method values:
+| Value | Method |
+|-------|--------|
+| 0 | npm |
+| 1 | pip |
+| 2 | cargo |
+| 3 | go_install |
+| 4 | github_release |
+
 ### 0x80 — gui_window_content
 
 Semantic rendering data for a buffer window. Replaces draw_text commands for buffer content. The BEAM pre-resolves all layout (word wrap, folding, virtual text splicing, conceal ranges) and all styling (syntax highlighting colors). The frontend renders directly from this data via CoreText, with selection/search/diagnostics as overlay quads (not baked into text colors).
@@ -449,6 +509,10 @@ opcode(1) + action_type(1) + payload...
 | 0x0E | file_tree_new_folder | (empty) | Create new folder at selected entry |
 | 0x0F | file_tree_collapse_all | (empty) | Collapse all directories in tree |
 | 0x10 | file_tree_refresh | (empty) | Refresh file tree |
+| 0x11 | tool_install | name_len(2) + name(name_len) | Install a tool by name |
+| 0x12 | tool_uninstall | name_len(2) + name(name_len) | Uninstall a tool by name |
+| 0x13 | tool_update | name_len(2) + name(name_len) | Update a tool by name |
+| 0x14 | tool_dismiss | (empty) | Dismiss the tool manager panel |
 
 ## Theme Color Slots
 

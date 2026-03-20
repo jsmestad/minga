@@ -20,3 +20,14 @@ config :minga, editor_wait_params: {5, 4}
 # load tools, resolve API keys, or spawn OS processes. The stub starts
 # instantly and satisfies the Session GenServer lifecycle.
 config :minga, test_provider_module: Minga.Test.StubProvider
+
+# Use stub installers in tests to avoid spawning npm/pip/cargo/go/curl
+# subprocesses during concurrent test runs (same EPIPE concern as git).
+config :minga,
+  tool_installers: %{
+    npm: Minga.Tool.Installer.Stub,
+    pip: Minga.Tool.Installer.Stub,
+    cargo: Minga.Tool.Installer.Stub,
+    go_install: Minga.Tool.Installer.Stub,
+    github_release: Minga.Tool.Installer.Stub
+  }
