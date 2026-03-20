@@ -193,11 +193,18 @@ final class CommandDispatcher {
                 onModeChanged?(guiState.statusBarState.modeName)
             }
 
-        case .guiPicker(let visible, let selectedIndex, let title, let query, let items):
+        case .guiPicker(let visible, let selectedIndex, let filteredCount, let totalCount, let title, let query, let hasPreview, let items, let actionMenu):
             if visible {
-                guiState.pickerState.update(visible: true, selectedIndex: selectedIndex, title: title, query: query, rawItems: items)
+                guiState.pickerState.update(visible: true, selectedIndex: selectedIndex, filteredCount: filteredCount, totalCount: totalCount, title: title, query: query, hasPreview: hasPreview, rawItems: items, actionMenu: actionMenu)
             } else {
                 guiState.pickerState.hide()
+            }
+
+        case .guiPickerPreview(let visible, let lines):
+            if visible {
+                guiState.pickerState.updatePreview(lines: lines)
+            } else {
+                guiState.pickerState.clearPreview()
             }
 
         case .guiAgentChat(let visible, let status, let model, let prompt, let pendingToolName, let pendingToolSummary, let messages):

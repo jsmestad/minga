@@ -20,13 +20,25 @@ defmodule Minga.Picker.FileSource do
   def title, do: "Find file"
 
   @impl true
+  @spec preview?() :: boolean()
+  def preview?, do: true
+
+  @impl true
   @spec candidates(term()) :: [Item.t()]
   def candidates(_context) do
     root = project_root()
 
     case Minga.FileFind.list_files(root) do
-      {:ok, paths} -> Enum.map(paths, &format_file_candidate/1)
-      {:error, msg} -> log_error(msg)
+      {:ok, paths} ->
+        # Build frecency map from recent files (position → score)
+        frecency_map = build_frecency_map()
+
+        paths
+        |> Enum.map(&format_file_candidate/1)
+        |> sort_by_frecency(frecency_map)
+
+      {:error, msg} ->
+        log_error(msg)
     end
   end
 
@@ -42,7 +54,8 @@ defmodule Minga.Picker.FileSource do
       id: path,
       label: "#{icon} #{filename}",
       description: dir_display,
-      icon_color: color
+      icon_color: color,
+      two_line: true
     }
   end
 
@@ -121,6 +134,35 @@ defmodule Minga.Picker.FileSource do
   def on_action(_action, _item, state), do: state
 
   # ── Private ─────────────────────────────────────────────────────────────────
+
+  # Build a map of relative_path → frecency_score from Project.recent_files.
+  # Most recently opened files get the highest score.
+  @spec build_frecency_map() :: %{String.t() => non_neg_integer()}
+  defp build_frecency_map do
+    recent = Minga.Project.recent_files()
+    total = length(recent)
+
+    recent
+    |> Enum.with_index()
+    |> Enum.into(%{}, fn {path, idx} ->
+      # Most recent = highest score. Score decays linearly.
+      {path, total - idx}
+    end)
+  catch
+    :exit, _ -> %{}
+  end
+
+  # Sort items by frecency (recent files first), preserving filesystem order for non-recent files.
+  @spec sort_by_frecency([Item.t()], %{String.t() => non_neg_integer()}) :: [Item.t()]
+  defp sort_by_frecency(items, frecency_map) when map_size(frecency_map) == 0, do: items
+
+  defp sort_by_frecency(items, frecency_map) do
+    Enum.sort_by(items, fn %Item{id: path} ->
+      score = Map.get(frecency_map, path, 0)
+      # Negate so higher scores sort first
+      {-score, path}
+    end)
+  end
 
   defdelegate project_root, to: Minga.Project, as: :resolve_root
 end

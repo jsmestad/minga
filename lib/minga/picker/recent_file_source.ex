@@ -21,6 +21,10 @@ defmodule Minga.Picker.RecentFileSource do
   def title, do: "Recent files"
 
   @impl true
+  @spec preview?() :: boolean()
+  def preview?, do: true
+
+  @impl true
   @spec candidates(term()) :: [Item.t()]
   def candidates(_context) do
     files = Project.recent_files()
@@ -36,7 +40,8 @@ defmodule Minga.Picker.RecentFileSource do
         id: rel_path,
         label: "#{icon} #{filename}",
         description: dir_display,
-        icon_color: color
+        icon_color: color,
+        two_line: true
       }
     end)
   catch
