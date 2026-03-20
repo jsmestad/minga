@@ -65,6 +65,7 @@ defmodule Minga.Editor do
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
 
+  alias Minga.Editor.MouseHoverTooltip
   alias Minga.Editor.PickerUI
 
   @typedoc "Internal state."
@@ -853,6 +854,12 @@ defmodule Minga.Editor do
   end
 
   @toast_duration_ms 3_000
+
+  # Mouse hover timeout: check if the mouse is over a diagnostic or symbol
+  def handle_info(:mouse_hover_timeout, state) do
+    state = MouseHoverTooltip.check_hover(state)
+    {:noreply, Renderer.render(state)}
+  end
 
   def handle_info(:dismiss_toast, state) do
     state = dispatch_agent_event(state, :dismiss_toast)
