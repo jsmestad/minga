@@ -251,9 +251,6 @@ defmodule Minga.Editor.Renderer.BufferLine do
   defp apply_line_bg(cmds, sr, bg, ctx) do
     default_bg = ctx.editor_bg
 
-    fill =
-      DisplayList.draw(sr, ctx.gutter_w, String.duplicate(" ", ctx.content_w), Face.new(bg: bg))
-
     tinted =
       Enum.map(cmds, fn {row, col, text, %Face{} = face} ->
         if (face.bg != nil and face.bg != default_bg) or face.reverse do
@@ -263,7 +260,16 @@ defmodule Minga.Editor.Renderer.BufferLine do
         end
       end)
 
-    [fill | tinted]
+    # GUI frontends draw the cursorline bg natively as a Metal quad.
+    # Skip the full-width space fill draw that the TUI needs for bg painting.
+    if ctx.is_gui do
+      tinted
+    else
+      fill =
+        DisplayList.draw(sr, ctx.gutter_w, String.duplicate(" ", ctx.content_w), Face.new(bg: bg))
+
+      [fill | tinted]
+    end
   end
 
   # Applies full-width background fill when the line has a decoration

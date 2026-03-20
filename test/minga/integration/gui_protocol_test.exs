@@ -245,4 +245,34 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert {:ok, {:gui_action, {:select_tab, 2}}} = Protocol.decode_event(action_msg)
     end
   end
+
+  describe "gui_cursorline" do
+    test "round-trips cursorline row and bg color", %{port: port} do
+      cmd = ProtocolGUI.encode_gui_cursorline(12, 0x2C323C)
+      Port.command(port, cmd)
+
+      assert_receive {^port, {:data, json}}, 5_000
+      decoded = Jason.decode!(json)
+
+      assert decoded["type"] == "gui_cursorline"
+      assert decoded["row"] == 12
+      assert decoded["r"] == 0x2C
+      assert decoded["g"] == 0x32
+      assert decoded["b"] == 0x3C
+    end
+
+    test "round-trips no cursorline (0xFFFF)", %{port: port} do
+      cmd = ProtocolGUI.encode_gui_cursorline(0xFFFF, 0)
+      Port.command(port, cmd)
+
+      assert_receive {^port, {:data, json}}, 5_000
+      decoded = Jason.decode!(json)
+
+      assert decoded["type"] == "gui_cursorline"
+      assert decoded["row"] == 0xFFFF
+      assert decoded["r"] == 0
+      assert decoded["g"] == 0
+      assert decoded["b"] == 0
+    end
+  end
 end

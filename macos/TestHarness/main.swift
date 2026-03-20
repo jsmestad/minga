@@ -110,6 +110,12 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
         let msgArray = messages.map { chatMessageToJSON($0) }
         return ["type": "gui_agent_chat", "visible": visible, "status": Int(status), "model": model, "prompt": prompt, "pending_tool_name": pendingToolName ?? "", "pending_tool_summary": pendingToolSummary, "messages": msgArray]
 
+    case .guiGutterSeparator(let col, let r, let g, let b):
+        return ["type": "gui_gutter_separator", "col": Int(col), "r": Int(r), "g": Int(g), "b": Int(b)]
+
+    case .guiCursorline(let row, let r, let g, let b):
+        return ["type": "gui_cursorline", "row": Int(row), "r": Int(r), "g": Int(g), "b": Int(b)]
+
     case .batchEnd:
         return ["type": "batch_end"]
 

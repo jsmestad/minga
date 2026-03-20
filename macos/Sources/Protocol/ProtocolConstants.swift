@@ -38,6 +38,7 @@ let OP_GUI_STATUS_BAR: UInt8 = 0x76
 let OP_GUI_PICKER: UInt8 = 0x77
 let OP_GUI_AGENT_CHAT: UInt8 = 0x78
 let OP_GUI_GUTTER_SEP: UInt8 = 0x79
+let OP_GUI_CURSORLINE: UInt8 = 0x7A
 
 // GUI theme color slot IDs
 let GUI_COLOR_EDITOR_BG: UInt8 = 0x01

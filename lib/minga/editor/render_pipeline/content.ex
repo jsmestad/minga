@@ -23,6 +23,7 @@ defmodule Minga.Editor.RenderPipeline.Content do
   alias Minga.Editor.Viewport
   alias Minga.Editor.Window
   alias Minga.Face
+  alias Minga.Port.Capabilities
 
   @typedoc "Internal editor state."
   @type state :: EditorState.t()
@@ -106,7 +107,8 @@ defmodule Minga.Editor.RenderPipeline.Content do
         gutter_w: gutter_w,
         content_w: content_w,
         has_sign_column: has_sign_column,
-        is_active: is_active
+        is_active: is_active,
+        is_gui: Capabilities.gui?(state.capabilities)
       })
 
     # Compute context fingerprint and check for context changes.
@@ -321,7 +323,8 @@ defmodule Minga.Editor.RenderPipeline.Content do
         gutter_w: gutter_w,
         content_w: content_w,
         has_sign_column: false,
-        is_active: is_active
+        is_active: is_active,
+        is_gui: Capabilities.gui?(state.capabilities)
       })
 
     # Compute the display map (block decorations, fold regions, virtual lines).

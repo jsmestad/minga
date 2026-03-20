@@ -34,6 +34,7 @@ enum RenderCommand: Sendable {
     case guiPicker(visible: Bool, selectedIndex: UInt16, title: String, query: String, items: [GUIPickerItem])
     case guiAgentChat(visible: Bool, status: UInt8, model: String, prompt: String, pendingToolName: String?, pendingToolSummary: String, messages: [GUIChatMessage])
     case guiGutterSeparator(col: UInt16, r: UInt8, g: UInt8, b: UInt8)
+    case guiCursorline(row: UInt16, r: UInt8, g: UInt8, b: UInt8)
 }
 
 /// A styled text run for GUI rendering. Carries pre-computed colors from the BEAM.
@@ -705,6 +706,12 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         guard data.count >= rest + 5 else { throw ProtocolDecodeError.malformed }
         let col = readU16(data, rest)
         return (.guiGutterSeparator(col: col, r: data[rest + 2], g: data[rest + 3], b: data[rest + 4]), 6)
+
+    case OP_GUI_CURSORLINE:
+        // row:2, r:1, g:1, b:1 = 5 bytes after opcode
+        guard data.count >= rest + 5 else { throw ProtocolDecodeError.malformed }
+        let row = readU16(data, rest)
+        return (.guiCursorline(row: row, r: data[rest + 2], g: data[rest + 3], b: data[rest + 4]), 6)
 
     default:
         throw ProtocolDecodeError.unknownOpcode(opcode)

@@ -87,6 +87,11 @@ final class LineBuffer {
     var gutterCol: UInt16 = 0
     var gutterSeparatorColor: UInt32 = 0
 
+    /// Cursorline: screen row and background color for native rendering.
+    /// `cursorlineRow = 0xFFFF` means no cursorline (disabled or inactive).
+    var cursorlineRow: UInt16 = 0xFFFF
+    var cursorlineBg: UInt32 = 0
+
     /// Track whether the buffer was modified since last render.
     var dirty: Bool = true
 

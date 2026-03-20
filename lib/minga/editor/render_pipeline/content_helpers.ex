@@ -108,6 +108,8 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
         nil
       end
 
+    is_gui = Map.get(params, :is_gui, false)
+
     %Context{
       viewport: viewport,
       visual_selection: visual_selection,
@@ -120,6 +122,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
       nav_flash: state.nav_flash,
       nav_flash_bg: state.theme.editor.nav_flash_bg,
       editor_bg: state.theme.editor.bg,
+      is_gui: is_gui,
       has_sign_column: has_sign_column,
       decorations: decorations,
       diagnostic_signs: diagnostic_signs_for_window(state, window),

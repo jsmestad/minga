@@ -703,9 +703,9 @@ private func mapKeyCode(_ event: NSEvent) -> UInt32? {
     case 125: return 57353  // Down arrow
     case 126: return 57352  // Up arrow
     case 115: return 57360  // Home
-    case 119: return 57367  // End
-    case 116: return 57365  // Page Up
-    case 121: return 57366  // Page Down
+    case 119: return 57361  // End
+    case 116: return 57362  // Page Up
+    case 121: return 57363  // Page Down
     case 117: return 57376  // Forward Delete
     case 122: return 57364  // F1
     case 120: return 57365  // F2

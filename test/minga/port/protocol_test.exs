@@ -1098,4 +1098,22 @@ defmodule Minga.Port.ProtocolTest do
       assert <<0x79, 0::16, 0::8, 0::8, 0::8>> = encoded
     end
   end
+
+  describe "encode_gui_cursorline/2" do
+    test "encodes cursor row and RGB background color" do
+      encoded = ProtocolGUI.encode_gui_cursorline(12, 0x2C323C)
+
+      assert <<0x7A, row::16, r::8, g::8, b::8>> = encoded
+      assert row == 12
+      assert r == 0x2C
+      assert g == 0x32
+      assert b == 0x3C
+    end
+
+    test "encodes 0xFFFF row for no cursorline" do
+      encoded = ProtocolGUI.encode_gui_cursorline(0xFFFF, 0)
+
+      assert <<0x7A, 0xFFFF::16, 0::8, 0::8, 0::8>> = encoded
+    end
+  end
 end
