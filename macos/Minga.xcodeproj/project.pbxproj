@@ -78,6 +78,7 @@
 		931A6127210D4ED441AC04B2 /* MessagesContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFE9DFE38318A361BEF0B773 /* MessagesContentView.swift */; };
 		939991DD65293C6C796EAA66 /* FontManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79F5D551302873BE8F7240ED /* FontManager.swift */; };
 		93E7D214A27256CF06571EFE /* ProtocolDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56750F0AAE58AF9A98BF5841 /* ProtocolDecoder.swift */; };
+		9758BF46BB0EC7FEEB14FBA3 /* SwiftUIViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86478D5660213F165B7E1E35 /* SwiftUIViewTests.swift */; };
 		97FB334A605B5B1FAEEFADF7 /* WindowContentRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC335D7973205BF8B7EDD8EA /* WindowContentRenderer.swift */; };
 		9BAECBE2506FC3893151FD6C /* FontFace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BC98120D82BD7548347875E /* FontFace.swift */; };
 		9F79DA3F22B88CCBD2C1915C /* ToolManagerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED47BC6334A067AE04FEE032 /* ToolManagerView.swift */; };
@@ -106,6 +107,7 @@
 		D1EEFBDAE315F717373F82BD /* EditorNSView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83165B89231936674C54B513 /* EditorNSView.swift */; };
 		D3D3326E46122D2FEA329E47 /* WhichKeyState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70D5765529645C5D860576B7 /* WhichKeyState.swift */; };
 		D42695D627BD38405475ECFF /* ScrollAccumulatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 211424F30BBE8A57852D5630 /* ScrollAccumulatorTests.swift */; };
+		DB83E9F1763A0D2E7BD7F7D3 /* ViewInspector in Frameworks */ = {isa = PBXBuildFile; productRef = BD2531C0969FD21CC18D2FDB /* ViewInspector */; };
 		DD0B958D8ACEFFEF3C1A50AE /* ViewModelComputedTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22420E1CC772DAFB9A5043C2 /* ViewModelComputedTests.swift */; };
 		E18A2D9D7987A763DBD8214D /* SlotAllocator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 371C61E78D4BB39467516BA7 /* SlotAllocator.swift */; };
 		E2F11A5F81A89C0BF03D9EE2 /* CoreTextLineRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5387C9048870A71E7565ED06 /* CoreTextLineRenderer.swift */; };
@@ -160,6 +162,7 @@
 		7E4E980D53CCCE228BA59BD5 /* KeyboardInputTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardInputTests.swift; sourceTree = "<group>"; };
 		7E7AEABDC6CCBE796A539322 /* CoreTextLineRendererTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreTextLineRendererTests.swift; sourceTree = "<group>"; };
 		83165B89231936674C54B513 /* EditorNSView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorNSView.swift; sourceTree = "<group>"; };
+		86478D5660213F165B7E1E35 /* SwiftUIViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwiftUIViewTests.swift; sourceTree = "<group>"; };
 		89DAA6AEFA6A62A1172EABF2 /* minga-mac */ = {isa = PBXFileReference; includeInIndex = 0; path = "minga-mac"; sourceTree = BUILT_PRODUCTS_DIR; };
 		92C0836F0D4150126F181C05 /* PickerState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PickerState.swift; sourceTree = "<group>"; };
 		9F8372175FF223C9260B00C4 /* SlotAllocatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SlotAllocatorTests.swift; sourceTree = "<group>"; };
@@ -189,6 +192,17 @@
 		FD66FBCBFC20D50D22A969C8 /* SymbolsNerdFontMono-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "SymbolsNerdFontMono-Regular.ttf"; sourceTree = "<group>"; };
 		FD7FC26DB745A436D50E3AA6 /* WindowContentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowContentTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		055B5DD060ABF986C99376D6 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				DB83E9F1763A0D2E7BD7F7D3 /* ViewInspector in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
 		11BD8FE058FA53674B42329F /* Renderer */ = {
@@ -336,6 +350,7 @@
 				211424F30BBE8A57852D5630 /* ScrollAccumulatorTests.swift */,
 				9F8372175FF223C9260B00C4 /* SlotAllocatorTests.swift */,
 				5634B25BE5BB945A83E30FAD /* StateLifecycleTests.swift */,
+				86478D5660213F165B7E1E35 /* SwiftUIViewTests.swift */,
 				56B00002D020FED57D265C74 /* SystemColorTests.swift */,
 				F086ACF8E4F305C9DDAE24FF /* ThemeColorsTests.swift */,
 				22420E1CC772DAFB9A5043C2 /* ViewModelComputedTests.swift */,
@@ -353,6 +368,7 @@
 			buildConfigurationList = D780919DB5E11DE4AB14FA57 /* Build configuration list for PBXNativeTarget "MingaTests" */;
 			buildPhases = (
 				C8F3C47EE52117DADE97B9F9 /* Sources */,
+				055B5DD060ABF986C99376D6 /* Frameworks */,
 			);
 			buildRules = (
 			);
@@ -360,6 +376,7 @@
 			);
 			name = MingaTests;
 			packageProductDependencies = (
+				BD2531C0969FD21CC18D2FDB /* ViewInspector */,
 			);
 			productName = MingaTests;
 			productReference = 64CEFB02A774E5E8EF19029F /* MingaTests.xctest */;
@@ -404,6 +421,9 @@
 			);
 			mainGroup = E8F5FA5379F05A4CFD1B29AA;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				44FD65C0FA0E5058965DCE65 /* XCRemoteSwiftPackageReference "ViewInspector" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = EAC6A96BCF212D9B7E7CEF60 /* Products */;
 			projectDirPath = "";
@@ -555,6 +575,7 @@
 				07C6F28E3CD1A55ABD5344AA /* SlotAllocatorTests.swift in Sources */,
 				0BCDFB56E8397D739F52ED34 /* StateLifecycleTests.swift in Sources */,
 				531166B714D49278BA811033 /* StatusBarView.swift in Sources */,
+				9758BF46BB0EC7FEEB14FBA3 /* SwiftUIViewTests.swift in Sources */,
 				FEFCEFCDC21C5AA5456036D0 /* SystemColorTests.swift in Sources */,
 				03FDC63893F3CAA82BCE2A49 /* TabBarState.swift in Sources */,
 				F16FDEC1BFC1776B1109622E /* TabBarView.swift in Sources */,
@@ -795,6 +816,25 @@
 			defaultConfigurationName = Debug;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		44FD65C0FA0E5058965DCE65 /* XCRemoteSwiftPackageReference "ViewInspector" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/nalexn/ViewInspector";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.10.3;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		BD2531C0969FD21CC18D2FDB /* ViewInspector */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 44FD65C0FA0E5058965DCE65 /* XCRemoteSwiftPackageReference "ViewInspector" */;
+			productName = ViewInspector;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 408C02F1934F748B5B5586FC /* Project object */;
 }
