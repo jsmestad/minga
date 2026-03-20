@@ -313,6 +313,12 @@ defmodule Minga.Editor.Commands.Lsp do
         execute: &LspActions.prepare_call_hierarchy/1
       },
       %Minga.Command{
+        name: :call_hierarchy_outgoing,
+        description: "Call hierarchy (outgoing)",
+        requires_buffer: true,
+        execute: &LspActions.prepare_outgoing_call_hierarchy/1
+      },
+      %Minga.Command{
         name: :workspace_symbols,
         description: "Search workspace symbols",
         requires_buffer: true,

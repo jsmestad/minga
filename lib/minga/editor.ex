@@ -960,6 +960,12 @@ defmodule Minga.Editor do
   defp dispatch_lsp_response(:incoming_calls, state, result),
     do: LspActions.handle_incoming_calls_response(state, result)
 
+  defp dispatch_lsp_response(:outgoing_calls, state, result),
+    do: LspActions.handle_outgoing_calls_response(state, result)
+
+  defp dispatch_lsp_response(:prepare_outgoing_hierarchy, state, result),
+    do: LspActions.handle_prepare_outgoing_hierarchy_response(state, result)
+
   defp dispatch_lsp_response(:code_lens, state, result),
     do: LspActions.handle_code_lens_response(state, result)
 
