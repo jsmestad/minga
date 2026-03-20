@@ -96,6 +96,7 @@
 		C715D937E8591D8BA46A29CD /* FontTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD2DE335B00721CBB29329F9 /* FontTests.swift */; };
 		C7F0701B0E9FCF7E0293E84D /* LineBufferTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F5F10DF600E92632AD966A5 /* LineBufferTests.swift */; };
 		C8FAD7BE37506758A1DBF8F6 /* FileTreeState.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC2F98D07FE0F56DDBCD9525 /* FileTreeState.swift */; };
+		CD2952CCEB2FD594B269A75D /* GUIActionEncoderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2C629D58FF3305F579BA5E2 /* GUIActionEncoderTests.swift */; };
 		CF09E23141DB0E6D9B65826A /* WhichKeyState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70D5765529645C5D860576B7 /* WhichKeyState.swift */; };
 		CF5F4DBB1A1D5B7152BC0ADE /* ProtocolDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56750F0AAE58AF9A98BF5841 /* ProtocolDecoder.swift */; };
 		D1EEFBDAE315F717373F82BD /* EditorNSView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83165B89231936674C54B513 /* EditorNSView.swift */; };
@@ -168,6 +169,7 @@
 		DD14027C8C7BD17057DE820B /* AgentChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentChatView.swift; sourceTree = "<group>"; };
 		DF1919291250D9AD1375A8C9 /* CompletionOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompletionOverlay.swift; sourceTree = "<group>"; };
 		E244758FFE2BDDE3A8108C70 /* AgentChatState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentChatState.swift; sourceTree = "<group>"; };
+		E2C629D58FF3305F579BA5E2 /* GUIActionEncoderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GUIActionEncoderTests.swift; sourceTree = "<group>"; };
 		E892F827AFBE959F9DF25C05 /* StatusBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBarView.swift; sourceTree = "<group>"; };
 		ED47BC6334A067AE04FEE032 /* ToolManagerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolManagerView.swift; sourceTree = "<group>"; };
 		F086ACF8E4F305C9DDAE24FF /* ThemeColorsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeColorsTests.swift; sourceTree = "<group>"; };
@@ -312,6 +314,7 @@
 				470991E7B3850B1AADFD46FD /* CommandDispatcherTests.swift */,
 				7E7AEABDC6CCBE796A539322 /* CoreTextLineRendererTests.swift */,
 				BD2DE335B00721CBB29329F9 /* FontTests.swift */,
+				E2C629D58FF3305F579BA5E2 /* GUIActionEncoderTests.swift */,
 				754C68BAFE0C4DB553BFD06A /* GUIChromeDecoderTests.swift */,
 				F6C3196976BC934B3112EF96 /* IMECompositionTests.swift */,
 				5F5F10DF600E92632AD966A5 /* LineBufferTests.swift */,
@@ -508,6 +511,7 @@
 				78F06B9BFB553B50D9BDD50F /* FontFace.swift in Sources */,
 				939991DD65293C6C796EAA66 /* FontManager.swift in Sources */,
 				C715D937E8591D8BA46A29CD /* FontTests.swift in Sources */,
+				CD2952CCEB2FD594B269A75D /* GUIActionEncoderTests.swift in Sources */,
 				30E31170A79F30413D15D858 /* GUIChromeDecoderTests.swift in Sources */,
 				36E0C059965477465E15CC02 /* GUIState.swift in Sources */,
 				854BCC1151B43E9A161C95B5 /* IMEComposition.swift in Sources */,
