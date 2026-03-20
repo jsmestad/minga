@@ -397,6 +397,52 @@ defmodule Minga.Editor.LspActions do
     end
   end
 
+  @doc """
+  Expands or initiates smart selection.
+
+  If a selection range chain is already stored (from a previous expand),
+  moves to the next wider range. Otherwise, sends a new selectionRange
+  request to the LSP server.
+  """
+  @spec selection_expand(state()) :: state()
+  def selection_expand(%{selection_ranges: ranges, selection_range_index: idx} = state)
+      when is_list(ranges) and idx + 1 < length(ranges) do
+    new_idx = idx + 1
+    range = Enum.at(ranges, new_idx)
+    state = %{state | selection_range_index: new_idx}
+    apply_selection_range(state, range)
+  end
+
+  def selection_expand(state) do
+    # No stored ranges or at the widest range; send a new LSP request
+    selection_range(state)
+  end
+
+  @doc """
+  Shrinks the smart selection to the previous (narrower) range.
+
+  Walks back down the stored selection range chain. If already at the
+  innermost range, exits visual mode.
+  """
+  @spec selection_shrink(state()) :: state()
+  def selection_shrink(%{selection_ranges: ranges, selection_range_index: idx} = state)
+      when is_list(ranges) and idx > 0 do
+    new_idx = idx - 1
+    range = Enum.at(ranges, new_idx)
+    state = %{state | selection_range_index: new_idx}
+    apply_selection_range(state, range)
+  end
+
+  def selection_shrink(%{selection_ranges: [_ | _]} = state) do
+    # At innermost range, exit visual mode
+    vim = VimState.transition(state.vim, :normal)
+    %{state | vim: vim, selection_ranges: nil, selection_range_index: 0}
+  end
+
+  def selection_shrink(state) do
+    %{state | status_msg: "No selection ranges to shrink"}
+  end
+
   # ── Call hierarchy ────────────────────────────────────────────────────────
 
   @doc "Sends a textDocument/prepareCallHierarchy request."
