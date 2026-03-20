@@ -691,4 +691,107 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert decoded["b"] == 0
     end
   end
+
+  describe "gui_window_content" do
+    test "round-trips window content with rows, selection, and diagnostics", %{port: port} do
+      alias Minga.Editor.SemanticWindow
+      alias Minga.Editor.SemanticWindow.{DiagnosticRange, Selection, Span, VisualRow}
+
+      sw = %SemanticWindow{
+        window_id: 7,
+        full_refresh: true,
+        cursor_row: 1,
+        cursor_col: 3,
+        cursor_shape: :beam,
+        rows: [
+          %VisualRow{
+            row_type: :normal,
+            buf_line: 0,
+            text: "def foo do",
+            content_hash: 12_345,
+            spans: [
+              %Span{start_col: 0, end_col: 3, fg: 0x51AFEF, bg: 0x282C34, attrs: 0x01}
+            ]
+          },
+          %VisualRow{
+            row_type: :fold_start,
+            buf_line: 1,
+            text: "  :ok",
+            spans: [],
+            content_hash: 99
+          }
+        ],
+        selection: %Selection{type: :char, start_row: 0, start_col: 0, end_row: 0, end_col: 10},
+        search_matches: [],
+        diagnostic_ranges: [
+          %DiagnosticRange{
+            start_row: 0,
+            start_col: 0,
+            end_row: 0,
+            end_col: 3,
+            severity: :warning
+          }
+        ]
+      }
+
+      alias Minga.Port.Protocol.GUIWindowContent
+      cmd = GUIWindowContent.encode(sw)
+      Port.command(port, cmd)
+
+      assert_receive {^port, {:data, json}}, 5_000
+      decoded = Jason.decode!(json)
+
+      assert decoded["type"] == "gui_window_content"
+      assert decoded["window_id"] == 7
+      assert decoded["full_refresh"] == true
+      assert decoded["cursor_row"] == 1
+      assert decoded["cursor_col"] == 3
+      assert decoded["cursor_shape"] == 1
+      assert length(decoded["rows"]) == 2
+
+      [r1, r2] = decoded["rows"]
+      assert r1["text"] == "def foo do"
+      assert r1["row_type"] == 0
+      assert r1["buf_line"] == 0
+      assert length(r1["spans"]) == 1
+      assert hd(r1["spans"])["fg"] == 0x51AFEF
+      assert r2["row_type"] == 1
+      assert r2["text"] == "  :ok"
+
+      assert decoded["selection"]["type"] == 1
+      assert decoded["selection"]["start_row"] == 0
+      assert decoded["selection"]["end_col"] == 10
+      assert decoded["diagnostic_count"] == 1
+    end
+  end
+
+  describe "draw_styled_text" do
+    test "round-trips styled text with all attributes", %{port: port} do
+      # Raw binary: opcode + row(2) + col(2) + fg(3) + bg(3) + attrs(2)
+      # + ul_color(3) + blend(1) + font_weight(1) + font_id(1) + text_len(2) + text
+      text = "hello"
+      attrs16 = 0x0025
+
+      cmd =
+        <<0x1C, 5::16, 10::16, 0xFF, 0x6C, 0x6B, 0x28, 0x2C, 0x34, attrs16::16, 0xFF, 0x00, 0x00,
+          128::8, 5::8, 2::8, byte_size(text)::16, text::binary>>
+
+      Port.command(port, cmd)
+
+      assert_receive {^port, {:data, json}}, 5_000
+      decoded = Jason.decode!(json)
+
+      assert decoded["type"] == "draw_styled_text"
+      assert decoded["row"] == 5
+      assert decoded["col"] == 10
+      assert decoded["fg"] == 0xFF6C6B
+      assert decoded["bg"] == 0x282C34
+      assert decoded["attrs"] == attrs16
+      assert decoded["underline_color"] == 0xFF0000
+      assert decoded["blend"] == 128
+      assert decoded["font_weight"] == 5
+      assert decoded["font_id"] == 2
+      assert decoded["text"] == "hello"
+    end
+  end
 end

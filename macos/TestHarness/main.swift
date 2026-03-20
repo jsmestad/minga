@@ -199,6 +199,16 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
         }
         return result
 
+    case .drawStyledText(let row, let col, let fg, let bg, let attrs, let underlineColor, let blend, let fontWeight, let fontId, let text):
+        return ["type": "draw_styled_text", "row": Int(row), "col": Int(col),
+                "fg": Int(fg), "bg": Int(bg), "attrs": Int(attrs),
+                "underline_color": Int(underlineColor), "blend": Int(blend),
+                "font_weight": Int(fontWeight), "font_id": Int(fontId), "text": text]
+
+    case .drawText(let row, let col, let fg, let bg, let attrs, let text):
+        return ["type": "draw_text", "row": Int(row), "col": Int(col),
+                "fg": Int(fg), "bg": Int(bg), "attrs": Int(attrs), "text": text]
+
     default:
         return nil
     }
