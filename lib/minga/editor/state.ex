@@ -57,6 +57,7 @@ defmodule Minga.Editor.State do
   alias Minga.FileTree
   alias Minga.Log
   alias Minga.Mode
+  alias Minga.Panel.MessageStore
   alias Minga.Port.Capabilities
   # BVBridge alias removed: build_file_tab_defaults creates BVState directly.
   alias Minga.Theme
@@ -104,6 +105,7 @@ defmodule Minga.Editor.State do
             warning_popup_timer: nil,
             warnings_popup_dismissed: false,
             bottom_panel: %BottomPanel{},
+            message_store: %MessageStore{},
             windows: %Windows{},
             file_tree: %FileTreeState{},
             lsp_status: :none,
@@ -149,6 +151,7 @@ defmodule Minga.Editor.State do
           warning_popup_timer: reference() | nil,
           warnings_popup_dismissed: boolean(),
           bottom_panel: BottomPanel.t(),
+          message_store: MessageStore.t(),
           windows: Windows.t(),
           file_tree: FileTreeState.t(),
           lsp_status: Minga.Editor.Modeline.lsp_status(),

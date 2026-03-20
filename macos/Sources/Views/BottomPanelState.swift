@@ -22,6 +22,9 @@ final class BottomPanelState {
     var filterPreset: UInt8 = 0
     var tabs: [BottomPanelTab] = []
 
+    /// Messages tab content state.
+    let messagesState = MessagesContentState()
+
     /// Panel height stored in UserDefaults for persistence across show/hide.
     /// This is the user's drag-resized height; the BEAM's heightPercent is
     /// the initial/default value.

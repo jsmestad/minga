@@ -17,11 +17,13 @@ defmodule Minga.Editor.MessageLog do
   alias Minga.Buffer.Document
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Panel.MessageStore
 
   @max_lines 1000
 
   @doc """
-  Appends a timestamped message to the `*Messages*` buffer.
+  Appends a timestamped message to the `*Messages*` buffer and the
+  structured MessageStore (for the GUI Messages tab).
 
   No-op if the messages buffer isn't available. Trims the buffer
   to `#{@max_lines}` lines when it grows too large.
@@ -33,7 +35,10 @@ defmodule Minga.Editor.MessageLog do
     time = Calendar.strftime(DateTime.utc_now(), "%H:%M:%S")
     BufferServer.append(buf, "[#{time}] #{text}\n")
     maybe_trim(buf)
-    state
+
+    # Dual-write: also append to the structured store for GUI rendering.
+    {level, subsystem, _clean_text} = MessageStore.parse_prefix(text)
+    %{state | message_store: MessageStore.append(state.message_store, text, level, subsystem)}
   end
 
   @doc """

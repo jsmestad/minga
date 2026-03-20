@@ -298,7 +298,7 @@ Bottom panel container state (resizable, tabbed panel below editor surface).
 
 ```
 When visible:
-  opcode(1) + 1(1) + active_tab_index(1) + height_percent(1) + filter_preset(1) + tab_count(1) + tab_defs...
+  opcode(1) + 1(1) + active_tab_index(1) + height_percent(1) + filter_preset(1) + tab_count(1) + tab_defs... + content_payload
 
 Per tab_def:
   tab_type(1) + name_len(1) + name(name_len)
@@ -308,6 +308,17 @@ Tab type values:
 
 Filter preset values:
   0x00 = none (user controls filters), 0x01 = warnings (preset to warnings+errors)
+
+Messages content_payload (when active tab is messages):
+  entry_count(2) + entries...
+
+Per entry:
+  id(4) + level(1) + subsystem(1) + timestamp_secs(4) + path_len(2) + path(path_len) + text_len(2) + text(text_len)
+
+Level bytes: 0=debug, 1=info, 2=warning, 3=error
+Subsystem bytes: 0=editor, 1=lsp, 2=parser, 3=git, 4=render, 5=agent, 6=zig, 7=gui
+
+Entries are sent incrementally: the BEAM tracks the last sent ID and only sends new entries each frame. On first connection (or reconnect), all entries are sent.
 
 When hidden:
   opcode(1) + 0(1)
@@ -338,6 +349,7 @@ opcode(1) + action_type(1) + payload...
 | 0x09 | panel_switch_tab | tab_index(1) | User clicked a bottom panel tab |
 | 0x0A | panel_dismiss | (empty) | User dismissed the bottom panel |
 | 0x0B | panel_resize | height_percent(1) | User resized the bottom panel |
+| 0x0C | open_file | path_len(2) + path(path_len) | Open or switch to a file |
 
 ## Theme Color Slots
 

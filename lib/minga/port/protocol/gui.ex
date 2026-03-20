@@ -83,6 +83,7 @@ defmodule Minga.Port.Protocol.GUI do
   @gui_action_panel_switch_tab 0x09
   @gui_action_panel_dismiss 0x0A
   @gui_action_panel_resize 0x0B
+  @gui_action_open_file 0x0C
 
   # ── Types ──
 
@@ -99,6 +100,7 @@ defmodule Minga.Port.Protocol.GUI do
           | {:panel_switch_tab, tab_index :: non_neg_integer()}
           | :panel_dismiss
           | {:panel_resize, height_percent :: non_neg_integer()}
+          | {:open_file, path :: String.t()}
 
   # ═══════════════════════════════════════════════════════════════════════════
   # Encoding (BEAM → Frontend)
@@ -255,19 +257,28 @@ defmodule Minga.Port.Protocol.GUI do
   Wire format:
     When visible:
       opcode(1) + visible=1(1) + active_tab_index(1) + height_percent(1)
-      + filter_preset(1) + tab_count(1) + tab_defs...
+      + filter_preset(1) + tab_count(1) + tab_defs... + content_payload
     Per tab_def:
       tab_type(1) + name_len(1) + name(name_len)
+    Messages content_payload (when active tab is :messages):
+      entry_count(2) + entries...
+    Per entry:
+      id(4) + level(1) + subsystem(1) + timestamp_secs(4)
+      + path_len(2) + path(path_len) + text_len(2) + text(text_len)
     When hidden:
       opcode(1) + visible=0(1)
   """
-  @spec encode_gui_bottom_panel(Minga.Editor.BottomPanel.t()) :: binary()
-  def encode_gui_bottom_panel(%{visible: false}) do
-    <<@op_gui_bottom_panel, 0>>
+  @spec encode_gui_bottom_panel(
+          Minga.Editor.BottomPanel.t(),
+          Minga.Panel.MessageStore.t()
+        ) :: {binary(), Minga.Panel.MessageStore.t()}
+  def encode_gui_bottom_panel(%{visible: false}, store) do
+    {<<@op_gui_bottom_panel, 0>>, store}
   end
 
-  def encode_gui_bottom_panel(%{visible: true} = panel) do
+  def encode_gui_bottom_panel(%{visible: true} = panel, store) do
     alias Minga.Editor.BottomPanel
+    alias Minga.Panel.MessageStore
 
     active_index =
       Enum.find_index(panel.tabs, &(&1 == panel.active_tab)) || 0
@@ -279,8 +290,46 @@ defmodule Minga.Port.Protocol.GUI do
         <<BottomPanel.tab_type_byte(tab)::8, name_bytes::8, name::binary>>
       end
 
-    <<@op_gui_bottom_panel, 1, active_index::8, panel.height_percent::8,
-      BottomPanel.filter_byte(panel.filter)::8, length(panel.tabs)::8, tab_defs::binary>>
+    header =
+      <<@op_gui_bottom_panel, 1, active_index::8, panel.height_percent::8,
+        BottomPanel.filter_byte(panel.filter)::8, length(panel.tabs)::8, tab_defs::binary>>
+
+    # Append content payload for the active tab
+    case panel.active_tab do
+      :messages ->
+        new_entries = MessageStore.entries_since(store, store.last_sent_id)
+        content = encode_message_entries(new_entries)
+        last_id = if new_entries == [], do: store.last_sent_id, else: List.last(new_entries).id
+        {header <> content, MessageStore.mark_sent(store, last_id)}
+
+      _ ->
+        # No content for other tabs yet
+        {header <> <<0::16>>, store}
+    end
+  end
+
+  @spec encode_message_entries([Minga.Panel.MessageStore.Entry.t()]) :: binary()
+  defp encode_message_entries(entries) do
+    alias Minga.Panel.MessageStore
+
+    count = length(entries)
+
+    entry_data =
+      for entry <- entries, into: <<>> do
+        path_bytes = entry.file_path || ""
+        path_len = byte_size(path_bytes)
+        text_bytes = entry.text
+        text_len = byte_size(text_bytes)
+        # Seconds since midnight for compact timestamp
+        ts_secs =
+          NaiveDateTime.to_time(entry.timestamp) |> Time.to_seconds_after_midnight() |> elem(0)
+
+        <<entry.id::32, MessageStore.level_byte(entry.level)::8,
+          MessageStore.subsystem_byte(entry.subsystem)::8, ts_secs::32, path_len::16,
+          path_bytes::binary, text_len::16, text_bytes::binary>>
+      end
+
+    <<count::16, entry_data::binary>>
   end
 
   # ── Theme ──
@@ -871,6 +920,9 @@ defmodule Minga.Port.Protocol.GUI do
 
   def decode_gui_action(@gui_action_panel_resize, <<height_percent::8>>),
     do: {:ok, {:panel_resize, height_percent}}
+
+  def decode_gui_action(@gui_action_open_file, <<path_len::16, path::binary-size(path_len)>>),
+    do: {:ok, {:open_file, path}}
 
   def decode_gui_action(_, _), do: :error
 end

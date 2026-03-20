@@ -30,6 +30,9 @@ protocol InputEncoder: AnyObject, Sendable {
     func sendPanelSwitchTab(index: UInt8)
     func sendPanelDismiss()
     func sendPanelResize(heightPercent: UInt8)
+
+    // File actions
+    func sendOpenFile(path: String)
 }
 
 extension InputEncoder {
@@ -220,6 +223,20 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_PANEL_RESIZE
         buf[2] = heightPercent
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: open_file. Layout: opcode(1) + action_type(1) + path_len(2) + path(path_len).
+    func sendOpenFile(path: String) {
+        let utf8 = Array(path.utf8)
+        let pathLen = min(utf8.count, Int(UInt16.max))
+        var buf = Data(count: 4 + pathLen)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_OPEN_FILE
+        writeU16(&buf, 2, UInt16(pathLen))
+        if pathLen > 0 {
+            buf.replaceSubrange(4..<(4 + pathLen), with: utf8[0..<pathLen])
+        }
         writeFrame(buf)
     }
 

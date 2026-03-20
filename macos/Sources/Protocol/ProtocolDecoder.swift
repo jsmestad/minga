@@ -37,7 +37,8 @@ enum RenderCommand: Sendable {
     case guiCursorline(row: UInt16, r: UInt8, g: UInt8, b: UInt8)
     case guiGutter(data: GUIWindowGutter)
     case guiBottomPanel(visible: Bool, activeTabIndex: UInt8, heightPercent: UInt8,
-                         filterPreset: UInt8, tabs: [GUIBottomPanelTab])
+                         filterPreset: UInt8, tabs: [GUIBottomPanelTab],
+                         entries: [GUIMessageEntry])
 }
 
 /// Line number display style from the BEAM.
@@ -98,6 +99,16 @@ struct GUIWindowGutter: Sendable {
 struct GUIBottomPanelTab: Sendable {
     let tabType: UInt8
     let name: String
+}
+
+/// A structured log entry from the Messages tab content.
+struct GUIMessageEntry: Sendable {
+    let id: UInt32
+    let level: UInt8
+    let subsystem: UInt8
+    let timestampSecs: UInt32
+    let filePath: String
+    let text: String
 }
 
 /// A styled text run for GUI rendering. Carries pre-computed colors from the BEAM.
@@ -816,7 +827,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         let visible = data[rest] != 0
         guard visible else {
             return (.guiBottomPanel(visible: false, activeTabIndex: 0, heightPercent: 30,
-                                     filterPreset: 0, tabs: []), 2)
+                                     filterPreset: 0, tabs: [], entries: []), 2)
         }
         // visible=1(1) + active_tab_index(1) + height_percent(1) + filter_preset(1) + tab_count(1) = 5 bytes
         guard data.count >= rest + 5 else { throw ProtocolDecodeError.malformed }
@@ -836,9 +847,40 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             pos += nameLen
             tabs.append(GUIBottomPanelTab(tabType: tabType, name: name))
         }
+        // Content payload: entry_count(2) + entries...
+        var entries: [GUIMessageEntry] = []
+        guard data.count >= pos + 2 else {
+            return (.guiBottomPanel(visible: true, activeTabIndex: activeTabIndex,
+                                     heightPercent: heightPercent, filterPreset: filterPreset,
+                                     tabs: tabs, entries: []), pos - offset)
+        }
+        let entryCount = Int(readU16(data, pos))
+        pos += 2
+        for _ in 0..<entryCount {
+            // id(4) + level(1) + subsystem(1) + timestamp_secs(4) + path_len(2)
+            guard data.count >= pos + 12 else { break }
+            let entryId = readU32(data, pos)
+            let level = data[pos + 4]
+            let subsystem = data[pos + 5]
+            let tsSecs = readU32(data, pos + 6)
+            let pathLen = Int(readU16(data, pos + 10))
+            pos += 12
+            guard data.count >= pos + pathLen else { break }
+            let filePath = String(data: data[pos..<(pos + pathLen)], encoding: .utf8) ?? ""
+            pos += pathLen
+            // text_len(2) + text
+            guard data.count >= pos + 2 else { break }
+            let textLen = Int(readU16(data, pos))
+            pos += 2
+            guard data.count >= pos + textLen else { break }
+            let text = String(data: data[pos..<(pos + textLen)], encoding: .utf8) ?? ""
+            pos += textLen
+            entries.append(GUIMessageEntry(id: entryId, level: level, subsystem: subsystem,
+                                            timestampSecs: tsSecs, filePath: filePath, text: text))
+        }
         return (.guiBottomPanel(visible: true, activeTabIndex: activeTabIndex,
                                  heightPercent: heightPercent, filterPreset: filterPreset,
-                                 tabs: tabs), pos - offset)
+                                 tabs: tabs, entries: entries), pos - offset)
 
     default:
         throw ProtocolDecodeError.unknownOpcode(opcode)

@@ -50,7 +50,7 @@ defmodule Minga.Editor.RenderPipeline.Emit do
   Also sends title and window background color when they change
   (side-channel writes).
   """
-  @spec emit(Frame.t(), state(), Chrome.t() | nil) :: :ok
+  @spec emit(Frame.t(), state(), Chrome.t() | nil) :: state()
   def emit(frame, state, chrome \\ nil) do
     scroll_deltas = detect_scroll_regions(state)
 
@@ -83,9 +83,9 @@ defmodule Minga.Editor.RenderPipeline.Emit do
       if Capabilities.gui?(state.capabilities) do
         status_bar_data = chrome && chrome.status_bar_data
         EmitGUI.sync_chrome(state, status_bar_data)
+      else
+        state
       end
-
-      :ok
     end)
   end
 

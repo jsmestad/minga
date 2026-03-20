@@ -224,7 +224,7 @@ final class CommandDispatcher {
                 lineBuffer.gutterCol = UInt16(data.lineNumberWidth) + UInt16(data.signColWidth)
             }
 
-        case .guiBottomPanel(let visible, let activeTabIndex, let heightPercent, let filterPreset, let tabs):
+        case .guiBottomPanel(let visible, let activeTabIndex, let heightPercent, let filterPreset, let tabs, let entries):
             if visible {
                 let panelTabs = tabs.enumerated().map { (i, t) in
                     BottomPanelTab(id: i, tabType: t.tabType, name: t.name)
@@ -236,6 +236,10 @@ final class CommandDispatcher {
                     filterPreset: filterPreset,
                     tabs: panelTabs
                 )
+                // Append new message entries
+                if !entries.isEmpty {
+                    guiState.bottomPanelState.messagesState.appendEntries(entries)
+                }
             } else {
                 guiState.bottomPanelState.hide()
             }

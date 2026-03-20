@@ -1300,6 +1300,29 @@ defmodule Minga.Editor do
     %{state | bottom_panel: BottomPanel.resize(state.bottom_panel, height_percent)}
   end
 
+  defp handle_gui_action(state, {:open_file, path}) do
+    # Check if already open in buffer list
+    idx =
+      Enum.find_index(state.buffers.list, fn buf ->
+        try do
+          BufferServer.file_path(buf) == path
+        catch
+          :exit, _ -> false
+        end
+      end)
+
+    case idx do
+      nil ->
+        case Commands.start_buffer(path) do
+          {:ok, pid} -> Commands.add_buffer(state, pid)
+          {:error, _reason} -> %{state | status_msg: "Could not open #{path}"}
+        end
+
+      i ->
+        EditorState.switch_buffer(state, i)
+    end
+  end
+
   # Moves the file tree cursor to the given index and performs the action.
   @spec gui_tree_action(state(), non_neg_integer(), :click | :toggle) :: state()
   defp gui_tree_action(%{file_tree: %{tree: nil}} = state, _index, _action), do: state

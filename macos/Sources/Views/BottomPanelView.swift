@@ -129,15 +129,25 @@ struct BottomPanelView: View {
 
     // MARK: - Content area
 
+    @ViewBuilder
     private var contentArea: some View {
-        // Placeholder content. The Messages tab (#823) will replace this
-        // with structured log entries. For now, show a centered label.
-        VStack {
-            Spacer()
-            Text(activeTabName)
-                .font(.system(size: 12))
-                .foregroundStyle(theme.tabInactiveFg.opacity(0.5))
-            Spacer()
+        if state.activeTabIndex < state.tabs.count,
+           state.tabs[state.activeTabIndex].tabType == 0x01 {
+            // Messages tab: render structured log entries
+            MessagesContentView(
+                state: state.messagesState,
+                theme: theme,
+                encoder: encoder
+            )
+        } else {
+            // Placeholder for other tab types (diagnostics, terminal)
+            VStack {
+                Spacer()
+                Text(activeTabName)
+                    .font(.system(size: 12))
+                    .foregroundStyle(theme.tabInactiveFg.opacity(0.5))
+                Spacer()
+            }
         }
     }
 
