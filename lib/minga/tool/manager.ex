@@ -36,7 +36,26 @@ defmodule Minga.Tool.Manager do
   @table __MODULE__
   @tools_dir_name "tools"
 
-  @type tool_status :: :installed | :installing | :not_installed | :update_available
+  @type tool_status :: :installed | :installing | :not_installed | :update_available | :failed
+
+  defmodule State do
+    @moduledoc false
+
+    @enforce_keys [:table]
+    defstruct [
+      :table,
+      installing: MapSet.new(),
+      failed: MapSet.new(),
+      task_refs: %{}
+    ]
+
+    @type t :: %__MODULE__{
+            table: :ets.tid(),
+            installing: MapSet.t(atom()),
+            failed: MapSet.t(atom()),
+            task_refs: %{reference() => atom()}
+          }
+  end
 
   # ── Client API ──────────────────────────────────────────────────────────────
 
@@ -129,7 +148,7 @@ defmodule Minga.Tool.Manager do
   end
 
   @impl true
-  @spec init(keyword()) :: {:ok, map()}
+  @spec init(keyword()) :: {:ok, State.t()}
   def init(_opts) do
     table = :ets.new(@table, [:named_table, :set, :public, read_concurrency: true])
     dir = tools_dir()
@@ -138,13 +157,7 @@ defmodule Minga.Tool.Manager do
     # Scan existing installations on startup
     scan_installed(table, dir)
 
-    state = %{
-      table: table,
-      installing: MapSet.new(),
-      task_refs: %{}
-    }
-
-    {:ok, state}
+    {:ok, %State{table: table}}
   end
 
   @impl true
@@ -237,16 +250,19 @@ defmodule Minga.Tool.Manager do
         Process.demonitor(ref, [:flush])
         state = %{state | task_refs: task_refs, installing: MapSet.delete(state.installing, name)}
 
-        case result do
-          {:ok, version, recipe} ->
-            record_installation(recipe, version)
-            broadcast(:tool_install_complete, %{name: name, version: version})
-            log_message("Tool installed: #{recipe.label} v#{version}")
+        state =
+          case result do
+            {:ok, version, recipe} ->
+              record_installation(recipe, version)
+              broadcast(:tool_install_complete, %{name: name, version: version})
+              log_message("Tool installed: #{recipe.label} v#{version}")
+              %{state | failed: MapSet.delete(state.failed, name)}
 
-          {:error, reason} ->
-            broadcast(:tool_install_failed, %{name: name, reason: reason})
-            log_message("Tool install failed: #{name} - #{inspect(reason)}")
-        end
+            {:error, reason} ->
+              broadcast(:tool_install_failed, %{name: name, reason: reason})
+              log_message("Tool install failed: #{name} - #{inspect(reason)}")
+              %{state | failed: MapSet.put(state.failed, name)}
+          end
 
         {:noreply, state}
     end
@@ -259,6 +275,7 @@ defmodule Minga.Tool.Manager do
 
       {name, task_refs} ->
         state = %{state | task_refs: task_refs, installing: MapSet.delete(state.installing, name)}
+        state = %{state | failed: MapSet.put(state.failed, name)}
         broadcast(:tool_install_failed, %{name: name, reason: reason})
         log_message("Tool install crashed: #{name} - #{inspect(reason)}")
         {:noreply, state}
@@ -285,9 +302,13 @@ defmodule Minga.Tool.Manager do
     if MapSet.member?(state.installing, name) do
       {:installing, nil}
     else
-      case get_installation(name) do
-        %Installation{version: version} -> {:installed, version}
-        nil -> {:not_installed, nil}
+      if MapSet.member?(state.failed, name) do
+        {:failed, nil}
+      else
+        case get_installation(name) do
+          %Installation{version: version} -> {:installed, version}
+          nil -> {:not_installed, nil}
+        end
       end
     end
   end
@@ -305,6 +326,7 @@ defmodule Minga.Tool.Manager do
   defp validate_recipe_and_status(name) do
     case RecipeRegistry.get(name) do
       nil -> {:error, :unknown_tool}
+      # Allow retry of failed installs
       recipe -> if installed?(name), do: {:error, :already_installed}, else: {:ok, recipe}
     end
   end
@@ -341,6 +363,7 @@ defmodule Minga.Tool.Manager do
     %{
       state
       | installing: MapSet.put(state.installing, name),
+        failed: MapSet.delete(state.failed, name),
         task_refs: Map.put(state.task_refs, task.ref, name)
     }
   end
@@ -482,6 +505,7 @@ defmodule Minga.Tool.Manager do
   # once check_updates is wired into tool_status_list (ticket #743).
   @spec status_order(tool_status()) :: non_neg_integer()
   defp status_order(:installing), do: 0
+  defp status_order(:failed), do: 0
   defp status_order(:installed), do: 1
   defp status_order(:not_installed), do: 2
 

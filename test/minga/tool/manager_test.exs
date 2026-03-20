@@ -107,7 +107,7 @@ defmodule Minga.Tool.ManagerTest do
       # All should have recipe and status
       for s <- statuses do
         assert %{recipe: %Minga.Tool.Recipe{}, status: status} = s
-        assert status in [:installed, :installing, :not_installed, :update_available]
+        assert status in [:installed, :installing, :not_installed, :update_available, :failed]
       end
     end
 

@@ -79,7 +79,15 @@ defmodule Minga.Picker.Source do
   """
   @callback layout() :: layout()
 
-  @optional_callbacks [preview?: 0, actions: 1, on_action: 3, layout: 0]
+  @doc """
+  Whether the picker should stay open after selecting an item.
+  Defaults to `false` (picker closes on Enter). When `true`, the picker
+  calls `on_select`, then refreshes items via `candidates/1` so the
+  user can see updated state (e.g., tool install status changes).
+  """
+  @callback keep_open_on_select?() :: boolean()
+
+  @optional_callbacks [preview?: 0, actions: 1, on_action: 3, layout: 0, keep_open_on_select?: 0]
 
   @doc """
   Default `on_cancel` implementation: restores the buffer that was active
@@ -135,6 +143,18 @@ defmodule Minga.Picker.Source do
       module.layout()
     else
       :bottom
+    end
+  end
+
+  @doc """
+  Returns whether the picker should stay open after selecting an item.
+  """
+  @spec keep_open_on_select?(module()) :: boolean()
+  def keep_open_on_select?(module) do
+    if function_exported?(module, :keep_open_on_select?, 0) do
+      module.keep_open_on_select?()
+    else
+      false
     end
   end
 end

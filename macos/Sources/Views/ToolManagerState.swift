@@ -38,6 +38,7 @@ enum ToolStatus: UInt8 {
     case installed = 1
     case installing = 2
     case updateAvailable = 3
+    case failed = 4
 
     var label: String {
         switch self {
@@ -45,6 +46,7 @@ enum ToolStatus: UInt8 {
         case .installed: return "Installed"
         case .installing: return "Installing..."
         case .updateAvailable: return "Update available"
+        case .failed: return "Failed"
         }
     }
 }

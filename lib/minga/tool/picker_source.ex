@@ -2,9 +2,9 @@ defmodule Minga.Tool.PickerSource do
   @moduledoc """
   Picker source for browsing and installing tools.
 
-  Shows all available tools with their install status. Selecting an
-  uninstalled tool installs it. Selecting an installed tool with an
-  update available updates it.
+  Shows all available tools with their install status. The picker stays
+  open after selecting a tool so the user can see status changes in real
+  time and install multiple tools in one session.
 
   Accessible via `SPC c l I` (Manage tools).
   """
@@ -25,6 +25,10 @@ defmodule Minga.Tool.PickerSource do
   @impl true
   @spec layout() :: :centered
   def layout, do: :centered
+
+  @impl true
+  @spec keep_open_on_select?() :: boolean()
+  def keep_open_on_select?, do: true
 
   @impl true
   @spec candidates(term()) :: [Item.t()]
@@ -58,7 +62,7 @@ defmodule Minga.Tool.PickerSource do
   end
 
   def on_select(%Item{id: {name, :installed}}, state) do
-    %{state | status_msg: "#{name} is already installed. Use :ToolUpdate to update."}
+    %{state | status_msg: "#{name} is already installed. Press C-o for actions."}
   end
 
   def on_select(%Item{id: {name, :update_available}}, state) do
@@ -70,6 +74,14 @@ defmodule Minga.Tool.PickerSource do
 
   def on_select(%Item{id: {name, :installing}}, state) do
     %{state | status_msg: "#{name} is currently being installed..."}
+  end
+
+  def on_select(%Item{id: {name, :failed}}, state) do
+    # Retry on failed tool
+    case ToolManager.install(name) do
+      :ok -> %{state | status_msg: "Retrying #{name}..."}
+      {:error, reason} -> %{state | status_msg: "Cannot install #{name}: #{reason}"}
+    end
   end
 
   @impl true
@@ -84,6 +96,10 @@ defmodule Minga.Tool.PickerSource do
 
   def actions(%Item{id: {_name, :not_installed}}) do
     [{"Install", :install}]
+  end
+
+  def actions(%Item{id: {_name, :failed}}) do
+    [{"Retry", :install}]
   end
 
   def actions(_), do: []
@@ -124,10 +140,12 @@ defmodule Minga.Tool.PickerSource do
   defp status_badge(:installing, _), do: "⟳ installing..."
   defp status_badge(:update_available, version), do: "↑ v#{version}"
   defp status_badge(:not_installed, _), do: ""
+  defp status_badge(:failed, _), do: "✕ failed"
 
   @spec status_color(atom()) :: non_neg_integer()
   defp status_color(:installed), do: 0x50FA7B
   defp status_color(:installing), do: 0xF1FA8C
   defp status_color(:update_available), do: 0xFFB86C
   defp status_color(:not_installed), do: 0x6272A4
+  defp status_color(:failed), do: 0xFF6E6E
 end

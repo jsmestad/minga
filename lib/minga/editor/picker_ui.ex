@@ -198,12 +198,18 @@ defmodule Minga.Editor.PickerUI do
         close(state)
 
       item ->
-        new_state = close(state)
-        new_state = source.on_select(item, new_state)
+        if Picker.Source.keep_open_on_select?(source) do
+          # Stay open: run the action, then refresh items in place
+          new_state = source.on_select(item, state)
+          refresh_items(new_state)
+        else
+          new_state = close(state)
+          new_state = source.on_select(item, new_state)
 
-        case Map.get(new_state, :pending_command) do
-          nil -> new_state
-          cmd -> {Map.delete(new_state, :pending_command), {:execute_command, cmd}}
+          case Map.get(new_state, :pending_command) do
+            nil -> new_state
+            cmd -> {Map.delete(new_state, :pending_command), {:execute_command, cmd}}
+          end
         end
     end
   end
@@ -460,6 +466,26 @@ defmodule Minga.Editor.PickerUI do
   @spec close(state()) :: state()
   def close(state) do
     %{state | picker_ui: %PickerState{}}
+  end
+
+  @doc """
+  Refreshes the picker items from the source while preserving the query
+  and selection position. Used by keep-open pickers (e.g., tool manager)
+  to update item status after an action.
+  """
+  @spec refresh_items(state()) :: state()
+  def refresh_items(%{picker_ui: %{picker: nil}} = state), do: state
+
+  def refresh_items(%{picker_ui: %{picker: picker, source: source} = pui} = state) do
+    items = source.candidates(state)
+    refreshed = %{picker | items: items}
+    refreshed = Picker.filter(refreshed, picker.query)
+
+    # Clamp selection to new item count
+    max_sel = max(length(refreshed.filtered) - 1, 0)
+    refreshed = %{refreshed | selected: min(picker.selected, max_sel)}
+
+    %{state | picker_ui: %{pui | picker: refreshed}}
   end
 
   # ── Centered (floating) layout ───────────────────────────────────────────────

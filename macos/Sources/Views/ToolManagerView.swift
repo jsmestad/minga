@@ -295,6 +295,16 @@ struct ToolManagerView: View {
                     Capsule()
                         .strokeBorder(theme.accent.opacity(0.4), lineWidth: 1)
                 )
+
+        case .failed:
+            HStack(spacing: 4) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Color(red: 1.0, green: 0.47, blue: 0.47))
+                Text("Failed — ↵ Retry")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Color(red: 1.0, green: 0.47, blue: 0.47))
+            }
         }
     }
 
@@ -344,17 +354,48 @@ struct ToolManagerView: View {
             .background(theme.popupBorder.opacity(0.3))
 
         HStack(spacing: 16) {
-            keyHint(key: "↵", action: "Install/Update")
-            keyHint(key: "d", action: "Uninstall")
-            keyHint(key: "Tab", action: "Filter")
+            enterHint
+            keyHint(key: "C-o", action: "Actions")
             keyHint(key: "Esc", action: "Close")
             Spacer()
+            if state.installingCount > 0 {
+                HStack(spacing: 3) {
+                    ProgressView()
+                        .controlSize(.mini)
+                    Text("\(state.installingCount) installing")
+                        .font(.system(size: 10))
+                        .foregroundStyle(theme.popupFg.opacity(0.4))
+                }
+            }
             Text("\(state.tools.count) tools")
                 .font(.system(size: 10))
                 .foregroundStyle(theme.popupFg.opacity(0.3))
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
+    }
+
+    /// Contextual Enter key hint based on selected tool status.
+    @ViewBuilder
+    private var enterHint: some View {
+        let selectedTool = state.selectedIndex < state.tools.count
+            ? state.tools[state.selectedIndex]
+            : nil
+
+        switch selectedTool?.status {
+        case .notInstalled:
+            keyHint(key: "↵", action: "Install")
+        case .installed:
+            keyHint(key: "↵", action: "Update")
+        case .updateAvailable:
+            keyHint(key: "↵", action: "Update")
+        case .failed:
+            keyHint(key: "↵", action: "Retry")
+        case .installing:
+            keyHint(key: "↵", action: "Installing…")
+        case nil, .none:
+            keyHint(key: "↵", action: "Select")
+        }
     }
 
     @ViewBuilder

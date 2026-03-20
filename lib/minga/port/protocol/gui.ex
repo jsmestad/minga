@@ -1240,6 +1240,7 @@ defmodule Minga.Port.Protocol.GUI do
   defp encode_tool_status(:installed), do: 1
   defp encode_tool_status(:installing), do: 2
   defp encode_tool_status(:update_available), do: 3
+  defp encode_tool_status(:failed), do: 4
   defp encode_tool_status(_), do: 0
 
   @spec encode_tool_method(atom()) :: non_neg_integer()
