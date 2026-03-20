@@ -244,7 +244,6 @@ opcode(1) + row(2) + r(1) + g(1) + b(1)
 
 The GUI frontend draws the cursorline as a full-width colored rectangle behind the text on this row. This replaces the TUI approach of prepending a full-width space fill draw to paint the background.
 
-<<<<<<< HEAD
 ### 0x7B — gui_gutter
 
 Structured gutter data for native line number and sign rendering. One message is sent per editor window (split pane), each including the window's screen position. Agent chat windows are skipped.

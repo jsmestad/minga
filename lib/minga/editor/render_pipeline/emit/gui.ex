@@ -337,7 +337,6 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
     :ok
   end
 
-<<<<<<< HEAD
   # ── Gutter ──
 
   @spec send_gui_gutter(state()) :: :ok

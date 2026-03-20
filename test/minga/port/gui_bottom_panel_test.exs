@@ -11,7 +11,7 @@ defmodule Minga.Port.GUIBottomPanelTest do
     test "encodes hidden panel as 2 bytes" do
       panel = %BottomPanel{visible: false}
       {binary, _store} = ProtocolGUI.encode_gui_bottom_panel(panel, empty_store())
-      assert <<0x7B, 0>> = binary
+      assert <<0x7C, 0>> = binary
     end
 
     test "encodes visible panel with messages tab and empty store" do
@@ -25,7 +25,7 @@ defmodule Minga.Port.GUIBottomPanelTest do
 
       {binary, _store} = ProtocolGUI.encode_gui_bottom_panel(panel, empty_store())
 
-      assert <<0x7B, 1, active_idx::8, height::8, filter::8, tab_count::8, rest::binary>> =
+      assert <<0x7C, 1, active_idx::8, height::8, filter::8, tab_count::8, rest::binary>> =
                binary
 
       assert active_idx == 0
@@ -49,7 +49,7 @@ defmodule Minga.Port.GUIBottomPanelTest do
 
       {binary, _store} = ProtocolGUI.encode_gui_bottom_panel(panel, empty_store())
 
-      assert <<0x7B, 1, active_idx::8, height::8, filter::8, tab_count::8, rest::binary>> =
+      assert <<0x7C, 1, active_idx::8, height::8, filter::8, tab_count::8, rest::binary>> =
                binary
 
       # diagnostics is at index 1
@@ -74,7 +74,7 @@ defmodule Minga.Port.GUIBottomPanelTest do
       {binary, new_store} = ProtocolGUI.encode_gui_bottom_panel(panel, store)
 
       # Header: opcode + visible + active_idx + height + filter + tab_count + tab_def
-      assert <<0x7B, 1, 0, _height::8, 0, 1, 0x01, nlen::8, _name::binary-size(nlen),
+      assert <<0x7C, 1, 0, _height::8, 0, 1, 0x01, nlen::8, _name::binary-size(nlen),
                entry_count::16, entries_data::binary>> = binary
 
       assert entry_count == 2
@@ -110,7 +110,7 @@ defmodule Minga.Port.GUIBottomPanelTest do
       assert store4.last_sent_id == 2
 
       # Parse to find entry count
-      assert <<0x7B, 1, _::binary-size(4), 0x01, nlen::8, _name::binary-size(nlen),
+      assert <<0x7C, 1, _::binary-size(4), 0x01, nlen::8, _name::binary-size(nlen),
                entry_count::16, _rest::binary>> = binary2
 
       assert entry_count == 1
@@ -119,7 +119,7 @@ defmodule Minga.Port.GUIBottomPanelTest do
     test "encodes filter preset for warnings" do
       panel = %BottomPanel{visible: true, filter: :warnings}
       {binary, _store} = ProtocolGUI.encode_gui_bottom_panel(panel, empty_store())
-      <<0x7B, 1, _active::8, _height::8, filter::8, _rest::binary>> = binary
+      <<0x7C, 1, _active::8, _height::8, filter::8, _rest::binary>> = binary
       assert filter == 0x01
     end
   end

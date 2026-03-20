@@ -787,7 +787,6 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         let row = readU16(data, rest)
         return (.guiCursorline(row: row, r: data[rest + 2], g: data[rest + 3], b: data[rest + 4]), 6)
 
-<<<<<<< HEAD
     case OP_GUI_GUTTER:
         // Per-window format: content_row:2 + content_col:2 + content_height:2 + is_active:1
         // + cursor_line:4 + style:1 + ln_width:1 + sign_width:1 + line_count:2 = 16 bytes header
