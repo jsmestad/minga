@@ -150,30 +150,45 @@ defmodule Minga.Input.Router do
           pid() | nil,
           {non_neg_integer(), non_neg_integer()} | nil
         ) :: EditorState.t()
-  defp maybe_schedule_document_highlight(state, old_buffer, old_cursor) do
-    current_buffer = state.buffers.active
+  defp maybe_schedule_document_highlight(state, old_buffer, old_cursor)
 
-    cond do
-      # Buffer changed: clear highlights
-      current_buffer != old_buffer ->
-        LspActions.clear_document_highlights(state)
+  # Buffer changed: clear highlights
+  defp maybe_schedule_document_highlight(
+         %EditorState{buffers: %{active: current}} = state,
+         old_buffer,
+         _old_cursor
+       )
+       when current != old_buffer do
+    LspActions.clear_document_highlights(state)
+  end
 
-      # Not normal mode: clear highlights
-      state.vim.mode != :normal ->
-        LspActions.clear_document_highlights(state)
+  # Not normal mode: clear highlights
+  defp maybe_schedule_document_highlight(
+         %EditorState{vim: %{mode: mode}} = state,
+         _old_buffer,
+         _old_cursor
+       )
+       when mode != :normal do
+    LspActions.clear_document_highlights(state)
+  end
 
-      # Normal mode with a live buffer: schedule only if cursor moved
-      current_buffer != nil ->
-        new_cursor = safe_cursor(current_buffer)
+  # Normal mode, no buffer: no-op
+  defp maybe_schedule_document_highlight(
+         %EditorState{buffers: %{active: nil}} = state,
+         _old_buffer,
+         _old_cursor
+       ) do
+    state
+  end
 
-        if new_cursor != old_cursor do
-          LspActions.schedule_document_highlight(state)
-        else
-          state
-        end
+  # Normal mode with a live buffer: schedule only if cursor moved
+  defp maybe_schedule_document_highlight(state, _old_buffer, old_cursor) do
+    new_cursor = safe_cursor(state.buffers.active)
 
-      true ->
-        state
+    if new_cursor != old_cursor do
+      LspActions.schedule_document_highlight(state)
+    else
+      state
     end
   end
 
