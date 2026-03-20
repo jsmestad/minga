@@ -213,7 +213,7 @@ struct StatusBarView: View {
                     Text("\(state.errorCount)")
                         .font(.system(size: 11))
                 }
-                .foregroundStyle(Color(red: 1.0, green: 0.42, blue: 0.42))
+                .foregroundStyle(theme.gutterErrorFg)
             }
             if state.warningCount > 0 {
                 HStack(spacing: 2) {
@@ -222,7 +222,7 @@ struct StatusBarView: View {
                     Text("\(state.warningCount)")
                         .font(.system(size: 11))
                 }
-                .foregroundStyle(Color(red: 0.92, green: 0.74, blue: 0.48))
+                .foregroundStyle(theme.gutterWarningFg)
             }
         }
         .padding(.horizontal, 4)
@@ -230,10 +230,10 @@ struct StatusBarView: View {
 
     private func lspDisplay(_ status: UInt8) -> (String, Color) {
         switch status {
-        case 1: return ("checkmark.circle.fill", Color(red: 0.60, green: 0.74, blue: 0.40))
+        case 1: return ("checkmark.circle.fill", theme.gitAddedFg)
         case 2: return ("arrow.triangle.2.circlepath", theme.modelineBarFg.opacity(0.5))
         case 3: return ("arrow.triangle.2.circlepath", theme.modelineBarFg.opacity(0.5))
-        case 4: return ("exclamationmark.triangle.fill", Color(red: 1.0, green: 0.42, blue: 0.42))
+        case 4: return ("exclamationmark.triangle.fill", theme.gutterErrorFg)
         default: return ("circle", theme.modelineBarFg.opacity(0.3))
         }
     }
@@ -349,10 +349,10 @@ private struct AgentStatusIndicator: View {
             HStack(spacing: 4) {
                 Image(systemName: "exclamationmark.circle.fill")
                     .font(.system(size: 10))
-                    .foregroundStyle(Color(red: 1.0, green: 0.42, blue: 0.42))
+                    .foregroundStyle(theme.gutterErrorFg)
                 Text("error")
                     .font(.system(size: 11))
-                    .foregroundStyle(Color(red: 1.0, green: 0.42, blue: 0.42))
+                    .foregroundStyle(theme.gutterErrorFg)
             }
         default: // idle — show nothing; no need to announce inactivity
             EmptyView()

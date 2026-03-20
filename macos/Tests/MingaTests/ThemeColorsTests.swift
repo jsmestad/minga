@@ -55,6 +55,24 @@ struct ThemeColorsSlotMappingTests {
     @Test("Slot 0x07 maps to treeActiveFg")
     @MainActor func treeActiveFg() { #expect(applySlot(GUI_COLOR_TREE_ACTIVE_FG).treeActiveFg == expectedColor()) }
 
+    @Test("Slot 0x08 maps to treeHeaderBg")
+    @MainActor func treeHeaderBg() { #expect(applySlot(GUI_COLOR_TREE_HEADER_BG).treeHeaderBg == expectedColor()) }
+
+    @Test("Slot 0x09 maps to treeHeaderFg")
+    @MainActor func treeHeaderFg() { #expect(applySlot(GUI_COLOR_TREE_HEADER_FG).treeHeaderFg == expectedColor()) }
+
+    @Test("Slot 0x0A maps to treeSeparatorFg")
+    @MainActor func treeSepFg() { #expect(applySlot(GUI_COLOR_TREE_SEPARATOR_FG).treeSeparatorFg == expectedColor()) }
+
+    @Test("Slot 0x0B maps to treeGitModified")
+    @MainActor func treeGitMod() { #expect(applySlot(GUI_COLOR_TREE_GIT_MODIFIED).treeGitModified == expectedColor()) }
+
+    @Test("Slot 0x0C maps to treeGitStaged")
+    @MainActor func treeGitStaged() { #expect(applySlot(GUI_COLOR_TREE_GIT_STAGED).treeGitStaged == expectedColor()) }
+
+    @Test("Slot 0x0D maps to treeGitUntracked")
+    @MainActor func treeGitUntracked() { #expect(applySlot(GUI_COLOR_TREE_GIT_UNTRACKED).treeGitUntracked == expectedColor()) }
+
     @Test("Slot 0x0E maps to treeSelectionFg")
     @MainActor func treeSelectionFg() { #expect(applySlot(GUI_COLOR_TREE_SELECTION_FG).treeSelectionFg == expectedColor()) }
 
@@ -75,10 +93,28 @@ struct ThemeColorsSlotMappingTests {
     @Test("Slot 0x13 maps to tabInactiveFg")
     @MainActor func tabInactiveFg() { #expect(applySlot(GUI_COLOR_TAB_INACTIVE_FG).tabInactiveFg == expectedColor()) }
 
+    @Test("Slot 0x14 maps to tabModifiedFg")
+    @MainActor func tabModifiedFg() { #expect(applySlot(GUI_COLOR_TAB_MODIFIED_FG).tabModifiedFg == expectedColor()) }
+
+    @Test("Slot 0x15 maps to tabSeparatorFg")
+    @MainActor func tabSepFg() { #expect(applySlot(GUI_COLOR_TAB_SEPARATOR_FG).tabSeparatorFg == expectedColor()) }
+
+    @Test("Slot 0x16 maps to tabCloseHoverFg")
+    @MainActor func tabCloseHoverFg() { #expect(applySlot(GUI_COLOR_TAB_CLOSE_HOVER_FG).tabCloseHoverFg == expectedColor()) }
+
+    @Test("Slot 0x17 maps to tabAttentionFg")
+    @MainActor func tabAttentionFg() { #expect(applySlot(GUI_COLOR_TAB_ATTENTION_FG).tabAttentionFg == expectedColor()) }
+
     // MARK: - Popup slots
 
     @Test("Slot 0x20 maps to popupBg")
     @MainActor func popupBg() { #expect(applySlot(GUI_COLOR_POPUP_BG).popupBg == expectedColor()) }
+
+    @Test("Slot 0x21 maps to popupFg")
+    @MainActor func popupFg() { #expect(applySlot(GUI_COLOR_POPUP_FG).popupFg == expectedColor()) }
+
+    @Test("Slot 0x22 maps to popupBorder")
+    @MainActor func popupBorder() { #expect(applySlot(GUI_COLOR_POPUP_BORDER).popupBorder == expectedColor()) }
 
     @Test("Slot 0x23 maps to popupSelBg")
     @MainActor func popupSelBg() { #expect(applySlot(GUI_COLOR_POPUP_SEL_BG).popupSelBg == expectedColor()) }
@@ -86,19 +122,57 @@ struct ThemeColorsSlotMappingTests {
     @Test("Slot 0x24 maps to popupKeyFg")
     @MainActor func popupKeyFg() { #expect(applySlot(GUI_COLOR_POPUP_KEY_FG).popupKeyFg == expectedColor()) }
 
+    @Test("Slot 0x25 maps to popupGroupFg")
+    @MainActor func popupGroupFg() { #expect(applySlot(GUI_COLOR_POPUP_GROUP_FG).popupGroupFg == expectedColor()) }
+
+    @Test("Slot 0x26 maps to popupDescFg")
+    @MainActor func popupDescFg() { #expect(applySlot(GUI_COLOR_POPUP_DESC_FG).popupDescFg == expectedColor()) }
+
+    // MARK: - Breadcrumb slots
+
+    @Test("Slot 0x27 maps to breadcrumbBg")
+    @MainActor func breadcrumbBg() { #expect(applySlot(GUI_COLOR_BREADCRUMB_BG).breadcrumbBg == expectedColor()) }
+
+    @Test("Slot 0x28 maps to breadcrumbFg")
+    @MainActor func breadcrumbFg() { #expect(applySlot(GUI_COLOR_BREADCRUMB_FG).breadcrumbFg == expectedColor()) }
+
+    @Test("Slot 0x29 maps to breadcrumbSeparatorFg")
+    @MainActor func breadcrumbSepFg() { #expect(applySlot(GUI_COLOR_BREADCRUMB_SEPARATOR_FG).breadcrumbSeparatorFg == expectedColor()) }
+
     // MARK: - Modeline / status bar slots
 
     @Test("Slot 0x30 maps to modelineBarBg")
     @MainActor func modelineBarBg() { #expect(applySlot(GUI_COLOR_MODELINE_BAR_BG).modelineBarBg == expectedColor()) }
 
+    @Test("Slot 0x31 maps to modelineBarFg")
+    @MainActor func modelineBarFg() { #expect(applySlot(GUI_COLOR_MODELINE_BAR_FG).modelineBarFg == expectedColor()) }
+
+    @Test("Slot 0x32 maps to modelineInfoBg")
+    @MainActor func modelineInfoBg() { #expect(applySlot(GUI_COLOR_MODELINE_INFO_BG).modelineInfoBg == expectedColor()) }
+
+    @Test("Slot 0x33 maps to modelineInfoFg")
+    @MainActor func modelineInfoFg() { #expect(applySlot(GUI_COLOR_MODELINE_INFO_FG).modelineInfoFg == expectedColor()) }
+
     @Test("Slot 0x34 maps to modeNormalBg")
     @MainActor func modeNormalBg() { #expect(applySlot(GUI_COLOR_MODE_NORMAL_BG).modeNormalBg == expectedColor()) }
+
+    @Test("Slot 0x35 maps to modeNormalFg")
+    @MainActor func modeNormalFg() { #expect(applySlot(GUI_COLOR_MODE_NORMAL_FG).modeNormalFg == expectedColor()) }
 
     @Test("Slot 0x36 maps to modeInsertBg")
     @MainActor func modeInsertBg() { #expect(applySlot(GUI_COLOR_MODE_INSERT_BG).modeInsertBg == expectedColor()) }
 
+    @Test("Slot 0x37 maps to modeInsertFg")
+    @MainActor func modeInsertFg() { #expect(applySlot(GUI_COLOR_MODE_INSERT_FG).modeInsertFg == expectedColor()) }
+
     @Test("Slot 0x38 maps to modeVisualBg")
     @MainActor func modeVisualBg() { #expect(applySlot(GUI_COLOR_MODE_VISUAL_BG).modeVisualBg == expectedColor()) }
+
+    @Test("Slot 0x39 maps to modeVisualFg")
+    @MainActor func modeVisualFg() { #expect(applySlot(GUI_COLOR_MODE_VISUAL_FG).modeVisualFg == expectedColor()) }
+
+    @Test("Slot 0x3A maps to statusbarAccentFg")
+    @MainActor func statusbarAccentFg() { #expect(applySlot(GUI_COLOR_STATUSBAR_ACCENT_FG).statusbarAccentFg == expectedColor()) }
 
     // MARK: - Gutter + Git slots (with RGB sync)
 
@@ -121,6 +195,27 @@ struct ThemeColorsSlotMappingTests {
         let theme = applySlot(GUI_COLOR_GUTTER_ERROR_FG)
         #expect(theme.gutterErrorFg == expectedColor())
         #expect(theme.gutterErrorFgRGB == 0xAABBCC)
+    }
+
+    @Test("Slot 0x53 maps to gutterWarningFg and gutterWarningFgRGB")
+    @MainActor func gutterWarningFg() {
+        let theme = applySlot(GUI_COLOR_GUTTER_WARNING_FG)
+        #expect(theme.gutterWarningFg == expectedColor())
+        #expect(theme.gutterWarningFgRGB == 0xAABBCC)
+    }
+
+    @Test("Slot 0x54 maps to gutterInfoFg and gutterInfoFgRGB")
+    @MainActor func gutterInfoFg() {
+        let theme = applySlot(GUI_COLOR_GUTTER_INFO_FG)
+        #expect(theme.gutterInfoFg == expectedColor())
+        #expect(theme.gutterInfoFgRGB == 0xAABBCC)
+    }
+
+    @Test("Slot 0x55 maps to gutterHintFg and gutterHintFgRGB")
+    @MainActor func gutterHintFg() {
+        let theme = applySlot(GUI_COLOR_GUTTER_HINT_FG)
+        #expect(theme.gutterHintFg == expectedColor())
+        #expect(theme.gutterHintFgRGB == 0xAABBCC)
     }
 
     @Test("Slot 0x56 maps to gitAddedFg and gitAddedFgRGB")
