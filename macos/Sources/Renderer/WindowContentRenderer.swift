@@ -166,6 +166,44 @@ final class WindowContentRenderer {
         return cached
     }
 
+    /// Render a visual row into an atlas slot.
+    ///
+    /// Checks the atlas cache first (using a key offset of 0xA000 to avoid
+    /// collision with content/gutter keys). On miss, rasterizes and uploads.
+    func renderRowToAtlas(displayRow: UInt16, row: GUIVisualRow,
+                          atlas: LineTextureAtlas) -> AtlasEntry? {
+        let hash = Int(row.contentHash)
+        let key = 0xA000 + displayRow  // Namespace to avoid collisions
+
+        guard !row.text.isEmpty else { return nil }
+
+        // Atlas cache hit.
+        if let entry = atlas.cachedEntry(forKey: key, contentHash: hash) {
+            return entry
+        }
+
+        // Build attributed string and CTLine.
+        let attributedString = buildAttributedString(text: row.text, spans: row.spans)
+        let ctLine = CTLineCreateWithAttributedString(attributedString)
+
+        var lineAscent: CGFloat = 0
+        var lineDescent: CGFloat = 0
+        var lineLeading: CGFloat = 0
+        let lineWidth = CTLineGetTypographicBounds(ctLine, &lineAscent, &lineDescent, &lineLeading)
+
+        let pixelWidth = min(Int(ceil(lineWidth * scale)), maxLinePixelWidth)
+        guard pixelWidth > 0, linePixelHeight > 0 else { return nil }
+
+        // Rasterize into pooled bitmap.
+        let result = rasterizer.rasterize(ctLine, width: pixelWidth, height: linePixelHeight,
+                                          scale: scale, descent: descent)
+
+        // Upload into atlas slot.
+        return atlas.upload(key: key, contentHash: hash,
+                           pointer: result.pointer, pixelWidth: pixelWidth,
+                           bytesPerRow: result.bytesPerRow)
+    }
+
     // MARK: - Attributed String Building
 
     /// Builds an NSAttributedString from composed text and pre-resolved spans.
