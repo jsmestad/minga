@@ -61,7 +61,27 @@ struct MessageEntry: Identifiable, Equatable {
 
     /// Color for the subsystem badge.
     var subsystemColor: Color {
-        switch subsystem {
+        Self.subsystemColor(for: subsystem)
+    }
+
+    /// Static lookup for subsystem name by ID (used by filter bar).
+    static func subsystemName(for sub: UInt8) -> String {
+        switch sub {
+        case 0: return "EDITOR"
+        case 1: return "LSP"
+        case 2: return "PARSER"
+        case 3: return "GIT"
+        case 4: return "RENDER"
+        case 5: return "AGENT"
+        case 6: return "ZIG"
+        case 7: return "GUI"
+        default: return "?"
+        }
+    }
+
+    /// Static lookup for subsystem color by ID (used by filter bar).
+    static func subsystemColor(for sub: UInt8) -> Color {
+        switch sub {
         case 0: return .blue        // EDITOR
         case 1: return .purple      // LSP
         case 2: return .orange      // PARSER
@@ -83,6 +103,67 @@ final class MessagesContentState {
     var isAutoScrolling: Bool = true
     /// Set to true when new entries arrive while scrolled up (shows "jump to latest").
     var hasNewEntries: Bool = false
+
+    // MARK: - Filters
+
+    /// Active log levels. Default: info + warning + error (debug hidden).
+    var activeLevels: Set<UInt8> = [1, 2, 3]
+    /// Active subsystems. Default: all.
+    var activeSubsystems: Set<UInt8> = [0, 1, 2, 3, 4, 5, 6, 7]
+    /// Text search query (case-insensitive substring match).
+    var searchText: String = ""
+
+    /// All known subsystem IDs.
+    static let allSubsystems: Set<UInt8> = [0, 1, 2, 3, 4, 5, 6, 7]
+    /// Default active levels (info + warning + error).
+    static let defaultLevels: Set<UInt8> = [1, 2, 3]
+
+    /// Whether any filter is active (not at defaults).
+    var isFiltering: Bool {
+        activeLevels != Self.defaultLevels
+            || activeSubsystems != Self.allSubsystems
+            || !searchText.isEmpty
+    }
+
+    /// Entries after applying all filters.
+    var filteredEntries: [MessageEntry] {
+        let search = searchText.lowercased()
+        return entries.filter { entry in
+            activeLevels.contains(entry.level)
+                && activeSubsystems.contains(entry.subsystem)
+                && (search.isEmpty || entry.text.lowercased().contains(search))
+        }
+    }
+
+    /// Toggle a level filter on/off.
+    func toggleLevel(_ level: UInt8) {
+        if activeLevels.contains(level) {
+            activeLevels.remove(level)
+        } else {
+            activeLevels.insert(level)
+        }
+    }
+
+    /// Toggle a subsystem filter on/off.
+    func toggleSubsystem(_ sub: UInt8) {
+        if activeSubsystems.contains(sub) {
+            activeSubsystems.remove(sub)
+        } else {
+            activeSubsystems.insert(sub)
+        }
+    }
+
+    /// Reset all filters to defaults.
+    func resetFilters() {
+        activeLevels = Self.defaultLevels
+        activeSubsystems = Self.allSubsystems
+        searchText = ""
+    }
+
+    /// Set of subsystem IDs that have at least one entry.
+    var presentSubsystems: Set<UInt8> {
+        Set(entries.map(\.subsystem))
+    }
 
     /// Maximum entries to keep (matches BEAM-side cap).
     private let maxEntries = 1000
