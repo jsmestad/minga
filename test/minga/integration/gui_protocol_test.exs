@@ -431,6 +431,237 @@ defmodule Minga.Integration.GUIProtocolTest do
     end
   end
 
+  describe "gui_which_key visible" do
+    test "round-trips visible which-key with bindings", %{port: port} do
+      # Build raw binary: visible=1, prefix="SPC", page=0, pageCount=2, 2 bindings
+      prefix = "SPC"
+
+      binding1 =
+        <<0::8, 1::8, "f"::binary, 9::16, "Find file"::binary, 0::8>>
+
+      binding2 =
+        <<1::8, 1::8, "b"::binary, 7::16, "Buffers"::binary, 0::8>>
+
+      cmd =
+        <<0x72, 1::8, byte_size(prefix)::16, prefix::binary, 0::8, 2::8, 2::16, binding1::binary,
+          binding2::binary>>
+
+      Port.command(port, cmd)
+
+      assert_receive {^port, {:data, json}}, 5_000
+      decoded = Jason.decode!(json)
+
+      assert decoded["type"] == "gui_which_key"
+      assert decoded["visible"] == true
+      assert decoded["prefix"] == "SPC"
+      assert decoded["page"] == 0
+      assert decoded["page_count"] == 2
+      assert length(decoded["bindings"]) == 2
+
+      [b1, b2] = decoded["bindings"]
+      assert b1["kind"] == 0
+      assert b1["key"] == "f"
+      assert b1["description"] == "Find file"
+      assert b2["kind"] == 1
+      assert b2["key"] == "b"
+      assert b2["description"] == "Buffers"
+    end
+  end
+
+  describe "gui_picker visible" do
+    test "round-trips visible picker with items", %{port: port} do
+      title = "Find File"
+      query = "edi"
+
+      # Item: icon_color(3) + flags(1) + label_len(2) + label + desc_len(2) + desc
+      #       + annotation_len(2) + annotation + match_pos_count(1) + positions(2 each)
+      item1 =
+        <<0x51, 0xAF, 0xEF, 0x00, 9::16, "editor.ex"::binary, 3::16, "lib"::binary, 0::16, 2::8,
+          0::16, 3::16>>
+
+      cmd =
+        <<0x77, 1::8, 0::16, 1::16, 10::16, byte_size(title)::16, title::binary,
+          byte_size(query)::16, query::binary, 0::8, 1::16, item1::binary, 0::8>>
+
+      Port.command(port, cmd)
+
+      assert_receive {^port, {:data, json}}, 5_000
+      decoded = Jason.decode!(json)
+
+      assert decoded["type"] == "gui_picker"
+      assert decoded["visible"] == true
+      assert decoded["title"] == "Find File"
+      assert decoded["query"] == "edi"
+      assert decoded["filtered_count"] == 1
+      assert decoded["total_count"] == 10
+      assert length(decoded["items"]) == 1
+
+      item = hd(decoded["items"])
+      assert item["label"] == "editor.ex"
+      assert item["description"] == "lib"
+      assert item["match_positions"] == [0, 3]
+    end
+  end
+
+  describe "gui_picker_preview visible" do
+    test "round-trips visible preview with styled lines", %{port: port} do
+      # Line 1: 2 segments
+      seg1 = <<0x51, 0xAF, 0xEF, 0x01, 4::16, "def "::binary>>
+      seg2 = <<0xEC, 0xBE, 0x7B, 0x00, 5::16, "hello"::binary>>
+      # Line 2: 1 segment
+      seg3 = <<0xBB, 0xC2, 0xCF, 0x00, 3::16, ":ok"::binary>>
+
+      cmd =
+        <<0x7D, 1::8, 2::16, 2::8, seg1::binary, seg2::binary, 1::8, seg3::binary>>
+
+      Port.command(port, cmd)
+
+      assert_receive {^port, {:data, json}}, 5_000
+      decoded = Jason.decode!(json)
+
+      assert decoded["type"] == "gui_picker_preview"
+      assert decoded["visible"] == true
+      assert length(decoded["lines"]) == 2
+
+      [[s1, s2], [s3]] = decoded["lines"]
+      assert s1["text"] == "def "
+      assert s1["bold"] == true
+      assert s1["fg_color"] == 0x51AFEF
+      assert s2["text"] == "hello"
+      assert s2["bold"] == false
+      assert s3["text"] == ":ok"
+    end
+  end
+
+  describe "gui_bottom_panel visible" do
+    test "round-trips visible bottom panel with tabs and entries", %{port: port} do
+      # Tab: type=0 (messages), name="Messages"
+      tab = <<0::8, 8::8, "Messages"::binary>>
+
+      # Entry: id(4) + level(1) + subsystem(1) + timestamp(4) + path_len(2) + path + text_len(2) + text
+      path = "lib/editor.ex"
+      text = "File opened"
+
+      entry =
+        <<42::32, 1::8, 0::8, 3661::32, byte_size(path)::16, path::binary, byte_size(text)::16,
+          text::binary>>
+
+      cmd =
+        <<0x7C, 1::8, 0::8, 30::8, 0::8, 1::8, tab::binary, 1::16, entry::binary>>
+
+      Port.command(port, cmd)
+
+      assert_receive {^port, {:data, json}}, 5_000
+      decoded = Jason.decode!(json)
+
+      assert decoded["type"] == "gui_bottom_panel"
+      assert decoded["visible"] == true
+      assert decoded["active_tab_index"] == 0
+      assert decoded["height_percent"] == 30
+      assert length(decoded["tabs"]) == 1
+      assert hd(decoded["tabs"])["name"] == "Messages"
+      assert length(decoded["entries"]) == 1
+
+      entry_decoded = hd(decoded["entries"])
+      assert entry_decoded["id"] == 42
+      assert entry_decoded["level"] == 1
+      assert entry_decoded["text"] == "File opened"
+    end
+  end
+
+  describe "gui_tool_manager visible" do
+    test "round-trips visible tool manager with tools", %{port: port} do
+      # Tool: name_len(1)+name, label_len(1)+label, desc_len(2)+desc,
+      #       category(1)+status(1)+method(1)+lang_count(1),
+      #       lang_len(1)+lang, version_len(1)+version,
+      #       homepage_len(2)+homepage, provides_count(1)+provides_len(1)+provides
+      name = "elixir_ls"
+      label = "ElixirLS"
+      desc = "Elixir LSP"
+      lang = "elixir"
+      version = "0.22"
+      homepage = "https://github.com/elixir-lsp/elixir-ls"
+      provides = "elixir-ls"
+
+      tool =
+        <<byte_size(name)::8, name::binary, byte_size(label)::8, label::binary,
+          byte_size(desc)::16, desc::binary, 0::8, 1::8, 0::8, 1::8, byte_size(lang)::8,
+          lang::binary, byte_size(version)::8, version::binary, byte_size(homepage)::16,
+          homepage::binary, 1::8, byte_size(provides)::8, provides::binary>>
+
+      cmd = <<0x7E, 1::8, 0::8, 0::16, 1::16, tool::binary>>
+
+      Port.command(port, cmd)
+
+      assert_receive {^port, {:data, json}}, 5_000
+      decoded = Jason.decode!(json)
+
+      assert decoded["type"] == "gui_tool_manager"
+      assert decoded["visible"] == true
+      assert decoded["filter"] == 0
+      assert length(decoded["tools"]) == 1
+
+      t = hd(decoded["tools"])
+      assert t["name"] == "elixir_ls"
+      assert t["label"] == "ElixirLS"
+      assert t["description"] == "Elixir LSP"
+      assert t["category"] == 0
+      assert t["status"] == 1
+      assert t["languages"] == ["elixir"]
+      assert t["version"] == "0.22"
+      assert t["homepage"] == "https://github.com/elixir-lsp/elixir-ls"
+      assert t["provides"] == ["elixir-ls"]
+    end
+  end
+
+  describe "gui_file_tree visible" do
+    test "round-trips visible file tree with entries", %{port: port} do
+      # Raw binary: selected_index(2), tree_width(2), entry_count(2), root_len(2), root
+      # Per entry: path_hash(4), flags(1), depth(1), git_status(1), icon_len(1), icon,
+      #            name_len(2), name, rel_path_len(2), rel_path
+      root = "/project"
+      name1 = "lib"
+      rel1 = "lib"
+      icon1 = <<0xF0, 0x9F, 0x93, 0x81>>
+      name2 = "editor.ex"
+      rel2 = "lib/editor.ex"
+
+      entry1 =
+        <<0xAA, 0xBB, 0xCC, 0xDD::8, 0x07::8, 0::8, 0::8, byte_size(icon1)::8, icon1::binary,
+          byte_size(name1)::16, name1::binary, byte_size(rel1)::16, rel1::binary>>
+
+      entry2 =
+        <<0x11, 0x22, 0x33, 0x44::8, 0x00::8, 1::8, 1::8, 0::8, byte_size(name2)::16,
+          name2::binary, byte_size(rel2)::16, rel2::binary>>
+
+      cmd =
+        <<0x70, 1::16, 30::16, 2::16, byte_size(root)::16, root::binary, entry1::binary,
+          entry2::binary>>
+
+      Port.command(port, cmd)
+
+      assert_receive {^port, {:data, json}}, 5_000
+      decoded = Jason.decode!(json)
+
+      assert decoded["type"] == "gui_file_tree"
+      assert decoded["selected_index"] == 1
+      assert decoded["tree_width"] == 30
+      assert decoded["root_path"] == "/project"
+      assert length(decoded["entries"]) == 2
+
+      [e1, e2] = decoded["entries"]
+      assert e1["name"] == "lib"
+      assert e1["is_dir"] == true
+      assert e1["is_expanded"] == true
+      assert e1["is_selected"] == true
+      assert e1["depth"] == 0
+      assert e2["name"] == "editor.ex"
+      assert e2["is_dir"] == false
+      assert e2["depth"] == 1
+      assert e2["git_status"] == 1
+    end
+  end
+
   describe "gui_cursorline" do
     test "round-trips cursorline row and bg color", %{port: port} do
       cmd = ProtocolGUI.encode_gui_cursorline(12, 0x2C323C)
