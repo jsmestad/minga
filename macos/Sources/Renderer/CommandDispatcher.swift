@@ -187,7 +187,15 @@ final class CommandDispatcher {
             guiState.breadcrumbState.update(segments: segments)
 
         case .guiStatusBar(let contentKind, let mode, let cursorLine, let cursorCol, let lineCount, let flags, let lspStatus, let gitBranch, let message, let filetype, let errorCount, let warningCount, let modelName, let messageCount, let sessionStatus):
-            guiState.statusBarState.update(contentKind: contentKind, mode: mode, cursorLine: cursorLine, cursorCol: cursorCol, lineCount: lineCount, flags: flags, lspStatus: lspStatus, gitBranch: gitBranch, message: message, filetype: filetype, errorCount: errorCount, warningCount: warningCount, modelName: modelName, messageCount: messageCount, sessionStatus: sessionStatus)
+            let update = StatusBarUpdate(
+                contentKind: contentKind, mode: mode,
+                cursorLine: cursorLine, cursorCol: cursorCol, lineCount: lineCount,
+                flags: flags, lspStatus: lspStatus, gitBranch: gitBranch,
+                message: message, filetype: filetype,
+                errorCount: errorCount, warningCount: warningCount,
+                modelName: modelName, messageCount: messageCount, sessionStatus: sessionStatus
+            )
+            guiState.statusBarState.update(from: update)
             if mode != lastMode {
                 lastMode = mode
                 onModeChanged?(guiState.statusBarState.modeName)

@@ -83,7 +83,7 @@ struct CompletionOverlay: View {
         .id(item.id)
         .contentShape(Rectangle())
         .onTapGesture {
-            (encoder as? ProtocolEncoder)?.sendCompletionSelect(index: UInt16(item.id))
+            encoder?.sendCompletionSelect(index: UInt16(item.id))
         }
     }
 

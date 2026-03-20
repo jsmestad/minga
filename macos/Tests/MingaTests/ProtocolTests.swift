@@ -265,15 +265,42 @@ struct PasteEventEncoderTests {
 
 // MARK: - Spy encoder for testing resize behavior
 
-/// Records calls to sendResize so tests can verify the view notifies the
-/// BEAM when its frame changes.
-/// Spy that records encoder calls for test assertions. Uses
-/// OSAllocatedUnfairLock so it satisfies Sendable without @unchecked.
+/// Spy that records all InputEncoder calls for test assertions.
+///
+/// Uses OSAllocatedUnfairLock so it satisfies Sendable without @unchecked.
+/// GUI action calls are recorded as GUIAction enum values, allowing tests
+/// to verify that view interactions send the correct protocol events.
 final class SpyEncoder: InputEncoder, Sendable {
     struct Resize: Sendable { let cols: UInt16; let rows: UInt16 }
     struct Ready: Sendable { let cols: UInt16; let rows: UInt16 }
     struct Log: Sendable { let level: UInt8; let message: String }
     struct Paste: Sendable { let text: String }
+    struct KeyPress: Sendable { let codepoint: UInt32; let modifiers: UInt8 }
+    struct MouseEvent: Sendable { let row: Int16; let col: Int16; let button: UInt8; let modifiers: UInt8; let eventType: UInt8; let clickCount: UInt8 }
+
+    /// Recorded GUI action events. Each sendFoo() call appends one entry.
+    enum GUIAction: Sendable, Equatable {
+        case selectTab(id: UInt32)
+        case closeTab(id: UInt32)
+        case fileTreeClick(index: UInt16)
+        case fileTreeToggle(index: UInt16)
+        case fileTreeNewFile
+        case fileTreeNewFolder
+        case fileTreeCollapseAll
+        case fileTreeRefresh
+        case completionSelect(index: UInt16)
+        case breadcrumbClick(index: UInt8)
+        case togglePanel(panel: UInt8)
+        case newTab
+        case panelSwitchTab(index: UInt8)
+        case panelDismiss
+        case panelResize(heightPercent: UInt8)
+        case openFile(path: String)
+        case toolInstall(name: String)
+        case toolUninstall(name: String)
+        case toolUpdate(name: String)
+        case toolDismiss
+    }
 
     private let state = OSAllocatedUnfairLock(initialState: State())
 
@@ -282,21 +309,31 @@ final class SpyEncoder: InputEncoder, Sendable {
         var readyCalls: [Ready] = []
         var logCalls: [Log] = []
         var pasteCalls: [Paste] = []
+        var keyPressCalls: [KeyPress] = []
+        var mouseEventCalls: [MouseEvent] = []
+        var guiActions: [GUIAction] = []
     }
 
     var resizeCalls: [Resize] { state.withLock { $0.resizeCalls } }
     var readyCalls: [Ready] { state.withLock { $0.readyCalls } }
     var logCalls: [Log] { state.withLock { $0.logCalls } }
     var pasteCalls: [Paste] { state.withLock { $0.pasteCalls } }
+    var keyPressCalls: [KeyPress] { state.withLock { $0.keyPressCalls } }
+    var mouseEventCalls: [MouseEvent] { state.withLock { $0.mouseEventCalls } }
+    var guiActions: [GUIAction] { state.withLock { $0.guiActions } }
 
     func sendReady(cols: UInt16, rows: UInt16) {
         state.withLock { $0.readyCalls.append(Ready(cols: cols, rows: rows)) }
     }
-    func sendKeyPress(codepoint: UInt32, modifiers: UInt8) {}
+    func sendKeyPress(codepoint: UInt32, modifiers: UInt8) {
+        state.withLock { $0.keyPressCalls.append(KeyPress(codepoint: codepoint, modifiers: modifiers)) }
+    }
     func sendResize(cols: UInt16, rows: UInt16) {
         state.withLock { $0.resizeCalls.append(Resize(cols: cols, rows: rows)) }
     }
-    func sendMouseEvent(row: Int16, col: Int16, button: UInt8, modifiers: UInt8, eventType: UInt8, clickCount: UInt8 = 1) {}
+    func sendMouseEvent(row: Int16, col: Int16, button: UInt8, modifiers: UInt8, eventType: UInt8, clickCount: UInt8 = 1) {
+        state.withLock { $0.mouseEventCalls.append(MouseEvent(row: row, col: col, button: button, modifiers: modifiers, eventType: eventType, clickCount: clickCount)) }
+    }
     func sendPasteEvent(text: String) {
         state.withLock { $0.pasteCalls.append(Paste(text: text)) }
     }
@@ -304,27 +341,27 @@ final class SpyEncoder: InputEncoder, Sendable {
         state.withLock { $0.logCalls.append(Log(level: level, message: message)) }
     }
 
-    // GUI action stubs (no recording needed for current tests)
-    func sendSelectTab(id: UInt32) {}
-    func sendCloseTab(id: UInt32) {}
-    func sendFileTreeClick(index: UInt16) {}
-    func sendFileTreeToggle(index: UInt16) {}
-    func sendFileTreeNewFile() {}
-    func sendFileTreeNewFolder() {}
-    func sendFileTreeCollapseAll() {}
-    func sendFileTreeRefresh() {}
-    func sendCompletionSelect(index: UInt16) {}
-    func sendBreadcrumbClick(index: UInt8) {}
-    func sendTogglePanel(panel: UInt8) {}
-    func sendNewTab() {}
-    func sendPanelSwitchTab(index: UInt8) {}
-    func sendPanelDismiss() {}
-    func sendPanelResize(heightPercent: UInt8) {}
-    func sendOpenFile(path: String) {}
-    func sendToolInstall(name: String) {}
-    func sendToolUninstall(name: String) {}
-    func sendToolUpdate(name: String) {}
-    func sendToolDismiss() {}
+    // GUI actions: all recorded for test assertions
+    func sendSelectTab(id: UInt32) { state.withLock { $0.guiActions.append(.selectTab(id: id)) } }
+    func sendCloseTab(id: UInt32) { state.withLock { $0.guiActions.append(.closeTab(id: id)) } }
+    func sendFileTreeClick(index: UInt16) { state.withLock { $0.guiActions.append(.fileTreeClick(index: index)) } }
+    func sendFileTreeToggle(index: UInt16) { state.withLock { $0.guiActions.append(.fileTreeToggle(index: index)) } }
+    func sendFileTreeNewFile() { state.withLock { $0.guiActions.append(.fileTreeNewFile) } }
+    func sendFileTreeNewFolder() { state.withLock { $0.guiActions.append(.fileTreeNewFolder) } }
+    func sendFileTreeCollapseAll() { state.withLock { $0.guiActions.append(.fileTreeCollapseAll) } }
+    func sendFileTreeRefresh() { state.withLock { $0.guiActions.append(.fileTreeRefresh) } }
+    func sendCompletionSelect(index: UInt16) { state.withLock { $0.guiActions.append(.completionSelect(index: index)) } }
+    func sendBreadcrumbClick(index: UInt8) { state.withLock { $0.guiActions.append(.breadcrumbClick(index: index)) } }
+    func sendTogglePanel(panel: UInt8) { state.withLock { $0.guiActions.append(.togglePanel(panel: panel)) } }
+    func sendNewTab() { state.withLock { $0.guiActions.append(.newTab) } }
+    func sendPanelSwitchTab(index: UInt8) { state.withLock { $0.guiActions.append(.panelSwitchTab(index: index)) } }
+    func sendPanelDismiss() { state.withLock { $0.guiActions.append(.panelDismiss) } }
+    func sendPanelResize(heightPercent: UInt8) { state.withLock { $0.guiActions.append(.panelResize(heightPercent: heightPercent)) } }
+    func sendOpenFile(path: String) { state.withLock { $0.guiActions.append(.openFile(path: path)) } }
+    func sendToolInstall(name: String) { state.withLock { $0.guiActions.append(.toolInstall(name: name)) } }
+    func sendToolUninstall(name: String) { state.withLock { $0.guiActions.append(.toolUninstall(name: name)) } }
+    func sendToolUpdate(name: String) { state.withLock { $0.guiActions.append(.toolUpdate(name: name)) } }
+    func sendToolDismiss() { state.withLock { $0.guiActions.append(.toolDismiss) } }
 }
 
 @Suite("EditorNSView Resize")

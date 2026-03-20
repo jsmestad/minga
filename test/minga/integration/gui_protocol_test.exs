@@ -246,6 +246,422 @@ defmodule Minga.Integration.GUIProtocolTest do
     end
   end
 
+  describe "gui_gutter_separator" do
+    test "round-trips gutter separator col and color", %{port: port} do
+      cmd = ProtocolGUI.encode_gui_gutter_separator(4, 0x3F444A)
+      Port.command(port, cmd)
+
+      assert_receive {^port, {:data, json}}, 5_000
+      decoded = Jason.decode!(json)
+
+      assert decoded["type"] == "gui_gutter_separator"
+      assert decoded["col"] == 4
+      assert decoded["r"] == 0x3F
+      assert decoded["g"] == 0x44
+      assert decoded["b"] == 0x4A
+    end
+  end
+
+  describe "gui_completion hidden" do
+    test "round-trips hidden completion", %{port: port} do
+      cmd = ProtocolGUI.encode_gui_completion(nil, 0, 0)
+      Port.command(port, cmd)
+
+      assert_receive {^port, {:data, json}}, 5_000
+      decoded = Jason.decode!(json)
+
+      assert decoded["type"] == "gui_completion"
+      assert decoded["visible"] == false
+    end
+  end
+
+  describe "gui_which_key hidden" do
+    test "round-trips hidden which-key", %{port: port} do
+      cmd = ProtocolGUI.encode_gui_which_key(%{show: false})
+      Port.command(port, cmd)
+
+      assert_receive {^port, {:data, json}}, 5_000
+      decoded = Jason.decode!(json)
+
+      assert decoded["type"] == "gui_which_key"
+      assert decoded["visible"] == false
+    end
+  end
+
+  describe "gui_picker hidden" do
+    test "round-trips hidden picker", %{port: port} do
+      cmd = ProtocolGUI.encode_gui_picker(nil)
+      Port.command(port, cmd)
+
+      assert_receive {^port, {:data, json}}, 5_000
+      decoded = Jason.decode!(json)
+
+      assert decoded["type"] == "gui_picker"
+      assert decoded["visible"] == false
+    end
+  end
+
+  describe "gui_bottom_panel hidden" do
+    test "round-trips hidden bottom panel", %{port: port} do
+      alias Minga.Panel.MessageStore
+      {cmd, _store} = ProtocolGUI.encode_gui_bottom_panel(%{visible: false}, %MessageStore{})
+      Port.command(port, cmd)
+
+      assert_receive {^port, {:data, json}}, 5_000
+      decoded = Jason.decode!(json)
+
+      assert decoded["type"] == "gui_bottom_panel"
+      assert decoded["visible"] == false
+    end
+  end
+
+  describe "gui_tool_manager hidden" do
+    test "round-trips hidden tool manager", %{port: port} do
+      cmd = ProtocolGUI.encode_gui_tool_manager(nil)
+      Port.command(port, cmd)
+
+      assert_receive {^port, {:data, json}}, 5_000
+      decoded = Jason.decode!(json)
+
+      assert decoded["type"] == "gui_tool_manager"
+      assert decoded["visible"] == false
+    end
+  end
+
+  describe "gui_gutter" do
+    test "round-trips gutter with entries", %{port: port} do
+      gutter_data = %{
+        window_id: 1,
+        content_row: 0,
+        content_col: 5,
+        content_height: 24,
+        is_active: true,
+        cursor_line: 10,
+        line_number_style: :hybrid,
+        line_number_width: 4,
+        sign_col_width: 1,
+        entries: [
+          %{buf_line: 8, display_type: :normal, sign_type: :git_added},
+          %{buf_line: 9, display_type: :fold_start, sign_type: :none},
+          %{buf_line: 10, display_type: :wrap_continuation, sign_type: :diag_error}
+        ]
+      }
+
+      cmd = ProtocolGUI.encode_gui_gutter(gutter_data)
+      Port.command(port, cmd)
+
+      assert_receive {^port, {:data, json}}, 5_000
+      decoded = Jason.decode!(json)
+
+      assert decoded["type"] == "gui_gutter"
+      assert decoded["window_id"] == 1
+      assert decoded["content_col"] == 5
+      assert decoded["content_height"] == 24
+      assert decoded["is_active"] == true
+      assert decoded["cursor_line"] == 10
+      assert decoded["line_number_style"] == 0
+      assert decoded["line_number_width"] == 4
+      assert decoded["sign_col_width"] == 1
+      assert length(decoded["entries"]) == 3
+
+      [e1, e2, e3] = decoded["entries"]
+      assert e1["buf_line"] == 8
+      assert e1["display_type"] == 0
+      assert e1["sign_type"] == 1
+      assert e2["display_type"] == 1
+      assert e3["display_type"] == 3
+      assert e3["sign_type"] == 4
+    end
+  end
+
+  describe "gui_completion visible" do
+    test "round-trips visible completion with items", %{port: port} do
+      comp = %Minga.Completion{
+        items: [],
+        filtered: [
+          %{
+            label: "def",
+            kind: :keyword,
+            insert_text: "def",
+            filter_text: "def",
+            detail: "keyword",
+            documentation: "",
+            sort_text: "def",
+            text_edit: nil,
+            additional_text_edits: [],
+            deprecated: false,
+            preselect: false,
+            data: nil,
+            commit_characters: []
+          },
+          %{
+            label: "defmodule",
+            kind: :keyword,
+            insert_text: "defmodule",
+            filter_text: "defmodule",
+            detail: "keyword",
+            documentation: "",
+            sort_text: "defmodule",
+            text_edit: nil,
+            additional_text_edits: [],
+            deprecated: false,
+            preselect: false,
+            data: nil,
+            commit_characters: []
+          }
+        ],
+        selected: 0,
+        trigger_position: {5, 0},
+        max_visible: 10
+      }
+
+      cmd = ProtocolGUI.encode_gui_completion(comp, 5, 0)
+      Port.command(port, cmd)
+
+      assert_receive {^port, {:data, json}}, 5_000
+      decoded = Jason.decode!(json)
+
+      assert decoded["type"] == "gui_completion"
+      assert decoded["visible"] == true
+      assert decoded["anchor_row"] == 5
+      assert decoded["anchor_col"] == 0
+      assert decoded["selected_index"] == 0
+      assert length(decoded["items"]) == 2
+      assert hd(decoded["items"])["label"] == "def"
+    end
+  end
+
+  describe "gui_which_key visible" do
+    test "round-trips visible which-key with bindings", %{port: port} do
+      # Build raw binary: visible=1, prefix="SPC", page=0, pageCount=2, 2 bindings
+      prefix = "SPC"
+
+      binding1 =
+        <<0::8, 1::8, "f"::binary, 9::16, "Find file"::binary, 0::8>>
+
+      binding2 =
+        <<1::8, 1::8, "b"::binary, 7::16, "Buffers"::binary, 0::8>>
+
+      cmd =
+        <<0x72, 1::8, byte_size(prefix)::16, prefix::binary, 0::8, 2::8, 2::16, binding1::binary,
+          binding2::binary>>
+
+      Port.command(port, cmd)
+
+      assert_receive {^port, {:data, json}}, 5_000
+      decoded = Jason.decode!(json)
+
+      assert decoded["type"] == "gui_which_key"
+      assert decoded["visible"] == true
+      assert decoded["prefix"] == "SPC"
+      assert decoded["page"] == 0
+      assert decoded["page_count"] == 2
+      assert length(decoded["bindings"]) == 2
+
+      [b1, b2] = decoded["bindings"]
+      assert b1["kind"] == 0
+      assert b1["key"] == "f"
+      assert b1["description"] == "Find file"
+      assert b2["kind"] == 1
+      assert b2["key"] == "b"
+      assert b2["description"] == "Buffers"
+    end
+  end
+
+  describe "gui_picker visible" do
+    test "round-trips visible picker with items", %{port: port} do
+      title = "Find File"
+      query = "edi"
+
+      # Item: icon_color(3) + flags(1) + label_len(2) + label + desc_len(2) + desc
+      #       + annotation_len(2) + annotation + match_pos_count(1) + positions(2 each)
+      item1 =
+        <<0x51, 0xAF, 0xEF, 0x00, 9::16, "editor.ex"::binary, 3::16, "lib"::binary, 0::16, 2::8,
+          0::16, 3::16>>
+
+      cmd =
+        <<0x77, 1::8, 0::16, 1::16, 10::16, byte_size(title)::16, title::binary,
+          byte_size(query)::16, query::binary, 0::8, 1::16, item1::binary, 0::8>>
+
+      Port.command(port, cmd)
+
+      assert_receive {^port, {:data, json}}, 5_000
+      decoded = Jason.decode!(json)
+
+      assert decoded["type"] == "gui_picker"
+      assert decoded["visible"] == true
+      assert decoded["title"] == "Find File"
+      assert decoded["query"] == "edi"
+      assert decoded["filtered_count"] == 1
+      assert decoded["total_count"] == 10
+      assert length(decoded["items"]) == 1
+
+      item = hd(decoded["items"])
+      assert item["label"] == "editor.ex"
+      assert item["description"] == "lib"
+      assert item["match_positions"] == [0, 3]
+    end
+  end
+
+  describe "gui_picker_preview visible" do
+    test "round-trips visible preview with styled lines", %{port: port} do
+      # Line 1: 2 segments
+      seg1 = <<0x51, 0xAF, 0xEF, 0x01, 4::16, "def "::binary>>
+      seg2 = <<0xEC, 0xBE, 0x7B, 0x00, 5::16, "hello"::binary>>
+      # Line 2: 1 segment
+      seg3 = <<0xBB, 0xC2, 0xCF, 0x00, 3::16, ":ok"::binary>>
+
+      cmd =
+        <<0x7D, 1::8, 2::16, 2::8, seg1::binary, seg2::binary, 1::8, seg3::binary>>
+
+      Port.command(port, cmd)
+
+      assert_receive {^port, {:data, json}}, 5_000
+      decoded = Jason.decode!(json)
+
+      assert decoded["type"] == "gui_picker_preview"
+      assert decoded["visible"] == true
+      assert length(decoded["lines"]) == 2
+
+      [[s1, s2], [s3]] = decoded["lines"]
+      assert s1["text"] == "def "
+      assert s1["bold"] == true
+      assert s1["fg_color"] == 0x51AFEF
+      assert s2["text"] == "hello"
+      assert s2["bold"] == false
+      assert s3["text"] == ":ok"
+    end
+  end
+
+  describe "gui_bottom_panel visible" do
+    test "round-trips visible bottom panel with tabs and entries", %{port: port} do
+      # Tab: type=0 (messages), name="Messages"
+      tab = <<0::8, 8::8, "Messages"::binary>>
+
+      # Entry: id(4) + level(1) + subsystem(1) + timestamp(4) + path_len(2) + path + text_len(2) + text
+      path = "lib/editor.ex"
+      text = "File opened"
+
+      entry =
+        <<42::32, 1::8, 0::8, 3661::32, byte_size(path)::16, path::binary, byte_size(text)::16,
+          text::binary>>
+
+      cmd =
+        <<0x7C, 1::8, 0::8, 30::8, 0::8, 1::8, tab::binary, 1::16, entry::binary>>
+
+      Port.command(port, cmd)
+
+      assert_receive {^port, {:data, json}}, 5_000
+      decoded = Jason.decode!(json)
+
+      assert decoded["type"] == "gui_bottom_panel"
+      assert decoded["visible"] == true
+      assert decoded["active_tab_index"] == 0
+      assert decoded["height_percent"] == 30
+      assert length(decoded["tabs"]) == 1
+      assert hd(decoded["tabs"])["name"] == "Messages"
+      assert length(decoded["entries"]) == 1
+
+      entry_decoded = hd(decoded["entries"])
+      assert entry_decoded["id"] == 42
+      assert entry_decoded["level"] == 1
+      assert entry_decoded["text"] == "File opened"
+    end
+  end
+
+  describe "gui_tool_manager visible" do
+    test "round-trips visible tool manager with tools", %{port: port} do
+      # Tool: name_len(1)+name, label_len(1)+label, desc_len(2)+desc,
+      #       category(1)+status(1)+method(1)+lang_count(1),
+      #       lang_len(1)+lang, version_len(1)+version,
+      #       homepage_len(2)+homepage, provides_count(1)+provides_len(1)+provides
+      name = "elixir_ls"
+      label = "ElixirLS"
+      desc = "Elixir LSP"
+      lang = "elixir"
+      version = "0.22"
+      homepage = "https://github.com/elixir-lsp/elixir-ls"
+      provides = "elixir-ls"
+
+      tool =
+        <<byte_size(name)::8, name::binary, byte_size(label)::8, label::binary,
+          byte_size(desc)::16, desc::binary, 0::8, 1::8, 0::8, 1::8, byte_size(lang)::8,
+          lang::binary, byte_size(version)::8, version::binary, byte_size(homepage)::16,
+          homepage::binary, 1::8, byte_size(provides)::8, provides::binary>>
+
+      cmd = <<0x7E, 1::8, 0::8, 0::16, 1::16, tool::binary>>
+
+      Port.command(port, cmd)
+
+      assert_receive {^port, {:data, json}}, 5_000
+      decoded = Jason.decode!(json)
+
+      assert decoded["type"] == "gui_tool_manager"
+      assert decoded["visible"] == true
+      assert decoded["filter"] == 0
+      assert length(decoded["tools"]) == 1
+
+      t = hd(decoded["tools"])
+      assert t["name"] == "elixir_ls"
+      assert t["label"] == "ElixirLS"
+      assert t["description"] == "Elixir LSP"
+      assert t["category"] == 0
+      assert t["status"] == 1
+      assert t["languages"] == ["elixir"]
+      assert t["version"] == "0.22"
+      assert t["homepage"] == "https://github.com/elixir-lsp/elixir-ls"
+      assert t["provides"] == ["elixir-ls"]
+    end
+  end
+
+  describe "gui_file_tree visible" do
+    test "round-trips visible file tree with entries", %{port: port} do
+      # Raw binary: selected_index(2), tree_width(2), entry_count(2), root_len(2), root
+      # Per entry: path_hash(4), flags(1), depth(1), git_status(1), icon_len(1), icon,
+      #            name_len(2), name, rel_path_len(2), rel_path
+      root = "/project"
+      name1 = "lib"
+      rel1 = "lib"
+      icon1 = <<0xF0, 0x9F, 0x93, 0x81>>
+      name2 = "editor.ex"
+      rel2 = "lib/editor.ex"
+
+      entry1 =
+        <<0xAA, 0xBB, 0xCC, 0xDD::8, 0x07::8, 0::8, 0::8, byte_size(icon1)::8, icon1::binary,
+          byte_size(name1)::16, name1::binary, byte_size(rel1)::16, rel1::binary>>
+
+      entry2 =
+        <<0x11, 0x22, 0x33, 0x44::8, 0x00::8, 1::8, 1::8, 0::8, byte_size(name2)::16,
+          name2::binary, byte_size(rel2)::16, rel2::binary>>
+
+      cmd =
+        <<0x70, 1::16, 30::16, 2::16, byte_size(root)::16, root::binary, entry1::binary,
+          entry2::binary>>
+
+      Port.command(port, cmd)
+
+      assert_receive {^port, {:data, json}}, 5_000
+      decoded = Jason.decode!(json)
+
+      assert decoded["type"] == "gui_file_tree"
+      assert decoded["selected_index"] == 1
+      assert decoded["tree_width"] == 30
+      assert decoded["root_path"] == "/project"
+      assert length(decoded["entries"]) == 2
+
+      [e1, e2] = decoded["entries"]
+      assert e1["name"] == "lib"
+      assert e1["is_dir"] == true
+      assert e1["is_expanded"] == true
+      assert e1["is_selected"] == true
+      assert e1["depth"] == 0
+      assert e2["name"] == "editor.ex"
+      assert e2["is_dir"] == false
+      assert e2["depth"] == 1
+      assert e2["git_status"] == 1
+    end
+  end
+
   describe "gui_cursorline" do
     test "round-trips cursorline row and bg color", %{port: port} do
       cmd = ProtocolGUI.encode_gui_cursorline(12, 0x2C323C)
@@ -273,6 +689,109 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert decoded["r"] == 0
       assert decoded["g"] == 0
       assert decoded["b"] == 0
+    end
+  end
+
+  describe "gui_window_content" do
+    test "round-trips window content with rows, selection, and diagnostics", %{port: port} do
+      alias Minga.Editor.SemanticWindow
+      alias Minga.Editor.SemanticWindow.{DiagnosticRange, Selection, Span, VisualRow}
+
+      sw = %SemanticWindow{
+        window_id: 7,
+        full_refresh: true,
+        cursor_row: 1,
+        cursor_col: 3,
+        cursor_shape: :beam,
+        rows: [
+          %VisualRow{
+            row_type: :normal,
+            buf_line: 0,
+            text: "def foo do",
+            content_hash: 12_345,
+            spans: [
+              %Span{start_col: 0, end_col: 3, fg: 0x51AFEF, bg: 0x282C34, attrs: 0x01}
+            ]
+          },
+          %VisualRow{
+            row_type: :fold_start,
+            buf_line: 1,
+            text: "  :ok",
+            spans: [],
+            content_hash: 99
+          }
+        ],
+        selection: %Selection{type: :char, start_row: 0, start_col: 0, end_row: 0, end_col: 10},
+        search_matches: [],
+        diagnostic_ranges: [
+          %DiagnosticRange{
+            start_row: 0,
+            start_col: 0,
+            end_row: 0,
+            end_col: 3,
+            severity: :warning
+          }
+        ]
+      }
+
+      alias Minga.Port.Protocol.GUIWindowContent
+      cmd = GUIWindowContent.encode(sw)
+      Port.command(port, cmd)
+
+      assert_receive {^port, {:data, json}}, 5_000
+      decoded = Jason.decode!(json)
+
+      assert decoded["type"] == "gui_window_content"
+      assert decoded["window_id"] == 7
+      assert decoded["full_refresh"] == true
+      assert decoded["cursor_row"] == 1
+      assert decoded["cursor_col"] == 3
+      assert decoded["cursor_shape"] == 1
+      assert length(decoded["rows"]) == 2
+
+      [r1, r2] = decoded["rows"]
+      assert r1["text"] == "def foo do"
+      assert r1["row_type"] == 0
+      assert r1["buf_line"] == 0
+      assert length(r1["spans"]) == 1
+      assert hd(r1["spans"])["fg"] == 0x51AFEF
+      assert r2["row_type"] == 1
+      assert r2["text"] == "  :ok"
+
+      assert decoded["selection"]["type"] == 1
+      assert decoded["selection"]["start_row"] == 0
+      assert decoded["selection"]["end_col"] == 10
+      assert decoded["diagnostic_count"] == 1
+    end
+  end
+
+  describe "draw_styled_text" do
+    test "round-trips styled text with all attributes", %{port: port} do
+      # Raw binary: opcode + row(2) + col(2) + fg(3) + bg(3) + attrs(2)
+      # + ul_color(3) + blend(1) + font_weight(1) + font_id(1) + text_len(2) + text
+      text = "hello"
+      attrs16 = 0x0025
+
+      cmd =
+        <<0x1C, 5::16, 10::16, 0xFF, 0x6C, 0x6B, 0x28, 0x2C, 0x34, attrs16::16, 0xFF, 0x00, 0x00,
+          128::8, 5::8, 2::8, byte_size(text)::16, text::binary>>
+
+      Port.command(port, cmd)
+
+      assert_receive {^port, {:data, json}}, 5_000
+      decoded = Jason.decode!(json)
+
+      assert decoded["type"] == "draw_styled_text"
+      assert decoded["row"] == 5
+      assert decoded["col"] == 10
+      assert decoded["fg"] == 0xFF6C6B
+      assert decoded["bg"] == 0x282C34
+      assert decoded["attrs"] == attrs16
+      assert decoded["underline_color"] == 0xFF0000
+      assert decoded["blend"] == 128
+      assert decoded["font_weight"] == 5
+      assert decoded["font_id"] == 2
+      assert decoded["text"] == "hello"
     end
   end
 end

@@ -44,7 +44,7 @@ struct TabBarView: View {
 
             // New tab button
             toolbarButton(systemIcon: "plus") {
-                (encoder as? ProtocolEncoder)?.sendNewTab()
+                encoder?.sendNewTab()
             }
 
             // Layout toggle buttons
@@ -97,7 +97,7 @@ struct TabBarView: View {
         .background(tab.isActive ? theme.tabActiveBg : Color.clear)
         .contentShape(Rectangle())
         .onTapGesture {
-            (encoder as? ProtocolEncoder)?.sendSelectTab(id: tab.id)
+            encoder?.sendSelectTab(id: tab.id)
         }
         .onHover { hovering in
             withAnimation(nil) {
@@ -111,7 +111,7 @@ struct TabBarView: View {
     @ViewBuilder
     private func closeButton(_ tab: TabEntry) -> some View {
         Button(action: {
-            (encoder as? ProtocolEncoder)?.sendCloseTab(id: tab.id)
+            encoder?.sendCloseTab(id: tab.id)
         }) {
             Image(systemName: "xmark")
                 .font(.system(size: 7, weight: .bold))
