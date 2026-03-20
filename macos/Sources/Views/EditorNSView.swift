@@ -147,6 +147,11 @@ final class EditorNSView: MTKView {
             // Match the Metal layer's scale to the window's backing scale.
             (layer as? CAMetalLayer)?.contentsScale = window.backingScaleFactor
 
+            // Restore window position and size from previous session.
+            // This fires before the window is made key/visible, so the
+            // saved frame is applied without a visible position jump.
+            window.setFrameAutosaveName("MingaEditorWindow")
+
             // Observe window becoming key to reclaim first responder.
             // SwiftUI can reassign it during layout passes.
             NotificationCenter.default.addObserver(
@@ -278,7 +283,21 @@ final class EditorNSView: MTKView {
 
     /// Intercept key equivalents (Cmd+key, etc.) before AppKit/SwiftUI
     /// can consume them for menus or focus navigation.
+    ///
+    /// Bare Cmd+Q (Quit), Cmd+H (Hide), and Cmd+M (Minimize) are returned
+    /// to the system so macOS platform conventions work as expected.
+    /// Modified variants (Cmd+Shift+M, Cmd+Option+Q, etc.) still route
+    /// to the BEAM so user keybindings work.
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if mods == .command {
+            switch event.charactersIgnoringModifiers {
+            case "q", "h", "m":
+                return false  // Let the system handle Quit, Hide, Minimize
+            default:
+                break
+            }
+        }
         keyDown(with: event)
         return true
     }
