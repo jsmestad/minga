@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Minga port protocol opcode registry. Single source of truth for opcode hex values across Elixir, Swift, and Zig. Validated by tests in each language.",
+  "version": "1.0.0",
+  "opcodes": {
+    "input": {
+      "description": "Frontend → BEAM events",
+      "key_press":       { "hex": "0x01", "direction": "input" },
+      "resize":          { "hex": "0x02", "direction": "input" },
+      "ready":           { "hex": "0x03", "direction": "input" },
+      "mouse_event":     { "hex": "0x04", "direction": "input" },
+      "paste_event":     { "hex": "0x06", "direction": "input" },
+      "gui_action":      { "hex": "0x07", "direction": "input" },
+      "log_message":     { "hex": "0x60", "direction": "input" }
+    },
+    "render": {
+      "description": "BEAM → frontend render commands",
+      "draw_text":         { "hex": "0x10" },
+      "set_cursor":        { "hex": "0x11" },
+      "clear":             { "hex": "0x12" },
+      "batch_end":         { "hex": "0x13" },
+      "define_region":     { "hex": "0x14" },
+      "set_cursor_shape":  { "hex": "0x15" },
+      "set_title":         { "hex": "0x16" },
+      "set_window_bg":     { "hex": "0x17" },
+      "clear_region":      { "hex": "0x18" },
+      "destroy_region":    { "hex": "0x19" },
+      "set_active_region": { "hex": "0x1A" },
+      "draw_styled_text":  { "hex": "0x1C" }
+    },
+    "config": {
+      "description": "BEAM → frontend configuration",
+      "set_font":          { "hex": "0x50" },
+      "set_font_fallback": { "hex": "0x51" },
+      "register_font":     { "hex": "0x52" }
+    },
+    "highlight": {
+      "description": "BEAM → parser highlight commands (ignored by GUI, handled by Zig)",
+      "set_language":        { "hex": "0x20" },
+      "parse_buffer":        { "hex": "0x21" },
+      "set_highlight_query": { "hex": "0x22" },
+      "load_grammar":        { "hex": "0x23" },
+      "set_injection_query": { "hex": "0x24" },
+      "query_language_at":   { "hex": "0x25" },
+      "edit_buffer":         { "hex": "0x26" },
+      "measure_text":        { "hex": "0x27" }
+    },
+    "gui_chrome": {
+      "description": "BEAM → GUI-only chrome commands (0x70-0x7E range)",
+      "gui_file_tree":      { "hex": "0x70" },
+      "gui_tab_bar":        { "hex": "0x71" },
+      "gui_which_key":      { "hex": "0x72" },
+      "gui_completion":     { "hex": "0x73" },
+      "gui_theme":          { "hex": "0x74" },
+      "gui_breadcrumb":     { "hex": "0x75" },
+      "gui_status_bar":     { "hex": "0x76" },
+      "gui_picker":         { "hex": "0x77" },
+      "gui_agent_chat":     { "hex": "0x78" },
+      "gui_gutter_sep":     { "hex": "0x79" },
+      "gui_cursorline":     { "hex": "0x7A" },
+      "gui_gutter":         { "hex": "0x7B" },
+      "gui_bottom_panel":   { "hex": "0x7C" },
+      "gui_picker_preview": { "hex": "0x7D" },
+      "gui_tool_manager":   { "hex": "0x7E" }
+    },
+    "gui_semantic": {
+      "description": "BEAM → GUI semantic rendering (0x80+ range)",
+      "gui_window_content": { "hex": "0x80" }
+    }
+  },
+  "gui_actions": {
+    "description": "Sub-opcodes within gui_action (0x07)",
+    "select_tab":           { "hex": "0x01" },
+    "close_tab":            { "hex": "0x02" },
+    "file_tree_click":      { "hex": "0x03" },
+    "file_tree_toggle":     { "hex": "0x04" },
+    "completion_select":    { "hex": "0x05" },
+    "breadcrumb_click":     { "hex": "0x06" },
+    "toggle_panel":         { "hex": "0x07" },
+    "new_tab":              { "hex": "0x08" },
+    "panel_switch_tab":     { "hex": "0x09" },
+    "panel_dismiss":        { "hex": "0x0A" },
+    "panel_resize":         { "hex": "0x0B" },
+    "open_file":            { "hex": "0x0C" },
+    "file_tree_new_file":   { "hex": "0x0D" },
+    "file_tree_new_folder": { "hex": "0x0E" },
+    "file_tree_collapse_all": { "hex": "0x0F" },
+    "file_tree_refresh":    { "hex": "0x10" },
+    "tool_install":         { "hex": "0x11" },
+    "tool_uninstall":       { "hex": "0x12" },
+    "tool_update":          { "hex": "0x13" },
+    "tool_dismiss":         { "hex": "0x14" }
+  }
+}
