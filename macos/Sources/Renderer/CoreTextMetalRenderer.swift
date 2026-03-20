@@ -149,13 +149,23 @@ final class CoreTextMetalRenderer {
                             Float(rgb.blueComponent))
     }
 
+    /// Semantic window content renderer (from 0x80 opcode).
+    private(set) var windowContentRenderer: WindowContentRenderer?
+
     /// Set up the line renderer. Called once the FontManager is available.
     func setupLineRenderer(fontManager: FontManager) {
         self.lineRenderer = CoreTextLineRenderer(device: device, fontManager: fontManager)
+        self.windowContentRenderer = WindowContentRenderer(device: device, fontManager: fontManager)
     }
 
-    /// Render the editor from LineBuffer data.
+    /// Render the editor from LineBuffer data + semantic window content.
+    ///
+    /// Buffer windows with semantic content (from 0x80 opcode) are rendered
+    /// via `WindowContentRenderer`. Everything else (overlays, agent chat,
+    /// cursor, gutter, separator) continues through the LineBuffer path.
     func render(lineBuffer: LineBuffer, fontManager: FontManager,
+                windowContents: [UInt16: GUIWindowContent] = [:],
+                themeColors: ThemeColors? = nil,
                 drawable: CAMetalDrawable, viewportSize: CGSize,
                 contentScale: Float, scrollOffset: SIMD2<Float> = .zero) {
         guard let lineRenderer else { return }
@@ -167,6 +177,15 @@ final class CoreTextMetalRenderer {
         // Advance frame counter for cache eviction.
         lineRenderer.beginFrame()
         lineRenderer.updateViewportWidth(cols: lineBuffer.cols)
+
+        // Advance semantic content renderer.
+        if let wcr = windowContentRenderer {
+            wcr.beginFrame()
+            wcr.updateViewportWidth(cols: lineBuffer.cols)
+            if let tc = themeColors {
+                wcr.defaultFgRGB = tc.editorFgRGB
+            }
+        }
 
         // Default background color.
         let defaultBg = lineBuffer.defaultBg != 0
@@ -283,6 +302,96 @@ final class CoreTextMetalRenderer {
             }
         }
 
+        // Semantic window content rendering (from 0x80 opcode).
+        // Buffer windows with semantic content bypass LineBuffer for text;
+        // their line textures come from WindowContentRenderer instead.
+        // Selection, search, and diagnostic overlays are drawn as Metal quads.
+        var semanticOverlayQuads: [QuadGPU] = []
+        var diagnosticQuads: [QuadGPU] = []
+
+        if let wcr = windowContentRenderer {
+            for (_, content) in windowContents {
+                // Find the matching gutter entry to get window screen position.
+                // The gutter's contentRow/contentCol define where this window's
+                // content area starts on screen.
+                //
+                // TODO: GUIWindowGutter doesn't have a windowId field yet.
+                // For now, match the active gutter for single-window layouts.
+                // Multi-window support requires adding windowId to the 0x7B
+                // gutter opcode or matching by contentRow ranges.
+                guard let gutter = lineBuffer.windowGutters.first(where: { $0.isActive }) else {
+                    continue
+                }
+
+                let windowRowOffset = Float(gutter.contentRow) * cellH * scale
+                let gutterWidth = Float(gutter.lineNumberWidth) + Float(gutter.signColWidth)
+                let contentColOffset = (Float(gutter.contentCol) + gutterWidth) * cellW * scale + gutterPaddingPx
+
+                // Selection overlay quads (drawn before text).
+                if let sel = content.selection {
+                    appendSelectionQuads(
+                        selection: sel,
+                        rowOffset: windowRowOffset,
+                        colOffset: contentColOffset,
+                        cellW: cellW, cellH: cellH, scale: scale,
+                        viewportWidth: Float(viewportSize.width),
+                        quads: &semanticOverlayQuads
+                    )
+                }
+
+                // Search match overlay quads (drawn before text).
+                for match in content.searchMatches {
+                    let matchY = windowRowOffset + Float(match.row) * cellH * scale
+                    let matchX = contentColOffset + Float(match.startCol) * cellW * scale
+                    let matchW = Float(match.endCol - match.startCol) * cellW * scale
+
+                    var quad = QuadGPU()
+                    quad.position = SIMD2<Float>(matchX, matchY)
+                    quad.size = SIMD2<Float>(matchW, cellH * scale)
+                    quad.color = match.isCurrent
+                        ? SIMD3<Float>(0.95, 0.75, 0.0)    // current match: gold
+                        : SIMD3<Float>(0.35, 0.35, 0.15)   // other matches: dim gold
+                    quad.alpha = 1.0
+                    semanticOverlayQuads.append(quad)
+                }
+
+                // Render line textures from semantic content.
+                for (rowIdx, row) in content.rows.enumerated() {
+                    if let cached = wcr.renderRow(displayRow: UInt16(rowIdx), row: row) {
+                        let yPos = windowRowOffset + Float(rowIdx) * cellH * scale
+
+                        var lineGPU = LineGPU()
+                        lineGPU.position = SIMD2<Float>(contentColOffset, yPos)
+                        lineGPU.size = SIMD2<Float>(Float(cached.pixelWidth), Float(cached.pixelHeight))
+                        lineGPU.uvOrigin = .zero
+                        lineGPU.uvSize = SIMD2<Float>(1, 1)
+                        lineInstances.append((lineGPU, cached.texture))
+                    }
+                }
+
+                // Diagnostic underline quads (drawn after text).
+                for diag in content.diagnosticUnderlines {
+                    let diagColor: SIMD3<Float> = switch diag.severity {
+                    case .error:   SIMD3<Float>(1.0, 0.42, 0.42)   // red
+                    case .warning: SIMD3<Float>(0.93, 0.75, 0.48)  // yellow
+                    case .info:    SIMD3<Float>(0.32, 0.69, 0.94)  // blue
+                    case .hint:    SIMD3<Float>(0.33, 0.33, 0.33)  // gray
+                    }
+
+                    let diagY = windowRowOffset + Float(diag.startRow) * cellH * scale + cellH * scale - 2.0 * scale
+                    let diagX = contentColOffset + Float(diag.startCol) * cellW * scale
+                    let diagW = Float(diag.endCol - diag.startCol) * cellW * scale
+
+                    var quad = QuadGPU()
+                    quad.position = SIMD2<Float>(diagX, diagY)
+                    quad.size = SIMD2<Float>(diagW, 2.0 * scale)
+                    quad.color = diagColor
+                    quad.alpha = 1.0
+                    diagnosticQuads.append(quad)
+                }
+            }
+        }
+
         // Native gutter rendering from structured data.
         // One GUIWindowGutter per editor window (split pane).
         for windowGutter in lineBuffer.windowGutters {
@@ -319,6 +428,17 @@ final class CoreTextMetalRenderer {
             encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: bgQuads.count)
         }
 
+        // Pass 1.5: Semantic overlay quads (search matches, selection).
+        // Drawn after bg fills but before cursor and text so they appear
+        // behind text content. Selection and search highlights render as
+        // Metal quads instead of being baked into line textures.
+        if !semanticOverlayQuads.isEmpty {
+            encoder.setRenderPipelineState(bgPipeline)
+            encoder.setVertexBytes(&semanticOverlayQuads, length: semanticOverlayQuads.count * MemoryLayout<QuadGPU>.stride, index: 0)
+            encoder.setVertexBytes(&uniforms, length: MemoryLayout<CTUniformsGPU>.size, index: 1)
+            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: semanticOverlayQuads.count)
+        }
+
         // Pass 2: Cursor background (drawn BEFORE text so text is visible on top).
         // For block cursors, draw the cursor bg here so the text pass composites over it.
         // Beam and underline cursors are drawn AFTER text (pass 5).
@@ -349,6 +469,14 @@ final class CoreTextMetalRenderer {
                 encoder.setFragmentTexture(texture, index: 0)
                 encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: 1)
             }
+        }
+
+        // Pass 3.5: Diagnostic underline quads (drawn after text, before gutter).
+        if !diagnosticQuads.isEmpty {
+            encoder.setRenderPipelineState(bgPipeline)
+            encoder.setVertexBytes(&diagnosticQuads, length: diagnosticQuads.count * MemoryLayout<QuadGPU>.stride, index: 0)
+            encoder.setVertexBytes(&uniforms, length: MemoryLayout<CTUniformsGPU>.size, index: 1)
+            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: diagnosticQuads.count)
         }
 
         // Pass 4: Gutter gap fill.
@@ -639,6 +767,74 @@ final class CoreTextMetalRenderer {
             Float((color >> 8) & 0xFF) / 255.0,
             Float(color & 0xFF) / 255.0
         )
+    }
+
+    /// Build selection overlay quads from semantic selection data.
+    ///
+    /// Char selection: one quad per row (partial for first/last rows).
+    /// Line selection: full-width quads for each row in the range.
+    private func appendSelectionQuads(
+        selection sel: GUISelectionOverlay,
+        rowOffset: Float, colOffset: Float,
+        cellW: Float, cellH: Float, scale: Float,
+        viewportWidth: Float,
+        quads: inout [QuadGPU]
+    ) {
+        let selColor = SIMD3<Float>(0.15, 0.30, 0.55)  // blue selection bg
+
+        switch sel.type {
+        case .line:
+            for row in sel.startRow...sel.endRow {
+                var quad = QuadGPU()
+                quad.position = SIMD2<Float>(colOffset, rowOffset + Float(row) * cellH * scale)
+                quad.size = SIMD2<Float>(viewportWidth - colOffset, cellH * scale)
+                quad.color = selColor
+                quad.alpha = 1.0
+                quads.append(quad)
+            }
+
+        case .char:
+            for row in sel.startRow...sel.endRow {
+                let y = rowOffset + Float(row) * cellH * scale
+                let startCol: Float
+                let endCol: Float
+
+                if row == sel.startRow && row == sel.endRow {
+                    startCol = Float(sel.startCol)
+                    endCol = Float(sel.endCol)
+                } else if row == sel.startRow {
+                    startCol = Float(sel.startCol)
+                    endCol = (viewportWidth - colOffset) / (cellW * scale)
+                } else if row == sel.endRow {
+                    startCol = 0
+                    endCol = Float(sel.endCol)
+                } else {
+                    startCol = 0
+                    endCol = (viewportWidth - colOffset) / (cellW * scale)
+                }
+
+                var quad = QuadGPU()
+                quad.position = SIMD2<Float>(colOffset + startCol * cellW * scale, y)
+                quad.size = SIMD2<Float>((endCol - startCol) * cellW * scale, cellH * scale)
+                quad.color = selColor
+                quad.alpha = 1.0
+                quads.append(quad)
+            }
+
+        case .block:
+            for row in sel.startRow...sel.endRow {
+                let y = rowOffset + Float(row) * cellH * scale
+                let x = colOffset + Float(sel.startCol) * cellW * scale
+                let w = Float(sel.endCol - sel.startCol) * cellW * scale
+
+                var quad = QuadGPU()
+                quad.position = SIMD2<Float>(x, y)
+                quad.size = SIMD2<Float>(w, cellH * scale)
+                quad.color = selColor
+                quad.alpha = 1.0
+                quads.append(quad)
+            }
+        }
     }
 
     /// Calculate the display width (in cell columns) of a string,

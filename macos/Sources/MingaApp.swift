@@ -252,6 +252,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Create the editor view.
         let nsView = EditorNSView(encoder: enc, fontFace: face, lineBuffer: disp.lineBuffer,
                                    coreTextRenderer: ctRenderer, fontManager: fm)
+        nsView.guiState = appState.gui
         nsView.statusBarState = appState.gui.statusBarState
         self.editorNSView = nsView
         appState.editorNSView = nsView

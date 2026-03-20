@@ -77,8 +77,9 @@ final class ThemeColors {
     var gitModifiedFg: Color = color(0x51AFEF)
     var gitDeletedFg: Color = color(0xFF6C6B)
 
-    // Raw 24-bit RGB values for Metal renderer (gutter rendering).
+    // Raw 24-bit RGB values for Metal renderer.
     // Updated alongside the Color properties when gui_theme slots arrive.
+    var editorFgRGB: UInt32 = 0xBBC2CF
     var gutterFgRGB: UInt32 = 0x555555
     var gutterCurrentFgRGB: UInt32 = 0xBBC2CF
     var gutterErrorFgRGB: UInt32 = 0xFF6C6B
@@ -108,7 +109,7 @@ final class ThemeColors {
     private func applySlot(_ slot: UInt8, color c: Color, rgb: UInt32) {
         switch slot {
         case GUI_COLOR_EDITOR_BG: editorBg = c
-        case GUI_COLOR_EDITOR_FG: editorFg = c
+        case GUI_COLOR_EDITOR_FG: editorFg = c; editorFgRGB = rgb
         case GUI_COLOR_TREE_BG: treeBg = c
         case GUI_COLOR_TREE_FG: treeFg = c
         case GUI_COLOR_TREE_SELECTION_BG: treeSelectionBg = c

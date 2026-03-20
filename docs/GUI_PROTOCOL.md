@@ -35,7 +35,7 @@ The BEAM checks `Capabilities.gui?` (true when `frontend_type == :native_gui`) t
 
 ## GUI Render Opcodes (BEAM → Frontend)
 
-All GUI chrome opcodes live in the contiguous range 0x70-0x7F. Frontends can classify an opcode as GUI chrome by checking `opcode >= 0x70 && opcode <= 0x7F`.
+GUI chrome opcodes live in the range 0x70-0x7F. GUI content opcodes (semantic buffer rendering) start at 0x80. Frontends can classify an opcode as GUI by checking `opcode >= 0x70`.
 
 ### 0x70 — gui_file_tree
 
@@ -334,6 +334,55 @@ When hidden:
 `height_percent` is the BEAM's default/initial height (10-60). The frontend may override with a user-dragged height stored locally.
 
 `filter_preset` is a hint for the Messages tab. When the panel auto-opens for warnings, the BEAM sets `filter_preset=1`. The frontend should apply a warnings+errors level filter on the visibility transition (hidden to visible). If the user has already changed filters manually, don't override.
+
+### 0x80 — gui_window_content
+
+Semantic rendering data for a buffer window. Replaces draw_text commands for buffer content. The BEAM pre-resolves all layout (word wrap, folding, virtual text splicing, conceal ranges) and all styling (syntax highlighting colors). The frontend renders directly from this data via CoreText, with selection/search/diagnostics as overlay quads (not baked into text colors).
+
+One 0x80 message is sent per buffer window per frame. Agent chat windows do not use this opcode.
+
+```
+opcode(1) + window_id(2) + flags(1) + cursor_row(2) + cursor_col(2) + cursor_shape(1) + visible_row_count(2) + rows... + selection + search_matches + diagnostic_ranges
+
+Flags:
+  bit 0: full_refresh (1 = all rows changed, 0 = incremental)
+
+Cursor shape: 0 = block, 1 = beam, 2 = underline
+
+Per visual row:
+  row_type(1) + buf_line(4) + content_hash(4) + text_len(4) + text(text_len) + span_count(2) + spans...
+
+Row types:
+  0 = normal, 1 = fold_start, 2 = virtual_line, 3 = block_decoration, 4 = wrap_continuation
+
+Per highlight span:
+  start_col(2) + end_col(2) + fg(3) + bg(3) + attrs(1) + font_weight(1) + font_id(1)
+
+Attrs bits: 0=bold, 1=italic, 2=underline, 3=strikethrough, 4=curl_underline
+
+Span columns are in display column coordinates (CJK/fullwidth = 2 columns).
+Colors are pre-resolved 24-bit RGB from the BEAM's theme/highlight resolver.
+
+Selection section:
+  selection_type(1): 0=none, 1=char, 2=line, 3=block
+  If type != 0: start_row(2) + start_col(2) + end_row(2) + end_col(2)
+  All coordinates are display-relative (within the window's content area).
+
+Search matches section:
+  match_count(2)
+  Per match: row(2) + start_col(2) + end_col(2) + is_current(1)
+
+Diagnostic ranges section:
+  diag_count(2)
+  Per range: start_row(2) + start_col(2) + end_row(2) + end_col(2) + severity(1)
+  Severity: 0=error, 1=warning, 2=info, 3=hint
+```
+
+The frontend renders selection and search matches as Metal quads behind text (not baked into line textures). This enables zero re-rasterization when the selection changes. Diagnostic underlines are rendered as quads after text.
+
+`content_hash` is a per-row hash computed by the BEAM. The frontend uses it for CTLine texture cache invalidation: if the hash matches, the cached texture is reused without re-rasterization.
+
+When `gui_window_content` is present for a window, the BEAM does not send draw_text commands for that window's buffer content. Overlays (hover popups, signature help) continue as draw_text. Gutter data (0x7B), cursorline (0x7A), and cursor position continue through their existing opcodes.
 
 ## GUI Action Input Opcode (Frontend → BEAM)
 

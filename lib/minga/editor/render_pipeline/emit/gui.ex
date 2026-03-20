@@ -61,7 +61,18 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
         agentic_view: [],
         status_bar: [],
         splash: nil,
-        windows: Enum.map(frame.windows, fn wf -> %{wf | gutter: %{}} end)
+        windows:
+          Enum.map(frame.windows, fn wf ->
+            # Buffer windows with semantic content get their text from the
+            # 0x80 opcode, not draw_text. Strip lines + tilde_lines so
+            # the cell-grid only carries overlays (hover, signature help).
+            # Agent chat windows don't have semantic content and keep their draws.
+            if wf.semantic != nil do
+              %{wf | gutter: %{}, lines: %{}, tilde_lines: %{}}
+            else
+              %{wf | gutter: %{}}
+            end
+          end)
     }
   end
 

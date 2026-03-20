@@ -25,6 +25,9 @@ final class EditorNSView: MTKView {
     /// Font manager for per-span font family support.
     let fontManager: FontManager
 
+    /// GUI state for semantic window content (0x80) and theme colors.
+    var guiState: GUIState?
+
     private var trackingArea: NSTrackingArea?
 
     /// IME composition state (marked text tracking).
@@ -114,6 +117,8 @@ final class EditorNSView: MTKView {
         }
 
         coreTextRenderer.render(lineBuffer: lineBuffer, fontManager: fontManager,
+                                windowContents: guiState?.windowContents ?? [:],
+                                themeColors: guiState?.themeColors,
                                 drawable: drawable, viewportSize: drawableSize,
                                 contentScale: scale)
         lineBuffer.dirty = false

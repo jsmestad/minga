@@ -89,7 +89,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUITest do
       assert Enum.all?(filtered.windows, fn wf -> wf.gutter == %{} end)
     end
 
-    test "preserves window content lines and tilde_lines" do
+    test "preserves lines and tilde_lines when no semantic content" do
       face = Minga.Face.new(fg: 0xBBC2CF, bg: 0x282C34)
       tilde_face = Minga.Face.new(fg: 0x5B6268, bg: 0x282C34)
 
@@ -115,6 +115,88 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUITest do
 
       assert filtered_wf.lines == content_layer
       assert filtered_wf.tilde_lines == tilde_layer
+    end
+
+    test "strips lines and tilde_lines from windows with semantic content" do
+      face = Minga.Face.new(fg: 0xBBC2CF, bg: 0x282C34)
+
+      content_layer = DisplayList.draws_to_layer([DisplayList.draw(0, 4, "hello world", face)])
+      tilde_layer = DisplayList.draws_to_layer([DisplayList.draw(5, 0, "~", face)])
+
+      semantic = %Minga.Editor.SemanticWindow{
+        window_id: 1,
+        rows: [],
+        cursor_row: 0,
+        cursor_col: 0,
+        cursor_shape: :block
+      }
+
+      wf = %WindowFrame{
+        rect: {0, 0, 80, 20},
+        gutter: DisplayList.draws_to_layer([DisplayList.draw(0, 0, "  1 ", face)]),
+        lines: content_layer,
+        tilde_lines: tilde_layer,
+        modeline: %{},
+        cursor: nil,
+        semantic: semantic
+      }
+
+      frame = %Frame{
+        cursor: Cursor.new(0, 0, :block),
+        windows: [wf]
+      }
+
+      filtered = EmitGUI.filter_frame_for_gui(frame)
+      filtered_wf = hd(filtered.windows)
+
+      assert filtered_wf.lines == %{}
+      assert filtered_wf.tilde_lines == %{}
+      assert filtered_wf.gutter == %{}
+    end
+
+    test "mixed windows: semantic gets stripped, non-semantic preserved" do
+      face = Minga.Face.new(fg: 0xBBC2CF, bg: 0x282C34)
+      content = DisplayList.draws_to_layer([DisplayList.draw(0, 4, "text", face)])
+
+      semantic = %Minga.Editor.SemanticWindow{
+        window_id: 1,
+        rows: [],
+        cursor_row: 0,
+        cursor_col: 0,
+        cursor_shape: :block
+      }
+
+      buffer_wf = %WindowFrame{
+        rect: {0, 0, 40, 20},
+        lines: content,
+        tilde_lines: %{},
+        modeline: %{},
+        cursor: nil,
+        semantic: semantic
+      }
+
+      chat_wf = %WindowFrame{
+        rect: {0, 40, 40, 20},
+        lines: content,
+        tilde_lines: %{},
+        modeline: %{},
+        cursor: nil,
+        semantic: nil
+      }
+
+      frame = %Frame{
+        cursor: Cursor.new(0, 0, :block),
+        windows: [buffer_wf, chat_wf]
+      }
+
+      filtered = EmitGUI.filter_frame_for_gui(frame)
+      [filtered_buf, filtered_chat] = filtered.windows
+
+      # Buffer window: lines stripped (semantic provides content via 0x80)
+      assert filtered_buf.lines == %{}
+
+      # Chat window: lines preserved (no semantic content)
+      assert filtered_chat.lines == content
     end
 
     test "handles empty frame (no windows, no chrome)" do
