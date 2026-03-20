@@ -37,6 +37,7 @@ defmodule Minga.Editor.Commands do
   alias Minga.Editor.Commands.Marks
   alias Minga.Editor.Commands.Movement
   alias Minga.Editor.Commands.Operators
+  alias Minga.Editor.Commands.Tool
   alias Minga.Editor.Commands.Visual
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Window
@@ -145,6 +146,17 @@ defmodule Minga.Editor.Commands do
 
   def execute(state, {:describe_key_result, _, _, _} = cmd), do: Help.execute(state, cmd)
   def execute(state, {:describe_key_not_found, _} = cmd), do: Help.execute(state, cmd)
+
+  # ── Tool manager commands (with name argument) ──────────────────────────
+
+  def execute(state, {:tool_install_named, [name]}),
+    do: Tool.execute_named(state, :install, name)
+
+  def execute(state, {:tool_uninstall_named, [name]}),
+    do: Tool.execute_named(state, :uninstall, name)
+
+  def execute(state, {:tool_update_named, [name]}),
+    do: Tool.execute_named(state, :update, name)
 
   # ── Agent tuple commands ──────────────────────────────────────────────────
 

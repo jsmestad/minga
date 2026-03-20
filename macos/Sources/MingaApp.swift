@@ -163,6 +163,13 @@ struct ContentView: View {
             state: appState.gui.pickerState,
             theme: appState.gui.themeColors
         )
+
+        // Tool manager overlay (floats over entire window)
+        ToolManagerView(
+            state: appState.gui.toolManagerState,
+            theme: appState.gui.themeColors,
+            encoder: appState.encoder
+        )
         }
         .navigationTitle(appState.windowTitle)
         .toolbarBackground(appState.windowBgColor ?? Color(red: 0.12, green: 0.12, blue: 0.14), for: .windowToolbar)

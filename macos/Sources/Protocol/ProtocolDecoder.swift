@@ -40,6 +40,22 @@ enum RenderCommand: Sendable {
                          filterPreset: UInt8, tabs: [GUIBottomPanelTab],
                          entries: [GUIMessageEntry])
     case guiWindowContent(data: GUIWindowContent)
+    case guiToolManager(visible: Bool, filter: UInt8, selectedIndex: UInt16, tools: [GUIToolEntry])
+}
+
+// MARK: - Tool Manager data types
+
+struct GUIToolEntry {
+    let name: String
+    let label: String
+    let description: String
+    let category: UInt8
+    let status: UInt8
+    let method: UInt8
+    let languages: [String]
+    let version: String
+    let homepage: String
+    let provides: [String]
 }
 
 /// Line number display style from the BEAM.
@@ -1017,6 +1033,90 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             diagnosticUnderlines: diags
         )
         return (.guiWindowContent(data: content), pos - offset)
+
+    case OP_GUI_TOOL_MANAGER:
+        // visible(1)
+        guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
+        let visible = data[rest] != 0
+        guard visible else {
+            return (.guiToolManager(visible: false, filter: 0, selectedIndex: 0, tools: []), 2)
+        }
+        // filter(1) + selected_index(2) + tool_count(2)
+        guard data.count >= rest + 6 else { throw ProtocolDecodeError.malformed }
+        let tmFilter = data[rest + 1]
+        let tmSelectedIndex = readU16(data, rest + 2)
+        let toolCount = Int(readU16(data, rest + 4))
+        var pos = rest + 6
+        var tools: [GUIToolEntry] = []
+        tools.reserveCapacity(toolCount)
+        for _ in 0..<toolCount {
+            // name_len(1) + name
+            guard data.count >= pos + 1 else { break }
+            let nameLen = Int(data[pos]); pos += 1
+            guard data.count >= pos + nameLen else { break }
+            let name = String(data: data[pos..<(pos + nameLen)], encoding: .utf8) ?? ""
+            pos += nameLen
+            // label_len(1) + label
+            guard data.count >= pos + 1 else { break }
+            let labelLen = Int(data[pos]); pos += 1
+            guard data.count >= pos + labelLen else { break }
+            let toolLabel = String(data: data[pos..<(pos + labelLen)], encoding: .utf8) ?? ""
+            pos += labelLen
+            // desc_len(2) + desc
+            guard data.count >= pos + 2 else { break }
+            let descLen = Int(readU16(data, pos)); pos += 2
+            guard data.count >= pos + descLen else { break }
+            let desc = String(data: data[pos..<(pos + descLen)], encoding: .utf8) ?? ""
+            pos += descLen
+            // category(1) + status(1) + method(1) + language_count(1)
+            guard data.count >= pos + 4 else { break }
+            let cat = data[pos]
+            let stat = data[pos + 1]
+            let meth = data[pos + 2]
+            let langCount = Int(data[pos + 3])
+            pos += 4
+            var langs: [String] = []
+            for _ in 0..<langCount {
+                guard data.count >= pos + 1 else { break }
+                let lLen = Int(data[pos]); pos += 1
+                guard data.count >= pos + lLen else { break }
+                let lang = String(data: data[pos..<(pos + lLen)], encoding: .utf8) ?? ""
+                pos += lLen
+                langs.append(lang)
+            }
+            // version_len(1) + version
+            guard data.count >= pos + 1 else { break }
+            let verLen = Int(data[pos]); pos += 1
+            guard data.count >= pos + verLen else { break }
+            let version = String(data: data[pos..<(pos + verLen)], encoding: .utf8) ?? ""
+            pos += verLen
+            // homepage_len(2) + homepage
+            guard data.count >= pos + 2 else { break }
+            let hpLen = Int(readU16(data, pos)); pos += 2
+            guard data.count >= pos + hpLen else { break }
+            let homepage = String(data: data[pos..<(pos + hpLen)], encoding: .utf8) ?? ""
+            pos += hpLen
+            // provides_count(1) + provides
+            guard data.count >= pos + 1 else { break }
+            let provCount = Int(data[pos]); pos += 1
+            var provides: [String] = []
+            for _ in 0..<provCount {
+                guard data.count >= pos + 1 else { break }
+                let cLen = Int(data[pos]); pos += 1
+                guard data.count >= pos + cLen else { break }
+                let cmd = String(data: data[pos..<(pos + cLen)], encoding: .utf8) ?? ""
+                pos += cLen
+                provides.append(cmd)
+            }
+            tools.append(GUIToolEntry(
+                name: name, label: toolLabel, description: desc,
+                category: cat, status: stat, method: meth,
+                languages: langs, version: version,
+                homepage: homepage, provides: provides
+            ))
+        }
+        return (.guiToolManager(visible: true, filter: tmFilter,
+                                 selectedIndex: tmSelectedIndex, tools: tools), pos - offset)
 
     default:
         throw ProtocolDecodeError.unknownOpcode(opcode)
