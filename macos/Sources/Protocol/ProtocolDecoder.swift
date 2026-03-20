@@ -35,6 +35,61 @@ enum RenderCommand: Sendable {
     case guiAgentChat(visible: Bool, status: UInt8, model: String, prompt: String, pendingToolName: String?, pendingToolSummary: String, messages: [GUIChatMessage])
     case guiGutterSeparator(col: UInt16, r: UInt8, g: UInt8, b: UInt8)
     case guiCursorline(row: UInt16, r: UInt8, g: UInt8, b: UInt8)
+    case guiGutter(data: GUIWindowGutter)
+}
+
+/// Line number display style from the BEAM.
+enum GUILineNumberStyle: UInt8, Sendable {
+    case hybrid = 0
+    case absolute = 1
+    case relative = 2
+    case none = 3
+}
+
+/// Display type for a gutter row.
+enum GUIGutterDisplayType: UInt8, Sendable {
+    case normal = 0
+    case foldStart = 1
+    case foldContinuation = 2
+    case wrapContinuation = 3
+}
+
+/// Sign type for the gutter sign column.
+enum GUIGutterSignType: UInt8, Sendable {
+    case none = 0
+    case gitAdded = 1
+    case gitModified = 2
+    case gitDeleted = 3
+    case diagError = 4
+    case diagWarning = 5
+    case diagInfo = 6
+    case diagHint = 7
+}
+
+/// A single gutter entry for one visible line.
+struct GUIGutterEntry: Sendable {
+    let bufLine: UInt32
+    let displayType: GUIGutterDisplayType
+    let signType: GUIGutterSignType
+}
+
+/// Gutter data for one window, including its screen position.
+/// One message per window arrives each frame.
+struct GUIWindowGutter: Sendable {
+    /// Screen row where this window's content area begins.
+    let contentRow: UInt16
+    /// Screen column where this window's content area begins.
+    let contentCol: UInt16
+    /// Height of this window's content area in rows.
+    let contentHeight: UInt16
+    /// Whether this is the active (focused) window.
+    let isActive: Bool
+
+    let cursorLine: UInt32
+    let lineNumberStyle: GUILineNumberStyle
+    let lineNumberWidth: UInt8
+    let signColWidth: UInt8
+    var entries: [GUIGutterEntry]
 }
 
 /// A styled text run for GUI rendering. Carries pre-computed colors from the BEAM.
@@ -712,6 +767,39 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         guard data.count >= rest + 5 else { throw ProtocolDecodeError.malformed }
         let row = readU16(data, rest)
         return (.guiCursorline(row: row, r: data[rest + 2], g: data[rest + 3], b: data[rest + 4]), 6)
+
+    case OP_GUI_GUTTER:
+        // Per-window format: content_row:2 + content_col:2 + content_height:2 + is_active:1
+        // + cursor_line:4 + style:1 + ln_width:1 + sign_width:1 + line_count:2 = 16 bytes header
+        guard data.count >= rest + 16 else { throw ProtocolDecodeError.malformed }
+        let contentRow = readU16(data, rest)
+        let contentCol = readU16(data, rest + 2)
+        let contentHeight = readU16(data, rest + 4)
+        let isActive = data[rest + 6] != 0
+        let cursorLine = readU32(data, rest + 7)
+        let styleRaw = data[rest + 11]
+        let lnWidth = data[rest + 12]
+        let signWidth = data[rest + 13]
+        let lineCount = Int(readU16(data, rest + 14))
+        let style = GUILineNumberStyle(rawValue: styleRaw) ?? .hybrid
+
+        // Each entry is 6 bytes: buf_line:4 + display_type:1 + sign_type:1
+        guard data.count >= rest + 16 + lineCount * 6 else { throw ProtocolDecodeError.malformed }
+        var entries: [GUIGutterEntry] = []
+        entries.reserveCapacity(lineCount)
+        for i in 0..<lineCount {
+            let base = rest + 16 + i * 6
+            let bufLine = readU32(data, base)
+            let dt = GUIGutterDisplayType(rawValue: data[base + 4]) ?? .normal
+            let st = GUIGutterSignType(rawValue: data[base + 5]) ?? .none
+            entries.append(GUIGutterEntry(bufLine: bufLine, displayType: dt, signType: st))
+        }
+        let windowGutter = GUIWindowGutter(
+            contentRow: contentRow, contentCol: contentCol, contentHeight: contentHeight,
+            isActive: isActive, cursorLine: cursorLine, lineNumberStyle: style,
+            lineNumberWidth: lnWidth, signColWidth: signWidth, entries: entries
+        )
+        return (.guiGutter(data: windowGutter), 1 + 16 + lineCount * 6)
 
     default:
         throw ProtocolDecodeError.unknownOpcode(opcode)

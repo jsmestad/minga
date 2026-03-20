@@ -146,6 +146,17 @@ final class CommandDispatcher {
 
         case .guiTheme(let slots):
             guiState.themeColors.applySlots(slots)
+            // Sync gutter theme colors to LineBuffer for Metal rendering.
+            let tc = guiState.themeColors
+            lineBuffer.gutterFgColor = tc.gutterFgRGB
+            lineBuffer.gutterCurrentFgColor = tc.gutterCurrentFgRGB
+            lineBuffer.gutterErrorFgColor = tc.gutterErrorFgRGB
+            lineBuffer.gutterWarningFgColor = tc.gutterWarningFgRGB
+            lineBuffer.gutterInfoFgColor = tc.gutterInfoFgRGB
+            lineBuffer.gutterHintFgColor = tc.gutterHintFgRGB
+            lineBuffer.gitAddedFgColor = tc.gitAddedFgRGB
+            lineBuffer.gitModifiedFgColor = tc.gitModifiedFgRGB
+            lineBuffer.gitDeletedFgColor = tc.gitDeletedFgRGB
 
         case .guiTabBar(let activeIndex, let tabs):
             guiState.tabBarState.update(activeIndex: activeIndex, entries: tabs)
@@ -204,6 +215,14 @@ final class CommandDispatcher {
             let rgb: UInt32 = (UInt32(r) << 16) | (UInt32(g) << 8) | UInt32(b)
             lineBuffer.cursorlineRow = row
             lineBuffer.cursorlineBg = rgb
+
+        case .guiGutter(let data):
+            lineBuffer.windowGutters.append(data)
+            // Sync gutterCol from the active window's gutter data so the
+            // separator and gap fill logic stays consistent.
+            if data.isActive {
+                lineBuffer.gutterCol = UInt16(data.lineNumberWidth) + UInt16(data.signColWidth)
+            }
         }
     }
 

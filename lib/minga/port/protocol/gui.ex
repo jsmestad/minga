@@ -24,6 +24,7 @@ defmodule Minga.Port.Protocol.GUI do
   | 0x78   | gui_agent_chat| Agent conversation view        |
   | 0x79   | gui_gutter_sep| Gutter separator col + color   |
   | 0x7A   | gui_cursorline| Cursorline row + bg color      |
+  | 0x7B   | gui_gutter    | Structured gutter data         |
 
   ## GUI Actions (Frontend → BEAM)
 
@@ -62,6 +63,7 @@ defmodule Minga.Port.Protocol.GUI do
   @op_gui_agent_chat 0x78
   @op_gui_gutter_separator 0x79
   @op_gui_cursorline 0x7A
+  @op_gui_gutter 0x7B
 
   # ── GUI action sub-opcodes (Frontend → BEAM) ──
 
@@ -112,6 +114,109 @@ defmodule Minga.Port.Protocol.GUI do
     b = bg_rgb &&& 0xFF
     <<@op_gui_cursorline, row::16, r::8, g::8, b::8>>
   end
+
+  # ── Gutter ──
+
+  @typedoc "Line number display style for the GUI gutter."
+  @type line_number_style :: :hybrid | :absolute | :relative | :none
+
+  @typedoc "Sign type for the gutter sign column."
+  @type sign_type ::
+          :none
+          | :git_added
+          | :git_modified
+          | :git_deleted
+          | :diag_error
+          | :diag_warning
+          | :diag_info
+          | :diag_hint
+
+  @typedoc "Display type for a gutter row."
+  @type display_type :: :normal | :fold_start | :fold_continuation | :wrap_continuation
+
+  @typedoc "A single gutter entry for one visible line."
+  @type gutter_entry :: %{
+          buf_line: non_neg_integer(),
+          display_type: display_type(),
+          sign_type: sign_type()
+        }
+
+  @typedoc "Gutter data for a single window."
+  @type gutter_data :: %{
+          content_row: non_neg_integer(),
+          content_col: non_neg_integer(),
+          content_height: non_neg_integer(),
+          is_active: boolean(),
+          cursor_line: non_neg_integer(),
+          line_number_style: line_number_style(),
+          line_number_width: non_neg_integer(),
+          sign_col_width: non_neg_integer(),
+          entries: [gutter_entry()]
+        }
+
+  @doc """
+  Encodes a gui_gutter command for one window.
+
+  One message is sent per window (not batched). Each message includes
+  the window's screen position so the GUI knows where to render.
+
+  Wire format:
+    opcode(1) + content_row(2) + content_col(2) + content_height(2)
+    + is_active(1) + cursor_line(4) + line_number_style(1)
+    + line_number_width(1) + sign_col_width(1) + line_count(2) + entries...
+
+  Per entry:
+    buf_line(4) + display_type(1) + sign_type(1)
+  """
+  @spec encode_gui_gutter(gutter_data()) :: binary()
+  def encode_gui_gutter(%{
+        content_row: row,
+        content_col: col,
+        content_height: height,
+        is_active: active,
+        cursor_line: cursor_line,
+        line_number_style: style,
+        line_number_width: ln_width,
+        sign_col_width: sign_width,
+        entries: entries
+      }) do
+    style_byte = encode_line_number_style(style)
+    count = length(entries)
+    active_byte = if active, do: 1, else: 0
+
+    entry_binaries =
+      Enum.map(entries, fn %{buf_line: bl, display_type: dt, sign_type: st} ->
+        <<bl::32, encode_display_type(dt)::8, encode_sign_type(st)::8>>
+      end)
+
+    IO.iodata_to_binary([
+      <<@op_gui_gutter, row::16, col::16, height::16, active_byte::8, cursor_line::32,
+        style_byte::8, ln_width::8, sign_width::8, count::16>>
+      | entry_binaries
+    ])
+  end
+
+  @spec encode_line_number_style(line_number_style()) :: non_neg_integer()
+  defp encode_line_number_style(:hybrid), do: 0
+  defp encode_line_number_style(:absolute), do: 1
+  defp encode_line_number_style(:relative), do: 2
+  defp encode_line_number_style(:none), do: 3
+
+  @spec encode_display_type(display_type()) :: non_neg_integer()
+  defp encode_display_type(:normal), do: 0
+  defp encode_display_type(:fold_start), do: 1
+  defp encode_display_type(:fold_continuation), do: 2
+  defp encode_display_type(:wrap_continuation), do: 3
+
+  @spec encode_sign_type(sign_type()) :: non_neg_integer()
+  defp encode_sign_type(:none), do: 0
+  defp encode_sign_type(:git_added), do: 1
+  defp encode_sign_type(:git_modified), do: 2
+  defp encode_sign_type(:git_deleted), do: 3
+  defp encode_sign_type(:diag_error), do: 4
+  defp encode_sign_type(:diag_warning), do: 5
+  defp encode_sign_type(:diag_info), do: 6
+  defp encode_sign_type(:diag_hint), do: 7
 
   # ── Gutter separator ──
 

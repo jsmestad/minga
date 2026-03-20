@@ -10,7 +10,7 @@ Minga's rendering pipeline produces two types of output:
 
 1. **Cell-grid commands** (opcodes 0x10-0x1B): draw_text, set_cursor, clear, batch_end, etc. These paint the editor content surface (buffer text, gutter, modeline for splits, minibuffer). In a TUI frontend, these go to the terminal. In a GUI frontend, these go to a Metal/OpenGL surface.
 
-2. **GUI chrome commands** (opcodes 0x70-0x7A): structured data for native chrome elements (tab bar, file tree sidebar, status bar, which-key popup, cursorline, etc.). These are sent only to GUI frontends. A TUI frontend never sees them.
+2. **GUI chrome commands** (opcodes 0x70-0x7B): structured data for native chrome elements (tab bar, file tree sidebar, status bar, which-key popup, cursorline, gutter, etc.). These are sent only to GUI frontends. A TUI frontend never sees them.
 
 Both types are sent within the same render cycle. The BEAM sends cell-grid commands first (one `{:packet, 4}` message containing clear through batch_end), then GUI chrome commands as separate `{:packet, 4}` messages immediately after. GUI chrome commands are not inside the batch_end-terminated cell-grid frame.
 
@@ -244,6 +244,53 @@ opcode(1) + row(2) + r(1) + g(1) + b(1)
 
 The GUI frontend draws the cursorline as a full-width colored rectangle behind the text on this row. This replaces the TUI approach of prepending a full-width space fill draw to paint the background.
 
+### 0x7B — gui_gutter
+
+Structured gutter data for native line number and sign rendering. One message is sent per editor window (split pane), each including the window's screen position. Agent chat windows are skipped.
+
+```
+opcode(1) + content_row(2) + content_col(2) + content_height(2) + is_active(1)
++ cursor_line(4) + line_number_style(1) + line_number_width(1)
++ sign_col_width(1) + line_count(2) + entries...
+
+Per entry:
+  buf_line(4) + display_type(1) + sign_type(1)
+```
+
+`content_row` and `content_col` are the screen position of the window's content area (0-indexed). `content_height` is the height in rows. `is_active` is 1 for the focused window, 0 otherwise. `cursor_line` is the 0-indexed buffer line where the cursor sits. `line_number_width` is the character column count allocated for line numbers. `sign_col_width` is 0 (no sign column) or 2 (sign column present). `line_count` is the number of visible line entries.
+
+Line number style values:
+| Value | Style |
+|-------|-------|
+| 0 | hybrid (relative + absolute on cursor line) |
+| 1 | absolute |
+| 2 | relative |
+| 3 | none (line numbers hidden) |
+
+Display type values:
+| Value | Type |
+|-------|------|
+| 0 | normal line |
+| 1 | fold start |
+| 2 | fold continuation |
+| 3 | wrap continuation |
+
+Sign type values:
+| Value | Sign |
+|-------|------|
+| 0 | none |
+| 1 | git added |
+| 2 | git modified |
+| 3 | git deleted |
+| 4 | diagnostic error |
+| 5 | diagnostic warning |
+| 6 | diagnostic info |
+| 7 | diagnostic hint |
+
+Diagnostics take priority over git signs (same line shows only the highest-priority sign). The GUI frontend renders line numbers natively using its font engine, computing relative/absolute display from `buf_line` and `cursor_line`. Git signs are drawn as colored bars; diagnostic signs as colored text characters.
+
+When this opcode is sent, the BEAM strips `WindowFrame.gutter` from the cell-grid frame output, so no draw_text commands are sent for gutter content. The TUI rendering path is unaffected.
+
 ## GUI Action Input Opcode (Frontend → BEAM)
 
 The frontend sends user interactions with native chrome back to the BEAM using the `gui_action` opcode (0x07). This opcode lives in the input event range, not the GUI chrome range.
@@ -342,6 +389,20 @@ Mode color slots fall back to `modeline.bar_fg` / `modeline.bar_bg` when a mode 
 | Slot | Name | Source | Usage |
 |------|------|--------|-------|
 | 0x40 | accent | `tree.active_fg` | Global accent color (same as tree active) |
+
+### Gutter + Git (0x50-0x58)
+
+| Slot | Name | Source | Usage |
+|------|------|--------|-------|
+| 0x50 | gutter_fg | `gutter.fg` | Line number foreground (non-current lines) |
+| 0x51 | gutter_current_fg | `gutter.current_fg` | Current line number foreground |
+| 0x52 | gutter_error_fg | `gutter.error_fg` | Diagnostic error sign color |
+| 0x53 | gutter_warning_fg | `gutter.warning_fg` | Diagnostic warning sign color |
+| 0x54 | gutter_info_fg | `gutter.info_fg` | Diagnostic info sign color |
+| 0x55 | gutter_hint_fg | `gutter.hint_fg` | Diagnostic hint sign color |
+| 0x56 | git_added_fg | `git.added_fg` | Git added sign color |
+| 0x57 | git_modified_fg | `git.modified_fg` | Git modified sign color |
+| 0x58 | git_deleted_fg | `git.deleted_fg` | Git deleted sign color |
 
 ## Behavioral Contract
 

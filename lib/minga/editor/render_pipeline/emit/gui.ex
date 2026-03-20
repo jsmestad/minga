@@ -14,10 +14,14 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
 
   alias Minga.Agent.Session, as: AgentSession
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Config.Options
   alias Minga.Editor.Layout
+  alias Minga.Editor.RenderPipeline.ContentHelpers
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.TabBar
   alias Minga.Editor.StatusBar.Data, as: StatusBarData
+  alias Minga.Editor.Viewport
+  alias Minga.Git.Tracker, as: GitTracker
   alias Minga.Port.Manager, as: PortManager
   alias Minga.Port.Protocol.GUI, as: ProtocolGUI
 
@@ -48,6 +52,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
     send_gui_agent_chat(state)
     send_gui_gutter_separator(state)
     send_gui_cursorline(state)
+    send_gui_gutter(state)
     :ok
   end
 
@@ -330,5 +335,144 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
     cmd = ProtocolGUI.encode_gui_cursorline(row, bg_rgb)
     PortManager.send_commands(state.port_manager, [cmd])
     :ok
+  end
+
+  # ── Gutter ──
+
+  @spec send_gui_gutter(state()) :: :ok
+  defp send_gui_gutter(state) do
+    alias Minga.Editor.Window.Content
+
+    layout = Layout.get(state)
+
+    cmds =
+      Enum.flat_map(layout.window_layouts, fn {win_id, win_layout} ->
+        window = Map.get(state.windows.map, win_id)
+
+        # Skip agent chat windows (they don't have gutter)
+        if window && is_pid(window.buffer) && !Content.agent_chat?(window.content) do
+          is_active = win_id == state.windows.active
+          gutter_data = build_window_gutter(state, window, win_layout, is_active)
+          [ProtocolGUI.encode_gui_gutter(gutter_data)]
+        else
+          []
+        end
+      end)
+
+    if cmds != [] do
+      PortManager.send_commands(state.port_manager, cmds)
+    end
+
+    :ok
+  end
+
+  @spec build_window_gutter(
+          state(),
+          Minga.Editor.Window.t(),
+          Layout.window_layout(),
+          boolean()
+        ) :: ProtocolGUI.gutter_data()
+  defp build_window_gutter(state, window, win_layout, is_active) do
+    buf = window.buffer
+    cursor_line = max(window.last_cursor_line, 0)
+    viewport_top = max(window.last_viewport_top, 0)
+    line_count = max(window.last_line_count, 0)
+
+    {content_row, content_col, _content_w, content_height} = win_layout.content
+
+    win_pos = %{
+      content_row: content_row,
+      content_col: content_col,
+      content_height: content_height,
+      is_active: is_active
+    }
+
+    # Guard against uninitialized window state (before first render)
+    if line_count == 0 do
+      Map.merge(win_pos, %{
+        cursor_line: 0,
+        line_number_style: :none,
+        line_number_width: 0,
+        sign_col_width: 0,
+        entries: []
+      })
+    else
+      build_gutter_entries(state, window, buf, win_pos, %{
+        cursor_line: cursor_line,
+        viewport_top: viewport_top,
+        line_count: line_count
+      })
+    end
+  end
+
+  @spec build_gutter_entries(state(), Minga.Editor.Window.t(), pid(), map(), map()) ::
+          ProtocolGUI.gutter_data()
+  defp build_gutter_entries(state, window, buf, win_pos, params) do
+    %{cursor_line: cursor_line, viewport_top: viewport_top, line_count: line_count} = params
+    line_number_style = BufferServer.get_option(buf, :line_numbers)
+
+    # Compute gutter geometry (same logic as Scroll stage)
+    has_sign_column =
+      GitTracker.tracked?(buf) or BufferServer.file_path(buf) != nil
+
+    sign_col_width = if has_sign_column, do: 2, else: 0
+
+    line_number_width =
+      if line_number_style == :none, do: 0, else: Viewport.gutter_width(line_count)
+
+    # Get signs for the buffer
+    diag_signs = ContentHelpers.diagnostic_signs_for_window(state, window)
+    git_signs = ContentHelpers.git_signs_for_window(state, window)
+
+    # Build entries for each visible line
+    entries =
+      for row <- 0..(win_pos.content_height - 1) do
+        buf_line = viewport_top + row
+
+        sign_type =
+          if buf_line < line_count do
+            resolve_sign_type(buf_line, diag_signs, git_signs)
+          else
+            :none
+          end
+
+        %{buf_line: buf_line, display_type: :normal, sign_type: sign_type}
+      end
+
+    Map.merge(win_pos, %{
+      cursor_line: cursor_line,
+      line_number_style: line_number_style,
+      line_number_width: line_number_width,
+      sign_col_width: sign_col_width,
+      entries: entries
+    })
+  end
+
+  # Resolves the highest-priority sign for a buffer line.
+  # Diagnostics take priority over git signs (same as Renderer.Gutter).
+  @spec resolve_sign_type(
+          non_neg_integer(),
+          %{non_neg_integer() => atom()},
+          %{non_neg_integer() => atom()}
+        ) :: ProtocolGUI.sign_type()
+  defp resolve_sign_type(buf_line, diag_signs, git_signs) do
+    case Map.get(diag_signs, buf_line) do
+      :error -> :diag_error
+      :warning -> :diag_warning
+      :info -> :diag_info
+      :hint -> :diag_hint
+      nil -> resolve_git_sign(buf_line, git_signs)
+    end
+  end
+
+  @spec resolve_git_sign(non_neg_integer(), %{non_neg_integer() => atom()}) ::
+          ProtocolGUI.sign_type()
+  defp resolve_git_sign(buf_line, git_signs) do
+    case Map.get(git_signs, buf_line) do
+      :added -> :git_added
+      :modified -> :git_modified
+      :deleted -> :git_deleted
+      _ -> :none
+    end
   end
 end

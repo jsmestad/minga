@@ -256,7 +256,8 @@ defmodule Minga.Editor.RenderPipeline.Emit do
         agent_panel: [],
         agentic_view: [],
         status_bar: [],
-        splash: nil
+        splash: nil,
+        windows: Enum.map(frame.windows, fn wf -> %{wf | gutter: %{}} end)
     }
   end
 

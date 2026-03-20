@@ -66,6 +66,29 @@ final class ThemeColors {
     var modeVisualFg: Color = color(0x21242B)
     var statusbarAccentFg: Color = color(0x51AFEF)
 
+    // ── Gutter ──
+    var gutterFg: Color = color(0x555555)
+    var gutterCurrentFg: Color = color(0xBBC2CF)
+    var gutterErrorFg: Color = color(0xFF6C6B)
+    var gutterWarningFg: Color = color(0xECBE7B)
+    var gutterInfoFg: Color = color(0x51AFEF)
+    var gutterHintFg: Color = color(0x555555)
+    var gitAddedFg: Color = color(0x98BE65)
+    var gitModifiedFg: Color = color(0x51AFEF)
+    var gitDeletedFg: Color = color(0xFF6C6B)
+
+    // Raw 24-bit RGB values for Metal renderer (gutter rendering).
+    // Updated alongside the Color properties when gui_theme slots arrive.
+    var gutterFgRGB: UInt32 = 0x555555
+    var gutterCurrentFgRGB: UInt32 = 0xBBC2CF
+    var gutterErrorFgRGB: UInt32 = 0xFF6C6B
+    var gutterWarningFgRGB: UInt32 = 0xECBE7B
+    var gutterInfoFgRGB: UInt32 = 0x51AFEF
+    var gutterHintFgRGB: UInt32 = 0x555555
+    var gitAddedFgRGB: UInt32 = 0x98BE65
+    var gitModifiedFgRGB: UInt32 = 0x51AFEF
+    var gitDeletedFgRGB: UInt32 = 0xFF6C6B
+
     // ── Accent ──
     var accent: Color = color(0x51AFEF)
 
@@ -77,11 +100,12 @@ final class ThemeColors {
                 green: Double(g) / 255.0,
                 blue: Double(b) / 255.0
             )
-            applySlot(slotId, color: c)
+            let rgb = (UInt32(r) << 16) | (UInt32(g) << 8) | UInt32(b)
+            applySlot(slotId, color: c, rgb: rgb)
         }
     }
 
-    private func applySlot(_ slot: UInt8, color c: Color) {
+    private func applySlot(_ slot: UInt8, color c: Color, rgb: UInt32) {
         switch slot {
         case GUI_COLOR_EDITOR_BG: editorBg = c
         case GUI_COLOR_EDITOR_FG: editorFg = c
@@ -128,6 +152,15 @@ final class ThemeColors {
         case GUI_COLOR_MODE_VISUAL_FG: modeVisualFg = c
         case GUI_COLOR_STATUSBAR_ACCENT_FG: statusbarAccentFg = c
         case GUI_COLOR_ACCENT: accent = c
+        case GUI_COLOR_GUTTER_FG: gutterFg = c; gutterFgRGB = rgb
+        case GUI_COLOR_GUTTER_CURRENT_FG: gutterCurrentFg = c; gutterCurrentFgRGB = rgb
+        case GUI_COLOR_GUTTER_ERROR_FG: gutterErrorFg = c; gutterErrorFgRGB = rgb
+        case GUI_COLOR_GUTTER_WARNING_FG: gutterWarningFg = c; gutterWarningFgRGB = rgb
+        case GUI_COLOR_GUTTER_INFO_FG: gutterInfoFg = c; gutterInfoFgRGB = rgb
+        case GUI_COLOR_GUTTER_HINT_FG: gutterHintFg = c; gutterHintFgRGB = rgb
+        case GUI_COLOR_GIT_ADDED_FG: gitAddedFg = c; gitAddedFgRGB = rgb
+        case GUI_COLOR_GIT_MODIFIED_FG: gitModifiedFg = c; gitModifiedFgRGB = rgb
+        case GUI_COLOR_GIT_DELETED_FG: gitDeletedFg = c; gitDeletedFgRGB = rgb
         default: break
         }
     }

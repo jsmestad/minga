@@ -916,7 +916,7 @@ defmodule Minga.Port.ProtocolTest do
 
       # Should have a reasonable number of color slots
       assert count > 20
-      assert count < 50
+      assert count < 60
 
       # Each entry is 4 bytes (slot_id, r, g, b)
       assert byte_size(rest) == count * 4
@@ -1114,6 +1114,146 @@ defmodule Minga.Port.ProtocolTest do
       encoded = ProtocolGUI.encode_gui_cursorline(0xFFFF, 0)
 
       assert <<0x7A, 0xFFFF::16, 0::8, 0::8, 0::8>> = encoded
+    end
+  end
+
+  describe "encode_gui_gutter/1" do
+    test "encodes per-window gutter with position header and entries" do
+      data = %{
+        content_row: 2,
+        content_col: 10,
+        content_height: 30,
+        is_active: true,
+        cursor_line: 42,
+        line_number_style: :hybrid,
+        line_number_width: 4,
+        sign_col_width: 2,
+        entries: [
+          %{buf_line: 40, display_type: :normal, sign_type: :git_added},
+          %{buf_line: 41, display_type: :normal, sign_type: :diag_error},
+          %{buf_line: 42, display_type: :normal, sign_type: :none}
+        ]
+      }
+
+      encoded = ProtocolGUI.encode_gui_gutter(data)
+
+      assert <<0x7B, c_row::16, c_col::16, c_h::16, active::8, cursor::32, style::8, ln_w::8,
+               sign_w::8, count::16, rest::binary>> = encoded
+
+      assert c_row == 2
+      assert c_col == 10
+      assert c_h == 30
+      assert active == 1
+      assert cursor == 42
+      # hybrid = 0
+      assert style == 0
+      assert ln_w == 4
+      assert sign_w == 2
+      assert count == 3
+
+      # Each entry is 6 bytes: buf_line(4) + display_type(1) + sign_type(1)
+      assert byte_size(rest) == 3 * 6
+
+      assert <<40::32, 0::8, 1::8, 41::32, 0::8, 4::8, 42::32, 0::8, 0::8>> = rest
+    end
+
+    test "encodes inactive window" do
+      data = %{
+        content_row: 25,
+        content_col: 0,
+        content_height: 20,
+        is_active: false,
+        cursor_line: 10,
+        line_number_style: :absolute,
+        line_number_width: 3,
+        sign_col_width: 0,
+        entries: [%{buf_line: 10, display_type: :normal, sign_type: :none}]
+      }
+
+      encoded = ProtocolGUI.encode_gui_gutter(data)
+
+      assert <<0x7B, 25::16, 0::16, 20::16, 0::8, 10::32, 1::8, 3::8, 0::8, 1::16, _rest::binary>> =
+               encoded
+    end
+
+    test "encodes empty gutter (no entries)" do
+      data = %{
+        content_row: 0,
+        content_col: 0,
+        content_height: 0,
+        is_active: false,
+        cursor_line: 0,
+        line_number_style: :none,
+        line_number_width: 0,
+        sign_col_width: 0,
+        entries: []
+      }
+
+      encoded = ProtocolGUI.encode_gui_gutter(data)
+
+      # none = 3
+      assert <<0x7B, 0::16, 0::16, 0::16, 0::8, 0::32, 3::8, 0::8, 0::8, 0::16>> = encoded
+    end
+
+    test "encodes all line number styles" do
+      for {style, expected_byte} <- [hybrid: 0, absolute: 1, relative: 2, none: 3] do
+        data = %{
+          content_row: 0,
+          content_col: 0,
+          content_height: 10,
+          is_active: true,
+          cursor_line: 0,
+          line_number_style: style,
+          line_number_width: 0,
+          sign_col_width: 0,
+          entries: []
+        }
+
+        encoded = ProtocolGUI.encode_gui_gutter(data)
+        assert <<0x7B, _pos::binary-size(7), 0::32, ^expected_byte::8, _rest::binary>> = encoded
+      end
+    end
+
+    test "encodes all sign types" do
+      sign_types = [
+        {:none, 0},
+        {:git_added, 1},
+        {:git_modified, 2},
+        {:git_deleted, 3},
+        {:diag_error, 4},
+        {:diag_warning, 5},
+        {:diag_info, 6},
+        {:diag_hint, 7}
+      ]
+
+      entries =
+        Enum.map(sign_types, fn {sign, _byte} ->
+          %{buf_line: 0, display_type: :normal, sign_type: sign}
+        end)
+
+      data = %{
+        content_row: 0,
+        content_col: 0,
+        content_height: 40,
+        is_active: true,
+        cursor_line: 0,
+        line_number_style: :hybrid,
+        line_number_width: 4,
+        sign_col_width: 2,
+        entries: entries
+      }
+
+      encoded = ProtocolGUI.encode_gui_gutter(data)
+
+      # Header: opcode(1) + pos(7) + cursor(4) + style(1) + ln_w(1) + sign_w(1) + count(2) = 17
+      <<0x7B, _header::binary-size(16), rest::binary>> = encoded
+
+      # Extract sign_type bytes from each 6-byte entry
+      actual_sign_bytes =
+        for <<_bl::32, _dt::8, st::8 <- rest>>, do: st
+
+      expected_sign_bytes = Enum.map(sign_types, fn {_sign, byte} -> byte end)
+      assert actual_sign_bytes == expected_sign_bytes
     end
   end
 end
