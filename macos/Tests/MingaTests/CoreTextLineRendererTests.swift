@@ -13,7 +13,8 @@ struct CoreTextLineRendererTests {
     private func makeRenderer() -> CoreTextLineRenderer? {
         guard let device = MTLCreateSystemDefaultDevice() else { return nil }
         let fontManager = FontManager(name: "Menlo", size: 13, scale: 2.0)
-        return CoreTextLineRenderer(device: device, fontManager: fontManager)
+        let rasterizer = BitmapRasterizer()
+        return CoreTextLineRenderer(device: device, fontManager: fontManager, rasterizer: rasterizer)
     }
 
     @Test("Renders a simple text run into a non-nil texture")

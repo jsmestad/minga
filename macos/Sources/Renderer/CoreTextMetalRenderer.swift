@@ -153,9 +153,15 @@ final class CoreTextMetalRenderer {
     private(set) var windowContentRenderer: WindowContentRenderer?
 
     /// Set up the line renderer. Called once the FontManager is available.
+    /// Shared pooled bitmap rasterizer for both line renderers.
+    private var bitmapRasterizer: BitmapRasterizer?
+
+    /// Set up the line renderer. Called once the FontManager is available.
     func setupLineRenderer(fontManager: FontManager) {
-        self.lineRenderer = CoreTextLineRenderer(device: device, fontManager: fontManager)
-        self.windowContentRenderer = WindowContentRenderer(device: device, fontManager: fontManager)
+        let rasterizer = BitmapRasterizer()
+        self.bitmapRasterizer = rasterizer
+        self.lineRenderer = CoreTextLineRenderer(device: device, fontManager: fontManager, rasterizer: rasterizer)
+        self.windowContentRenderer = WindowContentRenderer(device: device, fontManager: fontManager, rasterizer: rasterizer)
     }
 
     /// Render the editor from LineBuffer data + semantic window content.
