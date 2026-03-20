@@ -454,15 +454,16 @@ defmodule Minga.Port.Protocol.GUI do
   @doc """
   Encodes a gui_file_tree command with the visible file tree entries.
 
-  Sends: selected_index, tree_width, entry_count, then per entry:
-  flags (is_dir, is_expanded), depth, git_status, icon, name.
+  Sends: selected_index, tree_width, entry_count, root_len, root, then per entry:
+  path_hash, flags (is_dir, is_expanded), depth, git_status, icon, name, rel_path.
   """
   @spec encode_gui_file_tree(Minga.FileTree.t() | nil) :: binary()
-  def encode_gui_file_tree(nil), do: <<@op_gui_file_tree, 0::16, 0::16, 0::16>>
+  def encode_gui_file_tree(nil), do: <<@op_gui_file_tree, 0::16, 0::16, 0::16, 0::16>>
 
   def encode_gui_file_tree(%Minga.FileTree{} = tree) do
     entries = Minga.FileTree.visible_entries(tree)
     count = length(entries)
+    root_bytes = :erlang.iolist_to_binary([tree.root])
 
     entry_binaries =
       entries
@@ -473,7 +474,8 @@ defmodule Minga.Port.Protocol.GUI do
 
     IO.iodata_to_binary([
       @op_gui_file_tree,
-      <<tree.cursor::16, tree.width::16, count::16>>
+      <<tree.cursor::16, tree.width::16, count::16, byte_size(root_bytes)::16,
+        root_bytes::binary>>
       | entry_binaries
     ])
   end
@@ -495,13 +497,16 @@ defmodule Minga.Port.Protocol.GUI do
     icon = file_tree_icon(entry)
     icon_bytes = :erlang.iolist_to_binary([icon])
     name_bytes = :erlang.iolist_to_binary([entry.name])
+    rel_path = Path.relative_to(entry.path, tree.root)
+    rel_path_bytes = :erlang.iolist_to_binary([rel_path])
 
     # Stable 32-bit hash of the file path so the GUI can use it as a
     # persistent SwiftUI identity across tree updates.
     path_hash = :erlang.phash2(entry.path, 0xFFFFFFFF)
 
     <<path_hash::32, flags::8, entry.depth::8, git_status::8, byte_size(icon_bytes)::8,
-      icon_bytes::binary, byte_size(name_bytes)::16, name_bytes::binary>>
+      icon_bytes::binary, byte_size(name_bytes)::16, name_bytes::binary,
+      byte_size(rel_path_bytes)::16, rel_path_bytes::binary>>
   end
 
   # Nerd Font folder icon (nf-md-folder)

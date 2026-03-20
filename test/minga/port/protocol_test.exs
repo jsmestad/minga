@@ -943,7 +943,9 @@ defmodule Minga.Port.ProtocolTest do
     end
 
     @tag :tmp_dir
-    test "encodes gui_file_tree with path_hash per entry", %{tmp_dir: tmp_dir} do
+    test "encodes gui_file_tree with root, path_hash, and rel_path per entry", %{
+      tmp_dir: tmp_dir
+    } do
       File.write!(Path.join(tmp_dir, "hello.ex"), "")
 
       tree = %Minga.FileTree{
@@ -955,22 +957,29 @@ defmodule Minga.Port.ProtocolTest do
 
       encoded = ProtocolGUI.encode_gui_file_tree(tree)
 
-      assert <<0x70, cursor::16, width::16, count::16, rest::binary>> = encoded
+      # Header: opcode + cursor + width + count + root_len + root
+      root_len = byte_size(tmp_dir)
+
+      assert <<0x70, cursor::16, width::16, count::16, ^root_len::16, root::binary-size(root_len),
+               entry_rest::binary>> = encoded
+
       assert cursor == 0
       assert width == 30
       assert count == 1
+      assert root == tmp_dir
 
-      # Entry starts with path_hash(4), then flags(1), depth(1), git_status(1),
-      # icon_len(1), icon, name_len(2), name
+      # Entry: path_hash + flags + depth + git_status + icon + name + rel_path
       expected_path = Path.join(tmp_dir, "hello.ex")
       expected_hash = :erlang.phash2(expected_path, 0xFFFFFFFF)
 
       assert <<^expected_hash::32, flags::8, depth::8, _git::8, icon_len::8,
-               _icon::binary-size(icon_len), name_len::16, name::binary-size(name_len)>> = rest
+               _icon::binary-size(icon_len), name_len::16, name::binary-size(name_len),
+               rel_path_len::16, rel_path::binary-size(rel_path_len)>> = entry_rest
 
       assert flags == 0x04
       assert depth == 0
       assert name == "hello.ex"
+      assert rel_path == "hello.ex"
     end
 
     @tag :tmp_dir
@@ -987,9 +996,10 @@ defmodule Minga.Port.ProtocolTest do
       encoded1 = ProtocolGUI.encode_gui_file_tree(tree)
       encoded2 = ProtocolGUI.encode_gui_file_tree(tree)
 
-      # Skip the 7-byte header (opcode + cursor + width + count)
-      <<_header1::binary-size(7), entry1::binary>> = encoded1
-      <<_header2::binary-size(7), entry2::binary>> = encoded2
+      # Skip header: opcode(1) + cursor(2) + width(2) + count(2) + root_len(2) + root
+      header_size = 9 + byte_size(tmp_dir)
+      <<_header1::binary-size(header_size), entry1::binary>> = encoded1
+      <<_header2::binary-size(header_size), entry2::binary>> = encoded2
 
       <<hash1::32, _::binary>> = entry1
       <<hash2::32, _::binary>> = entry2
@@ -999,7 +1009,7 @@ defmodule Minga.Port.ProtocolTest do
 
     test "encodes gui_file_tree nil as zero entries" do
       encoded = ProtocolGUI.encode_gui_file_tree(nil)
-      assert <<0x70, 0::16, 0::16, 0::16>> = encoded
+      assert <<0x70, 0::16, 0::16, 0::16, 0::16>> = encoded
     end
 
     test "encodes gui_tab_bar with tabs" do

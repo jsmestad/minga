@@ -26,7 +26,7 @@ enum RenderCommand: Sendable {
     case registerFont(id: UInt8, family: String)
     case guiTheme(slots: [(slotId: UInt8, r: UInt8, g: UInt8, b: UInt8)])
     case guiTabBar(activeIndex: UInt8, tabs: [GUITabEntry])
-    case guiFileTree(selectedIndex: UInt16, treeWidth: UInt16, entries: [GUIFileTreeEntry])
+    case guiFileTree(selectedIndex: UInt16, treeWidth: UInt16, rootPath: String, entries: [GUIFileTreeEntry])
     case guiCompletion(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, selectedIndex: UInt16, items: [GUICompletionItem])
     case guiWhichKey(visible: Bool, prefix: String, page: UInt8, pageCount: UInt8, bindings: [GUIWhichKeyBinding])
     case guiBreadcrumb(segments: [String])
@@ -169,6 +169,7 @@ struct GUIFileTreeEntry: Sendable {
     let gitStatus: UInt8
     let icon: String
     let name: String
+    let relPath: String
 }
 
 /// A single tab entry decoded from the gui_tab_bar protocol message.
@@ -399,17 +400,21 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
 
     // GUI chrome commands.
     case OP_GUI_FILE_TREE:
-        // selected_index:2, tree_width:2, entry_count:2, then per entry:
-        // flags:1, depth:1, git_status:1, icon_len:1, icon, name_len:2, name
-        guard data.count >= rest + 6 else { throw ProtocolDecodeError.malformed }
+        // Header: selected_index:2, tree_width:2, entry_count:2, root_len:2, root
+        // Per entry: path_hash:4, flags:1, depth:1, git_status:1, icon_len:1, icon,
+        //            name_len:2, name, rel_path_len:2, rel_path
+        guard data.count >= rest + 8 else { throw ProtocolDecodeError.malformed }
         let selectedIndex = readU16(data, rest)
         let treeWidth = readU16(data, rest + 2)
         let entryCount = Int(readU16(data, rest + 4))
+        let rootLen = Int(readU16(data, rest + 6))
+        guard data.count >= rest + 8 + rootLen else { throw ProtocolDecodeError.malformed }
+        let rootData = data[(rest + 8)..<(rest + 8 + rootLen)]
+        let rootPath = String(data: rootData, encoding: .utf8) ?? ""
         var entries: [GUIFileTreeEntry] = []
         entries.reserveCapacity(entryCount)
-        var pos = rest + 6
+        var pos = rest + 8 + rootLen
         for _ in 0..<entryCount {
-            // path_hash:4, flags:1, depth:1, git_status:1, icon_len:1, icon, name_len:2, name
             guard data.count >= pos + 8 else { throw ProtocolDecodeError.malformed }
             let pathHash = readU32(data, pos)
             let flags = data[pos + 4]
@@ -420,9 +425,13 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             let iconData = data[(pos + 8)..<(pos + 8 + iconLen)]
             let icon = String(data: iconData, encoding: .utf8) ?? ""
             let nameLen = Int(readU16(data, pos + 8 + iconLen))
-            guard data.count >= pos + 10 + iconLen + nameLen else { throw ProtocolDecodeError.malformed }
+            guard data.count >= pos + 10 + iconLen + nameLen + 2 else { throw ProtocolDecodeError.malformed }
             let nameData = data[(pos + 10 + iconLen)..<(pos + 10 + iconLen + nameLen)]
             let name = String(data: nameData, encoding: .utf8) ?? ""
+            let relPathLen = Int(readU16(data, pos + 10 + iconLen + nameLen))
+            guard data.count >= pos + 12 + iconLen + nameLen + relPathLen else { throw ProtocolDecodeError.malformed }
+            let relPathData = data[(pos + 12 + iconLen + nameLen)..<(pos + 12 + iconLen + nameLen + relPathLen)]
+            let relPath = String(data: relPathData, encoding: .utf8) ?? ""
             entries.append(GUIFileTreeEntry(
                 pathHash: pathHash,
                 isDir: flags & 0x01 != 0,
@@ -431,11 +440,12 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                 depth: depth,
                 gitStatus: gitStatus,
                 icon: icon,
-                name: name
+                name: name,
+                relPath: relPath
             ))
-            pos += 10 + iconLen + nameLen
+            pos += 12 + iconLen + nameLen + relPathLen
         }
-        return (.guiFileTree(selectedIndex: selectedIndex, treeWidth: treeWidth, entries: entries), pos - offset)
+        return (.guiFileTree(selectedIndex: selectedIndex, treeWidth: treeWidth, rootPath: rootPath, entries: entries), pos - offset)
 
     case OP_GUI_TAB_BAR:
         // active_index:1, tab_count:1, then per tab: flags:1, id:4, icon_len:1, icon, label_len:2, label

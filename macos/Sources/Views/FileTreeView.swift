@@ -228,6 +228,40 @@ struct FileTreeView: View {
                 encoder?.sendFileTreeClick(index: UInt16(entry.index))
             }
         }
+        .contextMenu { entryContextMenu(entry) }
+        .accessibilityLabel(entry.isDir ? "Folder: \(entry.name)" : "File: \(entry.name)")
+    }
+
+    // MARK: - Context menu
+
+    @ViewBuilder
+    private func entryContextMenu(_ entry: FileTreeEntry) -> some View {
+        if entry.isDir {
+            Button("New File…") {
+                encoder?.sendFileTreeNewFile()
+            }
+            Button("New Folder…") {
+                encoder?.sendFileTreeNewFolder()
+            }
+            Divider()
+        }
+
+        Button("Copy Path") {
+            copyToClipboard(fileTreeState.fullPath(for: entry))
+        }
+        Button("Copy Relative Path") {
+            copyToClipboard(entry.relPath)
+        }
+        Divider()
+        Button("Reveal in Finder") {
+            let path = fileTreeState.fullPath(for: entry)
+            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+        }
+    }
+
+    private func copyToClipboard(_ string: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(string, forType: .string)
     }
 
     // MARK: - Disclosure chevron

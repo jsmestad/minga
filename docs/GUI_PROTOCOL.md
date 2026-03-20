@@ -42,13 +42,18 @@ All GUI chrome opcodes live in the contiguous range 0x70-0x7F. Frontends can cla
 File tree sidebar entries for the native sidebar view.
 
 ```
-opcode(1) + selected_index(2) + tree_width(2) + entry_count(2) + entries...
+opcode(1) + selected_index(2) + tree_width(2) + entry_count(2) + root_len(2) + root(root_len) + entries...
 
 Per entry:
-  path_hash(4) + flags(1) + depth(1) + git_status(1) + icon_len(1) + icon(icon_len) + name_len(2) + name(name_len)
+  path_hash(4) + flags(1) + depth(1) + git_status(1) + icon_len(1) + icon(icon_len) + name_len(2) + name(name_len) + rel_path_len(2) + rel_path(rel_path_len)
+
+Root: absolute project root path, sent once in the header.
 
 Path hash: erlang:phash2 of the full file path, mod 2^32. Stable across tree
 updates so GUI frontends can use it as a persistent view identity for diffing.
+
+Rel path: path relative to root (e.g., "lib/minga/editor.ex"). GUI computes
+full path as root + "/" + rel_path for context menu actions.
 
 Flags bits:
   bit 0: is_dir
