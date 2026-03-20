@@ -270,8 +270,9 @@ final class CoreTextLineRenderer {
             let attrStr = NSAttributedString(string: run.text, attributes: attrs)
             result.append(attrStr)
 
-            // Advance current column past this run's text.
-            currentCol = run.col + UInt16(run.text.count)
+            // Advance current column past this run's text, using display width
+            // to correctly handle wide characters (CJK, fullwidth, etc.).
+            currentCol = run.col + UInt16(displayWidth(run.text))
         }
 
         return result
@@ -322,7 +323,7 @@ final class CoreTextLineRenderer {
         let bytesPerRow = width * 4
         var buffer = [UInt8](repeating: 0, count: bytesPerRow * height)
 
-        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
         guard let ctx = CGContext(
             data: &buffer,
             width: width,
@@ -359,5 +360,32 @@ final class CoreTextLineRenderer {
         CTLineDraw(ctLine, ctx)
 
         return buffer
+    }
+
+    /// Calculate the display width (in cell columns) of a string,
+    /// accounting for wide characters (CJK, emoji, etc.).
+    private func displayWidth(_ text: String) -> Int {
+        var width = 0
+        for scalar in text.unicodeScalars {
+            let v = scalar.value
+            // CJK Unified Ideographs and common fullwidth ranges
+            if (v >= 0x1100 && v <= 0x115F)    // Hangul Jamo
+                || (v >= 0x2E80 && v <= 0x303E)  // CJK Radicals, Kangxi, Ideographic Description, CJK Symbols
+                || (v >= 0x3040 && v <= 0x33BF)  // Hiragana, Katakana, Bopomofo, etc.
+                || (v >= 0x3400 && v <= 0x4DBF)  // CJK Unified Ideographs Extension A
+                || (v >= 0x4E00 && v <= 0xA4CF)  // CJK Unified Ideographs, Yi
+                || (v >= 0xAC00 && v <= 0xD7AF)  // Hangul Syllables
+                || (v >= 0xF900 && v <= 0xFAFF)  // CJK Compatibility Ideographs
+                || (v >= 0xFE30 && v <= 0xFE6F)  // CJK Compatibility Forms
+                || (v >= 0xFF01 && v <= 0xFF60)  // Fullwidth Forms
+                || (v >= 0xFFE0 && v <= 0xFFE6)  // Fullwidth Signs
+                || (v >= 0x20000 && v <= 0x2FA1F) // CJK Extensions B-F, Compatibility Supplement
+            {
+                width += 2
+            } else {
+                width += 1
+            }
+        }
+        return width
     }
 }
