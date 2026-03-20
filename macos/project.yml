@@ -14,6 +14,11 @@ settings:
     # Remove once `metal --version` works without this (check Xcode Settings > Components).
     TOOLCHAINS: com.apple.dt.toolchain.Metal.32023.864
 
+packages:
+  ViewInspector:
+    url: https://github.com/nalexn/ViewInspector
+    from: "0.10.3"
+
 targets:
   minga-mac:
     type: tool
@@ -50,6 +55,8 @@ targets:
       base:
         PRODUCT_NAME: MingaTests
         GENERATE_INFOPLIST_FILE: "YES"
+    dependencies:
+      - package: ViewInspector
 
 schemes:
   minga-mac:
