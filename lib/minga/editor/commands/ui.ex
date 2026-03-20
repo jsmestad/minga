@@ -7,10 +7,10 @@ defmodule Minga.Editor.Commands.UI do
 
   @behaviour Minga.Command.Provider
 
-  alias Minga.Editor.BottomPanel
   alias Minga.Editor.PickerUI
   alias Minga.Editor.State, as: EditorState
   alias Minga.Parser.Manager, as: ParserManager
+  alias Minga.Port.Capabilities
 
   @impl Minga.Command.Provider
   def __commands__ do
@@ -79,18 +79,17 @@ defmodule Minga.Editor.Commands.UI do
   end
 
   @spec toggle_bottom_panel(EditorState.t()) :: EditorState.t()
-  defp toggle_bottom_panel(state) do
-    %{state | bottom_panel: BottomPanel.toggle(state.bottom_panel)}
-  end
+  defp toggle_bottom_panel(state), do: frontend(state).toggle_bottom_panel(state)
 
   @spec bottom_panel_next_tab(EditorState.t()) :: EditorState.t()
-  defp bottom_panel_next_tab(state) do
-    %{state | bottom_panel: BottomPanel.next_tab(state.bottom_panel)}
-  end
+  defp bottom_panel_next_tab(state), do: frontend(state).bottom_panel_next_tab(state)
 
   @spec bottom_panel_prev_tab(EditorState.t()) :: EditorState.t()
-  defp bottom_panel_prev_tab(state) do
-    %{state | bottom_panel: BottomPanel.prev_tab(state.bottom_panel)}
+  defp bottom_panel_prev_tab(state), do: frontend(state).bottom_panel_prev_tab(state)
+
+  @spec frontend(EditorState.t()) :: module()
+  defp frontend(%{capabilities: caps}) do
+    if Capabilities.gui?(caps), do: __MODULE__.GUI, else: __MODULE__.TUI
   end
 
   @spec execute_parser_restart(EditorState.t()) :: EditorState.t()

@@ -649,6 +649,23 @@ LSP communication, file indexing, git operations: these can run as separate BEAM
 
 ---
 
+## GUI/TUI Command Branching
+
+Commands that open GUI-native chrome (bottom panel, native pickers, native tooltips) need a TUI fallback that does something reasonable with the TUI's tools (gap buffers, popup windows, cell-grid overlays). The branching uses `Capabilities.gui?` at runtime since the frontend type isn't known at compile time.
+
+**Established pattern:** follow the Chrome module's approach. `Chrome` dispatches to `Chrome.TUI` / `Chrome.GUI` submodules. Command modules with GUI/TUI branches use `Commands.Foo.GUI` and `Commands.Foo.TUI` submodules with a `Frontend` behaviour and a single dispatch in the parent. Already implemented in `Commands.UI` and `Commands.BufferManagement`. For simpler cases with 1-2 branches that don't warrant submodules, inline `if Capabilities.gui?` checks are acceptable.
+
+```
+lib/minga/editor/commands/
+  buffer_management.ex          # shared commands + dispatch
+  buffer_management/gui.ex      # GUI-specific (bottom panel, native UI)
+  buffer_management/tui.ex      # TUI-specific (gap buffers, popups)
+```
+
+The dispatch helper lives in the parent module (not a shared utility), since each command group may dispatch on different capabilities.
+
+---
+
 ## Design Principles
 
 These guide what we build and how:
