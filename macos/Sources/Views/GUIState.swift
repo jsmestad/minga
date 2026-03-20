@@ -40,7 +40,12 @@ final class GUIState {
     let bottomPanelState = BottomPanelState()
 
     /// Semantic window content from gui_window_content (0x80).
-    /// Phase 2: stored but not yet used for rendering. Phase 3 will
-    /// switch buffer window rendering from draw_text to this data.
-    var windowContent: GUIWindowContent?
+    /// Keyed by windowId. Cleared each frame before dispatch.
+    var windowContents: [UInt16: GUIWindowContent] = [:]
+
+    /// Clears per-frame state that must be rebuilt from incoming commands.
+    /// Called at the start of each frame before dispatching commands.
+    func beginFrame() {
+        windowContents.removeAll(keepingCapacity: true)
+    }
 }

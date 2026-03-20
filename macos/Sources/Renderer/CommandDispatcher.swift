@@ -65,6 +65,7 @@ final class CommandDispatcher {
         switch command {
         case .clear:
             lineBuffer.clear()
+            guiState.beginFrame()
 
         case .drawText(let row, let col, let fg, let bg, let attrs, let text):
             drawText(row: row, col: col, fg: fg, bg: bg, attrs: attrs, text: text)
@@ -225,10 +226,7 @@ final class CommandDispatcher {
             }
 
         case .guiWindowContent(let data):
-            // Phase 2: store the semantic window content for future rendering.
-            // During Phase 2, draw_text commands still drive rendering.
-            // Phase 3 will switch to rendering from this data.
-            guiState.windowContent = data
+            guiState.windowContents[data.windowId] = data
 
         case .guiBottomPanel(let visible, let activeTabIndex, let heightPercent, let filterPreset, let tabs, let entries):
             if visible {
