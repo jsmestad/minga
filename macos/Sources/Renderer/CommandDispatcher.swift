@@ -224,6 +224,12 @@ final class CommandDispatcher {
                 lineBuffer.gutterCol = UInt16(data.lineNumberWidth) + UInt16(data.signColWidth)
             }
 
+        case .guiWindowContent(let data):
+            // Phase 2: store the semantic window content for future rendering.
+            // During Phase 2, draw_text commands still drive rendering.
+            // Phase 3 will switch to rendering from this data.
+            guiState.windowContent = data
+
         case .guiBottomPanel(let visible, let activeTabIndex, let heightPercent, let filterPreset, let tabs, let entries):
             if visible {
                 let panelTabs = tabs.enumerated().map { (i, t) in

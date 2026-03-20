@@ -38,4 +38,9 @@ final class GUIState {
 
     /// Bottom panel container state.
     let bottomPanelState = BottomPanelState()
+
+    /// Semantic window content from gui_window_content (0x80).
+    /// Phase 2: stored but not yet used for rendering. Phase 3 will
+    /// switch buffer window rendering from draw_text to this data.
+    var windowContent: GUIWindowContent?
 }

@@ -42,6 +42,9 @@ let OP_GUI_CURSORLINE: UInt8 = 0x7A
 let OP_GUI_GUTTER: UInt8 = 0x7B
 let OP_GUI_BOTTOM_PANEL: UInt8 = 0x7C
 
+// GUI window content opcode (semantic rendering data for buffer windows)
+let OP_GUI_WINDOW_CONTENT: UInt8 = 0x80
+
 // GUI theme color slot IDs
 let GUI_COLOR_EDITOR_BG: UInt8 = 0x01
 let GUI_COLOR_EDITOR_FG: UInt8 = 0x02
