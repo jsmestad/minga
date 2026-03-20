@@ -876,12 +876,12 @@ defmodule Minga.Editor do
   def handle_info({:minga_event, :tool_install_started, %{name: name}}, state) do
     state = %{state | status_msg: "Installing #{name}..."}
     state = maybe_refresh_tool_picker(state)
-    {:noreply, render(state)}
+    {:noreply, Renderer.render(state)}
   end
 
   def handle_info({:minga_event, :tool_install_progress, %{name: name, message: msg}}, state) do
     state = %{state | status_msg: "#{name}: #{msg}"}
-    {:noreply, render(state)}
+    {:noreply, Renderer.render(state)}
   end
 
   def handle_info({:minga_event, :tool_install_complete, %{name: name, version: version}}, state) do
@@ -890,7 +890,7 @@ defmodule Minga.Editor do
     state = maybe_refresh_tool_picker(state)
     # Clear the success message after 5 seconds
     Process.send_after(self(), :clear_tool_status, 5_000)
-    {:noreply, render(state)}
+    {:noreply, Renderer.render(state)}
   end
 
   def handle_info({:minga_event, :tool_install_failed, %{name: name, reason: reason}}, state) do
@@ -898,7 +898,7 @@ defmodule Minga.Editor do
     state = log_message(state, "Tool install failed: #{name} — #{reason_str}")
     state = %{state | status_msg: "✕ #{name} install failed: #{reason_str}"}
     state = maybe_refresh_tool_picker(state)
-    {:noreply, render(state)}
+    {:noreply, Renderer.render(state)}
   end
 
   def handle_info(:clear_tool_status, state) do
@@ -910,7 +910,7 @@ defmodule Minga.Editor do
         state
       end
 
-    {:noreply, render(state)}
+    {:noreply, Renderer.render(state)}
   end
 
   def handle_info(_msg, state) do

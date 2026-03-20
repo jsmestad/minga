@@ -148,7 +148,6 @@ defmodule Minga.Tool.Manager do
   end
 
   @impl true
-  @spec init(keyword()) :: {:ok, State.t()}
   def init(_opts) do
     table = :ets.new(@table, [:named_table, :set, :public, read_concurrency: true])
     dir = tools_dir()
