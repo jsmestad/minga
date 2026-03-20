@@ -97,8 +97,38 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
     case .guiBreadcrumb(let segments):
         return ["type": "gui_breadcrumb", "segments": segments]
 
-    case .guiStatusBar(let contentKind, let mode, let cursorLine, let cursorCol, let lineCount, let flags, let lspStatus, let gitBranch, let message, let filetype, let errorCount, let warningCount, let modelName, let messageCount, let sessionStatus):
-        return ["type": "gui_status_bar", "content_kind": Int(contentKind), "mode": Int(mode), "cursor_line": Int(cursorLine), "cursor_col": Int(cursorCol), "line_count": Int(lineCount), "flags": Int(flags), "lsp_status": Int(lspStatus), "git_branch": gitBranch, "message": message, "filetype": filetype, "error_count": Int(errorCount), "warning_count": Int(warningCount), "model_name": modelName, "message_count": Int(messageCount), "session_status": Int(sessionStatus)]
+    case .guiStatusBar(let contentKind, let mode, let cursorLine, let cursorCol, let lineCount, let flags, let lspStatus, let gitBranch, let message, let filetype, let errorCount, let warningCount, let modelName, let messageCount, let sessionStatus, let infoCount, let hintCount, let macroRecording, let parserStatus, let agentStatus, let gitAdded, let gitModified, let gitDeleted, let icon, let iconColorR, let iconColorG, let iconColorB, let filename):
+        var result: [String: Any] = [:]
+        result["type"] = "gui_status_bar"
+        result["content_kind"] = Int(contentKind)
+        result["mode"] = Int(mode)
+        result["cursor_line"] = Int(cursorLine)
+        result["cursor_col"] = Int(cursorCol)
+        result["line_count"] = Int(lineCount)
+        result["flags"] = Int(flags)
+        result["lsp_status"] = Int(lspStatus)
+        result["git_branch"] = gitBranch
+        result["message"] = message
+        result["filetype"] = filetype
+        result["error_count"] = Int(errorCount)
+        result["warning_count"] = Int(warningCount)
+        result["model_name"] = modelName
+        result["message_count"] = Int(messageCount)
+        result["session_status"] = Int(sessionStatus)
+        result["info_count"] = Int(infoCount)
+        result["hint_count"] = Int(hintCount)
+        result["macro_recording"] = Int(macroRecording)
+        result["parser_status"] = Int(parserStatus)
+        result["agent_status"] = Int(agentStatus)
+        result["git_added"] = Int(gitAdded)
+        result["git_modified"] = Int(gitModified)
+        result["git_deleted"] = Int(gitDeleted)
+        result["icon"] = icon
+        result["icon_color_r"] = Int(iconColorR)
+        result["icon_color_g"] = Int(iconColorG)
+        result["icon_color_b"] = Int(iconColorB)
+        result["filename"] = filename
+        return result
 
     case .guiPicker(let visible, let selectedIndex, let filteredCount, let totalCount, let title, let query, let hasPreview, let items, let actionMenu):
         let itemArray = items.map { i -> [String: Any] in

@@ -115,14 +115,14 @@ defmodule Minga.Integration.GUIProtocolTest do
            filetype: :elixir,
            dirty: true,
            git_branch: "main",
-           git_diff_summary: nil,
-           diagnostic_counts: nil,
+           git_diff_summary: {5, 3, 1},
+           diagnostic_counts: {2, 4, 1, 0},
            lsp_status: :ready,
            parser_status: :available,
            buf_index: 1,
            buf_count: 3,
-           macro_recording: false,
-           agent_status: nil,
+           macro_recording: {true, "q"},
+           agent_status: :thinking,
            agent_theme_colors: nil
          }}
 
@@ -141,6 +141,16 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert decoded["line_count"] == 200
       assert decoded["git_branch"] == "main"
       assert decoded["filetype"] == "elixir"
+      # Extended fields (TUI modeline parity)
+      assert decoded["info_count"] == 1
+      assert decoded["hint_count"] == 0
+      assert decoded["macro_recording"] == 17
+      assert decoded["parser_status"] == 0
+      assert decoded["agent_status"] == 1
+      assert decoded["git_added"] == 5
+      assert decoded["git_modified"] == 3
+      assert decoded["git_deleted"] == 1
+      assert decoded["filename"] == "foo.ex"
     end
 
     test "gui_status_bar agent variant encodes and decodes correctly", %{port: port} do
