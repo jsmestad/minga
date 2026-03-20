@@ -43,10 +43,11 @@ defmodule Minga.LSP.SyncServerTest do
     end
   end
 
-  describe "notify_change/1" do
+  describe "buffer_changed event" do
     test "no-op for buffer with no clients" do
       {:ok, buf} = BufferServer.start_link(content: "hello")
-      assert :ok = SyncServer.notify_change(buf)
+      Events.notify_buffer_changed(buf)
+      :sys.get_state(SyncServer)
     end
 
     test "schedules debounced didChange" do
@@ -55,9 +56,11 @@ defmodule Minga.LSP.SyncServerTest do
       # Insert a fake client entry.
       :ets.insert(SyncServer.Registry, {buf, [self()]})
 
-      SyncServer.notify_change(buf)
+      Events.notify_buffer_changed(buf)
 
-      # The debounce timer should be set in SyncServer state.
+      # Sync call to flush the event message through SyncServer's mailbox.
+      :sys.get_state(SyncServer)
+
       state = :sys.get_state(SyncServer)
       assert Map.has_key?(state.debounce_timers, buf)
     end

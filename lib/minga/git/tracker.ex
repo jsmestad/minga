@@ -60,37 +60,6 @@ defmodule Minga.Git.Tracker do
     ArgumentError -> false
   end
 
-  @doc """
-  Notifies the git buffer that tracked content has changed.
-
-  Reads the current buffer content and sends it to the `Git.Buffer` for
-  diff recomputation. No-op if the buffer has no git tracking. Safe to
-  call from any process.
-  """
-  @spec notify_change(term()) :: :ok
-  def notify_change(buffer_pid) when not is_pid(buffer_pid) do
-    Minga.Log.warning(
-      :editor,
-      "[Git.Tracker] notify_change called with non-pid: #{inspect(buffer_pid)}"
-    )
-
-    :ok
-  end
-
-  def notify_change(buffer_pid) when is_pid(buffer_pid) do
-    case lookup(buffer_pid) do
-      nil ->
-        :ok
-
-      git_pid ->
-        {content, _cursor} = BufferServer.content_and_cursor(buffer_pid)
-        GitBuffer.update(git_pid, content)
-        :ok
-    end
-  catch
-    :exit, _ -> :ok
-  end
-
   # ── GenServer callbacks ────────────────────────────────────────────────
 
   @impl true
@@ -105,11 +74,21 @@ defmodule Minga.Git.Tracker do
 
     Minga.Events.subscribe(:buffer_opened)
     Minga.Events.subscribe(:buffer_saved)
+    Minga.Events.subscribe(:buffer_changed)
 
     {:ok, %{monitors: %{}}}
   end
 
   @impl true
+  def handle_info(
+        {:minga_event, :buffer_changed, %Minga.Events.BufferChangedEvent{buffer: buf}},
+        state
+      )
+      when is_pid(buf) do
+    do_notify_change(buf)
+    {:noreply, state}
+  end
+
   def handle_info(
         {:minga_event, :buffer_opened, %Minga.Events.BufferEvent{buffer: buf, path: path}},
         state
@@ -142,6 +121,21 @@ defmodule Minga.Git.Tracker do
   def handle_info(_msg, state), do: {:noreply, state}
 
   # ── Private ────────────────────────────────────────────────────────────
+
+  @spec do_notify_change(pid()) :: :ok
+  defp do_notify_change(buffer_pid) do
+    case lookup(buffer_pid) do
+      nil ->
+        :ok
+
+      git_pid ->
+        {content, _cursor} = BufferServer.content_and_cursor(buffer_pid)
+        GitBuffer.update(git_pid, content)
+        :ok
+    end
+  catch
+    :exit, _ -> :ok
+  end
 
   @spec maybe_start_git_buffer(map(), pid(), String.t()) :: map()
   defp maybe_start_git_buffer(state, buffer_pid, path) do
