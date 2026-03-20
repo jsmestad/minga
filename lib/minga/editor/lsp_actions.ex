@@ -467,6 +467,28 @@ defmodule Minga.Editor.LspActions do
     end
   end
 
+  @doc "Sends a textDocument/prepareCallHierarchy request for outgoing calls."
+  @spec prepare_outgoing_call_hierarchy(state()) :: state()
+  def prepare_outgoing_call_hierarchy(%{buffers: %{active: nil}} = state) do
+    %{state | status_msg: "No active buffer"}
+  end
+
+  def prepare_outgoing_call_hierarchy(%{buffers: %{active: buf}} = state) do
+    case lsp_client_for(state, buf) do
+      nil ->
+        %{state | status_msg: "No language server"}
+
+      client ->
+        send_lsp_request(
+          state,
+          client,
+          buf,
+          "textDocument/prepareCallHierarchy",
+          :prepare_outgoing_hierarchy
+        )
+    end
+  end
+
   # ── Code lens ─────────────────────────────────────────────────────────────
 
   @doc "Sends a textDocument/codeLens request."
@@ -928,6 +950,26 @@ defmodule Minga.Editor.LspActions do
     request_incoming_calls(state, item)
   end
 
+  @doc "Handles a prepareCallHierarchy response for outgoing calls."
+  @spec handle_prepare_outgoing_hierarchy_response(state(), {:ok, term()} | {:error, term()}) ::
+          state()
+  def handle_prepare_outgoing_hierarchy_response(state, {:error, error}) do
+    Log.debug(:lsp, "Call hierarchy request failed: #{inspect(error)}")
+    %{state | status_msg: "Call hierarchy request failed"}
+  end
+
+  def handle_prepare_outgoing_hierarchy_response(state, {:ok, nil}) do
+    %{state | status_msg: "No call hierarchy available"}
+  end
+
+  def handle_prepare_outgoing_hierarchy_response(state, {:ok, []}) do
+    %{state | status_msg: "No call hierarchy available"}
+  end
+
+  def handle_prepare_outgoing_hierarchy_response(state, {:ok, [item | _]}) do
+    request_outgoing_calls(state, item)
+  end
+
   @doc "Handles a callHierarchy/incomingCalls response."
   @spec handle_incoming_calls_response(state(), {:ok, term()} | {:error, term()}) :: state()
   def handle_incoming_calls_response(state, {:error, _}) do
@@ -957,6 +999,37 @@ defmodule Minga.Editor.LspActions do
       end)
 
     PickerUI.open(state, LocationSource, %{locations: items, title: "Incoming Calls"})
+  end
+
+  @doc "Handles a callHierarchy/outgoingCalls response."
+  @spec handle_outgoing_calls_response(state(), {:ok, term()} | {:error, term()}) :: state()
+  def handle_outgoing_calls_response(state, {:error, _}) do
+    %{state | status_msg: "Failed to fetch outgoing calls"}
+  end
+
+  def handle_outgoing_calls_response(state, {:ok, nil}) do
+    %{state | status_msg: "No outgoing calls"}
+  end
+
+  def handle_outgoing_calls_response(state, {:ok, []}) do
+    %{state | status_msg: "No outgoing calls"}
+  end
+
+  def handle_outgoing_calls_response(state, {:ok, calls}) when is_list(calls) do
+    items =
+      Enum.map(calls, fn call ->
+        to = call["to"]
+        uri = to["uri"]
+        range = to["range"]
+        {line, col} = extract_position(range["start"])
+        path = SyncServer.uri_to_path(uri)
+        name = to["name"]
+        detail = Map.get(to, "detail", "")
+        label = if detail != "", do: "#{name} (#{detail})", else: name
+        {path, line, col, label}
+      end)
+
+    PickerUI.open(state, LocationSource, %{locations: items, title: "Outgoing Calls"})
   end
 
   # ── Code lens response ────────────────────────────────────────────────────
@@ -1524,6 +1597,21 @@ defmodule Minga.Editor.LspActions do
         params = %{"item" => item}
         ref = Client.request(client, "callHierarchy/incomingCalls", params)
         put_in(state.lsp_pending, Map.put(state.lsp_pending, ref, :incoming_calls))
+    end
+  end
+
+  @spec request_outgoing_calls(state(), map()) :: state()
+  defp request_outgoing_calls(state, item) do
+    buf = state.buffers.active
+
+    case lsp_client_for(state, buf) do
+      nil ->
+        %{state | status_msg: "No language server"}
+
+      client ->
+        params = %{"item" => item}
+        ref = Client.request(client, "callHierarchy/outgoingCalls", params)
+        put_in(state.lsp_pending, Map.put(state.lsp_pending, ref, :outgoing_calls))
     end
   end
 
