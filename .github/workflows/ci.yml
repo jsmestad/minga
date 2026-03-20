@@ -121,6 +121,39 @@ jobs:
             -derivedDataPath DerivedData \
             CODE_SIGNING_ALLOWED=NO
 
+  swift-integration:
+    name: Swift Protocol Integration
+    runs-on: macos-15
+    env:
+      MIX_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Cache deps
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: integration-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-${{ hashFiles('mix.lock') }}
+          restore-keys: integration-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-
+
+      - run: mix deps.get
+
+      - name: Build Swift test harness
+        run: mix swift.harness
+
+      - name: Run BEAM-to-Swift protocol integration tests
+        run: mix test test/minga/integration/gui_protocol_test.exs --include swift_harness
+
   dialyzer:
     name: Dialyzer
     runs-on: ubuntu-latest
