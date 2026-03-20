@@ -38,9 +38,9 @@ struct CTUniformsGPU {
     var scrollOffset: SIMD2<Float> = .zero
 }
 
-/// Background clear color (dark gray matching the default bg).
+/// Default background clear color (dark gray matching the default bg).
 /// Linear equivalents of sRGB (0.12, 0.12, 0.14).
-private let ctBgClearColor = MTLClearColor(red: 0.01298, green: 0.01298, blue: 0.01681, alpha: 1.0)
+private let ctBgClearColorDefault = MTLClearColor(red: 0.01298, green: 0.01298, blue: 0.01681, alpha: 1.0)
 
 /// Renders the editor using CoreText line textures instead of cell-grid instanced drawing.
 final class CoreTextMetalRenderer {
@@ -52,11 +52,17 @@ final class CoreTextMetalRenderer {
     /// The CoreText line rendering engine.
     private(set) var lineRenderer: CoreTextLineRenderer?
 
+    /// Dynamic clear color, updated when the theme's default bg changes.
+    private var clearColor: MTLClearColor
+    /// Cached defaultBg value to detect changes.
+    private var cachedDefaultBg: UInt32 = 0
+
     init?() {
         guard let device = MTLCreateSystemDefaultDevice() else { return nil }
         self.device = device
         guard let queue = device.makeCommandQueue() else { return nil }
         self.commandQueue = queue
+        self.clearColor = ctBgClearColorDefault
 
         // Load the compiled Metal shader library.
         let executableURL = Bundle.main.executableURL!
@@ -122,6 +128,23 @@ final class CoreTextMetalRenderer {
             ? colorFromU24(lineBuffer.defaultBg, default: SIMD3<Float>(0.12, 0.12, 0.14))
             : SIMD3<Float>(0.12, 0.12, 0.14)
 
+        // Update clear color dynamically when the theme's default bg changes.
+        if lineBuffer.defaultBg != cachedDefaultBg {
+            cachedDefaultBg = lineBuffer.defaultBg
+            if lineBuffer.defaultBg != 0 {
+                // Convert sRGB [0,1] to linear for MTLClearColor.
+                let r = Double(defaultBg.x)
+                let g = Double(defaultBg.y)
+                let b = Double(defaultBg.z)
+                func srgbToLinear(_ c: Double) -> Double {
+                    c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4)
+                }
+                clearColor = MTLClearColor(red: srgbToLinear(r), green: srgbToLinear(g), blue: srgbToLinear(b), alpha: 1.0)
+            } else {
+                clearColor = ctBgClearColorDefault
+            }
+        }
+
         // Gutter padding (same as MetalRenderer).
         let gutterPaddingPt: Float = lineBuffer.gutterCol > 0 ? round(12.0 * scale) / scale : 0
         let gutterPaddingPx = gutterPaddingPt * scale
@@ -134,24 +157,42 @@ final class CoreTextMetalRenderer {
             let rowF = Float(row)
             let yPos = rowF * cellH * scale
 
-            // Background: fill the full row with default bg.
-            var bgQuad = QuadGPU()
-            bgQuad.position = SIMD2<Float>(0, yPos)
-            bgQuad.size = SIMD2<Float>(Float(viewportSize.width), cellH * scale)
-            bgQuad.color = defaultBg
-            bgQuad.alpha = 1.0
-            bgQuads.append(bgQuad)
+            // Background: fill the full row with default bg, but only if the
+            // row has per-run bg colors that differ from the clear color.
+            // When the clear color matches the default bg, the row-wide fill
+            // is redundant because the render pass already clears to that color.
+            let runs = lineBuffer.runsForLine(row)
+            let hasExplicitBg = runs.contains { run in
+                let isReverse = (run.attrs & 0x08) != 0
+                return run.bg != 0 || isReverse
+            }
+            if hasExplicitBg {
+                var bgQuad = QuadGPU()
+                bgQuad.position = SIMD2<Float>(0, yPos)
+                bgQuad.size = SIMD2<Float>(Float(viewportSize.width), cellH * scale)
+                bgQuad.color = defaultBg
+                bgQuad.alpha = 1.0
+                bgQuads.append(bgQuad)
+            }
 
             // Per-run background fills (for runs with explicit bg color or reverse attribute).
-            let runs = lineBuffer.runsForLine(row)
-            for run in runs {
+            for (i, run) in runs.enumerated() {
                 let isReverse = (run.attrs & 0x08) != 0  // ATTR_REVERSE
                 if run.bg != 0 || isReverse {
                     let bgColor = isReverse
                         ? colorFromU24(run.fg, default: SIMD3<Float>(1, 1, 1))
                         : colorFromU24(run.bg, default: defaultBg)
                     let colOffset = Float(run.col) * cellW * scale
-                    let runWidth = Float(run.text.count) * cellW * scale
+                    // Use column span (next run col - this run col) for correct
+                    // width with CJK/wide characters, falling back to display
+                    // width calculation for the last run on the line.
+                    let colSpan: UInt16
+                    if i + 1 < runs.count {
+                        colSpan = runs[i + 1].col - run.col
+                    } else {
+                        colSpan = UInt16(displayWidth(run.text))
+                    }
+                    let runWidth = Float(colSpan) * cellW * scale
                     let xPos = run.col >= lineBuffer.gutterCol
                         ? colOffset + gutterPaddingPx : colOffset
 
@@ -190,7 +231,7 @@ final class CoreTextMetalRenderer {
         renderDesc.colorAttachments[0].texture = drawable.texture
         renderDesc.colorAttachments[0].loadAction = .clear
         renderDesc.colorAttachments[0].storeAction = .store
-        renderDesc.colorAttachments[0].clearColor = ctBgClearColor
+        renderDesc.colorAttachments[0].clearColor = clearColor
 
         guard let cmdBuf = commandQueue.makeCommandBuffer(),
               let encoder = cmdBuf.makeRenderCommandEncoder(descriptor: renderDesc) else { return }
@@ -319,5 +360,32 @@ final class CoreTextMetalRenderer {
             Float((color >> 8) & 0xFF) / 255.0,
             Float(color & 0xFF) / 255.0
         )
+    }
+
+    /// Calculate the display width (in cell columns) of a string,
+    /// accounting for wide characters (CJK, emoji, etc.).
+    private func displayWidth(_ text: String) -> Int {
+        var width = 0
+        for scalar in text.unicodeScalars {
+            let v = scalar.value
+            // CJK Unified Ideographs and common fullwidth ranges
+            if (v >= 0x1100 && v <= 0x115F)    // Hangul Jamo
+                || (v >= 0x2E80 && v <= 0x303E)  // CJK Radicals, Kangxi, Ideographic Description, CJK Symbols
+                || (v >= 0x3040 && v <= 0x33BF)  // Hiragana, Katakana, Bopomofo, etc.
+                || (v >= 0x3400 && v <= 0x4DBF)  // CJK Unified Ideographs Extension A
+                || (v >= 0x4E00 && v <= 0xA4CF)  // CJK Unified Ideographs, Yi
+                || (v >= 0xAC00 && v <= 0xD7AF)  // Hangul Syllables
+                || (v >= 0xF900 && v <= 0xFAFF)  // CJK Compatibility Ideographs
+                || (v >= 0xFE30 && v <= 0xFE6F)  // CJK Compatibility Forms
+                || (v >= 0xFF01 && v <= 0xFF60)  // Fullwidth Forms
+                || (v >= 0xFFE0 && v <= 0xFFE6)  // Fullwidth Signs
+                || (v >= 0x20000 && v <= 0x2FA1F) // CJK Extensions B-F, Compatibility Supplement
+            {
+                width += 2
+            } else {
+                width += 1
+            }
+        }
+        return width
     }
 }
