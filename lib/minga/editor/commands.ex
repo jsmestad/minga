@@ -34,6 +34,7 @@ defmodule Minga.Editor.Commands do
   alias Minga.Editor.Commands.Extensions, as: ExtCommands
   alias Minga.Editor.Commands.Help
   alias Minga.Editor.Commands.Lsp, as: LspCommands
+  alias Minga.Editor.LspActions
   alias Minga.Editor.Commands.Marks
   alias Minga.Editor.Commands.Movement
   alias Minga.Editor.Commands.Operators
@@ -395,6 +396,10 @@ defmodule Minga.Editor.Commands do
 
   def execute(state, {:execute_ex_command, {:extension_update, []}}) do
     ExtCommands.update(state)
+  end
+
+  def execute(state, {:execute_ex_command, {:rename, new_name}}) do
+    LspActions.rename(state, new_name)
   end
 
   def execute(state, {:execute_ex_command, _} = cmd), do: BufferManagement.execute(state, cmd)

@@ -72,6 +72,7 @@ defmodule Minga.Command.Parser do
           | {:set, atom()}
           | {:setglobal, atom()}
           | {:substitute, String.t(), String.t(), [substitute_flag()]}
+          | {:rename, String.t()}
           | {:unknown, String.t()}
 
   @typedoc "Flags for :%s substitution."
@@ -167,6 +168,7 @@ defmodule Minga.Command.Parser do
   defp do_parse("split"), do: {:split_horizontal, []}
   defp do_parse("sp"), do: {:split_horizontal, []}
   defp do_parse("close"), do: {:window_close, []}
+  defp do_parse("rename " <> name), do: {:rename, String.trim(name)}
 
   defp do_parse("set number"), do: {:set, :number}
   defp do_parse("set nu"), do: {:set, :number}

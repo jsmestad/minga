@@ -762,6 +762,73 @@ defmodule Minga.LSP.Client do
           "formats" => ["relative"],
           "overlappingTokenSupport" => false,
           "multilineTokenSupport" => false
+        },
+        "references" => %{
+          "dynamicRegistration" => false
+        },
+        "documentHighlight" => %{
+          "dynamicRegistration" => false
+        },
+        "codeAction" => %{
+          "dynamicRegistration" => false,
+          "codeActionLiteralSupport" => %{
+            "codeActionKind" => %{
+              "valueSet" => [
+                "quickfix",
+                "refactor",
+                "refactor.extract",
+                "refactor.inline",
+                "refactor.rewrite",
+                "source",
+                "source.organizeImports",
+                "source.fixAll"
+              ]
+            }
+          },
+          "isPreferredSupport" => true,
+          "resolveSupport" => %{
+            "properties" => ["edit"]
+          }
+        },
+        "rename" => %{
+          "dynamicRegistration" => false,
+          "prepareSupport" => true
+        },
+        "documentSymbol" => %{
+          "dynamicRegistration" => false,
+          "hierarchicalDocumentSymbolSupport" => true,
+          "symbolKind" => %{
+            "valueSet" => Enum.to_list(1..26)
+          }
+        },
+        "typeDefinition" => %{
+          "dynamicRegistration" => false
+        },
+        "implementation" => %{
+          "dynamicRegistration" => false
+        },
+        "selectionRange" => %{
+          "dynamicRegistration" => false
+        },
+        "callHierarchy" => %{
+          "dynamicRegistration" => false
+        },
+        "codeLens" => %{
+          "dynamicRegistration" => false
+        },
+        "inlayHint" => %{
+          "dynamicRegistration" => false
+        }
+      },
+      "workspace" => %{
+        "symbol" => %{
+          "dynamicRegistration" => false,
+          "symbolKind" => %{
+            "valueSet" => Enum.to_list(1..26)
+          }
+        },
+        "workspaceEdit" => %{
+          "documentChanges" => true
         }
       }
     }
