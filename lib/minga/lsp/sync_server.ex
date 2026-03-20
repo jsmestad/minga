@@ -242,13 +242,47 @@ defmodule Minga.LSP.SyncServer do
 
   defp notify_clients_change(clients, buffer_pid) do
     with uri when is_binary(uri) <- buffer_uri(buffer_pid) do
-      {content, _cursor} = BufferServer.content_and_cursor(buffer_pid)
-      send_to_alive_clients(clients, fn c -> Client.did_change(c, uri, content) end)
+      # Collect edit deltas for incremental sync
+      deltas = BufferServer.flush_edits(buffer_pid)
+
+      send_to_alive_clients(clients, fn client ->
+        send_change(client, uri, buffer_pid, deltas)
+      end)
     end
 
     :ok
   catch
     :exit, _ -> :ok
+  end
+
+  # Sends a change notification using incremental sync if the server supports
+  # it and deltas are available, otherwise falls back to full sync.
+  @spec send_change(pid(), String.t(), pid(), [Minga.Buffer.EditDelta.t()]) :: :ok
+  defp send_change(client, uri, buffer_pid, deltas) do
+    sync_kind =
+      try do
+        Client.sync_kind(client)
+      catch
+        :exit, _ -> :full
+      end
+
+    case {sync_kind, deltas} do
+      {:incremental, [_ | _]} ->
+        changes = Enum.map(deltas, &delta_to_lsp_change/1)
+        Client.did_change_incremental(client, uri, changes)
+
+      _ ->
+        {content, _cursor} = BufferServer.content_and_cursor(buffer_pid)
+        Client.did_change(client, uri, content)
+    end
+  end
+
+  @spec delta_to_lsp_change(Minga.Buffer.EditDelta.t()) ::
+          {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer(), String.t()}
+  defp delta_to_lsp_change(delta) do
+    {sl, sc} = delta.start_position
+    {el, ec} = delta.old_end_position
+    {sl, sc, el, ec, delta.inserted_text}
   end
 
   @spec buffer_uri(pid()) :: String.t() | nil

@@ -144,6 +144,37 @@ defmodule Minga.LSP.Client do
   end
 
   @doc """
+  Returns the sync kind negotiated with the server.
+
+  - `:full` (1) — server expects full content on every change
+  - `:incremental` (2) — server accepts incremental content changes
+  - `:none` (0) — server doesn't want change notifications
+  """
+  @spec sync_kind(GenServer.server()) :: :none | :full | :incremental
+  def sync_kind(server) do
+    GenServer.call(server, :sync_kind)
+  end
+
+  @doc """
+  Sends `textDocument/didChange` with incremental content changes.
+
+  Each change is a `{start_line, start_col, end_line, end_col, new_text}`
+  tuple matching the LSP TextDocumentContentChangeEvent format.
+  """
+  @spec did_change_incremental(
+          GenServer.server(),
+          String.t(),
+          [
+            {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer(),
+             String.t()}
+          ]
+        ) :: :ok
+  def did_change_incremental(server, uri, changes)
+      when is_binary(uri) and is_list(changes) do
+    GenServer.cast(server, {:did_change_incremental, uri, changes})
+  end
+
+  @doc """
   Sends a synchronous LSP request and waits for the response.
 
   Blocks the caller for up to `timeout` milliseconds. Returns
@@ -247,6 +278,10 @@ defmodule Minga.LSP.Client do
     {:reply, state.capabilities, state}
   end
 
+  def handle_call(:sync_kind, _from, state) do
+    {:reply, extract_sync_kind(state.capabilities), state}
+  end
+
   def handle_call(:semantic_token_legend, _from, state) do
     {:reply, state.semantic_token_legend, state}
   end
@@ -320,6 +355,36 @@ defmodule Minga.LSP.Client do
         send_notification(state, "textDocument/didChange", %{
           "textDocument" => %{"uri" => uri, "version" => new_version},
           "contentChanges" => [%{"text" => text}]
+        })
+
+        {:noreply, state}
+    end
+  end
+
+  def handle_cast({:did_change_incremental, uri, changes}, %{status: :ready} = state) do
+    case Map.get(state.open_documents, uri) do
+      nil ->
+        {:noreply, state}
+
+      %{version: version} ->
+        new_version = version + 1
+        doc = %{uri: uri, version: new_version}
+        state = %{state | open_documents: Map.put(state.open_documents, uri, doc)}
+
+        content_changes =
+          Enum.map(changes, fn {sl, sc, el, ec, text} ->
+            %{
+              "range" => %{
+                "start" => %{"line" => sl, "character" => sc},
+                "end" => %{"line" => el, "character" => ec}
+              },
+              "text" => text
+            }
+          end)
+
+        send_notification(state, "textDocument/didChange", %{
+          "textDocument" => %{"uri" => uri, "version" => new_version},
+          "contentChanges" => content_changes
         })
 
         {:noreply, state}
@@ -853,6 +918,24 @@ defmodule Minga.LSP.Client do
         }
       }
     }
+  end
+
+  @spec extract_sync_kind(map()) :: :none | :full | :incremental
+  defp extract_sync_kind(capabilities) do
+    sync = get_in(capabilities, ["textDocumentSync"])
+
+    case sync do
+      # TextDocumentSyncOptions object
+      %{"change" => 2} -> :incremental
+      %{"change" => 1} -> :full
+      %{"change" => 0} -> :none
+      # Shorthand integer
+      2 -> :incremental
+      1 -> :full
+      0 -> :none
+      # Default to full
+      _ -> :full
+    end
   end
 
   @spec reply_to_caller(State.pending_from(), term()) :: :ok

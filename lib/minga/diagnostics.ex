@@ -223,8 +223,28 @@ defmodule Minga.Diagnostics do
   @impl GenServer
   @spec init(atom()) :: {:ok, state()}
   def init(name) do
-    table = :ets.new(table_name(name), [:set, :public, :named_table, read_concurrency: true])
-    {:ok, %{table: table, subscribers: []}}
+    tname = table_name(name)
+    table = :ets.new(tname, [:set, :public, :named_table, read_concurrency: true])
+
+    # Secondary index: maps URI → list of sources that have diagnostics for it.
+    # Enables O(1) URI lookups instead of scanning the entire table.
+    uri_index = :ets.new(:"#{tname}_uri_idx", [:set, :public, read_concurrency: true])
+
+    # Merge cache: stores merged diagnostics per URI.
+    # Invalidated on publish/clear for that URI only.
+    merge_cache = :ets.new(:"#{tname}_cache", [:set, :public, read_concurrency: true])
+
+    # Store refs so readers can find the secondary tables from the main table name.
+    :persistent_term.put({__MODULE__, tname}, {uri_index, merge_cache})
+
+    {:ok,
+     %{
+       table: table,
+       uri_index: uri_index,
+       merge_cache: merge_cache,
+       subscribers: [],
+       generation: 0
+     }}
   end
 
   @impl GenServer
@@ -235,18 +255,28 @@ defmodule Minga.Diagnostics do
 
   def handle_call({:publish, source, uri, diagnostics}, _from, state) do
     :ets.insert(state.table, {{source, uri}, diagnostics})
+    update_uri_index(state.uri_index, uri, source, :add)
+    invalidate_cache(state.merge_cache, uri)
+    gen = state.generation + 1
     notify_subscribers(state.subscribers, uri)
-    {:reply, :ok, state}
+    {:reply, :ok, %{state | generation: gen}}
   end
 
   def handle_call({:clear, source, uri}, _from, state) do
     :ets.delete(state.table, {source, uri})
+    update_uri_index(state.uri_index, uri, source, :remove)
+    invalidate_cache(state.merge_cache, uri)
+    gen = state.generation + 1
     notify_subscribers(state.subscribers, uri)
-    {:reply, :ok, state}
+    {:reply, :ok, %{state | generation: gen}}
   end
 
   def handle_call(:table_name, _from, state) do
     {:reply, state.table, state}
+  end
+
+  def handle_call(:table_refs, _from, state) do
+    {:reply, {state.table, state.uri_index, state.merge_cache}, state}
   end
 
   def handle_call({:clear_source, source}, _from, state) do
@@ -262,8 +292,15 @@ defmodule Minga.Diagnostics do
       )
 
     :ets.match_delete(state.table, {{source, :_}, :_})
+
+    Enum.each(affected_uris, fn uri ->
+      update_uri_index(state.uri_index, uri, source, :remove)
+      invalidate_cache(state.merge_cache, uri)
+    end)
+
+    gen = state.generation + 1
     Enum.each(affected_uris, &notify_subscribers(state.subscribers, &1))
-    {:reply, :ok, state}
+    {:reply, :ok, %{state | generation: gen}}
   end
 
   @impl GenServer
@@ -273,16 +310,40 @@ defmodule Minga.Diagnostics do
 
   # ── Private ────────────────────────────────────────────────────────────────
 
+  # Merged diagnostics for a URI, using the URI index for O(1) source
+  # lookup and a generation-based cache to avoid re-merging on every call.
   @spec merged_for_uri(:ets.table(), uri()) :: [Diagnostic.t()]
   defp merged_for_uri(table, uri) do
-    :ets.foldl(
-      fn
-        {{_src, ^uri}, diags}, acc -> diags ++ acc
-        _other, acc -> acc
-      end,
-      [],
-      table
-    )
+    {uri_index, cache_table} = :persistent_term.get({__MODULE__, table})
+
+    # Check cache first
+    case :ets.lookup(cache_table, uri) do
+      [{^uri, cached_diags}] ->
+        cached_diags
+
+      [] ->
+        # Cache miss: look up sources for this URI, then fetch each
+        result = merge_from_index(table, uri_index, uri)
+        :ets.insert(cache_table, {uri, result})
+        result
+    end
+  end
+
+  @spec merge_from_index(:ets.table(), :ets.table(), uri()) :: [Diagnostic.t()]
+  defp merge_from_index(table, uri_index, uri) do
+    sources =
+      case :ets.lookup(uri_index, uri) do
+        [{^uri, src_list}] -> src_list
+        [] -> []
+      end
+
+    sources
+    |> Enum.flat_map(fn source ->
+      case :ets.lookup(table, {source, uri}) do
+        [{{^source, ^uri}, diags}] -> diags
+        [] -> []
+      end
+    end)
     |> Diagnostic.sort()
   end
 
@@ -306,6 +367,44 @@ defmodule Minga.Diagnostics do
       nil -> List.last(sorted_diags)
       diag -> diag
     end
+  end
+
+  @spec update_uri_index(:ets.table(), uri(), source(), :add | :remove) :: :ok
+  defp update_uri_index(uri_index, uri, source, :add) do
+    case :ets.lookup(uri_index, uri) do
+      [{^uri, sources}] ->
+        unless source in sources do
+          :ets.insert(uri_index, {uri, [source | sources]})
+        end
+
+      [] ->
+        :ets.insert(uri_index, {uri, [source]})
+    end
+
+    :ok
+  end
+
+  defp update_uri_index(uri_index, uri, source, :remove) do
+    case :ets.lookup(uri_index, uri) do
+      [{^uri, sources}] ->
+        new_sources = List.delete(sources, source)
+
+        if new_sources == [] do
+          :ets.delete(uri_index, uri)
+        else
+          :ets.insert(uri_index, {uri, new_sources})
+        end
+
+      [] ->
+        :ok
+    end
+
+    :ok
+  end
+
+  @spec invalidate_cache(:ets.table(), uri()) :: true
+  defp invalidate_cache(cache, uri) do
+    :ets.delete(cache, uri)
   end
 
   @spec notify_subscribers([pid()], uri()) :: :ok
