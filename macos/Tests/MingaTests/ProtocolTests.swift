@@ -313,6 +313,10 @@ final class SpyEncoder: InputEncoder, Sendable {
     func sendBreadcrumbClick(index: UInt8) {}
     func sendTogglePanel(panel: UInt8) {}
     func sendNewTab() {}
+    func sendPanelSwitchTab(index: UInt8) {}
+    func sendPanelDismiss() {}
+    func sendPanelResize(heightPercent: UInt8) {}
+    func sendOpenFile(path: String) {}
 }
 
 @Suite("EditorNSView Resize")

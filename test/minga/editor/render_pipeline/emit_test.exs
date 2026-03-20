@@ -22,7 +22,7 @@ defmodule Minga.Editor.RenderPipeline.EmitTest do
       }
 
       state = base_state()
-      assert :ok = Emit.emit(frame, state)
+      Emit.emit(frame, state)
 
       assert_receive {:"$gen_cast", {:send_commands, commands}}
       assert is_list(commands)
@@ -41,7 +41,7 @@ defmodule Minga.Editor.RenderPipeline.EmitTest do
       }
 
       state = base_state()
-      assert :ok = Emit.emit(frame, state)
+      Emit.emit(frame, state)
 
       assert_receive {:"$gen_cast", {:send_commands, commands}}
       # First command should be clear (0x12)
@@ -65,13 +65,13 @@ defmodule Minga.Editor.RenderPipeline.EmitTest do
       # First emit: establishes tracking state (full redraw)
       state1 = seed_state(state, 0)
       frame1 = build_frame_with_window(state1, viewport_top: 0)
-      assert :ok = Emit.emit(frame1, state1)
+      Emit.emit(frame1, state1)
       assert_receive {:"$gen_cast", {:send_commands, _first_commands}}
 
       # Simulate scrolling down by 1 line
       state2 = simulate_scroll(state, 1)
       frame2 = build_frame_with_window(state2, viewport_top: 1)
-      assert :ok = Emit.emit(frame2, state2)
+      Emit.emit(frame2, state2)
 
       assert_receive {:"$gen_cast", {:send_commands, scroll_commands}}
       # Should NOT start with clear (0x12)
@@ -88,12 +88,12 @@ defmodule Minga.Editor.RenderPipeline.EmitTest do
 
       state1 = seed_state(state, 0)
       frame1 = build_frame_with_window(state1, viewport_top: 0)
-      assert :ok = Emit.emit(frame1, state1)
+      Emit.emit(frame1, state1)
       assert_receive {:"$gen_cast", {:send_commands, _}}
 
       state2 = simulate_scroll(state, 3)
       frame2 = build_frame_with_window(state2, viewport_top: 3)
-      assert :ok = Emit.emit(frame2, state2)
+      Emit.emit(frame2, state2)
 
       assert_receive {:"$gen_cast", {:send_commands, scroll_commands}}
       refute match?([<<0x12>> | _], scroll_commands)
@@ -110,12 +110,12 @@ defmodule Minga.Editor.RenderPipeline.EmitTest do
 
       state1 = seed_state(state, 0)
       frame1 = build_frame_with_window(state1, viewport_top: 0)
-      assert :ok = Emit.emit(frame1, state1)
+      Emit.emit(frame1, state1)
       assert_receive {:"$gen_cast", {:send_commands, _}}
 
       state2 = simulate_scroll(state, 4)
       frame2 = build_frame_with_window(state2, viewport_top: 4)
-      assert :ok = Emit.emit(frame2, state2)
+      Emit.emit(frame2, state2)
 
       assert_receive {:"$gen_cast", {:send_commands, commands}}
       # Should start with clear (full redraw)
@@ -127,12 +127,12 @@ defmodule Minga.Editor.RenderPipeline.EmitTest do
 
       state1 = seed_state(state, 5)
       frame1 = build_frame_with_window(state1, viewport_top: 5)
-      assert :ok = Emit.emit(frame1, state1)
+      Emit.emit(frame1, state1)
       assert_receive {:"$gen_cast", {:send_commands, _}}
 
       # Same viewport top: no scroll, full redraw (no deltas collected)
       frame2 = build_frame_with_window(state1, viewport_top: 5)
-      assert :ok = Emit.emit(frame2, state1)
+      Emit.emit(frame2, state1)
 
       assert_receive {:"$gen_cast", {:send_commands, commands}}
       assert [<<0x12>> | _] = commands
@@ -145,13 +145,13 @@ defmodule Minga.Editor.RenderPipeline.EmitTest do
       # Start at line 10
       state1 = seed_state(state, 10)
       frame1 = build_frame_with_window(state1, viewport_top: 10)
-      assert :ok = Emit.emit(frame1, state1)
+      Emit.emit(frame1, state1)
       assert_receive {:"$gen_cast", {:send_commands, _}}
 
       # Scroll up by 2
       state2 = simulate_scroll(state, 8)
       frame2 = build_frame_with_window(state2, viewport_top: 8)
-      assert :ok = Emit.emit(frame2, state2)
+      Emit.emit(frame2, state2)
 
       assert_receive {:"$gen_cast", {:send_commands, scroll_commands}}
       refute match?([<<0x12>> | _], scroll_commands)
@@ -169,12 +169,12 @@ defmodule Minga.Editor.RenderPipeline.EmitTest do
 
       state1 = seed_state(state, 0)
       frame1 = build_frame_with_window(state1, viewport_top: 0)
-      assert :ok = Emit.emit(frame1, state1)
+      Emit.emit(frame1, state1)
       assert_receive {:"$gen_cast", {:send_commands, _}}
 
       state2 = simulate_scroll(state, 1)
       frame2 = build_frame_with_window(state2, viewport_top: 1)
-      assert :ok = Emit.emit(frame2, state2)
+      Emit.emit(frame2, state2)
 
       assert_receive {:"$gen_cast", {:send_commands, commands}}
       # Last command should be batch_end (0x13)
@@ -187,12 +187,12 @@ defmodule Minga.Editor.RenderPipeline.EmitTest do
 
       state1 = seed_state(state, 0)
       frame1 = build_frame_with_window(state1, viewport_top: 0)
-      assert :ok = Emit.emit(frame1, state1)
+      Emit.emit(frame1, state1)
       assert_receive {:"$gen_cast", {:send_commands, _}}
 
       state2 = simulate_scroll(state, 1)
       frame2 = build_frame_with_window(state2, viewport_top: 1)
-      assert :ok = Emit.emit(frame2, state2)
+      Emit.emit(frame2, state2)
 
       assert_receive {:"$gen_cast", {:send_commands, commands}}
       # Should contain set_cursor (0x11) and set_cursor_shape (0x15)
@@ -225,7 +225,7 @@ defmodule Minga.Editor.RenderPipeline.EmitTest do
           ]
       }
 
-      assert :ok = Emit.emit(frame_with_chrome, gui_state)
+      Emit.emit(frame_with_chrome, gui_state)
 
       assert_receive {:"$gen_cast", {:send_commands, commands}}
 
@@ -262,7 +262,7 @@ defmodule Minga.Editor.RenderPipeline.EmitTest do
           tab_bar: [DisplayList.draw(0, 0, " tab ", Minga.Face.new(fg: 0xBBC2CF, bg: 0x21242B))]
       }
 
-      assert :ok = Emit.emit(frame_with_chrome, gui_state)
+      Emit.emit(frame_with_chrome, gui_state)
 
       assert_receive {:"$gen_cast", {:send_commands, commands}}
       assert is_list(commands)
@@ -294,7 +294,7 @@ defmodule Minga.Editor.RenderPipeline.EmitTest do
           ]
       }
 
-      assert :ok = Emit.emit(frame_with_chrome, gui_state)
+      Emit.emit(frame_with_chrome, gui_state)
 
       assert_receive {:"$gen_cast", {:send_commands, commands}}
 
@@ -321,7 +321,7 @@ defmodule Minga.Editor.RenderPipeline.EmitTest do
         | overlays: [%DisplayList.Overlay{draws: [hover_draw]}]
       }
 
-      assert :ok = Emit.emit(frame_with_overlay, gui_state)
+      Emit.emit(frame_with_overlay, gui_state)
 
       assert_receive {:"$gen_cast", {:send_commands, commands}}
       draw_commands = Enum.filter(commands, &match?(<<0x10, _::binary>>, &1))

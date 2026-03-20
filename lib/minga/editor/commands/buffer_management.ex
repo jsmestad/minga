@@ -153,13 +153,11 @@ defmodule Minga.Editor.Commands.BufferManagement do
     open_special_buffer(state, "*Messages*", msg_buf)
   end
 
-  def execute(%{buffers: %{warnings: nil}} = state, :view_warnings) do
-    %{state | status_msg: "No warnings buffer"}
-  end
-
-  def execute(%{buffers: %{warnings: warn_buf}} = state, :view_warnings) do
-    state = %{state | warnings_popup_dismissed: false}
-    open_special_buffer(state, "*Warnings*", warn_buf)
+  def execute(state, :view_warnings) do
+    alias Minga.Editor.BottomPanel
+    # Open bottom panel with warnings filter preset (#825)
+    new_panel = BottomPanel.show(state.bottom_panel, :messages, :warnings)
+    %{state | bottom_panel: new_panel}
   end
 
   def execute(state, {:open_special_buffer, buffer_name, buffer_pid})
@@ -1186,8 +1184,8 @@ defmodule Minga.Editor.Commands.BufferManagement do
       },
       %Minga.Command{
         name: :view_warnings,
-        description: "View *Warnings* buffer",
-        requires_buffer: true,
+        description: "Show warnings in bottom panel",
+        requires_buffer: false,
         execute: fn state -> execute(state, :view_warnings) end
       },
       %Minga.Command{

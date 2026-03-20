@@ -9,22 +9,23 @@ defmodule Minga.Port.Protocol.GUI do
 
   ## GUI Chrome Commands (BEAM → Frontend)
 
-  Contiguous range 0x70-0x78 for easy classification by frontends.
+  Contiguous range 0x70-0x7F for easy classification by frontends.
 
-  | Opcode | Name          | Description                    |
-  |--------|---------------|--------------------------------|
-  | 0x70   | gui_file_tree | File tree entries              |
-  | 0x71   | gui_tab_bar   | Tab bar with tab entries       |
-  | 0x72   | gui_which_key | Which-key popup bindings       |
-  | 0x73   | gui_completion| Completion popup items         |
-  | 0x74   | gui_theme     | Theme color slots              |
-  | 0x75   | gui_breadcrumb| Path breadcrumb segments       |
-  | 0x76   | gui_status_bar| Status bar data                |
-  | 0x77   | gui_picker    | Fuzzy picker items             |
-  | 0x78   | gui_agent_chat| Agent conversation view        |
-  | 0x79   | gui_gutter_sep| Gutter separator col + color   |
-  | 0x7A   | gui_cursorline| Cursorline row + bg color      |
-  | 0x7B   | gui_gutter    | Structured gutter data         |
+  | Opcode | Name            | Description                    |
+  |--------|-----------------|--------------------------------|
+  | 0x70   | gui_file_tree   | File tree entries              |
+  | 0x71   | gui_tab_bar     | Tab bar with tab entries       |
+  | 0x72   | gui_which_key   | Which-key popup bindings       |
+  | 0x73   | gui_completion  | Completion popup items         |
+  | 0x74   | gui_theme       | Theme color slots              |
+  | 0x75   | gui_breadcrumb  | Path breadcrumb segments       |
+  | 0x76   | gui_status_bar  | Status bar data                |
+  | 0x77   | gui_picker      | Fuzzy picker items             |
+  | 0x78   | gui_agent_chat  | Agent conversation view        |
+  | 0x79   | gui_gutter_sep  | Gutter separator col + color   |
+  | 0x7A   | gui_cursorline  | Cursorline row + bg color      |
+  | 0x7B   | gui_gutter      | Structured gutter data         |
+  | 0x7C   | gui_bottom_panel| Bottom panel container state   |
 
   ## GUI Actions (Frontend → BEAM)
 
@@ -38,6 +39,9 @@ defmodule Minga.Port.Protocol.GUI do
   | 0x06       | breadcrumb_click     |
   | 0x07       | toggle_panel         |
   | 0x08       | new_tab              |
+  | 0x09       | panel_switch_tab     |
+  | 0x0A       | panel_dismiss        |
+  | 0x0B       | panel_resize         |
   """
 
   import Bitwise
@@ -50,7 +54,7 @@ defmodule Minga.Port.Protocol.GUI do
   alias Minga.Theme.Slots
 
   # ── GUI chrome opcodes (BEAM → Frontend) ──
-  # Contiguous range 0x70-0x79 for easy range-check classification.
+  # Contiguous range 0x70-0x7F for easy range-check classification.
 
   @op_gui_file_tree 0x70
   @op_gui_tab_bar 0x71
@@ -64,6 +68,7 @@ defmodule Minga.Port.Protocol.GUI do
   @op_gui_gutter_separator 0x79
   @op_gui_cursorline 0x7A
   @op_gui_gutter 0x7B
+  @op_gui_bottom_panel 0x7C
 
   # ── GUI action sub-opcodes (Frontend → BEAM) ──
 
@@ -75,6 +80,10 @@ defmodule Minga.Port.Protocol.GUI do
   @gui_action_breadcrumb_click 0x06
   @gui_action_toggle_panel 0x07
   @gui_action_new_tab 0x08
+  @gui_action_panel_switch_tab 0x09
+  @gui_action_panel_dismiss 0x0A
+  @gui_action_panel_resize 0x0B
+  @gui_action_open_file 0x0C
 
   # ── Types ──
 
@@ -88,6 +97,10 @@ defmodule Minga.Port.Protocol.GUI do
           | {:breadcrumb_click, segment_index :: non_neg_integer()}
           | {:toggle_panel, panel :: non_neg_integer()}
           | :new_tab
+          | {:panel_switch_tab, tab_index :: non_neg_integer()}
+          | :panel_dismiss
+          | {:panel_resize, height_percent :: non_neg_integer()}
+          | {:open_file, path :: String.t()}
 
   # ═══════════════════════════════════════════════════════════════════════════
   # Encoding (BEAM → Frontend)
@@ -234,6 +247,89 @@ defmodule Minga.Port.Protocol.GUI do
     g = color_rgb >>> 8 &&& 0xFF
     b = color_rgb &&& 0xFF
     <<@op_gui_gutter_separator, col::16, r::8, g::8, b::8>>
+  end
+
+  # ── Bottom panel ──
+
+  @doc """
+  Encodes a gui_bottom_panel command from a `BottomPanel.t()`.
+
+  Wire format:
+    When visible:
+      opcode(1) + visible=1(1) + active_tab_index(1) + height_percent(1)
+      + filter_preset(1) + tab_count(1) + tab_defs... + content_payload
+    Per tab_def:
+      tab_type(1) + name_len(1) + name(name_len)
+    Messages content_payload (when active tab is :messages):
+      entry_count(2) + entries...
+    Per entry:
+      id(4) + level(1) + subsystem(1) + timestamp_secs(4)
+      + path_len(2) + path(path_len) + text_len(2) + text(text_len)
+    When hidden:
+      opcode(1) + visible=0(1)
+  """
+  @spec encode_gui_bottom_panel(
+          Minga.Editor.BottomPanel.t(),
+          Minga.Panel.MessageStore.t()
+        ) :: {binary(), Minga.Panel.MessageStore.t()}
+  def encode_gui_bottom_panel(%{visible: false}, store) do
+    {<<@op_gui_bottom_panel, 0>>, store}
+  end
+
+  def encode_gui_bottom_panel(%{visible: true} = panel, store) do
+    alias Minga.Editor.BottomPanel
+    alias Minga.Panel.MessageStore
+
+    active_index =
+      Enum.find_index(panel.tabs, &(&1 == panel.active_tab)) || 0
+
+    tab_defs =
+      for tab <- panel.tabs, into: <<>> do
+        name = BottomPanel.tab_name(tab)
+        name_bytes = byte_size(name)
+        <<BottomPanel.tab_type_byte(tab)::8, name_bytes::8, name::binary>>
+      end
+
+    header =
+      <<@op_gui_bottom_panel, 1, active_index::8, panel.height_percent::8,
+        BottomPanel.filter_byte(panel.filter)::8, length(panel.tabs)::8, tab_defs::binary>>
+
+    # Append content payload for the active tab
+    case panel.active_tab do
+      :messages ->
+        new_entries = MessageStore.entries_since(store, store.last_sent_id)
+        content = encode_message_entries(new_entries)
+        last_id = if new_entries == [], do: store.last_sent_id, else: List.last(new_entries).id
+        {header <> content, MessageStore.mark_sent(store, last_id)}
+
+      _ ->
+        # No content for other tabs yet
+        {header <> <<0::16>>, store}
+    end
+  end
+
+  @spec encode_message_entries([Minga.Panel.MessageStore.Entry.t()]) :: binary()
+  defp encode_message_entries(entries) do
+    alias Minga.Panel.MessageStore
+
+    count = length(entries)
+
+    entry_data =
+      for entry <- entries, into: <<>> do
+        path_bytes = entry.file_path || ""
+        path_len = byte_size(path_bytes)
+        text_bytes = entry.text
+        text_len = byte_size(text_bytes)
+        # Seconds since midnight for compact timestamp
+        ts_secs =
+          NaiveDateTime.to_time(entry.timestamp) |> Time.to_seconds_after_midnight() |> elem(0)
+
+        <<entry.id::32, MessageStore.level_byte(entry.level)::8,
+          MessageStore.subsystem_byte(entry.subsystem)::8, ts_secs::32, path_len::16,
+          path_bytes::binary, text_len::16, text_bytes::binary>>
+      end
+
+    <<count::16, entry_data::binary>>
   end
 
   # ── Theme ──
@@ -816,5 +912,17 @@ defmodule Minga.Port.Protocol.GUI do
     do: {:ok, {:toggle_panel, panel}}
 
   def decode_gui_action(@gui_action_new_tab, <<>>), do: {:ok, :new_tab}
+
+  def decode_gui_action(@gui_action_panel_switch_tab, <<tab_index::8>>),
+    do: {:ok, {:panel_switch_tab, tab_index}}
+
+  def decode_gui_action(@gui_action_panel_dismiss, <<>>), do: {:ok, :panel_dismiss}
+
+  def decode_gui_action(@gui_action_panel_resize, <<height_percent::8>>),
+    do: {:ok, {:panel_resize, height_percent}}
+
+  def decode_gui_action(@gui_action_open_file, <<path_len::16, path::binary-size(path_len)>>),
+    do: {:ok, {:open_file, path}}
+
   def decode_gui_action(_, _), do: :error
 end

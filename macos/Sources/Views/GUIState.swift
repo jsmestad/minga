@@ -35,4 +35,7 @@ final class GUIState {
 
     /// Agent chat state.
     let agentChatState = AgentChatState()
+
+    /// Bottom panel container state.
+    let bottomPanelState = BottomPanelState()
 }

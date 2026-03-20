@@ -39,7 +39,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
   to avoid re-calling BufferServer for cursor/file info on the same frame.
   When nil (e.g. non-GUI fallback paths), it is computed here.
   """
-  @spec sync_chrome(state(), StatusBarData.t() | nil) :: :ok
+  @spec sync_chrome(state(), StatusBarData.t() | nil) :: state()
   def sync_chrome(state, status_bar_data \\ nil) do
     send_gui_theme(state)
     send_gui_tab_bar(state)
@@ -53,7 +53,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
     send_gui_gutter_separator(state)
     send_gui_cursorline(state)
     send_gui_gutter(state)
-    :ok
+    send_gui_bottom_panel(state)
   end
 
   # ── Theme ──
@@ -474,5 +474,16 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
       :deleted -> :git_deleted
       _ -> :none
     end
+  end
+
+  # ── Bottom panel ──
+
+  @spec send_gui_bottom_panel(state()) :: state()
+  defp send_gui_bottom_panel(
+         %{bottom_panel: panel, message_store: store, port_manager: pm} = state
+       ) do
+    {cmd, new_store} = ProtocolGUI.encode_gui_bottom_panel(panel, store)
+    PortManager.send_commands(pm, [cmd])
+    %{state | message_store: new_store}
   end
 end

@@ -10,7 +10,7 @@ Minga's rendering pipeline produces two types of output:
 
 1. **Cell-grid commands** (opcodes 0x10-0x1B): draw_text, set_cursor, clear, batch_end, etc. These paint the editor content surface (buffer text, gutter, modeline for splits, minibuffer). In a TUI frontend, these go to the terminal. In a GUI frontend, these go to a Metal/OpenGL surface.
 
-2. **GUI chrome commands** (opcodes 0x70-0x7B): structured data for native chrome elements (tab bar, file tree sidebar, status bar, which-key popup, cursorline, gutter, etc.). These are sent only to GUI frontends. A TUI frontend never sees them.
+2. **GUI chrome commands** (opcodes 0x70-0x7F): structured data for native chrome elements (tab bar, file tree sidebar, status bar, bottom panel, which-key popup, cursorline, gutter, etc.). These are sent only to GUI frontends. A TUI frontend never sees them.
 
 Both types are sent within the same render cycle. The BEAM sends cell-grid commands first (one `{:packet, 4}` message containing clear through batch_end), then GUI chrome commands as separate `{:packet, 4}` messages immediately after. GUI chrome commands are not inside the batch_end-terminated cell-grid frame.
 
@@ -35,7 +35,7 @@ The BEAM checks `Capabilities.gui?` (true when `frontend_type == :native_gui`) t
 
 ## GUI Render Opcodes (BEAM → Frontend)
 
-All GUI chrome opcodes live in the contiguous range 0x70-0x78. Frontends can classify an opcode as GUI chrome by checking `opcode >= 0x70 && opcode <= 0x7F`.
+All GUI chrome opcodes live in the contiguous range 0x70-0x7F. Frontends can classify an opcode as GUI chrome by checking `opcode >= 0x70 && opcode <= 0x7F`.
 
 ### 0x70 — gui_file_tree
 
@@ -291,6 +291,42 @@ Diagnostics take priority over git signs (same line shows only the highest-prior
 
 When this opcode is sent, the BEAM strips `WindowFrame.gutter` from the cell-grid frame output, so no draw_text commands are sent for gutter content. The TUI rendering path is unaffected.
 
+### 0x7C — gui_bottom_panel
+
+Bottom panel container state (resizable, tabbed panel below editor surface).
+
+```
+When visible:
+  opcode(1) + 1(1) + active_tab_index(1) + height_percent(1) + filter_preset(1) + tab_count(1) + tab_defs... + content_payload
+
+Per tab_def:
+  tab_type(1) + name_len(1) + name(name_len)
+
+Tab type values:
+  0x01 = messages, 0x02 = diagnostics (future), 0x03 = terminal (future)
+
+Filter preset values:
+  0x00 = none (user controls filters), 0x01 = warnings (preset to warnings+errors)
+
+Messages content_payload (when active tab is messages):
+  entry_count(2) + entries...
+
+Per entry:
+  id(4) + level(1) + subsystem(1) + timestamp_secs(4) + path_len(2) + path(path_len) + text_len(2) + text(text_len)
+
+Level bytes: 0=debug, 1=info, 2=warning, 3=error
+Subsystem bytes: 0=editor, 1=lsp, 2=parser, 3=git, 4=render, 5=agent, 6=zig, 7=gui
+
+Entries are sent incrementally: the BEAM tracks the last sent ID and only sends new entries each frame. On first connection (or reconnect), all entries are sent.
+
+When hidden:
+  opcode(1) + 0(1)
+```
+
+`height_percent` is the BEAM's default/initial height (10-60). The frontend may override with a user-dragged height stored locally.
+
+`filter_preset` is a hint for the Messages tab. When the panel auto-opens for warnings, the BEAM sets `filter_preset=1`. The frontend should apply a warnings+errors level filter on the visibility transition (hidden to visible). If the user has already changed filters manually, don't override.
+
 ## GUI Action Input Opcode (Frontend → BEAM)
 
 The frontend sends user interactions with native chrome back to the BEAM using the `gui_action` opcode (0x07). This opcode lives in the input event range, not the GUI chrome range.
@@ -309,6 +345,10 @@ opcode(1) + action_type(1) + payload...
 | 0x06 | breadcrumb_click | segment_index(1) | User clicked a breadcrumb segment |
 | 0x07 | toggle_panel | panel(1) | User toggled a panel |
 | 0x08 | new_tab | (empty) | User requested a new tab |
+| 0x09 | panel_switch_tab | tab_index(1) | User clicked a bottom panel tab |
+| 0x0A | panel_dismiss | (empty) | User dismissed the bottom panel |
+| 0x0B | panel_resize | height_percent(1) | User resized the bottom panel |
+| 0x0C | open_file | path_len(2) + path(path_len) | Open or switch to a file |
 
 ## Theme Color Slots
 
@@ -425,7 +465,7 @@ A GUI frontend must satisfy these requirements:
 Within a single render cycle (one `{:packet, 4}` framed batch):
 
 1. Cell-grid commands: `clear`, `define_region`, `draw_text` (multiple), `set_cursor`, `set_cursor_shape`, `batch_end`
-2. GUI chrome commands: `gui_theme` (if changed), `gui_tab_bar`, `gui_file_tree`, `gui_which_key`, `gui_completion`, `gui_breadcrumb`, `gui_status_bar`, `gui_picker`, `gui_agent_chat`
+2. GUI chrome commands: `gui_theme` (if changed), `gui_tab_bar`, `gui_file_tree`, `gui_which_key`, `gui_completion`, `gui_breadcrumb`, `gui_status_bar`, `gui_picker`, `gui_agent_chat`, `gui_bottom_panel`
 
 Note: GUI chrome commands are sent after `batch_end`. They are separate from the cell-grid frame because they update native UI state, not the pixel surface. The frontend should process them after committing the cell-grid frame to the GPU.
 

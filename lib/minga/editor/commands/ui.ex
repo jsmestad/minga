@@ -7,6 +7,7 @@ defmodule Minga.Editor.Commands.UI do
 
   @behaviour Minga.Command.Provider
 
+  alias Minga.Editor.BottomPanel
   alias Minga.Editor.PickerUI
   alias Minga.Editor.State, as: EditorState
   alias Minga.Parser.Manager, as: ParserManager
@@ -55,8 +56,41 @@ defmodule Minga.Editor.Commands.UI do
         description: "Restart tree-sitter parser",
         requires_buffer: false,
         execute: &execute_parser_restart/1
+      },
+      %Minga.Command{
+        name: :toggle_bottom_panel,
+        description: "Toggle bottom panel",
+        requires_buffer: false,
+        execute: &toggle_bottom_panel/1
+      },
+      %Minga.Command{
+        name: :bottom_panel_next_tab,
+        description: "Bottom panel: next tab",
+        requires_buffer: false,
+        execute: &bottom_panel_next_tab/1
+      },
+      %Minga.Command{
+        name: :bottom_panel_prev_tab,
+        description: "Bottom panel: previous tab",
+        requires_buffer: false,
+        execute: &bottom_panel_prev_tab/1
       }
     ]
+  end
+
+  @spec toggle_bottom_panel(EditorState.t()) :: EditorState.t()
+  defp toggle_bottom_panel(state) do
+    %{state | bottom_panel: BottomPanel.toggle(state.bottom_panel)}
+  end
+
+  @spec bottom_panel_next_tab(EditorState.t()) :: EditorState.t()
+  defp bottom_panel_next_tab(state) do
+    %{state | bottom_panel: BottomPanel.next_tab(state.bottom_panel)}
+  end
+
+  @spec bottom_panel_prev_tab(EditorState.t()) :: EditorState.t()
+  defp bottom_panel_prev_tab(state) do
+    %{state | bottom_panel: BottomPanel.prev_tab(state.bottom_panel)}
   end
 
   @spec execute_parser_restart(EditorState.t()) :: EditorState.t()

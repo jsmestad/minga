@@ -116,6 +116,20 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
     case .guiCursorline(let row, let r, let g, let b):
         return ["type": "gui_cursorline", "row": Int(row), "r": Int(r), "g": Int(g), "b": Int(b)]
 
+    case .guiBottomPanel(let visible, let activeTabIndex, let heightPercent, let filterPreset, let tabs, let entries):
+        var tabList: [[String: Any]] = []
+        for tab in tabs {
+            tabList.append(["tab_type": Int(tab.tabType), "name": tab.name])
+        }
+        var entryList: [[String: Any]] = []
+        for entry in entries {
+            entryList.append(["id": Int(entry.id), "level": Int(entry.level), "subsystem": Int(entry.subsystem),
+                              "timestamp_secs": Int(entry.timestampSecs), "file_path": entry.filePath, "text": entry.text])
+        }
+        return ["type": "gui_bottom_panel", "visible": visible, "active_tab_index": Int(activeTabIndex),
+                "height_percent": Int(heightPercent), "filter_preset": Int(filterPreset),
+                "tabs": tabList, "entries": entryList]
+
     case .batchEnd:
         return ["type": "batch_end"]
 

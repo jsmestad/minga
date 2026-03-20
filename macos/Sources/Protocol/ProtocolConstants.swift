@@ -26,7 +26,7 @@ let OP_DESTROY_REGION: UInt8 = 0x19
 let OP_SET_ACTIVE_REGION: UInt8 = 0x1A
 let OP_DRAW_STYLED_TEXT: UInt8 = 0x1C
 
-// MARK: - GUI chrome opcodes (BEAM → frontend, contiguous range 0x70-0x78)
+// MARK: - GUI chrome opcodes (BEAM → frontend, contiguous range 0x70-0x7F)
 
 let OP_GUI_FILE_TREE: UInt8 = 0x70
 let OP_GUI_TAB_BAR: UInt8 = 0x71
@@ -40,6 +40,7 @@ let OP_GUI_AGENT_CHAT: UInt8 = 0x78
 let OP_GUI_GUTTER_SEP: UInt8 = 0x79
 let OP_GUI_CURSORLINE: UInt8 = 0x7A
 let OP_GUI_GUTTER: UInt8 = 0x7B
+let OP_GUI_BOTTOM_PANEL: UInt8 = 0x7C
 
 // GUI theme color slot IDs
 let GUI_COLOR_EDITOR_BG: UInt8 = 0x01
@@ -179,6 +180,10 @@ let GUI_ACTION_COMPLETION_SELECT: UInt8 = 0x05
 let GUI_ACTION_BREADCRUMB_CLICK: UInt8 = 0x06
 let GUI_ACTION_TOGGLE_PANEL: UInt8 = 0x07
 let GUI_ACTION_NEW_TAB: UInt8 = 0x08
+let GUI_ACTION_PANEL_SWITCH_TAB: UInt8 = 0x09
+let GUI_ACTION_PANEL_DISMISS: UInt8 = 0x0A
+let GUI_ACTION_PANEL_RESIZE: UInt8 = 0x0B
+let GUI_ACTION_OPEN_FILE: UInt8 = 0x0C
 
 // MARK: - Log message opcode (frontend → BEAM)
 

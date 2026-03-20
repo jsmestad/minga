@@ -27,8 +27,7 @@ defmodule Minga.Picker.BufferSourceTest do
     %{
       buffers: %Buffers{
         list: buffers,
-        messages: Keyword.get(opts, :messages),
-        warnings: Keyword.get(opts, :warnings)
+        messages: Keyword.get(opts, :messages)
       }
     }
   end
@@ -135,19 +134,17 @@ defmodule Minga.Picker.BufferSourceTest do
   end
 
   describe "extra special buffers not in list" do
-    test "SPC b B includes messages and warnings even when not in buffer list" do
+    test "SPC b B includes messages even when not in buffer list" do
       file_buf = start_buffer(content: "code")
       messages = start_buffer(content: "", buffer_name: "*Messages*")
-      warnings = start_buffer(content: "", buffer_name: "*Warnings*")
 
-      state = fake_state([file_buf], messages: messages, warnings: warnings)
+      state = fake_state([file_buf], messages: messages)
       candidates = BufferAllSource.candidates(state)
 
       labels = Enum.map(candidates, fn %Item{label: label} -> label end)
 
-      assert length(candidates) == 3
+      assert length(candidates) == 2
       assert Enum.any?(labels, &String.contains?(&1, "*Messages*"))
-      assert Enum.any?(labels, &String.contains?(&1, "*Warnings*"))
     end
 
     test "extra special buffers use {:pid, pid} keys" do
@@ -225,28 +222,24 @@ defmodule Minga.Picker.BufferSourceTest do
   describe "edge case: all buffers are special" do
     test "SPC b b returns empty list even with special buffers on struct" do
       messages = start_buffer(content: "", buffer_name: "*Messages*")
-      warnings = start_buffer(content: "", buffer_name: "*Warnings*")
 
-      candidates = BufferSource.candidates(fake_state([], messages: messages, warnings: warnings))
+      candidates = BufferSource.candidates(fake_state([], messages: messages))
       assert candidates == []
     end
 
     test "SPC b B shows special buffers from struct fields" do
       messages = start_buffer(content: "", buffer_name: "*Messages*")
-      warnings = start_buffer(content: "", buffer_name: "*Warnings*")
 
-      candidates =
-        BufferAllSource.candidates(fake_state([], messages: messages, warnings: warnings))
+      candidates = BufferAllSource.candidates(fake_state([], messages: messages))
 
-      assert length(candidates) == 2
+      assert length(candidates) == 1
     end
 
     test "SPC b B shows special buffers already in the list" do
       messages = start_buffer(content: "", buffer_name: "*Messages*")
-      warnings = start_buffer(content: "", buffer_name: "*Warnings*")
 
-      candidates = BufferAllSource.candidates(fake_state([messages, warnings]))
-      assert length(candidates) == 2
+      candidates = BufferAllSource.candidates(fake_state([messages]))
+      assert length(candidates) == 1
     end
   end
 end

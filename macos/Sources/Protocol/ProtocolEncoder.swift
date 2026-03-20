@@ -25,6 +25,14 @@ protocol InputEncoder: AnyObject, Sendable {
     func sendBreadcrumbClick(index: UInt8)
     func sendTogglePanel(panel: UInt8)
     func sendNewTab()
+
+    // Bottom panel actions
+    func sendPanelSwitchTab(index: UInt8)
+    func sendPanelDismiss()
+    func sendPanelResize(heightPercent: UInt8)
+
+    // File actions
+    func sendOpenFile(path: String)
 }
 
 extension InputEncoder {
@@ -189,6 +197,46 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         var buf = Data(count: 2)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_NEW_TAB
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: panel_switch_tab. Layout: opcode(1) + action_type(1) + tab_index(1).
+    func sendPanelSwitchTab(index: UInt8) {
+        var buf = Data(count: 3)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_PANEL_SWITCH_TAB
+        buf[2] = index
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: panel_dismiss. Layout: opcode(1) + action_type(1).
+    func sendPanelDismiss() {
+        var buf = Data(count: 2)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_PANEL_DISMISS
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: panel_resize. Layout: opcode(1) + action_type(1) + height_percent(1).
+    func sendPanelResize(heightPercent: UInt8) {
+        var buf = Data(count: 3)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_PANEL_RESIZE
+        buf[2] = heightPercent
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: open_file. Layout: opcode(1) + action_type(1) + path_len(2) + path(path_len).
+    func sendOpenFile(path: String) {
+        let utf8 = Array(path.utf8)
+        let pathLen = min(utf8.count, Int(UInt16.max))
+        var buf = Data(count: 4 + pathLen)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_OPEN_FILE
+        writeU16(&buf, 2, UInt16(pathLen))
+        if pathLen > 0 {
+            buf.replaceSubrange(4..<(4 + pathLen), with: utf8[0..<pathLen])
+        }
         writeFrame(buf)
     }
 

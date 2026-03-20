@@ -3,7 +3,7 @@ defmodule Minga.Editor.State.Buffers do
   Groups buffer-related fields from EditorState.
 
   Tracks the active buffer pid, the list of open buffers, the active index,
-  and special (unlisted) buffers like *Messages* and *Warnings*.
+  and special (unlisted) buffers like *Messages*.
   """
 
   @type t :: %__MODULE__{
@@ -11,7 +11,6 @@ defmodule Minga.Editor.State.Buffers do
           list: [pid()],
           active_index: non_neg_integer(),
           messages: pid() | nil,
-          warnings: pid() | nil,
           help: pid() | nil
         }
 
@@ -19,7 +18,6 @@ defmodule Minga.Editor.State.Buffers do
             list: [],
             active_index: 0,
             messages: nil,
-            warnings: nil,
             help: nil
 
   @doc "Appends a buffer pid and makes it active."

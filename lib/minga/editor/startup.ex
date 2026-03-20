@@ -48,7 +48,7 @@ defmodule Minga.Editor.Startup do
     subscribe_to_parser(Keyword.get(opts, :parser_manager))
     FileWatcherHelpers.maybe_watch_buffer(buffer)
 
-    {messages_buf, warnings_buf} = start_special_buffers()
+    {messages_buf, _} = start_special_buffers()
 
     # Always ensure an active buffer exists. The editor's render pipeline,
     # command dispatch, and input routing all assume buffers.active is a
@@ -87,8 +87,7 @@ defmodule Minga.Editor.Startup do
         active: active_buf,
         list: buffers,
         active_index: 0,
-        messages: messages_buf,
-        warnings: warnings_buf
+        messages: messages_buf
       },
       port_manager: port_manager,
       viewport: Viewport.new(height, width),
@@ -233,14 +232,16 @@ defmodule Minga.Editor.Startup do
   end
 
   @doc """
-  Starts the *Messages* and *Warnings* special buffers.
+  Starts the *Messages* special buffer.
+
+  The *Warnings* buffer was removed in #825; warnings now route through
+  *Messages* with level filtering in the GUI bottom panel.
   """
   @spec start_special_buffers() :: {pid() | nil, pid() | nil}
   def start_special_buffers do
     messages_buf = start_special_buffer("*Messages*", content: "", read_only: true)
-    warnings_buf = start_special_buffer("*Warnings*", content: "", read_only: true)
 
-    {messages_buf, warnings_buf}
+    {messages_buf, nil}
   end
 
   @spec start_special_buffer(String.t(), keyword()) :: pid() | nil

@@ -31,6 +31,7 @@ defmodule Minga.Editor.State do
   alias Minga.Agent.UIState
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Completion
+  alias Minga.Editor.BottomPanel
   alias Minga.Editor.CompletionTrigger
   alias Minga.Editor.Dashboard
 
@@ -56,6 +57,7 @@ defmodule Minga.Editor.State do
   alias Minga.FileTree
   alias Minga.Log
   alias Minga.Mode
+  alias Minga.Panel.MessageStore
   alias Minga.Port.Capabilities
   # BVBridge alias removed: build_file_tab_defaults creates BVState directly.
   alias Minga.Theme
@@ -101,7 +103,8 @@ defmodule Minga.Editor.State do
             completion_trigger: CompletionTrigger.new(),
             render_timer: nil,
             warning_popup_timer: nil,
-            warnings_popup_dismissed: false,
+            bottom_panel: %BottomPanel{},
+            message_store: %MessageStore{},
             windows: %Windows{},
             file_tree: %FileTreeState{},
             lsp_status: :none,
@@ -145,7 +148,8 @@ defmodule Minga.Editor.State do
           completion_trigger: CompletionTrigger.t(),
           render_timer: reference() | nil,
           warning_popup_timer: reference() | nil,
-          warnings_popup_dismissed: boolean(),
+          bottom_panel: BottomPanel.t(),
+          message_store: MessageStore.t(),
           windows: Windows.t(),
           file_tree: FileTreeState.t(),
           lsp_status: Minga.Editor.Modeline.lsp_status(),
@@ -265,7 +269,6 @@ defmodule Minga.Editor.State do
 
     # Clear special buffer slots if they match
     messages = if bs.messages == pid, do: nil, else: bs.messages
-    warnings = if bs.warnings == pid, do: nil, else: bs.warnings
     help = if bs.help == pid, do: nil, else: bs.help
 
     # Determine new active buffer
@@ -285,7 +288,6 @@ defmodule Minga.Editor.State do
         active: new_active,
         active_index: new_index,
         messages: messages,
-        warnings: warnings,
         help: help
     }
 
