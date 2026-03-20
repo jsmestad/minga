@@ -83,12 +83,49 @@ defmodule Minga.Editor.Commands.FileTree do
   def toggle_hidden(%{file_tree: %{tree: tree}} = state),
     do: sync_and_update(state, FileTree.toggle_hidden(tree))
 
+  @spec collapse_all(state()) :: state()
+  def collapse_all(%{file_tree: %{tree: nil}} = state), do: state
+
+  def collapse_all(%{file_tree: %{tree: tree}} = state) do
+    sync_and_update(state, FileTree.collapse_all(tree))
+  end
+
   @spec refresh(state()) :: state()
   def refresh(%{file_tree: %{tree: nil}} = state), do: state
 
   def refresh(%{file_tree: %{tree: tree}} = state) do
     tree = tree |> FileTree.refresh() |> FileTree.refresh_git_status()
     sync_and_update(state, tree)
+  end
+
+  @doc """
+  Stub for creating a new file at the selected directory.
+  Requires a name prompt UI (not yet implemented). Logs intent to *Messages*.
+  """
+  @spec new_file(state()) :: state()
+  def new_file(%{file_tree: %{tree: nil}} = state), do: state
+
+  def new_file(state) do
+    Minga.Editor.log_to_messages(
+      "[file-tree] New file: requires name prompt (not yet implemented)"
+    )
+
+    state
+  end
+
+  @doc """
+  Stub for creating a new folder at the selected directory.
+  Requires a name prompt UI (not yet implemented). Logs intent to *Messages*.
+  """
+  @spec new_folder(state()) :: state()
+  def new_folder(%{file_tree: %{tree: nil}} = state), do: state
+
+  def new_folder(state) do
+    Minga.Editor.log_to_messages(
+      "[file-tree] New folder: requires name prompt (not yet implemented)"
+    )
+
+    state
   end
 
   @spec close(state()) :: state()
@@ -209,6 +246,24 @@ defmodule Minga.Editor.Commands.FileTree do
         description: "Close file tree",
         requires_buffer: false,
         execute: &close/1
+      },
+      %Minga.Command{
+        name: :tree_collapse_all,
+        description: "Collapse all directories in tree",
+        requires_buffer: false,
+        execute: &collapse_all/1
+      },
+      %Minga.Command{
+        name: :tree_new_file,
+        description: "Create new file in tree",
+        requires_buffer: false,
+        execute: &new_file/1
+      },
+      %Minga.Command{
+        name: :tree_new_folder,
+        description: "Create new folder in tree",
+        requires_buffer: false,
+        execute: &new_folder/1
       }
     ]
   end

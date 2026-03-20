@@ -21,6 +21,10 @@ protocol InputEncoder: AnyObject, Sendable {
     func sendCloseTab(id: UInt32)
     func sendFileTreeClick(index: UInt16)
     func sendFileTreeToggle(index: UInt16)
+    func sendFileTreeNewFile()
+    func sendFileTreeNewFolder()
+    func sendFileTreeCollapseAll()
+    func sendFileTreeRefresh()
     func sendCompletionSelect(index: UInt16)
     func sendBreadcrumbClick(index: UInt8)
     func sendTogglePanel(panel: UInt8)
@@ -162,6 +166,38 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_FILE_TREE_TOGGLE
         writeU16(&buf, 2, index)
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: file_tree_new_file. Layout: opcode(1) + action_type(1).
+    func sendFileTreeNewFile() {
+        var buf = Data(count: 2)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_FILE_TREE_NEW_FILE
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: file_tree_new_folder. Layout: opcode(1) + action_type(1).
+    func sendFileTreeNewFolder() {
+        var buf = Data(count: 2)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_FILE_TREE_NEW_FOLDER
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: file_tree_collapse_all. Layout: opcode(1) + action_type(1).
+    func sendFileTreeCollapseAll() {
+        var buf = Data(count: 2)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_FILE_TREE_COLLAPSE_ALL
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: file_tree_refresh. Layout: opcode(1) + action_type(1).
+    func sendFileTreeRefresh() {
+        var buf = Data(count: 2)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_FILE_TREE_REFRESH
         writeFrame(buf)
     }
 

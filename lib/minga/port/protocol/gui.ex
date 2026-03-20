@@ -84,6 +84,10 @@ defmodule Minga.Port.Protocol.GUI do
   @gui_action_panel_dismiss 0x0A
   @gui_action_panel_resize 0x0B
   @gui_action_open_file 0x0C
+  @gui_action_file_tree_new_file 0x0D
+  @gui_action_file_tree_new_folder 0x0E
+  @gui_action_file_tree_collapse_all 0x0F
+  @gui_action_file_tree_refresh 0x10
 
   # ── Types ──
 
@@ -101,6 +105,10 @@ defmodule Minga.Port.Protocol.GUI do
           | :panel_dismiss
           | {:panel_resize, height_percent :: non_neg_integer()}
           | {:open_file, path :: String.t()}
+          | :file_tree_new_file
+          | :file_tree_new_folder
+          | :file_tree_collapse_all
+          | :file_tree_refresh
 
   # ═══════════════════════════════════════════════════════════════════════════
   # Encoding (BEAM → Frontend)
@@ -927,6 +935,16 @@ defmodule Minga.Port.Protocol.GUI do
 
   def decode_gui_action(@gui_action_open_file, <<path_len::16, path::binary-size(path_len)>>),
     do: {:ok, {:open_file, path}}
+
+  def decode_gui_action(@gui_action_file_tree_new_file, <<>>), do: {:ok, :file_tree_new_file}
+
+  def decode_gui_action(@gui_action_file_tree_new_folder, <<>>),
+    do: {:ok, :file_tree_new_folder}
+
+  def decode_gui_action(@gui_action_file_tree_collapse_all, <<>>),
+    do: {:ok, :file_tree_collapse_all}
+
+  def decode_gui_action(@gui_action_file_tree_refresh, <<>>), do: {:ok, :file_tree_refresh}
 
   def decode_gui_action(_, _), do: :error
 end

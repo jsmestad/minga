@@ -352,6 +352,10 @@ opcode(1) + action_type(1) + payload...
 | 0x0A | panel_dismiss | (empty) | User dismissed the bottom panel |
 | 0x0B | panel_resize | height_percent(1) | User resized the bottom panel |
 | 0x0C | open_file | path_len(2) + path(path_len) | Open or switch to a file |
+| 0x0D | file_tree_new_file | (empty) | Create new file at selected entry |
+| 0x0E | file_tree_new_folder | (empty) | Create new folder at selected entry |
+| 0x0F | file_tree_collapse_all | (empty) | Collapse all directories in tree |
+| 0x10 | file_tree_refresh | (empty) | Refresh file tree |
 
 ## Theme Color Slots
 

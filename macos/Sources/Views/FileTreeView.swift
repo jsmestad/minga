@@ -95,10 +95,53 @@ struct FileTreeView: View {
                 .truncationMode(.tail)
 
             Spacer()
+
+            headerActions
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
         .background(theme.treeBg)
+    }
+
+    // MARK: - Header action icons
+
+    /// Small icon buttons in the project header (New File, New Folder, Refresh, Collapse All).
+    @ViewBuilder
+    private var headerActions: some View {
+        HStack(spacing: 2) {
+            headerButton(systemName: "doc.badge.plus", tooltip: "New File…") {
+                encoder?.sendFileTreeNewFile()
+            }
+            headerButton(systemName: "folder.badge.plus", tooltip: "New Folder…") {
+                encoder?.sendFileTreeNewFolder()
+            }
+            headerButton(systemName: "arrow.clockwise", tooltip: "Refresh") {
+                encoder?.sendFileTreeRefresh()
+            }
+            headerButton(systemName: "arrow.down.right.and.arrow.up.left", tooltip: "Collapse All") {
+                encoder?.sendFileTreeCollapseAll()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func headerButton(systemName: String, tooltip: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 11))
+                .foregroundStyle(theme.treeFg.opacity(0.6))
+                .frame(width: 20, height: 20)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(tooltip)
+        .onHover { isHovered in
+            if isHovered {
+                NSCursor.pointingHand.push()
+            } else {
+                NSCursor.pop()
+            }
+        }
     }
 
     private var projectName: String {

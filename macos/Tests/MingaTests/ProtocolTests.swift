@@ -309,6 +309,10 @@ final class SpyEncoder: InputEncoder, Sendable {
     func sendCloseTab(id: UInt32) {}
     func sendFileTreeClick(index: UInt16) {}
     func sendFileTreeToggle(index: UInt16) {}
+    func sendFileTreeNewFile() {}
+    func sendFileTreeNewFolder() {}
+    func sendFileTreeCollapseAll() {}
+    func sendFileTreeRefresh() {}
     func sendCompletionSelect(index: UInt16) {}
     func sendBreadcrumbClick(index: UInt8) {}
     func sendTogglePanel(panel: UInt8) {}
