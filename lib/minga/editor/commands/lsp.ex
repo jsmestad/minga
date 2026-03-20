@@ -298,7 +298,13 @@ defmodule Minga.Editor.Commands.Lsp do
         name: :selection_expand,
         description: "Smart selection expand",
         requires_buffer: true,
-        execute: &LspActions.selection_range/1
+        execute: &LspActions.selection_expand/1
+      },
+      %Minga.Command{
+        name: :selection_shrink,
+        description: "Smart selection shrink",
+        requires_buffer: true,
+        execute: &LspActions.selection_shrink/1
       },
       %Minga.Command{
         name: :call_hierarchy,
