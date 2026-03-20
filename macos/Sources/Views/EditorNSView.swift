@@ -54,6 +54,11 @@ final class EditorNSView: MTKView {
     private(set) var agentChatVisible: Bool = false
     private var agentKeyMonitor: Any?
 
+    /// Status bar state from the BEAM. Used by the agent key monitor to
+    /// check the current vim mode so `y` is only intercepted as copy in
+    /// normal mode, not swallowed while the user is typing in insert mode.
+    var statusBarState: StatusBarState?
+
     init(encoder: InputEncoder, fontFace: FontFace, lineBuffer: LineBuffer,
          coreTextRenderer: CoreTextMetalRenderer, fontManager: FontManager) {
         self.encoder = encoder
@@ -257,11 +262,14 @@ final class EditorNSView: MTKView {
                 return nil
             }
 
-            // `y` with no modifiers: trigger copy, swallow the event.
-            // Without swallowing, the BEAM enters operator-pending yank
-            // mode and the next keypress is misinterpreted as a motion.
+            // `y` with no modifiers in normal mode: trigger copy, swallow
+            // the event. Without swallowing, the BEAM enters operator-pending
+            // yank mode and the next keypress is misinterpreted as a motion.
+            // Only intercept in normal mode (mode == 0) so the user can still
+            // type `y` in the agent chat input field during insert mode.
             let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-            if event.characters == "y" && flags.isEmpty {
+            let isNormalMode = self.statusBarState?.mode == 0
+            if event.characters == "y" && flags.isEmpty && isNormalMode {
                 NSApp.sendAction(#selector(NSText.copy(_:)), to: nil, from: nil)
                 return nil
             }
