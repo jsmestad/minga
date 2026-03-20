@@ -101,6 +101,13 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
         state.theme.search
       )
 
+    decorations =
+      if is_active do
+        merge_document_highlight_decorations(decorations, state.document_highlights, state.theme)
+      else
+        decorations
+      end
+
     cursorline_bg =
       if is_active and Options.get(:cursorline) do
         state.theme.editor.cursorline_bg
@@ -738,6 +745,67 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
 
     decs
   end
+
+  # ── Document highlight decorations ──────────────────────────────────────────
+
+  # Merges LSP document highlights into decorations with caching.
+  # Uses a process-dictionary cache keyed on the highlight list and base
+  # decorations version, matching the search highlight caching pattern.
+  @spec merge_document_highlight_decorations(
+          Decorations.t(),
+          [Minga.LSP.DocumentHighlight.t()] | nil,
+          Minga.Theme.t()
+        ) :: Decorations.t()
+  defp merge_document_highlight_decorations(decs, nil, _theme), do: decs
+  defp merge_document_highlight_decorations(decs, [], _theme), do: decs
+
+  defp merge_document_highlight_decorations(decs, highlights, theme) do
+    cached = Process.get(:doc_highlight_cache)
+    fingerprint = {highlights, decs.version}
+
+    case cached do
+      {^fingerprint, cached_decs} ->
+        cached_decs
+
+      _ ->
+        result = rebuild_document_highlight_decorations(decs, highlights, theme)
+        Process.put(:doc_highlight_cache, {fingerprint, result})
+        result
+    end
+  end
+
+  @spec rebuild_document_highlight_decorations(
+          Decorations.t(),
+          [Minga.LSP.DocumentHighlight.t()],
+          Minga.Theme.t()
+        ) :: Decorations.t()
+  defp rebuild_document_highlight_decorations(decs, highlights, theme) do
+    Decorations.batch(decs, fn d ->
+      d = Decorations.remove_group(d, :document_highlight)
+
+      Enum.reduce(highlights, d, fn hl, acc ->
+        bg = document_highlight_bg(hl.kind, theme)
+        style = Face.new(bg: bg)
+
+        {_id, acc} =
+          Decorations.add_highlight(acc, {hl.start_line, hl.start_col}, {hl.end_line, hl.end_col},
+            style: style,
+            priority: -15,
+            group: :document_highlight
+          )
+
+        acc
+      end)
+    end)
+  end
+
+  # Resolve background color for document highlights from the theme.
+  # Uses subtle, muted colors that are visible but don't compete with
+  # search highlights (priority -10) or selection.
+  @spec document_highlight_bg(Minga.LSP.DocumentHighlight.kind(), Minga.Theme.t()) ::
+          Minga.Theme.color()
+  defp document_highlight_bg(:write, _theme), do: 0x4A3F2B
+  defp document_highlight_bg(_kind, _theme), do: 0x3A3F4B
 
   @doc "Returns the decorations for a window's buffer."
   @spec window_decorations(Window.t()) :: Decorations.t()

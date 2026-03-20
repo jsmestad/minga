@@ -15,6 +15,7 @@ defmodule Minga.Input.Router do
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor
+  alias Minga.Editor.LspActions
   alias Minga.Editor.State, as: EditorState
   alias Minga.Port.Manager, as: PortManager
   alias Minga.Port.Protocol
@@ -65,12 +66,20 @@ defmodule Minga.Input.Router do
     old_buffer = state.buffers.active
     old_mode = state.vim.mode
     buf_version_before = buffer_version(state)
+    old_cursor = safe_cursor(old_buffer)
 
     state = %{state | status_msg: nil}
 
     state = dispatch_split(state, codepoint, modifiers)
 
-    post_key_housekeeping(state, old_buffer, buf_version_before, old_mode, {codepoint, modifiers})
+    post_key_housekeeping(
+      state,
+      old_buffer,
+      buf_version_before,
+      old_mode,
+      {codepoint, modifiers},
+      old_cursor
+    )
   end
 
   # Walks overlay handlers first (ConflictPrompt, Picker, Completion).
@@ -113,20 +122,68 @@ defmodule Minga.Input.Router do
           pid() | nil,
           non_neg_integer(),
           atom(),
-          {non_neg_integer(), non_neg_integer()}
+          {non_neg_integer(), non_neg_integer()},
+          {non_neg_integer(), non_neg_integer()} | nil
         ) :: EditorState.t()
   def post_key_housekeeping(
         state,
         old_buffer,
         buf_version_before,
         old_mode,
-        {codepoint, modifiers}
+        {codepoint, modifiers},
+        old_cursor \\ nil
       ) do
     state
     |> Editor.do_maybe_reset_highlight(old_buffer)
     |> Editor.do_maybe_reparse(buf_version_before)
     |> Editor.do_maybe_handle_completion(old_mode, codepoint, modifiers)
+    |> maybe_schedule_document_highlight(old_buffer, old_cursor)
     |> maybe_render(buf_version_before)
+  end
+
+  # Schedules a debounced document highlight request when the cursor moves
+  # in normal mode. Clears highlights on buffer switch or mode change.
+  # Only schedules when the cursor actually moved (avoids timer churn on
+  # keystrokes that don't change position, like failed motions or `zz`).
+  @spec maybe_schedule_document_highlight(
+          EditorState.t(),
+          pid() | nil,
+          {non_neg_integer(), non_neg_integer()} | nil
+        ) :: EditorState.t()
+  defp maybe_schedule_document_highlight(state, old_buffer, old_cursor) do
+    current_buffer = state.buffers.active
+
+    cond do
+      # Buffer changed: clear highlights
+      current_buffer != old_buffer ->
+        LspActions.clear_document_highlights(state)
+
+      # Not normal mode: clear highlights
+      state.vim.mode != :normal ->
+        LspActions.clear_document_highlights(state)
+
+      # Normal mode with a live buffer: schedule only if cursor moved
+      current_buffer != nil ->
+        new_cursor = safe_cursor(current_buffer)
+
+        if new_cursor != old_cursor do
+          LspActions.schedule_document_highlight(state)
+        else
+          state
+        end
+
+      true ->
+        state
+    end
+  end
+
+  @spec safe_cursor(pid() | nil) :: {non_neg_integer(), non_neg_integer()} | nil
+  defp safe_cursor(nil), do: nil
+
+  defp safe_cursor(buf) do
+    BufferServer.cursor(buf)
+  catch
+    :exit, _ -> nil
   end
 
   # Skips the full render when entering operator-pending mode with no buffer

@@ -32,7 +32,7 @@ defmodule Minga.Editor.SemanticWindow do
      change).
   """
 
-  alias __MODULE__.{DiagnosticRange, SearchMatch, Selection, VisualRow}
+  alias __MODULE__.{DiagnosticRange, DocumentHighlightRange, SearchMatch, Selection, VisualRow}
 
   @enforce_keys [:window_id, :rows, :cursor_row, :cursor_col, :cursor_shape]
   defstruct window_id: 0,
@@ -43,6 +43,7 @@ defmodule Minga.Editor.SemanticWindow do
             selection: nil,
             search_matches: [],
             diagnostic_ranges: [],
+            document_highlights: [],
             full_refresh: true
 
   @type cursor_shape :: :block | :beam | :underline
@@ -56,6 +57,7 @@ defmodule Minga.Editor.SemanticWindow do
           selection: Selection.t() | nil,
           search_matches: [SearchMatch.t()],
           diagnostic_ranges: [DiagnosticRange.t()],
+          document_highlights: [DocumentHighlightRange.t()],
           full_refresh: boolean()
         }
 end

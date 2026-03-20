@@ -19,7 +19,8 @@ defmodule Minga.Test.GUIWindowContentDecoder do
     {rows, rest} = decode_rows(rest, row_count, [])
     {selection, rest} = decode_selection(rest)
     {search_matches, rest} = decode_search_matches(rest)
-    {diagnostic_ranges, <<>>} = decode_diagnostic_ranges(rest)
+    {diagnostic_ranges, rest} = decode_diagnostic_ranges(rest)
+    {document_highlights, <<>>} = decode_document_highlights(rest)
 
     %{
       window_id: window_id,
@@ -30,7 +31,8 @@ defmodule Minga.Test.GUIWindowContentDecoder do
       rows: rows,
       selection: selection,
       search_matches: search_matches,
-      diagnostic_ranges: diagnostic_ranges
+      diagnostic_ranges: diagnostic_ranges,
+      document_highlights: document_highlights
     }
   end
 
@@ -159,6 +161,34 @@ defmodule Minga.Test.GUIWindowContentDecoder do
   defp decode_severity(1), do: :warning
   defp decode_severity(2), do: :info
   defp decode_severity(3), do: :hint
+
+  # ── Document highlights ─────────────────────────────────────────────────
+
+  defp decode_document_highlights(<<count::16, rest::binary>>) do
+    decode_highlight_entries(rest, count, [])
+  end
+
+  defp decode_highlight_entries(rest, 0, acc), do: {Enum.reverse(acc), rest}
+
+  defp decode_highlight_entries(
+         <<start_row::16, start_col::16, end_row::16, end_col::16, kind::8, rest::binary>>,
+         remaining,
+         acc
+       ) do
+    highlight = %{
+      start_row: start_row,
+      start_col: start_col,
+      end_row: end_row,
+      end_col: end_col,
+      kind: decode_highlight_kind(kind)
+    }
+
+    decode_highlight_entries(rest, remaining - 1, [highlight | acc])
+  end
+
+  defp decode_highlight_kind(1), do: :text
+  defp decode_highlight_kind(2), do: :read
+  defp decode_highlight_kind(3), do: :write
 
   # ── Cursor shape ────────────────────────────────────────────────────────
 

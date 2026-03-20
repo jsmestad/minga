@@ -1170,6 +1170,25 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             pos += 9
         }
 
+        // Document highlights: count:2, then per highlight: start_row:2 + start_col:2 + end_row:2 + end_col:2 + kind:1 = 9
+        var docHighlights: [GUIDocumentHighlight] = []
+        if data.count >= pos + 2 {
+            let highlightCount = Int(readU16(data, pos))
+            pos += 2
+            docHighlights.reserveCapacity(highlightCount)
+            for _ in 0..<highlightCount {
+                guard data.count >= pos + 9 else { throw ProtocolDecodeError.malformed }
+                docHighlights.append(GUIDocumentHighlight(
+                    startRow: readU16(data, pos),
+                    startCol: readU16(data, pos + 2),
+                    endRow: readU16(data, pos + 4),
+                    endCol: readU16(data, pos + 6),
+                    kind: GUIDocumentHighlightKind(rawValue: data[pos + 8]) ?? .text
+                ))
+                pos += 9
+            }
+        }
+
         let content = GUIWindowContent(
             windowId: windowId,
             fullRefresh: (flags & 0x01) != 0,
@@ -1179,7 +1198,8 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             rows: rows,
             selection: selection,
             searchMatches: matches,
-            diagnosticUnderlines: diags
+            diagnosticUnderlines: diags,
+            documentHighlights: docHighlights
         )
         return (.guiWindowContent(data: content), pos - offset)
 

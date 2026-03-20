@@ -103,6 +103,25 @@ struct GUIDiagnosticUnderline: Sendable, Equatable {
     let severity: GUIDiagnosticSeverity
 }
 
+// MARK: - Document highlight
+
+/// LSP document highlight kind (matches LSP spec values).
+enum GUIDocumentHighlightKind: UInt8, Sendable {
+    case text = 1
+    case read = 2
+    case write = 3
+}
+
+/// A document highlight range in display coordinates.
+/// Rendered as a subtle background quad behind text, similar to search matches.
+struct GUIDocumentHighlight: Sendable, Equatable {
+    let startRow: UInt16
+    let startCol: UInt16
+    let endRow: UInt16
+    let endCol: UInt16
+    let kind: GUIDocumentHighlightKind
+}
+
 // MARK: - Window content
 
 /// Complete semantic content for one editor window.
@@ -120,12 +139,14 @@ final class GUIWindowContent: Sendable {
     let selection: GUISelectionOverlay?
     let searchMatches: [GUISearchMatch]
     let diagnosticUnderlines: [GUIDiagnosticUnderline]
+    let documentHighlights: [GUIDocumentHighlight]
 
     init(windowId: UInt16, fullRefresh: Bool,
          cursorRow: UInt16, cursorCol: UInt16, cursorShape: CursorShape,
          rows: [GUIVisualRow], selection: GUISelectionOverlay?,
          searchMatches: [GUISearchMatch],
-         diagnosticUnderlines: [GUIDiagnosticUnderline]) {
+         diagnosticUnderlines: [GUIDiagnosticUnderline],
+         documentHighlights: [GUIDocumentHighlight]) {
         self.windowId = windowId
         self.fullRefresh = fullRefresh
         self.cursorRow = cursorRow
@@ -135,5 +156,6 @@ final class GUIWindowContent: Sendable {
         self.selection = selection
         self.searchMatches = searchMatches
         self.diagnosticUnderlines = diagnosticUnderlines
+        self.documentHighlights = documentHighlights
     }
 }

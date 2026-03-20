@@ -65,17 +65,8 @@ defmodule Minga.Editor.State do
   @typedoc "Line number display style."
   @type line_number_style :: :hybrid | :absolute | :relative | :none
 
-  @typedoc "LSP document highlight kind."
-  @type highlight_kind :: :text | :read | :write
-
   @typedoc "A document highlight range from the LSP server."
-  @type document_highlight :: %{
-          start_line: non_neg_integer(),
-          start_col: non_neg_integer(),
-          end_line: non_neg_integer(),
-          end_col: non_neg_integer(),
-          kind: highlight_kind()
-        }
+  @type document_highlight :: Minga.LSP.DocumentHighlight.t()
 
   # Fields saved/restored per-tab. Adding a per-tab field? Add it here,
   # and snapshot_tab_fields/1 + restore_tab_context/1 will pick it up
