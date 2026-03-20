@@ -186,14 +186,19 @@ final class CommandDispatcher {
         case .guiBreadcrumb(let segments):
             guiState.breadcrumbState.update(segments: segments)
 
-        case .guiStatusBar(let contentKind, let mode, let cursorLine, let cursorCol, let lineCount, let flags, let lspStatus, let gitBranch, let message, let filetype, let errorCount, let warningCount, let modelName, let messageCount, let sessionStatus):
+        case .guiStatusBar(let contentKind, let mode, let cursorLine, let cursorCol, let lineCount, let flags, let lspStatus, let gitBranch, let message, let filetype, let errorCount, let warningCount, let modelName, let messageCount, let sessionStatus, let infoCount, let hintCount, let macroRecording, let parserStatus, let agentStatus, let gitAdded, let gitModified, let gitDeleted, let icon, let iconColorR, let iconColorG, let iconColorB, let filename):
             let update = StatusBarUpdate(
                 contentKind: contentKind, mode: mode,
                 cursorLine: cursorLine, cursorCol: cursorCol, lineCount: lineCount,
                 flags: flags, lspStatus: lspStatus, gitBranch: gitBranch,
                 message: message, filetype: filetype,
                 errorCount: errorCount, warningCount: warningCount,
-                modelName: modelName, messageCount: messageCount, sessionStatus: sessionStatus
+                modelName: modelName, messageCount: messageCount, sessionStatus: sessionStatus,
+                infoCount: infoCount, hintCount: hintCount, macroRecording: macroRecording,
+                parserStatus: parserStatus, agentStatus: agentStatus,
+                gitAdded: gitAdded, gitModified: gitModified, gitDeleted: gitDeleted,
+                icon: icon, iconColorR: iconColorR, iconColorG: iconColorG, iconColorB: iconColorB,
+                filename: filename
             )
             guiState.statusBarState.update(from: update)
             if mode != lastMode {

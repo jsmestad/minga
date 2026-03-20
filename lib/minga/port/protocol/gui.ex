@@ -646,6 +646,13 @@ defmodule Minga.Port.Protocol.GUI do
     [flags:1][lsp_status:1][git_branch_len:1][git_branch:N]
     [message_len:2][message:N][filetype_len:1][filetype:N]
     [error_count:2][warning_count:2]
+    -- Extended fields (parity with TUI modeline) --
+    [info_count:2][hint_count:2]
+    [macro_recording:1]
+    [parser_status:1][agent_status:1]
+    [git_added:2][git_modified:2][git_deleted:2]
+    [icon_len:1][icon:N][icon_color_r:1][icon_color_g:1][icon_color_b:1]
+    [filename_len:2][filename:N]
 
   Agent variant (content_kind == 1):
     [opcode:1][content_kind=1:1][mode:1]
@@ -665,12 +672,29 @@ defmodule Minga.Port.Protocol.GUI do
 
     git_branch = :erlang.iolist_to_binary([d.git_branch || ""])
     filetype = :erlang.iolist_to_binary([Atom.to_string(d.filetype || :text)])
-    {error_count, warning_count} = diagnostic_counts_from_buffer_data(d)
+
+    {error_count, warning_count, info_count, hint_count} =
+      full_diagnostic_counts(d)
+
+    # Extended fields for TUI modeline parity
+    macro_byte = encode_macro_recording(d.macro_recording)
+    parser_byte = encode_parser_status(d.parser_status)
+    agent_byte = encode_agent_session_status(d.agent_status)
+    {git_added, git_modified, git_deleted} = git_diff_counts(d)
+    {icon, icon_color} = Minga.Devicon.icon_and_color(d.filetype)
+    icon_bytes = :erlang.iolist_to_binary([icon])
+    icon_r = icon_color >>> 16 &&& 0xFF
+    icon_g = icon_color >>> 8 &&& 0xFF
+    icon_b = icon_color &&& 0xFF
+    filename = :erlang.iolist_to_binary([d.file_name || ""])
 
     # cursor_line/cursor_col are 0-indexed from BufferServer; encode as 1-indexed for the GUI
     <<@op_gui_status_bar, 0::8, mode_byte::8, d.cursor_line + 1::32, d.cursor_col + 1::32,
       d.line_count::32, flags::8, lsp_byte::8, byte_size(git_branch)::8, git_branch::binary,
-      0::16, byte_size(filetype)::8, filetype::binary, error_count::16, warning_count::16>>
+      0::16, byte_size(filetype)::8, filetype::binary, error_count::16, warning_count::16,
+      info_count::16, hint_count::16, macro_byte::8, parser_byte::8, agent_byte::8, git_added::16,
+      git_modified::16, git_deleted::16, byte_size(icon_bytes)::8, icon_bytes::binary, icon_r::8,
+      icon_g::8, icon_b::8, byte_size(filename)::16, filename::binary>>
   end
 
   def encode_gui_status_bar({:agent, d}) do
@@ -703,13 +727,34 @@ defmodule Minga.Port.Protocol.GUI do
   defp encode_lsp_status(:error), do: 4
   defp encode_lsp_status(_), do: 0
 
-  @spec diagnostic_counts_from_buffer_data(map()) :: {non_neg_integer(), non_neg_integer()}
-  defp diagnostic_counts_from_buffer_data(d) do
+  @spec full_diagnostic_counts(map()) ::
+          {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()}
+  defp full_diagnostic_counts(d) do
     case d.diagnostic_counts do
-      {errors, warnings, _info, _hints} -> {errors, warnings}
-      _ -> {0, 0}
+      {errors, warnings, info, hints} -> {errors, warnings, info, hints}
+      _ -> {0, 0, 0, 0}
     end
   end
+
+  @spec encode_macro_recording({true, String.t()} | false) :: non_neg_integer()
+  defp encode_macro_recording({true, <<char::utf8, _::binary>>})
+       when char >= ?a and char <= ?z,
+       do: char - ?a + 1
+
+  defp encode_macro_recording(_), do: 0
+
+  @spec encode_parser_status(atom() | nil) :: non_neg_integer()
+  defp encode_parser_status(:available), do: 0
+  defp encode_parser_status(:unavailable), do: 1
+  defp encode_parser_status(:restarting), do: 2
+  defp encode_parser_status(_), do: 0
+
+  @spec git_diff_counts(map()) ::
+          {non_neg_integer(), non_neg_integer(), non_neg_integer()}
+  defp git_diff_counts(%{git_diff_summary: {added, modified, deleted}}),
+    do: {added, modified, deleted}
+
+  defp git_diff_counts(_), do: {0, 0, 0}
 
   @spec build_buffer_status_flags(map()) :: non_neg_integer()
   defp build_buffer_status_flags(d) do

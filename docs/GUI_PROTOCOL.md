@@ -166,6 +166,12 @@ opcode(1) + content_kind=0(1) + mode(1) + cursor_line(4) + cursor_col(4) + line_
 + flags(1) + lsp_status(1) + git_branch_len(1) + git_branch(git_branch_len)
 + message_len(2) + message(message_len) + filetype_len(1) + filetype(filetype_len)
 + error_count(2) + warning_count(2)
+-- Extended fields (TUI modeline parity) --
++ info_count(2) + hint_count(2)
++ macro_recording(1) + parser_status(1) + agent_status(1)
++ git_added(2) + git_modified(2) + git_deleted(2)
++ icon_len(1) + icon(icon_len) + icon_color_r(1) + icon_color_g(1) + icon_color_b(1)
++ filename_len(2) + filename(filename_len)
 ```
 
 **Agent variant (content_kind == 1):**
@@ -185,7 +191,15 @@ Flags bits: bit 0=has_lsp, bit 1=has_git, bit 2=is_dirty
 
 LSP status: 0=none, 1=ready, 2=initializing, 3=starting, 4=error
 
-Session status: 0=idle, 1=thinking, 2=tool_executing, 3=error
+Parser status: 0=available, 1=unavailable, 2=restarting
+
+Agent status: 0=idle, 1=thinking, 2=tool_executing, 3=error
+
+Session status (agent variant): 0=idle, 1=thinking, 2=tool_executing, 3=error
+
+Macro recording: 0=not recording, 1-26=recording register a-z
+
+`icon` is a UTF-8 encoded Nerd Font glyph for the filetype (e.g., "" for Elixir). `icon_color` is 24-bit RGB split into 3 bytes. `filename` is the display name of the active buffer (for accessibility/tooltip use). `git_added`, `git_modified`, `git_deleted` are line counts from the buffer's diff against HEAD.
 
 ### 0x77 — gui_picker
 

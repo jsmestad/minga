@@ -30,7 +30,7 @@ enum RenderCommand: Sendable {
     case guiCompletion(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, selectedIndex: UInt16, items: [GUICompletionItem])
     case guiWhichKey(visible: Bool, prefix: String, page: UInt8, pageCount: UInt8, bindings: [GUIWhichKeyBinding])
     case guiBreadcrumb(segments: [String])
-    case guiStatusBar(contentKind: UInt8, mode: UInt8, cursorLine: UInt32, cursorCol: UInt32, lineCount: UInt32, flags: UInt8, lspStatus: UInt8, gitBranch: String, message: String, filetype: String, errorCount: UInt16, warningCount: UInt16, modelName: String, messageCount: UInt32, sessionStatus: UInt8)
+    case guiStatusBar(contentKind: UInt8, mode: UInt8, cursorLine: UInt32, cursorCol: UInt32, lineCount: UInt32, flags: UInt8, lspStatus: UInt8, gitBranch: String, message: String, filetype: String, errorCount: UInt16, warningCount: UInt16, modelName: String, messageCount: UInt32, sessionStatus: UInt8, infoCount: UInt16, hintCount: UInt16, macroRecording: UInt8, parserStatus: UInt8, agentStatus: UInt8, gitAdded: UInt16, gitModified: UInt16, gitDeleted: UInt16, icon: String, iconColorR: UInt8, iconColorG: UInt8, iconColorB: UInt8, filename: String)
     case guiPicker(visible: Bool, selectedIndex: UInt16, filteredCount: UInt16, totalCount: UInt16, title: String, query: String, hasPreview: Bool, items: [GUIPickerItem], actionMenu: GUIPickerActionMenu?)
     case guiPickerPreview(visible: Bool, lines: [GUIPickerPreviewLine])
     case guiAgentChat(visible: Bool, status: UInt8, model: String, prompt: String, pendingToolName: String?, pendingToolSummary: String, messages: [GUIChatMessage])
@@ -646,6 +646,22 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         var modelName = ""
         var messageCount: UInt32 = 0
         var sessionStatus: UInt8 = 0
+
+        // Extended buffer fields (TUI modeline parity)
+        var infoCount: UInt16 = 0
+        var hintCount: UInt16 = 0
+        var macroRecording: UInt8 = 0
+        var parserStatus: UInt8 = 0
+        var agentStatus: UInt8 = 0
+        var gitAdded: UInt16 = 0
+        var gitModified: UInt16 = 0
+        var gitDeleted: UInt16 = 0
+        var icon = ""
+        var iconColorR: UInt8 = 0
+        var iconColorG: UInt8 = 0
+        var iconColorB: UInt8 = 0
+        var filename = ""
+
         if contentKind == 1 && data.count >= totalConsumed + 1 {
             let modelNameLen = Int(data[totalConsumed])
             totalConsumed += 1
@@ -656,8 +672,43 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             messageCount = readU32(data, totalConsumed)
             sessionStatus = data[totalConsumed + 4]
             totalConsumed += 5
+        } else if contentKind == 0 {
+            // Extended buffer fields after warning_count:
+            // info_count:2 hint_count:2 macro_recording:1 parser_status:1 agent_status:1
+            // git_added:2 git_modified:2 git_deleted:2
+            // icon_len:1 icon:N icon_color_r:1 icon_color_g:1 icon_color_b:1
+            // filename_len:2 filename:N
+            // 2+2+1+1+1+2+2+2 = 13 bytes of fixed fields before icon
+            guard data.count >= totalConsumed + 13 else { throw ProtocolDecodeError.malformed }
+            infoCount = readU16(data, totalConsumed)
+            hintCount = readU16(data, totalConsumed + 2)
+            macroRecording = data[totalConsumed + 4]
+            parserStatus = data[totalConsumed + 5]
+            agentStatus = data[totalConsumed + 6]
+            gitAdded = readU16(data, totalConsumed + 7)
+            gitModified = readU16(data, totalConsumed + 9)
+            gitDeleted = readU16(data, totalConsumed + 11)
+            totalConsumed += 13
+            // icon: len:1 + data + color:3
+            guard data.count >= totalConsumed + 1 else { throw ProtocolDecodeError.malformed }
+            let iconLen = Int(data[totalConsumed])
+            totalConsumed += 1
+            guard data.count >= totalConsumed + iconLen + 3 else { throw ProtocolDecodeError.malformed }
+            icon = String(data: data[totalConsumed..<(totalConsumed + iconLen)], encoding: .utf8) ?? ""
+            totalConsumed += iconLen
+            iconColorR = data[totalConsumed]
+            iconColorG = data[totalConsumed + 1]
+            iconColorB = data[totalConsumed + 2]
+            totalConsumed += 3
+            // filename: len:2 + data
+            guard data.count >= totalConsumed + 2 else { throw ProtocolDecodeError.malformed }
+            let filenameLen = Int(readU16(data, totalConsumed))
+            totalConsumed += 2
+            guard data.count >= totalConsumed + filenameLen else { throw ProtocolDecodeError.malformed }
+            filename = String(data: data[totalConsumed..<(totalConsumed + filenameLen)], encoding: .utf8) ?? ""
+            totalConsumed += filenameLen
         }
-        return (.guiStatusBar(contentKind: contentKind, mode: mode, cursorLine: cursorLine, cursorCol: cursorCol, lineCount: lineCount, flags: flags, lspStatus: lspStatus, gitBranch: gitBranch, message: message, filetype: filetype, errorCount: errorCount, warningCount: warningCount, modelName: modelName, messageCount: messageCount, sessionStatus: sessionStatus), totalConsumed - offset)
+        return (.guiStatusBar(contentKind: contentKind, mode: mode, cursorLine: cursorLine, cursorCol: cursorCol, lineCount: lineCount, flags: flags, lspStatus: lspStatus, gitBranch: gitBranch, message: message, filetype: filetype, errorCount: errorCount, warningCount: warningCount, modelName: modelName, messageCount: messageCount, sessionStatus: sessionStatus, infoCount: infoCount, hintCount: hintCount, macroRecording: macroRecording, parserStatus: parserStatus, agentStatus: agentStatus, gitAdded: gitAdded, gitModified: gitModified, gitDeleted: gitDeleted, icon: icon, iconColorR: iconColorR, iconColorG: iconColorG, iconColorB: iconColorB, filename: filename), totalConsumed - offset)
 
     case OP_GUI_PICKER:
         guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }

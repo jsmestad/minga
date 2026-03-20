@@ -25,6 +25,20 @@ struct StatusBarUpdate: Sendable {
     let modelName: String
     let messageCount: UInt32
     let sessionStatus: UInt8
+    // Extended fields (TUI modeline parity)
+    let infoCount: UInt16
+    let hintCount: UInt16
+    let macroRecording: UInt8
+    let parserStatus: UInt8
+    let agentStatus: UInt8
+    let gitAdded: UInt16
+    let gitModified: UInt16
+    let gitDeleted: UInt16
+    let icon: String
+    let iconColorR: UInt8
+    let iconColorG: UInt8
+    let iconColorB: UInt8
+    let filename: String
 }
 
 @MainActor
@@ -47,6 +61,20 @@ final class StatusBarState {
     var modelName: String = ""
     var messageCount: UInt32 = 0
     var sessionStatus: UInt8 = 0
+    // Extended fields (TUI modeline parity)
+    var infoCount: UInt16 = 0
+    var hintCount: UInt16 = 0
+    var macroRecording: UInt8 = 0
+    var parserStatus: UInt8 = 0
+    var agentStatus: UInt8 = 0
+    var gitAdded: UInt16 = 0
+    var gitModified: UInt16 = 0
+    var gitDeleted: UInt16 = 0
+    var icon: String = ""
+    var iconColorR: UInt8 = 0
+    var iconColorG: UInt8 = 0
+    var iconColorB: UInt8 = 0
+    var filename: String = ""
 
     func update(from data: StatusBarUpdate) {
         self.contentKind = data.contentKind
@@ -64,6 +92,19 @@ final class StatusBarState {
         self.modelName = data.modelName
         self.messageCount = data.messageCount
         self.sessionStatus = data.sessionStatus
+        self.infoCount = data.infoCount
+        self.hintCount = data.hintCount
+        self.macroRecording = data.macroRecording
+        self.parserStatus = data.parserStatus
+        self.agentStatus = data.agentStatus
+        self.gitAdded = data.gitAdded
+        self.gitModified = data.gitModified
+        self.gitDeleted = data.gitDeleted
+        self.icon = data.icon
+        self.iconColorR = data.iconColorR
+        self.iconColorG = data.iconColorG
+        self.iconColorB = data.iconColorB
+        self.filename = data.filename
     }
 
     var modeName: String {
@@ -81,8 +122,26 @@ final class StatusBarState {
 
     var hasGit: Bool { flags & 0x02 != 0 }
     var hasLsp: Bool { flags & 0x01 != 0 }
+    var isDirty: Bool { flags & 0x04 != 0 }
     var isInsertMode: Bool { mode == 1 }
     var isAgentWindow: Bool { contentKind == 1 }
+    var isRecordingMacro: Bool { macroRecording > 0 }
+    var hasGitDiffStats: Bool { gitAdded > 0 || gitModified > 0 || gitDeleted > 0 }
+
+    /// The macro register character (a-z), or nil if not recording.
+    var macroRegister: Character? {
+        guard macroRecording > 0, macroRecording <= 26 else { return nil }
+        return Character(UnicodeScalar(96 + macroRecording))
+    }
+
+    /// Icon color as a SwiftUI Color from the 24-bit RGB components.
+    var iconColor: Color {
+        Color(
+            red: Double(iconColorR) / 255.0,
+            green: Double(iconColorG) / 255.0,
+            blue: Double(iconColorB) / 255.0
+        )
+    }
 
     var sessionStatusName: String {
         switch sessionStatus {
@@ -103,39 +162,58 @@ struct StatusBarView: View {
     private let barHeight: CGFloat = 24
 
     var body: some View {
-        HStack(spacing: 0) {
-            if state.isAgentWindow {
-                agentLeftSegment
-            } else {
-                leftSegment
+        ZStack {
+            // Center (lowest priority, truncates first)
+            centerSegment
+
+            // Left-aligned
+            HStack(spacing: 0) {
+                if state.isAgentWindow {
+                    agentLeftSegment
+                } else {
+                    leftSegment
+                }
+                Spacer(minLength: 0)
             }
 
-            Spacer()
-
-            // Center: status message (buffer) or animated agent status indicator
-            if state.isAgentWindow {
-                AgentStatusIndicator(sessionStatus: state.sessionStatus, theme: theme)
-            } else if !state.message.isEmpty {
-                Text(state.message)
-                    .font(.system(size: 11))
-                    .foregroundStyle(theme.modelineBarFg.opacity(0.7))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-            }
-
-            Spacer()
-
-            // Right: position + mode (buffer) or message count + mode (agent)
-            if state.isAgentWindow {
-                agentRightSegment
-            } else {
-                rightSegment
+            // Right-aligned
+            HStack(spacing: 0) {
+                Spacer(minLength: 0)
+                if state.isAgentWindow {
+                    agentRightSegment
+                } else {
+                    rightSegment
+                }
             }
         }
         .frame(height: barHeight)
         .background(theme.modelineBarBg)
         .focusable(false)
         .focusEffectDisabled()
+    }
+
+    // MARK: - Center segment (transient indicators)
+
+    @ViewBuilder
+    private var centerSegment: some View {
+        if state.isAgentWindow {
+            AgentStatusIndicator(sessionStatus: state.sessionStatus, theme: theme)
+        } else if state.isRecordingMacro, let reg = state.macroRegister {
+            HStack(spacing: 4) {
+                Circle()
+                    .fill(Color.red)
+                    .frame(width: 6, height: 6)
+                Text("recording @\(String(reg))")
+                    .font(.system(size: 11))
+                    .foregroundStyle(theme.modelineBarFg.opacity(0.8))
+            }
+        } else if !state.message.isEmpty {
+            Text(state.message)
+                .font(.system(size: 11))
+                .foregroundStyle(theme.modelineBarFg.opacity(0.7))
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
     }
 
     // MARK: - Agent segments
@@ -188,63 +266,136 @@ struct StatusBarView: View {
                 encoder?.sendTogglePanel(panel: 1)
             }
 
-            // Git branch
+            // Agent status (thinking/executing/error; hidden when idle)
+            agentStatusIcon
+
+            // Git branch + diff stats
             if state.hasGit && !state.gitBranch.isEmpty {
-                HStack(spacing: 3) {
-                    Image(systemName: "arrow.triangle.branch")
-                        .font(.system(size: 9, weight: .medium))
-                    Text(state.gitBranch)
-                        .font(.system(size: 11))
-                        .lineLimit(1)
-                }
-                .foregroundStyle(theme.modelineBarFg.opacity(0.6))
-                .padding(.horizontal, 6)
+                gitSegment
             }
 
-            // LSP status
-            if state.hasLsp {
-                lspIndicator
-            }
-
-            // Diagnostic counts
-            if state.errorCount > 0 || state.warningCount > 0 {
-                diagnosticIndicators
-            }
+            // Diagnostic counts (all 4 levels, theme-colored)
+            diagnosticIndicators
         }
     }
 
+    // MARK: - Agent status icon
+
+    @ViewBuilder
+    private var agentStatusIcon: some View {
+        switch state.agentStatus {
+        case 1: // thinking
+            ProgressView()
+                .scaleEffect(0.45)
+                .frame(width: 14, height: barHeight)
+        case 2: // executing
+            Image(systemName: "bolt.fill")
+                .font(.system(size: 9))
+                .foregroundStyle(theme.statusbarAccentFg)
+                .frame(width: 14, height: barHeight)
+        case 3: // error
+            Image(systemName: "exclamationmark.circle.fill")
+                .font(.system(size: 9))
+                .foregroundStyle(theme.gutterErrorFg)
+                .frame(width: 14, height: barHeight)
+        default: // idle: show nothing
+            EmptyView()
+        }
+    }
+
+    // MARK: - Git branch + diff stats
+
+    @ViewBuilder
+    private var gitSegment: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "arrow.triangle.branch")
+                .font(.system(size: 9, weight: .medium))
+            Text(state.gitBranch)
+                .font(.system(size: 11))
+                .lineLimit(1)
+
+            // Diff stats: +added ~modified -deleted
+            if state.hasGitDiffStats {
+                HStack(spacing: 4) {
+                    if state.gitAdded > 0 {
+                        Text("+\(state.gitAdded)")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(theme.gitAddedFg)
+                    }
+                    if state.gitModified > 0 {
+                        Text("~\(state.gitModified)")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(theme.gitModifiedFg)
+                    }
+                    if state.gitDeleted > 0 {
+                        Text("-\(state.gitDeleted)")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(theme.gitDeletedFg)
+                    }
+                }
+            }
+        }
+        .foregroundStyle(theme.modelineBarFg.opacity(0.6))
+        .padding(.horizontal, 6)
+    }
+
+    // MARK: - LSP indicator (theme-colored)
+
     @ViewBuilder
     private var lspIndicator: some View {
-        let (icon, color) = lspDisplay(state.lspStatus)
-        Image(systemName: icon)
+        let (sfIcon, color) = lspDisplay(state.lspStatus)
+        Image(systemName: sfIcon)
             .font(.system(size: 9))
             .foregroundStyle(color)
             .padding(.horizontal, 4)
     }
 
+    // MARK: - Diagnostic counts (all 4 levels, theme-colored)
+
     @ViewBuilder
     private var diagnosticIndicators: some View {
-        HStack(spacing: 6) {
-            if state.errorCount > 0 {
-                HStack(spacing: 2) {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 9))
-                    Text("\(state.errorCount)")
-                        .font(.system(size: 11))
+        let hasAny = state.errorCount > 0 || state.warningCount > 0 || state.infoCount > 0 || state.hintCount > 0
+        if hasAny {
+            HStack(spacing: 6) {
+                if state.errorCount > 0 {
+                    HStack(spacing: 2) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 9))
+                        Text("\(state.errorCount)")
+                            .font(.system(size: 11))
+                    }
+                    .foregroundStyle(theme.gutterErrorFg)
                 }
-                .foregroundStyle(theme.gutterErrorFg)
-            }
-            if state.warningCount > 0 {
-                HStack(spacing: 2) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 9))
-                    Text("\(state.warningCount)")
-                        .font(.system(size: 11))
+                if state.warningCount > 0 {
+                    HStack(spacing: 2) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 9))
+                        Text("\(state.warningCount)")
+                            .font(.system(size: 11))
+                    }
+                    .foregroundStyle(theme.gutterWarningFg)
                 }
-                .foregroundStyle(theme.gutterWarningFg)
+                if state.infoCount > 0 {
+                    HStack(spacing: 2) {
+                        Image(systemName: "info.circle.fill")
+                            .font(.system(size: 9))
+                        Text("\(state.infoCount)")
+                            .font(.system(size: 11))
+                    }
+                    .foregroundStyle(theme.gutterInfoFg)
+                }
+                if state.hintCount > 0 {
+                    HStack(spacing: 2) {
+                        Image(systemName: "lightbulb.fill")
+                            .font(.system(size: 9))
+                        Text("\(state.hintCount)")
+                            .font(.system(size: 11))
+                    }
+                    .foregroundStyle(theme.gutterHintFg)
+                }
             }
+            .padding(.horizontal, 4)
         }
-        .padding(.horizontal, 4)
     }
 
     private func lspDisplay(_ status: UInt8) -> (String, Color) {
@@ -262,15 +413,30 @@ struct StatusBarView: View {
     @ViewBuilder
     private var rightSegment: some View {
         HStack(spacing: 8) {
-            // Filetype
+            // Parser status (only when degraded)
+            parserStatusIcon
+
+            // LSP status
+            if state.hasLsp {
+                lspIndicator
+            }
+
+            // Devicon + filetype
             if !state.filetype.isEmpty {
-                Text(state.filetype)
-                    .font(.system(size: 11))
-                    .foregroundStyle(theme.modelineBarFg.opacity(0.6))
+                HStack(spacing: 3) {
+                    if !state.icon.isEmpty {
+                        Text(state.icon)
+                            .font(.custom("Symbols Nerd Font Mono", size: 11))
+                            .foregroundStyle(state.iconColor)
+                    }
+                    Text(state.filetype)
+                        .font(.system(size: 11))
+                        .foregroundStyle(theme.modelineBarFg.opacity(0.6))
+                }
             }
 
             // Cursor position
-            Text("\(state.cursorLine):\(state.cursorCol)")
+            Text("Ln \(state.cursorLine), Col \(state.cursorCol)")
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(theme.modelineBarFg.opacity(0.7))
 
@@ -278,6 +444,26 @@ struct StatusBarView: View {
             modeBadge
         }
         .padding(.trailing, 8)
+    }
+
+    // MARK: - Parser status (only when degraded)
+
+    @ViewBuilder
+    private var parserStatusIcon: some View {
+        switch state.parserStatus {
+        case 1: // unavailable
+            Image(systemName: "leaf.fill")
+                .font(.system(size: 9))
+                .foregroundStyle(theme.gutterErrorFg)
+                .help("Tree-sitter parser unavailable")
+        case 2: // restarting
+            Image(systemName: "leaf.fill")
+                .font(.system(size: 9))
+                .foregroundStyle(theme.gutterWarningFg)
+                .help("Tree-sitter parser restarting")
+        default: // available: show nothing
+            EmptyView()
+        }
     }
 
     @ViewBuilder
