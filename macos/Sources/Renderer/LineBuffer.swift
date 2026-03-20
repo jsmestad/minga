@@ -92,6 +92,24 @@ final class LineBuffer {
     var cursorlineRow: UInt16 = 0xFFFF
     var cursorlineBg: UInt32 = 0
 
+    /// Per-window gutter data from gui_gutter opcode (0x7B).
+    /// One entry per editor window (split pane). Cleared each frame.
+    /// The renderer iterates these to draw gutter content at the correct
+    /// screen positions for each window.
+    var windowGutters: [GUIWindowGutter] = []
+
+    /// Gutter theme colors as 24-bit RGB values.
+    /// Updated by CommandDispatcher from ThemeColors when gui_theme arrives.
+    var gutterFgColor: UInt32 = 0x555555
+    var gutterCurrentFgColor: UInt32 = 0xBBC2CF
+    var gutterErrorFgColor: UInt32 = 0xFF6C6B
+    var gutterWarningFgColor: UInt32 = 0xECBE7B
+    var gutterInfoFgColor: UInt32 = 0x51AFEF
+    var gutterHintFgColor: UInt32 = 0x555555
+    var gitAddedFgColor: UInt32 = 0x98BE65
+    var gitModifiedFgColor: UInt32 = 0x51AFEF
+    var gitDeletedFgColor: UInt32 = 0xFF6C6B
+
     /// Track whether the buffer was modified since last render.
     var dirty: Bool = true
 
@@ -109,6 +127,7 @@ final class LineBuffer {
     func clear() {
         lines.removeAll(keepingCapacity: true)
         lineHashes.removeAll(keepingCapacity: true)
+        windowGutters.removeAll(keepingCapacity: true)
         dirty = true
     }
 
@@ -205,6 +224,11 @@ final class LineBuffer {
     /// Returns the styled runs for a given row, or an empty array if none.
     func runsForLine(_ row: UInt16) -> [StyledRun] {
         return lines[row] ?? []
+    }
+
+    /// Returns the window gutter whose content area contains the given screen row.
+    func windowGutter(forRow row: UInt16) -> GUIWindowGutter? {
+        windowGutters.first { row >= $0.contentRow && row < $0.contentRow &+ $0.contentHeight }
     }
 
     /// Returns the total number of lines that have content.

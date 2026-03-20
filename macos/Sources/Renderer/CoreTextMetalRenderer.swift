@@ -238,6 +238,19 @@ final class CoreTextMetalRenderer {
             }
         }
 
+        // Native gutter rendering from structured data.
+        // One GUIWindowGutter per editor window (split pane).
+        for windowGutter in lineBuffer.windowGutters {
+            renderGutterEntries(
+                gutter: windowGutter,
+                lineBuffer: lineBuffer,
+                cellW: cellW, cellH: cellH, scale: scale,
+                gutterPaddingPx: gutterPaddingPx,
+                bgQuads: &bgQuads,
+                lineInstances: &lineInstances
+            )
+        }
+
         // Set up render pass.
         let renderDesc = MTLRenderPassDescriptor()
         renderDesc.colorAttachments[0].texture = drawable.texture
@@ -285,7 +298,7 @@ final class CoreTextMetalRenderer {
         // Pass 3: Line textures (one draw call per line since each has its own texture).
         if !lineInstances.isEmpty {
             encoder.setRenderPipelineState(linePipeline)
-            for var (lineGPU, texture) in lineInstances {
+            for (var lineGPU, texture) in lineInstances {
                 encoder.setVertexBytes(&lineGPU, length: MemoryLayout<LineGPU>.stride, index: 0)
                 encoder.setVertexBytes(&uniforms, length: MemoryLayout<CTUniformsGPU>.size, index: 1)
                 encoder.setFragmentTexture(texture, index: 0)
@@ -360,6 +373,215 @@ final class CoreTextMetalRenderer {
         encoder.endEncoding()
         cmdBuf.present(drawable)
         cmdBuf.commit()
+    }
+
+    // MARK: - Native Gutter Rendering
+
+    /// Renders line numbers and signs natively from structured gutter data.
+    ///
+    /// Line numbers are rendered as CTLine textures through the existing
+    /// CoreTextLineRenderer. Git signs are drawn as colored Metal quads.
+    /// Diagnostic signs are rendered as CTLine textures.
+    private func renderGutterEntries(
+        gutter: GUIWindowGutter,
+        lineBuffer: LineBuffer,
+        cellW: Float, cellH: Float, scale: Float,
+        gutterPaddingPx: Float,
+        bgQuads: inout [QuadGPU],
+        lineInstances: inout [(LineGPU, MTLTexture)]
+    ) {
+        guard let lineRenderer else { return }
+        let signColWidth = Int(gutter.signColWidth)
+        let baseRow = gutter.contentRow
+        let baseCol = gutter.contentCol
+
+        for (rowIndex, entry) in gutter.entries.enumerated() {
+            let screenRow = baseRow + UInt16(rowIndex)
+            let yPos = Float(screenRow) * cellH * scale
+            let xOffset = Float(baseCol) * cellW * scale
+
+            // Sign column (leftmost in gutter)
+            if signColWidth > 0 {
+                renderGutterSign(
+                    entry: entry, screenRow: screenRow, yPos: yPos, xOffset: xOffset,
+                    cellW: cellW, cellH: cellH, scale: scale,
+                    lineBuffer: lineBuffer,
+                    bgQuads: &bgQuads, lineInstances: &lineInstances,
+                    lineRenderer: lineRenderer
+                )
+            }
+
+            // Line number (after sign column)
+            if gutter.lineNumberStyle != .none && gutter.lineNumberWidth > 0 {
+                renderGutterLineNumber(
+                    entry: entry, gutter: gutter,
+                    screenRow: screenRow, yPos: yPos, xOffset: xOffset,
+                    signColWidth: signColWidth,
+                    cellW: cellW, cellH: cellH, scale: scale,
+                    lineBuffer: lineBuffer,
+                    lineInstances: &lineInstances,
+                    lineRenderer: lineRenderer
+                )
+            }
+        }
+    }
+
+    /// Renders a git or diagnostic sign for one gutter row.
+    ///
+    /// Git signs (added/modified/deleted) are drawn as thin colored bars
+    /// using Metal quads. Diagnostic signs (E/W/I/H) are rendered as
+    /// CTLine textures in the diagnostic color.
+    private func renderGutterSign(
+        entry: GUIGutterEntry, screenRow: UInt16, yPos: Float, xOffset: Float,
+        cellW: Float, cellH: Float, scale: Float,
+        lineBuffer: LineBuffer,
+        bgQuads: inout [QuadGPU],
+        lineInstances: inout [(LineGPU, MTLTexture)],
+        lineRenderer: CoreTextLineRenderer
+    ) {
+        switch entry.signType {
+        case .gitAdded:
+            var quad = QuadGPU()
+            let gitBarWidth = round(3.0 * scale)
+            quad.position = SIMD2<Float>(xOffset, yPos)
+            quad.size = SIMD2<Float>(gitBarWidth, cellH * scale)
+            quad.color = gutterSignColor(entry.signType, lineBuffer: lineBuffer)
+            quad.alpha = 1.0
+            bgQuads.append(quad)
+
+        case .gitModified:
+            var quad = QuadGPU()
+            let gitBarWidth = round(3.0 * scale)
+            quad.position = SIMD2<Float>(xOffset, yPos)
+            quad.size = SIMD2<Float>(gitBarWidth, cellH * scale)
+            quad.color = gutterSignColor(entry.signType, lineBuffer: lineBuffer)
+            quad.alpha = 1.0
+            bgQuads.append(quad)
+
+        case .gitDeleted:
+            var quad = QuadGPU()
+            let barHeight = round(2.0 * scale)
+            quad.position = SIMD2<Float>(xOffset, yPos + cellH * scale - barHeight)
+            quad.size = SIMD2<Float>(cellW * 2 * scale, barHeight)
+            quad.color = gutterSignColor(entry.signType, lineBuffer: lineBuffer)
+            quad.alpha = 1.0
+            bgQuads.append(quad)
+
+        case .diagError, .diagWarning, .diagInfo, .diagHint:
+            let (text, fg) = diagnosticSignTextAndColor(entry.signType, lineBuffer: lineBuffer)
+            let runs = [StyledRun(col: 0, text: text, fg: fg, bg: 0, attrs: 0)]
+            // Use screen row directly for cache key (unique per screen position)
+            let cacheRow = 0x8000 + screenRow
+            let contentHash = gutterContentHash(text: text, fg: fg)
+            if let cached = lineRenderer.renderLine(row: cacheRow, runs: runs, contentHash: contentHash) {
+                var lineGPU = LineGPU()
+                lineGPU.position = SIMD2<Float>(xOffset, yPos)
+                lineGPU.size = SIMD2<Float>(Float(cached.pixelWidth), Float(cached.pixelHeight))
+                lineGPU.uvOrigin = .zero
+                lineGPU.uvSize = SIMD2<Float>(1, 1)
+                lineInstances.append((lineGPU, cached.texture))
+            }
+
+        case .none:
+            break
+        }
+    }
+
+    /// Renders a line number for one gutter row.
+    private func renderGutterLineNumber(
+        entry: GUIGutterEntry, gutter: GUIWindowGutter,
+        screenRow: UInt16, yPos: Float, xOffset: Float,
+        signColWidth: Int,
+        cellW: Float, cellH: Float, scale: Float,
+        lineBuffer: LineBuffer,
+        lineInstances: inout [(LineGPU, MTLTexture)],
+        lineRenderer: CoreTextLineRenderer
+    ) {
+        let (numberStr, isCurrent) = gutterNumberString(
+            bufLine: entry.bufLine,
+            cursorLine: gutter.cursorLine,
+            style: gutter.lineNumberStyle
+        )
+
+        guard !numberStr.isEmpty else { return }
+
+        let fg = isCurrent ? lineBuffer.gutterCurrentFgColor : lineBuffer.gutterFgColor
+        let lnWidth = Int(gutter.lineNumberWidth)
+
+        // Right-align the number within the line number column space.
+        // The number starts after the sign column.
+        let padCols = max(lnWidth - numberStr.count - 1, 0)
+        let startCol = UInt16(signColWidth + padCols)
+
+        let runs = [StyledRun(col: startCol, text: numberStr, fg: fg, bg: 0, attrs: 0)]
+        // Use screen row for cache key (unique per screen position)
+        let cacheRow = 0x9000 + screenRow
+        let contentHash = gutterContentHash(text: numberStr, fg: fg)
+        if let cached = lineRenderer.renderLine(row: cacheRow, runs: runs, contentHash: contentHash) {
+            let xPos = xOffset + Float(startCol) * cellW * scale
+            var lineGPU = LineGPU()
+            lineGPU.position = SIMD2<Float>(xPos, yPos)
+            lineGPU.size = SIMD2<Float>(Float(cached.pixelWidth), Float(cached.pixelHeight))
+            lineGPU.uvOrigin = .zero
+            lineGPU.uvSize = SIMD2<Float>(1, 1)
+            lineInstances.append((lineGPU, cached.texture))
+        }
+    }
+
+    /// Computes the display string and current-line flag for a gutter line number.
+    private func gutterNumberString(
+        bufLine: UInt32, cursorLine: UInt32, style: GUILineNumberStyle
+    ) -> (String, Bool) {
+        let isCursor = bufLine == cursorLine
+        switch style {
+        case .absolute:
+            return (String(bufLine + 1), isCursor)
+        case .relative:
+            let rel = abs(Int64(bufLine) - Int64(cursorLine))
+            return (String(rel), isCursor)
+        case .hybrid:
+            if isCursor {
+                return (String(bufLine + 1), true)
+            } else {
+                let rel = abs(Int64(bufLine) - Int64(cursorLine))
+                return (String(rel), false)
+            }
+        case .none:
+            return ("", false)
+        }
+    }
+
+    /// Returns the color for a git/diagnostic gutter sign from the line buffer's theme colors.
+    private func gutterSignColor(_ signType: GUIGutterSignType, lineBuffer: LineBuffer) -> SIMD3<Float> {
+        switch signType {
+        case .gitAdded: return colorFromU24(lineBuffer.gitAddedFgColor, default: .zero)
+        case .gitModified: return colorFromU24(lineBuffer.gitModifiedFgColor, default: .zero)
+        case .gitDeleted: return colorFromU24(lineBuffer.gitDeletedFgColor, default: .zero)
+        case .diagError: return colorFromU24(lineBuffer.gutterErrorFgColor, default: .zero)
+        case .diagWarning: return colorFromU24(lineBuffer.gutterWarningFgColor, default: .zero)
+        case .diagInfo: return colorFromU24(lineBuffer.gutterInfoFgColor, default: .zero)
+        case .diagHint: return colorFromU24(lineBuffer.gutterHintFgColor, default: .zero)
+        case .none: return .zero
+        }
+    }
+
+    /// Returns the sign character and fg color (as U24) for a diagnostic sign type.
+    private func diagnosticSignTextAndColor(_ signType: GUIGutterSignType, lineBuffer: LineBuffer) -> (String, UInt32) {
+        switch signType {
+        case .diagError: return ("E", lineBuffer.gutterErrorFgColor)
+        case .diagWarning: return ("W", lineBuffer.gutterWarningFgColor)
+        case .diagInfo: return ("I", lineBuffer.gutterInfoFgColor)
+        case .diagHint: return ("H", lineBuffer.gutterHintFgColor)
+        default: return ("", 0)
+        }
+    }
+
+    /// Simple content hash for gutter entries.
+    private func gutterContentHash(text: String, fg: UInt32) -> Int {
+        var hasher = Hasher()
+        hasher.combine(text)
+        hasher.combine(fg)
+        return hasher.finalize()
     }
 
     // MARK: - Private

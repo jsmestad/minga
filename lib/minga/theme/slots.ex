@@ -16,6 +16,7 @@ defmodule Minga.Theme.Slots do
   | 0x20-0x29 | Popups + Breadcrumb |
   | 0x30-0x3A | Modeline + Status bar |
   | 0x40      | Accent        |
+  | 0x50-0x58 | Gutter + Git  |
   """
 
   # ── Editor + Tree ──
@@ -69,6 +70,17 @@ defmodule Minga.Theme.Slots do
   @mode_visual_bg 0x38
   @mode_visual_fg 0x39
   @statusbar_accent_fg 0x3A
+
+  # ── Gutter ──
+  @gutter_fg 0x50
+  @gutter_current_fg 0x51
+  @gutter_error_fg 0x52
+  @gutter_warning_fg 0x53
+  @gutter_info_fg 0x54
+  @gutter_hint_fg 0x55
+  @git_added_fg 0x56
+  @git_modified_fg 0x57
+  @git_deleted_fg 0x58
 
   # ── Accent ──
   @accent 0x40
@@ -138,7 +150,16 @@ defmodule Minga.Theme.Slots do
       {@mode_visual_bg, visual_bg},
       {@mode_visual_fg, visual_fg},
       {@statusbar_accent_fg, t.active_fg},
-      {@accent, t.active_fg}
+      {@accent, t.active_fg},
+      {@gutter_fg, theme.gutter.fg},
+      {@gutter_current_fg, theme.gutter.current_fg},
+      {@gutter_error_fg, theme.gutter.error_fg},
+      {@gutter_warning_fg, theme.gutter.warning_fg},
+      {@gutter_info_fg, theme.gutter.info_fg},
+      {@gutter_hint_fg, theme.gutter.hint_fg},
+      {@git_added_fg, theme.git.added_fg},
+      {@git_modified_fg, theme.git.modified_fg},
+      {@git_deleted_fg, theme.git.deleted_fg}
     ]
   end
 
