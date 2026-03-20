@@ -19,6 +19,7 @@ defmodule Minga.Editor.RenderPipeline.Content do
   alias Minga.Editor.Modeline
   alias Minga.Editor.RenderPipeline.ContentHelpers
   alias Minga.Editor.RenderPipeline.Scroll.WindowScroll
+  alias Minga.Editor.SemanticWindow
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Viewport
   alias Minga.Editor.Window
@@ -188,13 +189,23 @@ defmodule Minga.Editor.RenderPipeline.Content do
         nil
       end
 
+    # Build semantic window for GUI frontends (Phase 1 of #828).
+    # Captures the same data the draw path uses, pre-resolved for the GUI.
+    semantic =
+      if Capabilities.gui?(state.capabilities) do
+        SemanticWindow.Builder.build(state, scroll, render_ctx)
+      else
+        nil
+      end
+
     win_frame = %WindowFrame{
       rect: {0, 0, content_width, content_height},
       gutter: DisplayList.draws_to_layer(gutter_draws),
       lines: DisplayList.draws_to_layer(line_draws),
       tilde_lines: DisplayList.draws_to_layer(tilde_draws),
       modeline: %{},
-      cursor: buf_cursor
+      cursor: buf_cursor,
+      semantic: semantic
     }
 
     cursor_info = buf_cursor

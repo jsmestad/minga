@@ -95,6 +95,7 @@ defmodule Minga.Editor.DisplayList do
     alias Minga.Editor.DisplayList
     alias Minga.Editor.DisplayList.Cursor
     alias Minga.Editor.Layout
+    alias Minga.Editor.SemanticWindow
 
     @enforce_keys [:rect]
     defstruct rect: nil,
@@ -102,7 +103,8 @@ defmodule Minga.Editor.DisplayList do
               lines: %{},
               tilde_lines: %{},
               modeline: %{},
-              cursor: nil
+              cursor: nil,
+              semantic: nil
 
     @type t :: %__MODULE__{
             rect: Layout.rect(),
@@ -110,7 +112,8 @@ defmodule Minga.Editor.DisplayList do
             lines: DisplayList.render_layer(),
             tilde_lines: DisplayList.render_layer(),
             modeline: DisplayList.render_layer(),
-            cursor: Cursor.t() | nil
+            cursor: Cursor.t() | nil,
+            semantic: SemanticWindow.t() | nil
           }
   end
 
