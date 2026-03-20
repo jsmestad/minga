@@ -65,6 +65,18 @@ defmodule Minga.Editor.State do
   @typedoc "Line number display style."
   @type line_number_style :: :hybrid | :absolute | :relative | :none
 
+  @typedoc "LSP document highlight kind."
+  @type highlight_kind :: :text | :read | :write
+
+  @typedoc "A document highlight range from the LSP server."
+  @type document_highlight :: %{
+          start_line: non_neg_integer(),
+          start_col: non_neg_integer(),
+          end_line: non_neg_integer(),
+          end_col: non_neg_integer(),
+          kind: highlight_kind()
+        }
+
   # Fields saved/restored per-tab. Adding a per-tab field? Add it here,
   # and snapshot_tab_fields/1 + restore_tab_context/1 will pick it up
   # automatically.
@@ -82,7 +94,8 @@ defmodule Minga.Editor.State do
     :injection_ranges,
     :search,
     :pending_conflict,
-    :vim
+    :vim,
+    :document_highlights
   ]
 
   @enforce_keys [:port_manager, :viewport]
@@ -128,7 +141,13 @@ defmodule Minga.Editor.State do
             pending_quit: nil,
             buffer_monitors: %{},
             face_override_registries: %{},
-            font_registry: Minga.FontRegistry.new()
+            font_registry: Minga.FontRegistry.new(),
+            document_highlights: nil,
+            highlight_debounce_timer: nil,
+            code_lenses: [],
+            inlay_hints: [],
+            selection_ranges: nil,
+            selection_range_index: 0
 
   @type t :: %__MODULE__{
           port_manager: GenServer.server() | nil,
@@ -177,6 +196,12 @@ defmodule Minga.Editor.State do
           pending_quit: :quit | :quit_all | nil,
           buffer_monitors: %{pid() => reference()},
           face_override_registries: %{pid() => Minga.Face.Registry.t()},
+          document_highlights: [document_highlight()] | nil,
+          highlight_debounce_timer: reference() | nil,
+          code_lenses: [map()],
+          inlay_hints: [map()],
+          selection_ranges: [map()] | nil,
+          selection_range_index: non_neg_integer(),
           font_registry: Minga.FontRegistry.t()
         }
 

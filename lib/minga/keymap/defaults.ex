@@ -72,10 +72,16 @@ defmodule Minga.Keymap.Defaults do
     {[{?h, @none}, {?e, @none}, {?U, @none}], :extension_update, "Update extension"},
 
     # ── Code ────────────────────────────────────────────────────────────────────
+    {[{?c, @none}, {?a, @none}], :code_action, "Code actions"},
     {[{?c, @none}, {?d, @none}], :diagnostics_list, "List diagnostics"},
+    {[{?c, @none}, {?D, @none}], :find_references, "Find references"},
     {[{?c, @none}, {?f, @none}], :format_buffer, "Format buffer"},
     {[{?c, @none}, {?g, @none}], :goto_definition, "Go to definition"},
+    {[{?c, @none}, {?i, @none}], :goto_implementation, "Go to implementation"},
+    {[{?c, @none}, {?j, @none}], :document_symbols, "Document symbols"},
     {[{?c, @none}, {?k, @none}], :hover, "Hover documentation"},
+    {[{?c, @none}, {?r, @none}], :rename_symbol, "Rename symbol"},
+    {[{?c, @none}, {?t, @none}], :goto_type_definition, "Go to type definition"},
     {[{?c, @none}, {?l, @none}, {?i, @none}], :lsp_info, "LSP info"},
     {[{?c, @none}, {?l, @none}, {?r, @none}], :lsp_restart, "Restart LSP"},
     {[{?c, @none}, {?l, @none}, {?s, @none}], :lsp_stop, "Stop LSP"},

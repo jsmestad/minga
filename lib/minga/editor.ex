@@ -711,10 +711,101 @@ defmodule Minga.Editor do
         new_state = Renderer.render(new_state)
         {:noreply, new_state}
 
+      {:references, pending} ->
+        new_state = put_in(state.lsp_pending, pending)
+        new_state = LspActions.handle_references_response(new_state, result)
+        new_state = Renderer.render(new_state)
+        {:noreply, new_state}
+
+      {:document_highlight, pending} ->
+        new_state = put_in(state.lsp_pending, pending)
+        new_state = LspActions.handle_document_highlight_response(new_state, result)
+        new_state = Renderer.render(new_state)
+        {:noreply, new_state}
+
+      {:code_action, pending} ->
+        new_state = put_in(state.lsp_pending, pending)
+        new_state = LspActions.handle_code_action_response(new_state, result)
+        new_state = Renderer.render(new_state)
+        {:noreply, new_state}
+
+      {:prepare_rename, pending} ->
+        new_state = put_in(state.lsp_pending, pending)
+        new_state = LspActions.handle_prepare_rename_response(new_state, result)
+        new_state = Renderer.render(new_state)
+        {:noreply, new_state}
+
+      {:rename, pending} ->
+        new_state = put_in(state.lsp_pending, pending)
+        new_state = LspActions.handle_rename_response(new_state, result)
+        new_state = Renderer.render(new_state)
+        {:noreply, new_state}
+
+      {:type_definition, pending} ->
+        new_state = put_in(state.lsp_pending, pending)
+        new_state = LspActions.handle_type_definition_response(new_state, result)
+        new_state = Renderer.render(new_state)
+        {:noreply, new_state}
+
+      {:implementation, pending} ->
+        new_state = put_in(state.lsp_pending, pending)
+        new_state = LspActions.handle_implementation_response(new_state, result)
+        new_state = Renderer.render(new_state)
+        {:noreply, new_state}
+
+      {:document_symbol, pending} ->
+        new_state = put_in(state.lsp_pending, pending)
+        new_state = LspActions.handle_document_symbol_response(new_state, result)
+        new_state = Renderer.render(new_state)
+        {:noreply, new_state}
+
+      {:workspace_symbol, pending} ->
+        new_state = put_in(state.lsp_pending, pending)
+        new_state = LspActions.handle_workspace_symbol_response(new_state, result)
+        new_state = Renderer.render(new_state)
+        {:noreply, new_state}
+
+      {:selection_range, pending} ->
+        new_state = put_in(state.lsp_pending, pending)
+        new_state = LspActions.handle_selection_range_response(new_state, result)
+        new_state = Renderer.render(new_state)
+        {:noreply, new_state}
+
+      {:prepare_call_hierarchy, pending} ->
+        new_state = put_in(state.lsp_pending, pending)
+        new_state = LspActions.handle_prepare_call_hierarchy_response(new_state, result)
+        new_state = Renderer.render(new_state)
+        {:noreply, new_state}
+
+      {:incoming_calls, pending} ->
+        new_state = put_in(state.lsp_pending, pending)
+        new_state = LspActions.handle_incoming_calls_response(new_state, result)
+        new_state = Renderer.render(new_state)
+        {:noreply, new_state}
+
+      {:code_lens, pending} ->
+        new_state = put_in(state.lsp_pending, pending)
+        new_state = LspActions.handle_code_lens_response(new_state, result)
+        new_state = Renderer.render(new_state)
+        {:noreply, new_state}
+
+      {:inlay_hint, pending} ->
+        new_state = put_in(state.lsp_pending, pending)
+        new_state = LspActions.handle_inlay_hint_response(new_state, result)
+        new_state = Renderer.render(new_state)
+        {:noreply, new_state}
+
       {nil, _} ->
         # Not a tracked request — try completion handler
         handle_lsp_completion_response(ref, result, state)
     end
+  end
+
+  # Document highlight debounce timer fired
+  def handle_info(:document_highlight_debounce, state) do
+    state = %{state | highlight_debounce_timer: nil}
+    state = LspActions.document_highlight(state)
+    {:noreply, state}
   end
 
   # Completion resolve debounce timer fired — send the actual resolve request

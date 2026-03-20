@@ -257,6 +257,54 @@ defmodule Minga.Editor.Commands.Lsp do
         description: "Hover documentation",
         requires_buffer: true,
         execute: &LspActions.hover/1
+      },
+      %Minga.Command{
+        name: :find_references,
+        description: "Find all references",
+        requires_buffer: true,
+        execute: &LspActions.find_references/1
+      },
+      %Minga.Command{
+        name: :code_action,
+        description: "Code actions",
+        requires_buffer: true,
+        execute: &LspActions.code_action/1
+      },
+      %Minga.Command{
+        name: :rename_symbol,
+        description: "Rename symbol",
+        requires_buffer: true,
+        execute: &LspActions.prepare_rename/1
+      },
+      %Minga.Command{
+        name: :goto_type_definition,
+        description: "Go to type definition",
+        requires_buffer: true,
+        execute: &LspActions.goto_type_definition/1
+      },
+      %Minga.Command{
+        name: :goto_implementation,
+        description: "Go to implementation",
+        requires_buffer: true,
+        execute: &LspActions.goto_implementation/1
+      },
+      %Minga.Command{
+        name: :document_symbols,
+        description: "Document symbols",
+        requires_buffer: true,
+        execute: &LspActions.document_symbols/1
+      },
+      %Minga.Command{
+        name: :selection_expand,
+        description: "Smart selection expand",
+        requires_buffer: true,
+        execute: &LspActions.selection_range/1
+      },
+      %Minga.Command{
+        name: :call_hierarchy,
+        description: "Call hierarchy (incoming)",
+        requires_buffer: true,
+        execute: &LspActions.prepare_call_hierarchy/1
       }
     ]
 
