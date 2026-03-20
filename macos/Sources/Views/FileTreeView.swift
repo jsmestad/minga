@@ -1,8 +1,9 @@
 /// Custom-drawn file tree sidebar matching Zed's visual style.
 ///
-/// Dense, clean rows with Nerd Font icons, whitespace indentation,
-/// and git status color tints. No box-drawing characters, no stock
-/// List widget. Styled for tight vertical rhythm.
+/// Dense, clean rows with Nerd Font icons, disclosure chevrons,
+/// indent guides, hover highlights, and git status color tints.
+/// No box-drawing characters, no stock List widget. Styled for
+/// tight vertical rhythm with native macOS feel.
 
 import SwiftUI
 
@@ -14,11 +15,18 @@ struct FileTreeView: View {
 
     private let rowHeight: CGFloat = 22
     private let indentWidth: CGFloat = 14
+    private let chevronWidth: CGFloat = 12
     private let sidebarMinWidth: CGFloat = 180
     private let sidebarMaxWidth: CGFloat = 360
 
+    /// Chevron/hover animation duration. Respects reduced motion.
+    private var animDuration: Double {
+        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.15
+    }
+
     @State private var sidebarWidth: CGFloat = 240
     @State private var isDraggingResize: Bool = false
+    @State private var hoveredEntryId: Int? = nil
 
     var body: some View {
         HStack(spacing: 0) {
@@ -34,30 +42,41 @@ struct FileTreeView: View {
                 sidebarWidth = CGFloat(fileTreeState.treeWidth) * 7.5
             }
 
-            // Resize handle (drag to resize sidebar)
-            Rectangle()
-                .fill(isDraggingResize ? theme.treeActiveFg.opacity(0.5) : Color.clear)
-                .frame(width: 4)
-                .contentShape(Rectangle())
-                .gesture(
-                    DragGesture(minimumDistance: 1)
-                        .onChanged { value in
-                            isDraggingResize = true
-                            let newWidth = sidebarWidth + value.translation.width
-                            sidebarWidth = min(max(newWidth, sidebarMinWidth), sidebarMaxWidth)
-                        }
-                        .onEnded { _ in
-                            isDraggingResize = false
-                        }
-                )
-                .onHover { hovering in
-                    if hovering {
-                        NSCursor.resizeLeftRight.push()
-                    } else {
-                        NSCursor.pop()
-                    }
-                }
+            resizeHandle
         }
+    }
+
+    // MARK: - Resize handle
+
+    /// 8px hit target with a 1px visible separator line.
+    @ViewBuilder
+    private var resizeHandle: some View {
+        Color.clear
+            .frame(width: 8)
+            .overlay(alignment: .leading) {
+                Rectangle()
+                    .fill(isDraggingResize ? theme.treeActiveFg.opacity(0.3) : theme.treeSeparatorFg.opacity(0.4))
+                    .frame(width: 1)
+            }
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 1)
+                    .onChanged { value in
+                        isDraggingResize = true
+                        let newWidth = sidebarWidth + value.translation.width
+                        sidebarWidth = min(max(newWidth, sidebarMinWidth), sidebarMaxWidth)
+                    }
+                    .onEnded { _ in
+                        isDraggingResize = false
+                    }
+            )
+            .onHover { hovering in
+                if hovering {
+                    NSCursor.resizeLeftRight.push()
+                } else {
+                    NSCursor.pop()
+                }
+            }
     }
 
     // MARK: - Project header
@@ -65,7 +84,6 @@ struct FileTreeView: View {
     @ViewBuilder
     private var projectHeader: some View {
         HStack(spacing: 6) {
-            // Folder icon
             Text("\u{F024B}")
                 .font(.custom("Symbols Nerd Font Mono", size: 12))
                 .foregroundStyle(theme.treeDirFg)
@@ -95,7 +113,7 @@ struct FileTreeView: View {
     @ViewBuilder
     private var entryList: some View {
         ScrollViewReader { proxy in
-            ScrollView(.vertical, showsIndicators: false) {
+            ScrollView(.vertical) {
                 LazyVStack(spacing: 0) {
                     ForEach(fileTreeState.entries) { entry in
                         entryRow(entry)
@@ -115,12 +133,17 @@ struct FileTreeView: View {
 
     @ViewBuilder
     private func entryRow(_ entry: FileTreeEntry) -> some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 0) {
+            // Disclosure chevron (directories) or alignment spacer (files)
+            disclosureChevron(entry)
+
             // Nerd Font icon
             Text(entry.icon)
                 .font(.custom("Symbols Nerd Font Mono", size: 12))
                 .foregroundStyle(iconColor(entry))
                 .frame(width: 16, alignment: .center)
+
+            Spacer().frame(width: 4)
 
             // Name
             Text(entry.name)
@@ -135,34 +158,86 @@ struct FileTreeView: View {
         .padding(.trailing, 8)
         .frame(height: rowHeight)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(selectionBackground(entry))
+        .background(rowBackground(entry))
+        .overlay(alignment: .leading) {
+            indentGuides(entry)
+        }
         .id(entry.id)
         .contentShape(Rectangle())
+        .onHover { isHovered in
+            hoveredEntryId = isHovered ? entry.id : nil
+        }
         .onTapGesture(count: 2) {
-            (encoder as? ProtocolEncoder)?.sendFileTreeClick(index: UInt16(entry.id))
+            // Double-click: always open (files open permanently)
+            encoder?.sendFileTreeClick(index: UInt16(entry.id))
         }
         .onTapGesture {
-            (encoder as? ProtocolEncoder)?.sendFileTreeClick(index: UInt16(entry.id))
+            // Single-click: toggle directories, select/preview files
+            if entry.isDir {
+                encoder?.sendFileTreeToggle(index: UInt16(entry.id))
+            } else {
+                encoder?.sendFileTreeClick(index: UInt16(entry.id))
+            }
+        }
+    }
+
+    // MARK: - Disclosure chevron
+
+    @ViewBuilder
+    private func disclosureChevron(_ entry: FileTreeEntry) -> some View {
+        if entry.isDir {
+            Image(systemName: "chevron.right")
+                .font(.system(size: 9, weight: .medium))
+                .foregroundStyle(theme.treeFg.opacity(0.5))
+                .rotationEffect(.degrees(entry.isExpanded ? 90 : 0))
+                .animation(.easeInOut(duration: animDuration), value: entry.isExpanded)
+                .frame(width: chevronWidth, height: rowHeight)
+        } else {
+            Spacer().frame(width: chevronWidth)
+        }
+    }
+
+    // MARK: - Indent guides
+
+    /// Draws thin vertical indent guide lines using a lightweight Canvas.
+    @ViewBuilder
+    private func indentGuides(_ entry: FileTreeEntry) -> some View {
+        if entry.depth > 0 {
+            Canvas { context, size in
+                for level in 0..<entry.depth {
+                    // Align guide with the center of each ancestor's chevron column
+                    let x = 8 + CGFloat(level) * indentWidth + chevronWidth / 2
+                    let rect = CGRect(x: x, y: 0, width: 1, height: size.height)
+                    context.fill(Path(rect), with: .color(theme.treeGuideFg))
+                }
+            }
+            .allowsHitTesting(false)
+            .frame(height: rowHeight)
+        }
+    }
+
+    // MARK: - Row background (selection + hover)
+
+    @ViewBuilder
+    private func rowBackground(_ entry: FileTreeEntry) -> some View {
+        if entry.isSelected {
+            RoundedRectangle(cornerRadius: 4)
+                .fill(theme.treeSelectionBg)
+                .padding(.horizontal, 4)
+        } else if hoveredEntryId == entry.id {
+            RoundedRectangle(cornerRadius: 4)
+                .fill(theme.treeFg.opacity(0.06))
+                .padding(.horizontal, 4)
+                .animation(.easeInOut(duration: animDuration), value: hoveredEntryId)
+        } else {
+            Color.clear
         }
     }
 
     // MARK: - Layout helpers
 
     private func leadingPadding(_ entry: FileTreeEntry) -> CGFloat {
-        // Base padding + depth indentation
         8 + CGFloat(entry.depth) * indentWidth
-    }
-
-    @ViewBuilder
-    private func selectionBackground(_ entry: FileTreeEntry) -> some View {
-        if entry.isSelected {
-            // Subtle rounded selection background, like Zed
-            RoundedRectangle(cornerRadius: 4)
-                .fill(theme.treeSelectionBg.opacity(0.6))
-                .padding(.horizontal, 4)
-        } else {
-            Color.clear
-        }
     }
 
     // MARK: - Colors
@@ -171,7 +246,6 @@ struct FileTreeView: View {
         if entry.isDir {
             return theme.treeDirFg
         }
-        // Git status tints the icon too
         switch entry.gitStatus {
         case 1: return theme.treeGitModified
         case 2: return theme.treeGitStaged
@@ -182,9 +256,8 @@ struct FileTreeView: View {
 
     private func nameColor(_ entry: FileTreeEntry) -> Color {
         if entry.isSelected {
-            return theme.treeActiveFg
+            return theme.treeSelectionFg
         }
-        // Git status colors on the name
         switch entry.gitStatus {
         case 1: return theme.treeGitModified
         case 2: return theme.treeGitStaged
