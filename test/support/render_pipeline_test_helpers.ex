@@ -7,6 +7,9 @@ defmodule Minga.Editor.RenderPipeline.TestHelpers do
   """
 
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Editor.DisplayList
+  alias Minga.Editor.DisplayList.{Cursor, Frame, WindowFrame}
+  alias Minga.Editor.Layout
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.{Buffers, Highlighting, Windows}
   alias Minga.Editor.Viewport
@@ -14,6 +17,7 @@ defmodule Minga.Editor.RenderPipeline.TestHelpers do
   alias Minga.Editor.Window
   alias Minga.Editor.WindowTree
   alias Minga.Input
+  alias Minga.Port.Capabilities
   alias Minga.Theme
 
   @doc """
@@ -49,6 +53,106 @@ defmodule Minga.Editor.RenderPipeline.TestHelpers do
       focus_stack: Input.default_stack(),
       theme: Theme.get!(:doom_one),
       highlight: %Highlighting{}
+    }
+  end
+
+  @doc """
+  Constructs a GUI-capable EditorState for pipeline stage tests.
+
+  Same as `base_state/1` but with `frontend_type: :native_gui` capabilities.
+  """
+  @spec gui_state(keyword()) :: EditorState.t()
+  def gui_state(opts \\ []) do
+    state = base_state(opts)
+    %{state | capabilities: %Capabilities{frontend_type: :native_gui}}
+  end
+
+  @doc """
+  Generates content with `n` lines for testing scrolling and large buffers.
+  """
+  @spec long_content(pos_integer()) :: String.t()
+  def long_content(n) do
+    Enum.map_join(1..n, "\n", fn i -> "line #{i}: content here for testing" end)
+  end
+
+  @doc """
+  Updates window tracking fields as if a render pass completed at the given
+  viewport top. Ensures gutter_w and buf_version are consistent across frames.
+  """
+  @spec simulate_scroll(EditorState.t(), non_neg_integer()) :: EditorState.t()
+  def simulate_scroll(state, new_top) do
+    win_id = state.windows.active
+    window = Map.get(state.windows.map, win_id)
+
+    updated_window = %{
+      window
+      | last_viewport_top: new_top,
+        last_gutter_w: 4,
+        last_buf_version: 1,
+        last_line_count: 100,
+        last_cursor_line: new_top
+    }
+
+    new_map = Map.put(state.windows.map, win_id, updated_window)
+    %{state | windows: %{state.windows | map: new_map}}
+  end
+
+  @doc """
+  Seeds the initial tracking state so the first frame has consistent values.
+  Without this, the sentinel values (-1) cause spurious gutter-width mismatches.
+  """
+  @spec seed_state(EditorState.t(), non_neg_integer()) :: EditorState.t()
+  def seed_state(state, viewport_top) do
+    simulate_scroll(state, viewport_top)
+  end
+
+  @doc """
+  Builds a Frame with a single window for testing emit and content stages.
+  """
+  @spec build_frame_with_window(EditorState.t(), keyword()) :: Frame.t()
+  def build_frame_with_window(state, opts) do
+    viewport_top = Keyword.get(opts, :viewport_top, 0)
+    layout = Layout.put(state) |> Layout.get()
+
+    win_id = state.windows.active
+    win_layout = Map.get(layout.window_layouts, win_id)
+    {_row, _col, width, height} = win_layout.content
+
+    content_draws =
+      for row <- 0..(height - 1) do
+        DisplayList.draw(
+          row,
+          4,
+          "line #{viewport_top + row}: content",
+          Minga.Face.new(fg: 0xBBC2CF, bg: 0x282C34)
+        )
+      end
+
+    gutter_draws =
+      for row <- 0..(height - 1) do
+        DisplayList.draw(
+          row,
+          0,
+          String.pad_leading("#{viewport_top + row + 1}", 3) <> " ",
+          Minga.Face.new(fg: 0x5B6268, bg: 0x282C34)
+        )
+      end
+
+    win_frame = %WindowFrame{
+      rect: {0, 0, width, height},
+      gutter: DisplayList.draws_to_layer(gutter_draws),
+      lines: DisplayList.draws_to_layer(content_draws),
+      tilde_lines: %{},
+      modeline: %{},
+      cursor: nil
+    }
+
+    %Frame{
+      cursor: Cursor.new(0, 4, :block),
+      windows: [win_frame],
+      minibuffer: [
+        DisplayList.draw(height + 1, 0, " ", Minga.Face.new(fg: 0xBBC2CF, bg: 0x282C34))
+      ]
     }
   end
 end

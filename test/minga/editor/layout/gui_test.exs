@@ -3,14 +3,7 @@ defmodule Minga.Editor.Layout.GUITest do
 
   alias Minga.Editor.Layout
   alias Minga.Editor.Layout.GUI, as: LayoutGUI
-  alias Minga.Port.Capabilities
-
   import Minga.Editor.RenderPipeline.TestHelpers
-
-  defp gui_state do
-    state = base_state()
-    %{state | capabilities: %Capabilities{frontend_type: :native_gui}}
-  end
 
   describe "Layout.GUI.compute/1" do
     test "returns a Layout struct" do

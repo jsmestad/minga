@@ -22,16 +22,10 @@ defmodule Minga.Editor.SemanticWindowTest do
   alias Minga.Editor.SemanticWindow.VisualRow
   alias Minga.Editor.State, as: EditorState
   alias Minga.Face
-  alias Minga.Port.Capabilities
+
   alias Minga.Search.Match, as: SearchMatchStruct
 
   import Minga.Editor.RenderPipeline.TestHelpers
-
-  # Creates a GUI-capable base state
-  defp gui_state(opts) do
-    state = base_state(opts)
-    %{state | capabilities: %Capabilities{frontend_type: :native_gui}}
-  end
 
   # Runs through scroll + content stages, returns {frames, cursor, state}
   defp build_content(state) do
