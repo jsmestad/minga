@@ -12,11 +12,9 @@ System.put_env("GIT_TEMPLATE_DIR", "")
 # On Linux (CI), the harness tests are excluded automatically.
 harness_path = Path.join(:code.priv_dir(:minga), "minga-test-harness")
 
-unless File.exists?(harness_path) do
-  case System.find_executable("swiftc") do
-    nil -> :noop
-    _swiftc -> Mix.Task.run("swift.harness")
-  end
+case System.find_executable("swiftc") do
+  nil -> :noop
+  _swiftc -> Mix.Task.run("swift.harness")
 end
 
 swift_exclude = if File.exists?(harness_path), do: [], else: [:swift_harness]

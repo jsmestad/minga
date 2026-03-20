@@ -21,6 +21,7 @@ defmodule Mix.Tasks.Swift.Harness do
     sources = [
       "macos/Sources/Protocol/ProtocolConstants.swift",
       "macos/Sources/Protocol/ProtocolDecoder.swift",
+      "macos/Sources/Renderer/WindowContent.swift",
       "macos/TestHarness/main.swift"
     ]
 

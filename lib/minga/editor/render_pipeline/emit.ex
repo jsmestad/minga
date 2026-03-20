@@ -25,6 +25,7 @@ defmodule Minga.Editor.RenderPipeline.Emit do
   alias Minga.Editor.Title
   alias Minga.Port.Capabilities
   alias Minga.Port.Manager, as: PortManager
+  alias Minga.Port.Protocol.GUIWindowContent
   alias Minga.Telemetry
 
   @typedoc "Internal editor state."
@@ -69,6 +70,7 @@ defmodule Minga.Editor.RenderPipeline.Emit do
       send_window_bg(state)
 
       if gui? do
+        send_gui_window_content(frame, state)
         status_bar_data = chrome && chrome.status_bar_data
         EmitGUI.sync_chrome(state, status_bar_data)
       else
@@ -125,6 +127,31 @@ defmodule Minga.Editor.RenderPipeline.Emit do
     Process.put(:emit_prev_content_rects, rects)
     Process.put(:emit_prev_gutter_ws, gutter_ws)
     Process.put(:emit_prev_buf_versions, buf_versions)
+    :ok
+  end
+
+  # ── GUI window content (0x80) ────────────────────────────────────────────
+
+  # Sends the gui_window_content opcode for each buffer window that has
+  # a semantic struct attached. This runs alongside (not instead of)
+  # draw_text commands during Phase 2. Phase 3 will stop sending draw_text
+  # for buffer windows.
+  @spec send_gui_window_content(Frame.t(), state()) :: :ok
+  defp send_gui_window_content(frame, state) do
+    cmds =
+      frame.windows
+      |> Enum.flat_map(fn %DisplayList.WindowFrame{semantic: semantic} ->
+        if semantic != nil do
+          [GUIWindowContent.encode(semantic)]
+        else
+          []
+        end
+      end)
+
+    if cmds != [] do
+      PortManager.send_commands(state.port_manager, cmds)
+    end
+
     :ok
   end
 

@@ -39,6 +39,7 @@ enum RenderCommand: Sendable {
     case guiBottomPanel(visible: Bool, activeTabIndex: UInt8, heightPercent: UInt8,
                          filterPreset: UInt8, tabs: [GUIBottomPanelTab],
                          entries: [GUIMessageEntry])
+    case guiWindowContent(data: GUIWindowContent)
 }
 
 /// Line number display style from the BEAM.
@@ -880,6 +881,128 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         return (.guiBottomPanel(visible: true, activeTabIndex: activeTabIndex,
                                  heightPercent: heightPercent, filterPreset: filterPreset,
                                  tabs: tabs, entries: entries), pos - offset)
+
+    case OP_GUI_WINDOW_CONTENT:
+        // Header: window_id:2 + flags:1 + cursor_row:2 + cursor_col:2 + cursor_shape:1 + row_count:2 = 10
+        guard data.count >= rest + 10 else { throw ProtocolDecodeError.malformed }
+        let windowId = readU16(data, rest)
+        let flags = data[rest + 2]
+        let cursorRow = readU16(data, rest + 3)
+        let cursorCol = readU16(data, rest + 5)
+        let cursorShape = CursorShape(rawValue: data[rest + 7]) ?? .block
+        let rowCount = Int(readU16(data, rest + 8))
+        var pos = rest + 10
+
+        // Decode rows
+        var rows: [GUIVisualRow] = []
+        rows.reserveCapacity(rowCount)
+        for _ in 0..<rowCount {
+            // row_type:1 + buf_line:4 + content_hash:4 + text_len:4 = 13
+            guard data.count >= pos + 13 else { throw ProtocolDecodeError.malformed }
+            let rowType = GUIVisualRowType(rawValue: data[pos]) ?? .normal
+            let bufLine = readU32(data, pos + 1)
+            let contentHash = readU32(data, pos + 5)
+            let textLen = Int(readU32(data, pos + 9))
+            pos += 13
+            guard data.count >= pos + textLen else { throw ProtocolDecodeError.malformed }
+            let text = String(data: data[pos..<(pos + textLen)], encoding: .utf8) ?? ""
+            pos += textLen
+
+            // span_count:2
+            guard data.count >= pos + 2 else { throw ProtocolDecodeError.malformed }
+            let spanCount = Int(readU16(data, pos))
+            pos += 2
+
+            // Each span: start_col:2 + end_col:2 + fg:3 + bg:3 + attrs:1 + font_weight:1 + font_id:1 = 13
+            var spans: [GUIHighlightSpan] = []
+            spans.reserveCapacity(spanCount)
+            for _ in 0..<spanCount {
+                guard data.count >= pos + 13 else { throw ProtocolDecodeError.malformed }
+                let startCol = readU16(data, pos)
+                let endCol = readU16(data, pos + 2)
+                let fg = readU24(data, pos + 4)
+                let bg = readU24(data, pos + 7)
+                let attrs = data[pos + 10]
+                let fontWeight = data[pos + 11]
+                let fontId = data[pos + 12]
+                spans.append(GUIHighlightSpan(
+                    startCol: startCol, endCol: endCol,
+                    fg: fg, bg: bg, attrs: attrs,
+                    fontWeight: fontWeight, fontId: fontId
+                ))
+                pos += 13
+            }
+
+            rows.append(GUIVisualRow(
+                rowType: rowType, bufLine: bufLine,
+                contentHash: contentHash, text: text, spans: spans
+            ))
+        }
+
+        // Selection: type:1, then if type != 0: start_row:2 + start_col:2 + end_row:2 + end_col:2
+        guard data.count >= pos + 1 else { throw ProtocolDecodeError.malformed }
+        let selType = data[pos]
+        pos += 1
+        var selection: GUISelectionOverlay? = nil
+        if selType != 0 {
+            guard data.count >= pos + 8 else { throw ProtocolDecodeError.malformed }
+            selection = GUISelectionOverlay(
+                type: GUISelectionType(rawValue: selType) ?? .char,
+                startRow: readU16(data, pos),
+                startCol: readU16(data, pos + 2),
+                endRow: readU16(data, pos + 4),
+                endCol: readU16(data, pos + 6)
+            )
+            pos += 8
+        }
+
+        // Search matches: count:2, then per match: row:2 + start_col:2 + end_col:2 + is_current:1 = 7
+        guard data.count >= pos + 2 else { throw ProtocolDecodeError.malformed }
+        let matchCount = Int(readU16(data, pos))
+        pos += 2
+        var matches: [GUISearchMatch] = []
+        matches.reserveCapacity(matchCount)
+        for _ in 0..<matchCount {
+            guard data.count >= pos + 7 else { throw ProtocolDecodeError.malformed }
+            matches.append(GUISearchMatch(
+                row: readU16(data, pos),
+                startCol: readU16(data, pos + 2),
+                endCol: readU16(data, pos + 4),
+                isCurrent: data[pos + 6] != 0
+            ))
+            pos += 7
+        }
+
+        // Diagnostic ranges: count:2, then per range: start_row:2 + start_col:2 + end_row:2 + end_col:2 + severity:1 = 9
+        guard data.count >= pos + 2 else { throw ProtocolDecodeError.malformed }
+        let diagCount = Int(readU16(data, pos))
+        pos += 2
+        var diags: [GUIDiagnosticUnderline] = []
+        diags.reserveCapacity(diagCount)
+        for _ in 0..<diagCount {
+            guard data.count >= pos + 9 else { throw ProtocolDecodeError.malformed }
+            diags.append(GUIDiagnosticUnderline(
+                startRow: readU16(data, pos),
+                startCol: readU16(data, pos + 2),
+                endRow: readU16(data, pos + 4),
+                endCol: readU16(data, pos + 6),
+                severity: GUIDiagnosticSeverity(rawValue: data[pos + 8]) ?? .error
+            ))
+            pos += 9
+        }
+
+        let content = GUIWindowContent(
+            windowId: windowId,
+            fullRefresh: (flags & 0x01) != 0,
+            cursorRow: cursorRow,
+            cursorCol: cursorCol,
+            cursorShape: cursorShape,
+            rows: rows,
+            selection: selection,
+            searchMatches: matches,
+            diagnosticUnderlines: diags
+        )
+        return (.guiWindowContent(data: content), pos - offset)
 
     default:
         throw ProtocolDecodeError.unknownOpcode(opcode)
