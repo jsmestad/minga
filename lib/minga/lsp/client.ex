@@ -144,6 +144,27 @@ defmodule Minga.LSP.Client do
   end
 
   @doc """
+  Sends a synchronous LSP request and waits for the response.
+
+  Blocks the caller for up to `timeout` milliseconds. Returns
+  `{:ok, result}` or `{:error, reason}`. Use sparingly; prefer
+  the async `request/3` for most features. This is intended for
+  picker sources that need results before building candidates.
+  """
+  @spec request_sync(GenServer.server(), String.t(), map(), non_neg_integer()) ::
+          {:ok, term()} | {:error, term()}
+  def request_sync(server, method, params, timeout \\ @request_timeout)
+      when is_binary(method) and is_map(params) do
+    ref = request(server, method, params)
+
+    receive do
+      {:lsp_response, ^ref, result} -> result
+    after
+      timeout -> {:error, :timeout}
+    end
+  end
+
+  @doc """
   Returns the semantic token legend if the server supports semantic tokens.
 
   Returns `{token_types, token_modifiers}` or `nil`.

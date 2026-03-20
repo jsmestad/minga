@@ -305,6 +305,14 @@ defmodule Minga.Editor.Commands.Lsp do
         description: "Call hierarchy (incoming)",
         requires_buffer: true,
         execute: &LspActions.prepare_call_hierarchy/1
+      },
+      %Minga.Command{
+        name: :workspace_symbols,
+        description: "Search workspace symbols",
+        requires_buffer: true,
+        execute: fn state ->
+          Minga.Editor.PickerUI.open(state, Minga.Picker.WorkspaceSymbolSource)
+        end
       }
     ]
 

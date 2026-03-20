@@ -33,6 +33,7 @@ defmodule Minga.Keymap.Defaults do
 
     # ── Search ─────────────────────────────────────────────────────────────────
     {[{?s, @none}, {?p, @none}], :search_project, "Search project"},
+    {[{?s, @none}, {?w, @none}], :workspace_symbols, "Search workspace symbols"},
     {[{?/, @none}], :search_project, "Search project"},
 
     # ── File ──────────────────────────────────────────────────────────────────
