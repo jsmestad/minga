@@ -42,7 +42,8 @@ struct ToolManagerView: View {
                     // Footer with keyboard hints
                     footerBar
                 }
-                .frame(width: panelWidth, maxHeight: panelMaxHeight)
+                .frame(width: panelWidth)
+                .frame(maxHeight: panelMaxHeight)
                 .background(
                     RoundedRectangle(cornerRadius: 12)
                         .fill(theme.popupBg)
