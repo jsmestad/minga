@@ -27,6 +27,7 @@ struct FileTreeView: View {
     @State private var sidebarWidth: CGFloat = 240
     @State private var isDraggingResize: Bool = false
     @State private var hoveredEntryId: UInt32? = nil
+    @State private var scrollOffset: CGFloat = 0
 
     var body: some View {
         HStack(spacing: 0) {
@@ -163,9 +164,23 @@ struct FileTreeView: View {
                     }
                 }
                 .padding(.top, 2)
+                .background(
+                    GeometryReader { geo in
+                        Color.clear.preference(
+                            key: ScrollOffsetKey.self,
+                            value: geo.frame(in: .named("fileTreeScroll")).minY
+                        )
+                    }
+                )
+            }
+            .coordinateSpace(name: "fileTreeScroll")
+            .onPreferenceChange(ScrollOffsetKey.self) { value in
+                scrollOffset = value
+            }
+            .overlay(alignment: .top) {
+                stickyParentHeader
             }
             .onChange(of: fileTreeState.selectedIndex) { _, newIndex in
-                // Look up the stable ID of the selected entry to scroll to it.
                 if let selectedEntry = fileTreeState.entries.first(where: { $0.index == newIndex }) {
                     withAnimation(nil) {
                         proxy.scrollTo(selectedEntry.id, anchor: .center)
@@ -173,6 +188,86 @@ struct FileTreeView: View {
                 }
             }
         }
+    }
+
+    // MARK: - Sticky parent header
+
+    /// The parent directory chain for the top visible entry, pinned at the
+    /// top of the scroll view. Only shows when the user has scrolled past
+    /// a directory's own row so you always know where you are in the tree.
+    @ViewBuilder
+    private var stickyParentHeader: some View {
+        let parents = stickyParentEntries()
+        if !parents.isEmpty {
+            VStack(spacing: 0) {
+                ForEach(parents) { parent in
+                    HStack(spacing: 0) {
+                        // Match the indent of the actual entry row
+                        disclosureChevron(parent)
+
+                        Text(parent.icon)
+                            .font(.custom("Symbols Nerd Font Mono", size: 12))
+                            .foregroundStyle(theme.treeDirFg)
+                            .frame(width: 16, alignment: .center)
+
+                        Spacer().frame(width: 4)
+
+                        Text(parent.name)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(theme.treeDirFg)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.leading, leadingPadding(parent))
+                    .padding(.trailing, 8)
+                    .frame(height: rowHeight)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(theme.treeBg)
+                }
+
+                // Subtle bottom separator
+                Rectangle()
+                    .fill(theme.treeSeparatorFg.opacity(0.3))
+                    .frame(height: 1)
+            }
+        }
+    }
+
+    /// Computes the parent directory entries that should be pinned at the top.
+    /// Returns directories whose rows have scrolled off the top, ordered by depth.
+    private func stickyParentEntries() -> [FileTreeEntry] {
+        let entries = fileTreeState.entries
+        guard !entries.isEmpty else { return [] }
+
+        // The 2px top padding shifts the content down. scrollOffset is negative
+        // when scrolled down (content moves up).
+        let adjustedOffset = -(scrollOffset - 2)
+        guard adjustedOffset > 0 else { return [] }
+
+        let topIndex = min(Int(adjustedOffset / rowHeight), entries.count - 1)
+        let topEntry = entries[topIndex]
+
+        // Only show sticky headers when the top visible entry is nested
+        guard topEntry.depth > 0 else { return [] }
+
+        // Walk backwards from topIndex to find the parent directory at each
+        // depth level that has scrolled off screen.
+        var parents: [FileTreeEntry] = []
+        var neededDepths = Set(0..<topEntry.depth)
+
+        for i in stride(from: topIndex, through: 0, by: -1) {
+            let entry = entries[i]
+            if entry.isDir && neededDepths.contains(entry.depth) {
+                parents.append(entry)
+                neededDepths.remove(entry.depth)
+                if neededDepths.isEmpty { break }
+            }
+        }
+
+        // Sort by depth so they stack correctly (shallowest on top)
+        return parents.sorted { $0.depth < $1.depth }
     }
 
     // MARK: - Entry row
@@ -371,5 +466,13 @@ struct FileTreeView: View {
         default:
             return entry.isDir ? theme.treeDirFg : theme.treeFg
         }
+    }
+}
+
+/// Preference key for tracking scroll offset within the file tree.
+private struct ScrollOffsetKey: PreferenceKey {
+    nonisolated(unsafe) static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }
