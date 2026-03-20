@@ -1257,6 +1257,22 @@ defmodule Minga.Editor do
     gui_tree_action(state, index, :toggle)
   end
 
+  defp handle_gui_action(state, :file_tree_new_file) do
+    Commands.FileTree.new_file(state)
+  end
+
+  defp handle_gui_action(state, :file_tree_new_folder) do
+    Commands.FileTree.new_folder(state)
+  end
+
+  defp handle_gui_action(state, :file_tree_collapse_all) do
+    Commands.FileTree.collapse_all(state)
+  end
+
+  defp handle_gui_action(state, :file_tree_refresh) do
+    Commands.FileTree.refresh(state)
+  end
+
   defp handle_gui_action(state, {:completion_select, index}) do
     case state.completion do
       %Completion{} = comp ->

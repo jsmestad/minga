@@ -896,6 +896,26 @@ defmodule Minga.Port.ProtocolTest do
       assert {:ok, {:gui_action, :new_tab}} = Protocol.decode_event(payload)
     end
 
+    test "file_tree_new_file with no payload" do
+      payload = <<0x07, 0x0D>>
+      assert {:ok, {:gui_action, :file_tree_new_file}} = Protocol.decode_event(payload)
+    end
+
+    test "file_tree_new_folder with no payload" do
+      payload = <<0x07, 0x0E>>
+      assert {:ok, {:gui_action, :file_tree_new_folder}} = Protocol.decode_event(payload)
+    end
+
+    test "file_tree_collapse_all with no payload" do
+      payload = <<0x07, 0x0F>>
+      assert {:ok, {:gui_action, :file_tree_collapse_all}} = Protocol.decode_event(payload)
+    end
+
+    test "file_tree_refresh with no payload" do
+      payload = <<0x07, 0x10>>
+      assert {:ok, {:gui_action, :file_tree_refresh}} = Protocol.decode_event(payload)
+    end
+
     test "unknown action type returns malformed" do
       payload = <<0x07, 0xFF, 0, 0>>
       assert {:error, :malformed} = Protocol.decode_event(payload)
@@ -922,21 +942,74 @@ defmodule Minga.Port.ProtocolTest do
       assert byte_size(rest) == count * 4
     end
 
-    test "encodes gui_file_tree with entries" do
+    @tag :tmp_dir
+    test "encodes gui_file_tree with root, path_hash, and rel_path per entry", %{
+      tmp_dir: tmp_dir
+    } do
+      File.write!(Path.join(tmp_dir, "hello.ex"), "")
+
       tree = %Minga.FileTree{
-        root: "/tmp/project",
-        expanded: MapSet.new(["/tmp/project"]),
+        root: tmp_dir,
+        expanded: MapSet.new([tmp_dir]),
         cursor: 0,
         width: 30
       }
 
-      # This will try to read the filesystem, but the encoder should handle it
-      # Just verify it produces a valid binary with the right opcode
       encoded = ProtocolGUI.encode_gui_file_tree(tree)
-      # gui_file_tree
-      assert <<0x70, cursor::16, width::16, _count::16, _rest::binary>> = encoded
-      assert width == 30
+
+      # Header: opcode + cursor + width + count + root_len + root
+      root_len = byte_size(tmp_dir)
+
+      assert <<0x70, cursor::16, width::16, count::16, ^root_len::16, root::binary-size(root_len),
+               entry_rest::binary>> = encoded
+
       assert cursor == 0
+      assert width == 30
+      assert count == 1
+      assert root == tmp_dir
+
+      # Entry: path_hash + flags + depth + git_status + icon + name + rel_path
+      expected_path = Path.join(tmp_dir, "hello.ex")
+      expected_hash = :erlang.phash2(expected_path, 0xFFFFFFFF)
+
+      assert <<^expected_hash::32, flags::8, depth::8, _git::8, icon_len::8,
+               _icon::binary-size(icon_len), name_len::16, name::binary-size(name_len),
+               rel_path_len::16, rel_path::binary-size(rel_path_len)>> = entry_rest
+
+      assert flags == 0x04
+      assert depth == 0
+      assert name == "hello.ex"
+      assert rel_path == "hello.ex"
+    end
+
+    @tag :tmp_dir
+    test "path_hash is stable across encodes", %{tmp_dir: tmp_dir} do
+      File.write!(Path.join(tmp_dir, "stable.txt"), "")
+
+      tree = %Minga.FileTree{
+        root: tmp_dir,
+        expanded: MapSet.new([tmp_dir]),
+        cursor: 0,
+        width: 30
+      }
+
+      encoded1 = ProtocolGUI.encode_gui_file_tree(tree)
+      encoded2 = ProtocolGUI.encode_gui_file_tree(tree)
+
+      # Skip header: opcode(1) + cursor(2) + width(2) + count(2) + root_len(2) + root
+      header_size = 9 + byte_size(tmp_dir)
+      <<_header1::binary-size(header_size), entry1::binary>> = encoded1
+      <<_header2::binary-size(header_size), entry2::binary>> = encoded2
+
+      <<hash1::32, _::binary>> = entry1
+      <<hash2::32, _::binary>> = entry2
+
+      assert hash1 == hash2
+    end
+
+    test "encodes gui_file_tree nil as zero entries" do
+      encoded = ProtocolGUI.encode_gui_file_tree(nil)
+      assert <<0x70, 0::16, 0::16, 0::16, 0::16>> = encoded
     end
 
     test "encodes gui_tab_bar with tabs" do

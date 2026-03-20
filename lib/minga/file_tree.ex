@@ -100,6 +100,12 @@ defmodule Minga.FileTree do
     end
   end
 
+  @doc "Collapses all directories, keeping only the root expanded. Resets cursor to 0."
+  @spec collapse_all(t()) :: t()
+  def collapse_all(%__MODULE__{} = tree) do
+    %{tree | expanded: MapSet.new([tree.root]), cursor: 0}
+  end
+
   @doc "Collapses the directory at cursor, or if on a file/collapsed dir, collapses the parent."
   @spec collapse(t()) :: t()
   def collapse(%__MODULE__{} = tree) do

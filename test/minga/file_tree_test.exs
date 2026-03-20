@@ -382,6 +382,57 @@ defmodule Minga.FileTreeTest do
     end
   end
 
+  describe "collapse_all/1" do
+    @tag :tmp_dir
+    test "collapses everything except root", %{tmp_dir: tmp_dir} do
+      File.mkdir_p!(Path.join([tmp_dir, "lib", "minga"]))
+      File.write!(Path.join([tmp_dir, "lib", "minga", "editor.ex"]), "")
+
+      tree =
+        FileTree.new(tmp_dir)
+        |> Map.update!(:expanded, fn exp ->
+          exp
+          |> MapSet.put(Path.join(tmp_dir, "lib"))
+          |> MapSet.put(Path.join([tmp_dir, "lib", "minga"]))
+        end)
+
+      assert MapSet.size(tree.expanded) == 3
+
+      tree = FileTree.collapse_all(tree)
+      assert MapSet.size(tree.expanded) == 1
+      assert MapSet.member?(tree.expanded, tree.root)
+    end
+
+    @tag :tmp_dir
+    test "clamps cursor to valid range", %{tmp_dir: tmp_dir} do
+      File.mkdir_p!(Path.join(tmp_dir, "lib"))
+      File.write!(Path.join([tmp_dir, "lib", "a.ex"]), "")
+      File.write!(Path.join([tmp_dir, "lib", "b.ex"]), "")
+      File.write!(Path.join(tmp_dir, "mix.exs"), "")
+
+      tree =
+        FileTree.new(tmp_dir)
+        |> Map.update!(:expanded, &MapSet.put(&1, Path.join(tmp_dir, "lib")))
+        |> Map.put(:cursor, 3)
+
+      # cursor 3 = "mix.exs" with lib expanded. After collapse_all,
+      # only root-level entries are visible (lib, mix.exs), cursor clamps to 0.
+      tree = FileTree.collapse_all(tree)
+      assert tree.cursor == 0
+    end
+
+    @tag :tmp_dir
+    test "is a no-op on an already-collapsed tree", %{tmp_dir: tmp_dir} do
+      File.write!(Path.join(tmp_dir, "a.txt"), "")
+
+      tree = FileTree.new(tmp_dir)
+      tree2 = FileTree.collapse_all(tree)
+
+      assert tree2.expanded == tree.expanded
+      assert tree2.cursor == 0
+    end
+  end
+
   describe "refresh/1" do
     @tag :tmp_dir
     test "clamps cursor after files are deleted", %{tmp_dir: tmp_dir} do
