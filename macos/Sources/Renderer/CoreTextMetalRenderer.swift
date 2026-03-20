@@ -311,15 +311,8 @@ final class CoreTextMetalRenderer {
 
         if let wcr = windowContentRenderer {
             for (_, content) in windowContents {
-                // Find the matching gutter entry to get window screen position.
-                // The gutter's contentRow/contentCol define where this window's
-                // content area starts on screen.
-                //
-                // TODO: GUIWindowGutter doesn't have a windowId field yet.
-                // For now, match the active gutter for single-window layouts.
-                // Multi-window support requires adding windowId to the 0x7B
-                // gutter opcode or matching by contentRow ranges.
-                guard let gutter = lineBuffer.windowGutters.first(where: { $0.isActive }) else {
+                // Match gutter data to semantic window content by windowId.
+                guard let gutter = lineBuffer.windowGutters[content.windowId] else {
                     continue
                 }
 
@@ -394,7 +387,7 @@ final class CoreTextMetalRenderer {
 
         // Native gutter rendering from structured data.
         // One GUIWindowGutter per editor window (split pane).
-        for windowGutter in lineBuffer.windowGutters {
+        for (_, windowGutter) in lineBuffer.windowGutters {
             renderGutterEntries(
                 gutter: windowGutter,
                 lineBuffer: lineBuffer,

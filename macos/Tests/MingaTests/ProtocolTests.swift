@@ -321,6 +321,10 @@ final class SpyEncoder: InputEncoder, Sendable {
     func sendPanelDismiss() {}
     func sendPanelResize(heightPercent: UInt8) {}
     func sendOpenFile(path: String) {}
+    func sendToolInstall(name: String) {}
+    func sendToolUninstall(name: String) {}
+    func sendToolUpdate(name: String) {}
+    func sendToolDismiss() {}
 }
 
 @Suite("EditorNSView Resize")

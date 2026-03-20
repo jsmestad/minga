@@ -296,7 +296,7 @@ The GUI frontend draws the cursorline as a full-width colored rectangle behind t
 Structured gutter data for native line number and sign rendering. One message is sent per editor window (split pane), each including the window's screen position. Agent chat windows are skipped.
 
 ```
-opcode(1) + content_row(2) + content_col(2) + content_height(2) + is_active(1)
+opcode(1) + window_id(2) + content_row(2) + content_col(2) + content_height(2) + is_active(1)
 + cursor_line(4) + line_number_style(1) + line_number_width(1)
 + sign_col_width(1) + line_count(2) + entries...
 
@@ -304,7 +304,7 @@ Per entry:
   buf_line(4) + display_type(1) + sign_type(1)
 ```
 
-`content_row` and `content_col` are the screen position of the window's content area (0-indexed). `content_height` is the height in rows. `is_active` is 1 for the focused window, 0 otherwise. `cursor_line` is the 0-indexed buffer line where the cursor sits. `line_number_width` is the character column count allocated for line numbers. `sign_col_width` is 0 (no sign column) or 2 (sign column present). `line_count` is the number of visible line entries.
+`window_id` matches the `window_id` field in `gui_window_content` (0x80), enabling the frontend to correlate gutter data with semantic buffer content for the same window. `content_row` and `content_col` are the screen position of the window's content area (0-indexed). `content_height` is the height in rows. `is_active` is 1 for the focused window, 0 otherwise. `cursor_line` is the 0-indexed buffer line where the cursor sits. `line_number_width` is the character column count allocated for line numbers. `sign_col_width` is 0 (no sign column) or 2 (sign column present). `line_count` is the number of visible line entries.
 
 Line number style values:
 | Value | Style |

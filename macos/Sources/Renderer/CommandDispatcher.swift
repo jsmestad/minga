@@ -225,7 +225,7 @@ final class CommandDispatcher {
             lineBuffer.cursorlineBg = rgb
 
         case .guiGutter(let data):
-            lineBuffer.windowGutters.append(data)
+            lineBuffer.windowGutters[data.windowId] = data
             // Sync gutterCol from the active window's gutter data so the
             // separator and gap fill logic stays consistent.
             if data.isActive {

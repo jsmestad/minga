@@ -175,6 +175,7 @@ defmodule Minga.Port.Protocol.GUI do
 
   @typedoc "Gutter data for a single window."
   @type gutter_data :: %{
+          window_id: non_neg_integer(),
           content_row: non_neg_integer(),
           content_col: non_neg_integer(),
           content_height: non_neg_integer(),
@@ -193,7 +194,7 @@ defmodule Minga.Port.Protocol.GUI do
   the window's screen position so the GUI knows where to render.
 
   Wire format:
-    opcode(1) + content_row(2) + content_col(2) + content_height(2)
+    opcode(1) + window_id(2) + content_row(2) + content_col(2) + content_height(2)
     + is_active(1) + cursor_line(4) + line_number_style(1)
     + line_number_width(1) + sign_col_width(1) + line_count(2) + entries...
 
@@ -202,6 +203,7 @@ defmodule Minga.Port.Protocol.GUI do
   """
   @spec encode_gui_gutter(gutter_data()) :: binary()
   def encode_gui_gutter(%{
+        window_id: window_id,
         content_row: row,
         content_col: col,
         content_height: height,
@@ -222,8 +224,8 @@ defmodule Minga.Port.Protocol.GUI do
       end)
 
     IO.iodata_to_binary([
-      <<@op_gui_gutter, row::16, col::16, height::16, active_byte::8, cursor_line::32,
-        style_byte::8, ln_width::8, sign_width::8, count::16>>
+      <<@op_gui_gutter, window_id::16, row::16, col::16, height::16, active_byte::8,
+        cursor_line::32, style_byte::8, ln_width::8, sign_width::8, count::16>>
       | entry_binaries
     ])
   end

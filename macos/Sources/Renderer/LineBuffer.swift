@@ -96,7 +96,7 @@ final class LineBuffer {
     /// One entry per editor window (split pane). Cleared each frame.
     /// The renderer iterates these to draw gutter content at the correct
     /// screen positions for each window.
-    var windowGutters: [GUIWindowGutter] = []
+    var windowGutters: [UInt16: GUIWindowGutter] = [:]
 
     /// Gutter theme colors as 24-bit RGB values.
     /// Updated by CommandDispatcher from ThemeColors when gui_theme arrives.
@@ -228,7 +228,7 @@ final class LineBuffer {
 
     /// Returns the window gutter whose content area contains the given screen row.
     func windowGutter(forRow row: UInt16) -> GUIWindowGutter? {
-        windowGutters.first { row >= $0.contentRow && row < $0.contentRow &+ $0.contentHeight }
+        windowGutters.values.first { row >= $0.contentRow && row < $0.contentRow &+ $0.contentHeight }
     }
 
     /// Returns the total number of lines that have content.

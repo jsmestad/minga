@@ -194,23 +194,8 @@ defmodule Minga.Editor.PickerUI do
 
   def handle_key(%{picker_ui: %{picker: picker, source: source}} = state, @enter, _mods) do
     case Picker.selected_item(picker) do
-      nil ->
-        close(state)
-
-      item ->
-        if Picker.Source.keep_open_on_select?(source) do
-          # Stay open: run the action, then refresh items in place
-          new_state = source.on_select(item, state)
-          refresh_items(new_state)
-        else
-          new_state = close(state)
-          new_state = source.on_select(item, new_state)
-
-          case Map.get(new_state, :pending_command) do
-            nil -> new_state
-            cmd -> {Map.delete(new_state, :pending_command), {:execute_command, cmd}}
-          end
-        end
+      nil -> close(state)
+      item -> select_item(state, item, source)
     end
   end
 
@@ -321,6 +306,23 @@ defmodule Minga.Editor.PickerUI do
 
   # Ignore all other keys
   def handle_key(state, _cp, _mods), do: state
+
+  @spec select_item(EditorState.t(), Picker.item(), module()) ::
+          EditorState.t() | {EditorState.t(), {:execute_command, atom()}}
+  defp select_item(state, item, source) do
+    if Picker.Source.keep_open_on_select?(source) do
+      new_state = source.on_select(item, state)
+      refresh_items(new_state)
+    else
+      new_state = close(state)
+      new_state = source.on_select(item, new_state)
+
+      case Map.get(new_state, :pending_command) do
+        nil -> new_state
+        cmd -> {Map.delete(new_state, :pending_command), {:execute_command, cmd}}
+      end
+    end
+  end
 
   @doc """
   Renders the picker overlay. Returns `{draws, cursor_pos | nil}`.
