@@ -175,6 +175,18 @@ final class CoreTextMetalRenderer {
                 bgQuads.append(bgQuad)
             }
 
+            // Cursorline: draw a full-width bg fill on the cursor row.
+            // This replaces the TUI fill draw (all-space text with bg color)
+            // with a native Metal quad for crisp, overlap-free rendering.
+            if row == lineBuffer.cursorlineRow && lineBuffer.cursorlineBg != 0 {
+                var clQuad = QuadGPU()
+                clQuad.position = SIMD2<Float>(0, yPos)
+                clQuad.size = SIMD2<Float>(Float(viewportSize.width), cellH * scale)
+                clQuad.color = colorFromU24(lineBuffer.cursorlineBg, default: defaultBg)
+                clQuad.alpha = 1.0
+                bgQuads.append(clQuad)
+            }
+
             // Per-run background fills (for runs with explicit bg color or reverse attribute).
             for (i, run) in runs.enumerated() {
                 let isReverse = (run.attrs & 0x08) != 0  // ATTR_REVERSE

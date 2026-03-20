@@ -199,6 +199,11 @@ final class CommandDispatcher {
             let rgb: UInt32 = (UInt32(r) << 16) | (UInt32(g) << 8) | UInt32(b)
             lineBuffer.gutterCol = col
             lineBuffer.gutterSeparatorColor = rgb
+
+        case .guiCursorline(let row, let r, let g, let b):
+            let rgb: UInt32 = (UInt32(r) << 16) | (UInt32(g) << 8) | UInt32(b)
+            lineBuffer.cursorlineRow = row
+            lineBuffer.cursorlineBg = rgb
         }
     }
 

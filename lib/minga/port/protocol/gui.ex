@@ -23,6 +23,7 @@ defmodule Minga.Port.Protocol.GUI do
   | 0x77   | gui_picker    | Fuzzy picker items             |
   | 0x78   | gui_agent_chat| Agent conversation view        |
   | 0x79   | gui_gutter_sep| Gutter separator col + color   |
+  | 0x7A   | gui_cursorline| Cursorline row + bg color      |
 
   ## GUI Actions (Frontend → BEAM)
 
@@ -60,6 +61,7 @@ defmodule Minga.Port.Protocol.GUI do
   @op_gui_picker 0x77
   @op_gui_agent_chat 0x78
   @op_gui_gutter_separator 0x79
+  @op_gui_cursorline 0x7A
 
   # ── GUI action sub-opcodes (Frontend → BEAM) ──
 
@@ -88,6 +90,28 @@ defmodule Minga.Port.Protocol.GUI do
   # ═══════════════════════════════════════════════════════════════════════════
   # Encoding (BEAM → Frontend)
   # ═══════════════════════════════════════════════════════════════════════════
+
+  # ── Cursorline ──
+
+  @doc """
+  Encodes a gui_cursorline command.
+
+  Sends the cursor screen row and cursorline background color to the GUI
+  frontend so it can draw the highlight as a native Metal quad instead of
+  a full-width space fill draw.
+
+  `row` is the screen row (0-indexed). `bg_rgb` is a 24-bit RGB color value.
+  Pass `row = 0xFFFF` and `bg_rgb = 0` to indicate no cursorline (inactive
+  window or cursorline disabled).
+  """
+  @spec encode_gui_cursorline(non_neg_integer(), non_neg_integer()) :: binary()
+  def encode_gui_cursorline(row, bg_rgb)
+      when is_integer(row) and is_integer(bg_rgb) do
+    r = bg_rgb >>> 16 &&& 0xFF
+    g = bg_rgb >>> 8 &&& 0xFF
+    b = bg_rgb &&& 0xFF
+    <<@op_gui_cursorline, row::16, r::8, g::8, b::8>>
+  end
 
   # ── Gutter separator ──
 

@@ -47,6 +47,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
     send_gui_picker(state)
     send_gui_agent_chat(state)
     send_gui_gutter_separator(state)
+    send_gui_cursorline(state)
     :ok
   end
 
@@ -293,6 +294,40 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
       end
 
     cmd = ProtocolGUI.encode_gui_gutter_separator(max(col, 0), color_rgb)
+    PortManager.send_commands(state.port_manager, [cmd])
+    :ok
+  end
+
+  # ── Cursorline ──
+
+  @spec send_gui_cursorline(state()) :: :ok
+  defp send_gui_cursorline(state) do
+    alias Minga.Config.Options
+
+    active_window = Map.get(state.windows.map, state.windows.active)
+    cursorline_enabled = Options.get(:cursorline)
+
+    {row, bg_rgb} =
+      if active_window && cursorline_enabled do
+        # Compute screen row of cursor: content_rect row + (cursor_line - viewport_top)
+        layout = Layout.get(state)
+
+        case Layout.active_window_layout(layout, state) do
+          %{content: {content_row, _col, _w, _h}} ->
+            cursor_line = active_window.last_cursor_line || 0
+            viewport_top = active_window.last_viewport_top || 0
+            screen_row = content_row + cursor_line - viewport_top
+            bg = state.theme.editor.cursorline_bg || 0
+            {screen_row, bg}
+
+          nil ->
+            {0xFFFF, 0}
+        end
+      else
+        {0xFFFF, 0}
+      end
+
+    cmd = ProtocolGUI.encode_gui_cursorline(row, bg_rgb)
     PortManager.send_commands(state.port_manager, [cmd])
     :ok
   end

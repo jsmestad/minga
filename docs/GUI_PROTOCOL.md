@@ -10,7 +10,7 @@ Minga's rendering pipeline produces two types of output:
 
 1. **Cell-grid commands** (opcodes 0x10-0x1B): draw_text, set_cursor, clear, batch_end, etc. These paint the editor content surface (buffer text, gutter, modeline for splits, minibuffer). In a TUI frontend, these go to the terminal. In a GUI frontend, these go to a Metal/OpenGL surface.
 
-2. **GUI chrome commands** (opcodes 0x70-0x78): structured data for native chrome elements (tab bar, file tree sidebar, status bar, which-key popup, etc.). These are sent only to GUI frontends. A TUI frontend never sees them.
+2. **GUI chrome commands** (opcodes 0x70-0x7A): structured data for native chrome elements (tab bar, file tree sidebar, status bar, which-key popup, cursorline, etc.). These are sent only to GUI frontends. A TUI frontend never sees them.
 
 Both types are sent within the same render cycle. The BEAM sends cell-grid commands first (one `{:packet, 4}` message containing clear through batch_end), then GUI chrome commands as separate `{:packet, 4}` messages immediately after. GUI chrome commands are not inside the batch_end-terminated cell-grid frame.
 
@@ -221,6 +221,28 @@ Per message (type byte first):
 When hidden:
   opcode(1) + 0(1)
 ```
+
+### 0x79 — gui_gutter_separator
+
+Gutter separator column position and color.
+
+```
+opcode(1) + col(2) + r(1) + g(1) + b(1)
+```
+
+`col` is the cell column at the right edge of the gutter (0 = no separator visible). Color is 24-bit RGB.
+
+### 0x7A — gui_cursorline
+
+Cursorline highlight row and background color for native rendering.
+
+```
+opcode(1) + row(2) + r(1) + g(1) + b(1)
+```
+
+`row` is the 0-indexed screen row where the cursorline should be drawn. `row = 0xFFFF` means no cursorline (disabled or inactive window). Color is 24-bit RGB.
+
+The GUI frontend draws the cursorline as a full-width colored rectangle behind the text on this row. This replaces the TUI approach of prepending a full-width space fill draw to paint the background.
 
 ## GUI Action Input Opcode (Frontend → BEAM)
 
