@@ -13,6 +13,8 @@ defmodule Minga.Picker.CodeActionSource do
 
   alias Minga.Editor.LspActions
   alias Minga.Log
+  alias Minga.LSP.Client
+  alias Minga.LSP.SyncServer
   alias Minga.Picker.Item
 
   @impl true
@@ -67,19 +69,48 @@ defmodule Minga.Picker.CodeActionSource do
         edit -> LspActions.apply_workspace_edit(state, edit, "Code action")
       end
 
-    # If there's a command, we'd need to execute it via the LSP client
-    # Commands are server-side operations; for now log them
+    # If there's a command, execute it via the LSP client
     case action["command"] do
       nil ->
         state
 
-      %{"command" => cmd, "title" => title} ->
-        Log.info(:lsp, "Code action command: #{title} (#{cmd})")
-        # TODO: Execute the command via Client.request("workspace/executeCommand", ...)
-        state
+      %{"command" => cmd} = command ->
+        execute_lsp_command(state, cmd, command)
 
       _ ->
         state
+    end
+  end
+
+  @spec execute_lsp_command(term(), String.t(), map()) :: term()
+  defp execute_lsp_command(state, cmd, command) do
+    buf = state.buffers.active
+
+    case lsp_client_for(buf) do
+      nil ->
+        Log.warning(:lsp, "No LSP client to execute command: #{cmd}")
+        state
+
+      client ->
+        params = %{
+          "command" => cmd,
+          "arguments" => Map.get(command, "arguments", [])
+        }
+
+        # Fire and forget; command results (if any) arrive as LSP notifications
+        Client.request(client, "workspace/executeCommand", params)
+        Log.info(:lsp, "Executing LSP command: #{cmd}")
+        state
+    end
+  end
+
+  @spec lsp_client_for(pid() | nil) :: pid() | nil
+  defp lsp_client_for(nil), do: nil
+
+  defp lsp_client_for(buffer_pid) do
+    case SyncServer.clients_for_buffer(buffer_pid) do
+      [client | _] -> client
+      [] -> nil
     end
   end
 

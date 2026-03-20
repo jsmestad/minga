@@ -82,7 +82,15 @@ defmodule Minga.Editor.PickerUI do
   """
   @spec open(state(), module(), map() | nil) :: state()
   def open(state, source_module, context \\ nil) do
-    items = source_module.candidates(state)
+    # Set context before calling candidates so sources can read it.
+    state_with_ctx =
+      if context do
+        put_in(state.picker_ui.context, context)
+      else
+        state
+      end
+
+    items = source_module.candidates(state_with_ctx)
 
     case items do
       [] ->
