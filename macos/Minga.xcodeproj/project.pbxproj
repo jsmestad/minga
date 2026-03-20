@@ -13,6 +13,7 @@
 		07C6F28E3CD1A55ABD5344AA /* SlotAllocatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F8372175FF223C9260B00C4 /* SlotAllocatorTests.swift */; };
 		0A5FA884302FD99B07B78852 /* AgentChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD14027C8C7BD17057DE820B /* AgentChatView.swift */; };
 		0A71887712DA184422548C26 /* ProtocolConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = C441427A427E23B912F70092 /* ProtocolConstants.swift */; };
+		0BCDFB56E8397D739F52ED34 /* StateLifecycleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5634B25BE5BB945A83E30FAD /* StateLifecycleTests.swift */; };
 		0CB4D8D8FE0F7CBB3C69E609 /* ProtocolEncoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CDC524DEAE5431F6B18A31B /* ProtocolEncoder.swift */; };
 		0D5DFD181E86D51707D3A59E /* AgentChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD14027C8C7BD17057DE820B /* AgentChatView.swift */; };
 		1512D09504679F58B63B14DD /* ThemeColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00D6B3C68CFF37BC4303933A /* ThemeColors.swift */; };
@@ -133,6 +134,7 @@
 		52F606681DE9AA9D502A42AA /* PickerOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PickerOverlay.swift; sourceTree = "<group>"; };
 		5387C9048870A71E7565ED06 /* CoreTextLineRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreTextLineRenderer.swift; sourceTree = "<group>"; };
 		5458552EC58E44C7CD15A98A /* FileTreeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTreeView.swift; sourceTree = "<group>"; };
+		5634B25BE5BB945A83E30FAD /* StateLifecycleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StateLifecycleTests.swift; sourceTree = "<group>"; };
 		56750F0AAE58AF9A98BF5841 /* ProtocolDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolDecoder.swift; sourceTree = "<group>"; };
 		56B00002D020FED57D265C74 /* SystemColorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemColorTests.swift; sourceTree = "<group>"; };
 		5DDE4A535E0895090BF02EE8 /* CoreTextMetalRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreTextMetalRenderer.swift; sourceTree = "<group>"; };
@@ -316,6 +318,7 @@
 				F220A60775A252A728477659 /* ProtocolTests.swift */,
 				211424F30BBE8A57852D5630 /* ScrollAccumulatorTests.swift */,
 				9F8372175FF223C9260B00C4 /* SlotAllocatorTests.swift */,
+				5634B25BE5BB945A83E30FAD /* StateLifecycleTests.swift */,
 				56B00002D020FED57D265C74 /* SystemColorTests.swift */,
 				F086ACF8E4F305C9DDAE24FF /* ThemeColorsTests.swift */,
 				620F7F967502D4F1F7AE8F03 /* WindowContentRendererTests.swift */,
@@ -527,6 +530,7 @@
 				D42695D627BD38405475ECFF /* ScrollAccumulatorTests.swift in Sources */,
 				6700C63C4B7070D3388A7BD4 /* SlotAllocator.swift in Sources */,
 				07C6F28E3CD1A55ABD5344AA /* SlotAllocatorTests.swift in Sources */,
+				0BCDFB56E8397D739F52ED34 /* StateLifecycleTests.swift in Sources */,
 				531166B714D49278BA811033 /* StatusBarView.swift in Sources */,
 				FEFCEFCDC21C5AA5456036D0 /* SystemColorTests.swift in Sources */,
 				03FDC63893F3CAA82BCE2A49 /* TabBarState.swift in Sources */,

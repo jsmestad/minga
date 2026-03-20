@@ -40,4 +40,11 @@ final class TabBarState {
             )
         }
     }
+
+    /// Clear all tab state. Called when the BEAM sends an empty tab bar
+    /// or during error recovery to prevent stale tabs from persisting.
+    func hide() {
+        tabs = []
+        activeIndex = 0
+    }
 }

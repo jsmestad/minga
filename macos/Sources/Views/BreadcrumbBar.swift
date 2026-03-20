@@ -13,6 +13,12 @@ final class BreadcrumbState {
     func update(segments: [String]) {
         self.segments = segments
     }
+
+    /// Clear breadcrumb state. Called when no buffer is active or during
+    /// error recovery to prevent stale path segments from persisting.
+    func hide() {
+        segments = []
+    }
 }
 
 struct BreadcrumbBar: View {

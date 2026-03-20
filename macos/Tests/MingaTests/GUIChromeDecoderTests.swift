@@ -1013,6 +1013,67 @@ struct GUIAgentChatDecoderTests {
         #expect(pendingToolName == "write_file")
         #expect(pendingToolSummary == "Writing to config.toml")
     }
+
+    @Test("Decode gui_agent_chat with styled_assistant message")
+    func decodeStyledAssistant() throws {
+        var data = Data()
+        data.append(OP_GUI_AGENT_CHAT)
+        data.append(1); data.append(0)
+        appendString16(&data, "claude"); appendString16(&data, "")
+        data.append(0) // no pending
+        appendU16(&data, 1) // 1 message
+
+        // styled_assistant: 0x07, line_count::16, then per line:
+        //   run_count::16, then per run: text_len::16, text, fg::24, bg::24, flags::8
+        data.append(0x07) // type=styled_assistant
+        appendU16(&data, 2) // 2 lines
+
+        // Line 1: 2 runs
+        appendU16(&data, 2) // run_count
+        // Run 1: "def " bold, fg=blue, bg=dark
+        appendString16(&data, "def ")
+        appendRGB(&data, 0x51, 0xAF, 0xEF) // fg
+        appendRGB(&data, 0x28, 0x2C, 0x34) // bg
+        data.append(0x01) // flags: bold
+
+        // Run 2: "hello" italic, fg=green
+        appendString16(&data, "hello")
+        appendRGB(&data, 0x98, 0xBE, 0x65) // fg
+        appendRGB(&data, 0x28, 0x2C, 0x34) // bg
+        data.append(0x02) // flags: italic
+
+        // Line 2: 1 run
+        appendU16(&data, 1) // run_count
+        appendString16(&data, "  :ok")
+        appendRGB(&data, 0xBB, 0xC2, 0xCF)
+        appendRGB(&data, 0x28, 0x2C, 0x34)
+        data.append(0x04) // flags: underline
+
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == data.count)
+
+        guard case .guiAgentChat(_, _, _, _, _, _, let messages) = cmd else {
+            Issue.record("Expected .guiAgentChat"); return
+        }
+
+        guard case .styledAssistant(let lines) = messages[0] else {
+            Issue.record("Expected .styledAssistant message"); return
+        }
+        #expect(lines.count == 2)
+        #expect(lines[0].count == 2) // 2 runs on line 1
+        #expect(lines[0][0].text == "def ")
+        #expect(lines[0][0].fgR == 0x51)
+        #expect(lines[0][0].fgG == 0xAF)
+        #expect(lines[0][0].fgB == 0xEF)
+        #expect(lines[0][0].bold == true)
+        #expect(lines[0][0].italic == false)
+        #expect(lines[0][1].text == "hello")
+        #expect(lines[0][1].italic == true)
+        #expect(lines[0][1].bold == false)
+        #expect(lines[1].count == 1)
+        #expect(lines[1][0].text == "  :ok")
+        #expect(lines[1][0].underline == true)
+    }
 }
 
 // MARK: - gui_tool_manager (0x7E)
