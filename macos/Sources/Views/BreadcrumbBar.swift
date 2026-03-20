@@ -42,7 +42,7 @@ struct BreadcrumbBar: View {
                                 : theme.breadcrumbFg.opacity(0.6)
                         )
                         .onTapGesture {
-                            (encoder as? ProtocolEncoder)?.sendBreadcrumbClick(index: UInt8(index))
+                            encoder?.sendBreadcrumbClick(index: UInt8(index))
                         }
                 }
 
