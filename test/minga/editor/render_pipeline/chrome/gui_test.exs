@@ -8,7 +8,6 @@ defmodule Minga.Editor.RenderPipeline.Chrome.GUITest do
   alias Minga.Editor.RenderPipeline.Content
   alias Minga.Editor.RenderPipeline.Scroll
   alias Minga.Editor.State, as: EditorState
-  alias Minga.Port.Capabilities
 
   import Minga.Editor.RenderPipeline.TestHelpers
 
@@ -19,11 +18,6 @@ defmodule Minga.Editor.RenderPipeline.Chrome.GUITest do
     {scrolls, state} = Scroll.scroll_windows(state, layout)
     {_frames, cursor_info, state} = Content.build_content(state, scrolls)
     {scrolls, cursor_info, state, layout}
-  end
-
-  defp gui_state do
-    state = base_state()
-    %{state | capabilities: %Capabilities{frontend_type: :native_gui}}
   end
 
   describe "Chrome.GUI.build/4" do

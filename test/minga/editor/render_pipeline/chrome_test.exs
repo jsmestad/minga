@@ -24,8 +24,6 @@ defmodule Minga.Editor.RenderPipeline.ChromeTest do
     {scrolls, cursor_info, state, layout}
   end
 
-  alias Minga.Port.Capabilities
-
   describe "build_chrome/4 TUI path" do
     test "returns a Chrome struct" do
       state = base_state()
@@ -67,11 +65,6 @@ defmodule Minga.Editor.RenderPipeline.ChromeTest do
   end
 
   describe "build_chrome/4 GUI path" do
-    defp gui_state(opts \\ []) do
-      state = base_state(opts)
-      %{state | capabilities: %Capabilities{frontend_type: :native_gui}}
-    end
-
     test "returns a Chrome struct with GUI capabilities" do
       state = gui_state()
       {scrolls, cursor_info, state, layout} = run_through_content(state)

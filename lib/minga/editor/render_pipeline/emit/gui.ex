@@ -1,20 +1,28 @@
 defmodule Minga.Editor.RenderPipeline.Emit.GUI do
   @moduledoc """
-  GUI chrome synchronization for the Emit stage.
+  GUI-specific emit logic for the Emit stage.
 
-  Sends structured chrome data (tab bar, file tree, which-key, completion,
-  breadcrumb, status bar, picker, agent chat, theme) to the native GUI
-  frontend. These are separate from the TUI cell-grid rendering commands
-  and from the frame-to-commands conversion in `Emit`.
+  Handles two responsibilities:
 
-  Called from `Emit.emit/2` only when the frontend has GUI capabilities.
-  Each function independently gathers state, encodes to protocol binary,
-  and sends to the port manager.
+  1. **Frame filtering**: strips SwiftUI-owned chrome fields from the
+     display list frame before it's converted to Metal cell-grid commands.
+     Tab bar, file tree, agent panel, agentic view, status bar, and splash
+     are handled natively by SwiftUI and should not appear in the cell grid.
+     Gutter is also stripped from window frames since the GUI renders it
+     natively.
+
+  2. **Chrome synchronization**: sends structured chrome data (tab bar,
+     file tree, which-key, completion, breadcrumb, status bar, picker,
+     agent chat, theme) to the native GUI frontend via dedicated protocol
+     opcodes. These are separate from the cell-grid rendering commands.
+
+  Called from `Emit.emit/3` only when the frontend has GUI capabilities.
   """
 
   alias Minga.Agent.Session, as: AgentSession
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Config.Options
+  alias Minga.Editor.DisplayList.Frame
   alias Minga.Editor.Layout
   alias Minga.Editor.RenderPipeline.ContentHelpers
   alias Minga.Editor.State, as: EditorState
@@ -27,6 +35,37 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
 
   @typedoc "Internal editor state."
   @type state :: EditorState.t()
+
+  # ── Frame filtering ──────────────────────────────────────────────────────
+
+  @doc """
+  Filters a frame for GUI rendering by zeroing SwiftUI-owned chrome fields.
+
+  The GUI frontend renders tab bar, file tree, agent panel, agentic view,
+  status bar, and splash natively via SwiftUI. These fields are cleared so
+  they don't appear in the Metal cell-grid output. Window frame gutters are
+  also cleared since the GUI renders gutter natively.
+
+  Overlays pass through intentionally: the Chrome stage already filters
+  picker, which-key, and completion (empty in GUI mode). The remaining
+  overlays (hover popup, signature help, float popups) are Metal-rendered
+  and belong in the cell-grid output.
+  """
+  @spec filter_frame_for_gui(Frame.t()) :: Frame.t()
+  def filter_frame_for_gui(frame) do
+    %{
+      frame
+      | tab_bar: [],
+        file_tree: [],
+        agent_panel: [],
+        agentic_view: [],
+        status_bar: [],
+        splash: nil,
+        windows: Enum.map(frame.windows, fn wf -> %{wf | gutter: %{}} end)
+    }
+  end
+
+  # ── Chrome synchronization ──────────────────────────────────────────────
 
   @doc """
   Sends all GUI chrome data to the native frontend.
