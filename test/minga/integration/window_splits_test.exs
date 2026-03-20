@@ -22,32 +22,38 @@ defmodule Minga.Integration.WindowSplitsTest do
       assert_screen_snapshot(ctx, "vsplit_basic")
     end
 
-    test "modeline appears in both panes" do
+    test "global status bar appears at row height-2" do
       ctx = start_editor("hello world")
 
       send_keys(ctx, "<Space>wv")
 
-      modeline_row = screen_row(ctx, ctx.height - 2)
-      # Should contain NORMAL twice (one per pane)
-      assert String.contains?(modeline_row, "NORMAL")
-      assert String.contains?(modeline_row, "│")
+      # Single global status bar (not per-pane); shows focused window info.
+      status_bar_row = screen_row(ctx, ctx.height - 2)
+      assert String.contains?(status_bar_row, "NORMAL")
+      # Vertical separator still rendered between panes in content rows.
+      row1 = screen_row(ctx, 1)
+      assert String.contains?(row1, "│")
     end
   end
 
   # ── Horizontal split ───────────────────────────────────────────────────────
 
   describe "horizontal split (SPC w s)" do
-    test "creates two stacked panes" do
+    test "creates two stacked panes with global status bar" do
       ctx = start_editor("hello world")
 
       send_keys(ctx, "<Space>ws")
 
-      # Both panes should show content, with separate modelines
+      # Single global status bar at row height-2 (not one per pane).
       rows = screen_text(ctx)
       modeline_count = Enum.count(rows, &String.contains?(&1, "NORMAL"))
 
-      assert modeline_count >= 2,
-             "expected 2 modelines for horizontal split, found #{modeline_count}"
+      assert modeline_count == 1,
+             "expected 1 global status bar, found #{modeline_count}"
+
+      # Horizontal separator between the two panes.
+      sep_rows = Enum.filter(rows, &String.contains?(&1, "──"))
+      assert sep_rows != [], "expected a horizontal separator between split panes"
 
       assert_screen_snapshot(ctx, "hsplit_basic")
     end

@@ -20,6 +20,7 @@ defmodule Minga.Editor.RenderPipeline.Emit do
   alias Minga.Editor.DisplayList
   alias Minga.Editor.DisplayList.{Frame, Overlay, WindowFrame}
   alias Minga.Editor.Layout
+  alias Minga.Editor.RenderPipeline.Chrome
   alias Minga.Editor.RenderPipeline.Emit.GUI, as: EmitGUI
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.TabBar
@@ -49,8 +50,8 @@ defmodule Minga.Editor.RenderPipeline.Emit do
   Also sends title and window background color when they change
   (side-channel writes).
   """
-  @spec emit(Frame.t(), state()) :: :ok
-  def emit(frame, state) do
+  @spec emit(Frame.t(), state(), Chrome.t() | nil) :: :ok
+  def emit(frame, state, chrome \\ nil) do
     scroll_deltas = detect_scroll_regions(state)
 
     # Make the font registry available for font_family → font_id resolution
@@ -80,7 +81,8 @@ defmodule Minga.Editor.RenderPipeline.Emit do
       send_window_bg(state)
 
       if Capabilities.gui?(state.capabilities) do
-        EmitGUI.sync_chrome(state)
+        status_bar_data = chrome && chrome.status_bar_data
+        EmitGUI.sync_chrome(state, status_bar_data)
       end
 
       :ok
@@ -247,7 +249,15 @@ defmodule Minga.Editor.RenderPipeline.Emit do
   # are Metal-rendered and belong in the cell-grid output.
   @spec filter_frame_for_gui(Frame.t()) :: Frame.t()
   defp filter_frame_for_gui(frame) do
-    %{frame | tab_bar: [], file_tree: [], agent_panel: [], agentic_view: [], splash: nil}
+    %{
+      frame
+      | tab_bar: [],
+        file_tree: [],
+        agent_panel: [],
+        agentic_view: [],
+        status_bar: [],
+        splash: nil
+    }
   end
 
   @spec build_commands(Frame.t(), [scroll_delta()] | nil) :: [binary()]
@@ -331,22 +341,13 @@ defmodule Minga.Editor.RenderPipeline.Emit do
 
   @spec collect_chrome_draws(Frame.t()) :: [DisplayList.draw()]
   defp collect_chrome_draws(frame) do
-    # Modeline draws are inside window frames; extract them all
-    modeline_draws =
-      Enum.flat_map(frame.windows, fn wf ->
-        {row_off, col_off, _w, _h} = wf.rect
-
-        DisplayList.layer_to_draws(wf.modeline)
-        |> DisplayList.offset_draws(row_off, col_off)
-      end)
-
     frame.tab_bar ++
       frame.file_tree ++
       frame.agentic_view ++
       frame.separators ++
+      frame.status_bar ++
       frame.agent_panel ++
       frame.minibuffer ++
-      modeline_draws ++
       (frame.splash || [])
   end
 

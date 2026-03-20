@@ -23,6 +23,7 @@ defmodule Minga.Editor.Layout do
   constraint.
   """
 
+  alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Window
   alias Minga.Editor.WindowTree
@@ -42,16 +43,20 @@ defmodule Minga.Editor.Layout do
   Layout for a single editor window, with sub-rects for each chrome element.
 
   - `total` — the full window rect (from WindowTree.layout)
-  - `content` — the text area within the window (total minus modeline)
-  - `modeline` — one row at the bottom of the window
+  - `content` — the text area within the window (full window; no per-window modeline)
+  - `modeline` — always zero-height; kept for backward compatibility. The global status bar
+    at `Layout.t().status_bar` replaces per-window modelines.
   - `sidebar` — optional info panel (agent chat dashboard)
   """
   @type window_layout :: %{
           total: rect(),
           content: rect(),
-          modeline: rect(),
+          modeline: {non_neg_integer(), non_neg_integer(), pos_integer(), 0},
           sidebar: rect() | nil
         }
+
+  @typedoc "A horizontal separator between split panes: {row, col, width, filename}."
+  @type horizontal_separator :: {non_neg_integer(), non_neg_integer(), pos_integer(), String.t()}
 
   @typedoc "Complete layout for one frame."
   @type t :: %__MODULE__{
@@ -60,7 +65,9 @@ defmodule Minga.Editor.Layout do
           file_tree: rect() | nil,
           editor_area: rect(),
           window_layouts: %{Window.id() => window_layout()},
+          horizontal_separators: [horizontal_separator()],
           agent_panel: rect() | nil,
+          status_bar: rect() | nil,
           minibuffer: rect()
         }
 
@@ -72,7 +79,9 @@ defmodule Minga.Editor.Layout do
     tab_bar: nil,
     file_tree: nil,
     window_layouts: %{},
-    agent_panel: nil
+    horizontal_separators: [],
+    agent_panel: nil,
+    status_bar: nil
   ]
 
   # ── Public API ─────────────────────────────────────────────────────────────
@@ -126,41 +135,108 @@ defmodule Minga.Editor.Layout do
 
   # ── Shared helpers (used by Layout.TUI and Layout.GUI) ─────────────────────
 
-  @doc false
-  @spec compute_window_layouts(WindowTree.t(), rect()) :: %{Window.id() => window_layout()}
-  def compute_window_layouts(tree, editor_area) do
-    layouts = WindowTree.layout(tree, editor_area)
-    Map.new(layouts, fn {win_id, rect} -> {win_id, subdivide_window(rect)} end)
+  @doc """
+  Computes window layouts and horizontal separator positions simultaneously.
+
+  Horizontal splits steal 1 row from the top window for a separator bar.
+  The separator shows the lower window's buffer filename.
+
+  Returns `{window_layouts_map, horizontal_separators_list}`.
+  """
+  @spec compute_window_layouts_with_separators(WindowTree.t(), rect(), map()) ::
+          {%{Window.id() => window_layout()}, [horizontal_separator()]}
+  def compute_window_layouts_with_separators(tree, editor_area, window_map) do
+    {layout_pairs, separators} = layout_with_separators(tree, editor_area, window_map)
+
+    window_layouts =
+      Map.new(layout_pairs, fn {win_id, rect} -> {win_id, subdivide_window(rect)} end)
+
+    {window_layouts, separators}
+  end
+
+  # Recursively computes window rects and separator positions.
+  # Horizontal splits steal 1 row from the top child for the separator.
+  @spec layout_with_separators(WindowTree.t(), rect(), map()) ::
+          {[{Window.id(), rect()}], [horizontal_separator()]}
+  defp layout_with_separators({:leaf, id}, rect, _window_map) do
+    {[{id, rect}], []}
+  end
+
+  defp layout_with_separators(
+         {:split, :vertical, left, right, size},
+         {row, col, width, height},
+         window_map
+       ) do
+    usable = width - 1
+    left_width = WindowTree.clamp_size(size, usable)
+    right_width = max(usable - left_width, 1)
+    separator_col = col + left_width
+
+    {left_layouts, left_seps} =
+      layout_with_separators(left, {row, col, left_width, height}, window_map)
+
+    {right_layouts, right_seps} =
+      layout_with_separators(right, {row, separator_col + 1, right_width, height}, window_map)
+
+    {left_layouts ++ right_layouts, left_seps ++ right_seps}
+  end
+
+  defp layout_with_separators(
+         {:split, :horizontal, top, bottom, size},
+         {row, col, width, height},
+         window_map
+       ) do
+    top_height = WindowTree.clamp_size(size, height)
+    # Steal 1 row from the top child for the separator. Floor at 0 (not 1) so
+    # degenerate tiny terminals don't get a negative or inflated top height.
+    adjusted_top_height = max(top_height - 1, 0)
+    sep_row = row + adjusted_top_height
+    bottom_height = max(height - top_height, 1)
+
+    {top_layouts, top_seps} =
+      layout_with_separators(top, {row, col, width, adjusted_top_height}, window_map)
+
+    {bottom_layouts, bottom_seps} =
+      layout_with_separators(bottom, {row + top_height, col, width, bottom_height}, window_map)
+
+    # The separator label is the lower window's buffer filename.
+    bottom_name = first_window_filename(bottom, window_map)
+    separator = {sep_row, col, width, bottom_name}
+
+    {top_layouts ++ bottom_layouts, [separator | top_seps] ++ bottom_seps}
+  end
+
+  # Returns the display filename of the first (top-left) leaf in a subtree.
+  # Uses BufferServer.display_name/1 which handles named buffers (e.g. *Messages*)
+  # and the [RO] suffix in a single round-trip.
+  @spec first_window_filename(WindowTree.t(), map()) :: String.t()
+  defp first_window_filename({:leaf, id}, window_map) do
+    case Map.get(window_map, id) do
+      %{buffer: buf} when is_pid(buf) ->
+        try do
+          BufferServer.display_name(buf)
+        catch
+          :exit, _ -> "[no file]"
+        end
+
+      _ ->
+        "[no file]"
+    end
+  end
+
+  defp first_window_filename({:split, _, left, _right, _size}, window_map) do
+    first_window_filename(left, window_map)
   end
 
   @doc false
   @spec subdivide_window(rect()) :: window_layout()
-  def subdivide_window({row, col, width, height}) when height < 2 do
+  def subdivide_window({row, col, width, height}) do
     %{
       total: {row, col, width, height},
       content: {row, col, width, height},
       modeline: {row + height, col, width, 0},
       sidebar: nil
     }
-  end
-
-  def subdivide_window({row, col, width, height}) do
-    content_height = height - 1
-    modeline_row = row + content_height
-
-    %{
-      total: {row, col, width, height},
-      content: {row, col, width, content_height},
-      modeline: {modeline_row, col, width, 1},
-      sidebar: nil
-    }
-  end
-
-  @doc false
-  @spec single_window_layout_no_modeline(rect()) :: map()
-  def single_window_layout_no_modeline({row, col, width, height}) do
-    base = subdivide_window({row, col, width, height})
-    %{base | content: {row, col, width, height}, modeline: {row + height, col, width, 0}}
   end
 
   @doc """

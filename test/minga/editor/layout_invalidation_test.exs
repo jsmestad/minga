@@ -144,10 +144,10 @@ defmodule Minga.Editor.LayoutInvalidationTest do
       state = with_file_tree(state, 20) |> Layout.invalidate()
       assert is_nil(state.layout)
 
-      # Recompute gives correct layout with file tree
+      # Recompute gives correct layout with file tree (height = rows - tab - status_bar - mini = 21)
       layout = Layout.compute(state)
       assert layout.file_tree != nil
-      assert layout.file_tree == {1, 0, 20, 22}
+      assert layout.file_tree == {1, 0, 20, 21}
 
       # Editor area starts after tree + separator
       {_r, col, _w, _h} = layout.editor_area

@@ -149,6 +149,7 @@ defmodule Minga.Editor.DisplayList do
               file_tree: [],
               agent_panel: [],
               agentic_view: [],
+              status_bar: [],
               minibuffer: [],
               separators: [],
               overlays: [],
@@ -164,6 +165,7 @@ defmodule Minga.Editor.DisplayList do
             file_tree: [DisplayList.draw()],
             agent_panel: [DisplayList.draw()],
             agentic_view: [DisplayList.draw()],
+            status_bar: [DisplayList.draw()],
             minibuffer: [DisplayList.draw()],
             separators: [DisplayList.draw()],
             overlays: [Overlay.t()],
@@ -264,9 +266,8 @@ defmodule Minga.Editor.DisplayList do
         gutter = layer_to_draws(wf.gutter)
         lines = layer_to_draws(wf.lines)
         tildes = layer_to_draws(wf.tilde_lines)
-        modeline = layer_to_draws(wf.modeline)
 
-        offset_draws(gutter ++ lines ++ tildes ++ modeline, row_off, col_off)
+        offset_draws(gutter ++ lines ++ tildes, row_off, col_off)
       end)
 
     splash_draws =
@@ -281,6 +282,7 @@ defmodule Minga.Editor.DisplayList do
         frame.agentic_view ++
         window_draws ++
         frame.separators ++
+        frame.status_bar ++
         frame.agent_panel ++
         frame.minibuffer ++
         splash_draws

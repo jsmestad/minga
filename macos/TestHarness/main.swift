@@ -97,8 +97,8 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
     case .guiBreadcrumb(let segments):
         return ["type": "gui_breadcrumb", "segments": segments]
 
-    case .guiStatusBar(let mode, let cursorLine, let cursorCol, let lineCount, let flags, let lspStatus, let gitBranch, let message, let filetype, let errorCount, let warningCount):
-        return ["type": "gui_status_bar", "mode": Int(mode), "cursor_line": Int(cursorLine), "cursor_col": Int(cursorCol), "line_count": Int(lineCount), "flags": Int(flags), "lsp_status": Int(lspStatus), "git_branch": gitBranch, "message": message, "filetype": filetype, "error_count": Int(errorCount), "warning_count": Int(warningCount)]
+    case .guiStatusBar(let contentKind, let mode, let cursorLine, let cursorCol, let lineCount, let flags, let lspStatus, let gitBranch, let message, let filetype, let errorCount, let warningCount, let modelName, let messageCount, let sessionStatus):
+        return ["type": "gui_status_bar", "content_kind": Int(contentKind), "mode": Int(mode), "cursor_line": Int(cursorLine), "cursor_col": Int(cursorCol), "line_count": Int(lineCount), "flags": Int(flags), "lsp_status": Int(lspStatus), "git_branch": gitBranch, "message": message, "filetype": filetype, "error_count": Int(errorCount), "warning_count": Int(warningCount), "model_name": modelName, "message_count": Int(messageCount), "session_status": Int(sessionStatus)]
 
     case .guiPicker(let visible, let selectedIndex, let title, let query, let items):
         let itemArray = items.map { i -> [String: Any] in

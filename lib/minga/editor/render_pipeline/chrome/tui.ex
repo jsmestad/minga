@@ -11,6 +11,7 @@ defmodule Minga.Editor.RenderPipeline.Chrome.TUI do
   alias Minga.Editor.DisplayList
   alias Minga.Editor.DisplayList.{Cursor, Overlay}
   alias Minga.Editor.Layout
+  alias Minga.Editor.Modeline
   alias Minga.Editor.PickerUI
   alias Minga.Editor.Renderer.Caps
   alias Minga.Editor.Renderer.Minibuffer
@@ -18,8 +19,8 @@ defmodule Minga.Editor.RenderPipeline.Chrome.TUI do
   alias Minga.Editor.RenderPipeline.Chrome
   alias Minga.Editor.RenderPipeline.ChromeHelpers
   alias Minga.Editor.RenderPipeline.Scroll.WindowScroll
-
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.StatusBar.Data, as: StatusBarData
   alias Minga.Editor.TreeRenderer
   alias Minga.Popup.Lifecycle, as: PopupLifecycle
 
@@ -27,8 +28,8 @@ defmodule Minga.Editor.RenderPipeline.Chrome.TUI do
   @type state :: EditorState.t()
 
   @doc """
-  Builds TUI chrome: modeline, tab bar, minibuffer, file tree,
-  separators, and all overlays.
+  Builds TUI chrome: global status bar, tab bar, minibuffer, file tree,
+  separators (vertical + horizontal), and all overlays.
   """
   @spec build(
           state(),
@@ -36,22 +37,15 @@ defmodule Minga.Editor.RenderPipeline.Chrome.TUI do
           %{Minga.Editor.Window.id() => WindowScroll.t()},
           Cursor.t() | nil
         ) :: Chrome.t()
-  def build(state, layout, scrolls, cursor_info) do
+  def build(state, layout, _scrolls, cursor_info) do
     full_viewport = state.viewport
 
-    # Modeline per buffer window
-    {modeline_draws, modeline_click_regions} =
-      Enum.reduce(scrolls, {%{}, []}, fn {_win_id, scroll}, {draws_acc, regions_acc} ->
-        {draws, regions} = ChromeHelpers.render_window_modeline(state, scroll)
-        {Map.put(draws_acc, scroll.win_id, draws), regions ++ regions_acc}
-      end)
+    # Global status bar (one render for the focused window)
+    {status_bar_draws, status_bar_data, modeline_click_regions} =
+      build_status_bar(state, layout)
 
-    # Modeline per agent chat window
-    {modeline_draws, modeline_click_regions} =
-      Chrome.render_agent_modelines(state, layout, modeline_draws, modeline_click_regions)
-
-    # Separators (vertical split borders)
-    separator_draws =
+    # Vertical split borders
+    vertical_separators =
       if EditorState.split?(state) do
         ChromeHelpers.render_separators(
           state.windows.tree,
@@ -62,6 +56,12 @@ defmodule Minga.Editor.RenderPipeline.Chrome.TUI do
       else
         []
       end
+
+    # Horizontal split separators (filename bars)
+    horizontal_separators =
+      ChromeHelpers.render_horizontal_separators(layout.horizontal_separators, state.theme)
+
+    separator_draws = vertical_separators ++ horizontal_separators
 
     # File tree
     tree_draws = TreeRenderer.render(state)
@@ -80,7 +80,8 @@ defmodule Minga.Editor.RenderPipeline.Chrome.TUI do
     regions = Regions.define_regions(layout)
 
     %Chrome{
-      modeline_draws: modeline_draws,
+      status_bar_draws: status_bar_draws,
+      status_bar_data: status_bar_data,
       modeline_click_regions: modeline_click_regions,
       tab_bar: tab_bar_draws,
       tab_bar_click_regions: tab_bar_regions,
@@ -91,6 +92,20 @@ defmodule Minga.Editor.RenderPipeline.Chrome.TUI do
       overlays: overlays,
       regions: regions
     }
+  end
+
+  @spec build_status_bar(state(), Layout.t()) ::
+          {[DisplayList.draw()], StatusBarData.t(), [Minga.Editor.Modeline.click_region()]}
+  defp build_status_bar(_state, %{status_bar: nil}) do
+    {[], nil, []}
+  end
+
+  defp build_status_bar(state, layout) do
+    {sb_row, _sb_col, sb_width, _sb_h} = layout.status_bar
+    status_bar_data = StatusBarData.from_state(state)
+    modeline_data = StatusBarData.to_modeline_data(status_bar_data)
+    {draws, click_regions} = Modeline.render(sb_row, sb_width, modeline_data, state.theme)
+    {draws, status_bar_data, click_regions}
   end
 
   # ── Overlays ──────────────────────────────────────────────────────────────

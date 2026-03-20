@@ -148,22 +148,36 @@ Segments are the path components relative to the project root. For example, `lib
 
 ### 0x76 — gui_status_bar
 
-Status bar data (mode, cursor position, git branch, etc.).
+Status bar data for the focused window. The first byte after the opcode is `content_kind`:
+- `0` — buffer window: show file info, cursor position, git, diagnostics.
+- `1` — agent chat window: show model name, message count, session status.
 
+**Buffer variant (content_kind == 0):**
 ```
-opcode(1) + mode(1) + cursor_line(4) + cursor_col(4) + line_count(4) + flags(1) + lsp_status(1) + git_branch_len(1) + git_branch(git_branch_len) + message_len(2) + message(message_len) + filetype_len(1) + filetype(filetype_len)
-
-Mode values:
-  0 = normal, 1 = insert, 2 = visual, 3 = command, 4 = operator_pending, 5 = search, 6 = replace
-
-Flags bits:
-  bit 0: has_lsp
-  bit 1: has_git
-  bit 2: is_dirty
-
-LSP status values:
-  0 = none, 1 = ready, 2 = initializing, 3 = starting, 4 = error
+opcode(1) + content_kind=0(1) + mode(1) + cursor_line(4) + cursor_col(4) + line_count(4)
++ flags(1) + lsp_status(1) + git_branch_len(1) + git_branch(git_branch_len)
++ message_len(2) + message(message_len) + filetype_len(1) + filetype(filetype_len)
++ error_count(2) + warning_count(2)
 ```
+
+**Agent variant (content_kind == 1):**
+```
+opcode(1) + content_kind=1(1) + mode(1)
++ zeros(4) + zeros(4) + zeros(4)          <- shared header slots, all zero for agent
++ zeros(1) + zeros(1) + zeros(1) + zeros(2) + zeros(1) + zeros(2) + zeros(2)
++ model_name_len(1) + model_name(model_name_len)
++ message_count(4) + session_status(1)
+```
+
+`cursor_line` and `cursor_col` are 1-indexed on the wire.
+
+Mode values: 0=normal, 1=insert, 2=visual, 3=command, 4=operator_pending, 5=search, 6=replace
+
+Flags bits: bit 0=has_lsp, bit 1=has_git, bit 2=is_dirty
+
+LSP status: 0=none, 1=ready, 2=initializing, 3=starting, 4=error
+
+Session status: 0=idle, 1=thinking, 2=tool_executing, 3=error
 
 ### 0x77 — gui_picker
 

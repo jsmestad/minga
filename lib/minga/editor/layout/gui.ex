@@ -27,13 +27,16 @@ defmodule Minga.Editor.Layout.GUI do
     # Editor area is the full viewport minus the minibuffer row.
     editor_area = {0, 0, vp.cols, editor_height}
 
-    # In single-window GUI mode, skip the modeline row (SwiftUI status bar
-    # handles it). In splits, keep modeline per window.
-    window_layouts =
+    # All windows are no-modeline; the global SwiftUI status bar handles status display.
+    {window_layouts, horizontal_separators} =
       if EditorState.split?(state) do
-        Layout.compute_window_layouts(state.windows.tree, editor_area)
+        Layout.compute_window_layouts_with_separators(
+          state.windows.tree,
+          editor_area,
+          state.windows.map
+        )
       else
-        %{state.windows.active => Layout.single_window_layout_no_modeline(editor_area)}
+        {%{state.windows.active => Layout.subdivide_window(editor_area)}, []}
       end
 
     %Layout{
@@ -42,7 +45,9 @@ defmodule Minga.Editor.Layout.GUI do
       file_tree: nil,
       editor_area: editor_area,
       window_layouts: window_layouts,
+      horizontal_separators: horizontal_separators,
       agent_panel: nil,
+      status_bar: nil,
       minibuffer: minibuffer
     }
   end
