@@ -12,15 +12,17 @@ struct PickerOverlay: View {
     let theme: ThemeColors
 
     private let panelWidth: CGFloat = 600
-    private let maxVisibleItems = 18
     private let itemHeight: CGFloat = 24
+    private let maxListHeight: CGFloat = 440
 
     var body: some View {
         if state.visible {
             ZStack {
+                // Dimmed background: non-interactive
                 Color.black.opacity(0.3)
                     .ignoresSafeArea()
                     .allowsHitTesting(false)
+                    .accessibilityHidden(true)
 
                 VStack(spacing: 0) {
                     searchField
@@ -53,7 +55,6 @@ struct PickerOverlay: View {
                 }
                 .offset(y: -60)
             }
-            .allowsHitTesting(false)
             .transition(.opacity.animation(.easeInOut(duration: 0.1)))
         }
     }
@@ -94,14 +95,14 @@ struct PickerOverlay: View {
     @ViewBuilder
     private var resultsList: some View {
         ScrollViewReader { proxy in
-            ScrollView(.vertical, showsIndicators: false) {
+            ScrollView(.vertical, showsIndicators: true) {
                 LazyVStack(spacing: 0) {
-                    ForEach(state.items.prefix(maxVisibleItems)) { item in
+                    ForEach(state.items) { item in
                         itemRow(item)
                     }
                 }
             }
-            .frame(maxHeight: CGFloat(min(state.items.count, maxVisibleItems)) * itemHeight)
+            .frame(maxHeight: min(CGFloat(state.items.count) * itemHeight, maxListHeight))
             .onChange(of: state.selectedIndex) { _, newIndex in
                 withAnimation(nil) {
                     proxy.scrollTo(newIndex, anchor: .center)

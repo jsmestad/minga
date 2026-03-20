@@ -248,7 +248,9 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
             nil
           end
 
-        picker_cmd = ProtocolGUI.encode_gui_picker(picker, has_preview, action_menu)
+        # GUI gets up to 100 items so the native ScrollView can scroll.
+        # The TUI path uses picker.max_visible (terminal rows).
+        picker_cmd = ProtocolGUI.encode_gui_picker(picker, has_preview, action_menu, 100)
         preview_cmd = ProtocolGUI.encode_gui_picker_preview(preview_lines)
         PortManager.send_commands(pm, [picker_cmd, preview_cmd])
     end

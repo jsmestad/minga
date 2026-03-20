@@ -738,12 +738,19 @@ defmodule Minga.Port.Protocol.GUI do
   @type action_menu_state ::
           {[{String.t(), atom()}], non_neg_integer()} | nil
 
-  @spec encode_gui_picker(Minga.Picker.t() | nil, boolean(), action_menu_state()) :: binary()
-  def encode_gui_picker(picker, has_preview \\ false, action_menu \\ nil)
-  def encode_gui_picker(nil, _has_preview, _action_menu), do: <<@op_gui_picker, 0::8>>
+  @spec encode_gui_picker(
+          Minga.Picker.t() | nil,
+          boolean(),
+          action_menu_state(),
+          non_neg_integer()
+        ) ::
+          binary()
+  def encode_gui_picker(picker, has_preview \\ false, action_menu \\ nil, max_items \\ 0)
+  def encode_gui_picker(nil, _has_preview, _action_menu, _max_items), do: <<@op_gui_picker, 0::8>>
 
-  def encode_gui_picker(%Minga.Picker{} = picker, has_preview, action_menu) do
-    items = Enum.take(picker.filtered, picker.max_visible)
+  def encode_gui_picker(%Minga.Picker{} = picker, has_preview, action_menu, max_items) do
+    limit = if max_items > 0, do: max_items, else: picker.max_visible
+    items = Enum.take(picker.filtered, limit)
     title_bytes = :erlang.iolist_to_binary([picker.title])
     query_bytes = :erlang.iolist_to_binary([picker.query])
     filtered_count = length(picker.filtered)
