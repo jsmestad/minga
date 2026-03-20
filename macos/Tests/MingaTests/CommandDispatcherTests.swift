@@ -164,7 +164,12 @@ struct CommandDispatcherRoutingTests {
                                            lspStatus: 1, gitBranch: "main",
                                            message: "-- INSERT --", filetype: "elixir",
                                            errorCount: 3, warningCount: 7,
-                                           modelName: "", messageCount: 0, sessionStatus: 0))
+                                           modelName: "", messageCount: 0, sessionStatus: 0,
+                                           infoCount: 1, hintCount: 2,
+                                           macroRecording: 0, parserStatus: 0, agentStatus: 0,
+                                           gitAdded: 5, gitModified: 3, gitDeleted: 1,
+                                           icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0,
+                                           filename: "editor.ex"))
 
         #expect(gui.statusBarState.mode == 1)
         #expect(gui.statusBarState.cursorLine == 42)

@@ -336,11 +336,30 @@ struct GUIStatusBarDecoderTests {
         appendString8(&data, "elixir") // filetype
         appendU16(&data, 3) // errorCount
         appendU16(&data, 7) // warningCount
+        // Extended buffer fields
+        appendU16(&data, 1) // infoCount
+        appendU16(&data, 2) // hintCount
+        data.append(0) // macroRecording
+        data.append(1) // parserStatus
+        data.append(0) // agentStatus
+        appendU16(&data, 5) // gitAdded
+        appendU16(&data, 3) // gitModified
+        appendU16(&data, 1) // gitDeleted
+        appendString8(&data, "") // icon
+        data.append(0); data.append(0); data.append(0) // icon color RGB
+        appendString16(&data, "editor.ex") // filename
 
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiStatusBar(let contentKind, let mode, let cursorLine, let cursorCol, let lineCount, let flags, let lspStatus, let gitBranch, let message, let filetype, let errorCount, let warningCount, _, _, _) = cmd else {
+        guard case .guiStatusBar(let contentKind, let mode, let cursorLine, let cursorCol,
+                                  let lineCount, let flags, let lspStatus, let gitBranch,
+                                  let message, let filetype, let errorCount, let warningCount,
+                                  _, _, _,
+                                  let infoCount, let hintCount, let macroRecording,
+                                  let parserStatus, let agentStatus,
+                                  let gitAdded, let gitModified, let gitDeleted,
+                                  _, _, _, _, let filename) = cmd else {
             Issue.record("Expected .guiStatusBar"); return
         }
 
@@ -356,6 +375,15 @@ struct GUIStatusBarDecoderTests {
         #expect(filetype == "elixir")
         #expect(errorCount == 3)
         #expect(warningCount == 7)
+        #expect(infoCount == 1)
+        #expect(hintCount == 2)
+        #expect(macroRecording == 0)
+        #expect(parserStatus == 1)
+        #expect(agentStatus == 0)
+        #expect(gitAdded == 5)
+        #expect(gitModified == 3)
+        #expect(gitDeleted == 1)
+        #expect(filename == "editor.ex")
     }
 
     @Test("Decode gui_status_bar agent variant with model and session status")
@@ -382,7 +410,7 @@ struct GUIStatusBarDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiStatusBar(let contentKind, _, _, _, _, _, _, _, _, _, _, _, let modelName, let messageCount, let sessionStatus) = cmd else {
+        guard case .guiStatusBar(let contentKind, _, _, _, _, _, _, _, _, _, _, _, let modelName, let messageCount, let sessionStatus, _, _, _, _, _, _, _, _, _, _, _, _, _) = cmd else {
             Issue.record("Expected .guiStatusBar"); return
         }
 

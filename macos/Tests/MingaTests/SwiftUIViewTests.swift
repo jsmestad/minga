@@ -165,7 +165,10 @@ struct StatusBarViewViewTests {
             contentKind: 0, mode: 0, cursorLine: 42, cursorCol: 9,
             lineCount: 500, flags: 0, lspStatus: 0, gitBranch: "",
             message: "", filetype: "elixir", errorCount: 0, warningCount: 0,
-            modelName: "", messageCount: 0, sessionStatus: 0
+            modelName: "", messageCount: 0, sessionStatus: 0,
+            infoCount: 0, hintCount: 0, macroRecording: 0, parserStatus: 0, agentStatus: 0,
+            gitAdded: 0, gitModified: 0, gitDeleted: 0,
+            icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: ""
         ))
 
         let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: nil)
@@ -173,7 +176,7 @@ struct StatusBarViewViewTests {
         let texts = body.findAll(ViewInspectorQuery.text)
         let strings = texts.compactMap { try? $0.string() }
 
-        #expect(strings.contains("42:9"))
+        #expect(strings.contains("Ln 42, Col 9"))
         #expect(strings.contains("NORMAL"))
         #expect(strings.contains("elixir"))
     }
@@ -185,7 +188,10 @@ struct StatusBarViewViewTests {
             contentKind: 1, mode: 0, cursorLine: 0, cursorCol: 0,
             lineCount: 0, flags: 0, lspStatus: 0, gitBranch: "",
             message: "", filetype: "", errorCount: 0, warningCount: 0,
-            modelName: "claude-3-5-sonnet", messageCount: 7, sessionStatus: 0
+            modelName: "claude-3-5-sonnet", messageCount: 7, sessionStatus: 0,
+            infoCount: 0, hintCount: 0, macroRecording: 0, parserStatus: 0, agentStatus: 0,
+            gitAdded: 0, gitModified: 0, gitDeleted: 0,
+            icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: ""
         ))
 
         let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: nil)
@@ -204,7 +210,10 @@ struct StatusBarViewViewTests {
             contentKind: 0, mode: 0, cursorLine: 1, cursorCol: 1,
             lineCount: 1, flags: 0x02, lspStatus: 0, gitBranch: "main",
             message: "", filetype: "", errorCount: 0, warningCount: 0,
-            modelName: "", messageCount: 0, sessionStatus: 0
+            modelName: "", messageCount: 0, sessionStatus: 0,
+            infoCount: 0, hintCount: 0, macroRecording: 0, parserStatus: 0, agentStatus: 0,
+            gitAdded: 0, gitModified: 0, gitDeleted: 0,
+            icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: ""
         ))
 
         let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: nil)
@@ -222,7 +231,10 @@ struct StatusBarViewViewTests {
             contentKind: 0, mode: 0, cursorLine: 1, cursorCol: 1,
             lineCount: 1, flags: 0, lspStatus: 0, gitBranch: "",
             message: "", filetype: "", errorCount: 3, warningCount: 7,
-            modelName: "", messageCount: 0, sessionStatus: 0
+            modelName: "", messageCount: 0, sessionStatus: 0,
+            infoCount: 0, hintCount: 0, macroRecording: 0, parserStatus: 0, agentStatus: 0,
+            gitAdded: 0, gitModified: 0, gitDeleted: 0,
+            icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: ""
         ))
 
         let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: nil)

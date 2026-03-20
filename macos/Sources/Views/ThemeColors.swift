@@ -166,17 +166,10 @@ final class ThemeColors {
         }
     }
 
-    /// Helper to create a Color from a 24-bit RGB integer.
-    private static func color(_ rgb: UInt32) -> Color {
-        Color(
-            red: Double((rgb >> 16) & 0xFF) / 255.0,
-            green: Double((rgb >> 8) & 0xFF) / 255.0,
-            blue: Double(rgb & 0xFF) / 255.0
-        )
-    }
 }
 
-/// Module-level helper matching the static method for use in default values.
+/// File-private helper to create a Color from a 24-bit RGB integer.
+/// Used by ThemeColors property defaults and applySlot.
 private func color(_ rgb: UInt32) -> Color {
     Color(
         red: Double((rgb >> 16) & 0xFF) / 255.0,
