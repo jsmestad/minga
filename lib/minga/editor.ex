@@ -158,6 +158,12 @@ defmodule Minga.Editor do
     # Refresh file tree git status when any buffer is saved.
     Minga.Events.subscribe(:buffer_saved)
 
+    # Tool manager progress: show install/update status in the status line.
+    Minga.Events.subscribe(:tool_install_started)
+    Minga.Events.subscribe(:tool_install_progress)
+    Minga.Events.subscribe(:tool_install_complete)
+    Minga.Events.subscribe(:tool_install_failed)
+
     # Monitor all initial buffers so we get :DOWN when they die.
     all_initial_pids =
       state.buffers.list ++
@@ -863,6 +869,48 @@ defmodule Minga.Editor do
     {:noreply, refresh_tree_git_status(state)}
   end
 
+  # ── Tool manager events ────────────────────────────────────────────────────
+
+  def handle_info({:minga_event, :tool_install_started, %{name: name}}, state) do
+    state = %{state | status_msg: "Installing #{name}..."}
+    state = maybe_refresh_tool_picker(state)
+    {:noreply, render(state)}
+  end
+
+  def handle_info({:minga_event, :tool_install_progress, %{name: name, message: msg}}, state) do
+    state = %{state | status_msg: "#{name}: #{msg}"}
+    {:noreply, render(state)}
+  end
+
+  def handle_info({:minga_event, :tool_install_complete, %{name: name, version: version}}, state) do
+    state = log_message(state, "Tool installed: #{name} v#{version}")
+    state = %{state | status_msg: "✓ #{name} v#{version} installed"}
+    state = maybe_refresh_tool_picker(state)
+    # Clear the success message after 5 seconds
+    Process.send_after(self(), :clear_tool_status, 5_000)
+    {:noreply, render(state)}
+  end
+
+  def handle_info({:minga_event, :tool_install_failed, %{name: name, reason: reason}}, state) do
+    reason_str = if is_binary(reason), do: reason, else: inspect(reason)
+    state = log_message(state, "Tool install failed: #{name} — #{reason_str}")
+    state = %{state | status_msg: "✕ #{name} install failed: #{reason_str}"}
+    state = maybe_refresh_tool_picker(state)
+    {:noreply, render(state)}
+  end
+
+  def handle_info(:clear_tool_status, state) do
+    # Only clear if the status message is still a tool status
+    state =
+      if String.starts_with?(state.status_msg || "", ["✓ ", "Installing ", "Updating "]) do
+        %{state | status_msg: nil}
+      else
+        state
+      end
+
+    {:noreply, render(state)}
+  end
+
   def handle_info(_msg, state) do
     {:noreply, state}
   end
@@ -1339,6 +1387,55 @@ defmodule Minga.Editor do
         EditorState.switch_buffer(state, i)
     end
   end
+
+  defp handle_gui_action(state, {:tool_install, name_str}) do
+    name = String.to_existing_atom(name_str)
+
+    case Minga.Tool.Manager.install(name) do
+      :ok -> %{state | status_msg: "Installing #{name_str}..."}
+      {:error, reason} -> %{state | status_msg: "Cannot install #{name_str}: #{reason}"}
+    end
+  rescue
+    ArgumentError -> %{state | status_msg: "Unknown tool: #{name_str}"}
+  end
+
+  defp handle_gui_action(state, {:tool_uninstall, name_str}) do
+    name = String.to_existing_atom(name_str)
+
+    case Minga.Tool.Manager.uninstall(name) do
+      :ok -> %{state | status_msg: "Uninstalled #{name_str}"}
+      {:error, reason} -> %{state | status_msg: "Cannot uninstall #{name_str}: #{reason}"}
+    end
+  rescue
+    ArgumentError -> %{state | status_msg: "Unknown tool: #{name_str}"}
+  end
+
+  defp handle_gui_action(state, {:tool_update, name_str}) do
+    name = String.to_existing_atom(name_str)
+
+    case Minga.Tool.Manager.update(name) do
+      :ok -> %{state | status_msg: "Updating #{name_str}..."}
+      {:error, reason} -> %{state | status_msg: "Cannot update #{name_str}: #{reason}"}
+    end
+  rescue
+    ArgumentError -> %{state | status_msg: "Unknown tool: #{name_str}"}
+  end
+
+  defp handle_gui_action(state, :tool_dismiss) do
+    # The tool manager panel is closed; no state change needed since
+    # visibility is driven by the BEAM's render cycle
+    state
+  end
+
+  # Refreshes the tool manager picker items if it's currently open.
+  # Called when tool install events change tool status so the user
+  # sees live updates (spinner → checkmark, etc.).
+  @spec maybe_refresh_tool_picker(state()) :: state()
+  defp maybe_refresh_tool_picker(%{picker_ui: %{source: Minga.Tool.PickerSource}} = state) do
+    Minga.Editor.PickerUI.refresh_items(state)
+  end
+
+  defp maybe_refresh_tool_picker(state), do: state
 
   # Moves the file tree cursor to the given index and performs the action.
   @spec gui_tree_action(state(), non_neg_integer(), :click | :toggle) :: state()

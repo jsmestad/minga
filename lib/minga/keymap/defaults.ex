@@ -80,6 +80,7 @@ defmodule Minga.Keymap.Defaults do
     {[{?c, @none}, {?l, @none}, {?r, @none}], :lsp_restart, "Restart LSP"},
     {[{?c, @none}, {?l, @none}, {?s, @none}], :lsp_stop, "Stop LSP"},
     {[{?c, @none}, {?l, @none}, {?S, @none}], :lsp_start, "Start LSP"},
+    {[{?c, @none}, {?l, @none}, {?I, @none}], :tool_manage, "Manage tools"},
 
     # ── Git ──────────────────────────────────────────────────────────────────────
     {[{?g, @none}, {?s, @none}], :git_stage_hunk, "Stage hunk"},

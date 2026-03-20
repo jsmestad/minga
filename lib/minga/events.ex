@@ -89,6 +89,12 @@ defmodule Minga.Events do
           | :buffer_changed
           | :content_replaced
           | :mode_changed
+          | :tool_install_started
+          | :tool_install_progress
+          | :tool_install_complete
+          | :tool_install_failed
+          | :tool_uninstall_complete
+          | :tool_missing
 
   @typedoc "Typed event payloads. Each topic has a specific struct."
   @type payload ::

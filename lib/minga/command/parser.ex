@@ -65,6 +65,9 @@ defmodule Minga.Command.Parser do
           | {:agent_pick_model, []}
           | {:agent_cycle_model, []}
           | {:agent_cycle_thinking, []}
+          | {:tool_install_named, [String.t()]}
+          | {:tool_uninstall_named, [String.t()]}
+          | {:tool_update_named, [String.t()]}
           | {:goto_line, pos_integer()}
           | {:set, atom()}
           | {:setglobal, atom()}
@@ -150,6 +153,14 @@ defmodule Minga.Command.Parser do
   defp do_parse("agent-cycle-model"), do: {:agent_cycle_model, []}
   defp do_parse("agent-summarize"), do: {:agent_summarize, []}
   defp do_parse("agent-thinking"), do: {:agent_cycle_thinking, []}
+  defp do_parse("ToolInstall " <> name), do: {:tool_install_named, [String.trim(name)]}
+  defp do_parse("ToolUninstall " <> name), do: {:tool_uninstall_named, [String.trim(name)]}
+  defp do_parse("ToolUpdate " <> name), do: {:tool_update_named, [String.trim(name)]}
+  defp do_parse("ToolInstall"), do: {:tool_install, []}
+  defp do_parse("ToolUninstall"), do: {:tool_uninstall, []}
+  defp do_parse("ToolUpdate"), do: {:tool_update, []}
+  defp do_parse("ToolList"), do: {:tool_list, []}
+  defp do_parse("ToolManage"), do: {:tool_manage, []}
   defp do_parse("warnings"), do: {:view_warnings, []}
   defp do_parse("vsplit"), do: {:split_vertical, []}
   defp do_parse("vs"), do: {:split_vertical, []}

@@ -39,6 +39,9 @@ final class GUIState {
     /// Bottom panel container state.
     let bottomPanelState = BottomPanelState()
 
+    /// Tool manager panel state.
+    let toolManagerState = ToolManagerState()
+
     /// Semantic window content from gui_window_content (0x80).
     /// Keyed by windowId. Cleared each frame before dispatch.
     var windowContents: [UInt16: GUIWindowContent] = [:]

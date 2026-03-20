@@ -254,6 +254,33 @@ final class CommandDispatcher {
             } else {
                 guiState.bottomPanelState.hide()
             }
+
+        case .guiToolManager(let visible, let filter, let selectedIndex, let rawTools):
+            if visible {
+                let tools = rawTools.map { t in
+                    ToolEntry(
+                        id: t.name,
+                        name: t.name,
+                        label: t.label,
+                        description: t.description,
+                        category: ToolCategory(rawValue: t.category) ?? .lspServer,
+                        status: ToolStatus(rawValue: t.status) ?? .notInstalled,
+                        method: ToolMethod(rawValue: t.method) ?? .npm,
+                        languages: t.languages,
+                        version: t.version,
+                        homepage: t.homepage,
+                        provides: t.provides
+                    )
+                }
+                guiState.toolManagerState.update(
+                    visible: true,
+                    filter: ToolFilter(rawValue: filter) ?? .all,
+                    selectedIndex: selectedIndex,
+                    tools: tools
+                )
+            } else {
+                guiState.toolManagerState.hide()
+            }
         }
     }
 

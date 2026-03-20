@@ -1,0 +1,43 @@
+defmodule Minga.Tool.UpdatePickerSource do
+  @moduledoc """
+  Picker source for updating installed tools.
+
+  Shows installed tools. Selecting one triggers an update (uninstall + reinstall).
+  """
+
+  @behaviour Minga.Picker.Source
+
+  alias Minga.Picker.Item
+  alias Minga.Tool.Manager, as: ToolManager
+
+  @impl true
+  @spec title() :: String.t()
+  def title, do: "Update Tool"
+
+  @impl true
+  @spec candidates(term()) :: [Item.t()]
+  def candidates(_context) do
+    ToolManager.all_installed()
+    |> Enum.sort_by(& &1.name)
+    |> Enum.map(fn inst ->
+      %Item{
+        id: inst.name,
+        label: "#{inst.name} v#{inst.version}",
+        description: "#{inst.method}"
+      }
+    end)
+  end
+
+  @impl true
+  @spec on_select(Item.t(), term()) :: term()
+  def on_select(%Item{id: name}, state) do
+    case ToolManager.update(name) do
+      :ok -> %{state | status_msg: "Updating #{name}..."}
+      {:error, reason} -> %{state | status_msg: "Failed to update #{name}: #{reason}"}
+    end
+  end
+
+  @impl true
+  @spec on_cancel(term()) :: term()
+  def on_cancel(state), do: state
+end
