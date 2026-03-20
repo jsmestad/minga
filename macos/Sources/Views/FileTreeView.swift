@@ -199,6 +199,9 @@ struct FileTreeView: View {
                 .truncationMode(.tail)
 
             Spacer(minLength: 0)
+
+            // Git status dot
+            gitStatusDot(entry)
         }
         .padding(.leading, leadingPadding(entry))
         .padding(.trailing, 8)
@@ -244,6 +247,29 @@ struct FileTreeView: View {
     }
 
     // MARK: - Indent guides
+
+    // MARK: - Git status dot
+
+    /// Small colored dot indicating git status, right-aligned in the row.
+    @ViewBuilder
+    private func gitStatusDot(_ entry: FileTreeEntry) -> some View {
+        if let color = gitDotColor(entry) {
+            Circle()
+                .fill(color)
+                .frame(width: 6, height: 6)
+                .padding(.trailing, 2)
+        }
+    }
+
+    private func gitDotColor(_ entry: FileTreeEntry) -> Color? {
+        switch entry.gitStatus {
+        case 1: return theme.treeGitModified
+        case 2: return theme.treeGitStaged
+        case 3: return theme.treeGitUntracked
+        case 4: return theme.gutterErrorFg  // conflict
+        default: return nil
+        }
+    }
 
     /// Draws thin vertical indent guide lines using a lightweight Canvas.
     @ViewBuilder
