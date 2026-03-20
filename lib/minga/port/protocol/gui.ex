@@ -488,8 +488,12 @@ defmodule Minga.Port.Protocol.GUI do
     icon_bytes = :erlang.iolist_to_binary([icon])
     name_bytes = :erlang.iolist_to_binary([entry.name])
 
-    <<flags::8, entry.depth::8, git_status::8, byte_size(icon_bytes)::8, icon_bytes::binary,
-      byte_size(name_bytes)::16, name_bytes::binary>>
+    # Stable 32-bit hash of the file path so the GUI can use it as a
+    # persistent SwiftUI identity across tree updates.
+    path_hash = :erlang.phash2(entry.path, 0xFFFFFFFF)
+
+    <<path_hash::32, flags::8, entry.depth::8, git_status::8, byte_size(icon_bytes)::8,
+      icon_bytes::binary, byte_size(name_bytes)::16, name_bytes::binary>>
   end
 
   # Nerd Font folder icon (nf-md-folder)

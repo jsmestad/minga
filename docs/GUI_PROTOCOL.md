@@ -45,7 +45,10 @@ File tree sidebar entries for the native sidebar view.
 opcode(1) + selected_index(2) + tree_width(2) + entry_count(2) + entries...
 
 Per entry:
-  flags(1) + depth(1) + git_status(1) + icon_len(1) + icon(icon_len) + name_len(2) + name(name_len)
+  path_hash(4) + flags(1) + depth(1) + git_status(1) + icon_len(1) + icon(icon_len) + name_len(2) + name(name_len)
+
+Path hash: erlang:phash2 of the full file path, mod 2^32. Stable across tree
+updates so GUI frontends can use it as a persistent view identity for diffing.
 
 Flags bits:
   bit 0: is_dir

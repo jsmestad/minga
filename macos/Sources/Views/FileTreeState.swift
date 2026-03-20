@@ -4,8 +4,13 @@ import SwiftUI
 
 /// A single file tree entry for SwiftUI rendering.
 struct FileTreeEntry: Identifiable {
-    /// Use the array index as ID since paths can be long and we rebuild every update.
-    let id: Int
+    /// Stable 32-bit hash of the file path, sent by the BEAM. Persists across
+    /// tree updates so SwiftUI's diffing correctly identifies unchanged rows
+    /// instead of treating every row below a change as new.
+    let id: UInt32
+    /// Array index within the current visible entries. Used for click actions
+    /// (the BEAM expects an index, not a hash).
+    let index: Int
     let isDir: Bool
     let isExpanded: Bool
     let isSelected: Bool
@@ -31,7 +36,8 @@ final class FileTreeState {
         self.visible = true
         self.entries = rawEntries.enumerated().map { index, entry in
             FileTreeEntry(
-                id: index,
+                id: entry.pathHash,
+                index: index,
                 isDir: entry.isDir,
                 isExpanded: entry.isExpanded,
                 isSelected: entry.isSelected,

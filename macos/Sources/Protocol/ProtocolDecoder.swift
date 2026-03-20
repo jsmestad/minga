@@ -161,6 +161,7 @@ struct GUIWhichKeyBinding: Sendable {
 
 /// A single file tree entry decoded from the gui_file_tree protocol message.
 struct GUIFileTreeEntry: Sendable {
+    let pathHash: UInt32
     let isDir: Bool
     let isExpanded: Bool
     let isSelected: Bool
@@ -408,19 +409,22 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         entries.reserveCapacity(entryCount)
         var pos = rest + 6
         for _ in 0..<entryCount {
-            guard data.count >= pos + 4 else { throw ProtocolDecodeError.malformed }
-            let flags = data[pos]
-            let depth = data[pos + 1]
-            let gitStatus = data[pos + 2]
-            let iconLen = Int(data[pos + 3])
-            guard data.count >= pos + 4 + iconLen + 2 else { throw ProtocolDecodeError.malformed }
-            let iconData = data[(pos + 4)..<(pos + 4 + iconLen)]
+            // path_hash:4, flags:1, depth:1, git_status:1, icon_len:1, icon, name_len:2, name
+            guard data.count >= pos + 8 else { throw ProtocolDecodeError.malformed }
+            let pathHash = readU32(data, pos)
+            let flags = data[pos + 4]
+            let depth = data[pos + 5]
+            let gitStatus = data[pos + 6]
+            let iconLen = Int(data[pos + 7])
+            guard data.count >= pos + 8 + iconLen + 2 else { throw ProtocolDecodeError.malformed }
+            let iconData = data[(pos + 8)..<(pos + 8 + iconLen)]
             let icon = String(data: iconData, encoding: .utf8) ?? ""
-            let nameLen = Int(readU16(data, pos + 4 + iconLen))
-            guard data.count >= pos + 6 + iconLen + nameLen else { throw ProtocolDecodeError.malformed }
-            let nameData = data[(pos + 6 + iconLen)..<(pos + 6 + iconLen + nameLen)]
+            let nameLen = Int(readU16(data, pos + 8 + iconLen))
+            guard data.count >= pos + 10 + iconLen + nameLen else { throw ProtocolDecodeError.malformed }
+            let nameData = data[(pos + 10 + iconLen)..<(pos + 10 + iconLen + nameLen)]
             let name = String(data: nameData, encoding: .utf8) ?? ""
             entries.append(GUIFileTreeEntry(
+                pathHash: pathHash,
                 isDir: flags & 0x01 != 0,
                 isExpanded: flags & 0x02 != 0,
                 isSelected: flags & 0x04 != 0,
@@ -429,7 +433,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                 icon: icon,
                 name: name
             ))
-            pos += 6 + iconLen + nameLen
+            pos += 10 + iconLen + nameLen
         }
         return (.guiFileTree(selectedIndex: selectedIndex, treeWidth: treeWidth, entries: entries), pos - offset)
 

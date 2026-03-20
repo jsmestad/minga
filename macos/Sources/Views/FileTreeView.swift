@@ -26,7 +26,7 @@ struct FileTreeView: View {
 
     @State private var sidebarWidth: CGFloat = 240
     @State private var isDraggingResize: Bool = false
-    @State private var hoveredEntryId: Int? = nil
+    @State private var hoveredEntryId: UInt32? = nil
 
     var body: some View {
         HStack(spacing: 0) {
@@ -122,8 +122,11 @@ struct FileTreeView: View {
                 .padding(.top, 2)
             }
             .onChange(of: fileTreeState.selectedIndex) { _, newIndex in
-                withAnimation(nil) {
-                    proxy.scrollTo(newIndex, anchor: .center)
+                // Look up the stable ID of the selected entry to scroll to it.
+                if let selectedEntry = fileTreeState.entries.first(where: { $0.index == newIndex }) {
+                    withAnimation(nil) {
+                        proxy.scrollTo(selectedEntry.id, anchor: .center)
+                    }
                 }
             }
         }
@@ -169,14 +172,14 @@ struct FileTreeView: View {
         }
         .onTapGesture(count: 2) {
             // Double-click: always open (files open permanently)
-            encoder?.sendFileTreeClick(index: UInt16(entry.id))
+            encoder?.sendFileTreeClick(index: UInt16(entry.index))
         }
         .onTapGesture {
             // Single-click: toggle directories, select/preview files
             if entry.isDir {
-                encoder?.sendFileTreeToggle(index: UInt16(entry.id))
+                encoder?.sendFileTreeToggle(index: UInt16(entry.index))
             } else {
-                encoder?.sendFileTreeClick(index: UInt16(entry.id))
+                encoder?.sendFileTreeClick(index: UInt16(entry.index))
             }
         }
     }
