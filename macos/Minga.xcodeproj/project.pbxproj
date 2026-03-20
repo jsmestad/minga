@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		00F882ED2F8F2943E71E34BC /* CoreTextShaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = 48E21C30D142028698027567 /* CoreTextShaders.metal */; };
 		03FDC63893F3CAA82BCE2A49 /* TabBarState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A7AA0437B5C38BA8A8A80D5 /* TabBarState.swift */; };
+		058481A528AFB6C7225A067D /* MouseInputTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA65B90C0347C6496C7FA986 /* MouseInputTests.swift */; };
 		07C32C28178AE5675ACF4539 /* CommandDispatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = C21AB9021A9BCB034C13109A /* CommandDispatcher.swift */; };
 		07C6F28E3CD1A55ABD5344AA /* SlotAllocatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F8372175FF223C9260B00C4 /* SlotAllocatorTests.swift */; };
 		0A5FA884302FD99B07B78852 /* AgentChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD14027C8C7BD17057DE820B /* AgentChatView.swift */; };
@@ -85,6 +86,7 @@
 		A78FBA1CD5BB02EEBA8ACB45 /* ProtocolConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = C441427A427E23B912F70092 /* ProtocolConstants.swift */; };
 		AB804A6366BEFE62E30C929B /* WindowContentRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC335D7973205BF8B7EDD8EA /* WindowContentRenderer.swift */; };
 		AE619C9C5E8A6C337F6283F1 /* EditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C26E064D810299C0302F439 /* EditorView.swift */; };
+		B0A5712B943D48F8F72C1DDA /* KeyboardInputTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E4E980D53CCCE228BA59BD5 /* KeyboardInputTests.swift */; };
 		B12FA22E8F25CE3E5F55366F /* WindowContentRendererTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 620F7F967502D4F1F7AE8F03 /* WindowContentRendererTests.swift */; };
 		B2EFBC6B76ABF724B8C9B04F /* StatusBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E892F827AFBE959F9DF25C05 /* StatusBarView.swift */; };
 		B3CE9FF4E42438A1A72BD156 /* CompletionOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF1919291250D9AD1375A8C9 /* CompletionOverlay.swift */; };
@@ -151,12 +153,14 @@
 		79F5D551302873BE8F7240ED /* FontManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FontManager.swift; sourceTree = "<group>"; };
 		7A67102D81C9E70546F1019B /* MessagesContentState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessagesContentState.swift; sourceTree = "<group>"; };
 		7CDC524DEAE5431F6B18A31B /* ProtocolEncoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolEncoder.swift; sourceTree = "<group>"; };
+		7E4E980D53CCCE228BA59BD5 /* KeyboardInputTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardInputTests.swift; sourceTree = "<group>"; };
 		7E7AEABDC6CCBE796A539322 /* CoreTextLineRendererTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreTextLineRendererTests.swift; sourceTree = "<group>"; };
 		83165B89231936674C54B513 /* EditorNSView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorNSView.swift; sourceTree = "<group>"; };
 		89DAA6AEFA6A62A1172EABF2 /* minga-mac */ = {isa = PBXFileReference; includeInIndex = 0; path = "minga-mac"; sourceTree = BUILT_PRODUCTS_DIR; };
 		92C0836F0D4150126F181C05 /* PickerState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PickerState.swift; sourceTree = "<group>"; };
 		9F8372175FF223C9260B00C4 /* SlotAllocatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SlotAllocatorTests.swift; sourceTree = "<group>"; };
 		A64B96EAA100E627F4E8E0A1 /* ToolManagerState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolManagerState.swift; sourceTree = "<group>"; };
+		AA65B90C0347C6496C7FA986 /* MouseInputTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MouseInputTests.swift; sourceTree = "<group>"; };
 		AFE9DFE38318A361BEF0B773 /* MessagesContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessagesContentView.swift; sourceTree = "<group>"; };
 		BD2DE335B00721CBB29329F9 /* FontTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FontTests.swift; sourceTree = "<group>"; };
 		BEA9C2BB0C840BE88B0FEA52 /* CompletionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompletionState.swift; sourceTree = "<group>"; };
@@ -319,7 +323,9 @@
 				E2C629D58FF3305F579BA5E2 /* GUIActionEncoderTests.swift */,
 				754C68BAFE0C4DB553BFD06A /* GUIChromeDecoderTests.swift */,
 				F6C3196976BC934B3112EF96 /* IMECompositionTests.swift */,
+				7E4E980D53CCCE228BA59BD5 /* KeyboardInputTests.swift */,
 				5F5F10DF600E92632AD966A5 /* LineBufferTests.swift */,
+				AA65B90C0347C6496C7FA986 /* MouseInputTests.swift */,
 				47BD56B7D6D195D236F9BF40 /* ProtocolEncoderBinaryTests.swift */,
 				F220A60775A252A728477659 /* ProtocolTests.swift */,
 				211424F30BBE8A57852D5630 /* ScrollAccumulatorTests.swift */,
@@ -519,12 +525,14 @@
 				36E0C059965477465E15CC02 /* GUIState.swift in Sources */,
 				854BCC1151B43E9A161C95B5 /* IMEComposition.swift in Sources */,
 				1631D7B76B33CD897C48F263 /* IMECompositionTests.swift in Sources */,
+				B0A5712B943D48F8F72C1DDA /* KeyboardInputTests.swift in Sources */,
 				63A874F653524DCE4E046BDD /* LineBuffer.swift in Sources */,
 				C7F0701B0E9FCF7E0293E84D /* LineBufferTests.swift in Sources */,
 				26DAAF2C2CCC2713AD30C539 /* LineTextureAtlas.swift in Sources */,
 				8D55764B8CF042B4C48AA5D0 /* MessagesContentState.swift in Sources */,
 				931A6127210D4ED441AC04B2 /* MessagesContentView.swift in Sources */,
 				8B944E100C80DFF282D25D4C /* MingaWindow.swift in Sources */,
+				058481A528AFB6C7225A067D /* MouseInputTests.swift in Sources */,
 				F560D385A1FB0A46824F7B1F /* PickerOverlay.swift in Sources */,
 				32171233224FC90E1E956631 /* PickerState.swift in Sources */,
 				5CADBD593C49EE44EBBD854E /* PortLogger.swift in Sources */,
