@@ -158,6 +158,47 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
         return ["type": "gui_tool_manager", "visible": visible, "filter": Int(filter),
                 "selected_index": Int(selectedIndex), "tools": toolArray]
 
+    case .guiGutter(let data):
+        let entries = data.entries.map { e -> [String: Any] in
+            ["buf_line": Int(e.bufLine),
+             "display_type": Int(e.displayType.rawValue),
+             "sign_type": Int(e.signType.rawValue)]
+        }
+        return ["type": "gui_gutter", "window_id": Int(data.windowId),
+                "content_row": Int(data.contentRow), "content_col": Int(data.contentCol),
+                "content_height": Int(data.contentHeight), "is_active": data.isActive,
+                "cursor_line": Int(data.cursorLine),
+                "line_number_style": Int(data.lineNumberStyle.rawValue),
+                "line_number_width": Int(data.lineNumberWidth),
+                "sign_col_width": Int(data.signColWidth),
+                "entries": entries]
+
+    case .guiWindowContent(let data):
+        let rows = data.rows.map { row -> [String: Any] in
+            let spans = row.spans.map { s -> [String: Any] in
+                ["start_col": Int(s.startCol), "end_col": Int(s.endCol),
+                 "fg": Int(s.fg), "bg": Int(s.bg), "attrs": Int(s.attrs),
+                 "font_weight": Int(s.fontWeight), "font_id": Int(s.fontId)]
+            }
+            return ["row_type": Int(row.rowType.rawValue), "buf_line": Int(row.bufLine),
+                    "content_hash": Int(row.contentHash), "text": row.text, "spans": spans]
+        }
+        var result: [String: Any] = [
+            "type": "gui_window_content", "window_id": Int(data.windowId),
+            "full_refresh": data.fullRefresh,
+            "cursor_row": Int(data.cursorRow), "cursor_col": Int(data.cursorCol),
+            "cursor_shape": Int(data.cursorShape.rawValue),
+            "rows": rows,
+            "search_match_count": data.searchMatches.count,
+            "diagnostic_count": data.diagnosticUnderlines.count
+        ]
+        if let sel = data.selection {
+            result["selection"] = ["type": Int(sel.type.rawValue),
+                                   "start_row": Int(sel.startRow), "start_col": Int(sel.startCol),
+                                   "end_row": Int(sel.endRow), "end_col": Int(sel.endCol)]
+        }
+        return result
+
     default:
         return nil
     }

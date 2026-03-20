@@ -328,6 +328,109 @@ defmodule Minga.Integration.GUIProtocolTest do
     end
   end
 
+  describe "gui_gutter" do
+    test "round-trips gutter with entries", %{port: port} do
+      gutter_data = %{
+        window_id: 1,
+        content_row: 0,
+        content_col: 5,
+        content_height: 24,
+        is_active: true,
+        cursor_line: 10,
+        line_number_style: :hybrid,
+        line_number_width: 4,
+        sign_col_width: 1,
+        entries: [
+          %{buf_line: 8, display_type: :normal, sign_type: :git_added},
+          %{buf_line: 9, display_type: :fold_start, sign_type: :none},
+          %{buf_line: 10, display_type: :wrap_continuation, sign_type: :diag_error}
+        ]
+      }
+
+      cmd = ProtocolGUI.encode_gui_gutter(gutter_data)
+      Port.command(port, cmd)
+
+      assert_receive {^port, {:data, json}}, 5_000
+      decoded = Jason.decode!(json)
+
+      assert decoded["type"] == "gui_gutter"
+      assert decoded["window_id"] == 1
+      assert decoded["content_col"] == 5
+      assert decoded["content_height"] == 24
+      assert decoded["is_active"] == true
+      assert decoded["cursor_line"] == 10
+      assert decoded["line_number_style"] == 0
+      assert decoded["line_number_width"] == 4
+      assert decoded["sign_col_width"] == 1
+      assert length(decoded["entries"]) == 3
+
+      [e1, e2, e3] = decoded["entries"]
+      assert e1["buf_line"] == 8
+      assert e1["display_type"] == 0
+      assert e1["sign_type"] == 1
+      assert e2["display_type"] == 1
+      assert e3["display_type"] == 3
+      assert e3["sign_type"] == 4
+    end
+  end
+
+  describe "gui_completion visible" do
+    test "round-trips visible completion with items", %{port: port} do
+      comp = %Minga.Completion{
+        items: [],
+        filtered: [
+          %{
+            label: "def",
+            kind: :keyword,
+            insert_text: "def",
+            filter_text: "def",
+            detail: "keyword",
+            documentation: "",
+            sort_text: "def",
+            text_edit: nil,
+            additional_text_edits: [],
+            deprecated: false,
+            preselect: false,
+            data: nil,
+            commit_characters: []
+          },
+          %{
+            label: "defmodule",
+            kind: :keyword,
+            insert_text: "defmodule",
+            filter_text: "defmodule",
+            detail: "keyword",
+            documentation: "",
+            sort_text: "defmodule",
+            text_edit: nil,
+            additional_text_edits: [],
+            deprecated: false,
+            preselect: false,
+            data: nil,
+            commit_characters: []
+          }
+        ],
+        selected: 0,
+        trigger_position: {5, 0},
+        max_visible: 10
+      }
+
+      cmd = ProtocolGUI.encode_gui_completion(comp, 5, 0)
+      Port.command(port, cmd)
+
+      assert_receive {^port, {:data, json}}, 5_000
+      decoded = Jason.decode!(json)
+
+      assert decoded["type"] == "gui_completion"
+      assert decoded["visible"] == true
+      assert decoded["anchor_row"] == 5
+      assert decoded["anchor_col"] == 0
+      assert decoded["selected_index"] == 0
+      assert length(decoded["items"]) == 2
+      assert hd(decoded["items"])["label"] == "def"
+    end
+  end
+
   describe "gui_cursorline" do
     test "round-trips cursorline row and bg color", %{port: port} do
       cmd = ProtocolGUI.encode_gui_cursorline(12, 0x2C323C)
