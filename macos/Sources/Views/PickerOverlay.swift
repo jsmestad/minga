@@ -1,13 +1,9 @@
-/// Native command palette / file finder with Zed-quality visual polish
-/// and Helm-level features.
+/// Native command palette / file finder with Helm-level density.
 ///
-/// Centered floating panel with:
-/// - Search field with candidate count (X/Y)
-/// - Match highlighting (matched characters in accent color)
-/// - Two-line layout for file items (name + path)
-/// - Keybinding annotations for commands
-/// - Multi-select checkmarks
-/// - Optional preview pane (split layout when source supports preview)
+/// Centered floating panel with dense single-line items. Preview happens
+/// in the editor area behind the picker (the BEAM switches the active
+/// buffer on navigation), not in an inline pane. This matches Helm/Ivy's
+/// approach: the picker is a fast selection tool, the editor is the preview.
 
 import SwiftUI
 
@@ -15,84 +11,49 @@ struct PickerOverlay: View {
     let state: PickerState
     let theme: ThemeColors
 
-    private let panelWidth: CGFloat = 560
-    private let previewPanelWidth: CGFloat = 900
-    private let maxVisibleItems = 14
-    private let singleLineItemHeight: CGFloat = 28
-    private let twoLineItemHeight: CGFloat = 44
-
-    /// Effective panel width: wider when preview is shown.
-    private var effectiveWidth: CGFloat {
-        state.hasPreview ? previewPanelWidth : panelWidth
-    }
-
-    /// Width ratio for the item list when preview is active.
-    private let listWidthRatio: CGFloat = 0.4
+    private let panelWidth: CGFloat = 600
+    private let maxVisibleItems = 18
+    private let itemHeight: CGFloat = 24
 
     var body: some View {
         if state.visible {
             ZStack {
-                // Dimmed background
                 Color.black.opacity(0.3)
                     .ignoresSafeArea()
                     .allowsHitTesting(false)
 
-                // Centered panel
                 VStack(spacing: 0) {
-                    // Search field with candidate count
                     searchField
 
-                    // Separator
-                    Rectangle()
-                        .fill(theme.popupBorder.opacity(0.3))
-                        .frame(height: 1)
+                    Divider()
+                        .overlay(theme.popupBorder.opacity(0.3))
 
-                    // Main content: list + optional preview
-                    if state.hasPreview && !state.previewLines.isEmpty {
-                        HStack(spacing: 0) {
-                            resultsList
-                                .frame(width: effectiveWidth * listWidthRatio)
+                    resultsList
 
-                            // Vertical divider
-                            Rectangle()
-                                .fill(theme.popupBorder.opacity(0.3))
-                                .frame(width: 1)
-
-                            previewPane
-                                .frame(maxWidth: .infinity)
-                        }
-                    } else {
-                        resultsList
-                    }
-
-                    // Bottom bar
                     if !state.items.isEmpty {
-                        Rectangle()
-                            .fill(theme.popupBorder.opacity(0.3))
-                            .frame(height: 1)
-
+                        Divider()
+                            .overlay(theme.popupBorder.opacity(0.3))
                         bottomBar
                     }
                 }
-                .frame(width: effectiveWidth)
-                .overlay(alignment: .center) {
-                    // Action menu overlay (C-o)
-                    if let menu = state.actionMenu {
-                        actionMenuOverlay(menu)
-                    }
-                }
+                .frame(width: panelWidth)
                 .background(
-                    RoundedRectangle(cornerRadius: 10)
+                    RoundedRectangle(cornerRadius: 8)
                         .fill(theme.popupBg)
                         .shadow(color: .black.opacity(0.5), radius: 20, y: 8)
                 )
                 .overlay(
-                    RoundedRectangle(cornerRadius: 10)
+                    RoundedRectangle(cornerRadius: 8)
                         .strokeBorder(theme.popupBorder.opacity(0.4), lineWidth: 1)
                 )
-                .offset(y: -60)  // Slightly above center, like Zed
+                .overlay(alignment: .center) {
+                    if let menu = state.actionMenu {
+                        actionMenuOverlay(menu)
+                    }
+                }
+                .offset(y: -60)
             }
-            .allowsHitTesting(false)  // BEAM handles all picker input
+            .allowsHitTesting(false)
             .transition(.opacity.animation(.easeInOut(duration: 0.1)))
         }
     }
@@ -108,25 +69,24 @@ struct PickerOverlay: View {
 
             if state.query.isEmpty {
                 Text(state.title.isEmpty ? "Search..." : state.title)
-                    .font(.system(size: 14))
+                    .font(.system(size: 13))
                     .foregroundStyle(theme.popupFg.opacity(0.35))
             } else {
                 Text(state.query)
-                    .font(.system(size: 14, design: .monospaced))
+                    .font(.system(size: 13, design: .monospaced))
                     .foregroundStyle(theme.popupFg)
             }
 
             Spacer()
 
-            // Candidate count: "3/127"
             if state.totalCount > 0 {
                 Text("\(state.filteredCount)/\(state.totalCount)")
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(theme.popupFg.opacity(0.35))
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
     }
 
     // MARK: - Results list
@@ -137,15 +97,11 @@ struct PickerOverlay: View {
             ScrollView(.vertical, showsIndicators: false) {
                 LazyVStack(spacing: 0) {
                     ForEach(state.items.prefix(maxVisibleItems)) { item in
-                        if item.isTwoLine {
-                            twoLineRow(item)
-                        } else {
-                            singleLineRow(item)
-                        }
+                        itemRow(item)
                     }
                 }
             }
-            .frame(maxHeight: computeListHeight())
+            .frame(maxHeight: CGFloat(min(state.items.count, maxVisibleItems)) * itemHeight)
             .onChange(of: state.selectedIndex) { _, newIndex in
                 withAnimation(nil) {
                     proxy.scrollTo(newIndex, anchor: .center)
@@ -154,114 +110,62 @@ struct PickerOverlay: View {
         }
     }
 
-    /// Compute the total height for the results list.
-    private func computeListHeight() -> CGFloat {
-        let visibleItems = state.items.prefix(maxVisibleItems)
-        let height = visibleItems.reduce(CGFloat(0)) { total, item in
-            total + (item.isTwoLine ? twoLineItemHeight : singleLineItemHeight)
-        }
-        return min(height, CGFloat(maxVisibleItems) * singleLineItemHeight)
-    }
-
-    // MARK: - Single-line row (commands)
+    // MARK: - Single unified row (all items)
 
     @ViewBuilder
-    private func singleLineRow(_ item: PickerItem) -> some View {
+    private func itemRow(_ item: PickerItem) -> some View {
         let isSelected = item.id == state.selectedIndex
 
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
             // Multi-select checkmark
             if item.isMarked {
                 Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 12))
+                    .font(.system(size: 11))
                     .foregroundStyle(theme.accent)
-                    .frame(width: 16)
+                    .frame(width: 14)
             }
 
             // File type icon
             Text(item.icon)
-                .font(.custom("Symbols Nerd Font Mono", size: 14))
+                .font(.custom("Symbols Nerd Font Mono", size: 13))
                 .foregroundStyle(iconColor(item.iconColor))
-                .frame(width: 20, alignment: .center)
+                .frame(width: 18, alignment: .center)
 
-            // Label with match highlighting
+            // Filename with match highlighting
             highlightedLabel(item)
 
-            Spacer()
+            // Path (inline, dimmed) — Helm/Ivy style
+            if !item.description.isEmpty {
+                Text(item.description)
+                    .font(.system(size: 12))
+                    .foregroundStyle(theme.popupFg.opacity(0.35))
+                    .lineLimit(1)
+                    .truncationMode(.head)
+            }
+
+            Spacer(minLength: 4)
 
             // Annotation (keybinding)
             if !item.annotation.isEmpty {
                 Text(item.annotation)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.system(size: 10.5, design: .monospaced))
                     .foregroundStyle(theme.popupFg.opacity(0.3))
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
                     .background(
                         RoundedRectangle(cornerRadius: 3)
                             .fill(theme.popupFg.opacity(0.06))
                     )
             }
         }
-        .padding(.horizontal, 12)
-        .frame(height: singleLineItemHeight)
-        .background(selectionBackground(isSelected))
-        .id(item.id)
-    }
-
-    // MARK: - Two-line row (files, buffers)
-
-    @ViewBuilder
-    private func twoLineRow(_ item: PickerItem) -> some View {
-        let isSelected = item.id == state.selectedIndex
-
-        HStack(alignment: .center, spacing: 8) {
-            // Multi-select checkmark
-            if item.isMarked {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 12))
-                    .foregroundStyle(theme.accent)
-                    .frame(width: 16)
-            }
-
-            // File type icon (vertically centered)
-            Text(item.icon)
-                .font(.custom("Symbols Nerd Font Mono", size: 16))
-                .foregroundStyle(iconColor(item.iconColor))
-                .frame(width: 22, alignment: .center)
-
-            // Two-line text
-            VStack(alignment: .leading, spacing: 1) {
-                // Primary: filename with match highlighting
-                highlightedLabel(item)
-
-                // Secondary: path (dimmed, smaller)
-                if !item.description.isEmpty {
-                    Text(item.description)
-                        .font(.system(size: 11))
-                        .foregroundStyle(theme.popupFg.opacity(0.35))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-            }
-
-            Spacer()
-
-            // Annotation
-            if !item.annotation.isEmpty {
-                Text(item.annotation)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(theme.popupFg.opacity(0.3))
-            }
-        }
-        .padding(.horizontal, 12)
-        .frame(height: twoLineItemHeight)
+        .padding(.horizontal, 10)
+        .frame(height: itemHeight)
         .background(selectionBackground(isSelected))
         .id(item.id)
     }
 
     // MARK: - Match highlighting
 
-    /// Renders the display label with matched characters highlighted.
     @ViewBuilder
     private func highlightedLabel(_ item: PickerItem) -> some View {
         let label = item.displayLabel
@@ -273,14 +177,12 @@ struct PickerOverlay: View {
                 .foregroundStyle(theme.popupFg)
                 .lineLimit(1)
         } else {
-            // Build an AttributedString with highlighted matches
             let attributed = buildHighlightedText(label, matchPositions: matchSet)
             Text(attributed)
                 .lineLimit(1)
         }
     }
 
-    /// Builds an AttributedString with matched characters in accent color and bold.
     private func buildHighlightedText(_ text: String, matchPositions: Set<Int>) -> AttributedString {
         var result = AttributedString()
         let chars = Array(text)
@@ -302,45 +204,11 @@ struct PickerOverlay: View {
         return result
     }
 
-    // MARK: - Preview pane
-
-    @ViewBuilder
-    private var previewPane: some View {
-        ScrollView([.vertical, .horizontal], showsIndicators: true) {
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(state.previewLines) { line in
-                    HStack(spacing: 0) {
-                        // Line number
-                        Text("\(line.id + 1)")
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundStyle(theme.popupFg.opacity(0.2))
-                            .frame(width: 36, alignment: .trailing)
-                            .padding(.trailing, 8)
-
-                        // Content segments
-                        ForEach(line.segments) { segment in
-                            Text(segment.text)
-                                .font(.system(size: 12, weight: segment.bold ? .semibold : .regular, design: .monospaced))
-                                .foregroundStyle(segmentColor(segment.fgColor))
-                        }
-
-                        Spacer(minLength: 0)
-                    }
-                    .frame(height: 18)
-                }
-            }
-            .padding(.vertical, 8)
-            .padding(.horizontal, 4)
-        }
-        .background(theme.popupBg.opacity(0.95))
-    }
-
     // MARK: - Bottom bar
 
     @ViewBuilder
     private var bottomBar: some View {
         HStack(spacing: 12) {
-            // Show marked count if multi-select is active
             let markedCount = state.items.filter { $0.isMarked }.count
             if markedCount > 0 {
                 Text("\(markedCount) selected")
@@ -350,7 +218,6 @@ struct PickerOverlay: View {
 
             Spacer()
 
-            // Keyboard hints
             Group {
                 keyHint("↑↓", label: "navigate")
                 keyHint("⏎", label: "open")
@@ -358,8 +225,8 @@ struct PickerOverlay: View {
                 keyHint("⎋", label: "close")
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 6)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 5)
     }
 
     @ViewBuilder
@@ -385,7 +252,6 @@ struct PickerOverlay: View {
     @ViewBuilder
     private func actionMenuOverlay(_ menu: PickerActionMenu) -> some View {
         VStack(spacing: 0) {
-            // Header
             HStack {
                 Text("Actions")
                     .font(.system(size: 12, weight: .semibold))
@@ -402,7 +268,6 @@ struct PickerOverlay: View {
                 .fill(theme.popupBorder.opacity(0.3))
                 .frame(height: 1)
 
-            // Action items
             ForEach(Array(menu.actions.enumerated()), id: \.offset) { idx, action in
                 let isSelected = idx == menu.selectedIndex
 
@@ -438,9 +303,9 @@ struct PickerOverlay: View {
     @ViewBuilder
     private func selectionBackground(_ isSelected: Bool) -> some View {
         if isSelected {
-            RoundedRectangle(cornerRadius: 5)
-                .fill(theme.popupSelBg.opacity(0.6))
-                .padding(.horizontal, 4)
+            RoundedRectangle(cornerRadius: 3)
+                .fill(theme.popupSelBg.opacity(0.7))
+                .padding(.horizontal, 2)
         } else {
             Color.clear
         }
