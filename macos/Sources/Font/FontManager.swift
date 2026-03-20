@@ -11,6 +11,12 @@ import Foundation
 import AppKit
 
 /// Manages font faces for CoreText line rendering.
+///
+/// `@MainActor` for the same reason as `FontFace`: the mutable font
+/// registry is only accessed from the main thread (protocol dispatch,
+/// rendering), and the annotation makes that contract enforceable under
+/// Swift 6 strict concurrency.
+@MainActor
 final class FontManager {
     /// The primary font (ID 0). Always set after init.
     private(set) var primary: FontFace

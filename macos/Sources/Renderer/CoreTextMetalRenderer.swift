@@ -43,6 +43,10 @@ struct CTUniformsGPU {
 private let ctBgClearColorDefault = MTLClearColor(red: 0.01298, green: 0.01298, blue: 0.01681, alpha: 1.0)
 
 /// Renders the editor using CoreText line textures instead of cell-grid instanced drawing.
+///
+/// `@MainActor` because it accesses `FontManager` (main-actor-isolated)
+/// in the render path, and all callers are on the main thread already.
+@MainActor
 final class CoreTextMetalRenderer {
     let device: MTLDevice
     let commandQueue: MTLCommandQueue
@@ -57,12 +61,27 @@ final class CoreTextMetalRenderer {
     /// Cached defaultBg value to detect changes.
     private var cachedDefaultBg: UInt32 = 0
 
+    /// Cursor color derived from the system accent color (sRGB components).
+    /// Updated when the system appearance changes (user picks a new accent
+    /// in System Settings). Note: these are sRGB values, not linear. The
+    /// `.bgra8Unorm_srgb` framebuffer handles the sRGB→linear conversion
+    /// for blending, so passing sRGB here is correct for visual accuracy.
+    private(set) var cursorColor: SIMD3<Float>
+
+    /// Notification observer for system color changes. Stored so we can
+    /// remove it in deinit if needed (though the renderer lives for the
+    /// app's entire lifetime in practice).
+    private var colorChangeObserver: NSObjectProtocol?
+
     init?() {
         guard let device = MTLCreateSystemDefaultDevice() else { return nil }
         self.device = device
         guard let queue = device.makeCommandQueue() else { return nil }
         self.commandQueue = queue
         self.clearColor = ctBgClearColorDefault
+
+        // Read the system accent color for the cursor.
+        self.cursorColor = CoreTextMetalRenderer.readAccentColor()
 
         // Load the compiled Metal shader library.
         let executableURL = Bundle.main.executableURL!
@@ -102,6 +121,32 @@ final class CoreTextMetalRenderer {
             NSLog("Failed to create CoreText Metal pipeline: \(error)")
             return nil
         }
+
+        // Watch for system accent color changes so the cursor color stays
+        // in sync with System Settings.
+        colorChangeObserver = DistributedNotificationCenter.default().addObserver(
+            forName: NSNotification.Name("AppleColorPreferencesChangedNotification"),
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.cursorColor = CoreTextMetalRenderer.readAccentColor()
+            }
+        }
+    }
+
+    /// Read `NSColor.controlAccentColor` as an sRGB SIMD3 for Metal.
+    ///
+    /// Returns sRGB components (not linear). This is correct because the
+    /// `.bgra8Unorm_srgb` framebuffer applies sRGB↔linear conversion
+    /// during blending, so sRGB input produces accurate output.
+    static func readAccentColor() -> SIMD3<Float> {
+        guard let rgb = NSColor.controlAccentColor.usingColorSpace(.sRGB) else {
+            return SIMD3<Float>(0.8, 0.8, 0.8)
+        }
+        return SIMD3<Float>(Float(rgb.redComponent),
+                            Float(rgb.greenComponent),
+                            Float(rgb.blueComponent))
     }
 
     /// Set up the line renderer. Called once the FontManager is available.
@@ -261,7 +306,7 @@ final class CoreTextMetalRenderer {
             var cursorQuad = QuadGPU()
             cursorQuad.position = SIMD2<Float>(cursorCol * cellW * scale + cursorPadding, cursorRow * cellH * scale)
             cursorQuad.size = SIMD2<Float>(cellW * scale, cellH * scale)
-            cursorQuad.color = SIMD3<Float>(0.8, 0.8, 0.8)
+            cursorQuad.color = cursorColor
             cursorQuad.alpha = 1.0
 
             encoder.setRenderPipelineState(bgPipeline)
@@ -273,7 +318,7 @@ final class CoreTextMetalRenderer {
         // Pass 3: Line textures (one draw call per line since each has its own texture).
         if !lineInstances.isEmpty {
             encoder.setRenderPipelineState(linePipeline)
-            for var (lineGPU, texture) in lineInstances {
+            for (var lineGPU, texture) in lineInstances {
                 encoder.setVertexBytes(&lineGPU, length: MemoryLayout<LineGPU>.stride, index: 0)
                 encoder.setVertexBytes(&uniforms, length: MemoryLayout<CTUniformsGPU>.size, index: 1)
                 encoder.setFragmentTexture(texture, index: 0)
@@ -320,7 +365,7 @@ final class CoreTextMetalRenderer {
                 ? gutterPaddingPx : 0
 
             var cursorQuad = QuadGPU()
-            cursorQuad.color = SIMD3<Float>(0.8, 0.8, 0.8)
+            cursorQuad.color = cursorColor
             cursorQuad.alpha = 1.0
 
             switch lineBuffer.cursorShape {

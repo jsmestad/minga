@@ -7,6 +7,7 @@ import CoreText
 @testable import minga_mac
 
 @Suite("CoreTextLineRenderer")
+@MainActor
 struct CoreTextLineRendererTests {
     /// Helper to create a renderer with the system monospace font.
     private func makeRenderer() -> CoreTextLineRenderer? {

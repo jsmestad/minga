@@ -6,6 +6,7 @@ import CoreText
 @testable import minga_mac
 
 @Suite("FontFace resolution")
+@MainActor
 struct FontResolutionTests {
     @Test("Load font by PostScript name")
     func loadByPostScript() {
@@ -84,6 +85,7 @@ struct FontResolutionTests {
 }
 
 @Suite("FontFace variants")
+@MainActor
 struct FontVariantTests {
     @Test("Menlo has bold, italic, and bold-italic variants")
     func menloHasAllVariants() {
@@ -145,6 +147,7 @@ struct FontVariantTests {
 }
 
 @Suite("FontManager")
+@MainActor
 struct FontManagerTests {
     @Test("Primary font has correct metrics")
     func primaryMetrics() {

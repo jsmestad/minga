@@ -13,6 +13,11 @@ import AppKit
 ///
 /// Holds up to four CTFont variants (regular, bold, italic, bold-italic).
 /// Weight variants beyond bold/regular are resolved lazily via NSFontManager.
+///
+/// Annotated `@MainActor` because the mutable caches (`weightedFonts`,
+/// `fallbackFonts`) are not thread-safe, and all callers are on the main
+/// thread already (rendering, font commands, protocol dispatch).
+@MainActor
 final class FontFace {
     let ctFont: CTFont
     /// Bold variant, or nil if the font family doesn't have one.

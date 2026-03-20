@@ -36,6 +36,10 @@ struct CachedLineTexture {
 /// CoreText into a CTLine, rasterized into a bitmap context, then uploaded
 /// to a Metal texture. Textures are cached per line and invalidated when
 /// the content hash changes.
+///
+/// `@MainActor` because it accesses `FontManager` and `FontFace`, which
+/// are main-actor-isolated for Swift 6 strict concurrency safety.
+@MainActor
 final class CoreTextLineRenderer {
     /// The Metal device for texture creation.
     private let device: MTLDevice
