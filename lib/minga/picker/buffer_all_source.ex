@@ -1,7 +1,7 @@
 defmodule Minga.Picker.BufferAllSource do
   @moduledoc """
   Picker source for switching between all open buffers, including special
-  buffers like `*Messages*` and `*Warnings*`.
+  buffers like `*Messages*`.
 
   This is the `SPC b B` variant. For the filtered default (`SPC b b`), see
   `Minga.Picker.BufferSource`.

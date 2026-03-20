@@ -40,14 +40,14 @@ defmodule Minga.Editor do
   alias Minga.Editor.SemanticTokenSync
   alias Minga.Editor.Startup
   alias Minga.Editor.Viewport
-  alias Minga.Editor.WarningLog
+  # WarningLog removed in #825; warnings route through MessageLog with level override
   alias Minga.Editor.Window
 
   alias Minga.FileTree
   alias Minga.Input
   alias Minga.LSP.SyncServer, as: LspSyncServer
   alias Minga.Mode
-  alias Minga.Popup.Lifecycle, as: PopupLifecycle
+  # PopupLifecycle alias removed: warnings popup replaced by bottom panel (#825)
   alias Minga.Port.Manager, as: PortManager
   alias Minga.Port.Protocol
 
@@ -162,7 +162,7 @@ defmodule Minga.Editor do
     all_initial_pids =
       state.buffers.list ++
         Enum.filter(
-          [state.buffers.messages, state.buffers.warnings, state.buffers.help],
+          [state.buffers.messages, state.buffers.help],
           &is_pid/1
         )
 
@@ -273,7 +273,7 @@ defmodule Minga.Editor do
   end
 
   def handle_cast({:log_to_warnings, text}, state) do
-    state = WarningLog.log(state, text)
+    state = MessageLog.log(state, text, :warning)
     {:noreply, maybe_schedule_warning_popup(state)}
   end
 
@@ -990,7 +990,8 @@ defmodule Minga.Editor do
 
   defp apply_effect(state, {:log_warning, msg}) when is_binary(msg) do
     Minga.Log.warning(:editor, msg)
-    state
+    state = MessageLog.log(state, msg, :warning)
+    maybe_schedule_warning_popup(state)
   end
 
   defp apply_effect(state, :sync_agent_buffer), do: AgentLifecycle.sync_buffer(state)
@@ -1353,44 +1354,19 @@ defmodule Minga.Editor do
   end
 
   @spec open_warnings_popup_if_needed(state()) :: state()
-  defp open_warnings_popup_if_needed(%{warnings_popup_dismissed: true} = state), do: state
-  defp open_warnings_popup_if_needed(%{buffers: %{warnings: nil}} = state), do: state
+  defp open_warnings_popup_if_needed(%{bottom_panel: %{dismissed: true}} = state), do: state
+
+  defp open_warnings_popup_if_needed(
+         %{bottom_panel: %{visible: true, active_tab: :messages}} = state
+       ) do
+    # Panel already visible on Messages tab; don't change the user's filter.
+    schedule_render(state, 16)
+  end
 
   defp open_warnings_popup_if_needed(state) do
-    warnings_buf = state.buffers.warnings
-
-    # Check if *Warnings* is already visible in any window
-    already_visible =
-      Enum.any?(state.windows.map, fn {_id, win} ->
-        win.buffer == warnings_buf
-      end)
-
-    if already_visible do
-      # Scroll the warnings window to the end so the latest entry is visible
-      scroll_warnings_to_end(state, warnings_buf)
-    else
-      open_warnings_popup(state, warnings_buf)
-    end
-  end
-
-  @spec open_warnings_popup(state(), pid()) :: state()
-  defp open_warnings_popup(state, warnings_buf) do
-    case PopupLifecycle.open_popup(state, "*Warnings*", warnings_buf) do
-      {:ok, new_state} -> schedule_render(new_state, 16)
-      :no_match -> state
-    end
-  end
-
-  @spec scroll_warnings_to_end(state(), pid()) :: state()
-  defp scroll_warnings_to_end(state, warnings_buf) do
-    case Enum.find(state.windows.map, fn {_id, win} -> win.buffer == warnings_buf end) do
-      {_id, _win} ->
-        # Trigger a render so the viewport catches up to the appended content.
-        schedule_render(state, 16)
-
-      nil ->
-        state
-    end
+    # Auto-open the bottom panel with warnings filter preset
+    new_panel = BottomPanel.show(state.bottom_panel, :messages, :warnings)
+    schedule_render(%{state | bottom_panel: new_panel}, 16)
   end
 
   # Returns true if the given buffer PID is visible in any window.

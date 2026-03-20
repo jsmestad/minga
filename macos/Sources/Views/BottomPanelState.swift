@@ -35,11 +35,18 @@ final class BottomPanelState {
 
     func update(visible: Bool, activeTabIndex: Int, heightPercent: Int,
                 filterPreset: UInt8, tabs: [BottomPanelTab]) {
-        self.visible = visible
+        let wasHidden = !self.visible
         self.activeTabIndex = activeTabIndex
         self.heightPercent = heightPercent
         self.filterPreset = filterPreset
         self.tabs = tabs
+        self.visible = visible
+
+        // Apply filter preset on visibility transition (hidden -> visible)
+        // only if the user hasn't already changed filters manually.
+        if wasHidden && visible && filterPreset == 1 {
+            messagesState.activeLevels = [2, 3]  // warning + error
+        }
     }
 
     func hide() {

@@ -111,6 +111,14 @@ private struct MessagesFilterBar: View {
             // Subsystem toggles (only show subsystems that have entries)
             subsystemToggles
 
+            // Separator
+            Rectangle()
+                .fill(theme.treeSeparatorFg.opacity(0.3))
+                .frame(width: 1, height: 16)
+
+            // "Warnings" preset button
+            warningsPreset
+
             Spacer()
 
             // Search field
@@ -190,6 +198,34 @@ private struct MessagesFilterBar: View {
                 .clipShape(RoundedRectangle(cornerRadius: 3))
         }
         .buttonStyle(.plain)
+    }
+
+    // MARK: - Warnings preset
+
+    private var warningsPreset: some View {
+        let isActive = state.activeLevels == [2, 3]
+            && state.activeSubsystems == MessagesContentState.allSubsystems
+            && state.searchText.isEmpty
+
+        return Button(action: {
+            state.activeLevels = [2, 3]
+            state.activeSubsystems = MessagesContentState.allSubsystems
+            state.searchText = ""
+        }) {
+            HStack(spacing: 3) {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.system(size: 8, weight: .bold))
+                Text("Warnings")
+                    .font(.system(size: 9, weight: .medium))
+            }
+            .foregroundStyle(isActive ? .white : theme.modelineBarFg.opacity(0.6))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(isActive ? Color.orange.opacity(0.7) : Color.orange.opacity(0.15))
+            .clipShape(RoundedRectangle(cornerRadius: 3))
+        }
+        .buttonStyle(.plain)
+        .help("Show only warnings and errors")
     }
 
     // MARK: - Search

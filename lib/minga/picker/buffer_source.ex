@@ -59,13 +59,13 @@ defmodule Minga.Picker.BufferSource do
   end
 
   @doc """
-  Returns candidate entries for special buffers (messages, warnings) that are
+  Returns candidate entries for special buffers (messages) that are
   alive but not currently in the buffer list. Uses `{:pid, pid}` as the item
   key so `on_select` can distinguish them from list-indexed buffers.
   """
   @spec extra_special_buffers(Buffers.t()) :: [Item.t()]
   def extra_special_buffers(%Buffers{list: list} = bs) do
-    special_fields = [bs.messages, bs.warnings]
+    special_fields = [bs.messages]
 
     special_fields
     |> Enum.reject(fn pid -> is_nil(pid) or Enum.member?(list, pid) end)

@@ -103,7 +103,6 @@ defmodule Minga.Editor.State do
             completion_trigger: CompletionTrigger.new(),
             render_timer: nil,
             warning_popup_timer: nil,
-            warnings_popup_dismissed: false,
             bottom_panel: %BottomPanel{},
             message_store: %MessageStore{},
             windows: %Windows{},
@@ -149,7 +148,6 @@ defmodule Minga.Editor.State do
           completion_trigger: CompletionTrigger.t(),
           render_timer: reference() | nil,
           warning_popup_timer: reference() | nil,
-          warnings_popup_dismissed: boolean(),
           bottom_panel: BottomPanel.t(),
           message_store: MessageStore.t(),
           windows: Windows.t(),
@@ -271,7 +269,6 @@ defmodule Minga.Editor.State do
 
     # Clear special buffer slots if they match
     messages = if bs.messages == pid, do: nil, else: bs.messages
-    warnings = if bs.warnings == pid, do: nil, else: bs.warnings
     help = if bs.help == pid, do: nil, else: bs.help
 
     # Determine new active buffer
@@ -291,7 +288,6 @@ defmodule Minga.Editor.State do
         active: new_active,
         active_index: new_index,
         messages: messages,
-        warnings: warnings,
         help: help
     }
 
