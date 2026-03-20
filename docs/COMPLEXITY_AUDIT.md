@@ -30,7 +30,7 @@ The agent chat currently renders through three active paths, with PR #608 adding
 | Path | Module | Lines | When used |
 |------|--------|-------|-----------|
 | Chrome overlay | `ChatRenderer` | 876 | Side panel |
-| Full-screen composite | `View.Renderer` wrapping `ChatRenderer` | 1,360 | Agentic view |
+| Full-screen composite | `View.PromptRenderer` + `View.DashboardRenderer` | ~700 | Agentic view |
 | Content stage 4b | `render_pipeline/content.ex` → `ViewRenderer` | 276 | Window split |
 | **PR #608** (buffer pipeline) | `BufferSync` + `ChatDecorations` | ~507 | New, replaces the above |
 
@@ -96,11 +96,9 @@ Its callers are `ChromeHelpers` (eliminated by step 1) and `ViewRenderer` (elimi
 
 **Expected deletion:** ~876 lines
 
-### Step 3: Simplify `View.Renderer`
+### Step 3: ~~Simplify `View.Renderer`~~ (Done)
 
-Full-screen agentic view becomes: left split with `*Agent*` buffer, right split with preview. `ViewRenderer` shrinks to layout orchestration and preview rendering. Stops producing chat draw tuples entirely.
-
-**Expected reduction:** ~800-1,000 lines
+`View.Renderer` was split into `View.PromptRenderer` (~350 lines) and `View.DashboardRenderer` (~220 lines), with shared data extraction in `View.RenderInput` (~160 lines). Each module is focused on one rendering concern.
 
 ### Step 4: Merge `PanelState` + `View.State` into `Agent.UIState`
 

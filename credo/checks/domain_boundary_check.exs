@@ -49,7 +49,9 @@ defmodule Minga.Credo.DomainBoundaryCheck do
   # The agent's prompt buffer is a Buffer.Server instance, so these
   # cross-domain references are deliberate and unavoidable.
   @allowed_agent_buffer_modules [
-    "Minga.Agent.View.Renderer",
+    "Minga.Agent.View.PromptRenderer",
+    "Minga.Agent.View.DashboardRenderer",
+    "Minga.Agent.View.RenderInput",
     # Macro.camelize turns "ui_state" → "UiState", not "UIState"
     "Minga.Agent.UiState",
     "Minga.Agent.UiState.Panel",

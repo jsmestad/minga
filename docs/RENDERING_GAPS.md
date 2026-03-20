@@ -117,7 +117,7 @@ Stage result types are defined as module structs: `Invalidation`, `WindowScroll`
 - `Editor.PickerUI`: fuzzy finder overlay
 - `Editor.CompletionUI`: completion menu
 - `Agent.ChatRenderer`: agent panel sidebar
-- `Agent.View.Renderer`: full-screen agent view
+- `Agent.View.PromptRenderer` + `Agent.View.DashboardRenderer`: agent view chrome
 
 Each module produces `[DisplayList.draw()]` lists. The pipeline's Chrome stage collects them; the Compose stage merges them into the final `Frame`.
 
