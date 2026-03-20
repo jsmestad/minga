@@ -24,6 +24,7 @@ defmodule Minga.Editor.SemanticWindow.Builder do
   alias Minga.Editor.DisplayMap
   alias Minga.Editor.FoldMap
   alias Minga.Editor.Modeline
+  alias Minga.Editor.Renderer.Composition
   alias Minga.Editor.Renderer.Context
   alias Minga.Editor.RenderPipeline.Scroll.WindowScroll
   alias Minga.Editor.SemanticWindow
@@ -163,8 +164,7 @@ defmodule Minga.Editor.SemanticWindow.Builder do
     |> Enum.with_index()
     |> Enum.map(fn {{line_text, hl_segments}, idx} ->
       buf_line = first_line + idx
-      composed_text = compose_line_text(line_text, ctx.decorations, buf_line)
-      spans = build_spans_for_line(composed_text, hl_segments, ctx.decorations, buf_line)
+      {composed_text, spans} = compose_line(line_text, hl_segments, ctx.decorations, buf_line)
 
       %VisualRow{
         row_type: :normal,
@@ -199,8 +199,7 @@ defmodule Minga.Editor.SemanticWindow.Builder do
         ) :: VisualRow.t()
   defp build_visual_row_entry(buf_line, :normal, lines, first_line, ctx) do
     line_text = line_at(lines, buf_line, first_line)
-    composed = compose_line_text(line_text, ctx.decorations, buf_line)
-    spans = build_spans_for_line(composed, nil, ctx.decorations, buf_line)
+    {composed, spans} = compose_line(line_text, nil, ctx.decorations, buf_line)
 
     %VisualRow{
       row_type: :normal,
@@ -214,8 +213,7 @@ defmodule Minga.Editor.SemanticWindow.Builder do
   defp build_visual_row_entry(buf_line, {:fold_start, hidden_count}, lines, first_line, ctx) do
     line_text = line_at(lines, buf_line, first_line)
     fold_text = line_text <> " ··· #{hidden_count} lines"
-    composed = compose_line_text(fold_text, ctx.decorations, buf_line)
-    spans = build_spans_for_line(composed, nil, ctx.decorations, buf_line)
+    {composed, spans} = compose_line(fold_text, nil, ctx.decorations, buf_line)
 
     %VisualRow{
       row_type: :fold_start,
@@ -270,45 +268,39 @@ defmodule Minga.Editor.SemanticWindow.Builder do
 
   # ── Line composition ───────────────────────────────────────────────────
 
-  # Composes the final display text for a line by splicing inline virtual
-  # text and applying conceal ranges. This produces the text the GUI will
-  # actually render.
-  @spec compose_line_text(String.t(), Decorations.t(), non_neg_integer()) :: String.t()
-  defp compose_line_text(text, decorations, buf_line) do
-    # For now, return the raw text. Full virtual text splicing and conceal
-    # application will be added when the encoder needs composed text.
-    # The current Content stage handles this inside BufferLine.render via
-    # inline segment insertion. Phase 2 will extract that logic here.
-    _ = decorations
-    _ = buf_line
-    text
-  end
-
-  # ── Span building ──────────────────────────────────────────────────────
-
-  # Builds highlight spans for a line from pre-computed styled segments.
-  @spec build_spans_for_line(
+  # Composes the final display text and highlight spans for a line.
+  #
+  # Runs the shared composition pipeline: highlight segments are merged
+  # with decorations, conceals are applied, and inline virtual text is
+  # spliced in. The resulting segments are then converted to composed
+  # text + Span structs.
+  #
+  # Both the draw path (Line.ex) and the semantic path (this builder)
+  # use the same composition functions from Renderer.Composition,
+  # guaranteeing identical output for the same input.
+  @spec compose_line(
           String.t(),
           [Highlight.styled_segment()] | nil,
           Decorations.t(),
           non_neg_integer()
-        ) :: [Span.t()]
-  defp build_spans_for_line(_composed_text, nil, _decorations, _buf_line), do: []
+        ) :: {String.t(), [Span.t()]}
+  defp compose_line(line_text, hl_segments, decorations, buf_line) do
+    # Start with highlight segments or plain text
+    segments =
+      case hl_segments do
+        nil -> [{line_text, Minga.Face.new()}]
+        segs -> segs
+      end
 
-  defp build_spans_for_line(_composed_text, segments, _decorations, _buf_line) do
-    {spans, _col} =
-      Enum.reduce(segments, {[], 0}, fn {text, face}, {acc, col} ->
-        width = Unicode.display_width(text)
+    # Merge decoration highlights (search matches, etc.)
+    line_highlights = Decorations.highlights_for_line(decorations, buf_line)
+    segments = Decorations.merge_highlights(segments, line_highlights, buf_line)
 
-        if width > 0 do
-          span = Span.from_face(face, col, col + width)
-          {[span | acc], col + width}
-        else
-          {acc, col}
-        end
-      end)
+    # Apply conceals and inject inline virtual text (shared pipeline)
+    segments = Composition.compose_segments(segments, decorations, buf_line)
 
-    Enum.reverse(spans)
+    # Convert to composed text + spans
+    Composition.segments_to_text_and_spans(segments)
   end
 
   # ── Cursor display coordinates ─────────────────────────────────────────
