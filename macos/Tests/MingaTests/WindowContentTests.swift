@@ -21,6 +21,7 @@ struct WindowContentBuilder {
     var selectionCoords: (UInt16, UInt16, UInt16, UInt16)?
     var searchMatches: [(row: UInt16, startCol: UInt16, endCol: UInt16, isCurrent: UInt8)] = []
     var diagnosticRanges: [(startRow: UInt16, startCol: UInt16, endRow: UInt16, endCol: UInt16, severity: UInt8)] = []
+    var documentHighlights: [(startRow: UInt16, startCol: UInt16, endRow: UInt16, endCol: UInt16, kind: UInt8)] = []
 
     struct RowBuilder {
         var rowType: UInt8 = 0  // normal
@@ -94,6 +95,15 @@ struct WindowContentBuilder {
             data.append(d.severity)
         }
 
+        appendU16(&data, UInt16(documentHighlights.count))
+        for h in documentHighlights {
+            appendU16(&data, h.startRow)
+            appendU16(&data, h.startCol)
+            appendU16(&data, h.endRow)
+            appendU16(&data, h.endCol)
+            data.append(h.kind)
+        }
+
         return data
     }
 
@@ -136,6 +146,7 @@ struct WindowContentDecoderTests {
         #expect(content.selection == nil)
         #expect(content.searchMatches.isEmpty)
         #expect(content.diagnosticUnderlines.isEmpty)
+        #expect(content.documentHighlights.isEmpty)
     }
 
     @Test("Decode header fields: window_id, cursor, shape, full_refresh")
@@ -333,6 +344,32 @@ struct WindowContentDecoderTests {
         #expect(content.diagnosticUnderlines[1].startCol == 5)
     }
 
+    @Test("Decode document highlights with all kind values")
+    func decodeDocumentHighlights() throws {
+        var builder = WindowContentBuilder()
+        builder.documentHighlights = [
+            (startRow: 2, startCol: 4, endRow: 2, endCol: 12, kind: 1),  // text
+            (startRow: 5, startCol: 0, endRow: 5, endCol: 8, kind: 2),   // read
+            (startRow: 8, startCol: 10, endRow: 8, endCol: 18, kind: 3), // write
+        ]
+
+        let (cmd, _) = try decodeCommand(data: builder.build(), offset: 0)
+        guard case .guiWindowContent(let content) = cmd else {
+            Issue.record("Expected .guiWindowContent"); return
+        }
+
+        #expect(content.documentHighlights.count == 3)
+        #expect(content.documentHighlights[0].kind == .text)
+        #expect(content.documentHighlights[0].startRow == 2)
+        #expect(content.documentHighlights[0].startCol == 4)
+        #expect(content.documentHighlights[0].endCol == 12)
+        #expect(content.documentHighlights[1].kind == .read)
+        #expect(content.documentHighlights[1].startRow == 5)
+        #expect(content.documentHighlights[2].kind == .write)
+        #expect(content.documentHighlights[2].startCol == 10)
+        #expect(content.documentHighlights[2].endCol == 18)
+    }
+
     @Test("Decode consumes entire binary (no leftover bytes)")
     func decodeConsumesAllBytes() throws {
         var builder = WindowContentBuilder()
@@ -364,6 +401,7 @@ struct WindowContentDecoderTests {
         builder.selectionCoords = (0, 0, 0, 10)
         builder.searchMatches = [(row: 0, startCol: 4, endCol: 7, isCurrent: 0)]
         builder.diagnosticRanges = [(startRow: 0, startCol: 0, endRow: 0, endCol: 3, severity: 1)]
+        builder.documentHighlights = [(startRow: 0, startCol: 4, endRow: 0, endCol: 7, kind: 2)]
 
         let data = builder.build()
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
@@ -385,5 +423,7 @@ struct WindowContentDecoderTests {
         #expect(content.searchMatches.count == 1)
         #expect(content.diagnosticUnderlines.count == 1)
         #expect(content.diagnosticUnderlines[0].severity == .warning)
+        #expect(content.documentHighlights.count == 1)
+        #expect(content.documentHighlights[0].kind == .read)
     }
 }

@@ -43,6 +43,11 @@ defmodule Minga.Port.Protocol.GUIWindowContent do
   diag_range_count:     u16
   per range: start_row(u16), start_col(u16), end_row(u16), end_col(u16),
              severity(u8)
+
+  highlight_count:      u16
+  per highlight: start_row(u16), start_col(u16), end_row(u16), end_col(u16),
+                 kind(u8)
+  Kind: 1=text, 2=read, 3=write
   ```
   """
 
@@ -50,6 +55,7 @@ defmodule Minga.Port.Protocol.GUIWindowContent do
 
   alias Minga.Editor.SemanticWindow
   alias Minga.Editor.SemanticWindow.DiagnosticRange
+  alias Minga.Editor.SemanticWindow.DocumentHighlightRange
   alias Minga.Editor.SemanticWindow.SearchMatch
   alias Minga.Editor.SemanticWindow.Selection
   alias Minga.Editor.SemanticWindow.Span
@@ -76,8 +82,16 @@ defmodule Minga.Port.Protocol.GUIWindowContent do
     selection_binary = encode_selection(sw.selection)
     matches_binary = encode_search_matches(sw.search_matches)
     diag_binary = encode_diagnostic_ranges(sw.diagnostic_ranges)
+    highlight_binary = encode_document_highlights(sw.document_highlights)
 
-    IO.iodata_to_binary([header, rows_binary, selection_binary, matches_binary, diag_binary])
+    IO.iodata_to_binary([
+      header,
+      rows_binary,
+      selection_binary,
+      matches_binary,
+      diag_binary,
+      highlight_binary
+    ])
   end
 
   @doc """
@@ -183,6 +197,27 @@ defmodule Minga.Port.Protocol.GUIWindowContent do
   defp encode_severity(:warning), do: 1
   defp encode_severity(:info), do: 2
   defp encode_severity(:hint), do: 3
+
+  # ── Document highlights ─────────────────────────────────────────────────
+
+  @spec encode_document_highlights([DocumentHighlightRange.t()]) :: binary()
+  defp encode_document_highlights(highlights) do
+    count = length(highlights)
+    entries = Enum.map(highlights, &encode_document_highlight/1)
+    IO.iodata_to_binary([<<count::16>> | entries])
+  end
+
+  @spec encode_document_highlight(DocumentHighlightRange.t()) :: binary()
+  defp encode_document_highlight(%DocumentHighlightRange{} = h) do
+    kind = encode_highlight_kind(h.kind)
+
+    <<h.start_row::16, h.start_col::16, h.end_row::16, h.end_col::16, kind::8>>
+  end
+
+  @spec encode_highlight_kind(DocumentHighlightRange.kind()) :: non_neg_integer()
+  defp encode_highlight_kind(:text), do: 1
+  defp encode_highlight_kind(:read), do: 2
+  defp encode_highlight_kind(:write), do: 3
 
   # ── Cursor shape ────────────────────────────────────────────────────────
 

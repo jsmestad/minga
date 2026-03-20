@@ -34,12 +34,12 @@ defmodule Minga.Editor.Commands do
   alias Minga.Editor.Commands.Extensions, as: ExtCommands
   alias Minga.Editor.Commands.Help
   alias Minga.Editor.Commands.Lsp, as: LspCommands
-  alias Minga.Editor.LspActions
   alias Minga.Editor.Commands.Marks
   alias Minga.Editor.Commands.Movement
   alias Minga.Editor.Commands.Operators
   alias Minga.Editor.Commands.Tool
   alias Minga.Editor.Commands.Visual
+  alias Minga.Editor.LspActions
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Window
   alias Minga.Keymap.Active, as: KeymapActive

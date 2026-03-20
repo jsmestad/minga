@@ -681,119 +681,25 @@ defmodule Minga.Editor do
   # LSP async response — route to the appropriate handler based on lsp.pending
   def handle_info({:lsp_response, ref, result}, state) do
     case Map.pop(state.lsp_pending, ref) do
-      {:definition, pending} ->
-        new_state = put_in(state.lsp_pending, pending)
-        new_state = LspActions.handle_definition_response(new_state, result)
-        new_state = Renderer.render(new_state)
-        {:noreply, new_state}
-
-      {:hover, pending} ->
-        new_state = put_in(state.lsp_pending, pending)
-        new_state = LspActions.handle_hover_response(new_state, result)
-        new_state = Renderer.render(new_state)
-        {:noreply, new_state}
-
       {:completion_resolve, pending} ->
         new_state = put_in(state.lsp_pending, pending)
         new_state = CompletionHandling.handle_resolve_response(new_state, result)
-        new_state = Renderer.render(new_state)
-        {:noreply, new_state}
+        {:noreply, Renderer.render(new_state)}
 
       {:signature_help, pending} ->
         new_state = put_in(state.lsp_pending, pending)
         new_state = CompletionHandling.handle_signature_help_response(new_state, result)
-        new_state = Renderer.render(new_state)
-        {:noreply, new_state}
+        {:noreply, Renderer.render(new_state)}
 
       {{:semantic_tokens, buf_pid}, pending} ->
         new_state = put_in(state.lsp_pending, pending)
         new_state = SemanticTokenSync.handle_response(new_state, buf_pid, result)
-        new_state = Renderer.render(new_state)
-        {:noreply, new_state}
+        {:noreply, Renderer.render(new_state)}
 
-      {:references, pending} ->
+      {kind, pending} when is_atom(kind) ->
         new_state = put_in(state.lsp_pending, pending)
-        new_state = LspActions.handle_references_response(new_state, result)
-        new_state = Renderer.render(new_state)
-        {:noreply, new_state}
-
-      {:document_highlight, pending} ->
-        new_state = put_in(state.lsp_pending, pending)
-        new_state = LspActions.handle_document_highlight_response(new_state, result)
-        new_state = Renderer.render(new_state)
-        {:noreply, new_state}
-
-      {:code_action, pending} ->
-        new_state = put_in(state.lsp_pending, pending)
-        new_state = LspActions.handle_code_action_response(new_state, result)
-        new_state = Renderer.render(new_state)
-        {:noreply, new_state}
-
-      {:prepare_rename, pending} ->
-        new_state = put_in(state.lsp_pending, pending)
-        new_state = LspActions.handle_prepare_rename_response(new_state, result)
-        new_state = Renderer.render(new_state)
-        {:noreply, new_state}
-
-      {:rename, pending} ->
-        new_state = put_in(state.lsp_pending, pending)
-        new_state = LspActions.handle_rename_response(new_state, result)
-        new_state = Renderer.render(new_state)
-        {:noreply, new_state}
-
-      {:type_definition, pending} ->
-        new_state = put_in(state.lsp_pending, pending)
-        new_state = LspActions.handle_type_definition_response(new_state, result)
-        new_state = Renderer.render(new_state)
-        {:noreply, new_state}
-
-      {:implementation, pending} ->
-        new_state = put_in(state.lsp_pending, pending)
-        new_state = LspActions.handle_implementation_response(new_state, result)
-        new_state = Renderer.render(new_state)
-        {:noreply, new_state}
-
-      {:document_symbol, pending} ->
-        new_state = put_in(state.lsp_pending, pending)
-        new_state = LspActions.handle_document_symbol_response(new_state, result)
-        new_state = Renderer.render(new_state)
-        {:noreply, new_state}
-
-      {:workspace_symbol, pending} ->
-        new_state = put_in(state.lsp_pending, pending)
-        new_state = LspActions.handle_workspace_symbol_response(new_state, result)
-        new_state = Renderer.render(new_state)
-        {:noreply, new_state}
-
-      {:selection_range, pending} ->
-        new_state = put_in(state.lsp_pending, pending)
-        new_state = LspActions.handle_selection_range_response(new_state, result)
-        new_state = Renderer.render(new_state)
-        {:noreply, new_state}
-
-      {:prepare_call_hierarchy, pending} ->
-        new_state = put_in(state.lsp_pending, pending)
-        new_state = LspActions.handle_prepare_call_hierarchy_response(new_state, result)
-        new_state = Renderer.render(new_state)
-        {:noreply, new_state}
-
-      {:incoming_calls, pending} ->
-        new_state = put_in(state.lsp_pending, pending)
-        new_state = LspActions.handle_incoming_calls_response(new_state, result)
-        new_state = Renderer.render(new_state)
-        {:noreply, new_state}
-
-      {:code_lens, pending} ->
-        new_state = put_in(state.lsp_pending, pending)
-        new_state = LspActions.handle_code_lens_response(new_state, result)
-        new_state = Renderer.render(new_state)
-        {:noreply, new_state}
-
-      {:inlay_hint, pending} ->
-        new_state = put_in(state.lsp_pending, pending)
-        new_state = LspActions.handle_inlay_hint_response(new_state, result)
-        new_state = Renderer.render(new_state)
-        {:noreply, new_state}
+        new_state = dispatch_lsp_response(kind, new_state, result)
+        {:noreply, Renderer.render(new_state)}
 
       {nil, _} ->
         # Not a tracked request — try completion handler
@@ -1006,6 +912,63 @@ defmodule Minga.Editor do
 
   def handle_info(_msg, state) do
     {:noreply, state}
+  end
+
+  # ── LSP response dispatch ──────────────────────────────────────────────────
+
+  # Dispatches an LSP response to the appropriate handler based on the kind atom.
+  @spec dispatch_lsp_response(atom(), EditorState.t(), term()) :: EditorState.t()
+  defp dispatch_lsp_response(:definition, state, result),
+    do: LspActions.handle_definition_response(state, result)
+
+  defp dispatch_lsp_response(:hover, state, result),
+    do: LspActions.handle_hover_response(state, result)
+
+  defp dispatch_lsp_response(:references, state, result),
+    do: LspActions.handle_references_response(state, result)
+
+  defp dispatch_lsp_response(:document_highlight, state, result),
+    do: LspActions.handle_document_highlight_response(state, result)
+
+  defp dispatch_lsp_response(:code_action, state, result),
+    do: LspActions.handle_code_action_response(state, result)
+
+  defp dispatch_lsp_response(:prepare_rename, state, result),
+    do: LspActions.handle_prepare_rename_response(state, result)
+
+  defp dispatch_lsp_response(:rename, state, result),
+    do: LspActions.handle_rename_response(state, result)
+
+  defp dispatch_lsp_response(:type_definition, state, result),
+    do: LspActions.handle_type_definition_response(state, result)
+
+  defp dispatch_lsp_response(:implementation, state, result),
+    do: LspActions.handle_implementation_response(state, result)
+
+  defp dispatch_lsp_response(:document_symbol, state, result),
+    do: LspActions.handle_document_symbol_response(state, result)
+
+  defp dispatch_lsp_response(:workspace_symbol, state, result),
+    do: LspActions.handle_workspace_symbol_response(state, result)
+
+  defp dispatch_lsp_response(:selection_range, state, result),
+    do: LspActions.handle_selection_range_response(state, result)
+
+  defp dispatch_lsp_response(:prepare_call_hierarchy, state, result),
+    do: LspActions.handle_prepare_call_hierarchy_response(state, result)
+
+  defp dispatch_lsp_response(:incoming_calls, state, result),
+    do: LspActions.handle_incoming_calls_response(state, result)
+
+  defp dispatch_lsp_response(:code_lens, state, result),
+    do: LspActions.handle_code_lens_response(state, result)
+
+  defp dispatch_lsp_response(:inlay_hint, state, result),
+    do: LspActions.handle_inlay_hint_response(state, result)
+
+  defp dispatch_lsp_response(kind, state, _result) do
+    Minga.Log.debug(:lsp, "Unhandled LSP response kind: #{inspect(kind)}")
+    state
   end
 
   # ── Agent event dispatch ──────────────────────────────────────────────────

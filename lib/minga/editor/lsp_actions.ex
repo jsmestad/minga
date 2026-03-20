@@ -29,9 +29,14 @@ defmodule Minga.Editor.LspActions do
   alias Minga.Editor.HoverPopup
   alias Minga.Editor.PickerUI
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.VimState
+  alias Minga.Log
   alias Minga.LSP.Client
+  alias Minga.LSP.DocumentHighlight
   alias Minga.LSP.SyncServer
   alias Minga.LSP.WorkspaceEdit
+  alias Minga.Mode.CommandState
+  alias Minga.Mode.VisualState
   alias Minga.Picker.LocationSource
 
   @type state :: EditorState.t()
@@ -121,8 +126,17 @@ defmodule Minga.Editor.LspActions do
 
   def document_highlight(%{buffers: %{active: buf}} = state) do
     case lsp_client_for(state, buf) do
-      nil -> state
-      client -> send_lsp_request(state, client, buf, "textDocument/documentHighlight", :document_highlight)
+      nil ->
+        state
+
+      client ->
+        send_lsp_request(
+          state,
+          client,
+          buf,
+          "textDocument/documentHighlight",
+          :document_highlight
+        )
     end
   end
 
@@ -271,8 +285,11 @@ defmodule Minga.Editor.LspActions do
 
   def goto_type_definition(%{buffers: %{active: buf}} = state) do
     case lsp_client_for(state, buf) do
-      nil -> %{state | status_msg: "No language server"}
-      client -> send_lsp_request(state, client, buf, "textDocument/typeDefinition", :type_definition)
+      nil ->
+        %{state | status_msg: "No language server"}
+
+      client ->
+        send_lsp_request(state, client, buf, "textDocument/typeDefinition", :type_definition)
     end
   end
 
@@ -284,8 +301,11 @@ defmodule Minga.Editor.LspActions do
 
   def goto_implementation(%{buffers: %{active: buf}} = state) do
     case lsp_client_for(state, buf) do
-      nil -> %{state | status_msg: "No language server"}
-      client -> send_lsp_request(state, client, buf, "textDocument/implementation", :implementation)
+      nil ->
+        %{state | status_msg: "No language server"}
+
+      client ->
+        send_lsp_request(state, client, buf, "textDocument/implementation", :implementation)
     end
   end
 
@@ -391,7 +411,13 @@ defmodule Minga.Editor.LspActions do
         %{state | status_msg: "No language server"}
 
       client ->
-        send_lsp_request(state, client, buf, "textDocument/prepareCallHierarchy", :prepare_call_hierarchy)
+        send_lsp_request(
+          state,
+          client,
+          buf,
+          "textDocument/prepareCallHierarchy",
+          :prepare_call_hierarchy
+        )
     end
   end
 
@@ -472,7 +498,7 @@ defmodule Minga.Editor.LspActions do
   """
   @spec handle_definition_response(state(), {:ok, term()} | {:error, term()}) :: state()
   def handle_definition_response(state, {:error, error}) do
-    Minga.Log.debug(:lsp, "Definition request failed: #{inspect(error)}")
+    Log.debug(:lsp, "Definition request failed: #{inspect(error)}")
     %{state | status_msg: "Definition request failed"}
   end
 
@@ -503,7 +529,7 @@ defmodule Minga.Editor.LspActions do
   """
   @spec handle_hover_response(state(), {:ok, term()} | {:error, term()}) :: state()
   def handle_hover_response(state, {:error, error}) do
-    Minga.Log.debug(:lsp, "Hover request failed: #{inspect(error)}")
+    Log.debug(:lsp, "Hover request failed: #{inspect(error)}")
     %{state | status_msg: "Hover request failed"}
   end
 
@@ -539,7 +565,7 @@ defmodule Minga.Editor.LspActions do
   """
   @spec handle_references_response(state(), {:ok, term()} | {:error, term()}) :: state()
   def handle_references_response(state, {:error, error}) do
-    Minga.Log.debug(:lsp, "References request failed: #{inspect(error)}")
+    Log.debug(:lsp, "References request failed: #{inspect(error)}")
     %{state | status_msg: "References request failed"}
   end
 
@@ -595,28 +621,7 @@ defmodule Minga.Editor.LspActions do
   end
 
   def handle_document_highlight_response(state, {:ok, highlights}) when is_list(highlights) do
-    parsed =
-      Enum.map(highlights, fn hl ->
-        range = hl["range"]
-        start_pos = range["start"]
-        end_pos = range["end"]
-
-        kind =
-          case hl["kind"] do
-            2 -> :read
-            3 -> :write
-            _ -> :text
-          end
-
-        %{
-          start_line: start_pos["line"],
-          start_col: start_pos["character"],
-          end_line: end_pos["line"],
-          end_col: end_pos["character"],
-          kind: kind
-        }
-      end)
-
+    parsed = Enum.map(highlights, &DocumentHighlight.from_lsp/1)
     %{state | document_highlights: parsed}
   end
 
@@ -630,7 +635,7 @@ defmodule Minga.Editor.LspActions do
   """
   @spec handle_code_action_response(state(), {:ok, term()} | {:error, term()}) :: state()
   def handle_code_action_response(state, {:error, error}) do
-    Minga.Log.debug(:lsp, "Code action request failed: #{inspect(error)}")
+    Log.debug(:lsp, "Code action request failed: #{inspect(error)}")
     %{state | status_msg: "Code action request failed"}
   end
 
@@ -656,7 +661,7 @@ defmodule Minga.Editor.LspActions do
   """
   @spec handle_prepare_rename_response(state(), {:ok, term()} | {:error, term()}) :: state()
   def handle_prepare_rename_response(state, {:error, error}) do
-    Minga.Log.debug(:lsp, "Prepare rename failed: #{inspect(error)}")
+    Log.debug(:lsp, "Prepare rename failed: #{inspect(error)}")
     %{state | status_msg: "Cannot rename at this position"}
   end
 
@@ -669,8 +674,8 @@ defmodule Minga.Editor.LspActions do
 
     # Enter command mode with "rename <placeholder>" pre-filled
     # The ex-command parser handles "rename <new_name>" → {:rename, new_name}
-    command_state = %Minga.Mode.CommandState{input: "rename #{placeholder}"}
-    vim = Minga.Editor.VimState.transition(state.vim, :command, command_state)
+    command_state = %CommandState{input: "rename #{placeholder}"}
+    vim = VimState.transition(state.vim, :command, command_state)
     %{state | vim: vim}
   end
 
@@ -681,7 +686,7 @@ defmodule Minga.Editor.LspActions do
   """
   @spec handle_rename_response(state(), {:ok, term()} | {:error, term()}) :: state()
   def handle_rename_response(state, {:error, error}) do
-    Minga.Log.debug(:lsp, "Rename failed: #{inspect(error)}")
+    Log.debug(:lsp, "Rename failed: #{inspect(error)}")
     %{state | status_msg: "Rename failed"}
   end
 
@@ -698,7 +703,7 @@ defmodule Minga.Editor.LspActions do
   @doc "Handles a textDocument/typeDefinition response (same format as definition)."
   @spec handle_type_definition_response(state(), {:ok, term()} | {:error, term()}) :: state()
   def handle_type_definition_response(state, {:error, error}) do
-    Minga.Log.debug(:lsp, "Type definition request failed: #{inspect(error)}")
+    Log.debug(:lsp, "Type definition request failed: #{inspect(error)}")
     %{state | status_msg: "Type definition request failed"}
   end
 
@@ -720,7 +725,7 @@ defmodule Minga.Editor.LspActions do
   @doc "Handles a textDocument/implementation response (same format as definition)."
   @spec handle_implementation_response(state(), {:ok, term()} | {:error, term()}) :: state()
   def handle_implementation_response(state, {:error, error}) do
-    Minga.Log.debug(:lsp, "Implementation request failed: #{inspect(error)}")
+    Log.debug(:lsp, "Implementation request failed: #{inspect(error)}")
     %{state | status_msg: "Implementation request failed"}
   end
 
@@ -758,7 +763,7 @@ defmodule Minga.Editor.LspActions do
   @doc "Handles a textDocument/documentSymbol response."
   @spec handle_document_symbol_response(state(), {:ok, term()} | {:error, term()}) :: state()
   def handle_document_symbol_response(state, {:error, error}) do
-    Minga.Log.debug(:lsp, "Document symbol request failed: #{inspect(error)}")
+    Log.debug(:lsp, "Document symbol request failed: #{inspect(error)}")
     %{state | status_msg: "Document symbol request failed"}
   end
 
@@ -790,7 +795,7 @@ defmodule Minga.Editor.LspActions do
   @doc "Handles a workspace/symbol response."
   @spec handle_workspace_symbol_response(state(), {:ok, term()} | {:error, term()}) :: state()
   def handle_workspace_symbol_response(state, {:error, error}) do
-    Minga.Log.debug(:lsp, "Workspace symbol request failed: #{inspect(error)}")
+    Log.debug(:lsp, "Workspace symbol request failed: #{inspect(error)}")
     %{state | status_msg: "Workspace symbol request failed"}
   end
 
@@ -827,7 +832,7 @@ defmodule Minga.Editor.LspActions do
   """
   @spec handle_selection_range_response(state(), {:ok, term()} | {:error, term()}) :: state()
   def handle_selection_range_response(state, {:error, error}) do
-    Minga.Log.debug(:lsp, "Selection range request failed: #{inspect(error)}")
+    Log.debug(:lsp, "Selection range request failed: #{inspect(error)}")
     %{state | status_msg: "Selection range request failed"}
   end
 
@@ -860,7 +865,7 @@ defmodule Minga.Editor.LspActions do
   @spec handle_prepare_call_hierarchy_response(state(), {:ok, term()} | {:error, term()}) ::
           state()
   def handle_prepare_call_hierarchy_response(state, {:error, error}) do
-    Minga.Log.debug(:lsp, "Call hierarchy request failed: #{inspect(error)}")
+    Log.debug(:lsp, "Call hierarchy request failed: #{inspect(error)}")
     %{state | status_msg: "Call hierarchy request failed"}
   end
 
@@ -913,7 +918,7 @@ defmodule Minga.Editor.LspActions do
   @doc "Handles a textDocument/codeLens response (stores for rendering)."
   @spec handle_code_lens_response(state(), {:ok, term()} | {:error, term()}) :: state()
   def handle_code_lens_response(state, {:error, _}) do
-    Minga.Log.debug(:lsp, "Code lens request failed")
+    Log.debug(:lsp, "Code lens request failed")
     state
   end
 
@@ -941,7 +946,7 @@ defmodule Minga.Editor.LspActions do
   @doc "Handles a textDocument/inlayHint response (stores for rendering)."
   @spec handle_inlay_hint_response(state(), {:ok, term()} | {:error, term()}) :: state()
   def handle_inlay_hint_response(state, {:error, _}) do
-    Minga.Log.debug(:lsp, "Inlay hint request failed")
+    Log.debug(:lsp, "Inlay hint request failed")
     state
   end
 
@@ -991,22 +996,28 @@ defmodule Minga.Editor.LspActions do
 
       _ ->
         {state, file_count, edit_count} =
-          Enum.reduce(file_edits, {state, 0, 0}, fn {path, edits}, {st, fc, ec} ->
-            st = ensure_buffer_open(st, path)
-            buf = find_buffer_by_path(st, path)
-
-            case buf do
-              nil ->
-                Minga.Log.warning(:lsp, "#{label}: could not open buffer for #{path}")
-                {st, fc, ec}
-
-              pid ->
-                BufferServer.apply_text_edits(pid, edits)
-                {st, fc + 1, ec + length(edits)}
-            end
-          end)
+          Enum.reduce(file_edits, {state, 0, 0}, &apply_single_file_edit(&1, &2, label))
 
         %{state | status_msg: "#{label}: applied #{edit_count} edits across #{file_count} files"}
+    end
+  end
+
+  @spec apply_single_file_edit(
+          {String.t(), [WorkspaceEdit.text_edit()]},
+          {state(), non_neg_integer(), non_neg_integer()},
+          String.t()
+        ) :: {state(), non_neg_integer(), non_neg_integer()}
+  defp apply_single_file_edit({path, edits}, {st, fc, ec}, label) do
+    st = ensure_buffer_open(st, path)
+
+    case find_buffer_by_path(st, path) do
+      nil ->
+        Log.warning(:lsp, "#{label}: could not open buffer for #{path}")
+        {st, fc, ec}
+
+      pid ->
+        BufferServer.apply_text_edits(pid, edits)
+        {st, fc + 1, ec + length(edits)}
     end
   end
 
@@ -1333,7 +1344,9 @@ defmodule Minga.Editor.LspActions do
 
   @spec extract_rename_placeholder(map()) :: String.t()
   defp extract_rename_placeholder(%{"placeholder" => name}) when is_binary(name), do: name
-  defp extract_rename_placeholder(%{"range" => _, "placeholder" => name}) when is_binary(name), do: name
+
+  defp extract_rename_placeholder(%{"range" => _, "placeholder" => name}) when is_binary(name),
+    do: name
 
   defp extract_rename_placeholder(%{"start" => _, "end" => _} = _range) do
     # Server returned a Range, meaning the cursor is on a renameable symbol
@@ -1441,12 +1454,12 @@ defmodule Minga.Editor.LspActions do
       BufferServer.move_to(buf, {range.end_line, range.end_col})
 
       # Enter visual mode with the anchor at the start of the range
-      visual_state = %Minga.Mode.VisualState{
+      visual_state = %VisualState{
         visual_anchor: {range.start_line, range.start_col},
         visual_type: :char
       }
 
-      vim = Minga.Editor.VimState.transition(state.vim, :visual, visual_state)
+      vim = VimState.transition(state.vim, :visual, visual_state)
       %{state | vim: vim}
     else
       state
@@ -1472,13 +1485,11 @@ defmodule Minga.Editor.LspActions do
   defp extract_inlay_label(label) when is_binary(label), do: label
 
   defp extract_inlay_label(parts) when is_list(parts) do
-    parts
-    |> Enum.map(fn
+    Enum.map_join(parts, fn
       %{"value" => v} when is_binary(v) -> v
       s when is_binary(s) -> s
       _ -> ""
     end)
-    |> Enum.join()
   end
 
   defp extract_inlay_label(_), do: ""

@@ -145,7 +145,8 @@ struct GUIStateFrameTests {
             windowId: 1, fullRefresh: true,
             cursorRow: 0, cursorCol: 0, cursorShape: .block,
             rows: [], selection: nil,
-            searchMatches: [], diagnosticUnderlines: []
+            searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: []
         )
         state.windowContents[1] = content
         #expect(state.windowContents.count == 1)

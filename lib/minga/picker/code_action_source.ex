@@ -12,6 +12,7 @@ defmodule Minga.Picker.CodeActionSource do
   @behaviour Minga.Picker.Source
 
   alias Minga.Editor.LspActions
+  alias Minga.Log
   alias Minga.Picker.Item
 
   @impl true
@@ -73,7 +74,7 @@ defmodule Minga.Picker.CodeActionSource do
         state
 
       %{"command" => cmd, "title" => title} ->
-        Minga.Log.info(:lsp, "Code action command: #{title} (#{cmd})")
+        Log.info(:lsp, "Code action command: #{title} (#{cmd})")
         # TODO: Execute the command via Client.request("workspace/executeCommand", ...)
         state
 

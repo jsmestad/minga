@@ -29,6 +29,7 @@ defmodule Minga.Editor.SemanticWindow.Builder do
   alias Minga.Editor.RenderPipeline.Scroll.WindowScroll
   alias Minga.Editor.SemanticWindow
   alias Minga.Editor.SemanticWindow.DiagnosticRange
+  alias Minga.Editor.SemanticWindow.DocumentHighlightRange
   alias Minga.Editor.SemanticWindow.SearchMatch
   alias Minga.Editor.SemanticWindow.Selection
   alias Minga.Editor.SemanticWindow.Span
@@ -109,6 +110,10 @@ defmodule Minga.Editor.SemanticWindow.Builder do
     # Diagnostic inline ranges in display coordinates
     diagnostic_ranges = build_diagnostic_ranges(window, viewport, visible_rows)
 
+    # Document highlights in display coordinates
+    doc_highlights =
+      build_document_highlights(state.document_highlights, viewport.top, viewport_bottom)
+
     %SemanticWindow{
       window_id: win_id,
       rows: visual_rows,
@@ -118,6 +123,7 @@ defmodule Minga.Editor.SemanticWindow.Builder do
       selection: selection,
       search_matches: search_matches,
       diagnostic_ranges: diagnostic_ranges,
+      document_highlights: doc_highlights,
       full_refresh: true
     }
   end
@@ -351,6 +357,32 @@ defmodule Minga.Editor.SemanticWindow.Builder do
     end
   catch
     :exit, _ -> []
+  end
+
+  # ── Document highlights ─────────────────────────────────────────────────
+
+  @spec build_document_highlights(
+          [Minga.LSP.DocumentHighlight.t()] | nil,
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: [DocumentHighlightRange.t()]
+  defp build_document_highlights(nil, _top, _bottom), do: []
+  defp build_document_highlights([], _top, _bottom), do: []
+
+  defp build_document_highlights(highlights, viewport_top, viewport_bottom) do
+    highlights
+    |> Enum.filter(fn hl ->
+      hl.start_line < viewport_bottom and hl.end_line >= viewport_top
+    end)
+    |> Enum.map(fn hl ->
+      %DocumentHighlightRange{
+        start_row: hl.start_line - viewport_top,
+        start_col: hl.start_col,
+        end_row: hl.end_line - viewport_top,
+        end_col: hl.end_col,
+        kind: hl.kind
+      }
+    end)
   end
 
   # ── Helpers ────────────────────────────────────────────────────────────

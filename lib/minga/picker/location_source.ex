@@ -24,6 +24,7 @@ defmodule Minga.Picker.LocationSource do
   alias Minga.Editor.Commands
   alias Minga.Editor.State, as: EditorState
   alias Minga.Picker.Item
+  alias Minga.Picker.Source
 
   @impl true
   @spec title() :: String.t()
@@ -50,7 +51,7 @@ defmodule Minga.Picker.LocationSource do
   @impl true
   @spec on_cancel(term()) :: term()
   def on_cancel(state) do
-    Minga.Picker.Source.restore_or_keep(state)
+    Source.restore_or_keep(state)
   end
 
   # ── Private ────────────────────────────────────────────────────────────────

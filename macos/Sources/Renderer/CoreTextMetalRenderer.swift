@@ -363,6 +363,26 @@ final class CoreTextMetalRenderer {
                     )
                 }
 
+                // Document highlight overlay quads (drawn before search matches,
+                // so search matches paint over them when they overlap).
+                for highlight in content.documentHighlights {
+                    // Document highlights are typically single-line (one identifier).
+                    // Draw on startRow only; multi-row highlights are rare for this feature.
+                    let hlY = windowRowOffset + Float(highlight.startRow) * cellH * scale
+                    let hlX = contentColOffset + Float(highlight.startCol) * cellW * scale
+                    let hlW = Float(highlight.endCol - highlight.startCol) * cellW * scale
+
+                    var quad = QuadGPU()
+                    quad.position = SIMD2<Float>(hlX, hlY)
+                    quad.size = SIMD2<Float>(hlW, cellH * scale)
+                    // Write references get a warmer amber tint; read/text get a subtle blue-gray.
+                    quad.color = highlight.kind == .write
+                        ? SIMD3<Float>(0.29, 0.25, 0.17)   // amber: 0x4A3F2B
+                        : SIMD3<Float>(0.23, 0.25, 0.29)   // blue-gray: 0x3A3F4B
+                    quad.alpha = 1.0
+                    semanticOverlayQuads.append(quad)
+                }
+
                 // Search match overlay quads (drawn before text).
                 for match in content.searchMatches {
                     let matchY = windowRowOffset + Float(match.row) * cellH * scale
