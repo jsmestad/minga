@@ -156,12 +156,22 @@ final class CoreTextMetalRenderer {
     /// Shared pooled bitmap rasterizer for both line renderers.
     private var bitmapRasterizer: BitmapRasterizer?
 
+    /// Line texture atlas for batched instanced drawing.
+    private(set) var atlas: LineTextureAtlas?
+
+    /// Metal buffer for line GPU instances (one instanced draw call).
+    private var instanceBuffer: MTLBuffer?
+    private var maxInstanceSlots: Int = 0
+
     /// Set up the line renderer. Called once the FontManager is available.
     func setupLineRenderer(fontManager: FontManager) {
         let rasterizer = BitmapRasterizer()
         self.bitmapRasterizer = rasterizer
         self.lineRenderer = CoreTextLineRenderer(device: device, fontManager: fontManager, rasterizer: rasterizer)
         self.windowContentRenderer = WindowContentRenderer(device: device, fontManager: fontManager, rasterizer: rasterizer)
+
+        let linePixelHeight = Int(ceil(CGFloat(fontManager.cellHeight) * fontManager.scale))
+        self.atlas = LineTextureAtlas(device: device, slotHeight: linePixelHeight)
     }
 
     /// Render the editor from LineBuffer data + semantic window content.
@@ -193,6 +203,22 @@ final class CoreTextMetalRenderer {
             }
         }
 
+        // Ensure atlas can hold all lines (content + gutter + semantic).
+        if let atlas {
+            let neededSlots = Int(lineBuffer.rows) * 4
+            let atlasPixelWidth = Int(ceil(CGFloat(lineBuffer.cols) * CGFloat(cellW) * CGFloat(scale)))
+            atlas.ensureCapacity(maxSlots: neededSlots, width: atlasPixelWidth)
+            atlas.beginFrame()
+
+            if neededSlots > maxInstanceSlots {
+                maxInstanceSlots = neededSlots
+                instanceBuffer = device.makeBuffer(
+                    length: neededSlots * MemoryLayout<LineGPU>.stride,
+                    options: .storageModeShared
+                )
+            }
+        }
+
         // Default background color.
         let defaultBg = lineBuffer.defaultBg != 0
             ? colorFromU24(lineBuffer.defaultBg, default: SIMD3<Float>(0.12, 0.12, 0.14))
@@ -221,7 +247,7 @@ final class CoreTextMetalRenderer {
 
         // Build background quads and line texture instances.
         var bgQuads: [QuadGPU] = []
-        var lineInstances: [(LineGPU, MTLTexture)] = []
+        var lineInstances: [LineGPU] = []
 
         for row: UInt16 in 0..<lineBuffer.rows {
             let rowF = Float(row)
@@ -290,20 +316,19 @@ final class CoreTextMetalRenderer {
             // Line texture.
             if !runs.isEmpty {
                 let contentHash = lineBuffer.computeLineHash(row: row)
-                if let cached = lineRenderer.renderLine(row: row, runs: runs, contentHash: contentHash) {
-                    // The texture starts at the first run's column. Gap-filling
-                    // spaces in the attributed string handle intra-line positioning.
+                if let atlas, let entry = lineRenderer.renderLineToAtlas(row: row, runs: runs, contentHash: contentHash, atlas: atlas) {
                     let firstCol = runs.first.map { Float($0.col) } ?? 0
                     let colPx = firstCol * cellW * scale
                     let xPos = firstCol >= Float(lineBuffer.gutterCol)
                         ? colPx + gutterPaddingPx : colPx
 
+                    let (uvOrigin, uvSize) = atlas.uvForSlot(entry.slotIndex, pixelWidth: entry.pixelWidth)
                     var lineGPU = LineGPU()
                     lineGPU.position = SIMD2<Float>(xPos, yPos)
-                    lineGPU.size = SIMD2<Float>(Float(cached.pixelWidth), Float(cached.pixelHeight))
-                    lineGPU.uvOrigin = .zero
-                    lineGPU.uvSize = SIMD2<Float>(1, 1)
-                    lineInstances.append((lineGPU, cached.texture))
+                    lineGPU.size = SIMD2<Float>(Float(entry.pixelWidth), Float(entry.pixelHeight))
+                    lineGPU.uvOrigin = uvOrigin
+                    lineGPU.uvSize = uvSize
+                    lineInstances.append(lineGPU)
                 }
             }
         }
@@ -354,17 +379,18 @@ final class CoreTextMetalRenderer {
                     semanticOverlayQuads.append(quad)
                 }
 
-                // Render line textures from semantic content.
+                // Render line textures from semantic content into atlas.
                 for (rowIdx, row) in content.rows.enumerated() {
-                    if let cached = wcr.renderRow(displayRow: UInt16(rowIdx), row: row) {
+                    if let atlas, let entry = wcr.renderRowToAtlas(displayRow: UInt16(rowIdx), row: row, atlas: atlas) {
                         let yPos = windowRowOffset + Float(rowIdx) * cellH * scale
 
+                        let (uvOrigin, uvSize) = atlas.uvForSlot(entry.slotIndex, pixelWidth: entry.pixelWidth)
                         var lineGPU = LineGPU()
                         lineGPU.position = SIMD2<Float>(contentColOffset, yPos)
-                        lineGPU.size = SIMD2<Float>(Float(cached.pixelWidth), Float(cached.pixelHeight))
-                        lineGPU.uvOrigin = .zero
-                        lineGPU.uvSize = SIMD2<Float>(1, 1)
-                        lineInstances.append((lineGPU, cached.texture))
+                        lineGPU.size = SIMD2<Float>(Float(entry.pixelWidth), Float(entry.pixelHeight))
+                        lineGPU.uvOrigin = uvOrigin
+                        lineGPU.uvSize = uvSize
+                        lineInstances.append(lineGPU)
                     }
                 }
 
@@ -459,15 +485,21 @@ final class CoreTextMetalRenderer {
             encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: 1)
         }
 
-        // Pass 3: Line textures (one draw call per line since each has its own texture).
-        if !lineInstances.isEmpty {
-            encoder.setRenderPipelineState(linePipeline)
-            for (var lineGPU, texture) in lineInstances {
-                encoder.setVertexBytes(&lineGPU, length: MemoryLayout<LineGPU>.stride, index: 0)
-                encoder.setVertexBytes(&uniforms, length: MemoryLayout<CTUniformsGPU>.size, index: 1)
-                encoder.setFragmentTexture(texture, index: 0)
-                encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: 1)
+        // Pass 3: Line textures — one instanced draw call with the atlas texture.
+        if !lineInstances.isEmpty, let atlas, let atlasTexture = atlas.texture,
+           let instBuf = instanceBuffer {
+            // Copy instance data into the shared Metal buffer.
+            let byteCount = lineInstances.count * MemoryLayout<LineGPU>.stride
+            lineInstances.withUnsafeBytes { ptr in
+                memcpy(instBuf.contents(), ptr.baseAddress!, byteCount)
             }
+
+            encoder.setRenderPipelineState(linePipeline)
+            encoder.setVertexBuffer(instBuf, offset: 0, index: 0)
+            encoder.setVertexBytes(&uniforms, length: MemoryLayout<CTUniformsGPU>.size, index: 1)
+            encoder.setFragmentTexture(atlasTexture, index: 0)
+            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6,
+                                   instanceCount: lineInstances.count)
         }
 
         // Pass 3.5: Diagnostic underline quads (drawn after text, before gutter).
@@ -560,7 +592,7 @@ final class CoreTextMetalRenderer {
         cellW: Float, cellH: Float, scale: Float,
         gutterPaddingPx: Float,
         bgQuads: inout [QuadGPU],
-        lineInstances: inout [(LineGPU, MTLTexture)]
+        lineInstances: inout [LineGPU]
     ) {
         guard let lineRenderer else { return }
         let signColWidth = Int(gutter.signColWidth)
@@ -608,7 +640,7 @@ final class CoreTextMetalRenderer {
         cellW: Float, cellH: Float, scale: Float,
         lineBuffer: LineBuffer,
         bgQuads: inout [QuadGPU],
-        lineInstances: inout [(LineGPU, MTLTexture)],
+        lineInstances: inout [LineGPU],
         lineRenderer: CoreTextLineRenderer
     ) {
         switch entry.signType {
@@ -642,16 +674,16 @@ final class CoreTextMetalRenderer {
         case .diagError, .diagWarning, .diagInfo, .diagHint:
             let (text, fg) = diagnosticSignTextAndColor(entry.signType, lineBuffer: lineBuffer)
             let runs = [StyledRun(col: 0, text: text, fg: fg, bg: 0, attrs: 0)]
-            // Use screen row directly for cache key (unique per screen position)
             let cacheRow = 0x8000 + screenRow
             let contentHash = gutterContentHash(text: text, fg: fg)
-            if let cached = lineRenderer.renderLine(row: cacheRow, runs: runs, contentHash: contentHash) {
+            if let atlas, let entry = lineRenderer.renderLineToAtlas(row: cacheRow, runs: runs, contentHash: contentHash, atlas: atlas) {
+                let (uvOrigin, uvSize) = atlas.uvForSlot(entry.slotIndex, pixelWidth: entry.pixelWidth)
                 var lineGPU = LineGPU()
                 lineGPU.position = SIMD2<Float>(xOffset, yPos)
-                lineGPU.size = SIMD2<Float>(Float(cached.pixelWidth), Float(cached.pixelHeight))
-                lineGPU.uvOrigin = .zero
-                lineGPU.uvSize = SIMD2<Float>(1, 1)
-                lineInstances.append((lineGPU, cached.texture))
+                lineGPU.size = SIMD2<Float>(Float(entry.pixelWidth), Float(entry.pixelHeight))
+                lineGPU.uvOrigin = uvOrigin
+                lineGPU.uvSize = uvSize
+                lineInstances.append(lineGPU)
             }
 
         case .none:
@@ -666,7 +698,7 @@ final class CoreTextMetalRenderer {
         signColWidth: Int,
         cellW: Float, cellH: Float, scale: Float,
         lineBuffer: LineBuffer,
-        lineInstances: inout [(LineGPU, MTLTexture)],
+        lineInstances: inout [LineGPU],
         lineRenderer: CoreTextLineRenderer
     ) {
         let (numberStr, isCurrent) = gutterNumberString(
@@ -686,17 +718,17 @@ final class CoreTextMetalRenderer {
         let startCol = UInt16(signColWidth + padCols)
 
         let runs = [StyledRun(col: startCol, text: numberStr, fg: fg, bg: 0, attrs: 0)]
-        // Use screen row for cache key (unique per screen position)
         let cacheRow = 0x9000 + screenRow
         let contentHash = gutterContentHash(text: numberStr, fg: fg)
-        if let cached = lineRenderer.renderLine(row: cacheRow, runs: runs, contentHash: contentHash) {
+        if let atlas, let entry = lineRenderer.renderLineToAtlas(row: cacheRow, runs: runs, contentHash: contentHash, atlas: atlas) {
+            let (uvOrigin, uvSize) = atlas.uvForSlot(entry.slotIndex, pixelWidth: entry.pixelWidth)
             let xPos = xOffset + Float(startCol) * cellW * scale
             var lineGPU = LineGPU()
             lineGPU.position = SIMD2<Float>(xPos, yPos)
-            lineGPU.size = SIMD2<Float>(Float(cached.pixelWidth), Float(cached.pixelHeight))
-            lineGPU.uvOrigin = .zero
-            lineGPU.uvSize = SIMD2<Float>(1, 1)
-            lineInstances.append((lineGPU, cached.texture))
+            lineGPU.size = SIMD2<Float>(Float(entry.pixelWidth), Float(entry.pixelHeight))
+            lineGPU.uvOrigin = uvOrigin
+            lineGPU.uvSize = uvSize
+            lineInstances.append(lineGPU)
         }
     }
 

@@ -195,6 +195,41 @@ final class CoreTextLineRenderer {
         return cached
     }
 
+    /// Render a line's styled runs into an atlas slot.
+    ///
+    /// Checks the atlas cache first. On hit, returns the cached entry.
+    /// On miss, rasterizes via BitmapRasterizer and uploads into the atlas.
+    func renderLineToAtlas(row: UInt16, runs: [StyledRun], contentHash: Int,
+                           atlas: LineTextureAtlas) -> AtlasEntry? {
+        guard !runs.isEmpty else { return nil }
+
+        // Atlas cache hit.
+        if let entry = atlas.cachedEntry(forKey: row, contentHash: contentHash) {
+            return entry
+        }
+
+        // Build attributed string and CTLine.
+        let attributedString = buildAttributedString(runs: runs)
+        let ctLine = CTLineCreateWithAttributedString(attributedString)
+
+        var lineAscent: CGFloat = 0
+        var lineDescent: CGFloat = 0
+        var lineLeading: CGFloat = 0
+        let lineWidth = CTLineGetTypographicBounds(ctLine, &lineAscent, &lineDescent, &lineLeading)
+
+        let pixelWidth = min(Int(ceil(lineWidth * scale)), maxLinePixelWidth)
+        guard pixelWidth > 0, linePixelHeight > 0 else { return nil }
+
+        // Rasterize into pooled bitmap.
+        let result = rasterizer.rasterize(ctLine, width: pixelWidth, height: linePixelHeight,
+                                          scale: scale, descent: descent)
+
+        // Upload into atlas slot.
+        return atlas.upload(key: row, contentHash: contentHash,
+                           pointer: result.pointer, pixelWidth: pixelWidth,
+                           bytesPerRow: result.bytesPerRow)
+    }
+
     /// Advance the frame counter and evict stale textures.
     func beginFrame() {
         frameCounter += 1
