@@ -31,6 +31,9 @@ final class WindowContentRenderer {
     /// Font manager for resolving font faces.
     private let fontManager: FontManager
 
+    /// Shared pooled bitmap rasterizer.
+    private let rasterizer: BitmapRasterizer
+
     /// Per-row texture cache keyed by display row index.
     /// Separate from CoreTextLineRenderer's cache to avoid key collisions.
     private var lineCache: [UInt16: CachedLineTexture] = [:]
@@ -66,9 +69,10 @@ final class WindowContentRenderer {
     /// Updated from theme's editor_fg color slot each frame.
     var defaultFgRGB: UInt32 = 0xBBC2CF
 
-    init(device: MTLDevice, fontManager: FontManager) {
+    init(device: MTLDevice, fontManager: FontManager, rasterizer: BitmapRasterizer) {
         self.device = device
         self.fontManager = fontManager
+        self.rasterizer = rasterizer
         self.scale = fontManager.scale
         self.cellWidth = CGFloat(fontManager.cellWidth)
         self.cellHeight = CGFloat(fontManager.cellHeight)
@@ -129,8 +133,9 @@ final class WindowContentRenderer {
         let pixelHeight = linePixelHeight
         guard pixelWidth > 0, pixelHeight > 0 else { return nil }
 
-        // Rasterize to BGRA bitmap.
-        let bgraData = rasterize(ctLine, width: pixelWidth, height: pixelHeight)
+        // Rasterize into the pooled BGRA bitmap.
+        let result = rasterizer.rasterize(ctLine, width: pixelWidth, height: pixelHeight,
+                                          scale: scale, descent: descent)
 
         // Create texture.
         let texDesc = MTLTextureDescriptor.texture2DDescriptor(
@@ -144,12 +149,11 @@ final class WindowContentRenderer {
 
         guard let texture = device.makeTexture(descriptor: texDesc) else { return nil }
 
+        // Upload bitmap data. Pooled pointer valid until next rasterize() call.
         let region = MTLRegion(origin: MTLOrigin(x: 0, y: 0, z: 0),
                                size: MTLSize(width: pixelWidth, height: pixelHeight, depth: 1))
-        bgraData.withUnsafeBytes { ptr in
-            texture.replace(region: region, mipmapLevel: 0,
-                           withBytes: ptr.baseAddress!, bytesPerRow: pixelWidth * 4)
-        }
+        texture.replace(region: region, mipmapLevel: 0,
+                       withBytes: result.pointer, bytesPerRow: result.bytesPerRow)
 
         let cached = CachedLineTexture(
             texture: texture,
@@ -339,37 +343,4 @@ final class WindowContentRenderer {
         return NSColor(red: r, green: g, blue: b, alpha: 1.0)
     }
 
-    // MARK: - Rasterization
-
-    /// Rasterize a CTLine into a premultiplied BGRA bitmap.
-    private func rasterize(_ ctLine: CTLine, width: Int, height: Int) -> [UInt8] {
-        let bytesPerRow = width * 4
-        var buffer = [UInt8](repeating: 0, count: bytesPerRow * height)
-
-        let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
-        guard let ctx = CGContext(
-            data: &buffer,
-            width: width,
-            height: height,
-            bitsPerComponent: 8,
-            bytesPerRow: bytesPerRow,
-            space: colorSpace,
-            bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
-        ) else {
-            return buffer
-        }
-
-        ctx.scaleBy(x: scale, y: scale)
-        ctx.setAllowsFontSmoothing(true)
-        ctx.setShouldSmoothFonts(true)
-        ctx.setAllowsFontSubpixelPositioning(true)
-        ctx.setShouldSubpixelPositionFonts(true)
-        ctx.setAllowsAntialiasing(true)
-        ctx.setShouldAntialias(true)
-
-        ctx.textPosition = CGPoint(x: 0, y: descent)
-        CTLineDraw(ctLine, ctx)
-
-        return buffer
-    }
 }

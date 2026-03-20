@@ -16,7 +16,8 @@ struct DisplayColumnMappingTests {
     private func makeRenderer() -> WindowContentRenderer? {
         guard let device = MTLCreateSystemDefaultDevice() else { return nil }
         let fm = FontManager(name: "Menlo", size: 13.0, scale: 2.0)
-        return WindowContentRenderer(device: device, fontManager: fm)
+        let rasterizer = BitmapRasterizer()
+        return WindowContentRenderer(device: device, fontManager: fm, rasterizer: rasterizer)
     }
 
     @Test("ASCII text: each char maps to one display column")

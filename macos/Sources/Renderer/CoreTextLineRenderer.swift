@@ -87,9 +87,13 @@ final class CoreTextLineRenderer {
     private static let ATTR_REVERSE: UInt8 = 0x08
     private static let ATTR_STRIKETHROUGH: UInt8 = 0x10
 
-    init(device: MTLDevice, fontManager: FontManager) {
+    /// Shared pooled bitmap rasterizer.
+    private let rasterizer: BitmapRasterizer
+
+    init(device: MTLDevice, fontManager: FontManager, rasterizer: BitmapRasterizer) {
         self.device = device
         self.fontManager = fontManager
+        self.rasterizer = rasterizer
         self.scale = fontManager.scale
         self.cellWidth = CGFloat(fontManager.cellWidth)
         self.cellHeight = CGFloat(fontManager.cellHeight)
@@ -157,8 +161,9 @@ final class CoreTextLineRenderer {
 
         guard pixelWidth > 0, pixelHeight > 0 else { return nil }
 
-        // Rasterize into a BGRA bitmap.
-        let bgraData = rasterizeLine(ctLine, runs: runs, width: pixelWidth, height: pixelHeight)
+        // Rasterize into the pooled BGRA bitmap.
+        let result = rasterizer.rasterize(ctLine, width: pixelWidth, height: pixelHeight,
+                                          scale: scale, descent: descent)
 
         // Create or reuse texture.
         let texDesc = MTLTextureDescriptor.texture2DDescriptor(
@@ -172,13 +177,12 @@ final class CoreTextLineRenderer {
 
         guard let texture = device.makeTexture(descriptor: texDesc) else { return nil }
 
-        // Upload bitmap data.
+        // Upload bitmap data. The pooled pointer is valid until the next
+        // rasterize() call, and texture.replace copies immediately.
         let region = MTLRegion(origin: MTLOrigin(x: 0, y: 0, z: 0),
                                size: MTLSize(width: pixelWidth, height: pixelHeight, depth: 1))
-        bgraData.withUnsafeBytes { ptr in
-            texture.replace(region: region, mipmapLevel: 0,
-                           withBytes: ptr.baseAddress!, bytesPerRow: pixelWidth * 4)
-        }
+        texture.replace(region: region, mipmapLevel: 0,
+                       withBytes: result.pointer, bytesPerRow: result.bytesPerRow)
 
         let cached = CachedLineTexture(
             texture: texture,
@@ -315,55 +319,6 @@ final class CoreTextLineRenderer {
         case 4: return .double         // double
         default: return .single        // line (default)
         }
-    }
-
-    /// Rasterize a CTLine into a premultiplied BGRA bitmap.
-    ///
-    /// Renders each run's text in its foreground color into a premultiplied BGRA
-    /// context with a transparent background. The resulting texture is composited
-    /// over the background quad in Metal.
-    private func rasterizeLine(_ ctLine: CTLine, runs: [StyledRun],
-                                width: Int, height: Int) -> [UInt8] {
-        let bytesPerRow = width * 4
-        var buffer = [UInt8](repeating: 0, count: bytesPerRow * height)
-
-        let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
-        guard let ctx = CGContext(
-            data: &buffer,
-            width: width,
-            height: height,
-            bitsPerComponent: 8,
-            bytesPerRow: bytesPerRow,
-            space: colorSpace,
-            bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
-        ) else {
-            return buffer
-        }
-
-        // Scale for Retina.
-        ctx.scaleBy(x: scale, y: scale)
-
-        // Font rendering quality settings.
-        ctx.setAllowsFontSmoothing(true)
-        ctx.setShouldSmoothFonts(true)
-        ctx.setAllowsFontSubpixelPositioning(true)
-        ctx.setShouldSubpixelPositionFonts(true)
-        ctx.setAllowsAntialiasing(true)
-        ctx.setShouldAntialias(true)
-
-        // CoreText uses a bottom-up coordinate system.
-        let baselineY = descent
-
-        // The CTLine starts at x=0 within the texture. Column positioning
-        // is handled by CoreTextMetalRenderer when it places the texture
-        // quad. The gap-filling spaces in buildAttributedString ensure
-        // each run's text appears at the correct relative offset.
-        ctx.textPosition = CGPoint(x: 0, y: baselineY)
-
-        // Draw the complete CTLine.
-        CTLineDraw(ctLine, ctx)
-
-        return buffer
     }
 
     /// Calculate the display width (in cell columns) of a string,
