@@ -53,6 +53,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
     send_gui_gutter_separator(state)
     send_gui_cursorline(state)
     send_gui_gutter(state)
+    send_gui_bottom_panel(state)
     :ok
   end
 
@@ -337,6 +338,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
     :ok
   end
 
+<<<<<<< HEAD
   # ── Gutter ──
 
   @spec send_gui_gutter(state()) :: :ok
@@ -474,5 +476,14 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
       :deleted -> :git_deleted
       _ -> :none
     end
+  end
+
+  # ── Bottom panel ──
+
+  @spec send_gui_bottom_panel(state()) :: :ok
+  defp send_gui_bottom_panel(%{bottom_panel: panel, port_manager: pm}) do
+    cmd = ProtocolGUI.encode_gui_bottom_panel(panel)
+    PortManager.send_commands(pm, [cmd])
+    :ok
   end
 end

@@ -31,6 +31,7 @@ defmodule Minga.Editor.State do
   alias Minga.Agent.UIState
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Completion
+  alias Minga.Editor.BottomPanel
   alias Minga.Editor.CompletionTrigger
   alias Minga.Editor.Dashboard
 
@@ -102,6 +103,7 @@ defmodule Minga.Editor.State do
             render_timer: nil,
             warning_popup_timer: nil,
             warnings_popup_dismissed: false,
+            bottom_panel: %BottomPanel{},
             windows: %Windows{},
             file_tree: %FileTreeState{},
             lsp_status: :none,
@@ -146,6 +148,7 @@ defmodule Minga.Editor.State do
           render_timer: reference() | nil,
           warning_popup_timer: reference() | nil,
           warnings_popup_dismissed: boolean(),
+          bottom_panel: BottomPanel.t(),
           windows: Windows.t(),
           file_tree: FileTreeState.t(),
           lsp_status: Minga.Editor.Modeline.lsp_status(),

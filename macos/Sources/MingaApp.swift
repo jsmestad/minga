@@ -126,6 +126,15 @@ struct ContentView: View {
                     }
                 }
 
+                // Bottom panel (between editor and status bar)
+                if appState.gui.bottomPanelState.visible {
+                    BottomPanelView(
+                        state: appState.gui.bottomPanelState,
+                        theme: appState.gui.themeColors,
+                        encoder: appState.encoder
+                    )
+                }
+
                 // Status bar
                 StatusBarView(
                     state: appState.gui.statusBarState,

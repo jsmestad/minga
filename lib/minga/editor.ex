@@ -22,6 +22,7 @@ defmodule Minga.Editor do
   alias Minga.Diagnostics.Decorations, as: DiagDecorations
 
   alias Minga.Editor.AgentLifecycle
+  alias Minga.Editor.BottomPanel
   alias Minga.Editor.BufferLifecycle
   alias Minga.Editor.Commands
   alias Minga.Editor.CompletionHandling
@@ -1275,13 +1276,28 @@ defmodule Minga.Editor do
     Commands.FileTree.toggle(state)
   end
 
+  defp handle_gui_action(state, {:toggle_panel, 1}) do
+    %{state | bottom_panel: BottomPanel.toggle(state.bottom_panel)}
+  end
+
   defp handle_gui_action(state, {:toggle_panel, _panel}) do
-    # Other panel toggles (diagnostics, etc.) are follow-up features.
     state
   end
 
   defp handle_gui_action(state, :new_tab) do
     Commands.BufferManagement.execute(state, :new_buffer)
+  end
+
+  defp handle_gui_action(state, {:panel_switch_tab, tab_index}) do
+    %{state | bottom_panel: BottomPanel.switch_tab(state.bottom_panel, tab_index)}
+  end
+
+  defp handle_gui_action(state, :panel_dismiss) do
+    %{state | bottom_panel: BottomPanel.dismiss(state.bottom_panel)}
+  end
+
+  defp handle_gui_action(state, {:panel_resize, height_percent}) do
+    %{state | bottom_panel: BottomPanel.resize(state.bottom_panel, height_percent)}
   end
 
   # Moves the file tree cursor to the given index and performs the action.

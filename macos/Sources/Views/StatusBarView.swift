@@ -160,6 +160,15 @@ struct StatusBarView: View {
                 encoder?.sendTogglePanel(panel: 0)
             }
 
+            // Bottom panel toggle
+            StatusBarIconButton(
+                icon: "rectangle.bottomhalf.inset.filled",
+                barHeight: barHeight,
+                barFg: theme.modelineBarFg
+            ) {
+                encoder?.sendTogglePanel(panel: 1)
+            }
+
             // Git branch
             if state.hasGit && !state.gitBranch.isEmpty {
                 HStack(spacing: 3) {

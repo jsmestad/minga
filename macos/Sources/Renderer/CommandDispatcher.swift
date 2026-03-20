@@ -223,6 +223,22 @@ final class CommandDispatcher {
             if data.isActive {
                 lineBuffer.gutterCol = UInt16(data.lineNumberWidth) + UInt16(data.signColWidth)
             }
+
+        case .guiBottomPanel(let visible, let activeTabIndex, let heightPercent, let filterPreset, let tabs):
+            if visible {
+                let panelTabs = tabs.enumerated().map { (i, t) in
+                    BottomPanelTab(id: i, tabType: t.tabType, name: t.name)
+                }
+                guiState.bottomPanelState.update(
+                    visible: true,
+                    activeTabIndex: Int(activeTabIndex),
+                    heightPercent: Int(heightPercent),
+                    filterPreset: filterPreset,
+                    tabs: panelTabs
+                )
+            } else {
+                guiState.bottomPanelState.hide()
+            }
         }
     }
 

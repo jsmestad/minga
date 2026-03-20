@@ -36,6 +36,8 @@ enum RenderCommand: Sendable {
     case guiGutterSeparator(col: UInt16, r: UInt8, g: UInt8, b: UInt8)
     case guiCursorline(row: UInt16, r: UInt8, g: UInt8, b: UInt8)
     case guiGutter(data: GUIWindowGutter)
+    case guiBottomPanel(visible: Bool, activeTabIndex: UInt8, heightPercent: UInt8,
+                         filterPreset: UInt8, tabs: [GUIBottomPanelTab])
 }
 
 /// Line number display style from the BEAM.
@@ -90,6 +92,12 @@ struct GUIWindowGutter: Sendable {
     let lineNumberWidth: UInt8
     let signColWidth: UInt8
     var entries: [GUIGutterEntry]
+}
+
+/// A tab definition from gui_bottom_panel.
+struct GUIBottomPanelTab: Sendable {
+    let tabType: UInt8
+    let name: String
 }
 
 /// A styled text run for GUI rendering. Carries pre-computed colors from the BEAM.
@@ -768,6 +776,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         let row = readU16(data, rest)
         return (.guiCursorline(row: row, r: data[rest + 2], g: data[rest + 3], b: data[rest + 4]), 6)
 
+<<<<<<< HEAD
     case OP_GUI_GUTTER:
         // Per-window format: content_row:2 + content_col:2 + content_height:2 + is_active:1
         // + cursor_line:4 + style:1 + ln_width:1 + sign_width:1 + line_count:2 = 16 bytes header
@@ -800,6 +809,36 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             lineNumberWidth: lnWidth, signColWidth: signWidth, entries: entries
         )
         return (.guiGutter(data: windowGutter), 1 + 16 + lineCount * 6)
+
+    case OP_GUI_BOTTOM_PANEL:
+        // visible(1)
+        guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
+        let visible = data[rest] != 0
+        guard visible else {
+            return (.guiBottomPanel(visible: false, activeTabIndex: 0, heightPercent: 30,
+                                     filterPreset: 0, tabs: []), 2)
+        }
+        // visible=1(1) + active_tab_index(1) + height_percent(1) + filter_preset(1) + tab_count(1) = 5 bytes
+        guard data.count >= rest + 5 else { throw ProtocolDecodeError.malformed }
+        let activeTabIndex = data[rest + 1]
+        let heightPercent = data[rest + 2]
+        let filterPreset = data[rest + 3]
+        let tabCount = Int(data[rest + 4])
+        var pos = rest + 5
+        var tabs: [GUIBottomPanelTab] = []
+        for _ in 0..<tabCount {
+            guard data.count >= pos + 2 else { throw ProtocolDecodeError.malformed }
+            let tabType = data[pos]
+            let nameLen = Int(data[pos + 1])
+            pos += 2
+            guard data.count >= pos + nameLen else { throw ProtocolDecodeError.malformed }
+            let name = String(data: data[pos..<(pos + nameLen)], encoding: .utf8) ?? ""
+            pos += nameLen
+            tabs.append(GUIBottomPanelTab(tabType: tabType, name: name))
+        }
+        return (.guiBottomPanel(visible: true, activeTabIndex: activeTabIndex,
+                                 heightPercent: heightPercent, filterPreset: filterPreset,
+                                 tabs: tabs), pos - offset)
 
     default:
         throw ProtocolDecodeError.unknownOpcode(opcode)

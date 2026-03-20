@@ -25,6 +25,11 @@ protocol InputEncoder: AnyObject, Sendable {
     func sendBreadcrumbClick(index: UInt8)
     func sendTogglePanel(panel: UInt8)
     func sendNewTab()
+
+    // Bottom panel actions
+    func sendPanelSwitchTab(index: UInt8)
+    func sendPanelDismiss()
+    func sendPanelResize(heightPercent: UInt8)
 }
 
 extension InputEncoder {
@@ -189,6 +194,32 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         var buf = Data(count: 2)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_NEW_TAB
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: panel_switch_tab. Layout: opcode(1) + action_type(1) + tab_index(1).
+    func sendPanelSwitchTab(index: UInt8) {
+        var buf = Data(count: 3)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_PANEL_SWITCH_TAB
+        buf[2] = index
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: panel_dismiss. Layout: opcode(1) + action_type(1).
+    func sendPanelDismiss() {
+        var buf = Data(count: 2)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_PANEL_DISMISS
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: panel_resize. Layout: opcode(1) + action_type(1) + height_percent(1).
+    func sendPanelResize(heightPercent: UInt8) {
+        var buf = Data(count: 3)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_PANEL_RESIZE
+        buf[2] = heightPercent
         writeFrame(buf)
     }
 
