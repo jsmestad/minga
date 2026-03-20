@@ -48,13 +48,13 @@ defmodule Minga.Editor.RenderPipeline.Chrome.TUITest do
       assert [_ | _] = chrome.minibuffer
     end
 
-    test "includes modeline draws per window" do
+    test "includes global status bar draws" do
       state = base_state()
       {scrolls, cursor_info, state, layout} = run_through_content(state)
 
       chrome = ChromeTUI.build(state, layout, scrolls, cursor_info)
 
-      assert map_size(chrome.modeline_draws) > 0
+      assert [_ | _] = chrome.status_bar_draws
     end
 
     test "includes region definitions" do

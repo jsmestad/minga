@@ -15,16 +15,18 @@ defmodule Minga.Editor.RenderPipeline.Chrome.GUI do
   alias Minga.Editor.RenderPipeline.Chrome
   alias Minga.Editor.RenderPipeline.ChromeHelpers
   alias Minga.Editor.RenderPipeline.Scroll.WindowScroll
-
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.StatusBar.Data, as: StatusBarData
   alias Minga.Popup.Lifecycle, as: PopupLifecycle
 
   @typedoc "Internal editor state."
   @type state :: EditorState.t()
 
   @doc """
-  Builds GUI chrome: modeline (splits only), minibuffer, separators,
-  and Metal-rendered overlays (hover, signature help, float popups).
+  Builds GUI chrome: status bar data (for SwiftUI encoding), horizontal separators
+  in the Metal surface, minibuffer, and Metal-rendered overlays (hover, signature
+  help, float popups). SwiftUI handles tab bar, file tree, picker, which-key,
+  and completion natively.
   """
   @spec build(
           state(),
@@ -32,26 +34,15 @@ defmodule Minga.Editor.RenderPipeline.Chrome.GUI do
           %{Minga.Editor.Window.id() => WindowScroll.t()},
           Cursor.t() | nil
         ) :: Chrome.t()
-  def build(state, layout, scrolls, _cursor_info) do
+  def build(state, layout, _scrolls, _cursor_info) do
     full_viewport = state.viewport
 
-    # Modeline only for splits (SwiftUI status bar handles single window)
-    {modeline_draws, modeline_click_regions} =
-      if EditorState.split?(state) do
-        Enum.reduce(scrolls, {%{}, []}, fn {_win_id, scroll}, {draws_acc, regions_acc} ->
-          {draws, regions} = ChromeHelpers.render_window_modeline(state, scroll)
-          {Map.put(draws_acc, scroll.win_id, draws), regions ++ regions_acc}
-        end)
-      else
-        {%{}, []}
-      end
+    # Compute status bar data (used by Emit.GUI to encode the 0x76 opcode).
+    # No cell rendering for the GUI — SwiftUI owns the status bar surface.
+    status_bar_data = StatusBarData.from_state(state)
 
-    # Modeline per agent chat window
-    {modeline_draws, modeline_click_regions} =
-      Chrome.render_agent_modelines(state, layout, modeline_draws, modeline_click_regions)
-
-    # Separators (still needed for splits in the Metal editor surface)
-    separator_draws =
+    # Vertical split borders (still drawn in Metal)
+    vertical_separators =
       if EditorState.split?(state) do
         ChromeHelpers.render_separators(
           state.windows.tree,
@@ -62,6 +53,12 @@ defmodule Minga.Editor.RenderPipeline.Chrome.GUI do
       else
         []
       end
+
+    # Horizontal split separators (filename bars, drawn in Metal)
+    horizontal_separators =
+      ChromeHelpers.render_horizontal_separators(layout.horizontal_separators, state.theme)
+
+    separator_draws = vertical_separators ++ horizontal_separators
 
     # Minibuffer (rendered in Metal, not SwiftUI)
     {minibuffer_row, _mbc, _mbw, _mbh} = layout.minibuffer
@@ -75,8 +72,9 @@ defmodule Minga.Editor.RenderPipeline.Chrome.GUI do
     regions = Regions.define_regions(layout)
 
     %Chrome{
-      modeline_draws: modeline_draws,
-      modeline_click_regions: modeline_click_regions,
+      status_bar_draws: [],
+      status_bar_data: status_bar_data,
+      modeline_click_regions: [],
       tab_bar: [],
       tab_bar_click_regions: [],
       minibuffer: [minibuffer_draw],

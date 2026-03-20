@@ -46,15 +46,13 @@ defmodule Minga.Editor.RenderPipeline.ChromeTest do
       assert Enum.all?(chrome.minibuffer, &is_tuple/1)
     end
 
-    test "chrome contains modeline draws per window" do
+    test "chrome contains global status bar draws" do
       state = base_state()
       {scrolls, cursor_info, state, layout} = run_through_content(state)
 
       chrome = Chrome.build_chrome(state, layout, scrolls, cursor_info)
 
-      assert map_size(chrome.modeline_draws) == 1
-      [{_win_id, draws}] = Map.to_list(chrome.modeline_draws)
-      assert [_ | _] = draws
+      assert [_ | _] = chrome.status_bar_draws
     end
 
     test "chrome regions is a list of binaries" do
@@ -94,14 +92,23 @@ defmodule Minga.Editor.RenderPipeline.ChromeTest do
       assert chrome.file_tree == []
     end
 
-    test "modeline is empty for single window" do
+    test "status bar draws are empty for GUI (SwiftUI owns the status bar surface)" do
       state = gui_state()
       {scrolls, cursor_info, state, layout} = run_through_content(state)
 
       chrome = Chrome.build_chrome(state, layout, scrolls, cursor_info)
 
-      assert chrome.modeline_draws == %{}
+      assert chrome.status_bar_draws == []
       assert chrome.modeline_click_regions == []
+    end
+
+    test "status bar data is computed for GUI (consumed by Emit.GUI 0x76 opcode)" do
+      state = gui_state()
+      {scrolls, cursor_info, state, layout} = run_through_content(state)
+
+      chrome = Chrome.build_chrome(state, layout, scrolls, cursor_info)
+
+      assert {:buffer, _} = chrome.status_bar_data
     end
 
     test "minibuffer is still rendered" do

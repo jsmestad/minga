@@ -18,18 +18,18 @@ defmodule Minga.Editor.RenderPipeline.Chrome do
   alias Minga.Editor.DisplayList.Cursor
   alias Minga.Editor.HoverPopup
   alias Minga.Editor.Layout
-  alias Minga.Editor.RenderPipeline.ChromeHelpers
   alias Minga.Editor.RenderPipeline.Scroll.WindowScroll
   alias Minga.Editor.SignatureHelp
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.StatusBar.Data, as: StatusBarData
   alias Minga.Editor.Window
-  alias Minga.Editor.Window.Content
   alias Minga.Port.Capabilities
 
   # ── Result struct ──────────────────────────────────────────────────────────
 
   @enforce_keys []
-  defstruct modeline_draws: %{},
+  defstruct status_bar_draws: [],
+            status_bar_data: nil,
             modeline_click_regions: [],
             tab_bar: [],
             tab_bar_click_regions: [],
@@ -41,7 +41,8 @@ defmodule Minga.Editor.RenderPipeline.Chrome do
             regions: []
 
   @type t :: %__MODULE__{
-          modeline_draws: %{non_neg_integer() => [DisplayList.draw()]},
+          status_bar_draws: [DisplayList.draw()],
+          status_bar_data: StatusBarData.t() | nil,
           modeline_click_regions: [Minga.Editor.Modeline.click_region()],
           tab_bar: [DisplayList.draw()],
           tab_bar_click_regions: [Minga.Editor.TabBarRenderer.click_region()],
@@ -79,28 +80,6 @@ defmodule Minga.Editor.RenderPipeline.Chrome do
   end
 
   # ── Shared helpers (used by both TUI and GUI submodules) ───────────────────
-
-  @doc """
-  Builds modeline draws for agent chat windows.
-
-  Agent chat windows are not part of the scroll pipeline (they don't have
-  buffer viewports), so their modelines are rendered separately here.
-  """
-  @spec render_agent_modelines(state(), Layout.t(), map(), list()) :: {map(), list()}
-  def render_agent_modelines(state, layout, modeline_draws, modeline_click_regions) do
-    layout.window_layouts
-    |> Enum.reduce({modeline_draws, modeline_click_regions}, fn {win_id, win_layout},
-                                                                {draws_acc, regions_acc} ->
-      window = Map.get(state.windows.map, win_id)
-
-      if window != nil and Content.agent_chat?(window.content) do
-        {draws, regions} = ChromeHelpers.render_agent_modeline(state, win_layout)
-        {Map.put(draws_acc, win_id, draws), regions ++ regions_acc}
-      else
-        {draws_acc, regions_acc}
-      end
-    end)
-  end
 
   @doc "Renders the hover popup overlay draws."
   @spec render_hover_popup(state()) :: [DisplayList.draw()]

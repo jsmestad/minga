@@ -381,23 +381,53 @@ defmodule Minga.Port.Protocol.GUI do
 
   # ── Status bar ──
 
-  @doc "Encodes a gui_status_bar command."
-  @spec encode_gui_status_bar(map()) :: binary()
-  def encode_gui_status_bar(data) do
-    mode_byte = encode_vim_mode(data.mode)
-    lsp_byte = encode_lsp_status(data[:lsp_status])
-    flags = build_status_flags(data)
+  @doc """
+  Encodes a gui_status_bar command from a `StatusBar.Data.t()` tagged union.
 
-    git_branch = :erlang.iolist_to_binary([data[:git_branch] || ""])
-    message = :erlang.iolist_to_binary([data[:status_msg] || ""])
-    filetype = :erlang.iolist_to_binary([Atom.to_string(data[:filetype] || :text)])
+  Wire format (opcode 0x76):
 
-    {error_count, warning_count} = diagnostic_counts_for_status(data)
+  Buffer variant (content_kind == 0):
+    [opcode:1][content_kind=0:1][mode:1][cursor_line:4][cursor_col:4][line_count:4]
+    [flags:1][lsp_status:1][git_branch_len:1][git_branch:N]
+    [message_len:2][message:N][filetype_len:1][filetype:N]
+    [error_count:2][warning_count:2]
 
-    <<@op_gui_status_bar, mode_byte::8, data.cursor_line::32, data.cursor_col::32,
-      data.line_count::32, flags::8, lsp_byte::8, byte_size(git_branch)::8, git_branch::binary,
-      byte_size(message)::16, message::binary, byte_size(filetype)::8, filetype::binary,
-      error_count::16, warning_count::16>>
+  Agent variant (content_kind == 1):
+    [opcode:1][content_kind=1:1][mode:1]
+    [zeros:4][zeros:4][zeros:4]        <- shared header slots, zero for agent
+    [zeros:1][zeros:1][zeros:1][zeros:2][zeros:1][zeros:2][zeros:2]
+    [model_name_len:1][model_name:N]
+    [message_count:4][session_status:1]
+
+  `content_kind`: 0 = buffer window, 1 = agent chat window.
+  `cursor_line`/`cursor_col` are 1-indexed on the wire (0-indexed in BEAM state).
+  """
+  @spec encode_gui_status_bar(Minga.Editor.StatusBar.Data.t()) :: binary()
+  def encode_gui_status_bar({:buffer, d}) do
+    mode_byte = encode_vim_mode(d.mode)
+    lsp_byte = encode_lsp_status(d.lsp_status)
+    flags = build_buffer_status_flags(d)
+
+    git_branch = :erlang.iolist_to_binary([d.git_branch || ""])
+    filetype = :erlang.iolist_to_binary([Atom.to_string(d.filetype || :text)])
+    {error_count, warning_count} = diagnostic_counts_from_buffer_data(d)
+
+    # cursor_line/cursor_col are 0-indexed from BufferServer; encode as 1-indexed for the GUI
+    <<@op_gui_status_bar, 0::8, mode_byte::8, d.cursor_line + 1::32, d.cursor_col + 1::32,
+      d.line_count::32, flags::8, lsp_byte::8, byte_size(git_branch)::8, git_branch::binary,
+      0::16, byte_size(filetype)::8, filetype::binary, error_count::16, warning_count::16>>
+  end
+
+  def encode_gui_status_bar({:agent, d}) do
+    mode_byte = encode_vim_mode(d.mode)
+    model_name = :erlang.iolist_to_binary([d.model_name || "Agent"])
+    session_status_byte = encode_agent_session_status(d.session_status)
+
+    # Shared header fields are all zeros (not meaningful for agent windows).
+    # message_count and session_status are explicit fields — no slot reuse.
+    <<@op_gui_status_bar, 1::8, mode_byte::8, 0::32, 0::32, 0::32, 0::8, 0::8, 0::8, 0::16, 0::8,
+      0::16, 0::16, byte_size(model_name)::8, model_name::binary, d.message_count::32,
+      session_status_byte::8>>
   end
 
   @spec encode_vim_mode(atom()) :: non_neg_integer()
@@ -418,21 +448,28 @@ defmodule Minga.Port.Protocol.GUI do
   defp encode_lsp_status(:error), do: 4
   defp encode_lsp_status(_), do: 0
 
-  @spec diagnostic_counts_for_status(map()) :: {non_neg_integer(), non_neg_integer()}
-  defp diagnostic_counts_for_status(data) do
-    case data[:diagnostic_counts] do
+  @spec diagnostic_counts_from_buffer_data(map()) :: {non_neg_integer(), non_neg_integer()}
+  defp diagnostic_counts_from_buffer_data(d) do
+    case d.diagnostic_counts do
       {errors, warnings, _info, _hints} -> {errors, warnings}
       _ -> {0, 0}
     end
   end
 
-  @spec build_status_flags(map()) :: non_neg_integer()
-  defp build_status_flags(data) do
-    has_lsp = if data[:lsp_status] && data[:lsp_status] != :none, do: 1, else: 0
-    has_git = if data[:git_branch], do: 1, else: 0
-    is_dirty = if data[:dirty_marker] && data[:dirty_marker] != "", do: 1, else: 0
+  @spec build_buffer_status_flags(map()) :: non_neg_integer()
+  defp build_buffer_status_flags(d) do
+    has_lsp = if d.lsp_status && d.lsp_status != :none, do: 1, else: 0
+    has_git = if d.git_branch && d.git_branch != "", do: 1, else: 0
+    is_dirty = if d.dirty, do: 1, else: 0
     bor(has_lsp, bor(bsl(has_git, 1), bsl(is_dirty, 2)))
   end
+
+  @spec encode_agent_session_status(atom() | nil) :: non_neg_integer()
+  defp encode_agent_session_status(:idle), do: 0
+  defp encode_agent_session_status(:thinking), do: 1
+  defp encode_agent_session_status(:tool_executing), do: 2
+  defp encode_agent_session_status(:error), do: 3
+  defp encode_agent_session_status(_), do: 0
 
   # ── Picker ──
 

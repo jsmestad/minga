@@ -30,7 +30,7 @@ enum RenderCommand: Sendable {
     case guiCompletion(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, selectedIndex: UInt16, items: [GUICompletionItem])
     case guiWhichKey(visible: Bool, prefix: String, page: UInt8, pageCount: UInt8, bindings: [GUIWhichKeyBinding])
     case guiBreadcrumb(segments: [String])
-    case guiStatusBar(mode: UInt8, cursorLine: UInt32, cursorCol: UInt32, lineCount: UInt32, flags: UInt8, lspStatus: UInt8, gitBranch: String, message: String, filetype: String, errorCount: UInt16, warningCount: UInt16)
+    case guiStatusBar(contentKind: UInt8, mode: UInt8, cursorLine: UInt32, cursorCol: UInt32, lineCount: UInt32, flags: UInt8, lspStatus: UInt8, gitBranch: String, message: String, filetype: String, errorCount: UInt16, warningCount: UInt16, modelName: String, messageCount: UInt32, sessionStatus: UInt8)
     case guiPicker(visible: Bool, selectedIndex: UInt16, title: String, query: String, items: [GUIPickerItem])
     case guiAgentChat(visible: Bool, status: UInt8, model: String, prompt: String, pendingToolName: String?, pendingToolSummary: String, messages: [GUIChatMessage])
     case guiGutterSeparator(col: UInt16, r: UInt8, g: UInt8, b: UInt8)
@@ -483,28 +483,50 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         return (.guiBreadcrumb(segments: segments), pos - offset)
 
     case OP_GUI_STATUS_BAR:
-        // mode:1 cursor_line:4 cursor_col:4 line_count:4 flags:1 lsp:1 git_len:1 git message_len:2 message filetype_len:1 filetype
-        guard data.count >= rest + 16 else { throw ProtocolDecodeError.malformed }
-        let mode = data[rest]
-        let cursorLine = readU32(data, rest + 1)
-        let cursorCol = readU32(data, rest + 5)
-        let lineCount = readU32(data, rest + 9)
-        let flags = data[rest + 13]
-        let lspStatus = data[rest + 14]
-        let gitLen = Int(data[rest + 15])
-        guard data.count >= rest + 16 + gitLen + 2 else { throw ProtocolDecodeError.malformed }
-        let gitBranch = String(data: data[(rest + 16)..<(rest + 16 + gitLen)], encoding: .utf8) ?? ""
-        let msgLen = Int(readU16(data, rest + 16 + gitLen))
-        guard data.count >= rest + 18 + gitLen + msgLen + 1 else { throw ProtocolDecodeError.malformed }
-        let message = String(data: data[(rest + 18 + gitLen)..<(rest + 18 + gitLen + msgLen)], encoding: .utf8) ?? ""
-        let ftLen = Int(data[rest + 18 + gitLen + msgLen])
-        guard data.count >= rest + 19 + gitLen + msgLen + ftLen else { throw ProtocolDecodeError.malformed }
-        let filetype = String(data: data[(rest + 19 + gitLen + msgLen)..<(rest + 19 + gitLen + msgLen + ftLen)], encoding: .utf8) ?? ""
-        let diagBase = rest + 19 + gitLen + msgLen + ftLen
-        let errorCount: UInt16 = data.count >= diagBase + 4 ? readU16(data, diagBase) : 0
-        let warningCount: UInt16 = data.count >= diagBase + 4 ? readU16(data, diagBase + 2) : 0
-        let totalConsumed = data.count >= diagBase + 4 ? diagBase + 4 : diagBase
-        return (.guiStatusBar(mode: mode, cursorLine: cursorLine, cursorCol: cursorCol, lineCount: lineCount, flags: flags, lspStatus: lspStatus, gitBranch: gitBranch, message: message, filetype: filetype, errorCount: errorCount, warningCount: warningCount), totalConsumed - offset)
+        // Shared header (both variants):
+        //   content_kind:1 mode:1 cursor_line:4 cursor_col:4 line_count:4
+        //   flags:1 lsp:1 git_len:1 git(:git_len) msg_len:2 msg(:msg_len) ft_len:1 ft(:ft_len)
+        //   error_count:2 warning_count:2
+        // Agent-only fields (content_kind == 1), appended after the shared header:
+        //   model_name_len:1 model_name(:model_name_len) message_count:4 session_status:1
+        guard data.count >= rest + 17 else { throw ProtocolDecodeError.malformed }
+        let contentKind = data[rest]
+        let mode = data[rest + 1]
+        let cursorLine = readU32(data, rest + 2)
+        let cursorCol = readU32(data, rest + 6)
+        let lineCount = readU32(data, rest + 10)
+        let flags = data[rest + 14]
+        let lspStatus = data[rest + 15]
+        let gitLen = Int(data[rest + 16])
+        guard data.count >= rest + 17 + gitLen + 2 else { throw ProtocolDecodeError.malformed }
+        let gitBranch = String(data: data[(rest + 17)..<(rest + 17 + gitLen)], encoding: .utf8) ?? ""
+        let msgLen = Int(readU16(data, rest + 17 + gitLen))
+        guard data.count >= rest + 19 + gitLen + msgLen + 1 else { throw ProtocolDecodeError.malformed }
+        let message = String(data: data[(rest + 19 + gitLen)..<(rest + 19 + gitLen + msgLen)], encoding: .utf8) ?? ""
+        let ftLen = Int(data[rest + 19 + gitLen + msgLen])
+        guard data.count >= rest + 20 + gitLen + msgLen + ftLen + 4 else { throw ProtocolDecodeError.malformed }
+        let filetype = String(data: data[(rest + 20 + gitLen + msgLen)..<(rest + 20 + gitLen + msgLen + ftLen)], encoding: .utf8) ?? ""
+        let diagBase = rest + 20 + gitLen + msgLen + ftLen
+        let errorCount: UInt16 = readU16(data, diagBase)
+        let warningCount: UInt16 = readU16(data, diagBase + 2)
+        var totalConsumed = diagBase + 4
+
+        // Agent-only fields: explicit message_count and session_status after model_name.
+        var modelName = ""
+        var messageCount: UInt32 = 0
+        var sessionStatus: UInt8 = 0
+        if contentKind == 1 && data.count >= totalConsumed + 1 {
+            let modelNameLen = Int(data[totalConsumed])
+            totalConsumed += 1
+            // 4 bytes message_count + 1 byte session_status follow the model name
+            guard data.count >= totalConsumed + modelNameLen + 5 else { throw ProtocolDecodeError.malformed }
+            modelName = String(data: data[totalConsumed..<(totalConsumed + modelNameLen)], encoding: .utf8) ?? ""
+            totalConsumed += modelNameLen
+            messageCount = readU32(data, totalConsumed)
+            sessionStatus = data[totalConsumed + 4]
+            totalConsumed += 5
+        }
+        return (.guiStatusBar(contentKind: contentKind, mode: mode, cursorLine: cursorLine, cursorCol: cursorCol, lineCount: lineCount, flags: flags, lspStatus: lspStatus, gitBranch: gitBranch, message: message, filetype: filetype, errorCount: errorCount, warningCount: warningCount, modelName: modelName, messageCount: messageCount, sessionStatus: sessionStatus), totalConsumed - offset)
 
     case OP_GUI_PICKER:
         guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }

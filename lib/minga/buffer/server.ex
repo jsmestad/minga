@@ -334,6 +334,21 @@ defmodule Minga.Buffer.Server do
     GenServer.call(server, :buffer_name)
   end
 
+  @doc """
+  Returns the display name for use in the status bar and modeline.
+
+  For named buffers (e.g. `*Messages*`), returns the name directly with a
+  `[RO]` suffix when read-only. For file buffers, returns `Path.basename(file_path)`
+  with a `[RO]` suffix when read-only, or `"[no file]"` when no path is set.
+
+  Single GenServer round-trip; prefer over combining `buffer_name/1`,
+  `file_path/1`, and `read_only?/1` separately.
+  """
+  @spec display_name(GenServer.server()) :: String.t()
+  def display_name(server) do
+    GenServer.call(server, :display_name)
+  end
+
   @doc "Returns whether the buffer is read-only."
   @spec read_only?(GenServer.server()) :: boolean()
   def read_only?(server) do
@@ -1130,6 +1145,10 @@ defmodule Minga.Buffer.Server do
     {:reply, state.name, state}
   end
 
+  def handle_call(:display_name, _from, state) do
+    {:reply, display_name_from_state(state), state}
+  end
+
   def handle_call(:read_only?, _from, state) do
     {:reply, state.read_only, state}
   end
@@ -1441,6 +1460,17 @@ defmodule Minga.Buffer.Server do
   # back into this GenServer. The self-send pattern unblocks the caller
   # immediately; the broadcast happens after the reply.
   @spec defer_content_replaced(BufState.t()) :: :ok
+  @spec display_name_from_state(BufState.t()) :: String.t()
+  defp display_name_from_state(%{name: name, read_only: ro}) when is_binary(name) do
+    name <> if(ro, do: " [RO]", else: "")
+  end
+
+  defp display_name_from_state(%{file_path: path, read_only: ro}) when is_binary(path) do
+    Path.basename(path) <> if(ro, do: " [RO]", else: "")
+  end
+
+  defp display_name_from_state(_state), do: "[no file]"
+
   defp defer_content_replaced(state) do
     path = state.file_path || ""
 

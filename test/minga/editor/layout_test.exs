@@ -119,30 +119,36 @@ defmodule Minga.Editor.LayoutTest do
   end
 
   # ── Basic layout ─────────────────────────────────────────────────────────────
-  # Tab bar at row 0, editor starts at row 1, minibuffer at last row.
-  # For 24-row terminal: tab_bar={0,0,80,1}, editor={1,0,80,22}, minibuffer={23,0,80,1}
+  # Tab bar at row 0, editor starts at row 1, status bar at row 22, minibuffer at last row.
+  # For 24-row terminal: tab_bar={0,0,80,1}, editor={1,0,80,21}, status_bar={22,0,80,1}, minibuffer={23,0,80,1}
 
   describe "compute/1 single window" do
-    test "full terminal minus minibuffer and tab bar rows" do
+    test "full terminal minus minibuffer, status bar, and tab bar rows" do
       state = new_state(24, 80) |> with_window()
       layout = Layout.compute(state)
 
       assert layout.terminal == {0, 0, 80, 24}
       assert layout.tab_bar == {0, 0, 80, 1}
+      assert layout.status_bar == {22, 0, 80, 1}
       assert layout.minibuffer == {23, 0, 80, 1}
-      assert layout.editor_area == {1, 0, 80, 22}
+      assert layout.editor_area == {1, 0, 80, 21}
       assert layout.file_tree == nil
       assert layout.agent_panel == nil
     end
 
-    test "single window gets content and modeline sub-rects" do
+    test "single window fills editor area; modeline row is the global status bar" do
       state = new_state(24, 80) |> with_window()
       layout = Layout.compute(state)
 
+      # Tab bar at row 0, status bar at row 22, minibuffer at row 23.
+      # Editor area gets rows 1-21 (21 rows, same content height as before).
       assert %{1 => wl} = layout.window_layouts
-      assert wl.total == {1, 0, 80, 22}
+      assert wl.total == {1, 0, 80, 21}
       assert wl.content == {1, 0, 80, 21}
-      assert wl.modeline == {22, 0, 80, 1}
+      # Zero-height modeline: per-window modelines are gone; global status bar handles display.
+      assert wl.modeline == {22, 0, 80, 0}
+      # Global status bar occupies row 22 (one row above minibuffer).
+      assert layout.status_bar == {22, 0, 80, 1}
     end
   end
 
@@ -153,9 +159,9 @@ defmodule Minga.Editor.LayoutTest do
       state = new_state(24, 80) |> with_window() |> with_file_tree(30)
       layout = Layout.compute(state)
 
-      # Tree starts at row 1 (below tab bar), height = 22 (24 - tab bar - minibuffer)
-      assert layout.file_tree == {1, 0, 30, 22}
-      assert layout.editor_area == {1, 31, 49, 22}
+      # Tree starts at row 1 (below tab bar), height = 21 (24 - tab_bar - status_bar - minibuffer)
+      assert layout.file_tree == {1, 0, 30, 21}
+      assert layout.editor_area == {1, 31, 49, 21}
     end
 
     test "window layouts use editor area coordinates" do
@@ -163,9 +169,11 @@ defmodule Minga.Editor.LayoutTest do
       layout = Layout.compute(state)
 
       %{1 => wl} = layout.window_layouts
-      assert wl.total == {1, 31, 49, 22}
+      # Editor area is 21 rows (24 - tab - status_bar - minibuffer).
+      assert wl.total == {1, 31, 49, 21}
       assert wl.content == {1, 31, 49, 21}
-      assert wl.modeline == {22, 31, 49, 1}
+      # Zero-height modeline; global status bar at row 22 handles display.
+      assert wl.modeline == {22, 31, 49, 0}
     end
   end
 
@@ -176,10 +184,10 @@ defmodule Minga.Editor.LayoutTest do
       state = new_state(24, 80) |> with_window() |> with_agent_panel()
       layout = Layout.compute(state)
 
-      # remaining = 22 (24-2). 35% of 24 = 8 rows for agent panel.
-      # editor_height = 22 - 8 = 14
-      assert layout.agent_panel == {15, 0, 80, 8}
-      assert layout.editor_area == {1, 0, 80, 14}
+      # remaining = 21 (24 - tab - status_bar - minibuffer). 35% of 24 = 8 rows for agent panel.
+      # editor_height = 21 - 8 = 13
+      assert layout.agent_panel == {14, 0, 80, 8}
+      assert layout.editor_area == {1, 0, 80, 13}
     end
 
     test "agent panel with file tree" do
@@ -196,42 +204,53 @@ defmodule Minga.Editor.LayoutTest do
   # ── Split windows ──────────────────────────────────────────────────────────
 
   describe "compute/1 with vertical split" do
-    test "two windows side by side with modelines" do
+    test "two windows side by side with zero-height modelines (global status bar)" do
       state = new_state(24, 80) |> with_vsplit()
       layout = Layout.compute(state)
 
       assert map_size(layout.window_layouts) == 2
       %{1 => left, 2 => right} = layout.window_layouts
 
-      # Both windows should have modeline as last row
+      # Per-window modelines are gone; all windows have zero-height modeline rects.
+      {_, _, _, lmh} = left.modeline
+      {_, _, _, rmh} = right.modeline
+      assert lmh == 0
+      assert rmh == 0
+
+      # Each window fills its full allocated rect with content.
       {_, _, _, left_h} = left.total
-      {lr, _, _, _} = left.modeline
-      {ltr, _, _, _} = left.total
-      assert lr == ltr + left_h - 1
+      {_, _, _, left_ch} = left.content
+      assert left_h == left_ch
 
       {_, _, _, right_h} = right.total
-      {rr, _, _, _} = right.modeline
-      {rtr, _, _, _} = right.total
-      assert rr == rtr + right_h - 1
+      {_, _, _, right_ch} = right.content
+      assert right_h == right_ch
     end
   end
 
   describe "compute/1 with horizontal split" do
-    test "two windows stacked with modelines" do
+    test "two windows stacked with horizontal separator" do
       state = new_state(24, 80) |> with_hsplit()
       layout = Layout.compute(state)
 
       assert map_size(layout.window_layouts) == 2
       %{1 => top, 2 => bottom} = layout.window_layouts
 
-      # Top window modeline is at the boundary
-      {tr, _, _, th} = top.total
-      {tmr, _, _, _} = top.modeline
-      assert tmr == tr + th - 1
+      # Both windows have zero-height modelines (global status bar handles display).
+      {_, _, _, tmh} = top.modeline
+      assert tmh == 0
 
-      # Bottom window sits below the top
+      # A horizontal separator appears between the panes.
+      assert [sep | _] = layout.horizontal_separators
+      {sep_row, _sep_col, _sep_w, _sep_name} = sep
+
+      # Separator is positioned at the boundary (top's last content row + 1).
+      {tr, _, _, th} = top.total
+      assert sep_row == tr + th
+
+      # Bottom window starts below the separator.
       {br, _, _, _} = bottom.total
-      assert br == tr + th
+      assert br == sep_row + 1
     end
   end
 
@@ -296,24 +315,23 @@ defmodule Minga.Editor.LayoutTest do
     end
 
     test "collapses when panel height is below minimum (boundary)" do
-      # 15 rows. tab_bar=1, minibuffer=1, remaining=13. Panel = 35% of 15 = 5.
-      # Editor = 13-5 = 8. Both survive.
-      # 14 rows. remaining=12. Panel = 35% of 14 = 4. 4 < 5 (min), collapse.
+      # 14 rows: tab=1, status_bar=1, minibuffer=1, remaining=11.
+      # Panel = 35% of 14 = 4 < 5 (min), so it collapses → editor_height = 11.
       state = new_state(14, 80) |> with_window() |> with_agent_panel()
       layout = Layout.compute(state)
       assert layout.agent_panel == nil
       {_, _, _, eh} = layout.editor_area
-      assert eh == 12
+      assert eh == 11
     end
 
     test "collapses when remaining editor height would be below minimum" do
-      # 9 rows. remaining=7. Panel = 35% of 9 = 3. 3 < 5, collapse.
+      # 9 rows. tab=1, status=1, mini=1, remaining=6. Panel = 35% of 9 = 3. 3 < 5, collapse.
       state = new_state(9, 80) |> with_window() |> with_agent_panel()
       layout = Layout.compute(state)
       assert layout.agent_panel == nil
 
-      # 21 rows. remaining=19. Panel = 35% of 21 = 7. Editor = 19-7 = 12. Fine.
-      state = new_state(21, 80) |> with_window() |> with_agent_panel()
+      # 22 rows. remaining=19. Panel = 35% of 22 = 7. Editor = 19-7 = 12. Fine.
+      state = new_state(22, 80) |> with_window() |> with_agent_panel()
       layout = Layout.compute(state)
       assert layout.agent_panel != nil
       {_, _, _, eh} = layout.editor_area
@@ -374,6 +392,8 @@ defmodule Minga.Editor.LayoutTest do
     end
 
     test "both collapse when terminal is tiny" do
+      # 5 rows: tab=1, status_bar=1, minibuffer=1, remaining=2.
+      # Agent panel and file tree both collapse; editor gets the remaining 2 rows.
       state = new_state(5, 10) |> with_window() |> with_file_tree(8) |> with_agent_panel()
       layout = Layout.compute(state)
       assert layout.agent_panel == nil
@@ -381,7 +401,7 @@ defmodule Minga.Editor.LayoutTest do
       {_, col, w, h} = layout.editor_area
       assert col == 0
       assert w == 10
-      assert h == 3
+      assert h == 2
     end
 
     test "editor area always has positive dimensions at minimum terminal" do
@@ -514,14 +534,14 @@ defmodule Minga.Editor.LayoutTest do
   # ── Helpers ──────────────────────────────────────────────────────────────────
 
   defp collect_all_rects(layout) do
-    base = [layout.tab_bar, layout.minibuffer] |> Enum.reject(&is_nil/1)
+    base = [layout.tab_bar, layout.status_bar, layout.minibuffer] |> Enum.reject(&is_nil/1)
     base = if layout.file_tree, do: [layout.file_tree | base], else: base
     base = if layout.agent_panel, do: [layout.agent_panel | base], else: base
 
     window_rects =
       layout.window_layouts
       |> Map.values()
-      |> Enum.flat_map(fn wl -> [wl.content, wl.modeline] end)
+      |> Enum.map(fn wl -> wl.content end)
       |> Enum.reject(fn {_r, _c, _w, h} -> h == 0 end)
 
     base ++ window_rects
@@ -531,6 +551,7 @@ defmodule Minga.Editor.LayoutTest do
     rects =
       [
         layout.tab_bar,
+        layout.status_bar,
         layout.file_tree,
         layout.agent_panel,
         layout.minibuffer
@@ -540,7 +561,7 @@ defmodule Minga.Editor.LayoutTest do
     window_rects =
       layout.window_layouts
       |> Map.values()
-      |> Enum.flat_map(fn wl -> [wl.content, wl.modeline] end)
+      |> Enum.map(fn wl -> wl.content end)
       |> Enum.reject(fn {_r, _c, _w, h} -> h == 0 end)
 
     all_rects = rects ++ window_rects
@@ -703,15 +724,18 @@ defmodule Minga.Editor.LayoutTest do
       assert content_h == ea_h
     end
 
-    test "split-window GUI mode preserves per-window modeline" do
+    test "split-window GUI mode has zero-height per-window modelines (global status bar)" do
       state = new_state(40, 120) |> with_vsplit() |> with_gui_caps()
       layout = Layout.compute(state)
 
-      # Both windows should have modelines in split mode
+      # Per-window modelines are gone; all windows have zero-height modeline rects.
       Enum.each(layout.window_layouts, fn {_id, wl} ->
         {_r, _c, _w, h} = wl.modeline
-        assert h == 1
+        assert h == 0
       end)
+
+      # GUI doesn't use a TUI status bar rect (SwiftUI owns the status bar surface).
+      assert layout.status_bar == nil
     end
 
     test "GUI layout differs from TUI layout for same viewport" do
@@ -739,10 +763,10 @@ defmodule Minga.Editor.LayoutTest do
 
       # Both windows should exist
       assert map_size(layout.window_layouts) == 2
-      # Each window should have a modeline
+      # No per-window modelines; global SwiftUI status bar handles this.
       Enum.each(layout.window_layouts, fn {_id, wl} ->
         {_r, _c, _w, h} = wl.modeline
-        assert h == 1
+        assert h == 0
       end)
     end
   end

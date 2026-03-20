@@ -8,6 +8,8 @@ import SwiftUI
 @MainActor
 @Observable
 final class StatusBarState {
+    /// 0 = buffer window, 1 = agent chat window.
+    var contentKind: UInt8 = 0
     var mode: UInt8 = 0
     var cursorLine: UInt32 = 1
     var cursorCol: UInt32 = 1
@@ -19,10 +21,16 @@ final class StatusBarState {
     var filetype: String = ""
     var errorCount: UInt16 = 0
     var warningCount: UInt16 = 0
+    // Agent-only fields
+    var modelName: String = ""
+    var messageCount: UInt32 = 0
+    var sessionStatus: UInt8 = 0
 
-    func update(mode: UInt8, cursorLine: UInt32, cursorCol: UInt32, lineCount: UInt32,
-                flags: UInt8, lspStatus: UInt8, gitBranch: String, message: String, filetype: String,
-                errorCount: UInt16, warningCount: UInt16) {
+    func update(contentKind: UInt8, mode: UInt8, cursorLine: UInt32, cursorCol: UInt32,
+                lineCount: UInt32, flags: UInt8, lspStatus: UInt8, gitBranch: String,
+                message: String, filetype: String, errorCount: UInt16, warningCount: UInt16,
+                modelName: String, messageCount: UInt32, sessionStatus: UInt8) {
+        self.contentKind = contentKind
         self.mode = mode
         self.cursorLine = cursorLine
         self.cursorCol = cursorCol
@@ -34,6 +42,9 @@ final class StatusBarState {
         self.filetype = filetype
         self.errorCount = errorCount
         self.warningCount = warningCount
+        self.modelName = modelName
+        self.messageCount = messageCount
+        self.sessionStatus = sessionStatus
     }
 
     var modeName: String {
@@ -52,6 +63,17 @@ final class StatusBarState {
     var hasGit: Bool { flags & 0x02 != 0 }
     var hasLsp: Bool { flags & 0x01 != 0 }
     var isInsertMode: Bool { mode == 1 }
+    var isAgentWindow: Bool { contentKind == 1 }
+
+    var sessionStatusName: String {
+        switch sessionStatus {
+        case 0: return "idle"
+        case 1: return "thinking"
+        case 2: return "executing"
+        case 3: return "error"
+        default: return "idle"
+        }
+    }
 }
 
 struct StatusBarView: View {
@@ -63,13 +85,18 @@ struct StatusBarView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            // Left: panel toggle icons
-            leftSegment
+            if state.isAgentWindow {
+                agentLeftSegment
+            } else {
+                leftSegment
+            }
 
             Spacer()
 
-            // Center: status message
-            if !state.message.isEmpty {
+            // Center: status message (buffer) or animated agent status indicator
+            if state.isAgentWindow {
+                AgentStatusIndicator(sessionStatus: state.sessionStatus, theme: theme)
+            } else if !state.message.isEmpty {
                 Text(state.message)
                     .font(.system(size: 11))
                     .foregroundStyle(theme.modelineBarFg.opacity(0.7))
@@ -79,13 +106,44 @@ struct StatusBarView: View {
 
             Spacer()
 
-            // Right: position + mode
-            rightSegment
+            // Right: position + mode (buffer) or message count + mode (agent)
+            if state.isAgentWindow {
+                agentRightSegment
+            } else {
+                rightSegment
+            }
         }
         .frame(height: barHeight)
         .background(theme.modelineBarBg)
         .focusable(false)
         .focusEffectDisabled()
+    }
+
+    // MARK: - Agent segments
+
+    @ViewBuilder
+    private var agentLeftSegment: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "bubble.left.and.bubble.right")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(theme.modelineBarFg.opacity(0.6))
+            Text(state.modelName.isEmpty ? "Agent" : state.modelName)
+                .font(.system(size: 11))
+                .foregroundStyle(theme.modelineBarFg.opacity(0.8))
+                .lineLimit(1)
+        }
+        .padding(.leading, 6)
+    }
+
+    @ViewBuilder
+    private var agentRightSegment: some View {
+        HStack(spacing: 8) {
+            Text("\(state.messageCount) msgs")
+                .font(.system(size: 11))
+                .foregroundStyle(theme.modelineBarFg.opacity(0.6))
+            modeBadge
+        }
+        .padding(.trailing, 8)
     }
 
     // MARK: - Left segment
@@ -94,8 +152,12 @@ struct StatusBarView: View {
     private var leftSegment: some View {
         HStack(spacing: 2) {
             // File tree toggle
-            statusButton(icon: "sidebar.leading") {
-                (encoder as? ProtocolEncoder)?.sendTogglePanel(panel: 0)
+            StatusBarIconButton(
+                icon: "sidebar.leading",
+                barHeight: barHeight,
+                barFg: theme.modelineBarFg
+            ) {
+                encoder?.sendTogglePanel(panel: 0)
             }
 
             // Git branch
@@ -213,14 +275,78 @@ struct StatusBarView: View {
         }
     }
 
-    @ViewBuilder
-    private func statusButton(icon: String, action: @escaping () -> Void) -> some View {
+}
+
+// MARK: - Reusable toolbar-style icon button with hover highlight
+
+/// A compact icon button that shows a subtle rounded-rect fill on hover,
+/// matching the Xcode / VS Code toolbar button aesthetic.
+private struct StatusBarIconButton: View {
+    let icon: String
+    let barHeight: CGFloat
+    let barFg: Color
+    let action: () -> Void
+
+    @State private var isHovered = false
+
+    var body: some View {
         Button(action: action) {
             Image(systemName: icon)
                 .font(.system(size: 10.5, weight: .medium))
-                .foregroundStyle(theme.modelineBarFg.opacity(0.6))
+                .foregroundStyle(barFg.opacity(isHovered ? 0.9 : 0.6))
                 .frame(width: 26, height: barHeight)
+                .contentShape(Rectangle())
+                .background(
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(barFg.opacity(isHovered ? 0.10 : 0))
+                        .padding(.horizontal, 2)
+                )
         }
         .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+    }
+}
+
+// MARK: - Animated agent session status indicator
+
+/// Shows nothing for idle, a native spinner for active states, and a red
+/// icon for error. Static text for an active state reads as "maybe broken" —
+/// the spinner communicates liveness.
+private struct AgentStatusIndicator: View {
+    let sessionStatus: UInt8
+    let theme: ThemeColors
+
+    var body: some View {
+        switch sessionStatus {
+        case 1: // thinking
+            HStack(spacing: 5) {
+                ProgressView()
+                    .scaleEffect(0.55)
+                    .frame(width: 12, height: 12)
+                Text("thinking…")
+                    .font(.system(size: 11))
+                    .foregroundStyle(theme.modelineBarFg.opacity(0.65))
+            }
+        case 2: // tool executing
+            HStack(spacing: 5) {
+                ProgressView()
+                    .scaleEffect(0.55)
+                    .frame(width: 12, height: 12)
+                Text("executing…")
+                    .font(.system(size: 11))
+                    .foregroundStyle(theme.modelineBarFg.opacity(0.65))
+            }
+        case 3: // error
+            HStack(spacing: 4) {
+                Image(systemName: "exclamationmark.circle.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Color(red: 1.0, green: 0.42, blue: 0.42))
+                Text("error")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Color(red: 1.0, green: 0.42, blue: 0.42))
+            }
+        default: // idle — show nothing; no need to announce inactivity
+            EmptyView()
+        }
     }
 }

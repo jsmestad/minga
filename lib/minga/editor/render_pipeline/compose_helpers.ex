@@ -10,8 +10,7 @@ defmodule Minga.Editor.RenderPipeline.ComposeHelpers do
 
   alias Minga.Agent.UIState
   alias Minga.Buffer.Unicode
-  alias Minga.Editor.DisplayList
-  alias Minga.Editor.DisplayList.{Cursor, Overlay, WindowFrame}
+  alias Minga.Editor.DisplayList.{Cursor, Overlay}
   alias Minga.Editor.Layout
   alias Minga.Editor.RenderPipeline.ChromeHelpers
   alias Minga.Editor.State, as: EditorState
@@ -21,28 +20,6 @@ defmodule Minga.Editor.RenderPipeline.ComposeHelpers do
 
   # Agent input area = 3 rows (border + text + padding); cursor goes on the text row.
   @agent_input_height 3
-
-  # ── Modeline injection ─────────────────────────────────────────────────────
-
-  @doc """
-  Merges modeline draws into a WindowFrame, applying grayscale dimming
-  for inactive windows (cursor == nil means inactive).
-  """
-  @spec inject_modeline(WindowFrame.t(), %{non_neg_integer() => [DisplayList.draw()]}) ::
-          WindowFrame.t()
-  def inject_modeline(wf, modeline_map) do
-    is_active = wf.cursor != nil
-    all_draws = Enum.flat_map(modeline_map, fn {_id, draws} -> draws end)
-
-    dimmed =
-      if is_active do
-        all_draws
-      else
-        DisplayList.grayscale_draws(all_draws)
-      end
-
-    %{wf | modeline: DisplayList.draws_to_layer(dimmed)}
-  end
 
   # ── Cursor resolution ─────────────────────────────────────────────────────
 

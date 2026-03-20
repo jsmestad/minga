@@ -23,7 +23,7 @@ defmodule Minga.Editor.Layout.TUI do
 
   @doc """
   Computes TUI layout: tab bar at row 0, file tree left, agent panel bottom,
-  editor area in the middle, minibuffer at the last row.
+  editor area in the middle, status bar at rows - 2, minibuffer at the last row.
   """
   @spec compute(EditorState.t()) :: Layout.t()
   def compute(state) do
@@ -33,9 +33,19 @@ defmodule Minga.Editor.Layout.TUI do
     # 0. Tab bar takes row 0.
     tab_bar_row = 0
 
-    # 1. Minibuffer always takes the last row.
+    # 1. Minibuffer always takes the last row. Status bar takes the row above it,
+    # but only when there's enough room (status_bar row must be above content_start).
+    # At tiny terminals (< 4 rows), omit the status bar rather than overlap the editor.
     minibuffer = {vp.rows - 1, 0, vp.cols, 1}
-    remaining_height = max(vp.rows - 1 - @content_start, 1)
+
+    {status_bar, remaining_height} =
+      if vp.rows - 2 > @content_start do
+        # Normal case: reserve 2 rows at the bottom (status bar + minibuffer).
+        {{vp.rows - 2, 0, vp.cols, 1}, max(vp.rows - 2 - @content_start, 1)}
+      else
+        # Degenerate terminal: too small for a separate status bar row.
+        {nil, max(vp.rows - 1 - @content_start, 1)}
+      end
 
     # 2. File tree takes a left column if open.
     {file_tree_rect, editor_col, editor_width} = file_tree_layout(state, vp.cols)
@@ -61,11 +71,15 @@ defmodule Minga.Editor.Layout.TUI do
     editor_area = {@content_start, editor_col, editor_width, editor_height}
 
     # 6. Window layouts within the editor area.
-    window_layouts =
+    {window_layouts, horizontal_separators} =
       if EditorState.split?(state) do
-        Layout.compute_window_layouts(state.windows.tree, editor_area)
+        Layout.compute_window_layouts_with_separators(
+          state.windows.tree,
+          editor_area,
+          state.windows.map
+        )
       else
-        %{state.windows.active => Layout.subdivide_window(editor_area)}
+        {%{state.windows.active => Layout.subdivide_window(editor_area)}, []}
       end
 
     %Layout{
@@ -74,7 +88,9 @@ defmodule Minga.Editor.Layout.TUI do
       file_tree: file_tree_rect,
       editor_area: editor_area,
       window_layouts: window_layouts,
+      horizontal_separators: horizontal_separators,
       agent_panel: agent_rect,
+      status_bar: status_bar,
       minibuffer: minibuffer
     }
   end
@@ -169,7 +185,9 @@ defmodule Minga.Editor.Layout.TUI do
   end
 
   defp file_tree_layout(%{file_tree: %{tree: %FileTree{width: tw}}} = state, total_cols) do
-    tree_height = state.viewport.rows - @content_start - 1
+    # Same logic as compute/1: reserve 2 rows at the bottom when possible, else 1.
+    bottom_reserve = if state.viewport.rows - 2 > @content_start, do: 2, else: 1
+    tree_height = state.viewport.rows - @content_start - bottom_reserve
     min_editor_w = 3
     max_tree_w = max(total_cols - 1 - min_editor_w, 1)
     clamped_tw = min(tw, max_tree_w)

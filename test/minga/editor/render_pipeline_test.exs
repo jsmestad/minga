@@ -53,7 +53,8 @@ defmodule Minga.Editor.RenderPipelineTest do
       {er, _ec, ew, eh} = layout.editor_area
       assert er == 1
       assert ew == 100
-      assert eh == 28
+      # 30 rows: tab=1, status_bar=1, minibuffer=1, editor=27
+      assert eh == 27
     end
   end
 

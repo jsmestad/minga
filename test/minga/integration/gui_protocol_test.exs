@@ -102,18 +102,29 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert decoded["segments"] == ["lib", "foo.ex"]
     end
 
-    test "gui_status_bar encodes and decodes correctly", %{port: port} do
-      data = %{
-        mode: :normal,
-        cursor_line: 42,
-        cursor_col: 10,
-        line_count: 200,
-        filetype: :elixir,
-        dirty_marker: "●",
-        lsp_status: :ready,
-        git_branch: "main",
-        status_msg: ""
-      }
+    test "gui_status_bar buffer variant encodes and decodes correctly", %{port: port} do
+      data =
+        {:buffer,
+         %{
+           mode: :normal,
+           mode_state: nil,
+           cursor_line: 41,
+           cursor_col: 9,
+           line_count: 200,
+           file_name: "foo.ex",
+           filetype: :elixir,
+           dirty: true,
+           git_branch: "main",
+           git_diff_summary: nil,
+           diagnostic_counts: nil,
+           lsp_status: :ready,
+           parser_status: :available,
+           buf_index: 1,
+           buf_count: 3,
+           macro_recording: false,
+           agent_status: nil,
+           agent_theme_colors: nil
+         }}
 
       cmd = ProtocolGUI.encode_gui_status_bar(data)
       Port.command(port, cmd)
@@ -121,12 +132,42 @@ defmodule Minga.Integration.GUIProtocolTest do
       decoded = Jason.decode!(json)
 
       assert decoded["type"] == "gui_status_bar"
+      # content_kind 0 = buffer
+      assert decoded["content_kind"] == 0
       assert decoded["mode"] == 0
+      # 1-indexed in the wire format (cursor_line is 0-indexed internally, +1 encoded)
       assert decoded["cursor_line"] == 42
       assert decoded["cursor_col"] == 10
       assert decoded["line_count"] == 200
       assert decoded["git_branch"] == "main"
       assert decoded["filetype"] == "elixir"
+    end
+
+    test "gui_status_bar agent variant encodes and decodes correctly", %{port: port} do
+      data =
+        {:agent,
+         %{
+           mode: :normal,
+           mode_state: nil,
+           model_name: "claude-3-5-sonnet",
+           session_status: :thinking,
+           message_count: 7,
+           macro_recording: false,
+           agent_status: :thinking,
+           agent_theme_colors: nil
+         }}
+
+      cmd = ProtocolGUI.encode_gui_status_bar(data)
+      Port.command(port, cmd)
+      assert_receive {^port, {:data, json}}, 5_000
+      decoded = Jason.decode!(json)
+
+      assert decoded["type"] == "gui_status_bar"
+      # content_kind 1 = agent
+      assert decoded["content_kind"] == 1
+      assert decoded["mode"] == 0
+      assert decoded["model_name"] == "claude-3-5-sonnet"
+      assert decoded["message_count"] == 7
     end
 
     test "gui_agent_chat hidden encodes and decodes correctly", %{port: port} do

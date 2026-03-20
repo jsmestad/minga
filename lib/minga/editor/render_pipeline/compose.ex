@@ -32,12 +32,6 @@ defmodule Minga.Editor.RenderPipeline.Compose do
   def compose_windows(window_frames, chrome, cursor_info, state) do
     layout = Layout.get(state)
 
-    # Inject modeline draws into WindowFrames + apply dimming
-    window_frames =
-      Enum.map(window_frames, fn wf ->
-        ComposeHelpers.inject_modeline(wf, chrome.modeline_draws)
-      end)
-
     # Resolve cursor from window frames, overlays, and fallbacks.
     # Priority (highest first): picker overlay → agent panel → active WindowFrame → fallback.
     {minibuffer_row, _, _, _} = layout.minibuffer
@@ -70,6 +64,7 @@ defmodule Minga.Editor.RenderPipeline.Compose do
       windows: window_frames,
       file_tree: chrome.file_tree,
       separators: chrome.separators,
+      status_bar: chrome.status_bar_draws,
       agent_panel: chrome.agent_panel,
       minibuffer: chrome.minibuffer,
       overlays: chrome.overlays,

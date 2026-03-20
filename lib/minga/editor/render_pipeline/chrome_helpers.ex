@@ -8,30 +8,19 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
   Extracted from `RenderPipeline` to reduce module size.
   """
 
-  alias Minga.Agent.Session
-  alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Config.Options
-  alias Minga.Diagnostics
   alias Minga.Editor.DisplayList
   alias Minga.Editor.FloatingWindow
   alias Minga.Editor.Layout
-  alias Minga.Editor.MacroRecorder
-  alias Minga.Editor.Modeline
   alias Minga.Editor.State, as: EditorState
-  alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.TabBarRenderer
   alias Minga.Editor.Viewport
   alias Minga.Editor.WindowTree
   alias Minga.Face
-  alias Minga.Git.Buffer, as: GitBuffer
-  alias Minga.Git.Tracker, as: GitTracker
-  alias Minga.LSP.SyncServer
   alias Minga.Theme
   alias Minga.WhichKey
 
   @type state :: EditorState.t()
-
-  @typep window_scroll :: Minga.Editor.RenderPipeline.Scroll.WindowScroll.t()
 
   # ── Tab bar ────────────────────────────────────────────────────────────────
 
@@ -53,128 +42,6 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
     TabBarRenderer.render(tab_row, tab_width, state.tab_bar, state.theme, hover_col)
   end
 
-  # ── Window modeline ────────────────────────────────────────────────────────
-
-  @doc "Renders the modeline for a single window scroll result."
-  @spec render_window_modeline(state(), window_scroll()) ::
-          {[DisplayList.draw()], [Modeline.click_region()]}
-  def render_window_modeline(state, %{win_layout: %{modeline: {_, _, _, 0}}}) do
-    _ = state
-    {[], []}
-  end
-
-  def render_window_modeline(state, scroll) do
-    win_layout = scroll.win_layout
-    is_active = scroll.is_active
-    snapshot = scroll.snapshot
-    cursor_line = scroll.cursor_line
-    cursor_col = scroll.cursor_col
-
-    {modeline_row, _mc, modeline_width, _mh} = win_layout.modeline
-    {_row_off, col_off, _cw, _ch} = win_layout.content
-    file_name = snapshot_display_name(snapshot)
-    dirty_marker = if snapshot.dirty, do: " ● ", else: ""
-    filetype = Map.get(snapshot, :filetype, :text)
-    line_count = snapshot.line_count
-    buf_count = length(state.buffers.list)
-    buf_index = state.buffers.active_index + 1
-
-    lsp_status = if is_active, do: state.lsp_status, else: :none
-
-    buf = scroll.window.buffer
-    {git_branch, git_diff_summary} = git_modeline_data(buf)
-    diagnostic_counts = diagnostic_modeline_data(buf)
-
-    Modeline.render(
-      modeline_row,
-      modeline_width,
-      %{
-        mode: if(is_active, do: state.vim.mode, else: :normal),
-        mode_state: if(is_active, do: state.vim.mode_state, else: nil),
-        file_name: file_name,
-        filetype: filetype,
-        dirty_marker: dirty_marker,
-        cursor_line: cursor_line,
-        cursor_col: cursor_col,
-        line_count: line_count,
-        buf_index: buf_index,
-        buf_count: buf_count,
-        macro_recording:
-          if(is_active, do: MacroRecorder.recording?(state.vim.macro_recorder), else: false),
-        agent_status: if(is_active, do: AgentAccess.agent(state).status, else: nil),
-        agent_theme_colors:
-          if(is_active && AgentAccess.agent(state).status,
-            do: Theme.agent_theme(state.theme),
-            else: nil
-          ),
-        lsp_status: lsp_status,
-        parser_status: state.parser_status,
-        git_branch: git_branch,
-        git_diff_summary: git_diff_summary,
-        diagnostic_counts: diagnostic_counts
-      },
-      state.theme,
-      col_off
-    )
-  end
-
-  @doc """
-  Renders the modeline for an agent chat window.
-
-  Shows vim mode, macro recording, and agent session status instead of
-  the filename/filetype/position info that buffer modelines display.
-  """
-  @spec render_agent_modeline(state(), Layout.window_layout()) ::
-          {[DisplayList.draw()], [Modeline.click_region()]}
-  def render_agent_modeline(state, win_layout) do
-    {modeline_row, _mc, modeline_width, modeline_height} = win_layout.modeline
-
-    if modeline_height == 0 do
-      {[], []}
-    else
-      {_row_off, col_off, _cw, _ch} = win_layout.content
-      agent = AgentAccess.agent(state)
-      panel = AgentAccess.panel(state)
-
-      message_count =
-        if agent.session do
-          try do
-            length(Session.messages(agent.session))
-          catch
-            :exit, _ -> 0
-          end
-        else
-          0
-        end
-
-      model_label =
-        if panel.model_name != "", do: panel.model_name, else: "Agent"
-
-      Modeline.render(
-        modeline_row,
-        modeline_width,
-        %{
-          mode: state.vim.mode,
-          mode_state: state.vim.mode_state,
-          file_name: "󰚩 #{model_label}",
-          filetype: :text,
-          dirty_marker: "",
-          cursor_line: message_count,
-          cursor_col: 0,
-          line_count: max(message_count, 1),
-          buf_index: 1,
-          buf_count: 1,
-          macro_recording: MacroRecorder.recording?(state.vim.macro_recorder),
-          agent_status: agent.status,
-          agent_theme_colors: Theme.agent_theme(state.theme),
-          mode_override: nil
-        },
-        state.theme,
-        col_off
-      )
-    end
-  end
-
   # ── Separators ─────────────────────────────────────────────────────────────
 
   @doc "Renders vertical split separators between windows."
@@ -186,6 +53,34 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
     for {col, start_row, end_row} <- separators, row <- start_row..end_row do
       DisplayList.draw(row, col, "│", Face.new(fg: theme.editor.split_border_fg))
     end
+  end
+
+  @doc """
+  Renders horizontal split separators as `──── filename.ex ────` bars.
+
+  Each separator is `{row, col, width, filename}` from the layout. The filename
+  is centered; the remaining width is filled with `─` on each side.
+  """
+  @spec render_horizontal_separators([Layout.horizontal_separator()], Theme.t()) ::
+          [DisplayList.draw()]
+  def render_horizontal_separators([], _theme), do: []
+
+  def render_horizontal_separators(separators, theme) do
+    face = Face.new(fg: theme.editor.split_border_fg)
+
+    Enum.flat_map(separators, fn {row, col, width, filename} ->
+      label = " #{filename} "
+      label_len = String.length(label)
+      dash_total = max(width - label_len, 0)
+      left_dashes = div(dash_total, 2)
+      right_dashes = dash_total - left_dashes
+
+      left_str = String.duplicate("─", left_dashes)
+      right_str = String.duplicate("─", right_dashes)
+      full_line = left_str <> label <> right_str
+
+      [DisplayList.draw(row, col, full_line, face)]
+    end)
   end
 
   # ── Which-key ──────────────────────────────────────────────────────────────
@@ -501,45 +396,5 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
 
     collect_separators(top, {row, col, width, top_height}) ++
       collect_separators(bottom, {row + top_height, col, width, bottom_height})
-  end
-
-  # ── Git modeline data ─────────────────────────────────────────────────────
-
-  # Returns {branch_name | nil, {added, modified, deleted} | nil} for the
-  # modeline. Single GenServer call to Git.Buffer, no file I/O: the branch
-  # is cached on Git.Buffer state and refreshed on init and save.
-  @spec git_modeline_data(pid() | nil) :: {String.t() | nil, GitBuffer.diff_summary() | nil}
-  defp git_modeline_data(nil), do: {nil, nil}
-
-  defp git_modeline_data(buf) when is_pid(buf) do
-    case GitTracker.lookup(buf) do
-      nil ->
-        {nil, nil}
-
-      git_pid ->
-        try do
-          GitBuffer.modeline_info(git_pid)
-        catch
-          :exit, _ -> {nil, nil}
-        end
-    end
-  end
-
-  @spec diagnostic_modeline_data(pid() | nil) ::
-          {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()} | nil
-  defp diagnostic_modeline_data(nil), do: nil
-
-  defp diagnostic_modeline_data(buf) when is_pid(buf) do
-    path =
-      try do
-        BufferServer.file_path(buf)
-      catch
-        :exit, _ -> nil
-      end
-
-    case path do
-      nil -> nil
-      path -> Diagnostics.count_tuple(SyncServer.path_to_uri(path))
-    end
   end
 end

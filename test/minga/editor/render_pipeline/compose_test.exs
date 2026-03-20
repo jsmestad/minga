@@ -38,14 +38,13 @@ defmodule Minga.Editor.RenderPipeline.ComposeTest do
       assert frame.cursor.shape in [:block, :beam, :underline]
     end
 
-    test "frame windows have modeline injected" do
+    test "frame includes global status bar draws" do
       state = base_state()
       {frames, chrome, cursor_info, state} = run_through_chrome(state)
 
       frame = Compose.compose_windows(frames, chrome, cursor_info, state)
 
-      [wf | _] = frame.windows
-      assert map_size(wf.modeline) >= 1
+      assert [_ | _] = frame.status_bar
     end
 
     test "frame includes chrome elements" do

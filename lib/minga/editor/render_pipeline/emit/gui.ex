@@ -14,13 +14,10 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
 
   alias Minga.Agent.Session, as: AgentSession
   alias Minga.Buffer.Server, as: BufferServer
-  alias Minga.Diagnostics
   alias Minga.Editor.Layout
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.TabBar
-  alias Minga.Filetype
-  alias Minga.Git
-  alias Minga.LSP.SyncServer, as: LspSyncServer
+  alias Minga.Editor.StatusBar.Data, as: StatusBarData
   alias Minga.Port.Manager, as: PortManager
   alias Minga.Port.Protocol.GUI, as: ProtocolGUI
 
@@ -33,16 +30,20 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
   Each chrome element is gathered from editor state, encoded to protocol
   binary, and sent to the port manager. The caller has already verified
   that the frontend has GUI capabilities.
+
+  `status_bar_data` is pre-computed by the Chrome stage and passed through
+  to avoid re-calling BufferServer for cursor/file info on the same frame.
+  When nil (e.g. non-GUI fallback paths), it is computed here.
   """
-  @spec sync_chrome(state()) :: :ok
-  def sync_chrome(state) do
+  @spec sync_chrome(state(), StatusBarData.t() | nil) :: :ok
+  def sync_chrome(state, status_bar_data \\ nil) do
     send_gui_theme(state)
     send_gui_tab_bar(state)
     send_gui_file_tree(state)
     send_gui_which_key(state)
     send_gui_completion(state)
     send_gui_breadcrumb(state)
-    send_gui_status_bar(state)
+    send_gui_status_bar(state, status_bar_data || StatusBarData.from_state(state))
     send_gui_picker(state)
     send_gui_agent_chat(state)
     send_gui_gutter_separator(state)
@@ -168,63 +169,11 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
 
   # ── Status bar ──
 
-  @spec send_gui_status_bar(state()) :: :ok
-  defp send_gui_status_bar(%{port_manager: pm} = state) do
-    data = build_status_bar_data(state)
-    cmd = ProtocolGUI.encode_gui_status_bar(data)
+  @spec send_gui_status_bar(state(), StatusBarData.t()) :: :ok
+  defp send_gui_status_bar(%{port_manager: pm}, status_bar_data) do
+    cmd = ProtocolGUI.encode_gui_status_bar(status_bar_data)
     PortManager.send_commands(pm, [cmd])
     :ok
-  end
-
-  @spec build_status_bar_data(state()) :: map()
-  defp build_status_bar_data(state) do
-    buf = state.buffers.active
-    {line, col} = if buf, do: BufferServer.cursor(buf), else: {1, 0}
-    line_count = if buf, do: BufferServer.line_count(buf), else: 1
-    file_name = if buf, do: BufferServer.file_path(buf) || "", else: ""
-
-    diagnostic_counts = diagnostic_counts_for_gui(buf)
-
-    %{
-      mode: state.vim.mode,
-      cursor_line: line + 1,
-      cursor_col: col + 1,
-      line_count: line_count,
-      filetype: Filetype.detect(file_name),
-      dirty_marker: if(buf && BufferServer.dirty?(buf), do: "●", else: ""),
-      lsp_status: state.lsp_status,
-      git_branch: resolve_git_branch(state),
-      status_msg: state.status_msg,
-      diagnostic_counts: diagnostic_counts
-    }
-  end
-
-  @spec resolve_git_branch(state()) :: String.t() | nil
-  defp resolve_git_branch(%{file_tree: %{tree: %{root: root}}}) do
-    case Git.current_branch(root) do
-      {:ok, branch} -> branch
-      _ -> nil
-    end
-  end
-
-  defp resolve_git_branch(_state), do: nil
-
-  @spec diagnostic_counts_for_gui(pid() | nil) ::
-          {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()} | nil
-  defp diagnostic_counts_for_gui(nil), do: nil
-
-  defp diagnostic_counts_for_gui(buf) do
-    path =
-      try do
-        BufferServer.file_path(buf)
-      catch
-        :exit, _ -> nil
-      end
-
-    case path do
-      nil -> nil
-      path -> Diagnostics.count_tuple(LspSyncServer.path_to_uri(path))
-    end
   end
 
   # ── Picker ──

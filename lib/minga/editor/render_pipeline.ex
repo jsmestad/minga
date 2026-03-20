@@ -145,7 +145,7 @@ defmodule Minga.Editor.RenderPipeline do
 
     # Stage 7: Emit
     Telemetry.span([:minga, :render, :stage], %{stage: :emit}, fn ->
-      Emit.emit(frame, state)
+      Emit.emit(frame, state, chrome)
     end)
 
     state

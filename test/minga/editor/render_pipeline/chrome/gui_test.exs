@@ -47,13 +47,22 @@ defmodule Minga.Editor.RenderPipeline.Chrome.GUITest do
       assert chrome.agent_panel == []
     end
 
-    test "modeline is empty for single window (SwiftUI status bar)" do
+    test "status bar draws are empty for GUI (SwiftUI owns the status bar surface)" do
       state = gui_state()
       {scrolls, cursor_info, state, layout} = run_through_content(state)
 
       chrome = ChromeGUI.build(state, layout, scrolls, cursor_info)
 
-      assert chrome.modeline_draws == %{}
+      assert chrome.status_bar_draws == []
+    end
+
+    test "status bar data is computed for GUI emission via 0x76 opcode" do
+      state = gui_state()
+      {scrolls, cursor_info, state, layout} = run_through_content(state)
+
+      chrome = ChromeGUI.build(state, layout, scrolls, cursor_info)
+
+      assert {:buffer, _} = chrome.status_bar_data
     end
 
     test "minibuffer is still rendered in Metal" do
