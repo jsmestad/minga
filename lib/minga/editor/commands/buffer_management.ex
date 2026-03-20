@@ -145,20 +145,8 @@ defmodule Minga.Editor.Commands.BufferManagement do
     end
   end
 
-  def execute(%{buffers: %{messages: nil}} = state, :view_messages) do
-    %{state | status_msg: "No messages buffer"}
-  end
-
-  def execute(%{buffers: %{messages: msg_buf}} = state, :view_messages) do
-    open_special_buffer(state, "*Messages*", msg_buf)
-  end
-
-  def execute(state, :view_warnings) do
-    alias Minga.Editor.BottomPanel
-    # Open bottom panel with warnings filter preset (#825)
-    new_panel = BottomPanel.show(state.bottom_panel, :messages, :warnings)
-    %{state | bottom_panel: new_panel}
-  end
+  def execute(state, :view_messages), do: frontend(state).view_messages(state)
+  def execute(state, :view_warnings), do: frontend(state).view_warnings(state)
 
   def execute(state, {:open_special_buffer, buffer_name, buffer_pid})
       when is_binary(buffer_name) and is_pid(buffer_pid) do
@@ -1010,8 +998,12 @@ defmodule Minga.Editor.Commands.BufferManagement do
   # Opens a special buffer (like *Messages* or *Warnings*) as a popup if a
   # matching popup rule exists, otherwise falls back to normal buffer switching.
   # If the buffer is already open in a popup, toggles it closed.
+  @doc """
+  Opens a special buffer in a popup window (TUI) or switches to it.
+  Public so `BufferManagement.TUI` can call it for TUI fallback paths.
+  """
   @spec open_special_buffer(state(), String.t(), pid()) :: state()
-  defp open_special_buffer(state, buffer_name, buffer_pid) do
+  def open_special_buffer(state, buffer_name, buffer_pid) do
     case find_popup_for_buffer(state, buffer_pid) do
       {:ok, popup_window_id} ->
         # Toggle: close the existing popup
@@ -1178,8 +1170,8 @@ defmodule Minga.Editor.Commands.BufferManagement do
       },
       %Minga.Command{
         name: :view_messages,
-        description: "View *Messages* buffer",
-        requires_buffer: true,
+        description: "Show messages in bottom panel",
+        requires_buffer: false,
         execute: fn state -> execute(state, :view_messages) end
       },
       %Minga.Command{
@@ -1264,5 +1256,13 @@ defmodule Minga.Editor.Commands.BufferManagement do
     ]
 
     standard ++ tabs ++ scoped
+  end
+
+  # ── Frontend dispatch ─────────────────────────────────────────────────────
+
+  @spec frontend(state()) :: module()
+  defp frontend(%{capabilities: caps}) do
+    alias Minga.Port.Capabilities
+    if Capabilities.gui?(caps), do: __MODULE__.GUI, else: __MODULE__.TUI
   end
 end

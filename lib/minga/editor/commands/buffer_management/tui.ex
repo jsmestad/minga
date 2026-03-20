@@ -1,0 +1,29 @@
+defmodule Minga.Editor.Commands.BufferManagement.TUI do
+  @moduledoc "TUI variant of buffer management commands. Opens gap buffers in windows."
+
+  @behaviour Minga.Editor.Commands.BufferManagement.Frontend
+
+  alias Minga.Editor.Commands.BufferManagement
+  alias Minga.Editor.State, as: EditorState
+
+  @impl true
+  @spec view_messages(EditorState.t()) :: EditorState.t()
+  def view_messages(%{buffers: %{messages: nil}} = state) do
+    %{state | status_msg: "No messages buffer"}
+  end
+
+  def view_messages(%{buffers: %{messages: msg_buf}} = state) do
+    BufferManagement.open_special_buffer(state, "*Messages*", msg_buf)
+  end
+
+  @impl true
+  @spec view_warnings(EditorState.t()) :: EditorState.t()
+  def view_warnings(%{buffers: %{messages: nil}} = state) do
+    %{state | status_msg: "No messages buffer"}
+  end
+
+  def view_warnings(%{buffers: %{messages: msg_buf}} = state) do
+    # Warnings appear in *Messages* with [WARN] prefix (no separate buffer)
+    BufferManagement.open_special_buffer(state, "*Messages*", msg_buf)
+  end
+end
