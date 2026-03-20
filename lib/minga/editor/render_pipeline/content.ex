@@ -7,7 +7,8 @@ defmodule Minga.Editor.RenderPipeline.Content do
   tildes (but without modeline, which is added in the Chrome stage).
   """
 
-  alias Minga.Agent.View.Renderer, as: ViewRenderer
+  alias Minga.Agent.View.DashboardRenderer
+  alias Minga.Agent.View.PromptRenderer
   alias Minga.Buffer.Decorations
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Buffer.Unicode
@@ -250,7 +251,7 @@ defmodule Minga.Editor.RenderPipeline.Content do
 
   # Renders an agent chat window: buffer content through the standard
   # pipeline (for decorations, visual mode, search) plus the prompt
-  # input from ViewRenderer.
+  # input from PromptRenderer.
   @spec render_agent_chat_window(state(), Window.t(), Window.id(), Layout.window_layout()) ::
           {WindowFrame.t(), Cursor.t() | nil, state()}
   defp render_agent_chat_window(state, window, _win_id, win_layout) do
@@ -276,7 +277,7 @@ defmodule Minga.Editor.RenderPipeline.Content do
               )
             end
 
-          separator ++ ViewRenderer.render_dashboard_only(state, {sr, sc, sw, sh})
+          separator ++ DashboardRenderer.render(state, {sr, sc, sw, sh})
 
         nil ->
           []
@@ -284,14 +285,14 @@ defmodule Minga.Editor.RenderPipeline.Content do
 
     # Compute prompt height and subdivide the content rect.
     # Subdivide the content rect for chat content vs prompt input.
-    prompt_height = ViewRenderer.prompt_height(state, chat_width)
+    prompt_height = PromptRenderer.prompt_height(state, chat_width)
     input_v_gap = 1
     chat_height = max(height - prompt_height - input_v_gap, 1)
     prompt_row = row_off + chat_height + input_v_gap
 
     # Render the prompt (agent chrome, not buffer content)
     prompt_rect = {prompt_row, col_off, chat_width, prompt_height}
-    prompt_draws = ViewRenderer.render_prompt_only(state, prompt_rect)
+    prompt_draws = PromptRenderer.render(state, prompt_rect)
 
     # Render the chat content through the standard buffer pipeline
     is_active = agent_window_active?(state, window)
@@ -428,7 +429,7 @@ defmodule Minga.Editor.RenderPipeline.Content do
     full_rect = {row_off, col_off, chat_width, height}
 
     prompt_cursor =
-      case ViewRenderer.cursor_position_in_rect(state, full_rect) do
+      case PromptRenderer.cursor_position_in_rect(state, full_rect) do
         {row, col} -> Cursor.new(row, col, :beam)
         nil -> nil
       end

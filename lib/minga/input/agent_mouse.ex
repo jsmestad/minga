@@ -23,7 +23,7 @@ defmodule Minga.Input.AgentMouse do
   @behaviour Minga.Input.Handler
 
   alias Minga.Agent.UIState
-  alias Minga.Agent.View.Renderer, as: ViewRenderer
+  alias Minga.Agent.View.PromptRenderer
   alias Minga.Config.Options
   alias Minga.Editor.Layout
   alias Minga.Editor.State, as: EditorState
@@ -198,11 +198,11 @@ defmodule Minga.Input.AgentMouse do
   defp handle_prompt_click(state, {cr, _cc, cw, ch}, row, _col) do
     panel = AgentAccess.panel(state)
     input_lines = UIState.input_lines(panel)
-    box_width = ViewRenderer.input_box_width(cw)
-    inner_width = ViewRenderer.input_inner_width(box_width)
-    input_height = ViewRenderer.compute_input_height(input_lines, inner_width)
+    box_width = PromptRenderer.input_box_width(cw)
+    inner_width = PromptRenderer.input_inner_width(box_width)
+    input_height = PromptRenderer.compute_input_height(input_lines, inner_width)
 
-    input_start_row = cr + ch - input_height - ViewRenderer.input_v_gap()
+    input_start_row = cr + ch - input_height - PromptRenderer.input_v_gap()
 
     if row >= input_start_row do
       state = AgentAccess.update_agent_ui(state, &UIState.set_input_focused(&1, true))
@@ -221,7 +221,7 @@ defmodule Minga.Input.AgentMouse do
 
   @spec click_in_prompt?(Layout.rect(), non_neg_integer(), EditorState.t()) :: boolean()
   defp click_in_prompt?({row_off, _col, width, height}, click_row, state) do
-    prompt_h = ViewRenderer.prompt_height(state, width)
+    prompt_h = PromptRenderer.prompt_height(state, width)
     chat_h = max(height - prompt_h - 1, 1)
     click_row >= row_off + chat_h
   end
