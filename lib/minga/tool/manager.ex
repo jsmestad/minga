@@ -299,17 +299,26 @@ defmodule Minga.Tool.Manager do
 
   @spec tool_status(atom(), map()) :: {tool_status(), String.t() | nil}
   defp tool_status(name, state) do
-    if MapSet.member?(state.installing, name) do
-      {:installing, nil}
-    else
-      if MapSet.member?(state.failed, name) do
-        {:failed, nil}
-      else
-        case get_installation(name) do
-          %Installation{version: version} -> {:installed, version}
-          nil -> {:not_installed, nil}
-        end
-      end
+    tool_status_for(name, state.installing, state.failed)
+  end
+
+  @spec tool_status_for(atom(), MapSet.t(), MapSet.t()) :: {tool_status(), String.t() | nil}
+  defp tool_status_for(name, installing, failed) do
+    cond_tool_status(
+      MapSet.member?(installing, name),
+      MapSet.member?(failed, name),
+      name
+    )
+  end
+
+  @spec cond_tool_status(boolean(), boolean(), atom()) :: {tool_status(), String.t() | nil}
+  defp cond_tool_status(true, _, _name), do: {:installing, nil}
+  defp cond_tool_status(_, true, _name), do: {:failed, nil}
+
+  defp cond_tool_status(false, false, name) do
+    case get_installation(name) do
+      %Installation{version: version} -> {:installed, version}
+      nil -> {:not_installed, nil}
     end
   end
 

@@ -1193,6 +1193,7 @@ defmodule Minga.Port.ProtocolTest do
   describe "encode_gui_gutter/1" do
     test "encodes per-window gutter with position header and entries" do
       data = %{
+        window_id: 1,
         content_row: 2,
         content_col: 10,
         content_height: 30,
@@ -1210,8 +1211,10 @@ defmodule Minga.Port.ProtocolTest do
 
       encoded = ProtocolGUI.encode_gui_gutter(data)
 
-      assert <<0x7B, c_row::16, c_col::16, c_h::16, active::8, cursor::32, style::8, ln_w::8,
-               sign_w::8, count::16, rest::binary>> = encoded
+      assert <<0x7B, wid::16, c_row::16, c_col::16, c_h::16, active::8, cursor::32, style::8,
+               ln_w::8, sign_w::8, count::16, rest::binary>> = encoded
+
+      assert wid == 1
 
       assert c_row == 2
       assert c_col == 10
@@ -1232,6 +1235,7 @@ defmodule Minga.Port.ProtocolTest do
 
     test "encodes inactive window" do
       data = %{
+        window_id: 1,
         content_row: 25,
         content_col: 0,
         content_height: 20,
@@ -1245,12 +1249,13 @@ defmodule Minga.Port.ProtocolTest do
 
       encoded = ProtocolGUI.encode_gui_gutter(data)
 
-      assert <<0x7B, 25::16, 0::16, 20::16, 0::8, 10::32, 1::8, 3::8, 0::8, 1::16, _rest::binary>> =
-               encoded
+      assert <<0x7B, 1::16, 25::16, 0::16, 20::16, 0::8, 10::32, 1::8, 3::8, 0::8, 1::16,
+               _rest::binary>> = encoded
     end
 
     test "encodes empty gutter (no entries)" do
       data = %{
+        window_id: 1,
         content_row: 0,
         content_col: 0,
         content_height: 0,
@@ -1265,12 +1270,13 @@ defmodule Minga.Port.ProtocolTest do
       encoded = ProtocolGUI.encode_gui_gutter(data)
 
       # none = 3
-      assert <<0x7B, 0::16, 0::16, 0::16, 0::8, 0::32, 3::8, 0::8, 0::8, 0::16>> = encoded
+      assert <<0x7B, 1::16, 0::16, 0::16, 0::16, 0::8, 0::32, 3::8, 0::8, 0::8, 0::16>> = encoded
     end
 
     test "encodes all line number styles" do
       for {style, expected_byte} <- [hybrid: 0, absolute: 1, relative: 2, none: 3] do
         data = %{
+          window_id: 1,
           content_row: 0,
           content_col: 0,
           content_height: 10,
@@ -1283,7 +1289,8 @@ defmodule Minga.Port.ProtocolTest do
         }
 
         encoded = ProtocolGUI.encode_gui_gutter(data)
-        assert <<0x7B, _pos::binary-size(7), 0::32, ^expected_byte::8, _rest::binary>> = encoded
+        # header: opcode(1) + window_id(2) + pos(6) + is_active(1) = 10 bytes before cursor_line
+        assert <<0x7B, _pre::binary-size(9), 0::32, ^expected_byte::8, _rest::binary>> = encoded
       end
     end
 
@@ -1305,6 +1312,7 @@ defmodule Minga.Port.ProtocolTest do
         end)
 
       data = %{
+        window_id: 1,
         content_row: 0,
         content_col: 0,
         content_height: 40,
@@ -1318,8 +1326,8 @@ defmodule Minga.Port.ProtocolTest do
 
       encoded = ProtocolGUI.encode_gui_gutter(data)
 
-      # Header: opcode(1) + pos(7) + cursor(4) + style(1) + ln_w(1) + sign_w(1) + count(2) = 17
-      <<0x7B, _header::binary-size(16), rest::binary>> = encoded
+      # Header: opcode(1) + wid(2) + pos(7) + cursor(4) + style(1) + ln_w(1) + sign_w(1) + count(2) = 19
+      <<0x7B, _header::binary-size(18), rest::binary>> = encoded
 
       # Extract sign_type bytes from each 6-byte entry
       actual_sign_bytes =

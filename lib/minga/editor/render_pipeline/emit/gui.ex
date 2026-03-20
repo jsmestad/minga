@@ -568,7 +568,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
         # Skip agent chat windows (they don't have gutter)
         if window && is_pid(window.buffer) && !Content.agent_chat?(window.content) do
           is_active = win_id == state.windows.active
-          gutter_data = build_window_gutter(state, window, win_layout, is_active)
+          gutter_data = build_window_gutter(state, window, win_id, win_layout, is_active)
           [ProtocolGUI.encode_gui_gutter(gutter_data)]
         else
           []
@@ -585,10 +585,11 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
   @spec build_window_gutter(
           state(),
           Minga.Editor.Window.t(),
+          pos_integer(),
           Layout.window_layout(),
           boolean()
         ) :: ProtocolGUI.gutter_data()
-  defp build_window_gutter(state, window, win_layout, is_active) do
+  defp build_window_gutter(state, window, win_id, win_layout, is_active) do
     buf = window.buffer
     cursor_line = max(window.last_cursor_line, 0)
     viewport_top = max(window.last_viewport_top, 0)
@@ -597,6 +598,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
     {content_row, content_col, _content_w, content_height} = win_layout.content
 
     win_pos = %{
+      window_id: win_id,
       content_row: content_row,
       content_col: content_col,
       content_height: content_height,

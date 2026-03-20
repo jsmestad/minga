@@ -97,6 +97,8 @@ struct GUIGutterEntry: Sendable {
 /// Gutter data for one window, including its screen position.
 /// One message per window arrives each frame.
 struct GUIWindowGutter: Sendable {
+    /// Window ID matching the gui_window_content (0x80) windowId.
+    let windowId: UInt16
     /// Screen row where this window's content area begins.
     let contentRow: UInt16
     /// Screen column where this window's content area begins.
@@ -913,37 +915,39 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         return (.guiCursorline(row: row, r: data[rest + 2], g: data[rest + 3], b: data[rest + 4]), 6)
 
     case OP_GUI_GUTTER:
-        // Per-window format: content_row:2 + content_col:2 + content_height:2 + is_active:1
-        // + cursor_line:4 + style:1 + ln_width:1 + sign_width:1 + line_count:2 = 16 bytes header
-        guard data.count >= rest + 16 else { throw ProtocolDecodeError.malformed }
-        let contentRow = readU16(data, rest)
-        let contentCol = readU16(data, rest + 2)
-        let contentHeight = readU16(data, rest + 4)
-        let isActive = data[rest + 6] != 0
-        let cursorLine = readU32(data, rest + 7)
-        let styleRaw = data[rest + 11]
-        let lnWidth = data[rest + 12]
-        let signWidth = data[rest + 13]
-        let lineCount = Int(readU16(data, rest + 14))
+        // Per-window format: window_id:2 + content_row:2 + content_col:2 + content_height:2
+        // + is_active:1 + cursor_line:4 + style:1 + ln_width:1 + sign_width:1 + line_count:2 = 18 bytes header
+        guard data.count >= rest + 18 else { throw ProtocolDecodeError.malformed }
+        let windowId = readU16(data, rest)
+        let contentRow = readU16(data, rest + 2)
+        let contentCol = readU16(data, rest + 4)
+        let contentHeight = readU16(data, rest + 6)
+        let isActive = data[rest + 8] != 0
+        let cursorLine = readU32(data, rest + 9)
+        let styleRaw = data[rest + 13]
+        let lnWidth = data[rest + 14]
+        let signWidth = data[rest + 15]
+        let lineCount = Int(readU16(data, rest + 16))
         let style = GUILineNumberStyle(rawValue: styleRaw) ?? .hybrid
 
         // Each entry is 6 bytes: buf_line:4 + display_type:1 + sign_type:1
-        guard data.count >= rest + 16 + lineCount * 6 else { throw ProtocolDecodeError.malformed }
+        guard data.count >= rest + 18 + lineCount * 6 else { throw ProtocolDecodeError.malformed }
         var entries: [GUIGutterEntry] = []
         entries.reserveCapacity(lineCount)
         for i in 0..<lineCount {
-            let base = rest + 16 + i * 6
+            let base = rest + 18 + i * 6
             let bufLine = readU32(data, base)
             let dt = GUIGutterDisplayType(rawValue: data[base + 4]) ?? .normal
             let st = GUIGutterSignType(rawValue: data[base + 5]) ?? .none
             entries.append(GUIGutterEntry(bufLine: bufLine, displayType: dt, signType: st))
         }
         let windowGutter = GUIWindowGutter(
+            windowId: windowId,
             contentRow: contentRow, contentCol: contentCol, contentHeight: contentHeight,
             isActive: isActive, cursorLine: cursorLine, lineNumberStyle: style,
             lineNumberWidth: lnWidth, signColWidth: signWidth, entries: entries
         )
-        return (.guiGutter(data: windowGutter), 1 + 16 + lineCount * 6)
+        return (.guiGutter(data: windowGutter), 1 + 18 + lineCount * 6)
 
     case OP_GUI_BOTTOM_PANEL:
         // visible(1)

@@ -65,6 +65,8 @@ defmodule Minga.Editor do
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
 
+  alias Minga.Editor.PickerUI
+
   @typedoc "Internal state."
   @type state :: EditorState.t()
 
@@ -1432,7 +1434,7 @@ defmodule Minga.Editor do
   # sees live updates (spinner → checkmark, etc.).
   @spec maybe_refresh_tool_picker(state()) :: state()
   defp maybe_refresh_tool_picker(%{picker_ui: %{source: Minga.Tool.PickerSource}} = state) do
-    Minga.Editor.PickerUI.refresh_items(state)
+    PickerUI.refresh_items(state)
   end
 
   defp maybe_refresh_tool_picker(state), do: state
