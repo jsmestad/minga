@@ -62,6 +62,7 @@
 		686DD6EB8AFDCAFC79EA100A /* ProtocolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F220A60775A252A728477659 /* ProtocolTests.swift */; };
 		687B43B79B14FA56F9B76115 /* ScrollAccumulator.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEFD30A2572AE2608F099407 /* ScrollAccumulator.swift */; };
 		6C386E10E81099D724B28984 /* BreadcrumbBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFA9D8D41BCA4E6CB45243A2 /* BreadcrumbBar.swift */; };
+		778C6A917140005C0C0643CB /* ProtocolEncoderBinaryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47BD56B7D6D195D236F9BF40 /* ProtocolEncoderBinaryTests.swift */; };
 		78F06B9BFB553B50D9BDD50F /* FontFace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BC98120D82BD7548347875E /* FontFace.swift */; };
 		793247C2AB95598A1AC4C6EC /* ScrollAccumulator.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEFD30A2572AE2608F099407 /* ScrollAccumulator.swift */; };
 		7A21099CFC922D178A3079DF /* EditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C26E064D810299C0302F439 /* EditorView.swift */; };
@@ -127,6 +128,7 @@
 		443B3C2F0C91435E5C5A2E73 /* BottomPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BottomPanelView.swift; sourceTree = "<group>"; };
 		470991E7B3850B1AADFD46FD /* CommandDispatcherTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandDispatcherTests.swift; sourceTree = "<group>"; };
 		4742DDE225F256A140177301 /* LineTextureAtlas.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LineTextureAtlas.swift; sourceTree = "<group>"; };
+		47BD56B7D6D195D236F9BF40 /* ProtocolEncoderBinaryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolEncoderBinaryTests.swift; sourceTree = "<group>"; };
 		48E21C30D142028698027567 /* CoreTextShaders.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = CoreTextShaders.metal; sourceTree = "<group>"; };
 		4A647814918768E62822D4A1 /* MingaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MingaApp.swift; sourceTree = "<group>"; };
 		4AF6BEBA233BA1169CF8C642 /* ProtocolReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolReader.swift; sourceTree = "<group>"; };
@@ -318,6 +320,7 @@
 				754C68BAFE0C4DB553BFD06A /* GUIChromeDecoderTests.swift */,
 				F6C3196976BC934B3112EF96 /* IMECompositionTests.swift */,
 				5F5F10DF600E92632AD966A5 /* LineBufferTests.swift */,
+				47BD56B7D6D195D236F9BF40 /* ProtocolEncoderBinaryTests.swift */,
 				F220A60775A252A728477659 /* ProtocolTests.swift */,
 				211424F30BBE8A57852D5630 /* ScrollAccumulatorTests.swift */,
 				9F8372175FF223C9260B00C4 /* SlotAllocatorTests.swift */,
@@ -528,6 +531,7 @@
 				A78FBA1CD5BB02EEBA8ACB45 /* ProtocolConstants.swift in Sources */,
 				93E7D214A27256CF06571EFE /* ProtocolDecoder.swift in Sources */,
 				7C9B7CB6670412D9F4DE60BB /* ProtocolEncoder.swift in Sources */,
+				778C6A917140005C0C0643CB /* ProtocolEncoderBinaryTests.swift in Sources */,
 				FA582944CD6B90BCABC13FCE /* ProtocolReader.swift in Sources */,
 				686DD6EB8AFDCAFC79EA100A /* ProtocolTests.swift in Sources */,
 				793247C2AB95598A1AC4C6EC /* ScrollAccumulator.swift in Sources */,

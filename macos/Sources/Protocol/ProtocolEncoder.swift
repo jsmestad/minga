@@ -55,7 +55,13 @@ extension InputEncoder {
 /// Thread-safe encoder that writes `{:packet, 4}` framed events to stdout.
 final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     private let lock = NSLock()
-    private let stdout = FileHandle.standardOutput
+    private let output: FileHandle
+
+    /// Creates an encoder. Defaults to stdout for production use.
+    /// Pass a pipe's write handle for testing binary layout.
+    init(output: FileHandle = .standardOutput) {
+        self.output = output
+    }
 
     /// Send the ready event with initial dimensions and capabilities.
     func sendReady(cols: UInt16, rows: UInt16) {
@@ -332,7 +338,7 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
 
         lock.lock()
         defer { lock.unlock() }
-        stdout.write(frame)
+        output.write(frame)
     }
 
     private func writeU16(_ buf: inout Data, _ offset: Int, _ value: UInt16) {
