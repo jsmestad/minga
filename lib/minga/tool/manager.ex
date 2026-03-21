@@ -45,14 +45,14 @@ defmodule Minga.Tool.Manager do
     defstruct [
       :table,
       installing: MapSet.new(),
-      failed: MapSet.new(),
+      failed: %{},
       task_refs: %{}
     ]
 
     @type t :: %__MODULE__{
             table: :ets.tid(),
             installing: MapSet.t(atom()),
-            failed: MapSet.t(atom()),
+            failed: %{atom() => String.t()},
             task_refs: %{reference() => atom()}
           }
   end
@@ -123,12 +123,19 @@ defmodule Minga.Tool.Manager do
 
   @doc """
   Returns the status of every known tool (installed, installing, not_installed,
-  update_available) along with version info.
+  update_available, failed) along with version and error info.
 
   Returns a list of maps suitable for UI rendering:
-  `%{recipe: Recipe.t(), status: tool_status(), installed_version: String.t() | nil}`
+  `%{recipe: Recipe.t(), status: tool_status(), installed_version: String.t() | nil, error_reason: String.t() | nil}`
   """
-  @spec tool_status_list() :: [map()]
+  @spec tool_status_list() :: [
+          %{
+            recipe: Recipe.t(),
+            status: tool_status(),
+            installed_version: String.t() | nil,
+            error_reason: String.t() | nil
+          }
+        ]
   def tool_status_list do
     GenServer.call(__MODULE__, :tool_status_list)
   end
@@ -216,12 +223,13 @@ defmodule Minga.Tool.Manager do
 
     statuses =
       Enum.map(recipes, fn recipe ->
-        {status, version} = tool_status(recipe.name, state)
+        {status, version, error_reason} = tool_status(recipe.name, state)
 
         %{
           recipe: recipe,
           status: status,
-          installed_version: version
+          installed_version: version,
+          error_reason: error_reason
         }
       end)
       |> Enum.sort_by(fn %{recipe: r} -> {status_sort_order(r.name, state), r.label} end)
@@ -255,12 +263,13 @@ defmodule Minga.Tool.Manager do
               record_installation(recipe, version)
               broadcast(:tool_install_complete, %{name: name, version: version})
               log_message("Tool installed: #{recipe.label} v#{version}")
-              %{state | failed: MapSet.delete(state.failed, name)}
+              %{state | failed: Map.delete(state.failed, name)}
 
             {:error, reason} ->
+              reason_str = format_error_reason(reason)
               broadcast(:tool_install_failed, %{name: name, reason: reason})
-              log_message("Tool install failed: #{name} - #{inspect(reason)}")
-              %{state | failed: MapSet.put(state.failed, name)}
+              log_message("Tool install failed: #{name} - #{reason_str}")
+              %{state | failed: Map.put(state.failed, name, reason_str)}
           end
 
         {:noreply, state}
@@ -273,10 +282,11 @@ defmodule Minga.Tool.Manager do
         {:noreply, state}
 
       {name, task_refs} ->
+        reason_str = format_error_reason(reason)
         state = %{state | task_refs: task_refs, installing: MapSet.delete(state.installing, name)}
-        state = %{state | failed: MapSet.put(state.failed, name)}
+        state = %{state | failed: Map.put(state.failed, name, reason_str)}
         broadcast(:tool_install_failed, %{name: name, reason: reason})
-        log_message("Tool install crashed: #{name} - #{inspect(reason)}")
+        log_message("Tool install crashed: #{name} - #{reason_str}")
         {:noreply, state}
     end
   end
@@ -296,28 +306,29 @@ defmodule Minga.Tool.Manager do
     end
   end
 
-  @spec tool_status(atom(), map()) :: {tool_status(), String.t() | nil}
+  @spec tool_status(atom(), map()) :: {tool_status(), String.t() | nil, String.t() | nil}
   defp tool_status(name, state) do
     tool_status_for(name, state.installing, state.failed)
   end
 
-  @spec tool_status_for(atom(), MapSet.t(), MapSet.t()) :: {tool_status(), String.t() | nil}
+  @spec tool_status_for(atom(), MapSet.t(), %{atom() => String.t()}) ::
+          {tool_status(), String.t() | nil, String.t() | nil}
   defp tool_status_for(name, installing, failed) do
-    cond_tool_status(
-      MapSet.member?(installing, name),
-      MapSet.member?(failed, name),
-      name
-    )
+    if MapSet.member?(installing, name) do
+      {:installing, nil, nil}
+    else
+      case Map.get(failed, name) do
+        nil -> installed_status(name)
+        reason -> {:failed, nil, reason}
+      end
+    end
   end
 
-  @spec cond_tool_status(boolean(), boolean(), atom()) :: {tool_status(), String.t() | nil}
-  defp cond_tool_status(true, _, _name), do: {:installing, nil}
-  defp cond_tool_status(_, true, _name), do: {:failed, nil}
-
-  defp cond_tool_status(false, false, name) do
+  @spec installed_status(atom()) :: {tool_status(), String.t() | nil, String.t() | nil}
+  defp installed_status(name) do
     case get_installation(name) do
-      %Installation{version: version} -> {:installed, version}
-      nil -> {:not_installed, nil}
+      %Installation{version: version} -> {:installed, version, nil}
+      nil -> {:not_installed, nil, nil}
     end
   end
 
@@ -371,7 +382,7 @@ defmodule Minga.Tool.Manager do
     %{
       state
       | installing: MapSet.put(state.installing, name),
-        failed: MapSet.delete(state.failed, name),
+        failed: Map.delete(state.failed, name),
         task_refs: Map.put(state.task_refs, task.ref, name)
     }
   end
@@ -505,7 +516,7 @@ defmodule Minga.Tool.Manager do
 
   @spec status_sort_order(atom(), map()) :: non_neg_integer()
   defp status_sort_order(name, state) do
-    {status, _} = tool_status(name, state)
+    {status, _, _} = tool_status(name, state)
     status_order(status)
   end
 
@@ -516,6 +527,10 @@ defmodule Minga.Tool.Manager do
   defp status_order(:failed), do: 0
   defp status_order(:installed), do: 1
   defp status_order(:not_installed), do: 2
+
+  @spec format_error_reason(term()) :: String.t()
+  defp format_error_reason(reason) when is_binary(reason), do: reason
+  defp format_error_reason(reason), do: inspect(reason, limit: 200)
 
   @spec broadcast(atom(), map()) :: :ok
   defp broadcast(topic, payload) do

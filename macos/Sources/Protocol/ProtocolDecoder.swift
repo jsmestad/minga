@@ -57,6 +57,7 @@ struct GUIToolEntry {
     let version: String
     let homepage: String
     let provides: [String]
+    let errorReason: String
 }
 
 /// Line number display style from the BEAM.
@@ -1277,11 +1278,20 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                 pos += cLen
                 provides.append(cmd)
             }
+            // error_reason_len(2) + error_reason
+            guard data.count >= pos + 2 else { throw ProtocolDecodeError.malformed }
+            let errLen = Int(readU16(data, pos)); pos += 2
+            guard data.count >= pos + errLen else { throw ProtocolDecodeError.malformed }
+            let errorReason = errLen > 0
+                ? (String(data: data[pos..<(pos + errLen)], encoding: .utf8) ?? "")
+                : ""
+            pos += errLen
             tools.append(GUIToolEntry(
                 name: name, label: toolLabel, description: desc,
                 category: cat, status: stat, method: meth,
                 languages: langs, version: version,
-                homepage: homepage, provides: provides
+                homepage: homepage, provides: provides,
+                errorReason: errorReason
             ))
         }
         return (.guiToolManager(visible: true, filter: tmFilter,

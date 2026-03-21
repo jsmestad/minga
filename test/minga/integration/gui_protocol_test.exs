@@ -584,7 +584,8 @@ defmodule Minga.Integration.GUIProtocolTest do
       # Tool: name_len(1)+name, label_len(1)+label, desc_len(2)+desc,
       #       category(1)+status(1)+method(1)+lang_count(1),
       #       lang_len(1)+lang, version_len(1)+version,
-      #       homepage_len(2)+homepage, provides_count(1)+provides_len(1)+provides
+      #       homepage_len(2)+homepage, provides_count(1)+provides_len(1)+provides,
+      #       error_reason_len(2)+error_reason
       name = "elixir_ls"
       label = "ElixirLS"
       desc = "Elixir LSP"
@@ -597,7 +598,7 @@ defmodule Minga.Integration.GUIProtocolTest do
         <<byte_size(name)::8, name::binary, byte_size(label)::8, label::binary,
           byte_size(desc)::16, desc::binary, 0::8, 1::8, 0::8, 1::8, byte_size(lang)::8,
           lang::binary, byte_size(version)::8, version::binary, byte_size(homepage)::16,
-          homepage::binary, 1::8, byte_size(provides)::8, provides::binary>>
+          homepage::binary, 1::8, byte_size(provides)::8, provides::binary, 0::16>>
 
       cmd = <<0x7E, 1::8, 0::8, 0::16, 1::16, tool::binary>>
 
@@ -621,6 +622,58 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert t["version"] == "0.22"
       assert t["homepage"] == "https://github.com/elixir-lsp/elixir-ls"
       assert t["provides"] == ["elixir-ls"]
+    end
+
+    test "round-trips failed tool with error reason", %{port: port} do
+      error = "No matching asset for darwin_arm64"
+
+      tool =
+        <<5::8, "pyrit"::binary, 6::8, "Pyrite"::binary, 4::16, "Test"::binary, 0::8, 4::8, 0::8,
+          0::8, 0::8, ""::binary, 0::16, ""::binary, 0::8, byte_size(error)::16, error::binary>>
+
+      cmd = <<0x7E, 1::8, 0::8, 0::16, 1::16, tool::binary>>
+
+      Port.command(port, cmd)
+
+      assert_receive {^port, {:data, json}}, 5_000
+      decoded = Jason.decode!(json)
+
+      t = hd(decoded["tools"])
+      assert t["status"] == 4
+      assert t["error_reason"] == "No matching asset for darwin_arm64"
+    end
+
+    test "encodes failed tool error_reason through Elixir encoder", %{port: port} do
+      tool = %{
+        name: :pyrite,
+        label: "Pyrite",
+        description: "Test",
+        category: :lsp_server,
+        status: :failed,
+        method: :npm,
+        languages: [],
+        version: nil,
+        homepage: nil,
+        provides: [],
+        error_reason: "No matching asset for darwin_arm64"
+      }
+
+      cmd =
+        ProtocolGUI.encode_gui_tool_manager(%{
+          visible: true,
+          filter: :all,
+          selected_index: 0,
+          tools: [tool]
+        })
+
+      Port.command(port, cmd)
+
+      assert_receive {^port, {:data, json}}, 5_000
+      decoded = Jason.decode!(json)
+
+      t = hd(decoded["tools"])
+      assert t["status"] == 4
+      assert t["error_reason"] == "No matching asset for darwin_arm64"
     end
   end
 

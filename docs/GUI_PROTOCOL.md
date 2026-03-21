@@ -403,6 +403,7 @@ Per tool:
   + version_len(1) + version(version_len)
   + homepage_len(2) + homepage(homepage_len)
   + provides_count(1) + provides...
+  + error_reason_len(2) + error_reason(error_reason_len)
 
 Per language:
   lang_len(1) + lang(lang_len)
@@ -438,6 +439,7 @@ Status values:
 | 1 | installed |
 | 2 | installing |
 | 3 | update_available |
+| 4 | failed |
 
 Method values:
 | Value | Method |

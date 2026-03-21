@@ -109,6 +109,7 @@ struct ToolEntry: Identifiable {
     let version: String
     let homepage: String
     let provides: [String]
+    let errorReason: String
 }
 
 // MARK: - Observable state

@@ -180,10 +180,15 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
 
     case .guiToolManager(let visible, let filter, let selectedIndex, let tools):
         let toolArray = tools.map { t -> [String: Any] in
-            ["name": t.name, "label": t.label, "description": t.description,
-             "category": Int(t.category), "status": Int(t.status), "method": Int(t.method),
-             "languages": t.languages, "version": t.version, "homepage": t.homepage,
-             "provides": t.provides]
+            var entry: [String: Any] = [
+                "name": t.name, "label": t.label, "description": t.description,
+                "category": Int(t.category), "status": Int(t.status), "method": Int(t.method),
+                "languages": t.languages, "version": t.version, "homepage": t.homepage,
+                "provides": t.provides]
+            if !t.errorReason.isEmpty {
+                entry["error_reason"] = t.errorReason
+            }
+            return entry
         }
         return ["type": "gui_tool_manager", "visible": visible, "filter": Int(filter),
                 "selected_index": Int(selectedIndex), "tools": toolArray]
