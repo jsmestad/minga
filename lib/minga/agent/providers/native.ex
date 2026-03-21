@@ -742,6 +742,8 @@ defmodule Minga.Agent.Providers.Native do
       emit_error_and_end(lctx.provider_pid, Exception.message(e))
       {:error, Exception.message(e)}
   catch
+    # HTTP client or session process may die mid-stream. Targeted catch
+    # per AGENTS.md rule 4.
     :exit, reason ->
       emit_error_and_end(lctx.provider_pid, inspect(reason))
       {:error, reason}
@@ -892,6 +894,8 @@ defmodule Minga.Agent.Providers.Native do
       try do
         GenServer.call(lctx.session_pid, :dequeue_steering, 200)
       catch
+        # Session may die between loop iterations. Targeted catch per
+        # AGENTS.md rule 4.
         :exit, _ -> []
       end
 

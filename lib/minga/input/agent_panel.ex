@@ -179,6 +179,8 @@ defmodule Minga.Input.AgentPanel do
           state
         end
       catch
+        # Hot path race: prompt buffer may die between existence check and
+        # key dispatch. Targeted catch per AGENTS.md rule 4.
         :exit, _ -> state
       end
     else

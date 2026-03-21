@@ -86,6 +86,8 @@ defmodule Minga.Agent.UIState do
     BufferServer.buffer_name(pid)
     state
   catch
+    # Liveness probe: prompt buffer may die between pid check and this call.
+    # Targeted catch per AGENTS.md rule 4.
     :exit, _ ->
       %{state | panel: start_prompt_buffer(panel, "")}
   end
