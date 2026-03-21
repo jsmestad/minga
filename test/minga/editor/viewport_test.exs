@@ -140,6 +140,129 @@ defmodule Minga.Editor.ViewportTest do
     end
   end
 
+  describe "scroll_line_up/4 with margin" do
+    test "scrolls up and pushes cursor away from bottom edge" do
+      # 20 visible rows (no reserved), margin 5, effective_margin = 5
+      # cursor at line 19 (bottom of viewport), viewport top at 10
+      vp = Viewport.new(20, 80, 0)
+      vp = %{vp | top: 10}
+
+      {new_vp, clamped} = Viewport.scroll_line_up(vp, 19, 100, 5)
+
+      # top goes from 10 to 9
+      assert new_vp.top == 9
+      # max_cursor = 9 + 20 - 1 - 5 = 23, but cursor was 19, so 19 < 23, no clamp
+      # But cursor 19 > new_top + visible - 1 = 28? No. 19 <= 28.
+      # Wait: cursor 19 is in range. Check bottom margin: 19 > 28 - 5 = 23? No.
+      assert clamped == 19
+    end
+
+    test "cursor at bottom edge gets pushed up by margin" do
+      # 10 visible rows, margin 3, effective = 3
+      # top = 10, cursor = 18 (= top + visible - 2, near bottom)
+      vp = Viewport.new(10, 80, 0)
+      vp = %{vp | top: 10}
+
+      # After scroll up: top = 9, visible range = {9, 18}
+      # max_cursor = 18 - 3 = 15
+      {new_vp, clamped} = Viewport.scroll_line_up(vp, 18, 100, 3)
+
+      assert new_vp.top == 9
+      # cursor 18 > max(15, 9) = 15 → clamp to 15
+      assert clamped == 15
+    end
+
+    test "scrolling up to top=0 with margin still reaches line 0" do
+      # 10 visible rows, margin 4, effective = 4
+      # top = 1, cursor at 9 (bottom edge)
+      vp = Viewport.new(10, 80, 0)
+      vp = %{vp | top: 1}
+
+      {new_vp, clamped} = Viewport.scroll_line_up(vp, 9, 100, 4)
+
+      # top goes to 0
+      assert new_vp.top == 0
+      # max_cursor = 0 + 10 - 1 - 4 = 5
+      assert clamped == 5
+
+      # Verify scroll_to_cursor won't override this top
+      final_vp = Viewport.scroll_to_cursor(new_vp, {clamped, 0}, 4)
+      assert final_vp.top == 0
+    end
+
+    test "repeated scroll_line_up reaches top=0 with consistent cursor" do
+      # Simulate scrolling from top=15 to top=0 with 10 visible rows, margin=4
+      vp = Viewport.new(10, 80, 0)
+      vp = %{vp | top: 15}
+      cursor = 20
+
+      {final_vp, final_cursor} =
+        Enum.reduce(1..15, {vp, cursor}, fn _, {v, c} ->
+          Viewport.scroll_line_up(v, c, 100, 4)
+        end)
+
+      assert final_vp.top == 0
+
+      # Verify render pipeline won't override: scroll_to_cursor should keep top=0
+      render_vp = Viewport.scroll_to_cursor(final_vp, {final_cursor, 0}, 4)
+      assert render_vp.top == 0
+    end
+
+    test "does not go below top=0" do
+      vp = Viewport.new(10, 80, 0)
+      vp = %{vp | top: 0}
+      {new_vp, _} = Viewport.scroll_line_up(vp, 5, 100, 3)
+      assert new_vp.top == 0
+    end
+  end
+
+  describe "scroll_line_down/4 with margin" do
+    test "scrolls down and pushes cursor away from top edge" do
+      # 10 visible rows, margin 3, effective = 3
+      # top = 5, cursor = 5 (at top edge)
+      vp = Viewport.new(10, 80, 0)
+      vp = %{vp | top: 5}
+
+      # After scroll down: top = 6, visible range = {6, 15}
+      # min_cursor = 6 + 3 = 9
+      {new_vp, clamped} = Viewport.scroll_line_down(vp, 5, 100, 3)
+
+      assert new_vp.top == 6
+      # cursor 5 → first clamped to max(5, 6) = 6, then max(6, min(9, 15)) = 9
+      assert clamped == 9
+    end
+
+    test "cursor in middle is not affected by margin" do
+      # 20 visible rows, margin 5, effective = 5
+      # top = 0, cursor = 10 (middle)
+      vp = Viewport.new(20, 80, 0)
+
+      {new_vp, clamped} = Viewport.scroll_line_down(vp, 10, 100, 5)
+
+      assert new_vp.top == 1
+      # min_cursor = 1 + 5 = 6. cursor 10 >= 6, so no push.
+      assert clamped == 10
+    end
+
+    test "repeated scroll_line_down reaches bottom with consistent cursor" do
+      # 10 visible rows, margin=3, 30 total lines
+      vp = Viewport.new(10, 80, 0)
+      cursor = 5
+
+      {final_vp, final_cursor} =
+        Enum.reduce(1..20, {vp, cursor}, fn _, {v, c} ->
+          Viewport.scroll_line_down(v, c, 30, 3)
+        end)
+
+      # max_top = 30 - 10 = 20
+      assert final_vp.top == 20
+
+      # Verify render pipeline consistency
+      render_vp = Viewport.scroll_to_cursor(final_vp, {final_cursor, 0}, 3)
+      assert render_vp.top == 20
+    end
+  end
+
   describe "content_cols/2" do
     test "subtracts gutter width from total cols" do
       vp = Viewport.new(24, 80)

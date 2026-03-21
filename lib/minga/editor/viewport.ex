@@ -102,27 +102,43 @@ defmodule Minga.Editor.Viewport do
     # Clamp margin so it can't exceed half the visible area
     effective_margin = min(margin, div(visible_rows - 1, 2))
 
-    top =
-      cond do
-        cursor_line < vp.top + effective_margin ->
-          max(cursor_line - effective_margin, 0)
-
-        cursor_line >= vp.top + visible_rows - effective_margin ->
-          cursor_line - visible_rows + 1 + effective_margin
-
-        true ->
-          vp.top
-      end
-
-    left =
-      cond do
-        cursor_col < vp.left -> cursor_col
-        cursor_col >= vp.left + vp.cols -> cursor_col - vp.cols + 1
-        true -> vp.left
-      end
+    top = adjust_top(vp.top, cursor_line, visible_rows, effective_margin)
+    left = adjust_left(vp.left, cursor_col, vp.cols)
 
     %__MODULE__{vp | top: top, left: left}
   end
+
+  # Cursor is above the top margin: scroll up to give margin space.
+  @spec adjust_top(non_neg_integer(), non_neg_integer(), pos_integer(), non_neg_integer()) ::
+          non_neg_integer()
+  defp adjust_top(top, cursor_line, _visible, margin)
+       when cursor_line < top + margin do
+    max(cursor_line - margin, 0)
+  end
+
+  # Cursor is below the bottom margin: scroll down to give margin space.
+  defp adjust_top(top, cursor_line, visible, margin)
+       when cursor_line >= top + visible - margin do
+    cursor_line - visible + 1 + margin
+  end
+
+  # Cursor is in the margin-safe zone: no scroll needed.
+  defp adjust_top(top, _cursor_line, _visible, _margin), do: top
+
+  # Guard against negative cursor_col (can happen with stale coordinates).
+  @spec adjust_left(non_neg_integer(), integer(), pos_integer()) :: non_neg_integer()
+  defp adjust_left(_left, cursor_col, _cols) when cursor_col < 0, do: 0
+
+  # Cursor is left of the viewport: scroll left to show it.
+  defp adjust_left(left, cursor_col, _cols) when cursor_col < left, do: cursor_col
+
+  # Cursor is right of the viewport: scroll right to show it.
+  defp adjust_left(left, cursor_col, cols) when cursor_col >= left + cols do
+    cursor_col - cols + 1
+  end
+
+  # Cursor is visible horizontally: no scroll needed.
+  defp adjust_left(left, _cursor_col, _cols), do: left
 
   @doc "Returns the range of visible lines as `{first_line, last_line}` (inclusive)."
   @spec visible_range(t()) :: {non_neg_integer(), non_neg_integer()}
@@ -166,33 +182,70 @@ defmodule Minga.Editor.Viewport do
   @doc """
   Scrolls the viewport down by one line without moving the cursor.
 
-  The cursor line is clamped to remain visible. Returns
-  `{updated_viewport, clamped_cursor_line}`.
+  The cursor line is clamped to remain visible and respect scroll_margin.
+  When scrolling down, the cursor is pushed away from the top edge to
+  maintain the margin, matching vim's scrolloff behavior for Ctrl-E.
+  Returns `{updated_viewport, clamped_cursor_line}`.
   """
   @spec scroll_line_down(t(), non_neg_integer(), non_neg_integer()) ::
           {t(), non_neg_integer()}
   def scroll_line_down(%__MODULE__{} = vp, cursor_line, total_lines) do
+    scroll_line_down(vp, cursor_line, total_lines, default_scroll_margin())
+  end
+
+  @doc """
+  Scrolls the viewport down by one line with an explicit scroll margin.
+  """
+  @spec scroll_line_down(t(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
+          {t(), non_neg_integer()}
+  def scroll_line_down(%__MODULE__{} = vp, cursor_line, total_lines, margin) do
     visible = content_rows(vp)
     max_top = max(total_lines - visible, 0)
     new_top = min(vp.top + 1, max_top)
-    clamped_cursor = max(cursor_line, new_top)
+    effective_margin = min(margin, div(visible - 1, 2))
+
+    # Scrolling down: enforce top margin (push cursor away from top edge)
+    min_cursor = new_top + effective_margin
+    clamped_cursor = cursor_line |> max(new_top) |> max(min(min_cursor, new_top + visible - 1))
     {%__MODULE__{vp | top: new_top}, clamped_cursor}
   end
 
   @doc """
   Scrolls the viewport up by one line without moving the cursor.
 
-  The cursor line is clamped to remain visible. Returns
-  `{updated_viewport, clamped_cursor_line}`.
+  The cursor line is clamped to remain visible and respect scroll_margin.
+  When scrolling up, the cursor is pushed away from the bottom edge to
+  maintain the margin, matching vim's scrolloff behavior for Ctrl-Y.
+  Returns `{updated_viewport, clamped_cursor_line}`.
   """
   @spec scroll_line_up(t(), non_neg_integer(), non_neg_integer()) ::
           {t(), non_neg_integer()}
   def scroll_line_up(%__MODULE__{} = vp, cursor_line, _total_lines) do
+    scroll_line_up(vp, cursor_line, 0, default_scroll_margin())
+  end
+
+  @doc """
+  Scrolls the viewport up by one line with an explicit scroll margin.
+  """
+  @spec scroll_line_up(t(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
+          {t(), non_neg_integer()}
+  def scroll_line_up(%__MODULE__{} = vp, cursor_line, _total_lines, margin) do
     new_top = max(vp.top - 1, 0)
     visible = content_rows(vp)
-    max_cursor = new_top + visible - 1
-    clamped_cursor = min(cursor_line, max_cursor)
+    effective_margin = min(margin, div(visible - 1, 2))
+
+    # Scrolling up: enforce bottom margin (push cursor away from bottom edge)
+    max_cursor = new_top + visible - 1 - effective_margin
+    clamped_cursor = cursor_line |> min(new_top + visible - 1) |> min(max(max_cursor, new_top))
     {%__MODULE__{vp | top: new_top}, clamped_cursor}
+  end
+
+  # Default scroll margin. Reads from config, falls back to 5.
+  @spec default_scroll_margin() :: non_neg_integer()
+  defp default_scroll_margin do
+    Options.get(:scroll_margin)
+  catch
+    :exit, _ -> 5
   end
 
   @doc """
