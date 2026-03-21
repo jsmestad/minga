@@ -138,8 +138,8 @@ struct DisplayColumnMappingTests {
 
 @Suite("GUIState Frame Lifecycle")
 struct GUIStateFrameTests {
-    @Test("beginFrame clears windowContents")
-    @MainActor func beginFrameClearsContents() {
+    @Test("beginFrame preserves windowContents as fallback")
+    @MainActor func beginFramePreservesContents() {
         let state = GUIState()
         let content = GUIWindowContent(
             windowId: 1, fullRefresh: true,
@@ -151,7 +151,12 @@ struct GUIStateFrameTests {
         state.windowContents[1] = content
         #expect(state.windowContents.count == 1)
 
+        // beginFrame() intentionally does NOT clear windowContents.
+        // Stale content serves as a fallback to prevent blank viewport
+        // flashes if frame delivery is interrupted. The guiWindowContent
+        // dispatch overwrites per-window data each frame.
         state.beginFrame()
-        #expect(state.windowContents.isEmpty)
+        #expect(state.windowContents.count == 1)
+        #expect(state.windowContents[1]?.windowId == 1)
     }
 }

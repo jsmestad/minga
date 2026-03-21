@@ -258,9 +258,14 @@ defmodule Minga.Editor.DisplayList do
 
   Produces the same output that the old renderer sent to the port:
   clear, regions, content draws, cursor, batch_end.
+
+  Options:
+  - `batch_end: false` — omit the trailing `batch_end` command. Used by
+    the GUI emit path which appends Metal-critical chrome commands before
+    sending `batch_end` to ensure atomic frame delivery.
   """
-  @spec to_commands(Frame.t()) :: [binary()]
-  def to_commands(%Frame{} = frame) do
+  @spec to_commands(Frame.t(), keyword()) :: [binary()]
+  def to_commands(%Frame{} = frame, opts \\ []) do
     window_draws =
       Enum.flat_map(frame.windows, fn wf ->
         {row_off, col_off, _w, _h} = wf.rect
@@ -292,15 +297,25 @@ defmodule Minga.Editor.DisplayList do
 
     overlay_draws = Enum.flat_map(frame.overlays, fn %Overlay{draws: draws} -> draws end)
 
+    tail =
+      if Keyword.get(opts, :batch_end, true) do
+        [
+          Protocol.encode_cursor_shape(frame.cursor.shape),
+          Protocol.encode_cursor(frame.cursor.row, frame.cursor.col),
+          Protocol.encode_batch_end()
+        ]
+      else
+        [
+          Protocol.encode_cursor_shape(frame.cursor.shape),
+          Protocol.encode_cursor(frame.cursor.row, frame.cursor.col)
+        ]
+      end
+
     [Protocol.encode_clear()] ++
       frame.regions ++
       draws_to_commands(all_draws) ++
       draws_to_commands(overlay_draws) ++
-      [
-        Protocol.encode_cursor_shape(frame.cursor.shape),
-        Protocol.encode_cursor(frame.cursor.row, frame.cursor.col),
-        Protocol.encode_batch_end()
-      ]
+      tail
   end
 
   @doc """

@@ -80,18 +80,38 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
   # ── Chrome synchronization ──────────────────────────────────────────────
 
   @doc """
-  Sends all GUI chrome data to the native frontend.
+  Builds Metal-critical chrome commands that must be bundled with the
+  main frame for atomic delivery.
 
-  Each chrome element is gathered from editor state, encoded to protocol
-  binary, and sent to the port manager. The caller has already verified
-  that the frontend has GUI capabilities.
+  These commands write to LineBuffer state (gutter, cursorline, gutter
+  separator) which the Metal render pass reads. If they arrive in a
+  separate port message after `batch_end`, vsync can fire between them,
+  causing blank or partially rendered frames.
+
+  Returns encoded command binaries for the caller to bundle with the
+  main frame commands before `batch_end`.
+  """
+  @spec build_metal_commands(state()) :: [binary()]
+  def build_metal_commands(state) do
+    build_gui_gutter_commands(state) ++
+      build_gui_cursorline_commands(state) ++
+      build_gui_gutter_separator_commands(state)
+  end
+
+  @doc """
+  Sends SwiftUI chrome data to the native frontend.
+
+  These update `@Published` properties on SwiftUI `ObservableObject`s
+  (tab bar, file tree, status bar, picker, etc.). SwiftUI coalesces its
+  own view updates independently of Metal vsync, so these are safe to
+  send as separate port messages after the atomic Metal frame.
 
   `status_bar_data` is pre-computed by the Chrome stage and passed through
   to avoid re-calling BufferServer for cursor/file info on the same frame.
   When nil (e.g. non-GUI fallback paths), it is computed here.
   """
-  @spec sync_chrome(state(), StatusBarData.t() | nil) :: state()
-  def sync_chrome(state, status_bar_data \\ nil) do
+  @spec sync_swiftui_chrome(state(), StatusBarData.t() | nil) :: state()
+  def sync_swiftui_chrome(state, status_bar_data \\ nil) do
     send_gui_theme(state)
     send_gui_tab_bar(state)
     send_gui_file_tree(state)
@@ -101,9 +121,6 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
     send_gui_status_bar(state, status_bar_data || StatusBarData.from_state(state))
     send_gui_picker(state)
     send_gui_agent_chat(state)
-    send_gui_gutter_separator(state)
-    send_gui_cursorline(state)
-    send_gui_gutter(state)
     send_gui_bottom_panel(state)
   end
 
@@ -495,10 +512,8 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
 
   # ── Gutter separator ──
 
-  @spec send_gui_gutter_separator(state()) :: :ok
-  defp send_gui_gutter_separator(state) do
-    alias Minga.Config.Options
-
+  @spec build_gui_gutter_separator_commands(state()) :: [binary()]
+  defp build_gui_gutter_separator_commands(state) do
     show? = Options.get(:show_gutter_separator)
     active_window = Map.get(state.windows.map, state.windows.active)
     gutter_w = if active_window, do: active_window.last_gutter_w, else: 0
@@ -514,17 +529,13 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
         {0, 0}
       end
 
-    cmd = ProtocolGUI.encode_gui_gutter_separator(max(col, 0), color_rgb)
-    PortManager.send_commands(state.port_manager, [cmd])
-    :ok
+    [ProtocolGUI.encode_gui_gutter_separator(max(col, 0), color_rgb)]
   end
 
   # ── Cursorline ──
 
-  @spec send_gui_cursorline(state()) :: :ok
-  defp send_gui_cursorline(state) do
-    alias Minga.Config.Options
-
+  @spec build_gui_cursorline_commands(state()) :: [binary()]
+  defp build_gui_cursorline_commands(state) do
     active_window = Map.get(state.windows.map, state.windows.active)
     cursorline_enabled = Options.get(:cursorline)
 
@@ -548,38 +559,29 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
         {0xFFFF, 0}
       end
 
-    cmd = ProtocolGUI.encode_gui_cursorline(row, bg_rgb)
-    PortManager.send_commands(state.port_manager, [cmd])
-    :ok
+    [ProtocolGUI.encode_gui_cursorline(row, bg_rgb)]
   end
 
   # ── Gutter ──
 
-  @spec send_gui_gutter(state()) :: :ok
-  defp send_gui_gutter(state) do
+  @spec build_gui_gutter_commands(state()) :: [binary()]
+  defp build_gui_gutter_commands(state) do
     alias Minga.Editor.Window.Content
 
     layout = Layout.get(state)
 
-    cmds =
-      Enum.flat_map(layout.window_layouts, fn {win_id, win_layout} ->
-        window = Map.get(state.windows.map, win_id)
+    Enum.flat_map(layout.window_layouts, fn {win_id, win_layout} ->
+      window = Map.get(state.windows.map, win_id)
 
-        # Skip agent chat windows (they don't have gutter)
-        if window && is_pid(window.buffer) && !Content.agent_chat?(window.content) do
-          is_active = win_id == state.windows.active
-          gutter_data = build_window_gutter(state, window, win_id, win_layout, is_active)
-          [ProtocolGUI.encode_gui_gutter(gutter_data)]
-        else
-          []
-        end
-      end)
-
-    if cmds != [] do
-      PortManager.send_commands(state.port_manager, cmds)
-    end
-
-    :ok
+      # Skip agent chat windows (they don't have gutter)
+      if window && is_pid(window.buffer) && !Content.agent_chat?(window.content) do
+        is_active = win_id == state.windows.active
+        gutter_data = build_window_gutter(state, window, win_id, win_layout, is_active)
+        [ProtocolGUI.encode_gui_gutter(gutter_data)]
+      else
+        []
+      end
+    end)
   end
 
   @spec build_window_gutter(

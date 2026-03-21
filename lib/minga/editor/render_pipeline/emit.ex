@@ -51,31 +51,66 @@ defmodule Minga.Editor.RenderPipeline.Emit do
 
     gui? = Capabilities.gui?(state.capabilities)
 
-    commands =
-      if gui? do
-        frame
-        |> EmitGUI.filter_frame_for_gui()
-        |> DisplayList.to_commands()
-      else
-        EmitTUI.build_commands(frame, state)
-      end
+    if gui? do
+      emit_gui(frame, state, chrome)
+    else
+      emit_tui(frame, state)
+    end
+  end
+
+  # GUI emit: bundles all Metal-critical commands (frame content, window
+  # content, gutter, cursorline, gutter separator) into a single port
+  # message so they arrive atomically in one DispatchQueue.main.async block.
+  # SwiftUI chrome (tab bar, file tree, status bar, etc.) is sent separately
+  # since it doesn't affect the Metal render pass.
+  @spec emit_gui(Frame.t(), state(), Chrome.t() | nil) :: state()
+  defp emit_gui(frame, state, chrome) do
+    # Frame commands WITHOUT batch_end (we append it after Metal-critical chrome)
+    frame_cmds =
+      frame
+      |> EmitGUI.filter_frame_for_gui()
+      |> DisplayList.to_commands(batch_end: false)
+
+    # Semantic window content (0x80 opcode)
+    window_content_cmds = build_gui_window_content_commands(frame)
+
+    # Metal-critical chrome: gutter, cursorline, gutter separator
+    metal_chrome_cmds = EmitGUI.build_metal_commands(state)
+
+    # Bundle everything into one atomic port message, with batch_end last
+    all_metal =
+      frame_cmds ++
+        window_content_cmds ++
+        metal_chrome_cmds ++
+        [Minga.Port.Protocol.encode_batch_end()]
 
     update_tracking(state)
 
+    byte_count = IO.iodata_length(all_metal)
+
+    Telemetry.span([:minga, :port, :emit], %{byte_count: byte_count}, fn ->
+      PortManager.send_commands(state.port_manager, all_metal)
+      send_title(state)
+      send_window_bg(state)
+
+      # SwiftUI chrome: separate messages, safe (no Metal impact)
+      status_bar_data = chrome && chrome.status_bar_data
+      EmitGUI.sync_swiftui_chrome(state, status_bar_data)
+    end)
+  end
+
+  # TUI emit: single send_commands call (already atomic).
+  @spec emit_tui(Frame.t(), state()) :: state()
+  defp emit_tui(frame, state) do
+    commands = EmitTUI.build_commands(frame, state)
+    update_tracking(state)
     byte_count = IO.iodata_length(commands)
 
     Telemetry.span([:minga, :port, :emit], %{byte_count: byte_count}, fn ->
       PortManager.send_commands(state.port_manager, commands)
       send_title(state)
       send_window_bg(state)
-
-      if gui? do
-        send_gui_window_content(frame, state)
-        status_bar_data = chrome && chrome.status_bar_data
-        EmitGUI.sync_chrome(state, status_bar_data)
-      else
-        state
-      end
+      state
     end)
   end
 
@@ -132,27 +167,15 @@ defmodule Minga.Editor.RenderPipeline.Emit do
 
   # ── GUI window content (0x80) ────────────────────────────────────────────
 
-  # Sends the gui_window_content opcode for each buffer window that has
-  # a semantic struct attached. This runs alongside (not instead of)
-  # draw_text commands during Phase 2. Phase 3 will stop sending draw_text
-  # for buffer windows.
-  @spec send_gui_window_content(Frame.t(), state()) :: :ok
-  defp send_gui_window_content(frame, state) do
-    cmds =
-      frame.windows
-      |> Enum.flat_map(fn %DisplayList.WindowFrame{semantic: semantic} ->
-        if semantic != nil do
-          [GUIWindowContent.encode(semantic)]
-        else
-          []
-        end
-      end)
-
-    if cmds != [] do
-      PortManager.send_commands(state.port_manager, cmds)
-    end
-
-    :ok
+  # Builds gui_window_content commands for each buffer window that has
+  # a semantic struct attached. Returns encoded commands for bundling
+  # into the atomic Metal frame.
+  @spec build_gui_window_content_commands(Frame.t()) :: [binary()]
+  defp build_gui_window_content_commands(frame) do
+    Enum.flat_map(frame.windows, fn
+      %DisplayList.WindowFrame{semantic: nil} -> []
+      %DisplayList.WindowFrame{semantic: semantic} -> [GUIWindowContent.encode(semantic)]
+    end)
   end
 
   # ── Side-channel writes (shared) ─────────────────────────────────────────

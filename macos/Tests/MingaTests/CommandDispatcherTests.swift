@@ -19,10 +19,13 @@ struct CommandDispatcherRoutingTests {
 
     // MARK: - Basic commands
 
-    @Test("clear resets lineBuffer and calls beginFrame")
+    @Test("clear resets lineBuffer lines but preserves windowContents and windowGutters")
     @MainActor func clearCommand() {
         let (dispatcher, gui) = makeDispatcher()
-        // Seed some window content
+        // Seed line buffer content, window content, and gutter data
+        dispatcher.lineBuffer.appendRun(
+            row: 0, col: 0, text: "hello", fg: 0xFFFFFF, bg: 0, attrs: 0
+        )
         let content = GUIWindowContent(
             windowId: 1, fullRefresh: true,
             cursorRow: 0, cursorCol: 0, cursorShape: .block,
@@ -31,10 +34,24 @@ struct CommandDispatcherRoutingTests {
             documentHighlights: []
         )
         gui.windowContents[1] = content
-        #expect(gui.windowContents.count == 1)
+
+        let gutter = GUIWindowGutter(
+            windowId: 1, contentRow: 0, contentCol: 5, contentHeight: 24,
+            isActive: true, cursorLine: 10, lineNumberStyle: .hybrid,
+            lineNumberWidth: 4, signColWidth: 1, entries: []
+        )
+        dispatcher.dispatch(.guiGutter(data: gutter))
 
         dispatcher.dispatch(.clear)
-        #expect(gui.windowContents.isEmpty)
+
+        // LineBuffer lines are cleared
+        #expect(dispatcher.lineBuffer.lines.isEmpty)
+        // windowContents persists through clear (defense-in-depth:
+        // stale content is better than a blank viewport flash)
+        #expect(gui.windowContents.count == 1)
+        // windowGutters persists through clear (gutter positions are
+        // stable between frames, only change on resize/split)
+        #expect(dispatcher.lineBuffer.windowGutters[1] != nil)
     }
 
     @Test("setCursor updates lineBuffer cursor position")
