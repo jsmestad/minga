@@ -12,6 +12,10 @@ defmodule Minga.LSP.SyncServer do
   clients via `clients_for_buffer/1` (direct ETS read, no GenServer
   call needed).
 
+  Monitors all registered LSP client PIDs. If a client crashes outside
+  the event bus path, the `:DOWN` handler removes stale ETS entries so
+  they don't accumulate.
+
   ## Event subscriptions
 
   | Event              | Action                                           |
@@ -36,7 +40,8 @@ defmodule Minga.LSP.SyncServer do
 
   @typedoc "Internal state."
   @type state :: %{
-          debounce_timers: %{pid() => reference()}
+          debounce_timers: %{pid() => reference()},
+          client_monitors: %{reference() => {buffer_pid :: pid(), client_pid :: pid()}}
         }
 
   # ── Client API ─────────────────────────────────────────────────────────
@@ -81,10 +86,11 @@ defmodule Minga.LSP.SyncServer do
     Events.subscribe(:buffer_closed)
     Events.subscribe(:buffer_changed)
 
-    {:ok, %{debounce_timers: %{}}}
+    {:ok, %{debounce_timers: %{}, client_monitors: %{}}}
   end
 
   @impl true
+  @spec handle_info(term(), state()) :: {:noreply, state()}
   def handle_info(
         {:minga_event, :buffer_changed, %Events.BufferChangedEvent{buffer: buf}},
         state
@@ -96,7 +102,7 @@ defmodule Minga.LSP.SyncServer do
         {:minga_event, :buffer_opened, %Events.BufferEvent{buffer: buf, path: _path}},
         state
       ) do
-    do_buffer_open(buf)
+    state = do_buffer_open(state, buf)
     {:noreply, state}
   end
 
@@ -115,18 +121,23 @@ defmodule Minga.LSP.SyncServer do
     {:noreply, state}
   end
 
+  def handle_info({:DOWN, ref, :process, pid, _reason}, state) do
+    state = handle_client_down(state, ref, pid)
+    {:noreply, state}
+  end
+
   def handle_info(_msg, state), do: {:noreply, state}
 
   # ── Private: buffer lifecycle ──────────────────────────────────────────
 
-  @spec do_buffer_open(pid()) :: :ok
-  defp do_buffer_open(buffer_pid) do
+  @spec do_buffer_open(state(), pid()) :: state()
+  defp do_buffer_open(state, buffer_pid) do
     filetype = BufferServer.filetype(buffer_pid)
     file_path = BufferServer.file_path(buffer_pid)
 
     case file_path do
       nil ->
-        :ok
+        state
 
       path ->
         configs = ServerRegistry.servers_for(filetype)
@@ -151,14 +162,15 @@ defmodule Minga.LSP.SyncServer do
 
         if clients != [] do
           :ets.insert(@registry_table, {buffer_pid, clients})
+          monitor_clients(state, buffer_pid, clients)
+        else
+          state
         end
-
-        :ok
     end
   rescue
-    _ -> :ok
+    _ -> state
   catch
-    :exit, _ -> :ok
+    :exit, _ -> state
   end
 
   @spec do_buffer_save(pid()) :: :ok
@@ -175,9 +187,72 @@ defmodule Minga.LSP.SyncServer do
     notify_clients(clients, buffer_pid, &Client.did_close/2)
 
     :ets.delete(@registry_table, buffer_pid)
+    state = demonitor_clients_for_buffer(state, buffer_pid)
     cancel_debounce(state, buffer_pid)
   catch
     :exit, _ -> state
+  end
+
+  # ── Private: client monitoring ─────────────────────────────────────────
+
+  @spec monitor_clients(state(), pid(), [pid()]) :: state()
+  defp monitor_clients(state, buffer_pid, clients) do
+    new_monitors =
+      Enum.reduce(clients, state.client_monitors, fn client_pid, acc ->
+        ref = Process.monitor(client_pid)
+        Map.put(acc, ref, {buffer_pid, client_pid})
+      end)
+
+    %{state | client_monitors: new_monitors}
+  end
+
+  @spec demonitor_clients_for_buffer(state(), pid()) :: state()
+  defp demonitor_clients_for_buffer(state, buffer_pid) do
+    {to_remove, to_keep} =
+      Map.split_with(state.client_monitors, fn {_ref, {buf_pid, _client_pid}} ->
+        buf_pid == buffer_pid
+      end)
+
+    Enum.each(to_remove, fn {ref, _} ->
+      Process.demonitor(ref, [:flush])
+    end)
+
+    %{state | client_monitors: to_keep}
+  end
+
+  @spec handle_client_down(state(), reference(), pid()) :: state()
+  defp handle_client_down(state, ref, client_pid) do
+    case Map.pop(state.client_monitors, ref) do
+      {nil, _monitors} ->
+        state
+
+      {{buffer_pid, ^client_pid}, remaining_monitors} ->
+        state = %{state | client_monitors: remaining_monitors}
+        remove_client_from_buffer(buffer_pid, client_pid)
+        state
+
+      {_other, _monitors} ->
+        # ref found but pid mismatch; shouldn't happen, but don't crash
+        state
+    end
+  end
+
+  @spec remove_client_from_buffer(pid(), pid()) :: :ok
+  defp remove_client_from_buffer(buffer_pid, client_pid) do
+    case :ets.lookup(@registry_table, buffer_pid) do
+      [{^buffer_pid, clients}] ->
+        remaining = List.delete(clients, client_pid)
+
+        case remaining do
+          [] -> :ets.delete(@registry_table, buffer_pid)
+          _ -> :ets.insert(@registry_table, {buffer_pid, remaining})
+        end
+
+        :ok
+
+      [] ->
+        :ok
+    end
   end
 
   # ── Private: didChange debouncing ──────────────────────────────────────
