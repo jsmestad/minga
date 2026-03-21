@@ -638,6 +638,68 @@ defmodule Minga.Buffer.Decorations do
     |> Enum.sort_by(fn %ConcealRange{start_pos: {sl, sc}} ->
       if sl < line, do: 0, else: sc
     end)
+    |> merge_overlapping_conceals(line)
+  end
+
+  # Merges overlapping conceal ranges into non-overlapping output.
+  # Ranges are already sorted by effective start column. When ranges overlap,
+  # the higher-priority conceal's replacement wins. On tie, the first range wins.
+  @spec merge_overlapping_conceals([ConcealRange.t()], non_neg_integer()) :: [ConcealRange.t()]
+  defp merge_overlapping_conceals([], _line), do: []
+  defp merge_overlapping_conceals([single], _line), do: [single]
+
+  defp merge_overlapping_conceals([first | rest], line) do
+    {merged, current} =
+      Enum.reduce(rest, {[], first}, fn next, {acc, current} ->
+        curr_end = effective_end_col(current, line)
+        next_start = effective_start_col(next, line)
+
+        if next_start < curr_end do
+          # Overlap: merge into current, higher priority replacement wins
+          merged = merge_two_conceals(current, next, line)
+          {acc, merged}
+        else
+          # No overlap: emit current, advance to next
+          {[current | acc], next}
+        end
+      end)
+
+    Enum.reverse([current | merged])
+  end
+
+  defp merge_two_conceals(a, b, line) do
+    # Union of the two ranges: min start, max end
+    a_start = effective_start_col(a, line)
+    b_start = effective_start_col(b, line)
+    a_end = effective_end_col(a, line)
+    b_end = effective_end_col(b, line)
+
+    new_start_col = min(a_start, b_start)
+    new_end_col = max(a_end, b_end)
+
+    # Higher priority replacement wins; on tie, keep the earlier range's replacement
+    winner = if b.priority > a.priority, do: b, else: a
+
+    %ConcealRange{
+      id: winner.id,
+      start_pos: {line, new_start_col},
+      end_pos: {line, new_end_col},
+      replacement: winner.replacement,
+      replacement_style: winner.replacement_style,
+      priority: max(a.priority, b.priority),
+      group: winner.group
+    }
+  end
+
+  defp effective_start_col(%ConcealRange{start_pos: {sl, sc}}, line) do
+    if sl < line, do: 0, else: sc
+  end
+
+  # For multi-line conceals extending past this line, use a large sentinel
+  # value rather than :infinity to keep arithmetic safe in merge_two_conceals.
+  @max_col 1_000_000
+  defp effective_end_col(%ConcealRange{end_pos: {el, ec}}, line) do
+    if el > line, do: @max_col, else: ec
   end
 
   # ── Column mapping (inline virtual text + conceals) ──────────────────────

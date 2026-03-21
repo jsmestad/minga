@@ -196,6 +196,93 @@ defmodule Minga.Buffer.ConcealRangeTest do
     end
   end
 
+  # ── Overlap merging ────────────────────────────────────────────────────────
+
+  describe "conceals_for_line overlap merging" do
+    test "non-overlapping ranges preserved in order" do
+      decs = Decorations.new()
+      {_, decs} = Decorations.add_conceal(decs, {0, 0}, {0, 3})
+      {_, decs} = Decorations.add_conceal(decs, {0, 5}, {0, 8})
+      {_, decs} = Decorations.add_conceal(decs, {0, 10}, {0, 12})
+      conceals = Decorations.conceals_for_line(decs, 0)
+      assert length(conceals) == 3
+
+      assert [{0, 3}, {5, 8}, {10, 12}] ==
+               Enum.map(conceals, fn c -> {elem(c.start_pos, 1), elem(c.end_pos, 1)} end)
+    end
+
+    test "adjacent ranges are not merged" do
+      decs = Decorations.new()
+      {_, decs} = Decorations.add_conceal(decs, {0, 0}, {0, 5})
+      {_, decs} = Decorations.add_conceal(decs, {0, 5}, {0, 10})
+      conceals = Decorations.conceals_for_line(decs, 0)
+      assert length(conceals) == 2
+    end
+
+    test "overlapping ranges merge to union" do
+      decs = Decorations.new()
+      {_, decs} = Decorations.add_conceal(decs, {0, 2}, {0, 7})
+      {_, decs} = Decorations.add_conceal(decs, {0, 5}, {0, 10})
+      conceals = Decorations.conceals_for_line(decs, 0)
+      assert length(conceals) == 1
+      [c] = conceals
+      assert elem(c.start_pos, 1) == 2
+      assert elem(c.end_pos, 1) == 10
+    end
+
+    test "fully nested range absorbed by outer" do
+      decs = Decorations.new()
+      {_, decs} = Decorations.add_conceal(decs, {0, 0}, {0, 10})
+      {_, decs} = Decorations.add_conceal(decs, {0, 3}, {0, 6})
+      conceals = Decorations.conceals_for_line(decs, 0)
+      assert length(conceals) == 1
+      [c] = conceals
+      assert elem(c.start_pos, 1) == 0
+      assert elem(c.end_pos, 1) == 10
+    end
+
+    test "chain of overlapping ranges collapses to one" do
+      decs = Decorations.new()
+      {_, decs} = Decorations.add_conceal(decs, {0, 0}, {0, 4})
+      {_, decs} = Decorations.add_conceal(decs, {0, 3}, {0, 7})
+      {_, decs} = Decorations.add_conceal(decs, {0, 6}, {0, 10})
+      conceals = Decorations.conceals_for_line(decs, 0)
+      assert length(conceals) == 1
+      [c] = conceals
+      assert elem(c.start_pos, 1) == 0
+      assert elem(c.end_pos, 1) == 10
+    end
+
+    test "higher priority replacement wins on overlap" do
+      decs = Decorations.new()
+      {_, decs} = Decorations.add_conceal(decs, {0, 0}, {0, 5}, replacement: "·", priority: 0)
+      {_, decs} = Decorations.add_conceal(decs, {0, 3}, {0, 8}, replacement: "→", priority: 5)
+      conceals = Decorations.conceals_for_line(decs, 0)
+      assert length(conceals) == 1
+      [c] = conceals
+      assert c.replacement == "→"
+    end
+
+    test "same start, different end merges to longer" do
+      decs = Decorations.new()
+      {_, decs} = Decorations.add_conceal(decs, {0, 3}, {0, 7})
+      {_, decs} = Decorations.add_conceal(decs, {0, 3}, {0, 10})
+      conceals = Decorations.conceals_for_line(decs, 0)
+      assert length(conceals) == 1
+      [c] = conceals
+      assert elem(c.start_pos, 1) == 3
+      assert elem(c.end_pos, 1) == 10
+    end
+
+    test "duplicate ranges merge to one" do
+      decs = Decorations.new()
+      {_, decs} = Decorations.add_conceal(decs, {0, 4}, {0, 5})
+      {_, decs} = Decorations.add_conceal(decs, {0, 4}, {0, 5})
+      conceals = Decorations.conceals_for_line(decs, 0)
+      assert length(conceals) == 1
+    end
+  end
+
   # ── Column mapping ────────────────────────────────────────────────────────
 
   describe "buf_col_to_display_col with conceals" do
@@ -431,22 +518,25 @@ defmodule Minga.Buffer.ConcealRangeTest do
     end)
   end
 
-  defp build_ranges(widths, line_len, count) do
+  defp build_ranges(widths, line_len, _count) do
     widths = Enum.map(widths, &min(&1, 3))
-    total = Enum.sum(widths)
 
-    if total >= line_len do
-      [{0, min(2, line_len)}]
-    else
-      gap_each = max(div(line_len - total, count + 1), 1)
+    # Walk left to right. Each range starts at least 1 col after the previous end.
+    # Skip any range that doesn't fit within line_len.
+    {ranges, _cursor} =
+      Enum.reduce(widths, {[], 0}, fn w, {acc, cursor} ->
+        start_col = cursor + 1
+        end_col = start_col + w
 
-      {ranges, _pos} =
-        Enum.reduce(widths, {[], gap_each}, fn w, {acc, pos} ->
-          {[{min(pos, line_len - 1), min(pos + w, line_len)} | acc], pos + w + gap_each}
-        end)
+        if end_col <= line_len do
+          {[{start_col, end_col} | acc], end_col}
+        else
+          # No room; skip this range
+          {acc, cursor}
+        end
+      end)
 
-      Enum.reverse(ranges)
-    end
+    Enum.reverse(ranges)
   end
 
   defp build_decs_with_conceals(conceals) do
@@ -459,5 +549,139 @@ defmodule Minga.Buffer.ConcealRangeTest do
 
   defp inside_any_conceal?(buf_col, conceals) do
     Enum.any?(conceals, fn {s, e, _} -> buf_col >= s and buf_col < e end)
+  end
+
+  # ── Overlapping conceal generators ─────────────────────────────────────
+
+  defp overlapping_conceals_gen(line_len) do
+    bind(integer(2..5), fn count ->
+      list_of(single_conceal_gen(line_len), length: count)
+    end)
+  end
+
+  defp single_conceal_gen(line_len) do
+    bind(
+      {integer(0..max(line_len - 2, 0)), integer(1..min(line_len, 5)), member_of([nil, "·", "→"]),
+       integer(0..3)},
+      fn {start, width, replacement, priority} ->
+        end_col = min(start + width, line_len)
+        constant({start, end_col, replacement, priority})
+      end
+    )
+  end
+
+  defp build_decs_with_priority_conceals(conceals) do
+    Enum.reduce(conceals, Decorations.new(), fn {s, e, replacement, priority}, decs ->
+      opts = [priority: priority]
+      opts = if replacement, do: [{:replacement, replacement} | opts], else: opts
+      {_id, decs} = Decorations.add_conceal(decs, {0, s}, {0, e}, opts)
+      decs
+    end)
+  end
+
+  defp inside_any_merged_conceal?(buf_col, merged_conceals) do
+    Enum.any?(merged_conceals, fn c ->
+      {_, sc} = c.start_pos
+      {_, ec} = c.end_pos
+      buf_col >= sc and buf_col < ec
+    end)
+  end
+
+  # ── Overlap property tests ────────────────────────────────────────────
+
+  describe "column mapping with overlapping conceals" do
+    property "conceals_for_line returns non-overlapping ranges" do
+      check all(
+              line_len <- integer(5..50),
+              raw_conceals <- overlapping_conceals_gen(line_len)
+            ) do
+        decs = build_decs_with_priority_conceals(raw_conceals)
+        merged = Decorations.conceals_for_line(decs, 0)
+
+        merged
+        |> Enum.chunk_every(2, 1, :discard)
+        |> Enum.each(fn [a, b] ->
+          {_, a_end} = a.end_pos
+          {_, b_start} = b.start_pos
+
+          assert a_end <= b_start,
+                 "Overlapping output: #{inspect(a)} overlaps #{inspect(b)}"
+        end)
+      end
+    end
+
+    property "buf_col_to_display_col is monotonic with overlapping input" do
+      check all(
+              line_len <- integer(5..50),
+              raw_conceals <- overlapping_conceals_gen(line_len)
+            ) do
+        decs = build_decs_with_priority_conceals(raw_conceals)
+        display_cols = for b <- 0..line_len, do: Decorations.buf_col_to_display_col(decs, 0, b)
+
+        display_cols
+        |> Enum.chunk_every(2, 1, :discard)
+        |> Enum.each(fn [prev, curr] ->
+          assert curr >= prev,
+                 "Not monotonic: #{prev} -> #{curr}, conceals=#{inspect(raw_conceals)}"
+        end)
+      end
+    end
+
+    property "roundtrip holds for non-concealed columns with overlapping input" do
+      check all(
+              line_len <- integer(5..50),
+              raw_conceals <- overlapping_conceals_gen(line_len)
+            ) do
+        decs = build_decs_with_priority_conceals(raw_conceals)
+        merged = Decorations.conceals_for_line(decs, 0)
+
+        for buf_col <- 0..line_len,
+            not inside_any_merged_conceal?(buf_col, merged) do
+          display_col = Decorations.buf_col_to_display_col(decs, 0, buf_col)
+          roundtrip = Decorations.display_col_to_buf_col(decs, 0, display_col)
+
+          assert roundtrip == buf_col,
+                 "Roundtrip failed: buf_col=#{buf_col} -> display_col=#{display_col} -> #{roundtrip}, " <>
+                   "conceals=#{inspect(raw_conceals)}"
+        end
+      end
+    end
+
+    property "higher priority replacement wins on overlap" do
+      check all(
+              line_len <- integer(10..50),
+              raw_conceals <- overlapping_conceals_gen(line_len)
+            ) do
+        decs = build_decs_with_priority_conceals(raw_conceals)
+        merged = Decorations.conceals_for_line(decs, 0)
+
+        for m <- merged do
+          {_, ms} = m.start_pos
+          {_, me} = m.end_pos
+
+          overlapping_inputs =
+            Enum.filter(raw_conceals, fn {s, e, _r, _p} -> s < me and e > ms end)
+
+          if overlapping_inputs != [] do
+            max_priority = overlapping_inputs |> Enum.map(fn {_, _, _, p} -> p end) |> Enum.max()
+
+            top_tier =
+              Enum.filter(overlapping_inputs, fn {_, _, _, p} -> p == max_priority end)
+
+            # Only assert when there's a single unique max-priority replacement
+            replacements = top_tier |> Enum.map(fn {_, _, r, _} -> r end) |> Enum.uniq()
+
+            if length(replacements) == 1 do
+              assert m.replacement == hd(replacements),
+                     "Expected replacement #{inspect(hd(replacements))}, got #{inspect(m.replacement)}"
+            else
+              # Tie: just verify the replacement came from one of the top-tier inputs
+              assert m.replacement in replacements,
+                     "Replacement #{inspect(m.replacement)} not in top-tier #{inspect(replacements)}"
+            end
+          end
+        end
+      end
+    end
   end
 end
