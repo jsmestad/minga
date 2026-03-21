@@ -278,6 +278,8 @@ Per message (type byte first):
   0x04 (tool_call):  type(1) + status(1) + error(1) + collapsed(1) + duration_ms(4) + name_len(2) + name + result_len(4) + result
   0x05 (system):     type(1) + level(1) + text_len(4) + text
   0x06 (usage):      type(1) + input(4) + output(4) + cache_read(4) + cache_write(4) + cost_micros(4)
+  0x07 (styled_assistant): type(1) + line_count(2), per line: run_count(2), per run: text_len(2) + text + fg(3) + bg(3) + flags(1)
+  0x08 (styled_tool_call): type(1) + status(1) + error(1) + collapsed(1) + duration_ms(4) + name_len(2) + name + line_count(2), per line: run_count(2), per run: text_len(2) + text + fg(3) + bg(3) + flags(1)
 
 When hidden:
   opcode(1) + 0(1)
@@ -529,6 +531,7 @@ opcode(1) + action_type(1) + payload...
 | 0x12 | tool_uninstall | name_len(2) + name(name_len) | Uninstall a tool by name |
 | 0x13 | tool_update | name_len(2) + name(name_len) | Update a tool by name |
 | 0x14 | tool_dismiss | (empty) | Dismiss the tool manager panel |
+| 0x15 | agent_tool_toggle | index(2) | Toggle collapse/expand of agent tool call at message index |
 
 ## Theme Color Slots
 

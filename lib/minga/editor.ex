@@ -59,6 +59,8 @@ defmodule Minga.Editor do
           | {:width, pos_integer()}
           | {:height, pos_integer()}
 
+  alias Minga.Agent.Session, as: AgentSession
+
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.AgentAccess
@@ -1529,6 +1531,20 @@ defmodule Minga.Editor do
   defp handle_gui_action(state, :tool_dismiss) do
     # The tool manager panel is closed; no state change needed since
     # visibility is driven by the BEAM's render cycle
+    state
+  end
+
+  defp handle_gui_action(state, {:agent_tool_toggle, message_index}) do
+    session = AgentAccess.session(state)
+
+    if session do
+      try do
+        AgentSession.toggle_tool_collapse(session, message_index)
+      catch
+        :exit, _ -> :ok
+      end
+    end
+
     state
   end
 

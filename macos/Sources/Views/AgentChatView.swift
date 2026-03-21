@@ -20,6 +20,7 @@ struct AgentChatView: View {
     let state: AgentChatState
     let theme: ThemeColors
     let isInsertMode: Bool
+    let encoder: InputEncoder?
 
     @State private var scrollViewHeight: CGFloat = 0
 
@@ -120,8 +121,10 @@ struct AgentChatView: View {
             styledAssistantBlock(lines)
         case .thinking(_, let text, let collapsed):
             thinkingBlock(text, collapsed: collapsed)
-        case .toolCall(_, let name, let status, let isError, let collapsed, let duration, let result):
-            toolCallCard(name: name, status: status, isError: isError, collapsed: collapsed, durationMs: duration, result: result)
+        case .toolCall(let id, let name, let status, let isError, let collapsed, let duration, let result):
+            toolCallCard(messageIndex: id, name: name, status: status, isError: isError, collapsed: collapsed, durationMs: duration, result: result, resultLines: nil)
+        case .styledToolCall(let id, let name, let status, let isError, let collapsed, let duration, let resultLines):
+            toolCallCard(messageIndex: id, name: name, status: status, isError: isError, collapsed: collapsed, durationMs: duration, result: nil, resultLines: resultLines)
         case .system(_, let text, let isError):
             systemMessage(text, isError: isError)
         case .usage(_, let input, let output, _, _, let costMicros):
@@ -179,7 +182,7 @@ struct AgentChatView: View {
         }
     }
 
-    private func buildAttributedString(_ runs: [StyledTextRun]) -> AttributedString {
+    private func buildAttributedString(_ runs: [StyledTextRun], baseFontSize: CGFloat = 13, monospaced: Bool = false) -> AttributedString {
         var result = AttributedString()
         for run in runs {
             var attr = AttributedString(run.text)
@@ -202,12 +205,15 @@ struct AgentChatView: View {
                     blue: Double(run.bgB) / 255.0
                 )
             }
+            let design: Font.Design = monospaced ? .monospaced : .default
             if run.bold && run.italic {
-                attr.font = .system(size: 13, weight: .bold).italic()
+                attr.font = .system(size: baseFontSize, weight: .bold, design: design).italic()
             } else if run.bold {
-                attr.font = .system(size: 13, weight: .bold)
+                attr.font = .system(size: baseFontSize, weight: .bold, design: design)
             } else if run.italic {
-                attr.font = .system(size: 13).italic()
+                attr.font = .system(size: baseFontSize, design: design).italic()
+            } else if monospaced {
+                attr.font = .system(size: baseFontSize, design: .monospaced)
             }
             if run.underline {
                 attr.underlineStyle = .single
@@ -241,10 +247,19 @@ struct AgentChatView: View {
     }
 
     @ViewBuilder
-    private func toolCallCard(name: String, status: UInt8, isError: Bool, collapsed: Bool, durationMs: UInt32, result: String) -> some View {
+    private func toolCallCard(messageIndex: Int, name: String, status: UInt8, isError: Bool, collapsed: Bool, durationMs: UInt32, result: String?, resultLines: [[StyledTextRun]]?) -> some View {
+        let hasResult = (result != nil && !result!.isEmpty) || (resultLines != nil && !resultLines!.isEmpty)
+
         VStack(alignment: .leading, spacing: 0) {
-            // Header
+            // Header (clickable to toggle collapse)
             HStack(spacing: 6) {
+                // Collapse/expand chevron (only shown when there's result content)
+                if hasResult {
+                    Image(systemName: collapsed ? "chevron.right" : "chevron.down")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(theme.popupFg.opacity(0.4))
+                }
+
                 Image(systemName: toolIcon(status))
                     .font(.system(size: 10))
                     .foregroundStyle(isError ? Color.red.opacity(0.8) : theme.accent)
@@ -265,19 +280,43 @@ struct AgentChatView: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                if hasResult, messageIndex <= Int(UInt16.max) {
+                    encoder?.sendAgentToolToggle(index: UInt16(messageIndex))
+                }
+            }
 
-            // Result (collapsed by default)
-            if !collapsed && !result.isEmpty {
+            // Result (collapsed by default, supports styled or plain text)
+            if !collapsed && hasResult {
                 Rectangle()
                     .fill(theme.popupBorder.opacity(0.2))
                     .frame(height: 1)
 
                 ScrollView(.vertical) {
-                    Text(result)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(theme.popupFg.opacity(0.7))
-                        .textSelection(.enabled)
+                    if let lines = resultLines, !lines.isEmpty {
+                        // Styled result with tree-sitter/markdown formatting
+                        VStack(alignment: .leading, spacing: 2) {
+                            ForEach(Array(lines.enumerated()), id: \.offset) { _, runs in
+                                if runs.isEmpty || (runs.count == 1 && runs[0].text.isEmpty) {
+                                    Text(" ")
+                                        .font(.system(size: 11, design: .monospaced))
+                                        .foregroundStyle(.clear)
+                                } else {
+                                    Text(buildAttributedString(runs, baseFontSize: 11, monospaced: true))
+                                        .textSelection(.enabled)
+                                }
+                            }
+                        }
                         .padding(10)
+                    } else if let text = result, !text.isEmpty {
+                        // Plain text fallback
+                        Text(text)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(theme.popupFg.opacity(0.7))
+                            .textSelection(.enabled)
+                            .padding(10)
+                    }
                 }
                 .frame(maxHeight: 200)
             }

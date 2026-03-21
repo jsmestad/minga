@@ -89,6 +89,7 @@
     "tool_install":         { "hex": "0x11" },
     "tool_uninstall":       { "hex": "0x12" },
     "tool_update":          { "hex": "0x13" },
-    "tool_dismiss":         { "hex": "0x14" }
+    "tool_dismiss":         { "hex": "0x14" },
+    "agent_tool_toggle":    { "hex": "0x15" }
   }
 }

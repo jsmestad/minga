@@ -104,7 +104,8 @@ struct ContentView: View {
                         AgentChatView(
                             state: appState.gui.agentChatState,
                             theme: appState.gui.themeColors,
-                            isInsertMode: appState.gui.statusBarState.isInsertMode
+                            isInsertMode: appState.gui.statusBarState.isInsertMode,
+                            encoder: appState.encoder
                         )
                     }
 

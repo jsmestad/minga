@@ -95,6 +95,7 @@ defmodule Minga.Port.Protocol.GUI do
   @gui_action_tool_uninstall 0x12
   @gui_action_tool_update 0x13
   @gui_action_tool_dismiss 0x14
+  @gui_action_agent_tool_toggle 0x15
 
   # ── Types ──
 
@@ -120,6 +121,7 @@ defmodule Minga.Port.Protocol.GUI do
           | {:tool_uninstall, name :: String.t()}
           | {:tool_update, name :: String.t()}
           | :tool_dismiss
+          | {:agent_tool_toggle, message_index :: non_neg_integer()}
 
   # ═══════════════════════════════════════════════════════════════════════════
   # Encoding (BEAM → Frontend)
@@ -999,6 +1001,15 @@ defmodule Minga.Port.Protocol.GUI do
   @type gui_chat_message ::
           Minga.Agent.Message.t()
           | {:styled_assistant, [[styled_run()]]}
+          | {:styled_tool_call,
+             %{
+               name: String.t(),
+               status: :running | :complete | :error,
+               is_error: boolean(),
+               collapsed: boolean(),
+               duration_ms: non_neg_integer() | nil,
+               result: String.t() | nil
+             }, [[styled_run()]]}
 
   @spec encode_chat_message(gui_chat_message()) :: binary()
   defp encode_chat_message({:user, text}) do
@@ -1058,6 +1069,43 @@ defmodule Minga.Port.Protocol.GUI do
     <<0x04::8, status_byte::8, error_byte::8, collapsed_byte::8, duration::32,
       byte_size(name_bytes)::16, name_bytes::binary, byte_size(result_bytes)::32,
       result_bytes::binary>>
+  end
+
+  # Styled tool call: same header fields as tool_call (0x04), but result is styled runs.
+  # Sub-opcode 0x08. Layout:
+  #   0x08, status::8, error::8, collapsed::8, duration::32,
+  #   name_len::16, name, line_count::16, then per line:
+  #   run_count::16, then per run: text_len::16, text, fg::24, bg::24, flags::8
+  defp encode_chat_message({:styled_tool_call, tc, styled_lines}) do
+    name_bytes = :erlang.iolist_to_binary([tc.name])
+
+    status_byte =
+      case tc.status do
+        :running -> 0
+        :complete -> 1
+        :error -> 2
+      end
+
+    duration = tc.duration_ms || 0
+    error_byte = if tc.is_error, do: 1, else: 0
+    collapsed_byte = if tc.collapsed, do: 1, else: 0
+
+    line_binaries =
+      Enum.map(styled_lines, fn runs ->
+        run_binaries =
+          Enum.map(runs, fn {text, fg, bg, flags} ->
+            text_bytes = :erlang.iolist_to_binary([text])
+            <<byte_size(text_bytes)::16, text_bytes::binary, fg::24, bg::24, flags::8>>
+          end)
+
+        [<<length(runs)::16>> | run_binaries]
+      end)
+
+    IO.iodata_to_binary([
+      <<0x08::8, status_byte::8, error_byte::8, collapsed_byte::8, duration::32,
+        byte_size(name_bytes)::16, name_bytes::binary, length(styled_lines)::16>>
+      | line_binaries
+    ])
   end
 
   defp encode_chat_message({:system, text, level}) do
@@ -1142,6 +1190,9 @@ defmodule Minga.Port.Protocol.GUI do
     do: {:ok, {:tool_update, name}}
 
   def decode_gui_action(@gui_action_tool_dismiss, <<>>), do: {:ok, :tool_dismiss}
+
+  def decode_gui_action(@gui_action_agent_tool_toggle, <<index::16>>),
+    do: {:ok, {:agent_tool_toggle, index}}
 
   def decode_gui_action(_, _), do: :error
 
