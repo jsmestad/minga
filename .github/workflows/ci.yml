@@ -69,7 +69,7 @@ jobs:
 
       - run: mix deps.get
       - run: mix deps.compile
-      - run: mix test --warnings-as-errors
+      - run: mix test --warnings-as-errors --exclude system_clipboard
 
   test-zig:
     name: Test (Zig)

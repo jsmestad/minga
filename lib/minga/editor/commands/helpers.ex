@@ -84,16 +84,7 @@ defmodule Minga.Editor.Commands.Helpers do
          reg_type,
          _clipboard
        ) do
-    case Clipboard.write(text) do
-      :ok ->
-        :ok
-
-      :unavailable ->
-        Minga.Log.warning(:editor, "Clipboard: no clipboard tool available")
-
-      {:error, reason} ->
-        Minga.Log.warning(:editor, "Clipboard: write failed (#{reason})")
-    end
+    Clipboard.write_async(text)
 
     state
     |> write_unnamed(text, reg_type)
@@ -247,12 +238,7 @@ defmodule Minga.Editor.Commands.Helpers do
   """
   @spec maybe_sync_clipboard(state(), String.t(), clipboard_mode()) :: state()
   def maybe_sync_clipboard(state, text, clipboard) when clipboard in [:unnamedplus, :unnamed] do
-    case Clipboard.write(text) do
-      :ok -> :ok
-      :unavailable -> :ok
-      {:error, _} -> :ok
-    end
-
+    Clipboard.write_async(text)
     state
   end
 
