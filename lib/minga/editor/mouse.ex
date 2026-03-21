@@ -232,6 +232,14 @@ defmodule Minga.Editor.Mouse do
   # ── Mouse motion (hover tracking) ──
 
   def handle(state, row, col, :none, _mods, :motion, _cc) do
+    # Clear any existing hover popup when the mouse moves
+    state =
+      if state.hover_popup != nil do
+        %{state | hover_popup: nil}
+      else
+        state
+      end
+
     %{state | mouse: MouseState.set_hover(state.mouse, row, col)}
   end
 

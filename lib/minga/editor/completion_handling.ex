@@ -265,8 +265,47 @@ defmodule Minga.Editor.CompletionHandling do
     new_state = %{state | completion_trigger: new_bridge}
 
     case completion do
-      nil -> new_state
-      %Completion{} -> %{new_state | completion: completion}
+      nil ->
+        new_state
+
+      %Completion{} ->
+        %{new_state | completion: completion}
+
+      {:merge, items, trigger_pos} ->
+        # Merge items from a secondary server into the existing completion
+        merge_completion_items(new_state, items, trigger_pos)
+    end
+  end
+
+  @spec merge_completion_items(
+          EditorState.t(),
+          [Completion.Item.t()],
+          {non_neg_integer(), non_neg_integer()}
+        ) :: EditorState.t()
+  defp merge_completion_items(state, [], _trigger_pos), do: state
+
+  defp merge_completion_items(state, new_items, trigger_pos) do
+    case state.completion do
+      nil ->
+        # No existing completion; create a new one from the merged items
+        completion = Completion.new(new_items, trigger_pos)
+        prefix = CompletionTrigger.get_typed_since_trigger(state.buffers.active, trigger_pos)
+        completion = Completion.filter(completion, prefix)
+        %{state | completion: completion}
+
+      %Completion{} = existing ->
+        # Merge into existing completion
+        merged_items = existing.items ++ new_items
+        completion = Completion.new(merged_items, existing.trigger_position)
+
+        prefix =
+          CompletionTrigger.get_typed_since_trigger(
+            state.buffers.active,
+            existing.trigger_position
+          )
+
+        completion = Completion.filter(completion, prefix)
+        %{state | completion: completion}
     end
   end
 

@@ -30,6 +30,7 @@ defmodule Minga.Editor.CompletionTrigger do
   @typedoc "Completion bridge state tracked in the Editor."
   @type t :: %{
           pending_ref: reference() | nil,
+          pending_refs: MapSet.t(reference()),
           debounce_timer: reference() | nil,
           trigger_position: {non_neg_integer(), non_neg_integer()} | nil
         }
@@ -37,7 +38,7 @@ defmodule Minga.Editor.CompletionTrigger do
   @doc "Returns initial completion bridge state."
   @spec new() :: t()
   def new do
-    %{pending_ref: nil, debounce_timer: nil, trigger_position: nil}
+    %{pending_ref: nil, pending_refs: MapSet.new(), debounce_timer: nil, trigger_position: nil}
   end
 
   @doc """
@@ -57,23 +58,29 @@ defmodule Minga.Editor.CompletionTrigger do
       [] ->
         {bridge, nil}
 
-      [client | _rest] ->
-        trigger_chars = get_trigger_characters(client)
+      _ ->
+        # Collect trigger characters from all clients
+        all_trigger_chars =
+          clients
+          |> Enum.flat_map(&get_trigger_characters/1)
+          |> Enum.uniq()
 
-        cond do
-          char in trigger_chars ->
-            # Trigger character: fire immediately
-            bridge = cancel_debounce(bridge)
-            send_completion_request(bridge, client, buffer_pid)
+        # Use the first client for debounce scheduling, but send to all on fire
+        [first_client | _] = clients
 
-          identifier_char?(char) ->
-            # Identifier character: debounce
-            schedule_debounced_trigger(bridge, client, buffer_pid)
-
-          true ->
+        if char in all_trigger_chars do
+          # Trigger character: fire immediately to all clients
+          bridge = cancel_debounce(bridge)
+          send_completion_requests(bridge, clients, buffer_pid)
+        else
+          if identifier_char?(char) do
+            # Identifier character: debounce (sends to all clients when timer fires)
+            schedule_debounced_trigger(bridge, first_client, buffer_pid)
+          else
             # Non-identifier, non-trigger: dismiss completion
             bridge = cancel_debounce(bridge)
             {%{bridge | pending_ref: nil, trigger_position: nil}, nil}
+          end
         end
     end
   end
@@ -100,8 +107,9 @@ defmodule Minga.Editor.CompletionTrigger do
   def handle_response(%{pending_ref: ref} = bridge, ref, {:ok, result}, buffer_pid) do
     items = Completion.parse_response(result)
     trigger_pos = bridge.trigger_position || get_cursor_position(buffer_pid)
+    remaining = MapSet.delete(bridge.pending_refs, ref)
 
-    bridge = %{bridge | pending_ref: nil}
+    bridge = %{bridge | pending_ref: nil, pending_refs: remaining}
 
     case items do
       [] ->
@@ -109,10 +117,23 @@ defmodule Minga.Editor.CompletionTrigger do
 
       _ ->
         completion = Completion.new(items, trigger_pos)
-        # Apply initial filter based on text typed since trigger
         prefix = get_typed_since_trigger(buffer_pid, trigger_pos)
         completion = Completion.filter(completion, prefix)
         {bridge, completion}
+    end
+  end
+
+  # Response from a secondary server: merge into existing completion
+  def handle_response(%{pending_refs: refs} = bridge, ref, {:ok, result}, buffer_pid) do
+    if MapSet.member?(refs, ref) do
+      items = Completion.parse_response(result)
+      remaining = MapSet.delete(refs, ref)
+      bridge = %{bridge | pending_refs: remaining}
+      # Return items for the caller to merge into existing completion
+      {bridge, {:merge, items, bridge.trigger_position || get_cursor_position(buffer_pid)}}
+    else
+      # Stale ref, ignore
+      {bridge, nil}
     end
   end
 
@@ -136,6 +157,42 @@ defmodule Minga.Editor.CompletionTrigger do
   end
 
   # ── Private ────────────────────────────────────────────────────────────────
+
+  # Sends completion requests to ALL LSP clients for the buffer.
+  # Tracks all refs so responses from any client can be merged.
+  @spec send_completion_requests(t(), [pid()], pid()) :: {t(), nil}
+  defp send_completion_requests(bridge, clients, buffer_pid) do
+    file_path = BufferServer.file_path(buffer_pid)
+
+    case file_path do
+      nil ->
+        {bridge, nil}
+
+      path ->
+        uri = SyncServer.path_to_uri(path)
+        {line, col} = get_cursor_position(buffer_pid)
+
+        params = %{
+          "textDocument" => %{"uri" => uri},
+          "position" => %{"line" => line, "character" => col}
+        }
+
+        refs =
+          Enum.map(clients, fn client ->
+            Client.request(client, "textDocument/completion", params)
+          end)
+
+        primary_ref = List.first(refs)
+        all_refs = MapSet.new(refs)
+
+        {%{
+           bridge
+           | pending_ref: primary_ref,
+             pending_refs: all_refs,
+             trigger_position: {line, col}
+         }, nil}
+    end
+  end
 
   @spec send_completion_request(t(), pid(), pid()) :: {t(), nil}
   defp send_completion_request(bridge, client, buffer_pid) do
@@ -211,7 +268,9 @@ defmodule Minga.Editor.CompletionTrigger do
   end
 
   @spec get_typed_since_trigger(pid(), {non_neg_integer(), non_neg_integer()}) :: String.t()
-  defp get_typed_since_trigger(buffer_pid, {trigger_line, trigger_col}) do
+  @doc "Returns the text typed since the trigger position (for prefix filtering)."
+  @spec get_typed_since_trigger(pid(), {non_neg_integer(), non_neg_integer()}) :: String.t()
+  def get_typed_since_trigger(buffer_pid, {trigger_line, trigger_col}) do
     {content, {cursor_line, cursor_col}} = BufferServer.content_and_cursor(buffer_pid)
 
     # Only makes sense on the same line
