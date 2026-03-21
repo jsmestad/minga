@@ -39,6 +39,7 @@ struct StatusBarUpdate: Sendable {
     let iconColorG: UInt8
     let iconColorB: UInt8
     let filename: String
+    let diagnosticHint: String
 }
 
 @MainActor
@@ -75,6 +76,7 @@ final class StatusBarState {
     var iconColorG: UInt8 = 0
     var iconColorB: UInt8 = 0
     var filename: String = ""
+    var diagnosticHint: String = ""
 
     /// Updates status bar properties, guarding each assignment with an
     /// equality check to prevent redundant `@Observable` notifications.
@@ -110,6 +112,7 @@ final class StatusBarState {
         if self.iconColorG != data.iconColorG { self.iconColorG = data.iconColorG }
         if self.iconColorB != data.iconColorB { self.iconColorB = data.iconColorB }
         if self.filename != data.filename { self.filename = data.filename }
+        if self.diagnosticHint != data.diagnosticHint { self.diagnosticHint = data.diagnosticHint }
     }
 
     var modeName: String {
@@ -216,6 +219,12 @@ struct StatusBarView: View {
             Text(state.message)
                 .font(.system(size: 11))
                 .foregroundStyle(theme.modelineBarFg.opacity(0.7))
+                .lineLimit(1)
+                .truncationMode(.tail)
+        } else if !state.diagnosticHint.isEmpty {
+            Text(state.diagnosticHint)
+                .font(.system(size: 11))
+                .foregroundStyle(theme.modelineBarFg.opacity(0.45))
                 .lineLimit(1)
                 .truncationMode(.tail)
         }

@@ -49,6 +49,7 @@ defmodule Minga.Editor.StatusBar.Data do
           git_diff_summary: git_diff_summary(),
           diagnostic_counts:
             {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()} | nil,
+          diagnostic_hint: String.t() | nil,
           lsp_status: lsp_status(),
           parser_status: parser_status(),
           buf_index: pos_integer(),
@@ -106,6 +107,10 @@ defmodule Minga.Editor.StatusBar.Data do
     {git_branch, git_diff_summary} = git_modeline_data(buf)
     diagnostic_counts = diagnostic_modeline_data(buf)
 
+    # Fetch diagnostic hint for the current cursor line (shown in status bar
+    # center segment when idle, replaces the old cell-grid minibuffer hint)
+    diagnostic_hint = cursor_line_diagnostic_hint(buf, line)
+
     agent = AgentAccess.agent(state)
 
     %{
@@ -120,6 +125,7 @@ defmodule Minga.Editor.StatusBar.Data do
       git_branch: git_branch,
       git_diff_summary: git_diff_summary,
       diagnostic_counts: diagnostic_counts,
+      diagnostic_hint: diagnostic_hint,
       lsp_status: state.lsp_status,
       parser_status: state.parser_status,
       buf_index: state.buffers.active_index + 1,
@@ -214,6 +220,56 @@ defmodule Minga.Editor.StatusBar.Data do
       path -> Diagnostics.count_tuple(SyncServer.path_to_uri(path))
     end
   end
+
+  # ── Diagnostic hint for status bar ──────────────────────────────────────────
+
+  @doc """
+  Returns the first diagnostic message on the given cursor line, formatted
+  as a human-readable hint string (icon + message + source). Returns nil
+  if no diagnostics exist on that line.
+
+  Used by the GUI status bar center segment to show diagnostic context
+  when idle (no status message, no active minibuffer).
+  """
+  @spec cursor_line_diagnostic_hint(pid() | nil, non_neg_integer()) :: String.t() | nil
+  def cursor_line_diagnostic_hint(nil, _line), do: nil
+
+  def cursor_line_diagnostic_hint(buf, line) when is_pid(buf) do
+    file_path =
+      try do
+        BufferServer.file_path(buf)
+      catch
+        :exit, _ -> nil
+      end
+
+    case file_path do
+      nil ->
+        nil
+
+      path ->
+        uri = SyncServer.path_to_uri(path)
+
+        uri
+        |> Diagnostics.for_uri()
+        |> Enum.find(fn d -> d.range.start_line == line end)
+        |> format_diagnostic_hint()
+    end
+  end
+
+  @spec format_diagnostic_hint(Diagnostics.Diagnostic.t() | nil) :: String.t() | nil
+  defp format_diagnostic_hint(nil), do: nil
+
+  defp format_diagnostic_hint(diag) do
+    icon = diagnostic_severity_icon(diag.severity)
+    source = if diag.source, do: " [#{diag.source}]", else: ""
+    "#{icon} #{diag.message}#{source}"
+  end
+
+  @spec diagnostic_severity_icon(Diagnostics.Diagnostic.severity()) :: String.t()
+  defp diagnostic_severity_icon(:error), do: "✖"
+  defp diagnostic_severity_icon(:warning), do: "⚠"
+  defp diagnostic_severity_icon(:info), do: "ℹ"
+  defp diagnostic_severity_icon(:hint), do: "💡"
 
   # ── Adapters for Modeline.render/5 ────────────────────────────────────────
 

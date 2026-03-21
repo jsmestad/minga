@@ -42,6 +42,9 @@ final class GUIState {
     /// Tool manager panel state.
     let toolManagerState = ToolManagerState()
 
+    /// Native minibuffer state (0x7F).
+    let minibufferState = MinibufferState()
+
     /// Semantic window content from gui_window_content (0x80).
     /// Keyed by windowId. NOT cleared between frames; the guiWindowContent
     /// dispatch overwrites per-window data each frame. Stale entries serve

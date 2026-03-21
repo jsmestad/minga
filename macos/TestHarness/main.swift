@@ -97,7 +97,7 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
     case .guiBreadcrumb(let segments):
         return ["type": "gui_breadcrumb", "segments": segments]
 
-    case .guiStatusBar(let contentKind, let mode, let cursorLine, let cursorCol, let lineCount, let flags, let lspStatus, let gitBranch, let message, let filetype, let errorCount, let warningCount, let modelName, let messageCount, let sessionStatus, let infoCount, let hintCount, let macroRecording, let parserStatus, let agentStatus, let gitAdded, let gitModified, let gitDeleted, let icon, let iconColorR, let iconColorG, let iconColorB, let filename):
+    case .guiStatusBar(let contentKind, let mode, let cursorLine, let cursorCol, let lineCount, let flags, let lspStatus, let gitBranch, let message, let filetype, let errorCount, let warningCount, let modelName, let messageCount, let sessionStatus, let infoCount, let hintCount, let macroRecording, let parserStatus, let agentStatus, let gitAdded, let gitModified, let gitDeleted, let icon, let iconColorR, let iconColorG, let iconColorB, let filename, let diagnosticHint):
         var result: [String: Any] = [:]
         result["type"] = "gui_status_bar"
         result["content_kind"] = Int(contentKind)
@@ -128,6 +128,7 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
         result["icon_color_g"] = Int(iconColorG)
         result["icon_color_b"] = Int(iconColorB)
         result["filename"] = filename
+        result["diagnostic_hint"] = diagnosticHint
         return result
 
     case .guiPicker(let visible, let selectedIndex, let filteredCount, let totalCount, let title, let query, let hasPreview, let items, let actionMenu):
@@ -243,6 +244,22 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
     case .drawText(let row, let col, let fg, let bg, let attrs, let text):
         return ["type": "draw_text", "row": Int(row), "col": Int(col),
                 "fg": Int(fg), "bg": Int(bg), "attrs": Int(attrs), "text": text]
+
+    case .guiMinibuffer(let visible, let mode, let cursorPos, let prompt,
+                         let input, let context, let selectedIndex, let candidates):
+        var result: [String: Any] = [:]
+        result["type"] = "gui_minibuffer"
+        result["visible"] = visible
+        result["mode"] = Int(mode)
+        result["cursor_pos"] = Int(cursorPos)
+        result["prompt"] = prompt
+        result["input"] = input
+        result["context"] = context
+        result["selected_index"] = Int(selectedIndex)
+        result["candidates"] = candidates.map { c in
+            ["match_score": Int(c.matchScore), "label": c.label, "description": c.description] as [String: Any]
+        }
+        return result
 
     default:
         return nil

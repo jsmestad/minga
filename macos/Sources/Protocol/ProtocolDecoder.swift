@@ -30,7 +30,7 @@ enum RenderCommand: Sendable {
     case guiCompletion(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, selectedIndex: UInt16, items: [GUICompletionItem])
     case guiWhichKey(visible: Bool, prefix: String, page: UInt8, pageCount: UInt8, bindings: [GUIWhichKeyBinding])
     case guiBreadcrumb(segments: [String])
-    case guiStatusBar(contentKind: UInt8, mode: UInt8, cursorLine: UInt32, cursorCol: UInt32, lineCount: UInt32, flags: UInt8, lspStatus: UInt8, gitBranch: String, message: String, filetype: String, errorCount: UInt16, warningCount: UInt16, modelName: String, messageCount: UInt32, sessionStatus: UInt8, infoCount: UInt16, hintCount: UInt16, macroRecording: UInt8, parserStatus: UInt8, agentStatus: UInt8, gitAdded: UInt16, gitModified: UInt16, gitDeleted: UInt16, icon: String, iconColorR: UInt8, iconColorG: UInt8, iconColorB: UInt8, filename: String)
+    case guiStatusBar(contentKind: UInt8, mode: UInt8, cursorLine: UInt32, cursorCol: UInt32, lineCount: UInt32, flags: UInt8, lspStatus: UInt8, gitBranch: String, message: String, filetype: String, errorCount: UInt16, warningCount: UInt16, modelName: String, messageCount: UInt32, sessionStatus: UInt8, infoCount: UInt16, hintCount: UInt16, macroRecording: UInt8, parserStatus: UInt8, agentStatus: UInt8, gitAdded: UInt16, gitModified: UInt16, gitDeleted: UInt16, icon: String, iconColorR: UInt8, iconColorG: UInt8, iconColorB: UInt8, filename: String, diagnosticHint: String)
     case guiPicker(visible: Bool, selectedIndex: UInt16, filteredCount: UInt16, totalCount: UInt16, title: String, query: String, hasPreview: Bool, items: [GUIPickerItem], actionMenu: GUIPickerActionMenu?)
     case guiPickerPreview(visible: Bool, lines: [GUIPickerPreviewLine])
     case guiAgentChat(visible: Bool, status: UInt8, model: String, prompt: String, pendingToolName: String?, pendingToolSummary: String, messages: [GUIChatMessage])
@@ -42,6 +42,15 @@ enum RenderCommand: Sendable {
                          entries: [GUIMessageEntry])
     case guiWindowContent(data: GUIWindowContent)
     case guiToolManager(visible: Bool, filter: UInt8, selectedIndex: UInt16, tools: [GUIToolEntry])
+    case guiMinibuffer(visible: Bool, mode: UInt8, cursorPos: UInt16, prompt: String, input: String, context: String, selectedIndex: UInt16, candidates: [GUIMinibufferCandidate])
+}
+
+// MARK: - Minibuffer data types
+
+struct GUIMinibufferCandidate: Sendable {
+    let matchScore: UInt8
+    let label: String
+    let description: String
 }
 
 // MARK: - Tool Manager data types
@@ -662,6 +671,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         var iconColorG: UInt8 = 0
         var iconColorB: UInt8 = 0
         var filename = ""
+        var diagnosticHint = ""
 
         if contentKind == 1 && data.count >= totalConsumed + 1 {
             let modelNameLen = Int(data[totalConsumed])
@@ -708,8 +718,17 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             guard data.count >= totalConsumed + filenameLen else { throw ProtocolDecodeError.malformed }
             filename = String(data: data[totalConsumed..<(totalConsumed + filenameLen)], encoding: .utf8) ?? ""
             totalConsumed += filenameLen
+            // diagnostic_hint_len:2 + diagnostic_hint:N (backward-compatible: may be absent)
+            if data.count >= totalConsumed + 2 {
+                let diagHintLen = Int(readU16(data, totalConsumed))
+                totalConsumed += 2
+                if data.count >= totalConsumed + diagHintLen, diagHintLen > 0 {
+                    diagnosticHint = String(data: data[totalConsumed..<(totalConsumed + diagHintLen)], encoding: .utf8) ?? ""
+                    totalConsumed += diagHintLen
+                }
+            }
         }
-        return (.guiStatusBar(contentKind: contentKind, mode: mode, cursorLine: cursorLine, cursorCol: cursorCol, lineCount: lineCount, flags: flags, lspStatus: lspStatus, gitBranch: gitBranch, message: message, filetype: filetype, errorCount: errorCount, warningCount: warningCount, modelName: modelName, messageCount: messageCount, sessionStatus: sessionStatus, infoCount: infoCount, hintCount: hintCount, macroRecording: macroRecording, parserStatus: parserStatus, agentStatus: agentStatus, gitAdded: gitAdded, gitModified: gitModified, gitDeleted: gitDeleted, icon: icon, iconColorR: iconColorR, iconColorG: iconColorG, iconColorB: iconColorB, filename: filename), totalConsumed - offset)
+        return (.guiStatusBar(contentKind: contentKind, mode: mode, cursorLine: cursorLine, cursorCol: cursorCol, lineCount: lineCount, flags: flags, lspStatus: lspStatus, gitBranch: gitBranch, message: message, filetype: filetype, errorCount: errorCount, warningCount: warningCount, modelName: modelName, messageCount: messageCount, sessionStatus: sessionStatus, infoCount: infoCount, hintCount: hintCount, macroRecording: macroRecording, parserStatus: parserStatus, agentStatus: agentStatus, gitAdded: gitAdded, gitModified: gitModified, gitDeleted: gitDeleted, icon: icon, iconColorR: iconColorR, iconColorG: iconColorG, iconColorB: iconColorB, filename: filename, diagnosticHint: diagnosticHint), totalConsumed - offset)
 
     case OP_GUI_PICKER:
         guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
@@ -1298,6 +1317,63 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         }
         return (.guiToolManager(visible: true, filter: tmFilter,
                                  selectedIndex: tmSelectedIndex, tools: tools), pos - offset)
+
+    case OP_GUI_MINIBUFFER:
+        // visible(1)
+        guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
+        let mbVisible = data[rest] != 0
+        guard mbVisible else {
+            return (.guiMinibuffer(visible: false, mode: 0, cursorPos: 0xFFFF, prompt: "",
+                                    input: "", context: "", selectedIndex: 0, candidates: []), 2)
+        }
+        // mode(1) + cursor_pos(2) + prompt_len(1)
+        guard data.count >= rest + 5 else { throw ProtocolDecodeError.malformed }
+        let mbMode = data[rest + 1]
+        let mbCursorPos = readU16(data, rest + 2)
+        let mbPromptLen = Int(data[rest + 4])
+        var mbPos = rest + 5
+        // prompt
+        guard data.count >= mbPos + mbPromptLen else { throw ProtocolDecodeError.malformed }
+        let mbPrompt = String(data: data[mbPos..<(mbPos + mbPromptLen)], encoding: .utf8) ?? ""
+        mbPos += mbPromptLen
+        // input_len(2) + input
+        guard data.count >= mbPos + 2 else { throw ProtocolDecodeError.malformed }
+        let mbInputLen = Int(readU16(data, mbPos)); mbPos += 2
+        guard data.count >= mbPos + mbInputLen else { throw ProtocolDecodeError.malformed }
+        let mbInput = String(data: data[mbPos..<(mbPos + mbInputLen)], encoding: .utf8) ?? ""
+        mbPos += mbInputLen
+        // context_len(2) + context
+        guard data.count >= mbPos + 2 else { throw ProtocolDecodeError.malformed }
+        let mbContextLen = Int(readU16(data, mbPos)); mbPos += 2
+        guard data.count >= mbPos + mbContextLen else { throw ProtocolDecodeError.malformed }
+        let mbContext = String(data: data[mbPos..<(mbPos + mbContextLen)], encoding: .utf8) ?? ""
+        mbPos += mbContextLen
+        // selected_index(2) + candidate_count(2)
+        guard data.count >= mbPos + 4 else { throw ProtocolDecodeError.malformed }
+        let mbSelIndex = readU16(data, mbPos); mbPos += 2
+        let mbCandCount = Int(readU16(data, mbPos)); mbPos += 2
+        // candidates
+        var mbCandidates: [GUIMinibufferCandidate] = []
+        mbCandidates.reserveCapacity(mbCandCount)
+        for _ in 0..<mbCandCount {
+            // match_score(1) + label_len(2)
+            guard data.count >= mbPos + 3 else { break }
+            let score = data[mbPos]; mbPos += 1
+            let candLabelLen = Int(readU16(data, mbPos)); mbPos += 2
+            guard data.count >= mbPos + candLabelLen else { break }
+            let candLabel = String(data: data[mbPos..<(mbPos + candLabelLen)], encoding: .utf8) ?? ""
+            mbPos += candLabelLen
+            // desc_len(2) + desc
+            guard data.count >= mbPos + 2 else { break }
+            let candDescLen = Int(readU16(data, mbPos)); mbPos += 2
+            guard data.count >= mbPos + candDescLen else { break }
+            let candDesc = String(data: data[mbPos..<(mbPos + candDescLen)], encoding: .utf8) ?? ""
+            mbPos += candDescLen
+            mbCandidates.append(GUIMinibufferCandidate(matchScore: score, label: candLabel, description: candDesc))
+        }
+        return (.guiMinibuffer(visible: true, mode: mbMode, cursorPos: mbCursorPos,
+                                prompt: mbPrompt, input: mbInput, context: mbContext,
+                                selectedIndex: mbSelIndex, candidates: mbCandidates), mbPos - offset)
 
     default:
         throw ProtocolDecodeError.unknownOpcode(opcode)

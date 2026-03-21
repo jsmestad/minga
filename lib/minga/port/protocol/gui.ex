@@ -27,6 +27,8 @@ defmodule Minga.Port.Protocol.GUI do
   | 0x7B   | gui_gutter      | Structured gutter data         |
   | 0x7C   | gui_bottom_panel| Bottom panel container state   |
   | 0x7D   | gui_picker_preview | Picker preview content      |
+  | 0x7E   | gui_tool_manager| Tool manager panel           |
+  | 0x7F   | gui_minibuffer  | Native minibuffer + candidates|
 
   ## GUI Actions (Frontend → BEAM)
 
@@ -49,6 +51,7 @@ defmodule Minga.Port.Protocol.GUI do
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Devicon
+  alias Minga.Editor.MinibufferData
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
   alias Minga.Filetype
@@ -72,6 +75,7 @@ defmodule Minga.Port.Protocol.GUI do
   @op_gui_bottom_panel 0x7C
   @op_gui_picker_preview 0x7D
   @op_gui_tool_manager 0x7E
+  @op_gui_minibuffer 0x7F
 
   # ── GUI action sub-opcodes (Frontend → BEAM) ──
 
@@ -688,13 +692,17 @@ defmodule Minga.Port.Protocol.GUI do
     icon_b = icon_color &&& 0xFF
     filename = :erlang.iolist_to_binary([d.file_name || ""])
 
+    # Diagnostic hint for the cursor line (shown in status bar center when idle)
+    diag_hint = :erlang.iolist_to_binary([d.diagnostic_hint || ""])
+
     # cursor_line/cursor_col are 0-indexed from BufferServer; encode as 1-indexed for the GUI
     <<@op_gui_status_bar, 0::8, mode_byte::8, d.cursor_line + 1::32, d.cursor_col + 1::32,
       d.line_count::32, flags::8, lsp_byte::8, byte_size(git_branch)::8, git_branch::binary,
       0::16, byte_size(filetype)::8, filetype::binary, error_count::16, warning_count::16,
       info_count::16, hint_count::16, macro_byte::8, parser_byte::8, agent_byte::8, git_added::16,
       git_modified::16, git_deleted::16, byte_size(icon_bytes)::8, icon_bytes::binary, icon_r::8,
-      icon_g::8, icon_b::8, byte_size(filename)::16, filename::binary>>
+      icon_g::8, icon_b::8, byte_size(filename)::16, filename::binary, byte_size(diag_hint)::16,
+      diag_hint::binary>>
   end
 
   def encode_gui_status_bar({:agent, d}) do
@@ -1302,4 +1310,52 @@ defmodule Minga.Port.Protocol.GUI do
   defp encode_tool_method(:go_install), do: 3
   defp encode_tool_method(:github_release), do: 4
   defp encode_tool_method(_), do: 0
+
+  # ── Minibuffer ──
+
+  @doc """
+  Encodes a gui_minibuffer command (0x7F).
+
+  Sends structured minibuffer state to the GUI frontend for native rendering.
+  Includes mode, prompt, input text, cursor position, context string, and
+  completion candidates.
+
+  When `visible` is false, sends a single hide byte. When visible, encodes
+  the full payload including any completion candidates.
+  """
+  @spec encode_gui_minibuffer(MinibufferData.t()) :: binary()
+  def encode_gui_minibuffer(%MinibufferData{visible: false}),
+    do: <<@op_gui_minibuffer, 0::8>>
+
+  def encode_gui_minibuffer(%{
+        visible: true,
+        mode: mode,
+        cursor_pos: cursor_pos,
+        prompt: prompt,
+        input: input,
+        context: context,
+        selected_index: selected_index,
+        candidates: candidates
+      }) do
+    prompt_bytes = :erlang.iolist_to_binary([prompt])
+    input_bytes = :erlang.iolist_to_binary([input])
+    context_bytes = :erlang.iolist_to_binary([context])
+
+    candidate_data =
+      Enum.map(candidates, fn %{label: label, description: desc, match_score: score} ->
+        label_bytes = :erlang.iolist_to_binary([label])
+        desc_bytes = :erlang.iolist_to_binary([desc])
+
+        <<min(score, 255)::8, byte_size(label_bytes)::16, label_bytes::binary,
+          byte_size(desc_bytes)::16, desc_bytes::binary>>
+      end)
+
+    IO.iodata_to_binary([
+      <<@op_gui_minibuffer, 1::8, mode::8, cursor_pos::16, byte_size(prompt_bytes)::8,
+        prompt_bytes::binary, byte_size(input_bytes)::16, input_bytes::binary,
+        byte_size(context_bytes)::16, context_bytes::binary, selected_index::16,
+        length(candidates)::16>>
+      | candidate_data
+    ])
+  end
 end

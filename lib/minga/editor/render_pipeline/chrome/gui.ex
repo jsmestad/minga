@@ -10,6 +10,7 @@ defmodule Minga.Editor.RenderPipeline.Chrome.GUI do
 
   alias Minga.Editor.DisplayList.{Cursor, Overlay}
   alias Minga.Editor.Layout
+  alias Minga.Editor.MinibufferData
   alias Minga.Editor.Renderer.Minibuffer
   alias Minga.Editor.Renderer.Regions
   alias Minga.Editor.RenderPipeline.Chrome
@@ -60,9 +61,12 @@ defmodule Minga.Editor.RenderPipeline.Chrome.GUI do
 
     separator_draws = vertical_separators ++ horizontal_separators
 
-    # Minibuffer (rendered in Metal, not SwiftUI)
+    # Minibuffer (rendered in Metal for backward compat; covered by native SwiftUI view)
     {minibuffer_row, _mbc, _mbw, _mbh} = layout.minibuffer
     minibuffer_draw = Minibuffer.render(state, minibuffer_row, full_viewport.cols)
+
+    # Structured minibuffer data for native SwiftUI rendering (0x7F opcode)
+    minibuffer_data = MinibufferData.from_state(state)
 
     # Overlays: only hover popup, signature help, and float popups.
     # Picker, which-key, and completion are handled by SwiftUI.
@@ -74,6 +78,7 @@ defmodule Minga.Editor.RenderPipeline.Chrome.GUI do
     %Chrome{
       status_bar_draws: [],
       status_bar_data: status_bar_data,
+      minibuffer_data: minibuffer_data,
       modeline_click_regions: [],
       tab_bar: [],
       tab_bar_click_regions: [],

@@ -8,12 +8,14 @@ defmodule Minga.Mode.CommandState do
 
   @enforce_keys []
   defstruct input: "",
+            candidate_index: 0,
             count: nil,
             leader_node: nil,
             leader_keys: []
 
   @type t :: %__MODULE__{
           input: String.t(),
+          candidate_index: integer(),
           count: non_neg_integer() | nil,
           leader_node: Minga.Keymap.Bindings.node_t() | nil,
           leader_keys: [String.t()]

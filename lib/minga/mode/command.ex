@@ -13,8 +13,10 @@ defmodule Minga.Mode.Command do
   | Key         | Action                                              |
   |-------------|-----------------------------------------------------|
   | `Enter`     | Parse + execute command, transition to Normal       |
+  | `Tab`       | Accept selected completion candidate                |
   | `Escape`    | Cancel, transition to Normal                        |
   | `Backspace` | Delete last character; if empty → Normal            |
+  | `↑` / `↓`  | Navigate completion candidates                     |
   | Printable   | Append character to the command buffer              |
 
   ## State contract
@@ -33,6 +35,7 @@ defmodule Minga.Mode.Command do
   # Special codepoints
   @escape 27
   @enter 13
+  @tab 9
 
   # Arrow key codepoints sent by libvaxis (exclude from printable range)
   @arrow_up 57_352
@@ -76,13 +79,28 @@ defmodule Minga.Mode.Command do
     end
   end
 
-  # Arrow keys — ignored in command mode (use terminal editing only)
+  # Tab → accept selected completion candidate
+  def handle_key({@tab, _mods}, %CommandState{} = state) do
+    {:execute, [{:accept_command_candidate}], state}
+  end
+
+  # Arrow up → move candidate selection up
+  def handle_key({@arrow_up, _mods}, %CommandState{candidate_index: idx} = state) do
+    {:continue, %{state | candidate_index: idx - 1}}
+  end
+
+  # Arrow down → move candidate selection down
+  def handle_key({@arrow_down, _mods}, %CommandState{candidate_index: idx} = state) do
+    {:continue, %{state | candidate_index: idx + 1}}
+  end
+
+  # Arrow left/right — ignored in command mode
   def handle_key({cp, _mods}, %CommandState{} = state)
-      when cp in [@arrow_up, @arrow_down, @arrow_left, @arrow_right] do
+      when cp in [@arrow_left, @arrow_right] do
     {:continue, state}
   end
 
-  # Printable Unicode characters (no modifiers) → append to input
+  # Printable Unicode characters (no modifiers) → append to input, reset candidate selection
   def handle_key({codepoint, 0}, %CommandState{input: input} = state)
       when codepoint >= 32 and codepoint <= 0x10FFFF do
     char =
@@ -94,7 +112,7 @@ defmodule Minga.Mode.Command do
 
     case char do
       nil -> {:continue, state}
-      c -> {:continue, %{state | input: input <> c}}
+      c -> {:continue, %{state | input: input <> c, candidate_index: 0}}
     end
   end
 

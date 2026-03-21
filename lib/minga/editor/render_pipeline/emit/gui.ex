@@ -24,6 +24,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
   alias Minga.Config.Options
   alias Minga.Editor.DisplayList.Frame
   alias Minga.Editor.Layout
+  alias Minga.Editor.MinibufferData
   alias Minga.Editor.RenderPipeline.ContentHelpers
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.TabBar
@@ -118,8 +119,8 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
   to avoid re-calling BufferServer for cursor/file info on the same frame.
   When nil (e.g. non-GUI fallback paths), it is computed here.
   """
-  @spec sync_swiftui_chrome(state(), StatusBarData.t() | nil) :: state()
-  def sync_swiftui_chrome(state, status_bar_data \\ nil) do
+  @spec sync_swiftui_chrome(state(), StatusBarData.t() | nil, MinibufferData.t() | nil) :: state()
+  def sync_swiftui_chrome(state, status_bar_data \\ nil, minibuffer_data \\ nil) do
     sb_data = status_bar_data || StatusBarData.from_state(state)
 
     # Collect changed chrome commands into a single list.
@@ -135,7 +136,8 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
         build_gui_breadcrumb_cmd(state),
         build_gui_status_bar_cmd(state, sb_data),
         build_gui_picker_cmd(state),
-        build_gui_agent_chat_cmd(state)
+        build_gui_agent_chat_cmd(state),
+        build_gui_minibuffer_cmd(state, minibuffer_data)
       ]
       |> Enum.reject(&is_nil/1)
 
@@ -285,6 +287,41 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
   @spec build_gui_status_bar_cmd(state(), StatusBarData.t()) :: binary()
   defp build_gui_status_bar_cmd(_state, status_bar_data) do
     ProtocolGUI.encode_gui_status_bar(status_bar_data)
+  end
+
+  # ── Minibuffer ──
+
+  # Sends the gui_minibuffer opcode only when the data has changed since
+  # the last frame. Uses a content hash to avoid re-encoding and resending
+  # identical minibuffer state every render cycle.
+
+  @spec build_gui_minibuffer_cmd(state(), MinibufferData.t() | nil) :: binary() | nil
+  defp build_gui_minibuffer_cmd(_state, %MinibufferData{} = data) do
+    fingerprint = minibuffer_fingerprint(data)
+
+    if fingerprint != Process.get(:last_gui_minibuffer) do
+      Process.put(:last_gui_minibuffer, fingerprint)
+      ProtocolGUI.encode_gui_minibuffer(data)
+    end
+  end
+
+  defp build_gui_minibuffer_cmd(_state, nil) do
+    if Process.get(:last_gui_minibuffer) != :hidden do
+      Process.put(:last_gui_minibuffer, :hidden)
+      ProtocolGUI.encode_gui_minibuffer(%MinibufferData{visible: false})
+    end
+  end
+
+  # Produces a lightweight fingerprint for change detection. Captures all
+  # fields that affect the rendered output without allocating a full
+  # encoded binary.
+  @spec minibuffer_fingerprint(MinibufferData.t()) :: term()
+  defp minibuffer_fingerprint(%MinibufferData{visible: false}), do: :hidden
+
+  defp minibuffer_fingerprint(%MinibufferData{} = d) do
+    {d.visible, d.mode, d.cursor_pos, d.prompt, d.input, d.context, d.selected_index,
+     length(d.candidates),
+     Enum.map(d.candidates, fn c -> {c.label, c.description, c.match_score} end)}
   end
 
   # ── Picker ──

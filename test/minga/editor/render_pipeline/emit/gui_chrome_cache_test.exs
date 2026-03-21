@@ -1,6 +1,6 @@
 defmodule Minga.Editor.RenderPipeline.Emit.GUI.ChromeCacheTest do
   @moduledoc """
-  Tests for fingerprint-based change detection in `sync_swiftui_chrome/2`.
+  Tests for fingerprint-based change detection in `sync_swiftui_chrome/3`.
 
   Verifies that unchanged chrome components are skipped on subsequent
   frames, and that changed components are re-sent. Uses the process
@@ -26,6 +26,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI.ChromeCacheTest do
     :last_gui_picker_fp,
     :last_gui_agent_chat_fp,
     :last_gui_bottom_panel_fp,
+    :last_gui_minibuffer,
     # Also clear the font registry that Emit puts in the process dict.
     :emit_font_registry
   ]
@@ -63,7 +64,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI.ChromeCacheTest do
     end
   end
 
-  describe "sync_swiftui_chrome/2 fingerprint caching" do
+  describe "sync_swiftui_chrome/3 fingerprint caching" do
     test "sends chrome commands on first call" do
       state = gui_chrome_state()
       sb_data = StatusBarData.from_state(state)

@@ -450,6 +450,40 @@ Method values:
 | 3 | go_install |
 | 4 | github_release |
 
+### 0x7F — gui_minibuffer
+
+Native minibuffer state with inline completion candidates. Replaces the cell-grid minibuffer row for GUI frontends. The input bar shows the prompt, typed text, and cursor; the candidate list (when present) expands above it.
+
+```
+When visible:
+  opcode(1) + 1(1) + mode(1) + cursor_pos(2)
+  + prompt_len(1) + prompt(prompt_len)
+  + input_len(2) + input(input_len)
+  + context_len(2) + context(context_len)
+  + selected_index(2) + candidate_count(2) + candidates...
+
+Per candidate:
+  match_score(1) + label_len(2) + label(label_len) + desc_len(2) + desc(desc_len)
+
+When hidden:
+  opcode(1) + 0(1)
+```
+
+Mode values:
+
+| Value | Mode | Prompt Example | Has Cursor | Context Example |
+|-------|------|----------------|------------|-----------------|
+| 0 | command | `:` | yes | (empty) |
+| 1 | search_forward | `/` | yes | `"3 of 42"` |
+| 2 | search_backward | `?` | yes | `"3 of 42"` |
+| 3 | search_prompt | `"Search: "` | yes | (empty) |
+| 4 | eval | `"Eval: "` | yes | (empty) |
+| 5 | substitute_confirm | `"replace with foo?"` | no | `"y/n/a/q (2 of 15)"` |
+| 6 | extension_confirm | (plugin prompt) | no | (empty) |
+| 7 | describe_key | `"Press key: "` | no | (accumulated keys) |
+
+`cursor_pos` is the 0-indexed character position within `input` for the beam cursor. `0xFFFF` means no cursor (prompt-only modes 5-7). `context` is right-aligned supplementary text. `match_score` is 0-255 fuzzy match quality. `candidate_count == 0` naturally represents "input visible, no completions."
+
 ### 0x80 — gui_window_content
 
 Semantic rendering data for a buffer window. Replaces draw_text commands for buffer content. The BEAM pre-resolves all layout (word wrap, folding, virtual text splicing, conceal ranges) and all styling (syntax highlighting colors). The frontend renders directly from this data via CoreText, with selection/search/diagnostics as overlay quads (not baked into text colors).

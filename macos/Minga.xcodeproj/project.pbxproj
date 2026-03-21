@@ -30,9 +30,11 @@
 		2BA99A1851D0FF01436D5FF8 /* ToolManagerState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A64B96EAA100E627F4E8E0A1 /* ToolManagerState.swift */; };
 		2E40B27FA890123D325C4346 /* TabBarState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A7AA0437B5C38BA8A8A80D5 /* TabBarState.swift */; };
 		30E31170A79F30413D15D858 /* GUIChromeDecoderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 754C68BAFE0C4DB553BFD06A /* GUIChromeDecoderTests.swift */; };
+		314707094507A0EBBADBF111 /* MinibufferState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02D2D3B0C9A042E9A5C485E1 /* MinibufferState.swift */; };
 		31E0D1C2347322703DA6CC71 /* FileTreeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5458552EC58E44C7CD15A98A /* FileTreeView.swift */; };
 		32171233224FC90E1E956631 /* PickerState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92C0836F0D4150126F181C05 /* PickerState.swift */; };
 		36E0C059965477465E15CC02 /* GUIState.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2AC58C2F81C6E5B2C7004B3 /* GUIState.swift */; };
+		3943C8DF3827347B61E6B725 /* MinibufferView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05DDF3EED1B486C4639A06FF /* MinibufferView.swift */; };
 		3C4EF75DC1B6D22F690448FD /* ToolManagerState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A64B96EAA100E627F4E8E0A1 /* ToolManagerState.swift */; };
 		3DF3937E460A624254F647BC /* WhichKeyOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF8ACE680725ECE21E6E03B4 /* WhichKeyOverlay.swift */; };
 		44D48DF33203C53ACC3BA1AA /* WindowContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 790F7E20F30FEEFC552B3685 /* WindowContent.swift */; };
@@ -63,6 +65,7 @@
 		686DD6EB8AFDCAFC79EA100A /* ProtocolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F220A60775A252A728477659 /* ProtocolTests.swift */; };
 		687B43B79B14FA56F9B76115 /* ScrollAccumulator.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEFD30A2572AE2608F099407 /* ScrollAccumulator.swift */; };
 		6C386E10E81099D724B28984 /* BreadcrumbBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFA9D8D41BCA4E6CB45243A2 /* BreadcrumbBar.swift */; };
+		74D29226F82E6ADE18E2E108 /* MinibufferState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02D2D3B0C9A042E9A5C485E1 /* MinibufferState.swift */; };
 		778C6A917140005C0C0643CB /* ProtocolEncoderBinaryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47BD56B7D6D195D236F9BF40 /* ProtocolEncoderBinaryTests.swift */; };
 		78F06B9BFB553B50D9BDD50F /* FontFace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BC98120D82BD7548347875E /* FontFace.swift */; };
 		793247C2AB95598A1AC4C6EC /* ScrollAccumulator.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEFD30A2572AE2608F099407 /* ScrollAccumulator.swift */; };
@@ -113,6 +116,7 @@
 		E18A2D9D7987A763DBD8214D /* SlotAllocator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 371C61E78D4BB39467516BA7 /* SlotAllocator.swift */; };
 		E2F11A5F81A89C0BF03D9EE2 /* CoreTextLineRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5387C9048870A71E7565ED06 /* CoreTextLineRenderer.swift */; };
 		EDF83D0ACFCCB4ED91C1813C /* CommandDispatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = C21AB9021A9BCB034C13109A /* CommandDispatcher.swift */; };
+		EF9BCC61E6D89ABC9D50750C /* MinibufferView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05DDF3EED1B486C4639A06FF /* MinibufferView.swift */; };
 		F0A2BCCA095F1CA4FBE9BE3F /* ProtocolSchemaTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DC281B7F9F7E4C0BA793B1E /* ProtocolSchemaTests.swift */; };
 		F16FDEC1BFC1776B1109622E /* TabBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03D7C3564C27A7E14D894539 /* TabBarView.swift */; };
 		F3BB64E36F257BD7FACEA5D6 /* CoreTextShaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = 48E21C30D142028698027567 /* CoreTextShaders.metal */; };
@@ -125,8 +129,10 @@
 
 /* Begin PBXFileReference section */
 		00D6B3C68CFF37BC4303933A /* ThemeColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeColors.swift; sourceTree = "<group>"; };
+		02D2D3B0C9A042E9A5C485E1 /* MinibufferState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MinibufferState.swift; sourceTree = "<group>"; };
 		03D7C3564C27A7E14D894539 /* TabBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabBarView.swift; sourceTree = "<group>"; };
 		053D515EC453DEBFF51FB6CB /* DecoderFuzzTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DecoderFuzzTests.swift; sourceTree = "<group>"; };
+		05DDF3EED1B486C4639A06FF /* MinibufferView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MinibufferView.swift; sourceTree = "<group>"; };
 		0A7AA0437B5C38BA8A8A80D5 /* TabBarState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabBarState.swift; sourceTree = "<group>"; };
 		0C26E064D810299C0302F439 /* EditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorView.swift; sourceTree = "<group>"; };
 		211424F30BBE8A57852D5630 /* ScrollAccumulatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollAccumulatorTests.swift; sourceTree = "<group>"; };
@@ -270,6 +276,8 @@
 				7A67102D81C9E70546F1019B /* MessagesContentState.swift */,
 				AFE9DFE38318A361BEF0B773 /* MessagesContentView.swift */,
 				4D02E1034A8BFBDB7E15FCE9 /* MingaWindow.swift */,
+				02D2D3B0C9A042E9A5C485E1 /* MinibufferState.swift */,
+				05DDF3EED1B486C4639A06FF /* MinibufferView.swift */,
 				52F606681DE9AA9D502A42AA /* PickerOverlay.swift */,
 				92C0836F0D4150126F181C05 /* PickerState.swift */,
 				BEFD30A2572AE2608F099407 /* ScrollAccumulator.swift */,
@@ -505,6 +513,8 @@
 				A15090D92542403F12179DFD /* MessagesContentView.swift in Sources */,
 				16E32CF32A4AE261F717B823 /* MingaApp.swift in Sources */,
 				27236A210603A4548A56F072 /* MingaWindow.swift in Sources */,
+				314707094507A0EBBADBF111 /* MinibufferState.swift in Sources */,
+				EF9BCC61E6D89ABC9D50750C /* MinibufferView.swift in Sources */,
 				B768FE0E1E64E6C754EAD109 /* PickerOverlay.swift in Sources */,
 				7B1E95EDA0612049FB400108 /* PickerState.swift in Sources */,
 				158393FF12EC30CAB1653526 /* PortLogger.swift in Sources */,
@@ -566,6 +576,8 @@
 				8D55764B8CF042B4C48AA5D0 /* MessagesContentState.swift in Sources */,
 				931A6127210D4ED441AC04B2 /* MessagesContentView.swift in Sources */,
 				8B944E100C80DFF282D25D4C /* MingaWindow.swift in Sources */,
+				74D29226F82E6ADE18E2E108 /* MinibufferState.swift in Sources */,
+				3943C8DF3827347B61E6B725 /* MinibufferView.swift in Sources */,
 				058481A528AFB6C7225A067D /* MouseInputTests.swift in Sources */,
 				F560D385A1FB0A46824F7B1F /* PickerOverlay.swift in Sources */,
 				32171233224FC90E1E956631 /* PickerState.swift in Sources */,

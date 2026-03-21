@@ -18,6 +18,7 @@ defmodule Minga.Editor.RenderPipeline.Chrome do
   alias Minga.Editor.DisplayList.Cursor
   alias Minga.Editor.HoverPopup
   alias Minga.Editor.Layout
+  alias Minga.Editor.MinibufferData
   alias Minga.Editor.RenderPipeline.Scroll.WindowScroll
   alias Minga.Editor.SignatureHelp
   alias Minga.Editor.State, as: EditorState
@@ -30,6 +31,7 @@ defmodule Minga.Editor.RenderPipeline.Chrome do
   @enforce_keys []
   defstruct status_bar_draws: [],
             status_bar_data: nil,
+            minibuffer_data: nil,
             modeline_click_regions: [],
             tab_bar: [],
             tab_bar_click_regions: [],
@@ -43,6 +45,7 @@ defmodule Minga.Editor.RenderPipeline.Chrome do
   @type t :: %__MODULE__{
           status_bar_draws: [DisplayList.draw()],
           status_bar_data: StatusBarData.t() | nil,
+          minibuffer_data: MinibufferData.t() | nil,
           modeline_click_regions: [Minga.Editor.Modeline.click_region()],
           tab_bar: [DisplayList.draw()],
           tab_bar_click_regions: [Minga.Editor.TabBarRenderer.click_region()],

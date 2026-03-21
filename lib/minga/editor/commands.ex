@@ -40,6 +40,7 @@ defmodule Minga.Editor.Commands do
   alias Minga.Editor.Commands.Tool
   alias Minga.Editor.Commands.Visual
   alias Minga.Editor.LspActions
+  alias Minga.Editor.MinibufferData
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Window
   alias Minga.Keymap.Active, as: KeymapActive
@@ -356,6 +357,28 @@ defmodule Minga.Editor.Commands do
       _keys ->
         rec = %{state.vim.macro_recorder | last_register: register}
         {%{state | vim: %{state.vim | macro_recorder: rec}}, {:replay_macro, register}}
+    end
+  end
+
+  # ── Minibuffer candidate acceptance ───────────────────────────────────────
+
+  def execute(state, {:accept_command_candidate}) do
+    case state.vim do
+      %{mode: :command, mode_state: ms} ->
+        candidates = MinibufferData.complete_ex_command(ms.input)
+        idx = MinibufferData.clamp_index(ms.candidate_index, length(candidates))
+
+        case Enum.at(candidates, idx) do
+          nil ->
+            state
+
+          %{label: label} ->
+            new_ms = %{ms | input: label, candidate_index: 0}
+            %{state | vim: %{state.vim | mode_state: new_ms}}
+        end
+
+      _ ->
+        state
     end
   end
 

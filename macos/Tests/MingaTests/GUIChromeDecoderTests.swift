@@ -359,7 +359,7 @@ struct GUIStatusBarDecoderTests {
                                   let infoCount, let hintCount, let macroRecording,
                                   let parserStatus, let agentStatus,
                                   let gitAdded, let gitModified, let gitDeleted,
-                                  _, _, _, _, let filename) = cmd else {
+                                  _, _, _, _, let filename, _) = cmd else {
             Issue.record("Expected .guiStatusBar"); return
         }
 
@@ -410,7 +410,7 @@ struct GUIStatusBarDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiStatusBar(let contentKind, _, _, _, _, _, _, _, _, _, _, _, let modelName, let messageCount, let sessionStatus, _, _, _, _, _, _, _, _, _, _, _, _, _) = cmd else {
+        guard case .guiStatusBar(let contentKind, _, _, _, _, _, _, _, _, _, _, _, let modelName, let messageCount, let sessionStatus, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = cmd else {
             Issue.record("Expected .guiStatusBar"); return
         }
 

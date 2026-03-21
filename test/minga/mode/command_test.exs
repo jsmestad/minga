@@ -143,9 +143,37 @@ defmodule Minga.Mode.CommandTest do
       assert state.input == "w"
     end
 
-    test "arrow keys are ignored" do
-      assert {:continue, state} = Command.handle_key({57_352, 0}, fresh_state("w"))
+    test "arrow up decrements candidate_index" do
+      state = %CommandState{input: "w", candidate_index: 2}
+      assert {:continue, new_state} = Command.handle_key({57_352, 0}, state)
+      assert new_state.candidate_index == 1
+      assert new_state.input == "w"
+    end
+
+    test "arrow down increments candidate_index" do
+      state = %CommandState{input: "w", candidate_index: 0}
+      assert {:continue, new_state} = Command.handle_key({57_353, 0}, state)
+      assert new_state.candidate_index == 1
+      assert new_state.input == "w"
+    end
+
+    test "arrow left/right are ignored" do
+      assert {:continue, state} = Command.handle_key({57_350, 0}, fresh_state("w"))
       assert state.input == "w"
+      assert {:continue, state} = Command.handle_key({57_351, 0}, fresh_state("w"))
+      assert state.input == "w"
+    end
+
+    test "tab returns accept_command_candidate action" do
+      state = fresh_state("wri")
+      assert {:execute, [{:accept_command_candidate}], ^state} = Command.handle_key({9, 0}, state)
+    end
+
+    test "typing a character resets candidate_index to 0" do
+      state = %CommandState{input: "w", candidate_index: 3}
+      assert {:continue, new_state} = Command.handle_key({?r, 0}, state)
+      assert new_state.input == "wr"
+      assert new_state.candidate_index == 0
     end
   end
 
