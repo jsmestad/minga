@@ -189,6 +189,9 @@ defmodule Minga.CommandOutput do
     BufferServer.buffer_name(buf)
     state
   catch
+    # Liveness probe: the monitor handles the common case, but there's a narrow
+    # race where the buffer dies between monitor delivery and this call.
+    # Targeted catch per AGENTS.md rule 4.
     :exit, _ -> create_buffer(state)
   end
 

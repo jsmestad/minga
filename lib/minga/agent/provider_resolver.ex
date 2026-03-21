@@ -102,10 +102,6 @@ defmodule Minga.Agent.ProviderResolver do
   @spec has_native_credentials?() :: boolean()
   defp has_native_credentials? do
     Credentials.any_configured?()
-  rescue
-    ArgumentError -> false
-  catch
-    :exit, _ -> false
   end
 
   @spec pi_available?() :: boolean()
