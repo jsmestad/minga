@@ -7,35 +7,56 @@
 
 import SwiftUI
 
+/// Measures the ScrollView's visible viewport height so the content
+/// can be bottom-anchored when there are fewer messages than screen space.
+private struct ScrollViewHeightKey: PreferenceKey {
+    nonisolated(unsafe) static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
 struct AgentChatView: View {
     let state: AgentChatState
     let theme: ThemeColors
     let isInsertMode: Bool
+
+    @State private var scrollViewHeight: CGFloat = 0
 
     var body: some View {
         VStack(spacing: 0) {
             // Header bar
             chatHeader
 
-            // Messages
+            // Messages: bottom-anchored so few messages cluster near the
+            // prompt input rather than leaving a void below them.
             ScrollViewReader { proxy in
                 ScrollView(.vertical) {
                     LazyVStack(spacing: 12) {
                         ForEach(state.messages) { msg in
                             messageView(msg)
                         }
-
-                        // Bottom padding so the last message has breathing room
-                        // above the prompt separator / approval banner.
-                        Spacer(minLength: 16)
-                            .id("bottom-padding")
                     }
                     .padding(.horizontal, 16)
                     .padding(.top, 12)
+                    .padding(.bottom, 16)
+                    .frame(minHeight: scrollViewHeight, alignment: .bottom)
+                }
+                .defaultScrollAnchor(.bottom)
+                .background(
+                    GeometryReader { geo in
+                        Color.clear.preference(
+                            key: ScrollViewHeightKey.self,
+                            value: geo.size.height
+                        )
+                    }
+                )
+                .onPreferenceChange(ScrollViewHeightKey.self) { height in
+                    scrollViewHeight = height
                 }
                 .onChange(of: state.messages.count) { _, _ in
                     withAnimation(nil) {
-                        proxy.scrollTo("bottom-padding", anchor: .bottom)
+                        proxy.scrollTo(state.messages.last?.id, anchor: .bottom)
                     }
                 }
             }
