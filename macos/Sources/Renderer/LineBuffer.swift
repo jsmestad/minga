@@ -124,10 +124,15 @@ final class LineBuffer {
     }
 
     /// Clear all lines and reset cursor state for a new frame.
+    ///
+    /// Note: `windowGutters` is intentionally NOT cleared here.
+    /// Gutter positions are stable between frames (they only change on
+    /// resize/split). Keeping the previous frame's gutter data as fallback
+    /// prevents a blank-gutter flash if the gutter command hasn't arrived
+    /// yet. The `guiGutter` dispatch overwrites per-window data each frame.
     func clear() {
         lines.removeAll(keepingCapacity: true)
         lineHashes.removeAll(keepingCapacity: true)
-        windowGutters.removeAll(keepingCapacity: true)
         dirty = true
     }
 

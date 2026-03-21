@@ -43,12 +43,21 @@ final class GUIState {
     let toolManagerState = ToolManagerState()
 
     /// Semantic window content from gui_window_content (0x80).
-    /// Keyed by windowId. Cleared each frame before dispatch.
+    /// Keyed by windowId. NOT cleared between frames; the guiWindowContent
+    /// dispatch overwrites per-window data each frame. Stale entries serve
+    /// as fallback to prevent blank viewport flashes.
     var windowContents: [UInt16: GUIWindowContent] = [:]
 
-    /// Clears per-frame state that must be rebuilt from incoming commands.
-    /// Called at the start of each frame before dispatching commands.
+    /// Prepares for a new frame.
+    ///
+    /// Note: `windowContents` is intentionally NOT cleared here.
+    /// The `guiWindowContent` dispatch overwrites per-window data each
+    /// frame. Keeping stale content as fallback prevents a blank viewport
+    /// flash if frame delivery is interrupted (defense-in-depth alongside
+    /// the atomic Metal frame bundling on the BEAM side).
     func beginFrame() {
-        windowContents.removeAll(keepingCapacity: true)
+        // No-op: all per-frame state is overwritten by incoming commands.
+        // Previously cleared windowContents here, but that caused blank
+        // frames when vsync fired between clear and content arrival.
     }
 }
