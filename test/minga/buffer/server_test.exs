@@ -147,6 +147,96 @@ defmodule Minga.Buffer.ServerTest do
     end
   end
 
+  describe "move_if_possible/2" do
+    test "moves left when not at column 0" do
+      pid = start_supervised!({Server, content: "hello"})
+      Server.move_to(pid, {0, 3})
+      assert {:ok, {0, 2}} = Server.move_if_possible(pid, :left)
+      assert Server.cursor(pid) == {0, 2}
+    end
+
+    test "left from column 1 succeeds and reaches column 0" do
+      pid = start_supervised!({Server, content: "hello"})
+      Server.move_to(pid, {0, 1})
+      assert {:ok, {0, 0}} = Server.move_if_possible(pid, :left)
+      assert Server.cursor(pid) == {0, 0}
+    end
+
+    test "returns :at_boundary when at column 0 (left)" do
+      pid = start_supervised!({Server, content: "hello"})
+      assert :at_boundary = Server.move_if_possible(pid, :left)
+      assert Server.cursor(pid) == {0, 0}
+    end
+
+    test "moves right when not at end of line" do
+      pid = start_supervised!({Server, content: "hello"})
+      assert {:ok, {0, 1}} = Server.move_if_possible(pid, :right)
+      assert Server.cursor(pid) == {0, 1}
+    end
+
+    test "returns :at_boundary when at last grapheme position (right)" do
+      pid = start_supervised!({Server, content: "hello"})
+      # "hello" has last grapheme at byte offset 4
+      Server.move_to(pid, {0, 4})
+      assert :at_boundary = Server.move_if_possible(pid, :right)
+      assert Server.cursor(pid) == {0, 4}
+    end
+
+    test "single character line is at boundary for right" do
+      # single char: last_grapheme_byte_offset("x") is 0, cursor already at max_col
+      pid = start_supervised!({Server, content: "x"})
+      assert :at_boundary = Server.move_if_possible(pid, :right)
+      assert Server.cursor(pid) == {0, 0}
+    end
+
+    test "returns :at_boundary on empty line (right)" do
+      pid = start_supervised!({Server, content: "\n"})
+      assert :at_boundary = Server.move_if_possible(pid, :right)
+      assert Server.cursor(pid) == {0, 0}
+    end
+
+    test "returns :at_boundary at start of buffer (left)" do
+      pid = start_supervised!({Server, content: "abc\ndef"})
+      assert :at_boundary = Server.move_if_possible(pid, :left)
+    end
+
+    test "returns :at_boundary at end of last line (right)" do
+      pid = start_supervised!({Server, content: "abc\ndef"})
+      Server.move_to(pid, {1, 2})
+      assert :at_boundary = Server.move_if_possible(pid, :right)
+    end
+
+    test "consecutive right moves walk to end of line then stop" do
+      pid = start_supervised!({Server, content: "abc"})
+      assert {:ok, {0, 1}} = Server.move_if_possible(pid, :right)
+      assert {:ok, {0, 2}} = Server.move_if_possible(pid, :right)
+      assert :at_boundary = Server.move_if_possible(pid, :right)
+      # cursor stays put after boundary
+      assert :at_boundary = Server.move_if_possible(pid, :right)
+      assert Server.cursor(pid) == {0, 2}
+    end
+
+    test "respects byte-offset positions for multi-byte graphemes (right)" do
+      # "héllo": h(0) é(1, 2 bytes) l(3) l(4) o(5) — last grapheme at byte offset 5
+      pid = start_supervised!({Server, content: "héllo"})
+      Server.move_to(pid, {0, 5})
+      assert :at_boundary = Server.move_if_possible(pid, :right)
+    end
+
+    test "left through multi-byte grapheme returns correct byte offset" do
+      # "héllo": moving left from l(3) should land on é(1)
+      pid = start_supervised!({Server, content: "héllo"})
+      Server.move_to(pid, {0, 3})
+      assert {:ok, {0, 1}} = Server.move_if_possible(pid, :left)
+    end
+
+    test "does not mark buffer dirty" do
+      pid = start_supervised!({Server, content: "hello"})
+      Server.move_if_possible(pid, :right)
+      refute Server.dirty?(pid)
+    end
+  end
+
   describe "move_to/2" do
     test "moves to exact position" do
       {:ok, pid} = Server.start_link(content: "abc\ndef\nghi")
