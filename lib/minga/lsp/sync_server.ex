@@ -243,7 +243,7 @@ defmodule Minga.LSP.SyncServer do
   defp notify_clients_change(clients, buffer_pid) do
     with uri when is_binary(uri) <- buffer_uri(buffer_pid) do
       # Collect edit deltas for incremental sync
-      deltas = BufferServer.flush_edits(buffer_pid)
+      deltas = BufferServer.flush_edits(buffer_pid, :lsp)
 
       send_to_alive_clients(clients, fn client ->
         send_change(client, uri, buffer_pid, deltas)

@@ -674,8 +674,8 @@ defmodule Minga.Editor do
   end
 
   # Completion debounce timer fired — send the actual completion request
-  def handle_info({:completion_debounce, client, buffer_pid}, state) do
-    new_bridge = CompletionTrigger.flush_debounce(state.completion_trigger, client, buffer_pid)
+  def handle_info({:completion_debounce, clients, buffer_pid}, state) do
+    new_bridge = CompletionTrigger.flush_debounce(state.completion_trigger, clients, buffer_pid)
     {:noreply, %{state | completion_trigger: new_bridge}}
   end
 
@@ -702,6 +702,11 @@ defmodule Minga.Editor do
         new_state = dispatch_lsp_response(kind, new_state, result)
         {:noreply, Renderer.render(new_state)}
 
+      {kind, pending} when is_tuple(kind) ->
+        new_state = put_in(state.lsp_pending, pending)
+        new_state = dispatch_lsp_response(kind, new_state, result)
+        {:noreply, Renderer.render(new_state)}
+
       {nil, _} ->
         # Not a tracked request — try completion handler
         handle_lsp_completion_response(ref, result, state)
@@ -709,6 +714,12 @@ defmodule Minga.Editor do
   end
 
   # Document highlight debounce timer fired
+  def handle_info(:inlay_hint_scroll_debounce, state) do
+    state = %{state | inlay_hint_debounce_timer: nil}
+    state = LspActions.inlay_hints(state)
+    {:noreply, state}
+  end
+
   def handle_info(:document_highlight_debounce, state) do
     state = %{state | highlight_debounce_timer: nil}
     state = LspActions.document_highlight(state)
@@ -748,6 +759,12 @@ defmodule Minga.Editor do
   # Refresh the cached LSP status for the modeline indicator.
   # Fired after buffer open (with delay for async LSP initialization)
   # and periodically while LSP clients are connecting.
+  def handle_info(:request_code_lens_and_inlay_hints, state) do
+    state = LspActions.code_lens(state)
+    state = LspActions.inlay_hints(state)
+    {:noreply, state}
+  end
+
   def handle_info(:refresh_lsp_status, state) do
     old_status = state.lsp_status
     state = BufferLifecycle.refresh_lsp_status(state)
@@ -872,7 +889,11 @@ defmodule Minga.Editor do
   end
 
   def handle_info({:minga_event, :buffer_saved, %Minga.Events.BufferEvent{}}, state) do
-    {:noreply, refresh_tree_git_status(state)}
+    state = refresh_tree_git_status(state)
+    # Request fresh code lenses and inlay hints after save
+    state = LspActions.code_lens(state)
+    state = LspActions.inlay_hints(state)
+    {:noreply, state}
   end
 
   # ── Tool manager events ────────────────────────────────────────────────────
@@ -924,12 +945,15 @@ defmodule Minga.Editor do
   # ── LSP response dispatch ──────────────────────────────────────────────────
 
   # Dispatches an LSP response to the appropriate handler based on the kind atom.
-  @spec dispatch_lsp_response(atom(), EditorState.t(), term()) :: EditorState.t()
+  @spec dispatch_lsp_response(term(), EditorState.t(), term()) :: EditorState.t()
   defp dispatch_lsp_response(:definition, state, result),
     do: LspActions.handle_definition_response(state, result)
 
   defp dispatch_lsp_response(:hover, state, result),
     do: LspActions.handle_hover_response(state, result)
+
+  defp dispatch_lsp_response({:hover_mouse, row, col}, state, result),
+    do: LspActions.handle_hover_mouse_response(state, result, row, col)
 
   defp dispatch_lsp_response(:references, state, result),
     do: LspActions.handle_references_response(state, result)
@@ -975,6 +999,9 @@ defmodule Minga.Editor do
 
   defp dispatch_lsp_response(:code_lens, state, result),
     do: LspActions.handle_code_lens_response(state, result)
+
+  defp dispatch_lsp_response(:code_lens_resolve, state, result),
+    do: LspActions.handle_code_lens_resolve_response(state, result)
 
   defp dispatch_lsp_response(:inlay_hint, state, result),
     do: LspActions.handle_inlay_hint_response(state, result)
@@ -1343,6 +1370,11 @@ defmodule Minga.Editor do
       buffer: buffer_pid,
       path: file_path
     })
+
+    # Schedule code lens and inlay hint requests after LSP clients connect.
+    # The SyncServer handles didOpen via the event bus; by the time 800ms
+    # elapses the LSP client should be ready to serve requests.
+    Process.send_after(self(), :request_code_lens_and_inlay_hints, 800)
 
     state
   end

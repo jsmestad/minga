@@ -79,9 +79,19 @@ defmodule Minga.Theme do
   # ── Color group structs ─────────────────────────────────────────────────────
 
   defmodule Editor do
-    @moduledoc "Editor chrome colors: background, foreground, tilde lines, split borders, cursorline, nav-flash."
+    @moduledoc "Editor chrome colors: background, foreground, tilde lines, split borders, cursorline, nav-flash, highlight/selection."
     @enforce_keys [:bg, :fg, :tilde_fg, :split_border_fg]
-    defstruct [:bg, :fg, :tilde_fg, :split_border_fg, :cursorline_bg, :nav_flash_bg]
+    defstruct [
+      :bg,
+      :fg,
+      :tilde_fg,
+      :split_border_fg,
+      :cursorline_bg,
+      :nav_flash_bg,
+      :highlight_read_bg,
+      :highlight_write_bg,
+      :selection_bg
+    ]
 
     @type t :: %__MODULE__{
             bg: Minga.Theme.color(),
@@ -89,7 +99,10 @@ defmodule Minga.Theme do
             tilde_fg: Minga.Theme.color(),
             split_border_fg: Minga.Theme.color(),
             cursorline_bg: Minga.Theme.color() | nil,
-            nav_flash_bg: Minga.Theme.color() | nil
+            nav_flash_bg: Minga.Theme.color() | nil,
+            highlight_read_bg: Minga.Theme.color() | nil,
+            highlight_write_bg: Minga.Theme.color() | nil,
+            selection_bg: Minga.Theme.color() | nil
           }
   end
 

@@ -137,9 +137,24 @@ defmodule Minga.Input.Router do
     |> Editor.do_maybe_reset_highlight(old_buffer)
     |> Editor.do_maybe_reparse(buf_version_before)
     |> Editor.do_maybe_handle_completion(old_mode, codepoint, modifiers)
+    |> maybe_clear_selection_ranges(old_mode)
     |> maybe_schedule_document_highlight(old_buffer, old_cursor)
     |> maybe_render(buf_version_before)
   end
+
+  # Clears selection range state when leaving visual mode by any means.
+  # This ensures the stored selection range chain doesn't linger after
+  # the user exits visual mode (Escape, entering normal mode, switching buffers).
+  @spec maybe_clear_selection_ranges(EditorState.t(), atom()) :: EditorState.t()
+  defp maybe_clear_selection_ranges(
+         %EditorState{vim: %{mode: current_mode}, selection_ranges: ranges} = state,
+         old_mode
+       )
+       when old_mode == :visual and current_mode != :visual and ranges != nil do
+    %{state | selection_ranges: nil, selection_range_index: 0}
+  end
+
+  defp maybe_clear_selection_ranges(state, _old_mode), do: state
 
   # Schedules a debounced document highlight request when the cursor moves
   # in normal mode. Clears highlights on buffer switch or mode change.
@@ -186,7 +201,8 @@ defmodule Minga.Input.Router do
     new_cursor = safe_cursor(state.buffers.active)
 
     if new_cursor != old_cursor do
-      LspActions.schedule_document_highlight(state)
+      state = LspActions.schedule_document_highlight(state)
+      LspActions.schedule_inlay_hints_on_scroll(state)
     else
       state
     end

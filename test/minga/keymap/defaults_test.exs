@@ -123,6 +123,32 @@ defmodule Minga.Keymap.DefaultsTest do
       assert {:command, :describe_key} = Bindings.lookup(h_node, {?k, 0})
     end
 
+    # ── Code / LSP bindings ───────────────────────────────────────────────────
+
+    test "SPC c h → :call_hierarchy" do
+      trie = Defaults.leader_trie()
+      {:prefix, c_node} = Bindings.lookup(trie, {?c, 0})
+      assert {:command, :call_hierarchy} = Bindings.lookup(c_node, {?h, 0})
+    end
+
+    test "SPC c H → :call_hierarchy_outgoing" do
+      trie = Defaults.leader_trie()
+      {:prefix, c_node} = Bindings.lookup(trie, {?c, 0})
+      assert {:command, :call_hierarchy_outgoing} = Bindings.lookup(c_node, {?H, 0})
+    end
+
+    test "SPC c v → :selection_expand" do
+      trie = Defaults.leader_trie()
+      {:prefix, c_node} = Bindings.lookup(trie, {?c, 0})
+      assert {:command, :selection_expand} = Bindings.lookup(c_node, {?v, 0})
+    end
+
+    test "SPC c V → :selection_shrink" do
+      trie = Defaults.leader_trie()
+      {:prefix, c_node} = Bindings.lookup(trie, {?c, 0})
+      assert {:command, :selection_shrink} = Bindings.lookup(c_node, {?V, 0})
+    end
+
     # ── Negative cases ─────────────────────────────────────────────────────────
 
     test "unknown leader prefix returns :not_found" do

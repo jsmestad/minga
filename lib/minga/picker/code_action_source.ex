@@ -62,6 +62,10 @@ defmodule Minga.Picker.CodeActionSource do
 
   @spec apply_code_action(term(), map()) :: term()
   defp apply_code_action(state, action) do
+    # If the action has a `data` field but no `edit` field, resolve it first
+    # via codeAction/resolve to get the full action with the edit.
+    action = maybe_resolve_action(state, action)
+
     # Code actions can have an edit (WorkspaceEdit) and/or a command
     state =
       case action["edit"] do
@@ -79,6 +83,46 @@ defmodule Minga.Picker.CodeActionSource do
 
       _ ->
         state
+    end
+  end
+
+  # Resolves a code action that has a `data` field but no `edit` field.
+  # This handles lazy-resolved actions per LSP 3.16+.
+  @spec maybe_resolve_action(term(), map()) :: map()
+  defp maybe_resolve_action(state, action) do
+    needs_resolve = action["data"] != nil and action["edit"] == nil
+
+    if needs_resolve do
+      resolve_action(state, action)
+    else
+      action
+    end
+  end
+
+  @spec resolve_action(term(), map()) :: map()
+  defp resolve_action(state, action) do
+    case lsp_client_for(state.buffers.active) do
+      nil ->
+        Log.warning(:lsp, "No LSP client to resolve code action")
+        action
+
+      client ->
+        do_resolve_request(client, action)
+    end
+  end
+
+  @spec do_resolve_request(pid(), map()) :: map()
+  defp do_resolve_request(client, action) do
+    case Client.request_sync(client, "codeAction/resolve", action, 5_000) do
+      {:ok, resolved} when is_map(resolved) ->
+        resolved
+
+      {:error, reason} ->
+        Log.warning(:lsp, "codeAction/resolve failed: #{inspect(reason)}")
+        action
+
+      _ ->
+        action
     end
   end
 
