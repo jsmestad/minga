@@ -188,6 +188,23 @@ defmodule Minga.Editor.LspActionsTest do
     end
   end
 
+  # ── code_lens/1 ───────────────────────────────────────────────────────────
+
+  describe "code_lens/1" do
+    test "sets status_msg when no active buffer" do
+      state = fake_state()
+      result = LspActions.code_lens(state)
+      assert result.status_msg == "No active buffer"
+    end
+
+    test "silently no-ops when no LSP client is registered" do
+      buf = start_supervised!({BufferServer, content: "hello"})
+      state = fake_state_with_buffer(buf)
+      result = LspActions.code_lens(state)
+      assert result.status_msg == nil
+    end
+  end
+
   # ── handle_code_lens_response/2 ──────────────────────────────────────────
 
   describe "handle_code_lens_response/2" do
