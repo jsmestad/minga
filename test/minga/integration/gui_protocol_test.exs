@@ -117,6 +117,7 @@ defmodule Minga.Integration.GUIProtocolTest do
            git_branch: "main",
            git_diff_summary: {5, 3, 1},
            diagnostic_counts: {2, 4, 1, 0},
+           diagnostic_hint: "✖ undefined function foo/0 [ElixirLS]",
            lsp_status: :ready,
            parser_status: :available,
            buf_index: 1,
@@ -151,6 +152,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert decoded["git_modified"] == 3
       assert decoded["git_deleted"] == 1
       assert decoded["filename"] == "foo.ex"
+      assert decoded["diagnostic_hint"] == "✖ undefined function foo/0 [ElixirLS]"
     end
 
     test "gui_status_bar agent variant encodes and decodes correctly", %{port: port} do

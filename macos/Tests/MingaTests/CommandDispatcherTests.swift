@@ -187,7 +187,7 @@ struct CommandDispatcherRoutingTests {
                                            macroRecording: 0, parserStatus: 0, agentStatus: 0,
                                            gitAdded: 5, gitModified: 3, gitDeleted: 1,
                                            icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0,
-                                           filename: "editor.ex"))
+                                           filename: "editor.ex", diagnosticHint: ""))
 
         #expect(gui.statusBarState.mode == 1)
         #expect(gui.statusBarState.cursorLine == 42)

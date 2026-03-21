@@ -186,7 +186,7 @@ final class CommandDispatcher {
         case .guiBreadcrumb(let segments):
             guiState.breadcrumbState.update(segments: segments)
 
-        case .guiStatusBar(let contentKind, let mode, let cursorLine, let cursorCol, let lineCount, let flags, let lspStatus, let gitBranch, let message, let filetype, let errorCount, let warningCount, let modelName, let messageCount, let sessionStatus, let infoCount, let hintCount, let macroRecording, let parserStatus, let agentStatus, let gitAdded, let gitModified, let gitDeleted, let icon, let iconColorR, let iconColorG, let iconColorB, let filename):
+        case .guiStatusBar(let contentKind, let mode, let cursorLine, let cursorCol, let lineCount, let flags, let lspStatus, let gitBranch, let message, let filetype, let errorCount, let warningCount, let modelName, let messageCount, let sessionStatus, let infoCount, let hintCount, let macroRecording, let parserStatus, let agentStatus, let gitAdded, let gitModified, let gitDeleted, let icon, let iconColorR, let iconColorG, let iconColorB, let filename, let diagnosticHint):
             let update = StatusBarUpdate(
                 contentKind: contentKind, mode: mode,
                 cursorLine: cursorLine, cursorCol: cursorCol, lineCount: lineCount,
@@ -198,7 +198,7 @@ final class CommandDispatcher {
                 parserStatus: parserStatus, agentStatus: agentStatus,
                 gitAdded: gitAdded, gitModified: gitModified, gitDeleted: gitDeleted,
                 icon: icon, iconColorR: iconColorR, iconColorG: iconColorG, iconColorB: iconColorB,
-                filename: filename
+                filename: filename, diagnosticHint: diagnosticHint
             )
             guiState.statusBarState.update(from: update)
             if mode != lastMode {
@@ -294,6 +294,18 @@ final class CommandDispatcher {
                 )
             } else {
                 guiState.toolManagerState.hide()
+            }
+
+        case .guiMinibuffer(let visible, let mode, let cursorPos, let prompt,
+                             let input, let context, let selectedIndex, let candidates):
+            if visible {
+                guiState.minibufferState.update(
+                    visible: true, mode: mode, cursorPos: cursorPos,
+                    prompt: prompt, input: input, context: context,
+                    selectedIndex: selectedIndex, rawCandidates: candidates
+                )
+            } else {
+                guiState.minibufferState.hide()
             }
         }
     }

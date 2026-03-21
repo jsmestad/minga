@@ -135,6 +135,19 @@ struct ContentView: View {
                     )
                 }
 
+                // Native minibuffer (appears above status bar when active)
+                if appState.gui.minibufferState.visible {
+                    MinibufferView(
+                        state: appState.gui.minibufferState,
+                        theme: appState.gui.themeColors
+                    )
+                    .transition(
+                        .move(edge: .bottom)
+                        .combined(with: .opacity)
+                        .animation(.easeInOut(duration: 0.15))
+                    )
+                }
+
                 // Status bar
                 StatusBarView(
                     state: appState.gui.statusBarState,

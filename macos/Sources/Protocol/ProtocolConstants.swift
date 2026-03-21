@@ -43,6 +43,7 @@ let OP_GUI_GUTTER: UInt8 = 0x7B
 let OP_GUI_BOTTOM_PANEL: UInt8 = 0x7C
 let OP_GUI_PICKER_PREVIEW: UInt8 = 0x7D
 let OP_GUI_TOOL_MANAGER: UInt8 = 0x7E
+let OP_GUI_MINIBUFFER: UInt8 = 0x7F
 
 // GUI window content opcode (semantic rendering data for buffer windows)
 let OP_GUI_WINDOW_CONTENT: UInt8 = 0x80

@@ -95,7 +95,8 @@ defmodule Minga.Editor.RenderPipeline.Emit do
 
       # SwiftUI chrome: separate messages, safe (no Metal impact)
       status_bar_data = chrome && chrome.status_bar_data
-      EmitGUI.sync_swiftui_chrome(state, status_bar_data)
+      minibuffer_data = chrome && chrome.minibuffer_data
+      EmitGUI.sync_swiftui_chrome(state, status_bar_data, minibuffer_data)
     end)
   end
 
