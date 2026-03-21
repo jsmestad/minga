@@ -2,6 +2,7 @@ defmodule Minga.Agent.Tools.MultiEditFileTest do
   use ExUnit.Case, async: true
 
   alias Minga.Agent.Tools.MultiEditFile
+  alias Minga.Buffer.Server, as: BufferServer
 
   @moduletag :tmp_dir
 
@@ -126,6 +127,42 @@ defmodule Minga.Agent.Tools.MultiEditFileTest do
 
       # File should not have been rewritten
       assert File.read!(path) == "original content"
+    end
+  end
+
+  describe "execute/2 via buffer (buffer open for file)" do
+    test "batch edits route through buffer as a single undo entry", %{tmp_dir: dir} do
+      path = Path.join(dir, "buffered.ex")
+      File.write!(path, "aaa bbb ccc")
+      pid = start_supervised!({BufferServer, file_path: path})
+
+      edits = [
+        %{"old_text" => "aaa", "new_text" => "AAA"},
+        %{"old_text" => "ccc", "new_text" => "CCC"}
+      ]
+
+      assert {:ok, result} = MultiEditFile.execute(path, edits)
+      assert result =~ "2/2 edits applied"
+
+      # Edit went through buffer
+      assert BufferServer.content(pid) == "AAA bbb CCC"
+      assert BufferServer.dirty?(pid)
+
+      # Disk unchanged
+      assert File.read!(path) == "aaa bbb ccc"
+
+      # Single undo reverts entire batch
+      BufferServer.undo(pid)
+      assert BufferServer.content(pid) == "aaa bbb ccc"
+    end
+
+    test "falls back to filesystem when no buffer is open", %{tmp_dir: dir} do
+      path = Path.join(dir, "no_buffer.ex")
+      File.write!(path, "aaa bbb")
+
+      edits = [%{"old_text" => "aaa", "new_text" => "AAA"}]
+      assert {:ok, _} = MultiEditFile.execute(path, edits)
+      assert File.read!(path) == "AAA bbb"
     end
   end
 end

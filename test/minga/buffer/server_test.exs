@@ -998,4 +998,222 @@ defmodule Minga.Buffer.ServerTest do
       assert Map.has_key?(overrides, "comment")
     end
   end
+
+  describe "find_and_replace/3" do
+    test "replacing unique text updates content and marks dirty" do
+      {:ok, pid} = Server.start_link(content: "defmodule Foo do\n  def hello, do: :world\nend\n")
+
+      assert {:ok, _} =
+               Server.find_and_replace(pid, "def hello, do: :world", "def hello, do: :earth")
+
+      assert Server.content(pid) =~ "def hello, do: :earth"
+      assert Server.dirty?(pid)
+    end
+
+    test "replacing text creates a single undo entry" do
+      {:ok, pid} = Server.start_link(content: "aaa bbb ccc")
+      Server.find_and_replace(pid, "bbb", "BBB")
+      assert Server.content(pid) == "aaa BBB ccc"
+
+      Server.undo(pid)
+      assert Server.content(pid) == "aaa bbb ccc"
+    end
+
+    test "returns error when old_text is not found" do
+      {:ok, pid} = Server.start_link(content: "hello world")
+      assert {:error, msg} = Server.find_and_replace(pid, "nonexistent", "replacement")
+      assert msg =~ "not found"
+      assert Server.content(pid) == "hello world"
+      refute Server.dirty?(pid)
+    end
+
+    test "returns error when old_text is ambiguous" do
+      {:ok, pid} = Server.start_link(content: "foo\nbar\nfoo\n")
+      assert {:error, msg} = Server.find_and_replace(pid, "foo", "baz")
+      assert msg =~ "2 times"
+      assert Server.content(pid) == "foo\nbar\nfoo\n"
+    end
+
+    test "read-only buffer rejects find_and_replace" do
+      {:ok, pid} = Server.start_link(content: "hello", read_only: true)
+      assert {:error, msg} = Server.find_and_replace(pid, "hello", "world")
+      assert msg =~ "read-only"
+    end
+
+    test "multi-line old_text and new_text work correctly" do
+      {:ok, pid} = Server.start_link(content: "line1\nline2\nline3\n")
+
+      assert {:ok, _} =
+               Server.find_and_replace(pid, "line1\nline2", "replaced1\nreplaced2\nreplaced3")
+
+      assert Server.content(pid) == "replaced1\nreplaced2\nreplaced3\nline3\n"
+    end
+
+    test "empty old_text returns error" do
+      {:ok, pid} = Server.start_link(content: "hello")
+      assert {:error, msg} = Server.find_and_replace(pid, "", "something")
+      assert msg =~ "empty"
+    end
+
+    test "old_text at very start of buffer" do
+      {:ok, pid} = Server.start_link(content: "target rest of file")
+      assert {:ok, _} = Server.find_and_replace(pid, "target", "replaced")
+      assert Server.content(pid) == "replaced rest of file"
+    end
+
+    test "old_text at very end of buffer without trailing newline" do
+      {:ok, pid} = Server.start_link(content: "start of file target")
+      assert {:ok, _} = Server.find_and_replace(pid, "target", "replaced")
+      assert Server.content(pid) == "start of file replaced"
+    end
+
+    test "old_text spans entire buffer content" do
+      {:ok, pid} = Server.start_link(content: "everything")
+      assert {:ok, _} = Server.find_and_replace(pid, "everything", "replaced")
+      assert Server.content(pid) == "replaced"
+    end
+
+    test "replacement that changes line count" do
+      {:ok, pid} = Server.start_link(content: "before\nsingle line\nafter")
+      assert Server.line_count(pid) == 3
+
+      Server.find_and_replace(pid, "single line", "line A\nline B\nline C")
+      assert Server.line_count(pid) == 5
+      assert Server.content(pid) == "before\nline A\nline B\nline C\nafter"
+    end
+
+    test "unicode multi-byte graphemes in old_text and new_text" do
+      {:ok, pid} = Server.start_link(content: "I like café and naïve")
+      assert {:ok, _} = Server.find_and_replace(pid, "café", "tea")
+      assert Server.content(pid) == "I like tea and naïve"
+    end
+
+    test "two rapid find_and_replace calls produce two independent undo entries" do
+      {:ok, pid} = Server.start_link(content: "aaa bbb ccc")
+      Server.find_and_replace(pid, "aaa", "AAA")
+      Server.find_and_replace(pid, "ccc", "CCC")
+      assert Server.content(pid) == "AAA bbb CCC"
+
+      Server.undo(pid)
+      assert Server.content(pid) == "AAA bbb ccc"
+
+      Server.undo(pid)
+      assert Server.content(pid) == "aaa bbb ccc"
+    end
+
+    test "concurrent find_and_replace calls are serialized cleanly" do
+      content = "aaa\nbbb\nccc\nddd\neee"
+      {:ok, pid} = Server.start_link(content: content)
+
+      task_a = Task.async(fn -> Server.find_and_replace(pid, "aaa", "AAA") end)
+      task_b = Task.async(fn -> Server.find_and_replace(pid, "eee", "EEE") end)
+
+      results = Task.await_many([task_a, task_b])
+      assert Enum.all?(results, &match?({:ok, _}, &1))
+
+      final = Server.content(pid)
+      assert final =~ "AAA"
+      assert final =~ "EEE"
+      assert final =~ "bbb"
+      assert final =~ "ccc"
+      assert final =~ "ddd"
+    end
+  end
+
+  describe "find_and_replace_batch/2" do
+    test "batch applies multiple edits and produces a single undo entry" do
+      {:ok, pid} = Server.start_link(content: "aaa bbb ccc")
+      assert {:ok, results} = Server.find_and_replace_batch(pid, [{"aaa", "AAA"}, {"ccc", "CCC"}])
+      assert Enum.all?(results, &match?({:ok, _}, &1))
+      assert Server.content(pid) == "AAA bbb CCC"
+
+      Server.undo(pid)
+      assert Server.content(pid) == "aaa bbb ccc"
+    end
+
+    test "batch reports per-edit success and failure" do
+      {:ok, pid} = Server.start_link(content: "foo bar foo")
+
+      assert {:ok, results} =
+               Server.find_and_replace_batch(pid, [
+                 {"bar", "BAR"},
+                 {"nonexistent", "x"},
+                 {"foo", "FOO"}
+               ])
+
+      assert [{:ok, _}, {:error, _}, {:error, _}] = results
+      # bar→BAR succeeded, making "foo" appear twice (ambiguous for third edit)
+      assert Server.content(pid) == "foo BAR foo"
+    end
+
+    test "edits within a batch are applied sequentially" do
+      {:ok, pid} = Server.start_link(content: "foo bar baz")
+      # First edit makes "bar" ambiguous for the second
+      assert {:ok, results} = Server.find_and_replace_batch(pid, [{"foo", "bar"}, {"bar", "qux"}])
+      assert [{:ok, _}, {:error, _}] = results
+      assert Server.content(pid) == "bar bar baz"
+    end
+
+    test "batch with all edits failing leaves buffer unchanged and clean" do
+      {:ok, pid} = Server.start_link(content: "hello world")
+
+      assert {:ok, results} =
+               Server.find_and_replace_batch(pid, [{"nope", "x"}, {"nada", "y"}])
+
+      assert Enum.all?(results, &match?({:error, _}, &1))
+      assert Server.content(pid) == "hello world"
+      refute Server.dirty?(pid)
+    end
+
+    test "empty edit list is a no-op" do
+      {:ok, pid} = Server.start_link(content: "hello")
+      assert {:ok, []} = Server.find_and_replace_batch(pid, [])
+      refute Server.dirty?(pid)
+    end
+
+    test "read-only buffer rejects batch" do
+      {:ok, pid} = Server.start_link(content: "hello", read_only: true)
+      assert {:error, msg} = Server.find_and_replace_batch(pid, [{"hello", "world"}])
+      assert msg =~ "read-only"
+    end
+  end
+
+  describe "pid_for_path/1" do
+    test "returns :not_found for unregistered path" do
+      assert :not_found = Server.pid_for_path("/no/such/file.ex")
+    end
+
+    test "registered buffer is findable by its file path", %{tmp_dir: dir} do
+      path = Path.join(dir, "test.ex")
+      File.write!(path, "hello")
+      pid = start_supervised!({Server, file_path: path})
+
+      assert {:ok, ^pid} = Server.pid_for_path(path)
+    end
+
+    test "dead buffer is automatically deregistered", %{tmp_dir: dir} do
+      path = Path.join(dir, "test.ex")
+      File.write!(path, "hello")
+      pid = start_supervised!({Server, file_path: path})
+
+      ref = Process.monitor(pid)
+      stop_supervised!(Server)
+      assert_receive {:DOWN, ^ref, :process, ^pid, _}
+
+      assert :not_found = Server.pid_for_path(path)
+    end
+
+    test "two buffers with different paths coexist", %{tmp_dir: dir} do
+      path_a = Path.join(dir, "a.ex")
+      path_b = Path.join(dir, "b.ex")
+      File.write!(path_a, "aaa")
+      File.write!(path_b, "bbb")
+
+      pid_a = start_supervised!({Server, file_path: path_a}, id: :buf_a)
+      pid_b = start_supervised!({Server, file_path: path_b}, id: :buf_b)
+
+      assert {:ok, ^pid_a} = Server.pid_for_path(path_a)
+      assert {:ok, ^pid_b} = Server.pid_for_path(path_b)
+    end
+  end
 end
