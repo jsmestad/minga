@@ -15,6 +15,7 @@
 import Metal
 import QuartzCore
 import AppKit
+import os.log
 
 /// GPU quad instance for background fills and cursor (must match QuadInstance in CoreTextShaders.metal).
 struct QuadGPU {
@@ -299,15 +300,7 @@ final class CoreTextMetalRenderer {
                         ? colorFromU24(run.fg, default: SIMD3<Float>(1, 1, 1))
                         : colorFromU24(run.bg, default: defaultBg)
                     let colOffset = Float(run.col) * cellW * scale
-                    // Use column span (next run col - this run col) for correct
-                    // width with CJK/wide characters, falling back to display
-                    // width calculation for the last run on the line.
-                    let colSpan: UInt16
-                    if i + 1 < runs.count {
-                        colSpan = runs[i + 1].col - run.col
-                    } else {
-                        colSpan = UInt16(displayWidth(run.text))
-                    }
+                    let colSpan = Self.runColSpan(runs: runs, at: i)
                     let runWidth = Float(colSpan) * cellW * scale
                     let xPos = run.col >= lineBuffer.gutterCol
                         ? colOffset + gutterPaddingPx : colOffset
@@ -906,9 +899,30 @@ final class CoreTextMetalRenderer {
         }
     }
 
+    /// Compute the column span for a run's background fill quad.
+    ///
+    /// For non-last runs, the span is the distance to the next run's column.
+    /// Uses Int arithmetic to avoid UInt16 underflow when runs arrive out of
+    /// order (protocol edge case), and clamps to a minimum of 1 cell.
+    /// For the last run on a line, falls back to display width calculation.
+    nonisolated static func runColSpan(runs: [StyledRun], at index: Int) -> UInt16 {
+        if index + 1 < runs.count {
+            let span = Int(runs[index + 1].col) - Int(runs[index].col)
+            #if DEBUG
+            if span <= 0 {
+                os_log(.fault, "Renderer: out-of-order runs at index %d, col %u >= %u",
+                       index, runs[index].col, runs[index + 1].col)
+            }
+            #endif
+            return UInt16(max(span, 1))
+        } else {
+            return UInt16(displayWidth(runs[index].text))
+        }
+    }
+
     /// Calculate the display width (in cell columns) of a string,
     /// accounting for wide characters (CJK, emoji, etc.).
-    private func displayWidth(_ text: String) -> Int {
+    nonisolated static func displayWidth(_ text: String) -> Int {
         var width = 0
         for scalar in text.unicodeScalars {
             let v = scalar.value
