@@ -27,6 +27,7 @@ defmodule Minga.Editor.LspActions do
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.Commands
   alias Minga.Editor.HoverPopup
+  alias Minga.Editor.LspDecorations
   alias Minga.Editor.PickerUI
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.VimState
@@ -1058,7 +1059,7 @@ defmodule Minga.Editor.LspActions do
       |> Enum.filter(fn l -> l.title != nil end)
 
     state = %{state | code_lenses: parsed}
-    Minga.Editor.LspDecorations.apply_code_lenses(state)
+    LspDecorations.apply_code_lenses(state)
   end
 
   # ── Inlay hint response ──────────────────────────────────────────────────
@@ -1097,7 +1098,7 @@ defmodule Minga.Editor.LspActions do
       end)
 
     state = %{state | inlay_hints: parsed}
-    Minga.Editor.LspDecorations.apply_inlay_hints(state)
+    LspDecorations.apply_inlay_hints(state)
   end
 
   # ── WorkspaceEdit application ─────────────────────────────────────────────

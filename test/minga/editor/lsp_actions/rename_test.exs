@@ -1,17 +1,23 @@
 defmodule Minga.Editor.LspActions.RenameTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Command.Parser
   alias Minga.Editor.LspActions
+  alias Minga.Editor.State.Buffers
+  alias Minga.Editor.State.Picker, as: PickerState
+  alias Minga.Editor.State.WhichKey
+  alias Minga.Editor.Viewport
+  alias Minga.Editor.VimState
 
   defp stub_state do
     %{
       status_msg: nil,
-      buffers: %Minga.Editor.State.Buffers{},
-      picker_ui: %Minga.Editor.State.Picker{},
-      whichkey: %Minga.Editor.State.WhichKey{},
-      vim: Minga.Editor.VimState.new(),
+      buffers: %Buffers{},
+      picker_ui: %PickerState{},
+      whichkey: %WhichKey{},
+      vim: VimState.new(),
       theme: Minga.Theme.get!(:doom_one),
-      viewport: %Minga.Editor.Viewport{rows: 40, cols: 120, top: 0, left: 0}
+      viewport: %Viewport{rows: 40, cols: 120, top: 0, left: 0}
     }
   end
 
@@ -71,11 +77,11 @@ defmodule Minga.Editor.LspActions.RenameTest do
 
   describe "rename command parser" do
     test "parses rename command" do
-      assert {:rename, "new_name"} = Minga.Command.Parser.parse("rename new_name")
+      assert {:rename, "new_name"} = Parser.parse("rename new_name")
     end
 
     test "trims whitespace from name" do
-      assert {:rename, "new_name"} = Minga.Command.Parser.parse("rename   new_name  ")
+      assert {:rename, "new_name"} = Parser.parse("rename   new_name  ")
     end
   end
 end

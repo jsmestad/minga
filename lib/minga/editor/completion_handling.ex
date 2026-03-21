@@ -279,7 +279,7 @@ defmodule Minga.Editor.CompletionHandling do
 
   @spec merge_completion_items(
           EditorState.t(),
-          [Completion.Item.t()],
+          [Completion.item()],
           {non_neg_integer(), non_neg_integer()}
         ) :: EditorState.t()
   defp merge_completion_items(state, [], _trigger_pos), do: state

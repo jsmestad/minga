@@ -36,6 +36,7 @@ defmodule Minga.Editor.CompletionTrigger do
         }
 
   @doc "Returns initial completion bridge state."
+  @dialyzer {:no_opaque, new: 0}
   @spec new() :: t()
   def new do
     %{pending_ref: nil, pending_refs: MapSet.new(), debounce_timer: nil, trigger_position: nil}
@@ -68,20 +69,7 @@ defmodule Minga.Editor.CompletionTrigger do
         # Use the first client for debounce scheduling, but send to all on fire
         [first_client | _] = clients
 
-        if char in all_trigger_chars do
-          # Trigger character: fire immediately to all clients
-          bridge = cancel_debounce(bridge)
-          send_completion_requests(bridge, clients, buffer_pid)
-        else
-          if identifier_char?(char) do
-            # Identifier character: debounce (sends to all clients when timer fires)
-            schedule_debounced_trigger(bridge, first_client, buffer_pid)
-          else
-            # Non-identifier, non-trigger: dismiss completion
-            bridge = cancel_debounce(bridge)
-            {%{bridge | pending_ref: nil, trigger_position: nil}, nil}
-          end
-        end
+        handle_char_type(bridge, char, all_trigger_chars, clients, first_client, buffer_pid)
     end
   end
 
@@ -101,7 +89,10 @@ defmodule Minga.Editor.CompletionTrigger do
   if it's stale.
   """
   @spec handle_response(t(), reference(), {:ok, term()} | {:error, term()}, pid()) ::
-          {t(), Completion.t() | nil}
+          {t(),
+           Completion.t()
+           | {:merge, [Completion.item()], {non_neg_integer(), non_neg_integer()}}
+           | nil}
   def handle_response(bridge, ref, result, buffer_pid)
 
   def handle_response(%{pending_ref: ref} = bridge, ref, {:ok, result}, buffer_pid) do
@@ -157,6 +148,26 @@ defmodule Minga.Editor.CompletionTrigger do
   end
 
   # ── Private ────────────────────────────────────────────────────────────────
+
+  @spec handle_char_type(t(), String.t(), [String.t()], [pid()], pid(), pid()) ::
+          {t(), Completion.t() | nil}
+  defp handle_char_type(bridge, char, trigger_chars, clients, first_client, buffer_pid) do
+    classify_char(bridge, char, char in trigger_chars, clients, first_client, buffer_pid)
+  end
+
+  defp classify_char(bridge, _char, true = _is_trigger, clients, _first_client, buffer_pid) do
+    bridge = cancel_debounce(bridge)
+    send_completion_requests(bridge, clients, buffer_pid)
+  end
+
+  defp classify_char(bridge, char, false = _is_trigger, _clients, first_client, buffer_pid) do
+    if identifier_char?(char) do
+      schedule_debounced_trigger(bridge, first_client, buffer_pid)
+    else
+      bridge = cancel_debounce(bridge)
+      {%{bridge | pending_ref: nil, trigger_position: nil}, nil}
+    end
+  end
 
   # Sends completion requests to ALL LSP clients for the buffer.
   # Tracks all refs so responses from any client can be merged.

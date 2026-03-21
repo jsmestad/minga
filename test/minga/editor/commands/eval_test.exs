@@ -1,6 +1,8 @@
 defmodule Minga.Editor.Commands.EvalTest do
   @moduledoc false
-  use ExUnit.Case, async: true
+  # async: false because capture_io(:stderr) replaces the global :standard_error
+  # process, which breaks concurrent tests that compile code (e.g., extension tests).
+  use ExUnit.Case, async: false
 
   import ExUnit.CaptureIO
 
