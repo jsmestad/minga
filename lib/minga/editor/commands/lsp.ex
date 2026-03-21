@@ -12,11 +12,13 @@ defmodule Minga.Editor.Commands.Lsp do
   alias Minga.Editor.BufferLifecycle
   alias Minga.Editor.HoverPopup
   alias Minga.Editor.LspActions
+  alias Minga.Editor.PickerUI
   alias Minga.Editor.State, as: EditorState
   alias Minga.LSP.Client
   alias Minga.LSP.ServerRegistry
   alias Minga.LSP.Supervisor, as: LSPSupervisor
   alias Minga.LSP.SyncServer
+  alias Minga.Picker.WorkspaceSymbolSource
 
   @type state :: EditorState.t()
 
@@ -323,7 +325,7 @@ defmodule Minga.Editor.Commands.Lsp do
         description: "Search workspace symbols",
         requires_buffer: true,
         execute: fn state ->
-          Minga.Editor.PickerUI.open(state, Minga.Picker.WorkspaceSymbolSource)
+          PickerUI.open(state, WorkspaceSymbolSource)
         end
       }
     ]

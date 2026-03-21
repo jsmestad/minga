@@ -27,7 +27,8 @@ struct CommandDispatcherRoutingTests {
             windowId: 1, fullRefresh: true,
             cursorRow: 0, cursorCol: 0, cursorShape: .block,
             rows: [], selection: nil,
-            searchMatches: [], diagnosticUnderlines: []
+            searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: []
         )
         gui.windowContents[1] = content
         #expect(gui.windowContents.count == 1)
@@ -291,7 +292,8 @@ struct CommandDispatcherRoutingTests {
             windowId: 7, fullRefresh: true,
             cursorRow: 5, cursorCol: 10, cursorShape: .beam,
             rows: [], selection: nil,
-            searchMatches: [], diagnosticUnderlines: []
+            searchMatches: [], diagnosticUnderlines: [],
+            documentHighlights: []
         )
         dispatcher.dispatch(.guiWindowContent(data: content))
 

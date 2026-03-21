@@ -18,6 +18,7 @@ defmodule Minga.Picker.WorkspaceSymbolSource do
   alias Minga.LSP.Client
   alias Minga.LSP.SyncServer
   alias Minga.Picker.Item
+  alias Minga.Picker.Source
 
   @impl true
   @spec title() :: String.t()
@@ -66,7 +67,7 @@ defmodule Minga.Picker.WorkspaceSymbolSource do
   @impl true
   @spec on_cancel(term()) :: term()
   def on_cancel(state) do
-    Minga.Picker.Source.restore_or_keep(state)
+    Source.restore_or_keep(state)
   end
 
   # ── Private ────────────────────────────────────────────────────────────────

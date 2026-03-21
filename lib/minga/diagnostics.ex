@@ -47,8 +47,14 @@ defmodule Minga.Diagnostics do
   @typedoc "A file URI string (e.g., `\"file:///path/to/file.ex\"`)."
   @type uri :: String.t()
 
-  @typedoc "Internal state: ETS table reference and subscriber list."
-  @type state :: %{table: :ets.table(), subscribers: [pid()]}
+  @typedoc "Internal state: ETS table references, merge cache, subscriber list, and generation counter."
+  @type state :: %{
+          table: :ets.table(),
+          uri_index: :ets.table(),
+          merge_cache: :ets.table(),
+          subscribers: [pid()],
+          generation: non_neg_integer()
+        }
 
   # ── Client API: Lifecycle ──────────────────────────────────────────────────
 
@@ -221,7 +227,7 @@ defmodule Minga.Diagnostics do
   # ── Server Callbacks ───────────────────────────────────────────────────────
 
   @impl GenServer
-  @spec init(atom()) :: {:ok, state()}
+  @spec init(atom() | pid()) :: {:ok, state()}
   def init(name) do
     tname = table_name(name)
     table = :ets.new(tname, [:set, :public, :named_table, read_concurrency: true])
