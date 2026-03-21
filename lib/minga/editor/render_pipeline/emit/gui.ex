@@ -509,14 +509,17 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
     # alone is stable (wouldn't detect typing). The styled cache length
     # is a reliable proxy for message count changes because styling
     # happens in the same render cycle as message arrival.
+    # message_version is bumped on every :messages_changed event,
+    # including collapse toggles, ensuring the fingerprint changes.
     {fp, prompt_text} =
       if is_agent_chat && session do
-        styled_len = length(state.agent_ui.panel.cached_styled_messages || [])
-        text = safe_prompt_content(state.agent_ui.panel.prompt_buffer)
+        panel = state.agent_ui.panel
+        styled_len = length(panel.cached_styled_messages || [])
+        text = safe_prompt_content(panel.prompt_buffer)
 
         {:erlang.phash2(
            {:visible, state.agent.status, state.agent.pending_approval, styled_len,
-            state.agent_ui.panel.model_name, text}
+            panel.model_name, text, panel.message_version}
          ), text}
       else
         {:not_visible, ""}

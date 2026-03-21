@@ -35,7 +35,8 @@ defmodule Minga.Agent.UIState.Panel do
           mention_completion: Minga.Agent.FileMention.completion() | nil,
           pasted_blocks: [paste_block()],
           cached_line_index: [{non_neg_integer(), Minga.Agent.BufferSync.line_type()}],
-          cached_styled_messages: [Minga.Agent.MarkdownHighlight.styled_lines()] | nil
+          cached_styled_messages: [Minga.Agent.MarkdownHighlight.styled_lines()] | nil,
+          message_version: non_neg_integer()
         }
 
   @enforce_keys []
@@ -53,7 +54,8 @@ defmodule Minga.Agent.UIState.Panel do
             mention_completion: nil,
             pasted_blocks: [],
             cached_line_index: [],
-            cached_styled_messages: nil
+            cached_styled_messages: nil,
+            message_version: 0
 
   @doc "Creates a new panel state with defaults."
   @spec new() :: t()
@@ -100,4 +102,10 @@ defmodule Minga.Agent.UIState.Panel do
   end
 
   def input_text(%__MODULE__{}), do: ""
+
+  @doc "Increments the message version counter. Used to invalidate the GUI fingerprint cache when message content changes (collapse toggles, new messages, etc.)."
+  @spec bump_message_version(t()) :: t()
+  def bump_message_version(%__MODULE__{message_version: v} = panel) do
+    %{panel | message_version: v + 1}
+  end
 end
