@@ -1191,16 +1191,36 @@ defmodule Minga.Buffer.ServerTest do
       assert {:ok, ^pid} = Server.pid_for_path(path)
     end
 
-    test "dead buffer is automatically deregistered", %{tmp_dir: dir} do
-      path = Path.join(dir, "test.ex")
-      File.write!(path, "hello")
-      pid = start_supervised!({Server, file_path: path})
+    test "opening a new file unregisters the old path", %{tmp_dir: dir} do
+      path_a = Path.join(dir, "a.ex")
+      path_b = Path.join(dir, "b.ex")
+      File.write!(path_a, "aaa")
+      File.write!(path_b, "bbb")
+      pid = start_supervised!({Server, file_path: path_a})
 
-      ref = Process.monitor(pid)
-      stop_supervised!(Server)
-      assert_receive {:DOWN, ^ref, :process, ^pid, _}
+      assert {:ok, ^pid} = Server.pid_for_path(path_a)
 
-      assert :not_found = Server.pid_for_path(path)
+      Server.open(pid, path_b)
+      assert :not_found = Server.pid_for_path(path_a)
+      assert {:ok, ^pid} = Server.pid_for_path(path_b)
+    end
+
+    test "save_as unregisters old path and registers new path", %{tmp_dir: dir} do
+      path_a = Path.join(dir, "a.ex")
+      path_b = Path.join(dir, "b.ex")
+      File.write!(path_a, "aaa")
+      pid = start_supervised!({Server, file_path: path_a})
+
+      assert {:ok, ^pid} = Server.pid_for_path(path_a)
+
+      Server.save_as(pid, path_b)
+      assert :not_found = Server.pid_for_path(path_a)
+      assert {:ok, ^pid} = Server.pid_for_path(path_b)
+    end
+
+    test "buffer without file_path does not register" do
+      _pid = start_supervised!({Server, content: "scratch"})
+      assert :not_found = Server.pid_for_path("/nonexistent")
     end
 
     test "two buffers with different paths coexist", %{tmp_dir: dir} do
