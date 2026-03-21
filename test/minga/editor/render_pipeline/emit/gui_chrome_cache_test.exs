@@ -190,6 +190,23 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI.ChromeCacheTest do
       assert Map.has_key?(new_state, :message_store)
     end
 
+    test "picker cache fingerprints an open picker without crashing" do
+      item = %Minga.Picker.Item{id: "a", label: "a.txt"}
+      picker = Minga.Picker.new([item], title: "Test")
+      state = gui_chrome_state()
+
+      # Inject an open picker into picker_ui state.
+      picker_ui = %{state.picker_ui | picker: picker, source: nil, action_menu: nil}
+      state = %{state | picker_ui: picker_ui}
+      sb_data = StatusBarData.from_state(state)
+
+      # Before the fix, this raised KeyError: key :total not found in %Minga.Picker{}.
+      EmitGUI.sync_swiftui_chrome(state, sb_data)
+      flush_port_casts()
+
+      refute Process.get(:last_gui_picker_fp) in [:closed, nil]
+    end
+
     test "agent chat survives dead prompt buffer process" do
       state = gui_chrome_state()
 

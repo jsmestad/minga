@@ -305,7 +305,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
     # Preview content is NOT in the fingerprint: a file changing on disk while
     # the picker is open won't refresh the preview. Acceptable trade-off for
     # scroll perf since the picker isn't open during normal editing.
-    fp = :erlang.phash2({picker.query, picker.selected, picker.total, action_menu})
+    fp = :erlang.phash2({picker.query, picker.selected, Picker.total(picker), action_menu})
 
     if fp != Process.get(:last_gui_picker_fp) do
       Process.put(:last_gui_picker_fp, fp)
@@ -323,11 +323,11 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
   # Returns a list of lines, where each line is a list of {text, fg_color, bold} segments.
   @spec build_picker_preview(state()) :: [[ProtocolGUI.preview_segment()]] | nil
   defp build_picker_preview(%{picker_ui: %{picker: picker}} = state) do
-    case Minga.Picker.selected_item(picker) do
+    case Picker.selected_item(picker) do
       nil ->
         nil
 
-      %Minga.Picker.Item{id: id} ->
+      %Picker.Item{id: id} ->
         build_preview_for_item(state, id)
     end
   end
