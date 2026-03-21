@@ -519,7 +519,7 @@ final class CoreTextMetalRenderer {
            let instBuf = instanceBuffer {
             // Copy instance data into the shared Metal buffer.
             let byteCount = lineInstances.count * MemoryLayout<LineGPU>.stride
-            lineInstances.withUnsafeBytes { ptr in
+            _ = lineInstances.withUnsafeBytes { ptr in
                 memcpy(instBuf.contents(), ptr.baseAddress!, byteCount)
             }
 
