@@ -12,18 +12,28 @@ defmodule Minga.Clipboard.System do
 
   All functions degrade gracefully: `read/0` returns `nil` and `write/1`
   returns `:unavailable` when no clipboard tool is found.
+
+  ## Executable caching
+
+  The clipboard tool and its path are detected once on first use and cached
+  in `:persistent_term`. The tool doesn't change during a session, so
+  repeating `System.find_executable/1` on every read/write is wasted work.
   """
 
   @behaviour Minga.Clipboard.Behaviour
 
+  # Cached tool info stores the resolved paths for both the read and write
+  # executables. The clipboard tool doesn't change during a session, so we
+  # detect once and cache in :persistent_term to avoid repeated PATH lookups.
+  @typep tool_info ::
+           %{read: {String.t(), [String.t()]}, write: {String.t(), [String.t()]}}
+           | :none
+
   @impl true
   @spec read() :: String.t() | nil
   def read do
-    case clipboard_tool() do
-      :pbpaste -> run_read("pbpaste", [])
-      :xclip -> run_read("xclip", ~w[-selection clipboard -o])
-      :wl_paste -> run_read("wl-paste", ~w[--no-newline])
-      :xsel -> run_read("xsel", ~w[--clipboard --output])
+    case cached_tool_info() do
+      %{read: {path, args}} -> run_read(path, args)
       :none -> nil
     end
   end
@@ -31,84 +41,136 @@ defmodule Minga.Clipboard.System do
   @impl true
   @spec write(String.t()) :: :ok | :unavailable | {:error, term()}
   def write(text) when is_binary(text) do
-    case clipboard_tool() do
-      :pbpaste -> run_write("pbcopy", [], text)
-      :xclip -> run_write("xclip", ~w[-selection clipboard], text)
-      :wl_paste -> run_write("wl-copy", [], text)
-      :xsel -> run_write("xsel", ~w[--clipboard --input], text)
+    case cached_tool_info() do
+      %{write: {path, args}} -> run_write(path, args, text)
       :none -> :unavailable
     end
   end
 
-  # ── Private ────────────────────────────────────────────────────────────────
+  # ── Tool detection and caching ─────────────────────────────────────────────
 
-  @spec clipboard_tool() :: :pbpaste | :xclip | :wl_paste | :xsel | :none
-  defp clipboard_tool do
-    cond do
-      tool_available?("pbpaste") -> :pbpaste
-      tool_available?("wl-paste") -> :wl_paste
-      tool_available?("xclip") -> :xclip
-      tool_available?("xsel") -> :xsel
-      true -> :none
+  @persistent_term_key {__MODULE__, :tool_info}
+
+  @spec cached_tool_info() :: tool_info()
+  defp cached_tool_info do
+    case :persistent_term.get(@persistent_term_key, nil) do
+      nil ->
+        info = detect_tool()
+        :persistent_term.put(@persistent_term_key, info)
+        info
+
+      info ->
+        info
     end
   end
 
-  @spec tool_available?(String.t()) :: boolean()
-  defp tool_available?(tool) do
-    not is_nil(System.find_executable(tool))
+  @doc false
+  @spec reset_cache() :: :ok
+  def reset_cache do
+    :persistent_term.erase(@persistent_term_key)
+    :ok
+  rescue
+    ArgumentError -> :ok
   end
 
-  @spec run_read(String.t(), [String.t()]) :: String.t() | nil
-  defp run_read(cmd, args) do
-    case System.cmd(cmd, args, stderr_to_stdout: false) do
-      {output, 0} -> output
+  @spec detect_tool() :: tool_info()
+  defp detect_tool do
+    find_platform("pbcopy", "pbpaste", [], []) ||
+      find_platform("wl-copy", "wl-paste", [], ~w[--no-newline]) ||
+      find_platform("xclip", "xclip", ~w[-selection clipboard], ~w[-selection clipboard -o]) ||
+      find_platform("xsel", "xsel", ~w[--clipboard --input], ~w[--clipboard --output]) ||
+      :none
+  end
+
+  @spec find_platform(String.t(), String.t(), [String.t()], [String.t()]) :: tool_info() | nil
+  defp find_platform(write_cmd, read_cmd, write_args, read_args) do
+    with write_path when write_path != nil <- System.find_executable(write_cmd),
+         read_path when read_path != nil <- System.find_executable(read_cmd) do
+      %{write: {write_path, write_args}, read: {read_path, read_args}}
+    else
       _ -> nil
     end
-  rescue
-    ErlangError -> nil
   end
 
-  @spec run_write(String.t(), [String.t()], String.t()) :: :ok | :unavailable | {:error, term()}
-  defp run_write(cmd, args, text) do
-    case System.find_executable(cmd) do
-      nil ->
-        :unavailable
+  # ── Read/Write ─────────────────────────────────────────────────────────────
 
-      executable ->
-        port =
-          Port.open({:spawn_executable, executable}, [
-            :binary,
-            :exit_status,
-            :use_stdio,
-            args: args
-          ])
+  @spec run_read(String.t(), [String.t()]) :: String.t() | nil
+  defp run_read(executable, args) do
+    port =
+      Port.open({:spawn_executable, executable}, [
+        :binary,
+        :exit_status,
+        :use_stdio,
+        args: args
+      ])
 
-        Port.command(port, text)
-        send(port, {self(), :close})
-        await_port_exit(port)
+    collect_port_output(port, [])
+  rescue
+    ErlangError -> nil
+    ArgumentError -> nil
+  end
+
+  @spec collect_port_output(port(), [binary()]) :: String.t() | nil
+  defp collect_port_output(port, chunks) do
+    receive do
+      {^port, {:data, data}} ->
+        collect_port_output(port, [data | chunks])
+
+      {^port, {:exit_status, 0}} ->
+        chunks |> Enum.reverse() |> IO.iodata_to_binary()
+
+      {^port, {:exit_status, _code}} ->
+        nil
+    after
+      5_000 ->
+        Port.close(port)
+        nil
     end
+  end
+
+  @spec run_write(String.t(), [String.t()], String.t()) :: :ok | {:error, term()}
+  defp run_write(executable, args, text) do
+    port =
+      Port.open({:spawn_executable, executable}, [
+        :binary,
+        :exit_status,
+        :use_stdio,
+        args: args
+      ])
+
+    Port.command(port, text)
+    # Close the port's stdin so the clipboard tool sees EOF and processes
+    # the data. We then wait only for the {:closed} or {:exit_status}
+    # message, whichever arrives first. The old code waited 500ms for an
+    # exit_status that never arrived after :closed.
+    send(port, {self(), :close})
+    await_port_close(port)
   rescue
     e in [ErlangError, ArgumentError] -> {:error, Exception.message(e)}
   end
 
-  @spec await_port_exit(port()) :: :ok | {:error, term()}
-  defp await_port_exit(port) do
+  @spec await_port_close(port()) :: :ok | {:error, term()}
+  defp await_port_close(port) do
+    result =
+      receive do
+        {^port, :closed} -> :ok
+        {^port, {:exit_status, 0}} -> :ok
+        {^port, {:exit_status, code}} -> {:error, "exit #{code}"}
+      after
+        5_000 -> {:error, :timeout}
+      end
+
+    # Best-effort drain: catches the trailing :exit_status (if :closed arrived
+    # first) or trailing :closed (if :exit_status arrived first). The Task
+    # calling write/1 is short-lived, so any leaked message is cleaned up on
+    # task exit. Long-lived callers benefit from the drain but are not harmed
+    # if the trailing message hasn't been delivered yet.
     receive do
-      {^port, {:exit_status, 0}} ->
-        :ok
-
-      {^port, {:exit_status, code}} ->
-        {:error, "exit #{code}"}
-
-      {^port, :closed} ->
-        receive do
-          {^port, {:exit_status, 0}} -> :ok
-          {^port, {:exit_status, code}} -> {:error, "exit #{code}"}
-        after
-          500 -> :ok
-        end
+      {^port, _} -> :ok
     after
-      5_000 -> {:error, :timeout}
+      0 -> :ok
     end
+
+    result
   end
 end
