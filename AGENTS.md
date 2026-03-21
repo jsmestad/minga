@@ -19,6 +19,10 @@ When building new features, design for the GUI rendering path first, then ensure
 - **ExUnit** + **StreamData** — testing
 - Pinned versions in `.tool-versions`
 
+## Logs
+
+Runtime logs are written to `~/.local/share/minga/minga.log`. macOS crash reports land in `~/Library/Logs/DiagnosticReports/` as `.ips` files (look for `minga-mac-*.ips`). Check both when investigating crashes.
+
 ## Project Structure
 
 ```
