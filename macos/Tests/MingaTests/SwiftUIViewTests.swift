@@ -272,6 +272,78 @@ struct TabBarViewViewTests {
     }
 }
 
+// MARK: - AgentChatView
+
+@Suite("AgentChatView View Structure")
+struct AgentChatViewTests {
+
+    @Test("Empty messages shows header and prompt area")
+    @MainActor func emptyMessages() throws {
+        let state = AgentChatState()
+        state.visible = true
+        state.model = "claude-sonnet-4"
+        state.status = 0
+
+        let sut = AgentChatView(state: state, theme: ThemeColors(), isInsertMode: false)
+        let body = try sut.inspect()
+        let texts = body.findAll(ViewInspectorQuery.text)
+        let strings = texts.compactMap { try? $0.string() }
+
+        // Header shows model name and status
+        #expect(strings.contains("claude-sonnet-4"))
+        #expect(strings.contains("idle"))
+        // Prompt shows normal-mode placeholder
+        #expect(strings.contains("Press i to type"))
+        #expect(strings.contains("NORMAL"))
+    }
+
+    @Test("User message renders as bubble")
+    @MainActor func userMessage() throws {
+        let state = AgentChatState()
+        state.visible = true
+        state.model = "test-model"
+        state.messages = [.user(id: 0, text: "Hello world")]
+
+        let sut = AgentChatView(state: state, theme: ThemeColors(), isInsertMode: false)
+        let body = try sut.inspect()
+        let texts = body.findAll(ViewInspectorQuery.text)
+        let strings = texts.compactMap { try? $0.string() }
+
+        #expect(strings.contains("Hello world"))
+    }
+
+    @Test("System message renders centered")
+    @MainActor func systemMessage() throws {
+        let state = AgentChatState()
+        state.visible = true
+        state.model = "test-model"
+        state.messages = [.system(id: 0, text: "Session started", isError: false)]
+
+        let sut = AgentChatView(state: state, theme: ThemeColors(), isInsertMode: false)
+        let body = try sut.inspect()
+        let texts = body.findAll(ViewInspectorQuery.text)
+        let strings = texts.compactMap { try? $0.string() }
+
+        #expect(strings.contains("Session started"))
+    }
+
+    @Test("Insert mode shows typing placeholder")
+    @MainActor func insertMode() throws {
+        let state = AgentChatState()
+        state.visible = true
+        state.model = "test-model"
+
+        let sut = AgentChatView(state: state, theme: ThemeColors(), isInsertMode: true)
+        let body = try sut.inspect()
+        let texts = body.findAll(ViewInspectorQuery.text)
+        let strings = texts.compactMap { try? $0.string() }
+
+        #expect(strings.contains("Type a message, Enter to send"))
+        // Should NOT show NORMAL badge in insert mode
+        #expect(!strings.contains("NORMAL"))
+    }
+}
+
 // MARK: - ViewInspector query helper
 
 /// Namespace for ViewInspector query types.
