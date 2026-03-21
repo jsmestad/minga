@@ -95,6 +95,76 @@ defmodule Minga.Tool.Recipe.RegistryTest do
     end
   end
 
+  describe "elixir_ls_asset?/2" do
+    test "matches the standard versioned zip" do
+      assert Registry.elixir_ls_asset?("elixir-ls-v0.30.0.zip", "darwin_arm64")
+    end
+
+    test "matches regardless of platform suffix" do
+      assert Registry.elixir_ls_asset?("elixir-ls-v0.30.0.zip", "linux_amd64")
+    end
+
+    test "rejects non-zip files" do
+      refute Registry.elixir_ls_asset?("elixir-ls-v0.30.0.tar.gz", "darwin_arm64")
+    end
+
+    test "rejects unrelated assets" do
+      refute Registry.elixir_ls_asset?("some-other-tool.zip", "darwin_arm64")
+    end
+  end
+
+  describe "lexical_asset?/2" do
+    test "matches the versioned zip" do
+      assert Registry.lexical_asset?("lexical-v0.7.3.zip", "darwin_arm64")
+    end
+
+    test "matches regardless of platform suffix" do
+      assert Registry.lexical_asset?("lexical-v0.7.3.zip", "linux_amd64")
+    end
+
+    test "rejects the unversioned zip to prefer the versioned one" do
+      refute Registry.lexical_asset?("lexical.zip", "darwin_arm64")
+    end
+
+    test "rejects non-zip files" do
+      refute Registry.lexical_asset?("lexical-v0.7.3.tar.gz", "darwin_arm64")
+    end
+
+    test "rejects unrelated assets" do
+      refute Registry.lexical_asset?("some-other-tool.zip", "darwin_arm64")
+    end
+  end
+
+  describe "clangd_asset?/2" do
+    test "matches the macOS asset with darwin suffix" do
+      assert Registry.clangd_asset?("clangd-mac-21.1.8.zip", "darwin_arm64")
+    end
+
+    test "matches the macOS asset with darwin amd64 suffix" do
+      assert Registry.clangd_asset?("clangd-mac-21.1.8.zip", "darwin_amd64")
+    end
+
+    test "matches the Linux asset with linux suffix" do
+      assert Registry.clangd_asset?("clangd-linux-21.1.8.zip", "linux_amd64")
+    end
+
+    test "rejects macOS asset when platform is linux" do
+      refute Registry.clangd_asset?("clangd-mac-21.1.8.zip", "linux_amd64")
+    end
+
+    test "rejects indexing tools asset" do
+      refute Registry.clangd_asset?("clangd_indexing_tools-mac-21.1.8.zip", "darwin_arm64")
+    end
+
+    test "matches the Windows asset with windows suffix" do
+      assert Registry.clangd_asset?("clangd-windows-21.1.8.zip", "windows_amd64")
+    end
+
+    test "rejects debug symbols asset" do
+      refute Registry.clangd_asset?("clangd-debug-symbols-windows-21.1.8.7z", "darwin_arm64")
+    end
+  end
+
   describe "for_language/1" do
     test "finds tools for Python" do
       tools = Registry.for_language(:python)

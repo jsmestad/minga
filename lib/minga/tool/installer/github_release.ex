@@ -4,15 +4,21 @@ defmodule Minga.Tool.Installer.GitHubRelease do
 
   Downloads pre-built binaries from a GitHub repository's latest release.
   Detects the current platform (OS + architecture) and selects the
-  matching asset. Handles .tar.gz, .gz, and .zip archives.
+  matching asset. Handles .tar.gz, .tar.xz, .gz, and .zip archives.
 
   ## Platform detection
 
   Maps `{:os.type(), :erlang.system_info(:system_architecture)}` to
-  standard platform suffixes used in release naming:
+  canonical platform names, then matches against common synonyms used
+  in release asset naming:
 
-  - `darwin_arm64` / `darwin_amd64` for macOS
-  - `linux_arm64` / `linux_amd64` for Linux
+  - OS: `"darwin"` also matches `"macos"` in asset names
+  - Arch: `"arm64"` also matches `"aarch64"`;
+          `"amd64"` also matches `"x86_64"` and `"x64"`
+
+  Only recognized archive formats (.tar.gz, .tar.xz, .gz, .zip) are
+  considered, filtering out signature files (.minisig, .sha256) and
+  editor extensions (.vsix).
 
   Recipes with non-standard naming can provide an `:asset_pattern`
   function for custom matching.
@@ -152,17 +158,37 @@ defmodule Minga.Tool.Installer.GitHubRelease do
     fn asset -> pattern.(asset["name"], suffix) end
   end
 
-  defp build_asset_matcher(_pattern, suffix) do
-    os = detect_os()
-    arch = detect_arch()
+  defp build_asset_matcher(_pattern, _suffix) do
+    os_names = os_synonyms(detect_os())
+    arch_names = arch_synonyms(detect_arch())
 
     fn asset ->
       name = String.downcase(asset["name"] || "")
 
-      (String.contains?(name, os) and String.contains?(name, arch)) or
-        String.contains?(name, suffix) or
-        String.contains?(name, String.replace(suffix, "_", "-"))
+      recognized_archive?(name) and
+        Enum.any?(os_names, &String.contains?(name, &1)) and
+        Enum.any?(arch_names, &String.contains?(name, &1))
     end
+  end
+
+  @spec os_synonyms(String.t()) :: [String.t()]
+  defp os_synonyms("darwin"), do: ["darwin", "macos"]
+  defp os_synonyms("linux"), do: ["linux"]
+  defp os_synonyms("windows"), do: ["windows", "win32", "win"]
+  defp os_synonyms(other), do: [other]
+
+  @spec arch_synonyms(String.t()) :: [String.t()]
+  defp arch_synonyms("arm64"), do: ["arm64", "aarch64"]
+  defp arch_synonyms("amd64"), do: ["amd64", "x86_64", "x64"]
+  defp arch_synonyms(other), do: [other]
+
+  @spec recognized_archive?(String.t()) :: boolean()
+  defp recognized_archive?(name) do
+    String.ends_with?(name, ".tar.gz") or
+      String.ends_with?(name, ".tgz") or
+      String.ends_with?(name, ".tar.xz") or
+      String.ends_with?(name, ".gz") or
+      String.ends_with?(name, ".zip")
   end
 
   @spec extract_version(map()) :: {:ok, String.t()} | {:error, term()}
@@ -204,15 +230,26 @@ defmodule Minga.Tool.Installer.GitHubRelease do
     end
   end
 
-  @type archive_type :: :tar_gz | :gz | :zip | :raw
+  @type archive_type :: :tar_gz | :tar_xz | :gz | :zip | :raw
 
   @spec detect_archive_type(String.t()) :: archive_type()
   defp detect_archive_type(name) do
+    detect_tar(name) || detect_single_compressed(name) || detect_zip_or_raw(name)
+  end
+
+  @spec detect_tar(String.t()) :: :tar_gz | :tar_xz | nil
+  defp detect_tar(name) do
     if String.ends_with?(name, ".tar.gz") or String.ends_with?(name, ".tgz") do
       :tar_gz
     else
-      if String.ends_with?(name, ".gz"), do: :gz, else: detect_zip_or_raw(name)
+      if String.ends_with?(name, ".tar.xz") or String.ends_with?(name, ".txz"),
+        do: :tar_xz
     end
+  end
+
+  @spec detect_single_compressed(String.t()) :: :gz | nil
+  defp detect_single_compressed(name) do
+    if String.ends_with?(name, ".gz"), do: :gz, else: nil
   end
 
   @spec detect_zip_or_raw(String.t()) :: :zip | :raw
@@ -224,6 +261,10 @@ defmodule Minga.Tool.Installer.GitHubRelease do
           {String.t(), integer()}
   defp run_extraction(:tar_gz, tmp_path, _asset_name, dest_dir) do
     System.cmd("tar", ["xzf", tmp_path, "-C", dest_dir], stderr_to_stdout: true)
+  end
+
+  defp run_extraction(:tar_xz, tmp_path, _asset_name, dest_dir) do
+    System.cmd("tar", ["xJf", tmp_path, "-C", dest_dir], stderr_to_stdout: true)
   end
 
   defp run_extraction(:gz, tmp_path, asset_name, dest_dir) do
