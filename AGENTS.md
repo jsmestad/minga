@@ -119,28 +119,24 @@ test/                         # Mirrors lib/ structure
 - **Check your current branch** before starting work: `git branch --show-current`. If you're on `main`, create a branch. If you're on someone else's feature branch, switch to `main` and branch from there.
 - **Push your branch and open a PR** when the work is ready. Always open the PR; don't just push and leave it. CI must pass before merging.
 
-### Git Worktrees (trial)
+### Git Worktrees
 
-We're trying git worktrees so multiple agents can work on different features at the same time. **The user is new to worktrees, so walk them through every step.** Don't assume they know the commands.
+All feature branches use git worktrees. This keeps the main checkout clean and lets multiple agent sessions work on different features concurrently without stepping on each other.
 
-When starting a new feature, offer to use a worktree:
+**Starting work:**
 
-> "Want me to set this up as a worktree so you can keep working on other things in the main checkout? I'll walk you through it."
-
-If they say yes:
-
-1. Create the worktree directory and branch:
+1. Create the worktree and branch:
    ```bash
    git worktree add ../minga-worktrees/<branch-name> -b <branch-name>
    ```
-2. Tell the user to point the next agent session at `../minga-worktrees/<branch-name>` as its working directory.
-3. Remind them the first build will be slower (cold `_build` and `deps` cache).
+2. Do all work inside `../minga-worktrees/<branch-name>`. The agent's working directory must be set to the worktree, not the main checkout.
+3. The first build in a new worktree needs `mix deps.get` and a full compile. This is a one-time cost.
 
-When a feature is done and the PR is merged:
+**After the PR is merged:**
+
 1. Clean up: `git worktree remove ../minga-worktrees/<branch-name>`
 2. Prune stale refs: `git worktree prune`
-
-**After the first worktree experience, ask the user:** "How did the worktree workflow feel? Worth keeping, or would you rather go back to one branch at a time?" Update this section based on their answer.
+3. Pull main in the primary checkout: `cd <your-main-checkout> && git pull origin main`
 
 ## Iterative Fixes (especially rendering)
 
