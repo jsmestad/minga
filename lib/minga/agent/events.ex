@@ -11,6 +11,7 @@ defmodule Minga.Agent.Events do
 
   alias Minga.Agent.DiffReview
   alias Minga.Agent.UIState
+  alias Minga.Agent.UIState.Panel
   alias Minga.Agent.View.Preview
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
@@ -73,6 +74,7 @@ defmodule Minga.Agent.Events do
 
   def handle(state, :messages_changed) do
     state = AgentAccess.update_agent_ui(state, &UIState.maybe_auto_scroll/1)
+    state = AgentAccess.update_panel(state, &Panel.bump_message_version/1)
     {state, [{:render, 16}, :sync_agent_buffer, {:update_tab_label, ""}]}
   end
 

@@ -3,6 +3,7 @@ defmodule Minga.Agent.UIStateTest do
 
   alias Minga.Agent.Config, as: AgentConfig
   alias Minga.Agent.UIState
+  alias Minga.Agent.UIState.Panel
   alias Minga.Buffer.Server, as: BufferServer
 
   # Creates a UIState with a running prompt buffer containing the given text.
@@ -511,6 +512,19 @@ defmodule Minga.Agent.UIStateTest do
       ui = UIState.ensure_prompt_buffer(ui)
       assert is_pid(ui.panel.prompt_buffer)
       assert ui.panel.prompt_buffer != old_pid
+    end
+  end
+
+  describe "Panel.bump_message_version/1" do
+    test "increments the counter each call" do
+      panel = Panel.new()
+      assert panel.message_version == 0
+
+      panel = Panel.bump_message_version(panel)
+      assert panel.message_version == 1
+
+      panel = Panel.bump_message_version(panel)
+      assert panel.message_version == 2
     end
   end
 end

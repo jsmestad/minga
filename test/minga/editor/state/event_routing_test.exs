@@ -88,10 +88,12 @@ defmodule Minga.Editor.State.EventRoutingTest do
     test "messages_changed triggers buffer sync and tab label update" do
       %{state: state} = make_state()
 
-      {_new_state, effects} = AgentEvents.handle(state, :messages_changed)
+      {new_state, effects} = AgentEvents.handle(state, :messages_changed)
 
       assert :sync_agent_buffer in effects
       assert {:update_tab_label, ""} in effects
+      # message_version is bumped so the GUI fingerprint cache is invalidated
+      assert AgentAccess.panel(new_state).message_version == 1
     end
   end
 
