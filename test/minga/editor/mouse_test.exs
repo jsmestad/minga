@@ -64,12 +64,17 @@ defmodule Minga.Editor.MouseTest do
       {editor, buffer}
     end
 
-    test "scroll down moves viewport without moving cursor when cursor stays visible" do
+    test "scroll down clamps cursor to respect scroll margin" do
       {editor, buffer} = start_mouse_editor()
-      # Default scroll_lines is 1. Cursor at 0 gets clamped to viewport top.
+      # Default scroll_lines is 1. Cursor at 0 gets pushed to respect
+      # scroll_margin (vim scrolloff behavior: cursor stays within
+      # the margin zone when viewport scrolls).
+      # With height=10, reserved=2, visible_rows=8, margin=5,
+      # effective_margin = min(5, div(7,2)) = 3, new_top=1:
+      # cursor pushed to 1 + 3 = 4.
       send_mouse(editor, 0, 0, :wheel_down, :press)
       {line, _col} = BufferServer.cursor(buffer)
-      assert line == 1
+      assert line == 4
     end
 
     test "scroll down keeps cursor in place when it remains visible" do

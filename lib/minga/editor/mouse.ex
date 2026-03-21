@@ -93,7 +93,7 @@ defmodule Minga.Editor.Mouse do
     lines = scroll_lines(state)
     vp = active_window_viewport(state)
     new_vp = scroll_viewport(vp, lines, total_lines)
-    put_active_window_viewport(state, new_vp) |> clamp_cursor_to_viewport()
+    put_active_window_viewport(state, new_vp) |> clamp_cursor_to_viewport(:down)
   end
 
   def handle(%{buffers: %{active: buf}} = state, _r, _c, :wheel_up, _m, :press, _cc) do
@@ -101,7 +101,7 @@ defmodule Minga.Editor.Mouse do
     lines = scroll_lines(state)
     vp = active_window_viewport(state)
     new_vp = scroll_viewport(vp, -lines, total_lines)
-    put_active_window_viewport(state, new_vp) |> clamp_cursor_to_viewport()
+    put_active_window_viewport(state, new_vp) |> clamp_cursor_to_viewport(:up)
   end
 
   # ── Scroll wheel (horizontal) ──
@@ -948,28 +948,65 @@ defmodule Minga.Editor.Mouse do
     %Viewport{vp | top: new_top}
   end
 
-  @spec clamp_cursor_to_viewport(state()) :: state()
-  defp clamp_cursor_to_viewport(%{buffers: %{active: buf}} = state) do
+  # Clamps the cursor to remain visible within the viewport, respecting
+  # scroll_margin so the render pipeline's scroll_to_cursor doesn't override
+  # the viewport position the mouse handler just set.
+  #
+  # Direction-aware (matches vim scrolloff behavior):
+  # - Scrolling UP: enforce bottom margin (push cursor toward top)
+  # - Scrolling DOWN: enforce top margin (push cursor toward bottom)
+  @spec clamp_cursor_to_viewport(state(), :up | :down) :: state()
+  defp clamp_cursor_to_viewport(%{buffers: %{active: buf}} = state, direction) do
     vp = active_window_viewport(state)
     {cursor_line, cursor_col} = BufferServer.cursor(buf)
     {first_line, last_line} = Viewport.visible_range(vp)
-    do_clamp_cursor(state, buf, cursor_line, cursor_col, first_line, last_line)
-  end
 
-  defp do_clamp_cursor(state, buf, cursor_line, cursor_col, first_line, _last_line)
-       when cursor_line < first_line do
-    BufferServer.move_to(buf, {first_line, clamp_col_to_line(buf, first_line, cursor_col)})
+    margin = scroll_margin()
+    visible_rows = Viewport.content_rows(vp)
+    effective_margin = min(margin, div(visible_rows - 1, 2))
+
+    target_line =
+      clamp_with_margin(cursor_line, first_line, last_line, effective_margin, direction)
+
+    if target_line != cursor_line do
+      BufferServer.move_to(buf, {target_line, clamp_col_to_line(buf, target_line, cursor_col)})
+    end
+
     state
   end
 
-  defp do_clamp_cursor(state, buf, cursor_line, cursor_col, _first_line, last_line)
-       when cursor_line > last_line do
-    BufferServer.move_to(buf, {last_line, clamp_col_to_line(buf, last_line, cursor_col)})
-    state
+  # First clamp to basic visible range, then apply margin for scroll direction.
+  @spec clamp_with_margin(
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          :up | :down
+        ) :: non_neg_integer()
+  defp clamp_with_margin(cursor, first, last, margin, direction) do
+    # Basic visibility clamp
+    clamped = cursor |> max(first) |> min(last)
+
+    # Direction-aware margin clamp
+    case direction do
+      :up ->
+        # Scrolling up: enforce bottom margin (push cursor toward top)
+        max_cursor = last - margin
+        min(clamped, max(max_cursor, first))
+
+      :down ->
+        # Scrolling down: enforce top margin (push cursor toward bottom)
+        min_cursor = first + margin
+        max(clamped, min(min_cursor, last))
+    end
   end
 
-  defp do_clamp_cursor(state, _buf, _cursor_line, _cursor_col, _first_line, _last_line),
-    do: state
+  @spec scroll_margin() :: non_neg_integer()
+  defp scroll_margin do
+    Options.get(:scroll_margin)
+  catch
+    :exit, _ -> 5
+  end
 
   @spec maybe_auto_scroll(state(), integer()) :: state()
   defp maybe_auto_scroll(%{buffers: %{active: buf}} = state, row) when row <= 0 do

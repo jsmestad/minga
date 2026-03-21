@@ -10,11 +10,15 @@ defmodule Minga.Editor.ViewportScrollTest do
       assert new_vp.top == 1
     end
 
-    test "clamps cursor to viewport when it would go off-screen" do
+    test "clamps cursor to viewport with scroll margin when it would go off-screen" do
       vp = Viewport.new(10, 80, 0)
       {new_vp, clamped} = Viewport.scroll_line_down(vp, 0, 100)
       assert new_vp.top == 1
-      assert clamped == 1
+      # Cursor is pushed to first_visible + effective_margin to respect
+      # scroll_margin (vim scrolloff behavior). With 10 visible rows and
+      # default margin 5, effective_margin = min(5, div(9,2)) = 4.
+      # min_cursor = 1 + 4 = 5.
+      assert clamped == 5
     end
 
     test "does not scroll past end of file" do
@@ -37,11 +41,15 @@ defmodule Minga.Editor.ViewportScrollTest do
       assert new_vp.top == 4
     end
 
-    test "clamps cursor when it would fall below viewport" do
+    test "clamps cursor with scroll margin when it would fall below viewport" do
       vp = %{Viewport.new(10, 80, 0) | top: 5}
       {new_vp, clamped} = Viewport.scroll_line_up(vp, 14, 100)
       assert new_vp.top == 4
-      assert clamped == 13
+      # Cursor is pushed to last_visible - effective_margin to respect
+      # scroll_margin (vim scrolloff behavior). With 10 visible rows and
+      # default margin 5, effective_margin = min(5, div(9,2)) = 4.
+      # max_cursor = 4 + 10 - 1 - 4 = 9.
+      assert clamped == 9
     end
 
     test "does not scroll above line 0" do
