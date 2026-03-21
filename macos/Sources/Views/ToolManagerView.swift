@@ -16,6 +16,7 @@ struct ToolManagerView: View {
     private let panelWidth: CGFloat = 680
     private let panelMaxHeight: CGFloat = 520
     private let itemHeight: CGFloat = 64
+    private let failedItemHeight: CGFloat = 96
 
     var body: some View {
         if state.visible {
@@ -188,6 +189,9 @@ struct ToolManagerView: View {
 
     @ViewBuilder
     private func toolRow(_ tool: ToolEntry, isSelected: Bool) -> some View {
+        let hasError = tool.status == .failed && !tool.errorReason.isEmpty
+        let rowHeight = hasError ? failedItemHeight : itemHeight
+
         HStack(spacing: 12) {
             // Category icon
             categoryIcon(tool.category)
@@ -213,33 +217,43 @@ struct ToolManagerView: View {
                     .foregroundStyle(theme.popupFg.opacity(0.45))
                     .lineLimit(1)
 
-                // Languages and commands
-                HStack(spacing: 8) {
-                    if !tool.languages.isEmpty {
-                        HStack(spacing: 3) {
-                            Image(systemName: "globe")
-                                .font(.system(size: 9))
-                            Text(tool.languages.joined(separator: ", "))
-                                .font(.system(size: 10))
+                if hasError {
+                    // Inline error detail for failed tools
+                    Text(tool.errorReason)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(Color(red: 1.0, green: 0.47, blue: 0.47).opacity(0.8))
+                        .lineLimit(2)
+                        .truncationMode(.tail)
+                        .padding(.top, 2)
+                } else {
+                    // Languages and commands (hidden when showing error)
+                    HStack(spacing: 8) {
+                        if !tool.languages.isEmpty {
+                            HStack(spacing: 3) {
+                                Image(systemName: "globe")
+                                    .font(.system(size: 9))
+                                Text(tool.languages.joined(separator: ", "))
+                                    .font(.system(size: 10))
+                            }
+                            .foregroundStyle(theme.popupFg.opacity(0.3))
                         }
-                        .foregroundStyle(theme.popupFg.opacity(0.3))
-                    }
 
-                    if !tool.provides.isEmpty {
-                        HStack(spacing: 3) {
-                            Image(systemName: "terminal")
-                                .font(.system(size: 9))
-                            Text(tool.provides.joined(separator: ", "))
-                                .font(.system(size: 10, design: .monospaced))
+                        if !tool.provides.isEmpty {
+                            HStack(spacing: 3) {
+                                Image(systemName: "terminal")
+                                    .font(.system(size: 9))
+                                Text(tool.provides.joined(separator: ", "))
+                                    .font(.system(size: 10, design: .monospaced))
+                            }
+                            .foregroundStyle(theme.popupFg.opacity(0.3))
                         }
-                        .foregroundStyle(theme.popupFg.opacity(0.3))
                     }
                 }
             }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
-        .frame(height: itemHeight)
+        .frame(minHeight: rowHeight)
         .background(
             isSelected
                 ? RoundedRectangle(cornerRadius: 6)

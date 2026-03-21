@@ -1168,6 +1168,7 @@ defmodule Minga.Port.Protocol.GUI do
         + version_len(1) + version(version_len)
         + homepage_len(2) + homepage(homepage_len)
         + provides_count(1) + provides...
+        + error_reason_len(2) + error_reason(error_reason_len)
 
       Per language:
         lang_len(1) + lang(lang_len)
@@ -1186,6 +1187,7 @@ defmodule Minga.Port.Protocol.GUI do
   | 1     | installed       |
   | 2     | installing      |
   | 3     | update_available|
+  | 4     | failed          |
 
   ## Category values
 
@@ -1243,6 +1245,8 @@ defmodule Minga.Port.Protocol.GUI do
         version_len = byte_size(version)
         homepage = tool.homepage || ""
         homepage_len = byte_size(homepage)
+        error_reason = tool.error_reason || ""
+        error_reason_len = byte_size(error_reason)
 
         lang_data =
           Enum.map(tool.languages, fn lang ->
@@ -1260,7 +1264,8 @@ defmodule Minga.Port.Protocol.GUI do
           IO.iodata_to_binary(lang_data) <>
           <<version_len::8, version::binary, homepage_len::16, homepage::binary,
             length(tool.provides)::8>> <>
-          IO.iodata_to_binary(provides_data)
+          IO.iodata_to_binary(provides_data) <>
+          <<error_reason_len::16, error_reason::binary>>
       end)
 
     <<@op_gui_tool_manager, 1::8, filter_byte::8, selected::16, tool_count::16>> <>

@@ -284,7 +284,8 @@ struct CommandDispatcherRoutingTests {
         let tools = [GUIToolEntry(name: "elixir_ls", label: "ElixirLS",
                                   description: "LSP", category: 0, status: 1,
                                   method: 0, languages: ["elixir"], version: "0.22",
-                                  homepage: "", provides: ["elixir-ls"])]
+                                  homepage: "", provides: ["elixir-ls"],
+                                  errorReason: "")]
         dispatcher.dispatch(.guiToolManager(visible: true, filter: 0,
                                              selectedIndex: 0, tools: tools))
 

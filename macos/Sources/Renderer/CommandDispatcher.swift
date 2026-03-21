@@ -282,7 +282,8 @@ final class CommandDispatcher {
                         languages: t.languages,
                         version: t.version,
                         homepage: t.homepage,
-                        provides: t.provides
+                        provides: t.provides,
+                        errorReason: t.errorReason
                     )
                 }
                 guiState.toolManagerState.update(

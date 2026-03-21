@@ -336,13 +336,13 @@ struct ToolManagerStateLifecycleTests {
         let state = ToolManagerState()
         state.tools = [
             ToolEntry(id: "a", name: "a", label: "A", description: "", category: .lspServer,
-                     status: .installed, method: .npm, languages: [], version: "", homepage: "", provides: []),
+                     status: .installed, method: .npm, languages: [], version: "", homepage: "", provides: [], errorReason: ""),
             ToolEntry(id: "b", name: "b", label: "B", description: "", category: .formatter,
-                     status: .notInstalled, method: .pip, languages: [], version: "", homepage: "", provides: []),
+                     status: .notInstalled, method: .pip, languages: [], version: "", homepage: "", provides: [], errorReason: ""),
             ToolEntry(id: "c", name: "c", label: "C", description: "", category: .linter,
-                     status: .installing, method: .cargo, languages: [], version: "", homepage: "", provides: []),
+                     status: .installing, method: .cargo, languages: [], version: "", homepage: "", provides: [], errorReason: ""),
             ToolEntry(id: "d", name: "d", label: "D", description: "", category: .debugger,
-                     status: .updateAvailable, method: .goInstall, languages: [], version: "", homepage: "", provides: [])
+                     status: .updateAvailable, method: .goInstall, languages: [], version: "", homepage: "", provides: [], errorReason: "")
         ]
 
         #expect(state.installedCount == 2) // installed + updateAvailable
@@ -355,7 +355,7 @@ struct ToolManagerStateLifecycleTests {
         let state = ToolManagerState()
         state.tools = [
             ToolEntry(id: "a", name: "a", label: "A", description: "", category: .lspServer,
-                     status: .installed, method: .npm, languages: [], version: "", homepage: "", provides: [])
+                     status: .installed, method: .npm, languages: [], version: "", homepage: "", provides: [], errorReason: "")
         ]
         state.hide()
 

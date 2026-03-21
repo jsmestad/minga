@@ -1130,6 +1130,7 @@ struct GUIToolManagerDecoderTests {
         appendString16(&data, "https://github.com/elixir-lsp/elixir-ls") // homepage
         data.append(1) // providesCount
         appendString8(&data, "elixir-ls") // provides
+        appendString16(&data, "") // errorReason (empty for installed)
 
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
@@ -1150,6 +1151,7 @@ struct GUIToolManagerDecoderTests {
         #expect(tools[0].languages == ["elixir"])
         #expect(tools[0].version == "0.22.1")
         #expect(tools[0].provides == ["elixir-ls"])
+        #expect(tools[0].errorReason == "")
     }
 
     @Test("Decode gui_tool_manager hidden")
