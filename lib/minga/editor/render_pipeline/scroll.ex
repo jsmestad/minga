@@ -191,7 +191,15 @@ defmodule Minga.Editor.RenderPipeline.Scroll do
         FoldMap.buffer_to_visible(fold_map, cursor_line)
       end
 
+    # Vertical-only scroll: preserve horizontal scroll position (viewport.left)
+    # so that horizontal scroll from cursor tracking or mouse wheel persists.
+    # Passing cursor_col=0 would reset left to 0 via adjust_left.
+    # TODO: replace save/restore with Viewport.scroll_to_cursor_vertical/3
+    # that only modifies `top`. The same trap exists in mouse.ex:934 and
+    # content.ex:470 where {cursor_line, 0} silently resets left.
+    saved_left = viewport.left
     viewport = Viewport.scroll_to_cursor(viewport, {visible_cursor_line, 0}, window.buffer)
+    viewport = %{viewport | left: saved_left}
     visible_rows = Viewport.content_rows(viewport)
 
     # Map viewport visible range back to buffer lines
@@ -252,8 +260,12 @@ defmodule Minga.Editor.RenderPipeline.Scroll do
 
     content_w = max(viewport.cols - gutter_w, 1)
 
-    # Horizontal scroll (disabled when wrapping)
-    viewport = scroll_horizontal(viewport, cursor_line, cursor_col, wrap_on, window.buffer)
+    # Horizontal scroll (disabled when wrapping).
+    # Use content_w (text area excluding gutter) as the effective width,
+    # so the cursor triggers scroll when it reaches the content edge,
+    # not the full viewport edge.
+    viewport =
+      scroll_horizontal(viewport, cursor_line, cursor_col, wrap_on, content_w, window.buffer)
 
     # Substitution preview (active window only)
     {lines, preview_matches} =
@@ -334,14 +346,26 @@ defmodule Minga.Editor.RenderPipeline.Scroll do
   defp window_cursor(window, true), do: BufferServer.cursor(window.buffer)
   defp window_cursor(window, false), do: window.cursor
 
-  @spec scroll_horizontal(Viewport.t(), non_neg_integer(), non_neg_integer(), boolean(), pid()) ::
-          Viewport.t()
-  defp scroll_horizontal(vp, cursor_line, _cursor_col, true = _wrap_on, buf) do
-    Viewport.scroll_to_cursor(%{vp | left: 0}, {cursor_line, 0}, buf)
+  @spec scroll_horizontal(
+          Viewport.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          boolean(),
+          pos_integer(),
+          pid()
+        ) :: Viewport.t()
+  defp scroll_horizontal(vp, _cursor_line, _cursor_col, true = _wrap_on, _content_w, _buf) do
+    # Wrapping: no horizontal scroll needed. Just reset left to 0.
+    # Vertical scroll is handled separately above (save/restore pattern).
+    %{vp | left: 0}
   end
 
-  defp scroll_horizontal(vp, cursor_line, cursor_col, false = _wrap_on, buf) do
-    Viewport.scroll_to_cursor(vp, {cursor_line, cursor_col}, buf)
+  defp scroll_horizontal(vp, cursor_line, cursor_col, false = _wrap_on, content_w, buf) do
+    # Temporarily set cols to content_w (excluding gutter) so adjust_left
+    # triggers scroll at the content edge, not the full viewport edge.
+    content_vp = %{vp | cols: content_w}
+    adjusted = Viewport.scroll_to_cursor(content_vp, {cursor_line, cursor_col}, buf)
+    %{vp | left: adjusted.left}
   end
 
   @spec wrap_enabled?(pid()) :: boolean()

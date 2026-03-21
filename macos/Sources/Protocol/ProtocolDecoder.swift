@@ -1063,15 +1063,16 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                                  tabs: tabs, entries: entries), pos - offset)
 
     case OP_GUI_WINDOW_CONTENT:
-        // Header: window_id:2 + flags:1 + cursor_row:2 + cursor_col:2 + cursor_shape:1 + row_count:2 = 10
-        guard data.count >= rest + 10 else { throw ProtocolDecodeError.malformed }
+        // Header: window_id:2 + flags:1 + cursor_row:2 + cursor_col:2 + cursor_shape:1 + scroll_left:2 + row_count:2 = 12
+        guard data.count >= rest + 12 else { throw ProtocolDecodeError.malformed }
         let windowId = readU16(data, rest)
         let flags = data[rest + 2]
         let cursorRow = readU16(data, rest + 3)
         let cursorCol = readU16(data, rest + 5)
         let cursorShape = CursorShape(rawValue: data[rest + 7]) ?? .block
-        let rowCount = Int(readU16(data, rest + 8))
-        var pos = rest + 10
+        let scrollLeft = readU16(data, rest + 8)
+        let rowCount = Int(readU16(data, rest + 10))
+        var pos = rest + 12
 
         // Decode rows
         var rows: [GUIVisualRow] = []
@@ -1196,6 +1197,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             cursorRow: cursorRow,
             cursorCol: cursorCol,
             cursorShape: cursorShape,
+            scrollLeft: scrollLeft,
             rows: rows,
             selection: selection,
             searchMatches: matches,

@@ -359,12 +359,16 @@ final class CoreTextMetalRenderer {
                 let gutterWidth = Float(gutter.lineNumberWidth) + Float(gutter.signColWidth)
                 let contentColOffset = (Float(gutter.contentCol) + gutterWidth) * cellW * scale + gutterPaddingPx
 
+                // Horizontal scroll: shift line textures and overlays left by scrollLeft columns.
+                // The gutter stays fixed; only content past the gutter edge scrolls.
+                let hScrollPx = Float(content.scrollLeft) * cellW * scale
+
                 // Selection overlay quads (drawn before text).
                 if let sel = content.selection {
                     appendSelectionQuads(
                         selection: sel,
                         rowOffset: windowRowOffset,
-                        colOffset: contentColOffset,
+                        colOffset: contentColOffset - hScrollPx,
                         cellW: cellW, cellH: cellH, scale: scale,
                         viewportWidth: Float(viewportSize.width),
                         quads: &semanticOverlayQuads
@@ -377,7 +381,7 @@ final class CoreTextMetalRenderer {
                     // Document highlights are typically single-line (one identifier).
                     // Draw on startRow only; multi-row highlights are rare for this feature.
                     let hlY = windowRowOffset + Float(highlight.startRow) * cellH * scale
-                    let hlX = contentColOffset + Float(highlight.startCol) * cellW * scale
+                    let hlX = contentColOffset + Float(highlight.startCol) * cellW * scale - hScrollPx
                     let hlW = Float(highlight.endCol - highlight.startCol) * cellW * scale
 
                     var quad = QuadGPU()
@@ -395,7 +399,7 @@ final class CoreTextMetalRenderer {
                 // Search match overlay quads (drawn before text).
                 for match in content.searchMatches {
                     let matchY = windowRowOffset + Float(match.row) * cellH * scale
-                    let matchX = contentColOffset + Float(match.startCol) * cellW * scale
+                    let matchX = contentColOffset + Float(match.startCol) * cellW * scale - hScrollPx
                     let matchW = Float(match.endCol - match.startCol) * cellW * scale
 
                     var quad = QuadGPU()
@@ -415,7 +419,7 @@ final class CoreTextMetalRenderer {
 
                         let (uvOrigin, uvSize) = atlas.uvForSlot(entry.slotIndex, pixelWidth: entry.pixelWidth)
                         var lineGPU = LineGPU()
-                        lineGPU.position = SIMD2<Float>(contentColOffset, yPos)
+                        lineGPU.position = SIMD2<Float>(contentColOffset - hScrollPx, yPos)
                         lineGPU.size = SIMD2<Float>(Float(entry.pixelWidth), Float(entry.pixelHeight))
                         lineGPU.uvOrigin = uvOrigin
                         lineGPU.uvSize = uvSize
@@ -433,7 +437,7 @@ final class CoreTextMetalRenderer {
                     }
 
                     let diagY = windowRowOffset + Float(diag.startRow) * cellH * scale + cellH * scale - 2.0 * scale
-                    let diagX = contentColOffset + Float(diag.startCol) * cellW * scale
+                    let diagX = contentColOffset + Float(diag.startCol) * cellW * scale - hScrollPx
                     let diagW = Float(diag.endCol - diag.startCol) * cellW * scale
 
                     var quad = QuadGPU()
@@ -496,6 +500,11 @@ final class CoreTextMetalRenderer {
         // Pass 2: Cursor background (drawn BEFORE text so text is visible on top).
         // For block cursors, draw the cursor bg here so the text pass composites over it.
         // Beam and underline cursors are drawn AFTER text (pass 5).
+        // NOTE: Cursor position uses lineBuffer.cursorRow/Col from the TUI cell-grid
+        // path, which the BEAM computes as gutter_w + (cursor_col - viewport.left).
+        // Horizontal scroll is already baked in. If the TUI rendering path is ever
+        // removed for GUI frontends, cursor positioning will need to use the semantic
+        // window's cursor_col and scroll_left instead.
         if lineBuffer.cursorVisible && lineBuffer.cursorShape == .block {
             let cursorRow = Float(lineBuffer.cursorRow)
             let cursorCol = Float(lineBuffer.cursorCol)

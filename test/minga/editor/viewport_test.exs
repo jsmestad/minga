@@ -37,6 +37,26 @@ defmodule Minga.Editor.ViewportTest do
       assert vp.left == 6
     end
 
+    test "horizontal scroll with content_w smaller than cols (gutter scenario)" do
+      # Simulates what scroll.ex does: use content_w (excluding gutter)
+      # as the effective width for horizontal scroll.
+      # viewport.cols = 130, gutter_w = 4, content_w = 126
+      # cursor_col at 126 should trigger scroll (at the content edge)
+      content_w = 126
+      # reserved: 0 so content_rows == rows, isolating horizontal scroll
+      vp = %Viewport{top: 0, left: 0, rows: 24, cols: content_w, reserved: 0}
+      vp = Viewport.scroll_to_cursor(vp, {0, 126})
+      assert vp.left == 1, "cursor at content edge should trigger horizontal scroll"
+    end
+
+    test "horizontal scroll preserves left when cursor is within content" do
+      content_w = 126
+      # reserved: 0 so content_rows == rows, isolating horizontal scroll
+      vp = %Viewport{top: 0, left: 50, rows: 24, cols: content_w, reserved: 0}
+      vp = Viewport.scroll_to_cursor(vp, {0, 100})
+      assert vp.left == 50, "cursor within visible content should not change left"
+    end
+
     test "scrolls left when cursor moves before left edge" do
       vp = %Viewport{top: 0, left: 10, rows: 24, cols: 80}
       vp = Viewport.scroll_to_cursor(vp, {0, 5})

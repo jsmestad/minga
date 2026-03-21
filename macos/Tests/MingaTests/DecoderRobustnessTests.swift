@@ -277,11 +277,12 @@ struct DecoderTruncatedGUIChromeTests {
     @Test("gui_window_content truncated rows")
     func truncatedWindowContent() {
         var data = Data([OP_GUI_WINDOW_CONTENT])
-        // Header: window_id(2)+flags(1)+cursor_row(2)+cursor_col(2)+cursor_shape(1)+row_count(2) = 10
+        // Header: window_id(2)+flags(1)+cursor_row(2)+cursor_col(2)+cursor_shape(1)+scroll_left(2)+row_count(2) = 12
         data.append(contentsOf: [0x00, 0x01]) // windowId
         data.append(0x01) // flags
         data.append(contentsOf: [0x00, 0x00, 0x00, 0x00]) // cursor
         data.append(0x00) // cursor_shape
+        data.append(contentsOf: [0x00, 0x00]) // scrollLeft
         data.append(contentsOf: [0x00, 0x05]) // rowCount=5
         // No row data
 

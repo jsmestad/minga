@@ -14,7 +14,7 @@ defmodule Minga.Test.GUIWindowContentDecoder do
   @spec decode(binary()) :: map()
   def decode(
         <<0x80, window_id::16, flags::8, cursor_row::16, cursor_col::16, cursor_shape::8,
-          row_count::16, rest::binary>>
+          scroll_left::16, row_count::16, rest::binary>>
       ) do
     {rows, rest} = decode_rows(rest, row_count, [])
     {selection, rest} = decode_selection(rest)
@@ -28,6 +28,7 @@ defmodule Minga.Test.GUIWindowContentDecoder do
       cursor_row: cursor_row,
       cursor_col: cursor_col,
       cursor_shape: decode_cursor_shape(cursor_shape),
+      scroll_left: scroll_left,
       rows: rows,
       selection: selection,
       search_matches: search_matches,
