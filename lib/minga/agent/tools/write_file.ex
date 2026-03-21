@@ -9,18 +9,36 @@ defmodule Minga.Agent.Tools.WriteFile do
   """
 
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Editor
 
   @doc """
   Writes `content` to the file at `path`.
 
-  Creates any missing parent directories. Overwrites the file if it already
-  exists. Returns `{:ok, message}` on success or `{:error, reason}` on failure.
+  Creates any missing parent directories. For existing files with an open
+  buffer, routes through `replace_content`. For new files, writes to disk
+  first then opens a buffer so the file appears in the buffer list.
+  Falls back to filesystem-only when the Editor is not running.
+
+  Returns `{:ok, message}` on success or `{:error, reason}` on failure.
   """
   @spec execute(String.t(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
   def execute(path, content) when is_binary(path) and is_binary(content) do
     case BufferServer.pid_for_path(path) do
-      {:ok, pid} -> execute_via_buffer(pid, path, content)
-      :not_found -> execute_via_filesystem(path, content)
+      {:ok, pid} ->
+        # Buffer already open, replace content in-memory
+        execute_via_buffer(pid, path, content)
+
+      :not_found ->
+        # Write to disk first (handles new file creation + parent dirs),
+        # then open a buffer so the user gets visibility and undo.
+        case execute_via_filesystem(path, content) do
+          {:ok, msg} ->
+            open_buffer_for_written_file(path)
+            {:ok, msg}
+
+          error ->
+            error
+        end
     end
   end
 
@@ -34,6 +52,16 @@ defmodule Minga.Agent.Tools.WriteFile do
   catch
     # Buffer process died between pid_for_path and the call
     :exit, _ -> {:error, "buffer process died for #{path}"}
+  end
+
+  # Opens a buffer for a file that was just written to disk.
+  # Best-effort: if the Editor isn't running, the file still exists on disk.
+  @spec open_buffer_for_written_file(String.t()) :: :ok
+  defp open_buffer_for_written_file(path) do
+    Editor.ensure_buffer_for_path(path)
+    :ok
+  catch
+    :exit, _ -> :ok
   end
 
   @spec execute_via_filesystem(String.t(), String.t()) ::

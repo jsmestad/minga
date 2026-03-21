@@ -11,6 +11,7 @@ defmodule Minga.Agent.Tools.MultiEditFile do
   """
 
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Editor
 
   @typedoc "A single edit operation."
   @type edit :: %{String.t() => String.t()}
@@ -18,14 +19,18 @@ defmodule Minga.Agent.Tools.MultiEditFile do
   @doc """
   Applies a list of edits to the file at `path`.
 
+  Opens a buffer for the file if one doesn't exist, ensuring undo integration
+  and visibility in the buffer list. Falls back to filesystem I/O only when
+  the Editor is not running.
+
   Each edit in `edits` must have `"old_text"` and `"new_text"` keys.
   Returns `{:ok, summary}` with a per-edit status report.
   """
   @spec execute(String.t(), [edit()]) :: {:ok, String.t()} | {:error, String.t()}
   def execute(path, edits) when is_binary(path) and is_list(edits) do
-    case BufferServer.pid_for_path(path) do
+    case ensure_buffer(path) do
       {:ok, pid} -> execute_via_buffer(pid, path, edits)
-      :not_found -> execute_via_filesystem(path, edits)
+      :unavailable -> execute_via_filesystem(path, edits)
     end
   end
 
@@ -45,6 +50,16 @@ defmodule Minga.Agent.Tools.MultiEditFile do
     end
   catch
     :exit, _ -> {:error, "buffer process died for #{path}"}
+  end
+
+  @spec ensure_buffer(String.t()) :: {:ok, pid()} | :unavailable
+  defp ensure_buffer(path) do
+    case Editor.ensure_buffer_for_path(path) do
+      {:ok, pid} -> {:ok, pid}
+      {:error, _} -> :unavailable
+    end
+  catch
+    :exit, _ -> :unavailable
   end
 
   @spec format_buffer_results(String.t(), [BufferServer.replace_result()]) :: String.t()

@@ -10,9 +10,14 @@ defmodule Minga.Agent.Tools.EditFile do
   """
 
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Editor
 
   @doc """
   Replaces `old_text` with `new_text` in the file at `path`.
+
+  Opens a buffer for the file if one doesn't exist, ensuring undo integration
+  and visibility in the buffer list. Falls back to filesystem I/O only when
+  the Editor is not running (e.g., headless/test mode).
 
   Returns `{:ok, message}` on success. Fails if the file doesn't exist, if
   `old_text` is not found, or if `old_text` appears more than once (ambiguous edit).
@@ -20,9 +25,9 @@ defmodule Minga.Agent.Tools.EditFile do
   @spec execute(String.t(), String.t(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
   def execute(path, old_text, new_text)
       when is_binary(path) and is_binary(old_text) and is_binary(new_text) do
-    case BufferServer.pid_for_path(path) do
+    case ensure_buffer(path) do
       {:ok, pid} -> execute_via_buffer(pid, path, old_text, new_text)
-      :not_found -> execute_via_filesystem(path, old_text, new_text)
+      :unavailable -> execute_via_filesystem(path, old_text, new_text)
     end
   end
 
@@ -35,6 +40,17 @@ defmodule Minga.Agent.Tools.EditFile do
     end
   catch
     :exit, _ -> {:error, "buffer process died for #{path}"}
+  end
+
+  @spec ensure_buffer(String.t()) :: {:ok, pid()} | :unavailable
+  defp ensure_buffer(path) do
+    case Editor.ensure_buffer_for_path(path) do
+      {:ok, pid} -> {:ok, pid}
+      {:error, _} -> :unavailable
+    end
+  catch
+    # Editor not running (headless/test mode)
+    :exit, _ -> :unavailable
   end
 
   @spec execute_via_filesystem(String.t(), String.t(), String.t()) ::
