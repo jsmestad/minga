@@ -99,6 +99,27 @@ defmodule Minga.Theme.SlotsTest do
       assert pair_map[0x40] == theme.tree.active_fg
     end
 
+    test "highlight and selection slots map to expected IDs" do
+      theme = Minga.Theme.get!(:doom_one)
+      pairs = Slots.to_color_pairs(theme)
+      pair_map = Map.new(pairs)
+
+      assert pair_map[0x59] == theme.editor.highlight_read_bg
+      assert pair_map[0x5A] == theme.editor.highlight_write_bg
+      assert pair_map[0x5B] == theme.editor.selection_bg
+    end
+
+    test "all themes define highlight and selection colors (no nils)" do
+      for theme_name <- [:doom_one, :catppuccin_mocha, :one_dark, :one_light] do
+        theme = Minga.Theme.get!(theme_name)
+        pair_map = Map.new(Slots.to_color_pairs(theme))
+
+        assert pair_map[0x59] != nil, "#{theme_name} missing highlight_read_bg"
+        assert pair_map[0x5A] != nil, "#{theme_name} missing highlight_write_bg"
+        assert pair_map[0x5B] != nil, "#{theme_name} missing selection_bg"
+      end
+    end
+
     test "all slot IDs are unique" do
       theme = Minga.Theme.get!(:doom_one)
       pairs = Slots.to_color_pairs(theme)

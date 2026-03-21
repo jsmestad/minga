@@ -441,7 +441,7 @@ defmodule Minga.Editor.HighlightSync do
 
     # Try incremental sync first: if the buffer has pending edit deltas,
     # send them as an edit_buffer command instead of the full content.
-    edits = BufferServer.flush_edits(state.buffers.active)
+    edits = BufferServer.flush_edits(state.buffers.active, :highlight)
 
     commands =
       if edits != [] do

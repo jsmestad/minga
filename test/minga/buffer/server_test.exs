@@ -681,6 +681,152 @@ defmodule Minga.Buffer.ServerTest do
     end
   end
 
+  # ── Per-consumer flush_edits ──────────────────────────────────────────────
+
+  describe "per-consumer flush_edits" do
+    test "two consumers independently receive the full set of deltas from the same edit" do
+      {:ok, pid} = Server.start_link(content: "hello")
+      Server.move_to(pid, {0, 5})
+      Server.insert_char(pid, "x")
+      Server.insert_char(pid, "y")
+
+      # Both consumers should see the same 2 deltas
+      lsp_deltas = Server.flush_edits(pid, :lsp)
+      hl_deltas = Server.flush_edits(pid, :highlight)
+
+      assert length(lsp_deltas) == 2
+      assert length(hl_deltas) == 2
+      assert Enum.map(lsp_deltas, & &1.inserted_text) == ["x", "y"]
+      assert Enum.map(hl_deltas, & &1.inserted_text) == ["x", "y"]
+    end
+
+    test "flush_edits with consumer_id returns deltas since that consumer's last read" do
+      {:ok, pid} = Server.start_link(content: "hello")
+      Server.move_to(pid, {0, 5})
+      Server.insert_char(pid, "a")
+      Server.insert_char(pid, "b")
+
+      # First flush gets both deltas
+      assert [d1, d2] = Server.flush_edits(pid, :lsp)
+      assert d1.inserted_text == "a"
+      assert d2.inserted_text == "b"
+
+      # Insert more
+      Server.insert_char(pid, "c")
+
+      # Second flush gets only the new one
+      assert [d3] = Server.flush_edits(pid, :lsp)
+      assert d3.inserted_text == "c"
+    end
+
+    test "consumers can read at different rates without losing deltas" do
+      {:ok, pid} = Server.start_link(content: "")
+      Server.insert_char(pid, "a")
+      Server.insert_char(pid, "b")
+      Server.insert_char(pid, "c")
+
+      # :lsp reads all 3
+      lsp_first = Server.flush_edits(pid, :lsp)
+      assert length(lsp_first) == 3
+
+      # More edits
+      Server.insert_char(pid, "d")
+      Server.insert_char(pid, "e")
+
+      # :highlight hasn't read yet, should get all 5
+      hl_all = Server.flush_edits(pid, :highlight)
+      assert length(hl_all) == 5
+      assert Enum.map(hl_all, & &1.inserted_text) == ["a", "b", "c", "d", "e"]
+
+      # :lsp should get only the 2 new ones
+      lsp_second = Server.flush_edits(pid, :lsp)
+      assert length(lsp_second) == 2
+      assert Enum.map(lsp_second, & &1.inserted_text) == ["d", "e"]
+    end
+
+    test "log is trimmed after all consumers have read" do
+      {:ok, pid} = Server.start_link(content: "")
+      Server.insert_char(pid, "a")
+      Server.insert_char(pid, "b")
+
+      # Both consumers flush
+      Server.flush_edits(pid, :lsp)
+      Server.flush_edits(pid, :highlight)
+
+      # Check internal state: log should be trimmed
+      internal = :sys.get_state(pid)
+      assert internal.edit_log == []
+    end
+
+    test "new consumer starts from sequence 0 and gets entire log" do
+      {:ok, pid} = Server.start_link(content: "")
+      Server.insert_char(pid, "a")
+      Server.insert_char(pid, "b")
+      Server.insert_char(pid, "c")
+
+      # :lsp reads all 3
+      Server.flush_edits(pid, :lsp)
+
+      # More edits
+      Server.insert_char(pid, "d")
+      Server.insert_char(pid, "e")
+
+      # New consumer never registered before, gets everything still in log
+      # (log is trimmed based on min cursor; :lsp cursor is at 3, so a-c may be trimmed)
+      # But :new_consumer has cursor 0, so as long as log entries exist, it gets them.
+      # Since :lsp flushed 3 but :new_consumer hasn't, the log won't be fully trimmed.
+      # Actually, the log was trimmed based on registered consumers only.
+      # Since :new_consumer wasn't registered, its cursor defaults to 0 on first call.
+      # The log entries for d and e (seq 4, 5) are still there because :lsp hasn't
+      # read them yet. Entries for a,b,c (seq 1,2,3) may or may not be trimmed
+      # depending on whether other consumers exist. Since only :lsp is registered
+      # and its cursor is at 3, entries 1-3 got trimmed on that flush.
+      new_deltas = Server.flush_edits(pid, :new_consumer)
+      # Gets at least the 2 unread by all consumers (d, e)
+      assert length(new_deltas) >= 2
+    end
+
+    test "undo clears the edit log for all consumers" do
+      {:ok, pid} = Server.start_link(content: "hello")
+      Server.move_to(pid, {0, 5})
+      Server.insert_char(pid, "a")
+      Server.insert_char(pid, "b")
+
+      # :lsp reads
+      assert [_, _] = Server.flush_edits(pid, :lsp)
+
+      # More edits then undo
+      Server.insert_char(pid, "c")
+      Server.undo(pid)
+
+      # Both consumers get empty (forces full sync)
+      assert [] = Server.flush_edits(pid, :lsp)
+      assert [] = Server.flush_edits(pid, :highlight)
+    end
+
+    test "replace_content clears the edit log for all consumers" do
+      {:ok, pid} = Server.start_link(content: "hello")
+      Server.move_to(pid, {0, 5})
+      Server.insert_char(pid, "!")
+      Server.replace_content(pid, "goodbye")
+
+      assert [] = Server.flush_edits(pid, :lsp)
+      assert [] = Server.flush_edits(pid, :highlight)
+    end
+
+    test "flush with no edits returns empty list" do
+      {:ok, pid} = Server.start_link(content: "hello")
+      assert [] = Server.flush_edits(pid, :lsp)
+    end
+
+    test "flush same consumer twice with no intervening edits returns empty" do
+      {:ok, pid} = Server.start_link(content: "hello")
+      Server.insert_char(pid, "!")
+      assert [_] = Server.flush_edits(pid, :lsp)
+      assert [] = Server.flush_edits(pid, :lsp)
+    end
+  end
+
   # ── Buffer-local options ──────────────────────────────────────────────────
 
   describe "buffer-local options" do

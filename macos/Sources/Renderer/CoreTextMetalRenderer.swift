@@ -73,6 +73,11 @@ final class CoreTextMetalRenderer {
     /// app's entire lifetime in practice).
     private var colorChangeObserver: NSObjectProtocol?
 
+    /// Current theme colors reference, set at the start of each render call.
+    /// Used by helper methods (appendSelectionQuads, etc.) to read theme-driven
+    /// colors without threading the parameter through every call.
+    private var currentThemeColors: ThemeColors?
+
     init?() {
         guard let device = MTLCreateSystemDefaultDevice() else { return nil }
         self.device = device
@@ -185,6 +190,9 @@ final class CoreTextMetalRenderer {
                 drawable: CAMetalDrawable, viewportSize: CGSize,
                 contentScale: Float, scrollOffset: SIMD2<Float> = .zero) {
         guard let lineRenderer else { return }
+
+        // Store theme colors reference for helper methods.
+        self.currentThemeColors = themeColors
 
         let cellW = Float(fontManager.cellWidth)
         let cellH = Float(fontManager.cellHeight)
@@ -376,9 +384,10 @@ final class CoreTextMetalRenderer {
                     quad.position = SIMD2<Float>(hlX, hlY)
                     quad.size = SIMD2<Float>(hlW, cellH * scale)
                     // Write references get a warmer amber tint; read/text get a subtle blue-gray.
+                    // Colors are driven by the theme via ThemeColors slots 0x59/0x5A.
                     quad.color = highlight.kind == .write
-                        ? SIMD3<Float>(0.29, 0.25, 0.17)   // amber: 0x4A3F2B
-                        : SIMD3<Float>(0.23, 0.25, 0.29)   // blue-gray: 0x3A3F4B
+                        ? (currentThemeColors?.highlightWriteBgSIMD ?? SIMD3<Float>(0.29, 0.25, 0.17))
+                        : (currentThemeColors?.highlightReadBgSIMD ?? SIMD3<Float>(0.23, 0.25, 0.29))
                     quad.alpha = 1.0
                     semanticOverlayQuads.append(quad)
                 }
@@ -831,7 +840,7 @@ final class CoreTextMetalRenderer {
         viewportWidth: Float,
         quads: inout [QuadGPU]
     ) {
-        let selColor = SIMD3<Float>(0.15, 0.30, 0.55)  // blue selection bg
+        let selColor = currentThemeColors?.selectionBgSIMD ?? SIMD3<Float>(0.15, 0.30, 0.55)
 
         switch sel.type {
         case .line:

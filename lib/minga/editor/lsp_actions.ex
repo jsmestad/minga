@@ -557,6 +557,42 @@ defmodule Minga.Editor.LspActions do
     end
   end
 
+  @inlay_hint_scroll_debounce_ms 200
+
+  @doc """
+  Schedules a debounced inlay hint request when the viewport scrolls.
+
+  Only fires the request if the viewport top has actually changed since
+  the last inlay hint request. Debounced at 200ms to avoid flooding
+  during rapid scrolling.
+  """
+  @spec schedule_inlay_hints_on_scroll(state()) :: state()
+  def schedule_inlay_hints_on_scroll(%{buffers: %{active: nil}} = state), do: state
+
+  def schedule_inlay_hints_on_scroll(state) do
+    vp_top = state.viewport.top
+
+    if vp_top == state.last_inlay_viewport_top do
+      state
+    else
+      # Cancel any pending timer
+      state = cancel_inlay_hint_timer(state)
+
+      timer =
+        Process.send_after(self(), :inlay_hint_scroll_debounce, @inlay_hint_scroll_debounce_ms)
+
+      %{state | inlay_hint_debounce_timer: timer, last_inlay_viewport_top: vp_top}
+    end
+  end
+
+  @spec cancel_inlay_hint_timer(state()) :: state()
+  defp cancel_inlay_hint_timer(%{inlay_hint_debounce_timer: nil} = state), do: state
+
+  defp cancel_inlay_hint_timer(%{inlay_hint_debounce_timer: timer} = state) do
+    Process.cancel_timer(timer)
+    %{state | inlay_hint_debounce_timer: nil}
+  end
+
   # ── Response handlers ──────────────────────────────────────────────────────
 
   @doc """
@@ -623,6 +659,36 @@ defmodule Minga.Editor.LspActions do
   def handle_hover_response(state, {:ok, _}) do
     %{state | status_msg: "No hover information"}
   end
+
+  @doc """
+  Handles a hover response for a mouse-position hover request.
+
+  Creates a floating hover popup anchored at the mouse screen position
+  (row, col) rather than the keyboard cursor position.
+  """
+  @spec handle_hover_mouse_response(
+          state(),
+          {:ok, term()} | {:error, term()},
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: state()
+  def handle_hover_mouse_response(state, {:error, _}, _row, _col), do: state
+  def handle_hover_mouse_response(state, {:ok, nil}, _row, _col), do: state
+
+  def handle_hover_mouse_response(state, {:ok, %{"contents" => contents}}, row, col) do
+    markdown = extract_hover_markdown(contents)
+
+    case markdown do
+      "" ->
+        state
+
+      text ->
+        popup = HoverPopup.new(text, row, col)
+        %{state | hover_popup: popup}
+    end
+  end
+
+  def handle_hover_mouse_response(state, {:ok, _}, _row, _col), do: state
 
   # ── References response ─────────────────────────────────────────────────────
 
@@ -739,7 +805,7 @@ defmodule Minga.Editor.LspActions do
   end
 
   def handle_prepare_rename_response(state, {:ok, result}) do
-    placeholder = extract_rename_placeholder(result)
+    placeholder = extract_rename_placeholder(result, state)
 
     # Enter command mode with "rename <placeholder>" pre-filled
     # The ex-command parser handles "rename <new_name>" → {:rename, new_name}
@@ -1046,10 +1112,16 @@ defmodule Minga.Editor.LspActions do
   def handle_code_lens_response(state, {:ok, []}), do: state
 
   def handle_code_lens_response(state, {:ok, lenses}) when is_list(lenses) do
-    # Store code lenses for rendering. The render pipeline reads them
-    # to insert virtual text above functions.
+    # Separate resolved lenses (have command) from unresolved ones (need codeLens/resolve)
+    {resolved, unresolved} =
+      Enum.split_with(lenses, fn lens -> lens["command"] != nil end)
+
+    # Send resolve requests for lenses that have no command
+    state = resolve_code_lenses(state, unresolved)
+
+    # Store resolved lenses for rendering
     parsed =
-      Enum.map(lenses, fn lens ->
+      Enum.map(resolved, fn lens ->
         range = lens["range"]
         {line, _col} = extract_position(range["start"])
         command = lens["command"]
@@ -1464,20 +1536,118 @@ defmodule Minga.Editor.LspActions do
   defp severity_to_lsp(:info), do: 3
   defp severity_to_lsp(:hint), do: 4
 
-  @spec extract_rename_placeholder(map()) :: String.t()
-  defp extract_rename_placeholder(%{"placeholder" => name}) when is_binary(name), do: name
+  # Sends codeLens/resolve requests for lenses that have no command yet.
+  @spec resolve_code_lenses(state(), [map()]) :: state()
+  defp resolve_code_lenses(state, []), do: state
 
-  defp extract_rename_placeholder(%{"range" => _, "placeholder" => name}) when is_binary(name),
-    do: name
+  defp resolve_code_lenses(state, unresolved) do
+    buf = state.buffers.active
 
-  defp extract_rename_placeholder(%{"start" => _, "end" => _} = _range) do
-    # Server returned a Range, meaning the cursor is on a renameable symbol
-    # but didn't provide a placeholder. Try to extract the word under cursor.
-    ""
+    case lsp_client_for(state, buf) do
+      nil ->
+        state
+
+      client ->
+        Enum.reduce(unresolved, state, fn lens, st ->
+          ref = Client.request(client, "codeLens/resolve", lens)
+          put_in(st.lsp_pending, Map.put(st.lsp_pending, ref, :code_lens_resolve))
+        end)
+    end
   end
 
-  defp extract_rename_placeholder(%{"range" => _}), do: ""
-  defp extract_rename_placeholder(_), do: ""
+  @doc "Handles a codeLens/resolve response, merging the resolved lens into the existing list."
+  @spec handle_code_lens_resolve_response(state(), {:ok, term()} | {:error, term()}) :: state()
+  def handle_code_lens_resolve_response(state, {:error, _}) do
+    Log.debug(:lsp, "Code lens resolve failed")
+    state
+  end
+
+  def handle_code_lens_resolve_response(state, {:ok, nil}), do: state
+
+  def handle_code_lens_resolve_response(state, {:ok, lens}) when is_map(lens) do
+    command = lens["command"]
+
+    case command do
+      nil ->
+        state
+
+      %{"title" => title} ->
+        range = lens["range"]
+        {line, _col} = extract_position(range["start"])
+        entry = %{line: line, title: title, data: lens}
+        state = %{state | code_lenses: state.code_lenses ++ [entry]}
+        LspDecorations.apply_code_lenses(state)
+    end
+  end
+
+  def handle_code_lens_resolve_response(state, {:ok, _}), do: state
+
+  @spec extract_rename_placeholder(map(), state()) :: String.t()
+  defp extract_rename_placeholder(%{"placeholder" => name}, _state) when is_binary(name),
+    do: name
+
+  defp extract_rename_placeholder(%{"range" => _, "placeholder" => name}, _state)
+       when is_binary(name),
+       do: name
+
+  defp extract_rename_placeholder(
+         %{
+           "start" => %{"line" => sl, "character" => sc},
+           "end" => %{"line" => el, "character" => ec}
+         },
+         state
+       ) do
+    # Server returned a Range without placeholder; read text from buffer
+    read_range_from_buffer(state, {sl, sc}, {el, ec})
+  end
+
+  defp extract_rename_placeholder(
+         %{
+           "range" => %{
+             "start" => %{"line" => sl, "character" => sc},
+             "end" => %{"line" => el, "character" => ec}
+           }
+         },
+         state
+       ) do
+    # Range wrapper without placeholder; read text from buffer
+    read_range_from_buffer(state, {sl, sc}, {el, ec})
+  end
+
+  defp extract_rename_placeholder(_, _state), do: ""
+
+  # Reads text from the buffer for an LSP range (end is exclusive).
+  # content_range is inclusive on both ends, so we adjust end_col - 1.
+  @spec read_range_from_buffer(
+          state(),
+          {non_neg_integer(), non_neg_integer()},
+          {non_neg_integer(), non_neg_integer()}
+        ) :: String.t()
+  defp read_range_from_buffer(%{buffers: %{active: buf}}, {sl, sc}, {el, ec}) when is_pid(buf) do
+    {adj_el, adj_ec} = adjust_lsp_end_position(buf, el, ec)
+    BufferServer.content_range(buf, {sl, sc}, {adj_el, adj_ec})
+  rescue
+    _ -> ""
+  catch
+    :exit, _ -> ""
+  end
+
+  defp read_range_from_buffer(_, _, _), do: ""
+
+  # LSP end position is exclusive. content_range is inclusive.
+  # Adjust end position back by 1 column (or to end of prev line if col is 0).
+  @spec adjust_lsp_end_position(pid(), non_neg_integer(), non_neg_integer()) ::
+          {non_neg_integer(), non_neg_integer()}
+  defp adjust_lsp_end_position(_buf, el, ec) when ec > 0, do: {el, ec - 1}
+
+  defp adjust_lsp_end_position(buf, el, 0) when el > 0 do
+    case BufferServer.get_lines(buf, el - 1, 1) do
+      [prev_line] -> {el - 1, byte_size(prev_line)}
+      _ -> {el, 0}
+    end
+  end
+
+  defp adjust_lsp_end_position(_buf, el, ec), do: {el, ec}
 
   @spec flatten_document_symbols([map()], non_neg_integer()) :: [
           {String.t(), non_neg_integer(), non_neg_integer(), String.t()}

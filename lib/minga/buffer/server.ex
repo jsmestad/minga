@@ -257,12 +257,28 @@ defmodule Minga.Buffer.Server do
   @doc """
   Returns and clears pending edit deltas accumulated since the last flush.
 
-  Used by `HighlightSync` to send incremental content updates to the
-  parser process instead of full file content.
+  Deprecated: use `flush_edits/2` with a consumer_id for per-consumer cursors.
+  This legacy version destructively drains the shared pending_edits list.
   """
   @spec flush_edits(GenServer.server()) :: [EditDelta.t()]
   def flush_edits(server) do
     GenServer.call(server, :flush_edits)
+  end
+
+  @doc """
+  Returns edit deltas accumulated since the given consumer's last read.
+
+  Each consumer is identified by an atom (e.g., `:lsp`, `:highlight`).
+  The buffer tracks a per-consumer cursor (sequence number). On each call,
+  deltas since that cursor are returned and the cursor advances. The buffer
+  trims deltas that all registered consumers have read.
+
+  This avoids the data race where two consumers calling `flush_edits/1`
+  would each miss the other's deltas.
+  """
+  @spec flush_edits(GenServer.server(), atom()) :: [EditDelta.t()]
+  def flush_edits(server, consumer_id) when is_atom(consumer_id) do
+    GenServer.call(server, {:flush_edits, consumer_id})
   end
 
   @doc "Returns the file path associated with this buffer, if any."
@@ -1094,6 +1110,38 @@ defmodule Minga.Buffer.Server do
     {:reply, edits, %{state | pending_edits: []}}
   end
 
+  def handle_call({:flush_edits, consumer_id}, _from, state) do
+    cursor = Map.get(state.consumer_cursors, consumer_id, 0)
+
+    deltas =
+      state.edit_log
+      |> Enum.filter(fn {seq, _delta} -> seq > cursor end)
+      |> Enum.sort_by(fn {seq, _delta} -> seq end)
+      |> Enum.map(fn {_seq, delta} -> delta end)
+
+    new_cursor = state.edit_seq
+    new_cursors = Map.put(state.consumer_cursors, consumer_id, new_cursor)
+
+    # Trim log entries that all *registered* consumers have read,
+    # but only if we have at least 2 consumers registered (both known
+    # consumers are active). With fewer than 2, keep the full log so
+    # a consumer that hasn't registered yet can still read historical entries.
+    trimmed_log =
+      if map_size(new_cursors) >= 2 do
+        min_cursor =
+          new_cursors
+          |> Map.values()
+          |> Enum.min()
+
+        Enum.filter(state.edit_log, fn {seq, _} -> seq > min_cursor end)
+      else
+        state.edit_log
+      end
+
+    new_state = %{state | consumer_cursors: new_cursors, edit_log: trimmed_log}
+    {:reply, deltas, new_state}
+  end
+
   def handle_call(:version, _from, state) do
     {:reply, state.version, state}
   end
@@ -1603,7 +1651,14 @@ defmodule Minga.Buffer.Server do
 
   @spec record_edit(state(), EditDelta.t()) :: state()
   defp record_edit(state, delta) do
-    state = %{state | pending_edits: [delta | state.pending_edits]}
+    new_seq = state.edit_seq + 1
+
+    state = %{
+      state
+      | pending_edits: [delta | state.pending_edits],
+        edit_seq: new_seq,
+        edit_log: [{new_seq, delta} | state.edit_log]
+    }
 
     # Adjust decoration anchors based on the edit
     if Decorations.empty?(state.decorations) do
@@ -1625,7 +1680,9 @@ defmodule Minga.Buffer.Server do
   # Used for operations where computing accurate deltas is impractical
   # (undo, redo, multi-edit batches, full content replacement).
   @spec clear_edits(state()) :: state()
-  defp clear_edits(state), do: %{state | pending_edits: []}
+  defp clear_edits(state) do
+    %{state | pending_edits: [], edit_log: [], consumer_cursors: %{}}
+  end
 
   # Compute byte offset for a {line, col} position in content.
   @spec byte_offset_at(String.t(), {non_neg_integer(), non_neg_integer()}) :: non_neg_integer()

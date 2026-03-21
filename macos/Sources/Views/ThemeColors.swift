@@ -77,6 +77,28 @@ final class ThemeColors {
     var gitModifiedFg: Color = color(0x51AFEF)
     var gitDeletedFg: Color = color(0xFF6C6B)
 
+    // ── Document highlights + Selection ──
+    var highlightReadBg: Color = color(0x3A3F4B)
+    var highlightWriteBg: Color = color(0x4A3F2B)
+    var selectionBg: Color = color(0x264F78)
+
+    // Raw SIMD3 values for Metal renderer (highlight + selection).
+    var highlightReadBgSIMD: SIMD3<Float> = SIMD3<Float>(
+        Float((0x3A3F4B >> 16) & 0xFF) / 255.0,
+        Float((0x3A3F4B >> 8) & 0xFF) / 255.0,
+        Float(0x3A3F4B & 0xFF) / 255.0
+    )
+    var highlightWriteBgSIMD: SIMD3<Float> = SIMD3<Float>(
+        Float((0x4A3F2B >> 16) & 0xFF) / 255.0,
+        Float((0x4A3F2B >> 8) & 0xFF) / 255.0,
+        Float(0x4A3F2B & 0xFF) / 255.0
+    )
+    var selectionBgSIMD: SIMD3<Float> = SIMD3<Float>(
+        Float((0x264F78 >> 16) & 0xFF) / 255.0,
+        Float((0x264F78 >> 8) & 0xFF) / 255.0,
+        Float(0x264F78 & 0xFF) / 255.0
+    )
+
     // Raw 24-bit RGB values for Metal renderer.
     // Updated alongside the Color properties when gui_theme slots arrive.
     var editorFgRGB: UInt32 = 0xBBC2CF
@@ -104,6 +126,14 @@ final class ThemeColors {
             let rgb = (UInt32(r) << 16) | (UInt32(g) << 8) | UInt32(b)
             applySlot(slotId, color: c, rgb: rgb)
         }
+    }
+
+    private func rgbToSIMD3(_ rgb: UInt32) -> SIMD3<Float> {
+        SIMD3<Float>(
+            Float((rgb >> 16) & 0xFF) / 255.0,
+            Float((rgb >> 8) & 0xFF) / 255.0,
+            Float(rgb & 0xFF) / 255.0
+        )
     }
 
     private func applySlot(_ slot: UInt8, color c: Color, rgb: UInt32) {
@@ -162,6 +192,15 @@ final class ThemeColors {
         case GUI_COLOR_GIT_ADDED_FG: gitAddedFg = c; gitAddedFgRGB = rgb
         case GUI_COLOR_GIT_MODIFIED_FG: gitModifiedFg = c; gitModifiedFgRGB = rgb
         case GUI_COLOR_GIT_DELETED_FG: gitDeletedFg = c; gitDeletedFgRGB = rgb
+        case GUI_COLOR_HIGHLIGHT_READ_BG:
+            highlightReadBg = c
+            highlightReadBgSIMD = rgbToSIMD3(rgb)
+        case GUI_COLOR_HIGHLIGHT_WRITE_BG:
+            highlightWriteBg = c
+            highlightWriteBgSIMD = rgbToSIMD3(rgb)
+        case GUI_COLOR_SELECTION_BG:
+            selectionBg = c
+            selectionBgSIMD = rgbToSIMD3(rgb)
         default: break
         }
     }

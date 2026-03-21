@@ -11,6 +11,7 @@ defmodule Minga.Editor.MouseHoverTooltip do
   alias Minga.Diagnostics
   alias Minga.Editor.HoverPopup
   alias Minga.Editor.State, as: EditorState
+  alias Minga.LSP.Client
   alias Minga.LSP.SyncServer
 
   @type state :: EditorState.t()
@@ -78,13 +79,41 @@ defmodule Minga.Editor.MouseHoverTooltip do
           integer(),
           integer()
         ) :: state()
-  defp send_hover_request(state, _buf, _buf_line, _buf_col, _row, _col) do
-    # The hover request is already handled by LspActions.hover/1 which uses
-    # the cursor position. For mouse hover, we'd need a position-specific
-    # hover request. For now, just show hover for the cursor's current position.
-    # Full mouse-position hover is a follow-up that needs the Editor to send
-    # the mouse position to the LSP request.
-    state
+  defp send_hover_request(state, buf, buf_line, buf_col, row, col) do
+    clients = SyncServer.clients_for_buffer(buf)
+
+    case clients do
+      [] ->
+        state
+
+      [client | _] ->
+        file_path = BufferServer.file_path(buf)
+
+        case file_path do
+          nil ->
+            state
+
+          path ->
+            uri = SyncServer.path_to_uri(path)
+
+            params = %{
+              "textDocument" => %{"uri" => uri},
+              "position" => %{"line" => buf_line, "character" => buf_col}
+            }
+
+            ref = Client.request(client, "textDocument/hover", params)
+
+            # Store the mouse screen position for the hover popup anchor
+            state =
+              put_in(state.lsp_pending, Map.put(state.lsp_pending, ref, {:hover_mouse, row, col}))
+
+            state
+        end
+    end
+  rescue
+    _ -> state
+  catch
+    :exit, _ -> state
   end
 
   @spec gutter_width(term()) :: non_neg_integer()

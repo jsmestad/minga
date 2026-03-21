@@ -82,6 +82,11 @@ defmodule Minga.Theme.Slots do
   @git_modified_fg 0x57
   @git_deleted_fg 0x58
 
+  # ── Document highlights + Selection ──
+  @highlight_read_bg 0x59
+  @highlight_write_bg 0x5A
+  @selection_bg 0x5B
+
   # ── Accent ──
   @accent 0x40
 
@@ -159,7 +164,10 @@ defmodule Minga.Theme.Slots do
       {@gutter_hint_fg, theme.gutter.hint_fg},
       {@git_added_fg, theme.git.added_fg},
       {@git_modified_fg, theme.git.modified_fg},
-      {@git_deleted_fg, theme.git.deleted_fg}
+      {@git_deleted_fg, theme.git.deleted_fg},
+      {@highlight_read_bg, e.highlight_read_bg || 0x3A3F4B},
+      {@highlight_write_bg, e.highlight_write_bg || 0x4A3F2B},
+      {@selection_bg, e.selection_bg || 0x264F78}
     ]
   end
 
