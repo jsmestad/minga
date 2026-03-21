@@ -344,6 +344,52 @@ struct AgentChatViewTests {
     }
 }
 
+// MARK: - BottomPanelView
+
+@Suite("BottomPanelView View Structure")
+struct BottomPanelViewTests {
+
+    @Test("Panel renders tab bar with tab name")
+    @MainActor func rendersTabBar() throws {
+        let state = BottomPanelState()
+        state.visible = true
+        state.userHeight = 200
+        state.tabs = [BottomPanelTab(id: 0, tabType: 0x01, name: "Messages")]
+        state.activeTabIndex = 0
+
+        let sut = BottomPanelView(
+            state: state, theme: ThemeColors(),
+            encoder: nil, availableHeight: 600
+        )
+        let body = try sut.inspect()
+        let texts = body.findAll(ViewInspectorQuery.text)
+        let strings = texts.compactMap { try? $0.string() }
+        #expect(strings.contains("Messages"))
+    }
+
+    @Test("Panel renders multiple tabs")
+    @MainActor func multipleTabsRender() throws {
+        let state = BottomPanelState()
+        state.visible = true
+        state.userHeight = 200
+        state.tabs = [
+            BottomPanelTab(id: 0, tabType: 0x01, name: "Messages"),
+            BottomPanelTab(id: 1, tabType: 0x02, name: "Diagnostics"),
+        ]
+        state.activeTabIndex = 0
+
+        let sut = BottomPanelView(
+            state: state, theme: ThemeColors(),
+            encoder: nil, availableHeight: 600
+        )
+        let body = try sut.inspect()
+        let texts = body.findAll(ViewInspectorQuery.text)
+        let strings = texts.compactMap { try? $0.string() }
+        #expect(strings.contains("Messages"))
+        #expect(strings.contains("Diagnostics"))
+    }
+}
+
 // MARK: - ViewInspector query helper
 
 /// Namespace for ViewInspector query types.

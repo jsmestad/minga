@@ -10,6 +10,10 @@ struct BottomPanelView: View {
     @Bindable var state: BottomPanelState
     let theme: ThemeColors
     let encoder: InputEncoder?
+    /// Total height of the right pane (tab bar + editor + panel + status bar).
+    /// Used to cap the panel at 60% of available space. Measured by the parent
+    /// via a preference key so the panel itself doesn't need a GeometryReader.
+    let availableHeight: CGFloat
 
     /// Minimum panel height in points.
     private let minHeight: CGFloat = 100
@@ -20,24 +24,23 @@ struct BottomPanelView: View {
     @State private var dragStartHeight: CGFloat = 0
 
     var body: some View {
-        GeometryReader { geo in
-            let maxH = geo.size.height * maxHeightFraction
-            let panelH = min(max(state.userHeight, minHeight), maxH)
+        let maxH = availableHeight * maxHeightFraction
+        let panelH = min(max(state.userHeight, minHeight), maxH)
 
-            VStack(spacing: 0) {
-                // Drag handle at the top edge
-                dragHandle(maxHeight: maxH, windowHeight: geo.size.height)
+        VStack(spacing: 0) {
+            // Drag handle at the top edge
+            dragHandle(maxHeight: maxH, windowHeight: availableHeight)
 
-                // Tab bar
-                tabBar
+            // Tab bar
+            tabBar
 
-                // Content area (placeholder for now; Messages content is a follow-up)
-                contentArea
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-            .frame(height: panelH)
-            .background(theme.editorBg)
+            // Content area (placeholder for now; Messages content is a follow-up)
+            contentArea
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .frame(height: panelH)
+        .clipped()
+        .background(theme.editorBg)
     }
 
     // MARK: - Drag handle
