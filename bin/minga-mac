@@ -14,8 +14,11 @@ PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 XCODEPROJ="$PROJECT_DIR/macos/Minga.xcodeproj"
 
 # Build the macOS renderer if needed.
+ARCH=$(uname -m)
 echo "Building minga-mac..."
-xcodebuild -project "$XCODEPROJ" -scheme minga-mac -configuration Debug build -quiet 2>&1 | grep -v "^$" || true
+xcodebuild -project "$XCODEPROJ" -scheme minga-mac -configuration Debug \
+  -destination "platform=macOS,arch=$ARCH" build -quiet 2>&1 \
+  | grep -vE "^$|^note:|^Run script build phase" || true
 echo "Build complete."
 
 exec elixir -S mix run --no-halt --no-start \

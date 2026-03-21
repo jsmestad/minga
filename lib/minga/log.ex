@@ -42,11 +42,18 @@ defmodule Minga.Log do
 
   @type level :: :debug | :info | :warning | :error
 
+  # Covers both Minga's own levels and OTP Logger primary levels
+  # (all, notice, critical, alert, emergency) used in maybe_route_to_messages/2.
   @level_priority %{
+    all: 0,
     debug: 0,
     info: 1,
+    notice: 1,
     warning: 2,
     error: 3,
+    critical: 3,
+    alert: 3,
+    emergency: 3,
     none: 4
   }
 
@@ -114,11 +121,33 @@ defmodule Minga.Log do
           msg when is_binary(msg) -> msg
         end
 
+      # Route to *Messages* directly when the OTP primary level filter
+      # would suppress this message (e.g., :info suppressed by level: :warning).
+      # For levels that pass the OTP filter, Minga.LoggerHandler already
+      # routes to *Messages* so we stay out of the way to avoid duplicates.
+      maybe_route_to_messages(level, subsystem, message)
+
       case level do
         :debug -> Logger.debug(message)
         :info -> Logger.info(message)
         :warning -> Logger.warning(message)
         :error -> Logger.error(message)
+      end
+    end
+
+    :ok
+  end
+
+  @spec maybe_route_to_messages(level(), subsystem(), String.t()) :: :ok
+  defp maybe_route_to_messages(level, subsystem, message) do
+    otp_level = Logger.level()
+    otp_priority = Map.fetch!(@level_priority, otp_level)
+    msg_priority = Map.fetch!(@level_priority, level)
+
+    if otp_priority > msg_priority do
+      case Process.whereis(Minga.Editor) do
+        nil -> :ok
+        _pid -> Minga.Editor.log_to_messages("[#{subsystem}/#{level}] " <> message)
       end
     end
 

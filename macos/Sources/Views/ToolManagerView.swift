@@ -393,7 +393,7 @@ struct ToolManagerView: View {
             keyHint(key: "↵", action: "Retry")
         case .installing:
             keyHint(key: "↵", action: "Installing…")
-        case nil, .none:
+        case nil:
             keyHint(key: "↵", action: "Select")
         }
     }
