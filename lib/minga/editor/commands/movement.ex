@@ -76,9 +76,7 @@ defmodule Minga.Editor.Commands.Movement do
     if mode in [:insert, :replace] do
       BufferServer.move(buf, :left)
     else
-      gb = BufferServer.snapshot(buf)
-      {_line, col} = Document.cursor(gb)
-      if col > 0, do: BufferServer.move(buf, :left)
+      BufferServer.move_if_possible(buf, :left)
     end
 
     state
@@ -88,16 +86,7 @@ defmodule Minga.Editor.Commands.Movement do
     if mode in [:insert, :replace] do
       BufferServer.move(buf, :right)
     else
-      gb = BufferServer.snapshot(buf)
-      {line, col} = Document.cursor(gb)
-
-      max_col =
-        case Document.lines(gb, line, 1) do
-          [text] when byte_size(text) > 0 -> Unicode.last_grapheme_byte_offset(text)
-          _ -> 0
-        end
-
-      if col < max_col, do: BufferServer.move(buf, :right)
+      BufferServer.move_if_possible(buf, :right)
     end
 
     state

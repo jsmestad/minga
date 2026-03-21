@@ -274,6 +274,23 @@ defmodule Minga.Buffer.Server do
     GenServer.call(server, {:move_cursor, direction})
   end
 
+  @doc """
+  Moves the cursor left or right if the move is valid, performing the boundary
+  check inside the buffer process. Returns `{:ok, new_position}` if the cursor
+  moved, or `:at_boundary` if the cursor was already at the boundary.
+
+  For `:left`, the boundary is column 0.
+  For `:right`, the boundary is the last grapheme position on the current line.
+
+  This avoids copying the entire `Document.t()` across the process boundary
+  just to check whether the cursor is at a line boundary.
+  """
+  @spec move_if_possible(GenServer.server(), :left | :right) ::
+          {:ok, Document.position()} | :at_boundary
+  def move_if_possible(server, direction) when direction in [:left, :right] do
+    GenServer.call(server, {:move_if_possible, direction})
+  end
+
   @doc "Returns the total line count."
   @spec line_count(GenServer.server()) :: pos_integer()
   def line_count(server) do
@@ -1205,6 +1222,26 @@ defmodule Minga.Buffer.Server do
     {:reply, :ok, %{state | document: doc}}
   end
 
+  def handle_call(
+        {:move_if_possible, :left},
+        _from,
+        %{document: %Document{cursor_col: col} = doc} = state
+      )
+      when col > 0 do
+    new_doc = Document.move(doc, :left)
+    {:reply, {:ok, Document.cursor(new_doc)}, %{state | document: new_doc}}
+  end
+
+  def handle_call({:move_if_possible, :left}, _from, state) do
+    {:reply, :at_boundary, state}
+  end
+
+  def handle_call({:move_if_possible, :right}, _from, state) do
+    %Document{cursor_line: line, cursor_col: col} = doc = state.document
+    max_col = right_boundary(doc, line)
+    do_move_right(col, max_col, doc, state)
+  end
+
   def handle_call(:line_count, _from, state) do
     {:reply, Document.line_count(state.document), state}
   end
@@ -1905,5 +1942,26 @@ defmodule Minga.Buffer.Server do
         last_part = List.last(parts)
         {line + new_lines, String.length(last_part)}
     end
+  end
+
+  # ── move_if_possible helpers ──
+
+  @spec right_boundary(Document.t(), non_neg_integer()) :: non_neg_integer()
+  defp right_boundary(doc, line) do
+    case Document.lines(doc, line, 1) do
+      [text] when byte_size(text) > 0 -> Unicode.last_grapheme_byte_offset(text)
+      _ -> 0
+    end
+  end
+
+  @spec do_move_right(non_neg_integer(), non_neg_integer(), Document.t(), BufState.t()) ::
+          {:reply, {:ok, Document.position()} | :at_boundary, BufState.t()}
+  defp do_move_right(col, max_col, doc, state) when col < max_col do
+    new_doc = Document.move(doc, :right)
+    {:reply, {:ok, Document.cursor(new_doc)}, %{state | document: new_doc}}
+  end
+
+  defp do_move_right(_col, _max_col, _doc, state) do
+    {:reply, :at_boundary, state}
   end
 end
