@@ -56,7 +56,12 @@ defmodule Minga.Credo.DomainBoundaryCheck do
     "Minga.Agent.UiState",
     "Minga.Agent.UiState.Panel",
     "Minga.Agent.BufferSync",
-    "Minga.Agent.ChatDecorations"
+    "Minga.Agent.ChatDecorations",
+    # Agent tools route through Buffer.Server when a buffer is open (#905).
+    # This is the core of buffer-routed agent edits.
+    "Minga.Agent.Tools.EditFile",
+    "Minga.Agent.Tools.MultiEditFile",
+    "Minga.Agent.Tools.WriteFile"
   ]
 
   @impl Credo.Check

@@ -2,42 +2,99 @@ defmodule Minga.Agent.Tools.MultiEditFile do
   @moduledoc """
   Applies multiple find-and-replace edits to a single file in one tool call.
 
-  Each edit is an `{old_text, new_text}` pair. Edits are applied in the order
-  given. If any edit fails (text not found, ambiguous match), subsequent edits
-  still attempt and all results are reported. This lets the model make many
-  changes to a file in a single round-trip instead of N separate `edit_file` calls.
+  Routes through `Buffer.Server.find_and_replace_batch/2` when a buffer is
+  open for the file (atomic batch, single undo entry, no disk I/O). Falls
+  back to filesystem I/O when no buffer exists.
+
+  Each edit is an `{old_text, new_text}` pair. Edits are applied in order.
+  If any edit fails, subsequent edits still attempt and all results are reported.
   """
+
+  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Editor
 
   @typedoc "A single edit operation."
   @type edit :: %{String.t() => String.t()}
 
-  defmodule EditResult do
-    @moduledoc false
-    @enforce_keys [:index, :status, :message]
-    defstruct [:index, :status, :message]
-
-    @type t :: %__MODULE__{
-            index: non_neg_integer(),
-            status: :ok | :error,
-            message: String.t()
-          }
-  end
-
-  @typedoc "Result of a single edit within the batch."
-  @type edit_result :: EditResult.t()
-
   @doc """
   Applies a list of edits to the file at `path`.
 
-  Each edit in `edits` must have `"old_text"` and `"new_text"` keys.
-  Edits are applied sequentially to the file content in memory, then the
-  final result is written to disk once. If any edit fails, the file is still
-  written with the edits that succeeded.
+  Opens a buffer for the file if one doesn't exist, ensuring undo integration
+  and visibility in the buffer list. Falls back to filesystem I/O only when
+  the Editor is not running.
 
+  Each edit in `edits` must have `"old_text"` and `"new_text"` keys.
   Returns `{:ok, summary}` with a per-edit status report.
   """
   @spec execute(String.t(), [edit()]) :: {:ok, String.t()} | {:error, String.t()}
   def execute(path, edits) when is_binary(path) and is_list(edits) do
+    case ensure_buffer(path) do
+      {:ok, pid} -> execute_via_buffer(pid, path, edits)
+      :unavailable -> execute_via_filesystem(path, edits)
+    end
+  end
+
+  # ── Buffer path ──
+
+  @spec execute_via_buffer(pid(), String.t(), [edit()]) ::
+          {:ok, String.t()} | {:error, String.t()}
+  defp execute_via_buffer(pid, path, edits) do
+    edit_pairs =
+      Enum.map(edits, fn edit ->
+        {edit["old_text"] || "", edit["new_text"] || ""}
+      end)
+
+    case BufferServer.find_and_replace_batch(pid, edit_pairs) do
+      {:ok, results} -> {:ok, format_buffer_results(path, results)}
+      {:error, msg} -> {:error, "#{path}: #{msg}"}
+    end
+  catch
+    :exit, _ -> {:error, "buffer process died for #{path}"}
+  end
+
+  @spec ensure_buffer(String.t()) :: {:ok, pid()} | :unavailable
+  defp ensure_buffer(path) do
+    case Editor.ensure_buffer_for_path(path) do
+      {:ok, pid} -> {:ok, pid}
+      {:error, _} -> :unavailable
+    end
+  catch
+    :exit, _ -> :unavailable
+  end
+
+  @spec format_buffer_results(String.t(), [BufferServer.replace_result()]) :: String.t()
+  defp format_buffer_results(path, results) do
+    total = length(results)
+    succeeded = Enum.count(results, &match?({:ok, _}, &1))
+    failed = total - succeeded
+
+    summary = "#{path}: #{succeeded}/#{total} edits applied"
+
+    summary =
+      if failed > 0 do
+        summary <> " (#{failed} failed)"
+      else
+        summary
+      end
+
+    error_details =
+      results
+      |> Enum.with_index()
+      |> Enum.filter(fn {{status, _}, _} -> status == :error end)
+      |> Enum.map_join("\n", fn {{:error, msg}, i} -> "  edit #{i + 1}: #{msg}" end)
+
+    if error_details == "" do
+      summary
+    else
+      summary <> "\n" <> error_details
+    end
+  end
+
+  # ── Filesystem fallback ──
+
+  @spec execute_via_filesystem(String.t(), [edit()]) ::
+          {:ok, String.t()} | {:error, String.t()}
+  defp execute_via_filesystem(path, edits) do
     case File.read(path) do
       {:ok, content} ->
         {final_content, results} = apply_edits(content, edits)
@@ -51,60 +108,50 @@ defmodule Minga.Agent.Tools.MultiEditFile do
     end
   end
 
-  @spec apply_edits(String.t(), [edit()]) :: {String.t(), [edit_result()]}
+  @spec apply_edits(String.t(), [edit()]) :: {String.t(), [{:ok | :error, String.t()}]}
   defp apply_edits(content, edits) do
     {final_content, results_reversed} =
       edits
       |> Enum.with_index()
-      |> Enum.reduce({content, []}, fn {edit, index}, {current_content, results} ->
+      |> Enum.reduce({content, []}, fn {edit, _index}, {current_content, results} ->
         old_text = edit["old_text"] || ""
         new_text = edit["new_text"] || ""
 
-        case apply_single_edit(current_content, old_text, new_text, index) do
-          {:ok, updated_content, result} ->
-            {updated_content, [result | results]}
+        case apply_single_edit(current_content, old_text, new_text) do
+          {:ok, updated_content} ->
+            {updated_content, [{:ok, "applied"} | results]}
 
-          {:error, result} ->
-            {current_content, [result | results]}
+          {:error, msg} ->
+            {current_content, [{:error, msg} | results]}
         end
       end)
 
     {final_content, Enum.reverse(results_reversed)}
   end
 
-  @spec apply_single_edit(String.t(), String.t(), String.t(), non_neg_integer()) ::
-          {:ok, String.t(), edit_result()} | {:error, edit_result()}
-  defp apply_single_edit(_content, "", _new_text, index) do
-    {:error, %EditResult{index: index, status: :error, message: "old_text is empty"}}
+  @spec apply_single_edit(String.t(), String.t(), String.t()) ::
+          {:ok, String.t()} | {:error, String.t()}
+  defp apply_single_edit(_content, "", _new_text) do
+    {:error, "old_text is empty"}
   end
 
-  defp apply_single_edit(content, old_text, new_text, index) do
-    parts = String.split(content, old_text)
-    occurrence_count = length(parts) - 1
-
-    case occurrence_count do
-      0 ->
-        {:error, %EditResult{index: index, status: :error, message: "old_text not found"}}
-
-      1 ->
-        updated = String.replace(content, old_text, new_text, global: false)
-        {:ok, updated, %EditResult{index: index, status: :ok, message: "applied"}}
-
-      n ->
-        {:error,
-         %EditResult{
-           index: index,
-           status: :error,
-           message: "old_text found #{n} times (ambiguous)"
-         }}
+  defp apply_single_edit(content, old_text, new_text) do
+    case length(:binary.matches(content, old_text)) do
+      0 -> {:error, "old_text not found"}
+      1 -> {:ok, String.replace(content, old_text, new_text, global: false)}
+      n -> {:error, "old_text found #{n} times (ambiguous)"}
     end
   end
 
-  @spec write_and_report(String.t(), String.t(), String.t(), [edit_result()]) ::
-          {:ok, String.t()} | {:error, String.t()}
+  @spec write_and_report(
+          String.t(),
+          String.t(),
+          String.t(),
+          [{:ok | :error, String.t()}]
+        ) :: {:ok, String.t()} | {:error, String.t()}
   defp write_and_report(path, original_content, final_content, results) do
-    succeeded = Enum.count(results, &(&1.status == :ok))
-    failed = Enum.count(results, &(&1.status == :error))
+    succeeded = Enum.count(results, &match?({:ok, _}, &1))
+    failed = Enum.count(results, &match?({:error, _}, &1))
     total = length(results)
 
     # Only write if something changed
@@ -123,12 +170,11 @@ defmodule Minga.Agent.Tools.MultiEditFile do
 
   @spec format_report(
           String.t(),
-          [edit_result()],
+          [{:ok | :error, String.t()}],
           non_neg_integer(),
           non_neg_integer(),
           non_neg_integer()
-        ) ::
-          String.t()
+        ) :: String.t()
   defp format_report(path, results, succeeded, failed, total) do
     summary = "#{path}: #{succeeded}/#{total} edits applied"
 
@@ -141,8 +187,9 @@ defmodule Minga.Agent.Tools.MultiEditFile do
 
     details =
       results
-      |> Enum.filter(&(&1.status == :error))
-      |> Enum.map_join("\n", fn r -> "  edit #{r.index + 1}: #{r.message}" end)
+      |> Enum.with_index()
+      |> Enum.filter(fn {{status, _}, _} -> status == :error end)
+      |> Enum.map_join("\n", fn {{:error, msg}, i} -> "  edit #{i + 1}: #{msg}" end)
 
     if details == "" do
       summary

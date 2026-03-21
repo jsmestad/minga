@@ -138,6 +138,44 @@ defmodule Minga.Buffer.Server do
     GenServer.call(server, {:apply_text_edits, edits})
   end
 
+  @doc """
+  Atomically finds and replaces text in the buffer.
+
+  The search, ambiguity check, and replacement all happen inside a single
+  `handle_call`, so there is no TOCTOU race between reading content and
+  applying the edit. Returns `{:ok, message}` on success, or `{:error, reason}`
+  if the text is not found, is ambiguous (multiple matches), or the buffer
+  is read-only.
+  """
+  @spec find_and_replace(GenServer.server(), String.t(), String.t()) ::
+          {:ok, String.t()} | {:error, String.t()}
+  def find_and_replace(server, old_text, new_text)
+      when is_binary(old_text) and is_binary(new_text) do
+    GenServer.call(server, {:find_and_replace, old_text, new_text})
+  end
+
+  @typedoc "A find-and-replace edit pair for batch operations."
+  @type replace_edit :: {old_text :: String.t(), new_text :: String.t()}
+
+  @typedoc "Result of a single edit within a batch."
+  @type replace_result :: {:ok, String.t()} | {:error, String.t()}
+
+  @doc """
+  Atomically applies multiple find-and-replace edits in a single `handle_call`.
+
+  Edits are applied sequentially: earlier edits affect the content that later
+  edits search against. Failed edits (not found, ambiguous) are reported but
+  don't block subsequent edits. A single undo entry is pushed for the entire
+  batch.
+
+  Returns `{:ok, results}` where results is a list of per-edit outcomes.
+  """
+  @spec find_and_replace_batch(GenServer.server(), [replace_edit()]) ::
+          {:ok, [replace_result()]} | {:error, String.t()}
+  def find_and_replace_batch(server, edits) when is_list(edits) do
+    GenServer.call(server, {:find_and_replace_batch, edits})
+  end
+
   @doc "Deletes the character before the cursor (backspace)."
   @spec delete_before(GenServer.server()) :: :ok
   def delete_before(server) do
@@ -188,7 +226,7 @@ defmodule Minga.Buffer.Server do
   end
 
   @doc "Replaces the entire buffer content, pushing the old content onto the undo stack."
-  @spec replace_content(GenServer.server(), String.t()) :: :ok
+  @spec replace_content(GenServer.server(), String.t()) :: :ok | {:error, :read_only}
   def replace_content(server, new_content) when is_binary(new_content) do
     GenServer.call(server, {:replace_content, new_content})
   end
@@ -280,6 +318,23 @@ defmodule Minga.Buffer.Server do
   @spec flush_edits(GenServer.server(), atom()) :: [EditDelta.t()]
   def flush_edits(server, consumer_id) when is_atom(consumer_id) do
     GenServer.call(server, {:flush_edits, consumer_id})
+  end
+
+  @doc """
+  Looks up the buffer pid for a file path via `Minga.Buffer.Registry`.
+
+  Returns `{:ok, pid}` if a buffer is registered for the given path,
+  or `:not_found` if no buffer has that path open. O(1) ETS lookup,
+  no GenServer calls. The path is expanded to an absolute path before lookup.
+  """
+  @spec pid_for_path(String.t()) :: {:ok, pid()} | :not_found
+  def pid_for_path(path) when is_binary(path) do
+    abs_path = Path.expand(path)
+
+    case Registry.lookup(Minga.Buffer.Registry, abs_path) do
+      [{pid, _value}] -> {:ok, pid}
+      [] -> :not_found
+    end
   end
 
   @doc "Returns the file path associated with this buffer, if any."
@@ -734,6 +789,7 @@ defmodule Minga.Buffer.Server do
           explicit_options: MapSet.new()
         }
 
+        register_path(path)
         {:ok, state}
 
       {:error, reason} ->
@@ -764,6 +820,8 @@ defmodule Minga.Buffer.Server do
             redo_stack: []
         }
 
+        unregister_path(state.file_path)
+        register_path(file_path)
         {:reply, :ok, new_state}
 
       {:error, reason} ->
@@ -863,6 +921,53 @@ defmodule Minga.Buffer.Server do
     # Multi-edit batches are complex to delta-track (offsets shift between
     # edits). Clear pending edits to force a full content sync.
     {:reply, :ok, push_undo(state, doc) |> mark_dirty() |> clear_edits()}
+  end
+
+  # ── Find and Replace ──
+
+  def handle_call({:find_and_replace, _old, _new}, _from, %{read_only: true} = state) do
+    {:reply, {:error, "buffer is read-only"}, state}
+  end
+
+  def handle_call({:find_and_replace, "", _new}, _from, state) do
+    {:reply, {:error, "old_text is empty"}, state}
+  end
+
+  def handle_call({:find_and_replace, old_text, new_text}, _from, state) do
+    content = Document.content(state.document)
+
+    case do_find_and_replace(content, old_text, new_text) do
+      {:ok, new_doc, msg} ->
+        {:reply, {:ok, msg}, push_undo_force(state, new_doc) |> mark_dirty() |> clear_edits()}
+
+      {:error, _} = err ->
+        {:reply, err, state}
+    end
+  end
+
+  def handle_call({:find_and_replace_batch, _edits}, _from, %{read_only: true} = state) do
+    {:reply, {:error, "buffer is read-only"}, state}
+  end
+
+  def handle_call({:find_and_replace_batch, []}, _from, state) do
+    {:reply, {:ok, []}, state}
+  end
+
+  def handle_call({:find_and_replace_batch, edits}, _from, state) do
+    {final_doc, results_reversed} =
+      Enum.reduce(edits, {state.document, []}, &apply_batch_edit/2)
+
+    results = Enum.reverse(results_reversed)
+    any_applied = Enum.any?(results, &match?({:ok, _}, &1))
+
+    new_state =
+      if any_applied do
+        push_undo_force(state, final_doc) |> mark_dirty() |> clear_edits()
+      else
+        state
+      end
+
+    {:reply, {:ok, results}, new_state}
   end
 
   def handle_call(:delete_before, _from, %{read_only: true} = state) do
@@ -1035,6 +1140,8 @@ defmodule Minga.Buffer.Server do
     case write_file(file_path, Document.content(state.document)) do
       :ok ->
         {new_mtime, new_size} = file_stat_info(file_path)
+        unregister_path(state.file_path)
+        register_path(file_path)
 
         {:reply, :ok,
          mark_saved(%{state | file_path: file_path, mtime: new_mtime, file_size: new_size})}
@@ -1499,6 +1606,71 @@ defmodule Minga.Buffer.Server do
   def handle_info({:deferred_broadcast, topic, payload}, state) do
     Events.broadcast(topic, payload)
     {:noreply, state}
+  end
+
+  # ── Find and Replace helpers ──
+
+  @spec apply_batch_edit({String.t(), String.t()}, {Document.t(), [replace_result()]}) ::
+          {Document.t(), [replace_result()]}
+  defp apply_batch_edit({"", _new_text}, {doc, acc}) do
+    {doc, [{:error, "old_text is empty"} | acc]}
+  end
+
+  defp apply_batch_edit({old_text, new_text}, {doc, acc}) do
+    content = Document.content(doc)
+
+    case do_find_and_replace(content, old_text, new_text) do
+      {:ok, new_doc, msg} -> {new_doc, [{:ok, msg} | acc]}
+      {:error, _} = err -> {doc, [err | acc]}
+    end
+  end
+
+  # Performs the actual string search and replace on raw content.
+  # Returns a new Document built from the replaced content. Note: this
+  # resets the cursor to {0, 0}. This matches the behavior of
+  # replace_content/2 which also rebuilds via Document.new/1.
+  @spec do_find_and_replace(String.t(), String.t(), String.t()) ::
+          {:ok, Document.t(), String.t()} | {:error, String.t()}
+  defp do_find_and_replace(content, old_text, new_text) do
+    case :binary.matches(content, old_text) do
+      [] ->
+        {:error, "old_text not found"}
+
+      [{offset, len}] ->
+        # Build new content by splicing: before_match <> new_text <> after_match
+        before_match = binary_part(content, 0, offset)
+        after_match = binary_part(content, offset + len, byte_size(content) - offset - len)
+        new_content = before_match <> new_text <> after_match
+        new_doc = Document.new(new_content)
+
+        {:ok, new_doc, "applied"}
+
+      matches ->
+        {:error, "old_text found #{length(matches)} times (ambiguous)"}
+    end
+  end
+
+  # ── Registry helpers ──
+
+  @spec register_path(String.t() | nil) :: :ok
+  defp register_path(nil), do: :ok
+
+  defp register_path(path) do
+    abs_path = Path.expand(path)
+
+    case Registry.register(Minga.Buffer.Registry, abs_path, nil) do
+      {:ok, _} -> :ok
+      {:error, {:already_registered, _}} -> :ok
+    end
+  end
+
+  @spec unregister_path(String.t() | nil) :: :ok
+  defp unregister_path(nil), do: :ok
+
+  defp unregister_path(path) do
+    abs_path = Path.expand(path)
+    Registry.unregister(Minga.Buffer.Registry, abs_path)
+    :ok
   end
 
   # ── Private ──

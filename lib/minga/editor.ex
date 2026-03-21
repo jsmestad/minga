@@ -64,6 +64,7 @@ defmodule Minga.Editor do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.AgentAccess
+  alias Minga.Editor.State.Buffers
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
 
@@ -112,6 +113,28 @@ defmodule Minga.Editor do
   @spec log_to_warnings(String.t(), GenServer.server()) :: :ok
   def log_to_warnings(text, server \\ __MODULE__) do
     GenServer.cast(server, {:log_to_warnings, text})
+  end
+
+  @doc """
+  Ensures a buffer exists for the given file path, opening one if needed.
+
+  If a buffer is already registered for `path`, returns its pid. Otherwise,
+  starts a new buffer through the Editor GenServer so it gets full tracking:
+  buffer list, monitoring, LSP sync, event broadcast. The buffer is added
+  in the background without switching the active window.
+
+  Used by agent tools to guarantee every edited file has a buffer with
+  undo integration and visibility in the buffer list.
+  """
+  @spec ensure_buffer_for_path(String.t(), GenServer.server()) ::
+          {:ok, pid()} | {:error, term()}
+  def ensure_buffer_for_path(path, server \\ __MODULE__) do
+    abs_path = Path.expand(path)
+
+    case BufferServer.pid_for_path(abs_path) do
+      {:ok, pid} -> {:ok, pid}
+      :not_found -> GenServer.call(server, {:ensure_buffer, abs_path})
+    end
   end
 
   @doc "Send an async message to the Editor GenServer. Used by background tasks."
@@ -217,6 +240,25 @@ defmodule Minga.Editor do
 
       {:error, reason} ->
         {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call({:ensure_buffer, abs_path}, _from, state) do
+    # Double-check: another call may have opened it between the caller's
+    # pid_for_path check and this handle_call arriving.
+    case BufferServer.pid_for_path(abs_path) do
+      {:ok, pid} ->
+        {:reply, {:ok, pid}, state}
+
+      :not_found ->
+        case Commands.start_buffer(abs_path) do
+          {:ok, pid} ->
+            state = register_buffer_background(state, pid, abs_path)
+            {:reply, {:ok, pid}, state}
+
+          {:error, reason} ->
+            {:reply, {:error, reason}, state}
+        end
     end
   end
 
@@ -1381,6 +1423,26 @@ defmodule Minga.Editor do
     # The SyncServer handles didOpen via the event bus; by the time 800ms
     # elapses the LSP client should be ready to serve requests.
     Process.send_after(self(), :request_code_lens_and_inlay_hints, 800)
+
+    state
+  end
+
+  # Like register_buffer but adds the buffer in the background without
+  # switching the active window. Used by ensure_buffer_for_path so agent
+  # edits don't yank the user away from their current file.
+  # Skips code_lens/inlay_hint scheduling; those are lazy-loaded when
+  # the user explicitly opens the buffer.
+  @spec register_buffer_background(state(), pid(), String.t()) :: state()
+  defp register_buffer_background(state, buffer_pid, file_path) do
+    state = %{state | buffers: Buffers.add_background(state.buffers, buffer_pid)}
+    state = EditorState.monitor_buffer(state, buffer_pid)
+    state = log_message(state, "Opened (agent): #{file_path}")
+    state = BufferLifecycle.lsp_buffer_opened(state, buffer_pid)
+
+    Minga.Events.broadcast(:buffer_opened, %Minga.Events.BufferEvent{
+      buffer: buffer_pid,
+      path: file_path
+    })
 
     state
   end

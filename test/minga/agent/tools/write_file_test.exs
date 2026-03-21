@@ -2,6 +2,7 @@ defmodule Minga.Agent.Tools.WriteFileTest do
   use ExUnit.Case, async: true
 
   alias Minga.Agent.Tools.WriteFile
+  alias Minga.Buffer.Server, as: BufferServer
 
   @moduletag :tmp_dir
 
@@ -43,6 +44,43 @@ defmodule Minga.Agent.Tools.WriteFileTest do
       assert {:ok, msg} = WriteFile.execute(path, "")
       assert msg =~ "wrote 0 bytes"
       assert File.read!(path) == ""
+    end
+  end
+
+  describe "execute/2 via buffer (buffer open for file)" do
+    test "replaces buffer content when buffer is open", %{tmp_dir: dir} do
+      path = Path.join(dir, "buffered.ex")
+      File.write!(path, "old content")
+      pid = start_supervised!({BufferServer, file_path: path})
+
+      assert {:ok, msg} = WriteFile.execute(path, "new content")
+      assert msg =~ "via buffer"
+
+      # Edit went through buffer
+      assert BufferServer.content(pid) == "new content"
+      assert BufferServer.dirty?(pid)
+
+      # Disk unchanged
+      assert File.read!(path) == "old content"
+    end
+
+    test "write through buffer is undoable", %{tmp_dir: dir} do
+      path = Path.join(dir, "undo.ex")
+      File.write!(path, "original")
+      pid = start_supervised!({BufferServer, file_path: path})
+
+      WriteFile.execute(path, "replaced")
+      assert BufferServer.content(pid) == "replaced"
+
+      BufferServer.undo(pid)
+      assert BufferServer.content(pid) == "original"
+    end
+
+    test "creates file on disk when no buffer is open", %{tmp_dir: dir} do
+      path = Path.join(dir, "new_file.ex")
+
+      assert {:ok, _} = WriteFile.execute(path, "brand new")
+      assert File.read!(path) == "brand new"
     end
   end
 end

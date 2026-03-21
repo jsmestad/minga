@@ -18,6 +18,7 @@ defmodule Minga.Application do
       │   ├── Minga.Config.Hooks
       │   ├── Minga.Config.Advice
       │   └── Minga.Filetype.Registry
+      ├── Minga.Buffer.Registry (Registry, :unique)
       ├── Minga.Buffer.Supervisor (DynamicSupervisor, one_for_one)
       ├── Minga.Services.Supervisor (rest_for_one)
       │   ├── Minga.Services.Independent (one_for_one)
@@ -77,6 +78,7 @@ defmodule Minga.Application do
 
     base_children = [
       Minga.Foundation.Supervisor,
+      {Registry, keys: :unique, name: Minga.Buffer.Registry},
       {DynamicSupervisor, name: Minga.Buffer.Supervisor, strategy: :one_for_one},
       Minga.Services.Supervisor
     ]

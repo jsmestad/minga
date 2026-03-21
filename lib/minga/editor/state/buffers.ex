@@ -29,6 +29,13 @@ defmodule Minga.Editor.State.Buffers do
     %{bs | list: buffers, active_index: idx, active: pid}
   end
 
+  @doc "Appends a buffer pid without changing the active buffer."
+  @spec add_background(t(), pid()) :: t()
+  def add_background(%__MODULE__{} = bs, pid) do
+    # credo:disable-for-next-line Credo.Check.Refactor.AppendSingleItem
+    %{bs | list: bs.list ++ [pid]}
+  end
+
   @doc "Switches to the buffer at `idx`, wrapping around."
   @spec switch_to(t(), non_neg_integer()) :: t()
   def switch_to(%__MODULE__{list: [_ | _] = buffers} = bs, idx) do
