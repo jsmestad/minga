@@ -36,7 +36,6 @@ defmodule Minga.MixProject do
           # Architecture
           "docs/ARCHITECTURE.md",
           "docs/PROTOCOL.md",
-          "docs/RENDERING_GAPS.md",
           "docs/PERFORMANCE.md",
           # Agent System
           "docs/FOR-AI-CODERS.md",
@@ -64,7 +63,6 @@ defmodule Minga.MixProject do
           Architecture: [
             "docs/ARCHITECTURE.md",
             "docs/PROTOCOL.md",
-            "docs/RENDERING_GAPS.md",
             "docs/PERFORMANCE.md"
           ],
           "Agent System": [

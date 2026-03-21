@@ -55,6 +55,7 @@ struct MessagesContentView: View {
                             }
                         }
                     }
+                    .defaultScrollAnchor(.bottom)
                 }
 
                 // "Jump to latest" button

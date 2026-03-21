@@ -28,6 +28,7 @@ defmodule Minga.Port.Protocol.GUIWindowContentTest do
       cursor_row: Keyword.get(opts, :cursor_row, 0),
       cursor_col: Keyword.get(opts, :cursor_col, 0),
       cursor_shape: Keyword.get(opts, :cursor_shape, :block),
+      scroll_left: Keyword.get(opts, :scroll_left, 0),
       selection: Keyword.get(opts, :selection, nil),
       search_matches: Keyword.get(opts, :search_matches, []),
       diagnostic_ranges: Keyword.get(opts, :diagnostic_ranges, []),
@@ -363,8 +364,9 @@ defmodule Minga.Port.Protocol.GUIWindowContentTest do
       row = make_row("x", spans: [span], content_hash: 0)
       binary = GUIWindowContent.encode(minimal_window(rows: [row]))
 
-      # header(11) + row_type(1) + buf_line(4) + hash(4) + text_len(4) + "x"(1) + span_count(2) = 27
-      <<_header::binary-size(27), 0x00, 0x01, 0x00, 0x0A, 0xAA, 0xBB, 0xCC, 0x11, 0x22, 0x33,
+      # header(13) + row fields(16) = 29
+      # header: op(1) wid(2) flags(1) crow(2) ccol(2) shape(1) sleft(2) rows(2)
+      <<_header::binary-size(29), 0x00, 0x01, 0x00, 0x0A, 0xAA, 0xBB, 0xCC, 0x11, 0x22, 0x33,
         0x07, 0x03, 0x01, _rest::binary>> = binary
     end
 
@@ -387,6 +389,7 @@ defmodule Minga.Port.Protocol.GUIWindowContentTest do
         assert decoded.cursor_row == sw.cursor_row
         assert decoded.cursor_col == sw.cursor_col
         assert decoded.cursor_shape == sw.cursor_shape
+        assert decoded.scroll_left == sw.scroll_left
         assert decoded.full_refresh == sw.full_refresh
         assert length(decoded.rows) == length(sw.rows)
       end
@@ -430,6 +433,7 @@ defmodule Minga.Port.Protocol.GUIWindowContentTest do
           cursor_row <- integer(0..100),
           cursor_col <- integer(0..200),
           cursor_shape <- member_of([:block, :beam, :underline]),
+          scroll_left <- integer(0..500),
           selection <- one_of([constant(nil), selection_gen()]),
           match_count <- integer(0..5),
           matches <- list_of(search_match_gen(), length: match_count),
@@ -443,6 +447,7 @@ defmodule Minga.Port.Protocol.GUIWindowContentTest do
         cursor_row: cursor_row,
         cursor_col: cursor_col,
         cursor_shape: cursor_shape,
+        scroll_left: scroll_left,
         selection: selection,
         search_matches: matches,
         diagnostic_ranges: diags,

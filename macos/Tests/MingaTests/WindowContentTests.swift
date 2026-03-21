@@ -16,6 +16,7 @@ struct WindowContentBuilder {
     var cursorRow: UInt16 = 0
     var cursorCol: UInt16 = 0
     var cursorShape: UInt8 = 0  // block
+    var scrollLeft: UInt16 = 0
     var rows: [RowBuilder] = []
     var selectionType: UInt8 = 0
     var selectionCoords: (UInt16, UInt16, UInt16, UInt16)?
@@ -49,6 +50,7 @@ struct WindowContentBuilder {
         appendU16(&data, cursorRow)
         appendU16(&data, cursorCol)
         data.append(cursorShape)
+        appendU16(&data, scrollLeft)
         appendU16(&data, UInt16(rows.count))
 
         for row in rows {
@@ -149,7 +151,7 @@ struct WindowContentDecoderTests {
         #expect(content.documentHighlights.isEmpty)
     }
 
-    @Test("Decode header fields: window_id, cursor, shape, full_refresh")
+    @Test("Decode header fields: window_id, cursor, shape, full_refresh, scrollLeft")
     func decodeHeaderFields() throws {
         var builder = WindowContentBuilder()
         builder.windowId = 7
@@ -157,6 +159,7 @@ struct WindowContentDecoderTests {
         builder.cursorRow = 15
         builder.cursorCol = 42
         builder.cursorShape = 1  // beam
+        builder.scrollLeft = 25
 
         let (cmd, _) = try decodeCommand(data: builder.build(), offset: 0)
         guard case .guiWindowContent(let content) = cmd else {
@@ -168,6 +171,7 @@ struct WindowContentDecoderTests {
         #expect(content.cursorRow == 15)
         #expect(content.cursorCol == 42)
         #expect(content.cursorShape == .beam)
+        #expect(content.scrollLeft == 25)
     }
 
     @Test("Decode rows with text and buf_line")

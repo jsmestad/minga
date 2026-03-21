@@ -15,6 +15,7 @@ defmodule Minga.Port.Protocol.GUIWindowContent do
   cursor_row:           u16      (display row, fold/wrap adjusted)
   cursor_col:           u16      (display col, virtual text adjusted)
   cursor_shape:         u8
+  scroll_left:          u16      (horizontal scroll offset in display cols)
   visible_row_count:    u16
 
   per visible row:
@@ -76,7 +77,7 @@ defmodule Minga.Port.Protocol.GUIWindowContent do
 
     header =
       <<@op_gui_window_content, sw.window_id::16, flags::8, sw.cursor_row::16, sw.cursor_col::16,
-        cursor_shape::8, row_count::16>>
+        cursor_shape::8, sw.scroll_left::16, row_count::16>>
 
     rows_binary = encode_rows(sw.rows)
     selection_binary = encode_selection(sw.selection)

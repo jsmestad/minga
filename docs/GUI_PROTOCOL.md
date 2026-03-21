@@ -491,12 +491,16 @@ Semantic rendering data for a buffer window. Replaces draw_text commands for buf
 One 0x80 message is sent per buffer window per frame. Agent chat windows do not use this opcode.
 
 ```
-opcode(1) + window_id(2) + flags(1) + cursor_row(2) + cursor_col(2) + cursor_shape(1) + visible_row_count(2) + rows... + selection + search_matches + diagnostic_ranges
+opcode(1) + window_id(2) + flags(1) + cursor_row(2) + cursor_col(2) + cursor_shape(1) + scroll_left(2) + visible_row_count(2) + rows... + selection + search_matches + diagnostic_ranges
 
 Flags:
   bit 0: full_refresh (1 = all rows changed, 0 = incremental)
 
 Cursor shape: 0 = block, 1 = beam, 2 = underline
+
+scroll_left: horizontal scroll offset in display columns. When > 0, the frontend
+shifts line textures and overlay quads left by scroll_left * cell_width so that
+content past the viewport's left edge becomes visible. The gutter stays fixed.
 
 Per visual row:
   row_type(1) + buf_line(4) + content_hash(4) + text_len(4) + text(text_len) + span_count(2) + spans...

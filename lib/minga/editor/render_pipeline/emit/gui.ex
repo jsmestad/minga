@@ -30,6 +30,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
   alias Minga.Editor.State.TabBar
   alias Minga.Editor.StatusBar.Data, as: StatusBarData
   alias Minga.Editor.Viewport
+  alias Minga.Editor.Window.Content
   alias Minga.Git.Tracker, as: GitTracker
   alias Minga.Picker
   alias Minga.Port.Manager, as: PortManager
@@ -102,10 +103,17 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
   @doc """
   Sends SwiftUI chrome data to the native frontend.
 
-  These update `@Published` properties on SwiftUI `ObservableObject`s
+  These update `@Observable` properties on SwiftUI state objects
   (tab bar, file tree, status bar, picker, etc.). SwiftUI coalesces its
   own view updates independently of Metal vsync, so these are safe to
   send as separate port messages after the atomic Metal frame.
+
+  Each chrome component uses fingerprint-based change detection via the
+  process dictionary to skip re-encoding and re-sending when nothing
+  changed. During j/k scroll, only the status bar (cursor position)
+  changes; everything else is skipped. All changed chrome commands are
+  batched into a single `PortManager.send_commands` call to reduce
+  port write overhead.
 
   `status_bar_data` is pre-computed by the Chrome stage and passed through
   to avoid re-calling BufferServer for cursor/file info on the same frame.
@@ -113,45 +121,63 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
   """
   @spec sync_swiftui_chrome(state(), StatusBarData.t() | nil, MinibufferData.t() | nil) :: state()
   def sync_swiftui_chrome(state, status_bar_data \\ nil, minibuffer_data \\ nil) do
-    send_gui_theme(state)
-    send_gui_tab_bar(state)
-    send_gui_file_tree(state)
-    send_gui_which_key(state)
-    send_gui_completion(state)
-    send_gui_breadcrumb(state)
-    send_gui_status_bar(state, status_bar_data || StatusBarData.from_state(state))
-    send_gui_picker(state)
-    send_gui_agent_chat(state)
-    send_gui_bottom_panel(state)
-    send_gui_minibuffer(state, minibuffer_data)
+    sb_data = status_bar_data || StatusBarData.from_state(state)
+
+    # Collect changed chrome commands into a single list.
+    # Each build_gui_* function returns nil when the data hasn't changed
+    # (fingerprint cache hit), or an encoded binary when it has.
+    chrome_cmds =
+      [
+        build_gui_theme_cmd(state),
+        build_gui_tab_bar_cmd(state),
+        build_gui_file_tree_cmd(state),
+        build_gui_which_key_cmd(state),
+        build_gui_completion_cmd(state),
+        build_gui_breadcrumb_cmd(state),
+        build_gui_status_bar_cmd(state, sb_data),
+        build_gui_picker_cmd(state),
+        build_gui_agent_chat_cmd(state),
+        build_gui_minibuffer_cmd(state, minibuffer_data)
+      ]
+      |> Enum.reject(&is_nil/1)
+
+    # Bottom panel is special: it returns updated message_store state.
+    {panel_cmd, state} = build_gui_bottom_panel_cmd(state)
+    chrome_cmds = if panel_cmd, do: chrome_cmds ++ [panel_cmd], else: chrome_cmds
+
+    if chrome_cmds != [] do
+      PortManager.send_commands(state.port_manager, chrome_cmds)
+    end
+
     state
   end
 
   # ── Theme ──
 
-  @spec send_gui_theme(state()) :: :ok
-  defp send_gui_theme(state) do
+  @spec build_gui_theme_cmd(state()) :: binary() | nil
+  defp build_gui_theme_cmd(state) do
     theme_name = state.theme.name
 
     if theme_name != Process.get(:last_gui_theme) do
       Process.put(:last_gui_theme, theme_name)
-      PortManager.send_commands(state.port_manager, [ProtocolGUI.encode_gui_theme(state.theme)])
+      ProtocolGUI.encode_gui_theme(state.theme)
     end
-
-    :ok
   end
 
   # ── Tab bar ──
 
-  @spec send_gui_tab_bar(state()) :: :ok
-  defp send_gui_tab_bar(%{tab_bar: %TabBar{} = tb} = state) do
+  @spec build_gui_tab_bar_cmd(state()) :: binary() | nil
+  defp build_gui_tab_bar_cmd(%{tab_bar: %TabBar{} = tb} = state) do
     active_buf = active_window_buffer(state)
-    cmd = ProtocolGUI.encode_gui_tab_bar(tb, active_buf)
-    PortManager.send_commands(state.port_manager, [cmd])
-    :ok
+    fp = :erlang.phash2({tb, active_buf})
+
+    if fp != Process.get(:last_gui_tab_bar_fp) do
+      Process.put(:last_gui_tab_bar_fp, fp)
+      ProtocolGUI.encode_gui_tab_bar(tb, active_buf)
+    end
   end
 
-  defp send_gui_tab_bar(%{tab_bar: nil}), do: :ok
+  defp build_gui_tab_bar_cmd(%{tab_bar: nil}), do: nil
 
   @spec active_window_buffer(state()) :: pid() | nil
   defp active_window_buffer(%{windows: %{active: win_id, map: map}}) do
@@ -163,39 +189,46 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
 
   # ── File tree ──
 
-  @spec send_gui_file_tree(state()) :: :ok
-  defp send_gui_file_tree(%{
-         file_tree: %{tree: %Minga.FileTree{} = tree},
-         port_manager: pm
-       }) do
-    cmd = ProtocolGUI.encode_gui_file_tree(tree)
-    PortManager.send_commands(pm, [cmd])
-    :ok
+  @spec build_gui_file_tree_cmd(state()) :: binary() | nil
+  defp build_gui_file_tree_cmd(%{file_tree: %{tree: %Minga.FileTree{} = tree}}) do
+    fp = :erlang.phash2(tree)
+
+    if fp != Process.get(:last_gui_file_tree_fp) do
+      Process.put(:last_gui_file_tree_fp, fp)
+      ProtocolGUI.encode_gui_file_tree(tree)
+    end
   end
 
-  defp send_gui_file_tree(%{port_manager: pm}) do
-    cmd = ProtocolGUI.encode_gui_file_tree(nil)
-    PortManager.send_commands(pm, [cmd])
-    :ok
+  defp build_gui_file_tree_cmd(_state) do
+    if Process.get(:last_gui_file_tree_fp) != :no_tree do
+      Process.put(:last_gui_file_tree_fp, :no_tree)
+      ProtocolGUI.encode_gui_file_tree(nil)
+    end
   end
 
   # ── Which-key ──
 
-  @spec send_gui_which_key(state()) :: :ok
-  defp send_gui_which_key(%{whichkey: wk, port_manager: pm}) do
-    cmd = ProtocolGUI.encode_gui_which_key(wk)
-    PortManager.send_commands(pm, [cmd])
-    :ok
+  @spec build_gui_which_key_cmd(state()) :: binary() | nil
+  defp build_gui_which_key_cmd(%{whichkey: wk}) do
+    fp = :erlang.phash2(wk)
+
+    if fp != Process.get(:last_gui_which_key_fp) do
+      Process.put(:last_gui_which_key_fp, fp)
+      ProtocolGUI.encode_gui_which_key(wk)
+    end
   end
 
   # ── Completion ──
 
-  @spec send_gui_completion(state()) :: :ok
-  defp send_gui_completion(%{completion: comp, port_manager: pm} = state) do
+  @spec build_gui_completion_cmd(state()) :: binary() | nil
+  defp build_gui_completion_cmd(%{completion: comp} = state) do
     {cursor_row, cursor_col} = current_cursor_screen_pos(state)
-    cmd = ProtocolGUI.encode_gui_completion(comp, cursor_row, cursor_col)
-    PortManager.send_commands(pm, [cmd])
-    :ok
+    fp = :erlang.phash2({comp, cursor_row, cursor_col})
+
+    if fp != Process.get(:last_gui_completion_fp) do
+      Process.put(:last_gui_completion_fp, fp)
+      ProtocolGUI.encode_gui_completion(comp, cursor_row, cursor_col)
+    end
   end
 
   @spec current_cursor_screen_pos(state()) :: {non_neg_integer(), non_neg_integer()}
@@ -221,8 +254,8 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
 
   # ── Breadcrumb ──
 
-  @spec send_gui_breadcrumb(state()) :: :ok
-  defp send_gui_breadcrumb(%{port_manager: pm} = state) do
+  @spec build_gui_breadcrumb_cmd(state()) :: binary() | nil
+  defp build_gui_breadcrumb_cmd(state) do
     file_path = active_buffer_path(state)
 
     root =
@@ -231,9 +264,12 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
         _ -> ""
       end
 
-    cmd = ProtocolGUI.encode_gui_breadcrumb(file_path, root)
-    PortManager.send_commands(pm, [cmd])
-    :ok
+    fp = :erlang.phash2({file_path, root})
+
+    if fp != Process.get(:last_gui_breadcrumb_fp) do
+      Process.put(:last_gui_breadcrumb_fp, fp)
+      ProtocolGUI.encode_gui_breadcrumb(file_path, root)
+    end
   end
 
   @spec active_buffer_path(state()) :: String.t() | nil
@@ -245,12 +281,12 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
   end
 
   # ── Status bar ──
+  # Status bar changes on every scroll frame (cursor line), so it's always sent.
+  # No fingerprint caching; the encoding cost is small (fixed-size struct).
 
-  @spec send_gui_status_bar(state(), StatusBarData.t()) :: :ok
-  defp send_gui_status_bar(%{port_manager: pm}, status_bar_data) do
-    cmd = ProtocolGUI.encode_gui_status_bar(status_bar_data)
-    PortManager.send_commands(pm, [cmd])
-    :ok
+  @spec build_gui_status_bar_cmd(state(), StatusBarData.t()) :: binary()
+  defp build_gui_status_bar_cmd(_state, status_bar_data) do
+    ProtocolGUI.encode_gui_status_bar(status_bar_data)
   end
 
   # ── Minibuffer ──
@@ -259,27 +295,21 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
   # the last frame. Uses a content hash to avoid re-encoding and resending
   # identical minibuffer state every render cycle.
 
-  @spec send_gui_minibuffer(state(), MinibufferData.t() | nil) :: :ok
-  defp send_gui_minibuffer(%{port_manager: pm}, %MinibufferData{} = data) do
+  @spec build_gui_minibuffer_cmd(state(), MinibufferData.t() | nil) :: binary() | nil
+  defp build_gui_minibuffer_cmd(_state, %MinibufferData{} = data) do
     fingerprint = minibuffer_fingerprint(data)
 
     if fingerprint != Process.get(:last_gui_minibuffer) do
       Process.put(:last_gui_minibuffer, fingerprint)
-      cmd = ProtocolGUI.encode_gui_minibuffer(data)
-      PortManager.send_commands(pm, [cmd])
+      ProtocolGUI.encode_gui_minibuffer(data)
     end
-
-    :ok
   end
 
-  defp send_gui_minibuffer(%{port_manager: pm}, nil) do
+  defp build_gui_minibuffer_cmd(_state, nil) do
     if Process.get(:last_gui_minibuffer) != :hidden do
       Process.put(:last_gui_minibuffer, :hidden)
-      cmd = ProtocolGUI.encode_gui_minibuffer(%MinibufferData{visible: false})
-      PortManager.send_commands(pm, [cmd])
+      ProtocolGUI.encode_gui_minibuffer(%MinibufferData{visible: false})
     end
-
-    :ok
   end
 
   # Produces a lightweight fingerprint for change detection. Captures all
@@ -296,49 +326,45 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
 
   # ── Picker ──
 
-  @spec send_gui_picker(state()) :: :ok
-  defp send_gui_picker(
-         %{
-           picker_ui: %{picker: picker, source: source, action_menu: action_menu},
-           port_manager: pm
-         } =
-           state
-       ) do
-    case picker do
-      nil ->
-        picker_cmd = ProtocolGUI.encode_gui_picker(nil)
-        preview_cmd = ProtocolGUI.encode_gui_picker_preview(nil)
-        PortManager.send_commands(pm, [picker_cmd, preview_cmd])
-
-      _ ->
-        has_preview = source != nil and Picker.Source.preview?(source)
-
-        preview_lines =
-          if has_preview do
-            build_picker_preview(state)
-          else
-            nil
-          end
-
-        # GUI gets up to 100 items so the native ScrollView can scroll.
-        # The TUI path uses picker.max_visible (terminal rows).
-        picker_cmd = ProtocolGUI.encode_gui_picker(picker, has_preview, action_menu, 100)
-        preview_cmd = ProtocolGUI.encode_gui_picker_preview(preview_lines)
-        PortManager.send_commands(pm, [picker_cmd, preview_cmd])
+  @spec build_gui_picker_cmd(state()) :: binary() | nil
+  defp build_gui_picker_cmd(%{picker_ui: %{picker: nil}}) do
+    if Process.get(:last_gui_picker_fp) != :closed do
+      Process.put(:last_gui_picker_fp, :closed)
+      picker_cmd = ProtocolGUI.encode_gui_picker(nil)
+      preview_cmd = ProtocolGUI.encode_gui_picker_preview(nil)
+      IO.iodata_to_binary([picker_cmd, preview_cmd])
     end
+  end
 
-    :ok
+  defp build_gui_picker_cmd(
+         %{picker_ui: %{picker: picker, source: source, action_menu: action_menu}} = state
+       ) do
+    # Preview content is NOT in the fingerprint: a file changing on disk while
+    # the picker is open won't refresh the preview. Acceptable trade-off for
+    # scroll perf since the picker isn't open during normal editing.
+    fp = :erlang.phash2({picker.query, picker.selected, Picker.total(picker), action_menu})
+
+    if fp != Process.get(:last_gui_picker_fp) do
+      Process.put(:last_gui_picker_fp, fp)
+      has_preview = source != nil and Picker.Source.preview?(source)
+      preview_lines = if has_preview, do: build_picker_preview(state)
+      # Picker always pairs with its preview; concatenate so they arrive as
+      # adjacent frames in the batched port write.
+      picker_cmd = ProtocolGUI.encode_gui_picker(picker, has_preview, action_menu, 100)
+      preview_cmd = ProtocolGUI.encode_gui_picker_preview(preview_lines)
+      IO.iodata_to_binary([picker_cmd, preview_cmd])
+    end
   end
 
   # Build preview content for the currently selected picker item.
   # Returns a list of lines, where each line is a list of {text, fg_color, bold} segments.
   @spec build_picker_preview(state()) :: [[ProtocolGUI.preview_segment()]] | nil
   defp build_picker_preview(%{picker_ui: %{picker: picker}} = state) do
-    case Minga.Picker.selected_item(picker) do
+    case Picker.selected_item(picker) do
       nil ->
         nil
 
-      %Minga.Picker.Item{id: id} ->
+      %Picker.Item{id: id} ->
         build_preview_for_item(state, id)
     end
   end
@@ -470,23 +496,58 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
 
   # ── Agent chat ──
 
-  @spec send_gui_agent_chat(state()) :: :ok
-  defp send_gui_agent_chat(%{port_manager: pm} = state) do
-    data = build_agent_chat_data(state)
+  @spec build_gui_agent_chat_cmd(state()) :: binary() | nil
+  defp build_gui_agent_chat_cmd(state) do
+    active_window = Map.get(state.windows.map, state.windows.active)
+    is_agent_chat = active_window != nil && Content.agent_chat?(active_window.content)
+    session = state.agent.session
 
-    if data.visible do
-      Minga.Log.debug(:render, "[gui] sending agent chat: #{length(data.messages)} messages")
+    # Compute fingerprint from cheap state fields to avoid calling
+    # AgentSession.messages (expensive GenServer.call that allocates a
+    # formatted message list) on every frame. The prompt buffer content
+    # is included because it's a single fast GenServer.call, and the PID
+    # alone is stable (wouldn't detect typing). The styled cache length
+    # is a reliable proxy for message count changes because styling
+    # happens in the same render cycle as message arrival.
+    {fp, prompt_text} =
+      if is_agent_chat && session do
+        styled_len = length(state.agent_ui.panel.cached_styled_messages || [])
+        text = safe_prompt_content(state.agent_ui.panel.prompt_buffer)
+
+        {:erlang.phash2(
+           {:visible, state.agent.status, state.agent.pending_approval, styled_len,
+            state.agent_ui.panel.model_name, text}
+         ), text}
+      else
+        {:not_visible, ""}
+      end
+
+    if fp != Process.get(:last_gui_agent_chat_fp) do
+      Process.put(:last_gui_agent_chat_fp, fp)
+      data = build_agent_chat_data(state, prompt_text)
+
+      if data.visible do
+        Minga.Log.debug(:render, "[gui] sending agent chat: #{length(data.messages)} messages")
+      end
+
+      ProtocolGUI.encode_gui_agent_chat(data)
     end
-
-    cmd = ProtocolGUI.encode_gui_agent_chat(data)
-    PortManager.send_commands(pm, [cmd])
-    :ok
   end
 
-  @spec build_agent_chat_data(state()) :: map()
-  defp build_agent_chat_data(state) do
-    alias Minga.Editor.Window.Content
+  # Reads prompt buffer content, guarding against a dead process.
+  # The prompt buffer can die between state updates; the :DOWN handler
+  # clears the PID on the next cycle, but there's a race window.
+  @spec safe_prompt_content(pid() | nil) :: String.t()
+  defp safe_prompt_content(nil), do: ""
 
+  defp safe_prompt_content(buf) do
+    BufferServer.content(buf) |> String.trim_trailing("\n")
+  catch
+    :exit, _ -> ""
+  end
+
+  @spec build_agent_chat_data(state(), String.t()) :: map()
+  defp build_agent_chat_data(state, prompt_text) do
     active_window = Map.get(state.windows.map, state.windows.active)
     is_agent_chat = active_window != nil && Content.agent_chat?(active_window.content)
     session = state.agent.session
@@ -504,21 +565,13 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
       styled_cache = state.agent_ui.panel.cached_styled_messages
       gui_messages = build_gui_messages(messages, styled_cache)
 
-      prompt_text =
-        case state.agent_ui.panel.prompt_buffer do
-          nil -> ""
-          buf -> BufferServer.content(buf) |> String.trim_trailing("\n")
-        end
-
-      pending = state.agent.pending_approval
-
       %{
         visible: true,
         messages: gui_messages,
         status: state.agent.status || :idle,
         model: state.agent_ui.panel.model_name,
         prompt: prompt_text,
-        pending_approval: pending
+        pending_approval: state.agent.pending_approval
       }
     else
       %{visible: false}
@@ -610,8 +663,6 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
 
   @spec build_gui_gutter_commands(state()) :: [binary()]
   defp build_gui_gutter_commands(state) do
-    alias Minga.Editor.Window.Content
-
     layout = Layout.get(state)
 
     Enum.flat_map(layout.window_layouts, fn {win_id, win_layout} ->
@@ -742,12 +793,20 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
 
   # ── Bottom panel ──
 
-  @spec send_gui_bottom_panel(state()) :: state()
-  defp send_gui_bottom_panel(
-         %{bottom_panel: panel, message_store: store, port_manager: pm} = state
-       ) do
-    {cmd, new_store} = ProtocolGUI.encode_gui_bottom_panel(panel, store)
-    PortManager.send_commands(pm, [cmd])
-    %{state | message_store: new_store}
+  # Bottom panel is special: it returns {cmd | nil, updated_state} because
+  # encode_gui_bottom_panel may advance the message_store cursor when new
+  # entries have arrived. We still fingerprint to skip encoding when the
+  # panel hasn't changed.
+  @spec build_gui_bottom_panel_cmd(state()) :: {binary() | nil, state()}
+  defp build_gui_bottom_panel_cmd(%{bottom_panel: panel, message_store: store} = state) do
+    fp = :erlang.phash2({panel, store})
+
+    if fp != Process.get(:last_gui_bottom_panel_fp) do
+      Process.put(:last_gui_bottom_panel_fp, fp)
+      {cmd, new_store} = ProtocolGUI.encode_gui_bottom_panel(panel, store)
+      {cmd, %{state | message_store: new_store}}
+    else
+      {nil, state}
+    end
   end
 end

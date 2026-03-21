@@ -1,18 +1,18 @@
 # Performance Bottleneck Analysis
 
-**Date:** 2026-03-15
+**Date:** 2026-03-15 (updated 2026-03-21)
 **Focus:** End-user latency and AI agent edit throughput
-**Related:** [Telemetry ticket #527](https://github.com/jsmestad/minga/issues/527), [PERFORMANCE.md](PERFORMANCE.md), [BUFFER-AWARE-AGENTS.md](BUFFER-AWARE-AGENTS.md)
+**Related:** [Epic #911](https://github.com/jsmestad/minga/issues/911), [Telemetry ticket #527](https://github.com/jsmestad/minga/issues/527), [PERFORMANCE.md](PERFORMANCE.md), [BUFFER-AWARE-AGENTS.md](BUFFER-AWARE-AGENTS.md)
 
 ## Summary
 
 The editor's core architecture is sound for performance: dirty-line tracking, incremental tree-sitter sync via EditDelta, render debounce at 16ms, BEAM VM tuning, and ETS for read-heavy shared state all work well. The bottlenecks below are specific, fixable problems rather than architectural flaws.
 
-The single most impactful fix is routing agent edits through the buffer instead of the filesystem. The second most impactful is adding telemetry so every subsequent optimization is data-driven.
+The single most impactful remaining fix is routing agent edits through the buffer instead of the filesystem. Telemetry infrastructure (P2) is now in place, so subsequent optimizations can be data-driven.
 
 ## Priority-Ordered Bottlenecks
 
-### P1: Agent File Edits Bypass Buffers
+### P1: Agent File Edits Bypass Buffers — [#905](https://github.com/jsmestad/minga/issues/905)
 
 **Impact:** HIGH for AI agent workloads. Zero impact on human editing.
 **Effort:** Medium. Pattern documented in BUFFER-AWARE-AGENTS.md.
@@ -43,30 +43,25 @@ The buffer already has `Buffer.Server.apply_text_edits/2` which would give:
 
 **Why first:** Every agent feature built on filesystem I/O inherits this performance tax. The longer this waits, the more code depends on the slow path.
 
-### P2: Telemetry Infrastructure (#527)
+### P2: Telemetry Infrastructure (#527) ✅ DONE
 
-**Impact:** META. Enables data-driven decisions for every subsequent optimization.
-**Effort:** Low-medium. `:telemetry` is a mature zero-dep library.
+**Status:** Implemented. `Minga.Telemetry` provides a thin wrapper over `:telemetry` with `span/3` and `execute/3`. The render pipeline, editor input dispatch, and command execution are all instrumented with named spans. `Minga.Telemetry.DevHandler` routes span durations through `Minga.Log.debug` and is attached at startup.
 
-Currently: ad-hoc `Minga.Log.debug(:render, "[render:content] 24µs")` strings in the render pipeline. Not aggregatable, not structured, no histograms. Without telemetry, performance regressions are invisible until a user reports "it feels slow."
+**Instrumented spans:**
 
-**What to instrument (from ticket #527):**
+| Span | Status |
+|------|--------|
+| `[:minga, :render, :pipeline]` | ✅ In `RenderPipeline` |
+| `[:minga, :render, :stage]` | ✅ All 7 stages (invalidation, layout, scroll, content, agent_content, chrome, compose) |
+| `[:minga, :input, :dispatch]` | ✅ In `Editor` |
+| `[:minga, :command, :execute]` | ✅ In `Editor.Commands` |
+| `[:minga, :port, :emit]` | ✅ In `RenderPipeline` |
+| `[:minga, :buffer, :operation]` | Not yet instrumented |
+| `[:minga, :agent, :tool]` | Not yet instrumented |
 
-| Span | What it measures | Why it matters |
-|------|------------------|----------------|
-| `[:minga, :input, :dispatch]` | Key event → command resolution | Input latency floor |
-| `[:minga, :command, :execute]` | Command execution duration | Per-command cost |
-| `[:minga, :render, :pipeline]` | Full render with per-stage children | Frame budget tracking |
-| `[:minga, :render, :stage]` | Individual stage (invalidation, layout, scroll, content, chrome, compose, emit) | Identify slow stages |
-| `[:minga, :port, :emit]` | Encoding + writing to Port | Serialization overhead |
-| `[:minga, :buffer, :operation]` | GenServer call duration per operation type | Buffer contention |
-| `[:minga, :agent, :tool]` | Agent tool execution | Agent throughput |
+Set `:log_level_render` to `:debug` to see per-stage timing in `*Messages*`. The remaining two spans (buffer operations, agent tools) can be added when those subsystems need profiling.
 
-**Development reporter:** A `Minga.Telemetry.Reporter` GenServer that aggregates spans into histograms and writes to `*Messages*` on demand (e.g., via a `:telemetry_report` command or `SPC h t`).
-
-**Why second:** Priorities 3-7 are all "probably matters, but by how much?" questions. Telemetry turns guesses into measurements. Without it, you might spend a week optimizing the motion snapshot problem only to discover it's 200µs per keystroke (fine) while the real culprit is something you haven't measured.
-
-### P3: Motion Execution Copies Full Document Across Process Boundary
+### P3: Motion Execution Copies Full Document Across Process Boundary — [#906](https://github.com/jsmestad/minga/issues/906) / [#907](https://github.com/jsmestad/minga/issues/907)
 
 **Impact:** HIGH for human editing on large files. Proportional to file size.
 **Effort:** Quick win (low), structural fix (medium-high).
@@ -92,7 +87,7 @@ Word motions are the worst: they call `Readable.content(buf)` which concatenates
 
 **Structural fix:** Rewrite word motions to use `line_at` iteratively instead of materializing full content. Word motions search forward/backward from the cursor and rarely need more than 2-3 lines of context. This eliminates the O(n) content materialization entirely.
 
-### P4: Undo Stack Stores Full Document Snapshots
+### P4: Undo Stack Stores Full Document Snapshots — [#908](https://github.com/jsmestad/minga/issues/908)
 
 **Impact:** MEDIUM. Bounded by coalescing (300ms) and stack cap (1000 entries).
 **Effort:** High. Fundamental change to undo architecture.
@@ -105,7 +100,7 @@ In practice, the 300ms coalescing window limits human typing to 2-3 entries/seco
 
 **Why deferred:** The coalescing window and stack cap bound the worst case. For typical files (10-50KB), the peak is 10-50MB, which is fine. Fix agent buffer routing (P1) first, which eliminates the reload-pushes-snapshot problem.
 
-### P5: Scroll Stage GenServer Call Volume
+### P5: Scroll Stage GenServer Call Volume — [#909](https://github.com/jsmestad/minga/issues/909)
 
 **Impact:** MEDIUM. Already partially optimized via `render_snapshot`.
 **Effort:** Low-medium.
@@ -122,7 +117,7 @@ At 60fps, that's ~300-420 GenServer round-trips/second per window. Each GenServe
 
 **Fix (if telemetry shows it matters):** A single `scroll_snapshot` call that returns everything the scroll stage needs: line count, cursor, decorations, render snapshot, options, file path. One round-trip instead of 4-7.
 
-### P6: Line Index Cache Invalidation on Mutation
+### P6: Line Index Cache Invalidation on Mutation — [#910](https://github.com/jsmestad/minga/issues/910)
 
 **Impact:** LOW-MEDIUM. Already well-designed.
 **Effort:** Medium (incremental update is tricky for multi-line edits).
@@ -172,14 +167,13 @@ These don't need optimization:
 ## Recommended Execution Order
 
 ```
-1. Agent buffer routing (P1)     ← biggest win for AI workloads
-2. Telemetry (#527) (P2)         ← enables data-driven decisions
-3. Motion quick win: h/l (P3a)   ← low effort, measurable with telemetry
-4. [measure with telemetry]      ← verify P3-P7 actually matter
-5. Word motion refactor (P3b)    ← if telemetry confirms O(n) cost
-6. Scroll snapshot (P5)          ← if telemetry shows GenServer overhead
-7. Delta undo (P4)               ← if memory profiling shows pressure
-8. Line index incremental (P6)   ← if telemetry shows rebuild cost
+1. Agent buffer routing (#905)       ← biggest win for AI workloads
+2. Motion quick win: h/l (#906)      ← low effort, high frequency
+3. Word motion refactor (#907)       ← eliminates O(n) per keystroke
+4. [measure with telemetry]          ← verify remaining items matter
+5. Delta undo (#908)                 ← if memory profiling shows pressure
+6. Scroll snapshot (#909)            ← if telemetry shows GenServer overhead
+7. Line index incremental (#910)     ← if telemetry shows rebuild cost
 ```
 
-Steps 4-8 are conditional. Telemetry may reveal that some of these are already fast enough, or that a bottleneck we haven't identified is the real problem.
+Telemetry (P2) is done. Steps 4-7 are conditional. Telemetry may reveal that some are already fast enough, or that an unidentified bottleneck is the real problem.

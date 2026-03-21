@@ -26,11 +26,17 @@ defmodule Minga.Editor.Commands.ClipboardSyncTest do
 
   # Start an Agent to act as in-memory clipboard storage for the duration
   # of each test. Stubs route read/write through it.
+  #
+  # The mock stub sends {:clipboard_written, text} to the test process
+  # so tests can use assert_receive as a synchronization barrier. This is
+  # necessary because clipboard writes are now async (via Task.Supervisor).
   setup do
     {:ok, agent} = Agent.start_link(fn -> nil end)
+    test_pid = self()
 
     stub(Minga.Clipboard.Mock, :write, fn text ->
       Agent.update(agent, fn _ -> text end)
+      send(test_pid, {:clipboard_written, text})
       :ok
     end)
 
@@ -70,6 +76,8 @@ defmodule Minga.Editor.Commands.ClipboardSyncTest do
         :unnamedplus
       )
 
+      # Clipboard write is async; wait for the Task to complete
+      assert_receive {:clipboard_written, ^sentinel}, 200
       assert clipboard_contents(agent) == sentinel
     end
 
@@ -85,6 +93,7 @@ defmodule Minga.Editor.Commands.ClipboardSyncTest do
         :unnamedplus
       )
 
+      assert_receive {:clipboard_written, ^sentinel}, 200
       assert clipboard_contents(agent) == sentinel
     end
 
@@ -100,6 +109,7 @@ defmodule Minga.Editor.Commands.ClipboardSyncTest do
         :unnamedplus
       )
 
+      assert_receive {:clipboard_written, ^sentinel}, 200
       assert clipboard_contents(agent) == sentinel
     end
 
@@ -116,6 +126,8 @@ defmodule Minga.Editor.Commands.ClipboardSyncTest do
         :unnamedplus
       )
 
+      # Async write should NOT have been triggered for the black hole register
+      refute_receive {:clipboard_written, _}, 50
       assert clipboard_contents(agent) == sentinel
     end
 
@@ -131,6 +143,7 @@ defmodule Minga.Editor.Commands.ClipboardSyncTest do
         :unnamedplus
       )
 
+      assert_receive {:clipboard_written, ^sentinel}, 200
       assert clipboard_contents(agent) == sentinel
     end
   end
@@ -149,6 +162,7 @@ defmodule Minga.Editor.Commands.ClipboardSyncTest do
         :none
       )
 
+      refute_receive {:clipboard_written, _}, 50
       assert clipboard_contents(agent) == sentinel
     end
 
@@ -157,6 +171,7 @@ defmodule Minga.Editor.Commands.ClipboardSyncTest do
       state = put_in(make_state().vim.reg.active, "+")
       Helpers.put_register_with_clipboard_override(state, sentinel, :yank, :charwise, :none)
 
+      assert_receive {:clipboard_written, ^sentinel}, 200
       assert clipboard_contents(agent) == sentinel
     end
   end
@@ -178,6 +193,10 @@ defmodule Minga.Editor.Commands.ClipboardSyncTest do
           :unnamedplus
         )
 
+      # Wait for the async clipboard write to complete before simulating
+      # an external copy, otherwise the Task overwrites our external value.
+      assert_receive {:clipboard_written, ^internal}, 200
+
       # Simulate external copy by writing directly to the in-memory clipboard
       Agent.update(agent, fn _ -> external end)
 
@@ -198,7 +217,8 @@ defmodule Minga.Editor.Commands.ClipboardSyncTest do
           :unnamedplus
         )
 
-      # Clipboard was synced, so it should match
+      # Clipboard read returns nil until the async Task completes; nil falls
+      # back to the stored register value, so this is safe without synchronization.
       {text, _type, _state} = Helpers.get_register(state, :unnamedplus)
       assert text == sentinel
     end

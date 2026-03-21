@@ -78,36 +78,41 @@ final class StatusBarState {
     var filename: String = ""
     var diagnosticHint: String = ""
 
+    /// Updates status bar properties, guarding each assignment with an
+    /// equality check to prevent redundant `@Observable` notifications.
+    /// During j/k scroll, only cursorLine changes; the other ~25 fields
+    /// stay the same. Without guards, every write fires a notification
+    /// that invalidates the SwiftUI sub-view reading that property.
     func update(from data: StatusBarUpdate) {
-        self.contentKind = data.contentKind
-        self.mode = data.mode
-        self.cursorLine = data.cursorLine
-        self.cursorCol = data.cursorCol
-        self.lineCount = data.lineCount
-        self.flags = data.flags
-        self.lspStatus = data.lspStatus
-        self.gitBranch = data.gitBranch
-        self.message = data.message
-        self.filetype = data.filetype
-        self.errorCount = data.errorCount
-        self.warningCount = data.warningCount
-        self.modelName = data.modelName
-        self.messageCount = data.messageCount
-        self.sessionStatus = data.sessionStatus
-        self.infoCount = data.infoCount
-        self.hintCount = data.hintCount
-        self.macroRecording = data.macroRecording
-        self.parserStatus = data.parserStatus
-        self.agentStatus = data.agentStatus
-        self.gitAdded = data.gitAdded
-        self.gitModified = data.gitModified
-        self.gitDeleted = data.gitDeleted
-        self.icon = data.icon
-        self.iconColorR = data.iconColorR
-        self.iconColorG = data.iconColorG
-        self.iconColorB = data.iconColorB
-        self.filename = data.filename
-        self.diagnosticHint = data.diagnosticHint
+        if self.contentKind != data.contentKind { self.contentKind = data.contentKind }
+        if self.mode != data.mode { self.mode = data.mode }
+        if self.cursorLine != data.cursorLine { self.cursorLine = data.cursorLine }
+        if self.cursorCol != data.cursorCol { self.cursorCol = data.cursorCol }
+        if self.lineCount != data.lineCount { self.lineCount = data.lineCount }
+        if self.flags != data.flags { self.flags = data.flags }
+        if self.lspStatus != data.lspStatus { self.lspStatus = data.lspStatus }
+        if self.gitBranch != data.gitBranch { self.gitBranch = data.gitBranch }
+        if self.message != data.message { self.message = data.message }
+        if self.filetype != data.filetype { self.filetype = data.filetype }
+        if self.errorCount != data.errorCount { self.errorCount = data.errorCount }
+        if self.warningCount != data.warningCount { self.warningCount = data.warningCount }
+        if self.modelName != data.modelName { self.modelName = data.modelName }
+        if self.messageCount != data.messageCount { self.messageCount = data.messageCount }
+        if self.sessionStatus != data.sessionStatus { self.sessionStatus = data.sessionStatus }
+        if self.infoCount != data.infoCount { self.infoCount = data.infoCount }
+        if self.hintCount != data.hintCount { self.hintCount = data.hintCount }
+        if self.macroRecording != data.macroRecording { self.macroRecording = data.macroRecording }
+        if self.parserStatus != data.parserStatus { self.parserStatus = data.parserStatus }
+        if self.agentStatus != data.agentStatus { self.agentStatus = data.agentStatus }
+        if self.gitAdded != data.gitAdded { self.gitAdded = data.gitAdded }
+        if self.gitModified != data.gitModified { self.gitModified = data.gitModified }
+        if self.gitDeleted != data.gitDeleted { self.gitDeleted = data.gitDeleted }
+        if self.icon != data.icon { self.icon = data.icon }
+        if self.iconColorR != data.iconColorR { self.iconColorR = data.iconColorR }
+        if self.iconColorG != data.iconColorG { self.iconColorG = data.iconColorG }
+        if self.iconColorB != data.iconColorB { self.iconColorB = data.iconColorB }
+        if self.filename != data.filename { self.filename = data.filename }
+        if self.diagnosticHint != data.diagnosticHint { self.diagnosticHint = data.diagnosticHint }
     }
 
     var modeName: String {
