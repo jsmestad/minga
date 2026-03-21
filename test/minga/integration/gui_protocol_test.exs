@@ -219,6 +219,90 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert msg2["kind"] == "assistant"
       assert msg2["text"] == "hi there"
     end
+
+    test "gui_agent_chat with styled_tool_call round-trips", %{port: port} do
+      tc = %{
+        name: "bash",
+        status: :complete,
+        is_error: false,
+        collapsed: false,
+        duration_ms: 1500,
+        result: "output text"
+      }
+
+      styled_lines = [
+        [{"$ ls -la", 0x98BE65, 0x000000, 0x01}],
+        [{"total 42", 0xBBC2CF, 0x000000, 0x00}]
+      ]
+
+      data = %{
+        visible: true,
+        messages: [{:styled_tool_call, tc, styled_lines}],
+        status: :idle,
+        model: "claude",
+        prompt: "",
+        pending_approval: nil
+      }
+
+      cmd = ProtocolGUI.encode_gui_agent_chat(data)
+      Port.command(port, cmd)
+      assert_receive {^port, {:data, json}}, 5_000
+      decoded = Jason.decode!(json)
+
+      assert decoded["type"] == "gui_agent_chat"
+      assert decoded["visible"] == true
+      assert length(decoded["messages"]) == 1
+
+      [msg] = decoded["messages"]
+      assert msg["kind"] == "styled_tool_call"
+      assert msg["name"] == "bash"
+      assert msg["status"] == 1
+      assert msg["is_error"] == false
+      assert msg["collapsed"] == false
+      assert msg["duration_ms"] == 1500
+      assert length(msg["result_lines"]) == 2
+
+      [[run1], [run2]] = msg["result_lines"]
+      assert run1["text"] == "$ ls -la"
+      assert run1["bold"] == true
+      assert run1["fg"] == [0x98, 0xBE, 0x65]
+      assert run2["text"] == "total 42"
+      assert run2["bold"] == false
+    end
+
+    test "gui_agent_chat with regular tool_call round-trips", %{port: port} do
+      tc = %{
+        name: "read_file",
+        status: :running,
+        is_error: false,
+        collapsed: true,
+        duration_ms: 0,
+        result: "file content here"
+      }
+
+      data = %{
+        visible: true,
+        messages: [{:tool_call, tc}],
+        status: :tool_executing,
+        model: "claude",
+        prompt: "",
+        pending_approval: nil
+      }
+
+      cmd = ProtocolGUI.encode_gui_agent_chat(data)
+      Port.command(port, cmd)
+      assert_receive {^port, {:data, json}}, 5_000
+      decoded = Jason.decode!(json)
+
+      assert decoded["type"] == "gui_agent_chat"
+      assert length(decoded["messages"]) == 1
+
+      [msg] = decoded["messages"]
+      assert msg["kind"] == "tool_call"
+      assert msg["name"] == "read_file"
+      assert msg["collapsed"] == true
+      assert msg["result"] == "file content here"
+    end
   end
 
   describe "round-trip: BEAM encode → harness decode → harness sends gui_action → BEAM receives" do

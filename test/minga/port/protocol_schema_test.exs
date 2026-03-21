@@ -93,6 +93,7 @@ defmodule Minga.Port.ProtocolSchemaTest do
       assert_opcode(expected, "tool_uninstall", 0x12)
       assert_opcode(expected, "tool_update", 0x13)
       assert_opcode(expected, "tool_dismiss", 0x14)
+      assert_opcode(expected, "agent_tool_toggle", 0x15)
     end
   end
 

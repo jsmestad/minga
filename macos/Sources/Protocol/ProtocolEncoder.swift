@@ -43,6 +43,9 @@ protocol InputEncoder: AnyObject, Sendable {
     func sendToolUninstall(name: String)
     func sendToolUpdate(name: String)
     func sendToolDismiss()
+
+    // Agent chat actions
+    func sendAgentToolToggle(index: UInt16)
 }
 
 extension InputEncoder {
@@ -307,6 +310,15 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         if nameLen > 0 {
             buf.replaceSubrange(4..<(4 + nameLen), with: utf8[0..<nameLen])
         }
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: agent_tool_toggle. Layout: opcode(1) + action_type(1) + index(2).
+    func sendAgentToolToggle(index: UInt16) {
+        var buf = Data(count: 4)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_AGENT_TOOL_TOGGLE
+        writeU16(&buf, 2, index)
         writeFrame(buf)
     }
 

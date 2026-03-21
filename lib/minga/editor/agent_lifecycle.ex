@@ -26,6 +26,10 @@ defmodule Minga.Editor.AgentLifecycle do
   alias Minga.Editor.State.TabBar
   @type state :: EditorState.t()
 
+  # Maximum characters of tool call result to send for styled rendering.
+  # Matches the truncation in AgentBufferSync.message_to_markdown/1.
+  @max_styled_result_chars 500
+
   @doc """
   Starts the agent session if the agent pane is visible during init.
 
@@ -272,8 +276,8 @@ defmodule Minga.Editor.AgentLifecycle do
     :exit, _ -> []
   end
 
-  # Computes styled runs for each message. Only assistant messages get
-  # tree-sitter/markdown styling; other message types pass through as nil.
+  # Computes styled runs for each message. Assistant messages and tool call
+  # results get tree-sitter/markdown styling; other message types pass through as nil.
   #
   # Computes per-message byte offsets into the full buffer so tree-sitter
   # highlights (which reference the full buffer) align correctly with
@@ -296,6 +300,12 @@ defmodule Minga.Editor.AgentLifecycle do
     |> Enum.map(fn
       {{:assistant, text}, idx} ->
         byte_offset = Map.get(byte_offset_map, idx, 0)
+        MarkdownHighlight.stylize(text, highlight, theme_syntax, byte_offset)
+
+      {{:tool_call, %{result: result}}, idx} when is_binary(result) and result != "" ->
+        byte_offset = Map.get(byte_offset_map, idx, 0)
+        # Tool call results use the same markdown/tree-sitter styling pipeline
+        text = String.slice(result, 0, @max_styled_result_chars)
         MarkdownHighlight.stylize(text, highlight, theme_syntax, byte_offset)
 
       _ ->

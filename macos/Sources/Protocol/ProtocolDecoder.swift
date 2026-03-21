@@ -163,6 +163,8 @@ enum GUIChatMessage: Sendable {
     case styledAssistant(lines: [[StyledTextRun]])
     case thinking(text: String, collapsed: Bool)
     case toolCall(name: String, status: UInt8, isError: Bool, collapsed: Bool, durationMs: UInt32, result: String)
+    /// Tool call with pre-styled result runs from tree-sitter.
+    case styledToolCall(name: String, status: UInt8, isError: Bool, collapsed: Bool, durationMs: UInt32, resultLines: [[StyledTextRun]])
     case system(text: String, isError: Bool)
     case usage(input: UInt32, output: UInt32, cacheRead: UInt32, cacheWrite: UInt32, costMicros: UInt32)
 }
@@ -967,6 +969,49 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                 }
                 messages.append(.styledAssistant(lines: lines))
                 pos = rPos
+            case 0x08: // styled_tool_call
+                // Same header as tool_call (0x04) but result is styled runs instead of plain text.
+                // Format: 0x08, status::8, error::8, collapsed::8, duration::32,
+                //   name_len::16, name, line_count::16, then per line:
+                //   run_count::16, then per run: text_len::16, text, fg::24, bg::24, flags::8
+                guard data.count >= pos + 10 else { throw ProtocolDecodeError.malformed }
+                let stcStatus = data[pos + 1]
+                let stcIsError = data[pos + 2] != 0
+                let stcCollapsed = data[pos + 3] != 0
+                let stcDuration = readU32(data, pos + 4)
+                let stcNameLen = Int(readU16(data, pos + 8))
+                guard data.count >= pos + 10 + stcNameLen + 2 else { throw ProtocolDecodeError.malformed }
+                let stcName = String(data: data[(pos + 10)..<(pos + 10 + stcNameLen)], encoding: .utf8) ?? ""
+                let stcLineCount = Int(readU16(data, pos + 10 + stcNameLen))
+                var stcLines: [[StyledTextRun]] = []
+                stcLines.reserveCapacity(stcLineCount)
+                var stcPos = pos + 12 + stcNameLen
+                for _ in 0..<stcLineCount {
+                    guard data.count >= stcPos + 2 else { throw ProtocolDecodeError.malformed }
+                    let runCount = Int(readU16(data, stcPos))
+                    var runs: [StyledTextRun] = []
+                    runs.reserveCapacity(runCount)
+                    stcPos += 2
+                    for _ in 0..<runCount {
+                        guard data.count >= stcPos + 9 else { throw ProtocolDecodeError.malformed }
+                        let textLen = Int(readU16(data, stcPos))
+                        guard data.count >= stcPos + 2 + textLen + 7 else { throw ProtocolDecodeError.malformed }
+                        let runText = String(data: data[(stcPos + 2)..<(stcPos + 2 + textLen)], encoding: .utf8) ?? ""
+                        let fgOff = stcPos + 2 + textLen
+                        runs.append(StyledTextRun(
+                            text: runText,
+                            fgR: data[fgOff], fgG: data[fgOff + 1], fgB: data[fgOff + 2],
+                            bgR: data[fgOff + 3], bgG: data[fgOff + 4], bgB: data[fgOff + 5],
+                            bold: (data[fgOff + 6] & 0x01) != 0,
+                            italic: (data[fgOff + 6] & 0x02) != 0,
+                            underline: (data[fgOff + 6] & 0x04) != 0
+                        ))
+                        stcPos = fgOff + 7
+                    }
+                    stcLines.append(runs)
+                }
+                messages.append(.styledToolCall(name: stcName, status: stcStatus, isError: stcIsError, collapsed: stcCollapsed, durationMs: stcDuration, resultLines: stcLines))
+                pos = stcPos
             default:
                 break
             }

@@ -601,6 +601,9 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
   defp maybe_style_message({{:assistant, _text}, styled_lines}),
     do: {:styled_assistant, styled_lines}
 
+  defp maybe_style_message({{:tool_call, tc}, styled_lines}) when is_list(styled_lines),
+    do: {:styled_tool_call, tc, styled_lines}
+
   defp maybe_style_message({msg, _cache_entry}), do: msg
 
   @spec pad_cache([term()], non_neg_integer()) :: [term()]
