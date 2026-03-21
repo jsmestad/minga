@@ -42,10 +42,22 @@ struct MingaApp: App {
     }
 }
 
+/// Preference key for measuring the right pane's total height.
+/// Used by BottomPanelView to cap its height at a fraction of
+/// available space without needing a greedy GeometryReader.
+private struct PaneHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 600
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        // Single measurement source (one GeometryReader); last write wins.
+        value = nextValue()
+    }
+}
+
 /// ContentView observes AppState and switches from a placeholder to the
 /// editor surface once the AppDelegate finishes initialization.
 struct ContentView: View {
     @ObservedObject var appState: AppState
+    @State private var rightPaneHeight: CGFloat = 600
 
     var body: some View {
         ZStack {
@@ -132,7 +144,8 @@ struct ContentView: View {
                     BottomPanelView(
                         state: appState.gui.bottomPanelState,
                         theme: appState.gui.themeColors,
-                        encoder: appState.encoder
+                        encoder: appState.encoder,
+                        availableHeight: rightPaneHeight
                     )
                 }
 
@@ -155,6 +168,17 @@ struct ContentView: View {
                     theme: appState.gui.themeColors,
                     encoder: appState.encoder
                 )
+            }
+            .background(
+                GeometryReader { geo in
+                    Color.clear.preference(
+                        key: PaneHeightKey.self,
+                        value: geo.size.height
+                    )
+                }
+            )
+            .onPreferenceChange(PaneHeightKey.self) { height in
+                rightPaneHeight = height
             }
 
         }
