@@ -134,6 +134,10 @@ jobs:
           version-file: .tool-versions
           version-type: strict
 
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
+
       - name: Install XcodeGen
         run: brew install xcodegen
 
