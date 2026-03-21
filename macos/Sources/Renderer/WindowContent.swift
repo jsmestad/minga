@@ -135,6 +135,10 @@ final class GUIWindowContent: Sendable {
     let cursorRow: UInt16
     let cursorCol: UInt16
     let cursorShape: CursorShape
+    /// Horizontal scroll offset in display columns. When > 0, line textures
+    /// and overlay quads must be shifted left by `scrollLeft * cellWidth` pixels
+    /// so content past the viewport edge becomes visible.
+    let scrollLeft: UInt16
     let rows: [GUIVisualRow]
     let selection: GUISelectionOverlay?
     let searchMatches: [GUISearchMatch]
@@ -143,6 +147,7 @@ final class GUIWindowContent: Sendable {
 
     init(windowId: UInt16, fullRefresh: Bool,
          cursorRow: UInt16, cursorCol: UInt16, cursorShape: CursorShape,
+         scrollLeft: UInt16 = 0,
          rows: [GUIVisualRow], selection: GUISelectionOverlay?,
          searchMatches: [GUISearchMatch],
          diagnosticUnderlines: [GUIDiagnosticUnderline],
@@ -152,6 +157,7 @@ final class GUIWindowContent: Sendable {
         self.cursorRow = cursorRow
         self.cursorCol = cursorCol
         self.cursorShape = cursorShape
+        self.scrollLeft = scrollLeft
         self.rows = rows
         self.selection = selection
         self.searchMatches = searchMatches

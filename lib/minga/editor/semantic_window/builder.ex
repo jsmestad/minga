@@ -120,6 +120,7 @@ defmodule Minga.Editor.SemanticWindow.Builder do
       cursor_row: display_cursor_row,
       cursor_col: display_cursor_col,
       cursor_shape: cursor_shape,
+      scroll_left: viewport.left,
       selection: selection,
       search_matches: search_matches,
       diagnostic_ranges: diagnostic_ranges,
