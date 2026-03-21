@@ -34,6 +34,12 @@ final class FileTreeState {
     var projectRoot: String = ""
 
     /// Update from a decoded gui_file_tree protocol message.
+    ///
+    /// The BEAM-side fingerprint caching (phash2 of the entire FileTree
+    /// struct) is the primary guard against redundant sends. When this
+    /// function is called, the tree data has genuinely changed and the
+    /// array rebuild is necessary (git status, file renames, expand/collapse
+    /// can change entry content without changing count or selection).
     func update(selectedIndex: UInt16, treeWidth: UInt16, rootPath: String, rawEntries: [GUIFileTreeEntry]) {
         self.selectedIndex = Int(selectedIndex)
         self.treeWidth = Int(treeWidth)
