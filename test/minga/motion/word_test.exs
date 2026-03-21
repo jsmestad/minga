@@ -134,4 +134,105 @@ defmodule Minga.Motion.WordTest do
       assert Motion.word_end(b, {0, 0}) == {0, 0}
     end
   end
+
+  describe "word_forward_big/2" do
+    test "moves past punctuation without stopping" do
+      b = buf("foo.bar baz")
+      assert Motion.word_forward_big(b, {0, 0}) == {0, 8}
+    end
+
+    test "moves across lines" do
+      b = buf("foo.bar\nbaz")
+      assert Motion.word_forward_big(b, {0, 0}) == {1, 0}
+    end
+
+    test "skips multiple spaces" do
+      b = buf("abc   def")
+      assert Motion.word_forward_big(b, {0, 0}) == {0, 6}
+    end
+
+    test "stays at end of buffer when no next WORD" do
+      b = buf("hello")
+      assert Motion.word_forward_big(b, {0, 4}) == {0, 4}
+    end
+
+    test "works on empty buffer" do
+      b = buf("")
+      assert Motion.word_forward_big(b, {0, 0}) == {0, 0}
+    end
+
+    test "moves from whitespace to start of next WORD" do
+      b = buf("foo bar")
+      assert Motion.word_forward_big(b, {0, 3}) == {0, 4}
+    end
+
+    test "moves across blank lines" do
+      b = buf("abc\n\ndef")
+      assert Motion.word_forward_big(b, {0, 0}) == {2, 0}
+    end
+  end
+
+  describe "word_backward_big/2" do
+    test "moves past punctuation to start of WORD" do
+      b = buf("foo.bar baz")
+      assert Motion.word_backward_big(b, {0, 8}) == {0, 0}
+    end
+
+    test "moves across lines" do
+      b = buf("hello\nworld")
+      assert Motion.word_backward_big(b, {1, 0}) == {0, 0}
+    end
+
+    test "stays at {0,0} when already at start" do
+      b = buf("hello")
+      assert Motion.word_backward_big(b, {0, 0}) == {0, 0}
+    end
+
+    test "works on empty buffer" do
+      b = buf("")
+      assert Motion.word_backward_big(b, {0, 0}) == {0, 0}
+    end
+
+    test "skips whitespace backward to find WORD start" do
+      b = buf("foo   bar")
+      assert Motion.word_backward_big(b, {0, 8}) == {0, 6}
+    end
+
+    test "treats punctuation as part of WORD" do
+      b = buf("foo.bar baz.qux")
+      assert Motion.word_backward_big(b, {0, 10}) == {0, 8}
+    end
+  end
+
+  describe "word_end_big/2" do
+    test "moves to end of WORD including punctuation" do
+      b = buf("foo.bar baz")
+      assert Motion.word_end_big(b, {0, 0}) == {0, 6}
+    end
+
+    test "moves across lines" do
+      b = buf("hi\nfoo.bar")
+      assert Motion.word_end_big(b, {0, 1}) == {1, 6}
+    end
+
+    test "stays at end of buffer" do
+      b = buf("hello")
+      assert Motion.word_end_big(b, {0, 4}) == {0, 4}
+    end
+
+    test "works on empty buffer" do
+      b = buf("")
+      assert Motion.word_end_big(b, {0, 0}) == {0, 0}
+    end
+
+    test "skips whitespace to reach next WORD end" do
+      b = buf("abc   def.ghi")
+      assert Motion.word_end_big(b, {0, 2}) == {0, 12}
+    end
+
+    test "single character" do
+      b = buf("x")
+      assert Motion.word_end_big(b, {0, 0}) == {0, 0}
+    end
+  end
 end
