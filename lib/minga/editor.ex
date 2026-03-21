@@ -376,6 +376,9 @@ defmodule Minga.Editor do
     new_state =
       Input.Router.dispatch_mouse(state, row, col, button, mods, event_type, click_count)
 
+    # Scroll wheel events change the viewport; schedule inlay hint refresh.
+    # The function no-ops if the viewport top hasn't actually changed.
+    new_state = LspActions.schedule_inlay_hints_on_scroll(new_state)
     new_state = Renderer.render(new_state)
     {:noreply, new_state}
   end
@@ -386,6 +389,7 @@ defmodule Minga.Editor do
         state
       ) do
     new_state = Input.Router.dispatch_mouse(state, row, col, button, mods, event_type, 1)
+    new_state = LspActions.schedule_inlay_hints_on_scroll(new_state)
     new_state = Renderer.render(new_state)
     {:noreply, new_state}
   end

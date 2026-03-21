@@ -260,6 +260,7 @@ defmodule Minga.Buffer.Server do
   Deprecated: use `flush_edits/2` with a consumer_id for per-consumer cursors.
   This legacy version destructively drains the shared pending_edits list.
   """
+  @deprecated "Use flush_edits/2 with a consumer_id instead"
   @spec flush_edits(GenServer.server()) :: [EditDelta.t()]
   def flush_edits(server) do
     GenServer.call(server, :flush_edits)
@@ -1122,10 +1123,9 @@ defmodule Minga.Buffer.Server do
     new_cursor = state.edit_seq
     new_cursors = Map.put(state.consumer_cursors, consumer_id, new_cursor)
 
-    # Trim log entries that all *registered* consumers have read,
-    # but only if we have at least 2 consumers registered (both known
-    # consumers are active). With fewer than 2, keep the full log so
-    # a consumer that hasn't registered yet can still read historical entries.
+    # Trim log entries that all *registered* consumers have read.
+    # When only one consumer is registered, cap the log at @max_single_consumer_log
+    # to prevent unbounded growth if the second consumer never arrives.
     trimmed_log =
       if map_size(new_cursors) >= 2 do
         min_cursor =
@@ -1135,7 +1135,7 @@ defmodule Minga.Buffer.Server do
 
         Enum.filter(state.edit_log, fn {seq, _} -> seq > min_cursor end)
       else
-        state.edit_log
+        cap_log(state.edit_log)
       end
 
     new_state = %{state | consumer_cursors: new_cursors, edit_log: trimmed_log}
@@ -1683,6 +1683,19 @@ defmodule Minga.Buffer.Server do
   defp clear_edits(state) do
     %{state | pending_edits: [], edit_log: [], consumer_cursors: %{}}
   end
+
+  # Maximum edit_log entries retained when only one consumer is registered.
+  # Prevents unbounded growth if the second consumer never calls flush_edits.
+  # At this limit, older entries are dropped (the lagging consumer will get a
+  # partial log and must fall back to full sync).
+  @max_single_consumer_log 1000
+
+  # Keeps only the most recent @max_single_consumer_log entries.
+  # The edit_log is stored newest-first (prepended in record_edit),
+  # so Enum.take gets the most recent entries. Enum.take is a no-op
+  # when the list is already shorter than the limit.
+  @spec cap_log([{non_neg_integer(), EditDelta.t()}]) :: [{non_neg_integer(), EditDelta.t()}]
+  defp cap_log(log), do: Enum.take(log, @max_single_consumer_log)
 
   # Compute byte offset for a {line, col} position in content.
   @spec byte_offset_at(String.t(), {non_neg_integer(), non_neg_integer()}) :: non_neg_integer()

@@ -570,7 +570,7 @@ defmodule Minga.Editor.LspActions do
   def schedule_inlay_hints_on_scroll(%{buffers: %{active: nil}} = state), do: state
 
   def schedule_inlay_hints_on_scroll(state) do
-    vp_top = state.viewport.top
+    vp_top = effective_viewport_top(state)
 
     if vp_top == state.last_inlay_viewport_top do
       state
@@ -592,6 +592,16 @@ defmodule Minga.Editor.LspActions do
     Process.cancel_timer(timer)
     %{state | inlay_hint_debounce_timer: nil}
   end
+
+  # Returns the viewport top for the active window, falling back to
+  # state.viewport.top. Uses EditorState.active_window_viewport when
+  # the state is a proper struct, otherwise reads state.viewport directly.
+  @spec effective_viewport_top(state()) :: non_neg_integer()
+  defp effective_viewport_top(%EditorState{} = state) do
+    EditorState.active_window_viewport(state).top
+  end
+
+  defp effective_viewport_top(state), do: state.viewport.top
 
   # ── Response handlers ──────────────────────────────────────────────────────
 

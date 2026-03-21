@@ -609,7 +609,7 @@ defmodule Minga.Buffer.ServerTest do
       {:ok, pid} = Server.start_link(content: "hello")
       Server.move_to(pid, {0, 5})
       Server.insert_char(pid, "!")
-      edits = Server.flush_edits(pid)
+      edits = Server.flush_edits(pid, :test)
       assert [delta] = edits
       assert delta.start_byte == 5
       assert delta.old_end_byte == 5
@@ -621,7 +621,7 @@ defmodule Minga.Buffer.ServerTest do
       {:ok, pid} = Server.start_link(content: "hello")
       Server.move_to(pid, {0, 5})
       Server.delete_before(pid)
-      edits = Server.flush_edits(pid)
+      edits = Server.flush_edits(pid, :test)
       assert [delta] = edits
       assert delta.start_byte == 4
       assert delta.old_end_byte == 5
@@ -629,12 +629,12 @@ defmodule Minga.Buffer.ServerTest do
       assert delta.inserted_text == ""
     end
 
-    test "flush_edits clears pending deltas" do
+    test "flush_edits clears pending deltas for that consumer" do
       {:ok, pid} = Server.start_link(content: "hello")
       Server.move_to(pid, {0, 5})
       Server.insert_char(pid, "!")
-      assert [_] = Server.flush_edits(pid)
-      assert [] = Server.flush_edits(pid)
+      assert [_] = Server.flush_edits(pid, :test)
+      assert [] = Server.flush_edits(pid, :test)
     end
 
     test "multiple edits accumulate in order" do
@@ -642,7 +642,7 @@ defmodule Minga.Buffer.ServerTest do
       Server.move_to(pid, {0, 2})
       Server.insert_char(pid, "c")
       Server.insert_char(pid, "d")
-      edits = Server.flush_edits(pid)
+      edits = Server.flush_edits(pid, :test)
       assert length(edits) == 2
       assert [first, second] = edits
       assert first.inserted_text == "c"
@@ -652,7 +652,7 @@ defmodule Minga.Buffer.ServerTest do
     test "delete_range records a deletion delta" do
       {:ok, pid} = Server.start_link(content: "hello world")
       Server.delete_range(pid, {0, 5}, {0, 11})
-      edits = Server.flush_edits(pid)
+      edits = Server.flush_edits(pid, :test)
       assert [delta] = edits
       assert delta.start_byte == 5
       assert delta.old_end_byte == 11
@@ -664,12 +664,12 @@ defmodule Minga.Buffer.ServerTest do
       {:ok, pid} = Server.start_link(content: "hello")
       Server.move_to(pid, {0, 5})
       Server.insert_char(pid, "!")
-      assert [_] = Server.flush_edits(pid)
+      assert [_] = Server.flush_edits(pid, :test)
       # Make another edit then undo
       Server.insert_char(pid, "?")
       Server.undo(pid)
       # Undo clears edits to force full sync
-      assert [] = Server.flush_edits(pid)
+      assert [] = Server.flush_edits(pid, :test)
     end
 
     test "replace_content clears pending edits" do
@@ -677,7 +677,7 @@ defmodule Minga.Buffer.ServerTest do
       Server.move_to(pid, {0, 5})
       Server.insert_char(pid, "!")
       Server.replace_content(pid, "goodbye")
-      assert [] = Server.flush_edits(pid)
+      assert [] = Server.flush_edits(pid, :test)
     end
   end
 
@@ -824,6 +824,20 @@ defmodule Minga.Buffer.ServerTest do
       Server.insert_char(pid, "!")
       assert [_] = Server.flush_edits(pid, :lsp)
       assert [] = Server.flush_edits(pid, :lsp)
+    end
+
+    test "edit_log is capped at 1000 entries when only one consumer is registered" do
+      {:ok, pid} = Server.start_link(content: "")
+
+      # Insert more than 1000 chars with only :lsp reading periodically
+      for _ <- 1..1100, do: Server.insert_char(pid, "x")
+
+      # Only one consumer has ever called flush_edits
+      _deltas = Server.flush_edits(pid, :lsp)
+
+      # Internal log should be capped, not grow to 1100
+      internal = :sys.get_state(pid)
+      assert length(internal.edit_log) <= 1000
     end
   end
 
