@@ -72,11 +72,11 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI.ChromeCacheTest do
 
       # Should receive at least one send_commands cast with chrome data.
       casts = collect_port_casts()
-      assert length(casts) > 0, "expected at least one port cast on first call"
+      assert casts != [], "expected at least one port cast on first call"
 
       # The batched commands should contain multiple opcodes.
       all_cmds = List.flatten(casts)
-      assert length(all_cmds) > 0
+      assert all_cmds != []
     end
 
     test "skips unchanged chrome on second call with identical state" do
@@ -188,6 +188,26 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI.ChromeCacheTest do
 
       assert is_map(new_state)
       assert Map.has_key?(new_state, :message_store)
+    end
+
+    test "agent chat survives dead prompt buffer process" do
+      state = gui_chrome_state()
+
+      # Start and immediately stop a process to get a dead pid.
+      {:ok, dead_pid} = Agent.start(fn -> nil end)
+      Agent.stop(dead_pid)
+
+      # Inject the dead pid as the prompt buffer in agent_ui state.
+      panel = %{state.agent_ui.panel | prompt_buffer: dead_pid}
+      state = %{state | agent_ui: %{state.agent_ui | panel: panel}}
+
+      sb_data = StatusBarData.from_state(state)
+
+      # Should not crash; the dead buffer is handled via catch :exit.
+      new_state = EmitGUI.sync_swiftui_chrome(state, sb_data)
+      flush_port_casts()
+
+      assert is_map(new_state)
     end
   end
 end

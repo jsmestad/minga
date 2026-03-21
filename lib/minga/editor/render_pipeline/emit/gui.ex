@@ -29,6 +29,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
   alias Minga.Editor.State.TabBar
   alias Minga.Editor.StatusBar.Data, as: StatusBarData
   alias Minga.Editor.Viewport
+  alias Minga.Editor.Window.Content
   alias Minga.Git.Tracker, as: GitTracker
   alias Minga.Picker
   alias Minga.Port.Manager, as: PortManager
@@ -460,24 +461,33 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
 
   @spec build_gui_agent_chat_cmd(state()) :: binary() | nil
   defp build_gui_agent_chat_cmd(state) do
-    data = build_agent_chat_data(state)
+    active_window = Map.get(state.windows.map, state.windows.active)
+    is_agent_chat = active_window != nil && Content.agent_chat?(active_window.content)
+    session = state.agent.session
 
-    # Fingerprint: when not visible, skip unless transitioning from visible.
-    # When visible, fingerprint on status + pending + message count + styled cache length.
-    fp =
-      if data.visible do
+    # Compute fingerprint from cheap state fields to avoid calling
+    # AgentSession.messages (expensive GenServer.call that allocates a
+    # formatted message list) on every frame. The prompt buffer content
+    # is included because it's a single fast GenServer.call, and the PID
+    # alone is stable (wouldn't detect typing). The styled cache length
+    # is a reliable proxy for message count changes because styling
+    # happens in the same render cycle as message arrival.
+    {fp, prompt_text} =
+      if is_agent_chat && session do
         styled_len = length(state.agent_ui.panel.cached_styled_messages || [])
+        text = safe_prompt_content(state.agent_ui.panel.prompt_buffer)
 
-        :erlang.phash2(
-          {:visible, data.status, data.pending_approval, length(data.messages), styled_len,
-           data.prompt}
-        )
+        {:erlang.phash2(
+           {:visible, state.agent.status, state.agent.pending_approval, styled_len,
+            state.agent_ui.panel.model_name, text}
+         ), text}
       else
-        :not_visible
+        {:not_visible, ""}
       end
 
     if fp != Process.get(:last_gui_agent_chat_fp) do
       Process.put(:last_gui_agent_chat_fp, fp)
+      data = build_agent_chat_data(state, prompt_text)
 
       if data.visible do
         Minga.Log.debug(:render, "[gui] sending agent chat: #{length(data.messages)} messages")
@@ -487,10 +497,20 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
     end
   end
 
-  @spec build_agent_chat_data(state()) :: map()
-  defp build_agent_chat_data(state) do
-    alias Minga.Editor.Window.Content
+  # Reads prompt buffer content, guarding against a dead process.
+  # The prompt buffer can die between state updates; the :DOWN handler
+  # clears the PID on the next cycle, but there's a race window.
+  @spec safe_prompt_content(pid() | nil) :: String.t()
+  defp safe_prompt_content(nil), do: ""
 
+  defp safe_prompt_content(buf) do
+    BufferServer.content(buf) |> String.trim_trailing("\n")
+  catch
+    :exit, _ -> ""
+  end
+
+  @spec build_agent_chat_data(state(), String.t()) :: map()
+  defp build_agent_chat_data(state, prompt_text) do
     active_window = Map.get(state.windows.map, state.windows.active)
     is_agent_chat = active_window != nil && Content.agent_chat?(active_window.content)
     session = state.agent.session
@@ -508,21 +528,13 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
       styled_cache = state.agent_ui.panel.cached_styled_messages
       gui_messages = build_gui_messages(messages, styled_cache)
 
-      prompt_text =
-        case state.agent_ui.panel.prompt_buffer do
-          nil -> ""
-          buf -> BufferServer.content(buf) |> String.trim_trailing("\n")
-        end
-
-      pending = state.agent.pending_approval
-
       %{
         visible: true,
         messages: gui_messages,
         status: state.agent.status || :idle,
         model: state.agent_ui.panel.model_name,
         prompt: prompt_text,
-        pending_approval: pending
+        pending_approval: state.agent.pending_approval
       }
     else
       %{visible: false}
@@ -614,8 +626,6 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
 
   @spec build_gui_gutter_commands(state()) :: [binary()]
   defp build_gui_gutter_commands(state) do
-    alias Minga.Editor.Window.Content
-
     layout = Layout.get(state)
 
     Enum.flat_map(layout.window_layouts, fn {win_id, win_layout} ->
