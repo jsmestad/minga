@@ -284,7 +284,7 @@ struct AgentChatViewTests {
         state.model = "claude-sonnet-4"
         state.status = 0
 
-        let sut = AgentChatView(state: state, theme: ThemeColors(), isInsertMode: false)
+        let sut = AgentChatView(state: state, theme: ThemeColors(), isInsertMode: false, encoder: nil)
         let body = try sut.inspect()
         let texts = body.findAll(ViewInspectorQuery.text)
         let strings = texts.compactMap { try? $0.string() }
@@ -304,7 +304,7 @@ struct AgentChatViewTests {
         state.model = "test-model"
         state.messages = [.user(id: 0, text: "Hello world")]
 
-        let sut = AgentChatView(state: state, theme: ThemeColors(), isInsertMode: false)
+        let sut = AgentChatView(state: state, theme: ThemeColors(), isInsertMode: false, encoder: nil)
         let body = try sut.inspect()
         let texts = body.findAll(ViewInspectorQuery.text)
         let strings = texts.compactMap { try? $0.string() }
@@ -319,7 +319,7 @@ struct AgentChatViewTests {
         state.model = "test-model"
         state.messages = [.system(id: 0, text: "Session started", isError: false)]
 
-        let sut = AgentChatView(state: state, theme: ThemeColors(), isInsertMode: false)
+        let sut = AgentChatView(state: state, theme: ThemeColors(), isInsertMode: false, encoder: nil)
         let body = try sut.inspect()
         let texts = body.findAll(ViewInspectorQuery.text)
         let strings = texts.compactMap { try? $0.string() }
@@ -333,7 +333,7 @@ struct AgentChatViewTests {
         state.visible = true
         state.model = "test-model"
 
-        let sut = AgentChatView(state: state, theme: ThemeColors(), isInsertMode: true)
+        let sut = AgentChatView(state: state, theme: ThemeColors(), isInsertMode: true, encoder: nil)
         let body = try sut.inspect()
         let texts = body.findAll(ViewInspectorQuery.text)
         let strings = texts.compactMap { try? $0.string() }
