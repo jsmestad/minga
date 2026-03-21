@@ -48,7 +48,8 @@ defmodule Minga.Tool.Recipe.Registry do
       package: "elixir-lsp/elixir-ls",
       homepage: "https://github.com/elixir-lsp/elixir-ls",
       category: :lsp_server,
-      languages: [:elixir]
+      languages: [:elixir],
+      asset_pattern: &Minga.Tool.Recipe.Registry.elixir_ls_asset?/2
     },
     %Recipe{
       name: :lexical,
@@ -59,7 +60,8 @@ defmodule Minga.Tool.Recipe.Registry do
       package: "lexical-lsp/lexical",
       homepage: "https://github.com/lexical-lsp/lexical",
       category: :lsp_server,
-      languages: [:elixir]
+      languages: [:elixir],
+      asset_pattern: &Minga.Tool.Recipe.Registry.lexical_asset?/2
     },
     %Recipe{
       name: :pyright,
@@ -92,8 +94,7 @@ defmodule Minga.Tool.Recipe.Registry do
       package: "rust-lang/rust-analyzer",
       homepage: "https://rust-analyzer.github.io",
       category: :lsp_server,
-      languages: [:rust],
-      asset_pattern: &Minga.Tool.Recipe.Registry.rust_analyzer_asset?/2
+      languages: [:rust]
     },
     %Recipe{
       name: :gopls,
@@ -170,7 +171,8 @@ defmodule Minga.Tool.Recipe.Registry do
       package: "clangd/clangd",
       homepage: "https://clangd.llvm.org",
       category: :lsp_server,
-      languages: [:c, :cpp]
+      languages: [:c, :cpp],
+      asset_pattern: &Minga.Tool.Recipe.Registry.clangd_asset?/2
     }
   ]
 
@@ -239,11 +241,58 @@ defmodule Minga.Tool.Recipe.Registry do
 
   # ── Asset pattern helpers ───────────────────────────────────────────────────
 
-  @doc false
-  @spec rust_analyzer_asset?(String.t(), String.t()) :: boolean()
-  def rust_analyzer_asset?(asset_name, platform_suffix) do
-    String.contains?(asset_name, platform_suffix) and
-      String.ends_with?(asset_name, ".gz") and
-      not String.contains?(asset_name, "sha256")
+  @doc """
+  Matches clangd release assets.
+
+  clangd uses "mac" instead of "darwin"/"macos" and ships one binary per
+  OS (no architecture in the filename, likely universal on macOS). We also
+  need to exclude `clangd_indexing_tools-*` assets.
+  """
+  @spec clangd_asset?(String.t(), String.t()) :: boolean()
+  def clangd_asset?(asset_name, platform_suffix) do
+    name = String.downcase(asset_name)
+    os_token = clangd_os_token(platform_suffix)
+
+    String.starts_with?(name, "clangd-") and
+      String.contains?(name, os_token) and
+      String.ends_with?(name, ".zip")
+  end
+
+  @spec clangd_os_token(String.t()) :: String.t()
+  defp clangd_os_token("darwin_" <> _), do: "mac"
+  defp clangd_os_token("linux_" <> _), do: "linux"
+  defp clangd_os_token("windows_" <> _), do: "windows"
+  defp clangd_os_token(_), do: "unknown"
+
+  @doc """
+  Matches ElixirLS release assets.
+
+  ElixirLS is a BEAM application that ships a single platform-independent
+  zip (e.g., `elixir-ls-v0.30.0.zip`). The default asset matcher fails
+  because it looks for OS/arch strings like `darwin_arm64` in the filename.
+  """
+  @spec elixir_ls_asset?(String.t(), String.t()) :: boolean()
+  def elixir_ls_asset?(asset_name, _platform_suffix) do
+    name = String.downcase(asset_name)
+
+    String.starts_with?(name, "elixir-ls") and
+      String.ends_with?(name, ".zip")
+  end
+
+  @doc """
+  Matches Lexical release assets.
+
+  Lexical is a BEAM application that ships platform-independent zips.
+  Releases include both a versioned zip (`lexical-v0.7.3.zip`) and a
+  plain `lexical.zip`. We prefer the versioned one to avoid cache
+  confusion across upgrades.
+  """
+  @spec lexical_asset?(String.t(), String.t()) :: boolean()
+  def lexical_asset?(asset_name, _platform_suffix) do
+    name = String.downcase(asset_name)
+
+    String.starts_with?(name, "lexical") and
+      String.ends_with?(name, ".zip") and
+      String.contains?(name, "-v")
   end
 end
