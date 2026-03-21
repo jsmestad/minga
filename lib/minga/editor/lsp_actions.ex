@@ -501,7 +501,7 @@ defmodule Minga.Editor.LspActions do
   def code_lens(%{buffers: %{active: buf}} = state) do
     case lsp_client_for(state, buf) do
       nil ->
-        %{state | status_msg: "No language server"}
+        state
 
       client ->
         file_path = BufferServer.file_path(buf)
