@@ -102,6 +102,7 @@ defmodule Minga.Keymap.Defaults do
 
     # ── Git ──────────────────────────────────────────────────────────────────────
     {[{?g, @none}, {?g, @none}], :git_status_toggle, "Git status"},
+    {[{?g, @none}, {?f, @none}], :git_changed_files, "Changed files"},
     {[{?g, @none}, {?s, @none}], :git_stage_hunk, "Stage hunk"},
     {[{?g, @none}, {?r, @none}], :git_revert_hunk, "Revert hunk"},
     {[{?g, @none}, {?p, @none}], :git_preview_hunk, "Preview hunk"},

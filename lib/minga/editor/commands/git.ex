@@ -9,14 +9,17 @@ defmodule Minga.Editor.Commands.Git do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Git
   alias Minga.Git.Buffer, as: GitBuffer
+  alias Minga.Editor.PickerUI
   alias Minga.Git.Diff
   alias Minga.Git.Repo
   alias Minga.Git.Tracker, as: GitTracker
+  alias Minga.Picker.GitChangedSource
 
   @type state :: EditorState.t()
 
   @command_specs [
     {:git_status_toggle, "Git status", false},
+    {:git_changed_files, "Changed files", false},
     {:next_git_hunk, "Next git hunk", true},
     {:prev_git_hunk, "Previous git hunk", true},
     {:git_stage_hunk, "Stage hunk", true},
@@ -35,6 +38,12 @@ defmodule Minga.Editor.Commands.Git do
     else
       open_git_status_panel(state)
     end
+  end
+
+  # ── Changed files picker ────────────────────────────────────────────────────
+
+  def execute(state, :git_changed_files) do
+    PickerUI.open(state, GitChangedSource)
   end
 
   # ── Navigation ─────────────────────────────────────────────────────────────
