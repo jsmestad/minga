@@ -21,7 +21,9 @@ defmodule Minga.Editor.MinibufferData do
   @type candidate :: %{
           label: String.t(),
           description: String.t(),
-          match_score: non_neg_integer()
+          match_score: non_neg_integer(),
+          match_positions: [non_neg_integer()],
+          annotation: String.t()
         }
 
   @typedoc "Structured minibuffer data for GUI encoding."
@@ -233,16 +235,18 @@ defmodule Minga.Editor.MinibufferData do
     |> Enum.map(fn %Command{} = cmd ->
       name = to_string(cmd.name)
       score = fuzzy_score(name, input_lower)
-      {cmd, score}
+      {cmd, name, score}
     end)
-    |> Enum.filter(fn {_cmd, score} -> score > 0 end)
-    |> Enum.sort_by(fn {_cmd, score} -> score end, :desc)
+    |> Enum.filter(fn {_cmd, _name, score} -> score > 0 end)
+    |> Enum.sort_by(fn {_cmd, _name, score} -> score end, :desc)
     |> Enum.take(@max_candidates)
-    |> Enum.map(fn {cmd, score} ->
+    |> Enum.map(fn {cmd, name, score} ->
       %{
-        label: to_string(cmd.name),
+        label: name,
         description: cmd.description || "",
-        match_score: min(score, 255)
+        match_score: min(score, 255),
+        match_positions: find_match_positions(name, input_lower),
+        annotation: ""
       }
     end)
   end
@@ -270,7 +274,9 @@ defmodule Minga.Editor.MinibufferData do
       %{
         label: to_string(cmd.name),
         description: cmd.description || "",
-        match_score: 100
+        match_score: 100,
+        match_positions: [],
+        annotation: ""
       }
     end)
   end
@@ -317,6 +323,28 @@ defmodule Minga.Editor.MinibufferData do
       0
     end
   end
+
+  # Finds the character indices in `name` that match `query` characters
+  # in order. Used for highlighting matched characters in the GUI.
+  # Returns indices as 0-based grapheme positions.
+  @spec find_match_positions(String.t(), String.t()) :: [non_neg_integer()]
+  defp find_match_positions(name, query) do
+    name_lower = String.downcase(name)
+    name_chars = String.graphemes(name_lower)
+    query_chars = String.graphemes(query)
+    do_find_positions(name_chars, query_chars, 0, [])
+  end
+
+  @spec do_find_positions([String.t()], [String.t()], non_neg_integer(), [non_neg_integer()]) ::
+          [non_neg_integer()]
+  defp do_find_positions(_name, [], _idx, acc), do: Enum.reverse(acc)
+  defp do_find_positions([], _query, _idx, acc), do: Enum.reverse(acc)
+
+  defp do_find_positions([c | name_rest], [c | query_rest], idx, acc),
+    do: do_find_positions(name_rest, query_rest, idx + 1, [idx | acc])
+
+  defp do_find_positions([_ | name_rest], query, idx, acc),
+    do: do_find_positions(name_rest, query, idx + 1, acc)
 
   @spec chars_in_order?(String.t(), String.t()) :: boolean()
   defp chars_in_order?(name, query) do

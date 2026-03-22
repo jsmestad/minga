@@ -12,6 +12,9 @@ struct MinibufferCandidate: Identifiable {
     let matchScore: UInt8
     let label: String
     let description: String
+    let annotation: String
+    /// Character indices that matched the fuzzy query, for accent highlighting.
+    let matchPositions: Set<Int>
 }
 
 /// Minibuffer mode constants matching the BEAM protocol.
@@ -75,8 +78,12 @@ final class MinibufferState {
         self.context = context
         self.selectedIndex = selectedIndex
         self.candidates = rawCandidates.enumerated().map { i, c in
-            MinibufferCandidate(id: i, matchScore: c.matchScore,
-                                label: c.label, description: c.description)
+            MinibufferCandidate(
+                id: i, matchScore: c.matchScore,
+                label: c.label, description: c.description,
+                annotation: c.annotation,
+                matchPositions: Set(c.matchPositions.map { Int($0) })
+            )
         }
         self.inputVersion += 1
     }

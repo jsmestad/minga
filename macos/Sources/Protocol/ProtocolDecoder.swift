@@ -57,6 +57,8 @@ struct GUIMinibufferCandidate: Sendable {
     let matchScore: UInt8
     let label: String
     let description: String
+    let annotation: String
+    let matchPositions: [UInt16]
 }
 
 // MARK: - Hover popup data types
@@ -1496,7 +1498,22 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             guard data.count >= mbPos + candDescLen else { break }
             let candDesc = String(data: data[mbPos..<(mbPos + candDescLen)], encoding: .utf8) ?? ""
             mbPos += candDescLen
-            mbCandidates.append(GUIMinibufferCandidate(matchScore: score, label: candLabel, description: candDesc))
+            // annotation_len(2) + annotation
+            guard data.count >= mbPos + 2 else { break }
+            let candAnnotLen = Int(readU16(data, mbPos)); mbPos += 2
+            guard data.count >= mbPos + candAnnotLen else { break }
+            let candAnnot = String(data: data[mbPos..<(mbPos + candAnnotLen)], encoding: .utf8) ?? ""
+            mbPos += candAnnotLen
+            // match_pos_count(1) + match_positions(count * 2)
+            guard data.count >= mbPos + 1 else { break }
+            let matchPosCount = Int(data[mbPos]); mbPos += 1
+            var matchPositions: [UInt16] = []
+            matchPositions.reserveCapacity(matchPosCount)
+            for _ in 0..<matchPosCount {
+                guard data.count >= mbPos + 2 else { break }
+                matchPositions.append(readU16(data, mbPos)); mbPos += 2
+            }
+            mbCandidates.append(GUIMinibufferCandidate(matchScore: score, label: candLabel, description: candDesc, annotation: candAnnot, matchPositions: matchPositions))
         }
         return (.guiMinibuffer(visible: true, mode: mbMode, cursorPos: mbCursorPos,
                                 prompt: mbPrompt, input: mbInput, context: mbContext,

@@ -18,6 +18,7 @@
 		084A4F7680D533CDACEC729A /* StatusBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E892F827AFBE959F9DF25C05 /* StatusBarView.swift */; };
 		0BCDFB56E8397D739F52ED34 /* StateLifecycleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5634B25BE5BB945A83E30FAD /* StateLifecycleTests.swift */; };
 		0D5DFD181E86D51707D3A59E /* AgentChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD14027C8C7BD17057DE820B /* AgentChatView.swift */; };
+		0E10D47CFF85000F62B5AB9A /* TextHighlighting.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDA1A468192F9DE2BBF374DD /* TextHighlighting.swift */; };
 		16116567DD7218A82575360A /* CoreTextShaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = 48E21C30D142028698027567 /* CoreTextShaders.metal */; };
 		1631D7B76B33CD897C48F263 /* IMECompositionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6C3196976BC934B3112EF96 /* IMECompositionTests.swift */; };
 		18F0DDA03D08C0B4302DCCF4 /* BitmapRasterizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42375D2D8B25AF31BEB11AB5 /* BitmapRasterizer.swift */; };
@@ -84,6 +85,7 @@
 		8CB3E1EEDEA109F6C0183597 /* SignatureHelpState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EED42A8B64B9CDFEF37ED9D /* SignatureHelpState.swift */; };
 		8D55764B8CF042B4C48AA5D0 /* MessagesContentState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A67102D81C9E70546F1019B /* MessagesContentState.swift */; };
 		8F6865441CD813045F071273 /* BreadcrumbBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFA9D8D41BCA4E6CB45243A2 /* BreadcrumbBar.swift */; };
+		92AFB851C9873F6E26F069A3 /* TextHighlighting.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDA1A468192F9DE2BBF374DD /* TextHighlighting.swift */; };
 		931A6127210D4ED441AC04B2 /* MessagesContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFE9DFE38318A361BEF0B773 /* MessagesContentView.swift */; };
 		939991DD65293C6C796EAA66 /* FontManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79F5D551302873BE8F7240ED /* FontManager.swift */; };
 		93E7D214A27256CF06571EFE /* ProtocolDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56750F0AAE58AF9A98BF5841 /* ProtocolDecoder.swift */; };
@@ -205,6 +207,7 @@
 		B66E4E27BE182768B01E5F64 /* HoverPopupState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HoverPopupState.swift; sourceTree = "<group>"; };
 		B9B4DF5FEB6C8DFCA427A692 /* Minga.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Minga.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		BD2DE335B00721CBB29329F9 /* FontTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FontTests.swift; sourceTree = "<group>"; };
+		BDA1A468192F9DE2BBF374DD /* TextHighlighting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextHighlighting.swift; sourceTree = "<group>"; };
 		BEA9C2BB0C840BE88B0FEA52 /* CompletionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompletionState.swift; sourceTree = "<group>"; };
 		BEFD30A2572AE2608F099407 /* ScrollAccumulator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollAccumulator.swift; sourceTree = "<group>"; };
 		C21AB9021A9BCB034C13109A /* CommandDispatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandDispatcher.swift; sourceTree = "<group>"; };
@@ -328,6 +331,7 @@
 				E892F827AFBE959F9DF25C05 /* StatusBarView.swift */,
 				0A7AA0437B5C38BA8A8A80D5 /* TabBarState.swift */,
 				03D7C3564C27A7E14D894539 /* TabBarView.swift */,
+				BDA1A468192F9DE2BBF374DD /* TextHighlighting.swift */,
 				00D6B3C68CFF37BC4303933A /* ThemeColors.swift */,
 				A64B96EAA100E627F4E8E0A1 /* ToolManagerState.swift */,
 				ED47BC6334A067AE04FEE032 /* ToolManagerView.swift */,
@@ -605,6 +609,7 @@
 				084A4F7680D533CDACEC729A /* StatusBarView.swift in Sources */,
 				C134E5115725A3A85492FF51 /* TabBarState.swift in Sources */,
 				A574FC420DE17918612DFA48 /* TabBarView.swift in Sources */,
+				92AFB851C9873F6E26F069A3 /* TextHighlighting.swift in Sources */,
 				810251CDDA9CB63F881D426C /* ThemeColors.swift in Sources */,
 				00BFD5EFCCE2F178469BBA9E /* ToolManagerState.swift in Sources */,
 				2CB47C7E5221C260DE6EE77F /* ToolManagerView.swift in Sources */,
@@ -685,6 +690,7 @@
 				FEFCEFCDC21C5AA5456036D0 /* SystemColorTests.swift in Sources */,
 				03FDC63893F3CAA82BCE2A49 /* TabBarState.swift in Sources */,
 				F16FDEC1BFC1776B1109622E /* TabBarView.swift in Sources */,
+				0E10D47CFF85000F62B5AB9A /* TextHighlighting.swift in Sources */,
 				B6295F0247ADE2D1D0133DCB /* ThemeColors.swift in Sources */,
 				61CF67858355FFF4962D9D99 /* ThemeColorsTests.swift in Sources */,
 				2BA99A1851D0FF01436D5FF8 /* ToolManagerState.swift in Sources */,

@@ -66,16 +66,32 @@ defmodule Minga.Port.GUIMinibufferProtocolTest do
         context: "",
         selected_index: 0,
         candidates: [
-          %{label: "write", description: "Save the current buffer", match_score: 150},
-          %{label: "wq", description: "Save and quit", match_score: 140}
+          %{
+            label: "write",
+            description: "Save the current buffer",
+            match_score: 150,
+            match_positions: [0],
+            annotation: ""
+          },
+          %{
+            label: "wq",
+            description: "Save and quit",
+            match_score: 140,
+            match_positions: [0],
+            annotation: ""
+          }
         ]
       }
 
       result = ProtocolGUI.encode_gui_minibuffer(data)
 
-      assert <<@op_gui_minibuffer, 1, 0, 1::16, 1, ":", 1::16, "w", 0::16, "", 0::16, 2::16, 150,
-               5::16, "write", 23::16, "Save the current buffer", 140, 2::16, "wq", 13::16,
-               "Save and quit">> = result
+      # Per candidate: score(1) + label_len(2) + label + desc_len(2) + desc
+      #   + annotation_len(2) + annotation + match_pos_count(1) + positions(count*2)
+      assert <<@op_gui_minibuffer, 1, 0, 1::16, 1, ":", 1::16, "w", 0::16, "", 0::16, 2::16,
+               150, 5::16, "write", 23::16, "Save the current buffer",
+               0::16, 1, 0::16,
+               140, 2::16, "wq", 13::16, "Save and quit",
+               0::16, 1, 0::16>> = result
     end
 
     test "substitute confirm mode with no cursor" do
@@ -106,7 +122,7 @@ defmodule Minga.Port.GUIMinibufferProtocolTest do
         context: "",
         selected_index: 0,
         candidates: [
-          %{label: "test", description: "", match_score: 300}
+          %{label: "test", description: "", match_score: 300, match_positions: [], annotation: ""}
         ]
       }
 
