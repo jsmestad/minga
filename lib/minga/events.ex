@@ -35,6 +35,7 @@ defmodule Minga.Events do
   | `:mode_changed`   | `ModeEvent`          | `old: atom(), new: atom()`        |
   | `:git_status_changed` | `GitStatusEvent` | `git_root, entries, branch, ahead, behind` |
   | `:project_rebuilt` | `ProjectRebuiltEvent` | `root: String.t()` |
+  | `:command_done`    | `CommandDoneEvent`    | `name: String.t(), exit_code: non_neg_integer()` |
 
   ## Why Registry?
 
@@ -97,6 +98,14 @@ defmodule Minga.Events do
     @type t :: %__MODULE__{root: String.t()}
   end
 
+  defmodule CommandDoneEvent do
+    @moduledoc "Payload for `:command_done` events. Published when a CommandOutput process finishes."
+    @enforce_keys [:name, :exit_code]
+    defstruct [:name, :exit_code]
+
+    @type t :: %__MODULE__{name: String.t(), exit_code: non_neg_integer()}
+  end
+
   defmodule GitStatusEvent do
     @moduledoc "Payload for `:git_status_changed` events. Published by `Git.Repo` when repo status changes."
     @enforce_keys [:git_root, :entries, :branch, :ahead, :behind]
@@ -129,6 +138,7 @@ defmodule Minga.Events do
           | :tool_uninstall_complete
           | :tool_missing
           | :project_rebuilt
+          | :command_done
 
   @typedoc "Typed event payloads. Each topic has a specific struct."
   @type payload ::
@@ -138,6 +148,7 @@ defmodule Minga.Events do
           | ModeEvent.t()
           | ToolMissingEvent.t()
           | ProjectRebuiltEvent.t()
+          | CommandDoneEvent.t()
           | GitStatusEvent.t()
 
   # ── Child spec ──────────────────────────────────────────────────────────────
@@ -224,6 +235,7 @@ defmodule Minga.Events do
   @spec broadcast(:mode_changed, ModeEvent.t()) :: :ok
   @spec broadcast(:tool_missing, ToolMissingEvent.t()) :: :ok
   @spec broadcast(:project_rebuilt, ProjectRebuiltEvent.t()) :: :ok
+  @spec broadcast(:command_done, CommandDoneEvent.t()) :: :ok
   @spec broadcast(:git_status_changed, GitStatusEvent.t()) :: :ok
   def broadcast(topic, %_{} = payload) when is_atom(topic) do
     Registry.dispatch(@registry, topic, fn entries ->

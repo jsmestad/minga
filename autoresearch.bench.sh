@@ -6,7 +6,7 @@
 #   - eval_test.exs timeout-testing code
 #   - agent_split_toggle_test.exs dummy process (:timer.sleep(1000))
 
-set -euo pipefail
+set -uo pipefail
 
 cd "$(dirname "$0")"
 
