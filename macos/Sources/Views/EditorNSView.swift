@@ -160,10 +160,12 @@ final class EditorNSView: MTKView {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            if SystemBlinkTiming.blinkingDisabled {
-                self?.stopCursorBlink()
-            } else {
-                self?.resetCursorBlink()
+            MainActor.assumeIsolated {
+                if SystemBlinkTiming.blinkingDisabled {
+                    self?.stopCursorBlink()
+                } else {
+                    self?.resetCursorBlink()
+                }
             }
         }
     }
