@@ -642,6 +642,7 @@ opcode(1) + action_type(1) + payload...
 | 0x13 | tool_update | name_len(2) + name(name_len) | Update a tool by name |
 | 0x14 | tool_dismiss | (empty) | Dismiss the tool manager panel |
 | 0x15 | agent_tool_toggle | index(2) | Toggle collapse/expand of agent tool call at message index |
+| 0x16 | execute_command | name_len(2) + name(name_len) | Execute a named command from the BEAM command registry |
 
 ## Theme Color Slots
 

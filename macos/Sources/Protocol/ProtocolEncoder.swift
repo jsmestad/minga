@@ -46,6 +46,9 @@ protocol InputEncoder: AnyObject, Sendable {
 
     // Agent chat actions
     func sendAgentToolToggle(index: UInt16)
+
+    // Generic command execution
+    func sendExecuteCommand(name: String)
 }
 
 extension InputEncoder {
@@ -319,6 +322,23 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_AGENT_TOOL_TOGGLE
         writeU16(&buf, 2, index)
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: execute_command. Layout: opcode(1) + action_type(1) + name_len(2) + name(name_len).
+    ///
+    /// Dispatches a named command through the BEAM's command registry.
+    /// The command name must match a registered atom (e.g., "buffer_prev", "find_file").
+    func sendExecuteCommand(name: String) {
+        let utf8 = Array(name.utf8)
+        let nameLen = min(utf8.count, Int(UInt16.max))
+        var buf = Data(count: 4 + nameLen)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_EXECUTE_COMMAND
+        writeU16(&buf, 2, UInt16(nameLen))
+        if nameLen > 0 {
+            buf.replaceSubrange(4..<4 + nameLen, with: utf8.prefix(nameLen))
+        }
         writeFrame(buf)
     }
 

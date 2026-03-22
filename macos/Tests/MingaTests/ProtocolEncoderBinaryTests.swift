@@ -299,6 +299,18 @@ struct EncoderGUIActionTests {
         #expect(payload.count == 2)
         #expect(payload[1] == GUI_ACTION_TOOL_DISMISS)
     }
+
+    @Test("execute_command encodes command name with length prefix")
+    func executeCommandLayout() {
+        let payload = captureFrame { $0.sendExecuteCommand(name: "buffer_prev") }
+
+        #expect(payload[0] == OP_GUI_ACTION)
+        #expect(payload[1] == GUI_ACTION_EXECUTE_COMMAND)
+        let nameLen = readU16(payload, 2)
+        #expect(nameLen == 11) // "buffer_prev".count
+        let name = String(data: payload[4..<(4 + Int(nameLen))], encoding: .utf8)
+        #expect(name == "buffer_prev")
+    }
 }
 
 // MARK: - Frame header

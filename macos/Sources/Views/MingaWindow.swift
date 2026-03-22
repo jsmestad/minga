@@ -13,6 +13,11 @@
 /// provides two layers of defense:
 /// 1. SwiftUI views don't participate in the focus system at all
 /// 2. If anything does steal focus, this guard reclaims it immediately
+///
+/// Exception: when AppKit installs a field editor (`NSTextView`, a subclass
+/// of `NSText`) as first responder for an active TextField, the guard yields
+/// intentionally. This covers all current and future SwiftUI text fields
+/// without per-field suspend/resume wiring. See `checkFirstResponder()`.
 
 import AppKit
 
@@ -55,6 +60,12 @@ final class FirstResponderGuard {
     private func checkFirstResponder() {
         guard !suspended else { return }
         guard let window, let editor = editorView else { return }
+        // Don't steal focus from active text fields. When a SwiftUI TextField
+        // (or any NSTextField) is focused, AppKit makes the window's field
+        // editor (an NSTextView, subclass of NSText) the first responder.
+        // Checking for NSText covers all current and future text fields without
+        // requiring per-field suspend/resume wiring.
+        if window.firstResponder is NSText { return }
         if window.firstResponder !== editor {
             window.makeFirstResponder(editor)
         }

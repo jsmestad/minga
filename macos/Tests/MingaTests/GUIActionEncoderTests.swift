@@ -170,6 +170,30 @@ struct GUIActionEncoderTests {
         #expect(spy.mouseEventCalls[0].clickCount == 2)
     }
 
+    @Test("sendExecuteCommand records command name")
+    func executeCommand() {
+        let spy = SpyEncoder()
+        let encoder: InputEncoder = spy
+        encoder.sendExecuteCommand(name: "buffer_prev")
+
+        #expect(spy.guiActions == [.executeCommand(name: "buffer_prev")])
+    }
+
+    @Test("sendExecuteCommand handles various command names")
+    func executeCommandVariety() {
+        let spy = SpyEncoder()
+        let encoder: InputEncoder = spy
+        encoder.sendExecuteCommand(name: "split_vertical")
+        encoder.sendExecuteCommand(name: "find_file")
+        encoder.sendExecuteCommand(name: "open_config")
+
+        #expect(spy.guiActions == [
+            .executeCommand(name: "split_vertical"),
+            .executeCommand(name: "find_file"),
+            .executeCommand(name: "open_config")
+        ])
+    }
+
     @Test("multiple action types accumulate independently")
     func mixedActions() {
         let spy = SpyEncoder()
