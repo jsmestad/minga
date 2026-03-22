@@ -122,6 +122,28 @@ struct GUIDocumentHighlight: Sendable, Equatable {
     let kind: GUIDocumentHighlightKind
 }
 
+// MARK: - Line annotation
+
+/// The visual kind of a line annotation.
+enum GUILineAnnotationKind: UInt8, Sendable {
+    case inlinePill = 0
+    case inlineText = 1
+    case gutterIcon = 2
+}
+
+/// A line annotation in display coordinates.
+///
+/// Pill badges render as rounded-rect pills after line content.
+/// Inline text renders as styled text after line content (no background).
+/// Gutter icons render in the sign column.
+struct GUILineAnnotation: Sendable, Equatable {
+    let row: UInt16
+    let kind: GUILineAnnotationKind
+    let fg: UInt32      // 24-bit RGB
+    let bg: UInt32      // 24-bit RGB
+    let text: String
+}
+
 // MARK: - Window content
 
 /// Complete semantic content for one editor window.
@@ -147,6 +169,7 @@ final class GUIWindowContent: Sendable {
     let searchMatches: [GUISearchMatch]
     let diagnosticUnderlines: [GUIDiagnosticUnderline]
     let documentHighlights: [GUIDocumentHighlight]
+    let lineAnnotations: [GUILineAnnotation]
 
     init(windowId: UInt16, fullRefresh: Bool, cursorVisible: Bool = true,
          cursorRow: UInt16, cursorCol: UInt16, cursorShape: CursorShape,
@@ -154,7 +177,8 @@ final class GUIWindowContent: Sendable {
          rows: [GUIVisualRow], selection: GUISelectionOverlay?,
          searchMatches: [GUISearchMatch],
          diagnosticUnderlines: [GUIDiagnosticUnderline],
-         documentHighlights: [GUIDocumentHighlight]) {
+         documentHighlights: [GUIDocumentHighlight],
+         lineAnnotations: [GUILineAnnotation] = []) {
         self.windowId = windowId
         self.fullRefresh = fullRefresh
         self.cursorVisible = cursorVisible
@@ -167,5 +191,6 @@ final class GUIWindowContent: Sendable {
         self.searchMatches = searchMatches
         self.diagnosticUnderlines = diagnosticUnderlines
         self.documentHighlights = documentHighlights
+        self.lineAnnotations = lineAnnotations
     }
 }

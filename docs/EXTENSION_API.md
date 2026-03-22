@@ -389,6 +389,49 @@ end)
 
 **Style properties:** `:fg`, `:bg` (24-bit RGB integers like `0x61AFEF`), `:bold`, `:italic`, `:underline`, `:strikethrough`, `:reverse`.
 
+### Line Annotations
+
+Line annotations attach visual metadata to buffer lines: colored pill badges, inline dimmed text, and gutter icons. Each frontend renders them natively (GUI renders pill badges with rounded rect backgrounds; TUI renders styled text at end of line).
+
+Three annotation kinds are supported:
+
+| Kind | Description | Example use |
+|------|-------------|-------------|
+| `:inline_pill` | Colored pill badge after line content | Org tags (`:work:`, `:urgent:`), diagnostic counts |
+| `:inline_text` | Styled text after line content (no background) | Git blame, inline hints |
+| `:gutter_icon` | Symbol in the gutter sign column | Bookmarks, breakpoints |
+
+```elixir
+# Add annotations inside a batch_decorations call
+Minga.Buffer.Server.batch_decorations(buf, fn decs ->
+  # Clear previous annotations from this group
+  decs = Minga.Buffer.Decorations.remove_group(decs, :org_tags)
+
+  # Pill badge: colored background + contrasting text
+  {_id, decs} = Minga.Buffer.Decorations.add_annotation(decs, line, "work",
+    kind: :inline_pill, fg: 0xFFFFFF, bg: 0x6366F1, group: :org_tags)
+
+  {_id, decs} = Minga.Buffer.Decorations.add_annotation(decs, line, "urgent",
+    kind: :inline_pill, fg: 0xFFFFFF, bg: 0xDC2626, group: :org_tags)
+
+  # Inline text: dimmed annotation (git blame style)
+  {_id, decs} = Minga.Buffer.Decorations.add_annotation(decs, line, "J. Smith, 2d ago",
+    kind: :inline_text, fg: 0x888888, group: :git_blame)
+
+  decs
+end)
+```
+
+**Options:**
+
+- `:kind` (default `:inline_pill`) -- `:inline_pill`, `:inline_text`, or `:gutter_icon`
+- `:fg` (default `0xFFFFFF`) -- foreground color, 24-bit RGB
+- `:bg` (default `0x6366F1`) -- background color, 24-bit RGB (only used by `:inline_pill`)
+- `:group` -- atom for bulk removal via `remove_group/2`
+- `:priority` (default `0`) -- ordering when multiple annotations share a line (lower first)
+
+Annotations are line-anchored: they automatically shift when lines are inserted or deleted above them. Deleting the line an annotation is on removes the annotation.
+
 ---
 
 ## Tree-Sitter Grammars

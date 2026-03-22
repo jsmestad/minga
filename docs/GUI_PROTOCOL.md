@@ -532,6 +532,19 @@ Diagnostic ranges section:
   diag_count(2)
   Per range: start_row(2) + start_col(2) + end_row(2) + end_col(2) + severity(1)
   Severity: 0=error, 1=warning, 2=info, 3=hint
+
+Document highlights section:
+  highlight_count(2)
+  Per highlight: start_row(2) + start_col(2) + end_row(2) + end_col(2) + kind(1)
+  Kind: 1=text, 2=read, 3=write
+
+Line annotations section:
+  annotation_count(2)
+  Per annotation: row(2) + kind(1) + fg(3) + bg(3) + text_len(2) + text(text_len)
+  Kind: 0=inline_pill, 1=inline_text, 2=gutter_icon
+  fg/bg are 24-bit RGB. text is UTF-8, text_len is byte length.
+  The frontend renders inline_pill as rounded-rect pills, inline_text as styled
+  text after line content, and gutter_icon in the sign column.
 ```
 
 The frontend renders selection and search matches as Metal quads behind text (not baked into line textures). This enables zero re-rasterization when the selection changes. Diagnostic underlines are rendered as quads after text.

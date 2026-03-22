@@ -130,6 +130,7 @@ defmodule Minga.Editor.Renderer.Line do
         )
     end
     |> append_eol_virtual_text(screen_row, buf_line, line_display_len, ctx)
+    |> append_annotations(screen_row, buf_line, line_display_len, ctx)
   end
 
   # Appends EOL virtual text draw commands after the line content.
@@ -178,6 +179,83 @@ defmodule Minga.Editor.Renderer.Line do
       draw = DisplayList.draw(screen_row, col, text, style)
       {[draw | draws], col + width}
     end)
+  end
+
+  # Appends line annotation draw commands after EOL virtual text.
+  # Pill annotations render with background color; inline text without.
+  # Gutter icons are handled separately in the gutter renderer.
+  @spec append_annotations(
+          [DisplayList.draw()],
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          Context.t()
+        ) :: [DisplayList.draw()]
+  defp append_annotations(draws, _screen_row, _buf_line, _line_len, %{
+         decorations: %{annotations: []}
+       }),
+       do: draws
+
+  defp append_annotations(draws, screen_row, buf_line, line_display_len, ctx) do
+    anns = Decorations.annotations_for_line(ctx.decorations, buf_line)
+
+    if anns == [] do
+      draws
+    else
+      # Annotations start after the last drawn content on this line.
+      # We compute the current end column from existing draws.
+      ann_start = max_draw_end_col(draws, line_display_len, ctx)
+
+      {ann_draws, _col} =
+        Enum.reduce(anns, {[], ann_start}, fn ann, {acc, col} ->
+          render_annotation(ann, screen_row, col, acc)
+        end)
+
+      draws ++ Enum.reverse(ann_draws)
+    end
+  end
+
+  # Computes the column after the last draw command, so annotations
+  # don't overlap with EOL virtual text.
+  @spec max_draw_end_col([DisplayList.draw()], non_neg_integer(), Context.t()) ::
+          non_neg_integer()
+  defp max_draw_end_col(draws, line_display_len, ctx) do
+    base = max(line_display_len + 1 - ctx.viewport.left, 0) + ctx.gutter_w
+
+    Enum.reduce(draws, base, fn draw, acc ->
+      {_row, col, text, _style} = draw
+      draw_end = col + Unicode.display_width(text)
+      max(acc, draw_end + 1)
+    end)
+  end
+
+  @spec render_annotation(
+          Decorations.LineAnnotation.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          [DisplayList.draw()]
+        ) :: {[DisplayList.draw()], non_neg_integer()}
+  defp render_annotation(%{kind: :inline_pill} = ann, screen_row, col, acc) do
+    # Pill: space-padded text with background color
+    text = " #{ann.text} "
+    style = Face.new(fg: ann.fg, bg: ann.bg, bold: true)
+    width = Unicode.display_width(text)
+    draw = DisplayList.draw(screen_row, col, text, style)
+    {[draw | acc], col + width + 1}
+  end
+
+  defp render_annotation(%{kind: :inline_text} = ann, screen_row, col, acc) do
+    # Inline text: styled text, no background
+    style = Face.new(fg: ann.fg)
+    width = Unicode.display_width(ann.text)
+    draw = DisplayList.draw(screen_row, col, ann.text, style)
+    {[draw | acc], col + width + 1}
+  end
+
+  defp render_annotation(%{kind: :gutter_icon}, _screen_row, col, acc) do
+    # Gutter icons are rendered in the gutter renderer, not at EOL.
+    # Skip here.
+    {acc, col}
   end
 
   # ── Display-width helpers ─────────────────────────────────────────────────

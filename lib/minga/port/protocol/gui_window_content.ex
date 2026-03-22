@@ -49,6 +49,15 @@ defmodule Minga.Port.Protocol.GUIWindowContent do
   per highlight: start_row(u16), start_col(u16), end_row(u16), end_col(u16),
                  kind(u8)
   Kind: 1=text, 2=read, 3=write
+
+  annotation_count:     u16
+  per annotation:
+    row:                u16      (display row)
+    kind:               u8       (0=inline_pill, 1=inline_text, 2=gutter_icon)
+    fg:                 u24
+    bg:                 u24
+    text_len:           u16
+    text:               [text_len] UTF-8
   ```
   """
 
@@ -57,6 +66,7 @@ defmodule Minga.Port.Protocol.GUIWindowContent do
   alias Minga.Editor.SemanticWindow
   alias Minga.Editor.SemanticWindow.DiagnosticRange
   alias Minga.Editor.SemanticWindow.DocumentHighlightRange
+  alias Minga.Editor.SemanticWindow.ResolvedAnnotation
   alias Minga.Editor.SemanticWindow.SearchMatch
   alias Minga.Editor.SemanticWindow.Selection
   alias Minga.Editor.SemanticWindow.Span
@@ -88,6 +98,7 @@ defmodule Minga.Port.Protocol.GUIWindowContent do
     matches_binary = encode_search_matches(sw.search_matches)
     diag_binary = encode_diagnostic_ranges(sw.diagnostic_ranges)
     highlight_binary = encode_document_highlights(sw.document_highlights)
+    annotation_binary = encode_annotations(sw.annotations)
 
     IO.iodata_to_binary([
       header,
@@ -95,7 +106,8 @@ defmodule Minga.Port.Protocol.GUIWindowContent do
       selection_binary,
       matches_binary,
       diag_binary,
-      highlight_binary
+      highlight_binary,
+      annotation_binary
     ])
   end
 
@@ -223,6 +235,37 @@ defmodule Minga.Port.Protocol.GUIWindowContent do
   defp encode_highlight_kind(:text), do: 1
   defp encode_highlight_kind(:read), do: 2
   defp encode_highlight_kind(:write), do: 3
+
+  # ── Line annotations ─────────────────────────────────────────────────────
+
+  @spec encode_annotations([ResolvedAnnotation.t()]) :: binary()
+  defp encode_annotations(annotations) do
+    count = length(annotations)
+    entries = Enum.map(annotations, &encode_annotation/1)
+    IO.iodata_to_binary([<<count::16>> | entries])
+  end
+
+  @spec encode_annotation(ResolvedAnnotation.t()) :: binary()
+  defp encode_annotation(%ResolvedAnnotation{} = ann) do
+    kind = encode_annotation_kind(ann.kind)
+    fg_r = ann.fg >>> 16 &&& 0xFF
+    fg_g = ann.fg >>> 8 &&& 0xFF
+    fg_b = ann.fg &&& 0xFF
+    bg_r = ann.bg >>> 16 &&& 0xFF
+    bg_g = ann.bg >>> 8 &&& 0xFF
+    bg_b = ann.bg &&& 0xFF
+    text_bytes = ann.text
+    text_len = byte_size(text_bytes)
+
+    <<ann.row::16, kind::8, fg_r::8, fg_g::8, fg_b::8, bg_r::8, bg_g::8, bg_b::8, text_len::16,
+      text_bytes::binary>>
+  end
+
+  @spec encode_annotation_kind(Minga.Buffer.Decorations.LineAnnotation.kind()) ::
+          non_neg_integer()
+  defp encode_annotation_kind(:inline_pill), do: 0
+  defp encode_annotation_kind(:inline_text), do: 1
+  defp encode_annotation_kind(:gutter_icon), do: 2
 
   # ── Cursor shape ────────────────────────────────────────────────────────
 

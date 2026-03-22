@@ -30,6 +30,7 @@ defmodule Minga.Editor.SemanticWindow.Builder do
   alias Minga.Editor.SemanticWindow
   alias Minga.Editor.SemanticWindow.DiagnosticRange
   alias Minga.Editor.SemanticWindow.DocumentHighlightRange
+  alias Minga.Editor.SemanticWindow.ResolvedAnnotation
   alias Minga.Editor.SemanticWindow.SearchMatch
   alias Minga.Editor.SemanticWindow.Selection
   alias Minga.Editor.SemanticWindow.Span
@@ -124,6 +125,10 @@ defmodule Minga.Editor.SemanticWindow.Builder do
     doc_highlights =
       build_document_highlights(state.document_highlights, viewport.top, viewport_bottom)
 
+    # Line annotations in display coordinates
+    annotations =
+      build_annotations(ctx.decorations, viewport.top, viewport_bottom)
+
     %SemanticWindow{
       window_id: win_id,
       rows: visual_rows,
@@ -136,6 +141,7 @@ defmodule Minga.Editor.SemanticWindow.Builder do
       search_matches: search_matches,
       diagnostic_ranges: diagnostic_ranges,
       document_highlights: doc_highlights,
+      annotations: annotations,
       full_refresh: true
     }
   end
@@ -393,6 +399,29 @@ defmodule Minga.Editor.SemanticWindow.Builder do
         end_row: hl.end_line - viewport_top,
         end_col: hl.end_col,
         kind: hl.kind
+      }
+    end)
+  end
+
+  # ── Line annotations ──────────────────────────────────────────────────
+
+  @spec build_annotations(Decorations.t(), non_neg_integer(), non_neg_integer()) ::
+          [ResolvedAnnotation.t()]
+  defp build_annotations(%Decorations{annotations: []}, _top, _bottom), do: []
+
+  defp build_annotations(%Decorations{} = decorations, viewport_top, viewport_bottom) do
+    decorations.annotations
+    |> Enum.filter(fn ann ->
+      ann.line >= viewport_top and ann.line < viewport_bottom
+    end)
+    |> Enum.sort_by(fn ann -> {ann.line, ann.priority} end)
+    |> Enum.map(fn ann ->
+      %ResolvedAnnotation{
+        row: ann.line - viewport_top,
+        kind: ann.kind,
+        fg: ann.fg,
+        bg: ann.bg,
+        text: ann.text
       }
     end)
   end
