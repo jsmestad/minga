@@ -70,6 +70,7 @@ defmodule Minga.Editor do
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
 
+  alias Minga.Editor.MinibufferData
   alias Minga.Editor.MouseHoverTooltip
   alias Minga.Editor.PickerUI
 
@@ -1784,6 +1785,26 @@ defmodule Minga.Editor do
     end
 
     state
+  end
+
+  defp handle_gui_action(state, {:minibuffer_select, index}) do
+    case state.vim do
+      %{mode: :command, mode_state: ms} ->
+        candidates = MinibufferData.complete_ex_command(ms.input)
+        clamped = MinibufferData.clamp_index(index, length(candidates))
+
+        case Enum.at(candidates, clamped) do
+          nil ->
+            state
+
+          %{label: label} ->
+            new_ms = %{ms | input: label, candidate_index: 0}
+            %{state | vim: %{state.vim | mode_state: new_ms}}
+        end
+
+      _ ->
+        state
+    end
   end
 
   defp handle_gui_action(state, {:execute_command, name_str}) do
