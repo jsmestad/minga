@@ -98,7 +98,11 @@ struct BottomPanelView: View {
                     .foregroundStyle(theme.tabInactiveFg)
             }
             .buttonStyle(.plain)
+            .help("Close panel")
             .padding(.horizontal, 8)
+            .onHover { isHovered in
+                if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+            }
         }
         .frame(height: 28)
         .background(theme.tabBg)

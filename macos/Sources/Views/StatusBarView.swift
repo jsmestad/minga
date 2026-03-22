@@ -266,7 +266,8 @@ struct StatusBarView: View {
             StatusBarIconButton(
                 icon: "sidebar.leading",
                 barHeight: barHeight,
-                barFg: theme.modelineBarFg
+                barFg: theme.modelineBarFg,
+                tooltip: "Toggle file tree (SPC o p)"
             ) {
                 encoder?.sendTogglePanel(panel: 0)
             }
@@ -275,7 +276,8 @@ struct StatusBarView: View {
             StatusBarIconButton(
                 icon: "rectangle.bottomhalf.inset.filled",
                 barHeight: barHeight,
-                barFg: theme.modelineBarFg
+                barFg: theme.modelineBarFg,
+                tooltip: "Toggle messages panel"
             ) {
                 encoder?.sendTogglePanel(panel: 1)
             }
@@ -374,11 +376,12 @@ struct StatusBarView: View {
 
     @ViewBuilder
     private var lspIndicator: some View {
-        let (sfIcon, color) = lspDisplay(state.lspStatus)
-        Image(systemName: sfIcon)
+        let info = lspInfo(state.lspStatus)
+        Image(systemName: info.icon)
             .font(.system(size: 9))
-            .foregroundStyle(color)
+            .foregroundStyle(info.color)
             .padding(.horizontal, 4)
+            .help(info.tooltip)
     }
 
     // MARK: - Diagnostic counts (all 4 levels, theme-colored)
@@ -438,13 +441,13 @@ struct StatusBarView: View {
         }
     }
 
-    private func lspDisplay(_ status: UInt8) -> (String, Color) {
+    private func lspInfo(_ status: UInt8) -> (icon: String, tooltip: String, color: Color) {
         switch status {
-        case 1: return ("checkmark.circle.fill", theme.gitAddedFg)
-        case 2: return ("arrow.triangle.2.circlepath", theme.modelineBarFg.opacity(0.5))
-        case 3: return ("arrow.triangle.2.circlepath", theme.modelineBarFg.opacity(0.5))
-        case 4: return ("exclamationmark.triangle.fill", theme.gutterErrorFg)
-        default: return ("circle", theme.modelineBarFg.opacity(0.3))
+        case 1:  return ("checkmark.circle.fill",         "LSP: ready",         theme.gitAddedFg)
+        case 2:  return ("arrow.triangle.2.circlepath",   "LSP: initializing…", theme.modelineBarFg.opacity(0.5))
+        case 3:  return ("arrow.triangle.2.circlepath",   "LSP: starting…",     theme.modelineBarFg.opacity(0.5))
+        case 4:  return ("exclamationmark.triangle.fill", "LSP: error",         theme.gutterErrorFg)
+        default: return ("circle",                        "LSP: inactive",      theme.modelineBarFg.opacity(0.3))
         }
     }
 
@@ -473,15 +476,18 @@ struct StatusBarView: View {
                         .font(.system(size: 11))
                         .foregroundStyle(theme.modelineBarFg.opacity(0.6))
                 }
+                .help(state.filetype)
             }
 
             // Cursor position
             Text("Ln \(state.cursorLine), Col \(state.cursorCol)")
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(theme.modelineBarFg.opacity(0.7))
+                .help("Line \(state.cursorLine), Column \(state.cursorCol)")
 
             // Vim mode badge
             modeBadge
+                .help("\(state.modeName) mode")
         }
         .padding(.trailing, 8)
     }
@@ -539,6 +545,7 @@ private struct StatusBarIconButton: View {
     let icon: String
     let barHeight: CGFloat
     let barFg: Color
+    var tooltip: String = ""
     let action: () -> Void
 
     @State private var isHovered = false
@@ -557,7 +564,11 @@ private struct StatusBarIconButton: View {
                 )
         }
         .buttonStyle(.plain)
-        .onHover { isHovered = $0 }
+        .help(tooltip)
+        .onHover { hovering in
+            isHovered = hovering
+            if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+        }
     }
 }
 
