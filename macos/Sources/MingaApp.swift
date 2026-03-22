@@ -137,6 +137,35 @@ struct ContentView: View {
                         )
                         .offset(x: x, y: y)
                     }
+
+                    // Overlay shared dimensions (computed once for all overlays)
+                    let overlayCW = CGFloat(appState.editorNSView?.cellWidth ?? 8)
+                    let overlayCH = CGFloat(appState.editorNSView?.cellHeight ?? 16)
+                    let overlayVPW = CGFloat(appState.editorNSView?.bounds.width ?? 800)
+
+                    // Signature help overlay (lowest overlay z-order)
+                    if appState.gui.signatureHelpState.visible {
+                        SignatureHelpOverlay(
+                            state: appState.gui.signatureHelpState,
+                            theme: appState.gui.themeColors,
+                            cellWidth: overlayCW,
+                            cellHeight: overlayCH,
+                            viewportHeight: rightPaneHeight,
+                            viewportWidth: overlayVPW
+                        )
+                    }
+
+                    // Hover popup overlay (above signature help, below completion)
+                    if appState.gui.hoverPopupState.visible {
+                        HoverPopupOverlay(
+                            state: appState.gui.hoverPopupState,
+                            theme: appState.gui.themeColors,
+                            cellWidth: overlayCW,
+                            cellHeight: overlayCH,
+                            viewportHeight: rightPaneHeight,
+                            viewportWidth: overlayVPW
+                        )
+                    }
                 }
 
                 // Bottom panel (between editor and status bar)
@@ -208,6 +237,19 @@ struct ContentView: View {
             theme: appState.gui.themeColors,
             encoder: appState.encoder
         )
+
+        // Float popup overlay (centered, like picker)
+        if appState.gui.floatPopupState.visible {
+            let cw = CGFloat(appState.editorNSView?.cellWidth ?? 8)
+            let ch = CGFloat(appState.editorNSView?.cellHeight ?? 16)
+
+            FloatPopupOverlay(
+                state: appState.gui.floatPopupState,
+                theme: appState.gui.themeColors,
+                cellWidth: cw,
+                cellHeight: ch
+            )
+        }
         }
         .navigationTitle(appState.windowTitle)
         .toolbarBackground(appState.windowBgColor ?? Color(red: 0.12, green: 0.12, blue: 0.14), for: .windowToolbar)

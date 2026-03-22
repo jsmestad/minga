@@ -25,6 +25,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
   alias Minga.Editor.DisplayList.Frame
   alias Minga.Editor.Layout
   alias Minga.Editor.MinibufferData
+  alias Minga.Editor.RenderPipeline.ChromeHelpers
   alias Minga.Editor.RenderPipeline.ContentHelpers
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.TabBar
@@ -42,33 +43,27 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
   # ── Frame filtering ──────────────────────────────────────────────────────
 
   @doc """
-  Filters a frame for GUI rendering by zeroing SwiftUI-owned chrome fields.
+  Filters a frame for GUI rendering.
 
-  The GUI frontend renders tab bar, file tree, agent panel, agentic view,
-  status bar, and splash natively via SwiftUI. These fields are cleared so
-  they don't appear in the Metal cell-grid output. Window frame gutters are
-  also cleared since the GUI renders gutter natively.
+  Most chrome fields are already empty from Chrome.GUI (tab bar, file tree,
+  status bar, separators, minibuffer, overlays all use dedicated GUI opcodes).
+  This filter handles the two remaining sources of draw_text content:
 
-  Overlays pass through intentionally: the Chrome stage already filters
-  picker, which-key, and completion (empty in GUI mode). The remaining
-  overlays (hover popup, signature help, float popups) are Metal-rendered
-  and belong in the cell-grid output.
+  1. **Splash screen** draws come from `Renderer`, not Chrome. Cleared here
+     since the GUI could render a native splash.
+  2. **Window content** (gutter, lines, tilde_lines) for buffer windows with
+     semantic data (0x80 opcode). Gutter is cleared for all windows since the
+     GUI renders it natively via 0x7B.
   """
   @spec filter_frame_for_gui(Frame.t()) :: Frame.t()
   def filter_frame_for_gui(frame) do
     %{
       frame
-      | tab_bar: [],
-        file_tree: [],
-        agent_panel: [],
-        agentic_view: [],
-        status_bar: [],
-        splash: nil,
+      | splash: nil,
         windows:
           Enum.map(frame.windows, fn wf ->
             # Buffer windows with semantic content get their text from the
-            # 0x80 opcode, not draw_text. Strip lines + tilde_lines so
-            # the cell-grid only carries overlays (hover, signature help).
+            # 0x80 opcode, not draw_text. Strip lines + tilde_lines.
             # Agent chat windows don't have semantic content and keep their draws.
             if wf.semantic != nil do
               %{wf | gutter: %{}, lines: %{}, tilde_lines: %{}}
@@ -97,7 +92,8 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
   def build_metal_commands(state) do
     build_gui_gutter_commands(state) ++
       build_gui_cursorline_commands(state) ++
-      build_gui_gutter_separator_commands(state)
+      build_gui_gutter_separator_commands(state) ++
+      build_gui_split_separator_commands(state)
   end
 
   @doc """
@@ -137,7 +133,10 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
         build_gui_status_bar_cmd(state, sb_data),
         build_gui_picker_cmd(state),
         build_gui_agent_chat_cmd(state),
-        build_gui_minibuffer_cmd(state, minibuffer_data)
+        build_gui_minibuffer_cmd(state, minibuffer_data),
+        build_gui_hover_popup_cmd(state),
+        build_gui_signature_help_cmd(state),
+        build_gui_float_popup_cmd(state)
       ]
       |> Enum.reject(&is_nil/1)
 
@@ -794,6 +793,135 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
       :modified -> :git_modified
       :deleted -> :git_deleted
       _ -> :none
+    end
+  end
+
+  # ── Hover popup ──
+
+  @spec build_gui_hover_popup_cmd(state()) :: binary() | nil
+  defp build_gui_hover_popup_cmd(%{hover_popup: popup}) do
+    fp = :erlang.phash2(popup)
+
+    if fp != Process.get(:last_gui_hover_popup_fp) do
+      Process.put(:last_gui_hover_popup_fp, fp)
+      ProtocolGUI.encode_gui_hover_popup(popup)
+    end
+  end
+
+  # ── Signature help ──
+
+  @spec build_gui_signature_help_cmd(state()) :: binary() | nil
+  defp build_gui_signature_help_cmd(%{signature_help: sh}) do
+    fp = :erlang.phash2(sh)
+
+    if fp != Process.get(:last_gui_signature_help_fp) do
+      Process.put(:last_gui_signature_help_fp, fp)
+      ProtocolGUI.encode_gui_signature_help(sh)
+    end
+  end
+
+  # ── Split separators ──
+
+  @spec build_gui_split_separator_commands(state()) :: [binary()]
+  defp build_gui_split_separator_commands(state) do
+    if EditorState.split?(state) do
+      layout = Layout.get(state)
+      border_color = state.theme.editor.split_border_fg
+
+      # Collect vertical separators from the window tree
+      verticals =
+        ChromeHelpers.collect_vertical_separators(
+          state.windows.tree,
+          layout.editor_area
+        )
+
+      # Horizontal separators from layout
+      horizontals = layout.horizontal_separators
+
+      [ProtocolGUI.encode_gui_split_separators(border_color, verticals, horizontals)]
+    else
+      # No splits: send empty separator data to clear any previous state
+      [ProtocolGUI.encode_gui_split_separators(0, [], [])]
+    end
+  end
+
+  # ── Float popup ──
+
+  @spec build_gui_float_popup_cmd(state()) :: binary() | nil
+  defp build_gui_float_popup_cmd(state) do
+    float_window = find_float_popup_window(state)
+
+    fp = :erlang.phash2(float_window && {float_window.buffer, float_window.popup_meta})
+
+    if fp != Process.get(:last_gui_float_popup_fp) do
+      Process.put(:last_gui_float_popup_fp, fp)
+
+      if float_window do
+        data = build_float_popup_data(state, float_window)
+        ProtocolGUI.encode_gui_float_popup(data)
+      else
+        ProtocolGUI.encode_gui_float_popup(%{
+          visible: false,
+          title: "",
+          lines: [],
+          width: 0,
+          height: 0
+        })
+      end
+    end
+  end
+
+  @spec find_float_popup_window(state()) :: Minga.Editor.Window.t() | nil
+  defp find_float_popup_window(state) do
+    Enum.find_value(state.windows.map, fn
+      {_id, %{popup_meta: %Minga.Popup.Active{rule: %Minga.Popup.Rule{display: :float}}} = w} ->
+        w
+
+      _ ->
+        nil
+    end)
+  end
+
+  @spec build_float_popup_data(state(), Minga.Editor.Window.t()) :: ProtocolGUI.float_popup_data()
+  defp build_float_popup_data(state, window) do
+    rule = window.popup_meta.rule
+    vp = state.viewport
+
+    width = resolve_float_dim(rule, :width, vp.cols)
+    height = resolve_float_dim(rule, :height, vp.rows)
+
+    # Interior dimensions (subtract 2 for border)
+    interior_h = max(height - 2, 1)
+    interior_w = max(width - 2, 1)
+
+    {title, lines} =
+      try do
+        name = BufferServer.buffer_name(window.buffer)
+        snapshot = BufferServer.render_snapshot(window.buffer, 0, interior_h)
+        trimmed = Enum.map(snapshot.lines, &String.slice(&1, 0, interior_w))
+        {name, trimmed}
+      catch
+        :exit, _ -> {"", []}
+      end
+
+    %{visible: true, title: title, lines: lines, width: width, height: height}
+  end
+
+  @spec resolve_float_dim(Minga.Popup.Rule.t(), :width | :height, pos_integer()) ::
+          pos_integer()
+  defp resolve_float_dim(rule, dim, viewport_size) do
+    val =
+      case dim do
+        :width -> rule.width || rule.size || {:percent, 50}
+        :height -> rule.height || rule.size || {:percent, 50}
+      end
+
+    case val do
+      {:percent, pct} -> max(div(viewport_size * pct, 100), 1)
+      {:cols, n} -> n
+      {:rows, n} -> n
+      n when is_integer(n) -> n
+      _ -> max(div(viewport_size, 2), 1)
     end
   end
 

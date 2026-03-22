@@ -307,6 +307,45 @@ final class CommandDispatcher {
             } else {
                 guiState.minibufferState.hide()
             }
+
+        case .guiHoverPopup(let visible, let anchorRow, let anchorCol,
+                             let focused, let scrollOffset, let lines):
+            if visible {
+                guiState.hoverPopupState.update(
+                    visible: true, anchorRow: anchorRow, anchorCol: anchorCol,
+                    focused: focused, scrollOffset: scrollOffset, rawLines: lines
+                )
+            } else {
+                guiState.hoverPopupState.hide()
+            }
+
+        case .guiSignatureHelp(let visible, let anchorRow, let anchorCol,
+                                let activeSignature, let activeParameter, let signatures):
+            if visible {
+                guiState.signatureHelpState.update(
+                    visible: true, anchorRow: anchorRow, anchorCol: anchorCol,
+                    activeSignature: activeSignature, activeParameter: activeParameter,
+                    rawSignatures: signatures
+                )
+            } else {
+                guiState.signatureHelpState.hide()
+            }
+
+        case .guiSplitSeparators(let borderColor, let verticals, let horizontals):
+            lineBuffer.splitBorderColor = borderColor
+            lineBuffer.verticalSeparators = verticals
+            lineBuffer.horizontalSeparators = horizontals
+            lineBuffer.dirty = true
+
+        case .guiFloatPopup(let visible, let width, let height, let title, let lines):
+            if visible {
+                guiState.floatPopupState.update(
+                    visible: true, width: width, height: height,
+                    title: title, lines: lines
+                )
+            } else {
+                guiState.floatPopupState.hide()
+            }
         }
     }
 

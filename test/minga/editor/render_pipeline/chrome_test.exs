@@ -104,13 +104,13 @@ defmodule Minga.Editor.RenderPipeline.ChromeTest do
       assert {:buffer, _} = chrome.status_bar_data
     end
 
-    test "minibuffer is still rendered" do
+    test "minibuffer is empty for GUI (native SwiftUI via 0x7F)" do
       state = gui_state()
       {scrolls, cursor_info, state, layout} = run_through_content(state)
 
       chrome = Chrome.build_chrome(state, layout, scrolls, cursor_info)
 
-      assert [_ | _] = chrome.minibuffer
+      assert chrome.minibuffer == []
     end
 
     test "regions are still produced" do

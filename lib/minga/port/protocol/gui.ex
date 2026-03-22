@@ -29,6 +29,10 @@ defmodule Minga.Port.Protocol.GUI do
   | 0x7D   | gui_picker_preview | Picker preview content      |
   | 0x7E   | gui_tool_manager| Tool manager panel           |
   | 0x7F   | gui_minibuffer  | Native minibuffer + candidates|
+  | 0x81   | gui_hover_popup | Native hover tooltip popup    |
+  | 0x82   | gui_signature_help | Signature help popup       |
+  | 0x83   | gui_float_popup | Float popup window            |
+  | 0x84   | gui_split_separators | Split pane separator lines |
 
   ## GUI Actions (Frontend → BEAM)
 
@@ -76,6 +80,11 @@ defmodule Minga.Port.Protocol.GUI do
   @op_gui_picker_preview 0x7D
   @op_gui_tool_manager 0x7E
   @op_gui_minibuffer 0x7F
+  # 0x80 is gui_window_content (in gui_window_content.ex)
+  @op_gui_hover_popup 0x81
+  @op_gui_signature_help 0x82
+  @op_gui_float_popup 0x83
+  @op_gui_split_separators 0x84
 
   # ── GUI action sub-opcodes (Frontend → BEAM) ──
 
@@ -1409,4 +1418,231 @@ defmodule Minga.Port.Protocol.GUI do
       | candidate_data
     ])
   end
+
+  # ── Hover Popup ──
+
+  @doc """
+  Encodes a gui_hover_popup command (0x81).
+
+  Wire format:
+    opcode(1) + visible(1) + anchor_row(2) + anchor_col(2) + focused(1) +
+    scroll_offset(2) + line_count(2) + lines...
+
+  Each line:
+    line_type(1) + segment_count(2) + segments...
+
+  Each segment:
+    style(1) + text_len(2) + text(text_len)
+
+  Line types: 0=text, 1=code, 2=code_header, 3=header, 4=blockquote,
+    5=list_item, 6=rule, 7=empty
+
+  Segment styles: 0=plain, 1=bold, 2=italic, 3=bold_italic,
+    4=code, 5=code_block, 6=code_content, 7=header1, 8=header2, 9=header3,
+    10=blockquote, 11=list_bullet, 12=rule
+  """
+  @spec encode_gui_hover_popup(Minga.Editor.HoverPopup.t() | nil) :: binary()
+  def encode_gui_hover_popup(nil), do: <<@op_gui_hover_popup, 0::8>>
+
+  def encode_gui_hover_popup(%Minga.Editor.HoverPopup{content_lines: []}) do
+    <<@op_gui_hover_popup, 0::8>>
+  end
+
+  def encode_gui_hover_popup(%Minga.Editor.HoverPopup{} = popup) do
+    focused_byte = if popup.focused, do: 1, else: 0
+
+    line_data =
+      Enum.map(popup.content_lines, fn {segments, line_type} ->
+        line_type_byte = encode_line_type(line_type)
+
+        segment_data =
+          Enum.map(segments, fn {text, style} ->
+            style_byte = encode_markdown_style(style)
+            text_bytes = :erlang.iolist_to_binary([text])
+            <<style_byte::8, byte_size(text_bytes)::16, text_bytes::binary>>
+          end)
+
+        [<<line_type_byte::8, length(segments)::16>> | segment_data]
+      end)
+
+    IO.iodata_to_binary([
+      <<@op_gui_hover_popup, 1::8, popup.anchor_row::16, popup.anchor_col::16, focused_byte::8,
+        popup.scroll_offset::16, length(popup.content_lines)::16>>
+      | line_data
+    ])
+  end
+
+  # ── Signature Help ──
+
+  @doc """
+  Encodes a gui_signature_help command (0x82).
+
+  Wire format:
+    opcode(1) + visible(1) + anchor_row(2) + anchor_col(2) +
+    active_signature(1) + active_parameter(1) + signature_count(1) +
+    signatures...
+
+  Each signature:
+    label_len(2) + label + doc_len(2) + doc + param_count(1) + params...
+
+  Each parameter:
+    label_len(2) + label + doc_len(2) + doc
+  """
+  @spec encode_gui_signature_help(Minga.Editor.SignatureHelp.t() | nil) :: binary()
+  def encode_gui_signature_help(nil), do: <<@op_gui_signature_help, 0::8>>
+
+  def encode_gui_signature_help(%Minga.Editor.SignatureHelp{signatures: []}) do
+    <<@op_gui_signature_help, 0::8>>
+  end
+
+  def encode_gui_signature_help(%Minga.Editor.SignatureHelp{} = sh) do
+    sig_data =
+      Enum.map(sh.signatures, fn sig ->
+        label_bytes = :erlang.iolist_to_binary([sig.label])
+        doc_bytes = :erlang.iolist_to_binary([sig.documentation])
+
+        param_data =
+          Enum.map(sig.parameters, fn param ->
+            p_label = :erlang.iolist_to_binary([param.label])
+            p_doc = :erlang.iolist_to_binary([param.documentation])
+            <<byte_size(p_label)::16, p_label::binary, byte_size(p_doc)::16, p_doc::binary>>
+          end)
+
+        [
+          <<byte_size(label_bytes)::16, label_bytes::binary, byte_size(doc_bytes)::16,
+            doc_bytes::binary, length(sig.parameters)::8>>
+          | param_data
+        ]
+      end)
+
+    IO.iodata_to_binary([
+      <<@op_gui_signature_help, 1::8, sh.anchor_row::16, sh.anchor_col::16,
+        sh.active_signature::8, sh.active_parameter::8, length(sh.signatures)::8>>
+      | sig_data
+    ])
+  end
+
+  # ── Float Popup ──
+
+  @typedoc "Data for a float popup."
+  @type float_popup_data :: %{
+          visible: boolean(),
+          title: String.t(),
+          lines: [String.t()],
+          width: non_neg_integer(),
+          height: non_neg_integer()
+        }
+
+  @doc """
+  Encodes a gui_float_popup command (0x83).
+
+  Wire format:
+    opcode(1) + visible(1) + width(2) + height(2) +
+    title_len(2) + title(title_len) + line_count(2) + lines...
+
+  Each line:
+    text_len(2) + text(text_len)
+
+  When visible=0, no further fields are sent.
+  """
+  @spec encode_gui_float_popup(float_popup_data()) :: binary()
+  def encode_gui_float_popup(%{visible: false}) do
+    <<@op_gui_float_popup, 0::8>>
+  end
+
+  def encode_gui_float_popup(%{visible: true, title: title, lines: lines, width: w, height: h}) do
+    title_bytes = IO.iodata_to_binary(title)
+
+    line_data =
+      Enum.map(lines, fn line ->
+        text = IO.iodata_to_binary(line)
+        <<byte_size(text)::16, text::binary>>
+      end)
+
+    IO.iodata_to_binary([
+      <<@op_gui_float_popup, 1::8, w::16, h::16, byte_size(title_bytes)::16, title_bytes::binary,
+        length(lines)::16>>
+      | line_data
+    ])
+  end
+
+  # ── Split Separators ──
+
+  @typedoc "A vertical split separator."
+  @type vertical_separator ::
+          {col :: non_neg_integer(), start_row :: non_neg_integer(), end_row :: non_neg_integer()}
+
+  @typedoc "A horizontal split separator with filename."
+  @type horizontal_separator ::
+          {row :: non_neg_integer(), col :: non_neg_integer(), width :: non_neg_integer(),
+           filename :: String.t()}
+
+  @doc """
+  Encodes a gui_split_separators command (0x84).
+
+  Wire format:
+    opcode(1) + border_color_rgb(3) +
+    vertical_count(1) + verticals... +
+    horizontal_count(1) + horizontals...
+
+  Each vertical: col(2) + start_row(2) + end_row(2)
+  Each horizontal: row(2) + col(2) + width(2) + filename_len(2) + filename
+  """
+  @spec encode_gui_split_separators(
+          non_neg_integer(),
+          [vertical_separator()],
+          [horizontal_separator()]
+        ) :: binary()
+  def encode_gui_split_separators(border_color_rgb, verticals, horizontals) do
+    r = border_color_rgb >>> 16 &&& 0xFF
+    g = border_color_rgb >>> 8 &&& 0xFF
+    b = border_color_rgb &&& 0xFF
+
+    vert_data =
+      Enum.map(verticals, fn {col, start_row, end_row} ->
+        <<col::16, start_row::16, end_row::16>>
+      end)
+
+    horiz_data =
+      Enum.map(horizontals, fn {row, col, width, filename} ->
+        name_bytes = IO.iodata_to_binary(filename)
+        <<row::16, col::16, width::16, byte_size(name_bytes)::16, name_bytes::binary>>
+      end)
+
+    IO.iodata_to_binary([
+      <<@op_gui_split_separators, r::8, g::8, b::8, length(verticals)::8>>,
+      vert_data,
+      <<length(horizontals)::8>>,
+      horiz_data
+    ])
+  end
+
+  # ── Shared encoding helpers for hover/overlay content ──
+
+  @spec encode_markdown_style(Minga.Agent.Markdown.style()) :: non_neg_integer()
+  defp encode_markdown_style(:plain), do: 0
+  defp encode_markdown_style(:bold), do: 1
+  defp encode_markdown_style(:italic), do: 2
+  defp encode_markdown_style(:bold_italic), do: 3
+  defp encode_markdown_style(:code), do: 4
+  defp encode_markdown_style(:code_block), do: 5
+  defp encode_markdown_style({:code_content, _lang}), do: 6
+  defp encode_markdown_style(:header1), do: 7
+  defp encode_markdown_style(:header2), do: 8
+  defp encode_markdown_style(:header3), do: 9
+  defp encode_markdown_style(:blockquote), do: 10
+  defp encode_markdown_style(:list_bullet), do: 11
+  defp encode_markdown_style(:rule), do: 12
+  defp encode_markdown_style(_), do: 0
+
+  @spec encode_line_type(Minga.Agent.Markdown.line_type()) :: non_neg_integer()
+  defp encode_line_type(:text), do: 0
+  defp encode_line_type(:code), do: 1
+  defp encode_line_type({:code_header, _lang}), do: 2
+  defp encode_line_type(:header), do: 3
+  defp encode_line_type(:blockquote), do: 4
+  defp encode_line_type(:list_item), do: 5
+  defp encode_line_type(:rule), do: 6
+  defp encode_line_type(:empty), do: 7
+  defp encode_line_type(_), do: 0
 end

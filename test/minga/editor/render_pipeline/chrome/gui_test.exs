@@ -59,13 +59,13 @@ defmodule Minga.Editor.RenderPipeline.Chrome.GUITest do
       assert {:buffer, _} = chrome.status_bar_data
     end
 
-    test "minibuffer is still rendered in Metal" do
+    test "minibuffer is not rendered in Metal (native SwiftUI via 0x7F)" do
       state = gui_state()
       {scrolls, cursor_info, state, layout} = run_through_content(state)
 
       chrome = ChromeGUI.build(state, layout, scrolls, cursor_info)
 
-      assert [_ | _] = chrome.minibuffer
+      assert chrome.minibuffer == []
     end
 
     test "includes region definitions" do

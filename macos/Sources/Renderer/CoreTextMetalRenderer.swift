@@ -580,6 +580,84 @@ final class CoreTextMetalRenderer {
             encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: 1)
         }
 
+        // Pass 5.5: Split separators (vertical lines between split panes,
+        // horizontal bars with centered filenames for horizontal splits).
+        if lineBuffer.splitBorderColor != 0 {
+            let sepColor = colorFromU24(lineBuffer.splitBorderColor, default: SIMD3<Float>(0.3, 0.3, 0.3))
+
+            // Vertical separators: 1px-wide lines spanning startRow..endRow
+            for vert in lineBuffer.verticalSeparators {
+                let sepX = Float(vert.col) * cellW * scale
+                let sepY = Float(vert.startRow) * cellH * scale
+                let sepH = Float(vert.endRow &- vert.startRow &+ 1) * cellH * scale
+
+                var vertQuad = QuadGPU()
+                vertQuad.position = SIMD2<Float>(sepX, sepY)
+                vertQuad.size = SIMD2<Float>(1.0, sepH)
+                vertQuad.color = sepColor
+                vertQuad.alpha = 1.0
+
+                encoder.setRenderPipelineState(bgPipeline)
+                encoder.setVertexBytes(&vertQuad, length: MemoryLayout<QuadGPU>.stride, index: 0)
+                encoder.setVertexBytes(&uniforms, length: MemoryLayout<CTUniformsGPU>.size, index: 1)
+                encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: 1)
+            }
+
+            // Horizontal separators: 1px-high line + centered filename label
+            for horiz in lineBuffer.horizontalSeparators {
+                let hY = Float(horiz.row) * cellH * scale + (cellH * scale * 0.5) - 0.5
+                let hX = Float(horiz.col) * cellW * scale
+                let hW = Float(horiz.width) * cellW * scale
+
+                // Background line spanning the full width
+                var horizQuad = QuadGPU()
+                horizQuad.position = SIMD2<Float>(hX, hY)
+                horizQuad.size = SIMD2<Float>(hW, 1.0)
+                horizQuad.color = sepColor
+                horizQuad.alpha = 1.0
+
+                encoder.setRenderPipelineState(bgPipeline)
+                encoder.setVertexBytes(&horizQuad, length: MemoryLayout<QuadGPU>.stride, index: 0)
+                encoder.setVertexBytes(&uniforms, length: MemoryLayout<CTUniformsGPU>.size, index: 1)
+                encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: 1)
+
+                // Centered filename label rendered as a CoreText texture
+                if !horiz.filename.isEmpty, let atlas = atlas {
+                    let labelRuns = [StyledRun(col: 0, text: horiz.filename, fg: lineBuffer.splitBorderColor, bg: 0, attrs: 0)]
+                    let labelHash = horiz.filename.hashValue ^ Int(lineBuffer.splitBorderColor)
+                    // Use a unique row namespace (0xF000+) for separator labels to avoid cache collisions
+                    let labelRow = UInt16(0xF000) &+ horiz.row
+                    if let entry = lineRenderer.renderLineToAtlas(row: labelRow, runs: labelRuns, contentHash: labelHash, atlas: atlas) {
+                        // Center the label text within the separator width
+                        let labelW = Float(entry.pixelWidth)
+                        let centerX = hX + (hW - labelW) * 0.5
+                        let labelY = Float(horiz.row) * cellH * scale
+
+                        // Small bg fill behind label so it "breaks" the horizontal line
+                        let padPx: Float = 4.0 * scale
+                        var labelBg = QuadGPU()
+                        labelBg.position = SIMD2<Float>(centerX - padPx, hY - 1)
+                        labelBg.size = SIMD2<Float>(labelW + padPx * 2, 3.0)
+                        labelBg.color = defaultBg
+                        labelBg.alpha = 1.0
+                        encoder.setRenderPipelineState(bgPipeline)
+                        encoder.setVertexBytes(&labelBg, length: MemoryLayout<QuadGPU>.stride, index: 0)
+                        encoder.setVertexBytes(&uniforms, length: MemoryLayout<CTUniformsGPU>.size, index: 1)
+                        encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: 1)
+
+                        // Render the label texture
+                        let (uvOrigin, uvSize) = atlas.uvForSlot(entry.slotIndex, pixelWidth: entry.pixelWidth)
+                        var lineGPU = LineGPU()
+                        lineGPU.position = SIMD2<Float>(centerX, labelY)
+                        lineGPU.size = SIMD2<Float>(Float(entry.pixelWidth), Float(entry.pixelHeight))
+                        lineGPU.uvOrigin = uvOrigin
+                        lineGPU.uvSize = uvSize
+                        lineInstances.append(lineGPU)
+                    }
+                }
+            }
+        }
+
         // Pass 6: Cursor overlay for beam and underline shapes.
         // Block cursor is drawn in pass 2 (before text) so text shows on top.
         // Beam and underline are drawn AFTER text so they overlay it.

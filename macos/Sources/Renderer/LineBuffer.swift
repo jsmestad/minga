@@ -111,6 +111,11 @@ final class LineBuffer {
     var gitModifiedFgColor: UInt32 = 0x51AFEF
     var gitDeletedFgColor: UInt32 = 0xFF6C6B
 
+    /// Split separator data from gui_split_separators (0x84).
+    var splitBorderColor: UInt32 = 0
+    var verticalSeparators: [GUIVerticalSeparator] = []
+    var horizontalSeparators: [GUIHorizontalSeparator] = []
+
     /// Track whether the buffer was modified since last render.
     var dirty: Bool = true
 

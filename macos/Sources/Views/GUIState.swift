@@ -45,6 +45,15 @@ final class GUIState {
     /// Native minibuffer state (0x7F).
     let minibufferState = MinibufferState()
 
+    /// Hover popup state (0x81).
+    let hoverPopupState = HoverPopupState()
+
+    /// Signature help popup state (0x82).
+    let signatureHelpState = SignatureHelpState()
+
+    /// Float popup state (0x83).
+    let floatPopupState = FloatPopupState()
+
     /// Semantic window content from gui_window_content (0x80).
     /// Keyed by windowId. NOT cleared between frames; the guiWindowContent
     /// dispatch overwrites per-window data each frame. Stale entries serve
