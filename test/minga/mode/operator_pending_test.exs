@@ -110,35 +110,35 @@ defmodule Minga.Mode.OperatorPendingTest do
   # ── Double-operator (line-wise) ────────────────────────────────────────────
 
   describe "dd (delete line)" do
-    test "d+d emits :delete_line and transitions to :normal" do
+    test "d+d emits {:delete_lines_counted, 1} and transitions to :normal" do
       state = op_state(:delete)
 
-      assert {:execute_then_transition, [:delete_line], :normal, _} =
+      assert {:execute_then_transition, [{:delete_lines_counted, 1}], :normal, _} =
                OperatorPending.handle_key({?d, 0}, state)
     end
 
-    test "dd with op_count=3 emits 3 :delete_line commands" do
+    test "dd with op_count=3 emits {:delete_lines_counted, 3}" do
       state = op_state(:delete, 3)
 
-      assert {:execute_then_transition, [:delete_line, :delete_line, :delete_line], :normal, _} =
+      assert {:execute_then_transition, [{:delete_lines_counted, 3}], :normal, _} =
                OperatorPending.handle_key({?d, 0}, state)
     end
   end
 
   describe "cc (change line)" do
-    test "c+c emits :change_line and transitions to :insert" do
+    test "c+c emits {:change_lines_counted, 1} and transitions to :insert" do
       state = op_state(:change)
 
-      assert {:execute_then_transition, [:change_line], :insert, _} =
+      assert {:execute_then_transition, [{:change_lines_counted, 1}], :insert, _} =
                OperatorPending.handle_key({?c, 0}, state)
     end
   end
 
   describe "yy (yank line)" do
-    test "y+y emits :yank_line and transitions to :normal" do
+    test "y+y emits {:yank_lines_counted, 1} and transitions to :normal" do
       state = op_state(:yank)
 
-      assert {:execute_then_transition, [:yank_line], :normal, _} =
+      assert {:execute_then_transition, [{:yank_lines_counted, 1}], :normal, _} =
                OperatorPending.handle_key({?y, 0}, state)
     end
   end
@@ -262,12 +262,12 @@ defmodule Minga.Mode.OperatorPendingTest do
       assert [{:delete_motion, :word_forward}] = cmds
     end
 
-    test "d then d produces :delete_line command and normal mode" do
+    test "d then d produces {:delete_lines_counted, 1} command and normal mode" do
       state = Mode.initial_state()
       {_, _, op_state} = Mode.process(:normal, {?d, 0}, state)
       {new_mode, cmds, _} = Mode.process(:operator_pending, {?d, 0}, op_state)
       assert new_mode == :normal
-      assert cmds == [:delete_line]
+      assert cmds == [{:delete_lines_counted, 1}]
     end
 
     test "Escape from operator_pending returns to normal" do

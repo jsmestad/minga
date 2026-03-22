@@ -151,7 +151,9 @@ defmodule Minga.Editor.ChangeTracking do
   defp editing_command?({:delete_chars_at, _}), do: true
   defp editing_command?({:delete_chars_before, _}), do: true
   defp editing_command?(:delete_line), do: true
+  defp editing_command?({:delete_lines_counted, _}), do: true
   defp editing_command?(:change_line), do: true
+  defp editing_command?({:change_lines_counted, _}), do: true
   defp editing_command?(:join_lines), do: true
   defp editing_command?(:toggle_case), do: true
   defp editing_command?(:indent_line), do: true
