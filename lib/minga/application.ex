@@ -124,6 +124,8 @@ defmodule Minga.Application do
   def stop(_state) do
     # Mark the session as cleanly shut down so the next launch
     # knows this wasn't a crash.
+    # Uses the default session dir (same as Editor.Supervisor). Application.stop
+    # has no access to the Editor's runtime state, so it can't use an injected path.
     Minga.Session.mark_clean_shutdown()
 
     # Clean shutdown: restore the default console logger and stderr device.

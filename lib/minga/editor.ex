@@ -358,13 +358,15 @@ defmodule Minga.Editor do
     new_state = Renderer.render(new_state)
     # Setup highlighting after first paint with correct viewport
     send(self(), :setup_highlight)
-    send(self(), :check_swap_recovery)
+
+    maybe_check_swap_recovery(new_state)
+
     # If the agentic view was activated at init, start the session now
     # that the port is connected and the viewport is known.
     new_state = AgentLifecycle.maybe_start_session(new_state)
     # Start the periodic session save timer (30 seconds)
-    session_ref = Process.send_after(self(), :save_session, 30_000)
-    new_state = %{new_state | session_timer: session_ref}
+    new_state = maybe_start_session_timer(new_state)
+
     {:noreply, new_state}
   end
 
@@ -477,12 +479,12 @@ defmodule Minga.Editor do
   # ── Swap file recovery ────────────────────────────────────────────────────────
 
   def handle_info(:check_swap_recovery, state) do
-    recoverable = Swap.Recovery.scan()
+    recoverable = Swap.Recovery.scan(swap_dir: state.swap_dir)
 
     new_state =
       case recoverable do
         [] ->
-          if Session.clean_shutdown?() do
+          if Session.clean_shutdown?(session_dir: state.session_dir) do
             state
           else
             # Restore open files from the previous session
@@ -500,9 +502,10 @@ defmodule Minga.Editor do
 
   def handle_info(:save_session, state) do
     snapshot = Session.snapshot(state)
+    session_opts = [session_dir: state.session_dir]
 
     Task.start(fn ->
-      case Session.save(snapshot) do
+      case Session.save(snapshot, session_opts) do
         :ok -> :ok
         {:error, reason} -> Minga.Log.warning(:editor, "Session save failed: #{inspect(reason)}")
       end
@@ -1505,6 +1508,18 @@ defmodule Minga.Editor do
     end
   end
 
+  @spec maybe_check_swap_recovery(state()) :: :ok
+  defp maybe_check_swap_recovery(%{swap_dir: nil}), do: :ok
+  defp maybe_check_swap_recovery(_state), do: send(self(), :check_swap_recovery)
+
+  @spec maybe_start_session_timer(state()) :: state()
+  defp maybe_start_session_timer(%{session_dir: nil} = state), do: state
+
+  defp maybe_start_session_timer(state) do
+    ref = Process.send_after(self(), :save_session, 30_000)
+    %{state | session_timer: ref}
+  end
+
   @spec cancel_session_timer(state()) :: state()
   defp cancel_session_timer(%{session_timer: nil} = state), do: state
 
@@ -1516,7 +1531,7 @@ defmodule Minga.Editor do
   # Restores open files and cursor positions from the previous session.
   @spec restore_session(state()) :: state()
   defp restore_session(state) do
-    case Session.load() do
+    case Session.load(session_dir: state.session_dir) do
       {:ok, session} ->
         state = log_message(state, "Restored from previous session")
         Enum.reduce(session.buffers, state, &restore_session_buffer/2)

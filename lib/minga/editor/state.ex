@@ -144,7 +144,9 @@ defmodule Minga.Editor.State do
             selection_range_index: 0,
             tool_declined: MapSet.new(),
             tool_prompt_queue: [],
-            session_timer: nil
+            session_timer: nil,
+            swap_dir: nil,
+            session_dir: nil
 
   @type t :: %__MODULE__{
           port_manager: GenServer.server() | nil,
@@ -204,7 +206,9 @@ defmodule Minga.Editor.State do
           font_registry: Minga.FontRegistry.t(),
           tool_declined: MapSet.t(atom()),
           tool_prompt_queue: [atom()],
-          session_timer: reference() | nil
+          session_timer: reference() | nil,
+          swap_dir: String.t() | nil,
+          session_dir: String.t() | nil
         }
 
   # ── Convenience accessors ─────────────────────────────────────────────────

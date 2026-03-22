@@ -805,7 +805,8 @@ defmodule Minga.Buffer.Server do
           unlisted: Keyword.get(opts, :unlisted, false),
           persistent: Keyword.get(opts, :persistent, false),
           options: seed_options(filetype),
-          explicit_options: MapSet.new()
+          explicit_options: MapSet.new(),
+          swap_dir: Keyword.get(opts, :swap_dir)
         }
 
         register_path(path)
@@ -1651,12 +1652,16 @@ defmodule Minga.Buffer.Server do
   end
 
   @impl true
-  def handle_info(:write_swap, %{buffer_type: :file, file_path: path, dirty: true} = state)
-      when is_binary(path) do
+  def handle_info(
+        :write_swap,
+        %{buffer_type: :file, file_path: path, dirty: true, swap_dir: dir} = state
+      )
+      when is_binary(path) and is_binary(dir) do
     content = Document.content(state.document)
+    swap_opts = [swap_dir: dir]
 
     Task.start(fn ->
-      case Minga.Swap.write(path, content) do
+      case Minga.Swap.write(path, content, swap_opts) do
         :ok ->
           :ok
 
@@ -1908,8 +1913,8 @@ defmodule Minga.Buffer.Server do
   # Schedule a debounced swap file write. Cancels any pending timer
   # so rapid edits only produce one write after 5 seconds of quiet.
   @spec schedule_swap_write(state()) :: state()
-  defp schedule_swap_write(%{buffer_type: :file, file_path: path} = state)
-       when is_binary(path) do
+  defp schedule_swap_write(%{buffer_type: :file, file_path: path, swap_dir: dir} = state)
+       when is_binary(path) and is_binary(dir) do
     state = cancel_swap_timer(state)
     ref = Process.send_after(self(), :write_swap, @swap_debounce_ms)
     %{state | swap_timer: ref}
@@ -1926,8 +1931,9 @@ defmodule Minga.Buffer.Server do
   end
 
   @spec delete_swap_file(state()) :: :ok
-  defp delete_swap_file(%{file_path: path}) when is_binary(path) do
-    Minga.Swap.delete(path, [])
+  defp delete_swap_file(%{file_path: path, swap_dir: dir})
+       when is_binary(path) and is_binary(dir) do
+    Minga.Swap.delete(path, swap_dir: dir)
   end
 
   defp delete_swap_file(_state), do: :ok

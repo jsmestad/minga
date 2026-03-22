@@ -36,7 +36,7 @@ defmodule Minga.Swap.Recovery do
   - `:swap_dir` - override the default swap directory (for testing)
   - `:pid_alive?` - override the PID liveness check (for testing)
   """
-  @spec scan(keyword()) :: [entry()]
+  @spec scan([option()]) :: [entry()]
   def scan(opts \\ []) do
     dir = Swap.swap_dir(opts)
     pid_alive? = Keyword.get(opts, :pid_alive?, &Swap.pid_alive?/1)

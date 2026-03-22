@@ -60,7 +60,8 @@ defmodule Minga.Buffer.State do
             face_overrides: %{},
             options: %{},
             explicit_options: MapSet.new(),
-            swap_timer: nil
+            swap_timer: nil,
+            swap_dir: nil
 
   @type t :: %__MODULE__{
           document: Document.t(),
@@ -87,7 +88,8 @@ defmodule Minga.Buffer.State do
           face_overrides: %{String.t() => keyword()},
           options: %{atom() => term()},
           explicit_options: MapSet.t(atom()),
-          swap_timer: reference() | nil
+          swap_timer: reference() | nil,
+          swap_dir: String.t() | nil
         }
 
   @max_undo_stack 1000
