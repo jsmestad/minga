@@ -17,6 +17,7 @@ final class GUIState {
 
     /// File tree sidebar state.
     let fileTreeState = FileTreeState()
+    let gitStatusState = GitStatusState()
 
     /// Completion popup state.
     let completionState = CompletionState()

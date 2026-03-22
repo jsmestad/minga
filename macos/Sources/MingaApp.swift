@@ -62,10 +62,11 @@ struct ContentView: View {
     var body: some View {
         ZStack {
         HStack(spacing: 0) {
-            // File tree sidebar
-            if appState.gui.fileTreeState.visible {
-                FileTreeView(
+            // Left sidebar (file tree or git status)
+            if appState.gui.fileTreeState.visible || appState.gui.gitStatusState.visible {
+                SidebarContainer(
                     fileTreeState: appState.gui.fileTreeState,
+                    gitStatusState: appState.gui.gitStatusState,
                     theme: appState.gui.themeColors,
                     encoder: appState.encoder
                 )

@@ -49,6 +49,7 @@ enum RenderCommand: Sendable {
     case guiSignatureHelp(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, activeSignature: UInt8, activeParameter: UInt8, signatures: [GUISignature])
     case guiFloatPopup(visible: Bool, width: UInt16, height: UInt16, title: String, lines: [String])
     case guiSplitSeparators(borderColor: UInt32, verticals: [GUIVerticalSeparator], horizontals: [GUIHorizontalSeparator])
+    case guiGitStatus(repoState: UInt8, ahead: UInt16, behind: UInt16, branchName: String, entries: [GUIGitStatusEntry])
 }
 
 // MARK: - Minibuffer data types
@@ -134,6 +135,16 @@ struct GUIHorizontalSeparator: Sendable {
     let col: UInt16
     let width: UInt16
     let filename: String
+}
+
+// MARK: - Git status panel data types
+
+/// Raw decoded entry from gui_git_status protocol message.
+struct GUIGitStatusEntry: Sendable {
+    let pathHash: UInt32
+    let section: UInt8
+    let status: UInt8
+    let path: String
 }
 
 // MARK: - Tool Manager data types
@@ -1690,6 +1701,36 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         }
         return (.guiSplitSeparators(borderColor: sepColor, verticals: verts, horizontals: horizs),
                 sepPos - offset)
+
+    case OP_GUI_GIT_STATUS:
+        // Header: repo_state:1, ahead:2, behind:2, branch_len:2, branch, entry_count:2
+        guard data.count >= rest + 9 else { throw ProtocolDecodeError.malformed }
+        let gsRepoState = data[rest]
+        let gsAhead = readU16(data, rest + 1)
+        let gsBehind = readU16(data, rest + 3)
+        let gsBranchLen = Int(readU16(data, rest + 5))
+        guard data.count >= rest + 7 + gsBranchLen + 2 else { throw ProtocolDecodeError.malformed }
+        let gsBranchData = data[(rest + 7)..<(rest + 7 + gsBranchLen)]
+        let gsBranchName = String(data: gsBranchData, encoding: .utf8) ?? ""
+        let gsEntryCount = Int(readU16(data, rest + 7 + gsBranchLen))
+        var gsEntries: [GUIGitStatusEntry] = []
+        gsEntries.reserveCapacity(gsEntryCount)
+        var gsPos = rest + 9 + gsBranchLen
+        for _ in 0..<gsEntryCount {
+            // path_hash:4, section:1, status:1, path_len:2, path
+            guard data.count >= gsPos + 8 else { throw ProtocolDecodeError.malformed }
+            let gsPathHash = readU32(data, gsPos)
+            let gsSection = data[gsPos + 4]
+            let gsStatus = data[gsPos + 5]
+            let gsPathLen = Int(readU16(data, gsPos + 6))
+            guard data.count >= gsPos + 8 + gsPathLen else { throw ProtocolDecodeError.malformed }
+            let gsPathData = data[(gsPos + 8)..<(gsPos + 8 + gsPathLen)]
+            let gsPath = String(data: gsPathData, encoding: .utf8) ?? ""
+            gsEntries.append(GUIGitStatusEntry(pathHash: gsPathHash, section: gsSection, status: gsStatus, path: gsPath))
+            gsPos += 8 + gsPathLen
+        }
+        return (.guiGitStatus(repoState: gsRepoState, ahead: gsAhead, behind: gsBehind, branchName: gsBranchName, entries: gsEntries),
+                gsPos - offset)
 
     default:
         throw ProtocolDecodeError.unknownOpcode(opcode)
