@@ -12,7 +12,7 @@ cd "$(dirname "$0")"
 
 count=$(grep -rn 'Process\.sleep\|:timer\.sleep' test/ --include='*.exs' \
   | grep -v ':infinity' \
-  | grep -v '^\s*#' \
+  | grep -v '#.*Process\.sleep\|#.*:timer\.sleep' \
   | grep -v 'eval_test.exs.*:timer.sleep(10_000)' \
   | grep -v 'agent_split_toggle_test.exs.*:timer.sleep(1000)' \
   | grep -v 'event_routing_test.exs.*:timer.sleep(:infinity)' \
@@ -24,7 +24,7 @@ echo ""
 echo "Remaining flaky patterns:"
 grep -rn 'Process\.sleep\|:timer\.sleep' test/ --include='*.exs' \
   | grep -v ':infinity' \
-  | grep -v '^\s*#' \
+  | grep -v '#.*Process\.sleep\|#.*:timer\.sleep' \
   | grep -v 'eval_test.exs.*:timer.sleep(10_000)' \
   | grep -v 'agent_split_toggle_test.exs.*:timer.sleep(1000)' \
   | grep -v 'event_routing_test.exs.*:timer.sleep(:infinity)' \
