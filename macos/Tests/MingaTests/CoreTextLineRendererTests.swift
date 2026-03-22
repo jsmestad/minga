@@ -4,7 +4,6 @@ import Testing
 import Foundation
 import Metal
 import CoreText
-@testable import minga_mac
 
 @Suite("CoreTextLineRenderer")
 @MainActor

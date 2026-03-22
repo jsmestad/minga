@@ -9,6 +9,20 @@
       <BuildActionEntries>
          <BuildActionEntry
             buildForTesting = "YES"
+            buildForRunning = "YES"
+            buildForProfiling = "YES"
+            buildForArchiving = "YES"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "D96277718552247F338DD197"
+               BuildableName = "Minga.app"
+               BlueprintName = "Minga"
+               ReferencedContainer = "container:Minga.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
             buildForRunning = "NO"
             buildForProfiling = "NO"
             buildForArchiving = "NO"
@@ -18,20 +32,6 @@
                BlueprintIdentifier = "2734C1C657DD572768745C3F"
                BuildableName = "MingaTests.xctest"
                BlueprintName = "MingaTests"
-               ReferencedContainer = "container:Minga.xcodeproj">
-            </BuildableReference>
-         </BuildActionEntry>
-         <BuildActionEntry
-            buildForTesting = "YES"
-            buildForRunning = "YES"
-            buildForProfiling = "YES"
-            buildForArchiving = "YES"
-            buildForAnalyzing = "YES">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "AB99946B54F4654DA02F2A34"
-               BuildableName = "minga-mac"
-               BlueprintName = "minga-mac"
                ReferencedContainer = "container:Minga.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
@@ -46,9 +46,9 @@
       <MacroExpansion>
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "AB99946B54F4654DA02F2A34"
-            BuildableName = "minga-mac"
-            BlueprintName = "minga-mac"
+            BlueprintIdentifier = "D96277718552247F338DD197"
+            BuildableName = "Minga.app"
+            BlueprintName = "Minga"
             ReferencedContainer = "container:Minga.xcodeproj">
          </BuildableReference>
       </MacroExpansion>
@@ -82,9 +82,9 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "AB99946B54F4654DA02F2A34"
-            BuildableName = "minga-mac"
-            BlueprintName = "minga-mac"
+            BlueprintIdentifier = "D96277718552247F338DD197"
+            BuildableName = "Minga.app"
+            BlueprintName = "Minga"
             ReferencedContainer = "container:Minga.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
@@ -99,9 +99,9 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "AB99946B54F4654DA02F2A34"
-            BuildableName = "minga-mac"
-            BlueprintName = "minga-mac"
+            BlueprintIdentifier = "D96277718552247F338DD197"
+            BuildableName = "Minga.app"
+            BlueprintName = "Minga"
             ReferencedContainer = "container:Minga.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>

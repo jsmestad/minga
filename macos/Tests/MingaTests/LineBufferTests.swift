@@ -2,7 +2,6 @@
 
 import Testing
 import Foundation
-@testable import minga_mac
 
 @Suite("StyledRun")
 struct StyledRunTests {

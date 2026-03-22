@@ -80,7 +80,7 @@ final class CoreTextLineRenderer {
     /// Font descent in points.
     let descent: CGFloat
 
-    /// Attribute bitmask constants (matching protocol/CellGrid).
+    /// Attribute bitmask constants (matching port protocol wire format).
     private static let ATTR_BOLD: UInt8 = 0x01
     private static let ATTR_UNDERLINE: UInt8 = 0x02
     private static let ATTR_ITALIC: UInt8 = 0x04

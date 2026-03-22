@@ -90,11 +90,21 @@ final class CoreTextMetalRenderer {
         self.cursorColor = CoreTextMetalRenderer.readAccentColor()
 
         // Load the compiled Metal shader library.
-        let executableURL = Bundle.main.executableURL!
-        let metallibURL = executableURL.deletingLastPathComponent().appendingPathComponent("default.metallib")
-        guard let library = try? device.makeLibrary(URL: metallibURL) else {
-            NSLog("Failed to load Metal library from \(metallibURL.path)")
-            return nil
+        // For app bundles, the metallib is in Contents/Resources/. For tool
+        // targets, it's next to the executable. Try both paths.
+        let library: MTLLibrary
+        if let lib = try? device.makeDefaultLibrary(bundle: Bundle.main) {
+            // App bundle: Xcode places default.metallib in the Resources dir
+            // and makeDefaultLibrary(bundle:) finds it automatically.
+            library = lib
+        } else {
+            let executableURL = Bundle.main.executableURL!
+            let metallibURL = executableURL.deletingLastPathComponent().appendingPathComponent("default.metallib")
+            guard let lib = try? device.makeLibrary(URL: metallibURL) else {
+                NSLog("Failed to load Metal library from \(metallibURL.path)")
+                return nil
+            }
+            library = lib
         }
 
         // Background fill pipeline (also used for cursor overlay).

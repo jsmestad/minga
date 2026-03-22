@@ -20,8 +20,8 @@ packages:
     from: "0.10.3"
 
 targets:
-  minga-mac:
-    type: tool
+  Minga:
+    type: application
     platform: macOS
     sources:
       - path: Sources
@@ -30,15 +30,20 @@ targets:
         type: group
     settings:
       base:
-        PRODUCT_NAME: minga-mac
+        PRODUCT_NAME: Minga
+        PRODUCT_BUNDLE_IDENTIFIER: com.minga.editor
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
         SWIFT_OPTIMIZATION_LEVEL: "-Onone"
-        INFOPLIST_FILE: ""
+        INFOPLIST_FILE: Info.plist
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        COMBINE_HIDPI_IMAGES: "YES"
         MTL_LANGUAGE_REVISION: UseDeploymentTarget
     dependencies: []
     postBuildScripts:
       - name: Codesign
         script: |
-          codesign --force --sign - "${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}"
+          codesign --force --deep --sign - "${BUILT_PRODUCTS_DIR}/${FULL_PRODUCT_NAME}"
         basedOnDependencyAnalysis: false
 
   MingaTests:
@@ -59,10 +64,10 @@ targets:
       - package: ViewInspector
 
 schemes:
-  minga-mac:
+  Minga:
     build:
       targets:
-        minga-mac: all
+        Minga: all
         MingaTests: [test]
     test:
       targets:
