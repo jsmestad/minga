@@ -2,7 +2,8 @@
 ///
 /// Accumulates styled text runs per screen line, preserving the run structure
 /// that CoreText needs for proper shaping, kerning, and font smoothing.
-/// This replaces the character-cell decomposition that CellGrid does.
+/// Preserves the run structure that CoreText needs for proper shaping,
+/// kerning, and font smoothing (instead of decomposing into individual cells).
 ///
 /// Each line holds an array of `StyledRun` structs describing a contiguous
 /// span of text with uniform styling. The BEAM sends `draw_text` commands
@@ -51,7 +52,7 @@ struct StyledRun: Hashable, Equatable {
     }
 }
 
-/// Cursor shape for the line buffer (mirrors CellGrid's CursorShape).
+/// Cursor shape for the line buffer.
 enum LineBufferCursorShape {
     case block
     case beam
@@ -61,8 +62,8 @@ enum LineBufferCursorShape {
 /// In-memory line buffer representing the editor's screen state as styled runs.
 ///
 /// Each line is an array of `StyledRun` structs ordered by column. The buffer
-/// is populated by `CommandDispatcher` alongside `CellGrid` during the CoreText
-/// migration, then read by `CoreTextLineRenderer` to produce Metal textures.
+/// is populated by `CommandDispatcher` from draw_text protocol commands,
+/// then read by `CoreTextLineRenderer` to produce Metal textures.
 ///
 /// Not thread-safe; all access should happen on the main thread.
 final class LineBuffer {
@@ -70,7 +71,7 @@ final class LineBuffer {
     /// that received draw commands have entries).
     private(set) var lines: [UInt16: [StyledRun]] = [:]
 
-    /// Grid dimensions (matches CellGrid).
+    /// Grid dimensions in cell units.
     private(set) var cols: UInt16
     private(set) var rows: UInt16
 
@@ -83,7 +84,7 @@ final class LineBuffer {
     /// Default background color (24-bit RGB) for the window.
     var defaultBg: UInt32 = 0
 
-    /// Gutter separator: column position and color (mirrors CellGrid).
+    /// Gutter separator: column position and color.
     var gutterCol: UInt16 = 0
     var gutterSeparatorColor: UInt32 = 0
 

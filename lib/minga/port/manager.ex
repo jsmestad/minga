@@ -292,7 +292,7 @@ defmodule Minga.Port.Manager do
         :gui ->
           # Swift GUI binary built by Xcode.
           # In dev, find it in DerivedData via the build settings output.
-          find_xcode_build_product("minga-mac")
+          find_xcode_build_product("Minga")
 
         _tui ->
           # Zig TUI binary in zig-out/bin/
@@ -313,10 +313,14 @@ defmodule Minga.Port.Manager do
 
   @spec renderer_binary_name(backend()) :: String.t()
   defp renderer_binary_name(:tui), do: "minga-renderer"
-  defp renderer_binary_name(:gui), do: "minga-mac"
+  defp renderer_binary_name(:gui), do: "Minga"
 
   # Find the Xcode build product in DerivedData.
   # Uses `xcodebuild -showBuildSettings` to get the exact path.
+  #
+  # For `type: application` targets, the executable lives inside the .app
+  # bundle at `Minga.app/Contents/MacOS/Minga`. We parse both
+  # BUILT_PRODUCTS_DIR and FULL_PRODUCT_NAME to construct the correct path.
   @spec find_xcode_build_product(String.t()) :: String.t()
   defp find_xcode_build_product(product_name) do
     project_path = Path.join([File.cwd!(), "macos", "Minga.xcodeproj"])
@@ -327,7 +331,7 @@ defmodule Minga.Port.Manager do
              "-project",
              project_path,
              "-scheme",
-             "minga-mac",
+             "Minga",
              "-configuration",
              "Debug",
              "-showBuildSettings"
@@ -335,13 +339,48 @@ defmodule Minga.Port.Manager do
            stderr_to_stdout: true
          ) do
       {output, 0} ->
-        case Regex.run(~r/BUILT_PRODUCTS_DIR = (.+)/, output) do
-          [_, dir] -> Path.join(String.trim(dir), product_name)
-          _ -> Path.join([File.cwd!(), "macos", "build", "Debug", product_name])
-        end
+        resolve_build_product_path(output, product_name)
 
       _ ->
         Path.join([File.cwd!(), "macos", "build", "Debug", product_name])
+    end
+  end
+
+  @spec resolve_build_product_path(String.t(), String.t()) :: String.t()
+  defp resolve_build_product_path(build_settings, product_name) do
+    built_dir = parse_build_setting(build_settings, "BUILT_PRODUCTS_DIR")
+    full_product = parse_build_setting(build_settings, "FULL_PRODUCT_NAME")
+
+    case {built_dir, full_product} do
+      {dir, app_name} when is_binary(dir) and is_binary(app_name) ->
+        resolve_executable_in_product(dir, app_name, product_name)
+
+      {dir, _} when is_binary(dir) ->
+        Path.join(dir, product_name)
+
+      _ ->
+        Path.join([File.cwd!(), "macos", "build", "Debug", product_name])
+    end
+  end
+
+  @spec resolve_executable_in_product(String.t(), String.t(), String.t()) :: String.t()
+  defp resolve_executable_in_product(dir, app_name, product_name) do
+    if String.ends_with?(app_name, ".app") do
+      # Application target: binary is inside the .app bundle
+      Path.join([dir, app_name, "Contents", "MacOS", product_name])
+    else
+      # Tool target (legacy): binary is directly in the build dir
+      Path.join(dir, product_name)
+    end
+  end
+
+  @spec parse_build_setting(String.t(), String.t()) :: String.t() | nil
+  defp parse_build_setting(output, key) do
+    # Anchor to whitespace so e.g. "BUILT_PRODUCTS_DIR" doesn't match
+    # "PRECOMPS_INCLUDE_HEADERS_FROM_BUILT_PRODUCTS_DIR".
+    case Regex.run(~r/\s+#{Regex.escape(key)} = (.+)/, output) do
+      [_, value] -> String.trim(value)
+      _ -> nil
     end
   end
 end

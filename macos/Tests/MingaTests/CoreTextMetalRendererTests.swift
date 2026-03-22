@@ -5,7 +5,6 @@
 /// StyledRuns have out-of-order column positions.
 
 import Testing
-@testable import minga_mac
 
 @Suite("CoreTextMetalRenderer.runColSpan")
 struct RunColSpanTests {

@@ -394,12 +394,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let ext = "ttf"
 
         // Look for the font in the app bundle's Resources directory.
-        // For a tool target, resources are next to the binary.
-        let searchPaths = [
-            Bundle.main.bundleURL.appendingPathComponent("Resources/Fonts/\(fontName).\(ext)"),
+        // Bundle.main.resourceURL resolves to Contents/Resources/ for app
+        // bundles and the executable's directory for tool targets.
+        let searchPaths: [URL] = [
+            Bundle.main.resourceURL?.appendingPathComponent("Fonts/\(fontName).\(ext)"),
+            Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/Fonts/\(fontName).\(ext)"),
             Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent("Resources/Fonts/\(fontName).\(ext)"),
             Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent("\(fontName).\(ext)")
-        ]
+        ].compactMap { $0 }
 
         for url in searchPaths {
             if FileManager.default.fileExists(atPath: url.path) {

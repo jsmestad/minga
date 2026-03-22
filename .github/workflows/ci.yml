@@ -107,7 +107,7 @@ jobs:
         run: |
           cd macos
           xcodebuild build \
-            -scheme minga-mac \
+            -scheme Minga \
             -configuration Debug \
             -derivedDataPath DerivedData \
             CODE_SIGNING_ALLOWED=NO
@@ -116,7 +116,7 @@ jobs:
         run: |
           cd macos
           xcodebuild test \
-            -scheme minga-mac \
+            -scheme Minga \
             -configuration Debug \
             -derivedDataPath DerivedData \
             CODE_SIGNING_ALLOWED=NO

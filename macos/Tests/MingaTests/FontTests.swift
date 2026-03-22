@@ -3,7 +3,6 @@
 import Testing
 import Foundation
 import CoreText
-@testable import minga_mac
 
 @Suite("FontFace resolution")
 @MainActor
