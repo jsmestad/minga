@@ -1,6 +1,7 @@
 defmodule Minga.Tool.ManagerTest do
   use ExUnit.Case, async: false
 
+  alias Minga.Events
   alias Minga.Tool.{Installation, Manager}
   alias Minga.Tool.Installer.Stub
 
@@ -10,6 +11,9 @@ defmodule Minga.Tool.ManagerTest do
     # Initialize the stub installer
     Stub.reset()
 
+    # Subscribe to install events so we can await completion without sleeping
+    subscribe_install_events()
+
     # Clean up any tools installed by previous tests.
     # The Manager is a singleton with a global ETS table.
     for inst <- Manager.all_installed() do
@@ -17,6 +21,24 @@ defmodule Minga.Tool.ManagerTest do
     end
 
     :ok
+  end
+
+  # Subscribe to install events so await_install/1 can receive them.
+  # Must be called BEFORE Manager.install so we don't miss the event.
+  defp subscribe_install_events do
+    Events.subscribe(:tool_install_complete)
+    Events.subscribe(:tool_install_failed)
+  end
+
+  # Waits for the Manager's async install task to finish by receiving
+  # the completion or failure event. No sleeping, no polling.
+  defp await_install(tool_name, timeout \\ 2000) do
+    receive do
+      {:minga_event, :tool_install_complete, %{name: ^tool_name}} -> :ok
+      {:minga_event, :tool_install_failed, %{name: ^tool_name}} -> :ok
+    after
+      timeout -> flunk("Install of #{tool_name} timed out after #{timeout}ms")
+    end
   end
 
   describe "installed?/1" do
@@ -40,9 +62,7 @@ defmodule Minga.Tool.ManagerTest do
       Stub.set_install_result({:ok, "1.1.400"})
 
       assert :ok = Manager.install(:pyright)
-
-      # Wait for the async task to complete
-      :timer.sleep(200)
+      await_install(:pyright)
 
       # Verify installed
       assert Manager.installed?(:pyright)
@@ -53,22 +73,23 @@ defmodule Minga.Tool.ManagerTest do
     test "returns error when already installed" do
       Stub.set_install_result({:ok, "1.0.0"})
       assert :ok = Manager.install(:prettier)
-      :timer.sleep(200)
+      await_install(:prettier)
 
       assert {:error, :already_installed} = Manager.install(:prettier)
     end
 
     test "returns error when already installing" do
-      Stub.set_install_delay(1000)
+      Stub.set_install_delay(500)
       assert :ok = Manager.install(:black)
       assert {:error, :already_installing} = Manager.install(:black)
+      await_install(:black)
     end
 
     test "handles install failure gracefully" do
       Stub.set_install_result({:error, "simulated failure"})
 
       assert :ok = Manager.install(:gopls)
-      :timer.sleep(200)
+      await_install(:gopls)
 
       # Should not be recorded as installed
       refute Manager.installed?(:gopls)
@@ -77,7 +98,7 @@ defmodule Minga.Tool.ManagerTest do
     test "records install in stub history" do
       Stub.set_install_result({:ok, "1.0.0"})
       Manager.install(:stylua)
-      :timer.sleep(200)
+      await_install(:stylua)
 
       assert :stylua in Stub.installs()
     end
@@ -91,7 +112,7 @@ defmodule Minga.Tool.ManagerTest do
     test "uninstalls an installed tool" do
       Stub.set_install_result({:ok, "1.0.0"})
       Manager.install(:zls)
-      :timer.sleep(200)
+      await_install(:zls)
       assert Manager.installed?(:zls)
 
       assert :ok = Manager.uninstall(:zls)
@@ -114,7 +135,7 @@ defmodule Minga.Tool.ManagerTest do
     test "shows installed tools as :installed" do
       Stub.set_install_result({:ok, "1.0.0"})
       Manager.install(:clangd)
-      :timer.sleep(200)
+      await_install(:clangd)
 
       statuses = Manager.tool_status_list()
       clangd = Enum.find(statuses, fn s -> s.recipe.name == :clangd end)
