@@ -37,6 +37,14 @@ struct MinibufferView: View {
             inputBar
         }
         .background(theme.popupBg)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Minibuffer")
+        .onChange(of: state.visible) { _, visible in
+            NSAccessibility.post(
+                element: NSApp.mainWindow as Any,
+                notification: visible ? .layoutChanged : .layoutChanged
+            )
+        }
     }
 
     // MARK: - Input bar
@@ -71,6 +79,10 @@ struct MinibufferView: View {
             Spacer().frame(width: 12)
         }
         .frame(height: barHeight)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(state.prompt)
+        .accessibilityValue(state.input)
+        .accessibilityAddTraits(state.isInputMode ? .isSearchField : .isStaticText)
     }
 
     // MARK: - Input text with blinking cursor
@@ -126,6 +138,7 @@ struct MinibufferView: View {
                         RoundedRectangle(cornerRadius: 4)
                             .fill(theme.popupFg.opacity(0.1))
                     )
+                    .accessibilityLabel("Press \(key)")
             }
 
             if !countPart.isEmpty {
@@ -134,6 +147,7 @@ struct MinibufferView: View {
                     .foregroundStyle(theme.popupFg.opacity(0.35))
             }
         }
+        .accessibilityElement(children: .contain)
     }
 
     // MARK: - Candidate list
@@ -157,6 +171,7 @@ struct MinibufferView: View {
                 }
             }
         }
+        .accessibilityLabel("\(state.candidates.count) results")
     }
 
     @ViewBuilder
@@ -207,6 +222,10 @@ struct MinibufferView: View {
             encoder?.sendMinibufferSelect(index: UInt16(candidate.id))
         }
         .id(candidate.id)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(candidate.label)
+        .accessibilityValue(candidate.description)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
     @ViewBuilder
