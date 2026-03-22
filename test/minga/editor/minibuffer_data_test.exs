@@ -248,5 +248,36 @@ defmodule Minga.Editor.MinibufferDataTest do
         assert c.match_score >= 0 and c.match_score <= 255
       end
     end
+
+    test "match_positions reflect matched character indices for exact match" do
+      {candidates, _total} = MinibufferData.complete_ex_command("save")
+      save = Enum.find(candidates, &(&1.label == "save"))
+      assert save != nil
+      # Exact match: all 4 characters at positions 0-3
+      assert save.match_positions == [0, 1, 2, 3]
+    end
+
+    test "match_positions for partial query show correct indices" do
+      {candidates, _total} = MinibufferData.complete_ex_command("sa")
+      save = Enum.find(candidates, &(&1.label == "save"))
+      assert save != nil
+      assert save.match_positions == [0, 1]
+    end
+
+    test "annotation is a string on every candidate" do
+      {candidates, _total} = MinibufferData.complete_ex_command("save")
+
+      for c <- candidates do
+        assert is_binary(c.annotation)
+      end
+    end
+
+    test "total_candidates reflects uncapped match count" do
+      {candidates, total} = MinibufferData.complete_ex_command("")
+      # Empty query returns popular commands (capped at 15)
+      assert length(candidates) <= 15
+      # Total should be >= candidates since it's the uncapped count
+      assert total >= length(candidates)
+    end
   end
 end
