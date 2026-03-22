@@ -31,22 +31,21 @@ defmodule Minga.MixProject do
           "docs/GETTING-STARTED.md",
           # Using Minga
           "docs/CONFIGURATION.md",
-          "docs/KEYMAP-SCOPES.md",
-          "docs/AGENTIC-KEYMAP.md",
           "docs/PROJECTS.md",
-          # Architecture
-          "docs/ARCHITECTURE.md",
-          "docs/PROTOCOL.md",
-          "docs/PERFORMANCE.md",
-          # Agent System
-          "docs/FOR-AI-CODERS.md",
-          "docs/BUFFER-AWARE-AGENTS.md",
-          # Extending Minga
-          "docs/EXTENSIBILITY.md",
           # Coming From...
           "docs/FOR-NEOVIM-USERS.md",
           "docs/FOR-EMACS-USERS.md",
           "docs/FOR-PI-USERS.md",
+          "docs/FOR-AI-CODERS.md",
+          # Extending Minga
+          "docs/EXTENSIBILITY.md",
+          "docs/KEYMAP-SCOPES.md",
+          "docs/AGENTIC-KEYMAP.md",
+          # Architecture
+          "docs/ARCHITECTURE.md",
+          "docs/PROTOCOL.md",
+          "docs/BUFFER-AWARE-AGENTS.md",
+          "docs/PERFORMANCE.md",
           # Development
           "CONTRIBUTING.md",
           "docs/RELEASING.md"
@@ -57,26 +56,24 @@ defmodule Minga.MixProject do
           ],
           "Using Minga": [
             "docs/CONFIGURATION.md",
-            "docs/KEYMAP-SCOPES.md",
-            "docs/AGENTIC-KEYMAP.md",
             "docs/PROJECTS.md"
-          ],
-          Architecture: [
-            "docs/ARCHITECTURE.md",
-            "docs/PROTOCOL.md",
-            "docs/PERFORMANCE.md"
-          ],
-          "Agent System": [
-            "docs/FOR-AI-CODERS.md",
-            "docs/BUFFER-AWARE-AGENTS.md"
-          ],
-          "Extending Minga": [
-            "docs/EXTENSIBILITY.md"
           ],
           "Coming From...": [
             "docs/FOR-NEOVIM-USERS.md",
             "docs/FOR-EMACS-USERS.md",
-            "docs/FOR-PI-USERS.md"
+            "docs/FOR-PI-USERS.md",
+            "docs/FOR-AI-CODERS.md"
+          ],
+          "Extending Minga": [
+            "docs/EXTENSIBILITY.md",
+            "docs/KEYMAP-SCOPES.md",
+            "docs/AGENTIC-KEYMAP.md"
+          ],
+          Architecture: [
+            "docs/ARCHITECTURE.md",
+            "docs/PROTOCOL.md",
+            "docs/BUFFER-AWARE-AGENTS.md",
+            "docs/PERFORMANCE.md"
           ],
           Development: [
             "CONTRIBUTING.md",
