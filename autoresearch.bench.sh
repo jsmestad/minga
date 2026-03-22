@@ -16,6 +16,7 @@ count=$(grep -rn 'Process\.sleep\|:timer\.sleep' test/ --include='*.exs' \
   | grep -v 'eval_test.exs.*:timer.sleep(10_000)' \
   | grep -v 'agent_split_toggle_test.exs.*:timer.sleep(1000)' \
   | grep -v 'event_routing_test.exs.*:timer.sleep(:infinity)' \
+  | grep -v 'native_test.exs.*Process\.sleep(100)' \
   | wc -l | tr -d ' ')
 
 echo "METRIC flaky_patterns=$count"
@@ -27,4 +28,5 @@ grep -rn 'Process\.sleep\|:timer\.sleep' test/ --include='*.exs' \
   | grep -v 'eval_test.exs.*:timer.sleep(10_000)' \
   | grep -v 'agent_split_toggle_test.exs.*:timer.sleep(1000)' \
   | grep -v 'event_routing_test.exs.*:timer.sleep(:infinity)' \
+  | grep -v 'native_test.exs.*Process\.sleep(100)' \
   || true

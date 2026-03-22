@@ -371,8 +371,8 @@ defmodule Minga.Agent.Providers.NativeTest do
       {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client)
       :ok = Native.send_prompt(pid, "Tell me a very long story")
 
-      # Give it a moment to start streaming
-      Process.sleep(50)
+      # Wait for streaming to actually start (AgentStart proves streaming: true)
+      assert_receive {:agent_provider_event, %Event.AgentStart{}}, 500
 
       assert :ok = Native.abort(pid)
 
@@ -492,7 +492,7 @@ defmodule Minga.Agent.Providers.NativeTest do
 
       {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client)
       :ok = Native.send_prompt(pid, "Long story")
-      Process.sleep(50)
+      assert_receive {:agent_provider_event, %Event.AgentStart{}}, 500
 
       assert {:error, "Already streaming"} = Native.continue(pid)
 
@@ -541,7 +541,7 @@ defmodule Minga.Agent.Providers.NativeTest do
       {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client)
       :ok = Native.send_prompt(pid, "First prompt")
 
-      Process.sleep(50)
+      assert_receive {:agent_provider_event, %Event.AgentStart{}}, 500
 
       assert {:error, :already_streaming} = Native.send_prompt(pid, "Second prompt")
 
