@@ -221,8 +221,8 @@ jobs:
       # Import Developer ID certificate into a temporary keychain
       - name: Import signing certificate
         env:
-          DEVELOPER_ID_CERT: ${{ secrets.DEVELOPER_ID_APPLICATION_CERT }}
-          DEVELOPER_ID_PASSWORD: ${{ secrets.DEVELOPER_ID_APPLICATION_PASSWORD }}
+          DEVELOPER_ID_CERT: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          DEVELOPER_ID_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
         run: |
           KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
           KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
@@ -305,7 +305,7 @@ jobs:
       - name: Notarize DMG
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+          APPLE_ID_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           xcrun notarytool submit "$dmg_path" \
