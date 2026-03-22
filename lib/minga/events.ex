@@ -34,6 +34,7 @@ defmodule Minga.Events do
   | `:buffer_changed` | `BufferChangedEvent` | `buffer: pid()`                   |
   | `:mode_changed`   | `ModeEvent`          | `old: atom(), new: atom()`        |
   | `:git_status_changed` | `GitStatusEvent` | `git_root, entries, branch, ahead, behind` |
+  | `:project_rebuilt` | `ProjectRebuiltEvent` | `root: String.t()` |
 
   ## Why Registry?
 
@@ -88,6 +89,14 @@ defmodule Minga.Events do
     @type t :: %__MODULE__{command: String.t()}
   end
 
+  defmodule ProjectRebuiltEvent do
+    @moduledoc "Payload for `:project_rebuilt` events. Published when the file cache rebuild completes."
+    @enforce_keys [:root]
+    defstruct [:root]
+
+    @type t :: %__MODULE__{root: String.t()}
+  end
+
   defmodule GitStatusEvent do
     @moduledoc "Payload for `:git_status_changed` events. Published by `Git.Repo` when repo status changes."
     @enforce_keys [:git_root, :entries, :branch, :ahead, :behind]
@@ -119,6 +128,7 @@ defmodule Minga.Events do
           | :tool_install_failed
           | :tool_uninstall_complete
           | :tool_missing
+          | :project_rebuilt
 
   @typedoc "Typed event payloads. Each topic has a specific struct."
   @type payload ::
@@ -127,6 +137,7 @@ defmodule Minga.Events do
           | BufferChangedEvent.t()
           | ModeEvent.t()
           | ToolMissingEvent.t()
+          | ProjectRebuiltEvent.t()
           | GitStatusEvent.t()
 
   # ── Child spec ──────────────────────────────────────────────────────────────
@@ -148,13 +159,17 @@ defmodule Minga.Events do
 
   The process will be included in `Registry.dispatch/3` callbacks when
   `broadcast/2` is called for this topic. A process can subscribe to
-  multiple topics. Subscribing to the same topic twice is allowed and
-  results in the callback being invoked twice per broadcast.
+  multiple topics. Subscribing to the same topic multiple times from
+  the same process is a no-op.
   """
   @spec subscribe(topic()) :: :ok
   def subscribe(topic) when is_atom(topic) do
     if Process.whereis(@registry) do
-      {:ok, _} = Registry.register(@registry, topic, [])
+      already? =
+        Registry.lookup(@registry, topic)
+        |> Enum.any?(fn {pid, _} -> pid == self() end)
+
+      unless already?, do: {:ok, _} = Registry.register(@registry, topic, [])
     end
 
     :ok
@@ -164,12 +179,17 @@ defmodule Minga.Events do
   Subscribes the calling process to a topic with metadata.
 
   The metadata value is passed to the dispatch callback alongside the pid,
-  which lets subscribers filter or tag their registrations.
+  which lets subscribers filter or tag their registrations. Subscribing
+  with the same topic and value from the same process is a no-op.
   """
   @spec subscribe(topic(), term()) :: :ok
   def subscribe(topic, value) when is_atom(topic) do
     if Process.whereis(@registry) do
-      {:ok, _} = Registry.register(@registry, topic, value)
+      already? =
+        Registry.lookup(@registry, topic)
+        |> Enum.any?(fn {pid, v} -> pid == self() and v == value end)
+
+      unless already?, do: {:ok, _} = Registry.register(@registry, topic, value)
     end
 
     :ok
@@ -203,6 +223,7 @@ defmodule Minga.Events do
   @spec broadcast(:buffer_changed, BufferChangedEvent.t()) :: :ok
   @spec broadcast(:mode_changed, ModeEvent.t()) :: :ok
   @spec broadcast(:tool_missing, ToolMissingEvent.t()) :: :ok
+  @spec broadcast(:project_rebuilt, ProjectRebuiltEvent.t()) :: :ok
   @spec broadcast(:git_status_changed, GitStatusEvent.t()) :: :ok
   def broadcast(topic, %_{} = payload) when is_atom(topic) do
     Registry.dispatch(@registry, topic, fn entries ->

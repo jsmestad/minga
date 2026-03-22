@@ -24,15 +24,22 @@ defmodule Minga.ProjectTest do
   # prior casts have been handled.
   defp flush(name), do: :sys.get_state(name)
 
-  # Polls until the async rebuild Task completes and files are cached.
-  # The rebuild is a Task.async that sends its result back to the
-  # GenServer via handle_info.
-  defp await_rebuild(name, max_attempts \\ 50) do
+  # Waits for the async rebuild Task to complete.
+  # Subscribes to :project_rebuilt and uses assert_receive if the
+  # GenServer is still rebuilding. Pins root to avoid consuming
+  # events from concurrent tests (async: true).
+  defp await_rebuild(name) do
+    Minga.Events.subscribe(:project_rebuilt)
     state = :sys.get_state(name)
 
-    if state.rebuilding? and max_attempts > 0 do
-      Process.sleep(10)
-      await_rebuild(name, max_attempts - 1)
+    if state.rebuilding? do
+      root = state.current_root
+
+      assert_receive {:minga_event, :project_rebuilt,
+                      %Minga.Events.ProjectRebuiltEvent{root: ^root}},
+                     5_000
+
+      :sys.get_state(name)
     else
       state
     end
