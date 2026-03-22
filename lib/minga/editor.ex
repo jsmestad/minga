@@ -432,13 +432,12 @@ defmodule Minga.Editor do
         {:minga_input, {:mouse_event, row, col, button, mods, event_type, click_count}},
         state
       ) do
+    snapshot = Input.Router.capture_snapshot(state)
+
     new_state =
       Input.Router.dispatch_mouse(state, row, col, button, mods, event_type, click_count)
 
-    # Scroll wheel events change the viewport; schedule inlay hint refresh.
-    # The function no-ops if the viewport top hasn't actually changed.
-    new_state = LspActions.schedule_inlay_hints_on_scroll(new_state)
-    new_state = Renderer.render(new_state)
+    new_state = Input.Router.post_action_housekeeping(new_state, snapshot)
     {:noreply, new_state}
   end
 
@@ -447,17 +446,18 @@ defmodule Minga.Editor do
         {:minga_input, {:mouse_event, row, col, button, mods, event_type}},
         state
       ) do
+    snapshot = Input.Router.capture_snapshot(state)
     new_state = Input.Router.dispatch_mouse(state, row, col, button, mods, event_type, 1)
-    new_state = LspActions.schedule_inlay_hints_on_scroll(new_state)
-    new_state = Renderer.render(new_state)
+    new_state = Input.Router.post_action_housekeeping(new_state, snapshot)
     {:noreply, new_state}
   end
 
   # ── GUI action events (semantic commands from SwiftUI chrome) ────────────
 
   def handle_info({:minga_input, {:gui_action, action}}, state) do
+    snapshot = Input.Router.capture_snapshot(state)
     new_state = handle_gui_action(state, action)
-    new_state = Renderer.render(new_state)
+    new_state = Input.Router.post_action_housekeeping(new_state, snapshot)
     {:noreply, new_state}
   end
 
