@@ -18,6 +18,11 @@ struct ToolManagerView: View {
     private let itemHeight: CGFloat = 64
     private let failedItemHeight: CGFloat = 96
 
+    /// Transition animation duration. Respects reduced motion.
+    private var animDuration: Double {
+        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.15
+    }
+
     var body: some View {
         if state.visible {
             ZStack {
@@ -57,7 +62,7 @@ struct ToolManagerView: View {
                 .offset(y: -30)
             }
             .allowsHitTesting(false)  // BEAM handles all input
-            .transition(.opacity.combined(with: .scale(scale: 0.97)).animation(.easeOut(duration: 0.15)))
+            .transition(.opacity.combined(with: .scale(scale: 0.97)).animation(.easeOut(duration: animDuration)))
         }
     }
 
