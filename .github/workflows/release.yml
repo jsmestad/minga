@@ -307,6 +307,7 @@ jobs:
             homepage "https://github.com/jsmestad/minga"
 
             app "Minga.app"
+            binary "#{{appdir}}/Minga.app/Contents/Resources/bin/minga"
 
             zap trash: [
               "~/Library/Application Support/minga",

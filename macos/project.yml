@@ -40,6 +40,17 @@ targets:
         COMBINE_HIDPI_IMAGES: "YES"
         MTL_LANGUAGE_REVISION: UseDeploymentTarget
     dependencies: []
+    postCompileScripts:
+      - name: Copy CLI launcher
+        script: |
+          mkdir -p "${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/bin"
+          cp "${SRCROOT}/Resources/bin/minga" "${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/bin/minga"
+          chmod +x "${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/bin/minga"
+        basedOnDependencyAnalysis: false
+        inputFiles:
+          - $(SRCROOT)/Resources/bin/minga
+        outputFiles:
+          - $(BUILT_PRODUCTS_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/bin/minga
     postBuildScripts:
       - name: Codesign
         script: |

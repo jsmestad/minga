@@ -160,6 +160,7 @@
 		3EED42A8B64B9CDFEF37ED9D /* SignatureHelpState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignatureHelpState.swift; sourceTree = "<group>"; };
 		42375D2D8B25AF31BEB11AB5 /* BitmapRasterizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BitmapRasterizer.swift; sourceTree = "<group>"; };
 		443B3C2F0C91435E5C5A2E73 /* BottomPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BottomPanelView.swift; sourceTree = "<group>"; };
+		45FDD575702B556527C10119 /* minga */ = {isa = PBXFileReference; path = minga; sourceTree = "<group>"; };
 		470991E7B3850B1AADFD46FD /* CommandDispatcherTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandDispatcherTests.swift; sourceTree = "<group>"; };
 		4742DDE225F256A140177301 /* LineTextureAtlas.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LineTextureAtlas.swift; sourceTree = "<group>"; };
 		47BD56B7D6D195D236F9BF40 /* ProtocolEncoderBinaryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolEncoderBinaryTests.swift; sourceTree = "<group>"; };
@@ -259,6 +260,14 @@
 			path = Fonts;
 			sourceTree = "<group>";
 		};
+		206B34B6897C65A6D1C21BFE /* bin */ = {
+			isa = PBXGroup;
+			children = (
+				45FDD575702B556527C10119 /* minga */,
+			);
+			path = bin;
+			sourceTree = "<group>";
+		};
 		4AACF7C989E8FDB12B3EC840 /* Font */ = {
 			isa = PBXGroup;
 			children = (
@@ -347,6 +356,7 @@
 			isa = PBXGroup;
 			children = (
 				F5647A59C841B3C408994CC7 /* Assets.xcassets */,
+				206B34B6897C65A6D1C21BFE /* bin */,
 				13651B343AC3A6E146620074 /* Fonts */,
 			);
 			path = Resources;
@@ -426,6 +436,7 @@
 			buildConfigurationList = D46DE51E179B7A9200E28B87 /* Build configuration list for PBXNativeTarget "Minga" */;
 			buildPhases = (
 				0DC99D5910B06BE8D7B8DE3E /* Sources */,
+				DE42BE7E030FEAA69E9EC033 /* Copy CLI launcher */,
 				F708F0C1577DD5141846EFB7 /* Resources */,
 				DB4598C0910E3166689E6F1A /* Codesign */,
 			);
@@ -505,6 +516,27 @@
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "codesign --force --deep --sign - \"${BUILT_PRODUCTS_DIR}/${FULL_PRODUCT_NAME}\"\n";
+		};
+		DE42BE7E030FEAA69E9EC033 /* Copy CLI launcher */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/Resources/bin/minga",
+			);
+			name = "Copy CLI launcher";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(BUILT_PRODUCTS_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/bin/minga",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "mkdir -p \"${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/bin\"\ncp \"${SRCROOT}/Resources/bin/minga\" \"${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/bin/minga\"\nchmod +x \"${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/bin/minga\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
