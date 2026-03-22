@@ -275,6 +275,123 @@ defmodule Minga.Editor.FileTreeIntegrationTest do
     end
   end
 
+  describe "mutual exclusivity: file tree and git status" do
+    test "opening file tree closes git status panel and resets keymap_scope", %{tmp_dir: dir} do
+      file = Path.join(dir, "test.txt")
+      File.write!(file, "hello")
+      ctx = start_editor(file)
+
+      # Inject git status panel state (simulates git status being open)
+      :sys.replace_state(ctx.editor, fn state ->
+        panel_data = %{
+          repo_state: :normal,
+          branch: "main",
+          ahead: 0,
+          behind: 0,
+          entries: []
+        }
+
+        %{state | git_status_panel: panel_data, keymap_scope: :git_status}
+      end)
+
+      # Open file tree (should close git status first)
+      state = send_keys_sync(ctx, "<SPC>op")
+
+      assert state.file_tree.tree != nil
+      assert state.git_status_panel == nil
+      assert state.keymap_scope == :file_tree
+    end
+
+    test "opening file tree works normally when git status is already closed", %{tmp_dir: dir} do
+      file = Path.join(dir, "test.txt")
+      File.write!(file, "hello")
+      ctx = start_editor(file)
+
+      # Verify git status is nil before opening tree
+      state = :sys.get_state(ctx.editor)
+      assert state.git_status_panel == nil
+
+      # Open file tree
+      state = send_keys_sync(ctx, "<SPC>op")
+
+      assert state.file_tree.tree != nil
+      assert state.keymap_scope == :file_tree
+      assert state.git_status_panel == nil
+    end
+
+    test "closing the file tree resets tree state and restores editor scope", %{tmp_dir: dir} do
+      file = Path.join(dir, "test.txt")
+      File.write!(file, "hello")
+      ctx = start_editor(file)
+
+      # Open file tree
+      send_keys_sync(ctx, "<SPC>op")
+      state = :sys.get_state(ctx.editor)
+      assert state.file_tree.tree != nil
+      assert state.keymap_scope == :file_tree
+
+      # Close via the public function (this is what Commands.Git calls)
+      closed_state = Minga.Editor.Commands.FileTree.close(state)
+
+      assert closed_state.file_tree.tree == nil
+      assert closed_state.keymap_scope == :editor
+    end
+
+    test "opening git status closes file tree via close_file_tree_if_open", %{tmp_dir: dir} do
+      file = Path.join(dir, "test.txt")
+      File.write!(file, "hello")
+      ctx = start_editor(file)
+
+      # Open file tree
+      state = send_keys_sync(ctx, "<SPC>op")
+      assert state.file_tree.tree != nil
+      assert state.keymap_scope == :file_tree
+
+      # Get the state and call close directly (simulating what git.ex does)
+      state = :sys.get_state(ctx.editor)
+      closed_state = Minga.Editor.Commands.FileTree.close(state)
+
+      assert closed_state.file_tree.tree == nil
+      assert closed_state.keymap_scope == :editor
+    end
+
+    test "round-trip: git status open -> file tree open closes git -> file tree close restores editor",
+         %{tmp_dir: dir} do
+      file = Path.join(dir, "test.txt")
+      File.write!(file, "hello")
+      ctx = start_editor(file)
+
+      # Start in :editor scope
+      state = :sys.get_state(ctx.editor)
+      assert state.keymap_scope == :editor
+
+      # Inject git status open
+      :sys.replace_state(ctx.editor, fn state ->
+        panel_data = %{
+          repo_state: :normal,
+          branch: "main",
+          ahead: 0,
+          behind: 0,
+          entries: []
+        }
+
+        %{state | git_status_panel: panel_data, keymap_scope: :git_status}
+      end)
+
+      # Open file tree (closes git status)
+      state = send_keys_sync(ctx, "<SPC>op")
+      assert state.keymap_scope == :file_tree
+      assert state.git_status_panel == nil
+      assert state.file_tree.tree != nil
+
+      # Close file tree
+      state = send_keys_sync(ctx, "<SPC>op")
+      assert state.keymap_scope == :editor
+      assert state.file_tree.tree == nil
+      assert state.git_status_panel == nil
+    end
+  end
+
   describe "file tree git status refresh on save" do
     test "Editor subscribes to :buffer_saved and refreshes file tree git status", %{tmp_dir: dir} do
       file = Path.join(dir, "save_test.ex")

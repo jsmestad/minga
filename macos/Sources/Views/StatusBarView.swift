@@ -166,6 +166,10 @@ struct StatusBarView: View {
     let state: StatusBarState
     let theme: ThemeColors
     let encoder: InputEncoder?
+    var isFileTreeVisible: Bool = false
+    var isGitStatusVisible: Bool = false
+    var isBottomPanelVisible: Bool = false
+    var isAgentChatVisible: Bool = false
 
     private let barHeight: CGFloat = 24
 
@@ -265,6 +269,8 @@ struct StatusBarView: View {
             // File tree toggle
             StatusBarIconButton(
                 icon: "sidebar.leading",
+                isActive: isFileTreeVisible,
+                accentFg: theme.statusbarAccentFg,
                 barHeight: barHeight,
                 barFg: theme.modelineBarFg,
                 tooltip: "Toggle file tree (SPC o p)"
@@ -272,15 +278,35 @@ struct StatusBarView: View {
                 encoder?.sendTogglePanel(panel: 0)
             }
 
+            // Source control toggle
+            StatusBarIconButton(
+                icon: "point.3.filled.connected.trianglepath.dotted",
+                isActive: isGitStatusVisible,
+                accentFg: theme.statusbarAccentFg,
+                barHeight: barHeight,
+                barFg: theme.modelineBarFg,
+                tooltip: "Git status (SPC g g)"
+            ) {
+                encoder?.sendTogglePanel(panel: 2)
+            }
+
             // Bottom panel toggle
             StatusBarIconButton(
                 icon: "rectangle.bottomhalf.inset.filled",
+                isActive: isBottomPanelVisible,
+                accentFg: theme.statusbarAccentFg,
                 barHeight: barHeight,
                 barFg: theme.modelineBarFg,
-                tooltip: "Toggle messages panel"
+                tooltip: "Toggle messages (SPC b m)"
             ) {
                 encoder?.sendTogglePanel(panel: 1)
             }
+
+            // Divider between toggle icons and informational segments
+            Rectangle()
+                .fill(theme.modelineBarFg.opacity(0.1))
+                .frame(width: 1, height: 14)
+                .padding(.horizontal, 4)
 
             // Agent status (thinking/executing/error; hidden when idle)
             agentStatusIcon
@@ -456,6 +482,18 @@ struct StatusBarView: View {
     @ViewBuilder
     private var rightSegment: some View {
         HStack(spacing: 8) {
+            // Agent chat toggle
+            StatusBarIconButton(
+                icon: "bubble.left.and.text.bubble.right",
+                isActive: isAgentChatVisible,
+                accentFg: theme.statusbarAccentFg,
+                barHeight: barHeight,
+                barFg: theme.modelineBarFg,
+                tooltip: "Toggle agent chat (SPC a a)"
+            ) {
+                encoder?.sendTogglePanel(panel: 3)
+            }
+
             // Parser status (only when degraded)
             parserStatusIcon
 
@@ -540,9 +578,13 @@ struct StatusBarView: View {
 // MARK: - Reusable toolbar-style icon button with hover highlight
 
 /// A compact icon button that shows a subtle rounded-rect fill on hover,
-/// matching the Xcode / VS Code toolbar button aesthetic.
+/// matching the Xcode / VS Code toolbar button aesthetic. Supports an
+/// active/inactive state for panel toggle icons: active shows the accent
+/// color at full opacity, inactive dims to 0.45 opacity.
 private struct StatusBarIconButton: View {
     let icon: String
+    var isActive: Bool = false
+    var accentFg: Color = .accentColor
     let barHeight: CGFloat
     let barFg: Color
     var tooltip: String = ""
@@ -550,23 +592,42 @@ private struct StatusBarIconButton: View {
 
     @State private var isHovered = false
 
+    private var iconColor: Color {
+        if isActive {
+            return accentFg
+        }
+        return barFg.opacity(isHovered ? 0.7 : 0.45)
+    }
+
     var body: some View {
+        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+
         Button(action: action) {
             Image(systemName: icon)
                 .font(.system(size: 10.5, weight: .medium))
-                .foregroundStyle(barFg.opacity(isHovered ? 0.9 : 0.6))
+                .foregroundStyle(iconColor)
                 .frame(width: 26, height: barHeight)
                 .contentShape(Rectangle())
                 .background(
                     RoundedRectangle(cornerRadius: 4)
-                        .fill(barFg.opacity(isHovered ? 0.10 : 0))
+                        .fill(barFg.opacity(isHovered ? 0.08 : 0))
                         .padding(.horizontal, 2)
+                )
+                .animation(
+                    reduceMotion ? nil : .easeInOut(duration: 0.15),
+                    value: isActive
                 )
         }
         .buttonStyle(.plain)
         .help(tooltip)
         .onHover { hovering in
-            isHovered = hovering
+            if reduceMotion {
+                isHovered = hovering
+            } else {
+                withAnimation(.easeInOut(duration: 0.12)) {
+                    isHovered = hovering
+                }
+            }
             if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
         }
     }

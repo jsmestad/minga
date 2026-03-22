@@ -1758,6 +1758,14 @@ defmodule Minga.Editor do
     %{state | bottom_panel: BottomPanel.toggle(state.bottom_panel)}
   end
 
+  defp handle_gui_action(state, {:toggle_panel, 2}) do
+    Commands.Git.execute(state, :git_status_toggle)
+  end
+
+  defp handle_gui_action(state, {:toggle_panel, 3}) do
+    Commands.Agent.toggle_agent_split(state)
+  end
+
   defp handle_gui_action(state, {:toggle_panel, _panel}) do
     state
   end
