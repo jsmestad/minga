@@ -374,6 +374,69 @@ defmodule Minga.Test.EditorCase do
     BufferServer.cursor(buffer)
   end
 
+  @doc "Returns the full editor state (via :sys.get_state). Race-free."
+  @spec editor_state(editor_ctx()) :: Minga.Editor.State.t()
+  def editor_state(%{editor: editor}) do
+    :sys.get_state(editor)
+  end
+
+  @doc "Returns the number of open buffers."
+  @spec buffer_count(editor_ctx()) :: non_neg_integer()
+  def buffer_count(%{editor: editor}) do
+    length(:sys.get_state(editor).buffers.list)
+  end
+
+  @doc "Returns the active buffer index (0-based)."
+  @spec active_buffer_index(editor_ctx()) :: non_neg_integer()
+  def active_buffer_index(%{editor: editor}) do
+    :sys.get_state(editor).buffers.active_index
+  end
+
+  @doc "Returns the active buffer pid."
+  @spec active_buffer(editor_ctx()) :: pid() | nil
+  def active_buffer(%{editor: editor}) do
+    :sys.get_state(editor).buffers.active
+  end
+
+  @doc "Returns the content of the active buffer."
+  @spec active_content(editor_ctx()) :: String.t()
+  def active_content(ctx) do
+    case active_buffer(ctx) do
+      nil -> ""
+      buf -> BufferServer.content(buf)
+    end
+  end
+
+  @doc "Returns whether the window tree contains a split."
+  @spec has_split?(editor_ctx()) :: boolean()
+  def has_split?(%{editor: editor}) do
+    Minga.Editor.State.Windows.split?(:sys.get_state(editor).windows)
+  end
+
+  @doc "Returns the number of windows."
+  @spec window_count(editor_ctx()) :: non_neg_integer()
+  def window_count(%{editor: editor}) do
+    map_size(:sys.get_state(editor).windows.map)
+  end
+
+  @doc "Returns the active window id."
+  @spec active_window_id(editor_ctx()) :: pos_integer()
+  def active_window_id(%{editor: editor}) do
+    :sys.get_state(editor).windows.active
+  end
+
+  @doc "Returns true if a picker is currently open."
+  @spec picker_open?(editor_ctx()) :: boolean()
+  def picker_open?(%{editor: editor}) do
+    Minga.Editor.State.Picker.open?(:sys.get_state(editor).picker_ui)
+  end
+
+  @doc "Returns the active picker state, or nil."
+  @spec picker_state(editor_ctx()) :: Minga.Picker.t() | nil
+  def picker_state(%{editor: editor}) do
+    :sys.get_state(editor).picker_ui.picker
+  end
+
   @doc "Returns the cell at a given screen row and col."
   @spec screen_cell(editor_ctx(), non_neg_integer(), non_neg_integer()) :: map()
   def screen_cell(%{port: port}, row, col) do
