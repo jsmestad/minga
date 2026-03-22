@@ -100,18 +100,27 @@ struct CompletionOverlay: View {
             )
     }
 
+    /// Maps LSP completion kind to a display letter and theme-driven color.
+    /// Colors use existing theme slots for consistency across light/dark themes.
+    ///
+    /// Semantic grouping:
+    /// - `popupKeyFg` (blue): callable things (functions, methods)
+    /// - `popupGroupFg` (purple): structural things (modules, keywords)
+    /// - `gutterWarningFg` (yellow): data things (variables, structs, enums)
+    /// - `statusbarAccentFg` (accent): reference things (fields, constants)
+    /// - `gitAddedFg` (green): snippets
     private func kindDisplay(_ kind: UInt8) -> (String, Color) {
         switch kind {
-        case 1:  return ("ƒ", Color(red: 0.56, green: 0.74, blue: 0.96))  // function
-        case 2:  return ("m", Color(red: 0.56, green: 0.74, blue: 0.96))  // method
-        case 3:  return ("v", Color(red: 0.73, green: 0.74, blue: 0.41))  // variable
-        case 4:  return ("f", Color(red: 0.86, green: 0.55, blue: 0.19))  // field
-        case 5:  return ("M", Color(red: 0.78, green: 0.47, blue: 0.86))  // module
-        case 7:  return ("k", Color(red: 0.78, green: 0.47, blue: 0.86))  // keyword
-        case 8:  return ("s", Color(red: 0.60, green: 0.74, blue: 0.40))  // snippet
-        case 9:  return ("c", Color(red: 0.86, green: 0.55, blue: 0.19))  // constant
-        case 11: return ("S", Color(red: 0.86, green: 0.75, blue: 0.48))  // struct
-        case 12: return ("E", Color(red: 0.86, green: 0.75, blue: 0.48))  // enum
+        case 1:  return ("ƒ", theme.popupKeyFg)         // function
+        case 2:  return ("m", theme.popupKeyFg)         // method
+        case 3:  return ("v", theme.gutterWarningFg)    // variable
+        case 4:  return ("f", theme.statusbarAccentFg)  // field
+        case 5:  return ("M", theme.popupGroupFg)       // module
+        case 7:  return ("k", theme.popupGroupFg)       // keyword
+        case 8:  return ("s", theme.gitAddedFg)         // snippet
+        case 9:  return ("c", theme.statusbarAccentFg)  // constant
+        case 11: return ("S", theme.gutterWarningFg)    // struct
+        case 12: return ("E", theme.gutterWarningFg)    // enum
         default: return ("·", theme.popupFg.opacity(0.5))
         }
     }
