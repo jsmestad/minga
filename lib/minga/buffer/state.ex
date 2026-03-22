@@ -28,8 +28,12 @@ defmodule Minga.Buffer.State do
   """
   @type buffer_type :: :file | :nofile | :nowrite | :prompt | :terminal
 
-  @typedoc "An undo/redo stack entry: the document snapshot and its version at capture time."
-  @type stack_entry :: {non_neg_integer(), Document.t()}
+  @typedoc "The source of an edit for undo/redo attribution."
+  @type edit_source :: :user | :agent | :lsp
+
+  @typedoc "An undo/redo stack entry: the document snapshot, version, and edit source."
+  @type stack_entry ::
+          {version :: non_neg_integer(), document :: Document.t(), source :: edit_source()}
 
   @enforce_keys [:document]
   defstruct document: nil,
@@ -129,19 +133,19 @@ defmodule Minga.Buffer.State do
   single undo step while preserving distinct undo entries for edits
   separated by a pause.
   """
-  @spec push_undo(t(), Document.t()) :: t()
-  def push_undo(%__MODULE__{} = state, new_buf) do
+  @spec push_undo(t(), Document.t(), edit_source()) :: t()
+  def push_undo(%__MODULE__{} = state, new_buf, source) when source in [:user, :agent, :lsp] do
     now = System.monotonic_time(:millisecond)
     elapsed = now - state.last_undo_at
 
-    push_undo(state, new_buf, now, elapsed)
+    do_push_undo(state, new_buf, source, now, elapsed)
   end
 
   # First undo ever, or enough time has passed: push a new entry.
-  @spec push_undo(t(), Document.t(), integer(), integer()) :: t()
-  defp push_undo(%__MODULE__{} = state, new_buf, now, elapsed)
+  @spec do_push_undo(t(), Document.t(), edit_source(), integer(), integer()) :: t()
+  defp do_push_undo(%__MODULE__{} = state, new_buf, source, now, elapsed)
        when state.last_undo_at == 0 or elapsed >= @undo_coalesce_ms do
-    entry = {state.version, state.document}
+    entry = {state.version, state.document, source}
 
     new_undo =
       [entry | state.undo_stack]
@@ -151,21 +155,24 @@ defmodule Minga.Buffer.State do
   end
 
   # Within the coalescing window: replace document, keep stack as-is.
-  defp push_undo(%__MODULE__{} = state, new_buf, now, _elapsed) do
+  # Source is ignored here; the stack entry was already recorded with the
+  # source from the first edit in this coalescing window.
+  defp do_push_undo(%__MODULE__{} = state, new_buf, _source, now, _elapsed) do
     %{state | document: new_buf, redo_stack: [], last_undo_at: now}
   end
 
   @doc """
   Pushes an undo entry unconditionally, bypassing time-based coalescing.
 
-  Use this for explicit user actions (like `:replace_content`) where
-  each invocation should always be a separate undo step regardless of
+  Use this for explicit actions (like `:replace_content`, agent batch edits)
+  where each invocation should always be a separate undo step regardless of
   timing.
   """
-  @spec push_undo_force(t(), Document.t()) :: t()
-  def push_undo_force(%__MODULE__{} = state, new_buf) do
+  @spec push_undo_force(t(), Document.t(), edit_source()) :: t()
+  def push_undo_force(%__MODULE__{} = state, new_buf, source)
+      when source in [:user, :agent, :lsp] do
     now = System.monotonic_time(:millisecond)
-    entry = {state.version, state.document}
+    entry = {state.version, state.document, source}
 
     new_undo =
       [entry | state.undo_stack]

@@ -694,6 +694,83 @@ defmodule Minga.Buffer.ServerTest do
     end
   end
 
+  describe "undo source metadata" do
+    test "user edits are tagged :user in undo stack" do
+      pid = start_supervised!({Server, content: "hello"})
+      Server.insert_char(pid, "X")
+
+      %{undo_stack: [{_version, _doc, source} | _]} = :sys.get_state(pid)
+      assert source == :user
+    end
+
+    test "agent edits (find_and_replace) are tagged :agent" do
+      pid = start_supervised!({Server, content: "hello world"})
+      Server.find_and_replace(pid, "hello", "goodbye")
+
+      %{undo_stack: [{_version, _doc, source} | _]} = :sys.get_state(pid)
+      assert source == :agent
+    end
+
+    test "agent batch edits (find_and_replace_batch) are tagged :agent" do
+      pid = start_supervised!({Server, content: "hello world"})
+      Server.find_and_replace_batch(pid, [{"hello", "goodbye"}])
+
+      %{undo_stack: [{_version, _doc, source} | _]} = :sys.get_state(pid)
+      assert source == :agent
+    end
+
+    test "LSP batch edits (apply_text_edits) are tagged :lsp" do
+      pid = start_supervised!({Server, content: "hello"})
+      Server.apply_text_edits(pid, [{{0, 0}, {0, 5}, "goodbye"}])
+
+      %{undo_stack: [{_version, _doc, source} | _]} = :sys.get_state(pid)
+      assert source == :lsp
+    end
+
+    test "source metadata survives undo/redo round-trip" do
+      pid = start_supervised!({Server, content: "hello world"})
+      Server.find_and_replace(pid, "hello", "goodbye")
+
+      # Undo pops the agent entry and creates a redo entry carrying the source
+      Server.undo(pid)
+      %{redo_stack: [{_version, _doc, source} | _]} = :sys.get_state(pid)
+      assert source == :agent
+
+      # Redo pushes it back to undo_stack
+      Server.redo(pid)
+      %{undo_stack: [{_version, _doc, source} | _]} = :sys.get_state(pid)
+      assert source == :agent
+    end
+
+    test "replace_content with :agent source is tagged :agent" do
+      pid = start_supervised!({Server, content: "hello"})
+      Server.replace_content(pid, "goodbye", :agent)
+
+      %{undo_stack: [{_version, _doc, source} | _]} = :sys.get_state(pid)
+      assert source == :agent
+    end
+
+    test "replace_content defaults to :user source" do
+      pid = start_supervised!({Server, content: "hello"})
+      Server.replace_content(pid, "goodbye")
+
+      %{undo_stack: [{_version, _doc, source} | _]} = :sys.get_state(pid)
+      assert source == :user
+    end
+
+    test "interleaved user and agent edits preserve correct sources" do
+      pid = start_supervised!({Server, content: "hello world"})
+
+      Server.insert_char(pid, "X")
+      Server.break_undo_coalescing(pid)
+      Server.find_and_replace(pid, "Xhello", "goodbye")
+
+      %{undo_stack: [{_, _, agent_source}, {_, _, user_source} | _]} = :sys.get_state(pid)
+      assert agent_source == :agent
+      assert user_source == :user
+    end
+  end
+
   describe "edit delta tracking" do
     test "insert_char records an insertion delta" do
       {:ok, pid} = Server.start_link(content: "hello")
