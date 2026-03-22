@@ -237,6 +237,19 @@ struct ContentView: View {
             theme: appState.gui.themeColors,
             encoder: appState.encoder
         )
+
+        // Float popup overlay (centered, like picker)
+        if appState.gui.floatPopupState.visible {
+            let cw = CGFloat(appState.editorNSView?.cellWidth ?? 8)
+            let ch = CGFloat(appState.editorNSView?.cellHeight ?? 16)
+
+            FloatPopupOverlay(
+                state: appState.gui.floatPopupState,
+                theme: appState.gui.themeColors,
+                cellWidth: cw,
+                cellHeight: ch
+            )
+        }
         }
         .navigationTitle(appState.windowTitle)
         .toolbarBackground(appState.windowBgColor ?? Color(red: 0.12, green: 0.12, blue: 0.14), for: .windowToolbar)

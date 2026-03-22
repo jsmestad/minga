@@ -103,6 +103,81 @@ defmodule Minga.Port.GUIHoverProtocolTest do
     end
   end
 
+  # ── Float Popup ────────────────────────────────────────────────────
+
+  @op_gui_float_popup 0x83
+
+  describe "encode_gui_float_popup/1" do
+    test "hidden state encodes to 2 bytes" do
+      assert <<@op_gui_float_popup, 0>> = ProtocolGUI.encode_gui_float_popup(%{visible: false})
+    end
+
+    test "visible popup with title and content lines" do
+      data = %{
+        visible: true,
+        title: "*Help*",
+        lines: ["Line one", "Line two"],
+        width: 60,
+        height: 20
+      }
+
+      result = ProtocolGUI.encode_gui_float_popup(data)
+
+      # opcode(1) + visible(1) + width(2) + height(2) + title_len(2) + title + line_count(2)
+      assert <<@op_gui_float_popup, 1, 60::16, 20::16, 6::16, "*Help*", 2::16, rest::binary>> =
+               result
+
+      # line 1
+      assert <<8::16, "Line one", remaining::binary>> = rest
+      # line 2
+      assert <<8::16, "Line two">> = remaining
+    end
+
+    test "visible popup with empty title" do
+      data = %{visible: true, title: "", lines: ["hello"], width: 40, height: 10}
+      result = ProtocolGUI.encode_gui_float_popup(data)
+      assert <<@op_gui_float_popup, 1, 40::16, 10::16, 0::16, 1::16, 5::16, "hello">> = result
+    end
+  end
+
+  # ── Split Separators ──────────────────────────────────────────────
+
+  @op_gui_split_separators 0x84
+
+  describe "encode_gui_split_separators/3" do
+    test "empty separators encode correctly" do
+      result = ProtocolGUI.encode_gui_split_separators(0x5B6268, [], [])
+      assert <<@op_gui_split_separators, 0x5B, 0x62, 0x68, 0, 0>> = result
+    end
+
+    test "vertical separators encode correctly" do
+      verticals = [{10, 0, 24}]
+      result = ProtocolGUI.encode_gui_split_separators(0xABCDEF, verticals, [])
+
+      assert <<@op_gui_split_separators, 0xAB, 0xCD, 0xEF, 1, 10::16, 0::16, 24::16, 0>> =
+               result
+    end
+
+    test "horizontal separators with filename encode correctly" do
+      horizontals = [{12, 0, 80, "editor.ex"}]
+      result = ProtocolGUI.encode_gui_split_separators(0x333333, [], horizontals)
+
+      assert <<@op_gui_split_separators, 0x33, 0x33, 0x33, 0, 1, 12::16, 0::16, 80::16, 9::16,
+               "editor.ex">> = result
+    end
+
+    test "mixed vertical and horizontal separators" do
+      verticals = [{40, 0, 30}, {80, 0, 30}]
+      horizontals = [{15, 0, 40, "foo.ex"}]
+      result = ProtocolGUI.encode_gui_split_separators(0x555555, verticals, horizontals)
+
+      # Header: opcode + color(3) + vert_count(1)
+      assert <<@op_gui_split_separators, 0x55, 0x55, 0x55, 2, rest::binary>> = result
+      # Two vertical entries (6 bytes each) + horiz_count(1) + horizontal data
+      assert <<40::16, 0::16, 30::16, 80::16, 0::16, 30::16, 1, _horiz::binary>> = rest
+    end
+  end
+
   # ── Signature Help ──────────────────────────────────────────────────
 
   describe "encode_gui_signature_help/1" do

@@ -45,6 +45,8 @@ enum RenderCommand: Sendable {
     case guiMinibuffer(visible: Bool, mode: UInt8, cursorPos: UInt16, prompt: String, input: String, context: String, selectedIndex: UInt16, candidates: [GUIMinibufferCandidate])
     case guiHoverPopup(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, focused: Bool, scrollOffset: UInt16, lines: [GUIHoverLine])
     case guiSignatureHelp(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, activeSignature: UInt8, activeParameter: UInt8, signatures: [GUISignature])
+    case guiFloatPopup(visible: Bool, width: UInt16, height: UInt16, title: String, lines: [String])
+    case guiSplitSeparators(borderColor: UInt32, verticals: [GUIVerticalSeparator], horizontals: [GUIHorizontalSeparator])
 }
 
 // MARK: - Minibuffer data types
@@ -111,6 +113,23 @@ struct GUISignature: Sendable {
     let label: String
     let documentation: String
     let parameters: [GUISignatureParameter]
+}
+
+// MARK: - Split separator data types
+
+/// A vertical split separator line.
+struct GUIVerticalSeparator: Sendable {
+    let col: UInt16
+    let startRow: UInt16
+    let endRow: UInt16
+}
+
+/// A horizontal split separator with a centered filename.
+struct GUIHorizontalSeparator: Sendable {
+    let row: UInt16
+    let col: UInt16
+    let width: UInt16
+    let filename: String
 }
 
 // MARK: - Tool Manager data types
@@ -1578,6 +1597,79 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         return (.guiSignatureHelp(visible: true, anchorRow: shAnchorRow, anchorCol: shAnchorCol,
                                    activeSignature: shActiveSig, activeParameter: shActiveParam,
                                    signatures: signatures), shPos - offset)
+
+    case OP_GUI_FLOAT_POPUP:
+        // visible(1)
+        guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
+        let fpVisible = data[rest] != 0
+        guard fpVisible else {
+            return (.guiFloatPopup(visible: false, width: 0, height: 0, title: "", lines: []), 2)
+        }
+        // width(2) + height(2) + title_len(2)
+        guard data.count >= rest + 7 else { throw ProtocolDecodeError.malformed }
+        let fpWidth = readU16(data, rest + 1)
+        let fpHeight = readU16(data, rest + 3)
+        let fpTitleLen = Int(readU16(data, rest + 5))
+        var fpPos = rest + 7
+        guard data.count >= fpPos + fpTitleLen else { throw ProtocolDecodeError.malformed }
+        let fpTitle = String(data: data[fpPos..<(fpPos + fpTitleLen)], encoding: .utf8) ?? ""
+        fpPos += fpTitleLen
+        // line_count(2)
+        guard data.count >= fpPos + 2 else { throw ProtocolDecodeError.malformed }
+        let fpLineCount = Int(readU16(data, fpPos)); fpPos += 2
+        var fpLines: [String] = []
+        fpLines.reserveCapacity(fpLineCount)
+        for _ in 0..<fpLineCount {
+            guard data.count >= fpPos + 2 else { throw ProtocolDecodeError.malformed }
+            let lineLen = Int(readU16(data, fpPos)); fpPos += 2
+            guard data.count >= fpPos + lineLen else { throw ProtocolDecodeError.malformed }
+            let line = String(data: data[fpPos..<(fpPos + lineLen)], encoding: .utf8) ?? ""
+            fpPos += lineLen
+            fpLines.append(line)
+        }
+        return (.guiFloatPopup(visible: true, width: fpWidth, height: fpHeight,
+                                title: fpTitle, lines: fpLines), fpPos - offset)
+
+    case OP_GUI_SPLIT_SEPARATORS:
+        // border_color_rgb(3) + vertical_count(1)
+        guard data.count >= rest + 4 else { throw ProtocolDecodeError.malformed }
+        let sepR = data[rest]
+        let sepG = data[rest + 1]
+        let sepB = data[rest + 2]
+        let sepColor: UInt32 = (UInt32(sepR) << 16) | (UInt32(sepG) << 8) | UInt32(sepB)
+        let vertCount = Int(data[rest + 3])
+        var sepPos = rest + 4
+        var verts: [GUIVerticalSeparator] = []
+        verts.reserveCapacity(vertCount)
+        for _ in 0..<vertCount {
+            // col(2) + start_row(2) + end_row(2)
+            guard data.count >= sepPos + 6 else { throw ProtocolDecodeError.malformed }
+            let col = readU16(data, sepPos)
+            let startRow = readU16(data, sepPos + 2)
+            let endRow = readU16(data, sepPos + 4)
+            sepPos += 6
+            verts.append(GUIVerticalSeparator(col: col, startRow: startRow, endRow: endRow))
+        }
+        // horizontal_count(1)
+        guard data.count >= sepPos + 1 else { throw ProtocolDecodeError.malformed }
+        let horizCount = Int(data[sepPos]); sepPos += 1
+        var horizs: [GUIHorizontalSeparator] = []
+        horizs.reserveCapacity(horizCount)
+        for _ in 0..<horizCount {
+            // row(2) + col(2) + width(2) + filename_len(2)
+            guard data.count >= sepPos + 8 else { throw ProtocolDecodeError.malformed }
+            let hRow = readU16(data, sepPos)
+            let hCol = readU16(data, sepPos + 2)
+            let hWidth = readU16(data, sepPos + 4)
+            let fnLen = Int(readU16(data, sepPos + 6))
+            sepPos += 8
+            guard data.count >= sepPos + fnLen else { throw ProtocolDecodeError.malformed }
+            let fn = String(data: data[sepPos..<(sepPos + fnLen)], encoding: .utf8) ?? ""
+            sepPos += fnLen
+            horizs.append(GUIHorizontalSeparator(row: hRow, col: hCol, width: hWidth, filename: fn))
+        }
+        return (.guiSplitSeparators(borderColor: sepColor, verticals: verts, horizontals: horizs),
+                sepPos - offset)
 
     default:
         throw ProtocolDecodeError.unknownOpcode(opcode)

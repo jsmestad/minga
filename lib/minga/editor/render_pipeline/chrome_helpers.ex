@@ -370,6 +370,16 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
 
   @typep separator_span :: {non_neg_integer(), non_neg_integer(), non_neg_integer()}
 
+  @doc """
+  Collects vertical separator positions from the window tree.
+
+  Returns a list of `{col, start_row, end_row}` tuples for each
+  vertical split border. Used by both TUI (to render `│` characters)
+  and GUI (to render native Metal quads via 0x84 opcode).
+  """
+  @spec collect_vertical_separators(WindowTree.t(), WindowTree.rect()) :: [separator_span()]
+  def collect_vertical_separators(tree, rect), do: collect_separators(tree, rect)
+
   @spec collect_separators(WindowTree.t(), WindowTree.rect()) :: [separator_span()]
   defp collect_separators({:leaf, _}, _rect), do: []
 

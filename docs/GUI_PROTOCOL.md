@@ -577,6 +577,39 @@ When visible=0, no further fields are sent. The frontend hides the popup.
 The frontend highlights the active parameter (identified by `active_parameter` index) within the active signature's label string by matching the parameter label as a substring.
 ```
 
+### 0x83 — gui_float_popup
+
+Centered float popup window for buffer content (e.g. `*Help*`). The BEAM reads the buffer content and sends it as plain text lines. The frontend renders as a centered panel with a title bar and scrollable content.
+
+```
+opcode(1) + visible(1) + width(2) + height(2) + title_len(2) + title(title_len) + line_count(2) + lines...
+
+Per line:
+  text_len(2) + text(text_len)
+
+Width and height are in cell units. The frontend converts to points using cell dimensions.
+When visible=0, no further fields are sent. The frontend hides the popup.
+```
+
+### 0x84 — gui_split_separators
+
+Split pane separator lines for Metal rendering. Sent as a Metal-critical command bundled with gutter, cursorline, and gutter separator. One message per frame when splits are active.
+
+Vertical separators are 1px-wide lines between split panes. Horizontal separators are 1px-high lines with a centered filename label separating horizontal splits.
+
+```
+opcode(1) + border_color_rgb(3) + vertical_count(1) + verticals... + horizontal_count(1) + horizontals...
+
+Per vertical:
+  col(2) + start_row(2) + end_row(2)
+
+Per horizontal:
+  row(2) + col(2) + width(2) + filename_len(2) + filename(filename_len)
+
+border_color_rgb is 24-bit RGB from theme.editor.split_border_fg.
+When no splits are active, the BEAM sends counts of 0 for both separator types.
+```
+
 ## GUI Action Input Opcode (Frontend → BEAM)
 
 The frontend sends user interactions with native chrome back to the BEAM using the `gui_action` opcode (0x07). This opcode lives in the input event range, not the GUI chrome range.

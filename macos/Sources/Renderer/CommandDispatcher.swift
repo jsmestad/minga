@@ -330,6 +330,22 @@ final class CommandDispatcher {
             } else {
                 guiState.signatureHelpState.hide()
             }
+
+        case .guiSplitSeparators(let borderColor, let verticals, let horizontals):
+            lineBuffer.splitBorderColor = borderColor
+            lineBuffer.verticalSeparators = verticals
+            lineBuffer.horizontalSeparators = horizontals
+            lineBuffer.dirty = true
+
+        case .guiFloatPopup(let visible, let width, let height, let title, let lines):
+            if visible {
+                guiState.floatPopupState.update(
+                    visible: true, width: width, height: height,
+                    title: title, lines: lines
+                )
+            } else {
+                guiState.floatPopupState.hide()
+            }
         }
     }
 

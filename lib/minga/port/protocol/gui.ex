@@ -31,6 +31,8 @@ defmodule Minga.Port.Protocol.GUI do
   | 0x7F   | gui_minibuffer  | Native minibuffer + candidates|
   | 0x81   | gui_hover_popup | Native hover tooltip popup    |
   | 0x82   | gui_signature_help | Signature help popup       |
+  | 0x83   | gui_float_popup | Float popup window            |
+  | 0x84   | gui_split_separators | Split pane separator lines |
 
   ## GUI Actions (Frontend → BEAM)
 
@@ -81,6 +83,8 @@ defmodule Minga.Port.Protocol.GUI do
   # 0x80 is gui_window_content (in gui_window_content.ex)
   @op_gui_hover_popup 0x81
   @op_gui_signature_help 0x82
+  @op_gui_float_popup 0x83
+  @op_gui_split_separators 0x84
 
   # ── GUI action sub-opcodes (Frontend → BEAM) ──
 
@@ -1515,6 +1519,101 @@ defmodule Minga.Port.Protocol.GUI do
       <<@op_gui_signature_help, 1::8, sh.anchor_row::16, sh.anchor_col::16,
         sh.active_signature::8, sh.active_parameter::8, length(sh.signatures)::8>>
       | sig_data
+    ])
+  end
+
+  # ── Float Popup ──
+
+  @typedoc "Data for a float popup."
+  @type float_popup_data :: %{
+          visible: boolean(),
+          title: String.t(),
+          lines: [String.t()],
+          width: non_neg_integer(),
+          height: non_neg_integer()
+        }
+
+  @doc """
+  Encodes a gui_float_popup command (0x83).
+
+  Wire format:
+    opcode(1) + visible(1) + width(2) + height(2) +
+    title_len(2) + title(title_len) + line_count(2) + lines...
+
+  Each line:
+    text_len(2) + text(text_len)
+
+  When visible=0, no further fields are sent.
+  """
+  @spec encode_gui_float_popup(float_popup_data()) :: binary()
+  def encode_gui_float_popup(%{visible: false}) do
+    <<@op_gui_float_popup, 0::8>>
+  end
+
+  def encode_gui_float_popup(%{visible: true, title: title, lines: lines, width: w, height: h}) do
+    title_bytes = IO.iodata_to_binary(title)
+
+    line_data =
+      Enum.map(lines, fn line ->
+        text = IO.iodata_to_binary(line)
+        <<byte_size(text)::16, text::binary>>
+      end)
+
+    IO.iodata_to_binary([
+      <<@op_gui_float_popup, 1::8, w::16, h::16, byte_size(title_bytes)::16, title_bytes::binary,
+        length(lines)::16>>
+      | line_data
+    ])
+  end
+
+  # ── Split Separators ──
+
+  @typedoc "A vertical split separator."
+  @type vertical_separator ::
+          {col :: non_neg_integer(), start_row :: non_neg_integer(), end_row :: non_neg_integer()}
+
+  @typedoc "A horizontal split separator with filename."
+  @type horizontal_separator ::
+          {row :: non_neg_integer(), col :: non_neg_integer(), width :: non_neg_integer(),
+           filename :: String.t()}
+
+  @doc """
+  Encodes a gui_split_separators command (0x84).
+
+  Wire format:
+    opcode(1) + border_color_rgb(3) +
+    vertical_count(1) + verticals... +
+    horizontal_count(1) + horizontals...
+
+  Each vertical: col(2) + start_row(2) + end_row(2)
+  Each horizontal: row(2) + col(2) + width(2) + filename_len(2) + filename
+  """
+  @spec encode_gui_split_separators(
+          non_neg_integer(),
+          [vertical_separator()],
+          [horizontal_separator()]
+        ) :: binary()
+  def encode_gui_split_separators(border_color_rgb, verticals, horizontals) do
+    r = border_color_rgb >>> 16 &&& 0xFF
+    g = border_color_rgb >>> 8 &&& 0xFF
+    b = border_color_rgb &&& 0xFF
+
+    vert_data =
+      Enum.map(verticals, fn {col, start_row, end_row} ->
+        <<col::16, start_row::16, end_row::16>>
+      end)
+
+    horiz_data =
+      Enum.map(horizontals, fn {row, col, width, filename} ->
+        name_bytes = IO.iodata_to_binary(filename)
+        <<row::16, col::16, width::16, byte_size(name_bytes)::16, name_bytes::binary>>
+      end)
+
+    IO.iodata_to_binary([
+      <<@op_gui_split_separators, r::8, g::8, b::8, length(verticals)::8>>,
+      vert_data,
+      <<length(horizontals)::8>>,
+      horiz_data
     ])
   end
 
