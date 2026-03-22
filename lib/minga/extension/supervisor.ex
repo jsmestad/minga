@@ -113,6 +113,7 @@ defmodule Minga.Extension.Supervisor do
   defp start_from_path(supervisor, registry, name, entry) do
     with {:ok, module} <- compile_extension(entry.path),
          :ok <- validate_behaviour(module, name),
+         :ok <- register_and_validate_options(name, module, entry.config),
          {:ok, _state} <- call_init(module, entry.config) do
       start_child(supervisor, registry, name, module, entry.config)
     else
@@ -241,6 +242,7 @@ defmodule Minga.Extension.Supervisor do
     # The convention is the package name maps to a module like MingaSnippets.
     with {:ok, module} <- find_extension_module(package_atom),
          :ok <- validate_behaviour(module, name),
+         :ok <- register_and_validate_options(name, module, entry.config),
          {:ok, _state} <- call_init(module, entry.config) do
       start_child(supervisor, registry, name, module, entry.config)
     else
@@ -408,6 +410,20 @@ defmodule Minga.Extension.Supervisor do
       [] -> :ok
       funs -> {:error, "extension #{name} missing callbacks: #{inspect(funs)}"}
     end
+  end
+
+  @spec register_and_validate_options(atom(), module(), keyword()) ::
+          :ok | {:error, String.t()}
+  defp register_and_validate_options(name, module, config) do
+    if function_exported?(module, :__option_schema__, 0) do
+      schema = module.__option_schema__()
+      Minga.Config.Options.register_extension_schema(name, schema, config)
+    else
+      :ok
+    end
+  rescue
+    e ->
+      {:error, "__option_schema__/0 crashed: #{Exception.message(e)}"}
   end
 
   @spec call_init(module(), keyword()) :: {:ok, term()} | {:error, term()}

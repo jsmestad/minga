@@ -75,6 +75,28 @@ defmodule Minga.Config do
   end
 
   @doc """
+  Sets an extension option at runtime.
+
+  Use this from commands, keybindings, or extension code to change an
+  extension option after load. Not usable in `config.exs` (the schema
+  isn't registered yet at config eval time; use the extension declaration
+  syntax instead).
+
+  ## Examples
+
+      set_extension_option :minga_org, :conceal, false
+      set_extension_option :minga_org, :heading_bullets, ["•", "◦"]
+  """
+  @spec set_extension_option(atom(), atom(), term()) :: :ok
+  def set_extension_option(extension, name, value)
+      when is_atom(extension) and is_atom(name) do
+    case Options.set_extension_option(extension, name, value) do
+      {:ok, _} -> :ok
+      {:error, msg} -> raise ArgumentError, msg
+    end
+  end
+
+  @doc """
   Binds a key sequence to a command in the given mode.
 
   Supports all vim modes: `:normal`, `:insert`, `:visual`,

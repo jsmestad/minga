@@ -361,108 +361,167 @@ defmodule Minga.Config.OptionsTest do
     end
   end
 
-  describe "register_extension_option/4" do
-    test "registers a boolean option with default", %{server: s} do
-      assert :ok = Options.register_extension_option(s, :org_conceal, :boolean, true)
-      assert Options.get(s, :org_conceal) == true
+  describe "extension option schema" do
+    @schema [
+      {:conceal, :boolean, true, "Hide markup delimiters"},
+      {:pretty_bullets, :boolean, true, "Replace heading stars with Unicode bullets"},
+      {:heading_bullets, :string_list, ["◉", "○", "◈", "◇"], "Unicode bullets for heading levels"}
+    ]
+
+    test "registers schema and seeds defaults", %{server: s} do
+      assert :ok = Options.register_extension_schema(s, :minga_org, @schema, [])
+      assert Options.get_extension_option(s, :minga_org, :conceal) == true
+      assert Options.get_extension_option(s, :minga_org, :pretty_bullets) == true
+      assert Options.get_extension_option(s, :minga_org, :heading_bullets) == ["◉", "○", "◈", "◇"]
     end
 
-    test "registered option is settable by users", %{server: s} do
-      Options.register_extension_option(s, :org_conceal, :boolean, true)
-      assert {:ok, false} = Options.set(s, :org_conceal, false)
-      assert Options.get(s, :org_conceal) == false
+    test "user config overrides defaults", %{server: s} do
+      user_config = [conceal: false, heading_bullets: ["•", "◦"]]
+      assert :ok = Options.register_extension_schema(s, :minga_org, @schema, user_config)
+
+      assert Options.get_extension_option(s, :minga_org, :conceal) == false
+      assert Options.get_extension_option(s, :minga_org, :heading_bullets) == ["•", "◦"]
+      # Unset options keep their default
+      assert Options.get_extension_option(s, :minga_org, :pretty_bullets) == true
     end
 
-    test "validates extension option types", %{server: s} do
-      Options.register_extension_option(s, :org_conceal, :boolean, true)
-      assert {:error, msg} = Options.set(s, :org_conceal, "yes")
+    test "validates user config types at registration", %{server: s} do
+      assert {:error, msg} =
+               Options.register_extension_schema(s, :minga_org, @schema, conceal: "yes")
+
       assert msg =~ "boolean"
     end
 
-    test "rejects collision with built-in option name", %{server: s} do
-      assert {:error, msg} = Options.register_extension_option(s, :tab_width, :pos_integer, 4)
-      assert msg =~ "conflicts with a built-in option"
+    test "unknown user config keys produce warning but succeed", %{server: s} do
+      # Unknown keys are logged as warnings, not errors
+      assert :ok = Options.register_extension_schema(s, :minga_org, @schema, unknown_key: true)
     end
 
-    test "supports enum type descriptor", %{server: s} do
-      Options.register_extension_option(s, :org_export_format, {:enum, [:html, :pdf, :md]}, :html)
-      assert Options.get(s, :org_export_format) == :html
-      assert {:ok, :pdf} = Options.set(s, :org_export_format, :pdf)
-      assert {:error, _} = Options.set(s, :org_export_format, :docx)
+    test "set_extension_option validates against schema", %{server: s} do
+      Options.register_extension_schema(s, :minga_org, @schema, [])
+
+      assert {:ok, false} = Options.set_extension_option(s, :minga_org, :conceal, false)
+      assert Options.get_extension_option(s, :minga_org, :conceal) == false
+
+      assert {:error, msg} = Options.set_extension_option(s, :minga_org, :conceal, "nope")
+      assert msg =~ "boolean"
     end
 
-    test "supports string_list type descriptor", %{server: s} do
-      bullets = ["◉", "○", "◈"]
-      Options.register_extension_option(s, :org_heading_bullets, :string_list, bullets)
-      assert Options.get(s, :org_heading_bullets) == bullets
-      assert {:ok, ["•"]} = Options.set(s, :org_heading_bullets, ["•"])
-      assert {:error, _} = Options.set(s, :org_heading_bullets, :not_a_list)
-    end
+    test "set_extension_option rejects unregistered option names", %{server: s} do
+      Options.register_extension_schema(s, :minga_org, @schema, [])
 
-    test "re-registration does not overwrite existing user value", %{server: s} do
-      # Simulates config reload: register, user sets value, then re-register on reload.
-      Options.register_extension_option(s, :org_conceal, :boolean, true)
-      Options.set(s, :org_conceal, false)
-
-      Options.register_extension_option(s, :org_conceal, :boolean, true)
-      assert Options.get(s, :org_conceal) == false
-    end
-
-    test "extension_option? returns true for registered options", %{server: s} do
-      Options.register_extension_option(s, :org_conceal, :boolean, true)
-      assert Options.extension_option?(s, :org_conceal) == true
-    end
-
-    test "extension_option? returns false for built-in options", %{server: s} do
-      assert Options.extension_option?(s, :tab_width) == false
-    end
-
-    test "extension_option? returns false for unknown options", %{server: s} do
-      assert Options.extension_option?(s, :nonexistent) == false
-    end
-
-    test "filetype overrides work for extension options", %{server: s} do
-      Options.register_extension_option(s, :org_conceal, :boolean, true)
-      Options.set_for_filetype(s, :org, :org_conceal, false)
-
-      assert Options.get_for_filetype(s, :org_conceal, :org) == false
-      assert Options.get(s, :org_conceal) == true
-    end
-
-    test "re-registration after reset preserves the pattern", %{server: s} do
-      Options.register_extension_option(s, :org_conceal, :boolean, true)
-      Options.set(s, :org_conceal, false)
-
-      # Reset clears everything (simulates config reload)
-      Options.reset(s)
-
-      # Extension re-registers during init
-      Options.register_extension_option(s, :org_conceal, :boolean, true)
-      # Default is restored since user value was cleared by reset
-      assert Options.get(s, :org_conceal) == true
-    end
-
-    test "all/1 includes extension option values", %{server: s} do
-      Options.register_extension_option(s, :org_conceal, :boolean, true)
-      all = Options.all(s)
-      assert Map.get(all, :org_conceal) == true
-    end
-
-    test "reset clears extension type metadata", %{server: s} do
-      Options.register_extension_option(s, :org_conceal, :boolean, true)
-      Options.reset(s)
-
-      assert Options.extension_option?(s, :org_conceal) == false
-      assert {:error, msg} = Options.set(s, :org_conceal, false)
+      assert {:error, msg} = Options.set_extension_option(s, :minga_org, :nonexistent, true)
       assert msg =~ "unknown option"
     end
 
-    test "multiple extensions can register different options", %{server: s} do
-      Options.register_extension_option(s, :org_conceal, :boolean, true)
-      Options.register_extension_option(s, :zen_mode, :boolean, false)
+    test "supports enum type descriptor", %{server: s} do
+      schema = [{:format, {:enum, [:html, :pdf, :md]}, :html, "Default export format"}]
+      Options.register_extension_schema(s, :exporter, schema, [])
 
-      assert Options.get(s, :org_conceal) == true
-      assert Options.get(s, :zen_mode) == false
+      assert Options.get_extension_option(s, :exporter, :format) == :html
+      assert {:ok, :pdf} = Options.set_extension_option(s, :exporter, :format, :pdf)
+      assert {:error, _} = Options.set_extension_option(s, :exporter, :format, :docx)
+    end
+
+    test "two extensions can have options with the same name", %{server: s} do
+      schema_a = [{:conceal, :boolean, true, "Ext A conceal"}]
+      schema_b = [{:conceal, :boolean, false, "Ext B conceal"}]
+
+      Options.register_extension_schema(s, :ext_a, schema_a, [])
+      Options.register_extension_schema(s, :ext_b, schema_b, [])
+
+      assert Options.get_extension_option(s, :ext_a, :conceal) == true
+      assert Options.get_extension_option(s, :ext_b, :conceal) == false
+
+      Options.set_extension_option(s, :ext_a, :conceal, false)
+      # ext_b is unaffected
+      assert Options.get_extension_option(s, :ext_b, :conceal) == false
+    end
+
+    test "per-filetype overrides work for extension options", %{server: s} do
+      Options.register_extension_schema(s, :minga_org, @schema, [])
+
+      # Global default is true
+      assert Options.get_extension_option_for_filetype(s, :minga_org, :conceal, :org) == true
+
+      # Set a filetype-specific override
+      assert {:ok, false} =
+               Options.set_extension_option_for_filetype(s, :minga_org, :org, :conceal, false)
+
+      # Filetype lookup returns the override
+      assert Options.get_extension_option_for_filetype(s, :minga_org, :conceal, :org) == false
+
+      # Global value is unchanged
+      assert Options.get_extension_option(s, :minga_org, :conceal) == true
+
+      # Different filetype falls back to global
+      assert Options.get_extension_option_for_filetype(s, :minga_org, :conceal, :markdown) == true
+    end
+
+    test "set_extension_option_for_filetype validates against schema", %{server: s} do
+      Options.register_extension_schema(s, :minga_org, @schema, [])
+
+      assert {:error, msg} =
+               Options.set_extension_option_for_filetype(s, :minga_org, :org, :conceal, "nope")
+
+      assert msg =~ "boolean"
+    end
+
+    test "get_extension_option_for_filetype falls back to global when no override", %{server: s} do
+      Options.register_extension_schema(s, :minga_org, @schema, conceal: false)
+
+      assert Options.get_extension_option_for_filetype(s, :minga_org, :conceal, :org) == false
+    end
+
+    test "get_extension_option_for_filetype with nil filetype returns global", %{server: s} do
+      Options.register_extension_schema(s, :minga_org, @schema, [])
+
+      assert Options.get_extension_option_for_filetype(s, :minga_org, :conceal, nil) == true
+    end
+
+    test "extension_schema returns the registered schema", %{server: s} do
+      Options.register_extension_schema(s, :minga_org, @schema, [])
+      assert Options.extension_schema(s, :minga_org) == @schema
+    end
+
+    test "extension_schema returns nil for unknown extension", %{server: s} do
+      assert Options.extension_schema(s, :unknown) == nil
+    end
+
+    test "extension_option_description returns the description string", %{server: s} do
+      Options.register_extension_schema(s, :minga_org, @schema, [])
+
+      assert Options.extension_option_description(s, :minga_org, :conceal) ==
+               "Hide markup delimiters"
+
+      assert Options.extension_option_description(s, :minga_org, :pretty_bullets) ==
+               "Replace heading stars with Unicode bullets"
+    end
+
+    test "extension_option_description returns nil for unknown option", %{server: s} do
+      Options.register_extension_schema(s, :minga_org, @schema, [])
+      assert Options.extension_option_description(s, :minga_org, :nonexistent) == nil
+    end
+
+    test "extension_option_description returns nil for unknown extension", %{server: s} do
+      assert Options.extension_option_description(s, :unknown, :conceal) == nil
+    end
+
+    test "re-registration does not overwrite user-set values", %{server: s} do
+      Options.register_extension_schema(s, :minga_org, @schema, [])
+      Options.set_extension_option(s, :minga_org, :conceal, false)
+
+      # Re-register (simulates config reload)
+      Options.register_extension_schema(s, :minga_org, @schema, [])
+      assert Options.get_extension_option(s, :minga_org, :conceal) == false
+    end
+
+    test "reset clears extension schemas and values", %{server: s} do
+      Options.register_extension_schema(s, :minga_org, @schema, [])
+      Options.reset(s)
+
+      assert Options.extension_schema(s, :minga_org) == nil
+      assert Options.get_extension_option(s, :minga_org, :conceal) == nil
     end
   end
 end
