@@ -1,35 +1,39 @@
-# Autoresearch: Fix Flaky Tests
+# Autoresearch: Convert async: false tests to async: true
 
 ## Goal
-Eliminate timing-dependent test patterns (Process.sleep, :timer.sleep, polling loops) across the Elixir test suite. Each iteration fixes one test file by replacing sleep/poll patterns with proper OTP synchronization.
+Reduce the number of `async: false` test files by making global singletons injectable (pass name/table reference instead of hardcoding). Each conversion moves tests from the sync queue to the async queue, speeding up CI.
 
 ## Metric
-`flaky_patterns` — count of finite Process.sleep/:timer.sleep calls in test files (lower is better). Measured by `autoresearch.bench.sh`.
+`async_false_count` — number of test files containing `async: false` (lower is better). Measured by `autoresearch.bench.sh`.
 
 ## Rules
-1. **No "wait longer" fixes** — don't increase sleep durations
-2. **No `async: false` changes** — don't serialize tests to hide races
-3. **True fixes only** — use `:sys.get_state` barriers, `Process.monitor`, `assert_receive`, event subscriptions, or GenServer call synchronization
-4. **One file per iteration** — fix one test file, verify it passes 5x, measure
-5. **Exclude legitimate uses** — `spawn(fn -> Process.sleep(:infinity) end)` (dummy processes) and timeout-testing code are not flaky patterns
-6. **Consult test-advisor** when you can't find a way to eliminate the dependency on globals or time, or when you believe a test isn't valuable to keep
+1. **Make singletons injectable** — add a `name:` option to GenServers/ETS modules so tests can start private instances
+2. **No behavior changes** — production code should work identically; the default name stays the same
+3. **One module per iteration** — refactor one production module, convert its test(s) to async: true, verify 3x
+4. **Don't convert tests with legitimate reasons** — OS Port spawning (erl_child_setup EPIPE), capture_io(:stderr), System env mutation
+5. **Consult test-advisor** when unsure if a test is safe to convert
 
-## Priority (from CI failure frequency)
-1. `chaos/editor_fuzzer_test.exs` — 8 CI failures (HeadlessPort.collect_frame timeout)
-2. `buffer/decorations_benchmark_test.exs` — 4 CI failures (tree height assertion)
-3. `tool/manager_test.exs` — 6x `:timer.sleep(200)` (async task completion)
-4. `editor/warnings_buffer_test.exs` — 3x `Process.sleep(300)` (async cast barrier)
-5. `parser/multi_buffer_test.exs` — 2x `Process.sleep(50)` (parser readiness)
-6. `parser/incremental_test.exs` — 2x `Process.sleep(50/20)` (parser readiness)
-7. `editor/file_tree_integration_test.exs` — `Process.sleep(50)` + polling
-8. `git/tracker_test.exs` — polling with `Process.sleep(interval)`
-9. `command_output_test.exs` — polling with `Process.sleep(5)`
-10. `project_test.exs` — `Process.sleep(10)` + polling rebuild
-11. `agent/providers/native_test.exs` — 6x `Process.sleep(50-100)` (streaming timing)
+## Priority (by test count, highest impact first)
 
-## Synchronization patterns to use
-- `:sys.get_state(pid)` — flushes GenServer mailbox, ensures prior casts processed
-- `Process.monitor(pid)` + `assert_receive {:DOWN, ...}` — wait for process exit
-- `assert_receive {:event, ...}` — wait for specific messages
-- GenServer.call as barrier — any sync call blocks until mailbox drained
-- `receive ... after timeout -> flunk()` — wait for specific messages with deadline
+### Convertible with production refactoring
+| Tests | File | Blocker | Fix |
+|-------|------|---------|-----|
+| 42 | popup/{lifecycle,registry}_test.exs | Popup.Registry global ETS | Add name: param to Registry |
+| 77 | config_test + config/loader_test + formatter_test + log_routing | Options/Hooks/Keymap globals | Add name: to Options |
+| 85 | mode/{visual,insert}_test + keymap/scope + minga_org_test | KeymapActive global | Add name: to KeymapActive |
+| 16 | events_test.exs | Shared EventBus | May already be safe (subscribe is idempotent) |
+
+### Likely safe without production changes (investigate)
+| Tests | File | Why async:false | Investigation |
+|-------|------|-----------------|---------------|
+| 39 | filetype_test.exs | "shared Agent state" | Check if Agent is test-local |
+| 16 | git/repo_test.exs | No stated reason | Check for globals |
+| 12 | tool/manager_test.exs | Global ETS | Already uses Events; might work |
+| 11 | perf/document_perf_test.exs | No stated reason | Likely perf isolation |
+| 8 | config/hooks_test.exs | No stated reason | Check for globals |
+
+### Cannot convert (legitimate reasons)
+- OS Port: gui_protocol_test, lsp/*, parser/*, command_output_test, tree_sitter_test, git/backend_operations, clipboard/system_test, extension/git_test
+- capture_io: eval_test
+- Env mutation: credentials_test, startup_test
+- Global handlers: telemetry/*

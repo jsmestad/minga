@@ -1,6 +1,6 @@
 defmodule Minga.Git.RepoTest do
   @moduledoc "Tests for Minga.Git.Repo: per-repository GenServer lifecycle, caching, and event publication."
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Minga.Events
   alias Minga.Git.Repo
@@ -92,38 +92,38 @@ defmodule Minga.Git.RepoTest do
       assert Repo.branch(repo) == "develop"
     end
 
-    test "publishes :git_status_changed when status changes", %{root: dir, repo: repo} do
+    test "refresh publishes git_status_changed when status changes", %{root: dir, repo: repo} do
       Events.subscribe(:git_status_changed)
-
       entry = %StatusEntry{path: "new.ex", status: :added, staged: true}
       GitStub.set_status(dir, [entry])
 
       Repo.refresh(repo)
       :sys.get_state(repo)
 
+      # Pin ^dir to only match events from this test's Repo (async-safe)
       assert_receive {:minga_event, :git_status_changed,
-                      %Events.GitStatusEvent{entries: [^entry]}}
+                      %Events.GitStatusEvent{git_root: ^dir, entries: [^entry]}}
     end
 
-    test "does not publish event when status is unchanged", %{repo: repo} do
+    test "refresh does not publish event when status is unchanged", %{root: dir, repo: repo} do
       Events.subscribe(:git_status_changed)
 
       Repo.refresh(repo)
       :sys.get_state(repo)
 
-      refute_receive {:minga_event, :git_status_changed, _}, 50
+      # Pin ^dir so we only refute events from this test's Repo
+      refute_receive {:minga_event, :git_status_changed, %{git_root: ^dir}}, 50
     end
 
-    test "publishes event when branch changes", %{root: dir, repo: repo} do
+    test "refresh publishes git_status_changed when branch changes", %{root: dir, repo: repo} do
       Events.subscribe(:git_status_changed)
-
       GitStub.set_branch(dir, "feature/new")
 
       Repo.refresh(repo)
       :sys.get_state(repo)
 
       assert_receive {:minga_event, :git_status_changed,
-                      %Events.GitStatusEvent{branch: "feature/new"}}
+                      %Events.GitStatusEvent{git_root: ^dir, branch: "feature/new"}}
     end
   end
 

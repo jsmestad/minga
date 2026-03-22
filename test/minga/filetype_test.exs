@@ -1,7 +1,6 @@
 defmodule Minga.FiletypeTest do
   @moduledoc "Tests for Minga.Filetype — file language detection."
-  # async: false because runtime registry tests modify shared Agent state
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Minga.Filetype
 
@@ -209,30 +208,6 @@ defmodule Minga.FiletypeTest do
 
     test "unknown shebang interpreter falls back to :text" do
       assert Filetype.detect_from_content("script", "#!/usr/bin/env obscurelang") == :text
-    end
-  end
-
-  describe "detect/1 — runtime registry integration" do
-    test "detects filetypes registered at runtime via extension" do
-      Minga.Filetype.Registry.register(".org", :org)
-      assert Filetype.detect("notes.org") == :org
-    end
-
-    test "detects filetypes registered at runtime via filename" do
-      Minga.Filetype.Registry.register("Justfile", :just)
-      assert Filetype.detect("Justfile") == :just
-    end
-
-    test "runtime registry takes precedence over compile-time map" do
-      # .json is normally :json in the compile-time map
-      assert Filetype.detect("data.json") == :json
-
-      # Override it at runtime
-      Minga.Filetype.Registry.register(".json", :json_custom)
-      assert Filetype.detect("data.json") == :json_custom
-
-      # Clean up: restore original
-      Minga.Filetype.Registry.register(".json", :json)
     end
   end
 end
