@@ -48,6 +48,10 @@ final class CommandDispatcher {
     /// Parameter: mode name string (e.g., "NORMAL", "INSERT", "VISUAL").
     var onModeChanged: ((String) -> Void)?
 
+    /// Called once after the first `batch_end` is received from the BEAM.
+    /// Used in bundle mode to flush pending file URLs after the BEAM is ready.
+    var onFirstRender: (() -> Void)?
+
     /// Tracks the last mode to detect changes.
     private var lastMode: UInt8 = 0
 
@@ -94,6 +98,10 @@ final class CommandDispatcher {
             }
 
         case .batchEnd:
+            if let firstRender = onFirstRender {
+                firstRender()
+                onFirstRender = nil
+            }
             onFrameReady?()
 
         case .setTitle(let title):

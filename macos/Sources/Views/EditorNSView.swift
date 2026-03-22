@@ -13,7 +13,7 @@ import MetalKit
 /// The main editor view. Uses MTKView's built-in display link for
 /// vsync-driven rendering with automatic frame coalescing.
 final class EditorNSView: MTKView {
-    let encoder: InputEncoder
+    var encoder: InputEncoder
     private(set) var fontFace: FontFace
 
     /// Line-based styled run buffer for CoreText rendering.

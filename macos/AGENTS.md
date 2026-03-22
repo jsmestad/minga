@@ -78,7 +78,7 @@ macos/
 ## Tech Requirements
 
 - **Swift 6.0+** with strict concurrency
-- **Metal 3.1+** (MSL 3.1), macOS 14.0+ deployment target
+- **Metal 3.2+** (MSL 3.2), macOS 15.0+ deployment target
 - **Xcode 16+** for building
 - Build via `xcodebuild -project Minga.xcodeproj -scheme Minga build`
 
