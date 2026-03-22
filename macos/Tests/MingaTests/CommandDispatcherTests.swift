@@ -126,6 +126,50 @@ struct CommandDispatcherRoutingTests {
         #expect(gui.fileTreeState.visible == false)
     }
 
+    @Test("guiGitStatus updates state when repo has entries")
+    @MainActor func guiGitStatusRouting() {
+        let (dispatcher, gui) = makeDispatcher()
+        let rawEntries = [
+            GUIGitStatusEntry(pathHash: 12345, section: 1, status: 1, path: "lib/editor.ex")
+        ]
+        dispatcher.dispatch(.guiGitStatus(repoState: 0, ahead: 2, behind: 0,
+                                           branchName: "main", entries: rawEntries))
+
+        #expect(gui.gitStatusState.visible == true)
+        #expect(gui.gitStatusState.branchName == "main")
+        #expect(gui.gitStatusState.ahead == 2)
+        #expect(gui.gitStatusState.changedEntries.count == 1)
+        #expect(gui.gitStatusState.changedEntries[0].path == "lib/editor.ex")
+    }
+
+    @Test("guiGitStatus hides when notARepo with empty entries (panel closed signal)")
+    @MainActor func guiGitStatusHidesOnClearSignal() {
+        let (dispatcher, gui) = makeDispatcher()
+        // First show it with real data
+        let rawEntries = [
+            GUIGitStatusEntry(pathHash: 12345, section: 1, status: 1, path: "lib/editor.ex")
+        ]
+        dispatcher.dispatch(.guiGitStatus(repoState: 0, ahead: 0, behind: 0,
+                                           branchName: "main", entries: rawEntries))
+        #expect(gui.gitStatusState.visible == true)
+
+        // Then send the "panel closed" sentinel: notARepo (1) + empty entries
+        dispatcher.dispatch(.guiGitStatus(repoState: 1, ahead: 0, behind: 0,
+                                           branchName: "", entries: []))
+        #expect(gui.gitStatusState.visible == false)
+    }
+
+    @Test("guiGitStatus shows panel for normal repo with clean working tree")
+    @MainActor func guiGitStatusShowsCleanRepo() {
+        let (dispatcher, gui) = makeDispatcher()
+        // Normal repo (0) with zero entries is a clean working tree, NOT
+        // a hide signal. Only notARepo + empty triggers hide.
+        dispatcher.dispatch(.guiGitStatus(repoState: 0, ahead: 0, behind: 0,
+                                           branchName: "main", entries: []))
+        #expect(gui.gitStatusState.visible == true)
+        #expect(gui.gitStatusState.branchName == "main")
+    }
+
     @Test("guiCompletion visible updates completionState")
     @MainActor func guiCompletionVisible() {
         let (dispatcher, gui) = makeDispatcher()

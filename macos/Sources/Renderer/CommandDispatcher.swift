@@ -352,25 +352,37 @@ final class CommandDispatcher {
             }
 
         case .guiGitStatus(let repoState, let ahead, let behind, let branchName, let rawEntries):
-            let entries = rawEntries.compactMap { raw -> GitStatusEntry? in
-                guard let section = GitStatusSection(rawValue: raw.section),
-                      let status = GitFileStatus(rawValue: raw.status) else {
-                    return nil
+            // When git_status_panel is nil, the BEAM sends notARepo + empty
+            // entries as the "panel closed" signal (same pattern as file tree
+            // sending empty entries to trigger hide). Can't gate on
+            // rawEntries.isEmpty alone: a clean working tree (normal repo,
+            // 0 changed files) is a valid visible-panel state. The compound
+            // check notARepo + empty is the specific sentinel the BEAM sends
+            // when git_status_panel is nil. (#1047)
+            let parsedRepoState = GitRepoState(rawValue: repoState) ?? .notARepo
+            if parsedRepoState == .notARepo && rawEntries.isEmpty {
+                guiState.gitStatusState.hide()
+            } else {
+                let entries = rawEntries.compactMap { raw -> GitStatusEntry? in
+                    guard let section = GitStatusSection(rawValue: raw.section),
+                          let status = GitFileStatus(rawValue: raw.status) else {
+                        return nil
+                    }
+                    return GitStatusEntry(
+                        id: (UInt32(raw.section) << 24) | (raw.pathHash & 0x00FFFFFF),
+                        section: section,
+                        status: status,
+                        path: raw.path
+                    )
                 }
-                return GitStatusEntry(
-                    id: (UInt32(raw.section) << 24) | (raw.pathHash & 0x00FFFFFF),
-                    section: section,
-                    status: status,
-                    path: raw.path
+                guiState.gitStatusState.update(
+                    repoState: parsedRepoState,
+                    branchName: branchName,
+                    ahead: ahead,
+                    behind: behind,
+                    entries: entries
                 )
             }
-            guiState.gitStatusState.update(
-                repoState: GitRepoState(rawValue: repoState) ?? .notARepo,
-                branchName: branchName,
-                ahead: ahead,
-                behind: behind,
-                entries: entries
-            )
         }
     }
 
