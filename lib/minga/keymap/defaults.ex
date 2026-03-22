@@ -13,9 +13,16 @@ defmodule Minga.Keymap.Defaults do
   | `SPC f`   | +file       |
   | `SPC b`   | +buffer     |
   | `SPC w`   | +window     |
+  | `SPC s`   | +search     |
+  | `SPC c`   | +code       |
+  | `SPC g`   | +git        |
+  | `SPC o`   | +open       |
+  | `SPC a`   | +ai         |
+  | `SPC t`   | +toggle     |
   | `SPC p`   | +project    |
   | `SPC q`   | +quit       |
   | `SPC h`   | +help       |
+  | `SPC m`   | +filetype   |
   """
 
   alias Minga.Keymap.Bindings
@@ -109,6 +116,7 @@ defmodule Minga.Keymap.Defaults do
 
     # ── Open ──────────────────────────────────────────────────────────────────
     {[{?o, @none}, {?p, @none}], :toggle_file_tree, "Toggle file tree"},
+    {[{?o, @none}, {?r, @none}], :tree_reveal_active, "Reveal file in tree"},
 
     # ── AI agent ─────────────────────────────────────────────────────────────
     {[{?a, @none}, {?a, @none}], :toggle_agentic_view, "Toggle agent split"},
