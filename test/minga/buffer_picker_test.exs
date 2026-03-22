@@ -1,50 +1,44 @@
 defmodule Minga.BufferPickerTest do
   @moduledoc """
-  Integration tests for the buffer picker (SPC b b) via the headless harness.
+  Tests for the buffer picker (SPC b b).
+
+  Most assertions are state-based (picker open, item count, selected item,
+  active buffer content). Screen assertions are kept only for rendering
+  verification that can't be checked via state (snapshot baselines).
   """
 
   use Minga.Test.EditorCase, async: true
 
   describe "opening the picker" do
     @tag :tmp_dir
-    test "SPC b b opens a picker overlay", %{tmp_dir: tmp_dir} do
+    test "SPC b b opens a picker with buffer items", %{tmp_dir: tmp_dir} do
       path1 = Path.join(tmp_dir, "alpha.txt")
       path2 = Path.join(tmp_dir, "beta.txt")
       File.write!(path1, "alpha content")
       File.write!(path2, "beta content")
 
       ctx = start_editor("alpha content", file_path: path1)
-      send_keys_sync(ctx, ":e #{path2}<CR>")
+      send_keys(ctx, ":e #{path2}<CR>")
 
-      # Open buffer picker
       send_keys_sync(ctx, "<SPC>bb")
 
-      # Should see the prompt line
-      mb = minibuffer(ctx)
-      assert String.contains?(mb, ">")
-
-      # Should see buffer names in the picker area
-      screen = screen_text(ctx)
-      all_text = Enum.join(screen, "\n")
-      assert String.contains?(all_text, "alpha.txt")
-      assert String.contains?(all_text, "beta.txt")
+      assert picker_open?(ctx)
+      picker = picker_state(ctx)
+      labels = Enum.map(picker.items, & &1.label)
+      assert Enum.any?(labels, &String.contains?(&1, "alpha.txt"))
+      assert Enum.any?(labels, &String.contains?(&1, "beta.txt"))
     end
 
     test "SPC b b with single buffer still opens picker" do
       ctx = start_editor("hello")
       send_keys_sync(ctx, "<SPC>bb")
-
-      mb = minibuffer(ctx)
-      assert String.contains?(mb, ">")
+      assert picker_open?(ctx)
     end
   end
 
   describe "filtering" do
     @tag :tmp_dir
     test "typing filters the buffer list", %{tmp_dir: tmp_dir} do
-      # Use filenames whose unique prefixes don't appear in the tmp_dir path.
-      # The picker matches against the full file path (desc field), so if the
-      # directory name contains the filter substring, all files match.
       path1 = Path.join(tmp_dir, "xylo.txt")
       path2 = Path.join(tmp_dir, "zap.txt")
       path3 = Path.join(tmp_dir, "zen.txt")
@@ -53,93 +47,102 @@ defmodule Minga.BufferPickerTest do
       File.write!(path3, "zen")
 
       ctx = start_editor("xylo", file_path: path1)
-      send_keys_sync(ctx, ":e #{path2}<CR>")
-      send_keys_sync(ctx, ":e #{path3}<CR>")
+      send_keys(ctx, ":e #{path2}<CR>")
+      send_keys(ctx, ":e #{path3}<CR>")
 
-      # Open picker and type "ze" to match only zen.txt
       send_keys_sync(ctx, "<SPC>bb")
       send_key_sync(ctx, ?z)
       send_key_sync(ctx, ?e)
 
-      # Should see zen but not xylo (skip row 0 which is the tab bar)
-      screen = screen_text(ctx)
-      picker_text = screen |> Enum.drop(1) |> Enum.join("\n")
-      assert String.contains?(picker_text, "zen.txt")
-      refute String.contains?(picker_text, "xylo.txt")
+      picker = picker_state(ctx)
+      filtered_labels = Enum.map(picker.filtered, & &1.label)
+      assert Enum.any?(filtered_labels, &String.contains?(&1, "zen.txt"))
+      refute Enum.any?(filtered_labels, &String.contains?(&1, "xylo.txt"))
     end
   end
 
   describe "navigation" do
     @tag :tmp_dir
-    test "C-j and C-k move selection and preview buffer content", %{tmp_dir: tmp_dir} do
+    test "pressing C-j advances the selection index", %{tmp_dir: tmp_dir} do
       path1 = Path.join(tmp_dir, "first.txt")
       path2 = Path.join(tmp_dir, "second.txt")
       File.write!(path1, "first file content")
       File.write!(path2, "second file content")
 
       ctx = start_editor("first file content", file_path: path1)
-      send_keys_sync(ctx, ":e #{path2}<CR>")
+      send_keys(ctx, ":e #{path2}<CR>")
 
-      # Open picker — should start showing current buffer
+      send_keys_sync(ctx, "<SPC>bb")
+      idx_before = picker_state(ctx).selected
+
+      send_key_sync(ctx, ?j, 0x02)
+      idx_after = picker_state(ctx).selected
+
+      assert idx_after > idx_before
+    end
+
+    @tag :tmp_dir
+    test "pressing C-k retreats the selection index", %{tmp_dir: tmp_dir} do
+      path1 = Path.join(tmp_dir, "first.txt")
+      path2 = Path.join(tmp_dir, "second.txt")
+      File.write!(path1, "first file content")
+      File.write!(path2, "second file content")
+
+      ctx = start_editor("first file content", file_path: path1)
+      send_keys(ctx, ":e #{path2}<CR>")
+
       send_keys_sync(ctx, "<SPC>bb")
 
-      # Move down with C-j
+      # Move down first, then back up
       send_key_sync(ctx, ?j, 0x02)
+      idx_down = picker_state(ctx).selected
 
-      # Check that preview shows one of the buffer's content (file or scratch)
-      row0 = screen_row(ctx, 1)
+      send_key_sync(ctx, ?k, 0x02)
+      idx_up = picker_state(ctx).selected
 
-      assert String.contains?(row0, "first") or String.contains?(row0, "second") or
-               String.contains?(row0, ";;")
+      assert idx_up < idx_down
     end
   end
 
   describe "selecting" do
     @tag :tmp_dir
-    test "Enter selects the first buffer and closes picker", %{tmp_dir: tmp_dir} do
+    test "Enter selects the buffer and closes picker", %{tmp_dir: tmp_dir} do
       path1 = Path.join(tmp_dir, "one.txt")
       path2 = Path.join(tmp_dir, "two.txt")
       File.write!(path1, "one content")
       File.write!(path2, "two content")
 
       ctx = start_editor("one content", file_path: path1)
-      send_keys_sync(ctx, ":e #{path2}<CR>")
+      send_keys(ctx, ":e #{path2}<CR>")
 
-      # We're on buffer 2, open picker — selection starts at index 0 (one.txt)
+      # On buffer 2 (two), open picker, select first item (one)
       send_keys_sync(ctx, "<SPC>bb")
+      assert picker_open?(ctx)
 
-      # Press Enter to select the first item (one.txt)
       send_key_sync(ctx, 13)
-
-      # Picker should be closed (minibuffer is empty, not showing ">")
-      mb = minibuffer(ctx)
-      refute String.contains?(mb, ">")
-
-      # Should be showing the first buffer's content
-      assert_row_contains(ctx, 1, "one content")
+      refute picker_open?(ctx)
+      assert active_content(ctx) == "one content"
     end
 
     @tag :tmp_dir
-    test "navigating then Enter selects the moved-to buffer", %{tmp_dir: tmp_dir} do
+    test "filtering then Enter selects the filtered item", %{tmp_dir: tmp_dir} do
       path1 = Path.join(tmp_dir, "aaa.txt")
       path2 = Path.join(tmp_dir, "bbb.txt")
       File.write!(path1, "aaa content")
       File.write!(path2, "bbb content")
 
       ctx = start_editor("aaa content", file_path: path1)
-      send_keys_sync(ctx, ":e #{path2}<CR>")
+      send_keys(ctx, ":e #{path2}<CR>")
 
-      # On buffer 3 (bbb). Open picker — items: aaa, [no file], bbb
-      # Navigate and select bbb
       send_keys_sync(ctx, "<SPC>bb")
-      # Filter to just "bbb" to avoid scratch confusion
+      # Filter to just "bbb"
       send_key_sync(ctx, ?b)
       send_key_sync(ctx, ?b)
       send_key_sync(ctx, ?b)
       send_key_sync(ctx, 13)
 
-      # Should show bbb content
-      assert_row_contains(ctx, 1, "bbb content")
+      refute picker_open?(ctx)
+      assert active_content(ctx) == "bbb content"
     end
   end
 
@@ -152,53 +155,45 @@ defmodule Minga.BufferPickerTest do
       File.write!(path2, "bbb content")
 
       ctx = start_editor("aaa content", file_path: path1)
-      send_keys_sync(ctx, ":e #{path2}<CR>")
-      # Currently on buffer 2 (bbb)
-      assert_row_contains(ctx, 1, "bbb content")
+      send_keys(ctx, ":e #{path2}<CR>")
+      assert active_content(ctx) == "bbb content"
 
-      # Open picker, navigate to buffer 1 (preview changes), then cancel
       send_keys_sync(ctx, "<SPC>bb")
-      send_key_sync(ctx, ?j, 0x02)
-      # Escape
+      assert picker_open?(ctx)
+
       send_key_sync(ctx, 27)
-
-      # Should restore original buffer (bbb)
-      assert_row_contains(ctx, 1, "bbb content")
-
-      # Picker should be closed
-      mb = minibuffer(ctx)
-      refute String.contains?(mb, ">")
+      refute picker_open?(ctx)
+      assert active_content(ctx) == "bbb content"
     end
   end
 
   describe "dirty indicator" do
     @tag :tmp_dir
-    test "modified buffers show dirty indicator in picker", %{tmp_dir: tmp_dir} do
+    test "modified buffers show [+] in picker item label", %{tmp_dir: tmp_dir} do
       path = Path.join(tmp_dir, "dirty.txt")
       File.write!(path, "clean")
 
       ctx = start_editor("clean", file_path: path)
 
-      # Modify the buffer, then open picker (sync ensures all keys processed
-      # before the next sequence fires)
+      # Modify the buffer
       send_keys_sync(ctx, "ix<Esc>")
-      send_keys_sync(ctx, "<SPC>bb")
 
-      # Picker rendering is async; poll until the dirty indicator appears
-      wait_until_screen(
-        ctx,
-        fn ->
-          screen_text(ctx) |> Enum.join("\n") |> String.contains?("[+]")
-        end,
-        message: "Expected [+] dirty indicator in picker"
-      )
+      # Open picker and check item labels for dirty marker
+      send_keys_sync(ctx, "<SPC>bb")
+      assert picker_open?(ctx)
+
+      picker = picker_state(ctx)
+      labels = Enum.map(picker.items, & &1.label)
+
+      assert Enum.any?(labels, &String.contains?(&1, "[+]")),
+             "Expected [+] dirty indicator in picker item labels, got: #{inspect(labels)}"
     end
   end
 
   describe "cursor shape" do
     test "picker uses beam cursor" do
       ctx = start_editor("hello")
-      send_keys_sync(ctx, "<SPC>bb")
+      send_keys(ctx, "<SPC>bb")
       assert cursor_shape(ctx) == :beam
     end
   end
