@@ -226,6 +226,7 @@ defmodule Minga.MixProject do
 
   defp releases do
     [
+      # TUI release: Burrito-wrapped standalone binary (macOS + Linux)
       minga: [
         steps: [:assemble, &Burrito.wrap/1],
         burrito: [
@@ -233,6 +234,16 @@ defmodule Minga.MixProject do
           debug: Mix.env() != :prod,
           no_clean: true
         ]
+      ],
+      # macOS GUI release: plain OTP release embedded inside Minga.app bundle.
+      # Produces a self-contained BEAM release with ERTS included.
+      # Use `mix release minga_macos` then `mix app.assemble` to build the bundle.
+      minga_macos: [
+        include_erts: true,
+        cookie: "minga_app_cookie",
+        steps: [:assemble],
+        rel_templates_path: "rel",
+        strip_beams: Mix.env() == :prod
       ]
     ]
   end
