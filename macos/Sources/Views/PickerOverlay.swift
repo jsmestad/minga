@@ -10,6 +10,7 @@ import SwiftUI
 struct PickerOverlay: View {
     let state: PickerState
     let theme: ThemeColors
+    let encoder: InputEncoder?
 
     private let panelWidth: CGFloat = 600
     private let itemHeight: CGFloat = 24
@@ -18,11 +19,14 @@ struct PickerOverlay: View {
     var body: some View {
         if state.visible {
             ZStack {
-                // Dimmed background: non-interactive
+                // Dimmed background: click to dismiss (like Spotlight, Alfred, Xcode Open Quickly)
                 Color.black.opacity(0.3)
                     .ignoresSafeArea()
-                    .allowsHitTesting(false)
                     .accessibilityHidden(true)
+                    .onTapGesture {
+                        // Send Escape to the BEAM to dismiss the picker via the normal mode transition
+                        encoder?.sendKeyPress(codepoint: 27, modifiers: 0)
+                    }
 
                 VStack(spacing: 0) {
                     searchField

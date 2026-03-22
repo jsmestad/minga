@@ -228,7 +228,8 @@ struct ContentView: View {
         // Picker overlay (floats over entire window)
         PickerOverlay(
             state: appState.gui.pickerState,
-            theme: appState.gui.themeColors
+            theme: appState.gui.themeColors,
+            encoder: appState.encoder
         )
 
         // Tool manager overlay (floats over entire window)
