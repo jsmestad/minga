@@ -21,7 +21,9 @@ defmodule Minga.Parser.IncrementalTest do
     name = :"parser_test_#{:erlang.unique_integer([:positive])}"
     {:ok, pid} = ParserManager.start_link(name: name, parser_path: @parser_path)
     ParserManager.subscribe(pid)
-    Process.sleep(50)
+    # subscribe is a GenServer.call, so the port is already open when it returns.
+    # Use :sys.get_state as a final sync barrier to ensure init completed.
+    :sys.get_state(pid)
     {:ok, parser: pid}
   end
 
@@ -32,7 +34,8 @@ defmodule Minga.Parser.IncrementalTest do
 
   defp setup_elixir(parser) do
     ParserManager.send_commands(parser, [Protocol.encode_set_language(@buffer_id, "elixir")])
-    Process.sleep(20)
+    # send_commands is a cast; flush to ensure set_language is processed before parse
+    :sys.get_state(parser)
   end
 
   defp full_parse(parser, version, content) do
