@@ -73,8 +73,8 @@ defmodule Minga.Port.Protocol.GUIWindowContent do
   def encode(%SemanticWindow{} = sw) do
     # Flags byte: bit 0 = full_refresh, bit 1 = cursor_visible
     flags =
-      (if sw.full_refresh, do: 1, else: 0) |||
-        (if Map.get(sw, :cursor_visible, true), do: 0x02, else: 0)
+      if(sw.full_refresh, do: 1, else: 0) |||
+        if Map.get(sw, :cursor_visible, true), do: 0x02, else: 0
 
     cursor_shape = encode_cursor_shape(sw.cursor_shape)
     row_count = length(sw.rows)
