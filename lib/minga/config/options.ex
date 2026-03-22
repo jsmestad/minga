@@ -155,14 +155,17 @@ defmodule Minga.Config.Options do
   @typep type_descriptor ::
            :pos_integer
            | :non_neg_integer
+           | :integer
            | :boolean
            | :atom
            | {:enum, [atom()]}
            | :theme_atom
+           | :string
            | :string_or_nil
            | :string_list
            | :map_or_nil
            | :float_or_nil
+           | :any
 
   @typedoc "ETS table reference used for reads and writes."
   @type table :: :ets.table()
@@ -260,6 +263,85 @@ defmodule Minga.Config.Options do
     {:ok, %{table: table}}
   end
 
+  # ── Extension Option Registration ──────────────────────────────────────────
+
+  @doc """
+  Registers a typed option for use by an extension.
+
+  Extensions call this during `init/1` to declare options that users can
+  set in their `config.exs` alongside built-in options. The option is
+  immediately available via `get/1` and `set/2`.
+
+  Returns `:ok` on success or `{:error, reason}` if the name collides
+  with a built-in option.
+
+  ## Type descriptors
+
+  Supported type descriptors (same as built-in options):
+
+  - `:boolean` — true/false
+  - `:pos_integer` — positive integer (> 0)
+  - `:non_neg_integer` — non-negative integer (>= 0)
+  - `:string` — binary string
+  - `:string_or_nil` — string or nil
+  - `:string_list` — list of strings
+  - `:atom` — any atom
+  - `{:enum, [atom()]}` — one of the listed atoms
+  - `:map_or_nil` — map or nil
+  - `:any` — no validation
+
+  ## Examples
+
+      # In your extension's init/1:
+      Minga.Config.Options.register_extension_option(:org_conceal, :boolean, true)
+      Minga.Config.Options.register_extension_option(:org_heading_bullets, :string_list, ["◉", "○", "◈", "◇"])
+
+      # Users can then set in config.exs:
+      set :org_conceal, false
+  """
+  @spec register_extension_option(atom(), type_descriptor(), term()) ::
+          :ok | {:error, String.t()}
+  @spec register_extension_option(GenServer.server(), atom(), type_descriptor(), term()) ::
+          :ok | {:error, String.t()}
+  def register_extension_option(name, type, default) when is_atom(name),
+    do: register_extension_option(__MODULE__, name, type, default)
+
+  def register_extension_option(_server, name, _type, _default)
+      when is_atom(name) and name in @valid_names do
+    {:error,
+     "option #{inspect(name)} conflicts with a built-in option; choose a prefixed name (e.g., :myext_#{name})"}
+  end
+
+  def register_extension_option(server, name, type, default) when is_atom(name) do
+    table = table_name(server)
+    :ets.insert(table, {{:ext_type, name}, type})
+    :ets.insert(table, {{:ext_default, name}, default})
+
+    # Seed the default value only if no user value is set yet
+    case :ets.lookup(table, name) do
+      [{^name, _}] -> :ok
+      [] -> :ets.insert(table, {name, default})
+    end
+
+    :ok
+  end
+
+  @doc """
+  Returns true if the given option name is registered as an extension option.
+  """
+  @spec extension_option?(atom()) :: boolean()
+  @spec extension_option?(GenServer.server(), atom()) :: boolean()
+  def extension_option?(name) when is_atom(name), do: extension_option?(__MODULE__, name)
+
+  def extension_option?(server, name) when is_atom(name) do
+    table = table_name(server)
+
+    case :ets.lookup(table, {:ext_type, name}) do
+      [{_, _}] -> true
+      [] -> false
+    end
+  end
+
   # ── Client API (reads go directly to ETS) ───────────────────────────────────
 
   @doc """
@@ -273,7 +355,7 @@ defmodule Minga.Config.Options do
   def set(name, value) when is_atom(name), do: set(__MODULE__, name, value)
 
   def set(server, name, value) when is_atom(name) do
-    case validate(name, value) do
+    case validate(server, name, value) do
       :ok ->
         :ets.insert(table_name(server), {name, value})
         {:ok, value}
@@ -295,7 +377,7 @@ defmodule Minga.Config.Options do
 
     case :ets.lookup(table, name) do
       [{^name, value}] -> value
-      [] -> Map.get(@defaults, name)
+      [] -> builtin_or_extension_default(table, name)
     end
   end
 
@@ -335,7 +417,7 @@ defmodule Minga.Config.Options do
 
   def set_for_filetype(server, filetype, name, value)
       when is_atom(filetype) and is_atom(name) do
-    case validate(name, value) do
+    case validate(server, name, value) do
       :ok ->
         :ets.insert(table_name(server), {{:filetype, filetype, name}, value})
         {:ok, value}
@@ -401,13 +483,27 @@ defmodule Minga.Config.Options do
   to validate buffer-local option overrides.
   """
   @spec validate_option(atom(), term()) :: :ok | {:error, String.t()}
-  def validate_option(name, value), do: validate(name, value)
+  def validate_option(name, value), do: validate(__MODULE__, name, value)
 
-  @spec validate(atom(), term()) :: :ok | {:error, String.t()}
-  defp validate(name, value) do
+  @spec validate(GenServer.server(), atom(), term()) :: :ok | {:error, String.t()}
+  defp validate(server, name, value) do
     case Map.fetch(@types, name) do
-      {:ok, type} -> validate_type(type, name, value)
-      :error -> {:error, "unknown option: #{inspect(name)}"}
+      {:ok, type} ->
+        validate_type(type, name, value)
+
+      :error ->
+        validate_extension_option(server, name, value)
+    end
+  end
+
+  @spec validate_extension_option(GenServer.server(), atom(), term()) ::
+          :ok | {:error, String.t()}
+  defp validate_extension_option(server, name, value) do
+    table = table_name(server)
+
+    case :ets.lookup(table, {:ext_type, name}) do
+      [{_, type}] -> validate_type(type, name, value)
+      [] -> {:error, "unknown option: #{inspect(name)}"}
     end
   end
 
@@ -423,6 +519,12 @@ defmodule Minga.Config.Options do
 
   defp validate_type(:non_neg_integer, name, value) do
     {:error, "#{name} must be a non-negative integer, got: #{inspect(value)}"}
+  end
+
+  defp validate_type(:integer, _name, value) when is_integer(value), do: :ok
+
+  defp validate_type(:integer, name, value) do
+    {:error, "#{name} must be an integer, got: #{inspect(value)}"}
   end
 
   defp validate_type(:boolean, _name, value) when is_boolean(value), do: :ok
@@ -507,6 +609,20 @@ defmodule Minga.Config.Options do
   end
 
   # ── Private helpers ─────────────────────────────────────────────────────────
+
+  @spec builtin_or_extension_default(:ets.table(), atom()) :: term() | nil
+  defp builtin_or_extension_default(table, name) do
+    case Map.fetch(@defaults, name) do
+      {:ok, default} ->
+        default
+
+      :error ->
+        case :ets.lookup(table, {:ext_default, name}) do
+          [{_, default}] -> default
+          [] -> nil
+        end
+    end
+  end
 
   @spec table_name(GenServer.server()) :: atom()
   defp table_name(name) when is_atom(name), do: :"#{name}_ets"

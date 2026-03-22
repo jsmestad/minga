@@ -115,6 +115,7 @@ defmodule Minga.Editor.RenderPipeline.Chrome.TUI do
     render_overlays_flag = Caps.render_overlays?(state.capabilities)
 
     {picker_draws, picker_cursor} = PickerUI.render(state, viewport)
+    {prompt_draws, prompt_cursor} = Minga.Editor.PromptUI.render(state, viewport)
 
     whichkey_draws =
       if render_overlays_flag,
@@ -132,7 +133,8 @@ defmodule Minga.Editor.RenderPipeline.Chrome.TUI do
          %Overlay{draws: sig_help_draws},
          %Overlay{draws: whichkey_draws},
          %Overlay{draws: completion_draws},
-         %Overlay{draws: picker_draws, cursor: picker_cursor}
+         %Overlay{draws: picker_draws, cursor: picker_cursor},
+         %Overlay{draws: prompt_draws, cursor: prompt_cursor}
        ])
     |> Enum.reject(fn %Overlay{draws: d} -> d == [] end)
   end

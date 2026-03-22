@@ -34,6 +34,7 @@ defmodule Minga.Input do
   alias Minga.Input.ModeFSM
   alias Minga.Input.Picker
   alias Minga.Input.Popup
+  alias Minga.Input.Prompt
   alias Minga.Input.Scoped
   alias Minga.Input.SignatureHelp
   alias Minga.Input.ToolApproval
@@ -85,6 +86,7 @@ defmodule Minga.Input do
     [
       Interrupt,
       ConflictPrompt,
+      Prompt,
       Picker,
       Completion
     ]
