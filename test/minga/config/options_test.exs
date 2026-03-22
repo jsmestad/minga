@@ -442,6 +442,21 @@ defmodule Minga.Config.OptionsTest do
       assert Options.get(s, :org_conceal) == true
     end
 
+    test "all/1 includes extension option values", %{server: s} do
+      Options.register_extension_option(s, :org_conceal, :boolean, true)
+      all = Options.all(s)
+      assert Map.get(all, :org_conceal) == true
+    end
+
+    test "reset clears extension type metadata", %{server: s} do
+      Options.register_extension_option(s, :org_conceal, :boolean, true)
+      Options.reset(s)
+
+      assert Options.extension_option?(s, :org_conceal) == false
+      assert {:error, msg} = Options.set(s, :org_conceal, false)
+      assert msg =~ "unknown option"
+    end
+
     test "multiple extensions can register different options", %{server: s} do
       Options.register_extension_option(s, :org_conceal, :boolean, true)
       Options.register_extension_option(s, :zen_mode, :boolean, false)

@@ -40,6 +40,7 @@ defmodule Minga.Editor.PromptUITest do
   @escape 27
   @enter 13
   @backspace 127
+  @delete 57_348
 
   defp make_state(overrides \\ %{}) do
     base = %{
@@ -232,6 +233,70 @@ defmodule Minga.Editor.PromptUITest do
       refute PromptUI.open?(state)
       assert state.prompt_ui.handler == nil
       assert state.prompt_ui.text == ""
+    end
+  end
+
+  describe "handle_key/3 — delete (forward)" do
+    test "removes character after cursor" do
+      state = make_state() |> PromptUI.open(TestHandler, default: "abc")
+      state = %{state | prompt_ui: %{state.prompt_ui | cursor: 0}}
+      {state, nil} = PromptUI.handle_key(state, @delete, 0)
+
+      assert state.prompt_ui.text == "bc"
+      assert state.prompt_ui.cursor == 0
+    end
+
+    test "does nothing at end of text" do
+      state = make_state() |> PromptUI.open(TestHandler, default: "abc")
+      # cursor is at 3 (end)
+      {state, nil} = PromptUI.handle_key(state, @delete, 0)
+
+      assert state.prompt_ui.text == "abc"
+      assert state.prompt_ui.cursor == 3
+    end
+
+    test "deletes in middle of text" do
+      state = make_state() |> PromptUI.open(TestHandler, default: "abc")
+      state = %{state | prompt_ui: %{state.prompt_ui | cursor: 1}}
+      {state, nil} = PromptUI.handle_key(state, @delete, 0)
+
+      assert state.prompt_ui.text == "ac"
+      assert state.prompt_ui.cursor == 1
+    end
+  end
+
+  describe "handle_key/3 — edge cases" do
+    test "control characters are ignored" do
+      state = make_state() |> PromptUI.open(TestHandler)
+      {state, nil} = PromptUI.handle_key(state, 0x01, 0)
+
+      assert state.prompt_ui.text == ""
+    end
+
+    test "surrogate codepoints are ignored" do
+      state = make_state() |> PromptUI.open(TestHandler)
+      {state, nil} = PromptUI.handle_key(state, 0xD800, 0)
+
+      assert state.prompt_ui.text == ""
+    end
+
+    test "backspace on multi-byte unicode deletes one grapheme" do
+      state = make_state() |> PromptUI.open(TestHandler, default: "a😀b")
+      # cursor at 3 (end), move back once to position 2 (after 😀)
+      state = %{state | prompt_ui: %{state.prompt_ui | cursor: 2}}
+      {state, nil} = PromptUI.handle_key(state, @backspace, 0)
+
+      assert state.prompt_ui.text == "ab"
+      assert state.prompt_ui.cursor == 1
+    end
+
+    test "inserting at position 0 prepends to text" do
+      state = make_state() |> PromptUI.open(TestHandler, default: "bc")
+      state = %{state | prompt_ui: %{state.prompt_ui | cursor: 0}}
+      {state, nil} = PromptUI.handle_key(state, ?a, 0)
+
+      assert state.prompt_ui.text == "abc"
+      assert state.prompt_ui.cursor == 1
     end
   end
 
