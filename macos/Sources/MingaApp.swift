@@ -11,6 +11,7 @@
 
 import SwiftUI
 import AppKit
+import os
 
 /// Default font settings.
 private let defaultFontName = "Menlo"
@@ -50,6 +51,70 @@ private struct PaneHeightKey: PreferenceKey {
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         // Single measurement source (one GeometryReader); last write wins.
         value = nextValue()
+    }
+}
+
+/// Loading overlay shown while the BEAM boots and renders its first frame.
+/// Covers the empty Metal framebuffer with the app icon, a spinner, and a
+/// random quip so the user sees a friendly loading state instead of a blank
+/// dark screen. Fades out when the first batch_end arrives.
+///
+/// Adapts to the macOS system appearance (light/dark) to minimize the flash
+/// when the editor's actual theme loads. The exact theme colors are not
+/// available yet (BEAM has not sent guiTheme), but matching the system
+/// appearance gets close enough for most users.
+struct StartupOverlay: View {
+    @Environment(\.colorScheme) private var systemScheme
+
+    private static let quips = [
+        "Reticulating splines…",
+        "Warming up the BEAM…",
+        "Spawning processes…",
+        "Consulting the oracle…",
+        "Aligning the gap buffer…",
+        "Negotiating with tree-sitter…",
+        "Calibrating modal flux…",
+        "Herding supervisors…",
+        "Entering god mode…",
+        "The cake is a lie…",
+        "It's dangerous to go alone…",
+        "Kept you waiting, huh?",
+        "Calibrating…",
+        "Preparing emotional states…",
+        "Escaping to normal mode…",
+        "M-x start-editor",
+    ]
+
+    /// Picked once per overlay lifetime so it doesn't change mid-fade.
+    @State private var quip = quips.randomElement()!
+
+    private var backgroundColor: Color {
+        if systemScheme == .dark {
+            Color(red: 0.12, green: 0.12, blue: 0.14)
+        } else {
+            Color(red: 0.95, green: 0.95, blue: 0.96)
+        }
+    }
+
+    var body: some View {
+        ZStack {
+            backgroundColor
+
+            VStack(spacing: 16) {
+                Image("MingaLogo")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 96, height: 96)
+
+                ProgressView()
+                    .controlSize(.small)
+
+                Text(quip)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .ignoresSafeArea()
     }
 }
 
@@ -255,6 +320,13 @@ struct ContentView: View {
                 cellHeight: ch
             )
         }
+
+        // Startup overlay: covers the empty Metal framebuffer with a
+        // spinner while the BEAM boots. Fades out on first batch_end.
+        if !appState.hasReceivedFirstFrame {
+            StartupOverlay()
+                .transition(.opacity)
+        }
         }
         .navigationTitle(appState.windowTitle)
         .toolbarBackground(appState.windowBgColor ?? Color(red: 0.12, green: 0.12, blue: 0.14), for: .windowToolbar)
@@ -273,6 +345,9 @@ final class AppState: ObservableObject {
     @Published var windowBgColor: Color?
     /// Whether the theme is dark (luminance < 0.5). Drives toolbarColorScheme.
     @Published var windowBgIsDark: Bool = true
+    /// Flipped once when the first complete frame (batch_end) arrives from
+    /// the BEAM. The startup overlay fades out when this becomes true.
+    @Published var hasReceivedFirstFrame: Bool = false
     /// All GUI chrome sub-states in a single container.
     let gui = GUIState()
     /// Protocol encoder for sending gui_action events from SwiftUI chrome.
@@ -298,6 +373,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var editorNSView: EditorNSView?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        os_signpost(.begin, log: startupLog, name: "AppStartup")
+
         // Register the bundled Nerd Font for devicon rendering.
         registerBundledFonts()
 
@@ -389,6 +466,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         nsView.statusBarState = appState.gui.statusBarState
         self.editorNSView = nsView
         appState.editorNSView = nsView
+        os_signpost(.event, log: startupLog, name: "EditorViewCreated")
 
         disp.onFrameReady = { [weak nsView] in
             nsView?.renderFrame()
@@ -446,12 +524,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         reader.start()
         self.protocolReader = reader
 
-        // In bundle mode, file URLs buffered before the BEAM was ready are
-        // flushed when the dispatcher receives the first ready acknowledgement
-        // from the BEAM (via onFirstRender below).
-        if beamManager != nil {
-            disp.onFirstRender = { [weak self] in
-                guard let self, let manager = self.beamManager, let enc = self.encoder else { return }
+        // First frame callback: dismiss the startup overlay and flush any
+        // pending file URLs (bundle mode only).
+        disp.onFirstRender = { [weak self] in
+            guard let self else { return }
+
+            os_signpost(.end, log: startupLog, name: "AppStartup")
+
+            let duration: Double = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.25
+            withAnimation(.easeOut(duration: duration)) {
+                self.appState.hasReceivedFirstFrame = true
+            }
+
+            // In bundle mode, flush file URLs buffered before the BEAM was ready.
+            if let manager = self.beamManager, let enc = self.encoder {
                 let urls = manager.flushPendingFileURLs()
                 for url in urls {
                     enc.sendOpenFile(path: url.path)
