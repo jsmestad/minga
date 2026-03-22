@@ -93,6 +93,16 @@ defmodule Minga.Editor.SemanticWindow.Builder do
         :block
       end
 
+    # Hide the editor cursor when the minibuffer has focus (command, search,
+    # eval, search_prompt modes). The native SwiftUI minibuffer shows its
+    # own cursor; having two cursors visible is confusing.
+    cursor_visible =
+      if is_active do
+        state.vim.mode not in [:command, :search, :eval, :search_prompt]
+      else
+        true
+      end
+
     # Selection in display coordinates
     selection = Selection.from_visual_selection(ctx.visual_selection, viewport.top)
 
@@ -120,6 +130,7 @@ defmodule Minga.Editor.SemanticWindow.Builder do
       cursor_row: display_cursor_row,
       cursor_col: display_cursor_col,
       cursor_shape: cursor_shape,
+      cursor_visible: cursor_visible,
       scroll_left: viewport.left,
       selection: selection,
       search_matches: search_matches,

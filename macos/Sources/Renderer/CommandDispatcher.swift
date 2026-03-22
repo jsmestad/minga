@@ -247,6 +247,9 @@ final class CommandDispatcher {
 
         case .guiWindowContent(let data):
             guiState.windowContents[data.windowId] = data
+            // BEAM controls cursor visibility per window. When the minibuffer
+            // or other overlay has focus, cursor_visible is false.
+            frameState.cursorVisible = data.cursorVisible
 
         case .guiBottomPanel(let visible, let activeTabIndex, let heightPercent, let filterPreset, let tabs, let entries):
             if visible {

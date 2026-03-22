@@ -11,7 +11,7 @@ defmodule Minga.Port.Protocol.GUIWindowContent do
   ```
   opcode:               u8 = 0x80
   window_id:            u16
-  flags:                u8       (bit 0 = full_refresh)
+  flags:                u8       (bit 0 = full_refresh, bit 1 = cursor_visible)
   cursor_row:           u16      (display row, fold/wrap adjusted)
   cursor_col:           u16      (display col, virtual text adjusted)
   cursor_shape:         u8
@@ -71,7 +71,11 @@ defmodule Minga.Port.Protocol.GUIWindowContent do
   """
   @spec encode(SemanticWindow.t()) :: binary()
   def encode(%SemanticWindow{} = sw) do
-    flags = if sw.full_refresh, do: 1, else: 0
+    # Flags byte: bit 0 = full_refresh, bit 1 = cursor_visible
+    flags =
+      (if sw.full_refresh, do: 1, else: 0) |||
+        (if Map.get(sw, :cursor_visible, true), do: 0x02, else: 0)
+
     cursor_shape = encode_cursor_shape(sw.cursor_shape)
     row_count = length(sw.rows)
 
