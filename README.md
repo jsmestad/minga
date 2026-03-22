@@ -1,4 +1,8 @@
-# 🥨 Minga
+<p align="center">
+  <img src="assets/minga_dark.svg" alt="Minga logo" width="128">
+</p>
+
+# Minga
 
 **Vim motions. Emacs extensibility. Built for the age of AI agents.**
 
@@ -80,4 +84,4 @@ A heartfelt thank you to [Henrik Lissner](https://github.com/hlissner) and all c
 
 ---
 
-*Created by [Justin Smestad](https://evalcode.com). Built with 🥨 in Colorado.*
+*Created by [Justin Smestad](https://evalcode.com). Built in Colorado.*
