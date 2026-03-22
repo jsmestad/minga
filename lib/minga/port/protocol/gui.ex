@@ -706,14 +706,17 @@ defmodule Minga.Port.Protocol.GUI do
     # Diagnostic hint for the cursor line (shown in status bar center when idle)
     diag_hint = :erlang.iolist_to_binary([d.diagnostic_hint || ""])
 
+    # Status message (shown in status bar center, takes priority over diagnostic hint)
+    message = :erlang.iolist_to_binary([d.status_msg || ""])
+
     # cursor_line/cursor_col are 0-indexed from BufferServer; encode as 1-indexed for the GUI
     <<@op_gui_status_bar, 0::8, mode_byte::8, d.cursor_line + 1::32, d.cursor_col + 1::32,
       d.line_count::32, flags::8, lsp_byte::8, byte_size(git_branch)::8, git_branch::binary,
-      0::16, byte_size(filetype)::8, filetype::binary, error_count::16, warning_count::16,
-      info_count::16, hint_count::16, macro_byte::8, parser_byte::8, agent_byte::8, git_added::16,
-      git_modified::16, git_deleted::16, byte_size(icon_bytes)::8, icon_bytes::binary, icon_r::8,
-      icon_g::8, icon_b::8, byte_size(filename)::16, filename::binary, byte_size(diag_hint)::16,
-      diag_hint::binary>>
+      byte_size(message)::16, message::binary, byte_size(filetype)::8, filetype::binary,
+      error_count::16, warning_count::16, info_count::16, hint_count::16, macro_byte::8,
+      parser_byte::8, agent_byte::8, git_added::16, git_modified::16, git_deleted::16,
+      byte_size(icon_bytes)::8, icon_bytes::binary, icon_r::8, icon_g::8, icon_b::8,
+      byte_size(filename)::16, filename::binary, byte_size(diag_hint)::16, diag_hint::binary>>
   end
 
   def encode_gui_status_bar({:agent, d}) do

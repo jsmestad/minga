@@ -179,16 +179,19 @@ defmodule Minga.BufferPickerTest do
 
       ctx = start_editor("clean", file_path: path)
 
-      # Modify the buffer
-      send_keys(ctx, "ix<Esc>")
+      # Modify the buffer, then open picker (sync ensures all keys processed
+      # before the next sequence fires)
+      send_keys_sync(ctx, "ix<Esc>")
+      send_keys_sync(ctx, "<SPC>bb")
 
-      # Open picker
-      send_keys(ctx, "<SPC>bb")
-
-      screen = screen_text(ctx)
-      all_text = Enum.join(screen, "\n")
-      # Buffer picker shows [+] for modified buffers
-      assert String.contains?(all_text, "[+]")
+      # Picker rendering is async; poll until the dirty indicator appears
+      wait_until_screen(
+        ctx,
+        fn ->
+          screen_text(ctx) |> Enum.join("\n") |> String.contains?("[+]")
+        end,
+        message: "Expected [+] dirty indicator in picker"
+      )
     end
   end
 

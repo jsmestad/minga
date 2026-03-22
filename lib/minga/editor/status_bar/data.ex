@@ -56,7 +56,8 @@ defmodule Minga.Editor.StatusBar.Data do
           buf_count: non_neg_integer(),
           macro_recording: {true, String.t()} | false,
           agent_status: AgentState.status(),
-          agent_theme_colors: Theme.Agent.t() | nil
+          agent_theme_colors: Theme.Agent.t() | nil,
+          status_msg: String.t() | nil
         }
 
   @typedoc "Data for a focused agent chat window."
@@ -132,7 +133,8 @@ defmodule Minga.Editor.StatusBar.Data do
       buf_count: length(state.buffers.list),
       macro_recording: MacroRecorder.recording?(state.vim.macro_recorder),
       agent_status: agent.status,
-      agent_theme_colors: if(agent.status, do: Theme.agent_theme(state.theme), else: nil)
+      agent_theme_colors: if(agent.status, do: Theme.agent_theme(state.theme), else: nil),
+      status_msg: state.status_msg
     }
   end
 

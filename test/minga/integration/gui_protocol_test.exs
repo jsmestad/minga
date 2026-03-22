@@ -124,7 +124,8 @@ defmodule Minga.Integration.GUIProtocolTest do
            buf_count: 3,
            macro_recording: {true, "q"},
            agent_status: :thinking,
-           agent_theme_colors: nil
+           agent_theme_colors: nil,
+           status_msg: "Wrote foo.ex"
          }}
 
       cmd = ProtocolGUI.encode_gui_status_bar(data)
@@ -141,6 +142,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert decoded["cursor_col"] == 10
       assert decoded["line_count"] == 200
       assert decoded["git_branch"] == "main"
+      assert decoded["message"] == "Wrote foo.ex"
       assert decoded["filetype"] == "elixir"
       # Extended fields (TUI modeline parity)
       assert decoded["info_count"] == 1
