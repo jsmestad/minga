@@ -165,9 +165,12 @@ defmodule Minga.Integration.PickerLifecycleTest do
     test "selecting a command executes it and closes picker" do
       ctx = start_editor("hello world")
 
-      # Open command palette and filter to "new_buffer"
+      # Open command palette and filter to a side-effect-free command.
+      # Avoids new_buffer which triggers DynamicSupervisor.start_child,
+      # Events.broadcast, and async messages from Git.Tracker/LSP/etc.
+      # that create a race between the event cascade and the mode assertion.
       send_keys_sync(ctx, "<Space>:")
-      send_keys_sync(ctx, "new_buffer")
+      send_keys_sync(ctx, "cycle_line_numbers")
 
       # Select the first match
       send_keys_sync(ctx, "<CR>")
