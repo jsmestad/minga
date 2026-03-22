@@ -82,7 +82,27 @@ final class BEAMProcessManager {
 
         let proc = Process()
         proc.executableURL = execURL
-        proc.arguments = ["start"]
+
+        // Forward CLI flags (--editor, --no-context, --config) to the BEAM.
+        // The CLI launcher script passes these via `open --args`, which puts
+        // them in ProcessInfo.processInfo.arguments. We forward all arguments
+        // that look like Minga CLI flags to the BEAM release's `start` command.
+        var beamArgs = ["start"]
+        let appArgs = ProcessInfo.processInfo.arguments.dropFirst() // skip argv[0]
+        let mingaFlags: Set<String> = ["--editor", "--no-context", "--config"]
+        var skipNext = false
+        for arg in appArgs {
+            if skipNext {
+                beamArgs.append(arg)
+                skipNext = false
+                continue
+            }
+            if mingaFlags.contains(arg) {
+                beamArgs.append(arg)
+                if arg == "--config" { skipNext = true }
+            }
+        }
+        proc.arguments = beamArgs
 
         // Set up pipes for the port protocol.
         let stdinPipe = Pipe()

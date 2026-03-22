@@ -1,0 +1,176 @@
+#!/bin/bash
+#
+# CLI launcher for Minga.app
+#
+# Opens files in the Minga GUI editor from the terminal. Homebrew Cask
+# symlinks this to /usr/local/bin/minga so users can run:
+#
+#   minga file.ex           Open file in Minga
+#   minga .                 Open current directory as project
+#   minga --help            Show help
+#   minga --version         Show version
+#
+# Limitations (v1, shell script):
+#   - --wait / $EDITOR semantics not supported (the script returns
+#     immediately after launching the app; planned for a compiled
+#     Swift CLI binary in a follow-up)
+#
+# The script resolves Minga.app from these locations (in order):
+#   1. Relative to the script itself (inside the .app bundle)
+#   2. /Applications/Minga.app
+#   3. ~/Applications/Minga.app
+
+set -euo pipefail
+
+# ── Resolve the app bundle ──────────────────────────────────────────────
+
+resolve_app() {
+  # If this script is inside a .app bundle (Contents/Resources/bin/minga),
+  # the app is 3 levels up.
+  local script_dir
+  script_dir="$(cd "$(dirname "$0")" && pwd)"
+  local bundle_app
+  bundle_app="$(cd "$script_dir/../../.." 2>/dev/null && pwd)" || true
+
+  if [ -n "$bundle_app" ] && [ -f "$bundle_app/Contents/MacOS/Minga" ]; then
+    echo "$bundle_app"
+    return
+  fi
+
+  # Standard install locations
+  if [ -d "/Applications/Minga.app" ]; then
+    echo "/Applications/Minga.app"
+    return
+  fi
+
+  if [ -d "$HOME/Applications/Minga.app" ]; then
+    echo "$HOME/Applications/Minga.app"
+    return
+  fi
+
+  return 1
+}
+
+# ── Help and version (handled locally, no app needed) ───────────────────
+
+show_help() {
+  cat << 'EOF'
+minga - BEAM-powered modal text editor
+
+Usage: minga [options] [file|directory]
+
+Options:
+  -h, --help             Show this help message
+  -v, --version          Show version
+  --editor               Start in editor mode (skip agentic view)
+  --no-context           Don't load the file as agent context
+  --config <path>        Use a custom config file
+
+Examples:
+  minga                          Launch Minga
+  minga README.md                Open file in Minga
+  minga .                        Open current directory as project
+  minga ~/code/myproject         Open directory as project
+EOF
+}
+
+show_version() {
+  local app_path
+  app_path=$(resolve_app 2>/dev/null) || {
+    echo "minga (version unknown, Minga.app not found)"
+    return
+  }
+  local version
+  version=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$app_path/Contents/Info.plist" 2>/dev/null || echo "unknown")
+  echo "minga $version"
+}
+
+# ── Main ────────────────────────────────────────────────────────────────
+
+# Handle flags that don't need the app
+case "${1:-}" in
+  -h|--help)
+    show_help
+    exit 0
+    ;;
+  -v|--version)
+    show_version
+    exit 0
+    ;;
+esac
+
+# Find the app bundle
+APP_PATH=$(resolve_app) || {
+  echo "error: Minga.app not found." >&2
+  echo "" >&2
+  echo "Looked in:" >&2
+  echo "  - Relative to this script (inside .app bundle)" >&2
+  echo "  - /Applications/Minga.app" >&2
+  echo "  - ~/Applications/Minga.app" >&2
+  echo "" >&2
+  echo "Install Minga.app or set the path manually:" >&2
+  echo "  open -a /path/to/Minga.app" >&2
+  exit 1
+}
+
+# No arguments: just launch the app
+if [ $# -eq 0 ]; then
+  open -a "$APP_PATH"
+  exit 0
+fi
+
+# Separate flags from file/directory arguments
+flags=()
+files=()
+skip_next=false
+
+for arg in "$@"; do
+  if $skip_next; then
+    flags+=("$arg")
+    skip_next=false
+    continue
+  fi
+
+  case "$arg" in
+    --config)
+      # --config takes a path argument
+      flags+=("$arg")
+      skip_next=true
+      ;;
+    --editor|--no-context)
+      flags+=("$arg")
+      ;;
+    -*)
+      echo "warning: unknown flag '$arg' (ignored)" >&2
+      ;;
+    *)
+      # Convert to absolute path
+      if [ -e "$arg" ]; then
+        files+=("$(cd "$(dirname "$arg")" && pwd)/$(basename "$arg")")
+      else
+        local_dir="$(dirname "$arg")"
+        if [ -d "$local_dir" ]; then
+          files+=("$(cd "$local_dir" && pwd)/$(basename "$arg")")
+        else
+          files+=("$(pwd)/$arg")
+        fi
+      fi
+      ;;
+  esac
+done
+
+# Build the open command.
+# File arguments go as positional args (macOS delivers them via application(_:open:)).
+# Flags go via --args (delivered to ProcessInfo.processInfo.arguments, forwarded
+# to the BEAM child process by BEAMProcessManager).
+open_args=(-a "$APP_PATH")
+
+if [ ${#files[@]} -gt 0 ]; then
+  open_args+=("${files[@]}")
+fi
+
+if [ ${#flags[@]} -gt 0 ]; then
+  open_args+=(--args "${flags[@]}")
+fi
+
+open "${open_args[@]}"
