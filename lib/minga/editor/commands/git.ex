@@ -6,11 +6,13 @@ defmodule Minga.Editor.Commands.Git do
   @behaviour Minga.Command.Provider
 
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Editor.Commands
   alias Minga.Editor.PickerUI
   alias Minga.Editor.State, as: EditorState
   alias Minga.Git
   alias Minga.Git.Buffer, as: GitBuffer
   alias Minga.Git.Diff
+  alias Minga.Git.DiffView
   alias Minga.Git.Repo
   alias Minga.Git.Tracker, as: GitTracker
   alias Minga.Picker.GitChangedSource
@@ -23,6 +25,7 @@ defmodule Minga.Editor.Commands.Git do
     {:git_branch_picker, "Switch branch", false},
     {:git_push, "Push", false},
     {:git_fetch, "Fetch", false},
+    {:git_diff_file, "View diff", true},
     {:next_git_hunk, "Next git hunk", true},
     {:prev_git_hunk, "Previous git hunk", true},
     {:git_stage_hunk, "Stage hunk", true},
@@ -59,6 +62,14 @@ defmodule Minga.Editor.Commands.Git do
 
   def execute(state, :git_fetch) do
     git_remote_action(state, &Git.fetch_remotes/1, "Fetching...", "Fetched", "Fetch failed")
+  end
+
+  # ── Diff view ──────────────────────────────────────────────────────────────
+
+  def execute(state, :git_diff_file) do
+    with_git_buffer(state, fn git_pid, buf ->
+      open_diff_view(state, git_pid, buf)
+    end)
   end
 
   # ── Navigation ─────────────────────────────────────────────────────────────
@@ -152,6 +163,38 @@ defmodule Minga.Editor.Commands.Git do
   end
 
   # ── Private ────────────────────────────────────────────────────────────────
+
+  @spec open_diff_view(state(), pid(), pid()) :: state()
+  defp open_diff_view(state, git_pid, buf) do
+    git_root = GitBuffer.git_root(git_pid)
+    rel_path = GitBuffer.relative_path(git_pid)
+    {current_content, _cursor} = BufferServer.content_and_cursor(buf)
+
+    base_content =
+      case Git.show_head(git_root, rel_path) do
+        {:ok, content} -> content
+        :error -> ""
+      end
+
+    diff_result = DiffView.build(base_content, current_content)
+    filename = Path.basename(rel_path)
+    filetype = Minga.Filetype.detect(filename)
+
+    case BufferServer.start_link(
+           content: diff_result.text,
+           buffer_type: :nofile,
+           read_only: true,
+           buffer_name: "#{filename} [diff]",
+           filetype: filetype
+         ) do
+      {:ok, diff_buf} ->
+        state = Commands.add_buffer(state, diff_buf)
+        %{state | status_msg: "Diff: #{filename} (#{length(diff_result.hunk_lines)} hunks)"}
+
+      {:error, reason} ->
+        %{state | status_msg: "Failed to open diff: #{inspect(reason)}"}
+    end
+  end
 
   @spec git_remote_action(
           state(),
