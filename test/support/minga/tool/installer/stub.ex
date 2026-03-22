@@ -28,13 +28,23 @@ defmodule Minga.Tool.Installer.Stub do
 
   # ── Setup ───────────────────────────────────────────────────────────────────
 
-  @doc "Initializes or resets the stub to default (successful) behavior."
-  @spec reset() :: :ok
-  def reset do
+  @doc """
+  Creates the ETS table if it doesn't exist. Call once from test_helper.exs
+  so the table is owned by the long-lived test coordinator process and
+  survives across individual test processes.
+  """
+  @spec ensure_table() :: :ok
+  def ensure_table do
     if :ets.whereis(@table) == :undefined do
-      :ets.new(@table, [:named_table, :public, :set])
+      :ets.new(@table, [:named_table, :public, :set, read_concurrency: true])
     end
 
+    :ok
+  end
+
+  @doc "Resets the stub to default (successful) behavior. Table must already exist."
+  @spec reset() :: :ok
+  def reset do
     :ets.insert(@table, {:install_result, {:ok, "1.0.0-stub"}})
     :ets.insert(@table, {:uninstall_result, :ok})
     :ets.insert(@table, {:installed_version, {:ok, "1.0.0-stub"}})
