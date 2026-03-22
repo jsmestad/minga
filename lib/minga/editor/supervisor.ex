@@ -37,7 +37,11 @@ defmodule Minga.Editor.Supervisor do
     children = [
       Minga.Parser.Manager,
       {Minga.Port.Manager, [backend: backend]},
-      Minga.Editor
+      {Minga.Editor,
+       [
+         swap_dir: Minga.Swap.swap_dir(),
+         session_dir: Path.dirname(Minga.Session.session_file())
+       ]}
     ]
 
     Supervisor.init(children, strategy: :rest_for_one)
