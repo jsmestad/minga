@@ -1,8 +1,5 @@
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/minga_dark.svg">
-    <img src="assets/minga_light.svg" alt="Minga logo" width="128">
-  </picture>
+  <img src="assets/minga_dark.svg" alt="Minga logo" width="128">
 </p>
 
 # Minga
