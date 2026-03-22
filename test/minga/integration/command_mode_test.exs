@@ -13,7 +13,7 @@ defmodule Minga.Integration.CommandModeTest do
     test "colon shows in minibuffer with cursor positioned after it" do
       ctx = start_editor("hello world")
 
-      send_keys(ctx, ":")
+      send_keys_sync(ctx, ":")
 
       assert editor_mode(ctx) == :command
       assert_minibuffer_contains(ctx, ":")
@@ -30,7 +30,7 @@ defmodule Minga.Integration.CommandModeTest do
     test "typed text appears in minibuffer after colon" do
       ctx = start_editor("hello world")
 
-      send_keys(ctx, ":set nu")
+      send_keys_sync(ctx, ":set nu")
 
       assert editor_mode(ctx) == :command
       assert_minibuffer_contains(ctx, ":set nu")
@@ -40,7 +40,7 @@ defmodule Minga.Integration.CommandModeTest do
     test "partial command shows incrementally" do
       ctx = start_editor("hello world")
 
-      send_keys(ctx, ":se")
+      send_keys_sync(ctx, ":se")
 
       assert_minibuffer_contains(ctx, ":se")
       {cursor_row, cursor_col} = screen_cursor(ctx)
@@ -56,10 +56,10 @@ defmodule Minga.Integration.CommandModeTest do
     test "removes last character from minibuffer" do
       ctx = start_editor("hello world")
 
-      send_keys(ctx, ":set")
+      send_keys_sync(ctx, ":set")
       assert_minibuffer_contains(ctx, ":set")
 
-      send_keys(ctx, "<BS>")
+      send_keys_sync(ctx, "<BS>")
 
       assert editor_mode(ctx) == :command
       assert_minibuffer_contains(ctx, ":se")
@@ -69,7 +69,7 @@ defmodule Minga.Integration.CommandModeTest do
     test "backspacing to empty exits command mode" do
       ctx = start_editor("hello world")
 
-      send_keys(ctx, ":a<BS>")
+      send_keys_sync(ctx, ":a<BS>")
 
       assert editor_mode(ctx) == :normal
       assert_modeline_contains(ctx, "NORMAL")
@@ -86,7 +86,7 @@ defmodule Minga.Integration.CommandModeTest do
       # Record buffer cursor before command mode
       cursor_before = buffer_cursor(ctx)
 
-      send_keys(ctx, ":set nu<Esc>")
+      send_keys_sync(ctx, ":set nu<Esc>")
 
       assert editor_mode(ctx) == :normal
       assert_modeline_contains(ctx, "NORMAL")
@@ -98,12 +98,12 @@ defmodule Minga.Integration.CommandModeTest do
       ctx = start_editor("hello world")
 
       # Move cursor to col 5 before entering command mode
-      send_keys(ctx, "lllll")
+      send_keys_sync(ctx, "lllll")
       cursor_before = buffer_cursor(ctx)
       {_line, col} = cursor_before
       assert col == 5
 
-      send_keys(ctx, ":w<Esc>")
+      send_keys_sync(ctx, ":w<Esc>")
 
       assert buffer_cursor(ctx) == cursor_before
     end
@@ -115,7 +115,7 @@ defmodule Minga.Integration.CommandModeTest do
     test "toggles line numbers and returns to normal mode" do
       ctx = start_editor("hello\nworld\nfoo")
 
-      send_keys(ctx, ":set nu<CR>")
+      send_keys_sync(ctx, ":set nu<CR>")
 
       assert editor_mode(ctx) == :normal
       assert_modeline_contains(ctx, "NORMAL")
@@ -129,7 +129,7 @@ defmodule Minga.Integration.CommandModeTest do
     test "toggles relative line numbers and returns to normal mode" do
       ctx = start_editor("line one\nline two\nline three\nline four\nline five")
 
-      send_keys(ctx, ":set rnu<CR>")
+      send_keys_sync(ctx, ":set rnu<CR>")
 
       assert editor_mode(ctx) == :normal
       assert_screen_snapshot(ctx, "command_exec_set_rnu")
@@ -143,7 +143,7 @@ defmodule Minga.Integration.CommandModeTest do
       ctx =
         start_editor("line one\nline two\nline three\nline four\nline five")
 
-      send_keys(ctx, ":3<CR>")
+      send_keys_sync(ctx, ":3<CR>")
 
       assert editor_mode(ctx) == :normal
       {line, col} = buffer_cursor(ctx)
@@ -157,8 +157,8 @@ defmodule Minga.Integration.CommandModeTest do
         start_editor("line one\nline two\nline three\nline four\nline five")
 
       # Move to line 3 first, then :1 to go back to top
-      send_keys(ctx, ":3<CR>")
-      send_keys(ctx, ":1<CR>")
+      send_keys_sync(ctx, ":3<CR>")
+      send_keys_sync(ctx, ":1<CR>")
 
       {line, _col} = buffer_cursor(ctx)
       assert line == 0
@@ -172,7 +172,7 @@ defmodule Minga.Integration.CommandModeTest do
     test "shows no file name error in status" do
       ctx = start_editor("hello world")
 
-      send_keys(ctx, ":w<CR>")
+      send_keys_sync(ctx, ":w<CR>")
 
       assert editor_mode(ctx) == :normal
       assert_screen_snapshot(ctx, "command_save_unnamed")
@@ -185,7 +185,7 @@ defmodule Minga.Integration.CommandModeTest do
     test "returns to normal mode silently" do
       ctx = start_editor("hello world")
 
-      send_keys(ctx, ":nonexistent<CR>")
+      send_keys_sync(ctx, ":nonexistent<CR>")
 
       assert editor_mode(ctx) == :normal
       assert_modeline_contains(ctx, "NORMAL")
@@ -205,7 +205,7 @@ defmodule Minga.Integration.CommandModeTest do
       assert start_line == 0
 
       # Enter command mode and jump to line 4
-      send_keys(ctx, ":4<CR>")
+      send_keys_sync(ctx, ":4<CR>")
 
       assert editor_mode(ctx) == :normal
       {line, _} = buffer_cursor(ctx)
@@ -218,17 +218,17 @@ defmodule Minga.Integration.CommandModeTest do
         start_editor("first\nsecond\nthird\nfourth\nfifth")
 
       # Toggle line numbers
-      send_keys(ctx, ":set nu<CR>")
+      send_keys_sync(ctx, ":set nu<CR>")
       assert editor_mode(ctx) == :normal
 
       # Jump to line 3
-      send_keys(ctx, ":3<CR>")
+      send_keys_sync(ctx, ":3<CR>")
       assert editor_mode(ctx) == :normal
       {line, _} = buffer_cursor(ctx)
       assert line == 2
 
       # Enter and escape without executing
-      send_keys(ctx, ":w<Esc>")
+      send_keys_sync(ctx, ":w<Esc>")
       assert editor_mode(ctx) == :normal
       # Cursor stays where it was after :3
       {line2, _} = buffer_cursor(ctx)

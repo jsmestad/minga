@@ -12,7 +12,7 @@ defmodule Minga.Integration.WindowSplitsTest do
     test "creates two side-by-side panes with separator" do
       ctx = start_editor("hello world")
 
-      send_keys(ctx, "<Space>wv")
+      send_keys_sync(ctx, "<Space>wv")
 
       # Both panes should show the same buffer content
       rows = screen_text(ctx)
@@ -25,7 +25,7 @@ defmodule Minga.Integration.WindowSplitsTest do
     test "global status bar appears at row height-2" do
       ctx = start_editor("hello world")
 
-      send_keys(ctx, "<Space>wv")
+      send_keys_sync(ctx, "<Space>wv")
 
       # Single global status bar (not per-pane); shows focused window info.
       status_bar_row = screen_row(ctx, ctx.height - 2)
@@ -42,7 +42,7 @@ defmodule Minga.Integration.WindowSplitsTest do
     test "creates two stacked panes with global status bar" do
       ctx = start_editor("hello world")
 
-      send_keys(ctx, "<Space>ws")
+      send_keys_sync(ctx, "<Space>ws")
 
       # Single global status bar at row height-2 (not one per pane).
       rows = screen_text(ctx)
@@ -65,11 +65,11 @@ defmodule Minga.Integration.WindowSplitsTest do
     test "C-w l moves focus to right pane" do
       ctx = start_editor("hello world")
 
-      send_keys(ctx, "<Space>wv")
+      send_keys_sync(ctx, "<Space>wv")
       # Focus starts in the left pane (or right, depending on impl)
       cursor_before = screen_cursor(ctx)
 
-      send_keys(ctx, "<C-w>l")
+      send_keys_sync(ctx, "<C-w>l")
       cursor_after = screen_cursor(ctx)
 
       # Cursor should move to the other pane (different column region)
@@ -80,11 +80,11 @@ defmodule Minga.Integration.WindowSplitsTest do
     test "C-w h moves focus to left pane" do
       ctx = start_editor("hello world")
 
-      send_keys(ctx, "<Space>wv")
-      send_keys(ctx, "<C-w>l")
+      send_keys_sync(ctx, "<Space>wv")
+      send_keys_sync(ctx, "<C-w>l")
       cursor_right = screen_cursor(ctx)
 
-      send_keys(ctx, "<C-w>h")
+      send_keys_sync(ctx, "<C-w>h")
       cursor_left = screen_cursor(ctx)
 
       assert cursor_left != cursor_right
@@ -98,9 +98,9 @@ defmodule Minga.Integration.WindowSplitsTest do
     test "typing in one pane doesn't affect the other" do
       ctx = start_editor("hello world")
 
-      send_keys(ctx, "<Space>wv")
+      send_keys_sync(ctx, "<Space>wv")
       # Type in the active pane
-      send_keys(ctx, "iNEW TEXT<Esc>")
+      send_keys_sync(ctx, "iNEW TEXT<Esc>")
 
       # Both panes share the same buffer, so content changes appear in both.
       # But cursor position should only be in the active pane.
@@ -115,13 +115,13 @@ defmodule Minga.Integration.WindowSplitsTest do
     test "closing one pane restores full width" do
       ctx = start_editor("hello world")
 
-      send_keys(ctx, "<Space>wv")
+      send_keys_sync(ctx, "<Space>wv")
       # Verify split exists
       row1_split = screen_row(ctx, 1)
       assert String.contains?(row1_split, "│")
 
       # Close the current window
-      send_keys(ctx, "<Space>wd")
+      send_keys_sync(ctx, "<Space>wd")
 
       # Should be back to single pane, no separator
       row1_single = screen_row(ctx, 1)
@@ -136,14 +136,14 @@ defmodule Minga.Integration.WindowSplitsTest do
     test "switching away and back preserves cursor position" do
       ctx = start_editor("hello world")
 
-      send_keys(ctx, "<Space>wv")
+      send_keys_sync(ctx, "<Space>wv")
       # Move cursor in left pane
-      send_keys(ctx, "lllll")
+      send_keys_sync(ctx, "lllll")
       cursor_left = buffer_cursor(ctx)
 
       # Switch to right pane and back
-      send_keys(ctx, "<C-w>l")
-      send_keys(ctx, "<C-w>h")
+      send_keys_sync(ctx, "<C-w>l")
+      send_keys_sync(ctx, "<C-w>h")
 
       assert buffer_cursor(ctx) == cursor_left
     end
@@ -155,8 +155,8 @@ defmodule Minga.Integration.WindowSplitsTest do
     test "splitting twice creates three panes" do
       ctx = start_editor("hello world")
 
-      send_keys(ctx, "<Space>wv")
-      send_keys(ctx, "<Space>wv")
+      send_keys_sync(ctx, "<Space>wv")
+      send_keys_sync(ctx, "<Space>wv")
 
       # Should have two separators (three panes)
       rows = screen_text(ctx)

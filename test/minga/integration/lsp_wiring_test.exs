@@ -161,10 +161,10 @@ defmodule Minga.Integration.LspWiringTest do
       end)
 
       # Enter visual mode then exit
-      send_keys(ctx, "v")
+      send_keys_sync(ctx, "v")
       assert editor_mode(ctx) == :visual
 
-      send_keys(ctx, "<Esc>")
+      send_keys_sync(ctx, "<Esc>")
       assert editor_mode(ctx) == :normal
 
       # Selection range state should be cleared

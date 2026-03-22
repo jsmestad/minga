@@ -18,16 +18,16 @@ defmodule Minga.Integration.ToggleLineNumbersTest do
 
       assert BufferServer.get_option(ctx.buffer, :line_numbers) == :hybrid
 
-      send_keys(ctx, "<SPC>tl")
+      send_keys_sync(ctx, "<SPC>tl")
       assert BufferServer.get_option(ctx.buffer, :line_numbers) == :absolute
 
-      send_keys(ctx, "<SPC>tl")
+      send_keys_sync(ctx, "<SPC>tl")
       assert BufferServer.get_option(ctx.buffer, :line_numbers) == :relative
 
-      send_keys(ctx, "<SPC>tl")
+      send_keys_sync(ctx, "<SPC>tl")
       assert BufferServer.get_option(ctx.buffer, :line_numbers) == :none
 
-      send_keys(ctx, "<SPC>tl")
+      send_keys_sync(ctx, "<SPC>tl")
       assert BufferServer.get_option(ctx.buffer, :line_numbers) == :hybrid
     end
 
@@ -41,9 +41,9 @@ defmodule Minga.Integration.ToggleLineNumbersTest do
       assert row2 =~ ~r/\d.*line two/, "hybrid: line 2 shows a number"
 
       # Cycle to none (hybrid → absolute → relative → none = 3 presses).
-      send_keys(ctx, "<SPC>tl")
-      send_keys(ctx, "<SPC>tl")
-      send_keys(ctx, "<SPC>tl")
+      send_keys_sync(ctx, "<SPC>tl")
+      send_keys_sync(ctx, "<SPC>tl")
+      send_keys_sync(ctx, "<SPC>tl")
       assert BufferServer.get_option(ctx.buffer, :line_numbers) == :none
 
       row1 = screen_row(ctx, 1)
@@ -51,7 +51,7 @@ defmodule Minga.Integration.ToggleLineNumbersTest do
       refute row1 =~ ~r/^\s+\d/, "none: no line number padding"
 
       # One more press back to hybrid.
-      send_keys(ctx, "<SPC>tl")
+      send_keys_sync(ctx, "<SPC>tl")
       assert BufferServer.get_option(ctx.buffer, :line_numbers) == :hybrid
 
       row1 = screen_row(ctx, 1)

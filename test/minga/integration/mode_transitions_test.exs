@@ -16,7 +16,7 @@ defmodule Minga.Integration.ModeTransitionsTest do
     test "modeline shows INSERT, cursor shape is beam" do
       ctx = start_editor("hello world")
 
-      send_keys(ctx, "i")
+      send_keys_sync(ctx, "i")
 
       assert_modeline_contains(ctx, "INSERT")
       assert cursor_shape(ctx) == :beam
@@ -29,7 +29,7 @@ defmodule Minga.Integration.ModeTransitionsTest do
     test "cursor moves right one column, enters insert mode" do
       ctx = start_editor("hello world")
 
-      send_keys(ctx, "a")
+      send_keys_sync(ctx, "a")
 
       assert cursor_shape(ctx) == :beam
       assert_modeline_contains(ctx, "INSERT")
@@ -41,7 +41,7 @@ defmodule Minga.Integration.ModeTransitionsTest do
     test "cursor moves to end of line, enters insert mode" do
       ctx = start_editor("hello world")
 
-      send_keys(ctx, "A")
+      send_keys_sync(ctx, "A")
 
       assert cursor_shape(ctx) == :beam
       assert_modeline_contains(ctx, "INSERT")
@@ -53,7 +53,7 @@ defmodule Minga.Integration.ModeTransitionsTest do
     test "opens new line below, cursor on new line" do
       ctx = start_editor("hello\nworld")
 
-      send_keys(ctx, "o")
+      send_keys_sync(ctx, "o")
 
       assert cursor_shape(ctx) == :beam
       assert_modeline_contains(ctx, "INSERT")
@@ -67,7 +67,7 @@ defmodule Minga.Integration.ModeTransitionsTest do
     test "opens new line above, cursor on new line" do
       ctx = start_editor("hello\nworld")
 
-      send_keys(ctx, "O")
+      send_keys_sync(ctx, "O")
 
       assert cursor_shape(ctx) == :beam
       assert_modeline_contains(ctx, "INSERT")
@@ -83,10 +83,10 @@ defmodule Minga.Integration.ModeTransitionsTest do
     test "cursor shape returns to block, modeline shows NORMAL" do
       ctx = start_editor("hello world")
 
-      send_keys(ctx, "i")
+      send_keys_sync(ctx, "i")
       assert cursor_shape(ctx) == :beam
 
-      send_keys(ctx, "<Esc>")
+      send_keys_sync(ctx, "<Esc>")
 
       assert cursor_shape(ctx) == :block
       assert_modeline_contains(ctx, "NORMAL")
@@ -98,11 +98,11 @@ defmodule Minga.Integration.ModeTransitionsTest do
       ctx = start_editor("hello world")
 
       # Move right three times then enter insert mode
-      send_keys(ctx, "llli")
+      send_keys_sync(ctx, "llli")
       assert editor_mode(ctx) == :insert
       {_, col_in_insert} = buffer_cursor(ctx)
 
-      send_keys(ctx, "<Esc>")
+      send_keys_sync(ctx, "<Esc>")
 
       {_, col_after_escape} = buffer_cursor(ctx)
       # Minga currently keeps cursor at same column on insert→normal
@@ -112,7 +112,7 @@ defmodule Minga.Integration.ModeTransitionsTest do
     test "cursor stays at col 0 when escaping at start of line" do
       ctx = start_editor("hello world")
 
-      send_keys(ctx, "i<Esc>")
+      send_keys_sync(ctx, "i<Esc>")
 
       {_line, col} = buffer_cursor(ctx)
       assert col == 0
@@ -125,7 +125,7 @@ defmodule Minga.Integration.ModeTransitionsTest do
     test "modeline shows VISUAL, cursor stays block" do
       ctx = start_editor("hello world")
 
-      send_keys(ctx, "v")
+      send_keys_sync(ctx, "v")
 
       assert_modeline_contains(ctx, "VISUAL")
       assert cursor_shape(ctx) == :block
@@ -138,7 +138,7 @@ defmodule Minga.Integration.ModeTransitionsTest do
     test "modeline shows V-LINE" do
       ctx = start_editor("hello world\nsecond line")
 
-      send_keys(ctx, "V")
+      send_keys_sync(ctx, "V")
 
       assert_modeline_contains(ctx, "V-LINE")
       assert cursor_shape(ctx) == :block
@@ -152,10 +152,10 @@ defmodule Minga.Integration.ModeTransitionsTest do
     test "returns to normal mode, selection cleared" do
       ctx = start_editor("hello world\nsecond line")
 
-      send_keys(ctx, "vlll")
+      send_keys_sync(ctx, "vlll")
       assert_modeline_contains(ctx, "VISUAL")
 
-      send_keys(ctx, "<Esc>")
+      send_keys_sync(ctx, "<Esc>")
 
       assert_modeline_contains(ctx, "NORMAL")
       assert cursor_shape(ctx) == :block
@@ -170,7 +170,7 @@ defmodule Minga.Integration.ModeTransitionsTest do
     test "minibuffer shows colon, cursor moves to minibuffer row" do
       ctx = start_editor("hello world")
 
-      send_keys(ctx, ":")
+      send_keys_sync(ctx, ":")
 
       assert_minibuffer_contains(ctx, ":")
       assert_modeline_contains(ctx, "COMMAND")
@@ -194,10 +194,10 @@ defmodule Minga.Integration.ModeTransitionsTest do
       # Record cursor position before command mode
       cursor_before = screen_cursor(ctx)
 
-      send_keys(ctx, ":")
+      send_keys_sync(ctx, ":")
       assert_modeline_contains(ctx, "COMMAND")
 
-      send_keys(ctx, "<Esc>")
+      send_keys_sync(ctx, "<Esc>")
 
       assert_modeline_contains(ctx, "NORMAL")
       assert cursor_shape(ctx) == :block
@@ -220,7 +220,7 @@ defmodule Minga.Integration.ModeTransitionsTest do
       ctx = start_editor("hello world")
 
       # :set nu is a valid command that toggles line numbers
-      send_keys(ctx, ":set nu<CR>")
+      send_keys_sync(ctx, ":set nu<CR>")
 
       assert_modeline_contains(ctx, "NORMAL")
       assert cursor_shape(ctx) == :block
@@ -235,7 +235,7 @@ defmodule Minga.Integration.ModeTransitionsTest do
 
       cursor_before = screen_cursor(ctx)
 
-      send_keys(ctx, ":x<BS><BS>")
+      send_keys_sync(ctx, ":x<BS><BS>")
 
       assert_modeline_contains(ctx, "NORMAL")
       assert cursor_shape(ctx) == :block
@@ -252,7 +252,7 @@ defmodule Minga.Integration.ModeTransitionsTest do
     test "modeline stays NORMAL while in operator-pending mode" do
       ctx = start_editor("hello world\nsecond line")
 
-      send_keys(ctx, "d")
+      send_keys_sync(ctx, "d")
 
       # Operator-pending is an invisible sub-state of Normal (like Vim/Doom).
       # The modeline should NOT flash "OPERATOR".
@@ -268,7 +268,7 @@ defmodule Minga.Integration.ModeTransitionsTest do
 
       content_before = buffer_content(ctx)
 
-      send_keys(ctx, "d<Esc>")
+      send_keys_sync(ctx, "d<Esc>")
 
       assert_modeline_contains(ctx, "NORMAL")
       assert editor_mode(ctx) == :normal
@@ -281,7 +281,7 @@ defmodule Minga.Integration.ModeTransitionsTest do
     test "executes linewise delete, returns to normal" do
       ctx = start_editor("first\nsecond\nthird")
 
-      send_keys(ctx, "dd")
+      send_keys_sync(ctx, "dd")
 
       assert_modeline_contains(ctx, "NORMAL")
       assert editor_mode(ctx) == :normal
@@ -297,7 +297,7 @@ defmodule Minga.Integration.ModeTransitionsTest do
       ctx = start_editor("hello world")
 
       # r sets pending_replace in normal mode state, not a mode transition
-      send_keys(ctx, "r")
+      send_keys_sync(ctx, "r")
 
       assert_modeline_contains(ctx, "NORMAL")
       assert editor_mode(ctx) == :normal
@@ -310,7 +310,7 @@ defmodule Minga.Integration.ModeTransitionsTest do
     test "replaces character and stays in normal mode" do
       ctx = start_editor("hello world")
 
-      send_keys(ctx, "rX")
+      send_keys_sync(ctx, "rX")
 
       assert_modeline_contains(ctx, "NORMAL")
       assert cursor_shape(ctx) == :block
@@ -323,10 +323,10 @@ defmodule Minga.Integration.ModeTransitionsTest do
     test "Escape after r returns to block cursor without replacing" do
       ctx = start_editor("hello world")
 
-      send_keys(ctx, "r")
+      send_keys_sync(ctx, "r")
       assert cursor_shape(ctx) == :underline
 
-      send_keys(ctx, "<Esc>")
+      send_keys_sync(ctx, "<Esc>")
       assert cursor_shape(ctx) == :block
       assert String.starts_with?(buffer_content(ctx), "hello")
     end
@@ -336,7 +336,7 @@ defmodule Minga.Integration.ModeTransitionsTest do
     test "R overwrites then backspace restores" do
       ctx = start_editor("abcdef")
 
-      send_keys(ctx, "R")
+      send_keys_sync(ctx, "R")
       assert editor_mode(ctx) == :replace
       assert cursor_shape(ctx) == :underline
 
@@ -345,20 +345,20 @@ defmodule Minga.Integration.ModeTransitionsTest do
       assert String.starts_with?(buffer_content(ctx), "XYcdef")
 
       # Backspace restores 'b'
-      send_keys(ctx, "<BS>")
+      send_keys_sync(ctx, "<BS>")
       assert String.starts_with?(buffer_content(ctx), "Xbcdef")
 
       # Backspace restores 'a'
-      send_keys(ctx, "<BS>")
+      send_keys_sync(ctx, "<BS>")
       assert String.starts_with?(buffer_content(ctx), "abcdef")
     end
 
     test "backspace at entry column is a no-op" do
       ctx = start_editor("abcdef")
 
-      send_keys(ctx, "R")
+      send_keys_sync(ctx, "R")
       # No overwrites yet, backspace should do nothing
-      send_keys(ctx, "<BS>")
+      send_keys_sync(ctx, "<BS>")
       assert String.starts_with?(buffer_content(ctx), "abcdef")
     end
   end
@@ -370,20 +370,20 @@ defmodule Minga.Integration.ModeTransitionsTest do
       ctx = start_editor("hello world\nsecond line\nthird line")
 
       # Step 1: Enter insert mode, type text
-      send_keys(ctx, "iABC<Esc>")
+      send_keys_sync(ctx, "iABC<Esc>")
       assert_modeline_contains(ctx, "NORMAL")
       assert cursor_shape(ctx) == :block
       assert String.contains?(buffer_content(ctx), "ABC")
 
       # Step 2: Enter command mode
-      send_keys(ctx, ":")
+      send_keys_sync(ctx, ":")
       assert_modeline_contains(ctx, "COMMAND")
       assert cursor_shape(ctx) == :beam
       {cursor_row, _} = screen_cursor(ctx)
       assert cursor_row == ctx.height - 1
 
       # Step 3: Escape back to normal
-      send_keys(ctx, "<Esc>")
+      send_keys_sync(ctx, "<Esc>")
       assert_modeline_contains(ctx, "NORMAL")
       assert cursor_shape(ctx) == :block
 
@@ -399,7 +399,7 @@ defmodule Minga.Integration.ModeTransitionsTest do
       ctx = start_editor("hello world")
 
       # Select "hel" in visual mode, then change
-      send_keys(ctx, "vllc")
+      send_keys_sync(ctx, "vllc")
       assert_modeline_contains(ctx, "INSERT")
       assert cursor_shape(ctx) == :beam
 
@@ -407,7 +407,7 @@ defmodule Minga.Integration.ModeTransitionsTest do
       type_text(ctx, "XYZ")
 
       # Escape back to normal
-      send_keys(ctx, "<Esc>")
+      send_keys_sync(ctx, "<Esc>")
       assert_modeline_contains(ctx, "NORMAL")
       assert cursor_shape(ctx) == :block
       assert String.starts_with?(buffer_content(ctx), "XYZ")
@@ -422,7 +422,7 @@ defmodule Minga.Integration.ModeTransitionsTest do
     test "minibuffer shows search prompt, cursor on minibuffer row" do
       ctx = start_editor("hello world\nfoo bar")
 
-      send_keys(ctx, "/")
+      send_keys_sync(ctx, "/")
 
       assert_modeline_contains(ctx, "SEARCH")
       assert cursor_shape(ctx) == :beam
@@ -438,7 +438,7 @@ defmodule Minga.Integration.ModeTransitionsTest do
 
       cursor_before = screen_cursor(ctx)
 
-      send_keys(ctx, "/hello<Esc>")
+      send_keys_sync(ctx, "/hello<Esc>")
 
       assert_modeline_contains(ctx, "NORMAL")
       assert cursor_shape(ctx) == :block

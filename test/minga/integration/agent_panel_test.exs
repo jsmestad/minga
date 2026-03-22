@@ -41,7 +41,7 @@ defmodule Minga.Integration.AgentPanelTest do
   # Opens the agent split and asserts a separator rendered.
   # Returns `{ctx, sep_col}` where `sep_col` is the column index of the separator.
   defp open_agent_split(ctx) do
-    send_keys(ctx, "<Space>aa")
+    send_keys_sync(ctx, "<Space>aa")
     row1 = screen_row(ctx, 1)
     sep_col = row1 |> String.graphemes() |> Enum.find_index(&(&1 == "│"))
 
@@ -76,7 +76,7 @@ defmodule Minga.Integration.AgentPanelTest do
 
       assert Enum.any?(screen_text(ctx), &String.contains?(&1, "│"))
 
-      send_keys(ctx, "<Space>aa")
+      send_keys_sync(ctx, "<Space>aa")
 
       row1 = screen_row(ctx, 1)
       refute String.contains?(row1, "│"), "separator should be gone after closing agent panel"
@@ -85,10 +85,10 @@ defmodule Minga.Integration.AgentPanelTest do
     test "double toggle is idempotent (open -> close -> clean)" do
       ctx = start_editor_with_fake_session("hello world")
 
-      send_keys(ctx, "<Space>aa")
+      send_keys_sync(ctx, "<Space>aa")
       assert Enum.any?(screen_text(ctx), &String.contains?(&1, "│"))
 
-      send_keys(ctx, "<Space>aa")
+      send_keys_sync(ctx, "<Space>aa")
 
       content_row = screen_row(ctx, 1)
 
@@ -99,8 +99,8 @@ defmodule Minga.Integration.AgentPanelTest do
     test "buffer content is preserved through open/close cycle" do
       ctx = start_editor_with_fake_session("hello world")
 
-      send_keys(ctx, "<Space>aa")
-      send_keys(ctx, "<Space>aa")
+      send_keys_sync(ctx, "<Space>aa")
+      send_keys_sync(ctx, "<Space>aa")
 
       content = buffer_content(ctx)
       assert content == "hello world"
@@ -153,7 +153,7 @@ defmodule Minga.Integration.AgentPanelTest do
       ctx = start_editor_with_fake_session("one line")
       {ctx, _sep_col} = open_agent_split(ctx)
 
-      send_keys(ctx, "<Space>aa")
+      send_keys_sync(ctx, "<Space>aa")
 
       # Tilde rows (empty buffer lines) should span the full terminal width
       tilde_row = screen_row(ctx, 3)
@@ -194,7 +194,7 @@ defmodule Minga.Integration.AgentPanelTest do
       {_ctx, _sep_col} = open_agent_split(ctx)
 
       # x should delete a character because we're in editor scope
-      send_keys(ctx, "x")
+      send_keys_sync(ctx, "x")
       content = buffer_content(ctx)
       refute content == "hello world", "buffer should still be editable"
     end
@@ -222,7 +222,7 @@ defmodule Minga.Integration.AgentPanelTest do
 
       # Try to delete with x; buffer should be unchanged because keystrokes
       # route to the agent chat nav handler, not the buffer
-      send_keys(ctx, "x")
+      send_keys_sync(ctx, "x")
       content = buffer_content(ctx)
 
       assert content == "hello world",
@@ -247,7 +247,7 @@ defmodule Minga.Integration.AgentPanelTest do
              "clicking editor should return scope to :editor, got #{state.keymap_scope}"
 
       # Verify buffer editing works again
-      send_keys(ctx, "x")
+      send_keys_sync(ctx, "x")
       content = buffer_content(ctx)
       refute content == "hello world", "buffer should be editable after returning focus"
     end
@@ -262,7 +262,7 @@ defmodule Minga.Integration.AgentPanelTest do
 
       # SPC a v should toggle focus to agent (re-opens split if needed,
       # or toggles the active window)
-      send_keys(ctx, "<Space>av")
+      send_keys_sync(ctx, "<Space>av")
 
       state = :sys.get_state(ctx.editor)
 
@@ -290,7 +290,7 @@ defmodule Minga.Integration.AgentPanelTest do
     test "file tree open: tree on left, editor on right" do
       ctx = start_editor_with_fake_session("hello world")
 
-      send_keys(ctx, "<Space>op")
+      send_keys_sync(ctx, "<Space>op")
 
       wait_until(
         ctx,
@@ -350,7 +350,7 @@ defmodule Minga.Integration.AgentPanelTest do
       ctx = start_editor_with_fake_session("hello world")
 
       # Open file tree first
-      send_keys(ctx, "<Space>op")
+      send_keys_sync(ctx, "<Space>op")
 
       wait_until(
         ctx,
@@ -406,7 +406,7 @@ defmodule Minga.Integration.AgentPanelTest do
       ml_before = modeline(ctx)
 
       {ctx, _sep_col} = open_agent_split(ctx)
-      send_keys(ctx, "<Space>aa")
+      send_keys_sync(ctx, "<Space>aa")
 
       ml_after = modeline(ctx)
 
@@ -423,7 +423,7 @@ defmodule Minga.Integration.AgentPanelTest do
       ctx = start_editor_with_fake_session("hello world\nsecond line\nthird line")
       {ctx, _sep_col} = open_agent_split(ctx)
 
-      send_keys(ctx, "<Space>aa")
+      send_keys_sync(ctx, "<Space>aa")
 
       for row_idx <- 1..3 do
         row = screen_row(ctx, row_idx)

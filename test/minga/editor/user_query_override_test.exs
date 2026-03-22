@@ -44,7 +44,7 @@ defmodule Minga.Editor.UserQueryOverrideTest do
       version_before = state.highlight.version
 
       # Run :reload-highlights
-      send_keys(ctx, ":reload-highlights<CR>")
+      send_keys_sync(ctx, ":reload-highlights<CR>")
 
       state = :sys.get_state(ctx.editor)
 
@@ -69,7 +69,7 @@ defmodule Minga.Editor.UserQueryOverrideTest do
 
       version_before = :sys.get_state(ctx.editor).highlight.version
 
-      send_keys(ctx, ":rh<CR>")
+      send_keys_sync(ctx, ":rh<CR>")
 
       state = :sys.get_state(ctx.editor)
       assert HighlightSync.get_active_highlight(state).spans == {}

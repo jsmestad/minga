@@ -15,7 +15,7 @@ defmodule Minga.Integration.WhichKeyTest do
       ctx = start_editor("hello world")
 
       # Press SPC to enter leader mode
-      send_keys(ctx, "<Space>")
+      send_keys_sync(ctx, "<Space>")
 
       # The which-key popup is timer-based (300ms default).
       # Trigger it by sending the timeout message directly.
@@ -35,7 +35,7 @@ defmodule Minga.Integration.WhichKeyTest do
     test "SPC w shows window-specific bindings" do
       ctx = start_editor("hello world")
 
-      send_keys(ctx, "<Space>w")
+      send_keys_sync(ctx, "<Space>w")
       trigger_whichkey_timeout(ctx)
 
       # Window group should show split/navigation bindings
@@ -48,7 +48,7 @@ defmodule Minga.Integration.WhichKeyTest do
     test "SPC b shows buffer-specific bindings" do
       ctx = start_editor("hello world")
 
-      send_keys(ctx, "<Space>b")
+      send_keys_sync(ctx, "<Space>b")
       trigger_whichkey_timeout(ctx)
 
       assert screen_contains?(ctx, "buffer") or screen_contains?(ctx, "Switch") or
@@ -64,12 +64,12 @@ defmodule Minga.Integration.WhichKeyTest do
     test "completing a binding dismisses the popup" do
       ctx = start_editor("hello world")
 
-      send_keys(ctx, "<Space>")
+      send_keys_sync(ctx, "<Space>")
       trigger_whichkey_timeout(ctx)
       assert screen_contains?(ctx, "+file")
 
       # Complete the binding: SPC f f (find file) opens picker, closes which-key
-      send_keys(ctx, "ff")
+      send_keys_sync(ctx, "ff")
 
       # Which-key labels should be gone, picker should be visible instead
       refute screen_contains?(ctx, "+buffer")
@@ -79,10 +79,10 @@ defmodule Minga.Integration.WhichKeyTest do
     test "escape dismisses the popup and returns to normal" do
       ctx = start_editor("hello world")
 
-      send_keys(ctx, "<Space>")
+      send_keys_sync(ctx, "<Space>")
       trigger_whichkey_timeout(ctx)
 
-      send_keys(ctx, "<Esc>")
+      send_keys_sync(ctx, "<Esc>")
 
       assert editor_mode(ctx) == :normal
       assert_screen_snapshot(ctx, "whichkey_dismissed_by_escape")
@@ -96,7 +96,7 @@ defmodule Minga.Integration.WhichKeyTest do
       ctx = start_editor("hello world")
 
       # Send the full SPC b b sequence without triggering timeout
-      send_keys(ctx, "<Space>bb")
+      send_keys_sync(ctx, "<Space>bb")
 
       # The picker should be open, but no which-key popup artifacts
       assert screen_contains?(ctx, "Switch buffer")

@@ -35,7 +35,7 @@ defmodule Minga.BufferManagementTest do
       assert_row_contains(ctx, 1, "first file")
 
       # Open second file via :e
-      send_keys(ctx, ":e #{path2}<CR>")
+      send_keys_sync(ctx, ":e #{path2}<CR>")
 
       assert_row_contains(ctx, 1, "second file")
       assert_modeline_contains(ctx, "file2.txt")
@@ -52,11 +52,11 @@ defmodule Minga.BufferManagementTest do
       ctx = start_editor("first", file_path: path1)
 
       # Open second file
-      send_keys(ctx, ":e #{path2}<CR>")
+      send_keys_sync(ctx, ":e #{path2}<CR>")
       assert_modeline_contains(ctx, "[2/2]")
 
       # Open first file again — should switch back, not create a third buffer
-      send_keys(ctx, ":e #{path1}<CR>")
+      send_keys_sync(ctx, ":e #{path1}<CR>")
       assert_row_contains(ctx, 1, "first")
       assert_modeline_contains(ctx, "[1/2]")
     end
@@ -74,25 +74,25 @@ defmodule Minga.BufferManagementTest do
 
       ctx = start_editor("alpha", file_path: path1)
 
-      send_keys(ctx, ":e #{path2}<CR>")
-      send_keys(ctx, ":e #{path3}<CR>")
+      send_keys_sync(ctx, ":e #{path2}<CR>")
+      send_keys_sync(ctx, ":e #{path3}<CR>")
 
       # Now on buffer 3/3 (gamma)
       assert_row_contains(ctx, 1, "gamma")
       assert_modeline_contains(ctx, "[3/3]")
 
       # SPC b n → wraps to buffer 1 (alpha)
-      send_keys(ctx, "<SPC>bn")
+      send_keys_sync(ctx, "<SPC>bn")
       assert_row_contains(ctx, 1, "alpha")
       assert_modeline_contains(ctx, "[1/3]")
 
       # SPC b n → buffer 2 (beta)
-      send_keys(ctx, "<SPC>bn")
+      send_keys_sync(ctx, "<SPC>bn")
       assert_row_contains(ctx, 1, "beta")
       assert_modeline_contains(ctx, "[2/3]")
 
       # SPC b p → back to buffer 1 (alpha)
-      send_keys(ctx, "<SPC>bp")
+      send_keys_sync(ctx, "<SPC>bp")
       assert_row_contains(ctx, 1, "alpha")
       assert_modeline_contains(ctx, "[1/3]")
     end
@@ -100,10 +100,10 @@ defmodule Minga.BufferManagementTest do
     test "next/prev with single buffer is a no-op" do
       ctx = start_editor("only one")
 
-      send_keys(ctx, "<SPC>bn")
+      send_keys_sync(ctx, "<SPC>bn")
       assert_row_contains(ctx, 1, "only one")
 
-      send_keys(ctx, "<SPC>bp")
+      send_keys_sync(ctx, "<SPC>bp")
       assert_row_contains(ctx, 1, "only one")
     end
   end
@@ -117,12 +117,12 @@ defmodule Minga.BufferManagementTest do
       File.write!(path2, "why")
 
       ctx = start_editor("ex", file_path: path1)
-      send_keys(ctx, ":e #{path2}<CR>")
+      send_keys_sync(ctx, ":e #{path2}<CR>")
       assert_row_contains(ctx, 1, "why")
 
       # SPC b b → opens picker, first item is x.txt, Enter selects it
-      send_keys(ctx, "<SPC>bb")
-      send_key(ctx, 13)
+      send_keys_sync(ctx, "<SPC>bb")
+      send_key_sync(ctx, 13)
       assert_row_contains(ctx, 1, "ex")
     end
   end
@@ -136,10 +136,10 @@ defmodule Minga.BufferManagementTest do
       File.write!(path2, "second")
 
       ctx = start_editor("first", file_path: path1)
-      send_keys(ctx, ":e #{path2}<CR>")
+      send_keys_sync(ctx, ":e #{path2}<CR>")
 
       # On buffer 2/2, kill it
-      send_keys(ctx, "<SPC>bd")
+      send_keys_sync(ctx, "<SPC>bd")
 
       # Should switch to the remaining buffer
       assert_row_contains(ctx, 1, "first")
@@ -154,7 +154,7 @@ defmodule Minga.BufferManagementTest do
       File.write!(path, "alone")
 
       ctx = start_editor("alone", file_path: path)
-      send_keys(ctx, "<SPC>bd")
+      send_keys_sync(ctx, "<SPC>bd")
 
       # Should show an empty buffer (dashboard disabled pending rewrite)
       screen = screen_text(ctx)
@@ -170,13 +170,13 @@ defmodule Minga.BufferManagementTest do
       File.write!(path2, "quebec")
 
       ctx = start_editor("papa", file_path: path1)
-      send_keys(ctx, ":e #{path2}<CR>")
+      send_keys_sync(ctx, ":e #{path2}<CR>")
 
       # Switch back to first buffer and kill it
-      send_keys(ctx, "<SPC>bp")
+      send_keys_sync(ctx, "<SPC>bp")
       assert_row_contains(ctx, 1, "papa")
 
-      send_keys(ctx, "<SPC>bd")
+      send_keys_sync(ctx, "<SPC>bd")
       assert_row_contains(ctx, 1, "quebec")
       ml = modeline(ctx)
       refute String.contains?(ml, "[")
@@ -195,10 +195,10 @@ defmodule Minga.BufferManagementTest do
       ml = modeline(ctx)
       refute String.contains?(ml, "[1/")
 
-      send_keys(ctx, ":e #{path2}<CR>")
+      send_keys_sync(ctx, ":e #{path2}<CR>")
       assert_modeline_contains(ctx, "[2/2]")
 
-      send_keys(ctx, "<SPC>bp")
+      send_keys_sync(ctx, "<SPC>bp")
       assert_modeline_contains(ctx, "[1/2]")
     end
   end
@@ -206,7 +206,7 @@ defmodule Minga.BufferManagementTest do
   describe ":new — new empty buffer" do
     test "creates a new unnamed buffer" do
       ctx = start_editor("hello")
-      send_keys(ctx, ":new<CR>")
+      send_keys_sync(ctx, ":new<CR>")
 
       # Should show empty buffer with [new 1] name
       assert_modeline_contains(ctx, "[new 1]")
@@ -214,17 +214,17 @@ defmodule Minga.BufferManagementTest do
 
     test "successive :new increments the number" do
       ctx = start_editor("hello")
-      send_keys(ctx, ":new<CR>")
+      send_keys_sync(ctx, ":new<CR>")
       assert_modeline_contains(ctx, "[new 1]")
 
-      send_keys(ctx, ":new<CR>")
+      send_keys_sync(ctx, ":new<CR>")
       assert_modeline_contains(ctx, "[new 2]")
     end
 
     test "new buffer is editable" do
       ctx = start_editor("hello")
-      send_keys(ctx, ":new<CR>")
-      send_keys(ctx, "isome text<Esc>")
+      send_keys_sync(ctx, ":new<CR>")
+      send_keys_sync(ctx, "isome text<Esc>")
       assert_row_contains(ctx, 1, "some text")
     end
   end
@@ -232,7 +232,7 @@ defmodule Minga.BufferManagementTest do
   describe "SPC b N — new buffer via leader" do
     test "creates a new buffer" do
       ctx = start_editor("hello")
-      send_keys(ctx, "<SPC>bN")
+      send_keys_sync(ctx, "<SPC>bN")
       assert_modeline_contains(ctx, "[new 1]")
     end
   end

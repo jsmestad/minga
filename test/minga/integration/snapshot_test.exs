@@ -52,7 +52,7 @@ defmodule Minga.Integration.SnapshotTest do
     test "cursor after $ (end of line)" do
       ctx = start_editor("hello world\nsecond line")
 
-      send_keys(ctx, "$")
+      send_keys_sync(ctx, "$")
 
       assert_screen_snapshot(ctx, "nav_end_of_line")
     end
@@ -60,7 +60,7 @@ defmodule Minga.Integration.SnapshotTest do
     test "cursor after 0 (start of line)" do
       ctx = start_editor("hello world\nsecond line")
 
-      send_keys(ctx, "ll0")
+      send_keys_sync(ctx, "ll0")
 
       assert_screen_snapshot(ctx, "nav_start_of_line")
     end
@@ -87,7 +87,7 @@ defmodule Minga.Integration.SnapshotTest do
     test "screen after escape back to normal mode" do
       ctx = start_editor("hello")
 
-      send_keys(ctx, "iabc<Esc>")
+      send_keys_sync(ctx, "iabc<Esc>")
 
       assert_screen_snapshot(ctx, "insert_then_escape")
     end
@@ -97,7 +97,7 @@ defmodule Minga.Integration.SnapshotTest do
     test "screen after dd (delete line)" do
       ctx = start_editor("first\nsecond\nthird")
 
-      send_keys(ctx, "dd")
+      send_keys_sync(ctx, "dd")
 
       assert_screen_snapshot(ctx, "dd_first_line")
     end
@@ -105,7 +105,7 @@ defmodule Minga.Integration.SnapshotTest do
     test "screen after x (delete char)" do
       ctx = start_editor("hello world")
 
-      send_keys(ctx, "x")
+      send_keys_sync(ctx, "x")
 
       assert_screen_snapshot(ctx, "x_delete_char")
     end
@@ -115,7 +115,7 @@ defmodule Minga.Integration.SnapshotTest do
     test "screen after dd then undo" do
       ctx = start_editor("first\nsecond\nthird")
 
-      send_keys(ctx, "dd")
+      send_keys_sync(ctx, "dd")
       send_key(ctx, ?u)
 
       assert_screen_snapshot(ctx, "dd_then_undo")
@@ -134,7 +134,7 @@ defmodule Minga.Integration.SnapshotTest do
     test "screen after visual selection with lll" do
       ctx = start_editor("hello world\nsecond line")
 
-      send_keys(ctx, "vlll")
+      send_keys_sync(ctx, "vlll")
 
       assert_screen_snapshot(ctx, "visual_select_lll")
     end
@@ -144,7 +144,7 @@ defmodule Minga.Integration.SnapshotTest do
     test "screen after pressing colon" do
       ctx = start_editor("hello world")
 
-      send_keys(ctx, ":")
+      send_keys_sync(ctx, ":")
 
       assert_screen_snapshot(ctx, "command_mode_entered")
     end
@@ -152,7 +152,7 @@ defmodule Minga.Integration.SnapshotTest do
     test "screen after typing a command" do
       ctx = start_editor("hello world")
 
-      send_keys(ctx, ":set")
+      send_keys_sync(ctx, ":set")
 
       assert_screen_snapshot(ctx, "command_mode_typed_set")
     end
@@ -160,7 +160,7 @@ defmodule Minga.Integration.SnapshotTest do
     test "screen after escaping command mode" do
       ctx = start_editor("hello world")
 
-      send_keys(ctx, ":set<Esc>")
+      send_keys_sync(ctx, ":set<Esc>")
 
       assert_screen_snapshot(ctx, "command_mode_escaped")
     end
@@ -171,17 +171,17 @@ defmodule Minga.Integration.SnapshotTest do
       ctx = start_editor("line one\nline two\nline three")
 
       # Navigate to line 2, col 3
-      send_key(ctx, ?j)
-      send_key(ctx, ?l)
-      send_key(ctx, ?l)
+      send_key_sync(ctx, ?j)
+      send_key_sync(ctx, ?l)
+      send_key_sync(ctx, ?l)
 
       # Insert text
-      send_keys(ctx, "iXY<Esc>")
+      send_keys_sync(ctx, "iXY<Esc>")
 
       assert_screen_snapshot(ctx, "workflow_after_insert")
 
       # Delete the line
-      send_keys(ctx, "dd")
+      send_keys_sync(ctx, "dd")
 
       assert_screen_snapshot(ctx, "workflow_after_dd")
 

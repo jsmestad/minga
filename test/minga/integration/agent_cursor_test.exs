@@ -115,7 +115,7 @@ defmodule Minga.Integration.AgentCursorTest do
       ctx = start_agent_editor()
 
       # Press i to focus the prompt input (enters insert mode)
-      send_keys(ctx, "i")
+      send_keys_sync(ctx, "i")
 
       rows = screen_text(ctx)
       {cursor_row, _cursor_col} = screen_cursor(ctx)
@@ -136,7 +136,7 @@ defmodule Minga.Integration.AgentCursorTest do
     test "cursor stays on content row after typing" do
       ctx = start_agent_editor()
 
-      send_keys(ctx, "i")
+      send_keys_sync(ctx, "i")
       type_text(ctx, "hello")
 
       rows = screen_text(ctx)
@@ -155,7 +155,7 @@ defmodule Minga.Integration.AgentCursorTest do
       for {width, height} <- [{80, 24}, {120, 40}, {60, 20}] do
         ctx = start_agent_editor(width: width, height: height)
 
-        send_keys(ctx, "i")
+        send_keys_sync(ctx, "i")
 
         rows = screen_text(ctx)
         {cursor_row, _cursor_col} = screen_cursor(ctx)
@@ -192,7 +192,7 @@ defmodule Minga.Integration.AgentCursorTest do
     test "modeline shows INSERT mode after focusing input" do
       ctx = start_agent_editor()
 
-      send_keys(ctx, "i")
+      send_keys_sync(ctx, "i")
 
       rows = screen_text(ctx)
 

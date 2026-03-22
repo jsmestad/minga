@@ -14,10 +14,10 @@ defmodule Minga.BufferPickerTest do
       File.write!(path2, "beta content")
 
       ctx = start_editor("alpha content", file_path: path1)
-      send_keys(ctx, ":e #{path2}<CR>")
+      send_keys_sync(ctx, ":e #{path2}<CR>")
 
       # Open buffer picker
-      send_keys(ctx, "<SPC>bb")
+      send_keys_sync(ctx, "<SPC>bb")
 
       # Should see the prompt line
       mb = minibuffer(ctx)
@@ -32,7 +32,7 @@ defmodule Minga.BufferPickerTest do
 
     test "SPC b b with single buffer still opens picker" do
       ctx = start_editor("hello")
-      send_keys(ctx, "<SPC>bb")
+      send_keys_sync(ctx, "<SPC>bb")
 
       mb = minibuffer(ctx)
       assert String.contains?(mb, ">")
@@ -53,13 +53,13 @@ defmodule Minga.BufferPickerTest do
       File.write!(path3, "zen")
 
       ctx = start_editor("xylo", file_path: path1)
-      send_keys(ctx, ":e #{path2}<CR>")
-      send_keys(ctx, ":e #{path3}<CR>")
+      send_keys_sync(ctx, ":e #{path2}<CR>")
+      send_keys_sync(ctx, ":e #{path3}<CR>")
 
       # Open picker and type "ze" to match only zen.txt
-      send_keys(ctx, "<SPC>bb")
-      send_key(ctx, ?z)
-      send_key(ctx, ?e)
+      send_keys_sync(ctx, "<SPC>bb")
+      send_key_sync(ctx, ?z)
+      send_key_sync(ctx, ?e)
 
       # Should see zen but not xylo (skip row 0 which is the tab bar)
       screen = screen_text(ctx)
@@ -78,13 +78,13 @@ defmodule Minga.BufferPickerTest do
       File.write!(path2, "second file content")
 
       ctx = start_editor("first file content", file_path: path1)
-      send_keys(ctx, ":e #{path2}<CR>")
+      send_keys_sync(ctx, ":e #{path2}<CR>")
 
       # Open picker — should start showing current buffer
-      send_keys(ctx, "<SPC>bb")
+      send_keys_sync(ctx, "<SPC>bb")
 
       # Move down with C-j
-      send_key(ctx, ?j, 0x02)
+      send_key_sync(ctx, ?j, 0x02)
 
       # Check that preview shows one of the buffer's content (file or scratch)
       row0 = screen_row(ctx, 1)
@@ -103,13 +103,13 @@ defmodule Minga.BufferPickerTest do
       File.write!(path2, "two content")
 
       ctx = start_editor("one content", file_path: path1)
-      send_keys(ctx, ":e #{path2}<CR>")
+      send_keys_sync(ctx, ":e #{path2}<CR>")
 
       # We're on buffer 2, open picker — selection starts at index 0 (one.txt)
-      send_keys(ctx, "<SPC>bb")
+      send_keys_sync(ctx, "<SPC>bb")
 
       # Press Enter to select the first item (one.txt)
-      send_key(ctx, 13)
+      send_key_sync(ctx, 13)
 
       # Picker should be closed (minibuffer is empty, not showing ">")
       mb = minibuffer(ctx)
@@ -127,16 +127,16 @@ defmodule Minga.BufferPickerTest do
       File.write!(path2, "bbb content")
 
       ctx = start_editor("aaa content", file_path: path1)
-      send_keys(ctx, ":e #{path2}<CR>")
+      send_keys_sync(ctx, ":e #{path2}<CR>")
 
       # On buffer 3 (bbb). Open picker — items: aaa, [no file], bbb
       # Navigate and select bbb
-      send_keys(ctx, "<SPC>bb")
+      send_keys_sync(ctx, "<SPC>bb")
       # Filter to just "bbb" to avoid scratch confusion
-      send_key(ctx, ?b)
-      send_key(ctx, ?b)
-      send_key(ctx, ?b)
-      send_key(ctx, 13)
+      send_key_sync(ctx, ?b)
+      send_key_sync(ctx, ?b)
+      send_key_sync(ctx, ?b)
+      send_key_sync(ctx, 13)
 
       # Should show bbb content
       assert_row_contains(ctx, 1, "bbb content")
@@ -152,15 +152,15 @@ defmodule Minga.BufferPickerTest do
       File.write!(path2, "bbb content")
 
       ctx = start_editor("aaa content", file_path: path1)
-      send_keys(ctx, ":e #{path2}<CR>")
+      send_keys_sync(ctx, ":e #{path2}<CR>")
       # Currently on buffer 2 (bbb)
       assert_row_contains(ctx, 1, "bbb content")
 
       # Open picker, navigate to buffer 1 (preview changes), then cancel
-      send_keys(ctx, "<SPC>bb")
-      send_key(ctx, ?j, 0x02)
+      send_keys_sync(ctx, "<SPC>bb")
+      send_key_sync(ctx, ?j, 0x02)
       # Escape
-      send_key(ctx, 27)
+      send_key_sync(ctx, 27)
 
       # Should restore original buffer (bbb)
       assert_row_contains(ctx, 1, "bbb content")
@@ -198,7 +198,7 @@ defmodule Minga.BufferPickerTest do
   describe "cursor shape" do
     test "picker uses beam cursor" do
       ctx = start_editor("hello")
-      send_keys(ctx, "<SPC>bb")
+      send_keys_sync(ctx, "<SPC>bb")
       assert cursor_shape(ctx) == :beam
     end
   end

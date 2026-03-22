@@ -10,7 +10,7 @@ defmodule Minga.Editor.MacroIntegrationTest do
       ctx = start_editor("aaa\nbbb\nccc")
 
       # Record macro: qa (start), x (delete char), j (move down), q (stop)
-      send_keys(ctx, "qaxjq")
+      send_keys_sync(ctx, "qaxjq")
 
       # First line should have "aa" (deleted first char)
       assert_row_contains(ctx, 1, "aa")
@@ -18,7 +18,7 @@ defmodule Minga.Editor.MacroIntegrationTest do
       assert buffer_cursor(ctx) == {1, 0}
 
       # Replay: @a
-      send_keys(ctx, "@a")
+      send_keys_sync(ctx, "@a")
 
       # Second line should have "bb" (deleted first char)
       assert_row_contains(ctx, 2, "bb")
@@ -30,10 +30,10 @@ defmodule Minga.Editor.MacroIntegrationTest do
       ctx = start_editor("1xxx\n2xxx\n3xxx\n4xxx\n5xxx")
 
       # Record macro: delete first char, move down
-      send_keys(ctx, "qaxjq")
+      send_keys_sync(ctx, "qaxjq")
 
       # Replay twice with count
-      send_keys(ctx, "2@a")
+      send_keys_sync(ctx, "2@a")
 
       # Lines 0, 1, 2 should have first char deleted
       content = buffer_content(ctx)
@@ -50,10 +50,10 @@ defmodule Minga.Editor.MacroIntegrationTest do
       ctx = start_editor("aaa\nbbb\nccc")
 
       # Record macro into register a
-      send_keys(ctx, "qaxjq")
+      send_keys_sync(ctx, "qaxjq")
 
       # Replay with @@
-      send_keys(ctx, "@@")
+      send_keys_sync(ctx, "@@")
 
       content = buffer_content(ctx)
       lines = String.split(content, "\n")
@@ -65,13 +65,13 @@ defmodule Minga.Editor.MacroIntegrationTest do
       ctx = start_editor("hello")
 
       # Start recording into register a
-      send_keys(ctx, "qa")
+      send_keys_sync(ctx, "qa")
 
       ml = modeline(ctx)
       assert String.contains?(ml, "recording @a")
 
       # Stop recording
-      send_keys(ctx, "q")
+      send_keys_sync(ctx, "q")
 
       ml = modeline(ctx)
       refute String.contains?(ml, "recording")
@@ -81,15 +81,15 @@ defmodule Minga.Editor.MacroIntegrationTest do
       ctx = start_editor("aaa\nbbb\nccc")
 
       # Record into a: delete char
-      send_keys(ctx, "qaxq")
+      send_keys_sync(ctx, "qaxq")
       # Record into b: move down
-      send_keys(ctx, "qbjq")
+      send_keys_sync(ctx, "qbjq")
 
       # Go to start
-      send_keys(ctx, "gg0")
+      send_keys_sync(ctx, "gg0")
 
       # Replay b (move down), then a (delete char)
-      send_keys(ctx, "@b@a")
+      send_keys_sync(ctx, "@b@a")
 
       content = buffer_content(ctx)
       lines = String.split(content, "\n")
@@ -101,14 +101,14 @@ defmodule Minga.Editor.MacroIntegrationTest do
 
     test "replaying unrecorded register shows error" do
       ctx = start_editor("hello")
-      send_keys(ctx, "@z")
+      send_keys_sync(ctx, "@z")
       mb = minibuffer(ctx)
       assert String.contains?(mb, "No macro in register @z")
     end
 
     test "@@ with no previous macro shows error" do
       ctx = start_editor("hello")
-      send_keys(ctx, "@@")
+      send_keys_sync(ctx, "@@")
       mb = minibuffer(ctx)
       assert String.contains?(mb, "No previous macro")
     end
@@ -119,14 +119,14 @@ defmodule Minga.Editor.MacroIntegrationTest do
       ctx = start_editor("aaa\nbbb\nccc")
 
       # Record a macro (doesn't matter what)
-      send_keys(ctx, "qajq")
+      send_keys_sync(ctx, "qajq")
 
       # Now do a normal edit: delete first char
-      send_keys(ctx, "gg0x")
+      send_keys_sync(ctx, "gg0x")
       assert buffer_content(ctx) |> String.split("\n") |> List.first() == "aa"
 
       # Dot repeat should repeat the x (delete char)
-      send_keys(ctx, ".")
+      send_keys_sync(ctx, ".")
       assert buffer_content(ctx) |> String.split("\n") |> List.first() == "a"
     end
   end

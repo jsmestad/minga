@@ -58,7 +58,7 @@ defmodule Minga.Integration.ResizeTest do
       ctx = start_editor(content)
 
       # Move cursor to line 20
-      send_keys(ctx, "20j")
+      send_keys_sync(ctx, "20j")
       {line, _} = buffer_cursor(ctx)
       assert line == 20
 
@@ -79,7 +79,7 @@ defmodule Minga.Integration.ResizeTest do
     test "file tree and editor adjust to new width" do
       ctx = start_editor("hello world")
 
-      send_keys(ctx, "<Space>op")
+      send_keys_sync(ctx, "<Space>op")
       assert Enum.any?(screen_text(ctx), &String.contains?(&1, "│"))
 
       ctx = send_resize(ctx, 120, 24)
@@ -95,7 +95,7 @@ defmodule Minga.Integration.ResizeTest do
     test "split panes adjust proportionally" do
       ctx = start_editor("hello world")
 
-      send_keys(ctx, "<Space>wv")
+      send_keys_sync(ctx, "<Space>wv")
       row_before = screen_row(ctx, 1)
       assert String.contains?(row_before, "│")
 
