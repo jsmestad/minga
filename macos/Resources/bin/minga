@@ -62,14 +62,13 @@ Usage: minga [options] [file|directory]
 Options:
   -h, --help             Show this help message
   -v, --version          Show version
-  --editor               Start in file editing mode (skip agentic view)
+  --editor               Start in editor mode (skip agentic view)
   --no-context           Don't load the file as agent context
   --config <path>        Use a custom config file
 
 Examples:
-  minga                          Launch Minga (agentic view)
+  minga                          Launch Minga
   minga README.md                Open file in Minga
-  minga --editor README.md       Open file in traditional editor
   minga .                        Open current directory as project
   minga ~/code/myproject         Open directory as project
 EOF
