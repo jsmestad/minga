@@ -15,6 +15,10 @@ defmodule Minga.Git.TrackerTest do
     %{root: dir}
   end
 
+  # Flushes the Tracker's mailbox so any pending events (:buffer_opened,
+  # :DOWN, etc.) are processed before we check state.
+  defp flush_tracker, do: :sys.get_state(Tracker)
+
   describe "lookup/1" do
     test "returns nil for untracked buffer" do
       {:ok, buf} = BufferServer.start_link(content: "hello")
@@ -38,9 +42,11 @@ defmodule Minga.Git.TrackerTest do
       {:ok, buf} = BufferServer.start_link(content: "defmodule Foo do\nend\n", file_path: path)
       Events.broadcast(:buffer_opened, %Events.BufferEvent{buffer: buf, path: path})
 
-      assert_until(fn -> Tracker.tracked?(buf) end,
-        message: "Expected git buffer to be started for #{path}"
-      )
+      # Flush the Tracker so it processes the :buffer_opened event
+      flush_tracker()
+
+      assert Tracker.tracked?(buf),
+             "Expected git buffer to be started for #{path}"
 
       git_pid = Tracker.lookup(buf)
       assert is_pid(git_pid)
@@ -54,13 +60,16 @@ defmodule Minga.Git.TrackerTest do
 
       {:ok, buf} = BufferServer.start_link(content: "x = 1\n", file_path: path)
       Events.broadcast(:buffer_opened, %Events.BufferEvent{buffer: buf, path: path})
-      assert_until(fn -> Tracker.tracked?(buf) end)
+      flush_tracker()
+      assert Tracker.tracked?(buf)
 
       GenServer.stop(buf)
 
-      assert_until(fn -> not Tracker.tracked?(buf) end,
-        message: "Expected git buffer to be cleaned up after buffer death"
-      )
+      # Flush the :DOWN message that the Tracker receives when buf dies
+      flush_tracker()
+
+      refute Tracker.tracked?(buf),
+             "Expected git buffer to be cleaned up after buffer death"
     end
 
     test "stops Git.Repo when last buffer for a git root closes", %{root: dir} do
@@ -70,7 +79,8 @@ defmodule Minga.Git.TrackerTest do
 
       {:ok, buf} = BufferServer.start_link(content: "x = 1\n", file_path: path)
       Events.broadcast(:buffer_opened, %Events.BufferEvent{buffer: buf, path: path})
-      assert_until(fn -> Tracker.tracked?(buf) end)
+      flush_tracker()
+      assert Tracker.tracked?(buf)
 
       # Verify Git.Repo was started
       repo_pid = Repo.lookup(dir)
@@ -88,7 +98,12 @@ defmodule Minga.Git.TrackerTest do
       path = "/tmp/not_a_git_repo_#{:rand.uniform(100_000)}.ex"
       {:ok, buf} = BufferServer.start_link(content: "hello", file_path: path)
       Events.broadcast(:buffer_opened, %Events.BufferEvent{buffer: buf, path: path})
-      refute_until(fn -> Tracker.tracked?(buf) end)
+
+      # Flush the event; if the Tracker tried to track it, it would be
+      # visible after this barrier.
+      flush_tracker()
+
+      refute Tracker.tracked?(buf)
     end
   end
 
@@ -100,13 +115,13 @@ defmodule Minga.Git.TrackerTest do
 
       {:ok, buf} = BufferServer.start_link(content: "line1\nline2\n", file_path: path)
       Events.broadcast(:buffer_opened, %Events.BufferEvent{buffer: buf, path: path})
-      assert_until(fn -> Tracker.tracked?(buf) end)
+      flush_tracker()
+      assert Tracker.tracked?(buf)
 
       BufferServer.insert_text(buf, "new line\n")
       Events.notify_buffer_changed(buf)
 
-      # Sync to flush the event through Tracker's mailbox.
-      :sys.get_state(Tracker)
+      flush_tracker()
 
       git_pid = Tracker.lookup(buf)
       assert is_pid(git_pid)
@@ -115,50 +130,7 @@ defmodule Minga.Git.TrackerTest do
     test "no-op for untracked buffer" do
       {:ok, buf} = BufferServer.start_link(content: "hello")
       Events.notify_buffer_changed(buf)
-      :sys.get_state(Tracker)
+      flush_tracker()
     end
-  end
-
-  defp assert_until(condition, opts \\ []) do
-    message = Keyword.get(opts, :message, "Condition not met within timeout")
-    timeout = Keyword.get(opts, :timeout, 500)
-    interval = Keyword.get(opts, :interval, 10)
-    deadline = System.monotonic_time(:millisecond) + timeout
-    poll_until(condition, interval, deadline, message)
-  end
-
-  defp refute_until(condition, opts \\ []) do
-    timeout = Keyword.get(opts, :timeout, 100)
-    interval = Keyword.get(opts, :interval, 10)
-    deadline = System.monotonic_time(:millisecond) + timeout
-    poll_refute(condition, interval, deadline)
-  end
-
-  defp poll_until(condition, interval, deadline, message) do
-    if condition.(),
-      do: :ok,
-      else:
-        if(System.monotonic_time(:millisecond) >= deadline,
-          do: flunk(message),
-          else:
-            (
-              Process.sleep(interval)
-              poll_until(condition, interval, deadline, message)
-            )
-        )
-  end
-
-  defp poll_refute(condition, interval, deadline) do
-    if condition.(),
-      do: flunk("Condition became true when it should have stayed false"),
-      else:
-        if(System.monotonic_time(:millisecond) >= deadline,
-          do: :ok,
-          else:
-            (
-              Process.sleep(interval)
-              poll_refute(condition, interval, deadline)
-            )
-        )
   end
 end
