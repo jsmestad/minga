@@ -160,10 +160,15 @@ final class EditorNSView: MTKView {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            if SystemBlinkTiming.blinkingDisabled {
-                self?.stopCursorBlink()
-            } else {
-                self?.resetCursorBlink()
+            // queue: .main guarantees main thread, but Swift 6 strict
+            // concurrency can't verify this statically. Use
+            // assumeIsolated to bridge the gap.
+            MainActor.assumeIsolated {
+                if SystemBlinkTiming.blinkingDisabled {
+                    self?.stopCursorBlink()
+                } else {
+                    self?.resetCursorBlink()
+                }
             }
         }
     }

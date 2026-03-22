@@ -1422,9 +1422,8 @@ defmodule Minga.Port.Protocol.GUI do
 
         [
           <<min(score, 255)::8, byte_size(label_bytes)::16, label_bytes::binary,
-            byte_size(desc_bytes)::16, desc_bytes::binary,
-            byte_size(annotation_bytes)::16, annotation_bytes::binary,
-            length(match_positions)::8>>
+            byte_size(desc_bytes)::16, desc_bytes::binary, byte_size(annotation_bytes)::16,
+            annotation_bytes::binary, length(match_positions)::8>>
           | pos_binary
         ]
       end)
