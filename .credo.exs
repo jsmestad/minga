@@ -20,7 +20,7 @@
           {Credo.Check.Consistency.TabsOrSpaces, []},
 
           # ── Design ─────────────────────────────────────────────────────────
-          {Credo.Check.Design.AliasUsage, [priority: :low, if_nested_deeper_than: 2]},
+          {Credo.Check.Design.AliasUsage, false},
           {Credo.Check.Design.TagFIXME, []},
           {Credo.Check.Design.TagTODO, [exit_status: 0]},
 
