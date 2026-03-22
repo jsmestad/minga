@@ -471,7 +471,7 @@ defmodule Minga.Test.EditorCase do
 
   defp do_wait_until(editor, _condition, _remaining, _interval, message) do
     state = :sys.get_state(editor)
-    raise ExUnit.AssertionError, message: "#{message}\nFinal state mode: #{state.mode}"
+    raise ExUnit.AssertionError, message: "#{message}\nFinal state mode: #{state.vim.mode}"
   end
 
   @doc """
@@ -508,8 +508,11 @@ defmodule Minga.Test.EditorCase do
     end
   end
 
-  defp do_wait_screen(_editor, _port, _condition, _remaining, _interval, message) do
-    raise ExUnit.AssertionError, message: message
+  defp do_wait_screen(editor, port, _condition, _remaining, _interval, message) do
+    # Sync both processes so any post-failure inspection sees stable state
+    state = :sys.get_state(editor)
+    :sys.get_state(port)
+    raise ExUnit.AssertionError, message: "#{message}\nFinal state mode: #{state.vim.mode}"
   end
 
   # ── Mouse and resize helpers ─────────────────────────────────────────────────
