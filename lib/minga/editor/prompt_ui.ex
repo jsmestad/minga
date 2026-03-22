@@ -143,8 +143,7 @@ defmodule Minga.Editor.PromptUI do
   Returns `{[], nil}` when no prompt is active.
   """
   @spec render(state(), Minga.Editor.Viewport.t()) ::
-          {[Minga.Editor.DisplayList.draw()],
-           {non_neg_integer(), non_neg_integer()} | nil}
+          {[Minga.Editor.DisplayList.draw()], {non_neg_integer(), non_neg_integer()} | nil}
   def render(%{prompt_ui: %PromptState{handler: nil}}, _viewport), do: {[], nil}
 
   def render(%{prompt_ui: prompt, theme: theme} = _state, viewport) do
