@@ -39,6 +39,7 @@ defmodule Minga.MixProject do
           "docs/FOR-AI-CODERS.md",
           # Extending Minga
           "docs/EXTENSIBILITY.md",
+          "docs/EXTENSION_API.md",
           "docs/KEYMAP-SCOPES.md",
           "docs/AGENTIC-KEYMAP.md",
           # Architecture
@@ -66,6 +67,7 @@ defmodule Minga.MixProject do
           ],
           "Extending Minga": [
             "docs/EXTENSIBILITY.md",
+            "docs/EXTENSION_API.md",
             "docs/KEYMAP-SCOPES.md",
             "docs/AGENTIC-KEYMAP.md"
           ],
