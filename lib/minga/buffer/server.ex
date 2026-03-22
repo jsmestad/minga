@@ -229,7 +229,7 @@ defmodule Minga.Buffer.Server do
   @spec replace_content(GenServer.server(), String.t(), BufState.edit_source()) ::
           :ok | {:error, :read_only}
   def replace_content(server, new_content, source \\ :user)
-      when is_binary(new_content) and source in [:user, :agent, :lsp] do
+      when is_binary(new_content) and source in [:user, :agent, :lsp, :recovery] do
     GenServer.call(server, {:replace_content, new_content, source})
   end
 
@@ -1650,6 +1650,39 @@ defmodule Minga.Buffer.Server do
     {:noreply, state}
   end
 
+  @impl true
+  def handle_info(:write_swap, %{buffer_type: :file, file_path: path, dirty: true} = state)
+      when is_binary(path) do
+    content = Document.content(state.document)
+
+    Task.start(fn ->
+      case Minga.Swap.write(path, content) do
+        :ok ->
+          :ok
+
+        {:error, reason} ->
+          Minga.Log.warning(
+            :editor,
+            "Failed to write swap file for #{Path.basename(path)}: #{inspect(reason)}"
+          )
+      end
+    end)
+
+    {:noreply, %{state | swap_timer: nil}}
+  end
+
+  def handle_info(:write_swap, state) do
+    {:noreply, %{state | swap_timer: nil}}
+  end
+
+  @impl true
+  @spec terminate(term(), state()) :: :ok
+  def terminate(_reason, state) do
+    # Clean up swap file on orderly shutdown (buffer closed, editor quit).
+    delete_swap_file(state)
+    :ok
+  end
+
   # ── Find and Replace helpers ──
 
   @spec apply_batch_edit({String.t(), String.t()}, {Document.t(), [replace_result()]}) ::
@@ -1854,14 +1887,50 @@ defmodule Minga.Buffer.Server do
     Minga.Log.debug(:editor, "Redo: #{source} edit")
   end
 
+  @swap_debounce_ms 5_000
+
   @spec mark_dirty(state()) :: state()
-  defp mark_dirty(state), do: BufState.mark_dirty(state)
+  defp mark_dirty(state) do
+    state = BufState.mark_dirty(state)
+    schedule_swap_write(state)
+  end
 
   @spec sync_dirty(state()) :: state()
   defp sync_dirty(state), do: BufState.sync_dirty(state)
 
   @spec mark_saved(state()) :: state()
-  defp mark_saved(state), do: BufState.mark_saved(state)
+  defp mark_saved(state) do
+    state = BufState.mark_saved(state)
+    :ok = delete_swap_file(state)
+    cancel_swap_timer(state)
+  end
+
+  # Schedule a debounced swap file write. Cancels any pending timer
+  # so rapid edits only produce one write after 5 seconds of quiet.
+  @spec schedule_swap_write(state()) :: state()
+  defp schedule_swap_write(%{buffer_type: :file, file_path: path} = state)
+       when is_binary(path) do
+    state = cancel_swap_timer(state)
+    ref = Process.send_after(self(), :write_swap, @swap_debounce_ms)
+    %{state | swap_timer: ref}
+  end
+
+  defp schedule_swap_write(state), do: state
+
+  @spec cancel_swap_timer(state()) :: state()
+  defp cancel_swap_timer(%{swap_timer: nil} = state), do: state
+
+  defp cancel_swap_timer(%{swap_timer: ref} = state) when is_reference(ref) do
+    Process.cancel_timer(ref)
+    %{state | swap_timer: nil}
+  end
+
+  @spec delete_swap_file(state()) :: :ok
+  defp delete_swap_file(%{file_path: path}) when is_binary(path) do
+    Minga.Swap.delete(path, [])
+  end
+
+  defp delete_swap_file(_state), do: :ok
 
   @spec write_file(String.t(), String.t()) :: :ok | {:error, term()}
   defp write_file(file_path, content) do

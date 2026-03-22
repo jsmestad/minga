@@ -20,6 +20,8 @@ defmodule Minga.Editor do
   alias Minga.Config.Options
 
   alias Minga.Diagnostics.Decorations, as: DiagDecorations
+  alias Minga.Session
+  alias Minga.Swap
 
   alias Minga.Editor.AgentLifecycle
   alias Minga.Editor.BottomPanel
@@ -356,9 +358,13 @@ defmodule Minga.Editor do
     new_state = Renderer.render(new_state)
     # Setup highlighting after first paint with correct viewport
     send(self(), :setup_highlight)
+    send(self(), :check_swap_recovery)
     # If the agentic view was activated at init, start the session now
     # that the port is connected and the viewport is known.
     new_state = AgentLifecycle.maybe_start_session(new_state)
+    # Start the periodic session save timer (30 seconds)
+    session_ref = Process.send_after(self(), :save_session, 30_000)
+    new_state = %{new_state | session_timer: session_ref}
     {:noreply, new_state}
   end
 
@@ -466,6 +472,48 @@ defmodule Minga.Editor do
     # Also request semantic tokens from LSP if available
     new_state = SemanticTokenSync.request_tokens(new_state)
     {:noreply, new_state}
+  end
+
+  # ── Swap file recovery ────────────────────────────────────────────────────────
+
+  def handle_info(:check_swap_recovery, state) do
+    recoverable = Swap.Recovery.scan()
+
+    new_state =
+      case recoverable do
+        [] ->
+          if Session.clean_shutdown?() do
+            state
+          else
+            # Restore open files from the previous session
+            restore_session(state)
+          end
+
+        entries ->
+          recover_swap_entries(state, entries)
+      end
+
+    {:noreply, new_state}
+  end
+
+  # ── Session persistence ───────────────────────────────────────────────────────
+
+  def handle_info(:save_session, state) do
+    snapshot = Session.snapshot(state)
+
+    Task.start(fn ->
+      case Session.save(snapshot) do
+        :ok -> :ok
+        {:error, reason} -> Minga.Log.warning(:editor, "Session save failed: #{inspect(reason)}")
+      end
+    end)
+
+    # Cancel any existing timer and schedule a new one.
+    # This prevents timer accumulation when file saves trigger
+    # immediate :save_session messages alongside the periodic timer.
+    state = cancel_session_timer(state)
+    ref = Process.send_after(self(), :save_session, 30_000)
+    {:noreply, %{state | session_timer: ref}}
   end
 
   # ── Highlight events from Parser.Manager ──────────────────────────────────────
@@ -943,6 +991,8 @@ defmodule Minga.Editor do
     # Request fresh code lenses and inlay hints after save
     state = LspActions.code_lens(state)
     state = LspActions.inlay_hints(state)
+    # Save session state on every file save
+    send(self(), :save_session)
     {:noreply, state}
   end
 
@@ -1431,6 +1481,89 @@ defmodule Minga.Editor do
   def do_file_tree_open(state, pid, path, tree) do
     new_state = register_buffer(state, pid, path)
     put_in(new_state.file_tree.tree, FileTree.reveal(tree, path))
+  end
+
+  @spec recover_swap_entries(state(), [Swap.Recovery.entry()]) :: state()
+  defp recover_swap_entries(state, entries) do
+    count = length(entries)
+
+    state =
+      log_message(state, "Found #{count} file(s) with unsaved changes from a previous session")
+
+    Enum.reduce(entries, state, &recover_swap_entry/2)
+  end
+
+  @spec recover_swap_entry(Swap.Recovery.entry(), state()) :: state()
+  defp recover_swap_entry(entry, state) do
+    case Swap.Recovery.recover(entry.swap_path) do
+      {:ok, file_path, content} ->
+        state = log_message(state, "Recovered: #{Path.basename(file_path)}")
+        recover_buffer(state, file_path, content)
+
+      {:error, reason} ->
+        log_message(state, "Failed to recover #{Path.basename(entry.path)}: #{inspect(reason)}")
+    end
+  end
+
+  @spec cancel_session_timer(state()) :: state()
+  defp cancel_session_timer(%{session_timer: nil} = state), do: state
+
+  defp cancel_session_timer(%{session_timer: ref} = state) when is_reference(ref) do
+    Process.cancel_timer(ref)
+    %{state | session_timer: nil}
+  end
+
+  # Restores open files and cursor positions from the previous session.
+  @spec restore_session(state()) :: state()
+  defp restore_session(state) do
+    case Session.load() do
+      {:ok, session} ->
+        state = log_message(state, "Restored from previous session")
+        Enum.reduce(session.buffers, state, &restore_session_buffer/2)
+
+      {:error, _} ->
+        state
+    end
+  end
+
+  @spec restore_session_buffer(Session.buffer_entry(), state()) :: state()
+  defp restore_session_buffer(%{file: file} = entry, state) do
+    if File.exists?(file) do
+      case Commands.start_buffer(file) do
+        {:ok, pid} ->
+          :ok = BufferServer.move_to(pid, {entry.cursor_line, entry.cursor_col})
+          register_buffer(state, pid, file)
+
+        {:error, _} ->
+          state
+      end
+    else
+      state
+    end
+  end
+
+  # Opens a file and replaces its content with recovered swap data.
+  # The buffer is marked dirty since the recovered content hasn't been saved.
+  @spec recover_buffer(state(), String.t(), String.t()) :: state()
+  defp recover_buffer(state, file_path, content) do
+    case Commands.start_buffer(file_path) do
+      {:ok, pid} ->
+        # Replace buffer content with the recovered swap data.
+        # This marks the buffer dirty (unsaved changes from the crash).
+        case BufferServer.replace_content(pid, content, :recovery) do
+          :ok ->
+            register_buffer(state, pid, file_path)
+
+          {:error, :read_only} ->
+            log_message(state, "Cannot recover #{Path.basename(file_path)}: read-only")
+        end
+
+      {:error, reason} ->
+        log_message(
+          state,
+          "Could not open buffer for #{Path.basename(file_path)}: #{inspect(reason)}"
+        )
+    end
   end
 
   # Shared buffer registration: adds buffer to the list, logs, refreshes

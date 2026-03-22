@@ -29,7 +29,7 @@ defmodule Minga.Buffer.State do
   @type buffer_type :: :file | :nofile | :nowrite | :prompt | :terminal
 
   @typedoc "The source of an edit for undo/redo attribution."
-  @type edit_source :: :user | :agent | :lsp
+  @type edit_source :: :user | :agent | :lsp | :recovery
 
   @typedoc "An undo/redo stack entry: the document snapshot, version, and edit source."
   @type stack_entry ::
@@ -59,7 +59,8 @@ defmodule Minga.Buffer.State do
             decorations: %Decorations{},
             face_overrides: %{},
             options: %{},
-            explicit_options: MapSet.new()
+            explicit_options: MapSet.new(),
+            swap_timer: nil
 
   @type t :: %__MODULE__{
           document: Document.t(),
@@ -85,7 +86,8 @@ defmodule Minga.Buffer.State do
           decorations: Decorations.t(),
           face_overrides: %{String.t() => keyword()},
           options: %{atom() => term()},
-          explicit_options: MapSet.t(atom())
+          explicit_options: MapSet.t(atom()),
+          swap_timer: reference() | nil
         }
 
   @max_undo_stack 1000

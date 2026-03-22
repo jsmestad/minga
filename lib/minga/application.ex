@@ -122,6 +122,10 @@ defmodule Minga.Application do
   @impl true
   @spec stop(term()) :: :ok
   def stop(_state) do
+    # Mark the session as cleanly shut down so the next launch
+    # knows this wasn't a crash.
+    Minga.Session.mark_clean_shutdown()
+
     # Clean shutdown: restore the default console logger and stderr device.
     # This only runs when the application is stopping gracefully, not on
     # Editor crashes (where the LoggerHandler stays installed so crash
