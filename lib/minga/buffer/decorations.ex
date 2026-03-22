@@ -41,6 +41,7 @@ defmodule Minga.Buffer.Decorations do
   alias Minga.Buffer.Decorations.ConcealRange
   alias Minga.Buffer.Decorations.FoldRegion
   alias Minga.Buffer.Decorations.HighlightRange
+  alias Minga.Buffer.Decorations.LineAnnotation
   alias Minga.Buffer.Decorations.VirtualText
   alias Minga.Buffer.IntervalTree
   alias Minga.Face
@@ -87,6 +88,7 @@ defmodule Minga.Buffer.Decorations do
 
   - `highlights`: interval tree of highlight ranges
   - `virtual_texts`: list of virtual text decorations (queried by line, not range)
+  - `annotations`: list of line annotations (pill badges, inline text, gutter icons)
   - `fold_regions`: list of buffer-level fold regions (per-buffer, not per-window)
   - `block_decorations`: list of block decorations (custom-rendered lines between buffer lines)
   - `conceal_ranges`: list of conceal ranges (hidden buffer text with optional replacement)
@@ -96,24 +98,28 @@ defmodule Minga.Buffer.Decorations do
   @type t :: %__MODULE__{
           highlights: IntervalTree.t(),
           virtual_texts: [VirtualText.t()],
+          annotations: [LineAnnotation.t()],
           fold_regions: [FoldRegion.t()],
           block_decorations: [BlockDecoration.t()],
           conceal_ranges: [ConcealRange.t()],
           pending:
             [{:add, highlight_range()} | {:remove, reference()} | {:remove_group, term()}] | nil,
           version: non_neg_integer(),
-          vt_line_cache: %{non_neg_integer() => [VirtualText.t()]} | nil
+          vt_line_cache: %{non_neg_integer() => [VirtualText.t()]} | nil,
+          ann_line_cache: %{non_neg_integer() => [LineAnnotation.t()]} | nil
         }
 
   @enforce_keys []
   defstruct highlights: nil,
             virtual_texts: [],
+            annotations: [],
             fold_regions: [],
             block_decorations: [],
             conceal_ranges: [],
             pending: nil,
             version: 0,
-            vt_line_cache: nil
+            vt_line_cache: nil,
+            ann_line_cache: nil
 
   # ── Construction ─────────────────────────────────────────────────────────
 
@@ -201,10 +207,12 @@ defmodule Minga.Buffer.Decorations do
       decs
       | pending: [{:remove_group, group} | pending],
         virtual_texts: Enum.reject(decs.virtual_texts, &(&1.group == group)),
+        annotations: Enum.reject(decs.annotations, &(&1.group == group)),
         block_decorations: Enum.reject(decs.block_decorations, &(&1.group == group)),
         fold_regions: Enum.reject(decs.fold_regions, &(&1.group == group)),
         conceal_ranges: Enum.reject(decs.conceal_ranges, &(&1.group == group)),
-        vt_line_cache: nil
+        vt_line_cache: nil,
+        ann_line_cache: nil
     }
   end
 
@@ -213,6 +221,7 @@ defmodule Minga.Buffer.Decorations do
       IntervalTree.map_filter(decs.highlights, &filter_group(&1, group))
 
     new_virtual_texts = Enum.reject(decs.virtual_texts, &(&1.group == group))
+    new_annotations = Enum.reject(decs.annotations, &(&1.group == group))
     new_blocks = Enum.reject(decs.block_decorations, &(&1.group == group))
     new_folds = Enum.reject(decs.fold_regions, &(&1.group == group))
     new_conceals = Enum.reject(decs.conceal_ranges, &(&1.group == group))
@@ -221,11 +230,13 @@ defmodule Minga.Buffer.Decorations do
       decs
       | highlights: new_highlights,
         virtual_texts: new_virtual_texts,
+        annotations: new_annotations,
         block_decorations: new_blocks,
         fold_regions: new_folds,
         conceal_ranges: new_conceals,
         version: decs.version + 1,
-        vt_line_cache: nil
+        vt_line_cache: nil,
+        ann_line_cache: nil
     }
   end
 
@@ -702,6 +713,105 @@ defmodule Minga.Buffer.Decorations do
     if el > line, do: @max_col, else: ec
   end
 
+  # ── Line annotation API ────────────────────────────────────────────────────
+
+  @doc """
+  Adds a line annotation to the buffer. Returns `{id, updated_decorations}`.
+
+  ## Options
+
+  - `:kind` (optional, default `:inline_pill`) - `:inline_pill`, `:inline_text`, or `:gutter_icon`
+  - `:fg` (optional, default `0xFFFFFF`) - foreground color (24-bit RGB)
+  - `:bg` (optional, default `0x6366F1`) - background color (24-bit RGB)
+  - `:group` (optional) - atom for bulk removal (e.g., `:org_tags`, `:agent`)
+  - `:priority` (optional, default 0) - ordering when multiple annotations share a line
+
+  ## Examples
+
+      {id, decs} = Decorations.add_annotation(decs, 5, "work",
+        kind: :inline_pill, fg: 0xFFFFFF, bg: 0x6366F1, group: :org_tags)
+
+      {id, decs} = Decorations.add_annotation(decs, 10, "J. Smith, 2d ago",
+        kind: :inline_text, fg: 0x888888, group: :git_blame)
+  """
+  @spec add_annotation(t(), non_neg_integer(), String.t(), keyword()) :: {reference(), t()}
+  def add_annotation(%__MODULE__{} = decs, line, text, opts \\ [])
+      when is_integer(line) and line >= 0 and is_binary(text) do
+    id = make_ref()
+
+    ann = %LineAnnotation{
+      id: id,
+      line: line,
+      text: text,
+      kind: Keyword.get(opts, :kind, :inline_pill),
+      fg: Keyword.get(opts, :fg, 0xFFFFFF),
+      bg: Keyword.get(opts, :bg, 0x6366F1),
+      group: Keyword.get(opts, :group),
+      priority: Keyword.get(opts, :priority, 0)
+    }
+
+    new_anns = [ann | decs.annotations]
+    {id, %{decs | annotations: new_anns, version: decs.version + 1, ann_line_cache: nil}}
+  end
+
+  @doc "Removes a line annotation by ID."
+  @spec remove_annotation(t(), reference()) :: t()
+  def remove_annotation(%__MODULE__{} = decs, id) do
+    case Enum.split_with(decs.annotations, fn ann -> ann.id == id end) do
+      {[], _} ->
+        decs
+
+      {_, remaining} ->
+        %{decs | annotations: remaining, version: decs.version + 1, ann_line_cache: nil}
+    end
+  end
+
+  # ── Line annotation queries ──────────────────────────────────────────────
+
+  @doc """
+  Returns all annotations for a specific line, sorted by priority.
+  """
+  @spec annotations_for_line(t(), non_neg_integer()) :: [LineAnnotation.t()]
+  def annotations_for_line(%__MODULE__{ann_line_cache: cache}, line) when cache != nil do
+    Map.get(cache, line, [])
+  end
+
+  def annotations_for_line(%__MODULE__{annotations: anns}, line) do
+    anns
+    |> Enum.filter(fn %LineAnnotation{line: l} -> l == line end)
+    |> Enum.sort_by(fn %LineAnnotation{priority: p} -> p end)
+  end
+
+  @doc """
+  Builds the annotation line cache for O(1) per-line lookups.
+
+  Call once before a render pass. The cache is invalidated on any
+  annotation mutation.
+  """
+  @spec build_ann_line_cache(t()) :: t()
+  def build_ann_line_cache(%__MODULE__{ann_line_cache: cache} = decs) when cache != nil, do: decs
+
+  def build_ann_line_cache(%__MODULE__{annotations: []} = decs) do
+    %{decs | ann_line_cache: %{}}
+  end
+
+  def build_ann_line_cache(%__MODULE__{annotations: anns} = decs) do
+    cache =
+      anns
+      |> Enum.group_by(fn %LineAnnotation{line: l} -> l end)
+      |> Map.new(fn {line, line_anns} ->
+        sorted = Enum.sort_by(line_anns, fn %LineAnnotation{priority: p} -> p end)
+        {line, sorted}
+      end)
+
+    %{decs | ann_line_cache: cache}
+  end
+
+  @doc "Returns true if there are any annotations."
+  @spec has_annotations?(t()) :: boolean()
+  def has_annotations?(%__MODULE__{annotations: []}), do: false
+  def has_annotations?(%__MODULE__{}), do: true
+
   # ── Column mapping (inline virtual text + conceals) ──────────────────────
 
   @doc """
@@ -982,6 +1092,7 @@ defmodule Minga.Buffer.Decorations do
   def empty?(%__MODULE__{
         highlights: nil,
         virtual_texts: [],
+        annotations: [],
         fold_regions: [],
         block_decorations: [],
         conceal_ranges: []
@@ -991,12 +1102,13 @@ defmodule Minga.Buffer.Decorations do
   def empty?(%__MODULE__{
         highlights: hl,
         virtual_texts: vts,
+        annotations: anns,
         fold_regions: folds,
         block_decorations: blocks,
         conceal_ranges: conceals
       }) do
-    (hl == nil or IntervalTree.empty?(hl)) and vts == [] and folds == [] and blocks == [] and
-      conceals == []
+    (hl == nil or IntervalTree.empty?(hl)) and vts == [] and anns == [] and folds == [] and
+      blocks == [] and conceals == []
   end
 
   # ── Anchor adjustment ───────────────────────────────────────────────────
@@ -1024,8 +1136,9 @@ defmodule Minga.Buffer.Decorations do
           IntervalTree.position()
         ) :: t()
   def adjust_for_edit(%__MODULE__{} = decs, _edit_start, _edit_end, _new_end)
-      when decs.highlights == nil and decs.virtual_texts == [] and decs.fold_regions == [] and
-             decs.block_decorations == [] and decs.conceal_ranges == [],
+      when decs.highlights == nil and decs.virtual_texts == [] and decs.annotations == [] and
+             decs.fold_regions == [] and decs.block_decorations == [] and
+             decs.conceal_ranges == [],
       do: decs
 
   def adjust_for_edit(%__MODULE__{} = decs, edit_start, edit_end, new_end) do
@@ -1046,6 +1159,7 @@ defmodule Minga.Buffer.Decorations do
       end
 
     new_vts = adjust_virtual_texts(decs.virtual_texts, ctx)
+    new_anns = adjust_annotations(decs.annotations, ctx)
     new_folds = adjust_fold_regions(decs.fold_regions, ctx)
 
     new_blocks = adjust_block_decorations(decs.block_decorations, ctx)
@@ -1055,11 +1169,13 @@ defmodule Minga.Buffer.Decorations do
       decs
       | highlights: new_highlights,
         virtual_texts: new_vts,
+        annotations: new_anns,
         fold_regions: new_folds,
         block_decorations: new_blocks,
         conceal_ranges: new_conceals,
         version: decs.version + 1,
-        vt_line_cache: nil
+        vt_line_cache: nil,
+        ann_line_cache: nil
     }
   end
 
@@ -1076,6 +1192,44 @@ defmodule Minga.Buffer.Decorations do
     new_anchor = adjust_anchor_position(anchor, ctx)
     %{vt | anchor: new_anchor}
   end
+
+  # ── Annotation edit adjustment ──────────────────────────────────────────
+
+  # Annotations are line-anchored (no column). On deletion, annotations
+  # whose line falls within the deleted range are removed (a deleted line's
+  # annotation is semantically void). Survivors after the edit are shifted
+  # by line_delta.
+  @spec adjust_annotations([LineAnnotation.t()], edit_ctx()) :: [LineAnnotation.t()]
+  defp adjust_annotations([], _ctx), do: []
+
+  defp adjust_annotations(anns, ctx) do
+    {edit_start_line, _} = ctx.edit_start
+    {edit_end_line, _} = ctx.edit_end
+
+    anns
+    |> Enum.reject(fn ann ->
+      # Remove annotations on lines entirely within a deleted range
+      ctx.is_delete and ann.line >= edit_start_line and ann.line < edit_end_line
+    end)
+    |> Enum.map(&shift_ann_line(&1, edit_start_line, edit_end_line, ctx.line_delta))
+  end
+
+  # After the edit: shift by line delta
+  @spec shift_ann_line(LineAnnotation.t(), non_neg_integer(), non_neg_integer(), integer()) ::
+          LineAnnotation.t()
+  defp shift_ann_line(%LineAnnotation{line: l} = ann, _start_line, end_line, delta)
+       when l > end_line do
+    %{ann | line: l + delta}
+  end
+
+  # Within the edit region but not deleted: clamp to edit start
+  defp shift_ann_line(%LineAnnotation{line: l} = ann, start_line, _end_line, _delta)
+       when l >= start_line do
+    %{ann | line: start_line}
+  end
+
+  # Before the edit: no change
+  defp shift_ann_line(ann, _start_line, _end_line, _delta), do: ann
 
   @spec adjust_anchor_position(IntervalTree.position(), edit_ctx()) :: IntervalTree.position()
   defp adjust_anchor_position(anchor, ctx) when anchor < ctx.edit_start, do: anchor

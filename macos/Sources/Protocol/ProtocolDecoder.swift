@@ -1349,6 +1349,33 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             }
         }
 
+        // Line annotations: count:2, then per annotation: row:2 + kind:1 + fg:3 + bg:3 + text_len:2 + text
+        var lineAnnotations: [GUILineAnnotation] = []
+        if data.count >= pos + 2 {
+            let annotationCount = Int(readU16(data, pos))
+            pos += 2
+            lineAnnotations.reserveCapacity(annotationCount)
+            for _ in 0..<annotationCount {
+                guard data.count >= pos + 11 else { throw ProtocolDecodeError.malformed }
+                let annRow = readU16(data, pos)
+                let annKind = GUILineAnnotationKind(rawValue: data[pos + 2]) ?? .inlinePill
+                let annFg = readU24(data, pos + 3)
+                let annBg = readU24(data, pos + 6)
+                let annTextLen = Int(readU16(data, pos + 9))
+                pos += 11
+                guard data.count >= pos + annTextLen else { throw ProtocolDecodeError.malformed }
+                let annText = String(data: Data(data[pos..<(pos + annTextLen)]), encoding: .utf8) ?? ""
+                pos += annTextLen
+                lineAnnotations.append(GUILineAnnotation(
+                    row: annRow,
+                    kind: annKind,
+                    fg: annFg,
+                    bg: annBg,
+                    text: annText
+                ))
+            }
+        }
+
         let content = GUIWindowContent(
             windowId: windowId,
             fullRefresh: (flags & 0x01) != 0,
@@ -1361,7 +1388,8 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             selection: selection,
             searchMatches: matches,
             diagnosticUnderlines: diags,
-            documentHighlights: docHighlights
+            documentHighlights: docHighlights,
+            lineAnnotations: lineAnnotations
         )
         return (.guiWindowContent(data: content), pos - offset)
 

@@ -630,4 +630,246 @@ defmodule Minga.Buffer.DecorationsTest do
       assert result.version == decs.version + 1
     end
   end
+
+  # ── Line annotation tests ──────────────────────────────────────────────
+
+  describe "add_annotation/4" do
+    test "adds an annotation and returns its ID" do
+      decs = Decorations.new()
+      {id, decs} = Decorations.add_annotation(decs, 5, "3 errors")
+
+      assert is_reference(id)
+      assert Decorations.has_annotations?(decs)
+    end
+
+    test "bumps version on add" do
+      decs = Decorations.new()
+      v0 = decs.version
+      {_id, decs} = Decorations.add_annotation(decs, 5, "test")
+
+      assert decs.version == v0 + 1
+    end
+
+    test "invalidates ann_line_cache on add" do
+      decs = Decorations.new()
+      {_id, decs} = Decorations.add_annotation(decs, 5, "first")
+      decs = Decorations.build_ann_line_cache(decs)
+      assert decs.ann_line_cache != nil
+
+      {_id, decs} = Decorations.add_annotation(decs, 10, "second")
+      assert decs.ann_line_cache == nil
+    end
+
+    test "respects kind, fg, bg, group, priority options" do
+      decs = Decorations.new()
+
+      {_id, decs} =
+        Decorations.add_annotation(decs, 3, "urgent",
+          kind: :inline_text,
+          fg: 0xFF0000,
+          bg: 0x00FF00,
+          group: :tags,
+          priority: 10
+        )
+
+      [ann] = Decorations.annotations_for_line(decs, 3)
+      assert ann.kind == :inline_text
+      assert ann.fg == 0xFF0000
+      assert ann.bg == 0x00FF00
+      assert ann.group == :tags
+      assert ann.priority == 10
+    end
+  end
+
+  describe "remove_annotation/2" do
+    test "removes a specific annotation by ID" do
+      decs = Decorations.new()
+      {id1, decs} = Decorations.add_annotation(decs, 5, "first")
+      {_id2, decs} = Decorations.add_annotation(decs, 10, "second")
+
+      decs = Decorations.remove_annotation(decs, id1)
+
+      assert Decorations.annotations_for_line(decs, 5) == []
+      assert length(Decorations.annotations_for_line(decs, 10)) == 1
+    end
+
+    test "no-op for non-existent ID" do
+      decs = Decorations.new()
+      {_id, decs} = Decorations.add_annotation(decs, 5, "test")
+      v = decs.version
+
+      decs = Decorations.remove_annotation(decs, make_ref())
+
+      assert Decorations.has_annotations?(decs)
+      assert decs.version == v
+    end
+  end
+
+  describe "annotations_for_line/2" do
+    test "returns annotations sorted by priority" do
+      decs = Decorations.new()
+      {_id, decs} = Decorations.add_annotation(decs, 5, "high", priority: 20)
+      {_id, decs} = Decorations.add_annotation(decs, 5, "low", priority: 5)
+      {_id, decs} = Decorations.add_annotation(decs, 5, "mid", priority: 10)
+
+      anns = Decorations.annotations_for_line(decs, 5)
+      texts = Enum.map(anns, & &1.text)
+      assert texts == ["low", "mid", "high"]
+    end
+
+    test "returns empty list for line with no annotations" do
+      decs = Decorations.new()
+      {_id, decs} = Decorations.add_annotation(decs, 5, "test")
+
+      assert Decorations.annotations_for_line(decs, 10) == []
+    end
+
+    test "returns all annotations on a line" do
+      decs = Decorations.new()
+      {_id, decs} = Decorations.add_annotation(decs, 0, "a")
+      {_id, decs} = Decorations.add_annotation(decs, 0, "b")
+      {_id, decs} = Decorations.add_annotation(decs, 0, "c")
+
+      assert length(Decorations.annotations_for_line(decs, 0)) == 3
+    end
+  end
+
+  describe "build_ann_line_cache/1" do
+    test "builds cache and subsequent queries use it" do
+      decs = Decorations.new()
+      {_id, decs} = Decorations.add_annotation(decs, 0, "a")
+      {_id, decs} = Decorations.add_annotation(decs, 5, "b")
+      {_id, decs} = Decorations.add_annotation(decs, 10, "c")
+
+      decs = Decorations.build_ann_line_cache(decs)
+      assert decs.ann_line_cache != nil
+
+      # Queries should still work correctly with cache
+      assert length(Decorations.annotations_for_line(decs, 5)) == 1
+      assert Decorations.annotations_for_line(decs, 3) == []
+    end
+
+    test "returns unchanged when cache already built" do
+      decs = Decorations.new()
+      {_id, decs} = Decorations.add_annotation(decs, 5, "test")
+      decs = Decorations.build_ann_line_cache(decs)
+
+      assert decs == Decorations.build_ann_line_cache(decs)
+    end
+
+    test "handles empty annotations" do
+      decs = Decorations.new()
+      decs = Decorations.build_ann_line_cache(decs)
+
+      assert decs.ann_line_cache == %{}
+    end
+  end
+
+  describe "remove_group/2 with annotations" do
+    test "removes all annotations in a group" do
+      decs = Decorations.new()
+      {_id, decs} = Decorations.add_annotation(decs, 5, "lsp1", group: :lsp)
+      {_id, decs} = Decorations.add_annotation(decs, 10, "lsp2", group: :lsp)
+      {_id, decs} = Decorations.add_annotation(decs, 15, "agent", group: :agent)
+
+      decs = Decorations.remove_group(decs, :lsp)
+
+      assert Decorations.annotations_for_line(decs, 5) == []
+      assert Decorations.annotations_for_line(decs, 10) == []
+      assert length(Decorations.annotations_for_line(decs, 15)) == 1
+    end
+
+    test "no-op on non-existent group" do
+      decs = Decorations.new()
+      {_id, decs} = Decorations.add_annotation(decs, 5, "test", group: :lsp)
+
+      decs = Decorations.remove_group(decs, :nonexistent)
+
+      assert length(Decorations.annotations_for_line(decs, 5)) == 1
+    end
+  end
+
+  describe "adjust_for_edit/4 with annotations" do
+    test "insertion before annotation line shifts it forward" do
+      decs = Decorations.new()
+      {_id, decs} = Decorations.add_annotation(decs, 10, "test")
+
+      # Insert 3 lines at line 2
+      decs = Decorations.adjust_for_edit(decs, {2, 0}, {2, 0}, {5, 0})
+
+      [ann] = decs.annotations
+      assert ann.line == 13
+    end
+
+    test "insertion after annotation line leaves it unchanged" do
+      decs = Decorations.new()
+      {_id, decs} = Decorations.add_annotation(decs, 5, "test")
+
+      decs = Decorations.adjust_for_edit(decs, {20, 0}, {20, 0}, {23, 0})
+
+      [ann] = decs.annotations
+      assert ann.line == 5
+    end
+
+    test "deletion before annotation line shifts it back" do
+      decs = Decorations.new()
+      {_id, decs} = Decorations.add_annotation(decs, 10, "test")
+
+      # Delete lines 2-5 (3 lines)
+      decs = Decorations.adjust_for_edit(decs, {2, 0}, {5, 0}, {2, 0})
+
+      [ann] = decs.annotations
+      assert ann.line == 7
+    end
+
+    test "deletion spanning annotation line removes it" do
+      decs = Decorations.new()
+      {_id, decs} = Decorations.add_annotation(decs, 5, "test")
+
+      # Delete lines 3-8
+      decs = Decorations.adjust_for_edit(decs, {3, 0}, {8, 0}, {3, 0})
+
+      assert not Decorations.has_annotations?(decs)
+    end
+
+    test "annotation on line 0 survives insertion at line 0" do
+      decs = Decorations.new()
+      {_id, decs} = Decorations.add_annotation(decs, 0, "test")
+
+      # Insert at line 0 (pushes content down)
+      decs = Decorations.adjust_for_edit(decs, {0, 0}, {0, 0}, {2, 0})
+
+      [ann] = decs.annotations
+      # Annotation at line 0 is within the edit region; clamped to edit start
+      assert ann.line == 0
+    end
+
+    test "no-op on empty annotations" do
+      decs = Decorations.new()
+      decs = Decorations.adjust_for_edit(decs, {0, 0}, {0, 0}, {1, 0})
+
+      assert not Decorations.has_annotations?(decs)
+    end
+  end
+
+  describe "has_annotations?/1" do
+    test "false for new decorations" do
+      assert not Decorations.has_annotations?(Decorations.new())
+    end
+
+    test "true after adding an annotation" do
+      {_id, decs} = Decorations.add_annotation(Decorations.new(), 0, "test")
+      assert Decorations.has_annotations?(decs)
+    end
+  end
+
+  describe "empty?/1 with annotations" do
+    test "annotations count as non-empty" do
+      decs = Decorations.new()
+      assert Decorations.empty?(decs)
+
+      {_id, decs} = Decorations.add_annotation(decs, 0, "test")
+      assert not Decorations.empty?(decs)
+    end
+  end
 end

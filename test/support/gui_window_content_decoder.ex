@@ -20,7 +20,8 @@ defmodule Minga.Test.GUIWindowContentDecoder do
     {selection, rest} = decode_selection(rest)
     {search_matches, rest} = decode_search_matches(rest)
     {diagnostic_ranges, rest} = decode_diagnostic_ranges(rest)
-    {document_highlights, <<>>} = decode_document_highlights(rest)
+    {document_highlights, rest} = decode_document_highlights(rest)
+    {annotations, <<>>} = decode_annotations(rest)
 
     %{
       window_id: window_id,
@@ -34,7 +35,8 @@ defmodule Minga.Test.GUIWindowContentDecoder do
       selection: selection,
       search_matches: search_matches,
       diagnostic_ranges: diagnostic_ranges,
-      document_highlights: document_highlights
+      document_highlights: document_highlights,
+      annotations: annotations
     }
   end
 
@@ -191,6 +193,35 @@ defmodule Minga.Test.GUIWindowContentDecoder do
   defp decode_highlight_kind(1), do: :text
   defp decode_highlight_kind(2), do: :read
   defp decode_highlight_kind(3), do: :write
+
+  # ── Line annotations ─────────────────────────────────────────────────────
+
+  defp decode_annotations(<<count::16, rest::binary>>) do
+    decode_annotation_entries(rest, count, [])
+  end
+
+  defp decode_annotation_entries(rest, 0, acc), do: {Enum.reverse(acc), rest}
+
+  defp decode_annotation_entries(
+         <<row::16, kind::8, fg_r::8, fg_g::8, fg_b::8, bg_r::8, bg_g::8, bg_b::8, text_len::16,
+           text::binary-size(text_len), rest::binary>>,
+         remaining,
+         acc
+       ) do
+    annotation = %{
+      row: row,
+      kind: decode_annotation_kind(kind),
+      fg: fg_r <<< 16 ||| fg_g <<< 8 ||| fg_b,
+      bg: bg_r <<< 16 ||| bg_g <<< 8 ||| bg_b,
+      text: text
+    }
+
+    decode_annotation_entries(rest, remaining - 1, [annotation | acc])
+  end
+
+  defp decode_annotation_kind(0), do: :inline_pill
+  defp decode_annotation_kind(1), do: :inline_text
+  defp decode_annotation_kind(2), do: :gutter_icon
 
   # ── Cursor shape ────────────────────────────────────────────────────────
 

@@ -12,6 +12,7 @@ defmodule Minga.Port.Protocol.GUIWindowContentTest do
 
   alias Minga.Editor.SemanticWindow
   alias Minga.Editor.SemanticWindow.DiagnosticRange
+  alias Minga.Editor.SemanticWindow.ResolvedAnnotation
   alias Minga.Editor.SemanticWindow.SearchMatch
   alias Minga.Editor.SemanticWindow.Selection
   alias Minga.Editor.SemanticWindow.Span
@@ -33,6 +34,7 @@ defmodule Minga.Port.Protocol.GUIWindowContentTest do
       selection: Keyword.get(opts, :selection, nil),
       search_matches: Keyword.get(opts, :search_matches, []),
       diagnostic_ranges: Keyword.get(opts, :diagnostic_ranges, []),
+      annotations: Keyword.get(opts, :annotations, []),
       full_refresh: Keyword.get(opts, :full_refresh, true)
     }
   end
@@ -364,6 +366,96 @@ defmodule Minga.Port.Protocol.GUIWindowContentTest do
       assert decoded.selection == nil
       assert decoded.search_matches == []
       assert decoded.diagnostic_ranges == []
+      assert decoded.annotations == []
+    end
+  end
+
+  # ── Round-trip: line annotations ────────────────────────────────────────
+
+  describe "round-trip: line annotations" do
+    test "empty annotations round-trip" do
+      decoded = round_trip(minimal_window(annotations: []))
+      assert decoded.annotations == []
+    end
+
+    test "inline_pill annotation round-trips" do
+      ann = %ResolvedAnnotation{
+        row: 5,
+        kind: :inline_pill,
+        fg: 0xFF6C6B,
+        bg: 0x3E4452,
+        text: "3 errors"
+      }
+
+      decoded = round_trip(minimal_window(annotations: [ann]))
+
+      assert length(decoded.annotations) == 1
+      [d] = decoded.annotations
+      assert d.row == 5
+      assert d.kind == :inline_pill
+      assert d.fg == 0xFF6C6B
+      assert d.bg == 0x3E4452
+      assert d.text == "3 errors"
+    end
+
+    test "all three annotation kinds round-trip" do
+      anns = [
+        %ResolvedAnnotation{row: 0, kind: :inline_pill, fg: 0xFFFFFF, bg: 0x6366F1, text: "pill"},
+        %ResolvedAnnotation{row: 1, kind: :inline_text, fg: 0x888888, bg: 0x000000, text: "text"},
+        %ResolvedAnnotation{row: 2, kind: :gutter_icon, fg: 0xFF0000, bg: 0x00FF00, text: "!"}
+      ]
+
+      decoded = round_trip(minimal_window(annotations: anns))
+
+      assert length(decoded.annotations) == 3
+      kinds = Enum.map(decoded.annotations, & &1.kind)
+      assert kinds == [:inline_pill, :inline_text, :gutter_icon]
+    end
+
+    test "unicode annotation text round-trips" do
+      ann = %ResolvedAnnotation{
+        row: 0,
+        kind: :inline_pill,
+        fg: 0xFFFFFF,
+        bg: 0x000000,
+        text: "⚠ 日本語"
+      }
+
+      decoded = round_trip(minimal_window(annotations: [ann]))
+
+      assert hd(decoded.annotations).text == "⚠ 日本語"
+    end
+
+    test "multiple annotations on same row round-trip" do
+      anns = [
+        %ResolvedAnnotation{row: 7, kind: :inline_pill, fg: 0xFFFFFF, bg: 0x6366F1, text: "work"},
+        %ResolvedAnnotation{
+          row: 7,
+          kind: :inline_pill,
+          fg: 0xFFFFFF,
+          bg: 0xDC2626,
+          text: "urgent"
+        },
+        %ResolvedAnnotation{
+          row: 7,
+          kind: :inline_text,
+          fg: 0x888888,
+          bg: 0x000000,
+          text: "3 tags"
+        }
+      ]
+
+      decoded = round_trip(minimal_window(annotations: anns))
+
+      assert length(decoded.annotations) == 3
+      assert Enum.all?(decoded.annotations, &(&1.row == 7))
+    end
+
+    test "empty text annotation round-trips" do
+      ann = %ResolvedAnnotation{row: 0, kind: :inline_pill, fg: 0xFFFFFF, bg: 0x000000, text: ""}
+      decoded = round_trip(minimal_window(annotations: [ann]))
+
+      assert hd(decoded.annotations).text == ""
     end
   end
 
@@ -462,6 +554,8 @@ defmodule Minga.Port.Protocol.GUIWindowContentTest do
           matches <- list_of(search_match_gen(), length: match_count),
           diag_count <- integer(0..5),
           diags <- list_of(diagnostic_range_gen(), length: diag_count),
+          ann_count <- integer(0..5),
+          anns <- list_of(annotation_gen(), length: ann_count),
           full_refresh <- boolean(),
           cursor_visible <- boolean()
         ) do
@@ -476,6 +570,7 @@ defmodule Minga.Port.Protocol.GUIWindowContentTest do
         selection: selection,
         search_matches: matches,
         diagnostic_ranges: diags,
+        annotations: anns,
         full_refresh: full_refresh
       }
     end
@@ -570,6 +665,18 @@ defmodule Minga.Port.Protocol.GUIWindowContentTest do
         end_col: end_col,
         severity: severity
       }
+    end
+  end
+
+  defp annotation_gen do
+    gen all(
+          row <- integer(0..100),
+          kind <- member_of([:inline_pill, :inline_text, :gutter_icon]),
+          fg <- integer(0..0xFFFFFF),
+          bg <- integer(0..0xFFFFFF),
+          text <- string(:printable, max_length: 50)
+        ) do
+      %ResolvedAnnotation{row: row, kind: kind, fg: fg, bg: bg, text: text}
     end
   end
 end
