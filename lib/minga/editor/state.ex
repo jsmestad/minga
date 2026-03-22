@@ -59,6 +59,7 @@ defmodule Minga.Editor.State do
   alias Minga.Mode
   alias Minga.Panel.MessageStore
   alias Minga.Port.Capabilities
+  alias Minga.Tool.Manager, as: ToolManager
   # BVBridge alias removed: build_file_tab_defaults creates BVState directly.
   alias Minga.Theme
 
@@ -1213,8 +1214,8 @@ defmodule Minga.Editor.State do
   @spec skip_tool_prompt?(t(), atom()) :: boolean()
   def skip_tool_prompt?(%__MODULE__{} = state, tool_name) do
     MapSet.member?(state.tool_declined, tool_name) or
-      Minga.Tool.Manager.installed?(tool_name) or
-      MapSet.member?(Minga.Tool.Manager.installing(), tool_name) or
+      ToolManager.installed?(tool_name) or
+      MapSet.member?(ToolManager.installing(), tool_name) or
       tool_name in state.tool_prompt_queue
   end
 end

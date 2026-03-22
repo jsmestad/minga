@@ -241,12 +241,10 @@ defmodule Minga.Editor.Commands.Lsp do
 
   # Returns cached update info if ToolManager has checked recently.
   # Does not make network calls; the Editor GenServer must never block.
+  # Stubbed until ToolManager exposes an ETS-backed per-tool version cache
+  # from check_updates results (tracked in #743 follow-up).
   @spec check_update_info(Recipe.t(), String.t()) :: String.t()
-  defp check_update_info(_recipe, _installed_version) do
-    # TODO: wire to ToolManager.cached_latest_version/1 once it exposes
-    # an ETS-backed per-tool version cache from check_updates results
-    ""
-  end
+  defp check_update_info(_recipe, _installed_version), do: ""
 
   @spec gather_client_info(pid()) :: map()
   defp gather_client_info(pid) do
