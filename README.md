@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/icon_1024.png" alt="Minga logo" width="128">
+  <img src="assets/minga_dark-transparent.svg" alt="Minga logo" width="128">
 </p>
 
 # Minga
