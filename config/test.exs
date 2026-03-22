@@ -31,3 +31,9 @@ config :minga,
     go_install: Minga.Tool.Installer.Stub,
     github_release: Minga.Tool.Installer.Stub
   }
+
+# Disable the which-key popup timer in tests. The timer fires after 300ms
+# and triggers an extra render, which can steal frame waiters from the
+# headless test harness. Setting :infinity prevents the timer from firing
+# while still allowing the which-key popup to render via explicit tests.
+config :minga, whichkey_timeout_ms: :infinity

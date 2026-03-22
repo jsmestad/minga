@@ -62,12 +62,33 @@ defmodule Minga.WhichKey do
   After `timeout_ms` milliseconds (default #{@default_timeout_ms} ms), sends
   `{:whichkey_timeout, ref}` to the calling process. Returns the `ref` that
   will be included in the message so the caller can identify it.
+
+  When the application config `:whichkey_timeout_ms` is set to `:infinity`
+  (e.g., in test mode), no timer is started. The returned `ref` is still
+  safe to pass to `cancel_timeout/1`, which will be a no-op.
   """
-  @spec start_timeout(non_neg_integer()) :: timer_ref()
-  def start_timeout(timeout_ms \\ @default_timeout_ms)
-      when is_integer(timeout_ms) and timeout_ms >= 0 do
+  @spec start_timeout(non_neg_integer() | nil) :: timer_ref()
+  def start_timeout(timeout_ms \\ nil) do
     ref = make_ref()
-    Process.send_after(self(), {:whichkey_timeout, ref}, timeout_ms)
+
+    effective =
+      case timeout_ms do
+        nil -> Application.get_env(:minga, :whichkey_timeout_ms, @default_timeout_ms)
+        ms when is_integer(ms) and ms >= 0 -> ms
+      end
+
+    case effective do
+      :infinity ->
+        :ok
+
+      ms when is_integer(ms) and ms >= 0 ->
+        Process.send_after(self(), {:whichkey_timeout, ref}, ms)
+
+      bad ->
+        raise ArgumentError,
+              "whichkey_timeout_ms must be a non-negative integer or :infinity, got: #{inspect(bad)}"
+    end
+
     ref
   end
 
@@ -157,14 +178,14 @@ defmodule Minga.WhichKey do
   defp modifier_prefix(modifiers) do
     ctrl = band(modifiers, 0x02) != 0
     alt = band(modifiers, 0x04) != 0
-
-    cond do
-      ctrl and alt -> "C-M-"
-      ctrl -> "C-"
-      alt -> "M-"
-      true -> ""
-    end
+    modifier_string(ctrl, alt)
   end
+
+  @spec modifier_string(boolean(), boolean()) :: String.t()
+  defp modifier_string(true, true), do: "C-M-"
+  defp modifier_string(true, false), do: "C-"
+  defp modifier_string(false, true), do: "M-"
+  defp modifier_string(false, false), do: ""
 
   @spec format_label(String.t() | atom()) :: String.t()
   defp format_label(label) when is_binary(label), do: label
