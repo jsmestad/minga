@@ -50,26 +50,28 @@ struct BreadcrumbBar: View {
                         .onTapGesture {
                             encoder?.sendBreadcrumbClick(index: UInt8(index))
                         }
+                        .onHover { isHovered in
+                            if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+                        }
                 }
 
                 Spacer()
 
-                // Search icon
-                Button(action: {}) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 10.5, weight: .medium))
-                        .foregroundStyle(theme.breadcrumbFg.opacity(0.5))
+                // Find file button
+                breadcrumbButton(
+                    systemIcon: "magnifyingglass",
+                    tooltip: "Find file (SPC f f)"
+                ) {
+                    encoder?.sendExecuteCommand(name: "find_file")
                 }
-                .buttonStyle(.plain)
-                .padding(.trailing, 4)
 
-                // Settings icon
-                Button(action: {}) {
-                    Image(systemName: "gearshape")
-                        .font(.system(size: 10.5, weight: .medium))
-                        .foregroundStyle(theme.breadcrumbFg.opacity(0.5))
+                // Open config button
+                breadcrumbButton(
+                    systemIcon: "gearshape",
+                    tooltip: "Open config (SPC f p)"
+                ) {
+                    encoder?.sendExecuteCommand(name: "open_config")
                 }
-                .buttonStyle(.plain)
             }
             .padding(.horizontal, 10)
             .frame(height: barHeight)
@@ -81,6 +83,26 @@ struct BreadcrumbBar: View {
             Rectangle()
                 .fill(theme.breadcrumbSeparatorFg.opacity(0.3))
                 .frame(height: 1)
+        }
+    }
+
+    /// Compact icon button for the breadcrumb bar with tooltip and pointer cursor.
+    @ViewBuilder
+    private func breadcrumbButton(
+        systemIcon: String,
+        tooltip: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemIcon)
+                .font(.system(size: 10.5, weight: .medium))
+                .foregroundStyle(theme.breadcrumbFg.opacity(0.5))
+        }
+        .buttonStyle(.plain)
+        .help(tooltip)
+        .padding(.trailing, 4)
+        .onHover { isHovered in
+            if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
         }
     }
 }

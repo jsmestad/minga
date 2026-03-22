@@ -19,8 +19,18 @@ struct TabBarView: View {
     var body: some View {
         HStack(spacing: 0) {
             // Navigation arrows (back/forward)
-            navButton(icon: "chevron.left")
-            navButton(icon: "chevron.right")
+            tabBarButton(
+                systemIcon: "chevron.left",
+                tooltip: "Previous tab (SPC b p)"
+            ) {
+                encoder?.sendExecuteCommand(name: "buffer_prev")
+            }
+            tabBarButton(
+                systemIcon: "chevron.right",
+                tooltip: "Next tab (SPC b n)"
+            ) {
+                encoder?.sendExecuteCommand(name: "buffer_next")
+            }
 
             // Thin separator after nav arrows
             verticalSeparator
@@ -43,13 +53,26 @@ struct TabBarView: View {
             verticalSeparator
 
             // New tab button
-            toolbarButton(systemIcon: "plus") {
+            tabBarButton(
+                systemIcon: "plus",
+                tooltip: "New tab"
+            ) {
                 encoder?.sendNewTab()
             }
 
-            // Layout toggle buttons
-            toolbarButton(systemIcon: "rectangle.split.2x1") {}
-            toolbarButton(systemIcon: "rectangle.expand.vertical") {}
+            // Window split buttons
+            tabBarButton(
+                systemIcon: "rectangle.split.2x1",
+                tooltip: "Split right (SPC w v)"
+            ) {
+                encoder?.sendExecuteCommand(name: "split_vertical")
+            }
+            tabBarButton(
+                systemIcon: "rectangle.expand.vertical",
+                tooltip: "Split below (SPC w s)"
+            ) {
+                encoder?.sendExecuteCommand(name: "split_horizontal")
+            }
         }
         .frame(height: barHeight)
         .background(theme.tabBg)
@@ -123,21 +146,19 @@ struct TabBarView: View {
                 )
         }
         .buttonStyle(.plain)
-    }
-
-    @ViewBuilder
-    private func navButton(icon: String) -> some View {
-        Button(action: {}) {
-            Image(systemName: icon)
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(theme.tabInactiveFg)
-                .frame(width: 28, height: barHeight)
+        .help("Close tab")
+        .onHover { isHovered in
+            if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
         }
-        .buttonStyle(.plain)
     }
 
+    /// Compact icon button for the tab bar toolbar with tooltip and pointer cursor.
     @ViewBuilder
-    private func toolbarButton(systemIcon: String, action: @escaping () -> Void) -> some View {
+    private func tabBarButton(
+        systemIcon: String,
+        tooltip: String,
+        action: @escaping () -> Void
+    ) -> some View {
         Button(action: action) {
             Image(systemName: systemIcon)
                 .font(.system(size: 10.5, weight: .medium))
@@ -145,6 +166,10 @@ struct TabBarView: View {
                 .frame(width: 28, height: barHeight)
         }
         .buttonStyle(.plain)
+        .help(tooltip)
+        .onHover { isHovered in
+            if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+        }
     }
 
     private var verticalSeparator: some View {

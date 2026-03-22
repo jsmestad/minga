@@ -49,6 +49,17 @@ defmodule Minga.Port.Protocol.GUI do
   | 0x09       | panel_switch_tab     |
   | 0x0A       | panel_dismiss        |
   | 0x0B       | panel_resize         |
+  | 0x0C       | open_file            |
+  | 0x0D       | file_tree_new_file   |
+  | 0x0E       | file_tree_new_folder |
+  | 0x0F       | file_tree_collapse_all |
+  | 0x10       | file_tree_refresh    |
+  | 0x11       | tool_install         |
+  | 0x12       | tool_uninstall       |
+  | 0x13       | tool_update          |
+  | 0x14       | tool_dismiss         |
+  | 0x15       | agent_tool_toggle    |
+  | 0x16       | execute_command      |
   """
 
   import Bitwise
@@ -109,6 +120,7 @@ defmodule Minga.Port.Protocol.GUI do
   @gui_action_tool_update 0x13
   @gui_action_tool_dismiss 0x14
   @gui_action_agent_tool_toggle 0x15
+  @gui_action_execute_command 0x16
 
   # ── Types ──
 
@@ -135,6 +147,7 @@ defmodule Minga.Port.Protocol.GUI do
           | {:tool_update, name :: String.t()}
           | :tool_dismiss
           | {:agent_tool_toggle, message_index :: non_neg_integer()}
+          | {:execute_command, name :: String.t()}
 
   # ═══════════════════════════════════════════════════════════════════════════
   # Encoding (BEAM → Frontend)
@@ -1213,6 +1226,12 @@ defmodule Minga.Port.Protocol.GUI do
 
   def decode_gui_action(@gui_action_agent_tool_toggle, <<index::16>>),
     do: {:ok, {:agent_tool_toggle, index}}
+
+  def decode_gui_action(
+        @gui_action_execute_command,
+        <<name_len::16, name::binary-size(name_len)>>
+      ),
+      do: {:ok, {:execute_command, name}}
 
   def decode_gui_action(_, _), do: :error
 
