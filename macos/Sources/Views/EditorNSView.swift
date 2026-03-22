@@ -8,6 +8,7 @@
 /// Wrapped by EditorView (NSViewRepresentable) for use in SwiftUI.
 
 import AppKit
+import os
 import MetalKit
 
 /// The main editor view. Uses MTKView's built-in display link for
@@ -331,6 +332,7 @@ final class EditorNSView: MTKView {
             readySent = true
             dispatcher.frameState.resize(newCols: newCols, newRows: newRows)
             encoder.sendReady(cols: newCols, rows: newRows)
+            os_signpost(.event, log: startupLog, name: "ReadySent", "%{public}dx%{public}d", newCols, newRows)
             PortLogger.info("Window ready: \(newCols)x\(newRows) cells (\(Int(newSize.width))x\(Int(newSize.height))pt)")
         } else if newCols != dispatcher.frameState.cols || newRows != dispatcher.frameState.rows {
             dispatcher.frameState.resize(newCols: newCols, newRows: newRows)

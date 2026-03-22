@@ -352,6 +352,24 @@ struct CommandDispatcherRoutingTests {
         #expect(dispatcher.frameState.gutterCol == 5) // 4 + 1
     }
 
+    // MARK: - Batch lifecycle
+
+    @Test("batchEnd fires onFirstRender once then clears it")
+    @MainActor func batchEndFiresFirstRenderOnce() {
+        let (dispatcher, _) = makeDispatcher()
+        var callCount = 0
+        dispatcher.onFirstRender = { callCount += 1 }
+
+        dispatcher.dispatch(.batchEnd)
+        #expect(callCount == 1)
+        #expect(dispatcher.onFirstRender == nil)
+
+        dispatcher.dispatch(.batchEnd)
+        #expect(callCount == 1)
+    }
+
+    // MARK: - Theme
+
     @Test("guiTheme updates themeColors and syncs to frameState")
     @MainActor func guiThemeRouting() {
         let (dispatcher, gui) = makeDispatcher()
