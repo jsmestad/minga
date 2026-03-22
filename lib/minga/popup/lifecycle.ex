@@ -56,10 +56,12 @@ defmodule Minga.Popup.Lifecycle do
   displayed in a new split pane. The original layout is snapshotted for
   restore on close.
   """
-  @spec open_popup(state(), String.t(), pid()) :: {:ok, state()} | :no_match
-  def open_popup(state, buffer_name, buffer_pid)
+  @spec open_popup(state(), String.t(), pid(), keyword()) :: {:ok, state()} | :no_match
+  def open_popup(state, buffer_name, buffer_pid, opts \\ [])
       when is_binary(buffer_name) and is_pid(buffer_pid) do
-    case PopupRegistry.match(buffer_name) do
+    registry = Keyword.get(opts, :registry, Minga.Popup.Registry)
+
+    case PopupRegistry.match(buffer_name, registry) do
       {:ok, rule} ->
         {:ok, apply_rule(state, rule, buffer_pid)}
 

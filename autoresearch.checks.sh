@@ -1,10 +1,9 @@
 #!/bin/bash
-# Verify the changed test files still pass (run 3x for flake detection)
+# Verify changed test files still pass (run 3x for flake detection)
 set -euo pipefail
 
 cd "$(dirname "$0")"
 
-# Find test files changed from main
 changed_tests=$(git diff --name-only main -- 'test/**/*_test.exs' 2>/dev/null || true)
 
 if [ -z "$changed_tests" ]; then

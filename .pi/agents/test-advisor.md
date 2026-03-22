@@ -134,6 +134,32 @@ Don't list 20 edge cases for completeness. Pick the 3-5 that are most likely to 
 {If you read the existing test file, note any helpers, setup conventions, or patterns the new tests should follow for consistency.}
 ```
 
+## Concurrency Safety
+
+When designing tests, proactively design for `async: true`. Every test plan you produce should address concurrency, even if the implementing agent didn't ask about it.
+
+**Default assumption:** the test will be `async: true`. Only recommend `async: false` if you can name the specific global resource that requires it.
+
+**Synchronization design:** for every GenServer interaction in the test, specify the synchronization mechanism:
+
+- After a `GenServer.cast` or `send`: recommend `:sys.get_state/1` as a barrier before asserting
+- After an event that triggers async work: recommend `Minga.Events.subscribe(topic)` in setup + `assert_receive` after the action. Pin unique fields (`^dir`, `^buf`) to avoid matching events from concurrent tests.
+- After process shutdown: recommend `Process.monitor` + `assert_receive {:DOWN, ...}` instead of `Process.alive?/1`
+- For timer-triggered callbacks (e.g., `Process.send_after(self(), :timeout, 200)`): recommend sending the timer message directly (`send(pid, :timeout)`) followed by `:sys.get_state/1` instead of sleeping
+
+**ETS isolation:** if the module under test uses a global ETS table with a `@table` default, design the test setup to create a private table via `start_supervised!` with a unique name. Follow the pattern in `Minga.Config.Advice` and `Minga.Popup.Registry`.
+
+**Assertion stability:** when designing assertions for UI state (file trees, picker results, completion lists), recommend content-based assertions (`Enum.any?`, `Enum.find`) over index-based assertions (`Enum.at`, `List.first`). Index assertions are fragile under concurrent filesystem operations.
+
+Include a "Concurrency" subsection in your output:
+
+```markdown
+### Concurrency
+- **async:** true/false (with reason if false)
+- **Synchronization:** {what mechanism, where in the test}
+- **Isolation:** {any ETS tables or global state to parameterize}
+```
+
 ## Tone
 
 Concrete and actionable. Every test you propose should be writable from your description without guessing. Include the setup, the action, and the assertion. "Test that it handles edge cases" is worthless. "Insert a 4-byte emoji at column 0, assert cursor.col is 1 (grapheme) not 4 (bytes)" is useful.

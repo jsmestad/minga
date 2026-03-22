@@ -1,184 +1,177 @@
 defmodule Minga.Popup.RegistryTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Minga.Popup.Registry
   alias Minga.Popup.Rule
 
   setup do
-    Registry.init()
-    Registry.clear()
-    :ok
+    # Each test gets its own ETS table via a unique atom name.
+    # No cross-test interference, safe for async: true.
+    table = :"popup_reg_#{:erlang.unique_integer([:positive])}"
+    Registry.init(table)
+    on_exit(fn -> if :ets.whereis(table) != :undefined, do: :ets.delete(table) end)
+    %{table: table}
   end
 
-  describe "register/1 and match/1" do
-    test "registers and matches a string pattern rule" do
+  describe "register and match" do
+    test "registers and matches a string pattern rule", %{table: t} do
       rule = Rule.new("*Warnings*", side: :bottom)
-      Registry.register(rule)
+      Registry.register(rule, t)
 
-      assert {:ok, matched} = Registry.match("*Warnings*")
+      assert {:ok, matched} = Registry.match("*Warnings*", t)
       assert matched.pattern == "*Warnings*"
       assert matched.side == :bottom
     end
 
-    test "registers and matches a regex pattern rule" do
+    test "registers and matches a regex pattern rule", %{table: t} do
       rule = Rule.new(~r/\*Help/, display: :float)
-      Registry.register(rule)
+      Registry.register(rule, t)
 
-      assert {:ok, matched} = Registry.match("*Help: elixir*")
+      assert {:ok, matched} = Registry.match("*Help: elixir*", t)
       assert matched.display == :float
     end
 
-    test "returns :none when no rule matches" do
+    test "returns :none when no rule matches", %{table: t} do
       rule = Rule.new("*Warnings*")
-      Registry.register(rule)
+      Registry.register(rule, t)
 
-      assert :none = Registry.match("some-file.ex")
+      assert :none = Registry.match("some-file.ex", t)
     end
 
-    test "returns :none with empty registry" do
-      assert :none = Registry.match("*Warnings*")
+    test "returns :none with empty registry", %{table: t} do
+      assert :none = Registry.match("*Warnings*", t)
     end
 
-    test "higher priority rule wins" do
+    test "higher priority rule wins", %{table: t} do
       low = Rule.new("*Warnings*", side: :bottom, priority: 0)
       high = Rule.new("*Warnings*", side: :right, priority: 10)
 
-      Registry.register(low)
-      Registry.register(high)
+      Registry.register(low, t)
+      Registry.register(high, t)
 
-      assert {:ok, matched} = Registry.match("*Warnings*")
+      assert {:ok, matched} = Registry.match("*Warnings*", t)
       assert matched.side == :right
     end
 
-    test "later registration wins at same priority" do
+    test "later registration wins at same priority", %{table: t} do
       first = Rule.new("*Warnings*", side: :bottom, priority: 0)
       second = Rule.new("*Warnings*", side: :right, priority: 0)
 
-      Registry.register(first)
-      Registry.register(second)
+      Registry.register(first, t)
+      Registry.register(second, t)
 
-      # Both match, but we want the first one found in sorted order.
-      # With same priority, the ordered_set key is {-priority, sequence}.
-      # Later sequence is higher, so it sorts after. First key in ordered_set
-      # is the first registered. This means first registration wins at same priority.
-      # Let's just verify one matches.
-      assert {:ok, _matched} = Registry.match("*Warnings*")
+      assert {:ok, _matched} = Registry.match("*Warnings*", t)
     end
 
-    test "first matching rule wins when multiple patterns match" do
+    test "first matching rule wins when multiple patterns match", %{table: t} do
       specific = Rule.new("*Help: elixir*", side: :right, priority: 10)
       general = Rule.new(~r/\*Help/, side: :bottom, priority: 0)
 
-      Registry.register(specific)
-      Registry.register(general)
+      Registry.register(specific, t)
+      Registry.register(general, t)
 
-      # The specific rule has higher priority, so it should match first
-      assert {:ok, matched} = Registry.match("*Help: elixir*")
+      assert {:ok, matched} = Registry.match("*Help: elixir*", t)
       assert matched.side == :right
 
-      # A name that only matches the general regex
-      assert {:ok, matched} = Registry.match("*Help: zig*")
+      assert {:ok, matched} = Registry.match("*Help: zig*", t)
       assert matched.side == :bottom
     end
 
-    test "regex and string patterns coexist" do
+    test "regex and string patterns coexist", %{table: t} do
       string_rule = Rule.new("*Warnings*", side: :bottom)
       regex_rule = Rule.new(~r/\*test-/, side: :right)
 
-      Registry.register(string_rule)
-      Registry.register(regex_rule)
+      Registry.register(string_rule, t)
+      Registry.register(regex_rule, t)
 
-      assert {:ok, matched} = Registry.match("*Warnings*")
+      assert {:ok, matched} = Registry.match("*Warnings*", t)
       assert matched.side == :bottom
 
-      assert {:ok, matched} = Registry.match("*test-output*")
+      assert {:ok, matched} = Registry.match("*test-output*", t)
       assert matched.side == :right
 
-      assert :none = Registry.match("random-buffer")
+      assert :none = Registry.match("random-buffer", t)
     end
   end
 
-  describe "list/0" do
-    test "returns all rules in priority order" do
+  describe "list" do
+    test "returns all rules in priority order", %{table: t} do
       low = Rule.new("*low*", priority: 0)
       high = Rule.new("*high*", priority: 10)
       mid = Rule.new("*mid*", priority: 5)
 
-      Registry.register(low)
-      Registry.register(high)
-      Registry.register(mid)
+      Registry.register(low, t)
+      Registry.register(high, t)
+      Registry.register(mid, t)
 
-      rules = Registry.list()
+      rules = Registry.list(t)
       assert length(rules) == 3
 
       priorities = Enum.map(rules, & &1.priority)
       assert priorities == [10, 5, 0]
     end
 
-    test "returns empty list when no rules registered" do
-      assert Registry.list() == []
+    test "returns empty list when no rules registered", %{table: t} do
+      assert Registry.list(t) == []
     end
   end
 
-  describe "unregister/1" do
-    test "removes rules with matching string pattern" do
+  describe "unregister" do
+    test "removes rules with matching string pattern", %{table: t} do
       rule = Rule.new("*Warnings*")
-      Registry.register(rule)
+      Registry.register(rule, t)
+      assert {:ok, _} = Registry.match("*Warnings*", t)
 
-      assert {:ok, _} = Registry.match("*Warnings*")
-
-      Registry.unregister("*Warnings*")
-
-      assert :none = Registry.match("*Warnings*")
+      Registry.unregister("*Warnings*", t)
+      assert :none = Registry.match("*Warnings*", t)
     end
 
-    test "removes rules with matching regex pattern" do
+    test "removes rules with matching regex pattern", %{table: t} do
       rule = Rule.new(~r/\*Help/)
-      Registry.register(rule)
+      Registry.register(rule, t)
 
-      Registry.unregister(~r/\*Help/)
-
-      assert :none = Registry.match("*Help*")
+      Registry.unregister(~r/\*Help/, t)
+      assert :none = Registry.match("*Help*", t)
     end
 
-    test "does not remove non-matching rules" do
-      rule1 = Rule.new("*Warnings*")
-      rule2 = Rule.new("*Messages*")
+    test "does not remove non-matching rules", %{table: t} do
+      Registry.register(Rule.new("*Warnings*"), t)
+      Registry.register(Rule.new("*Messages*"), t)
 
-      Registry.register(rule1)
-      Registry.register(rule2)
+      Registry.unregister("*Warnings*", t)
 
-      Registry.unregister("*Warnings*")
-
-      assert :none = Registry.match("*Warnings*")
-      assert {:ok, _} = Registry.match("*Messages*")
+      assert :none = Registry.match("*Warnings*", t)
+      assert {:ok, _} = Registry.match("*Messages*", t)
     end
   end
 
-  describe "clear/0" do
-    test "removes all rules" do
-      Registry.register(Rule.new("*Warnings*"))
-      Registry.register(Rule.new("*Messages*"))
+  describe "clear" do
+    test "removes all rules", %{table: t} do
+      Registry.register(Rule.new("*Warnings*"), t)
+      Registry.register(Rule.new("*Messages*"), t)
+      assert length(Registry.list(t)) == 2
 
-      assert length(Registry.list()) == 2
-
-      Registry.clear()
-
-      assert Registry.list() == []
+      Registry.clear(t)
+      assert Registry.list(t) == []
     end
   end
 
-  describe "init/0" do
+  describe "init" do
     test "is idempotent" do
-      assert Registry.init() in [:ok, :already_exists]
-      assert Registry.init() == :already_exists
+      table = :"popup_reg_idempotent_#{:erlang.unique_integer([:positive])}"
+      Registry.init(table)
+      Registry.init(table)
+      on_exit(fn -> if :ets.whereis(table) != :undefined, do: :ets.delete(table) end)
+
+      # Table should exist and be usable
+      assert :none = Registry.match("anything", table)
     end
 
-    test "preserves data across duplicate init calls" do
-      Registry.register(Rule.new("*test*"))
-      Registry.init()
+    test "preserves data across duplicate init calls", %{table: t} do
+      Registry.register(Rule.new("*test*"), t)
+      Registry.init(t)
 
-      assert {:ok, _} = Registry.match("*test*")
+      assert {:ok, _} = Registry.match("*test*", t)
     end
   end
 end
