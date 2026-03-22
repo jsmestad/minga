@@ -10,11 +10,13 @@ defmodule Minga.Editor.Commands.Git do
   alias Minga.Git
   alias Minga.Git.Buffer, as: GitBuffer
   alias Minga.Git.Diff
+  alias Minga.Git.Repo
   alias Minga.Git.Tracker, as: GitTracker
 
   @type state :: EditorState.t()
 
   @command_specs [
+    {:git_status_toggle, "Git status", false},
     {:next_git_hunk, "Next git hunk", true},
     {:prev_git_hunk, "Previous git hunk", true},
     {:git_stage_hunk, "Stage hunk", true},
@@ -24,6 +26,16 @@ defmodule Minga.Editor.Commands.Git do
   ]
 
   @spec execute(state(), atom()) :: state()
+
+  # ── Status panel toggle ────────────────────────────────────────────────────
+
+  def execute(state, :git_status_toggle) do
+    if state.keymap_scope == :git_status do
+      %{state | keymap_scope: :editor, git_status_panel: nil}
+    else
+      open_git_status_panel(state)
+    end
+  end
 
   # ── Navigation ─────────────────────────────────────────────────────────────
 
@@ -116,6 +128,36 @@ defmodule Minga.Editor.Commands.Git do
   end
 
   # ── Private ────────────────────────────────────────────────────────────────
+
+  @spec open_git_status_panel(state()) :: state()
+  defp open_git_status_panel(state) do
+    case Git.root_for(Minga.Project.resolve_root()) do
+      {:ok, git_root} -> open_git_status_for_root(state, git_root)
+      :not_git -> %{state | status_msg: "Not in a git repository"}
+    end
+  end
+
+  @spec open_git_status_for_root(state(), String.t()) :: state()
+  defp open_git_status_for_root(state, git_root) do
+    case Repo.lookup(git_root) do
+      nil ->
+        %{state | status_msg: "Git.Repo not available"}
+
+      repo_pid ->
+        entries = Repo.status(repo_pid)
+        summary = Repo.summary(repo_pid)
+
+        panel_data = %{
+          repo_state: :normal,
+          branch: summary.branch || "",
+          ahead: summary.ahead,
+          behind: summary.behind,
+          entries: entries
+        }
+
+        %{state | keymap_scope: :git_status, git_status_panel: panel_data}
+    end
+  end
 
   @spec format_hunk_preview(Diff.hunk()) :: String.t()
   defp format_hunk_preview(%{type: :added, count: count}) do

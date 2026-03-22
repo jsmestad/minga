@@ -36,7 +36,7 @@ defmodule Minga.Keymap.Scope do
   @type context :: keyword()
 
   @typedoc "A scope name atom."
-  @type scope_name :: :editor | :agent | :file_tree
+  @type scope_name :: :editor | :agent | :file_tree | :git_status
 
   @typedoc "Vim state relevant to scope resolution."
   @type vim_state :: :normal | :insert | :input_normal
@@ -107,7 +107,8 @@ defmodule Minga.Keymap.Scope do
   @scope_modules %{
     editor: Minga.Keymap.Scope.Editor,
     agent: Minga.Keymap.Scope.Agent,
-    file_tree: Minga.Keymap.Scope.FileTree
+    file_tree: Minga.Keymap.Scope.FileTree,
+    git_status: Minga.Keymap.Scope.GitStatus
   }
 
   @doc "Returns the scope module for a given scope name."

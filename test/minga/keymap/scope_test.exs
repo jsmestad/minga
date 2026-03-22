@@ -23,12 +23,13 @@ defmodule Minga.Keymap.ScopeTest do
   end
 
   describe "all_scopes/0" do
-    test "returns all three built-in scopes" do
+    test "returns all built-in scopes" do
       scopes = Scope.all_scopes()
       assert :editor in scopes
       assert :agent in scopes
       assert :file_tree in scopes
-      assert length(scopes) == 3
+      assert :git_status in scopes
+      assert length(scopes) == 4
     end
   end
 
