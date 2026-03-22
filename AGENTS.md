@@ -270,6 +270,38 @@ mix test --failed                         # Re-run only tests that failed last t
 - **Use `start_supervised!/1`** to start processes in tests. It guarantees cleanup between tests.
 - **Avoid `Process.sleep/1` in tests.** Use `:sys.get_state/1` as a synchronization barrier (ensures the process has handled prior messages), or `Process.monitor/1` + `assert_receive {:DOWN, ...}` to wait for process exit. Sleep is acceptable only in integration tests that interact with external OS processes.
 - **Avoid `Process.alive?/1` in assertions.** It's a race condition. Monitor the process instead.
+- **For timer-triggered callbacks** (e.g., `Process.send_after(self(), :timeout, 200)`), send the timer message directly in tests (`send(pid, :timeout)`) followed by `:sys.get_state/1`, instead of sleeping for the timer duration.
+- **For async events** the test needs to wait for, use `Minga.Events.subscribe(topic)` in setup and `assert_receive {:minga_event, topic, payload}` after the action. Pin unique fields (e.g., `^dir`, `^buf`) to avoid matching events from concurrent tests.
+
+**Test concurrency (`async: true` by default):**
+
+All new test files must use `async: true` unless they have a documented reason for serialization. Every `async: false` must have a comment on the line above explaining the specific global resource that forces serialization.
+
+Legitimate reasons for `async: false`:
+- Mutates global state that cannot be parameterized (Application env, Logger config, global telemetry handlers, `persistent_term`)
+- Spawns real OS processes (`System.cmd`, `Port.open`) that hit the BEAM's `erl_child_setup` EPIPE race
+- Uses `capture_io(:stderr)` which replaces the global `:standard_error` registered process
+
+These are NOT legitimate reasons for `async: false`:
+- **HeadlessPort.** `Minga.Test.HeadlessPort` is a pure Elixir GenServer. It does not spawn OS processes, does not touch `:standard_error`, and is safe for concurrent use. Tests using `EditorCase` should be `async: true`.
+- **"Tests are flaky when async."** That means the test has a synchronization bug. Fix the synchronization, don't serialize.
+- **Global ETS table.** Parameterize the table (see below) instead of forcing serialization.
+
+**ETS singletons must accept a table parameter:**
+
+When a module uses a module-level `@table __MODULE__` ETS table, expose the table name as a parameter on all public functions (with `@table` as the default). Follow the pattern in `Minga.Config.Advice` and `Minga.Popup.Registry`: production callers pass no argument (uses the default), tests pass a private table name created via `start_supervised!` with a unique name.
+
+**async: false submodules must live in separate files:**
+
+Never embed an `async: false` module inside an `async: true` test file. ExUnit applies `async` at the module level. An `async: false` submodule drags the entire file into the sync queue. Extract to a separate file and keep `async: false` on the extracted module.
+
+**Assert on content, not position:**
+
+When testing UI state that can shift under concurrency (file tree entries, picker results, completion items), assert on presence or content, not index position. `FileTree.selected_entry(tree)` rescans the filesystem and can return a different entry if concurrent tests create/delete files. Use `assert Enum.any?(entries, fn e -> e.name == "target.txt" end)` instead of `assert Enum.at(entries, 3).name == "target.txt"`.
+
+**Design for event-based synchronization:**
+
+When production code performs an async operation that tests need to wait for, add a broadcast event via `Minga.Events` if one doesn't exist. Events like `:project_rebuilt` and `:command_done` have genuine production value (other subsystems react to them) and give tests a clean synchronization point. Don't force tests to poll with `Process.sleep` when an event would be the right production design anyway.
 
 **Debugging test failures:**
 

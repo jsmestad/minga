@@ -58,11 +58,15 @@ The shortcut commands that cover most of this:
 - `mix zig.lint` = `zig fmt --check` + `zig build test`
 - Swift: must be run separately (macOS only)
 
+**Scope checks to what changed.** Only check CI jobs relevant to the file types in the diff. If only `.md`, `.yml`, or `.json` files changed, skip the CI table entirely. If only `.exs` test files changed, `mix lint` and `mix test.llm` are required but Zig/Swift checks are N/A. Don't ask for evidence of checks that can't possibly fail given the diff.
+
 **When reviewing, check for evidence that these were run.** Look at the conversation history or ask. If the diff touches Zig code and there's no evidence `mix zig.lint` was run, flag it. If the diff touches Swift code and there's no evidence of a Swift build + test, flag it.
 
 ## Code Quality Checklist
 
-### Elixir
+**Only check the sections relevant to the diff.** If no `.zig` files changed, skip the Zig section entirely. If no `.swift` files changed, skip Swift. If no production `.ex` files changed (test-only diff), skip `@spec`, `@moduledoc`, and architecture checks. Don't produce a wall of "N/A" checkboxes.
+
+### Elixir (when `.ex` or `.exs` files changed)
 - [ ] Every public function has `@spec`
 - [ ] Every module has `@moduledoc`
 - [ ] Structs use `@enforce_keys`
@@ -77,24 +81,36 @@ The shortcut commands that cover most of this:
 - [ ] Logging uses `Minga.Log` (not `Logger` directly)
 - [ ] Bulk text operations used (no character-by-character loops on Document)
 
-### Zig
+### Zig (when `.zig` files changed)
 - [ ] Public functions have doc comments (`///`)
 - [ ] Error handling is explicit (no `catch unreachable` in non-test code)
 - [ ] Protocol parsing validates input (no trusting the wire format blindly)
 - [ ] No stdout usage outside of Port protocol (use stderr for debug)
 
-### Swift / macOS
+### Swift / macOS (when `.swift` or `.metal` files changed)
 - [ ] `@MainActor` isolation and `Sendable` conformance where needed
 - [ ] Metal struct layout matches Swift side (`MemoryLayout<T>.stride`)
 - [ ] No hardcoded colors; use system colors where appropriate
 - [ ] Protocol decoding validates input
 
-### Architecture
+### Architecture (when production code structure changes)
 - [ ] Changes align with `docs/ARCHITECTURE.md`
 - [ ] Port protocol messages match the spec on both sides (Elixir + frontend)
 - [ ] No NIF usage (pure Elixir + Port only)
 - [ ] Supervisor strategy makes sense for the failure modes
 - [ ] New render commands have encoder/decoder on all relevant frontends
+
+## Test Concurrency Checks
+
+When a PR adds or modifies test files, check these in addition to the code quality checklist. All items are blocking unless noted otherwise.
+
+- [ ] Every `async: false` has a comment on the preceding line explaining the specific global resource. No comment = BLOCKED.
+- [ ] The `async: false` reason is legitimate (see AGENTS.md "Test concurrency" section). Flag if the comment references HeadlessPort, EditorCase, or "flaky when async."
+- [ ] No `async: false` submodule is embedded inside an `async: true` file. Must be a separate file.
+- [ ] No `Process.sleep` used to wait for GenServer state changes, event processing, or render cycles. Acceptable: `spawn(fn -> Process.sleep(:infinity) end)` for dummy processes, integration tests with real OS processes.
+- [ ] If a test uses a module backed by a global ETS table and is `async: false`, check whether the ETS module already accepts a table parameter. If it does, the test should use a private table and switch to `async: true`.
+- [ ] Mox stubs/expects actually get called in the test. Dead stubs copied between files are cleanup items.
+- [ ] Tests asserting on lists of filesystem entries (file tree, directory listings) assert on content/presence, not index position.
 
 ## Output Format
 
@@ -127,7 +143,13 @@ The shortcut commands that cover most of this:
 or
 **BLOCKED** — {N} items must be fixed: {numbered list}. Fix these and re-run the reviewer.
 
-{The verdict line is machine-read by the commit-gate extension. Always end with exactly one of these verdicts. Missing CI checks count as BLOCKED.}
+{The verdict line is machine-read by the commit-gate extension. Always end with exactly one of these verdicts.}
+
+**What blocks and what doesn't:**
+- **Critical items** always block. These are bugs, missing CI evidence, or rule violations.
+- **Cleanup items** do NOT block. They are suggestions for the touched files. The agent should fix them if quick, but a PASS verdict is correct even with outstanding cleanup items.
+- **Missing CI checks** block only when the check is relevant to the file types changed (see scoping above).
+- **Aim for one round.** If you have 2 critical items and 3 cleanup items, report all 5 but only block on the 2 critical items. Don't create a cycle where fixing a cleanup item reveals another cleanup item in the next round.
 ```
 
 ## Tone
