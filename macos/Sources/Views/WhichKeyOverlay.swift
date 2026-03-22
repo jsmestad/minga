@@ -14,6 +14,11 @@ struct WhichKeyOverlay: View {
     private let rowHeight: CGFloat = 22
     private let maxColumns = 4
 
+    /// Transition animation duration. Respects reduced motion.
+    private var animDuration: Double {
+        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.15
+    }
+
     var body: some View {
         if state.visible && !state.bindings.isEmpty {
             VStack(spacing: 0) {
@@ -56,7 +61,7 @@ struct WhichKeyOverlay: View {
             .padding(.horizontal, 16)
             .padding(.bottom, 8)
             .allowsHitTesting(false)
-            .transition(.opacity.animation(.easeInOut(duration: 0.15)))
+            .transition(.opacity.animation(.easeInOut(duration: animDuration)))
         }
     }
 

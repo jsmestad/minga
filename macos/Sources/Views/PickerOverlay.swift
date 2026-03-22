@@ -16,6 +16,11 @@ struct PickerOverlay: View {
     private let itemHeight: CGFloat = 24
     private let maxListHeight: CGFloat = 440
 
+    /// Transition animation duration. Respects reduced motion.
+    private var animDuration: Double {
+        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.1
+    }
+
     var body: some View {
         if state.visible {
             ZStack {
@@ -59,7 +64,7 @@ struct PickerOverlay: View {
                 }
                 .offset(y: -60)
             }
-            .transition(.opacity.animation(.easeInOut(duration: 0.1)))
+            .transition(.opacity.animation(.easeInOut(duration: animDuration)))
         }
     }
 
