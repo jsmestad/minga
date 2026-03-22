@@ -22,6 +22,7 @@ defmodule Minga.MixProject do
       source_url: "https://github.com/jsmestad/minga",
       docs: [
         main: "readme",
+        assets: %{"assets" => "assets"},
         extras: [
           # Overview
           "README.md",
