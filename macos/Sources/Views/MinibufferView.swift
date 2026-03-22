@@ -85,9 +85,9 @@ struct MinibufferView: View {
                     .foregroundStyle(theme.popupFg)
             }
 
-            // Blinking cursor
+            // Blinking cursor (resets on every input change via inputVersion)
             if state.showCursor {
-                BlinkingCursor(color: theme.accent)
+                BlinkingCursor(color: theme.accent, resetToken: state.inputVersion)
             }
 
             // Text after cursor
@@ -194,44 +194,6 @@ struct MinibufferView: View {
                 .padding(.horizontal, 4)
         } else {
             Color.clear
-        }
-    }
-}
-
-// MARK: - Blinking cursor
-
-/// A 2px-wide beam cursor that blinks at the system insertion point rate.
-/// Uses a Task-based timer loop for precise on/off timing that matches
-/// native macOS text cursor behavior (no fade, just toggle).
-private struct BlinkingCursor: View {
-    let color: Color
-    @State private var isVisible = true
-    @State private var blinkTask: Task<Void, Never>?
-
-    var body: some View {
-        Rectangle()
-            .fill(color)
-            .frame(width: 2, height: 16)
-            .opacity(isVisible ? 1 : 0)
-            .onAppear { startBlinking() }
-            .onDisappear { blinkTask?.cancel() }
-    }
-
-    private func startBlinking() {
-        // Read system blink rate (milliseconds), fall back to 530ms
-        let onMs = UserDefaults.standard.double(forKey: "NSTextInsertionPointBlinkPeriodOn")
-        let offMs = UserDefaults.standard.double(forKey: "NSTextInsertionPointBlinkPeriodOff")
-        let onNanos = onMs > 0 ? UInt64(onMs * 1_000_000) : 530_000_000
-        let offNanos = offMs > 0 ? UInt64(offMs * 1_000_000) : 530_000_000
-
-        blinkTask = Task { @MainActor in
-            while !Task.isCancelled {
-                isVisible = true
-                try? await Task.sleep(nanoseconds: onNanos)
-                guard !Task.isCancelled else { break }
-                isVisible = false
-                try? await Task.sleep(nanoseconds: offNanos)
-            }
         }
     }
 }

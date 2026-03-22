@@ -37,6 +37,10 @@ final class AgentChatState {
     var messages: [ChatMessageEntry] = []
     var pendingApproval: PendingApproval?
 
+    /// Monotonically increasing counter for BlinkingCursor reset token.
+    /// Increments on every update() so the cursor resets on each BEAM frame.
+    var promptVersion: Int = 0
+
     struct PendingApproval {
         let toolName: String
         let summary: String
@@ -59,6 +63,7 @@ final class AgentChatState {
         self.status = status
         self.model = model
         self.prompt = prompt
+        self.promptVersion += 1
         self.pendingApproval = pendingToolName.map { PendingApproval(toolName: $0, summary: pendingToolSummary) }
         self.messages = rawMessages.enumerated().map { i, msg in
             switch msg {

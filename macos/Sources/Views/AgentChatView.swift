@@ -445,10 +445,7 @@ struct AgentChatView: View {
                         .font(.system(size: 13))
                         .foregroundStyle(theme.popupFg)
                     if isInsertMode {
-                        // Cursor indicator
-                        Rectangle()
-                            .fill(theme.accent)
-                            .frame(width: 1.5, height: 16)
+                        BlinkingCursor(color: theme.accent, resetToken: state.promptVersion)
                     }
                 }
             }

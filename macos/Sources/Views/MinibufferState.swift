@@ -38,6 +38,12 @@ final class MinibufferState {
     var selectedIndex: UInt16 = 0
     var candidates: [MinibufferCandidate] = []
 
+    /// Monotonically increasing counter that increments on every update().
+    /// Used as a reset token for BlinkingCursor so the cursor snaps to
+    /// visible on every BEAM frame, regardless of whether the input string
+    /// changed length (e.g., delete one char then type one char).
+    var inputVersion: Int = 0
+
     /// Whether the current mode accepts text input (shows a cursor).
     var isInputMode: Bool {
         mode <= MinibufferMode.eval.rawValue
@@ -72,6 +78,7 @@ final class MinibufferState {
             MinibufferCandidate(id: i, matchScore: c.matchScore,
                                 label: c.label, description: c.description)
         }
+        self.inputVersion += 1
     }
 
     func hide() {
