@@ -372,10 +372,11 @@ struct EditorNSViewResizeTests {
     @MainActor private func makeView(spy: SpyEncoder, cols: UInt16 = 80, rows: UInt16 = 24) -> EditorNSView? {
         let face = FontFace(name: "Menlo", size: 13.0, scale: 1.0)
         let fm = FontManager(name: "Menlo", size: 13.0, scale: 1.0)
-        let lineBuffer = LineBuffer(cols: cols, rows: rows)
+        let guiState = GUIState()
+        let disp = CommandDispatcher(cols: cols, rows: rows, guiState: guiState)
         guard let ctRenderer = CoreTextMetalRenderer() else { return nil }
-        ctRenderer.setupLineRenderer(fontManager: fm)
-        return EditorNSView(encoder: spy, fontFace: face, lineBuffer: lineBuffer,
+        ctRenderer.setupRenderers(fontManager: fm)
+        return EditorNSView(encoder: spy, fontFace: face, dispatcher: disp,
                             coreTextRenderer: ctRenderer, fontManager: fm)
     }
 
@@ -392,8 +393,8 @@ struct EditorNSViewResizeTests {
         #expect(spy.resizeCalls.count == 1)
         #expect(spy.resizeCalls[0].cols == 100)
         #expect(spy.resizeCalls[0].rows == 40)
-        #expect(view.lineBuffer.cols == 100)
-        #expect(view.lineBuffer.rows == 40)
+        #expect(view.dispatcher.frameState.cols == 100)
+        #expect(view.dispatcher.frameState.rows == 40)
     }
 
     @Test("setFrameSize does not send resize when dimensions unchanged")
@@ -420,8 +421,8 @@ struct EditorNSViewResizeTests {
         #expect(spy.resizeCalls.count == 1)
         #expect(spy.resizeCalls[0].cols >= 1)
         #expect(spy.resizeCalls[0].rows >= 1)
-        #expect(view.lineBuffer.cols >= 1)
-        #expect(view.lineBuffer.rows >= 1)
+        #expect(view.dispatcher.frameState.cols >= 1)
+        #expect(view.dispatcher.frameState.rows >= 1)
     }
 }
 

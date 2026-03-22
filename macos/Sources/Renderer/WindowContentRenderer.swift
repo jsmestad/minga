@@ -1,15 +1,13 @@
 /// Renders semantic window content (from 0x80 opcode) into Metal textures.
 ///
 /// Converts `GUIVisualRow` data into `NSAttributedString` via CoreText,
-/// then rasterizes to Metal textures using the same pipeline as
-/// `CoreTextLineRenderer`. The key difference: styled runs come from
-/// pre-resolved `GUIHighlightSpan` structs (BEAM-computed colors) instead
-/// of `StyledRun` decoded from draw_text commands.
+/// rasterizes via `BitmapRasterizer`, and caches textures in `LineTextureAtlas`.
+/// Styled runs come from pre-resolved `GUIHighlightSpan` structs (BEAM-computed
+/// colors) rather than cell-grid draw_text commands.
 ///
-/// Selection, search matches, and diagnostics are NOT baked into the
-/// attributed string. They are returned as overlay quad data for the
-/// Metal renderer to draw as separate geometry (zero re-rasterization
-/// when selection changes).
+/// Selection, search matches, and diagnostics are NOT baked into the attributed
+/// string. They are returned as overlay quad data for Metal to draw as separate
+/// geometry (zero re-rasterization when selection changes).
 
 import Foundation
 import CoreText
@@ -20,9 +18,7 @@ import AppKit
 /// Renders `GUIWindowContent` rows into cached Metal line textures.
 ///
 /// Each row's text + spans produce an `NSAttributedString` → `CTLine` →
-/// bitmap → `MTLTexture`, cached by content hash. The texture cache is
-/// separate from `CoreTextLineRenderer`'s cache to avoid row key collisions
-/// during the transition period.
+/// bitmap → `MTLTexture`, cached by content hash.
 @MainActor
 final class WindowContentRenderer {
     /// Metal device for texture creation.
@@ -35,7 +31,6 @@ final class WindowContentRenderer {
     private let rasterizer: BitmapRasterizer
 
     /// Per-row texture cache keyed by display row index.
-    /// Separate from CoreTextLineRenderer's cache to avoid key collisions.
     private var lineCache: [UInt16: CachedLineTexture] = [:]
 
     /// Frame counter for LRU eviction.
@@ -200,6 +195,63 @@ final class WindowContentRenderer {
 
         // Upload into atlas slot.
         return atlas.upload(key: key, contentHash: hash,
+                           pointer: result.pointer, pixelWidth: pixelWidth,
+                           bytesPerRow: result.bytesPerRow)
+    }
+
+    // MARK: - Simple Text Rendering
+
+    /// Renders a plain text string with a single color into the atlas.
+    ///
+    /// Used for gutter line numbers, diagnostic signs, and separator labels
+    /// that don't need the full span-based rendering pipeline. Bypasses
+    /// StyledRun entirely: creates NSAttributedString directly from the
+    /// text + color, rasterizes via CTLine, and uploads to the atlas.
+    ///
+    /// - Parameters:
+    ///   - text: The string to render.
+    ///   - fg: Foreground color as 24-bit RGB.
+    ///   - bold: Whether to use the bold font variant.
+    ///   - key: Atlas cache key (must be unique within the atlas namespace).
+    ///   - contentHash: Content hash for cache invalidation.
+    ///   - atlas: The texture atlas to upload into.
+    /// - Returns: An atlas entry, or nil if the text is empty.
+    func renderSimpleText(_ text: String, fg: UInt32, bold: Bool = false,
+                          key: UInt16, contentHash: Int,
+                          atlas: LineTextureAtlas) -> AtlasEntry? {
+        guard !text.isEmpty else { return nil }
+
+        // Atlas cache hit.
+        if let entry = atlas.cachedEntry(forKey: key, contentHash: contentHash) {
+            return entry
+        }
+
+        // Build attributed string with single font + color.
+        let fgColor = nsColor(from: fg)
+        let font = bold ? (fontManager.primary.ctFontBold ?? fontManager.primary.ctFont) : fontManager.primary.ctFont
+        let ligatures = fontManager.primary.ligaturesEnabled ? 2 : 0
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: fgColor,
+            .ligature: ligatures
+        ]
+        let attrStr = NSAttributedString(string: text, attributes: attrs)
+        let ctLine = CTLineCreateWithAttributedString(attrStr)
+
+        var lineAscent: CGFloat = 0
+        var lineDescent: CGFloat = 0
+        var lineLeading: CGFloat = 0
+        let lineWidth = CTLineGetTypographicBounds(ctLine, &lineAscent, &lineDescent, &lineLeading)
+
+        let pixelWidth = min(Int(ceil(lineWidth * scale)), maxLinePixelWidth)
+        guard pixelWidth > 0, linePixelHeight > 0 else { return nil }
+
+        // Rasterize into pooled bitmap.
+        let result = rasterizer.rasterize(ctLine, width: pixelWidth, height: linePixelHeight,
+                                          scale: scale, descent: descent)
+
+        // Upload into atlas slot.
+        return atlas.upload(key: key, contentHash: contentHash,
                            pointer: result.pointer, pixelWidth: pixelWidth,
                            bytesPerRow: result.bytesPerRow)
     }

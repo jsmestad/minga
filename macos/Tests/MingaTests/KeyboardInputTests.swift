@@ -20,10 +20,11 @@ struct KeyboardInputTests {
     private func makeView(spy: SpyEncoder) -> EditorNSView? {
         let face = FontFace(name: "Menlo", size: 13.0, scale: 1.0)
         let fm = FontManager(name: "Menlo", size: 13.0, scale: 1.0)
-        let lineBuffer = LineBuffer(cols: 80, rows: 24)
+        let guiState = GUIState()
+        let disp = CommandDispatcher(cols: 80, rows: 24, guiState: guiState)
         guard let ctRenderer = CoreTextMetalRenderer() else { return nil }
-        ctRenderer.setupLineRenderer(fontManager: fm)
-        return EditorNSView(encoder: spy, fontFace: face, lineBuffer: lineBuffer,
+        ctRenderer.setupRenderers(fontManager: fm)
+        return EditorNSView(encoder: spy, fontFace: face, dispatcher: disp,
                             coreTextRenderer: ctRenderer, fontManager: fm)
     }
 

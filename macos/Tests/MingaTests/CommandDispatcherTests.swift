@@ -19,13 +19,10 @@ struct CommandDispatcherRoutingTests {
 
     // MARK: - Basic commands
 
-    @Test("clear resets lineBuffer lines but preserves windowContents and windowGutters")
+    @Test("clear marks dirty but preserves windowContents and windowGutters")
     @MainActor func clearCommand() {
         let (dispatcher, gui) = makeDispatcher()
-        // Seed line buffer content, window content, and gutter data
-        dispatcher.lineBuffer.appendRun(
-            row: 0, col: 0, text: "hello", fg: 0xFFFFFF, bg: 0, attrs: 0
-        )
+        // Seed window content and gutter data
         let content = GUIWindowContent(
             windowId: 1, fullRefresh: true,
             cursorRow: 0, cursorCol: 0, cursorShape: .block,
@@ -41,40 +38,41 @@ struct CommandDispatcherRoutingTests {
             lineNumberWidth: 4, signColWidth: 1, entries: []
         )
         dispatcher.dispatch(.guiGutter(data: gutter))
+        dispatcher.frameState.dirty = false
 
         dispatcher.dispatch(.clear)
 
-        // LineBuffer lines are cleared
-        #expect(dispatcher.lineBuffer.lines.isEmpty)
+        // FrameState is marked dirty
+        #expect(dispatcher.frameState.dirty == true)
         // windowContents persists through clear (defense-in-depth:
         // stale content is better than a blank viewport flash)
         #expect(gui.windowContents.count == 1)
         // windowGutters persists through clear (gutter positions are
         // stable between frames, only change on resize/split)
-        #expect(dispatcher.lineBuffer.windowGutters[1] != nil)
+        #expect(dispatcher.frameState.windowGutters[1] != nil)
     }
 
-    @Test("setCursor updates lineBuffer cursor position")
+    @Test("setCursor updates frameState cursor position")
     @MainActor func setCursorCommand() {
         let (dispatcher, _) = makeDispatcher()
         dispatcher.dispatch(.setCursor(row: 10, col: 20))
-        #expect(dispatcher.lineBuffer.cursorRow == 10)
-        #expect(dispatcher.lineBuffer.cursorCol == 20)
+        #expect(dispatcher.frameState.cursorRow == 10)
+        #expect(dispatcher.frameState.cursorCol == 20)
     }
 
-    @Test("setCursorShape updates lineBuffer cursor shape")
+    @Test("setCursorShape updates frameState cursor shape")
     @MainActor func setCursorShapeCommand() {
         let (dispatcher, _) = makeDispatcher()
         dispatcher.dispatch(.setCursorShape(.beam))
-        #expect(dispatcher.lineBuffer.cursorShape == .beam)
+        #expect(dispatcher.frameState.cursorShape == .beam)
     }
 
-    @Test("setWindowBg updates lineBuffer defaultBg")
+    @Test("setWindowBg updates frameState defaultBg")
     @MainActor func setWindowBgCommand() {
         let (dispatcher, _) = makeDispatcher()
         dispatcher.dispatch(.setWindowBg(r: 0x28, g: 0x2C, b: 0x34))
         let expected: UInt32 = (0x28 << 16) | (0x2C << 8) | 0x34
-        #expect(dispatcher.lineBuffer.defaultBg == expected)
+        #expect(dispatcher.frameState.defaultBg == expected)
     }
 
     // MARK: - GUI chrome routing
@@ -319,27 +317,27 @@ struct CommandDispatcherRoutingTests {
         #expect(gui.windowContents[7]?.cursorRow == 5)
     }
 
-    @Test("guiGutterSeparator updates lineBuffer gutter state")
+    @Test("guiGutterSeparator updates frameState gutter state")
     @MainActor func guiGutterSepRouting() {
         let (dispatcher, _) = makeDispatcher()
         dispatcher.dispatch(.guiGutterSeparator(col: 4, r: 0x3F, g: 0x44, b: 0x4A))
 
-        #expect(dispatcher.lineBuffer.gutterCol == 4)
+        #expect(dispatcher.frameState.gutterCol == 4)
         let expected: UInt32 = (0x3F << 16) | (0x44 << 8) | 0x4A
-        #expect(dispatcher.lineBuffer.gutterSeparatorColor == expected)
+        #expect(dispatcher.frameState.gutterSeparatorColor == expected)
     }
 
-    @Test("guiCursorline updates lineBuffer cursorline state")
+    @Test("guiCursorline updates frameState cursorline state")
     @MainActor func guiCursorlineRouting() {
         let (dispatcher, _) = makeDispatcher()
         dispatcher.dispatch(.guiCursorline(row: 12, r: 0x2C, g: 0x32, b: 0x3C))
 
-        #expect(dispatcher.lineBuffer.cursorlineRow == 12)
+        #expect(dispatcher.frameState.cursorlineRow == 12)
         let expected: UInt32 = (0x2C << 16) | (0x32 << 8) | 0x3C
-        #expect(dispatcher.lineBuffer.cursorlineBg == expected)
+        #expect(dispatcher.frameState.cursorlineBg == expected)
     }
 
-    @Test("guiGutter stores gutter data in lineBuffer")
+    @Test("guiGutter stores gutter data in frameState")
     @MainActor func guiGutterRouting() {
         let (dispatcher, _) = makeDispatcher()
         let gutter = GUIWindowGutter(
@@ -349,12 +347,12 @@ struct CommandDispatcherRoutingTests {
         )
         dispatcher.dispatch(.guiGutter(data: gutter))
 
-        #expect(dispatcher.lineBuffer.windowGutters[1] != nil)
+        #expect(dispatcher.frameState.windowGutters[1] != nil)
         // Active window gutter syncs gutterCol
-        #expect(dispatcher.lineBuffer.gutterCol == 5) // 4 + 1
+        #expect(dispatcher.frameState.gutterCol == 5) // 4 + 1
     }
 
-    @Test("guiTheme updates themeColors and syncs to lineBuffer")
+    @Test("guiTheme updates themeColors and syncs to frameState")
     @MainActor func guiThemeRouting() {
         let (dispatcher, gui) = makeDispatcher()
         let slots: [(slotId: UInt8, r: UInt8, g: UInt8, b: UInt8)] = [
@@ -362,9 +360,9 @@ struct CommandDispatcherRoutingTests {
         ]
         dispatcher.dispatch(.guiTheme(slots: slots))
 
-        // Check lineBuffer got the RGB value synced
+        // Check frameState got the RGB value synced
         let expected: UInt32 = (0xAA << 16) | (0xBB << 8) | 0xCC
-        #expect(dispatcher.lineBuffer.gutterFgColor == expected)
+        #expect(dispatcher.frameState.gutterColors.fg == expected)
         #expect(gui.themeColors.gutterFgRGB == expected)
     }
 }

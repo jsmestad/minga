@@ -1,6 +1,6 @@
 /// CoreText-based Metal renderer.
 ///
-/// Renders the screen from LineBuffer + CoreTextLineRenderer, replacing
+/// Renders the editor screen from FrameState metadata + WindowContentRenderer, replacing
 /// the cell-grid instanced drawing. Each visible line is a pre-rendered
 /// texture composited as a textured quad over background color fills.
 ///
@@ -53,9 +53,6 @@ final class CoreTextMetalRenderer {
     let commandQueue: MTLCommandQueue
     private let bgPipeline: MTLRenderPipelineState
     private let linePipeline: MTLRenderPipelineState
-
-    /// The CoreText line rendering engine.
-    private(set) var lineRenderer: CoreTextLineRenderer?
 
     /// Dynamic clear color, updated when the theme's default bg changes.
     private var clearColor: MTLClearColor
@@ -179,28 +176,27 @@ final class CoreTextMetalRenderer {
     private var instanceBuffer: MTLBuffer?
     private var maxInstanceSlots: Int = 0
 
-    /// Set up the line renderer. Called once the FontManager is available.
-    func setupLineRenderer(fontManager: FontManager) {
+    /// Set up the window content renderer and texture atlas. Called once the FontManager is available.
+    func setupRenderers(fontManager: FontManager) {
         let rasterizer = BitmapRasterizer()
         self.bitmapRasterizer = rasterizer
-        self.lineRenderer = CoreTextLineRenderer(device: device, fontManager: fontManager, rasterizer: rasterizer)
         self.windowContentRenderer = WindowContentRenderer(device: device, fontManager: fontManager, rasterizer: rasterizer)
 
         let linePixelHeight = Int(ceil(CGFloat(fontManager.cellHeight) * fontManager.scale))
         self.atlas = LineTextureAtlas(device: device, slotHeight: linePixelHeight)
     }
 
-    /// Render the editor from LineBuffer data + semantic window content.
+    /// Render the editor from FrameState metadata + semantic window content.
     ///
     /// Buffer windows with semantic content (from 0x80 opcode) are rendered
-    /// via `WindowContentRenderer`. Everything else (overlays, agent chat,
-    /// cursor, gutter, separator) continues through the LineBuffer path.
-    func render(lineBuffer: LineBuffer, fontManager: FontManager,
+    /// via `WindowContentRenderer`. Frame metadata (cursor, gutter, cursorline,
+    /// default bg) comes from FrameState. Content comes from WindowContentRenderer
+    /// via the gui_window_content (0x80) semantic rendering pipeline.
+    func render(frameState: FrameState, fontManager: FontManager,
                 windowContents: [UInt16: GUIWindowContent] = [:],
                 themeColors: ThemeColors? = nil,
                 drawable: CAMetalDrawable, viewportSize: CGSize,
                 contentScale: Float, scrollOffset: SIMD2<Float> = .zero) {
-        guard let lineRenderer else { return }
 
         // Store theme colors reference for helper methods.
         self.currentThemeColors = themeColors
@@ -209,14 +205,10 @@ final class CoreTextMetalRenderer {
         let cellH = Float(fontManager.cellHeight)
         let scale = contentScale
 
-        // Advance frame counter for cache eviction.
-        lineRenderer.beginFrame()
-        lineRenderer.updateViewportWidth(cols: lineBuffer.cols)
-
         // Advance semantic content renderer.
         if let wcr = windowContentRenderer {
             wcr.beginFrame()
-            wcr.updateViewportWidth(cols: lineBuffer.cols)
+            wcr.updateViewportWidth(cols: frameState.cols)
             if let tc = themeColors {
                 wcr.defaultFgRGB = tc.editorFgRGB
             }
@@ -224,8 +216,8 @@ final class CoreTextMetalRenderer {
 
         // Ensure atlas can hold all lines (content + gutter + semantic).
         if let atlas {
-            let neededSlots = Int(lineBuffer.rows) * 4
-            let atlasPixelWidth = Int(ceil(CGFloat(lineBuffer.cols) * CGFloat(cellW) * CGFloat(scale)))
+            let neededSlots = Int(frameState.rows) * 4
+            let atlasPixelWidth = Int(ceil(CGFloat(frameState.cols) * CGFloat(cellW) * CGFloat(scale)))
             atlas.ensureCapacity(maxSlots: neededSlots, width: atlasPixelWidth)
             atlas.beginFrame()
 
@@ -239,14 +231,14 @@ final class CoreTextMetalRenderer {
         }
 
         // Default background color.
-        let defaultBg = lineBuffer.defaultBg != 0
-            ? colorFromU24(lineBuffer.defaultBg, default: SIMD3<Float>(0.12, 0.12, 0.14))
+        let defaultBg = frameState.defaultBg != 0
+            ? colorFromU24(frameState.defaultBg, default: SIMD3<Float>(0.12, 0.12, 0.14))
             : SIMD3<Float>(0.12, 0.12, 0.14)
 
         // Update clear color dynamically when the theme's default bg changes.
-        if lineBuffer.defaultBg != cachedDefaultBg {
-            cachedDefaultBg = lineBuffer.defaultBg
-            if lineBuffer.defaultBg != 0 {
+        if frameState.defaultBg != cachedDefaultBg {
+            cachedDefaultBg = frameState.defaultBg
+            if frameState.defaultBg != 0 {
                 // Convert sRGB [0,1] to linear for MTLClearColor.
                 let r = Double(defaultBg.x)
                 let g = Double(defaultBg.y)
@@ -261,91 +253,26 @@ final class CoreTextMetalRenderer {
         }
 
         // Gutter padding (same as MetalRenderer).
-        let gutterPaddingPt: Float = lineBuffer.gutterCol > 0 ? round(12.0 * scale) / scale : 0
+        let gutterPaddingPt: Float = frameState.gutterCol > 0 ? round(12.0 * scale) / scale : 0
         let gutterPaddingPx = gutterPaddingPt * scale
 
         // Build background quads and line texture instances.
         var bgQuads: [QuadGPU] = []
         var lineInstances: [LineGPU] = []
 
-        for row: UInt16 in 0..<lineBuffer.rows {
-            let rowF = Float(row)
-            let yPos = rowF * cellH * scale
-
-            // Background: fill the full row with default bg, but only if the
-            // row has per-run bg colors that differ from the clear color.
-            // When the clear color matches the default bg, the row-wide fill
-            // is redundant because the render pass already clears to that color.
-            let runs = lineBuffer.runsForLine(row)
-            let hasExplicitBg = runs.contains { run in
-                let isReverse = (run.attrs & 0x08) != 0
-                return run.bg != 0 || isReverse
-            }
-            if hasExplicitBg {
-                var bgQuad = QuadGPU()
-                bgQuad.position = SIMD2<Float>(0, yPos)
-                bgQuad.size = SIMD2<Float>(Float(viewportSize.width), cellH * scale)
-                bgQuad.color = defaultBg
-                bgQuad.alpha = 1.0
-                bgQuads.append(bgQuad)
-            }
-
-            // Cursorline: draw a full-width bg fill on the cursor row.
-            // This replaces the TUI fill draw (all-space text with bg color)
-            // with a native Metal quad for crisp, overlap-free rendering.
-            if row == lineBuffer.cursorlineRow && lineBuffer.cursorlineBg != 0 {
-                var clQuad = QuadGPU()
-                clQuad.position = SIMD2<Float>(0, yPos)
-                clQuad.size = SIMD2<Float>(Float(viewportSize.width), cellH * scale)
-                clQuad.color = colorFromU24(lineBuffer.cursorlineBg, default: defaultBg)
-                clQuad.alpha = 1.0
-                bgQuads.append(clQuad)
-            }
-
-            // Per-run background fills (for runs with explicit bg color or reverse attribute).
-            for (i, run) in runs.enumerated() {
-                let isReverse = (run.attrs & 0x08) != 0  // ATTR_REVERSE
-                if run.bg != 0 || isReverse {
-                    let bgColor = isReverse
-                        ? colorFromU24(run.fg, default: SIMD3<Float>(1, 1, 1))
-                        : colorFromU24(run.bg, default: defaultBg)
-                    let colOffset = Float(run.col) * cellW * scale
-                    let colSpan = Self.runColSpan(runs: runs, at: i)
-                    let runWidth = Float(colSpan) * cellW * scale
-                    let xPos = run.col >= lineBuffer.gutterCol
-                        ? colOffset + gutterPaddingPx : colOffset
-
-                    var runBg = QuadGPU()
-                    runBg.position = SIMD2<Float>(xPos, yPos)
-                    runBg.size = SIMD2<Float>(runWidth, cellH * scale)
-                    runBg.color = bgColor
-                    runBg.alpha = 1.0
-                    bgQuads.append(runBg)
-                }
-            }
-
-            // Line texture.
-            if !runs.isEmpty {
-                let contentHash = lineBuffer.computeLineHash(row: row)
-                if let atlas, let entry = lineRenderer.renderLineToAtlas(row: row, runs: runs, contentHash: contentHash, atlas: atlas) {
-                    let firstCol = runs.first.map { Float($0.col) } ?? 0
-                    let colPx = firstCol * cellW * scale
-                    let xPos = firstCol >= Float(lineBuffer.gutterCol)
-                        ? colPx + gutterPaddingPx : colPx
-
-                    let (uvOrigin, uvSize) = atlas.uvForSlot(entry.slotIndex, pixelWidth: entry.pixelWidth)
-                    var lineGPU = LineGPU()
-                    lineGPU.position = SIMD2<Float>(xPos, yPos)
-                    lineGPU.size = SIMD2<Float>(Float(entry.pixelWidth), Float(entry.pixelHeight))
-                    lineGPU.uvOrigin = uvOrigin
-                    lineGPU.uvSize = uvSize
-                    lineInstances.append(lineGPU)
-                }
-            }
+        // Cursorline: draw a full-width bg fill on the cursor row.
+        if frameState.cursorlineRow != 0xFFFF && frameState.cursorlineBg != 0 {
+            let yPos = Float(frameState.cursorlineRow) * cellH * scale
+            var clQuad = QuadGPU()
+            clQuad.position = SIMD2<Float>(0, yPos)
+            clQuad.size = SIMD2<Float>(Float(viewportSize.width), cellH * scale)
+            clQuad.color = colorFromU24(frameState.cursorlineBg, default: defaultBg)
+            clQuad.alpha = 1.0
+            bgQuads.append(clQuad)
         }
 
         // Semantic window content rendering (from 0x80 opcode).
-        // Buffer windows with semantic content bypass LineBuffer for text;
+        // Buffer windows with semantic content rendered via WindowContentRenderer;
         // their line textures come from WindowContentRenderer instead.
         // Selection, search, and diagnostic overlays are drawn as Metal quads.
         var semanticOverlayQuads: [QuadGPU] = []
@@ -354,7 +281,7 @@ final class CoreTextMetalRenderer {
         if let wcr = windowContentRenderer {
             for (_, content) in windowContents {
                 // Match gutter data to semantic window content by windowId.
-                guard let gutter = lineBuffer.windowGutters[content.windowId] else {
+                guard let gutter = frameState.windowGutters[content.windowId] else {
                     continue
                 }
 
@@ -455,10 +382,10 @@ final class CoreTextMetalRenderer {
 
         // Native gutter rendering from structured data.
         // One GUIWindowGutter per editor window (split pane).
-        for (_, windowGutter) in lineBuffer.windowGutters {
+        for (_, windowGutter) in frameState.windowGutters {
             renderGutterEntries(
                 gutter: windowGutter,
-                lineBuffer: lineBuffer,
+                frameState: frameState,
                 cellW: cellW, cellH: cellH, scale: scale,
                 gutterPaddingPx: gutterPaddingPx,
                 bgQuads: &bgQuads,
@@ -503,15 +430,15 @@ final class CoreTextMetalRenderer {
         // Pass 2: Cursor background (drawn BEFORE text so text is visible on top).
         // For block cursors, draw the cursor bg here so the text pass composites over it.
         // Beam and underline cursors are drawn AFTER text (pass 5).
-        // NOTE: Cursor position uses lineBuffer.cursorRow/Col from the TUI cell-grid
+        // NOTE: Cursor position uses frameState.cursorRow/Col from the TUI cell-grid
         // path, which the BEAM computes as gutter_w + (cursor_col - viewport.left).
         // Horizontal scroll is already baked in. If the TUI rendering path is ever
         // removed for GUI frontends, cursor positioning will need to use the semantic
         // window's cursor_col and scroll_left instead.
-        if lineBuffer.cursorVisible && lineBuffer.cursorShape == .block {
-            let cursorRow = Float(lineBuffer.cursorRow)
-            let cursorCol = Float(lineBuffer.cursorCol)
-            let cursorPadding: Float = (lineBuffer.gutterCol > 0 && lineBuffer.cursorCol >= lineBuffer.gutterCol)
+        if frameState.cursorVisible && frameState.cursorShape == .block {
+            let cursorRow = Float(frameState.cursorRow)
+            let cursorCol = Float(frameState.cursorCol)
+            let cursorPadding: Float = (frameState.gutterCol > 0 && frameState.cursorCol >= frameState.gutterCol)
                 ? gutterPaddingPx : 0
 
             var cursorQuad = QuadGPU()
@@ -552,9 +479,9 @@ final class CoreTextMetalRenderer {
         }
 
         // Pass 4: Gutter gap fill.
-        if lineBuffer.gutterCol > 0 && gutterPaddingPx > 0 {
+        if frameState.gutterCol > 0 && gutterPaddingPx > 0 {
             var fillQuad = QuadGPU()
-            fillQuad.position = SIMD2<Float>(Float(lineBuffer.gutterCol) * cellW * scale, 0)
+            fillQuad.position = SIMD2<Float>(Float(frameState.gutterCol) * cellW * scale, 0)
             fillQuad.size = SIMD2<Float>(gutterPaddingPx, Float(viewportSize.height))
             fillQuad.color = defaultBg
             fillQuad.alpha = 1.0
@@ -566,12 +493,12 @@ final class CoreTextMetalRenderer {
         }
 
         // Pass 5: Gutter separator line.
-        if lineBuffer.gutterCol > 0 && lineBuffer.gutterSeparatorColor != 0 {
+        if frameState.gutterCol > 0 && frameState.gutterSeparatorColor != 0 {
             var sepQuad = QuadGPU()
-            let sepX = (Float(lineBuffer.gutterCol) * cellW + gutterPaddingPt) * scale - 1.0
+            let sepX = (Float(frameState.gutterCol) * cellW + gutterPaddingPt) * scale - 1.0
             sepQuad.position = SIMD2<Float>(sepX, 0)
             sepQuad.size = SIMD2<Float>(1.0, Float(viewportSize.height))
-            sepQuad.color = colorFromU24(lineBuffer.gutterSeparatorColor, default: SIMD3<Float>(0.3, 0.3, 0.3))
+            sepQuad.color = colorFromU24(frameState.gutterSeparatorColor, default: SIMD3<Float>(0.3, 0.3, 0.3))
             sepQuad.alpha = 1.0
 
             encoder.setRenderPipelineState(bgPipeline)
@@ -582,11 +509,11 @@ final class CoreTextMetalRenderer {
 
         // Pass 5.5: Split separators (vertical lines between split panes,
         // horizontal bars with centered filenames for horizontal splits).
-        if lineBuffer.splitBorderColor != 0 {
-            let sepColor = colorFromU24(lineBuffer.splitBorderColor, default: SIMD3<Float>(0.3, 0.3, 0.3))
+        if frameState.splitBorderColor != 0 {
+            let sepColor = colorFromU24(frameState.splitBorderColor, default: SIMD3<Float>(0.3, 0.3, 0.3))
 
             // Vertical separators: 1px-wide lines spanning startRow..endRow
-            for vert in lineBuffer.verticalSeparators {
+            for vert in frameState.verticalSeparators {
                 let sepX = Float(vert.col) * cellW * scale
                 let sepY = Float(vert.startRow) * cellH * scale
                 let sepH = Float(vert.endRow &- vert.startRow &+ 1) * cellH * scale
@@ -604,7 +531,7 @@ final class CoreTextMetalRenderer {
             }
 
             // Horizontal separators: 1px-high line + centered filename label
-            for horiz in lineBuffer.horizontalSeparators {
+            for horiz in frameState.horizontalSeparators {
                 let hY = Float(horiz.row) * cellH * scale + (cellH * scale * 0.5) - 0.5
                 let hX = Float(horiz.col) * cellW * scale
                 let hW = Float(horiz.width) * cellW * scale
@@ -622,12 +549,11 @@ final class CoreTextMetalRenderer {
                 encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: 1)
 
                 // Centered filename label rendered as a CoreText texture
-                if !horiz.filename.isEmpty, let atlas = atlas {
-                    let labelRuns = [StyledRun(col: 0, text: horiz.filename, fg: lineBuffer.splitBorderColor, bg: 0, attrs: 0)]
-                    let labelHash = horiz.filename.hashValue ^ Int(lineBuffer.splitBorderColor)
-                    // Use a unique row namespace (0xF000+) for separator labels to avoid cache collisions
-                    let labelRow = UInt16(0xF000) &+ horiz.row
-                    if let entry = lineRenderer.renderLineToAtlas(row: labelRow, runs: labelRuns, contentHash: labelHash, atlas: atlas) {
+                if !horiz.filename.isEmpty, let atlas = atlas, let wcr = windowContentRenderer {
+                    let labelHash = horiz.filename.hashValue ^ Int(frameState.splitBorderColor)
+                    let labelKey = UInt16(0xF000) &+ horiz.row
+                    if let entry = wcr.renderSimpleText(horiz.filename, fg: frameState.splitBorderColor,
+                                                         key: labelKey, contentHash: labelHash, atlas: atlas) {
                         // Center the label text within the separator width
                         let labelW = Float(entry.pixelWidth)
                         let centerX = hX + (hW - labelW) * 0.5
@@ -661,17 +587,17 @@ final class CoreTextMetalRenderer {
         // Pass 6: Cursor overlay for beam and underline shapes.
         // Block cursor is drawn in pass 2 (before text) so text shows on top.
         // Beam and underline are drawn AFTER text so they overlay it.
-        if lineBuffer.cursorVisible && lineBuffer.cursorShape != .block {
-            let cursorRow = Float(lineBuffer.cursorRow)
-            let cursorCol = Float(lineBuffer.cursorCol)
-            let cursorPadding: Float = (lineBuffer.gutterCol > 0 && lineBuffer.cursorCol >= lineBuffer.gutterCol)
+        if frameState.cursorVisible && frameState.cursorShape != .block {
+            let cursorRow = Float(frameState.cursorRow)
+            let cursorCol = Float(frameState.cursorCol)
+            let cursorPadding: Float = (frameState.gutterCol > 0 && frameState.cursorCol >= frameState.gutterCol)
                 ? gutterPaddingPx : 0
 
             var cursorQuad = QuadGPU()
             cursorQuad.color = cursorColor
             cursorQuad.alpha = 1.0
 
-            switch lineBuffer.cursorShape {
+            switch frameState.cursorShape {
             case .block:
                 break  // Handled in pass 2.
 
@@ -703,17 +629,16 @@ final class CoreTextMetalRenderer {
     /// Renders line numbers and signs natively from structured gutter data.
     ///
     /// Line numbers are rendered as CTLine textures through the existing
-    /// CoreTextLineRenderer. Git signs are drawn as colored Metal quads.
+    /// WindowContentRenderer. Git signs are drawn as colored Metal quads.
     /// Diagnostic signs are rendered as CTLine textures.
     private func renderGutterEntries(
         gutter: GUIWindowGutter,
-        lineBuffer: LineBuffer,
+        frameState: FrameState,
         cellW: Float, cellH: Float, scale: Float,
         gutterPaddingPx: Float,
         bgQuads: inout [QuadGPU],
         lineInstances: inout [LineGPU]
     ) {
-        guard let lineRenderer else { return }
         let signColWidth = Int(gutter.signColWidth)
         let baseRow = gutter.contentRow
         let baseCol = gutter.contentCol
@@ -728,9 +653,8 @@ final class CoreTextMetalRenderer {
                 renderGutterSign(
                     entry: entry, screenRow: screenRow, yPos: yPos, xOffset: xOffset,
                     cellW: cellW, cellH: cellH, scale: scale,
-                    lineBuffer: lineBuffer,
+                    frameState: frameState,
                     bgQuads: &bgQuads, lineInstances: &lineInstances,
-                    lineRenderer: lineRenderer
                 )
             }
 
@@ -741,9 +665,8 @@ final class CoreTextMetalRenderer {
                     screenRow: screenRow, yPos: yPos, xOffset: xOffset,
                     signColWidth: signColWidth,
                     cellW: cellW, cellH: cellH, scale: scale,
-                    lineBuffer: lineBuffer,
+                    frameState: frameState,
                     lineInstances: &lineInstances,
-                    lineRenderer: lineRenderer
                 )
             }
         }
@@ -757,10 +680,9 @@ final class CoreTextMetalRenderer {
     private func renderGutterSign(
         entry: GUIGutterEntry, screenRow: UInt16, yPos: Float, xOffset: Float,
         cellW: Float, cellH: Float, scale: Float,
-        lineBuffer: LineBuffer,
+        frameState: FrameState,
         bgQuads: inout [QuadGPU],
         lineInstances: inout [LineGPU],
-        lineRenderer: CoreTextLineRenderer
     ) {
         switch entry.signType {
         case .gitAdded:
@@ -768,7 +690,7 @@ final class CoreTextMetalRenderer {
             let gitBarWidth = round(3.0 * scale)
             quad.position = SIMD2<Float>(xOffset, yPos)
             quad.size = SIMD2<Float>(gitBarWidth, cellH * scale)
-            quad.color = gutterSignColor(entry.signType, lineBuffer: lineBuffer)
+            quad.color = gutterSignColor(entry.signType, frameState: frameState)
             quad.alpha = 1.0
             bgQuads.append(quad)
 
@@ -777,7 +699,7 @@ final class CoreTextMetalRenderer {
             let gitBarWidth = round(3.0 * scale)
             quad.position = SIMD2<Float>(xOffset, yPos)
             quad.size = SIMD2<Float>(gitBarWidth, cellH * scale)
-            quad.color = gutterSignColor(entry.signType, lineBuffer: lineBuffer)
+            quad.color = gutterSignColor(entry.signType, frameState: frameState)
             quad.alpha = 1.0
             bgQuads.append(quad)
 
@@ -786,16 +708,17 @@ final class CoreTextMetalRenderer {
             let barHeight = round(2.0 * scale)
             quad.position = SIMD2<Float>(xOffset, yPos + cellH * scale - barHeight)
             quad.size = SIMD2<Float>(cellW * 2 * scale, barHeight)
-            quad.color = gutterSignColor(entry.signType, lineBuffer: lineBuffer)
+            quad.color = gutterSignColor(entry.signType, frameState: frameState)
             quad.alpha = 1.0
             bgQuads.append(quad)
 
         case .diagError, .diagWarning, .diagInfo, .diagHint:
-            let (text, fg) = diagnosticSignTextAndColor(entry.signType, lineBuffer: lineBuffer)
-            let runs = [StyledRun(col: 0, text: text, fg: fg, bg: 0, attrs: 0)]
-            let cacheRow = 0x8000 + screenRow
+            let (text, fg) = diagnosticSignTextAndColor(entry.signType, frameState: frameState)
+            let cacheKey = UInt16(0x8000) &+ screenRow
             let contentHash = gutterContentHash(text: text, fg: fg)
-            if let atlas, let entry = lineRenderer.renderLineToAtlas(row: cacheRow, runs: runs, contentHash: contentHash, atlas: atlas) {
+            if let atlas, let wcr = windowContentRenderer,
+               let entry = wcr.renderSimpleText(text, fg: fg, bold: true,
+                                                 key: cacheKey, contentHash: contentHash, atlas: atlas) {
                 let (uvOrigin, uvSize) = atlas.uvForSlot(entry.slotIndex, pixelWidth: entry.pixelWidth)
                 var lineGPU = LineGPU()
                 lineGPU.position = SIMD2<Float>(xOffset, yPos)
@@ -816,9 +739,8 @@ final class CoreTextMetalRenderer {
         screenRow: UInt16, yPos: Float, xOffset: Float,
         signColWidth: Int,
         cellW: Float, cellH: Float, scale: Float,
-        lineBuffer: LineBuffer,
+        frameState: FrameState,
         lineInstances: inout [LineGPU],
-        lineRenderer: CoreTextLineRenderer
     ) {
         let (numberStr, isCurrent) = gutterNumberString(
             bufLine: entry.bufLine,
@@ -828,7 +750,7 @@ final class CoreTextMetalRenderer {
 
         guard !numberStr.isEmpty else { return }
 
-        let fg = isCurrent ? lineBuffer.gutterCurrentFgColor : lineBuffer.gutterFgColor
+        let fg = isCurrent ? frameState.gutterColors.currentFg : frameState.gutterColors.fg
         let lnWidth = Int(gutter.lineNumberWidth)
 
         // Right-align the number within the line number column space.
@@ -836,10 +758,11 @@ final class CoreTextMetalRenderer {
         let padCols = max(lnWidth - numberStr.count - 1, 0)
         let startCol = UInt16(signColWidth + padCols)
 
-        let runs = [StyledRun(col: startCol, text: numberStr, fg: fg, bg: 0, attrs: 0)]
-        let cacheRow = 0x9000 + screenRow
+        let cacheKey = UInt16(0x9000) &+ screenRow
         let contentHash = gutterContentHash(text: numberStr, fg: fg)
-        if let atlas, let entry = lineRenderer.renderLineToAtlas(row: cacheRow, runs: runs, contentHash: contentHash, atlas: atlas) {
+        if let atlas, let wcr = windowContentRenderer,
+           let entry = wcr.renderSimpleText(numberStr, fg: fg,
+                                             key: cacheKey, contentHash: contentHash, atlas: atlas) {
             let (uvOrigin, uvSize) = atlas.uvForSlot(entry.slotIndex, pixelWidth: entry.pixelWidth)
             let xPos = xOffset + Float(startCol) * cellW * scale
             var lineGPU = LineGPU()
@@ -875,26 +798,26 @@ final class CoreTextMetalRenderer {
     }
 
     /// Returns the color for a git/diagnostic gutter sign from the line buffer's theme colors.
-    private func gutterSignColor(_ signType: GUIGutterSignType, lineBuffer: LineBuffer) -> SIMD3<Float> {
+    private func gutterSignColor(_ signType: GUIGutterSignType, frameState: FrameState) -> SIMD3<Float> {
         switch signType {
-        case .gitAdded: return colorFromU24(lineBuffer.gitAddedFgColor, default: .zero)
-        case .gitModified: return colorFromU24(lineBuffer.gitModifiedFgColor, default: .zero)
-        case .gitDeleted: return colorFromU24(lineBuffer.gitDeletedFgColor, default: .zero)
-        case .diagError: return colorFromU24(lineBuffer.gutterErrorFgColor, default: .zero)
-        case .diagWarning: return colorFromU24(lineBuffer.gutterWarningFgColor, default: .zero)
-        case .diagInfo: return colorFromU24(lineBuffer.gutterInfoFgColor, default: .zero)
-        case .diagHint: return colorFromU24(lineBuffer.gutterHintFgColor, default: .zero)
+        case .gitAdded: return colorFromU24(frameState.gutterColors.gitAddedFg, default: .zero)
+        case .gitModified: return colorFromU24(frameState.gutterColors.gitModifiedFg, default: .zero)
+        case .gitDeleted: return colorFromU24(frameState.gutterColors.gitDeletedFg, default: .zero)
+        case .diagError: return colorFromU24(frameState.gutterColors.errorFg, default: .zero)
+        case .diagWarning: return colorFromU24(frameState.gutterColors.warningFg, default: .zero)
+        case .diagInfo: return colorFromU24(frameState.gutterColors.infoFg, default: .zero)
+        case .diagHint: return colorFromU24(frameState.gutterColors.hintFg, default: .zero)
         case .none: return .zero
         }
     }
 
     /// Returns the sign character and fg color (as U24) for a diagnostic sign type.
-    private func diagnosticSignTextAndColor(_ signType: GUIGutterSignType, lineBuffer: LineBuffer) -> (String, UInt32) {
+    private func diagnosticSignTextAndColor(_ signType: GUIGutterSignType, frameState: FrameState) -> (String, UInt32) {
         switch signType {
-        case .diagError: return ("E", lineBuffer.gutterErrorFgColor)
-        case .diagWarning: return ("W", lineBuffer.gutterWarningFgColor)
-        case .diagInfo: return ("I", lineBuffer.gutterInfoFgColor)
-        case .diagHint: return ("H", lineBuffer.gutterHintFgColor)
+        case .diagError: return ("E", frameState.gutterColors.errorFg)
+        case .diagWarning: return ("W", frameState.gutterColors.warningFg)
+        case .diagInfo: return ("I", frameState.gutterColors.infoFg)
+        case .diagHint: return ("H", frameState.gutterColors.hintFg)
         default: return ("", 0)
         }
     }
@@ -984,27 +907,6 @@ final class CoreTextMetalRenderer {
                 quad.alpha = 1.0
                 quads.append(quad)
             }
-        }
-    }
-
-    /// Compute the column span for a run's background fill quad.
-    ///
-    /// For non-last runs, the span is the distance to the next run's column.
-    /// Uses Int arithmetic to avoid UInt16 underflow when runs arrive out of
-    /// order (protocol edge case), and clamps to a minimum of 1 cell.
-    /// For the last run on a line, falls back to display width calculation.
-    nonisolated static func runColSpan(runs: [StyledRun], at index: Int) -> UInt16 {
-        if index + 1 < runs.count {
-            let span = Int(runs[index + 1].col) - Int(runs[index].col)
-            #if DEBUG
-            if span <= 0 {
-                os_log(.fault, "Renderer: out-of-order runs at index %d, col %u >= %u",
-                       index, runs[index].col, runs[index + 1].col)
-            }
-            #endif
-            return UInt16(max(span, 1))
-        } else {
-            return UInt16(displayWidth(runs[index].text))
         }
     }
 

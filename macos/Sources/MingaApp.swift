@@ -6,7 +6,7 @@
 ///
 /// Architecture:
 ///   ProtocolReader (background thread) → decodes commands → dispatches to main thread
-///   CommandDispatcher (main thread) → updates LineBuffer → triggers CoreTextMetalRenderer
+///   CommandDispatcher (main thread) → updates FrameState + GUIState → triggers CoreTextMetalRenderer
 ///   EditorNSView (main thread) → keyboard/mouse → ProtocolEncoder → stdout
 
 import SwiftUI
@@ -321,7 +321,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.terminate(nil)
             return
         }
-        ctRenderer.setupLineRenderer(fontManager: fm)
+        ctRenderer.setupRenderers(fontManager: fm)
 
         // Protocol encoder and reader: in bundle mode, we spawn the BEAM
         // and use pipe file handles. In dev mode, we use stdin/stdout.
@@ -378,7 +378,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.dispatcher = disp
 
         // Create the editor view.
-        let nsView = EditorNSView(encoder: enc, fontFace: face, lineBuffer: disp.lineBuffer,
+        let nsView = EditorNSView(encoder: enc, fontFace: face, dispatcher: disp,
                                    coreTextRenderer: ctRenderer, fontManager: fm)
         nsView.guiState = appState.gui
         nsView.statusBarState = appState.gui.statusBarState
@@ -562,7 +562,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         fontManager?.setPrimaryFont(name: family, size: size, scale: scale,
                                      ligatures: ligatures, weight: weight)
         if let fm = fontManager {
-            nsView.coreTextRenderer.setupLineRenderer(fontManager: fm)
+            nsView.coreTextRenderer.setupRenderers(fontManager: fm)
         }
 
         nsView.updateFont(newFace)

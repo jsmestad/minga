@@ -22,10 +22,11 @@ struct MouseInputTests {
     private func makeView(spy: SpyEncoder) -> EditorNSView? {
         let face = FontFace(name: "Menlo", size: 13.0, scale: 1.0)
         let fm = FontManager(name: "Menlo", size: 13.0, scale: 1.0)
-        let lineBuffer = LineBuffer(cols: 80, rows: 24)
+        let guiState = GUIState()
+        let disp = CommandDispatcher(cols: 80, rows: 24, guiState: guiState)
         guard let ctRenderer = CoreTextMetalRenderer() else { return nil }
-        ctRenderer.setupLineRenderer(fontManager: fm)
-        let view = EditorNSView(encoder: spy, fontFace: face, lineBuffer: lineBuffer,
+        ctRenderer.setupRenderers(fontManager: fm)
+        let view = EditorNSView(encoder: spy, fontFace: face, dispatcher: disp,
                                 coreTextRenderer: ctRenderer, fontManager: fm)
         // Give the view a real frame so cellPosition math works.
         // Without a window, convert(_:from:) returns the point unchanged,
