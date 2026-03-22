@@ -44,4 +44,16 @@ defmodule Minga.Git.Backend do
 
   @callback current_branch(git_root :: String.t()) ::
               {:ok, String.t()} | :error
+
+  @callback ahead_behind(git_root :: String.t()) ::
+              {:ok, non_neg_integer(), non_neg_integer()} | :error
+
+  @callback unstage(git_root :: String.t(), paths :: String.t() | [String.t()]) ::
+              :ok | {:error, String.t()}
+
+  @callback unstage_all(git_root :: String.t()) ::
+              :ok | {:error, String.t()}
+
+  @callback discard(git_root :: String.t(), path :: String.t()) ::
+              :ok | {:error, String.t()}
 end

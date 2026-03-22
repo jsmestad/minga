@@ -128,6 +128,33 @@ defmodule Minga.Git do
   @spec current_branch(String.t()) :: {:ok, String.t()} | :error
   def current_branch(git_root), do: impl().current_branch(git_root)
 
+  @doc """
+  Returns ahead/behind counts relative to the upstream tracking branch.
+  """
+  @spec ahead_behind(String.t()) :: {:ok, non_neg_integer(), non_neg_integer()} | :error
+  def ahead_behind(git_root), do: impl().ahead_behind(git_root)
+
+  @doc """
+  Unstages specific files from the index (equivalent to `git reset HEAD -- <paths>`).
+  """
+  @spec unstage(String.t(), String.t() | [String.t()]) :: :ok | {:error, String.t()}
+  def unstage(git_root, paths), do: impl().unstage(git_root, paths)
+
+  @doc """
+  Unstages all staged files (equivalent to `git reset HEAD`).
+  """
+  @spec unstage_all(String.t()) :: :ok | {:error, String.t()}
+  def unstage_all(git_root), do: impl().unstage_all(git_root)
+
+  @doc """
+  Discards working tree changes for a file. Destructive and irreversible.
+
+  For tracked files, runs `git checkout -- <path>`.
+  For untracked files, deletes the file.
+  """
+  @spec discard(String.t(), String.t()) :: :ok | {:error, String.t()}
+  def discard(git_root, path), do: impl().discard(git_root, path)
+
   # ── Pure calculations (no backend needed) ──────────────────────────────
 
   @doc """
