@@ -25,7 +25,9 @@ defmodule Minga.Editor.Commands.BufferManagement do
   alias Minga.Editor.Window
   alias Minga.Formatter
   alias Minga.Mode
+  alias Minga.Mode.ToolConfirmState
   alias Minga.Popup.Lifecycle, as: PopupLifecycle
+  alias Minga.Tool.Recipe.Registry, as: RecipeRegistry
 
   @type state :: EditorState.t()
 
@@ -963,20 +965,61 @@ defmodule Minga.Editor.Commands.BufferManagement do
     spec = Formatter.resolve_formatter(filetype, file_path)
     buf_name = Helpers.buffer_display_name(buf)
 
-    case {spec, spec && Formatter.format(BufferServer.content(buf), spec)} do
-      {nil, _} ->
+    case spec do
+      nil ->
         state
 
-      {_, {:ok, formatted}} ->
+      _ ->
+        command = spec |> String.split() |> List.first()
+
+        if System.find_executable(command) do
+          run_formatter_with_spec(state, buf, spec, buf_name)
+        else
+          # Formatter binary not found; queue a tool prompt if a recipe exists
+          queue_formatter_tool_prompt(state, command)
+        end
+    end
+  end
+
+  @spec run_formatter_with_spec(state(), pid(), String.t(), String.t()) :: state()
+  defp run_formatter_with_spec(state, buf, spec, buf_name) do
+    case Formatter.format(BufferServer.content(buf), spec) do
+      {:ok, formatted} ->
         BufferServer.replace_content(buf, formatted)
         Minga.Editor.log_to_messages("Format-on-save: #{buf_name}")
         state
 
-      {_, {:error, msg}} ->
+      {:error, msg} ->
         Minga.Log.warning(:editor, "Format-on-save failed: #{buf_name} (#{msg})")
         state
     end
   end
+
+  @spec queue_formatter_tool_prompt(state(), String.t()) :: state()
+  defp queue_formatter_tool_prompt(state, command) do
+    case RecipeRegistry.for_command(command) do
+      nil ->
+        state
+
+      recipe ->
+        if EditorState.skip_tool_prompt?(state, recipe.name) do
+          state
+        else
+          queue = state.tool_prompt_queue ++ [recipe.name]
+          state = %{state | tool_prompt_queue: queue}
+          show_tool_prompt_if_normal(state)
+        end
+    end
+  end
+
+  @spec show_tool_prompt_if_normal(state()) :: state()
+  defp show_tool_prompt_if_normal(%{vim: %{mode: :normal}, tool_prompt_queue: pending} = state)
+       when pending != [] do
+    ms = %ToolConfirmState{pending: pending, declined: state.tool_declined}
+    EditorState.transition_mode(state, :tool_confirm, ms)
+  end
+
+  defp show_tool_prompt_if_normal(state), do: state
 
   @spec apply_whitespace_transforms(pid()) :: :ok
   defp apply_whitespace_transforms(buf) do

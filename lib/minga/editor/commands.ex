@@ -160,6 +160,29 @@ defmodule Minga.Editor.Commands do
   def execute(state, {:tool_update_named, [name]}),
     do: Tool.execute_named(state, :update, name)
 
+  # ── Tool install prompt commands ──────────────────────────────────────────
+
+  def execute(state, {:tool_confirm_accept, name}) do
+    case Minga.Tool.Manager.install(name) do
+      :ok ->
+        state = %{state | status_msg: "Installing #{name}..."}
+        drain_tool_prompt_queue(state)
+
+      {:error, reason} ->
+        %{state | status_msg: "Cannot install #{name}: #{reason}"}
+    end
+  end
+
+  def execute(state, {:tool_confirm_decline, name}) do
+    state = %{state | tool_declined: MapSet.put(state.tool_declined, name)}
+    drain_tool_prompt_queue(state)
+  end
+
+  def execute(state, {:tool_confirm_dismiss, declined_set}) do
+    declined = MapSet.union(state.tool_declined, declined_set)
+    %{state | tool_declined: declined, tool_prompt_queue: []}
+  end
+
   # ── Agent tuple commands ──────────────────────────────────────────────────
 
   def execute(state, {:agent_set_provider, [provider]}),
@@ -472,6 +495,15 @@ defmodule Minga.Editor.Commands do
           state() | {state(), action()}
   defp guard_buffer(%{buffers: %{active: nil}} = state, _fun), do: state
   defp guard_buffer(_state, fun), do: fun.()
+
+  # Remove the current tool from the prompt queue after accept/decline.
+  @spec drain_tool_prompt_queue(state()) :: state()
+  defp drain_tool_prompt_queue(state) do
+    case state.tool_prompt_queue do
+      [_current | rest] -> %{state | tool_prompt_queue: rest}
+      [] -> state
+    end
+  end
 
   # ── Filetype trie substitution ────────────────────────────────────────────
 

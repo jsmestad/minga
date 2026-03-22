@@ -191,6 +191,8 @@ defmodule Minga.Editor do
     Minga.Events.subscribe(:tool_install_progress)
     Minga.Events.subscribe(:tool_install_complete)
     Minga.Events.subscribe(:tool_install_failed)
+    Minga.Events.subscribe(:tool_uninstall_complete)
+    Minga.Events.subscribe(:tool_missing)
 
     # Monitor all initial buffers so we get :DOWN when they die.
     all_initial_pids =
@@ -974,11 +976,37 @@ defmodule Minga.Editor do
     {:noreply, Renderer.render(state)}
   end
 
+  def handle_info({:minga_event, :tool_uninstall_complete, %{name: name}}, state) do
+    state = log_message(state, "Tool uninstalled: #{name}")
+    state = maybe_refresh_tool_picker(state)
+    {:noreply, Renderer.render(state)}
+  end
+
   def handle_info(:clear_tool_status, state) do
     # Only clear if the status message is still a tool status
     state =
       if String.starts_with?(state.status_msg || "", ["✓ ", "Installing ", "Updating "]) do
         %{state | status_msg: nil}
+      else
+        state
+      end
+
+    {:noreply, Renderer.render(state)}
+  end
+
+  # ── Tool missing prompt ────────────────────────────────────────────────────
+
+  def handle_info(
+        {:minga_event, :tool_missing, %Minga.Events.ToolMissingEvent{command: command}},
+        state
+      ) do
+    recipe = Minga.Tool.Recipe.Registry.for_command(command)
+
+    state =
+      if recipe && not EditorState.skip_tool_prompt?(state, recipe.name) do
+        queue = state.tool_prompt_queue ++ [recipe.name]
+        state = %{state | tool_prompt_queue: queue}
+        maybe_show_tool_prompt(state)
       else
         state
       end
@@ -1619,6 +1647,18 @@ defmodule Minga.Editor do
   end
 
   defp maybe_refresh_tool_picker(state), do: state
+
+  # Transitions to :tool_confirm mode if in normal mode and there are
+  # pending tool prompts. Otherwise the prompt waits until the user
+  # returns to normal mode.
+  @spec maybe_show_tool_prompt(state()) :: state()
+  defp maybe_show_tool_prompt(%{vim: %{mode: :normal}, tool_prompt_queue: pending} = state)
+       when pending != [] do
+    ms = %Minga.Mode.ToolConfirmState{pending: pending, declined: state.tool_declined}
+    EditorState.transition_mode(state, :tool_confirm, ms)
+  end
+
+  defp maybe_show_tool_prompt(state), do: state
 
   # Moves the file tree cursor to the given index and performs the action.
   @spec gui_tree_action(state(), non_neg_integer(), :click | :toggle) :: state()

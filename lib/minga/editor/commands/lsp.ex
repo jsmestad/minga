@@ -19,6 +19,9 @@ defmodule Minga.Editor.Commands.Lsp do
   alias Minga.LSP.Supervisor, as: LSPSupervisor
   alias Minga.LSP.SyncServer
   alias Minga.Picker.WorkspaceSymbolSource
+  alias Minga.Tool.Manager, as: ToolManager
+  alias Minga.Tool.Recipe
+  alias Minga.Tool.Recipe.Registry, as: RecipeRegistry
 
   @type state :: EditorState.t()
 
@@ -199,17 +202,49 @@ defmodule Minga.Editor.Commands.Lsp do
     rows =
       Enum.map_join(clients, "\n\n", fn pid ->
         info = gather_client_info(pid)
+        tool_info = tool_info_for_server(info.name)
 
         """
         **#{info.name}** `#{info.status}`
         - Root: `#{info.root}`
         - Encoding: #{info.encoding}
-        - Uptime: #{info.uptime}\
+        - Uptime: #{info.uptime}#{tool_info}\
         """
       end)
 
     header <> rows
   end
+
+  # Returns a markdown snippet with tool manager info for a server,
+  # or empty string if the server isn't managed by Minga.
+  @spec tool_info_for_server(atom()) :: String.t()
+  defp tool_info_for_server(server_name) do
+    command = Atom.to_string(server_name)
+
+    case RecipeRegistry.for_command(command) do
+      nil -> ""
+      recipe -> format_tool_info(recipe)
+    end
+  end
+
+  @spec format_tool_info(Recipe.t()) :: String.t()
+  defp format_tool_info(recipe) do
+    case ToolManager.get_installation(recipe.name) do
+      nil ->
+        "\n- Tool: not managed (system install)"
+
+      inst ->
+        update_info = check_update_info(recipe, inst.version)
+        "\n- Tool: managed by Minga (v#{inst.version})#{update_info}"
+    end
+  end
+
+  # Returns cached update info if ToolManager has checked recently.
+  # Does not make network calls; the Editor GenServer must never block.
+  # Stubbed until ToolManager exposes an ETS-backed per-tool version cache
+  # from check_updates results (tracked in #743 follow-up).
+  @spec check_update_info(Recipe.t(), String.t()) :: String.t()
+  defp check_update_info(_recipe, _installed_version), do: ""
 
   @spec gather_client_info(pid()) :: map()
   defp gather_client_info(pid) do

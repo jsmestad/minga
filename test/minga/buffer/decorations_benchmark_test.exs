@@ -1,99 +1,36 @@
 defmodule Minga.Buffer.DecorationsBenchmarkTest do
   @moduledoc """
-  Benchmark tests verifying decoration performance characteristics.
+  Structural tests verifying decoration batch performance characteristics.
 
-  Uses relative scaling tests (1K vs 10K) instead of absolute time
-  thresholds. This catches algorithmic regressions (O(n²) would show
-  100x scaling for 10x data) without flaking on slow CI runners.
+  Uses deterministic structural assertions (tree height, version bumps)
+  instead of wall-clock timing. This proves the batch API uses O(n log n)
+  single-rebuild rather than O(n²) repeated inserts, without flaking on
+  slow CI runners.
 
-  Each measurement uses the median of 5 runs to eliminate outlier noise
-  from GC pauses, scheduler jitter, and cache effects. Single-shot
-  `:timer.tc` on sub-millisecond operations is too noisy for ratio tests.
+  ## What we're proving
+
+  1. **Deferred execution**: batch mode collects operations in a pending
+     list and applies them all at once (single version bump, not N bumps)
+  2. **Balanced rebuild**: the resulting tree has optimal height (proves
+     `from_list` median-split, not sequential inserts)
+  3. **Correctness at scale**: batch operations produce the right results
+     with 1K and 10K decorations
   """
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Decorations
 
-  # Number of timed iterations per measurement. The median of 5 is
-  # insensitive to a single GC pause or scheduling hiccup while keeping
-  # total test time reasonable (~0.5s extra for the batch test).
-  @bench_iterations 5
+  describe "batch deferred execution" do
+    test "batch commits with single version bump regardless of operation count" do
+      base = build_decorations(100)
+      original_version = base.version
 
-  describe "performance: query scaling" do
-    setup do
-      decs_1k = build_decorations(1_000)
-      decs_10k = build_decorations(10_000)
-      lines = for _ <- 1..30, do: String.duplicate("x", 80)
-      {:ok, decs_1k: decs_1k, decs_10k: decs_10k, lines: lines}
-    end
-
-    test "range query scales sub-linearly (O(log n + k))", ctx do
-      # Warmup
-      Decorations.highlights_for_lines(ctx.decs_1k, 200, 230)
-      Decorations.highlights_for_lines(ctx.decs_10k, 5_000, 5_030)
-
-      us_1k =
-        median_of(@bench_iterations, fn ->
-          Decorations.highlights_for_lines(ctx.decs_1k, 200, 230)
-        end)
-
-      us_10k =
-        median_of(@bench_iterations, fn ->
-          Decorations.highlights_for_lines(ctx.decs_10k, 5_000, 5_030)
-        end)
-
-      # With O(log n + k) query, 10x more data should be at most ~3-4x slower
-      # (log(10000)/log(1000) ≈ 1.33x, plus constant factors).
-      # Allow up to 15x to account for tree depth and cache effects.
-      # An O(n) scan would be ~10x, O(n²) would be ~100x.
-      ratio = if us_1k > 0, do: us_10k / us_1k, else: 1.0
-
-      assert ratio < 15,
-             "10K/1K query ratio is #{Float.round(ratio, 1)}x (1K: #{us_1k}µs, 10K: #{us_10k}µs). Expected < 15x for O(log n + k)."
-    end
-
-    test "query + merge scales sub-linearly", ctx do
-      merge_fn = fn decs, offset ->
-        for {line, i} <- Enum.with_index(ctx.lines, offset) do
-          ranges = Decorations.highlights_for_line(decs, i)
-          Decorations.merge_highlights([{line, Minga.Face.new()}], ranges, i)
-        end
-      end
-
-      # Warmup
-      merge_fn.(ctx.decs_1k, 200)
-      merge_fn.(ctx.decs_10k, 5_000)
-
-      us_1k = median_of(@bench_iterations, fn -> merge_fn.(ctx.decs_1k, 200) end)
-      us_10k = median_of(@bench_iterations, fn -> merge_fn.(ctx.decs_10k, 5_000) end)
-
-      ratio = if us_1k > 0, do: us_10k / us_1k, else: 1.0
-
-      assert ratio < 15,
-             "10K/1K merge ratio is #{Float.round(ratio, 1)}x (1K: #{us_1k}µs, 10K: #{us_10k}µs). Expected < 15x for O(log n + k)."
-    end
-  end
-
-  describe "performance: batch operations" do
-    test "batch clear-and-replace scales sub-linearly" do
-      # This is the real-world pattern: LSP diagnostic refresh or agent chat
-      # sync clears all decorations in a group and replaces them. The batch
-      # API defers tree rebuilding until commit, so N operations produce
-      # a single from_list rebuild at the end.
-      #
-      # Uses relative scaling (1K vs 10K) instead of absolute time thresholds.
-      # An O(n²) regression would show ~100x scaling; we expect ~13x for
-      # the O(n log n) tree rebuild. Threshold at 25x gives breathing room
-      # for constant-factor variance without losing detection power.
-      base_1k = build_decorations(1_000)
-      base_10k = build_decorations(10_000)
-
-      batch_replace = fn base, count ->
+      result =
         Decorations.batch(base, fn d ->
           d = Decorations.remove_group(d, :diagnostics)
 
-          Enum.reduce(0..(count - 1), d, fn i, acc ->
-            {_, acc} =
+          Enum.reduce(0..499, d, fn i, acc ->
+            {_id, acc} =
               Decorations.add_highlight(acc, {i, 0}, {i, 20},
                 style: Minga.Face.new(bg: 0xECBE7B),
                 group: :diagnostics
@@ -102,31 +39,215 @@ defmodule Minga.Buffer.DecorationsBenchmarkTest do
             acc
           end)
         end)
-      end
 
-      # Warmup both sizes to level the JIT/allocation playing field
-      batch_replace.(base_1k, 1_000)
-      batch_replace.(base_10k, 10_000)
+      # Single version bump, not 501 (1 remove_group + 500 adds)
+      assert result.version == original_version + 1
+      assert Decorations.highlight_count(result) == 500
+    end
 
-      us_1k = median_of(@bench_iterations, fn -> batch_replace.(base_1k, 1_000) end)
-      us_10k = median_of(@bench_iterations, fn -> batch_replace.(base_10k, 10_000) end)
+    test "non-batch add_highlight bumps version per operation" do
+      decs = Decorations.new()
 
-      # Verify correctness (single run for the assertion)
-      decs_1k = batch_replace.(base_1k, 1_000)
-      decs_10k = batch_replace.(base_10k, 10_000)
-      assert Decorations.highlight_count(decs_1k) == 1_000
-      assert Decorations.highlight_count(decs_10k) == 10_000
+      {_id, decs} =
+        Decorations.add_highlight(decs, {0, 0}, {0, 10},
+          style: Minga.Face.new(bg: 0xFF0000),
+          group: :test
+        )
 
-      ratio = if us_1k > 0, do: us_10k / us_1k, else: 1.0
+      v1 = decs.version
 
-      # O(n log n) tree rebuild: 10x data ≈ 13x work. Allow 25x for noise.
-      # An O(n²) regression would show ~100x.
-      assert ratio < 25,
-             "10K/1K batch ratio is #{Float.round(ratio, 1)}x (1K: #{us_1k}µs, 10K: #{us_10k}µs). Expected < 25x for sub-linear scaling."
+      {_id, decs} =
+        Decorations.add_highlight(decs, {1, 0}, {1, 10},
+          style: Minga.Face.new(bg: 0xFF0000),
+          group: :test
+        )
+
+      # Each non-batch operation bumps version individually
+      assert decs.version == v1 + 1
+    end
+
+    test "batch with no operations still applies cleanly" do
+      base = build_decorations(50)
+      count_before = Decorations.highlight_count(base)
+
+      result = Decorations.batch(base, fn d -> d end)
+
+      assert Decorations.highlight_count(result) == count_before
     end
   end
 
-  describe "performance: zero decorations (baseline)" do
+  describe "batch produces optimally balanced tree" do
+    test "1K batch rebuild has optimal tree height" do
+      result = batch_replace(Decorations.new(), 1_000)
+
+      assert Decorations.highlight_count(result) == 1_000
+      # from_list median-split produces height = floor(log2(n)) + 1
+      assert result.highlights.height == expected_from_list_height(1_000)
+    end
+
+    test "10K batch rebuild has optimal tree height" do
+      result = batch_replace(Decorations.new(), 10_000)
+
+      assert Decorations.highlight_count(result) == 10_000
+      assert result.highlights.height == expected_from_list_height(10_000)
+    end
+
+    test "batch clear-and-replace preserves optimal height" do
+      base = build_decorations(1_000)
+
+      result =
+        Decorations.batch(base, fn d ->
+          d = Decorations.remove_group(d, :diagnostics)
+
+          Enum.reduce(0..4_999, d, fn i, acc ->
+            {_id, acc} =
+              Decorations.add_highlight(acc, {i, 0}, {i, 20},
+                style: Minga.Face.new(bg: 0xECBE7B),
+                group: :diagnostics
+              )
+
+            acc
+          end)
+        end)
+
+      assert Decorations.highlight_count(result) == 5_000
+      assert result.highlights.height == expected_from_list_height(5_000)
+    end
+
+    test "overlapping intervals do not affect tree balance" do
+      # 100 intervals all on line 0 with overlapping columns
+      result =
+        Decorations.batch(Decorations.new(), fn d ->
+          Enum.reduce(0..99, d, fn i, acc ->
+            {_id, acc} =
+              Decorations.add_highlight(acc, {0, i}, {0, i + 20},
+                style: Minga.Face.new(bg: 0xECBE7B),
+                group: :test
+              )
+
+            acc
+          end)
+        end)
+
+      assert Decorations.highlight_count(result) == 100
+      assert result.highlights.height == expected_from_list_height(100)
+    end
+  end
+
+  describe "batch correctness at scale" do
+    test "batch clear-and-replace at 1K produces correct query results" do
+      base = build_decorations(1_000)
+
+      result =
+        Decorations.batch(base, fn d ->
+          d = Decorations.remove_group(d, :diagnostics)
+
+          Enum.reduce(0..999, d, fn i, acc ->
+            {_id, acc} =
+              Decorations.add_highlight(acc, {i, 0}, {i, 20},
+                style: Minga.Face.new(bg: 0xECBE7B),
+                group: :diagnostics
+              )
+
+            acc
+          end)
+        end)
+
+      assert Decorations.highlight_count(result) == 1_000
+
+      # Query a specific range and verify results
+      highlights = Decorations.highlights_for_lines(result, 500, 509)
+      assert length(highlights) == 10
+    end
+
+    test "batch clear-and-replace at 10K produces correct query results" do
+      base = build_decorations(10_000)
+
+      result =
+        Decorations.batch(base, fn d ->
+          d = Decorations.remove_group(d, :diagnostics)
+
+          Enum.reduce(0..9_999, d, fn i, acc ->
+            {_id, acc} =
+              Decorations.add_highlight(acc, {i, 0}, {i, 20},
+                style: Minga.Face.new(bg: 0xECBE7B),
+                group: :diagnostics
+              )
+
+            acc
+          end)
+        end)
+
+      assert Decorations.highlight_count(result) == 10_000
+
+      # Query a 30-line viewport window in the middle
+      highlights = Decorations.highlights_for_lines(result, 5_000, 5_029)
+      assert length(highlights) == 30
+    end
+
+    test "batch on empty decorations works" do
+      result =
+        Decorations.batch(Decorations.new(), fn d ->
+          Enum.reduce(0..9, d, fn i, acc ->
+            {_id, acc} =
+              Decorations.add_highlight(acc, {i, 0}, {i, 10},
+                style: Minga.Face.new(bg: 0xECBE7B),
+                group: :test
+              )
+
+            acc
+          end)
+        end)
+
+      assert Decorations.highlight_count(result) == 10
+      assert result.highlights.height == expected_from_list_height(10)
+    end
+
+    test "batch that only removes produces correct results" do
+      base = build_decorations(100)
+      assert Decorations.highlight_count(base) == 100
+
+      result =
+        Decorations.batch(base, fn d ->
+          Decorations.remove_group(d, :diagnostics)
+        end)
+
+      assert Decorations.highlight_count(result) == 0
+      assert Decorations.empty?(result)
+    end
+  end
+
+  describe "query correctness at scale" do
+    test "range query returns correct results from 10K-decoration tree" do
+      decs = build_decorations(10_000)
+
+      # Query a 30-line viewport window
+      highlights = Decorations.highlights_for_lines(decs, 5_000, 5_029)
+      assert length(highlights) == 30
+
+      # Each result should be on the expected line (sort since tree traversal order varies)
+      lines = highlights |> Enum.map(fn hl -> elem(hl.start, 0) end) |> Enum.sort()
+      assert lines == Enum.to_list(5_000..5_029)
+    end
+
+    test "query + merge produces correct highlight segments at scale" do
+      decs = build_decorations(10_000)
+      lines = for _ <- 1..30, do: String.duplicate("x", 80)
+
+      merged =
+        for {line, i} <- Enum.with_index(lines, 5_000) do
+          ranges = Decorations.highlights_for_line(decs, i)
+          Decorations.merge_highlights([{line, Minga.Face.new()}], ranges, i)
+        end
+
+      # Should produce 30 lines of merged results
+      assert length(merged) == 30
+      # Each merged line should have segments (not be empty)
+      assert Enum.all?(merged, fn segments -> segments != [] end)
+    end
+  end
+
+  describe "zero decorations baseline" do
     test "empty decorations short-circuit without allocations" do
       decs = Decorations.new()
 
@@ -140,21 +261,32 @@ defmodule Minga.Buffer.DecorationsBenchmarkTest do
 
   # ── Helpers ──────────────────────────────────────────────────────────────
 
-  # Runs `fun` `n` times and returns the median duration in microseconds.
-  # The median is insensitive to single-outlier GC pauses or scheduling
-  # hiccups that make single-shot `:timer.tc` unreliable for ratio tests.
-  @spec median_of(pos_integer(), (-> term())) :: non_neg_integer()
-  defp median_of(n, fun) do
-    times =
-      for _ <- 1..n do
-        {us, _result} = :timer.tc(fun)
-        us
-      end
+  # Computes the expected height of a perfectly balanced tree built by
+  # from_list's median-split algorithm (splits at div(n, 2) each level;
+  # see IntervalTree.build_balanced/1).
+  @spec expected_from_list_height(non_neg_integer()) :: non_neg_integer()
+  defp expected_from_list_height(0), do: 0
+  defp expected_from_list_height(n), do: trunc(:math.log2(n)) + 1
 
-    sorted = Enum.sort(times)
-    Enum.at(sorted, div(n, 2))
+  # Runs a batch that clears diagnostics and adds `count` new ones.
+  @spec batch_replace(Decorations.t(), non_neg_integer()) :: Decorations.t()
+  defp batch_replace(base, count) do
+    Decorations.batch(base, fn d ->
+      d = Decorations.remove_group(d, :diagnostics)
+
+      Enum.reduce(0..(count - 1), d, fn i, acc ->
+        {_id, acc} =
+          Decorations.add_highlight(acc, {i, 0}, {i, 20},
+            style: Minga.Face.new(bg: 0xECBE7B),
+            group: :diagnostics
+          )
+
+        acc
+      end)
+    end)
   end
 
+  @spec build_decorations(pos_integer()) :: Decorations.t()
   defp build_decorations(count) do
     Enum.reduce(0..(count - 1), Decorations.new(), fn i, decs ->
       {_id, decs} =

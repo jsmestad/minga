@@ -471,7 +471,48 @@ defmodule Minga.Test.EditorCase do
 
   defp do_wait_until(editor, _condition, _remaining, _interval, message) do
     state = :sys.get_state(editor)
-    raise ExUnit.AssertionError, message: "#{message}\nFinal state mode: #{state.mode}"
+    raise ExUnit.AssertionError, message: "#{message}\nFinal state mode: #{state.vim.mode}"
+  end
+
+  @doc """
+  Polls until a screen-based condition is true.
+
+  Unlike `wait_until`, this syncs both the editor GenServer AND the
+  HeadlessPort before each check. This ensures render commands have been
+  flushed to the grid before `screen_row`/`screen_text` are called.
+
+  The condition function takes no arguments; use screen query helpers
+  (`screen_row`, `screen_text`) inside it to inspect rendered output.
+
+  Uses a larger default polling budget (50×20ms = 1s) than `wait_until`
+  because layout-settling operations (file tree + agent panel) may need
+  multiple render cycles on loaded CI runners.
+  """
+  @spec wait_until_screen(editor_ctx(), (-> boolean()), keyword()) :: :ok
+  def wait_until_screen(%{editor: editor, port: port} = _ctx, condition, opts \\ []) do
+    max = Keyword.get(opts, :max_attempts, 50)
+    interval = Keyword.get(opts, :interval_ms, 20)
+    message = Keyword.get(opts, :message, "Screen condition not met after polling")
+    do_wait_screen(editor, port, condition, max, interval, message)
+  end
+
+  defp do_wait_screen(editor, port, condition, remaining, interval, message) when remaining > 0 do
+    :sys.get_state(editor)
+    :sys.get_state(port)
+
+    if condition.() do
+      :ok
+    else
+      Process.sleep(interval)
+      do_wait_screen(editor, port, condition, remaining - 1, interval, message)
+    end
+  end
+
+  defp do_wait_screen(editor, port, _condition, _remaining, _interval, message) do
+    # Sync both processes so any post-failure inspection sees stable state
+    state = :sys.get_state(editor)
+    :sys.get_state(port)
+    raise ExUnit.AssertionError, message: "#{message}\nFinal state mode: #{state.vim.mode}"
   end
 
   # ── Mouse and resize helpers ─────────────────────────────────────────────────

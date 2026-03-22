@@ -406,7 +406,8 @@ defmodule Minga.Integration.MouseTest do
     test "click dispatches to correct region when file tree and agent are both open" do
       ctx = start_editor("hello world")
 
-      # Open file tree and wait for it to render
+      # Open file tree and wait for it to render.
+      # Bump polling budget for CI runners where layout settling takes longer.
       send_keys(ctx, "<Space>op")
 
       wait_until(
@@ -415,6 +416,8 @@ defmodule Minga.Integration.MouseTest do
           state.file_tree != nil and
             FileTree.open?(state.file_tree)
         end,
+        max_attempts: 50,
+        interval_ms: 20,
         message: "file tree never opened"
       )
 
@@ -422,10 +425,13 @@ defmodule Minga.Integration.MouseTest do
       inject_fake_session(ctx)
       send_keys(ctx, "<Space>aa")
 
-      # Wait for both separators to appear (file tree | editor | agent)
-      wait_until(
+      # Wait for both separators to appear (file tree | editor | agent).
+      # Use wait_until_screen to sync the HeadlessPort before reading the
+      # grid, preventing a race where the editor has rendered but the port
+      # hasn't flushed yet.
+      wait_until_screen(
         ctx,
-        fn _state ->
+        fn ->
           row1 = screen_row(ctx, 1)
           sep_count = row1 |> String.graphemes() |> Enum.count(&(&1 == "│"))
           sep_count >= 2
