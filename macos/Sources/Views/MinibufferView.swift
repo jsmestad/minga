@@ -28,6 +28,18 @@ struct MinibufferView: View {
                 candidateList
             }
 
+            // Count indicator (when more results exist than visible)
+            if state.totalCandidates > state.candidates.count {
+                HStack {
+                    Spacer()
+                    Text("↕ \(state.candidates.count) of \(state.totalCandidates)")
+                        .font(.system(size: 10))
+                        .foregroundStyle(theme.popupFg.opacity(0.3))
+                        .padding(.trailing, 12)
+                        .padding(.vertical, 2)
+                }
+            }
+
             // Top border (fully opaque when Increase Contrast is on)
             Rectangle()
                 .fill(theme.popupBorder.opacity(
@@ -235,6 +247,13 @@ struct MinibufferView: View {
             encoder?.sendMinibufferSelect(index: UInt16(candidate.id))
         }
         .id(candidate.id)
+        .transition(.opacity)
+        .animation(
+            SystemBlinkTiming.blinkingDisabled
+                ? nil
+                : .easeOut(duration: 0.15).delay(Double(candidate.id) * 0.02),
+            value: state.inputVersion
+        )
         .accessibilityElement(children: .combine)
         .accessibilityLabel(candidate.label)
         .accessibilityValue(candidate.description)

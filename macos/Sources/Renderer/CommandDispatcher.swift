@@ -299,12 +299,14 @@ final class CommandDispatcher {
             }
 
         case .guiMinibuffer(let visible, let mode, let cursorPos, let prompt,
-                             let input, let context, let selectedIndex, let candidates):
+                             let input, let context, let selectedIndex,
+                             let totalCandidates, let candidates):
             if visible {
                 guiState.minibufferState.update(
                     visible: true, mode: mode, cursorPos: cursorPos,
                     prompt: prompt, input: input, context: context,
-                    selectedIndex: selectedIndex, rawCandidates: candidates
+                    selectedIndex: selectedIndex, totalCandidates: totalCandidates,
+                    rawCandidates: candidates
                 )
             } else {
                 guiState.minibufferState.hide()

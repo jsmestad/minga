@@ -1415,16 +1415,19 @@ defmodule Minga.Port.Protocol.GUI do
   def encode_gui_minibuffer(%MinibufferData{visible: false}),
     do: <<@op_gui_minibuffer, 0::8>>
 
-  def encode_gui_minibuffer(%{
-        visible: true,
-        mode: mode,
-        cursor_pos: cursor_pos,
-        prompt: prompt,
-        input: input,
-        context: context,
-        selected_index: selected_index,
-        candidates: candidates
-      }) do
+  def encode_gui_minibuffer(
+        %{
+          visible: true,
+          mode: mode,
+          cursor_pos: cursor_pos,
+          prompt: prompt,
+          input: input,
+          context: context,
+          selected_index: selected_index,
+          candidates: candidates
+        } = data
+      ) do
+    total_candidates = Map.get(data, :total_candidates, length(candidates))
     prompt_bytes = :erlang.iolist_to_binary([prompt])
     input_bytes = :erlang.iolist_to_binary([input])
     context_bytes = :erlang.iolist_to_binary([context])
@@ -1457,7 +1460,7 @@ defmodule Minga.Port.Protocol.GUI do
       <<@op_gui_minibuffer, 1::8, mode::8, cursor_pos::16, byte_size(prompt_bytes)::8,
         prompt_bytes::binary, byte_size(input_bytes)::16, input_bytes::binary,
         byte_size(context_bytes)::16, context_bytes::binary, selected_index::16,
-        length(candidates)::16>>
+        length(candidates)::16, total_candidates::16>>
       | candidate_data
     ])
   end

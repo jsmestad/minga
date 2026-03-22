@@ -246,7 +246,8 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
                 "fg": Int(fg), "bg": Int(bg), "attrs": Int(attrs), "text": text]
 
     case .guiMinibuffer(let visible, let mode, let cursorPos, let prompt,
-                         let input, let context, let selectedIndex, let candidates):
+                         let input, let context, let selectedIndex,
+                         let totalCandidates, let candidates):
         var result: [String: Any] = [:]
         result["type"] = "gui_minibuffer"
         result["visible"] = visible
@@ -256,6 +257,7 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
         result["input"] = input
         result["context"] = context
         result["selected_index"] = Int(selectedIndex)
+        result["total_candidates"] = Int(totalCandidates)
         result["candidates"] = candidates.map { c in
             ["match_score": Int(c.matchScore), "label": c.label, "description": c.description] as [String: Any]
         }

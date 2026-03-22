@@ -195,7 +195,7 @@ defmodule Minga.Editor.MinibufferDataTest do
 
   describe "complete_ex_command/1 scoring" do
     test "exact match ranks first" do
-      candidates = MinibufferData.complete_ex_command("save")
+      {candidates, _total} = MinibufferData.complete_ex_command("save")
       labels = Enum.map(candidates, & &1.label)
 
       # "save" should be first (exact match scores highest)
@@ -204,7 +204,7 @@ defmodule Minga.Editor.MinibufferDataTest do
 
     test "prefix matches rank above substring matches" do
       # "quit" is a prefix match for "quit"; "force_quit" contains "quit" as substring
-      candidates = MinibufferData.complete_ex_command("quit")
+      {candidates, _total} = MinibufferData.complete_ex_command("quit")
       labels = Enum.map(candidates, & &1.label)
 
       quit_idx = Enum.find_index(labels, &(&1 == "quit"))
@@ -216,13 +216,13 @@ defmodule Minga.Editor.MinibufferDataTest do
     end
 
     test "no match returns empty list" do
-      candidates = MinibufferData.complete_ex_command("zzzzzzxyz")
+      {candidates, _total} = MinibufferData.complete_ex_command("zzzzzzxyz")
       assert candidates == []
     end
 
     test "shorter names rank higher within same tier" do
       # Both "quit" and "quit_all" are prefix matches for "qui"
-      candidates = MinibufferData.complete_ex_command("qui")
+      {candidates, _total} = MinibufferData.complete_ex_command("qui")
       labels = Enum.map(candidates, & &1.label)
 
       quit_idx = Enum.find_index(labels, &(&1 == "quit"))
@@ -234,12 +234,12 @@ defmodule Minga.Editor.MinibufferDataTest do
     end
 
     test "candidates capped at 15" do
-      candidates = MinibufferData.complete_ex_command("")
+      {candidates, _total} = MinibufferData.complete_ex_command("")
       assert length(candidates) <= 15
     end
 
     test "all candidates have required fields" do
-      candidates = MinibufferData.complete_ex_command("save")
+      {candidates, _total} = MinibufferData.complete_ex_command("save")
 
       for c <- candidates do
         assert is_binary(c.label)

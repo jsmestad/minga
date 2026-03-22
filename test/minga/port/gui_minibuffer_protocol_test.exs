@@ -3,7 +3,8 @@ defmodule Minga.Port.GUIMinibufferProtocolTest do
   Tests for the gui_minibuffer (0x7F) protocol encoder.
 
   Verifies the binary wire format for both visible and hidden states,
-  including candidate list encoding.
+  including candidate list encoding with match positions, annotations,
+  and total candidate count.
   """
 
   use ExUnit.Case, async: true
@@ -34,8 +35,11 @@ defmodule Minga.Port.GUIMinibufferProtocolTest do
 
       result = ProtocolGUI.encode_gui_minibuffer(data)
 
-      assert <<@op_gui_minibuffer, 1, 0, 3::16, 1, ":", 3::16, "set", 0::16, "", 0::16, 0::16>> =
-               result
+      # Header: op(1) visible(1) mode(1) cursor_pos(2) prompt_len(1) prompt
+      #         input_len(2) input context_len(2) context
+      #         selected_index(2) candidate_count(2) total_candidates(2)
+      assert <<@op_gui_minibuffer, 1, 0, 3::16, 1, ":", 3::16, "set", 0::16, "", 0::16, 0::16,
+               0::16>> = result
     end
 
     test "visible search forward mode with context" do
@@ -53,10 +57,10 @@ defmodule Minga.Port.GUIMinibufferProtocolTest do
       result = ProtocolGUI.encode_gui_minibuffer(data)
 
       assert <<@op_gui_minibuffer, 1, 1, 5::16, 1, "/", 5::16, "hello", 7::16, "3 of 42", 0::16,
-               0::16>> = result
+               0::16, 0::16>> = result
     end
 
-    test "visible command mode with candidates" do
+    test "visible command mode with candidates includes total_candidates" do
       data = %MinibufferData{
         visible: true,
         mode: 0,
@@ -80,16 +84,16 @@ defmodule Minga.Port.GUIMinibufferProtocolTest do
             match_positions: [0],
             annotation: ""
           }
-        ]
+        ],
+        total_candidates: 47
       }
 
       result = ProtocolGUI.encode_gui_minibuffer(data)
 
-      # Per candidate: score(1) + label_len(2) + label + desc_len(2) + desc
-      #   + annotation_len(2) + annotation + match_pos_count(1) + positions(count*2)
-      assert <<@op_gui_minibuffer, 1, 0, 1::16, 1, ":", 1::16, "w", 0::16, "", 0::16, 2::16, 150,
-               5::16, "write", 23::16, "Save the current buffer", 0::16, 1, 0::16, 140, 2::16,
-               "wq", 13::16, "Save and quit", 0::16, 1, 0::16>> = result
+      # candidate_count(2) = 2, total_candidates(2) = 47, then candidate data
+      assert <<@op_gui_minibuffer, 1, 0, 1::16, 1, ":", 1::16, "w", 0::16, "", 0::16, 2::16,
+               47::16, 150, 5::16, "write", 23::16, "Save the current buffer", 0::16, 1, 0::16,
+               140, 2::16, "wq", 13::16, "Save and quit", 0::16, 1, 0::16>> = result
     end
 
     test "substitute confirm mode with no cursor" do
@@ -107,7 +111,7 @@ defmodule Minga.Port.GUIMinibufferProtocolTest do
       result = ProtocolGUI.encode_gui_minibuffer(data)
 
       assert <<@op_gui_minibuffer, 1, 5, 0xFFFF::16, 17, "replace with foo?", 0::16, "", 17::16,
-               "y/n/a/q (2 of 15)", 0::16, 0::16>> = result
+               "y/n/a/q (2 of 15)", 0::16, 0::16, 0::16>> = result
     end
 
     test "match_score is clamped to 255" do
@@ -126,9 +130,10 @@ defmodule Minga.Port.GUIMinibufferProtocolTest do
 
       result = ProtocolGUI.encode_gui_minibuffer(data)
 
-      # Extract the candidate portion: after header, score should be clamped to 255
-      <<@op_gui_minibuffer, 1, 0, 0::16, 1, ":", 0::16, "", 0::16, "", 0::16, 1::16, score,
-        _rest::binary>> = result
+      # After header + candidate_count(2) + total_candidates(2), score byte
+      # total_candidates defaults to length(candidates) = 1
+      <<@op_gui_minibuffer, 1, 0, 0::16, 1, ":", 0::16, "", 0::16, "", 0::16, 1::16, _total::16,
+        score, _rest::binary>> = result
 
       assert score == 255
     end
@@ -149,7 +154,7 @@ defmodule Minga.Port.GUIMinibufferProtocolTest do
       input_bytes = byte_size("héllo")
 
       assert <<@op_gui_minibuffer, 1, 1, 3::16, 1, "?", ^input_bytes::16, "héllo", 0::16, "",
-               0::16, 0::16>> = result
+               0::16, 0::16, 0::16>> = result
     end
   end
 end

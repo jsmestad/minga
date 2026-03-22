@@ -40,6 +40,9 @@ final class MinibufferState {
     var context: String = ""
     var selectedIndex: UInt16 = 0
     var candidates: [MinibufferCandidate] = []
+    /// Total matching candidates before the BEAM caps at 15. Used for
+    /// the "3 of 47" count indicator when there are more results than visible.
+    var totalCandidates: UInt16 = 0
 
     /// Monotonically increasing counter that increments on every update().
     /// Used as a reset token for BlinkingCursor so the cursor snaps to
@@ -69,6 +72,7 @@ final class MinibufferState {
 
     func update(visible: Bool, mode: UInt8, cursorPos: UInt16, prompt: String,
                 input: String, context: String, selectedIndex: UInt16,
+                totalCandidates: UInt16 = 0,
                 rawCandidates: [GUIMinibufferCandidate]) {
         self.visible = visible
         self.mode = mode
@@ -77,6 +81,7 @@ final class MinibufferState {
         self.input = input
         self.context = context
         self.selectedIndex = selectedIndex
+        self.totalCandidates = totalCandidates
         self.candidates = rawCandidates.enumerated().map { i, c in
             MinibufferCandidate(
                 id: i, matchScore: c.matchScore,
