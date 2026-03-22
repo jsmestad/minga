@@ -217,6 +217,7 @@ final class CoreTextMetalRenderer {
     /// default bg) comes from FrameState. Content comes from WindowContentRenderer
     /// via the gui_window_content (0x80) semantic rendering pipeline.
     func render(frameState: FrameState, fontManager: FontManager,
+                cursorBlinkVisible: Bool = true,
                 windowContents: [UInt16: GUIWindowContent] = [:],
                 themeColors: ThemeColors? = nil,
                 drawable: CAMetalDrawable, viewportSize: CGSize,
@@ -459,7 +460,7 @@ final class CoreTextMetalRenderer {
         // Horizontal scroll is already baked in. If the TUI rendering path is ever
         // removed for GUI frontends, cursor positioning will need to use the semantic
         // window's cursor_col and scroll_left instead.
-        if frameState.cursorVisible && frameState.cursorShape == .block {
+        if frameState.cursorVisible && cursorBlinkVisible && frameState.cursorShape == .block {
             let cursorRow = Float(frameState.cursorRow)
             let cursorCol = Float(frameState.cursorCol)
             let cursorPadding: Float = (frameState.gutterCol > 0 && frameState.cursorCol >= frameState.gutterCol)
@@ -611,7 +612,7 @@ final class CoreTextMetalRenderer {
         // Pass 6: Cursor overlay for beam and underline shapes.
         // Block cursor is drawn in pass 2 (before text) so text shows on top.
         // Beam and underline are drawn AFTER text so they overlay it.
-        if frameState.cursorVisible && frameState.cursorShape != .block {
+        if frameState.cursorVisible && cursorBlinkVisible && frameState.cursorShape != .block {
             let cursorRow = Float(frameState.cursorRow)
             let cursorCol = Float(frameState.cursorCol)
             let cursorPadding: Float = (frameState.gutterCol > 0 && frameState.cursorCol >= frameState.gutterCol)
