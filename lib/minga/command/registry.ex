@@ -105,6 +105,30 @@ defmodule Minga.Command.Registry do
   end
 
   @doc """
+  Registers a pre-built `%Command{}` struct.
+
+  Used by `Extension.Supervisor` to register commands declared via the
+  extension DSL (`command/3` macro), where the full struct (including
+  `requires_buffer`, `scope`, etc.) is built by the framework.
+  """
+  @spec register_command(server(), Command.t()) :: :ok
+  def register_command(server, %Command{} = cmd) do
+    GenServer.call(server, {:register, cmd})
+  end
+
+  @doc """
+  Removes a command by name.
+
+  Used by `Extension.Supervisor` to deregister commands when an extension
+  is stopped, preventing stale entries from pointing at purged modules.
+  No-op if the command doesn't exist.
+  """
+  @spec unregister(server(), atom()) :: :ok
+  def unregister(server, name) when is_atom(name) do
+    GenServer.call(server, {:unregister, name})
+  end
+
+  @doc """
   Looks up a command by name.
 
   Returns `{:ok, command}` if found, `:error` otherwise.
@@ -165,6 +189,12 @@ defmodule Minga.Command.Registry do
   @impl true
   def handle_call({:register, %Command{} = cmd}, _from, table) do
     :ets.insert(table, {cmd.name, cmd})
+    {:reply, :ok, table}
+  end
+
+  @impl true
+  def handle_call({:unregister, name}, _from, table) do
+    :ets.delete(table, name)
     {:reply, :ok, table}
   end
 

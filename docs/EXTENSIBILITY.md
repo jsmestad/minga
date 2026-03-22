@@ -351,6 +351,73 @@ The same `Buffer.Server` API that user extensions use (`apply_text_edits/2`, `co
 
 ---
 
+## Extension commands and keybindings
+
+Extensions declare commands and keybindings with the same DSL macros they use for options. The framework handles registration, deregistration on reload, and introspection. You never need to call `Minga.Command.Registry` or `Minga.Keymap.Active` directly.
+
+### The declarative path (recommended)
+
+```elixir
+defmodule MingaOrg do
+  use Minga.Extension
+
+  option :todo_keywords, :string_list,
+    default: ["TODO", "DONE"],
+    description: "TODO keyword cycle sequence"
+
+  command :org_cycle_todo, "Cycle TODO keyword",
+    execute: {MingaOrg.Todo, :cycle},
+    requires_buffer: true
+
+  command :org_toggle_checkbox, "Toggle checkbox",
+    execute: {MingaOrg.Checkbox, :toggle},
+    requires_buffer: true
+
+  keybind :normal, "SPC m t", :org_cycle_todo, "Cycle TODO", filetype: :org
+  keybind :normal, "SPC m x", :org_toggle_checkbox, "Toggle checkbox", filetype: :org
+  keybind :normal, "M-h", :org_promote_heading, "Promote heading", filetype: :org
+
+  # ...
+end
+```
+
+`command/3` takes a name, description, and keyword list. The `:execute` option is a `{Module, :function}` tuple. The function receives editor state and returns new state. If your command needs extension config (like `todo_keywords` above), read it at call time with `Minga.Config.Options.get_extension_option(:minga_org, :todo_keywords)`.
+
+`keybind/4` and `keybind/5` take a mode (`:normal`, `:insert`, `:visual`, or `:operator_pending`), a key string, a command name, a description, and optional keyword opts (`:filetype` for scoping). The key string format is the same as `bind` in your user config: `"SPC m t"`, `"M-h"`, `"C-j"`, `"TAB"`, etc.
+
+Both macros accumulate metadata at compile time. When the extension loads, the framework reads `__command_schema__/0` and `__keybind_schema__/0` and registers everything automatically. On reload, old registrations are cleaned up first.
+
+### The imperative path (for runtime-dynamic commands)
+
+The declarative macros handle the common case. For commands that can't be known at compile time (generated from user config, one per language server, etc.), the imperative APIs are equally supported:
+
+```elixir
+@impl true
+def init(config) do
+  # Register commands dynamically
+  for lang <- Keyword.get(config, :languages, []) do
+    name = :"format_#{lang}"
+    Minga.Command.Registry.register(
+      Minga.Command.Registry,
+      name,
+      "Format #{lang}",
+      fn state -> format_buffer(state, lang) end
+    )
+  end
+
+  # Register keybindings dynamically
+  Minga.Keymap.Active.bind(:normal, "SPC m f", :format_current, "Format buffer")
+
+  {:ok, %{}}
+end
+```
+
+These are the same APIs the framework uses internally. They write to the same ETS tables. Commands registered this way are immediately dispatchable and show up in the command palette.
+
+The DSL is syntactic sugar over these APIs, not a replacement. Use whichever fits your extension's needs.
+
+---
+
 ## Runtime grammar loading for extensions
 
 Extensions can ship tree-sitter grammar source files and have Minga compile and load them at runtime, enabling syntax highlighting for new languages without rebuilding the binary.
