@@ -297,7 +297,7 @@ jobs:
           import os, textwrap
           v = os.environ["VERSION"].lstrip("v")
           dmg_sha = os.environ["DMG_SHA"]
-          cask = f'''cask "minga-mac" do
+          cask = f'''cask "minga" do
             version "{v}"
             sha256 "{dmg_sha}"
 
@@ -310,12 +310,12 @@ jobs:
 
             zap trash: [
               "~/Library/Application Support/minga",
-              "~/Library/Preferences/com.minga.minga-mac.plist",
-              "~/Library/Caches/com.minga.minga-mac",
+              "~/Library/Preferences/com.minga.editor.plist",
+              "~/Library/Caches/com.minga.editor",
             ]
           end
           '''
-          with open("homebrew-tap/Casks/minga-mac.rb", "w") as f:
+          with open("homebrew-tap/Casks/minga.rb", "w") as f:
               f.write(textwrap.dedent(cask).lstrip())
           PYEOF
           else
