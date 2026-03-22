@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Hardened runtime entitlements for the Minga.app bundle.
+	     Required because the app embeds the BEAM VM, which uses
+	     JIT compilation at runtime. Without these entitlements,
+	     the app crashes on launch with hardened runtime enabled. -->
+
+	<!-- Allow the BEAM's JIT compiler to map writable+executable memory -->
+	<key>com.apple.security.cs.allow-jit</key>
+	<true/>
+
+	<!-- Allow loading OTP built-in shared libraries (e.g. crypto.so, ssl.so)
+	     that ship unsigned in the ERTS release bundled by Mix releases. -->
+	<key>com.apple.security.cs.disable-library-validation</key>
+	<true/>
+</dict>
+</plist>
