@@ -48,6 +48,10 @@ let OP_GUI_MINIBUFFER: UInt8 = 0x7F
 // GUI window content opcode (semantic rendering data for buffer windows)
 let OP_GUI_WINDOW_CONTENT: UInt8 = 0x80
 
+// GUI overlay opcodes (native popup rendering)
+let OP_GUI_HOVER_POPUP: UInt8 = 0x81
+let OP_GUI_SIGNATURE_HELP: UInt8 = 0x82
+
 // GUI theme color slot IDs
 let GUI_COLOR_EDITOR_BG: UInt8 = 0x01
 let GUI_COLOR_EDITOR_FG: UInt8 = 0x02

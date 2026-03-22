@@ -43,6 +43,8 @@ enum RenderCommand: Sendable {
     case guiWindowContent(data: GUIWindowContent)
     case guiToolManager(visible: Bool, filter: UInt8, selectedIndex: UInt16, tools: [GUIToolEntry])
     case guiMinibuffer(visible: Bool, mode: UInt8, cursorPos: UInt16, prompt: String, input: String, context: String, selectedIndex: UInt16, candidates: [GUIMinibufferCandidate])
+    case guiHoverPopup(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, focused: Bool, scrollOffset: UInt16, lines: [GUIHoverLine])
+    case guiSignatureHelp(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, activeSignature: UInt8, activeParameter: UInt8, signatures: [GUISignature])
 }
 
 // MARK: - Minibuffer data types
@@ -51,6 +53,64 @@ struct GUIMinibufferCandidate: Sendable {
     let matchScore: UInt8
     let label: String
     let description: String
+}
+
+// MARK: - Hover popup data types
+
+/// Markdown style for a hover text segment.
+enum GUIHoverStyle: UInt8, Sendable {
+    case plain = 0
+    case bold = 1
+    case italic = 2
+    case boldItalic = 3
+    case code = 4
+    case codeBlock = 5
+    case codeContent = 6
+    case header1 = 7
+    case header2 = 8
+    case header3 = 9
+    case blockquote = 10
+    case listBullet = 11
+    case rule = 12
+}
+
+/// Line type for hover content (block context).
+enum GUIHoverLineType: UInt8, Sendable {
+    case text = 0
+    case code = 1
+    case codeHeader = 2
+    case header = 3
+    case blockquote = 4
+    case listItem = 5
+    case rule = 6
+    case empty = 7
+}
+
+/// A styled text segment within a hover line.
+struct GUIHoverSegment: Sendable {
+    let style: GUIHoverStyle
+    let text: String
+}
+
+/// A line of hover content with its block type and styled segments.
+struct GUIHoverLine: Sendable {
+    let lineType: GUIHoverLineType
+    let segments: [GUIHoverSegment]
+}
+
+// MARK: - Signature help data types
+
+/// A parameter in a function signature.
+struct GUISignatureParameter: Sendable {
+    let label: String
+    let documentation: String
+}
+
+/// A function signature with its parameters.
+struct GUISignature: Sendable {
+    let label: String
+    let documentation: String
+    let parameters: [GUISignatureParameter]
 }
 
 // MARK: - Tool Manager data types
@@ -1419,6 +1479,105 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         return (.guiMinibuffer(visible: true, mode: mbMode, cursorPos: mbCursorPos,
                                 prompt: mbPrompt, input: mbInput, context: mbContext,
                                 selectedIndex: mbSelIndex, candidates: mbCandidates), mbPos - offset)
+
+    case OP_GUI_HOVER_POPUP:
+        // visible(1)
+        guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
+        let hVisible = data[rest] != 0
+        guard hVisible else {
+            return (.guiHoverPopup(visible: false, anchorRow: 0, anchorCol: 0,
+                                    focused: false, scrollOffset: 0, lines: []), 2)
+        }
+        // anchor_row(2) + anchor_col(2) + focused(1) + scroll_offset(2) + line_count(2)
+        guard data.count >= rest + 10 else { throw ProtocolDecodeError.malformed }
+        let hAnchorRow = readU16(data, rest + 1)
+        let hAnchorCol = readU16(data, rest + 3)
+        let hFocused = data[rest + 5] != 0
+        let hScrollOffset = readU16(data, rest + 6)
+        let hLineCount = Int(readU16(data, rest + 8))
+        var hPos = rest + 10
+        var hLines: [GUIHoverLine] = []
+        hLines.reserveCapacity(hLineCount)
+        for _ in 0..<hLineCount {
+            // line_type(1) + segment_count(2)
+            guard data.count >= hPos + 3 else { break }
+            let lineType = GUIHoverLineType(rawValue: data[hPos]) ?? .text
+            let segCount = Int(readU16(data, hPos + 1))
+            hPos += 3
+            var segments: [GUIHoverSegment] = []
+            segments.reserveCapacity(segCount)
+            for _ in 0..<segCount {
+                // style(1) + text_len(2) + text
+                guard data.count >= hPos + 3 else { break }
+                let style = GUIHoverStyle(rawValue: data[hPos]) ?? .plain
+                let textLen = Int(readU16(data, hPos + 1))
+                hPos += 3
+                guard data.count >= hPos + textLen else { break }
+                let text = String(data: data[hPos..<(hPos + textLen)], encoding: .utf8) ?? ""
+                hPos += textLen
+                segments.append(GUIHoverSegment(style: style, text: text))
+            }
+            hLines.append(GUIHoverLine(lineType: lineType, segments: segments))
+        }
+        return (.guiHoverPopup(visible: true, anchorRow: hAnchorRow, anchorCol: hAnchorCol,
+                                focused: hFocused, scrollOffset: hScrollOffset, lines: hLines),
+                hPos - offset)
+
+    case OP_GUI_SIGNATURE_HELP:
+        // visible(1)
+        guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
+        let shVisible = data[rest] != 0
+        guard shVisible else {
+            return (.guiSignatureHelp(visible: false, anchorRow: 0, anchorCol: 0,
+                                      activeSignature: 0, activeParameter: 0, signatures: []), 2)
+        }
+        // anchor_row(2) + anchor_col(2) + active_signature(1) + active_parameter(1) + signature_count(1)
+        guard data.count >= rest + 8 else { throw ProtocolDecodeError.malformed }
+        let shAnchorRow = readU16(data, rest + 1)
+        let shAnchorCol = readU16(data, rest + 3)
+        let shActiveSig = data[rest + 5]
+        let shActiveParam = data[rest + 6]
+        let shSigCount = Int(data[rest + 7])
+        var shPos = rest + 8
+        var signatures: [GUISignature] = []
+        signatures.reserveCapacity(shSigCount)
+        for _ in 0..<shSigCount {
+            // label_len(2) + label
+            guard data.count >= shPos + 2 else { break }
+            let labelLen = Int(readU16(data, shPos)); shPos += 2
+            guard data.count >= shPos + labelLen else { break }
+            let label = String(data: data[shPos..<(shPos + labelLen)], encoding: .utf8) ?? ""
+            shPos += labelLen
+            // doc_len(2) + doc
+            guard data.count >= shPos + 2 else { break }
+            let docLen = Int(readU16(data, shPos)); shPos += 2
+            guard data.count >= shPos + docLen else { break }
+            let doc = String(data: data[shPos..<(shPos + docLen)], encoding: .utf8) ?? ""
+            shPos += docLen
+            // param_count(1)
+            guard data.count >= shPos + 1 else { break }
+            let paramCount = Int(data[shPos]); shPos += 1
+            var params: [GUISignatureParameter] = []
+            params.reserveCapacity(paramCount)
+            for _ in 0..<paramCount {
+                // label_len(2) + label + doc_len(2) + doc
+                guard data.count >= shPos + 2 else { break }
+                let pLabelLen = Int(readU16(data, shPos)); shPos += 2
+                guard data.count >= shPos + pLabelLen else { break }
+                let pLabel = String(data: data[shPos..<(shPos + pLabelLen)], encoding: .utf8) ?? ""
+                shPos += pLabelLen
+                guard data.count >= shPos + 2 else { break }
+                let pDocLen = Int(readU16(data, shPos)); shPos += 2
+                guard data.count >= shPos + pDocLen else { break }
+                let pDoc = String(data: data[shPos..<(shPos + pDocLen)], encoding: .utf8) ?? ""
+                shPos += pDocLen
+                params.append(GUISignatureParameter(label: pLabel, documentation: pDoc))
+            }
+            signatures.append(GUISignature(label: label, documentation: doc, parameters: params))
+        }
+        return (.guiSignatureHelp(visible: true, anchorRow: shAnchorRow, anchorCol: shAnchorCol,
+                                   activeSignature: shActiveSig, activeParameter: shActiveParam,
+                                   signatures: signatures), shPos - offset)
 
     default:
         throw ProtocolDecodeError.unknownOpcode(opcode)

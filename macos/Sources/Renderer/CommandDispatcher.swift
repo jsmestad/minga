@@ -307,6 +307,29 @@ final class CommandDispatcher {
             } else {
                 guiState.minibufferState.hide()
             }
+
+        case .guiHoverPopup(let visible, let anchorRow, let anchorCol,
+                             let focused, let scrollOffset, let lines):
+            if visible {
+                guiState.hoverPopupState.update(
+                    visible: true, anchorRow: anchorRow, anchorCol: anchorCol,
+                    focused: focused, scrollOffset: scrollOffset, rawLines: lines
+                )
+            } else {
+                guiState.hoverPopupState.hide()
+            }
+
+        case .guiSignatureHelp(let visible, let anchorRow, let anchorCol,
+                                let activeSignature, let activeParameter, let signatures):
+            if visible {
+                guiState.signatureHelpState.update(
+                    visible: true, anchorRow: anchorRow, anchorCol: anchorCol,
+                    activeSignature: activeSignature, activeParameter: activeParameter,
+                    rawSignatures: signatures
+                )
+            } else {
+                guiState.signatureHelpState.hide()
+            }
         }
     }
 

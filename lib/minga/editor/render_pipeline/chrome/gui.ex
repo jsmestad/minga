@@ -95,15 +95,10 @@ defmodule Minga.Editor.RenderPipeline.Chrome.GUI do
 
   @spec build_overlays(state()) :: [Overlay.t()]
   defp build_overlays(state) do
-    hover_draws = Chrome.render_hover_popup(state)
-    sig_help_draws = Chrome.render_signature_help(state)
+    # Hover popup and signature help are now sent via dedicated GUI
+    # opcodes (0x81, 0x82) and rendered natively by SwiftUI.
+    # Only float popups still go through the overlay draw path.
     float_overlays = PopupLifecycle.render_float_overlays(state)
-
-    (float_overlays ++
-       [
-         %Overlay{draws: hover_draws},
-         %Overlay{draws: sig_help_draws}
-       ])
-    |> Enum.reject(fn %Overlay{draws: d} -> d == [] end)
+    Enum.reject(float_overlays, fn %Overlay{draws: d} -> d == [] end)
   end
 end

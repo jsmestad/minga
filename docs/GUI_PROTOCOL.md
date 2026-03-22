@@ -35,7 +35,7 @@ The BEAM checks `Capabilities.gui?` (true when `frontend_type == :native_gui`) t
 
 ## GUI Render Opcodes (BEAM → Frontend)
 
-GUI chrome opcodes live in the range 0x70-0x7F. GUI content opcodes (semantic buffer rendering) start at 0x80. Frontends can classify an opcode as GUI by checking `opcode >= 0x70`.
+GUI chrome opcodes live in the range 0x70-0x7F. GUI content opcodes (semantic buffer rendering, overlays) start at 0x80. Frontends can classify an opcode as GUI by checking `opcode >= 0x70`.
 
 ### 0x70 — gui_file_tree
 
@@ -537,7 +537,45 @@ The frontend renders selection and search matches as Metal quads behind text (no
 
 `content_hash` is a per-row hash computed by the BEAM. The frontend uses it for CTLine texture cache invalidation: if the hash matches, the cached texture is reused without re-rasterization.
 
-When `gui_window_content` is present for a window, the BEAM does not send draw_text commands for that window's buffer content. Overlays (hover popups, signature help) continue as draw_text. Gutter data (0x7B), cursorline (0x7A), and cursor position continue through their existing opcodes.
+When `gui_window_content` is present for a window, the BEAM does not send draw_text commands for that window's buffer content. Overlays (hover popups, signature help) have dedicated GUI opcodes (0x81, 0x82) and are rendered natively by SwiftUI. Gutter data (0x7B), cursorline (0x7A), and cursor position continue through their existing opcodes.
+
+### 0x81 — gui_hover_popup
+
+Native hover tooltip popup for LSP hover content. Sends parsed markdown content as styled segments so the GUI frontend can render with native text layout. Positioned at the anchor token; the frontend handles above/below flip logic.
+
+```
+opcode(1) + visible(1) + anchor_row(2) + anchor_col(2) + focused(1) + scroll_offset(2) + line_count(2) + lines...
+
+Per line:
+  line_type(1) + segment_count(2) + segments...
+
+Per segment:
+  style(1) + text_len(2) + text(text_len)
+
+Line types: 0=text, 1=code, 2=code_header, 3=header, 4=blockquote, 5=list_item, 6=rule, 7=empty
+
+Segment styles: 0=plain, 1=bold, 2=italic, 3=bold_italic, 4=code, 5=code_block, 6=code_content, 7=header1, 8=header2, 9=header3, 10=blockquote, 11=list_bullet, 12=rule
+
+When visible=0, no further fields are sent. The frontend hides the popup.
+When focused=1, the popup border uses the accent color and scrolling is enabled.
+```
+
+### 0x82 — gui_signature_help
+
+LSP signature help popup showing the active function signature with parameter highlighting. Positioned above the cursor. Supports multiple overloaded signatures with cycling.
+
+```
+opcode(1) + visible(1) + anchor_row(2) + anchor_col(2) + active_signature(1) + active_parameter(1) + signature_count(1) + signatures...
+
+Per signature:
+  label_len(2) + label(label_len) + doc_len(2) + doc(doc_len) + param_count(1) + params...
+
+Per parameter:
+  label_len(2) + label(label_len) + doc_len(2) + doc(doc_len)
+
+When visible=0, no further fields are sent. The frontend hides the popup.
+The frontend highlights the active parameter (identified by `active_parameter` index) within the active signature's label string by matching the parameter label as a substring.
+```
 
 ## GUI Action Input Opcode (Frontend → BEAM)
 
@@ -673,7 +711,7 @@ A GUI frontend must satisfy these requirements:
 
 2. **Render cell-grid commands to a pixel surface** (Metal, OpenGL, Vulkan). The BEAM sends editor content (buffer text, gutter, modeline for splits, minibuffer) as cell-grid commands. The GUI frontend must maintain a cell grid and render it to a texture/surface.
 
-3. **Render GUI chrome natively.** Tab bar, file tree, status bar, breadcrumb, which-key, completion, picker, and agent chat should be rendered using native UI frameworks (SwiftUI, GTK4, Qt). Do not render them from the cell grid.
+3. **Render GUI chrome natively.** Tab bar, file tree, status bar, breadcrumb, which-key, completion, picker, agent chat, hover popup, and signature help should be rendered using native UI frameworks (SwiftUI, GTK4, Qt). Do not render them from the cell grid.
 
 4. **Send `gui_action` events for user interactions with chrome.** When a user clicks a tab, selects a completion item, or toggles a panel, encode the action and send it to the BEAM on stdout.
 

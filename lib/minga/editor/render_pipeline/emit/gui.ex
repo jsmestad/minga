@@ -68,7 +68,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
           Enum.map(frame.windows, fn wf ->
             # Buffer windows with semantic content get their text from the
             # 0x80 opcode, not draw_text. Strip lines + tilde_lines so
-            # the cell-grid only carries overlays (hover, signature help).
+            # the cell-grid only carries separators and cursor commands.
             # Agent chat windows don't have semantic content and keep their draws.
             if wf.semantic != nil do
               %{wf | gutter: %{}, lines: %{}, tilde_lines: %{}}
@@ -137,7 +137,9 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
         build_gui_status_bar_cmd(state, sb_data),
         build_gui_picker_cmd(state),
         build_gui_agent_chat_cmd(state),
-        build_gui_minibuffer_cmd(state, minibuffer_data)
+        build_gui_minibuffer_cmd(state, minibuffer_data),
+        build_gui_hover_popup_cmd(state),
+        build_gui_signature_help_cmd(state)
       ]
       |> Enum.reject(&is_nil/1)
 
@@ -794,6 +796,30 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
       :modified -> :git_modified
       :deleted -> :git_deleted
       _ -> :none
+    end
+  end
+
+  # ── Hover popup ──
+
+  @spec build_gui_hover_popup_cmd(state()) :: binary() | nil
+  defp build_gui_hover_popup_cmd(%{hover_popup: popup}) do
+    fp = :erlang.phash2(popup)
+
+    if fp != Process.get(:last_gui_hover_popup_fp) do
+      Process.put(:last_gui_hover_popup_fp, fp)
+      ProtocolGUI.encode_gui_hover_popup(popup)
+    end
+  end
+
+  # ── Signature help ──
+
+  @spec build_gui_signature_help_cmd(state()) :: binary() | nil
+  defp build_gui_signature_help_cmd(%{signature_help: sh}) do
+    fp = :erlang.phash2(sh)
+
+    if fp != Process.get(:last_gui_signature_help_fp) do
+      Process.put(:last_gui_signature_help_fp, fp)
+      ProtocolGUI.encode_gui_signature_help(sh)
     end
   end
 
