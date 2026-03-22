@@ -44,7 +44,7 @@ enum RenderCommand: Sendable {
                          entries: [GUIMessageEntry])
     case guiWindowContent(data: GUIWindowContent)
     case guiToolManager(visible: Bool, filter: UInt8, selectedIndex: UInt16, tools: [GUIToolEntry])
-    case guiMinibuffer(visible: Bool, mode: UInt8, cursorPos: UInt16, prompt: String, input: String, context: String, selectedIndex: UInt16, candidates: [GUIMinibufferCandidate])
+    case guiMinibuffer(visible: Bool, mode: UInt8, cursorPos: UInt16, prompt: String, input: String, context: String, selectedIndex: UInt16, totalCandidates: UInt16, candidates: [GUIMinibufferCandidate])
     case guiHoverPopup(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, focused: Bool, scrollOffset: UInt16, lines: [GUIHoverLine])
     case guiSignatureHelp(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, activeSignature: UInt8, activeParameter: UInt8, signatures: [GUISignature])
     case guiFloatPopup(visible: Bool, width: UInt16, height: UInt16, title: String, lines: [String])
@@ -1464,7 +1464,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         let mbVisible = data[rest] != 0
         guard mbVisible else {
             return (.guiMinibuffer(visible: false, mode: 0, cursorPos: 0xFFFF, prompt: "",
-                                    input: "", context: "", selectedIndex: 0, candidates: []), 2)
+                                    input: "", context: "", selectedIndex: 0, totalCandidates: 0, candidates: []), 2)
         }
         // mode(1) + cursor_pos(2) + prompt_len(1)
         guard data.count >= rest + 5 else { throw ProtocolDecodeError.malformed }
@@ -1488,10 +1488,11 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         guard data.count >= mbPos + mbContextLen else { throw ProtocolDecodeError.malformed }
         let mbContext = String(data: data[mbPos..<(mbPos + mbContextLen)], encoding: .utf8) ?? ""
         mbPos += mbContextLen
-        // selected_index(2) + candidate_count(2)
-        guard data.count >= mbPos + 4 else { throw ProtocolDecodeError.malformed }
+        // selected_index(2) + candidate_count(2) + total_candidates(2)
+        guard data.count >= mbPos + 6 else { throw ProtocolDecodeError.malformed }
         let mbSelIndex = readU16(data, mbPos); mbPos += 2
         let mbCandCount = Int(readU16(data, mbPos)); mbPos += 2
+        let mbTotalCandidates = readU16(data, mbPos); mbPos += 2
         // candidates
         var mbCandidates: [GUIMinibufferCandidate] = []
         mbCandidates.reserveCapacity(mbCandCount)
@@ -1528,7 +1529,8 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         }
         return (.guiMinibuffer(visible: true, mode: mbMode, cursorPos: mbCursorPos,
                                 prompt: mbPrompt, input: mbInput, context: mbContext,
-                                selectedIndex: mbSelIndex, candidates: mbCandidates), mbPos - offset)
+                                selectedIndex: mbSelIndex, totalCandidates: mbTotalCandidates,
+                                candidates: mbCandidates), mbPos - offset)
 
     case OP_GUI_HOVER_POPUP:
         // visible(1)

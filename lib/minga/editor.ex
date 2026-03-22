@@ -1824,7 +1824,7 @@ defmodule Minga.Editor do
   defp handle_gui_action(state, {:minibuffer_select, index}) do
     case state.vim do
       %{mode: :command, mode_state: ms} ->
-        candidates = MinibufferData.complete_ex_command(ms.input)
+        {candidates, _total} = MinibufferData.complete_ex_command(ms.input)
         clamped = MinibufferData.clamp_index(index, length(candidates))
 
         case Enum.at(candidates, clamped) do

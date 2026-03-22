@@ -28,15 +28,48 @@ struct MinibufferView: View {
                 candidateList
             }
 
-            // Top border
+            // Count indicator (when more results exist than visible)
+            if state.totalCandidates > state.candidates.count {
+                HStack {
+                    Spacer()
+                    Text("↕ \(state.candidates.count) of \(state.totalCandidates)")
+                        .font(.system(size: 10))
+                        .foregroundStyle(theme.popupFg.opacity(0.3))
+                        .padding(.trailing, 12)
+                        .padding(.vertical, 2)
+                }
+            }
+
+            // Top border (fully opaque when Increase Contrast is on)
             Rectangle()
-                .fill(theme.popupBorder.opacity(0.3))
+                .fill(theme.popupBorder.opacity(
+                    NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast ? 1.0 : 0.3
+                ))
                 .frame(height: 1)
 
             // Input bar
             inputBar
         }
-        .background(theme.popupBg)
+        .background {
+            // Frosted-glass vibrancy with theme tint overlay for color consistency.
+            // When Increase Contrast is on, use solid bg for readability.
+            if NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast {
+                theme.popupBg
+            } else {
+                ZStack {
+                    Color.clear.background(.ultraThinMaterial)
+                    theme.popupBg.opacity(0.6)
+                }
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Minibuffer")
+        .onChange(of: state.visible) { _, visible in
+            NSAccessibility.post(
+                element: NSApp.mainWindow as Any,
+                notification: visible ? .layoutChanged : .layoutChanged
+            )
+        }
     }
 
     // MARK: - Input bar
@@ -71,6 +104,10 @@ struct MinibufferView: View {
             Spacer().frame(width: 12)
         }
         .frame(height: barHeight)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(state.prompt)
+        .accessibilityValue(state.input)
+        .accessibilityAddTraits(state.isInputMode ? .isSearchField : .isStaticText)
     }
 
     // MARK: - Input text with blinking cursor
@@ -126,6 +163,7 @@ struct MinibufferView: View {
                         RoundedRectangle(cornerRadius: 4)
                             .fill(theme.popupFg.opacity(0.1))
                     )
+                    .accessibilityLabel("Press \(key)")
             }
 
             if !countPart.isEmpty {
@@ -134,6 +172,7 @@ struct MinibufferView: View {
                     .foregroundStyle(theme.popupFg.opacity(0.35))
             }
         }
+        .accessibilityElement(children: .contain)
     }
 
     // MARK: - Candidate list
@@ -157,6 +196,7 @@ struct MinibufferView: View {
                 }
             }
         }
+        .accessibilityLabel("\(state.candidates.count) results")
     }
 
     @ViewBuilder
@@ -207,6 +247,17 @@ struct MinibufferView: View {
             encoder?.sendMinibufferSelect(index: UInt16(candidate.id))
         }
         .id(candidate.id)
+        .transition(.opacity)
+        .animation(
+            SystemBlinkTiming.blinkingDisabled
+                ? nil
+                : .easeOut(duration: 0.15).delay(Double(candidate.id) * 0.02),
+            value: state.inputVersion
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(candidate.label)
+        .accessibilityValue(candidate.description)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
     @ViewBuilder

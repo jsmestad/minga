@@ -195,7 +195,7 @@ defmodule Minga.Editor.MinibufferDataTest do
 
   describe "complete_ex_command/1 scoring" do
     test "exact match ranks first" do
-      candidates = MinibufferData.complete_ex_command("save")
+      {candidates, _total} = MinibufferData.complete_ex_command("save")
       labels = Enum.map(candidates, & &1.label)
 
       # "save" should be first (exact match scores highest)
@@ -204,7 +204,7 @@ defmodule Minga.Editor.MinibufferDataTest do
 
     test "prefix matches rank above substring matches" do
       # "quit" is a prefix match for "quit"; "force_quit" contains "quit" as substring
-      candidates = MinibufferData.complete_ex_command("quit")
+      {candidates, _total} = MinibufferData.complete_ex_command("quit")
       labels = Enum.map(candidates, & &1.label)
 
       quit_idx = Enum.find_index(labels, &(&1 == "quit"))
@@ -216,13 +216,13 @@ defmodule Minga.Editor.MinibufferDataTest do
     end
 
     test "no match returns empty list" do
-      candidates = MinibufferData.complete_ex_command("zzzzzzxyz")
+      {candidates, _total} = MinibufferData.complete_ex_command("zzzzzzxyz")
       assert candidates == []
     end
 
     test "shorter names rank higher within same tier" do
       # Both "quit" and "quit_all" are prefix matches for "qui"
-      candidates = MinibufferData.complete_ex_command("qui")
+      {candidates, _total} = MinibufferData.complete_ex_command("qui")
       labels = Enum.map(candidates, & &1.label)
 
       quit_idx = Enum.find_index(labels, &(&1 == "quit"))
@@ -234,12 +234,12 @@ defmodule Minga.Editor.MinibufferDataTest do
     end
 
     test "candidates capped at 15" do
-      candidates = MinibufferData.complete_ex_command("")
+      {candidates, _total} = MinibufferData.complete_ex_command("")
       assert length(candidates) <= 15
     end
 
     test "all candidates have required fields" do
-      candidates = MinibufferData.complete_ex_command("save")
+      {candidates, _total} = MinibufferData.complete_ex_command("save")
 
       for c <- candidates do
         assert is_binary(c.label)
@@ -247,6 +247,37 @@ defmodule Minga.Editor.MinibufferDataTest do
         assert is_integer(c.match_score)
         assert c.match_score >= 0 and c.match_score <= 255
       end
+    end
+
+    test "match_positions reflect matched character indices for exact match" do
+      {candidates, _total} = MinibufferData.complete_ex_command("save")
+      save = Enum.find(candidates, &(&1.label == "save"))
+      assert save != nil
+      # Exact match: all 4 characters at positions 0-3
+      assert save.match_positions == [0, 1, 2, 3]
+    end
+
+    test "match_positions for partial query show correct indices" do
+      {candidates, _total} = MinibufferData.complete_ex_command("sa")
+      save = Enum.find(candidates, &(&1.label == "save"))
+      assert save != nil
+      assert save.match_positions == [0, 1]
+    end
+
+    test "annotation is a string on every candidate" do
+      {candidates, _total} = MinibufferData.complete_ex_command("save")
+
+      for c <- candidates do
+        assert is_binary(c.annotation)
+      end
+    end
+
+    test "total_candidates reflects uncapped match count" do
+      {candidates, total} = MinibufferData.complete_ex_command("")
+      # Empty query returns popular commands (capped at 15)
+      assert length(candidates) <= 15
+      # Total should be >= candidates since it's the uncapped count
+      assert total >= length(candidates)
     end
   end
 end

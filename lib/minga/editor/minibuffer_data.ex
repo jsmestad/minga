@@ -37,7 +37,8 @@ defmodule Minga.Editor.MinibufferData do
           input: String.t(),
           context: String.t(),
           selected_index: non_neg_integer(),
-          candidates: [candidate()]
+          candidates: [candidate()],
+          total_candidates: non_neg_integer()
         }
 
   @enforce_keys [:visible]
@@ -48,7 +49,8 @@ defmodule Minga.Editor.MinibufferData do
             input: "",
             context: "",
             selected_index: 0,
-            candidates: []
+            candidates: [],
+            total_candidates: 0
 
   # Mode constants matching the protocol spec
   @mode_command 0
@@ -88,7 +90,7 @@ defmodule Minga.Editor.MinibufferData do
 
   def from_state(%{vim: %{mode: :command, mode_state: ms}}) do
     input = ms.input
-    candidates = complete_ex_command(input)
+    {candidates, total} = complete_ex_command(input)
     raw_index = ms.candidate_index
     selected = clamp_index(raw_index, length(candidates))
 
@@ -100,7 +102,8 @@ defmodule Minga.Editor.MinibufferData do
       input: input,
       context: "",
       selected_index: selected,
-      candidates: candidates
+      candidates: candidates,
+      total_candidates: total
     }
   end
 
@@ -227,40 +230,49 @@ defmodule Minga.Editor.MinibufferData do
   Queries the command registry and fuzzy-matches against the input.
   Returns up to `@max_candidates` results sorted by match quality.
   """
-  @spec complete_ex_command(String.t()) :: [candidate()]
+  @spec complete_ex_command(String.t()) :: {[candidate()], non_neg_integer()}
   def complete_ex_command(""), do: popular_commands()
 
   def complete_ex_command(input) do
     input_lower = String.downcase(input)
     keybind_map = build_keybind_map()
 
-    CommandRegistry.all(CommandRegistry)
-    |> Enum.map(fn %Command{} = cmd ->
-      name = to_string(cmd.name)
-      score = fuzzy_score(name, input_lower)
-      {cmd, name, score}
-    end)
-    |> Enum.filter(fn {_cmd, _name, score} -> score > 0 end)
-    |> Enum.sort_by(fn {_cmd, _name, score} -> score end, :desc)
-    |> Enum.take(@max_candidates)
-    |> Enum.map(fn {cmd, name, score} ->
-      %{
-        label: name,
-        description: cmd.description || "",
-        match_score: min(score, 255),
-        match_positions: find_match_positions(name, input_lower),
-        annotation: Map.get(keybind_map, cmd.name, "")
-      }
-    end)
+    matched =
+      CommandRegistry.all(CommandRegistry)
+      |> Enum.map(fn %Command{} = cmd ->
+        name = to_string(cmd.name)
+        score = fuzzy_score(name, input_lower)
+        {cmd, name, score}
+      end)
+      |> Enum.filter(fn {_cmd, _name, score} -> score > 0 end)
+      |> Enum.sort_by(fn {_cmd, _name, score} -> score end, :desc)
+
+    total = length(matched)
+
+    candidates =
+      matched
+      |> Enum.take(@max_candidates)
+      |> Enum.map(fn {cmd, name, score} ->
+        %{
+          label: name,
+          description: cmd.description || "",
+          match_score: min(score, 255),
+          match_positions: find_match_positions(name, input_lower),
+          annotation: Map.get(keybind_map, cmd.name, "")
+        }
+      end)
+
+    {candidates, total}
   end
 
   # When input is empty, show commonly used commands
-  @spec popular_commands() :: [candidate()]
+  @spec popular_commands() :: {[candidate()], non_neg_integer()}
   defp popular_commands do
     popular = ~w(write quit edit save-buffer find-file split vsplit set help)a
     keybind_map = build_keybind_map()
 
     all = CommandRegistry.all(CommandRegistry)
+    total = length(all)
 
     popular_cmds =
       Enum.filter(all, fn cmd -> cmd.name in popular end)
@@ -272,17 +284,20 @@ defmodule Minga.Editor.MinibufferData do
       |> Enum.sort_by(fn cmd -> to_string(cmd.name) end)
       |> Enum.take(@max_candidates - length(popular_cmds))
 
-    (popular_cmds ++ remaining)
-    |> Enum.take(@max_candidates)
-    |> Enum.map(fn cmd ->
-      %{
-        label: to_string(cmd.name),
-        description: cmd.description || "",
-        match_score: 100,
-        match_positions: [],
-        annotation: Map.get(keybind_map, cmd.name, "")
-      }
-    end)
+    candidates =
+      (popular_cmds ++ remaining)
+      |> Enum.take(@max_candidates)
+      |> Enum.map(fn cmd ->
+        %{
+          label: to_string(cmd.name),
+          description: cmd.description || "",
+          match_score: 100,
+          match_positions: [],
+          annotation: Map.get(keybind_map, cmd.name, "")
+        }
+      end)
+
+    {candidates, total}
   end
 
   # Simple fuzzy scoring: prefix match gets highest score, then substring,

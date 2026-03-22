@@ -400,7 +400,7 @@ defmodule Minga.Editor.Commands do
   def execute(state, {:accept_command_candidate}) do
     case state.vim do
       %{mode: :command, mode_state: ms} ->
-        candidates = MinibufferData.complete_ex_command(ms.input)
+        {candidates, _total} = MinibufferData.complete_ex_command(ms.input)
         idx = MinibufferData.clamp_index(ms.candidate_index, length(candidates))
 
         case Enum.at(candidates, idx) do
