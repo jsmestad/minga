@@ -170,6 +170,11 @@ defmodule Minga.Editor.Commands.Git do
 
   # ── Private ────────────────────────────────────────────────────────────────
 
+  # Mutual exclusivity: close file tree when opening git status.
+  @spec close_file_tree_if_open(state()) :: state()
+  defp close_file_tree_if_open(%{file_tree: %{tree: nil}} = state), do: state
+  defp close_file_tree_if_open(state), do: Commands.FileTree.close(state)
+
   @spec open_diff_view(state(), pid(), pid()) :: state()
   defp open_diff_view(state, git_pid, buf) do
     git_root = GitBuffer.git_root(git_pid)
@@ -321,6 +326,9 @@ defmodule Minga.Editor.Commands.Git do
           behind: summary.behind,
           entries: entries
         }
+
+        # Mutual exclusivity: close file tree when opening git status
+        state = close_file_tree_if_open(state)
 
         %{state | keymap_scope: :git_status, git_status_panel: panel_data}
     end

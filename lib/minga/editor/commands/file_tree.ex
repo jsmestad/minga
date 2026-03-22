@@ -179,6 +179,15 @@ defmodule Minga.Editor.Commands.FileTree do
 
   # ── Private helpers ───────────────────────────────────────────────────────
 
+  # Mutual exclusivity: close git status panel when opening file tree.
+  # Explicitly resets keymap_scope to :editor so we don't leave orphaned
+  # :git_status scope if a future refactor separates the open steps.
+  @spec close_git_status_if_open(state()) :: state()
+  defp close_git_status_if_open(%{git_status_panel: nil} = state), do: state
+
+  defp close_git_status_if_open(state),
+    do: %{state | git_status_panel: nil, keymap_scope: :editor}
+
   # Opens a file from the tree, reusing an existing buffer when one exists
   # for the same path. Without the dedup check, the file tree creates
   # duplicate Buffer.Server processes for the same file, which causes stale
@@ -207,6 +216,8 @@ defmodule Minga.Editor.Commands.FileTree do
 
   @spec open(state()) :: state()
   defp open(state) do
+    state = close_git_status_if_open(state)
+
     root = Minga.Project.root() || File.cwd!()
     tree = FileTree.new(root)
     tree = FileTree.refresh_git_status(tree)

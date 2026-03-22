@@ -120,167 +120,210 @@ struct StartupOverlay: View {
 
 /// ContentView observes AppState and switches from a placeholder to the
 /// editor surface once the AppDelegate finishes initialization.
+///
+/// Layout hierarchy:
+///   ZStack {
+///     VStack { HStack { sidebar, editorPane }, statusBar }  // chrome
+///     windowOverlays                                         // floating UI
+///   }
 struct ContentView: View {
     @ObservedObject var appState: AppState
     @State private var rightPaneHeight: CGFloat = 600
 
     var body: some View {
         ZStack {
-        HStack(spacing: 0) {
-            // Left sidebar (file tree or git status)
-            if appState.gui.fileTreeState.visible || appState.gui.gitStatusState.visible {
-                SidebarContainer(
-                    fileTreeState: appState.gui.fileTreeState,
-                    gitStatusState: appState.gui.gitStatusState,
-                    theme: appState.gui.themeColors,
-                    encoder: appState.encoder
-                )
-
-                // 1px separator between sidebar and editor
-                Rectangle()
-                    .fill(appState.gui.themeColors.treeSeparatorFg)
-                    .frame(width: 1)
-            }
-
-            // Right pane: tab bar + breadcrumb + editor + status bar
             VStack(spacing: 0) {
-                // Native tab bar
-                if !appState.gui.tabBarState.tabs.isEmpty {
-                    TabBarView(
-                        tabBarState: appState.gui.tabBarState,
-                        theme: appState.gui.themeColors,
-                        encoder: appState.encoder
-                    )
+                HStack(spacing: 0) {
+                    sidebar
+                    editorPane
                 }
-
-                // Breadcrumb path bar
-                BreadcrumbBar(
-                    state: appState.gui.breadcrumbState,
-                    theme: appState.gui.themeColors,
-                    encoder: appState.encoder
-                )
-
-                // Editor surface (Metal) with optional agent chat overlay
-                ZStack(alignment: .topLeading) {
-                    // Metal editor surface (always present for input handling)
-                    Group {
-                        if let nsView = appState.editorNSView {
-                            EditorView(editorNSView: nsView)
-                        } else {
-                            Color(red: 0.12, green: 0.12, blue: 0.14)
-                        }
-                    }
-                    // Show the agent view on top when visible. Keeping the
-                    // metal view underneath means EditorNSView stays in the
-                    // responder chain for keyboard input.
-                    .opacity(appState.gui.agentChatState.visible ? 0 : 1)
-                    .onChange(of: appState.gui.agentChatState.visible) { _, visible in
-                        appState.editorNSView?.setAgentChatVisible(visible)
-                    }
-
-                    if appState.gui.agentChatState.visible {
-                        AgentChatView(
-                            state: appState.gui.agentChatState,
-                            theme: appState.gui.themeColors,
-                            isInsertMode: appState.gui.statusBarState.isInsertMode,
-                            encoder: appState.encoder
-                        )
-                    }
-
-                    // Completion overlay (positioned at cursor)
-                    if appState.gui.completionState.visible {
-                        let cw = CGFloat(appState.editorNSView?.cellWidth ?? 8)
-                        let ch = CGFloat(appState.editorNSView?.cellHeight ?? 16)
-                        let x = CGFloat(appState.gui.completionState.anchorCol) * cw
-                        let y = (CGFloat(appState.gui.completionState.anchorRow) + 1) * ch
-
-                        CompletionOverlay(
-                            state: appState.gui.completionState,
-                            theme: appState.gui.themeColors,
-                            encoder: appState.encoder,
-                            cellWidth: cw,
-                            cellHeight: ch
-                        )
-                        .offset(x: x, y: y)
-                    }
-
-                    // Overlay shared dimensions (computed once for all overlays)
-                    let overlayCW = CGFloat(appState.editorNSView?.cellWidth ?? 8)
-                    let overlayCH = CGFloat(appState.editorNSView?.cellHeight ?? 16)
-                    let overlayVPW = CGFloat(appState.editorNSView?.bounds.width ?? 800)
-
-                    // Signature help overlay (lowest overlay z-order)
-                    if appState.gui.signatureHelpState.visible {
-                        SignatureHelpOverlay(
-                            state: appState.gui.signatureHelpState,
-                            theme: appState.gui.themeColors,
-                            cellWidth: overlayCW,
-                            cellHeight: overlayCH,
-                            viewportHeight: rightPaneHeight,
-                            viewportWidth: overlayVPW
-                        )
-                    }
-
-                    // Hover popup overlay (above signature help, below completion)
-                    if appState.gui.hoverPopupState.visible {
-                        HoverPopupOverlay(
-                            state: appState.gui.hoverPopupState,
-                            theme: appState.gui.themeColors,
-                            cellWidth: overlayCW,
-                            cellHeight: overlayCH,
-                            viewportHeight: rightPaneHeight,
-                            viewportWidth: overlayVPW
-                        )
-                    }
-                }
-
-                // Bottom panel (between editor and status bar)
-                if appState.gui.bottomPanelState.visible {
-                    BottomPanelView(
-                        state: appState.gui.bottomPanelState,
-                        theme: appState.gui.themeColors,
-                        encoder: appState.encoder,
-                        availableHeight: rightPaneHeight
-                    )
-                }
-
-                // Native minibuffer (appears above status bar when active)
-                if appState.gui.minibufferState.visible {
-                    MinibufferView(
-                        state: appState.gui.minibufferState,
-                        theme: appState.gui.themeColors,
-                        encoder: appState.encoder
-                    )
-                    .transition(
-                        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-                            ? .opacity.animation(.easeInOut(duration: 0.1))
-                            : .move(edge: .bottom)
-                                .combined(with: .opacity)
-                                .animation(.easeInOut(duration: 0.15))
-                    )
-                }
-
-                // Status bar
-                StatusBarView(
-                    state: appState.gui.statusBarState,
-                    theme: appState.gui.themeColors,
-                    encoder: appState.encoder
-                )
+                statusBar
             }
-            .background(
-                GeometryReader { geo in
-                    Color.clear.preference(
-                        key: PaneHeightKey.self,
-                        value: geo.size.height
-                    )
-                }
-            )
-            .onPreferenceChange(PaneHeightKey.self) { height in
-                rightPaneHeight = height
-            }
-
+            windowOverlays
         }
+        .navigationTitle(appState.windowTitle)
+        .toolbarBackground(appState.windowBgColor ?? Color(red: 0.12, green: 0.12, blue: 0.14), for: .windowToolbar)
+        .toolbarBackground(.visible, for: .windowToolbar)
+        .toolbarColorScheme(appState.windowBgIsDark ? .dark : .light, for: .windowToolbar)
+        .preferredColorScheme(appState.windowBgIsDark ? .dark : .light)
+    }
 
+    // MARK: - Sidebar
+
+    @ViewBuilder
+    private var sidebar: some View {
+        if appState.gui.fileTreeState.visible || appState.gui.gitStatusState.visible {
+            SidebarContainer(
+                fileTreeState: appState.gui.fileTreeState,
+                gitStatusState: appState.gui.gitStatusState,
+                theme: appState.gui.themeColors,
+                encoder: appState.encoder
+            )
+
+            // 1px separator between sidebar and editor
+            Rectangle()
+                .fill(appState.gui.themeColors.treeSeparatorFg)
+                .frame(width: 1)
+        }
+    }
+
+    // MARK: - Editor Pane
+
+    private var editorPane: some View {
+        VStack(spacing: 0) {
+            // Native tab bar
+            if !appState.gui.tabBarState.tabs.isEmpty {
+                TabBarView(
+                    tabBarState: appState.gui.tabBarState,
+                    theme: appState.gui.themeColors,
+                    encoder: appState.encoder
+                )
+            }
+
+            // Breadcrumb path bar
+            BreadcrumbBar(
+                state: appState.gui.breadcrumbState,
+                theme: appState.gui.themeColors,
+                encoder: appState.encoder
+            )
+
+            // Editor surface (Metal) with overlays
+            editorSurface
+
+            // Bottom panel (between editor and status bar)
+            if appState.gui.bottomPanelState.visible {
+                BottomPanelView(
+                    state: appState.gui.bottomPanelState,
+                    theme: appState.gui.themeColors,
+                    encoder: appState.encoder,
+                    availableHeight: rightPaneHeight
+                )
+            }
+
+            // Native minibuffer (appears above status bar when active)
+            if appState.gui.minibufferState.visible {
+                MinibufferView(
+                    state: appState.gui.minibufferState,
+                    theme: appState.gui.themeColors,
+                    encoder: appState.encoder
+                )
+                .transition(
+                    NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+                        ? .opacity.animation(.easeInOut(duration: 0.1))
+                        : .move(edge: .bottom)
+                            .combined(with: .opacity)
+                            .animation(.easeInOut(duration: 0.15))
+                )
+            }
+        }
+        .background(
+            GeometryReader { geo in
+                Color.clear.preference(
+                    key: PaneHeightKey.self,
+                    value: geo.size.height
+                )
+            }
+        )
+        .onPreferenceChange(PaneHeightKey.self) { height in
+            rightPaneHeight = height
+        }
+    }
+
+    // MARK: - Editor Surface (Metal + editor-local overlays)
+
+    private var editorSurface: some View {
+        ZStack(alignment: .topLeading) {
+            // Metal editor surface (always present for input handling)
+            Group {
+                if let nsView = appState.editorNSView {
+                    EditorView(editorNSView: nsView)
+                } else {
+                    Color(red: 0.12, green: 0.12, blue: 0.14)
+                }
+            }
+            // Show the agent view on top when visible. Keeping the
+            // metal view underneath means EditorNSView stays in the
+            // responder chain for keyboard input.
+            .opacity(appState.gui.agentChatState.visible ? 0 : 1)
+            .onChange(of: appState.gui.agentChatState.visible) { _, visible in
+                appState.editorNSView?.setAgentChatVisible(visible)
+            }
+
+            if appState.gui.agentChatState.visible {
+                AgentChatView(
+                    state: appState.gui.agentChatState,
+                    theme: appState.gui.themeColors,
+                    isInsertMode: appState.gui.statusBarState.isInsertMode,
+                    encoder: appState.encoder
+                )
+            }
+
+            // Completion overlay (positioned at cursor)
+            if appState.gui.completionState.visible {
+                let cw = CGFloat(appState.editorNSView?.cellWidth ?? 8)
+                let ch = CGFloat(appState.editorNSView?.cellHeight ?? 16)
+                let x = CGFloat(appState.gui.completionState.anchorCol) * cw
+                let y = (CGFloat(appState.gui.completionState.anchorRow) + 1) * ch
+
+                CompletionOverlay(
+                    state: appState.gui.completionState,
+                    theme: appState.gui.themeColors,
+                    encoder: appState.encoder,
+                    cellWidth: cw,
+                    cellHeight: ch
+                )
+                .offset(x: x, y: y)
+            }
+
+            // Overlay shared dimensions (computed once for all overlays)
+            let overlayCW = CGFloat(appState.editorNSView?.cellWidth ?? 8)
+            let overlayCH = CGFloat(appState.editorNSView?.cellHeight ?? 16)
+            let overlayVPW = CGFloat(appState.editorNSView?.bounds.width ?? 800)
+
+            // Signature help overlay (lowest overlay z-order)
+            if appState.gui.signatureHelpState.visible {
+                SignatureHelpOverlay(
+                    state: appState.gui.signatureHelpState,
+                    theme: appState.gui.themeColors,
+                    cellWidth: overlayCW,
+                    cellHeight: overlayCH,
+                    viewportHeight: rightPaneHeight,
+                    viewportWidth: overlayVPW
+                )
+            }
+
+            // Hover popup overlay (above signature help, below completion)
+            if appState.gui.hoverPopupState.visible {
+                HoverPopupOverlay(
+                    state: appState.gui.hoverPopupState,
+                    theme: appState.gui.themeColors,
+                    cellWidth: overlayCW,
+                    cellHeight: overlayCH,
+                    viewportHeight: rightPaneHeight,
+                    viewportWidth: overlayVPW
+                )
+            }
+        }
+    }
+
+    // MARK: - Status Bar (full window width)
+
+    private var statusBar: some View {
+        StatusBarView(
+            state: appState.gui.statusBarState,
+            theme: appState.gui.themeColors,
+            encoder: appState.encoder,
+            isFileTreeVisible: appState.gui.fileTreeState.visible,
+            isGitStatusVisible: appState.gui.gitStatusState.visible,
+            isBottomPanelVisible: appState.gui.bottomPanelState.visible,
+            isAgentChatVisible: appState.gui.agentChatState.visible
+        )
+    }
+
+    // MARK: - Window Overlays (floating UI on top of everything)
+
+    @ViewBuilder
+    private var windowOverlays: some View {
         // Which-key overlay (center bottom of full window)
         VStack {
             Spacer()
@@ -327,12 +370,6 @@ struct ContentView: View {
             StartupOverlay()
                 .transition(.opacity)
         }
-        }
-        .navigationTitle(appState.windowTitle)
-        .toolbarBackground(appState.windowBgColor ?? Color(red: 0.12, green: 0.12, blue: 0.14), for: .windowToolbar)
-        .toolbarBackground(.visible, for: .windowToolbar)
-        .toolbarColorScheme(appState.windowBgIsDark ? .dark : .light, for: .windowToolbar)
-        .preferredColorScheme(appState.windowBgIsDark ? .dark : .light)
     }
 }
 
