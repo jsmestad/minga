@@ -148,6 +148,78 @@ defmodule Minga.Port.ManagerTest do
     end
   end
 
+  describe "ready event replay on late subscribe" do
+    test "late subscriber receives replayed ready event" do
+      name = unique_name()
+      pid = start_supervised!({Manager, name: name, renderer_path: "/nonexistent"}, id: name)
+
+      # Ready event arrives with no subscribers
+      ready_payload = <<0x03, 80::16, 24::16>>
+      send(pid, {nil, {:data, ready_payload}})
+      _ = :sys.get_state(pid)
+
+      # Subscribe after ready was already processed
+      :ok = Manager.subscribe(name)
+
+      assert_receive {:minga_input, {:ready, 80, 24}}
+    end
+
+    test "replayed ready uses current terminal size, not stale" do
+      name = unique_name()
+      pid = start_supervised!({Manager, name: name, renderer_path: "/nonexistent"}, id: name)
+
+      # Ready at 80x24, then resize to 120x40
+      send(pid, {nil, {:data, <<0x03, 80::16, 24::16>>}})
+      _ = :sys.get_state(pid)
+      send(pid, {nil, {:data, <<0x02, 120::16, 40::16>>}})
+      _ = :sys.get_state(pid)
+
+      :ok = Manager.subscribe(name)
+
+      # Should receive the current size (120x40), not the original (80x24)
+      assert_receive {:minga_input, {:ready, 120, 40}}
+      refute_receive {:minga_input, {:ready, 80, 24}}, 50
+    end
+
+    test "no spurious ready when port is not yet ready" do
+      name = unique_name()
+      start_supervised!({Manager, name: name, renderer_path: "/nonexistent"}, id: name)
+
+      :ok = Manager.subscribe(name)
+
+      refute_receive {:minga_input, {:ready, _, _}}, 50
+    end
+
+    test "late subscriber in connected mode receives replayed ready" do
+      name = unique_name()
+      {pid, fake_port} = start_connected(name)
+
+      # Ready arrives before any subscribers
+      ready_payload = <<0x03, 80::16, 24::16>>
+      send(pid, {fake_port, {:data, ready_payload}})
+      _ = :sys.get_state(pid)
+
+      :ok = Manager.subscribe(name)
+
+      assert_receive {:minga_input, {:ready, 80, 24}}
+    end
+
+    test "no replay after port EOF clears ready state" do
+      name = unique_name()
+      {pid, fake_port} = start_connected(name)
+
+      # Ready, then EOF (GUI parent exited)
+      send(pid, {fake_port, {:data, <<0x03, 80::16, 24::16>>}})
+      _ = :sys.get_state(pid)
+      send(pid, {fake_port, :eof})
+      _ = :sys.get_state(pid)
+
+      :ok = Manager.subscribe(name)
+
+      refute_receive {:minga_input, {:ready, _, _}}, 50
+    end
+  end
+
   describe "subscriber cleanup" do
     test "removes subscriber when it exits" do
       name = unique_name()

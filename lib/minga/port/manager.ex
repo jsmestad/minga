@@ -113,7 +113,23 @@ defmodule Minga.Port.Manager do
   def handle_call({:subscribe, pid}, _from, state) do
     Process.monitor(pid)
     subscribers = [pid | state.subscribers] |> Enum.uniq()
-    {:reply, :ok, %{state | subscribers: subscribers}}
+    new_state = %{state | subscribers: subscribers}
+
+    # Replay the ready event to late subscribers. In connected mode
+    # (GUI frontend), the frontend may send the ready event before any
+    # subscriber registers. The event gets broadcast to an empty list
+    # and is lost. Replaying it here ensures the Editor always receives
+    # the initial dimensions and capabilities regardless of startup
+    # ordering.
+    case new_state do
+      %{ready: true, terminal_size: {width, height}} ->
+        send(pid, {:minga_input, {:ready, width, height}})
+
+      _ ->
+        :ok
+    end
+
+    {:reply, :ok, new_state}
   end
 
   def handle_call(:terminal_size, _from, state) do

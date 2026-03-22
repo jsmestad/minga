@@ -16,3 +16,25 @@ port_mode =
   end
 
 config :minga, port_mode: port_mode
+
+# Connected mode means the GUI app spawned us. Start the editor with
+# the GUI backend so the supervision tree boots Port.Manager, Editor,
+# and the parser. Without this, the BEAM process sits idle and the
+# Swift frontend sees only its default (empty) SwiftUI state.
+#
+# The default Erlang logger handler writes to :standard_io (stdout).
+# In connected mode, stdout is the binary protocol pipe to the Swift
+# frontend. Unframed log text would corrupt the {:packet, 4} protocol
+# stream, causing unknownOpcode decode errors on the Swift side.
+#
+# Redirect the default handler to the Minga log file. This matches
+# what LoggerHandler.install() does later during Editor.init, but
+# covers the startup window before the Editor is running.
+if port_mode == :connected do
+  config :minga, start_editor: true, backend: :gui
+
+  log_dir = Path.expand("~/.local/share/minga")
+  File.mkdir_p!(log_dir)
+  log_path = Path.join(log_dir, "minga.log")
+  config :logger, :default_handler, config: [type: {:file, String.to_charlist(log_path)}]
+end
