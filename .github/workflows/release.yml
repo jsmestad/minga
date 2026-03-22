@@ -164,10 +164,189 @@ jobs:
           path: burrito_out/${{ matrix.artifact }}
           if-no-files-found: error
 
+  # ── Build: macOS GUI app bundle (.app → signed DMG) ─────────────────
+  build-app:
+    name: Build macOS App
+    needs: [validate, ci]
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ env.OTP_VERSION }}
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Cache deps
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: app-deps-${{ runner.os }}-${{ runner.arch }}-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-${{ hashFiles('mix.lock') }}
+          restore-keys: app-deps-${{ runner.os }}-${{ runner.arch }}-${{ env.OTP_VERSION }}-${{ env.ELIXIR_VERSION }}-
+
+      - name: Cache Xcode DerivedData
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Developer/Xcode/DerivedData
+          key: xcode-${{ runner.os }}-${{ hashFiles('macos/Sources/**/*.swift', 'macos/Sources/**/*.metal', 'macos/project.yml') }}
+          restore-keys: xcode-${{ runner.os }}-
+
+      - run: mix deps.get --only prod
+
+      # Build the complete Minga.app bundle (BEAM release + Xcode build + assembly)
+      - name: Assemble Minga.app
+        run: MIX_ENV=prod mix app.assemble
+
+      # Locate the assembled .app bundle
+      - name: Find app bundle
+        id: find_app
+        run: |
+          APP_PATH=$(find ~/Library/Developer/Xcode/DerivedData -name "Minga.app" -path "*/Release/*" -type d | head -1)
+          if [ -z "$APP_PATH" ]; then
+            echo "::error::Minga.app not found in DerivedData"
+            exit 1
+          fi
+          echo "app_path=$APP_PATH" >> "$GITHUB_OUTPUT"
+          echo "Found: $APP_PATH"
+
+      # Import Developer ID certificate into a temporary keychain
+      - name: Import signing certificate
+        env:
+          DEVELOPER_ID_CERT: ${{ secrets.DEVELOPER_ID_APPLICATION_CERT }}
+          DEVELOPER_ID_PASSWORD: ${{ secrets.DEVELOPER_ID_APPLICATION_PASSWORD }}
+        run: |
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+
+          # Create temporary keychain
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          # Import certificate
+          echo "$DEVELOPER_ID_CERT" | base64 --decode > $RUNNER_TEMP/certificate.p12
+          security import $RUNNER_TEMP/certificate.p12 \
+            -P "$DEVELOPER_ID_PASSWORD" \
+            -A \
+            -t cert \
+            -f pkcs12 \
+            -k "$KEYCHAIN_PATH"
+
+          # Allow codesign to access the keychain
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          # Add to search list
+          security list-keychains -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | tr -d '"')
+
+          echo "keychain_path=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+
+      # Sign the app bundle with Developer ID (hardened runtime for notarization)
+      - name: Codesign Minga.app
+        run: |
+          set -euo pipefail
+          APP="${{ steps.find_app.outputs.app_path }}"
+
+          # Derive the signing identity from the just-imported keychain.
+          # This avoids hardcoding the developer name and fails fast if
+          # the certificate import didn't work.
+          IDENTITY=$(security find-identity -v -p codesigning "$keychain_path" \
+            | grep "Developer ID Application" | head -1 | sed 's/.*"\(.*\)"/\1/')
+          if [ -z "$IDENTITY" ]; then
+            echo "::error::No Developer ID Application cert found in keychain"
+            exit 1
+          fi
+          echo "Signing with: $IDENTITY"
+          ENTITLEMENTS="${{ github.workspace }}/macos/Entitlements.plist"
+
+          # Sign nested components first (per-component signing, not --deep)
+          find "$APP/Contents" \( -name "*.dylib" -o -name "*.framework" \) -print0 \
+            | xargs -0 -I{} codesign --force --options runtime --sign "$IDENTITY" "{}"
+
+          # Sign executable binaries inside the BEAM release with JIT entitlements.
+          # beam.smp is the binary that calls mmap(MAP_JIT); it needs the
+          # entitlement in its own code signature (entitlements are process-scoped).
+          # The || true skips non-Mach-O files (shell scripts, .beam bytecode).
+          find "$APP/Contents/Resources/release" -type f -perm /111 -print0 \
+            | xargs -0 -I{} sh -c 'codesign --force --options runtime --entitlements "'"$ENTITLEMENTS"'" --sign "'"$IDENTITY"'" "$1" 2>&1 || true' _ {}
+
+          # Sign the main executable and the bundle itself
+          codesign --force --options runtime --entitlements "$ENTITLEMENTS" --sign "$IDENTITY" "$APP"
+
+          # Verify
+          codesign --verify --deep --strict "$APP"
+          echo "Codesign verification passed"
+
+      # Create DMG
+      - name: Create DMG
+        run: |
+          APP="${{ steps.find_app.outputs.app_path }}"
+          DMG_PATH="$RUNNER_TEMP/Minga.dmg"
+
+          hdiutil create \
+            -volname "Minga" \
+            -srcfolder "$APP" \
+            -ov \
+            -format UDZO \
+            "$DMG_PATH"
+
+          echo "dmg_path=$DMG_PATH" >> "$GITHUB_ENV"
+
+      # Notarize the DMG
+      - name: Notarize DMG
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          xcrun notarytool submit "$dmg_path" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_ID_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+
+          # Staple the notarization ticket to the DMG
+          xcrun stapler staple "$dmg_path"
+          echo "Notarization and stapling complete"
+
+      # Clean up keychain
+      - name: Cleanup keychain
+        if: always()
+        run: |
+          if [ -f "$keychain_path" ]; then
+            security delete-keychain "$keychain_path"
+          fi
+
+      # Verify the DMG contains a valid app bundle before uploading
+      - name: Smoke test DMG
+        run: |
+          trap 'hdiutil detach /tmp/minga-verify 2>/dev/null || true' EXIT
+          hdiutil attach "$dmg_path" -mountpoint /tmp/minga-verify -nobrowse
+          test -d "/tmp/minga-verify/Minga.app"
+          test -f "/tmp/minga-verify/Minga.app/Contents/MacOS/Minga"
+          test -d "/tmp/minga-verify/Minga.app/Contents/Resources/release"
+          echo "DMG smoke test passed"
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: Minga_dmg
+          path: ${{ env.dmg_path }}
+          if-no-files-found: error
+
   # ── Release: create GitHub Release with all artifacts ──────────────────
   release:
     name: Create Release
-    needs: [validate, build]
+    needs: [validate, build, build-app]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -180,17 +359,25 @@ jobs:
       - name: Prepare binaries
         run: |
           mkdir -p release-binaries
+
+          # TUI/Burrito binaries
           for dir in release-artifacts/minga_*; do
             name=$(basename "$dir")
             cp "$dir/$name" "release-binaries/$name"
             chmod +x "release-binaries/$name"
           done
+
+          # macOS GUI DMG
+          if [ -d "release-artifacts/Minga_dmg" ]; then
+            cp release-artifacts/Minga_dmg/Minga.dmg release-binaries/Minga.dmg
+          fi
+
           ls -lh release-binaries/
 
       - name: Generate checksums
         run: |
           cd release-binaries
-          sha256sum minga_* > SHA256SUMS.txt
+          find . -maxdepth 1 -type f ! -name SHA256SUMS.txt -exec sha256sum {} + > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
       - name: Create GitHub Release
@@ -200,6 +387,7 @@ jobs:
           prerelease: ${{ needs.validate.outputs.is_prerelease == 'true' }}
           files: |
             release-binaries/minga_*
+            release-binaries/Minga.dmg
             release-binaries/SHA256SUMS.txt
 
   # ── Update Homebrew tap with new version and hashes ────────────────────
@@ -221,6 +409,9 @@ jobs:
           echo "macos_x86_64=$(sha256sum release-artifacts/minga_macos_x86_64/minga_macos_x86_64 | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
           echo "linux_aarch64=$(sha256sum release-artifacts/minga_linux_aarch64/minga_linux_aarch64 | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
           echo "linux_x86_64=$(sha256sum release-artifacts/minga_linux_x86_64/minga_linux_x86_64 | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          if [ -f "release-artifacts/Minga_dmg/Minga.dmg" ]; then
+            echo "dmg=$(sha256sum release-artifacts/Minga_dmg/Minga.dmg | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Checkout Homebrew tap
         uses: actions/checkout@v4
@@ -236,6 +427,7 @@ jobs:
           SHA_MACOS_X86_64: ${{ steps.hashes.outputs.macos_x86_64 }}
           SHA_LINUX_AARCH64: ${{ steps.hashes.outputs.linux_aarch64 }}
           SHA_LINUX_X86_64: ${{ steps.hashes.outputs.linux_x86_64 }}
+          SHA_DMG: ${{ steps.hashes.outputs.dmg }}
         run: |
           version="${VERSION#v}"
 
@@ -287,11 +479,9 @@ jobs:
               f.write(textwrap.dedent(formula).lstrip())
           PYEOF
 
-          # Generate cask only if a .dmg exists in the release (skipped for TUI-only releases)
-          dmg_url="https://github.com/jsmestad/minga/releases/download/v${version}/Minga.dmg"
-          if curl -fSL -o Minga.dmg "$dmg_url" 2>/dev/null; then
-            dmg_sha=$(sha256sum Minga.dmg | cut -d' ' -f1)
-            export DMG_SHA="$dmg_sha"
+          # Generate cask if DMG hash is available (skipped for TUI-only releases)
+          if [ -n "$SHA_DMG" ]; then
+            export DMG_SHA="$SHA_DMG"
 
             python3 << 'PYEOF'
           import os, textwrap
