@@ -186,9 +186,11 @@ struct ContentView: View {
                         encoder: appState.encoder
                     )
                     .transition(
-                        .move(edge: .bottom)
-                        .combined(with: .opacity)
-                        .animation(.easeInOut(duration: 0.15))
+                        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+                            ? .opacity.animation(.easeInOut(duration: 0.1))
+                            : .move(edge: .bottom)
+                                .combined(with: .opacity)
+                                .animation(.easeInOut(duration: 0.15))
                     )
                 }
 

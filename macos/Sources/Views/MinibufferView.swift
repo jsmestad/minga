@@ -28,15 +28,28 @@ struct MinibufferView: View {
                 candidateList
             }
 
-            // Top border
+            // Top border (fully opaque when Increase Contrast is on)
             Rectangle()
-                .fill(theme.popupBorder.opacity(0.3))
+                .fill(theme.popupBorder.opacity(
+                    NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast ? 1.0 : 0.3
+                ))
                 .frame(height: 1)
 
             // Input bar
             inputBar
         }
-        .background(theme.popupBg)
+        .background {
+            // Frosted-glass vibrancy with theme tint overlay for color consistency.
+            // When Increase Contrast is on, use solid bg for readability.
+            if NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast {
+                theme.popupBg
+            } else {
+                ZStack {
+                    Color.clear.background(.ultraThinMaterial)
+                    theme.popupBg.opacity(0.6)
+                }
+            }
+        }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Minibuffer")
         .onChange(of: state.visible) { _, visible in
