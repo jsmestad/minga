@@ -898,6 +898,15 @@ An extension is a directory containing `.ex` files, with one module that impleme
 defmodule MingaTodo do
   use Minga.Extension
 
+  # Declare typed config options (validated at load time)
+  option :keyword, :string,
+    default: "TODO",
+    description: "The keyword to scan for"
+
+  option :highlight, :boolean,
+    default: true,
+    description: "Highlight TODO lines in the gutter"
+
   @impl true
   def name, do: :minga_todo
 
@@ -915,7 +924,9 @@ defmodule MingaTodo do
 end
 ```
 
-The `use Minga.Extension` macro gives you a default `child_spec/1` that starts a simple Agent holding your config. Override `child_spec/1` if your extension needs a GenServer or a full supervision tree:
+Options declared with `option/3` are validated against their type when the extension loads. Users configure them directly in the extension declaration (see [Loading extensions](#loading-extensions) below). At runtime, read them with `Minga.Config.Options.get_extension_option(:minga_todo, :keyword)`.
+
+The `use Minga.Extension` macro also gives you a default `child_spec/1` that starts a simple Agent holding your config. Override `child_spec/1` if your extension needs a GenServer or a full supervision tree:
 
 ```elixir
 defmodule MingaTodo do
@@ -970,7 +981,15 @@ extension :minga_snippets, git: "https://github.com/user/minga-snippets"
 extension :minga_tools, hex: "minga_tools", version: "~> 0.3"
 ```
 
-Exactly one of `path:`, `git:`, or `hex:` is required. Extra keyword options (everything except the source option) are passed to the extension's `init/1` callback.
+Exactly one of `path:`, `git:`, or `hex:` is required. Extra keyword options (everything except the source and its sub-options like `branch:` or `version:`) are passed to the extension as config. If the extension declares typed options with `option/3`, these values are validated at load time:
+
+```elixir
+# Config options are grouped right in the extension declaration
+extension :minga_org, git: "https://github.com/jsmestad/minga-org",
+  conceal: false,
+  pretty_bullets: true,
+  heading_bullets: ["•", "◦"]
+```
 
 ### Local path extensions
 

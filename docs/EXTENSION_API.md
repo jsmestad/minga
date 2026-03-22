@@ -18,17 +18,30 @@ When a user writes `extension :my_ext, git: "..."` in their config, they're choo
 
 ## The Extension Behaviour
 
-Every extension implements four callbacks. `use Minga.Extension` gives you a default `child_spec/1` (an Agent holding your config). Override it if you need a custom GenServer or supervision tree.
+Every extension implements four callbacks. `use Minga.Extension` gives you a default `child_spec/1` (an Agent holding your config), the `option/3` macro for declaring typed config options, and a generated `__option_schema__/0` function the framework reads at load time. Override `child_spec/1` if you need a custom GenServer or supervision tree.
 
 ```elixir
-defmodule MyExtension do
+defmodule MingaOrg do
   use Minga.Extension
 
-  @impl true
-  def name, do: :my_extension
+  # Declare typed config options (validated at load time)
+  option :conceal, :boolean,
+    default: true,
+    description: "Hide markup delimiters and show styled content"
+
+  option :pretty_bullets, :boolean,
+    default: true,
+    description: "Replace heading stars with Unicode bullets"
+
+  option :heading_bullets, :string_list,
+    default: ["◉", "○", "◈", "◇"],
+    description: "Unicode bullets for heading levels"
 
   @impl true
-  def description, do: "Adds org-mode support"
+  def name, do: :minga_org
+
+  @impl true
+  def description, do: "Org-mode support"
 
   @impl true
   def version, do: "0.1.0"
@@ -36,15 +49,17 @@ defmodule MyExtension do
   @impl true
   def init(config) do
     # config is the keyword list from the user's extension declaration.
-    # This is where you register everything.
-    MyExtension.Commands.register()
-    MyExtension.Keybindings.register()
+    # Options declared above are already validated and stored in ETS.
+    MingaOrg.Commands.register()
+    MingaOrg.Keybindings.register()
     {:ok, %{}}
   end
 end
 ```
 
-**Lifecycle:** The user declares the extension in `config.exs`. Minga compiles it, calls `init/1`, then starts the `child_spec/1` under `Extension.Supervisor`. On config reload (`SPC h r`), all extensions stop and re-load from scratch.
+The `option` macro follows the same pattern as Ecto's `field`: you declare it at the module level, and `use Minga.Extension` generates a `__option_schema__/0` function from the accumulated declarations. You never write the introspection function yourself.
+
+**Lifecycle:** The user declares the extension in `config.exs`. Minga compiles it, validates config options against the schema, calls `init/1`, then starts `child_spec/1` under `Extension.Supervisor`. On config reload (`SPC h r`), all extensions stop and re-load from scratch.
 
 Each extension runs under a `DynamicSupervisor` with `:one_for_one` strategy. If your extension crashes, only your extension restarts. The editor and other extensions keep running.
 
@@ -130,39 +145,66 @@ All advice is wrapped in try/rescue. If your advice function crashes, it logs a 
 
 ## Config Options
 
-Extensions can register typed options that users set in `config.exs`, right alongside built-in options like `:tab_width` and `:theme`. No separate config DSL, no special syntax. Just `set :org_conceal, false`.
+Extension options are declared with the `option/3` macro in your module (see [The Extension Behaviour](#the-extension-behaviour) above) and configured by users in the extension declaration. No flat `set` calls, no namespace collisions, no separate DSL.
+
+**Declaring options** (in your extension module):
 
 ```elixir
-# In your init/1:
-Minga.Config.Options.register_extension_option(:org_conceal, :boolean, true)
-Minga.Config.Options.register_extension_option(
-  :org_heading_bullets, :string_list, ["◉", "○", "◈", "◇"]
-)
+option :conceal, :boolean,
+  default: true,
+  description: "Hide markup delimiters and show styled content"
+
+option :pretty_bullets, :boolean,
+  default: true,
+  description: "Replace heading stars with Unicode bullets"
+
+option :heading_bullets, :string_list,
+  default: ["◉", "○", "◈", "◇"],
+  description: "Unicode bullets for heading levels"
 ```
 
-Users configure these the same way they configure everything else:
+**User configuration** (in `config.exs`, grouped under the extension):
 
 ```elixir
-# In ~/.config/minga/config.exs:
-set :org_conceal, false
-set :org_heading_bullets, ["•", "◦", "▸"]
+extension :minga_org, git: "https://github.com/jsmestad/minga-org",
+  conceal: false,
+  pretty_bullets: true,
+  heading_bullets: ["•", "◦"]
 ```
 
-Values are validated against the registered type. Setting `:org_conceal` to `"yes"` gives a clear error telling the user it must be a boolean. Registering a name that collides with a built-in option returns `{:error, reason}`.
+Values are validated against your declared types at load time. Setting `:conceal` to `"yes"` gives a clear error telling the user it must be a boolean. Unknown keys produce a warning log.
+
+Two extensions can both declare a `:conceal` option without conflict. Options are namespaced under the extension name in ETS.
 
 **Supported types:** `:boolean`, `:pos_integer`, `:non_neg_integer`, `:integer`, `:string`, `:string_or_nil`, `:string_list`, `:atom`, `{:enum, [atoms]}`, `:map_or_nil`, `:any`.
 
-**Reading values:**
+**Reading values at runtime:**
 
 ```elixir
-Minga.Config.Options.get(:org_conceal)
-# => true (or whatever the user set)
+Minga.Config.Options.get_extension_option(:minga_org, :conceal)
+# => false
 
 # With filetype override support:
-Minga.Config.Options.get_for_filetype(:org_conceal, :org)
+Minga.Config.Options.get_extension_option_for_filetype(:minga_org, :conceal, :org)
 ```
 
-**Prefix your option names** to avoid collisions: `:org_conceal`, not `:conceal`.
+**Setting values at runtime** (e.g., from a toggle command):
+
+```elixir
+Minga.Config.Options.set_extension_option(:minga_org, :conceal, false)
+```
+
+**Overriding per filetype** (e.g., disable conceal only for org files):
+
+```elixir
+Minga.Config.Options.set_extension_option_for_filetype(:minga_org, :org, :conceal, false)
+```
+
+**Overriding at runtime** (e.g., from a toggle command):
+
+```elixir
+Minga.Config.Options.set_extension_option(:minga_org, :conceal, false)
+```
 
 ---
 
