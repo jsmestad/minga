@@ -1,6 +1,7 @@
 defmodule Minga.Editor.Commands.Git do
   @moduledoc """
-  Git hunk operations: navigation, stage, revert, preview, and blame.
+  Git commands: status panel, remote operations (push/pull/fetch), diff view,
+  branch picker, hunk navigation, stage, revert, preview, and blame.
   """
 
   @behaviour Minga.Command.Provider
@@ -24,6 +25,7 @@ defmodule Minga.Editor.Commands.Git do
     {:git_changed_files, "Changed files", false},
     {:git_branch_picker, "Switch branch", false},
     {:git_push, "Push", false},
+    {:git_pull, "Pull", false},
     {:git_fetch, "Fetch", false},
     {:git_diff_file, "View diff", true},
     {:next_git_hunk, "Next git hunk", true},
@@ -57,11 +59,15 @@ defmodule Minga.Editor.Commands.Git do
   end
 
   def execute(state, :git_push) do
-    git_remote_action(state, &Git.push/1, "Pushing...", "Pushed", "Push failed")
+    git_remote_action(state, &Git.push/1, "Pushing…", "Pushed", "Push failed")
+  end
+
+  def execute(state, :git_pull) do
+    git_remote_action(state, &Git.pull/1, "Pulling…", "Pulled", "Pull failed")
   end
 
   def execute(state, :git_fetch) do
-    git_remote_action(state, &Git.fetch_remotes/1, "Fetching...", "Fetched", "Fetch failed")
+    git_remote_action(state, &Git.fetch_remotes/1, "Fetching…", "Fetched", "Fetch failed")
   end
 
   # ── Diff view ──────────────────────────────────────────────────────────────
@@ -196,6 +202,54 @@ defmodule Minga.Editor.Commands.Git do
     end
   end
 
+  @doc """
+  Handles the result of an async git remote operation.
+
+  Called by `Minga.Editor.handle_info/2` when a `{:git_remote_result, ref, result}`
+  message arrives. Matches the ref against the in-flight operation to ignore stale
+  results, then updates the status bar and refreshes the git repo.
+  """
+  @spec handle_remote_result(state(), reference(), :ok | {:error, String.t()}) :: state()
+  def handle_remote_result(state, ref, result) do
+    case state.git_remote_op do
+      {^ref, task_monitor, {git_root, success_msg, error_prefix}} ->
+        Process.demonitor(task_monitor, [:flush])
+
+        status_msg =
+          case result do
+            :ok ->
+              refresh_repo(git_root)
+              success_msg
+
+            {:error, reason} ->
+              "#{error_prefix}: #{reason}"
+          end
+
+        %{state | git_remote_op: nil, status_msg: status_msg}
+
+      _ ->
+        # Stale result from a superseded operation; ignore
+        state
+    end
+  end
+
+  @doc """
+  Handles the `:DOWN` message when an async git remote task crashes.
+
+  Clears the in-flight operation so future remote operations aren't
+  permanently blocked. Called by the Editor's `:DOWN` handler.
+  """
+  @spec handle_remote_task_down(state(), reference()) :: state() | :not_matched
+  def handle_remote_task_down(state, monitor_ref) do
+    case state.git_remote_op do
+      {_msg_ref, ^monitor_ref, _context} ->
+        %{state | git_remote_op: nil, status_msg: "Git operation failed unexpectedly"}
+
+      _ ->
+        :not_matched
+    end
+  end
+
   @spec git_remote_action(
           state(),
           (String.t() -> :ok | {:error, String.t()}),
@@ -204,18 +258,30 @@ defmodule Minga.Editor.Commands.Git do
           String.t()
         ) ::
           state()
-  defp git_remote_action(state, operation, _progress_msg, success_msg, error_prefix) do
+  defp git_remote_action(state, _operation, _progress_msg, _success_msg, _error_prefix)
+       when state.git_remote_op != nil do
+    %{state | status_msg: "Git operation already in progress"}
+  end
+
+  defp git_remote_action(state, operation, progress_msg, success_msg, error_prefix) do
     case Git.root_for(Minga.Project.resolve_root()) do
       {:ok, git_root} ->
-        # Run synchronously for now; async with progress feedback is a future enhancement
-        case operation.(git_root) do
-          :ok ->
-            refresh_repo(git_root)
-            %{state | status_msg: success_msg}
+        ref = make_ref()
+        editor_pid = self()
 
-          {:error, reason} ->
-            %{state | status_msg: "#{error_prefix}: #{reason}"}
-        end
+        {:ok, task_pid} =
+          Task.start(fn ->
+            result = operation.(git_root)
+            send(editor_pid, {:git_remote_result, ref, result})
+          end)
+
+        task_monitor = Process.monitor(task_pid)
+
+        %{
+          state
+          | git_remote_op: {ref, task_monitor, {git_root, success_msg, error_prefix}},
+            status_msg: progress_msg
+        }
 
       :not_git ->
         %{state | status_msg: "Not in a git repository"}

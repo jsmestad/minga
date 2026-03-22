@@ -113,6 +113,7 @@ defmodule Minga.Editor.State do
             windows: %Windows{},
             file_tree: %FileTreeState{},
             git_status_panel: nil,
+            git_remote_op: nil,
             lsp_status: :none,
             parser_status: :available,
             hover_popup: nil,
@@ -173,6 +174,10 @@ defmodule Minga.Editor.State do
           windows: Windows.t(),
           file_tree: FileTreeState.t(),
           git_status_panel: Minga.Port.Protocol.GUI.git_status_data() | nil,
+          git_remote_op:
+            {msg_ref :: reference(), task_monitor :: reference(),
+             {git_root :: String.t(), success_msg :: String.t(), error_prefix :: String.t()}}
+            | nil,
           lsp_status: Minga.Editor.Modeline.lsp_status(),
           parser_status: Minga.Editor.Modeline.parser_status(),
           hover_popup: Minga.Editor.HoverPopup.t() | nil,

@@ -105,11 +105,12 @@ defmodule Minga.Keymap.Defaults do
     {[{?g, @none}, {?f, @none}], :git_changed_files, "Changed files"},
     {[{?g, @none}, {?B, @none}], :git_branch_picker, "Switch branch"},
     {[{?g, @none}, {?P, @none}], :git_push, "Push"},
+    {[{?g, @none}, {?p, @none}], :git_pull, "Pull"},
     {[{?g, @none}, {?F, @none}], :git_fetch, "Fetch"},
     {[{?g, @none}, {?d, @none}], :git_diff_file, "View diff"},
     {[{?g, @none}, {?s, @none}], :git_stage_hunk, "Stage hunk"},
     {[{?g, @none}, {?r, @none}], :git_revert_hunk, "Revert hunk"},
-    {[{?g, @none}, {?p, @none}], :git_preview_hunk, "Preview hunk"},
+    {[{?g, @none}, {?v, @none}], :git_preview_hunk, "Preview hunk"},
     {[{?g, @none}, {?b, @none}], :git_blame_line, "Blame line"},
 
     # ── Project ────────────────────────────────────────────────────────────────
