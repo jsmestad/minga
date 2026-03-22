@@ -25,6 +25,7 @@ defmodule Minga.Test.GUIWindowContentDecoder do
     %{
       window_id: window_id,
       full_refresh: (flags &&& 1) == 1,
+      cursor_visible: (flags &&& 2) == 2,
       cursor_row: cursor_row,
       cursor_col: cursor_col,
       cursor_shape: decode_cursor_shape(cursor_shape),

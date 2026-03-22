@@ -1339,6 +1339,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         let content = GUIWindowContent(
             windowId: windowId,
             fullRefresh: (flags & 0x01) != 0,
+            cursorVisible: (flags & 0x02) != 0,
             cursorRow: cursorRow,
             cursorCol: cursorCol,
             cursorShape: cursorShape,

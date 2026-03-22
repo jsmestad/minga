@@ -132,6 +132,9 @@ struct GUIDocumentHighlight: Sendable, Equatable {
 final class GUIWindowContent: Sendable {
     let windowId: UInt16
     let fullRefresh: Bool
+    /// Whether the BEAM wants the cursor visible in this window.
+    /// False when the minibuffer or other overlay has focus.
+    let cursorVisible: Bool
     let cursorRow: UInt16
     let cursorCol: UInt16
     let cursorShape: CursorShape
@@ -145,7 +148,7 @@ final class GUIWindowContent: Sendable {
     let diagnosticUnderlines: [GUIDiagnosticUnderline]
     let documentHighlights: [GUIDocumentHighlight]
 
-    init(windowId: UInt16, fullRefresh: Bool,
+    init(windowId: UInt16, fullRefresh: Bool, cursorVisible: Bool = true,
          cursorRow: UInt16, cursorCol: UInt16, cursorShape: CursorShape,
          scrollLeft: UInt16 = 0,
          rows: [GUIVisualRow], selection: GUISelectionOverlay?,
@@ -154,6 +157,7 @@ final class GUIWindowContent: Sendable {
          documentHighlights: [GUIDocumentHighlight]) {
         self.windowId = windowId
         self.fullRefresh = fullRefresh
+        self.cursorVisible = cursorVisible
         self.cursorRow = cursorRow
         self.cursorCol = cursorCol
         self.cursorShape = cursorShape

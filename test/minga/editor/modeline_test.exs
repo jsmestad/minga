@@ -238,8 +238,16 @@ defmodule Minga.Editor.ModelineTest do
       assert Modeline.cursor_shape(:visual) == :block
     end
 
-    test "command mode returns block" do
-      assert Modeline.cursor_shape(:command) == :block
+    test "command mode returns beam (text input mode)" do
+      assert Modeline.cursor_shape(:command) == :beam
+    end
+
+    test "eval mode returns beam (text input mode)" do
+      assert Modeline.cursor_shape(:eval) == :beam
+    end
+
+    test "search_prompt mode returns beam (text input mode)" do
+      assert Modeline.cursor_shape(:search_prompt) == :beam
     end
 
     test "operator_pending mode returns block" do

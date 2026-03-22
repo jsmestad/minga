@@ -12,7 +12,7 @@ import Foundation
 /// Builds a gui_window_content binary payload for testing.
 struct WindowContentBuilder {
     var windowId: UInt16 = 1
-    var flags: UInt8 = 1  // full_refresh
+    var flags: UInt8 = 0x03  // bit 0 = full_refresh, bit 1 = cursor_visible
     var cursorRow: UInt16 = 0
     var cursorCol: UInt16 = 0
     var cursorShape: UInt8 = 0  // block
@@ -141,6 +141,7 @@ struct WindowContentDecoderTests {
 
         #expect(content.windowId == 42)
         #expect(content.fullRefresh == true)
+        #expect(content.cursorVisible == true)
         #expect(content.cursorRow == 0)
         #expect(content.cursorCol == 0)
         #expect(content.cursorShape == .block)
@@ -155,7 +156,7 @@ struct WindowContentDecoderTests {
     func decodeHeaderFields() throws {
         var builder = WindowContentBuilder()
         builder.windowId = 7
-        builder.flags = 0  // full_refresh = false
+        builder.flags = 0  // full_refresh = false, cursor_visible = false
         builder.cursorRow = 15
         builder.cursorCol = 42
         builder.cursorShape = 1  // beam
@@ -168,10 +169,42 @@ struct WindowContentDecoderTests {
 
         #expect(content.windowId == 7)
         #expect(content.fullRefresh == false)
+        #expect(content.cursorVisible == false)
         #expect(content.cursorRow == 15)
         #expect(content.cursorCol == 42)
         #expect(content.cursorShape == .beam)
         #expect(content.scrollLeft == 25)
+    }
+
+    @Test("Decode cursor_visible flag from flags byte bit 1")
+    func decodeCursorVisible() throws {
+        // flags = 0x03: full_refresh (bit 0) + cursor_visible (bit 1)
+        var builder = WindowContentBuilder()
+        builder.flags = 0x03
+        let (cmd1, _) = try decodeCommand(data: builder.build(), offset: 0)
+        guard case .guiWindowContent(let content1) = cmd1 else {
+            Issue.record("Expected .guiWindowContent"); return
+        }
+        #expect(content1.fullRefresh == true)
+        #expect(content1.cursorVisible == true)
+
+        // flags = 0x01: full_refresh only, cursor hidden
+        builder.flags = 0x01
+        let (cmd2, _) = try decodeCommand(data: builder.build(), offset: 0)
+        guard case .guiWindowContent(let content2) = cmd2 else {
+            Issue.record("Expected .guiWindowContent"); return
+        }
+        #expect(content2.fullRefresh == true)
+        #expect(content2.cursorVisible == false)
+
+        // flags = 0x02: cursor visible only, no full refresh
+        builder.flags = 0x02
+        let (cmd3, _) = try decodeCommand(data: builder.build(), offset: 0)
+        guard case .guiWindowContent(let content3) = cmd3 else {
+            Issue.record("Expected .guiWindowContent"); return
+        }
+        #expect(content3.fullRefresh == false)
+        #expect(content3.cursorVisible == true)
     }
 
     @Test("Decode rows with text and buf_line")

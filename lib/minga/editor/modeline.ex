@@ -190,6 +190,9 @@ defmodule Minga.Editor.Modeline do
   def cursor_shape(%{mode: mode}), do: cursor_shape(mode)
   def cursor_shape(:insert), do: :beam
   def cursor_shape(:search), do: :beam
+  def cursor_shape(:command), do: :beam
+  def cursor_shape(:eval), do: :beam
+  def cursor_shape(:search_prompt), do: :beam
   def cursor_shape(:replace), do: :underline
   def cursor_shape(_mode), do: :block
 

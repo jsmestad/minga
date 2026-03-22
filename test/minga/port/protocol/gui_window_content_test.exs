@@ -28,6 +28,7 @@ defmodule Minga.Port.Protocol.GUIWindowContentTest do
       cursor_row: Keyword.get(opts, :cursor_row, 0),
       cursor_col: Keyword.get(opts, :cursor_col, 0),
       cursor_shape: Keyword.get(opts, :cursor_shape, :block),
+      cursor_visible: Keyword.get(opts, :cursor_visible, true),
       scroll_left: Keyword.get(opts, :scroll_left, 0),
       selection: Keyword.get(opts, :selection, nil),
       search_matches: Keyword.get(opts, :search_matches, []),
@@ -87,6 +88,26 @@ defmodule Minga.Port.Protocol.GUIWindowContentTest do
     test "full_refresh false round-trips" do
       decoded = round_trip(minimal_window(full_refresh: false))
       assert decoded.full_refresh == false
+    end
+
+    test "cursor_visible true round-trips (default)" do
+      decoded = round_trip(minimal_window([]))
+      assert decoded.cursor_visible == true
+    end
+
+    test "cursor_visible false round-trips (minibuffer active)" do
+      decoded = round_trip(minimal_window(cursor_visible: false))
+      assert decoded.cursor_visible == false
+    end
+
+    test "cursor_visible and full_refresh are independent flag bits" do
+      decoded = round_trip(minimal_window(full_refresh: false, cursor_visible: true))
+      assert decoded.full_refresh == false
+      assert decoded.cursor_visible == true
+
+      decoded = round_trip(minimal_window(full_refresh: true, cursor_visible: false))
+      assert decoded.full_refresh == true
+      assert decoded.cursor_visible == false
     end
 
     test "all cursor shapes round-trip" do
@@ -353,7 +374,8 @@ defmodule Minga.Port.Protocol.GUIWindowContentTest do
       sw = minimal_window(window_id: 1, cursor_row: 2, cursor_col: 3, cursor_shape: :block)
       binary = GUIWindowContent.encode(sw)
 
-      <<0x80, 0x00, 0x01, 0x01, 0x00, 0x02, 0x00, 0x03, 0x00, 0x00, 0x00, _rest::binary>> =
+      # flags = 0x03: bit 0 = full_refresh, bit 1 = cursor_visible (both true by default)
+      <<0x80, 0x00, 0x01, 0x03, 0x00, 0x02, 0x00, 0x03, 0x00, 0x00, 0x00, _rest::binary>> =
         binary
     end
 
@@ -391,6 +413,7 @@ defmodule Minga.Port.Protocol.GUIWindowContentTest do
         assert decoded.cursor_shape == sw.cursor_shape
         assert decoded.scroll_left == sw.scroll_left
         assert decoded.full_refresh == sw.full_refresh
+        assert decoded.cursor_visible == sw.cursor_visible
         assert length(decoded.rows) == length(sw.rows)
       end
     end
@@ -439,7 +462,8 @@ defmodule Minga.Port.Protocol.GUIWindowContentTest do
           matches <- list_of(search_match_gen(), length: match_count),
           diag_count <- integer(0..5),
           diags <- list_of(diagnostic_range_gen(), length: diag_count),
-          full_refresh <- boolean()
+          full_refresh <- boolean(),
+          cursor_visible <- boolean()
         ) do
       %SemanticWindow{
         window_id: window_id,
@@ -447,6 +471,7 @@ defmodule Minga.Port.Protocol.GUIWindowContentTest do
         cursor_row: cursor_row,
         cursor_col: cursor_col,
         cursor_shape: cursor_shape,
+        cursor_visible: cursor_visible,
         scroll_left: scroll_left,
         selection: selection,
         search_matches: matches,

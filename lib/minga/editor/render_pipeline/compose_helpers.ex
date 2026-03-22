@@ -56,6 +56,16 @@ defmodule Minga.Editor.RenderPipeline.ComposeHelpers do
     {minibuffer_row, eval_col}
   end
 
+  def resolve_cursor(
+        %{vim: %{mode: :search_prompt, mode_state: mode_state}},
+        _cursor_info,
+        minibuffer_row
+      ) do
+    # Search prompt prefix is "Search: " (8 chars)
+    prompt_col = Unicode.display_width(mode_state.input) + 8
+    {minibuffer_row, prompt_col}
+  end
+
   def resolve_cursor(_state, %Cursor{row: row, col: col}, _minibuffer_row), do: {row, col}
   def resolve_cursor(_state, nil, _minibuffer_row), do: {0, 0}
 
