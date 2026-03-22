@@ -4,9 +4,7 @@ defmodule Minga.Integration.FileTreeTest do
   return, and separator rendering.
 
   """
-  # async: false because file tree reads the real filesystem and can be
-  # slow under heavy test concurrency
-  use Minga.Test.EditorCase, async: false
+  use Minga.Test.EditorCase, async: true
 
   # ── Toggle ─────────────────────────────────────────────────────────────────
 

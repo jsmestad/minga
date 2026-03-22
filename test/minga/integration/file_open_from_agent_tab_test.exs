@@ -14,9 +14,7 @@ defmodule Minga.Integration.FileOpenFromAgentTabTest do
   nothing. Result: blank content area.
   """
 
-  # async: false — headless editors under high concurrency can destabilize
-  # ExUnit's :standard_error process registration during teardown
-  use Minga.Test.EditorCase, async: false
+  use Minga.Test.EditorCase, async: true
 
   alias Minga.Agent.BufferSync, as: AgentBufferSync
   alias Minga.Buffer.Server, as: BufferServer

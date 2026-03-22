@@ -8,9 +8,7 @@ defmodule Minga.Integration.AgentCursorTest do
   area, but the visible cursor is one row too high.
   """
 
-  # async: false — headless editors under high concurrency can destabilize
-  # ExUnit's :standard_error process registration during teardown
-  use Minga.Test.EditorCase, async: false
+  use Minga.Test.EditorCase, async: true
 
   alias Minga.Agent.BufferSync, as: AgentBufferSync
   alias Minga.Buffer.Server, as: BufferServer
