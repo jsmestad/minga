@@ -1638,6 +1638,22 @@ defmodule Minga.Editor do
     state
   end
 
+  defp handle_gui_action(state, {:execute_command, name_str}) do
+    command = String.to_existing_atom(name_str)
+
+    # Discard any follow-up action (dot_repeat, replay_macro): GUI chrome
+    # buttons are not vim editing operations and don't participate in the
+    # action pipeline.
+    case Commands.execute(state, command) do
+      {new_state, _action} -> new_state
+      new_state -> new_state
+    end
+  rescue
+    ArgumentError ->
+      Minga.Log.warning(:editor, "[execute_command] unrecognized command: #{name_str}")
+      state
+  end
+
   # Refreshes the tool manager picker items if it's currently open.
   # Called when tool install events change tool status so the user
   # sees live updates (spinner → checkmark, etc.).
