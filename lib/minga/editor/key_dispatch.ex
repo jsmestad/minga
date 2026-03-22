@@ -60,6 +60,10 @@ defmodule Minga.Editor.KeyDispatch do
     new_mode_state =
       ModeTransitions.adjust(new_mode_state, old_mode, new_mode, state)
 
+    # Stamp the active buffer's filetype onto mode state so mode modules
+    # can resolve filetype-scoped bindings without a side-channel lookup.
+    new_mode_state = set_mode_filetype(new_mode_state, state)
+
     base_state = EditorState.transition_mode(state, new_mode, new_mode_state)
 
     # Fire mode change hook and break undo coalescing.
@@ -192,4 +196,23 @@ defmodule Minga.Editor.KeyDispatch do
     do: op in @mutating_operators
 
   defp mutating_operator?(_), do: false
+
+  # ── Filetype stamping ──────────────────────────────────────────────────────
+
+  @spec set_mode_filetype(Mode.state(), EditorState.t()) :: Mode.state()
+  defp set_mode_filetype(%{filetype: _} = mode_state, state) do
+    filetype = active_filetype(state)
+    %{mode_state | filetype: filetype}
+  end
+
+  defp set_mode_filetype(mode_state, _state), do: mode_state
+
+  @spec active_filetype(EditorState.t()) :: atom()
+  defp active_filetype(%{buffers: %{active: nil}}), do: :text
+
+  defp active_filetype(%{buffers: %{active: buf}}) do
+    BufferServer.filetype(buf)
+  catch
+    :exit, _ -> :text
+  end
 end

@@ -197,6 +197,127 @@ defmodule Minga.Keymap.ActiveTest do
     end
   end
 
+  describe "bind/6 filetype-scoped insert mode" do
+    test "stores insert-mode binding scoped to filetype", %{store: s} do
+      assert :ok =
+               Active.bind(s, :insert, "TAB", :org_table_align, "Align table", filetype: :org)
+
+      trie = Active.filetype_mode_trie(s, :org, :insert)
+      assert {:command, :org_table_align} = Bindings.lookup(trie, {9, 0})
+    end
+
+    test "filetype insert binding does not appear in global insert trie", %{store: s} do
+      Active.bind(s, :insert, "TAB", :org_table_align, "Align table", filetype: :org)
+
+      global_trie = Active.mode_trie(s, :insert)
+      assert :not_found = Bindings.lookup(global_trie, {9, 0})
+    end
+
+    test "filetype insert binding does not appear in normal filetype trie", %{store: s} do
+      Active.bind(s, :insert, "TAB", :org_table_align, "Align table", filetype: :org)
+
+      normal_trie = Active.filetype_trie(s, :org)
+      assert :not_found = Bindings.lookup(normal_trie, {9, 0})
+    end
+
+    test "different filetypes have independent insert tries", %{store: s} do
+      Active.bind(s, :insert, "TAB", :org_table_align, "Align table", filetype: :org)
+      Active.bind(s, :insert, "TAB", :md_indent, "Indent list", filetype: :markdown)
+
+      org_trie = Active.filetype_mode_trie(s, :org, :insert)
+      md_trie = Active.filetype_mode_trie(s, :markdown, :insert)
+
+      assert {:command, :org_table_align} = Bindings.lookup(org_trie, {9, 0})
+      assert {:command, :md_indent} = Bindings.lookup(md_trie, {9, 0})
+    end
+
+    test "filetype mode trie is empty for unregistered combinations", %{store: s} do
+      trie = Active.filetype_mode_trie(s, :rust, :insert)
+      assert :not_found = Bindings.lookup(trie, {9, 0})
+    end
+  end
+
+  describe "bind/6 filetype-scoped visual mode" do
+    test "stores visual-mode binding scoped to filetype", %{store: s} do
+      Active.bind(s, :visual, "S", :org_surround, "Surround", filetype: :org)
+
+      trie = Active.filetype_mode_trie(s, :org, :visual)
+      assert {:command, :org_surround} = Bindings.lookup(trie, {?S, 0})
+    end
+  end
+
+  describe "bind/6 filetype-scoped unsupported modes" do
+    test "operator_pending filetype binding returns error", %{store: s} do
+      assert {:error, msg} =
+               Active.bind(s, :operator_pending, "x", :cmd, "Cmd", filetype: :org)
+
+      assert msg =~ "not supported"
+    end
+
+    test "command mode filetype binding returns error", %{store: s} do
+      assert {:error, msg} =
+               Active.bind(s, :command, "x", :cmd, "Cmd", filetype: :org)
+
+      assert msg =~ "not supported"
+    end
+  end
+
+  describe "resolve_mode_binding/4" do
+    test "filetype binding takes priority over global", %{store: s} do
+      Active.bind(s, :insert, "TAB", :global_tab, "Global TAB")
+      Active.bind(s, :insert, "TAB", :org_table_align, "Align table", filetype: :org)
+
+      assert {:command, :org_table_align} =
+               Active.resolve_mode_binding(s, :insert, :org, {9, 0})
+    end
+
+    test "falls back to global when no filetype binding exists", %{store: s} do
+      Active.bind(s, :insert, "TAB", :global_tab, "Global TAB")
+
+      assert {:command, :global_tab} = Active.resolve_mode_binding(s, :insert, :org, {9, 0})
+    end
+
+    test "falls back to global when filetype is nil", %{store: s} do
+      Active.bind(s, :insert, "TAB", :global_tab, "Global TAB")
+
+      assert {:command, :global_tab} = Active.resolve_mode_binding(s, :insert, nil, {9, 0})
+    end
+
+    test "returns :not_found when no binding exists anywhere", %{store: s} do
+      assert :not_found = Active.resolve_mode_binding(s, :insert, :org, {9, 0})
+    end
+
+    test "filetype binding for one filetype does not affect another", %{store: s} do
+      Active.bind(s, :insert, "TAB", :org_table_align, "Align table", filetype: :org)
+
+      assert :not_found = Active.resolve_mode_binding(s, :insert, :markdown, {9, 0})
+    end
+  end
+
+  describe "resolve_mode_binding/4 — prefix edge case" do
+    test "prefix match in filetype trie falls through to global command", %{store: s} do
+      # Filetype trie has C-j as a prefix (part of a multi-key sequence)
+      Active.bind(s, :insert, "C-j C-k", :org_thing, "Org thing", filetype: :org)
+      # Global trie has C-j as a direct command
+      Active.bind(s, :insert, "C-j", :global_next, "Global next")
+
+      # The filetype trie returns {:prefix, _} for C-j, not {:command, _}.
+      # resolve_mode_binding should fall through to the global command.
+      assert {:command, :global_next} =
+               Active.resolve_mode_binding(s, :insert, :org, {?j, 0x02})
+    end
+  end
+
+  describe "reset/1 — filetype mode tries" do
+    test "reset clears filetype mode tries", %{store: s} do
+      Active.bind(s, :insert, "TAB", :org_align, "Align", filetype: :org)
+      Active.reset(s)
+
+      trie = Active.filetype_mode_trie(s, :org, :insert)
+      assert :not_found = Bindings.lookup(trie, {9, 0})
+    end
+  end
+
   describe "bind/5 scope overrides" do
     test "adds scope-specific binding", %{store: s} do
       Active.bind(s, {:agent, :normal}, "y", :agent_copy, "Agent copy")

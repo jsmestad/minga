@@ -151,4 +151,38 @@ defmodule Minga.Mode.Insert.UserOverrideTest do
       assert {:execute, {:insert_char, "a"}, _} = Insert.handle_key({?a, 0}, fresh_state())
     end
   end
+
+  describe "filetype-scoped insert-mode overrides" do
+    test "filetype binding fires when filetype matches" do
+      KeymapActive.bind(:insert, "C-j", :org_special, "Org special", filetype: :org)
+
+      state = %{fresh_state() | filetype: :org}
+      assert {:execute, :org_special, _} = Insert.handle_key({?j, 0x02}, state)
+    end
+
+    test "filetype binding does not fire for different filetype" do
+      KeymapActive.bind(:insert, "C-j", :org_special, "Org special", filetype: :org)
+
+      state = %{fresh_state() | filetype: :elixir}
+      assert {:continue, _} = Insert.handle_key({?j, 0x02}, state)
+    end
+
+    test "filetype binding shadows global binding for same key" do
+      KeymapActive.bind(:insert, "C-j", :global_next, "Global next")
+      KeymapActive.bind(:insert, "C-j", :org_special, "Org special", filetype: :org)
+
+      org_state = %{fresh_state() | filetype: :org}
+      assert {:execute, :org_special, _} = Insert.handle_key({?j, 0x02}, org_state)
+
+      elixir_state = %{fresh_state() | filetype: :elixir}
+      assert {:execute, :global_next, _} = Insert.handle_key({?j, 0x02}, elixir_state)
+    end
+
+    test "global binding fires when no filetype binding exists" do
+      KeymapActive.bind(:insert, "C-k", :global_prev, "Global prev")
+
+      state = %{fresh_state() | filetype: :org}
+      assert {:execute, :global_prev, _} = Insert.handle_key({?k, 0x02}, state)
+    end
+  end
 end

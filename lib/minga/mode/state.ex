@@ -11,7 +11,8 @@ defmodule Minga.Mode.State do
   alias Minga.Keymap.Bindings
 
   @enforce_keys []
-  defstruct count: nil,
+  defstruct filetype: :text,
+            count: nil,
             leader_node: nil,
             leader_keys: [],
             prefix_node: nil,
@@ -33,6 +34,7 @@ defmodule Minga.Mode.State do
   @type pending_mark_kind :: :set | :jump_line | :jump_exact
 
   @type t :: %__MODULE__{
+          filetype: atom(),
           count: non_neg_integer() | nil,
           leader_node: Bindings.node_t() | nil,
           leader_keys: [String.t()],
