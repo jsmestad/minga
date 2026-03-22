@@ -12,6 +12,13 @@ Minga.Tool.Installer.Stub.ensure_table()
 # git init calls in tests. An empty string tells git to skip templates.
 System.put_env("GIT_TEMPLATE_DIR", "")
 
+# Suppress "hint: Using 'master' as the name for the initial branch" noise
+# from git init calls. Uses the same env-var mechanism as GIT_TEMPLATE_DIR
+# so all tests that call `git init` inherit the setting automatically.
+System.put_env("GIT_CONFIG_COUNT", "1")
+System.put_env("GIT_CONFIG_KEY_0", "init.defaultBranch")
+System.put_env("GIT_CONFIG_VALUE_0", "main")
+
 # Auto-build the Swift test harness on macOS if swiftc is available.
 # On Linux (CI), the harness tests are excluded automatically.
 harness_path = Path.join(:code.priv_dir(:minga), "minga-test-harness")
