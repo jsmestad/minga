@@ -17,6 +17,8 @@ import QuartzCore
 import AppKit
 import os.log
 
+private let rendererLog = OSLog(subsystem: "com.minga.editor", category: "Renderer")
+
 /// GPU quad instance for background fills and cursor (must match QuadInstance in CoreTextShaders.metal).
 struct QuadGPU {
     var position: SIMD2<Float> = .zero
@@ -127,12 +129,34 @@ final class CoreTextMetalRenderer {
         lineDesc.colorAttachments[0].sourceAlphaBlendFactor = .one
         lineDesc.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
 
-        do {
-            self.bgPipeline = try device.makeRenderPipelineState(descriptor: bgDesc)
-            self.linePipeline = try device.makeRenderPipelineState(descriptor: lineDesc)
-        } catch {
-            NSLog("Failed to create CoreText Metal pipeline: \(error)")
-            return nil
+        // Try loading cached pipeline states first, fall back to runtime compilation.
+        let pipelineStart = CFAbsoluteTimeGetCurrent()
+
+        if let cached = PipelineCache.loadCachedPipelines(
+            device: device, library: library,
+            bgDescriptor: bgDesc, lineDescriptor: lineDesc
+        ) {
+            self.bgPipeline = cached.bg
+            self.linePipeline = cached.line
+            let elapsed = (CFAbsoluteTimeGetCurrent() - pipelineStart) * 1000
+            os_log(.info, log: rendererLog, "Metal pipelines loaded from cache in %.1fms", elapsed)
+        } else {
+            do {
+                self.bgPipeline = try device.makeRenderPipelineState(descriptor: bgDesc)
+                self.linePipeline = try device.makeRenderPipelineState(descriptor: lineDesc)
+                let elapsed = (CFAbsoluteTimeGetCurrent() - pipelineStart) * 1000
+                os_log(.info, log: rendererLog, "Metal pipelines compiled from shaders in %.1fms", elapsed)
+
+                // Cache the compiled pipelines for next launch.
+                PipelineCache.savePipelineCache(
+                    device: device, library: library,
+                    bgDescriptor: bgDesc, lineDescriptor: lineDesc
+                )
+            } catch {
+                os_log(.error, log: rendererLog, "Failed to create CoreText Metal pipeline: %{public}@",
+                       error.localizedDescription)
+                return nil
+            }
         }
 
         // Watch for system accent color changes so the cursor color stays
