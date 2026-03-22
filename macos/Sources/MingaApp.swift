@@ -275,10 +275,16 @@ final class AppState: ObservableObject {
 }
 
 /// App delegate that sets up the protocol reader, renderer, and wiring.
+///
+/// Operates in two modes:
+/// - **Bundle mode**: Minga.app launched from Finder/Spotlight/Dock. The app
+///   spawns the BEAM release as a child process via BEAMProcessManager.
+/// - **Dev mode**: BEAM spawned us. We read/write our own stdin/stdout.
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let appState = AppState()
 
+    private var beamManager: BEAMProcessManager?
     private var protocolReader: ProtocolReader?
     private var encoder: ProtocolEncoder?
     private var dispatcher: CommandDispatcher?
@@ -317,14 +323,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         ctRenderer.setupLineRenderer(fontManager: fm)
 
-        // Protocol encoder (writes to stdout).
-        let enc = ProtocolEncoder()
+        // Protocol encoder and reader: in bundle mode, we spawn the BEAM
+        // and use pipe file handles. In dev mode, we use stdin/stdout.
+        let protocolInput: FileHandle
+        let protocolOutput: FileHandle
+
+        if BEAMProcessManager.isBundleMode {
+            let manager = BEAMProcessManager()
+            self.beamManager = manager
+
+            manager.onCrash = {
+                // TODO: show error UI instead of terminating
+                NSLog("BEAM crashed too many times, terminating")
+                NSApp.terminate(nil)
+            }
+            manager.onNormalExit = {
+                NSApp.terminate(nil)
+            }
+            manager.onBEAMReady = { [weak self] newReadHandle, newWriteHandle in
+                self?.reconnectProtocol(readHandle: newReadHandle, writeHandle: newWriteHandle)
+            }
+
+            manager.start()
+
+            guard let readH = manager.readHandle, let writeH = manager.writeHandle else {
+                NSLog("Failed to start BEAM process")
+                NSApp.terminate(nil)
+                return
+            }
+            protocolInput = readH
+            protocolOutput = writeH
+        } else {
+            // Dev mode: BEAM is our parent, use stdin/stdout
+            protocolInput = .standardInput
+            protocolOutput = .standardOutput
+        }
+
+        let enc = ProtocolEncoder(output: protocolOutput)
         self.encoder = enc
         appState.encoder = enc
 
         // Enable port-based logging so messages appear in *Messages*.
         PortLogger.setup(encoder: enc)
-        PortLogger.info("macOS GUI frontend starting")
+        PortLogger.info("macOS GUI frontend starting (\(beamManager != nil ? "bundle" : "dev") mode)")
         PortLogger.info("Font: \(defaultFontName) \(Int(defaultFontSize))pt, cell: \(face.cellWidth)x\(face.cellHeight), scale: \(scale)x")
         PortLogger.info("Initial grid: \(cols)x\(rows) cells")
 
@@ -379,30 +420,129 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // once SwiftUI assigns the real frame dimensions. This avoids
         // the BEAM rendering at hardcoded 800x600 defaults.
 
-        // Start reading protocol commands from stdin.
+        // Start reading protocol commands.
         let reader = ProtocolReader(
+            input: protocolInput,
             handler: { [weak self] data in
                 DispatchQueue.main.async {
                     self?.handleProtocolData(data)
                 }
             },
-            onDisconnect: {
-                // BEAM has exited; shut down gracefully.
+            onDisconnect: { [weak self] in
                 DispatchQueue.main.async {
-                    NSApp.terminate(nil)
+                    // In bundle mode, BEAMProcessManager handles restart/error.
+                    // In dev mode, our parent (BEAM) exited; shut down.
+                    if self?.beamManager == nil {
+                        NSApp.terminate(nil)
+                    }
                 }
             }
         )
         reader.start()
         self.protocolReader = reader
+
+        // In bundle mode, file URLs buffered before the BEAM was ready are
+        // flushed when the dispatcher receives the first ready acknowledgement
+        // from the BEAM (via onFirstRender below).
+        if beamManager != nil {
+            disp.onFirstRender = { [weak self] in
+                guard let self, let manager = self.beamManager, let enc = self.encoder else { return }
+                let urls = manager.flushPendingFileURLs()
+                for url in urls {
+                    enc.sendOpenFile(path: url.path)
+                }
+            }
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         true
     }
 
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        // In dev mode (no beamManager), terminate immediately.
+        guard let manager = beamManager, !manager.isShuttingDown else {
+            return .terminateNow
+        }
+
+        // In bundle mode, wait for the BEAM to exit cleanly before
+        // allowing the app to terminate. This prevents orphaned BEAM
+        // processes running in the background after the Dock icon disappears.
+        manager.onNormalExit = {
+            NSApp.reply(toApplicationShouldTerminate: true)
+        }
+        manager.onCrash = {
+            NSApp.reply(toApplicationShouldTerminate: true)
+        }
+        manager.shutdownGracefully(timeout: 3.0)
+        return .terminateLater
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         protocolReader?.stop()
+    }
+
+    /// Handle files opened via Finder "Open With", file associations, or
+    /// `open -a Minga file.ex` from the terminal.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        if let enc = encoder {
+            // BEAM is running, send open_file commands directly.
+            for url in urls where url.isFileURL {
+                enc.sendOpenFile(path: url.path)
+            }
+        } else if let manager = beamManager {
+            // BEAM not ready yet, buffer the URLs.
+            for url in urls where url.isFileURL {
+                manager.bufferFileURL(url)
+            }
+        }
+    }
+
+    // MARK: - Protocol reconnection (after BEAM restart)
+
+    /// Replaces the protocol reader and encoder with fresh ones backed by new pipe handles.
+    /// Called by BEAMProcessManager.onBEAMReady after a crash restart.
+    private func reconnectProtocol(readHandle: FileHandle, writeHandle: FileHandle) {
+        // Stop the old reader (its input pipe is already closed).
+        protocolReader?.stop()
+
+        // Create new encoder for the new pipe.
+        let enc = ProtocolEncoder(output: writeHandle)
+        self.encoder = enc
+        appState.encoder = enc
+        PortLogger.setup(encoder: enc)
+
+        // Create new reader for the new pipe.
+        let reader = ProtocolReader(
+            input: readHandle,
+            handler: { [weak self] data in
+                DispatchQueue.main.async {
+                    self?.handleProtocolData(data)
+                }
+            },
+            onDisconnect: { [weak self] in
+                DispatchQueue.main.async {
+                    if self?.beamManager == nil {
+                        NSApp.terminate(nil)
+                    }
+                }
+            }
+        )
+        reader.start()
+        self.protocolReader = reader
+
+        // Update the editor view's encoder reference so keystrokes
+        // go to the new BEAM process, not the dead pipe.
+        editorNSView?.encoder = enc
+
+        // Re-send ready event so the new BEAM knows our dimensions.
+        if let nsView = editorNSView {
+            let cols = UInt16(nsView.bounds.width / CGFloat(nsView.cellWidth))
+            let rows = UInt16(nsView.bounds.height / CGFloat(nsView.cellHeight))
+            enc.sendReady(cols: cols, rows: rows)
+        }
+
+        PortLogger.info("Protocol reconnected after BEAM restart")
     }
 
     // MARK: - Font change

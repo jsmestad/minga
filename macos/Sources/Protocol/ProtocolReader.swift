@@ -5,25 +5,43 @@
 /// (the BEAM batches an entire render frame into one message).
 
 import Foundation
+import Synchronization
 
-/// Reads framed protocol messages from stdin and dispatches them.
+/// Reads framed protocol messages from an input file handle and dispatches them.
+///
+/// Defaults to stdin (BEAM is parent, spawned us). In bundle mode, the
+/// BEAMProcessManager passes the child process's stdout pipe instead.
 final class ProtocolReader: @unchecked Sendable {
     private var thread: Thread?
+    private let input: FileHandle
     private let handler: @Sendable (Data) -> Void
     private let onDisconnect: @Sendable () -> Void
-    private var running = false
+    private let running = Mutex(false)
 
     /// Create a reader that calls `handler` with each payload on a background thread.
-    /// `onDisconnect` is called when stdin closes (BEAM exited).
-    init(handler: @escaping @Sendable (Data) -> Void, onDisconnect: @escaping @Sendable () -> Void) {
+    /// `onDisconnect` is called when the input closes (peer exited).
+    ///
+    /// - Parameters:
+    ///   - input: File handle to read from. Defaults to `.standardInput`.
+    ///   - handler: Called with each decoded payload.
+    ///   - onDisconnect: Called when the input stream closes.
+    init(input: FileHandle = .standardInput,
+         handler: @escaping @Sendable (Data) -> Void,
+         onDisconnect: @escaping @Sendable () -> Void) {
+        self.input = input
         self.handler = handler
         self.onDisconnect = onDisconnect
     }
 
-    /// Start reading stdin on a background thread.
+    /// Start reading on a background thread.
     func start() {
-        guard !running else { return }
-        running = true
+        let alreadyRunning = running.withLock { val -> Bool in
+            if val { return true }
+            val = true
+            return false
+        }
+        guard !alreadyRunning else { return }
+
         let t = Thread { [weak self] in
             self?.readLoop()
         }
@@ -36,17 +54,15 @@ final class ProtocolReader: @unchecked Sendable {
     /// Stop the reader. Note: the thread blocks on read(), so this
     /// only takes effect after the current read completes or stdin closes.
     func stop() {
-        running = false
+        running.withLock { $0 = false }
     }
 
     // MARK: - Private
 
     private func readLoop() {
-        let stdin = FileHandle.standardInput
-
-        while running {
+        while running.withLock({ $0 }) {
             // Read 4-byte length header.
-            let lenData = stdin.readData(ofLength: 4)
+            let lenData = input.readData(ofLength: 4)
             guard lenData.count == 4 else {
                 // stdin closed or short read: BEAM has exited.
                 onDisconnect()
@@ -65,7 +81,7 @@ final class ProtocolReader: @unchecked Sendable {
             var payload = Data()
             var remaining = length
             while remaining > 0 {
-                let chunk = stdin.readData(ofLength: remaining)
+                let chunk = input.readData(ofLength: remaining)
                 guard !chunk.isEmpty else {
                     onDisconnect()
                     return

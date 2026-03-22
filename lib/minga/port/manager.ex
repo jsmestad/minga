@@ -1,10 +1,20 @@
 defmodule Minga.Port.Manager do
   @moduledoc """
-  GenServer that manages the Zig renderer Port process.
+  GenServer that manages the frontend renderer Port.
 
-  Spawns the Zig binary as an Erlang Port with `{:packet, 4}` framing.
-  Incoming input events from Zig are decoded and forwarded to subscribers.
-  Outgoing render commands are encoded and sent to the Port.
+  Operates in two modes depending on the `MINGA_PORT_MODE` env var:
+
+  - **Spawn mode** (default): BEAM is the parent process. Port.Manager
+    spawns the GUI/TUI binary as a child via `Port.open({:spawn_executable, ...})`.
+    Used in development, TUI mode, and Burrito releases.
+
+  - **Connected mode** (`MINGA_PORT_MODE=connected`): BEAM is a child of
+    the GUI process. The GUI set up stdin/stdout pipes before launching us.
+    Port.Manager opens `{:fd, 0, 1}` as a Port instead of spawning a child.
+    Used when launching from `Minga.app` (Finder, Spotlight, Dock).
+
+  Both modes use identical `{:packet, 4}` framing. The protocol layer
+  (event decoding, render commands, subscriber broadcasting) is the same.
 
   Subscribers register via `subscribe/1` and receive messages as:
 
@@ -27,6 +37,8 @@ defmodule Minga.Port.Manager do
           {:name, GenServer.name()}
           | {:renderer_path, String.t()}
           | {:backend, backend()}
+          | {:port_mode, Minga.Port.Manager.State.port_mode()}
+          | {:port_opener, (term(), [term()] -> port())}
 
   alias Minga.Port.Manager.State, as: PortState
 
@@ -88,10 +100,12 @@ defmodule Minga.Port.Manager do
     Process.flag(:fullsweep_after, 20)
 
     backend = Keyword.get(opts, :backend, :tui)
+    port_mode = Keyword.get(opts, :port_mode, Application.get_env(:minga, :port_mode, :spawn))
     renderer_path = Keyword.get(opts, :renderer_path, default_renderer_path(backend))
 
-    state = %PortState{renderer_path: renderer_path}
-    {:ok, start_port(state)}
+    port_opener = Keyword.get(opts, :port_opener, &Port.open/2)
+    state = %PortState{renderer_path: renderer_path, port_mode: port_mode}
+    {:ok, start_port(state, port_opener)}
   end
 
   @impl true
@@ -176,6 +190,14 @@ defmodule Minga.Port.Manager do
     {:noreply, %{state | port: nil, ready: false}}
   end
 
+  # In connected mode ({:fd, 0, 1}), stdin EOF means the GUI parent exited.
+  # Shut down cleanly, same as a normal exit in spawn mode.
+  def handle_info({port, :eof}, %{port: port} = state) do
+    Minga.Log.info(:port, "GUI parent disconnected (stdin EOF)")
+    maybe_stop_system(0)
+    {:noreply, %{state | port: nil, ready: false}}
+  end
+
   def handle_info({:DOWN, _ref, :process, pid, _reason}, state) do
     subscribers = Enum.reject(state.subscribers, &(&1 == pid))
     {:noreply, %{state | subscribers: subscribers}}
@@ -187,13 +209,24 @@ defmodule Minga.Port.Manager do
 
   # ── Private ──
 
-  @spec start_port(state()) :: state()
-  defp start_port(state) do
+  @spec start_port(state(), fun()) :: state()
+  defp start_port(%{port_mode: :connected} = state, port_opener) do
+    # Connected mode: the GUI parent already set up stdin/stdout pipes.
+    # Open fd 0 (stdin) and fd 1 (stdout) as an Erlang Port with the
+    # same {:packet, 4} framing used in spawn mode. The entire protocol
+    # layer (event decoding, render commands, subscriber broadcasting)
+    # works identically over both transports.
+    port = port_opener.({:fd, 0, 1}, [:binary, {:packet, 4}, :eof])
+    %{state | port: port}
+  end
+
+  defp start_port(state, port_opener) do
+    # Spawn mode: we're the parent. Launch the GUI binary as a child process.
     if File.exists?(state.renderer_path) do
       env = tty_env()
 
       port =
-        Port.open(
+        port_opener.(
           {:spawn_executable, state.renderer_path},
           [:binary, :exit_status, {:packet, 4}, :use_stdio, {:env, env}]
         )

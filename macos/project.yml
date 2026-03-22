@@ -2,7 +2,7 @@ name: Minga
 options:
   bundleIdPrefix: com.minga
   deploymentTarget:
-    macOS: "14.0"
+    macOS: "15.0"
   xcodeVersion: "16.0"
   generateEmptyDirectories: true
   createIntermediateGroups: true
