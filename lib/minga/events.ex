@@ -79,6 +79,14 @@ defmodule Minga.Events do
     @type t :: %__MODULE__{old: atom(), new: atom()}
   end
 
+  defmodule ToolMissingEvent do
+    @moduledoc "Payload for `:tool_missing` events. Sent when an LSP server or formatter command is not found and a tool recipe exists."
+    @enforce_keys [:command]
+    defstruct [:command]
+
+    @type t :: %__MODULE__{command: String.t()}
+  end
+
   # ── Types ───────────────────────────────────────────────────────────────────
 
   @typedoc "Known event topics."
@@ -98,7 +106,11 @@ defmodule Minga.Events do
 
   @typedoc "Typed event payloads. Each topic has a specific struct."
   @type payload ::
-          BufferEvent.t() | BufferClosedEvent.t() | BufferChangedEvent.t() | ModeEvent.t()
+          BufferEvent.t()
+          | BufferClosedEvent.t()
+          | BufferChangedEvent.t()
+          | ModeEvent.t()
+          | ToolMissingEvent.t()
 
   # ── Child spec ──────────────────────────────────────────────────────────────
 
@@ -173,6 +185,7 @@ defmodule Minga.Events do
   @spec broadcast(:buffer_closed, BufferClosedEvent.t()) :: :ok
   @spec broadcast(:buffer_changed, BufferChangedEvent.t()) :: :ok
   @spec broadcast(:mode_changed, ModeEvent.t()) :: :ok
+  @spec broadcast(:tool_missing, ToolMissingEvent.t()) :: :ok
   def broadcast(topic, %_{} = payload) when is_atom(topic) do
     Registry.dispatch(@registry, topic, fn entries ->
       for {pid, _value} <- entries do

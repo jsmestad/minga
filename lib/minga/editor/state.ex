@@ -140,7 +140,9 @@ defmodule Minga.Editor.State do
             code_lenses: [],
             inlay_hints: [],
             selection_ranges: nil,
-            selection_range_index: 0
+            selection_range_index: 0,
+            tool_declined: MapSet.new(),
+            tool_prompt_queue: []
 
   @type t :: %__MODULE__{
           port_manager: GenServer.server() | nil,
@@ -197,7 +199,9 @@ defmodule Minga.Editor.State do
           inlay_hints: [map()],
           selection_ranges: [map()] | nil,
           selection_range_index: non_neg_integer(),
-          font_registry: Minga.FontRegistry.t()
+          font_registry: Minga.FontRegistry.t(),
+          tool_declined: MapSet.t(atom()),
+          tool_prompt_queue: [atom()]
         }
 
   # ── Convenience accessors ─────────────────────────────────────────────────
@@ -1196,5 +1200,21 @@ defmodule Minga.Editor.State do
   @spec transition_mode(t(), Mode.mode(), Mode.state() | nil) :: t()
   def transition_mode(%__MODULE__{} = state, mode, mode_state \\ nil) do
     %{state | vim: VimState.transition(state.vim, mode, mode_state)}
+  end
+
+  # ── Tool prompt helpers ──────────────────────────────────────────────────────
+
+  @doc """
+  Returns true if the given tool should NOT be prompted for installation.
+
+  A tool is skipped when it's already declined this session, already
+  installed, currently being installed, or already in the prompt queue.
+  """
+  @spec skip_tool_prompt?(t(), atom()) :: boolean()
+  def skip_tool_prompt?(%__MODULE__{} = state, tool_name) do
+    MapSet.member?(state.tool_declined, tool_name) or
+      Minga.Tool.Manager.installed?(tool_name) or
+      MapSet.member?(Minga.Tool.Manager.installing(), tool_name) or
+      tool_name in state.tool_prompt_queue
   end
 end

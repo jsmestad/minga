@@ -82,6 +82,18 @@ defmodule Minga.Editor.Renderer.Minibuffer do
     )
   end
 
+  def render(%{vim: %{mode: :tool_confirm, mode_state: ms}, theme: theme}, row, cols) do
+    prompt = Minga.Mode.display(:tool_confirm, ms)
+    mb = theme.minibuffer
+
+    DisplayList.draw(
+      row,
+      0,
+      String.pad_trailing(prompt, cols),
+      Face.new(fg: mb.fg, bg: mb.bg)
+    )
+  end
+
   def render(%{vim: %{mode: :command, mode_state: ms}, theme: theme}, row, cols) do
     cmd_text = ":" <> ms.input
     mb = theme.minibuffer

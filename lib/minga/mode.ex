@@ -40,6 +40,7 @@ defmodule Minga.Mode do
           | :search_prompt
           | :substitute_confirm
           | :extension_confirm
+          | :tool_confirm
 
   @typedoc """
   A command to execute. Either a bare atom (e.g. `:move_left`) or a
@@ -64,6 +65,7 @@ defmodule Minga.Mode do
           | Minga.Mode.SearchPromptState.t()
           | Minga.Mode.SubstituteConfirmState.t()
           | Minga.Mode.ExtensionConfirmState.t()
+          | Minga.Mode.ToolConfirmState.t()
 
   @typedoc """
   Result returned by a mode's `handle_key/2`.
@@ -128,6 +130,7 @@ defmodule Minga.Mode do
   def display(:eval), do: "-- EVAL --"
   def display(:substitute_confirm), do: "-- SUBSTITUTE --"
   def display(:extension_confirm), do: "-- UPDATE --"
+  def display(:tool_confirm), do: "-- INSTALL? --"
 
   @doc """
   Returns the status-line label for a mode, using the FSM state for
@@ -162,6 +165,12 @@ defmodule Minga.Mode do
     "#{label} [Y/n/d] (#{current} of #{total})"
   end
 
+  def display(:tool_confirm, %Minga.Mode.ToolConfirmState{} = s) do
+    name = Enum.at(s.pending, s.current)
+    label = tool_label(name)
+    "#{label} not found. Install? [y/n]"
+  end
+
   def display(mode, _state), do: display(mode)
 
   # ── Private ──────────────────────────────────────────────────────────────────
@@ -178,6 +187,7 @@ defmodule Minga.Mode do
   defp mode_module(:search_prompt), do: Minga.Mode.SearchPrompt
   defp mode_module(:substitute_confirm), do: Minga.Mode.SubstituteConfirm
   defp mode_module(:extension_confirm), do: Minga.Mode.ExtensionConfirm
+  defp mode_module(:tool_confirm), do: Minga.Mode.ToolConfirm
 
   @spec apply_result(mode(), result()) :: {mode(), [command()], state()}
   defp apply_result(mode, {:continue, state}) do
@@ -204,6 +214,14 @@ defmodule Minga.Mode do
 
   @spec reset_count(state()) :: state()
   defp reset_count(%_{} = state), do: %{state | count: nil}
+
+  @spec tool_label(atom()) :: String.t()
+  defp tool_label(name) do
+    case Minga.Tool.Recipe.Registry.get(name) do
+      nil -> Atom.to_string(name)
+      recipe -> recipe.label
+    end
+  end
 
   @spec format_update_label(Minga.Mode.ExtensionConfirmState.update_entry()) :: String.t()
   defp format_update_label(%{pinned: true, name: name}) do

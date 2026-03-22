@@ -30,10 +30,12 @@ defmodule Minga.LSP.SyncServer do
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Events
+  alias Minga.Events.ToolMissingEvent
   alias Minga.LSP.Client
   alias Minga.LSP.RootDetector
   alias Minga.LSP.ServerRegistry
   alias Minga.LSP.Supervisor, as: LSPSupervisor
+  alias Minga.Tool.Recipe.Registry, as: RecipeRegistry
 
   @registry_table __MODULE__.Registry
   @debounce_ms 150
@@ -41,7 +43,8 @@ defmodule Minga.LSP.SyncServer do
   @typedoc "Internal state."
   @type state :: %{
           debounce_timers: %{pid() => reference()},
-          client_monitors: %{reference() => {buffer_pid :: pid(), client_pid :: pid()}}
+          client_monitors: %{reference() => {buffer_pid :: pid(), client_pid :: pid()}},
+          pending_tool_buffers: %{String.t() => [pid()]}
         }
 
   # ── Client API ─────────────────────────────────────────────────────────
@@ -85,8 +88,9 @@ defmodule Minga.LSP.SyncServer do
     Events.subscribe(:buffer_saved)
     Events.subscribe(:buffer_closed)
     Events.subscribe(:buffer_changed)
+    Events.subscribe(:tool_install_complete)
 
-    {:ok, %{debounce_timers: %{}, client_monitors: %{}}}
+    {:ok, %{debounce_timers: %{}, client_monitors: %{}, pending_tool_buffers: %{}}}
   end
 
   @impl true
@@ -121,6 +125,13 @@ defmodule Minga.LSP.SyncServer do
     {:noreply, state}
   end
 
+  # After a tool install completes, re-trigger buffer open for any open buffers
+  # that need the newly installed tool. This auto-starts the LSP server.
+  def handle_info({:minga_event, :tool_install_complete, %{name: tool_name}}, state) do
+    state = retry_buffers_for_tool(state, tool_name)
+    {:noreply, state}
+  end
+
   def handle_info({:DOWN, ref, :process, pid, _reason}, state) do
     state = handle_client_down(state, ref, pid)
     {:noreply, state}
@@ -145,17 +156,22 @@ defmodule Minga.LSP.SyncServer do
         {content, _cursor} = BufferServer.content_and_cursor(buffer_pid)
         language_id = to_string(filetype)
 
-        clients =
-          configs
-          |> Enum.map(fn config ->
+        results =
+          Enum.map(configs, fn config ->
             root = RootDetector.find_root(path, config.root_markers)
-            LSPSupervisor.ensure_client(config, root)
+            {config, LSPSupervisor.ensure_client(config, root)}
           end)
+
+        # Broadcast :tool_missing for configs that failed and have a recipe
+        state = track_missing_tools(state, results, buffer_pid)
+
+        clients =
+          results
           |> Enum.filter(fn
-            {:ok, _pid} -> true
+            {_config, {:ok, _pid}} -> true
             _ -> false
           end)
-          |> Enum.map(fn {:ok, pid} ->
+          |> Enum.map(fn {_config, {:ok, pid}} ->
             Client.did_open(pid, uri, language_id, content)
             pid
           end)
@@ -191,6 +207,62 @@ defmodule Minga.LSP.SyncServer do
     cancel_debounce(state, buffer_pid)
   catch
     :exit, _ -> state
+  end
+
+  # ── Private: missing tool detection ──────────────────────────────────────
+
+  # Broadcasts :tool_missing for failed configs that have a recipe, and
+  # tracks the buffer pid per command so we can retry after install.
+  @spec track_missing_tools(state(), [{map(), term()}], pid()) :: state()
+  defp track_missing_tools(state, results, buffer_pid) do
+    results
+    |> Enum.filter(&failed_with_recipe?/1)
+    |> Enum.reduce(state, fn {config, _}, acc ->
+      Events.broadcast(:tool_missing, %ToolMissingEvent{command: config.command})
+      track_buffer_for_command(acc, config.command, buffer_pid)
+    end)
+  end
+
+  @spec failed_with_recipe?({map(), term()}) :: boolean()
+  defp failed_with_recipe?({config, {:error, :not_available}}),
+    do: RecipeRegistry.for_command(config.command) != nil
+
+  defp failed_with_recipe?(_), do: false
+
+  @spec track_buffer_for_command(state(), String.t(), pid()) :: state()
+  defp track_buffer_for_command(state, command, buffer_pid) do
+    existing = Map.get(state.pending_tool_buffers, command, [])
+
+    if buffer_pid in existing do
+      state
+    else
+      updated = Map.put(state.pending_tool_buffers, command, [buffer_pid | existing])
+      %{state | pending_tool_buffers: updated}
+    end
+  end
+
+  # Re-trigger buffer open for buffers that were waiting on this tool.
+  @spec retry_buffers_for_tool(state(), atom()) :: state()
+  defp retry_buffers_for_tool(state, tool_name) do
+    recipe = RecipeRegistry.get(tool_name)
+
+    if recipe do
+      # Collect all buffer pids that were waiting on any command this tool provides
+      {buffer_pids, remaining_pending} =
+        Enum.reduce(recipe.provides, {[], state.pending_tool_buffers}, fn cmd, {pids, pending} ->
+          {Map.get(pending, cmd, []) ++ pids, Map.delete(pending, cmd)}
+        end)
+
+      state = %{state | pending_tool_buffers: remaining_pending}
+
+      buffer_pids
+      |> Enum.uniq()
+      |> Enum.reduce(state, fn buf_pid, acc ->
+        do_buffer_open(acc, buf_pid)
+      end)
+    else
+      state
+    end
   end
 
   # ── Private: client monitoring ─────────────────────────────────────────

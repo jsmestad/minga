@@ -77,13 +77,28 @@ defmodule Minga.Editor.KeyDispatch do
 
     # Clean up mode_state if we've transitioned back to Normal.
     # Skip if a command changed the mode (e.g. substitute confirm, search).
-    if new_mode == :normal and old_mode != :normal and after_commands.vim.mode == :normal do
-      case after_commands.vim.mode_state do
-        %Mode.State{} -> after_commands
-        _ -> %{after_commands | vim: %{after_commands.vim | mode_state: Mode.initial_state()}}
+    result =
+      if new_mode == :normal and old_mode != :normal and after_commands.vim.mode == :normal do
+        case after_commands.vim.mode_state do
+          %Mode.State{} -> after_commands
+          _ -> %{after_commands | vim: %{after_commands.vim | mode_state: Mode.initial_state()}}
+        end
+      else
+        after_commands
       end
+
+    # When leaving :tool_confirm, check if more tools were queued during
+    # the session and re-enter :tool_confirm to prompt for them.
+    if old_mode == :tool_confirm and result.vim.mode == :normal and
+         result.tool_prompt_queue != [] do
+      ms = %Minga.Mode.ToolConfirmState{
+        pending: result.tool_prompt_queue,
+        declined: result.tool_declined
+      }
+
+      EditorState.transition_mode(result, :tool_confirm, ms)
     else
-      after_commands
+      result
     end
   end
 

@@ -8,6 +8,8 @@ defmodule Minga.Editor.Commands.Formatting do
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.State, as: EditorState
   alias Minga.Formatter
+  alias Minga.Mode.ToolConfirmState
+  alias Minga.Tool.Recipe.Registry, as: RecipeRegistry
 
   @typedoc "Internal editor state."
   @type state :: EditorState.t()
@@ -23,7 +25,13 @@ defmodule Minga.Editor.Commands.Formatting do
         %{state | status_msg: "No formatter configured for #{filetype}"}
 
       _ ->
-        format_and_replace(state, buf, spec)
+        command = spec |> String.split() |> List.first()
+
+        if System.find_executable(command) do
+          format_and_replace(state, buf, spec)
+        else
+          maybe_prompt_formatter_install(state, command)
+        end
     end
   end
 
@@ -50,6 +58,36 @@ defmodule Minga.Editor.Commands.Formatting do
         Minga.Log.warning(:editor, "Formatter failed: #{buf_name} (#{msg})")
         %{state | status_msg: "Format error: #{msg}"}
     end
+  end
+
+  # When the formatter binary is missing and a tool recipe exists for it,
+  # queue a tool install prompt. Since this runs inside the Editor process,
+  # we modify state directly instead of broadcasting an event.
+  @spec maybe_prompt_formatter_install(state(), String.t()) :: state()
+  defp maybe_prompt_formatter_install(state, command) do
+    case RecipeRegistry.for_command(command) do
+      nil ->
+        %{state | status_msg: "Formatter not found: #{command}"}
+
+      recipe ->
+        if EditorState.skip_tool_prompt?(state, recipe.name) do
+          %{state | status_msg: "Formatter not found: #{command}"}
+        else
+          queue_and_show_prompt(state, recipe.name)
+        end
+    end
+  end
+
+  @spec queue_and_show_prompt(state(), atom()) :: state()
+  defp queue_and_show_prompt(%{vim: %{mode: :normal}} = state, tool_name) do
+    queue = state.tool_prompt_queue ++ [tool_name]
+    state = %{state | tool_prompt_queue: queue}
+    ms = %ToolConfirmState{pending: queue, declined: state.tool_declined}
+    EditorState.transition_mode(state, :tool_confirm, ms)
+  end
+
+  defp queue_and_show_prompt(state, tool_name) do
+    %{state | tool_prompt_queue: state.tool_prompt_queue ++ [tool_name]}
   end
 
   @impl Minga.Command.Provider
