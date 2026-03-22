@@ -74,6 +74,13 @@ defmodule Minga.Test.EditorCase do
     {:ok, snapshot} = HeadlessPort.collect_frame(ref)
     Process.put({:last_frame_snapshot, port}, snapshot)
 
+    # Drain any deferred messages queued by the :ready handler (e.g.
+    # :setup_highlight, :debounced_render). Without this, a background
+    # render can produce a spurious batch_end that satisfies the next
+    # send_key's frame waiter before the key press is actually processed.
+    _ = :sys.get_state(editor)
+    _ = :sys.get_state(port)
+
     Map.merge(ctx, %{
       editor: editor,
       buffer: buffer,
@@ -109,6 +116,10 @@ defmodule Minga.Test.EditorCase do
     send(editor, {:minga_input, {:ready, width, height}})
     {:ok, snapshot} = HeadlessPort.collect_frame(ref)
     Process.put({:last_frame_snapshot, port}, snapshot)
+
+    # Drain deferred messages from :ready (see start_editor/2 comment).
+    _ = :sys.get_state(editor)
+    _ = :sys.get_state(port)
 
     %{
       editor: editor,
@@ -212,9 +223,15 @@ defmodule Minga.Test.EditorCase do
   @doc """
   Sends a key and waits for the editor GenServer to process it.
   Uses `:sys.get_state` as a synchronization barrier instead of waiting
-  for a render frame. This is faster and more reliable for tests that
-  only check editor state, not rendered screen output. Returns the
-  editor state after processing.
+  for a render frame. Safe for both editor/buffer state reads AND
+  port/screen state reads: because the editor sends the render cast to
+  the port before processing the `:sys.get_state` message, BEAM message
+  ordering guarantees the render reaches the port's mailbox ahead of any
+  subsequent `screen_cursor` or `modeline` call from the test process.
+
+  This is the preferred sync primitive for navigation tests. Use
+  `send_key/3` only when you need the captured frame snapshot for
+  `assert_screen_snapshot`. Returns the editor state after processing.
   """
   @spec send_key_sync(editor_ctx(), non_neg_integer(), non_neg_integer()) :: map()
   def send_key_sync(%{editor: editor}, codepoint, mods \\ 0) do

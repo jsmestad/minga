@@ -12,25 +12,31 @@ defmodule Minga.IntegrationTest do
   # ── Normal mode navigation ────────────────────────────────────────────────────
 
   describe "Normal mode — hjkl navigation" do
+    # These tests check buffer/screen state, not frame snapshots, so they
+    # use send_key_sync which is race-free (uses :sys.get_state as a sync
+    # barrier instead of waiting for batch_end frames that could be
+    # satisfied by background renders).
     test "l moves cursor right, content unchanged" do
       ctx = start_editor("hello\nworld\nfoo")
       original = buffer_content(ctx)
 
-      send_key(ctx, ?l)
-      send_key(ctx, ?l)
+      send_key_sync(ctx, ?l)
+      send_key_sync(ctx, ?l)
 
       assert buffer_content(ctx) == original
       assert buffer_cursor(ctx) == {0, 2}
-      # Screen cursor is offset by gutter width (3 for a 3-line file)
+      # Screen cursor is offset by gutter width (3 for a 3-line file).
+      # send_key_sync guarantees the render cast reached the port before
+      # :sys.get_state(editor) returned, so screen_cursor sees post-render state.
       assert screen_cursor(ctx) == {1, 3 + 2}
     end
 
     test "h moves cursor left" do
       ctx = start_editor("hello\nworld\nfoo")
 
-      send_key(ctx, ?l)
-      send_key(ctx, ?l)
-      send_key(ctx, ?h)
+      send_key_sync(ctx, ?l)
+      send_key_sync(ctx, ?l)
+      send_key_sync(ctx, ?h)
 
       assert buffer_cursor(ctx) == {0, 1}
     end
@@ -38,11 +44,11 @@ defmodule Minga.IntegrationTest do
     test "j moves cursor down, k moves cursor up" do
       ctx = start_editor("hello\nworld\nfoo")
 
-      send_key(ctx, ?j)
+      send_key_sync(ctx, ?j)
       assert elem(buffer_cursor(ctx), 0) == 1
       assert_modeline_contains(ctx, "2:")
 
-      send_key(ctx, ?k)
+      send_key_sync(ctx, ?k)
       assert elem(buffer_cursor(ctx), 0) == 0
       assert_modeline_contains(ctx, "1:")
     end
@@ -50,9 +56,9 @@ defmodule Minga.IntegrationTest do
     test "multiple l moves advance the column" do
       ctx = start_editor("hello world")
 
-      send_key(ctx, ?l)
-      send_key(ctx, ?l)
-      send_key(ctx, ?l)
+      send_key_sync(ctx, ?l)
+      send_key_sync(ctx, ?l)
+      send_key_sync(ctx, ?l)
 
       {_line, col} = buffer_cursor(ctx)
       assert col == 3
@@ -61,9 +67,9 @@ defmodule Minga.IntegrationTest do
     test "0 moves to beginning of line" do
       ctx = start_editor("hello\nworld")
 
-      send_key(ctx, ?l)
-      send_key(ctx, ?l)
-      send_key(ctx, ?0)
+      send_key_sync(ctx, ?l)
+      send_key_sync(ctx, ?l)
+      send_key_sync(ctx, ?0)
 
       assert buffer_cursor(ctx) == {0, 0}
     end
