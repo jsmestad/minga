@@ -255,6 +255,7 @@ defmodule Minga.Project do
     Process.demonitor(ref, [:flush])
 
     if root == state.current_root do
+      Minga.Events.broadcast(:project_rebuilt, %Minga.Events.ProjectRebuiltEvent{root: root})
       {:noreply, %{state | cached_files: files, rebuilding?: false, rebuild_ref: nil}}
     else
       # Root changed while rebuild was in progress; discard stale result

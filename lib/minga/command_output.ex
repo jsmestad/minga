@@ -158,6 +158,11 @@ defmodule Minga.CommandOutput do
       BufferServer.append(state.buffer, "\n\n[Process exited with code #{code}]")
     end
 
+    Minga.Events.broadcast(
+      :command_done,
+      %Minga.Events.CommandDoneEvent{name: state.name, exit_code: code}
+    )
+
     {:noreply, %{state | port: nil, exit_code: code, running?: false}}
   end
 

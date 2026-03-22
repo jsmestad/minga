@@ -14,9 +14,21 @@ defmodule Minga.Popup.LifecycleTest do
   alias Minga.Popup.Registry, as: PopupRegistry
   alias Minga.Popup.Rule
 
-  # Lightweight fake buffer pid for testing (no GenServer needed)
+  # Lightweight fake buffer pid that responds to GenServer.call(:display_name)
+  # so Layout.compute doesn't hang for 5 seconds on a default timeout.
   defp fake_pid do
-    spawn(fn -> Process.sleep(:infinity) end)
+    spawn(fn -> fake_pid_loop() end)
+  end
+
+  defp fake_pid_loop do
+    receive do
+      {:"$gen_call", from, :display_name} ->
+        GenServer.reply(from, "[test]")
+        fake_pid_loop()
+
+      _ ->
+        fake_pid_loop()
+    end
   end
 
   setup do
@@ -45,7 +57,7 @@ defmodule Minga.Popup.LifecycleTest do
       PopupRegistry.clear()
 
       for pid <- [main_buf, popup_buf] do
-        if Process.alive?(pid), do: Process.exit(pid, :kill)
+        Process.exit(pid, :kill)
       end
     end)
 
@@ -193,7 +205,7 @@ defmodule Minga.Popup.LifecycleTest do
       popup_buf: popup_buf
     } do
       popup_buf2 = fake_pid()
-      on_exit(fn -> if Process.alive?(popup_buf2), do: Process.exit(popup_buf2, :kill) end)
+      on_exit(fn -> Process.exit(popup_buf2, :kill) end)
 
       PopupRegistry.register(Rule.new("*Messages*", side: :bottom, size: {:percent, 25}))
       PopupRegistry.register(Rule.new("*Warnings*", side: :bottom, size: {:percent, 30}))
@@ -223,7 +235,7 @@ defmodule Minga.Popup.LifecycleTest do
       popup_buf: popup_buf
     } do
       popup_buf2 = fake_pid()
-      on_exit(fn -> if Process.alive?(popup_buf2), do: Process.exit(popup_buf2, :kill) end)
+      on_exit(fn -> Process.exit(popup_buf2, :kill) end)
 
       PopupRegistry.register(Rule.new("*Messages*", side: :bottom, size: {:percent, 25}))
       PopupRegistry.register(Rule.new("*Warnings*", side: :bottom, size: {:percent, 30}))
@@ -333,7 +345,12 @@ defmodule Minga.Popup.LifecycleTest do
     end
 
     test "render_float_overlays returns overlays for float popups", %{state: state} do
-      {:ok, real_buf} = BufferServer.start_link(content: "hello world", buffer_name: "*Help*")
+      real_buf =
+        start_supervised!(
+          {BufferServer, content: "hello world", buffer_name: "*Help*"},
+          id: :float_overlay_buf
+        )
+
       PopupRegistry.register(Rule.new("*Help*", display: :float, focus: true))
       {:ok, with_popup} = Lifecycle.open_popup(state, "*Help*", real_buf)
 
@@ -342,8 +359,6 @@ defmodule Minga.Popup.LifecycleTest do
       [overlay] = overlays
       assert is_list(overlay.draws)
       assert overlay.draws != []
-
-      GenServer.stop(real_buf)
     end
 
     test "render_float_overlays returns empty for split-only popups", %{

@@ -94,14 +94,9 @@ defmodule Minga.Agent.Providers.PiRpcTest do
     end
 
     test "get_state resolves when pi responds", %{pid: pid} do
-      # Call get_state in a task so it doesn't block us
-      task = Task.async(fn -> PiRpc.get_state(pid) end)
+      # Call get_state via await_request which handles the synchronization.
+      {task, req_id} = await_request(pid, fn -> PiRpc.get_state(pid) end)
 
-      # Wait for the pending request to appear.
-      # The Task needs time to enter GenServer.call before we can inspect state.
-      req_id = poll_pending(pid)
-
-      # Simulate pi responding
       response =
         JSON.encode!(%{
           "id" => req_id,
@@ -121,8 +116,7 @@ defmodule Minga.Agent.Providers.PiRpcTest do
     end
 
     test "get_available_models resolves when pi responds", %{pid: pid} do
-      task = Task.async(fn -> PiRpc.get_available_models(pid) end)
-      req_id = poll_pending(pid)
+      {task, req_id} = await_request(pid, fn -> PiRpc.get_available_models(pid) end)
 
       response =
         JSON.encode!(%{
@@ -137,8 +131,7 @@ defmodule Minga.Agent.Providers.PiRpcTest do
     end
 
     test "failed response returns error tuple", %{pid: pid} do
-      task = Task.async(fn -> PiRpc.get_state(pid) end)
-      req_id = poll_pending(pid)
+      {task, req_id} = await_request(pid, fn -> PiRpc.get_state(pid) end)
 
       response =
         JSON.encode!(%{
@@ -153,21 +146,46 @@ defmodule Minga.Agent.Providers.PiRpcTest do
     end
   end
 
-  # Polls :sys.get_state until the pending map has at least one entry.
-  # Returns the first pending request id.
-  defp poll_pending(pid, attempts \\ 50) do
+  # Spawns a Task that calls the given function (which must be a blocking
+  # GenServer.call to `pid`), then waits for the call to be received by
+  # inspecting the GenServer's pending map. Returns {task, req_id}.
+  #
+  # The Task signals the test process before entering the GenServer.call.
+  # After receiving the signal, :sys.get_state acts as a barrier: the
+  # GenServer processes messages in order, so if the Task's call is in
+  # the mailbox, it will be handled before the sys message.
+  defp await_request(pid, fun) do
+    test_pid = self()
+
+    task =
+      Task.async(fn ->
+        send(test_pid, :task_entering_call)
+        fun.()
+      end)
+
+    # Wait for the Task to start executing. Once we receive this signal,
+    # the Task is about to send its GenServer.call message.
+    assert_receive :task_entering_call, 1000
+
+    # Barrier: flush the GenServer's mailbox. The Task's GenServer.call
+    # message is either already in the mailbox (processed by this barrier)
+    # or arrives during the barrier's own receive. Either way, after this
+    # returns, the pending map is populated.
     state = :sys.get_state(pid)
 
     case Map.to_list(state.pending) do
       [{req_id, _from} | _] ->
-        req_id
-
-      [] when attempts > 0 ->
-        Process.sleep(5)
-        poll_pending(pid, attempts - 1)
+        {task, req_id}
 
       [] ->
-        flunk("pending map never populated after polling")
+        # Extremely rare: Task was signaled but GenServer.call hasn't
+        # arrived yet. One more barrier resolves it.
+        state = :sys.get_state(pid)
+
+        case Map.to_list(state.pending) do
+          [{req_id, _from} | _] -> {task, req_id}
+          [] -> flunk("GenServer pending map still empty after two :sys.get_state barriers")
+        end
     end
   end
 

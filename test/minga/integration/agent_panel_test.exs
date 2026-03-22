@@ -3,25 +3,12 @@ defmodule Minga.Integration.AgentPanelTest do
   Integration tests for agent panel: toggle, focus management, layout
   computation, and interaction with other UI elements (file tree, splits).
   """
-  # Now async-safe: StubServer replaces real agent session startup
-  # async: false — headless editors under high concurrency can destabilize
-  # ExUnit's :standard_error process registration during teardown
-  use Minga.Test.EditorCase, async: false
-
-  import Mox
+  use Minga.Test.EditorCase, async: true
 
   alias Minga.Editor.Layout
   alias Minga.Editor.State.FileTree
   alias Minga.Editor.Window.Content
   alias Minga.Test.StubServer
-
-  setup :verify_on_exit!
-
-  setup do
-    stub(Minga.Clipboard.Mock, :write, fn _text -> :ok end)
-    stub(Minga.Clipboard.Mock, :read, fn -> {:ok, ""} end)
-    :ok
-  end
 
   # ── Test helpers ───────────────────────────────────────────────────────────
 

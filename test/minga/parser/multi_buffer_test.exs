@@ -19,7 +19,9 @@ defmodule Minga.Parser.MultiBufferTest do
     name = :"parser_multi_#{:erlang.unique_integer([:positive])}"
     {:ok, pid} = ParserManager.start_link(name: name, parser_path: @parser_path)
     ParserManager.subscribe(pid)
-    Process.sleep(50)
+    # subscribe is a GenServer.call, so the port is already open when it returns.
+    # Use :sys.get_state as a final sync barrier to ensure init completed.
+    :sys.get_state(pid)
     {:ok, parser: pid}
   end
 
@@ -146,7 +148,8 @@ defmodule Minga.Parser.MultiBufferTest do
 
       # Close buffer 1
       ParserManager.send_commands(parser, [Protocol.encode_close_buffer(1)])
-      Process.sleep(50)
+      # send_commands is a cast; flush with :sys.get_state so the close is processed
+      :sys.get_state(parser)
 
       # Buffer 2 should still work fine
       spans2_v2 = setup_buffer(parser, 2, "json", 2, json_source)

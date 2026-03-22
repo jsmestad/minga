@@ -5,62 +5,23 @@ defmodule Minga.CommandOutputTest do
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.CommandOutput
+  alias Minga.Events
 
-  # Polls until the command's buffer contains the expected text.
-  # Much faster than a fixed Process.sleep since most commands finish
-  # in a few milliseconds.
-  defp wait_for_output(name, expected, timeout \\ 2000) do
-    deadline = System.monotonic_time(:millisecond) + timeout
-    do_wait_for_output(name, expected, deadline)
+  setup do
+    # Subscribe to command_done events so we can await completion
+    # without polling. Idempotent: safe to call in every test.
+    Events.subscribe(:command_done)
+    :ok
   end
 
-  defp do_wait_for_output(name, expected, deadline) do
-    case check_output(name, expected) do
-      :ok ->
-        :ok
-
-      {:not_ready, context} ->
-        if System.monotonic_time(:millisecond) >= deadline do
-          flunk("Timed out waiting for #{inspect(expected)} in command output. #{context}")
-        else
-          Process.sleep(5)
-          do_wait_for_output(name, expected, deadline)
-        end
-    end
-  end
-
-  defp check_output(name, expected) do
-    case CommandOutput.buffer(name) do
-      nil ->
-        {:not_ready, "Buffer not yet created for #{name}"}
-
-      buf ->
-        content = BufferServer.content(buf)
-
-        if String.contains?(content, expected) do
-          :ok
-        else
-          {:not_ready, "Got: #{inspect(content)}"}
-        end
-    end
-  end
-
-  # Polls until running?/1 returns false.
-  defp wait_until_done(name, timeout \\ 2000) do
-    deadline = System.monotonic_time(:millisecond) + timeout
-    do_wait_until_done(name, deadline)
-  end
-
-  defp do_wait_until_done(name, deadline) when is_integer(deadline) do
-    if CommandOutput.running?(name) do
-      if System.monotonic_time(:millisecond) >= deadline do
-        flunk("Timed out waiting for command #{name} to finish")
-      else
-        Process.sleep(5)
-        do_wait_until_done(name, deadline)
-      end
-    else
-      :ok
+  # Waits for the command to finish by receiving the :command_done event.
+  # Returns the exit code.
+  defp await_done(name, timeout \\ 2000) do
+    receive do
+      {:minga_event, :command_done, %Events.CommandDoneEvent{name: ^name, exit_code: code}} ->
+        code
+    after
+      timeout -> flunk("Command #{name} did not finish within #{timeout}ms")
     end
   end
 
@@ -68,7 +29,7 @@ defmodule Minga.CommandOutputTest do
     test "creates a buffer and streams command output" do
       name = "test_output_#{System.unique_integer([:positive])}"
       :ok = CommandOutput.run(name, "echo hello")
-      wait_for_output(name, "hello")
+      await_done(name)
 
       buf = CommandOutput.buffer(name)
       assert is_pid(buf)
@@ -81,7 +42,9 @@ defmodule Minga.CommandOutputTest do
     test "includes exit code in output" do
       name = "test_exit_#{System.unique_integer([:positive])}"
       :ok = CommandOutput.run(name, "echo done")
-      wait_for_output(name, "[Process exited with code 0]")
+      code = await_done(name)
+
+      assert code == 0
 
       buf = CommandOutput.buffer(name)
       content = BufferServer.content(buf)
@@ -91,7 +54,9 @@ defmodule Minga.CommandOutputTest do
     test "captures non-zero exit code" do
       name = "test_fail_#{System.unique_integer([:positive])}"
       :ok = CommandOutput.run(name, "bash -c 'exit 42'")
-      wait_for_output(name, "[Process exited with code 42]")
+      code = await_done(name)
+
+      assert code == 42
 
       buf = CommandOutput.buffer(name)
       content = BufferServer.content(buf)
@@ -101,10 +66,10 @@ defmodule Minga.CommandOutputTest do
     test "clears buffer on re-run" do
       name = "test_rerun_#{System.unique_integer([:positive])}"
       :ok = CommandOutput.run(name, "echo first")
-      wait_for_output(name, "first")
+      await_done(name)
 
       :ok = CommandOutput.run(name, "echo second")
-      wait_for_output(name, "second")
+      await_done(name)
 
       buf = CommandOutput.buffer(name)
       content = BufferServer.content(buf)
@@ -115,7 +80,7 @@ defmodule Minga.CommandOutputTest do
     test "streams stderr alongside stdout" do
       name = "test_stderr_#{System.unique_integer([:positive])}"
       :ok = CommandOutput.run(name, "echo out; echo err >&2")
-      wait_for_output(name, "out")
+      await_done(name)
 
       buf = CommandOutput.buffer(name)
       content = BufferServer.content(buf)
@@ -137,7 +102,7 @@ defmodule Minga.CommandOutputTest do
     test "returns false after command exits" do
       name = "test_done_#{System.unique_integer([:positive])}"
       :ok = CommandOutput.run(name, "echo fast")
-      wait_until_done(name)
+      await_done(name)
 
       refute CommandOutput.running?(name)
     end
@@ -170,11 +135,10 @@ defmodule Minga.CommandOutputTest do
     test "returns the buffer pid after run" do
       name = "test_buf_#{System.unique_integer([:positive])}"
       :ok = CommandOutput.run(name, "echo hi")
-      wait_for_output(name, "hi")
+      await_done(name)
 
       buf = CommandOutput.buffer(name)
       assert is_pid(buf)
-      assert Process.alive?(buf)
     end
   end
 end

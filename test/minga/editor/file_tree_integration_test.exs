@@ -249,8 +249,9 @@ defmodule Minga.Editor.FileTreeIntegrationTest do
       # Focus returned to editor
       assert state.file_tree.focused == false
 
-      # Wait for the async :setup_highlight message to process
-      Process.sleep(50)
+      # Flush the :setup_highlight message (self-sent by maybe_reset_highlight
+      # during the Enter key press). send_key_sync already flushed the key
+      # handler, so :setup_highlight is next in the mailbox.
       state = :sys.get_state(ctx.editor)
 
       # Highlight setup should have fired (version bumped by parse command)
@@ -264,9 +265,12 @@ defmodule Minga.Editor.FileTreeIntegrationTest do
 
       case Minga.Git.root_for(Path.join(dir, "other.ex")) do
         {:ok, _root} ->
-          # Git.Tracker handles git buffer lifecycle via the event bus.
-          # Poll until the async event is processed.
-          assert poll_until(fn -> GitTracker.tracked?(buf) end, 500, 10),
+          # Flush the Tracker's mailbox so the :buffer_opened event is processed.
+          # The event was dispatched via Registry.dispatch (send/2) during the
+          # editor's file-open lifecycle, so it's in the Tracker's mailbox now.
+          :sys.get_state(GitTracker)
+
+          assert GitTracker.tracked?(buf),
                  "Expected git buffer to be started for file opened from tree"
 
         :not_git ->
@@ -414,24 +418,6 @@ defmodule Minga.Editor.FileTreeIntegrationTest do
 
       # The tree should still be present (refresh didn't crash or nil it out)
       assert state.file_tree.tree != nil
-    end
-  end
-
-  defp poll_until(condition, timeout, interval) do
-    deadline = System.monotonic_time(:millisecond) + timeout
-    do_poll_until(condition, interval, deadline)
-  end
-
-  defp do_poll_until(condition, interval, deadline) do
-    if condition.() do
-      true
-    else
-      if System.monotonic_time(:millisecond) >= deadline do
-        false
-      else
-        Process.sleep(interval)
-        do_poll_until(condition, interval, deadline)
-      end
     end
   end
 end
