@@ -1424,12 +1424,27 @@ defmodule Minga.Port.Protocol.GUI do
     context_bytes = :erlang.iolist_to_binary([context])
 
     candidate_data =
-      Enum.map(candidates, fn %{label: label, description: desc, match_score: score} ->
+      Enum.map(candidates, fn candidate ->
+        %{label: label, description: desc, match_score: score} = candidate
+        match_positions = Map.get(candidate, :match_positions, [])
+        annotation = Map.get(candidate, :annotation, "")
+
         label_bytes = :erlang.iolist_to_binary([label])
         desc_bytes = :erlang.iolist_to_binary([desc])
+        annotation_bytes = :erlang.iolist_to_binary([annotation])
 
-        <<min(score, 255)::8, byte_size(label_bytes)::16, label_bytes::binary,
-          byte_size(desc_bytes)::16, desc_bytes::binary>>
+        # Per candidate: score(1) + label_len(2) + label + desc_len(2) + desc
+        #   + annotation_len(2) + annotation
+        #   + match_pos_count(1) + match_positions(count * 2)
+        pos_binary =
+          Enum.map(match_positions, fn pos -> <<min(pos, 0xFFFF)::16>> end)
+
+        [
+          <<min(score, 255)::8, byte_size(label_bytes)::16, label_bytes::binary,
+            byte_size(desc_bytes)::16, desc_bytes::binary, byte_size(annotation_bytes)::16,
+            annotation_bytes::binary, length(match_positions)::8>>
+          | pos_binary
+        ]
       end)
 
     IO.iodata_to_binary([

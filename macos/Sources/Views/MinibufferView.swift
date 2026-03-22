@@ -161,11 +161,8 @@ struct MinibufferView: View {
         let isSelected = candidate.id == Int(state.selectedIndex)
 
         HStack(spacing: 8) {
-            // Command name
-            Text(candidate.label)
-                .font(.system(size: 13, design: .monospaced))
-                .foregroundStyle(isSelected ? theme.editorBg : theme.popupFg)
-                .lineLimit(1)
+            // Command name with fuzzy match highlighting
+            highlightedLabel(candidate, isSelected: isSelected)
 
             // Description (dimmed)
             if !candidate.description.isEmpty {
@@ -179,11 +176,49 @@ struct MinibufferView: View {
             }
 
             Spacer(minLength: 0)
+
+            // Keybinding annotation (right-aligned)
+            if !candidate.annotation.isEmpty {
+                Text(candidate.annotation)
+                    .font(.system(size: 10.5, design: .monospaced))
+                    .foregroundStyle(isSelected
+                        ? theme.editorBg.opacity(0.5)
+                        : theme.popupFg.opacity(0.3))
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill((isSelected ? theme.editorBg : theme.popupFg).opacity(0.06))
+                    )
+            }
         }
         .padding(.horizontal, 12)
         .frame(height: candidateHeight)
         .background(selectionBackground(isSelected))
         .id(candidate.id)
+    }
+
+    @ViewBuilder
+    private func highlightedLabel(_ candidate: MinibufferCandidate, isSelected: Bool) -> some View {
+        if candidate.matchPositions.isEmpty {
+            Text(candidate.label)
+                .font(.system(size: 13, design: .monospaced))
+                .foregroundStyle(isSelected ? theme.editorBg : theme.popupFg)
+                .lineLimit(1)
+        } else {
+            let baseColor = isSelected ? Color(theme.editorBg) : Color(theme.popupFg)
+            let matchColor = isSelected ? Color(theme.editorBg) : Color(theme.accent)
+            let attributed = TextHighlighting.attributedString(
+                candidate.label,
+                matchPositions: candidate.matchPositions,
+                baseFont: .system(size: 13, design: .monospaced),
+                matchFont: .system(size: 13, weight: .semibold, design: .monospaced),
+                baseColor: baseColor,
+                matchColor: matchColor
+            )
+            Text(attributed)
+                .lineLimit(1)
+        }
     }
 
     @ViewBuilder

@@ -187,31 +187,15 @@ struct PickerOverlay: View {
                 .foregroundStyle(theme.popupFg)
                 .lineLimit(1)
         } else {
-            let attributed = buildHighlightedText(label, matchPositions: matchSet)
+            let attributed = TextHighlighting.attributedString(
+                label,
+                matchPositions: matchSet,
+                baseColor: Color(theme.popupFg),
+                matchColor: Color(theme.accent)
+            )
             Text(attributed)
                 .lineLimit(1)
         }
-    }
-
-    private func buildHighlightedText(_ text: String, matchPositions: Set<Int>) -> AttributedString {
-        var result = AttributedString()
-        let chars = Array(text)
-
-        for (idx, char) in chars.enumerated() {
-            var segment = AttributedString(String(char))
-            segment.font = .system(size: 13)
-
-            if matchPositions.contains(idx) {
-                segment.foregroundColor = Color(theme.accent)
-                segment.font = .system(size: 13, weight: .semibold)
-            } else {
-                segment.foregroundColor = Color(theme.popupFg)
-            }
-
-            result.append(segment)
-        }
-
-        return result
     }
 
     // MARK: - Bottom bar
