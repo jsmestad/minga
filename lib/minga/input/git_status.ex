@@ -15,6 +15,7 @@ defmodule Minga.Input.GitStatus do
   alias Minga.Git
   alias Minga.Git.Repo
   alias Minga.Input
+  alias Minga.Input.GitStatus.TuiState
   alias Minga.Keymap.Scope
 
   @impl true
@@ -177,11 +178,11 @@ defmodule Minga.Input.GitStatus do
     end
   end
 
-  @spec toggle_current_section(map()) :: map()
-  defp toggle_current_section(tui) do
+  @spec toggle_current_section(TuiState.t()) :: TuiState.t()
+  defp toggle_current_section(%TuiState{} = tui) do
     case Enum.at(tui.flat_entries, tui.cursor_index) do
       {:section_header, section, _count} ->
-        collapsed = toggle_set_member(tui.collapsed, section)
+        collapsed = toggle_collapsed(tui.collapsed, section)
         rebuild_flat_entries(%{tui | collapsed: collapsed})
 
       _ ->
@@ -189,16 +190,16 @@ defmodule Minga.Input.GitStatus do
     end
   end
 
-  @spec toggle_set_member(MapSet.t(), term()) :: MapSet.t()
-  defp toggle_set_member(set, item) do
-    if MapSet.member?(set, item) do
-      MapSet.delete(set, item)
+  @spec toggle_collapsed(%{atom() => true}, atom()) :: %{atom() => true}
+  defp toggle_collapsed(collapsed, section) do
+    if Map.has_key?(collapsed, section) do
+      Map.delete(collapsed, section)
     else
-      MapSet.put(set, item)
+      Map.put(collapsed, section, true)
     end
   end
 
-  @spec update_tui_state(EditorState.t(), (map() -> map())) :: EditorState.t()
+  @spec update_tui_state(EditorState.t(), (TuiState.t() -> TuiState.t())) :: EditorState.t()
   defp update_tui_state(%{git_status_panel: nil} = state, _fun), do: state
 
   defp update_tui_state(state, fun) do
@@ -244,13 +245,13 @@ defmodule Minga.Input.GitStatus do
     end
   end
 
-  @spec build_initial_tui_state(map()) :: map()
+  @spec build_initial_tui_state(map()) :: TuiState.t()
   defp build_initial_tui_state(panel_data) do
     entries = Map.get(panel_data, :entries, [])
 
-    tui = %{
+    tui = %TuiState{
       cursor_index: 0,
-      collapsed: MapSet.new(),
+      collapsed: %{},
       flat_entries: [],
       entries: entries
     }
@@ -258,11 +259,8 @@ defmodule Minga.Input.GitStatus do
     rebuild_flat_entries(tui)
   end
 
-  @spec rebuild_flat_entries(map()) :: map()
-  defp rebuild_flat_entries(tui) do
-    entries = Map.get(tui, :entries, [])
-    collapsed = tui.collapsed
-
+  @spec rebuild_flat_entries(TuiState.t()) :: TuiState.t()
+  defp rebuild_flat_entries(%TuiState{} = tui) do
     sections = [
       {:conflicts, fn e -> e.status == :conflict end},
       {:staged, fn e -> e.staged and e.status != :conflict and e.status != :untracked end},
@@ -272,7 +270,8 @@ defmodule Minga.Input.GitStatus do
 
     flat =
       Enum.flat_map(sections, fn {section_name, filter_fn} ->
-        build_section_entries(entries, section_name, filter_fn, collapsed)
+        is_collapsed = Map.has_key?(tui.collapsed, section_name)
+        build_section_entries(tui.entries, section_name, filter_fn, is_collapsed)
       end)
 
     %{tui | flat_entries: flat}
@@ -282,9 +281,9 @@ defmodule Minga.Input.GitStatus do
           [Git.StatusEntry.t()],
           atom(),
           (Git.StatusEntry.t() -> boolean()),
-          MapSet.t()
-        ) :: [term()]
-  defp build_section_entries(entries, section_name, filter_fn, collapsed) do
+          boolean()
+        ) :: [TuiState.flat_entry()]
+  defp build_section_entries(entries, section_name, filter_fn, is_collapsed) do
     section_entries = Enum.filter(entries, filter_fn)
 
     case section_entries do
@@ -294,7 +293,7 @@ defmodule Minga.Input.GitStatus do
       _ ->
         header = [{:section_header, section_name, length(section_entries)}]
 
-        if MapSet.member?(collapsed, section_name) do
+        if is_collapsed do
           header
         else
           file_entries = Enum.map(section_entries, &{:file, section_name, &1})
@@ -303,7 +302,7 @@ defmodule Minga.Input.GitStatus do
     end
   end
 
-  @spec find_next_section([term()], non_neg_integer()) :: non_neg_integer()
+  @spec find_next_section([TuiState.flat_entry()], non_neg_integer()) :: non_neg_integer()
   defp find_next_section(flat_entries, current_idx) do
     result =
       flat_entries
@@ -319,7 +318,7 @@ defmodule Minga.Input.GitStatus do
     end
   end
 
-  @spec find_prev_section([term()], non_neg_integer()) :: non_neg_integer()
+  @spec find_prev_section([TuiState.flat_entry()], non_neg_integer()) :: non_neg_integer()
   defp find_prev_section(flat_entries, current_idx) do
     result =
       flat_entries

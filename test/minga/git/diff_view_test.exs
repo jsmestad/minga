@@ -23,7 +23,7 @@ defmodule Minga.Git.DiffViewTest do
 
       # Should have at least one :added metadata entry
       added_meta = Enum.filter(result.line_metadata, fn m -> m.type == :added end)
-      assert length(added_meta) > 0
+      assert [_ | _] = added_meta
     end
 
     test "shows deleted lines" do
@@ -38,7 +38,7 @@ defmodule Minga.Git.DiffViewTest do
 
       # Should have :removed metadata
       removed_meta = Enum.filter(result.line_metadata, fn m -> m.type == :removed end)
-      assert length(removed_meta) > 0
+      assert [_ | _] = removed_meta
     end
 
     test "shows modified lines as removed + added" do
@@ -53,8 +53,8 @@ defmodule Minga.Git.DiffViewTest do
 
       removed = Enum.filter(result.line_metadata, fn m -> m.type == :removed end)
       added = Enum.filter(result.line_metadata, fn m -> m.type == :added end)
-      assert length(removed) > 0
-      assert length(added) > 0
+      assert [_ | _] = removed
+      assert [_ | _] = added
     end
 
     test "folds large unchanged regions" do
@@ -70,7 +70,7 @@ defmodule Minga.Git.DiffViewTest do
 
       # Should have fold metadata for the large unchanged region
       fold_meta = Enum.filter(result.line_metadata, fn m -> m.type == :fold end)
-      assert length(fold_meta) > 0
+      assert [_ | _] = fold_meta
 
       # The fold should indicate how many lines were hidden
       fold = hd(fold_meta)
@@ -83,7 +83,7 @@ defmodule Minga.Git.DiffViewTest do
 
       result = DiffView.build(base, current)
       assert is_list(result.hunk_lines)
-      assert length(result.hunk_lines) > 0
+      assert [_ | _] = result.hunk_lines
     end
 
     test "handles empty base (new file)" do
@@ -92,7 +92,7 @@ defmodule Minga.Git.DiffViewTest do
       assert "new content" in lines
 
       added = Enum.filter(result.line_metadata, fn m -> m.type == :added end)
-      assert length(added) > 0
+      assert [_ | _] = added
     end
 
     test "handles empty current (deleted file)" do
@@ -101,7 +101,7 @@ defmodule Minga.Git.DiffViewTest do
       assert "old content" in lines
 
       removed = Enum.filter(result.line_metadata, fn m -> m.type == :removed end)
-      assert length(removed) > 0
+      assert [_ | _] = removed
     end
   end
 end
