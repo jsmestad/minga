@@ -1,12 +1,12 @@
 # Minga Architecture
 
-How a text editor built on process isolation and preemptive concurrency actually works, and why it's a surprisingly good idea.
+How a text editor built on process isolation and preemptive concurrency actually works.
 
 ---
 
 ## The Big Idea
 
-Most text editors are single-threaded programs with shared state. Buffers, rendering, input handling, plugin execution, AI agents: all living in one address space, contending for one event loop. When a background task does heavy work, your keystrokes queue up. When two things modify the same buffer, you get race conditions. When you want to know what a plugin is doing, you add `print` statements and restart.
+Most editors are single-threaded with shared state. Everything (buffers, rendering, input, plugins, AI agents) lives in one address space, contending for one event loop. When a background task does heavy work, your keystrokes queue up. When two things modify the same buffer, you get race conditions.
 
 Minga splits the editor into **separate OS processes** with completely isolated memory: a BEAM process for all editor logic, and one or more frontend processes for rendering and input.
 
@@ -442,19 +442,19 @@ Editor.handle_info decodes via Port.Protocol
     ▼
 Input.Router.dispatch_mouse walks overlay handlers, then surface handlers
     │
-    ├─ Overlays (Picker, Completion) — intercept when their UI is visible
+    ├─ Overlays (Picker, Completion) - intercept when their UI is visible
     │
-    ├─ Input.FileTreeHandler — hit-tests against Layout.file_tree rect
+    ├─ Input.FileTreeHandler - hit-tests against Layout.file_tree rect
     │     ├─ Inside file tree → handle tree click/scroll
     │     └─ Outside → :passthrough
     │
-    ├─ Input.AgentMouse — hit-tests against agent regions (position-based)
+    ├─ Input.AgentMouse - hit-tests against agent regions (position-based)
     │     ├─ Agent chat window (WindowTree + Content.agent_chat?) → scroll chat, click-to-focus
     │     ├─ Agent side panel (Layout.agent_panel rect) → scroll chat, click-to-focus
     │     ├─ File viewer sidebar (right of chat_width_pct) → scroll preview
     │     └─ Outside agent regions → :passthrough
     │
-    └─ Input.ModeFSM (fallback) — buffer-content mouse handling
+    └─ Input.ModeFSM (fallback) - buffer-content mouse handling
           └─ Editor.Mouse.handle/7
                 ├─ click_count=1 → position cursor, start drag
                 ├─ click_count=2 → select word (visual char), word-snapped drag
@@ -670,14 +670,14 @@ The dispatch helper lives in the parent module (not a shared utility), since eac
 
 These guide what we build and how:
 
-- **GUI-first, TUI-capable** — Design for native GUI frontends (Swift/Metal, GTK4) first. The TUI is a capable fallback, like Emacs's terminal mode, not the primary target.
-- **Fault tolerance over speed** — The BEAM's supervision model means crashes are recoverable events, not catastrophes.
-- **Process isolation** — Editor state and rendering never share memory; either can fail independently. Multiple frontends can exist because the protocol enforces this boundary.
-- **Vim grammar, modern UX** — Modal editing with discoverable leader-key menus.
-- **Elixir for logic, platform-native rendering** — The BEAM handles everything a text editor needs to think about. Swift, GTK4, and Zig handle everything a display needs to draw.
-- **Test everything** — Property-based tests for data structures, snapshot tests for UI, integration tests for the full pipeline.
-- **Convention over configuration** — Minga ships working defaults for everything: theme, keybindings, tab width, formatters, LSP servers. A fresh install with no config file should feel like Doom Emacs on day one. Your `config.exs` is a diff, not a manifest; it contains only what you've changed. Defaults are inspectable (`:set` shows current values, `SPC h k` shows bindings and whether they're defaults or overrides) and never hidden so deep that users can't find them.
-- **Core vs. extension** — If a Doom Emacs user installs Minga with zero configuration, would they expect this feature to work? If yes, it ships built-in. If it's a power-user addition, a niche workflow, or a matter of taste, it's an extension. Built-in features that touch only public APIs should be architected as if they were extensions (clean boundary, no internal coupling) so extraction is possible later. See `docs/AUTHORING_EXTENSIONS.md` for the full philosophy.
+- **GUI-first, TUI-capable.** Design for native GUI frontends (Swift/Metal, GTK4) first. The TUI is a capable fallback, like Emacs's terminal mode, not the primary target.
+- **Fault tolerance over speed.** The BEAM's supervision model means crashes are recoverable events, not catastrophes.
+- **Process isolation.** Editor state and rendering never share memory; either can fail independently. Multiple frontends can exist because the protocol enforces this boundary.
+- **Vim grammar, modern UX.** Modal editing with discoverable leader-key menus.
+- **Elixir for logic, platform-native rendering.** The BEAM handles everything a text editor needs to think about. Swift, GTK4, and Zig handle everything a display needs to draw.
+- **Test everything.** Property-based tests for data structures, snapshot tests for UI, integration tests for the full pipeline.
+- **Convention over configuration.** Minga ships working defaults for everything: theme, keybindings, tab width, formatters, LSP servers. A fresh install with no config file should feel like Doom Emacs on day one. Your `config.exs` is a diff, not a manifest; it contains only what you've changed. Defaults are inspectable (`:set` shows current values, `SPC h k` shows bindings and whether they're defaults or overrides) and never hidden so deep that users can't find them.
+- **Core vs. extension.** If a Doom Emacs user installs Minga with zero configuration, would they expect this feature to work? If yes, it ships built-in. If it's a power-user addition, a niche workflow, or a matter of taste, it's an extension. Built-in features that touch only public APIs should be architected as if they were extensions (clean boundary, no internal coupling) so extraction is possible later. See `docs/AUTHORING_EXTENSIONS.md` for the full philosophy.
 
 ---
 

@@ -127,4 +127,6 @@ You're up and running. Here's what to read based on what you care about:
 
 **"I'm coming from Neovim/Emacs."** The [Neovim](for-neovim-users.html) and [Emacs](for-emacs-users.html) migration guides explain what's the same, what's different, and what's better.
 
+**"I use AI coding tools."** Read [For AI-Assisted Developers](for-ai-coders.html). It covers why Minga's architecture matters for agentic workflows and how it compares to what you're using today.
+
 **"I want to contribute."** The [Contributing guide](contributing.html) has the build-from-source setup, testing, and how to add new commands and motions.
