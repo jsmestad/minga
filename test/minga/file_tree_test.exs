@@ -174,7 +174,12 @@ defmodule Minga.FileTreeTest do
 
       tree = FileTree.new(tmp_dir)
       tree2 = FileTree.toggle_expand(tree)
-      assert tree == tree2
+      # Structural state unchanged (expanded set, cursor, root)
+      assert tree2.expanded == tree.expanded
+      assert tree2.cursor == tree.cursor
+      assert tree2.root == tree.root
+      # Cache is populated as a side effect of checking the entry
+      assert is_list(tree2.entries)
     end
   end
 
@@ -445,6 +450,165 @@ defmodule Minga.FileTreeTest do
       File.rm!(Path.join(tmp_dir, "b.txt"))
       tree = FileTree.refresh(tree)
       assert tree.cursor == 0
+    end
+  end
+
+  describe "entry caching" do
+    @tag :tmp_dir
+    test "visible_entries returns cached results when filesystem changes", %{tmp_dir: tmp_dir} do
+      File.write!(Path.join(tmp_dir, "a.txt"), "")
+
+      # Use ensure_entries to populate the cache in the struct
+      tree = FileTree.new(tmp_dir) |> FileTree.ensure_entries()
+      entries1 = FileTree.visible_entries(tree)
+      assert length(entries1) == 1
+
+      # Create a new file after the cache is populated
+      File.write!(Path.join(tmp_dir, "b.txt"), "")
+
+      # Second call on the SAME struct should return the cached list,
+      # not seeing the new file
+      entries2 = FileTree.visible_entries(tree)
+      assert entries2 == entries1
+      assert length(entries2) == 1
+    end
+
+    @tag :tmp_dir
+    test "ensure_entries populates cache and subsequent visible_entries uses it", %{
+      tmp_dir: tmp_dir
+    } do
+      File.write!(Path.join(tmp_dir, "a.txt"), "")
+
+      tree = FileTree.new(tmp_dir)
+      assert tree.entries == nil
+
+      tree = FileTree.ensure_entries(tree)
+      assert is_list(tree.entries)
+      assert length(tree.entries) == 1
+
+      # Create a new file; cached entries should still show only "a.txt"
+      File.write!(Path.join(tmp_dir, "b.txt"), "")
+      assert FileTree.visible_entries(tree) == tree.entries
+      assert length(FileTree.visible_entries(tree)) == 1
+    end
+
+    @tag :tmp_dir
+    test "toggle_expand invalidates cache so new entries are computed", %{tmp_dir: tmp_dir} do
+      File.mkdir_p!(Path.join(tmp_dir, "src"))
+      File.write!(Path.join([tmp_dir, "src", "main.ex"]), "")
+
+      tree = FileTree.new(tmp_dir)
+      # Populate cache: just "src" (collapsed)
+      entries_before = FileTree.visible_entries(tree)
+      assert length(entries_before) == 1
+
+      # Expand "src"; this should invalidate the cache
+      tree = FileTree.toggle_expand(tree)
+      entries_after = FileTree.visible_entries(tree)
+
+      # Now we see both "src" and "main.ex"
+      assert length(entries_after) == 2
+      names = Enum.map(entries_after, & &1.name)
+      assert names == ["src", "main.ex"]
+    end
+
+    @tag :tmp_dir
+    test "refresh invalidates cache and picks up filesystem changes", %{tmp_dir: tmp_dir} do
+      File.write!(Path.join(tmp_dir, "a.txt"), "")
+
+      tree = FileTree.new(tmp_dir) |> FileTree.ensure_entries()
+      assert length(FileTree.visible_entries(tree)) == 1
+
+      # Create a new file
+      File.write!(Path.join(tmp_dir, "b.txt"), "")
+
+      # Stale cache: still 1 entry
+      assert length(FileTree.visible_entries(tree)) == 1
+
+      # Refresh should rescan and see both files
+      tree = FileTree.refresh(tree)
+      assert length(FileTree.visible_entries(tree)) == 2
+    end
+
+    @tag :tmp_dir
+    test "cursor-only operations preserve the entry cache", %{tmp_dir: tmp_dir} do
+      File.write!(Path.join(tmp_dir, "a.txt"), "")
+      File.write!(Path.join(tmp_dir, "b.txt"), "")
+
+      tree = FileTree.new(tmp_dir) |> FileTree.ensure_entries()
+      original_entries = tree.entries
+
+      # move_down preserves cache
+      tree = FileTree.move_down(tree)
+      assert tree.entries == original_entries
+      assert tree.cursor == 1
+
+      # move_up preserves cache
+      tree = FileTree.move_up(tree)
+      assert tree.entries == original_entries
+      assert tree.cursor == 0
+    end
+
+    @tag :tmp_dir
+    test "toggle_hidden invalidates and recomputes cache", %{tmp_dir: tmp_dir} do
+      File.write!(Path.join(tmp_dir, ".hidden"), "")
+      File.write!(Path.join(tmp_dir, "visible.txt"), "")
+
+      tree = FileTree.new(tmp_dir) |> FileTree.ensure_entries()
+      assert length(tree.entries) == 1
+
+      tree = FileTree.toggle_hidden(tree)
+      assert length(tree.entries) == 2
+      names = Enum.map(tree.entries, & &1.name)
+      assert ".hidden" in names
+      assert "visible.txt" in names
+    end
+
+    @tag :tmp_dir
+    test "collapse_all invalidates cache", %{tmp_dir: tmp_dir} do
+      File.mkdir_p!(Path.join(tmp_dir, "lib"))
+      File.write!(Path.join([tmp_dir, "lib", "a.ex"]), "")
+
+      tree = FileTree.new(tmp_dir) |> FileTree.toggle_expand() |> FileTree.ensure_entries()
+      assert length(tree.entries) == 2
+
+      tree = FileTree.collapse_all(tree)
+      # Cache invalidated; new entries should show only collapsed "lib"
+      assert length(FileTree.visible_entries(tree)) == 1
+    end
+
+    @tag :tmp_dir
+    test "reveal invalidates cache and sees newly expanded paths", %{tmp_dir: tmp_dir} do
+      File.mkdir_p!(Path.join([tmp_dir, "lib", "minga"]))
+      target = Path.join([tmp_dir, "lib", "minga", "editor.ex"])
+      File.write!(target, "")
+
+      tree = FileTree.new(tmp_dir) |> FileTree.ensure_entries()
+      # Only "lib" visible (collapsed)
+      assert length(tree.entries) == 1
+
+      tree = FileTree.reveal(tree, target)
+      # Now lib, minga, and editor.ex are visible
+      assert length(tree.entries) == 3
+      assert FileTree.selected_entry(tree).name == "editor.ex"
+    end
+
+    @tag :tmp_dir
+    test "selected_entry uses cached entries for cursor stability", %{tmp_dir: tmp_dir} do
+      File.write!(Path.join(tmp_dir, "a.txt"), "")
+      File.write!(Path.join(tmp_dir, "b.txt"), "")
+
+      # move_down calls ensure_entries internally, so cache is populated
+      tree = FileTree.new(tmp_dir) |> FileTree.move_down()
+      assert tree.entries != nil
+      entry = FileTree.selected_entry(tree)
+      assert entry.name == "b.txt"
+
+      # Even if a file is added that would sort before "b.txt",
+      # selected_entry on the same struct returns the same entry
+      File.write!(Path.join(tmp_dir, "aaa.txt"), "")
+      entry2 = FileTree.selected_entry(tree)
+      assert entry2.name == "b.txt"
     end
   end
 end

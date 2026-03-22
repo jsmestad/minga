@@ -3,8 +3,9 @@ defmodule Minga.FileTree do
   Pure data structure for a navigable filesystem tree.
 
   Holds the root path, a set of expanded directories, a cursor position,
-  and a show_hidden toggle. The flat list of visible entries is computed
-  lazily from the filesystem by walking only expanded directories.
+  and a show_hidden toggle. The flat list of visible entries is cached in
+  the struct after the first computation and invalidated whenever tree
+  state changes (expand, collapse, toggle_hidden, refresh, reveal).
 
   No GenServer; the editor owns this struct in its state.
   """
@@ -35,7 +36,8 @@ defmodule Minga.FileTree do
           cursor: non_neg_integer(),
           show_hidden: boolean(),
           width: pos_integer(),
-          git_status: GitStatus.status_map()
+          git_status: GitStatus.status_map(),
+          entries: [entry()] | nil
         }
 
   @enforce_keys [:root]
@@ -44,7 +46,8 @@ defmodule Minga.FileTree do
             cursor: 0,
             show_hidden: false,
             width: 30,
-            git_status: %{}
+            git_status: %{},
+            entries: nil
 
   @default_ignore ~w(.git _build deps node_modules .elixir_ls)
 
@@ -73,7 +76,8 @@ defmodule Minga.FileTree do
   @doc "Moves the cursor down by one entry, clamped to the last visible entry."
   @spec move_down(t()) :: t()
   def move_down(%__MODULE__{} = tree) do
-    max_idx = max(length(visible_entries(tree)) - 1, 0)
+    tree = ensure_entries(tree)
+    max_idx = max(length(tree.entries) - 1, 0)
     %{tree | cursor: min(tree.cursor + 1, max_idx)}
   end
 
@@ -87,74 +91,76 @@ defmodule Minga.FileTree do
   """
   @spec toggle_expand(t()) :: t()
   def toggle_expand(%__MODULE__{} = tree) do
-    case selected_entry(tree) do
+    cached = ensure_entries(tree)
+
+    case Enum.at(cached.entries, cached.cursor) do
       %{dir?: true, path: path} ->
-        if MapSet.member?(tree.expanded, path) do
-          %{tree | expanded: MapSet.delete(tree.expanded, path)}
+        if MapSet.member?(cached.expanded, path) do
+          invalidate_entries(%{cached | expanded: MapSet.delete(cached.expanded, path)})
         else
-          %{tree | expanded: MapSet.put(tree.expanded, path)}
+          invalidate_entries(%{cached | expanded: MapSet.put(cached.expanded, path)})
         end
 
       _ ->
-        tree
+        cached
     end
   end
 
   @doc "Collapses all directories, keeping only the root expanded. Resets cursor to 0."
   @spec collapse_all(t()) :: t()
   def collapse_all(%__MODULE__{} = tree) do
-    %{tree | expanded: MapSet.new([tree.root]), cursor: 0}
+    invalidate_entries(%{tree | expanded: MapSet.new([tree.root]), cursor: 0})
   end
 
   @doc "Collapses the directory at cursor, or if on a file/collapsed dir, collapses the parent."
   @spec collapse(t()) :: t()
   def collapse(%__MODULE__{} = tree) do
-    case selected_entry(tree) do
-      %{dir?: true, path: path} when path != tree.root ->
-        if MapSet.member?(tree.expanded, path) do
+    cached = ensure_entries(tree)
+
+    case Enum.at(cached.entries, cached.cursor) do
+      %{dir?: true, path: path} when path != cached.root ->
+        if MapSet.member?(cached.expanded, path) do
           # Collapse this directory
-          %{tree | expanded: MapSet.delete(tree.expanded, path)}
+          invalidate_entries(%{cached | expanded: MapSet.delete(cached.expanded, path)})
         else
           # Already collapsed; jump to parent
-          jump_to_parent(tree, path)
+          jump_to_parent(cached, path)
         end
 
-      %{path: path} when path != tree.root ->
+      %{path: path} when path != cached.root ->
         # File entry; jump to parent directory
-        jump_to_parent(tree, path)
+        jump_to_parent(cached, path)
 
       _ ->
-        tree
+        cached
     end
   end
 
   @doc "Expands the directory at cursor. No-op on files or already-expanded dirs."
   @spec expand(t()) :: t()
   def expand(%__MODULE__{} = tree) do
-    case selected_entry(tree) do
+    cached = ensure_entries(tree)
+
+    case Enum.at(cached.entries, cached.cursor) do
       %{dir?: true, path: path} ->
-        expand_or_enter(tree, path)
+        expand_or_enter(cached, path)
 
       _ ->
-        tree
+        cached
     end
   end
 
   @spec expand_or_enter(t(), String.t()) :: t()
   defp expand_or_enter(tree, path) do
     if MapSet.member?(tree.expanded, path) do
-      move_to_first_child(tree)
+      # Already expanded; move cursor to first child.
+      # Entries are already cached and valid (no structural change).
+      child_idx = tree.cursor + 1
+
+      if child_idx < length(tree.entries), do: %{tree | cursor: child_idx}, else: tree
     else
-      %{tree | expanded: MapSet.put(tree.expanded, path)}
+      invalidate_entries(%{tree | expanded: MapSet.put(tree.expanded, path)})
     end
-  end
-
-  @spec move_to_first_child(t()) :: t()
-  defp move_to_first_child(tree) do
-    entries = visible_entries(tree)
-    child_idx = tree.cursor + 1
-
-    if child_idx < length(entries), do: %{tree | cursor: child_idx}, else: tree
   end
 
   # ── Visibility toggle ────────────────────────────────────────────────────
@@ -162,15 +168,22 @@ defmodule Minga.FileTree do
   @doc "Toggles visibility of hidden files (dotfiles)."
   @spec toggle_hidden(t()) :: t()
   def toggle_hidden(%__MODULE__{} = tree) do
-    new_tree = %{tree | show_hidden: not tree.show_hidden}
+    new_tree = invalidate_entries(%{tree | show_hidden: not tree.show_hidden})
+    new_tree = ensure_entries(new_tree)
     # Clamp cursor to valid range after toggling
-    max_idx = max(length(visible_entries(new_tree)) - 1, 0)
+    max_idx = max(length(new_tree.entries) - 1, 0)
     %{new_tree | cursor: min(new_tree.cursor, max_idx)}
   end
 
   # ── Queries ───────────────────────────────────────────────────────────────
 
-  @doc "Returns the entry at the current cursor position, or nil if empty."
+  @doc """
+  Returns the entry at the current cursor position, or nil if empty.
+
+  This reads from the cached entries if available. For performance-sensitive
+  callers that will call this repeatedly, call `ensure_entries/1` first to
+  populate the cache; subsequent calls on the same struct will use it.
+  """
   @spec selected_entry(t()) :: entry() | nil
   def selected_entry(%__MODULE__{} = tree) do
     Enum.at(visible_entries(tree), tree.cursor)
@@ -179,19 +192,42 @@ defmodule Minga.FileTree do
   @doc """
   Returns the flat list of currently visible entries.
 
-  Walks the directory tree starting from root, descending into expanded
-  directories. Results are sorted: directories first, then files, both
-  alphabetically. Hidden files are excluded unless `show_hidden` is true.
+  Returns cached entries if available. Otherwise walks the directory tree
+  starting from root, descending into expanded directories. Results are
+  sorted: directories first, then files, both alphabetically. Hidden
+  files are excluded unless `show_hidden` is true.
+
+  Note: this returns only the list, not the updated struct. If the cache
+  was empty, the computed entries are not stored back in the struct.
+  Callers that need repeated access should call `ensure_entries/1` first
+  to populate the cache, then read `.entries` or call this function on
+  the returned struct.
   """
   @spec visible_entries(t()) :: [entry()]
   def visible_entries(%__MODULE__{} = tree) do
-    walk(tree.root, 0, tree, [])
+    ensure_entries(tree).entries
   end
 
-  @doc "Refreshes the tree by recomputing visible entries (clamps cursor)."
+  @doc """
+  Returns the tree with entries guaranteed to be populated.
+
+  If entries are already cached, returns the tree unchanged.
+  Otherwise computes entries from the filesystem and caches them.
+  Use this when you need to read entries multiple times from the
+  same tree without redundant filesystem walks.
+  """
+  @spec ensure_entries(t()) :: t()
+  def ensure_entries(%__MODULE__{entries: entries} = tree) when is_list(entries), do: tree
+
+  def ensure_entries(%__MODULE__{} = tree) do
+    %{tree | entries: walk(tree.root, 0, tree, [])}
+  end
+
+  @doc "Refreshes the tree by rescanning the filesystem (clamps cursor)."
   @spec refresh(t()) :: t()
   def refresh(%__MODULE__{} = tree) do
-    max_idx = max(length(visible_entries(tree)) - 1, 0)
+    tree = invalidate_entries(tree) |> ensure_entries()
+    max_idx = max(length(tree.entries) - 1, 0)
     %{tree | cursor: min(tree.cursor, max_idx)}
   end
 
@@ -212,18 +248,19 @@ defmodule Minga.FileTree do
     # Expand all ancestor directories between root and the target
     ancestors = path_ancestors(expanded_path, tree.root)
     new_expanded = Enum.reduce(ancestors, tree.expanded, &MapSet.put(&2, &1))
-    tree = %{tree | expanded: new_expanded}
+    tree = invalidate_entries(%{tree | expanded: new_expanded}) |> ensure_entries()
 
     # Find the entry index and move cursor there
-    entries = visible_entries(tree)
-
-    case Enum.find_index(entries, fn e -> e.path == expanded_path end) do
+    case Enum.find_index(tree.entries, fn e -> e.path == expanded_path end) do
       nil -> tree
       idx -> %{tree | cursor: idx}
     end
   end
 
   # ── Private ───────────────────────────────────────────────────────────────
+
+  @spec invalidate_entries(t()) :: t()
+  defp invalidate_entries(%__MODULE__{} = tree), do: %{tree | entries: nil}
 
   @spec walk(String.t(), non_neg_integer(), t(), [boolean()]) :: [entry()]
   defp walk(dir_path, depth, tree, parent_guides) do
@@ -289,9 +326,9 @@ defmodule Minga.FileTree do
   @spec jump_to_parent(t(), String.t()) :: t()
   defp jump_to_parent(tree, path) do
     parent = Path.dirname(path)
-    entries = visible_entries(tree)
+    tree = ensure_entries(tree)
 
-    case Enum.find_index(entries, fn e -> e.path == parent end) do
+    case Enum.find_index(tree.entries, fn e -> e.path == parent end) do
       nil -> tree
       idx -> %{tree | cursor: idx}
     end
