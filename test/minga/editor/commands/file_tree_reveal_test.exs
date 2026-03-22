@@ -81,16 +81,10 @@ defmodule Minga.Editor.Commands.FileTreeRevealTest do
       assert state.file_tree.focused == true
       assert state.keymap_scope == :file_tree
 
-      # The file should be visible in the tree and the cursor should
-      # be on it. The tree root is Project.root() which may differ
-      # between local and CI, so verify via visible_entries lookup.
-      entries = FileTree.visible_entries(state.file_tree.tree)
-      expanded_path = Path.expand(file)
-      file_entry = Enum.find(entries, fn e -> e.path == expanded_path end)
-      assert file_entry != nil, "reveal_test2.txt should be visible in the tree"
-
-      assert state.file_tree.tree.cursor ==
-               Enum.find_index(entries, fn e -> e.path == expanded_path end)
+      # Cursor should be on the revealed file
+      selected = FileTree.selected_entry(state.file_tree.tree)
+      assert selected != nil, "reveal_test2.txt should be visible in the tree"
+      assert selected.name == "reveal_test2.txt"
     end
 
     test "no-op when active buffer has no file path", %{tmp_dir: _dir} do
