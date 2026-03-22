@@ -302,6 +302,7 @@ final class SpyEncoder: InputEncoder, Sendable {
         case toolDismiss
         case agentToolToggle(index: UInt16)
         case executeCommand(name: String)
+        case minibufferSelect(index: UInt16)
     }
 
     private let state = OSAllocatedUnfairLock(initialState: State())
@@ -366,6 +367,7 @@ final class SpyEncoder: InputEncoder, Sendable {
     func sendToolDismiss() { state.withLock { $0.guiActions.append(.toolDismiss) } }
     func sendAgentToolToggle(index: UInt16) { state.withLock { $0.guiActions.append(.agentToolToggle(index: index)) } }
     func sendExecuteCommand(name: String) { state.withLock { $0.guiActions.append(.executeCommand(name: name)) } }
+    func sendMinibufferSelect(index: UInt16) { state.withLock { $0.guiActions.append(.minibufferSelect(index: index)) } }
 }
 
 @Suite("EditorNSView Resize")

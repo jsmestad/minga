@@ -182,7 +182,8 @@ struct ContentView: View {
                 if appState.gui.minibufferState.visible {
                     MinibufferView(
                         state: appState.gui.minibufferState,
-                        theme: appState.gui.themeColors
+                        theme: appState.gui.themeColors,
+                        encoder: appState.encoder
                     )
                     .transition(
                         .move(edge: .bottom)

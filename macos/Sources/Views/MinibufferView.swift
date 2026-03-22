@@ -13,6 +13,9 @@ import SwiftUI
 struct MinibufferView: View {
     let state: MinibufferState
     let theme: ThemeColors
+    let encoder: InputEncoder?
+
+    @State private var hoveredIndex: Int? = nil
 
     private let barHeight: CGFloat = 32
     private let candidateHeight: CGFloat = 26
@@ -159,6 +162,7 @@ struct MinibufferView: View {
     @ViewBuilder
     private func candidateRow(_ candidate: MinibufferCandidate) -> some View {
         let isSelected = candidate.id == Int(state.selectedIndex)
+        let isHovered = hoveredIndex == candidate.id
 
         HStack(spacing: 8) {
             // Command name with fuzzy match highlighting
@@ -194,7 +198,14 @@ struct MinibufferView: View {
         }
         .padding(.horizontal, 12)
         .frame(height: candidateHeight)
-        .background(selectionBackground(isSelected))
+        .background(candidateBackground(isSelected: isSelected, isHovered: isHovered))
+        .contentShape(Rectangle())
+        .onHover { hovering in
+            hoveredIndex = hovering ? candidate.id : nil
+        }
+        .onTapGesture {
+            encoder?.sendMinibufferSelect(index: UInt16(candidate.id))
+        }
         .id(candidate.id)
     }
 
@@ -222,10 +233,14 @@ struct MinibufferView: View {
     }
 
     @ViewBuilder
-    private func selectionBackground(_ isSelected: Bool) -> some View {
+    private func candidateBackground(isSelected: Bool, isHovered: Bool) -> some View {
         if isSelected {
             RoundedRectangle(cornerRadius: 3)
                 .fill(theme.accent.opacity(0.8))
+                .padding(.horizontal, 4)
+        } else if isHovered {
+            RoundedRectangle(cornerRadius: 3)
+                .fill(theme.popupFg.opacity(0.06))
                 .padding(.horizontal, 4)
         } else {
             Color.clear

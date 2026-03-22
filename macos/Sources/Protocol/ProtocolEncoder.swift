@@ -49,6 +49,9 @@ protocol InputEncoder: AnyObject, Sendable {
 
     // Generic command execution
     func sendExecuteCommand(name: String)
+
+    // Minibuffer actions
+    func sendMinibufferSelect(index: UInt16)
 }
 
 extension InputEncoder {
@@ -339,6 +342,15 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         if nameLen > 0 {
             buf.replaceSubrange(4..<4 + nameLen, with: utf8.prefix(nameLen))
         }
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: minibuffer_select. Accepts a candidate by index.
+    func sendMinibufferSelect(index: UInt16) {
+        var buf = Data(count: 4)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_MINIBUFFER_SELECT
+        writeU16(&buf, 2, index)
         writeFrame(buf)
     }
 

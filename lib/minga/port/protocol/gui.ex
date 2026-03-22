@@ -60,6 +60,7 @@ defmodule Minga.Port.Protocol.GUI do
   | 0x14       | tool_dismiss         |
   | 0x15       | agent_tool_toggle    |
   | 0x16       | execute_command      |
+  | 0x17       | minibuffer_select    |
   """
 
   import Bitwise
@@ -121,6 +122,7 @@ defmodule Minga.Port.Protocol.GUI do
   @gui_action_tool_dismiss 0x14
   @gui_action_agent_tool_toggle 0x15
   @gui_action_execute_command 0x16
+  @gui_action_minibuffer_select 0x17
 
   # ── Types ──
 
@@ -148,6 +150,7 @@ defmodule Minga.Port.Protocol.GUI do
           | :tool_dismiss
           | {:agent_tool_toggle, message_index :: non_neg_integer()}
           | {:execute_command, name :: String.t()}
+          | {:minibuffer_select, candidate_index :: non_neg_integer()}
 
   # ═══════════════════════════════════════════════════════════════════════════
   # Encoding (BEAM → Frontend)
@@ -1232,6 +1235,9 @@ defmodule Minga.Port.Protocol.GUI do
         <<name_len::16, name::binary-size(name_len)>>
       ),
       do: {:ok, {:execute_command, name}}
+
+  def decode_gui_action(@gui_action_minibuffer_select, <<index::16>>),
+    do: {:ok, {:minibuffer_select, index}}
 
   def decode_gui_action(_, _), do: :error
 
