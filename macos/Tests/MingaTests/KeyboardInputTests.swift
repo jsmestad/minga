@@ -23,7 +23,7 @@ struct KeyboardInputTests {
         let guiState = GUIState()
         let disp = CommandDispatcher(cols: 80, rows: 24, guiState: guiState)
         guard let ctRenderer = CoreTextMetalRenderer() else { return nil }
-        ctRenderer.setupLineRenderer(fontManager: fm)
+        ctRenderer.setupRenderers(fontManager: fm)
         return EditorNSView(encoder: spy, fontFace: face, dispatcher: disp,
                             coreTextRenderer: ctRenderer, fontManager: fm)
     }

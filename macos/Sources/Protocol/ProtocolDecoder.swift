@@ -11,6 +11,8 @@ import Foundation
 enum RenderCommand: Sendable {
     case clear
     case batchEnd
+    /// Legacy cell-grid text commands. Decoded but discarded by CommandDispatcher.
+    /// Kept in the enum so the decoder can skip the bytes without crashing.
     case drawText(row: UInt16, col: UInt16, fg: UInt32, bg: UInt32, attrs: UInt8, text: String)
     case drawStyledText(row: UInt16, col: UInt16, fg: UInt32, bg: UInt32, attrs: UInt16, underlineColor: UInt32, blend: UInt8, fontWeight: UInt8, fontId: UInt8, text: String)
     case setCursor(row: UInt16, col: UInt16)

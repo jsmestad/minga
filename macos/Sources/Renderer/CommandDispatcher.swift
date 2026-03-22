@@ -1,4 +1,4 @@
-/// Routes decoded protocol commands to FrameState/LineBuffer and triggers rendering.
+/// Routes decoded protocol commands to FrameState and GUIState, triggering rendering.
 ///
 /// Handles region tracking (define/clear/destroy/set_active) with coordinate
 /// offset and clipping, matching the Zig renderer.zig logic.
@@ -18,14 +18,11 @@ struct Region {
     let zOrder: UInt8
 }
 
-/// Dispatches render commands to FrameState (metadata) and LineBuffer (runs).
+/// Dispatches render commands to FrameState (metadata) and GUIState (chrome).
 @MainActor
 final class CommandDispatcher {
     /// Per-frame metadata for the Metal render pass.
     var frameState: FrameState
-
-    /// Styled run buffer (legacy, used only by CoreTextLineRenderer during migration).
-    let lineBuffer: LineBuffer
 
     private var regions: [UInt16: Region] = [:]
     private var activeRegion: Region?
@@ -60,7 +57,6 @@ final class CommandDispatcher {
 
     init(cols: UInt16, rows: UInt16, guiState: GUIState) {
         self.frameState = FrameState(cols: cols, rows: rows)
-        self.lineBuffer = LineBuffer(cols: cols, rows: rows)
         self.guiState = guiState
     }
 
@@ -68,19 +64,13 @@ final class CommandDispatcher {
     func dispatch(_ command: RenderCommand) {
         switch command {
         case .clear:
-            lineBuffer.clear()
             frameState.beginFrame()
             guiState.beginFrame()
 
-        case .drawText(let row, let col, let fg, let bg, let attrs, let text):
-            drawText(row: row, col: col, fg: fg, bg: bg, attrs: attrs, text: text)
-
-        case .drawStyledText(let row, let col, let fg, let bg, let attrs16, let ulColor, _, let fontWeight, let fontId, let text):
-            let attrs8 = UInt8(attrs16 & 0xFF)
-            let ulStyle = UInt8((attrs16 >> UL_STYLE_SHIFT) & UL_STYLE_MASK)
-            drawText(row: row, col: col, fg: fg, bg: bg, attrs: attrs8, text: text,
-                     underlineColor: ulColor, underlineStyle: ulStyle, fontWeight: fontWeight,
-                     fontId: fontId)
+        case .drawText, .drawStyledText:
+            // Legacy cell-grid text rendering. All content now flows through
+            // gui_window_content (0x80) and dedicated GUI opcodes. Discard.
+            break
 
         case .setCursor(let row, let col):
             var absRow = row
@@ -118,15 +108,12 @@ final class CommandDispatcher {
             let region = Region(id: id, parentId: parentId, role: role, row: row, col: col, width: width, height: height, zOrder: zOrder)
             regions[id] = region
 
-        case .clearRegion(let id):
-            if let region = regions[id] {
-                lineBuffer.clearRect(col: region.col, row: region.row, width: region.width, height: region.height)
-            }
+        case .clearRegion:
+            // Cell-grid clearing no longer needed; semantic content is managed
+            // by gui_window_content (0x80). Region tracking kept for cursor offset.
+            break
 
         case .destroyRegion(let id):
-            if let region = regions[id] {
-                lineBuffer.clearRect(col: region.col, row: region.row, width: region.width, height: region.height)
-            }
             regions.removeValue(forKey: id)
             if activeRegion?.id == id {
                 activeRegion = nil
@@ -353,30 +340,4 @@ final class CommandDispatcher {
         }
     }
 
-    // MARK: - Private
-
-    /// Append a styled text run to the LineBuffer (legacy path, to be removed).
-    ///
-    /// CoreText handles all shaping, ligatures, and glyph layout natively,
-    /// so there's no per-character decomposition. The full text run is
-    /// preserved as-is for CoreText to process.
-    private func drawText(row: UInt16, col: UInt16, fg: UInt32, bg: UInt32, attrs: UInt8, text: String,
-                          underlineColor: UInt32 = 0, underlineStyle: UInt8 = 0, fontWeight: UInt8 = 2,
-                          fontId: UInt8 = 0) {
-        var absRow = row
-        var absCol = col
-
-        if let region = activeRegion {
-            absRow &+= region.row
-            absCol &+= region.col
-            if absRow >= region.row &+ region.height { return }
-        }
-
-        lineBuffer.appendRun(
-            row: absRow, col: absCol, text: text,
-            fg: fg, bg: bg, attrs: attrs,
-            underlineColor: underlineColor, underlineStyle: underlineStyle,
-            fontWeight: fontWeight, fontId: fontId
-        )
-    }
 }

@@ -6,7 +6,7 @@
 ///
 /// Architecture:
 ///   ProtocolReader (background thread) → decodes commands → dispatches to main thread
-///   CommandDispatcher (main thread) → updates LineBuffer → triggers CoreTextMetalRenderer
+///   CommandDispatcher (main thread) → updates FrameState + GUIState → triggers CoreTextMetalRenderer
 ///   EditorNSView (main thread) → keyboard/mouse → ProtocolEncoder → stdout
 
 import SwiftUI
@@ -315,7 +315,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.terminate(nil)
             return
         }
-        ctRenderer.setupLineRenderer(fontManager: fm)
+        ctRenderer.setupRenderers(fontManager: fm)
 
         // Protocol encoder (writes to stdout).
         let enc = ProtocolEncoder()
@@ -422,7 +422,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         fontManager?.setPrimaryFont(name: family, size: size, scale: scale,
                                      ligatures: ligatures, weight: weight)
         if let fm = fontManager {
-            nsView.coreTextRenderer.setupLineRenderer(fontManager: fm)
+            nsView.coreTextRenderer.setupRenderers(fontManager: fm)
         }
 
         nsView.updateFont(newFace)

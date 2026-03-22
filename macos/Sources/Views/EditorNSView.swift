@@ -16,10 +16,7 @@ final class EditorNSView: MTKView {
     let encoder: InputEncoder
     private(set) var fontFace: FontFace
 
-    /// Line-based styled run buffer for CoreText rendering (legacy, being removed).
-    let lineBuffer: LineBuffer
-
-    /// Command dispatcher owning frame metadata and line buffer.
+    /// Command dispatcher owning frame metadata.
     let dispatcher: CommandDispatcher
 
     /// CoreText-based renderer.
@@ -70,7 +67,6 @@ final class EditorNSView: MTKView {
         self.encoder = encoder
         self.fontFace = fontFace
         self.dispatcher = dispatcher
-        self.lineBuffer = dispatcher.lineBuffer
         self.coreTextRenderer = coreTextRenderer
         self.fontManager = fontManager
         super.init(frame: .zero, device: coreTextRenderer.device)
@@ -122,7 +118,7 @@ final class EditorNSView: MTKView {
             NSAccessibility.post(element: self, notification: .selectedTextChanged)
         }
 
-        coreTextRenderer.render(frameState: fs, lineBuffer: lineBuffer, fontManager: fontManager,
+        coreTextRenderer.render(frameState: fs, fontManager: fontManager,
                                 windowContents: guiState?.windowContents ?? [:],
                                 themeColors: guiState?.themeColors,
                                 drawable: drawable, viewportSize: drawableSize,
@@ -148,7 +144,6 @@ final class EditorNSView: MTKView {
 
         if newCols != dispatcher.frameState.cols || newRows != dispatcher.frameState.rows {
             dispatcher.frameState.resize(newCols: newCols, newRows: newRows)
-            lineBuffer.resize(newCols: newCols, newRows: newRows)
             encoder.sendResize(cols: newCols, rows: newRows)
         }
 
@@ -217,12 +212,10 @@ final class EditorNSView: MTKView {
             // window dimensions so the BEAM never sees wrong defaults.
             readySent = true
             dispatcher.frameState.resize(newCols: newCols, newRows: newRows)
-            lineBuffer.resize(newCols: newCols, newRows: newRows)
             encoder.sendReady(cols: newCols, rows: newRows)
             PortLogger.info("Window ready: \(newCols)x\(newRows) cells (\(Int(newSize.width))x\(Int(newSize.height))pt)")
         } else if newCols != dispatcher.frameState.cols || newRows != dispatcher.frameState.rows {
             dispatcher.frameState.resize(newCols: newCols, newRows: newRows)
-            lineBuffer.resize(newCols: newCols, newRows: newRows)
             encoder.sendResize(cols: newCols, rows: newRows)
             PortLogger.info("Window resized: \(newCols)x\(newRows) cells")
         }
@@ -682,28 +675,27 @@ extension EditorNSView {
     }
 
     /// Returns the full text content of all visible lines.
+    /// Reads from GUIWindowContent (0x80 opcode) semantic data.
     override func accessibilityValue() -> Any? {
+        guard let contents = guiState?.windowContents else { return "" }
         var lines: [String] = []
-        for row: UInt16 in 0..<dispatcher.frameState.rows {
-            let runs = lineBuffer.runsForLine(row)
-            if runs.isEmpty {
-                lines.append("")
-            } else {
-                lines.append(runs.map(\.text).joined())
+        for (_, content) in contents.sorted(by: { $0.key < $1.key }) {
+            for row in content.rows {
+                lines.append(row.text)
             }
         }
-        return lines.joined(separator: "\n")
+        return lines.isEmpty ? "" : lines.joined(separator: "\n")
     }
 
     override func accessibilityNumberOfCharacters() -> Int {
+        guard let contents = guiState?.windowContents else { return 0 }
         var count = 0
-        for row: UInt16 in 0..<dispatcher.frameState.rows {
-            let runs = lineBuffer.runsForLine(row)
-            for run in runs {
-                count += run.text.count
-            }
-            if row < dispatcher.frameState.rows - 1 {
-                count += 1  // newline
+        for (_, content) in contents.sorted(by: { $0.key < $1.key }) {
+            for (i, row) in content.rows.enumerated() {
+                count += row.text.count
+                if i < content.rows.count - 1 {
+                    count += 1  // newline between rows
+                }
             }
         }
         return count
