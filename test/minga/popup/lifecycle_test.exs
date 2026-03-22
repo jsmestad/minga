@@ -1,5 +1,5 @@
 defmodule Minga.Popup.LifecycleTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.Layout
@@ -32,8 +32,9 @@ defmodule Minga.Popup.LifecycleTest do
   end
 
   setup do
-    PopupRegistry.init()
-    PopupRegistry.clear()
+    # Each test gets its own popup registry table (async-safe)
+    table = :"popup_lifecycle_#{:erlang.unique_integer([:positive])}"
+    PopupRegistry.init(table)
 
     main_buf = fake_pid()
     popup_buf = fake_pid()
@@ -54,25 +55,29 @@ defmodule Minga.Popup.LifecycleTest do
     }
 
     on_exit(fn ->
-      PopupRegistry.clear()
+      if :ets.whereis(table) != :undefined, do: :ets.delete(table)
 
       for pid <- [main_buf, popup_buf] do
         Process.exit(pid, :kill)
       end
     end)
 
-    %{state: state, main_buf: main_buf, popup_buf: popup_buf}
+    %{state: state, main_buf: main_buf, popup_buf: popup_buf, table: table}
   end
 
   describe "open_popup/3" do
-    test "returns :no_match when no rule matches", %{state: state, popup_buf: popup_buf} do
-      assert :no_match = Lifecycle.open_popup(state, "unknown-buffer", popup_buf)
+    test "returns :no_match when no rule matches", %{state: state, popup_buf: popup_buf, table: t} do
+      assert :no_match = Lifecycle.open_popup(state, "unknown-buffer", popup_buf, registry: t)
     end
 
-    test "creates a bottom split popup when rule matches", %{state: state, popup_buf: popup_buf} do
-      PopupRegistry.register(Rule.new("*Warnings*", side: :bottom, size: {:percent, 30}))
+    test "creates a bottom split popup when rule matches", %{
+      state: state,
+      popup_buf: popup_buf,
+      table: t
+    } do
+      PopupRegistry.register(Rule.new("*Warnings*", side: :bottom, size: {:percent, 30}), t)
 
-      assert {:ok, new_state} = Lifecycle.open_popup(state, "*Warnings*", popup_buf)
+      assert {:ok, new_state} = Lifecycle.open_popup(state, "*Warnings*", popup_buf, registry: t)
 
       # A new window should exist
       assert map_size(new_state.windows.map) == 2
@@ -89,47 +94,52 @@ defmodule Minga.Popup.LifecycleTest do
       assert {:split, :horizontal, _, _, _} = new_state.windows.tree
     end
 
-    test "creates a right split popup", %{state: state, popup_buf: popup_buf} do
-      PopupRegistry.register(Rule.new("*Warnings*", side: :right, size: {:percent, 40}))
+    test "creates a right split popup", %{state: state, popup_buf: popup_buf, table: t} do
+      PopupRegistry.register(Rule.new("*Warnings*", side: :right, size: {:percent, 40}), t)
 
-      assert {:ok, new_state} = Lifecycle.open_popup(state, "*Warnings*", popup_buf)
+      assert {:ok, new_state} = Lifecycle.open_popup(state, "*Warnings*", popup_buf, registry: t)
 
       assert {:split, :vertical, _, _, _} = new_state.windows.tree
     end
 
-    test "focuses the popup when rule.focus is true", %{state: state, popup_buf: popup_buf} do
-      PopupRegistry.register(Rule.new("*Warnings*", focus: true))
+    test "focuses the popup when rule.focus is true", %{
+      state: state,
+      popup_buf: popup_buf,
+      table: t
+    } do
+      PopupRegistry.register(Rule.new("*Warnings*", focus: true), t)
 
-      assert {:ok, new_state} = Lifecycle.open_popup(state, "*Warnings*", popup_buf)
+      assert {:ok, new_state} = Lifecycle.open_popup(state, "*Warnings*", popup_buf, registry: t)
       assert new_state.windows.active == 2
     end
 
     test "keeps focus on original window when rule.focus is false", %{
       state: state,
-      popup_buf: popup_buf
+      popup_buf: popup_buf,
+      table: t
     } do
-      PopupRegistry.register(Rule.new("*Warnings*", focus: false))
+      PopupRegistry.register(Rule.new("*Warnings*", focus: false), t)
 
-      assert {:ok, new_state} = Lifecycle.open_popup(state, "*Warnings*", popup_buf)
+      assert {:ok, new_state} = Lifecycle.open_popup(state, "*Warnings*", popup_buf, registry: t)
       assert new_state.windows.active == 1
     end
 
-    test "invalidates layout cache after opening", %{state: state, popup_buf: popup_buf} do
-      PopupRegistry.register(Rule.new("*Warnings*"))
+    test "invalidates layout cache after opening", %{state: state, popup_buf: popup_buf, table: t} do
+      PopupRegistry.register(Rule.new("*Warnings*"), t)
 
       # Pre-compute layout
       state = %{state | layout: Layout.compute(state)}
       assert %Layout{} = state.layout
 
-      assert {:ok, new_state} = Lifecycle.open_popup(state, "*Warnings*", popup_buf)
+      assert {:ok, new_state} = Lifecycle.open_popup(state, "*Warnings*", popup_buf, registry: t)
       assert is_nil(new_state.layout)
     end
   end
 
   describe "close_popup/2" do
-    test "restores the original tree", %{state: state, popup_buf: popup_buf} do
-      PopupRegistry.register(Rule.new("*Warnings*", side: :bottom))
-      {:ok, with_popup} = Lifecycle.open_popup(state, "*Warnings*", popup_buf)
+    test "restores the original tree", %{state: state, popup_buf: popup_buf, table: t} do
+      PopupRegistry.register(Rule.new("*Warnings*", side: :bottom), t)
+      {:ok, with_popup} = Lifecycle.open_popup(state, "*Warnings*", popup_buf, registry: t)
 
       # Close the popup
       restored = Lifecycle.close_popup(with_popup, 2)
@@ -145,10 +155,11 @@ defmodule Minga.Popup.LifecycleTest do
 
     test "restores focus to the previously active window", %{
       state: state,
-      popup_buf: popup_buf
+      popup_buf: popup_buf,
+      table: t
     } do
-      PopupRegistry.register(Rule.new("*Warnings*", focus: true))
-      {:ok, with_popup} = Lifecycle.open_popup(state, "*Warnings*", popup_buf)
+      PopupRegistry.register(Rule.new("*Warnings*", focus: true), t)
+      {:ok, with_popup} = Lifecycle.open_popup(state, "*Warnings*", popup_buf, registry: t)
 
       # Focus is on the popup
       assert with_popup.windows.active == 2
@@ -158,19 +169,19 @@ defmodule Minga.Popup.LifecycleTest do
       assert restored.windows.active == 1
     end
 
-    test "is a no-op for non-popup windows", %{state: state} do
+    test "is a no-op for non-popup windows", %{state: state, table: _t} do
       result = Lifecycle.close_popup(state, 1)
       assert result.windows.tree == state.windows.tree
     end
 
-    test "is a no-op for nonexistent window ids", %{state: state} do
+    test "is a no-op for nonexistent window ids", %{state: state, table: _t} do
       result = Lifecycle.close_popup(state, 999)
       assert result.windows.tree == state.windows.tree
     end
 
-    test "invalidates layout cache after closing", %{state: state, popup_buf: popup_buf} do
-      PopupRegistry.register(Rule.new("*Warnings*"))
-      {:ok, with_popup} = Lifecycle.open_popup(state, "*Warnings*", popup_buf)
+    test "invalidates layout cache after closing", %{state: state, popup_buf: popup_buf, table: t} do
+      PopupRegistry.register(Rule.new("*Warnings*"), t)
+      {:ok, with_popup} = Lifecycle.open_popup(state, "*Warnings*", popup_buf, registry: t)
 
       # Set a layout cache
       with_popup = %{with_popup | layout: Layout.compute(with_popup)}
@@ -182,9 +193,9 @@ defmodule Minga.Popup.LifecycleTest do
   end
 
   describe "close_active_popup/1" do
-    test "closes the active popup", %{state: state, popup_buf: popup_buf} do
-      PopupRegistry.register(Rule.new("*Warnings*", focus: true))
-      {:ok, with_popup} = Lifecycle.open_popup(state, "*Warnings*", popup_buf)
+    test "closes the active popup", %{state: state, popup_buf: popup_buf, table: t} do
+      PopupRegistry.register(Rule.new("*Warnings*", focus: true), t)
+      {:ok, with_popup} = Lifecycle.open_popup(state, "*Warnings*", popup_buf, registry: t)
 
       assert with_popup.windows.active == 2
 
@@ -193,7 +204,7 @@ defmodule Minga.Popup.LifecycleTest do
       assert restored.windows.active == 1
     end
 
-    test "is a no-op when active window is not a popup", %{state: state} do
+    test "is a no-op when active window is not a popup", %{state: state, table: _t} do
       result = Lifecycle.close_active_popup(state)
       assert result.windows.tree == state.windows.tree
     end
@@ -202,17 +213,20 @@ defmodule Minga.Popup.LifecycleTest do
   describe "closing one popup preserves other popups" do
     test "closing the first-opened popup does not clobber the second", %{
       state: state,
-      popup_buf: popup_buf
+      popup_buf: popup_buf,
+      table: t
     } do
       popup_buf2 = fake_pid()
       on_exit(fn -> Process.exit(popup_buf2, :kill) end)
 
-      PopupRegistry.register(Rule.new("*Messages*", side: :bottom, size: {:percent, 25}))
-      PopupRegistry.register(Rule.new("*Warnings*", side: :bottom, size: {:percent, 30}))
+      PopupRegistry.register(Rule.new("*Messages*", side: :bottom, size: {:percent, 25}), t)
+      PopupRegistry.register(Rule.new("*Warnings*", side: :bottom, size: {:percent, 30}), t)
 
       # Open both popups
-      {:ok, with_messages} = Lifecycle.open_popup(state, "*Messages*", popup_buf)
-      {:ok, with_both} = Lifecycle.open_popup(with_messages, "*Warnings*", popup_buf2)
+      {:ok, with_messages} = Lifecycle.open_popup(state, "*Messages*", popup_buf, registry: t)
+
+      {:ok, with_both} =
+        Lifecycle.open_popup(with_messages, "*Warnings*", popup_buf2, registry: t)
 
       # Should have 3 windows: main + Messages + Warnings
       assert map_size(with_both.windows.map) == 3
@@ -232,16 +246,19 @@ defmodule Minga.Popup.LifecycleTest do
 
     test "closing the second-opened popup does not affect the first", %{
       state: state,
-      popup_buf: popup_buf
+      popup_buf: popup_buf,
+      table: t
     } do
       popup_buf2 = fake_pid()
       on_exit(fn -> Process.exit(popup_buf2, :kill) end)
 
-      PopupRegistry.register(Rule.new("*Messages*", side: :bottom, size: {:percent, 25}))
-      PopupRegistry.register(Rule.new("*Warnings*", side: :bottom, size: {:percent, 30}))
+      PopupRegistry.register(Rule.new("*Messages*", side: :bottom, size: {:percent, 25}), t)
+      PopupRegistry.register(Rule.new("*Warnings*", side: :bottom, size: {:percent, 30}), t)
 
-      {:ok, with_messages} = Lifecycle.open_popup(state, "*Messages*", popup_buf)
-      {:ok, with_both} = Lifecycle.open_popup(with_messages, "*Warnings*", popup_buf2)
+      {:ok, with_messages} = Lifecycle.open_popup(state, "*Messages*", popup_buf, registry: t)
+
+      {:ok, with_both} =
+        Lifecycle.open_popup(with_messages, "*Warnings*", popup_buf2, registry: t)
 
       # Close Warnings (the second-opened popup, window 3)
       after_close = Lifecycle.close_popup(with_both, 3)
@@ -257,9 +274,9 @@ defmodule Minga.Popup.LifecycleTest do
   end
 
   describe "close_all_popups/1" do
-    test "closes all popup windows", %{state: state, popup_buf: popup_buf} do
-      PopupRegistry.register(Rule.new("*Warnings*", focus: false))
-      {:ok, with_popup} = Lifecycle.open_popup(state, "*Warnings*", popup_buf)
+    test "closes all popup windows", %{state: state, popup_buf: popup_buf, table: t} do
+      PopupRegistry.register(Rule.new("*Warnings*", focus: false), t)
+      {:ok, with_popup} = Lifecycle.open_popup(state, "*Warnings*", popup_buf, registry: t)
 
       # Verify popup exists
       assert map_size(with_popup.windows.map) == 2
@@ -269,29 +286,37 @@ defmodule Minga.Popup.LifecycleTest do
       assert map_size(restored.windows.map) == 1
     end
 
-    test "is a no-op when no popups are open", %{state: state} do
+    test "is a no-op when no popups are open", %{state: state, table: _t} do
       result = Lifecycle.close_all_popups(state)
       assert result.windows.tree == state.windows.tree
     end
   end
 
   describe "active_is_popup?/1" do
-    test "returns false when active window is not a popup", %{state: state} do
+    test "returns false when active window is not a popup", %{state: state, table: _t} do
       refute Lifecycle.active_is_popup?(state)
     end
 
-    test "returns true when active window is a popup", %{state: state, popup_buf: popup_buf} do
-      PopupRegistry.register(Rule.new("*Warnings*", focus: true))
-      {:ok, with_popup} = Lifecycle.open_popup(state, "*Warnings*", popup_buf)
+    test "returns true when active window is a popup", %{
+      state: state,
+      popup_buf: popup_buf,
+      table: t
+    } do
+      PopupRegistry.register(Rule.new("*Warnings*", focus: true), t)
+      {:ok, with_popup} = Lifecycle.open_popup(state, "*Warnings*", popup_buf, registry: t)
 
       assert Lifecycle.active_is_popup?(with_popup)
     end
   end
 
   describe "float display mode" do
-    test "float popup adds window to map but not tree", %{state: state, popup_buf: popup_buf} do
-      PopupRegistry.register(Rule.new("*Help*", display: :float, focus: true))
-      {:ok, with_popup} = Lifecycle.open_popup(state, "*Help*", popup_buf)
+    test "float popup adds window to map but not tree", %{
+      state: state,
+      popup_buf: popup_buf,
+      table: t
+    } do
+      PopupRegistry.register(Rule.new("*Help*", display: :float, focus: true), t)
+      {:ok, with_popup} = Lifecycle.open_popup(state, "*Help*", popup_buf, registry: t)
 
       # Window map has 2 entries (main + popup)
       assert map_size(with_popup.windows.map) == 2
@@ -302,30 +327,33 @@ defmodule Minga.Popup.LifecycleTest do
 
     test "float popup focuses the new window when focus: true", %{
       state: state,
-      popup_buf: popup_buf
+      popup_buf: popup_buf,
+      table: t
     } do
-      PopupRegistry.register(Rule.new("*Help*", display: :float, focus: true))
-      {:ok, with_popup} = Lifecycle.open_popup(state, "*Help*", popup_buf)
+      PopupRegistry.register(Rule.new("*Help*", display: :float, focus: true), t)
+      {:ok, with_popup} = Lifecycle.open_popup(state, "*Help*", popup_buf, registry: t)
 
       assert with_popup.windows.active == 2
     end
 
     test "float popup does not steal focus when focus: false", %{
       state: state,
-      popup_buf: popup_buf
+      popup_buf: popup_buf,
+      table: t
     } do
-      PopupRegistry.register(Rule.new("*Help*", display: :float, focus: false))
-      {:ok, with_popup} = Lifecycle.open_popup(state, "*Help*", popup_buf)
+      PopupRegistry.register(Rule.new("*Help*", display: :float, focus: false), t)
+      {:ok, with_popup} = Lifecycle.open_popup(state, "*Help*", popup_buf, registry: t)
 
       assert with_popup.windows.active == 1
     end
 
     test "closing a float popup removes window and restores focus", %{
       state: state,
-      popup_buf: popup_buf
+      popup_buf: popup_buf,
+      table: t
     } do
-      PopupRegistry.register(Rule.new("*Help*", display: :float, focus: true))
-      {:ok, with_popup} = Lifecycle.open_popup(state, "*Help*", popup_buf)
+      PopupRegistry.register(Rule.new("*Help*", display: :float, focus: true), t)
+      {:ok, with_popup} = Lifecycle.open_popup(state, "*Help*", popup_buf, registry: t)
 
       restored = Lifecycle.close_popup(with_popup, 2)
 
@@ -334,9 +362,13 @@ defmodule Minga.Popup.LifecycleTest do
       assert restored.windows.tree == WindowTree.new(1)
     end
 
-    test "float popup has popup_meta with the rule", %{state: state, popup_buf: popup_buf} do
-      PopupRegistry.register(Rule.new("*Help*", display: :float, border: :double))
-      {:ok, with_popup} = Lifecycle.open_popup(state, "*Help*", popup_buf)
+    test "float popup has popup_meta with the rule", %{
+      state: state,
+      popup_buf: popup_buf,
+      table: t
+    } do
+      PopupRegistry.register(Rule.new("*Help*", display: :float, border: :double), t)
+      {:ok, with_popup} = Lifecycle.open_popup(state, "*Help*", popup_buf, registry: t)
 
       popup_window = with_popup.windows.map[2]
       assert Window.popup?(popup_window)
@@ -344,15 +376,15 @@ defmodule Minga.Popup.LifecycleTest do
       assert popup_window.popup_meta.rule.border == :double
     end
 
-    test "render_float_overlays returns overlays for float popups", %{state: state} do
+    test "render_float_overlays returns overlays for float popups", %{state: state, table: t} do
       real_buf =
         start_supervised!(
           {BufferServer, content: "hello world", buffer_name: "*Help*"},
           id: :float_overlay_buf
         )
 
-      PopupRegistry.register(Rule.new("*Help*", display: :float, focus: true))
-      {:ok, with_popup} = Lifecycle.open_popup(state, "*Help*", real_buf)
+      PopupRegistry.register(Rule.new("*Help*", display: :float, focus: true), t)
+      {:ok, with_popup} = Lifecycle.open_popup(state, "*Help*", real_buf, registry: t)
 
       overlays = Lifecycle.render_float_overlays(with_popup)
       assert length(overlays) == 1
@@ -363,10 +395,11 @@ defmodule Minga.Popup.LifecycleTest do
 
     test "render_float_overlays returns empty for split-only popups", %{
       state: state,
-      popup_buf: popup_buf
+      popup_buf: popup_buf,
+      table: t
     } do
-      PopupRegistry.register(Rule.new("*Warnings*", display: :split, side: :bottom))
-      {:ok, with_popup} = Lifecycle.open_popup(state, "*Warnings*", popup_buf)
+      PopupRegistry.register(Rule.new("*Warnings*", display: :split, side: :bottom), t)
+      {:ok, with_popup} = Lifecycle.open_popup(state, "*Warnings*", popup_buf, registry: t)
 
       overlays = Lifecycle.render_float_overlays(with_popup)
       assert overlays == []

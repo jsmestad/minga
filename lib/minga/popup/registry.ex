@@ -10,43 +10,60 @@ defmodule Minga.Popup.Registry do
   every buffer open, while registrations only happen at startup and when
   the user reloads config.
 
+  Every public function has a default-arg version that uses the global
+  `@table` and an explicit-table version for tests that create private
+  instances. This follows the same pattern as `Minga.Config.Advice`.
+
   ## Usage
 
       Popup.Registry.register(Popup.Rule.new("*Warnings*", side: :bottom))
       Popup.Registry.match("*Warnings*")
       #=> {:ok, %Popup.Rule{pattern: "*Warnings*", ...}}
 
-      Popup.Registry.match("some-file.ex")
+      Popup.Registry.match("*Messages*")
       #=> :none
+
+  ## Test usage (private instance)
+
+      table = Popup.Registry.init(:test_popup_registry)
+      Popup.Registry.register(rule, table)
+      assert {:ok, _} = Popup.Registry.match("*Warnings*", table)
   """
 
   alias Minga.Popup.Rule
 
   @table __MODULE__
 
+  # ── Table lifecycle ────────────────────────────────────────────────────────
+
   @doc """
   Creates the ETS table. Called once during application startup.
 
-  Safe to call multiple times; returns `:already_exists` if the table
-  already exists.
+  Accepts an optional table name for testing. Returns the table name.
+  Safe to call multiple times; returns the existing table if it exists.
   """
-  @spec init() :: :ok | :already_exists
-  def init do
-    case :ets.whereis(@table) do
+  @spec init() :: atom()
+  @spec init(atom()) :: atom()
+  def init, do: init(@table)
+
+  def init(table_name) when is_atom(table_name) do
+    case :ets.whereis(table_name) do
       :undefined ->
-        :ets.new(@table, [
+        :ets.new(table_name, [
           :named_table,
           :ordered_set,
           :public,
           read_concurrency: true
         ])
 
-        :ok
-
       _ref ->
-        :already_exists
+        :ok
     end
+
+    table_name
   end
+
+  # ── Register / unregister ──────────────────────────────────────────────────
 
   @doc """
   Registers a popup rule.
@@ -56,36 +73,15 @@ defmodule Minga.Popup.Registry do
   later registrations winning ties.
   """
   @spec register(Rule.t()) :: :ok
-  def register(%Rule{} = rule) do
-    ensure_table!()
+  @spec register(Rule.t(), atom()) :: :ok
+  def register(rule), do: register(rule, @table)
+
+  def register(%Rule{} = rule, table) do
+    ensure_table!(table)
     seq = next_sequence()
     key = {-rule.priority, seq}
-    :ets.insert(@table, {key, rule})
+    :ets.insert(table, {key, rule})
     :ok
-  end
-
-  @doc """
-  Finds the highest-priority rule matching the given buffer name.
-
-  Walks rules in priority order (highest first, with later registrations
-  winning ties at the same priority). Returns `{:ok, rule}` for the first
-  match, or `:none` if no rule matches.
-  """
-  @spec match(String.t()) :: {:ok, Rule.t()} | :none
-  def match(buffer_name) when is_binary(buffer_name) do
-    ensure_table!()
-    find_match(:ets.first(@table), buffer_name)
-  end
-
-  @doc """
-  Returns all registered rules, ordered by priority (highest first).
-  """
-  @spec list() :: [Rule.t()]
-  def list do
-    ensure_table!()
-
-    :ets.tab2list(@table)
-    |> Enum.map(fn {_key, rule} -> rule end)
   end
 
   @doc """
@@ -95,13 +91,16 @@ defmodule Minga.Popup.Registry do
   cleared before the new one is registered.
   """
   @spec unregister(Regex.t() | String.t()) :: :ok
-  def unregister(pattern) do
-    ensure_table!()
+  @spec unregister(Regex.t() | String.t(), atom()) :: :ok
+  def unregister(pattern), do: unregister(pattern, @table)
 
-    :ets.tab2list(@table)
+  def unregister(pattern, table) do
+    ensure_table!(table)
+
+    :ets.tab2list(table)
     |> Enum.each(fn {key, rule} ->
       if patterns_equal?(rule.pattern, pattern) do
-        :ets.delete(@table, key)
+        :ets.delete(table, key)
       end
     end)
 
@@ -112,28 +111,63 @@ defmodule Minga.Popup.Registry do
   Removes all registered rules. Used during config reload.
   """
   @spec clear() :: :ok
-  def clear do
-    ensure_table!()
-    :ets.delete_all_objects(@table)
+  @spec clear(atom()) :: :ok
+  def clear, do: clear(@table)
+
+  def clear(table) do
+    ensure_table!(table)
+    :ets.delete_all_objects(table)
     :ok
+  end
+
+  # ── Lookup ─────────────────────────────────────────────────────────────────
+
+  @doc """
+  Finds the highest-priority rule matching the given buffer name.
+
+  Walks rules in priority order (highest first, with later registrations
+  winning ties at the same priority). Returns `{:ok, rule}` for the first
+  match, or `:none` if no rule matches.
+  """
+  @spec match(String.t()) :: {:ok, Rule.t()} | :none
+  @spec match(String.t(), atom()) :: {:ok, Rule.t()} | :none
+  def match(buffer_name), do: match(buffer_name, @table)
+
+  def match(buffer_name, table) when is_binary(buffer_name) do
+    ensure_table!(table)
+    find_match(:ets.first(table), buffer_name, table)
+  end
+
+  @doc """
+  Returns all registered rules, ordered by priority (highest first).
+  """
+  @spec list() :: [Rule.t()]
+  @spec list(atom()) :: [Rule.t()]
+  def list, do: list(@table)
+
+  def list(table) do
+    ensure_table!(table)
+
+    :ets.tab2list(table)
+    |> Enum.map(fn {_key, rule} -> rule end)
   end
 
   # ── Private ────────────────────────────────────────────────────────────────
 
-  @spec find_match(term(), String.t()) :: {:ok, Rule.t()} | :none
-  defp find_match(:"$end_of_table", _buffer_name), do: :none
+  @spec find_match(term(), String.t(), atom()) :: {:ok, Rule.t()} | :none
+  defp find_match(:"$end_of_table", _buffer_name, _table), do: :none
 
-  defp find_match(key, buffer_name) do
-    case :ets.lookup(@table, key) do
+  defp find_match(key, buffer_name, table) do
+    case :ets.lookup(table, key) do
       [{_key, rule}] ->
         if Rule.matches?(rule, buffer_name) do
           {:ok, rule}
         else
-          find_match(:ets.next(@table, key), buffer_name)
+          find_match(:ets.next(table, key), buffer_name, table)
         end
 
       [] ->
-        find_match(:ets.next(@table, key), buffer_name)
+        find_match(:ets.next(table, key), buffer_name, table)
     end
   end
 
@@ -149,10 +183,10 @@ defmodule Minga.Popup.Registry do
 
   defp patterns_equal?(_a, _b), do: false
 
-  @spec ensure_table!() :: :ok
-  defp ensure_table! do
-    case :ets.whereis(@table) do
-      :undefined -> init()
+  @spec ensure_table!(atom()) :: :ok
+  defp ensure_table!(table) do
+    case :ets.whereis(table) do
+      :undefined -> init(table)
       _ref -> :ok
     end
 
