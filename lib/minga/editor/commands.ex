@@ -287,6 +287,18 @@ defmodule Minga.Editor.Commands do
     guard_buffer(state, fn -> Operators.execute(state, cmd) end)
   end
 
+  def execute(state, {:delete_lines_counted, _} = cmd) do
+    guard_buffer(state, fn -> Operators.execute(state, cmd) end)
+  end
+
+  def execute(state, {:change_lines_counted, _} = cmd) do
+    guard_buffer(state, fn -> Operators.execute(state, cmd) end)
+  end
+
+  def execute(state, {:yank_lines_counted, _} = cmd) do
+    guard_buffer(state, fn -> Operators.execute(state, cmd) end)
+  end
+
   # ── Parameterized visual ──────────────────────────────────────────────────
 
   def execute(state, {:wrap_visual_selection, _, _} = cmd) do

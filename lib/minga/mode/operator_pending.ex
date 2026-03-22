@@ -28,11 +28,11 @@ defmodule Minga.Mode.OperatorPending do
   | `d$`         | `{:delete_motion, :line_end}`            |
   | `dgg`        | `{:delete_motion, :document_start}`      |
   | `dG`         | `{:delete_motion, :document_end}`        |
-  | `dd`         | `:delete_line`                           |
+  | `dd`         | `{:delete_lines_counted, n}`             |
   | `cw`         | `{:change_motion, :word_forward}`        |
-  | `cc`         | `:change_line`                           |
+  | `cc`         | `{:change_lines_counted, n}`             |
   | `yw`         | `{:yank_motion, :word_forward}`          |
-  | `yy`         | `:yank_line`                             |
+  | `yy`         | `{:yank_lines_counted, n}`               |
 
   The `c*` variants transition to `:insert` mode; all others return to `:normal`.
 
@@ -252,18 +252,18 @@ defmodule Minga.Mode.OperatorPending do
   # ── Double-operator: line-wise variants (dd / cc / yy / >> / <<) ─────────
 
   def handle_key({?d, 0}, %OPState{operator: :delete} = state) do
-    cmds = List.duplicate(:delete_line, OPState.total_count(state))
-    {:execute_then_transition, cmds, :normal, OPState.to_base_state(state)}
+    {:execute_then_transition, [{:delete_lines_counted, OPState.total_count(state)}], :normal,
+     OPState.to_base_state(state)}
   end
 
   def handle_key({?c, 0}, %OPState{operator: :change} = state) do
-    cmds = List.duplicate(:change_line, OPState.total_count(state))
-    {:execute_then_transition, cmds, :insert, OPState.to_base_state(state)}
+    {:execute_then_transition, [{:change_lines_counted, OPState.total_count(state)}], :insert,
+     OPState.to_base_state(state)}
   end
 
   def handle_key({?y, 0}, %OPState{operator: :yank} = state) do
-    cmds = List.duplicate(:yank_line, OPState.total_count(state))
-    {:execute_then_transition, cmds, :normal, OPState.to_base_state(state)}
+    {:execute_then_transition, [{:yank_lines_counted, OPState.total_count(state)}], :normal,
+     OPState.to_base_state(state)}
   end
 
   # gcc — comment current line(s)

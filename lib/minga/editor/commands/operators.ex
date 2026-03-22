@@ -41,30 +41,57 @@ defmodule Minga.Editor.Commands.Operators do
 
   # ── Line-wise operators (dd / yy / cc / S) ────────────────────────────────
 
-  def execute(%{buffers: %{active: buf}} = state, :delete_line) do
+  def execute(%{buffers: %{active: _buf}} = state, :delete_line) do
+    execute(state, {:delete_lines_counted, 1})
+  end
+
+  def execute(%{buffers: %{active: buf}} = state, {:delete_lines_counted, count})
+      when is_integer(count) and count >= 1 do
     if read_only?(buf) do
       read_only_msg(state)
     else
       {line, _col} = BufferServer.cursor(buf)
-      yanked = BufferServer.get_lines_content(buf, line, line)
-      BufferServer.delete_lines(buf, line, line)
+      total = BufferServer.line_count(buf)
+      end_line = min(line + count - 1, total - 1)
+      yanked = BufferServer.get_lines_content(buf, line, end_line)
+      BufferServer.delete_lines(buf, line, end_line)
       Helpers.put_register(state, yanked <> "\n", :delete, :linewise)
     end
   end
 
-  def execute(%{buffers: %{active: buf}} = state, :change_line) do
+  def execute(%{buffers: %{active: _buf}} = state, :change_line) do
+    execute(state, {:change_lines_counted, 1})
+  end
+
+  def execute(%{buffers: %{active: buf}} = state, {:change_lines_counted, count})
+      when is_integer(count) and count >= 1 do
     if read_only?(buf) do
       read_only_msg(state)
     else
       {line, _col} = BufferServer.cursor(buf)
-      {:ok, yanked} = BufferServer.clear_line(buf, line)
+      total = BufferServer.line_count(buf)
+      end_line = min(line + count - 1, total - 1)
+
+      # Yank all lines first, then clear/delete
+      yanked = BufferServer.get_lines_content(buf, line, end_line)
+
+      # Delete extra lines (all but the first), then clear the remaining one
+      delete_trailing_lines(buf, line, end_line)
+      {:ok, _} = BufferServer.clear_line(buf, line)
       Helpers.put_register(state, yanked <> "\n", :delete, :linewise)
     end
   end
 
-  def execute(%{buffers: %{active: buf}} = state, :yank_line) do
+  def execute(%{buffers: %{active: _buf}} = state, :yank_line) do
+    execute(state, {:yank_lines_counted, 1})
+  end
+
+  def execute(%{buffers: %{active: buf}} = state, {:yank_lines_counted, count})
+      when is_integer(count) and count >= 1 do
     {line, _col} = BufferServer.cursor(buf)
-    yanked = BufferServer.get_lines_content(buf, line, line)
+    total = BufferServer.line_count(buf)
+    end_line = min(line + count - 1, total - 1)
+    yanked = BufferServer.get_lines_content(buf, line, end_line)
     Helpers.put_register(state, yanked <> "\n", :yank, :linewise)
   end
 
@@ -90,6 +117,14 @@ defmodule Minga.Editor.Commands.Operators do
   end
 
   # ── Helpers ────────────────────────────────────────────────────────────────
+
+  @spec delete_trailing_lines(pid(), non_neg_integer(), non_neg_integer()) :: :ok
+  defp delete_trailing_lines(_buf, same, same), do: :ok
+
+  defp delete_trailing_lines(buf, start_line, end_line) do
+    BufferServer.delete_lines(buf, start_line + 1, end_line)
+    :ok
+  end
 
   @spec read_only?(pid()) :: boolean()
   defp read_only?(buf), do: BufferServer.read_only?(buf)
