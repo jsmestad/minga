@@ -62,6 +62,20 @@ final class EditorNSView: MTKView {
     /// normal mode, not swallowed while the user is typing in insert mode.
     var statusBarState: StatusBarState?
 
+    // MARK: - Cursor blink
+
+    /// Whether the cursor is currently visible in the blink cycle.
+    /// The Metal renderer ANDs this with `frameState.cursorVisible` to
+    /// determine whether to draw the cursor.
+    private(set) var cursorBlinkVisible: Bool = true
+
+    /// The async task driving the blink timer. Cancelled on focus loss,
+    /// cursor hide, or dealloc.
+    private var blinkTask: Task<Void, Never>?
+
+    /// Observation token for accessibility display options changes.
+    private var accessibilityObserver: NSObjectProtocol?
+
     init(encoder: InputEncoder, fontFace: FontFace, dispatcher: CommandDispatcher,
          coreTextRenderer: CoreTextMetalRenderer, fontManager: FontManager) {
         self.encoder = encoder
@@ -84,8 +98,75 @@ final class EditorNSView: MTKView {
     @available(*, unavailable)
     required init(coder: NSCoder) { fatalError("Not implemented") }
 
+    /// Cleans up blink timer and accessibility observer.
+    /// Called from viewDidMoveToWindow when window is nil (view removed).
+    private func cleanupBlinkResources() {
+        blinkTask?.cancel()
+        blinkTask = nil
+        if let observer = accessibilityObserver {
+            NotificationCenter.default.removeObserver(observer)
+            accessibilityObserver = nil
+        }
+    }
+
     override var acceptsFirstResponder: Bool { true }
     override var isFlipped: Bool { true }
+
+    // MARK: - Cursor blink control
+
+    /// Resets the cursor to visible and restarts the blink cycle.
+    /// Called on keystrokes, cursor movement, and focus gain.
+    func resetCursorBlink() {
+        blinkTask?.cancel()
+        cursorBlinkVisible = true
+
+        // Don't blink when Accessibility > Reduce Motion is on.
+        guard !SystemBlinkTiming.blinkingDisabled else { return }
+
+        let timing = SystemBlinkTiming.system
+
+        // If on-period is 0, the user has disabled cursor blink system-wide.
+        guard timing.onDuration > 0 else { return }
+
+        blinkTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: timing.onDuration)
+                guard !Task.isCancelled else { break }
+                self?.cursorBlinkVisible = false
+                self?.needsDisplay = true
+                try? await Task.sleep(nanoseconds: timing.offDuration)
+                guard !Task.isCancelled else { break }
+                self?.cursorBlinkVisible = true
+                self?.needsDisplay = true
+            }
+        }
+    }
+
+    /// Stops the blink timer and shows the cursor as solid.
+    /// Called on focus loss and when the cursor is hidden (minibuffer active).
+    func stopCursorBlink() {
+        blinkTask?.cancel()
+        cursorBlinkVisible = true
+        needsDisplay = true
+    }
+
+    /// Starts observing Accessibility display option changes so the blink
+    /// timer responds to live Reduce Motion toggles. Idempotent: only
+    /// registers once (guards against repeated viewDidMoveToWindow calls).
+    private func observeAccessibilityChanges() {
+        guard accessibilityObserver == nil else { return }
+        accessibilityObserver = NotificationCenter.default.addObserver(
+            forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            if SystemBlinkTiming.blinkingDisabled {
+                self?.stopCursorBlink()
+            } else {
+                self?.resetCursorBlink()
+            }
+        }
+    }
 
     // MARK: - Rendering
 
@@ -116,9 +197,11 @@ final class EditorNSView: MTKView {
             lastAccessibilityCursorRow = fs.cursorRow
             lastAccessibilityCursorCol = fs.cursorCol
             NSAccessibility.post(element: self, notification: .selectedTextChanged)
+            resetCursorBlink()
         }
 
         coreTextRenderer.render(frameState: fs, fontManager: fontManager,
+                                cursorBlinkVisible: cursorBlinkVisible,
                                 windowContents: guiState?.windowContents ?? [:],
                                 themeColors: guiState?.themeColors,
                                 drawable: drawable, viewportSize: drawableSize,
@@ -155,32 +238,45 @@ final class EditorNSView: MTKView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        if let window = window {
-            // Match the Metal layer's scale to the window's backing scale.
-            (layer as? CAMetalLayer)?.contentsScale = window.backingScaleFactor
-
-            // Restore window position and size from previous session.
-            // This fires before the window is made key/visible, so the
-            // saved frame is applied without a visible position jump.
-            window.setFrameAutosaveName("MingaEditorWindow")
-
-            // Observe window becoming key to reclaim first responder.
-            // SwiftUI can reassign it during layout passes.
-            NotificationCenter.default.addObserver(
-                self,
-                selector: #selector(windowDidBecomeKey),
-                name: NSWindow.didBecomeKeyNotification,
-                object: window
-            )
-
-            // Install the first responder guard. This uses KVO to monitor
-            // first responder changes and immediately redirect them back
-            // to this editor view. Combined with .focusable(false) on all
-            // SwiftUI chrome, this ensures vim keybindings always work.
-            firstResponderGuard = FirstResponderGuard(window: window, editorView: self)
+        guard let window = window else {
+            cleanupBlinkResources()
+            return
         }
+
+        // Match the Metal layer's scale to the window's backing scale.
+        (layer as? CAMetalLayer)?.contentsScale = window.backingScaleFactor
+
+        // Restore window position and size from previous session.
+        // This fires before the window is made key/visible, so the
+        // saved frame is applied without a visible position jump.
+        window.setFrameAutosaveName("MingaEditorWindow")
+
+        // Observe window becoming/losing key to manage first responder
+        // and cursor blink. SwiftUI can reassign first responder during
+        // layout passes.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(windowDidBecomeKey),
+            name: NSWindow.didBecomeKeyNotification,
+            object: window
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(windowDidResignKey),
+            name: NSWindow.didResignKeyNotification,
+            object: window
+        )
+
+        // Install the first responder guard. This uses KVO to monitor
+        // first responder changes and immediately redirect them back
+        // to this editor view. Combined with .focusable(false) on all
+        // SwiftUI chrome, this ensures vim keybindings always work.
+        firstResponderGuard = FirstResponderGuard(window: window, editorView: self)
+
         updateTrackingArea()
         claimFirstResponder()
+        observeAccessibilityChanges()
+        resetCursorBlink()
     }
 
     /// Claim first responder after a short delay so SwiftUI's layout pass
@@ -197,6 +293,23 @@ final class EditorNSView: MTKView {
 
     @objc private func windowDidBecomeKey(_ notification: Notification) {
         claimFirstResponder()
+        resetCursorBlink()
+    }
+
+    @objc private func windowDidResignKey(_ notification: Notification) {
+        stopCursorBlink()
+    }
+
+    override func becomeFirstResponder() -> Bool {
+        let result = super.becomeFirstResponder()
+        if result { resetCursorBlink() }
+        return result
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let result = super.resignFirstResponder()
+        if result { stopCursorBlink() }
+        return result
     }
 
     override func setFrameSize(_ newSize: NSSize) {
@@ -318,6 +431,7 @@ final class EditorNSView: MTKView {
     }
 
     override func keyDown(with event: NSEvent) {
+        resetCursorBlink()
         let mods = modifierBits(from: event.modifierFlags)
 
         // Cmd+V: intercept paste and send as a single paste_event instead
@@ -387,6 +501,7 @@ final class EditorNSView: MTKView {
     // MARK: - Mouse
 
     override func mouseDown(with event: NSEvent) {
+        resetCursorBlink()
         let (row, col) = cellPosition(from: event)
         let cc = UInt8(clamping: event.clickCount)
         encoder.sendMouseEvent(row: row, col: col, button: MOUSE_BUTTON_LEFT,
