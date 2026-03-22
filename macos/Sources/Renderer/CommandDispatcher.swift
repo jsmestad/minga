@@ -1,4 +1,4 @@
-/// Routes decoded protocol commands to the LineBuffer and triggers rendering.
+/// Routes decoded protocol commands to FrameState/LineBuffer and triggers rendering.
 ///
 /// Handles region tracking (define/clear/destroy/set_active) with coordinate
 /// offset and clipping, matching the Zig renderer.zig logic.
@@ -18,10 +18,13 @@ struct Region {
     let zOrder: UInt8
 }
 
-/// Dispatches render commands to a LineBuffer and notifies when a frame is complete.
+/// Dispatches render commands to FrameState (metadata) and LineBuffer (runs).
 @MainActor
 final class CommandDispatcher {
-    /// Line-based styled run buffer for CoreText rendering.
+    /// Per-frame metadata for the Metal render pass.
+    var frameState: FrameState
+
+    /// Styled run buffer (legacy, used only by CoreTextLineRenderer during migration).
     let lineBuffer: LineBuffer
 
     private var regions: [UInt16: Region] = [:]
@@ -56,6 +59,7 @@ final class CommandDispatcher {
     let guiState: GUIState
 
     init(cols: UInt16, rows: UInt16, guiState: GUIState) {
+        self.frameState = FrameState(cols: cols, rows: rows)
         self.lineBuffer = LineBuffer(cols: cols, rows: rows)
         self.guiState = guiState
     }
@@ -65,6 +69,7 @@ final class CommandDispatcher {
         switch command {
         case .clear:
             lineBuffer.clear()
+            frameState.beginFrame()
             guiState.beginFrame()
 
         case .drawText(let row, let col, let fg, let bg, let attrs, let text):
@@ -84,14 +89,12 @@ final class CommandDispatcher {
                 absRow &+= region.row
                 absCol &+= region.col
             }
-            lineBuffer.showCursor(col: absCol, row: absRow)
+            frameState.cursorCol = absCol
+            frameState.cursorRow = absRow
+            frameState.dirty = true
 
         case .setCursorShape(let shape):
-            switch shape {
-            case .block: lineBuffer.cursorShape = .block
-            case .beam: lineBuffer.cursorShape = .beam
-            case .underline: lineBuffer.cursorShape = .underline
-            }
+            frameState.cursorShape = shape
 
         case .batchEnd:
             onFrameReady?()
@@ -101,7 +104,7 @@ final class CommandDispatcher {
 
         case .setWindowBg(let r, let g, let b):
             let rgb: UInt32 = (UInt32(r) << 16) | (UInt32(g) << 8) | UInt32(b)
-            lineBuffer.defaultBg = rgb
+            frameState.defaultBg = rgb
             let color = NSColor(
                 red: CGFloat(r) / 255.0,
                 green: CGFloat(g) / 255.0,
@@ -147,17 +150,18 @@ final class CommandDispatcher {
 
         case .guiTheme(let slots):
             guiState.themeColors.applySlots(slots)
-            // Sync gutter theme colors to LineBuffer for Metal rendering.
             let tc = guiState.themeColors
-            lineBuffer.gutterFgColor = tc.gutterFgRGB
-            lineBuffer.gutterCurrentFgColor = tc.gutterCurrentFgRGB
-            lineBuffer.gutterErrorFgColor = tc.gutterErrorFgRGB
-            lineBuffer.gutterWarningFgColor = tc.gutterWarningFgRGB
-            lineBuffer.gutterInfoFgColor = tc.gutterInfoFgRGB
-            lineBuffer.gutterHintFgColor = tc.gutterHintFgRGB
-            lineBuffer.gitAddedFgColor = tc.gitAddedFgRGB
-            lineBuffer.gitModifiedFgColor = tc.gitModifiedFgRGB
-            lineBuffer.gitDeletedFgColor = tc.gitDeletedFgRGB
+            frameState.gutterColors = GutterThemeColors(
+                fg: tc.gutterFgRGB,
+                currentFg: tc.gutterCurrentFgRGB,
+                errorFg: tc.gutterErrorFgRGB,
+                warningFg: tc.gutterWarningFgRGB,
+                infoFg: tc.gutterInfoFgRGB,
+                hintFg: tc.gutterHintFgRGB,
+                gitAddedFg: tc.gitAddedFgRGB,
+                gitModifiedFg: tc.gitModifiedFgRGB,
+                gitDeletedFg: tc.gitDeletedFgRGB
+            )
 
         case .guiTabBar(let activeIndex, let tabs):
             guiState.tabBarState.update(activeIndex: activeIndex, entries: tabs)
@@ -229,21 +233,22 @@ final class CommandDispatcher {
 
         case .guiGutterSeparator(let col, let r, let g, let b):
             let rgb: UInt32 = (UInt32(r) << 16) | (UInt32(g) << 8) | UInt32(b)
-            lineBuffer.gutterCol = col
-            lineBuffer.gutterSeparatorColor = rgb
+            frameState.gutterCol = col
+            frameState.gutterSeparatorColor = rgb
+            frameState.dirty = true
 
         case .guiCursorline(let row, let r, let g, let b):
             let rgb: UInt32 = (UInt32(r) << 16) | (UInt32(g) << 8) | UInt32(b)
-            lineBuffer.cursorlineRow = row
-            lineBuffer.cursorlineBg = rgb
+            frameState.cursorlineRow = row
+            frameState.cursorlineBg = rgb
+            frameState.dirty = true
 
         case .guiGutter(let data):
-            lineBuffer.windowGutters[data.windowId] = data
-            // Sync gutterCol from the active window's gutter data so the
-            // separator and gap fill logic stays consistent.
+            frameState.windowGutters[data.windowId] = data
             if data.isActive {
-                lineBuffer.gutterCol = UInt16(data.lineNumberWidth) + UInt16(data.signColWidth)
+                frameState.gutterCol = UInt16(data.lineNumberWidth) + UInt16(data.signColWidth)
             }
+            frameState.dirty = true
 
         case .guiWindowContent(let data):
             guiState.windowContents[data.windowId] = data
@@ -260,7 +265,6 @@ final class CommandDispatcher {
                     filterPreset: filterPreset,
                     tabs: panelTabs
                 )
-                // Append new message entries
                 if !entries.isEmpty {
                     guiState.bottomPanelState.messagesState.appendEntries(entries)
                 }
@@ -332,10 +336,10 @@ final class CommandDispatcher {
             }
 
         case .guiSplitSeparators(let borderColor, let verticals, let horizontals):
-            lineBuffer.splitBorderColor = borderColor
-            lineBuffer.verticalSeparators = verticals
-            lineBuffer.horizontalSeparators = horizontals
-            lineBuffer.dirty = true
+            frameState.splitBorderColor = borderColor
+            frameState.verticalSeparators = verticals
+            frameState.horizontalSeparators = horizontals
+            frameState.dirty = true
 
         case .guiFloatPopup(let visible, let width, let height, let title, let lines):
             if visible {
@@ -351,7 +355,7 @@ final class CommandDispatcher {
 
     // MARK: - Private
 
-    /// Append a styled text run to the LineBuffer.
+    /// Append a styled text run to the LineBuffer (legacy path, to be removed).
     ///
     /// CoreText handles all shaping, ligatures, and glyph layout natively,
     /// so there's no per-character decomposition. The full text run is

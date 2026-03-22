@@ -57,6 +57,7 @@
 		60EB260E8F42BD06CE5472C8 /* CoreTextLineRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5387C9048870A71E7565ED06 /* CoreTextLineRenderer.swift */; };
 		61CF67858355FFF4962D9D99 /* ThemeColorsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F086ACF8E4F305C9DDAE24FF /* ThemeColorsTests.swift */; };
 		63A874F653524DCE4E046BDD /* LineBuffer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F87D78FA2B8AA133DDD3141B /* LineBuffer.swift */; };
+		63F3CF3A4746901FDF1C3356 /* FrameState.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2D59D9EEB390C8DF351D595 /* FrameState.swift */; };
 		6474095F95F4DA480AFE91B7 /* WhichKeyOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF8ACE680725ECE21E6E03B4 /* WhichKeyOverlay.swift */; };
 		64A5A16E02B3E2694060F1A1 /* BitmapRasterizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42375D2D8B25AF31BEB11AB5 /* BitmapRasterizer.swift */; };
 		654E7E631260BE13502E1C32 /* FloatPopupOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84C47F406747CA6DD924A1AB /* FloatPopupOverlay.swift */; };
@@ -122,6 +123,7 @@
 		DE6C77896ED3E1E885216DC3 /* AgentChatState.swift in Sources */ = {isa = PBXBuildFile; fileRef = E244758FFE2BDDE3A8108C70 /* AgentChatState.swift */; };
 		E073657EE87B3F145830B7C7 /* FileTreeState.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC2F98D07FE0F56DDBCD9525 /* FileTreeState.swift */; };
 		E480C69FBC5BB4A7B8474928 /* IMEComposition.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2912755A61AF5BAF6ED3A480 /* IMEComposition.swift */; };
+		E4A2887CDB5EDB64080E5096 /* FrameState.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2D59D9EEB390C8DF351D595 /* FrameState.swift */; };
 		E4B419899BF1AFB3E24B04C2 /* HoverPopupState.swift in Sources */ = {isa = PBXBuildFile; fileRef = B66E4E27BE182768B01E5F64 /* HoverPopupState.swift */; };
 		E531C3FF51386D03BCE33EC7 /* FloatPopupState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23EF5FFAD8310BD41CF784AC /* FloatPopupState.swift */; };
 		E5CE1B3EBAABD914418D892F /* EditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C26E064D810299C0302F439 /* EditorView.swift */; };
@@ -210,6 +212,7 @@
 		CC335D7973205BF8B7EDD8EA /* WindowContentRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowContentRenderer.swift; sourceTree = "<group>"; };
 		CF8ACE680725ECE21E6E03B4 /* WhichKeyOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhichKeyOverlay.swift; sourceTree = "<group>"; };
 		CFA9D8D41BCA4E6CB45243A2 /* BreadcrumbBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BreadcrumbBar.swift; sourceTree = "<group>"; };
+		D2D59D9EEB390C8DF351D595 /* FrameState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrameState.swift; sourceTree = "<group>"; };
 		DD14027C8C7BD17057DE820B /* AgentChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentChatView.swift; sourceTree = "<group>"; };
 		DF1919291250D9AD1375A8C9 /* CompletionOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompletionOverlay.swift; sourceTree = "<group>"; };
 		E244758FFE2BDDE3A8108C70 /* AgentChatState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentChatState.swift; sourceTree = "<group>"; };
@@ -245,6 +248,7 @@
 				5387C9048870A71E7565ED06 /* CoreTextLineRenderer.swift */,
 				5DDE4A535E0895090BF02EE8 /* CoreTextMetalRenderer.swift */,
 				48E21C30D142028698027567 /* CoreTextShaders.metal */,
+				D2D59D9EEB390C8DF351D595 /* FrameState.swift */,
 				F87D78FA2B8AA133DDD3141B /* LineBuffer.swift */,
 				4742DDE225F256A140177301 /* LineTextureAtlas.swift */,
 				371C61E78D4BB39467516BA7 /* SlotAllocator.swift */,
@@ -538,6 +542,7 @@
 				E531C3FF51386D03BCE33EC7 /* FloatPopupState.swift in Sources */,
 				95F6DCD24E2D261CF64EC8EB /* FontFace.swift in Sources */,
 				E6B945D114487F6BD18ADD31 /* FontManager.swift in Sources */,
+				E4A2887CDB5EDB64080E5096 /* FrameState.swift in Sources */,
 				0704C24443A8A7455BE7853E /* GUIState.swift in Sources */,
 				C61B2087D8184481CD9072B7 /* HoverPopupOverlay.swift in Sources */,
 				50197E6E97D44EB7FF02A4E9 /* HoverPopupState.swift in Sources */,
@@ -604,6 +609,7 @@
 				78F06B9BFB553B50D9BDD50F /* FontFace.swift in Sources */,
 				939991DD65293C6C796EAA66 /* FontManager.swift in Sources */,
 				C715D937E8591D8BA46A29CD /* FontTests.swift in Sources */,
+				63F3CF3A4746901FDF1C3356 /* FrameState.swift in Sources */,
 				CD2952CCEB2FD594B269A75D /* GUIActionEncoderTests.swift in Sources */,
 				30E31170A79F30413D15D858 /* GUIChromeDecoderTests.swift in Sources */,
 				36E0C059965477465E15CC02 /* GUIState.swift in Sources */,

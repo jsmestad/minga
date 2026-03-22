@@ -16,8 +16,11 @@ final class EditorNSView: MTKView {
     let encoder: InputEncoder
     private(set) var fontFace: FontFace
 
-    /// Line-based styled run buffer for CoreText rendering.
+    /// Line-based styled run buffer for CoreText rendering (legacy, being removed).
     let lineBuffer: LineBuffer
+
+    /// Command dispatcher owning frame metadata and line buffer.
+    let dispatcher: CommandDispatcher
 
     /// CoreText-based renderer.
     let coreTextRenderer: CoreTextMetalRenderer
@@ -62,11 +65,12 @@ final class EditorNSView: MTKView {
     /// normal mode, not swallowed while the user is typing in insert mode.
     var statusBarState: StatusBarState?
 
-    init(encoder: InputEncoder, fontFace: FontFace, lineBuffer: LineBuffer,
+    init(encoder: InputEncoder, fontFace: FontFace, dispatcher: CommandDispatcher,
          coreTextRenderer: CoreTextMetalRenderer, fontManager: FontManager) {
         self.encoder = encoder
         self.fontFace = fontFace
-        self.lineBuffer = lineBuffer
+        self.dispatcher = dispatcher
+        self.lineBuffer = dispatcher.lineBuffer
         self.coreTextRenderer = coreTextRenderer
         self.fontManager = fontManager
         super.init(frame: .zero, device: coreTextRenderer.device)
@@ -109,19 +113,21 @@ final class EditorNSView: MTKView {
         let scale = Float(window?.backingScaleFactor ?? 2.0)
 
         // Check for cursor movement to post accessibility notifications.
-        if lineBuffer.cursorRow != lastAccessibilityCursorRow ||
-           lineBuffer.cursorCol != lastAccessibilityCursorCol {
-            lastAccessibilityCursorRow = lineBuffer.cursorRow
-            lastAccessibilityCursorCol = lineBuffer.cursorCol
+        let fs = dispatcher.frameState
+
+        if fs.cursorRow != lastAccessibilityCursorRow ||
+           fs.cursorCol != lastAccessibilityCursorCol {
+            lastAccessibilityCursorRow = fs.cursorRow
+            lastAccessibilityCursorCol = fs.cursorCol
             NSAccessibility.post(element: self, notification: .selectedTextChanged)
         }
 
-        coreTextRenderer.render(lineBuffer: lineBuffer, fontManager: fontManager,
+        coreTextRenderer.render(frameState: fs, lineBuffer: lineBuffer, fontManager: fontManager,
                                 windowContents: guiState?.windowContents ?? [:],
                                 themeColors: guiState?.themeColors,
                                 drawable: drawable, viewportSize: drawableSize,
                                 contentScale: scale)
-        lineBuffer.dirty = false
+        dispatcher.frameState.dirty = false
     }
 
     // MARK: - Font update
@@ -140,7 +146,8 @@ final class EditorNSView: MTKView {
         let newCols = UInt16(max(frame.width / newCellW, 1))
         let newRows = UInt16(max(frame.height / newCellH, 1))
 
-        if newCols != lineBuffer.cols || newRows != lineBuffer.rows {
+        if newCols != dispatcher.frameState.cols || newRows != dispatcher.frameState.rows {
+            dispatcher.frameState.resize(newCols: newCols, newRows: newRows)
             lineBuffer.resize(newCols: newCols, newRows: newRows)
             encoder.sendResize(cols: newCols, rows: newRows)
         }
@@ -209,10 +216,12 @@ final class EditorNSView: MTKView {
             // First real frame size: send the ready event with actual
             // window dimensions so the BEAM never sees wrong defaults.
             readySent = true
+            dispatcher.frameState.resize(newCols: newCols, newRows: newRows)
             lineBuffer.resize(newCols: newCols, newRows: newRows)
             encoder.sendReady(cols: newCols, rows: newRows)
             PortLogger.info("Window ready: \(newCols)x\(newRows) cells (\(Int(newSize.width))x\(Int(newSize.height))pt)")
-        } else if newCols != lineBuffer.cols || newRows != lineBuffer.rows {
+        } else if newCols != dispatcher.frameState.cols || newRows != dispatcher.frameState.rows {
+            dispatcher.frameState.resize(newCols: newCols, newRows: newRows)
             lineBuffer.resize(newCols: newCols, newRows: newRows)
             encoder.sendResize(cols: newCols, rows: newRows)
             PortLogger.info("Window resized: \(newCols)x\(newRows) cells")
@@ -612,7 +621,7 @@ extension EditorNSView: @preconcurrency NSTextInputClient {
     func selectedRange() -> NSRange {
         // The cursor position in terms of character offset from start of document.
         // For a cell-based editor, approximate as col + row * cols.
-        let offset = Int(lineBuffer.cursorRow) * Int(lineBuffer.cols) + Int(lineBuffer.cursorCol)
+        let offset = Int(dispatcher.frameState.cursorRow) * Int(dispatcher.frameState.cols) + Int(dispatcher.frameState.cursorCol)
         return NSRange(location: offset, length: 0)
     }
 
@@ -626,8 +635,8 @@ extension EditorNSView: @preconcurrency NSTextInputClient {
         actualRange?.pointee = range
 
         // Position at the cursor location.
-        let col = CGFloat(lineBuffer.cursorCol)
-        let row = CGFloat(lineBuffer.cursorRow)
+        let col = CGFloat(dispatcher.frameState.cursorCol)
+        let row = CGFloat(dispatcher.frameState.cursorRow)
         let localRect = NSRect(x: col * cellWidth, y: row * cellHeight,
                                 width: cellWidth, height: cellHeight)
 
@@ -644,7 +653,7 @@ extension EditorNSView: @preconcurrency NSTextInputClient {
         let localPoint = convert(windowPoint, from: nil)
         let col = Int(localPoint.x / cellWidth)
         let row = Int(localPoint.y / cellHeight)
-        return row * Int(lineBuffer.cols) + col
+        return row * Int(dispatcher.frameState.cols) + col
     }
 
     /// Returns the attributed substring for the given range.
@@ -675,7 +684,7 @@ extension EditorNSView {
     /// Returns the full text content of all visible lines.
     override func accessibilityValue() -> Any? {
         var lines: [String] = []
-        for row: UInt16 in 0..<lineBuffer.rows {
+        for row: UInt16 in 0..<dispatcher.frameState.rows {
             let runs = lineBuffer.runsForLine(row)
             if runs.isEmpty {
                 lines.append("")
@@ -688,12 +697,12 @@ extension EditorNSView {
 
     override func accessibilityNumberOfCharacters() -> Int {
         var count = 0
-        for row: UInt16 in 0..<lineBuffer.rows {
+        for row: UInt16 in 0..<dispatcher.frameState.rows {
             let runs = lineBuffer.runsForLine(row)
             for run in runs {
                 count += run.text.count
             }
-            if row < lineBuffer.rows - 1 {
+            if row < dispatcher.frameState.rows - 1 {
                 count += 1  // newline
             }
         }
@@ -701,7 +710,7 @@ extension EditorNSView {
     }
 
     override func accessibilityInsertionPointLineNumber() -> Int {
-        return Int(lineBuffer.cursorRow)
+        return Int(dispatcher.frameState.cursorRow)
     }
 
     override func accessibilitySelectedText() -> String? {
@@ -710,7 +719,7 @@ extension EditorNSView {
     }
 
     override func accessibilitySelectedTextRange() -> NSRange {
-        let offset = Int(lineBuffer.cursorRow) * Int(lineBuffer.cols) + Int(lineBuffer.cursorCol)
+        let offset = Int(dispatcher.frameState.cursorRow) * Int(dispatcher.frameState.cols) + Int(dispatcher.frameState.cursorCol)
         return NSRange(location: offset, length: 0)
     }
 
