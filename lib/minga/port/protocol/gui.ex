@@ -61,16 +61,19 @@ defmodule Minga.Port.Protocol.GUI do
   | 0x14       | tool_dismiss         |
   | 0x15       | agent_tool_toggle    |
   | 0x16       | execute_command      |
+  <<<<<<< HEAD
   | 0x17       | minibuffer_select    |
 
 
-  | 0x17       | git_stage_file       |
-  | 0x18       | git_unstage_file     |
-  | 0x19       | git_discard_file     |
-  | 0x1A       | git_stage_all        |
-  | 0x1B       | git_unstage_all      |
-  | 0x1C       | git_commit           |
-  | 0x1D       | git_open_file        |
+  =======
+  >>>>>>> 8fcc39d8 (fix(editor): suppress tool prompts in headless editors + add protocol tests)
+  | 0x18       | git_stage_file       |
+  | 0x19       | git_unstage_file     |
+  | 0x1A       | git_discard_file     |
+  | 0x1B       | git_stage_all        |
+  | 0x1C       | git_unstage_all      |
+  | 0x1D       | git_commit           |
+  | 0x1E       | git_open_file        |
   """
 
   import Bitwise
@@ -135,13 +138,13 @@ defmodule Minga.Port.Protocol.GUI do
   @gui_action_execute_command 0x16
   @gui_action_minibuffer_select 0x17
 
-  @gui_action_git_stage_file 0x17
-  @gui_action_git_unstage_file 0x18
-  @gui_action_git_discard_file 0x19
-  @gui_action_git_stage_all 0x1A
-  @gui_action_git_unstage_all 0x1B
-  @gui_action_git_commit 0x1C
-  @gui_action_git_open_file 0x1D
+  @gui_action_git_stage_file 0x18
+  @gui_action_git_unstage_file 0x19
+  @gui_action_git_discard_file 0x1A
+  @gui_action_git_stage_all 0x1B
+  @gui_action_git_unstage_all 0x1C
+  @gui_action_git_commit 0x1D
+  @gui_action_git_open_file 0x1E
 
   # ── Types ──
 

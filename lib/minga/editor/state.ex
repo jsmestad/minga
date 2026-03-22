@@ -147,7 +147,8 @@ defmodule Minga.Editor.State do
             tool_prompt_queue: [],
             session_timer: nil,
             swap_dir: nil,
-            session_dir: nil
+            session_dir: nil,
+            suppress_tool_prompts: false
 
   @type t :: %__MODULE__{
           port_manager: GenServer.server() | nil,
@@ -210,7 +211,8 @@ defmodule Minga.Editor.State do
           tool_prompt_queue: [atom()],
           session_timer: reference() | nil,
           swap_dir: String.t() | nil,
-          session_dir: String.t() | nil
+          session_dir: String.t() | nil,
+          suppress_tool_prompts: boolean()
         }
 
   # ── Convenience accessors ─────────────────────────────────────────────────

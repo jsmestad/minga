@@ -62,6 +62,7 @@ defmodule Minga.Editor do
           | {:buffer, pid()}
           | {:width, pos_integer()}
           | {:height, pos_integer()}
+          | {:suppress_tool_prompts, boolean()}
 
   alias Minga.Agent.Session, as: AgentSession
 
@@ -1074,6 +1075,14 @@ defmodule Minga.Editor do
   end
 
   # ── Tool missing prompt ────────────────────────────────────────────────────
+
+  def handle_info(
+        {:minga_event, :tool_missing, %Minga.Events.ToolMissingEvent{command: command}},
+        %{suppress_tool_prompts: true} = state
+      ) do
+    Minga.Log.debug(:editor, "[Editor] tool_missing suppressed for #{command}")
+    {:noreply, state}
+  end
 
   def handle_info(
         {:minga_event, :tool_missing, %Minga.Events.ToolMissingEvent{command: command}},
