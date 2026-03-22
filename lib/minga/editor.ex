@@ -955,8 +955,8 @@ defmodule Minga.Editor do
 
   # Process died. Check agent session first, then buffer monitors.
   def handle_info({:DOWN, ref, :process, pid, reason}, state) do
-    cond do
-      AgentAccess.session(state) == pid and AgentAccess.agent(state).session_monitor == ref ->
+    case classify_down(state, ref, pid) do
+      :agent_session ->
         Minga.Log.error(
           :agent,
           "[Agent] Session #{inspect(pid)} terminated: #{inspect(reason, pretty: true, limit: 500)}"
@@ -966,12 +966,15 @@ defmodule Minga.Editor do
         state = %{state | status_msg: "Agent session terminated, SPC a n to restart"}
         {:noreply, state}
 
-      Map.has_key?(state.buffer_monitors, pid) ->
+      :buffer ->
         Minga.Log.info(:editor, "Buffer process #{inspect(pid)} died, removing from state")
         state = EditorState.remove_dead_buffer(state, pid)
         {:noreply, Renderer.render(state)}
 
-      true ->
+      {:git_remote_task, updated_state} ->
+        {:noreply, Renderer.render(updated_state)}
+
+      :unknown ->
         {:noreply, state}
     end
   end
@@ -1024,6 +1027,13 @@ defmodule Minga.Editor do
     # Save session state on every file save
     send(self(), :save_session)
     {:noreply, state}
+  end
+
+  # ── Async git remote operations ─────────────────────────────────────────────
+
+  def handle_info({:git_remote_result, ref, result}, state) when is_reference(ref) do
+    state = Commands.Git.handle_remote_result(state, ref, result)
+    {:noreply, Renderer.render(state)}
   end
 
   # ── Tool manager events ────────────────────────────────────────────────────
@@ -1104,6 +1114,29 @@ defmodule Minga.Editor do
 
   def handle_info(_msg, state) do
     {:noreply, state}
+  end
+
+  # ── :DOWN classifier ────────────────────────────────────────────────────────
+
+  @spec classify_down(EditorState.t(), reference(), pid()) ::
+          :agent_session | :buffer | {:git_remote_task, EditorState.t()} | :unknown
+  defp classify_down(state, ref, pid) do
+    agent_pid = AgentAccess.session(state)
+    agent_monitor = AgentAccess.agent(state).session_monitor
+
+    case {agent_pid == pid and agent_monitor == ref, Map.has_key?(state.buffer_monitors, pid)} do
+      {true, _} ->
+        :agent_session
+
+      {_, true} ->
+        :buffer
+
+      _ ->
+        case Commands.Git.handle_remote_task_down(state, ref) do
+          :not_matched -> :unknown
+          updated_state -> {:git_remote_task, updated_state}
+        end
+    end
   end
 
   # ── LSP response dispatch ──────────────────────────────────────────────────
