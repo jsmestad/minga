@@ -6,10 +6,10 @@ defmodule Minga.Editor.Commands.Git do
   @behaviour Minga.Command.Provider
 
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Editor.PickerUI
   alias Minga.Editor.State, as: EditorState
   alias Minga.Git
   alias Minga.Git.Buffer, as: GitBuffer
-  alias Minga.Editor.PickerUI
   alias Minga.Git.Diff
   alias Minga.Git.Repo
   alias Minga.Git.Tracker, as: GitTracker
@@ -20,6 +20,9 @@ defmodule Minga.Editor.Commands.Git do
   @command_specs [
     {:git_status_toggle, "Git status", false},
     {:git_changed_files, "Changed files", false},
+    {:git_branch_picker, "Switch branch", false},
+    {:git_push, "Push", false},
+    {:git_fetch, "Fetch", false},
     {:next_git_hunk, "Next git hunk", true},
     {:prev_git_hunk, "Previous git hunk", true},
     {:git_stage_hunk, "Stage hunk", true},
@@ -44,6 +47,18 @@ defmodule Minga.Editor.Commands.Git do
 
   def execute(state, :git_changed_files) do
     PickerUI.open(state, GitChangedSource)
+  end
+
+  def execute(state, :git_branch_picker) do
+    PickerUI.open(state, Minga.Picker.GitBranchSource)
+  end
+
+  def execute(state, :git_push) do
+    git_remote_action(state, &Git.push/1, "Pushing...", "Pushed", "Push failed")
+  end
+
+  def execute(state, :git_fetch) do
+    git_remote_action(state, &Git.fetch_remotes/1, "Fetching...", "Fetched", "Fetch failed")
   end
 
   # ── Navigation ─────────────────────────────────────────────────────────────
@@ -137,6 +152,40 @@ defmodule Minga.Editor.Commands.Git do
   end
 
   # ── Private ────────────────────────────────────────────────────────────────
+
+  @spec git_remote_action(
+          state(),
+          (String.t() -> :ok | {:error, String.t()}),
+          String.t(),
+          String.t(),
+          String.t()
+        ) ::
+          state()
+  defp git_remote_action(state, operation, _progress_msg, success_msg, error_prefix) do
+    case Git.root_for(Minga.Project.resolve_root()) do
+      {:ok, git_root} ->
+        # Run synchronously for now; async with progress feedback is a future enhancement
+        case operation.(git_root) do
+          :ok ->
+            refresh_repo(git_root)
+            %{state | status_msg: success_msg}
+
+          {:error, reason} ->
+            %{state | status_msg: "#{error_prefix}: #{reason}"}
+        end
+
+      :not_git ->
+        %{state | status_msg: "Not in a git repository"}
+    end
+  end
+
+  @spec refresh_repo(String.t()) :: :ok
+  defp refresh_repo(git_root) do
+    case Repo.lookup(git_root) do
+      nil -> :ok
+      pid -> Repo.refresh(pid)
+    end
+  end
 
   @spec open_git_status_panel(state()) :: state()
   defp open_git_status_panel(state) do

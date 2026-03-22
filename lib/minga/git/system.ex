@@ -281,6 +281,110 @@ defmodule Minga.Git.System do
   end
 
   @impl true
+  @spec branch_list(String.t()) :: {:ok, [Minga.Git.BranchInfo.t()]} | {:error, String.t()}
+  def branch_list(git_root) when is_binary(git_root) do
+    format = "%(refname:short)%09%(upstream:short)%09%(upstream:track)%09%(HEAD)"
+
+    case System.cmd("git", ["branch", "-a", "--format=#{format}"],
+           cd: git_root,
+           stderr_to_stdout: true
+         ) do
+      {output, 0} ->
+        branches =
+          output
+          |> String.split("\n", trim: true)
+          |> Enum.map(&parse_branch_line/1)
+          |> Enum.reject(&is_nil/1)
+
+        {:ok, branches}
+
+      {output, _} ->
+        {:error, "git branch failed: #{String.trim(output)}"}
+    end
+  rescue
+    e in [ErlangError, ArgumentError] -> {:error, "git branch error: #{Exception.message(e)}"}
+  end
+
+  @impl true
+  @spec branch_create(String.t(), String.t()) :: :ok | {:error, String.t()}
+  def branch_create(git_root, name) when is_binary(git_root) and is_binary(name) do
+    case System.cmd("git", ["checkout", "-b", name], cd: git_root, stderr_to_stdout: true) do
+      {_, 0} -> :ok
+      {output, _} -> {:error, "git checkout -b failed: #{String.trim(output)}"}
+    end
+  rescue
+    e in [ErlangError, ArgumentError] ->
+      {:error, "git branch create error: #{Exception.message(e)}"}
+  end
+
+  @impl true
+  @spec branch_switch(String.t(), String.t()) :: :ok | {:error, String.t()}
+  def branch_switch(git_root, name) when is_binary(git_root) and is_binary(name) do
+    case System.cmd("git", ["checkout", name], cd: git_root, stderr_to_stdout: true) do
+      {_, 0} -> :ok
+      {output, _} -> {:error, "git checkout failed: #{String.trim(output)}"}
+    end
+  rescue
+    e in [ErlangError, ArgumentError] ->
+      {:error, "git branch switch error: #{Exception.message(e)}"}
+  end
+
+  @impl true
+  @spec branch_delete(String.t(), String.t(), boolean()) :: :ok | {:error, String.t()}
+  def branch_delete(git_root, name, force \\ false)
+      when is_binary(git_root) and is_binary(name) do
+    flag = if force, do: "-D", else: "-d"
+
+    case System.cmd("git", ["branch", flag, name], cd: git_root, stderr_to_stdout: true) do
+      {_, 0} -> :ok
+      {output, _} -> {:error, "git branch delete failed: #{String.trim(output)}"}
+    end
+  rescue
+    e in [ErlangError, ArgumentError] ->
+      {:error, "git branch delete error: #{Exception.message(e)}"}
+  end
+
+  @impl true
+  @spec push(String.t(), keyword()) :: :ok | {:error, String.t()}
+  def push(git_root, opts \\ []) when is_binary(git_root) do
+    args = ["push"]
+    args = if Keyword.get(opts, :set_upstream), do: args ++ ["--set-upstream"], else: args
+    args = if Keyword.get(opts, :force), do: args ++ ["--force-with-lease"], else: args
+
+    case System.cmd("git", args, cd: git_root, stderr_to_stdout: true) do
+      {_, 0} -> :ok
+      {output, _} -> {:error, "git push failed: #{String.trim(output)}"}
+    end
+  rescue
+    e in [ErlangError, ArgumentError] -> {:error, "git push error: #{Exception.message(e)}"}
+  end
+
+  @impl true
+  @spec pull(String.t(), keyword()) :: :ok | {:error, String.t()}
+  def pull(git_root, opts \\ []) when is_binary(git_root) do
+    args = ["pull"]
+    args = if Keyword.get(opts, :rebase), do: args ++ ["--rebase"], else: args
+
+    case System.cmd("git", args, cd: git_root, stderr_to_stdout: true) do
+      {_, 0} -> :ok
+      {output, _} -> {:error, "git pull failed: #{String.trim(output)}"}
+    end
+  rescue
+    e in [ErlangError, ArgumentError] -> {:error, "git pull error: #{Exception.message(e)}"}
+  end
+
+  @impl true
+  @spec fetch_remotes(String.t(), keyword()) :: :ok | {:error, String.t()}
+  def fetch_remotes(git_root, _opts \\ []) when is_binary(git_root) do
+    case System.cmd("git", ["fetch", "--all"], cd: git_root, stderr_to_stdout: true) do
+      {_, 0} -> :ok
+      {output, _} -> {:error, "git fetch failed: #{String.trim(output)}"}
+    end
+  rescue
+    e in [ErlangError, ArgumentError] -> {:error, "git fetch error: #{Exception.message(e)}"}
+  end
+
+  @impl true
   @spec current_branch(String.t()) :: {:ok, String.t()} | :error
   def current_branch(git_root) when is_binary(git_root) do
     # Read .git/HEAD directly to avoid spawning a subprocess.
@@ -423,6 +527,50 @@ defmodule Minga.Git.System do
       _ ->
         nil
     end
+  end
+
+  @spec parse_branch_line(String.t()) :: Minga.Git.BranchInfo.t() | nil
+  defp parse_branch_line("origin/HEAD\t" <> _), do: nil
+
+  defp parse_branch_line(line) do
+    case String.split(line, "\t") do
+      [name, upstream, track, head_marker] ->
+        remote = String.starts_with?(name, "origin/")
+        current = String.trim(head_marker) == "*"
+        upstream = if upstream == "", do: nil, else: upstream
+        {ahead, behind} = parse_track_info(track)
+
+        %Minga.Git.BranchInfo{
+          name: name,
+          current: current,
+          upstream: upstream,
+          remote: remote,
+          ahead: ahead,
+          behind: behind
+        }
+
+      _ ->
+        nil
+    end
+  end
+
+  @spec parse_track_info(String.t()) :: {non_neg_integer() | nil, non_neg_integer() | nil}
+  defp parse_track_info(""), do: {nil, nil}
+
+  defp parse_track_info(track) do
+    ahead =
+      case Regex.run(~r/ahead (\d+)/, track) do
+        [_, n] -> String.to_integer(n)
+        _ -> nil
+      end
+
+    behind =
+      case Regex.run(~r/behind (\d+)/, track) do
+        [_, n] -> String.to_integer(n)
+        _ -> nil
+      end
+
+    {ahead, behind}
   end
 
   @spec parse_porcelain_blame(String.t()) :: String.t()
