@@ -205,16 +205,10 @@ LLM agents hit these repeatedly. Read before writing any Elixir:
 
 The `commit-gate` extension blocks every `git commit` until `mix lint` has passed. You don't need to remember this; the extension catches it automatically. But you should still run all relevant checks proactively, not just wait for the gate to yell at you.
 
-**Run `mix precommit` when you're done with all changes.** This runs lint + tests in one shot. Fix any failures before committing.
+**Run `mix lint` and then `mix test.llm` when you're done with all changes.** These are separate commands because lint runs in dev env (where the dialyzer PLT lives) and tests run in test env. Fix any failures before committing.
 
 ```bash
-mix precommit                     # Runs: format, credo, compile, dialyzer, test
-```
-
-For targeted checks:
-
-```bash
-mix lint                          # Format + credo + compile + dialyzer (no tests)
+mix lint                          # Format + credo + compile + dialyzer (dev env)
 mix test.llm                      # Tests with LLM-optimized output
 mix test.debug test/minga/foo_test.exs  # Single file, verbose (faster iteration)
 mix test --failed                 # Re-run only previously failed tests

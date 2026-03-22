@@ -53,7 +53,8 @@ These match the CI pipeline in `.github/workflows/ci.yml`:
 | Swift integration | `mix test test/minga/integration/gui_protocol_test.exs --include swift_harness` | If protocol encoding changed |
 
 The shortcut commands that cover most of this:
-- `mix precommit` = `mix lint` + `mix test` (covers format, credo, compile, dialyzer, Elixir tests)
+- `mix lint` = format + credo + compile + dialyzer (runs in dev env where the dialyzer PLT lives)
+- `mix test.llm` = tests with LLM-optimized output (runs in test env)
 - `mix zig.lint` = `zig fmt --check` + `zig build test`
 - Swift: must be run separately (macOS only)
 
@@ -106,7 +107,8 @@ The shortcut commands that cover most of this:
 
 | Check | Required | Evidence |
 |-------|----------|----------|
-| mix precommit | Yes | ✅ ran / ❌ no evidence |
+| mix lint | Yes | ✅ ran / ❌ no evidence |
+| mix test.llm | Yes | ✅ ran / ❌ no evidence |
 | mix zig.lint | Yes/No | ✅ / ❌ / N/A |
 | Swift build+test | Yes/No | ✅ / ❌ / N/A |
 
