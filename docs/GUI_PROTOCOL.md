@@ -172,6 +172,7 @@ opcode(1) + content_kind=0(1) + mode(1) + cursor_line(4) + cursor_col(4) + line_
 + git_added(2) + git_modified(2) + git_deleted(2)
 + icon_len(1) + icon(icon_len) + icon_color_r(1) + icon_color_g(1) + icon_color_b(1)
 + filename_len(2) + filename(filename_len)
++ diagnostic_hint_len(2) + diagnostic_hint(diagnostic_hint_len)
 ```
 
 **Agent variant (content_kind == 1):**

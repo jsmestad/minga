@@ -2,10 +2,12 @@ defmodule Minga.Editor.RenderPipeline.Chrome.GUI do
   @moduledoc """
   GUI chrome builder.
 
-  Builds non-content UI draws for the Metal/SwiftUI frontend. Most chrome
-  (tab bar, file tree, picker, which-key, completion) is handled natively
-  by SwiftUI and excluded here. Only Metal-rendered elements are included:
-  modeline (for splits), minibuffer, separators, and hover/signature overlays.
+  Builds structured chrome data for the SwiftUI frontend. All chrome (tab bar,
+  file tree, picker, which-key, completion, minibuffer, status bar, separators)
+  is handled natively by SwiftUI via dedicated protocol opcodes. This module
+  produces only the structured data; no cell-grid draws are generated.
+  Metal-rendered overlays (hover, signature help, float popups) are the
+  exception.
   """
 
   alias Minga.Editor.DisplayList.{Cursor, Overlay}
@@ -21,10 +23,9 @@ defmodule Minga.Editor.RenderPipeline.Chrome.GUI do
   @type state :: EditorState.t()
 
   @doc """
-  Builds GUI chrome: status bar data (for SwiftUI encoding), horizontal separators
-  in the Metal surface, minibuffer, and Metal-rendered overlays (hover, signature
-  help, float popups). SwiftUI handles tab bar, file tree, picker, which-key,
-  and completion natively.
+  Builds GUI chrome: status bar data and minibuffer data (for SwiftUI
+  encoding via 0x76 and 0x7F opcodes), and Metal-rendered overlays
+  (hover, signature help, float popups).
   """
   @spec build(
           state(),
