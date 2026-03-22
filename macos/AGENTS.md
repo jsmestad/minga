@@ -9,7 +9,7 @@ Think of it as a GPU-accelerated terminal emulator that speaks a custom protocol
 ## Architecture
 
 ```
-BEAM (parent)                              minga-mac (this process)
+BEAM (parent)                              Minga (this process)
 ─────────────                              ────────────────────────
 Port.Manager  ──stdin ({:packet,4})──►  ProtocolReader (background thread)
                                               │
@@ -80,7 +80,7 @@ macos/
 - **Swift 6.0+** with strict concurrency
 - **Metal 3.1+** (MSL 3.1), macOS 14.0+ deployment target
 - **Xcode 16+** for building
-- Build via `xcodebuild -project Minga.xcodeproj -scheme minga-mac build`
+- Build via `xcodebuild -project Minga.xcodeproj -scheme Minga build`
 
 ## Coding Standards
 
@@ -120,7 +120,7 @@ When adding or changing opcodes, update all three files. The BEAM side is the so
 Before committing Swift changes:
 
 ```bash
-cd macos && xcodebuild -project Minga.xcodeproj -scheme minga-mac build 2>&1 | tail -5
+cd macos && xcodebuild -project Minga.xcodeproj -scheme Minga build 2>&1 | tail -5
 # Must show BUILD SUCCEEDED
 ```
 
