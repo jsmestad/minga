@@ -128,6 +128,42 @@ defmodule Minga.Editor.Commands.FileTree do
     state
   end
 
+  @doc """
+  Reveals the active buffer's file in the tree: opens the tree if closed,
+  expands parent directories, moves the cursor to the file, and focuses
+  the tree panel.
+  """
+  @spec reveal_active_file(state()) :: state()
+  def reveal_active_file(state) do
+    # When the file tree is focused, state.buffers.active points at the
+    # tree's backing buffer (no file path). Use the active window's buffer
+    # instead, which always holds the real editing buffer.
+    buf = active_editing_buffer(state)
+
+    case buf && BufferServer.file_path(buf) do
+      nil ->
+        state
+
+      path ->
+        state = ensure_tree_open(state)
+        tree = FileTree.reveal(state.file_tree.tree, path)
+        state = sync_and_update(state, tree)
+        state = put_in(state.file_tree.focused, true)
+
+        %{state | keymap_scope: :file_tree}
+        |> Layout.invalidate()
+        |> EditorState.invalidate_all_windows()
+    end
+  end
+
+  @spec active_editing_buffer(state()) :: pid() | nil
+  defp active_editing_buffer(state) do
+    case EditorState.active_window_struct(state) do
+      %{buffer: buf} when is_pid(buf) -> buf
+      _ -> state.buffers.active
+    end
+  end
+
   @spec close(state()) :: state()
   def close(%{file_tree: %{buffer: buf}} = state) when is_pid(buf) do
     GenServer.stop(buf, :normal)
@@ -162,6 +198,12 @@ defmodule Minga.Editor.Commands.FileTree do
         put_in(state.file_tree.tree, FileTree.reveal(tree, path))
     end
   end
+
+  # Opens the tree if not already open. Used by reveal_active_file to
+  # ensure the tree exists before calling FileTree.reveal.
+  @spec ensure_tree_open(state()) :: state()
+  defp ensure_tree_open(%{file_tree: %{tree: %FileTree{}}} = state), do: state
+  defp ensure_tree_open(state), do: open(state)
 
   @spec open(state()) :: state()
   defp open(state) do
@@ -264,6 +306,12 @@ defmodule Minga.Editor.Commands.FileTree do
         description: "Create new folder in tree",
         requires_buffer: false,
         execute: &new_folder/1
+      },
+      %Minga.Command{
+        name: :tree_reveal_active,
+        description: "Reveal active file in tree",
+        requires_buffer: false,
+        execute: &reveal_active_file/1
       }
     ]
   end
