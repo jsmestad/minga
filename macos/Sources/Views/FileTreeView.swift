@@ -310,6 +310,7 @@ struct FileTreeView: View {
         .contentShape(Rectangle())
         .onHover { isHovered in
             hoveredEntryId = isHovered ? entry.id : nil
+            if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
         }
         .onTapGesture(count: 2) {
             // Double-click: always open (files open permanently)
