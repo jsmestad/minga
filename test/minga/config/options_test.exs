@@ -360,4 +360,94 @@ defmodule Minga.Config.OptionsTest do
       assert {:error, _} = Options.set(s, :agent_destructive_tools, [:shell, :write_file])
     end
   end
+
+  describe "register_extension_option/4" do
+    test "registers a boolean option with default", %{server: s} do
+      assert :ok = Options.register_extension_option(s, :org_conceal, :boolean, true)
+      assert Options.get(s, :org_conceal) == true
+    end
+
+    test "registered option is settable by users", %{server: s} do
+      Options.register_extension_option(s, :org_conceal, :boolean, true)
+      assert {:ok, false} = Options.set(s, :org_conceal, false)
+      assert Options.get(s, :org_conceal) == false
+    end
+
+    test "validates extension option types", %{server: s} do
+      Options.register_extension_option(s, :org_conceal, :boolean, true)
+      assert {:error, msg} = Options.set(s, :org_conceal, "yes")
+      assert msg =~ "boolean"
+    end
+
+    test "rejects collision with built-in option name", %{server: s} do
+      assert {:error, msg} = Options.register_extension_option(s, :tab_width, :pos_integer, 4)
+      assert msg =~ "conflicts with a built-in option"
+    end
+
+    test "supports enum type descriptor", %{server: s} do
+      Options.register_extension_option(s, :org_export_format, {:enum, [:html, :pdf, :md]}, :html)
+      assert Options.get(s, :org_export_format) == :html
+      assert {:ok, :pdf} = Options.set(s, :org_export_format, :pdf)
+      assert {:error, _} = Options.set(s, :org_export_format, :docx)
+    end
+
+    test "supports string_list type descriptor", %{server: s} do
+      bullets = ["◉", "○", "◈"]
+      Options.register_extension_option(s, :org_heading_bullets, :string_list, bullets)
+      assert Options.get(s, :org_heading_bullets) == bullets
+      assert {:ok, ["•"]} = Options.set(s, :org_heading_bullets, ["•"])
+      assert {:error, _} = Options.set(s, :org_heading_bullets, :not_a_list)
+    end
+
+    test "re-registration does not overwrite existing user value", %{server: s} do
+      # Simulates config reload: register, user sets value, then re-register on reload.
+      Options.register_extension_option(s, :org_conceal, :boolean, true)
+      Options.set(s, :org_conceal, false)
+
+      Options.register_extension_option(s, :org_conceal, :boolean, true)
+      assert Options.get(s, :org_conceal) == false
+    end
+
+    test "extension_option? returns true for registered options", %{server: s} do
+      Options.register_extension_option(s, :org_conceal, :boolean, true)
+      assert Options.extension_option?(s, :org_conceal) == true
+    end
+
+    test "extension_option? returns false for built-in options", %{server: s} do
+      assert Options.extension_option?(s, :tab_width) == false
+    end
+
+    test "extension_option? returns false for unknown options", %{server: s} do
+      assert Options.extension_option?(s, :nonexistent) == false
+    end
+
+    test "filetype overrides work for extension options", %{server: s} do
+      Options.register_extension_option(s, :org_conceal, :boolean, true)
+      Options.set_for_filetype(s, :org, :org_conceal, false)
+
+      assert Options.get_for_filetype(s, :org_conceal, :org) == false
+      assert Options.get(s, :org_conceal) == true
+    end
+
+    test "re-registration after reset preserves the pattern", %{server: s} do
+      Options.register_extension_option(s, :org_conceal, :boolean, true)
+      Options.set(s, :org_conceal, false)
+
+      # Reset clears everything (simulates config reload)
+      Options.reset(s)
+
+      # Extension re-registers during init
+      Options.register_extension_option(s, :org_conceal, :boolean, true)
+      # Default is restored since user value was cleared by reset
+      assert Options.get(s, :org_conceal) == true
+    end
+
+    test "multiple extensions can register different options", %{server: s} do
+      Options.register_extension_option(s, :org_conceal, :boolean, true)
+      Options.register_extension_option(s, :zen_mode, :boolean, false)
+
+      assert Options.get(s, :org_conceal) == true
+      assert Options.get(s, :zen_mode) == false
+    end
+  end
 end

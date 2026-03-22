@@ -43,6 +43,7 @@ defmodule Minga.Editor.State do
   alias Minga.Editor.State.Highlighting
   alias Minga.Editor.State.Mouse
   alias Minga.Editor.State.Picker
+  alias Minga.Editor.State.Prompt
   alias Minga.Editor.State.Registers
   alias Minga.Editor.State.Search
   alias Minga.Editor.State.Tab
@@ -96,6 +97,7 @@ defmodule Minga.Editor.State do
             vim: VimState.new(),
             buffers: %Buffers{},
             picker_ui: %Picker{},
+            prompt_ui: %Prompt{},
             whichkey: %WhichKey{},
             search: %Search{},
             mouse: %Mouse{},
@@ -157,6 +159,7 @@ defmodule Minga.Editor.State do
           vim: VimState.t(),
           buffers: Buffers.t(),
           picker_ui: Picker.t(),
+          prompt_ui: Prompt.t(),
           whichkey: WhichKey.t(),
           search: Search.t(),
           mouse: Mouse.t(),
