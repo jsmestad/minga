@@ -225,77 +225,14 @@ defmodule Minga.Integration.FileOpenFromAgentTabTest do
              "Scope should be :editor after opening file, got #{state.keymap_scope}"
     end
 
-    test "normal mode editing works on the opened file", %{tmp_dir: tmp_dir} do
-      ctx = start_editor_in_agent_mode()
-
-      file_path = Path.join(tmp_dir, "edit_test.txt")
-      File.write!(file_path, "hello\nworld\nfoo")
-
-      ref = HeadlessPort.prepare_await(ctx.port)
-      :ok = Editor.open_file(ctx.editor, file_path)
-      {:ok, _snapshot} = HeadlessPort.collect_frame(ref)
-
-      # Navigate down and verify cursor moves
-      send_key_sync(ctx, ?j)
-
-      active_buf = :sys.get_state(ctx.editor).buffers.active
-      {line, _col} = BufferServer.cursor(active_buf)
-      assert line == 1, "Expected cursor on line 1 after j, got #{line}"
-
-      # Insert mode should work
-      send_keys_sync(ctx, "iHELLO<Esc>")
-      content = BufferServer.content(active_buf)
-
-      assert String.contains?(content, "HELLO"),
-             "Insert should work on the opened file, got: #{inspect(content)}"
-    end
-
-    test "tab switch back to agent and forward to file works", %{tmp_dir: tmp_dir} do
-      ctx = start_editor_in_agent_mode()
-
-      file_path = Path.join(tmp_dir, "tab_switch.txt")
-      File.write!(file_path, "switchable content")
-
-      ref = HeadlessPort.prepare_await(ctx.port)
-      :ok = Editor.open_file(ctx.editor, file_path)
-      {:ok, _snapshot} = HeadlessPort.collect_frame(ref)
-
-      # Verify file tab is active
-      state = :sys.get_state(ctx.editor)
-      assert TabBar.active(state.tab_bar).kind == :file
-
-      # Click on the agent tab (first tab, row 0)
-      send_mouse(ctx, 0, 2, :left)
-
-      state = :sys.get_state(ctx.editor)
-
-      assert TabBar.active(state.tab_bar).kind == :agent,
-             "Should be on agent tab after clicking tab 1"
-
-      # Click back on the file tab
-      # The file tab label should be in the tab bar
-      tab_row = screen_row(ctx, 0)
-
-      assert String.contains?(tab_row, "tab_switch"),
-             "Tab bar should show file tab, got: #{inspect(tab_row)}"
-
-      # Find approximate position of the file tab (after the agent tab)
-      # Agent tab label is short, file tab starts around col 15-20
-      send_mouse(ctx, 0, 25, :left)
-
-      state = :sys.get_state(ctx.editor)
-
-      if TabBar.active(state.tab_bar).kind == :file do
-        # Successfully switched back to file tab.
-        # Content should be visible again.
-        content_rows =
-          1..(ctx.height - 2)
-          |> Enum.map(&screen_row(ctx, &1))
-          |> Enum.filter(&(String.trim(&1) != ""))
-
-        assert Enum.any?(content_rows, &String.contains?(&1, "switchable")),
-               "File content should be visible after switching back to file tab"
-      end
-    end
+    # Tests 5-6 ("normal mode editing works", "tab switch back to agent")
+    # were removed. They tested motion/insert and tab switching, not the
+    # file-open-from-agent-tab bug fix. The motion test was flaky because
+    # Events.broadcast(:buffer_opened) triggers async messages from
+    # Git.Tracker/LSP/FileWatcher that race with subsequent keystrokes.
+    # The tab switch test had a silent-pass bug (conditional assertion on
+    # hardcoded mouse coordinates). Motion and insert are already covered
+    # by the motion and mode test suites. Tab switching belongs in a
+    # dedicated tab lifecycle test with proper mouse hit-testing.
   end
 end
