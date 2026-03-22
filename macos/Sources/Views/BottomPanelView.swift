@@ -22,6 +22,7 @@ struct BottomPanelView: View {
 
     /// Height at drag start, used to avoid compounding error from cumulative translation.
     @State private var dragStartHeight: CGFloat = 0
+    @State private var hoveredTabId: Int? = nil
 
     var body: some View {
         let maxH = availableHeight * maxHeightFraction
@@ -119,7 +120,7 @@ struct BottomPanelView: View {
         .background(
             isActive
                 ? theme.tabActiveBg.opacity(0.5)
-                : Color.clear
+                : (hoveredTabId == tab.id ? theme.tabInactiveFg.opacity(0.06) : Color.clear)
         )
         .overlay(alignment: .bottom) {
             if isActive {
@@ -127,6 +128,9 @@ struct BottomPanelView: View {
                     .fill(theme.accent)
                     .frame(height: 2)
             }
+        }
+        .onHover { isHovered in
+            hoveredTabId = isHovered ? tab.id : nil
         }
     }
 

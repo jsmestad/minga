@@ -17,6 +17,8 @@ struct CompletionOverlay: View {
     private let itemHeight: CGFloat = 24
     private let popupWidth: CGFloat = 340
 
+    @State private var hoveredItemId: Int? = nil
+
     var body: some View {
         if state.visible && !state.items.isEmpty {
             VStack(spacing: 0) {
@@ -77,11 +79,18 @@ struct CompletionOverlay: View {
         }
         .padding(.horizontal, 8)
         .frame(height: itemHeight)
-        .background(isSelected ? theme.popupSelBg.opacity(0.7) : Color.clear)
+        .background(
+            isSelected
+                ? theme.popupSelBg.opacity(0.7)
+                : (hoveredItemId == item.id ? theme.popupFg.opacity(0.06) : Color.clear)
+        )
         .clipShape(RoundedRectangle(cornerRadius: 4))
         .padding(.horizontal, 4)
         .id(item.id)
         .contentShape(Rectangle())
+        .onHover { isHovered in
+            hoveredItemId = isHovered ? item.id : nil
+        }
         .onTapGesture {
             encoder?.sendCompletionSelect(index: UInt16(item.id))
         }
