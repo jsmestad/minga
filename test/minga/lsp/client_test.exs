@@ -18,21 +18,16 @@ defmodule Minga.LSP.ClientTest do
          diagnostics: diag_server}
       )
 
-    # Wait for initialize handshake to complete
-    wait_until_ready(client)
-
-    %{client: client, diag_server: diag_server}
-  end
-
-  defp wait_until_ready(client, attempts \\ 500) do
-    if attempts <= 0 do
-      flunk("LSP client did not become ready in time")
-    end
+    # Subscribe before the init handshake completes, then wait for the
+    # :lsp_ready message. If init already finished, status check catches it.
+    Client.subscribe(client)
 
     case Client.status(client) do
       :ready -> :ok
-      _ -> Process.sleep(10) && wait_until_ready(client, attempts - 1)
+      _ -> assert_receive {:lsp_ready, :mock_lsp}, 5_000
     end
+
+    %{client: client, diag_server: diag_server}
   end
 
   describe "initialize handshake" do

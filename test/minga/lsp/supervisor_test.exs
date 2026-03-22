@@ -18,12 +18,15 @@ defmodule Minga.LSP.SupervisorTest do
     %{supervisor: sup_name, diag_server: diag_name}
   end
 
-  defp wait_until_ready(client, attempts \\ 500) do
-    if attempts <= 0, do: flunk("LSP client did not become ready in time")
+  # Subscribes to the client's events and waits for the LSP handshake to
+  # complete. If the handshake already finished before we subscribed,
+  # the status check catches it immediately.
+  defp await_ready(client) do
+    Client.subscribe(client)
 
     case Client.status(client) do
       :ready -> :ok
-      _ -> Process.sleep(10) && wait_until_ready(client, attempts - 1)
+      _ -> assert_receive {:lsp_ready, :mock_lsp}, 5_000
     end
   end
 
@@ -34,8 +37,7 @@ defmodule Minga.LSP.SupervisorTest do
 
       assert {:ok, pid} = LSPSupervisor.ensure_client(sup, config, root)
       assert is_pid(pid)
-      assert Process.alive?(pid)
-      wait_until_ready(pid)
+      await_ready(pid)
       assert Client.server_name(pid) == :mock_lsp
     end
 
@@ -44,7 +46,7 @@ defmodule Minga.LSP.SupervisorTest do
       root = System.tmp_dir!()
 
       {:ok, pid1} = LSPSupervisor.ensure_client(sup, config, root)
-      wait_until_ready(pid1)
+      await_ready(pid1)
 
       {:ok, pid2} = LSPSupervisor.ensure_client(sup, config, root)
       assert pid1 == pid2
@@ -81,12 +83,12 @@ defmodule Minga.LSP.SupervisorTest do
       config = MockLSPServer.server_config()
 
       {:ok, pid1} = LSPSupervisor.ensure_client(sup, config, System.tmp_dir!())
-      wait_until_ready(pid1)
+      await_ready(pid1)
 
       root2 = Path.join(System.tmp_dir!(), "proj2")
       File.mkdir_p!(root2)
       {:ok, pid2} = LSPSupervisor.ensure_client(sup, config, root2)
-      wait_until_ready(pid2)
+      await_ready(pid2)
 
       clients = LSPSupervisor.all_clients(sup)
       assert length(clients) == 2
