@@ -8,7 +8,7 @@ defmodule Minga.Editor.MessagesBufferTest do
   describe "*Messages* buffer" do
     test "SPC b m opens messages buffer in a popup split" do
       ctx = start_editor("hello")
-      send_keys(ctx, "<SPC>bm")
+      send_keys_sync(ctx, "<SPC>bm")
 
       # The messages buffer opens as a popup split. Its modeline should be
       # visible on screen (not necessarily the last modeline row, since
@@ -20,7 +20,7 @@ defmodule Minga.Editor.MessagesBufferTest do
 
     test "messages buffer contains editor startup log" do
       ctx = start_editor("hello")
-      send_keys(ctx, "<SPC>bm")
+      send_keys_sync(ctx, "<SPC>bm")
 
       # The messages buffer content appears in the popup split area.
       screen = screen_text(ctx)
@@ -30,7 +30,7 @@ defmodule Minga.Editor.MessagesBufferTest do
 
     test "messages buffer shows [RO] indicator" do
       ctx = start_editor("hello")
-      send_keys(ctx, "<SPC>bm")
+      send_keys_sync(ctx, "<SPC>bm")
 
       screen = screen_text(ctx)
       all_text = Enum.join(screen, "\n")
@@ -39,8 +39,8 @@ defmodule Minga.Editor.MessagesBufferTest do
 
     test "entering insert mode on messages buffer is blocked" do
       ctx = start_editor("hello")
-      send_keys(ctx, "<SPC>bm")
-      send_keys(ctx, "i")
+      send_keys_sync(ctx, "<SPC>bm")
+      send_keys_sync(ctx, "i")
 
       assert editor_mode(ctx) == :normal
       screen = screen_text(ctx)
@@ -52,13 +52,13 @@ defmodule Minga.Editor.MessagesBufferTest do
       ctx = start_editor("hello")
 
       # Open the messages popup
-      send_keys(ctx, "<SPC>bm")
+      send_keys_sync(ctx, "<SPC>bm")
       screen = screen_text(ctx)
       all_text = Enum.join(screen, "\n")
       assert String.contains?(all_text, "*Messages*")
 
       # Toggle it closed
-      send_keys(ctx, "<SPC>bm")
+      send_keys_sync(ctx, "<SPC>bm")
       screen = screen_text(ctx)
       all_text = Enum.join(screen, "\n")
       refute String.contains?(all_text, "*Messages*")
@@ -66,14 +66,14 @@ defmodule Minga.Editor.MessagesBufferTest do
 
     test "q dismisses the messages popup" do
       ctx = start_editor("hello")
-      send_keys(ctx, "<SPC>bm")
+      send_keys_sync(ctx, "<SPC>bm")
 
       screen = screen_text(ctx)
       all_text = Enum.join(screen, "\n")
       assert String.contains?(all_text, "*Messages*")
 
       # Press q to dismiss
-      send_keys(ctx, "q")
+      send_keys_sync(ctx, "q")
       screen = screen_text(ctx)
       all_text = Enum.join(screen, "\n")
       refute String.contains?(all_text, "*Messages*")
@@ -82,7 +82,7 @@ defmodule Minga.Editor.MessagesBufferTest do
     test "messages buffer is hidden from buffer picker" do
       ctx = start_editor("hello")
 
-      send_keys(ctx, "<SPC>bb")
+      send_keys_sync(ctx, "<SPC>bb")
       screen = screen_text(ctx)
       all_text = Enum.join(screen, "\n")
 

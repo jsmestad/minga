@@ -50,7 +50,7 @@ defmodule Minga.Editor.HighlightIntegrationTest do
              "Pre-condition: file1 should have spans"
 
       # Open second file via :e — triggers buffer switch
-      send_keys(ctx, ":e #{path2}<CR>")
+      send_keys_sync(ctx, ":e #{path2}<CR>")
 
       state = :sys.get_state(ctx.editor)
 
@@ -68,7 +68,7 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       ctx = start_editor("defmodule A do\nend\n", file_path: path1)
 
       # Open second file
-      send_keys(ctx, ":e #{path2}<CR>")
+      send_keys_sync(ctx, ":e #{path2}<CR>")
 
       # Inject spans for file2
       spans = [%{start_byte: 0, end_byte: 9, capture_id: 0}]
@@ -80,7 +80,7 @@ defmodule Minga.Editor.HighlightIntegrationTest do
              "Pre-condition: file2 should have spans"
 
       # Switch to previous buffer via SPC b n
-      send_keys(ctx, "<Space>bn")
+      send_keys_sync(ctx, "<Space>bn")
 
       state = :sys.get_state(ctx.editor)
 
@@ -107,7 +107,7 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       assert HighlightSync.get_active_highlight(state).spans == List.to_tuple(spans_a)
 
       # Open file2 via :e command (deterministic, no CWD dependency)
-      send_keys(ctx, ":e #{path2}<CR>")
+      send_keys_sync(ctx, ":e #{path2}<CR>")
 
       state = :sys.get_state(ctx.editor)
 
@@ -131,7 +131,7 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       buf1_pid = :sys.get_state(ctx.editor).buffers.active
 
       # Switch to file2 via :e command (deterministic, no CWD dependency)
-      send_keys(ctx, ":e #{path2}<CR>")
+      send_keys_sync(ctx, ":e #{path2}<CR>")
 
       state = :sys.get_state(ctx.editor)
 
@@ -222,13 +222,13 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       inject_highlights(ctx, ["keyword"], 1, spans_a)
 
       # Switch to file2
-      send_keys(ctx, ":e #{path2}<CR>")
+      send_keys_sync(ctx, ":e #{path2}<CR>")
 
       state2 = :sys.get_state(ctx.editor)
       assert HighlightSync.get_active_highlight(state2).spans == {}
 
       # Switch back to file1 via :e (should already be in buffer list)
-      send_keys(ctx, ":e #{path1}<CR>")
+      send_keys_sync(ctx, ":e #{path1}<CR>")
 
       state = :sys.get_state(ctx.editor)
 
@@ -256,7 +256,7 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       assert HighlightSync.get_active_highlight(state).spans == List.to_tuple(spans_a)
 
       # Open file2 and switch to it
-      send_keys(ctx, ":e #{path2}<CR>")
+      send_keys_sync(ctx, ":e #{path2}<CR>")
 
       state = :sys.get_state(ctx.editor)
 
@@ -264,7 +264,7 @@ defmodule Minga.Editor.HighlightIntegrationTest do
              "File2 should start with empty spans"
 
       # Switch back to file1 — should restore cached highlights instantly
-      send_keys(ctx, "<Space>bn")
+      send_keys_sync(ctx, "<Space>bn")
 
       state = :sys.get_state(ctx.editor)
 
@@ -335,7 +335,7 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       version_before = :sys.get_state(ctx.editor).highlight.version
 
       # dd deletes the current line
-      send_keys(ctx, "dd")
+      send_keys_sync(ctx, "dd")
 
       version_after = :sys.get_state(ctx.editor).highlight.version
 
@@ -350,7 +350,7 @@ defmodule Minga.Editor.HighlightIntegrationTest do
 
       version_before = :sys.get_state(ctx.editor).highlight.version
 
-      send_key(ctx, ?x)
+      send_key_sync(ctx, ?x)
 
       version_after = :sys.get_state(ctx.editor).highlight.version
 
@@ -364,11 +364,11 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       inject_highlights(ctx, ["keyword"], 1, [%{start_byte: 0, end_byte: 5, capture_id: 0}])
 
       # Yank a word first (yw), then paste
-      send_keys(ctx, "yw")
+      send_keys_sync(ctx, "yw")
 
       version_before = :sys.get_state(ctx.editor).highlight.version
 
-      send_key(ctx, ?p)
+      send_key_sync(ctx, ?p)
 
       version_after = :sys.get_state(ctx.editor).highlight.version
 
@@ -382,12 +382,12 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       inject_highlights(ctx, ["keyword"], 1, [%{start_byte: 0, end_byte: 5, capture_id: 0}])
 
       # Make a change first
-      send_key(ctx, ?x)
+      send_key_sync(ctx, ?x)
 
       version_before = :sys.get_state(ctx.editor).highlight.version
 
       # Undo
-      send_key(ctx, ?u)
+      send_key_sync(ctx, ?u)
 
       version_after = :sys.get_state(ctx.editor).highlight.version
 
@@ -403,7 +403,7 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       version_before = :sys.get_state(ctx.editor).highlight.version
 
       # Pure motions: h, j, k, l, w
-      send_keys(ctx, "llljkw")
+      send_keys_sync(ctx, "llljkw")
 
       version_after = :sys.get_state(ctx.editor).highlight.version
 
@@ -481,8 +481,8 @@ defmodule Minga.Editor.HighlightIntegrationTest do
 
       version_before = :sys.get_state(ctx.editor).highlight.version
 
-      send_key(ctx, ?i)
-      send_key(ctx, ?a)
+      send_key_sync(ctx, ?i)
+      send_key_sync(ctx, ?a)
 
       version_after = :sys.get_state(ctx.editor).highlight.version
 

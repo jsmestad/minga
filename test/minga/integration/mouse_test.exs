@@ -28,7 +28,7 @@ defmodule Minga.Integration.MouseTest do
   # Fails the test if the separator can't be found (layout didn't render).
   defp open_agent_split(ctx) do
     ctx = inject_fake_session(ctx)
-    send_keys(ctx, "<Space>aa")
+    send_keys_sync(ctx, "<Space>aa")
     row1 = screen_row(ctx, 1)
     sep_col = row1 |> String.graphemes() |> Enum.find_index(&(&1 == "│"))
 
@@ -134,7 +134,7 @@ defmodule Minga.Integration.MouseTest do
     test "clicking in tree area doesn't move buffer cursor" do
       ctx = start_editor("hello world")
 
-      send_keys(ctx, "<Space>op")
+      send_keys_sync(ctx, "<Space>op")
       cursor_before = buffer_cursor(ctx)
 
       # Click in the tree area (col 2, well within tree panel)
@@ -408,7 +408,7 @@ defmodule Minga.Integration.MouseTest do
 
       # Open file tree and wait for it to render.
       # Bump polling budget for CI runners where layout settling takes longer.
-      send_keys(ctx, "<Space>op")
+      send_keys_sync(ctx, "<Space>op")
 
       wait_until(
         ctx,
@@ -423,7 +423,7 @@ defmodule Minga.Integration.MouseTest do
 
       # Open agent panel (inject fake session to skip ~700ms provider startup)
       inject_fake_session(ctx)
-      send_keys(ctx, "<Space>aa")
+      send_keys_sync(ctx, "<Space>aa")
 
       # Wait for both separators to appear (file tree | editor | agent).
       # Use wait_until_screen to sync the HeadlessPort before reading the

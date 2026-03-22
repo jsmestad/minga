@@ -14,7 +14,7 @@ defmodule Minga.Integration.FileTreeTest do
     test "opening shows file tree panel with separator" do
       ctx = start_editor("hello world")
 
-      send_keys(ctx, "<Space>op")
+      send_keys_sync(ctx, "<Space>op")
 
       # File tree should show directory structure with separator
       rows = screen_text(ctx)
@@ -26,10 +26,10 @@ defmodule Minga.Integration.FileTreeTest do
       ctx = start_editor("hello world")
 
       # Open then close
-      send_keys(ctx, "<Space>op")
+      send_keys_sync(ctx, "<Space>op")
       assert Enum.any?(screen_text(ctx), &String.contains?(&1, "│"))
 
-      send_keys(ctx, "<Space>op")
+      send_keys_sync(ctx, "<Space>op")
 
       # Separator should be gone
       row1 = screen_row(ctx, 1)
@@ -43,10 +43,10 @@ defmodule Minga.Integration.FileTreeTest do
     test "j/k moves tree cursor" do
       ctx = start_editor("hello world")
 
-      send_keys(ctx, "<Space>op")
+      send_keys_sync(ctx, "<Space>op")
       # Move down in tree
-      send_keys(ctx, "j")
-      send_keys(ctx, "j")
+      send_keys_sync(ctx, "j")
+      send_keys_sync(ctx, "j")
     end
   end
 
@@ -56,11 +56,11 @@ defmodule Minga.Integration.FileTreeTest do
     test "pressing Escape returns focus to editor" do
       ctx = start_editor("hello world")
 
-      send_keys(ctx, "<Space>op")
+      send_keys_sync(ctx, "<Space>op")
       # Tree should be focused initially
-      send_keys(ctx, "j")
+      send_keys_sync(ctx, "j")
 
-      send_keys(ctx, "<Esc>")
+      send_keys_sync(ctx, "<Esc>")
 
       # After escape, focus should return to editor
       # Subsequent keys should operate on the buffer, not the tree
@@ -74,16 +74,16 @@ defmodule Minga.Integration.FileTreeTest do
     test "Enter on a file opens it in the editor and returns focus" do
       ctx = start_editor("hello world")
 
-      send_keys(ctx, "<Space>op")
+      send_keys_sync(ctx, "<Space>op")
       # Navigate down to find a file (skip root dir entry)
-      send_keys(ctx, "jjjjj")
+      send_keys_sync(ctx, "jjjjj")
       # Open the selected file
-      send_keys(ctx, "<CR>")
+      send_keys_sync(ctx, "<CR>")
 
       # Focus should be in the editor (not stuck in tree)
       # Verify by checking that 'j' moves the buffer cursor, not the tree cursor
       cursor_before = buffer_cursor(ctx)
-      send_keys(ctx, "j")
+      send_keys_sync(ctx, "j")
       cursor_after = buffer_cursor(ctx)
 
       # If focus returned to buffer, j moves cursor down one line
@@ -101,12 +101,12 @@ defmodule Minga.Integration.FileTreeTest do
     test "Escape from tree returns focus to editor while keeping tree open" do
       ctx = start_editor("hello world")
 
-      send_keys(ctx, "<Space>op")
+      send_keys_sync(ctx, "<Space>op")
       state = :sys.get_state(ctx.editor)
       assert state.keymap_scope == :file_tree
 
       # Escape closes the tree and returns focus to the editor
-      send_keys(ctx, "<Esc>")
+      send_keys_sync(ctx, "<Esc>")
       state = :sys.get_state(ctx.editor)
       assert state.keymap_scope == :editor
     end
@@ -114,13 +114,13 @@ defmodule Minga.Integration.FileTreeTest do
     test "opening a file from tree returns focus to editor" do
       ctx = start_editor("hello world")
 
-      send_keys(ctx, "<Space>op")
+      send_keys_sync(ctx, "<Space>op")
       state = :sys.get_state(ctx.editor)
       assert state.keymap_scope == :file_tree
 
       # Navigate past all directories to reach a file (directories come first).
       # Go to the bottom of the tree to find a file entry.
-      send_keys(ctx, "G<CR>")
+      send_keys_sync(ctx, "G<CR>")
 
       state = :sys.get_state(ctx.editor)
 
@@ -135,13 +135,13 @@ defmodule Minga.Integration.FileTreeTest do
     test "l expands a directory and shows children" do
       ctx = start_editor("hello world")
 
-      send_keys(ctx, "<Space>op")
+      send_keys_sync(ctx, "<Space>op")
       # The root dir entry should be at the top
       # Navigate to it and expand with l
-      send_keys(ctx, "j")
+      send_keys_sync(ctx, "j")
 
       rows_before = screen_text(ctx)
-      send_keys(ctx, "l")
+      send_keys_sync(ctx, "l")
       rows_after = screen_text(ctx)
 
       # After expansion, there should be more content rows (children visible)
@@ -155,12 +155,12 @@ defmodule Minga.Integration.FileTreeTest do
     test "h collapses an expanded directory" do
       ctx = start_editor("hello world")
 
-      send_keys(ctx, "<Space>op")
-      send_keys(ctx, "j")
-      send_keys(ctx, "l")
+      send_keys_sync(ctx, "<Space>op")
+      send_keys_sync(ctx, "j")
+      send_keys_sync(ctx, "l")
       rows_expanded = screen_text(ctx)
 
-      send_keys(ctx, "h")
+      send_keys_sync(ctx, "h")
       rows_collapsed = screen_text(ctx)
 
       # After collapse, some child rows should disappear
@@ -178,18 +178,18 @@ defmodule Minga.Integration.FileTreeTest do
     test "open -> close -> open shows tree with separator both times" do
       ctx = start_editor("hello world")
 
-      send_keys(ctx, "<Space>op")
+      send_keys_sync(ctx, "<Space>op")
       first_has_separator = Enum.any?(screen_text(ctx), &String.contains?(&1, "│"))
       assert first_has_separator
 
-      send_keys(ctx, "<Space>op")
+      send_keys_sync(ctx, "<Space>op")
 
       refute Enum.any?(1..20, fn row ->
                screen_row(ctx, row) |> String.contains?("│")
              end),
              "separator should be gone after close"
 
-      send_keys(ctx, "<Space>op")
+      send_keys_sync(ctx, "<Space>op")
       second_has_separator = Enum.any?(screen_text(ctx), &String.contains?(&1, "│"))
       assert second_has_separator, "re-opening tree should show separator again"
     end

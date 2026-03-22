@@ -38,7 +38,7 @@ defmodule Minga.Editor.FileChangeTest do
     ctx = start_editor("original", file_path: path)
 
     # Make local edit to dirty the buffer
-    send_keys(ctx, "ix<Esc>")
+    send_keys_sync(ctx, "ix<Esc>")
 
     # Simulate external modification
     File.write!(path, "external change that is longer")
@@ -61,7 +61,7 @@ defmodule Minga.Editor.FileChangeTest do
     ctx = start_editor("original", file_path: path)
 
     # Dirty the buffer
-    send_keys(ctx, "ix<Esc>")
+    send_keys_sync(ctx, "ix<Esc>")
 
     # External change
     File.write!(path, "reloaded content")
@@ -71,7 +71,7 @@ defmodule Minga.Editor.FileChangeTest do
     _ = :sys.get_state(ctx.editor)
 
     # Press r to reload
-    send_key(ctx, ?r)
+    send_key_sync(ctx, ?r)
 
     content = BufferServer.content(ctx.buffer)
     assert content == "reloaded content"
@@ -89,7 +89,7 @@ defmodule Minga.Editor.FileChangeTest do
     ctx = start_editor("original", file_path: path)
 
     # Dirty the buffer
-    send_keys(ctx, "ilocal<Esc>")
+    send_keys_sync(ctx, "ilocal<Esc>")
 
     # External change
     File.write!(path, "external modification")
@@ -99,7 +99,7 @@ defmodule Minga.Editor.FileChangeTest do
     _ = :sys.get_state(ctx.editor)
 
     # Press k to keep
-    send_key(ctx, ?k)
+    send_key_sync(ctx, ?k)
 
     content = BufferServer.content(ctx.buffer)
     assert String.contains?(content, "local")
@@ -114,7 +114,7 @@ defmodule Minga.Editor.FileChangeTest do
     File.write!(path, "original")
 
     ctx = start_editor("original", file_path: path)
-    send_keys(ctx, "ix<Esc>")
+    send_keys_sync(ctx, "ix<Esc>")
 
     File.write!(path, "external modification")
 

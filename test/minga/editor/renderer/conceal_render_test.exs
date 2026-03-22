@@ -27,7 +27,7 @@ defmodule Minga.Editor.Renderer.ConcealRenderTest do
       end)
 
       # Move cursor to line 1 so line 0 conceals are active
-      send_key(ctx, ?j)
+      send_key_sync(ctx, ?j)
 
       row_text = screen_row(ctx, @content_row)
 
@@ -52,7 +52,7 @@ defmodule Minga.Editor.Renderer.ConcealRenderTest do
       end)
 
       # Move cursor to line 1
-      send_key(ctx, ?j)
+      send_key_sync(ctx, ?j)
 
       row_text = screen_row(ctx, @content_row)
 
@@ -84,14 +84,14 @@ defmodule Minga.Editor.Renderer.ConcealRenderTest do
       end)
 
       # Move cursor off line 0, then remove conceals
-      send_key(ctx, ?j)
+      send_key_sync(ctx, ?j)
 
       BufferServer.batch_decorations(ctx.buffer, fn decs ->
         Decorations.remove_conceal_group(decs, :test)
       end)
 
       # Move back to line 0 to re-render
-      send_key(ctx, ?k)
+      send_key_sync(ctx, ?k)
 
       row_text = screen_row(ctx, @content_row)
 
@@ -108,7 +108,7 @@ defmodule Minga.Editor.Renderer.ConcealRenderTest do
       end)
 
       # Move cursor to line 1 so line 0 conceals are active
-      send_key(ctx, ?j)
+      send_key_sync(ctx, ?j)
 
       row_text = screen_row(ctx, @content_row)
 
@@ -125,7 +125,7 @@ defmodule Minga.Editor.Renderer.ConcealRenderTest do
         decs
       end)
 
-      send_key(ctx, 0)
+      send_key_sync(ctx, 0)
 
       # Cursor is on line 0, so conceals should be revealed
       row_text = screen_row(ctx, @content_row)
@@ -145,7 +145,7 @@ defmodule Minga.Editor.Renderer.ConcealRenderTest do
         decs
       end)
 
-      send_key(ctx, 0)
+      send_key_sync(ctx, 0)
 
       # Cursor is on line 0: line 0 reveals, line 1 conceals
       row_text_line1 = screen_row(ctx, @content_row + 1)
@@ -167,7 +167,7 @@ defmodule Minga.Editor.Renderer.ConcealRenderTest do
       end)
 
       # Yank the line
-      send_keys(ctx, "Vy")
+      send_keys_sync(ctx, "Vy")
 
       content = BufferServer.content(ctx.buffer)
       assert content == "**bold**"

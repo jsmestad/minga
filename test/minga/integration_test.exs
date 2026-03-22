@@ -12,25 +12,31 @@ defmodule Minga.IntegrationTest do
   # ── Normal mode navigation ────────────────────────────────────────────────────
 
   describe "Normal mode — hjkl navigation" do
+    # These tests check buffer/screen state, not frame snapshots, so they
+    # use send_key_sync which is race-free (uses :sys.get_state as a sync
+    # barrier instead of waiting for batch_end frames that could be
+    # satisfied by background renders).
     test "l moves cursor right, content unchanged" do
       ctx = start_editor("hello\nworld\nfoo")
       original = buffer_content(ctx)
 
-      send_key(ctx, ?l)
-      send_key(ctx, ?l)
+      send_key_sync(ctx, ?l)
+      send_key_sync(ctx, ?l)
 
       assert buffer_content(ctx) == original
       assert buffer_cursor(ctx) == {0, 2}
-      # Screen cursor is offset by gutter width (3 for a 3-line file)
+      # Screen cursor is offset by gutter width (3 for a 3-line file).
+      # send_key_sync guarantees the render cast reached the port before
+      # :sys.get_state(editor) returned, so screen_cursor sees post-render state.
       assert screen_cursor(ctx) == {1, 3 + 2}
     end
 
     test "h moves cursor left" do
       ctx = start_editor("hello\nworld\nfoo")
 
-      send_key(ctx, ?l)
-      send_key(ctx, ?l)
-      send_key(ctx, ?h)
+      send_key_sync(ctx, ?l)
+      send_key_sync(ctx, ?l)
+      send_key_sync(ctx, ?h)
 
       assert buffer_cursor(ctx) == {0, 1}
     end
@@ -38,11 +44,11 @@ defmodule Minga.IntegrationTest do
     test "j moves cursor down, k moves cursor up" do
       ctx = start_editor("hello\nworld\nfoo")
 
-      send_key(ctx, ?j)
+      send_key_sync(ctx, ?j)
       assert elem(buffer_cursor(ctx), 0) == 1
       assert_modeline_contains(ctx, "2:")
 
-      send_key(ctx, ?k)
+      send_key_sync(ctx, ?k)
       assert elem(buffer_cursor(ctx), 0) == 0
       assert_modeline_contains(ctx, "1:")
     end
@@ -50,9 +56,9 @@ defmodule Minga.IntegrationTest do
     test "multiple l moves advance the column" do
       ctx = start_editor("hello world")
 
-      send_key(ctx, ?l)
-      send_key(ctx, ?l)
-      send_key(ctx, ?l)
+      send_key_sync(ctx, ?l)
+      send_key_sync(ctx, ?l)
+      send_key_sync(ctx, ?l)
 
       {_line, col} = buffer_cursor(ctx)
       assert col == 3
@@ -61,9 +67,9 @@ defmodule Minga.IntegrationTest do
     test "0 moves to beginning of line" do
       ctx = start_editor("hello\nworld")
 
-      send_key(ctx, ?l)
-      send_key(ctx, ?l)
-      send_key(ctx, ?0)
+      send_key_sync(ctx, ?l)
+      send_key_sync(ctx, ?l)
+      send_key_sync(ctx, ?0)
 
       assert buffer_cursor(ctx) == {0, 0}
     end
@@ -75,7 +81,7 @@ defmodule Minga.IntegrationTest do
     test "i enters insert mode and characters are inserted" do
       ctx = start_editor("hello")
 
-      send_key(ctx, ?i)
+      send_key_sync(ctx, ?i)
       assert_mode(ctx, :insert)
 
       type_text(ctx, "abc")
@@ -87,19 +93,19 @@ defmodule Minga.IntegrationTest do
     test "Escape returns to normal mode — subsequent keys move, not insert" do
       ctx = start_editor("hello")
 
-      send_keys(ctx, "ix<Esc>")
+      send_keys_sync(ctx, "ix<Esc>")
 
       content_after_insert = buffer_content(ctx)
       assert_mode(ctx, :normal)
 
-      send_key(ctx, ?l)
+      send_key_sync(ctx, ?l)
       assert buffer_content(ctx) == content_after_insert
     end
 
     test "backspace deletes the previous character in insert mode" do
       ctx = start_editor("hello")
 
-      send_keys(ctx, "ia<BS>")
+      send_keys_sync(ctx, "ia<BS>")
 
       assert buffer_content(ctx) == "hello"
     end
@@ -107,7 +113,7 @@ defmodule Minga.IntegrationTest do
     test "Enter inserts a newline in insert mode" do
       ctx = start_editor("hello")
 
-      send_keys(ctx, "i<CR>")
+      send_keys_sync(ctx, "i<CR>")
 
       assert String.contains?(buffer_content(ctx), "\n")
     end
@@ -115,7 +121,7 @@ defmodule Minga.IntegrationTest do
     test "a moves right before entering insert mode" do
       ctx = start_editor("hi")
 
-      send_key(ctx, ?a)
+      send_key_sync(ctx, ?a)
       type_text(ctx, "!")
 
       assert String.contains?(buffer_content(ctx), "!")
@@ -128,8 +134,8 @@ defmodule Minga.IntegrationTest do
     test "dd deletes the current line and moves cursor" do
       ctx = start_editor("hello\nworld\nfoo")
 
-      send_key(ctx, ?d)
-      send_key(ctx, ?d)
+      send_key_sync(ctx, ?d)
+      send_key_sync(ctx, ?d)
 
       content = buffer_content(ctx)
       refute String.contains?(content, "hello")
@@ -139,8 +145,8 @@ defmodule Minga.IntegrationTest do
     test "dd on a single-line buffer leaves it empty or minimal" do
       ctx = start_editor("only line")
 
-      send_key(ctx, ?d)
-      send_key(ctx, ?d)
+      send_key_sync(ctx, ?d)
+      send_key_sync(ctx, ?d)
 
       refute String.contains?(buffer_content(ctx), "only")
     end
@@ -152,21 +158,21 @@ defmodule Minga.IntegrationTest do
     test "u after inserting reverts the buffer" do
       ctx = start_editor("hello")
 
-      send_keys(ctx, "ix<Esc>")
+      send_keys_sync(ctx, "ix<Esc>")
       assert buffer_content(ctx) == "xhello"
 
-      send_key(ctx, ?u)
+      send_key_sync(ctx, ?u)
       assert buffer_content(ctx) == "hello"
     end
 
     test "u after dd reverts the deletion" do
       ctx = start_editor("hello\nworld\nfoo")
 
-      send_key(ctx, ?d)
-      send_key(ctx, ?d)
+      send_key_sync(ctx, ?d)
+      send_key_sync(ctx, ?d)
       refute String.contains?(buffer_content(ctx), "hello")
 
-      send_key(ctx, ?u)
+      send_key_sync(ctx, ?u)
       assert String.contains?(buffer_content(ctx), "hello")
     end
 
@@ -174,7 +180,7 @@ defmodule Minga.IntegrationTest do
       ctx = start_editor("hello")
       original = buffer_content(ctx)
 
-      send_key(ctx, ?u)
+      send_key_sync(ctx, ?u)
       assert buffer_content(ctx) == original
     end
 
@@ -184,18 +190,18 @@ defmodule Minga.IntegrationTest do
       ctx = start_editor("aaa\nbbb\nccc")
 
       # Delete first line (dd), then delete next line (dd)
-      send_keys(ctx, "dd")
+      send_keys_sync(ctx, "dd")
       assert buffer_content(ctx) == "bbb\nccc"
 
-      send_keys(ctx, "dd")
+      send_keys_sync(ctx, "dd")
       assert buffer_content(ctx) == "ccc"
 
       # First undo restores "bbb"
-      send_key(ctx, ?u)
+      send_key_sync(ctx, ?u)
       assert buffer_content(ctx) == "bbb\nccc"
 
       # Second undo restores "aaa"
-      send_key(ctx, ?u)
+      send_key_sync(ctx, ?u)
       assert buffer_content(ctx) == "aaa\nbbb\nccc"
     end
   end
@@ -206,10 +212,10 @@ defmodule Minga.IntegrationTest do
     test "p pastes register text after cursor after yy" do
       ctx = start_editor("hello\nworld")
 
-      send_key(ctx, ?y)
-      send_key(ctx, ?y)
-      send_key(ctx, ?j)
-      send_key(ctx, ?p)
+      send_key_sync(ctx, ?y)
+      send_key_sync(ctx, ?y)
+      send_key_sync(ctx, ?j)
+      send_key_sync(ctx, ?p)
 
       lines = buffer_content(ctx) |> String.split("\n")
       assert length(lines) >= 3
@@ -218,10 +224,10 @@ defmodule Minga.IntegrationTest do
     test "P pastes register text before cursor" do
       ctx = start_editor("hello\nworld")
 
-      send_key(ctx, ?y)
-      send_key(ctx, ?y)
-      send_key(ctx, ?j)
-      send_key(ctx, ?P)
+      send_key_sync(ctx, ?y)
+      send_key_sync(ctx, ?y)
+      send_key_sync(ctx, ?j)
+      send_key_sync(ctx, ?P)
 
       assert String.contains?(buffer_content(ctx), "hello")
     end
@@ -230,7 +236,7 @@ defmodule Minga.IntegrationTest do
       ctx = start_editor("hello")
       original = buffer_content(ctx)
 
-      send_key(ctx, ?p)
+      send_key_sync(ctx, ?p)
       assert buffer_content(ctx) == original
     end
   end
@@ -243,7 +249,7 @@ defmodule Minga.IntegrationTest do
       ctx = start_editor("save me", file_path: path)
 
       # Type some content, then save via :w
-      send_keys(ctx, "iextra <Esc>:w<CR>")
+      send_keys_sync(ctx, "iextra <Esc>:w<CR>")
 
       assert File.exists?(path)
       assert String.contains?(File.read!(path), "extra")
@@ -257,23 +263,23 @@ defmodule Minga.IntegrationTest do
       ctx = start_editor("line one\nline two\nline three")
 
       # Navigate
-      send_key(ctx, ?j)
-      send_key(ctx, ?l)
-      send_key(ctx, ?l)
+      send_key_sync(ctx, ?j)
+      send_key_sync(ctx, ?l)
+      send_key_sync(ctx, ?l)
       assert_modeline_contains(ctx, "2:3")
 
       # Enter insert mode and type
-      send_keys(ctx, "iINSERTED<Esc>")
+      send_keys_sync(ctx, "iINSERTED<Esc>")
       assert String.contains?(buffer_content(ctx), "INSERTED")
       assert_row_contains(ctx, 2, "INSERTED")
 
       # Delete the line
-      send_key(ctx, ?d)
-      send_key(ctx, ?d)
+      send_key_sync(ctx, ?d)
+      send_key_sync(ctx, ?d)
       refute String.contains?(buffer_content(ctx), "INSERTED")
 
       # Undo the delete
-      send_key(ctx, ?u)
+      send_key_sync(ctx, ?u)
       assert String.contains?(buffer_content(ctx), "INSERTED")
       assert_row_contains(ctx, 2, "INSERTED")
 

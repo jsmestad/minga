@@ -39,9 +39,9 @@ defmodule Minga.Editor.Renderer.LineTest do
     test "typed characters appear on screen" do
       ctx = start_editor("hello")
 
-      send_key(ctx, ?i)
-      send_key(ctx, ?X)
-      send_key(ctx, ?Y)
+      send_key_sync(ctx, ?i)
+      send_key_sync(ctx, ?X)
+      send_key_sync(ctx, ?Y)
 
       assert_row_contains(ctx, @content_row, "XYhello")
     end
@@ -49,8 +49,8 @@ defmodule Minga.Editor.Renderer.LineTest do
     test "newline in insert mode creates a new line on screen" do
       ctx = start_editor("hello")
 
-      send_key(ctx, ?i)
-      send_key(ctx, 13)
+      send_key_sync(ctx, ?i)
+      send_key_sync(ctx, 13)
 
       assert_row_contains(ctx, @content_row + 1, "hello")
     end
@@ -67,7 +67,7 @@ defmodule Minga.Editor.Renderer.LineTest do
       ctx = start_editor("你好")
 
       # Move right once - cursor steps to second CJK char (display col 2)
-      send_key(ctx, ?l)
+      send_key_sync(ctx, ?l)
 
       screen = HeadlessPort.get_screen(ctx.port)
       {cursor_row, cursor_col} = screen.cursor
@@ -81,9 +81,9 @@ defmodule Minga.Editor.Renderer.LineTest do
       ctx = start_editor("你好世界")
 
       # v selects '你', l extends to '好', l extends to '世'
-      send_key(ctx, ?v)
-      send_key(ctx, ?l)
-      send_key(ctx, ?l)
+      send_key_sync(ctx, ?v)
+      send_key_sync(ctx, ?l)
+      send_key_sync(ctx, ?l)
 
       screen = HeadlessPort.get_screen(ctx.port)
       row = Enum.at(screen.grid, @content_row)
@@ -114,7 +114,7 @@ defmodule Minga.Editor.Renderer.LineTest do
       assert_row_contains(ctx, @content_row, "é hello")
 
       # Moving right from 'é' should step 1 display col (to the space)
-      send_key(ctx, ?l)
+      send_key_sync(ctx, ?l)
 
       screen = HeadlessPort.get_screen(ctx.port)
       {_crow, cursor_col} = screen.cursor
@@ -127,9 +127,9 @@ defmodule Minga.Editor.Renderer.LineTest do
 
       assert_row_contains(ctx, @content_row, "hello world")
 
-      send_key(ctx, ?v)
-      send_key(ctx, ?l)
-      send_key(ctx, ?l)
+      send_key_sync(ctx, ?v)
+      send_key_sync(ctx, ?l)
+      send_key_sync(ctx, ?l)
 
       screen = HeadlessPort.get_screen(ctx.port)
       row = Enum.at(screen.grid, @content_row)
@@ -148,9 +148,9 @@ defmodule Minga.Editor.Renderer.LineTest do
     test "selected text has reverse attribute" do
       ctx = start_editor("hello world")
 
-      send_key(ctx, ?v)
-      send_key(ctx, ?l)
-      send_key(ctx, ?l)
+      send_key_sync(ctx, ?v)
+      send_key_sync(ctx, ?l)
+      send_key_sync(ctx, ?l)
 
       screen = HeadlessPort.get_screen(ctx.port)
       row = Enum.at(screen.grid, @content_row)
@@ -171,7 +171,7 @@ defmodule Minga.Editor.Renderer.LineTest do
       # assert exact scroll positions without affecting other async tests.
       BufferServer.set_option(ctx.buffer, :scroll_margin, 0)
 
-      for _ <- 1..10, do: send_key(ctx, ?j)
+      for _ <- 1..10, do: send_key_sync(ctx, ?j)
 
       row_text = screen_row(ctx, @content_row)
 

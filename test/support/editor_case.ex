@@ -74,6 +74,13 @@ defmodule Minga.Test.EditorCase do
     {:ok, snapshot} = HeadlessPort.collect_frame(ref)
     Process.put({:last_frame_snapshot, port}, snapshot)
 
+    # Drain any deferred messages queued by the :ready handler (e.g.
+    # :setup_highlight, :debounced_render). Without this, a background
+    # render can produce a spurious batch_end that satisfies the next
+    # send_key's frame waiter before the key press is actually processed.
+    _ = :sys.get_state(editor)
+    _ = :sys.get_state(port)
+
     Map.merge(ctx, %{
       editor: editor,
       buffer: buffer,
@@ -109,6 +116,10 @@ defmodule Minga.Test.EditorCase do
     send(editor, {:minga_input, {:ready, width, height}})
     {:ok, snapshot} = HeadlessPort.collect_frame(ref)
     Process.put({:last_frame_snapshot, port}, snapshot)
+
+    # Drain deferred messages from :ready (see start_editor/2 comment).
+    _ = :sys.get_state(editor)
+    _ = :sys.get_state(port)
 
     %{
       editor: editor,
@@ -212,13 +223,22 @@ defmodule Minga.Test.EditorCase do
   @doc """
   Sends a key and waits for the editor GenServer to process it.
   Uses `:sys.get_state` as a synchronization barrier instead of waiting
-  for a render frame. This is faster and more reliable for tests that
-  only check editor state, not rendered screen output. Returns the
-  editor state after processing.
+  for a render frame. Safe for both editor/buffer state reads AND
+  port/screen state reads: because the editor sends the render cast to
+  the port before processing the `:sys.get_state` message, BEAM message
+  ordering guarantees the render reaches the port's mailbox ahead of any
+  subsequent `screen_cursor` or `modeline` call from the test process.
+
+  This is the preferred sync primitive for navigation tests. Use
+  `send_key/3` only when you need the captured frame snapshot for
+  `assert_screen_snapshot`. Returns the editor state after processing.
   """
   @spec send_key_sync(editor_ctx(), non_neg_integer(), non_neg_integer()) :: map()
-  def send_key_sync(%{editor: editor}, codepoint, mods \\ 0) do
+  def send_key_sync(%{editor: editor, port: port}, codepoint, mods \\ 0) do
     send(editor, {:minga_input, {:key_press, codepoint, mods}})
+    # Clear any stale frame snapshot so assert_screen_snapshot falls back
+    # to reading the live (post-render) grid from HeadlessPort.
+    Process.delete({:last_frame_snapshot, port})
     :sys.get_state(editor)
   end
 
@@ -229,13 +249,16 @@ defmodule Minga.Test.EditorCase do
   or which-key timeouts) are fully processed before the next key.
   """
   @spec send_keys_sync(editor_ctx(), String.t()) :: map()
-  def send_keys_sync(%{editor: editor} = _ctx, sequence) do
+  def send_keys_sync(%{editor: editor, port: port} = _ctx, sequence) do
     parse_key_sequence(sequence)
     |> Enum.each(fn {cp, mods} ->
       send(editor, {:minga_input, {:key_press, cp, mods}})
       :sys.get_state(editor)
     end)
 
+    # Clear any stale frame snapshot so assert_screen_snapshot falls back
+    # to reading the live (post-render) grid from HeadlessPort.
+    Process.delete({:last_frame_snapshot, port})
     :sys.get_state(editor)
   end
 
@@ -414,19 +437,19 @@ defmodule Minga.Test.EditorCase do
   Run with `UPDATE_SNAPSHOTS=1 mix test` to overwrite all baselines.
   ## Example
       ctx = start_editor("hello world")
-      send_keys(ctx, "llx")
+      send_keys_sync(ctx, "llx")
       assert_screen_snapshot(ctx, "after_delete_char")
   """
   defmacro assert_screen_snapshot(ctx, snapshot_name) do
     quote do
       ctx = unquote(ctx)
       name = unquote(snapshot_name)
-      # Use the frame snapshot captured atomically at batch_end time
-      # (stored by send_key/send_keys, keyed by port pid). This is
-      # race-free: no late render can overwrite it because it lives in
-      # the test process's memory. Falls back to reading the live grid
-      # if no snapshot was captured (e.g., asserting immediately after
-      # start_editor without any keys).
+      # If a preceding `send_key` captured a frame snapshot, use it.
+      # Otherwise (after `send_key_sync`/`send_keys_sync`, which clear
+      # the stale snapshot), fall back to reading the live grid from
+      # HeadlessPort. The fallback is safe because BEAM message ordering
+      # guarantees the render cast reached the port before the sync
+      # barrier returned.
       {rows, snap_cursor, snap_shape} =
         case Process.get({:last_frame_snapshot, ctx.port}) do
           %{grid: grid, cursor: c, cursor_shape: s} ->

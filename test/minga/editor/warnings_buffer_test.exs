@@ -16,7 +16,7 @@ defmodule Minga.Editor.WarningsBufferTest do
     test "SPC b W opens bottom panel with warnings filter" do
       ctx = start_editor("hello")
       set_gui_capabilities(ctx)
-      send_keys(ctx, "<SPC>bW")
+      send_keys_sync(ctx, "<SPC>bW")
 
       state = :sys.get_state(ctx.editor)
       assert state.bottom_panel.visible == true
@@ -33,7 +33,7 @@ defmodule Minga.Editor.WarningsBufferTest do
         %{s | bottom_panel: BottomPanel.dismiss(s.bottom_panel)}
       end)
 
-      send_keys(ctx, "<SPC>bW")
+      send_keys_sync(ctx, "<SPC>bW")
       state = :sys.get_state(ctx.editor)
       assert state.bottom_panel.visible == true
       assert state.bottom_panel.dismissed == false
@@ -42,7 +42,7 @@ defmodule Minga.Editor.WarningsBufferTest do
     test ":warnings ex-command opens bottom panel with warnings filter" do
       ctx = start_editor("hello")
       set_gui_capabilities(ctx)
-      send_keys(ctx, ":warnings<CR>")
+      send_keys_sync(ctx, ":warnings<CR>")
 
       state = :sys.get_state(ctx.editor)
       assert state.bottom_panel.visible == true
@@ -83,7 +83,7 @@ defmodule Minga.Editor.WarningsBufferTest do
       set_gui_capabilities(ctx)
 
       # Open panel manually (no filter)
-      send_keys(ctx, "<SPC>tp")
+      send_keys_sync(ctx, "<SPC>tp")
       state = :sys.get_state(ctx.editor)
       assert state.bottom_panel.visible == true
       assert state.bottom_panel.filter == nil
@@ -100,7 +100,7 @@ defmodule Minga.Editor.WarningsBufferTest do
   describe "warnings (TUI: *Messages* buffer fallback)" do
     test "SPC b W opens *Messages* buffer on TUI" do
       ctx = start_editor("hello")
-      send_keys(ctx, "<SPC>bW")
+      send_keys_sync(ctx, "<SPC>bW")
 
       screen = screen_text(ctx)
       all_text = Enum.join(screen, "\n")
@@ -109,7 +109,7 @@ defmodule Minga.Editor.WarningsBufferTest do
 
     test "SPC b m opens *Messages* buffer on TUI" do
       ctx = start_editor("hello")
-      send_keys(ctx, "<SPC>bm")
+      send_keys_sync(ctx, "<SPC>bm")
 
       screen = screen_text(ctx)
       all_text = Enum.join(screen, "\n")

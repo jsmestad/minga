@@ -236,14 +236,14 @@ defmodule Minga.Integration.FileOpenFromAgentTabTest do
       {:ok, _snapshot} = HeadlessPort.collect_frame(ref)
 
       # Navigate down and verify cursor moves
-      send_key(ctx, ?j)
+      send_key_sync(ctx, ?j)
 
       active_buf = :sys.get_state(ctx.editor).buffers.active
       {line, _col} = BufferServer.cursor(active_buf)
       assert line == 1, "Expected cursor on line 1 after j, got #{line}"
 
       # Insert mode should work
-      send_keys(ctx, "iHELLO<Esc>")
+      send_keys_sync(ctx, "iHELLO<Esc>")
       content = BufferServer.content(active_buf)
 
       assert String.contains?(content, "HELLO"),

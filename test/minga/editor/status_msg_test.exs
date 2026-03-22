@@ -11,7 +11,7 @@ defmodule Minga.Editor.StatusMsgTest do
     File.write!(path, "hello")
 
     ctx = start_editor("hello", file_path: path)
-    send_keys(ctx, ":w<CR>")
+    send_keys_sync(ctx, ":w<CR>")
 
     mb = minibuffer(ctx)
     assert String.contains?(mb, "Wrote")
@@ -28,7 +28,7 @@ defmodule Minga.Editor.StatusMsgTest do
     # Simulate external modification (mtime must advance)
     File.write!(path, "externally modified")
 
-    send_keys(ctx, ":w<CR>")
+    send_keys_sync(ctx, ":w<CR>")
 
     mb = minibuffer(ctx)
     assert String.contains?(mb, "WARNING")
@@ -45,7 +45,7 @@ defmodule Minga.Editor.StatusMsgTest do
     # Simulate external modification
     File.write!(path, "externally modified")
 
-    send_keys(ctx, ":w!<CR>")
+    send_keys_sync(ctx, ":w!<CR>")
 
     mb = minibuffer(ctx)
     assert String.contains?(mb, "Wrote")
@@ -60,7 +60,7 @@ defmodule Minga.Editor.StatusMsgTest do
     ctx = start_editor("original", file_path: path)
     File.write!(path, "reloaded")
 
-    send_keys(ctx, ":e!<CR>")
+    send_keys_sync(ctx, ":e!<CR>")
 
     mb = minibuffer(ctx)
     assert String.contains?(mb, "Reloaded")
@@ -72,13 +72,13 @@ defmodule Minga.Editor.StatusMsgTest do
     File.write!(path, "hello")
 
     ctx = start_editor("hello", file_path: path)
-    send_keys(ctx, ":w<CR>")
+    send_keys_sync(ctx, ":w<CR>")
 
     mb = minibuffer(ctx)
     assert String.contains?(mb, "Wrote")
 
     # Press any key — message should clear
-    send_key(ctx, ?j)
+    send_key_sync(ctx, ?j)
 
     mb = minibuffer(ctx)
     refute String.contains?(mb, "Wrote")
@@ -86,7 +86,7 @@ defmodule Minga.Editor.StatusMsgTest do
 
   test "save on scratch buffer shows error in minibuffer" do
     ctx = start_editor("scratch content")
-    send_keys(ctx, ":w<CR>")
+    send_keys_sync(ctx, ":w<CR>")
 
     mb = minibuffer(ctx)
     assert String.contains?(mb, "No file name")

@@ -18,8 +18,8 @@ defmodule Minga.Integration.ScrollViewportTest do
       ctx = start_editor(@test_content)
 
       # Move down first, then gg back to top
-      send_keys(ctx, "20j")
-      send_keys(ctx, "gg")
+      send_keys_sync(ctx, "20j")
+      send_keys_sync(ctx, "gg")
 
       {line, col} = buffer_cursor(ctx)
       assert line == 0
@@ -35,7 +35,7 @@ defmodule Minga.Integration.ScrollViewportTest do
     test "shows last lines of file, cursor at last line" do
       ctx = start_editor(@test_content)
 
-      send_keys(ctx, "G")
+      send_keys_sync(ctx, "G")
 
       {line, _col} = buffer_cursor(ctx)
       assert line == @line_count - 1
@@ -52,7 +52,7 @@ defmodule Minga.Integration.ScrollViewportTest do
       ctx = start_editor(@test_content)
 
       # Move down enough to scroll (24-row terminal, ~22 content rows)
-      send_keys(ctx, "30j")
+      send_keys_sync(ctx, "30j")
 
       {line, _col} = buffer_cursor(ctx)
       assert line == 30
@@ -69,8 +69,8 @@ defmodule Minga.Integration.ScrollViewportTest do
       ctx = start_editor(@test_content)
 
       # Go to bottom, then come back up
-      send_keys(ctx, "G")
-      send_keys(ctx, "30k")
+      send_keys_sync(ctx, "G")
+      send_keys_sync(ctx, "30k")
 
       {line, _col} = buffer_cursor(ctx)
       assert line == @line_count - 1 - 30
@@ -86,7 +86,7 @@ defmodule Minga.Integration.ScrollViewportTest do
       ctx = start_editor(@test_content)
 
       {line_before, _} = buffer_cursor(ctx)
-      send_keys(ctx, "<C-d>")
+      send_keys_sync(ctx, "<C-d>")
       {line_after, _} = buffer_cursor(ctx)
 
       # Should move roughly half the screen height (10-12 lines for 24-row terminal)
@@ -103,10 +103,10 @@ defmodule Minga.Integration.ScrollViewportTest do
       ctx = start_editor(@test_content)
 
       # Go down first
-      send_keys(ctx, "50j")
+      send_keys_sync(ctx, "50j")
       {line_before, _} = buffer_cursor(ctx)
 
-      send_keys(ctx, "<C-u>")
+      send_keys_sync(ctx, "<C-u>")
       {line_after, _} = buffer_cursor(ctx)
 
       jump = line_before - line_after
@@ -121,7 +121,7 @@ defmodule Minga.Integration.ScrollViewportTest do
     test "line numbers are correct after scrolling" do
       ctx = start_editor(@test_content)
 
-      send_keys(ctx, "25j")
+      send_keys_sync(ctx, "25j")
 
       # The gutter should show numbers around line 26
       # (0-indexed line 25 = display line 26)
@@ -140,7 +140,7 @@ defmodule Minga.Integration.ScrollViewportTest do
       ctx = start_editor(@test_content)
 
       # Move down enough to trigger scrolling
-      send_keys(ctx, "30j")
+      send_keys_sync(ctx, "30j")
 
       {cursor_line, _} = buffer_cursor(ctx)
       # The cursor should be visible on screen, not at the very last content row.
@@ -163,8 +163,8 @@ defmodule Minga.Integration.ScrollViewportTest do
     test "cursor stays away from viewport edge when scrolling up" do
       ctx = start_editor(@test_content)
 
-      send_keys(ctx, "G")
-      send_keys(ctx, "30k")
+      send_keys_sync(ctx, "G")
+      send_keys_sync(ctx, "30k")
 
       {cursor_line, _} = buffer_cursor(ctx)
       cursor_display_line = cursor_line + 1
@@ -189,9 +189,9 @@ defmodule Minga.Integration.ScrollViewportTest do
       ctx = start_editor(@wide_content)
 
       # Move to the long line (line 2, 0-indexed line 1)
-      send_keys(ctx, "j")
+      send_keys_sync(ctx, "j")
       # Move cursor far right past the terminal width
-      send_keys(ctx, "$")
+      send_keys_sync(ctx, "$")
 
       {_, col} = buffer_cursor(ctx)
       assert col >= 100, "cursor should be far right on the long line, at col #{col}"
@@ -213,10 +213,10 @@ defmodule Minga.Integration.ScrollViewportTest do
       # Capture initial screen
       initial_cursor = buffer_cursor(ctx)
 
-      send_keys(ctx, "G")
+      send_keys_sync(ctx, "G")
       assert buffer_cursor(ctx) != initial_cursor
 
-      send_keys(ctx, "gg")
+      send_keys_sync(ctx, "gg")
       assert buffer_cursor(ctx) == initial_cursor
       assert_screen_snapshot(ctx, "scroll_roundtrip_gg")
     end

@@ -10,25 +10,25 @@ defmodule Minga.Editor.Renderer.MinibufferTest do
     test "shows colon and typed command in minibuffer" do
       ctx = start_editor("hello")
 
-      send_key(ctx, ?:)
-      send_key(ctx, ?w)
-      send_key(ctx, ?q)
+      send_key_sync(ctx, ?:)
+      send_key_sync(ctx, ?w)
+      send_key_sync(ctx, ?q)
 
       assert_minibuffer_contains(ctx, ":wq")
     end
 
     test "shows COMMAND mode in modeline" do
       ctx = start_editor("hello")
-      send_key(ctx, ?:)
+      send_key_sync(ctx, ?:)
       assert_mode(ctx, :command)
     end
 
     test "minibuffer clears after Esc" do
       ctx = start_editor("hello")
 
-      send_key(ctx, ?:)
-      send_key(ctx, ?w)
-      send_key(ctx, 27)
+      send_key_sync(ctx, ?:)
+      send_key_sync(ctx, ?w)
+      send_key_sync(ctx, 27)
 
       assert_mode(ctx, :normal)
       mb = minibuffer(ctx)
@@ -38,8 +38,8 @@ defmodule Minga.Editor.Renderer.MinibufferTest do
     test "cursor moves to minibuffer in command mode" do
       ctx = start_editor("hello")
 
-      send_key(ctx, ?:)
-      send_key(ctx, ?q)
+      send_key_sync(ctx, ?:)
+      send_key_sync(ctx, ?q)
 
       {cursor_row, cursor_col} = screen_cursor(ctx)
       assert cursor_row == ctx.height - 1

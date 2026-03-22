@@ -15,7 +15,7 @@ defmodule Minga.Editor.Renderer.ByteGraphemeBoundaryTest do
       ctx = start_editor("café")
 
       # Move to end of line ($ in normal mode)
-      send_key(ctx, ?$)
+      send_key_sync(ctx, ?$)
 
       {_row, col} = screen_cursor(ctx)
       gutter_w = 3
@@ -28,7 +28,7 @@ defmodule Minga.Editor.Renderer.ByteGraphemeBoundaryTest do
       # "a🎉b" — 🎉 is 4 bytes and 2 display columns wide
       ctx = start_editor("a🎉b")
 
-      send_key(ctx, ?$)
+      send_key_sync(ctx, ?$)
 
       {_row, col} = screen_cursor(ctx)
       gutter_w = 3
@@ -42,9 +42,9 @@ defmodule Minga.Editor.Renderer.ByteGraphemeBoundaryTest do
       ctx = start_editor("ñoño")
 
       # Move right 3 times to reach 'o' at end
-      send_key(ctx, ?l)
-      send_key(ctx, ?l)
-      send_key(ctx, ?l)
+      send_key_sync(ctx, ?l)
+      send_key_sync(ctx, ?l)
+      send_key_sync(ctx, ?l)
 
       {_row, col} = screen_cursor(ctx)
       gutter_w = 3
@@ -59,7 +59,7 @@ defmodule Minga.Editor.Renderer.ByteGraphemeBoundaryTest do
       ctx = start_editor("café")
 
       # Move to end: $ puts cursor on last char
-      send_key(ctx, ?$)
+      send_key_sync(ctx, ?$)
 
       ml = modeline(ctx)
       # cursor_line=0, grapheme_col=3 → displayed as "1:4" (1-indexed)
@@ -84,9 +84,9 @@ defmodule Minga.Editor.Renderer.ByteGraphemeBoundaryTest do
       gutter_w = 3
 
       # Move to 'a', enter visual, select through 'f'
-      send_key(ctx, ?l)
-      send_key(ctx, ?v)
-      send_key(ctx, ?l)
+      send_key_sync(ctx, ?l)
+      send_key_sync(ctx, ?v)
+      send_key_sync(ctx, ?l)
 
       # Cells at grapheme positions 1 and 2 (gutter_w + 1, gutter_w + 2) should be reversed
       cell_a = screen_cell(ctx, 1, gutter_w + 1)
@@ -108,8 +108,8 @@ defmodule Minga.Editor.Renderer.ByteGraphemeBoundaryTest do
       gutter_w = 3
 
       # Select all with v$
-      send_key(ctx, ?v)
-      send_key(ctx, ?$)
+      send_key_sync(ctx, ?v)
+      send_key_sync(ctx, ?$)
 
       cell_a = screen_cell(ctx, 1, gutter_w)
       assert :reverse in cell_a.attrs, "Expected 'a' to be selected"
@@ -120,10 +120,10 @@ defmodule Minga.Editor.Renderer.ByteGraphemeBoundaryTest do
     test "cursor after inserting multi-byte character" do
       ctx = start_editor("")
 
-      send_key(ctx, ?i)
+      send_key_sync(ctx, ?i)
       # Type 'é' — this is tricky since send_key sends a codepoint
-      send_key(ctx, ?a)
-      send_key(ctx, ?b)
+      send_key_sync(ctx, ?a)
+      send_key_sync(ctx, ?b)
 
       {_row, col} = screen_cursor(ctx)
       gutter_w = 3
@@ -137,7 +137,7 @@ defmodule Minga.Editor.Renderer.ByteGraphemeBoundaryTest do
     test "cursor placement unchanged for ASCII" do
       ctx = start_editor("hello world")
 
-      send_key(ctx, ?$)
+      send_key_sync(ctx, ?$)
 
       {_row, col} = screen_cursor(ctx)
       gutter_w = 3
@@ -149,7 +149,7 @@ defmodule Minga.Editor.Renderer.ByteGraphemeBoundaryTest do
     test "modeline column correct for ASCII" do
       ctx = start_editor("hello")
 
-      send_key(ctx, ?$)
+      send_key_sync(ctx, ?$)
 
       ml = modeline(ctx)
 
