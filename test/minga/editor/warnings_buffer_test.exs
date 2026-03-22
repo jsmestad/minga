@@ -12,6 +12,18 @@ defmodule Minga.Editor.WarningsBufferTest do
     end)
   end
 
+  # Flushes the async log_to_warnings cast and fires the 200ms debounce
+  # timer immediately. The cast schedules :warning_popup_timeout via
+  # Process.send_after; we trigger it directly instead of sleeping.
+  defp flush_warning_popup(ctx) do
+    # First :sys.get_state flushes the cast (which schedules the debounce timer)
+    :sys.get_state(ctx.editor)
+    # Fire the timeout immediately instead of waiting 200ms
+    send(ctx.editor, :warning_popup_timeout)
+    # Second :sys.get_state flushes the timeout handler
+    :sys.get_state(ctx.editor)
+  end
+
   describe "warnings (GUI: bottom panel)" do
     test "SPC b W opens bottom panel with warnings filter" do
       ctx = start_editor("hello")
@@ -54,8 +66,7 @@ defmodule Minga.Editor.WarningsBufferTest do
       set_gui_capabilities(ctx)
 
       Minga.Editor.log_to_warnings("test warning", ctx.editor)
-      Process.sleep(300)
-      :sys.get_state(ctx.editor)
+      flush_warning_popup(ctx)
 
       state = :sys.get_state(ctx.editor)
       assert state.bottom_panel.visible == true
@@ -71,8 +82,7 @@ defmodule Minga.Editor.WarningsBufferTest do
       end)
 
       Minga.Editor.log_to_warnings("test warning after dismiss", ctx.editor)
-      Process.sleep(300)
-      :sys.get_state(ctx.editor)
+      flush_warning_popup(ctx)
 
       state = :sys.get_state(ctx.editor)
       assert state.bottom_panel.visible == false
@@ -89,8 +99,7 @@ defmodule Minga.Editor.WarningsBufferTest do
       assert state.bottom_panel.filter == nil
 
       Minga.Editor.log_to_warnings("test warning", ctx.editor)
-      Process.sleep(300)
-      :sys.get_state(ctx.editor)
+      flush_warning_popup(ctx)
 
       state = :sys.get_state(ctx.editor)
       assert state.bottom_panel.filter == nil
