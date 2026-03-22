@@ -319,38 +319,55 @@ struct StatusBarView: View {
 
     // MARK: - Git branch + diff stats
 
+    @State private var gitCopied = false
+
     @ViewBuilder
     private var gitSegment: some View {
-        HStack(spacing: 3) {
-            Image(systemName: "arrow.triangle.branch")
-                .font(.system(size: 9, weight: .medium))
-            Text(state.gitBranch)
-                .font(.system(size: 11))
-                .lineLimit(1)
+        Button(action: {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(state.gitBranch, forType: .string)
+            gitCopied = true
+            // Clear the "Copied" indicator after 2 seconds
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                gitCopied = false
+            }
+        }) {
+            HStack(spacing: 3) {
+                Image(systemName: gitCopied ? "checkmark" : "arrow.triangle.branch")
+                    .font(.system(size: 9, weight: .medium))
+                Text(gitCopied ? "Copied!" : state.gitBranch)
+                    .font(.system(size: 11))
+                    .lineLimit(1)
 
-            // Diff stats: +added ~modified -deleted
-            if state.hasGitDiffStats {
-                HStack(spacing: 4) {
-                    if state.gitAdded > 0 {
-                        Text("+\(state.gitAdded)")
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundStyle(theme.gitAddedFg)
-                    }
-                    if state.gitModified > 0 {
-                        Text("~\(state.gitModified)")
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundStyle(theme.gitModifiedFg)
-                    }
-                    if state.gitDeleted > 0 {
-                        Text("-\(state.gitDeleted)")
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundStyle(theme.gitDeletedFg)
+                // Diff stats: +added ~modified -deleted
+                if !gitCopied, state.hasGitDiffStats {
+                    HStack(spacing: 4) {
+                        if state.gitAdded > 0 {
+                            Text("+\(state.gitAdded)")
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(theme.gitAddedFg)
+                        }
+                        if state.gitModified > 0 {
+                            Text("~\(state.gitModified)")
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(theme.gitModifiedFg)
+                        }
+                        if state.gitDeleted > 0 {
+                            Text("-\(state.gitDeleted)")
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(theme.gitDeletedFg)
+                        }
                     }
                 }
             }
+            .foregroundStyle(theme.modelineBarFg.opacity(0.6))
         }
-        .foregroundStyle(theme.modelineBarFg.opacity(0.6))
+        .buttonStyle(.plain)
+        .help("Click to copy branch name")
         .padding(.horizontal, 6)
+        .onHover { isHovered in
+            if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+        }
     }
 
     // MARK: - LSP indicator (theme-colored)
@@ -370,45 +387,54 @@ struct StatusBarView: View {
     private var diagnosticIndicators: some View {
         let hasAny = state.errorCount > 0 || state.warningCount > 0 || state.infoCount > 0 || state.hintCount > 0
         if hasAny {
-            HStack(spacing: 6) {
-                if state.errorCount > 0 {
-                    HStack(spacing: 2) {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 9))
-                        Text("\(state.errorCount)")
-                            .font(.system(size: 11))
+            Button(action: {
+                encoder?.sendTogglePanel(panel: 1)
+            }) {
+                HStack(spacing: 6) {
+                    if state.errorCount > 0 {
+                        HStack(spacing: 2) {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 9))
+                            Text("\(state.errorCount)")
+                                .font(.system(size: 11))
+                        }
+                        .foregroundStyle(theme.gutterErrorFg)
                     }
-                    .foregroundStyle(theme.gutterErrorFg)
-                }
-                if state.warningCount > 0 {
-                    HStack(spacing: 2) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.system(size: 9))
-                        Text("\(state.warningCount)")
-                            .font(.system(size: 11))
+                    if state.warningCount > 0 {
+                        HStack(spacing: 2) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.system(size: 9))
+                            Text("\(state.warningCount)")
+                                .font(.system(size: 11))
+                        }
+                        .foregroundStyle(theme.gutterWarningFg)
                     }
-                    .foregroundStyle(theme.gutterWarningFg)
-                }
-                if state.infoCount > 0 {
-                    HStack(spacing: 2) {
-                        Image(systemName: "info.circle.fill")
-                            .font(.system(size: 9))
-                        Text("\(state.infoCount)")
-                            .font(.system(size: 11))
+                    if state.infoCount > 0 {
+                        HStack(spacing: 2) {
+                            Image(systemName: "info.circle.fill")
+                                .font(.system(size: 9))
+                            Text("\(state.infoCount)")
+                                .font(.system(size: 11))
+                        }
+                        .foregroundStyle(theme.gutterInfoFg)
                     }
-                    .foregroundStyle(theme.gutterInfoFg)
-                }
-                if state.hintCount > 0 {
-                    HStack(spacing: 2) {
-                        Image(systemName: "lightbulb.fill")
-                            .font(.system(size: 9))
-                        Text("\(state.hintCount)")
-                            .font(.system(size: 11))
+                    if state.hintCount > 0 {
+                        HStack(spacing: 2) {
+                            Image(systemName: "lightbulb.fill")
+                                .font(.system(size: 9))
+                            Text("\(state.hintCount)")
+                                .font(.system(size: 11))
+                        }
+                        .foregroundStyle(theme.gutterHintFg)
                     }
-                    .foregroundStyle(theme.gutterHintFg)
                 }
             }
+            .buttonStyle(.plain)
+            .help("Show diagnostics (SPC c d)")
             .padding(.horizontal, 4)
+            .onHover { isHovered in
+                if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+            }
         }
     }
 
