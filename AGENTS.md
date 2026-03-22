@@ -452,6 +452,18 @@ When implementing features, completing planned work, or changing architecture:
 - **`docs/ARCHITECTURE.md`** — Update when adding new process types, protocol opcodes, or changing supervision structure.
 - **`docs/PERFORMANCE.md`** — Mark optimizations as completed when done.
 
+### Documentation voice and style
+
+All files in `docs/` follow the project's writing style (load the `writing` skill for the full guide). Before writing or rewriting a doc, read at least two existing docs (e.g., `EXTENSIBILITY.md`, `FOR-EMACS-USERS.md`, `CONFIGURATION.md`) to absorb the voice. Key rules:
+
+- **Why before how.** Lead each section with the problem it solves, not the API signature. The reader should understand why they'd want this before they see the code.
+- **Teach, don't list.** Write like an upperclassman showing a freshman around, not a generated API dump. Use progressive disclosure: simple case first, then layers of complexity.
+- **Concrete examples that tell a story.** Every API section needs a copy-pasteable example that solves a real problem (org-mode TODO cycling, not `do_thing(x)`). Show the extension author's actual workflow, not abstract signatures.
+- **Cross-reference related docs.** The docs form a connected web. For example, EXTENSIBILITY.md explains the conceptual foundation, CONFIGURATION.md covers user-facing config, and FOR-EMACS-USERS.md draws the Emacs comparison. Don't repeat what's covered elsewhere; link to it.
+- **Short paragraphs, plain language, no em-dashes.** Same rules as everywhere else in the project.
+
+If a doc reads like a dry API reference with no narrative, it needs a rewrite. The bar is: would someone switching from Emacs or Neovim feel welcomed and oriented by this page?
+
 ## Adding New Features
 
 ### Dual-surface rule for status/chrome features
