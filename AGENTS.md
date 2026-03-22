@@ -188,6 +188,18 @@ Elixir 1.19's set-theoretic type system catches real bugs at compile time. Help 
   5. **Never build a "safe client" wrapper module** that mirrors another module's API with nil-handling and exit-catching added. That's just indirection. The monitor is the real fix; the wrapper hides the problem behind a layer that every caller must remember to use.
 - `mix compile --warnings-as-errors` must pass clean
 
+### Module Aliases (convention, not linted)
+
+Prefer fully qualified module names by default. Aliases add indirection that hurts LLM comprehension: when reading a snippet or diff, the alias block at the top of the file may not be visible, and `Document.insert_text(...)` is ambiguous where `Minga.Buffer.Document.insert_text(...)` is not. Fully qualified names also make grep/search reliable across the codebase.
+
+**Alias when the module path is 4+ segments deep** (e.g., `Minga.Agent.Tools.FileOperations`). At that depth, the fully qualified name eats enough line width to obscure the actual logic. Aliasing to `FileOperations` is a reasonable tradeoff.
+
+**For 2-3 segments** (`Minga.Motion`, `Minga.Buffer.Document`), use the fully qualified name. It's short enough to carry everywhere without readability cost.
+
+**Exception:** if a 3-segment module appears 8+ times in one file and the repetition genuinely hurts human readability, aliasing is fine. But that frequency is also a signal the function may be doing too much or the modules are too tightly coupled.
+
+The `Credo.Check.Design.AliasUsage` lint is disabled. This is a judgment call, not an automated rule.
+
 ### Common Elixir Footguns
 
 LLM agents hit these repeatedly. Read before writing any Elixir:
