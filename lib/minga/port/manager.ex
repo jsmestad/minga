@@ -129,15 +129,6 @@ defmodule Minga.Port.Manager do
   @impl true
   @spec handle_info(term(), state()) :: {:noreply, state()}
   def handle_info({port, {:data, data}}, %{port: port} = state) do
-    # Debug: log all port data opcodes
-    opcode = if byte_size(data) > 0, do: :binary.at(data, 0), else: nil
-
-    File.write(
-      "/tmp/minga_port.log",
-      "opcode=0x#{if opcode, do: Integer.to_string(opcode, 16), else: "nil"} size=#{byte_size(data)}\n",
-      [:append]
-    )
-
     case Protocol.decode_event(data) do
       {:ok, {:ready, width, height, caps}} ->
         new_state = %{state | ready: true, terminal_size: {width, height}, capabilities: caps}
@@ -155,12 +146,6 @@ defmodule Minga.Port.Manager do
         {:noreply, new_state}
 
       {:ok, {:resize, width, height}} ->
-        File.write(
-          "/tmp/minga_resize.log",
-          "RESIZE w=#{width} h=#{height} subs=#{length(state.subscribers)}\n",
-          [:append]
-        )
-
         new_state = %{state | terminal_size: {width, height}}
         broadcast(new_state.subscribers, {:minga_input, {:resize, width, height}})
         {:noreply, new_state}
@@ -281,23 +266,77 @@ defmodule Minga.Port.Manager do
   defp default_renderer_path(backend) do
     binary_name = renderer_binary_name(backend)
 
-    # In a release (or Burrito binary), the renderer lives in priv/
-    priv_path = Application.app_dir(:minga, "priv/#{binary_name}")
+    # Priority 1: app bundle context (BEAM release embedded inside Minga.app).
+    # Priority 2: priv/ directory (Burrito binary or standard release).
+    # Priority 3: dev/test fallback in the source tree.
+    case find_app_bundle_binary(binary_name, backend) do
+      {:ok, path} ->
+        path
 
-    if File.exists?(priv_path) do
-      priv_path
+      :not_in_bundle ->
+        priv_path = Application.app_dir(:minga, "priv/#{binary_name}")
+        if File.exists?(priv_path), do: priv_path, else: dev_fallback_path(backend)
+    end
+  end
+
+  @spec dev_fallback_path(backend()) :: String.t()
+  defp dev_fallback_path(:gui), do: find_xcode_build_product("Minga")
+
+  defp dev_fallback_path(:tui) do
+    Path.join([File.cwd!(), "zig", "zig-out", "bin", "minga-renderer"])
+  end
+
+  # When running from a BEAM release embedded inside a .app bundle,
+  # resolve the frontend binary relative to the bundle root.
+  #
+  # The release root is at: Minga.app/Contents/Resources/release/
+  # The GUI binary is at:   Minga.app/Contents/MacOS/Minga
+  # The TUI binary is at:   Minga.app/Contents/Resources/release/lib/minga-*/priv/minga-renderer
+  #                         (which Application.app_dir already resolves, so TUI returns :not_in_bundle)
+  @spec find_app_bundle_binary(String.t(), backend()) :: {:ok, String.t()} | :not_in_bundle
+  defp find_app_bundle_binary(binary_name, :gui) do
+    case app_bundle_root() do
+      {:ok, bundle_root} ->
+        gui_path = Path.join([bundle_root, "Contents", "MacOS", binary_name])
+
+        if File.exists?(gui_path) do
+          {:ok, gui_path}
+        else
+          :not_in_bundle
+        end
+
+      :not_in_bundle ->
+        :not_in_bundle
+    end
+  end
+
+  defp find_app_bundle_binary(_binary_name, _tui), do: :not_in_bundle
+
+  # Detect whether the BEAM is running inside a .app bundle by checking
+  # the release root path. Returns the bundle root (e.g., "/path/to/Minga.app")
+  # or :not_in_bundle.
+  #
+  # The release root is the directory containing bin/, lib/, releases/, erts-*.
+  # In a bundle, this is at: Minga.app/Contents/Resources/release/
+  # So the bundle root is 3 levels up from the release root.
+  @spec app_bundle_root() :: {:ok, String.t()} | :not_in_bundle
+  defp app_bundle_root do
+    # :code.root_dir() returns the release root in an OTP release,
+    # e.g., "/path/to/Minga.app/Contents/Resources/release"
+    release_root = :code.root_dir() |> to_string()
+
+    if String.contains?(release_root, ".app/Contents/Resources/release") do
+      # Walk up: release/ -> Resources/ -> Contents/ -> Minga.app/
+      bundle_root =
+        release_root
+        |> Path.join("..")
+        |> Path.join("..")
+        |> Path.join("..")
+        |> Path.expand()
+
+      {:ok, bundle_root}
     else
-      # Dev/test fallback: look in the source tree.
-      case backend do
-        :gui ->
-          # Swift GUI binary built by Xcode.
-          # In dev, find it in DerivedData via the build settings output.
-          find_xcode_build_product("Minga")
-
-        _tui ->
-          # Zig TUI binary in zig-out/bin/
-          Path.join([File.cwd!(), "zig", "zig-out", "bin", "minga-renderer"])
-      end
+      :not_in_bundle
     end
   end
 
