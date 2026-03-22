@@ -14,6 +14,8 @@ defmodule Minga.Editor.MinibufferData do
   alias Minga.Command
   alias Minga.Command.Registry, as: CommandRegistry
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Keymap.Defaults
+  alias Minga.WhichKey
 
   # ── Types ──────────────────────────────────────────────────────────────────
 
@@ -230,6 +232,7 @@ defmodule Minga.Editor.MinibufferData do
 
   def complete_ex_command(input) do
     input_lower = String.downcase(input)
+    keybind_map = build_keybind_map()
 
     CommandRegistry.all(CommandRegistry)
     |> Enum.map(fn %Command{} = cmd ->
@@ -246,7 +249,7 @@ defmodule Minga.Editor.MinibufferData do
         description: cmd.description || "",
         match_score: min(score, 255),
         match_positions: find_match_positions(name, input_lower),
-        annotation: ""
+        annotation: Map.get(keybind_map, cmd.name, "")
       }
     end)
   end
@@ -255,6 +258,7 @@ defmodule Minga.Editor.MinibufferData do
   @spec popular_commands() :: [candidate()]
   defp popular_commands do
     popular = ~w(write quit edit save-buffer find-file split vsplit set help)a
+    keybind_map = build_keybind_map()
 
     all = CommandRegistry.all(CommandRegistry)
 
@@ -276,7 +280,7 @@ defmodule Minga.Editor.MinibufferData do
         description: cmd.description || "",
         match_score: 100,
         match_positions: [],
-        annotation: ""
+        annotation: Map.get(keybind_map, cmd.name, "")
       }
     end)
   end
@@ -327,6 +331,17 @@ defmodule Minga.Editor.MinibufferData do
   # Finds the character indices in `name` that match `query` characters
   # in order. Used for highlighting matched characters in the GUI.
   # Returns indices as 0-based grapheme positions.
+  # Builds a map from command name atoms to human-readable keybinding strings.
+  # Uses WhichKey.format_key for proper display (SPC, C-s, etc.).
+  @spec build_keybind_map() :: %{atom() => String.t()}
+  defp build_keybind_map do
+    Defaults.all_bindings()
+    |> Enum.into(%{}, fn {keys, command, _desc} ->
+      key_str = Enum.map_join(keys, " ", &WhichKey.format_key/1)
+      {command, key_str}
+    end)
+  end
+
   @spec find_match_positions(String.t(), String.t()) :: [non_neg_integer()]
   defp find_match_positions(name, query) do
     name_lower = String.downcase(name)
