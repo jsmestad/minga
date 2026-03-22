@@ -7,11 +7,23 @@ defmodule Minga.Integration.MouseTest do
   """
   use Minga.Test.EditorCase, async: true
 
+  alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.FileTree
+  alias Minga.Test.HeadlessPort
   alias Minga.Test.StubServer
 
   # ── Test helpers ───────────────────────────────────────────────────────────
+
+  # Sends a gui_action to the editor and waits for the frame to render.
+  defp send_gui_action(%{editor: editor, port: port}, action) do
+    _ = :sys.get_state(editor)
+    ref = HeadlessPort.prepare_await(port)
+    send(editor, {:minga_input, {:gui_action, action}})
+    {:ok, snapshot} = HeadlessPort.collect_frame(ref)
+    Process.put({:last_frame_snapshot, port}, snapshot)
+    :ok
+  end
 
   # Injects a stub agent session to avoid the ~700ms provider startup.
   defp inject_fake_session(%{editor: editor} = ctx) do
@@ -480,6 +492,96 @@ defmodule Minga.Integration.MouseTest do
 
       assert state.keymap_scope == :editor,
              "clicking in editor area should set scope to :editor, got #{state.keymap_scope}"
+    end
+  end
+
+  # ── Post-action housekeeping (shared pipeline) ────────────────────────────
+  #
+  # These tests verify that mouse and GUI action events run through the same
+  # housekeeping pipeline as keyboard input (highlight reset, reparse,
+  # selection range cleanup). Before the shared pipeline refactoring, mouse
+  # events only ran inlay hints + render, and GUI actions only ran render.
+
+  describe "post-action housekeeping via mouse" do
+    test "clicking exits visual mode and clears LSP selection ranges" do
+      ctx = start_editor("hello world\nsecond line\nthird line")
+
+      # Enter visual mode via keyboard
+      send_keys_sync(ctx, "v")
+      assert editor_mode(ctx) == :visual
+
+      # Inject LSP selection ranges into state (normally set by an LSP response)
+      :sys.replace_state(ctx.editor, fn state ->
+        %{state | selection_ranges: [%{"range" => %{}}], selection_range_index: 1}
+      end)
+
+      # Verify precondition
+      state = :sys.get_state(ctx.editor)
+      assert state.selection_ranges != nil
+
+      # Click to exit visual mode; post_action_housekeeping should clear ranges
+      send_mouse(ctx, 2, 5, :left)
+
+      assert editor_mode(ctx) == :normal
+
+      state = :sys.get_state(ctx.editor)
+
+      assert state.selection_ranges == nil,
+             "mouse click exiting visual mode should clear LSP selection ranges"
+
+      assert state.selection_range_index == 0
+    end
+
+    test "gui_action select_tab runs full housekeeping pipeline" do
+      ctx = start_editor("hello world\nsecond line\nthird line")
+
+      state = :sys.get_state(ctx.editor)
+      tab_id = state.tab_bar.active_id
+
+      # Send a gui_action (select current tab). Before the refactoring,
+      # gui_action handlers only called Renderer.render, skipping highlight
+      # reset, reparse, selection cleanup, and doc highlight scheduling.
+      # Now they run the full post_action_housekeeping pipeline. If any
+      # step crashes (e.g., highlight reset with a nil parser), the test
+      # fails.
+      send_gui_action(ctx, {:select_tab, tab_id})
+
+      # Verify the editor is still in a consistent state after the full
+      # housekeeping pipeline ran.
+      state = :sys.get_state(ctx.editor)
+      assert state.vim.mode == :normal
+      assert state.buffers.active != nil
+    end
+
+    test "mouse click after buffer switch runs shared housekeeping" do
+      ctx = start_editor("first buffer content\nsecond line\nthird line")
+
+      state = :sys.get_state(ctx.editor)
+      first_buffer = state.buffers.active
+
+      # Add a second buffer and switch to it via state injection
+      {:ok, second_buffer} =
+        BufferServer.start_link(content: "different content here")
+
+      :sys.replace_state(ctx.editor, fn state ->
+        EditorState.add_buffer(state, second_buffer)
+      end)
+
+      state = :sys.get_state(ctx.editor)
+      assert state.buffers.active == second_buffer
+
+      # Switch back to first buffer
+      :sys.replace_state(ctx.editor, fn state ->
+        %{state | buffers: %{state.buffers | active: first_buffer, active_index: 0}}
+      end)
+
+      # Mouse click triggers the shared housekeeping pipeline, which
+      # includes maybe_reset_highlight. Before the refactoring, mouse
+      # events skipped this step entirely. If it crashes, the test fails.
+      send_mouse(ctx, 2, 5, :left)
+
+      {line, _col} = buffer_cursor(ctx)
+      assert line == 1, "cursor should have moved to clicked row"
     end
   end
 end

@@ -99,4 +99,48 @@ defmodule Minga.Input.RouterTest do
       assert elem(cursor, 0) == 0
     end
   end
+
+  describe "capture_snapshot/1" do
+    test "returns pre-action state for an active buffer" do
+      state = base_state()
+      snapshot = Router.capture_snapshot(state)
+
+      assert snapshot.old_buffer == state.buffers.active
+      assert snapshot.old_mode == :normal
+      assert snapshot.old_cursor == {0, 0}
+      assert snapshot.buf_version == BufferServer.version(state.buffers.active)
+    end
+
+    test "handles nil active buffer" do
+      state = base_state()
+      state = %{state | buffers: %Buffers{active: nil, list: [], active_index: 0}}
+      snapshot = Router.capture_snapshot(state)
+
+      assert snapshot.old_buffer == nil
+      assert snapshot.old_cursor == nil
+      assert snapshot.buf_version == 0
+    end
+
+    test "reflects mode changes" do
+      state = base_state()
+
+      # Enter visual mode by pressing 'v'
+      state = Router.dispatch(state, ?v, 0)
+      assert state.vim.mode == :visual
+
+      snapshot = Router.capture_snapshot(state)
+      assert snapshot.old_mode == :visual
+    end
+
+    test "reflects cursor position after movement" do
+      state = base_state()
+
+      # Move cursor down one line
+      state = Router.dispatch(state, ?j, 0)
+
+      snapshot = Router.capture_snapshot(state)
+      {line, _col} = snapshot.old_cursor
+      assert line == 1
+    end
+  end
 end
