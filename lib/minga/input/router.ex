@@ -1,16 +1,17 @@
 defmodule Minga.Input.Router do
   @moduledoc """
   Walks the focus stack to dispatch a key press, then runs centralized
-  post-key housekeeping.
+  post-action housekeeping.
 
   The focus stack is an ordered list of `Minga.Input.Handler` modules.
   `dispatch/3` calls each handler's `handle_key/3` in order via
   `Enum.reduce_while/3`. The first handler that returns `{:handled, state}`
   stops the walk. If all handlers pass through, the key is silently dropped.
 
-  After dispatch, `post_key_housekeeping/5` runs highlight sync, reparse,
-  completion handling, and render exactly once regardless of which handler
-  consumed the key.
+  After dispatch, `post_key_housekeeping/6` runs keyboard-specific steps
+  (completion triggering) then delegates to `post_action_housekeeping/2`
+  for the universal pipeline shared by all input paths (keyboard, mouse,
+  GUI actions).
   """
 
   alias Minga.Buffer.Server, as: BufferServer
@@ -19,6 +20,30 @@ defmodule Minga.Input.Router do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Port.Manager, as: PortManager
   alias Minga.Port.Protocol
+
+  @typedoc "Pre-action snapshot for housekeeping comparisons."
+  @type snapshot :: %{
+          old_buffer: pid() | nil,
+          buf_version: non_neg_integer(),
+          old_mode: atom(),
+          old_cursor: {non_neg_integer(), non_neg_integer()} | nil
+        }
+
+  @doc """
+  Captures a snapshot of the editor state before an action runs.
+
+  Call this before dispatching any action (key press, mouse event, GUI action)
+  and pass the result to `post_action_housekeeping/2` afterward.
+  """
+  @spec capture_snapshot(EditorState.t()) :: snapshot()
+  def capture_snapshot(state) do
+    %{
+      old_buffer: state.buffers.active,
+      buf_version: buffer_version(state),
+      old_mode: state.vim.mode,
+      old_cursor: safe_cursor(state.buffers.active)
+    }
+  end
 
   @doc """
   Dispatches a key press through the focus stack and runs post-key housekeeping.
@@ -114,8 +139,28 @@ defmodule Minga.Input.Router do
   end
 
   @doc """
-  Runs post-key housekeeping: highlight sync, reparse, completion handling,
-  and render. Called exactly once per key press after dispatch.
+  Universal post-action housekeeping shared by all input paths (keyboard,
+  mouse, GUI actions).
+
+  Runs highlight reset, reparse, selection range cleanup, document highlight
+  scheduling, inlay hint scheduling, and render. Call after any action that
+  mutates editor state.
+  """
+  @spec post_action_housekeeping(EditorState.t(), snapshot()) :: EditorState.t()
+  def post_action_housekeeping(state, snapshot) do
+    state
+    |> Editor.do_maybe_reset_highlight(snapshot.old_buffer)
+    |> Editor.do_maybe_reparse(snapshot.buf_version)
+    |> maybe_clear_selection_ranges(snapshot.old_mode)
+    |> maybe_schedule_document_highlight(snapshot.old_buffer, snapshot.old_cursor)
+    |> LspActions.schedule_inlay_hints_on_scroll()
+    |> maybe_render(snapshot.buf_version)
+  end
+
+  @doc """
+  Keyboard-specific post-key housekeeping. Handles completion triggering
+  (which needs the codepoint/modifiers), then delegates to
+  `post_action_housekeeping/2` for the universal pipeline.
   """
   @spec post_key_housekeeping(
           EditorState.t(),
@@ -133,13 +178,16 @@ defmodule Minga.Input.Router do
         {codepoint, modifiers},
         old_cursor \\ nil
       ) do
+    snapshot = %{
+      old_buffer: old_buffer,
+      buf_version: buf_version_before,
+      old_mode: old_mode,
+      old_cursor: old_cursor
+    }
+
     state
-    |> Editor.do_maybe_reset_highlight(old_buffer)
-    |> Editor.do_maybe_reparse(buf_version_before)
     |> Editor.do_maybe_handle_completion(old_mode, codepoint, modifiers)
-    |> maybe_clear_selection_ranges(old_mode)
-    |> maybe_schedule_document_highlight(old_buffer, old_cursor)
-    |> maybe_render(buf_version_before)
+    |> post_action_housekeeping(snapshot)
   end
 
   # Clears selection range state when leaving visual mode by any means.
