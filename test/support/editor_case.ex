@@ -71,7 +71,8 @@ defmodule Minga.Test.EditorCase do
     # Send ready event to trigger initial render
     ref = HeadlessPort.prepare_await(port)
     send(editor, {:minga_input, {:ready, width, height}})
-    {:ok, _snapshot} = HeadlessPort.collect_frame(ref)
+    {:ok, snapshot} = HeadlessPort.collect_frame(ref)
+    Process.put({:last_frame_snapshot, port}, snapshot)
 
     Map.merge(ctx, %{
       editor: editor,
@@ -106,7 +107,8 @@ defmodule Minga.Test.EditorCase do
 
     ref = HeadlessPort.prepare_await(port)
     send(editor, {:minga_input, {:ready, width, height}})
-    {:ok, _snapshot} = HeadlessPort.collect_frame(ref)
+    {:ok, snapshot} = HeadlessPort.collect_frame(ref)
+    Process.put({:last_frame_snapshot, port}, snapshot)
 
     %{
       editor: editor,
@@ -195,6 +197,10 @@ defmodule Minga.Test.EditorCase do
   """
   @spec send_key(editor_ctx(), non_neg_integer(), non_neg_integer()) :: :ok
   def send_key(%{editor: editor, port: port}, codepoint, mods \\ 0) do
+    # Drain any pending async messages (timers, highlight events, etc.)
+    # before registering the frame waiter. This prevents a pending render
+    # from satisfying our waiter instead of the intended key's render.
+    _ = :sys.get_state(editor)
     ref = HeadlessPort.prepare_await(port)
     send(editor, {:minga_input, {:key_press, codepoint, mods}})
     {:ok, snapshot} = HeadlessPort.collect_frame(ref)
@@ -261,40 +267,70 @@ defmodule Minga.Test.EditorCase do
   end
 
   # ── Screen query helpers ─────────────────────────────────────────────────────
+
+  # All screen helpers read from the last captured frame snapshot stored
+  # by send_key/send_mouse/start_editor. This is race-free: the snapshot
+  # is immutable data in the test process, unaffected by subsequent async
+  # renders. Falls back to the live HeadlessPort grid only when no
+  # snapshot exists (should not happen in well-structured tests).
+
   @doc "Returns the rendered text for a specific row."
   @spec screen_row(editor_ctx(), non_neg_integer()) :: String.t()
   def screen_row(%{port: port}, row) do
-    HeadlessPort.get_row_text(port, row)
+    case Process.get({:last_frame_snapshot, port}) do
+      %{grid: grid} ->
+        grid
+        |> Enum.at(row, [])
+        |> Enum.map_join(& &1.char)
+        |> String.trim_trailing()
+
+      nil ->
+        HeadlessPort.get_row_text(port, row)
+    end
   end
 
   @doc "Returns all screen rows as a list of strings."
   @spec screen_text(editor_ctx()) :: [String.t()]
   def screen_text(%{port: port}) do
-    HeadlessPort.get_screen_text(port)
+    case Process.get({:last_frame_snapshot, port}) do
+      %{grid: grid} ->
+        Enum.map(grid, fn row ->
+          row |> Enum.map_join(& &1.char) |> String.trim_trailing()
+        end)
+
+      nil ->
+        HeadlessPort.get_screen_text(port)
+    end
   end
 
   @doc "Returns the modeline row text (second to last row)."
   @spec modeline(editor_ctx()) :: String.t()
-  def modeline(%{port: port, height: height}) do
-    HeadlessPort.get_row_text(port, height - 2)
+  def modeline(%{height: height} = ctx) do
+    screen_row(ctx, height - 2)
   end
 
   @doc "Returns the minibuffer row text (last row)."
   @spec minibuffer(editor_ctx()) :: String.t()
-  def minibuffer(%{port: port, height: height}) do
-    HeadlessPort.get_row_text(port, height - 1)
+  def minibuffer(%{height: height} = ctx) do
+    screen_row(ctx, height - 1)
   end
 
   @doc "Returns the cursor position on screen."
   @spec screen_cursor(editor_ctx()) :: {non_neg_integer(), non_neg_integer()}
   def screen_cursor(%{port: port}) do
-    HeadlessPort.get_cursor(port)
+    case Process.get({:last_frame_snapshot, port}) do
+      %{cursor: cursor} -> cursor
+      nil -> HeadlessPort.get_cursor(port)
+    end
   end
 
   @doc "Returns the current cursor shape."
   @spec cursor_shape(editor_ctx()) :: Minga.Port.Protocol.cursor_shape()
   def cursor_shape(%{port: port}) do
-    HeadlessPort.get_cursor_shape(port)
+    case Process.get({:last_frame_snapshot, port}) do
+      %{cursor_shape: shape} -> shape
+      nil -> HeadlessPort.get_cursor_shape(port)
+    end
   end
 
   @doc "Returns the buffer content."
@@ -540,6 +576,7 @@ defmodule Minga.Test.EditorCase do
         event_type \\ :press,
         click_count \\ 1
       ) do
+    _ = :sys.get_state(editor)
     ref = HeadlessPort.prepare_await(port)
     send(editor, {:minga_input, {:mouse_event, row, col, button, mods, event_type, click_count}})
     {:ok, snapshot} = HeadlessPort.collect_frame(ref)
@@ -553,6 +590,7 @@ defmodule Minga.Test.EditorCase do
   """
   @spec send_resize(editor_ctx(), pos_integer(), pos_integer()) :: editor_ctx()
   def send_resize(%{editor: editor, port: port} = ctx, new_width, new_height) do
+    _ = :sys.get_state(editor)
     HeadlessPort.resize(port, new_width, new_height)
     ref = HeadlessPort.prepare_await(port)
     send(editor, {:minga_input, {:resize, new_width, new_height}})
