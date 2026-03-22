@@ -17,7 +17,6 @@ defmodule Minga.Mode.Insert do
   @behaviour Minga.Mode
 
   alias Minga.Keymap.Active, as: KeymapActive
-  alias Minga.Keymap.Bindings
   alias Minga.Mode
 
   # Special codepoints
@@ -78,7 +77,9 @@ defmodule Minga.Mode.Insert do
   # Check user-defined insert-mode bindings before self-inserting printable
   # chars. This lets users bind Ctrl+key and other sequences in insert mode.
   def handle_key(key, state) do
-    case check_user_override(:insert, key) do
+    filetype = Map.get(state, :filetype)
+
+    case check_user_override(:insert, filetype, key) do
       {:command, command} ->
         {:execute, command, state}
 
@@ -103,10 +104,9 @@ defmodule Minga.Mode.Insert do
     {:continue, state}
   end
 
-  @spec check_user_override(atom(), Mode.key()) :: {:command, atom()} | :not_found
-  defp check_user_override(mode, key) do
-    trie = KeymapActive.mode_trie(mode)
-    Bindings.lookup(trie, key)
+  @spec check_user_override(atom(), atom() | nil, Mode.key()) :: {:command, atom()} | :not_found
+  defp check_user_override(mode, filetype, key) do
+    KeymapActive.resolve_mode_binding(mode, filetype, key)
   catch
     :exit, _ -> :not_found
   end

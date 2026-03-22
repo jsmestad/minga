@@ -7,7 +7,8 @@ defmodule Minga.Mode.VisualState do
   """
 
   @enforce_keys [:visual_type]
-  defstruct visual_type: :char,
+  defstruct filetype: :text,
+            visual_type: :char,
             visual_anchor: {0, 0},
             count: nil,
             leader_node: nil,
@@ -21,6 +22,7 @@ defmodule Minga.Mode.VisualState do
   @type text_object_modifier :: :inner | :around | nil
 
   @type t :: %__MODULE__{
+          filetype: atom(),
           visual_type: selection_type(),
           visual_anchor: {non_neg_integer(), non_neg_integer()},
           count: non_neg_integer() | nil,

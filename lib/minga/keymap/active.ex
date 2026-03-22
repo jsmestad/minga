@@ -52,6 +52,9 @@ defmodule Minga.Keymap.Active do
   @typedoc "Per-filetype binding tries for SPC m."
   @type filetype_tries :: %{atom() => Bindings.node_t()}
 
+  @typedoc "Per-{filetype, mode} binding tries for filetype-scoped non-normal overrides."
+  @type filetype_mode_tries :: %{{atom(), atom()} => Bindings.node_t()}
+
   @typedoc "Per-mode binding tries for insert, visual, operator_pending, command."
   @type mode_tries :: %{atom() => Bindings.node_t()}
 
@@ -60,6 +63,7 @@ defmodule Minga.Keymap.Active do
   @normal_overrides_key :normal_overrides
   @scope_overrides_key :scope_overrides
   @filetype_tries_key :filetype_tries
+  @filetype_mode_tries_key :filetype_mode_tries
   @mode_tries_key :mode_tries
 
   # ── GenServer (table lifecycle only) ────────────────────────────────────────
@@ -144,6 +148,64 @@ defmodule Minga.Keymap.Active do
   def filetype_trie(server, filetype) when is_atom(filetype) do
     tries = ets_get(server, @filetype_tries_key, %{})
     Map.get(tries, filetype, Bindings.new())
+  end
+
+  @doc """
+  Returns the filetype-scoped binding trie for a specific mode.
+
+  Used by insert and visual modes to check for filetype-specific key
+  overrides before the global mode trie.
+  Returns an empty trie if no bindings exist for the combination.
+  """
+  @spec filetype_mode_trie(atom(), atom()) :: Bindings.node_t()
+  @spec filetype_mode_trie(GenServer.server(), atom(), atom()) :: Bindings.node_t()
+  def filetype_mode_trie(filetype, mode),
+    do: filetype_mode_trie(__MODULE__, filetype, mode)
+
+  def filetype_mode_trie(server, filetype, mode)
+      when is_atom(filetype) and is_atom(mode) do
+    tries = ets_get(server, @filetype_mode_tries_key, %{})
+    Map.get(tries, {filetype, mode}, Bindings.new())
+  end
+
+  @doc """
+  Resolves a key binding for a mode with filetype priority.
+
+  Checks the filetype-scoped trie first, then falls back to the global
+  mode trie. Returns `{:command, atom()}` on match, or `:not_found`.
+
+  This is the single lookup function mode modules should use instead of
+  calling `mode_trie/1` directly.
+  """
+  @spec resolve_mode_binding(atom(), atom() | nil, Bindings.key()) ::
+          {:command, atom()} | :not_found
+  @spec resolve_mode_binding(GenServer.server(), atom(), atom() | nil, Bindings.key()) ::
+          {:command, atom()} | :not_found
+  def resolve_mode_binding(mode, filetype, key),
+    do: resolve_mode_binding(__MODULE__, mode, filetype, key)
+
+  def resolve_mode_binding(server, mode, nil, key)
+      when is_atom(mode) and (is_atom(key) or is_tuple(key)),
+      do: lookup_global_mode(server, mode, key)
+
+  def resolve_mode_binding(server, mode, filetype, key)
+      when is_atom(mode) and is_atom(filetype) and (is_atom(key) or is_tuple(key)) do
+    ft_trie = filetype_mode_trie(server, filetype, mode)
+
+    case Bindings.lookup(ft_trie, key) do
+      {:command, _} = match -> match
+      # Prefix matches and :not_found both fall through to the global trie.
+      # A partial match in the filetype trie shouldn't block a direct command
+      # in the global trie (single-key insert bindings can't be prefixes).
+      _ -> lookup_global_mode(server, mode, key)
+    end
+  end
+
+  @spec lookup_global_mode(GenServer.server(), atom(), Bindings.key()) ::
+          {:command, atom()} | :not_found
+  defp lookup_global_mode(server, mode, key) do
+    trie = mode_trie(server, mode)
+    Bindings.lookup(trie, key)
   end
 
   @doc """
@@ -232,7 +294,7 @@ defmodule Minga.Keymap.Active do
     filetype = Keyword.get(opts, :filetype)
 
     if filetype do
-      bind_filetype(server, filetype, key_str, command, description)
+      bind_filetype(server, mode, filetype, key_str, command, description)
     else
       bind(server, mode, key_str, command, description)
     end
@@ -283,6 +345,7 @@ defmodule Minga.Keymap.Active do
       {@normal_overrides_key, %{}},
       {@scope_overrides_key, %{}},
       {@filetype_tries_key, build_default_filetype_tries()},
+      {@filetype_mode_tries_key, %{}},
       {@mode_tries_key, %{}}
     ])
   end
@@ -369,9 +432,11 @@ defmodule Minga.Keymap.Active do
 
   # ── Private: filetype bind ─────────────────────────────────────────────────
 
-  @spec bind_filetype(GenServer.server(), atom(), String.t(), atom(), String.t()) ::
+  @spec bind_filetype(GenServer.server(), atom(), atom(), String.t(), atom(), String.t()) ::
           :ok | {:error, String.t()}
-  defp bind_filetype(server, filetype, key_str, command, description) do
+  defp bind_filetype(server, :normal, filetype, key_str, command, description) do
+    # Normal mode: SPC m prefix goes into the existing filetype trie (leader substitution).
+    # Non-SPC-m normal bindings also go into the filetype trie (stripped as-is).
     case KeyParser.parse(key_str) do
       {:ok, keys} ->
         sub_keys = strip_spc_m_prefix(keys)
@@ -386,6 +451,33 @@ defmodule Minga.Keymap.Active do
         Minga.Log.warning(:config, "Invalid key binding #{inspect(key_str)}: #{reason}")
         {:error, reason}
     end
+  end
+
+  defp bind_filetype(server, mode, filetype, key_str, command, description)
+       when mode in [:insert, :visual] do
+    # Non-normal modes: store in the filetype-mode trie keyed by {filetype, mode}.
+    case KeyParser.parse(key_str) do
+      {:ok, keys} ->
+        ets_update(server, @filetype_mode_tries_key, %{}, fn tries ->
+          trie = Map.get(tries, {filetype, mode}, Bindings.new())
+          updated = Bindings.bind(trie, keys, command, description)
+          Map.put(tries, {filetype, mode}, updated)
+        end)
+
+      {:error, reason} ->
+        Minga.Log.warning(:config, "Invalid key binding #{inspect(key_str)}: #{reason}")
+        {:error, reason}
+    end
+  end
+
+  defp bind_filetype(_server, mode, filetype, key_str, _command, _description) do
+    Minga.Log.warning(
+      :config,
+      "Filetype-scoped bindings not yet supported for #{mode} mode " <>
+        "(key: #{inspect(key_str)}, filetype: #{filetype})"
+    )
+
+    {:error, "filetype-scoped bindings not supported for #{mode} mode"}
   end
 
   # Strip "SPC m" prefix from key sequences so filetype tries store only
