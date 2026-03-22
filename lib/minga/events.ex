@@ -33,6 +33,7 @@ defmodule Minga.Events do
   | `:buffer_closed`  | `BufferClosedEvent`  | `buffer: pid(), path: String.t() \| :scratch`  |
   | `:buffer_changed` | `BufferChangedEvent` | `buffer: pid()`                   |
   | `:mode_changed`   | `ModeEvent`          | `old: atom(), new: atom()`        |
+  | `:git_status_changed` | `GitStatusEvent` | `git_root, entries, branch, ahead, behind` |
 
   ## Why Registry?
 
@@ -87,6 +88,20 @@ defmodule Minga.Events do
     @type t :: %__MODULE__{command: String.t()}
   end
 
+  defmodule GitStatusEvent do
+    @moduledoc "Payload for `:git_status_changed` events. Published by `Git.Repo` when repo status changes."
+    @enforce_keys [:git_root, :entries, :branch, :ahead, :behind]
+    defstruct [:git_root, :entries, :branch, :ahead, :behind]
+
+    @type t :: %__MODULE__{
+            git_root: String.t(),
+            entries: [Minga.Git.StatusEntry.t()],
+            branch: String.t() | nil,
+            ahead: non_neg_integer(),
+            behind: non_neg_integer()
+          }
+  end
+
   # ── Types ───────────────────────────────────────────────────────────────────
 
   @typedoc "Known event topics."
@@ -97,6 +112,7 @@ defmodule Minga.Events do
           | :buffer_changed
           | :content_replaced
           | :mode_changed
+          | :git_status_changed
           | :tool_install_started
           | :tool_install_progress
           | :tool_install_complete
@@ -111,6 +127,7 @@ defmodule Minga.Events do
           | BufferChangedEvent.t()
           | ModeEvent.t()
           | ToolMissingEvent.t()
+          | GitStatusEvent.t()
 
   # ── Child spec ──────────────────────────────────────────────────────────────
 
@@ -186,6 +203,7 @@ defmodule Minga.Events do
   @spec broadcast(:buffer_changed, BufferChangedEvent.t()) :: :ok
   @spec broadcast(:mode_changed, ModeEvent.t()) :: :ok
   @spec broadcast(:tool_missing, ToolMissingEvent.t()) :: :ok
+  @spec broadcast(:git_status_changed, GitStatusEvent.t()) :: :ok
   def broadcast(topic, %_{} = payload) when is_atom(topic) do
     Registry.dispatch(@registry, topic, fn entries ->
       for {pid, _value} <- entries do

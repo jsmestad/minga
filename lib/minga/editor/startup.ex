@@ -102,7 +102,8 @@ defmodule Minga.Editor.Startup do
       focus_stack: Minga.Input.default_stack(),
       dashboard: dashboard,
       swap_dir: Keyword.get(opts, :swap_dir),
-      session_dir: Keyword.get(opts, :session_dir)
+      session_dir: Keyword.get(opts, :session_dir),
+      suppress_tool_prompts: Keyword.get(opts, :suppress_tool_prompts, false)
     }
 
     state = %{state | tab_bar: initial_tab_bar(active_buf, keymap_scope)}

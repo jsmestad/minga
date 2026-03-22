@@ -303,6 +303,15 @@ final class SpyEncoder: InputEncoder, Sendable {
         case agentToolToggle(index: UInt16)
         case executeCommand(name: String)
         case minibufferSelect(index: UInt16)
+
+
+        case gitStageFile(path: String)
+        case gitUnstageFile(path: String)
+        case gitDiscardFile(path: String)
+        case gitStageAll
+        case gitUnstageAll
+        case gitCommit(message: String)
+        case gitOpenFile(path: String)
     }
 
     private let state = OSAllocatedUnfairLock(initialState: State())
@@ -368,6 +377,15 @@ final class SpyEncoder: InputEncoder, Sendable {
     func sendAgentToolToggle(index: UInt16) { state.withLock { $0.guiActions.append(.agentToolToggle(index: index)) } }
     func sendExecuteCommand(name: String) { state.withLock { $0.guiActions.append(.executeCommand(name: name)) } }
     func sendMinibufferSelect(index: UInt16) { state.withLock { $0.guiActions.append(.minibufferSelect(index: index)) } }
+
+
+    func sendGitStageFile(path: String) { state.withLock { $0.guiActions.append(.gitStageFile(path: path)) } }
+    func sendGitUnstageFile(path: String) { state.withLock { $0.guiActions.append(.gitUnstageFile(path: path)) } }
+    func sendGitDiscardFile(path: String) { state.withLock { $0.guiActions.append(.gitDiscardFile(path: path)) } }
+    func sendGitStageAll() { state.withLock { $0.guiActions.append(.gitStageAll) } }
+    func sendGitUnstageAll() { state.withLock { $0.guiActions.append(.gitUnstageAll) } }
+    func sendGitCommit(message: String) { state.withLock { $0.guiActions.append(.gitCommit(message: message)) } }
+    func sendGitOpenFile(path: String) { state.withLock { $0.guiActions.append(.gitOpenFile(path: path)) } }
 }
 
 @Suite("EditorNSView Resize")

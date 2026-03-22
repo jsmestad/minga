@@ -23,6 +23,8 @@ defmodule Minga.Editor do
   alias Minga.Session
   alias Minga.Swap
 
+  alias Minga.Git.Repo, as: GitRepo
+
   alias Minga.Editor.AgentLifecycle
   alias Minga.Editor.BottomPanel
   alias Minga.Editor.BufferLifecycle
@@ -60,6 +62,7 @@ defmodule Minga.Editor do
           | {:buffer, pid()}
           | {:width, pos_integer()}
           | {:height, pos_integer()}
+          | {:suppress_tool_prompts, boolean()}
 
   alias Minga.Agent.Session, as: AgentSession
 
@@ -188,6 +191,7 @@ defmodule Minga.Editor do
 
     # Refresh file tree git status when any buffer is saved.
     Minga.Events.subscribe(:buffer_saved)
+    Minga.Events.subscribe(:git_status_changed)
 
     # Tool manager progress: show install/update status in the status line.
     Minga.Events.subscribe(:tool_install_started)
@@ -990,6 +994,28 @@ defmodule Minga.Editor do
     {:noreply, state}
   end
 
+  def handle_info(
+        {:minga_event, :git_status_changed,
+         %Minga.Events.GitStatusEvent{
+           entries: entries,
+           branch: branch,
+           ahead: ahead,
+           behind: behind
+         }},
+        state
+      ) do
+    git_status_data = %{
+      repo_state: :normal,
+      branch: branch || "",
+      ahead: ahead,
+      behind: behind,
+      entries: entries
+    }
+
+    state = %{state | git_status_panel: git_status_data}
+    {:noreply, schedule_render(state, 16)}
+  end
+
   def handle_info({:minga_event, :buffer_saved, %Minga.Events.BufferEvent{}}, state) do
     state = refresh_tree_git_status(state)
     # Request fresh code lenses and inlay hints after save
@@ -1049,6 +1075,14 @@ defmodule Minga.Editor do
   end
 
   # ── Tool missing prompt ────────────────────────────────────────────────────
+
+  def handle_info(
+        {:minga_event, :tool_missing, %Minga.Events.ToolMissingEvent{command: command}},
+        %{suppress_tool_prompts: true} = state
+      ) do
+    Minga.Log.debug(:editor, "[Editor] tool_missing suppressed for #{command}")
+    {:noreply, state}
+  end
 
   def handle_info(
         {:minga_event, :tool_missing, %Minga.Events.ToolMissingEvent{command: command}},
@@ -1821,6 +1855,112 @@ defmodule Minga.Editor do
     ArgumentError ->
       Minga.Log.warning(:editor, "[execute_command] unrecognized command: #{name_str}")
       state
+  end
+
+  defp handle_gui_action(state, {:git_stage_file, path}) do
+    git_action(state, fn git_root -> Minga.Git.stage(git_root, path) end, "Staged #{path}")
+  end
+
+  defp handle_gui_action(state, {:git_unstage_file, path}) do
+    git_action(state, fn git_root -> Minga.Git.unstage(git_root, path) end, "Unstaged #{path}")
+  end
+
+  defp handle_gui_action(state, {:git_discard_file, path}) do
+    git_action(state, fn git_root -> Minga.Git.discard(git_root, path) end, "Discarded #{path}")
+  end
+
+  defp handle_gui_action(state, :git_stage_all) do
+    git_action(state, fn git_root -> Minga.Git.stage(git_root, ".") end, "Staged all changes")
+  end
+
+  defp handle_gui_action(state, :git_unstage_all) do
+    git_action(state, fn git_root -> Minga.Git.unstage_all(git_root) end, "Unstaged all")
+  end
+
+  defp handle_gui_action(state, {:git_commit, message}) do
+    case resolve_git_root() do
+      nil ->
+        %{state | status_msg: "Not in a git repository"}
+
+      git_root ->
+        result = Minga.Git.commit(git_root, message)
+        refresh_git_repo(git_root)
+
+        case result do
+          {:ok, hash} -> %{state | status_msg: "Committed #{hash}"}
+          {:error, reason} -> %{state | status_msg: "Commit failed: #{reason}"}
+        end
+    end
+  end
+
+  defp handle_gui_action(state, {:git_open_file, path}) do
+    case resolve_git_root() do
+      nil ->
+        %{state | status_msg: "Not in a git repository"}
+
+      git_root ->
+        abs_path = Path.join(git_root, path)
+        open_file_by_path(state, abs_path)
+    end
+  end
+
+  @spec git_action(state(), (String.t() -> :ok | {:error, String.t()}), String.t()) :: state()
+  defp git_action(state, operation, success_msg) when is_binary(success_msg) do
+    git_root = resolve_git_root()
+
+    if git_root do
+      case operation.(git_root) do
+        :ok ->
+          refresh_git_repo(git_root)
+          %{state | status_msg: success_msg}
+
+        {:error, reason} ->
+          %{state | status_msg: "Git error: #{reason}"}
+      end
+    else
+      %{state | status_msg: "Not in a git repository"}
+    end
+  end
+
+  @spec open_file_by_path(state(), String.t()) :: state()
+  defp open_file_by_path(state, abs_path) do
+    idx =
+      Enum.find_index(state.buffers.list, fn buf ->
+        try do
+          BufferServer.file_path(buf) == abs_path
+        catch
+          :exit, _ -> false
+        end
+      end)
+
+    case idx do
+      nil ->
+        case Commands.start_buffer(abs_path) do
+          {:ok, pid} -> Commands.add_buffer(state, pid)
+          {:error, _reason} -> %{state | status_msg: "Could not open #{abs_path}"}
+        end
+
+      i ->
+        EditorState.switch_buffer(state, i)
+    end
+  end
+
+  @spec resolve_git_root() :: String.t() | nil
+  defp resolve_git_root do
+    root = Minga.Project.resolve_root()
+
+    case Minga.Git.root_for(root) do
+      {:ok, git_root} -> git_root
+      :not_git -> nil
+    end
+  end
+
+  @spec refresh_git_repo(String.t()) :: :ok
+  defp refresh_git_repo(git_root) do
+    case GitRepo.lookup(git_root) do
+      nil -> :ok
+      pid -> GitRepo.refresh(pid)
+    end
   end
 
   # Refreshes the tool manager picker items if it's currently open.

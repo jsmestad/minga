@@ -62,8 +62,13 @@ defmodule Minga.Git.Tracker do
 
   # ── GenServer callbacks ────────────────────────────────────────────────
 
+  @typep tracker_state :: %{
+           monitors: %{reference() => {pid(), String.t()}},
+           repo_buffer_counts: %{String.t() => pos_integer()}
+         }
+
   @impl true
-  @spec init(keyword()) :: {:ok, %{monitors: %{reference() => pid()}}}
+  @spec init(keyword()) :: {:ok, tracker_state()}
   def init(_opts) do
     :ets.new(@registry_table, [
       :named_table,
@@ -76,10 +81,11 @@ defmodule Minga.Git.Tracker do
     Minga.Events.subscribe(:buffer_saved)
     Minga.Events.subscribe(:buffer_changed)
 
-    {:ok, %{monitors: %{}}}
+    {:ok, %{monitors: %{}, repo_buffer_counts: %{}}}
   end
 
   @impl true
+  @spec handle_info(term(), tracker_state()) :: {:noreply, tracker_state()}
   def handle_info(
         {:minga_event, :buffer_changed, %Minga.Events.BufferChangedEvent{buffer: buf}},
         state
@@ -94,6 +100,10 @@ defmodule Minga.Git.Tracker do
         state
       )
       when is_pid(buf) do
+    # Start Git.Repo for the git root (if not already running) before
+    # per-buffer tracking. This ensures repo-wide state is available
+    # for the status panel and modeline even before per-buffer diffs.
+    ensure_repo_for_path(path)
     state = maybe_start_git_buffer(state, buf, path)
     {:noreply, state}
   end
@@ -112,9 +122,13 @@ defmodule Minga.Git.Tracker do
       {nil, monitors} ->
         {:noreply, %{state | monitors: monitors}}
 
-      {buffer_pid, monitors} ->
+      {{buffer_pid, git_root}, monitors} ->
+        # Clean up the git buffer registry entry
         :ets.delete(@registry_table, buffer_pid)
-        {:noreply, %{state | monitors: monitors}}
+
+        # Decrement repo buffer count; stop Git.Repo when no buffers remain
+        repo_counts = maybe_decrement_repo_count(state.repo_buffer_counts, git_root)
+        {:noreply, %{state | monitors: monitors, repo_buffer_counts: repo_counts}}
     end
   end
 
@@ -150,12 +164,89 @@ defmodule Minga.Git.Tracker do
       ref = Process.monitor(buffer_pid)
       rel_path = Path.relative_to(path, git_root)
       Minga.Editor.log_to_messages("Git: tracking #{rel_path}")
-      %{state | monitors: Map.put(state.monitors, ref, buffer_pid)}
+
+      repo_counts = Map.update(state.repo_buffer_counts, git_root, 1, &(&1 + 1))
+
+      # Store {buffer_pid, git_root} so we can decrement repo counts
+      # without calling back into a potentially-dead GitBuffer process.
+      %{
+        state
+        | monitors: Map.put(state.monitors, ref, {buffer_pid, git_root}),
+          repo_buffer_counts: repo_counts
+      }
     else
       _ -> state
     end
   catch
     :exit, _ -> state
+  end
+
+  @spec ensure_repo_for_path(String.t()) :: :ok
+  defp ensure_repo_for_path(path) do
+    case Git.root_for(path) do
+      {:ok, git_root} -> ensure_repo(git_root)
+      :not_git -> :ok
+    end
+  end
+
+  @spec ensure_repo(String.t()) :: :ok
+  defp ensure_repo(git_root) do
+    project_root =
+      try do
+        Minga.Project.root()
+      catch
+        :exit, _ -> nil
+      end
+
+    case Git.Repo.ensure_started(git_root, project_root) do
+      {:ok, _pid} ->
+        :ok
+
+      {:error, {:already_started, _pid}} ->
+        :ok
+
+      {:error, reason} ->
+        Minga.Log.warning(
+          :editor,
+          "[Git.Tracker] failed to start Git.Repo for #{git_root}: #{inspect(reason)}"
+        )
+
+        :ok
+    end
+  end
+
+  @spec maybe_decrement_repo_count(%{String.t() => pos_integer()}, String.t() | nil) :: %{
+          String.t() => pos_integer()
+        }
+  defp maybe_decrement_repo_count(counts, nil), do: counts
+
+  defp maybe_decrement_repo_count(counts, git_root) do
+    case Map.get(counts, git_root) do
+      nil ->
+        counts
+
+      1 ->
+        # Last buffer for this repo closed; stop Git.Repo
+        stop_repo(git_root)
+        Map.delete(counts, git_root)
+
+      n ->
+        Map.put(counts, git_root, n - 1)
+    end
+  end
+
+  @spec stop_repo(String.t()) :: :ok
+  defp stop_repo(git_root) do
+    case Git.Repo.lookup(git_root) do
+      nil ->
+        :ok
+
+      pid ->
+        DynamicSupervisor.terminate_child(Minga.Git.Repo.Supervisor, pid)
+        :ok
+    end
+  catch
+    :exit, _ -> :ok
   end
 
   @spec invalidate_on_save(pid()) :: :ok

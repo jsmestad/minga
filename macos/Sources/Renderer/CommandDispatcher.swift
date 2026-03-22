@@ -348,6 +348,27 @@ final class CommandDispatcher {
             } else {
                 guiState.floatPopupState.hide()
             }
+
+        case .guiGitStatus(let repoState, let ahead, let behind, let branchName, let rawEntries):
+            let entries = rawEntries.compactMap { raw -> GitStatusEntry? in
+                guard let section = GitStatusSection(rawValue: raw.section),
+                      let status = GitFileStatus(rawValue: raw.status) else {
+                    return nil
+                }
+                return GitStatusEntry(
+                    id: (UInt32(raw.section) << 24) | (raw.pathHash & 0x00FFFFFF),
+                    section: section,
+                    status: status,
+                    path: raw.path
+                )
+            }
+            guiState.gitStatusState.update(
+                repoState: GitRepoState(rawValue: repoState) ?? .notARepo,
+                branchName: branchName,
+                ahead: ahead,
+                behind: behind,
+                entries: entries
+            )
         }
     }
 

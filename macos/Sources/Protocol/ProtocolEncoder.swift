@@ -52,6 +52,15 @@ protocol InputEncoder: AnyObject, Sendable {
 
     // Minibuffer actions
     func sendMinibufferSelect(index: UInt16)
+
+    // Git status actions
+    func sendGitStageFile(path: String)
+    func sendGitUnstageFile(path: String)
+    func sendGitDiscardFile(path: String)
+    func sendGitStageAll()
+    func sendGitUnstageAll()
+    func sendGitCommit(message: String)
+    func sendGitOpenFile(path: String)
 }
 
 extension InputEncoder {
@@ -361,6 +370,64 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         var buf = Data(count: 4 + pathLen)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_OPEN_FILE
+        writeU16(&buf, 2, UInt16(pathLen))
+        if pathLen > 0 {
+            buf.replaceSubrange(4..<(4 + pathLen), with: utf8[0..<pathLen])
+        }
+        writeFrame(buf)
+    }
+
+    // MARK: - Git Status Actions
+
+    func sendGitStageFile(path: String) {
+        sendGitPathAction(GUI_ACTION_GIT_STAGE_FILE, path: path)
+    }
+
+    func sendGitUnstageFile(path: String) {
+        sendGitPathAction(GUI_ACTION_GIT_UNSTAGE_FILE, path: path)
+    }
+
+    func sendGitDiscardFile(path: String) {
+        sendGitPathAction(GUI_ACTION_GIT_DISCARD_FILE, path: path)
+    }
+
+    func sendGitStageAll() {
+        var buf = Data(count: 2)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_GIT_STAGE_ALL
+        writeFrame(buf)
+    }
+
+    func sendGitUnstageAll() {
+        var buf = Data(count: 2)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_GIT_UNSTAGE_ALL
+        writeFrame(buf)
+    }
+
+    func sendGitCommit(message: String) {
+        let utf8 = Array(message.utf8)
+        let msgLen = min(utf8.count, Int(UInt16.max))
+        var buf = Data(count: 4 + msgLen)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_GIT_COMMIT
+        writeU16(&buf, 2, UInt16(msgLen))
+        if msgLen > 0 {
+            buf.replaceSubrange(4..<(4 + msgLen), with: utf8[0..<msgLen])
+        }
+        writeFrame(buf)
+    }
+
+    func sendGitOpenFile(path: String) {
+        sendGitPathAction(GUI_ACTION_GIT_OPEN_FILE, path: path)
+    }
+
+    private func sendGitPathAction(_ actionType: UInt8, path: String) {
+        let utf8 = Array(path.utf8)
+        let pathLen = min(utf8.count, Int(UInt16.max))
+        var buf = Data(count: 4 + pathLen)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = actionType
         writeU16(&buf, 2, UInt16(pathLen))
         if pathLen > 0 {
             buf.replaceSubrange(4..<(4 + pathLen), with: utf8[0..<pathLen])

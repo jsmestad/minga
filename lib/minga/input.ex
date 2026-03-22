@@ -26,6 +26,7 @@ defmodule Minga.Input do
   alias Minga.Input.Dashboard
   alias Minga.Input.DiffReview
   alias Minga.Input.FileTreeHandler
+  alias Minga.Input.GitStatus
   alias Minga.Input.GlobalBindings
   alias Minga.Input.Hover
   alias Minga.Input.Interrupt
@@ -104,6 +105,7 @@ defmodule Minga.Input do
       DiffReview,
       AgentPanel,
       FileTreeHandler,
+      GitStatus,
       Popup,
       Scoped,
       AgentNav,

@@ -112,6 +112,7 @@ defmodule Minga.Editor.State do
             message_store: %MessageStore{},
             windows: %Windows{},
             file_tree: %FileTreeState{},
+            git_status_panel: nil,
             lsp_status: :none,
             parser_status: :available,
             hover_popup: nil,
@@ -146,7 +147,8 @@ defmodule Minga.Editor.State do
             tool_prompt_queue: [],
             session_timer: nil,
             swap_dir: nil,
-            session_dir: nil
+            session_dir: nil,
+            suppress_tool_prompts: false
 
   @type t :: %__MODULE__{
           port_manager: GenServer.server() | nil,
@@ -170,6 +172,7 @@ defmodule Minga.Editor.State do
           message_store: MessageStore.t(),
           windows: Windows.t(),
           file_tree: FileTreeState.t(),
+          git_status_panel: Minga.Port.Protocol.GUI.git_status_data() | nil,
           lsp_status: Minga.Editor.Modeline.lsp_status(),
           parser_status: Minga.Editor.Modeline.parser_status(),
           hover_popup: Minga.Editor.HoverPopup.t() | nil,
@@ -208,7 +211,8 @@ defmodule Minga.Editor.State do
           tool_prompt_queue: [atom()],
           session_timer: reference() | nil,
           swap_dir: String.t() | nil,
-          session_dir: String.t() | nil
+          session_dir: String.t() | nil,
+          suppress_tool_prompts: boolean()
         }
 
   # ── Convenience accessors ─────────────────────────────────────────────────

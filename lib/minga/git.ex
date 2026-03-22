@@ -28,6 +28,21 @@ defmodule Minga.Git do
           }
   end
 
+  defmodule BranchInfo do
+    @moduledoc "Structured information about a git branch."
+    @enforce_keys [:name, :current]
+    defstruct [:name, :current, upstream: nil, remote: false, ahead: nil, behind: nil]
+
+    @type t :: %__MODULE__{
+            name: String.t(),
+            current: boolean(),
+            upstream: String.t() | nil,
+            remote: boolean(),
+            ahead: non_neg_integer() | nil,
+            behind: non_neg_integer() | nil
+          }
+  end
+
   defmodule LogEntry do
     @moduledoc false
     @enforce_keys [:hash, :short_hash, :author, :date, :message]
@@ -127,6 +142,62 @@ defmodule Minga.Git do
   """
   @spec current_branch(String.t()) :: {:ok, String.t()} | :error
   def current_branch(git_root), do: impl().current_branch(git_root)
+
+  @doc """
+  Returns ahead/behind counts relative to the upstream tracking branch.
+  """
+  @spec ahead_behind(String.t()) :: {:ok, non_neg_integer(), non_neg_integer()} | :error
+  def ahead_behind(git_root), do: impl().ahead_behind(git_root)
+
+  @doc """
+  Unstages specific files from the index (equivalent to `git reset HEAD -- <paths>`).
+  """
+  @spec unstage(String.t(), String.t() | [String.t()]) :: :ok | {:error, String.t()}
+  def unstage(git_root, paths), do: impl().unstage(git_root, paths)
+
+  @doc """
+  Unstages all staged files (equivalent to `git reset HEAD`).
+  """
+  @spec unstage_all(String.t()) :: :ok | {:error, String.t()}
+  def unstage_all(git_root), do: impl().unstage_all(git_root)
+
+  @doc """
+  Discards working tree changes for a file. Destructive and irreversible.
+
+  For tracked files, runs `git checkout -- <path>`.
+  For untracked files, deletes the file.
+  """
+  @spec discard(String.t(), String.t()) :: :ok | {:error, String.t()}
+  def discard(git_root, path), do: impl().discard(git_root, path)
+
+  @doc "Lists all branches (local and remote)."
+  @spec branch_list(String.t()) :: {:ok, [BranchInfo.t()]} | {:error, String.t()}
+  def branch_list(git_root), do: impl().branch_list(git_root)
+
+  @doc "Creates a new branch and checks it out."
+  @spec branch_create(String.t(), String.t()) :: :ok | {:error, String.t()}
+  def branch_create(git_root, name), do: impl().branch_create(git_root, name)
+
+  @doc "Switches to an existing branch."
+  @spec branch_switch(String.t(), String.t()) :: :ok | {:error, String.t()}
+  def branch_switch(git_root, name), do: impl().branch_switch(git_root, name)
+
+  @doc "Deletes a branch."
+  @spec branch_delete(String.t(), String.t(), boolean()) :: :ok | {:error, String.t()}
+  def branch_delete(git_root, name, force \\ false),
+    do: impl().branch_delete(git_root, name, force)
+
+  @doc "Pushes the current branch to its upstream remote."
+  @spec push(String.t(), keyword()) :: :ok | {:error, String.t()}
+  def push(git_root, opts \\ []), do: impl().push(git_root, opts)
+
+  @doc "Pulls from the upstream remote (fetch + merge)."
+  @spec pull(String.t(), keyword()) :: :ok | {:error, String.t()}
+  def pull(git_root, opts \\ []), do: impl().pull(git_root, opts)
+
+  @doc "Fetches from all remotes."
+  @spec fetch_remotes(String.t(), keyword()) :: :ok | {:error, String.t()}
+  def fetch_remotes(git_root, opts \\ []), do: impl().fetch_remotes(git_root, opts)
 
   # ── Pure calculations (no backend needed) ──────────────────────────────
 

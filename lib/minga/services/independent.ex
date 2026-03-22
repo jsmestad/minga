@@ -9,6 +9,8 @@ defmodule Minga.Services.Independent do
   ## Children
 
       Services.Independent (one_for_one)
+      ├── Minga.Git.Repo.Registry        Registry(:unique) for per-repo GenServers
+      ├── Minga.Git.Repo.Supervisor      DynamicSupervisor for Git.Repo processes
       ├── Minga.Git.Tracker              Subscribes to buffer events, ETS registry
       ├── Minga.CommandOutput.Registry    Registry(:unique)
       ├── Minga.Eval.TaskSupervisor      Task.Supervisor for eval/async work
@@ -31,6 +33,8 @@ defmodule Minga.Services.Independent do
   @spec init(keyword()) :: {:ok, {Supervisor.sup_flags(), [Supervisor.child_spec()]}}
   def init(_opts) do
     children = [
+      {Registry, keys: :unique, name: Minga.Git.Repo.Registry},
+      {DynamicSupervisor, name: Minga.Git.Repo.Supervisor, strategy: :one_for_one},
       Minga.Git.Tracker,
       {Registry, keys: :unique, name: Minga.CommandOutput.Registry},
       {Task.Supervisor, name: Minga.Eval.TaskSupervisor},

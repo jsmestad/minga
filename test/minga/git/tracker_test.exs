@@ -3,6 +3,7 @@ defmodule Minga.Git.TrackerTest do
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Events
+  alias Minga.Git.Repo
   alias Minga.Git.Stub, as: GitStub
   alias Minga.Git.Tracker
 
@@ -60,6 +61,27 @@ defmodule Minga.Git.TrackerTest do
       assert_until(fn -> not Tracker.tracked?(buf) end,
         message: "Expected git buffer to be cleaned up after buffer death"
       )
+    end
+
+    test "stops Git.Repo when last buffer for a git root closes", %{root: dir} do
+      path = Path.join(dir, "repo_lifecycle_#{:rand.uniform(100_000)}.ex")
+      File.write!(path, "x = 1\n")
+      GitStub.set_head(dir, Path.relative_to(path, dir), "x = 1\n")
+
+      {:ok, buf} = BufferServer.start_link(content: "x = 1\n", file_path: path)
+      Events.broadcast(:buffer_opened, %Events.BufferEvent{buffer: buf, path: path})
+      assert_until(fn -> Tracker.tracked?(buf) end)
+
+      # Verify Git.Repo was started
+      repo_pid = Repo.lookup(dir)
+      assert is_pid(repo_pid)
+      ref = Process.monitor(repo_pid)
+
+      # Close the buffer (last one for this git root)
+      GenServer.stop(buf)
+
+      # Git.Repo should be terminated when the last buffer closes
+      assert_receive {:DOWN, ^ref, :process, ^repo_pid, _}, 1000
     end
 
     test "no-op for file not in a git repo" do

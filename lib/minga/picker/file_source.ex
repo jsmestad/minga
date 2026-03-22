@@ -11,6 +11,7 @@ defmodule Minga.Picker.FileSource do
   alias Minga.Devicon
   alias Minga.Editor.State, as: EditorState
   alias Minga.Filetype
+  alias Minga.Git.Repo, as: GitRepo
   alias Minga.Log
   alias Minga.Picker.Item
   alias Minga.Picker.Source
@@ -30,31 +31,35 @@ defmodule Minga.Picker.FileSource do
 
     case Minga.FileFind.list_files(root) do
       {:ok, paths} ->
-        # Build frecency map from recent files (position → score)
-        frecency_map = build_frecency_map()
+        recency_map = build_recency_map()
+        git_status_map = build_git_status_map()
+        score_map = build_score_map(recency_map, git_status_map)
 
         paths
-        |> Enum.map(&format_file_candidate/1)
-        |> sort_by_frecency(frecency_map)
+        |> Enum.map(&format_file_candidate(&1, git_status_map))
+        |> sort_by_score(score_map)
 
       {:error, msg} ->
         log_error(msg)
     end
   end
 
-  @spec format_file_candidate(String.t()) :: Item.t()
-  defp format_file_candidate(path) do
+  @spec format_file_candidate(String.t(), %{String.t() => atom()}) :: Item.t()
+  defp format_file_candidate(path, git_status_map) do
     filename = Path.basename(path)
     dir = Path.dirname(path)
     ft = Filetype.detect(filename)
     {icon, color} = Devicon.icon_and_color(ft)
     dir_display = if dir == ".", do: "", else: dir
 
+    annotation = git_status_annotation(Map.get(git_status_map, path))
+
     %Item{
       id: path,
       label: "#{icon} #{filename}",
       description: dir_display,
       icon_color: color,
+      annotation: annotation,
       two_line: true
     }
   end
@@ -135,10 +140,10 @@ defmodule Minga.Picker.FileSource do
 
   # ── Private ─────────────────────────────────────────────────────────────────
 
-  # Build a map of relative_path → frecency_score from Project.recent_files.
+  # Build a map of relative_path → recency_score from Project.recent_files.
   # Most recently opened files get the highest score.
-  @spec build_frecency_map() :: %{String.t() => non_neg_integer()}
-  defp build_frecency_map do
+  @spec build_recency_map() :: %{String.t() => non_neg_integer()}
+  defp build_recency_map do
     recent = Minga.Project.recent_files()
     total = length(recent)
 
@@ -152,17 +157,59 @@ defmodule Minga.Picker.FileSource do
     :exit, _ -> %{}
   end
 
-  # Sort items by frecency (recent files first), preserving filesystem order for non-recent files.
-  @spec sort_by_frecency([Item.t()], %{String.t() => non_neg_integer()}) :: [Item.t()]
-  defp sort_by_frecency(items, frecency_map) when map_size(frecency_map) == 0, do: items
+  # Build a map of relative_path → git status atom from Git.Repo.
+  @spec build_git_status_map() :: %{String.t() => atom()}
+  defp build_git_status_map do
+    root = project_root()
 
-  defp sort_by_frecency(items, frecency_map) do
+    with {:ok, git_root} <- Minga.Git.root_for(root),
+         repo_pid when is_pid(repo_pid) <- GitRepo.lookup(git_root) do
+      GitRepo.status(repo_pid)
+      |> Enum.into(%{}, fn entry -> {entry.path, entry.status} end)
+    else
+      _ -> %{}
+    end
+  catch
+    :exit, _ -> %{}
+  end
+
+  # Combine recency and git-modified scores. Git-modified files get a flat
+  # boost of 5. Recently opened files get position-based score (N..1).
+  # Both boosts stack: recently opened AND modified = highest score.
+  @spec build_score_map(%{String.t() => non_neg_integer()}, %{String.t() => atom()}) :: %{
+          String.t() => non_neg_integer()
+        }
+  defp build_score_map(recency_map, git_status_map) do
+    all_paths = Map.keys(recency_map) ++ Map.keys(git_status_map)
+
+    Map.new(Enum.uniq(all_paths), fn path ->
+      recency = Map.get(recency_map, path, 0)
+      git_boost = if Map.has_key?(git_status_map, path), do: 5, else: 0
+      {path, recency + git_boost}
+    end)
+  end
+
+  # Sort items by combined score (recent + git-modified), preserving filesystem order for unscored.
+  @spec sort_by_score([Item.t()], %{String.t() => non_neg_integer()}) :: [Item.t()]
+  defp sort_by_score(items, score_map) when map_size(score_map) == 0, do: items
+
+  defp sort_by_score(items, score_map) do
     Enum.sort_by(items, fn %Item{id: path} ->
-      score = Map.get(frecency_map, path, 0)
-      # Negate so higher scores sort first
+      score = Map.get(score_map, path, 0)
       {-score, path}
     end)
   end
+
+  # Returns a status annotation letter for display in the picker.
+  @spec git_status_annotation(atom() | nil) :: String.t() | nil
+  defp git_status_annotation(:modified), do: "M"
+  defp git_status_annotation(:added), do: "A"
+  defp git_status_annotation(:deleted), do: "D"
+  defp git_status_annotation(:untracked), do: "?"
+  defp git_status_annotation(:renamed), do: "R"
+  defp git_status_annotation(:copied), do: "C"
+  defp git_status_annotation(:conflict), do: "!"
+  defp git_status_annotation(_), do: nil
 
   defdelegate project_root, to: Minga.Project, as: :resolve_root
 end

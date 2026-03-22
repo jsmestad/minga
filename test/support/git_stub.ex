@@ -91,6 +91,7 @@ defmodule Minga.Git.Stub do
     :ets.match_delete(@table, {{:log, expanded}, :_})
     :ets.match_delete(@table, {{:diff, expanded}, :_})
     :ets.match_delete(@table, {{:branch, expanded}, :_})
+    :ets.match_delete(@table, {{:ahead_behind, expanded}, :_})
     :ok
   end
 
@@ -161,6 +162,69 @@ defmodule Minga.Git.Stub do
       [{_, branch}] -> {:ok, branch}
       [] -> {:ok, "main"}
     end
+  end
+
+  @impl true
+  @spec ahead_behind(String.t()) :: {:ok, non_neg_integer(), non_neg_integer()} | :error
+  def ahead_behind(git_root) do
+    case :ets.lookup(@table, {:ahead_behind, Path.expand(git_root)}) do
+      [{_, {ahead, behind}}] -> {:ok, ahead, behind}
+      [] -> {:ok, 0, 0}
+    end
+  end
+
+  @impl true
+  @spec unstage(String.t(), String.t() | [String.t()]) :: :ok
+  def unstage(_git_root, _paths), do: :ok
+
+  @impl true
+  @spec unstage_all(String.t()) :: :ok
+  def unstage_all(_git_root), do: :ok
+
+  @impl true
+  @spec discard(String.t(), String.t()) :: :ok
+  def discard(_git_root, _path), do: :ok
+
+  @impl true
+  @spec branch_list(String.t()) :: {:ok, [Minga.Git.BranchInfo.t()]}
+  def branch_list(git_root) do
+    case :ets.lookup(@table, {:branches, Path.expand(git_root)}) do
+      [{_, branches}] -> {:ok, branches}
+      [] -> {:ok, [%Minga.Git.BranchInfo{name: "main", current: true}]}
+    end
+  end
+
+  @impl true
+  @spec branch_create(String.t(), String.t()) :: :ok
+  def branch_create(_git_root, _name), do: :ok
+
+  @impl true
+  @spec branch_switch(String.t(), String.t()) :: :ok
+  def branch_switch(_git_root, _name), do: :ok
+
+  @impl true
+  @spec branch_delete(String.t(), String.t(), boolean()) :: :ok
+  def branch_delete(_git_root, _name, _force \\ false), do: :ok
+
+  @impl true
+  @spec push(String.t(), keyword()) :: :ok
+  def push(_git_root, _opts \\ []), do: :ok
+
+  @impl true
+  @spec pull(String.t(), keyword()) :: :ok
+  def pull(_git_root, _opts \\ []), do: :ok
+
+  @impl true
+  @spec fetch_remotes(String.t(), keyword()) :: :ok
+  def fetch_remotes(_git_root, _opts \\ []), do: :ok
+
+  # ── Additional Stub Configuration ─────────────────────────────────────
+
+  @doc "Sets the ahead/behind counts for a git root."
+  @spec set_ahead_behind(String.t(), non_neg_integer(), non_neg_integer()) :: :ok
+  def set_ahead_behind(git_root, ahead, behind) do
+    :ets.insert(@table, {{:ahead_behind, Path.expand(git_root)}, {ahead, behind}})
+    :ok
   end
 
   # ── Private ────────────────────────────────────────────────────────────

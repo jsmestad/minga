@@ -100,8 +100,7 @@ defmodule Minga.Git.System do
         entries =
           output
           |> String.split("\n", trim: true)
-          |> Enum.map(&parse_status_line/1)
-          |> Enum.reject(&is_nil/1)
+          |> Enum.flat_map(&parse_status_line/1)
 
         {:ok, entries}
 
@@ -198,6 +197,194 @@ defmodule Minga.Git.System do
   end
 
   @impl true
+  @spec ahead_behind(String.t()) :: {:ok, non_neg_integer(), non_neg_integer()} | :error
+  def ahead_behind(git_root) when is_binary(git_root) do
+    case System.cmd("git", ["rev-list", "--left-right", "--count", "HEAD...@{upstream}"],
+           cd: git_root,
+           stderr_to_stdout: true
+         ) do
+      {output, 0} ->
+        case String.split(String.trim(output), "\t") do
+          [ahead_str, behind_str] ->
+            {ahead, _} = Integer.parse(ahead_str)
+            {behind, _} = Integer.parse(behind_str)
+            {:ok, ahead, behind}
+
+          _ ->
+            :error
+        end
+
+      _ ->
+        :error
+    end
+  rescue
+    _ -> :error
+  end
+
+  @impl true
+  @spec unstage(String.t(), String.t() | [String.t()]) :: :ok | {:error, String.t()}
+  def unstage(git_root, path) when is_binary(git_root) and is_binary(path) do
+    unstage(git_root, [path])
+  end
+
+  def unstage(git_root, paths) when is_binary(git_root) and is_list(paths) do
+    args = ["reset", "HEAD", "--"] ++ paths
+
+    case System.cmd("git", args, cd: git_root, stderr_to_stdout: true) do
+      {_, 0} -> :ok
+      {output, _} -> {:error, "git reset failed: #{String.trim(output)}"}
+    end
+  rescue
+    e in [ErlangError, ArgumentError] -> {:error, "git reset error: #{Exception.message(e)}"}
+  end
+
+  @impl true
+  @spec unstage_all(String.t()) :: :ok | {:error, String.t()}
+  def unstage_all(git_root) when is_binary(git_root) do
+    case System.cmd("git", ["reset", "HEAD"], cd: git_root, stderr_to_stdout: true) do
+      {_, 0} -> :ok
+      {output, _} -> {:error, "git reset failed: #{String.trim(output)}"}
+    end
+  rescue
+    e in [ErlangError, ArgumentError] -> {:error, "git reset error: #{Exception.message(e)}"}
+  end
+
+  @impl true
+  @spec discard(String.t(), String.t()) :: :ok | {:error, String.t()}
+  def discard(git_root, path) when is_binary(git_root) and is_binary(path) do
+    abs_path = Path.join(git_root, path)
+
+    # Check if the file is tracked by git
+    case System.cmd("git", ["ls-files", "--error-unmatch", path],
+           cd: git_root,
+           stderr_to_stdout: true
+         ) do
+      {_, 0} ->
+        # Tracked file: restore from index/HEAD
+        case System.cmd("git", ["checkout", "--", path],
+               cd: git_root,
+               stderr_to_stdout: true
+             ) do
+          {_, 0} -> :ok
+          {output, _} -> {:error, "git checkout failed: #{String.trim(output)}"}
+        end
+
+      _ ->
+        # Untracked file: delete it
+        case File.rm(abs_path) do
+          :ok -> :ok
+          {:error, reason} -> {:error, "Failed to remove #{path}: #{inspect(reason)}"}
+        end
+    end
+  rescue
+    e in [ErlangError, ArgumentError] -> {:error, "git discard error: #{Exception.message(e)}"}
+  end
+
+  @impl true
+  @spec branch_list(String.t()) :: {:ok, [Minga.Git.BranchInfo.t()]} | {:error, String.t()}
+  def branch_list(git_root) when is_binary(git_root) do
+    format = "%(refname:short)%09%(upstream:short)%09%(upstream:track)%09%(HEAD)"
+
+    case System.cmd("git", ["branch", "-a", "--format=#{format}"],
+           cd: git_root,
+           stderr_to_stdout: true
+         ) do
+      {output, 0} ->
+        branches =
+          output
+          |> String.split("\n", trim: true)
+          |> Enum.map(&parse_branch_line/1)
+          |> Enum.reject(&is_nil/1)
+
+        {:ok, branches}
+
+      {output, _} ->
+        {:error, "git branch failed: #{String.trim(output)}"}
+    end
+  rescue
+    e in [ErlangError, ArgumentError] -> {:error, "git branch error: #{Exception.message(e)}"}
+  end
+
+  @impl true
+  @spec branch_create(String.t(), String.t()) :: :ok | {:error, String.t()}
+  def branch_create(git_root, name) when is_binary(git_root) and is_binary(name) do
+    case System.cmd("git", ["checkout", "-b", name], cd: git_root, stderr_to_stdout: true) do
+      {_, 0} -> :ok
+      {output, _} -> {:error, "git checkout -b failed: #{String.trim(output)}"}
+    end
+  rescue
+    e in [ErlangError, ArgumentError] ->
+      {:error, "git branch create error: #{Exception.message(e)}"}
+  end
+
+  @impl true
+  @spec branch_switch(String.t(), String.t()) :: :ok | {:error, String.t()}
+  def branch_switch(git_root, name) when is_binary(git_root) and is_binary(name) do
+    case System.cmd("git", ["checkout", name], cd: git_root, stderr_to_stdout: true) do
+      {_, 0} -> :ok
+      {output, _} -> {:error, "git checkout failed: #{String.trim(output)}"}
+    end
+  rescue
+    e in [ErlangError, ArgumentError] ->
+      {:error, "git branch switch error: #{Exception.message(e)}"}
+  end
+
+  @impl true
+  @spec branch_delete(String.t(), String.t(), boolean()) :: :ok | {:error, String.t()}
+  def branch_delete(git_root, name, force \\ false)
+      when is_binary(git_root) and is_binary(name) do
+    flag = if force, do: "-D", else: "-d"
+
+    case System.cmd("git", ["branch", flag, name], cd: git_root, stderr_to_stdout: true) do
+      {_, 0} -> :ok
+      {output, _} -> {:error, "git branch delete failed: #{String.trim(output)}"}
+    end
+  rescue
+    e in [ErlangError, ArgumentError] ->
+      {:error, "git branch delete error: #{Exception.message(e)}"}
+  end
+
+  @impl true
+  @spec push(String.t(), keyword()) :: :ok | {:error, String.t()}
+  def push(git_root, opts \\ []) when is_binary(git_root) do
+    args = ["push"]
+    args = if Keyword.get(opts, :set_upstream), do: args ++ ["--set-upstream"], else: args
+    args = if Keyword.get(opts, :force), do: args ++ ["--force-with-lease"], else: args
+
+    case System.cmd("git", args, cd: git_root, stderr_to_stdout: true) do
+      {_, 0} -> :ok
+      {output, _} -> {:error, "git push failed: #{String.trim(output)}"}
+    end
+  rescue
+    e in [ErlangError, ArgumentError] -> {:error, "git push error: #{Exception.message(e)}"}
+  end
+
+  @impl true
+  @spec pull(String.t(), keyword()) :: :ok | {:error, String.t()}
+  def pull(git_root, opts \\ []) when is_binary(git_root) do
+    args = ["pull"]
+    args = if Keyword.get(opts, :rebase), do: args ++ ["--rebase"], else: args
+
+    case System.cmd("git", args, cd: git_root, stderr_to_stdout: true) do
+      {_, 0} -> :ok
+      {output, _} -> {:error, "git pull failed: #{String.trim(output)}"}
+    end
+  rescue
+    e in [ErlangError, ArgumentError] -> {:error, "git pull error: #{Exception.message(e)}"}
+  end
+
+  @impl true
+  @spec fetch_remotes(String.t(), keyword()) :: :ok | {:error, String.t()}
+  def fetch_remotes(git_root, _opts \\ []) when is_binary(git_root) do
+    case System.cmd("git", ["fetch", "--all"], cd: git_root, stderr_to_stdout: true) do
+      {_, 0} -> :ok
+      {output, _} -> {:error, "git fetch failed: #{String.trim(output)}"}
+    end
+  rescue
+    e in [ErlangError, ArgumentError] -> {:error, "git fetch error: #{Exception.message(e)}"}
+  end
+
+  @impl true
   @spec current_branch(String.t()) :: {:ok, String.t()} | :error
   def current_branch(git_root) when is_binary(git_root) do
     # Read .git/HEAD directly to avoid spawning a subprocess.
@@ -229,43 +416,100 @@ defmodule Minga.Git.System do
 
   alias Minga.Git.StatusEntry
 
-  @spec parse_status_line(String.t()) :: Minga.Git.status_entry() | nil
+  @spec parse_status_line(String.t()) :: [Minga.Git.status_entry()]
   defp parse_status_line(line) when byte_size(line) >= 3 do
     index_status = String.at(line, 0)
     worktree_status = String.at(line, 1)
     path = String.trim(String.slice(line, 3..-1//1))
 
-    {status, staged} = interpret_status_codes(index_status, worktree_status)
-    %StatusEntry{path: path, status: status, staged: staged}
+    interpret_status_codes(index_status, worktree_status, path)
   end
 
-  defp parse_status_line(_), do: nil
+  defp parse_status_line(_), do: []
 
-  @spec interpret_status_codes(String.t(), String.t()) :: {atom(), boolean()}
+  @spec interpret_status_codes(String.t(), String.t(), String.t()) :: [Minga.Git.status_entry()]
   # Conflict/unmerged states
-  defp interpret_status_codes("U", _), do: {:conflict, false}
-  defp interpret_status_codes(_, "U"), do: {:conflict, false}
-  defp interpret_status_codes("D", "D"), do: {:conflict, false}
-  defp interpret_status_codes("A", "A"), do: {:conflict, false}
-  # Untracked
-  defp interpret_status_codes("?", "?"), do: {:untracked, false}
-  # Staged (index has changes)
-  defp interpret_status_codes("A", _), do: {:added, true}
-  defp interpret_status_codes("M", _), do: {:modified, true}
-  defp interpret_status_codes("D", _), do: {:deleted, true}
-  defp interpret_status_codes("R", _), do: {:renamed, true}
-  defp interpret_status_codes("C", _), do: {:copied, true}
-  # Worktree changes
-  defp interpret_status_codes(" ", "M"), do: {:modified, false}
-  defp interpret_status_codes(" ", "D"), do: {:deleted, false}
+  defp interpret_status_codes("U", _, path),
+    do: [%StatusEntry{path: path, status: :conflict, staged: false}]
 
-  defp interpret_status_codes(idx, wt) do
+  defp interpret_status_codes(_, "U", path),
+    do: [%StatusEntry{path: path, status: :conflict, staged: false}]
+
+  defp interpret_status_codes("D", "D", path),
+    do: [%StatusEntry{path: path, status: :conflict, staged: false}]
+
+  defp interpret_status_codes("A", "A", path),
+    do: [%StatusEntry{path: path, status: :conflict, staged: false}]
+
+  # Untracked
+  defp interpret_status_codes("?", "?", path),
+    do: [%StatusEntry{path: path, status: :untracked, staged: false}]
+
+  # Both staged and worktree changes: produce two entries
+  defp interpret_status_codes("M", "M", path) do
+    [
+      %StatusEntry{path: path, status: :modified, staged: true},
+      %StatusEntry{path: path, status: :modified, staged: false}
+    ]
+  end
+
+  defp interpret_status_codes("M", "D", path) do
+    [
+      %StatusEntry{path: path, status: :modified, staged: true},
+      %StatusEntry{path: path, status: :deleted, staged: false}
+    ]
+  end
+
+  defp interpret_status_codes("A", "M", path) do
+    [
+      %StatusEntry{path: path, status: :added, staged: true},
+      %StatusEntry{path: path, status: :modified, staged: false}
+    ]
+  end
+
+  defp interpret_status_codes("A", "D", path) do
+    [
+      %StatusEntry{path: path, status: :added, staged: true},
+      %StatusEntry{path: path, status: :deleted, staged: false}
+    ]
+  end
+
+  # Staged only (index has changes, worktree clean)
+  defp interpret_status_codes("A", " ", path),
+    do: [%StatusEntry{path: path, status: :added, staged: true}]
+
+  defp interpret_status_codes("M", " ", path),
+    do: [%StatusEntry{path: path, status: :modified, staged: true}]
+
+  defp interpret_status_codes("D", " ", path),
+    do: [%StatusEntry{path: path, status: :deleted, staged: true}]
+
+  defp interpret_status_codes("R", " ", path),
+    do: [%StatusEntry{path: path, status: :renamed, staged: true}]
+
+  defp interpret_status_codes("C", " ", path),
+    do: [%StatusEntry{path: path, status: :copied, staged: true}]
+
+  defp interpret_status_codes("R", _, path),
+    do: [%StatusEntry{path: path, status: :renamed, staged: true}]
+
+  defp interpret_status_codes("C", _, path),
+    do: [%StatusEntry{path: path, status: :copied, staged: true}]
+
+  # Worktree changes only
+  defp interpret_status_codes(" ", "M", path),
+    do: [%StatusEntry{path: path, status: :modified, staged: false}]
+
+  defp interpret_status_codes(" ", "D", path),
+    do: [%StatusEntry{path: path, status: :deleted, staged: false}]
+
+  defp interpret_status_codes(idx, wt, path) do
     Minga.Log.warning(
       :editor,
       "[Git] unexpected status codes: index=#{inspect(idx)} worktree=#{inspect(wt)}"
     )
 
-    {:unknown, false}
+    [%StatusEntry{path: path, status: :unknown, staged: false}]
   end
 
   @spec parse_log_line(String.t()) :: Minga.Git.log_entry() | nil
@@ -283,6 +527,50 @@ defmodule Minga.Git.System do
       _ ->
         nil
     end
+  end
+
+  @spec parse_branch_line(String.t()) :: Minga.Git.BranchInfo.t() | nil
+  defp parse_branch_line("origin/HEAD\t" <> _), do: nil
+
+  defp parse_branch_line(line) do
+    case String.split(line, "\t") do
+      [name, upstream, track, head_marker] ->
+        remote = String.starts_with?(name, "origin/")
+        current = String.trim(head_marker) == "*"
+        upstream = if upstream == "", do: nil, else: upstream
+        {ahead, behind} = parse_track_info(track)
+
+        %Minga.Git.BranchInfo{
+          name: name,
+          current: current,
+          upstream: upstream,
+          remote: remote,
+          ahead: ahead,
+          behind: behind
+        }
+
+      _ ->
+        nil
+    end
+  end
+
+  @spec parse_track_info(String.t()) :: {non_neg_integer() | nil, non_neg_integer() | nil}
+  defp parse_track_info(""), do: {nil, nil}
+
+  defp parse_track_info(track) do
+    ahead =
+      case Regex.run(~r/ahead (\d+)/, track) do
+        [_, n] -> String.to_integer(n)
+        _ -> nil
+      end
+
+    behind =
+      case Regex.run(~r/behind (\d+)/, track) do
+        [_, n] -> String.to_integer(n)
+        _ -> nil
+      end
+
+    {ahead, behind}
   end
 
   @spec parse_porcelain_blame(String.t()) :: String.t()

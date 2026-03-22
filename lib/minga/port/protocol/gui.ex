@@ -33,6 +33,7 @@ defmodule Minga.Port.Protocol.GUI do
   | 0x82   | gui_signature_help | Signature help popup       |
   | 0x83   | gui_float_popup | Float popup window            |
   | 0x84   | gui_split_separators | Split pane separator lines |
+  | 0x85   | gui_git_status       | Git status panel data      |
 
   ## GUI Actions (Frontend → BEAM)
 
@@ -60,7 +61,19 @@ defmodule Minga.Port.Protocol.GUI do
   | 0x14       | tool_dismiss         |
   | 0x15       | agent_tool_toggle    |
   | 0x16       | execute_command      |
+  <<<<<<< HEAD
   | 0x17       | minibuffer_select    |
+
+
+  =======
+  >>>>>>> 8fcc39d8 (fix(editor): suppress tool prompts in headless editors + add protocol tests)
+  | 0x18       | git_stage_file       |
+  | 0x19       | git_unstage_file     |
+  | 0x1A       | git_discard_file     |
+  | 0x1B       | git_stage_all        |
+  | 0x1C       | git_unstage_all      |
+  | 0x1D       | git_commit           |
+  | 0x1E       | git_open_file        |
   """
 
   import Bitwise
@@ -97,6 +110,7 @@ defmodule Minga.Port.Protocol.GUI do
   @op_gui_signature_help 0x82
   @op_gui_float_popup 0x83
   @op_gui_split_separators 0x84
+  @op_gui_git_status 0x85
 
   # ── GUI action sub-opcodes (Frontend → BEAM) ──
 
@@ -123,6 +137,14 @@ defmodule Minga.Port.Protocol.GUI do
   @gui_action_agent_tool_toggle 0x15
   @gui_action_execute_command 0x16
   @gui_action_minibuffer_select 0x17
+
+  @gui_action_git_stage_file 0x18
+  @gui_action_git_unstage_file 0x19
+  @gui_action_git_discard_file 0x1A
+  @gui_action_git_stage_all 0x1B
+  @gui_action_git_unstage_all 0x1C
+  @gui_action_git_commit 0x1D
+  @gui_action_git_open_file 0x1E
 
   # ── Types ──
 
@@ -151,6 +173,13 @@ defmodule Minga.Port.Protocol.GUI do
           | {:agent_tool_toggle, message_index :: non_neg_integer()}
           | {:execute_command, name :: String.t()}
           | {:minibuffer_select, candidate_index :: non_neg_integer()}
+          | {:git_stage_file, path :: String.t()}
+          | {:git_unstage_file, path :: String.t()}
+          | {:git_discard_file, path :: String.t()}
+          | :git_stage_all
+          | :git_unstage_all
+          | {:git_commit, message :: String.t()}
+          | {:git_open_file, path :: String.t()}
 
   # ═══════════════════════════════════════════════════════════════════════════
   # Encoding (BEAM → Frontend)
@@ -1239,6 +1268,36 @@ defmodule Minga.Port.Protocol.GUI do
   def decode_gui_action(@gui_action_minibuffer_select, <<index::16>>),
     do: {:ok, {:minibuffer_select, index}}
 
+  def decode_gui_action(
+        @gui_action_git_stage_file,
+        <<path_len::16, path::binary-size(path_len)>>
+      ),
+      do: {:ok, {:git_stage_file, path}}
+
+  def decode_gui_action(
+        @gui_action_git_unstage_file,
+        <<path_len::16, path::binary-size(path_len)>>
+      ),
+      do: {:ok, {:git_unstage_file, path}}
+
+  def decode_gui_action(
+        @gui_action_git_discard_file,
+        <<path_len::16, path::binary-size(path_len)>>
+      ),
+      do: {:ok, {:git_discard_file, path}}
+
+  def decode_gui_action(@gui_action_git_stage_all, <<>>),
+    do: {:ok, :git_stage_all}
+
+  def decode_gui_action(@gui_action_git_unstage_all, <<>>),
+    do: {:ok, :git_unstage_all}
+
+  def decode_gui_action(@gui_action_git_commit, <<msg_len::16, message::binary-size(msg_len)>>),
+    do: {:ok, {:git_commit, message}}
+
+  def decode_gui_action(@gui_action_git_open_file, <<path_len::16, path::binary-size(path_len)>>),
+    do: {:ok, {:git_open_file, path}}
+
   def decode_gui_action(_, _), do: :error
 
   # ═══════════════════════════════════════════════════════════════════════════
@@ -1659,6 +1718,75 @@ defmodule Minga.Port.Protocol.GUI do
       horiz_data
     ])
   end
+
+  # ── Git status panel (0x85) ──
+
+  @typedoc "Git status panel data for encoding."
+  @type git_status_data :: %{
+          repo_state: :normal | :not_a_repo | :loading,
+          branch: String.t(),
+          ahead: non_neg_integer(),
+          behind: non_neg_integer(),
+          entries: [Minga.Git.StatusEntry.t()]
+        }
+
+  @doc """
+  Encodes a gui_git_status command (0x85) for the native GUI frontend.
+
+  Wire format:
+    opcode:1, repo_state:1, ahead:2, behind:2, branch_len:2, branch,
+    entry_count:2, then per entry:
+      path_hash:4, section:1, status:1, path_len:2, path
+  """
+  @spec encode_gui_git_status(git_status_data()) :: binary()
+  def encode_gui_git_status(%{
+        repo_state: repo_state,
+        branch: branch,
+        ahead: ahead,
+        behind: behind,
+        entries: entries
+      }) do
+    repo_state_byte = encode_repo_state(repo_state)
+    branch_bytes = :erlang.iolist_to_binary([branch || ""])
+    entry_count = length(entries)
+
+    entry_binaries =
+      Enum.map(entries, fn entry ->
+        path_bytes = :erlang.iolist_to_binary([entry.path])
+        path_hash = :erlang.phash2(entry.path, 0xFFFFFFFF)
+        section = encode_status_section(entry)
+        status = encode_file_status(entry.status)
+
+        <<path_hash::32, section::8, status::8, byte_size(path_bytes)::16, path_bytes::binary>>
+      end)
+
+    IO.iodata_to_binary([
+      <<@op_gui_git_status, repo_state_byte::8, ahead::16, behind::16,
+        byte_size(branch_bytes)::16, branch_bytes::binary, entry_count::16>>
+      | entry_binaries
+    ])
+  end
+
+  @spec encode_repo_state(:normal | :not_a_repo | :loading) :: non_neg_integer()
+  defp encode_repo_state(:normal), do: 0
+  defp encode_repo_state(:not_a_repo), do: 1
+  defp encode_repo_state(:loading), do: 2
+
+  @spec encode_status_section(Minga.Git.StatusEntry.t()) :: non_neg_integer()
+  defp encode_status_section(%{staged: true}), do: 0
+  defp encode_status_section(%{status: :untracked}), do: 2
+  defp encode_status_section(%{status: :conflict}), do: 3
+  defp encode_status_section(_), do: 1
+
+  @spec encode_file_status(atom()) :: non_neg_integer()
+  defp encode_file_status(:modified), do: 1
+  defp encode_file_status(:added), do: 2
+  defp encode_file_status(:deleted), do: 3
+  defp encode_file_status(:renamed), do: 4
+  defp encode_file_status(:copied), do: 5
+  defp encode_file_status(:untracked), do: 6
+  defp encode_file_status(:conflict), do: 7
+  defp encode_file_status(:unknown), do: 0
 
   # ── Shared encoding helpers for hover/overlay content ──
 

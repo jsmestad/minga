@@ -127,6 +127,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
         build_gui_theme_cmd(state),
         build_gui_tab_bar_cmd(state),
         build_gui_file_tree_cmd(state),
+        build_gui_git_status_cmd(state),
         build_gui_which_key_cmd(state),
         build_gui_completion_cmd(state),
         build_gui_breadcrumb_cmd(state),
@@ -202,6 +203,32 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
     if Process.get(:last_gui_file_tree_fp) != :no_tree do
       Process.put(:last_gui_file_tree_fp, :no_tree)
       ProtocolGUI.encode_gui_file_tree(nil)
+    end
+  end
+
+  # ── Git status panel ──
+
+  @spec build_gui_git_status_cmd(state()) :: binary() | nil
+  defp build_gui_git_status_cmd(%{git_status_panel: %{} = data}) do
+    fp = :erlang.phash2(data)
+
+    if fp != Process.get(:last_gui_git_status_fp) do
+      Process.put(:last_gui_git_status_fp, fp)
+      ProtocolGUI.encode_gui_git_status(data)
+    end
+  end
+
+  defp build_gui_git_status_cmd(_state) do
+    if Process.get(:last_gui_git_status_fp) != :no_git do
+      Process.put(:last_gui_git_status_fp, :no_git)
+
+      ProtocolGUI.encode_gui_git_status(%{
+        repo_state: :not_a_repo,
+        branch: "",
+        ahead: 0,
+        behind: 0,
+        entries: []
+      })
     end
   end
 

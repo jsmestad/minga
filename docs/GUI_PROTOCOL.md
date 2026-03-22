@@ -643,6 +643,14 @@ opcode(1) + action_type(1) + payload...
 | 0x14 | tool_dismiss | (empty) | Dismiss the tool manager panel |
 | 0x15 | agent_tool_toggle | index(2) | Toggle collapse/expand of agent tool call at message index |
 | 0x16 | execute_command | name_len(2) + name(name_len) | Execute a named command from the BEAM command registry |
+| 0x17 | minibuffer_select | index(2) | Select minibuffer candidate at index |
+| 0x18 | git_stage_file | path_len(2) + path(path_len) | Stage a file |
+| 0x19 | git_unstage_file | path_len(2) + path(path_len) | Unstage a file |
+| 0x1A | git_discard_file | path_len(2) + path(path_len) | Discard working-tree changes |
+| 0x1B | git_stage_all | (empty) | Stage all changes |
+| 0x1C | git_unstage_all | (empty) | Unstage all |
+| 0x1D | git_commit | msg_len(2) + msg(msg_len) | Commit with message |
+| 0x1E | git_open_file | path_len(2) + path(path_len) | Open file in editor |
 
 ## Theme Color Slots
 

@@ -44,4 +44,37 @@ defmodule Minga.Git.Backend do
 
   @callback current_branch(git_root :: String.t()) ::
               {:ok, String.t()} | :error
+
+  @callback ahead_behind(git_root :: String.t()) ::
+              {:ok, non_neg_integer(), non_neg_integer()} | :error
+
+  @callback unstage(git_root :: String.t(), paths :: String.t() | [String.t()]) ::
+              :ok | {:error, String.t()}
+
+  @callback unstage_all(git_root :: String.t()) ::
+              :ok | {:error, String.t()}
+
+  @callback discard(git_root :: String.t(), path :: String.t()) ::
+              :ok | {:error, String.t()}
+
+  @callback branch_list(git_root :: String.t()) ::
+              {:ok, [Minga.Git.BranchInfo.t()]} | {:error, String.t()}
+
+  @callback branch_create(git_root :: String.t(), name :: String.t()) ::
+              :ok | {:error, String.t()}
+
+  @callback branch_switch(git_root :: String.t(), name :: String.t()) ::
+              :ok | {:error, String.t()}
+
+  @callback branch_delete(git_root :: String.t(), name :: String.t(), force :: boolean()) ::
+              :ok | {:error, String.t()}
+
+  @callback push(git_root :: String.t(), opts :: keyword()) ::
+              :ok | {:error, String.t()}
+
+  @callback pull(git_root :: String.t(), opts :: keyword()) ::
+              :ok | {:error, String.t()}
+
+  @callback fetch_remotes(git_root :: String.t(), opts :: keyword()) ::
+              :ok | {:error, String.t()}
 end

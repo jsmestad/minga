@@ -65,7 +65,8 @@ defmodule Minga.Test.EditorCase do
         port_manager: port,
         buffer: buffer,
         width: width,
-        height: height
+        height: height,
+        suppress_tool_prompts: true
       )
 
     # Send ready event to trigger initial render
@@ -109,7 +110,8 @@ defmodule Minga.Test.EditorCase do
         port_manager: port,
         buffer: buffer,
         width: width,
-        height: height
+        height: height,
+        suppress_tool_prompts: true
       )
 
     ref = HeadlessPort.prepare_await(port)
