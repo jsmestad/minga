@@ -226,9 +226,11 @@ defmodule Minga.Buffer.Server do
   end
 
   @doc "Replaces the entire buffer content, pushing the old content onto the undo stack."
-  @spec replace_content(GenServer.server(), String.t()) :: :ok | {:error, :read_only}
-  def replace_content(server, new_content) when is_binary(new_content) do
-    GenServer.call(server, {:replace_content, new_content})
+  @spec replace_content(GenServer.server(), String.t(), BufState.edit_source()) ::
+          :ok | {:error, :read_only}
+  def replace_content(server, new_content, source \\ :user)
+      when is_binary(new_content) and source in [:user, :agent, :lsp] do
+    GenServer.call(server, {:replace_content, new_content, source})
   end
 
   @doc "Replaces buffer content bypassing read-only. For programmatic panel updates."
@@ -862,7 +864,7 @@ defmodule Minga.Buffer.Server do
         Document.cursor(new_buf)
       )
 
-    state = push_undo(state, new_buf) |> mark_dirty() |> record_edit(delta)
+    state = push_undo(state, new_buf, :user) |> mark_dirty() |> record_edit(delta)
     {:reply, :ok, state}
   end
 
@@ -882,7 +884,7 @@ defmodule Minga.Buffer.Server do
         Document.cursor(new_doc)
       )
 
-    state = push_undo(state, new_doc) |> mark_dirty() |> record_edit(delta)
+    state = push_undo(state, new_doc, :user) |> mark_dirty() |> record_edit(delta)
     {:reply, :ok, state}
   end
 
@@ -908,7 +910,7 @@ defmodule Minga.Buffer.Server do
     delta =
       EditDelta.replacement(start_byte, old_end_byte, from_pos, to_pos, new_text, new_end_pos)
 
-    {:reply, :ok, push_undo(state, doc) |> mark_dirty() |> record_edit(delta)}
+    {:reply, :ok, push_undo(state, doc, :user) |> mark_dirty() |> record_edit(delta)}
   end
 
   def handle_call({:apply_text_edits, _edits}, _from, %{read_only: true} = state) do
@@ -937,7 +939,7 @@ defmodule Minga.Buffer.Server do
 
     # Multi-edit batches are complex to delta-track (offsets shift between
     # edits). Clear pending edits to force a full content sync.
-    {:reply, :ok, push_undo(state, doc) |> mark_dirty() |> clear_edits()}
+    {:reply, :ok, push_undo(state, doc, :lsp) |> mark_dirty() |> clear_edits()}
   end
 
   # ── Find and Replace ──
@@ -955,7 +957,8 @@ defmodule Minga.Buffer.Server do
 
     case do_find_and_replace(content, old_text, new_text) do
       {:ok, new_doc, msg} ->
-        {:reply, {:ok, msg}, push_undo_force(state, new_doc) |> mark_dirty() |> clear_edits()}
+        {:reply, {:ok, msg},
+         push_undo_force(state, new_doc, :agent) |> mark_dirty() |> clear_edits()}
 
       {:error, _} = err ->
         {:reply, err, state}
@@ -979,7 +982,7 @@ defmodule Minga.Buffer.Server do
 
     new_state =
       if any_applied do
-        push_undo_force(state, final_doc) |> mark_dirty() |> clear_edits()
+        push_undo_force(state, final_doc, :agent) |> mark_dirty() |> clear_edits()
       else
         state
       end
@@ -1008,7 +1011,7 @@ defmodule Minga.Buffer.Server do
           Document.cursor(old_doc)
         )
 
-      {:reply, :ok, push_undo(state, new_buf) |> mark_dirty() |> record_edit(delta)}
+      {:reply, :ok, push_undo(state, new_buf, :user) |> mark_dirty() |> record_edit(delta)}
     end
   end
 
@@ -1046,7 +1049,7 @@ defmodule Minga.Buffer.Server do
           old_end_pos
         )
 
-      {:reply, :ok, push_undo(state, new_buf) |> mark_dirty() |> record_edit(delta)}
+      {:reply, :ok, push_undo(state, new_buf, :user) |> mark_dirty() |> record_edit(delta)}
     end
   end
 
@@ -1168,12 +1171,12 @@ defmodule Minga.Buffer.Server do
     end
   end
 
-  def handle_call({:replace_content, _new_content}, _from, %{read_only: true} = state) do
+  def handle_call({:replace_content, _new_content, _source}, _from, %{read_only: true} = state) do
     {:reply, {:error, :read_only}, state}
   end
 
-  def handle_call({:replace_content, new_content}, _from, state) do
-    new_state = push_undo_force(state, state.document)
+  def handle_call({:replace_content, new_content, source}, _from, state) do
+    new_state = push_undo_force(state, state.document, source)
     new_buf = Document.new(new_content)
     {:reply, :ok, mark_dirty(%{new_state | document: new_buf}) |> clear_edits()}
   end
@@ -1447,7 +1450,7 @@ defmodule Minga.Buffer.Server do
       start_byte = byte_offset_at(old_content, from_pos)
       old_end_byte = byte_offset_at(old_content, to_pos)
       delta = EditDelta.deletion(start_byte, old_end_byte, from_pos, to_pos)
-      {:reply, :ok, push_undo(state, new_buf) |> mark_dirty() |> record_edit(delta)}
+      {:reply, :ok, push_undo(state, new_buf, :user) |> mark_dirty() |> record_edit(delta)}
     end
   end
 
@@ -1479,7 +1482,7 @@ defmodule Minga.Buffer.Server do
       start_byte = byte_offset_at(old_content, from_pos)
       old_end_byte = byte_offset_at(old_content, to_pos)
       delta = EditDelta.deletion(start_byte, old_end_byte, from_pos, to_pos)
-      {:reply, :ok, push_undo(state, new_buf) |> mark_dirty() |> record_edit(delta)}
+      {:reply, :ok, push_undo(state, new_buf, :user) |> mark_dirty() |> record_edit(delta)}
     end
   end
 
@@ -1496,7 +1499,7 @@ defmodule Minga.Buffer.Server do
   end
 
   def handle_call({:apply_snapshot, new_buf}, _from, state) do
-    {:reply, :ok, push_undo(state, new_buf) |> mark_dirty() |> clear_edits()}
+    {:reply, :ok, push_undo(state, new_buf, :user) |> mark_dirty() |> clear_edits()}
   end
 
   def handle_call({:clear_line, _line}, _from, %{read_only: true} = state) do
@@ -1509,7 +1512,7 @@ defmodule Minga.Buffer.Server do
     if new_buf == state.document do
       {:reply, {:ok, yanked}, state}
     else
-      {:reply, {:ok, yanked}, push_undo(state, new_buf) |> mark_dirty()}
+      {:reply, {:ok, yanked}, push_undo(state, new_buf, :user) |> mark_dirty()}
     end
   end
 
@@ -1518,8 +1521,8 @@ defmodule Minga.Buffer.Server do
       [] ->
         {:reply, :ok, state}
 
-      [{prev_version, prev_buf} | rest_undo] ->
-        redo_entry = {state.version, state.document}
+      [{prev_version, prev_buf, source} | rest_undo] ->
+        redo_entry = {state.version, state.document, source}
 
         new_state =
           %{
@@ -1532,6 +1535,7 @@ defmodule Minga.Buffer.Server do
           |> sync_dirty()
           |> clear_edits()
 
+        log_undo_source(:undo, source)
         {:reply, :ok, new_state}
     end
   end
@@ -1541,8 +1545,8 @@ defmodule Minga.Buffer.Server do
       [] ->
         {:reply, :ok, state}
 
-      [{next_version, next_buf} | rest_redo] ->
-        undo_entry = {state.version, state.document}
+      [{next_version, next_buf, source} | rest_redo] ->
+        undo_entry = {state.version, state.document, source}
 
         new_state =
           %{
@@ -1555,6 +1559,7 @@ defmodule Minga.Buffer.Server do
           |> sync_dirty()
           |> clear_edits()
 
+        log_undo_source(:redo, source)
         {:reply, :ok, new_state}
     end
   end
@@ -1828,13 +1833,26 @@ defmodule Minga.Buffer.Server do
   end
 
   # Delegates to BufState for time-based undo coalescing.
-  @spec push_undo(state(), Document.t()) :: state()
-  defp push_undo(state, new_buf), do: BufState.push_undo(state, new_buf)
+  @spec push_undo(state(), Document.t(), BufState.edit_source()) :: state()
+  defp push_undo(state, new_buf, source), do: BufState.push_undo(state, new_buf, source)
 
-  # Force-pushes an undo entry, bypassing coalescing. Used for explicit
-  # user actions like :replace_content.
-  @spec push_undo_force(state(), Document.t()) :: state()
-  defp push_undo_force(state, new_buf), do: BufState.push_undo_force(state, new_buf)
+  # Force-pushes an undo entry, bypassing coalescing. Used for agent
+  # batch edits and explicit actions like :replace_content.
+  @spec push_undo_force(state(), Document.t(), BufState.edit_source()) :: state()
+  defp push_undo_force(state, new_buf, source),
+    do: BufState.push_undo_force(state, new_buf, source)
+
+  # Logs undo/redo source for non-user edits (diagnostic, gated by :log_level_editor).
+  @spec log_undo_source(:undo | :redo, BufState.edit_source()) :: :ok
+  defp log_undo_source(_action, :user), do: :ok
+
+  defp log_undo_source(:undo, source) do
+    Minga.Log.debug(:editor, "Undo: #{source} edit")
+  end
+
+  defp log_undo_source(:redo, source) do
+    Minga.Log.debug(:editor, "Redo: #{source} edit")
+  end
 
   @spec mark_dirty(state()) :: state()
   defp mark_dirty(state), do: BufState.mark_dirty(state)
