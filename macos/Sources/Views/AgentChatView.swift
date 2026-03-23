@@ -35,8 +35,8 @@ struct AgentChatView: View {
                 ScrollViewReader { proxy in
                     ScrollView(.vertical) {
                         LazyVStack(spacing: 12) {
-                            ForEach(state.messages) { msg in
-                                messageView(msg)
+                            ForEach(Array(state.messages.enumerated()), id: \.element.id) { index, msg in
+                                messageViewWithDivider(msg, index: index)
                             }
                         }
                         .padding(.horizontal, 16)
@@ -130,11 +130,27 @@ struct AgentChatView: View {
 
     // MARK: - Messages
 
+    /// Wraps each message with an optional divider in a single VStack.
+    /// Keeping one view per ForEach iteration prevents LazyVStack from
+    /// miscalculating tap targets due to variable-height implicit Groups.
+    @ViewBuilder
+    private func messageViewWithDivider(_ msg: ChatMessageEntry, index: Int) -> some View {
+        VStack(spacing: 8) {
+            if index > 0 && shouldShowDivider(before: msg, after: state.messages[index - 1]) {
+                Rectangle()
+                    .fill(theme.popupBorder.opacity(0.15))
+                    .frame(height: 1)
+                    .padding(.horizontal, 4)
+            }
+            messageView(msg)
+        }
+    }
+
     @ViewBuilder
     private func messageView(_ msg: ChatMessageEntry) -> some View {
         switch msg {
         case .user(_, let text):
-            userBubble(text)
+            userMessage(text)
         case .assistant(_, let text):
             assistantBlock(text)
         case .styledAssistant(_, let lines):
@@ -153,20 +169,26 @@ struct AgentChatView: View {
     }
 
     @ViewBuilder
-    private func userBubble(_ text: String) -> some View {
-        HStack {
-            Spacer(minLength: 60)
+    private func userMessage(_ text: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            // Sender label
+            HStack(spacing: 4) {
+                Image(systemName: "person.fill")
+                    .font(.system(size: 9))
+                Text("You")
+                    .font(.system(size: 11, weight: .medium))
+            }
+            .foregroundStyle(theme.popupFg.opacity(0.45))
+
             Text(text)
                 .font(.system(size: 13))
                 .foregroundStyle(theme.popupFg)
                 .textSelection(.enabled)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(theme.accent.opacity(0.15))
-                )
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(theme.accent.opacity(0.04))
     }
 
     @ViewBuilder
@@ -631,6 +653,20 @@ struct AgentChatView: View {
                     Spacer()
                 }
             }
+        }
+    }
+
+    // MARK: - Message dividers
+
+    /// Show a divider between user messages and the preceding message group.
+    /// This creates visual rhythm between conversation turns.
+    private func shouldShowDivider(before current: ChatMessageEntry, after previous: ChatMessageEntry) -> Bool {
+        // Show divider before user messages (start of a new turn),
+        // unless the previous message was also a user message.
+        switch (previous, current) {
+        case (.user, .user): return false
+        case (_, .user): return true
+        default: return false
         }
     }
 
