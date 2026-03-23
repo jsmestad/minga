@@ -3,6 +3,10 @@
 /// Compact horizontal strip with file type icons, subtle separators,
 /// and navigation arrows. No stock SwiftUI tab bar widgets.
 /// All colors driven by BEAM theme.
+///
+/// Supports collapsible workspace groups: clicking a collapsed group
+/// header expands it (shows individual tabs); clicking again collapses
+/// back to a compact capsule showing the tab count.
 
 import SwiftUI
 
@@ -13,6 +17,9 @@ struct TabBarView: View {
     let encoder: InputEncoder?
 
     @State private var hoverTabId: UInt32?
+    /// Tracks which workspace groups are collapsed (Swift-local state).
+    /// Group 0 (manual) is never collapsible; only agent groups can collapse.
+    @State private var collapsedGroups: Set<UInt16> = []
 
     private let barHeight: CGFloat = 34
 
@@ -41,22 +48,13 @@ struct TabBarView: View {
                 groupSeparator(color: activeWs.color)
             }
 
-            // Tab strip
+            // Tab strip with collapsible groups
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 0) {
-                    ForEach(Array(tabBarState.tabs.enumerated()), id: \.element.id) { index, tab in
-                        tabItem(tab)
-
-                        // Group separator at group_id transitions, thin separator otherwise
-                        if tab.id != tabBarState.tabs.last?.id {
-                            let nextTab = tabBarState.tabs[index + 1]
-                            if tab.groupId != nextTab.groupId && tabBarState.hasWorkspaces {
-                                let separatorColor = workspaceColor(for: nextTab.groupId)
-                                groupSeparator(color: separatorColor)
-                            } else {
-                                verticalSeparator
-                            }
-                        }
+                    if tabBarState.hasWorkspaces {
+                        groupedTabStrip
+                    } else {
+                        flatTabStrip
                     }
                 }
             }
@@ -92,12 +90,107 @@ struct TabBarView: View {
         .focusEffectDisabled()
     }
 
+    // MARK: - Tab strip layouts
+
+    /// Flat tab strip (no workspaces active, Tier 0).
+    @ViewBuilder
+    private var flatTabStrip: some View {
+        ForEach(tabBarState.tabs) { tab in
+            tabItem(tab)
+
+            if tab.id != tabBarState.tabs.last?.id {
+                verticalSeparator
+            }
+        }
+    }
+
+    /// Grouped tab strip: renders tabs in workspace groups with
+    /// collapsible headers for agent workspaces. Groups are consolidated
+    /// by groupId (not contiguous), so tabs from the same workspace always
+    /// appear together even if they're interleaved in the underlying list.
+    @ViewBuilder
+    private var groupedTabStrip: some View {
+        let groups = groupedTabs()
+
+        ForEach(groups, id: \.groupId) { group in
+            // Group separator before non-first groups
+            if group.groupId != groups.first?.groupId {
+                groupSeparator(color: workspaceColor(for: group.groupId))
+            }
+
+            if group.groupId != 0 && collapsedGroups.contains(group.groupId) {
+                // Collapsed agent group: show capsule
+                collapsedGroupCapsule(group)
+            } else {
+                // Expanded: show individual tabs
+                ForEach(Array(group.tabs.enumerated()), id: \.element.id) { tabIndex, tab in
+                    tabItem(tab)
+
+                    // Thin separator between tabs within the same group
+                    if tabIndex < group.tabs.count - 1 {
+                        verticalSeparator
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Collapsed group capsule
+
+    @ViewBuilder
+    private func collapsedGroupCapsule(_ group: TabGroup) -> some View {
+        let ws = tabBarState.workspaces.first { $0.id == group.groupId }
+        let color = ws?.color ?? theme.tabInactiveFg
+
+        Button(action: {
+            // Pop cursor before view disappears to avoid stuck cursor
+            NSCursor.pop()
+            // Expand the group and switch to its workspace
+            collapsedGroups.remove(group.groupId)
+            // Switch to the specific workspace this capsule represents
+            let wsIndex = tabBarState.workspaces.firstIndex { $0.id == group.groupId }
+            let wsNum = wsIndex.map { $0 } ?? 0
+            if wsNum > 0 && wsNum <= 9 {
+                encoder?.sendExecuteCommand(name: "workspace_goto_\(wsNum)")
+            } else {
+                encoder?.sendExecuteCommand(name: "workspace_next_agent")
+            }
+        }) {
+            HStack(spacing: 4) {
+                Image(systemName: "cpu")
+                    .font(.system(size: 10))
+                    .foregroundStyle(color)
+
+                Text(ws?.label ?? "Agent")
+                    .font(.system(size: 11))
+                    .lineLimit(1)
+                    .foregroundStyle(theme.tabInactiveFg)
+
+                if let ws = ws, ws.isAgent {
+                    agentStatusDot(ws.agentStatus, color: color)
+                }
+
+                // Tab count badge
+                Text("(\(group.tabs.count))")
+                    .font(.system(size: 10))
+                    .foregroundStyle(theme.tabInactiveFg.opacity(0.7))
+            }
+            .padding(.horizontal, 10)
+            .frame(height: barHeight)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Expand and switch to workspace")
+        .onHover { isHovered in
+            if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+        }
+    }
+
     // MARK: - Workspace indicator
 
     @ViewBuilder
     private func workspaceIndicator(_ workspace: WorkspaceEntry) -> some View {
         Button(action: {
-            // Toggle workspace dropdown (handled by BEAM command)
             encoder?.sendExecuteCommand(name: "workspace_list")
         }) {
             HStack(spacing: 4) {
@@ -110,7 +203,6 @@ struct TabBarView: View {
                     .lineLimit(1)
                     .foregroundStyle(theme.tabActiveFg)
 
-                // Agent status indicator
                 if workspace.isAgent {
                     agentStatusDot(workspace.agentStatus, color: workspace.color)
                 }
@@ -129,11 +221,10 @@ struct TabBarView: View {
         }
     }
 
-    @ViewBuilder
     private func agentStatusDot(_ status: UInt8, color: Color) -> some View {
         Circle()
             .fill(agentStatusColor(status, accent: color))
-            .frame(width: 5, height: 5)
+            .frame(width: 6, height: 6)
     }
 
     private func agentStatusColor(_ status: UInt8, accent: Color) -> Color {
@@ -190,7 +281,6 @@ struct TabBarView: View {
                     .fill(theme.tabAttentionFg)
                     .frame(width: 5, height: 5)
             } else {
-                // Reserve space for alignment stability
                 Color.clear.frame(width: 12, height: 12)
             }
         }
@@ -206,9 +296,26 @@ struct TabBarView: View {
                 hoverTabId = hovering ? tab.id : nil
             }
         }
+        .contextMenu {
+            // Right-click to collapse the group this tab belongs to
+            if tab.groupId != 0 && tabBarState.hasWorkspaces {
+                Button("Collapse Group") {
+                    collapsedGroups.insert(tab.groupId)
+                }
+            }
+        }
     }
 
     // MARK: - Helpers
+
+    /// Consolidates tabs by groupId into workspace groups.
+    /// Group 0 (manual) always comes first; agent groups sorted by id.
+    /// Within each group, tab order is preserved from the BEAM's tab list.
+    private func groupedTabs() -> [TabGroup] {
+        Dictionary(grouping: tabBarState.tabs, by: \.groupId)
+            .sorted { $0.key < $1.key }
+            .map { TabGroup(groupId: $0.key, tabs: $0.value) }
+    }
 
     @ViewBuilder
     private func closeButton(_ tab: TabEntry) -> some View {
@@ -231,7 +338,6 @@ struct TabBarView: View {
         }
     }
 
-    /// Compact icon button for the tab bar toolbar with tooltip and pointer cursor.
     @ViewBuilder
     private func tabBarButton(
         systemIcon: String,
@@ -256,4 +362,12 @@ struct TabBarView: View {
             .fill(theme.tabSeparatorFg.opacity(0.4))
             .frame(width: 1, height: 16)
     }
+}
+
+// MARK: - Tab grouping model
+
+/// A contiguous group of tabs sharing the same groupId.
+private struct TabGroup {
+    let groupId: UInt16
+    let tabs: [TabEntry]
 }
