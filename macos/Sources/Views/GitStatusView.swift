@@ -23,8 +23,6 @@ struct GitStatusView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            branchHeader
-
             if state.repoState == .notARepo {
                 notARepoView
             } else if state.repoState == .loading {
@@ -45,64 +43,6 @@ struct GitStatusView: View {
         .background(theme.treeBg)
         .focusable(false)
         .focusEffectDisabled()
-    }
-
-    // MARK: - Branch header
-
-    @ViewBuilder
-    private var branchHeader: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 6) {
-                // Git branch icon (Nerd Font)
-                Text("\u{E725}")
-                    .font(.custom("Symbols Nerd Font Mono", size: 12))
-                    .foregroundStyle(theme.treeDirFg)
-
-                Text(state.branchName.isEmpty ? "No branch" : state.branchName)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(theme.treeHeaderFg)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-
-                Spacer(minLength: 4)
-
-                // Ahead/behind indicators
-                if state.ahead > 0 || state.behind > 0 {
-                    aheadBehindBadge
-                }
-            }
-            .padding(.horizontal, 10)
-            .frame(height: 34)
-            .background(theme.treeHeaderBg)
-
-            Rectangle()
-                .fill(theme.treeSeparatorFg.opacity(0.3))
-                .frame(height: 1)
-        }
-    }
-
-    @ViewBuilder
-    private var aheadBehindBadge: some View {
-        HStack(spacing: 3) {
-            if state.ahead > 0 {
-                HStack(spacing: 1) {
-                    Image(systemName: "arrow.up")
-                        .font(.system(size: 8, weight: .bold))
-                    Text("\(state.ahead)")
-                        .font(.system(size: 10, weight: .medium).monospacedDigit())
-                }
-                .foregroundStyle(theme.gitAddedFg)
-            }
-            if state.behind > 0 {
-                HStack(spacing: 1) {
-                    Image(systemName: "arrow.down")
-                        .font(.system(size: 8, weight: .bold))
-                    Text("\(state.behind)")
-                        .font(.system(size: 10, weight: .medium).monospacedDigit())
-                }
-                .foregroundStyle(theme.gutterWarningFg)
-            }
-        }
     }
 
     // MARK: - Empty states

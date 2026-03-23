@@ -90,8 +90,6 @@ struct TabBarView: View {
                 encoder?.sendExecuteCommand(name: "split_horizontal")
             }
         }
-        .frame(height: barHeight)
-        .background(theme.tabBg)
         .focusable(false)
         .focusEffectDisabled()
         .gesture(

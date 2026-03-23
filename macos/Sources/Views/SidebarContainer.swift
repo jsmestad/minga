@@ -1,13 +1,9 @@
-/// Sidebar container that renders the BEAM-active panel (file tree or git status).
+/// Sidebar body container that renders the BEAM-active panel (file tree or git status).
 ///
-/// Owns the sidebar width and resize handle so both panels share a single
-/// width. Dragging the resize handle persists across panel switches, matching
-/// the Zed/VS Code behavior where the sidebar remembers its size regardless
-/// of which panel is active.
-///
-/// The BEAM enforces mutual exclusivity: only one of fileTreeState.visible or
-/// gitStatusState.visible can be true at a time. This container renders
-/// whichever panel the BEAM says is visible.
+/// The header is rendered separately in the unified toolbar row (see ContentView).
+/// This container owns only the body content and the resize handle so both
+/// panels share a single width. Dragging the resize handle persists across
+/// panel switches, matching Zed/VS Code behavior.
 
 import SwiftUI
 
@@ -16,11 +12,11 @@ struct SidebarContainer: View {
     let gitStatusState: GitStatusState
     let theme: ThemeColors
     let encoder: InputEncoder?
+    @Binding var sidebarWidth: CGFloat
 
     private let sidebarMinWidth: CGFloat = 180
     private let sidebarMaxWidth: CGFloat = 360
 
-    @State private var sidebarWidth: CGFloat = 240
     @State private var isDraggingResize: Bool = false
 
     var body: some View {
@@ -42,9 +38,6 @@ struct SidebarContainer: View {
             }
             .frame(width: sidebarWidth)
             .background(theme.treeBg)
-            .onAppear {
-                sidebarWidth = CGFloat(fileTreeState.treeWidth) * 7.5
-            }
 
             resizeHandle
         }

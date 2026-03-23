@@ -123,19 +123,31 @@ struct StartupOverlay: View {
 ///
 /// Layout hierarchy:
 ///   ZStack {
-///     VStack { HStack { sidebar, editorPane }, statusBar }  // chrome
-///     windowOverlays                                         // floating UI
+///     VStack { unifiedToolbar, HStack { sidebarBody, editorBody }, statusBar }
+///     windowOverlays
 ///   }
+///
+/// The unified toolbar is a single row spanning the full window width,
+/// containing the sidebar header (project name/branch) and the tab bar.
+/// One shared background eliminates visual seams between sidebar and editor.
 struct ContentView: View {
     @ObservedObject var appState: AppState
     @State private var rightPaneHeight: CGFloat = 600
+    @State private var sidebarWidth: CGFloat = 240
+
+    private var showSidebar: Bool {
+        appState.gui.fileTreeState.visible || appState.gui.gitStatusState.visible
+    }
+
+    private var theme: ThemeColors { appState.gui.themeColors }
 
     var body: some View {
         ZStack {
             VStack(spacing: 0) {
+                unifiedToolbar
                 HStack(spacing: 0) {
-                    sidebar
-                    editorPane
+                    sidebarBody
+                    editorBody
                 }
                 statusBar
             }
@@ -146,34 +158,84 @@ struct ContentView: View {
         .toolbarBackground(.visible, for: .windowToolbar)
         .toolbarColorScheme(appState.windowBgIsDark ? .dark : .light, for: .windowToolbar)
         .preferredColorScheme(appState.windowBgIsDark ? .dark : .light)
+        .onAppear {
+            sidebarWidth = CGFloat(appState.gui.fileTreeState.treeWidth) * 7.5
+        }
     }
 
-    // MARK: - Sidebar
+    // MARK: - Unified Toolbar
 
+    /// Single toolbar row spanning the full window width. Contains the
+    /// sidebar header (when visible) and the tab bar, sharing one background.
     @ViewBuilder
-    private var sidebar: some View {
-        if appState.gui.fileTreeState.visible || appState.gui.gitStatusState.visible {
-            SidebarContainer(
+    private var unifiedToolbar: some View {
+        HStack(spacing: 0) {
+            if showSidebar {
+                sidebarHeaderContent
+                    .frame(width: sidebarWidth + 8) // +8 aligns with resize handle
+
+                // Thin vertical separator between sidebar header and tab bar
+                Rectangle()
+                    .fill(theme.tabSeparatorFg.opacity(0.4))
+                    .frame(width: 1, height: 16)
+            }
+
+            if !appState.gui.tabBarState.tabs.isEmpty {
+                TabBarView(
+                    tabBarState: appState.gui.tabBarState,
+                    theme: theme,
+                    encoder: appState.encoder
+                )
+            } else {
+                Spacer()
+            }
+        }
+        .frame(height: 34)
+        .background(theme.tabBg)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(theme.tabSeparatorFg.opacity(0.3))
+                .frame(height: 1)
+        }
+    }
+
+    /// Switches between file tree header and git status header based on
+    /// which sidebar panel the BEAM has active.
+    @ViewBuilder
+    private var sidebarHeaderContent: some View {
+        if appState.gui.fileTreeState.visible {
+            FileTreeHeaderContent(
                 fileTreeState: appState.gui.fileTreeState,
-                gitStatusState: appState.gui.gitStatusState,
-                theme: appState.gui.themeColors,
+                theme: theme,
                 encoder: appState.encoder
+            )
+        } else if appState.gui.gitStatusState.visible {
+            GitStatusHeaderContent(
+                state: appState.gui.gitStatusState,
+                theme: theme
             )
         }
     }
 
-    // MARK: - Editor Pane
+    // MARK: - Sidebar Body
 
-    private var editorPane: some View {
+    @ViewBuilder
+    private var sidebarBody: some View {
+        if showSidebar {
+            SidebarContainer(
+                fileTreeState: appState.gui.fileTreeState,
+                gitStatusState: appState.gui.gitStatusState,
+                theme: theme,
+                encoder: appState.encoder,
+                sidebarWidth: $sidebarWidth
+            )
+        }
+    }
+
+    // MARK: - Editor Body
+
+    private var editorBody: some View {
         VStack(spacing: 0) {
-            // Native tab bar
-            if !appState.gui.tabBarState.tabs.isEmpty {
-                TabBarView(
-                    tabBarState: appState.gui.tabBarState,
-                    theme: appState.gui.themeColors,
-                    encoder: appState.encoder
-                )
-            }
 
             // Breadcrumb path bar
             BreadcrumbBar(
