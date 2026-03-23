@@ -291,6 +291,7 @@ struct AgentChatStateLifecycleTests {
         state.update(visible: true, status: 1, model: "claude", prompt: "fix bug",
                      pendingToolName: "write_file",
                      pendingToolSummary: "Writing config.toml",
+                     helpVisible: false, helpGroups: [],
                      rawMessages: raw)
 
         #expect(state.visible == true)
@@ -309,6 +310,7 @@ struct AgentChatStateLifecycleTests {
         let state = AgentChatState()
         state.update(visible: true, status: 1, model: "claude", prompt: "test",
                      pendingToolName: nil, pendingToolSummary: "",
+                     helpVisible: false, helpGroups: [],
                      rawMessages: [GUIChatMessage(beamId: 1, content: .user(text: "hi"))])
         state.hide()
 

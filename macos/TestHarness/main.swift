@@ -149,9 +149,13 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
         }
         return ["type": "gui_picker_preview", "visible": visible, "lines": lineArray]
 
-    case .guiAgentChat(let visible, let status, let model, let prompt, let pendingToolName, let pendingToolSummary, let messages):
+    case .guiAgentChat(let visible, let status, let model, let prompt, let pendingToolName, let pendingToolSummary, let helpVisible, let helpGroups, let messages):
         let msgArray = messages.map { chatMessageToJSON($0) }
-        return ["type": "gui_agent_chat", "visible": visible, "status": Int(status), "model": model, "prompt": prompt, "pending_tool_name": pendingToolName ?? "", "pending_tool_summary": pendingToolSummary, "messages": msgArray]
+        let helpGroupArray = helpGroups.map { group -> [String: Any] in
+            let bindings = group.bindings.map { ["key": $0.key, "description": $0.description] }
+            return ["title": group.title, "bindings": bindings]
+        }
+        return ["type": "gui_agent_chat", "visible": visible, "status": Int(status), "model": model, "prompt": prompt, "pending_tool_name": pendingToolName ?? "", "pending_tool_summary": pendingToolSummary, "help_visible": helpVisible, "help_groups": helpGroupArray, "messages": msgArray]
 
     case .guiGutterSeparator(let col, let r, let g, let b):
         return ["type": "gui_gutter_separator", "col": Int(col), "r": Int(r), "g": Int(g), "b": Int(b)]

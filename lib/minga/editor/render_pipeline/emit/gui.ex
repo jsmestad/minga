@@ -540,12 +540,13 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
     {fp, prompt_text} =
       if is_agent_chat && session do
         panel = state.agent_ui.panel
+        view = state.agent_ui.view
         styled_len = length(panel.cached_styled_messages || [])
         text = safe_prompt_content(panel.prompt_buffer)
 
         {:erlang.phash2(
            {:visible, state.agent.status, state.agent.pending_approval, styled_len,
-            panel.model_name, text, panel.message_version}
+            panel.model_name, text, panel.message_version, view.help_visible}
          ), text}
       else
         {:not_visible, ""}
@@ -594,13 +595,25 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
       styled_cache = state.agent_ui.panel.cached_styled_messages
       gui_messages = build_gui_messages(messages_with_ids, styled_cache)
 
+      view = state.agent_ui.view
+      help_visible = view.help_visible
+
+      help_groups =
+        if help_visible do
+          Minga.Keymap.Scope.Agent.help_groups(view.focus)
+        else
+          []
+        end
+
       %{
         visible: true,
         messages: gui_messages,
         status: state.agent.status || :idle,
         model: state.agent_ui.panel.model_name,
         prompt: prompt_text,
-        pending_approval: state.agent.pending_approval
+        pending_approval: state.agent.pending_approval,
+        help_visible: help_visible,
+        help_groups: help_groups
       }
     else
       %{visible: false}

@@ -27,6 +27,14 @@ enum ChatMessageEntry: Identifiable {
     }
 }
 
+/// A group of keybindings for the help overlay cheatsheet.
+struct HelpGroup: Identifiable {
+    let title: String
+    let bindings: [(key: String, description: String)]
+
+    var id: String { title }
+}
+
 @MainActor
 @Observable
 final class AgentChatState {
@@ -36,6 +44,8 @@ final class AgentChatState {
     var prompt: String = ""
     var messages: [ChatMessageEntry] = []
     var pendingApproval: PendingApproval?
+    var helpVisible: Bool = false
+    var helpGroups: [HelpGroup] = []
 
     /// Monotonically increasing counter for BlinkingCursor reset token.
     /// Increments on every update() so the cursor resets on each BEAM frame.
@@ -58,13 +68,15 @@ final class AgentChatState {
 
     var isThinking: Bool { status == 1 || status == 2 }
 
-    func update(visible: Bool, status: UInt8, model: String, prompt: String, pendingToolName: String?, pendingToolSummary: String, rawMessages: [GUIChatMessage]) {
+    func update(visible: Bool, status: UInt8, model: String, prompt: String, pendingToolName: String?, pendingToolSummary: String, helpVisible: Bool, helpGroups: [HelpGroup], rawMessages: [GUIChatMessage]) {
         self.visible = visible
         self.status = status
         self.model = model
         self.prompt = prompt
         self.promptVersion += 1
         self.pendingApproval = pendingToolName.map { PendingApproval(toolName: $0, summary: pendingToolSummary) }
+        self.helpVisible = helpVisible
+        self.helpGroups = helpGroups
         self.messages = rawMessages.map { msg in
             let id = Int(msg.beamId)
             switch msg.content {
@@ -91,5 +103,7 @@ final class AgentChatState {
     func hide() {
         visible = false
         messages = []
+        helpVisible = false
+        helpGroups = []
     }
 }

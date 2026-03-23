@@ -219,9 +219,12 @@ final class CommandDispatcher {
                 guiState.pickerState.clearPreview()
             }
 
-        case .guiAgentChat(let visible, let status, let model, let prompt, let pendingToolName, let pendingToolSummary, let messages):
+        case .guiAgentChat(let visible, let status, let model, let prompt, let pendingToolName, let pendingToolSummary, let helpVisible, let helpGroups, let messages):
             if visible {
-                guiState.agentChatState.update(visible: true, status: status, model: model, prompt: prompt, pendingToolName: pendingToolName, pendingToolSummary: pendingToolSummary, rawMessages: messages)
+                let groups = helpGroups.map { g in
+                    HelpGroup(title: g.title, bindings: g.bindings.map { ($0.key, $0.description) })
+                }
+                guiState.agentChatState.update(visible: true, status: status, model: model, prompt: prompt, pendingToolName: pendingToolName, pendingToolSummary: pendingToolSummary, helpVisible: helpVisible, helpGroups: groups, rawMessages: messages)
             } else {
                 guiState.agentChatState.hide()
             }

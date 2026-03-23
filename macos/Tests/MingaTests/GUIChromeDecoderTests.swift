@@ -871,7 +871,7 @@ struct GUIAgentChatDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == 2)
 
-        guard case .guiAgentChat(let visible, _, _, _, _, _, _) = cmd else {
+        guard case .guiAgentChat(let visible, _, _, _, _, _, _, _, _) = cmd else {
             Issue.record("Expected .guiAgentChat"); return
         }
         #expect(visible == false)
@@ -886,6 +886,7 @@ struct GUIAgentChatDecoderTests {
         appendString16(&data, "claude-3") // model
         appendString16(&data, "Fix this bug") // prompt
         data.append(0) // no pending approval
+        data.append(0) // no help overlay
         appendU16(&data, 2) // messageCount
 
         // Message 1: user (beam_id=1)
@@ -903,7 +904,7 @@ struct GUIAgentChatDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiAgentChat(let visible, let status, let model, let prompt, let pendingToolName, _, let messages) = cmd else {
+        guard case .guiAgentChat(let visible, let status, let model, let prompt, let pendingToolName, _, _, _, let messages) = cmd else {
             Issue.record("Expected .guiAgentChat"); return
         }
 
@@ -936,6 +937,7 @@ struct GUIAgentChatDecoderTests {
         appendString16(&data, "claude") // model
         appendString16(&data, "") // prompt
         data.append(0) // no pending approval
+        data.append(0) // no help overlay
         appendU16(&data, 1) // messageCount
 
         // Thinking message (beam_id=10)
@@ -947,7 +949,7 @@ struct GUIAgentChatDecoderTests {
         data.append(contentsOf: thinkText.utf8)
 
         let (cmd, _) = try decodeCommand(data: data, offset: 0)
-        guard case .guiAgentChat(_, _, _, _, _, _, let messages) = cmd else {
+        guard case .guiAgentChat(_, _, _, _, _, _, _, _, let messages) = cmd else {
             Issue.record("Expected .guiAgentChat"); return
         }
 
@@ -966,6 +968,7 @@ struct GUIAgentChatDecoderTests {
         data.append(1); data.append(2) // visible, status=running tool
         appendString16(&data, "claude"); appendString16(&data, "")
         data.append(0) // no pending
+        data.append(0) // no help overlay
         appendU16(&data, 1)
 
         // Tool call message (beam_id=5)
@@ -981,7 +984,7 @@ struct GUIAgentChatDecoderTests {
         data.append(contentsOf: result.utf8)
 
         let (cmd, _) = try decodeCommand(data: data, offset: 0)
-        guard case .guiAgentChat(_, _, _, _, _, _, let messages) = cmd else {
+        guard case .guiAgentChat(_, _, _, _, _, _, _, _, let messages) = cmd else {
             Issue.record("Expected .guiAgentChat"); return
         }
 
@@ -1002,7 +1005,8 @@ struct GUIAgentChatDecoderTests {
         data.append(OP_GUI_AGENT_CHAT)
         data.append(1); data.append(0)
         appendString16(&data, "claude"); appendString16(&data, "")
-        data.append(0)
+        data.append(0) // no pending
+        data.append(0) // no help overlay
         appendU16(&data, 1)
 
         appendU32(&data, 1) // beam_id
@@ -1013,7 +1017,7 @@ struct GUIAgentChatDecoderTests {
         data.append(contentsOf: sysText.utf8)
 
         let (cmd, _) = try decodeCommand(data: data, offset: 0)
-        guard case .guiAgentChat(_, _, _, _, _, _, let messages) = cmd else {
+        guard case .guiAgentChat(_, _, _, _, _, _, _, _, let messages) = cmd else {
             Issue.record("Expected .guiAgentChat"); return
         }
 
@@ -1030,7 +1034,8 @@ struct GUIAgentChatDecoderTests {
         data.append(OP_GUI_AGENT_CHAT)
         data.append(1); data.append(0)
         appendString16(&data, "claude"); appendString16(&data, "")
-        data.append(0)
+        data.append(0) // no pending
+        data.append(0) // no help overlay
         appendU16(&data, 1)
 
         appendU32(&data, 1) // beam_id
@@ -1042,7 +1047,7 @@ struct GUIAgentChatDecoderTests {
         appendU32(&data, 15000) // costMicros
 
         let (cmd, _) = try decodeCommand(data: data, offset: 0)
-        guard case .guiAgentChat(_, _, _, _, _, _, let messages) = cmd else {
+        guard case .guiAgentChat(_, _, _, _, _, _, _, _, let messages) = cmd else {
             Issue.record("Expected .guiAgentChat"); return
         }
 
@@ -1065,10 +1070,11 @@ struct GUIAgentChatDecoderTests {
         data.append(1) // has pending approval
         appendString16(&data, "write_file") // pending tool name
         appendString16(&data, "Writing to config.toml") // pending summary
+        data.append(0) // no help overlay
         appendU16(&data, 0) // no messages
 
         let (cmd, _) = try decodeCommand(data: data, offset: 0)
-        guard case .guiAgentChat(_, _, _, _, let pendingToolName, let pendingToolSummary, _) = cmd else {
+        guard case .guiAgentChat(_, _, _, _, let pendingToolName, let pendingToolSummary, _, _, _) = cmd else {
             Issue.record("Expected .guiAgentChat"); return
         }
         #expect(pendingToolName == "write_file")
@@ -1082,6 +1088,7 @@ struct GUIAgentChatDecoderTests {
         data.append(1); data.append(0)
         appendString16(&data, "claude"); appendString16(&data, "")
         data.append(0) // no pending
+        data.append(0) // no help overlay
         appendU16(&data, 1) // 1 message
 
         // styled_assistant: beam_id::32, 0x07, line_count::16, then per line:
@@ -1114,7 +1121,7 @@ struct GUIAgentChatDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiAgentChat(_, _, _, _, _, _, let messages) = cmd else {
+        guard case .guiAgentChat(_, _, _, _, _, _, _, _, let messages) = cmd else {
             Issue.record("Expected .guiAgentChat"); return
         }
 

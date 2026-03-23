@@ -1066,6 +1066,7 @@ defmodule Minga.Port.Protocol.GUI do
     prompt_bytes = :erlang.iolist_to_binary([prompt || ""])
 
     pending_bytes = encode_pending_approval(data[:pending_approval])
+    help_bytes = encode_help_overlay(data[:help_visible], data[:help_groups])
 
     msg_binaries =
       messages
@@ -1077,6 +1078,7 @@ defmodule Minga.Port.Protocol.GUI do
       <<1::8, status_byte::8, byte_size(model_bytes)::16, model_bytes::binary,
         byte_size(prompt_bytes)::16, prompt_bytes::binary>>,
       pending_bytes,
+      help_bytes,
       <<length(msg_binaries)::16>>
       | msg_binaries
     ])
@@ -1091,6 +1093,35 @@ defmodule Minga.Port.Protocol.GUI do
     summary_b = :erlang.iolist_to_binary([summary])
     <<1::8, byte_size(name_b)::16, name_b::binary, byte_size(summary_b)::16, summary_b::binary>>
   end
+
+  # Encodes help overlay data: help_visible flag + optional help groups.
+  # Wire format: visible(1) [group_count(1) [title_len(2) title(utf8)
+  #   binding_count(1) [key_len(1) key(utf8) desc_len(2) desc(utf8)]...]*]
+  @spec encode_help_overlay(boolean() | nil, [{String.t(), [{String.t(), String.t()}]}] | nil) ::
+          binary()
+  defp encode_help_overlay(true, groups) when is_list(groups) and groups != [] do
+    group_binaries =
+      Enum.map(groups, fn {title, bindings} ->
+        title_b = :erlang.iolist_to_binary([title])
+
+        binding_binaries =
+          Enum.map(bindings, fn {key, desc} ->
+            key_b = :erlang.iolist_to_binary([key])
+            desc_b = :erlang.iolist_to_binary([desc])
+
+            <<byte_size(key_b)::8, key_b::binary, byte_size(desc_b)::16, desc_b::binary>>
+          end)
+
+        IO.iodata_to_binary([
+          <<byte_size(title_b)::16, title_b::binary, length(bindings)::8>>
+          | binding_binaries
+        ])
+      end)
+
+    IO.iodata_to_binary([<<1::8, length(groups)::8>> | group_binaries])
+  end
+
+  defp encode_help_overlay(_, _), do: <<0::8>>
 
   @spec summarize_tool_args(String.t(), map()) :: String.t()
   defp summarize_tool_args("shell", %{"command" => cmd}), do: cmd

@@ -310,8 +310,8 @@ struct AgentChatViewTests {
         // Header shows model name and status
         #expect(strings.contains("claude-sonnet-4"))
         #expect(strings.contains("idle"))
-        // Prompt is a pure input affordance: placeholder text only, no mode badge or model name
-        #expect(strings.contains("Press i to type"))
+        // Prompt capsule shows placeholder text
+        #expect(strings.contains("Ask anything..."))
         // NORMAL badge moved to unified status bar, no longer in prompt area
         #expect(!strings.contains("NORMAL"))
     }
@@ -357,7 +357,10 @@ struct AgentChatViewTests {
         let texts = body.findAll(ViewInspectorQuery.text)
         let strings = texts.compactMap { try? $0.string() }
 
-        #expect(strings.contains("Type a message, Enter to send"))
+        // In insert mode with empty prompt, a BlinkingCursor renders (not text)
+        // The tooltip still reads "Press i to start typing" but that's a .help() modifier
+        // Check that the old placeholder is NOT shown (capsule shows cursor instead)
+        #expect(!strings.contains("Ask anything..."))
         // Should NOT show NORMAL badge in insert mode
         #expect(!strings.contains("NORMAL"))
     }

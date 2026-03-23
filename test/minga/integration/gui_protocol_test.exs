@@ -336,6 +336,65 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert msg["collapsed"] == true
       assert msg["result"] == "file content here"
     end
+
+    test "gui_agent_chat with help overlay round-trips", %{port: port} do
+      data = %{
+        visible: true,
+        messages: [],
+        status: :idle,
+        model: "claude",
+        prompt: "",
+        pending_approval: nil,
+        help_visible: true,
+        help_groups: [
+          {"Navigation", [{"j / k", "Scroll down / up"}, {"gg / G", "Top / bottom"}]},
+          {"Copy", [{"y", "Copy code block"}]}
+        ]
+      }
+
+      cmd = ProtocolGUI.encode_gui_agent_chat(data)
+      Port.command(port, cmd)
+      assert_receive {^port, {:data, json}}, 5_000
+      decoded = Jason.decode!(json)
+
+      assert decoded["type"] == "gui_agent_chat"
+      assert decoded["help_visible"] == true
+      assert length(decoded["help_groups"]) == 2
+
+      [nav, copy] = decoded["help_groups"]
+      assert nav["title"] == "Navigation"
+      assert length(nav["bindings"]) == 2
+
+      [b1, b2] = nav["bindings"]
+      assert b1["key"] == "j / k"
+      assert b1["description"] == "Scroll down / up"
+      assert b2["key"] == "gg / G"
+      assert b2["description"] == "Top / bottom"
+
+      assert copy["title"] == "Copy"
+      assert length(copy["bindings"]) == 1
+      assert hd(copy["bindings"])["key"] == "y"
+    end
+
+    test "gui_agent_chat without help data round-trips with help_visible=false", %{port: port} do
+      data = %{
+        visible: true,
+        messages: [],
+        status: :idle,
+        model: "claude",
+        prompt: "",
+        pending_approval: nil
+      }
+
+      cmd = ProtocolGUI.encode_gui_agent_chat(data)
+      Port.command(port, cmd)
+      assert_receive {^port, {:data, json}}, 5_000
+      decoded = Jason.decode!(json)
+
+      assert decoded["type"] == "gui_agent_chat"
+      assert decoded["help_visible"] == false
+      assert decoded["help_groups"] == []
+    end
   end
 
   describe "round-trip: BEAM encode → harness decode → harness sends gui_action → BEAM receives" do

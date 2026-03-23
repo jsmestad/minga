@@ -265,8 +265,6 @@ defmodule Minga.Editor.RenderPipeline.Content do
     win_layout = Layout.add_sidebar(win_layout)
     {row_off, col_off, chat_width, height} = win_layout.content
 
-    buf = window.buffer
-
     # Render the sidebar (dashboard) if the layout carved one out.
     sidebar_draws =
       case win_layout.sidebar do
@@ -299,6 +297,53 @@ defmodule Minga.Editor.RenderPipeline.Content do
     # Render the prompt (agent chrome, not buffer content)
     prompt_rect = {prompt_row, col_off, chat_width, prompt_height}
     prompt_draws = PromptRenderer.render(state, prompt_rect)
+
+    # When help overlay is visible, render help content instead of buffer
+    help_visible = state.agent_ui.view.help_visible
+
+    if help_visible do
+      focus = state.agent_ui.view.focus
+      help_groups = Minga.Keymap.Scope.Agent.help_groups(focus)
+      chat_rect = {row_off, col_off, chat_width, chat_height}
+      help_draws = render_help_overlay(help_groups, chat_rect, state.theme)
+
+      frame = %WindowFrame{
+        rect: {0, 0, chat_width, height},
+        gutter: %{},
+        lines: DisplayList.draws_to_layer(help_draws ++ prompt_draws ++ sidebar_draws),
+        tilde_lines: %{},
+        modeline: %{},
+        cursor: nil
+      }
+
+      {frame, nil, state}
+    else
+      render_agent_chat_buffer(state, window, win_layout, sidebar_draws, prompt_draws,
+        row_off: row_off,
+        col_off: col_off,
+        chat_width: chat_width,
+        chat_height: chat_height,
+        height: height
+      )
+    end
+  end
+
+  @spec render_agent_chat_buffer(
+          state(),
+          Window.t(),
+          Layout.window_layout(),
+          [DisplayList.draw()],
+          [DisplayList.draw()],
+          keyword()
+        ) :: {WindowFrame.t(), Cursor.t() | nil, state()}
+  defp render_agent_chat_buffer(state, window, _win_layout, sidebar_draws, prompt_draws, opts) do
+    row_off = Keyword.fetch!(opts, :row_off)
+    col_off = Keyword.fetch!(opts, :col_off)
+    chat_width = Keyword.fetch!(opts, :chat_width)
+    chat_height = Keyword.fetch!(opts, :chat_height)
+    height = Keyword.fetch!(opts, :height)
+
+    buf = window.buffer
 
     # Render the chat content through the standard buffer pipeline
     is_active = agent_window_active?(state, window)
@@ -452,6 +497,115 @@ defmodule Minga.Editor.RenderPipeline.Content do
     }
 
     {frame, final_cursor, state}
+  end
+
+  # Renders help overlay content as display list draws in the chat area.
+  # Shows keybinding groups from Scope.Agent.help_groups/1 with category
+  # headers in accent color and key/description pairs.
+  @spec render_help_overlay(
+          [{String.t(), [{String.t(), String.t()}]}],
+          {non_neg_integer(), non_neg_integer(), pos_integer(), pos_integer()},
+          Minga.Theme.t()
+        ) :: [DisplayList.draw()]
+  defp render_help_overlay(help_groups, {row_off, col_off, width, height}, theme) do
+    at = Minga.Theme.agent_theme(theme)
+    blank = String.duplicate(" ", width)
+    bg_face = Face.new(bg: at.panel_bg)
+
+    # Background fill
+    bg_cmds =
+      for row <- 0..(height - 1) do
+        DisplayList.draw(row_off + row, col_off, blank, bg_face)
+      end
+
+    # Header
+    header_face = Face.new(fg: at.text_fg, bg: at.panel_bg, bold: true)
+    hint_face = Face.new(fg: at.text_dim, bg: at.panel_bg)
+    label_face = Face.new(fg: at.dashboard_label, bg: at.panel_bg, bold: true)
+    key_face = Face.new(fg: at.text_fg, bg: at.panel_bg)
+    desc_face = Face.new(fg: at.text_dim, bg: at.panel_bg)
+
+    header_row = 1
+
+    draws = [
+      DisplayList.draw(row_off + header_row, col_off + 2, "Keyboard Shortcuts", header_face),
+      DisplayList.draw(
+        row_off + header_row,
+        col_off + width - 24,
+        "? or Esc to close",
+        hint_face
+      )
+    ]
+
+    # Render groups
+    key_col_width = min(div(width, 3), 20)
+    row = header_row + 2
+
+    {draws, _row} =
+      Enum.reduce(help_groups, {draws, row}, fn {title, bindings}, {acc, r} ->
+        if r >= height - 1,
+          do: {acc, r},
+          else:
+            render_help_group(title, bindings, acc, r,
+              row_off: row_off,
+              col_off: col_off,
+              width: width,
+              height: height,
+              key_col_width: key_col_width,
+              label_face: label_face,
+              key_face: key_face,
+              desc_face: desc_face
+            )
+      end)
+
+    bg_cmds ++ draws
+  end
+
+  @spec render_help_group(
+          String.t(),
+          [{String.t(), String.t()}],
+          [DisplayList.draw()],
+          non_neg_integer(),
+          keyword()
+        ) :: {[DisplayList.draw()], non_neg_integer()}
+  defp render_help_group(title, bindings, draws, row, opts) do
+    height = Keyword.fetch!(opts, :height)
+
+    if row >= height - 1 do
+      {draws, row}
+    else
+      row_off = Keyword.fetch!(opts, :row_off)
+      col_off = Keyword.fetch!(opts, :col_off)
+      label_face = Keyword.fetch!(opts, :label_face)
+
+      title_draw = DisplayList.draw(row_off + row, col_off + 2, title, label_face)
+      row = row + 1
+
+      {binding_draws, row} =
+        Enum.map_reduce(bindings, row, fn
+          {_key, _desc}, r when r >= height - 1 -> {[], r}
+          {key, desc}, r -> {render_help_binding(key, desc, r, opts), r + 1}
+        end)
+
+      {[title_draw | List.flatten(binding_draws)] ++ draws, row + 1}
+    end
+  end
+
+  @spec render_help_binding(String.t(), String.t(), non_neg_integer(), keyword()) ::
+          [DisplayList.draw()]
+  defp render_help_binding(key, desc, row, opts) do
+    row_off = Keyword.fetch!(opts, :row_off)
+    col_off = Keyword.fetch!(opts, :col_off)
+    key_col_width = Keyword.fetch!(opts, :key_col_width)
+    key_face = Keyword.fetch!(opts, :key_face)
+    desc_face = Keyword.fetch!(opts, :desc_face)
+
+    key_text = String.pad_trailing(key, key_col_width)
+
+    [
+      DisplayList.draw(row_off + row, col_off + 4, key_text, key_face),
+      DisplayList.draw(row_off + row, col_off + 4 + key_col_width, desc, desc_face)
+    ]
   end
 
   # Computes the viewport for the agent chat window.
