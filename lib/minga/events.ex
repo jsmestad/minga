@@ -157,6 +157,19 @@ defmodule Minga.Events do
           }
   end
 
+  defmodule SupervisorRestartedEvent do
+    @moduledoc "Payload for `:supervisor_restarted` events. Published by `SystemObserver` when a monitored supervisor goes down."
+    @enforce_keys [:name, :pid, :reason, :restarted_at]
+    defstruct [:name, :pid, :reason, :restarted_at]
+
+    @type t :: %__MODULE__{
+            name: atom(),
+            pid: pid(),
+            reason: term(),
+            restarted_at: DateTime.t()
+          }
+  end
+
   # ── Types ───────────────────────────────────────────────────────────────────
 
   @typedoc "Known event topics."
@@ -178,6 +191,7 @@ defmodule Minga.Events do
           | :tool_missing
           | :project_rebuilt
           | :command_done
+          | :supervisor_restarted
 
   @typedoc "Typed event payloads. Each topic has a specific struct."
   @type payload ::
@@ -191,6 +205,7 @@ defmodule Minga.Events do
           | GitStatusEvent.t()
           | DiagnosticsUpdatedEvent.t()
           | LspStatusEvent.t()
+          | SupervisorRestartedEvent.t()
 
   # ── Child spec ──────────────────────────────────────────────────────────────
 
@@ -280,6 +295,7 @@ defmodule Minga.Events do
   @spec broadcast(:git_status_changed, GitStatusEvent.t()) :: :ok
   @spec broadcast(:diagnostics_updated, DiagnosticsUpdatedEvent.t()) :: :ok
   @spec broadcast(:lsp_status_changed, LspStatusEvent.t()) :: :ok
+  @spec broadcast(:supervisor_restarted, SupervisorRestartedEvent.t()) :: :ok
   def broadcast(topic, %_{} = payload) when is_atom(topic) do
     Registry.dispatch(@registry, topic, fn entries ->
       for {pid, _value} <- entries do
