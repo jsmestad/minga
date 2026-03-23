@@ -15,8 +15,8 @@ defmodule Minga.Diagnostics.Decorations do
 
   ## Integration
 
-  Called by the Editor when it receives a `{:diagnostics_changed, uri}`
-  message. The Editor finds the buffer for the URI, fetches the current
+  Called by the Editor when it receives a `:diagnostics_updated` event
+  via `Minga.Events`. The Editor finds the buffer for the URI, fetches the current
   diagnostics, and calls `apply/3` to update the decorations.
   """
 

@@ -22,13 +22,17 @@ defmodule Minga.LSP.ClientTest do
          diagnostics: diag_server}
       )
 
-    # Subscribe before the init handshake completes, then wait for the
-    # :lsp_ready message. If init already finished, status check catches it.
-    Client.subscribe(client)
+    # Subscribe to LSP status events and wait for the client to be ready.
+    Minga.Events.subscribe(:lsp_status_changed)
 
     case Client.status(client) do
-      :ready -> :ok
-      _ -> assert_receive {:lsp_ready, :mock_lsp}, 5_000
+      :ready ->
+        :ok
+
+      _ ->
+        assert_receive {:minga_event, :lsp_status_changed,
+                        %Minga.Events.LspStatusEvent{name: :mock_lsp, status: :ready}},
+                       5_000
     end
 
     %{client: client, diag_server: diag_server}
@@ -62,10 +66,12 @@ defmodule Minga.LSP.ClientTest do
       client: client,
       diag_server: diag_server
     } do
-      Diagnostics.subscribe(diag_server)
+      Minga.Events.subscribe(:diagnostics_updated)
       Client.did_open(client, @uri, "elixir", "defmodule Test do\nend\n")
 
-      assert_receive {:diagnostics_changed, @uri}, 5_000
+      assert_receive {:minga_event, :diagnostics_updated,
+                      %Minga.Events.DiagnosticsUpdatedEvent{uri: @uri}},
+                     5_000
 
       diags = Diagnostics.for_uri(diag_server, @uri)
       assert length(diags) == 1
@@ -101,14 +107,22 @@ defmodule Minga.LSP.ClientTest do
     end
 
     test "didClose clears diagnostics", %{client: client, diag_server: diag_server} do
-      Diagnostics.subscribe(diag_server)
+      Minga.Events.subscribe(:diagnostics_updated)
 
       Client.did_open(client, @uri, "elixir", "content")
-      assert_receive {:diagnostics_changed, @uri}, 5_000
+
+      assert_receive {:minga_event, :diagnostics_updated,
+                      %Minga.Events.DiagnosticsUpdatedEvent{uri: @uri}},
+                     5_000
+
       assert Diagnostics.for_uri(diag_server, @uri) != []
 
       Client.did_close(client, @uri)
-      assert_receive {:diagnostics_changed, @uri}, 5_000
+
+      assert_receive {:minga_event, :diagnostics_updated,
+                      %Minga.Events.DiagnosticsUpdatedEvent{uri: @uri}},
+                     5_000
+
       assert Diagnostics.for_uri(diag_server, @uri) == []
     end
 
@@ -119,9 +133,20 @@ defmodule Minga.LSP.ClientTest do
     end
   end
 
-  describe "subscriptions" do
-    test "subscriber can subscribe to client", %{client: client} do
-      assert :ok = Client.subscribe(client)
+  describe "status events" do
+    test "client broadcasts :lsp_status_changed with :stopped on shutdown", %{client: client} do
+      # Setup already proved :ready fires (via assert_receive). Test :stopped.
+      Minga.Events.subscribe(:lsp_status_changed)
+      Client.shutdown(client)
+
+      assert_receive {:minga_event, :lsp_status_changed,
+                      %Minga.Events.LspStatusEvent{name: :mock_lsp, status: :stopped}},
+                     5_000
+
+      # Clean shutdown must not produce a spurious :crashed event.
+      refute_receive {:minga_event, :lsp_status_changed,
+                      %Minga.Events.LspStatusEvent{status: :crashed}},
+                     200
     end
   end
 

@@ -8,9 +8,9 @@ defmodule Minga.Diagnostics do
   and doesn't know or care where diagnostics came from.
 
   Backed by ETS with `read_concurrency: true` for lock-free reads on the
-  render path. The GenServer owns the ETS table lifecycle and manages
-  subscriber notifications. Reads go directly to ETS; writes go through
-  the GenServer to serialize subscriber notifications.
+  render path. The GenServer owns the ETS table lifecycle and broadcasts
+  change notifications via `Minga.Events`. Reads go directly to ETS;
+  writes go through the GenServer to serialize event broadcasts.
 
   Modeled on Neovim's `vim.diagnostic` and Emacs's `flymake`.
 
@@ -31,10 +31,12 @@ defmodule Minga.Diagnostics do
       Diagnostics.next("file:///...", current_line)     # next diagnostic
       Diagnostics.count("file:///...")                  # {error: N, ...}
 
-  ## Subscriptions
+  ## Notifications
 
-  The Editor subscribes to receive `{:diagnostics_changed, uri}` messages
-  when diagnostics are published or cleared, triggering re-renders.
+  After each publish or clear, the GenServer broadcasts a
+  `{:minga_event, :diagnostics_updated, %DiagnosticsUpdatedEvent{}}` event
+  via `Minga.Events`. Subscribers (e.g., the Editor) react to re-render
+  gutter signs and minibuffer hints.
   """
 
   use GenServer
@@ -47,12 +49,11 @@ defmodule Minga.Diagnostics do
   @typedoc "A file URI string (e.g., `\"file:///path/to/file.ex\"`)."
   @type uri :: String.t()
 
-  @typedoc "Internal state: ETS table references, merge cache, subscriber list, and generation counter."
+  @typedoc "Internal state: ETS table references, merge cache, and generation counter."
   @type state :: %{
           table: :ets.table(),
           uri_index: :ets.table(),
           merge_cache: :ets.table(),
-          subscribers: [pid()],
           generation: non_neg_integer()
         }
 
@@ -65,24 +66,13 @@ defmodule Minga.Diagnostics do
     GenServer.start_link(__MODULE__, name, name: name)
   end
 
-  @doc """
-  Subscribes the calling process to diagnostic change notifications.
-
-  The subscriber receives `{:diagnostics_changed, uri}` messages whenever
-  diagnostics are published or cleared for a URI.
-  """
-  @spec subscribe(GenServer.server()) :: :ok
-  def subscribe(server \\ __MODULE__) do
-    GenServer.call(server, {:subscribe, self()})
-  end
-
-  # ── Client API: Producers (writes go through GenServer for subscriber notifications) ──
+  # ── Client API: Producers (writes go through GenServer for event broadcasts) ──
 
   @doc """
   Publishes diagnostics for a `{source, uri}` pair.
 
   Replaces all existing diagnostics for this source+URI combination.
-  Notifies subscribers with `{:diagnostics_changed, uri}`.
+  Broadcasts `:diagnostics_updated` via `Minga.Events`.
   """
   @spec publish(GenServer.server(), source(), uri(), [Diagnostic.t()]) :: :ok
   def publish(server \\ __MODULE__, source, uri, diagnostics)
@@ -93,7 +83,7 @@ defmodule Minga.Diagnostics do
   @doc """
   Clears all diagnostics for a specific `{source, uri}` pair.
 
-  Notifies subscribers with `{:diagnostics_changed, uri}`.
+  Broadcasts `:diagnostics_updated` via `Minga.Events`.
   """
   @spec clear(GenServer.server(), source(), uri()) :: :ok
   def clear(server \\ __MODULE__, source, uri)
@@ -104,7 +94,7 @@ defmodule Minga.Diagnostics do
   @doc """
   Clears all diagnostics from a specific source across all URIs.
 
-  Notifies subscribers for each affected URI.
+  Broadcasts `:diagnostics_updated` for each affected URI.
   """
   @spec clear_source(GenServer.server(), source()) :: :ok
   def clear_source(server \\ __MODULE__, source) when is_atom(source) do
@@ -248,23 +238,17 @@ defmodule Minga.Diagnostics do
        table: table,
        uri_index: uri_index,
        merge_cache: merge_cache,
-       subscribers: [],
        generation: 0
      }}
   end
 
   @impl GenServer
-  def handle_call({:subscribe, pid}, _from, state) when is_pid(pid) do
-    Process.monitor(pid)
-    {:reply, :ok, %{state | subscribers: [pid | state.subscribers]}}
-  end
-
   def handle_call({:publish, source, uri, diagnostics}, _from, state) do
     :ets.insert(state.table, {{source, uri}, diagnostics})
     update_uri_index(state.uri_index, uri, source, :add)
     invalidate_cache(state.merge_cache, uri)
     gen = state.generation + 1
-    notify_subscribers(state.subscribers, uri)
+    broadcast_diagnostics_updated(uri, source)
     {:reply, :ok, %{state | generation: gen}}
   end
 
@@ -273,7 +257,7 @@ defmodule Minga.Diagnostics do
     update_uri_index(state.uri_index, uri, source, :remove)
     invalidate_cache(state.merge_cache, uri)
     gen = state.generation + 1
-    notify_subscribers(state.subscribers, uri)
+    broadcast_diagnostics_updated(uri, source)
     {:reply, :ok, %{state | generation: gen}}
   end
 
@@ -305,13 +289,8 @@ defmodule Minga.Diagnostics do
     end)
 
     gen = state.generation + 1
-    Enum.each(affected_uris, &notify_subscribers(state.subscribers, &1))
+    Enum.each(affected_uris, &broadcast_diagnostics_updated(&1, source))
     {:reply, :ok, %{state | generation: gen}}
-  end
-
-  @impl GenServer
-  def handle_info({:DOWN, _ref, :process, pid, _reason}, state) do
-    {:noreply, %{state | subscribers: List.delete(state.subscribers, pid)}}
   end
 
   # ── Private ────────────────────────────────────────────────────────────────
@@ -413,9 +392,12 @@ defmodule Minga.Diagnostics do
     :ets.delete(cache, uri)
   end
 
-  @spec notify_subscribers([pid()], uri()) :: :ok
-  defp notify_subscribers(subscribers, uri) do
-    Enum.each(subscribers, &send(&1, {:diagnostics_changed, uri}))
+  @spec broadcast_diagnostics_updated(uri(), source()) :: :ok
+  defp broadcast_diagnostics_updated(uri, source) do
+    Minga.Events.broadcast(
+      :diagnostics_updated,
+      %Minga.Events.DiagnosticsUpdatedEvent{uri: uri, source: source}
+    )
   end
 
   @spec table_name(GenServer.server()) :: atom()

@@ -122,12 +122,6 @@ defmodule Minga.LSP.Client do
     GenServer.cast(server, {:did_close, uri})
   end
 
-  @doc "Subscribes the calling process to LSP events."
-  @spec subscribe(GenServer.server()) :: :ok
-  def subscribe(server) do
-    GenServer.call(server, {:subscribe, self()})
-  end
-
   @doc """
   Sends an async LSP request and returns a reference.
 
@@ -262,6 +256,7 @@ defmodule Minga.LSP.Client do
 
         Process.put(:diagnostics_server, diagnostics)
 
+        broadcast_status_changed(server_config.name, :starting, root_path)
         send(self(), :send_initialize)
         {:ok, state}
 
@@ -310,14 +305,10 @@ defmodule Minga.LSP.Client do
     {:reply, state.started_at, state}
   end
 
-  def handle_call({:subscribe, pid}, _from, state) do
-    Process.monitor(pid)
-    {:reply, :ok, %{state | subscribers: [pid | state.subscribers]}}
-  end
-
   def handle_call(:shutdown, from, %{status: :ready} = state) do
     {id, state} = send_request(state, "shutdown", %{})
     state = put_pending(state, id, "shutdown", from)
+    broadcast_status_changed(state.server_config.name, :stopped, state.root_path)
     {:noreply, %{state | status: :shutdown}}
   end
 
@@ -440,6 +431,7 @@ defmodule Minga.LSP.Client do
 
     {id, state} = send_request(state, "initialize", params)
     state = put_pending(state, id, "initialize", nil)
+    broadcast_status_changed(state.server_config.name, :initializing, state.root_path)
     {:noreply, %{state | status: :initializing}}
   end
 
@@ -452,17 +444,31 @@ defmodule Minga.LSP.Client do
     {:noreply, state}
   end
 
+  # Normal exit after deliberate shutdown: :stopped was already broadcast.
+  def handle_info({port, {:exit_status, _code}}, %{port: port, status: :shutdown} = state) do
+    {:stop, :normal, %{state | port: nil}}
+  end
+
+  # Unexpected exit: server died on its own.
   def handle_info({port, {:exit_status, code}}, %{port: port} = state) do
     msg = "LSP server #{state.server_config.name} exited with code #{code}"
     Minga.Log.warning(:lsp, msg)
     Minga.Editor.log_to_warnings(msg)
+    broadcast_status_changed(state.server_config.name, :crashed, state.root_path)
     {:stop, {:server_exited, code}, %{state | port: nil, status: :shutdown}}
   end
 
+  # Normal port close after deliberate shutdown: :stopped was already broadcast.
+  def handle_info({:EXIT, port, _reason}, %{port: port, status: :shutdown} = state) do
+    {:stop, :normal, %{state | port: nil}}
+  end
+
+  # Unexpected port crash.
   def handle_info({:EXIT, port, reason}, %{port: port} = state) do
     msg = "LSP server #{state.server_config.name} crashed: #{inspect(reason)}"
     Minga.Log.warning(:lsp, msg)
     Minga.Editor.log_to_warnings(msg)
+    broadcast_status_changed(state.server_config.name, :crashed, state.root_path)
     {:stop, {:port_crashed, reason}, %{state | port: nil, status: :shutdown}}
   end
 
@@ -476,10 +482,6 @@ defmodule Minga.LSP.Client do
         reply_to_caller(from, {:error, :timeout})
         {:noreply, %{state | pending: pending}}
     end
-  end
-
-  def handle_info({:DOWN, _ref, :process, pid, _reason}, state) do
-    {:noreply, %{state | subscribers: List.delete(state.subscribers, pid)}}
   end
 
   def handle_info(_msg, state) do
@@ -584,7 +586,7 @@ defmodule Minga.LSP.Client do
           nil
       end
 
-    notify_subscribers(state.subscribers, {:lsp_ready, state.server_config.name})
+    broadcast_status_changed(state.server_config.name, :ready, state.root_path)
 
     %{
       state
@@ -951,8 +953,19 @@ defmodule Minga.LSP.Client do
     :ok
   end
 
-  @spec notify_subscribers([pid()], term()) :: :ok
-  defp notify_subscribers(subscribers, message) do
-    Enum.each(subscribers, &send(&1, message))
+  @spec broadcast_status_changed(
+          atom(),
+          :starting | :initializing | :ready | :stopped | :crashed,
+          String.t()
+        ) :: :ok
+  defp broadcast_status_changed(name, status, root_path) do
+    Minga.Events.broadcast(
+      :lsp_status_changed,
+      %Minga.Events.LspStatusEvent{
+        name: name,
+        status: status,
+        uri: "file://#{root_path}"
+      }
+    )
   end
 end

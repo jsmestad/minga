@@ -46,7 +46,7 @@ defmodule Minga.Editor.EnsureBufferTest do
   #   3. register_buffer_background/3 which calls:
   #      - Buffers.add_background/2 (tested in buffers_test.exs)
   #      - EditorState.monitor_buffer/2 (tested in editor state tests)
-  #      - BufferLifecycle.lsp_buffer_opened/2 (tested in LSP tests)
+  #      - LSP status is event-driven via :lsp_status_changed (tested in LSP tests)
   #      - Events.broadcast/2 (tested in events tests)
   #
   # Full integration coverage lives in the snapshot test suite which

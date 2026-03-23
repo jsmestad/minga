@@ -292,49 +292,63 @@ defmodule Minga.DiagnosticsTest do
     end
   end
 
-  describe "subscriptions" do
-    test "subscriber receives notification on publish", %{server: s} do
-      Diagnostics.subscribe(s)
-      Diagnostics.publish(s, :server_a, @uri, [make_diag()])
+  describe "event bus notifications" do
+    # Use per-test unique URIs to avoid cross-contamination via the global
+    # event bus when running async: true.
+    defp unique_uri, do: "file:///tmp/diag_event_#{:erlang.unique_integer([:positive])}.ex"
 
-      assert_receive {:diagnostics_changed, @uri}
+    test "publish broadcasts :diagnostics_updated event", %{server: s} do
+      uri = unique_uri()
+      Minga.Events.subscribe(:diagnostics_updated)
+      Diagnostics.publish(s, :server_a, uri, [make_diag()])
+
+      assert_receive {:minga_event, :diagnostics_updated,
+                      %Minga.Events.DiagnosticsUpdatedEvent{uri: ^uri, source: :server_a}}
     end
 
-    test "subscriber receives notification on clear", %{server: s} do
-      Diagnostics.subscribe(s)
-      Diagnostics.publish(s, :server_a, @uri, [make_diag()])
-      assert_receive {:diagnostics_changed, @uri}
+    test "clear broadcasts :diagnostics_updated event", %{server: s} do
+      uri = unique_uri()
+      Minga.Events.subscribe(:diagnostics_updated)
+      Diagnostics.publish(s, :server_a, uri, [make_diag()])
 
-      Diagnostics.clear(s, :server_a, @uri)
-      assert_receive {:diagnostics_changed, @uri}
+      assert_receive {:minga_event, :diagnostics_updated,
+                      %Minga.Events.DiagnosticsUpdatedEvent{uri: ^uri}}
+
+      Diagnostics.clear(s, :server_a, uri)
+
+      assert_receive {:minga_event, :diagnostics_updated,
+                      %Minga.Events.DiagnosticsUpdatedEvent{uri: ^uri, source: :server_a}}
     end
 
-    test "subscriber receives notification per affected URI on clear_source", %{server: s} do
-      Diagnostics.subscribe(s)
-      Diagnostics.publish(s, :server_a, @uri, [make_diag()])
-      Diagnostics.publish(s, :server_a, @uri2, [make_diag()])
-      assert_receive {:diagnostics_changed, @uri}
-      assert_receive {:diagnostics_changed, @uri2}
+    test "clear_source broadcasts :diagnostics_updated per affected URI", %{server: s} do
+      uri_a = unique_uri()
+      uri_b = unique_uri()
+      Minga.Events.subscribe(:diagnostics_updated)
+      Diagnostics.publish(s, :server_a, uri_a, [make_diag()])
+      Diagnostics.publish(s, :server_a, uri_b, [make_diag()])
+
+      assert_receive {:minga_event, :diagnostics_updated,
+                      %Minga.Events.DiagnosticsUpdatedEvent{uri: ^uri_a}}
+
+      assert_receive {:minga_event, :diagnostics_updated,
+                      %Minga.Events.DiagnosticsUpdatedEvent{uri: ^uri_b}}
 
       Diagnostics.clear_source(s, :server_a)
-      assert_receive {:diagnostics_changed, @uri}
-      assert_receive {:diagnostics_changed, @uri2}
+
+      assert_receive {:minga_event, :diagnostics_updated,
+                      %Minga.Events.DiagnosticsUpdatedEvent{uri: ^uri_a, source: :server_a}}
+
+      assert_receive {:minga_event, :diagnostics_updated,
+                      %Minga.Events.DiagnosticsUpdatedEvent{uri: ^uri_b, source: :server_a}}
     end
 
-    test "dead subscriber is automatically cleaned up", %{server: s} do
-      task =
-        Task.async(fn ->
-          Diagnostics.subscribe(s)
-          :ok
-        end)
+    test "event payload includes source field", %{server: s} do
+      uri = unique_uri()
+      Minga.Events.subscribe(:diagnostics_updated)
+      Diagnostics.publish(s, :custom_linter, uri, [make_diag()])
 
-      Task.await(task)
-
-      # Flush the mailbox so the DOWN message is processed
-      :sys.get_state(s)
-
-      # Publishing should not crash even though subscriber is dead
-      assert :ok = Diagnostics.publish(s, :server_a, @uri, [make_diag()])
+      assert_receive {:minga_event, :diagnostics_updated,
+                      %Minga.Events.DiagnosticsUpdatedEvent{uri: ^uri, source: :custom_linter}}
     end
   end
 

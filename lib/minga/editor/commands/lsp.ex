@@ -9,7 +9,6 @@ defmodule Minga.Editor.Commands.Lsp do
   @behaviour Minga.Command.Provider
 
   alias Minga.Buffer.Server, as: BufferServer
-  alias Minga.Editor.BufferLifecycle
   alias Minga.Editor.HoverPopup
   alias Minga.Editor.LspActions
   alias Minga.Editor.PickerUI
@@ -62,8 +61,8 @@ defmodule Minga.Editor.Commands.Lsp do
       client_keys ->
         results = Enum.map(client_keys, &restart_one/1)
         msg = format_results(results, "Restarted", "Failed to restart")
-        state = %{state | status_msg: msg}
-        BufferLifecycle.refresh_lsp_status(state)
+        # Status will update via :lsp_status_changed events from the new clients
+        %{state | status_msg: msg}
     end
   end
 
@@ -79,8 +78,8 @@ defmodule Minga.Editor.Commands.Lsp do
       client_keys ->
         results = Enum.map(client_keys, &stop_one/1)
         msg = format_results(results, "Stopped", "Failed to stop")
-        state = %{state | status_msg: msg}
-        BufferLifecycle.refresh_lsp_status(state)
+        # Status will update via :lsp_status_changed events from the stopped clients
+        %{state | status_msg: msg}
     end
   end
 
@@ -101,11 +100,8 @@ defmodule Minga.Editor.Commands.Lsp do
         root = Minga.Project.root() || "."
         {results, state} = start_servers(configs, root, state, buf)
         msg = format_results(results, "Started", "Failed to start")
-        state = %{state | status_msg: msg}
-
-        # Schedule deferred refresh for async initialization
-        Process.send_after(self(), :refresh_lsp_status, 500)
-        BufferLifecycle.refresh_lsp_status(state)
+        # Status will update via :lsp_status_changed events from the new clients
+        %{state | status_msg: msg}
     end
   end
 
