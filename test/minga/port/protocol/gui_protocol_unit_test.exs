@@ -126,4 +126,50 @@ defmodule Minga.Port.Protocol.GUIProtocolUnitTest do
       assert agent_tc == 1
     end
   end
+
+  describe "workspace bar encodes icon field" do
+    test "icon is included in workspace entry" do
+      tb = TabBar.new(Tab.new_file(1, "a.ex"))
+
+      tb =
+        TabBar.update_workspace(tb, 0, &Minga.Editor.State.Workspace.set_icon(&1, "star"))
+
+      binary = ProtocolGUI.encode_gui_workspace_bar(tb)
+
+      <<0x86, _active::16, 1::8, _id::16, _kind::8, _status::8, _r::8, _g::8, _b::8,
+        _tc::16, label_len::8, _label::binary-size(label_len), icon_len::8,
+        icon::binary-size(icon_len), _rest::binary>> = binary
+
+      assert icon == "star"
+    end
+  end
+
+  describe "decode_gui_action for workspace actions" do
+    test "decodes workspace rename" do
+      name = "My Research"
+      payload = <<42::16, byte_size(name)::16, name::binary>>
+
+      assert {:ok, {:workspace_rename, 42, "My Research"}} ==
+               ProtocolGUI.decode_gui_action(0x1F, payload)
+    end
+
+    test "decodes workspace rename with empty name" do
+      payload = <<0::16, 0::16>>
+      assert {:ok, {:workspace_rename, 0, ""}} == ProtocolGUI.decode_gui_action(0x1F, payload)
+    end
+
+    test "decodes workspace set icon" do
+      icon = "brain"
+      payload = <<7::16, byte_size(icon)::8, icon::binary>>
+
+      assert {:ok, {:workspace_set_icon, 7, "brain"}} ==
+               ProtocolGUI.decode_gui_action(0x20, payload)
+    end
+
+    test "decodes workspace set icon with long SF Symbol name" do
+      icon = "chevron.left.forwardslash.chevron.right"
+      payload = <<0::16, byte_size(icon)::8, icon::binary>>
+      assert {:ok, {:workspace_set_icon, 0, ^icon}} = ProtocolGUI.decode_gui_action(0x20, payload)
+    end
+  end
 end
