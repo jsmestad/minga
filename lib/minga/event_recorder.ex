@@ -32,7 +32,6 @@ defmodule Minga.EventRecorder do
   @default_db_dir Path.expand("~/.local/share/minga")
   @db_filename "events.db"
   @retention_sweep_interval_ms :timer.hours(1)
-  @default_retention_days 90
 
   @subscribed_topics [
     :buffer_saved,
@@ -102,7 +101,12 @@ defmodule Minga.EventRecorder do
   @spec init(keyword()) :: {:ok, State.t()} | {:stop, term()}
   def init(opts) do
     db_dir = Keyword.get(opts, :db_dir, @default_db_dir)
-    retention_days = Keyword.get(opts, :retention_days, @default_retention_days)
+
+    retention_days =
+      Keyword.get_lazy(opts, :retention_days, fn ->
+        Minga.Config.Options.get(:event_retention_days)
+      end)
+
     path = Path.join(db_dir, @db_filename)
 
     case open_or_recreate(path) do
