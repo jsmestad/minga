@@ -24,15 +24,28 @@ defmodule Minga.Picker.WorkspaceSource do
       icon = workspace_icon(ws)
       label = "#{icon} #{ws.label}"
       active_marker = if ws.id == tb.active_workspace_id, do: " \u{2022}", else: ""
-      tab_count = length(TabBar.tabs_in_workspace(tb, ws.id))
+      tabs = TabBar.tabs_in_workspace(tb, ws.id)
+      tab_count = length(tabs)
       status = agent_status_text(ws)
-      desc = "#{tab_count} tab#{if tab_count == 1, do: "", else: "s"}#{status}"
+
+      # Show file names inline for context
+      file_names =
+        tabs
+        |> Enum.filter(&(&1.kind == :file))
+        |> Enum.map(& &1.label)
+        |> Enum.join(", ")
+
+      desc_parts = ["#{tab_count} tab#{if tab_count == 1, do: "", else: "s"}#{status}"]
+      desc_parts = if file_names != "", do: desc_parts ++ [file_names], else: desc_parts
+      desc = Enum.join(desc_parts, " \u{2022} ")
 
       %Item{
         id: ws.id,
         label: "#{label}#{active_marker}",
         description: desc,
-        icon_color: ws.color
+        annotation: status_annotation(ws),
+        icon_color: ws.color,
+        two_line: true
       }
     end)
   end
@@ -66,4 +79,14 @@ defmodule Minga.Picker.WorkspaceSource do
   defp agent_status_text(%Workspace{kind: :agent, agent_status: :error}), do: " \u{26A0} error"
   defp agent_status_text(%Workspace{kind: :agent, agent_status: :idle}), do: " \u{2713} idle"
   defp agent_status_text(_), do: ""
+
+  @spec status_annotation(Workspace.t()) :: String.t() | nil
+  defp status_annotation(%Workspace{kind: :agent, agent_status: :thinking}), do: "\u{21BB} thinking"
+
+  defp status_annotation(%Workspace{kind: :agent, agent_status: :tool_executing}),
+    do: "\u{2699} executing"
+
+  defp status_annotation(%Workspace{kind: :agent, agent_status: :error}), do: "\u{26A0} error"
+  defp status_annotation(%Workspace{kind: :agent, agent_status: :idle}), do: "\u{2713} idle"
+  defp status_annotation(_), do: nil
 end
