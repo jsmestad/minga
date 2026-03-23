@@ -16,92 +16,52 @@ struct FileTreeView: View {
     private let rowHeight: CGFloat = 22
     private let indentWidth: CGFloat = 14
     private let chevronWidth: CGFloat = 12
-    private let sidebarMinWidth: CGFloat = 180
-    private let sidebarMaxWidth: CGFloat = 360
 
     /// Chevron/hover animation duration. Respects reduced motion.
     private var animDuration: Double {
         NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.15
     }
 
-    @State private var sidebarWidth: CGFloat = 240
-    @State private var isDraggingResize: Bool = false
     @State private var hoveredEntryId: UInt32? = nil
     @State private var scrollOffset: CGFloat = 0
 
     var body: some View {
-        HStack(spacing: 0) {
-            VStack(spacing: 0) {
-                projectHeader
-                entryList
-            }
-            .frame(width: sidebarWidth)
-            .background(theme.treeBg)
-            .focusable(false)
-            .focusEffectDisabled()
-            .onAppear {
-                sidebarWidth = CGFloat(fileTreeState.treeWidth) * 7.5
-            }
-
-            resizeHandle
+        VStack(spacing: 0) {
+            projectHeader
+            entryList
         }
-    }
-
-    // MARK: - Resize handle
-
-    /// 8px hit target with a 1px visible separator line.
-    @ViewBuilder
-    private var resizeHandle: some View {
-        Color.clear
-            .frame(width: 8)
-            .overlay(alignment: .leading) {
-                Rectangle()
-                    .fill(isDraggingResize ? theme.treeActiveFg.opacity(0.3) : theme.treeSeparatorFg.opacity(0.4))
-                    .frame(width: 1)
-            }
-            .contentShape(Rectangle())
-            .gesture(
-                DragGesture(minimumDistance: 1)
-                    .onChanged { value in
-                        isDraggingResize = true
-                        let newWidth = sidebarWidth + value.translation.width
-                        sidebarWidth = min(max(newWidth, sidebarMinWidth), sidebarMaxWidth)
-                    }
-                    .onEnded { _ in
-                        isDraggingResize = false
-                    }
-            )
-            .onHover { hovering in
-                if hovering {
-                    NSCursor.resizeLeftRight.push()
-                } else {
-                    NSCursor.pop()
-                }
-            }
+        .focusable(false)
+        .focusEffectDisabled()
     }
 
     // MARK: - Project header
 
     @ViewBuilder
     private var projectHeader: some View {
-        HStack(spacing: 6) {
-            Text("\u{F024B}")
-                .font(.custom("Symbols Nerd Font Mono", size: 12))
-                .foregroundStyle(theme.treeDirFg)
+        VStack(spacing: 0) {
+            HStack(spacing: 6) {
+                Text("\u{F024B}")
+                    .font(.custom("Symbols Nerd Font Mono", size: 12))
+                    .foregroundStyle(theme.treeDirFg)
 
-            Text(projectName)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(theme.treeHeaderFg)
-                .lineLimit(1)
-                .truncationMode(.tail)
+                Text(projectName)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(theme.treeHeaderFg)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
 
-            Spacer()
+                Spacer()
 
-            headerActions
+                headerActions
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 34)
+            .background(theme.treeHeaderBg)
+
+            Rectangle()
+                .fill(theme.treeSeparatorFg.opacity(0.3))
+                .frame(height: 1)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(theme.treeBg)
     }
 
     // MARK: - Header action icons
@@ -127,22 +87,12 @@ struct FileTreeView: View {
 
     @ViewBuilder
     private func headerButton(systemName: String, tooltip: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: 11))
-                .foregroundStyle(theme.treeFg.opacity(0.6))
-                .frame(width: 20, height: 20)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help(tooltip)
-        .onHover { isHovered in
-            if isHovered {
-                NSCursor.pointingHand.push()
-            } else {
-                NSCursor.pop()
-            }
-        }
+        SidebarHeaderButton(
+            systemName: systemName,
+            barFg: theme.treeFg,
+            tooltip: tooltip,
+            action: action
+        )
     }
 
     private var projectName: String {

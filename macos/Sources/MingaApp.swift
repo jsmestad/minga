@@ -159,11 +159,6 @@ struct ContentView: View {
                 theme: appState.gui.themeColors,
                 encoder: appState.encoder
             )
-
-            // 1px separator between sidebar and editor
-            Rectangle()
-                .fill(appState.gui.themeColors.treeSeparatorFg)
-                .frame(width: 1)
         }
     }
 
