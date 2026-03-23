@@ -60,6 +60,9 @@ defmodule Minga.Editor.State.Tab do
   @typedoc "Agent tab status (nil for file tabs)."
   @type agent_status :: :idle | :thinking | :tool_executing | :error | nil
 
+  @typedoc "Workspace group id. 0 = manual/ungrouped workspace."
+  @type group_id :: non_neg_integer()
+
   @typedoc "A tab."
   @type t :: %__MODULE__{
           id: id(),
@@ -68,7 +71,8 @@ defmodule Minga.Editor.State.Tab do
           context: context(),
           session: pid() | nil,
           agent_status: agent_status(),
-          attention: boolean()
+          attention: boolean(),
+          group_id: group_id()
         }
 
   @enforce_keys [:id, :kind]
@@ -78,7 +82,8 @@ defmodule Minga.Editor.State.Tab do
             context: %{},
             session: nil,
             agent_status: nil,
-            attention: false
+            attention: false,
+            group_id: 0
 
   @doc "Creates a new file tab."
   @spec new_file(id(), String.t()) :: t()
@@ -130,5 +135,11 @@ defmodule Minga.Editor.State.Tab do
   @spec set_attention(t(), boolean()) :: t()
   def set_attention(%__MODULE__{} = tab, value) when is_boolean(value) do
     %{tab | attention: value}
+  end
+
+  @doc "Sets the workspace group id."
+  @spec set_group(t(), group_id()) :: t()
+  def set_group(%__MODULE__{} = tab, group_id) when is_integer(group_id) and group_id >= 0 do
+    %{tab | group_id: group_id}
   end
 end

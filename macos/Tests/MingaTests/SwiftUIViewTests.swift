@@ -274,9 +274,9 @@ struct TabBarViewViewTests {
     @MainActor func showsAllTabs() throws {
         let state = TabBarState()
         state.update(activeIndex: 0, entries: [
-            GUITabEntry(id: 1, isActive: true, isDirty: false, isAgent: false,
+            GUITabEntry(id: 1, groupId: 0, isActive: true, isDirty: false, isAgent: false,
                        hasAttention: false, agentStatus: 0, icon: "", label: "editor.ex"),
-            GUITabEntry(id: 2, isActive: false, isDirty: false, isAgent: false,
+            GUITabEntry(id: 2, groupId: 0, isActive: false, isDirty: false, isAgent: false,
                        hasAttention: false, agentStatus: 0, icon: "", label: "test.ex"),
         ])
 

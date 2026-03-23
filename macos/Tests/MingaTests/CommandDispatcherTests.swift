@@ -81,7 +81,7 @@ struct CommandDispatcherRoutingTests {
     @MainActor func guiTabBarRouting() {
         let (dispatcher, gui) = makeDispatcher()
         let tabs = [
-            GUITabEntry(id: 1, isActive: true, isDirty: false, isAgent: false,
+            GUITabEntry(id: 1, groupId: 0, isActive: true, isDirty: false, isAgent: false,
                        hasAttention: false, agentStatus: 0, icon: "", label: "test.ex")
         ]
         dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: tabs))

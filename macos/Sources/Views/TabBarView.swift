@@ -35,15 +35,27 @@ struct TabBarView: View {
             // Thin separator after nav arrows
             verticalSeparator
 
+            // Workspace indicator (visible when workspaces exist)
+            if tabBarState.hasWorkspaces, let activeWs = tabBarState.activeWorkspace {
+                workspaceIndicator(activeWs)
+                groupSeparator(color: activeWs.color)
+            }
+
             // Tab strip
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 0) {
-                    ForEach(tabBarState.tabs) { tab in
+                    ForEach(Array(tabBarState.tabs.enumerated()), id: \.element.id) { index, tab in
                         tabItem(tab)
 
-                        // Thin separator between tabs (skip after last)
+                        // Group separator at group_id transitions, thin separator otherwise
                         if tab.id != tabBarState.tabs.last?.id {
-                            verticalSeparator
+                            let nextTab = tabBarState.tabs[index + 1]
+                            if tab.groupId != nextTab.groupId && tabBarState.hasWorkspaces {
+                                let separatorColor = workspaceColor(for: nextTab.groupId)
+                                groupSeparator(color: separatorColor)
+                            } else {
+                                verticalSeparator
+                            }
                         }
                     }
                 }
@@ -78,6 +90,73 @@ struct TabBarView: View {
         .background(theme.tabBg)
         .focusable(false)
         .focusEffectDisabled()
+    }
+
+    // MARK: - Workspace indicator
+
+    @ViewBuilder
+    private func workspaceIndicator(_ workspace: WorkspaceEntry) -> some View {
+        Button(action: {
+            // Toggle workspace dropdown (handled by BEAM command)
+            encoder?.sendExecuteCommand(name: "workspace_list")
+        }) {
+            HStack(spacing: 4) {
+                Image(systemName: workspace.isManual ? "doc.on.doc" : "cpu")
+                    .font(.system(size: 10))
+                    .foregroundStyle(workspace.color)
+
+                Text(workspace.label)
+                    .font(.system(size: 11))
+                    .lineLimit(1)
+                    .foregroundStyle(theme.tabActiveFg)
+
+                // Agent status indicator
+                if workspace.isAgent {
+                    agentStatusDot(workspace.agentStatus, color: workspace.color)
+                }
+
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 7, weight: .bold))
+                    .foregroundStyle(theme.tabInactiveFg)
+            }
+            .padding(.horizontal, 8)
+            .frame(height: barHeight)
+        }
+        .buttonStyle(.plain)
+        .help("Switch workspace (SPC TAB l)")
+        .onHover { isHovered in
+            if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+        }
+    }
+
+    @ViewBuilder
+    private func agentStatusDot(_ status: UInt8, color: Color) -> some View {
+        Circle()
+            .fill(agentStatusColor(status, accent: color))
+            .frame(width: 5, height: 5)
+    }
+
+    private func agentStatusColor(_ status: UInt8, accent: Color) -> Color {
+        switch status {
+        case 1: return accent   // thinking
+        case 2: return accent   // tool_executing
+        case 3: return Color.red  // error
+        default: return theme.tabInactiveFg  // idle
+        }
+    }
+
+    private func workspaceColor(for groupId: UInt16) -> Color {
+        if let ws = tabBarState.workspaces.first(where: { $0.id == groupId }) {
+            return ws.color
+        }
+        return theme.tabSeparatorFg
+    }
+
+    private func groupSeparator(color: Color) -> some View {
+        Rectangle()
+            .fill(color.opacity(0.6))
+            .frame(width: 2, height: 20)
+            .padding(.horizontal, 2)
     }
 
     // MARK: - Tab item

@@ -116,8 +116,27 @@ private func randomGuiTabBar() -> Data {
     for _ in 0..<tabCount {
         data.append(UInt8.random(in: 0...0xFF))  // flags
         appendRandomU32(&data)  // id
+        appendRandomU16(&data)  // group_id
         data.append(randomString8Field(maxLen: 4))  // icon
         data.append(randomString16Field(maxLen: 20))  // label
+    }
+    return data
+}
+
+private func randomGuiWorkspaceBar() -> Data {
+    let wsCount = UInt8.random(in: 0...4)
+    var data = Data([OP_GUI_WORKSPACE_BAR])
+    appendRandomU16(&data) // active_workspace_id
+    data.append(wsCount)
+    for _ in 0..<wsCount {
+        appendRandomU16(&data) // id
+        data.append(UInt8.random(in: 0...1)) // kind
+        data.append(UInt8.random(in: 0...3)) // agent_status
+        data.append(UInt8.random(in: 0...0xFF)) // r
+        data.append(UInt8.random(in: 0...0xFF)) // g
+        data.append(UInt8.random(in: 0...0xFF)) // b
+        appendRandomU16(&data) // tab_count
+        data.append(randomString8Field(maxLen: 20)) // label
     }
     return data
 }
@@ -257,6 +276,16 @@ struct DecoderFuzzVariableLengthTests {
             let (cmd, size) = try decodeCommand(data: data, offset: 0)
             #expect(size == data.count)
             guard case .guiTabBar = cmd else { Issue.record("Expected .guiTabBar"); return }
+        }
+    }
+
+    @Test("gui_workspace_bar with random workspaces never crashes")
+    func fuzzGuiWorkspaceBar() throws {
+        for _ in 0..<fuzzIterations {
+            let data = randomGuiWorkspaceBar()
+            let (cmd, size) = try decodeCommand(data: data, offset: 0)
+            #expect(size == data.count)
+            guard case .guiWorkspaceBar = cmd else { Issue.record("Expected .guiWorkspaceBar"); return }
         }
     }
 
