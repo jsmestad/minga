@@ -734,12 +734,20 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         return (.guiBreadcrumb(segments: segments), pos - offset)
 
     case OP_GUI_STATUS_BAR:
-        // Shared header (both variants):
+        // Unified wire format for both buffer (contentKind=0) and agent (contentKind=1).
+        // Both variants encode the full buffer field set. The agent variant appends
+        // model_name, message_count, and session_status at the end.
+        //
+        // Layout:
         //   content_kind:1 mode:1 cursor_line:4 cursor_col:4 line_count:4
-        //   flags:1 lsp:1 git_len:1 git(:git_len) msg_len:2 msg(:msg_len) ft_len:1 ft(:ft_len)
-        //   error_count:2 warning_count:2
-        // Agent-only fields (content_kind == 1), appended after the shared header:
-        //   model_name_len:1 model_name(:model_name_len) message_count:4 session_status:1
+        //   flags:1 lsp:1 git_len:1 git(:git_len) msg_len:2 msg(:msg_len)
+        //   ft_len:1 ft(:ft_len) error_count:2 warning_count:2
+        //   info_count:2 hint_count:2 macro_recording:1 parser_status:1 agent_status:1
+        //   git_added:2 git_modified:2 git_deleted:2
+        //   icon_len:1 icon(:icon_len) icon_r:1 icon_g:1 icon_b:1
+        //   filename_len:2 filename(:filename_len)
+        //   diag_hint_len:2 diag_hint(:diag_hint_len)
+        //   [agent only] model_name_len:1 model_name(:model_name_len) message_count:4 session_status:1
         guard data.count >= rest + 17 else { throw ProtocolDecodeError.malformed }
         let contentKind = data[rest]
         let mode = data[rest + 1]
@@ -762,82 +770,65 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         let warningCount: UInt16 = readU16(data, diagBase + 2)
         var totalConsumed = diagBase + 4
 
-        // Agent-only fields: explicit message_count and session_status after model_name.
+        // Extended fields (shared by both variants)
+        guard data.count >= totalConsumed + 13 else { throw ProtocolDecodeError.malformed }
+        let infoCount: UInt16 = readU16(data, totalConsumed)
+        let hintCount: UInt16 = readU16(data, totalConsumed + 2)
+        let macroRecording: UInt8 = data[totalConsumed + 4]
+        let parserStatus: UInt8 = data[totalConsumed + 5]
+        let agentStatus: UInt8 = data[totalConsumed + 6]
+        let gitAdded: UInt16 = readU16(data, totalConsumed + 7)
+        let gitModified: UInt16 = readU16(data, totalConsumed + 9)
+        let gitDeleted: UInt16 = readU16(data, totalConsumed + 11)
+        totalConsumed += 13
+
+        // icon: len:1 + data + color:3
+        guard data.count >= totalConsumed + 1 else { throw ProtocolDecodeError.malformed }
+        let iconLen = Int(data[totalConsumed])
+        totalConsumed += 1
+        guard data.count >= totalConsumed + iconLen + 3 else { throw ProtocolDecodeError.malformed }
+        let icon = String(data: data[totalConsumed..<(totalConsumed + iconLen)], encoding: .utf8) ?? ""
+        totalConsumed += iconLen
+        let iconColorR = data[totalConsumed]
+        let iconColorG = data[totalConsumed + 1]
+        let iconColorB = data[totalConsumed + 2]
+        totalConsumed += 3
+
+        // filename: len:2 + data
+        guard data.count >= totalConsumed + 2 else { throw ProtocolDecodeError.malformed }
+        let filenameLen = Int(readU16(data, totalConsumed))
+        totalConsumed += 2
+        guard data.count >= totalConsumed + filenameLen else { throw ProtocolDecodeError.malformed }
+        let filename = String(data: data[totalConsumed..<(totalConsumed + filenameLen)], encoding: .utf8) ?? ""
+        totalConsumed += filenameLen
+
+        // diagnostic_hint: len:2 + data
+        var diagnosticHint = ""
+        if data.count >= totalConsumed + 2 {
+            let diagHintLen = Int(readU16(data, totalConsumed))
+            totalConsumed += 2
+            if data.count >= totalConsumed + diagHintLen, diagHintLen > 0 {
+                diagnosticHint = String(data: data[totalConsumed..<(totalConsumed + diagHintLen)], encoding: .utf8) ?? ""
+                totalConsumed += diagHintLen
+            }
+        }
+
+        // Agent-only trailing fields (only present when contentKind == 1)
         var modelName = ""
         var messageCount: UInt32 = 0
         var sessionStatus: UInt8 = 0
 
-        // Extended buffer fields (TUI modeline parity)
-        var infoCount: UInt16 = 0
-        var hintCount: UInt16 = 0
-        var macroRecording: UInt8 = 0
-        var parserStatus: UInt8 = 0
-        var agentStatus: UInt8 = 0
-        var gitAdded: UInt16 = 0
-        var gitModified: UInt16 = 0
-        var gitDeleted: UInt16 = 0
-        var icon = ""
-        var iconColorR: UInt8 = 0
-        var iconColorG: UInt8 = 0
-        var iconColorB: UInt8 = 0
-        var filename = ""
-        var diagnosticHint = ""
-
-        if contentKind == 1 && data.count >= totalConsumed + 1 {
+        if contentKind == 1, data.count >= totalConsumed + 1 {
             let modelNameLen = Int(data[totalConsumed])
             totalConsumed += 1
-            // 4 bytes message_count + 1 byte session_status follow the model name
             guard data.count >= totalConsumed + modelNameLen + 5 else { throw ProtocolDecodeError.malformed }
             modelName = String(data: data[totalConsumed..<(totalConsumed + modelNameLen)], encoding: .utf8) ?? ""
             totalConsumed += modelNameLen
             messageCount = readU32(data, totalConsumed)
             sessionStatus = data[totalConsumed + 4]
             totalConsumed += 5
-        } else if contentKind == 0 {
-            // Extended buffer fields after warning_count:
-            // info_count:2 hint_count:2 macro_recording:1 parser_status:1 agent_status:1
-            // git_added:2 git_modified:2 git_deleted:2
-            // icon_len:1 icon:N icon_color_r:1 icon_color_g:1 icon_color_b:1
-            // filename_len:2 filename:N
-            // 2+2+1+1+1+2+2+2 = 13 bytes of fixed fields before icon
-            guard data.count >= totalConsumed + 13 else { throw ProtocolDecodeError.malformed }
-            infoCount = readU16(data, totalConsumed)
-            hintCount = readU16(data, totalConsumed + 2)
-            macroRecording = data[totalConsumed + 4]
-            parserStatus = data[totalConsumed + 5]
-            agentStatus = data[totalConsumed + 6]
-            gitAdded = readU16(data, totalConsumed + 7)
-            gitModified = readU16(data, totalConsumed + 9)
-            gitDeleted = readU16(data, totalConsumed + 11)
-            totalConsumed += 13
-            // icon: len:1 + data + color:3
-            guard data.count >= totalConsumed + 1 else { throw ProtocolDecodeError.malformed }
-            let iconLen = Int(data[totalConsumed])
-            totalConsumed += 1
-            guard data.count >= totalConsumed + iconLen + 3 else { throw ProtocolDecodeError.malformed }
-            icon = String(data: data[totalConsumed..<(totalConsumed + iconLen)], encoding: .utf8) ?? ""
-            totalConsumed += iconLen
-            iconColorR = data[totalConsumed]
-            iconColorG = data[totalConsumed + 1]
-            iconColorB = data[totalConsumed + 2]
-            totalConsumed += 3
-            // filename: len:2 + data
-            guard data.count >= totalConsumed + 2 else { throw ProtocolDecodeError.malformed }
-            let filenameLen = Int(readU16(data, totalConsumed))
-            totalConsumed += 2
-            guard data.count >= totalConsumed + filenameLen else { throw ProtocolDecodeError.malformed }
-            filename = String(data: data[totalConsumed..<(totalConsumed + filenameLen)], encoding: .utf8) ?? ""
-            totalConsumed += filenameLen
-            // diagnostic_hint_len:2 + diagnostic_hint:N (backward-compatible: may be absent)
-            if data.count >= totalConsumed + 2 {
-                let diagHintLen = Int(readU16(data, totalConsumed))
-                totalConsumed += 2
-                if data.count >= totalConsumed + diagHintLen, diagHintLen > 0 {
-                    diagnosticHint = String(data: data[totalConsumed..<(totalConsumed + diagHintLen)], encoding: .utf8) ?? ""
-                    totalConsumed += diagHintLen
-                }
-            }
         }
+
         return (.guiStatusBar(contentKind: contentKind, mode: mode, cursorLine: cursorLine, cursorCol: cursorCol, lineCount: lineCount, flags: flags, lspStatus: lspStatus, gitBranch: gitBranch, message: message, filetype: filetype, errorCount: errorCount, warningCount: warningCount, modelName: modelName, messageCount: messageCount, sessionStatus: sessionStatus, infoCount: infoCount, hintCount: hintCount, macroRecording: macroRecording, parserStatus: parserStatus, agentStatus: agentStatus, gitAdded: gitAdded, gitModified: gitModified, gitDeleted: gitDeleted, icon: icon, iconColorR: iconColorR, iconColorG: iconColorG, iconColorB: iconColorB, filename: filename, diagnosticHint: diagnosticHint), totalConsumed - offset)
 
     case OP_GUI_PICKER:

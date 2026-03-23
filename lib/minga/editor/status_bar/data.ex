@@ -60,7 +60,7 @@ defmodule Minga.Editor.StatusBar.Data do
           status_msg: String.t() | nil
         }
 
-  @typedoc "Data for a focused agent chat window."
+  @typedoc "Data for a focused agent chat window. Includes background buffer context so the status bar layout stays stable across mode switches."
   @type agent_data :: %{
           mode: Minga.Mode.mode(),
           mode_state: Minga.Mode.state() | nil,
@@ -69,7 +69,24 @@ defmodule Minga.Editor.StatusBar.Data do
           message_count: non_neg_integer(),
           macro_recording: {true, String.t()} | false,
           agent_status: AgentState.status(),
-          agent_theme_colors: Theme.Agent.t() | nil
+          agent_theme_colors: Theme.Agent.t() | nil,
+          # Background buffer context (same fields as buffer_data)
+          cursor_line: non_neg_integer(),
+          cursor_col: non_neg_integer(),
+          line_count: non_neg_integer(),
+          file_name: String.t(),
+          filetype: atom(),
+          dirty: boolean(),
+          git_branch: String.t() | nil,
+          git_diff_summary: git_diff_summary(),
+          diagnostic_counts:
+            {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()} | nil,
+          diagnostic_hint: String.t() | nil,
+          lsp_status: lsp_status(),
+          parser_status: parser_status(),
+          buf_index: pos_integer(),
+          buf_count: non_neg_integer(),
+          status_msg: String.t() | nil
         }
 
   @typedoc "Tagged union: buffer or agent variant."
@@ -172,6 +189,18 @@ defmodule Minga.Editor.StatusBar.Data do
 
     model_name = if panel.model_name != "", do: panel.model_name, else: "Agent"
 
+    # Pull background buffer context so the status bar stays stable
+    buf = state.buffers.active
+    {line, col} = if buf, do: BufferServer.cursor(buf), else: {0, 0}
+    line_count = if buf, do: BufferServer.line_count(buf), else: 1
+    file_name = if buf, do: buf_display_name(buf), else: "[no file]"
+    dirty = buf != nil and BufferServer.dirty?(buf)
+    filetype = if buf, do: buffer_filetype(buf), else: :text
+
+    {git_branch, git_diff_summary} = git_modeline_data(buf)
+    diagnostic_counts = diagnostic_modeline_data(buf)
+    diagnostic_hint = cursor_line_diagnostic_hint(buf, line)
+
     %{
       mode: state.vim.mode,
       mode_state: state.vim.mode_state,
@@ -180,7 +209,23 @@ defmodule Minga.Editor.StatusBar.Data do
       message_count: message_count,
       macro_recording: MacroRecorder.recording?(state.vim.macro_recorder),
       agent_status: agent.status,
-      agent_theme_colors: Theme.agent_theme(state.theme)
+      agent_theme_colors: Theme.agent_theme(state.theme),
+      # Background buffer context
+      cursor_line: line,
+      cursor_col: col,
+      line_count: line_count,
+      file_name: file_name,
+      filetype: filetype,
+      dirty: dirty,
+      git_branch: git_branch,
+      git_diff_summary: git_diff_summary,
+      diagnostic_counts: diagnostic_counts,
+      diagnostic_hint: diagnostic_hint,
+      lsp_status: state.lsp_status,
+      parser_status: state.parser_status,
+      buf_index: state.buffers.active_index + 1,
+      buf_count: length(state.buffers.list),
+      status_msg: state.status_msg
     }
   end
 
@@ -278,11 +323,10 @@ defmodule Minga.Editor.StatusBar.Data do
   @doc """
   Converts a `StatusBar.Data.t()` to the map shape expected by `Modeline.render/5`.
 
-  Both variants produce data shaped identically for the modeline renderer;
-  the agent variant maps its fields onto the buffer modeline slots.
+  Both variants carry the same buffer fields and produce identical modeline data.
   """
   @spec to_modeline_data(t()) :: Minga.Editor.Modeline.modeline_data()
-  def to_modeline_data({:buffer, d}) do
+  def to_modeline_data({_variant, d}) do
     %{
       mode: d.mode,
       mode_state: d.mode_state,
@@ -302,25 +346,6 @@ defmodule Minga.Editor.StatusBar.Data do
       git_branch: d.git_branch,
       git_diff_summary: d.git_diff_summary,
       diagnostic_counts: d.diagnostic_counts
-    }
-  end
-
-  def to_modeline_data({:agent, d}) do
-    %{
-      mode: d.mode,
-      mode_state: d.mode_state,
-      file_name: "󰚩 #{d.model_name}",
-      filetype: :text,
-      dirty_marker: "",
-      cursor_line: d.message_count,
-      cursor_col: 0,
-      line_count: max(d.message_count, 1),
-      buf_index: 1,
-      buf_count: 1,
-      macro_recording: d.macro_recording,
-      agent_status: d.agent_status,
-      agent_theme_colors: d.agent_theme_colors,
-      mode_override: nil
     }
   end
 end

@@ -386,23 +386,36 @@ struct GUIStatusBarDecoderTests {
         #expect(filename == "editor.ex")
     }
 
-    @Test("Decode gui_status_bar agent variant with model and session status")
+    @Test("Decode gui_status_bar agent variant with background buffer context")
     func decodeAgentVariant() throws {
         var data = Data()
         data.append(OP_GUI_STATUS_BAR)
         data.append(1) // contentKind = agent
         data.append(0) // mode = normal
-        appendU32(&data, 0) // cursorLine
-        appendU32(&data, 0) // cursorCol
-        appendU32(&data, 0) // lineCount
-        data.append(0) // flags
-        data.append(0) // lspStatus
-        appendString8(&data, "") // gitBranch (empty)
-        appendString16(&data, "") // message (empty)
-        appendString8(&data, "") // filetype (empty)
-        appendU16(&data, 0) // errorCount
-        appendU16(&data, 0) // warningCount
-        // Agent-only fields
+        appendU32(&data, 11) // cursorLine (1-indexed)
+        appendU32(&data, 6)  // cursorCol (1-indexed)
+        appendU32(&data, 100) // lineCount
+        data.append(0x03) // flags (hasLsp=1, hasGit=1)
+        data.append(1) // lspStatus = ready
+        appendString8(&data, "feat/agent") // gitBranch
+        appendString16(&data, "") // message
+        appendString8(&data, "elixir") // filetype
+        appendU16(&data, 1) // errorCount
+        appendU16(&data, 2) // warningCount
+        // Extended fields (same as buffer variant)
+        appendU16(&data, 0) // infoCount
+        appendU16(&data, 1) // hintCount
+        data.append(0) // macroRecording
+        data.append(0) // parserStatus
+        data.append(1) // agentStatus = thinking
+        appendU16(&data, 3) // gitAdded
+        appendU16(&data, 2) // gitModified
+        appendU16(&data, 0) // gitDeleted
+        appendString8(&data, "") // icon
+        data.append(0); data.append(0); data.append(0) // icon color
+        appendString16(&data, "editor.ex") // filename
+        appendString16(&data, "") // diagnosticHint
+        // Agent-only trailing fields
         appendString8(&data, "claude-3-5-sonnet") // modelName
         appendU32(&data, 12) // messageCount
         data.append(1) // sessionStatus = thinking
@@ -410,7 +423,7 @@ struct GUIStatusBarDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiStatusBar(let contentKind, _, _, _, _, _, _, _, _, _, _, _, let modelName, let messageCount, let sessionStatus, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = cmd else {
+        guard case .guiStatusBar(let contentKind, _, let cursorLine, _, let lineCount, _, _, let gitBranch, _, let filetype, let errorCount, _, let modelName, let messageCount, let sessionStatus, _, let hintCount, _, _, let agentStatus, let gitAdded, let gitModified, _, _, _, _, _, let filename, _) = cmd else {
             Issue.record("Expected .guiStatusBar"); return
         }
 
@@ -418,6 +431,17 @@ struct GUIStatusBarDecoderTests {
         #expect(modelName == "claude-3-5-sonnet")
         #expect(messageCount == 12)
         #expect(sessionStatus == 1) // thinking
+        // Background buffer fields populated
+        #expect(cursorLine == 11)
+        #expect(lineCount == 100)
+        #expect(gitBranch == "feat/agent")
+        #expect(filetype == "elixir")
+        #expect(errorCount == 1)
+        #expect(hintCount == 1)
+        #expect(agentStatus == 1)
+        #expect(gitAdded == 3)
+        #expect(gitModified == 2)
+        #expect(filename == "editor.ex")
     }
 }
 

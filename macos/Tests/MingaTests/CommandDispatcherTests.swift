@@ -238,6 +238,33 @@ struct CommandDispatcherRoutingTests {
         #expect(gui.statusBarState.errorCount == 3)
     }
 
+    @Test("guiStatusBar agent variant populates background buffer fields")
+    @MainActor func guiStatusBarAgentRouting() {
+        let (dispatcher, gui) = makeDispatcher()
+        dispatcher.dispatch(.guiStatusBar(contentKind: 1, mode: 0, cursorLine: 11,
+                                           cursorCol: 6, lineCount: 100, flags: 0x03,
+                                           lspStatus: 1, gitBranch: "feat/agent",
+                                           message: "", filetype: "elixir",
+                                           errorCount: 1, warningCount: 2,
+                                           modelName: "claude-3-5-sonnet", messageCount: 7, sessionStatus: 1,
+                                           infoCount: 0, hintCount: 1,
+                                           macroRecording: 0, parserStatus: 0, agentStatus: 1,
+                                           gitAdded: 3, gitModified: 2, gitDeleted: 0,
+                                           icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0,
+                                           filename: "editor.ex", diagnosticHint: ""))
+
+        #expect(gui.statusBarState.contentKind == 1)
+        #expect(gui.statusBarState.isAgentWindow == true)
+        #expect(gui.statusBarState.modelName == "claude-3-5-sonnet")
+        #expect(gui.statusBarState.messageCount == 7)
+        // Background buffer fields populated
+        #expect(gui.statusBarState.cursorLine == 11)
+        #expect(gui.statusBarState.gitBranch == "feat/agent")
+        #expect(gui.statusBarState.filetype == "elixir")
+        #expect(gui.statusBarState.errorCount == 1)
+        #expect(gui.statusBarState.gitAdded == 3)
+    }
+
     @Test("guiBreadcrumb updates breadcrumbState")
     @MainActor func guiBreadcrumbRouting() {
         let (dispatcher, gui) = makeDispatcher()

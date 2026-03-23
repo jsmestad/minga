@@ -178,24 +178,16 @@ struct StatusBarView: View {
             // Center (lowest priority, truncates first)
             centerSegment
 
-            // Left-aligned
+            // Left-aligned (unified: same layout for buffer and agent)
             HStack(spacing: 0) {
-                if state.isAgentWindow {
-                    agentLeftSegment
-                } else {
-                    leftSegment
-                }
+                leftSegment
                 Spacer(minLength: 0)
             }
 
-            // Right-aligned
+            // Right-aligned (unified: same layout for buffer and agent)
             HStack(spacing: 0) {
                 Spacer(minLength: 0)
-                if state.isAgentWindow {
-                    agentRightSegment
-                } else {
-                    rightSegment
-                }
+                rightSegment
             }
         }
         .frame(height: barHeight)
@@ -208,9 +200,7 @@ struct StatusBarView: View {
 
     @ViewBuilder
     private var centerSegment: some View {
-        if state.isAgentWindow {
-            AgentStatusIndicator(sessionStatus: state.sessionStatus, theme: theme)
-        } else if state.isRecordingMacro, let reg = state.macroRegister {
+        if state.isRecordingMacro, let reg = state.macroRegister {
             HStack(spacing: 4) {
                 Circle()
                     .fill(Color.red)
@@ -232,33 +222,6 @@ struct StatusBarView: View {
                 .lineLimit(1)
                 .truncationMode(.tail)
         }
-    }
-
-    // MARK: - Agent segments
-
-    @ViewBuilder
-    private var agentLeftSegment: some View {
-        HStack(spacing: 4) {
-            Image(systemName: "bubble.left.and.bubble.right")
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(theme.modelineBarFg.opacity(0.6))
-            Text(state.modelName.isEmpty ? "Agent" : state.modelName)
-                .font(.system(size: 11))
-                .foregroundStyle(theme.modelineBarFg.opacity(0.8))
-                .lineLimit(1)
-        }
-        .padding(.leading, 6)
-    }
-
-    @ViewBuilder
-    private var agentRightSegment: some View {
-        HStack(spacing: 8) {
-            Text("\(state.messageCount) msgs")
-                .font(.system(size: 11))
-                .foregroundStyle(theme.modelineBarFg.opacity(0.6))
-            modeBadge
-        }
-        .padding(.trailing, 8)
     }
 
     // MARK: - Left segment
@@ -517,11 +480,17 @@ struct StatusBarView: View {
                 .help(state.filetype)
             }
 
-            // Cursor position
-            Text("Ln \(state.cursorLine), Col \(state.cursorCol)")
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(theme.modelineBarFg.opacity(0.7))
-                .help("Line \(state.cursorLine), Column \(state.cursorCol)")
+            // Cursor position / message count
+            if state.isAgentWindow {
+                Text("\(state.messageCount) msgs")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(theme.modelineBarFg.opacity(0.7))
+            } else {
+                Text("Ln \(state.cursorLine), Col \(state.cursorCol)")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(theme.modelineBarFg.opacity(0.7))
+                    .help("Line \(state.cursorLine), Column \(state.cursorCol)")
+            }
 
             // Vim mode badge
             modeBadge
@@ -633,46 +602,4 @@ private struct StatusBarIconButton: View {
     }
 }
 
-// MARK: - Animated agent session status indicator
 
-/// Shows nothing for idle, a native spinner for active states, and a red
-/// icon for error. Static text for an active state reads as "maybe broken" —
-/// the spinner communicates liveness.
-private struct AgentStatusIndicator: View {
-    let sessionStatus: UInt8
-    let theme: ThemeColors
-
-    var body: some View {
-        switch sessionStatus {
-        case 1: // thinking
-            HStack(spacing: 5) {
-                ProgressView()
-                    .scaleEffect(0.55)
-                    .frame(width: 12, height: 12)
-                Text("thinking…")
-                    .font(.system(size: 11))
-                    .foregroundStyle(theme.modelineBarFg.opacity(0.65))
-            }
-        case 2: // tool executing
-            HStack(spacing: 5) {
-                ProgressView()
-                    .scaleEffect(0.55)
-                    .frame(width: 12, height: 12)
-                Text("executing…")
-                    .font(.system(size: 11))
-                    .foregroundStyle(theme.modelineBarFg.opacity(0.65))
-            }
-        case 3: // error
-            HStack(spacing: 4) {
-                Image(systemName: "exclamationmark.circle.fill")
-                    .font(.system(size: 10))
-                    .foregroundStyle(theme.gutterErrorFg)
-                Text("error")
-                    .font(.system(size: 11))
-                    .foregroundStyle(theme.gutterErrorFg)
-            }
-        default: // idle — show nothing; no need to announce inactivity
-            EmptyView()
-        }
-    }
-}
