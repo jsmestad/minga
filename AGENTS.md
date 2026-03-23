@@ -221,7 +221,8 @@ The `commit-gate` extension blocks every `git commit` until `mix lint` has passe
 
 ```bash
 mix lint                          # Format + credo + compile + dialyzer (dev env)
-mix test.llm                      # Tests with LLM-optimized output
+mix test.llm                      # Tests with LLM-optimized output (excludes :heavy)
+mix test.heavy                    # Only :heavy tests (OS process, timeout, multi-turn)
 mix test.debug test/minga/foo_test.exs  # Single file, verbose (faster iteration)
 mix test --failed                 # Re-run only previously failed tests
 ```

@@ -81,7 +81,11 @@ defmodule Minga.FileWatcher do
     subscriber = Keyword.get(opts, :subscriber)
 
     # Subscribe to buffer-open events so we automatically watch new files.
-    Minga.Events.subscribe(:buffer_opened)
+    # Opt-out via subscribe_events: false (used by tests to avoid global
+    # event bus noise from concurrent tests flooding the watcher mailbox).
+    if Keyword.get(opts, :subscribe_events, true) do
+      Minga.Events.subscribe(:buffer_opened)
+    end
 
     state = %__MODULE__{
       subscriber: subscriber,

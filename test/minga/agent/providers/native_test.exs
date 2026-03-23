@@ -8,6 +8,9 @@ defmodule Minga.Agent.Providers.NativeTest do
   alias ReqLLM.StreamResponse.MetadataHandle
 
   @moduletag :tmp_dir
+  # Multi-turn agent loops with real Task spawning (~400-800ms per test).
+  # Excluded from test.llm; runs in test.heavy and full suite.
+  @moduletag :heavy
 
   # ── Test helpers ────────────────────────────────────────────────────────────
 

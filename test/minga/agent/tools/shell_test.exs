@@ -4,6 +4,9 @@ defmodule Minga.Agent.Tools.ShellTest do
   alias Minga.Agent.Tools.Shell
 
   @moduletag :tmp_dir
+  # Real OS commands with wall-clock timeouts make these inherently slow (~500-1000ms).
+  # Excluded from test.llm; runs in test.heavy and full suite.
+  @moduletag :heavy
 
   # Drains all shell chunks from the mailbox. Uses a short timeout since
   # Shell.execute blocks until the command completes, so by the time we
