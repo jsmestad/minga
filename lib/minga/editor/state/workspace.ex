@@ -26,23 +26,30 @@ defmodule Minga.Editor.State.Workspace do
   @typedoc "Agent status for workspace display."
   @type agent_status :: :idle | :thinking | :tool_executing | :error | nil
 
+  @typedoc "SF Symbol name for workspace icon."
+  @type icon :: String.t()
+
   @typedoc "A workspace."
   @type t :: %__MODULE__{
           id: non_neg_integer(),
           kind: kind(),
           label: String.t(),
+          icon: icon(),
           color: non_neg_integer(),
           agent_status: agent_status(),
-          session: pid() | nil
+          session: pid() | nil,
+          custom_name: boolean()
         }
 
   @enforce_keys [:id, :kind]
   defstruct id: 0,
             kind: :manual,
             label: "",
+            icon: "folder",
             color: 0x51AFEF,
             agent_status: nil,
-            session: nil
+            session: nil,
+            custom_name: false
 
   @doc """
   The default manual workspace. Always workspace id 0.
@@ -53,13 +60,47 @@ defmodule Minga.Editor.State.Workspace do
   """
   @spec manual() :: t()
   def manual do
-    %__MODULE__{id: 0, kind: :manual, label: "Files", color: 0x51AFEF}
+    %__MODULE__{id: 0, kind: :manual, label: "Files", icon: "doc.on.doc", color: 0x51AFEF}
   end
 
   @doc "Updates the workspace label."
   @spec set_label(t(), String.t()) :: t()
   def set_label(%__MODULE__{} = ws, label) when is_binary(label) do
     %{ws | label: label}
+  end
+
+  @doc "Renames the workspace (marks as custom so auto-naming stops)."
+  @spec rename(t(), String.t()) :: t()
+  def rename(%__MODULE__{} = ws, name) when is_binary(name) do
+    %{ws | label: name, custom_name: true}
+  end
+
+  @doc "Sets the workspace icon (SF Symbol name)."
+  @spec set_icon(t(), String.t()) :: t()
+  def set_icon(%__MODULE__{} = ws, icon) when is_binary(icon) do
+    %{ws | icon: icon}
+  end
+
+  @doc """
+  Auto-names the workspace from an agent prompt, unless the user has
+  set a custom name. Truncates to 30 chars.
+  """
+  @spec auto_name(t(), String.t()) :: t()
+  def auto_name(%__MODULE__{custom_name: true} = ws, _prompt), do: ws
+
+  def auto_name(%__MODULE__{} = ws, prompt) when is_binary(prompt) do
+    name =
+      prompt
+      |> String.split("\n")
+      |> hd()
+      |> String.slice(0, 30)
+      |> String.trim()
+
+    if name == "" do
+      ws
+    else
+      %{ws | label: name}
+    end
   end
 
   @doc "Creates a new agent workspace with a unique id."
@@ -71,6 +112,7 @@ defmodule Minga.Editor.State.Workspace do
       id: id,
       kind: :agent,
       label: label,
+      icon: "cpu",
       color: color,
       agent_status: :idle,
       session: session

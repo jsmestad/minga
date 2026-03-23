@@ -1980,6 +1980,18 @@ defmodule Minga.Editor do
     end
   end
 
+  defp handle_gui_action(%{tab_bar: %TabBar{} = tb} = state, {:workspace_rename, ws_id, name}) do
+    alias Minga.Editor.State.Workspace
+    tb = TabBar.update_workspace(tb, ws_id, &Workspace.rename(&1, name))
+    %{state | tab_bar: tb}
+  end
+
+  defp handle_gui_action(%{tab_bar: %TabBar{} = tb} = state, {:workspace_set_icon, ws_id, icon}) do
+    alias Minga.Editor.State.Workspace
+    tb = TabBar.update_workspace(tb, ws_id, &Workspace.set_icon(&1, icon))
+    %{state | tab_bar: tb}
+  end
+
   defp handle_gui_action(state, {:git_open_file, path}) do
     case resolve_git_root() do
       nil ->

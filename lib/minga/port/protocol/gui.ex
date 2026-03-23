@@ -70,6 +70,8 @@ defmodule Minga.Port.Protocol.GUI do
   | 0x1C       | git_unstage_all      |
   | 0x1D       | git_commit           |
   | 0x1E       | git_open_file        |
+  | 0x1F       | workspace_rename     |
+  | 0x20       | workspace_set_icon   |
   """
 
   import Bitwise
@@ -142,6 +144,8 @@ defmodule Minga.Port.Protocol.GUI do
   @gui_action_git_unstage_all 0x1C
   @gui_action_git_commit 0x1D
   @gui_action_git_open_file 0x1E
+  @gui_action_workspace_rename 0x1F
+  @gui_action_workspace_set_icon 0x20
 
   # ── Types ──
 
@@ -177,6 +181,8 @@ defmodule Minga.Port.Protocol.GUI do
           | :git_unstage_all
           | {:git_commit, message :: String.t()}
           | {:git_open_file, path :: String.t()}
+          | {:workspace_rename, id :: non_neg_integer(), name :: String.t()}
+          | {:workspace_set_icon, id :: non_neg_integer(), icon :: String.t()}
 
   # ═══════════════════════════════════════════════════════════════════════════
   # Encoding (BEAM → Frontend)
@@ -556,7 +562,7 @@ defmodule Minga.Port.Protocol.GUI do
 
   Per workspace:
     id(2) + kind(1) + agent_status(1) + color_r(1) + color_g(1) + color_b(1)
-    + tab_count(2) + label_len(1) + label(label_len)
+    + tab_count(2) + label_len(1) + label(label_len) + icon_len(1) + icon(icon_len)
 
   Kind: 0 = manual, 1 = agent.
   Agent status: 0 = idle, 1 = thinking, 2 = tool_executing, 3 = error.
@@ -572,9 +578,11 @@ defmodule Minga.Port.Protocol.GUI do
         b = Bitwise.band(ws.color, 0x0000FF)
         tab_count = length(TabBar.tabs_in_workspace(tb, ws.id))
         label_bytes = :erlang.iolist_to_binary([ws.label])
+        icon_bytes = :erlang.iolist_to_binary([ws.icon || "folder"])
 
         <<ws.id::16, kind_byte::8, status_byte::8, r::8, g::8, b::8, tab_count::16,
-          byte_size(label_bytes)::8, label_bytes::binary>>
+          byte_size(label_bytes)::8, label_bytes::binary,
+          byte_size(icon_bytes)::8, icon_bytes::binary>>
       end)
 
     IO.iodata_to_binary([
@@ -1453,6 +1461,18 @@ defmodule Minga.Port.Protocol.GUI do
 
   def decode_gui_action(@gui_action_git_open_file, <<path_len::16, path::binary-size(path_len)>>),
     do: {:ok, {:git_open_file, path}}
+
+  def decode_gui_action(
+        @gui_action_workspace_rename,
+        <<ws_id::16, name_len::16, name::binary-size(name_len)>>
+      ),
+      do: {:ok, {:workspace_rename, ws_id, name}}
+
+  def decode_gui_action(
+        @gui_action_workspace_set_icon,
+        <<ws_id::16, icon_len::8, icon::binary-size(icon_len)>>
+      ),
+      do: {:ok, {:workspace_set_icon, ws_id, icon}}
 
   def decode_gui_action(_, _), do: :error
 

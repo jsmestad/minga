@@ -26,6 +26,7 @@ struct WorkspaceEntry: Identifiable {
     let color: Color
     let tabCount: UInt16
     let label: String
+    let icon: String
 
     var isManual: Bool { kind == 0 }
     var isAgent: Bool { kind == 1 }
@@ -83,7 +84,8 @@ final class TabBarState {
                     blue: Double(entry.colorB) / 255.0
                 ),
                 tabCount: entry.tabCount,
-                label: entry.label
+                label: entry.label,
+                icon: entry.icon
             )
         }
     }

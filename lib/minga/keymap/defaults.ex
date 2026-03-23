@@ -153,6 +153,8 @@ defmodule Minga.Keymap.Defaults do
     {[{9, @none}, {?A, @none}], :workspace_next_agent, "Next agent workspace"},
     {[{9, @none}, {?m, @none}], :workspace_manual, "Manual workspace"},
     {[{9, @none}, {?l, @none}], :workspace_list, "Workspace picker"},
+    {[{9, @none}, {?r, @none}], :workspace_rename, "Rename workspace"},
+    {[{9, @none}, {?i, @none}], :workspace_set_icon, "Set workspace icon"},
     {[{9, @none}, {?D, @none}], :workspace_close, "Close workspace"},
 
     # ── Direct tab switching (SPC 1..9) ──────────────────────────────────────

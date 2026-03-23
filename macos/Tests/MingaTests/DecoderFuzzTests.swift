@@ -137,6 +137,7 @@ private func randomGuiWorkspaceBar() -> Data {
         data.append(UInt8.random(in: 0...0xFF)) // b
         appendRandomU16(&data) // tab_count
         data.append(randomString8Field(maxLen: 20)) // label
+        data.append(randomString8Field(maxLen: 15)) // icon
     }
     return data
 }

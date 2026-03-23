@@ -1234,6 +1234,7 @@ struct GUIWorkspaceBarDecoderTests {
         appendRGB(&data, 0x51, 0xAF, 0xEF) // color
         appendU16(&data, 3) // tab_count
         appendString8(&data, "My Files") // label
+        appendString8(&data, "doc.on.doc") // icon
 
         // Workspace 1: agent
         appendU16(&data, 1) // id
@@ -1242,6 +1243,7 @@ struct GUIWorkspaceBarDecoderTests {
         appendRGB(&data, 0xC6, 0x78, 0xDD) // color
         appendU16(&data, 1) // tab_count
         appendString8(&data, "Research") // label
+        appendString8(&data, "cpu") // icon
 
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
@@ -1262,6 +1264,7 @@ struct GUIWorkspaceBarDecoderTests {
         #expect(workspaces[0].colorB == 0xEF)
         #expect(workspaces[0].tabCount == 3)
         #expect(workspaces[0].label == "My Files")
+        #expect(workspaces[0].icon == "doc.on.doc")
 
         #expect(workspaces[1].id == 1)
         #expect(workspaces[1].kind == 1)
@@ -1271,6 +1274,7 @@ struct GUIWorkspaceBarDecoderTests {
         #expect(workspaces[1].colorB == 0xDD)
         #expect(workspaces[1].tabCount == 1)
         #expect(workspaces[1].label == "Research")
+        #expect(workspaces[1].icon == "cpu")
     }
 
     @Test("Decode workspace bar with zero workspaces")
@@ -1303,6 +1307,7 @@ struct GUIWorkspaceBarDecoderTests {
         appendRGB(&data, 0x98, 0xBE, 0x65) // color
         appendU16(&data, 0) // tab_count
         appendString8(&data, longLabel) // label
+        appendString8(&data, "hammer") // icon
 
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
@@ -1313,6 +1318,7 @@ struct GUIWorkspaceBarDecoderTests {
 
         #expect(activeWsId == 1)
         #expect(workspaces[0].label == longLabel)
+        #expect(workspaces[0].icon == "hammer")
     }
 }
 

@@ -12,6 +12,7 @@
 		03FDC63893F3CAA82BCE2A49 /* TabBarState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A7AA0437B5C38BA8A8A80D5 /* TabBarState.swift */; };
 		058481A528AFB6C7225A067D /* MouseInputTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA65B90C0347C6496C7FA986 /* MouseInputTests.swift */; };
 		067369CB702835E93D254606 /* PipelineCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EE75BA15B74A84B77B5B911 /* PipelineCache.swift */; };
+		06D57AD02306EA08C458CC11 /* WorkspaceIconPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73F9A4109AB33ABF7FB441EE /* WorkspaceIconPicker.swift */; };
 		0704C24443A8A7455BE7853E /* GUIState.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2AC58C2F81C6E5B2C7004B3 /* GUIState.swift */; };
 		07C32C28178AE5675ACF4539 /* CommandDispatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = C21AB9021A9BCB034C13109A /* CommandDispatcher.swift */; };
 		07C6F28E3CD1A55ABD5344AA /* SlotAllocatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F8372175FF223C9260B00C4 /* SlotAllocatorTests.swift */; };
@@ -101,6 +102,7 @@
 		941C53DDBC488FE908656CD3 /* BottomPanelState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 638ED9425257ED4E5A2A9C5A /* BottomPanelState.swift */; };
 		95F6DCD24E2D261CF64EC8EB /* FontFace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BC98120D82BD7548347875E /* FontFace.swift */; };
 		9758BF46BB0EC7FEEB14FBA3 /* SwiftUIViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86478D5660213F165B7E1E35 /* SwiftUIViewTests.swift */; };
+		A0351D1D024158F048BA1C25 /* WorkspaceIconPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73F9A4109AB33ABF7FB441EE /* WorkspaceIconPicker.swift */; };
 		A1AFA4551E04034C5FF5D39B /* ScrollAccumulator.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEFD30A2572AE2608F099407 /* ScrollAccumulator.swift */; };
 		A409AE210CBAE48D4DCE47F7 /* ProtocolConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = C441427A427E23B912F70092 /* ProtocolConstants.swift */; };
 		A574FC420DE17918612DFA48 /* TabBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03D7C3564C27A7E14D894539 /* TabBarView.swift */; };
@@ -211,6 +213,7 @@
 		638ED9425257ED4E5A2A9C5A /* BottomPanelState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BottomPanelState.swift; sourceTree = "<group>"; };
 		64CEFB02A774E5E8EF19029F /* MingaTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MingaTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		70D5765529645C5D860576B7 /* WhichKeyState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhichKeyState.swift; sourceTree = "<group>"; };
+		73F9A4109AB33ABF7FB441EE /* WorkspaceIconPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceIconPicker.swift; sourceTree = "<group>"; };
 		754C68BAFE0C4DB553BFD06A /* GUIChromeDecoderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GUIChromeDecoderTests.swift; sourceTree = "<group>"; };
 		790F7E20F30FEEFC552B3685 /* WindowContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowContent.swift; sourceTree = "<group>"; };
 		79F5D551302873BE8F7240ED /* FontManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FontManager.swift; sourceTree = "<group>"; };
@@ -366,6 +369,7 @@
 				ED47BC6334A067AE04FEE032 /* ToolManagerView.swift */,
 				CF8ACE680725ECE21E6E03B4 /* WhichKeyOverlay.swift */,
 				70D5765529645C5D860576B7 /* WhichKeyState.swift */,
+				73F9A4109AB33ABF7FB441EE /* WorkspaceIconPicker.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -655,6 +659,7 @@
 				5FDD7CBBCB910BDC63276AA7 /* WhichKeyState.swift in Sources */,
 				58D1135E113BF3A33EF7815F /* WindowContent.swift in Sources */,
 				4ADE54090FEEF5AA2A6C86A0 /* WindowContentRenderer.swift in Sources */,
+				A0351D1D024158F048BA1C25 /* WorkspaceIconPicker.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -748,6 +753,7 @@
 				AB804A6366BEFE62E30C929B /* WindowContentRenderer.swift in Sources */,
 				B12FA22E8F25CE3E5F55366F /* WindowContentRendererTests.swift in Sources */,
 				FEA7FDF0B8C5551790872FCA /* WindowContentTests.swift in Sources */,
+				06D57AD02306EA08C458CC11 /* WorkspaceIconPicker.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

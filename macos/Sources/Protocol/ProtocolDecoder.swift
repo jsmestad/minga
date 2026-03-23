@@ -371,6 +371,7 @@ struct GUIWorkspaceEntry: Sendable {
     let colorB: UInt8
     let tabCount: UInt16
     let label: String
+    let icon: String
 }
 
 /// Cursor shape matching the protocol constants.
@@ -1874,6 +1875,12 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             guard data.count >= wsPos + 10 + wsLabelLen else { throw ProtocolDecodeError.malformed }
             let wsLabelData = data[(wsPos + 10)..<(wsPos + 10 + wsLabelLen)]
             let wsLabel = String(data: wsLabelData, encoding: .utf8) ?? ""
+            let wsIconBase = wsPos + 10 + wsLabelLen
+            guard data.count >= wsIconBase + 1 else { throw ProtocolDecodeError.malformed }
+            let wsIconLen = Int(data[wsIconBase])
+            guard data.count >= wsIconBase + 1 + wsIconLen else { throw ProtocolDecodeError.malformed }
+            let wsIconData = data[(wsIconBase + 1)..<(wsIconBase + 1 + wsIconLen)]
+            let wsIcon = String(data: wsIconData, encoding: .utf8) ?? "folder"
             workspaces.append(GUIWorkspaceEntry(
                 id: wsId,
                 kind: wsKind,
@@ -1882,9 +1889,10 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                 colorG: wsG,
                 colorB: wsB,
                 tabCount: wsTabCount,
-                label: wsLabel
+                label: wsLabel,
+                icon: wsIcon
             ))
-            wsPos += 10 + wsLabelLen
+            wsPos += 10 + wsLabelLen + 1 + wsIconLen
         }
         return (.guiWorkspaceBar(activeWorkspaceId: activeWsId, workspaces: workspaces),
                 wsPos - offset)

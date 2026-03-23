@@ -220,7 +220,9 @@ defmodule Minga.Agent.Events do
   # A message was queued (steer or follow-up): trigger render so the pending
   # display can update. The queue contents live in Session, not EditorState,
   # so no state mutation is needed here.
-  def handle(state, {:prompt_queued, _content, _type}) do
+  def handle(state, {:prompt_queued, content, _type}) do
+    # Auto-name the workspace from the first prompt (if not custom-named)
+    state = maybe_auto_name_workspace(state, content)
     {state, [{:render, 16}]}
   end
 
@@ -291,6 +293,28 @@ defmodule Minga.Agent.Events do
          %Workspace{id: ws_id} <- TabBar.find_workspace_by_session(tb, pid),
          %Tab{id: tab_id} <- find_unassociated_file_tab(tb, path, ws_id) do
       %{state | tab_bar: TabBar.move_tab_to_workspace(tb, tab_id, ws_id)}
+    else
+      _ -> state
+    end
+  end
+
+  # Auto-names the agent workspace from the prompt text (first line, 30 chars).
+  # Skips if the workspace has a custom name set by the user.
+  @spec maybe_auto_name_workspace(EditorState.t(), String.t()) :: EditorState.t()
+  defp maybe_auto_name_workspace(%{tab_bar: nil} = state, _), do: state
+
+  defp maybe_auto_name_workspace(state, prompt) do
+    session = AgentAccess.session(state)
+
+    with pid when is_pid(pid) <- session,
+         %Workspace{} = ws <- TabBar.find_workspace_by_session(state.tab_bar, pid) do
+      updated_ws = Workspace.auto_name(ws, prompt)
+
+      if updated_ws.label != ws.label do
+        %{state | tab_bar: TabBar.update_workspace(state.tab_bar, ws.id, fn _ -> updated_ws end)}
+      else
+        state
+      end
     else
       _ -> state
     end

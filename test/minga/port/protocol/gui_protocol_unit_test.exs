@@ -79,13 +79,15 @@ defmodule Minga.Port.Protocol.GUIProtocolUnitTest do
       # Skip header(3) + first workspace
       <<0x86, _active::16, 2::8, rest::binary>> = binary
 
-      # Skip manual workspace entry
+      # Skip manual workspace entry (label + icon)
       <<_manual_id::16, 0::8, _manual_status::8, _mr::8, _mg::8, _mb::8, _mtc::16,
-        manual_label_len::8, _manual_label::binary-size(manual_label_len), rest2::binary>> = rest
+        manual_label_len::8, _manual_label::binary-size(manual_label_len),
+        manual_icon_len::8, _manual_icon::binary-size(manual_icon_len), rest2::binary>> = rest
 
-      # Parse agent workspace
+      # Parse agent workspace (label + icon)
       <<agent_id::16, agent_kind::8, agent_status::8, r::8, g::8, b::8, _tc::16, label_len::8,
-        label::binary-size(label_len), _rest3::binary>> = rest2
+        label::binary-size(label_len), icon_len::8, icon::binary-size(icon_len),
+        _rest3::binary>> = rest2
 
       assert agent_id == ws.id
       assert agent_kind == 1
@@ -99,6 +101,7 @@ defmodule Minga.Port.Protocol.GUIProtocolUnitTest do
       assert g == expected_g
       assert b == expected_b
       assert label == "Agent"
+      assert icon == "cpu"
     end
 
     test "tab_count reflects tabs in each workspace" do
@@ -112,11 +115,12 @@ defmodule Minga.Port.Protocol.GUIProtocolUnitTest do
 
       # Manual workspace: should have 1 tab (b.ex, tab id 2)
       <<_id::16, _kind::8, _status::8, _r::8, _g::8, _b::8, manual_tc::16, manual_ll::8,
-        _manual_label::binary-size(manual_ll), rest2::binary>> = rest
+        _manual_label::binary-size(manual_ll), manual_il::8,
+        _manual_icon::binary-size(manual_il), rest2::binary>> = rest
 
       # Agent workspace: should have 1 tab (a.ex, tab id 1)
-      <<_id2::16, _kind2::8, _status2::8, _r2::8, _g2::8, _b2::8, agent_tc::16, _rest3::binary>> =
-        rest2
+      <<_id2::16, _kind2::8, _status2::8, _r2::8, _g2::8, _b2::8, agent_tc::16,
+        _rest3::binary>> = rest2
 
       assert manual_tc == 1
       assert agent_tc == 1

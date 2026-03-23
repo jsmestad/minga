@@ -61,6 +61,30 @@ defmodule Minga.Editor.Commands.Workspace do
     Minga.Editor.PickerUI.open(state, Minga.Picker.WorkspaceSource)
   end
 
+  @doc "Open the icon picker for the active workspace."
+  @spec workspace_set_icon(state()) :: state()
+  def workspace_set_icon(state) do
+    Minga.Editor.PickerUI.open(state, Minga.Picker.WorkspaceIconSource)
+  end
+
+  @doc """
+  Rename the active workspace.
+
+  GUI: the inline TextField in the workspace indicator handles rename
+  natively (double-click or context menu). This keyboard path opens the
+  prompt UI with the current name prefilled, which works in both TUI
+  (minibuffer) and GUI (native prompt rendering).
+  """
+  @spec workspace_rename(state()) :: state()
+  def workspace_rename(%{tab_bar: %TabBar{} = tb} = state) do
+    ws = TabBar.active_workspace(tb)
+    current_name = if ws, do: ws.label, else: ""
+
+    Minga.Editor.PromptUI.open(state, Minga.Prompt.WorkspaceRename,
+      default: current_name
+    )
+  end
+
   @doc "Jump to workspace by number (1-based, 0 = manual workspace)."
   @spec workspace_goto(state(), non_neg_integer()) :: state()
   def workspace_goto(%{tab_bar: %TabBar{} = tb} = state, number) do
@@ -92,7 +116,9 @@ defmodule Minga.Editor.Commands.Workspace do
     {:workspace_manual, "Switch to manual workspace", :workspace_manual},
     {:workspace_toggle_last, "Toggle last workspace", :workspace_toggle_last},
     {:workspace_close, "Close workspace", :workspace_close},
-    {:workspace_list, "List workspaces", :workspace_list}
+    {:workspace_list, "List workspaces", :workspace_list},
+    {:workspace_rename, "Rename workspace", :workspace_rename},
+    {:workspace_set_icon, "Set workspace icon", :workspace_set_icon}
   ]
 
   @impl Minga.Command.Provider
