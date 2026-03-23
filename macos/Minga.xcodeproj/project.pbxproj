@@ -43,6 +43,7 @@
 		393F9EE9CE5F6691781C8CF7 /* MinibufferView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05DDF3EED1B486C4639A06FF /* MinibufferView.swift */; };
 		3943C8DF3827347B61E6B725 /* MinibufferView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05DDF3EED1B486C4639A06FF /* MinibufferView.swift */; };
 		3CD49A10C9BA962BBCB00CA8 /* MessagesContentState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A67102D81C9E70546F1019B /* MessagesContentState.swift */; };
+		41DCC27275D0E8E903EAA061 /* SidebarViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1BD0DFA1F5211213E7AD6FA7 /* SidebarViewTests.swift */; };
 		42E4FAA9F204D88F8D19EFF6 /* MessagesContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFE9DFE38318A361BEF0B773 /* MessagesContentView.swift */; };
 		44D48DF33203C53ACC3BA1AA /* WindowContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 790F7E20F30FEEFC552B3685 /* WindowContent.swift */; };
 		4699A67786955024F156446F /* WhichKeyOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF8ACE680725ECE21E6E03B4 /* WhichKeyOverlay.swift */; };
@@ -168,6 +169,7 @@
 		0C26E064D810299C0302F439 /* EditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorView.swift; sourceTree = "<group>"; };
 		0C9F6C86861307AE9524E8F5 /* CachedLineTexture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CachedLineTexture.swift; sourceTree = "<group>"; };
 		16B5F67DE84B139C6F8F3C9F /* GitStatusState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitStatusState.swift; sourceTree = "<group>"; };
+		1BD0DFA1F5211213E7AD6FA7 /* SidebarViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarViewTests.swift; sourceTree = "<group>"; };
 		1C991989EF4CA9F705DD3F4E /* SidebarHeaderButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarHeaderButton.swift; sourceTree = "<group>"; };
 		211424F30BBE8A57852D5630 /* ScrollAccumulatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollAccumulatorTests.swift; sourceTree = "<group>"; };
 		22420E1CC772DAFB9A5043C2 /* ViewModelComputedTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewModelComputedTests.swift; sourceTree = "<group>"; };
@@ -432,6 +434,7 @@
 				3DC281B7F9F7E4C0BA793B1E /* ProtocolSchemaTests.swift */,
 				F220A60775A252A728477659 /* ProtocolTests.swift */,
 				211424F30BBE8A57852D5630 /* ScrollAccumulatorTests.swift */,
+				1BD0DFA1F5211213E7AD6FA7 /* SidebarViewTests.swift */,
 				9F8372175FF223C9260B00C4 /* SlotAllocatorTests.swift */,
 				5634B25BE5BB945A83E30FAD /* StateLifecycleTests.swift */,
 				86478D5660213F165B7E1E35 /* SwiftUIViewTests.swift */,
@@ -710,6 +713,7 @@
 				D42695D627BD38405475ECFF /* ScrollAccumulatorTests.swift in Sources */,
 				17338247D6D83DAF4DE5B9EA /* SidebarContainer.swift in Sources */,
 				B52CC06DF924153EAA3BADBE /* SidebarHeaderButton.swift in Sources */,
+				41DCC27275D0E8E903EAA061 /* SidebarViewTests.swift in Sources */,
 				BBB00DAC44161274B154C350 /* SignatureHelpOverlay.swift in Sources */,
 				2A5DCAC8284B11CD4F8625A5 /* SignatureHelpState.swift in Sources */,
 				6700C63C4B7070D3388A7BD4 /* SlotAllocator.swift in Sources */,

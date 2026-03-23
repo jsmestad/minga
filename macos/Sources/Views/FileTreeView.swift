@@ -16,68 +16,22 @@ struct FileTreeView: View {
     private let rowHeight: CGFloat = 22
     private let indentWidth: CGFloat = 14
     private let chevronWidth: CGFloat = 12
-    private let sidebarMinWidth: CGFloat = 180
-    private let sidebarMaxWidth: CGFloat = 360
 
     /// Chevron/hover animation duration. Respects reduced motion.
     private var animDuration: Double {
         NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.15
     }
 
-    @State private var sidebarWidth: CGFloat = 240
-    @State private var isDraggingResize: Bool = false
     @State private var hoveredEntryId: UInt32? = nil
     @State private var scrollOffset: CGFloat = 0
 
     var body: some View {
-        HStack(spacing: 0) {
-            VStack(spacing: 0) {
-                projectHeader
-                entryList
-            }
-            .frame(width: sidebarWidth)
-            .background(theme.treeBg)
-            .focusable(false)
-            .focusEffectDisabled()
-            .onAppear {
-                sidebarWidth = CGFloat(fileTreeState.treeWidth) * 7.5
-            }
-
-            resizeHandle
+        VStack(spacing: 0) {
+            projectHeader
+            entryList
         }
-    }
-
-    // MARK: - Resize handle
-
-    /// 8px hit target with a 1px visible separator line.
-    @ViewBuilder
-    private var resizeHandle: some View {
-        Color.clear
-            .frame(width: 8)
-            .overlay(alignment: .leading) {
-                Rectangle()
-                    .fill(isDraggingResize ? theme.treeActiveFg.opacity(0.3) : theme.treeSeparatorFg.opacity(0.4))
-                    .frame(width: 1)
-            }
-            .contentShape(Rectangle())
-            .gesture(
-                DragGesture(minimumDistance: 1)
-                    .onChanged { value in
-                        isDraggingResize = true
-                        let newWidth = sidebarWidth + value.translation.width
-                        sidebarWidth = min(max(newWidth, sidebarMinWidth), sidebarMaxWidth)
-                    }
-                    .onEnded { _ in
-                        isDraggingResize = false
-                    }
-            )
-            .onHover { hovering in
-                if hovering {
-                    NSCursor.resizeLeftRight.push()
-                } else {
-                    NSCursor.pop()
-                }
-            }
+        .focusable(false)
+        .focusEffectDisabled()
     }
 
     // MARK: - Project header
