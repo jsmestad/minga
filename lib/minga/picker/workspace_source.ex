@@ -10,6 +10,7 @@ defmodule Minga.Picker.WorkspaceSource do
 
   alias Minga.Picker.Item
 
+  alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.TabBar
   alias Minga.Editor.State.Workspace
 
@@ -54,7 +55,17 @@ defmodule Minga.Picker.WorkspaceSource do
   @impl true
   @spec on_select(Item.t(), term()) :: term()
   def on_select(%Item{id: workspace_id}, %{tab_bar: %TabBar{} = tb} = state) do
-    %{state | tab_bar: TabBar.switch_workspace(tb, workspace_id)}
+    tb = TabBar.switch_workspace(tb, workspace_id)
+
+    # Switch to the first tab in the selected workspace so the user
+    # sees the workspace's content, not just an internal pointer change.
+    case TabBar.tabs_in_workspace(tb, workspace_id) do
+      [first | _] ->
+        EditorState.switch_tab(%{state | tab_bar: tb}, first.id)
+
+      [] ->
+        %{state | tab_bar: tb}
+    end
   end
 
   def on_select(_, state), do: state
