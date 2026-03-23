@@ -979,6 +979,7 @@ struct GUIAgentChatDecoderTests {
         data.append(1) // collapsed
         appendU32(&data, 1234) // durationMs
         appendString16(&data, "read_file") // name
+        appendString16(&data, "lib/minga.ex") // summary
         let result = "file contents here"
         appendU32(&data, UInt32(result.utf8.count))
         data.append(contentsOf: result.utf8)
@@ -988,7 +989,7 @@ struct GUIAgentChatDecoderTests {
             Issue.record("Expected .guiAgentChat"); return
         }
 
-        guard case .toolCall(let name, let tcStatus, let isError, let collapsed, let duration, let tcResult) = messages[0].content else {
+        guard case .toolCall(let name, _, let tcStatus, let isError, let collapsed, let duration, let tcResult) = messages[0].content else {
             Issue.record("Expected .toolCall message"); return
         }
         #expect(name == "read_file")

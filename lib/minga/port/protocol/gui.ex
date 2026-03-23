@@ -1123,6 +1123,19 @@ defmodule Minga.Port.Protocol.GUI do
 
   defp encode_help_overlay(_, _), do: <<0::8>>
 
+  # Computes a short summary for a tool call from its name and args.
+  # Reuses summarize_tool_args/2 (shared with the approval banner).
+  # Truncates to 100 chars max to keep the wire payload small.
+  @spec tool_call_summary(map()) :: String.t()
+  defp tool_call_summary(%{name: name, args: args}) when is_map(args) do
+    summarize_tool_args(name, args) |> String.slice(0, 100)
+  end
+
+  defp tool_call_summary(%{name: name} = tc) do
+    args = Map.get(tc, :args) || %{}
+    summarize_tool_args(name, args) |> String.slice(0, 100)
+  end
+
   @spec summarize_tool_args(String.t(), map()) :: String.t()
   defp summarize_tool_args("shell", %{"command" => cmd}), do: cmd
   defp summarize_tool_args("shell", %{command: cmd}), do: cmd
@@ -1217,6 +1230,7 @@ defmodule Minga.Port.Protocol.GUI do
 
   defp encode_chat_message_body({:tool_call, tc}) do
     name_bytes = :erlang.iolist_to_binary([tc.name])
+    summary_bytes = :erlang.iolist_to_binary([tool_call_summary(tc)])
     result_bytes = :erlang.iolist_to_binary([tc.result || ""])
 
     status_byte =
@@ -1231,8 +1245,8 @@ defmodule Minga.Port.Protocol.GUI do
     collapsed_byte = if tc.collapsed, do: 1, else: 0
 
     <<0x04::8, status_byte::8, error_byte::8, collapsed_byte::8, duration::32,
-      byte_size(name_bytes)::16, name_bytes::binary, byte_size(result_bytes)::32,
-      result_bytes::binary>>
+      byte_size(name_bytes)::16, name_bytes::binary, byte_size(summary_bytes)::16,
+      summary_bytes::binary, byte_size(result_bytes)::32, result_bytes::binary>>
   end
 
   # Styled tool call: same header fields as tool_call (0x04), but result is styled runs.
@@ -1242,6 +1256,7 @@ defmodule Minga.Port.Protocol.GUI do
   #   run_count::16, then per run: text_len::16, text, fg::24, bg::24, flags::8
   defp encode_chat_message_body({:styled_tool_call, tc, styled_lines}) do
     name_bytes = :erlang.iolist_to_binary([tc.name])
+    summary_bytes = :erlang.iolist_to_binary([tool_call_summary(tc)])
 
     status_byte =
       case tc.status do
@@ -1267,7 +1282,8 @@ defmodule Minga.Port.Protocol.GUI do
 
     IO.iodata_to_binary([
       <<0x08::8, status_byte::8, error_byte::8, collapsed_byte::8, duration::32,
-        byte_size(name_bytes)::16, name_bytes::binary, length(styled_lines)::16>>
+        byte_size(name_bytes)::16, name_bytes::binary, byte_size(summary_bytes)::16,
+        summary_bytes::binary, length(styled_lines)::16>>
       | line_binaries
     ])
   end

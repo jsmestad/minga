@@ -64,13 +64,16 @@ defmodule Minga.Port.GUIAgentChatProtocolTest do
       msg_payload = binary_part(binary, start, byte_size(binary) - start)
 
       <<0x08::8, status_byte::8, error_byte::8, collapsed_byte::8, duration::32, name_len::16,
-        name::binary-size(name_len), line_count::16, rest::binary>> = msg_payload
+        name::binary-size(name_len), summary_len::16, summary::binary-size(summary_len),
+        line_count::16, rest::binary>> = msg_payload
 
       assert status_byte == 1
       assert error_byte == 0
       assert collapsed_byte == 0
       assert duration == 1234
       assert name == "bash"
+      # No args in test data, so summary is empty
+      assert summary == ""
       assert line_count == 1
 
       # Parse the single line's single run

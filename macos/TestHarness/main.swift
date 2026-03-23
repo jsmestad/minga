@@ -295,11 +295,11 @@ func chatMessageToJSON(_ msg: GUIChatMessage) -> [String: Any] {
         result["kind"] = "styled_assistant"; result["lines"] = linesJSON
     case .thinking(let text, let collapsed):
         result["kind"] = "thinking"; result["text"] = text; result["collapsed"] = collapsed
-    case .toolCall(let name, let status, let isError, let collapsed, let durationMs, let resultStr):
-        result["kind"] = "tool_call"; result["name"] = name; result["status"] = Int(status)
-        result["is_error"] = isError; result["collapsed"] = collapsed
+    case .toolCall(let name, let summary, let status, let isError, let collapsed, let durationMs, let resultStr):
+        result["kind"] = "tool_call"; result["name"] = name; result["summary"] = summary
+        result["status"] = Int(status); result["is_error"] = isError; result["collapsed"] = collapsed
         result["duration_ms"] = Int(durationMs); result["result"] = resultStr
-    case .styledToolCall(let name, let status, let isError, let collapsed, let durationMs, let resultLines):
+    case .styledToolCall(let name, let summary, let status, let isError, let collapsed, let durationMs, let resultLines):
         let linesJSON: [[Any]] = resultLines.map { runs in
             runs.map { run -> [String: Any] in
                 return [
@@ -312,8 +312,8 @@ func chatMessageToJSON(_ msg: GUIChatMessage) -> [String: Any] {
                 ]
             }
         }
-        result["kind"] = "styled_tool_call"; result["name"] = name; result["status"] = Int(status)
-        result["is_error"] = isError; result["collapsed"] = collapsed
+        result["kind"] = "styled_tool_call"; result["name"] = name; result["summary"] = summary
+        result["status"] = Int(status); result["is_error"] = isError; result["collapsed"] = collapsed
         result["duration_ms"] = Int(durationMs); result["result_lines"] = linesJSON
     case .system(let text, let isError):
         result["kind"] = "system"; result["text"] = text; result["is_error"] = isError

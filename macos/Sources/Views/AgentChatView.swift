@@ -23,6 +23,11 @@ struct AgentChatView: View {
     let encoder: InputEncoder?
 
     @State private var scrollViewHeight: CGFloat = 0
+    /// Tracks whether the user has scrolled away from the bottom.
+    /// When true, auto-scroll is paused to let the user read earlier content.
+    @State private var userHasScrolledUp: Bool = false
+    /// Whether auto-scroll should follow streaming output.
+    private var shouldAutoScroll: Bool { !userHasScrolledUp }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -38,6 +43,7 @@ struct AgentChatView: View {
                             ForEach(Array(state.messages.enumerated()), id: \.element.id) { index, msg in
                                 messageViewWithDivider(msg, index: index)
                             }
+
                         }
                         .padding(.horizontal, 16)
                         .padding(.top, 12)
@@ -56,10 +62,45 @@ struct AgentChatView: View {
                     .onPreferenceChange(ScrollViewHeightKey.self) { height in
                         scrollViewHeight = height
                     }
+                    .onScrollGeometryChange(for: Bool.self) { geometry in
+                        // User is "at bottom" if within 50pt of the bottom edge
+                        let atBottom = geometry.contentOffset.y + geometry.visibleRect.height >= geometry.contentSize.height - 50
+                        return atBottom
+                    } action: { _, isAtBottom in
+                        userHasScrolledUp = !isAtBottom
+                    }
                     .onChange(of: state.messages.count) { _, _ in
-                        withAnimation(nil) {
-                            proxy.scrollTo(state.messages.last?.id, anchor: .bottom)
+                        if shouldAutoScroll {
+                            scrollToBottom(proxy: proxy)
                         }
+                    }
+                    .onChange(of: state.promptVersion) { _, _ in
+                        // Triggers on every BEAM frame update (streaming content growth)
+                        if shouldAutoScroll && state.isThinking {
+                            scrollToBottom(proxy: proxy)
+                        }
+                    }
+                    // "Follow output" pill when user scrolled up during streaming
+                    if userHasScrolledUp && state.isThinking {
+                        VStack {
+                            Spacer()
+                            Button {
+                                userHasScrolledUp = false
+                                scrollToBottom(proxy: proxy)
+                            } label: {
+                                followOutputPillLabel
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Follow output")
+                            .accessibilityHint("Scrolls to latest content and resumes auto-scroll")
+                            .padding(.bottom, 8)
+                        }
+                        .transition(.opacity)
+                        .animation(
+                            NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+                                ? nil : .easeOut(duration: 0.2),
+                            value: userHasScrolledUp
+                        )
                     }
                 }
                 .opacity(state.helpVisible ? 0.15 : 1.0)
@@ -157,10 +198,10 @@ struct AgentChatView: View {
             styledAssistantBlock(lines)
         case .thinking(_, let text, let collapsed):
             thinkingBlock(text, collapsed: collapsed)
-        case .toolCall(let id, let name, let status, let isError, let collapsed, let duration, let result):
-            toolCallCard(messageIndex: id, name: name, status: status, isError: isError, collapsed: collapsed, durationMs: duration, result: result, resultLines: nil)
-        case .styledToolCall(let id, let name, let status, let isError, let collapsed, let duration, let resultLines):
-            toolCallCard(messageIndex: id, name: name, status: status, isError: isError, collapsed: collapsed, durationMs: duration, result: nil, resultLines: resultLines)
+        case .toolCall(let id, let name, let summary, let status, let isError, let collapsed, let duration, let result):
+            toolCallCard(messageIndex: id, name: name, summary: summary, status: status, isError: isError, collapsed: collapsed, durationMs: duration, result: result, resultLines: nil)
+        case .styledToolCall(let id, let name, let summary, let status, let isError, let collapsed, let duration, let resultLines):
+            toolCallCard(messageIndex: id, name: name, summary: summary, status: status, isError: isError, collapsed: collapsed, durationMs: duration, result: nil, resultLines: resultLines)
         case .system(_, let text, let isError):
             systemMessage(text, isError: isError)
         case .usage(_, let input, let output, _, _, let costMicros):
@@ -289,7 +330,7 @@ struct AgentChatView: View {
     }
 
     @ViewBuilder
-    private func toolCallCard(messageIndex: Int, name: String, status: UInt8, isError: Bool, collapsed: Bool, durationMs: UInt32, result: String?, resultLines: [[StyledTextRun]]?) -> some View {
+    private func toolCallCard(messageIndex: Int, name: String, summary: String, status: UInt8, isError: Bool, collapsed: Bool, durationMs: UInt32, result: String?, resultLines: [[StyledTextRun]]?) -> some View {
         let hasResult = (result != nil && !result!.isEmpty) || (resultLines != nil && !resultLines!.isEmpty)
 
         VStack(alignment: .leading, spacing: 0) {
@@ -302,15 +343,32 @@ struct AgentChatView: View {
                         .foregroundStyle(theme.popupFg.opacity(0.4))
                 }
 
-                Image(systemName: toolIcon(status))
-                    .font(.system(size: 10))
-                    .foregroundStyle(isError ? Color.red.opacity(0.8) : theme.accent)
+                // Running spinner or status icon
+                if status == 0 {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .scaleEffect(0.6)
+                } else {
+                    Image(systemName: toolIcon(status))
+                        .font(.system(size: 10))
+                        .foregroundStyle(isError ? Color.red.opacity(0.8) : theme.accent)
+                }
 
                 Text(name)
                     .font(.system(size: 12, weight: .medium, design: .monospaced))
                     .foregroundStyle(theme.popupFg)
+                    .layoutPriority(1)
 
-                Spacer()
+                // Tool summary (command, path, etc.)
+                if !summary.isEmpty {
+                    Text(summary)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(theme.popupFg.opacity(0.5))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+
+                Spacer(minLength: 8)
 
                 if durationMs > 0 {
                     Text(formatDuration(durationMs))
@@ -653,6 +711,39 @@ struct AgentChatView: View {
                     Spacer()
                 }
             }
+        }
+    }
+
+    // MARK: - Follow output pill
+
+    @ViewBuilder
+    private var followOutputPillLabel: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "arrow.down")
+                .font(.system(size: 10, weight: .semibold))
+            Text("Follow output")
+                .font(.system(size: 11, weight: .medium))
+        }
+        .foregroundStyle(theme.popupFg.opacity(0.8))
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(
+            Capsule()
+                .fill(theme.popupBg.opacity(0.9))
+        )
+        .overlay(
+            Capsule()
+                .strokeBorder(theme.popupBorder.opacity(0.3), lineWidth: 1)
+        )
+    }
+
+    /// Scrolls to the last message with smooth animation.
+    private func scrollToBottom(proxy: ScrollViewProxy) {
+        guard let lastId = state.messages.last?.id else { return }
+        let animation: Animation? = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+            ? nil : .easeOut(duration: 0.15)
+        withAnimation(animation) {
+            proxy.scrollTo(lastId, anchor: .bottom)
         }
     }
 

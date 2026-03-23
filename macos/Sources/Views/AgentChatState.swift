@@ -9,8 +9,8 @@ enum ChatMessageEntry: Identifiable {
     /// Assistant message with pre-styled text runs from the BEAM (tree-sitter or markdown parser).
     case styledAssistant(id: Int, lines: [[StyledTextRun]])
     case thinking(id: Int, text: String, collapsed: Bool)
-    case toolCall(id: Int, name: String, status: UInt8, isError: Bool, collapsed: Bool, durationMs: UInt32, result: String)
-    case styledToolCall(id: Int, name: String, status: UInt8, isError: Bool, collapsed: Bool, durationMs: UInt32, resultLines: [[StyledTextRun]])
+    case toolCall(id: Int, name: String, summary: String, status: UInt8, isError: Bool, collapsed: Bool, durationMs: UInt32, result: String)
+    case styledToolCall(id: Int, name: String, summary: String, status: UInt8, isError: Bool, collapsed: Bool, durationMs: UInt32, resultLines: [[StyledTextRun]])
     case system(id: Int, text: String, isError: Bool)
     case usage(id: Int, input: UInt32, output: UInt32, cacheRead: UInt32, cacheWrite: UInt32, costMicros: UInt32)
 
@@ -18,8 +18,8 @@ enum ChatMessageEntry: Identifiable {
         switch self {
         case .user(let id, _), .assistant(let id, _), .styledAssistant(let id, _),
              .thinking(let id, _, _),
-             .toolCall(let id, _, _, _, _, _, _),
-             .styledToolCall(let id, _, _, _, _, _, _),
+             .toolCall(let id, _, _, _, _, _, _, _),
+             .styledToolCall(let id, _, _, _, _, _, _, _),
              .system(let id, _, _),
              .usage(let id, _, _, _, _, _):
             return id
@@ -88,10 +88,10 @@ final class AgentChatState {
                 return .styledAssistant(id: id, lines: lines)
             case .thinking(let text, let collapsed):
                 return .thinking(id: id, text: text, collapsed: collapsed)
-            case .toolCall(let name, let st, let isError, let collapsed, let duration, let result):
-                return .toolCall(id: id, name: name, status: st, isError: isError, collapsed: collapsed, durationMs: duration, result: result)
-            case .styledToolCall(let name, let st, let isError, let collapsed, let duration, let resultLines):
-                return .styledToolCall(id: id, name: name, status: st, isError: isError, collapsed: collapsed, durationMs: duration, resultLines: resultLines)
+            case .toolCall(let name, let summary, let st, let isError, let collapsed, let duration, let result):
+                return .toolCall(id: id, name: name, summary: summary, status: st, isError: isError, collapsed: collapsed, durationMs: duration, result: result)
+            case .styledToolCall(let name, let summary, let st, let isError, let collapsed, let duration, let resultLines):
+                return .styledToolCall(id: id, name: name, summary: summary, status: st, isError: isError, collapsed: collapsed, durationMs: duration, resultLines: resultLines)
             case .system(let text, let isError):
                 return .system(id: id, text: text, isError: isError)
             case .usage(let inp, let outp, let cacheR, let cacheW, let costM):
