@@ -24,7 +24,6 @@ struct GitStatusView: View {
     var body: some View {
         VStack(spacing: 0) {
             branchHeader
-            Divider().background(theme.treeSeparatorFg)
 
             if state.repoState == .notARepo {
                 notARepoView
@@ -52,28 +51,34 @@ struct GitStatusView: View {
 
     @ViewBuilder
     private var branchHeader: some View {
-        HStack(spacing: 6) {
-            // Git branch icon (Nerd Font)
-            Text("\u{E725}")
-                .font(.custom("Symbols Nerd Font Mono", size: 12))
-                .foregroundStyle(theme.treeDirFg)
+        VStack(spacing: 0) {
+            HStack(spacing: 6) {
+                // Git branch icon (Nerd Font)
+                Text("\u{E725}")
+                    .font(.custom("Symbols Nerd Font Mono", size: 12))
+                    .foregroundStyle(theme.treeDirFg)
 
-            Text(state.branchName.isEmpty ? "No branch" : state.branchName)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(theme.treeHeaderFg)
-                .lineLimit(1)
-                .truncationMode(.middle)
+                Text(state.branchName.isEmpty ? "No branch" : state.branchName)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(theme.treeHeaderFg)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
 
-            Spacer(minLength: 4)
+                Spacer(minLength: 4)
 
-            // Ahead/behind indicators
-            if state.ahead > 0 || state.behind > 0 {
-                aheadBehindBadge
+                // Ahead/behind indicators
+                if state.ahead > 0 || state.behind > 0 {
+                    aheadBehindBadge
+                }
             }
+            .padding(.horizontal, 10)
+            .frame(height: 34)
+            .background(theme.treeHeaderBg)
+
+            Rectangle()
+                .fill(theme.treeSeparatorFg.opacity(0.3))
+                .frame(height: 1)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(theme.treeBg)
     }
 
     @ViewBuilder
@@ -104,14 +109,14 @@ struct GitStatusView: View {
 
     @ViewBuilder
     private var notARepoView: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 6) {
             Spacer()
             Image(systemName: "folder.badge.questionmark")
-                .font(.system(size: 28))
-                .foregroundStyle(theme.treeFg.opacity(0.3))
+                .font(.system(size: 20))
+                .foregroundStyle(theme.treeFg.opacity(0.2))
             Text("Not a git repository")
-                .font(.system(size: 12))
-                .foregroundStyle(theme.treeFg.opacity(0.5))
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(theme.treeFg.opacity(0.4))
             Spacer()
         }
         .frame(maxWidth: .infinity)
@@ -119,14 +124,14 @@ struct GitStatusView: View {
 
     @ViewBuilder
     private var loadingView: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 6) {
             Spacer()
             ProgressView()
-                .scaleEffect(0.7)
-                .tint(theme.treeFg.opacity(0.5))
+                .scaleEffect(0.6)
+                .tint(theme.treeFg.opacity(0.4))
             Text("Loading\u{2026}")
-                .font(.system(size: 12))
-                .foregroundStyle(theme.treeFg.opacity(0.5))
+                .font(.system(size: 11))
+                .foregroundStyle(theme.treeFg.opacity(0.4))
             Spacer()
         }
         .frame(maxWidth: .infinity)
@@ -134,17 +139,17 @@ struct GitStatusView: View {
 
     @ViewBuilder
     private var cleanView: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 6) {
             Spacer()
             Image(systemName: "checkmark.circle")
-                .font(.system(size: 28))
-                .foregroundStyle(theme.gitAddedFg.opacity(0.6))
+                .font(.system(size: 20))
+                .foregroundStyle(theme.gitAddedFg.opacity(0.4))
             Text("Nothing to commit")
                 .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(theme.treeFg.opacity(0.7))
+                .foregroundStyle(theme.treeFg.opacity(0.5))
             Text("Working tree clean")
                 .font(.system(size: 11))
-                .foregroundStyle(theme.treeFg.opacity(0.4))
+                .foregroundStyle(theme.treeFg.opacity(0.3))
             Spacer()
         }
         .frame(maxWidth: .infinity)
@@ -256,15 +261,12 @@ struct GitStatusView: View {
 
     @ViewBuilder
     private func actionButton(systemName: String, tooltip: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(theme.treeFg.opacity(0.6))
-                .frame(width: 18, height: 18)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help(tooltip)
+        SidebarHeaderButton(
+            systemName: systemName,
+            barFg: theme.treeFg,
+            tooltip: tooltip,
+            action: action
+        )
     }
 
     // MARK: - File row
@@ -363,7 +365,9 @@ struct GitStatusView: View {
     @ViewBuilder
     private var commitArea: some View {
         VStack(spacing: 0) {
-            Divider().background(theme.treeSeparatorFg)
+            Rectangle()
+                .fill(theme.treeSeparatorFg.opacity(0.3))
+                .frame(height: 1)
 
             VStack(spacing: 6) {
                 // Commit message input
@@ -420,8 +424,8 @@ struct GitStatusView: View {
                         ? "Enter a commit message"
                         : "Commit staged changes")
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 8)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 10)
         }
     }
 

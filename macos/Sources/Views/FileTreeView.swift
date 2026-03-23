@@ -84,24 +84,30 @@ struct FileTreeView: View {
 
     @ViewBuilder
     private var projectHeader: some View {
-        HStack(spacing: 6) {
-            Text("\u{F024B}")
-                .font(.custom("Symbols Nerd Font Mono", size: 12))
-                .foregroundStyle(theme.treeDirFg)
+        VStack(spacing: 0) {
+            HStack(spacing: 6) {
+                Text("\u{F024B}")
+                    .font(.custom("Symbols Nerd Font Mono", size: 12))
+                    .foregroundStyle(theme.treeDirFg)
 
-            Text(projectName)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(theme.treeHeaderFg)
-                .lineLimit(1)
-                .truncationMode(.tail)
+                Text(projectName)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(theme.treeHeaderFg)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
 
-            Spacer()
+                Spacer()
 
-            headerActions
+                headerActions
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 34)
+            .background(theme.treeHeaderBg)
+
+            Rectangle()
+                .fill(theme.treeSeparatorFg.opacity(0.3))
+                .frame(height: 1)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(theme.treeBg)
     }
 
     // MARK: - Header action icons
@@ -127,22 +133,12 @@ struct FileTreeView: View {
 
     @ViewBuilder
     private func headerButton(systemName: String, tooltip: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: 11))
-                .foregroundStyle(theme.treeFg.opacity(0.6))
-                .frame(width: 20, height: 20)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help(tooltip)
-        .onHover { isHovered in
-            if isHovered {
-                NSCursor.pointingHand.push()
-            } else {
-                NSCursor.pop()
-            }
-        }
+        SidebarHeaderButton(
+            systemName: systemName,
+            barFg: theme.treeFg,
+            tooltip: tooltip,
+            action: action
+        )
     }
 
     private var projectName: String {
