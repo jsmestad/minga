@@ -382,6 +382,58 @@ final class CoreTextMetalRenderer {
                     }
                 }
 
+                // Line annotation pills/text (drawn after line content).
+                if !content.lineAnnotations.isEmpty, let atlas {
+                    var annotationsByRow: [UInt16: [GUILineAnnotation]] = [:]
+                    for ann in content.lineAnnotations {
+                        annotationsByRow[ann.row, default: []].append(ann)
+                    }
+
+                    for (rowIndex, rowAnnotations) in annotationsByRow {
+                        // Re-call renderRowToAtlas to get the cached line width.
+                        // Returns the entry computed in the content pass above
+                        // (content hash matches, no re-rasterization).
+                        let linePixelWidth: Float
+                        if Int(rowIndex) < content.rows.count {
+                            let row = content.rows[Int(rowIndex)]
+                            if let lineEntry = wcr.renderRowToAtlas(displayRow: rowIndex, row: row, atlas: atlas) {
+                                linePixelWidth = Float(lineEntry.pixelWidth)
+                            } else {
+                                linePixelWidth = 0
+                            }
+                        } else {
+                            linePixelWidth = 0
+                        }
+
+                        let rowY = windowRowOffset + Float(rowIndex) * cellH * scale
+                        var cursorX = contentColOffset - hScrollPx + linePixelWidth
+                            + Float(wcr.annotationGap) * scale
+
+                        for (annIdx, ann) in rowAnnotations.enumerated() {
+                            // Key scheme: 0xB000 + row*4 + annIdx. Caps at 4 cached
+                            // annotations per row; overflow-safe for large row indices.
+                            let rawKey = 0xB000 + Int(rowIndex) * 4 + min(annIdx, 3)
+                            guard rawKey <= Int(UInt16.max) else { continue }
+                            let annKey = UInt16(rawKey)
+
+                            guard let annEntry = wcr.renderAnnotationToAtlas(
+                                annotation: ann, key: annKey, atlas: atlas
+                            ) else { continue }
+
+                            let (uvOrigin, uvSize) = atlas.uvForSlot(annEntry.slotIndex, pixelWidth: annEntry.pixelWidth)
+
+                            var lineGPU = LineGPU()
+                            lineGPU.position = SIMD2<Float>(cursorX, rowY)
+                            lineGPU.size = SIMD2<Float>(Float(annEntry.pixelWidth), Float(annEntry.pixelHeight))
+                            lineGPU.uvOrigin = uvOrigin
+                            lineGPU.uvSize = uvSize
+                            lineInstances.append(lineGPU)
+
+                            cursorX += Float(annEntry.pixelWidth) + Float(wcr.annotationSpacing) * scale
+                        }
+                    }
+                }
+
                 // Diagnostic underline quads (drawn after text).
                 for diag in content.diagnosticUnderlines {
                     let diagColor: SIMD3<Float> = switch diag.severity {
