@@ -335,7 +335,11 @@ defmodule Minga.Agent.Providers.Native do
   end
 
   def handle_call(:abort, _from, state) do
-    Task.shutdown(state.task, :brutal_kill)
+    # Use a short timeout instead of :brutal_kill so the StreamServer
+    # (which traps exits) can terminate cleanly via its terminate/2
+    # callback. :brutal_kill sends an untrappable :kill signal that
+    # causes OTP to log the StreamServer's state as an [error].
+    Task.shutdown(state.task, 150)
     state = %{state | task: nil, streaming: false}
     Minga.Log.info(:agent, "[Agent.Native] aborted current operation")
     {:reply, :ok, state}
@@ -418,9 +422,9 @@ defmodule Minga.Agent.Providers.Native do
   end
 
   def handle_call(:new_session, _from, state) do
-    # Kill any running task
+    # Gracefully stop any running task (see :abort handler comment)
     if state.task do
-      Task.shutdown(state.task, :brutal_kill)
+      Task.shutdown(state.task, 150)
     end
 
     system_prompt = build_system_prompt(state.project_root)
