@@ -156,17 +156,17 @@ Segments are the path components relative to the project root. For example, `lib
 
 ### 0x76 — gui_status_bar
 
-Status bar data for the focused window. The first byte after the opcode is `content_kind`:
-- `0` — buffer window: show file info, cursor position, git, diagnostics.
-- `1` — agent chat window: show model name, message count, session status.
+Status bar data for the focused window. Both variants use the same unified wire format so the status bar layout stays stable across mode switches. The first byte after the opcode is `content_kind`:
+- `0` — buffer window
+- `1` — agent chat window (background buffer fields populate the standard slots; agent-specific fields are appended at the end)
 
-**Buffer variant (content_kind == 0):**
+**Unified layout (both variants):**
 ```
-opcode(1) + content_kind=0(1) + mode(1) + cursor_line(4) + cursor_col(4) + line_count(4)
+opcode(1) + content_kind(1) + mode(1) + cursor_line(4) + cursor_col(4) + line_count(4)
 + flags(1) + lsp_status(1) + git_branch_len(1) + git_branch(git_branch_len)
 + message_len(2) + message(message_len) + filetype_len(1) + filetype(filetype_len)
 + error_count(2) + warning_count(2)
--- Extended fields (TUI modeline parity) --
+-- Extended fields --
 + info_count(2) + hint_count(2)
 + macro_recording(1) + parser_status(1) + agent_status(1)
 + git_added(2) + git_modified(2) + git_deleted(2)
@@ -175,14 +175,13 @@ opcode(1) + content_kind=0(1) + mode(1) + cursor_line(4) + cursor_col(4) + line_
 + diagnostic_hint_len(2) + diagnostic_hint(diagnostic_hint_len)
 ```
 
-**Agent variant (content_kind == 1):**
+**Agent trailing fields (content_kind == 1 only, appended after diagnostic_hint):**
 ```
-opcode(1) + content_kind=1(1) + mode(1)
-+ zeros(4) + zeros(4) + zeros(4)          <- shared header slots, all zero for agent
-+ zeros(1) + zeros(1) + zeros(1) + zeros(2) + zeros(1) + zeros(2) + zeros(2)
 + model_name_len(1) + model_name(model_name_len)
 + message_count(4) + session_status(1)
 ```
+
+When `content_kind == 1`, the standard slots (cursor_line, git_branch, diagnostics, etc.) are populated from the background buffer so the status bar can show them alongside agent-specific info.
 
 `cursor_line` and `cursor_col` are 1-indexed on the wire.
 

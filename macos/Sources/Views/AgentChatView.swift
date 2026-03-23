@@ -451,19 +451,6 @@ struct AgentChatView: View {
             }
 
             Spacer()
-
-            if !isInsertMode {
-                Text("NORMAL")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(theme.modeNormalFg)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(RoundedRectangle(cornerRadius: 3).fill(theme.modeNormalBg))
-            }
-
-            Text(state.model)
-                .font(.system(size: 10))
-                .foregroundStyle(theme.popupFg.opacity(0.3))
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)

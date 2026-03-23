@@ -181,7 +181,7 @@ struct StatusBarViewViewTests {
         #expect(strings.contains("elixir"))
     }
 
-    @Test("Agent mode shows model name and mode badge")
+    @Test("Agent mode shows message count and mode badge (model name is in agent chat header, not status bar)")
     @MainActor func agentMode() throws {
         let state = StatusBarState()
         state.update(from: StatusBarUpdate(
@@ -199,8 +199,10 @@ struct StatusBarViewViewTests {
         let texts = body.findAll(ViewInspectorQuery.text)
         let strings = texts.compactMap { try? $0.string() }
 
-        #expect(strings.contains("claude-3-5-sonnet"))
+        // Model name no longer appears in the status bar (lives in agent chat header only)
+        #expect(!strings.contains("claude-3-5-sonnet"))
         #expect(strings.contains("7 msgs"))
+        #expect(strings.contains("NORMAL"))
     }
 
     @Test("Git branch shown when flag is set")
@@ -292,9 +294,10 @@ struct AgentChatViewTests {
         // Header shows model name and status
         #expect(strings.contains("claude-sonnet-4"))
         #expect(strings.contains("idle"))
-        // Prompt shows normal-mode placeholder
+        // Prompt is a pure input affordance: placeholder text only, no mode badge or model name
         #expect(strings.contains("Press i to type"))
-        #expect(strings.contains("NORMAL"))
+        // NORMAL badge moved to unified status bar, no longer in prompt area
+        #expect(!strings.contains("NORMAL"))
     }
 
     @Test("User message renders as bubble")

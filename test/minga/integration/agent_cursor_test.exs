@@ -171,15 +171,15 @@ defmodule Minga.Integration.AgentCursorTest do
   end
 
   describe "agent modeline" do
-    test "modeline shows vim mode and model name in agent view" do
+    test "modeline shows vim mode and background buffer name in agent view" do
       ctx = start_agent_editor()
 
       rows = screen_text(ctx)
 
-      # The modeline is the last row containing the model name (the sidebar
-      # also shows it, so we need the bottom-most occurrence).
-      modeline_idx = find_last_row_containing(rows, "claude-sonnet-4")
-      assert modeline_idx != nil, "Should find model name in the modeline"
+      # The modeline shows the background buffer name (not the model name,
+      # which now lives only in the agent chat header).
+      modeline_idx = find_last_row_containing(rows, "NORMAL")
+      assert modeline_idx != nil, "Should find modeline with NORMAL mode"
 
       modeline_text = Enum.at(rows, modeline_idx)
 
@@ -194,8 +194,8 @@ defmodule Minga.Integration.AgentCursorTest do
 
       rows = screen_text(ctx)
 
-      modeline_idx = find_last_row_containing(rows, "claude-sonnet-4")
-      assert modeline_idx != nil, "Should find modeline with model name"
+      modeline_idx = find_last_row_containing(rows, "INSERT")
+      assert modeline_idx != nil, "Should find modeline with INSERT mode"
 
       modeline_text = Enum.at(rows, modeline_idx)
 
@@ -209,7 +209,8 @@ defmodule Minga.Integration.AgentCursorTest do
       rows = screen_text(ctx)
 
       prompt_row = find_row_containing(rows, "Prompt")
-      modeline_row = find_last_row_containing(rows, "claude-sonnet-4")
+      # Find modeline by looking for the vim mode badge (always present)
+      modeline_row = find_last_row_containing(rows, "NORMAL")
 
       assert prompt_row != nil, "Should find the prompt border"
       assert modeline_row != nil, "Should find the modeline"

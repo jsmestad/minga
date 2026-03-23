@@ -754,7 +754,7 @@ defmodule Minga.Port.Protocol.GUI do
   def encode_gui_status_bar({:buffer, d}) do
     mode_byte = encode_vim_mode(d.mode)
     lsp_byte = encode_lsp_status(d.lsp_status)
-    flags = build_buffer_status_flags(d)
+    flags = build_status_flags(d)
 
     git_branch = :erlang.iolist_to_binary([d.git_branch || ""])
     filetype = :erlang.iolist_to_binary([Atom.to_string(d.filetype || :text)])
@@ -791,15 +791,45 @@ defmodule Minga.Port.Protocol.GUI do
   end
 
   def encode_gui_status_bar({:agent, d}) do
+    # Same wire format as the buffer variant (background buffer context fills
+    # all the standard slots), plus agent-specific fields appended at the end.
     mode_byte = encode_vim_mode(d.mode)
+    lsp_byte = encode_lsp_status(d.lsp_status)
+    flags = build_status_flags(d)
+
+    git_branch = :erlang.iolist_to_binary([d.git_branch || ""])
+    filetype = :erlang.iolist_to_binary([Atom.to_string(d.filetype || :text)])
+
+    {error_count, warning_count, info_count, hint_count} =
+      full_diagnostic_counts(d)
+
+    macro_byte = encode_macro_recording(d.macro_recording)
+    parser_byte = encode_parser_status(d.parser_status)
+    agent_byte = encode_agent_session_status(d.agent_status)
+    {git_added, git_modified, git_deleted} = git_diff_counts(d)
+    {icon, icon_color} = Minga.Devicon.icon_and_color(d.filetype)
+    icon_bytes = :erlang.iolist_to_binary([icon])
+    icon_r = icon_color >>> 16 &&& 0xFF
+    icon_g = icon_color >>> 8 &&& 0xFF
+    icon_b = icon_color &&& 0xFF
+    filename = :erlang.iolist_to_binary([d.file_name || ""])
+
+    diag_hint = :erlang.iolist_to_binary([d.diagnostic_hint || ""])
+    message = :erlang.iolist_to_binary([d.status_msg || ""])
+
+    # Agent-specific trailing fields
     model_name = :erlang.iolist_to_binary([d.model_name || "Agent"])
     session_status_byte = encode_agent_session_status(d.session_status)
 
-    # Shared header fields are all zeros (not meaningful for agent windows).
-    # message_count and session_status are explicit fields — no slot reuse.
-    <<@op_gui_status_bar, 1::8, mode_byte::8, 0::32, 0::32, 0::32, 0::8, 0::8, 0::8, 0::16, 0::8,
-      0::16, 0::16, byte_size(model_name)::8, model_name::binary, d.message_count::32,
-      session_status_byte::8>>
+    # content_kind=1 signals agent mode; cursor_line/col are 0-indexed, +1 for GUI
+    <<@op_gui_status_bar, 1::8, mode_byte::8, d.cursor_line + 1::32, d.cursor_col + 1::32,
+      d.line_count::32, flags::8, lsp_byte::8, byte_size(git_branch)::8, git_branch::binary,
+      byte_size(message)::16, message::binary, byte_size(filetype)::8, filetype::binary,
+      error_count::16, warning_count::16, info_count::16, hint_count::16, macro_byte::8,
+      parser_byte::8, agent_byte::8, git_added::16, git_modified::16, git_deleted::16,
+      byte_size(icon_bytes)::8, icon_bytes::binary, icon_r::8, icon_g::8, icon_b::8,
+      byte_size(filename)::16, filename::binary, byte_size(diag_hint)::16, diag_hint::binary,
+      byte_size(model_name)::8, model_name::binary, d.message_count::32, session_status_byte::8>>
   end
 
   @spec encode_vim_mode(atom()) :: non_neg_integer()
@@ -849,8 +879,8 @@ defmodule Minga.Port.Protocol.GUI do
 
   defp git_diff_counts(_), do: {0, 0, 0}
 
-  @spec build_buffer_status_flags(map()) :: non_neg_integer()
-  defp build_buffer_status_flags(d) do
+  @spec build_status_flags(map()) :: non_neg_integer()
+  defp build_status_flags(d) do
     has_lsp = if d.lsp_status && d.lsp_status != :none, do: 1, else: 0
     has_git = if d.git_branch && d.git_branch != "", do: 1, else: 0
     is_dirty = if d.dirty, do: 1, else: 0

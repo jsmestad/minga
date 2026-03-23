@@ -7,6 +7,7 @@ defmodule Minga.Integration.GUIProtocolTest do
   checking its JSON output.
   """
 
+  # async: false: spawns the headless Swift test harness as a real OS process via Port.open/2
   use ExUnit.Case, async: false
 
   alias Minga.Port.Protocol.GUI, as: ProtocolGUI
@@ -168,7 +169,23 @@ defmodule Minga.Integration.GUIProtocolTest do
            message_count: 7,
            macro_recording: false,
            agent_status: :thinking,
-           agent_theme_colors: nil
+           agent_theme_colors: nil,
+           # Background buffer context
+           cursor_line: 10,
+           cursor_col: 5,
+           line_count: 100,
+           file_name: "editor.ex",
+           filetype: :elixir,
+           dirty: true,
+           git_branch: "feat/agent",
+           git_diff_summary: {3, 2, 0},
+           diagnostic_counts: {1, 2, 0, 1},
+           diagnostic_hint: "⚠ unused variable [ElixirLS]",
+           lsp_status: :ready,
+           parser_status: :available,
+           buf_index: 2,
+           buf_count: 4,
+           status_msg: nil
          }}
 
       cmd = ProtocolGUI.encode_gui_status_bar(data)
@@ -182,6 +199,20 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert decoded["mode"] == 0
       assert decoded["model_name"] == "claude-3-5-sonnet"
       assert decoded["message_count"] == 7
+      # Background buffer fields are now populated
+      assert decoded["cursor_line"] == 11
+      assert decoded["cursor_col"] == 6
+      assert decoded["line_count"] == 100
+      assert decoded["git_branch"] == "feat/agent"
+      assert decoded["filetype"] == "elixir"
+      assert decoded["error_count"] == 1
+      assert decoded["warning_count"] == 2
+      assert decoded["hint_count"] == 1
+      assert decoded["git_added"] == 3
+      assert decoded["git_modified"] == 2
+      assert decoded["git_deleted"] == 0
+      assert decoded["filename"] == "editor.ex"
+      assert decoded["diagnostic_hint"] == "⚠ unused variable [ElixirLS]"
     end
 
     test "gui_agent_chat hidden encodes and decodes correctly", %{port: port} do
