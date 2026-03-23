@@ -142,6 +142,53 @@ defmodule Minga.Keymap.Bindings do
   end
 
   @doc """
+  Removes a key sequence binding from the trie.
+
+  Clears the command and description on the terminal node. Prunes empty
+  intermediate nodes (nodes with no command and no children) on the way
+  back up so the trie doesn't accumulate dead branches.
+
+  Returns the updated trie. No-op if the sequence doesn't exist.
+
+  ## Examples
+
+      iex> trie = Minga.Keymap.Bindings.new()
+      iex> trie = Minga.Keymap.Bindings.bind(trie, [{?j, 0}], :move_down, "Move cursor down")
+      iex> trie = Minga.Keymap.Bindings.unbind(trie, [{?j, 0}])
+      iex> Minga.Keymap.Bindings.lookup(trie, {?j, 0})
+      :not_found
+  """
+  @spec unbind(node_t(), [key()]) :: node_t()
+  def unbind(root, []), do: root
+
+  def unbind(%Node{children: children} = root, [key | rest]) do
+    case Map.fetch(children, key) do
+      :error ->
+        root
+
+      {:ok, child} ->
+        updated_child =
+          case rest do
+            [] ->
+              %{child | command: nil, description: nil}
+
+            _ ->
+              unbind(child, rest)
+          end
+
+        if empty_node?(updated_child) do
+          %{root | children: Map.delete(children, key)}
+        else
+          %{root | children: Map.put(children, key, updated_child)}
+        end
+    end
+  end
+
+  @spec empty_node?(node_t()) :: boolean()
+  defp empty_node?(%Node{command: nil, children: children}), do: map_size(children) == 0
+  defp empty_node?(_), do: false
+
+  @doc """
   Sets a human-readable description on an intermediate (prefix) node without
   binding a command. Useful for labelling leader-key groups like `f → "+file"`.
 

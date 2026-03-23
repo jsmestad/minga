@@ -301,6 +301,57 @@ defmodule Minga.Keymap.Active do
   end
 
   @doc """
+  Removes a key binding from the given mode.
+
+  Mirrors the dispatch logic of `bind/4`: for normal mode, leader
+  sequences are removed from the leader trie and single-key bindings
+  are removed from normal overrides. For other modes, the binding is
+  removed from the per-mode trie.
+
+  Returns `:ok` on success or `{:error, reason}` on failure.
+
+  ## Examples
+
+      unbind(:normal, "SPC g s")
+      unbind(:insert, "C-j")
+  """
+  @spec unbind(atom(), String.t()) :: :ok | {:error, String.t()}
+  @spec unbind(GenServer.server(), atom(), String.t()) :: :ok | {:error, String.t()}
+  def unbind(mode, key_str), do: unbind(__MODULE__, mode, key_str)
+
+  def unbind(server, mode, key_str) when is_atom(mode) and is_binary(key_str) do
+    case KeyParser.parse(key_str) do
+      {:ok, keys} ->
+        do_unbind(server, mode, keys)
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  @doc """
+  Removes a filetype-scoped key binding.
+
+  ## Examples
+
+      unbind(:normal, "SPC m t", filetype: :org)
+  """
+  @spec unbind(atom(), String.t(), keyword()) :: :ok | {:error, String.t()}
+  @spec unbind(GenServer.server(), atom(), String.t(), keyword()) :: :ok | {:error, String.t()}
+  def unbind(mode, key_str, opts), do: unbind(__MODULE__, mode, key_str, opts)
+
+  def unbind(server, mode, key_str, opts)
+      when is_atom(mode) and is_binary(key_str) and is_list(opts) do
+    filetype = Keyword.get(opts, :filetype)
+
+    if filetype do
+      unbind_filetype(server, mode, filetype, key_str)
+    else
+      unbind(server, mode, key_str)
+    end
+  end
+
+  @doc """
   Resets all bindings to defaults (removes user overrides).
   """
   @spec reset() :: :ok
@@ -485,4 +536,80 @@ defmodule Minga.Keymap.Active do
   @spec strip_spc_m_prefix([Bindings.key()]) :: [Bindings.key()]
   defp strip_spc_m_prefix([{32, 0}, {?m, 0} | rest]) when rest != [], do: rest
   defp strip_spc_m_prefix(keys), do: keys
+
+  # ── Private: unbind dispatch ────────────────────────────────────────────────
+
+  @spec do_unbind(GenServer.server(), atom(), [Bindings.key()]) :: :ok | {:error, String.t()}
+
+  # Normal mode: leader sequences (SPC + more keys)
+  defp do_unbind(server, :normal, [{32, 0} | rest]) when rest != [] do
+    ets_update(server, @leader_trie_key, Defaults.leader_trie(), fn trie ->
+      Bindings.unbind(trie, rest)
+    end)
+  end
+
+  # Normal mode: single-key binding
+  defp do_unbind(server, :normal, [single_key]) do
+    ets_update(server, @normal_overrides_key, %{}, fn overrides ->
+      Map.delete(overrides, single_key)
+    end)
+  end
+
+  # Normal mode: unsupported multi-key
+  defp do_unbind(_server, :normal, _keys) do
+    {:error, "unsupported key sequence for normal mode unbind"}
+  end
+
+  # Insert, visual, operator_pending, command modes
+  defp do_unbind(server, mode, keys)
+       when mode in [:insert, :visual, :operator_pending, :command] do
+    ets_update(server, @mode_tries_key, %{}, fn tries ->
+      trie = Map.get(tries, mode, Bindings.new())
+      updated = Bindings.unbind(trie, keys)
+      Map.put(tries, mode, updated)
+    end)
+  end
+
+  defp do_unbind(_server, mode, _keys) do
+    {:error, "unbind not supported for mode #{inspect(mode)}"}
+  end
+
+  # ── Private: filetype unbind ────────────────────────────────────────────────
+
+  @spec unbind_filetype(GenServer.server(), atom(), atom(), String.t()) ::
+          :ok | {:error, String.t()}
+  defp unbind_filetype(server, :normal, filetype, key_str) do
+    case KeyParser.parse(key_str) do
+      {:ok, keys} ->
+        sub_keys = strip_spc_m_prefix(keys)
+
+        ets_update(server, @filetype_tries_key, %{}, fn tries ->
+          trie = Map.get(tries, filetype, Bindings.new())
+          updated = Bindings.unbind(trie, sub_keys)
+          Map.put(tries, filetype, updated)
+        end)
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp unbind_filetype(server, mode, filetype, key_str)
+       when mode in [:insert, :visual] do
+    case KeyParser.parse(key_str) do
+      {:ok, keys} ->
+        ets_update(server, @filetype_mode_tries_key, %{}, fn tries ->
+          trie = Map.get(tries, {filetype, mode}, Bindings.new())
+          updated = Bindings.unbind(trie, keys)
+          Map.put(tries, {filetype, mode}, updated)
+        end)
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp unbind_filetype(_server, mode, _filetype, _key_str) do
+    {:error, "filetype-scoped unbind not supported for #{mode} mode"}
+  end
 end

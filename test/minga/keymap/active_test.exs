@@ -390,4 +390,56 @@ defmodule Minga.Keymap.ActiveTest do
       end
     end
   end
+
+  describe "unbind/3" do
+    test "removes a leader binding", %{store: s} do
+      Active.bind(s, :normal, "SPC z z", :custom_cmd, "Custom")
+      trie = Active.leader_trie(s)
+      assert {:command, :custom_cmd, _} = Bindings.lookup_sequence(trie, [{?z, 0}, {?z, 0}])
+
+      assert :ok = Active.unbind(s, :normal, "SPC z z")
+      trie = Active.leader_trie(s)
+      assert :not_found = Bindings.lookup_sequence(trie, [{?z, 0}, {?z, 0}])
+    end
+
+    test "removes a single-key normal override", %{store: s} do
+      Active.bind(s, :normal, "Q", :replay_macro, "Replay")
+      assert %{{?Q, 0} => {:replay_macro, "Replay"}} = Active.normal_overrides(s)
+
+      assert :ok = Active.unbind(s, :normal, "Q")
+      assert %{} = Active.normal_overrides(s)
+    end
+
+    test "removes an insert mode binding", %{store: s} do
+      Active.bind(s, :insert, "C-j", :next_line, "Next line")
+      trie = Active.mode_trie(s, :insert)
+      assert {:command, :next_line} = Bindings.lookup(trie, {?j, 0x02})
+
+      assert :ok = Active.unbind(s, :insert, "C-j")
+      trie = Active.mode_trie(s, :insert)
+      assert :not_found = Bindings.lookup(trie, {?j, 0x02})
+    end
+  end
+
+  describe "unbind/4 (filetype-scoped)" do
+    test "removes a filetype-scoped normal binding", %{store: s} do
+      Active.bind(s, :normal, "SPC m t", :org_test, "Test", filetype: :org)
+      ft_trie = Active.filetype_trie(s, :org)
+      assert {:command, :org_test} = Bindings.lookup(ft_trie, {?t, 0})
+
+      assert :ok = Active.unbind(s, :normal, "SPC m t", filetype: :org)
+      ft_trie = Active.filetype_trie(s, :org)
+      assert :not_found = Bindings.lookup(ft_trie, {?t, 0})
+    end
+
+    test "removes a filetype-scoped insert binding", %{store: s} do
+      Active.bind(s, :insert, "TAB", :org_table_align, "Align table", filetype: :org)
+      ft_trie = Active.filetype_mode_trie(s, :org, :insert)
+      assert {:command, :org_table_align} = Bindings.lookup(ft_trie, {9, 0})
+
+      assert :ok = Active.unbind(s, :insert, "TAB", filetype: :org)
+      ft_trie = Active.filetype_mode_trie(s, :org, :insert)
+      assert :not_found = Bindings.lookup(ft_trie, {9, 0})
+    end
+  end
 end
