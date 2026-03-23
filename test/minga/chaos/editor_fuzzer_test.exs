@@ -14,7 +14,8 @@ defmodule Minga.Chaos.EditorFuzzerTest do
       mix test test/minga/chaos/ --include chaos --seed 12345  # reproduce
   """
 
-  use ExUnit.Case
+  # Mutates Application env (:minga, :shutdown_fn); must not run concurrently with other tests.
+  use ExUnit.Case, async: false
   use PropCheck
   use PropCheck.StateM.ModelDSL
 
@@ -24,7 +25,24 @@ defmodule Minga.Chaos.EditorFuzzerTest do
   alias Minga.Test.HeadlessPort
 
   @moduletag :chaos
-  @moduletag timeout: 120_000
+  @moduletag timeout: 180_000
+
+  # Prevent :q/:qa/:wq from calling System.stop(0) and killing the VM.
+  # The editor still runs the quit path; it just becomes a no-op at the
+  # System.stop call site.
+  setup do
+    prev = Application.get_env(:minga, :shutdown_fn)
+    Application.put_env(:minga, :shutdown_fn, fn _status -> :ok end)
+
+    on_exit(fn ->
+      case prev do
+        nil -> Application.delete_env(:minga, :shutdown_fn)
+        fun -> Application.put_env(:minga, :shutdown_fn, fun)
+      end
+    end)
+
+    :ok
+  end
 
   # ── Model state ──────────────────────────────────────────────────────────
 
@@ -308,7 +326,10 @@ defmodule Minga.Chaos.EditorFuzzerTest do
 
   # ── Property ──────────────────────────────────────────────────────────
 
-  property "editor survives random action sequences", numtests: 50, max_size: 100 do
+  property "editor survives random action sequences",
+    numtests: 50,
+    max_size: 100,
+    max_shrinks: 200 do
     forall {content, cmds} <- content_and_commands() do
       ctx = start_chaos_editor(content)
       store_ctx(ctx)

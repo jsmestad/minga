@@ -868,9 +868,13 @@ defmodule Minga.Editor.Commands.BufferManagement do
 
   # Exits the editor. Single exit point so shutdown cleanup (flush buffers,
   # save session, etc.) can be added in one place.
+  #
+  # The shutdown function is injectable via application config so the chaos
+  # fuzzer can prevent `System.stop/1` from killing the VM mid-test.
   @spec shutdown_editor(state()) :: state()
   defp shutdown_editor(state) do
-    System.stop(0)
+    shutdown_fn = Application.get_env(:minga, :shutdown_fn, &System.stop/1)
+    shutdown_fn.(0)
     state
   end
 

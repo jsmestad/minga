@@ -125,10 +125,33 @@ defmodule Minga.Editor.RenderPipeline.Scroll do
         # Skip nil windows and agent chat windows (rendered by build_agent_chat_content)
         {acc, st}
       else
-        is_active = win_id == state.windows.active
-        scroll = scroll_window(st, win_id, window, win_layout, is_active)
+        scroll_and_invalidate(state, st, acc, win_id, window, win_layout)
+      end
+    end)
+  end
 
-        # Detect per-window invalidation by comparing against last frame
+  # ── Private ──────────────────────────────────────────────────────────────
+
+  # Scrolls a single window and detects invalidation. Guards against buffer
+  # death in the race window between the process dying and the :DOWN message
+  # being processed. Only scroll_window makes GenServer calls to the buffer;
+  # the invalidation detection is pure computation.
+  @spec scroll_and_invalidate(
+          state(),
+          state(),
+          %{Window.id() => WindowScroll.t()},
+          Window.id(),
+          Window.t(),
+          Layout.window_layout()
+        ) :: {%{Window.id() => WindowScroll.t()}, state()}
+  defp scroll_and_invalidate(state, st, acc, win_id, window, win_layout) do
+    is_active = win_id == state.windows.active
+
+    case safe_scroll_window(st, win_id, window, win_layout, is_active) do
+      :skip ->
+        {acc, st}
+
+      {:ok, scroll} ->
         updated_window =
           Window.detect_invalidation(
             window,
@@ -138,7 +161,6 @@ defmodule Minga.Editor.RenderPipeline.Scroll do
             scroll.buf_version
           )
 
-        # Also invalidate gutter when cursor line changed with relative numbering
         updated_window =
           detect_gutter_invalidation(
             updated_window,
@@ -146,18 +168,24 @@ defmodule Minga.Editor.RenderPipeline.Scroll do
             scroll.line_number_style
           )
 
-        # Store the invalidated window and update the scroll to reference it
         scroll = %{scroll | window: updated_window}
-
         new_map = Map.put(st.windows.map, win_id, updated_window)
         st = %{st | windows: %{st.windows | map: new_map}}
-
         {Map.put(acc, win_id, scroll), st}
-      end
-    end)
+    end
   end
 
-  # ── Private ──────────────────────────────────────────────────────────────
+  # Wraps scroll_window with a catch for dead buffer processes. Returns
+  # {:ok, scroll} on success, :skip if the buffer died mid-call.
+  @spec safe_scroll_window(state(), Window.id(), Window.t(), Layout.window_layout(), boolean()) ::
+          {:ok, WindowScroll.t()} | :skip
+  defp safe_scroll_window(state, win_id, window, win_layout, is_active) do
+    {:ok, scroll_window(state, win_id, window, win_layout, is_active)}
+  catch
+    :exit, _ ->
+      Minga.Log.debug(:render, "[scroll] skipped window #{win_id}: buffer process dead")
+      :skip
+  end
 
   @spec scroll_window(
           state(),
