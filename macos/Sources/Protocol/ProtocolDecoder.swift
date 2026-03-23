@@ -263,8 +263,15 @@ struct StyledTextRun: Sendable {
     let underline: Bool
 }
 
-/// A chat message from gui_agent_chat.
-enum GUIChatMessage: Sendable {
+/// A chat message from gui_agent_chat, with a stable BEAM-assigned ID.
+struct GUIChatMessage: Sendable {
+    /// Stable uint32 ID assigned by the BEAM. Persists across streaming updates.
+    let beamId: UInt32
+    let content: GUIChatMessageContent
+}
+
+/// The payload of a chat message (type-specific data).
+enum GUIChatMessageContent: Sendable {
     case user(text: String)
     case assistant(text: String)
     /// Assistant message with pre-styled text runs from tree-sitter.
@@ -971,7 +978,10 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         messages.reserveCapacity(msgCount)
         var pos = pendingPos + 2
         for _ in 0..<msgCount {
-            guard data.count >= pos + 1 else { throw ProtocolDecodeError.malformed }
+            // Each message is prefixed with a stable uint32 ID from the BEAM
+            guard data.count >= pos + 5 else { throw ProtocolDecodeError.malformed }
+            let beamId = readU32(data, pos)
+            pos += 4
             let msgType = data[pos]
             switch msgType {
             case 0x01: // user
@@ -979,14 +989,14 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                 let tLen = Int(readU32(data, pos + 1))
                 guard data.count >= pos + 5 + tLen else { throw ProtocolDecodeError.malformed }
                 let t = String(data: data[(pos + 5)..<(pos + 5 + tLen)], encoding: .utf8) ?? ""
-                messages.append(.user(text: t))
+                messages.append(GUIChatMessage(beamId: beamId, content: .user(text: t)))
                 pos += 5 + tLen
             case 0x02: // assistant
                 guard data.count >= pos + 5 else { throw ProtocolDecodeError.malformed }
                 let tLen = Int(readU32(data, pos + 1))
                 guard data.count >= pos + 5 + tLen else { throw ProtocolDecodeError.malformed }
                 let t = String(data: data[(pos + 5)..<(pos + 5 + tLen)], encoding: .utf8) ?? ""
-                messages.append(.assistant(text: t))
+                messages.append(GUIChatMessage(beamId: beamId, content: .assistant(text: t)))
                 pos += 5 + tLen
             case 0x03: // thinking
                 guard data.count >= pos + 6 else { throw ProtocolDecodeError.malformed }
@@ -994,7 +1004,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                 let tLen = Int(readU32(data, pos + 2))
                 guard data.count >= pos + 6 + tLen else { throw ProtocolDecodeError.malformed }
                 let t = String(data: data[(pos + 6)..<(pos + 6 + tLen)], encoding: .utf8) ?? ""
-                messages.append(.thinking(text: t, collapsed: collapsed))
+                messages.append(GUIChatMessage(beamId: beamId, content: .thinking(text: t, collapsed: collapsed)))
                 pos += 6 + tLen
             case 0x04: // tool_call
                 guard data.count >= pos + 10 else { throw ProtocolDecodeError.malformed }
@@ -1008,7 +1018,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                 let resultLen = Int(readU32(data, pos + 10 + nameLen))
                 guard data.count >= pos + 14 + nameLen + resultLen else { throw ProtocolDecodeError.malformed }
                 let result = String(data: data[(pos + 14 + nameLen)..<(pos + 14 + nameLen + resultLen)], encoding: .utf8) ?? ""
-                messages.append(.toolCall(name: name, status: tcStatus, isError: isError, collapsed: tcCollapsed, durationMs: duration, result: result))
+                messages.append(GUIChatMessage(beamId: beamId, content: .toolCall(name: name, status: tcStatus, isError: isError, collapsed: tcCollapsed, durationMs: duration, result: result)))
                 pos += 14 + nameLen + resultLen
             case 0x05: // system
                 guard data.count >= pos + 6 else { throw ProtocolDecodeError.malformed }
@@ -1016,7 +1026,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                 let tLen = Int(readU32(data, pos + 2))
                 guard data.count >= pos + 6 + tLen else { throw ProtocolDecodeError.malformed }
                 let t = String(data: data[(pos + 6)..<(pos + 6 + tLen)], encoding: .utf8) ?? ""
-                messages.append(.system(text: t, isError: isError))
+                messages.append(GUIChatMessage(beamId: beamId, content: .system(text: t, isError: isError)))
                 pos += 6 + tLen
             case 0x06: // usage
                 guard data.count >= pos + 21 else { throw ProtocolDecodeError.malformed }
@@ -1025,7 +1035,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                 let cacheR = readU32(data, pos + 9)
                 let cacheW = readU32(data, pos + 13)
                 let costM = readU32(data, pos + 17)
-                messages.append(.usage(input: inp, output: outp, cacheRead: cacheR, cacheWrite: cacheW, costMicros: costM))
+                messages.append(GUIChatMessage(beamId: beamId, content: .usage(input: inp, output: outp, cacheRead: cacheR, cacheWrite: cacheW, costMicros: costM)))
                 pos += 21
             case 0x07: // styled_assistant
                 // Format: 0x07, line_count::16, then per line:
@@ -1066,7 +1076,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                     }
                     lines.append(runs)
                 }
-                messages.append(.styledAssistant(lines: lines))
+                messages.append(GUIChatMessage(beamId: beamId, content: .styledAssistant(lines: lines)))
                 pos = rPos
             case 0x08: // styled_tool_call
                 // Same header as tool_call (0x04) but result is styled runs instead of plain text.
@@ -1109,7 +1119,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                     }
                     stcLines.append(runs)
                 }
-                messages.append(.styledToolCall(name: stcName, status: stcStatus, isError: stcIsError, collapsed: stcCollapsed, durationMs: stcDuration, resultLines: stcLines))
+                messages.append(GUIChatMessage(beamId: beamId, content: .styledToolCall(name: stcName, status: stcStatus, isError: stcIsError, collapsed: stcCollapsed, durationMs: stcDuration, resultLines: stcLines)))
                 pos = stcPos
             default:
                 break

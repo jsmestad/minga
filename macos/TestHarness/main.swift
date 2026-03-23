@@ -269,11 +269,12 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
 }
 
 func chatMessageToJSON(_ msg: GUIChatMessage) -> [String: Any] {
-    switch msg {
+    var result: [String: Any] = ["beam_id": Int(msg.beamId)]
+    switch msg.content {
     case .user(let text):
-        return ["kind": "user", "text": text]
+        result["kind"] = "user"; result["text"] = text
     case .assistant(let text):
-        return ["kind": "assistant", "text": text]
+        result["kind"] = "assistant"; result["text"] = text
     case .styledAssistant(let lines):
         let linesJSON: [[Any]] = lines.map { runs in
             runs.map { run -> [String: Any] in
@@ -287,11 +288,13 @@ func chatMessageToJSON(_ msg: GUIChatMessage) -> [String: Any] {
                 ]
             }
         }
-        return ["kind": "styled_assistant", "lines": linesJSON]
+        result["kind"] = "styled_assistant"; result["lines"] = linesJSON
     case .thinking(let text, let collapsed):
-        return ["kind": "thinking", "text": text, "collapsed": collapsed]
-    case .toolCall(let name, let status, let isError, let collapsed, let durationMs, let result):
-        return ["kind": "tool_call", "name": name, "status": Int(status), "is_error": isError, "collapsed": collapsed, "duration_ms": Int(durationMs), "result": result]
+        result["kind"] = "thinking"; result["text"] = text; result["collapsed"] = collapsed
+    case .toolCall(let name, let status, let isError, let collapsed, let durationMs, let resultStr):
+        result["kind"] = "tool_call"; result["name"] = name; result["status"] = Int(status)
+        result["is_error"] = isError; result["collapsed"] = collapsed
+        result["duration_ms"] = Int(durationMs); result["result"] = resultStr
     case .styledToolCall(let name, let status, let isError, let collapsed, let durationMs, let resultLines):
         let linesJSON: [[Any]] = resultLines.map { runs in
             runs.map { run -> [String: Any] in
@@ -305,12 +308,17 @@ func chatMessageToJSON(_ msg: GUIChatMessage) -> [String: Any] {
                 ]
             }
         }
-        return ["kind": "styled_tool_call", "name": name, "status": Int(status), "is_error": isError, "collapsed": collapsed, "duration_ms": Int(durationMs), "result_lines": linesJSON]
+        result["kind"] = "styled_tool_call"; result["name"] = name; result["status"] = Int(status)
+        result["is_error"] = isError; result["collapsed"] = collapsed
+        result["duration_ms"] = Int(durationMs); result["result_lines"] = linesJSON
     case .system(let text, let isError):
-        return ["kind": "system", "text": text, "is_error": isError]
+        result["kind"] = "system"; result["text"] = text; result["is_error"] = isError
     case .usage(let input, let output, let cacheRead, let cacheWrite, let costMicros):
-        return ["kind": "usage", "input": Int(input), "output": Int(output), "cache_read": Int(cacheRead), "cache_write": Int(cacheWrite), "cost_micros": Int(costMicros)]
+        result["kind"] = "usage"; result["input"] = Int(input); result["output"] = Int(output)
+        result["cache_read"] = Int(cacheRead); result["cache_write"] = Int(cacheWrite)
+        result["cost_micros"] = Int(costMicros)
     }
+    return result
 }
 
 // MARK: - Main loop

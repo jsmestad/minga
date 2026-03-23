@@ -302,7 +302,7 @@ struct CommandDispatcherRoutingTests {
     @Test("guiAgentChat visible updates agentChatState")
     @MainActor func guiAgentChatVisible() {
         let (dispatcher, gui) = makeDispatcher()
-        let messages: [GUIChatMessage] = [.user(text: "hello")]
+        let messages: [GUIChatMessage] = [GUIChatMessage(beamId: 1, content: .user(text: "hello"))]
         dispatcher.dispatch(.guiAgentChat(visible: true, status: 1, model: "claude",
                                            prompt: "Fix this", pendingToolName: nil,
                                            pendingToolSummary: "", messages: messages))

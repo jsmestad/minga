@@ -61,12 +61,7 @@ defmodule Minga.Port.Protocol.GUI do
   | 0x14       | tool_dismiss         |
   | 0x15       | agent_tool_toggle    |
   | 0x16       | execute_command      |
-  <<<<<<< HEAD
   | 0x17       | minibuffer_select    |
-
-
-  =======
-  >>>>>>> 8fcc39d8 (fix(editor): suppress tool prompts in headless editors + add protocol tests)
   | 0x18       | git_stage_file       |
   | 0x19       | git_unstage_file     |
   | 0x1A       | git_discard_file     |
@@ -1045,7 +1040,13 @@ defmodule Minga.Port.Protocol.GUI do
 
   # ── Agent chat ──
 
-  @doc "Encodes a gui_agent_chat command with conversation messages."
+  @doc """
+  Encodes a gui_agent_chat command with conversation messages.
+
+  Messages are `{id, message}` tuples where `id` is a stable BEAM-assigned
+  uint32. Each encoded message is prefixed with its ID so the GUI frontend
+  can use it as a persistent SwiftUI identity across updates.
+  """
   @spec encode_gui_agent_chat(map()) :: binary()
   def encode_gui_agent_chat(%{visible: false}) do
     <<@op_gui_agent_chat, 0::8>>
@@ -1132,25 +1133,36 @@ defmodule Minga.Port.Protocol.GUI do
                result: String.t() | nil
              }, [[styled_run()]]}
 
-  @spec encode_chat_message(gui_chat_message()) :: binary()
-  defp encode_chat_message({:user, text}) do
+  # Unwrap {id, message} tuple: prefix with the stable uint32 ID, then encode the message.
+  @spec encode_chat_message({pos_integer(), gui_chat_message()} | gui_chat_message()) :: binary()
+  defp encode_chat_message({id, msg}) when is_integer(id) do
+    <<id::32, encode_chat_message_body(msg)::binary>>
+  end
+
+  # Bare messages (no ID wrapper) for backward compat in tests. ID defaults to 0.
+  defp encode_chat_message(msg) when is_tuple(msg) do
+    <<0::32, encode_chat_message_body(msg)::binary>>
+  end
+
+  @spec encode_chat_message_body(gui_chat_message()) :: binary()
+  defp encode_chat_message_body({:user, text}) do
     text_bytes = :erlang.iolist_to_binary([text])
     <<0x01::8, byte_size(text_bytes)::32, text_bytes::binary>>
   end
 
-  defp encode_chat_message({:user, text, _attachments}) do
+  defp encode_chat_message_body({:user, text, _attachments}) do
     text_bytes = :erlang.iolist_to_binary([text])
     <<0x01::8, byte_size(text_bytes)::32, text_bytes::binary>>
   end
 
-  defp encode_chat_message({:assistant, text}) do
+  defp encode_chat_message_body({:assistant, text}) do
     text_bytes = :erlang.iolist_to_binary([text])
     <<0x02::8, byte_size(text_bytes)::32, text_bytes::binary>>
   end
 
   # Styled assistant message: opcode 0x07, line_count::16, then per line:
   # run_count::16, then per run: text_len::16, text, fg::24, bg::24, flags::8
-  defp encode_chat_message({:styled_assistant, styled_lines}) do
+  defp encode_chat_message_body({:styled_assistant, styled_lines}) do
     line_binaries =
       Enum.map(styled_lines, fn runs ->
         run_binaries =
@@ -1166,13 +1178,13 @@ defmodule Minga.Port.Protocol.GUI do
     IO.iodata_to_binary([<<0x07::8, length(styled_lines)::16>> | line_binaries])
   end
 
-  defp encode_chat_message({:thinking, text, collapsed}) do
+  defp encode_chat_message_body({:thinking, text, collapsed}) do
     collapsed_byte = if collapsed, do: 1, else: 0
     text_bytes = :erlang.iolist_to_binary([text])
     <<0x03::8, collapsed_byte::8, byte_size(text_bytes)::32, text_bytes::binary>>
   end
 
-  defp encode_chat_message({:tool_call, tc}) do
+  defp encode_chat_message_body({:tool_call, tc}) do
     name_bytes = :erlang.iolist_to_binary([tc.name])
     result_bytes = :erlang.iolist_to_binary([tc.result || ""])
 
@@ -1197,7 +1209,7 @@ defmodule Minga.Port.Protocol.GUI do
   #   0x08, status::8, error::8, collapsed::8, duration::32,
   #   name_len::16, name, line_count::16, then per line:
   #   run_count::16, then per run: text_len::16, text, fg::24, bg::24, flags::8
-  defp encode_chat_message({:styled_tool_call, tc, styled_lines}) do
+  defp encode_chat_message_body({:styled_tool_call, tc, styled_lines}) do
     name_bytes = :erlang.iolist_to_binary([tc.name])
 
     status_byte =
@@ -1229,13 +1241,13 @@ defmodule Minga.Port.Protocol.GUI do
     ])
   end
 
-  defp encode_chat_message({:system, text, level}) do
+  defp encode_chat_message_body({:system, text, level}) do
     level_byte = if level == :error, do: 1, else: 0
     text_bytes = :erlang.iolist_to_binary([text])
     <<0x05::8, level_byte::8, byte_size(text_bytes)::32, text_bytes::binary>>
   end
 
-  defp encode_chat_message({:usage, u}) do
+  defp encode_chat_message_body({:usage, u}) do
     cost_int = round((u.cost || 0.0) * 1_000_000)
     <<0x06::8, u.input::32, u.output::32, u.cache_read::32, u.cache_write::32, cost_int::32>>
   end

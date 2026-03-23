@@ -1117,8 +1117,8 @@ defmodule Minga.Port.ProtocolTest do
 
       assert msg_count == 1
 
-      # First byte should be 0x07 (styled_assistant opcode)
-      assert <<0x07, line_count::16, rest::binary>> = msg_data
+      # 4-byte message ID prefix (0 for bare messages), then 0x07 (styled_assistant opcode)
+      assert <<0::32, 0x07, line_count::16, rest::binary>> = msg_data
       assert line_count == 2
 
       # First line: 2 runs
