@@ -85,7 +85,12 @@ defmodule Minga.Integration.FileOpenFromAgentTabTest do
         | windows: windows,
           tab_bar: agent_tab_bar,
           keymap_scope: :agent,
-          agent: agent_state
+          agent: agent_state,
+          # Suppress :tool_missing events from the global event bus.
+          # Without this, a stray tool_missing broadcast can race with
+          # open_file and transition to :tool_confirm mode, causing the
+          # modeline test to see "INSTALL" instead of "NORMAL".
+          suppress_tool_prompts: true
       }
     end)
 
