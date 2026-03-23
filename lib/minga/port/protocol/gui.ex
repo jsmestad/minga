@@ -222,15 +222,24 @@ defmodule Minga.Port.Protocol.GUI do
           | :diag_warning
           | :diag_info
           | :diag_hint
+          | :annotation
 
   @typedoc "Display type for a gutter row."
   @type display_type :: :normal | :fold_start | :fold_continuation | :wrap_continuation
 
-  @typedoc "A single gutter entry for one visible line."
+  @typedoc """
+  A single gutter entry for one visible line.
+
+  When `sign_type` is `:annotation`, `sign_fg` and `sign_text` carry the
+  annotation icon's color and text. For all other sign types these fields
+  are absent or ignored.
+  """
   @type gutter_entry :: %{
-          buf_line: non_neg_integer(),
-          display_type: display_type(),
-          sign_type: sign_type()
+          required(:buf_line) => non_neg_integer(),
+          required(:display_type) => display_type(),
+          required(:sign_type) => sign_type(),
+          optional(:sign_fg) => non_neg_integer(),
+          optional(:sign_text) => String.t()
         }
 
   @typedoc "Gutter data for a single window."
@@ -279,8 +288,24 @@ defmodule Minga.Port.Protocol.GUI do
     active_byte = if active, do: 1, else: 0
 
     entry_binaries =
-      Enum.map(entries, fn %{buf_line: bl, display_type: dt, sign_type: st} ->
-        <<bl::32, encode_display_type(dt)::8, encode_sign_type(st)::8>>
+      Enum.map(entries, fn entry ->
+        base =
+          <<entry.buf_line::32, encode_display_type(entry.display_type)::8,
+            encode_sign_type(entry.sign_type)::8>>
+
+        case entry.sign_type do
+          :annotation ->
+            fg = Map.get(entry, :sign_fg, 0)
+            text = Map.get(entry, :sign_text, "")
+            text_len = byte_size(text)
+            fg_r = fg >>> 16 &&& 0xFF
+            fg_g = fg >>> 8 &&& 0xFF
+            fg_b = fg &&& 0xFF
+            <<base::binary, fg_r::8, fg_g::8, fg_b::8, text_len::8, text::binary>>
+
+          _ ->
+            base
+        end
       end)
 
     IO.iodata_to_binary([
@@ -311,6 +336,7 @@ defmodule Minga.Port.Protocol.GUI do
   defp encode_sign_type(:diag_warning), do: 5
   defp encode_sign_type(:diag_info), do: 6
   defp encode_sign_type(:diag_hint), do: 7
+  defp encode_sign_type(:annotation), do: 8
 
   # ── Gutter separator ──
 

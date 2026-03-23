@@ -753,6 +753,24 @@ final class CoreTextMetalRenderer {
                 lineInstances.append(lineGPU)
             }
 
+        case .annotation:
+            // Render annotation icon text with the annotation's custom fg color.
+            let text = entry.signText.isEmpty ? "●" : entry.signText
+            let fg = entry.signFg
+            let cacheKey = UInt16(0x8800) &+ screenRow
+            let contentHash = gutterContentHash(text: text, fg: fg)
+            if let atlas, let wcr = windowContentRenderer,
+               let atlasEntry = wcr.renderSimpleText(text, fg: fg, bold: false,
+                                                      key: cacheKey, contentHash: contentHash, atlas: atlas) {
+                let (uvOrigin, uvSize) = atlas.uvForSlot(atlasEntry.slotIndex, pixelWidth: atlasEntry.pixelWidth)
+                var lineGPU = LineGPU()
+                lineGPU.position = SIMD2<Float>(xOffset, yPos)
+                lineGPU.size = SIMD2<Float>(Float(atlasEntry.pixelWidth), Float(atlasEntry.pixelHeight))
+                lineGPU.uvOrigin = uvOrigin
+                lineGPU.uvSize = uvSize
+                lineInstances.append(lineGPU)
+            }
+
         case .none:
             break
         }
@@ -832,6 +850,7 @@ final class CoreTextMetalRenderer {
         case .diagWarning: return colorFromU24(frameState.gutterColors.warningFg, default: .zero)
         case .diagInfo: return colorFromU24(frameState.gutterColors.infoFg, default: .zero)
         case .diagHint: return colorFromU24(frameState.gutterColors.hintFg, default: .zero)
+        case .annotation: return .zero  // Annotation color is per-entry, not from theme
         case .none: return .zero
         }
     }

@@ -54,16 +54,89 @@ defmodule Minga.Editor.Renderer.Gutter do
           %{non_neg_integer() => Diagnostic.severity()},
           %{non_neg_integer() => atom()},
           colors(),
-          git_colors()
+          git_colors(),
+          Minga.Buffer.Decorations.t()
         ) :: DisplayList.draw() | []
-  def render_sign(screen_row, col_offset, buf_line, diag_signs, git_signs, colors, git_colors) do
-    case Map.get(diag_signs, buf_line) do
-      nil ->
-        render_git_sign(screen_row, col_offset, buf_line, git_signs, git_colors)
+  def render_sign(
+        screen_row,
+        col_offset,
+        buf_line,
+        diag_signs,
+        git_signs,
+        colors,
+        git_colors,
+        decorations \\ %Minga.Buffer.Decorations{}
+      ) do
+    diag = Map.get(diag_signs, buf_line)
+    git = Map.get(git_signs, buf_line)
 
-      severity ->
-        {icon, fg} = sign_for_severity(severity, colors)
-        DisplayList.draw(screen_row, col_offset, icon, Face.new(fg: fg))
+    render_sign_for_line(
+      screen_row,
+      col_offset,
+      buf_line,
+      diag,
+      git,
+      colors,
+      git_colors,
+      decorations
+    )
+  end
+
+  # Diagnostic sign takes highest priority.
+  @spec render_sign_for_line(
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          Diagnostic.severity() | nil,
+          atom() | nil,
+          colors(),
+          git_colors(),
+          Minga.Buffer.Decorations.t()
+        ) :: DisplayList.draw() | []
+  defp render_sign_for_line(
+         screen_row,
+         col_offset,
+         _buf_line,
+         severity,
+         _git,
+         colors,
+         _git_colors,
+         _decorations
+       )
+       when severity != nil do
+    {icon, fg} = sign_for_severity(severity, colors)
+    DisplayList.draw(screen_row, col_offset, icon, Face.new(fg: fg))
+  end
+
+  # Git sign takes second priority.
+  defp render_sign_for_line(
+         screen_row,
+         col_offset,
+         buf_line,
+         nil,
+         git,
+         _colors,
+         git_colors,
+         _decorations
+       )
+       when git != nil do
+    render_git_sign(screen_row, col_offset, buf_line, %{buf_line => git}, git_colors)
+  end
+
+  # Annotation gutter icon is the third tier; empty sign column as fallback.
+  defp render_sign_for_line(
+         screen_row,
+         col_offset,
+         buf_line,
+         nil,
+         nil,
+         _colors,
+         _git_colors,
+         decorations
+       ) do
+    case render_annotation_sign(screen_row, col_offset, buf_line, decorations) do
+      [] -> DisplayList.draw(screen_row, col_offset, "  ")
+      draw -> draw
     end
   end
 
@@ -90,6 +163,33 @@ defmodule Minga.Editor.Renderer.Gutter do
   end
 
   # ── Private ────────────────────────────────────────────────────────────────
+
+  # Renders the highest-priority :gutter_icon annotation in the sign column.
+  # Returns [] if no gutter icon annotation exists for this line.
+  @spec render_annotation_sign(
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          Minga.Buffer.Decorations.t()
+        ) :: DisplayList.draw() | []
+  defp render_annotation_sign(_screen_row, _col_offset, _buf_line, %{annotations: []}), do: []
+
+  defp render_annotation_sign(screen_row, col_offset, buf_line, decorations) do
+    icons =
+      decorations
+      |> Minga.Buffer.Decorations.annotations_for_line(buf_line)
+      |> Enum.filter(fn ann -> ann.kind == :gutter_icon end)
+
+    case icons do
+      [] ->
+        []
+
+      [ann | _] ->
+        # Pad/truncate to sign column width (2 chars)
+        text = String.pad_trailing(String.slice(ann.text, 0, @sign_col_width), @sign_col_width)
+        DisplayList.draw(screen_row, col_offset, text, Face.new(fg: ann.fg))
+    end
+  end
 
   @spec render_git_sign(
           non_neg_integer(),

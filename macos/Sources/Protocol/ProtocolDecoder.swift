@@ -189,6 +189,7 @@ enum GUIGutterSignType: UInt8, Sendable {
     case diagWarning = 5
     case diagInfo = 6
     case diagHint = 7
+    case annotation = 8
 }
 
 /// A single gutter entry for one visible line.
@@ -196,6 +197,19 @@ struct GUIGutterEntry: Sendable {
     let bufLine: UInt32
     let displayType: GUIGutterDisplayType
     let signType: GUIGutterSignType
+    /// Annotation icon foreground color (24-bit RGB). Only valid when signType == .annotation.
+    let signFg: UInt32
+    /// Annotation icon text. Only valid when signType == .annotation.
+    let signText: String
+
+    init(bufLine: UInt32, displayType: GUIGutterDisplayType, signType: GUIGutterSignType,
+         signFg: UInt32 = 0, signText: String = "") {
+        self.bufLine = bufLine
+        self.displayType = displayType
+        self.signType = signType
+        self.signFg = signFg
+        self.signText = signText
+    }
 }
 
 /// Gutter data for one window, including its screen position.
@@ -1140,16 +1154,32 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         let lineCount = Int(readU16(data, rest + 16))
         let style = GUILineNumberStyle(rawValue: styleRaw) ?? .hybrid
 
-        // Each entry is 6 bytes: buf_line:4 + display_type:1 + sign_type:1
-        guard data.count >= rest + 18 + lineCount * 6 else { throw ProtocolDecodeError.malformed }
+        // Entries: 6 bytes each (buf_line:4 + display_type:1 + sign_type:1).
+        // Annotation entries (sign_type=8) have extra bytes: fg:3 + text_len:1 + text.
         var entries: [GUIGutterEntry] = []
         entries.reserveCapacity(lineCount)
-        for i in 0..<lineCount {
-            let base = rest + 18 + i * 6
-            let bufLine = readU32(data, base)
-            let dt = GUIGutterDisplayType(rawValue: data[base + 4]) ?? .normal
-            let st = GUIGutterSignType(rawValue: data[base + 5]) ?? .none
-            entries.append(GUIGutterEntry(bufLine: bufLine, displayType: dt, signType: st))
+        var pos = rest + 18
+        for _ in 0..<lineCount {
+            guard data.count >= pos + 6 else { throw ProtocolDecodeError.malformed }
+            let bufLine = readU32(data, pos)
+            let dt = GUIGutterDisplayType(rawValue: data[pos + 4]) ?? .normal
+            let st = GUIGutterSignType(rawValue: data[pos + 5]) ?? .none
+            pos += 6
+
+            if st == .annotation {
+                // Read annotation-specific data: fg:3 + text_len:1 + text
+                guard data.count >= pos + 4 else { throw ProtocolDecodeError.malformed }
+                let fg = readU24(data, pos)
+                let textLen = Int(data[pos + 3])
+                pos += 4
+                guard data.count >= pos + textLen else { throw ProtocolDecodeError.malformed }
+                let text = String(data: Data(data[pos..<(pos + textLen)]), encoding: .utf8) ?? ""
+                pos += textLen
+                entries.append(GUIGutterEntry(bufLine: bufLine, displayType: dt, signType: st,
+                                              signFg: fg, signText: text))
+            } else {
+                entries.append(GUIGutterEntry(bufLine: bufLine, displayType: dt, signType: st))
+            }
         }
         let windowGutter = GUIWindowGutter(
             windowId: windowId,
@@ -1157,7 +1187,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             isActive: isActive, cursorLine: cursorLine, lineNumberStyle: style,
             lineNumberWidth: lnWidth, signColWidth: signWidth, entries: entries
         )
-        return (.guiGutter(data: windowGutter), 1 + 18 + lineCount * 6)
+        return (.guiGutter(data: windowGutter), pos - offset)
 
     case OP_GUI_BOTTOM_PANEL:
         // visible(1)

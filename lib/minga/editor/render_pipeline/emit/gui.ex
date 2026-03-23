@@ -759,8 +759,13 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
     line_number_style = BufferServer.get_option(buf, :line_numbers)
 
     # Compute gutter geometry (same logic as Scroll stage)
+    decorations = BufferServer.decorations(buf)
+
+    has_gutter_icons =
+      Enum.any?(decorations.annotations, fn ann -> ann.kind == :gutter_icon end)
+
     has_sign_column =
-      GitTracker.tracked?(buf) or BufferServer.file_path(buf) != nil
+      has_gutter_icons or GitTracker.tracked?(buf) or BufferServer.file_path(buf) != nil
 
     sign_col_width = if has_sign_column, do: 2, else: 0
 
@@ -776,14 +781,11 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
       for row <- 0..(win_pos.content_height - 1) do
         buf_line = viewport_top + row
 
-        sign_type =
-          if buf_line < line_count do
-            resolve_sign_type(buf_line, diag_signs, git_signs)
-          else
-            :none
-          end
-
-        %{buf_line: buf_line, display_type: :normal, sign_type: sign_type}
+        if buf_line < line_count do
+          resolve_gutter_entry(buf_line, diag_signs, git_signs, decorations)
+        else
+          %{buf_line: buf_line, display_type: :normal, sign_type: :none}
+        end
       end
 
     Map.merge(win_pos, %{
@@ -793,6 +795,49 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
       sign_col_width: sign_col_width,
       entries: entries
     })
+  end
+
+  # Resolves the gutter entry for a buffer line. Diagnostics > git signs > annotations.
+  @spec resolve_gutter_entry(
+          non_neg_integer(),
+          %{non_neg_integer() => atom()},
+          %{non_neg_integer() => atom()},
+          Minga.Buffer.Decorations.t()
+        ) :: ProtocolGUI.gutter_entry()
+  defp resolve_gutter_entry(buf_line, diag_signs, git_signs, decorations) do
+    sign_type = resolve_sign_type(buf_line, diag_signs, git_signs)
+
+    case sign_type do
+      :none ->
+        resolve_annotation_entry(buf_line, decorations)
+
+      _ ->
+        %{buf_line: buf_line, display_type: :normal, sign_type: sign_type}
+    end
+  end
+
+  # Checks for :gutter_icon annotations when no diagnostic or git sign is present.
+  @spec resolve_annotation_entry(non_neg_integer(), Minga.Buffer.Decorations.t()) ::
+          ProtocolGUI.gutter_entry()
+  defp resolve_annotation_entry(buf_line, decorations) do
+    icons =
+      decorations
+      |> Minga.Buffer.Decorations.annotations_for_line(buf_line)
+      |> Enum.filter(fn ann -> ann.kind == :gutter_icon end)
+
+    case icons do
+      [] ->
+        %{buf_line: buf_line, display_type: :normal, sign_type: :none}
+
+      [ann | _] ->
+        %{
+          buf_line: buf_line,
+          display_type: :normal,
+          sign_type: :annotation,
+          sign_fg: ann.fg,
+          sign_text: String.slice(ann.text, 0, 2)
+        }
+    end
   end
 
   # Resolves the highest-priority sign for a buffer line.

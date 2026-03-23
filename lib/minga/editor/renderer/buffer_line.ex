@@ -538,7 +538,8 @@ defmodule Minga.Editor.Renderer.BufferLine do
         ctx.diagnostic_signs,
         ctx.git_signs,
         ctx.gutter_colors,
-        ctx.git_colors
+        ctx.git_colors,
+        ctx.decorations
       )
     else
       []

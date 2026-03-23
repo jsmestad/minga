@@ -378,8 +378,13 @@ defmodule Minga.Editor.RenderPipeline.Scroll do
   @spec gutter_dimensions(state(), pid(), atom(), non_neg_integer()) ::
           {boolean(), non_neg_integer()}
   defp gutter_dimensions(_state, buf, line_number_style, line_count) do
+    decorations = Minga.Buffer.Server.decorations(buf)
+
+    has_gutter_icons =
+      Enum.any?(decorations.annotations, fn ann -> ann.kind == :gutter_icon end)
+
     has_sign_column =
-      GitTracker.tracked?(buf) or BufferServer.file_path(buf) != nil
+      has_gutter_icons or GitTracker.tracked?(buf) or BufferServer.file_path(buf) != nil
 
     sign_w = if has_sign_column, do: Gutter.sign_column_width(), else: 0
 
