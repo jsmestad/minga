@@ -235,8 +235,25 @@ struct TabBarView: View {
             if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
         }
         .onDisappear {
-            // Safety net: pop cursor if capsule is removed while hovered
             NSCursor.pop()
+        }
+        .contextMenu {
+            Button("Switch to Workspace") {
+                if group.groupId == 0 {
+                    encoder?.sendExecuteCommand(name: "workspace_manual")
+                } else if let idx = tabBarState.workspaces.firstIndex(where: { $0.id == group.groupId }),
+                          idx >= 1, idx <= 9 {
+                    encoder?.sendExecuteCommand(name: "workspace_goto_\(idx)")
+                } else {
+                    encoder?.sendExecuteCommand(name: "workspace_next_agent")
+                }
+            }
+            Divider()
+            if group.groupId != 0 {
+                Button("Close Workspace") {
+                    encoder?.sendWorkspaceClose(id: group.groupId)
+                }
+            }
         }
     }
 
@@ -335,9 +352,9 @@ struct TabBarView: View {
                 showIconPicker = true
             }
             Divider()
-            if workspace.isAgent {
+            if !workspace.isManual {
                 Button("Close Workspace") {
-                    encoder?.sendExecuteCommand(name: "workspace_close")
+                    encoder?.sendWorkspaceClose(id: workspace.id)
                 }
             }
         }

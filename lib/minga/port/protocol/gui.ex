@@ -72,6 +72,7 @@ defmodule Minga.Port.Protocol.GUI do
   | 0x1E       | git_open_file        |
   | 0x1F       | workspace_rename     |
   | 0x20       | workspace_set_icon   |
+  | 0x21       | workspace_close      |
 
   """
 
@@ -147,6 +148,7 @@ defmodule Minga.Port.Protocol.GUI do
   @gui_action_git_open_file 0x1E
   @gui_action_workspace_rename 0x1F
   @gui_action_workspace_set_icon 0x20
+  @gui_action_workspace_close 0x21
 
   # ── Types ──
 
@@ -184,6 +186,7 @@ defmodule Minga.Port.Protocol.GUI do
           | {:git_open_file, path :: String.t()}
           | {:workspace_rename, id :: non_neg_integer(), name :: String.t()}
           | {:workspace_set_icon, id :: non_neg_integer(), icon :: String.t()}
+          | {:workspace_close, id :: non_neg_integer()}
 
 
   # ═══════════════════════════════════════════════════════════════════════════
@@ -1475,6 +1478,9 @@ defmodule Minga.Port.Protocol.GUI do
         <<ws_id::16, icon_len::8, icon::binary-size(icon_len)>>
       ),
       do: {:ok, {:workspace_set_icon, ws_id, icon}}
+
+  def decode_gui_action(@gui_action_workspace_close, <<ws_id::16>>),
+    do: {:ok, {:workspace_close, ws_id}}
 
   def decode_gui_action(_, _), do: :error
 

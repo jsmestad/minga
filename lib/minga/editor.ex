@@ -1980,6 +1980,10 @@ defmodule Minga.Editor do
     end
   end
 
+  defp handle_gui_action(%{tab_bar: %TabBar{} = tb} = state, {:workspace_close, ws_id}) do
+    %{state | tab_bar: TabBar.remove_workspace(tb, ws_id)}
+  end
+
   defp handle_gui_action(%{tab_bar: %TabBar{} = tb} = state, {:workspace_rename, ws_id, name}) do
     alias Minga.Editor.State.Workspace
     tb = TabBar.update_workspace(tb, ws_id, &Workspace.rename(&1, name))

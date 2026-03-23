@@ -63,6 +63,7 @@ protocol InputEncoder: AnyObject, Sendable {
     func sendGitOpenFile(path: String)
     func sendWorkspaceRename(id: UInt16, name: String)
     func sendWorkspaceSetIcon(id: UInt16, icon: String)
+    func sendWorkspaceClose(id: UInt16)
 }
 
 extension InputEncoder {
@@ -449,6 +450,14 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         if iconLen > 0 {
             buf.replaceSubrange(5..<(5 + iconLen), with: utf8[0..<iconLen])
         }
+        writeFrame(buf)
+    }
+
+    func sendWorkspaceClose(id: UInt16) {
+        var buf = Data(count: 4)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_WORKSPACE_CLOSE
+        writeU16(&buf, 2, id)
         writeFrame(buf)
     }
 
