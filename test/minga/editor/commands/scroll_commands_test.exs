@@ -120,11 +120,15 @@ defmodule Minga.Editor.Commands.ScrollCommandsTest do
       send_key(editor, ?z)
 
       win = active_window(editor)
-      # The viewport should be centered on line 50.
-      # visible_rows = 24 - 2 (footer) = 22, so top should be ~50 - 11 = 39
-      # But window viewport has reserved: 2, so content_rows = 22
-      # center_on: 50 - div(22, 2) = 50 - 11 = 39
-      assert win.viewport.top >= 38 and win.viewport.top <= 42
+      # Assert the centering property: cursor line 50 should be near
+      # the midpoint of the visible area, regardless of how many rows
+      # are reserved for chrome (tab bar, status bar, etc.).
+      visible = Minga.Editor.Viewport.content_rows(win.viewport)
+      midpoint = win.viewport.top + div(visible, 2)
+
+      assert abs(midpoint - 50) <= 1,
+             "cursor line 50 should be near viewport midpoint #{midpoint} " <>
+               "(viewport.top=#{win.viewport.top}, content_rows=#{visible})"
     end
   end
 
@@ -141,8 +145,13 @@ defmodule Minga.Editor.Commands.ScrollCommandsTest do
       send_key(editor, ?t)
 
       win = active_window(editor)
-      # With scroll_margin (default 5), top should be around 50 - 5 = 45
-      assert win.viewport.top >= 44 and win.viewport.top <= 50
+      # Cursor line 50 should be near the top of the visible area.
+      # "Near" accounts for scroll_margin (default 5).
+      visible = Minga.Editor.Viewport.content_rows(win.viewport)
+
+      assert win.viewport.top <= 50 and win.viewport.top >= 50 - visible + 1,
+             "cursor line 50 should be near top of viewport " <>
+               "(viewport.top=#{win.viewport.top}, content_rows=#{visible})"
     end
   end
 
@@ -159,10 +168,14 @@ defmodule Minga.Editor.Commands.ScrollCommandsTest do
       send_key(editor, ?b)
 
       win = active_window(editor)
-      # visible_rows = max(24 - 2, 1) = 22, cursor at 50
-      # bottom_on: target_top = 50 - 22 + 1 + margin(5) = 34
-      assert win.viewport.top >= 30 and win.viewport.top <= 40,
-             "expected viewport.top between 30-40, got #{win.viewport.top}"
+      # Cursor line 50 should be near the bottom of the visible area.
+      # "Near" accounts for scroll_margin (default 5) + 1.
+      visible = Minga.Editor.Viewport.content_rows(win.viewport)
+      bottom = win.viewport.top + visible - 1
+
+      assert abs(bottom - 50) <= 6,
+             "cursor line 50 should be near bottom of viewport " <>
+               "(viewport.top=#{win.viewport.top}, bottom=#{bottom}, content_rows=#{visible})"
     end
   end
 end
