@@ -65,24 +65,25 @@ final class AgentChatState {
         self.prompt = prompt
         self.promptVersion += 1
         self.pendingApproval = pendingToolName.map { PendingApproval(toolName: $0, summary: pendingToolSummary) }
-        self.messages = rawMessages.enumerated().map { i, msg in
-            switch msg {
+        self.messages = rawMessages.map { msg in
+            let id = Int(msg.beamId)
+            switch msg.content {
             case .user(let text):
-                return .user(id: i, text: text)
+                return .user(id: id, text: text)
             case .assistant(let text):
-                return .assistant(id: i, text: text)
+                return .assistant(id: id, text: text)
             case .styledAssistant(let lines):
-                return .styledAssistant(id: i, lines: lines)
+                return .styledAssistant(id: id, lines: lines)
             case .thinking(let text, let collapsed):
-                return .thinking(id: i, text: text, collapsed: collapsed)
+                return .thinking(id: id, text: text, collapsed: collapsed)
             case .toolCall(let name, let st, let isError, let collapsed, let duration, let result):
-                return .toolCall(id: i, name: name, status: st, isError: isError, collapsed: collapsed, durationMs: duration, result: result)
+                return .toolCall(id: id, name: name, status: st, isError: isError, collapsed: collapsed, durationMs: duration, result: result)
             case .styledToolCall(let name, let st, let isError, let collapsed, let duration, let resultLines):
-                return .styledToolCall(id: i, name: name, status: st, isError: isError, collapsed: collapsed, durationMs: duration, resultLines: resultLines)
+                return .styledToolCall(id: id, name: name, status: st, isError: isError, collapsed: collapsed, durationMs: duration, resultLines: resultLines)
             case .system(let text, let isError):
-                return .system(id: i, text: text, isError: isError)
+                return .system(id: id, text: text, isError: isError)
             case .usage(let inp, let outp, let cacheR, let cacheW, let costM):
-                return .usage(id: i, input: inp, output: outp, cacheRead: cacheR, cacheWrite: cacheW, costMicros: costM)
+                return .usage(id: id, input: inp, output: outp, cacheRead: cacheR, cacheWrite: cacheW, costMicros: costM)
             }
         }
     }

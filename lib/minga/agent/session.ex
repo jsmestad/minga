@@ -51,6 +51,8 @@ defmodule Minga.Agent.Session do
           provider_opts: keyword(),
           status: status(),
           messages: [Message.t()],
+          message_ids: [pos_integer()],
+          next_message_id: pos_integer(),
           subscribers: MapSet.t(pid()),
           total_usage: Event.token_usage(),
           error_message: String.t() | nil,
@@ -106,6 +108,12 @@ defmodule Minga.Agent.Session do
   @spec messages(GenServer.server()) :: [Message.t()]
   def messages(session) do
     GenServer.call(session, :messages)
+  end
+
+  @doc "Returns the conversation messages paired with their stable BEAM-assigned IDs."
+  @spec messages_with_ids(GenServer.server()) :: [{pos_integer(), Message.t()}]
+  def messages_with_ids(session) do
+    GenServer.call(session, :messages_with_ids)
   end
 
   @doc "Returns accumulated token usage."
@@ -410,6 +418,8 @@ defmodule Minga.Agent.Session do
       provider_opts: provider_opts,
       status: :idle,
       messages: [Message.system("Session started · #{timestamp}")],
+      message_ids: [1],
+      next_message_id: 2,
       subscribers: MapSet.new(),
       total_usage: %{input: 0, output: 0, cache_read: 0, cache_write: 0, cost: 0.0},
       error_message: nil,
@@ -449,7 +459,7 @@ defmodule Minga.Agent.Session do
     # Content may be a plain string or a list of ContentPart structs
     # (when images are attached via @image.png mentions).
     {user_msg, send_content} = build_user_message(content)
-    state = %{state | messages: state.messages ++ [user_msg]}
+    state = append_msg(state, user_msg)
     state = notify_messages_changed(state)
 
     case state.provider_module.send_prompt(state.provider, send_content) do
@@ -476,7 +486,7 @@ defmodule Minga.Agent.Session do
   def handle_call({:send_follow_up, content}, _from, state) do
     # Agent is idle: treat follow-up as a regular prompt.
     {user_msg, send_content} = build_user_message(content)
-    state = %{state | messages: state.messages ++ [user_msg]}
+    state = append_msg(state, user_msg)
     state = notify_messages_changed(state)
 
     case state.provider_module.send_prompt(state.provider, send_content) do
@@ -492,13 +502,14 @@ defmodule Minga.Agent.Session do
       {:reply, [], state}
     else
       # Add each steering message to conversation history so it appears in chat.
-      messages =
-        Enum.reduce(steering, state.messages, fn content, msgs ->
+      new_msgs =
+        Enum.map(steering, fn content ->
           {user_msg, _} = build_user_message(content)
-          msgs ++ [user_msg]
+          user_msg
         end)
 
-      state = %{state | steering_queue: [], messages: messages}
+      state = %{state | steering_queue: []}
+      state = append_msgs(state, new_msgs)
       state = notify_messages_changed(state)
       {:reply, steering, state}
     end
@@ -558,7 +569,6 @@ defmodule Minga.Agent.Session do
     state = %{
       state
       | session_id: generate_session_id(),
-        messages: [Message.system("Session cleared · #{timestamp}")],
         status: :idle,
         total_usage: %{input: 0, output: 0, cache_read: 0, cache_write: 0, cost: 0.0},
         error_message: nil,
@@ -566,6 +576,8 @@ defmodule Minga.Agent.Session do
         steering_queue: [],
         follow_up_queue: []
     }
+
+    state = reset_messages(state, [Message.system("Session cleared · #{timestamp}")])
 
     broadcast(state, {:status_changed, :idle})
     state = notify_messages_changed(state)
@@ -584,7 +596,6 @@ defmodule Minga.Agent.Session do
         state = %{
           state
           | session_id: data.id,
-            messages: data.messages,
             total_usage: data.usage,
             model_name: data.model_name,
             status: :idle,
@@ -593,6 +604,8 @@ defmodule Minga.Agent.Session do
             steering_queue: [],
             follow_up_queue: []
         }
+
+        state = reset_messages(state, data.messages)
 
         broadcast(state, {:status_changed, :idle})
         state = notify_messages_changed(state)
@@ -609,6 +622,11 @@ defmodule Minga.Agent.Session do
 
   def handle_call(:messages, _from, state) do
     {:reply, state.messages, state}
+  end
+
+  def handle_call(:messages_with_ids, _from, state) do
+    paired = Enum.zip(state.message_ids, state.messages)
+    {:reply, paired, state}
   end
 
   def handle_call(:usage, _from, state) do
@@ -828,7 +846,8 @@ defmodule Minga.Agent.Session do
 
     case Branch.branch_at(state.messages, turn_index, branch_name, state.branches) do
       {:ok, truncated, branches} ->
-        state = %{state | messages: truncated, branches: branches}
+        truncated_ids = Enum.take(state.message_ids, length(truncated))
+        state = %{state | messages: truncated, message_ids: truncated_ids, branches: branches}
         state = notify_messages_changed(state)
 
         {:reply, {:ok, "Branched at turn #{turn_index}. Branch saved as '#{branch_name}'."},
@@ -851,7 +870,7 @@ defmodule Minga.Agent.Session do
         {:reply, {:error, "Branch #{branch_index} not found. Use /branches to list."}, state}
 
       branch ->
-        state = %{state | messages: branch.messages}
+        state = reset_messages(state, branch.messages)
         state = notify_messages_changed(state)
         {:reply, :ok, state}
     end
@@ -937,10 +956,10 @@ defmodule Minga.Agent.Session do
               cache_read: state.total_usage.cache_read + usage.cache_read,
               cache_write: state.total_usage.cache_write + usage.cache_write,
               cost: state.total_usage.cost + usage.cost
-            },
-            messages: state.messages ++ [Message.usage(usage)]
+            }
         }
 
+        state = append_msg(state, Message.usage(usage))
         notify_messages_changed(state)
       else
         state
@@ -962,8 +981,8 @@ defmodule Minga.Agent.Session do
         combined = combine_queue_entries_to_text(pending)
         {user_msg, send_content} = build_user_message(combined)
 
-        messages = state.messages ++ [user_msg]
-        state = %{state | messages: messages, steering_queue: [], follow_up_queue: []}
+        state = %{state | steering_queue: [], follow_up_queue: []}
+        state = append_msg(state, user_msg)
         state = notify_messages_changed(state)
 
         case state.provider_module.send_prompt(state.provider, send_content) do
@@ -980,22 +999,37 @@ defmodule Minga.Agent.Session do
   defp handle_provider_event(%Event.TextDelta{delta: delta}, state) do
     # Auto-collapse any expanded thinking blocks (thinking is done)
     messages = collapse_thinking_blocks(state.messages)
-    messages = append_to_last_assistant(messages, delta)
-    state = %{state | messages: messages}
+
+    state =
+      case append_to_last_assistant(messages, delta) do
+        {:updated, updated_messages} ->
+          %{state | messages: updated_messages}
+
+        {:appended, new_msg} ->
+          %{state | messages: messages} |> append_msg(new_msg)
+      end
+
     broadcast(state, {:text_delta, delta})
     state
   end
 
   defp handle_provider_event(%Event.ThinkingDelta{delta: delta}, state) do
-    messages = append_to_last_thinking(state.messages, delta)
-    state = %{state | messages: messages}
+    state =
+      case append_to_last_thinking(state.messages, delta) do
+        {:updated, updated_messages} ->
+          %{state | messages: updated_messages}
+
+        {:appended, new_msg} ->
+          append_msg(state, new_msg)
+      end
+
     broadcast(state, {:thinking_delta, delta})
     state
   end
 
   defp handle_provider_event(%Event.ToolStart{} = event, state) do
     msg = Message.tool_call(event.tool_call_id, event.name, event.args)
-    state = %{state | messages: Enum.reverse([msg | Enum.reverse(state.messages)])}
+    state = append_msg(state, msg)
     state = set_status(state, :tool_executing)
     broadcast(state, {:tool_started, event.name, event.args})
     notify_messages_changed(state)
@@ -1080,20 +1114,65 @@ defmodule Minga.Agent.Session do
 
   # ── Message list helpers ────────────────────────────────────────────────────
 
+  # Appends a message and assigns it a new stable ID.
+  @spec append_msg(state(), Message.t()) :: state()
+  defp append_msg(state, msg) do
+    id = state.next_message_id
+
+    %{
+      state
+      | messages: state.messages ++ [msg],
+        message_ids: state.message_ids ++ [id],
+        next_message_id: id + 1
+    }
+  end
+
+  # Appends multiple messages, assigning each a new stable ID.
+  @spec append_msgs(state(), [Message.t()]) :: state()
+  defp append_msgs(state, []), do: state
+
+  defp append_msgs(state, msgs) do
+    count = length(msgs)
+    base_id = state.next_message_id
+    new_ids = Enum.to_list(base_id..(base_id + count - 1))
+
+    %{
+      state
+      | messages: state.messages ++ msgs,
+        message_ids: state.message_ids ++ new_ids,
+        next_message_id: base_id + count
+    }
+  end
+
+  # Replaces all messages and resets IDs (used by new_session, load_session, switch_branch).
+  @spec reset_messages(state(), [Message.t()]) :: state()
+  defp reset_messages(state, msgs) do
+    count = length(msgs)
+    ids = Enum.to_list(1..max(count, 1))
+
+    %{
+      state
+      | messages: msgs,
+        message_ids: Enum.take(ids, count),
+        next_message_id: count + 1
+    }
+  end
+
   @spec append_system_message(state(), String.t(), Message.system_level()) :: state()
   defp append_system_message(state, text, level) do
     msg = Message.system(text, level)
-    %{state | messages: state.messages ++ [msg]}
+    append_msg(state, msg)
   end
 
-  @spec append_to_last_assistant([Message.t()], String.t()) :: [Message.t()]
+  @spec append_to_last_assistant([Message.t()], String.t()) ::
+          {:updated, [Message.t()]} | {:appended, Message.t()}
   defp append_to_last_assistant(messages, delta) do
     case List.last(messages) do
       {:assistant, text} ->
-        List.replace_at(messages, length(messages) - 1, {:assistant, text <> delta})
+        {:updated, List.replace_at(messages, length(messages) - 1, {:assistant, text <> delta})}
 
       _ ->
-        messages ++ [Message.assistant(delta)]
+        {:appended, Message.assistant(delta)}
     end
   end
 
@@ -1105,14 +1184,16 @@ defmodule Minga.Agent.Session do
     end)
   end
 
-  @spec append_to_last_thinking([Message.t()], String.t()) :: [Message.t()]
+  @spec append_to_last_thinking([Message.t()], String.t()) ::
+          {:updated, [Message.t()]} | {:appended, Message.t()}
   defp append_to_last_thinking(messages, delta) do
     case List.last(messages) do
       {:thinking, text, _collapsed} ->
-        List.replace_at(messages, length(messages) - 1, {:thinking, text <> delta, false})
+        {:updated,
+         List.replace_at(messages, length(messages) - 1, {:thinking, text <> delta, false})}
 
       _ ->
-        messages ++ [Message.thinking(delta)]
+        {:appended, Message.thinking(delta)}
     end
   end
 
@@ -1210,9 +1291,9 @@ defmodule Minga.Agent.Session do
           "Get your Anthropic key at: https://console.anthropic.com/settings/keys\n\n" <>
           "Run `/auth` with no arguments to see status for all providers."
 
-      messages = state.messages ++ [Message.system(msg)]
+      state = append_msg(state, Message.system(msg))
       broadcast(state, {:system_message, msg, :info})
-      %{state | messages: messages}
+      state
     else
       state
     end

@@ -280,13 +280,13 @@ struct AgentChatStateLifecycleTests {
     @MainActor func updateConvertsMessages() {
         let state = AgentChatState()
         let raw: [GUIChatMessage] = [
-            .user(text: "hello"),
-            .assistant(text: "hi"),
-            .thinking(text: "analyzing...", collapsed: false),
-            .toolCall(name: "read_file", status: 1, isError: false,
-                     collapsed: true, durationMs: 500, result: "contents"),
-            .system(text: "session started", isError: false),
-            .usage(input: 100, output: 50, cacheRead: 80, cacheWrite: 20, costMicros: 5000)
+            GUIChatMessage(beamId: 1, content: .user(text: "hello")),
+            GUIChatMessage(beamId: 2, content: .assistant(text: "hi")),
+            GUIChatMessage(beamId: 3, content: .thinking(text: "analyzing...", collapsed: false)),
+            GUIChatMessage(beamId: 4, content: .toolCall(name: "read_file", status: 1, isError: false,
+                     collapsed: true, durationMs: 500, result: "contents")),
+            GUIChatMessage(beamId: 5, content: .system(text: "session started", isError: false)),
+            GUIChatMessage(beamId: 6, content: .usage(input: 100, output: 50, cacheRead: 80, cacheWrite: 20, costMicros: 5000))
         ]
         state.update(visible: true, status: 1, model: "claude", prompt: "fix bug",
                      pendingToolName: "write_file",
@@ -309,7 +309,7 @@ struct AgentChatStateLifecycleTests {
         let state = AgentChatState()
         state.update(visible: true, status: 1, model: "claude", prompt: "test",
                      pendingToolName: nil, pendingToolSummary: "",
-                     rawMessages: [.user(text: "hi")])
+                     rawMessages: [GUIChatMessage(beamId: 1, content: .user(text: "hi"))])
         state.hide()
 
         #expect(state.visible == false)

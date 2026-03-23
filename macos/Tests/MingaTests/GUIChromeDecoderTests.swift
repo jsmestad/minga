@@ -888,12 +888,14 @@ struct GUIAgentChatDecoderTests {
         data.append(0) // no pending approval
         appendU16(&data, 2) // messageCount
 
-        // Message 1: user
+        // Message 1: user (beam_id=1)
+        appendU32(&data, 1)
         data.append(0x01) // type=user
         appendU32(&data, UInt32("hello".utf8.count))
         data.append(contentsOf: "hello".utf8)
 
-        // Message 2: assistant
+        // Message 2: assistant (beam_id=2)
+        appendU32(&data, 2)
         data.append(0x02) // type=assistant
         appendU32(&data, UInt32("hi there".utf8.count))
         data.append(contentsOf: "hi there".utf8)
@@ -912,12 +914,14 @@ struct GUIAgentChatDecoderTests {
         #expect(pendingToolName == nil)
         #expect(messages.count == 2)
 
-        guard case .user(let userText) = messages[0] else {
+        #expect(messages[0].beamId == 1)
+        guard case .user(let userText) = messages[0].content else {
             Issue.record("Expected .user message"); return
         }
         #expect(userText == "hello")
 
-        guard case .assistant(let assistantText) = messages[1] else {
+        #expect(messages[1].beamId == 2)
+        guard case .assistant(let assistantText) = messages[1].content else {
             Issue.record("Expected .assistant message"); return
         }
         #expect(assistantText == "hi there")
@@ -934,7 +938,8 @@ struct GUIAgentChatDecoderTests {
         data.append(0) // no pending approval
         appendU16(&data, 1) // messageCount
 
-        // Thinking message
+        // Thinking message (beam_id=10)
+        appendU32(&data, 10)
         data.append(0x03) // type=thinking
         data.append(1) // collapsed
         let thinkText = "Let me analyze..."
@@ -946,7 +951,8 @@ struct GUIAgentChatDecoderTests {
             Issue.record("Expected .guiAgentChat"); return
         }
 
-        guard case .thinking(let text, let collapsed) = messages[0] else {
+        #expect(messages[0].beamId == 10)
+        guard case .thinking(let text, let collapsed) = messages[0].content else {
             Issue.record("Expected .thinking message"); return
         }
         #expect(text == "Let me analyze...")
@@ -962,7 +968,8 @@ struct GUIAgentChatDecoderTests {
         data.append(0) // no pending
         appendU16(&data, 1)
 
-        // Tool call message
+        // Tool call message (beam_id=5)
+        appendU32(&data, 5)
         data.append(0x04) // type=tool_call
         data.append(1) // status
         data.append(0) // isError
@@ -978,7 +985,7 @@ struct GUIAgentChatDecoderTests {
             Issue.record("Expected .guiAgentChat"); return
         }
 
-        guard case .toolCall(let name, let tcStatus, let isError, let collapsed, let duration, let tcResult) = messages[0] else {
+        guard case .toolCall(let name, let tcStatus, let isError, let collapsed, let duration, let tcResult) = messages[0].content else {
             Issue.record("Expected .toolCall message"); return
         }
         #expect(name == "read_file")
@@ -998,6 +1005,7 @@ struct GUIAgentChatDecoderTests {
         data.append(0)
         appendU16(&data, 1)
 
+        appendU32(&data, 1) // beam_id
         data.append(0x05) // type=system
         data.append(1) // isError
         let sysText = "Session terminated"
@@ -1009,7 +1017,7 @@ struct GUIAgentChatDecoderTests {
             Issue.record("Expected .guiAgentChat"); return
         }
 
-        guard case .system(let text, let isError) = messages[0] else {
+        guard case .system(let text, let isError) = messages[0].content else {
             Issue.record("Expected .system message"); return
         }
         #expect(text == "Session terminated")
@@ -1025,6 +1033,7 @@ struct GUIAgentChatDecoderTests {
         data.append(0)
         appendU16(&data, 1)
 
+        appendU32(&data, 1) // beam_id
         data.append(0x06) // type=usage
         appendU32(&data, 1000) // input
         appendU32(&data, 500) // output
@@ -1037,7 +1046,7 @@ struct GUIAgentChatDecoderTests {
             Issue.record("Expected .guiAgentChat"); return
         }
 
-        guard case .usage(let input, let output, let cacheRead, let cacheWrite, let costMicros) = messages[0] else {
+        guard case .usage(let input, let output, let cacheRead, let cacheWrite, let costMicros) = messages[0].content else {
             Issue.record("Expected .usage message"); return
         }
         #expect(input == 1000)
@@ -1075,8 +1084,9 @@ struct GUIAgentChatDecoderTests {
         data.append(0) // no pending
         appendU16(&data, 1) // 1 message
 
-        // styled_assistant: 0x07, line_count::16, then per line:
+        // styled_assistant: beam_id::32, 0x07, line_count::16, then per line:
         //   run_count::16, then per run: text_len::16, text, fg::24, bg::24, flags::8
+        appendU32(&data, 42) // beam_id
         data.append(0x07) // type=styled_assistant
         appendU16(&data, 2) // 2 lines
 
@@ -1108,7 +1118,8 @@ struct GUIAgentChatDecoderTests {
             Issue.record("Expected .guiAgentChat"); return
         }
 
-        guard case .styledAssistant(let lines) = messages[0] else {
+        #expect(messages[0].beamId == 42)
+        guard case .styledAssistant(let lines) = messages[0].content else {
             Issue.record("Expected .styledAssistant message"); return
         }
         #expect(lines.count == 2)

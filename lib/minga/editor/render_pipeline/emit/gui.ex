@@ -582,9 +582,9 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
     session = state.agent.session
 
     if is_agent_chat && session do
-      messages =
+      messages_with_ids =
         try do
-          AgentSession.messages(session)
+          AgentSession.messages_with_ids(session)
         catch
           :exit, _ -> []
         end
@@ -592,7 +592,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
       # Use cached styled runs for assistant messages when available.
       # This avoids recomputing tree-sitter/markdown styling per frame.
       styled_cache = state.agent_ui.panel.cached_styled_messages
-      gui_messages = build_gui_messages(messages, styled_cache)
+      gui_messages = build_gui_messages(messages_with_ids, styled_cache)
 
       %{
         visible: true,
@@ -607,33 +607,34 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
     end
   end
 
-  # Builds the message list for GUI encoding. Replaces assistant messages
-  # with {:styled_assistant, styled_lines} when cached styled runs are
-  # available. Other message types pass through unchanged.
+  # Builds the message list for GUI encoding. Each entry is `{id, gui_message}`
+  # where `id` is the stable BEAM-assigned message ID. Replaces assistant messages
+  # with {:styled_assistant, styled_lines} when cached styled runs are available.
   #
+  # Input: list of `{id, Message.t()}` pairs from `messages_with_ids/1`.
   # Uses Enum.zip (O(n)) instead of Enum.at in a loop (O(n²)) since this
   # runs every render frame at 60fps.
-  @spec build_gui_messages([term()], [term()] | nil) :: [term()]
-  defp build_gui_messages(messages, nil), do: messages
+  @spec build_gui_messages([{pos_integer(), term()}], [term()] | nil) :: [{pos_integer(), term()}]
+  defp build_gui_messages(messages_with_ids, nil), do: messages_with_ids
 
-  defp build_gui_messages(messages, styled_cache) when is_list(styled_cache) do
+  defp build_gui_messages(messages_with_ids, styled_cache) when is_list(styled_cache) do
     # Pad the cache to match message length if needed (messages may have grown)
-    padded = pad_cache(styled_cache, length(messages))
+    padded = pad_cache(styled_cache, length(messages_with_ids))
 
-    Enum.zip(messages, padded)
+    Enum.zip(messages_with_ids, padded)
     |> Enum.map(&maybe_style_message/1)
   end
 
-  @spec maybe_style_message({term(), term()}) :: term()
-  defp maybe_style_message({{:assistant, _text} = msg, nil}), do: msg
+  @spec maybe_style_message({{pos_integer(), term()}, term()}) :: {pos_integer(), term()}
+  defp maybe_style_message({{id, {:assistant, _text} = msg}, nil}), do: {id, msg}
 
-  defp maybe_style_message({{:assistant, _text}, styled_lines}),
-    do: {:styled_assistant, styled_lines}
+  defp maybe_style_message({{id, {:assistant, _text}}, styled_lines}),
+    do: {id, {:styled_assistant, styled_lines}}
 
-  defp maybe_style_message({{:tool_call, tc}, styled_lines}) when is_list(styled_lines),
-    do: {:styled_tool_call, tc, styled_lines}
+  defp maybe_style_message({{id, {:tool_call, tc}}, styled_lines}) when is_list(styled_lines),
+    do: {id, {:styled_tool_call, tc, styled_lines}}
 
-  defp maybe_style_message({msg, _cache_entry}), do: msg
+  defp maybe_style_message({{id, msg}, _cache_entry}), do: {id, msg}
 
   @spec pad_cache([term()], non_neg_integer()) :: [term()]
   defp pad_cache(cache, target_len) when length(cache) >= target_len, do: cache

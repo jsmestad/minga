@@ -107,4 +107,97 @@ defmodule Minga.Port.GUIAgentChatProtocolTest do
       assert :binary.match(binary, <<0x04>>) != :nomatch
     end
   end
+
+  describe "stable message ID encoding" do
+    test "encodes {id, message} tuples with uint32 ID prefix" do
+      data = %{
+        visible: true,
+        messages: [{42, {:user, "hello"}}, {99, {:assistant, "hi"}}],
+        status: :idle,
+        model: "",
+        prompt: "",
+        pending_approval: nil
+      }
+
+      binary = ProtocolGUI.encode_gui_agent_chat(data)
+
+      # Parse the envelope to get to the message payload
+      <<0x78, 1::8, _status::8, model_len::16, _model::binary-size(model_len), prompt_len::16,
+        _prompt::binary-size(prompt_len), 0::8, msg_count::16, msg_data::binary>> = binary
+
+      assert msg_count == 2
+
+      # First message: ID=42, type=0x01 (user), text="hello"
+      <<42::32, 0x01::8, text_len::32, text::binary-size(text_len), rest::binary>> = msg_data
+      assert text == "hello"
+
+      # Second message: ID=99, type=0x02 (assistant), text="hi"
+      <<99::32, 0x02::8, text2_len::32, text2::binary-size(text2_len)>> = rest
+      assert text2 == "hi"
+    end
+
+    test "bare tuple messages (no ID wrapper) encode with ID 0" do
+      data = %{
+        visible: true,
+        messages: [{:user, "bare"}],
+        status: :idle,
+        model: "",
+        prompt: "",
+        pending_approval: nil
+      }
+
+      binary = ProtocolGUI.encode_gui_agent_chat(data)
+
+      <<0x78, 1::8, _status::8, model_len::16, _model::binary-size(model_len), prompt_len::16,
+        _prompt::binary-size(prompt_len), 0::8, 1::16, msg_data::binary>> = binary
+
+      # ID prefix should be 0 for bare tuples
+      <<0::32, 0x01::8, _rest::binary>> = msg_data
+    end
+
+    test "all message types carry the ID prefix" do
+      tc = %{
+        name: "bash",
+        status: :complete,
+        is_error: false,
+        collapsed: true,
+        duration_ms: 100,
+        result: "ok"
+      }
+
+      messages = [
+        {1, {:user, "hello"}},
+        {2, {:assistant, "hi"}},
+        {3, {:thinking, "hmm", true}},
+        {4, {:tool_call, tc}},
+        {5, {:system, "started", :info}},
+        {6, {:usage, %{input: 10, output: 5, cache_read: 0, cache_write: 0, cost: 0.001}}}
+      ]
+
+      data = %{
+        visible: true,
+        messages: messages,
+        status: :idle,
+        model: "",
+        prompt: "",
+        pending_approval: nil
+      }
+
+      binary = ProtocolGUI.encode_gui_agent_chat(data)
+
+      <<0x78, 1::8, _status::8, model_len::16, _model::binary-size(model_len), prompt_len::16,
+        _prompt::binary-size(prompt_len), 0::8, msg_count::16, _msg_data::binary>> = binary
+
+      assert msg_count == 6
+
+      # Verify each message starts with its expected ID by scanning the binary.
+      # The messages are sequential, so we check the first 4 bytes of each.
+      # Rather than parsing all message bodies, just verify the binary contains
+      # the expected ID values in order.
+      for {id, _msg} <- messages do
+        assert :binary.match(binary, <<id::32>>) != :nomatch,
+               "Expected message ID #{id} in encoded binary"
+      end
+    end
+  end
 end
