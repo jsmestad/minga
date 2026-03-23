@@ -1,4 +1,5 @@
 defmodule Minga.LSP.SyncServerTest do
+  # async: false — reads/mutates the shared SyncServer GenServer process (singleton)
   use ExUnit.Case, async: false
 
   alias Minga.Buffer.Server, as: BufferServer
@@ -47,7 +48,12 @@ defmodule Minga.LSP.SyncServerTest do
   describe "buffer_changed event" do
     test "no-op for buffer with no clients" do
       buf = start_supervised!({BufferServer, content: "hello"})
-      Events.notify_buffer_changed(buf)
+
+      Events.broadcast(
+        :buffer_changed,
+        %Events.BufferChangedEvent{buffer: buf, source: :user}
+      )
+
       :sys.get_state(SyncServer)
     end
 
@@ -58,13 +64,63 @@ defmodule Minga.LSP.SyncServerTest do
       # Insert a fake client entry.
       :ets.insert(SyncServer.Registry, {buf, [self()]})
 
-      Events.notify_buffer_changed(buf)
+      Events.broadcast(
+        :buffer_changed,
+        %Events.BufferChangedEvent{buffer: buf, source: :user}
+      )
 
       # Sync call to flush the event message through SyncServer's mailbox.
       :sys.get_state(SyncServer)
 
       state = :sys.get_state(SyncServer)
       assert Map.has_key?(state.debounce_timers, buf)
+    end
+
+    test "accumulates deltas from events" do
+      buf =
+        start_supervised!({BufferServer, content: "hello", file_path: "/tmp/accum.ex"})
+
+      delta = Minga.Buffer.EditDelta.insertion(0, {0, 0}, "x", {0, 1})
+
+      :ets.insert(SyncServer.Registry, {buf, [self()]})
+
+      Events.broadcast(
+        :buffer_changed,
+        %Events.BufferChangedEvent{buffer: buf, source: :user, delta: delta}
+      )
+
+      :sys.get_state(SyncServer)
+
+      state = :sys.get_state(SyncServer)
+      assert Map.has_key?(state.delta_accumulators, buf)
+      assert [^delta] = state.delta_accumulators[buf]
+    end
+
+    test "nil delta marks accumulator as full_sync" do
+      buf =
+        start_supervised!({BufferServer, content: "hello", file_path: "/tmp/fullsync.ex"})
+
+      delta = Minga.Buffer.EditDelta.insertion(0, {0, 0}, "x", {0, 1})
+      :ets.insert(SyncServer.Registry, {buf, [self()]})
+
+      # First: accumulate a real delta
+      Events.broadcast(
+        :buffer_changed,
+        %Events.BufferChangedEvent{buffer: buf, source: :user, delta: delta}
+      )
+
+      :sys.get_state(SyncServer)
+
+      # Second: nil delta (bulk op) should mark as full_sync
+      Events.broadcast(
+        :buffer_changed,
+        %Events.BufferChangedEvent{buffer: buf, source: :unknown, delta: nil}
+      )
+
+      :sys.get_state(SyncServer)
+
+      state = :sys.get_state(SyncServer)
+      assert state.delta_accumulators[buf] == :full_sync
     end
   end
 

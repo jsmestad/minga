@@ -31,7 +31,7 @@ defmodule Minga.Events do
   | `:buffer_saved`   | `BufferEvent`        | `buffer: pid(), path: String.t()`              |
   | `:buffer_opened`  | `BufferEvent`        | `buffer: pid(), path: String.t()`              |
   | `:buffer_closed`  | `BufferClosedEvent`  | `buffer: pid(), path: String.t() \| :scratch`  |
-  | `:buffer_changed` | `BufferChangedEvent` | `buffer: pid()`                   |
+  | `:buffer_changed` | `BufferChangedEvent` | `buffer: pid(), source: EditSource.t()`  |
   | `:mode_changed`   | `ModeEvent`          | `old: atom(), new: atom()`        |
   | `:git_status_changed` | `GitStatusEvent` | `git_root, entries, branch, ahead, behind` |
   | `:project_rebuilt` | `ProjectRebuiltEvent` | `root: String.t()` |
@@ -67,11 +67,26 @@ defmodule Minga.Events do
   end
 
   defmodule BufferChangedEvent do
-    @moduledoc "Payload for `:buffer_changed` events."
-    @enforce_keys [:buffer]
-    defstruct [:buffer]
+    @moduledoc """
+    Payload for `:buffer_changed` events.
 
-    @type t :: %__MODULE__{buffer: pid()}
+    Carries the edit delta and source identity so subscribers can do
+    incremental work directly from the event payload without calling
+    back to the buffer.
+
+    When `delta` is `nil`, the edit was a bulk operation (undo, redo,
+    content replacement) and subscribers should fall back to full sync.
+    """
+
+    @enforce_keys [:buffer, :source]
+    defstruct [:buffer, :source, :delta, :version]
+
+    @type t :: %__MODULE__{
+            buffer: pid(),
+            source: Minga.Buffer.EditSource.t(),
+            delta: Minga.Buffer.EditDelta.t() | nil,
+            version: non_neg_integer() | nil
+          }
   end
 
   defmodule ModeEvent do
@@ -248,13 +263,14 @@ defmodule Minga.Events do
   @doc """
   Broadcasts `:buffer_changed` to all subscribers.
 
-  Convenience wrapper that constructs the typed payload struct.
-  Callers that modify buffer content should call this instead of manually
-  building a `BufferChangedEvent` and calling `broadcast/2`.
+  Deprecated: use the 2-arity version that accepts a `BufferChangedEvent`
+  struct with delta and source fields. This 1-arity wrapper exists for
+  backward compatibility during migration.
   """
+  @deprecated "Buffer.Server now broadcasts :buffer_changed automatically on every edit. No manual broadcast needed."
   @spec notify_buffer_changed(pid()) :: :ok
   def notify_buffer_changed(buf) when is_pid(buf) do
-    broadcast(:buffer_changed, %BufferChangedEvent{buffer: buf})
+    broadcast(:buffer_changed, %BufferChangedEvent{buffer: buf, source: :unknown})
   end
 
   # ── Query ───────────────────────────────────────────────────────────────────

@@ -159,7 +159,7 @@ defmodule Minga.Editor.CompletionHandling do
       BufferServer.insert_text(buf, text)
     end
 
-    Minga.Events.notify_buffer_changed(buf)
+    # Buffer.Server now broadcasts :buffer_changed with delta from record_edit
     state
   end
 
@@ -176,7 +176,7 @@ defmodule Minga.Editor.CompletionHandling do
       edit.new_text
     )
 
-    Minga.Events.notify_buffer_changed(buf)
+    # Buffer.Server now broadcasts :buffer_changed with delta from record_edit
     state
   end
 

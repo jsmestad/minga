@@ -81,18 +81,8 @@ defmodule Minga.Editor.HighlightEvents do
   def maybe_reparse(state, version_before) do
     content_changed = buffer_version(state) != version_before
 
-    state =
-      if content_changed do
-        buf = state.buffers.active
-
-        if buf do
-          Minga.Events.notify_buffer_changed(buf)
-        end
-
-        state
-      else
-        state
-      end
+    # Buffer.Server now broadcasts :buffer_changed with delta from record_edit.
+    # No need to call notify_buffer_changed here.
 
     if content_changed do
       active_hl = HighlightSync.get_active_highlight(state)

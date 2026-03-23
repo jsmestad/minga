@@ -1,4 +1,5 @@
 defmodule Minga.EventsTest do
+  # async: false — uses application-level EventBus registry
   use ExUnit.Case, async: false
 
   alias Minga.Config.Hooks
@@ -129,13 +130,17 @@ defmodule Minga.EventsTest do
   end
 
   describe "buffer_changed event" do
-    test "subscriber receives buffer_changed with buffer pid" do
+    test "subscriber receives buffer_changed with buffer pid and source" do
       buf = fake_buffer()
       Events.subscribe(:buffer_changed)
 
-      Events.broadcast(:buffer_changed, %Events.BufferChangedEvent{buffer: buf})
+      Events.broadcast(
+        :buffer_changed,
+        %Events.BufferChangedEvent{buffer: buf, source: :user}
+      )
 
-      assert_receive {:minga_event, :buffer_changed, %Events.BufferChangedEvent{buffer: ^buf}}
+      assert_receive {:minga_event, :buffer_changed,
+                      %Events.BufferChangedEvent{buffer: ^buf, source: :user}}
     end
   end
 

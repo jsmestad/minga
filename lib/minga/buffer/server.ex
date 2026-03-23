@@ -81,9 +81,9 @@ defmodule Minga.Buffer.Server do
   end
 
   @doc "Inserts a character at the current cursor position."
-  @spec insert_char(GenServer.server(), String.t()) :: :ok
-  def insert_char(server, char) when is_binary(char) do
-    GenServer.call(server, {:insert_char, char})
+  @spec insert_char(GenServer.server(), String.t(), Minga.Buffer.EditSource.t()) :: :ok
+  def insert_char(server, char, source \\ :user) when is_binary(char) do
+    GenServer.call(server, {:insert_char, char, source})
   end
 
   @doc """
@@ -91,9 +91,9 @@ defmodule Minga.Buffer.Server do
 
   Each character is inserted sequentially, advancing the cursor.
   """
-  @spec insert_text(GenServer.server(), String.t()) :: :ok
-  def insert_text(server, text) when is_binary(text) do
-    GenServer.call(server, {:insert_text, text})
+  @spec insert_text(GenServer.server(), String.t(), Minga.Buffer.EditSource.t()) :: :ok
+  def insert_text(server, text, source \\ :user) when is_binary(text) do
+    GenServer.call(server, {:insert_text, text, source})
   end
 
   @doc """
@@ -108,12 +108,21 @@ defmodule Minga.Buffer.Server do
           non_neg_integer(),
           non_neg_integer(),
           non_neg_integer(),
-          String.t()
+          String.t(),
+          Minga.Buffer.EditSource.t()
         ) :: :ok
-  def apply_text_edit(server, start_line, start_col, end_line, end_col, new_text) do
+  def apply_text_edit(
+        server,
+        start_line,
+        start_col,
+        end_line,
+        end_col,
+        new_text,
+        source \\ :user
+      ) do
     GenServer.call(
       server,
-      {:apply_text_edit, {start_line, start_col}, {end_line, end_col}, new_text}
+      {:apply_text_edit, {start_line, start_col}, {end_line, end_col}, new_text, source}
     )
   end
 
@@ -132,10 +141,13 @@ defmodule Minga.Buffer.Server do
   function sorts them automatically.
 
   Used by AI/LSP batch operations to avoid N round-trips and N undo entries.
+
+  Source defaults to `{:lsp, :unknown}` (not `:user`) because batch edits
+  are typically LSP code actions or agent tool calls, not interactive typing.
   """
-  @spec apply_text_edits(GenServer.server(), [text_edit()]) :: :ok
-  def apply_text_edits(server, edits) when is_list(edits) do
-    GenServer.call(server, {:apply_text_edits, edits})
+  @spec apply_text_edits(GenServer.server(), [text_edit()], Minga.Buffer.EditSource.t()) :: :ok
+  def apply_text_edits(server, edits, source \\ {:lsp, :unknown}) when is_list(edits) do
+    GenServer.call(server, {:apply_text_edits, edits, source})
   end
 
   @doc """
@@ -333,6 +345,11 @@ defmodule Minga.Buffer.Server do
 
   This avoids the data race where two consumers calling `flush_edits/1`
   would each miss the other's deltas.
+
+  Deprecated: prefer consuming deltas from `BufferChangedEvent` payloads
+  on the event bus. LSP SyncServer already accumulates deltas from events.
+  HighlightSync still uses this during the migration period since it runs
+  synchronously inside the Editor GenServer before the deferred broadcast fires.
   """
   @spec flush_edits(GenServer.server(), atom()) :: [EditDelta.t()]
   def flush_edits(server, consumer_id) when is_atom(consumer_id) do
@@ -849,11 +866,11 @@ defmodule Minga.Buffer.Server do
     end
   end
 
-  def handle_call({:insert_char, _char}, _from, %{read_only: true} = state) do
+  def handle_call({:insert_char, _char, _source}, _from, %{read_only: true} = state) do
     {:reply, {:error, :read_only}, state}
   end
 
-  def handle_call({:insert_char, char}, _from, state) do
+  def handle_call({:insert_char, char, source}, _from, state) do
     old_doc = state.document
     new_buf = Document.insert_char(old_doc, char)
 
@@ -865,15 +882,16 @@ defmodule Minga.Buffer.Server do
         Document.cursor(new_buf)
       )
 
-    state = push_undo(state, new_buf, :user) |> mark_dirty() |> record_edit(delta)
+    undo_source = Minga.Buffer.EditSource.to_undo_source(source)
+    state = push_undo(state, new_buf, undo_source) |> mark_dirty() |> record_edit(delta, source)
     {:reply, :ok, state}
   end
 
-  def handle_call({:insert_text, _text}, _from, %{read_only: true} = state) do
+  def handle_call({:insert_text, _text, _source}, _from, %{read_only: true} = state) do
     {:reply, {:error, :read_only}, state}
   end
 
-  def handle_call({:insert_text, text}, _from, state) do
+  def handle_call({:insert_text, text, source}, _from, state) do
     old_doc = state.document
     new_doc = Document.insert_text(old_doc, text)
 
@@ -885,19 +903,20 @@ defmodule Minga.Buffer.Server do
         Document.cursor(new_doc)
       )
 
-    state = push_undo(state, new_doc, :user) |> mark_dirty() |> record_edit(delta)
+    undo_source = Minga.Buffer.EditSource.to_undo_source(source)
+    state = push_undo(state, new_doc, undo_source) |> mark_dirty() |> record_edit(delta, source)
     {:reply, :ok, state}
   end
 
   def handle_call(
-        {:apply_text_edit, _from_pos, _to_pos, _text},
+        {:apply_text_edit, _from_pos, _to_pos, _text, _source},
         _from,
         %{read_only: true} = state
       ) do
     {:reply, {:error, :read_only}, state}
   end
 
-  def handle_call({:apply_text_edit, from_pos, to_pos, new_text}, _from, state) do
+  def handle_call({:apply_text_edit, from_pos, to_pos, new_text, source}, _from, state) do
     old_content = Document.content(state.document)
     start_byte = byte_offset_at(old_content, from_pos)
     old_end_byte = byte_offset_at(old_content, to_pos)
@@ -911,18 +930,21 @@ defmodule Minga.Buffer.Server do
     delta =
       EditDelta.replacement(start_byte, old_end_byte, from_pos, to_pos, new_text, new_end_pos)
 
-    {:reply, :ok, push_undo(state, doc, :user) |> mark_dirty() |> record_edit(delta)}
+    undo_source = Minga.Buffer.EditSource.to_undo_source(source)
+
+    {:reply, :ok,
+     push_undo(state, doc, undo_source) |> mark_dirty() |> record_edit(delta, source)}
   end
 
-  def handle_call({:apply_text_edits, _edits}, _from, %{read_only: true} = state) do
+  def handle_call({:apply_text_edits, _edits, _source}, _from, %{read_only: true} = state) do
     {:reply, {:error, :read_only}, state}
   end
 
-  def handle_call({:apply_text_edits, []}, _from, state) do
+  def handle_call({:apply_text_edits, [], _source}, _from, state) do
     {:reply, :ok, state}
   end
 
-  def handle_call({:apply_text_edits, edits}, _from, state) do
+  def handle_call({:apply_text_edits, edits, source}, _from, state) do
     # Sort edits in reverse document order so earlier offsets stay valid
     # as we apply edits from the end of the document backward.
     sorted =
@@ -938,9 +960,11 @@ defmodule Minga.Buffer.Server do
         |> Document.insert_text(new_text)
       end)
 
+    undo_source = Minga.Buffer.EditSource.to_undo_source(source)
+
     # Multi-edit batches are complex to delta-track (offsets shift between
     # edits). Clear pending edits to force a full content sync.
-    {:reply, :ok, push_undo(state, doc, :lsp) |> mark_dirty() |> clear_edits()}
+    {:reply, :ok, push_undo(state, doc, undo_source) |> mark_dirty() |> clear_edits(source)}
   end
 
   # ── Find and Replace ──
@@ -959,7 +983,9 @@ defmodule Minga.Buffer.Server do
     case do_find_and_replace(content, old_text, new_text) do
       {:ok, new_doc, msg} ->
         {:reply, {:ok, msg},
-         push_undo_force(state, new_doc, :agent) |> mark_dirty() |> clear_edits()}
+         push_undo_force(state, new_doc, :agent)
+         |> mark_dirty()
+         |> clear_edits({:agent, self(), "unknown"})}
 
       {:error, _} = err ->
         {:reply, err, state}
@@ -983,7 +1009,9 @@ defmodule Minga.Buffer.Server do
 
     new_state =
       if any_applied do
-        push_undo_force(state, final_doc, :agent) |> mark_dirty() |> clear_edits()
+        push_undo_force(state, final_doc, :agent)
+        |> mark_dirty()
+        |> clear_edits({:agent, self(), "unknown"})
       else
         state
       end
@@ -1179,7 +1207,8 @@ defmodule Minga.Buffer.Server do
   def handle_call({:replace_content, new_content, source}, _from, state) do
     new_state = push_undo_force(state, state.document, source)
     new_buf = Document.new(new_content)
-    {:reply, :ok, mark_dirty(%{new_state | document: new_buf}) |> clear_edits()}
+    event_source = Minga.Buffer.EditSource.from_undo_source(source)
+    {:reply, :ok, mark_dirty(%{new_state | document: new_buf}) |> clear_edits(event_source)}
   end
 
   # Force replace bypasses read_only. Used by panel buffers (file tree, agent)
@@ -1500,7 +1529,7 @@ defmodule Minga.Buffer.Server do
   end
 
   def handle_call({:apply_snapshot, new_buf}, _from, state) do
-    {:reply, :ok, push_undo(state, new_buf, :user) |> mark_dirty() |> clear_edits()}
+    {:reply, :ok, push_undo(state, new_buf, :user) |> mark_dirty() |> clear_edits(:user)}
   end
 
   def handle_call({:clear_line, _line}, _from, %{read_only: true} = state) do
@@ -1525,6 +1554,8 @@ defmodule Minga.Buffer.Server do
       [{prev_version, prev_buf, source} | rest_undo] ->
         redo_entry = {state.version, state.document, source}
 
+        event_source = Minga.Buffer.EditSource.from_undo_source(source)
+
         new_state =
           %{
             state
@@ -1534,7 +1565,7 @@ defmodule Minga.Buffer.Server do
               redo_stack: [redo_entry | state.redo_stack]
           }
           |> sync_dirty()
-          |> clear_edits()
+          |> clear_edits(event_source)
 
         log_undo_source(:undo, source)
         {:reply, :ok, new_state}
@@ -1549,6 +1580,8 @@ defmodule Minga.Buffer.Server do
       [{next_version, next_buf, source} | rest_redo] ->
         undo_entry = {state.version, state.document, source}
 
+        event_source = Minga.Buffer.EditSource.from_undo_source(source)
+
         new_state =
           %{
             state
@@ -1558,7 +1591,7 @@ defmodule Minga.Buffer.Server do
               undo_stack: [undo_entry | state.undo_stack]
           }
           |> sync_dirty()
-          |> clear_edits()
+          |> clear_edits(event_source)
 
         log_undo_source(:redo, source)
         {:reply, :ok, new_state}
@@ -1782,6 +1815,24 @@ defmodule Minga.Buffer.Server do
     :ok
   end
 
+  # Defers a :buffer_changed broadcast with delta and source to a
+  # subsequent handle_info turn. Same pattern as defer_content_replaced.
+  @spec defer_buffer_changed(state(), EditDelta.t() | nil, Minga.Buffer.EditSource.t()) :: :ok
+  defp defer_buffer_changed(state, delta, source) do
+    send(
+      self(),
+      {:deferred_broadcast, :buffer_changed,
+       %Events.BufferChangedEvent{
+         buffer: self(),
+         delta: delta,
+         source: source,
+         version: state.version
+       }}
+    )
+
+    :ok
+  end
+
   # Notifies the Editor process (if one is monitoring this buffer) that
   # face overrides changed, so it can pre-compute the merged registry.
   @spec notify_face_overrides_changed(%{String.t() => keyword()}) :: :ok
@@ -1953,6 +2004,11 @@ defmodule Minga.Buffer.Server do
 
   @spec record_edit(state(), EditDelta.t()) :: state()
   defp record_edit(state, delta) do
+    record_edit(state, delta, :user)
+  end
+
+  @spec record_edit(state(), EditDelta.t(), Minga.Buffer.EditSource.t()) :: state()
+  defp record_edit(state, delta, source) do
     new_seq = state.edit_seq + 1
 
     state = %{
@@ -1963,26 +2019,31 @@ defmodule Minga.Buffer.Server do
     }
 
     # Adjust decoration anchors based on the edit
-    if Decorations.empty?(state.decorations) do
-      state
-    else
-      adjusted =
-        Decorations.adjust_for_edit(
-          state.decorations,
-          delta.start_position,
-          delta.old_end_position,
-          delta.new_end_position
-        )
+    state =
+      if Decorations.empty?(state.decorations) do
+        state
+      else
+        adjusted =
+          Decorations.adjust_for_edit(
+            state.decorations,
+            delta.start_position,
+            delta.old_end_position,
+            delta.new_end_position
+          )
 
-      %{state | decorations: adjusted}
-    end
+        %{state | decorations: adjusted}
+      end
+
+    defer_buffer_changed(state, delta, source)
+    state
   end
 
   # Clear pending edits to force HighlightSync into full content sync.
   # Used for operations where computing accurate deltas is impractical
   # (undo, redo, multi-edit batches, full content replacement).
-  @spec clear_edits(state()) :: state()
-  defp clear_edits(state) do
+  @spec clear_edits(state(), Minga.Buffer.EditSource.t()) :: state()
+  defp clear_edits(state, source) do
+    defer_buffer_changed(state, nil, source)
     %{state | pending_edits: [], edit_log: [], consumer_cursors: %{}}
   end
 
