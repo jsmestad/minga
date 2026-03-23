@@ -243,6 +243,12 @@ defmodule Minga.Editor.RenderPipeline.Content do
     {frame, ci, st} = render_agent_chat_window(st, window, win_id, win_layout)
     new_cursor = if ci != nil, do: ci, else: cursor
     {[frame | frames], new_cursor, st}
+  catch
+    # Buffer process died between the :DOWN message and this render.
+    # Skip this window; the :DOWN handler will clean up state next cycle.
+    :exit, _ ->
+      Minga.Log.debug(:render, "[content] skipped agent window #{win_id}: buffer process dead")
+      {frames, cursor, st}
   end
 
   defp maybe_render_agent_window(_window, _win_id, _win_layout, frames, cursor, st) do
