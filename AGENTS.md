@@ -215,9 +215,15 @@ LLM agents hit these repeatedly. Read before writing any Elixir:
 
 ### Pre-commit Checks (enforced by commit-gate extension)
 
-The `commit-gate` extension blocks every `git commit` until `mix lint` has passed. You don't need to remember this; the extension catches it automatically. But you should still run all relevant checks proactively, not just wait for the gate to yell at you.
+The `commit-gate` extension blocks every `git commit` until all checks pass. You don't need to remember this; the extension catches it automatically. But you should still run all relevant checks proactively, not just wait for the gate to yell at you. Running checks proactively is faster than getting blocked and re-running the review cycle.
 
-**Run `mix lint` and then `mix test.llm` when you're done with all changes.** These are separate commands because lint runs in dev env (where the dialyzer PLT lives) and tests run in test env. Fix any failures before committing.
+**Before requesting review, do this self-check:**
+
+1. **Run `mix lint`** (format + credo + compile + dialyzer). Fix any failures.
+2. **Run `mix test.llm`**. Fix any failures.
+3. **Check every touched `.ex` file:** does every public function have `@spec`? Does the module have `@moduledoc`? Do structs have `@enforce_keys`?
+4. **If you touched `.zig` files**, run `mix zig.lint`.
+5. **If you touched `.swift` files**, run `mix swift.build` and Swift tests.
 
 ```bash
 mix lint                          # Format + credo + compile + dialyzer (dev env)
@@ -225,15 +231,21 @@ mix test.llm                      # Tests with LLM-optimized output (excludes :h
 mix test.heavy                    # Only :heavy tests (OS process, timeout, multi-turn)
 mix test.debug test/minga/foo_test.exs  # Single file, verbose (faster iteration)
 mix test --failed                 # Re-run only previously failed tests
-```
-
-**Zig changes:**
-
-```bash
-mix zig.lint                      # zig fmt --check + zig build test
+mix zig.lint                      # zig fmt --check + zig build test (only if .zig changed)
 ```
 
 If any check fails, fix it before committing. No exceptions.
+
+**Run reviewer and intent-reviewer in parallel.** These are independent checks (code quality vs ticket intent). Always invoke them together using the `tasks` array:
+
+```
+subagent({ tasks: [
+  { agent: "reviewer", task: "Review the current git diff for code quality, CI parity, and cleanup. Run: git diff --cached" },
+  { agent: "intent-reviewer", task: "Compare the ticket intent against the implementation. Run: git diff main" }
+], agentScope: "both", confirmProjectAgents: false })
+```
+
+If either returns BLOCKED, fix the issues and re-run both (fresh, in parallel). The reviewer always starts from scratch to avoid confirmation bias on re-review.
 
 Example:
 
