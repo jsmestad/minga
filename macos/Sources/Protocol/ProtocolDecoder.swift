@@ -35,7 +35,7 @@ enum RenderCommand: Sendable {
     case guiStatusBar(contentKind: UInt8, mode: UInt8, cursorLine: UInt32, cursorCol: UInt32, lineCount: UInt32, flags: UInt8, lspStatus: UInt8, gitBranch: String, message: String, filetype: String, errorCount: UInt16, warningCount: UInt16, modelName: String, messageCount: UInt32, sessionStatus: UInt8, infoCount: UInt16, hintCount: UInt16, macroRecording: UInt8, parserStatus: UInt8, agentStatus: UInt8, gitAdded: UInt16, gitModified: UInt16, gitDeleted: UInt16, icon: String, iconColorR: UInt8, iconColorG: UInt8, iconColorB: UInt8, filename: String, diagnosticHint: String)
     case guiPicker(visible: Bool, selectedIndex: UInt16, filteredCount: UInt16, totalCount: UInt16, title: String, query: String, hasPreview: Bool, items: [GUIPickerItem], actionMenu: GUIPickerActionMenu?)
     case guiPickerPreview(visible: Bool, lines: [GUIPickerPreviewLine])
-    case guiAgentChat(visible: Bool, status: UInt8, model: String, prompt: String, pendingToolName: String?, pendingToolSummary: String, messages: [GUIChatMessage])
+    case guiAgentChat(visible: Bool, status: UInt8, model: String, prompt: String, pendingToolName: String?, pendingToolSummary: String, helpVisible: Bool, helpGroups: [GUIHelpGroup], messages: [GUIChatMessage])
     case guiGutterSeparator(col: UInt16, r: UInt8, g: UInt8, b: UInt8)
     case guiCursorline(row: UInt16, r: UInt8, g: UInt8, b: UInt8)
     case guiGutter(data: GUIWindowGutter)
@@ -263,6 +263,12 @@ struct StyledTextRun: Sendable {
     let underline: Bool
 }
 
+/// A help group from gui_agent_chat, containing a category title and keybindings.
+struct GUIHelpGroup: Sendable {
+    let title: String
+    let bindings: [(key: String, description: String)]
+}
+
 /// A chat message from gui_agent_chat, with a stable BEAM-assigned ID.
 struct GUIChatMessage: Sendable {
     /// Stable uint32 ID assigned by the BEAM. Persists across streaming updates.
@@ -277,9 +283,9 @@ enum GUIChatMessageContent: Sendable {
     /// Assistant message with pre-styled text runs from tree-sitter.
     case styledAssistant(lines: [[StyledTextRun]])
     case thinking(text: String, collapsed: Bool)
-    case toolCall(name: String, status: UInt8, isError: Bool, collapsed: Bool, durationMs: UInt32, result: String)
+    case toolCall(name: String, summary: String, status: UInt8, isError: Bool, collapsed: Bool, durationMs: UInt32, result: String)
     /// Tool call with pre-styled result runs from tree-sitter.
-    case styledToolCall(name: String, status: UInt8, isError: Bool, collapsed: Bool, durationMs: UInt32, resultLines: [[StyledTextRun]])
+    case styledToolCall(name: String, summary: String, status: UInt8, isError: Bool, collapsed: Bool, durationMs: UInt32, resultLines: [[StyledTextRun]])
     case system(text: String, isError: Bool)
     case usage(input: UInt32, output: UInt32, cacheRead: UInt32, cacheWrite: UInt32, costMicros: UInt32)
 }
@@ -945,7 +951,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
         let visible = data[rest] != 0
         if !visible {
-            return (.guiAgentChat(visible: false, status: 0, model: "", prompt: "", pendingToolName: nil, pendingToolSummary: "", messages: []), 2)
+            return (.guiAgentChat(visible: false, status: 0, model: "", prompt: "", pendingToolName: nil, pendingToolSummary: "", helpVisible: false, helpGroups: [], messages: []), 2)
         }
         guard data.count >= rest + 4 else { throw ProtocolDecodeError.malformed }
         let status = data[rest + 1]
@@ -971,6 +977,37 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             guard data.count >= pendingPos + 4 + pNameLen + pSummaryLen else { throw ProtocolDecodeError.malformed }
             pendingToolSummary = String(data: data[(pendingPos + 4 + pNameLen)..<(pendingPos + 4 + pNameLen + pSummaryLen)], encoding: .utf8) ?? ""
             pendingPos += 4 + pNameLen + pSummaryLen
+        }
+        // Parse help overlay: visible(1) [group_count(1) [title_len(2) title key_count(1) [key_len(1) key desc_len(2) desc]...]*]
+        guard data.count >= pendingPos + 1 else { throw ProtocolDecodeError.malformed }
+        let helpVisible = data[pendingPos] != 0
+        pendingPos += 1
+        var helpGroups: [GUIHelpGroup] = []
+        if helpVisible {
+            guard data.count >= pendingPos + 1 else { throw ProtocolDecodeError.malformed }
+            let groupCount = Int(data[pendingPos])
+            pendingPos += 1
+            for _ in 0..<groupCount {
+                guard data.count >= pendingPos + 2 else { throw ProtocolDecodeError.malformed }
+                let titleLen = Int(readU16(data, pendingPos))
+                guard data.count >= pendingPos + 2 + titleLen + 1 else { throw ProtocolDecodeError.malformed }
+                let title = String(data: data[(pendingPos + 2)..<(pendingPos + 2 + titleLen)], encoding: .utf8) ?? ""
+                let bindingCount = Int(data[pendingPos + 2 + titleLen])
+                pendingPos += 3 + titleLen
+                var bindings: [(key: String, description: String)] = []
+                for _ in 0..<bindingCount {
+                    guard data.count >= pendingPos + 1 else { throw ProtocolDecodeError.malformed }
+                    let keyLen = Int(data[pendingPos])
+                    guard data.count >= pendingPos + 1 + keyLen + 2 else { throw ProtocolDecodeError.malformed }
+                    let key = String(data: data[(pendingPos + 1)..<(pendingPos + 1 + keyLen)], encoding: .utf8) ?? ""
+                    let descLen = Int(readU16(data, pendingPos + 1 + keyLen))
+                    guard data.count >= pendingPos + 3 + keyLen + descLen else { throw ProtocolDecodeError.malformed }
+                    let desc = String(data: data[(pendingPos + 3 + keyLen)..<(pendingPos + 3 + keyLen + descLen)], encoding: .utf8) ?? ""
+                    bindings.append((key: key, description: desc))
+                    pendingPos += 3 + keyLen + descLen
+                }
+                helpGroups.append(GUIHelpGroup(title: title, bindings: bindings))
+            }
         }
         guard data.count >= pendingPos + 2 else { throw ProtocolDecodeError.malformed }
         let msgCount = Int(readU16(data, pendingPos))
@@ -1013,13 +1050,16 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                 let tcCollapsed = data[pos + 3] != 0
                 let duration = readU32(data, pos + 4)
                 let nameLen = Int(readU16(data, pos + 8))
-                guard data.count >= pos + 10 + nameLen + 4 else { throw ProtocolDecodeError.malformed }
+                guard data.count >= pos + 10 + nameLen + 2 else { throw ProtocolDecodeError.malformed }
                 let name = String(data: data[(pos + 10)..<(pos + 10 + nameLen)], encoding: .utf8) ?? ""
-                let resultLen = Int(readU32(data, pos + 10 + nameLen))
-                guard data.count >= pos + 14 + nameLen + resultLen else { throw ProtocolDecodeError.malformed }
-                let result = String(data: data[(pos + 14 + nameLen)..<(pos + 14 + nameLen + resultLen)], encoding: .utf8) ?? ""
-                messages.append(GUIChatMessage(beamId: beamId, content: .toolCall(name: name, status: tcStatus, isError: isError, collapsed: tcCollapsed, durationMs: duration, result: result)))
-                pos += 14 + nameLen + resultLen
+                let summaryLen = Int(readU16(data, pos + 10 + nameLen))
+                guard data.count >= pos + 12 + nameLen + summaryLen + 4 else { throw ProtocolDecodeError.malformed }
+                let summary = String(data: data[(pos + 12 + nameLen)..<(pos + 12 + nameLen + summaryLen)], encoding: .utf8) ?? ""
+                let resultLen = Int(readU32(data, pos + 12 + nameLen + summaryLen))
+                guard data.count >= pos + 16 + nameLen + summaryLen + resultLen else { throw ProtocolDecodeError.malformed }
+                let result = String(data: data[(pos + 16 + nameLen + summaryLen)..<(pos + 16 + nameLen + summaryLen + resultLen)], encoding: .utf8) ?? ""
+                messages.append(GUIChatMessage(beamId: beamId, content: .toolCall(name: name, summary: summary, status: tcStatus, isError: isError, collapsed: tcCollapsed, durationMs: duration, result: result)))
+                pos += 16 + nameLen + summaryLen + resultLen
             case 0x05: // system
                 guard data.count >= pos + 6 else { throw ProtocolDecodeError.malformed }
                 let isError = data[pos + 1] != 0
@@ -1081,7 +1121,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             case 0x08: // styled_tool_call
                 // Same header as tool_call (0x04) but result is styled runs instead of plain text.
                 // Format: 0x08, status::8, error::8, collapsed::8, duration::32,
-                //   name_len::16, name, line_count::16, then per line:
+                //   name_len::16, name, summary_len::16, summary, line_count::16, then per line:
                 //   run_count::16, then per run: text_len::16, text, fg::24, bg::24, flags::8
                 guard data.count >= pos + 10 else { throw ProtocolDecodeError.malformed }
                 let stcStatus = data[pos + 1]
@@ -1091,10 +1131,13 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                 let stcNameLen = Int(readU16(data, pos + 8))
                 guard data.count >= pos + 10 + stcNameLen + 2 else { throw ProtocolDecodeError.malformed }
                 let stcName = String(data: data[(pos + 10)..<(pos + 10 + stcNameLen)], encoding: .utf8) ?? ""
-                let stcLineCount = Int(readU16(data, pos + 10 + stcNameLen))
+                let stcSummaryLen = Int(readU16(data, pos + 10 + stcNameLen))
+                guard data.count >= pos + 12 + stcNameLen + stcSummaryLen + 2 else { throw ProtocolDecodeError.malformed }
+                let stcSummary = String(data: data[(pos + 12 + stcNameLen)..<(pos + 12 + stcNameLen + stcSummaryLen)], encoding: .utf8) ?? ""
+                let stcLineCount = Int(readU16(data, pos + 12 + stcNameLen + stcSummaryLen))
                 var stcLines: [[StyledTextRun]] = []
                 stcLines.reserveCapacity(stcLineCount)
-                var stcPos = pos + 12 + stcNameLen
+                var stcPos = pos + 14 + stcNameLen + stcSummaryLen
                 for _ in 0..<stcLineCount {
                     guard data.count >= stcPos + 2 else { throw ProtocolDecodeError.malformed }
                     let runCount = Int(readU16(data, stcPos))
@@ -1119,13 +1162,13 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                     }
                     stcLines.append(runs)
                 }
-                messages.append(GUIChatMessage(beamId: beamId, content: .styledToolCall(name: stcName, status: stcStatus, isError: stcIsError, collapsed: stcCollapsed, durationMs: stcDuration, resultLines: stcLines)))
+                messages.append(GUIChatMessage(beamId: beamId, content: .styledToolCall(name: stcName, summary: stcSummary, status: stcStatus, isError: stcIsError, collapsed: stcCollapsed, durationMs: stcDuration, resultLines: stcLines)))
                 pos = stcPos
             default:
                 break
             }
         }
-        return (.guiAgentChat(visible: true, status: status, model: model, prompt: prompt, pendingToolName: pendingToolName, pendingToolSummary: pendingToolSummary, messages: messages), pos - offset)
+        return (.guiAgentChat(visible: true, status: status, model: model, prompt: prompt, pendingToolName: pendingToolName, pendingToolSummary: pendingToolSummary, helpVisible: helpVisible, helpGroups: helpGroups, messages: messages), pos - offset)
 
     case OP_GUI_GUTTER_SEP:
         // col:2, r:1, g:1, b:1 = 5 bytes after opcode

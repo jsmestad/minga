@@ -1113,7 +1113,7 @@ defmodule Minga.Port.ProtocolTest do
       # Verify the styled assistant message is encoded with opcode 0x07
       # Find the message section (after header + pending + msg count)
       <<0x78, 1::8, _status::8, model_len::16, _model::binary-size(model_len), prompt_len::16,
-        _prompt::binary-size(prompt_len), 0::8, msg_count::16, msg_data::binary>> = encoded
+        _prompt::binary-size(prompt_len), 0::8, 0::8, msg_count::16, msg_data::binary>> = encoded
 
       assert msg_count == 1
 

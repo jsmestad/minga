@@ -9,8 +9,8 @@ enum ChatMessageEntry: Identifiable {
     /// Assistant message with pre-styled text runs from the BEAM (tree-sitter or markdown parser).
     case styledAssistant(id: Int, lines: [[StyledTextRun]])
     case thinking(id: Int, text: String, collapsed: Bool)
-    case toolCall(id: Int, name: String, status: UInt8, isError: Bool, collapsed: Bool, durationMs: UInt32, result: String)
-    case styledToolCall(id: Int, name: String, status: UInt8, isError: Bool, collapsed: Bool, durationMs: UInt32, resultLines: [[StyledTextRun]])
+    case toolCall(id: Int, name: String, summary: String, status: UInt8, isError: Bool, collapsed: Bool, durationMs: UInt32, result: String)
+    case styledToolCall(id: Int, name: String, summary: String, status: UInt8, isError: Bool, collapsed: Bool, durationMs: UInt32, resultLines: [[StyledTextRun]])
     case system(id: Int, text: String, isError: Bool)
     case usage(id: Int, input: UInt32, output: UInt32, cacheRead: UInt32, cacheWrite: UInt32, costMicros: UInt32)
 
@@ -18,13 +18,21 @@ enum ChatMessageEntry: Identifiable {
         switch self {
         case .user(let id, _), .assistant(let id, _), .styledAssistant(let id, _),
              .thinking(let id, _, _),
-             .toolCall(let id, _, _, _, _, _, _),
-             .styledToolCall(let id, _, _, _, _, _, _),
+             .toolCall(let id, _, _, _, _, _, _, _),
+             .styledToolCall(let id, _, _, _, _, _, _, _),
              .system(let id, _, _),
              .usage(let id, _, _, _, _, _):
             return id
         }
     }
+}
+
+/// A group of keybindings for the help overlay cheatsheet.
+struct HelpGroup: Identifiable {
+    let title: String
+    let bindings: [(key: String, description: String)]
+
+    var id: String { title }
 }
 
 @MainActor
@@ -36,6 +44,8 @@ final class AgentChatState {
     var prompt: String = ""
     var messages: [ChatMessageEntry] = []
     var pendingApproval: PendingApproval?
+    var helpVisible: Bool = false
+    var helpGroups: [HelpGroup] = []
 
     /// Monotonically increasing counter for BlinkingCursor reset token.
     /// Increments on every update() so the cursor resets on each BEAM frame.
@@ -58,13 +68,15 @@ final class AgentChatState {
 
     var isThinking: Bool { status == 1 || status == 2 }
 
-    func update(visible: Bool, status: UInt8, model: String, prompt: String, pendingToolName: String?, pendingToolSummary: String, rawMessages: [GUIChatMessage]) {
+    func update(visible: Bool, status: UInt8, model: String, prompt: String, pendingToolName: String?, pendingToolSummary: String, helpVisible: Bool, helpGroups: [HelpGroup], rawMessages: [GUIChatMessage]) {
         self.visible = visible
         self.status = status
         self.model = model
         self.prompt = prompt
         self.promptVersion += 1
         self.pendingApproval = pendingToolName.map { PendingApproval(toolName: $0, summary: pendingToolSummary) }
+        self.helpVisible = helpVisible
+        self.helpGroups = helpGroups
         self.messages = rawMessages.map { msg in
             let id = Int(msg.beamId)
             switch msg.content {
@@ -76,10 +88,10 @@ final class AgentChatState {
                 return .styledAssistant(id: id, lines: lines)
             case .thinking(let text, let collapsed):
                 return .thinking(id: id, text: text, collapsed: collapsed)
-            case .toolCall(let name, let st, let isError, let collapsed, let duration, let result):
-                return .toolCall(id: id, name: name, status: st, isError: isError, collapsed: collapsed, durationMs: duration, result: result)
-            case .styledToolCall(let name, let st, let isError, let collapsed, let duration, let resultLines):
-                return .styledToolCall(id: id, name: name, status: st, isError: isError, collapsed: collapsed, durationMs: duration, resultLines: resultLines)
+            case .toolCall(let name, let summary, let st, let isError, let collapsed, let duration, let result):
+                return .toolCall(id: id, name: name, summary: summary, status: st, isError: isError, collapsed: collapsed, durationMs: duration, result: result)
+            case .styledToolCall(let name, let summary, let st, let isError, let collapsed, let duration, let resultLines):
+                return .styledToolCall(id: id, name: name, summary: summary, status: st, isError: isError, collapsed: collapsed, durationMs: duration, resultLines: resultLines)
             case .system(let text, let isError):
                 return .system(id: id, text: text, isError: isError)
             case .usage(let inp, let outp, let cacheR, let cacheW, let costM):
@@ -91,5 +103,7 @@ final class AgentChatState {
     func hide() {
         visible = false
         messages = []
+        helpVisible = false
+        helpGroups = []
     }
 }

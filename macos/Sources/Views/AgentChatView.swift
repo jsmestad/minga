@@ -23,6 +23,11 @@ struct AgentChatView: View {
     let encoder: InputEncoder?
 
     @State private var scrollViewHeight: CGFloat = 0
+    /// Tracks whether the user has scrolled away from the bottom.
+    /// When true, auto-scroll is paused to let the user read earlier content.
+    @State private var userHasScrolledUp: Bool = false
+    /// Whether auto-scroll should follow streaming output.
+    private var shouldAutoScroll: Bool { !userHasScrolledUp }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -31,34 +36,77 @@ struct AgentChatView: View {
 
             // Messages: bottom-anchored so few messages cluster near the
             // prompt input rather than leaving a void below them.
-            ScrollViewReader { proxy in
-                ScrollView(.vertical) {
-                    LazyVStack(spacing: 12) {
-                        ForEach(state.messages) { msg in
-                            messageView(msg)
+            ZStack {
+                ScrollViewReader { proxy in
+                    ScrollView(.vertical) {
+                        LazyVStack(spacing: 12) {
+                            ForEach(Array(state.messages.enumerated()), id: \.element.id) { index, msg in
+                                messageViewWithDivider(msg, index: index)
+                            }
+
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.top, 12)
+                        .padding(.bottom, 16)
+                        .frame(minHeight: scrollViewHeight, alignment: .bottom)
+                    }
+                    .defaultScrollAnchor(.bottom)
+                    .background(
+                        GeometryReader { geo in
+                            Color.clear.preference(
+                                key: ScrollViewHeightKey.self,
+                                value: geo.size.height
+                            )
+                        }
+                    )
+                    .onPreferenceChange(ScrollViewHeightKey.self) { height in
+                        scrollViewHeight = height
+                    }
+                    .onScrollGeometryChange(for: Bool.self) { geometry in
+                        // User is "at bottom" if within 50pt of the bottom edge
+                        let atBottom = geometry.contentOffset.y + geometry.visibleRect.height >= geometry.contentSize.height - 50
+                        return atBottom
+                    } action: { _, isAtBottom in
+                        userHasScrolledUp = !isAtBottom
+                    }
+                    .onChange(of: state.messages.count) { _, _ in
+                        if shouldAutoScroll {
+                            scrollToBottom(proxy: proxy)
                         }
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 12)
-                    .padding(.bottom, 16)
-                    .frame(minHeight: scrollViewHeight, alignment: .bottom)
-                }
-                .defaultScrollAnchor(.bottom)
-                .background(
-                    GeometryReader { geo in
-                        Color.clear.preference(
-                            key: ScrollViewHeightKey.self,
-                            value: geo.size.height
+                    .onChange(of: state.promptVersion) { _, _ in
+                        // Triggers on every BEAM frame update (streaming content growth)
+                        if shouldAutoScroll && state.isThinking {
+                            scrollToBottom(proxy: proxy)
+                        }
+                    }
+                    // "Follow output" pill when user scrolled up during streaming
+                    if userHasScrolledUp && state.isThinking {
+                        VStack {
+                            Spacer()
+                            Button {
+                                userHasScrolledUp = false
+                                scrollToBottom(proxy: proxy)
+                            } label: {
+                                followOutputPillLabel
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Follow output")
+                            .accessibilityHint("Scrolls to latest content and resumes auto-scroll")
+                            .padding(.bottom, 8)
+                        }
+                        .transition(.opacity)
+                        .animation(
+                            NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+                                ? nil : .easeOut(duration: 0.2),
+                            value: userHasScrolledUp
                         )
                     }
-                )
-                .onPreferenceChange(ScrollViewHeightKey.self) { height in
-                    scrollViewHeight = height
                 }
-                .onChange(of: state.messages.count) { _, _ in
-                    withAnimation(nil) {
-                        proxy.scrollTo(state.messages.last?.id, anchor: .bottom)
-                    }
+                .opacity(state.helpVisible ? 0.15 : 1.0)
+
+                if state.helpVisible {
+                    helpOverlay
                 }
             }
 
@@ -98,6 +146,19 @@ struct AgentChatView: View {
             Text(state.statusLabel)
                 .font(.system(size: 11))
                 .foregroundStyle(theme.popupFg.opacity(0.4))
+
+            Button {
+                // Send '?' to toggle help overlay
+                encoder?.sendKeyPress(codepoint: 0x3F, modifiers: 0)
+            } label: {
+                Image(systemName: "questionmark.circle")
+                    .font(.system(size: 13))
+                    .foregroundStyle(state.helpVisible ? theme.accent : theme.popupFg.opacity(0.4))
+            }
+            .buttonStyle(.plain)
+            .help("Keyboard shortcuts (?)")
+            .accessibilityLabel("Help")
+            .accessibilityHint("Shows keybinding cheatsheet")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
@@ -110,21 +171,37 @@ struct AgentChatView: View {
 
     // MARK: - Messages
 
+    /// Wraps each message with an optional divider in a single VStack.
+    /// Keeping one view per ForEach iteration prevents LazyVStack from
+    /// miscalculating tap targets due to variable-height implicit Groups.
+    @ViewBuilder
+    private func messageViewWithDivider(_ msg: ChatMessageEntry, index: Int) -> some View {
+        VStack(spacing: 8) {
+            if index > 0 && shouldShowDivider(before: msg, after: state.messages[index - 1]) {
+                Rectangle()
+                    .fill(theme.popupBorder.opacity(0.15))
+                    .frame(height: 1)
+                    .padding(.horizontal, 4)
+            }
+            messageView(msg)
+        }
+    }
+
     @ViewBuilder
     private func messageView(_ msg: ChatMessageEntry) -> some View {
         switch msg {
         case .user(_, let text):
-            userBubble(text)
+            userMessage(text)
         case .assistant(_, let text):
             assistantBlock(text)
         case .styledAssistant(_, let lines):
             styledAssistantBlock(lines)
         case .thinking(_, let text, let collapsed):
             thinkingBlock(text, collapsed: collapsed)
-        case .toolCall(let id, let name, let status, let isError, let collapsed, let duration, let result):
-            toolCallCard(messageIndex: id, name: name, status: status, isError: isError, collapsed: collapsed, durationMs: duration, result: result, resultLines: nil)
-        case .styledToolCall(let id, let name, let status, let isError, let collapsed, let duration, let resultLines):
-            toolCallCard(messageIndex: id, name: name, status: status, isError: isError, collapsed: collapsed, durationMs: duration, result: nil, resultLines: resultLines)
+        case .toolCall(let id, let name, let summary, let status, let isError, let collapsed, let duration, let result):
+            toolCallCard(messageIndex: id, name: name, summary: summary, status: status, isError: isError, collapsed: collapsed, durationMs: duration, result: result, resultLines: nil)
+        case .styledToolCall(let id, let name, let summary, let status, let isError, let collapsed, let duration, let resultLines):
+            toolCallCard(messageIndex: id, name: name, summary: summary, status: status, isError: isError, collapsed: collapsed, durationMs: duration, result: nil, resultLines: resultLines)
         case .system(_, let text, let isError):
             systemMessage(text, isError: isError)
         case .usage(_, let input, let output, _, _, let costMicros):
@@ -133,20 +210,26 @@ struct AgentChatView: View {
     }
 
     @ViewBuilder
-    private func userBubble(_ text: String) -> some View {
-        HStack {
-            Spacer(minLength: 60)
+    private func userMessage(_ text: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            // Sender label
+            HStack(spacing: 4) {
+                Image(systemName: "person.fill")
+                    .font(.system(size: 9))
+                Text("You")
+                    .font(.system(size: 11, weight: .medium))
+            }
+            .foregroundStyle(theme.popupFg.opacity(0.45))
+
             Text(text)
                 .font(.system(size: 13))
                 .foregroundStyle(theme.popupFg)
                 .textSelection(.enabled)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(theme.accent.opacity(0.15))
-                )
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(theme.accent.opacity(0.04))
     }
 
     @ViewBuilder
@@ -247,7 +330,7 @@ struct AgentChatView: View {
     }
 
     @ViewBuilder
-    private func toolCallCard(messageIndex: Int, name: String, status: UInt8, isError: Bool, collapsed: Bool, durationMs: UInt32, result: String?, resultLines: [[StyledTextRun]]?) -> some View {
+    private func toolCallCard(messageIndex: Int, name: String, summary: String, status: UInt8, isError: Bool, collapsed: Bool, durationMs: UInt32, result: String?, resultLines: [[StyledTextRun]]?) -> some View {
         let hasResult = (result != nil && !result!.isEmpty) || (resultLines != nil && !resultLines!.isEmpty)
 
         VStack(alignment: .leading, spacing: 0) {
@@ -260,15 +343,32 @@ struct AgentChatView: View {
                         .foregroundStyle(theme.popupFg.opacity(0.4))
                 }
 
-                Image(systemName: toolIcon(status))
-                    .font(.system(size: 10))
-                    .foregroundStyle(isError ? Color.red.opacity(0.8) : theme.accent)
+                // Running spinner or status icon
+                if status == 0 {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .scaleEffect(0.6)
+                } else {
+                    Image(systemName: toolIcon(status))
+                        .font(.system(size: 10))
+                        .foregroundStyle(isError ? Color.red.opacity(0.8) : theme.accent)
+                }
 
                 Text(name)
                     .font(.system(size: 12, weight: .medium, design: .monospaced))
                     .foregroundStyle(theme.popupFg)
+                    .layoutPriority(1)
 
-                Spacer()
+                // Tool summary (command, path, etc.)
+                if !summary.isEmpty {
+                    Text(summary)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(theme.popupFg.opacity(0.5))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+
+                Spacer(minLength: 8)
 
                 if durationMs > 0 {
                     Text(formatDuration(durationMs))
@@ -423,38 +523,242 @@ struct AgentChatView: View {
 
     // MARK: - Prompt area
 
+    /// Whether the agent is actively streaming a response.
+    private var isStreaming: Bool { state.status == 1 || state.status == 2 }
+
+    /// Whether the send button should be enabled (insert mode with text).
+    private var canSend: Bool { isInsertMode && !state.prompt.isEmpty && !isStreaming }
+
+    /// The SF Symbol name for the action button, morphing between send and stop.
+    private var actionButtonIcon: String {
+        isStreaming ? "stop.circle.fill" : "arrow.up.circle.fill"
+    }
+
+    /// The action button's foreground color based on state.
+    private var actionButtonColor: Color {
+        if isStreaming { return .red }
+        if canSend { return theme.accent }
+        return theme.popupFg.opacity(0.2)
+    }
+
+    /// Capsule border color: accent when in insert mode, subtle border otherwise.
+    private var capsuleBorderColor: Color {
+        if isInsertMode { return theme.accent.opacity(0.5) }
+        return theme.popupBorder.opacity(0.3)
+    }
+
+    /// Capsule background opacity shifts with mode.
+    private var capsuleBgOpacity: Double {
+        if isInsertMode { return 0.8 }
+        if isStreaming { return 0.6 }
+        return 0.4
+    }
+
     @ViewBuilder
     private var promptArea: some View {
-        Rectangle()
-            .fill(theme.popupBorder.opacity(0.3))
-            .frame(height: 1)
-
         HStack(spacing: 8) {
-            Image(systemName: "chevron.right")
-                .font(.system(size: 10, weight: .bold))
-                .foregroundStyle(isInsertMode ? theme.accent : theme.popupFg.opacity(0.3))
+            promptCapsule
+            actionButton
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Agent prompt")
+    }
 
-            if state.prompt.isEmpty {
-                Text(isInsertMode ? "Type a message, Enter to send" : "Press i to type")
+    @ViewBuilder
+    private var promptCapsule: some View {
+        HStack(spacing: 0) {
+            if isStreaming && state.prompt.isEmpty {
+                Text("Generating...")
                     .font(.system(size: 13))
-                    .foregroundStyle(theme.popupFg.opacity(isInsertMode ? 0.4 : 0.25))
+                    .foregroundStyle(theme.popupFg.opacity(0.3))
+                    .italic()
+            } else if state.prompt.isEmpty && !isInsertMode {
+                Text("Ask anything...")
+                    .font(.system(size: 13))
+                    .foregroundStyle(theme.popupFg.opacity(0.25))
+            } else if state.prompt.isEmpty && isInsertMode {
+                // Show blinking cursor alone in empty insert mode
+                BlinkingCursor(color: theme.accent, resetToken: state.promptVersion)
             } else {
-                // Text + cursor with zero spacing so cursor sits right at the insertion point
-                HStack(spacing: 0) {
-                    Text(state.prompt)
-                        .font(.system(size: 13))
-                        .foregroundStyle(theme.popupFg)
-                    if isInsertMode {
-                        BlinkingCursor(color: theme.accent, resetToken: state.promptVersion)
-                    }
+                // Text + cursor with zero spacing so cursor sits at the insertion point
+                Text(state.prompt)
+                    .font(.system(size: 13))
+                    .foregroundStyle(theme.popupFg.opacity(isStreaming ? 0.4 : 1.0))
+                    .lineLimit(3)
+                if isInsertMode && !isStreaming {
+                    BlinkingCursor(color: theme.accent, resetToken: state.promptVersion)
                 }
             }
 
-            Spacer()
+            Spacer(minLength: 4)
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .background(isInsertMode ? theme.modelineBarBg : theme.modelineBarBg.opacity(0.7))
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(theme.popupBg.opacity(capsuleBgOpacity))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(capsuleBorderColor, lineWidth: 1)
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 12))
+        .onTapGesture {
+            if !isInsertMode && !isStreaming {
+                // Send 'i' to enter insert mode
+                encoder?.sendKeyPress(codepoint: 0x69, modifiers: 0)
+            }
+        }
+        .help("Press i to start typing")
+        .animation(
+            NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+                ? nil
+                : .easeInOut(duration: 0.15),
+            value: isInsertMode
+        )
+        .animation(
+            NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+                ? nil
+                : .easeInOut(duration: 0.15),
+            value: isStreaming
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Chat input")
+        .accessibilityValue(state.prompt.isEmpty ? "Empty" : state.prompt)
+        .accessibilityHint(isInsertMode ? "Type a message, press Return to send" : "Press i to start typing")
+        .accessibilityAddTraits(isInsertMode ? .isSearchField : .isStaticText)
+    }
+
+    @ViewBuilder
+    private var actionButton: some View {
+        Button {
+            if isStreaming {
+                // Send Ctrl+C to abort
+                encoder?.sendKeyPress(codepoint: 0x63, modifiers: 0x02)
+            } else if canSend {
+                // Send Enter to submit
+                encoder?.sendKeyPress(codepoint: 0x0D, modifiers: 0)
+            }
+        } label: {
+            Image(systemName: actionButtonIcon)
+                .font(.system(size: 24))
+                .foregroundStyle(actionButtonColor)
+                .contentTransition(.symbolEffect(.replace))
+        }
+        .buttonStyle(.plain)
+        .disabled(!canSend && !isStreaming)
+        .accessibilityLabel(isStreaming ? "Stop generating" : "Send message")
+        .accessibilityHint(isStreaming ? "Sends Ctrl+C to abort" : "Sends the current prompt")
+        .accessibilityAddTraits(.isButton)
+    }
+
+    // MARK: - Help overlay
+
+    @ViewBuilder
+    private var helpOverlay: some View {
+        ScrollView(.vertical) {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack {
+                    Text("Keyboard Shortcuts")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(theme.popupFg)
+                    Spacer()
+                    Text("Press ? or Esc to close")
+                        .font(.system(size: 11))
+                        .foregroundStyle(theme.popupFg.opacity(0.4))
+                }
+
+                ForEach(state.helpGroups) { group in
+                    helpGroupView(group)
+                }
+            }
+            .padding(20)
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(theme.popupBg.opacity(0.95))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(theme.popupBorder.opacity(0.3), lineWidth: 1)
+        )
+        .padding(16)
+        .transition(.opacity)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Keyboard shortcuts help")
+    }
+
+    @ViewBuilder
+    private func helpGroupView(_ group: HelpGroup) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(group.title)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(theme.accent)
+
+            ForEach(Array(group.bindings.enumerated()), id: \.offset) { _, binding in
+                HStack(spacing: 0) {
+                    Text(binding.key)
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundStyle(theme.popupFg.opacity(0.9))
+                        .frame(width: 140, alignment: .leading)
+
+                    Text(binding.description)
+                        .font(.system(size: 12))
+                        .foregroundStyle(theme.popupFg.opacity(0.6))
+
+                    Spacer()
+                }
+            }
+        }
+    }
+
+    // MARK: - Follow output pill
+
+    @ViewBuilder
+    private var followOutputPillLabel: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "arrow.down")
+                .font(.system(size: 10, weight: .semibold))
+            Text("Follow output")
+                .font(.system(size: 11, weight: .medium))
+        }
+        .foregroundStyle(theme.popupFg.opacity(0.8))
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(
+            Capsule()
+                .fill(theme.popupBg.opacity(0.9))
+        )
+        .overlay(
+            Capsule()
+                .strokeBorder(theme.popupBorder.opacity(0.3), lineWidth: 1)
+        )
+    }
+
+    /// Scrolls to the last message with smooth animation.
+    private func scrollToBottom(proxy: ScrollViewProxy) {
+        guard let lastId = state.messages.last?.id else { return }
+        let animation: Animation? = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+            ? nil : .easeOut(duration: 0.15)
+        withAnimation(animation) {
+            proxy.scrollTo(lastId, anchor: .bottom)
+        }
+    }
+
+    // MARK: - Message dividers
+
+    /// Show a divider between user messages and the preceding message group.
+    /// This creates visual rhythm between conversation turns.
+    private func shouldShowDivider(before current: ChatMessageEntry, after previous: ChatMessageEntry) -> Bool {
+        // Show divider before user messages (start of a new turn),
+        // unless the previous message was also a user message.
+        switch (previous, current) {
+        case (.user, .user): return false
+        case (_, .user): return true
+        default: return false
+        }
     }
 
     // MARK: - Helpers

@@ -305,7 +305,7 @@ struct CommandDispatcherRoutingTests {
         let messages: [GUIChatMessage] = [GUIChatMessage(beamId: 1, content: .user(text: "hello"))]
         dispatcher.dispatch(.guiAgentChat(visible: true, status: 1, model: "claude",
                                            prompt: "Fix this", pendingToolName: nil,
-                                           pendingToolSummary: "", messages: messages))
+                                           pendingToolSummary: "", helpVisible: false, helpGroups: [], messages: messages))
 
         #expect(gui.agentChatState.visible == true)
         #expect(gui.agentChatState.model == "claude")
@@ -317,7 +317,7 @@ struct CommandDispatcherRoutingTests {
         let (dispatcher, gui) = makeDispatcher()
         dispatcher.dispatch(.guiAgentChat(visible: false, status: 0, model: "",
                                            prompt: "", pendingToolName: nil,
-                                           pendingToolSummary: "", messages: []))
+                                           pendingToolSummary: "", helpVisible: false, helpGroups: [], messages: []))
 
         #expect(gui.agentChatState.visible == false)
         #expect(gui.agentChatState.messages.isEmpty)
