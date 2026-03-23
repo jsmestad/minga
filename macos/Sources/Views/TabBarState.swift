@@ -41,11 +41,6 @@ final class TabBarState {
     var workspaces: [WorkspaceEntry] = []
     var activeWorkspaceId: UInt16 = 0
 
-    /// Whether a workspace rename TextField is active. When true, the
-    /// EditorNSView should not forward key events to the BEAM so the
-    /// TextField can handle Enter/Escape/typing without interference.
-    var isEditingWorkspaceName: Bool = false
-
     /// Whether workspace grouping is active (at least one agent workspace exists).
     var hasWorkspaces: Bool {
         workspaces.contains { $0.isAgent }
