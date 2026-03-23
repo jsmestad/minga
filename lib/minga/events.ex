@@ -34,6 +34,8 @@ defmodule Minga.Events do
   | `:buffer_changed` | `BufferChangedEvent` | `buffer: pid(), source: EditSource.t()`  |
   | `:mode_changed`   | `ModeEvent`          | `old: atom(), new: atom()`        |
   | `:git_status_changed` | `GitStatusEvent` | `git_root, entries, branch, ahead, behind` |
+  | `:diagnostics_updated` | `DiagnosticsUpdatedEvent` | `uri: String.t(), source: atom()` |
+  | `:lsp_status_changed` | `LspStatusEvent` | `name: atom(), status: atom(), uri: String.t() \| nil` |
   | `:project_rebuilt` | `ProjectRebuiltEvent` | `root: String.t()` |
   | `:command_done`    | `CommandDoneEvent`    | `name: String.t(), exit_code: non_neg_integer()` |
 
@@ -135,6 +137,26 @@ defmodule Minga.Events do
           }
   end
 
+  defmodule DiagnosticsUpdatedEvent do
+    @moduledoc "Payload for `:diagnostics_updated` events. Published by `Diagnostics` when diagnostics are published or cleared for a URI."
+    @enforce_keys [:uri, :source]
+    defstruct [:uri, :source]
+
+    @type t :: %__MODULE__{uri: String.t(), source: atom()}
+  end
+
+  defmodule LspStatusEvent do
+    @moduledoc "Payload for `:lsp_status_changed` events. Published by `LSP.Client` on status transitions."
+    @enforce_keys [:name, :status]
+    defstruct [:name, :status, :uri]
+
+    @type t :: %__MODULE__{
+            name: atom(),
+            status: :starting | :initializing | :ready | :stopped | :crashed,
+            uri: String.t() | nil
+          }
+  end
+
   # ── Types ───────────────────────────────────────────────────────────────────
 
   @typedoc "Known event topics."
@@ -146,6 +168,8 @@ defmodule Minga.Events do
           | :content_replaced
           | :mode_changed
           | :git_status_changed
+          | :diagnostics_updated
+          | :lsp_status_changed
           | :tool_install_started
           | :tool_install_progress
           | :tool_install_complete
@@ -165,6 +189,8 @@ defmodule Minga.Events do
           | ProjectRebuiltEvent.t()
           | CommandDoneEvent.t()
           | GitStatusEvent.t()
+          | DiagnosticsUpdatedEvent.t()
+          | LspStatusEvent.t()
 
   # ── Child spec ──────────────────────────────────────────────────────────────
 
@@ -252,6 +278,8 @@ defmodule Minga.Events do
   @spec broadcast(:project_rebuilt, ProjectRebuiltEvent.t()) :: :ok
   @spec broadcast(:command_done, CommandDoneEvent.t()) :: :ok
   @spec broadcast(:git_status_changed, GitStatusEvent.t()) :: :ok
+  @spec broadcast(:diagnostics_updated, DiagnosticsUpdatedEvent.t()) :: :ok
+  @spec broadcast(:lsp_status_changed, LspStatusEvent.t()) :: :ok
   def broadcast(topic, %_{} = payload) when is_atom(topic) do
     Registry.dispatch(@registry, topic, fn entries ->
       for {pid, _value} <- entries do

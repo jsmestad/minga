@@ -117,6 +117,7 @@ defmodule Minga.Editor.State do
             git_status_panel: nil,
             git_remote_op: nil,
             lsp_status: :none,
+            lsp_server_statuses: %{},
             parser_status: :available,
             hover_popup: nil,
             signature_help: nil,
@@ -182,6 +183,9 @@ defmodule Minga.Editor.State do
              {git_root :: String.t(), success_msg :: String.t(), error_prefix :: String.t()}}
             | nil,
           lsp_status: Minga.Editor.Modeline.lsp_status(),
+          lsp_server_statuses: %{
+            atom() => :starting | :initializing | :ready | :crashed
+          },
           parser_status: Minga.Editor.Modeline.parser_status(),
           hover_popup: Minga.Editor.HoverPopup.t() | nil,
           signature_help: Minga.Editor.SignatureHelp.t() | nil,

@@ -22,15 +22,20 @@ defmodule Minga.LSP.SupervisorTest do
     %{supervisor: sup_name, diag_server: diag_name}
   end
 
-  # Subscribes to the client's events and waits for the LSP handshake to
-  # complete. If the handshake already finished before we subscribed,
-  # the status check catches it immediately.
+  # Subscribes to LSP status events and waits for the handshake to complete.
+  # If the handshake already finished before we subscribed, the status check
+  # catches it immediately.
   defp await_ready(client) do
-    Client.subscribe(client)
+    Minga.Events.subscribe(:lsp_status_changed)
 
     case Client.status(client) do
-      :ready -> :ok
-      _ -> assert_receive {:lsp_ready, :mock_lsp}, 5_000
+      :ready ->
+        :ok
+
+      _ ->
+        assert_receive {:minga_event, :lsp_status_changed,
+                        %Minga.Events.LspStatusEvent{name: :mock_lsp, status: :ready}},
+                       5_000
     end
   end
 

@@ -27,7 +27,7 @@ defmodule Minga.Editor do
 
   alias Minga.Editor.AgentLifecycle
   alias Minga.Editor.BottomPanel
-  alias Minga.Editor.BufferLifecycle
+
   alias Minga.Editor.Commands
   alias Minga.Editor.CompletionHandling
   alias Minga.Editor.CompletionTrigger
@@ -187,7 +187,8 @@ defmodule Minga.Editor do
       end
 
     state = Startup.apply_config_options(state)
-    Minga.Diagnostics.subscribe()
+    Minga.Events.subscribe(:diagnostics_updated)
+    Minga.Events.subscribe(:lsp_status_changed)
 
     # Refresh file tree git status when any buffer is saved.
     Minga.Events.subscribe(:buffer_saved)
@@ -871,23 +872,32 @@ defmodule Minga.Editor do
     {:noreply, state}
   end
 
-  def handle_info(:refresh_lsp_status, state) do
+  # LSP status changed — update per-server status map and derive aggregate for modeline.
+  def handle_info(
+        {:minga_event, :lsp_status_changed,
+         %Minga.Events.LspStatusEvent{name: name, status: status}},
+        state
+      ) do
     old_status = state.lsp_status
-    state = BufferLifecycle.refresh_lsp_status(state)
 
-    # If still initializing/starting, check again in 1 second
-    if state.lsp_status in [:starting, :initializing] do
-      Process.send_after(self(), :refresh_lsp_status, 1_000)
-    end
+    server_statuses =
+      case status do
+        :stopped -> Map.delete(state.lsp_server_statuses, name)
+        s -> Map.put(state.lsp_server_statuses, name, s)
+      end
 
-    # Re-render if status changed (modeline needs update)
-    state = if state.lsp_status != old_status, do: schedule_render(state, 16), else: state
+    lsp_status = aggregate_lsp_server_statuses(server_statuses)
+    state = %{state | lsp_server_statuses: server_statuses, lsp_status: lsp_status}
+    state = if lsp_status != old_status, do: schedule_render(state, 16), else: state
     {:noreply, state}
   end
 
   # Diagnostics changed — re-render to update gutter signs and minibuffer hint.
   # Debounced because multiple diagnostics may arrive in rapid succession.
-  def handle_info({:diagnostics_changed, uri}, state) do
+  def handle_info(
+        {:minga_event, :diagnostics_updated, %Minga.Events.DiagnosticsUpdatedEvent{uri: uri}},
+        state
+      ) do
     # Apply diagnostic underline decorations to the affected buffer
     apply_diagnostic_decorations(state, uri)
     {:noreply, schedule_render(state, 16)}
@@ -1394,10 +1404,34 @@ defmodule Minga.Editor do
     %{state | render_timer: ref}
   end
 
+  # ── LSP status aggregation ────────────────────────────────────────────────────
+
+  # Derives an aggregate LSP status from the per-server status map.
+  # Priority: :ready > :error > :initializing > :starting > :none
+  @spec aggregate_lsp_server_statuses(%{atom() => :starting | :initializing | :ready | :crashed}) ::
+          Minga.Editor.Modeline.lsp_status()
+  defp aggregate_lsp_server_statuses(server_statuses) when server_statuses == %{}, do: :none
+
+  defp aggregate_lsp_server_statuses(server_statuses) do
+    server_statuses
+    |> Map.values()
+    |> Enum.reduce(:none, fn
+      :ready, _acc -> :ready
+      _status, :ready -> :ready
+      :crashed, _acc -> :error
+      _status, :error -> :error
+      :initializing, _acc -> :initializing
+      _status, :initializing -> :initializing
+      :starting, _acc -> :starting
+      _status, :starting -> :starting
+      _status, acc -> acc
+    end)
+  end
+
   # ── Diagnostic decorations ──────────────────────────────────────────────────
 
   # Applies diagnostic underline decorations to the buffer matching the URI.
-  # Called when {:diagnostics_changed, uri} arrives from the Diagnostics server.
+  # Called when {:minga_event, :diagnostics_updated, ...} arrives via the event bus.
   @spec apply_diagnostic_decorations(state(), String.t()) :: :ok
   defp apply_diagnostic_decorations(state, uri) do
     path = LspSyncServer.uri_to_path(uri)
@@ -1664,7 +1698,6 @@ defmodule Minga.Editor do
   defp register_buffer(state, buffer_pid, file_path) do
     state = Commands.add_buffer(state, buffer_pid)
     state = log_message(state, "Opened: #{file_path}")
-    state = BufferLifecycle.lsp_buffer_opened(state, buffer_pid)
 
     Minga.Events.broadcast(:buffer_opened, %Minga.Events.BufferEvent{
       buffer: buffer_pid,
@@ -1689,7 +1722,6 @@ defmodule Minga.Editor do
     state = %{state | buffers: Buffers.add_background(state.buffers, buffer_pid)}
     state = EditorState.monitor_buffer(state, buffer_pid)
     state = log_message(state, "Opened (agent): #{file_path}")
-    state = BufferLifecycle.lsp_buffer_opened(state, buffer_pid)
 
     Minga.Events.broadcast(:buffer_opened, %Minga.Events.BufferEvent{
       buffer: buffer_pid,

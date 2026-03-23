@@ -8,7 +8,7 @@ defmodule Minga.LSP.SyncServer do
 
   Maintains an ETS table (`Minga.LSP.SyncServer.Registry`) mapping
   buffer pids to their attached LSP client pids. Consumers like
-  `CompletionTrigger`, `LspActions`, and `BufferLifecycle` look up
+  `CompletionTrigger` and `LspActions` look up
   clients via `clients_for_buffer/1` (direct ETS read, no GenServer
   call needed).
 

@@ -18,8 +18,7 @@ defmodule Minga.LSP.Client.State do
     open_documents: %{},
     capabilities: %{},
     semantic_token_legend: nil,
-    status: :starting,
-    subscribers: []
+    status: :starting
   ]
 
   @typedoc "Client lifecycle status."
@@ -53,7 +52,6 @@ defmodule Minga.LSP.Client.State do
           open_documents: %{String.t() => open_doc()},
           capabilities: map(),
           semantic_token_legend: {[String.t()], [String.t()]} | nil,
-          status: status(),
-          subscribers: [pid()]
+          status: status()
         }
 end
