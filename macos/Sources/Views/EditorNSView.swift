@@ -438,6 +438,13 @@ final class EditorNSView: MTKView {
     }
 
     override func keyDown(with event: NSEvent) {
+        // Don't forward keys to the BEAM while a SwiftUI TextField is active
+        // (e.g., workspace rename). Let the TextField handle Enter/Escape/typing.
+        if guiState?.tabBarState.isEditingWorkspaceName == true {
+            super.keyDown(with: event)
+            return
+        }
+
         resetCursorBlink()
         let mods = modifierBits(from: event.modifierFlags)
 

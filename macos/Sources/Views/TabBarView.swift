@@ -285,9 +285,12 @@ struct TabBarView: View {
                     }
                     .onExitCommand {
                         isRenaming = false
+                        tabBarState.isEditingWorkspaceName = false
                     }
                     .onChange(of: renameFieldFocused) { _, focused in
-                        if !focused { commitRename(workspace) }
+                        if !focused {
+                            commitRename(workspace)
+                        }
                     }
             } else {
                 Text(workspace.label)
@@ -297,6 +300,7 @@ struct TabBarView: View {
                     .onTapGesture(count: 2) {
                         renameText = workspace.label
                         isRenaming = true
+                        tabBarState.isEditingWorkspaceName = true
                         DispatchQueue.main.async { renameFieldFocused = true }
                     }
                     .onTapGesture(count: 1) {
@@ -321,6 +325,7 @@ struct TabBarView: View {
             Button("Rename Workspace...") {
                 renameText = workspace.label
                 isRenaming = true
+                tabBarState.isEditingWorkspaceName = true
                 DispatchQueue.main.async { renameFieldFocused = true }
             }
             Button("Change Icon...") {
@@ -338,6 +343,7 @@ struct TabBarView: View {
     private func commitRename(_ workspace: WorkspaceEntry) {
         guard isRenaming else { return }
         isRenaming = false
+        tabBarState.isEditingWorkspaceName = false
         let trimmed = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed != workspace.label else { return }
         encoder?.sendWorkspaceRename(id: workspace.id, name: trimmed)
