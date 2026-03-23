@@ -117,6 +117,77 @@ final class BitmapRasterizer {
         return RasterizeResult(pointer: UnsafeRawPointer(ptr), bytesPerRow: bytesPerRow)
     }
 
+    /// Rasterizes a pill badge: rounded rect background + centered text.
+    ///
+    /// The pill is drawn as a single bitmap containing both the colored
+    /// background and the text, suitable for a single atlas entry.
+    func rasterizePill(_ ctLine: CTLine, textWidth: CGFloat,
+                       bgColor: CGColor,
+                       width: Int, height: Int,
+                       scale: CGFloat, descent: CGFloat, ascent: CGFloat,
+                       hPad: CGFloat, cornerRadius: CGFloat) -> RasterizeResult {
+        let bytesPerRow = width * 4
+        let byteCount = bytesPerRow * height
+
+        ensureCapacity(byteCount: byteCount)
+
+        guard let ptr = pool else {
+            let fallback = UnsafeMutableRawPointer.allocate(byteCount: byteCount, alignment: 16)
+            pool = fallback
+            poolByteCount = byteCount
+            memset(fallback, 0, byteCount)
+            return RasterizeResult(pointer: UnsafeRawPointer(fallback), bytesPerRow: bytesPerRow)
+        }
+
+        memset(ptr, 0, byteCount)
+
+        guard let ctx = CGContext(
+            data: ptr,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: bytesPerRow,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo
+        ) else {
+            return RasterizeResult(pointer: UnsafeRawPointer(ptr), bytesPerRow: bytesPerRow)
+        }
+
+        ctx.scaleBy(x: scale, y: scale)
+        ctx.setAllowsFontSmoothing(true)
+        ctx.setShouldSmoothFonts(true)
+        ctx.setAllowsFontSubpixelPositioning(true)
+        ctx.setShouldSubpixelPositionFonts(true)
+        ctx.setAllowsAntialiasing(true)
+        ctx.setShouldAntialias(true)
+
+        // Draw rounded rect background centered vertically in the bitmap.
+        // The bitmap may be taller than the pill (to match atlas slot height),
+        // so the pill content is vertically centered within the bitmap height.
+        let pointWidth = CGFloat(width) / scale
+        let bitmapPointHeight = CGFloat(height) / scale
+        let pillHeight = min(ascent + descent + 3.0, bitmapPointHeight)
+        let pillY = (bitmapPointHeight - pillHeight) / 2
+
+        let pillRect = CGRect(x: 0, y: pillY, width: pointWidth, height: pillHeight)
+        let clampedRadius = min(cornerRadius, pillHeight / 2)
+        let path = CGPath(roundedRect: pillRect,
+                          cornerWidth: clampedRadius, cornerHeight: clampedRadius,
+                          transform: nil)
+        ctx.addPath(path)
+        ctx.setFillColor(bgColor)
+        ctx.fillPath()
+
+        // Position text: horizontally padded, vertically centered within pill.
+        let lineHeight = ascent + descent
+        let textY = pillY + descent + (pillHeight - lineHeight) / 2
+        ctx.textPosition = CGPoint(x: hPad, y: textY)
+
+        CTLineDraw(ctLine, ctx)
+
+        return RasterizeResult(pointer: UnsafeRawPointer(ptr), bytesPerRow: bytesPerRow)
+    }
+
     // MARK: - Private
 
     /// Grows the pool if needed. Never shrinks.

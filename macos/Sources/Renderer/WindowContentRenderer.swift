@@ -64,6 +64,27 @@ final class WindowContentRenderer {
     /// Updated from theme's editor_fg color slot each frame.
     var defaultFgRGB: UInt32 = 0xBBC2CF
 
+    /// Font for pill badge text (1.5pt smaller than primary for visual hierarchy).
+    private let pillFont: CTFont
+
+    /// Pill font ascent in points.
+    private let pillAscent: CGFloat
+
+    /// Pill font descent in points.
+    private let pillDescent: CGFloat
+
+    /// Horizontal padding inside pill badges (points).
+    private let pillHPad: CGFloat = 5.0
+
+    /// Corner radius for pill rounded rects (points).
+    private let pillCornerRadius: CGFloat = 4.0
+
+    /// Gap between line content and first annotation (points).
+    let annotationGap: CGFloat = 12.0
+
+    /// Gap between consecutive annotations (points).
+    let annotationSpacing: CGFloat = 4.0
+
     init(device: MTLDevice, fontManager: FontManager, rasterizer: BitmapRasterizer) {
         self.device = device
         self.fontManager = fontManager
@@ -75,6 +96,16 @@ final class WindowContentRenderer {
         self.descent = fontManager.primary.descent
         self.linePixelHeight = Int(ceil(cellHeight * scale))
         self.maxLinePixelWidth = Int(ceil(200.0 * cellWidth * scale))
+
+        // Derive pill font: 1.5pt smaller than primary.
+        let primarySize = CTFontGetSize(fontManager.primary.ctFont)
+        self.pillFont = CTFontCreateCopyWithAttributes(
+            fontManager.primary.ctFont,
+            max(primarySize - 1.5, 8.0),
+            nil, nil
+        )
+        self.pillAscent = CTFontGetAscent(pillFont)
+        self.pillDescent = CTFontGetDescent(pillFont)
     }
 
     /// Update max line width on viewport resize.
@@ -254,6 +285,92 @@ final class WindowContentRenderer {
         return atlas.upload(key: key, contentHash: contentHash,
                            pointer: result.pointer, pixelWidth: pixelWidth,
                            bytesPerRow: result.bytesPerRow)
+    }
+
+    // MARK: - Annotation Rendering
+
+    /// Renders a pill badge annotation into the atlas.
+    func renderPillToAtlas(text: String, fg: UInt32, bg: UInt32,
+                           key: UInt16, contentHash: Int,
+                           atlas: LineTextureAtlas) -> AtlasEntry? {
+        guard !text.isEmpty else { return nil }
+
+        if let entry = atlas.cachedEntry(forKey: key, contentHash: contentHash) {
+            return entry
+        }
+
+        let fgColor = nsColor(from: fg)
+        let ligatures = fontManager.primary.ligaturesEnabled ? 2 : 0
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: pillFont,
+            .foregroundColor: fgColor,
+            .ligature: ligatures
+        ]
+        let attrStr = NSAttributedString(string: text, attributes: attrs)
+        let ctLine = CTLineCreateWithAttributedString(attrStr)
+
+        var lineAscent: CGFloat = 0
+        var lineDescent: CGFloat = 0
+        var lineLeading: CGFloat = 0
+        let textWidth = CTLineGetTypographicBounds(ctLine, &lineAscent, &lineDescent, &lineLeading)
+
+        // Pill dimensions: text + horizontal padding, clamped to min width.
+        let pillWidth = textWidth + 2 * pillHPad
+        let pillContentHeight = pillAscent + pillDescent + 3.0
+        let clampedWidth = max(pillWidth, pillContentHeight)
+
+        let pixelWidth = Int(ceil(clampedWidth * scale))
+        // Match atlas slot height for consistent upload.
+        let pixelHeight = linePixelHeight
+        guard pixelWidth > 0, pixelHeight > 0 else { return nil }
+
+        let bgR = CGFloat((bg >> 16) & 0xFF) / 255.0
+        let bgG = CGFloat((bg >> 8) & 0xFF) / 255.0
+        let bgB = CGFloat(bg & 0xFF) / 255.0
+        let bgCGColor = CGColor(srgbRed: bgR, green: bgG, blue: bgB, alpha: 1.0)
+
+        let result = rasterizer.rasterizePill(
+            ctLine, textWidth: CGFloat(textWidth),
+            bgColor: bgCGColor,
+            width: pixelWidth, height: pixelHeight,
+            scale: scale, descent: pillDescent, ascent: pillAscent,
+            hPad: pillHPad, cornerRadius: pillCornerRadius
+        )
+
+        return atlas.upload(key: key, contentHash: contentHash,
+                           pointer: result.pointer, pixelWidth: pixelWidth,
+                           bytesPerRow: result.bytesPerRow)
+    }
+
+    /// Renders a line annotation (pill or inline text) into the atlas.
+    func renderAnnotationToAtlas(annotation: GUILineAnnotation,
+                                 key: UInt16, atlas: LineTextureAtlas) -> AtlasEntry? {
+        let contentHash = annotationContentHash(annotation)
+
+        switch annotation.kind {
+        case .inlinePill:
+            return renderPillToAtlas(
+                text: annotation.text, fg: annotation.fg, bg: annotation.bg,
+                key: key, contentHash: contentHash, atlas: atlas
+            )
+        case .inlineText:
+            return renderSimpleText(
+                annotation.text, fg: annotation.fg,
+                key: key, contentHash: contentHash, atlas: atlas
+            )
+        case .gutterIcon:
+            return nil
+        }
+    }
+
+    /// Computes a content hash for annotation atlas cache invalidation.
+    private func annotationContentHash(_ ann: GUILineAnnotation) -> Int {
+        var hasher = Hasher()
+        hasher.combine(ann.text)
+        hasher.combine(ann.fg)
+        hasher.combine(ann.bg)
+        hasher.combine(ann.kind.rawValue)
+        return hasher.finalize()
     }
 
     // MARK: - Attributed String Building
