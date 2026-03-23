@@ -182,12 +182,20 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
 
   @spec build_gui_workspace_bar_cmd(state()) :: binary() | nil
   defp build_gui_workspace_bar_cmd(%{tab_bar: %TabBar{} = tb}) do
-    # Only send workspace bar when agent workspaces exist (tier >= 1)
+    # Only send workspace bar when agent workspaces exist (tier >= 1).
+    # Also include workspace count so the GUI hides the indicator when
+    # all agent workspaces are removed.
     if TabBar.has_agent_workspaces?(tb) do
       fp = :erlang.phash2(tb.workspaces)
 
       if fp != Process.get(:last_gui_workspace_bar_fp) do
         Process.put(:last_gui_workspace_bar_fp, fp)
+        ProtocolGUI.encode_gui_workspace_bar(tb)
+      end
+    else
+      # No agent workspaces: send empty workspace bar to clear the GUI
+      if Process.get(:last_gui_workspace_bar_fp) != nil do
+        Process.put(:last_gui_workspace_bar_fp, nil)
         ProtocolGUI.encode_gui_workspace_bar(tb)
       end
     end

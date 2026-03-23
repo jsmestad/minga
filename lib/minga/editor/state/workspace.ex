@@ -39,15 +39,27 @@ defmodule Minga.Editor.State.Workspace do
   @enforce_keys [:id, :kind]
   defstruct id: 0,
             kind: :manual,
-            label: "My Files",
+            label: "",
             color: 0x51AFEF,
             agent_status: nil,
             session: nil
 
-  @doc "The default manual workspace. Always workspace id 0."
+  @doc """
+  The default manual workspace. Always workspace id 0.
+
+  Label defaults to "Files". Call `set_label/2` with the project name
+  once the project root is known (the Project GenServer isn't available
+  at compile time when this is used as a struct default).
+  """
   @spec manual() :: t()
   def manual do
-    %__MODULE__{id: 0, kind: :manual, label: "My Files", color: 0x51AFEF}
+    %__MODULE__{id: 0, kind: :manual, label: "Files", color: 0x51AFEF}
+  end
+
+  @doc "Updates the workspace label."
+  @spec set_label(t(), String.t()) :: t()
+  def set_label(%__MODULE__{} = ws, label) when is_binary(label) do
+    %{ws | label: label}
   end
 
   @doc "Creates a new agent workspace with a unique id."

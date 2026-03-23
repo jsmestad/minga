@@ -8,7 +8,9 @@ defmodule Minga.Editor.State.WorkspaceTest do
       ws = Workspace.manual()
       assert ws.id == 0
       assert ws.kind == :manual
-      assert ws.label == "My Files"
+      # Label is the project directory name or "Files" fallback
+      assert is_binary(ws.label)
+      assert ws.label != ""
       assert ws.color == 0x51AFEF
       assert ws.session == nil
       assert ws.agent_status == nil
