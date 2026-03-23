@@ -136,7 +136,7 @@ defmodule Minga.EventsTest do
 
       Events.broadcast(
         :buffer_changed,
-        %Events.BufferChangedEvent{buffer: buf, source: :user}
+        %Events.BufferChangedEvent{buffer: buf, source: Minga.Buffer.EditSource.user()}
       )
 
       assert_receive {:minga_event, :buffer_changed,

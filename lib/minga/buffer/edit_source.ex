@@ -6,6 +6,20 @@ defmodule Minga.Buffer.EditSource do
   timeline. The undo stack uses a simpler atom-based source (see
   `Minga.Buffer.State.edit_source`); use `to_undo_source/1` to bridge.
 
+  ## Creating sources
+
+  Always use the constructor functions instead of building raw tuples:
+
+      EditSource.user()
+      EditSource.agent(session_pid, tool_call_id)
+      EditSource.lsp(:elixir_ls)
+      EditSource.formatter()
+      EditSource.unknown()
+
+  Constructors validate arguments with guards (e.g. `session_id` must be a
+  pid, `server_name` must be an atom). Pattern matching on the raw shapes
+  is fine and encouraged; only construction should go through constructors.
+
   ## Source variants
 
   - `:user` — interactive keystroke from the human
@@ -22,6 +36,35 @@ defmodule Minga.Buffer.EditSource do
           | {:lsp, server_name :: atom()}
           | :formatter
           | :unknown
+
+  # ── Constructors ──────────────────────────────────────────────────────
+
+  @doc "Interactive edit from the human user."
+  @spec user() :: t()
+  def user, do: :user
+
+  @doc "Edit from an agent tool call."
+  @spec agent(pid(), String.t()) :: t()
+  def agent(session_id, tool_call_id)
+      when is_pid(session_id) and is_binary(tool_call_id) do
+    {:agent, session_id, tool_call_id}
+  end
+
+  @doc "Edit from an LSP server (code action, rename, etc.)."
+  @spec lsp(atom()) :: t()
+  def lsp(server_name) when is_atom(server_name) do
+    {:lsp, server_name}
+  end
+
+  @doc "Edit from format-on-save or explicit format command."
+  @spec formatter() :: t()
+  def formatter, do: :formatter
+
+  @doc "Source not determined (legacy code paths during migration)."
+  @spec unknown() :: t()
+  def unknown, do: :unknown
+
+  # ── Undo stack bridge ─────────────────────────────────────────────────
 
   @doc """
   Maps a rich edit source to the simple atom used by the undo stack.
@@ -47,8 +90,8 @@ defmodule Minga.Buffer.EditSource do
   reference. Treat it as a sentinel indicating "some agent edit, origin unknown."
   """
   @spec from_undo_source(Minga.Buffer.State.edit_source()) :: t()
-  def from_undo_source(:user), do: :user
-  def from_undo_source(:agent), do: {:agent, self(), "unknown"}
-  def from_undo_source(:lsp), do: {:lsp, :unknown}
-  def from_undo_source(:recovery), do: :unknown
+  def from_undo_source(:user), do: user()
+  def from_undo_source(:agent), do: agent(self(), "unknown")
+  def from_undo_source(:lsp), do: lsp(:unknown)
+  def from_undo_source(:recovery), do: unknown()
 end

@@ -2,6 +2,7 @@ defmodule Minga.Buffer.BufferChangedEventTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.EditDelta
+  alias Minga.Buffer.EditSource
   alias Minga.Buffer.Server
   alias Minga.Events
   alias Minga.Events.BufferChangedEvent
@@ -55,7 +56,7 @@ defmodule Minga.Buffer.BufferChangedEventTest do
 
     test "custom source is propagated" do
       buf = start_supervised!({Server, content: "hello world"})
-      Server.apply_text_edit(buf, 0, 0, 0, 5, "goodbye", {:lsp, :elixir_ls})
+      Server.apply_text_edit(buf, 0, 0, 0, 5, "goodbye", EditSource.lsp(:elixir_ls))
 
       assert_receive {:minga_event, :buffer_changed,
                       %BufferChangedEvent{
@@ -70,7 +71,7 @@ defmodule Minga.Buffer.BufferChangedEventTest do
     test "batch edits send nil delta with source" do
       buf = start_supervised!({Server, content: "aaa\nbbb\nccc"})
       edits = [{{0, 0}, {0, 3}, "AAA"}, {{1, 0}, {1, 3}, "BBB"}]
-      Server.apply_text_edits(buf, edits, {:lsp, :elixir_ls})
+      Server.apply_text_edits(buf, edits, EditSource.lsp(:elixir_ls))
 
       assert_receive {:minga_event, :buffer_changed,
                       %BufferChangedEvent{

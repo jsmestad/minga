@@ -51,7 +51,7 @@ defmodule Minga.LSP.SyncServerTest do
 
       Events.broadcast(
         :buffer_changed,
-        %Events.BufferChangedEvent{buffer: buf, source: :user}
+        %Events.BufferChangedEvent{buffer: buf, source: Minga.Buffer.EditSource.user()}
       )
 
       :sys.get_state(SyncServer)
@@ -66,7 +66,7 @@ defmodule Minga.LSP.SyncServerTest do
 
       Events.broadcast(
         :buffer_changed,
-        %Events.BufferChangedEvent{buffer: buf, source: :user}
+        %Events.BufferChangedEvent{buffer: buf, source: Minga.Buffer.EditSource.user()}
       )
 
       # Sync call to flush the event message through SyncServer's mailbox.
@@ -86,7 +86,11 @@ defmodule Minga.LSP.SyncServerTest do
 
       Events.broadcast(
         :buffer_changed,
-        %Events.BufferChangedEvent{buffer: buf, source: :user, delta: delta}
+        %Events.BufferChangedEvent{
+          buffer: buf,
+          source: Minga.Buffer.EditSource.user(),
+          delta: delta
+        }
       )
 
       :sys.get_state(SyncServer)
@@ -106,7 +110,11 @@ defmodule Minga.LSP.SyncServerTest do
       # First: accumulate a real delta
       Events.broadcast(
         :buffer_changed,
-        %Events.BufferChangedEvent{buffer: buf, source: :user, delta: delta}
+        %Events.BufferChangedEvent{
+          buffer: buf,
+          source: Minga.Buffer.EditSource.user(),
+          delta: delta
+        }
       )
 
       :sys.get_state(SyncServer)
@@ -114,7 +122,11 @@ defmodule Minga.LSP.SyncServerTest do
       # Second: nil delta (bulk op) should mark as full_sync
       Events.broadcast(
         :buffer_changed,
-        %Events.BufferChangedEvent{buffer: buf, source: :unknown, delta: nil}
+        %Events.BufferChangedEvent{
+          buffer: buf,
+          source: Minga.Buffer.EditSource.unknown(),
+          delta: nil
+        }
       )
 
       :sys.get_state(SyncServer)

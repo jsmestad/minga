@@ -123,7 +123,7 @@ defmodule Minga.Git.TrackerTest do
 
       Events.broadcast(
         :buffer_changed,
-        %Events.BufferChangedEvent{buffer: buf, source: :user}
+        %Events.BufferChangedEvent{buffer: buf, source: Minga.Buffer.EditSource.user()}
       )
 
       flush_tracker()
@@ -137,7 +137,7 @@ defmodule Minga.Git.TrackerTest do
 
       Events.broadcast(
         :buffer_changed,
-        %Events.BufferChangedEvent{buffer: buf, source: :user}
+        %Events.BufferChangedEvent{buffer: buf, source: Minga.Buffer.EditSource.user()}
       )
 
       flush_tracker()
