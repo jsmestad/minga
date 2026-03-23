@@ -32,7 +32,7 @@ defmodule Minga.EventRecorder do
   @default_db_dir Path.expand("~/.local/share/minga")
   @db_filename "events.db"
   @retention_sweep_interval_ms :timer.hours(1)
-  @default_retention_days 7
+  @default_retention_days 14
 
   @subscribed_topics [
     :buffer_saved,
