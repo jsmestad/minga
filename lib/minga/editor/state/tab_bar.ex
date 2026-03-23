@@ -403,8 +403,12 @@ defmodule Minga.Editor.State.TabBar do
     agent_ws = Enum.filter(workspaces, &Workspace.agent?/1)
 
     case agent_ws do
-      [] -> tb
-      [only] -> %{tb | active_workspace_id: only.id}
+      [] ->
+        tb
+
+      [only] ->
+        %{tb | active_workspace_id: only.id}
+
       _ ->
         current_idx =
           Enum.find_index(agent_ws, &(&1.id == tb.active_workspace_id))

@@ -518,10 +518,13 @@ defmodule Minga.Editor.State.TabBarTest do
 
     test "tier 3: 5+ agent workspaces" do
       tb = TabBar.new(file_tab(1, "a.ex"))
-      tb = Enum.reduce(1..5, tb, fn i, acc ->
-        {acc, _} = TabBar.add_agent_workspace(acc, "A#{i}")
-        acc
-      end)
+
+      tb =
+        Enum.reduce(1..5, tb, fn i, acc ->
+          {acc, _} = TabBar.add_agent_workspace(acc, "A#{i}")
+          acc
+        end)
+
       assert TabBar.disclosure_tier(tb) == 3
     end
   end

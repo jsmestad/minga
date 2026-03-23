@@ -20,8 +20,14 @@ struct TabBarView: View {
     /// Tracks which workspace groups are collapsed (Swift-local state).
     /// Group 0 (manual) is never collapsible; only agent groups can collapse.
     @State private var collapsedGroups: Set<UInt16> = []
+    /// Accumulated horizontal swipe delta for workspace switching.
+    @State private var swipeDelta: CGFloat = 0
+    /// Whether a swipe gesture is in progress.
+    @State private var swiping: Bool = false
 
     private let barHeight: CGFloat = 34
+    /// Minimum horizontal swipe distance to trigger a workspace switch.
+    private let swipeThreshold: CGFloat = 80
 
     var body: some View {
         HStack(spacing: 0) {
@@ -88,6 +94,34 @@ struct TabBarView: View {
         .background(theme.tabBg)
         .focusable(false)
         .focusEffectDisabled()
+        .gesture(
+            DragGesture(minimumDistance: 20)
+                .onChanged { value in
+                    // Only act on primarily horizontal drags (trackpad swipe)
+                    guard tabBarState.hasWorkspaces else { return }
+                    let horizontal = abs(value.translation.width)
+                    let vertical = abs(value.translation.height)
+                    guard horizontal > vertical * 1.5 else { return }
+                    swiping = true
+                    swipeDelta = value.translation.width
+                }
+                .onEnded { value in
+                    guard swiping, tabBarState.hasWorkspaces else {
+                        swiping = false
+                        swipeDelta = 0
+                        return
+                    }
+                    if value.translation.width < -swipeThreshold {
+                        // Swipe left: next workspace
+                        encoder?.sendExecuteCommand(name: "workspace_next")
+                    } else if value.translation.width > swipeThreshold {
+                        // Swipe right: previous workspace
+                        encoder?.sendExecuteCommand(name: "workspace_prev")
+                    }
+                    swiping = false
+                    swipeDelta = 0
+                }
+        )
     }
 
     // MARK: - Tab strip layouts

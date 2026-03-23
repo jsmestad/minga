@@ -71,7 +71,8 @@ defmodule Minga.Picker.WorkspaceSource do
   defp workspace_icon(%Workspace{kind: :agent}), do: "\u{F0BA0}"
 
   @spec agent_status_text(Workspace.t()) :: String.t()
-  defp agent_status_text(%Workspace{kind: :agent, agent_status: :thinking}), do: " \u{21BB} thinking"
+  defp agent_status_text(%Workspace{kind: :agent, agent_status: :thinking}),
+    do: " \u{21BB} thinking"
 
   defp agent_status_text(%Workspace{kind: :agent, agent_status: :tool_executing}),
     do: " \u{2699} executing"
@@ -81,7 +82,8 @@ defmodule Minga.Picker.WorkspaceSource do
   defp agent_status_text(_), do: ""
 
   @spec status_annotation(Workspace.t()) :: String.t() | nil
-  defp status_annotation(%Workspace{kind: :agent, agent_status: :thinking}), do: "\u{21BB} thinking"
+  defp status_annotation(%Workspace{kind: :agent, agent_status: :thinking}),
+    do: "\u{21BB} thinking"
 
   defp status_annotation(%Workspace{kind: :agent, agent_status: :tool_executing}),
     do: "\u{2699} executing"
