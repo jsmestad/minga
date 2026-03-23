@@ -967,10 +967,19 @@ defmodule Minga.Editor do
   def handle_info({:DOWN, ref, :process, pid, reason}, state) do
     case classify_down(state, ref, pid) do
       :agent_session ->
-        Minga.Log.error(
-          :agent,
-          "[Agent] Session #{inspect(pid)} terminated: #{inspect(reason, pretty: true, limit: 500)}"
-        )
+        # Intentional stops (:normal, :shutdown) come from close_agent_tab
+        # or restart_session. Only unexpected crashes are errors.
+        if reason in [:normal, :shutdown] do
+          Minga.Log.info(
+            :agent,
+            "[Agent] Session #{inspect(pid)} stopped"
+          )
+        else
+          Minga.Log.error(
+            :agent,
+            "[Agent] Session #{inspect(pid)} crashed: #{inspect(reason, pretty: true, limit: 500)}"
+          )
+        end
 
         state = AgentAccess.update_agent(state, &AgentState.clear_session/1)
         state = %{state | status_msg: "Agent session terminated, SPC a n to restart"}

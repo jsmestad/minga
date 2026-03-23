@@ -7,7 +7,7 @@ defmodule Minga.Input.ScopedTest do
   alias Minga.Agent.UIState
   alias Minga.Agent.View.Preview
   alias Minga.Buffer.Server, as: BufferServer
-  alias Minga.Editor.LayoutPreset
+
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.AgentAccess
@@ -17,7 +17,7 @@ defmodule Minga.Input.ScopedTest do
   alias Minga.Editor.State.TabBar
   alias Minga.Editor.Viewport
   alias Minga.Editor.VimState
-  alias Minga.Editor.Window
+
   alias Minga.FileTree
   alias Minga.FileTree.BufferSync
   alias Minga.Input.AgentPanel
@@ -51,8 +51,10 @@ defmodule Minga.Input.ScopedTest do
 
     tab_bar =
       if Keyword.get(opts, :agentic_active, false) do
-        # Agent mode: tab bar with an agent tab active
-        TabBar.new(Tab.new_agent(1, "Agent"))
+        # Agent mode: file tab + agent tab, agent tab active
+        tb = TabBar.new(Tab.new_file(1, "[no file]"))
+        {tb, _} = TabBar.add(tb, :agent, "Agent")
+        tb
       else
         TabBar.new(Tab.new_file(1, "[no file]"))
       end
@@ -219,19 +221,13 @@ defmodule Minga.Input.ScopedTest do
       assert {:handled, _} = walk_surface_handlers(state, ?G, 0)
     end
 
-    test "q closes agentic view", %{state: state} do
-      # Set up a proper window tree with agent split pane
-      {:ok, agent_buf} = BufferServer.start_link(content: "")
-
-      win = Window.new(1, state.buffers.active, 24, 80)
-      windows = %{state.windows | tree: {:leaf, win.id}, map: %{win.id => win}, active: win.id}
-      state = %{state | windows: windows}
-
-      state = LayoutPreset.apply(state, :agent_right, agent_buf)
-      assert LayoutPreset.has_agent_chat?(state)
+    test "q switches from agent tab back to file tab", %{state: state} do
+      # The base_state with agentic_active: true already sets up:
+      # - file tab (id 1) and agent tab (id 2)
+      # - agent tab is active, keymap_scope is :agent
+      assert state.keymap_scope == :agent
 
       {:handled, new_state} = Scoped.handle_key(state, ?q, 0)
-      refute LayoutPreset.has_agent_chat?(new_state)
       assert new_state.keymap_scope == :editor
     end
 

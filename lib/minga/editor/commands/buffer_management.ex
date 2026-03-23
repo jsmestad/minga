@@ -743,8 +743,11 @@ defmodule Minga.Editor.Commands.BufferManagement do
     # Stop spinner timer before it leaks
     state = AgentAccess.update_agent(state, &AgentState.stop_spinner_timer/1)
 
-    # Unsubscribe and stop the agent session if running
+    # Unsubscribe and stop the agent session if running.
+    # Clear session from agent state BEFORE stopping so the :DOWN
+    # handler won't classify this as an unexpected crash.
     session = AgentAccess.session(state)
+    state = AgentAccess.update_agent(state, &AgentState.clear_session/1)
 
     if session do
       try do

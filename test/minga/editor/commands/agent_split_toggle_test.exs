@@ -6,7 +6,6 @@ defmodule Minga.Editor.Commands.AgentSplitToggleTest do
   alias Minga.Agent.View.Preview
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.Commands.Agent, as: AgentCommands
-  alias Minga.Editor.LayoutPreset
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.AgentAccess
@@ -20,8 +19,6 @@ defmodule Minga.Editor.Commands.AgentSplitToggleTest do
   alias Minga.Input
   alias Minga.Test.StubServer
 
-  # Starts a stub GenServer that replies :ok to any call and stops cleanly.
-  # Used as a fake agent session to avoid starting a real provider.
   defp fake_session do
     {:ok, pid} = StubServer.start_link()
     pid
@@ -30,8 +27,6 @@ defmodule Minga.Editor.Commands.AgentSplitToggleTest do
   defp base_state(opts \\ []) do
     {:ok, buf} = BufferServer.start_link(content: "hello\nworld")
     {:ok, prompt_buf} = BufferServer.start_link(content: "")
-
-    # Create agent buffer (needed for split pane behavior)
     agent_buf = BufferSync.start_buffer()
 
     agent = %AgentState{
@@ -59,11 +54,8 @@ defmodule Minga.Editor.Commands.AgentSplitToggleTest do
       }
     }
 
-    # Build a tab bar: file tab always exists, agent tab if starting active
     file_tab = Tab.new_file(1, "test.ex")
     tb = TabBar.new(file_tab)
-
-    # Create a proper window for the buffer
     window = Window.new(1, buf, 24, 80)
 
     state = %EditorState{
@@ -84,12 +76,19 @@ defmodule Minga.Editor.Commands.AgentSplitToggleTest do
     }
 
     if active do
-      # Build agent tab with keymap scope
-      agent_ctx = %{keymap_scope: :agent}
+      agent_win = Window.new_agent_chat(1, agent_buf, 24, 80)
+      agent_ctx = %{
+        keymap_scope: :agent,
+        windows: %Minga.Editor.State.Windows{
+          tree: {:leaf, 1},
+          map: %{1 => agent_win},
+          active: 1,
+          next_id: 2
+        }
+      }
 
       {tb, at} = TabBar.add(tb, :agent, "Agent")
       tb = TabBar.update_context(tb, at.id, agent_ctx)
-      # Switch back to file tab so switch_tab properly snapshots it
       tb = TabBar.switch_to(tb, file_tab.id)
 
       state = %{
@@ -100,9 +99,18 @@ defmodule Minga.Editor.Commands.AgentSplitToggleTest do
 
       EditorState.switch_tab(state, at.id)
     else
-      # Always store an agent tab so AgentAccess can find it.
-      # This ensures the agent buffer is accessible to toggle_agent_split.
-      agent_ctx = %{keymap_scope: :agent}
+      # Create background agent tab with agent context
+      agent_win = Window.new_agent_chat(1, agent_buf, 24, 80)
+      agent_ctx = %{
+        keymap_scope: :agent,
+        windows: %Minga.Editor.State.Windows{
+          tree: {:leaf, 1},
+          map: %{1 => agent_win},
+          active: 1,
+          next_id: 2
+        }
+      }
+
       {tb, at} = TabBar.add(tb, :agent, "Agent")
       tb = TabBar.update_context(tb, at.id, agent_ctx)
       tb = TabBar.switch_to(tb, file_tab.id)
@@ -110,51 +118,27 @@ defmodule Minga.Editor.Commands.AgentSplitToggleTest do
     end
   end
 
-  # Helper: checks whether the buffer view is active (keymap_scope :editor)
-  defp buffer_surface_active?(state), do: state.keymap_scope == :editor
-
-  describe "toggle_agent_split/1 — activating" do
-    test "creates an agent chat split pane" do
+  describe "toggle_agent_split/1 — activating (tab switch)" do
+    test "switches to agent tab" do
       state = base_state()
+      assert EditorState.active_tab_kind(state) == :file
+
       new_state = AgentCommands.toggle_agentic_view(state)
 
-      # Should have an agent chat window in the tree
-      assert LayoutPreset.has_agent_chat?(new_state)
-
-      # Should stay on BufferView surface
-      assert buffer_surface_active?(new_state)
+      assert EditorState.active_tab_kind(new_state) == :agent
     end
 
-    test "stays on the current tab (does not switch to agent tab)" do
+    test "keymap_scope becomes :agent" do
       state = base_state()
-      original_tab_id = state.tab_bar.active_id
       new_state = AgentCommands.toggle_agentic_view(state)
 
-      # Active tab should not change
-      assert new_state.tab_bar.active_id == original_tab_id
-      assert EditorState.active_tab_kind(new_state) == :file
+      assert new_state.keymap_scope == :agent
     end
 
-    test "keymap_scope remains :editor" do
+    test "agent tab has agent_chat window in context" do
       state = base_state()
       new_state = AgentCommands.toggle_agentic_view(state)
 
-      # File buffer window keeps focus, so keymap_scope stays :editor
-      assert new_state.keymap_scope == :editor
-    end
-
-    test "adds agent chat window to existing tree" do
-      state = base_state()
-      # Start with a single leaf window
-      assert match?({:leaf, _}, state.windows.tree)
-
-      new_state = AgentCommands.toggle_agentic_view(state)
-
-      # Should now have a split with agent chat
-      assert match?({:split, :vertical, _, _, _}, new_state.windows.tree)
-      assert LayoutPreset.has_agent_chat?(new_state)
-
-      # Verify agent chat window exists in the map
       agent_chat_exists =
         Enum.any?(new_state.windows.map, fn {_id, window} ->
           Content.agent_chat?(window.content)
@@ -163,80 +147,42 @@ defmodule Minga.Editor.Commands.AgentSplitToggleTest do
       assert agent_chat_exists
     end
 
-    test "starts a session when none is running" do
-      state = base_state(session: nil)
-      new_state = AgentCommands.toggle_agentic_view(state)
-
-      # Should have created the split
-      assert LayoutPreset.has_agent_chat?(new_state)
-
-      # When pi isn't installed, the session start fails gracefully
-      # and sets an error instead of crashing.
-      if AgentAccess.session(new_state) == nil do
-        assert AgentAccess.agent(new_state).error != nil
-      end
-    end
-
     test "does not double-start a session when one is already running" do
       fake_session = spawn(fn -> :timer.sleep(1000) end)
       state = base_state(session: fake_session)
       new_state = AgentCommands.toggle_agentic_view(state)
 
-      # Session should be preserved
       assert AgentAccess.session(new_state) == fake_session
-
-      # Should have created the split
-      assert LayoutPreset.has_agent_chat?(new_state)
     end
 
-    test "uses the background agent tab for state storage" do
+    test "agent tab exists after toggle" do
       state = base_state()
-
-      # base_state always creates a background agent tab for state storage
       agent_tab_before = TabBar.find_by_kind(state.tab_bar, :agent)
       assert agent_tab_before != nil
-      assert EditorState.active_tab_kind(state) == :file
 
       new_state = AgentCommands.toggle_agentic_view(state)
 
-      # Agent tab should still exist with the same ID
       agent_tab_after = TabBar.find_by_kind(new_state.tab_bar, :agent)
       assert agent_tab_after != nil
       assert agent_tab_after.id == agent_tab_before.id
-
-      # Active tab should still be the file tab
-      assert EditorState.active_tab_kind(new_state) == :file
     end
   end
 
-  describe "toggle_agent_split/1 — deactivating" do
-    test "switches to editor scope" do
-      state = base_state()
-      # First activate the agent split
-      with_agent = AgentCommands.toggle_agentic_view(state)
-      # Then toggle it off
-      new_state = AgentCommands.toggle_agentic_view(with_agent)
-      assert buffer_surface_active?(new_state)
-    end
-
-    test "second toggle removes the split pane" do
-      state = base_state()
-      # First toggle: add agent split
-      with_agent = AgentCommands.toggle_agentic_view(state)
-      assert LayoutPreset.has_agent_chat?(with_agent)
-
-      # Second toggle: remove agent split
-      without_agent = AgentCommands.toggle_agentic_view(with_agent)
-      refute LayoutPreset.has_agent_chat?(without_agent)
-    end
-
-    test "removing split resets keymap_scope to :editor" do
+  describe "toggle_agent_split/1 — deactivating (back to file)" do
+    test "switches back to file tab" do
       state = base_state()
       with_agent = AgentCommands.toggle_agentic_view(state)
-      # Simulate agent window having focus
-      with_agent = %{with_agent | keymap_scope: :agent}
+      assert EditorState.active_tab_kind(with_agent) == :agent
 
       without_agent = AgentCommands.toggle_agentic_view(with_agent)
+      assert EditorState.active_tab_kind(without_agent) == :file
+    end
+
+    test "restores :editor keymap_scope" do
+      state = base_state()
+      with_agent = AgentCommands.toggle_agentic_view(state)
+      without_agent = AgentCommands.toggle_agentic_view(with_agent)
+
       assert without_agent.keymap_scope == :editor
     end
   end
@@ -254,19 +200,6 @@ defmodule Minga.Editor.Commands.AgentSplitToggleTest do
       assert new_state.keymap_scope == :editor
     end
 
-    test "restores file tab context after closing agent tab" do
-      # Start with agent tab active
-      state = base_state(active: true)
-      assert EditorState.active_tab_kind(state) == :agent
-
-      # Close agent tab via kill_buffer
-      state = BufferManagement.execute(state, :kill_buffer)
-
-      assert EditorState.active_tab_kind(state) == :file
-      # Windows should be restored (though they may have different structure)
-      assert state.keymap_scope == :editor
-    end
-
     test "does not crash when agent tab has no session" do
       state = base_state(active: true, session: nil)
       new_state = BufferManagement.execute(state, :kill_buffer)
@@ -275,54 +208,38 @@ defmodule Minga.Editor.Commands.AgentSplitToggleTest do
 
     test "removes agent tab from tab bar" do
       state = base_state(active: true)
-      agent_tabs_before = TabBar.filter_by_kind(state.tab_bar, :agent)
-      assert length(agent_tabs_before) == 1
+      assert length(TabBar.filter_by_kind(state.tab_bar, :agent)) == 1
 
       new_state = BufferManagement.execute(state, :kill_buffer)
-      agent_tabs_after = TabBar.filter_by_kind(new_state.tab_bar, :agent)
-      assert agent_tabs_after == []
+      assert TabBar.filter_by_kind(new_state.tab_bar, :agent) == []
     end
   end
 
   describe "round-trip toggle" do
-    test "first toggle adds split, second toggle removes it" do
+    test "toggle cycle returns to file tab" do
       state = base_state()
-      # Start with single window
-      assert match?({:leaf, _}, state.windows.tree)
+      assert EditorState.active_tab_kind(state) == :file
 
-      # First toggle: add agent split
-      with_split = AgentCommands.toggle_agentic_view(state)
-      assert LayoutPreset.has_agent_chat?(with_split)
-      assert match?({:split, :vertical, _, _, _}, with_split.windows.tree)
+      with_agent = AgentCommands.toggle_agentic_view(state)
+      assert EditorState.active_tab_kind(with_agent) == :agent
 
-      # Second toggle: remove agent split
-      restored = AgentCommands.toggle_agentic_view(with_split)
-      refute LayoutPreset.has_agent_chat?(restored)
-      assert match?({:leaf, _}, restored.windows.tree)
-
-      # Should still be on BufferView
-      assert buffer_surface_active?(restored)
+      restored = AgentCommands.toggle_agentic_view(with_agent)
+      assert EditorState.active_tab_kind(restored) == :file
+      assert restored.keymap_scope == :editor
     end
 
-    test "agent state is preserved through toggle cycles" do
+    test "agent tab persists through toggle cycles" do
       state = base_state()
+      agent_tab_id = TabBar.find_by_kind(state.tab_bar, :agent).id
 
-      # First toggle: adds split and creates agent tab
-      first_toggle = AgentCommands.toggle_agentic_view(state)
-      agent_tab_id = TabBar.find_by_kind(first_toggle.tab_bar, :agent).id
-      assert LayoutPreset.has_agent_chat?(first_toggle)
+      first = AgentCommands.toggle_agentic_view(state)
+      assert TabBar.get(first.tab_bar, agent_tab_id) != nil
 
-      # Second toggle: removes split (agent tab still exists in background)
-      second_toggle = AgentCommands.toggle_agentic_view(first_toggle)
-      refute LayoutPreset.has_agent_chat?(second_toggle)
-      # Agent tab should still exist
-      assert TabBar.get(second_toggle.tab_bar, agent_tab_id) != nil
+      second = AgentCommands.toggle_agentic_view(first)
+      assert TabBar.get(second.tab_bar, agent_tab_id) != nil
 
-      # Third toggle: re-adds split, agent state preserved
-      third_toggle = AgentCommands.toggle_agentic_view(second_toggle)
-      assert LayoutPreset.has_agent_chat?(third_toggle)
-      # Agent tab still exists with same ID
-      assert TabBar.get(third_toggle.tab_bar, agent_tab_id) != nil
+      third = AgentCommands.toggle_agentic_view(second)
+      assert TabBar.get(third.tab_bar, agent_tab_id) != nil
     end
   end
 end

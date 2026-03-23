@@ -64,16 +64,24 @@ defmodule Minga.Editor.Commands.AgentSession do
 
         state = AgentAccess.update_agent(state, &AgentState.set_session(&1, pid))
 
+        # Set the session PID on the agent TAB (not active_id, which may
+        # be a file tab when called from toggle_agent_split).
         state =
           case state do
-            %{tab_bar: %TabBar{active_id: id}} ->
-              EditorState.set_tab_session(state, id, pid)
+            %{tab_bar: %TabBar{} = tb} ->
+              case TabBar.find_by_kind(tb, :agent) do
+                %Tab{id: agent_tab_id} ->
+                  EditorState.set_tab_session(state, agent_tab_id, pid)
+
+                nil ->
+                  state
+              end
 
             _ ->
               state
           end
 
-        # Create a workspace for this agent session (if one doesn't exist yet)
+        # Create an agent group for this session (if one doesn't exist yet)
         ensure_agent_workspace(state, pid)
 
       {:error, reason} ->
