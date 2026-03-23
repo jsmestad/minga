@@ -15,7 +15,7 @@ defmodule Minga.Editor.Commands.AgentSession do
   alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
-  alias Minga.Editor.State.Workspace
+  alias Minga.Editor.State.AgentGroup
 
   @type state :: EditorState.t()
 
@@ -199,19 +199,19 @@ defmodule Minga.Editor.Commands.AgentSession do
   # a workspace (e.g., session restart).
   @spec ensure_agent_workspace(state(), pid()) :: state()
   defp ensure_agent_workspace(%{tab_bar: %TabBar{} = tb} = state, session_pid) do
-    case TabBar.find_workspace_by_session(tb, session_pid) do
-      %Workspace{} ->
+    case TabBar.find_group_by_session(tb, session_pid) do
+      %AgentGroup{} ->
         # Workspace already exists for this session
         state
 
       nil ->
         # Create workspace and assign the agent tab to it
-        {tb, ws} = TabBar.add_agent_workspace(tb, "Agent", session_pid)
+        {tb, ws} = TabBar.add_agent_group(tb, "Agent", session_pid)
 
         # Find the agent tab with this session and move it into the workspace
         tb =
           case TabBar.find_by_session(tb, session_pid) do
-            %Tab{id: tab_id} -> TabBar.move_tab_to_workspace(tb, tab_id, ws.id)
+            %Tab{id: tab_id} -> TabBar.move_tab_to_group(tb, tab_id, ws.id)
             nil -> tb
           end
 

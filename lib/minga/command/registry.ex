@@ -58,7 +58,7 @@ defmodule Minga.Command.Registry do
     Minga.Editor.Commands.Formatting,
     Minga.Editor.Commands.UI,
     Minga.Editor.Commands.Tool,
-    Minga.Editor.Commands.Workspace
+    Minga.Editor.Commands.AgentGroup
   ]
 
   # Compile-time check: verify no duplicate command names across providers.

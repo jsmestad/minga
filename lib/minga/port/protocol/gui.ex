@@ -34,7 +34,7 @@ defmodule Minga.Port.Protocol.GUI do
   | 0x83   | gui_float_popup | Float popup window            |
   | 0x84   | gui_split_separators | Split pane separator lines |
   | 0x85   | gui_git_status       | Git status panel data      |
-  | 0x86   | gui_workspace_bar    | Workspace indicator + list |
+  | 0x86   | gui_agent_groups    | Workspace indicator + list |
 
   ## GUI Actions (Frontend → BEAM)
 
@@ -70,9 +70,9 @@ defmodule Minga.Port.Protocol.GUI do
   | 0x1C       | git_unstage_all      |
   | 0x1D       | git_commit           |
   | 0x1E       | git_open_file        |
-  | 0x1F       | workspace_rename     |
-  | 0x20       | workspace_set_icon   |
-  | 0x21       | workspace_close      |
+  | 0x1F       | agent_group_rename     |
+  | 0x20       | agent_group_set_icon   |
+  | 0x21       | agent_group_close      |
 
   """
 
@@ -111,7 +111,7 @@ defmodule Minga.Port.Protocol.GUI do
   @op_gui_float_popup 0x83
   @op_gui_split_separators 0x84
   @op_gui_git_status 0x85
-  @op_gui_workspace_bar 0x86
+  @op_gui_agent_groups 0x86
 
   # ── GUI action sub-opcodes (Frontend → BEAM) ──
 
@@ -146,9 +146,9 @@ defmodule Minga.Port.Protocol.GUI do
   @gui_action_git_unstage_all 0x1C
   @gui_action_git_commit 0x1D
   @gui_action_git_open_file 0x1E
-  @gui_action_workspace_rename 0x1F
-  @gui_action_workspace_set_icon 0x20
-  @gui_action_workspace_close 0x21
+  @gui_action_agent_group_rename 0x1F
+  @gui_action_agent_group_set_icon 0x20
+  @gui_action_agent_group_close 0x21
 
   # ── Types ──
 
@@ -184,9 +184,9 @@ defmodule Minga.Port.Protocol.GUI do
           | :git_unstage_all
           | {:git_commit, message :: String.t()}
           | {:git_open_file, path :: String.t()}
-          | {:workspace_rename, id :: non_neg_integer(), name :: String.t()}
-          | {:workspace_set_icon, id :: non_neg_integer(), icon :: String.t()}
-          | {:workspace_close, id :: non_neg_integer()}
+          | {:agent_group_rename, id :: non_neg_integer(), name :: String.t()}
+          | {:agent_group_set_icon, id :: non_neg_integer(), icon :: String.t()}
+          | {:agent_group_close, id :: non_neg_integer()}
 
   # ═══════════════════════════════════════════════════════════════════════════
   # Encoding (BEAM → Frontend)
@@ -559,10 +559,10 @@ defmodule Minga.Port.Protocol.GUI do
   # ── Workspace bar ──
 
   @doc """
-  Encodes a gui_workspace_bar command with the current workspace state.
+  Encodes a gui_agent_groups command with the current workspace state.
 
   Wire format:
-    opcode(1) + active_workspace_id(2) + workspace_count(1) + workspaces...
+    opcode(1) + active_group_id(2) + workspace_count(1) + workspaces...
 
   Per workspace:
     id(2) + kind(1) + agent_status(1) + color_r(1) + color_g(1) + color_b(1)
@@ -571,27 +571,26 @@ defmodule Minga.Port.Protocol.GUI do
   Kind: 0 = manual, 1 = agent.
   Agent status: 0 = idle, 1 = thinking, 2 = tool_executing, 3 = error.
   """
-  @spec encode_gui_workspace_bar(TabBar.t()) :: binary()
-  def encode_gui_workspace_bar(%TabBar{} = tb) do
+  @spec encode_gui_agent_groups(TabBar.t()) :: binary()
+  def encode_gui_agent_groups(%TabBar{} = tb) do
     entries =
-      Enum.map(tb.workspaces, fn ws ->
-        kind_byte = if ws.kind == :manual, do: 0, else: 1
-        status_byte = encode_agent_status(ws.agent_status)
-        r = Bitwise.bsr(Bitwise.band(ws.color, 0xFF0000), 16)
-        g = Bitwise.bsr(Bitwise.band(ws.color, 0x00FF00), 8)
-        b = Bitwise.band(ws.color, 0x0000FF)
-        tab_count = length(TabBar.tabs_in_workspace(tb, ws.id))
-        label_bytes = :erlang.iolist_to_binary([ws.label])
-        icon_bytes = :erlang.iolist_to_binary([ws.icon || "folder"])
+      Enum.map(tb.agent_groups, fn group ->
+        status_byte = encode_agent_status(group.agent_status)
+        r = Bitwise.bsr(Bitwise.band(group.color, 0xFF0000), 16)
+        g = Bitwise.bsr(Bitwise.band(group.color, 0x00FF00), 8)
+        b = Bitwise.band(group.color, 0x0000FF)
+        tab_count = length(TabBar.tabs_in_group(tb, group.id))
+        label_bytes = :erlang.iolist_to_binary([group.label])
+        icon_bytes = :erlang.iolist_to_binary([group.icon || "cpu"])
 
-        <<ws.id::16, kind_byte::8, status_byte::8, r::8, g::8, b::8, tab_count::16,
+        <<group.id::16, status_byte::8, r::8, g::8, b::8, tab_count::16,
           byte_size(label_bytes)::8, label_bytes::binary, byte_size(icon_bytes)::8,
           icon_bytes::binary>>
       end)
 
     IO.iodata_to_binary([
-      @op_gui_workspace_bar,
-      <<TabBar.active_workspace_id(tb)::16, length(tb.workspaces)::8>>
+      @op_gui_agent_groups,
+      <<TabBar.active_group_id(tb)::16, length(tb.agent_groups)::8>>
       | entries
     ])
   end
@@ -1467,19 +1466,19 @@ defmodule Minga.Port.Protocol.GUI do
     do: {:ok, {:git_open_file, path}}
 
   def decode_gui_action(
-        @gui_action_workspace_rename,
+        @gui_action_agent_group_rename,
         <<ws_id::16, name_len::16, name::binary-size(name_len)>>
       ),
-      do: {:ok, {:workspace_rename, ws_id, name}}
+      do: {:ok, {:agent_group_rename, ws_id, name}}
 
   def decode_gui_action(
-        @gui_action_workspace_set_icon,
+        @gui_action_agent_group_set_icon,
         <<ws_id::16, icon_len::8, icon::binary-size(icon_len)>>
       ),
-      do: {:ok, {:workspace_set_icon, ws_id, icon}}
+      do: {:ok, {:agent_group_set_icon, ws_id, icon}}
 
-  def decode_gui_action(@gui_action_workspace_close, <<ws_id::16>>),
-    do: {:ok, {:workspace_close, ws_id}}
+  def decode_gui_action(@gui_action_agent_group_close, <<ws_id::16>>),
+    do: {:ok, {:agent_group_close, ws_id}}
 
   def decode_gui_action(_, _), do: :error
 

@@ -187,7 +187,6 @@ defmodule Minga.Editor do
       end
 
     state = Startup.apply_config_options(state)
-    state = set_manual_workspace_label(state)
     Minga.Events.subscribe(:diagnostics_updated)
     Minga.Events.subscribe(:lsp_status_changed)
 
@@ -1980,19 +1979,19 @@ defmodule Minga.Editor do
     end
   end
 
-  defp handle_gui_action(%{tab_bar: %TabBar{} = tb} = state, {:workspace_close, ws_id}) do
-    %{state | tab_bar: TabBar.remove_workspace(tb, ws_id)}
+  defp handle_gui_action(%{tab_bar: %TabBar{} = tb} = state, {:agent_group_close, ws_id}) do
+    %{state | tab_bar: TabBar.remove_group(tb, ws_id)}
   end
 
-  defp handle_gui_action(%{tab_bar: %TabBar{} = tb} = state, {:workspace_rename, ws_id, name}) do
-    alias Minga.Editor.State.Workspace
-    tb = TabBar.update_workspace(tb, ws_id, &Workspace.rename(&1, name))
+  defp handle_gui_action(%{tab_bar: %TabBar{} = tb} = state, {:agent_group_rename, ws_id, name}) do
+    alias Minga.Editor.State.AgentGroup
+    tb = TabBar.update_group(tb, ws_id, &AgentGroup.rename(&1, name))
     %{state | tab_bar: tb}
   end
 
-  defp handle_gui_action(%{tab_bar: %TabBar{} = tb} = state, {:workspace_set_icon, ws_id, icon}) do
-    alias Minga.Editor.State.Workspace
-    tb = TabBar.update_workspace(tb, ws_id, &Workspace.set_icon(&1, icon))
+  defp handle_gui_action(%{tab_bar: %TabBar{} = tb} = state, {:agent_group_set_icon, ws_id, icon}) do
+    alias Minga.Editor.State.AgentGroup
+    tb = TabBar.update_group(tb, ws_id, &AgentGroup.set_icon(&1, icon))
     %{state | tab_bar: tb}
   end
 
@@ -2190,21 +2189,4 @@ defmodule Minga.Editor do
   defdelegate do_dismiss_completion(state), to: CompletionHandling, as: :dismiss
 
   # Sets the manual workspace label to the project directory name.
-  # Called once at startup after the Project GenServer is available.
-  @spec set_manual_workspace_label(state()) :: state()
-  defp set_manual_workspace_label(%{tab_bar: %TabBar{} = tb} = state) do
-    label =
-      case Minga.Project.root() do
-        nil -> "Files"
-        root -> Path.basename(root)
-      end
-
-    alias Minga.Editor.State.Workspace
-    tb = TabBar.update_workspace(tb, 0, &Workspace.set_label(&1, label))
-    %{state | tab_bar: tb}
-  rescue
-    _ -> state
-  end
-
-  defp set_manual_workspace_label(state), do: state
 end

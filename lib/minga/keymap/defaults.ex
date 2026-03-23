@@ -147,15 +147,15 @@ defmodule Minga.Keymap.Defaults do
     {[{9, @none}, {?a, @none}], :cycle_agent_tabs, "Next agent tab"},
 
     # ── Workspace (SPC TAB prefix, shared with tab) ──────────────────────────
-    {[{9, @none}, {9, @none}], :workspace_toggle_last, "Last workspace"},
-    {[{9, @none}, {?N, @none}], :workspace_next, "Next workspace"},
-    {[{9, @none}, {?P, @none}], :workspace_prev, "Previous workspace"},
-    {[{9, @none}, {?A, @none}], :workspace_next_agent, "Next agent workspace"},
-    {[{9, @none}, {?m, @none}], :workspace_manual, "Manual workspace"},
-    {[{9, @none}, {?l, @none}], :workspace_list, "Workspace picker"},
-    {[{9, @none}, {?r, @none}], :workspace_rename, "Rename workspace"},
-    {[{9, @none}, {?i, @none}], :workspace_set_icon, "Set workspace icon"},
-    {[{9, @none}, {?D, @none}], :workspace_close, "Close workspace"},
+    {[{9, @none}, {9, @none}], :agent_group_toggle, "Toggle agent group"},
+    {[{9, @none}, {?N, @none}], :agent_group_next, "Next agent group"},
+    {[{9, @none}, {?P, @none}], :agent_group_prev, "Previous agent group"},
+    {[{9, @none}, {?A, @none}], :agent_group_next_agent, "Next agent group"},
+    {[{9, @none}, {?m, @none}], :ungrouped_tabs, "Ungrouped tabs"},
+    {[{9, @none}, {?l, @none}], :agent_group_list, "Agent group picker"},
+    {[{9, @none}, {?r, @none}], :agent_group_rename, "Rename agent group"},
+    {[{9, @none}, {?i, @none}], :agent_group_set_icon, "Set group icon"},
+    {[{9, @none}, {?D, @none}], :agent_group_close, "Close agent group"},
 
     # ── Direct tab switching (SPC 1..9) ──────────────────────────────────────
     {[{?1, @none}], :tab_goto_1, "Tab 1"},
