@@ -125,15 +125,16 @@ struct GitStatusViewBranchHeaderTests {
 @Suite("FileTreeView View Structure")
 struct FileTreeViewTests {
 
-    @Test("Project header shows project name from root directory entry")
+    @Test("Project header shows project name from projectRoot path")
     @MainActor func showsProjectName() throws {
         let state = FileTreeState()
         state.visible = true
+        state.projectRoot = "/Users/test/code/minga"
         state.entries = [
             FileTreeEntry(
                 id: 1, index: 0, isDir: true, isExpanded: true,
                 isSelected: false, depth: 0, gitStatus: 0,
-                icon: "\u{F024B}", name: "minga", relPath: ""
+                icon: "\u{F024B}", name: "assets", relPath: "assets"
             ),
         ]
 
@@ -141,13 +142,16 @@ struct FileTreeViewTests {
         let body = try sut.inspect()
         let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
 
+        // Should use projectRoot, not the first entry name
         #expect(strings.contains("minga"))
+        #expect(!strings.contains("assets") || strings.filter { $0 == "assets" }.count == 1)
     }
 
-    @Test("Empty entries falls back to 'Project' name")
+    @Test("Empty projectRoot falls back to 'Project' name")
     @MainActor func fallbackProjectName() throws {
         let state = FileTreeState()
         state.visible = true
+        state.projectRoot = ""
         state.entries = []
 
         let sut = FileTreeView(fileTreeState: state, theme: ThemeColors(), encoder: nil)

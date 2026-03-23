@@ -96,8 +96,8 @@ struct FileTreeView: View {
     }
 
     private var projectName: String {
-        if let first = fileTreeState.entries.first, first.depth == 0, first.isDir {
-            return first.name
+        if !fileTreeState.projectRoot.isEmpty {
+            return (fileTreeState.projectRoot as NSString).lastPathComponent
         }
         return "Project"
     }
