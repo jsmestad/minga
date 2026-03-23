@@ -17,6 +17,9 @@ struct TabBarView: View {
     let encoder: InputEncoder?
 
     @State private var hoverTabId: UInt32?
+    @State private var renamingTabId: UInt32?
+    @State private var tabRenameText: String = ""
+    @FocusState private var tabRenameFieldFocused: Bool
     /// Accumulated horizontal swipe delta for workspace switching.
     @State private var swipeDelta: CGFloat = 0
     /// Whether a swipe gesture is in progress.
@@ -386,12 +389,35 @@ struct TabBarView: View {
                 .font(.custom("Symbols Nerd Font Mono", size: 12))
                 .foregroundStyle(tab.isActive ? theme.tabActiveFg : theme.tabInactiveFg)
 
-            // Label
-            Text(tab.label)
-                .font(.system(size: 11.5))
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .foregroundStyle(tab.isActive ? theme.tabActiveFg : theme.tabInactiveFg)
+            // Label (double-click to rename)
+            if renamingTabId == tab.id {
+                TextField("", text: $tabRenameText)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 11.5))
+                    .focused($tabRenameFieldFocused)
+                    .frame(minWidth: 30, maxWidth: 160)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 2)
+                    .background(
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(theme.tabActiveBg)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 4)
+                                    .strokeBorder(Color.accentColor.opacity(0.5), lineWidth: 1)
+                            )
+                    )
+                    .onSubmit { commitTabRename(tab) }
+                    .onExitCommand { renamingTabId = nil }
+                    .onChange(of: tabRenameFieldFocused) { _, focused in
+                        if !focused { commitTabRename(tab) }
+                    }
+            } else {
+                Text(tab.label)
+                    .font(.system(size: 11.5))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .foregroundStyle(tab.isActive ? theme.tabActiveFg : theme.tabInactiveFg)
+            }
 
             // Close button / dirty indicator zone.
             // The close button is always in the view hierarchy so it can
@@ -417,7 +443,12 @@ struct TabBarView: View {
         .frame(height: barHeight)
         .background(tab.isActive ? theme.tabActiveBg : Color.clear)
         .contentShape(Rectangle())
-        .onTapGesture {
+        .onTapGesture(count: 2) {
+            tabRenameText = tab.label
+            renamingTabId = tab.id
+            DispatchQueue.main.async { tabRenameFieldFocused = true }
+        }
+        .onTapGesture(count: 1) {
             encoder?.sendSelectTab(id: tab.id)
         }
         .onHover { hovering in
@@ -426,10 +457,24 @@ struct TabBarView: View {
             }
         }
         .contextMenu {
+            Button("Rename Tab...") {
+                tabRenameText = tab.label
+                renamingTabId = tab.id
+                DispatchQueue.main.async { tabRenameFieldFocused = true }
+            }
+            Divider()
             Button("Close Tab") {
                 encoder?.sendCloseTab(id: tab.id)
             }
         }
+    }
+
+    private func commitTabRename(_ tab: TabEntry) {
+        guard renamingTabId == tab.id else { return }
+        renamingTabId = nil
+        let trimmed = tabRenameText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != tab.label else { return }
+        encoder?.sendTabRename(id: tab.id, name: trimmed)
     }
 
     // MARK: - Helpers
