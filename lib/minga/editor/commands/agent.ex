@@ -34,6 +34,7 @@ defmodule Minga.Editor.Commands.Agent do
   alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
+  alias Minga.Editor.State.Workspace
   alias Minga.Editor.State.Windows
   alias Minga.Editor.Window
   alias Minga.Editor.WindowTree
@@ -114,6 +115,23 @@ defmodule Minga.Editor.Commands.Agent do
         {tb, _tab} = TabBar.add(state.tab_bar, :agent, "Agent")
         agent_tab = TabBar.find_by_kind(tb, :agent)
         tb = TabBar.update_context(tb, agent_tab.id, context)
+
+        # Create a workspace for this agent and assign the tab to it
+        session = AgentAccess.session(state)
+
+        tb =
+          case session && TabBar.find_workspace_by_session(tb, session) do
+            %Workspace{id: ws_id} ->
+              # Workspace already exists (e.g., re-opening agent tab)
+              TabBar.move_tab_to_workspace(tb, agent_tab.id, ws_id)
+
+            nil when is_pid(session) ->
+              {tb, ws} = TabBar.add_agent_workspace(tb, "Agent", session)
+              TabBar.move_tab_to_workspace(tb, agent_tab.id, ws.id)
+
+            _ ->
+              tb
+          end
 
         # Switch back to the original active tab
         tb = %{tb | active_id: state.tab_bar.active_id}

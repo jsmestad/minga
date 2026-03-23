@@ -18,6 +18,7 @@ defmodule Minga.Agent.Events do
   alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
+  alias Minga.Editor.State.Workspace
 
   @type effect ::
           :render
@@ -149,6 +150,9 @@ defmodule Minga.Agent.Events do
     state =
       AgentAccess.update_agent_ui(state, &UIState.record_baseline(&1, path, before_content))
 
+    # Associate the file's tab with the agent's workspace
+    state = associate_file_with_agent_workspace(state, path)
+
     baseline = UIState.get_baseline(AgentAccess.agent_ui(state), path)
     existing_review = existing_diff_for_path(state, path)
 
@@ -256,10 +260,49 @@ defmodule Minga.Agent.Events do
     case session && TabBar.find_by_session(state.tab_bar, session) do
       %Tab{id: id} ->
         tb = TabBar.update_tab(state.tab_bar, id, &Tab.set_agent_status(&1, status))
+        # Also sync workspace agent status
+        tb =
+          case TabBar.find_workspace_by_session(tb, session) do
+            %Workspace{id: ws_id} ->
+              TabBar.update_workspace(tb, ws_id, &Workspace.set_agent_status(&1, status))
+
+            nil ->
+              tb
+          end
+
         %{state | tab_bar: tb}
 
       _ ->
         state
+    end
+  end
+
+  # Associates a file tab with the agent's workspace when the agent
+  # modifies the file. Finds the file tab by label match, then moves
+  # it to the agent session's workspace group.
+  @spec associate_file_with_agent_workspace(EditorState.t(), String.t()) :: EditorState.t()
+  defp associate_file_with_agent_workspace(%{tab_bar: nil} = state, _path), do: state
+
+  defp associate_file_with_agent_workspace(state, path) do
+    session = AgentAccess.session(state)
+    tb = state.tab_bar
+
+    with pid when is_pid(pid) <- session,
+         %Workspace{id: ws_id} <- TabBar.find_workspace_by_session(tb, pid) do
+      # Find the file tab whose label matches the filename
+      filename = Path.basename(path)
+
+      case Enum.find(tb.tabs, fn tab ->
+             tab.kind == :file and tab.group_id != ws_id and tab.label == filename
+           end) do
+        %Tab{id: tab_id} ->
+          %{state | tab_bar: TabBar.move_tab_to_workspace(tb, tab_id, ws_id)}
+
+        nil ->
+          state
+      end
+    else
+      _ -> state
     end
   end
 end

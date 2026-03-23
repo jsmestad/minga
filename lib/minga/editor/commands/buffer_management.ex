@@ -764,6 +764,16 @@ defmodule Minga.Editor.Commands.BufferManagement do
       end
     end
 
+    # Remove the agent's workspace (tabs migrate to manual workspace)
+    state =
+      case session && TabBar.find_workspace_by_session(state.tab_bar, session) do
+        %{id: ws_id} ->
+          %{state | tab_bar: TabBar.remove_workspace(state.tab_bar, ws_id)}
+
+        _ ->
+          state
+      end
+
     Minga.Editor.log_to_messages("Closed agent tab")
 
     # Find a file tab to switch to
