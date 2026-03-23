@@ -142,6 +142,15 @@ final class StatusBarState {
         return Character(UnicodeScalar(96 + macroRecording))
     }
 
+    /// Titleized filetype for display (e.g., "elixir" → "Elixir", "c_sharp" → "C Sharp").
+    var filetypeDisplay: String {
+        filetype
+            .replacingOccurrences(of: "_", with: " ")
+            .split(separator: " ")
+            .map { $0.prefix(1).uppercased() + $0.dropFirst() }
+            .joined(separator: " ")
+    }
+
     /// Icon color as a SwiftUI Color from the 24-bit RGB components.
     var iconColor: Color {
         Color(
@@ -465,19 +474,27 @@ struct StatusBarView: View {
                 lspIndicator
             }
 
-            // Devicon + filetype
+            // Devicon + filetype (clickable to change language mode)
             if !state.filetype.isEmpty {
-                HStack(spacing: 3) {
-                    if !state.icon.isEmpty {
-                        Text(state.icon)
-                            .font(.custom("Symbols Nerd Font Mono", size: 11))
-                            .foregroundStyle(state.iconColor)
+                Button(action: {
+                    encoder?.sendExecuteCommand(name: "set_language")
+                }) {
+                    HStack(spacing: 3) {
+                        if !state.icon.isEmpty {
+                            Text(state.icon)
+                                .font(.custom("Symbols Nerd Font Mono", size: 11))
+                                .foregroundStyle(state.iconColor)
+                        }
+                        Text(state.filetypeDisplay)
+                            .font(.system(size: 11))
+                            .foregroundStyle(theme.modelineBarFg.opacity(0.6))
                     }
-                    Text(state.filetype)
-                        .font(.system(size: 11))
-                        .foregroundStyle(theme.modelineBarFg.opacity(0.6))
                 }
-                .help(state.filetype)
+                .buttonStyle(.plain)
+                .help("Change language mode (SPC b l)")
+                .onHover { isHovered in
+                    if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+                }
             }
 
             // Cursor position / message count
