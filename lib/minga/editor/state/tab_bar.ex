@@ -22,7 +22,6 @@ defmodule Minga.Editor.State.TabBar do
           active_id: Tab.id(),
           next_id: Tab.id(),
           workspaces: [Workspace.t()],
-          active_workspace_id: non_neg_integer(),
           next_workspace_id: pos_integer()
         }
 
@@ -31,7 +30,6 @@ defmodule Minga.Editor.State.TabBar do
             active_id: 1,
             next_id: 2,
             workspaces: [Workspace.manual()],
-            active_workspace_id: 0,
             next_workspace_id: 1
 
   @doc "Creates a tab bar with a single initial tab."
@@ -310,10 +308,27 @@ defmodule Minga.Editor.State.TabBar do
     Enum.find(workspaces, &(&1.id == id))
   end
 
-  @doc "Returns the active workspace."
+  @doc """
+  Returns the active workspace.
+
+  Derived from the active tab's group_id, not stored separately.
+  The active workspace is always the workspace of the tab you're looking at.
+  """
   @spec active_workspace(t()) :: Workspace.t() | nil
   def active_workspace(%__MODULE__{} = tb) do
-    get_workspace(tb, tb.active_workspace_id)
+    case active(tb) do
+      %Tab{group_id: gid} -> get_workspace(tb, gid)
+      nil -> get_workspace(tb, 0)
+    end
+  end
+
+  @doc "Returns the active workspace id, derived from the active tab."
+  @spec active_workspace_id(t()) :: non_neg_integer()
+  def active_workspace_id(%__MODULE__{} = tb) do
+    case active(tb) do
+      %Tab{group_id: gid} -> gid
+      nil -> 0
+    end
   end
 
   @doc """
@@ -348,10 +363,7 @@ defmodule Minga.Editor.State.TabBar do
         if tab.group_id == workspace_id, do: %{tab | group_id: 0}, else: tab
       end)
 
-    active_ws =
-      if tb.active_workspace_id == workspace_id, do: 0, else: tb.active_workspace_id
-
-    %{tb | workspaces: workspaces, tabs: tabs, active_workspace_id: active_ws}
+    %{tb | workspaces: workspaces, tabs: tabs}
   end
 
   @doc "Moves a tab to a different workspace."
@@ -360,11 +372,15 @@ defmodule Minga.Editor.State.TabBar do
     update_tab(tb, tab_id, &Tab.set_group(&1, workspace_id))
   end
 
-  @doc "Switches to the given workspace."
+  @doc """
+  Switches to the given workspace by activating its first tab.
+
+  Returns unchanged if the workspace doesn't exist or has no tabs.
+  """
   @spec switch_workspace(t(), non_neg_integer()) :: t()
   def switch_workspace(%__MODULE__{} = tb, workspace_id) do
     if Enum.any?(tb.workspaces, &(&1.id == workspace_id)) do
-      %{tb | active_workspace_id: workspace_id}
+      switch_to_first_tab_in(tb, workspace_id)
     else
       tb
     end
@@ -375,12 +391,11 @@ defmodule Minga.Editor.State.TabBar do
   def next_workspace(%__MODULE__{workspaces: [_single]} = tb), do: tb
 
   def next_workspace(%__MODULE__{workspaces: workspaces} = tb) do
-    idx =
-      Enum.find_index(workspaces, &(&1.id == tb.active_workspace_id)) || 0
-
+    current_ws_id = active_workspace_id(tb)
+    idx = Enum.find_index(workspaces, &(&1.id == current_ws_id)) || 0
     next_idx = rem(idx + 1, length(workspaces))
     next_ws = Enum.at(workspaces, next_idx)
-    %{tb | active_workspace_id: next_ws.id}
+    switch_to_first_tab_in(tb, next_ws.id)
   end
 
   @doc "Switches to the previous workspace, wrapping around."
@@ -388,30 +403,29 @@ defmodule Minga.Editor.State.TabBar do
   def prev_workspace(%__MODULE__{workspaces: [_single]} = tb), do: tb
 
   def prev_workspace(%__MODULE__{workspaces: workspaces} = tb) do
-    idx =
-      Enum.find_index(workspaces, &(&1.id == tb.active_workspace_id)) || 0
-
+    current_ws_id = active_workspace_id(tb)
+    idx = Enum.find_index(workspaces, &(&1.id == current_ws_id)) || 0
     len = length(workspaces)
     prev_idx = if idx == 0, do: len - 1, else: idx - 1
     prev_ws = Enum.at(workspaces, prev_idx)
-    %{tb | active_workspace_id: prev_ws.id}
+    switch_to_first_tab_in(tb, prev_ws.id)
   end
 
   @doc "Switches to the next agent workspace, skipping manual."
   @spec next_agent_workspace(t()) :: t()
   def next_agent_workspace(%__MODULE__{workspaces: workspaces} = tb) do
     agent_ws = Enum.filter(workspaces, &Workspace.agent?/1)
+    current_ws_id = active_workspace_id(tb)
 
     case agent_ws do
       [] ->
         tb
 
       [only] ->
-        %{tb | active_workspace_id: only.id}
+        switch_to_first_tab_in(tb, only.id)
 
       _ ->
-        current_idx =
-          Enum.find_index(agent_ws, &(&1.id == tb.active_workspace_id))
+        current_idx = Enum.find_index(agent_ws, &(&1.id == current_ws_id))
 
         next_ws =
           case current_idx do
@@ -419,7 +433,17 @@ defmodule Minga.Editor.State.TabBar do
             idx -> Enum.at(agent_ws, rem(idx + 1, length(agent_ws)))
           end
 
-        %{tb | active_workspace_id: next_ws.id}
+        switch_to_first_tab_in(tb, next_ws.id)
+    end
+  end
+
+  # Switches active_id to the first tab in the given workspace.
+  # Returns unchanged if the workspace has no tabs.
+  @spec switch_to_first_tab_in(t(), non_neg_integer()) :: t()
+  defp switch_to_first_tab_in(tb, workspace_id) do
+    case tabs_in_workspace(tb, workspace_id) do
+      [first | _] -> %{tb | active_id: first.id}
+      [] -> tb
     end
   end
 

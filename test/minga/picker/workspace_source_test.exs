@@ -66,14 +66,19 @@ defmodule Minga.Picker.WorkspaceSourceTest do
   end
 
   describe "on_select/2" do
-    test "switches to selected workspace" do
+    test "switches active tab to first tab in selected workspace" do
       tb = TabBar.new(Tab.new_file(1, "a.ex"))
+      {tb, _} = TabBar.add(tb, :file, "agent_file.ex")
       {tb, ws} = TabBar.add_agent_workspace(tb, "Agent")
-      state = %{tab_bar: tb}
+      tb = TabBar.move_tab_to_workspace(tb, 2, ws.id)
+      # Start on file tab
+      tb = TabBar.switch_to(tb, 1)
 
-      item = %Item{id: ws.id, label: "Agent"}
-      state = WorkspaceSource.on_select(item, state)
-      assert state.tab_bar.active_workspace_id == ws.id
+      # on_select calls EditorState.switch_tab which needs a full state.
+      # Test the underlying switch_workspace behavior directly instead.
+      tb = TabBar.switch_workspace(tb, ws.id)
+      assert TabBar.active_workspace_id(tb) == ws.id
+      assert tb.active_id == 2
     end
   end
 

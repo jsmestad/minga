@@ -40,7 +40,8 @@ defmodule Minga.Editor.Commands.Workspace do
   @doc "Switch to last active workspace (toggle between current and manual)."
   @spec workspace_toggle_last(state()) :: state()
   def workspace_toggle_last(%{tab_bar: %TabBar{} = tb} = state) do
-    new_id = if tb.active_workspace_id == 0, do: last_agent_id(tb), else: 0
+    current_ws = TabBar.active_workspace_id(tb)
+    new_id = if current_ws == 0, do: last_agent_id(tb), else: 0
     %{state | tab_bar: TabBar.switch_workspace(tb, new_id)}
   end
 
@@ -51,7 +52,7 @@ defmodule Minga.Editor.Commands.Workspace do
   """
   @spec workspace_close(state()) :: state()
   def workspace_close(%{tab_bar: %TabBar{} = tb} = state) do
-    %{state | tab_bar: TabBar.remove_workspace(tb, tb.active_workspace_id)}
+    %{state | tab_bar: TabBar.remove_workspace(tb, TabBar.active_workspace_id(tb))}
   end
 
   @doc "Open the workspace picker."

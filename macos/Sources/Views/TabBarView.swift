@@ -17,9 +17,6 @@ struct TabBarView: View {
     let encoder: InputEncoder?
 
     @State private var hoverTabId: UInt32?
-    /// Tracks which workspace groups are collapsed (Swift-local state).
-    /// Group 0 (manual) is never collapsible; only agent groups can collapse.
-    @State private var collapsedGroups: Set<UInt16> = []
     /// Accumulated horizontal swipe delta for workspace switching.
     @State private var swipeDelta: CGFloat = 0
     /// Whether a swipe gesture is in progress.
@@ -68,12 +65,30 @@ struct TabBarView: View {
             // Right-side controls
             verticalSeparator
 
-            // New tab button
-            tabBarButton(
-                systemIcon: "plus",
-                tooltip: "New tab"
-            ) {
-                encoder?.sendNewTab()
+            // New tab / new agent dropdown
+            Menu {
+                Button(action: {
+                    encoder?.sendNewTab()
+                }) {
+                    Label("New File", systemImage: "doc")
+                }
+                Button(action: {
+                    encoder?.sendExecuteCommand(name: "toggle_agent_split")
+                }) {
+                    Label("New Agent Session", systemImage: "cpu")
+                }
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundStyle(theme.tabInactiveFg)
+                    .frame(width: 28, height: barHeight)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .frame(width: 28)
+            .help("New file or agent session")
+            .onHover { isHovered in
+                if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
             }
 
             // Window split buttons
@@ -136,13 +151,14 @@ struct TabBarView: View {
         }
     }
 
-    /// Grouped tab strip: renders tabs in workspace groups with
-    /// collapsible headers for agent workspaces. Groups are consolidated
-    /// by groupId (not contiguous), so tabs from the same workspace always
-    /// appear together even if they're interleaved in the underlying list.
+    /// Grouped tab strip: only the active workspace's tabs are expanded.
+    /// All other workspaces collapse to capsules automatically.
+    /// Groups are consolidated by groupId so tabs from the same workspace
+    /// always appear together.
     @ViewBuilder
     private var groupedTabStrip: some View {
         let groups = groupedTabs()
+        let activeWsId = tabBarState.activeWorkspaceId
 
         ForEach(groups, id: \.groupId) { group in
             // Group separator before non-first groups
@@ -150,19 +166,18 @@ struct TabBarView: View {
                 groupSeparator(color: workspaceColor(for: group.groupId))
             }
 
-            if group.groupId != 0 && collapsedGroups.contains(group.groupId) {
-                // Collapsed agent group: show capsule
-                collapsedGroupCapsule(group)
-            } else {
-                // Expanded: show individual tabs
+            if group.groupId == 0 || group.groupId == activeWsId {
+                // Manual workspace is always expanded; active workspace is expanded
                 ForEach(Array(group.tabs.enumerated()), id: \.element.id) { tabIndex, tab in
                     tabItem(tab)
 
-                    // Thin separator between tabs within the same group
                     if tabIndex < group.tabs.count - 1 {
                         verticalSeparator
                     }
                 }
+            } else {
+                // Inactive agent workspace: show collapsed capsule
+                collapsedGroupCapsule(group)
             }
         }
     }
@@ -175,15 +190,12 @@ struct TabBarView: View {
         let color = ws?.color ?? theme.tabInactiveFg
 
         Button(action: {
-            // Pop cursor before view disappears to avoid stuck cursor
-            NSCursor.pop()
-            // Expand the group and switch to its workspace
-            collapsedGroups.remove(group.groupId)
-            // Switch to the specific workspace this capsule represents
-            let wsIndex = tabBarState.workspaces.firstIndex { $0.id == group.groupId }
-            let wsNum = wsIndex.map { $0 } ?? 0
-            if wsNum > 0 && wsNum <= 9 {
-                encoder?.sendExecuteCommand(name: "workspace_goto_\(wsNum)")
+            // Switch to this workspace by id (activates its first tab on the BEAM side)
+            if group.groupId == 0 {
+                encoder?.sendExecuteCommand(name: "workspace_manual")
+            } else if let idx = tabBarState.workspaces.firstIndex(where: { $0.id == group.groupId }),
+                      idx >= 1, idx <= 9 {
+                encoder?.sendExecuteCommand(name: "workspace_goto_\(idx)")
             } else {
                 encoder?.sendExecuteCommand(name: "workspace_next_agent")
             }
@@ -215,6 +227,10 @@ struct TabBarView: View {
         .help("Expand and switch to workspace")
         .onHover { isHovered in
             if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+        }
+        .onDisappear {
+            // Safety net: pop cursor if capsule is removed while hovered
+            NSCursor.pop()
         }
     }
 
@@ -334,11 +350,8 @@ struct TabBarView: View {
             }
         }
         .contextMenu {
-            // Right-click to collapse the group this tab belongs to
-            if tab.groupId != 0 && tabBarState.hasWorkspaces {
-                Button("Collapse Group") {
-                    collapsedGroups.insert(tab.groupId)
-                }
+            Button("Close Tab") {
+                encoder?.sendCloseTab(id: tab.id)
             }
         }
     }

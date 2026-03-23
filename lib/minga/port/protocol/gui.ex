@@ -579,7 +579,7 @@ defmodule Minga.Port.Protocol.GUI do
 
     IO.iodata_to_binary([
       @op_gui_workspace_bar,
-      <<tb.active_workspace_id::16, length(tb.workspaces)::8>>
+      <<TabBar.active_workspace_id(tb)::16, length(tb.workspaces)::8>>
       | entries
     ])
   end

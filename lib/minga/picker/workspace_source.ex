@@ -24,7 +24,7 @@ defmodule Minga.Picker.WorkspaceSource do
     Enum.map(tb.workspaces, fn ws ->
       icon = workspace_icon(ws)
       label = "#{icon} #{ws.label}"
-      active_marker = if ws.id == tb.active_workspace_id, do: " \u{2022}", else: ""
+      active_marker = if ws.id == TabBar.active_workspace_id(tb), do: " \u{2022}", else: ""
       tabs = TabBar.tabs_in_workspace(tb, ws.id)
       tab_count = length(tabs)
       status = agent_status_text(ws)
@@ -55,17 +55,10 @@ defmodule Minga.Picker.WorkspaceSource do
   @impl true
   @spec on_select(Item.t(), term()) :: term()
   def on_select(%Item{id: workspace_id}, %{tab_bar: %TabBar{} = tb} = state) do
+    # switch_workspace activates the first tab in the target workspace,
+    # then switch_tab does the full context snapshot/restore cycle.
     tb = TabBar.switch_workspace(tb, workspace_id)
-
-    # Switch to the first tab in the selected workspace so the user
-    # sees the workspace's content, not just an internal pointer change.
-    case TabBar.tabs_in_workspace(tb, workspace_id) do
-      [first | _] ->
-        EditorState.switch_tab(%{state | tab_bar: tb}, first.id)
-
-      [] ->
-        %{state | tab_bar: tb}
-    end
+    EditorState.switch_tab(%{state | tab_bar: tb}, tb.active_id)
   end
 
   def on_select(_, state), do: state

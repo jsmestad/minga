@@ -367,14 +367,18 @@ defmodule Minga.Editor.State.TabBarTest do
       assert TabBar.get(tb, 1).group_id == 0
     end
 
-    test "removing active workspace switches to manual" do
+    test "removing active workspace migrates tabs and active lands on manual" do
       tb = TabBar.new(file_tab(1, "a.ex"))
+      {tb, _} = TabBar.add(tb, :file, "b.ex")
       {tb, ws} = TabBar.add_agent_workspace(tb, "Agent")
+      tb = TabBar.move_tab_to_workspace(tb, 2, ws.id)
       tb = TabBar.switch_workspace(tb, ws.id)
-      assert tb.active_workspace_id == ws.id
+      assert TabBar.active_workspace_id(tb) == ws.id
 
+      # Remove workspace: tab 2 migrates to manual, active tab stays 2 (now in manual)
       tb = TabBar.remove_workspace(tb, ws.id)
-      assert tb.active_workspace_id == 0
+      assert TabBar.active_workspace_id(tb) == 0
+      assert TabBar.get(tb, 2).group_id == 0
     end
 
     test "removing nonexistent workspace is harmless" do
@@ -408,40 +412,61 @@ defmodule Minga.Editor.State.TabBarTest do
   end
 
   describe "switch_workspace/2" do
-    test "switches to an existing workspace" do
+    test "switches to an existing workspace by activating its first tab" do
       tb = TabBar.new(file_tab(1, "a.ex"))
+      {tb, _} = TabBar.add(tb, :agent, "Agent")
       {tb, ws} = TabBar.add_agent_workspace(tb, "Agent")
+      # Put agent tab in agent workspace
+      tb = TabBar.move_tab_to_workspace(tb, 2, ws.id)
+      # Start on file tab
+      tb = TabBar.switch_to(tb, 1)
+
       tb = TabBar.switch_workspace(tb, ws.id)
-      assert tb.active_workspace_id == ws.id
+      assert TabBar.active_workspace_id(tb) == ws.id
+      assert tb.active_id == 2
     end
 
     test "switching to nonexistent workspace is a no-op" do
       tb = TabBar.new(file_tab(1, "a.ex"))
       tb2 = TabBar.switch_workspace(tb, 999)
-      assert tb2.active_workspace_id == tb.active_workspace_id
+      assert TabBar.active_workspace_id(tb2) == TabBar.active_workspace_id(tb)
     end
   end
 
   describe "next_workspace/1 and prev_workspace/1" do
     test "next_workspace wraps around" do
       tb = TabBar.new(file_tab(1, "a.ex"))
-      {tb, _ws1} = TabBar.add_agent_workspace(tb, "Agent 1")
+      {tb, _} = TabBar.add(tb, :file, "b.ex")
+      {tb, ws1} = TabBar.add_agent_workspace(tb, "Agent 1")
+      tb = TabBar.move_tab_to_workspace(tb, 2, ws1.id)
       {tb, ws2} = TabBar.add_agent_workspace(tb, "Agent 2")
-      tb = TabBar.switch_workspace(tb, ws2.id)
+      {tb, _} = TabBar.add(tb, :file, "c.ex")
+      tb = TabBar.move_tab_to_workspace(tb, 3, ws2.id)
 
+      # Start on ws2 tab
+      tb = TabBar.switch_workspace(tb, ws2.id)
+      assert TabBar.active_workspace_id(tb) == ws2.id
+
+      # Next wraps to manual (0)
       tb = TabBar.next_workspace(tb)
-      assert tb.active_workspace_id == 0
+      assert TabBar.active_workspace_id(tb) == 0
     end
 
     test "prev_workspace wraps around" do
       tb = TabBar.new(file_tab(1, "a.ex"))
-      {tb, _ws1} = TabBar.add_agent_workspace(tb, "Agent 1")
+      {tb, _} = TabBar.add(tb, :file, "b.ex")
+      {tb, ws1} = TabBar.add_agent_workspace(tb, "Agent 1")
+      tb = TabBar.move_tab_to_workspace(tb, 2, ws1.id)
       {tb, ws2} = TabBar.add_agent_workspace(tb, "Agent 2")
-      # Start at manual (0)
+      {tb, _} = TabBar.add(tb, :file, "c.ex")
+      tb = TabBar.move_tab_to_workspace(tb, 3, ws2.id)
+
+      # Start on manual
       tb = TabBar.switch_workspace(tb, 0)
 
+      # Prev wraps to ws2
       tb = TabBar.prev_workspace(tb)
-      assert tb.active_workspace_id == ws2.id
+      assert TabBar.active_workspace_id(tb) == ws2.id
     end
 
     test "next_workspace on single workspace is a no-op" do
@@ -460,18 +485,23 @@ defmodule Minga.Editor.State.TabBarTest do
   describe "next_agent_workspace/1" do
     test "cycles through agent workspaces only, skipping manual" do
       tb = TabBar.new(file_tab(1, "a.ex"))
+      {tb, _} = TabBar.add(tb, :file, "b.ex")
       {tb, ws1} = TabBar.add_agent_workspace(tb, "Agent 1")
+      tb = TabBar.move_tab_to_workspace(tb, 2, ws1.id)
       {tb, ws2} = TabBar.add_agent_workspace(tb, "Agent 2")
+      {tb, _} = TabBar.add(tb, :file, "c.ex")
+      tb = TabBar.move_tab_to_workspace(tb, 3, ws2.id)
 
+      # Start on manual
       tb = TabBar.switch_workspace(tb, 0)
       tb = TabBar.next_agent_workspace(tb)
-      assert tb.active_workspace_id == ws1.id
+      assert TabBar.active_workspace_id(tb) == ws1.id
 
       tb = TabBar.next_agent_workspace(tb)
-      assert tb.active_workspace_id == ws2.id
+      assert TabBar.active_workspace_id(tb) == ws2.id
 
       tb = TabBar.next_agent_workspace(tb)
-      assert tb.active_workspace_id == ws1.id
+      assert TabBar.active_workspace_id(tb) == ws1.id
     end
 
     test "no agent workspaces returns unchanged" do
@@ -482,14 +512,17 @@ defmodule Minga.Editor.State.TabBarTest do
 
     test "single agent workspace always lands on it" do
       tb = TabBar.new(file_tab(1, "a.ex"))
+      {tb, _} = TabBar.add(tb, :file, "b.ex")
       {tb, ws} = TabBar.add_agent_workspace(tb, "Agent")
+      tb = TabBar.move_tab_to_workspace(tb, 2, ws.id)
+
+      # Start on manual
       tb = TabBar.switch_workspace(tb, 0)
+      tb = TabBar.next_agent_workspace(tb)
+      assert TabBar.active_workspace_id(tb) == ws.id
 
       tb = TabBar.next_agent_workspace(tb)
-      assert tb.active_workspace_id == ws.id
-
-      tb = TabBar.next_agent_workspace(tb)
-      assert tb.active_workspace_id == ws.id
+      assert TabBar.active_workspace_id(tb) == ws.id
     end
   end
 
