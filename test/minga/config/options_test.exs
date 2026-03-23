@@ -92,7 +92,8 @@ defmodule Minga.Config.OptionsTest do
                nav_flash_threshold: 5,
                log_level_config: :default,
                log_level_port: :default,
-               parser_tree_ttl: 300
+               parser_tree_ttl: 300,
+               event_retention_days: 90
              }
     end
   end

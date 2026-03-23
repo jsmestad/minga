@@ -17,6 +17,7 @@ defmodule Minga.Services.Independent do
       ├── Minga.Command.Registry         Named command lookup
       ├── Minga.Fold.Registry            Fold state
       ├── Minga.Diagnostics              ETS-backed diagnostics store
+      ├── Minga.EventRecorder            Persistent event log (SQLite via exqlite)
       ├── Minga.Tool.Recipe.Registry     Tool install recipe catalog
       └── Minga.Tool.Manager             Tool install/uninstall manager
   """
@@ -41,6 +42,7 @@ defmodule Minga.Services.Independent do
       Minga.Command.Registry,
       Minga.Fold.Registry,
       Minga.Diagnostics,
+      Minga.EventRecorder,
       Minga.Tool.Recipe.Registry,
       Minga.Tool.Manager
     ]
