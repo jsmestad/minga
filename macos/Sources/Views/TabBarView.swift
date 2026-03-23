@@ -301,20 +301,25 @@ struct TabBarView: View {
                 .truncationMode(.middle)
                 .foregroundStyle(tab.isActive ? theme.tabActiveFg : theme.tabInactiveFg)
 
-            // Dirty dot or close button
-            if isHovering {
+            // Close button / dirty indicator zone.
+            // The close button is always in the view hierarchy so it can
+            // receive clicks without the parent onTapGesture intercepting.
+            // It's visually hidden (opacity 0) when not hovered or active.
+            ZStack {
+                if tab.isDirty && !isHovering {
+                    Circle()
+                        .fill(theme.tabModifiedFg)
+                        .frame(width: 5, height: 5)
+                } else if tab.hasAttention && !isHovering {
+                    Circle()
+                        .fill(theme.tabAttentionFg)
+                        .frame(width: 5, height: 5)
+                }
+
                 closeButton(tab)
-            } else if tab.isDirty {
-                Circle()
-                    .fill(theme.tabModifiedFg)
-                    .frame(width: 5, height: 5)
-            } else if tab.hasAttention {
-                Circle()
-                    .fill(theme.tabAttentionFg)
-                    .frame(width: 5, height: 5)
-            } else {
-                Color.clear.frame(width: 12, height: 12)
+                    .opacity(isHovering || tab.isActive ? 1 : 0)
             }
+            .frame(width: 12, height: 12)
         }
         .padding(.horizontal, 12)
         .frame(height: barHeight)
