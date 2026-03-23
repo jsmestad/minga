@@ -21,6 +21,7 @@ defmodule Minga.Buffer.Server do
   alias Minga.Buffer.Decorations
   alias Minga.Buffer.Document
   alias Minga.Buffer.EditDelta
+  alias Minga.Buffer.EditSource
   alias Minga.Buffer.Unicode
   alias Minga.Config.Options
   alias Minga.Events
@@ -81,8 +82,8 @@ defmodule Minga.Buffer.Server do
   end
 
   @doc "Inserts a character at the current cursor position."
-  @spec insert_char(GenServer.server(), String.t(), Minga.Buffer.EditSource.t()) :: :ok
-  def insert_char(server, char, source \\ :user) when is_binary(char) do
+  @spec insert_char(GenServer.server(), String.t(), EditSource.t()) :: :ok
+  def insert_char(server, char, source \\ EditSource.user()) when is_binary(char) do
     GenServer.call(server, {:insert_char, char, source})
   end
 
@@ -91,8 +92,8 @@ defmodule Minga.Buffer.Server do
 
   Each character is inserted sequentially, advancing the cursor.
   """
-  @spec insert_text(GenServer.server(), String.t(), Minga.Buffer.EditSource.t()) :: :ok
-  def insert_text(server, text, source \\ :user) when is_binary(text) do
+  @spec insert_text(GenServer.server(), String.t(), EditSource.t()) :: :ok
+  def insert_text(server, text, source \\ EditSource.user()) when is_binary(text) do
     GenServer.call(server, {:insert_text, text, source})
   end
 
@@ -109,7 +110,7 @@ defmodule Minga.Buffer.Server do
           non_neg_integer(),
           non_neg_integer(),
           String.t(),
-          Minga.Buffer.EditSource.t()
+          EditSource.t()
         ) :: :ok
   def apply_text_edit(
         server,
@@ -118,7 +119,7 @@ defmodule Minga.Buffer.Server do
         end_line,
         end_col,
         new_text,
-        source \\ :user
+        source \\ EditSource.user()
       ) do
     GenServer.call(
       server,
@@ -145,8 +146,8 @@ defmodule Minga.Buffer.Server do
   Source defaults to `{:lsp, :unknown}` (not `:user`) because batch edits
   are typically LSP code actions or agent tool calls, not interactive typing.
   """
-  @spec apply_text_edits(GenServer.server(), [text_edit()], Minga.Buffer.EditSource.t()) :: :ok
-  def apply_text_edits(server, edits, source \\ {:lsp, :unknown}) when is_list(edits) do
+  @spec apply_text_edits(GenServer.server(), [text_edit()], EditSource.t()) :: :ok
+  def apply_text_edits(server, edits, source \\ EditSource.lsp(:unknown)) when is_list(edits) do
     GenServer.call(server, {:apply_text_edits, edits, source})
   end
 
@@ -882,7 +883,7 @@ defmodule Minga.Buffer.Server do
         Document.cursor(new_buf)
       )
 
-    undo_source = Minga.Buffer.EditSource.to_undo_source(source)
+    undo_source = EditSource.to_undo_source(source)
     state = push_undo(state, new_buf, undo_source) |> mark_dirty() |> record_edit(delta, source)
     {:reply, :ok, state}
   end
@@ -903,7 +904,7 @@ defmodule Minga.Buffer.Server do
         Document.cursor(new_doc)
       )
 
-    undo_source = Minga.Buffer.EditSource.to_undo_source(source)
+    undo_source = EditSource.to_undo_source(source)
     state = push_undo(state, new_doc, undo_source) |> mark_dirty() |> record_edit(delta, source)
     {:reply, :ok, state}
   end
@@ -930,7 +931,7 @@ defmodule Minga.Buffer.Server do
     delta =
       EditDelta.replacement(start_byte, old_end_byte, from_pos, to_pos, new_text, new_end_pos)
 
-    undo_source = Minga.Buffer.EditSource.to_undo_source(source)
+    undo_source = EditSource.to_undo_source(source)
 
     {:reply, :ok,
      push_undo(state, doc, undo_source) |> mark_dirty() |> record_edit(delta, source)}
@@ -960,7 +961,7 @@ defmodule Minga.Buffer.Server do
         |> Document.insert_text(new_text)
       end)
 
-    undo_source = Minga.Buffer.EditSource.to_undo_source(source)
+    undo_source = EditSource.to_undo_source(source)
 
     # Multi-edit batches are complex to delta-track (offsets shift between
     # edits). Clear pending edits to force a full content sync.
@@ -985,7 +986,7 @@ defmodule Minga.Buffer.Server do
         {:reply, {:ok, msg},
          push_undo_force(state, new_doc, :agent)
          |> mark_dirty()
-         |> clear_edits({:agent, self(), "unknown"})}
+         |> clear_edits(EditSource.agent(self(), "unknown"))}
 
       {:error, _} = err ->
         {:reply, err, state}
@@ -1011,7 +1012,7 @@ defmodule Minga.Buffer.Server do
       if any_applied do
         push_undo_force(state, final_doc, :agent)
         |> mark_dirty()
-        |> clear_edits({:agent, self(), "unknown"})
+        |> clear_edits(EditSource.agent(self(), "unknown"))
       else
         state
       end
@@ -1207,7 +1208,7 @@ defmodule Minga.Buffer.Server do
   def handle_call({:replace_content, new_content, source}, _from, state) do
     new_state = push_undo_force(state, state.document, source)
     new_buf = Document.new(new_content)
-    event_source = Minga.Buffer.EditSource.from_undo_source(source)
+    event_source = EditSource.from_undo_source(source)
     {:reply, :ok, mark_dirty(%{new_state | document: new_buf}) |> clear_edits(event_source)}
   end
 
@@ -1529,7 +1530,8 @@ defmodule Minga.Buffer.Server do
   end
 
   def handle_call({:apply_snapshot, new_buf}, _from, state) do
-    {:reply, :ok, push_undo(state, new_buf, :user) |> mark_dirty() |> clear_edits(:user)}
+    {:reply, :ok,
+     push_undo(state, new_buf, :user) |> mark_dirty() |> clear_edits(EditSource.user())}
   end
 
   def handle_call({:clear_line, _line}, _from, %{read_only: true} = state) do
@@ -1554,7 +1556,7 @@ defmodule Minga.Buffer.Server do
       [{prev_version, prev_buf, source} | rest_undo] ->
         redo_entry = {state.version, state.document, source}
 
-        event_source = Minga.Buffer.EditSource.from_undo_source(source)
+        event_source = EditSource.from_undo_source(source)
 
         new_state =
           %{
@@ -1580,7 +1582,7 @@ defmodule Minga.Buffer.Server do
       [{next_version, next_buf, source} | rest_redo] ->
         undo_entry = {state.version, state.document, source}
 
-        event_source = Minga.Buffer.EditSource.from_undo_source(source)
+        event_source = EditSource.from_undo_source(source)
 
         new_state =
           %{
@@ -1817,7 +1819,7 @@ defmodule Minga.Buffer.Server do
 
   # Defers a :buffer_changed broadcast with delta and source to a
   # subsequent handle_info turn. Same pattern as defer_content_replaced.
-  @spec defer_buffer_changed(state(), EditDelta.t() | nil, Minga.Buffer.EditSource.t()) :: :ok
+  @spec defer_buffer_changed(state(), EditDelta.t() | nil, EditSource.t()) :: :ok
   defp defer_buffer_changed(state, delta, source) do
     send(
       self(),
@@ -2004,10 +2006,10 @@ defmodule Minga.Buffer.Server do
 
   @spec record_edit(state(), EditDelta.t()) :: state()
   defp record_edit(state, delta) do
-    record_edit(state, delta, :user)
+    record_edit(state, delta, EditSource.user())
   end
 
-  @spec record_edit(state(), EditDelta.t(), Minga.Buffer.EditSource.t()) :: state()
+  @spec record_edit(state(), EditDelta.t(), EditSource.t()) :: state()
   defp record_edit(state, delta, source) do
     new_seq = state.edit_seq + 1
 
@@ -2041,7 +2043,7 @@ defmodule Minga.Buffer.Server do
   # Clear pending edits to force HighlightSync into full content sync.
   # Used for operations where computing accurate deltas is impractical
   # (undo, redo, multi-edit batches, full content replacement).
-  @spec clear_edits(state(), Minga.Buffer.EditSource.t()) :: state()
+  @spec clear_edits(state(), EditSource.t()) :: state()
   defp clear_edits(state, source) do
     defer_buffer_changed(state, nil, source)
     %{state | pending_edits: [], edit_log: [], consumer_cursors: %{}}

@@ -270,7 +270,10 @@ defmodule Minga.Events do
   @deprecated "Buffer.Server now broadcasts :buffer_changed automatically on every edit. No manual broadcast needed."
   @spec notify_buffer_changed(pid()) :: :ok
   def notify_buffer_changed(buf) when is_pid(buf) do
-    broadcast(:buffer_changed, %BufferChangedEvent{buffer: buf, source: :unknown})
+    broadcast(:buffer_changed, %BufferChangedEvent{
+      buffer: buf,
+      source: Minga.Buffer.EditSource.unknown()
+    })
   end
 
   # ── Query ───────────────────────────────────────────────────────────────────
