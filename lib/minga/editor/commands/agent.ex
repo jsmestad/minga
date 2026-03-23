@@ -34,8 +34,8 @@ defmodule Minga.Editor.Commands.Agent do
   alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
-  alias Minga.Editor.State.Workspace
   alias Minga.Editor.State.Windows
+  alias Minga.Editor.State.Workspace
   alias Minga.Editor.Window
   alias Minga.Editor.WindowTree
   alias Minga.Input.AgentPanel

@@ -32,8 +32,7 @@ defmodule Minga.Picker.WorkspaceSource do
       file_names =
         tabs
         |> Enum.filter(&(&1.kind == :file))
-        |> Enum.map(& &1.label)
-        |> Enum.join(", ")
+        |> Enum.map_join(", ", & &1.label)
 
       desc_parts = ["#{tab_count} tab#{if tab_count == 1, do: "", else: "s"}#{status}"]
       desc_parts = if file_names != "", do: desc_parts ++ [file_names], else: desc_parts

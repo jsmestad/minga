@@ -288,21 +288,20 @@ defmodule Minga.Agent.Events do
     tb = state.tab_bar
 
     with pid when is_pid(pid) <- session,
-         %Workspace{id: ws_id} <- TabBar.find_workspace_by_session(tb, pid) do
-      # Find the file tab whose label matches the filename
-      filename = Path.basename(path)
-
-      case Enum.find(tb.tabs, fn tab ->
-             tab.kind == :file and tab.group_id != ws_id and tab.label == filename
-           end) do
-        %Tab{id: tab_id} ->
-          %{state | tab_bar: TabBar.move_tab_to_workspace(tb, tab_id, ws_id)}
-
-        nil ->
-          state
-      end
+         %Workspace{id: ws_id} <- TabBar.find_workspace_by_session(tb, pid),
+         %Tab{id: tab_id} <- find_unassociated_file_tab(tb, path, ws_id) do
+      %{state | tab_bar: TabBar.move_tab_to_workspace(tb, tab_id, ws_id)}
     else
       _ -> state
     end
+  end
+
+  @spec find_unassociated_file_tab(TabBar.t(), String.t(), non_neg_integer()) :: Tab.t() | nil
+  defp find_unassociated_file_tab(tb, path, ws_id) do
+    filename = Path.basename(path)
+
+    Enum.find(tb.tabs, fn tab ->
+      tab.kind == :file and tab.group_id != ws_id and tab.label == filename
+    end)
   end
 end
