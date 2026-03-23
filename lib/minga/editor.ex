@@ -1980,16 +1980,6 @@ defmodule Minga.Editor do
     end
   end
 
-  defp handle_gui_action(%{tab_bar: %TabBar{} = tb} = state, {:tab_rename, tab_id, name}) do
-    trimmed = String.trim(name)
-
-    if trimmed != "" do
-      %{state | tab_bar: TabBar.update_label(tb, tab_id, trimmed)}
-    else
-      state
-    end
-  end
-
   defp handle_gui_action(%{tab_bar: %TabBar{} = tb} = state, {:workspace_rename, ws_id, name}) do
     alias Minga.Editor.State.Workspace
     tb = TabBar.update_workspace(tb, ws_id, &Workspace.rename(&1, name))

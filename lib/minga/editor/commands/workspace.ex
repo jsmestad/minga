@@ -109,17 +109,6 @@ defmodule Minga.Editor.Commands.Workspace do
     end
   end
 
-  @doc "Rename the active tab via prompt UI."
-  @spec tab_rename(state()) :: state()
-  def tab_rename(%{tab_bar: %TabBar{} = tb} = state) do
-    tab = TabBar.active(tb)
-    current_label = if tab, do: tab.label, else: ""
-
-    Minga.Editor.PromptUI.open(state, Minga.Prompt.TabRename,
-      default: current_label
-    )
-  end
-
   @workspace_command_specs [
     {:workspace_next, "Next workspace", :workspace_next},
     {:workspace_prev, "Previous workspace", :workspace_prev},
@@ -129,8 +118,7 @@ defmodule Minga.Editor.Commands.Workspace do
     {:workspace_close, "Close workspace", :workspace_close},
     {:workspace_list, "List workspaces", :workspace_list},
     {:workspace_rename, "Rename workspace", :workspace_rename},
-    {:workspace_set_icon, "Set workspace icon", :workspace_set_icon},
-    {:tab_rename, "Rename tab", :tab_rename}
+    {:workspace_set_icon, "Set workspace icon", :workspace_set_icon}
   ]
 
   @impl Minga.Command.Provider

@@ -388,7 +388,6 @@ final class SpyEncoder: InputEncoder, Sendable {
     func sendGitOpenFile(path: String) { state.withLock { $0.guiActions.append(.gitOpenFile(path: path)) } }
     func sendWorkspaceRename(id: UInt16, name: String) { state.withLock { $0.guiActions.append(.gitOpenFile(path: "rename:\(id):\(name)")) } }
     func sendWorkspaceSetIcon(id: UInt16, icon: String) { state.withLock { $0.guiActions.append(.gitOpenFile(path: "icon:\(id):\(icon)")) } }
-    func sendTabRename(id: UInt32, name: String) { state.withLock { $0.guiActions.append(.gitOpenFile(path: "tab-rename:\(id):\(name)")) } }
 }
 
 @Suite("EditorNSView Resize")
