@@ -3,6 +3,10 @@ defmodule Minga.LSP.ClientTest do
   # start in time under heavy parallel test load
   use ExUnit.Case, async: false
 
+  # OS process startup (MockLSPServer) makes these inherently slow (~250ms each).
+  # Excluded from test.llm; runs in test.heavy and full suite.
+  @moduletag :heavy
+
   alias Minga.Diagnostics
   alias Minga.LSP.Client
   alias Minga.Test.MockLSPServer

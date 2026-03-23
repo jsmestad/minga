@@ -10,6 +10,9 @@ defmodule Minga.Parser.CrashRecoveryTest do
   alias Minga.Port.Protocol
 
   @moduletag :parser_integration
+  # Real OS process crash + restart with backoff (~342ms).
+  # Excluded from test.llm; runs in test.heavy and full suite.
+  @moduletag :heavy
   @parser_path Path.join([File.cwd!(), "priv", "minga-parser"])
 
   setup do

@@ -6,6 +6,9 @@ defmodule Minga.Tool.ManagerTest do
   alias Minga.Tool.Installer.Stub
 
   @moduletag timeout: 10_000
+  # Sleep-based synchronization in installer stub (~500ms).
+  # Excluded from test.llm; runs in test.heavy and full suite.
+  @moduletag :heavy
 
   setup do
     # Initialize the stub installer

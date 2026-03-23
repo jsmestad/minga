@@ -9,6 +9,10 @@ defmodule Minga.BufferPickerTest do
 
   use Minga.Test.EditorCase, async: true
 
+  # EditorCase full-stack overhead (GenServer + HeadlessPort + buffers, ~300-500ms).
+  # Excluded from test.llm; runs in test.heavy and full suite.
+  @moduletag :heavy
+
   describe "opening the picker" do
     @tag :tmp_dir
     test "SPC b b opens a picker with buffer items", %{tmp_dir: tmp_dir} do

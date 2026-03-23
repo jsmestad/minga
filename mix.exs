@@ -183,7 +183,8 @@ defmodule Minga.MixProject do
       preferred_envs: [
         "test.llm": :test,
         "test.debug": :test,
-        "test.quick": :test
+        "test.quick": :test,
+        "test.heavy": :test
       ]
     ]
   end
@@ -285,10 +286,11 @@ defmodule Minga.MixProject do
       ],
       test: ["test --warnings-as-errors"],
       "test.llm": [
-        "test --warnings-as-errors --formatter Minga.Test.LLMFormatter --max-failures 5"
+        "test --warnings-as-errors --formatter Minga.Test.LLMFormatter --max-failures 5 --exclude heavy"
       ],
       "test.debug": ["test --warnings-as-errors --trace --max-failures 3"],
-      "test.quick": ["test --warnings-as-errors --stale --max-failures 5"],
+      "test.quick": ["test --warnings-as-errors --stale --max-failures 5 --exclude heavy"],
+      "test.heavy": ["test --warnings-as-errors --only heavy"],
       lint: [
         "format --check-formatted",
         "credo --strict",
