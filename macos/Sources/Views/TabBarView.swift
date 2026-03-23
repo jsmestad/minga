@@ -76,7 +76,13 @@ struct TabBarView: View {
                     Label("New File", systemImage: "doc")
                 }
                 Button(action: {
-                    encoder?.sendExecuteCommand(name: "toggle_agent_split")
+                    // If an agent tab exists, switch to it.
+                    // If not, create one via toggle_agentic_view.
+                    if tabBarState.tabs.contains(where: { $0.isAgent }) {
+                        encoder?.sendExecuteCommand(name: "workspace_next_agent")
+                    } else {
+                        encoder?.sendExecuteCommand(name: "toggle_agentic_view")
+                    }
                 }) {
                     Label("New Agent Session", systemImage: "cpu")
                 }
@@ -384,13 +390,22 @@ struct TabBarView: View {
         let isHovering = hoverTabId == tab.id
 
         HStack(spacing: 5) {
-            // File type icon (Nerd Font)
-            Text(tab.icon)
-                .font(.custom("Symbols Nerd Font Mono", size: 12))
-                .foregroundStyle(tab.isActive ? theme.tabActiveFg : theme.tabInactiveFg)
+            // File type icon (Nerd Font for files, SF Symbol for agents)
+            if tab.isAgent {
+                Image(systemName: "cpu")
+                    .font(.system(size: 11))
+                    .foregroundStyle(tab.isActive ? theme.tabActiveFg : theme.tabInactiveFg)
+            } else {
+                Text(tab.icon)
+                    .font(.custom("Symbols Nerd Font Mono", size: 12))
+                    .foregroundStyle(tab.isActive ? theme.tabActiveFg : theme.tabInactiveFg)
+            }
 
-            // Label (double-click to rename)
-            if renamingTabId == tab.id {
+            // Label: agent tabs show no label (workspace name is sufficient),
+            // file tabs show filename with double-click to rename.
+            if tab.isAgent {
+                // No label for agent tabs; the workspace indicator/capsule carries the name
+            } else if renamingTabId == tab.id {
                 TextField("", text: $tabRenameText)
                     .textFieldStyle(.plain)
                     .font(.system(size: 11.5))
