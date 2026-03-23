@@ -73,15 +73,9 @@ struct TabBarView: View {
                     Label("New File", systemImage: "doc")
                 }
                 Button(action: {
-                    // If an agent tab exists, switch to it.
-                    // If not, create one via toggle_agentic_view.
-                    if tabBarState.tabs.contains(where: { $0.isAgent }) {
-                        encoder?.sendExecuteCommand(name: "workspace_next_agent")
-                    } else {
-                        encoder?.sendExecuteCommand(name: "toggle_agentic_view")
-                    }
+                    encoder?.sendExecuteCommand(name: "toggle_agentic_view")
                 }) {
-                    Label("New Agent Session", systemImage: "cpu")
+                    Label("Agent", systemImage: "cpu")
                 }
             } label: {
                 Image(systemName: "plus")

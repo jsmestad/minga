@@ -7,13 +7,27 @@ defmodule Minga.Picker.WorkspaceSourceTest do
   alias Minga.Picker.WorkspaceSource
 
   describe "candidates/1" do
-    test "returns one item per workspace" do
+    test "returns one item per workspace with tabs" do
       tb = TabBar.new(Tab.new_file(1, "a.ex"))
-      {tb, _ws} = TabBar.add_agent_workspace(tb, "Research")
+      {tb, ws} = TabBar.add_agent_workspace(tb, "Research")
+      # Put a tab in the agent workspace so it shows
+      {tb, _} = TabBar.add(tb, :agent, "Agent")
+      tb = TabBar.move_tab_to_workspace(tb, 2, ws.id)
       state = %{tab_bar: tb}
 
       items = WorkspaceSource.candidates(state)
+      # Manual workspace has tab 1 (a.ex), agent workspace has tab 2
       assert length(items) == 2
+    end
+
+    test "filters out empty workspaces" do
+      tb = TabBar.new(Tab.new_file(1, "a.ex"))
+      {tb, _ws} = TabBar.add_agent_workspace(tb, "Empty Agent")
+      state = %{tab_bar: tb}
+
+      items = WorkspaceSource.candidates(state)
+      # Agent workspace has no tabs, should be filtered
+      assert length(items) == 1
     end
 
     test "marks active workspace with bullet" do
@@ -39,6 +53,9 @@ defmodule Minga.Picker.WorkspaceSourceTest do
     test "agent workspace shows status annotation" do
       tb = TabBar.new(Tab.new_file(1, "a.ex"))
       {tb, ws} = TabBar.add_agent_workspace(tb, "Agent")
+      # Need a tab in the workspace so it's not filtered
+      {tb, _} = TabBar.add(tb, :agent, "Agent Tab")
+      tb = TabBar.move_tab_to_workspace(tb, 2, ws.id)
 
       tb =
         TabBar.update_workspace(tb, ws.id, fn ws ->

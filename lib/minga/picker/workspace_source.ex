@@ -21,7 +21,12 @@ defmodule Minga.Picker.WorkspaceSource do
   @impl true
   @spec candidates(term()) :: [Item.t()]
   def candidates(%{tab_bar: %TabBar{} = tb}) do
-    Enum.map(tb.workspaces, fn ws ->
+    # Filter out workspaces with no tabs (empty manual workspace)
+    tb.workspaces
+    |> Enum.filter(fn ws ->
+      length(TabBar.tabs_in_workspace(tb, ws.id)) > 0
+    end)
+    |> Enum.map(fn ws ->
       icon = workspace_icon(ws)
       label = "#{icon} #{ws.label}"
       active_marker = if ws.id == TabBar.active_workspace_id(tb), do: " \u{2022}", else: ""
