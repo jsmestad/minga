@@ -204,6 +204,77 @@ defmodule Minga.Extension.SupervisorDslTest do
       assert {:command, :dsl_bind_cmd, _desc} =
                Minga.Keymap.Bindings.lookup_sequence(leader_trie, keys)
     end
+
+    test "keybindings are deregistered when extension is stopped", ctx do
+      {path, cleanup} =
+        make_extension("DslUnbind", """
+        defmodule Minga.TestExtensions.DslUnbind do
+          use Minga.Extension
+
+          command :dsl_unbind_cmd, "Will be unbound",
+            execute: {Minga.TestExtensions.DslUnbind, :noop}
+
+          keybind :normal, "SPC m y", :dsl_unbind_cmd, "DSL unbind test"
+
+          @impl true
+          def name, do: :dsl_unbind
+
+          @impl true
+          def description, do: "DSL unbind test"
+
+          @impl true
+          def version, do: "1.0.0"
+
+          @impl true
+          def init(_config), do: {:ok, %{}}
+
+          @spec noop(map()) :: map()
+          def noop(state), do: state
+        end
+        """)
+
+      on_exit(fn ->
+        cleanup.()
+        :code.purge(Minga.TestExtensions.DslUnbind)
+        :code.delete(Minga.TestExtensions.DslUnbind)
+      end)
+
+      :ok = ExtRegistry.register(ctx.registry, :dsl_unbind, path, [])
+      {:ok, entry} = ExtRegistry.get(ctx.registry, :dsl_unbind)
+
+      assert {:ok, _pid} =
+               ExtSupervisor.start_extension(
+                 ctx.supervisor,
+                 ctx.registry,
+                 :dsl_unbind,
+                 entry,
+                 start_opts(ctx)
+               )
+
+      # Keybinding exists after start
+      leader_trie = KeymapActive.leader_trie(ctx.keymap)
+      {:ok, keys} = Minga.Keymap.KeyParser.parse("m y")
+
+      assert {:command, :dsl_unbind_cmd, _desc} =
+               Minga.Keymap.Bindings.lookup_sequence(leader_trie, keys)
+
+      # Stop the extension
+      {:ok, running_entry} = ExtRegistry.get(ctx.registry, :dsl_unbind)
+
+      :ok =
+        ExtSupervisor.stop_extension(
+          ctx.supervisor,
+          ctx.registry,
+          :dsl_unbind,
+          running_entry,
+          start_opts(ctx)
+        )
+
+      # Keybinding is gone after stop
+      leader_trie = KeymapActive.leader_trie(ctx.keymap)
+
+      assert :not_found = Minga.Keymap.Bindings.lookup_sequence(leader_trie, keys)
+    end
   end
 
   # ── Helpers ─────────────────────────────────────────────────────────────────

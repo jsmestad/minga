@@ -188,6 +188,7 @@ defmodule Minga.Extension.Supervisor do
         ) :: :ok
   def stop_extension(supervisor, registry, name, entry, opts \\ []) do
     cmd_registry = Keyword.get(opts, :command_registry, Minga.Command.Registry)
+    keymap = Keyword.get(opts, :keymap, Minga.Keymap.Active)
 
     if is_pid(entry.pid) do
       try do
@@ -197,15 +198,12 @@ defmodule Minga.Extension.Supervisor do
       end
     end
 
-    # Deregister DSL-declared commands before purging the module.
-    # The module must still be loaded for __command_schema__/0 to work.
-    #
-    # NOTE: keybindings registered via keybind/4 are NOT deregistered here.
-    # Minga.Keymap.Active has no unbind API. The reload path is safe because
-    # Config.Loader.reload/1 calls Keymap.Active.reset() after stop_all/0.
-    # A future "disable extension" feature will need unbind/3 added to Active.
+    # Deregister DSL-declared commands and keybindings before purging the module.
+    # The module must still be loaded for __command_schema__/0 and
+    # __keybind_schema__/0 to work.
     if entry.module do
       deregister_extension_commands(entry.module, cmd_registry)
+      deregister_extension_keybinds(entry.module, keymap)
       :code.purge(entry.module)
       :code.delete(entry.module)
     end
@@ -479,6 +477,25 @@ defmodule Minga.Extension.Supervisor do
       Minga.Log.warning(
         :config,
         "Extension #{inspect(module)} command deregistration failed: #{Exception.message(e)}"
+      )
+
+      :ok
+  end
+
+  @spec deregister_extension_keybinds(module(), GenServer.server()) :: :ok
+  defp deregister_extension_keybinds(module, keymap) do
+    if function_exported?(module, :__keybind_schema__, 0) do
+      for {mode, key_str, _command, _description, opts} <- module.__keybind_schema__() do
+        Minga.Keymap.Active.unbind(keymap, mode, key_str, opts)
+      end
+    end
+
+    :ok
+  rescue
+    e ->
+      Minga.Log.warning(
+        :config,
+        "Extension #{inspect(module)} keybind deregistration failed: #{Exception.message(e)}"
       )
 
       :ok

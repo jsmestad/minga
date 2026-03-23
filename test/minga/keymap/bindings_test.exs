@@ -290,4 +290,75 @@ defmodule Minga.Keymap.BindingsTest do
       assert :not_found = Bindings.lookup_sequence(trie, [])
     end
   end
+
+  describe "unbind/2" do
+    test "removes a single-key binding" do
+      trie = Bindings.new()
+      trie = Bindings.bind(trie, [key(?j)], :move_down, "Move down")
+      assert {:command, :move_down} = Bindings.lookup(trie, key(?j))
+
+      trie = Bindings.unbind(trie, [key(?j)])
+      assert :not_found = Bindings.lookup(trie, key(?j))
+    end
+
+    test "removes a multi-key binding" do
+      trie = Bindings.new()
+      trie = Bindings.bind(trie, [key(?g), key(?g)], :document_start, "Go to first line")
+
+      trie = Bindings.unbind(trie, [key(?g), key(?g)])
+      assert :not_found = Bindings.lookup_sequence(trie, [key(?g), key(?g)])
+    end
+
+    test "prunes empty intermediate nodes" do
+      trie = Bindings.new()
+      trie = Bindings.bind(trie, [key(?g), key(?g)], :document_start, "Go to first line")
+
+      trie = Bindings.unbind(trie, [key(?g), key(?g)])
+      # The intermediate 'g' node should be pruned since it has no command and no children
+      assert :not_found = Bindings.lookup(trie, key(?g))
+    end
+
+    test "preserves sibling bindings when unbinding" do
+      trie = Bindings.new()
+      trie = Bindings.bind(trie, [key(?g), key(?g)], :document_start, "Go to first line")
+      trie = Bindings.bind(trie, [key(?g), key(?e)], :document_end, "Go to last line")
+
+      trie = Bindings.unbind(trie, [key(?g), key(?g)])
+      # g -> e still works
+      assert {:command, :document_end, _} =
+               Bindings.lookup_sequence(trie, [key(?g), key(?e)])
+
+      # g -> g is gone
+      assert :not_found = Bindings.lookup_sequence(trie, [key(?g), key(?g)])
+    end
+
+    test "no-op for nonexistent sequence" do
+      trie = Bindings.new()
+      trie = Bindings.bind(trie, [key(?j)], :move_down, "Move down")
+
+      trie2 = Bindings.unbind(trie, [key(?z)])
+      assert trie2 == trie
+    end
+
+    test "no-op for empty key list" do
+      trie = Bindings.new()
+      trie = Bindings.bind(trie, [key(?j)], :move_down, "Move down")
+
+      trie2 = Bindings.unbind(trie, [])
+      assert trie2 == trie
+    end
+
+    test "preserves prefix node that also has a command" do
+      trie = Bindings.new()
+      # 'g' is both a command and a prefix for 'gg'
+      trie = Bindings.bind(trie, [key(?g)], :go_prefix, "Go prefix")
+      trie = Bindings.bind(trie, [key(?g), key(?g)], :document_start, "Go to first line")
+
+      # Remove only the 'gg' binding
+      trie = Bindings.unbind(trie, [key(?g), key(?g)])
+
+      # 'g' command still works
+      assert {:command, :go_prefix} = Bindings.lookup(trie, key(?g))
+    end
+  end
 end
