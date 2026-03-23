@@ -1704,6 +1704,11 @@ defmodule Minga.Editor do
       path: file_path
     })
 
+    # Eagerly set up syntax highlighting for this specific buffer.
+    # Uses the PID-targeted variant so each restored buffer gets its
+    # own parse request, not just whoever is active last.
+    state = HighlightSync.setup_for_buffer_pid(state, buffer_pid)
+
     # Schedule code lens and inlay hint requests after LSP clients connect.
     # The SyncServer handles didOpen via the event bus; by the time 800ms
     # elapses the LSP client should be ready to serve requests.
