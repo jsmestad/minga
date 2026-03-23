@@ -87,7 +87,7 @@ defmodule Minga.Agent.Tools.Grep do
           {String.t(), [String.t()]}
   defp build_grep_command(pattern, glob, case_sensitive, context_lines) do
     grep = System.find_executable("grep") || "grep"
-    args = ["-rn"]
+    args = ["-rn", "-I"]
     args = if case_sensitive, do: args, else: args ++ ["-i"]
     args = if context_lines > 0, do: args ++ ["-C", Integer.to_string(context_lines)], else: args
     args = if glob, do: args ++ ["--include", glob], else: args

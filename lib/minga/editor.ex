@@ -1007,16 +1007,24 @@ defmodule Minga.Editor do
          }},
         state
       ) do
-    git_status_data = %{
-      repo_state: :normal,
-      branch: branch || "",
-      ahead: ahead,
-      behind: behind,
-      entries: entries
-    }
+    # Only update when the git status panel is actually open. Without
+    # this guard, stray broadcasts (from concurrent git operations or
+    # file watcher events) re-populate the panel after it was closed,
+    # causing the panel to ghost back into view.
+    if state.git_status_panel != nil do
+      git_status_data = %{
+        repo_state: :normal,
+        branch: branch || "",
+        ahead: ahead,
+        behind: behind,
+        entries: entries
+      }
 
-    state = %{state | git_status_panel: git_status_data}
-    {:noreply, schedule_render(state, 16)}
+      state = %{state | git_status_panel: git_status_data}
+      {:noreply, schedule_render(state, 16)}
+    else
+      {:noreply, state}
+    end
   end
 
   def handle_info({:minga_event, :buffer_saved, %Minga.Events.BufferEvent{}}, state) do

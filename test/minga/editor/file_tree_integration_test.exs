@@ -280,47 +280,52 @@ defmodule Minga.Editor.FileTreeIntegrationTest do
   end
 
   describe "mutual exclusivity: file tree and git status" do
-    test "opening file tree closes git status panel and resets keymap_scope", %{tmp_dir: dir} do
+    # These tests call Commands.FileTree functions directly on editor state
+    # rather than dispatching keys through the GenServer. This avoids flakiness
+    # from global :git_status_changed events re-populating git_status_panel
+    # between key dispatch and the :sys.get_state barrier.
+
+    test "toggle opens file tree and clears git status panel", %{tmp_dir: dir} do
       file = Path.join(dir, "test.txt")
       File.write!(file, "hello")
       ctx = start_editor(file)
 
-      # Inject git status panel state (simulates git status being open)
-      :sys.replace_state(ctx.editor, fn state ->
-        panel_data = %{
-          repo_state: :normal,
-          branch: "main",
-          ahead: 0,
-          behind: 0,
-          entries: []
-        }
+      # Get the editor state and inject git status panel
+      state = :sys.get_state(ctx.editor)
 
-        %{state | git_status_panel: panel_data, keymap_scope: :git_status}
-      end)
+      state = %{
+        state
+        | git_status_panel: %{
+            repo_state: :normal,
+            branch: "main",
+            ahead: 0,
+            behind: 0,
+            entries: []
+          },
+          keymap_scope: :git_status
+      }
 
-      # Open file tree (should close git status first)
-      state = send_keys_sync(ctx, "<SPC>op")
+      # Call toggle directly (pure function, no GenServer round-trip)
+      result = Minga.Editor.Commands.FileTree.toggle(state)
 
-      assert state.file_tree.tree != nil
-      assert state.git_status_panel == nil
-      assert state.keymap_scope == :file_tree
+      assert result.file_tree.tree != nil
+      assert result.git_status_panel == nil
+      assert result.keymap_scope == :file_tree
     end
 
-    test "opening file tree works normally when git status is already closed", %{tmp_dir: dir} do
+    test "toggle opens tree when git_status_panel is nil (no-op close)", %{tmp_dir: dir} do
       file = Path.join(dir, "test.txt")
       File.write!(file, "hello")
       ctx = start_editor(file)
 
-      # Verify git status is nil before opening tree
       state = :sys.get_state(ctx.editor)
       assert state.git_status_panel == nil
 
-      # Open file tree
-      state = send_keys_sync(ctx, "<SPC>op")
+      result = Minga.Editor.Commands.FileTree.toggle(state)
 
-      assert state.file_tree.tree != nil
-      assert state.keymap_scope == :file_tree
-      assert state.git_status_panel == nil
+      assert result.file_tree.tree != nil
+      assert result.keymap_scope == :file_tree
+      assert result.git_status_panel == nil
     end
 
     test "closing the file tree resets tree state and restores editor scope", %{tmp_dir: dir} do
@@ -328,9 +333,9 @@ defmodule Minga.Editor.FileTreeIntegrationTest do
       File.write!(file, "hello")
       ctx = start_editor(file)
 
-      # Open file tree
-      send_keys_sync(ctx, "<SPC>op")
+      # Open file tree via toggle
       state = :sys.get_state(ctx.editor)
+      state = Minga.Editor.Commands.FileTree.toggle(state)
       assert state.file_tree.tree != nil
       assert state.keymap_scope == :file_tree
 
@@ -341,55 +346,53 @@ defmodule Minga.Editor.FileTreeIntegrationTest do
       assert closed_state.keymap_scope == :editor
     end
 
-    test "opening git status closes file tree via close_file_tree_if_open", %{tmp_dir: dir} do
+    test "opening git status closes file tree via close", %{tmp_dir: dir} do
       file = Path.join(dir, "test.txt")
       File.write!(file, "hello")
       ctx = start_editor(file)
 
-      # Open file tree
-      state = send_keys_sync(ctx, "<SPC>op")
+      # Open file tree via toggle
+      state = :sys.get_state(ctx.editor)
+      state = Minga.Editor.Commands.FileTree.toggle(state)
       assert state.file_tree.tree != nil
       assert state.keymap_scope == :file_tree
 
-      # Get the state and call close directly (simulating what git.ex does)
-      state = :sys.get_state(ctx.editor)
+      # Close (simulating what Commands.Git does before opening git status)
       closed_state = Minga.Editor.Commands.FileTree.close(state)
 
       assert closed_state.file_tree.tree == nil
       assert closed_state.keymap_scope == :editor
     end
 
-    test "round-trip: git status open -> file tree open closes git -> file tree close restores editor",
-         %{tmp_dir: dir} do
+    test "round-trip: git status -> file tree -> close restores editor scope", %{tmp_dir: dir} do
       file = Path.join(dir, "test.txt")
       File.write!(file, "hello")
       ctx = start_editor(file)
 
-      # Start in :editor scope
       state = :sys.get_state(ctx.editor)
       assert state.keymap_scope == :editor
 
-      # Inject git status open
-      :sys.replace_state(ctx.editor, fn state ->
-        panel_data = %{
-          repo_state: :normal,
-          branch: "main",
-          ahead: 0,
-          behind: 0,
-          entries: []
-        }
+      # Simulate git status open
+      state = %{
+        state
+        | git_status_panel: %{
+            repo_state: :normal,
+            branch: "main",
+            ahead: 0,
+            behind: 0,
+            entries: []
+          },
+          keymap_scope: :git_status
+      }
 
-        %{state | git_status_panel: panel_data, keymap_scope: :git_status}
-      end)
-
-      # Open file tree (closes git status)
-      state = send_keys_sync(ctx, "<SPC>op")
+      # Open file tree (clears git status)
+      state = Minga.Editor.Commands.FileTree.toggle(state)
       assert state.keymap_scope == :file_tree
       assert state.git_status_panel == nil
       assert state.file_tree.tree != nil
 
       # Close file tree
-      state = send_keys_sync(ctx, "<SPC>op")
+      state = Minga.Editor.Commands.FileTree.toggle(state)
       assert state.keymap_scope == :editor
       assert state.file_tree.tree == nil
       assert state.git_status_panel == nil

@@ -91,9 +91,13 @@ defmodule Minga.Extension.Git do
   def current_ref(name) do
     dest = extension_path(name)
 
-    case git(dest, ["rev-parse", "--short", "HEAD"]) do
-      {ref, 0} -> {:ok, String.trim(ref)}
-      {output, _} -> {:error, "could not read HEAD for #{name}: #{String.trim(output)}"}
+    if File.dir?(dest) do
+      case git(dest, ["rev-parse", "--short", "HEAD"]) do
+        {ref, 0} -> {:ok, String.trim(ref)}
+        {output, _} -> {:error, "could not read HEAD for #{name}: #{String.trim(output)}"}
+      end
+    else
+      {:error, "extension #{name}: not cloned"}
     end
   end
 

@@ -142,7 +142,7 @@ defmodule Minga.ProjectSearch do
   defp search_with_rg(query, root) do
     args = ["--json", "--line-number", "--column", "--", query, "."]
 
-    case System.cmd("rg", args, cd: root, stderr_to_stdout: false) do
+    case System.cmd("rg", args, cd: root, stderr_to_stdout: true) do
       {output, code} when code in [0, 1] ->
         collect_matches(output, &parse_rg_json_line/1)
 
@@ -157,9 +157,9 @@ defmodule Minga.ProjectSearch do
 
   @spec search_with_grep(String.t(), String.t()) :: result()
   defp search_with_grep(query, root) do
-    args = ["-rn", "--", query, "."]
+    args = ["-rn", "-I", "--", query, "."]
 
-    case System.cmd("grep", args, cd: root, stderr_to_stdout: false) do
+    case System.cmd("grep", args, cd: root, stderr_to_stdout: true) do
       {output, code} when code in [0, 1] ->
         collect_matches(output, &parse_grep_line/1)
 

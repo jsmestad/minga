@@ -248,11 +248,13 @@ defmodule Minga.Port.ManagerTest do
 
   # Helper that creates a fake port for connected mode tests.
   # Uses `cat` as a harmless process so Port.command doesn't crash.
+  # Redirects stderr to /dev/null to suppress "Broken pipe" noise
+  # when the port closes and SIGPIPE kills cat.
   defp fake_port_opener do
     test_pid = self()
 
     fn _spec, _opts ->
-      port = Port.open({:spawn, "cat"}, [:binary, {:packet, 4}])
+      port = Port.open({:spawn, "cat 2>/dev/null"}, [:binary, {:packet, 4}])
       send(test_pid, {:fake_port, port})
       port
     end
@@ -286,7 +288,7 @@ defmodule Minga.Port.ManagerTest do
 
       capturing_opener = fn spec, opts ->
         send(test_pid, {:port_open_args, spec, opts})
-        Port.open({:spawn, "cat"}, [:binary, {:packet, 4}])
+        Port.open({:spawn, "cat 2>/dev/null"}, [:binary, {:packet, 4}])
       end
 
       start_supervised!(
