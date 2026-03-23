@@ -35,13 +35,14 @@ defmodule Minga.Application do
       │   ├── Minga.LSP.SyncServer
       │   ├── Minga.Project
       │   └── Minga.Agent.Supervisor
-      └── Minga.Runtime.Supervisor (one_for_one, conditional)
-          ├── Minga.Editor.Watchdog          (independent leaf)
-          ├── Minga.FileWatcher              (independent leaf)
-          └── Minga.Editor.Supervisor (rest_for_one)
-              ├── Minga.Parser.Manager
-              ├── Minga.Port.Manager
-              └── Minga.Editor
+      ├── Minga.Runtime.Supervisor (one_for_one, conditional)
+      │   ├── Minga.Editor.Watchdog          (independent leaf)
+      │   ├── Minga.FileWatcher              (independent leaf)
+      │   └── Minga.Editor.Supervisor (rest_for_one)
+      │       ├── Minga.Parser.Manager
+      │       ├── Minga.Port.Manager
+      │       └── Minga.Editor
+      └── Minga.SystemObserver               (always-on process observer)
 
   In standalone (Burrito) mode, automatically processes CLI arguments
   after the supervision tree is up.
@@ -98,7 +99,11 @@ defmodule Minga.Application do
         []
       end
 
-    children = base_children ++ editor_children
+    # SystemObserver is last: it monitors all other supervisors and needs
+    # the full tree to be up. With rest_for_one, its crash restarts nothing
+    # (nothing comes after it), and any upstream crash restarts it too
+    # (correct: re-establishes monitors).
+    children = base_children ++ editor_children ++ [Minga.SystemObserver]
 
     opts = [strategy: :rest_for_one, name: Minga.Supervisor]
     result = Supervisor.start_link(children, opts)
