@@ -1,4 +1,5 @@
 defmodule Minga.Git.TrackerTest do
+  # async: false — reads/mutates the shared Tracker GenServer process (singleton)
   use ExUnit.Case, async: false
 
   alias Minga.Buffer.Server, as: BufferServer
@@ -119,7 +120,11 @@ defmodule Minga.Git.TrackerTest do
       assert Tracker.tracked?(buf)
 
       BufferServer.insert_text(buf, "new line\n")
-      Events.notify_buffer_changed(buf)
+
+      Events.broadcast(
+        :buffer_changed,
+        %Events.BufferChangedEvent{buffer: buf, source: :user}
+      )
 
       flush_tracker()
 
@@ -129,7 +134,12 @@ defmodule Minga.Git.TrackerTest do
 
     test "no-op for untracked buffer" do
       {:ok, buf} = BufferServer.start_link(content: "hello")
-      Events.notify_buffer_changed(buf)
+
+      Events.broadcast(
+        :buffer_changed,
+        %Events.BufferChangedEvent{buffer: buf, source: :user}
+      )
+
       flush_tracker()
     end
   end
