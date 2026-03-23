@@ -28,6 +28,16 @@ defmodule Minga.Editor.Commands.UI do
         execute: fn state -> PickerUI.open(state, Minga.Picker.FileSource) end
       },
       %Minga.Command{
+        name: :find_file_other_window,
+        description: "Find file in other window",
+        requires_buffer: false,
+        execute: fn state ->
+          state
+          |> Minga.Editor.Commands.Movement.execute(:split_vertical)
+          |> PickerUI.open(Minga.Picker.FileSource)
+        end
+      },
+      %Minga.Command{
         name: :theme_picker,
         description: "Pick theme",
         requires_buffer: false,

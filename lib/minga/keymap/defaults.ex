@@ -45,6 +45,7 @@ defmodule Minga.Keymap.Defaults do
 
     # ── File ──────────────────────────────────────────────────────────────────
     {[{?f, @none}, {?f, @none}], :find_file, "Find file"},
+    {[{?f, @none}, {?F, @none}], :find_file_other_window, "Find file other window"},
     {[{?f, @none}, {?s, @none}], :save, "Save file"},
     {[{?f, @none}, {?p, @none}], :open_config, "Open config file"},
 
