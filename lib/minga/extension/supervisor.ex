@@ -85,36 +85,67 @@ defmodule Minga.Extension.Supervisor do
   Git and hex extensions must be resolved to a local path or loaded
   via Mix.install before calling this function.
   """
+  @typedoc """
+  Options for extension start/stop that inject collaborator dependencies.
+
+  * `:command_registry` — the `Minga.Command.Registry` server to register
+    commands with (default: `Minga.Command.Registry`)
+  * `:keymap` — the `Minga.Keymap.Active` server to register keybindings
+    with (default: `Minga.Keymap.Active`)
+  """
+  @type start_opts :: [command_registry: GenServer.server(), keymap: GenServer.server()]
+
   @spec start_extension(GenServer.server(), GenServer.server(), atom(), ExtRegistry.entry()) ::
           {:ok, pid()} | {:error, term()}
-  def start_extension(supervisor, registry, name, %{source_type: :git} = entry) do
+  @spec start_extension(
+          GenServer.server(),
+          GenServer.server(),
+          atom(),
+          ExtRegistry.entry(),
+          start_opts()
+        ) ::
+          {:ok, pid()} | {:error, term()}
+  def start_extension(supervisor, registry, name, entry, opts \\ [])
+
+  def start_extension(supervisor, registry, name, %{source_type: :git} = entry, opts) do
     # Git extensions are resolved to a local path in resolve_git_extensions/1.
     # If the path was set, compile from there. Otherwise it failed to clone.
     if entry.path do
-      start_from_path(supervisor, registry, name, entry)
+      start_from_path(supervisor, registry, name, entry, opts)
     else
       {:error, :clone_failed}
     end
   end
 
-  def start_extension(supervisor, registry, name, %{source_type: :hex} = entry) do
+  def start_extension(supervisor, registry, name, %{source_type: :hex} = entry, opts) do
     # Hex extensions are loaded via Mix.install in start_all/2.
     # Find the module implementing the Extension behaviour from the
     # newly available code paths.
-    find_and_start_hex_extension(supervisor, registry, name, entry)
+    find_and_start_hex_extension(supervisor, registry, name, entry, opts)
   end
 
-  def start_extension(supervisor, registry, name, entry) do
-    start_from_path(supervisor, registry, name, entry)
+  def start_extension(supervisor, registry, name, entry, opts) do
+    start_from_path(supervisor, registry, name, entry, opts)
   end
 
-  @spec start_from_path(GenServer.server(), GenServer.server(), atom(), ExtRegistry.entry()) ::
+  @spec start_from_path(
+          GenServer.server(),
+          GenServer.server(),
+          atom(),
+          ExtRegistry.entry(),
+          start_opts()
+        ) ::
           {:ok, pid()} | {:error, term()}
-  defp start_from_path(supervisor, registry, name, entry) do
+  defp start_from_path(supervisor, registry, name, entry, opts) do
+    cmd_registry = Keyword.get(opts, :command_registry, Minga.Command.Registry)
+    keymap = Keyword.get(opts, :keymap, Minga.Keymap.Active)
+
     with {:ok, module} <- compile_extension(entry.path),
          :ok <- validate_behaviour(module, name),
          :ok <- register_and_validate_options(name, module, entry.config),
          {:ok, _state} <- call_init(module, entry.config) do
+      register_extension_commands(module, name, cmd_registry)
+      register_extension_keybinds(module, name, keymap)
       start_child(supervisor, registry, name, module, entry.config)
     else
       {:error, reason} ->
@@ -148,7 +179,16 @@ defmodule Minga.Extension.Supervisor do
   Stops a single extension, terminates its process, and purges the module.
   """
   @spec stop_extension(GenServer.server(), GenServer.server(), atom(), ExtRegistry.entry()) :: :ok
-  def stop_extension(supervisor, registry, name, entry) do
+  @spec stop_extension(
+          GenServer.server(),
+          GenServer.server(),
+          atom(),
+          ExtRegistry.entry(),
+          start_opts()
+        ) :: :ok
+  def stop_extension(supervisor, registry, name, entry, opts \\ []) do
+    cmd_registry = Keyword.get(opts, :command_registry, Minga.Command.Registry)
+
     if is_pid(entry.pid) do
       try do
         DynamicSupervisor.terminate_child(supervisor, entry.pid)
@@ -157,7 +197,15 @@ defmodule Minga.Extension.Supervisor do
       end
     end
 
+    # Deregister DSL-declared commands before purging the module.
+    # The module must still be loaded for __command_schema__/0 to work.
+    #
+    # NOTE: keybindings registered via keybind/4 are NOT deregistered here.
+    # Minga.Keymap.Active has no unbind API. The reload path is safe because
+    # Config.Loader.reload/1 calls Keymap.Active.reset() after stop_all/0.
+    # A future "disable extension" feature will need unbind/3 added to Active.
     if entry.module do
+      deregister_extension_commands(entry.module, cmd_registry)
       :code.purge(entry.module)
       :code.delete(entry.module)
     end
@@ -228,9 +276,12 @@ defmodule Minga.Extension.Supervisor do
           GenServer.server(),
           GenServer.server(),
           atom(),
-          ExtRegistry.entry()
+          ExtRegistry.entry(),
+          start_opts()
         ) :: {:ok, pid()} | {:error, term()}
-  defp find_and_start_hex_extension(supervisor, registry, name, entry) do
+  defp find_and_start_hex_extension(supervisor, registry, name, entry, opts) do
+    cmd_registry = Keyword.get(opts, :command_registry, Minga.Command.Registry)
+    keymap = Keyword.get(opts, :keymap, Minga.Keymap.Active)
     package_atom = String.to_atom(entry.hex.package)
 
     case Application.ensure_all_started(package_atom) do
@@ -244,6 +295,8 @@ defmodule Minga.Extension.Supervisor do
          :ok <- validate_behaviour(module, name),
          :ok <- register_and_validate_options(name, module, entry.config),
          {:ok, _state} <- call_init(module, entry.config) do
+      register_extension_commands(module, name, cmd_registry)
+      register_extension_keybinds(module, name, keymap)
       start_child(supervisor, registry, name, module, entry.config)
     else
       {:error, reason} ->
@@ -409,6 +462,98 @@ defmodule Minga.Extension.Supervisor do
     case missing do
       [] -> :ok
       funs -> {:error, "extension #{name} missing callbacks: #{inspect(funs)}"}
+    end
+  end
+
+  @spec deregister_extension_commands(module(), GenServer.server()) :: :ok
+  defp deregister_extension_commands(module, cmd_registry) do
+    if function_exported?(module, :__command_schema__, 0) do
+      for {name, _description, _opts} <- module.__command_schema__() do
+        Minga.Command.Registry.unregister(cmd_registry, name)
+      end
+    end
+
+    :ok
+  rescue
+    e ->
+      Minga.Log.warning(
+        :config,
+        "Extension #{inspect(module)} command deregistration failed: #{Exception.message(e)}"
+      )
+
+      :ok
+  end
+
+  @spec register_extension_commands(module(), atom(), GenServer.server()) :: :ok
+  defp register_extension_commands(module, ext_name, cmd_registry) do
+    if function_exported?(module, :__command_schema__, 0) do
+      schema = module.__command_schema__()
+
+      for spec <- schema do
+        Minga.Command.Registry.register_command(cmd_registry, build_command_from_spec(spec))
+      end
+
+      if schema != [] do
+        Minga.Log.debug(:config, "Extension #{ext_name}: registered #{length(schema)} commands")
+      end
+    end
+
+    :ok
+  rescue
+    e ->
+      Minga.Log.warning(
+        :config,
+        "Extension #{ext_name} command registration failed: #{Exception.message(e)}"
+      )
+
+      :ok
+  end
+
+  @spec build_command_from_spec(Minga.Extension.command_spec()) :: Minga.Command.t()
+  defp build_command_from_spec({name, description, opts}) do
+    {mod, fun} = Keyword.fetch!(opts, :execute)
+    requires_buffer = Keyword.get(opts, :requires_buffer, false)
+
+    %Minga.Command{
+      name: name,
+      description: description,
+      execute: fn state -> apply(mod, fun, [state]) end,
+      requires_buffer: requires_buffer
+    }
+  end
+
+  @spec register_extension_keybinds(module(), atom(), GenServer.server()) :: :ok
+  defp register_extension_keybinds(module, ext_name, keymap) do
+    if function_exported?(module, :__keybind_schema__, 0) do
+      for spec <- module.__keybind_schema__() do
+        bind_keybind_spec(spec, ext_name, keymap)
+      end
+    end
+
+    :ok
+  rescue
+    e ->
+      Minga.Log.warning(
+        :config,
+        "Extension #{ext_name} keybind registration failed: #{Exception.message(e)}"
+      )
+
+      :ok
+  end
+
+  @spec bind_keybind_spec(Minga.Extension.keybind_spec(), atom(), GenServer.server()) :: :ok
+  defp bind_keybind_spec({mode, key_str, command, description, opts}, ext_name, keymap) do
+    case Minga.Keymap.Active.bind(keymap, mode, key_str, command, description, opts) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Minga.Log.warning(
+          :config,
+          "Extension #{ext_name}: keybind #{inspect(key_str)} failed: #{reason}"
+        )
+
+        :ok
     end
   end
 

@@ -279,6 +279,64 @@ defmodule Minga.Command.RegistryTest do
     end
   end
 
+  describe "register_command/2" do
+    test "registers a pre-built Command struct", %{registry: r} do
+      cmd = %Command{
+        name: :struct_cmd,
+        description: "From struct",
+        execute: fn s -> s end,
+        requires_buffer: true
+      }
+
+      :ok = Registry.register_command(r, cmd)
+
+      assert {:ok, registered} = Registry.lookup(r, :struct_cmd)
+      assert registered.name == :struct_cmd
+      assert registered.description == "From struct"
+      assert registered.requires_buffer == true
+    end
+
+    test "preserves requires_buffer and scope fields", %{registry: r} do
+      cmd = %Command{
+        name: :scoped_cmd,
+        description: "Scopeable",
+        execute: fn s -> s end,
+        requires_buffer: true,
+        scope: %{option: :wrap, toggle: true}
+      }
+
+      :ok = Registry.register_command(r, cmd)
+
+      assert {:ok, registered} = Registry.lookup(r, :scoped_cmd)
+      assert registered.requires_buffer == true
+      assert registered.scope == %{option: :wrap, toggle: true}
+    end
+  end
+
+  describe "unregister/2" do
+    test "removes a registered command", %{registry: r} do
+      :ok = Registry.register(r, :temp_cmd, "Temporary", fn s -> s end)
+      assert {:ok, _} = Registry.lookup(r, :temp_cmd)
+
+      :ok = Registry.unregister(r, :temp_cmd)
+      assert :error = Registry.lookup(r, :temp_cmd)
+    end
+
+    test "no-op for unknown command names", %{registry: r} do
+      assert :ok = Registry.unregister(r, :nonexistent_cmd)
+    end
+
+    test "does not affect other commands", %{registry: r} do
+      :ok = Registry.register(r, :keep_me, "Keep", fn s -> s end)
+      :ok = Registry.register(r, :remove_me, "Remove", fn s -> s end)
+
+      :ok = Registry.unregister(r, :remove_me)
+
+      assert {:ok, _} = Registry.lookup(r, :keep_me)
+      assert :error = Registry.lookup(r, :remove_me)
+    end
+  end
+
   describe "execute function" do
     test "user-registered execute functions work correctly", %{registry: r} do
       :ok = Registry.register(r, :my_cmd, "Test", fn state -> Map.put(state, :ran, true) end)

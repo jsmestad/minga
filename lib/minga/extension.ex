@@ -15,17 +15,20 @@ defmodule Minga.Extension do
           default: true,
           description: "Hide markup delimiters and show styled content"
 
-        option :pretty_bullets, :boolean,
-          default: true,
-          description: "Replace heading stars with Unicode bullets"
-
-        option :heading_bullets, :string_list,
-          default: ["◉", "○", "◈", "◇"],
-          description: "Unicode bullets for heading levels (cycles when depth exceeds list)"
-
         option :todo_keywords, :string_list,
           default: ["TODO", "DONE"],
           description: "TODO keyword cycle sequence"
+
+        command :org_cycle_todo, "Cycle TODO keyword",
+          execute: {MingaOrg.Todo, :cycle},
+          requires_buffer: true
+
+        command :org_toggle_checkbox, "Toggle checkbox",
+          execute: {MingaOrg.Checkbox, :toggle},
+          requires_buffer: true
+
+        keybind :normal, "SPC m t", :org_cycle_todo, "Cycle TODO", filetype: :org
+        keybind :normal, "SPC m x", :org_toggle_checkbox, "Toggle checkbox", filetype: :org
 
         @impl true
         def name, do: :minga_org
@@ -37,11 +40,14 @@ defmodule Minga.Extension do
         def version, do: "0.1.0"
 
         @impl true
-        def init(config) do
-          todo_keywords = Keyword.get(config, :todo_keywords, ["TODO", "DONE"])
-          {:ok, %{todo_keywords: todo_keywords}}
-        end
+        def init(_config), do: {:ok, %{}}
       end
+
+  Commands and keybindings declared with `command/3` and `keybind/4` are
+  auto-registered by the framework when the extension loads. Extensions
+  that need runtime-dynamic commands can still call
+  `Minga.Command.Registry.register/4` and `Minga.Keymap.Active.bind/5`
+  directly from `init/1`.
 
   ## Config declaration
 
@@ -117,9 +123,42 @@ defmodule Minga.Extension do
   @type option_spec ::
           {atom(), Minga.Config.Options.type_descriptor(), term(), description :: String.t()}
 
+  @typedoc """
+  A single command specification: `{name, description, opts}`.
+
+  The opts keyword list supports:
+
+  * `:execute` (required) — `{Module, :function}` MFA tuple. The function
+    receives editor state and returns new state. Extensions that need
+    config should call `Minga.Config.Options.get_extension_option/2`
+    inside the function body.
+  * `:requires_buffer` — when `true`, command is skipped if no buffer
+    is active (default: `false`)
+  """
+  @type command_spec :: {atom(), String.t(), keyword()}
+
+  @typedoc """
+  Vim modes that extensions can bind keys in.
+
+  Extensions bindable modes are the user-facing editing modes. Internal
+  modes like `:search_prompt`, `:substitute_confirm`, and `:extension_confirm`
+  are framework internals that extensions should not bind into.
+  """
+  @type bindable_mode :: :normal | :insert | :visual | :operator_pending
+
+  @typedoc """
+  A single keybinding specification: `{mode, key_string, command, description, opts}`.
+
+  The mode must be a `bindable_mode` (`:normal`, `:insert`, `:visual`,
+  or `:operator_pending`). The key string uses the same format as
+  `Minga.Keymap.Active.bind/5` (e.g. `"SPC m t"`, `"M-h"`, `"TAB"`).
+  Opts supports `:filetype` for scoping.
+  """
+  @type keybind_spec :: {bindable_mode(), String.t(), atom(), String.t(), keyword()}
+
   @doc """
-  Injects the `Minga.Extension` behaviour, the `option/3` DSL macro,
-  and a default `child_spec/1`.
+  Injects the `Minga.Extension` behaviour, DSL macros (`option/3`,
+  `command/3`, `keybind/4`, `keybind/5`), and a default `child_spec/1`.
 
   ## The `option` macro
 
@@ -132,7 +171,29 @@ defmodule Minga.Extension do
   a generated function the framework reads at load time to validate
   user config and register options in ETS.
 
-  ## Supported types
+  ## The `command` macro
+
+  Declares an editor command the extension provides:
+
+      command :org_cycle_todo, "Cycle TODO keyword",
+        execute: {MingaOrg.Todo, :cycle},
+        requires_buffer: true
+
+  Accumulated into `__command_schema__/0`. The framework registers
+  these in `Minga.Command.Registry` when the extension loads. The
+  execute MFA must be a `{Module, :function}` tuple whose function
+  accepts editor state and returns new state.
+
+  ## The `keybind` macro
+
+  Declares a keybinding the extension provides:
+
+      keybind :normal, "SPC m t", :org_cycle_todo, "Cycle TODO", filetype: :org
+
+  Accumulated into `__keybind_schema__/0`. The framework registers
+  these in `Minga.Keymap.Active` when the extension loads.
+
+  ## Supported option types
 
   `:boolean`, `:pos_integer`, `:non_neg_integer`, `:integer`, `:string`,
   `:string_or_nil`, `:string_list`, `:atom`, `{:enum, [atoms]}`,
@@ -142,6 +203,8 @@ defmodule Minga.Extension do
     quote do
       @behaviour Minga.Extension
       Module.register_attribute(__MODULE__, :__extension_options__, accumulate: true)
+      Module.register_attribute(__MODULE__, :__extension_commands__, accumulate: true)
+      Module.register_attribute(__MODULE__, :__extension_keybinds__, accumulate: true)
       @before_compile Minga.Extension
 
       @doc false
@@ -157,7 +220,7 @@ defmodule Minga.Extension do
 
       defoverridable child_spec: 1
 
-      import Minga.Extension, only: [option: 3]
+      import Minga.Extension, only: [option: 3, command: 3, keybind: 4, keybind: 5]
     end
   end
 
@@ -196,16 +259,83 @@ defmodule Minga.Extension do
     end
   end
 
+  @doc """
+  Declares an editor command this extension provides.
+
+  Accumulated at compile time and exposed via `__command_schema__/0`.
+  The framework auto-registers these commands when the extension loads.
+
+  ## Options
+
+  - `:execute` (required) — `{Module, :function}` MFA tuple. The function
+    receives editor state and returns new state.
+  - `:requires_buffer` — when `true`, command is skipped if no buffer
+    is active (default: `false`)
+
+  ## Examples
+
+      command :org_cycle_todo, "Cycle TODO keyword",
+        execute: {MingaOrg.Todo, :cycle},
+        requires_buffer: true
+
+      command :org_toggle_checkbox, "Toggle checkbox",
+        execute: {MingaOrg.Checkbox, :toggle},
+        requires_buffer: true
+  """
+  defmacro command(name, description, opts) do
+    quote do
+      @__extension_commands__ {unquote(name), unquote(description), unquote(opts)}
+    end
+  end
+
+  @doc """
+  Declares a keybinding this extension provides.
+
+  Accumulated at compile time and exposed via `__keybind_schema__/0`.
+  The framework auto-registers these keybindings when the extension loads.
+
+  ## Examples
+
+      keybind :normal, "SPC m t", :org_cycle_todo, "Cycle TODO"
+      keybind :normal, "M-h", :org_promote_heading, "Promote heading", filetype: :org
+  """
+  defmacro keybind(mode, key_string, command_name, description) do
+    quote do
+      @__extension_keybinds__ {unquote(mode), unquote(key_string), unquote(command_name),
+                               unquote(description), []}
+    end
+  end
+
+  @doc false
+  defmacro keybind(mode, key_string, command_name, description, opts) do
+    quote do
+      @__extension_keybinds__ {unquote(mode), unquote(key_string), unquote(command_name),
+                               unquote(description), unquote(opts)}
+    end
+  end
+
   @doc false
   defmacro __before_compile__(env) do
     options = Module.get_attribute(env.module, :__extension_options__) || []
+    commands = Module.get_attribute(env.module, :__extension_commands__) || []
+    keybinds = Module.get_attribute(env.module, :__extension_keybinds__) || []
     # Accumulated attributes are in reverse order; restore declaration order
     options = Enum.reverse(options)
+    commands = Enum.reverse(commands)
+    keybinds = Enum.reverse(keybinds)
 
     quote do
       @doc false
       @spec __option_schema__() :: [Minga.Extension.option_spec()]
       def __option_schema__, do: unquote(Macro.escape(options))
+
+      @doc false
+      @spec __command_schema__() :: [Minga.Extension.command_spec()]
+      def __command_schema__, do: unquote(Macro.escape(commands))
+
+      @doc false
+      @spec __keybind_schema__() :: [Minga.Extension.keybind_spec()]
+      def __keybind_schema__, do: unquote(Macro.escape(keybinds))
     end
   end
 end
