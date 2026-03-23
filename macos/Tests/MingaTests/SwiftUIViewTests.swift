@@ -178,7 +178,23 @@ struct StatusBarViewViewTests {
 
         #expect(strings.contains("Ln 42, Col 9"))
         #expect(strings.contains("NORMAL"))
-        #expect(strings.contains("elixir"))
+        #expect(strings.contains("Elixir"))
+    }
+
+    @Test("Filetype display is titleized")
+    @MainActor func filetypeDisplay() {
+        let state = StatusBarState()
+        state.filetype = "elixir"
+        #expect(state.filetypeDisplay == "Elixir")
+
+        state.filetype = "c_sharp"
+        #expect(state.filetypeDisplay == "C Sharp")
+
+        state.filetype = "text"
+        #expect(state.filetypeDisplay == "Text")
+
+        state.filetype = ""
+        #expect(state.filetypeDisplay == "")
     }
 
     @Test("Agent mode shows message count and mode badge (model name is in agent chat header, not status bar)")

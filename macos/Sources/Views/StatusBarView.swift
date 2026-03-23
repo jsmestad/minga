@@ -142,6 +142,15 @@ final class StatusBarState {
         return Character(UnicodeScalar(96 + macroRecording))
     }
 
+    /// Titleized filetype for display (e.g., "elixir" → "Elixir", "c_sharp" → "C Sharp").
+    var filetypeDisplay: String {
+        filetype
+            .replacingOccurrences(of: "_", with: " ")
+            .split(separator: " ")
+            .map { $0.prefix(1).uppercased() + $0.dropFirst() }
+            .joined(separator: " ")
+    }
+
     /// Icon color as a SwiftUI Color from the 24-bit RGB components.
     var iconColor: Color {
         Color(
@@ -476,7 +485,7 @@ struct StatusBarView: View {
                                 .font(.custom("Symbols Nerd Font Mono", size: 11))
                                 .foregroundStyle(state.iconColor)
                         }
-                        Text(state.filetype)
+                        Text(state.filetypeDisplay)
                             .font(.system(size: 11))
                             .foregroundStyle(theme.modelineBarFg.opacity(0.6))
                     }
