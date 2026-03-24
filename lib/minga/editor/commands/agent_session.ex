@@ -64,12 +64,13 @@ defmodule Minga.Editor.Commands.AgentSession do
 
         state = AgentAccess.update_agent(state, &AgentState.set_session(&1, pid))
 
-        # Set the session PID on the agent TAB (not active_id, which may
-        # be a file tab when called from toggle_agent_split).
+        # Set the session PID on the agent tab that was just created
+        # (or the active agent tab). find_sessionless_agent avoids the
+        # ambiguity of find_by_kind(:agent) when multiple agent tabs exist.
         state =
           case state do
             %{tab_bar: %TabBar{} = tb} ->
-              case TabBar.find_by_kind(tb, :agent) do
+              case TabBar.find_sessionless_agent(tb) do
                 %Tab{id: agent_tab_id} ->
                   EditorState.set_tab_session(state, agent_tab_id, pid)
 

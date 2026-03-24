@@ -119,14 +119,14 @@ defmodule Minga.Editor.Commands.Agent do
           next_id: win_id + 1
         }
 
-        context = %{keymap_scope: :agent, windows: windows}
+        # Build complete context with all @per_tab_fields populated.
+        context = EditorState.build_agent_tab_defaults(state, windows, agent_buf)
 
         # Create agent tab in the background (don't switch to it).
-        # Workspace creation happens later in start_agent_session when
+        # Group creation happens later in start_agent_session when
         # the session pid is available (ensure_agent_workspace/2).
-        {tb, _tab} = TabBar.add(state.tab_bar, :agent, "Agent")
-        agent_tab = TabBar.find_by_kind(tb, :agent)
-        tb = TabBar.update_context(tb, agent_tab.id, context)
+        {tb, new_tab} = TabBar.add(state.tab_bar, :agent, "Agent")
+        tb = TabBar.update_context(tb, new_tab.id, context)
 
         # Switch back to the original active tab
         tb = %{tb | active_id: state.tab_bar.active_id}

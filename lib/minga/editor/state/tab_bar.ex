@@ -203,6 +203,27 @@ defmodule Minga.Editor.State.TabBar do
     Enum.find(tabs, &(&1.kind == kind))
   end
 
+  @doc """
+  Returns an agent tab that has no session assigned, or nil.
+
+  Used by `start_agent_session` to find the correct tab to bind a
+  new session to, avoiding ambiguity when multiple agent tabs exist.
+  Falls back to the active tab if it's an agent tab.
+  """
+  @spec find_sessionless_agent(t()) :: Tab.t() | nil
+  def find_sessionless_agent(%__MODULE__{tabs: tabs, active_id: active_id}) do
+    # Prefer the active tab if it's an agent without a session.
+    active = Enum.find(tabs, &(&1.id == active_id))
+
+    if active && active.kind == :agent && active.session == nil do
+      active
+    else
+      Enum.find(tabs, fn tab ->
+        tab.kind == :agent and tab.session == nil
+      end)
+    end
+  end
+
   @doc "Returns the agent tab whose session matches the given pid, or nil."
   @spec find_by_session(t(), pid()) :: Tab.t() | nil
   def find_by_session(%__MODULE__{tabs: tabs}, session_pid) when is_pid(session_pid) do

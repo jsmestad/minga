@@ -52,7 +52,6 @@ defmodule Minga.Editor do
   alias Minga.LSP.SyncServer, as: LspSyncServer
   alias Minga.Mode
   # PopupLifecycle alias removed: warnings popup replaced by bottom panel (#825)
-  alias Minga.Port.Manager, as: PortManager
   alias Minga.Port.Protocol
 
   @typedoc "Options for starting the editor."
@@ -67,7 +66,7 @@ defmodule Minga.Editor do
   alias Minga.Agent.Session, as: AgentSession
 
   alias Minga.Editor.State, as: EditorState
-  alias Minga.Editor.State.Agent, as: AgentState
+
   alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.Buffers
   alias Minga.Editor.State.Tab
@@ -163,7 +162,7 @@ defmodule Minga.Editor do
     state = Startup.build_initial_state(opts)
 
     # Logger redirect and startup messages
-    tui_active? = state.port_manager == PortManager
+    tui_active? = state.backend == :tui
 
     state =
       if tui_active? do
@@ -967,13 +966,8 @@ defmodule Minga.Editor do
   def handle_info({:DOWN, ref, :process, pid, reason}, state) do
     case classify_down(state, ref, pid) do
       :agent_session ->
-        # Intentional stops (:normal, :shutdown) come from close_agent_tab
-        # or restart_session. Only unexpected crashes are errors.
         if reason in [:normal, :shutdown] do
-          Minga.Log.info(
-            :agent,
-            "[Agent] Session #{inspect(pid)} stopped"
-          )
+          Minga.Log.info(:agent, "[Agent] Session #{inspect(pid)} stopped")
         else
           Minga.Log.error(
             :agent,
@@ -981,8 +975,7 @@ defmodule Minga.Editor do
           )
         end
 
-        state = AgentAccess.update_agent(state, &AgentState.clear_session/1)
-        state = %{state | status_msg: "Agent session terminated, SPC a n to restart"}
+        state = Commands.BufferManagement.handle_agent_session_down(state, pid, reason)
         {:noreply, state}
 
       :buffer ->
@@ -1758,9 +1751,17 @@ defmodule Minga.Editor do
     EditorState.switch_tab(state, id)
   end
 
-  defp handle_gui_action(state, {:close_tab, _id}) do
-    # Close specific tab by id. For now, use force_quit which closes
-    # the active tab. Full implementation in a later step.
+  defp handle_gui_action(state, {:close_tab, id}) do
+    # Switch to the target tab first (if not already active), then close
+    # it. This ensures the right tab is closed when the user clicks X
+    # on a background tab.
+    state =
+      if state.tab_bar.active_id != id do
+        EditorState.switch_tab(state, id)
+      else
+        state
+      end
+
     Commands.BufferManagement.execute(state, :force_quit)
   end
 

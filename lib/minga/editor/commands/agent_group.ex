@@ -1,79 +1,81 @@
 defmodule Minga.Editor.Commands.AgentGroup do
   @moduledoc """
-  Workspace management commands.
+  Agent group navigation and management commands.
 
-  These commands handle workspace navigation and switching. Workspaces
-  are a progressive grouping layer over tabs: when agents are running,
-  their files are grouped into workspace sections.
+  All navigation commands route through `EditorState.switch_tab/2` so
+  the outgoing tab's context is snapshotted and the incoming tab's
+  context is restored. Never mutate `tab_bar.active_id` directly.
   """
 
   @behaviour Minga.Command.Provider
 
+  alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.TabBar
 
   @type state :: map()
 
-  @doc "Switch to the next workspace."
+  @doc "Switch to the next agent group's first tab."
   @spec agent_group_next(state()) :: state()
   def agent_group_next(%{tab_bar: %TabBar{} = tb} = state) do
-    %{state | tab_bar: TabBar.next_agent_group(tb)}
+    switch_via_group(state, TabBar.next_agent_group(tb))
   end
 
-  @doc "Switch to the previous workspace."
+  @doc "Switch to the previous agent group's first tab."
   @spec agent_group_prev(state()) :: state()
   def agent_group_prev(%{tab_bar: %TabBar{} = tb} = state) do
-    %{state | tab_bar: TabBar.prev_agent_group(tb)}
+    switch_via_group(state, TabBar.prev_agent_group(tb))
   end
 
-  @doc "Switch to the next agent workspace (skips manual)."
+  @doc "Switch to the next agent group (same as next)."
   @spec agent_group_next_agent(state()) :: state()
   def agent_group_next_agent(%{tab_bar: %TabBar{} = tb} = state) do
-    %{state | tab_bar: TabBar.next_agent_group(tb)}
+    switch_via_group(state, TabBar.next_agent_group(tb))
   end
 
   @doc "Switch to the first ungrouped (user) tab."
   @spec switch_to_ungrouped(state()) :: state()
   def switch_to_ungrouped(%{tab_bar: %TabBar{} = tb} = state) do
     case TabBar.tabs_in_group(tb, 0) do
-      [first | _] -> %{state | tab_bar: %{tb | active_id: first.id}}
+      [first | _] -> EditorState.switch_tab(state, first.id)
       [] -> state
     end
   end
 
-  @doc "Switch to last active workspace (toggle between current and manual)."
+  @doc "Toggle between ungrouped tabs and the last agent group."
   @spec agent_group_toggle(state()) :: state()
   def agent_group_toggle(%{tab_bar: %TabBar{} = tb} = state) do
     current_ws = TabBar.active_group_id(tb)
-    new_id = if current_ws == 0, do: last_agent_id(tb), else: 0
-    %{state | tab_bar: TabBar.switch_to_group(tb, new_id)}
+    target_group_id = if current_ws == 0, do: last_agent_id(tb), else: 0
+    target_tb = TabBar.switch_to_group(tb, target_group_id)
+    switch_via_group(state, target_tb)
   end
 
   @doc """
-  Close the active workspace and migrate its tabs to manual.
+  Close the active agent group and migrate its tabs to ungrouped.
 
-  The manual workspace (id 0) cannot be closed.
+  The ungrouped group (id 0) cannot be closed.
   """
   @spec agent_group_close(state()) :: state()
   def agent_group_close(%{tab_bar: %TabBar{} = tb} = state) do
     %{state | tab_bar: TabBar.remove_group(tb, TabBar.active_group_id(tb))}
   end
 
-  @doc "Open the workspace picker."
+  @doc "Open the agent group picker."
   @spec agent_group_list(state()) :: state()
   def agent_group_list(state) do
     Minga.Editor.PickerUI.open(state, Minga.Picker.AgentGroupSource)
   end
 
-  @doc "Open the icon picker for the active workspace."
+  @doc "Open the icon picker for the active agent group."
   @spec agent_group_set_icon(state()) :: state()
   def agent_group_set_icon(state) do
     Minga.Editor.PickerUI.open(state, Minga.Picker.AgentGroupIconSource)
   end
 
   @doc """
-  Rename the active workspace.
+  Rename the active agent group.
 
-  GUI: the inline TextField in the workspace indicator handles rename
+  GUI: the inline TextField in the group indicator handles rename
   natively (double-click or context menu). This keyboard path opens the
   prompt UI with the current name prefilled, which works in both TUI
   (minibuffer) and GUI (native prompt rendering).
@@ -86,7 +88,7 @@ defmodule Minga.Editor.Commands.AgentGroup do
     Minga.Editor.PromptUI.open(state, Minga.Prompt.AgentGroupRename, default: current_name)
   end
 
-  @doc "Jump to workspace by number (1-based, 0 = manual workspace)."
+  @doc "Jump to agent group by number (1-based, 0 = ungrouped)."
   @spec workspace_goto(state(), non_neg_integer()) :: state()
   def workspace_goto(%{tab_bar: %TabBar{} = tb} = state, number) do
     ws =
@@ -97,7 +99,19 @@ defmodule Minga.Editor.Commands.AgentGroup do
 
     case ws do
       nil -> state
-      %{id: id} -> %{state | tab_bar: TabBar.switch_to_group(tb, id)}
+      %{id: id} -> switch_via_group(state, TabBar.switch_to_group(tb, id))
+    end
+  end
+
+  # Takes a TabBar with a potentially new active_id (from a group switch
+  # operation) and routes through EditorState.switch_tab so snapshots
+  # and restores happen properly. No-op if the active tab didn't change.
+  @spec switch_via_group(state(), TabBar.t()) :: state()
+  defp switch_via_group(state, %TabBar{active_id: new_id}) do
+    if new_id == state.tab_bar.active_id do
+      state
+    else
+      EditorState.switch_tab(state, new_id)
     end
   end
 

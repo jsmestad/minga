@@ -62,6 +62,7 @@ defmodule Minga.Test.EditorCase do
     {:ok, editor} =
       Editor.start_link(
         name: :"headless_editor_#{id}",
+        backend: :headless,
         port_manager: port,
         buffer: buffer,
         width: width,
@@ -107,6 +108,7 @@ defmodule Minga.Test.EditorCase do
     {:ok, editor} =
       Editor.start_link(
         name: :"headless_editor_#{id}",
+        backend: :headless,
         port_manager: port,
         buffer: buffer,
         width: width,
