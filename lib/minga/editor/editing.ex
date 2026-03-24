@@ -39,6 +39,7 @@ defmodule Minga.Editor.Editing do
   """
 
   alias Minga.EditingModel
+  alias Minga.EditingModel.CUA, as: CUAModel
   alias Minga.EditingModel.Vim, as: VimModel
   alias Minga.Editor.MacroRecorder
   alias Minga.Editor.State, as: EditorState
@@ -58,7 +59,7 @@ defmodule Minga.Editor.Editing do
   def active_model do
     case Minga.Config.Options.get(:editing_model) do
       :vim -> VimModel
-      :cua -> raise "CUA editing model not yet implemented (Phase D)"
+      :cua -> CUAModel
     end
   catch
     # Config.Options may not be started yet (test setup, app boot).
@@ -68,8 +69,11 @@ defmodule Minga.Editor.Editing do
   # Builds a lightweight EditingModel state struct from EditorState
   # for dispatching through behaviour callbacks.
   @spec model_state(EditorState.t()) :: EditingModel.state()
-  defp model_state(%EditorState{vim: vim}) do
-    VimModel.from_editor(vim.mode, vim.mode_state)
+  defp model_state(%EditorState{} = state) do
+    case active_model() do
+      VimModel -> VimModel.from_editor(state.vim.mode, state.vim.mode_state)
+      CUAModel -> CUAModel.from_editor()
+    end
   end
 
   # ── Model-dispatched queries ─────────────────────────────────────────────
