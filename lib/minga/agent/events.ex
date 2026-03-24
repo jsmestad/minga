@@ -16,9 +16,9 @@ defmodule Minga.Agent.Events do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.AgentAccess
+  alias Minga.Editor.State.AgentGroup
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
-  alias Minga.Editor.State.AgentGroup
 
   @type effect ::
           :render

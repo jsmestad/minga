@@ -8,8 +8,8 @@ defmodule Minga.Prompt.AgentGroupRename do
 
   @behaviour Minga.Prompt.Handler
 
-  alias Minga.Editor.State.TabBar
   alias Minga.Editor.State.AgentGroup
+  alias Minga.Editor.State.TabBar
 
   @impl true
   @spec label() :: String.t()

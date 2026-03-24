@@ -11,8 +11,8 @@ defmodule Minga.Picker.AgentGroupSource do
   alias Minga.Picker.Item
 
   alias Minga.Editor.State, as: EditorState
-  alias Minga.Editor.State.TabBar
   alias Minga.Editor.State.AgentGroup
+  alias Minga.Editor.State.TabBar
 
   @impl true
   @spec title() :: String.t()

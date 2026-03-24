@@ -12,8 +12,8 @@ defmodule Minga.Editor.EditingTest do
   alias Minga.Editor.Editing
   alias Minga.Editor.MacroRecorder
   alias Minga.Editor.State, as: EditorState
-  alias Minga.Editor.VimState
   alias Minga.Editor.Viewport
+  alias Minga.Editor.VimState
   alias Minga.Mode
 
   @port_manager :fake_port

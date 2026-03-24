@@ -7,9 +7,9 @@ defmodule Minga.Agent.AgentGroupAssociationTest do
   """
   use ExUnit.Case, async: true
 
+  alias Minga.Editor.State.AgentGroup
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
-  alias Minga.Editor.State.AgentGroup
 
   defp build_agent_scenario do
     fake_session = spawn(fn -> Process.sleep(:infinity) end)

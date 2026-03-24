@@ -22,7 +22,7 @@
           # ── Design ─────────────────────────────────────────────────────────
           {Credo.Check.Design.AliasUsage, false},
           {Credo.Check.Design.TagFIXME, []},
-          {Credo.Check.Design.TagTODO, [exit_status: 0]},
+          {Credo.Check.Design.TagTODO, false},
 
           # ── Domain boundaries ──────────────────────────────────────────────
           {Minga.Credo.DomainBoundaryCheck, [exit_status: 0]},
