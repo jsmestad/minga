@@ -25,10 +25,9 @@ defmodule Minga.IntegrationTest do
 
       assert buffer_content(ctx) == original
       assert buffer_cursor(ctx) == {0, 2}
-      # Screen cursor is offset by gutter width (3 for a 3-line file).
-      # send_key_sync guarantees the render cast reached the port before
-      # :sys.get_state(editor) returned, so screen_cursor sees post-render state.
-      assert screen_cursor(ctx) == {1, 3 + 2}
+      # Screen cursor is offset by gutter width (5 for a 3-line file:
+      # 2 sign column + 2 digits + 1 trailing space).
+      assert screen_cursor(ctx) == {1, 5 + 2}
     end
 
     test "h moves cursor left" do

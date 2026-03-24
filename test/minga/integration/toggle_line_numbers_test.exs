@@ -47,8 +47,9 @@ defmodule Minga.Integration.ToggleLineNumbersTest do
       assert BufferServer.get_option(ctx.buffer, :line_numbers) == :none
 
       row1 = screen_row(ctx, 1)
-      assert row1 =~ ~r/^line one/, "none: no gutter, text starts immediately"
-      refute row1 =~ ~r/^\s+\d/, "none: no line number padding"
+      # Sign column (2 chars) is always reserved, but no line numbers.
+      assert row1 =~ ~r/^\s{2}line one/, "none: sign column only, no line numbers"
+      refute row1 =~ ~r/^\s+\d/, "none: no line number digits"
 
       # One more press back to hybrid.
       send_keys_sync(ctx, "<SPC>tl")

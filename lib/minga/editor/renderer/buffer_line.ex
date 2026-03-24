@@ -530,20 +530,16 @@ defmodule Minga.Editor.Renderer.BufferLine do
 
   @spec render_sign(line_params(), non_neg_integer()) :: DisplayList.draw() | []
   defp render_sign(%{ctx: ctx, buf_line: buf_line}, sr) do
-    if ctx.has_sign_column do
-      Gutter.render_sign(
-        sr,
-        0,
-        buf_line,
-        ctx.diagnostic_signs,
-        ctx.git_signs,
-        ctx.gutter_colors,
-        ctx.git_colors,
-        ctx.decorations
-      )
-    else
-      []
-    end
+    Gutter.render_sign(
+      sr,
+      0,
+      buf_line,
+      ctx.diagnostic_signs,
+      ctx.git_signs,
+      ctx.gutter_colors,
+      ctx.git_colors,
+      ctx.decorations
+    )
   end
 
   @spec render_number(line_params(), non_neg_integer()) :: DisplayList.draw() | []

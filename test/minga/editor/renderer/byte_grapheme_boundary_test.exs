@@ -18,7 +18,7 @@ defmodule Minga.Editor.Renderer.ByteGraphemeBoundaryTest do
       send_key_sync(ctx, ?$)
 
       {_row, col} = screen_cursor(ctx)
-      gutter_w = 3
+      gutter_w = 5
 
       # "café" has 4 graphemes, cursor on last char (index 3)
       assert col == gutter_w + 3
@@ -31,7 +31,7 @@ defmodule Minga.Editor.Renderer.ByteGraphemeBoundaryTest do
       send_key_sync(ctx, ?$)
 
       {_row, col} = screen_cursor(ctx)
-      gutter_w = 3
+      gutter_w = 5
 
       # Display columns: a=1, 🎉=2, b=1 — 'b' is at display col 3 (not grapheme 2)
       assert col == gutter_w + 3
@@ -47,7 +47,7 @@ defmodule Minga.Editor.Renderer.ByteGraphemeBoundaryTest do
       send_key_sync(ctx, ?l)
 
       {_row, col} = screen_cursor(ctx)
-      gutter_w = 3
+      gutter_w = 5
 
       # grapheme index 3
       assert col == gutter_w + 3
@@ -81,7 +81,7 @@ defmodule Minga.Editor.Renderer.ByteGraphemeBoundaryTest do
     test "visual selection highlights correct graphemes" do
       # "café" — select "af" (graphemes 1-2)
       ctx = start_editor("café")
-      gutter_w = 3
+      gutter_w = 5
 
       # Move to 'a', enter visual, select through 'f'
       send_key_sync(ctx, ?l)
@@ -105,7 +105,7 @@ defmodule Minga.Editor.Renderer.ByteGraphemeBoundaryTest do
 
     test "visual selection with emoji characters" do
       ctx = start_editor("a🎉b")
-      gutter_w = 3
+      gutter_w = 5
 
       # Select all with v$
       send_key_sync(ctx, ?v)
@@ -126,7 +126,7 @@ defmodule Minga.Editor.Renderer.ByteGraphemeBoundaryTest do
       send_key_sync(ctx, ?b)
 
       {_row, col} = screen_cursor(ctx)
-      gutter_w = 3
+      gutter_w = 5
 
       # After typing "ab", cursor should be at grapheme col 2
       assert col == gutter_w + 2
@@ -140,7 +140,7 @@ defmodule Minga.Editor.Renderer.ByteGraphemeBoundaryTest do
       send_key_sync(ctx, ?$)
 
       {_row, col} = screen_cursor(ctx)
-      gutter_w = 3
+      gutter_w = 5
 
       # "hello world" = 11 chars, cursor on 'd' at index 10
       assert col == gutter_w + 10

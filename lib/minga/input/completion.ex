@@ -144,11 +144,12 @@ defmodule Minga.Input.Completion do
       screen_row = line - state.viewport.top
       total_lines = BufferServer.line_count(buf)
 
-      gutter_w =
+      number_w =
         if state.line_numbers == :none,
           do: 0,
           else: Viewport.gutter_width(total_lines)
 
+      gutter_w = Minga.Editor.Renderer.Gutter.total_width(number_w)
       screen_col = col + gutter_w - state.viewport.left
 
       {max(screen_row, 0), max(screen_col, 0)}

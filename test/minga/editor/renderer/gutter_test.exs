@@ -18,20 +18,13 @@ defmodule Minga.Editor.Renderer.GutterTest do
     deleted_fg: 0xFF6C6B
   }
 
-  describe "total_width/2" do
-    test "adds sign column width when diagnostics present" do
-      line_number_w = 4
-      assert Gutter.total_width(line_number_w, true) == 6
+  describe "total_width/1" do
+    test "always includes sign column width" do
+      assert Gutter.total_width(4) == 6
     end
 
-    test "no sign column when no diagnostics" do
-      line_number_w = 4
-      assert Gutter.total_width(line_number_w, false) == 4
-    end
-
-    test "handles zero line number width" do
-      assert Gutter.total_width(0, true) == 2
-      assert Gutter.total_width(0, false) == 0
+    test "zero line number width still reserves sign column" do
+      assert Gutter.total_width(0) == 2
     end
   end
 
