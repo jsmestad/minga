@@ -93,7 +93,7 @@ defmodule Minga.Input.Scoped do
       {:passthrough, state}
       # Leader sequence in progress: passthrough ALL keys to mode FSM
     else
-      if is_map(state.vim.mode_state.leader_node) and not panel.input_focused do
+      if Minga.Editor.Editing.in_leader?(state) and not panel.input_focused do
         {:passthrough, state}
       else
         dispatch_agent_key_inner(state, cp, mods)
@@ -129,7 +129,7 @@ defmodule Minga.Input.Scoped do
   end
 
   defp handle_focused_input(state, _panel, cp, mods) do
-    if state.vim.mode == :insert do
+    if Minga.Editor.Editing.inserting?(state) do
       # In insert mode, fall through to scope trie for self-insert,
       # Enter, Backspace, Ctrl combos, etc.
       resolve_agent_key(state, :insert, cp, mods)

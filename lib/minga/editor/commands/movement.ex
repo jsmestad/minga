@@ -396,12 +396,14 @@ defmodule Minga.Editor.Commands.Movement do
   def execute(state, :window_close), do: close_window(state)
 
   def execute(state, :describe_key) do
-    new_mode_state = %{state.vim.mode_state | pending_describe_key: true}
+    state =
+      Minga.Editor.Editing.update_mode_state(state, fn ms ->
+        %{ms | pending_describe_key: true}
+      end)
 
     %{
       state
-      | vim: %{state.vim | mode_state: new_mode_state},
-        status_msg: "Press key to describe:"
+      | status_msg: "Press key to describe:"
     }
   end
 

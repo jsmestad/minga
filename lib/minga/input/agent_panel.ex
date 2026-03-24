@@ -56,7 +56,7 @@ defmodule Minga.Input.AgentPanel do
   @spec handle_panel_input(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           EditorState.t()
   defp handle_panel_input(state, cp, mods) do
-    if state.vim.mode == :insert do
+    if Minga.Editor.Editing.inserting?(state) do
       # Resolve through the agent scope insert trie. This gives us the
       # same keybindings as the split pane path (Enter, Shift+Enter,
       # Backspace, Ctrl combos, @-mention, printable chars) without
@@ -110,11 +110,15 @@ defmodule Minga.Input.AgentPanel do
   # Previously this called delegate_to_mode_fsm(state, 0, 0) which
   # discarded the actual key and could clobber buffers.active if the
   # leader command (e.g. :new_buffer) changed it during execution.
-  defp handle_panel_nav(state, _cp, _mods) when is_map(state.vim.mode_state.leader_node) do
-    {:passthrough, state}
+  defp handle_panel_nav(state, cp, mods) do
+    if Minga.Editor.Editing.in_leader?(state) do
+      {:passthrough, state}
+    else
+      handle_panel_nav_dispatch(state, cp, mods)
+    end
   end
 
-  defp handle_panel_nav(state, cp, mods) do
+  defp handle_panel_nav_dispatch(state, cp, mods) do
     if Input.key_sequence_pending?(state) do
       {:handled, delegate_to_mode_fsm(state, cp, mods)}
     else

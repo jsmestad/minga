@@ -239,7 +239,9 @@ defmodule Minga.Integration.MouseTest do
       state_after = :sys.get_state(ctx.editor)
 
       case EditorState.find_agent_chat_window(state_after) do
-        nil -> :ok
+        nil ->
+          :ok
+
         {_win_id, window} ->
           refute window.pinned, "agent chat window should be unpinned after scroll"
       end

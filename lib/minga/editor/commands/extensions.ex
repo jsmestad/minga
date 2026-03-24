@@ -53,8 +53,9 @@ defmodule Minga.Editor.Commands.Extensions do
   @spec apply_updates(state()) :: state()
   def apply_updates(state) do
     alias Minga.Extension.Updater
+    alias Minga.Editor.Editing
 
-    ms = state.vim.mode_state
+    ms = Editing.mode_state(state)
     Task.start(fn -> Updater.apply_accepted(ms) end)
 
     %{state | status_msg: "Applying extension updates..."}
@@ -63,8 +64,9 @@ defmodule Minga.Editor.Commands.Extensions do
   @spec confirm_details(state()) :: state()
   def confirm_details(state) do
     alias Minga.Extension.Updater
+    alias Minga.Editor.Editing
 
-    ms = state.vim.mode_state
+    ms = Editing.mode_state(state)
     update = Enum.at(ms.updates, ms.current)
     details = Updater.details(update.name)
     Minga.Editor.log_to_messages(details)

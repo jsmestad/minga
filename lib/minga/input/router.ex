@@ -16,6 +16,7 @@ defmodule Minga.Input.Router do
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor
+  alias Minga.Editor.Editing
   alias Minga.Editor.LspActions
   alias Minga.Editor.State, as: EditorState
   alias Minga.Port.Manager, as: PortManager
@@ -40,7 +41,7 @@ defmodule Minga.Input.Router do
     %{
       old_buffer: state.buffers.active,
       buf_version: buffer_version(state),
-      old_mode: state.vim.mode,
+      old_mode: Editing.mode(state),
       old_cursor: safe_cursor(state.buffers.active)
     }
   end
@@ -77,7 +78,7 @@ defmodule Minga.Input.Router do
           new_state,
           state.buffers.active,
           buffer_version(state),
-          state.vim.mode,
+          Editing.mode(state),
           {cancel, 0}
         )
 
@@ -89,7 +90,7 @@ defmodule Minga.Input.Router do
   @spec dispatch_normal(EditorState.t(), non_neg_integer(), non_neg_integer()) :: EditorState.t()
   defp dispatch_normal(state, codepoint, modifiers) do
     old_buffer = state.buffers.active
-    old_mode = state.vim.mode
+    old_mode = Editing.mode(state)
     buf_version_before = buffer_version(state)
     old_cursor = safe_cursor(old_buffer)
 
@@ -194,12 +195,13 @@ defmodule Minga.Input.Router do
   # This ensures the stored selection range chain doesn't linger after
   # the user exits visual mode (Escape, entering normal mode, switching buffers).
   @spec maybe_clear_selection_ranges(EditorState.t(), atom()) :: EditorState.t()
-  defp maybe_clear_selection_ranges(
-         %EditorState{vim: %{mode: current_mode}, selection_ranges: ranges} = state,
-         old_mode
-       )
-       when old_mode == :visual and current_mode != :visual and ranges != nil do
-    %{state | selection_ranges: nil, selection_range_index: 0}
+  defp maybe_clear_selection_ranges(%EditorState{selection_ranges: ranges} = state, old_mode)
+       when old_mode == :visual and ranges != nil do
+    if Editing.mode(state) != :visual do
+      %{state | selection_ranges: nil, selection_range_index: 0}
+    else
+      state
+    end
   end
 
   defp maybe_clear_selection_ranges(state, _old_mode), do: state
@@ -225,16 +227,6 @@ defmodule Minga.Input.Router do
     LspActions.clear_document_highlights(state)
   end
 
-  # Not normal mode: clear highlights
-  defp maybe_schedule_document_highlight(
-         %EditorState{vim: %{mode: mode}} = state,
-         _old_buffer,
-         _old_cursor
-       )
-       when mode != :normal do
-    LspActions.clear_document_highlights(state)
-  end
-
   # Normal mode, no buffer: no-op
   defp maybe_schedule_document_highlight(
          %EditorState{buffers: %{active: nil}} = state,
@@ -244,15 +236,21 @@ defmodule Minga.Input.Router do
     state
   end
 
-  # Normal mode with a live buffer: schedule only if cursor moved
+  # Same buffer: check mode and cursor
   defp maybe_schedule_document_highlight(state, _old_buffer, old_cursor) do
-    new_cursor = safe_cursor(state.buffers.active)
-
-    if new_cursor != old_cursor do
-      state = LspActions.schedule_document_highlight(state)
-      LspActions.schedule_inlay_hints_on_scroll(state)
+    if Editing.mode(state) != :normal do
+      # Not normal mode: clear highlights
+      LspActions.clear_document_highlights(state)
     else
-      state
+      # Normal mode with a live buffer: schedule only if cursor moved
+      new_cursor = safe_cursor(state.buffers.active)
+
+      if new_cursor != old_cursor do
+        state = LspActions.schedule_document_highlight(state)
+        LspActions.schedule_inlay_hints_on_scroll(state)
+      else
+        state
+      end
     end
   end
 
@@ -273,17 +271,14 @@ defmodule Minga.Input.Router do
   # A bare `batch_end` is still emitted so that frame-synchronization contracts
   # (HeadlessPort in tests, future frame-pacing in production) remain satisfied.
   @spec maybe_render(EditorState.t(), non_neg_integer()) :: EditorState.t()
-  defp maybe_render(%EditorState{vim: %{mode: :operator_pending}} = state, buf_version_before) do
-    if buffer_version(state) == buf_version_before do
+  defp maybe_render(state, buf_version_before) do
+    if Editing.mode(state) == :operator_pending and
+         buffer_version(state) == buf_version_before do
       PortManager.send_commands(state.port_manager, [Protocol.encode_batch_end()])
       state
     else
       Editor.do_render(state)
     end
-  end
-
-  defp maybe_render(state, _buf_version_before) do
-    Editor.do_render(state)
   end
 
   @doc """

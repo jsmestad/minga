@@ -99,7 +99,7 @@ defmodule Minga.Editor.SemanticWindow.Builder do
     # own cursor; having two cursors visible is confusing.
     cursor_visible =
       if is_active do
-        state.vim.mode not in [:command, :search, :eval, :search_prompt]
+        not Minga.Editor.Editing.minibuffer_mode?(state)
       else
         true
       end

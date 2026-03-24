@@ -14,7 +14,7 @@ defmodule Minga.Editor.StatusBar.Data do
   alias Minga.Agent.Session
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Diagnostics
-  alias Minga.Editor.MacroRecorder
+  alias Minga.Editor.Editing
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.AgentAccess
@@ -132,8 +132,8 @@ defmodule Minga.Editor.StatusBar.Data do
     agent = AgentAccess.agent(state)
 
     %{
-      mode: state.vim.mode,
-      mode_state: state.vim.mode_state,
+      mode: Editing.mode(state),
+      mode_state: Editing.mode_state(state),
       cursor_line: line,
       cursor_col: col,
       line_count: line_count,
@@ -148,7 +148,7 @@ defmodule Minga.Editor.StatusBar.Data do
       parser_status: state.parser_status,
       buf_index: state.buffers.active_index + 1,
       buf_count: length(state.buffers.list),
-      macro_recording: MacroRecorder.recording?(state.vim.macro_recorder),
+      macro_recording: Editing.macro_recording_status(state),
       agent_status: agent.status,
       agent_theme_colors: if(agent.status, do: Theme.agent_theme(state.theme), else: nil),
       status_msg: state.status_msg
@@ -202,12 +202,12 @@ defmodule Minga.Editor.StatusBar.Data do
     diagnostic_hint = cursor_line_diagnostic_hint(buf, line)
 
     %{
-      mode: state.vim.mode,
-      mode_state: state.vim.mode_state,
+      mode: Editing.mode(state),
+      mode_state: Editing.mode_state(state),
       model_name: model_name,
       session_status: agent.status,
       message_count: message_count,
-      macro_recording: MacroRecorder.recording?(state.vim.macro_recorder),
+      macro_recording: Editing.macro_recording_status(state),
       agent_status: agent.status,
       agent_theme_colors: Theme.agent_theme(state.theme),
       # Background buffer context

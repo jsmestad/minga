@@ -127,7 +127,7 @@ defmodule Minga.Input.AgentNav do
     # (chat content is read-only). Other modes like operator-pending, search,
     # and command are also allowed since they're needed for full vim grammar.
     state =
-      if state.vim.mode == :insert do
+      if Minga.Editor.Editing.inserting?(state) do
         EditorState.transition_mode(state, :normal)
       else
         state

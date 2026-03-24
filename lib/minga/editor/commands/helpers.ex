@@ -11,6 +11,7 @@ defmodule Minga.Editor.Commands.Helpers do
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Buffer.Unicode
   alias Minga.Clipboard
+  alias Minga.Editor.Editing
   alias Minga.Editor.HighlightSync
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Registers
@@ -67,81 +68,57 @@ defmodule Minga.Editor.Commands.Helpers do
           Registers.reg_type(),
           clipboard_mode()
         ) :: state()
-  defp put_register_with_clipboard(
-         %{vim: %{reg: %{active: "_"}}} = state,
-         _text,
-         _kind,
-         _reg_type,
-         _clipboard
-       ) do
-    reset_active_register(state)
-  end
-
-  defp put_register_with_clipboard(
-         %{vim: %{reg: %{active: "+"}}} = state,
-         text,
-         kind,
-         reg_type,
-         _clipboard
-       ) do
-    Clipboard.write_async(text)
-
-    state
-    |> write_unnamed(text, reg_type)
-    |> maybe_write_yank(text, kind, reg_type)
-    |> reset_active_register()
-  end
-
-  defp put_register_with_clipboard(
-         %{vim: %{reg: %{active: name} = reg}} = state,
-         text,
-         kind,
-         reg_type,
-         clipboard
-       )
-       when name >= "A" and name <= "Z" do
-    lower = String.downcase(name)
-
-    {existing_text, _existing_type} =
-      case Registers.get(reg, lower) do
-        {t, ty} -> {t, ty}
-        nil -> {"", :charwise}
-      end
-
-    appended = existing_text <> text
-
-    state
-    |> put_in_register(lower, appended, reg_type)
-    |> write_unnamed(text, reg_type)
-    |> maybe_write_yank(text, kind, reg_type)
-    |> maybe_sync_clipboard(text, clipboard)
-    |> reset_active_register()
-  end
-
-  defp put_register_with_clipboard(
-         %{vim: %{reg: %{active: name}}} = state,
-         text,
-         kind,
-         reg_type,
-         clipboard
-       )
-       when name >= "a" and name <= "z" do
-    state
-    |> put_in_register(name, text, reg_type)
-    |> write_unnamed(text, reg_type)
-    |> maybe_write_yank(text, kind, reg_type)
-    |> maybe_sync_clipboard(text, clipboard)
-    |> reset_active_register()
-  end
-
   defp put_register_with_clipboard(state, text, kind, reg_type, clipboard) do
-    name = if state.vim.reg.active == "", do: "", else: state.vim.reg.active
+    name = Editing.active_register(state)
 
-    state
-    |> put_in_register(name, text, reg_type)
-    |> maybe_write_yank(text, kind, reg_type)
-    |> maybe_sync_clipboard(text, clipboard)
-    |> reset_active_register()
+    case name do
+      "_" ->
+        reset_active_register(state)
+
+      "+" ->
+        Clipboard.write_async(text)
+
+        state
+        |> write_unnamed(text, reg_type)
+        |> maybe_write_yank(text, kind, reg_type)
+        |> reset_active_register()
+
+      name when name >= "A" and name <= "Z" ->
+        lower = String.downcase(name)
+        reg = Editing.registers(state)
+
+        {existing_text, _existing_type} =
+          case Registers.get(reg, lower) do
+            {t, ty} -> {t, ty}
+            nil -> {"", :charwise}
+          end
+
+        appended = existing_text <> text
+
+        state
+        |> put_in_register(lower, appended, reg_type)
+        |> write_unnamed(text, reg_type)
+        |> maybe_write_yank(text, kind, reg_type)
+        |> maybe_sync_clipboard(text, clipboard)
+        |> reset_active_register()
+
+      name when name >= "a" and name <= "z" ->
+        state
+        |> put_in_register(name, text, reg_type)
+        |> write_unnamed(text, reg_type)
+        |> maybe_write_yank(text, kind, reg_type)
+        |> maybe_sync_clipboard(text, clipboard)
+        |> reset_active_register()
+
+      _ ->
+        effective_name = if name == "", do: "", else: name
+
+        state
+        |> put_in_register(effective_name, text, reg_type)
+        |> maybe_write_yank(text, kind, reg_type)
+        |> maybe_sync_clipboard(text, clipboard)
+        |> reset_active_register()
+    end
   end
 
   @doc """
@@ -162,23 +139,26 @@ defmodule Minga.Editor.Commands.Helpers do
 
   @spec get_register(state(), clipboard_mode()) ::
           {String.t() | nil, Registers.reg_type(), state()}
-  def get_register(%{vim: %{reg: %{active: "+"}}} = state, _clipboard) do
-    text = Clipboard.read()
-    {text, :charwise, reset_active_register(state)}
-  end
+  def get_register(state, clipboard) do
+    name = Editing.active_register(state)
 
-  def get_register(%{vim: %{reg: reg}} = state, clipboard) do
-    key = if reg.active == "", do: "", else: reg.active
-    entry = Registers.get(reg, key)
+    if name == "+" do
+      text = Clipboard.read()
+      {text, :charwise, reset_active_register(state)}
+    else
+      reg = Editing.registers(state)
+      key = if name == "", do: "", else: name
+      entry = Registers.get(reg, key)
 
-    {text, reg_type} =
-      case entry do
-        {t, ty} -> {t, ty}
-        nil -> {nil, :charwise}
-      end
+      {text, reg_type} =
+        case entry do
+          {t, ty} -> {t, ty}
+          nil -> {nil, :charwise}
+        end
 
-    {final_text, final_type} = maybe_read_clipboard(key, text, reg_type, clipboard)
-    {final_text, final_type, reset_active_register(state)}
+      {final_text, final_type} = maybe_read_clipboard(key, text, reg_type, clipboard)
+      {final_text, final_type, reset_active_register(state)}
+    end
   end
 
   # When pasting from the unnamed register with clipboard sync enabled,
@@ -214,7 +194,7 @@ defmodule Minga.Editor.Commands.Helpers do
 
   @spec put_in_register(state(), String.t(), String.t(), Registers.reg_type()) :: state()
   def put_in_register(state, name, text, reg_type \\ :charwise) do
-    %{state | vim: %{state.vim | reg: Registers.put(state.vim.reg, name, text, reg_type)}}
+    Editing.put_register(state, name, text, reg_type)
   end
 
   @spec write_unnamed(state(), String.t(), Registers.reg_type()) :: state()
@@ -246,7 +226,7 @@ defmodule Minga.Editor.Commands.Helpers do
 
   @spec reset_active_register(state()) :: state()
   def reset_active_register(state),
-    do: %{state | vim: %{state.vim | reg: Registers.reset_active(state.vim.reg)}}
+    do: Editing.reset_active_register(state)
 
   # Reads clipboard mode from the active buffer's options. Falls back to
   # :none if no buffer is active (safe default: no clipboard calls).
@@ -272,7 +252,7 @@ defmodule Minga.Editor.Commands.Helpers do
   @spec save_jump_pos(state(), Document.position(), Document.position()) :: state()
   def save_jump_pos(state, {from_line, _} = from_pos, {to_line, _})
       when from_line != to_line do
-    %{state | vim: %{state.vim | last_jump_pos: from_pos}}
+    Editing.save_jump_pos(state, from_pos)
   end
 
   def save_jump_pos(state, _from_pos, _to_pos), do: state

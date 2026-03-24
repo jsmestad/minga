@@ -11,6 +11,7 @@ defmodule Minga.Editor.ChangeTracking do
   """
 
   alias Minga.Editor.ChangeRecorder
+  alias Minga.Editor.Editing
   alias Minga.Editor.State, as: EditorState
   alias Minga.Mode
 
@@ -26,18 +27,15 @@ defmodule Minga.Editor.ChangeTracking do
           [Mode.command()],
           {non_neg_integer(), non_neg_integer()}
         ) :: state()
-  def maybe_record_change(%{vim: %{change_recorder: %{replaying: true}}} = state, _, _, _, _),
-    do: state
+  def maybe_record_change(state, old_mode, new_mode, commands, key) do
+    rec = Editing.change_recorder(state)
 
-  def maybe_record_change(
-        %{vim: %{change_recorder: rec} = vim} = state,
-        old_mode,
-        new_mode,
-        commands,
-        key
-      ) do
-    rec = update_recorder(rec, old_mode, new_mode, commands, key)
-    %{state | vim: %{vim | change_recorder: rec}}
+    if rec.replaying do
+      state
+    else
+      rec = update_recorder(rec, old_mode, new_mode, commands, key)
+      Editing.set_change_recorder(state, rec)
+    end
   end
 
   @doc """
@@ -47,7 +45,9 @@ defmodule Minga.Editor.ChangeTracking do
   with recording suppressed to avoid overwriting the stored change.
   """
   @spec replay_last_change(state(), non_neg_integer() | nil) :: state()
-  def replay_last_change(%{vim: %{change_recorder: rec}} = state, count) do
+  def replay_last_change(state, count) do
+    rec = Editing.change_recorder(state)
+
     case ChangeRecorder.get_last_change(rec) do
       nil ->
         state
@@ -56,15 +56,15 @@ defmodule Minga.Editor.ChangeTracking do
         keys = ChangeRecorder.replace_count(keys, count)
 
         rec = ChangeRecorder.start_replay(rec)
-        state = %{state | vim: %{state.vim | change_recorder: rec}}
+        state = Editing.set_change_recorder(state, rec)
 
         state =
           Enum.reduce(keys, state, fn {codepoint, modifiers}, acc ->
             Minga.Editor.do_handle_key(acc, codepoint, modifiers)
           end)
 
-        rec = ChangeRecorder.stop_replay(state.vim.change_recorder)
-        %{state | vim: %{state.vim | change_recorder: rec}}
+        rec = ChangeRecorder.stop_replay(Minga.Editor.Editing.change_recorder(state))
+        Minga.Editor.Editing.set_change_recorder(state, rec)
     end
   end
 

@@ -369,9 +369,9 @@ defmodule Minga.Editor.Mouse do
 
         # Get current cursor as anchor if not already in visual mode
         anchor =
-          case state.vim.mode do
+          case Minga.Editor.Editing.mode(state) do
             :visual ->
-              state.vim.mode_state.visual_anchor
+              Minga.Editor.Editing.visual_anchor(state)
 
             _ ->
               BufferServer.cursor(buf)

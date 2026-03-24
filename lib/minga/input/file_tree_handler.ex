@@ -121,7 +121,7 @@ defmodule Minga.Input.FileTreeHandler do
     state = Minga.Editor.do_handle_key(state, cp, mods)
 
     state =
-      if state.vim.mode != :normal do
+      if Minga.Editor.Editing.mode(state) != :normal do
         EditorState.transition_mode(state, :normal)
       else
         state

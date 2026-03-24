@@ -68,7 +68,7 @@ defmodule Minga.Editor.Title do
   @spec build_vars(state()) :: [{String.t(), String.t()}]
   defp build_vars(%EditorState{} = state) do
     ctx = EditorState.active_content_context(state)
-    mode_str = state.vim.mode |> to_string() |> String.upcase()
+    mode_str = state |> Minga.Editor.Editing.mode() |> to_string() |> String.upcase()
 
     case ctx.type do
       :agent ->
