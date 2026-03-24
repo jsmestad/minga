@@ -50,6 +50,7 @@ enum RenderCommand: Sendable {
     case guiFloatPopup(visible: Bool, width: UInt16, height: UInt16, title: String, lines: [String])
     case guiSplitSeparators(borderColor: UInt32, verticals: [GUIVerticalSeparator], horizontals: [GUIHorizontalSeparator])
     case guiGitStatus(repoState: UInt8, ahead: UInt16, behind: UInt16, branchName: String, entries: [GUIGitStatusEntry])
+    case guiWorkspaceBar(activeWorkspaceId: UInt16, workspaces: [GUIWorkspaceEntry])
 }
 
 // MARK: - Minibuffer data types
@@ -350,6 +351,7 @@ struct GUIFileTreeEntry: Sendable {
 /// A single tab entry decoded from the gui_tab_bar protocol message.
 struct GUITabEntry: Sendable {
     let id: UInt32
+    let groupId: UInt16
     let isActive: Bool
     let isDirty: Bool
     let isAgent: Bool
@@ -357,6 +359,19 @@ struct GUITabEntry: Sendable {
     let agentStatus: UInt8
     let icon: String
     let label: String
+}
+
+/// A workspace entry decoded from the gui_workspace_bar protocol message.
+struct GUIWorkspaceEntry: Sendable {
+    let id: UInt16
+    let kind: UInt8       // 0 = manual, 1 = agent
+    let agentStatus: UInt8
+    let colorR: UInt8
+    let colorG: UInt8
+    let colorB: UInt8
+    let tabCount: UInt16
+    let label: String
+    let icon: String
 }
 
 /// Cursor shape matching the protocol constants.
@@ -623,7 +638,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         return (.guiFileTree(selectedIndex: selectedIndex, treeWidth: treeWidth, rootPath: rootPath, entries: entries), pos - offset)
 
     case OP_GUI_TAB_BAR:
-        // active_index:1, tab_count:1, then per tab: flags:1, id:4, icon_len:1, icon, label_len:2, label
+        // active_index:1, tab_count:1, then per tab: flags:1, id:4, group_id:2, icon_len:1, icon, label_len:2, label
         guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
         let activeIndex = data[rest]
         let tabCount = Int(data[rest + 1])
@@ -631,19 +646,21 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         tabs.reserveCapacity(tabCount)
         var pos = rest + 2
         for _ in 0..<tabCount {
-            guard data.count >= pos + 6 else { throw ProtocolDecodeError.malformed }
+            guard data.count >= pos + 8 else { throw ProtocolDecodeError.malformed }
             let flags = data[pos]
             let tabId = readU32(data, pos + 1)
-            let iconLen = Int(data[pos + 5])
-            guard data.count >= pos + 6 + iconLen + 2 else { throw ProtocolDecodeError.malformed }
-            let iconData = data[(pos + 6)..<(pos + 6 + iconLen)]
+            let groupId = readU16(data, pos + 5)
+            let iconLen = Int(data[pos + 7])
+            guard data.count >= pos + 8 + iconLen + 2 else { throw ProtocolDecodeError.malformed }
+            let iconData = data[(pos + 8)..<(pos + 8 + iconLen)]
             let icon = String(data: iconData, encoding: .utf8) ?? ""
-            let labelLen = Int(readU16(data, pos + 6 + iconLen))
-            guard data.count >= pos + 6 + iconLen + 2 + labelLen else { throw ProtocolDecodeError.malformed }
-            let labelData = data[(pos + 8 + iconLen)..<(pos + 8 + iconLen + labelLen)]
+            let labelLen = Int(readU16(data, pos + 8 + iconLen))
+            guard data.count >= pos + 8 + iconLen + 2 + labelLen else { throw ProtocolDecodeError.malformed }
+            let labelData = data[(pos + 10 + iconLen)..<(pos + 10 + iconLen + labelLen)]
             let label = String(data: labelData, encoding: .utf8) ?? ""
             tabs.append(GUITabEntry(
                 id: tabId,
+                groupId: groupId,
                 isActive: flags & 0x01 != 0,
                 isDirty: flags & 0x02 != 0,
                 isAgent: flags & 0x04 != 0,
@@ -652,7 +669,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                 icon: icon,
                 label: label
             ))
-            pos += 8 + iconLen + labelLen
+            pos += 10 + iconLen + labelLen
         }
         return (.guiTabBar(activeIndex: activeIndex, tabs: tabs), pos - offset)
 
@@ -1835,6 +1852,50 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         }
         return (.guiGitStatus(repoState: gsRepoState, ahead: gsAhead, behind: gsBehind, branchName: gsBranchName, entries: gsEntries),
                 gsPos - offset)
+
+    case OP_GUI_WORKSPACE_BAR:
+        // active_workspace_id:2, workspace_count:1, then per workspace:
+        // id:2, kind:1, agent_status:1, r:1, g:1, b:1, tab_count:2, label_len:1, label
+        guard data.count >= rest + 3 else { throw ProtocolDecodeError.malformed }
+        let activeWsId = readU16(data, rest)
+        let wsCount = Int(data[rest + 2])
+        var workspaces: [GUIWorkspaceEntry] = []
+        workspaces.reserveCapacity(wsCount)
+        var wsPos = rest + 3
+        for _ in 0..<wsCount {
+            guard data.count >= wsPos + 10 else { throw ProtocolDecodeError.malformed }
+            let wsId = readU16(data, wsPos)
+            let wsKind = data[wsPos + 2]
+            let wsAgentStatus = data[wsPos + 3]
+            let wsR = data[wsPos + 4]
+            let wsG = data[wsPos + 5]
+            let wsB = data[wsPos + 6]
+            let wsTabCount = readU16(data, wsPos + 7)
+            let wsLabelLen = Int(data[wsPos + 9])
+            guard data.count >= wsPos + 10 + wsLabelLen else { throw ProtocolDecodeError.malformed }
+            let wsLabelData = data[(wsPos + 10)..<(wsPos + 10 + wsLabelLen)]
+            let wsLabel = String(data: wsLabelData, encoding: .utf8) ?? ""
+            let wsIconBase = wsPos + 10 + wsLabelLen
+            guard data.count >= wsIconBase + 1 else { throw ProtocolDecodeError.malformed }
+            let wsIconLen = Int(data[wsIconBase])
+            guard data.count >= wsIconBase + 1 + wsIconLen else { throw ProtocolDecodeError.malformed }
+            let wsIconData = data[(wsIconBase + 1)..<(wsIconBase + 1 + wsIconLen)]
+            let wsIcon = String(data: wsIconData, encoding: .utf8) ?? "folder"
+            workspaces.append(GUIWorkspaceEntry(
+                id: wsId,
+                kind: wsKind,
+                agentStatus: wsAgentStatus,
+                colorR: wsR,
+                colorG: wsG,
+                colorB: wsB,
+                tabCount: wsTabCount,
+                label: wsLabel,
+                icon: wsIcon
+            ))
+            wsPos += 10 + wsLabelLen + 1 + wsIconLen
+        }
+        return (.guiWorkspaceBar(activeWorkspaceId: activeWsId, workspaces: workspaces),
+                wsPos - offset)
 
     default:
         throw ProtocolDecodeError.unknownOpcode(opcode)

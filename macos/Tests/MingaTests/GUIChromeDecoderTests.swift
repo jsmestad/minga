@@ -108,17 +108,19 @@ struct GUITabBarDecoderTests {
         data.append(0) // active_index
         data.append(2) // tab_count
 
-        // Tab 1: active, dirty, file tab
+        // Tab 1: active, dirty, file tab, workspace 0
         let flags1: UInt8 = 0x01 | 0x02 // active + dirty
         data.append(flags1)
         appendU32(&data, 42) // id
+        appendU16(&data, 0) // group_id (manual workspace)
         appendString8(&data, "") // icon (Nerd Font, can be multi-byte)
         appendString16(&data, "editor.ex")
 
-        // Tab 2: agent tab, has attention
+        // Tab 2: agent tab, has attention, workspace 1
         let flags2: UInt8 = 0x04 | 0x08 | (1 << 4) // agent + attention + agentStatus=1
         data.append(flags2)
         appendU32(&data, 99) // id
+        appendU16(&data, 1) // group_id (agent workspace)
         appendString8(&data, "")
         appendString16(&data, "Agent")
 
@@ -133,11 +135,13 @@ struct GUITabBarDecoderTests {
         #expect(activeIndex == 0)
         #expect(tabs.count == 2)
         #expect(tabs[0].id == 42)
+        #expect(tabs[0].groupId == 0)
         #expect(tabs[0].isActive == true)
         #expect(tabs[0].isDirty == true)
         #expect(tabs[0].isAgent == false)
         #expect(tabs[0].label == "editor.ex")
         #expect(tabs[1].id == 99)
+        #expect(tabs[1].groupId == 1)
         #expect(tabs[1].isAgent == true)
         #expect(tabs[1].hasAttention == true)
         #expect(tabs[1].agentStatus == 1)
@@ -1209,6 +1213,112 @@ struct GUIToolManagerDecoderTests {
         }
         #expect(visible == false)
         #expect(tools.isEmpty)
+    }
+}
+
+// MARK: - gui_workspace_bar (0x86)
+
+@Suite("GUI Workspace Bar Decoder")
+struct GUIWorkspaceBarDecoderTests {
+    @Test("Decode workspace bar with manual + agent workspaces")
+    func decodeTwoWorkspaces() throws {
+        var data = Data()
+        data.append(OP_GUI_WORKSPACE_BAR)
+        appendU16(&data, 0) // active_workspace_id
+        data.append(2) // workspace_count
+
+        // Workspace 0: manual
+        appendU16(&data, 0) // id
+        data.append(0) // kind = manual
+        data.append(0) // agent_status = idle
+        appendRGB(&data, 0x51, 0xAF, 0xEF) // color
+        appendU16(&data, 3) // tab_count
+        appendString8(&data, "My Files") // label
+        appendString8(&data, "doc.on.doc") // icon
+
+        // Workspace 1: agent
+        appendU16(&data, 1) // id
+        data.append(1) // kind = agent
+        data.append(1) // agent_status = thinking
+        appendRGB(&data, 0xC6, 0x78, 0xDD) // color
+        appendU16(&data, 1) // tab_count
+        appendString8(&data, "Research") // label
+        appendString8(&data, "cpu") // icon
+
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == data.count)
+
+        guard case .guiWorkspaceBar(let activeWsId, let workspaces) = cmd else {
+            Issue.record("Expected .guiWorkspaceBar, got \(String(describing: cmd))")
+            return
+        }
+
+        #expect(activeWsId == 0)
+        #expect(workspaces.count == 2)
+
+        #expect(workspaces[0].id == 0)
+        #expect(workspaces[0].kind == 0)
+        #expect(workspaces[0].agentStatus == 0)
+        #expect(workspaces[0].colorR == 0x51)
+        #expect(workspaces[0].colorG == 0xAF)
+        #expect(workspaces[0].colorB == 0xEF)
+        #expect(workspaces[0].tabCount == 3)
+        #expect(workspaces[0].label == "My Files")
+        #expect(workspaces[0].icon == "doc.on.doc")
+
+        #expect(workspaces[1].id == 1)
+        #expect(workspaces[1].kind == 1)
+        #expect(workspaces[1].agentStatus == 1)
+        #expect(workspaces[1].colorR == 0xC6)
+        #expect(workspaces[1].colorG == 0x78)
+        #expect(workspaces[1].colorB == 0xDD)
+        #expect(workspaces[1].tabCount == 1)
+        #expect(workspaces[1].label == "Research")
+        #expect(workspaces[1].icon == "cpu")
+    }
+
+    @Test("Decode workspace bar with zero workspaces")
+    func decodeEmptyWorkspaceBar() throws {
+        var data = Data()
+        data.append(OP_GUI_WORKSPACE_BAR)
+        appendU16(&data, 0) // active_workspace_id
+        data.append(0) // workspace_count
+
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == 4) // opcode + u16 + u8
+
+        guard case .guiWorkspaceBar(_, let workspaces) = cmd else {
+            Issue.record("Expected .guiWorkspaceBar"); return
+        }
+        #expect(workspaces.isEmpty)
+    }
+
+    @Test("Decode workspace bar with long label")
+    func decodeLongLabel() throws {
+        var data = Data()
+        data.append(OP_GUI_WORKSPACE_BAR)
+        appendU16(&data, 1) // active_workspace_id
+        data.append(1) // workspace_count
+
+        let longLabel = String(repeating: "A", count: 200)
+        appendU16(&data, 1) // id
+        data.append(1) // kind = agent
+        data.append(2) // agent_status = tool_executing
+        appendRGB(&data, 0x98, 0xBE, 0x65) // color
+        appendU16(&data, 0) // tab_count
+        appendString8(&data, longLabel) // label
+        appendString8(&data, "hammer") // icon
+
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == data.count)
+
+        guard case .guiWorkspaceBar(let activeWsId, let workspaces) = cmd else {
+            Issue.record("Expected .guiWorkspaceBar"); return
+        }
+
+        #expect(activeWsId == 1)
+        #expect(workspaces[0].label == longLabel)
+        #expect(workspaces[0].icon == "hammer")
     }
 }
 

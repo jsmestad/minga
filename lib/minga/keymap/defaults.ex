@@ -45,6 +45,7 @@ defmodule Minga.Keymap.Defaults do
 
     # ── File ──────────────────────────────────────────────────────────────────
     {[{?f, @none}, {?f, @none}], :find_file, "Find file"},
+    {[{?f, @none}, {?F, @none}], :find_file_other_window, "Find file other window"},
     {[{?f, @none}, {?s, @none}], :save, "Save file"},
     {[{?f, @none}, {?p, @none}], :open_config, "Open config file"},
 
@@ -144,6 +145,17 @@ defmodule Minga.Keymap.Defaults do
     {[{9, @none}, {?p, @none}], :tab_prev, "Previous tab"},
     {[{9, @none}, {?d, @none}], :kill_buffer, "Close tab"},
     {[{9, @none}, {?a, @none}], :cycle_agent_tabs, "Next agent tab"},
+
+    # ── Workspace (SPC TAB prefix, shared with tab) ──────────────────────────
+    {[{9, @none}, {9, @none}], :workspace_toggle_last, "Last workspace"},
+    {[{9, @none}, {?N, @none}], :workspace_next, "Next workspace"},
+    {[{9, @none}, {?P, @none}], :workspace_prev, "Previous workspace"},
+    {[{9, @none}, {?A, @none}], :workspace_next_agent, "Next agent workspace"},
+    {[{9, @none}, {?m, @none}], :workspace_manual, "Manual workspace"},
+    {[{9, @none}, {?l, @none}], :workspace_list, "Workspace picker"},
+    {[{9, @none}, {?r, @none}], :workspace_rename, "Rename workspace"},
+    {[{9, @none}, {?i, @none}], :workspace_set_icon, "Set workspace icon"},
+    {[{9, @none}, {?D, @none}], :workspace_close, "Close workspace"},
 
     # ── Direct tab switching (SPC 1..9) ──────────────────────────────────────
     {[{?1, @none}], :tab_goto_1, "Tab 1"},

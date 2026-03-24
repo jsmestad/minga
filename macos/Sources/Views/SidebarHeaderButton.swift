@@ -23,7 +23,7 @@ struct SidebarHeaderButton: View {
             Image(systemName: systemName)
                 .font(.system(size: 10.5, weight: .medium))
                 .foregroundStyle(barFg.opacity(isHovered ? 0.7 : 0.45))
-                .frame(width: 22, height: 22)
+                .frame(width: 28, height: 34)
                 .contentShape(Rectangle())
                 .background(
                     RoundedRectangle(cornerRadius: 4)

@@ -18,6 +18,7 @@ defmodule Minga.Agent.Events do
   alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
+  alias Minga.Editor.State.Workspace
 
   @type effect ::
           :render
@@ -149,6 +150,9 @@ defmodule Minga.Agent.Events do
     state =
       AgentAccess.update_agent_ui(state, &UIState.record_baseline(&1, path, before_content))
 
+    # Associate the file's tab with the agent's workspace
+    state = associate_file_with_agent_workspace(state, path)
+
     baseline = UIState.get_baseline(AgentAccess.agent_ui(state), path)
     existing_review = existing_diff_for_path(state, path)
 
@@ -216,7 +220,9 @@ defmodule Minga.Agent.Events do
   # A message was queued (steer or follow-up): trigger render so the pending
   # display can update. The queue contents live in Session, not EditorState,
   # so no state mutation is needed here.
-  def handle(state, {:prompt_queued, _content, _type}) do
+  def handle(state, {:prompt_queued, content, _type}) do
+    # Auto-name the workspace from the first prompt (if not custom-named)
+    state = maybe_auto_name_workspace(state, content)
     {state, [{:render, 16}]}
   end
 
@@ -256,10 +262,70 @@ defmodule Minga.Agent.Events do
     case session && TabBar.find_by_session(state.tab_bar, session) do
       %Tab{id: id} ->
         tb = TabBar.update_tab(state.tab_bar, id, &Tab.set_agent_status(&1, status))
+        # Also sync workspace agent status
+        tb =
+          case TabBar.find_workspace_by_session(tb, session) do
+            %Workspace{id: ws_id} ->
+              TabBar.update_workspace(tb, ws_id, &Workspace.set_agent_status(&1, status))
+
+            nil ->
+              tb
+          end
+
         %{state | tab_bar: tb}
 
       _ ->
         state
     end
+  end
+
+  # Associates a file tab with the agent's workspace when the agent
+  # modifies the file. Finds the file tab by label match, then moves
+  # it to the agent session's workspace group.
+  @spec associate_file_with_agent_workspace(EditorState.t(), String.t()) :: EditorState.t()
+  defp associate_file_with_agent_workspace(%{tab_bar: nil} = state, _path), do: state
+
+  defp associate_file_with_agent_workspace(state, path) do
+    session = AgentAccess.session(state)
+    tb = state.tab_bar
+
+    with pid when is_pid(pid) <- session,
+         %Workspace{id: ws_id} <- TabBar.find_workspace_by_session(tb, pid),
+         %Tab{id: tab_id} <- find_unassociated_file_tab(tb, path, ws_id) do
+      %{state | tab_bar: TabBar.move_tab_to_workspace(tb, tab_id, ws_id)}
+    else
+      _ -> state
+    end
+  end
+
+  # Auto-names the agent workspace from the prompt text (first line, 30 chars).
+  # Skips if the workspace has a custom name set by the user.
+  @spec maybe_auto_name_workspace(EditorState.t(), String.t()) :: EditorState.t()
+  defp maybe_auto_name_workspace(%{tab_bar: nil} = state, _), do: state
+
+  defp maybe_auto_name_workspace(state, prompt) do
+    session = AgentAccess.session(state)
+
+    with pid when is_pid(pid) <- session,
+         %Workspace{} = ws <- TabBar.find_workspace_by_session(state.tab_bar, pid) do
+      updated_ws = Workspace.auto_name(ws, prompt)
+
+      if updated_ws.label != ws.label do
+        %{state | tab_bar: TabBar.update_workspace(state.tab_bar, ws.id, fn _ -> updated_ws end)}
+      else
+        state
+      end
+    else
+      _ -> state
+    end
+  end
+
+  @spec find_unassociated_file_tab(TabBar.t(), String.t(), non_neg_integer()) :: Tab.t() | nil
+  defp find_unassociated_file_tab(tb, path, ws_id) do
+    filename = Path.basename(path)
+
+    Enum.find(tb.tabs, fn tab ->
+      tab.kind == :file and tab.group_id != ws_id and tab.label == filename
+    end)
   end
 end

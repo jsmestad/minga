@@ -90,7 +90,7 @@ struct GitStatusViewEmptyStateTests {
 
 // MARK: - GitStatusView Branch Header
 
-@Suite("GitStatusView Branch Header")
+@Suite("GitStatusHeaderContent Branch Header")
 struct GitStatusViewBranchHeaderTests {
 
     @Test("Branch header shows branch name")
@@ -99,7 +99,7 @@ struct GitStatusViewBranchHeaderTests {
         state.repoState = .normal
         state.branchName = "feat/sidebar-polish"
 
-        let sut = GitStatusView(state: state, theme: ThemeColors(), encoder: nil)
+        let sut = GitStatusHeaderContent(state: state, theme: ThemeColors())
         let body = try sut.inspect()
         let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
 
@@ -112,7 +112,7 @@ struct GitStatusViewBranchHeaderTests {
         state.repoState = .normal
         state.branchName = ""
 
-        let sut = GitStatusView(state: state, theme: ThemeColors(), encoder: nil)
+        let sut = GitStatusHeaderContent(state: state, theme: ThemeColors())
         let body = try sut.inspect()
         let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
 
@@ -130,21 +130,12 @@ struct FileTreeViewTests {
         let state = FileTreeState()
         state.visible = true
         state.projectRoot = "/Users/test/code/minga"
-        state.entries = [
-            FileTreeEntry(
-                id: 1, index: 0, isDir: true, isExpanded: true,
-                isSelected: false, depth: 0, gitStatus: 0,
-                icon: "\u{F024B}", name: "assets", relPath: "assets"
-            ),
-        ]
 
-        let sut = FileTreeView(fileTreeState: state, theme: ThemeColors(), encoder: nil)
+        let sut = FileTreeHeaderContent(fileTreeState: state, theme: ThemeColors(), encoder: nil)
         let body = try sut.inspect()
         let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
 
-        // Should use projectRoot, not the first entry name
         #expect(strings.contains("minga"))
-        #expect(!strings.contains("assets") || strings.filter { $0 == "assets" }.count == 1)
     }
 
     @Test("Empty projectRoot falls back to 'Project' name")
@@ -152,9 +143,8 @@ struct FileTreeViewTests {
         let state = FileTreeState()
         state.visible = true
         state.projectRoot = ""
-        state.entries = []
 
-        let sut = FileTreeView(fileTreeState: state, theme: ThemeColors(), encoder: nil)
+        let sut = FileTreeHeaderContent(fileTreeState: state, theme: ThemeColors(), encoder: nil)
         let body = try sut.inspect()
         let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
 
@@ -165,18 +155,9 @@ struct FileTreeViewTests {
     @MainActor func headerHasFourActionButtons() throws {
         let state = FileTreeState()
         state.visible = true
-        state.entries = [
-            FileTreeEntry(
-                id: 1, index: 0, isDir: true, isExpanded: true,
-                isSelected: false, depth: 0, gitStatus: 0,
-                icon: "\u{F024B}", name: "minga", relPath: ""
-            ),
-        ]
 
-        let sut = FileTreeView(fileTreeState: state, theme: ThemeColors(), encoder: nil)
+        let sut = FileTreeHeaderContent(fileTreeState: state, theme: ThemeColors(), encoder: nil)
         let body = try sut.inspect()
-        // SidebarHeaderButton wraps a Button, so count all buttons in the header area.
-        // There are 4 header action buttons plus potential click targets on entries.
         let buttons = body.findAll(ViewType.Button.self)
         #expect(buttons.count >= 4)
     }

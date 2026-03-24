@@ -621,12 +621,20 @@ defmodule Minga.Editor.State do
     state = %{state | buffers: Buffers.add(bs, pid)}
     state = monitor_buffer(state, pid)
 
-    case active_tab.kind do
-      :file ->
-        add_buffer_to_current_tab(state, label)
+    # Check if a tab for this buffer already exists (by label match).
+    # If so, switch to it. Otherwise, create a new tab.
+    case find_tab_for_buffer(tb, pid, label) do
+      %Tab{id: tab_id} ->
+        switch_tab(state, tab_id)
 
-      :agent ->
-        add_buffer_as_new_tab(state, label)
+      nil ->
+        case active_tab.kind do
+          :agent ->
+            add_buffer_as_new_tab(state, label)
+
+          :file ->
+            add_buffer_as_new_file_tab(state, label)
+        end
     end
   end
 
@@ -636,14 +644,39 @@ defmodule Minga.Editor.State do
     |> sync_active_window_buffer()
   end
 
-  # Reuses the current file tab: updates its label and syncs the active
-  # buffer into the current window. No new tab is created.
-  @spec add_buffer_to_current_tab(t(), String.t()) :: t()
-  defp add_buffer_to_current_tab(state, label) do
-    tb = TabBar.update_label(state.tab_bar, state.tab_bar.active_id, label)
+  # Creates a new file tab from a file tab context. Snapshots the current
+  # tab, creates a new one, and syncs the buffer into the new tab's window.
+  @spec add_buffer_as_new_file_tab(t(), String.t()) :: t()
+  defp add_buffer_as_new_file_tab(state, label) do
+    tb = state.tab_bar
+
+    # Snapshot current tab before leaving
+    current_ctx = snapshot_tab_context(state)
+    tb = TabBar.update_context(tb, tb.active_id, current_ctx)
+
+    # Create file tab (TabBar.add auto-activates it)
+    {tb, new_tab} = TabBar.add(tb, :file, label)
+    state = %{state | tab_bar: tb}
+    state = sync_active_window_buffer(state)
+
+    # Snapshot the new tab's context
+    new_ctx = snapshot_tab_context(state)
+    tb = TabBar.update_context(state.tab_bar, new_tab.id, new_ctx)
+
+    Log.debug(:editor, fn ->
+      "[tab] add_buffer new file tab=#{new_tab.id} label=#{label}"
+    end)
 
     %{state | tab_bar: tb}
-    |> sync_active_window_buffer()
+  end
+
+  # Finds an existing file tab that shows the same buffer (by label match).
+  # Returns the tab or nil.
+  @spec find_tab_for_buffer(TabBar.t(), pid(), String.t()) :: Tab.t() | nil
+  defp find_tab_for_buffer(%TabBar{tabs: tabs}, _pid, label) do
+    Enum.find(tabs, fn tab ->
+      tab.kind == :file and tab.label == label
+    end)
   end
 
   # Updates the active file tab's label to match the current buffer name.

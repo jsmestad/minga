@@ -221,9 +221,9 @@ struct TabBarStateLifecycleTests {
     @MainActor func updateConverts() {
         let state = TabBarState()
         let raw = [
-            GUITabEntry(id: 42, isActive: true, isDirty: true, isAgent: false,
+            GUITabEntry(id: 42, groupId: 0, isActive: true, isDirty: true, isAgent: false,
                        hasAttention: false, agentStatus: 0, icon: "", label: "editor.ex"),
-            GUITabEntry(id: 99, isActive: false, isDirty: false, isAgent: true,
+            GUITabEntry(id: 99, groupId: 0, isActive: false, isDirty: false, isAgent: true,
                        hasAttention: true, agentStatus: 1, icon: "", label: "Agent")
         ]
         state.update(activeIndex: 0, entries: raw)
@@ -242,7 +242,7 @@ struct TabBarStateLifecycleTests {
     @MainActor func hideClearsAll() {
         let state = TabBarState()
         state.update(activeIndex: 1, entries: [
-            GUITabEntry(id: 1, isActive: true, isDirty: false, isAgent: false,
+            GUITabEntry(id: 1, groupId: 0, isActive: true, isDirty: false, isAgent: false,
                        hasAttention: false, agentStatus: 0, icon: "", label: "a")
         ])
         state.hide()

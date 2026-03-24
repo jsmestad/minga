@@ -110,7 +110,9 @@ defmodule Minga.Editor.Commands.Agent do
 
         context = %{keymap_scope: :agent, windows: windows}
 
-        # Create agent tab in the background (don't switch to it)
+        # Create agent tab in the background (don't switch to it).
+        # Workspace creation happens later in start_agent_session when
+        # the session pid is available (ensure_agent_workspace/2).
         {tb, _tab} = TabBar.add(state.tab_bar, :agent, "Agent")
         agent_tab = TabBar.find_by_kind(tb, :agent)
         tb = TabBar.update_context(tb, agent_tab.id, context)

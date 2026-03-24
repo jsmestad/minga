@@ -34,6 +34,7 @@ defmodule Minga.Port.Protocol.GUI do
   | 0x83   | gui_float_popup | Float popup window            |
   | 0x84   | gui_split_separators | Split pane separator lines |
   | 0x85   | gui_git_status       | Git status panel data      |
+  | 0x86   | gui_workspace_bar    | Workspace indicator + list |
 
   ## GUI Actions (Frontend → BEAM)
 
@@ -69,6 +70,10 @@ defmodule Minga.Port.Protocol.GUI do
   | 0x1C       | git_unstage_all      |
   | 0x1D       | git_commit           |
   | 0x1E       | git_open_file        |
+  | 0x1F       | workspace_rename     |
+  | 0x20       | workspace_set_icon   |
+  | 0x21       | workspace_close      |
+
   """
 
   import Bitwise
@@ -106,6 +111,7 @@ defmodule Minga.Port.Protocol.GUI do
   @op_gui_float_popup 0x83
   @op_gui_split_separators 0x84
   @op_gui_git_status 0x85
+  @op_gui_workspace_bar 0x86
 
   # ── GUI action sub-opcodes (Frontend → BEAM) ──
 
@@ -140,6 +146,9 @@ defmodule Minga.Port.Protocol.GUI do
   @gui_action_git_unstage_all 0x1C
   @gui_action_git_commit 0x1D
   @gui_action_git_open_file 0x1E
+  @gui_action_workspace_rename 0x1F
+  @gui_action_workspace_set_icon 0x20
+  @gui_action_workspace_close 0x21
 
   # ── Types ──
 
@@ -175,6 +184,9 @@ defmodule Minga.Port.Protocol.GUI do
           | :git_unstage_all
           | {:git_commit, message :: String.t()}
           | {:git_open_file, path :: String.t()}
+          | {:workspace_rename, id :: non_neg_integer(), name :: String.t()}
+          | {:workspace_set_icon, id :: non_neg_integer(), icon :: String.t()}
+          | {:workspace_close, id :: non_neg_integer()}
 
   # ═══════════════════════════════════════════════════════════════════════════
   # Encoding (BEAM → Frontend)
@@ -468,8 +480,8 @@ defmodule Minga.Port.Protocol.GUI do
   Encodes a gui_tab_bar command with the current tab bar state.
 
   Each tab entry includes: flags byte (is_active, is_dirty, is_agent,
-  has_attention, agent_status in upper bits), tab id, Nerd Font icon,
-  and display label.
+  has_attention, agent_status in upper bits), tab id, group_id for
+  workspace grouping, Nerd Font icon, and display label.
   """
   @spec encode_gui_tab_bar(TabBar.t(), pid() | nil) :: binary()
   def encode_gui_tab_bar(%TabBar{} = tb, active_win_buffer \\ nil) do
@@ -491,12 +503,13 @@ defmodule Minga.Port.Protocol.GUI do
   defp encode_gui_tab_entry(tab, active_id, active_win_buffer) do
     is_active = if tab.id == active_id, do: 1, else: 0
     flags = build_tab_flags(tab, is_active, active_win_buffer)
+    group_id = Map.get(tab, :group_id, 0)
 
     icon = tab_icon(tab)
     icon_bytes = :erlang.iolist_to_binary([icon])
     label_bytes = :erlang.iolist_to_binary([tab.label])
 
-    <<flags::8, tab.id::32, byte_size(icon_bytes)::8, icon_bytes::binary,
+    <<flags::8, tab.id::32, group_id::16, byte_size(icon_bytes)::8, icon_bytes::binary,
       byte_size(label_bytes)::16, label_bytes::binary>>
   end
 
@@ -542,6 +555,46 @@ defmodule Minga.Port.Protocol.GUI do
   @spec tab_icon(Tab.t()) :: String.t()
   defp tab_icon(%{kind: :agent}), do: Devicon.icon(:agent)
   defp tab_icon(%{kind: :file, label: label}), do: Devicon.icon(Filetype.detect(label))
+
+  # ── Workspace bar ──
+
+  @doc """
+  Encodes a gui_workspace_bar command with the current workspace state.
+
+  Wire format:
+    opcode(1) + active_workspace_id(2) + workspace_count(1) + workspaces...
+
+  Per workspace:
+    id(2) + kind(1) + agent_status(1) + color_r(1) + color_g(1) + color_b(1)
+    + tab_count(2) + label_len(1) + label(label_len) + icon_len(1) + icon(icon_len)
+
+  Kind: 0 = manual, 1 = agent.
+  Agent status: 0 = idle, 1 = thinking, 2 = tool_executing, 3 = error.
+  """
+  @spec encode_gui_workspace_bar(TabBar.t()) :: binary()
+  def encode_gui_workspace_bar(%TabBar{} = tb) do
+    entries =
+      Enum.map(tb.workspaces, fn ws ->
+        kind_byte = if ws.kind == :manual, do: 0, else: 1
+        status_byte = encode_agent_status(ws.agent_status)
+        r = Bitwise.bsr(Bitwise.band(ws.color, 0xFF0000), 16)
+        g = Bitwise.bsr(Bitwise.band(ws.color, 0x00FF00), 8)
+        b = Bitwise.band(ws.color, 0x0000FF)
+        tab_count = length(TabBar.tabs_in_workspace(tb, ws.id))
+        label_bytes = :erlang.iolist_to_binary([ws.label])
+        icon_bytes = :erlang.iolist_to_binary([ws.icon || "folder"])
+
+        <<ws.id::16, kind_byte::8, status_byte::8, r::8, g::8, b::8, tab_count::16,
+          byte_size(label_bytes)::8, label_bytes::binary, byte_size(icon_bytes)::8,
+          icon_bytes::binary>>
+      end)
+
+    IO.iodata_to_binary([
+      @op_gui_workspace_bar,
+      <<TabBar.active_workspace_id(tb)::16, length(tb.workspaces)::8>>
+      | entries
+    ])
+  end
 
   # ── File tree ──
 
@@ -1412,6 +1465,21 @@ defmodule Minga.Port.Protocol.GUI do
 
   def decode_gui_action(@gui_action_git_open_file, <<path_len::16, path::binary-size(path_len)>>),
     do: {:ok, {:git_open_file, path}}
+
+  def decode_gui_action(
+        @gui_action_workspace_rename,
+        <<ws_id::16, name_len::16, name::binary-size(name_len)>>
+      ),
+      do: {:ok, {:workspace_rename, ws_id, name}}
+
+  def decode_gui_action(
+        @gui_action_workspace_set_icon,
+        <<ws_id::16, icon_len::8, icon::binary-size(icon_len)>>
+      ),
+      do: {:ok, {:workspace_set_icon, ws_id, icon}}
+
+  def decode_gui_action(@gui_action_workspace_close, <<ws_id::16>>),
+    do: {:ok, {:workspace_close, ws_id}}
 
   def decode_gui_action(_, _), do: :error
 

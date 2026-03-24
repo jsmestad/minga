@@ -203,7 +203,18 @@ defmodule Minga.Editor.Commands.FileTree do
         end
 
       idx ->
-        state = EditorState.switch_buffer(state, idx)
+        # If the buffer already has a tab, switch to that tab (correctly
+        # leaves agent view if needed). Otherwise fall back to buffer switch.
+        pid = Enum.at(state.buffers.list, idx)
+        tab = EditorState.find_tab_by_buffer(state, pid)
+
+        state =
+          if tab do
+            EditorState.switch_tab(state, tab.id)
+          else
+            EditorState.switch_buffer(state, idx)
+          end
+
         put_in(state.file_tree.tree, FileTree.reveal(tree, path))
     end
   end

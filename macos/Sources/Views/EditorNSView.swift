@@ -424,6 +424,13 @@ final class EditorNSView: MTKView {
     /// Modified variants (Cmd+Shift+M, Cmd+Option+Q, etc.) still route
     /// to the BEAM so user keybindings work.
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        // When a field editor (NSTextView) is active (e.g., workspace rename
+        // TextField, or any SwiftUI text input), yield so the field editor
+        // handles Cmd+A, Cmd+C, Cmd+Z, etc. through the normal responder chain.
+        if let window, window.firstResponder is NSText {
+            return false
+        }
+
         let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         if mods == .command {
             switch event.charactersIgnoringModifiers {

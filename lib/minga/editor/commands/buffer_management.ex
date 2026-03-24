@@ -84,11 +84,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   end
 
   def execute(state, :quit) do
-    if last_tab?(state) do
-      maybe_confirm_quit(state, :quit)
-    else
-      close_tab_or_quit(state)
-    end
+    maybe_confirm_quit(state, :quit)
   end
 
   def execute(state, :force_quit), do: close_tab_or_quit(state)
@@ -764,6 +760,16 @@ defmodule Minga.Editor.Commands.BufferManagement do
       end
     end
 
+    # Remove the agent's workspace (tabs migrate to manual workspace)
+    state =
+      case session && TabBar.find_workspace_by_session(state.tab_bar, session) do
+        %{id: ws_id} ->
+          %{state | tab_bar: TabBar.remove_workspace(state.tab_bar, ws_id)}
+
+        _ ->
+          state
+      end
+
     Minga.Editor.log_to_messages("Closed agent tab")
 
     # Find a file tab to switch to
@@ -822,7 +828,6 @@ defmodule Minga.Editor.Commands.BufferManagement do
     ConfigOptions.get(:confirm_quit)
   end
 
-  @spec last_tab?(state()) :: boolean()
   # Validates a filetype name string against the Language registry.
   # Uses String.to_existing_atom to avoid atom table pollution from typos.
   @spec resolve_filetype(String.t()) :: {:ok, atom()} | {:error, String.t()}
@@ -837,15 +842,33 @@ defmodule Minga.Editor.Commands.BufferManagement do
     ArgumentError -> {:error, "Unknown language: #{name}"}
   end
 
-  defp last_tab?(%{tab_bar: %TabBar{tabs: [_]}}), do: true
-  defp last_tab?(%{tab_bar: nil}), do: true
-  defp last_tab?(_state), do: false
-
   @spec close_tab_or_quit(state()) :: state()
   defp close_tab_or_quit(%{tab_bar: %TabBar{tabs: [_, _ | _]}} = state) do
     case EditorState.active_tab_kind(state) do
       :agent -> close_agent_tab(state)
       _ -> close_file_tab(state)
+    end
+  end
+
+  # Last tab: replace with an empty buffer instead of quitting.
+  # Matches VS Code/Zed behavior where closing the last tab leaves
+  # an empty editor, not an exited process.
+  defp close_tab_or_quit(%{tab_bar: %TabBar{tabs: [only]}} = state) do
+    case only.kind do
+      :agent ->
+        close_agent_tab(state)
+
+      :file ->
+        {:ok, buf} =
+          DynamicSupervisor.start_child(
+            Minga.Buffer.Supervisor,
+            {BufferServer, content: "", buffer_name: "[new]"}
+          )
+
+        state = EditorState.add_buffer(state, buf)
+        # The add_buffer created a new tab; now remove the old one
+        {:ok, tb} = TabBar.remove(state.tab_bar, only.id)
+        %{state | tab_bar: tb}
     end
   end
 

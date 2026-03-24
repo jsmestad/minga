@@ -74,7 +74,7 @@ Tab bar state with all open tabs.
 opcode(1) + active_index(1) + tab_count(1) + entries...
 
 Per entry:
-  flags(1) + id(4) + icon_len(1) + icon(icon_len) + label_len(2) + label(label_len)
+  flags(1) + id(4) + group_id(2) + icon_len(1) + icon(icon_len) + label_len(2) + label(label_len)
 
 Flags bits:
   bit 0: is_active
@@ -82,6 +82,10 @@ Flags bits:
   bit 2: is_agent (agent chat tab vs file tab)
   bit 3: has_attention
   bits 4-5: agent_status (0=idle, 1=thinking, 2=tool_executing, 3=error)
+
+group_id: workspace group this tab belongs to. 0 = manual/ungrouped workspace.
+Non-zero values match workspace IDs from gui_workspace_bar (0x86). The frontend
+renders group separators at group_id transitions in the tab strip.
 ```
 
 ### 0x72 — gui_which_key
@@ -622,6 +626,31 @@ Per horizontal:
 border_color_rgb is 24-bit RGB from theme.editor.split_border_fg.
 When no splits are active, the BEAM sends counts of 0 for both separator types.
 ```
+
+### 0x85 — gui_git_status
+
+Git status panel data. See git status panel section.
+
+### 0x86 — gui_workspace_bar
+
+Workspace indicator and dropdown data for progressive tab grouping. Sent alongside gui_tab_bar when workspaces exist.
+
+```
+opcode(1) + active_workspace_id(2) + workspace_count(1) + workspaces...
+
+Per workspace:
+  id(2) + kind(1) + agent_status(1) + color_r(1) + color_g(1) + color_b(1)
+  + tab_count(2) + label_len(1) + label(label_len)
+
+kind: 0 = manual (default user workspace), 1 = agent
+agent_status: 0 = idle, 1 = thinking, 2 = tool_executing, 3 = error
+color: 24-bit sRGB accent color for group separators and workspace indicator
+tab_count: number of tabs currently in this workspace
+```
+
+The manual workspace (id 0) always exists and cannot be removed. Agent workspaces are auto-created when an agent session starts and removed when the session ends (their tabs migrate to the manual workspace).
+
+The frontend uses `active_workspace_id` to highlight the active workspace in the indicator/dropdown. Tab entries in gui_tab_bar carry a `group_id` field that matches workspace IDs, enabling the frontend to render group separators at group transitions.
 
 ## GUI Action Input Opcode (Frontend → BEAM)
 

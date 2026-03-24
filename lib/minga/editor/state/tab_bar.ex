@@ -14,18 +14,23 @@ defmodule Minga.Editor.State.TabBar do
   """
 
   alias Minga.Editor.State.Tab
+  alias Minga.Editor.State.Workspace
 
   @typedoc "Tab bar state."
   @type t :: %__MODULE__{
           tabs: [Tab.t()],
           active_id: Tab.id(),
-          next_id: Tab.id()
+          next_id: Tab.id(),
+          workspaces: [Workspace.t()],
+          next_workspace_id: pos_integer()
         }
 
   @enforce_keys [:tabs, :active_id, :next_id]
   defstruct tabs: [],
             active_id: 1,
-            next_id: 2
+            next_id: 2,
+            workspaces: [Workspace.manual()],
+            next_workspace_id: 1
 
   @doc "Creates a tab bar with a single initial tab."
   @spec new(Tab.t()) :: t()
@@ -34,7 +39,7 @@ defmodule Minga.Editor.State.TabBar do
   end
 
   @doc "Returns the active tab."
-  @spec active(t()) :: Tab.t()
+  @spec active(t()) :: Tab.t() | nil
   def active(%__MODULE__{tabs: tabs, active_id: id}) do
     Enum.find(tabs, &(&1.id == id))
   end
@@ -286,6 +291,205 @@ defmodule Minga.Editor.State.TabBar do
     case find_by_session(tb, session_pid) do
       %Tab{id: id} -> update_tab(tb, id, &Tab.set_attention(&1, value))
       nil -> tb
+    end
+  end
+
+  # ── Workspace management ───────────────────────────────────────────────────
+
+  @doc "Returns all tabs belonging to the given workspace."
+  @spec tabs_in_workspace(t(), non_neg_integer()) :: [Tab.t()]
+  def tabs_in_workspace(%__MODULE__{tabs: tabs}, workspace_id) do
+    Enum.filter(tabs, &(&1.group_id == workspace_id))
+  end
+
+  @doc "Returns the workspace with the given id, or nil."
+  @spec get_workspace(t(), non_neg_integer()) :: Workspace.t() | nil
+  def get_workspace(%__MODULE__{workspaces: workspaces}, id) do
+    Enum.find(workspaces, &(&1.id == id))
+  end
+
+  @doc """
+  Returns the active workspace.
+
+  Derived from the active tab's group_id, not stored separately.
+  The active workspace is always the workspace of the tab you're looking at.
+  """
+  @spec active_workspace(t()) :: Workspace.t() | nil
+  def active_workspace(%__MODULE__{} = tb) do
+    case active(tb) do
+      %Tab{group_id: gid} -> get_workspace(tb, gid)
+      nil -> get_workspace(tb, 0)
+    end
+  end
+
+  @doc "Returns the active workspace id, derived from the active tab."
+  @spec active_workspace_id(t()) :: non_neg_integer()
+  def active_workspace_id(%__MODULE__{} = tb) do
+    case active(tb) do
+      %Tab{group_id: gid} -> gid
+      nil -> 0
+    end
+  end
+
+  @doc """
+  Adds an agent workspace and returns `{updated_tab_bar, workspace}`.
+
+  The workspace is inserted after the manual workspace. The `session` pid
+  is stored so we can track which agent owns the workspace.
+  """
+  @spec add_agent_workspace(t(), String.t(), pid() | nil) :: {t(), Workspace.t()}
+  def add_agent_workspace(%__MODULE__{} = tb, label, session \\ nil) do
+    ws = Workspace.new_agent(tb.next_workspace_id, label, session)
+
+    # credo:disable-for-next-line Credo.Check.Refactor.AppendSingleItem
+    workspaces = tb.workspaces ++ [ws]
+
+    {%{tb | workspaces: workspaces, next_workspace_id: tb.next_workspace_id + 1}, ws}
+  end
+
+  @doc """
+  Removes a workspace and migrates its tabs to the manual workspace (id 0).
+
+  The manual workspace (id 0) cannot be removed.
+  """
+  @spec remove_workspace(t(), non_neg_integer()) :: t()
+  def remove_workspace(%__MODULE__{} = tb, 0), do: tb
+
+  def remove_workspace(%__MODULE__{} = tb, workspace_id) do
+    workspaces = Enum.reject(tb.workspaces, &(&1.id == workspace_id))
+
+    tabs =
+      Enum.map(tb.tabs, fn tab ->
+        if tab.group_id == workspace_id, do: %{tab | group_id: 0}, else: tab
+      end)
+
+    %{tb | workspaces: workspaces, tabs: tabs}
+  end
+
+  @doc "Moves a tab to a different workspace."
+  @spec move_tab_to_workspace(t(), Tab.id(), non_neg_integer()) :: t()
+  def move_tab_to_workspace(%__MODULE__{} = tb, tab_id, workspace_id) do
+    update_tab(tb, tab_id, &Tab.set_group(&1, workspace_id))
+  end
+
+  @doc """
+  Switches to the given workspace by activating its first tab.
+
+  Returns unchanged if the workspace doesn't exist or has no tabs.
+  """
+  @spec switch_workspace(t(), non_neg_integer()) :: t()
+  def switch_workspace(%__MODULE__{} = tb, workspace_id) do
+    if Enum.any?(tb.workspaces, &(&1.id == workspace_id)) do
+      switch_to_first_tab_in(tb, workspace_id)
+    else
+      tb
+    end
+  end
+
+  @doc "Switches to the next workspace, wrapping around."
+  @spec next_workspace(t()) :: t()
+  def next_workspace(%__MODULE__{workspaces: [_single]} = tb), do: tb
+
+  def next_workspace(%__MODULE__{workspaces: workspaces} = tb) do
+    current_ws_id = active_workspace_id(tb)
+    idx = Enum.find_index(workspaces, &(&1.id == current_ws_id)) || 0
+    next_idx = rem(idx + 1, length(workspaces))
+    next_ws = Enum.at(workspaces, next_idx)
+    switch_to_first_tab_in(tb, next_ws.id)
+  end
+
+  @doc "Switches to the previous workspace, wrapping around."
+  @spec prev_workspace(t()) :: t()
+  def prev_workspace(%__MODULE__{workspaces: [_single]} = tb), do: tb
+
+  def prev_workspace(%__MODULE__{workspaces: workspaces} = tb) do
+    current_ws_id = active_workspace_id(tb)
+    idx = Enum.find_index(workspaces, &(&1.id == current_ws_id)) || 0
+    len = length(workspaces)
+    prev_idx = if idx == 0, do: len - 1, else: idx - 1
+    prev_ws = Enum.at(workspaces, prev_idx)
+    switch_to_first_tab_in(tb, prev_ws.id)
+  end
+
+  @doc "Switches to the next agent workspace, skipping manual."
+  @spec next_agent_workspace(t()) :: t()
+  def next_agent_workspace(%__MODULE__{workspaces: workspaces} = tb) do
+    agent_ws = Enum.filter(workspaces, &Workspace.agent?/1)
+    current_ws_id = active_workspace_id(tb)
+
+    case agent_ws do
+      [] ->
+        tb
+
+      [only] ->
+        switch_to_first_tab_in(tb, only.id)
+
+      _ ->
+        current_idx = Enum.find_index(agent_ws, &(&1.id == current_ws_id))
+
+        next_ws =
+          case current_idx do
+            nil -> hd(agent_ws)
+            idx -> Enum.at(agent_ws, rem(idx + 1, length(agent_ws)))
+          end
+
+        switch_to_first_tab_in(tb, next_ws.id)
+    end
+  end
+
+  # Switches active_id to the first tab in the given workspace.
+  # Returns unchanged if the workspace has no tabs.
+  @spec switch_to_first_tab_in(t(), non_neg_integer()) :: t()
+  defp switch_to_first_tab_in(tb, workspace_id) do
+    case tabs_in_workspace(tb, workspace_id) do
+      [first | _] -> %{tb | active_id: first.id}
+      [] -> tb
+    end
+  end
+
+  @doc "Returns the workspace matching the given session pid, or nil."
+  @spec find_workspace_by_session(t(), pid()) :: Workspace.t() | nil
+  def find_workspace_by_session(%__MODULE__{workspaces: workspaces}, session_pid)
+      when is_pid(session_pid) do
+    Enum.find(workspaces, fn
+      %Workspace{kind: :agent, session: ^session_pid} -> true
+      _ -> false
+    end)
+  end
+
+  @doc """
+  Updates a workspace by applying `fun` to it.
+
+  Returns unchanged tab bar if no workspace matches.
+  """
+  @spec update_workspace(t(), non_neg_integer(), (Workspace.t() -> Workspace.t())) :: t()
+  def update_workspace(%__MODULE__{workspaces: workspaces} = tb, id, fun)
+      when is_function(fun, 1) do
+    new_workspaces =
+      Enum.map(workspaces, fn
+        %Workspace{id: ^id} = ws -> fun.(ws)
+        ws -> ws
+      end)
+
+    %{tb | workspaces: new_workspaces}
+  end
+
+  @doc "Returns true if any agent workspaces exist."
+  @spec has_agent_workspaces?(t()) :: boolean()
+  def has_agent_workspaces?(%__MODULE__{workspaces: workspaces}) do
+    Enum.any?(workspaces, &Workspace.agent?/1)
+  end
+
+  @doc "Returns the progressive disclosure tier (0-3) based on workspace count."
+  @spec disclosure_tier(t()) :: 0 | 1 | 2 | 3
+  def disclosure_tier(%__MODULE__{} = tb) do
+    agent_count = Enum.count(tb.workspaces, &Workspace.agent?/1)
+
+    case agent_count do
+      0 -> 0
+      1 -> 1
+      n when n <= 4 -> 2
+      _ -> 3
     end
   end
 end

@@ -42,7 +42,16 @@ defmodule Minga.Extension.GitIntegrationTest do
 
   @moduletag :tmp_dir
   # Prevent git hangs under system load from blocking the entire suite
-  @moduletag timeout: 15_000
+  @moduletag timeout: 30_000
+
+  # Isolate from CI runner's global git config
+  @git_env [
+    {"GIT_CONFIG_NOSYSTEM", "1"},
+    {"GIT_AUTHOR_NAME", "Test"},
+    {"GIT_AUTHOR_EMAIL", "test@test.com"},
+    {"GIT_COMMITTER_NAME", "Test"},
+    {"GIT_COMMITTER_EMAIL", "test@test.com"}
+  ]
 
   describe "clone and verify" do
     test "clones a git repo to the target directory", %{tmp_dir: tmp_dir} do
@@ -56,15 +65,7 @@ defmodule Minga.Extension.GitIntegrationTest do
       File.write!(Path.join(work_path, "lib/my_ext.ex"), "defmodule MyExt do\nend\n")
       git!(work_path, ["add", "."])
 
-      git!(work_path, [
-        "-c",
-        "user.name=Test",
-        "-c",
-        "user.email=test@test.com",
-        "commit",
-        "-m",
-        "init"
-      ])
+      git!(work_path, ["commit", "-m", "init"])
 
       git!(work_path, ["push"])
 
@@ -84,15 +85,7 @@ defmodule Minga.Extension.GitIntegrationTest do
       File.write!(Path.join(repo, "file.txt"), "hello")
       git!(repo, ["add", "."])
 
-      git!(repo, [
-        "-c",
-        "user.name=Test",
-        "-c",
-        "user.email=test@test.com",
-        "commit",
-        "-m",
-        "init"
-      ])
+      git!(repo, ["commit", "-m", "init"])
 
       {ref, 0} = git(repo, ["rev-parse", "--short", "HEAD"])
       assert String.length(String.trim(ref)) > 0
@@ -107,14 +100,14 @@ defmodule Minga.Extension.GitIntegrationTest do
 
       File.write!(Path.join(repo, "file.txt"), "v1")
       git!(repo, ["add", "."])
-      git!(repo, ["-c", "user.name=Test", "-c", "user.email=test@test.com", "commit", "-m", "v1"])
+      git!(repo, ["commit", "-m", "v1"])
 
       {first_ref, 0} = git(repo, ["rev-parse", "--short", "HEAD"])
       first_ref = String.trim(first_ref)
 
       File.write!(Path.join(repo, "file.txt"), "v2")
       git!(repo, ["add", "."])
-      git!(repo, ["-c", "user.name=Test", "-c", "user.email=test@test.com", "commit", "-m", "v2"])
+      git!(repo, ["commit", "-m", "v2"])
 
       git!(repo, ["checkout", first_ref])
       content = File.read!(Path.join(repo, "file.txt"))
@@ -122,9 +115,9 @@ defmodule Minga.Extension.GitIntegrationTest do
     end
   end
 
-  # Helpers with consistent options
+  # Helpers with consistent options and CI-safe env isolation
   defp git(dir, args) do
-    System.cmd("git", args, cd: dir, stderr_to_stdout: true)
+    System.cmd("git", args, cd: dir, stderr_to_stdout: true, env: @git_env)
   end
 
   defp git!(dir, args) do
