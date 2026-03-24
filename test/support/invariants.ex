@@ -40,7 +40,7 @@ defmodule Minga.Test.Invariants do
   end
 
   defp collect_from_state(state) do
-    mode = state.vim.mode
+    mode = Minga.Editor.Editing.mode(state)
     buf = state.buffers.active
 
     if is_pid(buf) do
@@ -64,7 +64,7 @@ defmodule Minga.Test.Invariants do
     :exit, _ ->
       %{
         alive?: true,
-        mode: state.vim.mode,
+        mode: Minga.Editor.Editing.mode(state),
         cursor: {0, 0},
         line_count: 1,
         content: "",

@@ -96,7 +96,11 @@ defmodule Minga.Editor.RenderPipeline.ComposeHelpers do
       input_row = row + h - @agent_input_height + 1 + cursor_line
       input_col = col + 2 + cursor_col
 
-      Cursor.new(input_row, input_col, ChromeHelpers.input_cursor_shape(state.vim.mode))
+      Cursor.new(
+        input_row,
+        input_col,
+        ChromeHelpers.input_cursor_shape(Minga.Editor.Editing.mode(state))
+      )
     else
       nil
     end

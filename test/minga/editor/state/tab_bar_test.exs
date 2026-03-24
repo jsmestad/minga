@@ -1,9 +1,9 @@
 defmodule Minga.Editor.State.TabBarTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Editor.State.AgentGroup
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
-  alias Minga.Editor.State.AgentGroup
 
   defp file_tab(id, label \\ ""), do: Tab.new_file(id, label)
 

@@ -5,6 +5,7 @@ defmodule Minga.Editor.Commands.Macros do
 
   @behaviour Minga.Command.Provider
 
+  alias Minga.Editor.Editing
   alias Minga.Editor.MacroRecorder
   alias Minga.Editor.State, as: EditorState
 
@@ -16,29 +17,28 @@ defmodule Minga.Editor.Commands.Macros do
 
   @spec toggle_recording(state()) :: state()
   def toggle_recording(state) do
-    case MacroRecorder.recording?(state.vim.macro_recorder) do
+    case Editing.macro_recording?(state) do
       {true, _reg} ->
-        rec = MacroRecorder.stop_recording(state.vim.macro_recorder)
-        %{state | vim: %{state.vim | macro_recorder: rec}, status_msg: "Recorded macro"}
+        rec = MacroRecorder.stop_recording(Editing.macro_recorder(state))
+        state = Editing.set_macro_recorder(state, rec)
+        %{state | status_msg: "Recorded macro"}
 
       false ->
-        %{
-          state
-          | vim: %{
-              state.vim
-              | mode_state: %{state.vim.mode_state | pending_macro_register: true}
-            }
-        }
+        Editing.update_mode_state(state, fn ms ->
+          %{ms | pending_macro_register: true}
+        end)
     end
   end
 
   @spec replay_last(state()) :: state() | {state(), action()}
-  def replay_last(%{vim: %{macro_recorder: %{last_register: nil}}} = state) do
-    %{state | status_msg: "No previous macro"}
-  end
+  def replay_last(state) do
+    case Editing.macro_recorder(state) do
+      %{last_register: nil} ->
+        %{state | status_msg: "No previous macro"}
 
-  def replay_last(%{vim: %{macro_recorder: %{last_register: reg}}} = state) do
-    {state, {:replay_macro, reg}}
+      %{last_register: reg} ->
+        {state, {:replay_macro, reg}}
+    end
   end
 
   @impl Minga.Command.Provider

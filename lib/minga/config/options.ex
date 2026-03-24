@@ -80,7 +80,8 @@ defmodule Minga.Config.Options do
 
   @typedoc "Valid option names."
   @type option_name ::
-          :tab_width
+          :editing_model
+          | :tab_width
           | :line_numbers
           | :show_gutter_separator
           | :autopair
@@ -173,6 +174,7 @@ defmodule Minga.Config.Options do
   @type table :: :ets.table()
 
   @option_specs [
+    {:editing_model, {:enum, [:vim, :cua]}, :vim},
     {:tab_width, :pos_integer, 2},
     {:line_numbers, {:enum, [:hybrid, :absolute, :relative, :none]}, :hybrid},
     {:show_gutter_separator, :boolean, true},

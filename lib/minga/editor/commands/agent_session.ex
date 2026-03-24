@@ -13,9 +13,9 @@ defmodule Minga.Editor.Commands.AgentSession do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.AgentAccess
+  alias Minga.Editor.State.AgentGroup
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
-  alias Minga.Editor.State.AgentGroup
 
   @type state :: EditorState.t()
 
@@ -67,20 +67,7 @@ defmodule Minga.Editor.Commands.AgentSession do
         # Set the session PID on the agent tab that was just created
         # (or the active agent tab). find_sessionless_agent avoids the
         # ambiguity of find_by_kind(:agent) when multiple agent tabs exist.
-        state =
-          case state do
-            %{tab_bar: %TabBar{} = tb} ->
-              case TabBar.find_sessionless_agent(tb) do
-                %Tab{id: agent_tab_id} ->
-                  EditorState.set_tab_session(state, agent_tab_id, pid)
-
-                nil ->
-                  state
-              end
-
-            _ ->
-              state
-          end
+        state = assign_session_to_tab(state, pid)
 
         # Create an agent group for this session (if one doesn't exist yet)
         ensure_agent_workspace(state, pid)
@@ -131,6 +118,16 @@ defmodule Minga.Editor.Commands.AgentSession do
   def format_session_error(reason), do: "Failed to start session: #{inspect(reason)}"
 
   # ── Private helpers ────────────────────────────────────────────────────────
+
+  @spec assign_session_to_tab(state(), pid()) :: state()
+  defp assign_session_to_tab(%{tab_bar: %TabBar{} = tb} = state, pid) do
+    case TabBar.find_sessionless_agent(tb) do
+      %Tab{id: agent_tab_id} -> EditorState.set_tab_session(state, agent_tab_id, pid)
+      nil -> state
+    end
+  end
+
+  defp assign_session_to_tab(state, _pid), do: state
 
   @spec start_and_subscribe(keyword()) :: {:ok, pid()} | {:error, term()}
   defp start_and_subscribe(opts) do

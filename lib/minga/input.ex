@@ -96,10 +96,14 @@ defmodule Minga.Input do
   Returns the editor-level handlers for buffer editing.
 
   These handle scope-specific dispatch, global bindings, and the
-  vim mode FSM. They run after overlays have passed through.
+  editing model's key handler. The last handler in the list is
+  determined by the active editing model: `ModeFSM` for vim,
+  `CUADispatch` for CUA.
   """
   @spec surface_handlers() :: [module()]
   def surface_handlers do
+    bottom_handler = editing_dispatch_handler()
+
     [
       Dashboard,
       MentionCompletion,
@@ -113,8 +117,20 @@ defmodule Minga.Input do
       AgentNav,
       GlobalBindings,
       AgentMouse,
-      ModeFSM
+      bottom_handler
     ]
+  end
+
+  @doc """
+  Returns the appropriate bottom-of-stack dispatch handler for the
+  active editing model.
+  """
+  @spec editing_dispatch_handler() :: module()
+  def editing_dispatch_handler do
+    case Minga.Editor.Editing.active_model() do
+      Minga.EditingModel.Vim -> ModeFSM
+      Minga.EditingModel.CUA -> Minga.Input.CUADispatch
+    end
   end
 
   @doc """

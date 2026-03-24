@@ -280,7 +280,7 @@ defmodule Minga.Editor do
   end
 
   def handle_call(:api_mode, _from, state) do
-    {:reply, state.vim.mode, state}
+    {:reply, Minga.Editor.Editing.mode(state), state}
   end
 
   def handle_call(:api_save, _from, %{buffers: %{active: nil}} = state) do

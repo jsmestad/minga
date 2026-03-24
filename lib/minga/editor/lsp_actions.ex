@@ -1489,11 +1489,11 @@ defmodule Minga.Editor.LspActions do
   @spec build_action_range(state(), pid(), non_neg_integer(), non_neg_integer()) :: map()
   defp build_action_range(state, _buf, line, col) do
     # If we're in visual mode, use the visual anchor
-    case state.vim.mode do
+    case Minga.Editor.Editing.mode(state) do
       :visual ->
         anchor =
-          case state.vim.mode_state do
-            %{visual_anchor: {al, ac}} -> {al, ac}
+          case Minga.Editor.Editing.visual_anchor(state) do
+            {al, ac} -> {al, ac}
             _ -> {line, col}
           end
 

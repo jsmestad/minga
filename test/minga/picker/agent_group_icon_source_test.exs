@@ -3,8 +3,8 @@ defmodule Minga.Picker.AgentGroupIconSourceTest do
 
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
-  alias Minga.Picker.Item
   alias Minga.Picker.AgentGroupIconSource
+  alias Minga.Picker.Item
 
   describe "title/0" do
     test "returns a descriptive title" do

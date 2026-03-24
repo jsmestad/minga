@@ -369,7 +369,7 @@ defmodule Minga.Test.EditorCase do
   @doc "Returns the current editor mode."
   @spec editor_mode(editor_ctx()) :: atom()
   def editor_mode(%{editor: editor}) do
-    :sys.get_state(editor).vim.mode
+    Minga.Editor.Editing.mode(:sys.get_state(editor))
   end
 
   @doc "Returns the buffer cursor position."
@@ -597,7 +597,9 @@ defmodule Minga.Test.EditorCase do
 
   defp do_wait_until(editor, _condition, _remaining, _interval, message) do
     state = :sys.get_state(editor)
-    raise ExUnit.AssertionError, message: "#{message}\nFinal state mode: #{state.vim.mode}"
+
+    raise ExUnit.AssertionError,
+      message: "#{message}\nFinal state mode: #{Minga.Editor.Editing.mode(state)}"
   end
 
   @doc """
@@ -638,7 +640,9 @@ defmodule Minga.Test.EditorCase do
     # Sync both processes so any post-failure inspection sees stable state
     state = :sys.get_state(editor)
     :sys.get_state(port)
-    raise ExUnit.AssertionError, message: "#{message}\nFinal state mode: #{state.vim.mode}"
+
+    raise ExUnit.AssertionError,
+      message: "#{message}\nFinal state mode: #{Minga.Editor.Editing.mode(state)}"
   end
 
   # ── Mouse and resize helpers ─────────────────────────────────────────────────

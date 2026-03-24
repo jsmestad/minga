@@ -169,20 +169,26 @@ defmodule Minga.Editor.Renderer.Minibuffer do
 
   # Legacy path: fetches diagnostic from buffer (for backward compatibility)
   def render(%{buffers: %{active: buf}, theme: theme} = state, row, cols)
-      when is_pid(buf) and state.vim.mode in [:normal, :insert, :replace] do
-    mb = theme.minibuffer
+      when is_pid(buf) do
+    mode = Minga.Editor.Editing.mode(state)
 
-    case cursor_line_diagnostic(buf) do
-      nil ->
-        render_blank(row, cols, mb)
+    if mode in [:normal, :insert, :replace] do
+      mb = theme.minibuffer
 
-      msg ->
-        DisplayList.draw(
-          row,
-          0,
-          String.pad_trailing(msg, cols),
-          Face.new(fg: mb.dim_fg, bg: mb.bg)
-        )
+      case cursor_line_diagnostic(buf) do
+        nil ->
+          render_blank(row, cols, mb)
+
+        msg ->
+          DisplayList.draw(
+            row,
+            0,
+            String.pad_trailing(msg, cols),
+            Face.new(fg: mb.dim_fg, bg: mb.bg)
+          )
+      end
+    else
+      render_blank(row, cols, theme.minibuffer)
     end
   end
 

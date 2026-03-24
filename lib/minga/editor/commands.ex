@@ -29,7 +29,7 @@ defmodule Minga.Editor.Commands do
   alias Minga.Command.Registry, as: CommandRegistry
   alias Minga.Editor.Commands.Agent, as: AgentCommands
   alias Minga.Editor.Commands.BufferManagement
-  alias Minga.Editor.Commands.Editing
+  alias Minga.Editor.Commands.Editing, as: EditingCommands
   alias Minga.Editor.Commands.Eval
   alias Minga.Editor.Commands.Extensions, as: ExtCommands
   alias Minga.Editor.Commands.Help
@@ -39,6 +39,7 @@ defmodule Minga.Editor.Commands do
   alias Minga.Editor.Commands.Operators
   alias Minga.Editor.Commands.Tool
   alias Minga.Editor.Commands.Visual
+  alias Minga.Editor.Editing
   alias Minga.Editor.LspActions
   alias Minga.Editor.MinibufferData
   alias Minga.Editor.State, as: EditorState
@@ -79,7 +80,7 @@ defmodule Minga.Editor.Commands do
   # Register selection: stores the chosen register name for the next op.
   def execute(state, {:select_register, char}) when is_binary(char) do
     name = if char == "\"", do: "", else: char
-    put_in(state.vim.reg.active, name)
+    Editing.set_active_register(state, name)
   end
 
   # ── Leader / which-key (return action tuples) ─────────────────────────────
@@ -210,55 +211,55 @@ defmodule Minga.Editor.Commands do
   # ── Parameterized editing ─────────────────────────────────────────────────
 
   def execute(state, {:delete_chars_at, _} = cmd) do
-    guard_buffer(state, fn -> Editing.execute(state, cmd) end)
+    guard_buffer(state, fn -> EditingCommands.execute(state, cmd) end)
   end
 
   def execute(state, {:delete_chars_before, _} = cmd) do
-    guard_buffer(state, fn -> Editing.execute(state, cmd) end)
+    guard_buffer(state, fn -> EditingCommands.execute(state, cmd) end)
   end
 
   def execute(state, {:insert_char, _} = cmd) do
-    guard_buffer(state, fn -> Editing.execute(state, cmd) end)
+    guard_buffer(state, fn -> EditingCommands.execute(state, cmd) end)
   end
 
   def execute(state, {:replace_char, _} = cmd) do
-    guard_buffer(state, fn -> Editing.execute(state, cmd) end)
+    guard_buffer(state, fn -> EditingCommands.execute(state, cmd) end)
   end
 
   def execute(state, {:replace_overwrite, _} = cmd) do
-    guard_buffer(state, fn -> Editing.execute(state, cmd) end)
+    guard_buffer(state, fn -> EditingCommands.execute(state, cmd) end)
   end
 
   def execute(state, {:comment_motion, _} = cmd) do
-    guard_buffer(state, fn -> Editing.execute(state, cmd) end)
+    guard_buffer(state, fn -> EditingCommands.execute(state, cmd) end)
   end
 
   def execute(state, {:indent_lines, _} = cmd) do
-    guard_buffer(state, fn -> Editing.execute(state, cmd) end)
+    guard_buffer(state, fn -> EditingCommands.execute(state, cmd) end)
   end
 
   def execute(state, {:dedent_lines, _} = cmd) do
-    guard_buffer(state, fn -> Editing.execute(state, cmd) end)
+    guard_buffer(state, fn -> EditingCommands.execute(state, cmd) end)
   end
 
   def execute(state, {:indent_motion, _} = cmd) do
-    guard_buffer(state, fn -> Editing.execute(state, cmd) end)
+    guard_buffer(state, fn -> EditingCommands.execute(state, cmd) end)
   end
 
   def execute(state, {:dedent_motion, _} = cmd) do
-    guard_buffer(state, fn -> Editing.execute(state, cmd) end)
+    guard_buffer(state, fn -> EditingCommands.execute(state, cmd) end)
   end
 
   def execute(state, {:reindent_lines, _} = cmd) do
-    guard_buffer(state, fn -> Editing.execute(state, cmd) end)
+    guard_buffer(state, fn -> EditingCommands.execute(state, cmd) end)
   end
 
   def execute(state, {:reindent_motion, _} = cmd) do
-    guard_buffer(state, fn -> Editing.execute(state, cmd) end)
+    guard_buffer(state, fn -> EditingCommands.execute(state, cmd) end)
   end
 
   def execute(state, {:reindent_text_object, _, _} = cmd) do
-    guard_buffer(state, fn -> Editing.execute(state, cmd) end)
+    guard_buffer(state, fn -> EditingCommands.execute(state, cmd) end)
   end
 
   # ── Parameterized operators ───────────────────────────────────────────────
@@ -375,45 +376,33 @@ defmodule Minga.Editor.Commands do
     alias Minga.Editor.MacroRecorder
 
     rec =
-      state.vim.macro_recorder
+      Editing.macro_recorder(state)
       |> MacroRecorder.start_recording(register)
       |> Map.put(:last_register, register)
 
-    %{state | vim: %{state.vim | macro_recorder: rec}}
+    Editing.set_macro_recorder(state, rec)
   end
 
   def execute(state, {:replay_macro, register}) do
     alias Minga.Editor.MacroRecorder
 
-    case MacroRecorder.get_macro(state.vim.macro_recorder, register) do
+    case MacroRecorder.get_macro(Editing.macro_recorder(state), register) do
       nil ->
         %{state | status_msg: "No macro in register @#{register}"}
 
       _keys ->
-        rec = %{state.vim.macro_recorder | last_register: register}
-        {%{state | vim: %{state.vim | macro_recorder: rec}}, {:replay_macro, register}}
+        rec = %{Editing.macro_recorder(state) | last_register: register}
+        {Editing.set_macro_recorder(state, rec), {:replay_macro, register}}
     end
   end
 
   # ── Minibuffer candidate acceptance ───────────────────────────────────────
 
   def execute(state, {:accept_command_candidate}) do
-    case state.vim do
-      %{mode: :command, mode_state: ms} ->
-        {candidates, _total} = MinibufferData.complete_ex_command(ms.input)
-        idx = MinibufferData.clamp_index(ms.candidate_index, length(candidates))
-
-        case Enum.at(candidates, idx) do
-          nil ->
-            state
-
-          %{label: label} ->
-            new_ms = %{ms | input: label, candidate_index: 0}
-            %{state | vim: %{state.vim | mode_state: new_ms}}
-        end
-
-      _ ->
-        state
+    if Editing.mode(state) == :command do
+      accept_command_candidate(state)
+    else
+      state
     end
   end
 
@@ -517,20 +506,36 @@ defmodule Minga.Editor.Commands do
     end
   end
 
+  @spec accept_command_candidate(state()) :: state()
+  defp accept_command_candidate(state) do
+    ms = Editing.mode_state(state)
+    {candidates, _total} = MinibufferData.complete_ex_command(ms.input)
+    idx = MinibufferData.clamp_index(ms.candidate_index, length(candidates))
+
+    case Enum.at(candidates, idx) do
+      nil ->
+        state
+
+      %{label: label} ->
+        new_ms = %{ms | input: label, candidate_index: 0}
+        Editing.update_mode_state(state, fn _ -> new_ms end)
+    end
+  end
+
   # ── Filetype trie substitution ────────────────────────────────────────────
 
   @spec leader_keys_from_mode(EditorState.t()) :: [String.t()]
-  defp leader_keys_from_mode(%{vim: %{mode_state: %{leader_keys: keys}}})
-       when is_list(keys) do
-    Enum.reverse(keys)
+  defp leader_keys_from_mode(state) do
+    case Editing.mode_state(state) do
+      %{leader_keys: keys} when is_list(keys) -> Enum.reverse(keys)
+      _ -> []
+    end
   end
-
-  defp leader_keys_from_mode(_state), do: []
 
   @spec maybe_substitute_filetype_trie(EditorState.t(), Bindings.node_t()) ::
           {Bindings.node_t(), EditorState.t()}
   defp maybe_substitute_filetype_trie(state, node) do
-    case state.vim.mode_state do
+    case Editing.mode_state(state) do
       %{leader_keys: ["m", "SPC"]} ->
         filetype = current_filetype(state)
         ft_trie = filetype_trie_for(filetype)
@@ -538,7 +543,7 @@ defmodule Minga.Editor.Commands do
         if ft_trie.children == %{} do
           {node, state}
         else
-          state = put_in(state.vim.mode_state.leader_node, ft_trie)
+          state = Editing.set_leader_node(state, ft_trie)
           {ft_trie, state}
         end
 

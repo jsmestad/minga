@@ -239,7 +239,9 @@ defmodule Minga.Integration.MouseTest do
       state_after = :sys.get_state(ctx.editor)
 
       case EditorState.find_agent_chat_window(state_after) do
-        nil -> :ok
+        nil ->
+          :ok
+
         {_win_id, window} ->
           refute window.pinned, "agent chat window should be unpinned after scroll"
       end
@@ -387,8 +389,8 @@ defmodule Minga.Integration.MouseTest do
         |> Enum.filter(fn {ch, _i} -> ch == "│" end)
         |> Enum.map(fn {_ch, i} -> i end)
 
-      assert length(sep_positions) >= 1,
-             "expected at least 1 separator, found #{length(sep_positions)} in: #{inspect(row1)}"
+      assert sep_positions != [],
+             "expected at least 1 separator, found none in: #{inspect(row1)}"
 
       [tree_sep | _] = sep_positions
 

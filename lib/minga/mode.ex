@@ -32,6 +32,8 @@ defmodule Minga.Mode do
           :normal
           | :insert
           | :visual
+          | :visual_line
+          | :visual_block
           | :operator_pending
           | :command
           | :eval

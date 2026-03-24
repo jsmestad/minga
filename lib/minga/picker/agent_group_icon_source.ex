@@ -8,8 +8,8 @@ defmodule Minga.Picker.AgentGroupIconSource do
 
   @behaviour Minga.Picker.Source
 
-  alias Minga.Editor.State.TabBar
   alias Minga.Editor.State.AgentGroup
+  alias Minga.Editor.State.TabBar
   alias Minga.Picker.Item
 
   @icons [

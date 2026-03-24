@@ -77,6 +77,7 @@ defmodule Minga.Editor.Commands.AgentSplitToggleTest do
 
     if active do
       agent_win = Window.new_agent_chat(1, agent_buf, 24, 80)
+
       agent_ctx = %{
         keymap_scope: :agent,
         windows: %Minga.Editor.State.Windows{
@@ -101,6 +102,7 @@ defmodule Minga.Editor.Commands.AgentSplitToggleTest do
     else
       # Create background agent tab with agent context
       agent_win = Window.new_agent_chat(1, agent_buf, 24, 80)
+
       agent_ctx = %{
         keymap_scope: :agent,
         windows: %Minga.Editor.State.Windows{

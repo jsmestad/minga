@@ -764,8 +764,6 @@ defmodule Minga.Editor.Commands.BufferManagement do
     state
   end
 
-  defp cleanup_agent_session(state), do: state
-
   @doc """
   Cleans up editor state after an agent session dies (`:DOWN` handler).
 
@@ -784,8 +782,6 @@ defmodule Minga.Editor.Commands.BufferManagement do
 
     %{state | status_msg: msg}
   end
-
-  def handle_agent_session_down(state, _session_pid, _reason), do: state
 
   # Shared state cleanup for agent sessions: stops spinner, clears
   # agent state session, clears Tab.session/agent_status, removes group.

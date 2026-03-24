@@ -46,6 +46,8 @@ defmodule Minga.Editor.State.Tab do
           optional(:search) => term(),
           optional(:pending_conflict) => term(),
           optional(:vim) => Minga.Editor.VimState.t(),
+          optional(:document_highlights) => term(),
+          optional(:agent_ui) => term(),
           # Legacy fields kept for migration compatibility:
           optional(:mode) => atom(),
           optional(:mode_state) => term(),
