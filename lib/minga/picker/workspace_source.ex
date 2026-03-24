@@ -24,7 +24,7 @@ defmodule Minga.Picker.WorkspaceSource do
     # Filter out workspaces with no tabs (empty manual workspace)
     tb.workspaces
     |> Enum.filter(fn ws ->
-      length(TabBar.tabs_in_workspace(tb, ws.id)) > 0
+      TabBar.tabs_in_workspace(tb, ws.id) != []
     end)
     |> Enum.map(fn ws ->
       icon = workspace_icon(ws)
