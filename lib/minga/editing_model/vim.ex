@@ -60,6 +60,46 @@ defmodule Minga.EditingModel.Vim do
   @spec mode(t()) :: Minga.EditingModel.mode_label()
   def mode(%__MODULE__{mode: mode}), do: mode
 
+  @impl Minga.EditingModel
+  @spec inserting?(t()) :: boolean()
+  def inserting?(%__MODULE__{mode: :insert}), do: true
+  def inserting?(%__MODULE__{}), do: false
+
+  @impl Minga.EditingModel
+  @spec selecting?(t()) :: boolean()
+  def selecting?(%__MODULE__{mode: mode}) when mode in [:visual, :visual_line, :visual_block],
+    do: true
+
+  def selecting?(%__MODULE__{}), do: false
+
+  @impl Minga.EditingModel
+  @spec cursor_shape(t()) :: :beam | :block | :underline
+  def cursor_shape(%__MODULE__{mode: :insert}), do: :beam
+  def cursor_shape(%__MODULE__{mode: :replace}), do: :underline
+  def cursor_shape(%__MODULE__{}), do: :block
+
+  @impl Minga.EditingModel
+  @spec key_sequence_pending?(t()) :: boolean()
+  def key_sequence_pending?(%__MODULE__{mode_state: %{leader_node: node}})
+      when node != nil,
+      do: true
+
+  def key_sequence_pending?(%__MODULE__{mode_state: %{prefix_node: node}})
+      when node != nil,
+      do: true
+
+  def key_sequence_pending?(%__MODULE__{mode: mode})
+      when mode in [:operator_pending, :command],
+      do: true
+
+  def key_sequence_pending?(%__MODULE__{}), do: false
+
+  @impl Minga.EditingModel
+  @spec status_segment(t()) :: String.t()
+  def status_segment(%__MODULE__{mode: mode}) do
+    mode |> to_string() |> String.upcase()
+  end
+
   # ── Convenience ────────────────────────────────────────────────────────────
 
   @doc "Creates a Vim editing model state from an existing mode and mode_state."

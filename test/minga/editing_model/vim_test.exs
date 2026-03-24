@@ -122,6 +122,63 @@ defmodule Minga.EditingModel.VimTest do
     end
   end
 
+  # ── New behaviour callbacks (Phase B) ──────────────────────────────────────
+
+  describe "inserting?/1" do
+    test "false in normal mode" do
+      refute Vim.inserting?(Vim.initial_state())
+    end
+
+    test "true in insert mode" do
+      {_, _, state} = Vim.process_key(Vim.initial_state(), key_i())
+      assert Vim.inserting?(state)
+    end
+  end
+
+  describe "selecting?/1" do
+    test "false in normal mode" do
+      refute Vim.selecting?(Vim.initial_state())
+    end
+
+    test "false in insert mode" do
+      {_, _, state} = Vim.process_key(Vim.initial_state(), key_i())
+      refute Vim.selecting?(state)
+    end
+  end
+
+  describe "cursor_shape/1" do
+    test "block in normal mode" do
+      assert Vim.cursor_shape(Vim.initial_state()) == :block
+    end
+
+    test "beam in insert mode" do
+      {_, _, state} = Vim.process_key(Vim.initial_state(), key_i())
+      assert Vim.cursor_shape(state) == :beam
+    end
+  end
+
+  describe "key_sequence_pending?/1" do
+    test "false in normal mode at rest" do
+      refute Vim.key_sequence_pending?(Vim.initial_state())
+    end
+
+    test "true in operator-pending mode" do
+      {_, _, state} = Vim.process_key(Vim.initial_state(), key_d())
+      assert Vim.key_sequence_pending?(state)
+    end
+  end
+
+  describe "status_segment/1" do
+    test "NORMAL in normal mode" do
+      assert Vim.status_segment(Vim.initial_state()) == "NORMAL"
+    end
+
+    test "INSERT in insert mode" do
+      {_, _, state} = Vim.process_key(Vim.initial_state(), key_i())
+      assert Vim.status_segment(state) == "INSERT"
+    end
+  end
+
   # ── Insert mode key handling ───────────────────────────────────────────────
 
   describe "insert mode" do

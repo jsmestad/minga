@@ -98,4 +98,42 @@ defmodule Minga.EditingModel do
   parsing the display string. Examples: `:normal`, `:insert`, `:visual`.
   """
   @callback mode(state()) :: mode_label()
+
+  @doc """
+  Returns true when the editing model is in an inserting state.
+
+  For vim this means `:insert` mode. For CUA this is always true
+  (CUA is permanently in an insert-like state).
+  """
+  @callback inserting?(state()) :: boolean()
+
+  @doc """
+  Returns true when the editing model has an active selection.
+
+  For vim this means visual modes. For CUA this means a shift-selection
+  anchor is set.
+  """
+  @callback selecting?(state()) :: boolean()
+
+  @doc """
+  Returns the cursor shape for the current editing state.
+
+  Returns `:beam` (thin line), `:block` (full cell), or `:underline`.
+  """
+  @callback cursor_shape(state()) :: :beam | :block | :underline
+
+  @doc """
+  Returns true when a multi-key sequence is in progress.
+
+  For vim this means a leader node or prefix node is active. For CUA
+  this means a hold-SPC chord is pending.
+  """
+  @callback key_sequence_pending?(state()) :: boolean()
+
+  @doc """
+  Returns a short string for the status bar mode segment.
+
+  Examples: \"NORMAL\", \"INSERT\", \"VISUAL\", \"CUA\".
+  """
+  @callback status_segment(state()) :: String.t()
 end

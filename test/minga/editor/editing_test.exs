@@ -97,12 +97,37 @@ defmodule Minga.Editor.EditingTest do
   end
 
   describe "cursor_shape/1" do
-    test "returns :beam for insert mode" do
+    test "returns :beam for insert mode (dispatched through VimModel)" do
       assert Editing.cursor_shape(build_state(mode: :insert)) == :beam
     end
 
-    test "returns :block for normal mode" do
+    test "returns :block for normal mode (dispatched through VimModel)" do
       assert Editing.cursor_shape(build_state(mode: :normal)) == :block
+    end
+
+    test "returns :underline for replace mode" do
+      assert Editing.cursor_shape(build_state(mode: :replace)) == :underline
+    end
+  end
+
+  describe "key_sequence_pending?/1" do
+    test "false in normal mode at rest" do
+      refute Editing.key_sequence_pending?(build_state())
+    end
+
+    test "true when leader_node is set" do
+      ms = %{Mode.initial_state() | leader_node: %{children: %{}}}
+      assert Editing.key_sequence_pending?(build_state(mode_state: ms))
+    end
+  end
+
+  describe "status_segment/1" do
+    test "returns NORMAL for normal mode" do
+      assert Editing.status_segment(build_state(mode: :normal)) == "NORMAL"
+    end
+
+    test "returns INSERT for insert mode" do
+      assert Editing.status_segment(build_state(mode: :insert)) == "INSERT"
     end
   end
 
