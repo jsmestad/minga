@@ -47,21 +47,13 @@ defmodule Minga.Editor.Commands.Editing do
 
   # ── Deletion ──────────────────────────────────────────────────────────────
 
-  def execute(
-        %{vim: %{mode: :insert}, buffers: %{active: buf}} = state,
-        :delete_before
-      ) do
+  def execute(%{buffers: %{active: buf}} = state, :delete_before) do
     if BufferServer.get_option(buf, :autopair) do
       execute_autopair_delete(state, buf)
     else
       BufferServer.delete_before(buf)
       state
     end
-  end
-
-  def execute(%{buffers: %{active: buf}} = state, :delete_before) do
-    BufferServer.delete_before(buf)
-    state
   end
 
   def execute(%{buffers: %{active: buf}} = state, :delete_at) do
@@ -102,22 +94,13 @@ defmodule Minga.Editor.Commands.Editing do
     state
   end
 
-  def execute(
-        %{vim: %{mode: :insert}, buffers: %{active: buf}} = state,
-        {:insert_char, char}
-      )
-      when is_binary(char) do
+  def execute(%{buffers: %{active: buf}} = state, {:insert_char, char}) when is_binary(char) do
     if BufferServer.get_option(buf, :autopair) do
       execute_autopair_insert(buf, char)
     else
       BufferServer.insert_char(buf, char)
     end
 
-    state
-  end
-
-  def execute(%{buffers: %{active: buf}} = state, {:insert_char, char}) when is_binary(char) do
-    BufferServer.insert_char(buf, char)
     state
   end
 

@@ -644,4 +644,80 @@ defmodule Minga.Editor.Commands.EditingTest do
       refute String.contains?(content, "\n")
     end
   end
+
+  # ── Paste event (mode-independent) ──────────────────────────────────────
+
+  describe "paste event" do
+    test "paste inserts text in vim normal mode" do
+      {editor, buffer} = start_editor("hello")
+      # Don't enter insert mode, stay in normal
+      send(editor, {:minga_input, {:paste_event, "world"}})
+      _ = :sys.get_state(editor)
+
+      assert String.contains?(BufferServer.content(buffer), "world")
+    end
+
+    test "paste inserts text in vim insert mode" do
+      {editor, buffer} = start_editor("hello")
+      send_key(editor, ?i)
+      send(editor, {:minga_input, {:paste_event, "xyz"}})
+      _ = :sys.get_state(editor)
+
+      assert String.contains?(BufferServer.content(buffer), "xyz")
+    end
+
+    test "paste inserts multiline text" do
+      {editor, buffer} = start_editor("start")
+      send_key(editor, ?i)
+      send(editor, {:minga_input, {:paste_event, "line1\nline2"}})
+      _ = :sys.get_state(editor)
+
+      content = BufferServer.content(buffer)
+      assert String.contains?(content, "line1\nline2")
+    end
+  end
+
+  # ── Autopair without mode gate ──────────────────────────────────────────
+
+  describe "autopair fires regardless of vim mode" do
+    test "insert_char autopairs opening bracket in normal mode context" do
+      # Autopair should fire for any :insert_char command, because the
+      # editing model already decided to produce the command. The executor
+      # doesn't second-guess mode.
+      {:ok, buffer} = BufferServer.start_link(content: "")
+      BufferServer.set_option(buffer, :autopair, true)
+
+      state = %Minga.Editor.State{
+        port_manager: nil,
+        viewport: %Minga.Editor.Viewport{top: 0, left: 0, rows: 10, cols: 40},
+        buffers: %Minga.Editor.State.Buffers{active: buffer, list: [buffer]},
+        vim: Minga.Editor.VimState.new()
+      }
+
+      # Execute insert_char directly (bypasses mode FSM, tests the executor)
+      Minga.Editor.Commands.Editing.execute(state, {:insert_char, "("})
+
+      content = BufferServer.content(buffer)
+      assert content == "()", "autopair should insert closing paren, got: #{inspect(content)}"
+    end
+
+    test "delete_before removes autopair in normal mode context" do
+      {:ok, buffer} = BufferServer.start_link(content: "()")
+      BufferServer.set_option(buffer, :autopair, true)
+      # Place cursor between the parens (line 0, col 1)
+      BufferServer.move_to(buffer, {0, 1})
+
+      state = %Minga.Editor.State{
+        port_manager: nil,
+        viewport: %Minga.Editor.Viewport{top: 0, left: 0, rows: 10, cols: 40},
+        buffers: %Minga.Editor.State.Buffers{active: buffer, list: [buffer]},
+        vim: Minga.Editor.VimState.new()
+      }
+
+      Minga.Editor.Commands.Editing.execute(state, :delete_before)
+
+      content = BufferServer.content(buffer)
+      assert content == "", "autopair should delete both parens, got: #{inspect(content)}"
+    end
+  end
 end

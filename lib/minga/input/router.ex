@@ -79,6 +79,7 @@ defmodule Minga.Input.Router do
           state.buffers.active,
           buffer_version(state),
           Editing.mode(state),
+          Editing.inserting?(state),
           {cancel, 0}
         )
 
@@ -91,6 +92,7 @@ defmodule Minga.Input.Router do
   defp dispatch_normal(state, codepoint, modifiers) do
     old_buffer = state.buffers.active
     old_mode = Editing.mode(state)
+    was_inserting = Editing.inserting?(state)
     buf_version_before = buffer_version(state)
     old_cursor = safe_cursor(old_buffer)
 
@@ -103,6 +105,7 @@ defmodule Minga.Input.Router do
       old_buffer,
       buf_version_before,
       old_mode,
+      was_inserting,
       {codepoint, modifiers},
       old_cursor
     )
@@ -168,6 +171,7 @@ defmodule Minga.Input.Router do
           pid() | nil,
           non_neg_integer(),
           atom(),
+          boolean(),
           {non_neg_integer(), non_neg_integer()},
           {non_neg_integer(), non_neg_integer()} | nil
         ) :: EditorState.t()
@@ -176,6 +180,7 @@ defmodule Minga.Input.Router do
         old_buffer,
         buf_version_before,
         old_mode,
+        was_inserting,
         {codepoint, modifiers},
         old_cursor \\ nil
       ) do
@@ -187,7 +192,7 @@ defmodule Minga.Input.Router do
     }
 
     state
-    |> Editor.do_maybe_handle_completion(old_mode, codepoint, modifiers)
+    |> Editor.do_maybe_handle_completion(was_inserting, codepoint, modifiers)
     |> post_action_housekeeping(snapshot)
   end
 

@@ -74,8 +74,16 @@ defmodule Minga.EditingModel.Vim do
 
   @impl Minga.EditingModel
   @spec cursor_shape(t()) :: :beam | :block | :underline
+  def cursor_shape(%__MODULE__{mode: :normal, mode_state: %{pending_replace: true}}),
+    do: :underline
+
   def cursor_shape(%__MODULE__{mode: :insert}), do: :beam
   def cursor_shape(%__MODULE__{mode: :replace}), do: :underline
+
+  def cursor_shape(%__MODULE__{mode: mode})
+      when mode in [:search, :command, :eval, :search_prompt],
+      do: :beam
+
   def cursor_shape(%__MODULE__{}), do: :block
 
   @impl Minga.EditingModel
