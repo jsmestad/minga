@@ -1,13 +1,17 @@
 defmodule Minga.Editor.CompletionHandling do
   @moduledoc """
-  LSP completion accept, filter, trigger, and dismiss logic.
+  Completion accept, filter, trigger, and dismiss logic.
 
-  Extracted from `Minga.Editor` to keep the GenServer module focused on
+  Handles both LSP completions (async, debounced) and config file
+  completions (synchronous, from the Options registry). Extracted
+  from `Minga.Editor` to keep the GenServer module focused on
   orchestration. All functions are pure state transforms.
   """
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Completion
+  alias Minga.Config.Completion, as: ConfigCompletion
+  alias Minga.Config.Options
   alias Minga.Editor.CompletionTrigger
   alias Minga.Editor.SignatureHelp
   alias Minga.Editor.State, as: EditorState
@@ -191,7 +195,16 @@ defmodule Minga.Editor.CompletionHandling do
   @spec do_update(EditorState.t(), pid(), non_neg_integer()) :: EditorState.t()
   defp do_update(state, buf, codepoint) do
     state = update_filter(state, buf)
-    state = maybe_trigger(state, buf, codepoint)
+
+    state =
+      case config_completion_context(buf) do
+        :none ->
+          maybe_trigger(state, buf, codepoint)
+
+        context ->
+          maybe_trigger_config_completion(state, buf, context)
+      end
+
     maybe_trigger_signature_help(state, buf, codepoint)
   end
 
@@ -228,6 +241,200 @@ defmodule Minga.Editor.CompletionHandling do
           CompletionTrigger.maybe_trigger(state.completion_trigger, char, buf)
 
         %{state | completion_trigger: new_bridge}
+    end
+  end
+
+  # ── Config file completion ──────────────────────────────────────────────
+
+  @typedoc "Config completion context detected from cursor position."
+  @type config_context :: :option_name | {:option_value, atom()} | :filetype | :none
+
+  @doc false
+  @spec config_completion_context(pid()) :: config_context()
+  def config_completion_context(buf) do
+    file_path = BufferServer.file_path(buf)
+
+    if config_file?(file_path) do
+      {content, {cursor_line, cursor_col}} = BufferServer.content_and_cursor(buf)
+      lines = String.split(content, "\n")
+
+      case Enum.at(lines, cursor_line) do
+        nil -> :none
+        line_text -> detect_config_context(line_text, cursor_col)
+      end
+    else
+      :none
+    end
+  end
+
+  @spec config_file?(String.t() | nil) :: boolean()
+  defp config_file?(nil), do: false
+
+  defp config_file?(path) do
+    case Path.basename(path) do
+      ".minga.exs" -> true
+      "config.exs" -> matches_config_path?(path)
+      _ -> false
+    end
+  end
+
+  @spec matches_config_path?(String.t()) :: boolean()
+  defp matches_config_path?(path) do
+    config_path =
+      try do
+        Minga.Config.Loader.config_path()
+      catch
+        :exit, _ -> nil
+      end
+
+    config_path != nil and Path.expand(path) == Path.expand(config_path)
+  end
+
+  @doc """
+  Detects the config DSL context from a line of text and cursor position.
+
+  Returns `:option_name`, `{:option_value, atom()}`, `:filetype`, or `:none`.
+  Used internally by `config_completion_context/1` after determining the
+  buffer is a config file. Exposed for testing.
+  """
+  @spec detect_config_context(String.t(), non_neg_integer()) :: config_context()
+  def detect_config_context(line_text, cursor_col) do
+    before_cursor = String.slice(line_text, 0, cursor_col)
+    trimmed = String.trim_leading(before_cursor)
+    detect_from_trimmed(trimmed)
+  end
+
+  @spec detect_from_trimmed(String.t()) :: config_context()
+  defp detect_from_trimmed("set " <> rest) do
+    if String.contains?(rest, ",") do
+      # Past the option name; check if we know this option for value completion
+      case match_set_value_context("set " <> rest) do
+        {:option_value, _} = ctx -> ctx
+        nil -> :none
+      end
+    else
+      detect_set_option_name("set " <> rest)
+    end
+  end
+
+  defp detect_from_trimmed("for_filetype :" <> _), do: :filetype
+  defp detect_from_trimmed(_), do: :none
+
+  @spec detect_set_option_name(String.t()) :: config_context()
+  defp detect_set_option_name("set :" <> _), do: :option_name
+  defp detect_set_option_name(_), do: :none
+
+  @spec match_set_value_context(String.t()) :: {:option_value, atom()} | nil
+  defp match_set_value_context(text) do
+    # Match: "set :option_name, " with optional value start
+    case Regex.run(~r/^set\s+:([a-z_]+)\s*,\s*:?/, text) do
+      [_full, name_str] ->
+        name = String.to_existing_atom(name_str)
+
+        if name in Options.valid_names() do
+          {:option_value, name}
+        else
+          nil
+        end
+
+      nil ->
+        nil
+    end
+  rescue
+    ArgumentError -> nil
+  end
+
+  @spec maybe_trigger_config_completion(EditorState.t(), pid(), active_config_context()) ::
+          EditorState.t()
+  defp maybe_trigger_config_completion(state, _buf, _context) when state.completion != nil do
+    # Already showing a completion; update_filter handles narrowing.
+    state
+  end
+
+  defp maybe_trigger_config_completion(state, buf, context) do
+    case config_items_for_context(context) do
+      [] -> state
+      items -> build_config_completion(state, buf, items, context)
+    end
+  end
+
+  @spec build_config_completion(
+          EditorState.t(),
+          pid(),
+          [Completion.item()],
+          active_config_context()
+        ) :: EditorState.t()
+  defp build_config_completion(state, buf, items, context) do
+    {cursor_line, cursor_col} = BufferServer.cursor(buf)
+    trigger_col = config_trigger_col(buf, cursor_line, cursor_col, context)
+    completion = Completion.new(items, {cursor_line, trigger_col})
+
+    prefix = config_prefix(buf, cursor_line, trigger_col, cursor_col)
+    completion = Completion.filter(completion, prefix)
+
+    if Completion.active?(completion) do
+      %{state | completion: completion}
+    else
+      state
+    end
+  end
+
+  @typedoc "Config contexts that produce completion items (excludes :none)."
+  @type active_config_context :: :option_name | {:option_value, atom()} | :filetype
+
+  @spec config_items_for_context(active_config_context()) :: [Completion.item()]
+  defp config_items_for_context(:option_name), do: ConfigCompletion.option_name_items()
+
+  defp config_items_for_context({:option_value, name}),
+    do: ConfigCompletion.option_value_items(name)
+
+  defp config_items_for_context(:filetype), do: ConfigCompletion.filetype_items()
+
+  @spec config_trigger_col(pid(), non_neg_integer(), non_neg_integer(), active_config_context()) ::
+          non_neg_integer()
+  defp config_trigger_col(buf, cursor_line, cursor_col, context) do
+    {content, _cursor} = BufferServer.content_and_cursor(buf)
+    lines = String.split(content, "\n")
+    line_text = Enum.at(lines, cursor_line) || ""
+    before_cursor = String.slice(line_text, 0, cursor_col)
+
+    case context do
+      :option_name ->
+        # Trigger after "set :" — find the colon
+        case :binary.match(before_cursor, "set :") do
+          {pos, 5} -> pos + 5
+          :nomatch -> cursor_col
+        end
+
+      {:option_value, _} ->
+        # Trigger after the ", " or ", :" — find the last comma+space
+        case Regex.run(~r/,\s*:?/, before_cursor, return: :index) do
+          [{pos, len} | _] -> pos + len
+          nil -> cursor_col
+        end
+
+      :filetype ->
+        # Trigger after "for_filetype :" — find the colon
+        case :binary.match(before_cursor, "for_filetype :") do
+          {pos, 14} -> pos + 14
+          :nomatch -> cursor_col
+        end
+    end
+  end
+
+  @spec config_prefix(pid(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
+          String.t()
+  defp config_prefix(buf, cursor_line, trigger_col, cursor_col) do
+    if cursor_col > trigger_col do
+      {content, _cursor} = BufferServer.content_and_cursor(buf)
+      lines = String.split(content, "\n")
+
+      case Enum.at(lines, cursor_line) do
+        nil -> ""
+        line_text -> String.slice(line_text, trigger_col, cursor_col - trigger_col)
+      end
+    else
+      ""
     end
   end
 

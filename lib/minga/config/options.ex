@@ -646,6 +646,24 @@ defmodule Minga.Config.Options do
   @spec valid_names() :: [option_name()]
   def valid_names, do: @valid_names
 
+  @doc """
+  Returns the type descriptor for an option, or `nil` if unknown.
+
+  Used by `Config.Completion` to determine what value completions
+  to offer (enum variants, booleans, etc.).
+  """
+  @spec type_for(option_name()) :: type_descriptor() | nil
+  def type_for(name) when is_atom(name), do: Map.get(@types, name)
+
+  @doc """
+  Returns the full option spec list: `[{name, type, default}]`.
+
+  Used by `Config.Completion` to generate completion items with
+  type and default information in the detail text.
+  """
+  @spec option_specs() :: [option_spec()]
+  def option_specs, do: @option_specs
+
   # ── Validation ──────────────────────────────────────────────────────────────
 
   @doc """

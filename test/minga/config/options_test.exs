@@ -526,4 +526,40 @@ defmodule Minga.Config.OptionsTest do
       assert Options.get_extension_option(s, :minga_org, :conceal) == nil
     end
   end
+
+  describe "type_for/1" do
+    test "returns type descriptor for known options" do
+      assert Options.type_for(:tab_width) == :pos_integer
+      assert Options.type_for(:autopair) == :boolean
+      assert Options.type_for(:line_numbers) == {:enum, [:hybrid, :absolute, :relative, :none]}
+      assert Options.type_for(:theme) == :theme_atom
+      assert Options.type_for(:font_family) == :string
+    end
+
+    test "returns nil for unknown options" do
+      assert Options.type_for(:nonexistent) == nil
+    end
+  end
+
+  describe "option_specs/0" do
+    test "returns a list of {name, type, default} tuples" do
+      specs = Options.option_specs()
+
+      assert is_list(specs)
+      assert length(specs) == length(Options.valid_names())
+
+      for {name, _type, _default} <- specs do
+        assert is_atom(name)
+        assert name in Options.valid_names()
+      end
+    end
+
+    test "specs match valid_names and defaults" do
+      specs = Options.option_specs()
+
+      for {name, _type, default} <- specs do
+        assert Options.default(name) == default
+      end
+    end
+  end
 end
