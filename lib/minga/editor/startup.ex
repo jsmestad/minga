@@ -39,6 +39,7 @@ defmodule Minga.Editor.Startup do
   """
   @spec build_initial_state(keyword()) :: EditorState.t()
   def build_initial_state(opts) do
+    backend = Keyword.get(opts, :backend, :headless)
     port_manager = Keyword.get(opts, :port_manager, PortManager)
     width = Keyword.get(opts, :width, 80)
     height = Keyword.get(opts, :height, 24)
@@ -72,7 +73,7 @@ defmodule Minga.Editor.Startup do
     dashboard = nil
 
     # Decide mode FIRST, then create the right window type.
-    {keymap_scope, _agentic_state} = startup_view_state(port_manager)
+    {keymap_scope, _agentic_state} = startup_view_state(backend)
 
     initial_window_id = 1
 
@@ -83,6 +84,7 @@ defmodule Minga.Editor.Startup do
       if initial_window, do: %{initial_window_id => initial_window}, else: %{}
 
     state = %EditorState{
+      backend: backend,
       buffers: %Buffers{
         active: active_buf,
         list: buffers,
@@ -109,13 +111,21 @@ defmodule Minga.Editor.Startup do
     state = %{state | tab_bar: initial_tab_bar(active_buf, keymap_scope)}
 
     # Store the agent buffer reference if one was created.
-    case agent_state_update do
-      {:agent_buffer, pid} ->
-        AgentAccess.update_agent(state, fn a -> %{a | buffer: pid} end)
+    state =
+      case agent_state_update do
+        {:agent_buffer, pid} ->
+          AgentAccess.update_agent(state, fn a -> %{a | buffer: pid} end)
 
-      :noop ->
-        state
-    end
+        :noop ->
+          state
+      end
+
+    # Snapshot the fully assembled state into the initial tab's context.
+    # Without this, the first tab starts with an empty context, and
+    # restore_tab_context falls back to file defaults (wrong for agent tabs).
+    context = EditorState.snapshot_tab_context(state)
+    tb = TabBar.update_context(state.tab_bar, state.tab_bar.active_id, context)
+    %{state | tab_bar: tb}
   end
 
   @doc """
@@ -181,19 +191,21 @@ defmodule Minga.Editor.Startup do
   end
 
   @doc """
-  Determines the initial view state based on CLI flags and config.
+  Determines the initial view state based on the frontend backend and config.
 
   Returns `{keymap_scope, agentic_state}`. Called before window creation
   so the correct window type can be built in a single pass.
+
+  Agent-first startup only applies to the TUI. GUI frontends always
+  start with the editor view because agent mode is designed around the
+  TUI's full-screen chat layout.
   """
-  @spec startup_view_state(GenServer.server() | nil) ::
-          {atom(), UIState.t()}
-  def startup_view_state(port_manager) do
-    tui_mode? = port_manager == PortManager
+  @spec startup_view_state(EditorState.backend()) :: {atom(), UIState.t()}
+  def startup_view_state(backend) do
     cli_flags = Minga.CLI.startup_flags()
 
     want_agent? =
-      tui_mode? and
+      backend == :tui and
         not cli_flags.force_editor and
         ConfigOptions.get(:startup_view) == :agent
 

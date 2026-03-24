@@ -18,7 +18,7 @@ defmodule Minga.Agent.Events do
   alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
-  alias Minga.Editor.State.Workspace
+  alias Minga.Editor.State.AgentGroup
 
   @type effect ::
           :render
@@ -264,9 +264,9 @@ defmodule Minga.Agent.Events do
         tb = TabBar.update_tab(state.tab_bar, id, &Tab.set_agent_status(&1, status))
         # Also sync workspace agent status
         tb =
-          case TabBar.find_workspace_by_session(tb, session) do
-            %Workspace{id: ws_id} ->
-              TabBar.update_workspace(tb, ws_id, &Workspace.set_agent_status(&1, status))
+          case TabBar.find_group_by_session(tb, session) do
+            %AgentGroup{id: ws_id} ->
+              TabBar.update_group(tb, ws_id, &AgentGroup.set_agent_status(&1, status))
 
             nil ->
               tb
@@ -290,9 +290,9 @@ defmodule Minga.Agent.Events do
     tb = state.tab_bar
 
     with pid when is_pid(pid) <- session,
-         %Workspace{id: ws_id} <- TabBar.find_workspace_by_session(tb, pid),
+         %AgentGroup{id: ws_id} <- TabBar.find_group_by_session(tb, pid),
          %Tab{id: tab_id} <- find_unassociated_file_tab(tb, path, ws_id) do
-      %{state | tab_bar: TabBar.move_tab_to_workspace(tb, tab_id, ws_id)}
+      %{state | tab_bar: TabBar.move_tab_to_group(tb, tab_id, ws_id)}
     else
       _ -> state
     end
@@ -307,11 +307,11 @@ defmodule Minga.Agent.Events do
     session = AgentAccess.session(state)
 
     with pid when is_pid(pid) <- session,
-         %Workspace{} = ws <- TabBar.find_workspace_by_session(state.tab_bar, pid) do
-      updated_ws = Workspace.auto_name(ws, prompt)
+         %AgentGroup{} = ws <- TabBar.find_group_by_session(state.tab_bar, pid) do
+      updated_ws = AgentGroup.auto_name(ws, prompt)
 
       if updated_ws.label != ws.label do
-        %{state | tab_bar: TabBar.update_workspace(state.tab_bar, ws.id, fn _ -> updated_ws end)}
+        %{state | tab_bar: TabBar.update_group(state.tab_bar, ws.id, fn _ -> updated_ws end)}
       else
         state
       end

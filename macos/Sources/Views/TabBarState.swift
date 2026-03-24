@@ -18,18 +18,14 @@ struct TabEntry: Identifiable {
     let label: String
 }
 
-/// A workspace entry for the workspace indicator/dropdown.
-struct WorkspaceEntry: Identifiable {
+/// An agent group entry for the tab bar capsules and indicator.
+struct AgentGroupEntry: Identifiable {
     let id: UInt16
-    let kind: UInt8       // 0 = manual, 1 = agent
     let agentStatus: UInt8
     let color: Color
     let tabCount: UInt16
     let label: String
     let icon: String
-
-    var isManual: Bool { kind == 0 }
-    var isAgent: Bool { kind == 1 }
 }
 
 /// Observable state for the tab bar, driven by BEAM protocol messages.
@@ -38,17 +34,18 @@ struct WorkspaceEntry: Identifiable {
 final class TabBarState {
     var tabs: [TabEntry] = []
     var activeIndex: Int = 0
-    var workspaces: [WorkspaceEntry] = []
-    var activeWorkspaceId: UInt16 = 0
+    var agentGroups: [AgentGroupEntry] = []
+    var activeGroupId: UInt16 = 0
 
-    /// Whether workspace grouping is active (at least one agent workspace exists).
-    var hasWorkspaces: Bool {
-        workspaces.contains { $0.isAgent }
+    /// Whether any agent groups exist (controls visibility of group UI).
+    var hasAgentGroups: Bool {
+        !agentGroups.isEmpty
     }
 
-    /// The active workspace entry, if any.
-    var activeWorkspace: WorkspaceEntry? {
-        workspaces.first { $0.id == activeWorkspaceId }
+    /// The active agent group, if the active tab belongs to one. Nil when
+    /// the user is viewing ungrouped tabs.
+    var activeGroup: AgentGroupEntry? {
+        agentGroups.first { $0.id == activeGroupId }
     }
 
     /// Update from a decoded gui_tab_bar protocol message.
@@ -69,13 +66,12 @@ final class TabBarState {
         }
     }
 
-    /// Update from a decoded gui_workspace_bar protocol message.
-    func updateWorkspaces(activeWorkspaceId: UInt16, entries: [GUIWorkspaceEntry]) {
-        self.activeWorkspaceId = activeWorkspaceId
-        self.workspaces = entries.map { entry in
-            WorkspaceEntry(
+    /// Update from a decoded gui_agent_groups protocol message.
+    func updateAgentGroups(activeGroupId: UInt16, entries: [GUIAgentGroupEntry]) {
+        self.activeGroupId = activeGroupId
+        self.agentGroups = entries.map { entry in
+            AgentGroupEntry(
                 id: entry.id,
-                kind: entry.kind,
                 agentStatus: entry.agentStatus,
                 color: Color(
                     .sRGB,
@@ -90,12 +86,11 @@ final class TabBarState {
         }
     }
 
-    /// Clear all tab state. Called when the BEAM sends an empty tab bar
-    /// or during error recovery to prevent stale tabs from persisting.
+    /// Clear all tab state.
     func hide() {
         tabs = []
         activeIndex = 0
-        workspaces = []
-        activeWorkspaceId = 0
+        agentGroups = []
+        activeGroupId = 0
     }
 }

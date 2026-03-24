@@ -5,7 +5,6 @@ defmodule Minga.Editor.Commands.AgentSplitTest do
   alias Minga.Agent.UIState
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.Commands.Agent, as: AgentCommands
-  alias Minga.Editor.LayoutPreset
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.Buffers
@@ -34,18 +33,34 @@ defmodule Minga.Editor.Commands.AgentSplitTest do
       spinner_timer: nil
     }
 
-    # Create a background agent tab to hold agent state
+    # File tab with context
     file_tab = Tab.new_file(1, "[no file]")
 
     file_context = %{
-      keymap_scope: :editor
+      keymap_scope: :editor,
+      windows: %{
+        tree: {:leaf, 1},
+        map: %{1 => window},
+        active: 1,
+        next_id: 2
+      }
     }
 
     file_tab = %{file_tab | context: file_context}
+
+    # Agent tab with context containing an agent_chat window
     agent_tab = Tab.new_agent(2, "Agent")
 
+    agent_win = Window.new_agent_chat(1, agent_buf, 24, 80)
+
     agent_context = %{
-      keymap_scope: :agent
+      keymap_scope: :agent,
+      windows: %{
+        tree: {:leaf, 1},
+        map: %{1 => agent_win},
+        active: 1,
+        next_id: 2
+      }
     }
 
     agent_tab = %{agent_tab | context: agent_context}
@@ -76,64 +91,48 @@ defmodule Minga.Editor.Commands.AgentSplitTest do
   end
 
   describe "toggle_agent_split/1" do
-    test "creates agent chat split pane" do
+    test "switches to agent tab when on file tab" do
       state = make_state()
-
-      refute LayoutPreset.has_agent_chat?(state)
+      assert EditorState.active_tab_kind(state) == :file
 
       new_state = AgentCommands.toggle_agent_split(state)
 
-      assert LayoutPreset.has_agent_chat?(new_state)
-
-      # Window tree should have a split
-      assert {:split, :vertical, {:leaf, 1}, {:leaf, 2}, _} = new_state.windows.tree
-
-      # New window is agent chat content
-      agent_win = new_state.windows.map[2]
-      assert Content.agent_chat?(agent_win.content)
+      assert EditorState.active_tab_kind(new_state) == :agent
+      assert new_state.tab_bar.active_id == 2
     end
 
-    test "toggles off: removes agent chat pane" do
+    test "switches back to file tab when on agent tab" do
       state = make_state()
 
+      # Toggle on (switch to agent)
       state = AgentCommands.toggle_agent_split(state)
-      assert LayoutPreset.has_agent_chat?(state)
+      assert EditorState.active_tab_kind(state) == :agent
 
+      # Toggle off (switch to file)
       state = AgentCommands.toggle_agent_split(state)
-      refute LayoutPreset.has_agent_chat?(state)
-
-      # Back to single window
-      assert {:leaf, 1} = state.windows.tree
+      assert EditorState.active_tab_kind(state) == :file
+      assert state.tab_bar.active_id == 1
     end
 
-    test "preserves file buffer as active" do
+    test "agent tab has agent_chat window in context" do
+      state = make_state()
+      state = AgentCommands.toggle_agent_split(state)
+
+      # After switching to agent tab, the windows should include an agent_chat window
+      agent_win = Map.values(state.windows.map) |> Enum.find(&Content.agent_chat?(&1.content))
+      assert agent_win != nil
+    end
+
+    test "round-trip toggle restores file state" do
       state = make_state()
       original_buf = state.buffers.active
+      original_active = state.tab_bar.active_id
 
-      new_state = AgentCommands.toggle_agent_split(state)
-
-      # File buffer window is still active
-      assert new_state.windows.active == 1
-      assert new_state.buffers.active == original_buf
-    end
-
-    test "stays on editor keymap scope" do
-      state = make_state()
-
-      new_state = AgentCommands.toggle_agent_split(state)
-
-      # Focus is on the file buffer window, so scope stays :editor
-      assert new_state.keymap_scope == :editor
-    end
-
-    test "is idempotent (double-apply is a no-op)" do
-      state = make_state()
+      state = AgentCommands.toggle_agent_split(state)
       state = AgentCommands.toggle_agent_split(state)
 
-      state2 = AgentCommands.toggle_agent_split(state)
-
-      # Toggling again removes the pane
-      refute LayoutPreset.has_agent_chat?(state2)
+      assert state.tab_bar.active_id == original_active
+      assert state.buffers.active == original_buf
     end
   end
 end

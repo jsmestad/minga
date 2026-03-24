@@ -14,11 +14,10 @@ defmodule Minga.Editor.StartupTest do
   alias Minga.Editor.Window.Content
   alias Minga.Editor.WindowTree
   alias Minga.Input
-  alias Minga.Port.Manager, as: PortManager
 
   describe "startup_view_state/1" do
     test "returns :agent scope when startup_view is :agent in TUI mode" do
-      {scope, agentic} = Startup.startup_view_state(PortManager)
+      {scope, agentic} = Startup.startup_view_state(:tui)
 
       assert scope == :agent
       assert agentic.view.active == true
@@ -28,7 +27,7 @@ defmodule Minga.Editor.StartupTest do
     test "returns :editor scope when force_editor flag is set" do
       Application.put_env(:minga, :cli_startup_flags, %{force_editor: true, no_context: false})
 
-      {scope, agentic} = Startup.startup_view_state(PortManager)
+      {scope, agentic} = Startup.startup_view_state(:tui)
 
       assert scope == :editor
       assert agentic.view.active == false
@@ -36,8 +35,8 @@ defmodule Minga.Editor.StartupTest do
       Application.delete_env(:minga, :cli_startup_flags)
     end
 
-    test "returns :editor scope in headless mode (non-atom port_manager)" do
-      {scope, _agentic} = Startup.startup_view_state(self())
+    test "returns :editor scope for native GUI backend" do
+      {scope, _agentic} = Startup.startup_view_state(:native_gui)
 
       assert scope == :editor
     end

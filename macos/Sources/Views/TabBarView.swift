@@ -17,7 +17,7 @@ struct TabBarView: View {
     let encoder: InputEncoder?
 
     @State private var hoverTabId: UInt32?
-    /// Accumulated horizontal swipe delta for workspace switching.
+    /// Accumulated horizontal swipe delta for agent group switching.
     @State private var swipeDelta: CGFloat = 0
     /// Whether a swipe gesture is in progress.
     @State private var swiping: Bool = false
@@ -45,16 +45,16 @@ struct TabBarView: View {
             // Thin separator after nav arrows
             verticalSeparator
 
-            // Workspace indicator (visible when workspaces exist)
-            if tabBarState.hasWorkspaces, let activeWs = tabBarState.activeWorkspace {
-                workspaceIndicator(activeWs)
-                groupSeparator(color: activeWs.color)
+            // Agent group indicator (visible when active tab is in a group)
+            if let activeGroup = tabBarState.activeGroup {
+                agentGroupIndicator(activeGroup)
+                groupSeparator(color: activeGroup.color)
             }
 
             // Tab strip with collapsible groups
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 0) {
-                    if tabBarState.hasWorkspaces {
+                    if tabBarState.hasAgentGroups {
                         groupedTabStrip
                     } else {
                         flatTabStrip
@@ -111,7 +111,7 @@ struct TabBarView: View {
             DragGesture(minimumDistance: 20)
                 .onChanged { value in
                     // Only act on primarily horizontal drags (trackpad swipe)
-                    guard tabBarState.hasWorkspaces else { return }
+                    guard tabBarState.hasAgentGroups else { return }
                     let horizontal = abs(value.translation.width)
                     let vertical = abs(value.translation.height)
                     guard horizontal > vertical * 1.5 else { return }
@@ -119,17 +119,17 @@ struct TabBarView: View {
                     swipeDelta = value.translation.width
                 }
                 .onEnded { value in
-                    guard swiping, tabBarState.hasWorkspaces else {
+                    guard swiping, tabBarState.hasAgentGroups else {
                         swiping = false
                         swipeDelta = 0
                         return
                     }
                     if value.translation.width < -swipeThreshold {
                         // Swipe left: next workspace
-                        encoder?.sendExecuteCommand(name: "workspace_next")
+                        encoder?.sendExecuteCommand(name: "agent_group_next")
                     } else if value.translation.width > swipeThreshold {
                         // Swipe right: previous workspace
-                        encoder?.sendExecuteCommand(name: "workspace_prev")
+                        encoder?.sendExecuteCommand(name: "agent_group_prev")
                     }
                     swiping = false
                     swipeDelta = 0
@@ -158,7 +158,7 @@ struct TabBarView: View {
     @ViewBuilder
     private var groupedTabStrip: some View {
         let groups = groupedTabs()
-        let activeWsId = tabBarState.activeWorkspaceId
+        let activeWsId = tabBarState.activeGroupId
 
         ForEach(groups, id: \.groupId) { group in
             // Group separator before non-first groups
@@ -186,18 +186,18 @@ struct TabBarView: View {
 
     @ViewBuilder
     private func collapsedGroupCapsule(_ group: TabGroup) -> some View {
-        let ws = tabBarState.workspaces.first { $0.id == group.groupId }
+        let ws = tabBarState.agentGroups.first { $0.id == group.groupId }
         let color = ws?.color ?? theme.tabInactiveFg
 
         Button(action: {
             // Switch to this workspace by id (activates its first tab on the BEAM side)
             if group.groupId == 0 {
-                encoder?.sendExecuteCommand(name: "workspace_manual")
-            } else if let idx = tabBarState.workspaces.firstIndex(where: { $0.id == group.groupId }),
+                encoder?.sendExecuteCommand(name: "ungrouped_tabs")
+            } else if let idx = tabBarState.agentGroups.firstIndex(where: { $0.id == group.groupId }),
                       idx >= 1, idx <= 9 {
-                encoder?.sendExecuteCommand(name: "workspace_goto_\(idx)")
+                encoder?.sendExecuteCommand(name: "agent_group_goto_\(idx)")
             } else {
-                encoder?.sendExecuteCommand(name: "workspace_next_agent")
+                encoder?.sendExecuteCommand(name: "agent_group_next_agent")
             }
         }) {
             HStack(spacing: 4) {
@@ -210,7 +210,7 @@ struct TabBarView: View {
                     .lineLimit(1)
                     .foregroundStyle(theme.tabInactiveFg)
 
-                if let ws = ws, ws.isAgent {
+                if let ws = ws {
                     agentStatusDot(ws.agentStatus, color: color)
                 }
 
@@ -224,7 +224,7 @@ struct TabBarView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help("Expand and switch to workspace")
+        .help("Switch to agent group")
         .onHover { isHovered in
             if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
         }
@@ -232,20 +232,20 @@ struct TabBarView: View {
             NSCursor.pop()
         }
         .contextMenu {
-            Button("Switch to Workspace") {
+            Button("Switch to Group") {
                 if group.groupId == 0 {
-                    encoder?.sendExecuteCommand(name: "workspace_manual")
-                } else if let idx = tabBarState.workspaces.firstIndex(where: { $0.id == group.groupId }),
+                    encoder?.sendExecuteCommand(name: "ungrouped_tabs")
+                } else if let idx = tabBarState.agentGroups.firstIndex(where: { $0.id == group.groupId }),
                           idx >= 1, idx <= 9 {
-                    encoder?.sendExecuteCommand(name: "workspace_goto_\(idx)")
+                    encoder?.sendExecuteCommand(name: "agent_group_goto_\(idx)")
                 } else {
-                    encoder?.sendExecuteCommand(name: "workspace_next_agent")
+                    encoder?.sendExecuteCommand(name: "agent_group_next_agent")
                 }
             }
             Divider()
             if group.groupId != 0 {
-                Button("Close Workspace") {
-                    encoder?.sendWorkspaceClose(id: group.groupId)
+                Button("Close Group") {
+                    encoder?.sendGroupClose(id: group.groupId)
                 }
             }
         }
@@ -259,7 +259,7 @@ struct TabBarView: View {
     @FocusState private var renameFieldFocused: Bool
 
     @ViewBuilder
-    private func workspaceIndicator(_ workspace: WorkspaceEntry) -> some View {
+    private func agentGroupIndicator(_ workspace: AgentGroupEntry) -> some View {
         HStack(spacing: 4) {
             // Icon (click to change)
             Image(systemName: workspace.icon.isEmpty ? "folder" : workspace.icon)
@@ -276,7 +276,7 @@ struct TabBarView: View {
                         theme: theme
                     ) { selectedIcon in
                         showIconPicker = false
-                        encoder?.sendWorkspaceSetIcon(id: workspace.id, icon: selectedIcon)
+                        encoder?.sendGroupSetIcon(id: workspace.id, icon: selectedIcon)
                     }
                 }
 
@@ -319,11 +319,11 @@ struct TabBarView: View {
                         DispatchQueue.main.async { renameFieldFocused = true }
                     }
                     .onTapGesture(count: 1) {
-                        encoder?.sendExecuteCommand(name: "workspace_list")
+                        encoder?.sendExecuteCommand(name: "agent_group_list")
                     }
             }
 
-            if workspace.isAgent {
+            if true {
                 agentStatusDot(workspace.agentStatus, color: workspace.color)
             }
 
@@ -331,13 +331,13 @@ struct TabBarView: View {
                 .font(.system(size: 7, weight: .bold))
                 .foregroundStyle(theme.tabInactiveFg)
                 .onTapGesture {
-                    encoder?.sendExecuteCommand(name: "workspace_list")
+                    encoder?.sendExecuteCommand(name: "agent_group_list")
                 }
         }
         .padding(.horizontal, 8)
         .frame(height: barHeight)
         .contextMenu {
-            Button("Rename Workspace...") {
+            Button("Rename Group...") {
                 renameText = workspace.label
                 isRenaming = true
                 DispatchQueue.main.async { renameFieldFocused = true }
@@ -346,20 +346,20 @@ struct TabBarView: View {
                 showIconPicker = true
             }
             Divider()
-            if !workspace.isManual {
-                Button("Close Workspace") {
-                    encoder?.sendWorkspaceClose(id: workspace.id)
+            if !false {
+                Button("Close Group") {
+                    encoder?.sendGroupClose(id: workspace.id)
                 }
             }
         }
     }
 
-    private func commitRename(_ workspace: WorkspaceEntry) {
+    private func commitRename(_ workspace: AgentGroupEntry) {
         guard isRenaming else { return }
         isRenaming = false
         let trimmed = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed != workspace.label else { return }
-        encoder?.sendWorkspaceRename(id: workspace.id, name: trimmed)
+        encoder?.sendGroupRename(id: workspace.id, name: trimmed)
     }
 
     private func agentStatusDot(_ status: UInt8, color: Color) -> some View {
@@ -378,7 +378,7 @@ struct TabBarView: View {
     }
 
     private func workspaceColor(for groupId: UInt16) -> Color {
-        if let ws = tabBarState.workspaces.first(where: { $0.id == groupId }) {
+        if let ws = tabBarState.agentGroups.first(where: { $0.id == groupId }) {
             return ws.color
         }
         return theme.tabSeparatorFg

@@ -3,7 +3,7 @@ defmodule Minga.Editor.State.TabBarTest do
 
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
-  alias Minga.Editor.State.Workspace
+  alias Minga.Editor.State.AgentGroup
 
   defp file_tab(id, label \\ ""), do: Tab.new_file(id, label)
 
@@ -326,203 +326,202 @@ defmodule Minga.Editor.State.TabBarTest do
 
   # ── Workspace management ───────────────────────────────────────────────────
 
-  describe "add_agent_workspace/3" do
-    test "adds a workspace and returns it" do
+  describe "add_agent_group/3" do
+    test "adds a group and returns it" do
       tb = TabBar.new(file_tab(1, "a.ex"))
-      {tb, ws} = TabBar.add_agent_workspace(tb, "Claude")
-      assert ws.kind == :agent
-      assert ws.label == "Claude"
-      assert length(tb.workspaces) == 2
+      {tb, group} = TabBar.add_agent_group(tb, "Claude")
+      assert group.label == "Claude"
+      assert length(tb.agent_groups) == 1
     end
 
     test "assigns monotonically increasing workspace ids" do
       tb = TabBar.new(file_tab(1, "a.ex"))
-      {tb, ws1} = TabBar.add_agent_workspace(tb, "Agent 1")
-      {_tb, ws2} = TabBar.add_agent_workspace(tb, "Agent 2")
+      {tb, ws1} = TabBar.add_agent_group(tb, "Agent 1")
+      {_tb, ws2} = TabBar.add_agent_group(tb, "Agent 2")
       assert ws1.id == 1
       assert ws2.id == 2
     end
 
     test "stores session pid on workspace" do
       tb = TabBar.new(file_tab(1, "a.ex"))
-      {_tb, ws} = TabBar.add_agent_workspace(tb, "Agent", self())
+      {_tb, ws} = TabBar.add_agent_group(tb, "Agent", self())
       assert ws.session == self()
     end
   end
 
-  describe "remove_workspace/2" do
+  describe "remove_group/2" do
     test "removing manual workspace (id 0) is a no-op" do
       tb = TabBar.new(file_tab(1, "a.ex"))
-      tb2 = TabBar.remove_workspace(tb, 0)
+      tb2 = TabBar.remove_group(tb, 0)
       assert tb2 == tb
     end
 
     test "removing workspace migrates its tabs to manual" do
       tb = TabBar.new(file_tab(1, "a.ex"))
-      {tb, ws} = TabBar.add_agent_workspace(tb, "Agent")
-      tb = TabBar.move_tab_to_workspace(tb, 1, ws.id)
+      {tb, ws} = TabBar.add_agent_group(tb, "Agent")
+      tb = TabBar.move_tab_to_group(tb, 1, ws.id)
       assert TabBar.get(tb, 1).group_id == ws.id
 
-      tb = TabBar.remove_workspace(tb, ws.id)
+      tb = TabBar.remove_group(tb, ws.id)
       assert TabBar.get(tb, 1).group_id == 0
     end
 
     test "removing active workspace migrates tabs and active lands on manual" do
       tb = TabBar.new(file_tab(1, "a.ex"))
       {tb, _} = TabBar.add(tb, :file, "b.ex")
-      {tb, ws} = TabBar.add_agent_workspace(tb, "Agent")
-      tb = TabBar.move_tab_to_workspace(tb, 2, ws.id)
-      tb = TabBar.switch_workspace(tb, ws.id)
-      assert TabBar.active_workspace_id(tb) == ws.id
+      {tb, ws} = TabBar.add_agent_group(tb, "Agent")
+      tb = TabBar.move_tab_to_group(tb, 2, ws.id)
+      tb = TabBar.switch_to_group(tb, ws.id)
+      assert TabBar.active_group_id(tb) == ws.id
 
       # Remove workspace: tab 2 migrates to manual, active tab stays 2 (now in manual)
-      tb = TabBar.remove_workspace(tb, ws.id)
-      assert TabBar.active_workspace_id(tb) == 0
+      tb = TabBar.remove_group(tb, ws.id)
+      assert TabBar.active_group_id(tb) == 0
       assert TabBar.get(tb, 2).group_id == 0
     end
 
-    test "removing nonexistent workspace is harmless" do
+    test "removing nonexistent group is harmless" do
       tb = TabBar.new(file_tab(1, "a.ex"))
-      initial_count = length(tb.workspaces)
-      tb2 = TabBar.remove_workspace(tb, 999)
-      assert length(tb2.workspaces) == initial_count
+      initial_count = length(tb.agent_groups)
+      tb2 = TabBar.remove_group(tb, 999)
+      assert length(tb2.agent_groups) == initial_count
     end
   end
 
-  describe "move_tab_to_workspace/3" do
+  describe "move_tab_to_group/3" do
     test "moves a tab to a workspace" do
       tb = TabBar.new(file_tab(1, "a.ex"))
-      {tb, ws} = TabBar.add_agent_workspace(tb, "Agent")
-      tb = TabBar.move_tab_to_workspace(tb, 1, ws.id)
+      {tb, ws} = TabBar.add_agent_group(tb, "Agent")
+      tb = TabBar.move_tab_to_group(tb, 1, ws.id)
       assert TabBar.get(tb, 1).group_id == ws.id
     end
   end
 
-  describe "tabs_in_workspace/2" do
+  describe "tabs_in_group/2" do
     test "returns only tabs in that group" do
       tb = TabBar.new(file_tab(1, "a.ex"))
       {tb, _} = TabBar.add(tb, :file, "b.ex")
-      {tb, ws} = TabBar.add_agent_workspace(tb, "Agent")
-      tb = TabBar.move_tab_to_workspace(tb, 1, ws.id)
+      {tb, ws} = TabBar.add_agent_group(tb, "Agent")
+      tb = TabBar.move_tab_to_group(tb, 1, ws.id)
 
-      assert length(TabBar.tabs_in_workspace(tb, ws.id)) == 1
-      assert length(TabBar.tabs_in_workspace(tb, 0)) == 1
-      assert hd(TabBar.tabs_in_workspace(tb, ws.id)).id == 1
+      assert length(TabBar.tabs_in_group(tb, ws.id)) == 1
+      assert length(TabBar.tabs_in_group(tb, 0)) == 1
+      assert hd(TabBar.tabs_in_group(tb, ws.id)).id == 1
     end
   end
 
-  describe "switch_workspace/2" do
+  describe "switch_to_group/2" do
     test "switches to an existing workspace by activating its first tab" do
       tb = TabBar.new(file_tab(1, "a.ex"))
       {tb, _} = TabBar.add(tb, :agent, "Agent")
-      {tb, ws} = TabBar.add_agent_workspace(tb, "Agent")
+      {tb, ws} = TabBar.add_agent_group(tb, "Agent")
       # Put agent tab in agent workspace
-      tb = TabBar.move_tab_to_workspace(tb, 2, ws.id)
+      tb = TabBar.move_tab_to_group(tb, 2, ws.id)
       # Start on file tab
       tb = TabBar.switch_to(tb, 1)
 
-      tb = TabBar.switch_workspace(tb, ws.id)
-      assert TabBar.active_workspace_id(tb) == ws.id
+      tb = TabBar.switch_to_group(tb, ws.id)
+      assert TabBar.active_group_id(tb) == ws.id
       assert tb.active_id == 2
     end
 
     test "switching to nonexistent workspace is a no-op" do
       tb = TabBar.new(file_tab(1, "a.ex"))
-      tb2 = TabBar.switch_workspace(tb, 999)
-      assert TabBar.active_workspace_id(tb2) == TabBar.active_workspace_id(tb)
+      tb2 = TabBar.switch_to_group(tb, 999)
+      assert TabBar.active_group_id(tb2) == TabBar.active_group_id(tb)
     end
   end
 
-  describe "next_workspace/1 and prev_workspace/1" do
-    test "next_workspace wraps around" do
+  describe "next_agent_group/1 and prev_agent_group/1" do
+    test "next_agent_group wraps around" do
       tb = TabBar.new(file_tab(1, "a.ex"))
       {tb, _} = TabBar.add(tb, :file, "b.ex")
-      {tb, ws1} = TabBar.add_agent_workspace(tb, "Agent 1")
-      tb = TabBar.move_tab_to_workspace(tb, 2, ws1.id)
-      {tb, ws2} = TabBar.add_agent_workspace(tb, "Agent 2")
+      {tb, g1} = TabBar.add_agent_group(tb, "Agent 1")
+      tb = TabBar.move_tab_to_group(tb, 2, g1.id)
+      {tb, g2} = TabBar.add_agent_group(tb, "Agent 2")
       {tb, _} = TabBar.add(tb, :file, "c.ex")
-      tb = TabBar.move_tab_to_workspace(tb, 3, ws2.id)
+      tb = TabBar.move_tab_to_group(tb, 3, g2.id)
 
-      # Start on ws2 tab
-      tb = TabBar.switch_workspace(tb, ws2.id)
-      assert TabBar.active_workspace_id(tb) == ws2.id
+      # Start on g2
+      tb = TabBar.switch_to_group(tb, g2.id)
+      assert TabBar.active_group_id(tb) == g2.id
 
-      # Next wraps to manual (0)
-      tb = TabBar.next_workspace(tb)
-      assert TabBar.active_workspace_id(tb) == 0
+      # Next wraps to g1 (no manual workspace to cycle through)
+      tb = TabBar.next_agent_group(tb)
+      assert TabBar.active_group_id(tb) == g1.id
     end
 
-    test "prev_workspace wraps around" do
+    test "prev_agent_group wraps around" do
       tb = TabBar.new(file_tab(1, "a.ex"))
       {tb, _} = TabBar.add(tb, :file, "b.ex")
-      {tb, ws1} = TabBar.add_agent_workspace(tb, "Agent 1")
-      tb = TabBar.move_tab_to_workspace(tb, 2, ws1.id)
-      {tb, ws2} = TabBar.add_agent_workspace(tb, "Agent 2")
+      {tb, g1} = TabBar.add_agent_group(tb, "Agent 1")
+      tb = TabBar.move_tab_to_group(tb, 2, g1.id)
+      {tb, g2} = TabBar.add_agent_group(tb, "Agent 2")
       {tb, _} = TabBar.add(tb, :file, "c.ex")
-      tb = TabBar.move_tab_to_workspace(tb, 3, ws2.id)
+      tb = TabBar.move_tab_to_group(tb, 3, g2.id)
 
-      # Start on manual
-      tb = TabBar.switch_workspace(tb, 0)
+      # Start on g1
+      tb = TabBar.switch_to_group(tb, g1.id)
 
-      # Prev wraps to ws2
-      tb = TabBar.prev_workspace(tb)
-      assert TabBar.active_workspace_id(tb) == ws2.id
+      # Prev wraps to g2
+      tb = TabBar.prev_agent_group(tb)
+      assert TabBar.active_group_id(tb) == g2.id
     end
 
-    test "next_workspace on single workspace is a no-op" do
+    test "next_agent_group on single workspace is a no-op" do
       tb = TabBar.new(file_tab(1, "a.ex"))
-      tb2 = TabBar.next_workspace(tb)
+      tb2 = TabBar.next_agent_group(tb)
       assert tb2 == tb
     end
 
-    test "prev_workspace on single workspace is a no-op" do
+    test "prev_agent_group on single workspace is a no-op" do
       tb = TabBar.new(file_tab(1, "a.ex"))
-      tb2 = TabBar.prev_workspace(tb)
+      tb2 = TabBar.prev_agent_group(tb)
       assert tb2 == tb
     end
   end
 
-  describe "next_agent_workspace/1" do
+  describe "next_agent_group/1" do
     test "cycles through agent workspaces only, skipping manual" do
       tb = TabBar.new(file_tab(1, "a.ex"))
       {tb, _} = TabBar.add(tb, :file, "b.ex")
-      {tb, ws1} = TabBar.add_agent_workspace(tb, "Agent 1")
-      tb = TabBar.move_tab_to_workspace(tb, 2, ws1.id)
-      {tb, ws2} = TabBar.add_agent_workspace(tb, "Agent 2")
+      {tb, ws1} = TabBar.add_agent_group(tb, "Agent 1")
+      tb = TabBar.move_tab_to_group(tb, 2, ws1.id)
+      {tb, ws2} = TabBar.add_agent_group(tb, "Agent 2")
       {tb, _} = TabBar.add(tb, :file, "c.ex")
-      tb = TabBar.move_tab_to_workspace(tb, 3, ws2.id)
+      tb = TabBar.move_tab_to_group(tb, 3, ws2.id)
 
       # Start on manual
-      tb = TabBar.switch_workspace(tb, 0)
-      tb = TabBar.next_agent_workspace(tb)
-      assert TabBar.active_workspace_id(tb) == ws1.id
+      tb = TabBar.switch_to_group(tb, 0)
+      tb = TabBar.next_agent_group(tb)
+      assert TabBar.active_group_id(tb) == ws1.id
 
-      tb = TabBar.next_agent_workspace(tb)
-      assert TabBar.active_workspace_id(tb) == ws2.id
+      tb = TabBar.next_agent_group(tb)
+      assert TabBar.active_group_id(tb) == ws2.id
 
-      tb = TabBar.next_agent_workspace(tb)
-      assert TabBar.active_workspace_id(tb) == ws1.id
+      tb = TabBar.next_agent_group(tb)
+      assert TabBar.active_group_id(tb) == ws1.id
     end
 
     test "no agent workspaces returns unchanged" do
       tb = TabBar.new(file_tab(1, "a.ex"))
-      tb2 = TabBar.next_agent_workspace(tb)
+      tb2 = TabBar.next_agent_group(tb)
       assert tb2 == tb
     end
 
     test "single agent workspace always lands on it" do
       tb = TabBar.new(file_tab(1, "a.ex"))
       {tb, _} = TabBar.add(tb, :file, "b.ex")
-      {tb, ws} = TabBar.add_agent_workspace(tb, "Agent")
-      tb = TabBar.move_tab_to_workspace(tb, 2, ws.id)
+      {tb, ws} = TabBar.add_agent_group(tb, "Agent")
+      tb = TabBar.move_tab_to_group(tb, 2, ws.id)
 
       # Start on manual
-      tb = TabBar.switch_workspace(tb, 0)
-      tb = TabBar.next_agent_workspace(tb)
-      assert TabBar.active_workspace_id(tb) == ws.id
+      tb = TabBar.switch_to_group(tb, 0)
+      tb = TabBar.next_agent_group(tb)
+      assert TabBar.active_group_id(tb) == ws.id
 
-      tb = TabBar.next_agent_workspace(tb)
-      assert TabBar.active_workspace_id(tb) == ws.id
+      tb = TabBar.next_agent_group(tb)
+      assert TabBar.active_group_id(tb) == ws.id
     end
   end
 
@@ -534,18 +533,18 @@ defmodule Minga.Editor.State.TabBarTest do
 
     test "tier 1: exactly one agent workspace" do
       tb = TabBar.new(file_tab(1, "a.ex"))
-      {tb, _} = TabBar.add_agent_workspace(tb, "Agent")
+      {tb, _} = TabBar.add_agent_group(tb, "Agent")
       assert TabBar.disclosure_tier(tb) == 1
     end
 
     test "tier 2: 2-4 agent workspaces" do
       tb = TabBar.new(file_tab(1, "a.ex"))
-      {tb, _} = TabBar.add_agent_workspace(tb, "A1")
-      {tb, _} = TabBar.add_agent_workspace(tb, "A2")
+      {tb, _} = TabBar.add_agent_group(tb, "A1")
+      {tb, _} = TabBar.add_agent_group(tb, "A2")
       assert TabBar.disclosure_tier(tb) == 2
 
-      {tb, _} = TabBar.add_agent_workspace(tb, "A3")
-      {tb, _} = TabBar.add_agent_workspace(tb, "A4")
+      {tb, _} = TabBar.add_agent_group(tb, "A3")
+      {tb, _} = TabBar.add_agent_group(tb, "A4")
       assert TabBar.disclosure_tier(tb) == 2
     end
 
@@ -554,7 +553,7 @@ defmodule Minga.Editor.State.TabBarTest do
 
       tb =
         Enum.reduce(1..5, tb, fn i, acc ->
-          {acc, _} = TabBar.add_agent_workspace(acc, "A#{i}")
+          {acc, _} = TabBar.add_agent_group(acc, "A#{i}")
           acc
         end)
 
@@ -562,53 +561,60 @@ defmodule Minga.Editor.State.TabBarTest do
     end
   end
 
-  describe "find_workspace_by_session/2" do
+  describe "find_group_by_session/2" do
     test "finds workspace matching session pid" do
       tb = TabBar.new(file_tab(1, "a.ex"))
-      {tb, ws} = TabBar.add_agent_workspace(tb, "Agent", self())
-      found = TabBar.find_workspace_by_session(tb, self())
+      {tb, ws} = TabBar.add_agent_group(tb, "Agent", self())
+      found = TabBar.find_group_by_session(tb, self())
       assert found.id == ws.id
     end
 
     test "returns nil when no workspace matches" do
       tb = TabBar.new(file_tab(1, "a.ex"))
-      assert TabBar.find_workspace_by_session(tb, self()) == nil
+      assert TabBar.find_group_by_session(tb, self()) == nil
     end
   end
 
-  describe "active_workspace/1 and get_workspace/2" do
-    test "active_workspace returns current workspace" do
+  describe "active_group/1 and get_group/2" do
+    test "active_group returns nil for ungrouped tabs" do
       tb = TabBar.new(file_tab(1, "a.ex"))
-      ws = TabBar.active_workspace(tb)
-      assert ws.id == 0
-      assert ws.kind == :manual
+      assert TabBar.active_group(tb) == nil
     end
 
-    test "get_workspace returns nil for missing id" do
+    test "active_group returns the group when tab is in one" do
       tb = TabBar.new(file_tab(1, "a.ex"))
-      assert TabBar.get_workspace(tb, 999) == nil
+      {tb, _} = TabBar.add(tb, :agent, "Agent")
+      {tb, group} = TabBar.add_agent_group(tb, "Test")
+      tb = TabBar.move_tab_to_group(tb, 2, group.id)
+      tb = TabBar.switch_to_group(tb, group.id)
+      assert TabBar.active_group(tb).id == group.id
+    end
+
+    test "get_group returns nil for missing id" do
+      tb = TabBar.new(file_tab(1, "a.ex"))
+      assert TabBar.get_group(tb, 999) == nil
     end
   end
 
-  describe "has_agent_workspaces?/1" do
+  describe "has_agent_groups?/1" do
     test "false with only manual" do
       tb = TabBar.new(file_tab(1, "a.ex"))
-      refute TabBar.has_agent_workspaces?(tb)
+      refute TabBar.has_agent_groups?(tb)
     end
 
     test "true after adding agent workspace" do
       tb = TabBar.new(file_tab(1, "a.ex"))
-      {tb, _} = TabBar.add_agent_workspace(tb, "Agent")
-      assert TabBar.has_agent_workspaces?(tb)
+      {tb, _} = TabBar.add_agent_group(tb, "Agent")
+      assert TabBar.has_agent_groups?(tb)
     end
   end
 
-  describe "update_workspace/3" do
+  describe "update_group/3" do
     test "updates workspace via function" do
       tb = TabBar.new(file_tab(1, "a.ex"))
-      {tb, ws} = TabBar.add_agent_workspace(tb, "Agent")
-      tb = TabBar.update_workspace(tb, ws.id, &Workspace.set_agent_status(&1, :error))
-      assert TabBar.get_workspace(tb, ws.id).agent_status == :error
+      {tb, ws} = TabBar.add_agent_group(tb, "Agent")
+      tb = TabBar.update_group(tb, ws.id, &AgentGroup.set_agent_status(&1, :error))
+      assert TabBar.get_group(tb, ws.id).agent_status == :error
     end
   end
 end

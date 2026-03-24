@@ -39,6 +39,7 @@ defmodule Minga.Editor.Supervisor do
       {Minga.Port.Manager, [backend: backend]},
       {Minga.Editor,
        [
+         backend: backend,
          swap_dir: Minga.Swap.swap_dir(),
          session_dir: Path.dirname(Minga.Session.session_file())
        ]}

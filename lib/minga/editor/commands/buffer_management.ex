@@ -738,14 +738,13 @@ defmodule Minga.Editor.Commands.BufferManagement do
 
   defp remove_current_buffer(state), do: state
 
-  @spec close_agent_tab(state()) :: state()
-  defp close_agent_tab(%{tab_bar: %TabBar{}} = state) do
-    # Stop spinner timer before it leaks
-    state = AgentAccess.update_agent(state, &AgentState.stop_spinner_timer/1)
-
-    # Unsubscribe and stop the agent session if running
+  # Pure cleanup: stops the agent session, spinner, and group without
+  # touching tabs or navigation. Callers handle tab removal separately.
+  @spec cleanup_agent_session(state()) :: state()
+  defp cleanup_agent_session(%{tab_bar: %TabBar{}} = state) do
     session = AgentAccess.session(state)
 
+    # Stop and unsubscribe from the live session.
     if session do
       try do
         Session.unsubscribe(session)
@@ -760,32 +759,88 @@ defmodule Minga.Editor.Commands.BufferManagement do
       end
     end
 
-    # Remove the agent's workspace (tabs migrate to manual workspace)
-    state =
-      case session && TabBar.find_workspace_by_session(state.tab_bar, session) do
-        %{id: ws_id} ->
-          %{state | tab_bar: TabBar.remove_workspace(state.tab_bar, ws_id)}
+    state = scrub_agent_tab_state(state, session)
+    Minga.Editor.log_to_messages("Closed agent tab")
+    state
+  end
 
-        _ ->
-          state
+  defp cleanup_agent_session(state), do: state
+
+  @doc """
+  Cleans up editor state after an agent session dies (`:DOWN` handler).
+
+  The session is already dead, so no stop/unsubscribe is needed. This
+  clears the spinner, agent state, tab session/status, and agent group.
+  """
+  @spec handle_agent_session_down(state(), pid(), term()) :: state()
+  def handle_agent_session_down(%{tab_bar: %TabBar{}} = state, session_pid, reason) do
+    tab_status = if reason in [:normal, :shutdown], do: :idle, else: :error
+    state = scrub_agent_tab_state(state, session_pid, tab_status)
+
+    msg =
+      if reason in [:normal, :shutdown],
+        do: "Agent session ended",
+        else: "Agent session crashed (SPC a n to restart)"
+
+    %{state | status_msg: msg}
+  end
+
+  def handle_agent_session_down(state, _session_pid, _reason), do: state
+
+  # Shared state cleanup for agent sessions: stops spinner, clears
+  # agent state session, clears Tab.session/agent_status, removes group.
+  @spec scrub_agent_tab_state(state(), pid() | nil, Tab.agent_status()) :: state()
+  defp scrub_agent_tab_state(state, session, tab_status \\ :idle) do
+    state = AgentAccess.update_agent(state, &AgentState.stop_spinner_timer/1)
+    state = AgentAccess.update_agent(state, &AgentState.clear_session/1)
+
+    # Clear session and status on any tab that referenced this session.
+    state =
+      if session do
+        clear_session_from_tabs(state, session, tab_status)
+      else
+        state
       end
 
-    Minga.Editor.log_to_messages("Closed agent tab")
+    # Remove the agent's group from the tab bar.
+    case session && TabBar.find_group_by_session(state.tab_bar, session) do
+      %{id: group_id} ->
+        %{state | tab_bar: TabBar.remove_group(state.tab_bar, group_id)}
 
-    # Find a file tab to switch to
-    case TabBar.most_recent_of_kind(state.tab_bar, :file) do
-      %Tab{} ->
-        # Deactivate agentic view and switch to the file tab.
-        # restore_active_tab_context will set up the correct surface
-        # for the file tab we're switching to.
-        %{state | keymap_scope: :editor}
-        |> remove_current_tab()
-        |> restore_active_tab_context()
-
-      nil ->
-        # No file tabs left, just remove the agent tab
-        remove_current_tab(state)
+      _ ->
+        state
     end
+  end
+
+  # Clears session pid and sets agent_status on all tabs that reference
+  # the given session pid.
+  @spec clear_session_from_tabs(state(), pid(), Tab.agent_status()) :: state()
+  defp clear_session_from_tabs(%{tab_bar: tb} = state, session_pid, status) do
+    updated_tb =
+      Enum.reduce(tb.tabs, tb, fn tab, acc ->
+        if tab.session == session_pid do
+          acc
+          |> TabBar.update_tab(tab.id, &Tab.set_session(&1, nil))
+          |> TabBar.update_tab(tab.id, &Tab.set_agent_status(&1, status))
+        else
+          acc
+        end
+      end)
+
+    %{state | tab_bar: updated_tb}
+  end
+
+  # Closes the active agent tab: cleans up the session, removes the tab,
+  # and switches to the nearest file tab. Only called from multi-tab
+  # contexts (close_tab_or_quit's first clause); the last-tab case is
+  # handled directly by close_tab_or_quit.
+  @spec close_agent_tab(state()) :: state()
+  defp close_agent_tab(%{tab_bar: %TabBar{}} = state) do
+    state
+    |> cleanup_agent_session()
+    |> Map.put(:keymap_scope, :editor)
+    |> remove_current_tab()
+    |> restore_active_tab_context()
   end
 
   defp close_agent_tab(state), do: state
@@ -854,22 +909,24 @@ defmodule Minga.Editor.Commands.BufferManagement do
   # Matches VS Code/Zed behavior where closing the last tab leaves
   # an empty editor, not an exited process.
   defp close_tab_or_quit(%{tab_bar: %TabBar{tabs: [only]}} = state) do
-    case only.kind do
-      :agent ->
-        close_agent_tab(state)
+    # For agent tabs, clean up the session first (no tab navigation;
+    # cleanup_agent_session is pure resource teardown).
+    state = if only.kind == :agent, do: cleanup_agent_session(state), else: state
 
-      :file ->
-        {:ok, buf} =
-          DynamicSupervisor.start_child(
-            Minga.Buffer.Supervisor,
-            {BufferServer, content: "", buffer_name: "[new]"}
-          )
+    {:ok, buf} =
+      DynamicSupervisor.start_child(
+        Minga.Buffer.Supervisor,
+        {BufferServer, content: "", buffer_name: "[new]"}
+      )
 
-        state = EditorState.add_buffer(state, buf)
-        # The add_buffer created a new tab; now remove the old one
-        {:ok, tb} = TabBar.remove(state.tab_bar, only.id)
-        %{state | tab_bar: tb}
-    end
+    # add_buffer creates a new file tab (for agent tabs, via
+    # add_buffer_as_new_tab which resets keymap_scope to :editor
+    # and resets the agent UI). For file tabs it replaces in place.
+    state = EditorState.add_buffer(state, buf)
+
+    # Now we have 2 tabs; remove the old one.
+    {:ok, tb} = TabBar.remove(state.tab_bar, only.id)
+    %{state | tab_bar: tb}
   end
 
   defp close_tab_or_quit(state), do: shutdown_editor(state)

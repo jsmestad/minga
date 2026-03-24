@@ -61,9 +61,9 @@ protocol InputEncoder: AnyObject, Sendable {
     func sendGitUnstageAll()
     func sendGitCommit(message: String)
     func sendGitOpenFile(path: String)
-    func sendWorkspaceRename(id: UInt16, name: String)
-    func sendWorkspaceSetIcon(id: UInt16, icon: String)
-    func sendWorkspaceClose(id: UInt16)
+    func sendGroupRename(id: UInt16, name: String)
+    func sendGroupSetIcon(id: UInt16, icon: String)
+    func sendGroupClose(id: UInt16)
 }
 
 extension InputEncoder {
@@ -425,12 +425,12 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         sendGitPathAction(GUI_ACTION_GIT_OPEN_FILE, path: path)
     }
 
-    func sendWorkspaceRename(id: UInt16, name: String) {
+    func sendGroupRename(id: UInt16, name: String) {
         let utf8 = Array(name.utf8)
         let nameLen = min(utf8.count, Int(UInt16.max))
         var buf = Data(count: 6 + nameLen)
         buf[0] = OP_GUI_ACTION
-        buf[1] = GUI_ACTION_WORKSPACE_RENAME
+        buf[1] = GUI_ACTION_GROUP_RENAME
         writeU16(&buf, 2, id)
         writeU16(&buf, 4, UInt16(nameLen))
         if nameLen > 0 {
@@ -439,12 +439,12 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         writeFrame(buf)
     }
 
-    func sendWorkspaceSetIcon(id: UInt16, icon: String) {
+    func sendGroupSetIcon(id: UInt16, icon: String) {
         let utf8 = Array(icon.utf8)
         let iconLen = min(utf8.count, 255)
         var buf = Data(count: 5 + iconLen)
         buf[0] = OP_GUI_ACTION
-        buf[1] = GUI_ACTION_WORKSPACE_SET_ICON
+        buf[1] = GUI_ACTION_GROUP_SET_ICON
         writeU16(&buf, 2, id)
         buf[4] = UInt8(iconLen)
         if iconLen > 0 {
@@ -453,10 +453,10 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         writeFrame(buf)
     }
 
-    func sendWorkspaceClose(id: UInt16) {
+    func sendGroupClose(id: UInt16) {
         var buf = Data(count: 4)
         buf[0] = OP_GUI_ACTION
-        buf[1] = GUI_ACTION_WORKSPACE_CLOSE
+        buf[1] = GUI_ACTION_GROUP_CLOSE
         writeU16(&buf, 2, id)
         writeFrame(buf)
     }

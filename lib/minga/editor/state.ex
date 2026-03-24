@@ -13,7 +13,7 @@ defmodule Minga.Editor.State do
   **Global fields** are shared across all tabs and never snapshotted:
   `port_manager`, `theme`, `status_msg`, `render_timer`, `focus_stack`,
   `tab_bar`, `capabilities`, `layout`, `modeline_click_regions`,
-  `tab_bar_click_regions`, `agent`, `agent_ui`, `picker_ui`, `whichkey`.
+  `tab_bar_click_regions`, `agent`, `picker_ui`, `whichkey`.
 
   ## Composed sub-structs
 
@@ -88,11 +88,13 @@ defmodule Minga.Editor.State do
     :search,
     :pending_conflict,
     :vim,
-    :document_highlights
+    :document_highlights,
+    :agent_ui
   ]
 
   @enforce_keys [:port_manager, :viewport]
-  defstruct port_manager: nil,
+  defstruct backend: :headless,
+            port_manager: nil,
             viewport: nil,
             vim: VimState.new(),
             buffers: %Buffers{},
@@ -154,7 +156,10 @@ defmodule Minga.Editor.State do
             session_dir: nil,
             suppress_tool_prompts: false
 
+  @type backend :: :tui | :native_gui | :headless
+
   @type t :: %__MODULE__{
+          backend: backend(),
           port_manager: GenServer.server() | nil,
           viewport: Viewport.t(),
           vim: VimState.t(),
@@ -950,7 +955,42 @@ defmodule Minga.Editor.State do
       injection_ranges: %{},
       search: %Search{},
       pending_conflict: nil,
-      vim: VimState.new()
+      vim: VimState.new(),
+      document_highlights: nil,
+      agent_ui: UIState.new()
+    }
+  end
+
+  @doc """
+  Builds a complete per-tab context for an agent tab.
+
+  Used by agent tab creation paths to ensure all `@per_tab_fields` are
+  populated. Accepts a pre-built `Windows` struct for the agent chat
+  window and the agent buffer pid.
+  """
+  @spec build_agent_tab_defaults(t(), Windows.t(), pid() | nil) :: Tab.context()
+  def build_agent_tab_defaults(state, windows, agent_buf) do
+    %{
+      keymap_scope: :agent,
+      buffers: %Buffers{
+        active: agent_buf,
+        list: if(agent_buf, do: [agent_buf], else: []),
+        active_index: 0
+      },
+      windows: windows,
+      file_tree: %FileTreeState{},
+      viewport: state.viewport,
+      mouse: %Mouse{},
+      highlight: %Highlighting{},
+      lsp_pending: %{},
+      completion: nil,
+      completion_trigger: CompletionTrigger.new(),
+      injection_ranges: %{},
+      search: %Search{},
+      pending_conflict: nil,
+      vim: VimState.new(),
+      document_highlights: nil,
+      agent_ui: UIState.new()
     }
   end
 

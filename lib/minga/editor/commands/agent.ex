@@ -26,8 +26,7 @@ defmodule Minga.Editor.Commands.Agent do
   alias Minga.Editor.Commands
   alias Minga.Editor.Commands.AgentSession
   alias Minga.Editor.Commands.AgentSubStates
-  alias Minga.Editor.Layout
-  alias Minga.Editor.LayoutPreset
+
   alias Minga.Editor.PickerUI
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
@@ -58,15 +57,27 @@ defmodule Minga.Editor.Commands.Agent do
   """
   @spec toggle_agent_split(state()) :: state()
   def toggle_agent_split(state) do
-    if LayoutPreset.has_agent_chat?(state) do
-      state
-      |> LayoutPreset.restore_default()
-      |> Layout.invalidate()
-      |> EditorState.invalidate_all_windows()
-    else
-      state
-      |> ensure_agent_state()
-      |> apply_agent_split()
+    case EditorState.active_tab_kind(state) do
+      :agent ->
+        # On agent tab: switch back to most recent file tab
+        case TabBar.most_recent_of_kind(state.tab_bar, :file) do
+          %Tab{id: file_id} -> EditorState.switch_tab(state, file_id)
+          nil -> state
+        end
+
+      _ ->
+        # On file tab: ensure agent tab exists and switch to it
+        state = ensure_agent_state(state)
+
+        case find_agent_tab(state) do
+          %Tab{id: agent_id} ->
+            state
+            |> maybe_start_session()
+            |> EditorState.switch_tab(agent_id)
+
+          nil ->
+            state
+        end
     end
   end
 
@@ -108,14 +119,14 @@ defmodule Minga.Editor.Commands.Agent do
           next_id: win_id + 1
         }
 
-        context = %{keymap_scope: :agent, windows: windows}
+        # Build complete context with all @per_tab_fields populated.
+        context = EditorState.build_agent_tab_defaults(state, windows, agent_buf)
 
         # Create agent tab in the background (don't switch to it).
-        # Workspace creation happens later in start_agent_session when
+        # Group creation happens later in start_agent_session when
         # the session pid is available (ensure_agent_workspace/2).
-        {tb, _tab} = TabBar.add(state.tab_bar, :agent, "Agent")
-        agent_tab = TabBar.find_by_kind(tb, :agent)
-        tb = TabBar.update_context(tb, agent_tab.id, context)
+        {tb, new_tab} = TabBar.add(state.tab_bar, :agent, "Agent")
+        tb = TabBar.update_context(tb, new_tab.id, context)
 
         # Switch back to the original active tab
         tb = %{tb | active_id: state.tab_bar.active_id}
@@ -155,42 +166,13 @@ defmodule Minga.Editor.Commands.Agent do
     end
   end
 
-  @spec apply_agent_split(state()) :: state()
-  defp apply_agent_split(state) do
-    agent = AgentAccess.agent(state)
-
-    if is_pid(agent.buffer) do
-      try do
-        BufferServer.buffer_name(agent.buffer)
-
-        state
-        |> LayoutPreset.apply(:agent_right, agent.buffer)
-        |> Layout.invalidate()
-        |> EditorState.invalidate_all_windows()
-        |> maybe_start_session()
-        |> then(&update_agent_ui(&1, fn ui -> UIState.set_input_focused(ui, true) end))
-      catch
-        :exit, _ -> state
-      end
-    else
-      state
-    end
-  end
-
   @doc """
   Cycles through agent tabs. If no agent tabs exist, creates one.
   Currently delegates to toggle_agent_split since there's one agent
   session. Multi-agent tab cycling is future work.
   """
   @spec cycle_agent_tabs(state()) :: state()
-  def cycle_agent_tabs(state) do
-    if LayoutPreset.has_agent_chat?(state) do
-      # Already showing the agent pane; no-op for now (future: cycle sessions)
-      state
-    else
-      toggle_agent_split(state)
-    end
-  end
+  def cycle_agent_tabs(state), do: toggle_agent_split(state)
 
   @spec find_agent_tab(state()) :: Tab.t() | nil
   defp find_agent_tab(%{tab_bar: nil}), do: nil
@@ -1068,11 +1050,11 @@ defmodule Minga.Editor.Commands.Agent do
     %{state | status_msg: "Restored #{count} queued #{label} to editor"}
   end
 
-  # Returns true when no agent UI is visible (panel or split pane),
+  # Returns true when no agent UI is visible (panel or agent tab active),
   # meaning agent input/scroll commands should be no-ops.
   @spec no_agent_ui?(state()) :: boolean()
   defp no_agent_ui?(state) do
-    not AgentAccess.panel(state).visible and not LayoutPreset.has_agent_chat?(state)
+    not AgentAccess.panel(state).visible and EditorState.active_tab_kind(state) != :agent
   end
 
   @spec update_agent(state(), (AgentState.t() -> AgentState.t())) :: state()

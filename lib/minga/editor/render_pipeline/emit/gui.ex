@@ -126,7 +126,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
       [
         build_gui_theme_cmd(state),
         build_gui_tab_bar_cmd(state),
-        build_gui_workspace_bar_cmd(state),
+        build_gui_agent_groups_cmd(state),
         build_gui_file_tree_cmd(state),
         build_gui_git_status_cmd(state),
         build_gui_which_key_cmd(state),
@@ -180,28 +180,28 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
 
   defp build_gui_tab_bar_cmd(%{tab_bar: nil}), do: nil
 
-  @spec build_gui_workspace_bar_cmd(state()) :: binary() | nil
-  defp build_gui_workspace_bar_cmd(%{tab_bar: %TabBar{} = tb}) do
+  @spec build_gui_agent_groups_cmd(state()) :: binary() | nil
+  defp build_gui_agent_groups_cmd(%{tab_bar: %TabBar{} = tb}) do
     # Only send workspace bar when agent workspaces exist (tier >= 1).
     # Also include workspace count so the GUI hides the indicator when
     # all agent workspaces are removed.
-    if TabBar.has_agent_workspaces?(tb) do
-      fp = :erlang.phash2(tb.workspaces)
+    if TabBar.has_agent_groups?(tb) do
+      fp = :erlang.phash2(tb.agent_groups)
 
-      if fp != Process.get(:last_gui_workspace_bar_fp) do
-        Process.put(:last_gui_workspace_bar_fp, fp)
-        ProtocolGUI.encode_gui_workspace_bar(tb)
+      if fp != Process.get(:last_gui_agent_groups_fp) do
+        Process.put(:last_gui_agent_groups_fp, fp)
+        ProtocolGUI.encode_gui_agent_groups(tb)
       end
     else
       # No agent workspaces: send empty workspace bar to clear the GUI
-      if Process.get(:last_gui_workspace_bar_fp) != nil do
-        Process.put(:last_gui_workspace_bar_fp, nil)
-        ProtocolGUI.encode_gui_workspace_bar(tb)
+      if Process.get(:last_gui_agent_groups_fp) != nil do
+        Process.put(:last_gui_agent_groups_fp, nil)
+        ProtocolGUI.encode_gui_agent_groups(tb)
       end
     end
   end
 
-  defp build_gui_workspace_bar_cmd(_), do: nil
+  defp build_gui_agent_groups_cmd(_), do: nil
 
   @spec active_window_buffer(state()) :: pid() | nil
   defp active_window_buffer(%{windows: %{active: win_id, map: map}}) do
