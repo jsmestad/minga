@@ -95,7 +95,9 @@ defmodule Minga.Editor.State.WorkspaceTest do
 
   describe "auto_name/2" do
     test "sets label from first line of prompt" do
-      ws = Workspace.new_agent(1, "Agent") |> Workspace.auto_name("Fix the login bug\nMore details")
+      ws =
+        Workspace.new_agent(1, "Agent") |> Workspace.auto_name("Fix the login bug\nMore details")
+
       assert ws.label == "Fix the login bug"
     end
 

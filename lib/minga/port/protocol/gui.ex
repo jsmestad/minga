@@ -188,7 +188,6 @@ defmodule Minga.Port.Protocol.GUI do
           | {:workspace_set_icon, id :: non_neg_integer(), icon :: String.t()}
           | {:workspace_close, id :: non_neg_integer()}
 
-
   # ═══════════════════════════════════════════════════════════════════════════
   # Encoding (BEAM → Frontend)
   # ═══════════════════════════════════════════════════════════════════════════
@@ -586,8 +585,8 @@ defmodule Minga.Port.Protocol.GUI do
         icon_bytes = :erlang.iolist_to_binary([ws.icon || "folder"])
 
         <<ws.id::16, kind_byte::8, status_byte::8, r::8, g::8, b::8, tab_count::16,
-          byte_size(label_bytes)::8, label_bytes::binary,
-          byte_size(icon_bytes)::8, icon_bytes::binary>>
+          byte_size(label_bytes)::8, label_bytes::binary, byte_size(icon_bytes)::8,
+          icon_bytes::binary>>
       end)
 
     IO.iodata_to_binary([

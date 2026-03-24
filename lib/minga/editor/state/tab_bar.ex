@@ -39,7 +39,7 @@ defmodule Minga.Editor.State.TabBar do
   end
 
   @doc "Returns the active tab."
-  @spec active(t()) :: Tab.t()
+  @spec active(t()) :: Tab.t() | nil
   def active(%__MODULE__{tabs: tabs, active_id: id}) do
     Enum.find(tabs, &(&1.id == id))
   end

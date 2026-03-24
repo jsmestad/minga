@@ -80,9 +80,7 @@ defmodule Minga.Editor.Commands.Workspace do
     ws = TabBar.active_workspace(tb)
     current_name = if ws, do: ws.label, else: ""
 
-    Minga.Editor.PromptUI.open(state, Minga.Prompt.WorkspaceRename,
-      default: current_name
-    )
+    Minga.Editor.PromptUI.open(state, Minga.Prompt.WorkspaceRename, default: current_name)
   end
 
   @doc "Jump to workspace by number (1-based, 0 = manual workspace)."

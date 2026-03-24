@@ -3,7 +3,6 @@ defmodule Minga.Picker.WorkspaceSourceTest do
 
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
-  alias Minga.Picker.Item
   alias Minga.Picker.WorkspaceSource
 
   describe "candidates/1" do
