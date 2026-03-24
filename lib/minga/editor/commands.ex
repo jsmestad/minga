@@ -31,7 +31,6 @@ defmodule Minga.Editor.Commands do
   alias Minga.Editor.Commands.BufferManagement
   alias Minga.Editor.Commands.Editing, as: EditingCommands
   alias Minga.Editor.Commands.Eval
-  alias Minga.Editor.Editing
   alias Minga.Editor.Commands.Extensions, as: ExtCommands
   alias Minga.Editor.Commands.Help
   alias Minga.Editor.Commands.Lsp, as: LspCommands
@@ -40,6 +39,7 @@ defmodule Minga.Editor.Commands do
   alias Minga.Editor.Commands.Operators
   alias Minga.Editor.Commands.Tool
   alias Minga.Editor.Commands.Visual
+  alias Minga.Editor.Editing
   alias Minga.Editor.LspActions
   alias Minga.Editor.MinibufferData
   alias Minga.Editor.State, as: EditorState
@@ -400,18 +400,7 @@ defmodule Minga.Editor.Commands do
 
   def execute(state, {:accept_command_candidate}) do
     if Editing.mode(state) == :command do
-      ms = Editing.mode_state(state)
-      {candidates, _total} = MinibufferData.complete_ex_command(ms.input)
-      idx = MinibufferData.clamp_index(ms.candidate_index, length(candidates))
-
-      case Enum.at(candidates, idx) do
-        nil ->
-          state
-
-        %{label: label} ->
-          new_ms = %{ms | input: label, candidate_index: 0}
-          Editing.update_mode_state(state, fn _ -> new_ms end)
-      end
+      accept_command_candidate(state)
     else
       state
     end
@@ -514,6 +503,22 @@ defmodule Minga.Editor.Commands do
     case state.tool_prompt_queue do
       [_current | rest] -> %{state | tool_prompt_queue: rest}
       [] -> state
+    end
+  end
+
+  @spec accept_command_candidate(state()) :: state()
+  defp accept_command_candidate(state) do
+    ms = Editing.mode_state(state)
+    {candidates, _total} = MinibufferData.complete_ex_command(ms.input)
+    idx = MinibufferData.clamp_index(ms.candidate_index, length(candidates))
+
+    case Enum.at(candidates, idx) do
+      nil ->
+        state
+
+      %{label: label} ->
+        new_ms = %{ms | input: label, candidate_index: 0}
+        Editing.update_mode_state(state, fn _ -> new_ms end)
     end
   end
 
