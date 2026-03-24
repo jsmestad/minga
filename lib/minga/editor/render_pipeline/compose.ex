@@ -9,7 +9,7 @@ defmodule Minga.Editor.RenderPipeline.Compose do
 
   alias Minga.Editor.DisplayList.{Cursor, Frame, WindowFrame}
   alias Minga.Editor.Layout
-  alias Minga.Editor.Modeline
+
   alias Minga.Editor.RenderPipeline.Chrome
   alias Minga.Editor.RenderPipeline.ComposeHelpers
   alias Minga.Editor.State, as: EditorState
@@ -55,7 +55,7 @@ defmodule Minga.Editor.RenderPipeline.Compose do
         ComposeHelpers.agent_cursor_from_layout(state, layout),
         active_wf_cursor,
         minibuffer_result,
-        Modeline.cursor_shape(state.vim)
+        Minga.Editor.Editing.cursor_shape(state)
       )
 
     %Frame{

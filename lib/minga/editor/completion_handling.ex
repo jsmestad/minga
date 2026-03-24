@@ -119,10 +119,10 @@ defmodule Minga.Editor.CompletionHandling do
   insert, dismisses completion. Otherwise updates the filter prefix
   and possibly triggers new completion.
   """
-  @spec maybe_handle(EditorState.t(), atom(), non_neg_integer(), non_neg_integer()) ::
+  @spec maybe_handle(EditorState.t(), boolean(), non_neg_integer(), non_neg_integer()) ::
           EditorState.t()
-  def maybe_handle(state, old_mode, codepoint, modifiers) do
-    if Minga.Editor.Editing.inserting?(state) and old_mode == :insert do
+  def maybe_handle(state, was_inserting, codepoint, modifiers) do
+    if Minga.Editor.Editing.inserting?(state) and was_inserting do
       maybe_update(state, codepoint, modifiers)
     else
       state = dismiss(state)

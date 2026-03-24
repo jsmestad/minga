@@ -155,6 +155,30 @@ defmodule Minga.EditingModel.VimTest do
       {_, _, state} = Vim.process_key(Vim.initial_state(), key_i())
       assert Vim.cursor_shape(state) == :beam
     end
+
+    test "underline when pending_replace is true" do
+      state = %Vim{mode: :normal, mode_state: %Mode.State{pending_replace: true}}
+      assert Vim.cursor_shape(state) == :underline
+    end
+
+    test "underline in replace mode" do
+      state = %Vim{mode: :replace, mode_state: Mode.initial_state()}
+      assert Vim.cursor_shape(state) == :underline
+    end
+
+    test "beam for minibuffer modes" do
+      for mode <- [:search, :command, :eval, :search_prompt] do
+        state = %Vim{mode: mode, mode_state: Mode.initial_state()}
+        assert Vim.cursor_shape(state) == :beam, "expected :beam for #{mode}"
+      end
+    end
+
+    test "block for visual modes" do
+      for mode <- [:visual, :visual_line, :visual_block] do
+        state = %Vim{mode: mode, mode_state: Mode.initial_state()}
+        assert Vim.cursor_shape(state) == :block, "expected :block for #{mode}"
+      end
+    end
   end
 
   describe "key_sequence_pending?/1" do
@@ -164,6 +188,15 @@ defmodule Minga.EditingModel.VimTest do
 
     test "true in operator-pending mode" do
       {_, _, state} = Vim.process_key(Vim.initial_state(), key_d())
+      assert Vim.key_sequence_pending?(state)
+    end
+
+    test "true when prefix_node is set" do
+      state = %Vim{
+        mode: :normal,
+        mode_state: %Mode.State{prefix_node: %Minga.Keymap.Bindings.Node{}}
+      }
+
       assert Vim.key_sequence_pending?(state)
     end
   end

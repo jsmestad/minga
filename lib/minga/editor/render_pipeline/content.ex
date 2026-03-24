@@ -17,7 +17,7 @@ defmodule Minga.Editor.RenderPipeline.Content do
   alias Minga.Editor.DisplayMap
   alias Minga.Editor.FoldMap
   alias Minga.Editor.Layout
-  alias Minga.Editor.Modeline
+
   alias Minga.Editor.RenderPipeline.ContentHelpers
   alias Minga.Editor.RenderPipeline.Scroll.WindowScroll
   alias Minga.Editor.SemanticWindow
@@ -185,7 +185,7 @@ defmodule Minga.Editor.RenderPipeline.Content do
           Decorations.buf_col_to_display_col(render_ctx.decorations, cursor_line, cursor_col)
 
         cc = gutter_w + adjusted_cursor_col - viewport.left + col_off
-        Cursor.new(cr, cc, Modeline.cursor_shape(state.vim))
+        Cursor.new(cr, cc, Minga.Editor.Editing.cursor_shape(state))
       else
         nil
       end
@@ -469,7 +469,7 @@ defmodule Minga.Editor.RenderPipeline.Content do
 
         cr = cursor_line - viewport.top + row_off
         cc = gutter_w + adjusted_cc - viewport.left + col_off
-        Cursor.new(cr, cc, Modeline.cursor_shape(state.vim))
+        Cursor.new(cr, cc, Minga.Editor.Editing.cursor_shape(state))
       else
         nil
       end

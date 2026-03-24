@@ -108,6 +108,18 @@ defmodule Minga.Editor.EditingTest do
     test "returns :underline for replace mode" do
       assert Editing.cursor_shape(build_state(mode: :replace)) == :underline
     end
+
+    test "returns :underline when pending_replace is true in normal mode" do
+      ms = %{Mode.initial_state() | pending_replace: true}
+      assert Editing.cursor_shape(build_state(mode: :normal, mode_state: ms)) == :underline
+    end
+
+    test "returns :beam for minibuffer modes" do
+      for mode <- [:command, :search, :eval, :search_prompt] do
+        assert Editing.cursor_shape(build_state(mode: mode)) == :beam,
+               "expected :beam for #{mode}"
+      end
+    end
   end
 
   describe "key_sequence_pending?/1" do
@@ -117,6 +129,11 @@ defmodule Minga.Editor.EditingTest do
 
     test "true when leader_node is set" do
       ms = %{Mode.initial_state() | leader_node: %{children: %{}}}
+      assert Editing.key_sequence_pending?(build_state(mode_state: ms))
+    end
+
+    test "true when prefix_node is set" do
+      ms = %{Mode.initial_state() | prefix_node: %Minga.Keymap.Bindings.Node{}}
       assert Editing.key_sequence_pending?(build_state(mode_state: ms))
     end
   end

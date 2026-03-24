@@ -12,7 +12,7 @@ defmodule Minga.Editor.RenderPipeline.ComposeHelpers do
   alias Minga.Buffer.Unicode
   alias Minga.Editor.DisplayList.{Cursor, Overlay}
   alias Minga.Editor.Layout
-  alias Minga.Editor.RenderPipeline.ChromeHelpers
+
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.AgentAccess
 
@@ -99,7 +99,7 @@ defmodule Minga.Editor.RenderPipeline.ComposeHelpers do
       Cursor.new(
         input_row,
         input_col,
-        ChromeHelpers.input_cursor_shape(Minga.Editor.Editing.mode(state))
+        Minga.Editor.Editing.cursor_shape(state)
       )
     else
       nil

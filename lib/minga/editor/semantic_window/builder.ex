@@ -23,7 +23,7 @@ defmodule Minga.Editor.SemanticWindow.Builder do
   alias Minga.Diagnostics
   alias Minga.Editor.DisplayMap
   alias Minga.Editor.FoldMap
-  alias Minga.Editor.Modeline
+
   alias Minga.Editor.Renderer.Composition
   alias Minga.Editor.Renderer.Context
   alias Minga.Editor.RenderPipeline.Scroll.WindowScroll
@@ -89,7 +89,7 @@ defmodule Minga.Editor.SemanticWindow.Builder do
 
     cursor_shape =
       if is_active do
-        Modeline.cursor_shape(state.vim)
+        Minga.Editor.Editing.cursor_shape(state)
       else
         :block
       end

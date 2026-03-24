@@ -1578,7 +1578,7 @@ defmodule Minga.Editor do
   end
 
   @spec handle_paste_event_editor(state(), String.t()) :: state()
-  defp handle_paste_event_editor(%{vim: %{mode: :insert}, buffers: %{active: buf}} = state, text)
+  defp handle_paste_event_editor(%{buffers: %{active: buf}} = state, text)
        when is_pid(buf) do
     {line, col} = BufferServer.cursor(buf)
     BufferServer.apply_text_edit(buf, line, col, line, col, text)
@@ -1586,7 +1586,7 @@ defmodule Minga.Editor do
   end
 
   defp handle_paste_event_editor(state, _text) do
-    log_message(state, "Paste ignored (not in insert mode or agent input)")
+    log_message(state, "Paste ignored (no active buffer)")
   end
 
   # ── File tree helpers ───────────────────────────────────────────────────
@@ -2182,9 +2182,9 @@ defmodule Minga.Editor do
   defdelegate do_accept_completion(state, completion), to: CompletionHandling, as: :accept
 
   @doc false
-  @spec do_maybe_handle_completion(state(), atom(), non_neg_integer(), non_neg_integer()) ::
+  @spec do_maybe_handle_completion(state(), boolean(), non_neg_integer(), non_neg_integer()) ::
           state()
-  defdelegate do_maybe_handle_completion(state, old_mode, codepoint, modifiers),
+  defdelegate do_maybe_handle_completion(state, was_inserting, codepoint, modifiers),
     to: CompletionHandling,
     as: :maybe_handle
 
