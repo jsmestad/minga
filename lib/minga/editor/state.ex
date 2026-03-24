@@ -154,7 +154,9 @@ defmodule Minga.Editor.State do
             session_timer: nil,
             swap_dir: nil,
             session_dir: nil,
-            suppress_tool_prompts: false
+            suppress_tool_prompts: false,
+            space_leader_pending: false,
+            space_leader_timer: nil
 
   @type backend :: :tui | :native_gui | :headless
 
@@ -229,7 +231,9 @@ defmodule Minga.Editor.State do
           session_timer: reference() | nil,
           swap_dir: String.t() | nil,
           session_dir: String.t() | nil,
-          suppress_tool_prompts: boolean()
+          suppress_tool_prompts: boolean(),
+          space_leader_pending: boolean(),
+          space_leader_timer: reference() | nil
         }
 
   # ── Convenience accessors ─────────────────────────────────────────────────
