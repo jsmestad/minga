@@ -10,11 +10,11 @@ defmodule Minga.Config.Completion do
 
   1. **Option names** (`set :tab_width, ...`) with type and default as detail
   2. **Option values** (`set :theme, :doom_one`) for enum, boolean, and theme types
-  3. **Filetype atoms** (`for_filetype :elixir, ...`) from `Minga.Filetype`
+  3. **Filetype atoms** (`for_filetype :elixir, ...`) from `Minga.Language.Filetype`
   """
 
   alias Minga.Config.Options
-  alias Minga.Filetype
+  alias Minga.Language.Filetype
 
   @typedoc "A completion item compatible with `Minga.Completion.item()`."
   @type item :: %{

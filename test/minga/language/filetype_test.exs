@@ -1,8 +1,8 @@
-defmodule Minga.FiletypeTest do
-  @moduledoc "Tests for Minga.Filetype — file language detection."
+defmodule Minga.Language.FiletypeTest do
+  @moduledoc "Tests for Minga.Language.Filetype — file language detection."
   use ExUnit.Case, async: true
 
-  alias Minga.Filetype
+  alias Minga.Language.Filetype
 
   describe "detect/1 — extension matching" do
     test "detects Elixir files" do

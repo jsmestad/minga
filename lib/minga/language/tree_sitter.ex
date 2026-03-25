@@ -1,4 +1,4 @@
-defmodule Minga.TreeSitter do
+defmodule Minga.Language.TreeSitter do
   @moduledoc """
   Compiles and registers tree-sitter grammars at runtime.
 
@@ -13,7 +13,7 @@ defmodule Minga.TreeSitter do
 
   ## Example
 
-      Minga.TreeSitter.register_grammar(
+      Minga.Language.TreeSitter.register_grammar(
         "org",
         "/path/to/tree-sitter-org/src",
         highlights: "/path/to/queries/org/highlights.scm",
@@ -423,12 +423,12 @@ defmodule Minga.TreeSitter do
 
     # Register file extensions
     for ext <- Keyword.get(opts, :filetype_extensions, []) do
-      Minga.Filetype.Registry.register(ext, filetype_atom)
+      Minga.Language.Filetype.Registry.register(ext, filetype_atom)
     end
 
     # Register exact filenames
     for filename <- Keyword.get(opts, :filetype_filenames, []) do
-      Minga.Filetype.Registry.register(filename, filetype_atom)
+      Minga.Language.Filetype.Registry.register(filename, filetype_atom)
     end
 
     :ok

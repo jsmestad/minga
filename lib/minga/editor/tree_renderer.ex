@@ -15,7 +15,7 @@ defmodule Minga.Editor.TreeRenderer do
   alias Minga.Editor.WindowTree
   alias Minga.Face
   alias Minga.FileTree
-  alias Minga.Filetype
+  alias Minga.Language.Filetype
   alias Minga.Theme
 
   # Box-drawing characters for indent guides

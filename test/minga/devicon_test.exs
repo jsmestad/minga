@@ -61,7 +61,7 @@ defmodule Minga.DeviconTest do
   ]
 
   describe "icon_and_color/1" do
-    test "every filetype in Minga.Filetype has an entry" do
+    test "every filetype in Minga.Language.Filetype has an entry" do
       for ft <- @all_filetypes do
         {icon, color} = Devicon.icon_and_color(ft)
         assert is_binary(icon), "icon for #{ft} should be a string"

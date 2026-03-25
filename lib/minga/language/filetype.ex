@@ -1,4 +1,4 @@
-defmodule Minga.Filetype do
+defmodule Minga.Language.Filetype do
   @moduledoc """
   Detects a file's language from its path and content.
 
@@ -10,7 +10,7 @@ defmodule Minga.Filetype do
   5. Fall back to `:text`
 
   This module is pure — no GenServer, no side effects. For runtime
-  extensibility (adding new patterns), see `Minga.Filetype.Registry`.
+  extensibility (adding new patterns), see `Minga.Language.Filetype.Registry`.
   """
 
   # ── Exact filename → filetype (case-sensitive) ─────────────────────────────
@@ -226,7 +226,7 @@ defmodule Minga.Filetype do
 
   @spec lookup_registry_filename(String.t()) :: filetype() | :miss
   defp lookup_registry_filename(basename) do
-    case Minga.Filetype.Registry.lookup_filename(basename) do
+    case Minga.Language.Filetype.Registry.lookup_filename(basename) do
       nil -> :miss
       filetype -> filetype
     end
@@ -241,7 +241,7 @@ defmodule Minga.Filetype do
         :miss
 
       "." <> ext ->
-        case Minga.Filetype.Registry.lookup_extension(String.downcase(ext)) do
+        case Minga.Language.Filetype.Registry.lookup_extension(String.downcase(ext)) do
           nil -> :miss
           filetype -> filetype
         end
@@ -271,7 +271,7 @@ defmodule Minga.Filetype do
 
     # Check Filetype.Registry first (runtime overrides), then Language registry,
     # then fall back to the compile-time map for any stragglers
-    case Minga.Filetype.Registry.lookup_shebang(interpreter) do
+    case Minga.Language.Filetype.Registry.lookup_shebang(interpreter) do
       nil ->
         case LangRegistry.for_shebang(interpreter) do
           %{name: name} -> name

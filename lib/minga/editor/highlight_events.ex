@@ -15,7 +15,7 @@ defmodule Minga.Editor.HighlightEvents do
   alias Minga.Editor.Renderer
   alias Minga.Editor.State, as: EditorState
   alias Minga.Face
-  alias Minga.Filetype
+  alias Minga.Language.Filetype
   alias Minga.PrettifySymbols
 
   @doc """

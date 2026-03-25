@@ -13,7 +13,7 @@ defmodule Minga.Picker.ProjectSearchSource do
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Devicon
   alias Minga.Editor.State, as: EditorState
-  alias Minga.Filetype
+  alias Minga.Language.Filetype
   alias Minga.Picker.Source
 
   @impl true

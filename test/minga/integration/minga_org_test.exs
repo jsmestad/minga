@@ -12,11 +12,11 @@ defmodule Minga.Integration.MingaOrgTest do
   # Clones a real git repo; prevent hangs from blocking the suite
   @moduletag timeout: 30_000
 
-  alias Minga.Filetype
-  alias Minga.Filetype.Registry, as: FiletypeRegistry
   alias Minga.Highlight.Grammar, as: HLGrammar
   alias Minga.Keymap.Active, as: KeymapActive
-  alias Minga.TreeSitter
+  alias Minga.Language.Filetype
+  alias Minga.Language.Filetype.Registry, as: FiletypeRegistry
+  alias Minga.Language.TreeSitter
 
   @moduletag :integration
 

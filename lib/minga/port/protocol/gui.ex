@@ -83,7 +83,7 @@ defmodule Minga.Port.Protocol.GUI do
   alias Minga.Editor.MinibufferData
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
-  alias Minga.Filetype
+  alias Minga.Language.Filetype
   alias Minga.Theme.Slots
 
   # ── GUI chrome opcodes (BEAM → Frontend) ──

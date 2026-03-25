@@ -1,21 +1,21 @@
-defmodule Minga.Filetype.Registry do
+defmodule Minga.Language.Filetype.Registry do
   @moduledoc """
   Runtime-extensible filetype registry backed by an Agent.
 
-  Starts with the hardcoded defaults from `Minga.Filetype` and allows
+  Starts with the hardcoded defaults from `Minga.Language.Filetype` and allows
   new patterns to be registered at runtime via `register/2`. This
   enables future config/plugin systems to add custom filetype mappings.
 
   ## Examples
 
-      Minga.Filetype.Registry.register(".astro", :astro)
-      Minga.Filetype.Registry.register("Justfile", :just)
-      :astro = Minga.Filetype.Registry.lookup("component.astro")
+      Minga.Language.Filetype.Registry.register(".astro", :astro)
+      Minga.Language.Filetype.Registry.register("Justfile", :just)
+      :astro = Minga.Language.Filetype.Registry.lookup("component.astro")
   """
 
   use Agent
 
-  alias Minga.Filetype
+  alias Minga.Language.Filetype
 
   @typedoc "Registry state: extension map, filename map, shebang map."
   @type state :: %{
@@ -26,7 +26,7 @@ defmodule Minga.Filetype.Registry do
 
   # ── Client API ─────────────────────────────────────────────────────────────
 
-  @doc "Starts the registry with defaults from `Minga.Filetype`."
+  @doc "Starts the registry with defaults from `Minga.Language.Filetype`."
   @spec start_link(keyword()) :: Agent.on_start()
   def start_link(opts \\ []) do
     name = Keyword.get(opts, :name, __MODULE__)

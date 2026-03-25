@@ -10,8 +10,8 @@ defmodule Minga.Picker.FileSource do
 
   alias Minga.Devicon
   alias Minga.Editor.State, as: EditorState
-  alias Minga.Filetype
   alias Minga.Git.Repo, as: GitRepo
+  alias Minga.Language.Filetype
   alias Minga.Log
   alias Minga.Picker.Item
   alias Minga.Picker.Source

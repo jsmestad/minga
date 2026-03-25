@@ -25,7 +25,7 @@ defmodule Minga.Buffer.Server do
   alias Minga.Buffer.Unicode
   alias Minga.Config.Options
   alias Minga.Events
-  alias Minga.Filetype
+  alias Minga.Language.Filetype
   alias Minga.NavigableContent.BufferSnapshot
   alias Minga.Scroll
 

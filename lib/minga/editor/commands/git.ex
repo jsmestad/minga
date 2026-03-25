@@ -189,7 +189,7 @@ defmodule Minga.Editor.Commands.Git do
 
     diff_result = DiffView.build(base_content, current_content)
     filename = Path.basename(rel_path)
-    filetype = Minga.Filetype.detect(filename)
+    filetype = Minga.Language.Filetype.detect(filename)
 
     case BufferServer.start_link(
            content: diff_result.text,

@@ -1,8 +1,8 @@
-defmodule Minga.Filetype.RegistryTest do
-  @moduledoc "Tests for Minga.Filetype.Registry — runtime-extensible filetype lookup."
+defmodule Minga.Language.Filetype.RegistryTest do
+  @moduledoc "Tests for Minga.Language.Filetype.Registry — runtime-extensible filetype lookup."
   use ExUnit.Case, async: true
 
-  alias Minga.Filetype.Registry
+  alias Minga.Language.Filetype.Registry
 
   # Each test gets its own named Registry to avoid interference.
 
