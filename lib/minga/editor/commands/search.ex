@@ -214,7 +214,7 @@ defmodule Minga.Editor.Commands.Search do
         msg = if truncated?, do: "Results truncated to 10,000", else: nil
 
         state = put_in(state.workspace.search.project_results, matches)
-        state = PickerUI.open(state, Minga.Picker.ProjectSearchSource)
+        state = PickerUI.open(state, Minga.UI.Picker.ProjectSearchSource)
         if msg, do: %{state | status_msg: msg}, else: state
 
       {:error, msg} ->

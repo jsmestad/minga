@@ -8,7 +8,7 @@ defmodule Minga.Editor.State.WhichKey do
 
   @type t :: %__MODULE__{
           node: Minga.Keymap.Bindings.node_t() | nil,
-          timer: Minga.WhichKey.timer_ref() | nil,
+          timer: Minga.UI.WhichKey.timer_ref() | nil,
           show: boolean(),
           prefix_keys: [String.t()],
           page: non_neg_integer()
@@ -23,7 +23,7 @@ defmodule Minga.Editor.State.WhichKey do
   @doc "Returns a cleared (reset) which-key state."
   @spec clear(t()) :: t()
   def clear(%__MODULE__{} = wk) do
-    if wk.timer, do: Minga.WhichKey.cancel_timeout(wk.timer)
+    if wk.timer, do: Minga.UI.WhichKey.cancel_timeout(wk.timer)
     %__MODULE__{}
   end
 end

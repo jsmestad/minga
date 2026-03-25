@@ -6,7 +6,7 @@ defmodule Minga.Agent.ModelCatalog do
   credentials for, excluding non-chat models (embeddings, image gen,
   TTS, etc.) and deprecated/retired entries.
 
-  The output format matches what `Minga.Picker.AgentModelSource`
+  The output format matches what `Minga.UI.Picker.AgentModelSource`
   expects: a list of maps with string keys for `"id"`, `"name"`,
   `"provider"`, `"context_window"`, and `"cost"`.
   """

@@ -7,8 +7,8 @@ defmodule Minga.Editor.DashboardTest do
   alias Minga.Editor.State.Buffers
   alias Minga.Editor.State.Picker, as: PickerState
   alias Minga.Editor.Viewport
-  alias Minga.Picker
-  alias Minga.Picker.Item
+  alias Minga.UI.Picker
+  alias Minga.UI.Picker.Item
 
   describe "new_state/1" do
     test "creates state with quick actions when no recent files" do
@@ -184,7 +184,7 @@ defmodule Minga.Editor.DashboardTest do
         focus_stack: Minga.Input.default_stack(),
         dashboard: Dashboard.new_state(),
         theme: Minga.UI.Theme.get!(:doom_one),
-        picker_ui: %PickerState{picker: picker, source: Minga.Picker.FileSource}
+        picker_ui: %PickerState{picker: picker, source: Minga.UI.Picker.FileSource}
       }
 
       # Render returns state; side effect is a GenServer.cast to port_manager

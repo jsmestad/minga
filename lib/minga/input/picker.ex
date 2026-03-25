@@ -12,7 +12,7 @@ defmodule Minga.Input.Picker do
 
   alias Minga.Editor.PickerUI
   alias Minga.Editor.State, as: EditorState
-  alias Minga.Picker, as: PickerData
+  alias Minga.UI.Picker, as: PickerData
 
   @impl true
   @spec handle_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
