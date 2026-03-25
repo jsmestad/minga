@@ -91,7 +91,11 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
   @spec render_whichkey(state(), Viewport.t(), :bottom | :float) :: [DisplayList.draw()]
   def render_whichkey(state, viewport, layout \\ Options.get(:whichkey_layout))
 
-  def render_whichkey(%{whichkey: %{show: true, node: node} = wk, theme: theme}, viewport, layout)
+  def render_whichkey(
+        %{shell_state: %{whichkey: %{show: true, node: node} = wk}, theme: theme},
+        viewport,
+        layout
+      )
       when is_map(node) do
     bindings = WhichKey.bindings_from_node(node)
     prefix_title = whichkey_prefix_title(wk)

@@ -466,8 +466,9 @@ defmodule Minga.Editor do
     {:noreply, new_state}
   end
 
-  def handle_info({:whichkey_timeout, ref}, %{whichkey: %{timer: ref}} = state) do
-    new_state = put_in(state.whichkey.show, true)
+  def handle_info({:whichkey_timeout, ref}, %{shell_state: %{whichkey: %{timer: ref}}} = state) do
+    wk = EditorState.whichkey(state)
+    new_state = EditorState.set_whichkey(state, %{wk | show: true})
     new_state = Renderer.render(new_state)
     {:noreply, new_state}
   end
@@ -2143,7 +2144,9 @@ defmodule Minga.Editor do
   # Called when tool install events change tool status so the user
   # sees live updates (spinner → checkmark, etc.).
   @spec maybe_refresh_tool_picker(state()) :: state()
-  defp maybe_refresh_tool_picker(%{picker_ui: %{source: Minga.Tool.PickerSource}} = state) do
+  defp maybe_refresh_tool_picker(
+         %{shell_state: %{picker_ui: %{source: Minga.Tool.PickerSource}}} = state
+       ) do
     PickerUI.refresh_items(state)
   end
 

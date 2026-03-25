@@ -182,9 +182,11 @@ defmodule Minga.Editor.DashboardTest do
           buffers: %Buffers{active: nil}
         },
         focus_stack: Minga.Input.default_stack(),
-        shell_state: %Minga.Shell.Traditional.State{dashboard: Dashboard.new_state()},
-        theme: Minga.UI.Theme.get!(:doom_one),
-        picker_ui: %PickerState{picker: picker, source: Minga.UI.Picker.FileSource}
+        shell_state: %Minga.Shell.Traditional.State{
+          dashboard: Dashboard.new_state(),
+          picker_ui: %PickerState{picker: picker, source: Minga.UI.Picker.FileSource}
+        },
+        theme: Minga.UI.Theme.get!(:doom_one)
       }
 
       # Render returns state; side effect is a GenServer.cast to port_manager
@@ -200,7 +202,7 @@ defmodule Minga.Editor.DashboardTest do
       assert commands != []
 
       # Re-render without the picker to compare command counts
-      bare_state = %{state | picker_ui: %PickerState{}}
+      bare_state = Minga.Editor.State.set_picker_ui(state, %PickerState{})
       _new_bare = Renderer.render(bare_state)
       assert_receive {:"$gen_cast", {:send_commands, bare_commands}}
 

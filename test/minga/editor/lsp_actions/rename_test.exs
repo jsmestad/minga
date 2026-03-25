@@ -16,9 +16,11 @@ defmodule Minga.Editor.LspActions.RenameTest do
         vim: VimState.new(),
         viewport: Viewport.new(40, 120)
       },
-      shell_state: %Minga.Shell.Traditional.State{status_msg: nil},
-      picker_ui: %PickerState{},
-      whichkey: %WhichKey{},
+      shell_state: %Minga.Shell.Traditional.State{
+        status_msg: nil,
+        picker_ui: %PickerState{},
+        whichkey: %WhichKey{}
+      },
       theme: Minga.UI.Theme.get!(:doom_one)
     }
   end

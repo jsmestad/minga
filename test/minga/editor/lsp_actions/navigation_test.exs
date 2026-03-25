@@ -12,10 +12,12 @@ defmodule Minga.Editor.LspActions.NavigationTest do
 
   defp stub_state do
     %{
-      shell_state: %Minga.Shell.Traditional.State{status_msg: nil},
+      shell_state: %Minga.Shell.Traditional.State{
+        status_msg: nil,
+        picker_ui: %Minga.Editor.State.Picker{},
+        whichkey: %Minga.Editor.State.WhichKey{}
+      },
       buffers: %{active: nil, list: []},
-      picker_ui: %Minga.Editor.State.Picker{},
-      whichkey: %Minga.Editor.State.WhichKey{},
       vim: %{mode: :normal, last_jump_pos: nil}
     }
   end

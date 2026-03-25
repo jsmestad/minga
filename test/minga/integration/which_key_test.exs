@@ -112,7 +112,7 @@ defmodule Minga.Integration.WhichKeyTest do
   defp trigger_whichkey_timeout(%{editor: editor, port: port}) do
     state = :sys.get_state(editor)
 
-    case state.whichkey.timer do
+    case state.shell_state.whichkey.timer do
       ref when is_reference(ref) ->
         # Cancel the real timer and send the message immediately
         Process.cancel_timer(ref)

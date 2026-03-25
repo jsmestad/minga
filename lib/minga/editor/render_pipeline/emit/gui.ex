@@ -260,7 +260,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
   # ── Which-key ──
 
   @spec build_gui_which_key_cmd(state()) :: binary() | nil
-  defp build_gui_which_key_cmd(%{whichkey: wk}) do
+  defp build_gui_which_key_cmd(%{shell_state: %{whichkey: wk}}) do
     fp = :erlang.phash2(wk)
 
     if fp != Process.get(:last_gui_which_key_fp) do
@@ -378,7 +378,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
   # ── Picker ──
 
   @spec build_gui_picker_cmd(state()) :: binary() | nil
-  defp build_gui_picker_cmd(%{picker_ui: %{picker: nil}}) do
+  defp build_gui_picker_cmd(%{shell_state: %{picker_ui: %{picker: nil}}}) do
     if Process.get(:last_gui_picker_fp) != :closed do
       Process.put(:last_gui_picker_fp, :closed)
       picker_cmd = ProtocolGUI.encode_gui_picker(nil)
@@ -388,7 +388,8 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
   end
 
   defp build_gui_picker_cmd(
-         %{picker_ui: %{picker: picker, source: source, action_menu: action_menu}} = state
+         %{shell_state: %{picker_ui: %{picker: picker, source: source, action_menu: action_menu}}} =
+           state
        ) do
     # Preview content is NOT in the fingerprint: a file changing on disk while
     # the picker is open won't refresh the preview. Acceptable trade-off for
@@ -410,7 +411,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
   # Build preview content for the currently selected picker item.
   # Returns a list of lines, where each line is a list of {text, fg_color, bold} segments.
   @spec build_picker_preview(state()) :: [[ProtocolGUI.preview_segment()]] | nil
-  defp build_picker_preview(%{picker_ui: %{picker: picker}} = state) do
+  defp build_picker_preview(%{shell_state: %{picker_ui: %{picker: picker}}} = state) do
     case Picker.selected_item(picker) do
       nil ->
         nil

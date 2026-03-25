@@ -10,9 +10,11 @@ defmodule Minga.Editor.LspActions.CodeActionTest do
         vim: %{mode: :normal, last_jump_pos: nil},
         viewport: %Minga.Editor.Viewport{rows: 40, cols: 120, top: 0, left: 0}
       },
-      shell_state: %Minga.Shell.Traditional.State{status_msg: nil},
-      picker_ui: %Minga.Editor.State.Picker{},
-      whichkey: %Minga.Editor.State.WhichKey{},
+      shell_state: %Minga.Shell.Traditional.State{
+        status_msg: nil,
+        picker_ui: %Minga.Editor.State.Picker{},
+        whichkey: %Minga.Editor.State.WhichKey{}
+      },
       theme: Minga.UI.Theme.get!(:doom_one)
     }
   end
@@ -47,7 +49,7 @@ defmodule Minga.Editor.LspActions.CodeActionTest do
       # When items are empty (which they won't be since we have actions),
       # it returns state unchanged. The picker_ui.source being set confirms
       # the picker was opened.
-      assert result.picker_ui.source == Minga.UI.Picker.CodeActionSource
+      assert result.shell_state.picker_ui.source == Minga.UI.Picker.CodeActionSource
     end
   end
 end

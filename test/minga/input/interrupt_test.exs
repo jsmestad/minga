@@ -55,8 +55,8 @@ defmodule Minga.Input.InterruptTest do
       assert {:handled, new_state} = Interrupt.handle_key(state, @ctrl_g, 0)
       assert new_state.workspace.keymap_scope == :editor
       assert new_state.workspace.vim.mode == :normal
-      assert new_state.picker_ui.picker == nil
-      assert new_state.whichkey.node == nil
+      assert new_state.shell_state.picker_ui.picker == nil
+      assert new_state.shell_state.whichkey.node == nil
     end
   end
 
@@ -150,19 +150,19 @@ defmodule Minga.Input.InterruptTest do
     test "closes open picker" do
       state = base_state()
       picker = Minga.UI.Picker.new(["a", "b", "c"])
-      state = %{state | picker_ui: %Picker{picker: picker, source: nil}}
+      state = Minga.Editor.State.set_picker_ui(state, %Picker{picker: picker, source: nil})
 
       assert {:handled, new_state} = Interrupt.handle_key(state, @ctrl_g, 0)
-      assert new_state.picker_ui.picker == nil
+      assert new_state.shell_state.picker_ui.picker == nil
     end
 
     test "dismisses which-key popup" do
       state = base_state()
-      state = %{state | whichkey: %WhichKey{node: %{}, show: true}}
+      state = Minga.Editor.State.set_whichkey(state, %WhichKey{node: %{}, show: true})
 
       assert {:handled, new_state} = Interrupt.handle_key(state, @ctrl_g, 0)
-      assert new_state.whichkey.node == nil
-      assert new_state.whichkey.show == false
+      assert new_state.shell_state.whichkey.node == nil
+      assert new_state.shell_state.whichkey.show == false
     end
 
     test "dismisses conflict prompt" do
@@ -208,19 +208,19 @@ defmodule Minga.Input.InterruptTest do
               vim: vim,
               pending_conflict: {buf, "/tmp/x"},
               completion: completion
-          },
-          picker_ui: %Picker{picker: picker},
-          whichkey: %WhichKey{node: %{}, show: true}
+          }
       }
 
+      state = Minga.Editor.State.set_picker_ui(state, %Picker{picker: picker})
+      state = Minga.Editor.State.set_whichkey(state, %WhichKey{node: %{}, show: true})
       state = Minga.Editor.State.set_status(state, "hello")
 
       assert {:handled, new_state} = Interrupt.handle_key(state, @ctrl_g, 0)
       assert new_state.workspace.keymap_scope == :editor
       assert new_state.workspace.vim.mode == :normal
-      assert new_state.picker_ui.picker == nil
-      assert new_state.whichkey.node == nil
-      assert new_state.whichkey.show == false
+      assert new_state.shell_state.picker_ui.picker == nil
+      assert new_state.shell_state.whichkey.node == nil
+      assert new_state.shell_state.whichkey.show == false
       assert new_state.workspace.pending_conflict == nil
       assert new_state.workspace.completion == nil
       assert new_state.shell_state.status_msg == nil

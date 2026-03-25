@@ -62,7 +62,7 @@ defmodule Minga.UI.Picker.ThemeSourceTest do
 
       state = %{
         theme: Theme.get!(:one_dark),
-        picker_ui: %{restore_theme: original}
+        shell_state: %Minga.Shell.Traditional.State{picker_ui: %{restore_theme: original}}
       }
 
       restored = ThemeSource.on_cancel(state)
@@ -72,7 +72,7 @@ defmodule Minga.UI.Picker.ThemeSourceTest do
     test "returns state unchanged when no restore_theme" do
       state = %{
         theme: Theme.get!(:one_dark),
-        picker_ui: %{restore_theme: nil}
+        shell_state: %Minga.Shell.Traditional.State{picker_ui: %{restore_theme: nil}}
       }
 
       assert ThemeSource.on_cancel(state) == state

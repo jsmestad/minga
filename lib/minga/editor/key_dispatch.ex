@@ -119,7 +119,7 @@ defmodule Minga.Editor.KeyDispatch do
       case Commands.execute(s, cmd) do
         {s2, {:dot_repeat, count}} -> ChangeTracking.replay_last_change(s2, count)
         {s2, {:replay_macro, register}} -> MacroReplay.replay(s2, register)
-        {s2, {:whichkey_update, wk}} -> %{s2 | whichkey: wk}
+        {s2, {:whichkey_update, wk}} -> EditorState.set_whichkey(s2, wk)
         s2 -> s2
       end
     end

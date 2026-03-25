@@ -19,11 +19,17 @@ defmodule Minga.Shell.Traditional.State do
           nav_flash: Minga.Editor.NavFlash.t() | nil,
           hover_popup: Minga.Editor.HoverPopup.t() | nil,
           dashboard: Minga.Editor.Dashboard.state() | nil,
-          status_msg: String.t() | nil
+          status_msg: String.t() | nil,
+          picker_ui: Minga.Editor.State.Picker.t(),
+          prompt_ui: Minga.Editor.State.Prompt.t(),
+          whichkey: Minga.Editor.State.WhichKey.t()
         }
 
   defstruct nav_flash: nil,
             hover_popup: nil,
             dashboard: nil,
-            status_msg: nil
+            status_msg: nil,
+            picker_ui: %Minga.Editor.State.Picker{},
+            prompt_ui: %Minga.Editor.State.Prompt{},
+            whichkey: %Minga.Editor.State.WhichKey{}
 end

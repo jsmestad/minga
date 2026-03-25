@@ -95,7 +95,8 @@ defmodule Minga.UI.Picker.Source do
   unchanged if no restore index was saved.
   """
   @spec restore_or_keep(term()) :: term()
-  def restore_or_keep(%{picker_ui: %{restore: idx}} = state) when is_integer(idx) do
+  def restore_or_keep(%{shell_state: %{picker_ui: %{restore: idx}}} = state)
+      when is_integer(idx) do
     EditorState.switch_buffer(state, idx)
   end
 

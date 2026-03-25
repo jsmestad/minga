@@ -546,7 +546,7 @@ defmodule Minga.Editor.LspActionsTest do
         %{"title" => "Extract variable", "kind" => "refactor.extract", "isPreferred" => true}
       ]
 
-      state = %{picker_ui: %{context: %{actions: actions}}}
+      state = %{shell_state: %{picker_ui: %{context: %{actions: actions}}}}
       items = CodeActionSource.candidates(state)
 
       assert length(items) == 2

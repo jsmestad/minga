@@ -37,7 +37,7 @@ defmodule Minga.UI.Picker.CommandSourceTest do
           buffers: %Buffers{active: buf, list: [buf], active_index: 0},
           vim: VimState.new()
         },
-        picker_ui: %PickerState{}
+        shell_state: %Minga.Shell.Traditional.State{picker_ui: %PickerState{}}
       }
 
       result =
@@ -49,11 +49,11 @@ defmodule Minga.UI.Picker.CommandSourceTest do
       # Should have opened the scope picker, not set pending_command
       assert is_nil(Map.get(result, :pending_command))
       # The scope picker should be open
-      assert result.picker_ui.picker != nil
-      assert result.picker_ui.source == Minga.UI.Picker.OptionScopeSource
+      assert result.shell_state.picker_ui.picker != nil
+      assert result.shell_state.picker_ui.source == Minga.UI.Picker.OptionScopeSource
       # Context should carry the option info
-      assert result.picker_ui.context.option_name == :wrap
-      assert is_boolean(result.picker_ui.context.new_value)
+      assert result.shell_state.picker_ui.context.option_name == :wrap
+      assert is_boolean(result.shell_state.picker_ui.context.new_value)
     end
   end
 

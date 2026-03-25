@@ -1114,7 +1114,7 @@ defmodule Minga.Editor.Mouse do
 
   @spec cancel_mode_for_mouse(state()) :: state()
   defp cancel_mode_for_mouse(%{workspace: %{vim: %{mode: :command}}} = state) do
-    %{state | whichkey: WhichKeyState.clear(state.whichkey)}
+    EditorState.set_whichkey(state, WhichKeyState.clear(EditorState.whichkey(state)))
   end
 
   defp cancel_mode_for_mouse(state), do: state

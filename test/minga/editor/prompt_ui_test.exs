@@ -43,15 +43,22 @@ defmodule Minga.Editor.PromptUITest do
   @delete 57_348
 
   defp make_state(overrides \\ %{}) do
+    shell_overrides = Map.take(overrides, [:prompt_ui, :picker_ui])
+    other_overrides = Map.drop(overrides, [:prompt_ui, :picker_ui])
+
+    shell = %Minga.Shell.Traditional.State{
+      prompt_ui: Map.get(shell_overrides, :prompt_ui, %PromptState{}),
+      picker_ui: Map.get(shell_overrides, :picker_ui, %Minga.Editor.State.Picker{})
+    }
+
     base = %{
-      prompt_ui: %PromptState{},
-      picker_ui: %Minga.Editor.State.Picker{},
+      shell_state: shell,
       submitted: nil,
       cancelled: nil,
       new_name: nil
     }
 
-    Map.merge(base, overrides)
+    Map.merge(base, other_overrides)
   end
 
   describe "open/3" do
@@ -59,25 +66,25 @@ defmodule Minga.Editor.PromptUITest do
       state = make_state()
       state = PromptUI.open(state, TestHandler)
 
-      assert state.prompt_ui.handler == TestHandler
-      assert state.prompt_ui.label == "Test prompt: "
-      assert state.prompt_ui.text == ""
-      assert state.prompt_ui.cursor == 0
+      assert state.shell_state.prompt_ui.handler == TestHandler
+      assert state.shell_state.prompt_ui.label == "Test prompt: "
+      assert state.shell_state.prompt_ui.text == ""
+      assert state.shell_state.prompt_ui.cursor == 0
     end
 
     test "sets default text when provided" do
       state = make_state()
       state = PromptUI.open(state, RenameHandler, default: "old_name")
 
-      assert state.prompt_ui.text == "old_name"
-      assert state.prompt_ui.cursor == 8
+      assert state.shell_state.prompt_ui.text == "old_name"
+      assert state.shell_state.prompt_ui.cursor == 8
     end
 
     test "stores context when provided" do
       state = make_state()
       state = PromptUI.open(state, TestHandler, context: %{template: "todo"})
 
-      assert state.prompt_ui.context == %{template: "todo"}
+      assert state.shell_state.prompt_ui.context == %{template: "todo"}
     end
 
     test "closes active picker when opening prompt" do
@@ -89,8 +96,8 @@ defmodule Minga.Editor.PromptUITest do
       state = make_state(%{picker_ui: picker_state})
       state = PromptUI.open(state, TestHandler)
 
-      assert state.prompt_ui.handler == TestHandler
-      assert state.picker_ui.picker == nil
+      assert state.shell_state.prompt_ui.handler == TestHandler
+      assert state.shell_state.picker_ui.picker == nil
     end
   end
 
@@ -112,8 +119,8 @@ defmodule Minga.Editor.PromptUITest do
       {state, nil} = PromptUI.handle_key(state, ?h, 0)
       {state, nil} = PromptUI.handle_key(state, ?i, 0)
 
-      assert state.prompt_ui.text == "hi"
-      assert state.prompt_ui.cursor == 2
+      assert state.shell_state.prompt_ui.text == "hi"
+      assert state.shell_state.prompt_ui.cursor == 2
     end
 
     test "inserts at cursor position" do
@@ -123,16 +130,16 @@ defmodule Minga.Editor.PromptUITest do
       # Insert 'b' at position 1
       {state, nil} = PromptUI.handle_key(state, ?b, 0)
 
-      assert state.prompt_ui.text == "abc"
-      assert state.prompt_ui.cursor == 2
+      assert state.shell_state.prompt_ui.text == "abc"
+      assert state.shell_state.prompt_ui.cursor == 2
     end
 
     test "handles unicode characters" do
       state = make_state() |> PromptUI.open(TestHandler)
       {state, nil} = PromptUI.handle_key(state, 0x1F600, 0)
 
-      assert state.prompt_ui.text == "😀"
-      assert state.prompt_ui.cursor == 1
+      assert state.shell_state.prompt_ui.text == "😀"
+      assert state.shell_state.prompt_ui.cursor == 1
     end
   end
 
@@ -141,48 +148,48 @@ defmodule Minga.Editor.PromptUITest do
       state = make_state() |> PromptUI.open(TestHandler, default: "abc")
       {state, nil} = PromptUI.handle_key(state, @backspace, 0)
 
-      assert state.prompt_ui.text == "ab"
-      assert state.prompt_ui.cursor == 2
+      assert state.shell_state.prompt_ui.text == "ab"
+      assert state.shell_state.prompt_ui.cursor == 2
     end
 
     test "does nothing at start of text" do
       state = make_state() |> PromptUI.open(TestHandler, default: "abc")
       # Move to start
-      state = %{state | prompt_ui: %{state.prompt_ui | cursor: 0}}
+      state = Minga.Editor.State.set_prompt_ui(state, %{state.shell_state.prompt_ui | cursor: 0})
       {state, nil} = PromptUI.handle_key(state, @backspace, 0)
 
-      assert state.prompt_ui.text == "abc"
-      assert state.prompt_ui.cursor == 0
+      assert state.shell_state.prompt_ui.text == "abc"
+      assert state.shell_state.prompt_ui.cursor == 0
     end
   end
 
   describe "handle_key/3 — cursor movement" do
     test "arrow left moves cursor left" do
       state = make_state() |> PromptUI.open(TestHandler, default: "abc")
-      assert state.prompt_ui.cursor == 3
+      assert state.shell_state.prompt_ui.cursor == 3
 
       {state, nil} = PromptUI.handle_key(state, 57_350, 0)
-      assert state.prompt_ui.cursor == 2
+      assert state.shell_state.prompt_ui.cursor == 2
     end
 
     test "arrow left stops at 0" do
       state = make_state() |> PromptUI.open(TestHandler, default: "a")
-      state = %{state | prompt_ui: %{state.prompt_ui | cursor: 0}}
+      state = Minga.Editor.State.set_prompt_ui(state, %{state.shell_state.prompt_ui | cursor: 0})
       {state, nil} = PromptUI.handle_key(state, 57_350, 0)
-      assert state.prompt_ui.cursor == 0
+      assert state.shell_state.prompt_ui.cursor == 0
     end
 
     test "arrow right moves cursor right" do
       state = make_state() |> PromptUI.open(TestHandler, default: "abc")
-      state = %{state | prompt_ui: %{state.prompt_ui | cursor: 1}}
+      state = Minga.Editor.State.set_prompt_ui(state, %{state.shell_state.prompt_ui | cursor: 1})
       {state, nil} = PromptUI.handle_key(state, 57_351, 0)
-      assert state.prompt_ui.cursor == 2
+      assert state.shell_state.prompt_ui.cursor == 2
     end
 
     test "arrow right stops at end of text" do
       state = make_state() |> PromptUI.open(TestHandler, default: "abc")
       {state, nil} = PromptUI.handle_key(state, 57_351, 0)
-      assert state.prompt_ui.cursor == 3
+      assert state.shell_state.prompt_ui.cursor == 3
     end
   end
 
@@ -231,19 +238,19 @@ defmodule Minga.Editor.PromptUITest do
       state = PromptUI.close(state)
 
       refute PromptUI.open?(state)
-      assert state.prompt_ui.handler == nil
-      assert state.prompt_ui.text == ""
+      assert state.shell_state.prompt_ui.handler == nil
+      assert state.shell_state.prompt_ui.text == ""
     end
   end
 
   describe "handle_key/3 — delete (forward)" do
     test "removes character after cursor" do
       state = make_state() |> PromptUI.open(TestHandler, default: "abc")
-      state = %{state | prompt_ui: %{state.prompt_ui | cursor: 0}}
+      state = Minga.Editor.State.set_prompt_ui(state, %{state.shell_state.prompt_ui | cursor: 0})
       {state, nil} = PromptUI.handle_key(state, @delete, 0)
 
-      assert state.prompt_ui.text == "bc"
-      assert state.prompt_ui.cursor == 0
+      assert state.shell_state.prompt_ui.text == "bc"
+      assert state.shell_state.prompt_ui.cursor == 0
     end
 
     test "does nothing at end of text" do
@@ -251,17 +258,17 @@ defmodule Minga.Editor.PromptUITest do
       # cursor is at 3 (end)
       {state, nil} = PromptUI.handle_key(state, @delete, 0)
 
-      assert state.prompt_ui.text == "abc"
-      assert state.prompt_ui.cursor == 3
+      assert state.shell_state.prompt_ui.text == "abc"
+      assert state.shell_state.prompt_ui.cursor == 3
     end
 
     test "deletes in middle of text" do
       state = make_state() |> PromptUI.open(TestHandler, default: "abc")
-      state = %{state | prompt_ui: %{state.prompt_ui | cursor: 1}}
+      state = Minga.Editor.State.set_prompt_ui(state, %{state.shell_state.prompt_ui | cursor: 1})
       {state, nil} = PromptUI.handle_key(state, @delete, 0)
 
-      assert state.prompt_ui.text == "ac"
-      assert state.prompt_ui.cursor == 1
+      assert state.shell_state.prompt_ui.text == "ac"
+      assert state.shell_state.prompt_ui.cursor == 1
     end
   end
 
@@ -270,33 +277,33 @@ defmodule Minga.Editor.PromptUITest do
       state = make_state() |> PromptUI.open(TestHandler)
       {state, nil} = PromptUI.handle_key(state, 0x01, 0)
 
-      assert state.prompt_ui.text == ""
+      assert state.shell_state.prompt_ui.text == ""
     end
 
     test "surrogate codepoints are ignored" do
       state = make_state() |> PromptUI.open(TestHandler)
       {state, nil} = PromptUI.handle_key(state, 0xD800, 0)
 
-      assert state.prompt_ui.text == ""
+      assert state.shell_state.prompt_ui.text == ""
     end
 
     test "backspace on multi-byte unicode deletes one grapheme" do
       state = make_state() |> PromptUI.open(TestHandler, default: "a😀b")
       # cursor at 3 (end), move back once to position 2 (after 😀)
-      state = %{state | prompt_ui: %{state.prompt_ui | cursor: 2}}
+      state = Minga.Editor.State.set_prompt_ui(state, %{state.shell_state.prompt_ui | cursor: 2})
       {state, nil} = PromptUI.handle_key(state, @backspace, 0)
 
-      assert state.prompt_ui.text == "ab"
-      assert state.prompt_ui.cursor == 1
+      assert state.shell_state.prompt_ui.text == "ab"
+      assert state.shell_state.prompt_ui.cursor == 1
     end
 
     test "inserting at position 0 prepends to text" do
       state = make_state() |> PromptUI.open(TestHandler, default: "bc")
-      state = %{state | prompt_ui: %{state.prompt_ui | cursor: 0}}
+      state = Minga.Editor.State.set_prompt_ui(state, %{state.shell_state.prompt_ui | cursor: 0})
       {state, nil} = PromptUI.handle_key(state, ?a, 0)
 
-      assert state.prompt_ui.text == "abc"
-      assert state.prompt_ui.cursor == 1
+      assert state.shell_state.prompt_ui.text == "abc"
+      assert state.shell_state.prompt_ui.cursor == 1
     end
   end
 

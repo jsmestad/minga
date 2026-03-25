@@ -39,7 +39,7 @@ defmodule Minga.UI.Picker.ThemeSource do
 
   @impl true
   @spec on_cancel(term()) :: term()
-  def on_cancel(%{picker_ui: %{restore_theme: %Theme{} = theme}} = state) do
+  def on_cancel(%{shell_state: %{picker_ui: %{restore_theme: %Theme{} = theme}}} = state) do
     %{state | theme: theme}
   end
 

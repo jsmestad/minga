@@ -21,8 +21,10 @@ defmodule Minga.Input.PromptTest do
     prompt = struct(%PromptState{}, prompt_overrides)
 
     %{
-      prompt_ui: prompt,
-      picker_ui: %Minga.Editor.State.Picker{},
+      shell_state: %Minga.Shell.Traditional.State{
+        prompt_ui: prompt,
+        picker_ui: %Minga.Editor.State.Picker{}
+      },
       submitted: nil,
       cancelled: nil
     }
@@ -32,7 +34,7 @@ defmodule Minga.Input.PromptTest do
     test "routes keys to PromptUI when prompt is active" do
       state = make_state(%{handler: TestHandler, label: "Input: ", text: "", cursor: 0})
       assert {:handled, new_state} = InputPrompt.handle_key(state, ?a, 0)
-      assert new_state.prompt_ui.text == "a"
+      assert new_state.shell_state.prompt_ui.text == "a"
     end
 
     test "passes through when no prompt is active" do

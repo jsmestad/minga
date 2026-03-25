@@ -86,7 +86,9 @@ defmodule Minga.Editor.Commands do
   # ── Leader / which-key (return action tuples) ─────────────────────────────
 
   def execute(state, {:leader_start, node}) do
-    if state.whichkey.timer, do: WhichKey.cancel_timeout(state.whichkey.timer)
+    if EditorState.whichkey(state).timer,
+      do: WhichKey.cancel_timeout(EditorState.whichkey(state).timer)
+
     timer = WhichKey.start_timeout()
     prefix_keys = leader_keys_from_mode(state)
 
@@ -101,7 +103,9 @@ defmodule Minga.Editor.Commands do
   end
 
   def execute(state, {:leader_progress, node}) do
-    if state.whichkey.timer, do: WhichKey.cancel_timeout(state.whichkey.timer)
+    if EditorState.whichkey(state).timer,
+      do: WhichKey.cancel_timeout(EditorState.whichkey(state).timer)
+
     timer = WhichKey.start_timeout()
     prefix_keys = leader_keys_from_mode(state)
 
@@ -110,7 +114,7 @@ defmodule Minga.Editor.Commands do
     whichkey = %EditorState.WhichKey{
       node: effective_node,
       timer: timer,
-      show: state.whichkey.show,
+      show: EditorState.whichkey(state).show,
       prefix_keys: prefix_keys
     }
 
@@ -118,7 +122,8 @@ defmodule Minga.Editor.Commands do
   end
 
   def execute(state, :leader_cancel) do
-    if state.whichkey.timer, do: WhichKey.cancel_timeout(state.whichkey.timer)
+    if EditorState.whichkey(state).timer,
+      do: WhichKey.cancel_timeout(EditorState.whichkey(state).timer)
 
     whichkey = %EditorState.WhichKey{
       node: nil,
@@ -132,12 +137,12 @@ defmodule Minga.Editor.Commands do
   end
 
   def execute(state, :whichkey_next_page) do
-    whichkey = %{state.whichkey | page: state.whichkey.page + 1}
+    whichkey = %{EditorState.whichkey(state) | page: EditorState.whichkey(state).page + 1}
     {state, {:whichkey_update, whichkey}}
   end
 
   def execute(state, :whichkey_prev_page) do
-    whichkey = %{state.whichkey | page: max(state.whichkey.page - 1, 0)}
+    whichkey = %{EditorState.whichkey(state) | page: max(EditorState.whichkey(state).page - 1, 0)}
     {state, {:whichkey_update, whichkey}}
   end
 

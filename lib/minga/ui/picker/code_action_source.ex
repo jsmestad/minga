@@ -27,7 +27,8 @@ defmodule Minga.UI.Picker.CodeActionSource do
 
   @impl true
   @spec candidates(term()) :: [Item.t()]
-  def candidates(%{picker_ui: %{context: %{actions: actions}}}) when is_list(actions) do
+  def candidates(%{shell_state: %{picker_ui: %{context: %{actions: actions}}}})
+      when is_list(actions) do
     actions
     |> Enum.with_index()
     |> Enum.map(fn {action, index} ->

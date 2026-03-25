@@ -25,9 +25,9 @@ defmodule Minga.UI.Picker.OptionScopeSourceTest do
 
       state = %{
         workspace: %{buffers: %{active: buf}},
-        shell_state: %Minga.Shell.Traditional.State{status_msg: nil},
-        picker_ui: %PickerState{
-          context: %{option_name: :wrap, new_value: true}
+        shell_state: %Minga.Shell.Traditional.State{
+          status_msg: nil,
+          picker_ui: %PickerState{context: %{option_name: :wrap, new_value: true}}
         }
       }
 
@@ -49,9 +49,9 @@ defmodule Minga.UI.Picker.OptionScopeSourceTest do
 
       state = %{
         workspace: %{buffers: %{active: buf}},
-        shell_state: %Minga.Shell.Traditional.State{status_msg: nil},
-        picker_ui: %PickerState{
-          context: %{option_name: :wrap, new_value: !original}
+        shell_state: %Minga.Shell.Traditional.State{
+          status_msg: nil,
+          picker_ui: %PickerState{context: %{option_name: :wrap, new_value: !original}}
         }
       }
 

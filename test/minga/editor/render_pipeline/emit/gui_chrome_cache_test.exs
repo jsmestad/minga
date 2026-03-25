@@ -197,8 +197,8 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI.ChromeCacheTest do
       state = gui_chrome_state()
 
       # Inject an open picker into picker_ui state.
-      picker_ui = %{state.picker_ui | picker: picker, source: nil, action_menu: nil}
-      state = %{state | picker_ui: picker_ui}
+      picker_ui = %{state.shell_state.picker_ui | picker: picker, source: nil, action_menu: nil}
+      state = Minga.Editor.State.set_picker_ui(state, picker_ui)
       sb_data = StatusBarData.from_state(state)
 
       # Before the fix, this raised KeyError: key :total not found in %Minga.UI.Picker{}.

@@ -36,7 +36,8 @@ defmodule Minga.UI.Picker.LocationSource do
 
   @impl true
   @spec candidates(term()) :: [Item.t()]
-  def candidates(%{picker_ui: %{context: %{locations: locations}}}) when is_list(locations) do
+  def candidates(%{shell_state: %{picker_ui: %{context: %{locations: locations}}}})
+      when is_list(locations) do
     Enum.map(locations, &format_location/1)
   end
 

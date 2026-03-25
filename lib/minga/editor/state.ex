@@ -78,9 +78,6 @@ defmodule Minga.Editor.State do
             workspace: nil,
             shell: Minga.Shell.Traditional,
             shell_state: %ShellState{},
-            picker_ui: %Picker{},
-            prompt_ui: %Prompt{},
-            whichkey: %WhichKey{},
             theme: Minga.UI.Theme.get!(:doom_one),
             render_timer: nil,
             warning_popup_timer: nil,
@@ -127,9 +124,6 @@ defmodule Minga.Editor.State do
           workspace: WorkspaceState.t(),
           shell: module(),
           shell_state: ShellState.t(),
-          picker_ui: Picker.t(),
-          prompt_ui: Prompt.t(),
-          whichkey: WhichKey.t(),
           theme: Theme.t(),
           render_timer: reference() | nil,
           warning_popup_timer: reference() | nil,
@@ -255,6 +249,48 @@ defmodule Minga.Editor.State do
   @spec close_dashboard(t()) :: t()
   def close_dashboard(%{shell_state: ss} = state) do
     %{state | shell_state: %{ss | dashboard: nil}}
+  end
+
+  # ── Picker UI ───────────────────────────────────────────────────────────
+
+  @doc "Returns the picker UI state."
+  @spec picker_ui(t()) :: Picker.t()
+  def picker_ui(%{shell_state: ss}), do: ss.picker_ui
+
+  @doc "Replaces the picker UI state."
+  @spec set_picker_ui(t(), Picker.t()) :: t()
+  def set_picker_ui(%{shell_state: ss} = state, pui) do
+    %{state | shell_state: %{ss | picker_ui: pui}}
+  end
+
+  @doc "Applies a function to the picker UI state."
+  @spec update_picker_ui(t(), (Picker.t() -> Picker.t())) :: t()
+  def update_picker_ui(%{shell_state: ss} = state, fun) when is_function(fun, 1) do
+    %{state | shell_state: %{ss | picker_ui: fun.(ss.picker_ui)}}
+  end
+
+  # ── Prompt UI ──────────────────────────────────────────────────────────
+
+  @doc "Returns the prompt UI state."
+  @spec prompt_ui(t()) :: Prompt.t()
+  def prompt_ui(%{shell_state: ss}), do: ss.prompt_ui
+
+  @doc "Replaces the prompt UI state."
+  @spec set_prompt_ui(t(), Prompt.t()) :: t()
+  def set_prompt_ui(%{shell_state: ss} = state, prompt) do
+    %{state | shell_state: %{ss | prompt_ui: prompt}}
+  end
+
+  # ── Which-key ──────────────────────────────────────────────────────────
+
+  @doc "Returns the which-key popup state."
+  @spec whichkey(t()) :: WhichKey.t()
+  def whichkey(%{shell_state: ss}), do: ss.whichkey
+
+  @doc "Replaces the which-key popup state."
+  @spec set_whichkey(t(), WhichKey.t()) :: t()
+  def set_whichkey(%{shell_state: ss} = state, wk) do
+    %{state | shell_state: %{ss | whichkey: wk}}
   end
 
   # ── Convenience accessors ─────────────────────────────────────────────────
