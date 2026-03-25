@@ -30,7 +30,8 @@ defmodule Minga.Port.GUIAgentChatProtocolTest do
 
   describe "encode_gui_agent_chat with styled_tool_call" do
     test "encodes styled_tool_call with sub-opcode 0x08" do
-      tc = %{
+      tc = %Minga.Agent.ToolCall{
+        id: "tc-styled",
         name: "bash",
         status: :complete,
         is_error: false,
@@ -88,7 +89,8 @@ defmodule Minga.Port.GUIAgentChatProtocolTest do
     end
 
     test "encodes regular tool_call with sub-opcode 0x04" do
-      tc = %{
+      tc = %Minga.Agent.ToolCall{
+        id: "tc-regular",
         name: "read",
         status: :running,
         is_error: false,
@@ -159,7 +161,8 @@ defmodule Minga.Port.GUIAgentChatProtocolTest do
     end
 
     test "all message types carry the ID prefix" do
-      tc = %{
+      tc = %Minga.Agent.ToolCall{
+        id: "tc-all",
         name: "bash",
         status: :complete,
         is_error: false,
@@ -174,7 +177,9 @@ defmodule Minga.Port.GUIAgentChatProtocolTest do
         {3, {:thinking, "hmm", true}},
         {4, {:tool_call, tc}},
         {5, {:system, "started", :info}},
-        {6, {:usage, %{input: 10, output: 5, cache_read: 0, cache_write: 0, cost: 0.001}}}
+        {6,
+         {:usage,
+          %Minga.Agent.TurnUsage{input: 10, output: 5, cache_read: 0, cache_write: 0, cost: 0.001}}}
       ]
 
       data = %{

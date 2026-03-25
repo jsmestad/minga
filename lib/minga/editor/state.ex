@@ -194,11 +194,7 @@ defmodule Minga.Editor.State do
           parser_status: Minga.Editor.Modeline.parser_status(),
           hover_popup: Minga.Editor.HoverPopup.t() | nil,
           signature_help: Minga.Editor.SignatureHelp.t() | nil,
-          injection_ranges: %{
-            pid() => [
-              %{start_byte: non_neg_integer(), end_byte: non_neg_integer(), language: String.t()}
-            ]
-          },
+          injection_ranges: %{pid() => [Minga.Highlight.InjectionRange.t()]},
           focus_stack: [module()],
           keymap_scope: Minga.Keymap.Scope.scope_name(),
           tab_bar: TabBar.t() | nil,

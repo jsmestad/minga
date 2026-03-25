@@ -636,7 +636,7 @@ defmodule Minga.Port.ProtocolTest do
       assert {:ok, {:highlight_spans, 5, 42, spans}} = Protocol.decode_event(payload)
       assert length(spans) == 2
 
-      assert hd(spans) == %{
+      assert hd(spans) == %Minga.Highlight.Span{
                start_byte: 0,
                end_byte: 9,
                capture_id: 0,
@@ -644,7 +644,7 @@ defmodule Minga.Port.ProtocolTest do
                layer: 0
              }
 
-      assert List.last(spans) == %{
+      assert List.last(spans) == %Minga.Highlight.Span{
                start_byte: 10,
                end_byte: 15,
                capture_id: 1,

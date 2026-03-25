@@ -6,7 +6,6 @@ defmodule Minga.Mode.CommandState do
   `:`), plus the standard count/leader fields.
   """
 
-  @enforce_keys []
   defstruct input: "",
             candidate_index: 0,
             count: nil,

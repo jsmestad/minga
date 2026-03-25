@@ -10,7 +10,6 @@ defmodule Minga.Editor.MacroRecorder do
   replayed through the editor's `handle_key` pipeline.
   """
 
-  @enforce_keys []
   defstruct recording: nil,
             registers: %{},
             replaying: false,

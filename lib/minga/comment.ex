@@ -16,11 +16,7 @@ defmodule Minga.Comment do
   alias Minga.Language.Registry, as: LangRegistry
 
   @typedoc "A single injection range from tree-sitter."
-  @type injection_range :: %{
-          start_byte: non_neg_integer(),
-          end_byte: non_neg_integer(),
-          language: String.t()
-        }
+  @type injection_range :: Minga.Highlight.InjectionRange.t()
 
   @typedoc "Direction the toggle should go."
   @type toggle_direction :: :comment | :uncomment

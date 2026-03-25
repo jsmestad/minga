@@ -109,7 +109,6 @@ defmodule Minga.Buffer.Decorations do
           ann_line_cache: %{non_neg_integer() => [LineAnnotation.t()]} | nil
         }
 
-  @enforce_keys []
   defstruct highlights: nil,
             virtual_texts: [],
             annotations: [],

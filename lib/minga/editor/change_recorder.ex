@@ -17,7 +17,6 @@ defmodule Minga.Editor.ChangeRecorder do
   the replayed keys don't overwrite the stored change.
   """
 
-  @enforce_keys []
   defstruct recording: false,
             keys: [],
             pending_keys: [],

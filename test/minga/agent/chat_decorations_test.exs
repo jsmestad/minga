@@ -53,7 +53,8 @@ defmodule Minga.Agent.ChatDecorationsTest do
     end
 
     test "tool call gets header block and output fold" do
-      tc = %{
+      tc = %Minga.Agent.ToolCall{
+        id: "tc-1",
         name: "read_file",
         status: :complete,
         result: "file content here\nline 2\nline 3",
@@ -72,7 +73,14 @@ defmodule Minga.Agent.ChatDecorationsTest do
     end
 
     test "running tool call has no fold (still streaming)" do
-      tc = %{name: "shell", status: :running, result: "", collapsed: false}
+      tc = %Minga.Agent.ToolCall{
+        id: "tc-2",
+        name: "shell",
+        status: :running,
+        result: "",
+        collapsed: false
+      }
+
       decs = Decorations.new()
       messages = [{:tool_call, tc}]
       offsets = [{0, 0, 1}]
@@ -83,7 +91,14 @@ defmodule Minga.Agent.ChatDecorationsTest do
     end
 
     test "tool call awaiting approval shows approval prompt in header" do
-      tc = %{id: "tc_123", name: "write_file", status: :running, result: "", collapsed: false}
+      tc = %Minga.Agent.ToolCall{
+        id: "tc_123",
+        name: "write_file",
+        status: :running,
+        result: "",
+        collapsed: false
+      }
+
       decs = Decorations.new()
       messages = [{:tool_call, tc}]
       offsets = [{0, 0, 1}]
@@ -110,7 +125,14 @@ defmodule Minga.Agent.ChatDecorationsTest do
     end
 
     test "tool call without matching approval shows normal header" do
-      tc = %{id: "tc_456", name: "read_file", status: :running, result: "", collapsed: false}
+      tc = %Minga.Agent.ToolCall{
+        id: "tc_456",
+        name: "read_file",
+        status: :running,
+        result: "",
+        collapsed: false
+      }
+
       decs = Decorations.new()
       messages = [{:tool_call, tc}]
       offsets = [{0, 0, 1}]
@@ -157,7 +179,7 @@ defmodule Minga.Agent.ChatDecorationsTest do
 
     test "usage messages get a dim highlight" do
       decs = Decorations.new()
-      messages = [{:usage, %{input: 100, output: 50, cost: 0.001}}]
+      messages = [{:usage, %Minga.Agent.TurnUsage{input: 100, output: 50, cost: 0.001}}]
       offsets = [{0, 0, 1}]
 
       result = ChatDecorations.build_decorations(decs, messages, offsets, test_theme())

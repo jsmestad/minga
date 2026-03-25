@@ -11,7 +11,6 @@ defmodule Minga.Port.Capabilities do
   (TUI, RGB, wcwidth, no images, emulated floats, monospace).
   """
 
-  @enforce_keys []
   defstruct frontend_type: :tui,
             color_depth: :rgb,
             unicode_width: :wcwidth,

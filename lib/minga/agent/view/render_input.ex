@@ -23,7 +23,7 @@ defmodule Minga.Agent.View.RenderInput do
     :panel,
     :agent_ui,
     messages: [],
-    usage: %{input: 0, output: 0, cache_read: 0, cache_write: 0, cost: 0.0},
+    usage: %Minga.Agent.TurnUsage{},
     pending_approval: nil,
     session_title: "Minga Agent",
     lsp_servers: []
@@ -35,7 +35,7 @@ defmodule Minga.Agent.View.RenderInput do
           panel: panel_data(),
           agent_ui: agent_ui_data(),
           messages: list(),
-          usage: map(),
+          usage: Minga.Agent.TurnUsage.t(),
           pending_approval: map() | nil,
           session_title: String.t(),
           lsp_servers: [atom()]
@@ -138,9 +138,9 @@ defmodule Minga.Agent.View.RenderInput do
     }
   end
 
-  @doc "Returns a zero-value usage map."
-  @spec empty_usage() :: map()
-  def empty_usage, do: %{input: 0, output: 0, cache_read: 0, cache_write: 0, cost: 0.0}
+  @doc "Returns a zero-value usage record."
+  @spec empty_usage() :: Minga.Agent.TurnUsage.t()
+  def empty_usage, do: Minga.Agent.TurnUsage.new()
 
   # ── Private helpers ─────────────────────────────────────────────────────────
 

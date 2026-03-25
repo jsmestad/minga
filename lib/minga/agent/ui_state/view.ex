@@ -60,7 +60,6 @@ defmodule Minga.Agent.UIState.View do
   @max_chat_pct 80
   @resize_step 5
 
-  @enforce_keys []
   defstruct active: false,
             focus: :chat,
             preview: Preview.new(),

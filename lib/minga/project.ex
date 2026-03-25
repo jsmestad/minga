@@ -29,7 +29,6 @@ defmodule Minga.Project do
   alias Minga.Config.Options, as: ConfigOptions
   alias Minga.Project.Detector
 
-  @enforce_keys []
   defstruct current_root: nil,
             project_type: nil,
             cached_files: [],

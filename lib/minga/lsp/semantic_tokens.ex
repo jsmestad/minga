@@ -46,23 +46,13 @@ defmodule Minga.LSP.SemanticTokens do
 
   @semantic_layer 2
 
+  alias Minga.LSP.SemanticToken
+
   @typedoc "A decoded semantic token with absolute position."
-  @type token :: %{
-          line: non_neg_integer(),
-          start_char: non_neg_integer(),
-          length: non_neg_integer(),
-          type: String.t(),
-          modifiers: [String.t()]
-        }
+  @type token :: SemanticToken.t()
 
   @typedoc "A highlight span compatible with the existing highlight sweep."
-  @type highlight_span :: %{
-          start_byte: non_neg_integer(),
-          end_byte: non_neg_integer(),
-          capture_id: non_neg_integer(),
-          pattern_index: non_neg_integer(),
-          layer: non_neg_integer()
-        }
+  @type highlight_span :: Minga.Highlight.Span.t()
 
   @doc """
   Decodes a delta-encoded semantic token array from LSP.
@@ -110,7 +100,7 @@ defmodule Minga.LSP.SemanticTokens do
     type_name = Enum.at(types, type_idx, "unknown")
     modifier_names = decode_modifiers(mod_bits, mods)
 
-    token = %{
+    token = %SemanticToken{
       line: line,
       start_char: start_char,
       length: length,
@@ -182,7 +172,7 @@ defmodule Minga.LSP.SemanticTokens do
       capture_id = capture_name_to_id.(capture_name)
 
       [
-        %{
+        %Minga.Highlight.Span{
           start_byte: start_byte,
           end_byte: end_byte,
           capture_id: capture_id,

@@ -16,15 +16,13 @@ defmodule Minga.Agent.InternalState do
   via tool calls during the agent loop.
   """
 
+  alias Minga.Agent.TodoItem
+
   @typedoc "Status of a todo item."
-  @type todo_status :: :pending | :in_progress | :done
+  @type todo_status :: TodoItem.status()
 
   @typedoc "A single todo item."
-  @type todo_item :: %{
-          id: String.t(),
-          description: String.t(),
-          status: todo_status()
-        }
+  @type todo_item :: TodoItem.t()
 
   @typedoc "The full internal state."
   @type t :: %__MODULE__{
@@ -52,7 +50,7 @@ defmodule Minga.Agent.InternalState do
       items
       |> Enum.with_index()
       |> Enum.map(fn {item, index} ->
-        %{
+        %TodoItem{
           id: Map.get(item, "id", "task_#{index + 1}"),
           description: Map.get(item, "description", ""),
           status: parse_status(Map.get(item, "status", "pending"))

@@ -18,12 +18,10 @@ defmodule Minga.Agent.Instructions do
   instructions last (most specific wins when instructions conflict).
   """
 
+  alias Minga.Agent.Instruction
+
   @typedoc "A discovered instruction file."
-  @type instruction :: %{
-          label: String.t(),
-          path: String.t(),
-          content: String.t()
-        }
+  @type instruction :: Instruction.t()
 
   @doc """
   Discovers all instruction files and returns them as an ordered list.
@@ -53,7 +51,7 @@ defmodule Minga.Agent.Instructions do
         nil
 
       found ->
-        Enum.map_join(found, "\n\n", fn %{label: label, content: content} ->
+        Enum.map_join(found, "\n\n", fn %Instruction{label: label, content: content} ->
           "## #{label}\n\n#{String.trim(content)}"
         end)
     end
@@ -79,7 +77,7 @@ defmodule Minga.Agent.Instructions do
         header = "Loaded #{length(found)} instruction file(s):\n"
 
         lines =
-          Enum.map_join(found, "\n", fn %{label: label, path: path, content: content} ->
+          Enum.map_join(found, "\n", fn %Instruction{label: label, path: path, content: content} ->
             size = String.length(content)
             "  ✓ #{label} (#{path}, #{size} chars)"
           end)
@@ -142,7 +140,7 @@ defmodule Minga.Agent.Instructions do
   defp read_instruction(label, path) do
     case File.read(path) do
       {:ok, content} when content != "" ->
-        [%{label: label, path: path, content: content}]
+        [%Instruction{label: label, path: path, content: content}]
 
       _ ->
         []

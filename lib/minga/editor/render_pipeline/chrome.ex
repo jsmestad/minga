@@ -28,7 +28,6 @@ defmodule Minga.Editor.RenderPipeline.Chrome do
 
   # ── Result struct ──────────────────────────────────────────────────────────
 
-  @enforce_keys []
   defstruct status_bar_draws: [],
             status_bar_data: nil,
             minibuffer_data: nil,

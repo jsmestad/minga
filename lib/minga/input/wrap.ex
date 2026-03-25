@@ -26,8 +26,10 @@ defmodule Minga.Input.Wrap do
   breakindent, which doesn't apply to small input fields.
   """
 
+  alias Minga.Input.VisualLine
+
   @typedoc "A single visual row within a wrapped logical line."
-  @type visual_line :: %{text: String.t(), col_offset: non_neg_integer()}
+  @type visual_line :: VisualLine.t()
 
   @typedoc "Wrap result for one logical line: list of visual rows it expands to."
   @type wrap_entry :: [visual_line()]
@@ -48,17 +50,17 @@ defmodule Minga.Input.Wrap do
   A width below #{@min_wrap_width} truncates rather than wrapping.
   """
   @spec wrap_line(String.t(), pos_integer()) :: wrap_entry()
-  def wrap_line("", _width), do: [%{text: "", col_offset: 0}]
+  def wrap_line("", _width), do: [%VisualLine{text: "", col_offset: 0}]
 
   def wrap_line(text, width) when width < @min_wrap_width do
-    [%{text: String.slice(text, 0, width), col_offset: 0}]
+    [%VisualLine{text: String.slice(text, 0, width), col_offset: 0}]
   end
 
   def wrap_line(text, width) do
     graphemes = String.graphemes(text)
 
     if length(graphemes) <= width do
-      [%{text: text, col_offset: 0}]
+      [%VisualLine{text: text, col_offset: 0}]
     else
       do_wrap(graphemes, width, 0, [])
     end
@@ -159,13 +161,13 @@ defmodule Minga.Input.Wrap do
 
     case rest do
       [] ->
-        entry = %{text: Enum.join(taken), col_offset: offset}
+        entry = %VisualLine{text: Enum.join(taken), col_offset: offset}
         Enum.reverse([entry | acc])
 
       _ ->
         {row_graphemes, overflow} = break_at_word_boundary(taken, rest)
         row_len = length(row_graphemes)
-        entry = %{text: Enum.join(row_graphemes), col_offset: offset}
+        entry = %VisualLine{text: Enum.join(row_graphemes), col_offset: offset}
         do_wrap(overflow, width, offset + row_len, [entry | acc])
     end
   end
@@ -196,12 +198,12 @@ defmodule Minga.Input.Wrap do
   # entry. Returns `{visual_row_index, visual_col}`.
   @spec find_cursor_in_wrapped(wrap_entry(), non_neg_integer()) ::
           {non_neg_integer(), non_neg_integer()}
-  defp find_cursor_in_wrapped([%{col_offset: offset, text: text}], cursor_col) do
+  defp find_cursor_in_wrapped([%VisualLine{col_offset: offset, text: text}], cursor_col) do
     visual_col = min(cursor_col - offset, String.length(text))
     {0, max(visual_col, 0)}
   end
 
-  defp find_cursor_in_wrapped([%{col_offset: offset, text: text} | rest], cursor_col) do
+  defp find_cursor_in_wrapped([%VisualLine{col_offset: offset, text: text} | rest], cursor_col) do
     next_offset = offset + String.length(text)
 
     if cursor_col < next_offset do

@@ -39,7 +39,6 @@ defmodule Minga.Agent.View.Preview do
           scroll: Scroll.t()
         }
 
-  @enforce_keys []
   defstruct content: :empty,
             scroll: %Scroll{}
 

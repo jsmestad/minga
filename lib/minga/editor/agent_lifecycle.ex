@@ -302,7 +302,8 @@ defmodule Minga.Editor.AgentLifecycle do
         byte_offset = Map.get(byte_offset_map, idx, 0)
         MarkdownHighlight.stylize(text, highlight, theme_syntax, byte_offset)
 
-      {{:tool_call, %{result: result}}, idx} when is_binary(result) and result != "" ->
+      {{:tool_call, %Minga.Agent.ToolCall{result: result}}, idx}
+      when is_binary(result) and result != "" ->
         byte_offset = Map.get(byte_offset_map, idx, 0)
         # Tool call results use the same markdown/tree-sitter styling pipeline
         text = String.slice(result, 0, @max_styled_result_chars)

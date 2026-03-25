@@ -6,20 +6,11 @@ defmodule Minga.Agent.Message do
   a user prompt, an assistant response, a tool call, or a thinking block.
   """
 
-  @typedoc "Tool call status."
-  @type tool_status :: :running | :complete | :error
+  alias Minga.Agent.ToolCall
+  alias Minga.Agent.TurnUsage
 
   @typedoc "System message severity level."
   @type system_level :: :info | :error
-
-  @typedoc "Per-turn token usage data."
-  @type turn_usage :: %{
-          input: non_neg_integer(),
-          output: non_neg_integer(),
-          cache_read: non_neg_integer(),
-          cache_write: non_neg_integer(),
-          cost: float()
-        }
 
   @typedoc "Image attachment metadata for display in chat."
   @type image_attachment :: %{filename: String.t(), size_kb: non_neg_integer()}
@@ -30,22 +21,20 @@ defmodule Minga.Agent.Message do
           | {:user, String.t(), [image_attachment()]}
           | {:assistant, String.t()}
           | {:thinking, String.t(), boolean()}
-          | {:tool_call, tool_call()}
+          | {:tool_call, ToolCall.t()}
           | {:system, String.t(), system_level()}
-          | {:usage, turn_usage()}
+          | {:usage, TurnUsage.t()}
 
-  @typedoc "Tool call details."
-  @type tool_call :: %{
-          id: String.t(),
-          name: String.t(),
-          args: map(),
-          status: tool_status(),
-          result: String.t(),
-          is_error: boolean(),
-          collapsed: boolean(),
-          started_at: integer() | nil,
-          duration_ms: non_neg_integer() | nil
-        }
+  # Keep these type aliases for backward compatibility with consumers
+  # that reference Message.tool_call() or Message.turn_usage() in specs.
+  @typedoc "Deprecated: use `Minga.Agent.ToolCall.t()` directly."
+  @type tool_call :: ToolCall.t()
+
+  @typedoc "Deprecated: use `Minga.Agent.TurnUsage.t()` directly."
+  @type turn_usage :: TurnUsage.t()
+
+  @typedoc "Deprecated: use `Minga.Agent.ToolCall.status()` directly."
+  @type tool_status :: ToolCall.status()
 
   @doc "Creates a new user message."
   @spec user(String.t()) :: t()
@@ -80,26 +69,15 @@ defmodule Minga.Agent.Message do
   def text({:thinking, t, _collapsed}), do: t
   def text({:tool_call, tc}), do: "#{tc.name}: #{tc.result}"
   def text({:system, t, _level}), do: t
-  def text({:usage, u}), do: "↑#{u.input} ↓#{u.output} $#{u.cost}"
+  def text({:usage, u}), do: TurnUsage.format_short(u)
 
   @doc "Creates a per-turn usage message."
-  @spec usage(turn_usage()) :: t()
-  def usage(data) when is_map(data), do: {:usage, data}
+  @spec usage(TurnUsage.t()) :: t()
+  def usage(%TurnUsage{} = data), do: {:usage, data}
 
   @doc "Creates a new tool call message."
   @spec tool_call(String.t(), String.t(), map()) :: t()
   def tool_call(id, name, args \\ %{}) do
-    {:tool_call,
-     %{
-       id: id,
-       name: name,
-       args: args,
-       status: :running,
-       result: "",
-       is_error: false,
-       collapsed: true,
-       started_at: System.monotonic_time(:millisecond),
-       duration_ms: nil
-     }}
+    {:tool_call, ToolCall.new(id, name, args)}
   end
 end

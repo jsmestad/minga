@@ -2,6 +2,8 @@ defmodule Minga.Agent.SessionStoreTest do
   use ExUnit.Case, async: true
 
   alias Minga.Agent.SessionStore
+  alias Minga.Agent.ToolCall
+  alias Minga.Agent.TurnUsage
 
   @moduletag :tmp_dir
 
@@ -15,7 +17,7 @@ defmodule Minga.Agent.SessionStoreTest do
         {:user, "Hello, how are you?"},
         {:assistant, "I'm doing great!"},
         {:tool_call,
-         %{
+         %ToolCall{
            id: "tc1",
            name: "read_file",
            args: %{"path" => "lib/foo.ex"},
@@ -27,9 +29,9 @@ defmodule Minga.Agent.SessionStoreTest do
            duration_ms: 42
          }},
         {:thinking, "Let me think about this...", true},
-        {:usage, %{input: 100, output: 50, cache_read: 200, cache_write: 0, cost: 0.003}}
+        {:usage, %TurnUsage{input: 100, output: 50, cache_read: 200, cache_write: 0, cost: 0.003}}
       ],
-      usage: %{input: 100, output: 50, cache_read: 200, cache_write: 0, cost: 0.003}
+      usage: %TurnUsage{input: 100, output: 50, cache_read: 200, cache_write: 0, cost: 0.003}
     }
   end
 

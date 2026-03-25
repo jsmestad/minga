@@ -25,7 +25,6 @@ defmodule Minga.Panel.MessageStore do
           last_sent_id: non_neg_integer()
         }
 
-  @enforce_keys []
   defstruct entries: [],
             next_id: 1,
             last_sent_id: 0

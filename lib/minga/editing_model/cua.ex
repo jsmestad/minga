@@ -44,7 +44,6 @@ defmodule Minga.EditingModel.CUA do
           selection: selection()
         }
 
-  @enforce_keys []
   defstruct selection: nil
 
   # ── EditingModel callbacks ─────────────────────────────────────────────────

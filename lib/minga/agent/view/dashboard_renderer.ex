@@ -32,7 +32,8 @@ defmodule Minga.Agent.View.DashboardRenderer do
 
   Returns nil if the model has no known context limit.
   """
-  @spec context_fill_pct(map(), String.t(), non_neg_integer()) :: non_neg_integer() | nil
+  @spec context_fill_pct(Minga.Agent.TurnUsage.t() | map(), String.t(), non_neg_integer()) ::
+          non_neg_integer() | nil
   def context_fill_pct(usage, model_name, context_estimate \\ 0) do
     limit = ModelLimits.context_limit(model_name)
 

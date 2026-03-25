@@ -23,20 +23,14 @@ defmodule Minga.Session do
   @session_filename "session.json"
   @current_version 1
 
+  alias Minga.Session.BufferEntry
+  alias Minga.Session.Snapshot
+
   @typedoc "A snapshot of the current editor session."
-  @type snapshot :: %{
-          version: pos_integer(),
-          buffers: [buffer_entry()],
-          active_file: String.t() | nil,
-          clean_shutdown: boolean()
-        }
+  @type snapshot :: Snapshot.t()
 
   @typedoc "A single buffer's session state."
-  @type buffer_entry :: %{
-          file: String.t(),
-          cursor_line: non_neg_integer(),
-          cursor_col: non_neg_integer()
-        }
+  @type buffer_entry :: BufferEntry.t()
 
   @doc "Returns the session file path."
   @spec session_file(keyword()) :: String.t()
@@ -64,7 +58,7 @@ defmodule Minga.Session do
 
           path ->
             {line, col} = get_cursor(pid)
-            [%{file: path, cursor_line: line, cursor_col: col}]
+            [%BufferEntry{file: path, cursor_line: line, cursor_col: col}]
         end
       end)
 
@@ -74,7 +68,7 @@ defmodule Minga.Session do
         pid -> Buffer.Server.file_path(pid)
       end
 
-    %{
+    %Snapshot{
       version: @current_version,
       buffers: buffers,
       active_file: active_file,
@@ -156,7 +150,7 @@ defmodule Minga.Session do
       {:ok, %{"buffers" => buffers} = raw} ->
         entries =
           Enum.map(buffers, fn b ->
-            %{
+            %BufferEntry{
               file: b["file"],
               cursor_line: b["cursor_line"] || 0,
               cursor_col: b["cursor_col"] || 0
@@ -164,7 +158,7 @@ defmodule Minga.Session do
           end)
 
         {:ok,
-         %{
+         %Snapshot{
            version: raw["version"] || 1,
            buffers: entries,
            active_file: raw["active_file"],
