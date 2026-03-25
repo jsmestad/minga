@@ -1,9 +1,9 @@
-defmodule Minga.EventRecorderTest do
+defmodule Minga.Session.EventRecorderTest do
   use ExUnit.Case, async: true
 
-  alias Minga.EventRecorder
-  alias Minga.EventRecorder.Store
   alias Minga.Events
+  alias Minga.Session.EventRecorder
+  alias Minga.Session.EventRecorder.Store
 
   setup do
     tmp_dir = Path.join(System.tmp_dir!(), "minga_test_#{:erlang.unique_integer([:positive])}")
@@ -225,7 +225,7 @@ defmodule Minga.EventRecorderTest do
       # Insert an old event directly via Store
       db = open_db(db_dir)
 
-      old_record = %Minga.EventRecorder.EventRecord{
+      old_record = %Minga.Session.EventRecorder.EventRecord{
         timestamp: 0,
         wall_clock: ~U[2020-01-01 00:00:00Z],
         source: "user",

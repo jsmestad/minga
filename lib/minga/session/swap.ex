@@ -1,4 +1,4 @@
-defmodule Minga.Swap do
+defmodule Minga.Session.Swap do
   @moduledoc """
   Swap file management for crash recovery.
 

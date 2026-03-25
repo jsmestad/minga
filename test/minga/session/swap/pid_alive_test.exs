@@ -1,8 +1,8 @@
-defmodule Minga.Swap.PidAliveTest do
+defmodule Minga.Session.Swap.PidAliveTest do
   @moduledoc "Tests for Swap.pid_alive?/1 which spawns OS processes."
   use ExUnit.Case, async: false
 
-  alias Minga.Swap
+  alias Minga.Session.Swap
 
   describe "pid_alive?/1" do
     test "returns true for the current OS process" do

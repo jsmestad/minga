@@ -21,7 +21,6 @@ defmodule Minga.Editor do
 
   alias Minga.Diagnostics.Decorations, as: DiagDecorations
   alias Minga.Session
-  alias Minga.Swap
 
   alias Minga.Git.Repo, as: GitRepo
 
@@ -491,7 +490,7 @@ defmodule Minga.Editor do
   # ── Swap file recovery ────────────────────────────────────────────────────────
 
   def handle_info(:check_swap_recovery, state) do
-    recoverable = Swap.Recovery.scan(swap_dir: state.swap_dir)
+    recoverable = Minga.Session.scan_recoverable_swaps(swap_dir: state.swap_dir)
 
     new_state =
       case recoverable do
@@ -1616,7 +1615,7 @@ defmodule Minga.Editor do
     put_in(new_state.workspace.file_tree.tree, FileTree.reveal(tree, path))
   end
 
-  @spec recover_swap_entries(state(), [Swap.Recovery.entry()]) :: state()
+  @spec recover_swap_entries(state(), [Minga.Session.swap_entry()]) :: state()
   defp recover_swap_entries(state, entries) do
     count = length(entries)
 
@@ -1626,9 +1625,9 @@ defmodule Minga.Editor do
     Enum.reduce(entries, state, &recover_swap_entry/2)
   end
 
-  @spec recover_swap_entry(Swap.Recovery.entry(), state()) :: state()
+  @spec recover_swap_entry(Minga.Session.swap_entry(), state()) :: state()
   defp recover_swap_entry(entry, state) do
-    case Swap.Recovery.recover(entry.swap_path) do
+    case Minga.Session.recover_swap_file(entry.swap_path) do
       {:ok, file_path, content} ->
         state = log_message(state, "Recovered: #{Path.basename(file_path)}")
         recover_buffer(state, file_path, content)

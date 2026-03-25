@@ -1696,7 +1696,7 @@ defmodule Minga.Buffer.Server do
     swap_opts = [swap_dir: dir]
 
     Task.start(fn ->
-      case Minga.Swap.write(path, content, swap_opts) do
+      case Minga.Session.write_swap(path, content, swap_opts) do
         :ok ->
           :ok
 
@@ -1986,7 +1986,7 @@ defmodule Minga.Buffer.Server do
   @spec delete_swap_file(state()) :: :ok
   defp delete_swap_file(%{file_path: path, swap_dir: dir})
        when is_binary(path) and is_binary(dir) do
-    Minga.Swap.delete(path, swap_dir: dir)
+    Minga.Session.delete_swap(path, swap_dir: dir)
   end
 
   defp delete_swap_file(_state), do: :ok

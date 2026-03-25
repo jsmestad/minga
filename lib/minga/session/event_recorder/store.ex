@@ -1,4 +1,4 @@
-defmodule Minga.EventRecorder.Store do
+defmodule Minga.Session.EventRecorder.Store do
   @moduledoc """
   SQLite storage backend for the event recording system.
 
@@ -11,7 +11,7 @@ defmodule Minga.EventRecorder.Store do
   No Ecto, no migration framework.
   """
 
-  alias Minga.EventRecorder.EventRecord
+  alias Minga.Session.EventRecorder.EventRecord
 
   @type db :: Exqlite.Sqlite3.db()
 

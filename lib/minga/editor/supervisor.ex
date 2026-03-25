@@ -40,7 +40,7 @@ defmodule Minga.Editor.Supervisor do
       {Minga.Editor,
        [
          backend: backend,
-         swap_dir: Minga.Swap.swap_dir(),
+         swap_dir: Minga.Session.swap_dir(),
          session_dir: Path.dirname(Minga.Session.session_file())
        ]}
     ]

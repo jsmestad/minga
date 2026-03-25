@@ -1,8 +1,8 @@
-defmodule Minga.EventRecorder.StoreTest do
+defmodule Minga.Session.EventRecorder.StoreTest do
   use ExUnit.Case, async: true
 
-  alias Minga.EventRecorder.EventRecord
-  alias Minga.EventRecorder.Store
+  alias Minga.Session.EventRecorder.EventRecord
+  alias Minga.Session.EventRecorder.Store
 
   setup do
     {:ok, db} = Store.open_memory()

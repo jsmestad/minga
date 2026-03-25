@@ -1,4 +1,4 @@
-defmodule Minga.EventRecorder.EventRecord do
+defmodule Minga.Session.EventRecorder.EventRecord do
   @moduledoc """
   A single recorded event from the editor's event stream.
 

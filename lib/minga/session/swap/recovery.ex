@@ -1,4 +1,4 @@
-defmodule Minga.Swap.Recovery do
+defmodule Minga.Session.Swap.Recovery do
   @moduledoc """
   Scans the swap directory for orphaned swap files and determines
   which ones are recoverable.
@@ -12,7 +12,7 @@ defmodule Minga.Swap.Recovery do
   Corrupt swap files are cleaned up automatically.
   """
 
-  alias Minga.Swap
+  alias Minga.Session.Swap
 
   @typedoc "A recoverable swap file entry."
   @type entry :: %{

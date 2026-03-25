@@ -1,7 +1,7 @@
-defmodule Minga.SwapTest do
+defmodule Minga.Session.SwapTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Swap
+  alias Minga.Session.Swap
 
   @moduletag :tmp_dir
 

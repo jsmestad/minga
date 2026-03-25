@@ -1,4 +1,4 @@
-defmodule Minga.EventRecorder do
+defmodule Minga.Session.EventRecorder do
   @moduledoc """
   Persistent event recorder for the editor's event stream.
 
@@ -7,7 +7,7 @@ defmodule Minga.EventRecorder do
   GenServer: it receives events via cast (never blocking the broadcaster)
   and writes them to the database synchronously within its own process.
 
-  Downstream features query the database through `Minga.EventRecorder.Store`
+  Downstream features query the database through `Minga.Session.EventRecorder.Store`
   using separate read connections, which WAL mode supports without blocking
   the writer.
 
@@ -25,9 +25,9 @@ defmodule Minga.EventRecorder do
 
   use GenServer
 
-  alias Minga.EventRecorder.EventRecord
-  alias Minga.EventRecorder.Store
   alias Minga.Events
+  alias Minga.Session.EventRecorder.EventRecord
+  alias Minga.Session.EventRecorder.Store
 
   @default_db_dir Path.expand("~/.local/share/minga")
   @db_filename "events.db"

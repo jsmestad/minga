@@ -1,8 +1,8 @@
-defmodule Minga.EventRecorder.EventRecordTest do
+defmodule Minga.Session.EventRecorder.EventRecordTest do
   use ExUnit.Case, async: true
   use ExUnitProperties
 
-  alias Minga.EventRecorder.EventRecord
+  alias Minga.Session.EventRecorder.EventRecord
 
   describe "scope encoding round-trip" do
     property "encode_scope/decode_scope is symmetric" do
