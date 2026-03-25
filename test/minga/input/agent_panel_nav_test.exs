@@ -49,7 +49,7 @@ defmodule Minga.Input.AgentPanelNavTest do
         viewport: Viewport.new(24, 80),
         agent_ui: agentic
       },
-      agent: agent,
+      shell_state: %Minga.Shell.Traditional.State{agent: agent},
       focus_stack: [Scoped, Minga.Input.ModeFSM]
     }
   end

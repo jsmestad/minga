@@ -19,7 +19,7 @@ defmodule Minga.Editor.Commands.AgentCodeBlockTest do
         buffers: %Buffers{},
         agent_ui: %UIState{}
       },
-      agent: %AgentState{}
+      shell_state: %Minga.Shell.Traditional.State{agent: %AgentState{}}
     }
   end
 

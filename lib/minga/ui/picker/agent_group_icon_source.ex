@@ -70,7 +70,7 @@ defmodule Minga.UI.Picker.AgentGroupIconSource do
 
   @impl true
   @spec candidates(term()) :: [Item.t()]
-  def candidates(%{tab_bar: %TabBar{} = tb}) do
+  def candidates(%{shell_state: %{tab_bar: %TabBar{} = tb}}) do
     current_icon =
       case TabBar.active_group(tb) do
         %AgentGroup{icon: icon} -> icon
@@ -92,10 +92,13 @@ defmodule Minga.UI.Picker.AgentGroupIconSource do
 
   @impl true
   @spec on_select(Item.t(), term()) :: term()
-  def on_select(%Item{id: icon_name}, %{tab_bar: %TabBar{} = tb} = state) do
+  def on_select(
+        %Item{id: icon_name},
+        %{shell_state: %{tab_bar: %TabBar{} = tb}} = state
+      ) do
     ws_id = TabBar.active_group_id(tb)
     tb = TabBar.update_group(tb, ws_id, &AgentGroup.set_icon(&1, icon_name))
-    %{state | tab_bar: tb}
+    Minga.Editor.State.set_tab_bar(state, tb)
   end
 
   def on_select(_, state), do: state

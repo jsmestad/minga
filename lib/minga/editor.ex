@@ -627,7 +627,7 @@ defmodule Minga.Editor do
     # tree-sitter highlights, regardless of whether it's the active
     # buffer or not.
     new_state =
-      if pid != nil and pid == new_state.agent.buffer do
+      if pid != nil and pid == new_state.shell_state.agent.buffer do
         AgentLifecycle.update_styled_cache(new_state)
       else
         new_state
@@ -1262,10 +1262,11 @@ defmodule Minga.Editor do
   # the Tab struct so the tab bar can render status indicators.
   @spec update_background_tab_status(EditorState.t(), pid(), term()) :: EditorState.t()
   defp update_background_tab_status(state, session_pid, {:status_changed, status}) do
-    case state.tab_bar && TabBar.find_by_session(state.tab_bar, session_pid) do
+    case state.shell_state.tab_bar &&
+           TabBar.find_by_session(state.shell_state.tab_bar, session_pid) do
       %Tab{id: id} ->
-        tb = TabBar.update_tab(state.tab_bar, id, &Tab.set_agent_status(&1, status))
-        %{state | tab_bar: tb}
+        tb = TabBar.update_tab(state.shell_state.tab_bar, id, &Tab.set_agent_status(&1, status))
+        EditorState.set_tab_bar(state, tb)
 
       _ ->
         state
@@ -1291,12 +1292,16 @@ defmodule Minga.Editor do
 
   @spec set_tab_attention(EditorState.t(), pid()) :: EditorState.t()
   defp set_tab_attention(state, session_pid) do
-    case state.tab_bar && TabBar.find_by_session(state.tab_bar, session_pid) do
+    case state.shell_state.tab_bar &&
+           TabBar.find_by_session(state.shell_state.tab_bar, session_pid) do
       nil ->
         state
 
       _tab ->
-        %{state | tab_bar: TabBar.set_attention_by_session(state.tab_bar, session_pid, true)}
+        EditorState.set_tab_bar(
+          state,
+          TabBar.set_attention_by_session(state.shell_state.tab_bar, session_pid, true)
+        )
     end
   end
 
@@ -1787,7 +1792,7 @@ defmodule Minga.Editor do
     # it. This ensures the right tab is closed when the user clicks X
     # on a background tab.
     state =
-      if state.tab_bar.active_id != id do
+      if state.shell_state.tab_bar.active_id != id do
         EditorState.switch_tab(state, id)
       else
         state
@@ -2034,20 +2039,29 @@ defmodule Minga.Editor do
     end
   end
 
-  defp handle_gui_action(%{tab_bar: %TabBar{} = tb} = state, {:agent_group_close, ws_id}) do
-    %{state | tab_bar: TabBar.remove_group(tb, ws_id)}
+  defp handle_gui_action(
+         %{shell_state: %{shell_state: %{tab_bar: %TabBar{} = tb}}} = state,
+         {:agent_group_close, ws_id}
+       ) do
+    EditorState.set_tab_bar(state, TabBar.remove_group(tb, ws_id))
   end
 
-  defp handle_gui_action(%{tab_bar: %TabBar{} = tb} = state, {:agent_group_rename, ws_id, name}) do
+  defp handle_gui_action(
+         %{shell_state: %{shell_state: %{tab_bar: %TabBar{} = tb}}} = state,
+         {:agent_group_rename, ws_id, name}
+       ) do
     alias Minga.Editor.State.AgentGroup
     tb = TabBar.update_group(tb, ws_id, &AgentGroup.rename(&1, name))
-    %{state | tab_bar: tb}
+    EditorState.set_tab_bar(state, tb)
   end
 
-  defp handle_gui_action(%{tab_bar: %TabBar{} = tb} = state, {:agent_group_set_icon, ws_id, icon}) do
+  defp handle_gui_action(
+         %{shell_state: %{shell_state: %{tab_bar: %TabBar{} = tb}}} = state,
+         {:agent_group_set_icon, ws_id, icon}
+       ) do
     alias Minga.Editor.State.AgentGroup
     tb = TabBar.update_group(tb, ws_id, &AgentGroup.set_icon(&1, icon))
-    %{state | tab_bar: tb}
+    EditorState.set_tab_bar(state, tb)
   end
 
   defp handle_gui_action(state, {:space_leader_chord, codepoint, modifiers}) do

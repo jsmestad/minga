@@ -193,7 +193,8 @@ defmodule Minga.Editor.PickerUI do
         %{shell_state: %{picker_ui: %{action_menu: {_actions, _sel}}}} = state,
         _cp,
         _mods
-      ), do: state
+      ),
+      do: state
 
   # ── Normal picker handlers ─────────────────────────────────────────────────
 

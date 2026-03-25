@@ -60,7 +60,7 @@ defmodule Minga.Editor.Commands.Agent do
     case EditorState.active_tab_kind(state) do
       :agent ->
         # On agent tab: switch back to most recent file tab
-        case TabBar.most_recent_of_kind(state.tab_bar, :file) do
+        case TabBar.most_recent_of_kind(EditorState.tab_bar(state), :file) do
           %Tab{id: file_id} -> EditorState.switch_tab(state, file_id)
           nil -> state
         end
@@ -125,12 +125,12 @@ defmodule Minga.Editor.Commands.Agent do
         # Create agent tab in the background (don't switch to it).
         # Group creation happens later in start_agent_session when
         # the session pid is available (ensure_agent_workspace/2).
-        {tb, new_tab} = TabBar.add(state.tab_bar, :agent, "Agent")
+        {tb, new_tab} = TabBar.add(EditorState.tab_bar(state), :agent, "Agent")
         tb = TabBar.update_context(tb, new_tab.id, context)
 
         # Switch back to the original active tab
-        tb = %{tb | active_id: state.tab_bar.active_id}
-        %{state | tab_bar: tb}
+        tb = %{tb | active_id: EditorState.tab_bar(state).active_id}
+        EditorState.set_tab_bar(state, tb)
 
       _existing ->
         state
@@ -175,8 +175,8 @@ defmodule Minga.Editor.Commands.Agent do
   def cycle_agent_tabs(state), do: toggle_agent_split(state)
 
   @spec find_agent_tab(state()) :: Tab.t() | nil
-  defp find_agent_tab(%{tab_bar: nil}), do: nil
-  defp find_agent_tab(%{tab_bar: tb}), do: TabBar.find_by_kind(tb, :agent)
+  defp find_agent_tab(%{shell_state: %{tab_bar: nil}}), do: nil
+  defp find_agent_tab(%{shell_state: %{tab_bar: tb}}), do: TabBar.find_by_kind(tb, :agent)
 
   # Creates a new file tab for the active buffer and switches to it.
   # Used when deactivating the agentic view and no file tab exists yet
@@ -507,7 +507,7 @@ defmodule Minga.Editor.Commands.Agent do
       # Update the Tab's session reference for event routing
       state =
         case state do
-          %{tab_bar: %TabBar{active_id: id}} ->
+          %{shell_state: %{tab_bar: %TabBar{active_id: id}}} ->
             EditorState.set_tab_session(state, id, pid)
 
           _ ->

@@ -16,25 +16,25 @@ defmodule Minga.Editor.Commands.AgentGroup do
 
   @doc "Switch to the next agent group's first tab."
   @spec agent_group_next(state()) :: state()
-  def agent_group_next(%{tab_bar: %TabBar{} = tb} = state) do
+  def agent_group_next(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
     switch_via_group(state, TabBar.next_agent_group(tb))
   end
 
   @doc "Switch to the previous agent group's first tab."
   @spec agent_group_prev(state()) :: state()
-  def agent_group_prev(%{tab_bar: %TabBar{} = tb} = state) do
+  def agent_group_prev(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
     switch_via_group(state, TabBar.prev_agent_group(tb))
   end
 
   @doc "Switch to the next agent group (same as next)."
   @spec agent_group_next_agent(state()) :: state()
-  def agent_group_next_agent(%{tab_bar: %TabBar{} = tb} = state) do
+  def agent_group_next_agent(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
     switch_via_group(state, TabBar.next_agent_group(tb))
   end
 
   @doc "Switch to the first ungrouped (user) tab."
   @spec switch_to_ungrouped(state()) :: state()
-  def switch_to_ungrouped(%{tab_bar: %TabBar{} = tb} = state) do
+  def switch_to_ungrouped(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
     case TabBar.tabs_in_group(tb, 0) do
       [first | _] -> EditorState.switch_tab(state, first.id)
       [] -> state
@@ -43,7 +43,7 @@ defmodule Minga.Editor.Commands.AgentGroup do
 
   @doc "Toggle between ungrouped tabs and the last agent group."
   @spec agent_group_toggle(state()) :: state()
-  def agent_group_toggle(%{tab_bar: %TabBar{} = tb} = state) do
+  def agent_group_toggle(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
     current_ws = TabBar.active_group_id(tb)
     target_group_id = if current_ws == 0, do: last_agent_id(tb), else: 0
     target_tb = TabBar.switch_to_group(tb, target_group_id)
@@ -56,8 +56,8 @@ defmodule Minga.Editor.Commands.AgentGroup do
   The ungrouped group (id 0) cannot be closed.
   """
   @spec agent_group_close(state()) :: state()
-  def agent_group_close(%{tab_bar: %TabBar{} = tb} = state) do
-    %{state | tab_bar: TabBar.remove_group(tb, TabBar.active_group_id(tb))}
+  def agent_group_close(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
+    EditorState.set_tab_bar(state, TabBar.remove_group(tb, TabBar.active_group_id(tb)))
   end
 
   @doc "Open the agent group picker."
@@ -81,7 +81,7 @@ defmodule Minga.Editor.Commands.AgentGroup do
   (minibuffer) and GUI (native prompt rendering).
   """
   @spec agent_group_rename(state()) :: state()
-  def agent_group_rename(%{tab_bar: %TabBar{} = tb} = state) do
+  def agent_group_rename(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
     ws = TabBar.active_group(tb)
     current_name = if ws, do: ws.label, else: ""
 
@@ -90,7 +90,7 @@ defmodule Minga.Editor.Commands.AgentGroup do
 
   @doc "Jump to agent group by number (1-based, 0 = ungrouped)."
   @spec workspace_goto(state(), non_neg_integer()) :: state()
-  def workspace_goto(%{tab_bar: %TabBar{} = tb} = state, number) do
+  def workspace_goto(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, number) do
     ws =
       case number do
         0 -> TabBar.get_group(tb, 0)

@@ -28,7 +28,7 @@ defmodule Minga.UI.Picker.AgentSessionSource do
 
   @impl true
   @spec candidates(term()) :: [Item.t()]
-  def candidates(%{tab_bar: %TabBar{} = tb} = _state) do
+  def candidates(%{shell_state: %{tab_bar: %TabBar{} = tb}} = _state) do
     live = tab_candidates(tb)
     disk = disk_candidates()
     live_ids = MapSet.new(live, fn %Item{id: {id, _}} -> id end)

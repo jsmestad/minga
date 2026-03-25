@@ -112,7 +112,7 @@ defmodule Minga.Editor.Startup do
       suppress_tool_prompts: Keyword.get(opts, :suppress_tool_prompts, false)
     }
 
-    state = %{state | tab_bar: initial_tab_bar(active_buf, keymap_scope)}
+    state = EditorState.set_tab_bar(state, initial_tab_bar(active_buf, keymap_scope))
 
     # Store the agent buffer reference if one was created.
     state =
@@ -128,8 +128,9 @@ defmodule Minga.Editor.Startup do
     # Without this, the first tab starts with an empty context, and
     # restore_tab_context falls back to file defaults (wrong for agent tabs).
     context = EditorState.snapshot_tab_context(state)
-    tb = TabBar.update_context(state.tab_bar, state.tab_bar.active_id, context)
-    %{state | tab_bar: tb}
+    current_tb = EditorState.tab_bar(state)
+    tb = TabBar.update_context(current_tb, current_tb.active_id, context)
+    EditorState.set_tab_bar(state, tb)
   end
 
   @doc """

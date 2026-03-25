@@ -167,7 +167,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
   # ── Tab bar ──
 
   @spec build_gui_tab_bar_cmd(state()) :: binary() | nil
-  defp build_gui_tab_bar_cmd(%{tab_bar: %TabBar{} = tb} = state) do
+  defp build_gui_tab_bar_cmd(%{shell_state: %{shell_state: %{tab_bar: %TabBar{} = tb}}} = state) do
     active_buf = active_window_buffer(state)
     fp = :erlang.phash2({tb, active_buf})
 
@@ -177,10 +177,10 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
     end
   end
 
-  defp build_gui_tab_bar_cmd(%{tab_bar: nil}), do: nil
+  defp build_gui_tab_bar_cmd(%{shell_state: %{tab_bar: nil}}), do: nil
 
   @spec build_gui_agent_groups_cmd(state()) :: binary() | nil
-  defp build_gui_agent_groups_cmd(%{tab_bar: %TabBar{} = tb}) do
+  defp build_gui_agent_groups_cmd(%{shell_state: %{shell_state: %{tab_bar: %TabBar{} = tb}}}) do
     # Only send workspace bar when agent workspaces exist (tier >= 1).
     # Also include workspace count so the GUI hides the indicator when
     # all agent workspaces are removed.
@@ -552,7 +552,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
   defp build_gui_agent_chat_cmd(state) do
     active_window = Map.get(state.workspace.windows.map, state.workspace.windows.active)
     is_agent_chat = active_window != nil && Content.agent_chat?(active_window.content)
-    session = state.agent.session
+    session = state.shell_state.agent.session
 
     # Compute fingerprint from cheap state fields to avoid calling
     # AgentSession.messages (expensive GenServer.call that allocates a
@@ -571,8 +571,8 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
         text = safe_prompt_content(panel.prompt_buffer)
 
         {:erlang.phash2(
-           {:visible, state.agent.status, state.agent.pending_approval, styled_len,
-            panel.model_name, text, panel.message_version, view.help_visible}
+           {:visible, state.shell_state.agent.status, state.shell_state.agent.pending_approval,
+            styled_len, panel.model_name, text, panel.message_version, view.help_visible}
          ), text}
       else
         {:not_visible, ""}
@@ -606,7 +606,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
   defp build_agent_chat_data(state, prompt_text) do
     active_window = Map.get(state.workspace.windows.map, state.workspace.windows.active)
     is_agent_chat = active_window != nil && Content.agent_chat?(active_window.content)
-    session = state.agent.session
+    session = state.shell_state.agent.session
 
     if is_agent_chat && session do
       messages_with_ids =
@@ -634,10 +634,10 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
       %{
         visible: true,
         messages: gui_messages,
-        status: state.agent.status || :idle,
+        status: state.shell_state.agent.status || :idle,
         model: state.workspace.agent_ui.panel.model_name,
         prompt: prompt_text,
-        pending_approval: state.agent.pending_approval,
+        pending_approval: state.shell_state.agent.pending_approval,
         help_visible: help_visible,
         help_groups: help_groups
       }

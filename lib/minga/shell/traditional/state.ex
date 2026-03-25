@@ -24,7 +24,9 @@ defmodule Minga.Shell.Traditional.State do
           prompt_ui: Minga.Editor.State.Prompt.t(),
           whichkey: Minga.Editor.State.WhichKey.t(),
           bottom_panel: Minga.Editor.BottomPanel.t(),
-          git_status_panel: Minga.Frontend.Protocol.GUI.git_status_data() | nil
+          git_status_panel: Minga.Frontend.Protocol.GUI.git_status_data() | nil,
+          tab_bar: Minga.Editor.State.TabBar.t() | nil,
+          agent: Minga.Editor.State.Agent.t()
         }
 
   defstruct nav_flash: nil,
@@ -35,5 +37,7 @@ defmodule Minga.Shell.Traditional.State do
             prompt_ui: %Minga.Editor.State.Prompt{},
             whichkey: %Minga.Editor.State.WhichKey{},
             bottom_panel: %Minga.Editor.BottomPanel{},
-            git_status_panel: nil
+            git_status_panel: nil,
+            tab_bar: nil,
+            agent: %Minga.Editor.State.Agent{}
 end

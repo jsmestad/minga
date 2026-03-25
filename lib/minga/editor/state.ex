@@ -88,12 +88,10 @@ defmodule Minga.Editor.State do
             parser_status: :available,
             signature_help: nil,
             focus_stack: [],
-            tab_bar: nil,
             capabilities: %Capabilities{},
             layout: nil,
             modeline_click_regions: [],
             tab_bar_click_regions: [],
-            agent: %AgentState{},
             last_cursor_line: nil,
             last_test_command: nil,
             pending_quit: nil,
@@ -137,12 +135,10 @@ defmodule Minga.Editor.State do
           parser_status: Minga.Editor.Modeline.parser_status(),
           signature_help: Minga.Editor.SignatureHelp.t() | nil,
           focus_stack: [module()],
-          tab_bar: TabBar.t() | nil,
           capabilities: Capabilities.t(),
           layout: Minga.Editor.Layout.t() | nil,
           modeline_click_regions: [Minga.Editor.Modeline.click_region()],
           tab_bar_click_regions: [Minga.Editor.TabBarRenderer.click_region()],
-          agent: AgentState.t(),
           last_cursor_line: non_neg_integer() | nil,
           last_test_command: {String.t(), String.t()} | nil,
           pending_quit: :quit | :quit_all | nil,
@@ -319,6 +315,30 @@ defmodule Minga.Editor.State do
     %{state | shell_state: %{ss | git_status_panel: nil}}
   end
 
+  # ── Tab bar ────────────────────────────────────────────────────────────
+
+  @doc "Returns the tab bar state, or nil."
+  @spec tab_bar(t()) :: TabBar.t() | nil
+  def tab_bar(%{shell_state: ss}), do: ss.tab_bar
+
+  @doc "Replaces the tab bar state."
+  @spec set_tab_bar(t(), TabBar.t() | nil) :: t()
+  def set_tab_bar(%{shell_state: ss} = state, tb) do
+    %{state | shell_state: %{ss | tab_bar: tb}}
+  end
+
+  # ── Agent lifecycle ────────────────────────────────────────────────────
+
+  @doc "Returns the agent session lifecycle state."
+  @spec agent(t()) :: AgentState.t()
+  def agent(%{shell_state: ss}), do: ss.agent
+
+  @doc "Replaces the agent session lifecycle state."
+  @spec set_agent(t(), AgentState.t()) :: t()
+  def set_agent(%{shell_state: ss} = state, agent) do
+    %{state | shell_state: %{ss | agent: agent}}
+  end
+
   # ── Convenience accessors ─────────────────────────────────────────────────
 
   @doc "Returns the active buffer pid."
@@ -433,8 +453,10 @@ defmodule Minga.Editor.State do
     state = %{state | workspace: %{state.workspace | buffers: new_bs}, buffer_monitors: monitors}
 
     # Clear agent buffer or prompt buffer if the dead pid matches
+    agent = state.shell_state.agent
+
     state =
-      if state.agent != nil and state.agent.buffer == pid do
+      if agent != nil and agent.buffer == pid do
         AgentAccess.update_agent(state, fn a -> %{a | buffer: nil} end)
       else
         state
@@ -678,7 +700,10 @@ defmodule Minga.Editor.State do
   dedicated file tab.
   """
   @spec add_buffer(t(), pid()) :: t()
-  def add_buffer(%__MODULE__{workspace: %{buffers: bs}, tab_bar: %TabBar{} = tb} = state, pid) do
+  def add_buffer(
+        %__MODULE__{workspace: %{buffers: bs}, shell_state: %{tab_bar: %TabBar{} = tb}} = state,
+        pid
+      ) do
     label = buffer_label(pid)
     active_tab = TabBar.active(tb)
 
@@ -717,7 +742,7 @@ defmodule Minga.Editor.State do
   # tab, creates a new one, and syncs the buffer into the new tab's window.
   @spec add_buffer_as_new_file_tab(t(), String.t()) :: t()
   defp add_buffer_as_new_file_tab(state, label) do
-    tb = state.tab_bar
+    tb = tab_bar(state)
 
     # Snapshot current tab before leaving
     current_ctx = snapshot_tab_context(state)
@@ -725,18 +750,18 @@ defmodule Minga.Editor.State do
 
     # Create file tab (TabBar.add auto-activates it)
     {tb, new_tab} = TabBar.add(tb, :file, label)
-    state = %{state | tab_bar: tb}
+    state = set_tab_bar(state, tb)
     state = sync_active_window_buffer(state)
 
     # Snapshot the new tab's context
     new_ctx = snapshot_tab_context(state)
-    tb = TabBar.update_context(state.tab_bar, new_tab.id, new_ctx)
+    tb = TabBar.update_context(tab_bar(state), new_tab.id, new_ctx)
 
     Log.debug(:editor, fn ->
       "[tab] add_buffer new file tab=#{new_tab.id} label=#{label}"
     end)
 
-    %{state | tab_bar: tb}
+    set_tab_bar(state, tb)
   end
 
   # Finds an existing file tab that shows the same buffer (by label match).
@@ -751,13 +776,15 @@ defmodule Minga.Editor.State do
   # Updates the active file tab's label to match the current buffer name.
   # No-op if there's no tab bar or the active tab isn't a file tab.
   @spec sync_active_tab_label(t()) :: t()
-  defp sync_active_tab_label(%__MODULE__{tab_bar: nil} = state), do: state
+  defp sync_active_tab_label(%__MODULE__{shell_state: %{tab_bar: nil}} = state), do: state
 
-  defp sync_active_tab_label(%__MODULE__{tab_bar: tb, workspace: %{buffers: bs}} = state) do
+  defp sync_active_tab_label(
+         %__MODULE__{shell_state: %{tab_bar: tb}, workspace: %{buffers: bs}} = state
+       ) do
     case TabBar.active(tb) do
       %Tab{kind: :file} ->
         label = buffer_label(bs.active)
-        %{state | tab_bar: TabBar.update_label(tb, tb.active_id, label)}
+        set_tab_bar(state, TabBar.update_label(tb, tb.active_id, label))
 
       _ ->
         state
@@ -768,7 +795,7 @@ defmodule Minga.Editor.State do
   # is an agent tab and we need a dedicated file tab for the buffer.
   @spec add_buffer_as_new_tab(t(), String.t()) :: t()
   defp add_buffer_as_new_tab(state, label) do
-    tb = state.tab_bar
+    tb = tab_bar(state)
 
     # Snapshot current tab before leaving.
     current_ctx = snapshot_tab_context(state)
@@ -780,18 +807,18 @@ defmodule Minga.Editor.State do
     # Leave agent UI view: reset to editor scope.
     state = AgentAccess.update_agent_ui(state, fn _ -> UIState.new() end)
     state = put_in(state.workspace.keymap_scope, :editor)
-    state = %{state | tab_bar: tb}
+    state = set_tab_bar(state, tb)
     state = sync_active_window_buffer(state)
 
     # Snapshot the new tab's context.
     new_ctx = snapshot_tab_context(state)
-    tb = TabBar.update_context(state.tab_bar, new_tab.id, new_ctx)
+    tb = TabBar.update_context(tab_bar(state), new_tab.id, new_ctx)
 
     Log.debug(:editor, fn ->
       "[tab] add_buffer new tab=#{new_tab.id} label=#{label}"
     end)
 
-    %{state | tab_bar: tb}
+    set_tab_bar(state, tb)
   end
 
   @doc """
@@ -1212,9 +1239,9 @@ defmodule Minga.Editor.State do
   entire visual context changes.
   """
   @spec switch_tab(t(), Tab.id()) :: t()
-  def switch_tab(%__MODULE__{tab_bar: nil} = state, _target_id), do: state
+  def switch_tab(%__MODULE__{shell_state: %{tab_bar: nil}} = state, _target_id), do: state
 
-  def switch_tab(%__MODULE__{tab_bar: tb} = state, target_id) do
+  def switch_tab(%__MODULE__{shell_state: %{tab_bar: tb}} = state, target_id) do
     current_id = tb.active_id
 
     if current_id == target_id do
@@ -1235,7 +1262,7 @@ defmodule Minga.Editor.State do
 
       # Restore target tab's context
       %Tab{} = target = TabBar.active(tb)
-      state = %{state | tab_bar: tb}
+      state = set_tab_bar(state, tb)
 
       state = restore_tab_context(state, target.context)
 
@@ -1245,10 +1272,11 @@ defmodule Minga.Editor.State do
       state = rebuild_agent_from_session(state, target)
 
       # Clear attention flag on the tab we're switching to.
-      state = %{
-        state
-        | tab_bar: TabBar.update_tab(state.tab_bar, target_id, &Tab.set_attention(&1, false))
-      }
+      state =
+        set_tab_bar(
+          state,
+          TabBar.update_tab(tab_bar(state), target_id, &Tab.set_attention(&1, false))
+        )
 
       # Restart spinner for incoming agent if it's busy.
       state = maybe_restart_incoming_spinner(state)
@@ -1265,14 +1293,14 @@ defmodule Minga.Editor.State do
   Returns the active tab, or nil if the tab bar isn't initialized.
   """
   @spec active_tab(t()) :: Tab.t() | nil
-  def active_tab(%__MODULE__{tab_bar: nil}), do: nil
-  def active_tab(%__MODULE__{tab_bar: tb}), do: TabBar.active(tb)
+  def active_tab(%__MODULE__{shell_state: %{tab_bar: nil}}), do: nil
+  def active_tab(%__MODULE__{shell_state: %{tab_bar: tb}}), do: TabBar.active(tb)
 
   @doc "Finds a file tab whose context has the given buffer pid as active."
   @spec find_tab_by_buffer(t(), pid()) :: Tab.t() | nil
-  def find_tab_by_buffer(%__MODULE__{tab_bar: nil}, _pid), do: nil
+  def find_tab_by_buffer(%__MODULE__{shell_state: %{tab_bar: nil}}, _pid), do: nil
 
-  def find_tab_by_buffer(%__MODULE__{tab_bar: tb}, pid) do
+  def find_tab_by_buffer(%__MODULE__{shell_state: %{tab_bar: tb}}, pid) do
     Enum.find(tb.tabs, fn tab ->
       tab.kind == :file and tab_has_active_buffer?(tab, pid)
     end)
@@ -1292,9 +1320,9 @@ defmodule Minga.Editor.State do
   Returns the kind of the active tab, or `:file` as default.
   """
   @spec active_tab_kind(t()) :: Tab.kind()
-  def active_tab_kind(%__MODULE__{tab_bar: nil}), do: :file
+  def active_tab_kind(%__MODULE__{shell_state: %{tab_bar: nil}}), do: :file
 
-  def active_tab_kind(%__MODULE__{tab_bar: tb}) do
+  def active_tab_kind(%__MODULE__{shell_state: %{tab_bar: tb}}) do
     %Tab{kind: kind} = TabBar.active(tb)
     kind
   end
@@ -1323,8 +1351,8 @@ defmodule Minga.Editor.State do
   Called when a session is started or switched so `find_by_session/2` works.
   """
   @spec set_tab_session(t(), Tab.id(), pid() | nil) :: t()
-  def set_tab_session(%__MODULE__{tab_bar: tb} = state, tab_id, session_pid) do
-    %{state | tab_bar: TabBar.update_tab(tb, tab_id, &Tab.set_session(&1, session_pid))}
+  def set_tab_session(%__MODULE__{shell_state: %{tab_bar: tb}} = state, tab_id, session_pid) do
+    set_tab_bar(state, TabBar.update_tab(tb, tab_id, &Tab.set_session(&1, session_pid)))
   end
 
   # Rebuilds state.agent from the Session process when switching to an

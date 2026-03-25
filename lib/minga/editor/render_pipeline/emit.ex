@@ -189,7 +189,9 @@ defmodule Minga.Editor.RenderPipeline.Emit do
         title = Title.format(state, format)
 
         # Prepend [!] when any agent tab needs attention (TUI only).
-        if state.tab_bar && TabBar.any_attention?(state.tab_bar) do
+        tb = state.shell_state.tab_bar
+
+        if tb && TabBar.any_attention?(tb) do
           "[!] " <> title
         else
           title

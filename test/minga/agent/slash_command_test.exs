@@ -79,14 +79,16 @@ defmodule Minga.Agent.SlashCommandTest do
           vim: VimState.new(),
           agent_ui: UIState.new()
         },
-        agent: %AgentState{
-          session: session,
-          status: :idle,
-          error: nil,
-          spinner_timer: nil,
-          buffer: nil
-        },
-        shell_state: %Minga.Shell.Traditional.State{status_msg: nil}
+        shell_state: %Minga.Shell.Traditional.State{
+          status_msg: nil,
+          agent: %AgentState{
+            session: session,
+            status: :idle,
+            error: nil,
+            spinner_timer: nil,
+            buffer: nil
+          }
+        }
       }
     end
 

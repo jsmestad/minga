@@ -35,7 +35,7 @@ defmodule Minga.Editor.Commands.BufferManagementTest do
 
   defp tab_count(editor) do
     state = :sys.get_state(editor)
-    TabBar.count(state.tab_bar)
+    TabBar.count(state.shell_state.tab_bar)
   end
 
   describe "command mode" do
@@ -183,9 +183,13 @@ defmodule Minga.Editor.Commands.BufferManagementTest do
   defp add_second_tab(editor) do
     :sys.replace_state(editor, fn state ->
       {:ok, buffer2} = BufferServer.start_link(content: "second tab content")
-      {new_tb, _tab} = TabBar.add(state.tab_bar, :file, "second.txt")
+      {new_tb, _tab} = TabBar.add(state.shell_state.tab_bar, :file, "second.txt")
       new_buffers = Buffers.add(state.workspace.buffers, buffer2)
-      %{state | tab_bar: new_tb, workspace: %{state.workspace | buffers: new_buffers}}
+
+      Minga.Editor.State.set_tab_bar(
+        %{state | workspace: %{state.workspace | buffers: new_buffers}},
+        new_tb
+      )
     end)
   end
 

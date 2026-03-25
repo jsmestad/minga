@@ -20,7 +20,7 @@ defmodule Minga.UI.Picker.TabSourceTest do
       {tb, _} = TabBar.add(tb, :file, "lib.ex")
       {tb, _} = TabBar.add(tb, :agent, "Agent")
 
-      candidates = TabSource.candidates(%{tab_bar: tb})
+      candidates = TabSource.candidates(%{shell_state: %{tab_bar: tb}})
       assert length(candidates) == 3
 
       %Item{id: id1, label: label1} = Enum.find(candidates, fn %Item{id: id} -> id == 1 end)
@@ -34,7 +34,7 @@ defmodule Minga.UI.Picker.TabSourceTest do
       {tb, _} = TabBar.add(tb, :file, "two.ex")
       tb = TabBar.switch_to(tb, 1)
 
-      candidates = TabSource.candidates(%{tab_bar: tb})
+      candidates = TabSource.candidates(%{shell_state: %{tab_bar: tb}})
 
       %Item{label: active_label} = Enum.find(candidates, fn %Item{id: id} -> id == 1 end)
       assert String.contains?(active_label, "\u{2022}")
@@ -47,7 +47,9 @@ defmodule Minga.UI.Picker.TabSourceTest do
       tab = Tab.new_agent(1, "My Session")
       tb = TabBar.new(tab)
 
-      [%Item{label: label, description: desc}] = TabSource.candidates(%{tab_bar: tb})
+      [%Item{label: label, description: desc}] =
+        TabSource.candidates(%{shell_state: %{tab_bar: tb}})
+
       assert String.contains?(label, "My Session")
       assert desc == "agent"
     end
@@ -59,7 +61,7 @@ defmodule Minga.UI.Picker.TabSourceTest do
 
   describe "on_cancel/1" do
     test "returns state unchanged" do
-      state = %{tab_bar: TabBar.new(Tab.new_file(1, "x.ex"))}
+      state = %{shell_state: %{tab_bar: TabBar.new(Tab.new_file(1, "x.ex"))}}
       assert TabSource.on_cancel(state) == state
     end
   end

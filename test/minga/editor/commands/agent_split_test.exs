@@ -78,8 +78,7 @@ defmodule Minga.Editor.Commands.AgentSplitTest do
           next_id: 2
         }
       },
-      agent: agent,
-      tab_bar: tb
+      shell_state: %Minga.Shell.Traditional.State{agent: agent, tab_bar: tb}
     }
   end
 
@@ -91,7 +90,7 @@ defmodule Minga.Editor.Commands.AgentSplitTest do
       new_state = AgentCommands.toggle_agent_split(state)
 
       assert EditorState.active_tab_kind(new_state) == :agent
-      assert new_state.tab_bar.active_id == 2
+      assert new_state.shell_state.tab_bar.active_id == 2
     end
 
     test "switches back to file tab when on agent tab" do
@@ -104,7 +103,7 @@ defmodule Minga.Editor.Commands.AgentSplitTest do
       # Toggle off (switch to file)
       state = AgentCommands.toggle_agent_split(state)
       assert EditorState.active_tab_kind(state) == :file
-      assert state.tab_bar.active_id == 1
+      assert state.shell_state.tab_bar.active_id == 1
     end
 
     test "agent tab has agent_chat window in context" do
@@ -121,12 +120,12 @@ defmodule Minga.Editor.Commands.AgentSplitTest do
     test "round-trip toggle restores file state" do
       state = make_state()
       original_buf = state.workspace.buffers.active
-      original_active = state.tab_bar.active_id
+      original_active = state.shell_state.tab_bar.active_id
 
       state = AgentCommands.toggle_agent_split(state)
       state = AgentCommands.toggle_agent_split(state)
 
-      assert state.tab_bar.active_id == original_active
+      assert state.shell_state.tab_bar.active_id == original_active
       assert state.workspace.buffers.active == original_buf
     end
   end

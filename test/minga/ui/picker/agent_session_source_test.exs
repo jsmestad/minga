@@ -86,7 +86,7 @@ defmodule Minga.UI.Picker.AgentSessionSourceTest do
       # Active tab is the first one (pid1). Background tab (pid2) should not have bullet.
       bg_tabs =
         Enum.filter(candidates, fn
-          {{_, {:tab, id}}, _, _} -> id != state.tab_bar.active_id
+          {{_, {:tab, id}}, _, _} -> id != state.shell_state.tab_bar.active_id
           _ -> false
         end)
 
@@ -107,10 +107,10 @@ defmodule Minga.UI.Picker.AgentSessionSourceTest do
       Session.subscribe(pid)
 
       state = state_with_two_tabs_file_active(pid)
-      agent_tab_id = Enum.find(state.tab_bar.tabs, &(&1.kind == :agent)).id
+      agent_tab_id = Enum.find(state.shell_state.tab_bar.tabs, &(&1.kind == :agent)).id
       item = %Item{id: {"some-id", {:tab, agent_tab_id}}, label: "label", description: "desc"}
       result = AgentSessionSource.on_select(item, state)
-      assert result.tab_bar.active_id == agent_tab_id
+      assert result.shell_state.tab_bar.active_id == agent_tab_id
 
       Session.unsubscribe(pid)
       stop_session(pid)
@@ -148,7 +148,9 @@ defmodule Minga.UI.Picker.AgentSessionSourceTest do
     tb = TabBar.switch_to(tb, agent_tab.id)
 
     agent_ctx = %{
-      agent: %AgentState{session: session_pid, status: :idle},
+      shell_state: %Minga.Shell.Traditional.State{
+        agent: %AgentState{session: session_pid, status: :idle}
+      },
       agent_ui: %UIState{view: %UIState.View{active: true, focus: :chat}},
       windows: %Windows{},
       file_tree: nil,
@@ -173,8 +175,7 @@ defmodule Minga.UI.Picker.AgentSessionSourceTest do
         keymap_scope: :agent,
         agent_ui: agentic
       },
-      tab_bar: tb,
-      agent: agent
+      shell_state: %Minga.Shell.Traditional.State{tab_bar: tb, agent: agent}
     }
   end
 
@@ -200,8 +201,7 @@ defmodule Minga.UI.Picker.AgentSessionSourceTest do
         keymap_scope: :agent,
         agent_ui: agentic
       },
-      tab_bar: tb,
-      agent: agent
+      shell_state: %Minga.Shell.Traditional.State{tab_bar: tb, agent: agent}
     }
   end
 
@@ -211,7 +211,9 @@ defmodule Minga.UI.Picker.AgentSessionSourceTest do
     tb = TabBar.update_tab(tb, agent_tab.id, &Tab.set_session(&1, session_pid))
 
     agent_ctx = %{
-      agent: %AgentState{session: session_pid, status: :idle},
+      shell_state: %Minga.Shell.Traditional.State{
+        agent: %AgentState{session: session_pid, status: :idle}
+      },
       agent_ui: %UIState{view: %UIState.View{active: true, focus: :chat}},
       windows: %Windows{},
       file_tree: nil,
@@ -238,8 +240,7 @@ defmodule Minga.UI.Picker.AgentSessionSourceTest do
         keymap_scope: :editor,
         agent_ui: agentic
       },
-      tab_bar: tb,
-      agent: agent
+      shell_state: %Minga.Shell.Traditional.State{tab_bar: tb, agent: agent}
     }
   end
 end

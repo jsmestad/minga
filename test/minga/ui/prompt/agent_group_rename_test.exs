@@ -18,11 +18,11 @@ defmodule Minga.UI.Prompt.AgentGroupRenameTest do
       {tb, group} = TabBar.add_agent_group(tb, "Agent")
       tb = TabBar.move_tab_to_group(tb, 2, group.id)
       tb = TabBar.switch_to_group(tb, group.id)
-      state = %{tab_bar: tb, shell_state: %Minga.Shell.Traditional.State{status_msg: ""}}
+      state = %{shell_state: %Minga.Shell.Traditional.State{tab_bar: tb, status_msg: ""}}
 
       new_state = AgentGroupRename.on_submit("Research Bot", state)
-      assert TabBar.active_group(new_state.tab_bar).label == "Research Bot"
-      assert TabBar.active_group(new_state.tab_bar).custom_name == true
+      assert TabBar.active_group(new_state.shell_state.tab_bar).label == "Research Bot"
+      assert TabBar.active_group(new_state.shell_state.tab_bar).custom_name == true
       assert new_state.shell_state.status_msg =~ "Renamed"
     end
 
@@ -32,23 +32,25 @@ defmodule Minga.UI.Prompt.AgentGroupRenameTest do
       {tb, group} = TabBar.add_agent_group(tb, "Agent")
       tb = TabBar.move_tab_to_group(tb, 2, group.id)
       tb = TabBar.switch_to_group(tb, group.id)
-      state = %{tab_bar: tb, shell_state: %Minga.Shell.Traditional.State{status_msg: ""}}
+      state = %{shell_state: %Minga.Shell.Traditional.State{tab_bar: tb, status_msg: ""}}
 
       new_state = AgentGroupRename.on_submit("  My Space  ", state)
-      assert TabBar.active_group(new_state.tab_bar).label == "My Space"
+      assert TabBar.active_group(new_state.shell_state.tab_bar).label == "My Space"
     end
 
     test "rejects empty name with error message" do
       tb = TabBar.new(Tab.new_file(1, "a.ex"))
-      state = %{tab_bar: tb, shell_state: %Minga.Shell.Traditional.State{status_msg: ""}}
+      state = %{shell_state: %Minga.Shell.Traditional.State{tab_bar: tb, status_msg: ""}}
       new_state = AgentGroupRename.on_submit("", state)
       assert new_state.shell_state.status_msg =~ "cannot be empty"
     end
 
     test "rejects whitespace-only name" do
       state = %{
-        tab_bar: TabBar.new(Tab.new_file(1, "a.ex")),
-        shell_state: %Minga.Shell.Traditional.State{status_msg: ""}
+        shell_state: %Minga.Shell.Traditional.State{
+          tab_bar: TabBar.new(Tab.new_file(1, "a.ex")),
+          status_msg: ""
+        }
       }
 
       new_state = AgentGroupRename.on_submit("   ", state)
@@ -58,7 +60,10 @@ defmodule Minga.UI.Prompt.AgentGroupRenameTest do
 
   describe "on_cancel/1" do
     test "returns state unchanged" do
-      state = %{tab_bar: TabBar.new(Tab.new_file(1, "a.ex"))}
+      state = %{
+        shell_state: %Minga.Shell.Traditional.State{tab_bar: TabBar.new(Tab.new_file(1, "a.ex"))}
+      }
+
       assert AgentGroupRename.on_cancel(state) == state
     end
   end

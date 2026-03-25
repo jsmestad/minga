@@ -30,7 +30,7 @@ defmodule Minga.Integration.MouseTest do
     {:ok, fake} = StubServer.start_link()
 
     :sys.replace_state(editor, fn state ->
-      put_in(state.agent.session, fake)
+      Minga.Editor.State.AgentAccess.update_agent(state, fn a -> %{a | session: fake} end)
     end)
 
     ctx
@@ -449,7 +449,7 @@ defmodule Minga.Integration.MouseTest do
       ctx = start_editor("hello world\nsecond line\nthird line")
 
       state = :sys.get_state(ctx.editor)
-      tab_id = state.tab_bar.active_id
+      tab_id = state.shell_state.tab_bar.active_id
 
       # Send a gui_action (select current tab). Before the refactoring,
       # gui_action handlers only called Renderer.render, skipping highlight

@@ -21,7 +21,7 @@ defmodule Minga.Integration.AgentPanelTest do
     {:ok, fake} = StubServer.start_link()
 
     :sys.replace_state(ctx.editor, fn state ->
-      put_in(state.agent.session, fake)
+      Minga.Editor.State.AgentAccess.update_agent(state, fn a -> %{a | session: fake} end)
     end)
 
     ctx

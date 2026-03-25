@@ -56,7 +56,7 @@ defmodule Minga.Input.AgentNavTest do
         buffers: %Buffers{active: file_buf, list: [file_buf]},
         keymap_scope: :agent
       },
-      agent: agent
+      shell_state: %Minga.Shell.Traditional.State{agent: agent}
     }
   end
 

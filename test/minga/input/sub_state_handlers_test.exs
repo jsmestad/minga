@@ -73,8 +73,7 @@ defmodule Minga.Input.SubStateHandlersTest do
         agent_ui: agentic
       },
       focus_stack: [],
-      agent: agent,
-      tab_bar: tab_bar
+      shell_state: %Minga.Shell.Traditional.State{agent: agent, tab_bar: tab_bar}
     }
   end
 
