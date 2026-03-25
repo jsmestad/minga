@@ -8,10 +8,8 @@ defmodule Minga.Input.AgentNavTest do
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.Buffers
-  alias Minga.Editor.State.FileTree, as: FileTreeState
   alias Minga.Editor.State.Windows
   alias Minga.Editor.Viewport
-  alias Minga.Editor.VimState
   alias Minga.Editor.Window
   alias Minga.Input.AgentNav
   @ctrl Minga.Port.Protocol.mod_ctrl()
@@ -31,13 +29,7 @@ defmodule Minga.Input.AgentNavTest do
     {:ok, prompt_buf} = BufferServer.start_link(content: "")
     {:ok, file_buf} = BufferServer.start_link(content: "file content")
 
-    agent = %AgentState{
-      buffer: buf,
-      session: nil,
-      status: :idle,
-      error: nil,
-      spinner_timer: nil
-    }
+    agent = %AgentState{buffer: buf, status: :idle}
 
     agentic = %UIState{
       panel: %UIState.Panel{
@@ -58,16 +50,11 @@ defmodule Minga.Input.AgentNavTest do
 
     %EditorState{
       port_manager: self(),
-      viewport: %Viewport{rows: 24, cols: 80, top: 0, left: 0},
+      viewport: Viewport.new(24, 80),
       agent: agent,
       agent_ui: agentic,
       buffers: %Buffers{active: file_buf, list: [file_buf]},
-      vim: VimState.new(),
-      status_msg: nil,
-      file_tree: %FileTreeState{},
-      completion: nil,
-      keymap_scope: :agent,
-      focus_stack: []
+      keymap_scope: :agent
     }
   end
 
@@ -133,7 +120,7 @@ defmodule Minga.Input.AgentNavTest do
         buffer: buf,
         content: {:agent_chat, buf},
         cursor: {0, 0},
-        viewport: %Viewport{rows: 20, cols: 80, top: 0, left: 0},
+        viewport: Viewport.new(20, 80),
         pinned: true
       }
 

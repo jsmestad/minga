@@ -65,7 +65,7 @@ defmodule Minga.Input.SubStateHandlersTest do
 
     %EditorState{
       port_manager: self(),
-      viewport: %Viewport{rows: 24, cols: 80, top: 0, left: 0},
+      viewport: Viewport.new(24, 80),
       vim: VimState.new(),
       buffers: %Buffers{active: buf, list: [buf]},
       focus_stack: [],

@@ -16,7 +16,7 @@ defmodule Minga.Input.CompletionMouseTest do
     %EditorState{
       port_manager: nil,
       vim: %VimState{mode: :insert, mode_state: Mode.initial_state()},
-      viewport: %Viewport{rows: 30, cols: 80, top: 0, left: 0},
+      viewport: Viewport.new(30, 80),
       completion: completion
     }
   end
@@ -52,7 +52,7 @@ defmodule Minga.Input.CompletionMouseTest do
       state = %EditorState{
         port_manager: nil,
         vim: %VimState{mode: :normal, mode_state: Mode.initial_state()},
-        viewport: %Viewport{rows: 30, cols: 80, top: 0, left: 0},
+        viewport: Viewport.new(30, 80),
         completion: nil
       }
 

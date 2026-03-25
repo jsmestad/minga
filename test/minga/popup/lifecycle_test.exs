@@ -43,7 +43,7 @@ defmodule Minga.Popup.LifecycleTest do
 
     state = %EditorState{
       port_manager: nil,
-      viewport: %Viewport{rows: 24, cols: 80, top: 0, left: 0},
+      viewport: Viewport.new(24, 80),
       vim: VimState.new(),
       buffers: %Buffers{active: main_buf, list: [main_buf]},
       windows: %Windows{

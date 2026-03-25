@@ -30,10 +30,7 @@ defmodule Minga.Input.ScopedTest do
     {:ok, prompt_buf} = BufferServer.start_link(content: "")
 
     agent = %AgentState{
-      session: nil,
       status: :idle,
-      error: nil,
-      spinner_timer: nil,
       buffer: Keyword.get(opts, :agent_buffer, nil)
     }
 
@@ -63,10 +60,9 @@ defmodule Minga.Input.ScopedTest do
 
     %EditorState{
       port_manager: self(),
-      viewport: %Viewport{rows: 24, cols: 80, top: 0, left: 0},
+      viewport: Viewport.new(24, 80),
       vim: %VimState{mode: mode, mode_state: Mode.initial_state()},
       buffers: %Buffers{active: buf, list: [buf]},
-      focus_stack: [],
       keymap_scope: Keyword.get(opts, :keymap_scope, :editor),
       agent: agent,
       agent_ui: agentic,

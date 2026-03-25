@@ -20,9 +20,7 @@ defmodule Minga.Input.AgentPanelNavTest do
     end)
   end
 
-  alias Minga.Editor.State.FileTree, as: FileTreeState
   alias Minga.Editor.Viewport
-  alias Minga.Editor.VimState
   alias Minga.Input.Scoped
 
   defp make_state do
@@ -36,13 +34,7 @@ defmodule Minga.Input.AgentPanelNavTest do
 
     {:ok, prompt_buf} = BufferServer.start_link(content: "")
 
-    agent = %AgentState{
-      buffer: buf,
-      session: nil,
-      status: :idle,
-      error: nil,
-      spinner_timer: nil
-    }
+    agent = %AgentState{buffer: buf, status: :idle}
 
     base = UIState.new()
 
@@ -53,15 +45,9 @@ defmodule Minga.Input.AgentPanelNavTest do
 
     %EditorState{
       port_manager: self(),
-      viewport: %Viewport{rows: 24, cols: 80, top: 0, left: 0},
+      viewport: Viewport.new(24, 80),
       agent: agent,
       agent_ui: agentic,
-      buffers: %{active: nil, list: [], recent: []},
-      vim: VimState.new(),
-      status_msg: nil,
-      file_tree: %FileTreeState{},
-      completion: nil,
-      keymap_scope: :editor,
       focus_stack: [Scoped, Minga.Input.ModeFSM]
     }
   end

@@ -12,13 +12,10 @@ defmodule Minga.Input.VimNavIntegrationTest do
 
   @moduletag :tmp_dir
 
-  alias Minga.Agent.UIState
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.State, as: EditorState
-  alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.FileTree, as: FileTreeState
   alias Minga.Editor.Viewport
-  alias Minga.Editor.VimState
   alias Minga.FileTree
   alias Minga.FileTree.BufferSync
 
@@ -45,19 +42,10 @@ defmodule Minga.Input.VimNavIntegrationTest do
     tree = FileTree.new(tmp_dir)
     buf = BufferSync.start_buffer(tree)
 
-    agent = %AgentState{}
-    agentic = %UIState{}
-
     %EditorState{
       port_manager: self(),
-      viewport: %Viewport{rows: 24, cols: 80, top: 0, left: 0},
+      viewport: Viewport.new(24, 80),
       file_tree: %FileTreeState{tree: tree, focused: true, buffer: buf},
-      buffers: %{active: nil, list: [], recent: []},
-      vim: VimState.new(),
-      status_msg: nil,
-      agent: agent,
-      agent_ui: agentic,
-      completion: nil,
       keymap_scope: :file_tree,
       focus_stack: [Scoped, Minga.Input.ModeFSM]
     }

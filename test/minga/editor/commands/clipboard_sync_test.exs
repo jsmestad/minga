@@ -18,9 +18,7 @@ defmodule Minga.Editor.Commands.ClipboardSyncTest do
   alias Minga.Config.Options
   alias Minga.Editor.Commands.Helpers
   alias Minga.Editor.State
-  alias Minga.Editor.State.Registers
   alias Minga.Editor.Viewport
-  alias Minga.Editor.VimState
 
   setup :verify_on_exit!
 
@@ -50,12 +48,7 @@ defmodule Minga.Editor.Commands.ClipboardSyncTest do
   defp make_state do
     %State{
       port_manager: nil,
-      viewport: %Viewport{top: 0, left: 0, rows: 24, cols: 80},
-      vim: %VimState{
-        mode: :normal,
-        mode_state: nil,
-        reg: %Registers{}
-      }
+      viewport: Viewport.new(24, 80)
     }
   end
 
