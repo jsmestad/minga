@@ -25,15 +25,15 @@ defmodule Minga.Editor.Commands.Project do
   @spec execute(state(), Mode.command()) :: state()
 
   def execute(state, :project_find_file) do
-    PickerUI.open(state, Minga.Picker.FileSource)
+    PickerUI.open(state, Minga.UI.Picker.FileSource)
   end
 
   def execute(state, :project_recent_files) do
-    PickerUI.open(state, Minga.Picker.RecentFileSource)
+    PickerUI.open(state, Minga.UI.Picker.RecentFileSource)
   end
 
   def execute(state, :project_switch) do
-    PickerUI.open(state, Minga.Picker.ProjectSource)
+    PickerUI.open(state, Minga.UI.Picker.ProjectSource)
   end
 
   def execute(state, :project_invalidate) do

@@ -398,15 +398,15 @@ defmodule Minga.Port.Protocol.GUI do
   """
   @spec encode_gui_bottom_panel(
           Minga.Editor.BottomPanel.t(),
-          Minga.Panel.MessageStore.t()
-        ) :: {binary(), Minga.Panel.MessageStore.t()}
+          Minga.UI.Panel.MessageStore.t()
+        ) :: {binary(), Minga.UI.Panel.MessageStore.t()}
   def encode_gui_bottom_panel(%{visible: false}, store) do
     {<<@op_gui_bottom_panel, 0>>, store}
   end
 
   def encode_gui_bottom_panel(%{visible: true} = panel, store) do
     alias Minga.Editor.BottomPanel
-    alias Minga.Panel.MessageStore
+    alias Minga.UI.Panel.MessageStore
 
     active_index =
       Enum.find_index(panel.tabs, &(&1 == panel.active_tab)) || 0
@@ -436,9 +436,9 @@ defmodule Minga.Port.Protocol.GUI do
     end
   end
 
-  @spec encode_message_entries([Minga.Panel.MessageStore.Entry.t()]) :: binary()
+  @spec encode_message_entries([Minga.UI.Panel.MessageStore.Entry.t()]) :: binary()
   defp encode_message_entries(entries) do
-    alias Minga.Panel.MessageStore
+    alias Minga.UI.Panel.MessageStore
 
     count = length(entries)
 
@@ -764,7 +764,7 @@ defmodule Minga.Port.Protocol.GUI do
   def encode_gui_which_key(%{show: true, node: nil}), do: <<@op_gui_which_key, 0::8>>
 
   def encode_gui_which_key(%{show: true, node: node, prefix_keys: prefix_keys, page: page}) do
-    bindings = Minga.WhichKey.bindings_from_node(node)
+    bindings = Minga.UI.WhichKey.bindings_from_node(node)
     prefix_bytes = prefix_keys |> Enum.join(" ") |> :erlang.iolist_to_binary()
 
     page_size = 20
@@ -1006,7 +1006,7 @@ defmodule Minga.Port.Protocol.GUI do
           {[{String.t(), atom()}], non_neg_integer()} | nil
 
   @spec encode_gui_picker(
-          Minga.Picker.t() | nil,
+          Minga.UI.Picker.t() | nil,
           boolean(),
           action_menu_state(),
           non_neg_integer()
@@ -1015,7 +1015,7 @@ defmodule Minga.Port.Protocol.GUI do
   def encode_gui_picker(picker, has_preview \\ false, action_menu \\ nil, max_items \\ 0)
   def encode_gui_picker(nil, _has_preview, _action_menu, _max_items), do: <<@op_gui_picker, 0::8>>
 
-  def encode_gui_picker(%Minga.Picker{} = picker, has_preview, action_menu, max_items) do
+  def encode_gui_picker(%Minga.UI.Picker{} = picker, has_preview, action_menu, max_items) do
     limit = if max_items > 0, do: max_items, else: picker.max_visible
     items = Enum.take(picker.filtered, limit)
     title_bytes = :erlang.iolist_to_binary([picker.title])
@@ -1073,10 +1073,11 @@ defmodule Minga.Port.Protocol.GUI do
     ])
   end
 
-  @spec encode_picker_item_flags(Minga.Picker.Item.t(), Minga.Picker.t()) :: non_neg_integer()
+  @spec encode_picker_item_flags(Minga.UI.Picker.Item.t(), Minga.UI.Picker.t()) ::
+          non_neg_integer()
   defp encode_picker_item_flags(item, picker) do
     two_line = if item.two_line, do: 1, else: 0
-    marked = if Minga.Picker.marked?(picker, item), do: 1, else: 0
+    marked = if Minga.UI.Picker.marked?(picker, item), do: 1, else: 0
     bor(two_line, marked <<< 1)
   end
 

@@ -12,6 +12,6 @@ defmodule Minga.DoctestTest do
   doctest Minga.Buffer.Document
   doctest Minga.Motion
   doctest Minga.Keymap.Bindings
-  doctest Minga.WhichKey
+  doctest Minga.UI.WhichKey
   doctest Minga.Command.Parser
 end

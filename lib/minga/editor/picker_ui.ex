@@ -20,9 +20,9 @@ defmodule Minga.Editor.PickerUI do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Picker, as: PickerState
   alias Minga.Editor.State.WhichKey, as: WhichKeyState
-  alias Minga.Picker
   alias Minga.Port.Protocol
   alias Minga.UI.Face
+  alias Minga.UI.Picker
 
   import Bitwise
 
@@ -45,15 +45,15 @@ defmodule Minga.Editor.PickerUI do
   # source (file picker, recent files), the picker swaps to the mapped source
   # and strips the prefix from the fuzzy query.
   @mode_prefixes %{
-    ">" => Minga.Picker.CommandSource,
-    "#" => Minga.Picker.ProjectSearchSource,
-    "@" => Minga.Picker.BufferSource
+    ">" => Minga.UI.Picker.CommandSource,
+    "#" => Minga.UI.Picker.ProjectSearchSource,
+    "@" => Minga.UI.Picker.BufferSource
   }
 
   # Sources that support mode switching via prefix.
   @switchable_sources [
-    Minga.Picker.FileSource,
-    Minga.Picker.RecentFileSource
+    Minga.UI.Picker.FileSource,
+    Minga.UI.Picker.RecentFileSource
   ]
 
   defmodule RenderInput do
@@ -110,7 +110,7 @@ defmodule Minga.Editor.PickerUI do
             state
           end
 
-        layout = Minga.Picker.Source.layout(source_module)
+        layout = Minga.UI.Picker.Source.layout(source_module)
 
         %{
           new_state
@@ -709,7 +709,7 @@ defmodule Minga.Editor.PickerUI do
     max_vis = state.workspace.viewport.rows - 3
     max_vis = max(5, min(max_vis, state.workspace.viewport.rows - 3))
     picker = Picker.new(items, title: new_source.title(), max_visible: max_vis)
-    layout = Minga.Picker.Source.layout(new_source)
+    layout = Minga.UI.Picker.Source.layout(new_source)
 
     original = pui.original_source || current_source
 
@@ -733,7 +733,7 @@ defmodule Minga.Editor.PickerUI do
     max_vis = state.workspace.viewport.rows - 3
     max_vis = max(5, min(max_vis, state.workspace.viewport.rows - 3))
     picker = Picker.new(items, title: orig.title(), max_visible: max_vis)
-    layout = Minga.Picker.Source.layout(orig)
+    layout = Minga.UI.Picker.Source.layout(orig)
 
     %{
       state

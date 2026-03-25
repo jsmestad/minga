@@ -159,7 +159,7 @@ defmodule Minga.MixProject do
             Minga.Keymap.Defaults,
             Minga.Keymap.Store,
             Minga.Keymap.KeyParser,
-            Minga.WhichKey
+            Minga.UI.WhichKey
           ],
           "Port Protocol": [
             Minga.Port.Protocol,

@@ -866,7 +866,7 @@ defmodule Minga.Editor.Commands.Agent do
   @doc "Opens the session switcher picker."
   @spec scope_session_switcher(state()) :: state()
   def scope_session_switcher(state) do
-    PickerUI.open(state, Minga.Picker.AgentSessionSource)
+    PickerUI.open(state, Minga.UI.Picker.AgentSessionSource)
   end
 
   # ── Help ───────────────────────────────────────────────────────────────────
@@ -1308,13 +1308,13 @@ defmodule Minga.Editor.Commands.Agent do
         name: :agent_pick_model,
         description: "Pick AI agent model",
         requires_buffer: false,
-        execute: fn state -> PickerUI.open(state, Minga.Picker.AgentModelSource) end
+        execute: fn state -> PickerUI.open(state, Minga.UI.Picker.AgentModelSource) end
       },
       %Minga.Command{
         name: :agent_session_history,
         description: "Agent session history",
         requires_buffer: false,
-        execute: fn state -> PickerUI.open(state, Minga.Picker.SessionHistorySource) end
+        execute: fn state -> PickerUI.open(state, Minga.UI.Picker.SessionHistorySource) end
       }
     ]
 

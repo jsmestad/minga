@@ -7,7 +7,7 @@ defmodule Minga.Editor.LspActionsTest do
   alias Minga.Editor.HoverPopup
   alias Minga.Editor.LspActions
   alias Minga.Editor.VimState
-  alias Minga.Picker.CodeActionSource
+  alias Minga.UI.Picker.CodeActionSource
 
   # ── parse_location/1 ──────────────────────────────────────────────────────
 

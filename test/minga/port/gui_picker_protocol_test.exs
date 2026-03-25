@@ -3,9 +3,9 @@ defmodule Minga.Port.GUIPickerProtocolTest do
 
   use ExUnit.Case, async: true
 
-  alias Minga.Picker
-  alias Minga.Picker.Item
   alias Minga.Port.Protocol.GUI, as: ProtocolGUI
+  alias Minga.UI.Picker
+  alias Minga.UI.Picker.Item
 
   describe "encode_gui_picker/2" do
     test "encodes nil as hidden" do

@@ -47,7 +47,7 @@ defmodule Minga.Editor.Commands.Extensions do
 
   @spec update(state()) :: state()
   def update(state) do
-    PickerUI.open(state, Minga.Picker.ExtensionSource)
+    PickerUI.open(state, Minga.UI.Picker.ExtensionSource)
   end
 
   @spec apply_updates(state()) :: state()

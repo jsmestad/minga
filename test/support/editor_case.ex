@@ -433,7 +433,7 @@ defmodule Minga.Test.EditorCase do
   end
 
   @doc "Returns the active picker state, or nil."
-  @spec picker_state(editor_ctx()) :: Minga.Picker.t() | nil
+  @spec picker_state(editor_ctx()) :: Minga.UI.Picker.t() | nil
   def picker_state(%{editor: editor}) do
     :sys.get_state(editor).picker_ui.picker
   end

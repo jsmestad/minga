@@ -53,10 +53,10 @@ defmodule Minga.Editor.State do
   alias Minga.Editor.WindowTree
   alias Minga.Log
   alias Minga.Mode
-  alias Minga.Panel.MessageStore
   alias Minga.Port.Capabilities
   alias Minga.Project.FileTree
   alias Minga.Tool.Manager, as: ToolManager
+  alias Minga.UI.Panel.MessageStore
   alias Minga.UI.Theme
   alias Minga.Workspace.State, as: WorkspaceState
 

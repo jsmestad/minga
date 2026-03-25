@@ -17,7 +17,7 @@ defmodule Minga.Editor.MessageLog do
   alias Minga.Buffer.Document
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.State, as: EditorState
-  alias Minga.Panel.MessageStore
+  alias Minga.UI.Panel.MessageStore
 
   @max_lines 1000
 

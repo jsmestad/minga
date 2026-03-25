@@ -6,7 +6,7 @@ defmodule Minga.Editor.PromptUITest do
 
   # Test handler that records what happened
   defmodule TestHandler do
-    @behaviour Minga.Prompt.Handler
+    @behaviour Minga.UI.Prompt.Handler
 
     @impl true
     def label, do: "Test prompt: "
@@ -23,7 +23,7 @@ defmodule Minga.Editor.PromptUITest do
   end
 
   defmodule RenameHandler do
-    @behaviour Minga.Prompt.Handler
+    @behaviour Minga.UI.Prompt.Handler
 
     @impl true
     def label, do: "Rename to: "
@@ -82,7 +82,7 @@ defmodule Minga.Editor.PromptUITest do
 
     test "closes active picker when opening prompt" do
       picker_state = %Minga.Editor.State.Picker{
-        picker: %Minga.Picker{items: [], filtered: [], selected: 0, query: "", title: "Test"},
+        picker: %Minga.UI.Picker{items: [], filtered: [], selected: 0, query: "", title: "Test"},
         source: SomeSource
       }
 

@@ -17,10 +17,10 @@ defmodule Minga.Editor.Commands.Lsp do
   alias Minga.LSP.ServerRegistry
   alias Minga.LSP.Supervisor, as: LSPSupervisor
   alias Minga.LSP.SyncServer
-  alias Minga.Picker.WorkspaceSymbolSource
   alias Minga.Tool.Manager, as: ToolManager
   alias Minga.Tool.Recipe
   alias Minga.Tool.Recipe.Registry, as: RecipeRegistry
+  alias Minga.UI.Picker.WorkspaceSymbolSource
 
   @type state :: EditorState.t()
 

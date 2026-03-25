@@ -2,8 +2,8 @@ defmodule Minga.Port.GUIBottomPanelTest do
   use ExUnit.Case, async: true
 
   alias Minga.Editor.BottomPanel
-  alias Minga.Panel.MessageStore
   alias Minga.Port.Protocol.GUI, as: ProtocolGUI
+  alias Minga.UI.Panel.MessageStore
 
   defp empty_store, do: %MessageStore{}
 

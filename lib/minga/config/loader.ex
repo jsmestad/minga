@@ -32,7 +32,7 @@ defmodule Minga.Config.Loader do
   alias Minga.Extension.Registry, as: ExtRegistry
   alias Minga.Extension.Supervisor, as: ExtSupervisor
   alias Minga.Keymap.Active, as: KeymapActive
-  alias Minga.Popup.Registry, as: PopupRegistry
+  alias Minga.UI.Popup.Registry, as: PopupRegistry
   alias Minga.UI.Theme.Loader, as: ThemeLoader
 
   @typedoc "Loader state: stores paths, loaded modules, and any errors from each stage."
@@ -356,7 +356,7 @@ defmodule Minga.Config.Loader do
 
   @spec register_default_popup_rules() :: :ok
   defp register_default_popup_rules do
-    alias Minga.Popup.Rule
+    alias Minga.UI.Popup.Rule
 
     PopupRegistry.init()
 

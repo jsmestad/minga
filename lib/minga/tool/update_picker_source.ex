@@ -5,10 +5,10 @@ defmodule Minga.Tool.UpdatePickerSource do
   Shows installed tools. Selecting one triggers an update (uninstall + reinstall).
   """
 
-  @behaviour Minga.Picker.Source
+  @behaviour Minga.UI.Picker.Source
 
-  alias Minga.Picker.Item
   alias Minga.Tool.Manager, as: ToolManager
+  alias Minga.UI.Picker.Item
 
   @impl true
   @spec title() :: String.t()

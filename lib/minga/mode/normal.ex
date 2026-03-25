@@ -68,7 +68,7 @@ defmodule Minga.Mode.Normal do
   alias Minga.Keymap.Defaults
   alias Minga.Mode
   alias Minga.Mode.State, as: ModeState
-  alias Minga.WhichKey
+  alias Minga.UI.WhichKey
 
   # Special codepoints
   @escape 27

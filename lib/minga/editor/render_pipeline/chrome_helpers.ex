@@ -18,7 +18,7 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
   alias Minga.Editor.WindowTree
   alias Minga.UI.Face
   alias Minga.UI.Theme
-  alias Minga.WhichKey
+  alias Minga.UI.WhichKey
 
   @type state :: EditorState.t()
 

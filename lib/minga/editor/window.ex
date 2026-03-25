@@ -35,7 +35,7 @@ defmodule Minga.Editor.Window do
   alias Minga.Editor.FoldRange
   alias Minga.Editor.Viewport
   alias Minga.Editor.Window.Content
-  alias Minga.Popup.Active, as: PopupActive
+  alias Minga.UI.Popup.Active, as: PopupActive
 
   @typedoc "Unique identifier for a window."
   @type id :: pos_integer()

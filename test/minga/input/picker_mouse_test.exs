@@ -6,11 +6,11 @@ defmodule Minga.Input.PickerMouseTest do
   alias Minga.Editor.Viewport
   alias Minga.Editor.VimState
   alias Minga.Input.Picker, as: PickerInput
-  alias Minga.Picker, as: PickerData
+  alias Minga.UI.Picker, as: PickerData
 
   defmodule TestSource do
     @moduledoc false
-    @behaviour Minga.Picker.Source
+    @behaviour Minga.UI.Picker.Source
 
     @impl true
     def on_select(item, state), do: Map.put(state, :selected_item, item)

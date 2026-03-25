@@ -2,8 +2,8 @@ defmodule Minga.Editor.WindowTest do
   use ExUnit.Case, async: true
 
   alias Minga.Editor.Window
-  alias Minga.Popup.Active, as: PopupActive
-  alias Minga.Popup.Rule, as: PopupRule
+  alias Minga.UI.Popup.Active, as: PopupActive
+  alias Minga.UI.Popup.Rule, as: PopupRule
 
   defp make_window(opts \\ []) do
     buffer = Keyword.get_lazy(opts, :buffer, fn -> spawn(fn -> :ok end) end)

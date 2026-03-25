@@ -493,7 +493,7 @@ defmodule Minga.Integration.GUIProtocolTest do
 
   describe "gui_bottom_panel hidden" do
     test "round-trips hidden bottom panel", %{port: port} do
-      alias Minga.Panel.MessageStore
+      alias Minga.UI.Panel.MessageStore
       {cmd, _store} = ProtocolGUI.encode_gui_bottom_panel(%{visible: false}, %MessageStore{})
       Port.command(port, cmd)
 

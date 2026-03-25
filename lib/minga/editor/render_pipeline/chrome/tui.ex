@@ -22,7 +22,7 @@ defmodule Minga.Editor.RenderPipeline.Chrome.TUI do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.StatusBar.Data, as: StatusBarData
   alias Minga.Editor.TreeRenderer
-  alias Minga.Popup.Lifecycle, as: PopupLifecycle
+  alias Minga.UI.Popup.Lifecycle, as: PopupLifecycle
 
   @typedoc "Internal editor state."
   @type state :: EditorState.t()

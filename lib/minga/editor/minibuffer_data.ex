@@ -15,7 +15,7 @@ defmodule Minga.Editor.MinibufferData do
   alias Minga.Command.Registry, as: CommandRegistry
   alias Minga.Editor.State, as: EditorState
   alias Minga.Keymap.Defaults
-  alias Minga.WhichKey
+  alias Minga.UI.WhichKey
 
   # ── Types ──────────────────────────────────────────────────────────────────
 

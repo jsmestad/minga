@@ -7,8 +7,8 @@ defmodule Minga.Editor.PickerUITest do
   alias Minga.Editor.PickerUI.RenderInput
   alias Minga.Editor.State.Picker, as: PickerState
   alias Minga.Editor.Viewport
-  alias Minga.Picker
-  alias Minga.Picker.Item
+  alias Minga.UI.Picker
+  alias Minga.UI.Picker.Item
   alias Minga.UI.Theme
 
   defp theme_picker do
