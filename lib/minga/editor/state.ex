@@ -399,16 +399,17 @@ defmodule Minga.Editor.State do
 
   @doc "Returns the active window struct, or nil if windows aren't initialized."
   @spec active_window_struct(t()) :: Window.t() | nil
-  def active_window_struct(%__MODULE__{workspace: %{windows: ws}}), do: Windows.active_struct(ws)
+  def active_window_struct(%__MODULE__{workspace: ws}),
+    do: WorkspaceState.active_window_struct(ws)
 
   @doc "Returns true if the editor has more than one window."
   @spec split?(t()) :: boolean()
-  def split?(%__MODULE__{workspace: %{windows: ws}}), do: Windows.split?(ws)
+  def split?(%__MODULE__{workspace: ws}), do: WorkspaceState.split?(ws)
 
   @doc "Updates the window struct for the given window id via a mapper function."
   @spec update_window(t(), Window.id(), (Window.t() -> Window.t())) :: t()
-  def update_window(%__MODULE__{workspace: %{windows: ws} = wspace} = state, id, fun) do
-    %{state | workspace: %{wspace | windows: Windows.update(ws, id, fun)}}
+  def update_window(%__MODULE__{} = state, id, fun) do
+    update_workspace(state, &WorkspaceState.update_window(&1, id, fun))
   end
 
   @doc """
@@ -419,11 +420,8 @@ defmodule Minga.Editor.State do
   wrong when column offsets shift.
   """
   @spec invalidate_all_windows(t()) :: t()
-  def invalidate_all_windows(%__MODULE__{workspace: %{windows: ws} = wspace} = state) do
-    new_map =
-      Map.new(ws.map, fn {id, window} -> {id, Window.invalidate(window)} end)
-
-    %{state | workspace: %{wspace | windows: %{ws | map: new_map}}}
+  def invalidate_all_windows(%__MODULE__{} = state) do
+    update_workspace(state, &WorkspaceState.invalidate_all_windows/1)
   end
 
   @doc """
@@ -526,37 +524,8 @@ defmodule Minga.Editor.State do
   window tree consistent. No-op when windows aren't initialized.
   """
   @spec sync_active_window_buffer(t()) :: t()
-  def sync_active_window_buffer(%__MODULE__{workspace: %{buffers: %{active: nil}}} = state),
-    do: state
-
-  def sync_active_window_buffer(
-        %__MODULE__{
-          workspace: %{windows: %{map: windows, active: id} = ws, buffers: buffers} = wspace
-        } = state
-      ) do
-    case Map.fetch(windows, id) do
-      {:ok, %Window{buffer: existing} = window} when existing != buffers.active ->
-        # Buffer changed: invalidate all caches. The new buffer has
-        # different content, and cached draws from the old buffer are
-        # completely wrong. Also reset tracking fields so
-        # detect_invalidation forces a full redraw on the next frame.
-        #
-        # Both `buffer` and `content` must be updated. The render
-        # pipeline checks `Content.agent_chat?(window.content)` to
-        # decide rendering paths, so a stale content tag causes the
-        # window to be routed to the wrong renderer (e.g., blank
-        # screen when opening a file from the agent tab).
-        window = %{
-          Window.invalidate(window)
-          | buffer: buffers.active,
-            content: Content.buffer(buffers.active)
-        }
-
-        %{state | workspace: %{wspace | windows: %{ws | map: Map.put(windows, id, window)}}}
-
-      _ ->
-        state
-    end
+  def sync_active_window_buffer(%__MODULE__{} = state) do
+    update_workspace(state, &WorkspaceState.sync_active_window_buffer/1)
   end
 
   @doc """
@@ -693,9 +662,8 @@ defmodule Minga.Editor.State do
   remember to call `sync_active_window_buffer/1`.
   """
   @spec switch_buffer(t(), non_neg_integer()) :: t()
-  def switch_buffer(%__MODULE__{workspace: %{buffers: bs} = wspace} = state, idx) do
-    state = %{state | workspace: %{wspace | buffers: Buffers.switch_to(bs, idx)}}
-    state = sync_active_window_buffer(state)
+  def switch_buffer(%__MODULE__{} = state, idx) do
+    state = update_workspace(state, &WorkspaceState.switch_buffer(&1, idx))
     sync_active_tab_label(state)
   end
 
@@ -792,9 +760,7 @@ defmodule Minga.Editor.State do
   """
   @spec scope_for_content(Content.t(), Minga.Keymap.Scope.scope_name()) ::
           Minga.Keymap.Scope.scope_name()
-  def scope_for_content({:agent_chat, _pid}, _current_scope), do: :agent
-  def scope_for_content({:buffer, _pid}, current_scope) when current_scope == :agent, do: :editor
-  def scope_for_content({:buffer, _pid}, current_scope), do: current_scope
+  defdelegate scope_for_content(content, current_scope), to: WorkspaceState
 
   @doc """
   Returns the appropriate keymap scope for the active window's content type.
@@ -803,11 +769,8 @@ defmodule Minga.Editor.State do
   the correct scope. Returns :agent for agent chat windows, :editor otherwise.
   """
   @spec scope_for_active_window(t()) :: atom()
-  def scope_for_active_window(%{workspace: %{windows: %{map: map, active: active_id}}}) do
-    case Map.get(map, active_id) do
-      %{content: content} -> scope_for_content(content, :editor)
-      nil -> :editor
-    end
+  def scope_for_active_window(%{workspace: ws}) do
+    WorkspaceState.scope_for_active_window(ws)
   end
 
   @spec buffer_label(pid()) :: String.t()
@@ -1278,7 +1241,7 @@ defmodule Minga.Editor.State do
   """
   @spec transition_mode(t(), Mode.mode(), Mode.state() | nil) :: t()
   def transition_mode(%__MODULE__{} = state, mode, mode_state \\ nil) do
-    put_in(state.workspace.vim, VimState.transition(state.workspace.vim, mode, mode_state))
+    update_workspace(state, &WorkspaceState.transition_mode(&1, mode, mode_state))
   end
 
   # ── Tool prompt helpers ──────────────────────────────────────────────────────
