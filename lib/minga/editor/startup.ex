@@ -39,7 +39,7 @@ defmodule Minga.Editor.Startup do
   @spec build_initial_state(keyword()) :: EditorState.t()
   def build_initial_state(opts) do
     backend = Keyword.get(opts, :backend, :headless)
-    port_manager = Keyword.get(opts, :port_manager, PortManager)
+    port_manager = Keyword.get(opts, :port_manager, Minga.Frontend.Manager)
     width = Keyword.get(opts, :width, 80)
     height = Keyword.get(opts, :height, 24)
     buffer = Keyword.get(opts, :buffer)
