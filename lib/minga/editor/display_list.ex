@@ -27,7 +27,7 @@ defmodule Minga.Editor.DisplayList do
   """
 
   alias Minga.Editor.Layout
-  alias Minga.Port.Protocol
+  alias Minga.Frontend.Protocol
   alias Minga.UI.Face
 
   # ── Fundamental types ──────────────────────────────────────────────────────

@@ -51,9 +51,9 @@ defmodule Minga.Editor.State do
   alias Minga.Editor.Window
   alias Minga.Editor.Window.Content
   alias Minga.Editor.WindowTree
+  alias Minga.Frontend.Capabilities
   alias Minga.Log
   alias Minga.Mode
-  alias Minga.Port.Capabilities
   alias Minga.Project.FileTree
   alias Minga.Tool.Manager, as: ToolManager
   alias Minga.UI.Panel.MessageStore
@@ -130,7 +130,7 @@ defmodule Minga.Editor.State do
           warning_popup_timer: reference() | nil,
           bottom_panel: BottomPanel.t(),
           message_store: MessageStore.t(),
-          git_status_panel: Minga.Port.Protocol.GUI.git_status_data() | nil,
+          git_status_panel: Minga.Frontend.Protocol.GUI.git_status_data() | nil,
           git_remote_op:
             {msg_ref :: reference(), task_monitor :: reference(),
              {git_root :: String.t(), success_msg :: String.t(), error_prefix :: String.t()}}

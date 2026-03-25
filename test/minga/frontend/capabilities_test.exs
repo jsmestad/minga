@@ -1,7 +1,7 @@
-defmodule Minga.Port.CapabilitiesTest do
+defmodule Minga.Frontend.CapabilitiesTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Port.Capabilities
+  alias Minga.Frontend.Capabilities
 
   describe "query helpers" do
     test "images?/1" do

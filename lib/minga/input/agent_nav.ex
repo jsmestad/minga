@@ -84,7 +84,7 @@ defmodule Minga.Input.AgentNav do
     end
   end
 
-  @ctrl Minga.Port.Protocol.mod_ctrl()
+  @ctrl Minga.Input.mod_ctrl()
 
   @spec viewer_nav_command(non_neg_integer(), non_neg_integer()) ::
           {:scroll, (UIState.t() -> UIState.t())} | :passthrough

@@ -53,7 +53,7 @@ defmodule Minga.UI.Theme do
   @typedoc "RGB color as a non-negative integer (e.g., `0xFF6C6B`)."
   @type color :: non_neg_integer()
 
-  @typedoc "A style keyword list compatible with `Minga.Port.Protocol.style()`."
+  @typedoc "A style keyword list compatible with `Minga.Frontend.Protocol.style()`."
   @type style :: keyword()
 
   @typedoc "Syntax theme: tree-sitter capture name → style."

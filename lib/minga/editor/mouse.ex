@@ -42,8 +42,8 @@ defmodule Minga.Editor.Mouse do
   alias Minga.Editor.Window
   alias Minga.Editor.WindowTree
 
+  alias Minga.Frontend.Capabilities
   alias Minga.Mode.VisualState
-  alias Minga.Port.Capabilities
 
   # TUI scrolls 3 lines per wheel tick (standard terminal behavior).
   # GUI scrolls 1 line per event because the frontend accumulates pixel

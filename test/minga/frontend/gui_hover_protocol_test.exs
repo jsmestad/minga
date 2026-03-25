@@ -1,4 +1,4 @@
-defmodule Minga.Port.GUIHoverProtocolTest do
+defmodule Minga.Frontend.GUIHoverProtocolTest do
   @moduledoc """
   Tests for the gui_hover_popup (0x81) and gui_signature_help (0x82)
   protocol encoders.
@@ -11,7 +11,7 @@ defmodule Minga.Port.GUIHoverProtocolTest do
 
   alias Minga.Editor.HoverPopup
   alias Minga.Editor.SignatureHelp
-  alias Minga.Port.Protocol.GUI, as: ProtocolGUI
+  alias Minga.Frontend.Protocol.GUI, as: ProtocolGUI
 
   @op_gui_hover_popup 0x81
   @op_gui_signature_help 0x82

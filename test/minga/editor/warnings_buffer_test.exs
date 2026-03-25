@@ -3,7 +3,7 @@ defmodule Minga.Editor.WarningsBufferTest do
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.BottomPanel
-  alias Minga.Port.Capabilities
+  alias Minga.Frontend.Capabilities
 
   # Helper to switch the editor to GUI capabilities so bottom panel commands work.
   defp set_gui_capabilities(ctx) do

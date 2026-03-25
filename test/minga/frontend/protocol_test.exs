@@ -1,7 +1,7 @@
-defmodule Minga.Port.ProtocolTest do
+defmodule Minga.Frontend.ProtocolTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Port.Protocol
+  alias Minga.Frontend.Protocol
 
   # ── Modifier helpers ──
 
@@ -924,7 +924,7 @@ defmodule Minga.Port.ProtocolTest do
 
   # ── GUI encoding (Protocol.GUI) ──────────────────────────────────────────
 
-  alias Minga.Port.Protocol.GUI, as: ProtocolGUI
+  alias Minga.Frontend.Protocol.GUI, as: ProtocolGUI
 
   describe "encode_gui_theme/1" do
     test "encodes theme colors as slot_id + rgb tuples" do

@@ -11,7 +11,7 @@ defmodule Minga.Editor.Renderer.Caps do
   different capabilities.
   """
 
-  alias Minga.Port.Capabilities
+  alias Minga.Frontend.Capabilities
 
   @doc """
   Returns true if the BEAM should render overlay popups (which-key,

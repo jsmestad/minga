@@ -1432,7 +1432,6 @@ defmodule Minga.Editor.Commands.BufferManagement do
 
   @spec frontend(state()) :: module()
   defp frontend(%{capabilities: caps}) do
-    alias Minga.Port.Capabilities
-    if Capabilities.gui?(caps), do: __MODULE__.GUI, else: __MODULE__.TUI
+    if Minga.Frontend.gui?(caps), do: __MODULE__.GUI, else: __MODULE__.TUI
   end
 end

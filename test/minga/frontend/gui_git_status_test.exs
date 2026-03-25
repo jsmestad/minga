@@ -1,9 +1,9 @@
-defmodule Minga.Port.GUIGitStatusTest do
+defmodule Minga.Frontend.GUIGitStatusTest do
   @moduledoc "Tests for gui_git_status (0x85) encoding and git action sub-opcode decoding."
   use ExUnit.Case, async: true
 
+  alias Minga.Frontend.Protocol.GUI, as: ProtocolGUI
   alias Minga.Git.StatusEntry
-  alias Minga.Port.Protocol.GUI, as: ProtocolGUI
 
   describe "encode_gui_git_status/1" do
     test "encodes empty entries with normal repo state" do

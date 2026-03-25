@@ -315,8 +315,7 @@ defmodule Minga.Editor.Commands.Search do
       }
 
       if state.backend == :native_gui and state.port_manager do
-        cmd = Minga.Port.Protocol.GUI.encode_clipboard_write(text, :find)
-        Minga.Port.Manager.send_commands(state.port_manager, [cmd])
+        Minga.Frontend.clipboard_write(state.port_manager, text, :find)
       end
 
       %{state | status_msg: "Using \"#{text}\" for Find"}

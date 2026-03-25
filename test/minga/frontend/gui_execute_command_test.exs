@@ -1,7 +1,7 @@
-defmodule Minga.Port.GUIExecuteCommandTest do
+defmodule Minga.Frontend.GUIExecuteCommandTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Port.Protocol.GUI, as: ProtocolGUI
+  alias Minga.Frontend.Protocol.GUI, as: ProtocolGUI
 
   describe "decode_gui_action for execute_command (0x16)" do
     test "decodes a valid command name" do

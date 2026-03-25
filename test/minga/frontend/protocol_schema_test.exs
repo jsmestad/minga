@@ -1,4 +1,4 @@
-defmodule Minga.Port.ProtocolSchemaTest do
+defmodule Minga.Frontend.ProtocolSchemaTest do
   @moduledoc """
   Validates that Elixir opcode constants match the canonical
   protocol_schema.json. Catches drift between the schema and

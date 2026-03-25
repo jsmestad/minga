@@ -1,4 +1,4 @@
-defmodule Minga.Port.Protocol.GUIWindowContent do
+defmodule Minga.Frontend.Protocol.GUIWindowContent do
   @moduledoc """
   Binary protocol encoder for the `gui_window_content` opcode (0x80).
 

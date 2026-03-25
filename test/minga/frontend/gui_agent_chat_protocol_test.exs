@@ -1,7 +1,7 @@
-defmodule Minga.Port.GUIAgentChatProtocolTest do
+defmodule Minga.Frontend.GUIAgentChatProtocolTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Port.Protocol.GUI, as: ProtocolGUI
+  alias Minga.Frontend.Protocol.GUI, as: ProtocolGUI
 
   describe "decode_gui_action for agent_tool_toggle" do
     test "decodes a valid agent_tool_toggle action" do

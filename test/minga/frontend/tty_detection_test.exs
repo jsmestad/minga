@@ -1,7 +1,7 @@
-defmodule Minga.Port.TtyDetectionTest do
+defmodule Minga.Frontend.TtyDetectionTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Port.Manager
+  alias Minga.Frontend.Manager
 
   describe "tty_path_for/1" do
     test "long-form macOS name produces /dev/ttys* path" do

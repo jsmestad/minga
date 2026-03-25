@@ -20,14 +20,13 @@ defmodule Minga.Editor.PickerUI do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Picker, as: PickerState
   alias Minga.Editor.State.WhichKey, as: WhichKeyState
-  alias Minga.Port.Protocol
   alias Minga.UI.Face
   alias Minga.UI.Picker
 
   import Bitwise
 
-  @ctrl Protocol.mod_ctrl()
-  @alt Protocol.mod_alt()
+  @ctrl Minga.Input.mod_ctrl()
+  @alt Minga.Input.mod_alt()
 
   @escape 27
   @enter 13

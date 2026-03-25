@@ -1,11 +1,11 @@
-defmodule Minga.Port.Protocol.GUI do
+defmodule Minga.Frontend.Protocol.GUI do
   @moduledoc """
   Binary protocol encoder/decoder for GUI chrome commands (BEAM → Swift/GTK).
 
   This module handles the structured data protocol for native GUI elements:
   tab bars, file trees, which-key popups, completion menus, breadcrumbs,
   status bars, pickers, agent chat, and theme colors. These are separate
-  from the TUI cell-grid rendering commands in `Minga.Port.Protocol`.
+  from the TUI cell-grid rendering commands in `Minga.Frontend.Protocol`.
 
   ## GUI Chrome Commands (BEAM → Frontend)
 

@@ -1,4 +1,4 @@
-defmodule Minga.Port.Protocol do
+defmodule Minga.Frontend.Protocol do
   @moduledoc """
   Binary protocol encoder/decoder for BEAM ↔ Zig communication.
 
@@ -48,8 +48,8 @@ defmodule Minga.Port.Protocol do
   @op_paste_event 0x06
   @op_gui_action 0x07
 
-  alias Minga.Port.Capabilities
-  alias Minga.Port.Protocol.GUI, as: ProtocolGUI
+  alias Minga.Frontend.Capabilities
+  alias Minga.Frontend.Protocol.GUI, as: ProtocolGUI
 
   # Render commands (BEAM → Zig)
   @op_draw_text 0x10

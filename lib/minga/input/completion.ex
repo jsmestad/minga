@@ -19,8 +19,7 @@ defmodule Minga.Input.Completion do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Viewport
 
-  alias Minga.Port.Protocol
-  @ctrl Protocol.mod_ctrl()
+  @ctrl Minga.Input.mod_ctrl()
   @escape 27
   @tab 9
   @enter 13

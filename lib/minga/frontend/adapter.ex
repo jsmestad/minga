@@ -1,4 +1,4 @@
-defmodule Minga.Port.Frontend do
+defmodule Minga.Frontend.Adapter do
   @moduledoc """
   Behaviour for rendering frontends that communicate with the Editor.
 
@@ -9,14 +9,14 @@ defmodule Minga.Port.Frontend do
 
   ## Implementations
 
-  - `Minga.Port.Manager` — production frontend managing a Zig renderer Port
+  - `Minga.Frontend.Manager` — production frontend managing a Zig renderer Port
   - `Minga.Test.HeadlessPort` — in-memory screen grid for testing
 
   ## Contract
 
   Frontends receive pre-encoded binary commands via `send_commands/2`
   and deliver input events to subscribers as `{:minga_input, event}`
-  messages. The event types are defined in `Minga.Port.Protocol`.
+  messages. The event types are defined in `Minga.Frontend.Protocol`.
   """
 
   @doc "Starts the frontend process."
@@ -25,7 +25,7 @@ defmodule Minga.Port.Frontend do
   @doc """
   Sends a list of pre-encoded render command binaries to the frontend.
 
-  Commands are encoded via `Minga.Port.Protocol.encode_*` functions.
+  Commands are encoded via `Minga.Frontend.Protocol.encode_*` functions.
   The frontend processes them in order. A `batch_end` command signals
   the end of a frame and triggers a render flush.
   """
@@ -35,7 +35,7 @@ defmodule Minga.Port.Frontend do
   Subscribes the calling process to receive input events.
 
   The subscriber will receive `{:minga_input, event}` messages where
-  `event` is a `Minga.Port.Protocol.input_event()`.
+  `event` is a `Minga.Frontend.Protocol.input_event()`.
   """
   @callback subscribe(server :: GenServer.server()) :: :ok
 
@@ -63,7 +63,7 @@ defmodule Minga.Port.Frontend do
   or from a subsequent `capabilities_updated` event. Returns default
   capabilities if the frontend has not reported any.
   """
-  @callback capabilities(server :: GenServer.server()) :: Minga.Port.Capabilities.t()
+  @callback capabilities(server :: GenServer.server()) :: Minga.Frontend.Capabilities.t()
 
   @doc """
   Receives a display list frame for rendering.

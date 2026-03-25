@@ -1,4 +1,4 @@
-defmodule Minga.Port.Protocol.GUIProtocolUnitTest do
+defmodule Minga.Frontend.Protocol.GUIProtocolUnitTest do
   @moduledoc """
   BEAM-side encoding tests for GUI protocol commands.
   No Swift harness needed; asserts on binary structure directly.
@@ -8,7 +8,7 @@ defmodule Minga.Port.Protocol.GUIProtocolUnitTest do
   alias Minga.Editor.State.AgentGroup
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
-  alias Minga.Port.Protocol.GUI, as: ProtocolGUI
+  alias Minga.Frontend.Protocol.GUI, as: ProtocolGUI
 
   describe "encode_gui_tab_bar/1 with group_id" do
     test "tab entry includes group_id in wire format" do

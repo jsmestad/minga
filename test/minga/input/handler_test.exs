@@ -8,11 +8,11 @@ defmodule Minga.Input.HandlerTest do
   alias Minga.Editor.State.Buffers
   alias Minga.Editor.Viewport
   alias Minga.Editor.VimState
+  alias Minga.Frontend.Protocol
   alias Minga.Input
   alias Minga.Input.ConflictPrompt
   alias Minga.Input.GlobalBindings
   alias Minga.Input.ModeFSM
-  alias Minga.Port.Protocol
 
   # Minimal editor state for testing handlers in isolation.
   # Handlers only inspect/modify the fields they care about.

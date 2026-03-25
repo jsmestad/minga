@@ -1,4 +1,4 @@
-defmodule Minga.Port.Protocol.GUIWindowContentTest do
+defmodule Minga.Frontend.Protocol.GUIWindowContentTest do
   @moduledoc """
   Tests for the gui_window_content (0x80) encoder.
 
@@ -17,7 +17,7 @@ defmodule Minga.Port.Protocol.GUIWindowContentTest do
   alias Minga.Editor.SemanticWindow.Selection
   alias Minga.Editor.SemanticWindow.Span
   alias Minga.Editor.SemanticWindow.VisualRow
-  alias Minga.Port.Protocol.GUIWindowContent
+  alias Minga.Frontend.Protocol.GUIWindowContent
   alias Minga.Test.GUIWindowContentDecoder
 
   # ── Helpers ──────────────────────────────────────────────────────────────

@@ -1,11 +1,11 @@
-defmodule Minga.Port.Manager.State do
+defmodule Minga.Frontend.Manager.State do
   @moduledoc """
   Internal state for the Port Manager GenServer.
 
   Tracks the Zig renderer port, subscribers, readiness, and terminal dimensions.
   """
 
-  alias Minga.Port.Capabilities
+  alias Minga.Frontend.Capabilities
 
   @typedoc """
   Port connection mode.

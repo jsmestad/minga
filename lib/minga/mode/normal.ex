@@ -74,7 +74,7 @@ defmodule Minga.Mode.Normal do
   @escape 27
   @space 32
 
-  # Modifier flags (mirrors Minga.Port.Protocol)
+  # Modifier flags (mirrors Minga.Frontend.Protocol)
   @ctrl 0x02
   @alt 0x04
 

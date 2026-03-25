@@ -1,4 +1,4 @@
-defmodule Minga.Port.ProtocolPropertyTest do
+defmodule Minga.Frontend.ProtocolPropertyTest do
   @moduledoc """
   Property-based tests for the Port protocol encoder/decoder.
 
@@ -10,7 +10,7 @@ defmodule Minga.Port.ProtocolPropertyTest do
   use ExUnit.Case, async: true
   use ExUnitProperties
 
-  alias Minga.Port.Protocol
+  alias Minga.Frontend.Protocol
 
   import Minga.Test.Generators
 

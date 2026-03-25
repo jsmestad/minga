@@ -19,8 +19,6 @@ defmodule Minga.Input.Router do
   alias Minga.Editor.Editing
   alias Minga.Editor.LspActions
   alias Minga.Editor.State, as: EditorState
-  alias Minga.Port.Manager, as: PortManager
-  alias Minga.Port.Protocol
 
   @typedoc "Pre-action snapshot for housekeeping comparisons."
   @type snapshot :: %{
@@ -279,7 +277,7 @@ defmodule Minga.Input.Router do
   defp maybe_render(state, buf_version_before) do
     if Editing.mode(state) == :operator_pending and
          buffer_version(state) == buf_version_before do
-      PortManager.send_commands(state.port_manager, [Protocol.encode_batch_end()])
+      Minga.Frontend.send_batch_end(state.port_manager)
       state
     else
       Editor.do_render(state)

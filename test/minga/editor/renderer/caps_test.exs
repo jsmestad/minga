@@ -2,7 +2,7 @@ defmodule Minga.Editor.Renderer.CapsTest do
   use ExUnit.Case, async: true
 
   alias Minga.Editor.Renderer.Caps
-  alias Minga.Port.Capabilities
+  alias Minga.Frontend.Capabilities
 
   describe "render_overlays?/1" do
     test "true for emulated floats (TUI default)" do

@@ -1,4 +1,4 @@
-defmodule Minga.Port.GUIMinibufferProtocolTest do
+defmodule Minga.Frontend.GUIMinibufferProtocolTest do
   @moduledoc """
   Tests for the gui_minibuffer (0x7F) protocol encoder.
 
@@ -10,7 +10,7 @@ defmodule Minga.Port.GUIMinibufferProtocolTest do
   use ExUnit.Case, async: true
 
   alias Minga.Editor.MinibufferData
-  alias Minga.Port.Protocol.GUI, as: ProtocolGUI
+  alias Minga.Frontend.Protocol.GUI, as: ProtocolGUI
 
   @op_gui_minibuffer 0x7F
 

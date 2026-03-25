@@ -8,8 +8,8 @@ defmodule Minga.Editor.HighlightSync do
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Frontend.Protocol
   alias Minga.Parser.Manager, as: ParserManager
-  alias Minga.Port.Protocol
   alias Minga.UI.Highlight
   alias Minga.UI.Highlight.Grammar
 
@@ -610,7 +610,9 @@ defmodule Minga.Editor.HighlightSync do
   end
 
   @doc "Handles a highlight_spans event for the active buffer."
-  @spec handle_spans(EditorState.t(), non_neg_integer(), [Minga.Port.Protocol.highlight_span()]) ::
+  @spec handle_spans(EditorState.t(), non_neg_integer(), [
+          Minga.Frontend.Protocol.highlight_span()
+        ]) ::
           EditorState.t()
   def handle_spans(%EditorState{} = state, version, spans) do
     update_active_highlight(state, &Highlight.put_spans(&1, version, spans))

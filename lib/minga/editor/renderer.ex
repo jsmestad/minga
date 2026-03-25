@@ -27,7 +27,6 @@ defmodule Minga.Editor.Renderer do
   alias Minga.Editor.PickerUI
   alias Minga.Editor.RenderPipeline
   alias Minga.Editor.State, as: EditorState
-  alias Minga.Port.Manager, as: PortManager
 
   @typedoc "Internal editor state."
   @type state :: EditorState.t()
@@ -85,7 +84,7 @@ defmodule Minga.Editor.Renderer do
     }
 
     commands = DisplayList.to_commands(frame)
-    PortManager.send_commands(state.port_manager, commands)
+    Minga.Frontend.send_commands(state.port_manager, commands)
     state
   end
 

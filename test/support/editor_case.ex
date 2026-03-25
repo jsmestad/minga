@@ -349,7 +349,7 @@ defmodule Minga.Test.EditorCase do
   end
 
   @doc "Returns the current cursor shape."
-  @spec cursor_shape(editor_ctx()) :: Minga.Port.Protocol.cursor_shape()
+  @spec cursor_shape(editor_ctx()) :: Minga.Frontend.Protocol.cursor_shape()
   def cursor_shape(%{port: port}) do
     case Process.get({:last_frame_snapshot, port}) do
       %{cursor_shape: shape} -> shape

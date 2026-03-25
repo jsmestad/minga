@@ -1,9 +1,9 @@
-defmodule Minga.Port.GUIPickerProtocolTest do
+defmodule Minga.Frontend.GUIPickerProtocolTest do
   @moduledoc "Tests for the extended gui_picker protocol encoding (v2)."
 
   use ExUnit.Case, async: true
 
-  alias Minga.Port.Protocol.GUI, as: ProtocolGUI
+  alias Minga.Frontend.Protocol.GUI, as: ProtocolGUI
   alias Minga.UI.Picker
   alias Minga.UI.Picker.Item
 

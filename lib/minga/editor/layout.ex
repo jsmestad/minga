@@ -27,7 +27,6 @@ defmodule Minga.Editor.Layout do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Window
   alias Minga.Editor.WindowTree
-  alias Minga.Port.Capabilities
 
   # Minimum total window width before a sidebar is carved out.
   @sidebar_threshold 80
@@ -119,14 +118,14 @@ defmodule Minga.Editor.Layout do
   This is a pure function: given the same state, it always produces the
   same rectangles. No side effects, no GenServer calls.
 
-  In GUI mode (`Capabilities.gui?`), the Metal viewport IS the editor
+  In GUI mode (`Minga.Frontend.gui?`), the Metal viewport IS the editor
   area. SwiftUI handles tab bar, file tree sidebar, breadcrumb, and
   status bar outside the Metal view. The BEAM doesn't reserve rows or
   columns for chrome that SwiftUI renders natively.
   """
   @spec compute(EditorState.t()) :: t()
   def compute(state) do
-    if Capabilities.gui?(state.capabilities) do
+    if Minga.Frontend.gui?(state.capabilities) do
       __MODULE__.GUI.compute(state)
     else
       __MODULE__.TUI.compute(state)

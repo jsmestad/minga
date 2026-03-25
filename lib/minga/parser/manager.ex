@@ -7,7 +7,7 @@ defmodule Minga.Parser.Manager do
   forwarded to subscribers. Outgoing highlight commands are encoded and
   sent to the Port.
 
-  This is the parsing counterpart to `Minga.Port.Manager` (which handles
+  This is the parsing counterpart to `Minga.Frontend.Manager` (which handles
   rendering). Separating parsing from rendering means every frontend gets
   syntax highlighting for free, and a parser crash does not kill the
   renderer.
@@ -30,12 +30,12 @@ defmodule Minga.Parser.Manager do
       {:minga_highlight, event}
 
   where `event` is one of the highlight response types from
-  `Minga.Port.Protocol`.
+  `Minga.Frontend.Protocol`.
   """
 
   use GenServer
 
-  alias Minga.Port.Protocol
+  alias Minga.Frontend.Protocol
 
   # ── Restart constants ──
 

@@ -1,10 +1,10 @@
-defmodule Minga.Port.ProtocolTextobjectPositionsTest do
+defmodule Minga.Frontend.ProtocolTextobjectPositionsTest do
   @moduledoc """
   Tests for decoding the `TEXTOBJECT_POSITIONS` (0x39) opcode.
   """
   use ExUnit.Case, async: true
 
-  alias Minga.Port.Protocol
+  alias Minga.Frontend.Protocol
 
   @op_textobject_positions 0x39
 

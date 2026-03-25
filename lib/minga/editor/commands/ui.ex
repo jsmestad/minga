@@ -10,7 +10,6 @@ defmodule Minga.Editor.Commands.UI do
   alias Minga.Editor.PickerUI
   alias Minga.Editor.State, as: EditorState
   alias Minga.Parser.Manager, as: ParserManager
-  alias Minga.Port.Capabilities
 
   @impl Minga.Command.Provider
   def __commands__ do
@@ -99,7 +98,7 @@ defmodule Minga.Editor.Commands.UI do
 
   @spec frontend(EditorState.t()) :: module()
   defp frontend(%{capabilities: caps}) do
-    if Capabilities.gui?(caps), do: __MODULE__.GUI, else: __MODULE__.TUI
+    if Minga.Frontend.gui?(caps), do: __MODULE__.GUI, else: __MODULE__.TUI
   end
 
   @spec execute_parser_restart(EditorState.t()) :: EditorState.t()

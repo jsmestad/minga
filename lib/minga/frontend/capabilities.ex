@@ -1,4 +1,4 @@
-defmodule Minga.Port.Capabilities do
+defmodule Minga.Frontend.Capabilities do
   @moduledoc """
   Frontend capabilities reported during the ready handshake.
 

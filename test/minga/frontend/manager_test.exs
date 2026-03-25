@@ -1,8 +1,8 @@
-defmodule Minga.Port.ManagerTest do
+defmodule Minga.Frontend.ManagerTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Port.Manager
-  alias Minga.Port.Protocol
+  alias Minga.Frontend.Manager
+  alias Minga.Frontend.Protocol
 
   defp unique_name, do: :"port_mgr_#{:erlang.unique_integer([:positive])}"
 
