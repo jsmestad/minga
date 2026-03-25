@@ -103,17 +103,59 @@ defmodule Minga.Input.CUA.SpaceLeaderTest do
     end
   end
 
-  describe "gui_action ignored when inactive" do
-    test "chord gui_action is no-op in vim mode" do
+  describe "keystroke replay when inactive" do
+    test "chord replays withheld space and dispatches key in vim insert mode" do
       Options.set(:editing_model, :vim)
-      ctx = start_editor("hello")
+      ctx = start_editor("")
 
-      send(ctx.editor, {:minga_input, {:gui_action, {:space_leader_chord, ?f, 0}}})
+      # Enter insert mode
+      send_key(ctx, ?i)
+
+      # Simulate Swift sending space_leader_chord with 'w' key.
+      # This happens when the user types " w" fast enough that 'w'
+      # arrives within the 30ms grace window.
+      send(ctx.editor, {:minga_input, {:gui_action, {:space_leader_chord, ?w, 0}}})
       _ = :sys.get_state(ctx.editor)
 
       state = editor_state(ctx)
       # Should NOT enter leader mode
       assert state.whichkey.node == nil
+      # Both the withheld space AND the 'w' must appear in the buffer
+      assert buffer_content(ctx) == " w"
+    end
+
+    test "retract dispatches key normally in vim insert mode" do
+      Options.set(:editing_model, :vim)
+      ctx = start_editor("")
+
+      # Enter insert mode
+      send_key(ctx, ?i)
+
+      # Space was already sent (grace timer fired)
+      send_key(ctx, 0x20)
+
+      # Swift detects late chord, sends retract
+      send(ctx.editor, {:minga_input, {:gui_action, {:space_leader_retract, ?w, 0}}})
+      _ = :sys.get_state(ctx.editor)
+
+      state = editor_state(ctx)
+      assert state.whichkey.node == nil
+      # Space was already in buffer, 'w' must also appear
+      assert buffer_content(ctx) == " w"
+    end
+
+    test "chord replays space and key in CUA mode without :chord enabled" do
+      Options.set(:editing_model, :cua)
+      Options.set(:space_leader, :off)
+      ctx = start_editor("")
+
+      send(ctx.editor, {:minga_input, {:gui_action, {:space_leader_chord, ?x, 0}}})
+      _ = :sys.get_state(ctx.editor)
+
+      # Both space and key should appear
+      content = buffer_content(ctx)
+      assert String.contains?(content, " ")
+      assert String.contains?(content, "x")
     end
   end
 end

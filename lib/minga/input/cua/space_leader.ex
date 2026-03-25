@@ -48,7 +48,12 @@ defmodule Minga.Input.CUA.SpaceLeader do
           dispatch_key_normally(state, codepoint, modifiers)
       end
     else
-      state
+      # Space leader not active (Vim mode, or CUA without :chord).
+      # The Swift frontend withheld the space and sent the next key as
+      # a chord gui_action. Replay both: insert the withheld space,
+      # then dispatch the key through normal input handling.
+      state = insert_space(state)
+      dispatch_key_normally(state, codepoint, modifiers)
     end
   end
 
@@ -73,7 +78,9 @@ defmodule Minga.Input.CUA.SpaceLeader do
           dispatch_key_normally(state, codepoint, modifiers)
       end
     else
-      state
+      # Space leader not active. The grace timer already fired and sent
+      # the space, so it's in the buffer. Just dispatch the key normally.
+      dispatch_key_normally(state, codepoint, modifiers)
     end
   end
 
