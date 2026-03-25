@@ -13,9 +13,9 @@ defmodule Minga.Picker.BufferSource do
   alias Minga.Picker.Source
 
   alias Minga.Buffer.Server, as: BufferServer
-  alias Minga.Devicon
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Buffers
+  alias Minga.UI.Devicon
 
   @impl true
   @spec title() :: String.t()

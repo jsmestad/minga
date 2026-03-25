@@ -11,11 +11,11 @@ defmodule Minga.Picker.LanguageSource do
   @behaviour Minga.Picker.Source
 
   alias Minga.Buffer.Server, as: BufferServer
-  alias Minga.Devicon
   alias Minga.Editor.Commands.BufferManagement
   alias Minga.Language
   alias Minga.Language.Registry, as: LangRegistry
   alias Minga.Picker.Item
+  alias Minga.UI.Devicon
 
   @impl true
   @spec title() :: String.t()

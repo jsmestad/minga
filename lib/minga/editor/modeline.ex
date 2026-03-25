@@ -15,12 +15,12 @@ defmodule Minga.Editor.Modeline do
   """
 
   alias Minga.Buffer.Unicode
-  alias Minga.Devicon
   alias Minga.Editor.DisplayList
-  alias Minga.Face
   alias Minga.Mode
+  alias Minga.UI.Devicon
+  alias Minga.UI.Face
 
-  alias Minga.Theme
+  alias Minga.UI.Theme
 
   @typedoc "A clickable region: column range mapping to a command."
   @type click_region ::
@@ -52,7 +52,7 @@ defmodule Minga.Editor.Modeline do
           :buf_count => non_neg_integer(),
           :macro_recording => {true, String.t()} | false,
           optional(:agent_status) => Minga.Editor.State.Agent.status(),
-          optional(:agent_theme_colors) => Minga.Theme.Agent.t() | nil,
+          optional(:agent_theme_colors) => Minga.UI.Theme.Agent.t() | nil,
           optional(:mode_override) => String.t() | nil,
           optional(:lsp_status) => lsp_status(),
           optional(:parser_status) => parser_status(),
@@ -70,7 +70,7 @@ defmodule Minga.Editor.Modeline do
   """
   @spec render(non_neg_integer(), pos_integer(), modeline_data(), Theme.t(), non_neg_integer()) ::
           {[DisplayList.draw()], [click_region()]}
-  def render(row, cols, data, theme \\ Minga.Theme.get!(:doom_one), col_off \\ 0) do
+  def render(row, cols, data, theme \\ Minga.UI.Theme.get!(:doom_one), col_off \\ 0) do
     ml = theme.modeline
 
     {mode_fg, mode_bg} =

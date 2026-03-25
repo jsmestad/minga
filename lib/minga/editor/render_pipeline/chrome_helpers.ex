@@ -16,8 +16,8 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
   alias Minga.Editor.TabBarRenderer
   alias Minga.Editor.Viewport
   alias Minga.Editor.WindowTree
-  alias Minga.Face
-  alias Minga.Theme
+  alias Minga.UI.Face
+  alias Minga.UI.Theme
   alias Minga.WhichKey
 
   @type state :: EditorState.t()

@@ -119,7 +119,10 @@ defmodule Minga.Editor.HighlightSyncEvictionTest do
         state
         | workspace: %{
             state.workspace
-            | highlight: %{hl | highlights: Map.put(hl.highlights, pid1, Minga.Highlight.new())}
+            | highlight: %{
+                hl
+                | highlights: Map.put(hl.highlights, pid1, Minga.UI.Highlight.new())
+              }
           }
       }
 
@@ -214,7 +217,10 @@ defmodule Minga.Editor.HighlightSyncEvictionTest do
         state
         | workspace: %{
             state.workspace
-            | highlight: %{hl | highlights: Map.put(hl.highlights, pid1, Minga.Highlight.new())}
+            | highlight: %{
+                hl
+                | highlights: Map.put(hl.highlights, pid1, Minga.UI.Highlight.new())
+              }
           }
       }
 

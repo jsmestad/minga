@@ -85,7 +85,7 @@ defmodule Minga.Editor.ModelineTest do
       combined = Enum.join(texts)
 
       # Elixir devicon should appear somewhere in the modeline
-      {icon, _color} = Minga.Devicon.icon_and_color(:elixir)
+      {icon, _color} = Minga.UI.Devicon.icon_and_color(:elixir)
       assert String.contains?(combined, icon)
     end
 

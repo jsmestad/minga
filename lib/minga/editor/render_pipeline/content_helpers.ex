@@ -26,12 +26,12 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Window
   alias Minga.Editor.WrapMap
-  alias Minga.Face
   alias Minga.Git.Buffer, as: GitBuffer
   alias Minga.Git.Tracker, as: GitTracker
-  alias Minga.Highlight
   alias Minga.LSP.SyncServer
   alias Minga.Mode.VisualState
+  alias Minga.UI.Face
+  alias Minga.UI.Highlight
 
   @type state :: EditorState.t()
 
@@ -758,7 +758,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
   @spec merge_document_highlight_decorations(
           Decorations.t(),
           [Minga.LSP.DocumentHighlight.t()] | nil,
-          Minga.Theme.t()
+          Minga.UI.Theme.t()
         ) :: Decorations.t()
   defp merge_document_highlight_decorations(decs, nil, _theme), do: decs
   defp merge_document_highlight_decorations(decs, [], _theme), do: decs
@@ -781,7 +781,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
   @spec rebuild_document_highlight_decorations(
           Decorations.t(),
           [Minga.LSP.DocumentHighlight.t()],
-          Minga.Theme.t()
+          Minga.UI.Theme.t()
         ) :: Decorations.t()
   defp rebuild_document_highlight_decorations(decs, highlights, theme) do
     Decorations.batch(decs, fn d ->
@@ -806,8 +806,8 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
   # Resolve background color for document highlights from the theme.
   # Uses subtle, muted colors that are visible but don't compete with
   # search highlights (priority -10) or selection.
-  @spec document_highlight_bg(Minga.LSP.DocumentHighlight.kind(), Minga.Theme.t()) ::
-          Minga.Theme.color()
+  @spec document_highlight_bg(Minga.LSP.DocumentHighlight.kind(), Minga.UI.Theme.t()) ::
+          Minga.UI.Theme.color()
   defp document_highlight_bg(:write, _theme), do: 0x4A3F2B
   defp document_highlight_bg(_kind, _theme), do: 0x3A3F4B
 
@@ -823,13 +823,13 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
   def window_decorations(_window), do: Decorations.new()
 
   @doc "Returns the highlight state for a window's buffer."
-  @spec window_highlight(state(), Window.t()) :: Minga.Highlight.t() | nil
+  @spec window_highlight(state(), Window.t()) :: Minga.UI.Highlight.t() | nil
   def window_highlight(state, window) do
     hl =
       Map.get(
         state.workspace.highlight.highlights,
         window.buffer,
-        Minga.Highlight.from_theme(state.theme)
+        Minga.UI.Highlight.from_theme(state.theme)
       )
 
     if hl.capture_names == {} do

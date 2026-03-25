@@ -7,7 +7,7 @@ defmodule Minga.Diagnostics.DecorationsTest do
   alias Minga.Diagnostics.Decorations, as: DiagDecorations
   alias Minga.Diagnostics.Diagnostic
 
-  @gutter_colors %Minga.Theme.Gutter{
+  @gutter_colors %Minga.UI.Theme.Gutter{
     fg: 0x555555,
     current_fg: 0xBBC2CF,
     error_fg: 0xFF6C6B,
@@ -167,7 +167,7 @@ defmodule Minga.Diagnostics.DecorationsTest do
       BufferServer.batch_decorations(pid, fn decs ->
         {_id, decs} =
           Decorations.add_highlight(decs, {0, 0}, {0, 5},
-            style: Minga.Face.new(fg: 0x00FF00),
+            style: Minga.UI.Face.new(fg: 0x00FF00),
             group: :search
           )
 

@@ -124,7 +124,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI.ChromeCacheTest do
       flush_port_casts()
 
       # Change the theme to force a cache miss on the theme fingerprint.
-      changed_state = %{state | theme: Minga.Theme.get!(:one_dark)}
+      changed_state = %{state | theme: Minga.UI.Theme.get!(:one_dark)}
       sb_data2 = StatusBarData.from_state(changed_state)
 
       EmitGUI.sync_swiftui_chrome(changed_state, sb_data2)

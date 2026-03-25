@@ -94,7 +94,7 @@ defmodule Minga.Editor.DashboardTest do
 
   describe "render/4" do
     test "returns a list of draw tuples" do
-      theme = Minga.Theme.get!(:doom_one)
+      theme = Minga.UI.Theme.get!(:doom_one)
       state = Dashboard.new_state()
       draws = Dashboard.render(80, 24, theme, state)
       assert is_list(draws)
@@ -102,7 +102,7 @@ defmodule Minga.Editor.DashboardTest do
     end
 
     test "all draws are valid tuples" do
-      theme = Minga.Theme.get!(:doom_one)
+      theme = Minga.UI.Theme.get!(:doom_one)
       state = Dashboard.new_state()
       draws = Dashboard.render(80, 24, theme, state)
       assert draws != []
@@ -115,7 +115,7 @@ defmodule Minga.Editor.DashboardTest do
     end
 
     test "version string appears in draws" do
-      theme = Minga.Theme.get!(:doom_one)
+      theme = Minga.UI.Theme.get!(:doom_one)
       state = Dashboard.new_state()
       draws = Dashboard.render(80, 24, theme, state)
 
@@ -124,7 +124,7 @@ defmodule Minga.Editor.DashboardTest do
     end
 
     test "quick action labels appear in draws" do
-      theme = Minga.Theme.get!(:doom_one)
+      theme = Minga.UI.Theme.get!(:doom_one)
       state = Dashboard.new_state()
       draws = Dashboard.render(80, 24, theme, state)
 
@@ -134,7 +134,7 @@ defmodule Minga.Editor.DashboardTest do
     end
 
     test "recent files appear in draws when provided" do
-      theme = Minga.Theme.get!(:doom_one)
+      theme = Minga.UI.Theme.get!(:doom_one)
       state = Dashboard.new_state(["lib/my_file.ex"])
       draws = Dashboard.render(80, 24, theme, state)
 
@@ -143,7 +143,7 @@ defmodule Minga.Editor.DashboardTest do
     end
 
     test "renders within bounds for small terminal" do
-      theme = Minga.Theme.get!(:doom_one)
+      theme = Minga.UI.Theme.get!(:doom_one)
       state = Dashboard.new_state()
       draws = Dashboard.render(40, 10, theme, state)
 
@@ -154,8 +154,8 @@ defmodule Minga.Editor.DashboardTest do
     end
 
     test "active item has different background" do
-      theme = Minga.Theme.get!(:doom_one)
-      dt = Minga.Theme.dashboard_theme(theme)
+      theme = Minga.UI.Theme.get!(:doom_one)
+      dt = Minga.UI.Theme.dashboard_theme(theme)
       state = Dashboard.new_state()
       draws = Dashboard.render(80, 24, theme, state)
 
@@ -183,7 +183,7 @@ defmodule Minga.Editor.DashboardTest do
         },
         focus_stack: Minga.Input.default_stack(),
         dashboard: Dashboard.new_state(),
-        theme: Minga.Theme.get!(:doom_one),
+        theme: Minga.UI.Theme.get!(:doom_one),
         picker_ui: %PickerState{picker: picker, source: Minga.Picker.FileSource}
       }
 

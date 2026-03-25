@@ -11,10 +11,10 @@ defmodule Minga.Picker.TabSource do
 
   alias Minga.Picker.Item
 
-  alias Minga.Devicon
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.TabBar
   alias Minga.Language.Filetype
+  alias Minga.UI.Devicon
 
   @impl true
   @spec title() :: String.t()

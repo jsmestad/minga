@@ -18,7 +18,7 @@ defmodule Minga.Editor.RenderPipeline.TestHelpers do
   alias Minga.Editor.WindowTree
   alias Minga.Input
   alias Minga.Port.Capabilities
-  alias Minga.Theme
+  alias Minga.UI.Theme
 
   @doc """
   Constructs a minimal EditorState for pipeline stage tests.
@@ -126,7 +126,7 @@ defmodule Minga.Editor.RenderPipeline.TestHelpers do
           row,
           4,
           "line #{viewport_top + row}: content",
-          Minga.Face.new(fg: 0xBBC2CF, bg: 0x282C34)
+          Minga.UI.Face.new(fg: 0xBBC2CF, bg: 0x282C34)
         )
       end
 
@@ -136,7 +136,7 @@ defmodule Minga.Editor.RenderPipeline.TestHelpers do
           row,
           0,
           String.pad_leading("#{viewport_top + row + 1}", 3) <> " ",
-          Minga.Face.new(fg: 0x5B6268, bg: 0x282C34)
+          Minga.UI.Face.new(fg: 0x5B6268, bg: 0x282C34)
         )
       end
 
@@ -153,7 +153,7 @@ defmodule Minga.Editor.RenderPipeline.TestHelpers do
       cursor: Cursor.new(0, 4, :block),
       windows: [win_frame],
       minibuffer: [
-        DisplayList.draw(height + 1, 0, " ", Minga.Face.new(fg: 0xBBC2CF, bg: 0x282C34))
+        DisplayList.draw(height + 1, 0, " ", Minga.UI.Face.new(fg: 0xBBC2CF, bg: 0x282C34))
       ]
     }
   end

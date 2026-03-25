@@ -79,12 +79,12 @@ defmodule Minga.Port.Protocol.GUI do
   import Bitwise
 
   alias Minga.Buffer.Server, as: BufferServer
-  alias Minga.Devicon
   alias Minga.Editor.MinibufferData
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
   alias Minga.Language.Filetype
-  alias Minga.Theme.Slots
+  alias Minga.UI.Devicon
+  alias Minga.UI.Theme.Slots
 
   # ── GUI chrome opcodes (BEAM → Frontend) ──
   # Contiguous range 0x70-0x7F for easy range-check classification.
@@ -468,8 +468,8 @@ defmodule Minga.Port.Protocol.GUI do
   Takes a `Theme.t()` and produces a binary with `{slot_id:u8, r:u8, g:u8, b:u8}`
   entries for every color slot the GUI needs. Colors that are nil are skipped.
   """
-  @spec encode_gui_theme(Minga.Theme.t()) :: binary()
-  def encode_gui_theme(%Minga.Theme{} = theme) do
+  @spec encode_gui_theme(Minga.UI.Theme.t()) :: binary()
+  def encode_gui_theme(%Minga.UI.Theme{} = theme) do
     pairs =
       theme
       |> Slots.to_color_pairs()
@@ -855,7 +855,7 @@ defmodule Minga.Port.Protocol.GUI do
     parser_byte = encode_parser_status(d.parser_status)
     agent_byte = encode_agent_session_status(d.agent_status)
     {git_added, git_modified, git_deleted} = git_diff_counts(d)
-    {icon, icon_color} = Minga.Devicon.icon_and_color(d.filetype)
+    {icon, icon_color} = Minga.UI.Devicon.icon_and_color(d.filetype)
     icon_bytes = :erlang.iolist_to_binary([icon])
     icon_r = icon_color >>> 16 &&& 0xFF
     icon_g = icon_color >>> 8 &&& 0xFF
@@ -895,7 +895,7 @@ defmodule Minga.Port.Protocol.GUI do
     parser_byte = encode_parser_status(d.parser_status)
     agent_byte = encode_agent_session_status(d.agent_status)
     {git_added, git_modified, git_deleted} = git_diff_counts(d)
-    {icon, icon_color} = Minga.Devicon.icon_and_color(d.filetype)
+    {icon, icon_color} = Minga.UI.Devicon.icon_and_color(d.filetype)
     icon_bytes = :erlang.iolist_to_binary([icon])
     icon_r = icon_color >>> 16 &&& 0xFF
     icon_g = icon_color >>> 8 &&& 0xFF

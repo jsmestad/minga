@@ -13,8 +13,8 @@ defmodule Minga.Editor.Renderer.Minibuffer do
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Diagnostics
   alias Minga.Editor.DisplayList
-  alias Minga.Face
   alias Minga.LSP.SyncServer
+  alias Minga.UI.Face
 
   @typedoc """
   Focused input for minibuffer rendering.

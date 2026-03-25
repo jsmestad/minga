@@ -56,8 +56,8 @@ defmodule Minga.Editor.State do
   alias Minga.Panel.MessageStore
   alias Minga.Port.Capabilities
   alias Minga.Project.FileTree
-  alias Minga.Theme
   alias Minga.Tool.Manager, as: ToolManager
+  alias Minga.UI.Theme
   alias Minga.Workspace.State, as: WorkspaceState
 
   @typedoc "Line number display style."
@@ -73,7 +73,7 @@ defmodule Minga.Editor.State do
             picker_ui: %Picker{},
             prompt_ui: %Prompt{},
             whichkey: %WhichKey{},
-            theme: Minga.Theme.get!(:doom_one),
+            theme: Minga.UI.Theme.get!(:doom_one),
             status_msg: nil,
             render_timer: nil,
             warning_popup_timer: nil,
@@ -100,7 +100,7 @@ defmodule Minga.Editor.State do
             pending_quit: nil,
             buffer_monitors: %{},
             face_override_registries: %{},
-            font_registry: Minga.FontRegistry.new(),
+            font_registry: Minga.UI.FontRegistry.new(),
             highlight_debounce_timer: nil,
             inlay_hint_debounce_timer: nil,
             last_inlay_viewport_top: nil,
@@ -155,7 +155,7 @@ defmodule Minga.Editor.State do
           last_test_command: {String.t(), String.t()} | nil,
           pending_quit: :quit | :quit_all | nil,
           buffer_monitors: %{pid() => reference()},
-          face_override_registries: %{pid() => Minga.Face.Registry.t()},
+          face_override_registries: %{pid() => Minga.UI.Face.Registry.t()},
           highlight_debounce_timer: reference() | nil,
           inlay_hint_debounce_timer: reference() | nil,
           last_inlay_viewport_top: non_neg_integer() | nil,
@@ -163,7 +163,7 @@ defmodule Minga.Editor.State do
           inlay_hints: [map()],
           selection_ranges: [map()] | nil,
           selection_range_index: non_neg_integer(),
-          font_registry: Minga.FontRegistry.t(),
+          font_registry: Minga.UI.FontRegistry.t(),
           tool_declined: MapSet.t(atom()),
           tool_prompt_queue: [atom()],
           session_timer: reference() | nil,

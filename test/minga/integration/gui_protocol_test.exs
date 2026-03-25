@@ -38,7 +38,7 @@ defmodule Minga.Integration.GUIProtocolTest do
 
   describe "GUI chrome opcode round-trip" do
     test "gui_theme encodes and decodes correctly", %{port: port} do
-      theme = Minga.Theme.get!(:doom_one)
+      theme = Minga.UI.Theme.get!(:doom_one)
       cmd = ProtocolGUI.encode_gui_theme(theme)
 
       Port.command(port, cmd)

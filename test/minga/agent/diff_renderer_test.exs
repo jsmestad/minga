@@ -5,7 +5,7 @@ defmodule Minga.Agent.DiffRendererTest do
   alias Minga.Agent.DiffReview
 
   defp default_theme do
-    Minga.Theme.get!(:doom_one)
+    Minga.UI.Theme.get!(:doom_one)
   end
 
   defp simple_review do

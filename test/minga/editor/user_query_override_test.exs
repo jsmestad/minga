@@ -9,7 +9,7 @@ defmodule Minga.Editor.UserQueryOverrideTest do
   use Minga.Test.EditorCase, async: true
 
   alias Minga.Editor.HighlightSync
-  alias Minga.Highlight.Grammar
+  alias Minga.UI.Highlight.Grammar
 
   alias Minga.Command.Parser
 

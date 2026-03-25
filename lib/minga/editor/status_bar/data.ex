@@ -22,7 +22,7 @@ defmodule Minga.Editor.StatusBar.Data do
   alias Minga.Git.Buffer, as: GitBuffer
   alias Minga.Git.Tracker, as: GitTracker
   alias Minga.LSP.SyncServer
-  alias Minga.Theme
+  alias Minga.UI.Theme
 
   # ── Types ──────────────────────────────────────────────────────────────────
 

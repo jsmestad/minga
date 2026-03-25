@@ -8,10 +8,10 @@ defmodule Minga.Editor.HighlightSync do
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.State, as: EditorState
-  alias Minga.Highlight
-  alias Minga.Highlight.Grammar
   alias Minga.Parser.Manager, as: ParserManager
   alias Minga.Port.Protocol
+  alias Minga.UI.Highlight
+  alias Minga.UI.Highlight.Grammar
 
   @doc """
   Sets up highlighting for the current buffer.
@@ -37,7 +37,7 @@ defmodule Minga.Editor.HighlightSync do
   end
 
   @typedoc "Options for `setup_for_buffer_pid/3`."
-  @type setup_opt :: {:syntax, Minga.Theme.syntax()}
+  @type setup_opt :: {:syntax, Minga.UI.Theme.syntax()}
 
   @doc """
   Sets up highlighting for a specific buffer PID that may not be the active buffer.

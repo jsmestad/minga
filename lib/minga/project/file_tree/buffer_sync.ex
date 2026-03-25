@@ -7,9 +7,9 @@ defmodule Minga.Project.FileTree.BufferSync do
   """
 
   alias Minga.Buffer.Server, as: BufferServer
-  alias Minga.Devicon
   alias Minga.Language.Filetype
   alias Minga.Project.FileTree
+  alias Minga.UI.Devicon
 
   # Box-drawing characters matching TreeRenderer
   @guide_pipe "│ "

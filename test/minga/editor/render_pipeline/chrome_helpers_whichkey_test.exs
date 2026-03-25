@@ -4,7 +4,7 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpersWhichKeyTest do
   alias Minga.Editor.RenderPipeline.ChromeHelpers
   alias Minga.Editor.Viewport
   alias Minga.Keymap.Bindings
-  alias Minga.Theme
+  alias Minga.UI.Theme
 
   defp build_state do
     root =

@@ -3,7 +3,7 @@ defmodule Minga.Editor.Renderer.GutterTest do
 
   alias Minga.Editor.Renderer.Gutter
 
-  @colors %Minga.Theme.Gutter{
+  @colors %Minga.UI.Theme.Gutter{
     fg: 0x555555,
     current_fg: 0xBBC2CF,
     error_fg: 0xFF6C6B,
@@ -12,7 +12,7 @@ defmodule Minga.Editor.Renderer.GutterTest do
     hint_fg: 0x555555
   }
 
-  @git_colors %Minga.Theme.Git{
+  @git_colors %Minga.UI.Theme.Git{
     added_fg: 0x98BE65,
     modified_fg: 0x51AFEF,
     deleted_fg: 0xFF6C6B

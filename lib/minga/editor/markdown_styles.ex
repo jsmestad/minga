@@ -8,7 +8,7 @@ defmodule Minga.Editor.MarkdownStyles do
   """
 
   alias Minga.Agent.Markdown
-  alias Minga.Face
+  alias Minga.UI.Face
 
   @doc """
   Converts a markdown style atom to a Face struct.

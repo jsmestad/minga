@@ -23,7 +23,6 @@ defmodule Minga.Editor.SemanticWindow.Builder do
   alias Minga.Diagnostics
   alias Minga.Editor.DisplayMap
   alias Minga.Editor.FoldMap
-
   alias Minga.Editor.Renderer.Composition
   alias Minga.Editor.Renderer.Context
   alias Minga.Editor.RenderPipeline.Scroll.WindowScroll
@@ -37,8 +36,8 @@ defmodule Minga.Editor.SemanticWindow.Builder do
   alias Minga.Editor.SemanticWindow.VisualRow
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Viewport
-  alias Minga.Highlight
   alias Minga.LSP.SyncServer
+  alias Minga.UI.Highlight
 
   @type state :: EditorState.t()
 
@@ -316,7 +315,7 @@ defmodule Minga.Editor.SemanticWindow.Builder do
     # Start with highlight segments or plain text
     segments =
       case hl_segments do
-        nil -> [{line_text, Minga.Face.new()}]
+        nil -> [{line_text, Minga.UI.Face.new()}]
         segs -> segs
       end
 
@@ -464,7 +463,7 @@ defmodule Minga.Editor.SemanticWindow.Builder do
     segments_to_spans(segments)
   end
 
-  @spec segments_to_spans([{String.t(), Minga.Face.t()}]) :: [Span.t()]
+  @spec segments_to_spans([{String.t(), Minga.UI.Face.t()}]) :: [Span.t()]
   defp segments_to_spans(segments) do
     {spans, _col} =
       Enum.reduce(segments, {[], 0}, fn {text, style}, {acc, col} ->

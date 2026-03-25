@@ -3,8 +3,8 @@ defmodule Minga.Editor.DisplayListTest do
 
   alias Minga.Editor.DisplayList
   alias Minga.Editor.DisplayList.{Cursor, Frame, Overlay, WindowFrame}
-  alias Minga.Face
   alias Minga.Port.Protocol
+  alias Minga.UI.Face
 
   describe "draw/4" do
     test "creates a draw tuple with default empty style" do

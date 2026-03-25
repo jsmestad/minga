@@ -30,7 +30,7 @@ defmodule Minga.Editor.FloatingWindowTest do
         assert is_integer(row) and row >= 0
         assert is_integer(col) and col >= 0
         assert is_binary(text)
-        assert %Minga.Face{} = style
+        assert %Minga.UI.Face{} = style
       end)
     end
   end
@@ -213,7 +213,7 @@ defmodule Minga.Editor.FloatingWindowTest do
 
   describe "content" do
     test "content draws are offset into the interior" do
-      content = [DisplayList.draw(0, 0, "hello", Minga.Face.new(fg: 0xFFFFFF))]
+      content = [DisplayList.draw(0, 0, "hello", Minga.UI.Face.new(fg: 0xFFFFFF))]
 
       draws =
         FloatingWindow.render(

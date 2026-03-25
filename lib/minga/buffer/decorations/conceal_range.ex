@@ -34,7 +34,7 @@ defmodule Minga.Buffer.Decorations.ConcealRange do
   """
 
   alias Minga.Buffer.IntervalTree
-  alias Minga.Face
+  alias Minga.UI.Face
 
   @enforce_keys [:id, :start_pos, :end_pos]
   defstruct [

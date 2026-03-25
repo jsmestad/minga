@@ -13,9 +13,9 @@ defmodule Minga.Editor.HighlightIntegrationTest do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Viewport
   alias Minga.Editor.VimState
-  alias Minga.Face
-  alias Minga.Highlight
   alias Minga.Test.HeadlessPort
+  alias Minga.UI.Face
+  alias Minga.UI.Highlight
 
   # Helper: builds a %Highlight{} with a face registry from a theme map.
   defp highlight_with(attrs) do

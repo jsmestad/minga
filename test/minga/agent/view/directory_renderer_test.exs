@@ -2,7 +2,7 @@ defmodule Minga.Agent.View.DirectoryRendererTest do
   use ExUnit.Case, async: true
 
   alias Minga.Agent.View.DirectoryRenderer
-  alias Minga.Theme
+  alias Minga.UI.Theme
 
   defp default_theme do
     {:ok, theme} = Theme.get(:doom_one)

@@ -13,7 +13,7 @@ defmodule Minga.Editor.Renderer.Gutter do
 
   alias Minga.Diagnostics.Diagnostic
   alias Minga.Editor.DisplayList
-  alias Minga.Face
+  alias Minga.UI.Face
 
   @sign_col_width 2
 
@@ -21,7 +21,7 @@ defmodule Minga.Editor.Renderer.Gutter do
   @type line_number_style :: :hybrid | :absolute | :relative | :none
 
   @typedoc "Gutter color set from the active theme."
-  @type colors :: Minga.Theme.Gutter.t()
+  @type colors :: Minga.UI.Theme.Gutter.t()
 
   @doc """
   Returns the total gutter width including sign column and line numbers.
@@ -40,7 +40,7 @@ defmodule Minga.Editor.Renderer.Gutter do
   def sign_column_width, do: @sign_col_width
 
   @typedoc "Git sign color set from the active theme."
-  @type git_colors :: Minga.Theme.Git.t()
+  @type git_colors :: Minga.UI.Theme.Git.t()
 
   @doc """
   Renders the sign column for a line.

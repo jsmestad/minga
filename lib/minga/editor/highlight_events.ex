@@ -14,9 +14,9 @@ defmodule Minga.Editor.HighlightEvents do
   alias Minga.Editor.HighlightSync
   alias Minga.Editor.Renderer
   alias Minga.Editor.State, as: EditorState
-  alias Minga.Face
   alias Minga.Language.Filetype
-  alias Minga.PrettifySymbols
+  alias Minga.UI.Face
+  alias Minga.UI.PrettifySymbols
 
   @doc """
   Handles `:highlight_names` events from the parser (for the active buffer).

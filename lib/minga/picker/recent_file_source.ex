@@ -10,11 +10,11 @@ defmodule Minga.Picker.RecentFileSource do
 
   alias Minga.Picker.Item
 
-  alias Minga.Devicon
   alias Minga.Editor.State, as: EditorState
   alias Minga.Language.Filetype
   alias Minga.Picker.Source
   alias Minga.Project
+  alias Minga.UI.Devicon
 
   @impl true
   @spec title() :: String.t()

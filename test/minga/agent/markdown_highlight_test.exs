@@ -2,8 +2,8 @@ defmodule Minga.Agent.MarkdownHighlightTest do
   use ExUnit.Case, async: true
 
   alias Minga.Agent.MarkdownHighlight
-  alias Minga.Face
-  alias Minga.Highlight
+  alias Minga.UI.Face
+  alias Minga.UI.Highlight
 
   defp make_highlight(attrs) do
     theme = Keyword.get(attrs, :theme, %{})

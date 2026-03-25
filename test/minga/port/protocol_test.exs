@@ -636,7 +636,7 @@ defmodule Minga.Port.ProtocolTest do
       assert {:ok, {:highlight_spans, 5, 42, spans}} = Protocol.decode_event(payload)
       assert length(spans) == 2
 
-      assert hd(spans) == %Minga.Highlight.Span{
+      assert hd(spans) == %Minga.UI.Highlight.Span{
                start_byte: 0,
                end_byte: 9,
                capture_id: 0,
@@ -644,7 +644,7 @@ defmodule Minga.Port.ProtocolTest do
                layer: 0
              }
 
-      assert List.last(spans) == %Minga.Highlight.Span{
+      assert List.last(spans) == %Minga.UI.Highlight.Span{
                start_byte: 10,
                end_byte: 15,
                capture_id: 1,
@@ -928,7 +928,7 @@ defmodule Minga.Port.ProtocolTest do
 
   describe "encode_gui_theme/1" do
     test "encodes theme colors as slot_id + rgb tuples" do
-      theme = Minga.Theme.get!(:doom_one)
+      theme = Minga.UI.Theme.get!(:doom_one)
       encoded = ProtocolGUI.encode_gui_theme(theme)
 
       # First byte is opcode
@@ -1141,7 +1141,7 @@ defmodule Minga.Port.ProtocolTest do
     end
 
     test "nil colors are skipped" do
-      theme = Minga.Theme.get!(:doom_one)
+      theme = Minga.UI.Theme.get!(:doom_one)
       encoded = ProtocolGUI.encode_gui_theme(theme)
       # gui_theme
       <<0x74, count::8, _rest::binary>> = encoded

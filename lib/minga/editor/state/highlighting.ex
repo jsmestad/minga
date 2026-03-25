@@ -12,7 +12,7 @@ defmodule Minga.Editor.State.Highlighting do
   `Map.get(highlights, active_pid)`.
   """
 
-  alias Minga.Highlight
+  alias Minga.UI.Highlight
 
   @type t :: %__MODULE__{
           highlights: %{pid() => Highlight.t()},
@@ -21,7 +21,7 @@ defmodule Minga.Editor.State.Highlighting do
           reverse_buffer_ids: %{non_neg_integer() => pid()},
           next_buffer_id: non_neg_integer(),
           last_active_at: %{pid() => integer()},
-          syntax_overrides: %{pid() => Minga.Theme.syntax()}
+          syntax_overrides: %{pid() => Minga.UI.Theme.syntax()}
         }
 
   defstruct highlights: %{},

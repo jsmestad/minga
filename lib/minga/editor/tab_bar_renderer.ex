@@ -20,13 +20,13 @@ defmodule Minga.Editor.TabBarRenderer do
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Buffer.Unicode
-  alias Minga.Devicon
   alias Minga.Editor.DisplayList
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
-  alias Minga.Face
   alias Minga.Language.Filetype
-  alias Minga.Theme
+  alias Minga.UI.Devicon
+  alias Minga.UI.Face
+  alias Minga.UI.Theme
 
   @typedoc "A clickable region: column range mapping to a command."
   @type click_region ::

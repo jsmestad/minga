@@ -27,8 +27,8 @@ defmodule Minga.Editor.DisplayList do
   """
 
   alias Minga.Editor.Layout
-  alias Minga.Face
   alias Minga.Port.Protocol
+  alias Minga.UI.Face
 
   # ── Fundamental types ──────────────────────────────────────────────────────
 
@@ -345,8 +345,11 @@ defmodule Minga.Editor.DisplayList do
         {style, []}
 
       {family, rest} ->
-        registry = Process.get(:emit_font_registry) || Minga.FontRegistry.new()
-        {font_id, updated_registry, new?} = Minga.FontRegistry.get_or_register(registry, family)
+        registry = Process.get(:emit_font_registry) || Minga.UI.FontRegistry.new()
+
+        {font_id, updated_registry, new?} =
+          Minga.UI.FontRegistry.get_or_register(registry, family)
+
         Process.put(:emit_font_registry, updated_registry)
 
         style_with_id = if font_id > 0, do: [{:font_id, font_id} | rest], else: rest

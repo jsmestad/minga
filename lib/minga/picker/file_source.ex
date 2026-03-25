@@ -8,13 +8,13 @@ defmodule Minga.Picker.FileSource do
 
   @behaviour Minga.Picker.Source
 
-  alias Minga.Devicon
   alias Minga.Editor.State, as: EditorState
   alias Minga.Git.Repo, as: GitRepo
   alias Minga.Language.Filetype
   alias Minga.Log
   alias Minga.Picker.Item
   alias Minga.Picker.Source
+  alias Minga.UI.Devicon
 
   @impl true
   @spec title() :: String.t()
