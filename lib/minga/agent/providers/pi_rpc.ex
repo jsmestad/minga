@@ -508,6 +508,8 @@ defmodule Minga.Agent.Providers.PiRpc do
 
   @spec extract_usage(map()) :: Event.token_usage() | nil
   defp extract_usage(%{"messages" => messages}) when is_list(messages) do
+    alias Minga.Agent.TurnUsage
+
     # Sum usage across all assistant messages in the agent_end event
     messages
     |> Enum.filter(fn m -> m["role"] == "assistant" && is_map(m["usage"]) end)
@@ -515,7 +517,7 @@ defmodule Minga.Agent.Providers.PiRpc do
       usage = msg["usage"]
       cost_map = usage["cost"] || %{}
 
-      current = %{
+      current = %TurnUsage{
         input: usage["input"] || 0,
         output: usage["output"] || 0,
         cache_read: usage["cacheRead"] || 0,
@@ -524,17 +526,8 @@ defmodule Minga.Agent.Providers.PiRpc do
       }
 
       case acc do
-        nil ->
-          current
-
-        prev ->
-          %{
-            input: prev.input + current.input,
-            output: prev.output + current.output,
-            cache_read: prev.cache_read + current.cache_read,
-            cache_write: prev.cache_write + current.cache_write,
-            cost: prev.cost + current.cost
-          }
+        nil -> current
+        prev -> TurnUsage.add(prev, current)
       end
     end)
   end

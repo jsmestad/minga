@@ -56,13 +56,7 @@ defmodule Minga.LSP.SemanticTokens do
         }
 
   @typedoc "A highlight span compatible with the existing highlight sweep."
-  @type highlight_span :: %{
-          start_byte: non_neg_integer(),
-          end_byte: non_neg_integer(),
-          capture_id: non_neg_integer(),
-          pattern_index: non_neg_integer(),
-          layer: non_neg_integer()
-        }
+  @type highlight_span :: Minga.Highlight.Span.t()
 
   @doc """
   Decodes a delta-encoded semantic token array from LSP.
@@ -182,7 +176,7 @@ defmodule Minga.LSP.SemanticTokens do
       capture_id = capture_name_to_id.(capture_name)
 
       [
-        %{
+        %Minga.Highlight.Span{
           start_byte: start_byte,
           end_byte: end_byte,
           capture_id: capture_id,

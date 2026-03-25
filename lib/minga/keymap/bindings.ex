@@ -38,7 +38,6 @@ defmodule Minga.Keymap.Bindings do
   defmodule Node do
     @moduledoc "A single node in the keymap trie."
 
-    @enforce_keys []
     defstruct children: %{},
               command: nil,
               description: nil

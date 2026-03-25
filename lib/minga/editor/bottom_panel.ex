@@ -36,7 +36,6 @@ defmodule Minga.Editor.BottomPanel do
           height_percent: non_neg_integer()
         }
 
-  @enforce_keys []
   defstruct visible: false,
             active_tab: :messages,
             tabs: [:messages],

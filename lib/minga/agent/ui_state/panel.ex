@@ -39,7 +39,6 @@ defmodule Minga.Agent.UIState.Panel do
           message_version: non_neg_integer()
         }
 
-  @enforce_keys []
   defstruct visible: false,
             scroll: %Scroll{},
             prompt_buffer: nil,

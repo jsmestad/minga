@@ -13,7 +13,6 @@ defmodule Minga.Mode.ReplaceState do
     backspace past the column at which Replace mode was entered).
   """
 
-  @enforce_keys []
   defstruct original_chars: [],
             count: nil,
             leader_node: nil,

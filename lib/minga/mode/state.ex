@@ -10,7 +10,6 @@ defmodule Minga.Mode.State do
 
   alias Minga.Keymap.Bindings
 
-  @enforce_keys []
   defstruct filetype: :text,
             count: nil,
             leader_node: nil,

@@ -6,7 +6,6 @@ defmodule Minga.Mode.EvalState do
   count/leader fields.
   """
 
-  @enforce_keys []
   defstruct input: "",
             count: nil,
             leader_node: nil,

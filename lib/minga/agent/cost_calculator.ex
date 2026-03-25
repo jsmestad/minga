@@ -10,17 +10,11 @@ defmodule Minga.Agent.CostCalculator do
   All costs are in USD. Rates in LLMDB are per million tokens.
   """
 
-  @typedoc "Token usage with cost."
-  @type usage_with_cost :: %{
-          input: non_neg_integer(),
-          output: non_neg_integer(),
-          cache_read: non_neg_integer(),
-          cache_write: non_neg_integer(),
-          cost: float()
-        }
+  @typedoc "Deprecated: use `Minga.Agent.TurnUsage.t()` directly."
+  @type usage_with_cost :: Minga.Agent.TurnUsage.t()
 
   @doc """
-  Ensures the usage map has an accurate cost value.
+  Ensures the usage struct has an accurate cost value.
 
   If the existing cost is non-zero, it's returned as-is (the API's value
   is authoritative). Otherwise, the cost is calculated from LLMDB pricing
@@ -29,15 +23,13 @@ defmodule Minga.Agent.CostCalculator do
   `model` should be the bare model ID (without provider prefix).
   `provider` should be the provider atom (e.g., :anthropic).
   """
-  @spec ensure_cost(map(), String.t(), atom()) :: map()
-  def ensure_cost(usage, model_id, provider) when is_map(usage) do
-    existing_cost = Map.get(usage, :cost, 0.0) || 0.0
-
-    if existing_cost > 0.0 do
+  @spec ensure_cost(Minga.Agent.TurnUsage.t(), String.t(), atom()) :: Minga.Agent.TurnUsage.t()
+  def ensure_cost(%Minga.Agent.TurnUsage{} = usage, model_id, provider) do
+    if usage.cost > 0.0 do
       usage
     else
       calculated = calculate_cost(usage, model_id, provider)
-      Map.put(usage, :cost, calculated)
+      %{usage | cost: calculated}
     end
   end
 
@@ -46,17 +38,17 @@ defmodule Minga.Agent.CostCalculator do
 
   Returns 0.0 if the model is not found in LLMDB.
   """
-  @spec calculate_cost(map(), String.t(), atom()) :: float()
-  def calculate_cost(usage, model_id, provider) do
+  @spec calculate_cost(Minga.Agent.TurnUsage.t(), String.t(), atom()) :: float()
+  def calculate_cost(%Minga.Agent.TurnUsage{} = usage, model_id, provider) do
     case find_model_pricing(model_id, provider) do
       nil ->
         0.0
 
       rates ->
-        input = (Map.get(usage, :input, 0) || 0) * rate(rates, :input)
-        output = (Map.get(usage, :output, 0) || 0) * rate(rates, :output)
-        cache_read = (Map.get(usage, :cache_read, 0) || 0) * rate(rates, :cache_read)
-        cache_write = (Map.get(usage, :cache_write, 0) || 0) * rate(rates, :cache_write)
+        input = usage.input * rate(rates, :input)
+        output = usage.output * rate(rates, :output)
+        cache_read = usage.cache_read * rate(rates, :cache_read)
+        cache_write = usage.cache_write * rate(rates, :cache_write)
 
         Float.round(input + output + cache_read + cache_write, 6)
     end

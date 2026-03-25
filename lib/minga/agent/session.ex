@@ -28,7 +28,10 @@ defmodule Minga.Agent.Session do
   alias Minga.Agent.Message
   alias Minga.Agent.Notifier
   alias Minga.Agent.ProviderResolver
+  alias Minga.Agent.SessionMetadata
   alias Minga.Agent.SessionStore
+  alias Minga.Agent.ToolCall
+  alias Minga.Agent.TurnUsage
 
   @typedoc "Agent session status."
   @type status :: :idle | :thinking | :tool_executing | :error
@@ -122,6 +125,9 @@ defmodule Minga.Agent.Session do
     GenServer.call(session, :usage)
   end
 
+  @typedoc "Deprecated: use `Minga.Agent.SessionMetadata.t()` directly."
+  @type metadata :: SessionMetadata.t()
+
   @typedoc "Snapshot of session state needed by the editor for rendering."
   @type editor_snapshot :: %{
           status: status(),
@@ -165,19 +171,8 @@ defmodule Minga.Agent.Session do
     GenServer.call(session, {:load_session, session_id})
   end
 
-  @typedoc "Lightweight session metadata for the session picker."
-  @type metadata :: %{
-          id: String.t(),
-          model_name: String.t(),
-          created_at: DateTime.t(),
-          message_count: non_neg_integer(),
-          first_prompt: String.t() | nil,
-          cost: float(),
-          status: status()
-        }
-
   @doc "Returns lightweight metadata about this session (for the picker)."
-  @spec metadata(GenServer.server()) :: metadata()
+  @spec metadata(GenServer.server()) :: SessionMetadata.t()
   def metadata(session) do
     GenServer.call(session, :metadata)
   end
@@ -421,7 +416,7 @@ defmodule Minga.Agent.Session do
       message_ids: [1],
       next_message_id: 2,
       subscribers: MapSet.new(),
-      total_usage: %{input: 0, output: 0, cache_read: 0, cache_write: 0, cost: 0.0},
+      total_usage: TurnUsage.new(),
       error_message: nil,
       pending_thinking_level: initial_thinking_level,
       pending_approval: nil,
@@ -542,11 +537,8 @@ defmodule Minga.Agent.Session do
     # Mark any running tool calls as aborted
     messages =
       Enum.map(state.messages, fn
-        {:tool_call, %{status: :running} = tc} ->
-          {:tool_call, %{tc | status: :error, result: "aborted", is_error: true}}
-
-        other ->
-          other
+        {:tool_call, %ToolCall{} = tc} -> {:tool_call, ToolCall.abort(tc)}
+        other -> other
       end)
 
     # Append "Aborted" system message, clear any pending approval
@@ -570,7 +562,7 @@ defmodule Minga.Agent.Session do
       state
       | session_id: generate_session_id(),
         status: :idle,
-        total_usage: %{input: 0, output: 0, cache_read: 0, cache_write: 0, cost: 0.0},
+        total_usage: TurnUsage.new(),
         error_message: nil,
         pending_approval: nil,
         steering_queue: [],
@@ -648,13 +640,13 @@ defmodule Minga.Agent.Session do
   end
 
   def handle_call(:metadata, _from, state) do
-    meta = %{
+    meta = %SessionMetadata{
       id: state.session_id,
       model_name: state.model_name,
       created_at: state.created_at,
       message_count: length(state.messages),
       first_prompt: first_user_prompt(state.messages),
-      cost: state.total_usage[:cost] || 0.0,
+      cost: state.total_usage.cost,
       status: state.status
     }
 
@@ -808,7 +800,7 @@ defmodule Minga.Agent.Session do
   def handle_call({:toggle_tool_collapse, index}, _from, state) do
     messages =
       List.update_at(state.messages, index, fn
-        {:tool_call, tc} -> {:tool_call, %{tc | collapsed: !tc.collapsed}}
+        {:tool_call, %ToolCall{} = tc} -> {:tool_call, ToolCall.toggle_collapsed(tc)}
         {:thinking, text, collapsed} -> {:thinking, text, !collapsed}
         other -> other
       end)
@@ -822,7 +814,7 @@ defmodule Minga.Agent.Session do
     # If any tool call is collapsed, expand all; otherwise collapse all.
     any_collapsed =
       Enum.any?(state.messages, fn
-        {:tool_call, %{collapsed: true}} -> true
+        {:tool_call, %ToolCall{collapsed: true}} -> true
         {:thinking, _, true} -> true
         _ -> false
       end)
@@ -831,7 +823,7 @@ defmodule Minga.Agent.Session do
 
     messages =
       Enum.map(state.messages, fn
-        {:tool_call, tc} -> {:tool_call, %{tc | collapsed: target}}
+        {:tool_call, %ToolCall{} = tc} -> {:tool_call, ToolCall.set_collapsed(tc, target)}
         {:thinking, text, _} -> {:thinking, text, target}
         other -> other
       end)
@@ -948,16 +940,7 @@ defmodule Minga.Agent.Session do
       if usage do
         log_turn_usage(usage, state)
 
-        state = %{
-          state
-          | total_usage: %{
-              input: state.total_usage.input + usage.input,
-              output: state.total_usage.output + usage.output,
-              cache_read: state.total_usage.cache_read + usage.cache_read,
-              cache_write: state.total_usage.cache_write + usage.cache_write,
-              cost: state.total_usage.cost + usage.cost
-            }
-        }
+        state = %{state | total_usage: TurnUsage.add(state.total_usage, usage)}
 
         state = append_msg(state, Message.usage(usage))
         notify_messages_changed(state)
@@ -1058,8 +1041,7 @@ defmodule Minga.Agent.Session do
   defp handle_provider_event(%Event.ToolUpdate{} = event, state) do
     messages =
       update_tool_call(state.messages, event.tool_call_id, fn tc ->
-        # Auto-expand on first update so the user sees live output
-        %{tc | result: event.partial_result, collapsed: false}
+        ToolCall.update_partial(tc, event.partial_result)
       end)
 
     state = %{state | messages: messages}
@@ -1070,21 +1052,11 @@ defmodule Minga.Agent.Session do
   defp handle_provider_event(%Event.ToolEnd{} = event, state) do
     messages =
       update_tool_call(state.messages, event.tool_call_id, fn tc ->
-        duration =
-          if tc.started_at do
-            System.monotonic_time(:millisecond) - tc.started_at
-          else
-            nil
-          end
-
-        %{
-          tc
-          | status: if(event.is_error, do: :error, else: :complete),
-            result: event.result,
-            is_error: event.is_error,
-            collapsed: true,
-            duration_ms: duration
-        }
+        if event.is_error do
+          ToolCall.error(tc, event.result)
+        else
+          ToolCall.complete(tc, event.result)
+        end
       end)
 
     state = %{state | messages: messages}
@@ -1197,11 +1169,11 @@ defmodule Minga.Agent.Session do
     end
   end
 
-  @spec update_tool_call([Message.t()], String.t(), (Message.tool_call() -> Message.tool_call())) ::
+  @spec update_tool_call([Message.t()], String.t(), (ToolCall.t() -> ToolCall.t())) ::
           [Message.t()]
   defp update_tool_call(messages, tool_call_id, updater) do
     Enum.map(messages, fn
-      {:tool_call, %{id: ^tool_call_id} = tc} -> {:tool_call, updater.(tc)}
+      {:tool_call, %ToolCall{id: ^tool_call_id} = tc} -> {:tool_call, updater.(tc)}
       other -> other
     end)
   end

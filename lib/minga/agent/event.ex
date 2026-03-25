@@ -9,13 +9,7 @@ defmodule Minga.Agent.Event do
   """
 
   @typedoc "Token usage statistics from a completed response."
-  @type token_usage :: %{
-          input: non_neg_integer(),
-          output: non_neg_integer(),
-          cache_read: non_neg_integer(),
-          cache_write: non_neg_integer(),
-          cost: float()
-        }
+  @type token_usage :: Minga.Agent.TurnUsage.t()
 
   @typedoc "Union of all agent event types."
   @type t ::
@@ -99,14 +93,12 @@ defmodule Minga.Agent.Event do
 
   defmodule AgentStart do
     @moduledoc false
-    @enforce_keys []
     defstruct []
     @type t :: %__MODULE__{}
   end
 
   defmodule AgentEnd do
     @moduledoc false
-    @enforce_keys []
     defstruct usage: nil
     @type t :: %__MODULE__{usage: Minga.Agent.Event.token_usage() | nil}
   end

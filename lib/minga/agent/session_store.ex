@@ -181,17 +181,17 @@ defmodule Minga.Agent.SessionStore do
     %{"type" => "system", "text" => text, "level" => Atom.to_string(level)}
   end
 
-  defp serialize_message({:usage, usage}),
+  defp serialize_message({:usage, %Minga.Agent.TurnUsage{} = usage}),
     do: %{"type" => "usage", "data" => serialize_usage(usage)}
 
-  @spec serialize_usage(map()) :: map()
-  defp serialize_usage(usage) do
+  @spec serialize_usage(Minga.Agent.TurnUsage.t()) :: map()
+  defp serialize_usage(%Minga.Agent.TurnUsage{} = usage) do
     %{
-      "input" => Map.get(usage, :input, 0),
-      "output" => Map.get(usage, :output, 0),
-      "cache_read" => Map.get(usage, :cache_read, 0),
-      "cache_write" => Map.get(usage, :cache_write, 0),
-      "cost" => Map.get(usage, :cost, 0.0)
+      "input" => usage.input,
+      "output" => usage.output,
+      "cache_read" => usage.cache_read,
+      "cache_write" => usage.cache_write,
+      "cost" => usage.cost
     }
   end
 
@@ -202,7 +202,7 @@ defmodule Minga.Agent.SessionStore do
       timestamp: data["timestamp"],
       model_name: data["model_name"] || "unknown",
       messages: Enum.map(data["messages"] || [], &deserialize_message/1),
-      usage: deserialize_usage(data["usage"] || %{})
+      usage: deserialize_turn_usage(data["usage"] || %{})
     }
   end
 
@@ -214,18 +214,18 @@ defmodule Minga.Agent.SessionStore do
     {:thinking, text, collapsed}
   end
 
-  defp deserialize_message(%{"type" => "tool_call"} = tc) do
+  defp deserialize_message(%{"type" => "tool_call"} = raw) do
     {:tool_call,
-     %{
-       id: tc["id"],
-       name: tc["name"],
-       args: tc["args"] || %{},
-       status: String.to_existing_atom(tc["status"] || "complete"),
-       result: tc["result"] || "",
-       is_error: tc["is_error"] || false,
-       collapsed: tc["collapsed"] || true,
+     %Minga.Agent.ToolCall{
+       id: raw["id"],
+       name: raw["name"],
+       args: raw["args"] || %{},
+       status: String.to_existing_atom(raw["status"] || "complete"),
+       result: raw["result"] || "",
+       is_error: raw["is_error"] || false,
+       collapsed: raw["collapsed"] || true,
        started_at: nil,
-       duration_ms: tc["duration_ms"]
+       duration_ms: raw["duration_ms"]
      }}
   end
 
@@ -234,7 +234,7 @@ defmodule Minga.Agent.SessionStore do
   end
 
   defp deserialize_message(%{"type" => "usage", "data" => data}) do
-    {:usage, deserialize_usage(data)}
+    {:usage, deserialize_turn_usage(data)}
   end
 
   # Fallback for unknown message types
@@ -242,9 +242,9 @@ defmodule Minga.Agent.SessionStore do
     {:system, "Unknown message type: #{type} - #{inspect(msg)}", :info}
   end
 
-  @spec deserialize_usage(map()) :: map()
-  defp deserialize_usage(data) do
-    %{
+  @spec deserialize_turn_usage(map()) :: Minga.Agent.TurnUsage.t()
+  defp deserialize_turn_usage(data) do
+    %Minga.Agent.TurnUsage{
       input: data["input"] || 0,
       output: data["output"] || 0,
       cache_read: data["cache_read"] || 0,

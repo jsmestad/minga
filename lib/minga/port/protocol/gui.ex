@@ -1215,12 +1215,12 @@ defmodule Minga.Port.Protocol.GUI do
   # Computes a short summary for a tool call from its name and args.
   # Reuses summarize_tool_args/2 (shared with the approval banner).
   # Truncates to 100 chars max to keep the wire payload small.
-  @spec tool_call_summary(map()) :: String.t()
-  defp tool_call_summary(%{name: name, args: args}) when is_map(args) do
+  @spec tool_call_summary(Minga.Agent.ToolCall.t()) :: String.t()
+  defp tool_call_summary(%Minga.Agent.ToolCall{name: name, args: args}) when is_map(args) do
     summarize_tool_args(name, args) |> String.slice(0, 100)
   end
 
-  defp tool_call_summary(%{name: name} = tc) do
+  defp tool_call_summary(%Minga.Agent.ToolCall{name: name} = tc) do
     args = Map.get(tc, :args) || %{}
     summarize_tool_args(name, args) |> String.slice(0, 100)
   end
@@ -1320,7 +1320,7 @@ defmodule Minga.Port.Protocol.GUI do
   defp encode_chat_message_body({:tool_call, tc}) do
     name_bytes = :erlang.iolist_to_binary([tc.name])
     summary_bytes = :erlang.iolist_to_binary([tool_call_summary(tc)])
-    result_bytes = :erlang.iolist_to_binary([tc.result || ""])
+    result_bytes = :erlang.iolist_to_binary([tc.result])
 
     status_byte =
       case tc.status do

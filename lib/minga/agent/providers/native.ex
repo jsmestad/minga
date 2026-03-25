@@ -1549,12 +1549,13 @@ defmodule Minga.Agent.Providers.Native do
 
   @spec turn_cost_from_usage(Event.token_usage() | nil) :: float()
   defp turn_cost_from_usage(nil), do: 0.0
-  defp turn_cost_from_usage(%{cost: cost}) when is_number(cost), do: cost
+  defp turn_cost_from_usage(%Minga.Agent.TurnUsage{cost: cost}) when is_number(cost), do: cost
 
   @spec report_turn_cost(loop_ctx(), Event.token_usage() | nil) :: :ok
   defp report_turn_cost(_lctx, nil), do: :ok
 
-  defp report_turn_cost(lctx, %{cost: cost}) when is_number(cost) and cost > 0 do
+  defp report_turn_cost(lctx, %Minga.Agent.TurnUsage{cost: cost})
+       when is_number(cost) and cost > 0 do
     send(lctx.provider_pid, {:agent_turn_cost, cost})
     :ok
   end
@@ -1657,7 +1658,7 @@ defmodule Minga.Agent.Providers.Native do
   defp normalize_usage(nil, _model), do: nil
 
   defp normalize_usage(usage, model) when is_map(usage) do
-    normalized = %{
+    normalized = %Minga.Agent.TurnUsage{
       input: Map.get(usage, :input_tokens, 0) || Map.get(usage, :input, 0),
       output: Map.get(usage, :output_tokens, 0) || Map.get(usage, :output, 0),
       cache_read: Map.get(usage, :cache_read_input_tokens, 0) || Map.get(usage, :cache_read, 0),

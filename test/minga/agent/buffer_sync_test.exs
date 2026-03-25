@@ -45,7 +45,15 @@ defmodule Minga.Agent.BufferSyncTest do
     end
 
     test "classifies tool_call lines as :tool" do
-      tc = %{name: "bash", args: %{}, result: "output", status: :complete, collapsed: false}
+      tc = %Minga.Agent.ToolCall{
+        id: "tc-1",
+        name: "bash",
+        args: %{},
+        result: "output",
+        status: :complete,
+        collapsed: false
+      }
+
       messages = [{:tool_call, tc}]
       index = BufferSync.line_message_index(messages)
 
@@ -60,7 +68,7 @@ defmodule Minga.Agent.BufferSyncTest do
     end
 
     test "classifies usage lines as :usage" do
-      messages = [{:usage, %{input: 100, output: 50, cost: 0.01}}]
+      messages = [{:usage, %Minga.Agent.TurnUsage{input: 100, output: 50, cost: 0.01}}]
       index = BufferSync.line_message_index(messages)
 
       assert [{0, :usage}] = index
@@ -92,7 +100,15 @@ defmodule Minga.Agent.BufferSyncTest do
     end
 
     test "empty tool_call result produces single line" do
-      tc = %{name: "bash", args: %{}, result: "", status: :running, collapsed: false}
+      tc = %Minga.Agent.ToolCall{
+        id: "tc-2",
+        name: "bash",
+        args: %{},
+        result: "",
+        status: :running,
+        collapsed: false
+      }
+
       messages = [{:tool_call, tc}]
       index = BufferSync.line_message_index(messages)
 

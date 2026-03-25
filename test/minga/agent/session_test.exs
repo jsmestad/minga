@@ -48,7 +48,14 @@ defmodule Minga.Agent.SessionTest do
     end
 
     def handle_cast(:proceed, state) do
-      usage = %{input: 10, output: 5, cache_read: 0, cache_write: 0, cost: 0.001}
+      usage = %Minga.Agent.TurnUsage{
+        input: 10,
+        output: 5,
+        cache_read: 0,
+        cache_write: 0,
+        cost: 0.001
+      }
+
       send(state.subscriber, {:agent_provider_event, %Event.AgentEnd{usage: usage}})
       {:noreply, %{state | pending: nil}}
     end
@@ -104,7 +111,14 @@ defmodule Minga.Agent.SessionTest do
       send(state.subscriber, {:agent_provider_event, %Event.TextDelta{delta: "Hello "}})
       send(state.subscriber, {:agent_provider_event, %Event.TextDelta{delta: "world!"}})
 
-      usage = %{input: 100, output: 50, cache_read: 0, cache_write: 0, cost: 0.01}
+      usage = %Minga.Agent.TurnUsage{
+        input: 100,
+        output: 50,
+        cache_read: 0,
+        cache_write: 0,
+        cost: 0.01
+      }
+
       send(state.subscriber, {:agent_provider_event, %Event.AgentEnd{usage: usage}})
 
       {:noreply, state}
@@ -447,7 +461,13 @@ defmodule Minga.Agent.SessionTest do
         timestamp: DateTime.to_iso8601(DateTime.utc_now()),
         model_name: "test-model",
         messages: [{:user, "loaded message"}, {:assistant, "loaded reply"}],
-        usage: %{input: 500, output: 200, cache_read: 0, cache_write: 0, cost: 0.01}
+        usage: %Minga.Agent.TurnUsage{
+          input: 500,
+          output: 200,
+          cache_read: 0,
+          cache_write: 0,
+          cost: 0.01
+        }
       })
 
       :ok = Session.load_session(session, "loaded-session")
@@ -1117,7 +1137,13 @@ defmodule Minga.Agent.SessionTest do
         timestamp: DateTime.to_iso8601(DateTime.utc_now()),
         model_name: "test-model",
         messages: [{:user, "loaded"}, {:assistant, "reply"}],
-        usage: %{input: 10, output: 5, cache_read: 0, cache_write: 0, cost: 0.001}
+        usage: %Minga.Agent.TurnUsage{
+          input: 10,
+          output: 5,
+          cache_read: 0,
+          cache_write: 0,
+          cost: 0.001
+        }
       })
 
       :ok = Session.load_session(session, "id-test-session")

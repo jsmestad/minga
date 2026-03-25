@@ -2,6 +2,8 @@ defmodule Minga.Agent.MessageTest do
   use ExUnit.Case, async: true
 
   alias Minga.Agent.Message
+  alias Minga.Agent.ToolCall
+  alias Minga.Agent.TurnUsage
 
   describe "user/1" do
     test "creates a user message" do
@@ -75,7 +77,7 @@ defmodule Minga.Agent.MessageTest do
     end
 
     test "extracts text from tool call" do
-      tc = %{
+      tc = %ToolCall{
         name: "bash",
         result: "output",
         id: "1",
@@ -95,7 +97,7 @@ defmodule Minga.Agent.MessageTest do
 
   describe "usage/1" do
     test "creates a usage message" do
-      data = %{input: 100, output: 50, cache_read: 0, cache_write: 0, cost: 0.01}
+      data = %TurnUsage{input: 100, output: 50, cache_read: 0, cache_write: 0, cost: 0.01}
       msg = Message.usage(data)
       assert {:usage, ^data} = msg
     end

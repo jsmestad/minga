@@ -42,7 +42,6 @@ defmodule Minga.Scroll do
           metrics: metrics()
         }
 
-  @enforce_keys []
   defstruct offset: 0,
             pinned: true,
             metrics: %{total_lines: 0, visible_height: 1}

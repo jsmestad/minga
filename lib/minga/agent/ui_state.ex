@@ -60,7 +60,6 @@ defmodule Minga.Agent.UIState do
           view: View.t()
         }
 
-  @enforce_keys []
   defstruct panel: %Panel{},
             view: %View{}
 

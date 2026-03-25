@@ -17,7 +17,14 @@ defmodule Minga.Agent.EventTest do
     end
 
     test "creates an end event with usage" do
-      usage = %{input: 100, output: 50, cache_read: 0, cache_write: 0, cost: 0.01}
+      usage = %Minga.Agent.TurnUsage{
+        input: 100,
+        output: 50,
+        cache_read: 0,
+        cache_write: 0,
+        cost: 0.01
+      }
+
       event = %Event.AgentEnd{usage: usage}
       assert event.usage.input == 100
       assert event.usage.cost == 0.01

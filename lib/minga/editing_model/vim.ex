@@ -31,7 +31,6 @@ defmodule Minga.EditingModel.Vim do
           mode_state: Mode.state()
         }
 
-  @enforce_keys []
   defstruct mode: :normal,
             mode_state: %Mode.State{}
 
