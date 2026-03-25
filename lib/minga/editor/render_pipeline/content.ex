@@ -24,8 +24,8 @@ defmodule Minga.Editor.RenderPipeline.Content do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Viewport
   alias Minga.Editor.Window
-  alias Minga.Face
   alias Minga.Port.Capabilities
+  alias Minga.UI.Face
 
   @typedoc "Internal editor state."
   @type state :: EditorState.t()
@@ -510,10 +510,10 @@ defmodule Minga.Editor.RenderPipeline.Content do
   @spec render_help_overlay(
           [{String.t(), [{String.t(), String.t()}]}],
           {non_neg_integer(), non_neg_integer(), pos_integer(), pos_integer()},
-          Minga.Theme.t()
+          Minga.UI.Theme.t()
         ) :: [DisplayList.draw()]
   defp render_help_overlay(help_groups, {row_off, col_off, width, height}, theme) do
-    at = Minga.Theme.agent_theme(theme)
+    at = Minga.UI.Theme.agent_theme(theme)
     blank = String.duplicate(" ", width)
     bg_face = Face.new(bg: at.panel_bg)
 

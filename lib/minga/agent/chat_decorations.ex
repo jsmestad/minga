@@ -13,7 +13,7 @@ defmodule Minga.Agent.ChatDecorations do
 
   alias Minga.Buffer.Decorations
   alias Minga.Buffer.Server, as: BufferServer
-  alias Minga.Face
+  alias Minga.UI.Face
 
   # All decorations created by this module belong to the :chat group.
   # This allows remove_group(:chat) to clear chat decorations without
@@ -57,7 +57,7 @@ defmodule Minga.Agent.ChatDecorations do
   pre-computed `line_offsets` from BufferSync to place decorations at
   correct buffer positions without re-deriving the markdown format.
   """
-  @spec apply(pid(), [term()], [line_offset()], Minga.Theme.Agent.t(), keyword()) :: :ok
+  @spec apply(pid(), [term()], [line_offset()], Minga.UI.Theme.Agent.t(), keyword()) :: :ok
   def apply(buf, messages, line_offsets, agent_theme, opts \\ []) do
     BufferServer.batch_decorations(buf, fn decs ->
       decs
@@ -73,7 +73,7 @@ defmodule Minga.Agent.ChatDecorations do
           Decorations.t(),
           [term()],
           [line_offset()],
-          Minga.Theme.Agent.t(),
+          Minga.UI.Theme.Agent.t(),
           keyword()
         ) :: Decorations.t()
   def build_decorations(decs, messages, line_offsets, theme, opts \\ []) do
@@ -337,7 +337,7 @@ defmodule Minga.Agent.ChatDecorations do
           Minga.Agent.ToolCall.t(),
           non_neg_integer(),
           non_neg_integer(),
-          Minga.Theme.Agent.t(),
+          Minga.UI.Theme.Agent.t(),
           boolean()
         ) :: Decorations.t()
   defp apply_tool_call_decorations(decs, tc, line, line_count, theme, awaiting_approval) do
@@ -400,7 +400,7 @@ defmodule Minga.Agent.ChatDecorations do
     decs
   end
 
-  @spec tool_status_display(Minga.Agent.ToolCall.t(), Minga.Theme.Agent.t(), boolean()) ::
+  @spec tool_status_display(Minga.Agent.ToolCall.t(), Minga.UI.Theme.Agent.t(), boolean()) ::
           {String.t(), non_neg_integer()}
   defp tool_status_display(_tc, theme, true = _awaiting) do
     {"?", theme.status_thinking}
@@ -414,7 +414,7 @@ defmodule Minga.Agent.ChatDecorations do
     end
   end
 
-  @spec tool_header_render(String.t(), non_neg_integer(), Minga.Theme.Agent.t(), boolean()) ::
+  @spec tool_header_render(String.t(), non_neg_integer(), Minga.UI.Theme.Agent.t(), boolean()) ::
           (non_neg_integer() -> [{String.t(), Face.t()}])
   defp tool_header_render(header_text, status_fg, theme, true = _awaiting) do
     fn _w ->

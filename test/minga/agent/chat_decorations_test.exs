@@ -5,7 +5,7 @@ defmodule Minga.Agent.ChatDecorationsTest do
   alias Minga.Buffer.Decorations
 
   defp test_theme do
-    Minga.Theme.agent_theme(Minga.Theme.get!(Minga.Theme.default()))
+    Minga.UI.Theme.agent_theme(Minga.UI.Theme.get!(Minga.UI.Theme.default()))
   end
 
   describe "build_decorations/3" do

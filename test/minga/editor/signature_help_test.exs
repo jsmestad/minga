@@ -2,7 +2,7 @@ defmodule Minga.Editor.SignatureHelpTest do
   use ExUnit.Case, async: true
 
   alias Minga.Editor.SignatureHelp
-  alias Minga.Theme
+  alias Minga.UI.Theme
 
   @theme Theme.get!(:doom_one)
   @viewport {24, 80}
@@ -137,7 +137,7 @@ defmodule Minga.Editor.SignatureHelpTest do
       bar_draws = Enum.filter(draws, fn {_r, _c, text, _s} -> text == "bar" end)
       assert bar_draws != []
 
-      [{_r, _c, _text, %Minga.Face{} = face}] = bar_draws
+      [{_r, _c, _text, %Minga.UI.Face{} = face}] = bar_draws
       assert face.bold == true
     end
 

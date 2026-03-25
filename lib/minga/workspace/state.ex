@@ -39,7 +39,7 @@ defmodule Minga.Workspace.State do
           lsp_pending: %{reference() => atom() | tuple()},
           completion: Completion.t() | nil,
           completion_trigger: CompletionTrigger.t(),
-          injection_ranges: %{pid() => [Minga.Highlight.InjectionRange.t()]},
+          injection_ranges: %{pid() => [Minga.UI.Highlight.InjectionRange.t()]},
           search: Search.t(),
           pending_conflict: {pid(), String.t()} | nil,
           vim: VimState.t(),

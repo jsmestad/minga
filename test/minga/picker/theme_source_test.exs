@@ -3,7 +3,7 @@ defmodule Minga.Picker.ThemeSourceTest do
 
   alias Minga.Picker.Item
   alias Minga.Picker.ThemeSource
-  alias Minga.Theme
+  alias Minga.UI.Theme
 
   describe "title/0" do
     test "returns Theme" do

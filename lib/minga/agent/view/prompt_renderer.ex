@@ -17,10 +17,10 @@ defmodule Minga.Agent.View.PromptRenderer do
   alias Minga.Editor.DisplayList
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.AgentAccess
-  alias Minga.Face
+  alias Minga.UI.Face
 
   alias Minga.Input.Wrap, as: InputWrap
-  alias Minga.Theme
+  alias Minga.UI.Theme
 
   @typedoc "Screen rectangle {row_offset, col_offset, width, height}."
   @type rect :: {non_neg_integer(), non_neg_integer(), pos_integer(), pos_integer()}

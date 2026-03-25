@@ -2,7 +2,7 @@ defmodule Minga.Editor.HoverPopupTest do
   use ExUnit.Case, async: true
 
   alias Minga.Editor.HoverPopup
-  alias Minga.Theme
+  alias Minga.UI.Theme
 
   @theme Theme.get!(:doom_one)
   @viewport {24, 80}

@@ -281,7 +281,7 @@ defmodule Minga.Agent.BufferSync do
   end
 
   defp default_agent_theme do
-    theme = Minga.Theme.get!(Minga.Theme.default())
-    Minga.Theme.agent_theme(theme)
+    theme = Minga.UI.Theme.get!(Minga.UI.Theme.default())
+    Minga.UI.Theme.agent_theme(theme)
   end
 end

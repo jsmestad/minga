@@ -9,7 +9,7 @@ defmodule Minga.Editor.CompletionDocPreviewTest do
   alias Minga.Completion
   alias Minga.Editor.CompletionHandling
   alias Minga.Editor.CompletionUI
-  alias Minga.Theme
+  alias Minga.UI.Theme
 
   @theme Theme.get!(:doom_one)
 

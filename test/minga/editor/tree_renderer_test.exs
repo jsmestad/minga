@@ -6,7 +6,7 @@ defmodule Minga.Editor.TreeRendererTest do
   alias Minga.Editor.TreeRenderer
   alias Minga.Editor.TreeRenderer.RenderInput
   alias Minga.Project.FileTree
-  alias Minga.Theme
+  alias Minga.UI.Theme
 
   @moduletag :tmp_dir
 

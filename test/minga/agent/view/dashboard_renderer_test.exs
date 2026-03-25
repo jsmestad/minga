@@ -11,7 +11,7 @@ defmodule Minga.Agent.View.DashboardRendererTest do
   alias Minga.Editor.Viewport
   alias Minga.Editor.VimState
   alias Minga.Input
-  alias Minga.Theme
+  alias Minga.UI.Theme
 
   defp base_state(opts \\ []) do
     rows = Keyword.get(opts, :rows, 40)

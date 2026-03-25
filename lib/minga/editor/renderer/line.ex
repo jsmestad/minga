@@ -20,8 +20,8 @@ defmodule Minga.Editor.Renderer.Line do
   alias Minga.Editor.DisplayList
   alias Minga.Editor.Renderer.Composition
   alias Minga.Editor.Renderer.Context
-  alias Minga.Face
-  alias Minga.Highlight
+  alias Minga.UI.Face
+  alias Minga.UI.Highlight
 
   @typedoc "Column range of a selection on a single line (display columns, end exclusive)."
   @type line_selection :: nil | :full | {non_neg_integer(), non_neg_integer()}

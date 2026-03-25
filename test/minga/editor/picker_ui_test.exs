@@ -9,7 +9,7 @@ defmodule Minga.Editor.PickerUITest do
   alias Minga.Editor.Viewport
   alias Minga.Picker
   alias Minga.Picker.Item
-  alias Minga.Theme
+  alias Minga.UI.Theme
 
   defp theme_picker do
     Theme.get!(:doom_one).picker
@@ -82,7 +82,7 @@ defmodule Minga.Editor.PickerUITest do
         assert is_integer(row)
         assert is_integer(col)
         assert is_binary(text)
-        assert %Minga.Face{} = style
+        assert %Minga.UI.Face{} = style
       end)
     end
   end

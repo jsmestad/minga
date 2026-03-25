@@ -10,7 +10,7 @@ defmodule Minga.Buffer.Decorations.HighlightRange do
   """
 
   alias Minga.Buffer.IntervalTree
-  alias Minga.Face
+  alias Minga.UI.Face
 
   @enforce_keys [:id, :start, :end_, :style]
   defstruct id: nil,

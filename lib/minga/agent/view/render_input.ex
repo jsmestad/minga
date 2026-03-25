@@ -14,7 +14,7 @@ defmodule Minga.Agent.View.RenderInput do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.AgentAccess
   alias Minga.Scroll
-  alias Minga.Theme
+  alias Minga.UI.Theme
 
   @enforce_keys [:theme, :agent_status, :panel, :agent_ui]
   defstruct [

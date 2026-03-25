@@ -553,7 +553,7 @@ defmodule Minga.Editor do
 
         _ ->
           existing = HighlightSync.get_highlight(state, pid)
-          updated = Minga.Highlight.put_names(existing, names)
+          updated = Minga.UI.Highlight.put_names(existing, names)
           HighlightSync.put_highlight(state, pid, updated)
       end
 
@@ -610,7 +610,7 @@ defmodule Minga.Editor do
         _ ->
           # Non-active buffer: store spans in highlights map.
           existing = HighlightSync.get_highlight(state, pid)
-          updated = Minga.Highlight.put_spans(existing, version, spans)
+          updated = Minga.UI.Highlight.put_spans(existing, version, spans)
           state_with_hl = HighlightSync.put_highlight(state, pid, updated)
 
           # If this buffer is visible in any window (e.g., agent panel),
@@ -866,10 +866,10 @@ defmodule Minga.Editor do
 
         merged =
           if hl do
-            Minga.Face.Registry.with_overrides(hl.face_registry, overrides)
+            Minga.UI.Face.Registry.with_overrides(hl.face_registry, overrides)
           else
-            base = Minga.Face.Registry.from_theme(state.theme)
-            Minga.Face.Registry.with_overrides(base, overrides)
+            base = Minga.UI.Face.Registry.from_theme(state.theme)
+            Minga.UI.Face.Registry.with_overrides(base, overrides)
           end
 
         Map.put(state.face_override_registries, buf_pid, merged)

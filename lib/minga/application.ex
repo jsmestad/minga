@@ -52,9 +52,9 @@ defmodule Minga.Application do
 
   alias Minga.Agent.SessionStore
   alias Minga.Config.Options
-  alias Minga.Highlight.Grammar
   alias Minga.Telemetry.DevHandler
   alias Minga.Tool.Manager, as: ToolManager
+  alias Minga.UI.Highlight.Grammar
 
   @impl true
   @spec start(Application.start_type(), term()) :: {:ok, pid()} | {:error, term()}

@@ -14,8 +14,8 @@ defmodule Minga.Editor.Renderer.Context do
   alias Minga.Buffer.Decorations
   alias Minga.Diagnostics.Diagnostic
   alias Minga.Editor.Viewport
-  alias Minga.Highlight
   alias Minga.Search.Match
+  alias Minga.UI.Highlight
 
   @enforce_keys [:viewport, :gutter_w, :content_w]
   defstruct viewport: nil,
@@ -33,13 +33,13 @@ defmodule Minga.Editor.Renderer.Context do
             has_sign_column: true,
             diagnostic_signs: %{},
             git_signs: %{},
-            git_colors: %Minga.Theme.Git{
+            git_colors: %Minga.UI.Theme.Git{
               added_fg: 0x98BE65,
               modified_fg: 0x51AFEF,
               deleted_fg: 0xFF6C6B
             },
             decorations: %Decorations{},
-            gutter_colors: %Minga.Theme.Gutter{
+            gutter_colors: %Minga.UI.Theme.Gutter{
               fg: 0x555555,
               current_fg: 0xBBC2CF,
               error_fg: 0xFF6C6B,
@@ -69,16 +69,16 @@ defmodule Minga.Editor.Renderer.Context do
           content_w: pos_integer(),
           confirm_match: Match.t() | nil,
           highlight: Highlight.t() | nil,
-          cursorline_bg: Minga.Theme.color() | nil,
+          cursorline_bg: Minga.UI.Theme.color() | nil,
           nav_flash: Minga.Editor.NavFlash.t() | nil,
-          nav_flash_bg: Minga.Theme.color() | nil,
-          editor_bg: Minga.Theme.color(),
+          nav_flash_bg: Minga.UI.Theme.color() | nil,
+          editor_bg: Minga.UI.Theme.color(),
           is_gui: boolean(),
           has_sign_column: boolean(),
           diagnostic_signs: %{non_neg_integer() => Diagnostic.severity()},
           git_signs: %{non_neg_integer() => Minga.Git.Diff.hunk_type()},
           decorations: Decorations.t(),
-          git_colors: Minga.Theme.Git.t(),
-          gutter_colors: Minga.Theme.Gutter.t()
+          git_colors: Minga.UI.Theme.Git.t(),
+          gutter_colors: Minga.UI.Theme.Gutter.t()
         }
 end

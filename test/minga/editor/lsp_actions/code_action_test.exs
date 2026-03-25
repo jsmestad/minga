@@ -13,7 +13,7 @@ defmodule Minga.Editor.LspActions.CodeActionTest do
       status_msg: nil,
       picker_ui: %Minga.Editor.State.Picker{},
       whichkey: %Minga.Editor.State.WhichKey{},
-      theme: Minga.Theme.get!(:doom_one)
+      theme: Minga.UI.Theme.get!(:doom_one)
     }
   end
 

@@ -27,7 +27,7 @@ defmodule Minga.Editor.FloatingWindow do
   """
 
   alias Minga.Editor.DisplayList
-  alias Minga.Face
+  alias Minga.UI.Face
 
   # ── Border character sets ────────────────────────────────────────────────
 

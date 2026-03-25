@@ -12,7 +12,7 @@ defmodule Minga.Editor.LspDecorations do
   """
 
   alias Minga.Buffer.Server, as: BufferServer
-  alias Minga.Face
+  alias Minga.UI.Face
 
   @type state :: Minga.Editor.State.t()
 

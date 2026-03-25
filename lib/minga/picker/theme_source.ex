@@ -11,7 +11,7 @@ defmodule Minga.Picker.ThemeSource do
 
   alias Minga.Picker.Item
 
-  alias Minga.Theme
+  alias Minga.UI.Theme
 
   @impl true
   @spec title() :: String.t()

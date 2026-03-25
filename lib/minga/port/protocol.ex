@@ -193,7 +193,7 @@ defmodule Minga.Port.Protocol do
              [conceal_span()]}
           | {:grammar_loaded, success :: boolean(), name :: String.t()}
           | {:injection_ranges, buffer_id :: non_neg_integer(),
-             [Minga.Highlight.InjectionRange.t()]}
+             [Minga.UI.Highlight.InjectionRange.t()]}
           | {:language_at_response, request_id :: non_neg_integer(), language :: String.t()}
           | {:fold_ranges, buffer_id :: non_neg_integer(), version :: non_neg_integer(),
              [{start_line :: non_neg_integer(), end_line :: non_neg_integer()}]}
@@ -212,7 +212,7 @@ defmodule Minga.Port.Protocol do
   @type cursor_shape :: :block | :beam | :underline
 
   @typedoc "A highlight span from tree-sitter."
-  @type highlight_span :: Minga.Highlight.Span.t()
+  @type highlight_span :: Minga.UI.Highlight.Span.t()
 
   @typedoc "Text style attributes."
   @type style :: [
@@ -1056,7 +1056,7 @@ defmodule Minga.Port.Protocol do
          remaining,
          acc
        ) do
-    span = %Minga.Highlight.Span{
+    span = %Minga.UI.Highlight.Span{
       start_byte: start_byte,
       end_byte: end_byte,
       capture_id: capture_id,
@@ -1123,8 +1123,10 @@ defmodule Minga.Port.Protocol do
   defp decode_log_level(3), do: "DEBUG"
   defp decode_log_level(_), do: "UNKNOWN"
 
-  @spec decode_injection_ranges(binary(), non_neg_integer(), [Minga.Highlight.InjectionRange.t()]) ::
-          [Minga.Highlight.InjectionRange.t()]
+  @spec decode_injection_ranges(binary(), non_neg_integer(), [
+          Minga.UI.Highlight.InjectionRange.t()
+        ]) ::
+          [Minga.UI.Highlight.InjectionRange.t()]
   defp decode_injection_ranges(_rest, 0, acc), do: Enum.reverse(acc)
 
   defp decode_injection_ranges(
@@ -1133,7 +1135,7 @@ defmodule Minga.Port.Protocol do
          remaining,
          acc
        ) do
-    range = %Minga.Highlight.InjectionRange{
+    range = %Minga.UI.Highlight.InjectionRange{
       start_byte: start_byte,
       end_byte: end_byte,
       language: name

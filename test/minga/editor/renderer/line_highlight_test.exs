@@ -11,7 +11,7 @@ defmodule Minga.Editor.Renderer.LineHighlightTest do
   alias Minga.Editor.Renderer.Context
   alias Minga.Editor.Renderer.Line, as: LineRenderer
   alias Minga.Editor.Viewport
-  alias Minga.Highlight
+  alias Minga.UI.Highlight
 
   @keyword_color 0xFF0000
   @string_color 0x00FF00
@@ -35,11 +35,11 @@ defmodule Minga.Editor.Renderer.LineHighlightTest do
       spans: spans,
       capture_names: List.to_tuple(names),
       theme: theme,
-      face_registry: Minga.Face.Registry.from_syntax(theme)
+      face_registry: Minga.UI.Face.Registry.from_syntax(theme)
     }
   end
 
-  defp decode_draw({row, col, text, %Minga.Face{} = face}) do
+  defp decode_draw({row, col, text, %Minga.UI.Face{} = face}) do
     %{
       row: row,
       col: col,
@@ -50,7 +50,7 @@ defmodule Minga.Editor.Renderer.LineHighlightTest do
     }
   end
 
-  defp decode_attrs(%Minga.Face{} = face) do
+  defp decode_attrs(%Minga.UI.Face{} = face) do
     []
     |> then(fn a -> if face.bold, do: [:bold | a], else: a end)
     |> then(fn a -> if face.italic, do: [:italic | a], else: a end)

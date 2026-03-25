@@ -38,8 +38,8 @@ defmodule Minga.Editor.SemanticWindow.Span do
         }
 
   @doc "Builds a span from a `Face.t()` struct and column range."
-  @spec from_face(Minga.Face.t(), non_neg_integer(), non_neg_integer()) :: t()
-  def from_face(%Minga.Face{} = face, start_col, end_col) do
+  @spec from_face(Minga.UI.Face.t(), non_neg_integer(), non_neg_integer()) :: t()
+  def from_face(%Minga.UI.Face{} = face, start_col, end_col) do
     import Bitwise
 
     attrs =
@@ -62,7 +62,7 @@ defmodule Minga.Editor.SemanticWindow.Span do
     }
   end
 
-  @spec encode_font_weight(Minga.Face.font_weight() | nil) :: non_neg_integer()
+  @spec encode_font_weight(Minga.UI.Face.font_weight() | nil) :: non_neg_integer()
   defp encode_font_weight(nil), do: 0
   defp encode_font_weight(:thin), do: 1
   defp encode_font_weight(:light), do: 2

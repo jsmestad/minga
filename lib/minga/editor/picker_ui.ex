@@ -20,9 +20,9 @@ defmodule Minga.Editor.PickerUI do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Picker, as: PickerState
   alias Minga.Editor.State.WhichKey, as: WhichKeyState
-  alias Minga.Face
   alias Minga.Picker
   alias Minga.Port.Protocol
+  alias Minga.UI.Face
 
   import Bitwise
 

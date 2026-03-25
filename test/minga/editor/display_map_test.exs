@@ -200,7 +200,7 @@ defmodule Minga.Editor.DisplayMapTest do
 
       {_, decs} =
         Decorations.add_virtual_text(decs, {5, 0},
-          segments: [{"▎ Agent", Minga.Face.new(bold: true)}],
+          segments: [{"▎ Agent", Minga.UI.Face.new(bold: true)}],
           placement: :above
         )
 
@@ -232,7 +232,7 @@ defmodule Minga.Editor.DisplayMapTest do
 
       {_, decs} =
         Decorations.add_virtual_text(decs, {5, 0},
-          segments: [{"separator", Minga.Face.new()}],
+          segments: [{"separator", Minga.UI.Face.new()}],
           placement: :below
         )
 
@@ -257,19 +257,19 @@ defmodule Minga.Editor.DisplayMapTest do
       # Add 3 virtual lines above line 5
       {_, decs} =
         Decorations.add_virtual_text(decs, {5, 0},
-          segments: [{"header1", Minga.Face.new()}],
+          segments: [{"header1", Minga.UI.Face.new()}],
           placement: :above
         )
 
       {_, decs} =
         Decorations.add_virtual_text(decs, {5, 0},
-          segments: [{"header2", Minga.Face.new()}],
+          segments: [{"header2", Minga.UI.Face.new()}],
           placement: :above
         )
 
       {_, decs} =
         Decorations.add_virtual_text(decs, {5, 0},
-          segments: [{"header3", Minga.Face.new()}],
+          segments: [{"header3", Minga.UI.Face.new()}],
           placement: :above
         )
 
@@ -343,7 +343,7 @@ defmodule Minga.Editor.DisplayMapTest do
 
       {_, decs} =
         Decorations.add_virtual_text(decs, {5, 0},
-          segments: [{"header", Minga.Face.new()}],
+          segments: [{"header", Minga.UI.Face.new()}],
           placement: :above
         )
 
@@ -365,7 +365,7 @@ defmodule Minga.Editor.DisplayMapTest do
 
       {_, decs} =
         Decorations.add_virtual_text(decs, {0, 0},
-          segments: [{"header", Minga.Face.new()}],
+          segments: [{"header", Minga.UI.Face.new()}],
           placement: :above
         )
 

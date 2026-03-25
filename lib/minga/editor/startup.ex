@@ -282,7 +282,7 @@ defmodule Minga.Editor.Startup do
     state =
       try do
         theme_name = ConfigOptions.get(:theme)
-        theme = Minga.Theme.get!(theme_name)
+        theme = Minga.UI.Theme.get!(theme_name)
 
         %{state | theme: theme}
       catch

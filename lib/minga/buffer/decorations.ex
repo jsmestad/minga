@@ -44,7 +44,7 @@ defmodule Minga.Buffer.Decorations do
   alias Minga.Buffer.Decorations.LineAnnotation
   alias Minga.Buffer.Decorations.VirtualText
   alias Minga.Buffer.IntervalTree
-  alias Minga.Face
+  alias Minga.UI.Face
 
   @mergeable_style_fields [
     :fg,

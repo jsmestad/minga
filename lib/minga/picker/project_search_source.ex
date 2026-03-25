@@ -11,10 +11,10 @@ defmodule Minga.Picker.ProjectSearchSource do
   alias Minga.Picker.Item
 
   alias Minga.Buffer.Server, as: BufferServer
-  alias Minga.Devicon
   alias Minga.Editor.State, as: EditorState
   alias Minga.Language.Filetype
   alias Minga.Picker.Source
+  alias Minga.UI.Devicon
 
   @impl true
   @spec title() :: String.t()

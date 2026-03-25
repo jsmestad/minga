@@ -14,7 +14,7 @@ defmodule Minga.Editor.State.Picker do
           picker: Minga.Picker.t() | nil,
           source: module() | nil,
           restore: non_neg_integer() | nil,
-          restore_theme: Minga.Theme.t() | nil,
+          restore_theme: Minga.UI.Theme.t() | nil,
           action_menu: action_menu(),
           context: map() | nil,
           layout: Minga.Picker.Source.layout(),

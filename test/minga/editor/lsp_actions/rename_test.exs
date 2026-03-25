@@ -19,7 +19,7 @@ defmodule Minga.Editor.LspActions.RenameTest do
       status_msg: nil,
       picker_ui: %PickerState{},
       whichkey: %WhichKey{},
-      theme: Minga.Theme.get!(:doom_one)
+      theme: Minga.UI.Theme.get!(:doom_one)
     }
   end
 

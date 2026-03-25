@@ -26,9 +26,9 @@ defmodule Minga.Editor.SemanticTokenSync do
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.State, as: EditorState
-  alias Minga.Highlight
   alias Minga.LSP.Client
   alias Minga.LSP.SemanticTokens
+  alias Minga.UI.Highlight
 
   @doc """
   Requests semantic tokens for the active buffer from the LSP server.

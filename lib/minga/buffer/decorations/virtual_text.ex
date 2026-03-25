@@ -19,7 +19,7 @@ defmodule Minga.Buffer.Decorations.VirtualText do
 
   alias Minga.Buffer.IntervalTree
   alias Minga.Buffer.Unicode
-  alias Minga.Face
+  alias Minga.UI.Face
 
   @enforce_keys [:id, :anchor, :segments, :placement]
   defstruct id: nil,

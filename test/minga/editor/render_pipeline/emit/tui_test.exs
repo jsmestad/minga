@@ -192,7 +192,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.TUITest do
 
   describe "collect_chrome_draws/1" do
     test "concatenates all chrome frame fields" do
-      face = Minga.Face.new(fg: 0xBBC2CF, bg: 0x282C34)
+      face = Minga.UI.Face.new(fg: 0xBBC2CF, bg: 0x282C34)
 
       frame = %Frame{
         cursor: Cursor.new(0, 0, :block),
@@ -232,7 +232,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.TUITest do
 
   describe "collect_overlay_draws/1" do
     test "flattens overlay draw lists" do
-      face = Minga.Face.new(fg: 0xBBC2CF, bg: 0x3E4451)
+      face = Minga.UI.Face.new(fg: 0xBBC2CF, bg: 0x3E4451)
 
       frame = %Frame{
         cursor: Cursor.new(0, 0, :block),
@@ -279,7 +279,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.TUITest do
 
   describe "filter_layer_by_ranges/2" do
     test "returns only draws in the specified row ranges" do
-      face = Minga.Face.new(fg: 0xBBC2CF, bg: 0x282C34)
+      face = Minga.UI.Face.new(fg: 0xBBC2CF, bg: 0x282C34)
 
       layer = %{
         0 => [{0, "line0", face}],
@@ -297,14 +297,14 @@ defmodule Minga.Editor.RenderPipeline.Emit.TUITest do
     end
 
     test "returns empty list when no rows match" do
-      face = Minga.Face.new(fg: 0xBBC2CF, bg: 0x282C34)
+      face = Minga.UI.Face.new(fg: 0xBBC2CF, bg: 0x282C34)
       layer = %{0 => [{0, "line0", face}]}
 
       assert EmitTUI.filter_layer_by_ranges(layer, [5..10]) == []
     end
 
     test "handles multiple ranges" do
-      face = Minga.Face.new(fg: 0xBBC2CF, bg: 0x282C34)
+      face = Minga.UI.Face.new(fg: 0xBBC2CF, bg: 0x282C34)
 
       layer = %{
         0 => [{0, "line0", face}],

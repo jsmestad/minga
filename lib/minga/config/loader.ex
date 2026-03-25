@@ -33,7 +33,7 @@ defmodule Minga.Config.Loader do
   alias Minga.Extension.Supervisor, as: ExtSupervisor
   alias Minga.Keymap.Active, as: KeymapActive
   alias Minga.Popup.Registry, as: PopupRegistry
-  alias Minga.Theme.Loader, as: ThemeLoader
+  alias Minga.UI.Theme.Loader, as: ThemeLoader
 
   @typedoc "Loader state: stores paths, loaded modules, and any errors from each stage."
   @type state :: %{
@@ -214,7 +214,7 @@ defmodule Minga.Config.Loader do
   @spec load_user_themes() :: :ok
   defp load_user_themes do
     {themes, errors} = ThemeLoader.load_all()
-    Minga.Theme.register_user_themes(themes)
+    Minga.UI.Theme.register_user_themes(themes)
 
     for %{path: path, error: error} <- errors do
       Minga.Log.warning(:editor, "Theme load error: #{path}: #{error}")

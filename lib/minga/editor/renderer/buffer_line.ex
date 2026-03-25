@@ -26,8 +26,8 @@ defmodule Minga.Editor.Renderer.BufferLine do
   alias Minga.Editor.Renderer.Gutter
   alias Minga.Editor.Renderer.Line, as: LineRenderer
   alias Minga.Editor.WrapMap
-  alias Minga.Face
-  alias Minga.Highlight
+  alias Minga.UI.Face
+  alias Minga.UI.Highlight
 
   @typedoc """
   Per-line values that vary across lines in a render pass.
