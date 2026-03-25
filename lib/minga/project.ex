@@ -347,7 +347,7 @@ defmodule Minga.Project do
 
     task =
       Task.async(fn ->
-        case Minga.FileFind.list_files(root) do
+        case Minga.Project.list_files(root) do
           {:ok, files} -> {:rebuild_done, root, files}
           {:error, _msg} -> {:rebuild_done, root, []}
         end
@@ -472,4 +472,38 @@ defmodule Minga.Project do
       Minga.Log.warning(:editor, "Failed to persist recent files: #{Exception.message(e)}")
       :ok
   end
+
+  # ── Domain delegates ──────────────────────────────────────────────────────
+
+  @doc "Lists all files in the given directory, respecting .gitignore."
+  @spec list_files(String.t()) :: {:ok, [String.t()]} | {:error, String.t()}
+  defdelegate list_files(root), to: Minga.Project.FileFind
+
+  @doc "Finds alternate files (test <> implementation) for the given file."
+  @spec alternate_candidates(String.t(), atom(), String.t()) :: [String.t()]
+  defdelegate alternate_candidates(file_path, filetype, project_root),
+    to: Minga.Project.AlternateFile,
+    as: :candidates
+
+  @doc "Detects the test runner for a project."
+  @spec detect_test_runner(atom(), String.t()) ::
+          {:ok, Minga.Project.TestRunner.Runner.t()} | :none
+  defdelegate detect_test_runner(filetype, project_root),
+    to: Minga.Project.TestRunner,
+    as: :detect
+
+  @doc "Generates a command to run all tests."
+  @spec test_all_command(Minga.Project.TestRunner.Runner.t()) :: String.t()
+  defdelegate test_all_command(runner), to: Minga.Project.TestRunner, as: :all_command
+
+  @doc "Generates a command to run tests in a file."
+  @spec test_file_command(Minga.Project.TestRunner.Runner.t(), String.t()) :: String.t() | nil
+  defdelegate test_file_command(runner, path), to: Minga.Project.TestRunner, as: :file_command
+
+  @doc "Generates a command to run test at cursor position."
+  @spec test_at_point_command(Minga.Project.TestRunner.Runner.t(), String.t(), pos_integer()) ::
+          String.t() | nil
+  defdelegate test_at_point_command(runner, path, line),
+    to: Minga.Project.TestRunner,
+    as: :at_point_command
 end

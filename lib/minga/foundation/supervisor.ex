@@ -17,7 +17,7 @@ defmodule Minga.Foundation.Supervisor do
       ├── Minga.Keymap.Active          Active keymap state
       ├── Minga.Config.Hooks           Lifecycle hooks
       ├── Minga.Config.Advice          Before/after command advice (ETS)
-      └── Minga.Filetype.Registry      Filetype detection
+      └── Minga.Language.Filetype.Registry      Filetype detection
 
   Language.Registry is first because it has no dependencies and nothing
   depends on it within this group. Events is second so that everything
@@ -42,7 +42,7 @@ defmodule Minga.Foundation.Supervisor do
       Minga.Keymap.Active,
       Minga.Config.Hooks,
       Minga.Config.Advice,
-      Minga.Filetype.Registry
+      Minga.Language.Filetype.Registry
     ]
 
     Supervisor.init(children, strategy: :rest_for_one)

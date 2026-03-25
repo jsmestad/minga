@@ -25,7 +25,7 @@ defmodule Minga.Editor.TabBarRenderer do
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
   alias Minga.Face
-  alias Minga.Filetype
+  alias Minga.Language.Filetype
   alias Minga.Theme
 
   @typedoc "A clickable region: column range mapping to a command."

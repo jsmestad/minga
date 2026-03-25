@@ -127,8 +127,8 @@ defmodule Minga.Editor.FileTreeIntegrationTest do
       original_buf = state_before.workspace.buffers.active
 
       # Build a tree rooted at tmp_dir so we control the entries
-      tree = Minga.FileTree.new(dir)
-      tree_buf = Minga.FileTree.BufferSync.start_buffer(tree)
+      tree = Minga.Project.FileTree.new(dir)
+      tree_buf = Minga.Project.FileTree.BufferSync.start_buffer(tree)
 
       # Inject the tree into editor state
       :sys.replace_state(ctx.editor, fn s ->
@@ -145,7 +145,7 @@ defmodule Minga.Editor.FileTreeIntegrationTest do
 
       # Find other.ex and move cursor to it
       state = :sys.get_state(ctx.editor)
-      entries = Minga.FileTree.visible_entries(state.workspace.file_tree.tree)
+      entries = Minga.Project.FileTree.visible_entries(state.workspace.file_tree.tree)
       other_idx = Enum.find_index(entries, fn e -> e.name == "other.ex" end)
       assert other_idx != nil, "other.ex should be visible in tree rooted at #{dir}"
 

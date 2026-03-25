@@ -12,7 +12,7 @@ defmodule Minga.Picker.RecentFileSource do
 
   alias Minga.Devicon
   alias Minga.Editor.State, as: EditorState
-  alias Minga.Filetype
+  alias Minga.Language.Filetype
   alias Minga.Picker.Source
   alias Minga.Project
 

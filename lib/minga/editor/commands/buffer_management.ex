@@ -527,7 +527,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
 
   defp open_alternate(state, file_path, filetype) do
     project_root = Minga.Project.root() || Path.dirname(file_path)
-    candidates = Minga.AlternateFile.candidates(file_path, filetype, project_root)
+    candidates = Minga.Project.alternate_candidates(file_path, filetype, project_root)
 
     case Enum.find(candidates, &File.exists?/1) do
       nil ->

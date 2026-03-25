@@ -172,4 +172,31 @@ defmodule Minga.Session do
         {:error, reason}
     end
   end
+
+  # ── Swap file delegates ───────────────────────────────────────────────────
+
+  @doc "Returns the default swap directory path."
+  @spec swap_dir() :: String.t()
+  defdelegate swap_dir, to: Minga.Session.Swap
+
+  @doc "Writes a swap file for the given buffer path."
+  @spec write_swap(String.t(), String.t(), keyword()) :: :ok | {:error, term()}
+  defdelegate write_swap(path, content, opts \\ []), to: Minga.Session.Swap, as: :write
+
+  @doc "Deletes the swap file for the given buffer path."
+  @spec delete_swap(String.t(), keyword()) :: :ok
+  defdelegate delete_swap(path, opts \\ []), to: Minga.Session.Swap, as: :delete
+
+  # ── Swap recovery delegates ───────────────────────────────────────────────
+
+  @typedoc "A recoverable swap file entry."
+  @type swap_entry :: Minga.Session.Swap.Recovery.entry()
+
+  @doc "Scans the swap directory for recoverable swap files."
+  @spec scan_recoverable_swaps(keyword()) :: [swap_entry()]
+  defdelegate scan_recoverable_swaps(opts \\ []), to: Minga.Session.Swap.Recovery, as: :scan
+
+  @doc "Recovers content from a swap file. Returns `{:ok, original_path, content}`."
+  @spec recover_swap_file(String.t()) :: {:ok, String.t(), String.t()} | {:error, term()}
+  defdelegate recover_swap_file(swap_path), to: Minga.Session.Swap.Recovery, as: :recover
 end

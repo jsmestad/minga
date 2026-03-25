@@ -2,7 +2,7 @@ defmodule Minga.Highlight.Grammar do
   @moduledoc """
   Maps filetypes to tree-sitter language names and locates highlight queries.
 
-  Filetypes (atoms from `Minga.Filetype`) map to tree-sitter grammar names
+  Filetypes (atoms from `Minga.Language.Filetype`) map to tree-sitter grammar names
   (strings matching Zig's compiled-in registry). Highlight queries are loaded
   from `priv/queries/{language}/highlights.scm` with an optional user override
   in `~/.config/minga/queries/{language}/highlights.scm`.

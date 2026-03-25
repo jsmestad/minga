@@ -214,7 +214,9 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
   # ── File tree ──
 
   @spec build_gui_file_tree_cmd(state()) :: binary() | nil
-  defp build_gui_file_tree_cmd(%{workspace: %{file_tree: %{tree: %Minga.FileTree{} = tree}}}) do
+  defp build_gui_file_tree_cmd(%{
+         workspace: %{file_tree: %{tree: %Minga.Project.FileTree{} = tree}}
+       }) do
     fp = :erlang.phash2(tree)
 
     if fp != Process.get(:last_gui_file_tree_fp) do

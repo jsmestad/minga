@@ -17,7 +17,7 @@ defmodule Minga.Application do
       │   ├── Minga.Keymap.Active
       │   ├── Minga.Config.Hooks
       │   ├── Minga.Config.Advice
-      │   └── Minga.Filetype.Registry
+      │   └── Minga.Language.Filetype.Registry
       ├── Minga.Buffer.Registry (Registry, :unique)
       ├── Minga.Buffer.Supervisor (DynamicSupervisor, one_for_one)
       ├── Minga.Services.Supervisor (rest_for_one)

@@ -21,7 +21,6 @@ defmodule Minga.Editor do
 
   alias Minga.Diagnostics.Decorations, as: DiagDecorations
   alias Minga.Session
-  alias Minga.Swap
 
   alias Minga.Git.Repo, as: GitRepo
 
@@ -46,11 +45,10 @@ defmodule Minga.Editor do
   alias Minga.Editor.Viewport
   # WarningLog removed in #825; warnings route through MessageLog with level override
   alias Minga.Editor.Window
-
-  alias Minga.FileTree
   alias Minga.Input
   alias Minga.LSP.SyncServer, as: LspSyncServer
   alias Minga.Mode
+  alias Minga.Project.FileTree
   # PopupLifecycle alias removed: warnings popup replaced by bottom panel (#825)
   alias Minga.Port.Protocol
 
@@ -491,7 +489,7 @@ defmodule Minga.Editor do
   # ── Swap file recovery ────────────────────────────────────────────────────────
 
   def handle_info(:check_swap_recovery, state) do
-    recoverable = Swap.Recovery.scan(swap_dir: state.swap_dir)
+    recoverable = Minga.Session.scan_recoverable_swaps(swap_dir: state.swap_dir)
 
     new_state =
       case recoverable do
@@ -1616,7 +1614,7 @@ defmodule Minga.Editor do
     put_in(new_state.workspace.file_tree.tree, FileTree.reveal(tree, path))
   end
 
-  @spec recover_swap_entries(state(), [Swap.Recovery.entry()]) :: state()
+  @spec recover_swap_entries(state(), [Minga.Session.swap_entry()]) :: state()
   defp recover_swap_entries(state, entries) do
     count = length(entries)
 
@@ -1626,9 +1624,9 @@ defmodule Minga.Editor do
     Enum.reduce(entries, state, &recover_swap_entry/2)
   end
 
-  @spec recover_swap_entry(Swap.Recovery.entry(), state()) :: state()
+  @spec recover_swap_entry(Minga.Session.swap_entry(), state()) :: state()
   defp recover_swap_entry(entry, state) do
-    case Swap.Recovery.recover(entry.swap_path) do
+    case Minga.Session.recover_swap_file(entry.swap_path) do
       {:ok, file_path, content} ->
         state = log_message(state, "Recovered: #{Path.basename(file_path)}")
         recover_buffer(state, file_path, content)
@@ -2233,7 +2231,7 @@ defmodule Minga.Editor do
   defp refresh_tree_git_status(%{workspace: %{file_tree: %{tree: nil}}} = state), do: state
 
   defp refresh_tree_git_status(%{workspace: %{file_tree: %{tree: tree}}} = state) do
-    updated_tree = Minga.FileTree.refresh_git_status(tree)
+    updated_tree = Minga.Project.FileTree.refresh_git_status(tree)
     put_in(state.workspace.file_tree.tree, updated_tree)
   end
 

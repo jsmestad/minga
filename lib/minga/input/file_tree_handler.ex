@@ -14,9 +14,9 @@ defmodule Minga.Input.FileTreeHandler do
   alias Minga.Editor.Commands
   alias Minga.Editor.Layout
   alias Minga.Editor.State, as: EditorState
-  alias Minga.FileTree
   alias Minga.Input
   alias Minga.Keymap.Scope
+  alias Minga.Project.FileTree
   @impl true
   @spec handle_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           {:handled, EditorState.t()} | {:passthrough, EditorState.t()}

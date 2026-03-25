@@ -10,7 +10,7 @@ defmodule Minga.Editor.Layout.TUI do
   alias Minga.Editor.Layout
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.AgentAccess
-  alias Minga.FileTree
+  alias Minga.Project.FileTree
 
   # Row where editor content starts (below the tab bar).
   @content_start 1

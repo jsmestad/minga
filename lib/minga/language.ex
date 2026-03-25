@@ -64,4 +64,16 @@ defmodule Minga.Language do
     language_servers: [],
     root_markers: []
   ]
+
+  # ── Filetype detection delegates ──────────────────────────────────────────
+
+  @doc "Detects a file's language atom from its path."
+  @spec detect_filetype(String.t() | nil) :: atom()
+  defdelegate detect_filetype(path), to: Minga.Language.Filetype, as: :detect
+
+  @doc "Detects filetype using both path and first line content (shebang)."
+  @spec detect_filetype_from_content(String.t(), String.t()) :: atom()
+  defdelegate detect_filetype_from_content(path, first_line),
+    to: Minga.Language.Filetype,
+    as: :detect_from_content
 end

@@ -17,13 +17,12 @@ defmodule Minga.Input.ScopedTest do
   alias Minga.Editor.State.TabBar
   alias Minga.Editor.Viewport
   alias Minga.Editor.VimState
-
-  alias Minga.FileTree
-  alias Minga.FileTree.BufferSync
   alias Minga.Input.AgentPanel
   alias Minga.Input.FileTreeHandler
   alias Minga.Input.Scoped
   alias Minga.Mode
+  alias Minga.Project.FileTree
+  alias Minga.Project.FileTree.BufferSync
 
   defp base_state(opts) do
     {:ok, buf} = BufferServer.start_link(content: "hello world")

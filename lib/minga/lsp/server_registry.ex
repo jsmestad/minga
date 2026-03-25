@@ -3,7 +3,7 @@ defmodule Minga.LSP.ServerRegistry do
   Maps filetypes to language server configurations.
 
   A pure module with hardcoded defaults for well-known language servers,
-  following the pattern established by `Minga.Filetype`. No GenServer,
+  following the pattern established by `Minga.Language.Filetype`. No GenServer,
   no config files — if the server binary is on `$PATH`, it just works.
 
   ## Adding a new server
