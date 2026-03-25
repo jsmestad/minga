@@ -42,4 +42,13 @@ defmodule Minga.Shell.Traditional do
   def handle_gui_action(shell_state, workspace, _action) do
     {shell_state, workspace}
   end
+
+  @impl true
+  @spec input_handlers(ShellState.t()) :: %{overlay: [module()], surface: [module()]}
+  def input_handlers(_shell_state) do
+    %{
+      overlay: Minga.Input.overlay_handlers(),
+      surface: Minga.Input.surface_handlers()
+    }
+  end
 end
