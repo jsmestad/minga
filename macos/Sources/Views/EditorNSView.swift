@@ -470,9 +470,11 @@ final class EditorNSView: MTKView {
 
         // ── Space leader key-chord interception ──
         // When SPC is pending or held, intercept chord keys before any
-        // other processing. IME guard: skip when composing (SPC is the
-        // commit key in CJK input methods).
-        if !imeComposition.hasMarkedText {
+        // other processing. Skip when:
+        // - IME is composing (SPC is the commit key in CJK input methods)
+        // - Insert mode is active (SPC is always a literal space, never a leader)
+        let isInsertMode = statusBarState?.isInsertMode ?? false
+        if !imeComposition.hasMarkedText && !isInsertMode {
             if let chars = event.charactersIgnoringModifiers, chars == " ", mods == 0 {
                 // Bare SPC keyDown (no modifiers)
                 if event.isARepeat {
