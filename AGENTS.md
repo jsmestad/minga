@@ -188,6 +188,25 @@ Elixir 1.19's set-theoretic type system catches real bugs at compile time. Help 
   5. **Never build a "safe client" wrapper module** that mirrors another module's API with nil-handling and exit-catching added. That's just indirection. The monitor is the real fix; the wrapper hides the problem behind a layer that every caller must remember to use.
 - `mix compile --warnings-as-errors` must pass clean
 
+### Module-Level Type Aliases
+
+Define `@type` aliases at the top of any module where a type appears in 3+ specs. This turns noisy specs into readable ones:
+
+```elixir
+# Before: repeating GenServer.server() and EditorState.t() in 80+ specs
+@spec open_file(GenServer.server(), String.t()) :: :ok | {:error, term()}
+@spec switch_buffer(GenServer.server(), non_neg_integer()) :: :ok
+
+# After: aliases at module top, specs read like English
+@type server :: GenServer.server()
+@type editor_state :: EditorState.t()
+
+@spec open_file(server(), String.t()) :: :ok | {:error, term()}
+@spec switch_buffer(server(), non_neg_integer()) :: :ok
+```
+
+Name the alias after the domain concept (`@type user :: User.t()`, not `@type u :: User.t()`). This is a readability choice, not a correctness choice; both compile identically.
+
 ### Module Aliases (convention, not linted)
 
 Prefer fully qualified module names by default. Aliases add indirection that hurts LLM comprehension: when reading a snippet or diff, the alias block at the top of the file may not be visible, and `Document.insert_text(...)` is ambiguous where `Minga.Buffer.Document.insert_text(...)` is not. Fully qualified names also make grep/search reliable across the codebase.
@@ -199,6 +218,37 @@ Prefer fully qualified module names by default. Aliases add indirection that hur
 **Exception:** if a 3-segment module appears 8+ times in one file and the repetition genuinely hurts human readability, aliasing is fine. But that frequency is also a signal the function may be doing too much or the modules are too tightly coupled.
 
 The `Credo.Check.Design.AliasUsage` lint is disabled. This is a judgment call, not an automated rule.
+
+### Module Decomposition
+
+A facade module should be mostly `defdelegate`, `@spec`, and `@doc`. If you're writing business logic in the facade, extract it to a sub-module and delegate. The test: if removing all `defdelegate` lines and all typespecs leaves more than ~100 lines of actual logic, the module is doing too much.
+
+**GenServer modules specifically** should contain OTP callbacks (`init`, `handle_call`, `handle_cast`, `handle_info`, `terminate`) and route to handler modules for the actual logic. Each `handle_info` or `handle_call` clause should be 1-3 lines that extract data and call a handler function in a dedicated module. The GenServer is the process wrapper; the handler module is where the logic lives.
+
+```elixir
+# Good: GenServer clause routes to handler
+def handle_info({:buffer_saved, path}, state) do
+  {:noreply, SaveHandler.process(state, path)}
+end
+
+# Bad: GenServer clause contains 40 lines of business logic
+def handle_info({:buffer_saved, path}, state) do
+  # ... 40 lines of formatting, git refresh, LSP notify, etc.
+  {:noreply, new_state}
+end
+```
+
+Minga already follows this pattern in places (`Editor.KeyDispatch`, `Editor.CompletionHandling`, `Editor.Startup`). Apply it consistently: when a GenServer module exceeds ~500 lines, look for `handle_info` and `handle_call` clauses with inline logic and extract them to handler modules.
+
+### Protocols vs Behaviours
+
+Use the right abstraction for the dispatch pattern. Getting this wrong creates boilerplate (protocol for one implementation) or loses compile-time guarantees (behaviour where a protocol fits).
+
+- **Protocol** when you have a value and don't know its type at the call site. The caller writes `MyProtocol.do_thing(some_value)` and dispatch happens on the value's struct type. Examples: serialization, text access across different document types, rendering different content kinds.
+- **Behaviour** when you know the contract and want to swap the implementation module. The caller writes `impl_module.do_thing(args)` where `impl_module` is chosen at configuration time or stored in state. Examples: git backend (`System` vs `Stub`), rendering backend (`Port.Frontend`), storage adapters.
+- **Neither** when there's only one implementation (just call the function directly) or when you're doing simple value validation (pattern match, don't wrap it in a protocol).
+
+The diagnostic: if the call site stores a module atom and calls it dynamically, that's a behaviour. If the call site receives a value and dispatches on its type, that's a protocol. If you find yourself using `function_exported?/3` to check for optional callbacks, you probably want a protocol with a fallback `Any` implementation instead.
 
 ### Common Elixir Footguns
 
