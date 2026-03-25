@@ -36,15 +36,8 @@ defmodule Minga.Agent.Session do
   @typedoc "Agent session status."
   @type status :: :idle | :thinking | :tool_executing | :error
 
-  @typedoc "Pending tool approval data (nil when no approval is pending)."
-  @type pending_approval ::
-          %{
-            tool_call_id: String.t(),
-            name: String.t(),
-            args: map(),
-            reply_to: pid()
-          }
-          | nil
+  @typedoc "Pending tool approval data."
+  @type pending_approval :: Minga.Agent.ToolApproval.t()
 
   @typedoc "Internal session state."
   @type state :: %{
@@ -60,7 +53,7 @@ defmodule Minga.Agent.Session do
           total_usage: Event.token_usage(),
           error_message: String.t() | nil,
           pending_thinking_level: String.t() | nil,
-          pending_approval: pending_approval(),
+          pending_approval: pending_approval() | nil,
           model_name: String.t(),
           provider_name: String.t(),
           save_timer: reference() | nil,
@@ -1026,7 +1019,7 @@ defmodule Minga.Agent.Session do
   defp handle_provider_event(%Event.ToolApproval{} = event, state) do
     Notifier.notify(:approval, "Approval needed: #{event.name}")
 
-    approval = %{
+    approval = %Minga.Agent.ToolApproval{
       tool_call_id: event.tool_call_id,
       name: event.name,
       args: event.args,

@@ -7,30 +7,32 @@ defmodule Minga.Input.WrapTest do
 
   describe "wrap_line/2" do
     test "empty string returns single empty entry" do
-      assert Wrap.wrap_line("", 20) == [%{text: "", col_offset: 0}]
+      assert Wrap.wrap_line("", 20) == [%Minga.Input.VisualLine{text: "", col_offset: 0}]
     end
 
     test "short line fits in one row" do
-      assert Wrap.wrap_line("hello", 20) == [%{text: "hello", col_offset: 0}]
+      assert Wrap.wrap_line("hello", 20) == [
+               %Minga.Input.VisualLine{text: "hello", col_offset: 0}
+             ]
     end
 
     test "line exactly at width returns single entry" do
-      assert Wrap.wrap_line("12345", 5) == [%{text: "12345", col_offset: 0}]
+      assert Wrap.wrap_line("12345", 5) == [%Minga.Input.VisualLine{text: "12345", col_offset: 0}]
     end
 
     test "breaks at word boundary" do
       result = Wrap.wrap_line("hello world foo", 10)
       assert length(result) == 2
-      assert Enum.at(result, 0) == %{text: "hello ", col_offset: 0}
-      assert Enum.at(result, 1) == %{text: "world foo", col_offset: 6}
+      assert Enum.at(result, 0) == %Minga.Input.VisualLine{text: "hello ", col_offset: 0}
+      assert Enum.at(result, 1) == %Minga.Input.VisualLine{text: "world foo", col_offset: 6}
     end
 
     test "hard-wraps when no spaces exist" do
       result = Wrap.wrap_line("abcdefghijklmno", 5)
       assert length(result) == 3
-      assert Enum.at(result, 0) == %{text: "abcde", col_offset: 0}
-      assert Enum.at(result, 1) == %{text: "fghij", col_offset: 5}
-      assert Enum.at(result, 2) == %{text: "klmno", col_offset: 10}
+      assert Enum.at(result, 0) == %Minga.Input.VisualLine{text: "abcde", col_offset: 0}
+      assert Enum.at(result, 1) == %Minga.Input.VisualLine{text: "fghij", col_offset: 5}
+      assert Enum.at(result, 2) == %Minga.Input.VisualLine{text: "klmno", col_offset: 10}
     end
 
     test "URL-like string hard-wraps and preserves all text" do
@@ -49,7 +51,7 @@ defmodule Minga.Input.WrapTest do
 
     test "width below minimum truncates" do
       result = Wrap.wrap_line("hello world", 3)
-      assert result == [%{text: "hel", col_offset: 0}]
+      assert result == [%Minga.Input.VisualLine{text: "hel", col_offset: 0}]
     end
 
     test "narrow width wraps character by character" do

@@ -18,13 +18,10 @@ defmodule Minga.Snippet do
   @enforce_keys [:text, :tabstops]
   defstruct [:text, :tabstops]
 
+  alias Minga.Snippet.Tabstop
+
   @typedoc "A single tabstop: index, byte offset in expanded text, and placeholder length."
-  @type tabstop :: %{
-          index: non_neg_integer(),
-          offset: non_neg_integer(),
-          length: non_neg_integer(),
-          placeholder: String.t()
-        }
+  @type tabstop :: Tabstop.t()
 
   @type t :: %__MODULE__{
           text: String.t(),
@@ -76,7 +73,7 @@ defmodule Minga.Snippet do
   defp do_parse("${" <> rest, text_acc, stops, offset) do
     case parse_placeholder(rest) do
       {:ok, index, placeholder, remaining} ->
-        stop = %{
+        stop = %Tabstop{
           index: index,
           offset: offset,
           length: byte_size(placeholder),
@@ -99,7 +96,7 @@ defmodule Minga.Snippet do
   defp do_parse("$" <> rest, text_acc, stops, offset) do
     case parse_tabstop_number(rest) do
       {:ok, index, remaining} ->
-        stop = %{index: index, offset: offset, length: 0, placeholder: ""}
+        stop = %Tabstop{index: index, offset: offset, length: 0, placeholder: ""}
         do_parse(remaining, text_acc, [stop | stops], offset)
 
       :error ->
