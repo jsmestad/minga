@@ -391,6 +391,7 @@ final class SpyEncoder: InputEncoder, Sendable {
     func sendGroupClose(id: UInt16) { state.withLock { $0.guiActions.append(.gitOpenFile(path: "close-ws:\(id)")) } }
     func sendSpaceLeaderChord(codepoint: UInt32, modifiers: UInt8) { /* no-op for tests */ }
     func sendSpaceLeaderRetract(codepoint: UInt32, modifiers: UInt8) { /* no-op for tests */ }
+    func sendFindPasteboardSearch(text: String, direction: UInt8) { /* no-op for tests */ }
 }
 
 @Suite("EditorNSView Resize")

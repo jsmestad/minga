@@ -113,6 +113,13 @@ defmodule Minga.Port.Protocol.GUI do
   @op_gui_git_status 0x85
   @op_gui_agent_groups 0x86
 
+  # ── Forward-compatible opcodes (0x90+, include 2-byte length prefix) ──
+  # New opcodes >= 0x90 start with: opcode(1) + payload_length(2) + payload.
+  # Old frontends skip unknown 0x90+ opcodes by reading the length and
+  # advancing, instead of crashing. See ProtocolDecoder.swift default case.
+
+  @op_clipboard_write 0x90
+
   # ── GUI action sub-opcodes (Frontend → BEAM) ──
 
   @gui_action_select_tab 0x01
@@ -151,6 +158,7 @@ defmodule Minga.Port.Protocol.GUI do
   @gui_action_agent_group_close 0x21
   @gui_action_space_leader_chord 0x22
   @gui_action_space_leader_retract 0x23
+  @gui_action_find_pasteboard_search 0x24
 
   # ── Types ──
 
@@ -192,6 +200,7 @@ defmodule Minga.Port.Protocol.GUI do
           | {:space_leader_chord, codepoint :: non_neg_integer(), modifiers :: non_neg_integer()}
           | {:space_leader_retract, codepoint :: non_neg_integer(),
              modifiers :: non_neg_integer()}
+          | {:find_pasteboard_search, text :: String.t(), direction :: non_neg_integer()}
 
   # ═══════════════════════════════════════════════════════════════════════════
   # Encoding (BEAM → Frontend)
@@ -598,6 +607,29 @@ defmodule Minga.Port.Protocol.GUI do
       <<TabBar.active_group_id(tb)::16, length(tb.agent_groups)::8>>
       | entries
     ])
+  end
+
+  # ── Clipboard write (forward-compatible, 0x90+) ──
+
+  @typedoc "Clipboard target for the write opcode."
+  @type clipboard_target :: :general | :find
+
+  @doc """
+  Encodes a clipboard_write command.
+
+  Uses the forward-compatible 0x90+ format: opcode(1) + payload_length(2) + payload.
+  Payload: target(1) + text_length(2) + text(text_length).
+
+  Target: 0 = general pasteboard (Cmd+C), 1 = find pasteboard (Cmd+E).
+  """
+  @spec encode_clipboard_write(String.t(), clipboard_target()) :: binary()
+  def encode_clipboard_write(text, target \\ :general) do
+    target_byte = if target == :find, do: 1, else: 0
+    text_bytes = :erlang.iolist_to_binary([text])
+    text_len = byte_size(text_bytes)
+    payload_len = 1 + 2 + text_len
+
+    <<@op_clipboard_write, payload_len::16, target_byte::8, text_len::16, text_bytes::binary>>
   end
 
   # ── File tree ──
@@ -1496,6 +1528,12 @@ defmodule Minga.Port.Protocol.GUI do
         <<codepoint::32, modifiers::8>>
       ),
       do: {:ok, {:space_leader_retract, codepoint, modifiers}}
+
+  def decode_gui_action(
+        @gui_action_find_pasteboard_search,
+        <<direction::8, text_len::16, text::binary-size(text_len)>>
+      ),
+      do: {:ok, {:find_pasteboard_search, text, direction}}
 
   def decode_gui_action(_, _), do: :error
 

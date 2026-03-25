@@ -18,7 +18,8 @@ defmodule Minga.Editor.Commands.Visual do
 
   @command_specs [
     {:delete_visual_selection, "Delete visual selection", true},
-    {:yank_visual_selection, "Yank visual selection", true}
+    {:yank_visual_selection, "Yank visual selection", true},
+    {:select_all, "Select all", true}
   ]
 
   @spec execute(state(), Mode.command()) :: state()
@@ -120,6 +121,29 @@ defmodule Minga.Editor.Commands.Visual do
         BufferServer.move_to(buf, end_pos)
         %{state | vim: %{vim | mode_state: new_ms}}
     end
+  end
+
+  # ── Select all ─────────────────────────────────────────────────────────────
+
+  def execute(%{buffers: %{active: buf}} = state, :select_all) when is_pid(buf) do
+    line_count = BufferServer.line_count(buf)
+    last_line = max(line_count - 1, 0)
+
+    last_col =
+      case BufferServer.get_lines(buf, last_line, 1) do
+        [text] -> max(byte_size(text) - 1, 0)
+        _ -> 0
+      end
+
+    # Enter visual line mode with anchor at start, cursor at end
+    BufferServer.move_to(buf, {last_line, last_col})
+
+    visual_state = %VisualState{
+      visual_anchor: {0, 0},
+      visual_type: :line
+    }
+
+    EditorState.transition_mode(state, :visual, visual_state)
   end
 
   @impl Minga.Command.Provider

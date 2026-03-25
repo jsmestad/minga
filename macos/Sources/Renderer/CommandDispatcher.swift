@@ -164,6 +164,9 @@ final class CommandDispatcher {
         case .guiAgentGroups(let activeGroupId, let agentGroups):
             guiState.tabBarState.updateAgentGroups(activeGroupId: activeGroupId, entries: agentGroups)
 
+        case .clipboardWrite(let target, let text):
+            handleClipboardWrite(target: target, text: text)
+
         case .guiFileTree(let selectedIndex, let treeWidth, let rootPath, let entries):
             if entries.isEmpty {
                 guiState.fileTreeState.hide()
@@ -392,4 +395,18 @@ final class CommandDispatcher {
         }
     }
 
+    // MARK: - Clipboard
+
+    /// Handles a clipboard_write command from the BEAM.
+    /// Target 0 = general pasteboard (Cmd+C), 1 = find pasteboard (Cmd+E).
+    private func handleClipboardWrite(target: UInt8, text: String) {
+        let pasteboard: NSPasteboard
+        if target == 1 {
+            pasteboard = NSPasteboard(name: .find)
+        } else {
+            pasteboard = NSPasteboard.general
+        }
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+    }
 }

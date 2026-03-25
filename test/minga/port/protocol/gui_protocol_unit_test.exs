@@ -122,4 +122,69 @@ defmodule Minga.Port.Protocol.GUIProtocolUnitTest do
       assert {:ok, {:agent_group_close, 3}} == ProtocolGUI.decode_gui_action(0x21, payload)
     end
   end
+
+  # ── Clipboard write (forward-compatible 0x90+ format) ──────────────────
+
+  describe "encode_clipboard_write/2" do
+    test "encodes general pasteboard write with length prefix" do
+      binary = ProtocolGUI.encode_clipboard_write("hello")
+
+      # Format: opcode(1) + payload_length(2) + target(1) + text_len(2) + text
+      assert <<0x90, payload_len::16, 0::8, text_len::16, text::binary>> = binary
+      assert text == "hello"
+      assert text_len == 5
+      assert payload_len == 1 + 2 + 5
+    end
+
+    test "encodes find pasteboard write" do
+      binary = ProtocolGUI.encode_clipboard_write("search", :find)
+
+      assert <<0x90, _payload_len::16, 1::8, text_len::16, text::binary>> = binary
+      assert text == "search"
+      assert text_len == 6
+    end
+
+    test "encodes empty text" do
+      binary = ProtocolGUI.encode_clipboard_write("")
+
+      assert <<0x90, payload_len::16, 0::8, 0::16>> = binary
+      assert payload_len == 3
+    end
+
+    test "encodes unicode text" do
+      binary = ProtocolGUI.encode_clipboard_write("日本語")
+
+      assert <<0x90, _payload_len::16, 0::8, text_len::16, text::binary>> = binary
+      assert text == "日本語"
+      assert text_len == byte_size("日本語")
+    end
+
+    test "forward-compatible: starts with 0x90 and length prefix is skippable" do
+      binary = ProtocolGUI.encode_clipboard_write("test")
+
+      # Verify a decoder that doesn't know 0x90 can still skip it:
+      # read opcode (1 byte), read payload_len (2 bytes), skip payload_len bytes
+      <<0x90, payload_len::16, _payload::binary-size(payload_len)>> = binary
+    end
+  end
+
+  # ── Find Pasteboard gui_action decode ────────────────────────────────────
+
+  describe "decode_gui_action for find_pasteboard_search" do
+    test "decodes forward search" do
+      text = "hello"
+      payload = <<0::8, byte_size(text)::16, text::binary>>
+
+      assert {:ok, {:find_pasteboard_search, "hello", 0}} ==
+               ProtocolGUI.decode_gui_action(0x24, payload)
+    end
+
+    test "decodes backward search" do
+      text = "world"
+      payload = <<1::8, byte_size(text)::16, text::binary>>
+
+      assert {:ok, {:find_pasteboard_search, "world", 1}} ==
+               ProtocolGUI.decode_gui_action(0x24, payload)
+    end
+  end
 end

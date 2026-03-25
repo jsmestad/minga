@@ -56,6 +56,12 @@ let OP_GUI_SPLIT_SEPARATORS: UInt8 = 0x84
 let OP_GUI_GIT_STATUS: UInt8 = 0x85
 let OP_GUI_AGENT_GROUPS: UInt8 = 0x86
 
+// MARK: - Forward-compatible opcodes (0x90+, include 2-byte length prefix)
+// All opcodes >= 0x90 use the format: opcode(1) + payload_length(2) + payload.
+// Old frontends skip unknown 0x90+ opcodes by reading the length.
+
+let OP_CLIPBOARD_WRITE: UInt8 = 0x90
+
 // GUI theme color slot IDs
 let GUI_COLOR_EDITOR_BG: UInt8 = 0x01
 let GUI_COLOR_EDITOR_FG: UInt8 = 0x02
@@ -225,6 +231,7 @@ let GUI_ACTION_GROUP_SET_ICON: UInt8 = 0x20
 let GUI_ACTION_GROUP_CLOSE: UInt8 = 0x21
 let GUI_ACTION_SPACE_LEADER_CHORD: UInt8 = 0x22
 let GUI_ACTION_SPACE_LEADER_RETRACT: UInt8 = 0x23
+let GUI_ACTION_FIND_PASTEBOARD_SEARCH: UInt8 = 0x24
 
 // MARK: - Log message opcode (frontend → BEAM)
 
