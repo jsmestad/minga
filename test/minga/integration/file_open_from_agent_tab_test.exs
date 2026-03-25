@@ -64,13 +64,13 @@ defmodule Minga.Integration.FileOpenFromAgentTabTest do
     {:ok, fake_session} = StubServer.start_link()
 
     :sys.replace_state(editor, fn state ->
-      win_id = state.windows.active
+      win_id = state.workspace.windows.active
 
       agent_window = Window.new_agent_chat(win_id, agent_buf, height, width)
 
       windows = %{
-        state.windows
-        | map: Map.put(state.windows.map, win_id, agent_window)
+        state.workspace.windows
+        | map: Map.put(state.workspace.windows.map, win_id, agent_window)
       }
 
       agent_tab_bar = TabBar.new(Tab.new_agent(1, "Agent"))
@@ -82,9 +82,8 @@ defmodule Minga.Integration.FileOpenFromAgentTabTest do
 
       %{
         state
-        | windows: windows,
+        | workspace: %{state.workspace | windows: windows, keymap_scope: :agent},
           tab_bar: agent_tab_bar,
-          keymap_scope: :agent,
           agent: agent_state,
           # Suppress :tool_missing events from the global event bus.
           # Without this, a stray tool_missing broadcast can race with
@@ -122,8 +121,8 @@ defmodule Minga.Integration.FileOpenFromAgentTabTest do
 
       # Confirm we start in agent mode with agent_chat window
       state = :sys.get_state(ctx.editor)
-      win_id = state.windows.active
-      window = Map.get(state.windows.map, win_id)
+      win_id = state.workspace.windows.active
+      window = Map.get(state.workspace.windows.map, win_id)
       assert Content.agent_chat?(window.content), "Should start with agent_chat window"
 
       # Create a test file and open it
@@ -136,8 +135,8 @@ defmodule Minga.Integration.FileOpenFromAgentTabTest do
 
       # After opening a file, the window content MUST be {:buffer, _}
       state = :sys.get_state(ctx.editor)
-      win_id = state.windows.active
-      window = Map.get(state.windows.map, win_id)
+      win_id = state.workspace.windows.active
+      window = Map.get(state.workspace.windows.map, win_id)
 
       assert Content.buffer?(window.content),
              "Window content should be {:buffer, _} after opening file, " <>
@@ -213,7 +212,7 @@ defmodule Minga.Integration.FileOpenFromAgentTabTest do
       ctx = start_editor_in_agent_mode()
 
       state = :sys.get_state(ctx.editor)
-      assert state.keymap_scope == :agent
+      assert state.workspace.keymap_scope == :agent
 
       file_path = Path.join(tmp_dir, "scope_test.txt")
       File.write!(file_path, "test content")
@@ -224,8 +223,8 @@ defmodule Minga.Integration.FileOpenFromAgentTabTest do
 
       state = :sys.get_state(ctx.editor)
 
-      assert state.keymap_scope == :editor,
-             "Scope should be :editor after opening file, got #{state.keymap_scope}"
+      assert state.workspace.keymap_scope == :editor,
+             "Scope should be :editor after opening file, got #{state.workspace.keymap_scope}"
     end
 
     # Tests 5-6 ("normal mode editing works", "tab switch back to agent")

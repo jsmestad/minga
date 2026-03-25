@@ -13,6 +13,7 @@ defmodule Minga.Editor.Renderer.Minibuffer do
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Diagnostics
   alias Minga.Editor.DisplayList
+  alias Minga.Editor.State, as: EditorState
   alias Minga.Face
   alias Minga.LSP.SyncServer
 
@@ -31,7 +32,7 @@ defmodule Minga.Editor.Renderer.Minibuffer do
 
   @doc "Renders the minibuffer at `row` with a max width of `cols`."
   @spec render(input(), non_neg_integer(), pos_integer()) :: DisplayList.draw()
-  def render(%{vim: %{mode: :search, mode_state: ms}, theme: theme}, row, cols) do
+  def render(%EditorState{workspace: %{vim: %{mode: :search, mode_state: ms}}, theme: theme}, row, cols) do
     prefix = if ms.direction == :forward, do: "/", else: "?"
     search_text = prefix <> ms.input
     mb = theme.minibuffer
@@ -44,7 +45,7 @@ defmodule Minga.Editor.Renderer.Minibuffer do
     )
   end
 
-  def render(%{vim: %{mode: :search_prompt, mode_state: ms}, theme: theme}, row, cols) do
+  def render(%EditorState{workspace: %{vim: %{mode: :search_prompt, mode_state: ms}}, theme: theme}, row, cols) do
     prompt_text = "Search: " <> ms.input
     mb = theme.minibuffer
 
@@ -56,7 +57,7 @@ defmodule Minga.Editor.Renderer.Minibuffer do
     )
   end
 
-  def render(%{vim: %{mode: :substitute_confirm, mode_state: ms}, theme: theme}, row, cols) do
+  def render(%EditorState{workspace: %{vim: %{mode: :substitute_confirm, mode_state: ms}}, theme: theme}, row, cols) do
     current = ms.current + 1
     total = length(ms.matches)
     prompt = "replace with #{ms.replacement}? [y/n/a/q] (#{current} of #{total})"
@@ -70,7 +71,7 @@ defmodule Minga.Editor.Renderer.Minibuffer do
     )
   end
 
-  def render(%{vim: %{mode: :extension_confirm, mode_state: ms}, theme: theme}, row, cols) do
+  def render(%EditorState{workspace: %{vim: %{mode: :extension_confirm, mode_state: ms}}, theme: theme}, row, cols) do
     prompt = Minga.Mode.display(:extension_confirm, ms)
     mb = theme.minibuffer
 
@@ -82,7 +83,7 @@ defmodule Minga.Editor.Renderer.Minibuffer do
     )
   end
 
-  def render(%{vim: %{mode: :tool_confirm, mode_state: ms}, theme: theme}, row, cols) do
+  def render(%EditorState{workspace: %{vim: %{mode: :tool_confirm, mode_state: ms}}, theme: theme}, row, cols) do
     prompt = Minga.Mode.display(:tool_confirm, ms)
     mb = theme.minibuffer
 
@@ -94,7 +95,7 @@ defmodule Minga.Editor.Renderer.Minibuffer do
     )
   end
 
-  def render(%{vim: %{mode: :command, mode_state: ms}, theme: theme}, row, cols) do
+  def render(%EditorState{workspace: %{vim: %{mode: :command, mode_state: ms}}, theme: theme}, row, cols) do
     cmd_text = ":" <> ms.input
     mb = theme.minibuffer
 
@@ -106,7 +107,7 @@ defmodule Minga.Editor.Renderer.Minibuffer do
     )
   end
 
-  def render(%{vim: %{mode: :eval, mode_state: ms}, theme: theme}, row, cols) do
+  def render(%EditorState{workspace: %{vim: %{mode: :eval, mode_state: ms}}, theme: theme}, row, cols) do
     eval_text = "Eval: " <> ms.input
     mb = theme.minibuffer
 
@@ -168,27 +169,21 @@ defmodule Minga.Editor.Renderer.Minibuffer do
   end
 
   # Legacy path: fetches diagnostic from buffer (for backward compatibility)
-  def render(%{buffers: %{active: buf}, theme: theme} = state, row, cols)
-      when is_pid(buf) do
-    mode = Minga.Editor.Editing.mode(state)
+  def render(%EditorState{workspace: %{buffers: %{active: buf}}, theme: theme} = state, row, cols)
+      when is_pid(buf) and state.workspace.vim.mode in [:normal, :insert, :replace] do
+    mb = theme.minibuffer
 
-    if mode in [:normal, :insert, :replace] do
-      mb = theme.minibuffer
+    case cursor_line_diagnostic(buf) do
+      nil ->
+        render_blank(row, cols, mb)
 
-      case cursor_line_diagnostic(buf) do
-        nil ->
-          render_blank(row, cols, mb)
-
-        msg ->
-          DisplayList.draw(
-            row,
-            0,
-            String.pad_trailing(msg, cols),
-            Face.new(fg: mb.dim_fg, bg: mb.bg)
-          )
-      end
-    else
-      render_blank(row, cols, theme.minibuffer)
+      msg ->
+        DisplayList.draw(
+          row,
+          0,
+          String.pad_trailing(msg, cols),
+          Face.new(fg: mb.dim_fg, bg: mb.bg)
+        )
     end
   end
 

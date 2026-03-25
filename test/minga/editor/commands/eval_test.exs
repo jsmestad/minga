@@ -29,9 +29,11 @@ defmodule Minga.Editor.Commands.EvalTest do
   defp build_state(messages_buf \\ nil) do
     %EditorState{
       port_manager: nil,
-      viewport: %Viewport{rows: 24, cols: 80, top: 0, left: 0},
-      vim: VimState.new(),
-      buffers: %Buffers{messages: messages_buf}
+      workspace: %Minga.Workspace.State{
+        viewport: %Viewport{rows: 24, cols: 80, top: 0, left: 0},
+        vim: VimState.new(),
+        buffers: %Buffers{messages: messages_buf}
+      }
     }
   end
 

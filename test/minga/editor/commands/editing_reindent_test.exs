@@ -39,8 +39,8 @@ defmodule Minga.Editor.Commands.EditingReindentTest do
       send_key(editor, ?=)
 
       state = :sys.get_state(editor)
-      assert state.vim.mode == :operator_pending
-      assert state.vim.mode_state.operator == :reindent
+      assert state.workspace.vim.mode == :operator_pending
+      assert state.workspace.vim.mode_state.operator == :reindent
     end
 
     test "== returns to normal mode" do
@@ -49,7 +49,7 @@ defmodule Minga.Editor.Commands.EditingReindentTest do
       send_key(editor, ?=)
 
       state = :sys.get_state(editor)
-      assert state.vim.mode == :normal
+      assert state.workspace.vim.mode == :normal
     end
 
     test "=w returns to normal mode (word motion)" do
@@ -58,7 +58,7 @@ defmodule Minga.Editor.Commands.EditingReindentTest do
       send_key(editor, ?w)
 
       state = :sys.get_state(editor)
-      assert state.vim.mode == :normal
+      assert state.workspace.vim.mode == :normal
     end
 
     test "=G returns to normal mode" do
@@ -67,7 +67,7 @@ defmodule Minga.Editor.Commands.EditingReindentTest do
       send_key(editor, ?G)
 
       state = :sys.get_state(editor)
-      assert state.vim.mode == :normal
+      assert state.workspace.vim.mode == :normal
     end
 
     test "=gg returns to normal mode" do
@@ -78,7 +78,7 @@ defmodule Minga.Editor.Commands.EditingReindentTest do
       send_key(editor, ?g)
 
       state = :sys.get_state(editor)
-      assert state.vim.mode == :normal
+      assert state.workspace.vim.mode == :normal
     end
   end
 
@@ -92,7 +92,7 @@ defmodule Minga.Editor.Commands.EditingReindentTest do
       send_key(editor, ?=)
 
       state = :sys.get_state(editor)
-      assert state.vim.mode == :normal
+      assert state.workspace.vim.mode == :normal
     end
 
     test "v l = returns to normal after characterwise reindent" do
@@ -102,7 +102,7 @@ defmodule Minga.Editor.Commands.EditingReindentTest do
       send_key(editor, ?=)
 
       state = :sys.get_state(editor)
-      assert state.vim.mode == :normal
+      assert state.workspace.vim.mode == :normal
     end
   end
 
@@ -114,13 +114,13 @@ defmodule Minga.Editor.Commands.EditingReindentTest do
       send_key(editor, ?=)
 
       state = :sys.get_state(editor)
-      assert state.vim.mode == :operator_pending
+      assert state.workspace.vim.mode == :operator_pending
 
       send_key(editor, ?i)
       send_key(editor, ?w)
 
       state = :sys.get_state(editor)
-      assert state.vim.mode == :normal
+      assert state.workspace.vim.mode == :normal
     end
   end
 

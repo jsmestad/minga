@@ -9,7 +9,6 @@ defmodule Minga.Editor.RenderPipeline.Compose do
 
   alias Minga.Editor.DisplayList.{Cursor, Frame, WindowFrame}
   alias Minga.Editor.Layout
-
   alias Minga.Editor.RenderPipeline.Chrome
   alias Minga.Editor.RenderPipeline.ComposeHelpers
   alias Minga.Editor.State, as: EditorState
@@ -46,7 +45,7 @@ defmodule Minga.Editor.RenderPipeline.Compose do
     # command/search/eval mode.
     active_wf_cursor = Enum.find_value(window_frames, fn wf -> wf.cursor end)
     minibuffer_result = ComposeHelpers.resolve_cursor(state, cursor_info, minibuffer_row)
-    minibuffer_mode? = Minga.Editor.Editing.minibuffer_mode?(state)
+    minibuffer_mode? = state.workspace.vim.mode in [:command, :search, :eval, :search_prompt]
 
     cursor =
       resolve_frame_cursor(

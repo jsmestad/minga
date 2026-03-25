@@ -10,6 +10,7 @@ defmodule Minga.Editor.TitleTest do
   alias Minga.Editor.VimState
   alias Minga.Editor.Window
   alias Minga.Editor.WindowTree
+  alias Minga.Test.StateFactory
 
   defp state_with(opts \\ []) do
     path = Keyword.get(opts, :path, "/home/user/project/lib/editor.ex")
@@ -28,10 +29,10 @@ defmodule Minga.Editor.TitleTest do
       BufferServer.insert_char(buf, "x")
     end
 
-    %{
-      buffers: %{active: buf},
-      vim: %{mode: mode}
-    }
+    StateFactory.build(
+      buffers: %Buffers{active: buf},
+      vim: %VimState{mode: mode, mode_state: nil}
+    )
   end
 
   describe "format/2" do
@@ -90,7 +91,7 @@ defmodule Minga.Editor.TitleTest do
     end
 
     test "no active buffer falls back to no file" do
-      state = %{buffers: %{active: nil}, vim: %{mode: :normal}}
+      state = StateFactory.build(buffers: %Buffers{active: nil}, vim: %VimState{mode: :normal, mode_state: nil})
       result = Title.format(state, "{filename} - Minga")
       assert result == "[no file] - Minga"
     end
@@ -104,14 +105,16 @@ defmodule Minga.Editor.TitleTest do
 
       state = %EditorState{
         port_manager: self(),
-        viewport: Viewport.new(24, 80),
-        vim: VimState.new(),
-        buffers: %Buffers{active: file_buf, list: []},
-        windows: %Windows{
-          tree: WindowTree.new(1),
-          map: %{1 => agent_window},
-          active: 1,
-          next_id: 2
+        workspace: %Minga.Workspace.State{
+          viewport: Viewport.new(24, 80),
+          vim: VimState.new(),
+          buffers: %Buffers{active: file_buf, list: []},
+          windows: %Windows{
+            tree: WindowTree.new(1),
+            map: %{1 => agent_window},
+            active: 1,
+            next_id: 2
+          }
         },
         focus_stack: Minga.Input.default_stack()
       }
@@ -132,14 +135,16 @@ defmodule Minga.Editor.TitleTest do
 
       state = %EditorState{
         port_manager: self(),
-        viewport: Viewport.new(24, 80),
-        vim: VimState.new(),
-        buffers: %Buffers{active: buf, list: [buf]},
-        windows: %Windows{
-          tree: WindowTree.new(1),
-          map: %{1 => window},
-          active: 1,
-          next_id: 2
+        workspace: %Minga.Workspace.State{
+          viewport: Viewport.new(24, 80),
+          vim: VimState.new(),
+          buffers: %Buffers{active: buf, list: [buf]},
+          windows: %Windows{
+            tree: WindowTree.new(1),
+            map: %{1 => window},
+            active: 1,
+            next_id: 2
+          }
         },
         focus_stack: Minga.Input.default_stack()
       }
@@ -162,14 +167,16 @@ defmodule Minga.Editor.TitleTest do
 
       state = %EditorState{
         port_manager: self(),
-        viewport: Viewport.new(24, 80),
-        vim: VimState.new(),
-        buffers: %Buffers{active: buf, list: [buf]},
-        windows: %Windows{
-          tree: WindowTree.new(1),
-          map: %{1 => window},
-          active: 1,
-          next_id: 2
+        workspace: %Minga.Workspace.State{
+          viewport: Viewport.new(24, 80),
+          vim: VimState.new(),
+          buffers: %Buffers{active: buf, list: [buf]},
+          windows: %Windows{
+            tree: WindowTree.new(1),
+            map: %{1 => window},
+            active: 1,
+            next_id: 2
+          }
         },
         focus_stack: Minga.Input.default_stack()
       }
@@ -190,14 +197,16 @@ defmodule Minga.Editor.TitleTest do
 
       state = %EditorState{
         port_manager: self(),
-        viewport: Viewport.new(24, 80),
-        vim: VimState.new(),
-        buffers: %Buffers{active: buf, list: [buf]},
-        windows: %Windows{
-          tree: WindowTree.new(1),
-          map: %{1 => window},
-          active: 1,
-          next_id: 2
+        workspace: %Minga.Workspace.State{
+          viewport: Viewport.new(24, 80),
+          vim: VimState.new(),
+          buffers: %Buffers{active: buf, list: [buf]},
+          windows: %Windows{
+            tree: WindowTree.new(1),
+            map: %{1 => window},
+            active: 1,
+            next_id: 2
+          }
         },
         focus_stack: Minga.Input.default_stack()
       }
@@ -217,14 +226,16 @@ defmodule Minga.Editor.TitleTest do
 
       state = %EditorState{
         port_manager: self(),
-        viewport: Viewport.new(24, 80),
-        vim: VimState.new(),
-        buffers: %Buffers{active: buf, list: [buf]},
-        windows: %Windows{
-          tree: WindowTree.new(1),
-          map: %{1 => window},
-          active: 1,
-          next_id: 2
+        workspace: %Minga.Workspace.State{
+          viewport: Viewport.new(24, 80),
+          vim: VimState.new(),
+          buffers: %Buffers{active: buf, list: [buf]},
+          windows: %Windows{
+            tree: WindowTree.new(1),
+            map: %{1 => window},
+            active: 1,
+            next_id: 2
+          }
         },
         focus_stack: Minga.Input.default_stack()
       }
@@ -240,14 +251,16 @@ defmodule Minga.Editor.TitleTest do
 
       state = %EditorState{
         port_manager: self(),
-        viewport: Viewport.new(24, 80),
-        vim: VimState.new(),
-        buffers: %Buffers{active: file_buf, list: []},
-        windows: %Windows{
-          tree: WindowTree.new(1),
-          map: %{1 => agent_window},
-          active: 1,
-          next_id: 2
+        workspace: %Minga.Workspace.State{
+          viewport: Viewport.new(24, 80),
+          vim: VimState.new(),
+          buffers: %Buffers{active: file_buf, list: []},
+          windows: %Windows{
+            tree: WindowTree.new(1),
+            map: %{1 => agent_window},
+            active: 1,
+            next_id: 2
+          }
         },
         focus_stack: Minga.Input.default_stack()
       }

@@ -32,7 +32,7 @@ defmodule Minga.Input.AgentPanel do
           {:handled, EditorState.t()} | {:passthrough, EditorState.t()}
 
   # Editor scope with agent side panel visible + input focused
-  def handle_key(%{keymap_scope: :editor} = state, cp, mods) do
+  def handle_key(%EditorState{workspace: %{keymap_scope: :editor}} = state, cp, mods) do
     panel = AgentAccess.panel(state)
 
     if panel.visible and panel.input_focused do
@@ -56,7 +56,7 @@ defmodule Minga.Input.AgentPanel do
   @spec handle_panel_input(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           EditorState.t()
   defp handle_panel_input(state, cp, mods) do
-    if Minga.Editor.Editing.inserting?(state) do
+    if state.workspace.vim.mode == :insert do
       # Resolve through the agent scope insert trie. This gives us the
       # same keybindings as the split pane path (Enter, Shift+Enter,
       # Backspace, Ctrl combos, @-mention, printable chars) without
@@ -110,15 +110,11 @@ defmodule Minga.Input.AgentPanel do
   # Previously this called delegate_to_mode_fsm(state, 0, 0) which
   # discarded the actual key and could clobber buffers.active if the
   # leader command (e.g. :new_buffer) changed it during execution.
-  defp handle_panel_nav(state, cp, mods) do
-    if Minga.Editor.Editing.in_leader?(state) do
-      {:passthrough, state}
-    else
-      handle_panel_nav_dispatch(state, cp, mods)
-    end
+  defp handle_panel_nav(state, _cp, _mods) when is_map(state.workspace.vim.mode_state.leader_node) do
+    {:passthrough, state}
   end
 
-  defp handle_panel_nav_dispatch(state, cp, mods) do
+  defp handle_panel_nav(state, cp, mods) do
     if Input.key_sequence_pending?(state) do
       {:handled, delegate_to_mode_fsm(state, cp, mods)}
     else
@@ -171,14 +167,14 @@ defmodule Minga.Input.AgentPanel do
 
     if is_pid(prompt_pid) do
       try do
-        real_active = state.buffers.active
-        state = put_in(state.buffers.active, prompt_pid)
+        real_active = state.workspace.buffers.active
+        state = put_in(state.workspace.buffers.active, prompt_pid)
         state = Minga.Editor.do_handle_key(state, cp, mods)
 
         # Only restore if a command didn't legitimately change buffers.active.
         # Same guard as AgentNav.delegate_to_mode_fsm/4.
-        if state.buffers.active == prompt_pid do
-          put_in(state.buffers.active, real_active)
+        if state.workspace.buffers.active == prompt_pid do
+          put_in(state.workspace.buffers.active, real_active)
         else
           state
         end

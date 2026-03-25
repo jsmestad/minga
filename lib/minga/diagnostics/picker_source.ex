@@ -13,6 +13,7 @@ defmodule Minga.Diagnostics.PickerSource do
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Diagnostics
+  alias Minga.Editor.State, as: EditorState
   alias Minga.LSP.SyncServer
 
   @impl true
@@ -25,7 +26,7 @@ defmodule Minga.Diagnostics.PickerSource do
 
   @impl true
   @spec candidates(term()) :: [Item.t()]
-  def candidates(%{buffers: %{active: buf}}) when is_pid(buf) do
+  def candidates(%EditorState{workspace: %{buffers: %{active: buf}}}) when is_pid(buf) do
     buf
     |> BufferServer.file_path()
     |> candidates_for_path()
@@ -57,7 +58,7 @@ defmodule Minga.Diagnostics.PickerSource do
   @impl true
   @spec on_select(Item.t(), term()) :: term()
   def on_select(%Item{id: {line, col}}, state) do
-    case state.buffers.active do
+    case state.workspace.buffers.active do
       nil ->
         state
 

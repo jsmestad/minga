@@ -16,7 +16,6 @@ defmodule Minga.Editor.KeyDispatch do
   alias Minga.Editor.BufferLifecycle
   alias Minga.Editor.ChangeTracking
   alias Minga.Editor.Commands
-  alias Minga.Editor.Editing
   alias Minga.Editor.MacroReplay
   alias Minga.Editor.ModeTransitions
   alias Minga.Editor.State, as: EditorState
@@ -34,13 +33,13 @@ defmodule Minga.Editor.KeyDispatch do
   @spec handle_key(EditorState.t(), non_neg_integer(), non_neg_integer()) :: EditorState.t()
   def handle_key(state, codepoint, modifiers) do
     key = {codepoint, modifiers}
-    old_mode = Editing.mode(state)
+    old_mode = state.workspace.vim.mode
 
     # Route through EditingModel.Vim, which delegates to Mode.process/3.
     # This proves the EditingModel abstraction under real load. When CUA
     # (#306) arrives, this call site dispatches through the active editing
     # model instead of hardcoding Vim.
-    vim_state = VimModel.from_editor(old_mode, Editing.mode_state(state))
+    vim_state = VimModel.from_editor(old_mode, state.workspace.vim.mode_state)
     {new_mode, commands, new_vim_state} = VimModel.process_key(vim_state, key)
     {_, new_mode_state} = VimModel.to_editor(new_vim_state)
 
@@ -69,8 +68,8 @@ defmodule Minga.Editor.KeyDispatch do
 
     # Fire mode change hook and break undo coalescing.
     if old_mode != new_mode do
-      if base_state.buffers.active,
-        do: BufferServer.break_undo_coalescing(base_state.buffers.active)
+      if base_state.workspace.buffers.active,
+        do: BufferServer.break_undo_coalescing(base_state.workspace.buffers.active)
 
       Minga.Events.broadcast(:mode_changed, %Minga.Events.ModeEvent{old: old_mode, new: new_mode})
     end
@@ -83,10 +82,15 @@ defmodule Minga.Editor.KeyDispatch do
     # Clean up mode_state if we've transitioned back to Normal.
     # Skip if a command changed the mode (e.g. substitute confirm, search).
     result =
-      if new_mode == :normal and old_mode != :normal and Editing.mode(after_commands) == :normal do
-        case Editing.mode_state(after_commands) do
-          %Mode.State{} -> after_commands
-          _ -> Editing.update_mode_state(after_commands, fn _ -> Mode.initial_state() end)
+      if new_mode == :normal and old_mode != :normal and after_commands.workspace.vim.mode == :normal do
+        case after_commands.workspace.vim.mode_state do
+          %Mode.State{} ->
+            after_commands
+
+          _ ->
+            EditorState.update_workspace(after_commands, fn ws ->
+              %{ws | vim: %{ws.vim | mode_state: Mode.initial_state()}}
+            end)
         end
       else
         after_commands
@@ -94,7 +98,7 @@ defmodule Minga.Editor.KeyDispatch do
 
     # When leaving :tool_confirm, check if more tools were queued during
     # the session and re-enter :tool_confirm to prompt for them.
-    if old_mode == :tool_confirm and Editing.mode(result) == :normal and
+    if old_mode == :tool_confirm and result.workspace.vim.mode == :normal and
          result.tool_prompt_queue != [] do
       ms = %Minga.Mode.ToolConfirmState{
         pending: result.tool_prompt_queue,
@@ -112,7 +116,7 @@ defmodule Minga.Editor.KeyDispatch do
   """
   @spec dispatch_command(EditorState.t(), Mode.command()) :: EditorState.t()
   def dispatch_command(state, cmd) do
-    old_buffer = state.buffers.active
+    old_buffer = state.workspace.buffers.active
     cmd_name = command_name(cmd)
 
     execute = fn s ->
@@ -136,7 +140,7 @@ defmodule Minga.Editor.KeyDispatch do
   defp command_name(_cmd), do: :unknown
 
   # Checks whether the buffer in the active window is read-only.
-  # Prefers the active window's buffer over state.buffers.active, since popup
+  # Prefers the active window's buffer over state.workspace.buffers.active, since popup
   # windows may display a different buffer than the one tracked in the
   # buffers struct.
   @spec active_buffer_read_only?(EditorState.t()) :: boolean()
@@ -151,11 +155,11 @@ defmodule Minga.Editor.KeyDispatch do
   end
 
   @spec check_window_buffer_read_only(EditorState.t()) :: boolean()
-  defp check_window_buffer_read_only(%{windows: %{map: map, active: active_id}} = state) do
+  defp check_window_buffer_read_only(%EditorState{workspace: %{windows: %{map: map, active: active_id}}} = state) do
     buf =
       case Map.fetch(map, active_id) do
         {:ok, window} -> window.buffer
-        :error -> state.buffers.active
+        :error -> state.workspace.buffers.active
       end
 
     buf != nil and BufferServer.read_only?(buf)
@@ -209,9 +213,9 @@ defmodule Minga.Editor.KeyDispatch do
   defp set_mode_filetype(mode_state, _state), do: mode_state
 
   @spec active_filetype(EditorState.t()) :: atom()
-  defp active_filetype(%{buffers: %{active: nil}}), do: :text
+  defp active_filetype(%EditorState{workspace: %{buffers: %{active: nil}}}), do: :text
 
-  defp active_filetype(%{buffers: %{active: buf}}) do
+  defp active_filetype(%EditorState{workspace: %{buffers: %{active: buf}}}) do
     BufferServer.filetype(buf)
   catch
     :exit, _ -> :text

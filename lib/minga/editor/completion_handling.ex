@@ -28,9 +28,9 @@ defmodule Minga.Editor.CompletionHandling do
   item doesn't already have documentation and the server supports resolve.
   """
   @spec maybe_resolve_selected(EditorState.t()) :: EditorState.t()
-  def maybe_resolve_selected(%{completion: nil} = state), do: state
+  def maybe_resolve_selected(%EditorState{workspace: %{completion: nil}} = state), do: state
 
-  def maybe_resolve_selected(%{completion: completion} = state) do
+  def maybe_resolve_selected(%EditorState{workspace: %{completion: completion}} = state) do
     item = Completion.selected_item(completion)
     selected_idx = completion.selected
 
@@ -48,7 +48,7 @@ defmodule Minga.Editor.CompletionHandling do
         Process.send_after(self(), {:completion_resolve, selected_idx}, @resolve_debounce_ms)
 
       completion = %{completion | resolve_timer: timer}
-      %{state | completion: completion}
+      %{state | workspace: %{state.workspace | completion: completion}}
     end
   end
 
@@ -58,9 +58,9 @@ defmodule Minga.Editor.CompletionHandling do
   Called from Editor.handle_info({:completion_resolve, index}).
   """
   @spec flush_resolve(EditorState.t(), non_neg_integer()) :: EditorState.t()
-  def flush_resolve(%{completion: nil} = state, _index), do: state
+  def flush_resolve(%EditorState{workspace: %{completion: nil}} = state, _index), do: state
 
-  def flush_resolve(%{completion: completion, buffers: %{active: buf}} = state, index) do
+  def flush_resolve(%EditorState{workspace: %{completion: completion, buffers: %{active: buf}}} = state, index) do
     item = Enum.at(completion.filtered, index)
 
     if item == nil or item.raw == nil do
@@ -72,7 +72,7 @@ defmodule Minga.Editor.CompletionHandling do
 
         client ->
           ref = Client.request(client, "completionItem/resolve", item.raw)
-          put_in(state.lsp_pending, Map.put(state.lsp_pending, ref, :completion_resolve))
+          put_in(state.workspace.lsp_pending, Map.put(state.workspace.lsp_pending, ref, :completion_resolve))
       end
     end
   end
@@ -85,15 +85,15 @@ defmodule Minga.Editor.CompletionHandling do
   """
   @spec handle_resolve_response(EditorState.t(), {:ok, term()} | {:error, term()}) ::
           EditorState.t()
-  def handle_resolve_response(%{completion: nil} = state, _result), do: state
+  def handle_resolve_response(%EditorState{workspace: %{completion: nil}} = state, _result), do: state
 
   def handle_resolve_response(state, {:error, _error}), do: state
 
-  def handle_resolve_response(%{completion: completion} = state, {:ok, resolved}) do
+  def handle_resolve_response(%EditorState{workspace: %{completion: completion}} = state, {:ok, resolved}) do
     doc_text = extract_resolve_documentation(resolved)
     completion = Completion.update_selected_documentation(completion, doc_text)
     completion = %{completion | last_resolved_index: completion.selected}
-    %{state | completion: completion}
+    %{state | workspace: %{state.workspace | completion: completion}}
   end
 
   @doc """
@@ -123,10 +123,10 @@ defmodule Minga.Editor.CompletionHandling do
   insert, dismisses completion. Otherwise updates the filter prefix
   and possibly triggers new completion.
   """
-  @spec maybe_handle(EditorState.t(), boolean(), non_neg_integer(), non_neg_integer()) ::
+  @spec maybe_handle(EditorState.t(), atom(), non_neg_integer(), non_neg_integer()) ::
           EditorState.t()
-  def maybe_handle(state, was_inserting, codepoint, modifiers) do
-    if Minga.Editor.Editing.inserting?(state) and was_inserting do
+  def maybe_handle(state, old_mode, codepoint, modifiers) do
+    if state.workspace.vim.mode == :insert and old_mode == :insert do
       maybe_update(state, codepoint, modifiers)
     else
       state = dismiss(state)
@@ -141,18 +141,18 @@ defmodule Minga.Editor.CompletionHandling do
   @spec dismiss(EditorState.t()) :: EditorState.t()
   def dismiss(state) do
     # Cancel any pending resolve timer to avoid stale messages
-    if state.completion && state.completion.resolve_timer do
-      Process.cancel_timer(state.completion.resolve_timer)
+    if state.workspace.completion && state.workspace.completion.resolve_timer do
+      Process.cancel_timer(state.workspace.completion.resolve_timer)
     end
 
-    new_bridge = CompletionTrigger.dismiss(state.completion_trigger)
-    %{state | completion: nil, completion_trigger: new_bridge}
+    new_bridge = CompletionTrigger.dismiss(state.workspace.completion_trigger)
+    %{state | workspace: %{state.workspace | completion: nil, completion_trigger: new_bridge}}
   end
 
   # ── Private helpers ────────────────────────────────────────────────────────
 
   @spec accept_text(EditorState.t(), Completion.t(), String.t()) :: EditorState.t()
-  defp accept_text(%{buffers: %{active: buf}} = state, completion, text)
+  defp accept_text(%EditorState{workspace: %{buffers: %{active: buf}}} = state, completion, text)
        when is_pid(buf) do
     {trigger_line, trigger_col} = completion.trigger_position
     {_content, {cursor_line, cursor_col}} = BufferServer.content_and_cursor(buf)
@@ -170,7 +170,7 @@ defmodule Minga.Editor.CompletionHandling do
   defp accept_text(state, _completion, _text), do: state
 
   @spec apply_text_edit(EditorState.t(), Completion.text_edit()) :: EditorState.t()
-  defp apply_text_edit(%{buffers: %{active: buf}} = state, edit) when is_pid(buf) do
+  defp apply_text_edit(%EditorState{workspace: %{buffers: %{active: buf}}} = state, edit) when is_pid(buf) do
     BufferServer.apply_text_edit(
       buf,
       edit.range.start_line,
@@ -188,7 +188,7 @@ defmodule Minga.Editor.CompletionHandling do
 
   @spec maybe_update(EditorState.t(), non_neg_integer(), non_neg_integer()) :: EditorState.t()
   defp maybe_update(state, codepoint, _mods) do
-    buf = state.buffers.active
+    buf = state.workspace.buffers.active
     if buf == nil, do: state, else: do_update(state, buf, codepoint)
   end
 
@@ -209,9 +209,9 @@ defmodule Minga.Editor.CompletionHandling do
   end
 
   @spec update_filter(EditorState.t(), pid()) :: EditorState.t()
-  defp update_filter(%{completion: nil} = state, _buf), do: state
+  defp update_filter(%EditorState{workspace: %{completion: nil}} = state, _buf), do: state
 
-  defp update_filter(%{completion: %Completion{} = completion} = state, buf) do
+  defp update_filter(%EditorState{workspace: %{completion: %Completion{} = completion}} = state, buf) do
     prefix = completion_prefix(buf, completion.trigger_position)
     apply_filter(state, completion, prefix)
   end
@@ -224,7 +224,7 @@ defmodule Minga.Editor.CompletionHandling do
     filtered = Completion.filter(completion, prefix)
 
     if Completion.active?(filtered) do
-      %{state | completion: filtered}
+      %{state | workspace: %{state.workspace | completion: filtered}}
     else
       dismiss(state)
     end
@@ -238,9 +238,9 @@ defmodule Minga.Editor.CompletionHandling do
 
       char ->
         {new_bridge, _comp} =
-          CompletionTrigger.maybe_trigger(state.completion_trigger, char, buf)
+          CompletionTrigger.maybe_trigger(state.workspace.completion_trigger, char, buf)
 
-        %{state | completion_trigger: new_bridge}
+        %{state | workspace: %{state.workspace | completion_trigger: new_bridge}}
     end
   end
 
@@ -461,15 +461,15 @@ defmodule Minga.Editor.CompletionHandling do
   `Completion` struct if items were returned, and renders.
   """
   @spec handle_response(EditorState.t(), reference(), term()) :: EditorState.t()
-  def handle_response(%{buffers: %{active: nil}} = state, _ref, _result), do: state
+  def handle_response(%EditorState{workspace: %{buffers: %{active: nil}}} = state, _ref, _result), do: state
 
   def handle_response(state, ref, result) do
-    buffer_pid = state.buffers.active
+    buffer_pid = state.workspace.buffers.active
 
     {new_bridge, completion} =
-      CompletionTrigger.handle_response(state.completion_trigger, ref, result, buffer_pid)
+      CompletionTrigger.handle_response(state.workspace.completion_trigger, ref, result, buffer_pid)
 
-    new_state = %{state | completion_trigger: new_bridge}
+    new_state = %{state | workspace: %{state.workspace | completion_trigger: new_bridge}}
 
     case completion do
       nil ->
@@ -492,13 +492,13 @@ defmodule Minga.Editor.CompletionHandling do
   defp merge_completion_items(state, [], _trigger_pos), do: state
 
   defp merge_completion_items(state, new_items, trigger_pos) do
-    case state.completion do
+    case state.workspace.completion do
       nil ->
         # No existing completion; create a new one from the merged items
         completion = Completion.new(new_items, trigger_pos)
-        prefix = CompletionTrigger.get_typed_since_trigger(state.buffers.active, trigger_pos)
+        prefix = CompletionTrigger.get_typed_since_trigger(state.workspace.buffers.active, trigger_pos)
         completion = Completion.filter(completion, prefix)
-        %{state | completion: completion}
+        %{state | workspace: %{state.workspace | completion: completion}}
 
       %Completion{} = existing ->
         # Merge into existing completion
@@ -507,12 +507,12 @@ defmodule Minga.Editor.CompletionHandling do
 
         prefix =
           CompletionTrigger.get_typed_since_trigger(
-            state.buffers.active,
+            state.workspace.buffers.active,
             existing.trigger_position
           )
 
         completion = Completion.filter(completion, prefix)
-        %{state | completion: completion}
+        %{state | workspace: %{state.workspace | completion: completion}}
     end
   end
 
@@ -603,7 +603,7 @@ defmodule Minga.Editor.CompletionHandling do
           }
 
           ref = Client.request(client, "textDocument/signatureHelp", params)
-          put_in(state.lsp_pending, Map.put(state.lsp_pending, ref, :signature_help))
+          put_in(state.workspace.lsp_pending, Map.put(state.workspace.lsp_pending, ref, :signature_help))
         else
           state
         end
@@ -613,16 +613,16 @@ defmodule Minga.Editor.CompletionHandling do
   @spec approximate_cursor_screen_pos(EditorState.t()) ::
           {non_neg_integer(), non_neg_integer()}
   defp approximate_cursor_screen_pos(state) do
-    buf = state.buffers.active
+    buf = state.workspace.buffers.active
 
     if buf do
       {line, col} = BufferServer.cursor(buf)
-      vp = state.viewport
+      vp = state.workspace.viewport
       screen_row = max(line - vp.top + 1, 1)
       screen_col = min(col + 4, vp.cols - 1)
       {screen_row, screen_col}
     else
-      {div(state.viewport.rows, 2), div(state.viewport.cols, 2)}
+      {div(state.workspace.viewport.rows, 2), div(state.workspace.viewport.cols, 2)}
     end
   end
 

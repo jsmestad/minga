@@ -2,17 +2,23 @@ defmodule Minga.Editor.LspActions.CodeActionTest do
   use ExUnit.Case, async: true
 
   alias Minga.Editor.LspActions
+  alias Minga.Editor.State.Buffers
+  alias Minga.Editor.State.Picker
+  alias Minga.Editor.State.WhichKey
+  alias Minga.Editor.Viewport
+  alias Minga.Editor.VimState
+  alias Minga.Test.StateFactory
 
   defp stub_state do
-    %{
+    StateFactory.build(
       status_msg: nil,
-      buffers: %Minga.Editor.State.Buffers{},
-      picker_ui: %Minga.Editor.State.Picker{},
-      whichkey: %Minga.Editor.State.WhichKey{},
-      vim: %{mode: :normal, last_jump_pos: nil},
+      picker_ui: %Picker{},
+      whichkey: %WhichKey{},
       theme: Minga.Theme.get!(:doom_one),
-      viewport: %Minga.Editor.Viewport{rows: 40, cols: 120, top: 0, left: 0}
-    }
+      buffers: %Buffers{},
+      vim: %{VimState.new() | last_jump_pos: nil},
+      viewport: %Viewport{rows: 40, cols: 120, top: 0, left: 0}
+    )
   end
 
   describe "handle_code_action_response/2" do

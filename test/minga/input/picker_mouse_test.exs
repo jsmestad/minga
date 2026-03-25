@@ -28,8 +28,10 @@ defmodule Minga.Input.PickerMouseTest do
 
     %EditorState{
       port_manager: nil,
-      vim: VimState.new(),
-      viewport: %Viewport{rows: 30, cols: 80, top: 0, left: 0},
+      workspace: %Minga.Workspace.State{
+        viewport: %Viewport{rows: 30, cols: 80, top: 0, left: 0},
+        vim: VimState.new()
+      },
       picker_ui: %Minga.Editor.State.Picker{picker: picker, source: TestSource}
     }
   end
@@ -83,8 +85,10 @@ defmodule Minga.Input.PickerMouseTest do
 
       %EditorState{
         port_manager: nil,
-        vim: VimState.new(),
-        viewport: %Viewport{rows: 24, cols: 80, top: 0, left: 0},
+        workspace: %Minga.Workspace.State{
+          viewport: %Viewport{rows: 24, cols: 80, top: 0, left: 0},
+          vim: VimState.new()
+        },
         picker_ui: %Minga.Editor.State.Picker{
           picker: picker,
           source: TestSource,
@@ -133,8 +137,10 @@ defmodule Minga.Input.PickerMouseTest do
     test "passes through when no picker is active" do
       state = %EditorState{
         port_manager: nil,
-        vim: VimState.new(),
-        viewport: %Viewport{rows: 30, cols: 80, top: 0, left: 0}
+        workspace: %Minga.Workspace.State{
+          viewport: %Viewport{rows: 30, cols: 80, top: 0, left: 0},
+          vim: VimState.new()
+        }
       }
 
       {:passthrough, ^state} = PickerInput.handle_mouse(state, 10, 10, :left, 0, :press, 1)

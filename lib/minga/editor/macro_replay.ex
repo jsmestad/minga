@@ -7,7 +7,6 @@ defmodule Minga.Editor.MacroReplay do
   key dispatch.
   """
 
-  alias Minga.Editor.Editing
   alias Minga.Editor.MacroRecorder
   alias Minga.Editor.State, as: EditorState
   alias Minga.Mode
@@ -25,21 +24,18 @@ defmodule Minga.Editor.MacroReplay do
           {non_neg_integer(), non_neg_integer()},
           [Mode.command()]
         ) :: state()
-  def maybe_record_key(state, key, commands) do
-    rec = Editing.macro_recorder(state)
-    do_maybe_record_key(state, rec, key, commands)
-  end
+  def maybe_record_key(%EditorState{workspace: %{vim: %{macro_recorder: %{replaying: true}}}} = state, _key, _cmds),
+    do: state
 
-  @spec do_maybe_record_key(state(), MacroRecorder.t(), term(), [Mode.command()]) :: state()
-  defp do_maybe_record_key(state, %{replaying: true}, _key, _commands), do: state
-
-  defp do_maybe_record_key(state, rec, key, commands) do
+  def maybe_record_key(%EditorState{workspace: %{vim: %{macro_recorder: rec}}} = state, key, commands) do
     case MacroRecorder.recording?(rec) do
       {true, _reg} ->
-        if Enum.any?(commands, &match?(:toggle_macro_recording, &1)) do
+        has_stop? = Enum.any?(commands, &match?(:toggle_macro_recording, &1))
+
+        if has_stop? do
           state
         else
-          Editing.set_macro_recorder(state, MacroRecorder.record_key(rec, key))
+          %{state | workspace: %{state.workspace | vim: %{state.workspace.vim | macro_recorder: MacroRecorder.record_key(rec, key)}}}
         end
 
       false ->
@@ -54,24 +50,22 @@ defmodule Minga.Editor.MacroReplay do
   with recording suppressed to avoid overwriting the macro.
   """
   @spec replay(state(), String.t()) :: state()
-  def replay(state, register) do
-    rec = Editing.macro_recorder(state)
-
+  def replay(%EditorState{workspace: %{vim: %{macro_recorder: rec}}} = state, register) do
     case MacroRecorder.get_macro(rec, register) do
       nil ->
         state
 
       keys ->
         rec = MacroRecorder.start_replay(rec)
-        state = Editing.set_macro_recorder(state, rec)
+        state = %{state | workspace: %{state.workspace | vim: %{state.workspace.vim | macro_recorder: rec}}}
 
         state =
           Enum.reduce(keys, state, fn {codepoint, modifiers}, acc ->
             Minga.Editor.do_handle_key(acc, codepoint, modifiers)
           end)
 
-        rec = MacroRecorder.stop_replay(Editing.macro_recorder(state))
-        Editing.set_macro_recorder(state, rec)
+        rec = MacroRecorder.stop_replay(state.workspace.vim.macro_recorder)
+        %{state | workspace: %{state.workspace | vim: %{state.workspace.vim | macro_recorder: rec}}}
     end
   end
 end

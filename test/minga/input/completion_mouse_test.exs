@@ -15,9 +15,11 @@ defmodule Minga.Input.CompletionMouseTest do
 
     %EditorState{
       port_manager: nil,
-      vim: %VimState{mode: :insert, mode_state: Mode.initial_state()},
-      viewport: %Viewport{rows: 30, cols: 80, top: 0, left: 0},
-      completion: completion
+      workspace: %Minga.Workspace.State{
+        viewport: %Viewport{rows: 30, cols: 80, top: 0, left: 0},
+        vim: %VimState{mode: :insert, mode_state: Mode.initial_state()},
+        completion: completion
+      }
     }
   end
 
@@ -36,14 +38,14 @@ defmodule Minga.Input.CompletionMouseTest do
       {:handled, new_state} =
         CompletionInput.handle_mouse(state, 10, 10, :wheel_down, 0, :press, 1)
 
-      assert new_state.completion.selected == 1
+      assert new_state.workspace.completion.selected == 1
     end
 
     test "wheel_up moves completion selection up" do
       state = completion_state(sample_items())
       {:handled, state} = CompletionInput.handle_mouse(state, 10, 10, :wheel_down, 0, :press, 1)
       {:handled, new_state} = CompletionInput.handle_mouse(state, 10, 10, :wheel_up, 0, :press, 1)
-      assert new_state.completion.selected == 0
+      assert new_state.workspace.completion.selected == 0
     end
   end
 
@@ -51,9 +53,11 @@ defmodule Minga.Input.CompletionMouseTest do
     test "passes through when no completion is active" do
       state = %EditorState{
         port_manager: nil,
-        vim: %VimState{mode: :normal, mode_state: Mode.initial_state()},
-        viewport: %Viewport{rows: 30, cols: 80, top: 0, left: 0},
-        completion: nil
+        workspace: %Minga.Workspace.State{
+          viewport: %Viewport{rows: 30, cols: 80, top: 0, left: 0},
+          vim: %VimState{mode: :normal, mode_state: Mode.initial_state()},
+          completion: nil
+        }
       }
 
       {:passthrough, ^state} = CompletionInput.handle_mouse(state, 10, 10, :left, 0, :press, 1)
@@ -61,7 +65,7 @@ defmodule Minga.Input.CompletionMouseTest do
 
     test "passes through when in normal mode even with completion" do
       state = completion_state(sample_items())
-      state = %{state | vim: %{state.vim | mode: :normal}}
+      state = %{state | workspace: %{state.workspace | vim: %{state.workspace.vim | mode: :normal}}}
       {:passthrough, ^state} = CompletionInput.handle_mouse(state, 10, 10, :left, 0, :press, 1)
     end
   end

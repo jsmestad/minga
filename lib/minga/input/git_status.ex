@@ -21,7 +21,7 @@ defmodule Minga.Input.GitStatus do
   @impl true
   @spec handle_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           {:handled, EditorState.t()} | {:passthrough, EditorState.t()}
-  def handle_key(%{keymap_scope: :git_status} = state, cp, mods) do
+  def handle_key(%EditorState{workspace: %{keymap_scope: :git_status}} = state, cp, mods) do
     if Input.key_sequence_pending?(state) do
       # Multi-key sequence in progress; delegate to mode FSM
       {:passthrough, state}
@@ -138,7 +138,7 @@ defmodule Minga.Input.GitStatus do
   defp execute_command(state, :git_status_open_file) do
     with_selected_file(state, fn entry, git_root ->
       abs_path = Path.join(git_root, entry.path)
-      closed_state = %{state | keymap_scope: :editor, git_status_panel: nil}
+      closed_state = %{state | workspace: %{state.workspace | keymap_scope: :editor}, git_status_panel: nil}
       open_file_in_editor(closed_state, abs_path)
     end)
   end
@@ -148,7 +148,7 @@ defmodule Minga.Input.GitStatus do
   end
 
   defp execute_command(state, :git_status_close) do
-    %{state | keymap_scope: :editor, git_status_panel: nil}
+    %{state | workspace: %{state.workspace | keymap_scope: :editor}, git_status_panel: nil}
   end
 
   defp execute_command(state, _cmd), do: state
@@ -158,7 +158,7 @@ defmodule Minga.Input.GitStatus do
   @spec open_file_in_editor(EditorState.t(), String.t()) :: EditorState.t()
   defp open_file_in_editor(state, abs_path) do
     idx =
-      Enum.find_index(state.buffers.list, fn buf ->
+      Enum.find_index(state.workspace.buffers.list, fn buf ->
         try do
           BufferServer.file_path(buf) == abs_path
         catch

@@ -103,7 +103,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
 
     decorations =
       if is_active do
-        merge_document_highlight_decorations(decorations, state.document_highlights, state.theme)
+        merge_document_highlight_decorations(decorations, state.workspace.document_highlights, state.theme)
       else
         decorations
       end
@@ -822,7 +822,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
   @spec window_highlight(state(), Window.t()) :: Minga.Highlight.t() | nil
   def window_highlight(state, window) do
     hl =
-      Map.get(state.highlight.highlights, window.buffer, Minga.Highlight.from_theme(state.theme))
+      Map.get(state.workspace.highlight.highlights, window.buffer, Minga.Highlight.from_theme(state.theme))
 
     if hl.capture_names == {} do
       nil
@@ -896,7 +896,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
 
   @doc "Computes raw visual selection bounds (byte columns)."
   @spec visual_selection_bounds(state(), Document.position()) :: visual_selection()
-  def visual_selection_bounds(%{vim: %{mode: :visual, mode_state: %VisualState{} = ms}}, cursor) do
+  def visual_selection_bounds(%EditorState{workspace: %{vim: %{mode: :visual, mode_state: %VisualState{} = ms}}}, cursor) do
     anchor = ms.visual_anchor
     visual_type = ms.visual_type
 

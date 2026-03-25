@@ -3,8 +3,10 @@ defmodule Minga.Picker.LanguageSourceTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Editor.State.Buffers
   alias Minga.Picker.Item
   alias Minga.Picker.LanguageSource
+  alias Minga.Test.StateFactory
 
   describe "title/0" do
     test "returns Set language" do
@@ -60,7 +62,7 @@ defmodule Minga.Picker.LanguageSourceTest do
   describe "on_select/2" do
     test "changes the buffer filetype" do
       state = state_with_buffer("hello world", :text)
-      buf = state.buffers.active
+      buf = state.workspace.buffers.active
       assert BufferServer.filetype(buf) == :text
 
       item = %Item{id: :python, label: "Python"}
@@ -75,7 +77,7 @@ defmodule Minga.Picker.LanguageSourceTest do
 
     test "changes the buffer filetype via shared function" do
       state = state_with_buffer("hello", :text)
-      buf = state.buffers.active
+      buf = state.workspace.buffers.active
       assert BufferServer.filetype(buf) == :text
 
       new_state = BufferManagement.apply_filetype_change(state, :python)
@@ -84,7 +86,7 @@ defmodule Minga.Picker.LanguageSourceTest do
     end
 
     test "returns error message when no active buffer" do
-      state = %{buffers: %{active: nil}, status_msg: nil}
+      state = StateFactory.build(buffers: %Buffers{active: nil}, status_msg: nil)
       new_state = BufferManagement.apply_filetype_change(state, :python)
       assert new_state.status_msg =~ "No active buffer"
     end
@@ -95,9 +97,9 @@ defmodule Minga.Picker.LanguageSourceTest do
   defp state_with_buffer(content, filetype) do
     {:ok, buf} = BufferServer.start_link(content: content, filetype: filetype)
 
-    %{
-      buffers: %{active: buf, list: [buf], active_index: 0},
+    StateFactory.build(
+      buffers: %Buffers{active: buf, list: [buf], active_index: 0},
       status_msg: nil
-    }
+    )
   end
 end

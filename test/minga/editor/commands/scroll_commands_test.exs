@@ -34,7 +34,7 @@ defmodule Minga.Editor.Commands.ScrollCommandsTest do
 
   defp active_window(editor) do
     s = state(editor)
-    Map.get(s.windows.map, s.windows.active)
+    Map.get(s.workspace.windows.map, s.workspace.windows.active)
   end
 
   @ctrl 0x02

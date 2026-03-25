@@ -57,7 +57,7 @@ defmodule Minga.Picker.GitChangedSource do
         end
 
       idx ->
-        pid = Enum.at(state.buffers.list, idx)
+        pid = Enum.at(state.workspace.buffers.list, idx)
         tab = EditorState.find_tab_by_buffer(state, pid)
 
         if tab do

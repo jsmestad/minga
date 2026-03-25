@@ -4,13 +4,15 @@ defmodule Minga.Editor.Commands.BufferManagement.FrontendTest do
   alias Minga.Editor.BottomPanel
   alias Minga.Editor.Commands.BufferManagement.GUI, as: BufGUI
   alias Minga.Editor.Commands.BufferManagement.TUI, as: BufTUI
+  alias Minga.Editor.State.Buffers
+  alias Minga.Test.StateFactory
 
   defp base_state(opts \\ []) do
-    %{
+    StateFactory.build(
       bottom_panel: %BottomPanel{},
-      buffers: %{messages: Keyword.get(opts, :messages)},
+      buffers: %Buffers{messages: Keyword.get(opts, :messages)},
       status_msg: nil
-    }
+    )
   end
 
   describe "GUI.view_messages/1" do

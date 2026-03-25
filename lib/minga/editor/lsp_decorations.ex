@@ -12,9 +12,10 @@ defmodule Minga.Editor.LspDecorations do
   """
 
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Editor.State, as: EditorState
   alias Minga.Face
 
-  @type state :: Minga.Editor.State.t()
+  @type state :: EditorState.t()
 
   @doc """
   Applies code lens decorations to the active buffer.
@@ -23,10 +24,10 @@ defmodule Minga.Editor.LspDecorations do
   current lenses as `:above` virtual text.
   """
   @spec apply_code_lenses(state()) :: state()
-  def apply_code_lenses(%{buffers: %{active: nil}} = state), do: state
+  def apply_code_lenses(%EditorState{workspace: %{buffers: %{active: nil}}} = state), do: state
   def apply_code_lenses(%{code_lenses: []} = state), do: state
 
-  def apply_code_lenses(%{buffers: %{active: buf}, code_lenses: lenses} = state) do
+  def apply_code_lenses(%EditorState{workspace: %{buffers: %{active: buf}}, code_lenses: lenses} = state) do
     # Remove old code lens decorations
     BufferServer.remove_highlight_group(buf, :code_lens)
 
@@ -52,10 +53,10 @@ defmodule Minga.Editor.LspDecorations do
   current hints as `:inline` virtual text at their positions.
   """
   @spec apply_inlay_hints(state()) :: state()
-  def apply_inlay_hints(%{buffers: %{active: nil}} = state), do: state
+  def apply_inlay_hints(%EditorState{workspace: %{buffers: %{active: nil}}} = state), do: state
   def apply_inlay_hints(%{inlay_hints: []} = state), do: state
 
-  def apply_inlay_hints(%{buffers: %{active: buf}, inlay_hints: hints} = state) do
+  def apply_inlay_hints(%EditorState{workspace: %{buffers: %{active: buf}}, inlay_hints: hints} = state) do
     # Remove old inlay hint decorations
     BufferServer.remove_highlight_group(buf, :inlay_hint)
 

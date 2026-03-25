@@ -43,14 +43,16 @@ defmodule Minga.Popup.LifecycleTest do
 
     state = %EditorState{
       port_manager: nil,
-      viewport: %Viewport{rows: 24, cols: 80, top: 0, left: 0},
-      vim: VimState.new(),
-      buffers: %Buffers{active: main_buf, list: [main_buf]},
-      windows: %Windows{
-        tree: WindowTree.new(1),
-        map: %{1 => main_window},
-        active: 1,
-        next_id: 2
+      workspace: %Minga.Workspace.State{
+        viewport: %Viewport{rows: 24, cols: 80, top: 0, left: 0},
+        vim: VimState.new(),
+        buffers: %Buffers{active: main_buf, list: [main_buf]},
+        windows: %Windows{
+          tree: WindowTree.new(1),
+          map: %{1 => main_window},
+          active: 1,
+          next_id: 2
+        }
       }
     }
 
@@ -80,18 +82,18 @@ defmodule Minga.Popup.LifecycleTest do
       assert {:ok, new_state} = Lifecycle.open_popup(state, "*Warnings*", popup_buf, registry: t)
 
       # A new window should exist
-      assert map_size(new_state.windows.map) == 2
-      assert new_state.windows.next_id == 3
+      assert map_size(new_state.workspace.windows.map) == 2
+      assert new_state.workspace.windows.next_id == 3
 
       # The new window should have popup metadata
-      popup_window = Map.get(new_state.windows.map, 2)
+      popup_window = Map.get(new_state.workspace.windows.map, 2)
       assert popup_window != nil
       assert Window.popup?(popup_window)
       assert popup_window.popup_meta.rule.side == :bottom
       assert popup_window.popup_meta.previous_active == 1
 
       # The tree should be a horizontal split
-      assert {:split, :horizontal, _, _, _} = new_state.windows.tree
+      assert {:split, :horizontal, _, _, _} = new_state.workspace.windows.tree
     end
 
     test "creates a right split popup", %{state: state, popup_buf: popup_buf, table: t} do
@@ -99,7 +101,7 @@ defmodule Minga.Popup.LifecycleTest do
 
       assert {:ok, new_state} = Lifecycle.open_popup(state, "*Warnings*", popup_buf, registry: t)
 
-      assert {:split, :vertical, _, _, _} = new_state.windows.tree
+      assert {:split, :vertical, _, _, _} = new_state.workspace.windows.tree
     end
 
     test "focuses the popup when rule.focus is true", %{
@@ -110,7 +112,7 @@ defmodule Minga.Popup.LifecycleTest do
       PopupRegistry.register(Rule.new("*Warnings*", focus: true), t)
 
       assert {:ok, new_state} = Lifecycle.open_popup(state, "*Warnings*", popup_buf, registry: t)
-      assert new_state.windows.active == 2
+      assert new_state.workspace.windows.active == 2
     end
 
     test "keeps focus on original window when rule.focus is false", %{
@@ -121,7 +123,7 @@ defmodule Minga.Popup.LifecycleTest do
       PopupRegistry.register(Rule.new("*Warnings*", focus: false), t)
 
       assert {:ok, new_state} = Lifecycle.open_popup(state, "*Warnings*", popup_buf, registry: t)
-      assert new_state.windows.active == 1
+      assert new_state.workspace.windows.active == 1
     end
 
     test "invalidates layout cache after opening", %{state: state, popup_buf: popup_buf, table: t} do
@@ -145,12 +147,12 @@ defmodule Minga.Popup.LifecycleTest do
       restored = Lifecycle.close_popup(with_popup, 2)
 
       # Tree should be back to a single leaf
-      assert {:leaf, 1} = restored.windows.tree
+      assert {:leaf, 1} = restored.workspace.windows.tree
 
       # Popup window should be removed from the map
-      assert map_size(restored.windows.map) == 1
-      assert Map.has_key?(restored.windows.map, 1)
-      refute Map.has_key?(restored.windows.map, 2)
+      assert map_size(restored.workspace.windows.map) == 1
+      assert Map.has_key?(restored.workspace.windows.map, 1)
+      refute Map.has_key?(restored.workspace.windows.map, 2)
     end
 
     test "restores focus to the previously active window", %{
@@ -162,21 +164,21 @@ defmodule Minga.Popup.LifecycleTest do
       {:ok, with_popup} = Lifecycle.open_popup(state, "*Warnings*", popup_buf, registry: t)
 
       # Focus is on the popup
-      assert with_popup.windows.active == 2
+      assert with_popup.workspace.windows.active == 2
 
       # Close restores focus to window 1
       restored = Lifecycle.close_popup(with_popup, 2)
-      assert restored.windows.active == 1
+      assert restored.workspace.windows.active == 1
     end
 
     test "is a no-op for non-popup windows", %{state: state, table: _t} do
       result = Lifecycle.close_popup(state, 1)
-      assert result.windows.tree == state.windows.tree
+      assert result.workspace.windows.tree == state.workspace.windows.tree
     end
 
     test "is a no-op for nonexistent window ids", %{state: state, table: _t} do
       result = Lifecycle.close_popup(state, 999)
-      assert result.windows.tree == state.windows.tree
+      assert result.workspace.windows.tree == state.workspace.windows.tree
     end
 
     test "invalidates layout cache after closing", %{state: state, popup_buf: popup_buf, table: t} do
@@ -197,16 +199,16 @@ defmodule Minga.Popup.LifecycleTest do
       PopupRegistry.register(Rule.new("*Warnings*", focus: true), t)
       {:ok, with_popup} = Lifecycle.open_popup(state, "*Warnings*", popup_buf, registry: t)
 
-      assert with_popup.windows.active == 2
+      assert with_popup.workspace.windows.active == 2
 
       restored = Lifecycle.close_active_popup(with_popup)
-      assert {:leaf, 1} = restored.windows.tree
-      assert restored.windows.active == 1
+      assert {:leaf, 1} = restored.workspace.windows.tree
+      assert restored.workspace.windows.active == 1
     end
 
     test "is a no-op when active window is not a popup", %{state: state, table: _t} do
       result = Lifecycle.close_active_popup(state)
-      assert result.windows.tree == state.windows.tree
+      assert result.workspace.windows.tree == state.workspace.windows.tree
     end
   end
 
@@ -229,18 +231,18 @@ defmodule Minga.Popup.LifecycleTest do
         Lifecycle.open_popup(with_messages, "*Warnings*", popup_buf2, registry: t)
 
       # Should have 3 windows: main + Messages + Warnings
-      assert map_size(with_both.windows.map) == 3
+      assert map_size(with_both.workspace.windows.map) == 3
 
       # Close Messages (the first-opened popup, window 2)
       after_close = Lifecycle.close_popup(with_both, 2)
 
       # Warnings popup (window 3) should still exist
-      assert map_size(after_close.windows.map) == 2
-      assert Map.has_key?(after_close.windows.map, 1), "main window missing"
-      assert Map.has_key?(after_close.windows.map, 3), "Warnings popup was clobbered"
+      assert map_size(after_close.workspace.windows.map) == 2
+      assert Map.has_key?(after_close.workspace.windows.map, 1), "main window missing"
+      assert Map.has_key?(after_close.workspace.windows.map, 3), "Warnings popup was clobbered"
 
       # Window 3 should still be in the tree
-      leaves = WindowTree.leaves(after_close.windows.tree)
+      leaves = WindowTree.leaves(after_close.workspace.windows.tree)
       assert 3 in leaves, "Warnings popup window not in tree"
     end
 
@@ -264,11 +266,11 @@ defmodule Minga.Popup.LifecycleTest do
       after_close = Lifecycle.close_popup(with_both, 3)
 
       # Messages popup (window 2) should still exist
-      assert map_size(after_close.windows.map) == 2
-      assert Map.has_key?(after_close.windows.map, 1), "main window missing"
-      assert Map.has_key?(after_close.windows.map, 2), "Messages popup was clobbered"
+      assert map_size(after_close.workspace.windows.map) == 2
+      assert Map.has_key?(after_close.workspace.windows.map, 1), "main window missing"
+      assert Map.has_key?(after_close.workspace.windows.map, 2), "Messages popup was clobbered"
 
-      leaves = WindowTree.leaves(after_close.windows.tree)
+      leaves = WindowTree.leaves(after_close.workspace.windows.tree)
       assert 2 in leaves, "Messages popup window not in tree"
     end
   end
@@ -279,16 +281,16 @@ defmodule Minga.Popup.LifecycleTest do
       {:ok, with_popup} = Lifecycle.open_popup(state, "*Warnings*", popup_buf, registry: t)
 
       # Verify popup exists
-      assert map_size(with_popup.windows.map) == 2
+      assert map_size(with_popup.workspace.windows.map) == 2
 
       restored = Lifecycle.close_all_popups(with_popup)
-      assert {:leaf, 1} = restored.windows.tree
-      assert map_size(restored.windows.map) == 1
+      assert {:leaf, 1} = restored.workspace.windows.tree
+      assert map_size(restored.workspace.windows.map) == 1
     end
 
     test "is a no-op when no popups are open", %{state: state, table: _t} do
       result = Lifecycle.close_all_popups(state)
-      assert result.windows.tree == state.windows.tree
+      assert result.workspace.windows.tree == state.workspace.windows.tree
     end
   end
 
@@ -319,10 +321,10 @@ defmodule Minga.Popup.LifecycleTest do
       {:ok, with_popup} = Lifecycle.open_popup(state, "*Help*", popup_buf, registry: t)
 
       # Window map has 2 entries (main + popup)
-      assert map_size(with_popup.windows.map) == 2
+      assert map_size(with_popup.workspace.windows.map) == 2
 
       # Tree still only has the original leaf (no split was created)
-      assert with_popup.windows.tree == WindowTree.new(1)
+      assert with_popup.workspace.windows.tree == WindowTree.new(1)
     end
 
     test "float popup focuses the new window when focus: true", %{
@@ -333,7 +335,7 @@ defmodule Minga.Popup.LifecycleTest do
       PopupRegistry.register(Rule.new("*Help*", display: :float, focus: true), t)
       {:ok, with_popup} = Lifecycle.open_popup(state, "*Help*", popup_buf, registry: t)
 
-      assert with_popup.windows.active == 2
+      assert with_popup.workspace.windows.active == 2
     end
 
     test "float popup does not steal focus when focus: false", %{
@@ -344,7 +346,7 @@ defmodule Minga.Popup.LifecycleTest do
       PopupRegistry.register(Rule.new("*Help*", display: :float, focus: false), t)
       {:ok, with_popup} = Lifecycle.open_popup(state, "*Help*", popup_buf, registry: t)
 
-      assert with_popup.windows.active == 1
+      assert with_popup.workspace.windows.active == 1
     end
 
     test "closing a float popup removes window and restores focus", %{
@@ -357,9 +359,9 @@ defmodule Minga.Popup.LifecycleTest do
 
       restored = Lifecycle.close_popup(with_popup, 2)
 
-      assert map_size(restored.windows.map) == 1
-      assert restored.windows.active == 1
-      assert restored.windows.tree == WindowTree.new(1)
+      assert map_size(restored.workspace.windows.map) == 1
+      assert restored.workspace.windows.active == 1
+      assert restored.workspace.windows.tree == WindowTree.new(1)
     end
 
     test "float popup has popup_meta with the rule", %{
@@ -370,7 +372,7 @@ defmodule Minga.Popup.LifecycleTest do
       PopupRegistry.register(Rule.new("*Help*", display: :float, border: :double), t)
       {:ok, with_popup} = Lifecycle.open_popup(state, "*Help*", popup_buf, registry: t)
 
-      popup_window = with_popup.windows.map[2]
+      popup_window = with_popup.workspace.windows.map[2]
       assert Window.popup?(popup_window)
       assert popup_window.popup_meta.rule.display == :float
       assert popup_window.popup_meta.rule.border == :double

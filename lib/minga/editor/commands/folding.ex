@@ -73,7 +73,7 @@ defmodule Minga.Editor.Commands.Folding do
   # ── Private ────────────────────────────────────────────────────────────────
 
   @spec update_active_window(state(), (Window.t() -> Window.t())) :: state()
-  defp update_active_window(%{windows: %{active: id}} = state, fun) when is_integer(id) do
+  defp update_active_window(%EditorState{workspace: %{windows: %{active: id}}} = state, fun) when is_integer(id) do
     EditorState.update_window(state, id, fun)
   end
 
@@ -148,7 +148,7 @@ defmodule Minga.Editor.Commands.Folding do
   end
 
   defp set_all_decoration_folds(state, direction) do
-    buf = state.buffers.active
+    buf = state.workspace.buffers.active
 
     BufferServer.batch_decorations(buf, fn decs ->
       Enum.reduce(decs.fold_regions, decs, fn fold, d ->

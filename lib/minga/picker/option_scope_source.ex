@@ -55,7 +55,7 @@ defmodule Minga.Picker.OptionScopeSource do
 
   @spec apply_scoped(:buffer | :global, atom(), term(), term()) :: term()
   defp apply_scoped(:buffer, name, value, state) do
-    buf = state.buffers.active
+    buf = state.workspace.buffers.active
 
     if is_pid(buf) do
       BufferServer.set_option(buf, name, value)

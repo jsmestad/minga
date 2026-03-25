@@ -75,13 +75,13 @@ defmodule Minga.Editor.FileWatcherHelpers do
 
     %{
       state
-      | pending_conflict: {buf, path},
+      | workspace: %{state.workspace | pending_conflict: {buf, path}},
         status_msg: "#{name} changed on disk. [r]eload / [k]eep"
     }
   end
 
   @spec find_buffer_for_path(state(), String.t()) :: pid() | nil
-  defp find_buffer_for_path(%{buffers: %{list: buffers}}, path) do
+  defp find_buffer_for_path(%EditorState{workspace: %{buffers: %{list: buffers}}}, path) do
     expanded = Path.expand(path)
 
     Enum.find(buffers, fn buf ->

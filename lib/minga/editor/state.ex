@@ -6,9 +6,10 @@ defmodule Minga.Editor.State do
 
   EditorState fields fall into two categories:
 
-  **Per-tab fields** are saved/restored when switching tabs. Each tab
-  carries a snapshot of these fields so switching tabs restores the
-  full editing context. See `@per_tab_fields` for the canonical list.
+  **Workspace fields** live in `state.workspace` (`Minga.Workspace.State`).
+  These are saved/restored when switching tabs. Each tab carries a
+  snapshot of the workspace so switching tabs restores the full editing
+  context.
 
   **Global fields** are shared across all tabs and never snapshotted:
   `port_manager`, `theme`, `status_msg`, `render_timer`, `focus_stack`,
@@ -17,25 +18,16 @@ defmodule Minga.Editor.State do
 
   ## Composed sub-structs
 
-  * `Minga.Editor.VimState`           — modal FSM, registers, marks, recording
-  * `Minga.Editor.State.Buffers`      — buffer list, active buffer, special buffers
+  * `Minga.Workspace.State`           — per-tab editing context (buffers, windows, vim, etc.)
   * `Minga.Editor.State.Picker`       — picker instance, source, restore index
   * `Minga.Editor.State.WhichKey`     — which-key popup node, timer, visibility
-  * `Minga.Editor.State.Search`       — last search pattern/direction, project results
   * `Minga.Editor.State.Registers`    — named registers and active register selection
-  * `Minga.Editor.State.Windows`      — window tree, window map, active/next id
-  * `Minga.Editor.State.Highlighting` — current highlight, version counter, per-buffer cache
   """
 
   alias Minga.Agent.Session, as: AgentSession
   alias Minga.Agent.UIState
   alias Minga.Buffer.Server, as: BufferServer
-  alias Minga.Completion
-  alias Minga.Editor.BottomPanel
   alias Minga.Editor.CompletionTrigger
-  alias Minga.Editor.Dashboard
-
-  alias Minga.Editor.NavFlash
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.Buffers
@@ -61,8 +53,7 @@ defmodule Minga.Editor.State do
   alias Minga.Panel.MessageStore
   alias Minga.Port.Capabilities
   alias Minga.Tool.Manager, as: ToolManager
-  # BVBridge alias removed: build_file_tab_defaults creates BVState directly.
-  alias Minga.Theme
+  alias Minga.Workspace.State, as: WorkspaceState
 
   @typedoc "Line number display style."
   @type line_number_style :: :hybrid | :absolute | :relative | :none
@@ -70,52 +61,19 @@ defmodule Minga.Editor.State do
   @typedoc "A document highlight range from the LSP server."
   @type document_highlight :: Minga.LSP.DocumentHighlight.t()
 
-  # Fields saved/restored per-tab. Adding a per-tab field? Add it here,
-  # and snapshot_tab_fields/1 + restore_tab_context/1 will pick it up
-  # automatically.
-  @per_tab_fields [
-    :keymap_scope,
-    :buffers,
-    :windows,
-    :file_tree,
-    :viewport,
-    :mouse,
-    :highlight,
-    :lsp_pending,
-    :completion,
-    :completion_trigger,
-    :injection_ranges,
-    :search,
-    :pending_conflict,
-    :vim,
-    :document_highlights,
-    :agent_ui
-  ]
-
-  @enforce_keys [:port_manager, :viewport]
+  @enforce_keys [:port_manager, :workspace]
   defstruct backend: :headless,
             port_manager: nil,
-            viewport: nil,
-            vim: VimState.new(),
-            buffers: %Buffers{},
+            workspace: nil,
             picker_ui: %Picker{},
             prompt_ui: %Prompt{},
             whichkey: %WhichKey{},
-            search: %Search{},
-            mouse: %Mouse{},
             theme: Minga.Theme.get!(:doom_one),
             status_msg: nil,
-            pending_conflict: nil,
-            highlight: %Highlighting{},
-            lsp_pending: %{},
-            completion: nil,
-            completion_trigger: CompletionTrigger.new(),
             render_timer: nil,
             warning_popup_timer: nil,
-            bottom_panel: %BottomPanel{},
+            bottom_panel: %Minga.Editor.BottomPanel{},
             message_store: %MessageStore{},
-            windows: %Windows{},
-            file_tree: %FileTreeState{},
             git_status_panel: nil,
             git_remote_op: nil,
             lsp_status: :none,
@@ -123,16 +81,13 @@ defmodule Minga.Editor.State do
             parser_status: :available,
             hover_popup: nil,
             signature_help: nil,
-            injection_ranges: %{},
             focus_stack: [],
-            keymap_scope: :editor,
             tab_bar: nil,
             capabilities: %Capabilities{},
             layout: nil,
             modeline_click_regions: [],
             tab_bar_click_regions: [],
             agent: %AgentState{},
-            agent_ui: UIState.new(),
             dashboard: nil,
             nav_flash: nil,
             last_cursor_line: nil,
@@ -141,7 +96,6 @@ defmodule Minga.Editor.State do
             buffer_monitors: %{},
             face_override_registries: %{},
             font_registry: Minga.FontRegistry.new(),
-            document_highlights: nil,
             highlight_debounce_timer: nil,
             inlay_hint_debounce_timer: nil,
             last_inlay_viewport_top: nil,
@@ -154,36 +108,23 @@ defmodule Minga.Editor.State do
             session_timer: nil,
             swap_dir: nil,
             session_dir: nil,
-            suppress_tool_prompts: false,
-            space_leader_pending: false,
-            space_leader_timer: nil
+            suppress_tool_prompts: false
 
   @type backend :: :tui | :native_gui | :headless
 
   @type t :: %__MODULE__{
           backend: backend(),
           port_manager: GenServer.server() | nil,
-          viewport: Viewport.t(),
-          vim: VimState.t(),
-          buffers: Buffers.t(),
+          workspace: WorkspaceState.t(),
           picker_ui: Picker.t(),
           prompt_ui: Prompt.t(),
           whichkey: WhichKey.t(),
-          search: Search.t(),
-          mouse: Mouse.t(),
-          theme: Theme.t(),
+          theme: Minga.Theme.t(),
           status_msg: String.t() | nil,
-          pending_conflict: {pid(), String.t()} | nil,
-          highlight: Highlighting.t(),
-          lsp_pending: %{reference() => atom() | tuple()},
-          completion: Completion.t() | nil,
-          completion_trigger: CompletionTrigger.t(),
           render_timer: reference() | nil,
           warning_popup_timer: reference() | nil,
-          bottom_panel: BottomPanel.t(),
+          bottom_panel: Minga.Editor.BottomPanel.t(),
           message_store: MessageStore.t(),
-          windows: Windows.t(),
-          file_tree: FileTreeState.t(),
           git_status_panel: Minga.Port.Protocol.GUI.git_status_data() | nil,
           git_remote_op:
             {msg_ref :: reference(), task_monitor :: reference(),
@@ -196,28 +137,20 @@ defmodule Minga.Editor.State do
           parser_status: Minga.Editor.Modeline.parser_status(),
           hover_popup: Minga.Editor.HoverPopup.t() | nil,
           signature_help: Minga.Editor.SignatureHelp.t() | nil,
-          injection_ranges: %{
-            pid() => [
-              %{start_byte: non_neg_integer(), end_byte: non_neg_integer(), language: String.t()}
-            ]
-          },
           focus_stack: [module()],
-          keymap_scope: Minga.Keymap.Scope.scope_name(),
           tab_bar: TabBar.t() | nil,
           capabilities: Capabilities.t(),
           layout: Minga.Editor.Layout.t() | nil,
           modeline_click_regions: [Minga.Editor.Modeline.click_region()],
           tab_bar_click_regions: [Minga.Editor.TabBarRenderer.click_region()],
           agent: AgentState.t(),
-          agent_ui: UIState.t(),
-          dashboard: Dashboard.state() | nil,
-          nav_flash: NavFlash.t() | nil,
+          dashboard: Minga.Editor.Dashboard.state() | nil,
+          nav_flash: Minga.Editor.NavFlash.t() | nil,
           last_cursor_line: non_neg_integer() | nil,
           last_test_command: {String.t(), String.t()} | nil,
           pending_quit: :quit | :quit_all | nil,
           buffer_monitors: %{pid() => reference()},
           face_override_registries: %{pid() => Minga.Face.Registry.t()},
-          document_highlights: [document_highlight()] | nil,
           highlight_debounce_timer: reference() | nil,
           inlay_hint_debounce_timer: reference() | nil,
           last_inlay_viewport_top: non_neg_integer() | nil,
@@ -231,24 +164,44 @@ defmodule Minga.Editor.State do
           session_timer: reference() | nil,
           swap_dir: String.t() | nil,
           session_dir: String.t() | nil,
-          suppress_tool_prompts: boolean(),
-          space_leader_pending: boolean(),
-          space_leader_timer: reference() | nil
+          suppress_tool_prompts: boolean()
         }
+
+  # ── Workspace helpers ────────────────────────────────────────────────────
+
+  @doc """
+  Returns the workspace state.
+
+  Convenience accessor so callers can write `State.ws(state)` for
+  read-heavy code paths instead of `state.workspace`.
+  """
+  @spec ws(t()) :: WorkspaceState.t()
+  def ws(%__MODULE__{workspace: ws}), do: ws
+
+  @doc """
+  Updates the workspace via a mapper function.
+
+  Convenience for the common `%{state | workspace: %{state.workspace | ...}}`
+  pattern. Use when updating multiple workspace fields at once.
+  """
+  @spec update_workspace(t(), (WorkspaceState.t() -> WorkspaceState.t())) :: t()
+  def update_workspace(%__MODULE__{workspace: ws} = state, fun) when is_function(fun, 1) do
+    %{state | workspace: fun.(ws)}
+  end
 
   # ── Convenience accessors ─────────────────────────────────────────────────
 
   @doc "Returns the active buffer pid."
   @spec buffer(t()) :: pid() | nil
-  def buffer(%__MODULE__{buffers: %{active: b}}), do: b
+  def buffer(%__MODULE__{workspace: %{buffers: %{active: b}}}), do: b
 
   @doc "Returns the buffer list."
   @spec buffers(t()) :: [pid()]
-  def buffers(%__MODULE__{buffers: %{list: bs}}), do: bs
+  def buffers(%__MODULE__{workspace: %{buffers: %{list: bs}}}), do: bs
 
   @doc "Returns the active buffer index."
   @spec active_buffer(t()) :: non_neg_integer()
-  def active_buffer(%__MODULE__{buffers: %{active_index: idx}}), do: idx
+  def active_buffer(%__MODULE__{workspace: %{buffers: %{active_index: idx}}}), do: idx
 
   @doc """
   Returns the index of the buffer whose file path matches `file_path`, or nil.
@@ -257,7 +210,7 @@ defmodule Minga.Editor.State do
   removed from the buffer list.
   """
   @spec find_buffer_by_path(t() | map(), String.t()) :: non_neg_integer() | nil
-  def find_buffer_by_path(%{buffers: %{list: buffers}}, file_path) do
+  def find_buffer_by_path(%__MODULE__{workspace: %{buffers: %{list: buffers}}}, file_path) do
     Enum.find_index(buffers, fn buf ->
       try do
         BufferServer.file_path(buf) == file_path
@@ -314,7 +267,8 @@ defmodule Minga.Editor.State do
   """
   @spec remove_dead_buffer(t(), pid()) :: t()
   def remove_dead_buffer(
-        %__MODULE__{buffers: %Buffers{} = bs, buffer_monitors: monitors} = state,
+        %__MODULE__{workspace: %{buffers: %Buffers{} = bs} = ws, buffer_monitors: monitors} =
+          state,
         pid
       ) do
     # Clean up monitor ref
@@ -347,7 +301,7 @@ defmodule Minga.Editor.State do
         help: help
     }
 
-    state = %{state | buffers: new_bs, buffer_monitors: monitors}
+    state = %{state | workspace: %{ws | buffers: new_bs}, buffer_monitors: monitors}
 
     # Clear agent buffer or prompt buffer if the dead pid matches
     state =
@@ -358,7 +312,7 @@ defmodule Minga.Editor.State do
       end
 
     state =
-      if state.agent_ui != nil and state.agent_ui.panel.prompt_buffer == pid do
+      if state.workspace.agent_ui != nil and state.workspace.agent_ui.panel.prompt_buffer == pid do
         AgentAccess.update_panel(state, fn p -> %{p | prompt_buffer: nil} end)
       else
         state
@@ -408,7 +362,8 @@ defmodule Minga.Editor.State do
   end
 
   @spec buffer_content_context(t()) :: content_context()
-  defp buffer_content_context(%__MODULE__{buffers: %{active: buf}}) when is_pid(buf) do
+  defp buffer_content_context(%__MODULE__{workspace: %{buffers: %{active: buf}}})
+       when is_pid(buf) do
     path = BufferServer.file_path(buf)
     name = BufferServer.buffer_name(buf)
     dirty = BufferServer.dirty?(buf)
@@ -452,16 +407,16 @@ defmodule Minga.Editor.State do
 
   @doc "Returns the active window struct, or nil if windows aren't initialized."
   @spec active_window_struct(t()) :: Window.t() | nil
-  def active_window_struct(%__MODULE__{windows: ws}), do: Windows.active_struct(ws)
+  def active_window_struct(%__MODULE__{workspace: %{windows: ws}}), do: Windows.active_struct(ws)
 
   @doc "Returns true if the editor has more than one window."
   @spec split?(t()) :: boolean()
-  def split?(%__MODULE__{windows: ws}), do: Windows.split?(ws)
+  def split?(%__MODULE__{workspace: %{windows: ws}}), do: Windows.split?(ws)
 
   @doc "Updates the window struct for the given window id via a mapper function."
   @spec update_window(t(), Window.id(), (Window.t() -> Window.t())) :: t()
-  def update_window(%__MODULE__{windows: ws} = state, id, fun) do
-    %{state | windows: Windows.update(ws, id, fun)}
+  def update_window(%__MODULE__{workspace: %{windows: ws} = wks} = state, id, fun) do
+    %{state | workspace: %{wks | windows: Windows.update(ws, id, fun)}}
   end
 
   @doc """
@@ -472,15 +427,15 @@ defmodule Minga.Editor.State do
   wrong when column offsets shift.
   """
   @spec invalidate_all_windows(t()) :: t()
-  def invalidate_all_windows(%__MODULE__{windows: ws} = state) do
+  def invalidate_all_windows(%__MODULE__{workspace: %{windows: ws} = wks} = state) do
     new_map =
       Map.new(ws.map, fn {id, window} -> {id, Window.invalidate(window)} end)
 
-    %{state | windows: %{ws | map: new_map}}
+    %{state | workspace: %{wks | windows: %{ws | map: new_map}}}
   end
 
   @doc """
-  Returns the active window's viewport, falling back to `state.viewport`
+  Returns the active window's viewport, falling back to `state.workspace.viewport`
   when no window is active. Use this for scroll commands that need to
   read/write the viewport of the focused window (not the terminal-level
   viewport).
@@ -488,20 +443,20 @@ defmodule Minga.Editor.State do
   @spec active_window_viewport(t()) :: Viewport.t()
   def active_window_viewport(%__MODULE__{} = state) do
     case active_window_struct(state) do
-      nil -> state.viewport
+      nil -> state.workspace.viewport
       %Window{viewport: vp} -> vp
     end
   end
 
   @doc """
   Updates the active window's viewport. Falls back to updating
-  `state.viewport` when no window is active.
+  `state.workspace.viewport` when no window is active.
   """
   @spec put_active_window_viewport(t(), Viewport.t()) :: t()
   def put_active_window_viewport(%__MODULE__{} = state, new_vp) do
     case active_window_struct(state) do
       nil ->
-        %{state | viewport: new_vp}
+        update_workspace(state, fn ws -> %{ws | viewport: new_vp} end)
 
       %Window{id: win_id} ->
         update_window(state, win_id, fn w -> %{w | viewport: new_vp} end)
@@ -514,7 +469,7 @@ defmodule Minga.Editor.State do
   Returns `{win_id, window}` or `nil` if no agent chat window exists.
   """
   @spec find_agent_chat_window(t()) :: {Window.id(), Window.t()} | nil
-  def find_agent_chat_window(%__MODULE__{windows: ws}) do
+  def find_agent_chat_window(%__MODULE__{workspace: %{windows: ws}}) do
     Enum.find_value(ws.map, fn
       {win_id, %Window{content: {:agent_chat, _}} = window} -> {win_id, window}
       _ -> nil
@@ -547,11 +502,13 @@ defmodule Minga.Editor.State do
   minibuffer row and reserving space for the file tree panel when open.
   """
   @spec screen_rect(t()) :: WindowTree.rect()
-  def screen_rect(%__MODULE__{viewport: vp, file_tree: %{tree: nil}}) do
+  def screen_rect(%__MODULE__{workspace: %{viewport: vp, file_tree: %{tree: nil}}}) do
     {0, 0, vp.cols, vp.rows - 1}
   end
 
-  def screen_rect(%__MODULE__{viewport: vp, file_tree: %{tree: %FileTree{width: tw}}}) do
+  def screen_rect(%__MODULE__{
+        workspace: %{viewport: vp, file_tree: %{tree: %FileTree{width: tw}}}
+      }) do
     # Tree occupies columns 0..tw-1, separator at column tw,
     # editor content starts at column tw+1.
     editor_col = tw + 1
@@ -561,9 +518,11 @@ defmodule Minga.Editor.State do
 
   @doc "Returns the screen rect for the file tree panel, or nil if closed."
   @spec tree_rect(t()) :: WindowTree.rect() | nil
-  def tree_rect(%__MODULE__{file_tree: %{tree: nil}}), do: nil
+  def tree_rect(%__MODULE__{workspace: %{file_tree: %{tree: nil}}}), do: nil
 
-  def tree_rect(%__MODULE__{viewport: vp, file_tree: %{tree: %FileTree{width: tw}}}) do
+  def tree_rect(%__MODULE__{
+        workspace: %{viewport: vp, file_tree: %{tree: %FileTree{width: tw}}}
+      }) do
     # Row 0 is the tab bar; file tree starts at row 1.
     {1, 0, tw, vp.rows - 2}
   end
@@ -571,16 +530,20 @@ defmodule Minga.Editor.State do
   # ── Cross-cutting window + buffer helpers ─────────────────────────────────
 
   @doc """
-  Syncs the active window's buffer reference with `state.buffers.active`.
+  Syncs the active window's buffer reference with `state.workspace.buffers.active`.
 
-  Call this after any operation that changes `state.buffers.active` to keep the
+  Call this after any operation that changes `state.workspace.buffers.active` to keep the
   window tree consistent. No-op when windows aren't initialized.
   """
   @spec sync_active_window_buffer(t()) :: t()
-  def sync_active_window_buffer(%__MODULE__{buffers: %{active: nil}} = state), do: state
+  def sync_active_window_buffer(%__MODULE__{workspace: %{buffers: %{active: nil}}} = state),
+    do: state
 
   def sync_active_window_buffer(
-        %__MODULE__{windows: %{map: windows, active: id} = ws, buffers: buffers} = state
+        %__MODULE__{
+          workspace:
+            %{windows: %{map: windows, active: id} = wins, buffers: buffers} = wks
+        } = state
       ) do
     case Map.fetch(windows, id) do
       {:ok, %Window{buffer: existing} = window} when existing != buffers.active ->
@@ -600,7 +563,7 @@ defmodule Minga.Editor.State do
             content: Content.buffer(buffers.active)
         }
 
-        %{state | windows: %{ws | map: Map.put(windows, id, window)}}
+        %{state | workspace: %{wks | windows: %{wins | map: Map.put(windows, id, window)}}}
 
       _ ->
         state
@@ -618,7 +581,7 @@ defmodule Minga.Editor.State do
   dedicated file tab.
   """
   @spec add_buffer(t(), pid()) :: t()
-  def add_buffer(%__MODULE__{buffers: bs, tab_bar: %TabBar{} = tb} = state, pid) do
+  def add_buffer(%__MODULE__{workspace: %{buffers: bs} = wks, tab_bar: %TabBar{} = tb} = state, pid) do
     label = buffer_label(pid)
     active_tab = TabBar.active(tb)
 
@@ -627,7 +590,7 @@ defmodule Minga.Editor.State do
     end)
 
     # Add the buffer to the pool (Buffers.add auto-activates it)
-    state = %{state | buffers: Buffers.add(bs, pid)}
+    state = %{state | workspace: %{wks | buffers: Buffers.add(bs, pid)}}
     state = monitor_buffer(state, pid)
 
     # Check if a tab for this buffer already exists (by label match).
@@ -647,8 +610,8 @@ defmodule Minga.Editor.State do
     end
   end
 
-  def add_buffer(%__MODULE__{buffers: bs} = state, pid) do
-    %{state | buffers: Buffers.add(bs, pid)}
+  def add_buffer(%__MODULE__{workspace: %{buffers: bs} = wks} = state, pid) do
+    %{state | workspace: %{wks | buffers: Buffers.add(bs, pid)}}
     |> monitor_buffer(pid)
     |> sync_active_window_buffer()
   end
@@ -670,13 +633,13 @@ defmodule Minga.Editor.State do
 
     # Snapshot the new tab's context
     new_ctx = snapshot_tab_context(state)
-    tb = TabBar.update_context(state.tab_bar, new_tab.id, new_ctx)
+    tb2 = TabBar.update_context(state.tab_bar, new_tab.id, new_ctx)
 
     Log.debug(:editor, fn ->
       "[tab] add_buffer new file tab=#{new_tab.id} label=#{label}"
     end)
 
-    %{state | tab_bar: tb}
+    %{state | tab_bar: tb2}
   end
 
   # Finds an existing file tab that shows the same buffer (by label match).
@@ -693,7 +656,7 @@ defmodule Minga.Editor.State do
   @spec sync_active_tab_label(t()) :: t()
   defp sync_active_tab_label(%__MODULE__{tab_bar: nil} = state), do: state
 
-  defp sync_active_tab_label(%__MODULE__{tab_bar: tb, buffers: bs} = state) do
+  defp sync_active_tab_label(%__MODULE__{tab_bar: tb, workspace: %{buffers: bs}} = state) do
     case TabBar.active(tb) do
       %Tab{kind: :file} ->
         label = buffer_label(bs.active)
@@ -719,18 +682,22 @@ defmodule Minga.Editor.State do
 
     # Leave agent UI view: reset to editor scope.
     state = AgentAccess.update_agent_ui(state, fn _ -> UIState.new() end)
-    state = %{state | keymap_scope: :editor, tab_bar: tb}
+
+    state =
+      update_workspace(state, fn ws -> %{ws | keymap_scope: :editor} end)
+      |> Map.put(:tab_bar, tb)
+
     state = sync_active_window_buffer(state)
 
     # Snapshot the new tab's context.
     new_ctx = snapshot_tab_context(state)
-    tb = TabBar.update_context(state.tab_bar, new_tab.id, new_ctx)
+    tb2 = TabBar.update_context(state.tab_bar, new_tab.id, new_ctx)
 
     Log.debug(:editor, fn ->
       "[tab] add_buffer new tab=#{new_tab.id} label=#{label}"
     end)
 
-    %{state | tab_bar: tb}
+    %{state | tab_bar: tb2}
   end
 
   @doc """
@@ -740,8 +707,8 @@ defmodule Minga.Editor.State do
   remember to call `sync_active_window_buffer/1`.
   """
   @spec switch_buffer(t(), non_neg_integer()) :: t()
-  def switch_buffer(%__MODULE__{buffers: bs} = state, idx) do
-    state = %{state | buffers: Buffers.switch_to(bs, idx)}
+  def switch_buffer(%__MODULE__{workspace: %{buffers: bs} = wks} = state, idx) do
+    state = %{state | workspace: %{wks | buffers: Buffers.switch_to(bs, idx)}}
     state = sync_active_window_buffer(state)
     sync_active_tab_label(state)
   end
@@ -753,15 +720,23 @@ defmodule Minga.Editor.State do
   cursor position for the active window when it becomes inactive later.
   """
   @spec sync_active_window_cursor(t()) :: t()
-  def sync_active_window_cursor(%__MODULE__{buffers: %{active: nil}} = state), do: state
+  def sync_active_window_cursor(%__MODULE__{workspace: %{buffers: %{active: nil}}} = state),
+    do: state
 
   def sync_active_window_cursor(
-        %__MODULE__{windows: %{map: windows, active: id} = ws, buffers: %{active: buf}} = state
+        %__MODULE__{
+          workspace:
+            %{windows: %{map: windows, active: id} = wins, buffers: %{active: buf}} = wks
+        } = state
       ) do
     case Map.fetch(windows, id) do
       {:ok, window} ->
         cursor = BufferServer.cursor(buf)
-        %{state | windows: %{ws | map: Map.put(windows, id, %{window | cursor: cursor})}}
+
+        %{
+          state
+          | workspace: %{wks | windows: %{wins | map: Map.put(windows, id, %{window | cursor: cursor})}}
+        }
 
       :error ->
         state
@@ -777,14 +752,22 @@ defmodule Minga.Editor.State do
   No-op if `target_id` is already the active window or windows aren't set up.
   """
   @spec focus_window(t(), Window.id()) :: t()
-  def focus_window(%__MODULE__{windows: %{active: active}} = state, target_id)
+  def focus_window(%__MODULE__{workspace: %{windows: %{active: active}}} = state, target_id)
       when target_id == active,
       do: state
 
-  def focus_window(%__MODULE__{buffers: %{active: nil}} = state, _target_id), do: state
+  def focus_window(%__MODULE__{workspace: %{buffers: %{active: nil}}} = state, _target_id),
+    do: state
 
   def focus_window(
-        %__MODULE__{windows: %{map: windows, active: old_id} = ws, buffers: buffers} = state,
+        %__MODULE__{
+          workspace:
+            %{
+              windows: %{map: windows, active: old_id} = wins,
+              buffers: buffers,
+              keymap_scope: current_scope
+            } = wks
+        } = state,
         target_id
       ) do
     case {Map.fetch(windows, old_id), Map.fetch(windows, target_id)} do
@@ -799,13 +782,16 @@ defmodule Minga.Editor.State do
         # Derive keymap_scope from the target window's content type.
         # Agent chat windows use :agent scope; buffer windows use the
         # current scope (preserving :file_tree if the tree is focused).
-        scope = scope_for_content(target_win.content, state.keymap_scope)
+        scope = scope_for_content(target_win.content, current_scope)
 
         %{
           state
-          | windows: %{ws | map: windows, active: target_id},
-            buffers: %{buffers | active: target_win.buffer},
-            keymap_scope: scope
+          | workspace: %{
+              wks
+              | windows: %{wins | map: windows, active: target_id},
+                buffers: %{buffers | active: target_win.buffer},
+                keymap_scope: scope
+            }
         }
 
       _ ->
@@ -833,7 +819,7 @@ defmodule Minga.Editor.State do
   the correct scope. Returns :agent for agent chat windows, :editor otherwise.
   """
   @spec scope_for_active_window(t()) :: atom()
-  def scope_for_active_window(%{windows: %{map: map, active: active_id}}) do
+  def scope_for_active_window(%__MODULE__{workspace: %{windows: %{map: map, active: active_id}}}) do
     case Map.get(map, active_id) do
       %{content: content} -> scope_for_content(content, :editor)
       nil -> :editor
@@ -866,62 +852,77 @@ defmodule Minga.Editor.State do
   # ── Tab bar helpers ───────────────────────────────────────────────────────
 
   @doc """
-  Captures the current per-tab fields into a context map.
+  Captures the current workspace state for tab context storage.
 
-  The returned map is stored in the outgoing tab so it can be restored
-  when the user switches back.
+  The returned workspace is stored in the outgoing tab so it can be
+  restored when the user switches back.
   """
   @spec snapshot_tab_context(t()) :: Tab.context()
-  def snapshot_tab_context(%__MODULE__{} = state) do
-    snapshot_tab_fields(state)
+  def snapshot_tab_context(%__MODULE__{workspace: ws}) do
+    %{workspace: ws}
   end
 
   # Internal: snapshots tab fields without syncing. Used by switch_tab.
   @spec snapshot_tab_context_no_sync(t()) :: Tab.context()
-  defp snapshot_tab_context_no_sync(%__MODULE__{} = state) do
-    snapshot_tab_fields(state)
-  end
-
-  @spec snapshot_tab_fields(t()) :: Tab.context()
-  defp snapshot_tab_fields(state) do
-    Map.take(state, @per_tab_fields)
+  defp snapshot_tab_context_no_sync(%__MODULE__{workspace: ws}) do
+    %{workspace: ws}
   end
 
   @doc """
   Writes a tab context back into the live editor state.
 
-  The context carries per-tab fields directly. Empty context means a
-  brand-new tab; we build defaults with the current active buffer and
-  viewport dimensions.
+  The context carries a `workspace` key containing a `Workspace.State`
+  struct. Empty context means a brand-new tab; we build defaults with
+  the current active buffer and viewport dimensions.
 
-  Backward compatibility: old contexts with nested structure are migrated
-  to the new flat format via `maybe_migrate_legacy_context/2`.
+  Backward compatibility: old contexts with flat per-tab fields or
+  nested structure are migrated to workspace format via
+  `maybe_migrate_legacy_context/2`.
   """
   @spec restore_tab_context(t(), Tab.context()) :: t()
   def restore_tab_context(%__MODULE__{} = state, context) when is_map(context) do
-    context =
-      if map_size(context) == 0 do
-        build_file_tab_defaults(state)
-      else
-        context
-        |> maybe_migrate_legacy_context(state)
-        |> maybe_migrate_vim_fields()
+    workspace =
+      cond do
+        map_size(context) == 0 ->
+          build_workspace_defaults(state)
+
+        Map.has_key?(context, :workspace) ->
+          context.workspace
+
+        true ->
+          # Legacy context: migrate flat fields to workspace
+          context
+          |> maybe_migrate_legacy_context(state)
+          |> maybe_migrate_vim_fields()
+          |> flat_context_to_workspace(state)
       end
 
-    # Restore all per-tab fields from the context
-    Enum.reduce(@per_tab_fields, state, fn field, acc ->
-      maybe_restore(acc, field, context)
+    %{state | workspace: workspace}
+  end
+
+  # Converts a flat legacy context map (with per-tab field keys) into a
+  # Workspace.State struct. Falls back to current workspace values for
+  # any missing fields.
+  @spec flat_context_to_workspace(map(), t()) :: WorkspaceState.t()
+  defp flat_context_to_workspace(context, %__MODULE__{workspace: current_ws}) do
+    ws_fields = WorkspaceState.fields()
+
+    Enum.reduce(ws_fields, current_ws, fn field, ws ->
+      case Map.fetch(context, field) do
+        {:ok, value} -> Map.put(ws, field, value)
+        :error -> ws
+      end
     end)
   end
 
-  # Builds a file-tab context for a brand-new tab. Returns the flat format
-  # with per-tab fields directly.
-  @spec build_file_tab_defaults(t()) :: Tab.context()
-  defp build_file_tab_defaults(state) do
-    win_id = state.windows.next_id
-    rows = state.viewport.rows
-    cols = state.viewport.cols
-    buf = state.buffers.active
+  # Builds a workspace for a brand-new file tab.
+  @spec build_workspace_defaults(t()) :: WorkspaceState.t()
+  defp build_workspace_defaults(state) do
+    ws = state.workspace
+    win_id = ws.windows.next_id
+    rows = ws.viewport.rows
+    cols = ws.viewport.cols
+    buf = ws.buffers.active
 
     windows =
       if buf do
@@ -941,16 +942,16 @@ defmodule Minga.Editor.State do
         %Windows{}
       end
 
-    %{
+    %WorkspaceState{
       keymap_scope: :editor,
       buffers: %Buffers{
         active: buf,
         list: if(buf, do: [buf], else: []),
-        active_index: state.buffers.active_index
+        active_index: ws.buffers.active_index
       },
       windows: windows,
       file_tree: %FileTreeState{},
-      viewport: state.viewport,
+      viewport: ws.viewport,
       mouse: %Mouse{},
       highlight: %Highlighting{},
       lsp_pending: %{},
@@ -966,41 +967,43 @@ defmodule Minga.Editor.State do
   end
 
   @doc """
-  Builds a complete per-tab context for an agent tab.
+  Builds a complete workspace for an agent tab.
 
-  Used by agent tab creation paths to ensure all `@per_tab_fields` are
+  Used by agent tab creation paths to ensure all workspace fields are
   populated. Accepts a pre-built `Windows` struct for the agent chat
   window and the agent buffer pid.
   """
   @spec build_agent_tab_defaults(t(), Windows.t(), pid() | nil) :: Tab.context()
   def build_agent_tab_defaults(state, windows, agent_buf) do
     %{
-      keymap_scope: :agent,
-      buffers: %Buffers{
-        active: agent_buf,
-        list: if(agent_buf, do: [agent_buf], else: []),
-        active_index: 0
-      },
-      windows: windows,
-      file_tree: %FileTreeState{},
-      viewport: state.viewport,
-      mouse: %Mouse{},
-      highlight: %Highlighting{},
-      lsp_pending: %{},
-      completion: nil,
-      completion_trigger: CompletionTrigger.new(),
-      injection_ranges: %{},
-      search: %Search{},
-      pending_conflict: nil,
-      vim: VimState.new(),
-      document_highlights: nil,
-      agent_ui: UIState.new()
+      workspace: %WorkspaceState{
+        keymap_scope: :agent,
+        buffers: %Buffers{
+          active: agent_buf,
+          list: if(agent_buf, do: [agent_buf], else: []),
+          active_index: 0
+        },
+        windows: windows,
+        file_tree: %FileTreeState{},
+        viewport: state.workspace.viewport,
+        mouse: %Mouse{},
+        highlight: %Highlighting{},
+        lsp_pending: %{},
+        completion: nil,
+        completion_trigger: CompletionTrigger.new(),
+        injection_ranges: %{},
+        search: %Search{},
+        pending_conflict: nil,
+        vim: VimState.new(),
+        document_highlights: nil,
+        agent_ui: UIState.new()
+      }
     }
   end
 
   # Migrates legacy contexts (old nested format or oldest
-  # bare-field format) to the new flat format. If the context already
-  # has the :buffers key (new format), returns it unchanged.
+  # bare-field format) to the new flat format with per-tab field keys.
+  # The result is then passed to flat_context_to_workspace/2.
   @spec maybe_migrate_legacy_context(Tab.context(), t()) :: Tab.context()
   defp maybe_migrate_legacy_context(%{buffers: _} = context, _state), do: context
 
@@ -1037,28 +1040,42 @@ defmodule Minga.Editor.State do
 
   defp maybe_migrate_legacy_context(context, state) do
     # Oldest format: bare fields like :active_buffer, :windows, :mode
-    temp =
-      state
-      |> maybe_restore(:windows, context)
-      |> maybe_restore(:file_tree, context)
+    ws = state.workspace
 
-    temp =
+    windows = Map.get(context, :windows, ws.windows)
+    file_tree = Map.get(context, :file_tree, ws.file_tree)
+
+    buffers =
       case Map.fetch(context, :active_buffer) do
         {:ok, buf_pid} ->
-          idx = Map.get(context, :active_buffer_index, temp.buffers.active_index)
-          %{temp | buffers: %{temp.buffers | active: buf_pid, active_index: idx}}
+          idx = Map.get(context, :active_buffer_index, ws.buffers.active_index)
+          %{ws.buffers | active: buf_pid, active_index: idx}
 
         :error ->
-          temp
+          ws.buffers
       end
 
-    temp = %{temp | keymap_scope: Map.get(context, :keymap_scope, :editor)}
+    keymap_scope = Map.get(context, :keymap_scope, :editor)
 
-    # Build vim state from old fields (will be migrated by maybe_migrate_vim_fields)
-    # Preserve vim-related fields from the original context so they can be migrated
-    # Drop the vim field from the snapshot so maybe_migrate_vim_fields will migrate the flat fields
-    snapshot_tab_fields(temp)
-    |> Map.drop([:vim])
+    # Build flat context from migrated fields, preserving vim-related
+    # fields so maybe_migrate_vim_fields can handle them
+    %{
+      keymap_scope: keymap_scope,
+      buffers: buffers,
+      windows: windows,
+      file_tree: file_tree,
+      viewport: ws.viewport,
+      mouse: Map.get(context, :mouse, ws.mouse),
+      highlight: Map.get(context, :highlight, ws.highlight),
+      lsp_pending: Map.get(context, :lsp_pending, ws.lsp_pending),
+      completion: Map.get(context, :completion, ws.completion),
+      completion_trigger: Map.get(context, :completion_trigger, ws.completion_trigger),
+      injection_ranges: Map.get(context, :injection_ranges, ws.injection_ranges),
+      search: Map.get(context, :search, ws.search),
+      pending_conflict: Map.get(context, :pending_conflict, ws.pending_conflict),
+      document_highlights: Map.get(context, :document_highlights, ws.document_highlights),
+      agent_ui: Map.get(context, :agent_ui, ws.agent_ui)
+    }
     |> Map.merge(
       Map.take(context, [:mode, :mode_state, :reg, :marks, :last_jump_pos, :last_find_char])
     )
@@ -1080,16 +1097,8 @@ defmodule Minga.Editor.State do
   @spec log_switch_tab_result(t()) :: :ok
   defp log_switch_tab_result(state) do
     Log.debug(:editor, fn ->
-      "[tab] switch_tab restored: scope=#{state.keymap_scope} buf=#{inspect(state.buffers.active)}"
+      "[tab] switch_tab restored: scope=#{state.workspace.keymap_scope} buf=#{inspect(state.workspace.buffers.active)}"
     end)
-  end
-
-  @spec maybe_restore(t(), atom(), Tab.context()) :: t()
-  defp maybe_restore(state, key, context) do
-    case Map.fetch(context, key) do
-      {:ok, value} -> Map.put(state, key, value)
-      :error -> state
-    end
   end
 
   # Migrates old contexts with separate vim fields to the new VimState substruct
@@ -1200,6 +1209,8 @@ defmodule Minga.Editor.State do
   @spec tab_has_active_buffer?(Tab.t(), pid()) :: boolean()
   defp tab_has_active_buffer?(tab, pid) do
     case tab.context do
+      %__MODULE__{workspace: %{buffers: %{active: ^pid}}} -> true
+      # Legacy formats
       %{buffers: %{active: ^pid}} -> true
       %{surface_state: %{buffers: %{active: ^pid}}} -> true
       %{active_buffer: ^pid} -> true
@@ -1298,8 +1309,8 @@ defmodule Minga.Editor.State do
       EditorState.transition_mode(state, :visual, %VisualState{...})
   """
   @spec transition_mode(t(), Mode.mode(), Mode.state() | nil) :: t()
-  def transition_mode(%__MODULE__{} = state, mode, mode_state \\ nil) do
-    %{state | vim: VimState.transition(state.vim, mode, mode_state)}
+  def transition_mode(%__MODULE__{workspace: wks} = state, mode, mode_state \\ nil) do
+    %{state | workspace: %{wks | vim: VimState.transition(wks.vim, mode, mode_state)}}
   end
 
   # ── Tool prompt helpers ──────────────────────────────────────────────────────

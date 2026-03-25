@@ -33,7 +33,7 @@ defmodule Minga.Input.Completion do
   @spec handle_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           Minga.Input.Handler.result()
   def handle_key(
-        %{vim: %{mode: :insert}, completion: %Completion{} = completion} = state,
+        %EditorState{workspace: %{vim: %{mode: :insert}, completion: %Completion{} = completion}} = state,
         cp,
         mods
       ) do
@@ -60,7 +60,7 @@ defmodule Minga.Input.Completion do
 
   # Completion popup active: intercept scroll and clicks
   def handle_mouse(
-        %{vim: %{mode: :insert}, completion: %Completion{} = completion} = state,
+        %EditorState{workspace: %{vim: %{mode: :insert}, completion: %Completion{} = completion}} = state,
         row,
         col,
         button,
@@ -70,10 +70,10 @@ defmodule Minga.Input.Completion do
       ) do
     case button do
       :wheel_down ->
-        {:handled, %{state | completion: Completion.move_down(completion)}}
+        {:handled, %{state | workspace: %{state.workspace | completion: Completion.move_down(completion)}}}
 
       :wheel_up ->
-        {:handled, %{state | completion: Completion.move_up(completion)}}
+        {:handled, %{state | workspace: %{state.workspace | completion: Completion.move_up(completion)}}}
 
       :left ->
         handle_completion_click(state, completion, row, col)
@@ -97,7 +97,7 @@ defmodule Minga.Input.Completion do
 
     # Popup position: same logic as CompletionUI
     {cursor_row, cursor_col} = cursor_screen_pos(state)
-    space_below = state.viewport.rows - cursor_row - 2
+    space_below = state.workspace.viewport.rows - cursor_row - 2
 
     popup_start_row =
       if space_below >= item_count do
@@ -111,8 +111,8 @@ defmodule Minga.Input.Completion do
       Enum.map(Enum.take(visible, item_count), fn item -> String.length(item.label) + 4 end)
 
     popup_width = label_widths |> Enum.max(fn -> 20 end) |> max(20) |> min(50)
-    popup_width = min(popup_width, state.viewport.cols - cursor_col)
-    start_col = min(cursor_col, max(0, state.viewport.cols - popup_width))
+    popup_width = min(popup_width, state.workspace.viewport.cols - cursor_col)
+    start_col = min(cursor_col, max(0, state.workspace.viewport.cols - popup_width))
 
     clicked_idx = row - popup_start_row
 
@@ -137,20 +137,19 @@ defmodule Minga.Input.Completion do
 
   @spec cursor_screen_pos(EditorState.t()) :: {non_neg_integer(), non_neg_integer()}
   defp cursor_screen_pos(state) do
-    buf = state.buffers.active
+    buf = state.workspace.buffers.active
 
     if buf do
       {line, col} = BufferServer.cursor(buf)
-      screen_row = line - state.viewport.top
+      screen_row = line - state.workspace.viewport.top
       total_lines = BufferServer.line_count(buf)
 
-      number_w =
+      gutter_w =
         if state.line_numbers == :none,
           do: 0,
           else: Viewport.gutter_width(total_lines)
 
-      gutter_w = Minga.Editor.Renderer.Gutter.total_width(number_w)
-      screen_col = col + gutter_w - state.viewport.left
+      screen_col = col + gutter_w - state.workspace.viewport.left
 
       {max(screen_row, 0), max(screen_col, 0)}
     else
@@ -183,14 +182,14 @@ defmodule Minga.Input.Completion do
   # C-n or arrow down: move selection down
   defp do_handle(state, completion, cp, mods)
        when (cp == ?n and band(mods, @ctrl) != 0) or cp == @arrow_down do
-    state = %{state | completion: Completion.move_down(completion)}
+    state = %{state | workspace: %{state.workspace | completion: Completion.move_down(completion)}}
     {:handled, CompletionHandling.maybe_resolve_selected(state)}
   end
 
   # C-p or arrow up: move selection up
   defp do_handle(state, completion, cp, mods)
        when (cp == ?p and band(mods, @ctrl) != 0) or cp == @arrow_up do
-    state = %{state | completion: Completion.move_up(completion)}
+    state = %{state | workspace: %{state.workspace | completion: Completion.move_up(completion)}}
     {:handled, CompletionHandling.maybe_resolve_selected(state)}
   end
 

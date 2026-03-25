@@ -6,8 +6,11 @@ defmodule Minga.Editor.LspActionsTest do
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.HoverPopup
   alias Minga.Editor.LspActions
+  alias Minga.Editor.State.Buffers
+  alias Minga.Editor.Viewport
   alias Minga.Editor.VimState
   alias Minga.Picker.CodeActionSource
+  alias Minga.Test.StateFactory
 
   # ── parse_location/1 ──────────────────────────────────────────────────────
 
@@ -363,8 +366,9 @@ defmodule Minga.Editor.LspActionsTest do
       state =
         fake_state()
         |> Map.merge(%{inlay_hint_debounce_timer: nil, last_inlay_viewport_top: nil})
-        |> put_in([:buffers, :active], buf)
-        |> put_in([:viewport, :top], 10)
+
+      state = %{state | workspace: %{state.workspace | buffers: %{state.workspace.buffers | active: buf}}}
+      state = %{state | workspace: %{state.workspace | viewport: %{state.workspace.viewport | top: 10}}}
 
       result = LspActions.schedule_inlay_hints_on_scroll(state)
       assert result.inlay_hint_debounce_timer != nil
@@ -380,13 +384,14 @@ defmodule Minga.Editor.LspActionsTest do
       state =
         fake_state()
         |> Map.merge(%{inlay_hint_debounce_timer: nil, last_inlay_viewport_top: nil})
-        |> put_in([:buffers, :active], buf)
-        |> put_in([:viewport, :top], 5)
+
+      state = %{state | workspace: %{state.workspace | buffers: %{state.workspace.buffers | active: buf}}}
+      state = %{state | workspace: %{state.workspace | viewport: %{state.workspace.viewport | top: 5}}}
 
       state1 = LspActions.schedule_inlay_hints_on_scroll(state)
       timer1 = state1.inlay_hint_debounce_timer
 
-      state2 = state1 |> put_in([:viewport, :top], 15)
+      state2 = %{state1 | workspace: %{state1.workspace | viewport: %{state1.workspace.viewport | top: 15}}}
       state2 = LspActions.schedule_inlay_hints_on_scroll(state2)
       timer2 = state2.inlay_hint_debounce_timer
 
@@ -407,8 +412,8 @@ defmodule Minga.Editor.LspActionsTest do
       result =
         LspActions.handle_prepare_rename_response(state, {:ok, %{"placeholder" => "myVar"}})
 
-      assert result.vim.mode == :command
-      assert result.vim.mode_state.input == "rename myVar"
+      assert result.workspace.vim.mode == :command
+      assert result.workspace.vim.mode_state.input == "rename myVar"
     end
 
     test "prepareRename with Range + placeholder uses placeholder" do
@@ -423,13 +428,14 @@ defmodule Minga.Editor.LspActionsTest do
       }
 
       result = LspActions.handle_prepare_rename_response(state, {:ok, resp})
-      assert result.vim.mode == :command
-      assert result.vim.mode_state.input == "rename hello_world"
+      assert result.workspace.vim.mode == :command
+      assert result.workspace.vim.mode_state.input == "rename hello_world"
     end
 
     test "prepareRename with Range only reads text from buffer" do
       {:ok, buf} = BufferServer.start_link(content: "def hello_world do\n  :ok\nend")
-      state = fake_state_with_vim() |> put_in([:buffers, :active], buf)
+      state = fake_state_with_vim()
+      state = %{state | workspace: %{state.workspace | buffers: %{state.workspace.buffers | active: buf}}}
 
       resp = %{
         "start" => %{"line" => 0, "character" => 4},
@@ -437,15 +443,16 @@ defmodule Minga.Editor.LspActionsTest do
       }
 
       result = LspActions.handle_prepare_rename_response(state, {:ok, resp})
-      assert result.vim.mode == :command
-      assert result.vim.mode_state.input == "rename hello_world"
+      assert result.workspace.vim.mode == :command
+      assert result.workspace.vim.mode_state.input == "rename hello_world"
 
       GenServer.stop(buf)
     end
 
     test "prepareRename with wrapped Range reads text from buffer" do
       {:ok, buf} = BufferServer.start_link(content: "def hello_world do\n  :ok\nend")
-      state = fake_state_with_vim() |> put_in([:buffers, :active], buf)
+      state = fake_state_with_vim()
+      state = %{state | workspace: %{state.workspace | buffers: %{state.workspace.buffers | active: buf}}}
 
       resp = %{
         "range" => %{
@@ -455,8 +462,8 @@ defmodule Minga.Editor.LspActionsTest do
       }
 
       result = LspActions.handle_prepare_rename_response(state, {:ok, resp})
-      assert result.vim.mode == :command
-      assert result.vim.mode_state.input == "rename hello_world"
+      assert result.workspace.vim.mode == :command
+      assert result.workspace.vim.mode_state.input == "rename hello_world"
 
       GenServer.stop(buf)
     end
@@ -482,8 +489,8 @@ defmodule Minga.Editor.LspActionsTest do
       }
 
       result = LspActions.handle_prepare_rename_response(state, {:ok, resp})
-      assert result.vim.mode == :command
-      assert result.vim.mode_state.input == "rename "
+      assert result.workspace.vim.mode == :command
+      assert result.workspace.vim.mode_state.input == "rename "
     end
   end
 
@@ -562,28 +569,45 @@ defmodule Minga.Editor.LspActionsTest do
   # ── Helpers ────────────────────────────────────────────────────────────────
 
   defp fake_state do
-    %{
+    StateFactory.build(
       status_msg: nil,
-      last_jump_pos: nil,
       hover_popup: nil,
-      buffers: %{active: nil},
-      viewport: %{rows: 24, cols: 80, top: 0},
+      buffers: %Buffers{active: nil},
+      viewport: Viewport.new(24, 80),
+      lsp_pending: %{},
       code_lenses: [],
       inlay_hints: [],
       inlay_hint_debounce_timer: nil,
       last_inlay_viewport_top: nil
-    }
+    )
   end
 
   defp fake_state_with_buffer(buf) do
-    fake_state()
-    |> Map.put(:buffers, %{active: buf, list: [buf]})
-    |> Map.put(:lsp_pending, %{})
+    StateFactory.build(
+      status_msg: nil,
+      hover_popup: nil,
+      buffers: %Buffers{active: buf, list: [buf]},
+      viewport: Viewport.new(24, 80),
+      lsp_pending: %{},
+      code_lenses: [],
+      inlay_hints: [],
+      inlay_hint_debounce_timer: nil,
+      last_inlay_viewport_top: nil
+    )
   end
 
   defp fake_state_with_vim do
-    fake_state()
-    |> Map.put(:vim, %VimState{mode: :normal, mode_state: nil})
-    |> Map.put(:lsp_pending, %{})
+    StateFactory.build(
+      status_msg: nil,
+      hover_popup: nil,
+      buffers: %Buffers{active: nil},
+      viewport: Viewport.new(24, 80),
+      lsp_pending: %{},
+      vim: VimState.new(),
+      code_lenses: [],
+      inlay_hints: [],
+      inlay_hint_debounce_timer: nil,
+      last_inlay_viewport_top: nil
+    )
   end
 end

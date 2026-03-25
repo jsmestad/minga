@@ -34,14 +34,16 @@ defmodule Minga.Input.PopupTest do
 
     %EditorState{
       port_manager: nil,
-      viewport: %Viewport{rows: 24, cols: 80, top: 0, left: 0},
-      vim: vim,
-      buffers: %Buffers{active: main_buf, list: [main_buf]},
-      windows: %Windows{
-        tree: {:split, :horizontal, {:leaf, 1}, {:leaf, 2}, 16},
-        map: %{1 => main_window, 2 => popup_window},
-        active: if(focus_popup, do: 2, else: 1),
-        next_id: 3
+      workspace: %Minga.Workspace.State{
+        viewport: %Viewport{rows: 24, cols: 80, top: 0, left: 0},
+        vim: vim,
+        buffers: %Buffers{active: main_buf, list: [main_buf]},
+        windows: %Windows{
+          tree: {:split, :horizontal, {:leaf, 1}, {:leaf, 2}, 16},
+          map: %{1 => main_window, 2 => popup_window},
+          active: if(focus_popup, do: 2, else: 1),
+          next_id: 3
+        }
       }
     }
   end
@@ -52,14 +54,16 @@ defmodule Minga.Input.PopupTest do
 
     %EditorState{
       port_manager: nil,
-      viewport: %Viewport{rows: 24, cols: 80, top: 0, left: 0},
-      vim: VimState.new(),
-      buffers: %Buffers{active: main_buf, list: [main_buf]},
-      windows: %Windows{
-        tree: WindowTree.new(1),
-        map: %{1 => main_window},
-        active: 1,
-        next_id: 2
+      workspace: %Minga.Workspace.State{
+        viewport: %Viewport{rows: 24, cols: 80, top: 0, left: 0},
+        vim: VimState.new(),
+        buffers: %Buffers{active: main_buf, list: [main_buf]},
+        windows: %Windows{
+          tree: WindowTree.new(1),
+          map: %{1 => main_window},
+          active: 1,
+          next_id: 2
+        }
       }
     }
   end
@@ -83,15 +87,15 @@ defmodule Minga.Input.PopupTest do
       assert {:handled, new_state} = PopupHandler.handle_key(state, ?q, 0)
 
       # Popup window should be removed
-      assert map_size(new_state.windows.map) == 1
-      assert Map.has_key?(new_state.windows.map, 1)
-      refute Map.has_key?(new_state.windows.map, 2)
+      assert map_size(new_state.workspace.windows.map) == 1
+      assert Map.has_key?(new_state.workspace.windows.map, 1)
+      refute Map.has_key?(new_state.workspace.windows.map, 2)
 
       # Focus should be restored to window 1
-      assert new_state.windows.active == 1
+      assert new_state.workspace.windows.active == 1
 
       # Tree should be restored
-      assert {:leaf, 1} = new_state.windows.tree
+      assert {:leaf, 1} = new_state.workspace.windows.tree
     end
 
     test "passes through quit key in insert mode" do
@@ -115,7 +119,7 @@ defmodule Minga.Input.PopupTest do
 
       # Custom x should close
       assert {:handled, new_state} = PopupHandler.handle_key(state, ?x, 0)
-      assert map_size(new_state.windows.map) == 1
+      assert map_size(new_state.workspace.windows.map) == 1
     end
   end
 
@@ -138,14 +142,16 @@ defmodule Minga.Input.PopupTest do
 
       %EditorState{
         port_manager: nil,
-        viewport: %Viewport{rows: 24, cols: 80, top: 0, left: 0},
-        vim: VimState.new(),
-        buffers: %Buffers{active: main_buf, list: [main_buf]},
-        windows: %Windows{
-          tree: WindowTree.new(1),
-          map: %{1 => main_window, 2 => popup_window},
-          active: 1,
-          next_id: 3
+        workspace: %Minga.Workspace.State{
+          viewport: %Viewport{rows: 24, cols: 80, top: 0, left: 0},
+          vim: VimState.new(),
+          buffers: %Buffers{active: main_buf, list: [main_buf]},
+          windows: %Windows{
+            tree: WindowTree.new(1),
+            map: %{1 => main_window, 2 => popup_window},
+            active: 1,
+            next_id: 3
+          }
         }
       }
     end
@@ -159,7 +165,7 @@ defmodule Minga.Input.PopupTest do
       assert {:handled, new_state} = PopupHandler.handle_mouse(state, 0, 0, :left, 0, :press, 1)
 
       # Popup window should be removed
-      refute Map.has_key?(new_state.windows.map, 2)
+      refute Map.has_key?(new_state.workspace.windows.map, 2)
     end
 
     test "clicking inside float popup passes through" do

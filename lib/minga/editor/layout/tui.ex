@@ -27,7 +27,7 @@ defmodule Minga.Editor.Layout.TUI do
   """
   @spec compute(EditorState.t()) :: Layout.t()
   def compute(state) do
-    vp = state.viewport
+    vp = state.workspace.viewport
     terminal = {0, 0, vp.cols, vp.rows}
 
     # 0. Tab bar takes row 0.
@@ -74,12 +74,12 @@ defmodule Minga.Editor.Layout.TUI do
     {window_layouts, horizontal_separators} =
       if EditorState.split?(state) do
         Layout.compute_window_layouts_with_separators(
-          state.windows.tree,
+          state.workspace.windows.tree,
           editor_area,
-          state.windows.map
+          state.workspace.windows.map
         )
       else
-        {%{state.windows.active => Layout.subdivide_window(editor_area)}, []}
+        {%{state.workspace.windows.active => Layout.subdivide_window(editor_area)}, []}
       end
 
     %Layout{
@@ -180,14 +180,14 @@ defmodule Minga.Editor.Layout.TUI do
 
   @spec file_tree_layout(EditorState.t(), pos_integer()) ::
           {Layout.rect() | nil, non_neg_integer(), pos_integer()}
-  defp file_tree_layout(%{file_tree: %{tree: nil}}, total_cols) do
+  defp file_tree_layout(%EditorState{workspace: %{file_tree: %{tree: nil}}}, total_cols) do
     {nil, 0, total_cols}
   end
 
-  defp file_tree_layout(%{file_tree: %{tree: %FileTree{width: tw}}} = state, total_cols) do
+  defp file_tree_layout(%EditorState{workspace: %{file_tree: %{tree: %FileTree{width: tw}}}} = state, total_cols) do
     # Same logic as compute/1: reserve 2 rows at the bottom when possible, else 1.
-    bottom_reserve = if state.viewport.rows - 2 > @content_start, do: 2, else: 1
-    tree_height = state.viewport.rows - @content_start - bottom_reserve
+    bottom_reserve = if state.workspace.viewport.rows - 2 > @content_start, do: 2, else: 1
+    tree_height = state.workspace.viewport.rows - @content_start - bottom_reserve
     min_editor_w = 3
     max_tree_w = max(total_cols - 1 - min_editor_w, 1)
     clamped_tw = min(tw, max_tree_w)
@@ -205,7 +205,7 @@ defmodule Minga.Editor.Layout.TUI do
     panel = AgentAccess.panel(state)
 
     if panel.visible do
-      panel_height = div(state.viewport.rows * 35, 100)
+      panel_height = div(state.workspace.viewport.rows * 35, 100)
       editor_height = remaining_height - panel_height
       agent_row = @content_start + editor_height
       agent_rect = {agent_row, editor_col, editor_width, panel_height}

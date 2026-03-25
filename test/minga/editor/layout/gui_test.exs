@@ -48,7 +48,7 @@ defmodule Minga.Editor.Layout.GUITest do
       layout = LayoutGUI.compute(state)
 
       {row, 0, _, 1} = layout.minibuffer
-      assert row == state.viewport.rows - 1
+      assert row == state.workspace.viewport.rows - 1
     end
 
     test "single window has no modeline row" do

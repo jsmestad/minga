@@ -54,7 +54,7 @@ defmodule Minga.Session do
   @spec snapshot(Minga.Editor.State.t()) :: snapshot()
   def snapshot(editor_state) do
     buffers =
-      editor_state.buffers.list
+      editor_state.workspace.buffers.list
       |> Enum.flat_map(fn pid ->
         file_path = Buffer.Server.file_path(pid)
 
@@ -69,7 +69,7 @@ defmodule Minga.Session do
       end)
 
     active_file =
-      case editor_state.buffers.active do
+      case editor_state.workspace.buffers.active do
         nil -> nil
         pid -> Buffer.Server.file_path(pid)
       end

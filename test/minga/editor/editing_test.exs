@@ -27,8 +27,10 @@ defmodule Minga.Editor.EditingTest do
 
     %EditorState{
       port_manager: @port_manager,
-      viewport: %Viewport{top: 0, left: 0, rows: 24, cols: 80},
-      vim: vim
+      workspace: %Minga.Workspace.State{
+        viewport: %Viewport{top: 0, left: 0, rows: 24, cols: 80},
+        vim: vim
+      }
     }
   end
 
@@ -239,7 +241,7 @@ defmodule Minga.Editor.EditingTest do
   describe "save_jump_pos/2" do
     test "stores the jump position" do
       state = Editing.save_jump_pos(build_state(), {10, 5})
-      assert state.vim.last_jump_pos == {10, 5}
+      assert state.workspace.vim.last_jump_pos == {10, 5}
     end
   end
 end

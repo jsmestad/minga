@@ -18,6 +18,7 @@ defmodule Minga.Input do
   `surface_handlers/0` to build the split dispatch.
   """
 
+  alias Minga.Editor.State, as: EditorState
   alias Minga.Input.AgentMouse
   alias Minga.Input.AgentNav
   alias Minga.Input.AgentPanel
@@ -96,9 +97,7 @@ defmodule Minga.Input do
   Returns the editor-level handlers for buffer editing.
 
   These handle scope-specific dispatch, global bindings, and the
-  editing model's key handler. The last handler in the list is
-  determined by the active editing model: `ModeFSM` for vim,
-  `CUADispatch` for CUA.
+  vim mode FSM. They run after overlays have passed through.
   """
   @spec surface_handlers() :: [module()]
   def surface_handlers do
@@ -119,24 +118,19 @@ defmodule Minga.Input do
       AgentMouse
     ]
 
-    # SpaceLeader sits above the bottom dispatch handler in CUA mode.
-    # It intercepts SPC to enable hold-SPC-as-leader. In vim mode (or
-    # when space_leader: :off), it's not in the stack.
-    case bottom_handler do
-      Minga.Input.CUADispatch -> base ++ [Minga.Input.SpaceLeader, bottom_handler]
-      _ -> base ++ [bottom_handler]
-    end
+    base ++ [bottom_handler]
   end
 
   @doc """
-  Returns the appropriate bottom-of-stack dispatch handler for the
-  active editing model.
+  Returns the bottom-of-stack dispatch handler based on active editing model.
+
+  Vim mode uses `ModeFSM`, CUA mode uses `CUA.Dispatch`.
   """
   @spec editing_dispatch_handler() :: module()
   def editing_dispatch_handler do
     case Minga.Editor.Editing.active_model() do
       Minga.EditingModel.Vim -> ModeFSM
-      Minga.EditingModel.CUA -> Minga.Input.CUADispatch
+      Minga.EditingModel.CUA -> Minga.Input.CUA.Dispatch
     end
   end
 
@@ -144,13 +138,13 @@ defmodule Minga.Input do
   Returns true when the editing model is mid-sequence and should receive
   the next key before any handler-specific dispatch runs.
 
-  For vim: leader key sequences, pending `g` prefix, operator-pending
-  mode, and command-line mode. For CUA: always false (no multi-key
-  sequences). Used by AgentPanel and FileTreeHandler to decide whether
-  to delegate directly to the bottom-of-stack dispatch handler.
+  Covers leader key sequences, pending `g` prefix, operator-pending mode,
+  and command-line mode. Used by AgentPanel and FileTreeHandler to decide
+  whether to delegate directly to the Mode FSM.
   """
-  @spec key_sequence_pending?(Minga.Editor.State.t()) :: boolean()
+  @spec key_sequence_pending?(EditorState.t()) :: boolean()
   def key_sequence_pending?(state) do
     Minga.Editor.Editing.key_sequence_pending?(state)
   end
+
 end

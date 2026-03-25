@@ -38,9 +38,9 @@ defmodule Minga.Editor.MessageLog do
   Warning-level messages get a `[WARN]` prefix in the gap buffer for TUI visibility.
   """
   @spec log(EditorState.t(), String.t(), MessageStore.level() | nil) :: EditorState.t()
-  def log(%{buffers: %{messages: nil}} = state, _text, _level), do: state
+  def log(%EditorState{workspace: %{buffers: %{messages: nil}}} = state, _text, _level), do: state
 
-  def log(%{buffers: %{messages: buf}} = state, text, level_override) do
+  def log(%EditorState{workspace: %{buffers: %{messages: buf}}} = state, text, level_override) do
     # Parse prefix for subsystem detection (always) and level (when no override)
     {parsed_level, subsystem, _clean_text} = MessageStore.parse_prefix(text)
     level = level_override || parsed_level

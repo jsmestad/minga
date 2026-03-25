@@ -23,13 +23,13 @@ defmodule Minga.Editor.MouseHoverTooltip do
   (async, will arrive via the lsp_response handler).
   """
   @spec check_hover(state()) :: state()
-  def check_hover(%{mouse: %{hover_pos: nil}} = state), do: state
-  def check_hover(%{buffers: %{active: nil}} = state), do: state
+  def check_hover(%EditorState{workspace: %{mouse: %{hover_pos: nil}}} = state), do: state
+  def check_hover(%EditorState{workspace: %{buffers: %{active: nil}}} = state), do: state
 
-  def check_hover(%{mouse: %{hover_pos: {row, col}}} = state) do
+  def check_hover(%EditorState{workspace: %{mouse: %{hover_pos: {row, col}}}} = state) do
     # Convert screen position to buffer position
-    buf = state.buffers.active
-    vp = state.viewport
+    buf = state.workspace.buffers.active
+    vp = state.workspace.viewport
 
     buf_line = row + vp.top - 1
     # Approximate: col minus gutter width
@@ -105,7 +105,7 @@ defmodule Minga.Editor.MouseHoverTooltip do
 
             # Store the mouse screen position for the hover popup anchor
             state =
-              put_in(state.lsp_pending, Map.put(state.lsp_pending, ref, {:hover_mouse, row, col}))
+              put_in(state.workspace.lsp_pending, Map.put(state.workspace.lsp_pending, ref, {:hover_mouse, row, col}))
 
             state
         end

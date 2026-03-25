@@ -18,15 +18,17 @@ defmodule Minga.Editor.State.EventRoutingTest do
 
     state = %EditorState{
       port_manager: self(),
-      viewport: Viewport.new(24, 80),
+      workspace: %Minga.Workspace.State{
+        viewport: Viewport.new(24, 80),
+        buffers: %EditorState.Buffers{list: [], active: nil, active_index: 0},
+        windows: %Windows{},
+        vim: VimState.new(),
+        keymap_scope: :editor,
+        agent_ui: UIState.new(),
+        file_tree: nil
+      },
       tab_bar: tb,
-      buffers: %EditorState.Buffers{list: [], active: nil, active_index: 0},
-      windows: %Windows{},
-      vim: VimState.new(),
-      keymap_scope: :editor,
-      agent: %AgentState{session: session, status: :idle},
-      agent_ui: UIState.new(),
-      file_tree: nil
+      agent: %AgentState{session: session, status: :idle}
     }
 
     %{state: state, session: session}

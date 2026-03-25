@@ -50,7 +50,7 @@ defmodule Minga.Input.Scoped do
 
   # Editor scope with agent side panel: handled by Input.AgentPanel.
   # Editor scope (no panel): always passthrough to mode FSM.
-  def handle_key(%{keymap_scope: :editor} = state, _cp, _mods) do
+  def handle_key(%EditorState{workspace: %{keymap_scope: :editor}} = state, _cp, _mods) do
     {:passthrough, state}
   end
 
@@ -59,7 +59,7 @@ defmodule Minga.Input.Scoped do
   # Agent scope: dispatch through scope resolution.
   # Matches when in agent scope (window-level agent
   # chat split pane or full agent view).
-  def handle_key(%{keymap_scope: :agent} = state, cp, mods) do
+  def handle_key(%EditorState{workspace: %{keymap_scope: :agent}} = state, cp, mods) do
     handle_agent_key(state, cp, mods)
   end
 
@@ -93,7 +93,7 @@ defmodule Minga.Input.Scoped do
       {:passthrough, state}
       # Leader sequence in progress: passthrough ALL keys to mode FSM
     else
-      if Minga.Editor.Editing.in_leader?(state) and not panel.input_focused do
+      if is_map(state.workspace.vim.mode_state.leader_node) and not panel.input_focused do
         {:passthrough, state}
       else
         dispatch_agent_key_inner(state, cp, mods)
@@ -129,7 +129,7 @@ defmodule Minga.Input.Scoped do
   end
 
   defp handle_focused_input(state, _panel, cp, mods) do
-    if Minga.Editor.Editing.inserting?(state) do
+    if state.workspace.vim.mode == :insert do
       # In insert mode, fall through to scope trie for self-insert,
       # Enter, Backspace, Ctrl combos, etc.
       resolve_agent_key(state, :insert, cp, mods)

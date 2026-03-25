@@ -98,12 +98,12 @@ defmodule Minga.Input.AgentMouse do
 
   @spec find_agent_chat_window_at(EditorState.t(), Layout.t(), integer(), integer()) ::
           {:ok, pos_integer()} | :not_found
-  defp find_agent_chat_window_at(%{windows: %{tree: nil}}, _layout, _row, _col), do: :not_found
+  defp find_agent_chat_window_at(%EditorState{workspace: %{windows: %{tree: nil}}}, _layout, _row, _col), do: :not_found
 
   defp find_agent_chat_window_at(state, layout, row, col) do
-    case WindowTree.window_at(state.windows.tree, layout.editor_area, row, col) do
+    case WindowTree.window_at(state.workspace.windows.tree, layout.editor_area, row, col) do
       {:ok, win_id, _rect} ->
-        window = Map.get(state.windows.map, win_id)
+        window = Map.get(state.workspace.windows.map, win_id)
 
         if window != nil and Content.agent_chat?(window.content) do
           {:ok, win_id}
@@ -228,7 +228,7 @@ defmodule Minga.Input.AgentMouse do
 
   @spec maybe_focus_window(EditorState.t(), pos_integer()) :: EditorState.t()
   defp maybe_focus_window(state, win_id) do
-    if state.windows.active != win_id do
+    if state.workspace.windows.active != win_id do
       EditorState.focus_window(state, win_id)
     else
       state

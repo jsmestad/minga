@@ -62,7 +62,7 @@ defmodule Minga.Editor.RenderPipeline.ContentTest do
 
       {_frames, _cursor, state} = Content.build_content(state, scrolls)
 
-      [{_win_id, window}] = Map.to_list(state.windows.map)
+      [{_win_id, window}] = Map.to_list(state.workspace.windows.map)
 
       # After rendering, dirty_lines should be cleared
       assert window.dirty_lines == %{}

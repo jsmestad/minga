@@ -22,12 +22,14 @@ defmodule Minga.Input.HandlerTest do
 
     %EditorState{
       port_manager: self(),
-      viewport: Viewport.new(24, 80),
-      vim: VimState.new(),
-      buffers: %Buffers{
-        active: buf,
-        list: [buf],
-        active_index: 0
+      workspace: %Minga.Workspace.State{
+        viewport: Viewport.new(24, 80),
+        vim: VimState.new(),
+        buffers: %Buffers{
+          active: buf,
+          list: [buf],
+          active_index: 0
+        }
       },
       focus_stack: Input.default_stack()
     }
@@ -41,11 +43,11 @@ defmodule Minga.Input.HandlerTest do
 
     test "handles 'r' key during conflict by reloading" do
       state = base_state()
-      buf = state.buffers.active
-      state = %{state | pending_conflict: {buf, "/tmp/test.txt"}}
+      buf = state.workspace.buffers.active
+      state = %{state | workspace: %{state.workspace | pending_conflict: {buf, "/tmp/test.txt"}}}
 
       assert {:handled, new_state} = ConflictPrompt.handle_key(state, ?r, 0)
-      assert new_state.pending_conflict == nil
+      assert new_state.workspace.pending_conflict == nil
       assert new_state.status_msg =~ "reloaded"
     end
 
@@ -53,21 +55,21 @@ defmodule Minga.Input.HandlerTest do
       path = Path.join(tmp_dir, "conflict_test.txt")
       File.write!(path, "hello\nworld")
       state = base_state(buffer_opts: [file_path: path])
-      buf = state.buffers.active
-      state = %{state | pending_conflict: {buf, path}}
+      buf = state.workspace.buffers.active
+      state = %{state | workspace: %{state.workspace | pending_conflict: {buf, path}}}
 
       assert {:handled, new_state} = ConflictPrompt.handle_key(state, ?k, 0)
-      assert new_state.pending_conflict == nil
+      assert new_state.workspace.pending_conflict == nil
     end
 
     test "swallows unrecognized keys during conflict" do
       state = base_state()
-      buf = state.buffers.active
-      state = %{state | pending_conflict: {buf, "/tmp/test.txt"}}
+      buf = state.workspace.buffers.active
+      state = %{state | workspace: %{state.workspace | pending_conflict: {buf, "/tmp/test.txt"}}}
 
       assert {:handled, new_state} = ConflictPrompt.handle_key(state, ?x, 0)
       # State unchanged except for swallowing the key
-      assert new_state.pending_conflict == {buf, "/tmp/test.txt"}
+      assert new_state.workspace.pending_conflict == {buf, "/tmp/test.txt"}
     end
   end
 

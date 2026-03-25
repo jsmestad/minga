@@ -20,7 +20,7 @@ defmodule Minga.Editor.FloatingWindow do
         height: {:rows, 15},
         border: :rounded,
         theme: state.theme.popup,
-        viewport: {state.viewport.rows, state.viewport.cols}
+        viewport: {state.workspace.viewport.rows, state.workspace.viewport.cols}
       }
 
       draws = FloatingWindow.render(spec)

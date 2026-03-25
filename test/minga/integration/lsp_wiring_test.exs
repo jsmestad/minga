@@ -29,7 +29,7 @@ defmodule Minga.Integration.LspWiringTest do
 
       # Sync: if the handler crashed, get_state would raise.
       state = :sys.get_state(ctx.editor)
-      assert state.vim.mode == :normal
+      assert state.workspace.vim.mode == :normal
     end
 
     test "timer message with no active buffer is gracefully handled" do
@@ -37,7 +37,7 @@ defmodule Minga.Integration.LspWiringTest do
 
       # Remove the active buffer to simulate the edge case
       :sys.replace_state(ctx.editor, fn state ->
-        put_in(state.buffers.active, nil)
+        put_in(state.workspace.buffers.active, nil)
       end)
 
       # Should not crash even with no active buffer
@@ -59,7 +59,7 @@ defmodule Minga.Integration.LspWiringTest do
 
       # Sync and verify the editor is still alive
       state = :sys.get_state(ctx.editor)
-      assert state.vim.mode == :normal
+      assert state.workspace.vim.mode == :normal
     end
   end
 
@@ -120,7 +120,7 @@ defmodule Minga.Integration.LspWiringTest do
       ref = make_ref()
 
       :sys.replace_state(ctx.editor, fn state ->
-        %{state | lsp_pending: Map.put(state.lsp_pending, ref, {:hover_mouse, 5, 20})}
+        %{state | workspace: %{state.workspace | lsp_pending: Map.put(state.workspace.lsp_pending, ref, {:hover_mouse, 5, 20})}}
       end)
 
       # Send an LSP response for that ref

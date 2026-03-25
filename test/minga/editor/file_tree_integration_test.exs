@@ -29,15 +29,15 @@ defmodule Minga.Editor.FileTreeIntegrationTest do
       # Get the editor state and inject an agent chat as the active window
       # content to simulate the real scenario.
       state = :sys.get_state(ctx.editor)
-      assert state.file_tree.tree != nil
-      active_id = state.windows.active
-      active_window = Map.get(state.windows.map, active_id)
+      assert state.workspace.file_tree.tree != nil
+      active_id = state.workspace.windows.active
+      active_window = Map.get(state.workspace.windows.map, active_id)
       agent_window = %{active_window | content: {:agent_chat, self()}}
-      state = put_in(state.windows.map[active_id], agent_window)
+      state = put_in(state.workspace.windows.map[active_id], agent_window)
 
       # Toggle the tree closed and verify scope restores to :agent
       closed_state = Minga.Editor.Commands.FileTree.toggle(state)
-      assert closed_state.keymap_scope == :agent
+      assert closed_state.workspace.keymap_scope == :agent
     end
 
     test "closing tree restores :editor scope for regular buffer window", %{tmp_dir: dir} do
@@ -48,9 +48,9 @@ defmodule Minga.Editor.FileTreeIntegrationTest do
       send_keys_sync(ctx, "<SPC>op")
 
       state = :sys.get_state(ctx.editor)
-      assert state.file_tree.tree != nil
+      assert state.workspace.file_tree.tree != nil
       closed_state = Minga.Editor.Commands.FileTree.toggle(state)
-      assert closed_state.keymap_scope == :editor
+      assert closed_state.workspace.keymap_scope == :editor
     end
   end
 
@@ -84,17 +84,17 @@ defmodule Minga.Editor.FileTreeIntegrationTest do
 
       # Open tree (focused)
       state = send_keys_sync(ctx, "<SPC>op")
-      assert state.file_tree.tree != nil
-      assert state.file_tree.focused == true
+      assert state.workspace.file_tree.tree != nil
+      assert state.workspace.file_tree.focused == true
 
       # SPC w l should passthrough from tree, unfocusing it
       state = send_keys_sync(ctx, "<SPC>wl")
-      assert state.file_tree.tree != nil
-      assert state.file_tree.focused == false
+      assert state.workspace.file_tree.tree != nil
+      assert state.workspace.file_tree.focused == false
 
       # SPC w h should focus the tree again
       state = send_keys_sync(ctx, "<SPC>wh")
-      assert state.file_tree.focused == true
+      assert state.workspace.file_tree.focused == true
     end
 
     test "SPC w l from the file tree returns focus to editor", %{tmp_dir: dir} do
@@ -104,12 +104,12 @@ defmodule Minga.Editor.FileTreeIntegrationTest do
 
       # Open tree (focused)
       state = send_keys_sync(ctx, "<SPC>op")
-      assert state.file_tree.focused == true
+      assert state.workspace.file_tree.focused == true
 
       # SPC w l unfocuses tree, returns to editor
       state = send_keys_sync(ctx, "<SPC>wl")
-      assert state.file_tree.tree != nil
-      assert state.file_tree.focused == false
+      assert state.workspace.file_tree.tree != nil
+      assert state.workspace.file_tree.focused == false
     end
   end
 
@@ -124,7 +124,7 @@ defmodule Minga.Editor.FileTreeIntegrationTest do
       ctx = start_editor(Path.join(dir, "main.ex"))
 
       state_before = :sys.get_state(ctx.editor)
-      original_buf = state_before.buffers.active
+      original_buf = state_before.workspace.buffers.active
 
       # Build a tree rooted at tmp_dir so we control the entries
       tree = Minga.FileTree.new(dir)
@@ -132,13 +132,13 @@ defmodule Minga.Editor.FileTreeIntegrationTest do
 
       # Inject the tree into editor state
       :sys.replace_state(ctx.editor, fn s ->
-        s = put_in(s.file_tree, %{s.file_tree | tree: tree, focused: true, buffer: tree_buf})
-        %{s | keymap_scope: :file_tree}
+        s = put_in(s.workspace.file_tree, %{s.workspace.file_tree | tree: tree, focused: true, buffer: tree_buf})
+        %{s | workspace: %{s.workspace | keymap_scope: :file_tree}}
       end)
 
       # Find other.ex and move cursor to it
       state = :sys.get_state(ctx.editor)
-      entries = Minga.FileTree.visible_entries(state.file_tree.tree)
+      entries = Minga.FileTree.visible_entries(state.workspace.file_tree.tree)
       other_idx = Enum.find_index(entries, fn e -> e.name == "other.ex" end)
       assert other_idx != nil, "other.ex should be visible in tree rooted at #{dir}"
 
@@ -148,19 +148,19 @@ defmodule Minga.Editor.FileTreeIntegrationTest do
       state = send_key_sync(ctx, 13)
 
       # Verify the file was opened
-      assert state.buffers.active != original_buf
-      path = BufferServer.file_path(state.buffers.active)
+      assert state.workspace.buffers.active != original_buf
+      path = BufferServer.file_path(state.workspace.buffers.active)
       assert Path.basename(path) == "other.ex"
 
       # Focus returned to editor
-      assert state.file_tree.focused == false
-      assert state.keymap_scope == :editor
+      assert state.workspace.file_tree.focused == false
+      assert state.workspace.keymap_scope == :editor
 
       # Flush async messages (highlight setup is self-sent)
       state = :sys.get_state(ctx.editor)
 
       # Highlight version should have bumped (parse command fired)
-      assert state.highlight.version > state_before.highlight.version,
+      assert state.workspace.highlight.version > state_before.workspace.highlight.version,
              "Expected highlight version to increase after opening a file from the tree"
     end
   end
@@ -188,15 +188,15 @@ defmodule Minga.Editor.FileTreeIntegrationTest do
             behind: 0,
             entries: []
           },
-          keymap_scope: :git_status
+          workspace: %{state.workspace | keymap_scope: :git_status}
       }
 
       # Call toggle directly (pure function, no GenServer round-trip)
       result = Minga.Editor.Commands.FileTree.toggle(state)
 
-      assert result.file_tree.tree != nil
+      assert result.workspace.file_tree.tree != nil
       assert result.git_status_panel == nil
-      assert result.keymap_scope == :file_tree
+      assert result.workspace.keymap_scope == :file_tree
     end
 
     test "toggle opens tree when no git_status_panel is active", %{tmp_dir: dir} do
@@ -209,8 +209,8 @@ defmodule Minga.Editor.FileTreeIntegrationTest do
 
       result = Minga.Editor.Commands.FileTree.toggle(state)
 
-      assert result.file_tree.tree != nil
-      assert result.keymap_scope == :file_tree
+      assert result.workspace.file_tree.tree != nil
+      assert result.workspace.keymap_scope == :file_tree
       assert result.git_status_panel == nil
     end
 
@@ -222,14 +222,14 @@ defmodule Minga.Editor.FileTreeIntegrationTest do
       # Open file tree via toggle
       state = :sys.get_state(ctx.editor)
       state = Minga.Editor.Commands.FileTree.toggle(state)
-      assert state.file_tree.tree != nil
-      assert state.keymap_scope == :file_tree
+      assert state.workspace.file_tree.tree != nil
+      assert state.workspace.keymap_scope == :file_tree
 
       # Close via the public function (this is what Commands.Git calls)
       closed_state = Minga.Editor.Commands.FileTree.close(state)
 
-      assert closed_state.file_tree.tree == nil
-      assert closed_state.keymap_scope == :editor
+      assert closed_state.workspace.file_tree.tree == nil
+      assert closed_state.workspace.keymap_scope == :editor
     end
 
     test "round-trip: git status -> file tree -> close restores editor scope", %{tmp_dir: dir} do
@@ -238,7 +238,7 @@ defmodule Minga.Editor.FileTreeIntegrationTest do
       ctx = start_editor(file)
 
       state = :sys.get_state(ctx.editor)
-      assert state.keymap_scope == :editor
+      assert state.workspace.keymap_scope == :editor
 
       # Simulate git status open
       state = %{
@@ -250,19 +250,19 @@ defmodule Minga.Editor.FileTreeIntegrationTest do
             behind: 0,
             entries: []
           },
-          keymap_scope: :git_status
+          workspace: %{state.workspace | keymap_scope: :git_status}
       }
 
       # Open file tree (clears git status)
       state = Minga.Editor.Commands.FileTree.toggle(state)
-      assert state.keymap_scope == :file_tree
+      assert state.workspace.keymap_scope == :file_tree
       assert state.git_status_panel == nil
-      assert state.file_tree.tree != nil
+      assert state.workspace.file_tree.tree != nil
 
       # Close file tree
       state = Minga.Editor.Commands.FileTree.toggle(state)
-      assert state.keymap_scope == :editor
-      assert state.file_tree.tree == nil
+      assert state.workspace.keymap_scope == :editor
+      assert state.workspace.file_tree.tree == nil
       assert state.git_status_panel == nil
     end
   end
@@ -275,11 +275,11 @@ defmodule Minga.Editor.FileTreeIntegrationTest do
 
       # Open the file tree
       state = send_keys_sync(ctx, "<SPC>op")
-      assert state.file_tree.tree != nil
+      assert state.workspace.file_tree.tree != nil
 
       # Broadcast a :buffer_saved event (simulating what lsp_after_save does)
       Minga.Events.broadcast(:buffer_saved, %Minga.Events.BufferEvent{
-        buffer: state.buffers.active,
+        buffer: state.workspace.buffers.active,
         path: file
       })
 
@@ -288,7 +288,7 @@ defmodule Minga.Editor.FileTreeIntegrationTest do
       state = :sys.get_state(ctx.editor)
 
       # The tree should still be present (refresh didn't crash or nil it out)
-      assert state.file_tree.tree != nil
+      assert state.workspace.file_tree.tree != nil
     end
   end
 end

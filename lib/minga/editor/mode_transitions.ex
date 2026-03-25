@@ -23,7 +23,7 @@ defmodule Minga.Editor.ModeTransitions do
   @spec adjust(Mode.state(), Mode.mode(), Mode.mode(), EditorState.t()) :: Mode.state()
 
   # Entering visual mode: capture cursor as selection anchor.
-  def adjust(mode_state, old_mode, :visual, %{buffers: %{active: buf}})
+  def adjust(mode_state, old_mode, :visual, %EditorState{workspace: %{buffers: %{active: buf}}})
       when old_mode != :visual and is_pid(buf) do
     anchor = BufferServer.cursor(buf)
     %{mode_state | visual_anchor: anchor}
@@ -50,7 +50,7 @@ defmodule Minga.Editor.ModeTransitions do
         %Minga.Mode.SearchState{} = mode_state,
         old_mode,
         :search,
-        %{buffers: %{active: buf}}
+        %EditorState{workspace: %{buffers: %{active: buf}}}
       )
       when old_mode != :search and is_pid(buf) do
     cursor = BufferServer.cursor(buf)

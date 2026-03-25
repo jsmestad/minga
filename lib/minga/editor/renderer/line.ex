@@ -20,6 +20,7 @@ defmodule Minga.Editor.Renderer.Line do
   alias Minga.Editor.DisplayList
   alias Minga.Editor.Renderer.Composition
   alias Minga.Editor.Renderer.Context
+  alias Minga.Editor.State, as: EditorState
   alias Minga.Face
   alias Minga.Highlight
 
@@ -594,7 +595,7 @@ defmodule Minga.Editor.Renderer.Line do
          _text,
          _style,
          _screen_row,
-         %{viewport: %{left: left}},
+         %EditorState{workspace: %{viewport: %{left: left}}},
          cmds,
          screen_col,
          _buf_col

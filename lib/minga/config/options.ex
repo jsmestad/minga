@@ -82,7 +82,6 @@ defmodule Minga.Config.Options do
   @type option_name ::
           :editing_model
           | :space_leader
-          | :space_leader_timeout
           | :tab_width
           | :line_numbers
           | :show_gutter_separator
@@ -178,7 +177,6 @@ defmodule Minga.Config.Options do
   @option_specs [
     {:editing_model, {:enum, [:vim, :cua]}, :vim},
     {:space_leader, {:enum, [:chord, :off]}, :chord},
-    {:space_leader_timeout, :pos_integer, 200},
     {:tab_width, :pos_integer, 2},
     {:line_numbers, {:enum, [:hybrid, :absolute, :relative, :none]}, :hybrid},
     {:show_gutter_separator, :boolean, true},

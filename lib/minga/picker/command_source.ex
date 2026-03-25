@@ -81,7 +81,7 @@ defmodule Minga.Picker.CommandSource do
   # both through the picker context.
   @spec open_scope_picker(term(), Command.t(), Command.scope()) :: term()
   defp open_scope_picker(state, cmd, %{option: option_name} = _scope) do
-    buf = state.buffers.active
+    buf = state.workspace.buffers.active
 
     current_value =
       if is_pid(buf) do

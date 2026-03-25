@@ -68,16 +68,16 @@ defmodule Minga.Editor.LayoutPreset do
   defp remove_agent_window(state, agent_win_id) do
     state = maybe_switch_focus_away(state, agent_win_id)
 
-    case WindowTree.close(state.windows.tree, agent_win_id) do
+    case WindowTree.close(state.workspace.windows.tree, agent_win_id) do
       {:ok, new_tree} ->
-        map = Map.delete(state.windows.map, agent_win_id)
-        windows = %{state.windows | tree: new_tree, map: map}
-        state = %{state | windows: windows}
+        map = Map.delete(state.workspace.windows.map, agent_win_id)
+        windows = %{state.workspace.windows | tree: new_tree, map: map}
+        state = %{state | workspace: %{state.workspace | windows: windows}}
 
         # If we were in agent scope, return to editor scope since the
         # agent pane is gone.
-        if state.keymap_scope == :agent do
-          %{state | keymap_scope: :editor}
+        if state.workspace.keymap_scope == :agent do
+          %{state | workspace: %{state.workspace | keymap_scope: :editor}}
         else
           state
         end
@@ -89,16 +89,14 @@ defmodule Minga.Editor.LayoutPreset do
 
   @spec maybe_switch_focus_away(EditorState.t(), Window.id()) :: EditorState.t()
   defp maybe_switch_focus_away(state, closing_id) do
-    if state.windows.active == closing_id do
+    if state.workspace.windows.active == closing_id do
       case find_non_agent_window(state) do
         {buf_win_id, window} ->
-          scope = EditorState.scope_for_content(window.content, state.keymap_scope)
+          scope = EditorState.scope_for_content(window.content, state.workspace.keymap_scope)
 
-          %{
-            state
-            | windows: %{state.windows | active: buf_win_id},
-              keymap_scope: scope
-          }
+          EditorState.update_workspace(state, fn ws ->
+            %{ws | windows: %{ws.windows | active: buf_win_id}, keymap_scope: scope}
+          end)
 
         nil ->
           state
@@ -125,19 +123,19 @@ defmodule Minga.Editor.LayoutPreset do
       state
     else
       # Create a new agent chat window
-      next_id = state.windows.next_id
-      rows = state.viewport.rows
-      cols = state.viewport.cols
+      next_id = state.workspace.windows.next_id
+      rows = state.workspace.viewport.rows
+      cols = state.workspace.viewport.cols
       agent_window = Window.new_agent_chat(next_id, agent_buffer, rows, cols)
 
       # Split the active window to add the agent pane
-      active_id = state.windows.active
+      active_id = state.workspace.windows.active
 
-      case WindowTree.split(state.windows.tree, active_id, direction, next_id) do
+      case WindowTree.split(state.workspace.windows.tree, active_id, direction, next_id) do
         {:ok, new_tree} ->
-          new_map = Map.put(state.windows.map, next_id, agent_window)
-          windows = %{state.windows | tree: new_tree, map: new_map, next_id: next_id + 1}
-          %{state | windows: windows}
+          new_map = Map.put(state.workspace.windows.map, next_id, agent_window)
+          windows = %{state.workspace.windows | tree: new_tree, map: new_map, next_id: next_id + 1}
+          %{state | workspace: %{state.workspace | windows: windows}}
 
         :error ->
           state
@@ -147,14 +145,14 @@ defmodule Minga.Editor.LayoutPreset do
 
   @spec find_agent_chat_window(EditorState.t()) :: {Window.id(), Window.t()} | nil
   defp find_agent_chat_window(state) do
-    Enum.find(state.windows.map, fn {_id, window} ->
+    Enum.find(state.workspace.windows.map, fn {_id, window} ->
       Content.agent_chat?(window.content)
     end)
   end
 
   @spec find_non_agent_window(EditorState.t()) :: {Window.id(), Window.t()} | nil
   defp find_non_agent_window(state) do
-    Enum.find(state.windows.map, fn {_id, window} ->
+    Enum.find(state.workspace.windows.map, fn {_id, window} ->
       Content.buffer?(window.content)
     end)
   end

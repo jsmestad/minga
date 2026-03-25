@@ -28,7 +28,7 @@ defmodule Minga.Input.Dashboard do
   @impl true
   @spec handle_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           Minga.Input.Handler.result()
-  def handle_key(%{buffers: %{active: nil}, dashboard: %{} = dash} = state, codepoint, _modifiers) do
+  def handle_key(%EditorState{workspace: %{buffers: %{active: nil}}, dashboard: %{} = dash} = state, codepoint, _modifiers) do
     case codepoint do
       cp when cp == @key_j or cp == @arrow_down ->
         {:handled, %{state | dashboard: Dashboard.cursor_down(dash)}}

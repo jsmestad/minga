@@ -203,9 +203,9 @@ defmodule Minga.Editor do
 
     # Monitor all initial buffers so we get :DOWN when they die.
     all_initial_pids =
-      state.buffers.list ++
+      state.workspace.buffers.list ++
         Enum.filter(
-          [state.buffers.messages, state.buffers.help],
+          [state.workspace.buffers.messages, state.workspace.buffers.help],
           &is_pid/1
         )
 
@@ -271,23 +271,23 @@ defmodule Minga.Editor do
     end
   end
 
-  def handle_call(:api_active_buffer, _from, %{buffers: %{active: nil}} = state) do
+  def handle_call(:api_active_buffer, _from, %EditorState{workspace: %{buffers: %{active: nil}}} = state) do
     {:reply, {:error, :no_buffer}, state}
   end
 
-  def handle_call(:api_active_buffer, _from, %{buffers: %{active: buf}} = state) do
+  def handle_call(:api_active_buffer, _from, %EditorState{workspace: %{buffers: %{active: buf}}} = state) do
     {:reply, {:ok, buf}, state}
   end
 
   def handle_call(:api_mode, _from, state) do
-    {:reply, Minga.Editor.Editing.mode(state), state}
+    {:reply, state.workspace.vim.mode, state}
   end
 
-  def handle_call(:api_save, _from, %{buffers: %{active: nil}} = state) do
+  def handle_call(:api_save, _from, %EditorState{workspace: %{buffers: %{active: nil}}} = state) do
     {:reply, {:error, :no_buffer}, state}
   end
 
-  def handle_call(:api_save, _from, %{buffers: %{active: buf}} = state) do
+  def handle_call(:api_save, _from, %EditorState{workspace: %{buffers: %{active: buf}}} = state) do
     result = BufferServer.save(buf)
 
     new_state =
@@ -358,7 +358,7 @@ defmodule Minga.Editor do
   def handle_info({:minga_input, {:ready, width, height}}, state) do
     # Query capabilities from the frontend (may have been sent in extended ready).
     caps = Startup.fetch_capabilities(state.port_manager)
-    new_state = %{state | viewport: Viewport.new(height, width), capabilities: caps, layout: nil}
+    new_state = %{state | workspace: %{state.workspace | viewport: Viewport.new(height, width)}, capabilities: caps, layout: nil}
     Startup.send_font_config(new_state)
     new_state = Renderer.render(new_state)
     # Setup highlighting after first paint with correct viewport
@@ -388,7 +388,7 @@ defmodule Minga.Editor do
   end
 
   def handle_info({:minga_input, {:resize, width, height}}, state) do
-    new_state = %{state | viewport: Viewport.new(height, width)}
+    new_state = %{state | workspace: %{state.workspace | viewport: Viewport.new(height, width)}}
     # Invalidate the cached layout so resize_all_windows computes fresh
     # rectangles from the new viewport dimensions.
     new_state = Layout.invalidate(new_state)
@@ -472,12 +472,6 @@ defmodule Minga.Editor do
     {:noreply, state}
   end
 
-  # ── Space leader timeout (CUA mode) ──────────────────────────────────────────
-
-  def handle_info({:space_leader_timeout, ref}, state) do
-    {:noreply, Minga.Input.SpaceLeader.handle_timeout(state, ref)}
-  end
-
   # ── Highlight setup (async, after first paint with correct viewport) ──────────
 
   def handle_info(:setup_highlight, state) do
@@ -549,7 +543,7 @@ defmodule Minga.Editor do
 
           state
 
-        ^pid when pid == state.buffers.active ->
+        ^pid when pid == state.workspace.buffers.active ->
           HighlightEvents.handle_names(state, names)
 
         _ ->
@@ -567,7 +561,7 @@ defmodule Minga.Editor do
 
     new_state =
       if pid do
-        %{state | injection_ranges: Map.put(state.injection_ranges, pid, ranges)}
+        %{state | workspace: %{state.workspace | injection_ranges: Map.put(state.workspace.injection_ranges, pid, ranges)}}
       else
         Minga.Log.warning(
           :editor,
@@ -599,7 +593,7 @@ defmodule Minga.Editor do
 
           state
 
-        ^pid when pid == state.buffers.active ->
+        ^pid when pid == state.workspace.buffers.active ->
           HighlightEvents.handle_spans(state, version, spans)
 
         _ ->
@@ -655,7 +649,7 @@ defmodule Minga.Editor do
           Minga.Log.warning(:editor, "fold_ranges for unknown buffer_id=#{buffer_id}, discarding")
           state
 
-        ^pid when pid == state.buffers.active ->
+        ^pid when pid == state.workspace.buffers.active ->
           fold_ranges =
             Enum.map(ranges, fn {start_line, end_line} ->
               FoldRange.new!(start_line, end_line)
@@ -691,7 +685,7 @@ defmodule Minga.Editor do
 
           state
 
-        ^pid when pid == state.buffers.active ->
+        ^pid when pid == state.workspace.buffers.active ->
           apply_textobject_positions(state, positions)
 
         _ ->
@@ -737,7 +731,7 @@ defmodule Minga.Editor do
   # in Highlight.put_spans/3. Without resetting per-buffer versions, the
   # resync spans would be silently discarded (0 < previous_version).
   def handle_info({:minga_highlight, :parser_restarted}, state) do
-    hl = state.highlight
+    hl = state.workspace.highlight
 
     reset_highlights =
       Map.new(hl.highlights, fn {pid, buf_hl} ->
@@ -746,7 +740,7 @@ defmodule Minga.Editor do
 
     new_state = %{
       state
-      | highlight: %{hl | version: 0, highlights: reset_highlights},
+      | workspace: %{state.workspace | highlight: %{hl | version: 0, highlights: reset_highlights}},
         parser_status: :available
     }
 
@@ -787,35 +781,35 @@ defmodule Minga.Editor do
 
   # Completion debounce timer fired — send the actual completion request
   def handle_info({:completion_debounce, clients, buffer_pid}, state) do
-    new_bridge = CompletionTrigger.flush_debounce(state.completion_trigger, clients, buffer_pid)
-    {:noreply, %{state | completion_trigger: new_bridge}}
+    new_bridge = CompletionTrigger.flush_debounce(state.workspace.completion_trigger, clients, buffer_pid)
+    {:noreply, %{state | workspace: %{state.workspace | completion_trigger: new_bridge}}}
   end
 
   # LSP async response — route to the appropriate handler based on lsp.pending
   def handle_info({:lsp_response, ref, result}, state) do
-    case Map.pop(state.lsp_pending, ref) do
+    case Map.pop(state.workspace.lsp_pending, ref) do
       {:completion_resolve, pending} ->
-        new_state = put_in(state.lsp_pending, pending)
+        new_state = put_in(state.workspace.lsp_pending, pending)
         new_state = CompletionHandling.handle_resolve_response(new_state, result)
         {:noreply, Renderer.render(new_state)}
 
       {:signature_help, pending} ->
-        new_state = put_in(state.lsp_pending, pending)
+        new_state = put_in(state.workspace.lsp_pending, pending)
         new_state = CompletionHandling.handle_signature_help_response(new_state, result)
         {:noreply, Renderer.render(new_state)}
 
       {{:semantic_tokens, buf_pid}, pending} ->
-        new_state = put_in(state.lsp_pending, pending)
+        new_state = put_in(state.workspace.lsp_pending, pending)
         new_state = SemanticTokenSync.handle_response(new_state, buf_pid, result)
         {:noreply, Renderer.render(new_state)}
 
       {kind, pending} when is_atom(kind) ->
-        new_state = put_in(state.lsp_pending, pending)
+        new_state = put_in(state.workspace.lsp_pending, pending)
         new_state = dispatch_lsp_response(kind, new_state, result)
         {:noreply, Renderer.render(new_state)}
 
       {kind, pending} when is_tuple(kind) ->
-        new_state = put_in(state.lsp_pending, pending)
+        new_state = put_in(state.workspace.lsp_pending, pending)
         new_state = dispatch_lsp_response(kind, new_state, result)
         {:noreply, Renderer.render(new_state)}
 
@@ -852,7 +846,7 @@ defmodule Minga.Editor do
         Map.delete(state.face_override_registries, buf_pid)
       else
         # Get the base highlight for this buffer to merge overrides with
-        hl = Map.get(state.highlight.highlights, buf_pid)
+        hl = Map.get(state.workspace.highlight.highlights, buf_pid)
 
         merged =
           if hl do
@@ -1338,7 +1332,7 @@ defmodule Minga.Editor do
     do: Commands.execute(state, {:edit_file, path})
 
   defp apply_effect(state, {:switch_buffer, pid}) when is_pid(pid) do
-    case Enum.find_index(state.buffers.list, &(&1 == pid)) do
+    case Enum.find_index(state.workspace.buffers.list, &(&1 == pid)) do
       nil -> state
       idx -> EditorState.switch_buffer(state, idx) |> reset_nav_flash_tracking()
     end
@@ -1445,7 +1439,7 @@ defmodule Minga.Editor do
     path = LspSyncServer.uri_to_path(uri)
 
     buf_pid =
-      Enum.find(state.buffers.list, fn buf ->
+      Enum.find(state.workspace.buffers.list, fn buf ->
         try do
           BufferServer.file_path(buf) == path
         catch
@@ -1466,10 +1460,10 @@ defmodule Minga.Editor do
   # Updates `last_cursor_line` and, when the threshold is exceeded,
   # starts (or restarts) the flash animation.
   @spec maybe_trigger_nav_flash(state()) :: state()
-  defp maybe_trigger_nav_flash(%{buffers: %{active: nil}} = state), do: state
+  defp maybe_trigger_nav_flash(%EditorState{workspace: %{buffers: %{active: nil}}} = state), do: state
 
   defp maybe_trigger_nav_flash(state) do
-    buf = state.buffers.active
+    buf = state.workspace.buffers.active
     {current_line, _col} = BufferServer.cursor(buf)
 
     state = detect_jump(state, current_line)
@@ -1584,7 +1578,10 @@ defmodule Minga.Editor do
   end
 
   @spec handle_paste_event_editor(state(), String.t()) :: state()
-  defp handle_paste_event_editor(%{buffers: %{active: buf}} = state, text)
+  defp handle_paste_event_editor(
+         %EditorState{workspace: %{buffers: %{active: buf}}} = state,
+         text
+       )
        when is_pid(buf) do
     {line, col} = BufferServer.cursor(buf)
     BufferServer.apply_text_edit(buf, line, col, line, col, text)
@@ -1601,7 +1598,7 @@ defmodule Minga.Editor do
   @spec do_file_tree_open(state(), pid(), String.t(), FileTree.t()) :: state()
   def do_file_tree_open(state, pid, path, tree) do
     new_state = register_buffer(state, pid, path)
-    put_in(new_state.file_tree.tree, FileTree.reveal(tree, path))
+    put_in(new_state.workspace.file_tree.tree, FileTree.reveal(tree, path))
   end
 
   @spec recover_swap_entries(state(), [Swap.Recovery.entry()]) :: state()
@@ -1732,7 +1729,7 @@ defmodule Minga.Editor do
   # the user explicitly opens the buffer.
   @spec register_buffer_background(state(), pid(), String.t()) :: state()
   defp register_buffer_background(state, buffer_pid, file_path) do
-    state = %{state | buffers: Buffers.add_background(state.buffers, buffer_pid)}
+    state = %{state | workspace: %{state.workspace | buffers: Buffers.add_background(state.workspace.buffers, buffer_pid)}}
     state = EditorState.monitor_buffer(state, buffer_pid)
     state = log_message(state, "Opened (agent): #{file_path}")
 
@@ -1796,10 +1793,10 @@ defmodule Minga.Editor do
   end
 
   defp handle_gui_action(state, {:completion_select, index}) do
-    case state.completion do
+    case state.workspace.completion do
       %Completion{} = comp ->
         updated = %{comp | selected: index}
-        do_accept_completion(%{state | completion: updated}, updated)
+        do_accept_completion(%{state | workspace: %{state.workspace | completion: updated}}, updated)
 
       nil ->
         state
@@ -1850,7 +1847,7 @@ defmodule Minga.Editor do
   defp handle_gui_action(state, {:open_file, path}) do
     # Check if already open in buffer list
     idx =
-      Enum.find_index(state.buffers.list, fn buf ->
+      Enum.find_index(state.workspace.buffers.list, fn buf ->
         try do
           BufferServer.file_path(buf) == path
         catch
@@ -1924,7 +1921,7 @@ defmodule Minga.Editor do
   end
 
   defp handle_gui_action(state, {:minibuffer_select, index}) do
-    case state.vim do
+    case state.workspace.vim do
       %{mode: :command, mode_state: ms} ->
         {candidates, _total} = MinibufferData.complete_ex_command(ms.input)
         clamped = MinibufferData.clamp_index(index, length(candidates))
@@ -1935,7 +1932,7 @@ defmodule Minga.Editor do
 
           %{label: label} ->
             new_ms = %{ms | input: label, candidate_index: 0}
-            %{state | vim: %{state.vim | mode_state: new_ms}}
+            %{state | workspace: %{state.workspace | vim: %{state.workspace.vim | mode_state: new_ms}}}
         end
 
       _ ->
@@ -2011,6 +2008,14 @@ defmodule Minga.Editor do
     %{state | tab_bar: tb}
   end
 
+  defp handle_gui_action(state, {:space_leader_chord, codepoint, modifiers}) do
+    Minga.Input.CUA.SpaceLeader.handle_chord(state, codepoint, modifiers)
+  end
+
+  defp handle_gui_action(state, {:space_leader_retract, codepoint, modifiers}) do
+    Minga.Input.CUA.SpaceLeader.handle_retract(state, codepoint, modifiers)
+  end
+
   defp handle_gui_action(state, {:git_open_file, path}) do
     case resolve_git_root() do
       nil ->
@@ -2043,7 +2048,7 @@ defmodule Minga.Editor do
   @spec open_file_by_path(state(), String.t()) :: state()
   defp open_file_by_path(state, abs_path) do
     idx =
-      Enum.find_index(state.buffers.list, fn buf ->
+      Enum.find_index(state.workspace.buffers.list, fn buf ->
         try do
           BufferServer.file_path(buf) == abs_path
         catch
@@ -2095,7 +2100,9 @@ defmodule Minga.Editor do
   # pending tool prompts. Otherwise the prompt waits until the user
   # returns to normal mode.
   @spec maybe_show_tool_prompt(state()) :: state()
-  defp maybe_show_tool_prompt(%{vim: %{mode: :normal}, tool_prompt_queue: pending} = state)
+  defp maybe_show_tool_prompt(
+         %EditorState{workspace: %{vim: %{mode: :normal}}, tool_prompt_queue: pending} = state
+       )
        when pending != [] do
     ms = %Minga.Mode.ToolConfirmState{pending: pending, declined: state.tool_declined}
     EditorState.transition_mode(state, :tool_confirm, ms)
@@ -2105,11 +2112,11 @@ defmodule Minga.Editor do
 
   # Moves the file tree cursor to the given index and performs the action.
   @spec gui_tree_action(state(), non_neg_integer(), :click | :toggle) :: state()
-  defp gui_tree_action(%{file_tree: %{tree: nil}} = state, _index, _action), do: state
+  defp gui_tree_action(%EditorState{workspace: %{file_tree: %{tree: nil}}} = state, _index, _action), do: state
 
   defp gui_tree_action(state, index, action) do
-    tree = %{state.file_tree.tree | cursor: index}
-    state = put_in(state.file_tree.tree, tree)
+    tree = %{state.workspace.file_tree.tree | cursor: index}
+    state = put_in(state.workspace.file_tree.tree, tree)
 
     case action do
       :click -> Commands.FileTree.open_or_toggle(state)
@@ -2151,13 +2158,13 @@ defmodule Minga.Editor do
   # Returns true if the given buffer PID is visible in any window.
   @spec buffer_visible_in_window?(state(), pid()) :: boolean()
   defp buffer_visible_in_window?(state, buf_pid) do
-    Enum.any?(state.windows.map, fn {_id, win} -> win.buffer == buf_pid end)
+    Enum.any?(state.workspace.windows.map, fn {_id, win} -> win.buffer == buf_pid end)
   end
 
   # ── Window resize ────────────────────────────────────────────────────────
 
   @spec resize_all_windows(state()) :: state()
-  defp resize_all_windows(%{windows: %{tree: nil}} = state), do: state
+  defp resize_all_windows(%EditorState{workspace: %{windows: %{tree: nil}}} = state), do: state
 
   defp resize_all_windows(state) do
     layout = Layout.get(state)
@@ -2174,11 +2181,11 @@ defmodule Minga.Editor do
   # ── File tree helpers ────────────────────────────────────────────────────
 
   @spec refresh_tree_git_status(state()) :: state()
-  defp refresh_tree_git_status(%{file_tree: %{tree: nil}} = state), do: state
+  defp refresh_tree_git_status(%EditorState{workspace: %{file_tree: %{tree: nil}}} = state), do: state
 
-  defp refresh_tree_git_status(%{file_tree: %{tree: tree}} = state) do
+  defp refresh_tree_git_status(%EditorState{workspace: %{file_tree: %{tree: tree}}} = state) do
     updated_tree = Minga.FileTree.refresh_git_status(tree)
-    put_in(state.file_tree.tree, updated_tree)
+    put_in(state.workspace.file_tree.tree, updated_tree)
   end
 
   # ── Public housekeeping API for Input.Router ───────────────────────────────
@@ -2188,9 +2195,9 @@ defmodule Minga.Editor do
   defdelegate do_accept_completion(state, completion), to: CompletionHandling, as: :accept
 
   @doc false
-  @spec do_maybe_handle_completion(state(), boolean(), non_neg_integer(), non_neg_integer()) ::
+  @spec do_maybe_handle_completion(state(), atom(), non_neg_integer(), non_neg_integer()) ::
           state()
-  defdelegate do_maybe_handle_completion(state, was_inserting, codepoint, modifiers),
+  defdelegate do_maybe_handle_completion(state, old_mode, codepoint, modifiers),
     to: CompletionHandling,
     as: :maybe_handle
 

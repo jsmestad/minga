@@ -37,7 +37,7 @@ defmodule Minga.Input.AgentNav do
   @impl true
   @spec handle_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           Minga.Input.Handler.result()
-  def handle_key(%{keymap_scope: :agent} = state, cp, mods) do
+  def handle_key(%EditorState{workspace: %{keymap_scope: :agent}} = state, cp, mods) do
     panel = AgentAccess.panel(state)
 
     if panel.input_focused do
@@ -118,8 +118,8 @@ defmodule Minga.Input.AgentNav do
           non_neg_integer()
         ) :: EditorState.t()
   def delegate_to_mode_fsm(state, chat_buffer, cp, mods) do
-    real_active = state.buffers.active
-    state = put_in(state.buffers.active, chat_buffer)
+    real_active = state.workspace.buffers.active
+    state = put_in(state.workspace.buffers.active, chat_buffer)
 
     state = Minga.Editor.do_handle_key(state, cp, mods)
 
@@ -127,7 +127,7 @@ defmodule Minga.Input.AgentNav do
     # (chat content is read-only). Other modes like operator-pending, search,
     # and command are also allowed since they're needed for full vim grammar.
     state =
-      if Minga.Editor.Editing.inserting?(state) do
+      if state.workspace.vim.mode == :insert do
         EditorState.transition_mode(state, :normal)
       else
         state
@@ -141,8 +141,8 @@ defmodule Minga.Input.AgentNav do
 
     # Only restore the original active buffer if a command didn't
     # legitimately change it (e.g., leader commands like :new_buffer).
-    if state.buffers.active == chat_buffer do
-      put_in(state.buffers.active, real_active)
+    if state.workspace.buffers.active == chat_buffer do
+      put_in(state.workspace.buffers.active, real_active)
     else
       state
     end

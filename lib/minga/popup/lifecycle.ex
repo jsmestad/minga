@@ -81,7 +81,7 @@ defmodule Minga.Popup.Lifecycle do
   """
   @spec close_popup(state(), Window.id()) :: state()
   def close_popup(state, window_id) when is_integer(window_id) do
-    case Map.fetch(state.windows.map, window_id) do
+    case Map.fetch(state.workspace.windows.map, window_id) do
       {:ok, %Window{popup_meta: %PopupActive{} = meta}} ->
         do_close(state, window_id, meta)
 
@@ -98,7 +98,7 @@ defmodule Minga.Popup.Lifecycle do
   """
   @spec close_active_popup(state()) :: state()
   def close_active_popup(state) do
-    close_popup(state, state.windows.active)
+    close_popup(state, state.workspace.windows.active)
   end
 
   @doc """
@@ -110,7 +110,7 @@ defmodule Minga.Popup.Lifecycle do
   @spec close_all_popups(state()) :: state()
   def close_all_popups(state) do
     popup_ids =
-      state.windows.map
+      state.workspace.windows.map
       |> Enum.filter(fn {_id, w} -> Window.popup?(w) end)
       |> Enum.sort_by(fn {id, _w} -> id end, :desc)
       |> Enum.map(fn {id, _w} -> id end)
@@ -123,7 +123,7 @@ defmodule Minga.Popup.Lifecycle do
   """
   @spec active_is_popup?(state()) :: boolean()
   def active_is_popup?(state) do
-    case Map.fetch(state.windows.map, state.windows.active) do
+    case Map.fetch(state.workspace.windows.map, state.workspace.windows.active) do
       {:ok, window} -> Window.popup?(window)
       :error -> false
     end
@@ -138,7 +138,7 @@ defmodule Minga.Popup.Lifecycle do
   """
   @spec render_float_overlays(state()) :: [DisplayList.Overlay.t()]
   def render_float_overlays(state) do
-    state.windows.map
+    state.workspace.windows.map
     |> Enum.filter(fn {_id, w} -> float_popup?(w) end)
     |> Enum.map(fn {_id, window} -> render_float_overlay(state, window) end)
   end
@@ -150,7 +150,7 @@ defmodule Minga.Popup.Lifecycle do
   """
   @spec click_inside_float?(state(), integer(), integer()) :: boolean()
   def click_inside_float?(state, row, col) do
-    state.windows.map
+    state.workspace.windows.map
     |> Enum.any?(fn {_id, w} ->
       float_popup?(w) and inside_float_box?(state, w, row, col)
     end)
@@ -163,7 +163,7 @@ defmodule Minga.Popup.Lifecycle do
   @spec inside_float_box?(state(), Window.t(), integer(), integer()) :: boolean()
   defp inside_float_box?(state, window, row, col) do
     rule = window.popup_meta.rule
-    vp = state.viewport
+    vp = state.workspace.viewport
 
     box_w = resolve_float_dim(float_width(rule), vp.cols)
     box_h = resolve_float_dim(float_height(rule), vp.rows)
@@ -182,7 +182,7 @@ defmodule Minga.Popup.Lifecycle do
   @spec render_float_overlay(state(), Window.t()) :: DisplayList.Overlay.t()
   defp render_float_overlay(state, window) do
     rule = window.popup_meta.rule
-    vp = state.viewport
+    vp = state.workspace.viewport
     theme = state.theme.popup
 
     # Build content draws from the buffer
@@ -264,7 +264,7 @@ defmodule Minga.Popup.Lifecycle do
   # ── Private ────────────────────────────────────────────────────────────────
 
   @spec apply_rule(state(), Rule.t(), pid()) :: state()
-  defp apply_rule(%{windows: ws} = state, %Rule{display: :split} = rule, buffer_pid) do
+  defp apply_rule(%EditorState{workspace: %{windows: ws}} = state, %Rule{display: :split} = rule, buffer_pid) do
     previous_active = ws.active
 
     # Create the popup window
@@ -297,12 +297,12 @@ defmodule Minga.Popup.Lifecycle do
         new_map = Map.put(ws.map, next_id, popup_window)
         new_windows = %{ws | tree: new_tree, map: new_map, next_id: next_id + 1}
 
-        state = %{state | windows: new_windows}
+        state = %{state | workspace: %{state.workspace | windows: new_windows}}
 
         # Optionally switch focus to the popup
         state =
           if rule.focus do
-            %{state | windows: %{state.windows | active: next_id}}
+            %{state | workspace: %{state.workspace | windows: %{state.workspace.windows | active: next_id}}}
           else
             state
           end
@@ -314,7 +314,7 @@ defmodule Minga.Popup.Lifecycle do
     end
   end
 
-  defp apply_rule(%{windows: ws} = state, %Rule{display: :float} = rule, buffer_pid) do
+  defp apply_rule(%EditorState{workspace: %{windows: ws}} = state, %Rule{display: :float} = rule, buffer_pid) do
     previous_active = ws.active
 
     # Create the popup window (not added to the tree, only the map)
@@ -329,12 +329,12 @@ defmodule Minga.Popup.Lifecycle do
     # Add window to map but NOT to the tree (floats overlay the layout)
     new_map = Map.put(ws.map, next_id, popup_window)
     new_windows = %{ws | map: new_map, next_id: next_id + 1}
-    state = %{state | windows: new_windows}
+    state = %{state | workspace: %{state.workspace | windows: new_windows}}
 
     # Optionally switch focus to the popup
     state =
       if rule.focus do
-        %{state | windows: %{state.windows | active: next_id}}
+        %{state | workspace: %{state.workspace | windows: %{state.workspace.windows | active: next_id}}}
       else
         state
       end
@@ -344,7 +344,7 @@ defmodule Minga.Popup.Lifecycle do
 
   @spec do_close(state(), Window.id(), PopupActive.t()) :: state()
   defp do_close(state, window_id, %PopupActive{} = meta) do
-    ws = state.windows
+    ws = state.workspace.windows
 
     # If the popup is focused, switch focus to the previously active window
     state =
@@ -357,12 +357,12 @@ defmodule Minga.Popup.Lifecycle do
             find_non_popup_window(ws.map, window_id)
           end
 
-        %{state | windows: %{ws | active: restore_id}}
+        %{state | workspace: %{state.workspace | windows: %{ws | active: restore_id}}}
       else
         state
       end
 
-    ws = state.windows
+    ws = state.workspace.windows
 
     # Remove just this popup's window from the current tree (like
     # delete-window in Emacs). We used to restore a full tree snapshot,
@@ -376,7 +376,7 @@ defmodule Minga.Popup.Lifecycle do
     # Remove the popup window from the map
     new_map = Map.delete(ws.map, window_id)
     new_windows = %{ws | tree: new_tree, map: new_map}
-    state = %{state | windows: new_windows}
+    state = %{state | workspace: %{state.workspace | windows: new_windows}}
 
     Layout.invalidate(state)
   end
@@ -430,7 +430,7 @@ defmodule Minga.Popup.Lifecycle do
   defp compute_popup_size({:cols, n}, _total), do: max(n, 1)
 
   @spec viewport_size(state()) :: {pos_integer(), pos_integer()}
-  defp viewport_size(%{viewport: %Viewport{rows: r, cols: c}}), do: {r, c}
+  defp viewport_size(%EditorState{workspace: %{viewport: %Viewport{rows: r, cols: c}}}), do: {r, c}
   defp viewport_size(_state), do: {24, 80}
 
   @spec find_non_popup_window(%{Window.id() => Window.t()}, Window.id()) :: Window.id()

@@ -28,8 +28,7 @@ defmodule Minga.Input.Popup do
 
       meta ->
         # Only intercept the quit key in normal mode (not insert mode)
-        if Minga.Editor.Editing.mode(state) == :normal and
-             matches_quit_key?(meta.rule.quit_key, codepoint) do
+        if state.workspace.vim.mode == :normal and matches_quit_key?(meta.rule.quit_key, codepoint) do
           {:handled, Lifecycle.close_active_popup(state)}
         else
           {:passthrough, state}
@@ -70,7 +69,7 @@ defmodule Minga.Input.Popup do
   # ── Private ────────────────────────────────────────────────────────────────
 
   @spec find_float_popup_id(EditorState.t()) :: integer() | nil
-  defp find_float_popup_id(%{windows: %{map: map}}) do
+  defp find_float_popup_id(%EditorState{workspace: %{windows: %{map: map}}}) do
     Enum.find_value(map, fn
       {id, %Window{popup_meta: %Minga.Popup.Active{rule: %Minga.Popup.Rule{display: :float}}}} ->
         id
@@ -81,7 +80,7 @@ defmodule Minga.Input.Popup do
   end
 
   @spec active_popup_meta(EditorState.t()) :: Minga.Popup.Active.t() | nil
-  defp active_popup_meta(%{windows: %{map: map, active: active_id}}) do
+  defp active_popup_meta(%EditorState{workspace: %{windows: %{map: map, active: active_id}}}) do
     case Map.fetch(map, active_id) do
       {:ok, %Window{popup_meta: meta}} -> meta
       _ -> nil

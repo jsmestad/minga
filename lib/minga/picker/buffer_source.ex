@@ -38,7 +38,7 @@ defmodule Minga.Picker.BufferSource do
     `*Warnings*`, etc.) in the results. Defaults to `false`.
   """
   @spec build_candidates(term(), keyword()) :: [Item.t()]
-  def build_candidates(%{buffers: buffers_state}, opts \\ []) do
+  def build_candidates(%EditorState{workspace: %{buffers: buffers_state}}, opts \\ []) do
     %{list: buffers} = buffers_state
     include_special = Keyword.get(opts, :include_special, false)
 
@@ -105,7 +105,7 @@ defmodule Minga.Picker.BufferSource do
   def on_action(
         :kill,
         %Item{id: idx},
-        %{buffers: %Minga.Editor.State.Buffers{list: buffers} = bs} = state
+        %EditorState{workspace: %{buffers: %Minga.Editor.State.Buffers{list: buffers} = bs}} = state
       )
       when is_integer(idx) and idx < length(buffers) do
     alias Minga.Editor.State.Buffers
@@ -128,7 +128,7 @@ defmodule Minga.Picker.BufferSource do
         new_active = min(bs.active_index, length(new_buffers) - 1)
         new_bs = %Buffers{bs | list: new_buffers}
 
-        %{state | buffers: Buffers.switch_to(new_bs, new_active)}
+        %{state | workspace: %{state.workspace | buffers: Buffers.switch_to(new_bs, new_active)}}
         |> EditorState.sync_active_window_buffer()
     end
   end

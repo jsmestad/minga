@@ -174,7 +174,7 @@ defmodule Minga.Editor.AgentLifecycle do
 
   defp maybe_load_auto_context(state, _flags) do
     auto_context = ConfigOptions.get(:agent_auto_context)
-    active_buf = state.buffers.active
+    active_buf = state.workspace.buffers.active
 
     if auto_context and active_buf do
       load_buffer_as_preview(state, active_buf)
@@ -286,7 +286,7 @@ defmodule Minga.Editor.AgentLifecycle do
           MarkdownHighlight.styled_lines() | nil
         ]
   defp compute_styled_messages(state, buffer, messages) do
-    highlight = Map.get(state.highlight.highlights, buffer)
+    highlight = Map.get(state.workspace.highlight.highlights, buffer)
     theme_syntax = state.theme.syntax
 
     # Get the full buffer text and per-message line offsets so we can

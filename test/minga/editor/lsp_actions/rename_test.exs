@@ -8,17 +8,18 @@ defmodule Minga.Editor.LspActions.RenameTest do
   alias Minga.Editor.State.WhichKey
   alias Minga.Editor.Viewport
   alias Minga.Editor.VimState
+  alias Minga.Test.StateFactory
 
   defp stub_state do
-    %{
+    StateFactory.build(
       status_msg: nil,
-      buffers: %Buffers{},
       picker_ui: %PickerState{},
       whichkey: %WhichKey{},
-      vim: VimState.new(),
       theme: Minga.Theme.get!(:doom_one),
+      buffers: %Buffers{},
+      vim: VimState.new(),
       viewport: %Viewport{rows: 40, cols: 120, top: 0, left: 0}
-    }
+    )
   end
 
   describe "handle_prepare_rename_response/2" do
@@ -42,8 +43,8 @@ defmodule Minga.Editor.LspActions.RenameTest do
       }
 
       state = LspActions.handle_prepare_rename_response(stub_state(), {:ok, result})
-      assert state.vim.mode == :command
-      assert state.vim.mode_state.input == "rename my_func"
+      assert state.workspace.vim.mode == :command
+      assert state.workspace.vim.mode_state.input == "rename my_func"
     end
 
     test "prepare with range-only response enters command mode" do
@@ -53,8 +54,8 @@ defmodule Minga.Editor.LspActions.RenameTest do
       }
 
       state = LspActions.handle_prepare_rename_response(stub_state(), {:ok, result})
-      assert state.vim.mode == :command
-      assert state.vim.mode_state.input == "rename "
+      assert state.workspace.vim.mode == :command
+      assert state.workspace.vim.mode_state.input == "rename "
     end
   end
 

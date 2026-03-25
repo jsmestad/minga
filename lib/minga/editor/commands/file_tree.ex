@@ -18,18 +18,18 @@ defmodule Minga.Editor.Commands.FileTree do
   @type state :: EditorState.t()
 
   @spec toggle(state()) :: state()
-  def toggle(%{file_tree: %{tree: nil}} = state), do: open(state)
+  def toggle(%EditorState{workspace: %{file_tree: %{tree: nil}}} = state), do: open(state)
 
-  def toggle(%{file_tree: %{buffer: buf}} = state) when is_pid(buf) do
+  def toggle(%EditorState{workspace: %{file_tree: %{buffer: buf}}} = state) when is_pid(buf) do
     GenServer.stop(buf, :normal)
 
-    %{state | file_tree: FileTreeState.close(state.file_tree), keymap_scope: restore_scope(state)}
+    %{state | workspace: %{state.workspace | file_tree: FileTreeState.close(state.workspace.file_tree), keymap_scope: restore_scope(state)}}
     |> Layout.invalidate()
     |> EditorState.invalidate_all_windows()
   end
 
   def toggle(state) do
-    %{state | file_tree: FileTreeState.close(state.file_tree), keymap_scope: restore_scope(state)}
+    %{state | workspace: %{state.workspace | file_tree: FileTreeState.close(state.workspace.file_tree), keymap_scope: restore_scope(state)}}
     |> Layout.invalidate()
     |> EditorState.invalidate_all_windows()
   end
@@ -38,19 +38,19 @@ defmodule Minga.Editor.Commands.FileTree do
   defp restore_scope(state), do: EditorState.scope_for_active_window(state)
 
   @spec open_or_toggle(state()) :: state()
-  def open_or_toggle(%{file_tree: %{tree: nil}} = state), do: state
+  def open_or_toggle(%EditorState{workspace: %{file_tree: %{tree: nil}}} = state), do: state
 
-  def open_or_toggle(%{file_tree: %{tree: tree}} = state) do
+  def open_or_toggle(%EditorState{workspace: %{file_tree: %{tree: tree}}} = state) do
     case FileTree.selected_entry(tree) do
       %{dir?: true} ->
         new_tree = FileTree.toggle_expand(tree)
         sync_and_update(state, new_tree)
 
       %{dir?: false, path: path} ->
-        state = put_in(state.file_tree.focused, false)
+        state = put_in(state.workspace.file_tree.focused, false)
         # Opening a file buffer always uses :editor scope (not restore_scope)
         # because the new buffer becomes the active window content.
-        state = %{state | keymap_scope: :editor}
+        state = %{state | workspace: %{state.workspace | keymap_scope: :editor}}
         open_file_from_tree(state, path, tree)
 
       nil ->
@@ -59,41 +59,41 @@ defmodule Minga.Editor.Commands.FileTree do
   end
 
   @spec toggle_directory(state()) :: state()
-  def toggle_directory(%{file_tree: %{tree: nil}} = state), do: state
+  def toggle_directory(%EditorState{workspace: %{file_tree: %{tree: nil}}} = state), do: state
 
-  def toggle_directory(%{file_tree: %{tree: tree}} = state) do
+  def toggle_directory(%EditorState{workspace: %{file_tree: %{tree: tree}}} = state) do
     sync_and_update(state, FileTree.toggle_expand(tree))
   end
 
   @spec expand(state()) :: state()
-  def expand(%{file_tree: %{tree: nil}} = state), do: state
+  def expand(%EditorState{workspace: %{file_tree: %{tree: nil}}} = state), do: state
 
-  def expand(%{file_tree: %{tree: tree}} = state),
+  def expand(%EditorState{workspace: %{file_tree: %{tree: tree}}} = state),
     do: sync_and_update(state, FileTree.expand(tree))
 
   @spec collapse(state()) :: state()
-  def collapse(%{file_tree: %{tree: nil}} = state), do: state
+  def collapse(%EditorState{workspace: %{file_tree: %{tree: nil}}} = state), do: state
 
-  def collapse(%{file_tree: %{tree: tree}} = state),
+  def collapse(%EditorState{workspace: %{file_tree: %{tree: tree}}} = state),
     do: sync_and_update(state, FileTree.collapse(tree))
 
   @spec toggle_hidden(state()) :: state()
-  def toggle_hidden(%{file_tree: %{tree: nil}} = state), do: state
+  def toggle_hidden(%EditorState{workspace: %{file_tree: %{tree: nil}}} = state), do: state
 
-  def toggle_hidden(%{file_tree: %{tree: tree}} = state),
+  def toggle_hidden(%EditorState{workspace: %{file_tree: %{tree: tree}}} = state),
     do: sync_and_update(state, FileTree.toggle_hidden(tree))
 
   @spec collapse_all(state()) :: state()
-  def collapse_all(%{file_tree: %{tree: nil}} = state), do: state
+  def collapse_all(%EditorState{workspace: %{file_tree: %{tree: nil}}} = state), do: state
 
-  def collapse_all(%{file_tree: %{tree: tree}} = state) do
+  def collapse_all(%EditorState{workspace: %{file_tree: %{tree: tree}}} = state) do
     sync_and_update(state, FileTree.collapse_all(tree))
   end
 
   @spec refresh(state()) :: state()
-  def refresh(%{file_tree: %{tree: nil}} = state), do: state
+  def refresh(%EditorState{workspace: %{file_tree: %{tree: nil}}} = state), do: state
 
-  def refresh(%{file_tree: %{tree: tree}} = state) do
+  def refresh(%EditorState{workspace: %{file_tree: %{tree: tree}}} = state) do
     tree = tree |> FileTree.refresh() |> FileTree.refresh_git_status()
     sync_and_update(state, tree)
   end
@@ -103,7 +103,7 @@ defmodule Minga.Editor.Commands.FileTree do
   Requires a name prompt UI (not yet implemented). Logs intent to *Messages*.
   """
   @spec new_file(state()) :: state()
-  def new_file(%{file_tree: %{tree: nil}} = state), do: state
+  def new_file(%EditorState{workspace: %{file_tree: %{tree: nil}}} = state), do: state
 
   def new_file(state) do
     Minga.Editor.log_to_messages(
@@ -118,7 +118,7 @@ defmodule Minga.Editor.Commands.FileTree do
   Requires a name prompt UI (not yet implemented). Logs intent to *Messages*.
   """
   @spec new_folder(state()) :: state()
-  def new_folder(%{file_tree: %{tree: nil}} = state), do: state
+  def new_folder(%EditorState{workspace: %{file_tree: %{tree: nil}}} = state), do: state
 
   def new_folder(state) do
     Minga.Editor.log_to_messages(
@@ -135,7 +135,7 @@ defmodule Minga.Editor.Commands.FileTree do
   """
   @spec reveal_active_file(state()) :: state()
   def reveal_active_file(state) do
-    # When the file tree is focused, state.buffers.active points at the
+    # When the file tree is focused, state.workspace.buffers.active points at the
     # tree's backing buffer (no file path). Use the active window's buffer
     # instead, which always holds the real editing buffer.
     buf = active_editing_buffer(state)
@@ -146,11 +146,11 @@ defmodule Minga.Editor.Commands.FileTree do
 
       path ->
         state = ensure_tree_open(state)
-        tree = FileTree.reveal(state.file_tree.tree, path)
+        tree = FileTree.reveal(state.workspace.file_tree.tree, path)
         state = sync_and_update(state, tree)
-        state = put_in(state.file_tree.focused, true)
+        state = put_in(state.workspace.file_tree.focused, true)
 
-        %{state | keymap_scope: :file_tree}
+        %{state | workspace: %{state.workspace | keymap_scope: :file_tree}}
         |> Layout.invalidate()
         |> EditorState.invalidate_all_windows()
     end
@@ -160,20 +160,20 @@ defmodule Minga.Editor.Commands.FileTree do
   defp active_editing_buffer(state) do
     case EditorState.active_window_struct(state) do
       %{buffer: buf} when is_pid(buf) -> buf
-      _ -> state.buffers.active
+      _ -> state.workspace.buffers.active
     end
   end
 
   @spec close(state()) :: state()
-  def close(%{file_tree: %{buffer: buf}} = state) when is_pid(buf) do
+  def close(%EditorState{workspace: %{file_tree: %{buffer: buf}}} = state) when is_pid(buf) do
     GenServer.stop(buf, :normal)
-    %{state | file_tree: FileTreeState.close(state.file_tree), keymap_scope: restore_scope(state)}
+    %{state | workspace: %{state.workspace | file_tree: FileTreeState.close(state.workspace.file_tree), keymap_scope: restore_scope(state)}}
   end
 
   def close(state),
     do: %{
       state
-      | file_tree: FileTreeState.close(state.file_tree),
+      | file_tree: FileTreeState.close(state.workspace.file_tree),
         keymap_scope: restore_scope(state)
     }
 
@@ -186,7 +186,7 @@ defmodule Minga.Editor.Commands.FileTree do
   defp close_git_status_if_open(%{git_status_panel: nil} = state), do: state
 
   defp close_git_status_if_open(state),
-    do: %{state | git_status_panel: nil, keymap_scope: :editor}
+    do: %{state | git_status_panel: nil, workspace: %{state.workspace | keymap_scope: :editor}}
 
   # Opens a file from the tree, reusing an existing buffer when one exists
   # for the same path. Without the dedup check, the file tree creates
@@ -205,7 +205,7 @@ defmodule Minga.Editor.Commands.FileTree do
       idx ->
         # If the buffer already has a tab, switch to that tab (correctly
         # leaves agent view if needed). Otherwise fall back to buffer switch.
-        pid = Enum.at(state.buffers.list, idx)
+        pid = Enum.at(state.workspace.buffers.list, idx)
         tab = EditorState.find_tab_by_buffer(state, pid)
 
         state =
@@ -215,14 +215,14 @@ defmodule Minga.Editor.Commands.FileTree do
             EditorState.switch_buffer(state, idx)
           end
 
-        put_in(state.file_tree.tree, FileTree.reveal(tree, path))
+        put_in(state.workspace.file_tree.tree, FileTree.reveal(tree, path))
     end
   end
 
   # Opens the tree if not already open. Used by reveal_active_file to
   # ensure the tree exists before calling FileTree.reveal.
   @spec ensure_tree_open(state()) :: state()
-  defp ensure_tree_open(%{file_tree: %{tree: %FileTree{}}} = state), do: state
+  defp ensure_tree_open(%EditorState{workspace: %{file_tree: %{tree: %FileTree{}}}} = state), do: state
   defp ensure_tree_open(state), do: open(state)
 
   @spec open(state()) :: state()
@@ -232,10 +232,10 @@ defmodule Minga.Editor.Commands.FileTree do
     root = Minga.Project.root() || File.cwd!()
     tree = FileTree.new(root)
     tree = FileTree.refresh_git_status(tree)
-    tree = reveal_active(tree, state.buffers.active)
+    tree = reveal_active(tree, state.workspace.buffers.active)
     buf = BufferSync.start_buffer(tree)
 
-    %{state | file_tree: FileTreeState.open(state.file_tree, tree, buf), keymap_scope: :file_tree}
+    %{state | workspace: %{state.workspace | file_tree: FileTreeState.open(state.workspace.file_tree, tree, buf), keymap_scope: :file_tree}}
     |> Layout.invalidate()
     |> EditorState.invalidate_all_windows()
   end
@@ -251,13 +251,13 @@ defmodule Minga.Editor.Commands.FileTree do
   end
 
   @spec sync_and_update(state(), FileTree.t()) :: state()
-  defp sync_and_update(%{file_tree: %{buffer: buf}} = state, new_tree) when is_pid(buf) do
+  defp sync_and_update(%EditorState{workspace: %{file_tree: %{buffer: buf}}} = state, new_tree) when is_pid(buf) do
     BufferSync.sync(buf, new_tree)
-    put_in(state.file_tree.tree, new_tree)
+    put_in(state.workspace.file_tree.tree, new_tree)
   end
 
   defp sync_and_update(state, new_tree) do
-    put_in(state.file_tree.tree, new_tree)
+    put_in(state.workspace.file_tree.tree, new_tree)
   end
 
   @impl Minga.Command.Provider

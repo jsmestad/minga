@@ -30,7 +30,7 @@ defmodule Minga.Picker.WorkspaceSymbolSource do
 
   @impl true
   @spec candidates(term()) :: [Item.t()]
-  def candidates(%{buffers: %{active: buf}} = _state) when is_pid(buf) do
+  def candidates(%EditorState{workspace: %{buffers: %{active: buf}}} = _state) when is_pid(buf) do
     # Send a synchronous workspace/symbol request with empty query.
     # Most servers return commonly-used symbols for "".
     case lsp_client_for(buf) do
@@ -56,7 +56,7 @@ defmodule Minga.Picker.WorkspaceSymbolSource do
     state = set_jump_mark(state)
     state = open_or_switch_to_file(state, path)
 
-    case state.buffers.active do
+    case state.workspace.buffers.active do
       nil -> state
       buf -> BufferServer.move_to(buf, {line, col})
     end
@@ -114,9 +114,9 @@ defmodule Minga.Picker.WorkspaceSymbolSource do
   end
 
   @spec set_jump_mark(EditorState.t()) :: EditorState.t()
-  defp set_jump_mark(%{buffers: %{active: buf}} = state) when is_pid(buf) do
+  defp set_jump_mark(%EditorState{workspace: %{buffers: %{active: buf}}} = state) when is_pid(buf) do
     pos = BufferServer.cursor(buf)
-    %{state | vim: %{state.vim | last_jump_pos: pos}}
+    %{state | workspace: %{state.workspace | vim: %{state.workspace.vim | last_jump_pos: pos}}}
   end
 
   defp set_jump_mark(state), do: state
@@ -124,7 +124,7 @@ defmodule Minga.Picker.WorkspaceSymbolSource do
   @spec open_or_switch_to_file(EditorState.t(), String.t()) :: EditorState.t()
   defp open_or_switch_to_file(state, file_path) do
     idx =
-      Enum.find_index(state.buffers.list, fn buf ->
+      Enum.find_index(state.workspace.buffers.list, fn buf ->
         try do
           BufferServer.file_path(buf) == file_path
         catch

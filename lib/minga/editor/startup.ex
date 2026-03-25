@@ -83,15 +83,13 @@ defmodule Minga.Editor.Startup do
     windows =
       if initial_window, do: %{initial_window_id => initial_window}, else: %{}
 
-    state = %EditorState{
-      backend: backend,
+    workspace = %Minga.Workspace.State{
       buffers: %Buffers{
         active: active_buf,
         list: buffers,
         active_index: 0,
         messages: messages_buf
       },
-      port_manager: port_manager,
       viewport: Viewport.new(height, width),
       vim: VimState.new(),
       windows: %Windows{
@@ -100,7 +98,13 @@ defmodule Minga.Editor.Startup do
         active: initial_window_id,
         next_id: initial_window_id + 1
       },
-      keymap_scope: keymap_scope,
+      keymap_scope: keymap_scope
+    }
+
+    state = %EditorState{
+      backend: backend,
+      workspace: workspace,
+      port_manager: port_manager,
       focus_stack: Minga.Input.default_stack(),
       dashboard: dashboard,
       swap_dir: Keyword.get(opts, :swap_dir),

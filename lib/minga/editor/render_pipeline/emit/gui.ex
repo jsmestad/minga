@@ -204,7 +204,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
   defp build_gui_agent_groups_cmd(_), do: nil
 
   @spec active_window_buffer(state()) :: pid() | nil
-  defp active_window_buffer(%{windows: %{active: win_id, map: map}}) do
+  defp active_window_buffer(%EditorState{workspace: %{windows: %{active: win_id, map: map}}}) do
     case Map.get(map, win_id) do
       %{buffer: buf} when is_pid(buf) -> buf
       _ -> nil
@@ -214,7 +214,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
   # ── File tree ──
 
   @spec build_gui_file_tree_cmd(state()) :: binary() | nil
-  defp build_gui_file_tree_cmd(%{file_tree: %{tree: %Minga.FileTree{} = tree}}) do
+  defp build_gui_file_tree_cmd(%EditorState{workspace: %{file_tree: %{tree: %Minga.FileTree{} = tree}}}) do
     fp = :erlang.phash2(tree)
 
     if fp != Process.get(:last_gui_file_tree_fp) do
@@ -271,7 +271,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
   # ── Completion ──
 
   @spec build_gui_completion_cmd(state()) :: binary() | nil
-  defp build_gui_completion_cmd(%{completion: comp} = state) do
+  defp build_gui_completion_cmd(%EditorState{workspace: %{completion: comp}} = state) do
     {cursor_row, cursor_col} = current_cursor_screen_pos(state)
     fp = :erlang.phash2({comp, cursor_row, cursor_col})
 
@@ -287,11 +287,11 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
 
     case Layout.active_window_layout(layout, state) do
       %{content: {row, col, _w, _h}} ->
-        buf = state.buffers.active
+        buf = state.workspace.buffers.active
 
         if buf do
           {line, column} = BufferServer.cursor(buf)
-          vp = state.viewport
+          vp = state.workspace.viewport
           {row + line - vp.top, col + column}
         else
           {row, col}
@@ -309,7 +309,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
     file_path = active_buffer_path(state)
 
     root =
-      case state.file_tree do
+      case state.workspace.file_tree do
         %{tree: %{root: r}} -> r
         _ -> ""
       end
@@ -324,7 +324,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
 
   @spec active_buffer_path(state()) :: String.t() | nil
   defp active_buffer_path(state) do
-    case state.buffers.active do
+    case state.workspace.buffers.active do
       nil -> nil
       buf -> BufferServer.file_path(buf)
     end
@@ -437,7 +437,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
 
   # For buffer index items, use the buffer directly.
   defp build_preview_for_item(state, idx) when is_integer(idx) do
-    case Enum.at(state.buffers.list, idx) do
+    case Enum.at(state.workspace.buffers.list, idx) do
       nil -> nil
       buf_pid -> preview_from_buffer(state, buf_pid)
     end
@@ -447,7 +447,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
 
   @spec preview_from_buffer(state(), pid()) :: [[ProtocolGUI.preview_segment()]] | nil
   defp preview_from_buffer(state, buf_pid) do
-    case Map.get(state.highlight.highlights, buf_pid) do
+    case Map.get(state.workspace.highlight.highlights, buf_pid) do
       nil ->
         path = safe_file_path(buf_pid)
         if path, do: read_file_preview(path, state), else: nil
@@ -460,11 +460,11 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
   # Find a buffer PID for a given file path, along with its highlight state.
   @spec find_buffer_for_path(state(), String.t()) :: {pid(), Minga.Highlight.t() | nil} | nil
   defp find_buffer_for_path(state, abs_path) do
-    Enum.find_value(state.buffers.list, fn buf_pid ->
+    Enum.find_value(state.workspace.buffers.list, fn buf_pid ->
       try do
         case BufferServer.file_path(buf_pid) do
           ^abs_path ->
-            highlight = Map.get(state.highlight.highlights, buf_pid)
+            highlight = Map.get(state.workspace.highlight.highlights, buf_pid)
             {buf_pid, highlight}
 
           _ ->
@@ -548,7 +548,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
 
   @spec build_gui_agent_chat_cmd(state()) :: binary() | nil
   defp build_gui_agent_chat_cmd(state) do
-    active_window = Map.get(state.windows.map, state.windows.active)
+    active_window = Map.get(state.workspace.windows.map, state.workspace.windows.active)
     is_agent_chat = active_window != nil && Content.agent_chat?(active_window.content)
     session = state.agent.session
 
@@ -563,8 +563,8 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
     # including collapse toggles, ensuring the fingerprint changes.
     {fp, prompt_text} =
       if is_agent_chat && session do
-        panel = state.agent_ui.panel
-        view = state.agent_ui.view
+        panel = state.workspace.agent_ui.panel
+        view = state.workspace.agent_ui.view
         styled_len = length(panel.cached_styled_messages || [])
         text = safe_prompt_content(panel.prompt_buffer)
 
@@ -602,7 +602,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
 
   @spec build_agent_chat_data(state(), String.t()) :: map()
   defp build_agent_chat_data(state, prompt_text) do
-    active_window = Map.get(state.windows.map, state.windows.active)
+    active_window = Map.get(state.workspace.windows.map, state.workspace.windows.active)
     is_agent_chat = active_window != nil && Content.agent_chat?(active_window.content)
     session = state.agent.session
 
@@ -616,10 +616,10 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
 
       # Use cached styled runs for assistant messages when available.
       # This avoids recomputing tree-sitter/markdown styling per frame.
-      styled_cache = state.agent_ui.panel.cached_styled_messages
+      styled_cache = state.workspace.agent_ui.panel.cached_styled_messages
       gui_messages = build_gui_messages(messages_with_ids, styled_cache)
 
-      view = state.agent_ui.view
+      view = state.workspace.agent_ui.view
       help_visible = view.help_visible
 
       help_groups =
@@ -633,7 +633,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
         visible: true,
         messages: gui_messages,
         status: state.agent.status || :idle,
-        model: state.agent_ui.panel.model_name,
+        model: state.workspace.agent_ui.panel.model_name,
         prompt: prompt_text,
         pending_approval: state.agent.pending_approval,
         help_visible: help_visible,
@@ -682,7 +682,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
   @spec build_gui_gutter_separator_commands(state()) :: [binary()]
   defp build_gui_gutter_separator_commands(state) do
     show? = Options.get(:show_gutter_separator)
-    active_window = Map.get(state.windows.map, state.windows.active)
+    active_window = Map.get(state.workspace.windows.map, state.workspace.windows.active)
     gutter_w = if active_window, do: active_window.last_gutter_w, else: 0
 
     # Only send separator when enabled, visible gutter (gutter_w > 0).
@@ -703,7 +703,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
 
   @spec build_gui_cursorline_commands(state()) :: [binary()]
   defp build_gui_cursorline_commands(state) do
-    active_window = Map.get(state.windows.map, state.windows.active)
+    active_window = Map.get(state.workspace.windows.map, state.workspace.windows.active)
     cursorline_enabled = Options.get(:cursorline)
 
     {row, bg_rgb} =
@@ -736,11 +736,11 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
     layout = Layout.get(state)
 
     Enum.flat_map(layout.window_layouts, fn {win_id, win_layout} ->
-      window = Map.get(state.windows.map, win_id)
+      window = Map.get(state.workspace.windows.map, win_id)
 
       # Skip agent chat windows (they don't have gutter)
       if window && is_pid(window.buffer) && !Content.agent_chat?(window.content) do
-        is_active = win_id == state.windows.active
+        is_active = win_id == state.workspace.windows.active
         gutter_data = build_window_gutter(state, window, win_id, win_layout, is_active)
         [ProtocolGUI.encode_gui_gutter(gutter_data)]
       else
@@ -934,7 +934,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
       # Collect vertical separators from the window tree
       verticals =
         ChromeHelpers.collect_vertical_separators(
-          state.windows.tree,
+          state.workspace.windows.tree,
           layout.editor_area
         )
 
@@ -976,7 +976,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
 
   @spec find_float_popup_window(state()) :: Minga.Editor.Window.t() | nil
   defp find_float_popup_window(state) do
-    Enum.find_value(state.windows.map, fn
+    Enum.find_value(state.workspace.windows.map, fn
       {_id, %{popup_meta: %Minga.Popup.Active{rule: %Minga.Popup.Rule{display: :float}}} = w} ->
         w
 
@@ -988,7 +988,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
   @spec build_float_popup_data(state(), Minga.Editor.Window.t()) :: ProtocolGUI.float_popup_data()
   defp build_float_popup_data(state, window) do
     rule = window.popup_meta.rule
-    vp = state.viewport
+    vp = state.workspace.viewport
 
     width = resolve_float_dim(rule, :width, vp.cols)
     height = resolve_float_dim(rule, :height, vp.rows)

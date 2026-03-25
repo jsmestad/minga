@@ -45,8 +45,8 @@ defmodule Minga.Integration.MouseTest do
 
     state = :sys.get_state(ctx.editor)
 
-    assert state.keymap_scope == :agent,
-           "expected :agent scope after SPC a a, got #{state.keymap_scope}"
+    assert state.workspace.keymap_scope == :agent,
+           "expected :agent scope after SPC a a, got #{state.workspace.keymap_scope}"
 
     {ctx, nil}
   end
@@ -207,7 +207,7 @@ defmodule Minga.Integration.MouseTest do
       {_ctx, _} = open_agent_split(ctx)
 
       state = :sys.get_state(ctx.editor)
-      assert state.keymap_scope == :agent
+      assert state.workspace.keymap_scope == :agent
     end
 
     test "toggling back to file tab restores :editor scope" do
@@ -218,8 +218,8 @@ defmodule Minga.Integration.MouseTest do
       send_keys_sync(ctx, "<Space>aa")
       state = :sys.get_state(ctx.editor)
 
-      assert state.keymap_scope == :editor,
-             "toggling back should restore :editor scope, got #{state.keymap_scope}"
+      assert state.workspace.keymap_scope == :editor,
+             "toggling back should restore :editor scope, got #{state.workspace.keymap_scope}"
     end
   end
 
@@ -261,7 +261,7 @@ defmodule Minga.Integration.MouseTest do
 
       state = :sys.get_state(ctx.editor)
 
-      assert state.agent_ui.panel.input_focused,
+      assert state.workspace.agent_ui.panel.input_focused,
              "clicking in the input area should focus the agent input"
     end
 
@@ -275,7 +275,7 @@ defmodule Minga.Integration.MouseTest do
 
       state = :sys.get_state(ctx.editor)
 
-      assert state.agent_ui.panel.input_focused,
+      assert state.workspace.agent_ui.panel.input_focused,
              "precondition: input should be focused after clicking input area"
 
       # Click in the chat area (upper portion) to unfocus
@@ -283,7 +283,7 @@ defmodule Minga.Integration.MouseTest do
 
       state = :sys.get_state(ctx.editor)
 
-      refute state.agent_ui.panel.input_focused,
+      refute state.workspace.agent_ui.panel.input_focused,
              "clicking in chat area should unfocus the agent input"
     end
   end
@@ -358,8 +358,8 @@ defmodule Minga.Integration.MouseTest do
       wait_until(
         ctx,
         fn state ->
-          state.file_tree != nil and
-            FileTree.open?(state.file_tree)
+          state.workspace.file_tree != nil and
+            FileTree.open?(state.workspace.file_tree)
         end,
         max_attempts: 50,
         interval_ms: 20,
@@ -403,8 +403,8 @@ defmodule Minga.Integration.MouseTest do
       send_mouse(ctx, 5, editor_col, :left)
       state = :sys.get_state(ctx.editor)
 
-      assert state.keymap_scope == :editor,
-             "clicking in editor area should set :editor scope, got #{state.keymap_scope}"
+      assert state.workspace.keymap_scope == :editor,
+             "clicking in editor area should set :editor scope, got #{state.workspace.keymap_scope}"
     end
   end
 
@@ -462,15 +462,15 @@ defmodule Minga.Integration.MouseTest do
       # Verify the editor is still in a consistent state after the full
       # housekeeping pipeline ran.
       state = :sys.get_state(ctx.editor)
-      assert state.vim.mode == :normal
-      assert state.buffers.active != nil
+      assert state.workspace.vim.mode == :normal
+      assert state.workspace.buffers.active != nil
     end
 
     test "mouse click after buffer switch runs shared housekeeping" do
       ctx = start_editor("first buffer content\nsecond line\nthird line")
 
       state = :sys.get_state(ctx.editor)
-      first_buffer = state.buffers.active
+      first_buffer = state.workspace.buffers.active
 
       # Add a second buffer and switch to it via state injection
       {:ok, second_buffer} =
@@ -481,11 +481,11 @@ defmodule Minga.Integration.MouseTest do
       end)
 
       state = :sys.get_state(ctx.editor)
-      assert state.buffers.active == second_buffer
+      assert state.workspace.buffers.active == second_buffer
 
       # Switch back to first buffer
       :sys.replace_state(ctx.editor, fn state ->
-        %{state | buffers: %{state.buffers | active: first_buffer, active_index: 0}}
+        %{state | workspace: %{state.workspace | buffers: %{state.workspace.buffers | active: first_buffer, active_index: 0}}}
       end)
 
       # Mouse click triggers the shared housekeeping pipeline, which

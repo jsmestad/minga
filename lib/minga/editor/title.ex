@@ -68,7 +68,7 @@ defmodule Minga.Editor.Title do
   @spec build_vars(state()) :: [{String.t(), String.t()}]
   defp build_vars(%EditorState{} = state) do
     ctx = EditorState.active_content_context(state)
-    mode_str = state |> Minga.Editor.Editing.mode() |> to_string() |> String.upcase()
+    mode_str = state.workspace.vim.mode |> to_string() |> String.upcase()
 
     case ctx.type do
       :agent ->
@@ -97,42 +97,31 @@ defmodule Minga.Editor.Title do
     end
   end
 
-  # Fallback for non-EditorState maps (e.g. tests passing plain maps)
-  defp build_vars(%{vim: %{mode: mode}} = state) do
-    buf = get_in(state, [:buffers, :active])
-
-    if is_pid(buf) do
-      build_vars_from_buffer(buf, mode)
-    else
-      default_vars(mode)
-    end
-  end
-
   defp build_vars(_state) do
     default_vars(:normal)
   end
 
-  @spec build_vars_from_buffer(pid(), atom()) :: [{String.t(), String.t()}]
-  defp build_vars_from_buffer(buf, mode) do
-    path = BufferServer.file_path(buf)
-    dirty = BufferServer.dirty?(buf)
-    name = BufferServer.buffer_name(buf)
+  # @spec build_vars_from_buffer(pid(), atom()) :: [{String.t(), String.t()}]
+  # defp build_vars_from_buffer(buf, mode) do
+  #   path = BufferServer.file_path(buf)
+  #   dirty = BufferServer.dirty?(buf)
+  #   name = BufferServer.buffer_name(buf)
 
-    filename = if path, do: Path.basename(path), else: name || "[no file]"
-    directory = if path, do: path |> Path.dirname() |> Path.basename(), else: ""
-    filepath = path || ""
-    bufname = name || filename
+  #   filename = if path, do: Path.basename(path), else: name || "[no file]"
+  #   directory = if path, do: path |> Path.dirname() |> Path.basename(), else: ""
+  #   filepath = path || ""
+  #   bufname = name || filename
 
-    [
-      {"filename", filename},
-      {"filepath", filepath},
-      {"directory", directory},
-      {"dirty", if(dirty, do: "[+] ", else: "")},
-      {"readonly", ""},
-      {"mode", mode |> to_string() |> String.upcase()},
-      {"bufname", bufname}
-    ]
-  end
+  #   [
+  #     {"filename", filename},
+  #     {"filepath", filepath},
+  #     {"directory", directory},
+  #     {"dirty", if(dirty, do: "[+] ", else: "")},
+  #     {"readonly", ""},
+  #     {"mode", mode |> to_string() |> String.upcase()},
+  #     {"bufname", bufname}
+  #   ]
+  # end
 
   @spec default_vars(atom()) :: [{String.t(), String.t()}]
   defp default_vars(mode) do
@@ -148,7 +137,7 @@ defmodule Minga.Editor.Title do
   end
 
   @spec buffer_filepath(EditorState.t()) :: String.t()
-  defp buffer_filepath(%{buffers: %{active: buf}}) when is_pid(buf) do
+  defp buffer_filepath(%EditorState{workspace: %{buffers: %{active: buf}}}) when is_pid(buf) do
     BufferServer.file_path(buf) || ""
   end
 

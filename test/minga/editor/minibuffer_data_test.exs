@@ -12,6 +12,8 @@ defmodule Minga.Editor.MinibufferDataTest do
   use ExUnit.Case, async: true
 
   alias Minga.Editor.MinibufferData
+  alias Minga.Editor.VimState
+  alias Minga.Test.StateFactory
 
   describe "clamp_index/2" do
     test "returns 0 for empty list" do
@@ -38,7 +40,7 @@ defmodule Minga.Editor.MinibufferDataTest do
 
   describe "from_state/1 command mode" do
     test "returns visible struct with correct fields" do
-      state = %{vim: %{mode: :command, mode_state: %{input: "wri", candidate_index: 0}}}
+      state = StateFactory.build(vim: %{VimState.new() | mode: :command, mode_state: %{input: "wri", candidate_index: 0}})
       result = MinibufferData.from_state(state)
 
       assert result.visible == true
@@ -49,7 +51,7 @@ defmodule Minga.Editor.MinibufferDataTest do
     end
 
     test "reads candidate_index from mode_state" do
-      state = %{vim: %{mode: :command, mode_state: %{input: "qui", candidate_index: 1}}}
+      state = StateFactory.build(vim: %{VimState.new() | mode: :command, mode_state: %{input: "qui", candidate_index: 1}})
       result = MinibufferData.from_state(state)
 
       # candidate_index 1 should be clamped and set as selected_index
@@ -57,7 +59,7 @@ defmodule Minga.Editor.MinibufferDataTest do
     end
 
     test "generates completion candidates for non-empty input" do
-      state = %{vim: %{mode: :command, mode_state: %{input: "sav", candidate_index: 0}}}
+      state = StateFactory.build(vim: %{VimState.new() | mode: :command, mode_state: %{input: "sav", candidate_index: 0}})
       result = MinibufferData.from_state(state)
 
       assert result.candidates != []
@@ -66,7 +68,7 @@ defmodule Minga.Editor.MinibufferDataTest do
     end
 
     test "empty input returns candidates (popular commands)" do
-      state = %{vim: %{mode: :command, mode_state: %{input: "", candidate_index: 0}}}
+      state = StateFactory.build(vim: %{VimState.new() | mode: :command, mode_state: %{input: "", candidate_index: 0}})
       result = MinibufferData.from_state(state)
 
       assert result.candidates != []
@@ -75,7 +77,7 @@ defmodule Minga.Editor.MinibufferDataTest do
 
   describe "from_state/1 search modes" do
     test "search forward sets mode 1 and prompt /" do
-      state = %{vim: %{mode: :search, mode_state: %{direction: :forward, input: "pattern"}}}
+      state = StateFactory.build(vim: %{VimState.new() | mode: :search, mode_state: %{direction: :forward, input: "pattern"}})
       result = MinibufferData.from_state(state)
 
       assert result.visible == true
@@ -87,7 +89,7 @@ defmodule Minga.Editor.MinibufferDataTest do
     end
 
     test "search backward sets mode 2 and prompt ?" do
-      state = %{vim: %{mode: :search, mode_state: %{direction: :backward, input: "test"}}}
+      state = StateFactory.build(vim: %{VimState.new() | mode: :search, mode_state: %{direction: :backward, input: "test"}})
       result = MinibufferData.from_state(state)
 
       assert result.mode == 2
@@ -95,12 +97,10 @@ defmodule Minga.Editor.MinibufferDataTest do
     end
 
     test "search context formats match count correctly" do
-      state = %{
-        vim: %{
-          mode: :search,
-          mode_state: %{direction: :forward, input: "x", match_count: 42, current_match: 2}
-        }
-      }
+      state = StateFactory.build(vim: %{VimState.new() |
+        mode: :search,
+        mode_state: %{direction: :forward, input: "x", match_count: 42, current_match: 2}
+      })
 
       result = MinibufferData.from_state(state)
 
@@ -108,9 +108,7 @@ defmodule Minga.Editor.MinibufferDataTest do
     end
 
     test "search context shows 'no matches' when match_count is 0" do
-      state = %{
-        vim: %{mode: :search, mode_state: %{direction: :forward, input: "x", match_count: 0}}
-      }
+      state = StateFactory.build(vim: %{VimState.new() | mode: :search, mode_state: %{direction: :forward, input: "x", match_count: 0}})
 
       result = MinibufferData.from_state(state)
 
@@ -118,7 +116,7 @@ defmodule Minga.Editor.MinibufferDataTest do
     end
 
     test "search context is empty when match_count is nil" do
-      state = %{vim: %{mode: :search, mode_state: %{direction: :forward, input: "x"}}}
+      state = StateFactory.build(vim: %{VimState.new() | mode: :search, mode_state: %{direction: :forward, input: "x"}})
       result = MinibufferData.from_state(state)
 
       assert result.context == ""
@@ -127,12 +125,10 @@ defmodule Minga.Editor.MinibufferDataTest do
 
   describe "from_state/1 substitute confirm" do
     test "formats prompt and context from mode_state" do
-      state = %{
-        vim: %{
-          mode: :substitute_confirm,
-          mode_state: %{matches: [1, 2, 3], current: 1, replacement: "foo"}
-        }
-      }
+      state = StateFactory.build(vim: %{VimState.new() |
+        mode: :substitute_confirm,
+        mode_state: %{matches: [1, 2, 3], current: 1, replacement: "foo"}
+      })
 
       result = MinibufferData.from_state(state)
 
@@ -147,12 +143,10 @@ defmodule Minga.Editor.MinibufferDataTest do
 
   describe "from_state/1 describe key" do
     test "accumulates pressed keys into context" do
-      state = %{
-        vim: %{
-          mode: :normal,
-          mode_state: %{pending_describe_key: true, describe_key_keys: ["b", "SPC"]}
-        }
-      }
+      state = StateFactory.build(vim: %{VimState.new() |
+        mode: :normal,
+        mode_state: %{pending_describe_key: true, describe_key_keys: ["b", "SPC"]}
+      })
 
       result = MinibufferData.from_state(state)
 
@@ -164,12 +158,10 @@ defmodule Minga.Editor.MinibufferDataTest do
     end
 
     test "empty keys gives empty context" do
-      state = %{
-        vim: %{
-          mode: :normal,
-          mode_state: %{pending_describe_key: true, describe_key_keys: []}
-        }
-      }
+      state = StateFactory.build(vim: %{VimState.new() |
+        mode: :normal,
+        mode_state: %{pending_describe_key: true, describe_key_keys: []}
+      })
 
       result = MinibufferData.from_state(state)
 
@@ -179,14 +171,14 @@ defmodule Minga.Editor.MinibufferDataTest do
 
   describe "from_state/1 fallthrough" do
     test "normal mode without describe_key returns hidden" do
-      state = %{vim: %{mode: :normal, mode_state: %{}}}
+      state = StateFactory.build(vim: %{VimState.new() | mode: :normal, mode_state: %{}})
       result = MinibufferData.from_state(state)
 
       assert result.visible == false
     end
 
     test "insert mode returns hidden" do
-      state = %{vim: %{mode: :insert, mode_state: %{}}}
+      state = StateFactory.build(vim: %{VimState.new() | mode: :insert, mode_state: %{}})
       result = MinibufferData.from_state(state)
 
       assert result.visible == false

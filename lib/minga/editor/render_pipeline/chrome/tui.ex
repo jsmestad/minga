@@ -38,7 +38,7 @@ defmodule Minga.Editor.RenderPipeline.Chrome.TUI do
           Cursor.t() | nil
         ) :: Chrome.t()
   def build(state, layout, _scrolls, cursor_info) do
-    full_viewport = state.viewport
+    full_viewport = state.workspace.viewport
 
     # Global status bar (one render for the focused window)
     {status_bar_draws, status_bar_data, modeline_click_regions} =
@@ -48,7 +48,7 @@ defmodule Minga.Editor.RenderPipeline.Chrome.TUI do
     vertical_separators =
       if EditorState.split?(state) do
         ChromeHelpers.render_separators(
-          state.windows.tree,
+          state.workspace.windows.tree,
           layout.editor_area,
           elem(layout.editor_area, 3),
           state.theme
@@ -142,12 +142,12 @@ defmodule Minga.Editor.RenderPipeline.Chrome.TUI do
   @spec build_completion_draws(state(), Cursor.t() | nil) :: [DisplayList.draw()]
   defp build_completion_draws(state, %Cursor{row: cur_row, col: cur_col}) do
     CompletionUI.render(
-      state.completion,
+      state.workspace.completion,
       %{
         cursor_row: cur_row,
         cursor_col: cur_col,
-        viewport_rows: state.viewport.rows,
-        viewport_cols: state.viewport.cols
+        viewport_rows: state.workspace.viewport.rows,
+        viewport_cols: state.workspace.viewport.cols
       },
       state.theme
     )

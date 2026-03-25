@@ -35,7 +35,7 @@ defmodule Minga.Editor.Commands.Search do
   @spec execute(state(), Mode.command()) :: state()
 
   def execute(
-        %{buffers: %{active: buf}, vim: %{mode_state: %SearchState{} = ms}} = state,
+        %EditorState{workspace: %{buffers: %{active: buf}, vim: %{mode_state: %SearchState{} = ms}}} = state,
         :incremental_search
       ) do
     if ms.input == "" do
@@ -56,7 +56,7 @@ defmodule Minga.Editor.Commands.Search do
   end
 
   def execute(
-        %{buffers: %{active: buf}, vim: %{mode_state: %SearchState{} = ms}} = state,
+        %EditorState{workspace: %{buffers: %{active: buf}, vim: %{mode_state: %SearchState{} = ms}}} = state,
         :confirm_search
       ) do
     content = BufferServer.content(buf)
@@ -79,7 +79,7 @@ defmodule Minga.Editor.Commands.Search do
   end
 
   def execute(
-        %{buffers: %{active: buf}, vim: %{mode_state: %SearchState{} = ms}} = state,
+        %EditorState{workspace: %{buffers: %{active: buf}, vim: %{mode_state: %SearchState{} = ms}}} = state,
         :cancel_search
       ) do
     BufferServer.move_to(buf, ms.original_cursor)
@@ -87,7 +87,7 @@ defmodule Minga.Editor.Commands.Search do
   end
 
   def execute(
-        %{buffers: %{active: buf}, search: %{last_pattern: pattern, last_direction: dir}} = state,
+        %EditorState{workspace: %{buffers: %{active: buf}, search: %{last_pattern: pattern, last_direction: dir}}} = state,
         :search_next
       )
       when is_binary(pattern) do
@@ -109,7 +109,7 @@ defmodule Minga.Editor.Commands.Search do
   end
 
   def execute(
-        %{buffers: %{active: buf}, search: %{last_pattern: pattern, last_direction: dir}} = state,
+        %EditorState{workspace: %{buffers: %{active: buf}, search: %{last_pattern: pattern, last_direction: dir}}} = state,
         :search_prev
       )
       when is_binary(pattern) do
@@ -131,7 +131,7 @@ defmodule Minga.Editor.Commands.Search do
     %{state | status_msg: "No previous search pattern"}
   end
 
-  def execute(%{buffers: %{active: buf}} = state, :search_word_under_cursor_forward) do
+  def execute(%EditorState{workspace: %{buffers: %{active: buf}}} = state, :search_word_under_cursor_forward) do
     {content, cursor} = BufferServer.content_and_cursor(buf)
     tmp_buf = Document.new(content)
 
@@ -158,7 +158,7 @@ defmodule Minga.Editor.Commands.Search do
     end
   end
 
-  def execute(%{buffers: %{active: buf}} = state, :search_word_under_cursor_backward) do
+  def execute(%EditorState{workspace: %{buffers: %{active: buf}}} = state, :search_word_under_cursor_backward) do
     {content, cursor} = BufferServer.content_and_cursor(buf)
     tmp_buf = Document.new(content)
 
@@ -185,7 +185,7 @@ defmodule Minga.Editor.Commands.Search do
     end
   end
 
-  def execute(%{vim: %{mode_state: %{input: query}}} = state, :confirm_project_search)
+  def execute(%EditorState{workspace: %{vim: %{mode_state: %{input: query}}}} = state, :confirm_project_search)
       when is_binary(query) and query != "" do
     root = project_root()
 
@@ -196,7 +196,7 @@ defmodule Minga.Editor.Commands.Search do
       {:ok, matches, truncated?} ->
         msg = if truncated?, do: "Results truncated to 10,000", else: nil
 
-        state = put_in(state.search.project_results, matches)
+        state = put_in(state.workspace.search.project_results, matches)
         state = PickerUI.open(state, Minga.Picker.ProjectSearchSource)
         if msg, do: %{state | status_msg: msg}, else: state
 
@@ -211,7 +211,7 @@ defmodule Minga.Editor.Commands.Search do
 
   # Advance cursor to current match during substitute confirm
   def execute(
-        %{buffers: %{active: buf}, vim: %{mode_state: %Minga.Mode.SubstituteConfirmState{} = ms}} =
+        %EditorState{workspace: %{buffers: %{active: buf}, vim: %{mode_state: %Minga.Mode.SubstituteConfirmState{} = ms}}} =
           state,
         :substitute_confirm_advance
       ) do
@@ -227,7 +227,7 @@ defmodule Minga.Editor.Commands.Search do
 
   # Apply accepted substitutions from confirm mode
   def execute(
-        %{buffers: %{active: buf}, vim: %{mode_state: %Minga.Mode.SubstituteConfirmState{} = ms}} =
+        %EditorState{workspace: %{buffers: %{active: buf}, vim: %{mode_state: %Minga.Mode.SubstituteConfirmState{} = ms}}} =
           state,
         :apply_substitute_confirm
       ) do
@@ -347,11 +347,11 @@ defmodule Minga.Editor.Commands.Search do
 
   @spec put_in_search(state(), atom(), term()) :: state()
   defp put_in_search(state, :last_pattern, value) do
-    %{state | search: Minga.Editor.State.Search.record_pattern(state.search, value)}
+    %{state | workspace: %{state.workspace | search: Minga.Editor.State.Search.record_pattern(state.workspace.search, value)}}
   end
 
   defp put_in_search(state, :last_direction, value) do
-    %{state | search: %{state.search | last_direction: value}}
+    %{state | workspace: %{state.workspace | search: %{state.workspace.search | last_direction: value}}}
   end
 
   # Replace a match at a specific line/col/length in content string.
@@ -398,7 +398,7 @@ defmodule Minga.Editor.Commands.Search do
 
   @spec auto_unfold_decoration_fold(state(), non_neg_integer()) :: state()
   defp auto_unfold_decoration_fold(state, line) do
-    buf = state.buffers.active
+    buf = state.workspace.buffers.active
     open_decoration_fold_at(buf, line)
     state
   catch

@@ -38,15 +38,17 @@ defmodule Minga.Input.FileTreeNavTest do
 
     %EditorState{
       port_manager: self(),
-      viewport: %Viewport{rows: 24, cols: 80, top: 0, left: 0},
-      file_tree: %FileTreeState{tree: tree, focused: true, buffer: buf},
-      buffers: %{active: nil, list: [], recent: []},
-      vim: VimState.new(),
+      workspace: %Minga.Workspace.State{
+        viewport: %Viewport{rows: 24, cols: 80, top: 0, left: 0},
+        file_tree: %FileTreeState{tree: tree, focused: true, buffer: buf},
+        buffers: %{active: nil, list: [], recent: []},
+        vim: VimState.new(),
+        completion: nil,
+        keymap_scope: :file_tree,
+        agent_ui: agentic
+      },
       status_msg: nil,
       agent: agent,
-      agent_ui: agentic,
-      completion: nil,
-      keymap_scope: :file_tree,
       focus_stack: [Scoped, Minga.Input.ModeFSM]
     }
   end
@@ -54,13 +56,13 @@ defmodule Minga.Input.FileTreeNavTest do
   describe "vim navigation in file tree (via Scoped)" do
     test "j moves tree cursor down", %{tmp_dir: tmp_dir} do
       state = make_state(tmp_dir)
-      assert state.file_tree.tree.cursor == 0
+      assert state.workspace.file_tree.tree.cursor == 0
 
       {:handled, state} = walk_surface_handlers(state, ?j, 0)
-      assert state.file_tree.tree.cursor == 1
+      assert state.workspace.file_tree.tree.cursor == 1
 
       {:handled, state} = walk_surface_handlers(state, ?j, 0)
-      assert state.file_tree.tree.cursor == 2
+      assert state.workspace.file_tree.tree.cursor == 2
     end
 
     test "k moves tree cursor up", %{tmp_dir: tmp_dir} do
@@ -68,36 +70,36 @@ defmodule Minga.Input.FileTreeNavTest do
       # Move down first
       {:handled, state} = walk_surface_handlers(state, ?j, 0)
       {:handled, state} = walk_surface_handlers(state, ?j, 0)
-      assert state.file_tree.tree.cursor == 2
+      assert state.workspace.file_tree.tree.cursor == 2
 
       {:handled, state} = walk_surface_handlers(state, ?k, 0)
-      assert state.file_tree.tree.cursor == 1
+      assert state.workspace.file_tree.tree.cursor == 1
     end
 
     test "q closes the file tree via scope resolution", %{tmp_dir: tmp_dir} do
       state = make_state(tmp_dir)
       {:handled, state} = walk_surface_handlers(state, ?q, 0)
-      assert state.file_tree.tree == nil
-      assert state.file_tree.focused == false
-      assert state.keymap_scope == :editor
+      assert state.workspace.file_tree.tree == nil
+      assert state.workspace.file_tree.focused == false
+      assert state.workspace.keymap_scope == :editor
     end
 
     test "Escape closes the file tree", %{tmp_dir: tmp_dir} do
       state = make_state(tmp_dir)
       {:handled, state} = walk_surface_handlers(state, 27, 0)
-      assert state.file_tree.tree == nil
-      assert state.keymap_scope == :editor
+      assert state.workspace.file_tree.tree == nil
+      assert state.workspace.keymap_scope == :editor
     end
 
     test "passthrough when tree not focused", %{tmp_dir: tmp_dir} do
       state = make_state(tmp_dir)
-      state = put_in(state.file_tree.focused, false)
+      state = put_in(state.workspace.file_tree.focused, false)
       {:passthrough, _state} = FileTreeHandler.handle_key(state, ?j, 0)
     end
 
     test "tree cursor stays in bounds", %{tmp_dir: tmp_dir} do
       state = make_state(tmp_dir, 3)
-      entries = FileTree.visible_entries(state.file_tree.tree)
+      entries = FileTree.visible_entries(state.workspace.file_tree.tree)
       max_idx = length(entries) - 1
 
       # Move down past the end
@@ -107,18 +109,18 @@ defmodule Minga.Input.FileTreeNavTest do
           new_acc
         end)
 
-      assert state.file_tree.tree.cursor <= max_idx
+      assert state.workspace.file_tree.tree.cursor <= max_idx
     end
 
     test "buffer cursor syncs with tree cursor after j/k", %{tmp_dir: tmp_dir} do
       state = make_state(tmp_dir)
-      buf = state.file_tree.buffer
+      buf = state.workspace.file_tree.buffer
 
       {:handled, state} = walk_surface_handlers(state, ?j, 0)
       {:handled, state} = walk_surface_handlers(state, ?j, 0)
 
       {buf_line, _col} = BufferServer.cursor(buf)
-      assert buf_line == state.file_tree.tree.cursor
+      assert buf_line == state.workspace.file_tree.tree.cursor
     end
   end
 end

@@ -25,8 +25,10 @@ defmodule Minga.Editor.LayoutInvalidationTest do
   defp new_state(rows \\ 24, cols \\ 80) do
     %EditorState{
       port_manager: nil,
-      viewport: Viewport.new(rows, cols),
-      vim: VimState.new()
+      workspace: %Minga.Workspace.State{
+        viewport: Viewport.new(rows, cols),
+        vim: VimState.new()
+      }
     }
   end
 
@@ -44,18 +46,21 @@ defmodule Minga.Editor.LayoutInvalidationTest do
 
     %{
       state
-      | windows: %Windows{
-          tree: {:leaf, win_id},
-          map: %{win_id => window},
-          active: win_id,
-          next_id: win_id + 1
+      | workspace: %{
+          state.workspace
+          | windows: %Windows{
+              tree: {:leaf, win_id},
+              map: %{win_id => window},
+              active: win_id,
+              next_id: win_id + 1
+            }
         }
     }
   end
 
   defp with_file_tree(state, width \\ 30) do
     tree = %FileTree{root: "/tmp", width: width}
-    put_in(state.file_tree.tree, tree)
+    put_in(state.workspace.file_tree.tree, tree)
   end
 
   # ── Unit tests: invalidate_all_windows ─────────────────────────────────────
@@ -94,19 +99,24 @@ defmodule Minga.Editor.LayoutInvalidationTest do
         dirty_lines: %{}
       }
 
+      base = new_state()
+
       state = %{
-        new_state()
-        | windows: %Windows{
-            tree: {:split, :vertical, {:leaf, 1}, {:leaf, 2}, 0},
-            map: %{1 => win1, 2 => win2},
-            active: 1,
-            next_id: 3
+        base
+        | workspace: %{
+            base.workspace
+            | windows: %Windows{
+                tree: {:split, :vertical, {:leaf, 1}, {:leaf, 2}, 0},
+                map: %{1 => win1, 2 => win2},
+                active: 1,
+                next_id: 3
+              }
           }
       }
 
       state = EditorState.invalidate_all_windows(state)
 
-      for {_id, win} <- state.windows.map do
+      for {_id, win} <- state.workspace.windows.map do
         assert win.cached_content == %{}
         assert win.cached_gutter == %{}
         assert win.dirty_lines == :all
@@ -166,7 +176,7 @@ defmodule Minga.Editor.LayoutInvalidationTest do
       assert col == 21
 
       # Close file tree and invalidate
-      state = put_in(state.file_tree.tree, nil) |> Layout.invalidate()
+      state = put_in(state.workspace.file_tree.tree, nil) |> Layout.invalidate()
 
       layout = Layout.compute(state)
       assert layout.file_tree == nil

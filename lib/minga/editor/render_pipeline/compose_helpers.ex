@@ -12,7 +12,7 @@ defmodule Minga.Editor.RenderPipeline.ComposeHelpers do
   alias Minga.Buffer.Unicode
   alias Minga.Editor.DisplayList.{Cursor, Overlay}
   alias Minga.Editor.Layout
-
+  alias Minga.Editor.RenderPipeline.ChromeHelpers
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.AgentAccess
 
@@ -30,7 +30,7 @@ defmodule Minga.Editor.RenderPipeline.ComposeHelpers do
           non_neg_integer()
         ) :: {non_neg_integer(), non_neg_integer()}
   def resolve_cursor(
-        %{vim: %{mode: :search, mode_state: mode_state}},
+        %EditorState{workspace: %{vim: %{mode: :search, mode_state: mode_state}}},
         _cursor_info,
         minibuffer_row
       ) do
@@ -39,7 +39,7 @@ defmodule Minga.Editor.RenderPipeline.ComposeHelpers do
   end
 
   def resolve_cursor(
-        %{vim: %{mode: :command, mode_state: mode_state}},
+        %EditorState{workspace: %{vim: %{mode: :command, mode_state: mode_state}}},
         _cursor_info,
         minibuffer_row
       ) do
@@ -48,7 +48,7 @@ defmodule Minga.Editor.RenderPipeline.ComposeHelpers do
   end
 
   def resolve_cursor(
-        %{vim: %{mode: :eval, mode_state: mode_state}},
+        %EditorState{workspace: %{vim: %{mode: :eval, mode_state: mode_state}}},
         _cursor_info,
         minibuffer_row
       ) do
@@ -57,7 +57,7 @@ defmodule Minga.Editor.RenderPipeline.ComposeHelpers do
   end
 
   def resolve_cursor(
-        %{vim: %{mode: :search_prompt, mode_state: mode_state}},
+        %EditorState{workspace: %{vim: %{mode: :search_prompt, mode_state: mode_state}}},
         _cursor_info,
         minibuffer_row
       ) do
@@ -96,11 +96,7 @@ defmodule Minga.Editor.RenderPipeline.ComposeHelpers do
       input_row = row + h - @agent_input_height + 1 + cursor_line
       input_col = col + 2 + cursor_col
 
-      Cursor.new(
-        input_row,
-        input_col,
-        Minga.Editor.Editing.cursor_shape(state)
-      )
+      Cursor.new(input_row, input_col, ChromeHelpers.input_cursor_shape(state.workspace.vim.mode))
     else
       nil
     end

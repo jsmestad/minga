@@ -26,7 +26,7 @@ defmodule Minga.Picker.ProjectSearchSource do
 
   @impl true
   @spec candidates(term()) :: [Item.t()]
-  def candidates(%{search: %{project_results: results}}) when is_list(results) do
+  def candidates(%EditorState{workspace: %{search: %{project_results: results}}}) when is_list(results) do
     results
     |> Enum.with_index()
     |> Enum.map(fn {match, idx} ->
@@ -43,7 +43,7 @@ defmodule Minga.Picker.ProjectSearchSource do
 
   @impl true
   @spec on_select(Item.t(), term()) :: term()
-  def on_select(%Item{id: idx}, %{search: %{project_results: results}} = state)
+  def on_select(%Item{id: idx}, %EditorState{workspace: %{search: %{project_results: results}}} = state)
       when is_integer(idx) do
     case Enum.at(results, idx) do
       nil -> state
@@ -82,7 +82,7 @@ defmodule Minga.Picker.ProjectSearchSource do
   @spec jump_to_buffer(map(), non_neg_integer(), non_neg_integer(), non_neg_integer()) :: map()
   defp jump_to_buffer(state, buf_idx, line, col) do
     new_state = EditorState.switch_buffer(state, buf_idx)
-    pid = Enum.at(state.buffers.list, buf_idx)
+    pid = Enum.at(state.workspace.buffers.list, buf_idx)
     BufferServer.move_to(pid, {line, col})
     new_state
   end

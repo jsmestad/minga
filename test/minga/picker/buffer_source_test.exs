@@ -8,6 +8,7 @@ defmodule Minga.Picker.BufferSourceTest do
   alias Minga.Picker.BufferAllSource
   alias Minga.Picker.BufferSource
   alias Minga.Picker.Item
+  alias Minga.Test.StateFactory
 
   defp start_buffer(opts) do
     {:ok, pid} = BufferServer.start_link(opts)
@@ -24,12 +25,12 @@ defmodule Minga.Picker.BufferSourceTest do
   end
 
   defp fake_state(buffers, opts \\ []) do
-    %{
+    StateFactory.build(
       buffers: %Buffers{
         list: buffers,
         messages: Keyword.get(opts, :messages)
       }
-    }
+    )
   end
 
   describe "special?/1" do

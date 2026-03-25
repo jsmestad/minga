@@ -16,7 +16,6 @@ defmodule Minga.Input.Router do
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor
-  alias Minga.Editor.Editing
   alias Minga.Editor.LspActions
   alias Minga.Editor.State, as: EditorState
   alias Minga.Port.Manager, as: PortManager
@@ -39,10 +38,10 @@ defmodule Minga.Input.Router do
   @spec capture_snapshot(EditorState.t()) :: snapshot()
   def capture_snapshot(state) do
     %{
-      old_buffer: state.buffers.active,
+      old_buffer: state.workspace.buffers.active,
       buf_version: buffer_version(state),
-      old_mode: Editing.mode(state),
-      old_cursor: safe_cursor(state.buffers.active)
+      old_mode: state.workspace.vim.mode,
+      old_cursor: safe_cursor(state.workspace.buffers.active)
     }
   end
 
@@ -76,10 +75,9 @@ defmodule Minga.Input.Router do
         # Run housekeeping so the cleared prompt triggers a render.
         post_key_housekeeping(
           new_state,
-          state.buffers.active,
+          state.workspace.buffers.active,
           buffer_version(state),
-          Editing.mode(state),
-          Editing.inserting?(state),
+          state.workspace.vim.mode,
           {cancel, 0}
         )
 
@@ -90,9 +88,8 @@ defmodule Minga.Input.Router do
 
   @spec dispatch_normal(EditorState.t(), non_neg_integer(), non_neg_integer()) :: EditorState.t()
   defp dispatch_normal(state, codepoint, modifiers) do
-    old_buffer = state.buffers.active
-    old_mode = Editing.mode(state)
-    was_inserting = Editing.inserting?(state)
+    old_buffer = state.workspace.buffers.active
+    old_mode = state.workspace.vim.mode
     buf_version_before = buffer_version(state)
     old_cursor = safe_cursor(old_buffer)
 
@@ -105,7 +102,6 @@ defmodule Minga.Input.Router do
       old_buffer,
       buf_version_before,
       old_mode,
-      was_inserting,
       {codepoint, modifiers},
       old_cursor
     )
@@ -171,7 +167,6 @@ defmodule Minga.Input.Router do
           pid() | nil,
           non_neg_integer(),
           atom(),
-          boolean(),
           {non_neg_integer(), non_neg_integer()},
           {non_neg_integer(), non_neg_integer()} | nil
         ) :: EditorState.t()
@@ -180,7 +175,6 @@ defmodule Minga.Input.Router do
         old_buffer,
         buf_version_before,
         old_mode,
-        was_inserting,
         {codepoint, modifiers},
         old_cursor \\ nil
       ) do
@@ -192,7 +186,7 @@ defmodule Minga.Input.Router do
     }
 
     state
-    |> Editor.do_maybe_handle_completion(was_inserting, codepoint, modifiers)
+    |> Editor.do_maybe_handle_completion(old_mode, codepoint, modifiers)
     |> post_action_housekeeping(snapshot)
   end
 
@@ -200,13 +194,13 @@ defmodule Minga.Input.Router do
   # This ensures the stored selection range chain doesn't linger after
   # the user exits visual mode (Escape, entering normal mode, switching buffers).
   @spec maybe_clear_selection_ranges(EditorState.t(), atom()) :: EditorState.t()
-  defp maybe_clear_selection_ranges(%EditorState{selection_ranges: ranges} = state, old_mode)
-       when old_mode == :visual and ranges != nil do
-    if Editing.mode(state) != :visual do
-      %{state | selection_ranges: nil, selection_range_index: 0}
-    else
-      state
-    end
+  defp maybe_clear_selection_ranges(
+         %EditorState{workspace: %{vim: %{mode: current_mode}}, selection_ranges: ranges} =
+           state,
+         old_mode
+       )
+       when old_mode == :visual and current_mode != :visual and ranges != nil do
+    %{state | selection_ranges: nil, selection_range_index: 0}
   end
 
   defp maybe_clear_selection_ranges(state, _old_mode), do: state
@@ -224,7 +218,7 @@ defmodule Minga.Input.Router do
 
   # Buffer changed: clear highlights
   defp maybe_schedule_document_highlight(
-         %EditorState{buffers: %{active: current}} = state,
+         %EditorState{workspace: %{buffers: %{active: current}}} = state,
          old_buffer,
          _old_cursor
        )
@@ -232,30 +226,34 @@ defmodule Minga.Input.Router do
     LspActions.clear_document_highlights(state)
   end
 
+  # Not normal mode: clear highlights
+  defp maybe_schedule_document_highlight(
+         %EditorState{workspace: %{vim: %{mode: mode}}} = state,
+         _old_buffer,
+         _old_cursor
+       )
+       when mode != :normal do
+    LspActions.clear_document_highlights(state)
+  end
+
   # Normal mode, no buffer: no-op
   defp maybe_schedule_document_highlight(
-         %EditorState{buffers: %{active: nil}} = state,
+         %EditorState{workspace: %{buffers: %{active: nil}}} = state,
          _old_buffer,
          _old_cursor
        ) do
     state
   end
 
-  # Same buffer: check mode and cursor
+  # Normal mode with a live buffer: schedule only if cursor moved
   defp maybe_schedule_document_highlight(state, _old_buffer, old_cursor) do
-    if Editing.mode(state) != :normal do
-      # Not normal mode: clear highlights
-      LspActions.clear_document_highlights(state)
-    else
-      # Normal mode with a live buffer: schedule only if cursor moved
-      new_cursor = safe_cursor(state.buffers.active)
+    new_cursor = safe_cursor(state.workspace.buffers.active)
 
-      if new_cursor != old_cursor do
-        state = LspActions.schedule_document_highlight(state)
-        LspActions.schedule_inlay_hints_on_scroll(state)
-      else
-        state
-      end
+    if new_cursor != old_cursor do
+      state = LspActions.schedule_document_highlight(state)
+      LspActions.schedule_inlay_hints_on_scroll(state)
+    else
+      state
     end
   end
 
@@ -276,14 +274,17 @@ defmodule Minga.Input.Router do
   # A bare `batch_end` is still emitted so that frame-synchronization contracts
   # (HeadlessPort in tests, future frame-pacing in production) remain satisfied.
   @spec maybe_render(EditorState.t(), non_neg_integer()) :: EditorState.t()
-  defp maybe_render(state, buf_version_before) do
-    if Editing.mode(state) == :operator_pending and
-         buffer_version(state) == buf_version_before do
+  defp maybe_render(%EditorState{workspace: %{vim: %{mode: :operator_pending}}} = state, buf_version_before) do
+    if buffer_version(state) == buf_version_before do
       PortManager.send_commands(state.port_manager, [Protocol.encode_batch_end()])
       state
     else
       Editor.do_render(state)
     end
+  end
+
+  defp maybe_render(state, _buf_version_before) do
+    Editor.do_render(state)
   end
 
   @doc """
@@ -387,9 +388,9 @@ defmodule Minga.Input.Router do
   end
 
   @spec buffer_version(EditorState.t()) :: non_neg_integer()
-  defp buffer_version(%{buffers: %{active: nil}}), do: 0
+  defp buffer_version(%EditorState{workspace: %{buffers: %{active: nil}}}), do: 0
 
-  defp buffer_version(%{buffers: %{active: buf}}) do
+  defp buffer_version(%EditorState{workspace: %{buffers: %{active: buf}}}) do
     BufferServer.version(buf)
   end
 end

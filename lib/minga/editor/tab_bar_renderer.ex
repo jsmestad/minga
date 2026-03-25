@@ -22,6 +22,7 @@ defmodule Minga.Editor.TabBarRenderer do
   alias Minga.Buffer.Unicode
   alias Minga.Devicon
   alias Minga.Editor.DisplayList
+  alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
   alias Minga.Face
@@ -439,7 +440,7 @@ defmodule Minga.Editor.TabBarRenderer do
   defp agent_status_indicator(_), do: ""
 
   @spec tab_active_buffer(Tab.t()) :: pid() | nil
-  defp tab_active_buffer(%Tab{context: %{buffers: %{active: buf}}}), do: buf
+  defp tab_active_buffer(%Tab{context: %EditorState{workspace: %{buffers: %{active: buf}}}}), do: buf
   defp tab_active_buffer(_), do: nil
 
   @spec tab_bar_colors(Theme.t()) :: map()

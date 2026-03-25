@@ -21,9 +21,11 @@ defmodule Minga.Editor.Commands.HelpTest do
 
     %EditorState{
       port_manager: nil,
-      viewport: %Viewport{rows: 24, cols: 80, top: 0, left: 0},
-      vim: VimState.new(),
-      buffers: %Buffers{active: buf, list: [buf]}
+      workspace: %Minga.Workspace.State{
+        viewport: %Viewport{rows: 24, cols: 80, top: 0, left: 0},
+        vim: VimState.new(),
+        buffers: %Buffers{active: buf, list: [buf]}
+      }
     }
   end
 
@@ -34,10 +36,10 @@ defmodule Minga.Editor.Commands.HelpTest do
       state = build_state()
       result = Help.execute(state, {:describe_key_result, "j", :move_down, "Move cursor down"})
 
-      assert result.buffers.help != nil
-      assert Process.alive?(result.buffers.help)
+      assert result.workspace.buffers.help != nil
+      assert Process.alive?(result.workspace.buffers.help)
 
-      content = BufferServer.content(result.buffers.help)
+      content = BufferServer.content(result.workspace.buffers.help)
       assert content =~ "Key:         j"
       assert content =~ "Command:     move_down"
       assert content =~ "Description: Move cursor down"
@@ -47,18 +49,18 @@ defmodule Minga.Editor.Commands.HelpTest do
       state = build_state()
       result = Help.execute(state, {:describe_key_result, "SPC f f", :find_file, "Find file"})
 
-      assert result.buffers.active == result.buffers.help
+      assert result.workspace.buffers.active == result.workspace.buffers.help
     end
 
     test "reuses existing *Help* buffer on subsequent calls" do
       state = build_state()
       result1 = Help.execute(state, {:describe_key_result, "j", :move_down, "Move cursor down"})
-      help_pid = result1.buffers.help
+      help_pid = result1.workspace.buffers.help
 
       result2 =
         Help.execute(result1, {:describe_key_result, "k", :move_up, "Move cursor up"})
 
-      assert result2.buffers.help == help_pid
+      assert result2.workspace.buffers.help == help_pid
 
       content = BufferServer.content(help_pid)
       assert content =~ "Command:     move_up"
@@ -78,7 +80,7 @@ defmodule Minga.Editor.Commands.HelpTest do
       state = build_state()
       result = Help.execute(state, {:describe_key_not_found, "z"})
 
-      content = BufferServer.content(result.buffers.help)
+      content = BufferServer.content(result.workspace.buffers.help)
       assert content =~ "Key not bound: z"
     end
   end
@@ -88,7 +90,7 @@ defmodule Minga.Editor.Commands.HelpTest do
       state = build_state()
       result = Help.execute(state, {:describe_key_result, "j", :move_down, "Move cursor down"})
 
-      assert BufferServer.read_only?(result.buffers.help)
+      assert BufferServer.read_only?(result.workspace.buffers.help)
     end
   end
 end

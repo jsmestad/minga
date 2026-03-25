@@ -64,6 +64,10 @@ protocol InputEncoder: AnyObject, Sendable {
     func sendGroupRename(id: UInt16, name: String)
     func sendGroupSetIcon(id: UInt16, icon: String)
     func sendGroupClose(id: UInt16)
+
+    // Space leader key-chord
+    func sendSpaceLeaderChord(codepoint: UInt32, modifiers: UInt8)
+    func sendSpaceLeaderRetract(codepoint: UInt32, modifiers: UInt8)
 }
 
 extension InputEncoder {
@@ -458,6 +462,31 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_GROUP_CLOSE
         writeU16(&buf, 2, id)
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: space_leader_chord.
+    /// Clean chord: SPC was never sent. The BEAM enters leader mode directly.
+    /// Layout: opcode(1) + action_type(1) + codepoint(4) + modifiers(1).
+    func sendSpaceLeaderChord(codepoint: UInt32, modifiers: UInt8) {
+        var buf = Data(count: 7)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_SPACE_LEADER_CHORD
+        writeU32(&buf, 2, codepoint)
+        buf[6] = modifiers
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: space_leader_retract.
+    /// Fallback chord: SPC was already sent (grace timer fired). The BEAM
+    /// deletes the space and enters leader mode.
+    /// Same wire format as chord (the BEAM needs the key that triggered it).
+    func sendSpaceLeaderRetract(codepoint: UInt32, modifiers: UInt8) {
+        var buf = Data(count: 7)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_SPACE_LEADER_RETRACT
+        writeU32(&buf, 2, codepoint)
+        buf[6] = modifiers
         writeFrame(buf)
     }
 

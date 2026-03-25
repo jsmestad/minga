@@ -17,7 +17,6 @@ defmodule Minga.Editor.RenderPipeline.Content do
   alias Minga.Editor.DisplayMap
   alias Minga.Editor.FoldMap
   alias Minga.Editor.Layout
-
   alias Minga.Editor.RenderPipeline.ContentHelpers
   alias Minga.Editor.RenderPipeline.Scroll.WindowScroll
   alias Minga.Editor.SemanticWindow
@@ -64,7 +63,7 @@ defmodule Minga.Editor.RenderPipeline.Content do
   def build_agent_chat_content(state, layout) do
     layout.window_layouts
     |> Enum.reduce({[], nil, state}, fn {win_id, win_layout}, {frames, cursor, st} ->
-      window = Map.get(st.windows.map, win_id)
+      window = Map.get(st.workspace.windows.map, win_id)
       maybe_render_agent_window(window, win_id, win_layout, frames, cursor, st)
     end)
   end
@@ -226,8 +225,8 @@ defmodule Minga.Editor.RenderPipeline.Content do
       )
       |> Window.prune_cache(first_line, last_visible)
 
-    new_map = Map.put(state.windows.map, scroll.win_id, updated_window)
-    state = %{state | windows: %{state.windows | map: new_map}}
+    new_map = Map.put(state.workspace.windows.map, scroll.win_id, updated_window)
+    state = %{state | workspace: %{state.workspace | windows: %{state.workspace.windows | map: new_map}}}
 
     {win_frame, cursor_info, state}
   end
@@ -299,10 +298,10 @@ defmodule Minga.Editor.RenderPipeline.Content do
     prompt_draws = PromptRenderer.render(state, prompt_rect)
 
     # When help overlay is visible, render help content instead of buffer
-    help_visible = state.agent_ui.view.help_visible
+    help_visible = state.workspace.agent_ui.view.help_visible
 
     if help_visible do
-      focus = state.agent_ui.view.focus
+      focus = state.workspace.agent_ui.view.focus
       help_groups = Minga.Keymap.Scope.Agent.help_groups(focus)
       chat_rect = {row_off, col_off, chat_width, chat_height}
       help_draws = render_help_overlay(help_groups, chat_rect, state.theme)
@@ -459,7 +458,7 @@ defmodule Minga.Editor.RenderPipeline.Content do
       |> Window.prune_cache(first_line, last_visible)
 
     # Persist the updated window back to state
-    state = put_in(state.windows.map[window.id], window)
+    state = put_in(state.workspace.windows.map[window.id], window)
 
     tilde_draws = build_tilde_draws(rendered_rows, chat_height, row_off, col_off)
 
@@ -633,8 +632,8 @@ defmodule Minga.Editor.RenderPipeline.Content do
   end
 
   defp agent_window_active?(state, window) do
-    window.buffer == state.buffers.active or
-      Map.get(state.windows.map, state.windows.active) == window
+    window.buffer == state.workspace.buffers.active or
+      Map.get(state.workspace.windows.map, state.workspace.windows.active) == window
   end
 
   defp agent_window_cursor(_window, buf, true), do: BufferServer.cursor(buf)

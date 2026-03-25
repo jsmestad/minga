@@ -42,14 +42,14 @@ defmodule Minga.Editor.Commands.Lsp do
 
       _ ->
         markdown = build_lsp_info_markdown(clients)
-        vp = state.viewport
+        vp = state.workspace.viewport
         popup = HoverPopup.new(markdown, div(vp.rows, 2), div(vp.cols, 4))
         popup = HoverPopup.focus(popup)
         %{state | hover_popup: popup}
     end
   end
 
-  def execute(%{buffers: %{active: nil}} = state, :lsp_restart) do
+  def execute(%EditorState{workspace: %{buffers: %{active: nil}}} = state, :lsp_restart) do
     %{state | status_msg: "No active buffer"}
   end
 
@@ -66,7 +66,7 @@ defmodule Minga.Editor.Commands.Lsp do
     end
   end
 
-  def execute(%{buffers: %{active: nil}} = state, :lsp_stop) do
+  def execute(%EditorState{workspace: %{buffers: %{active: nil}}} = state, :lsp_stop) do
     %{state | status_msg: "No active buffer"}
   end
 
@@ -83,12 +83,12 @@ defmodule Minga.Editor.Commands.Lsp do
     end
   end
 
-  def execute(%{buffers: %{active: nil}} = state, :lsp_start) do
+  def execute(%EditorState{workspace: %{buffers: %{active: nil}}} = state, :lsp_start) do
     %{state | status_msg: "No active buffer"}
   end
 
   def execute(state, :lsp_start) do
-    buf = state.buffers.active
+    buf = state.workspace.buffers.active
     filetype = BufferServer.filetype(buf)
     configs = ServerRegistry.available_servers_for(filetype)
 
@@ -165,7 +165,7 @@ defmodule Minga.Editor.Commands.Lsp do
   end
 
   @spec clients_and_keys_for_active(state()) :: [{atom(), {atom(), String.t()}}]
-  defp clients_and_keys_for_active(%{buffers: %{active: buf}} = _state) do
+  defp clients_and_keys_for_active(%EditorState{workspace: %{buffers: %{active: buf}}} = _state) do
     clients = SyncServer.clients_for_buffer(buf)
     Enum.flat_map(clients, &client_name_and_key/1)
   end

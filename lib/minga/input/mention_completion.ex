@@ -19,7 +19,7 @@ defmodule Minga.Input.MentionCompletion do
           {:handled, EditorState.t()} | {:passthrough, EditorState.t()}
 
   # Agent scope: mention completion active in insert mode
-  def handle_key(%{keymap_scope: :agent} = state, cp, mods) do
+  def handle_key(%EditorState{workspace: %{keymap_scope: :agent}} = state, cp, mods) do
     panel = AgentAccess.panel(state)
 
     if panel.input_focused and panel.mention_completion != nil do
@@ -30,7 +30,7 @@ defmodule Minga.Input.MentionCompletion do
   end
 
   # Editor scope: mention completion active in side panel
-  def handle_key(%{keymap_scope: :editor} = state, cp, mods) do
+  def handle_key(%EditorState{workspace: %{keymap_scope: :editor}} = state, cp, mods) do
     panel = AgentAccess.panel(state)
 
     if panel.visible and panel.input_focused and panel.mention_completion != nil do

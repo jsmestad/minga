@@ -70,7 +70,7 @@ defmodule Minga.Editor.RenderPipelineTest do
       assert [_ | _] = commands
 
       # Windows should have updated tracking fields
-      [{_win_id, window}] = Map.to_list(result.windows.map)
+      [{_win_id, window}] = Map.to_list(result.workspace.windows.map)
       assert window.dirty_lines == %{}
       assert window.last_buf_version >= 0
     end
@@ -95,7 +95,7 @@ defmodule Minga.Editor.RenderPipelineTest do
       state = RenderPipeline.run(state)
       assert_receive {:"$gen_cast", {:send_commands, _}}
 
-      [{win_id, window}] = Map.to_list(state.windows.map)
+      [{win_id, window}] = Map.to_list(state.workspace.windows.map)
       assert window.dirty_lines == %{}
       assert window.last_buf_version >= 0
 
@@ -105,20 +105,20 @@ defmodule Minga.Editor.RenderPipelineTest do
       layout = Layout.get(state)
       {_scrolls, state} = Scroll.scroll_windows(state, layout)
 
-      window2 = Map.get(state.windows.map, win_id)
+      window2 = Map.get(state.workspace.windows.map, win_id)
       # No changes detected, dirty_lines stays empty
       assert window2.dirty_lines == %{}
     end
 
     test "editing the buffer triggers invalidation on next frame" do
       state = base_state(content: "line one\nline two\nline three")
-      buf = state.buffers.active
+      buf = state.workspace.buffers.active
 
       # Frame 1
       state = RenderPipeline.run(state)
       assert_receive {:"$gen_cast", {:send_commands, _}}
 
-      [{win_id, window1}] = Map.to_list(state.windows.map)
+      [{win_id, window1}] = Map.to_list(state.workspace.windows.map)
       old_version = window1.last_buf_version
 
       # Edit: insert a character
@@ -130,7 +130,7 @@ defmodule Minga.Editor.RenderPipelineTest do
       layout = Layout.get(state)
       {_scrolls, state} = Scroll.scroll_windows(state, layout)
 
-      window2 = Map.get(state.windows.map, win_id)
+      window2 = Map.get(state.workspace.windows.map, win_id)
       # Buffer version changed → full invalidation (conservative)
       assert window2.dirty_lines == :all
 
@@ -141,7 +141,7 @@ defmodule Minga.Editor.RenderPipelineTest do
 
     test "full pipeline produces correct output after edit" do
       state = base_state(content: "aaa\nbbb\nccc")
-      buf = state.buffers.active
+      buf = state.workspace.buffers.active
 
       # Frame 1
       state = RenderPipeline.run(state)
@@ -159,7 +159,7 @@ defmodule Minga.Editor.RenderPipelineTest do
       assert [_ | _] = cmds2
 
       # Window should be clean after frame 2
-      [{_win_id, window}] = Map.to_list(state.windows.map)
+      [{_win_id, window}] = Map.to_list(state.workspace.windows.map)
       assert window.dirty_lines == %{}
     end
 
@@ -174,7 +174,7 @@ defmodule Minga.Editor.RenderPipelineTest do
       state = RenderPipeline.run(state)
       assert_receive {:"$gen_cast", {:send_commands, _}}
 
-      [{_win_id, window}] = Map.to_list(state.windows.map)
+      [{_win_id, window}] = Map.to_list(state.workspace.windows.map)
       assert window.dirty_lines == %{}
       assert window.last_buf_version >= 0
     end
@@ -188,7 +188,7 @@ defmodule Minga.Editor.RenderPipelineTest do
       state = RenderPipeline.run(state)
       assert_receive {:"$gen_cast", {:send_commands, _}}
 
-      [{win_id, window}] = Map.to_list(state.windows.map)
+      [{win_id, window}] = Map.to_list(state.workspace.windows.map)
       # Verify caches were populated
       assert map_size(window.cached_content) > 0
       assert map_size(window.cached_gutter) > 0
@@ -197,7 +197,7 @@ defmodule Minga.Editor.RenderPipelineTest do
       state = RenderPipeline.run(state)
       assert_receive {:"$gen_cast", {:send_commands, _}}
 
-      window2 = Map.get(state.windows.map, win_id)
+      window2 = Map.get(state.workspace.windows.map, win_id)
       # Caches should still be populated and window clean
       assert map_size(window2.cached_content) > 0
       assert window2.dirty_lines == %{}
@@ -209,7 +209,7 @@ defmodule Minga.Editor.RenderPipelineTest do
       state = RenderPipeline.run(state)
       assert_receive {:"$gen_cast", {:send_commands, _}}
 
-      [{_win_id, window}] = Map.to_list(state.windows.map)
+      [{_win_id, window}] = Map.to_list(state.workspace.windows.map)
 
       # Should have cache entries for lines 0, 1, 2
       assert Map.has_key?(window.cached_content, 0)
@@ -225,7 +225,7 @@ defmodule Minga.Editor.RenderPipelineTest do
       state = RenderPipeline.run(state)
       assert_receive {:"$gen_cast", {:send_commands, cmds1}}
 
-      [{win_id, window1}] = Map.to_list(state.windows.map)
+      [{win_id, window1}] = Map.to_list(state.workspace.windows.map)
       cached_content_0 = window1.cached_content[0]
       cached_gutter_0 = window1.cached_gutter[0]
       assert cached_content_0 != nil
@@ -235,7 +235,7 @@ defmodule Minga.Editor.RenderPipelineTest do
       state = RenderPipeline.run(state)
       assert_receive {:"$gen_cast", {:send_commands, cmds2}}
 
-      window2 = Map.get(state.windows.map, win_id)
+      window2 = Map.get(state.workspace.windows.map, win_id)
       assert window2.cached_content[0] == cached_content_0
       assert window2.cached_gutter[0] == cached_gutter_0
 
@@ -246,12 +246,12 @@ defmodule Minga.Editor.RenderPipelineTest do
     test "edit marks buffer version changed, triggering full redraw" do
       lines = Enum.map_join(1..5, "\n", &"line #{&1}")
       state = base_state(content: lines, rows: 10, cols: 80)
-      buf = state.buffers.active
+      buf = state.workspace.buffers.active
 
       # Frame 1
       state = RenderPipeline.run(state)
       assert_receive {:"$gen_cast", {:send_commands, _}}
-      [{win_id, _}] = Map.to_list(state.windows.map)
+      [{win_id, _}] = Map.to_list(state.workspace.windows.map)
 
       # Edit buffer
       BufferServer.insert_char(buf, "X")
@@ -260,7 +260,7 @@ defmodule Minga.Editor.RenderPipelineTest do
       state = RenderPipeline.run(state)
       assert_receive {:"$gen_cast", {:send_commands, _}}
 
-      window = Map.get(state.windows.map, win_id)
+      window = Map.get(state.workspace.windows.map, win_id)
       # After render, window should be clean with updated caches
       assert window.dirty_lines == %{}
       assert window.last_buf_version > 0
@@ -272,19 +272,19 @@ defmodule Minga.Editor.RenderPipelineTest do
       lines = Enum.map_join(1..10, "\n", &"line #{&1}")
       state = base_state(content: lines, rows: 15, cols: 80)
       # Use absolute numbering so only old+new cursor lines dirty
-      BufferServer.set_option(state.buffers.active, :line_numbers, :absolute)
+      BufferServer.set_option(state.workspace.buffers.active, :line_numbers, :absolute)
 
       # Frame 1: full render
       state = RenderPipeline.run(state)
       assert_receive {:"$gen_cast", {:send_commands, _}}
 
-      [{win_id, window}] = Map.to_list(state.windows.map)
+      [{win_id, window}] = Map.to_list(state.workspace.windows.map)
       assert window.dirty_lines == %{}
 
       # Simulate cursor move from line 0 to line 3
-      BufferServer.move(state.buffers.active, :down)
-      BufferServer.move(state.buffers.active, :down)
-      BufferServer.move(state.buffers.active, :down)
+      BufferServer.move(state.workspace.buffers.active, :down)
+      BufferServer.move(state.workspace.buffers.active, :down)
+      BufferServer.move(state.workspace.buffers.active, :down)
 
       # Run through scroll stage to detect gutter invalidation
       state = EditorState.sync_active_window_cursor(state)
@@ -292,7 +292,7 @@ defmodule Minga.Editor.RenderPipelineTest do
       layout = Layout.get(state)
       {_scrolls, state} = Scroll.scroll_windows(state, layout)
 
-      window = Map.get(state.windows.map, win_id)
+      window = Map.get(state.workspace.windows.map, win_id)
       # With absolute line numbers, only old and new cursor lines dirty
       assert window.dirty_lines != :all
       dirty_count = map_size(window.dirty_lines)
@@ -303,20 +303,20 @@ defmodule Minga.Editor.RenderPipelineTest do
       lines = Enum.map_join(1..10, "\n", &"line #{&1}")
       state = base_state(content: lines, rows: 15, cols: 80)
       # Hybrid numbering: every visible line number changes on cursor move
-      BufferServer.set_option(state.buffers.active, :line_numbers, :hybrid)
+      BufferServer.set_option(state.workspace.buffers.active, :line_numbers, :hybrid)
 
       # Frame 1
       state = RenderPipeline.run(state)
       assert_receive {:"$gen_cast", {:send_commands, _}}
 
       # Move cursor
-      BufferServer.move(state.buffers.active, :down)
+      BufferServer.move(state.workspace.buffers.active, :down)
       state = EditorState.sync_active_window_cursor(state)
       state = RenderPipeline.compute_layout(state)
       layout = Layout.get(state)
       {_scrolls, state} = Scroll.scroll_windows(state, layout)
 
-      [{_win_id, window}] = Map.to_list(state.windows.map)
+      [{_win_id, window}] = Map.to_list(state.workspace.windows.map)
       # Hybrid/relative: all lines dirty because every gutter number changes
       assert window.dirty_lines == :all
     end
@@ -328,20 +328,20 @@ defmodule Minga.Editor.RenderPipelineTest do
       state = RenderPipeline.run(state)
       assert_receive {:"$gen_cast", {:send_commands, _}}
 
-      [{win_id, window}] = Map.to_list(state.windows.map)
+      [{win_id, window}] = Map.to_list(state.workspace.windows.map)
       assert window.dirty_lines == %{}
       assert window.last_context_fingerprint != nil
 
       # Simulate entering visual mode (changes visual_selection in context).
       # Visual mode uses VisualState as the mode_state, not a nested field.
       visual_state = %Minga.Mode.VisualState{visual_type: :char, visual_anchor: {0, 0}}
-      state = %{state | vim: %{state.vim | mode: :visual, mode_state: visual_state}}
+      state = %{state | workspace: %{state.workspace | vim: %{state.workspace.vim | mode: :visual, mode_state: visual_state}}}
 
       # Frame 2: context fingerprint will change due to visual selection
       state = RenderPipeline.run(state)
       assert_receive {:"$gen_cast", {:send_commands, _}}
 
-      window2 = Map.get(state.windows.map, win_id)
+      window2 = Map.get(state.workspace.windows.map, win_id)
       # After render, dirty_lines is cleared but a full redraw happened
       assert window2.dirty_lines == %{}
       # Fingerprint should be updated
@@ -356,7 +356,7 @@ defmodule Minga.Editor.RenderPipelineTest do
       state = RenderPipeline.run(state)
       assert_receive {:"$gen_cast", {:send_commands, _}}
 
-      [{_win_id, window}] = Map.to_list(state.windows.map)
+      [{_win_id, window}] = Map.to_list(state.workspace.windows.map)
 
       # Cache should only contain entries for visible lines (roughly 0..9)
       # Not lines 10..19 which are below the viewport

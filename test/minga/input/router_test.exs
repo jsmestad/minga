@@ -14,12 +14,14 @@ defmodule Minga.Input.RouterTest do
 
     %EditorState{
       port_manager: self(),
-      viewport: Viewport.new(24, 80),
-      vim: VimState.new(),
-      buffers: %Buffers{
-        active: buf,
-        list: [buf],
-        active_index: 0
+      workspace: %Minga.Workspace.State{
+        viewport: Viewport.new(24, 80),
+        vim: VimState.new(),
+        buffers: %Buffers{
+          active: buf,
+          list: [buf],
+          active_index: 0
+        }
       },
       focus_stack: Input.default_stack()
     }
@@ -39,18 +41,18 @@ defmodule Minga.Input.RouterTest do
       state = base_state()
       # 'j' in normal mode moves cursor down
       new_state = Router.dispatch(state, ?j, 0)
-      cursor = BufferServer.cursor(new_state.buffers.active)
+      cursor = BufferServer.cursor(new_state.workspace.buffers.active)
       assert elem(cursor, 0) == 1
     end
 
     test "conflict prompt takes priority over mode FSM" do
       state = base_state()
-      buf = state.buffers.active
-      state = %{state | pending_conflict: {buf, "/tmp/test.txt"}}
+      buf = state.workspace.buffers.active
+      state = %{state | workspace: %{state.workspace | pending_conflict: {buf, "/tmp/test.txt"}}}
 
       # 'j' is swallowed by conflict prompt, not forwarded to mode
       new_state = Router.dispatch(state, ?j, 0)
-      cursor = BufferServer.cursor(new_state.buffers.active)
+      cursor = BufferServer.cursor(new_state.workspace.buffers.active)
       # Cursor did not move because conflict prompt intercepted the key
       assert elem(cursor, 0) == 0
     end
@@ -68,7 +70,7 @@ defmodule Minga.Input.RouterTest do
 
       # Press 'd' to enter operator_pending mode (no buffer mutation)
       new_state = Router.dispatch(state, ?d, 0)
-      assert new_state.vim.mode == :operator_pending
+      assert new_state.workspace.vim.mode == :operator_pending
 
       # Only a single no-op batch_end message should be sent (no full render).
       # port_manager is self(), so GenServer.cast sends a $gen_cast message.
@@ -95,7 +97,7 @@ defmodule Minga.Input.RouterTest do
       # Another normal key
       state = Router.dispatch(state, ?k, 0)
       # Should have moved down then up, back to line 0
-      cursor = BufferServer.cursor(state.buffers.active)
+      cursor = BufferServer.cursor(state.workspace.buffers.active)
       assert elem(cursor, 0) == 0
     end
   end
@@ -105,15 +107,15 @@ defmodule Minga.Input.RouterTest do
       state = base_state()
       snapshot = Router.capture_snapshot(state)
 
-      assert snapshot.old_buffer == state.buffers.active
+      assert snapshot.old_buffer == state.workspace.buffers.active
       assert snapshot.old_mode == :normal
       assert snapshot.old_cursor == {0, 0}
-      assert snapshot.buf_version == BufferServer.version(state.buffers.active)
+      assert snapshot.buf_version == BufferServer.version(state.workspace.buffers.active)
     end
 
     test "handles nil active buffer" do
       state = base_state()
-      state = %{state | buffers: %Buffers{active: nil, list: [], active_index: 0}}
+      state = %{state | workspace: %{state.workspace | buffers: %Buffers{active: nil, list: [], active_index: 0}}}
       snapshot = Router.capture_snapshot(state)
 
       assert snapshot.old_buffer == nil
@@ -126,7 +128,7 @@ defmodule Minga.Input.RouterTest do
 
       # Enter visual mode by pressing 'v'
       state = Router.dispatch(state, ?v, 0)
-      assert state.vim.mode == :visual
+      assert state.workspace.vim.mode == :visual
 
       snapshot = Router.capture_snapshot(state)
       assert snapshot.old_mode == :visual

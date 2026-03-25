@@ -17,16 +17,18 @@ defmodule Minga.Editor.State.SnapshotTest do
 
     %EditorState{
       port_manager: nil,
-      viewport: Viewport.new(24, 80),
-      vim: %VimState{mode: mode, mode_state: Mode.initial_state()},
-      buffers: %Buffers{
-        active: buf,
-        list: if(buf, do: [buf], else: []),
-        active_index: 0
-      },
-      windows: %Windows{},
-      keymap_scope: Keyword.get(opts, :keymap_scope, :editor),
-      tab_bar: Keyword.get(opts, :tab_bar)
+      tab_bar: Keyword.get(opts, :tab_bar),
+      workspace: %Minga.Workspace.State{
+        viewport: Viewport.new(24, 80),
+        vim: %VimState{mode: mode, mode_state: Mode.initial_state()},
+        buffers: %Buffers{
+          active: buf,
+          list: if(buf, do: [buf], else: []),
+          active_index: 0
+        },
+        windows: %Windows{},
+        keymap_scope: Keyword.get(opts, :keymap_scope, :editor)
+      }
     }
   end
 
@@ -38,10 +40,10 @@ defmodule Minga.Editor.State.SnapshotTest do
       ctx = EditorState.snapshot_tab_context(state)
 
       # Per-tab fields stored directly
-      assert ctx.keymap_scope == :agent
-      assert ctx.vim.mode == :insert
-      assert ctx.buffers.active == buf
-      assert ctx.windows == state.windows
+      assert ctx.workspace.keymap_scope == :agent
+      assert ctx.workspace.vim.mode == :insert
+      assert ctx.workspace.buffers.active == buf
+      assert ctx.workspace.windows == state.workspace.windows
 
       # No surface_* fields (old bridge format)
       refute Map.has_key?(ctx, :surface_module)
@@ -54,17 +56,17 @@ defmodule Minga.Editor.State.SnapshotTest do
 
       ctx = EditorState.snapshot_tab_context(state)
 
-      assert ctx.buffers.active == buf
-      assert ctx.vim == state.vim
-      assert ctx.viewport == state.viewport
-      assert ctx.mouse == state.mouse
-      assert ctx.highlight == state.highlight
-      assert ctx.lsp_pending == state.lsp_pending
-      assert ctx.completion == state.completion
-      assert ctx.completion_trigger == state.completion_trigger
-      assert ctx.injection_ranges == state.injection_ranges
-      assert ctx.search == state.search
-      assert ctx.pending_conflict == state.pending_conflict
+      assert ctx.workspace.buffers.active == buf
+      assert ctx.workspace.vim == state.workspace.vim
+      assert ctx.workspace.viewport == state.workspace.viewport
+      assert ctx.workspace.mouse == state.workspace.mouse
+      assert ctx.workspace.highlight == state.workspace.highlight
+      assert ctx.workspace.lsp_pending == state.workspace.lsp_pending
+      assert ctx.workspace.completion == state.workspace.completion
+      assert ctx.workspace.completion_trigger == state.workspace.completion_trigger
+      assert ctx.workspace.injection_ranges == state.workspace.injection_ranges
+      assert ctx.workspace.search == state.workspace.search
+      assert ctx.workspace.pending_conflict == state.workspace.pending_conflict
     end
   end
 
@@ -80,9 +82,9 @@ defmodule Minga.Editor.State.SnapshotTest do
       ctx = EditorState.snapshot_tab_context(state_b)
 
       restored = EditorState.restore_tab_context(state, ctx)
-      assert restored.vim.mode == :insert
-      assert restored.keymap_scope == :editor
-      assert restored.buffers.active == buf_b
+      assert restored.workspace.vim.mode == :insert
+      assert restored.workspace.keymap_scope == :editor
+      assert restored.workspace.buffers.active == buf_b
     end
 
     test "restores agent scope context correctly" do
@@ -95,8 +97,8 @@ defmodule Minga.Editor.State.SnapshotTest do
       ctx = EditorState.snapshot_tab_context(state_b)
 
       restored = EditorState.restore_tab_context(state, ctx)
-      assert restored.keymap_scope == :agent
-      assert restored.buffers.active == buf_b
+      assert restored.workspace.keymap_scope == :agent
+      assert restored.workspace.buffers.active == buf_b
     end
 
     test "migrates legacy context with active_buffer field" do
@@ -115,17 +117,17 @@ defmodule Minga.Editor.State.SnapshotTest do
       }
 
       restored = EditorState.restore_tab_context(state, ctx)
-      assert restored.keymap_scope == :editor
-      assert restored.vim.mode == :insert
-      assert restored.buffers.active == buf_b
-      assert restored.buffers.active_index == 1
+      assert restored.workspace.keymap_scope == :editor
+      assert restored.workspace.vim.mode == :insert
+      assert restored.workspace.buffers.active == buf_b
+      assert restored.workspace.buffers.active_index == 1
     end
 
     test "handles empty context gracefully" do
       state = make_state()
       restored = EditorState.restore_tab_context(state, %{})
-      assert restored.vim.mode == :normal
-      assert restored.keymap_scope == :editor
+      assert restored.workspace.vim.mode == :normal
+      assert restored.workspace.keymap_scope == :editor
     end
   end
 
@@ -155,15 +157,15 @@ defmodule Minga.Editor.State.SnapshotTest do
       switched = EditorState.switch_tab(state, tab_b.id)
 
       # Should have restored tab b's context
-      assert switched.vim.mode == :insert
-      assert switched.buffers.active == buf_b
+      assert switched.workspace.vim.mode == :insert
+      assert switched.workspace.buffers.active == buf_b
       assert switched.tab_bar.active_id == tab_b.id
 
       # Tab a should have been snapshotted with flat context
       saved_a = TabBar.get(switched.tab_bar, tab_a.id)
-      assert saved_a.context.keymap_scope == :editor
-      assert saved_a.context.vim.mode == :normal
-      assert saved_a.context.buffers.active == buf_a
+      assert saved_a.context.workspace.keymap_scope == :editor
+      assert saved_a.context.workspace.vim.mode == :normal
+      assert saved_a.context.workspace.buffers.active == buf_a
     end
 
     test "switching to the current tab is a no-op" do
@@ -190,6 +192,55 @@ defmodule Minga.Editor.State.SnapshotTest do
       state = make_state(tab_bar: nil)
       assert EditorState.active_tab(state) == nil
       assert EditorState.active_tab_kind(state) == :file
+    end
+  end
+
+  describe "workspace field completeness" do
+    test "WorkspaceState.fields/0 stays in sync with struct definition" do
+      struct_keys =
+        %Minga.Workspace.State{viewport: Minga.Editor.Viewport.new(24, 80)}
+        |> Map.keys()
+        |> Kernel.--([:__struct__])
+        |> Enum.sort()
+
+      assert Enum.sort(Minga.Workspace.State.fields()) == struct_keys
+    end
+
+    test "snapshot + restore round-trip preserves all 16 workspace fields" do
+      {:ok, buf} = BufferServer.start_link(content: "hello")
+      {:ok, msg_buf} = BufferServer.start_link(content: "")
+
+      # Build a state with non-default values for every workspace field
+      original =
+        Minga.Test.StateFactory.build(
+          vim: %VimState{mode: :insert, mode_state: Mode.initial_state()},
+          buffers: %Buffers{active: buf, list: [buf], active_index: 0, messages: msg_buf},
+          windows: %Windows{},
+          file_tree: %Minga.Editor.State.FileTree{focused: true},
+          viewport: Minga.Editor.Viewport.new(40, 120),
+          mouse: %Minga.Editor.State.Mouse{click_count: 3},
+          highlight: %Minga.Editor.State.Highlighting{version: 42},
+          lsp_pending: %{make_ref() => :hover},
+          completion: nil,
+          completion_trigger: Minga.Editor.CompletionTrigger.new(),
+          injection_ranges: %{buf => [%{start_byte: 0, end_byte: 10, language: "elixir"}]},
+          search: %Minga.Editor.State.Search{last_pattern: "foo", last_direction: :backward},
+          pending_conflict: {buf, "/tmp/test.txt"},
+          keymap_scope: :agent,
+          document_highlights: [%{range: %{start: %{line: 0, character: 0}, end: %{line: 0, character: 5}}, kind: 1}],
+          agent_ui: Minga.Agent.UIState.new()
+        )
+
+      # Snapshot and restore into a different base state
+      ctx = EditorState.snapshot_tab_context(original)
+      fresh = Minga.Test.StateFactory.build()
+      restored = EditorState.restore_tab_context(fresh, ctx)
+
+      # Every workspace field must survive the round-trip
+      for field <- Minga.Workspace.State.fields() do
+        assert Map.get(restored.workspace, field) == Map.get(original.workspace, field),
+               "field :#{field} was not preserved through snapshot/restore round-trip"
+      end
     end
   end
 end

@@ -23,7 +23,6 @@ defmodule Minga.Editor.SemanticWindow.Builder do
   alias Minga.Diagnostics
   alias Minga.Editor.DisplayMap
   alias Minga.Editor.FoldMap
-
   alias Minga.Editor.Renderer.Composition
   alias Minga.Editor.Renderer.Context
   alias Minga.Editor.RenderPipeline.Scroll.WindowScroll
@@ -99,7 +98,7 @@ defmodule Minga.Editor.SemanticWindow.Builder do
     # own cursor; having two cursors visible is confusing.
     cursor_visible =
       if is_active do
-        not Minga.Editor.Editing.minibuffer_mode?(state)
+        state.workspace.vim.mode not in [:command, :search, :eval, :search_prompt]
       else
         true
       end
@@ -123,7 +122,7 @@ defmodule Minga.Editor.SemanticWindow.Builder do
 
     # Document highlights in display coordinates
     doc_highlights =
-      build_document_highlights(state.document_highlights, viewport.top, viewport_bottom)
+      build_document_highlights(state.workspace.document_highlights, viewport.top, viewport_bottom)
 
     # Line annotations in display coordinates
     annotations =

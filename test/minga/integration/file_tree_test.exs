@@ -101,12 +101,12 @@ defmodule Minga.Integration.FileTreeTest do
 
       send_keys_sync(ctx, "<Space>op")
       state = :sys.get_state(ctx.editor)
-      assert state.keymap_scope == :file_tree
+      assert state.workspace.keymap_scope == :file_tree
 
       # Escape closes the tree and returns focus to the editor
       send_keys_sync(ctx, "<Esc>")
       state = :sys.get_state(ctx.editor)
-      assert state.keymap_scope == :editor
+      assert state.workspace.keymap_scope == :editor
     end
 
     test "opening a file from tree returns focus to editor" do
@@ -114,7 +114,7 @@ defmodule Minga.Integration.FileTreeTest do
 
       send_keys_sync(ctx, "<Space>op")
       state = :sys.get_state(ctx.editor)
-      assert state.keymap_scope == :file_tree
+      assert state.workspace.keymap_scope == :file_tree
 
       # Navigate past all directories to reach a file (directories come first).
       # Go to the bottom of the tree to find a file entry.
@@ -122,8 +122,8 @@ defmodule Minga.Integration.FileTreeTest do
 
       state = :sys.get_state(ctx.editor)
 
-      assert state.keymap_scope == :editor,
-             "focus should return to editor after opening file from tree, got #{state.keymap_scope}"
+      assert state.workspace.keymap_scope == :editor,
+             "focus should return to editor after opening file from tree, got #{state.workspace.keymap_scope}"
     end
   end
 

@@ -14,7 +14,7 @@ defmodule Minga.Editor.Commands.Testing do
   @type state :: EditorState.t()
 
   @spec test_file(state()) :: state()
-  def test_file(%{buffers: %{active: buf}} = state) when is_pid(buf) do
+  def test_file(%EditorState{workspace: %{buffers: %{active: buf}}} = state) when is_pid(buf) do
     run_test_command(state, buf, :file)
   end
 
@@ -24,7 +24,7 @@ defmodule Minga.Editor.Commands.Testing do
   def test_all(state), do: run_test_command(state, nil, :all)
 
   @spec test_at_point(state()) :: state()
-  def test_at_point(%{buffers: %{active: buf}} = state) when is_pid(buf) do
+  def test_at_point(%EditorState{workspace: %{buffers: %{active: buf}}} = state) when is_pid(buf) do
     run_test_command(state, buf, :at_point)
   end
 

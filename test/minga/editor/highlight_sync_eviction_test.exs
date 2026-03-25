@@ -13,23 +13,28 @@ defmodule Minga.Editor.HighlightSyncEvictionTest do
   defp base_state do
     %EditorState{
       port_manager: nil,
-      viewport: Viewport.new(24, 80),
-      vim: VimState.new()
+      workspace: %Minga.Workspace.State{
+        viewport: Viewport.new(24, 80),
+        vim: VimState.new()
+      }
     }
   end
 
   defp with_buffer_tracking(state, pid, buffer_id, last_active_ms_ago) do
-    hl = state.highlight
+    hl = state.workspace.highlight
     now = System.monotonic_time(:millisecond)
 
     %{
       state
-      | highlight: %{
-          hl
-          | buffer_ids: Map.put(hl.buffer_ids, pid, buffer_id),
-            reverse_buffer_ids: Map.put(hl.reverse_buffer_ids, buffer_id, pid),
-            last_active_at: Map.put(hl.last_active_at, pid, now - last_active_ms_ago),
-            next_buffer_id: max(hl.next_buffer_id, buffer_id + 1)
+      | workspace: %{
+          state.workspace
+          | highlight: %{
+              hl
+              | buffer_ids: Map.put(hl.buffer_ids, pid, buffer_id),
+                reverse_buffer_ids: Map.put(hl.reverse_buffer_ids, buffer_id, pid),
+                last_active_at: Map.put(hl.last_active_at, pid, now - last_active_ms_ago),
+                next_buffer_id: max(hl.next_buffer_id, buffer_id + 1)
+            }
         }
     }
   end
@@ -41,9 +46,9 @@ defmodule Minga.Editor.HighlightSyncEvictionTest do
 
       new_state = HighlightSync.evict_inactive(state)
 
-      assert Map.has_key?(new_state.highlight.buffer_ids, pid1)
-      assert Map.has_key?(new_state.highlight.reverse_buffer_ids, 1)
-      assert Map.has_key?(new_state.highlight.last_active_at, pid1)
+      assert Map.has_key?(new_state.workspace.highlight.buffer_ids, pid1)
+      assert Map.has_key?(new_state.workspace.highlight.reverse_buffer_ids, 1)
+      assert Map.has_key?(new_state.workspace.highlight.last_active_at, pid1)
     end
 
     test "evicts buffers inactive longer than TTL" do
@@ -53,9 +58,9 @@ defmodule Minga.Editor.HighlightSyncEvictionTest do
 
       new_state = HighlightSync.evict_inactive(state)
 
-      refute Map.has_key?(new_state.highlight.buffer_ids, pid1)
-      refute Map.has_key?(new_state.highlight.reverse_buffer_ids, 1)
-      refute Map.has_key?(new_state.highlight.last_active_at, pid1)
+      refute Map.has_key?(new_state.workspace.highlight.buffer_ids, pid1)
+      refute Map.has_key?(new_state.workspace.highlight.reverse_buffer_ids, 1)
+      refute Map.has_key?(new_state.workspace.highlight.last_active_at, pid1)
     end
 
     test "does not evict the active buffer even if stale" do
@@ -64,12 +69,12 @@ defmodule Minga.Editor.HighlightSyncEvictionTest do
       state =
         base_state()
         |> with_buffer_tracking(pid1, 1, 10 * 60 * 1_000)
-        |> then(fn s -> %{s | buffers: %{s.buffers | active: pid1}} end)
+        |> then(fn s -> %{s | workspace: %{s.workspace | buffers: %{s.workspace.buffers | active: pid1}}} end)
 
       new_state = HighlightSync.evict_inactive(state)
 
       # Active buffer is protected
-      assert Map.has_key?(new_state.highlight.buffer_ids, pid1)
+      assert Map.has_key?(new_state.workspace.highlight.buffer_ids, pid1)
     end
 
     test "does not evict protected PIDs" do
@@ -78,7 +83,7 @@ defmodule Minga.Editor.HighlightSyncEvictionTest do
 
       new_state = HighlightSync.evict_inactive(state, protected_pids: [pid1])
 
-      assert Map.has_key?(new_state.highlight.buffer_ids, pid1)
+      assert Map.has_key?(new_state.workspace.highlight.buffer_ids, pid1)
     end
 
     test "evicts only stale buffers, keeps fresh ones" do
@@ -92,8 +97,8 @@ defmodule Minga.Editor.HighlightSyncEvictionTest do
 
       new_state = HighlightSync.evict_inactive(state)
 
-      assert Map.has_key?(new_state.highlight.buffer_ids, pid_fresh)
-      refute Map.has_key?(new_state.highlight.buffer_ids, pid_stale)
+      assert Map.has_key?(new_state.workspace.highlight.buffer_ids, pid_fresh)
+      refute Map.has_key?(new_state.workspace.highlight.buffer_ids, pid_stale)
     end
 
     test "returns state unchanged when no buffers are tracked" do
@@ -108,16 +113,16 @@ defmodule Minga.Editor.HighlightSyncEvictionTest do
         base_state()
         |> with_buffer_tracking(pid1, 1, 10 * 60 * 1_000)
 
-      hl = state.highlight
+      hl = state.workspace.highlight
 
       state = %{
         state
-        | highlight: %{hl | highlights: Map.put(hl.highlights, pid1, Minga.Highlight.new())}
+        | workspace: %{state.workspace | highlight: %{hl | highlights: Map.put(hl.highlights, pid1, Minga.Highlight.new())}}
       }
 
       new_state = HighlightSync.evict_inactive(state)
 
-      refute Map.has_key?(new_state.highlight.highlights, pid1)
+      refute Map.has_key?(new_state.workspace.highlight.highlights, pid1)
     end
   end
 
@@ -127,12 +132,12 @@ defmodule Minga.Editor.HighlightSyncEvictionTest do
 
       state =
         base_state()
-        |> then(fn s -> %{s | buffers: %{s.buffers | active: pid1}} end)
+        |> then(fn s -> %{s | workspace: %{s.workspace | buffers: %{s.workspace.buffers | active: pid1}}} end)
 
       new_state = HighlightSync.touch_active(state)
 
-      assert Map.has_key?(new_state.highlight.last_active_at, pid1)
-      ts = new_state.highlight.last_active_at[pid1]
+      assert Map.has_key?(new_state.workspace.highlight.last_active_at, pid1)
+      ts = new_state.workspace.highlight.last_active_at[pid1]
       now = System.monotonic_time(:millisecond)
       assert abs(now - ts) < 100
     end
@@ -149,13 +154,13 @@ defmodule Minga.Editor.HighlightSyncEvictionTest do
 
       state =
         base_state()
-        |> then(fn s -> %{s | buffers: %{s.buffers | active: pid1}} end)
+        |> then(fn s -> %{s | workspace: %{s.workspace | buffers: %{s.workspace.buffers | active: pid1}}} end)
 
       {id, new_state} = HighlightSync.ensure_buffer_id(state)
 
       assert id == 1
-      assert new_state.highlight.buffer_ids[pid1] == 1
-      assert new_state.highlight.next_buffer_id == 2
+      assert new_state.workspace.highlight.buffer_ids[pid1] == 1
+      assert new_state.workspace.highlight.next_buffer_id == 2
     end
 
     test "returns existing buffer_id on subsequent calls" do
@@ -163,7 +168,7 @@ defmodule Minga.Editor.HighlightSyncEvictionTest do
 
       state =
         base_state()
-        |> then(fn s -> %{s | buffers: %{s.buffers | active: pid1}} end)
+        |> then(fn s -> %{s | workspace: %{s.workspace | buffers: %{s.workspace.buffers | active: pid1}}} end)
 
       {id1, state} = HighlightSync.ensure_buffer_id(state)
       {id2, _state} = HighlightSync.ensure_buffer_id(state)
@@ -177,10 +182,10 @@ defmodule Minga.Editor.HighlightSyncEvictionTest do
 
       state =
         base_state()
-        |> then(fn s -> %{s | buffers: %{s.buffers | active: pid1}} end)
+        |> then(fn s -> %{s | workspace: %{s.workspace | buffers: %{s.workspace.buffers | active: pid1}}} end)
 
       {id1, state} = HighlightSync.ensure_buffer_id(state)
-      state = %{state | buffers: %{state.buffers | active: pid2}}
+      state = %{state | workspace: %{state.workspace | buffers: %{state.workspace.buffers | active: pid2}}}
       {id2, _state} = HighlightSync.ensure_buffer_id(state)
 
       assert id2 == id1 + 1
@@ -195,17 +200,17 @@ defmodule Minga.Editor.HighlightSyncEvictionTest do
         base_state()
         |> with_buffer_tracking(pid1, 1, 1_000)
 
-      hl = state.highlight
+      hl = state.workspace.highlight
 
       state = %{
         state
-        | highlight: %{hl | highlights: Map.put(hl.highlights, pid1, Minga.Highlight.new())}
+        | workspace: %{state.workspace | highlight: %{hl | highlights: Map.put(hl.highlights, pid1, Minga.Highlight.new())}}
       }
 
       new_state = HighlightSync.close_buffer(state, pid1)
 
-      refute Map.has_key?(new_state.highlight.buffer_ids, pid1)
-      refute Map.has_key?(new_state.highlight.highlights, pid1)
+      refute Map.has_key?(new_state.workspace.highlight.buffer_ids, pid1)
+      refute Map.has_key?(new_state.workspace.highlight.highlights, pid1)
     end
 
     test "no-op for unknown buffer PID" do

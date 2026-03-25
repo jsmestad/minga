@@ -5,8 +5,10 @@ defmodule Minga.Picker.OptionScopeSourceTest do
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Config.Options
+  alias Minga.Editor.State.Buffers
   alias Minga.Editor.State.Picker, as: PickerState
   alias Minga.Picker.OptionScopeSource
+  alias Minga.Test.StateFactory
 
   describe "candidates/1" do
     test "returns two scope choices" do
@@ -23,13 +25,13 @@ defmodule Minga.Picker.OptionScopeSourceTest do
       # Confirm the buffer starts with wrap: false (seeded default)
       assert BufferServer.get_option(buf, :wrap) == false
 
-      state = %{
-        buffers: %{active: buf},
+      state = StateFactory.build(
+        buffers: %Buffers{active: buf},
         status_msg: nil,
         picker_ui: %PickerState{
           context: %{option_name: :wrap, new_value: true}
         }
-      }
+      )
 
       result =
         OptionScopeSource.on_select(
@@ -47,13 +49,13 @@ defmodule Minga.Picker.OptionScopeSourceTest do
       {:ok, buf} = BufferServer.start_link(content: "hello")
       original = Options.get(:wrap)
 
-      state = %{
-        buffers: %{active: buf},
+      state = StateFactory.build(
+        buffers: %Buffers{active: buf},
         status_msg: nil,
         picker_ui: %PickerState{
           context: %{option_name: :wrap, new_value: !original}
         }
-      }
+      )
 
       result =
         OptionScopeSource.on_select(

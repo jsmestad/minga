@@ -216,8 +216,8 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI.ChromeCacheTest do
       Agent.stop(dead_pid)
 
       # Inject the dead pid as the prompt buffer in agent_ui state.
-      panel = %{state.agent_ui.panel | prompt_buffer: dead_pid}
-      state = %{state | agent_ui: %{state.agent_ui | panel: panel}}
+      panel = %{state.workspace.agent_ui.panel | prompt_buffer: dead_pid}
+      state = %{state | workspace: %{state.workspace | agent_ui: %{state.workspace.agent_ui | panel: panel}}}
 
       sb_data = StatusBarData.from_state(state)
 

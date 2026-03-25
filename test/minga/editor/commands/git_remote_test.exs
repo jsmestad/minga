@@ -15,7 +15,7 @@ defmodule Minga.Editor.Commands.GitRemoteTest do
 
   defp build_state(overrides) do
     Map.merge(
-      %EditorState{port_manager: nil, viewport: Viewport.new(80, 24)},
+      %EditorState{port_manager: nil, workspace: %Minga.Workspace.State{viewport: Viewport.new(80, 24)}},
       overrides
     )
   end

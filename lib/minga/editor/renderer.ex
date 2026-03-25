@@ -48,10 +48,10 @@ defmodule Minga.Editor.Renderer do
   initialized (if needed). No windows to cache.
   """
   @spec render(state()) :: state()
-  def render(%{buffers: %{active: nil}} = state) do
-    rows = state.viewport.rows
-    cols = state.viewport.cols
-    viewport = state.viewport
+  def render(%EditorState{workspace: %{buffers: %{active: nil}}} = state) do
+    rows = state.workspace.viewport.rows
+    cols = state.workspace.viewport.cols
+    viewport = state.workspace.viewport
 
     # Dashboard state is initialized by the editor when buffers empty,
     # but fall back to an empty state if somehow nil.

@@ -35,7 +35,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
 
   # ── Save / quit ───────────────────────────────────────────────────────────
 
-  def execute(%{buffers: %{active: buf}} = state, :save) do
+  def execute(%EditorState{workspace: %{buffers: %{active: buf}}} = state, :save) do
     state = apply_pre_save_transforms(state, buf)
 
     case BufferServer.save(buf) do
@@ -55,7 +55,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
     end
   end
 
-  def execute(%{buffers: %{active: buf}} = state, :force_save) do
+  def execute(%EditorState{workspace: %{buffers: %{active: buf}}} = state, :force_save) do
     case BufferServer.force_save(buf) do
       :ok ->
         name = Helpers.buffer_display_name(buf)
@@ -69,7 +69,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
     end
   end
 
-  def execute(%{buffers: %{active: buf}} = state, :reload) do
+  def execute(%EditorState{workspace: %{buffers: %{active: buf}}} = state, :reload) do
     case BufferServer.reload(buf) do
       :ok ->
         name = Helpers.buffer_display_name(buf)
@@ -127,7 +127,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   end
 
   def execute(state, :new_buffer) do
-    n = next_new_buffer_number(state.buffers.list)
+    n = next_new_buffer_number(state.workspace.buffers.list)
     name = "[new #{n}]"
 
     case DynamicSupervisor.start_child(
@@ -153,7 +153,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
 
   # ── Line number style ─────────────────────────────────────────────────────
 
-  def execute(%{buffers: %{active: buf}} = state, :cycle_line_numbers) when is_pid(buf) do
+  def execute(%EditorState{workspace: %{buffers: %{active: buf}}} = state, :cycle_line_numbers) when is_pid(buf) do
     current = BufferServer.get_option(buf, :line_numbers)
 
     next =
@@ -168,7 +168,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
     state
   end
 
-  def execute(%{buffers: %{active: buf}} = state, :toggle_wrap) when is_pid(buf) do
+  def execute(%EditorState{workspace: %{buffers: %{active: buf}}} = state, :toggle_wrap) when is_pid(buf) do
     current = BufferServer.get_option(buf, :wrap)
     BufferServer.set_option(buf, :wrap, !current)
     label = if current, do: "nowrap", else: "wrap"
@@ -232,25 +232,25 @@ defmodule Minga.Editor.Commands.BufferManagement do
     end
   end
 
-  def execute(%{buffers: %{active: buf}} = state, {:execute_ex_command, {:goto_line, line_num}}) do
+  def execute(%EditorState{workspace: %{buffers: %{active: buf}}} = state, {:execute_ex_command, {:goto_line, line_num}}) do
     target_line = max(0, line_num - 1)
     BufferServer.move_to(buf, {target_line, 0})
     state
   end
 
-  def execute(%{buffers: %{active: buf}} = state, {:execute_ex_command, {:set, :number}})
+  def execute(%EditorState{workspace: %{buffers: %{active: buf}}} = state, {:execute_ex_command, {:set, :number}})
       when is_pid(buf) do
     BufferServer.set_option(buf, :line_numbers, :absolute)
     state
   end
 
-  def execute(%{buffers: %{active: buf}} = state, {:execute_ex_command, {:set, :nonumber}})
+  def execute(%EditorState{workspace: %{buffers: %{active: buf}}} = state, {:execute_ex_command, {:set, :nonumber}})
       when is_pid(buf) do
     BufferServer.set_option(buf, :line_numbers, :none)
     state
   end
 
-  def execute(%{buffers: %{active: buf}} = state, {:execute_ex_command, {:set, :relativenumber}})
+  def execute(%EditorState{workspace: %{buffers: %{active: buf}}} = state, {:execute_ex_command, {:set, :relativenumber}})
       when is_pid(buf) do
     current = BufferServer.get_option(buf, :line_numbers)
 
@@ -265,7 +265,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   end
 
   def execute(
-        %{buffers: %{active: buf}} = state,
+        %EditorState{workspace: %{buffers: %{active: buf}}} = state,
         {:execute_ex_command, {:set, :norelativenumber}}
       )
       when is_pid(buf) do
@@ -281,13 +281,13 @@ defmodule Minga.Editor.Commands.BufferManagement do
     state
   end
 
-  def execute(%{buffers: %{active: buf}} = state, {:execute_ex_command, {:set, :wrap}})
+  def execute(%EditorState{workspace: %{buffers: %{active: buf}}} = state, {:execute_ex_command, {:set, :wrap}})
       when is_pid(buf) do
     BufferServer.set_option(buf, :wrap, true)
     state
   end
 
-  def execute(%{buffers: %{active: buf}} = state, {:execute_ex_command, {:set, :nowrap}})
+  def execute(%EditorState{workspace: %{buffers: %{active: buf}}} = state, {:execute_ex_command, {:set, :nowrap}})
       when is_pid(buf) do
     BufferServer.set_option(buf, :wrap, false)
     state
@@ -342,7 +342,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   end
 
   def execute(
-        %{buffers: %{active: buf}} = state,
+        %EditorState{workspace: %{buffers: %{active: buf}}} = state,
         {:execute_ex_command, {:substitute, pattern, replacement, flags}}
       ) do
     global? = :global in flags
@@ -462,7 +462,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   """
   @spec apply_filetype_change(state(), atom()) :: state()
   def apply_filetype_change(state, filetype) when is_atom(filetype) do
-    buf = state.buffers.active
+    buf = state.workspace.buffers.active
 
     if is_pid(buf) do
       try do
@@ -495,7 +495,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   # ── Alternate file ───────────────────────────────────────────────────────
 
   @spec alternate_file(state()) :: state()
-  def alternate_file(%{buffers: %{active: buf}} = state) when is_pid(buf) do
+  def alternate_file(%EditorState{workspace: %{buffers: %{active: buf}}} = state) when is_pid(buf) do
     file_path = BufferServer.file_path(buf)
     filetype = BufferServer.filetype(buf)
     open_alternate(state, file_path, filetype)
@@ -561,7 +561,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
 
   @spec switch_to_buffer(state(), non_neg_integer()) :: state()
   @spec switch_to_buffer(state(), non_neg_integer()) :: state()
-  defp switch_to_buffer(%{tab_bar: %TabBar{} = tb, buffers: %{list: buffers}} = state, idx) do
+  defp switch_to_buffer(%{tab_bar: %TabBar{} = tb, workspace: %{buffers: %{list: buffers}}} = state, idx) do
     target_buf = Enum.at(buffers, idx)
 
     # Find the file tab whose context holds this buffer
@@ -590,14 +590,14 @@ defmodule Minga.Editor.Commands.BufferManagement do
   end
 
   @spec next_buffer(state()) :: state()
-  defp next_buffer(%{buffers: %{list: [_, _ | _] = buffers, active_index: idx}} = state) do
+  defp next_buffer(%EditorState{workspace: %{buffers: %{list: [_, _ | _] = buffers, active_index: idx}}} = state) do
     cycle_buffer_in_tab(state, rem(idx + 1, Enum.count(buffers)))
   end
 
   defp next_buffer(state), do: state
 
   @spec prev_buffer(state()) :: state()
-  defp prev_buffer(%{buffers: %{list: [_, _ | _] = buffers, active_index: idx}} = state) do
+  defp prev_buffer(%EditorState{workspace: %{buffers: %{list: [_, _ | _] = buffers, active_index: idx}}} = state) do
     count = Enum.count(buffers)
     cycle_buffer_in_tab(state, rem(idx - 1 + count, count))
   end
@@ -608,7 +608,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   # has its own file tab, switches to that tab instead.
   @spec cycle_buffer_in_tab(state(), non_neg_integer()) :: state()
   defp cycle_buffer_in_tab(%{tab_bar: %TabBar{}} = state, idx) do
-    target_buf = Enum.at(state.buffers.list, idx)
+    target_buf = Enum.at(state.workspace.buffers.list, idx)
 
     case find_tab_for_buffer(state.tab_bar, target_buf) do
       nil ->
@@ -658,7 +658,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   @spec remove_current_buffer(state()) :: state()
 
   defp remove_current_buffer(
-         %{buffers: %{list: [_ | _] = buffers, active_index: idx} = bs} = state
+         %EditorState{workspace: %{buffers: %{list: [_ | _] = buffers, active_index: idx} = bs}} = state
        ) do
     buf = Enum.at(buffers, idx)
 
@@ -727,10 +727,9 @@ defmodule Minga.Editor.Commands.BufferManagement do
           new_idx = min(idx, Enum.count(new_buffers) - 1)
           new_active = Enum.at(new_buffers, new_idx)
 
-          %{
-            state
-            | buffers: %{bs | list: new_buffers, active_index: new_idx, active: new_active}
-          }
+          EditorState.update_workspace(state, fn ws ->
+            %{ws | buffers: %{bs | list: new_buffers, active_index: new_idx, active: new_active}}
+          end)
           |> EditorState.sync_active_window_buffer()
       end
     end
@@ -865,7 +864,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
 
   @spec any_buffer_dirty?(state()) :: boolean()
   defp any_buffer_dirty?(state) do
-    Enum.any?(state.buffers.list, fn pid ->
+    Enum.any?(state.workspace.buffers.list, fn pid ->
       try do
         BufferServer.dirty?(pid)
       catch
@@ -931,7 +930,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   # shutting down. Returns state unchanged (side-effectual only).
   @spec save_all_buffers(state()) :: state()
   defp save_all_buffers(state) do
-    Enum.each(state.buffers.list, fn buf ->
+    Enum.each(state.workspace.buffers.list, fn buf ->
       try do
         if BufferServer.dirty?(buf), do: BufferServer.save(buf)
       catch
@@ -1093,7 +1092,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   end
 
   @spec show_tool_prompt_if_normal(state()) :: state()
-  defp show_tool_prompt_if_normal(%{vim: %{mode: :normal}, tool_prompt_queue: pending} = state)
+  defp show_tool_prompt_if_normal(%EditorState{workspace: %{vim: %{mode: :normal}}, tool_prompt_queue: pending} = state)
        when pending != [] do
     ms = %ToolConfirmState{pending: pending, declined: state.tool_declined}
     EditorState.transition_mode(state, :tool_confirm, ms)
@@ -1156,7 +1155,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   defp focus_popup_window(state, buffer_pid) do
     case find_popup_for_buffer(state, buffer_pid) do
       {:ok, popup_window_id} ->
-        %{state | windows: %{state.windows | active: popup_window_id}}
+        %{state | workspace: %{state.workspace | windows: %{state.workspace.windows | active: popup_window_id}}}
 
       :none ->
         state
@@ -1165,7 +1164,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
 
   @spec switch_or_add_buffer(state(), pid()) :: state()
   defp switch_or_add_buffer(state, buffer_pid) do
-    idx = Enum.find_index(state.buffers.list, &(&1 == buffer_pid))
+    idx = Enum.find_index(state.workspace.buffers.list, &(&1 == buffer_pid))
 
     case idx do
       nil -> Commands.add_buffer(state, buffer_pid)
@@ -1177,7 +1176,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   @spec find_popup_for_buffer(state(), pid()) :: {:ok, Window.id()} | :none
   defp find_popup_for_buffer(state, buffer_pid) do
     result =
-      Enum.find(state.windows.map, fn {_id, window} ->
+      Enum.find(state.workspace.windows.map, fn {_id, window} ->
         Window.popup?(window) and window.buffer == buffer_pid
       end)
 
@@ -1196,11 +1195,11 @@ defmodule Minga.Editor.Commands.BufferManagement do
            {BufferServer, content: "", buffer_name: "[new 1]"}
          ) do
       {:ok, new_buf} ->
-        %{state | buffers: %{bs | list: [new_buf], active_index: 0, active: new_buf}}
+        %{state | workspace: %{state.workspace | buffers: %{bs | list: [new_buf], active_index: 0, active: new_buf}}}
         |> EditorState.sync_active_window_buffer()
 
       {:error, _} ->
-        %{state | buffers: %{bs | list: [], active_index: 0, active: nil}}
+        %{state | workspace: %{state.workspace | buffers: %{bs | list: [], active_index: 0, active: nil}}}
     end
   end
 
