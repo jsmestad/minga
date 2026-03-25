@@ -9,14 +9,14 @@ defmodule Minga.Editor.Commands.BufferManagement.GUI do
   @impl true
   @spec view_messages(EditorState.t()) :: EditorState.t()
   def view_messages(state) do
-    new_panel = BottomPanel.show(state.bottom_panel, :messages)
-    %{state | bottom_panel: new_panel}
+    new_panel = BottomPanel.show(EditorState.bottom_panel(state), :messages)
+    EditorState.set_bottom_panel(state, new_panel)
   end
 
   @impl true
   @spec view_warnings(EditorState.t()) :: EditorState.t()
   def view_warnings(state) do
-    new_panel = BottomPanel.show(state.bottom_panel, :messages, :warnings)
-    %{state | bottom_panel: new_panel}
+    new_panel = BottomPanel.show(EditorState.bottom_panel(state), :messages, :warnings)
+    EditorState.set_bottom_panel(state, new_panel)
   end
 end

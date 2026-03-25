@@ -1040,7 +1040,7 @@ defmodule Minga.Editor do
     # this guard, stray broadcasts (from concurrent git operations or
     # file watcher events) re-populate the panel after it was closed,
     # causing the panel to ghost back into view.
-    if state.git_status_panel != nil do
+    if EditorState.git_status_panel(state) != nil do
       git_status_data = %{
         repo_state: :normal,
         branch: branch || "",
@@ -1049,7 +1049,7 @@ defmodule Minga.Editor do
         entries: entries
       }
 
-      state = %{state | git_status_panel: git_status_data}
+      state = EditorState.set_git_status_panel(state, git_status_data)
       {:noreply, schedule_render(state, 16)}
     else
       {:noreply, state}
@@ -1845,7 +1845,7 @@ defmodule Minga.Editor do
   end
 
   defp handle_gui_action(state, {:toggle_panel, 1}) do
-    %{state | bottom_panel: BottomPanel.toggle(state.bottom_panel)}
+    EditorState.set_bottom_panel(state, BottomPanel.toggle(EditorState.bottom_panel(state)))
   end
 
   defp handle_gui_action(state, {:toggle_panel, 2}) do
@@ -1865,15 +1865,21 @@ defmodule Minga.Editor do
   end
 
   defp handle_gui_action(state, {:panel_switch_tab, tab_index}) do
-    %{state | bottom_panel: BottomPanel.switch_tab(state.bottom_panel, tab_index)}
+    EditorState.set_bottom_panel(
+      state,
+      BottomPanel.switch_tab(EditorState.bottom_panel(state), tab_index)
+    )
   end
 
   defp handle_gui_action(state, :panel_dismiss) do
-    %{state | bottom_panel: BottomPanel.dismiss(state.bottom_panel)}
+    EditorState.set_bottom_panel(state, BottomPanel.dismiss(EditorState.bottom_panel(state)))
   end
 
   defp handle_gui_action(state, {:panel_resize, height_percent}) do
-    %{state | bottom_panel: BottomPanel.resize(state.bottom_panel, height_percent)}
+    EditorState.set_bottom_panel(
+      state,
+      BottomPanel.resize(EditorState.bottom_panel(state), height_percent)
+    )
   end
 
   defp handle_gui_action(state, {:open_file, path}) do
@@ -2197,10 +2203,11 @@ defmodule Minga.Editor do
   end
 
   @spec open_warnings_popup_if_needed(state()) :: state()
-  defp open_warnings_popup_if_needed(%{bottom_panel: %{dismissed: true}} = state), do: state
+  defp open_warnings_popup_if_needed(%{shell_state: %{bottom_panel: %{dismissed: true}}} = state),
+    do: state
 
   defp open_warnings_popup_if_needed(
-         %{bottom_panel: %{visible: true, active_tab: :messages}} = state
+         %{shell_state: %{bottom_panel: %{visible: true, active_tab: :messages}}} = state
        ) do
     # Panel already visible on Messages tab; don't change the user's filter.
     schedule_render(state, 16)
@@ -2208,8 +2215,8 @@ defmodule Minga.Editor do
 
   defp open_warnings_popup_if_needed(state) do
     # Auto-open the bottom panel with warnings filter preset
-    new_panel = BottomPanel.show(state.bottom_panel, :messages, :warnings)
-    schedule_render(%{state | bottom_panel: new_panel}, 16)
+    new_panel = BottomPanel.show(EditorState.bottom_panel(state), :messages, :warnings)
+    schedule_render(EditorState.set_bottom_panel(state, new_panel), 16)
   end
 
   # Returns true if the given buffer PID is visible in any window.

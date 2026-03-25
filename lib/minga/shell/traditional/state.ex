@@ -22,7 +22,9 @@ defmodule Minga.Shell.Traditional.State do
           status_msg: String.t() | nil,
           picker_ui: Minga.Editor.State.Picker.t(),
           prompt_ui: Minga.Editor.State.Prompt.t(),
-          whichkey: Minga.Editor.State.WhichKey.t()
+          whichkey: Minga.Editor.State.WhichKey.t(),
+          bottom_panel: Minga.Editor.BottomPanel.t(),
+          git_status_panel: Minga.Frontend.Protocol.GUI.git_status_data() | nil
         }
 
   defstruct nav_flash: nil,
@@ -31,5 +33,7 @@ defmodule Minga.Shell.Traditional.State do
             status_msg: nil,
             picker_ui: %Minga.Editor.State.Picker{},
             prompt_ui: %Minga.Editor.State.Prompt{},
-            whichkey: %Minga.Editor.State.WhichKey{}
+            whichkey: %Minga.Editor.State.WhichKey{},
+            bottom_panel: %Minga.Editor.BottomPanel{},
+            git_status_panel: nil
 end

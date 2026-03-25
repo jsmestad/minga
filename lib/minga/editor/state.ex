@@ -81,9 +81,7 @@ defmodule Minga.Editor.State do
             theme: Minga.UI.Theme.get!(:doom_one),
             render_timer: nil,
             warning_popup_timer: nil,
-            bottom_panel: %BottomPanel{},
             message_store: %MessageStore{},
-            git_status_panel: nil,
             git_remote_op: nil,
             lsp_status: :none,
             lsp_server_statuses: %{},
@@ -127,9 +125,7 @@ defmodule Minga.Editor.State do
           theme: Theme.t(),
           render_timer: reference() | nil,
           warning_popup_timer: reference() | nil,
-          bottom_panel: BottomPanel.t(),
           message_store: MessageStore.t(),
-          git_status_panel: Minga.Frontend.Protocol.GUI.git_status_data() | nil,
           git_remote_op:
             {msg_ref :: reference(), task_monitor :: reference(),
              {git_root :: String.t(), success_msg :: String.t(), error_prefix :: String.t()}}
@@ -291,6 +287,36 @@ defmodule Minga.Editor.State do
   @spec set_whichkey(t(), WhichKey.t()) :: t()
   def set_whichkey(%{shell_state: ss} = state, wk) do
     %{state | shell_state: %{ss | whichkey: wk}}
+  end
+
+  # ── Bottom panel ───────────────────────────────────────────────────────
+
+  @doc "Returns the bottom panel state."
+  @spec bottom_panel(t()) :: BottomPanel.t()
+  def bottom_panel(%{shell_state: ss}), do: ss.bottom_panel
+
+  @doc "Replaces the bottom panel state."
+  @spec set_bottom_panel(t(), BottomPanel.t()) :: t()
+  def set_bottom_panel(%{shell_state: ss} = state, panel) do
+    %{state | shell_state: %{ss | bottom_panel: panel}}
+  end
+
+  # ── Git status panel ──────────────────────────────────────────────────
+
+  @doc "Returns the git status panel data, or nil."
+  @spec git_status_panel(t()) :: Minga.Frontend.Protocol.GUI.git_status_data() | nil
+  def git_status_panel(%{shell_state: ss}), do: ss.git_status_panel
+
+  @doc "Sets the git status panel data."
+  @spec set_git_status_panel(t(), Minga.Frontend.Protocol.GUI.git_status_data() | nil) :: t()
+  def set_git_status_panel(%{shell_state: ss} = state, data) do
+    %{state | shell_state: %{ss | git_status_panel: data}}
+  end
+
+  @doc "Clears the git status panel."
+  @spec close_git_status_panel(t()) :: t()
+  def close_git_status_panel(%{shell_state: ss} = state) do
+    %{state | shell_state: %{ss | git_status_panel: nil}}
   end
 
   # ── Convenience accessors ─────────────────────────────────────────────────

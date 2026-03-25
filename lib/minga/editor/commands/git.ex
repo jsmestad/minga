@@ -42,7 +42,8 @@ defmodule Minga.Editor.Commands.Git do
 
   def execute(state, :git_status_toggle) do
     if state.workspace.keymap_scope == :git_status do
-      %{state | workspace: %{state.workspace | keymap_scope: :editor}, git_status_panel: nil}
+      state = %{state | workspace: %{state.workspace | keymap_scope: :editor}}
+      EditorState.close_git_status_panel(state)
     else
       open_git_status_panel(state)
     end
@@ -331,11 +332,8 @@ defmodule Minga.Editor.Commands.Git do
         # Mutual exclusivity: close file tree when opening git status
         state = close_file_tree_if_open(state)
 
-        %{
-          state
-          | workspace: %{state.workspace | keymap_scope: :git_status},
-            git_status_panel: panel_data
-        }
+        state = %{state | workspace: %{state.workspace | keymap_scope: :git_status}}
+        EditorState.set_git_status_panel(state, panel_data)
     end
   end
 

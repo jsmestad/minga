@@ -234,7 +234,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
   # ── Git status panel ──
 
   @spec build_gui_git_status_cmd(state()) :: binary() | nil
-  defp build_gui_git_status_cmd(%{git_status_panel: %{} = data}) do
+  defp build_gui_git_status_cmd(%{shell_state: %{git_status_panel: %{} = data}}) do
     fp = :erlang.phash2(data)
 
     if fp != Process.get(:last_gui_git_status_fp) do
@@ -1038,7 +1038,9 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
   # entries have arrived. We still fingerprint to skip encoding when the
   # panel hasn't changed.
   @spec build_gui_bottom_panel_cmd(state()) :: {binary() | nil, state()}
-  defp build_gui_bottom_panel_cmd(%{bottom_panel: panel, message_store: store} = state) do
+  defp build_gui_bottom_panel_cmd(
+         %{shell_state: %{bottom_panel: panel}, message_store: store} = state
+       ) do
     fp = :erlang.phash2({panel, store})
 
     if fp != Process.get(:last_gui_bottom_panel_fp) do

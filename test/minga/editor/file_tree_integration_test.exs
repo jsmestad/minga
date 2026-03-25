@@ -188,22 +188,20 @@ defmodule Minga.Editor.FileTreeIntegrationTest do
 
       state = put_in(state.workspace.keymap_scope, :git_status)
 
-      state = %{
-        state
-        | git_status_panel: %{
-            repo_state: :normal,
-            branch: "main",
-            ahead: 0,
-            behind: 0,
-            entries: []
-          }
-      }
+      state =
+        Minga.Editor.State.set_git_status_panel(state, %{
+          repo_state: :normal,
+          branch: "main",
+          ahead: 0,
+          behind: 0,
+          entries: []
+        })
 
       # Call toggle directly (pure function, no GenServer round-trip)
       result = Minga.Editor.Commands.FileTree.toggle(state)
 
       assert result.workspace.file_tree.tree != nil
-      assert result.git_status_panel == nil
+      assert result.shell_state.git_status_panel == nil
       assert result.workspace.keymap_scope == :file_tree
     end
 
@@ -213,13 +211,13 @@ defmodule Minga.Editor.FileTreeIntegrationTest do
       ctx = start_editor(file)
 
       state = :sys.get_state(ctx.editor)
-      assert state.git_status_panel == nil
+      assert state.shell_state.git_status_panel == nil
 
       result = Minga.Editor.Commands.FileTree.toggle(state)
 
       assert result.workspace.file_tree.tree != nil
       assert result.workspace.keymap_scope == :file_tree
-      assert result.git_status_panel == nil
+      assert result.shell_state.git_status_panel == nil
     end
 
     test "closing the file tree resets tree state and restores editor scope", %{tmp_dir: dir} do
@@ -251,28 +249,26 @@ defmodule Minga.Editor.FileTreeIntegrationTest do
       # Simulate git status open
       state = put_in(state.workspace.keymap_scope, :git_status)
 
-      state = %{
-        state
-        | git_status_panel: %{
-            repo_state: :normal,
-            branch: "main",
-            ahead: 0,
-            behind: 0,
-            entries: []
-          }
-      }
+      state =
+        Minga.Editor.State.set_git_status_panel(state, %{
+          repo_state: :normal,
+          branch: "main",
+          ahead: 0,
+          behind: 0,
+          entries: []
+        })
 
       # Open file tree (clears git status)
       state = Minga.Editor.Commands.FileTree.toggle(state)
       assert state.workspace.keymap_scope == :file_tree
-      assert state.git_status_panel == nil
+      assert state.shell_state.git_status_panel == nil
       assert state.workspace.file_tree.tree != nil
 
       # Close file tree
       state = Minga.Editor.Commands.FileTree.toggle(state)
       assert state.workspace.keymap_scope == :editor
       assert state.workspace.file_tree.tree == nil
-      assert state.git_status_panel == nil
+      assert state.shell_state.git_status_panel == nil
     end
   end
 
