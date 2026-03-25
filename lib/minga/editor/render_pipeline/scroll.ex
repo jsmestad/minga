@@ -23,8 +23,6 @@ defmodule Minga.Editor.RenderPipeline.Scroll do
   alias Minga.Editor.Viewport
   alias Minga.Editor.Window
 
-  alias Minga.Git.Tracker, as: GitTracker
-
   defmodule WindowScroll do
     @moduledoc """
     Per-window data produced by the scroll stage.
@@ -405,21 +403,14 @@ defmodule Minga.Editor.RenderPipeline.Scroll do
 
   @spec gutter_dimensions(state(), pid(), atom(), non_neg_integer()) ::
           {boolean(), non_neg_integer()}
-  defp gutter_dimensions(_state, buf, line_number_style, line_count) do
-    decorations = Minga.Buffer.Server.decorations(buf)
-
-    has_gutter_icons =
-      Enum.any?(decorations.annotations, fn ann -> ann.kind == :gutter_icon end)
-
-    has_sign_column =
-      has_gutter_icons or GitTracker.tracked?(buf) or BufferServer.file_path(buf) != nil
-
-    sign_w = if has_sign_column, do: Gutter.sign_column_width(), else: 0
-
+  defp gutter_dimensions(_state, _buf, line_number_style, line_count) do
+    # Sign column is always reserved for consistent gutter layout.
+    # This prevents line numbers from shifting when diagnostics or git
+    # markers appear.
     number_w =
       if line_number_style == :none, do: 0, else: Viewport.gutter_width(line_count)
 
-    {has_sign_column, number_w + sign_w}
+    {true, Gutter.total_width(number_w)}
   end
 
   @spec cursor_line_text([String.t()], non_neg_integer(), non_neg_integer()) :: String.t()

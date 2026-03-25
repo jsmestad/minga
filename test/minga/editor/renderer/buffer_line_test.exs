@@ -101,21 +101,10 @@ defmodule Minga.Editor.Renderer.BufferLineTest do
       assert number_cmd != nil
     end
 
-    test "no sign column commands when sign_w is 0" do
-      {gutters, _c, 1} = BufferLine.render(make_params(%{sign_w: 0}))
+    test "always includes sign column" do
+      {gutters, _c, 1} = BufferLine.render(make_params(%{}))
       decoded = decode_all(gutters)
-      # With sign_w: 0 and has_sign_column: false, only line number gutter
-      assert length(decoded) == 1
-    end
-
-    test "includes sign column when has_sign_column is true" do
-      ctx = make_ctx(%{has_sign_column: true})
-
-      {gutters, _c, 1} =
-        BufferLine.render(make_params(%{ctx: ctx, sign_w: 2, gutter_w: 6}))
-
-      decoded = decode_all(gutters)
-      # Should have sign command + line number command
+      # Sign column is always reserved: sign command + line number command
       assert length(decoded) == 2
     end
 
@@ -398,13 +387,14 @@ defmodule Minga.Editor.Renderer.BufferLineTest do
       assert Enum.any?(decoded_away, fn cmd -> String.contains?(cmd.text, "4") end)
     end
 
-    test ":none style produces no gutter commands" do
-      ctx = make_ctx(%{has_sign_column: false})
-
+    test ":none style produces only sign column command" do
       {gutters, _c, 1} =
-        BufferLine.render(make_params(%{ln_style: :none, gutter_w: 0, ctx: ctx}))
+        BufferLine.render(make_params(%{ln_style: :none, gutter_w: 2, sign_w: 2}))
 
-      assert gutters == []
+      decoded = decode_all(gutters)
+      # Sign column is always reserved, but no line number
+      assert length(decoded) == 1
+      assert Enum.all?(decoded, fn cmd -> not Regex.match?(~r/\d/, cmd.text) end)
     end
   end
 

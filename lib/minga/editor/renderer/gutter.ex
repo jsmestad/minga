@@ -3,10 +3,10 @@ defmodule Minga.Editor.Renderer.Gutter do
   Line number gutter and diagnostic sign column rendering.
 
   The gutter has two parts (left to right):
-  1. **Sign column** (2 chars) — diagnostic severity icons (`E `, `W `, etc.)
+  1. **Sign column** (2 chars) — always reserved for diagnostic icons, git
+     signs, or annotation markers. Keeping this space constant prevents
+     line numbers from shifting when signs appear or disappear.
   2. **Line numbers** (variable width) — absolute, relative, or hybrid
-
-  The sign column is always present when diagnostics exist for the buffer.
 
   All render functions return `DisplayList.draw()` tuples (or `[]`).
   """
@@ -26,12 +26,13 @@ defmodule Minga.Editor.Renderer.Gutter do
   @doc """
   Returns the total gutter width including sign column and line numbers.
 
-  The sign column adds 2 characters when diagnostics are present.
+  The sign column is always reserved (2 characters) to keep the gutter
+  layout consistent regardless of whether diagnostics or git markers are
+  active. This prevents line numbers from shifting when signs appear.
   """
-  @spec total_width(non_neg_integer(), boolean()) :: non_neg_integer()
-  def total_width(line_number_w, has_diagnostics) do
-    sign_w = if has_diagnostics, do: @sign_col_width, else: 0
-    sign_w + line_number_w
+  @spec total_width(non_neg_integer()) :: non_neg_integer()
+  def total_width(line_number_w) do
+    @sign_col_width + line_number_w
   end
 
   @doc "Returns the width of the sign column."

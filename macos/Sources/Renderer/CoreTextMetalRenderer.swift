@@ -277,8 +277,11 @@ final class CoreTextMetalRenderer {
             }
         }
 
-        // Gutter padding (same as MetalRenderer).
-        let gutterPaddingPt: Float = frameState.gutterCol > 0 ? round(12.0 * scale) / scale : 0
+        // Gutter spacing: left margin for breathing room, right padding before separator.
+        // The sign column is always reserved (2 cell widths) for consistent layout.
+        let gutterLeftMarginPt: Float = frameState.gutterCol > 0 ? round(6.0 * scale) / scale : 0
+        let gutterLeftMarginPx = gutterLeftMarginPt * scale
+        let gutterPaddingPt: Float = frameState.gutterCol > 0 ? round(8.0 * scale) / scale : 0
         let gutterPaddingPx = gutterPaddingPt * scale
 
         // Build background quads and line texture instances.
@@ -312,7 +315,7 @@ final class CoreTextMetalRenderer {
 
                 let windowRowOffset = Float(gutter.contentRow) * cellH * scale
                 let gutterWidth = Float(gutter.lineNumberWidth) + Float(gutter.signColWidth)
-                let contentColOffset = (Float(gutter.contentCol) + gutterWidth) * cellW * scale + gutterPaddingPx
+                let contentColOffset = (Float(gutter.contentCol) + gutterWidth) * cellW * scale + gutterLeftMarginPx + gutterPaddingPx
 
                 // Horizontal scroll: shift line textures and overlays left by scrollLeft columns.
                 // The gutter stays fixed; only content past the gutter edge scrolls.
@@ -464,6 +467,7 @@ final class CoreTextMetalRenderer {
                 gutter: windowGutter,
                 frameState: frameState,
                 cellW: cellW, cellH: cellH, scale: scale,
+                gutterLeftMarginPx: gutterLeftMarginPx,
                 gutterPaddingPx: gutterPaddingPx,
                 bgQuads: &bgQuads,
                 lineInstances: &lineInstances
@@ -516,7 +520,7 @@ final class CoreTextMetalRenderer {
             let cursorRow = Float(frameState.cursorRow)
             let cursorCol = Float(frameState.cursorCol)
             let cursorPadding: Float = (frameState.gutterCol > 0 && frameState.cursorCol >= frameState.gutterCol)
-                ? gutterPaddingPx : 0
+                ? gutterLeftMarginPx + gutterPaddingPx : 0
 
             var cursorQuad = QuadGPU()
             cursorQuad.position = SIMD2<Float>(cursorCol * cellW * scale + cursorPadding, cursorRow * cellH * scale)
@@ -555,16 +559,30 @@ final class CoreTextMetalRenderer {
             encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: diagnosticQuads.count)
         }
 
-        // Pass 4: Gutter gap fill.
-        if frameState.gutterCol > 0 && gutterPaddingPx > 0 {
-            var fillQuad = QuadGPU()
-            fillQuad.position = SIMD2<Float>(Float(frameState.gutterCol) * cellW * scale, 0)
-            fillQuad.size = SIMD2<Float>(gutterPaddingPx, Float(viewportSize.height))
-            fillQuad.color = defaultBg
-            fillQuad.alpha = 1.0
+        // Pass 4: Gutter gap fills (left margin + right padding).
+        let totalGutterExtraPx = gutterLeftMarginPx + gutterPaddingPx
+        if frameState.gutterCol > 0 && totalGutterExtraPx > 0 {
+            // Left margin fill: from window edge to the start of gutter content.
+            if gutterLeftMarginPx > 0 {
+                var leftFill = QuadGPU()
+                leftFill.position = SIMD2<Float>(0, 0)
+                leftFill.size = SIMD2<Float>(gutterLeftMarginPx, Float(viewportSize.height))
+                leftFill.color = defaultBg
+                leftFill.alpha = 1.0
+                encoder.setRenderPipelineState(bgPipeline)
+                encoder.setVertexBytes(&leftFill, length: MemoryLayout<QuadGPU>.stride, index: 0)
+                encoder.setVertexBytes(&uniforms, length: MemoryLayout<CTUniformsGPU>.size, index: 1)
+                encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: 1)
+            }
 
+            // Right padding fill: between gutter columns and content separator.
+            var rightFill = QuadGPU()
+            rightFill.position = SIMD2<Float>(Float(frameState.gutterCol) * cellW * scale + gutterLeftMarginPx, 0)
+            rightFill.size = SIMD2<Float>(gutterPaddingPx, Float(viewportSize.height))
+            rightFill.color = defaultBg
+            rightFill.alpha = 1.0
             encoder.setRenderPipelineState(bgPipeline)
-            encoder.setVertexBytes(&fillQuad, length: MemoryLayout<QuadGPU>.stride, index: 0)
+            encoder.setVertexBytes(&rightFill, length: MemoryLayout<QuadGPU>.stride, index: 0)
             encoder.setVertexBytes(&uniforms, length: MemoryLayout<CTUniformsGPU>.size, index: 1)
             encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: 1)
         }
@@ -572,7 +590,7 @@ final class CoreTextMetalRenderer {
         // Pass 5: Gutter separator line.
         if frameState.gutterCol > 0 && frameState.gutterSeparatorColor != 0 {
             var sepQuad = QuadGPU()
-            let sepX = (Float(frameState.gutterCol) * cellW + gutterPaddingPt) * scale - 1.0
+            let sepX = (Float(frameState.gutterCol) * cellW + gutterLeftMarginPt + gutterPaddingPt) * scale - 1.0
             sepQuad.position = SIMD2<Float>(sepX, 0)
             sepQuad.size = SIMD2<Float>(1.0, Float(viewportSize.height))
             sepQuad.color = colorFromU24(frameState.gutterSeparatorColor, default: SIMD3<Float>(0.3, 0.3, 0.3))
@@ -668,7 +686,7 @@ final class CoreTextMetalRenderer {
             let cursorRow = Float(frameState.cursorRow)
             let cursorCol = Float(frameState.cursorCol)
             let cursorPadding: Float = (frameState.gutterCol > 0 && frameState.cursorCol >= frameState.gutterCol)
-                ? gutterPaddingPx : 0
+                ? gutterLeftMarginPx + gutterPaddingPx : 0
 
             var cursorQuad = QuadGPU()
             cursorQuad.color = cursorColor
@@ -712,6 +730,7 @@ final class CoreTextMetalRenderer {
         gutter: GUIWindowGutter,
         frameState: FrameState,
         cellW: Float, cellH: Float, scale: Float,
+        gutterLeftMarginPx: Float,
         gutterPaddingPx: Float,
         bgQuads: inout [QuadGPU],
         lineInstances: inout [LineGPU]
@@ -723,7 +742,7 @@ final class CoreTextMetalRenderer {
         for (rowIndex, entry) in gutter.entries.enumerated() {
             let screenRow = baseRow + UInt16(rowIndex)
             let yPos = Float(screenRow) * cellH * scale
-            let xOffset = Float(baseCol) * cellW * scale
+            let xOffset = Float(baseCol) * cellW * scale + gutterLeftMarginPx
 
             // Sign column (leftmost in gutter)
             if signColWidth > 0 {

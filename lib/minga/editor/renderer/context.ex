@@ -30,7 +30,7 @@ defmodule Minga.Editor.Renderer.Context do
             nav_flash_bg: nil,
             editor_bg: 0x282C34,
             is_gui: false,
-            has_sign_column: false,
+            has_sign_column: true,
             diagnostic_signs: %{},
             git_signs: %{},
             git_colors: %Minga.Theme.Git{

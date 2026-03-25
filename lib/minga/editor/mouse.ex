@@ -41,7 +41,7 @@ defmodule Minga.Editor.Mouse do
   alias Minga.Editor.Viewport
   alias Minga.Editor.Window
   alias Minga.Editor.WindowTree
-  alias Minga.Git.Tracker, as: GitTracker
+
   alias Minga.Mode.VisualState
   alias Minga.Port.Capabilities
 
@@ -645,16 +645,8 @@ defmodule Minga.Editor.Mouse do
     number_w =
       if ln_style == :none, do: 0, else: Viewport.gutter_width(total_lines)
 
-    # Sign column is shown when the buffer has a file path or a git buffer
-    # registered. This must match render_pipeline.ex's gutter_dimensions/4.
-    has_sign_column =
-      buf != nil and
-        (GitTracker.tracked?(buf) or BufferServer.file_path(buf) != nil)
-
-    sign_w =
-      if has_sign_column, do: Gutter.sign_column_width(), else: 0
-
-    number_w + sign_w
+    # Sign column is always reserved for consistent gutter layout.
+    Gutter.total_width(number_w)
   end
 
   # ── Screen-to-buffer coordinate translation ────────────────────────────────

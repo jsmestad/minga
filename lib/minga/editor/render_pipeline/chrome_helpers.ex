@@ -50,7 +50,9 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
   def render_separators(tree, screen_rect, _total_rows, theme) do
     separators = collect_separators(tree, screen_rect)
 
-    for {col, start_row, end_row} <- separators, row <- start_row..end_row do
+    for {col, start_row, end_row} <- separators,
+        start_row <= end_row,
+        row <- start_row..end_row do
       DisplayList.draw(row, col, "│", Face.new(fg: theme.editor.split_border_fg))
     end
   end
@@ -382,6 +384,11 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
 
   @spec collect_separators(WindowTree.t(), WindowTree.rect()) :: [separator_span()]
   defp collect_separators({:leaf, _}, _rect), do: []
+
+  # Degenerate dimensions: nothing to render.
+  defp collect_separators(_tree, {_row, _col, width, height})
+       when width <= 1 or height <= 0,
+       do: []
 
   defp collect_separators(
          {:split, :vertical, left, right, size},

@@ -176,7 +176,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
       window: window
     } = opts
 
-    sign_w = if ctx.has_sign_column, do: Gutter.sign_column_width(), else: 0
+    sign_w = Gutter.sign_column_width()
     max_rows = length(lines)
 
     # Pre-compute highlight segments for all visible lines in one O(N) pass.
@@ -249,7 +249,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
       window: window
     } = opts
 
-    sign_w = if ctx.has_sign_column, do: Gutter.sign_column_width(), else: 0
+    sign_w = Gutter.sign_column_width()
     wrap_on = Map.get(opts, :wrap_on, false)
 
     # Pre-compute wrap map for all visible buffer lines in one batch call
@@ -537,7 +537,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
     wrap_map =
       WrapMap.compute(lines, ctx.content_w, breakindent: breakindent, linebreak: linebreak)
 
-    sign_w = if ctx.has_sign_column, do: Gutter.sign_column_width(), else: 0
+    sign_w = Gutter.sign_column_width()
 
     {gutters, contents, screen_row, _byte_off} =
       lines

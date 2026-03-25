@@ -130,9 +130,9 @@ defmodule Minga.Editor.MouseTest do
   end
 
   describe "mouse click-to-position" do
-    # Gutter width for ≤99 lines = 3 (2 digits + 1 space).
+    # Gutter width for ≤99 lines = 5 (2 sign column + 2 digits + 1 space).
     # Screen col = gutter_width + buffer_col.
-    @gutter 3
+    @gutter 5
 
     test "left click moves cursor to clicked position" do
       {editor, buffer} = start_editor("hello\nworld\nfoo bar baz")
@@ -233,7 +233,7 @@ defmodule Minga.Editor.MouseTest do
   end
 
   describe "mouse drag selection" do
-    @gutter 3
+    @gutter 5
 
     test "left press + drag creates visual selection" do
       {editor, buffer} = start_editor("hello world foo")

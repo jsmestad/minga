@@ -372,7 +372,8 @@ defmodule Minga.Editor.RenderPipeline.Content do
 
     cursor_col = Unicode.display_col(cursor_line_text, cursor_byte_col)
     line_number_style = BufferServer.get_option(buf, :line_numbers)
-    gutter_w = if line_number_style == :none, do: 0, else: Viewport.gutter_width(line_count)
+    number_w = if line_number_style == :none, do: 0, else: Viewport.gutter_width(line_count)
+    gutter_w = Minga.Editor.Renderer.Gutter.total_width(number_w)
     content_w = max(chat_width - gutter_w, 1)
 
     # Build render context (includes decorations from the buffer)
@@ -385,7 +386,7 @@ defmodule Minga.Editor.RenderPipeline.Content do
         preview_matches: [],
         gutter_w: gutter_w,
         content_w: content_w,
-        has_sign_column: false,
+        has_sign_column: true,
         is_active: is_active,
         is_gui: Capabilities.gui?(state.capabilities)
       })

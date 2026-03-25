@@ -5,7 +5,7 @@ defmodule Minga.Editor.MouseMultiClickTest do
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor
 
-  @gutter 3
+  @gutter 5
   # Content starts at row 1 because the tab bar occupies row 0.
   @content_row 1
 

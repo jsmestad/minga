@@ -32,7 +32,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
   alias Minga.Editor.StatusBar.Data, as: StatusBarData
   alias Minga.Editor.Viewport
   alias Minga.Editor.Window.Content
-  alias Minga.Git.Tracker, as: GitTracker
+
   alias Minga.Picker
   alias Minga.Port.Manager, as: PortManager
   alias Minga.Port.Protocol.GUI, as: ProtocolGUI
@@ -796,21 +796,14 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
     %{cursor_line: cursor_line, viewport_top: viewport_top, line_count: line_count} = params
     line_number_style = BufferServer.get_option(buf, :line_numbers)
 
-    # Compute gutter geometry (same logic as Scroll stage)
-    decorations = BufferServer.decorations(buf)
-
-    has_gutter_icons =
-      Enum.any?(decorations.annotations, fn ann -> ann.kind == :gutter_icon end)
-
-    has_sign_column =
-      has_gutter_icons or GitTracker.tracked?(buf) or BufferServer.file_path(buf) != nil
-
-    sign_col_width = if has_sign_column, do: 2, else: 0
+    # Sign column is always reserved for consistent gutter layout.
+    sign_col_width = Minga.Editor.Renderer.Gutter.sign_column_width()
 
     line_number_width =
       if line_number_style == :none, do: 0, else: Viewport.gutter_width(line_count)
 
-    # Get signs for the buffer
+    # Get signs and decorations for the buffer
+    decorations = BufferServer.decorations(buf)
     diag_signs = ContentHelpers.diagnostic_signs_for_window(state, window)
     git_signs = ContentHelpers.git_signs_for_window(state, window)
 
