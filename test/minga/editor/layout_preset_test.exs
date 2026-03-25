@@ -6,7 +6,6 @@ defmodule Minga.Editor.LayoutPresetTest do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Buffers
   alias Minga.Editor.Viewport
-  alias Minga.Editor.VimState
   alias Minga.Editor.Window
   alias Minga.Editor.Window.Content
 
@@ -16,16 +15,14 @@ defmodule Minga.Editor.LayoutPresetTest do
 
     %EditorState{
       port_manager: self(),
-      viewport: %Viewport{rows: 24, cols: 80, top: 0, left: 0},
+      viewport: Viewport.new(24, 80),
       buffers: %Buffers{active: buf, list: [buf]},
       windows: %{
         tree: {:leaf, 1},
         map: %{1 => window},
         active: 1,
         next_id: 2
-      },
-      vim: VimState.new(),
-      keymap_scope: :editor
+      }
     }
   end
 

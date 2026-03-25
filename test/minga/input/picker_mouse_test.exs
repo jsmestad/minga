@@ -29,7 +29,7 @@ defmodule Minga.Input.PickerMouseTest do
     %EditorState{
       port_manager: nil,
       vim: VimState.new(),
-      viewport: %Viewport{rows: 30, cols: 80, top: 0, left: 0},
+      viewport: Viewport.new(30, 80),
       picker_ui: %Minga.Editor.State.Picker{picker: picker, source: TestSource}
     }
   end
@@ -84,7 +84,7 @@ defmodule Minga.Input.PickerMouseTest do
       %EditorState{
         port_manager: nil,
         vim: VimState.new(),
-        viewport: %Viewport{rows: 24, cols: 80, top: 0, left: 0},
+        viewport: Viewport.new(24, 80),
         picker_ui: %Minga.Editor.State.Picker{
           picker: picker,
           source: TestSource,
@@ -134,7 +134,7 @@ defmodule Minga.Input.PickerMouseTest do
       state = %EditorState{
         port_manager: nil,
         vim: VimState.new(),
-        viewport: %Viewport{rows: 30, cols: 80, top: 0, left: 0}
+        viewport: Viewport.new(30, 80)
       }
 
       {:passthrough, ^state} = PickerInput.handle_mouse(state, 10, 10, :left, 0, :press, 1)

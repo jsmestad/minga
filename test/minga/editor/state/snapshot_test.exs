@@ -6,7 +6,6 @@ defmodule Minga.Editor.State.SnapshotTest do
   alias Minga.Editor.State.Buffers
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
-  alias Minga.Editor.State.Windows
   alias Minga.Editor.Viewport
   alias Minga.Editor.VimState
   alias Minga.Mode
@@ -21,10 +20,8 @@ defmodule Minga.Editor.State.SnapshotTest do
       vim: %VimState{mode: mode, mode_state: Mode.initial_state()},
       buffers: %Buffers{
         active: buf,
-        list: if(buf, do: [buf], else: []),
-        active_index: 0
+        list: if(buf, do: [buf], else: [])
       },
-      windows: %Windows{},
       keymap_scope: Keyword.get(opts, :keymap_scope, :editor),
       tab_bar: Keyword.get(opts, :tab_bar)
     }

@@ -27,7 +27,7 @@ defmodule Minga.Editor.EditingTest do
 
     %EditorState{
       port_manager: @port_manager,
-      viewport: %Viewport{top: 0, left: 0, rows: 24, cols: 80},
+      viewport: Viewport.new(24, 80),
       vim: vim
     }
   end

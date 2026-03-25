@@ -17,7 +17,7 @@ defmodule Minga.Editor.LspActions.RenameTest do
       whichkey: %WhichKey{},
       vim: VimState.new(),
       theme: Minga.Theme.get!(:doom_one),
-      viewport: %Viewport{rows: 40, cols: 120, top: 0, left: 0}
+      viewport: Viewport.new(40, 120)
     }
   end
 

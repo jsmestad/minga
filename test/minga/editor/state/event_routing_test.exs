@@ -7,9 +7,7 @@ defmodule Minga.Editor.State.EventRoutingTest do
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.{Tab, TabBar}
-  alias Minga.Editor.State.Windows
   alias Minga.Editor.Viewport
-  alias Minga.Editor.VimState
 
   defp make_state(opts \\ []) do
     session = opts[:session] || spawn(fn -> :timer.sleep(:infinity) end)
@@ -20,13 +18,7 @@ defmodule Minga.Editor.State.EventRoutingTest do
       port_manager: self(),
       viewport: Viewport.new(24, 80),
       tab_bar: tb,
-      buffers: %EditorState.Buffers{list: [], active: nil, active_index: 0},
-      windows: %Windows{},
-      vim: VimState.new(),
-      keymap_scope: :editor,
-      agent: %AgentState{session: session, status: :idle},
-      agent_ui: UIState.new(),
-      file_tree: nil
+      agent: %AgentState{session: session, status: :idle}
     }
 
     %{state: state, session: session}

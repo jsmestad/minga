@@ -2,17 +2,14 @@ defmodule Minga.Editor.Commands.AgentSplitTest do
   use ExUnit.Case, async: true
 
   alias Minga.Agent.BufferSync, as: AgentBufferSync
-  alias Minga.Agent.UIState
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.Commands.Agent, as: AgentCommands
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.Buffers
-  alias Minga.Editor.State.FileTree, as: FileTreeState
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
   alias Minga.Editor.Viewport
-  alias Minga.Editor.VimState
   alias Minga.Editor.Window
   alias Minga.Editor.Window.Content
   alias Minga.Test.StubServer
@@ -28,9 +25,7 @@ defmodule Minga.Editor.Commands.AgentSplitTest do
     agent = %AgentState{
       buffer: agent_buf,
       session: fake_session,
-      status: :idle,
-      error: nil,
-      spinner_timer: nil
+      status: :idle
     }
 
     # File tab with context
@@ -73,7 +68,7 @@ defmodule Minga.Editor.Commands.AgentSplitTest do
 
     %EditorState{
       port_manager: self(),
-      viewport: %Viewport{rows: 24, cols: 80, top: 0, left: 0},
+      viewport: Viewport.new(24, 80),
       buffers: %Buffers{active: buf, list: [buf]},
       windows: %{
         tree: {:leaf, 1},
@@ -81,12 +76,8 @@ defmodule Minga.Editor.Commands.AgentSplitTest do
         active: 1,
         next_id: 2
       },
-      vim: VimState.new(),
-      keymap_scope: :editor,
       agent: agent,
-      agent_ui: UIState.new(),
-      tab_bar: tb,
-      file_tree: %FileTreeState{}
+      tab_bar: tb
     }
   end
 

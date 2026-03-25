@@ -34,7 +34,7 @@ defmodule Minga.Input.PopupTest do
 
     %EditorState{
       port_manager: nil,
-      viewport: %Viewport{rows: 24, cols: 80, top: 0, left: 0},
+      viewport: Viewport.new(24, 80),
       vim: vim,
       buffers: %Buffers{active: main_buf, list: [main_buf]},
       windows: %Windows{
@@ -52,8 +52,7 @@ defmodule Minga.Input.PopupTest do
 
     %EditorState{
       port_manager: nil,
-      viewport: %Viewport{rows: 24, cols: 80, top: 0, left: 0},
-      vim: VimState.new(),
+      viewport: Viewport.new(24, 80),
       buffers: %Buffers{active: main_buf, list: [main_buf]},
       windows: %Windows{
         tree: WindowTree.new(1),
@@ -138,8 +137,7 @@ defmodule Minga.Input.PopupTest do
 
       %EditorState{
         port_manager: nil,
-        viewport: %Viewport{rows: 24, cols: 80, top: 0, left: 0},
-        vim: VimState.new(),
+        viewport: Viewport.new(24, 80),
         buffers: %Buffers{active: main_buf, list: [main_buf]},
         windows: %Windows{
           tree: WindowTree.new(1),
