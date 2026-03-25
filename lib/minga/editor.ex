@@ -472,12 +472,6 @@ defmodule Minga.Editor do
     {:noreply, state}
   end
 
-  # ── Space leader timeout (CUA mode) ──────────────────────────────────────────
-
-  def handle_info({:space_leader_timeout, ref}, state) do
-    {:noreply, Minga.Input.SpaceLeader.handle_timeout(state, ref)}
-  end
-
   # ── Highlight setup (async, after first paint with correct viewport) ──────────
 
   def handle_info(:setup_highlight, state) do
@@ -2009,6 +2003,14 @@ defmodule Minga.Editor do
     alias Minga.Editor.State.AgentGroup
     tb = TabBar.update_group(tb, ws_id, &AgentGroup.set_icon(&1, icon))
     %{state | tab_bar: tb}
+  end
+
+  defp handle_gui_action(state, {:space_leader_chord, codepoint, modifiers}) do
+    Minga.Input.CUA.SpaceLeader.handle_chord(state, codepoint, modifiers)
+  end
+
+  defp handle_gui_action(state, {:space_leader_retract, codepoint, modifiers}) do
+    Minga.Input.CUA.SpaceLeader.handle_retract(state, codepoint, modifiers)
   end
 
   defp handle_gui_action(state, {:git_open_file, path}) do

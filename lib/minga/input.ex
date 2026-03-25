@@ -98,7 +98,7 @@ defmodule Minga.Input do
   These handle scope-specific dispatch, global bindings, and the
   editing model's key handler. The last handler in the list is
   determined by the active editing model: `ModeFSM` for vim,
-  `CUADispatch` for CUA.
+  `CUA.Dispatch` for CUA.
   """
   @spec surface_handlers() :: [module()]
   def surface_handlers do
@@ -119,13 +119,7 @@ defmodule Minga.Input do
       AgentMouse
     ]
 
-    # SpaceLeader sits above the bottom dispatch handler in CUA mode.
-    # It intercepts SPC to enable hold-SPC-as-leader. In vim mode (or
-    # when space_leader: :off), it's not in the stack.
-    case bottom_handler do
-      Minga.Input.CUADispatch -> base ++ [Minga.Input.SpaceLeader, bottom_handler]
-      _ -> base ++ [bottom_handler]
-    end
+    base ++ [bottom_handler]
   end
 
   @doc """
@@ -136,7 +130,7 @@ defmodule Minga.Input do
   def editing_dispatch_handler do
     case Minga.Editor.Editing.active_model() do
       Minga.EditingModel.Vim -> ModeFSM
-      Minga.EditingModel.CUA -> Minga.Input.CUADispatch
+      Minga.EditingModel.CUA -> Minga.Input.CUA.Dispatch
     end
   end
 

@@ -29,7 +29,6 @@ defmodule Minga.Config.OptionsTest do
       assert Options.all(s) == %{
                editing_model: :vim,
                space_leader: :chord,
-               space_leader_timeout: 200,
                tab_width: 2,
                line_numbers: :hybrid,
                show_gutter_separator: true,

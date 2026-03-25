@@ -1,4 +1,4 @@
-defmodule Minga.Input.CUADispatch do
+defmodule Minga.Input.CUA.Dispatch do
   @moduledoc """
   Input handler for CUA editing mode.
 

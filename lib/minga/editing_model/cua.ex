@@ -29,7 +29,7 @@ defmodule Minga.EditingModel.CUA do
   - `selecting?/1` returns true when a shift-selection anchor is active
   - `cursor_shape/1` always returns `:beam`
   - No operator-pending, no leader keys, no count prefixes
-  - Key dispatch is handled by `Input.CUADispatch` instead of `Input.ModeFSM`
+  - Key dispatch is handled by `Input.CUA.Dispatch` instead of `Input.ModeFSM`
   """
 
   @behaviour Minga.EditingModel
