@@ -58,4 +58,13 @@ defmodule Minga.Shell do
   claims them. The Editor walks overlays first, then surfaces.
   """
   @callback input_handlers(shell_state()) :: %{overlay: [module()], surface: [module()]}
+
+  @doc """
+  Compute spatial layout for the current state.
+
+  Returns a layout struct with named rectangles for each UI region.
+  The shell decides what regions exist (tab bar, modeline, file tree,
+  editor panes, agent panel, bottom panel, etc.).
+  """
+  @callback compute_layout(editor_state :: term()) :: Minga.Editor.Layout.t()
 end

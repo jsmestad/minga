@@ -103,7 +103,7 @@ defmodule Minga.Editor.Layout do
   read `state.layout` downstream.
   """
   @spec put(EditorState.t()) :: EditorState.t()
-  def put(state), do: %{state | layout: compute(state)}
+  def put(%{shell: shell} = state), do: %{state | layout: shell.compute_layout(state)}
 
   @doc """
   Invalidates the cached layout. Call when layout-affecting state changes

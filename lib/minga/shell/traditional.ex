@@ -44,6 +44,12 @@ defmodule Minga.Shell.Traditional do
   end
 
   @impl true
+  @spec compute_layout(term()) :: Minga.Editor.Layout.t()
+  def compute_layout(editor_state) do
+    Minga.Editor.Layout.compute(editor_state)
+  end
+
+  @impl true
   @spec input_handlers(ShellState.t()) :: %{overlay: [module()], surface: [module()]}
   def input_handlers(_shell_state) do
     %{
