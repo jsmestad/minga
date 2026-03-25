@@ -104,7 +104,7 @@ defmodule Minga.Input do
   def surface_handlers do
     bottom_handler = editing_dispatch_handler()
 
-    [
+    base = [
       Dashboard,
       MentionCompletion,
       ToolApproval,
@@ -116,9 +116,16 @@ defmodule Minga.Input do
       Scoped,
       AgentNav,
       GlobalBindings,
-      AgentMouse,
-      bottom_handler
+      AgentMouse
     ]
+
+    # SpaceLeader sits above the bottom dispatch handler in CUA mode.
+    # It intercepts SPC to enable hold-SPC-as-leader. In vim mode (or
+    # when space_leader: :off), it's not in the stack.
+    case bottom_handler do
+      Minga.Input.CUADispatch -> base ++ [Minga.Input.SpaceLeader, bottom_handler]
+      _ -> base ++ [bottom_handler]
+    end
   end
 
   @doc """

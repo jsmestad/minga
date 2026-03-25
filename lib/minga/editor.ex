@@ -472,6 +472,12 @@ defmodule Minga.Editor do
     {:noreply, state}
   end
 
+  # ── Space leader timeout (CUA mode) ──────────────────────────────────────────
+
+  def handle_info({:space_leader_timeout, ref}, state) do
+    {:noreply, Minga.Input.SpaceLeader.handle_timeout(state, ref)}
+  end
+
   # ── Highlight setup (async, after first paint with correct viewport) ──────────
 
   def handle_info(:setup_highlight, state) do
