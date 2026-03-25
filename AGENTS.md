@@ -160,6 +160,101 @@ This applies to internal infrastructure like data structures, coordinate mapping
 
 The test: if cutting the corner means the next team building on this code has to work around the limitation or refactor the foundation, it's not a valid shortcut. Build the foundation once, correctly.
 
+## Domain Architecture (Bounded Contexts)
+
+Minga is organized into bounded contexts. Each domain is a directory under `lib/minga/` with a facade module at `lib/minga/{domain}.ex` that is the **only valid entry point** from outside the domain. This is the same pattern HeadsDown uses (e.g., `HeadsDown.Accounts` delegates to `Registration`, `UserIdentities`, etc. and no outside module ever calls those internal modules directly).
+
+### The rule
+
+If you're in `Minga.Editor` and you need buffer content, you call `Minga.Buffer.content(buf)`. You never call `Minga.Buffer.Server.content(buf)` directly. The facade curates the public API; internal modules are implementation details.
+
+```elixir
+# Good: go through the domain facade
+content = Minga.Buffer.content(buf)
+Minga.Editing.word_forward(readable, cursor)
+{icon, color} = Minga.UI.icon_and_color(filetype)
+
+# Bad: reaching past the facade into internal modules
+content = Minga.Buffer.Server.content(buf)
+Minga.Motion.word_forward(readable, cursor)
+Minga.Devicon.icon_and_color(filetype)
+```
+
+### What the facade contains
+
+A facade module is mostly `defdelegate`, `@spec`, `@type`, and `@doc`. It may also contain short functions with real logic: composing two internal calls, normalizing arguments, broadcasting an event after a mutation, wrapping a result with a default. These are encouraged when they make the public API cleaner than a raw delegate. The test is volume, not presence: if removing all delegates and typespecs leaves more than ~100 lines of actual logic, the facade has too many inline functions and some should be extracted to internal modules.
+
+```elixir
+# Example of what a Buffer domain facade looks like (target state):
+defmodule Minga.Buffer do
+  # Simple pass-through: defdelegate
+  defdelegate content(buf), to: Minga.Buffer.Server
+  defdelegate cursor(buf), to: Minga.Buffer.Server
+
+  # Short glue logic is fine in the facade
+  def pid_for_path(path) do
+    Minga.Buffer.Server.pid_for_path(Path.expand(path))
+  end
+
+  # Composing two internal calls into one public operation is fine
+  def get_option(buf, name) do
+    case Minga.Buffer.Server.get_option(buf, name) do
+      nil -> Minga.Config.Options.default(name)
+      value -> value
+    end
+  end
+end
+```
+
+### What crosses boundaries
+
+- **Function calls** go through the facade. Always.
+- **Struct types** in `@spec` annotations may reference internal modules directly (e.g., `Minga.UI.Face.t()` in a spec is fine). Types are data, not behavior.
+- **Behaviours** that other domains implement (like `Minga.Command.Provider`) are part of the public API.
+- **Protocols** (like `Minga.Editing.Text.Readable`) are part of the public API since implementors need to reference them.
+
+### Domains
+
+| Domain | Facade | Responsibility |
+|--------|--------|----------------|
+| `buffer` | `Minga.Buffer` | Document storage, gap buffer, undo/redo, decorations |
+| `editing` | `Minga.Editing` | Vim motions, operators, text objects, search, auto-pair, completion, formatting |
+| `ui` | `Minga.UI` | Themes, faces, highlighting, icons, fonts, picker, popups, which-key |
+| `project` | `Minga.Project` | Project root, file finding, project search, file tree, test detection |
+| `config` | `Minga.Config` | Options, hooks, advice, per-filetype overrides |
+| `port` | `Minga.Port` | Binary protocol encoding, frontend port management |
+| `keymap` | `Minga.Keymap` | Key bindings, mode tries, scope management |
+| `lsp` | `Minga.LSP` | Language server client, document sync, workspace edits |
+| `command` | `Minga.Command` | Command struct, registry, provider behaviour |
+| `git` | `Minga.Git` | Git operations, diff, blame, status |
+| `agent` | `Minga.Agent` | AI agent sessions, tools, providers |
+| `mode` | `Minga.Mode` | Vim modal dispatch (normal, insert, visual, etc.) |
+| `input` | `Minga.Input` | Input routing, focus stack, handler behaviour |
+| `language` | `Minga.Language` | Language definitions, filetype detection, tree-sitter |
+| `session` | `Minga.Session` | Session persistence, swap files, event recording |
+| `editor` | `Minga.Editor` | Orchestration GenServer (consumes all other domains) |
+
+**Cross-cutting modules** that stay at the top level (used by every domain, no single owner): `Minga.Events`, `Minga.Log`, `Minga.Telemetry`, `Minga.Clipboard`.
+
+> **Migration note:** Several domains don't have proper facades yet and many modules are still at the wrong level (e.g., `Minga.Motion` should be `Minga.Editing.Motion` behind the `Minga.Editing` facade). The domain table above is the target state. New code should follow these boundaries; existing violations will be migrated domain by domain.
+
+### Enforcement
+
+`Minga.Credo.DomainBoundaryCheck` (in `credo/checks/domain_boundary_check.exs`) enforces domain boundaries at lint time. Today it only covers the Agent <-> Buffer boundary. As domains are migrated to the facade pattern, the check will be generalized to enforce all domain boundaries: each domain will declare its facade and a `public` list of struct types allowed across boundaries. The `public` list should shrink over time as facade APIs stabilize.
+
+Run `mix credo` to check. The check runs at `:high` priority.
+
+### Adding a new domain
+
+If a group of modules forms a natural bounded context (tight internal coupling, clear external API surface, 3+ modules that mostly reference each other):
+
+1. Create the directory `lib/minga/{domain}/` and move internal modules into it
+2. Create the facade at `lib/minga/{domain}.ex` with `defdelegate` + short glue logic
+3. Update all external callers to use the facade
+4. Add the domain to `@domains` in `Minga.Credo.DomainBoundaryCheck`
+5. Add the domain to the table above in AGENTS.md
+6. Verify with `mix credo` that no external code reaches past the facade
+
 ## Coding Standards
 
 ### Elixir Types (mandatory)
@@ -225,7 +320,9 @@ The `Credo.Check.Design.AliasUsage` lint is disabled. This is a judgment call, n
 
 ### Module Decomposition
 
-A facade module should be mostly `defdelegate`, `@spec`, and `@doc`. If you're writing business logic in the facade, extract it to a sub-module and delegate. The test: if removing all `defdelegate` lines and all typespecs leaves more than ~100 lines of actual logic, the module is doing too much.
+A facade module should be mostly `defdelegate`, `@spec`, and `@doc`, with short glue logic where it helps (see "Domain Architecture" above for examples). If removing all `defdelegate` lines and all typespecs leaves more than ~100 lines of actual logic, the module is doing too much. Extract to an internal module and delegate.
+
+**Domain facades follow this rule.** `Minga.Buffer` delegates to `Buffer.Server`. `Minga.Editing` delegates to `Editing.Motion`, `Editing.Operator`, etc. The facade is the public contract; internal modules do the work. When adding a new public function to a domain, add it to the facade, not directly to the internal module's public API. Other domains should never need to know which internal module implements the function.
 
 **GenServer modules specifically** should contain OTP callbacks (`init`, `handle_call`, `handle_cast`, `handle_info`, `terminate`) and route to handler modules for the actual logic. Each `handle_info` or `handle_call` clause should be 1-3 lines that extract data and call a handler function in a dedicated module. The GenServer is the process wrapper; the handler module is where the logic lives.
 
@@ -479,7 +576,7 @@ type(scope): short description
 Longer body if needed.
 ```
 
-Types: `feat`, `fix`, `refactor`, `test`, `docs`, `chore` Scopes: `buffer`, `port`, `editor`, `mode`, `keymap`, `zig`, `macos`, `gtk`, `cli`
+Types: `feat`, `fix`, `refactor`, `test`, `docs`, `chore` Scopes: `buffer`, `editing`, `ui`, `port`, `editor`, `mode`, `keymap`, `config`, `lsp`, `command`, `git`, `agent`, `input`, `language`, `session`, `project`, `zig`, `macos`, `gtk`, `cli`
 
 Examples:
 - `feat(buffer): implement gap buffer with cursor movement`
@@ -565,6 +662,12 @@ If a doc reads like a dry API reference with no narrative, it needs a rewrite. T
 
 ## Adding New Features
 
+### New feature in an existing domain
+1. Implement the logic in an internal module under `lib/minga/{domain}/`
+2. Add the public API to the domain facade at `lib/minga/{domain}.ex` (as `defdelegate` or short glue function)
+3. Callers outside the domain use only the facade
+4. Run `mix credo` to verify no boundary violations
+
 ### Dual-surface rule for status/chrome features
 Any new modeline data (diagnostic counts, indent info, selection size, etc.) must appear in **both** the cell-painted TUI modeline (`Chrome.TUI`) and the GUI status bar (`ProtocolGUI.encode_gui_status_bar/1`). The GUI status bar opcode (0x76) uses structured data with explicit fields, so adding new data means extending the wire format in `docs/PROTOCOL.md` and updating `gui_protocol_test.exs`. Design the GUI status bar fields first, then map them into TUI modeline cells. Forgetting to update one surface is a common mistake.
 
@@ -574,20 +677,23 @@ Any new modeline data (diagnostic counts, indent info, selection size, etc.) mus
 3. Test the command function and the keybinding lookup
 
 ### New motion
-1. Add function to `Minga.Motion` with `@spec`
-2. Register in `Minga.Mode.Normal` and `Minga.Mode.OperatorPending`
-3. Test against known buffer content
+1. Add the implementation in the appropriate `Minga.Editing.Motion.*` sub-module (e.g., `Motion.Word`, `Motion.Line`)
+2. Add a `defdelegate` in `Minga.Editing.Motion` (the internal facade)
+3. Add a `defdelegate` in `Minga.Editing` (the domain facade) so external callers use `Minga.Editing.my_motion/2`
+4. Register in `Minga.Mode.Normal` and `Minga.Mode.OperatorPending`
+5. Test against known buffer content
 
 ### New text object
-1. Add function to `Minga.TextObject` with `@spec`
-2. Register in `Minga.Mode.OperatorPending`
-3. Test with edge cases (cursor outside delimiters, nested, empty)
+1. Add the implementation in `Minga.Editing.TextObject` with `@spec`
+2. Add a `defdelegate` in `Minga.Editing` (the domain facade) so external callers use `Minga.Editing.my_text_object/2`
+3. Register in `Minga.Mode.OperatorPending`
+4. Test with edge cases (cursor outside delimiters, nested, empty)
 
 ### New or modified agent tool
 Agent tools live in `lib/minga/agent/tools/`. When adding or modifying a tool that reads or writes file content:
 
-1. **Prefer `Buffer.Server` over filesystem I/O.** If a buffer is open for the file, route through it. Use `Buffer.Server.content/1` instead of `File.read/1`, and `Buffer.Server.apply_text_edits/2` instead of `File.write/2`. This gives you undo integration, tree-sitter sync, instant visibility, and no file watcher noise. Fall back to filesystem I/O only when no buffer exists for the file. See [BUFFER-AWARE-AGENTS.md](docs/BUFFER-AWARE-AGENTS.md) for the full rationale.
-2. **Batch edits into a single `apply_text_edits/2` call** rather than making N separate GenServer calls. One call = one undo entry, one version bump.
+1. **Prefer `Minga.Buffer` over filesystem I/O.** If a buffer is open for the file, route through the `Minga.Buffer` facade (not `Buffer.Server` directly). Use `Minga.Buffer.content/1` instead of `File.read/1`, and `Minga.Buffer.apply_edit/6` instead of `File.write/2`. This gives you undo integration, tree-sitter sync, instant visibility, and no file watcher noise. Fall back to filesystem I/O only when no buffer exists for the file. See [BUFFER-AWARE-AGENTS.md](docs/BUFFER-AWARE-AGENTS.md) for the full rationale.
+2. **Batch edits into a single call** rather than making N separate calls. One call = one undo entry, one version bump.
 3. **Test the tool function** in `test/minga/agent/tools/`.
 
 > **Note:** Buffer routing is being implemented in phases. Today, tools still use `File.read/write` directly. When wiring a tool to use buffers, follow the pattern in `BUFFER-AWARE-AGENTS.md` Phase 1.
