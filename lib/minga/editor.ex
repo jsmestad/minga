@@ -948,7 +948,7 @@ defmodule Minga.Editor do
   # Warning popup debounce timer fired — open the *Warnings* popup if not
   # already visible.
   def handle_info(:warning_popup_timeout, state) do
-    state = %{state | warning_popup_timer: nil}
+    state = EditorState.update_shell_state(state, &%{&1 | warning_popup_timer: nil})
     {:noreply, open_warnings_popup_if_needed(state)}
   end
 
@@ -1129,7 +1129,7 @@ defmodule Minga.Editor do
 
   def handle_info(
         {:minga_event, :tool_missing, %Minga.Events.ToolMissingEvent{command: command}},
-        %{suppress_tool_prompts: true} = state
+        %{shell_state: %{suppress_tool_prompts: true}} = state
       ) do
     Minga.Log.debug(:editor, "[Editor] tool_missing suppressed for #{command}")
     {:noreply, state}
@@ -1143,8 +1143,8 @@ defmodule Minga.Editor do
 
     state =
       if recipe && not EditorState.skip_tool_prompt?(state, recipe.name) do
-        queue = state.tool_prompt_queue ++ [recipe.name]
-        state = %{state | tool_prompt_queue: queue}
+        queue = state.shell_state.tool_prompt_queue ++ [recipe.name]
+        state = EditorState.update_shell_state(state, &%{&1 | tool_prompt_queue: queue})
         maybe_show_tool_prompt(state)
       else
         state
@@ -2177,10 +2177,11 @@ defmodule Minga.Editor do
   # returns to normal mode.
   @spec maybe_show_tool_prompt(state()) :: state()
   defp maybe_show_tool_prompt(
-         %{workspace: %{vim: %{mode: :normal}}, tool_prompt_queue: pending} = state
+         %{workspace: %{vim: %{mode: :normal}}, shell_state: %{tool_prompt_queue: pending}} =
+           state
        )
        when pending != [] do
-    ms = %Minga.Mode.ToolConfirmState{pending: pending, declined: state.tool_declined}
+    ms = %Minga.Mode.ToolConfirmState{pending: pending, declined: state.shell_state.tool_declined}
     EditorState.transition_mode(state, :tool_confirm, ms)
   end
 
@@ -2206,14 +2207,15 @@ defmodule Minga.Editor do
   @warning_popup_debounce_ms 200
 
   @spec maybe_schedule_warning_popup(state()) :: state()
-  defp maybe_schedule_warning_popup(%{warning_popup_timer: ref} = state) when is_reference(ref) do
+  defp maybe_schedule_warning_popup(%{shell_state: %{warning_popup_timer: ref}} = state)
+       when is_reference(ref) do
     # Timer already running; the pending timeout will open the popup.
     state
   end
 
   defp maybe_schedule_warning_popup(state) do
     ref = Process.send_after(self(), :warning_popup_timeout, @warning_popup_debounce_ms)
-    %{state | warning_popup_timer: ref}
+    EditorState.update_shell_state(state, &%{&1 | warning_popup_timer: ref})
   end
 
   @spec open_warnings_popup_if_needed(state()) :: state()

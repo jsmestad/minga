@@ -180,13 +180,18 @@ defmodule Minga.Editor.Commands do
   end
 
   def execute(state, {:tool_confirm_decline, name}) do
-    state = %{state | tool_declined: MapSet.put(state.tool_declined, name)}
+    state =
+      EditorState.update_shell_state(
+        state,
+        &%{&1 | tool_declined: MapSet.put(state.shell_state.tool_declined, name)}
+      )
+
     drain_tool_prompt_queue(state)
   end
 
   def execute(state, {:tool_confirm_dismiss, declined_set}) do
-    declined = MapSet.union(state.tool_declined, declined_set)
-    %{state | tool_declined: declined, tool_prompt_queue: []}
+    declined = MapSet.union(state.shell_state.tool_declined, declined_set)
+    EditorState.update_shell_state(state, &%{&1 | tool_declined: declined, tool_prompt_queue: []})
   end
 
   # ── Agent tuple commands ──────────────────────────────────────────────────
@@ -505,8 +510,8 @@ defmodule Minga.Editor.Commands do
   # Remove the current tool from the prompt queue after accept/decline.
   @spec drain_tool_prompt_queue(state()) :: state()
   defp drain_tool_prompt_queue(state) do
-    case state.tool_prompt_queue do
-      [_current | rest] -> %{state | tool_prompt_queue: rest}
+    case state.shell_state.tool_prompt_queue do
+      [_current | rest] -> EditorState.update_shell_state(state, &%{&1 | tool_prompt_queue: rest})
       [] -> state
     end
   end

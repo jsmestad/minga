@@ -339,7 +339,7 @@ defmodule Minga.Editor.MouseTest do
 
     defp inject_click_regions(editor, regions) do
       :sys.replace_state(editor, fn state ->
-        %{state | tab_bar_click_regions: regions}
+        Minga.Editor.State.update_shell_state(state, &%{&1 | tab_bar_click_regions: regions})
       end)
     end
 

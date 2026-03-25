@@ -138,7 +138,7 @@ defmodule Minga.Editor.CompletionHandling do
     else
       state = dismiss(state)
       # Dismiss signature help when leaving insert mode
-      %{state | signature_help: nil}
+      EditorState.update_shell_state(state, &%{&1 | signature_help: nil})
     end
   end
 
@@ -552,12 +552,14 @@ defmodule Minga.Editor.CompletionHandling do
   @spec handle_signature_help_response(EditorState.t(), {:ok, term()} | {:error, term()}) ::
           EditorState.t()
   def handle_signature_help_response(state, {:error, _}), do: state
-  def handle_signature_help_response(state, {:ok, nil}), do: %{state | signature_help: nil}
+
+  def handle_signature_help_response(state, {:ok, nil}),
+    do: EditorState.update_shell_state(state, &%{&1 | signature_help: nil})
 
   def handle_signature_help_response(state, {:ok, result}) when is_map(result) do
     {cursor_row, cursor_col} = approximate_cursor_screen_pos(state)
     sh = SignatureHelp.from_response(result, cursor_row, cursor_col)
-    %{state | signature_help: sh}
+    EditorState.update_shell_state(state, &%{&1 | signature_help: sh})
   end
 
   def handle_signature_help_response(state, _), do: state
@@ -570,7 +572,7 @@ defmodule Minga.Editor.CompletionHandling do
     cond do
       # ) always dismisses signature help
       codepoint == ?) ->
-        %{state | signature_help: nil}
+        EditorState.update_shell_state(state, &%{&1 | signature_help: nil})
 
       # Check if the character is a server-declared signature trigger
       char != nil and signature_trigger_char?(state, buf, char) ->

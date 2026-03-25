@@ -134,8 +134,17 @@ defmodule Minga.Editor.RenderPipeline do
       end)
 
     # Cache click regions on state for mouse hit-testing
-    state = %{state | modeline_click_regions: chrome.modeline_click_regions}
-    state = %{state | tab_bar_click_regions: chrome.tab_bar_click_regions}
+    state =
+      EditorState.update_shell_state(
+        state,
+        &%{&1 | modeline_click_regions: chrome.modeline_click_regions}
+      )
+
+    state =
+      EditorState.update_shell_state(
+        state,
+        &%{&1 | tab_bar_click_regions: chrome.tab_bar_click_regions}
+      )
 
     # Stage 6: Compose
     frame =

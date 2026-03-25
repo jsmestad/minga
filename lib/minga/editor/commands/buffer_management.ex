@@ -1121,8 +1121,8 @@ defmodule Minga.Editor.Commands.BufferManagement do
         if EditorState.skip_tool_prompt?(state, recipe.name) do
           state
         else
-          queue = state.tool_prompt_queue ++ [recipe.name]
-          state = %{state | tool_prompt_queue: queue}
+          queue = state.shell_state.tool_prompt_queue ++ [recipe.name]
+          state = EditorState.update_shell_state(state, &%{&1 | tool_prompt_queue: queue})
           show_tool_prompt_if_normal(state)
         end
     end
@@ -1130,10 +1130,11 @@ defmodule Minga.Editor.Commands.BufferManagement do
 
   @spec show_tool_prompt_if_normal(state()) :: state()
   defp show_tool_prompt_if_normal(
-         %{workspace: %{vim: %{mode: :normal}}, tool_prompt_queue: pending} = state
+         %{workspace: %{vim: %{mode: :normal}}, shell_state: %{tool_prompt_queue: pending}} =
+           state
        )
        when pending != [] do
-    ms = %ToolConfirmState{pending: pending, declined: state.tool_declined}
+    ms = %ToolConfirmState{pending: pending, declined: state.shell_state.tool_declined}
     EditorState.transition_mode(state, :tool_confirm, ms)
   end
 

@@ -916,7 +916,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
   # ── Signature help ──
 
   @spec build_gui_signature_help_cmd(state()) :: binary() | nil
-  defp build_gui_signature_help_cmd(%{signature_help: sh}) do
+  defp build_gui_signature_help_cmd(%{shell_state: %{signature_help: sh}}) do
     fp = :erlang.phash2(sh)
 
     if fp != Process.get(:last_gui_signature_help_fp) do

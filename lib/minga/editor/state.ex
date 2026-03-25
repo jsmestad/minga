@@ -80,18 +80,14 @@ defmodule Minga.Editor.State do
             shell_state: %ShellState{},
             theme: Minga.UI.Theme.get!(:doom_one),
             render_timer: nil,
-            warning_popup_timer: nil,
             message_store: %MessageStore{},
             git_remote_op: nil,
             lsp_status: :none,
             lsp_server_statuses: %{},
             parser_status: :available,
-            signature_help: nil,
             focus_stack: [],
             capabilities: %Capabilities{},
             layout: nil,
-            modeline_click_regions: [],
-            tab_bar_click_regions: [],
             last_cursor_line: nil,
             last_test_command: nil,
             pending_quit: nil,
@@ -105,12 +101,9 @@ defmodule Minga.Editor.State do
             inlay_hints: [],
             selection_ranges: nil,
             selection_range_index: 0,
-            tool_declined: MapSet.new(),
-            tool_prompt_queue: [],
             session_timer: nil,
             swap_dir: nil,
-            session_dir: nil,
-            suppress_tool_prompts: false
+            session_dir: nil
 
   @type backend :: :tui | :native_gui | :headless
 
@@ -122,7 +115,6 @@ defmodule Minga.Editor.State do
           shell_state: ShellState.t(),
           theme: Theme.t(),
           render_timer: reference() | nil,
-          warning_popup_timer: reference() | nil,
           message_store: MessageStore.t(),
           git_remote_op:
             {msg_ref :: reference(), task_monitor :: reference(),
@@ -133,12 +125,9 @@ defmodule Minga.Editor.State do
             atom() => :starting | :initializing | :ready | :crashed
           },
           parser_status: Minga.Editor.Modeline.parser_status(),
-          signature_help: Minga.Editor.SignatureHelp.t() | nil,
           focus_stack: [module()],
           capabilities: Capabilities.t(),
           layout: Minga.Editor.Layout.t() | nil,
-          modeline_click_regions: [Minga.Editor.Modeline.click_region()],
-          tab_bar_click_regions: [Minga.Editor.TabBarRenderer.click_region()],
           last_cursor_line: non_neg_integer() | nil,
           last_test_command: {String.t(), String.t()} | nil,
           pending_quit: :quit | :quit_all | nil,
@@ -152,12 +141,9 @@ defmodule Minga.Editor.State do
           selection_ranges: [map()] | nil,
           selection_range_index: non_neg_integer(),
           font_registry: Minga.UI.FontRegistry.t(),
-          tool_declined: MapSet.t(atom()),
-          tool_prompt_queue: [atom()],
           session_timer: reference() | nil,
           swap_dir: String.t() | nil,
-          session_dir: String.t() | nil,
-          suppress_tool_prompts: boolean()
+          session_dir: String.t() | nil
         }
 
   # ── Workspace helpers ──────────────────────────────────────────────────────
@@ -1420,10 +1406,10 @@ defmodule Minga.Editor.State do
   installed, currently being installed, or already in the prompt queue.
   """
   @spec skip_tool_prompt?(t(), atom()) :: boolean()
-  def skip_tool_prompt?(%__MODULE__{} = state, tool_name) do
-    MapSet.member?(state.tool_declined, tool_name) or
+  def skip_tool_prompt?(%__MODULE__{shell_state: ss}, tool_name) do
+    MapSet.member?(ss.tool_declined, tool_name) or
       ToolManager.installed?(tool_name) or
       MapSet.member?(ToolManager.installing(), tool_name) or
-      tool_name in state.tool_prompt_queue
+      tool_name in ss.tool_prompt_queue
   end
 end

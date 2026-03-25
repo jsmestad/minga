@@ -1142,7 +1142,7 @@ defmodule Minga.Editor.Mouse do
 
   @spec close_tab_at(state(), non_neg_integer(), non_neg_integer()) :: state()
   defp close_tab_at(state, _row, col) do
-    case find_tab_bar_region(state.tab_bar_click_regions, col) do
+    case find_tab_bar_region(state.shell_state.tab_bar_click_regions, col) do
       {:command, cmd} -> close_tab_by_command(state, cmd)
       :not_tab_bar -> state
     end
@@ -1193,7 +1193,7 @@ defmodule Minga.Editor.Mouse do
 
       {tb_row, tb_col, tb_width, _tb_height} ->
         if row == tb_row and col >= tb_col and col < tb_col + tb_width do
-          find_tab_bar_region(state.tab_bar_click_regions, col)
+          find_tab_bar_region(state.shell_state.tab_bar_click_regions, col)
         else
           :not_tab_bar
         end
@@ -1231,7 +1231,7 @@ defmodule Minga.Editor.Mouse do
       end)
 
     if is_modeline do
-      find_click_region(state.modeline_click_regions, col)
+      find_click_region(state.shell_state.modeline_click_regions, col)
     else
       :not_modeline
     end

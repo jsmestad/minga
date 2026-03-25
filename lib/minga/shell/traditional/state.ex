@@ -26,7 +26,14 @@ defmodule Minga.Shell.Traditional.State do
           bottom_panel: Minga.Editor.BottomPanel.t(),
           git_status_panel: Minga.Frontend.Protocol.GUI.git_status_data() | nil,
           tab_bar: Minga.Editor.State.TabBar.t() | nil,
-          agent: Minga.Editor.State.Agent.t()
+          agent: Minga.Editor.State.Agent.t(),
+          modeline_click_regions: [Minga.Editor.Modeline.click_region()],
+          tab_bar_click_regions: [Minga.Editor.TabBarRenderer.click_region()],
+          warning_popup_timer: reference() | nil,
+          signature_help: Minga.Editor.SignatureHelp.t() | nil,
+          tool_declined: MapSet.t(atom()),
+          tool_prompt_queue: [atom()],
+          suppress_tool_prompts: boolean()
         }
 
   defstruct nav_flash: nil,
@@ -39,5 +46,12 @@ defmodule Minga.Shell.Traditional.State do
             bottom_panel: %Minga.Editor.BottomPanel{},
             git_status_panel: nil,
             tab_bar: nil,
-            agent: %Minga.Editor.State.Agent{}
+            agent: %Minga.Editor.State.Agent{},
+            modeline_click_regions: [],
+            tab_bar_click_regions: [],
+            warning_popup_timer: nil,
+            signature_help: nil,
+            tool_declined: MapSet.new(),
+            tool_prompt_queue: [],
+            suppress_tool_prompts: false
 end

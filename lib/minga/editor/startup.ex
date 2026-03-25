@@ -106,10 +106,12 @@ defmodule Minga.Editor.Startup do
       port_manager: port_manager,
       focus_stack: Minga.Input.default_stack(),
       shell: Minga.Shell.Traditional,
-      shell_state: %Minga.Shell.Traditional.State{dashboard: dashboard},
+      shell_state: %Minga.Shell.Traditional.State{
+        dashboard: dashboard,
+        suppress_tool_prompts: Keyword.get(opts, :suppress_tool_prompts, false)
+      },
       swap_dir: Keyword.get(opts, :swap_dir),
-      session_dir: Keyword.get(opts, :session_dir),
-      suppress_tool_prompts: Keyword.get(opts, :suppress_tool_prompts, false)
+      session_dir: Keyword.get(opts, :session_dir)
     }
 
     state = EditorState.set_tab_bar(state, initial_tab_bar(active_buf, keymap_scope))
