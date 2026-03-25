@@ -219,6 +219,14 @@ defmodule Minga.Editor.Commands.Helpers do
   @spec maybe_sync_clipboard(state(), String.t(), clipboard_mode()) :: state()
   def maybe_sync_clipboard(state, text, clipboard) when clipboard in [:unnamedplus, :unnamed] do
     Clipboard.write_async(text)
+
+    # Also send the clipboard write opcode to native GUI frontends.
+    # This writes to NSPasteboard directly, avoiding the pbcopy subprocess.
+    if state.backend == :native_gui and state.port_manager do
+      cmd = Minga.Port.Protocol.GUI.encode_clipboard_write(text)
+      Minga.Port.Manager.send_commands(state.port_manager, [cmd])
+    end
+
     state
   end
 

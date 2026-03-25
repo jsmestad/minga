@@ -48,6 +48,7 @@ enum RenderCommand: Sendable {
     case guiHoverPopup(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, focused: Bool, scrollOffset: UInt16, lines: [GUIHoverLine])
     case guiSignatureHelp(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, activeSignature: UInt8, activeParameter: UInt8, signatures: [GUISignature])
     case guiFloatPopup(visible: Bool, width: UInt16, height: UInt16, title: String, lines: [String])
+    case clipboardWrite(target: UInt8, text: String)
     case guiSplitSeparators(borderColor: UInt32, verticals: [GUIVerticalSeparator], horizontals: [GUIHorizontalSeparator])
     case guiGitStatus(repoState: UInt8, ahead: UInt16, behind: UInt16, branchName: String, entries: [GUIGitStatusEntry])
     case guiAgentGroups(activeGroupId: UInt16, agentGroups: [GUIAgentGroupEntry])
@@ -1894,7 +1895,33 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         return (.guiAgentGroups(activeGroupId: activeGId, agentGroups: groups),
                 gPos - offset)
 
+    case OP_CLIPBOARD_WRITE:
+        // Forward-compatible format: opcode(1) + payload_length(2) + target(1) + text_len(2) + text
+        guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
+        let payloadLen = Int(readU16(data, rest))
+        guard data.count >= rest + 2 + payloadLen else { throw ProtocolDecodeError.malformed }
+        let payloadStart = rest + 2
+        let target = data[payloadStart]
+        let textLen = Int(readU16(data, payloadStart + 1))
+        guard payloadLen >= 3 + textLen else { throw ProtocolDecodeError.malformed }
+        let textData = data[(payloadStart + 3)..<(payloadStart + 3 + textLen)]
+        let text = String(data: textData, encoding: .utf8) ?? ""
+        return (.clipboardWrite(target: target, text: text), 1 + 2 + payloadLen)
+
     default:
+        // Forward-compatibility: opcodes 0x90+ use a 2-byte length prefix
+        // so we can skip unknown opcodes without crashing. Opcodes below
+        // 0x90 without a length prefix are truly unknown and we must abort
+        // (we can't determine their size).
+        if opcode >= 0x90 {
+            guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
+            let payloadLen = Int(readU16(data, rest))
+            let totalSize = 1 + 2 + payloadLen  // opcode + length + payload
+            guard data.count >= offset + totalSize else { throw ProtocolDecodeError.malformed }
+            // Skip the unknown opcode silently. The BEAM may be newer than
+            // this frontend; crashing would be worse than ignoring.
+            return (nil, totalSize)
+        }
         throw ProtocolDecodeError.unknownOpcode(opcode)
     }
 }

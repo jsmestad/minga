@@ -176,7 +176,7 @@ defmodule Minga.EditingModel.CUATest do
 
     test "Cmd+C = yank selection" do
       {:cua, cmds, _} = CUA.process_key(CUA.initial_state(), {?c, @cmd})
-      assert cmds == [:yank_selection]
+      assert cmds == [:yank_visual_selection]
     end
 
     test "Cmd+X = cut selection" do
@@ -260,6 +260,25 @@ defmodule Minga.EditingModel.CUATest do
       {:cua, _, _} = CUA.process_key(state, {?a, 0})
       {:cua, _, _} = CUA.process_key(state, {@escape, 0})
       {:cua, _, _} = CUA.process_key(state, {?z, @cmd})
+    end
+  end
+
+  # ── Key dispatch: Find Pasteboard (Cmd+E/G) ───────────────────────────────
+
+  describe "process_key/2 with Find Pasteboard keys" do
+    test "Cmd+E = use selection for find" do
+      {:cua, cmds, _} = CUA.process_key(CUA.initial_state(), {?e, @cmd})
+      assert cmds == [:use_selection_for_find]
+    end
+
+    test "Cmd+G = search next" do
+      {:cua, cmds, _} = CUA.process_key(CUA.initial_state(), {?g, @cmd})
+      assert cmds == [:search_next]
+    end
+
+    test "Cmd+Shift+G = search prev" do
+      {:cua, cmds, _} = CUA.process_key(CUA.initial_state(), {?g, @cmd + @shift})
+      assert cmds == [:search_prev]
     end
   end
 end

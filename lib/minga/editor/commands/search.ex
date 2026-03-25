@@ -29,7 +29,8 @@ defmodule Minga.Editor.Commands.Search do
     {:search_word_under_cursor_backward, "Search word under cursor (backward)", true},
     {:confirm_project_search, "Confirm project search", true},
     {:substitute_confirm_advance, "Advance substitute confirmation", true},
-    {:apply_substitute_confirm, "Apply substitute and confirm", true}
+    {:apply_substitute_confirm, "Apply substitute and confirm", true},
+    {:use_selection_for_find, "Use selection for Find (Cmd+E)", true}
   ]
 
   @spec execute(state(), Mode.command()) :: state()
@@ -270,6 +271,27 @@ defmodule Minga.Editor.Commands.Search do
 
   def execute(state, :apply_substitute_confirm), do: state
 
+  # ── Use selection for Find (Cmd+E) ────────────────────────────────────────
+
+  def execute(%{buffers: %{active: buf}} = state, :use_selection_for_find) when is_pid(buf) do
+    gb = BufferServer.snapshot(buf)
+    cursor = Minga.Buffer.Document.cursor(gb)
+    text = word_at_cursor(gb, cursor)
+
+    if text != "" do
+      state = %{state | search: %{state.search | last_pattern: text, last_direction: :forward}}
+
+      if state.backend == :native_gui and state.port_manager do
+        cmd = Minga.Port.Protocol.GUI.encode_clipboard_write(text, :find)
+        Minga.Port.Manager.send_commands(state.port_manager, [cmd])
+      end
+
+      %{state | status_msg: "Using \"#{text}\" for Find"}
+    else
+      state
+    end
+  end
+
   @doc "Starts substitute confirm mode by finding all matches and transitioning."
   @spec start_substitute_confirm(state(), pid(), String.t(), String.t(), boolean()) :: state()
   def start_substitute_confirm(state, buf, pattern, replacement, global?) do
@@ -421,6 +443,13 @@ defmodule Minga.Editor.Commands.Search do
   defp open_decoration_fold_at(_buf, _line), do: :ok
 
   @spec active_foldable_window(state()) :: Window.t() | nil
+  @spec word_at_cursor(Minga.Buffer.Document.t(), {non_neg_integer(), non_neg_integer()}) ::
+          String.t()
+  defp word_at_cursor(gb, cursor) do
+    {start_pos, end_pos} = Minga.TextObject.inner_word(gb, cursor)
+    Minga.Buffer.Document.get_range(gb, start_pos, end_pos)
+  end
+
   defp active_foldable_window(state) do
     case EditorState.active_window_struct(state) do
       %Window{} = win -> if Window.has_folds?(win), do: win

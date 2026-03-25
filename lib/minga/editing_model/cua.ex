@@ -147,12 +147,28 @@ defmodule Minga.EditingModel.CUA do
 
   # Cmd+C = copy
   defp dispatch_key(state, ?c, mods) when Bitwise.band(mods, @cmd) != 0 do
-    {[:yank_selection], state}
+    {[:yank_visual_selection], state}
   end
 
   # Cmd+X = cut
   defp dispatch_key(state, ?x, mods) when Bitwise.band(mods, @cmd) != 0 do
     {[:delete_visual_selection], clear_selection(state)}
+  end
+
+  # Cmd+E = use selection for find (write to Find Pasteboard)
+  defp dispatch_key(state, ?e, mods) when Bitwise.band(mods, @cmd) != 0 do
+    {[:use_selection_for_find], state}
+  end
+
+  # Cmd+G = find next, Cmd+Shift+G = find previous
+  # (on GUI, Swift intercepts these and reads Find Pasteboard directly;
+  # this is the fallback for TUI or when Swift doesn't intercept)
+  defp dispatch_key(state, ?g, mods) when Bitwise.band(mods, @cmd) != 0 do
+    if Bitwise.band(mods, @shift) != 0 do
+      {[:search_prev], state}
+    else
+      {[:search_next], state}
+    end
   end
 
   # Cmd+V = paste

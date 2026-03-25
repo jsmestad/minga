@@ -73,6 +73,19 @@ final class CoreTextMetalRenderer {
     /// app's entire lifetime in practice).
     private var colorChangeObserver: NSObjectProtocol?
 
+    /// System selection color from NSColor.selectedTextBackgroundColor.
+    /// Used as fallback when no theme override is set. Computed once at
+    /// class load time (macOS caches the system color).
+    nonisolated(unsafe) private static let systemSelectionColor: SIMD3<Float> = {
+        let nsColor = NSColor.selectedTextBackgroundColor.usingColorSpace(.sRGB)
+            ?? NSColor.selectedTextBackgroundColor
+        return SIMD3<Float>(
+            Float(nsColor.redComponent),
+            Float(nsColor.greenComponent),
+            Float(nsColor.blueComponent)
+        )
+    }()
+
     /// Current theme colors reference, set at the start of each render call.
     /// Used by helper methods (appendSelectionQuads, etc.) to read theme-driven
     /// colors without threading the parameter through every call.
@@ -968,7 +981,7 @@ final class CoreTextMetalRenderer {
         viewportWidth: Float,
         quads: inout [QuadGPU]
     ) {
-        let selColor = currentThemeColors?.selectionBgSIMD ?? SIMD3<Float>(0.15, 0.30, 0.55)
+        let selColor = currentThemeColors?.selectionBgSIMD ?? Self.systemSelectionColor
 
         switch sel.type {
         case .line:

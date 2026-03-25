@@ -2013,6 +2013,17 @@ defmodule Minga.Editor do
     Minga.Input.CUA.SpaceLeader.handle_retract(state, codepoint, modifiers)
   end
 
+  defp handle_gui_action(
+         %{buffers: %{active: buf}} = state,
+         {:find_pasteboard_search, text, direction}
+       )
+       when is_pid(buf) do
+    # Set the search pattern and execute search_next/search_prev
+    state = %{state | search: %{state.search | last_pattern: text, last_direction: :forward}}
+    cmd = if direction == 1, do: :search_prev, else: :search_next
+    Minga.Editor.Commands.execute(state, cmd)
+  end
+
   defp handle_gui_action(state, {:git_open_file, path}) do
     case resolve_git_root() do
       nil ->

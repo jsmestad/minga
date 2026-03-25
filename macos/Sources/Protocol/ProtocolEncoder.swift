@@ -68,6 +68,9 @@ protocol InputEncoder: AnyObject, Sendable {
     // Space leader key-chord
     func sendSpaceLeaderChord(codepoint: UInt32, modifiers: UInt8)
     func sendSpaceLeaderRetract(codepoint: UInt32, modifiers: UInt8)
+
+    // Find Pasteboard
+    func sendFindPasteboardSearch(text: String, direction: UInt8)
 }
 
 extension InputEncoder {
@@ -487,6 +490,23 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         buf[1] = GUI_ACTION_SPACE_LEADER_RETRACT
         writeU32(&buf, 2, codepoint)
         buf[6] = modifiers
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: find_pasteboard_search.
+    /// Layout: opcode(1) + action_type(1) + direction(1) + text_len(2) + text.
+    /// Direction: 0 = forward (Cmd+G), 1 = backward (Cmd+Shift+G).
+    func sendFindPasteboardSearch(text: String, direction: UInt8) {
+        let utf8 = Array(text.utf8)
+        let textLen = min(utf8.count, Int(UInt16.max))
+        var buf = Data(count: 5 + textLen)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_FIND_PASTEBOARD_SEARCH
+        buf[2] = direction
+        writeU16(&buf, 3, UInt16(textLen))
+        if textLen > 0 {
+            buf.replaceSubrange(5..<(5 + textLen), with: utf8[0..<textLen])
+        }
         writeFrame(buf)
     }
 

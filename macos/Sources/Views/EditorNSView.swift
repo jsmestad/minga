@@ -530,6 +530,18 @@ final class EditorNSView: MTKView {
             return
         }
 
+        // ── Cmd+G / Cmd+Shift+G: Find next/prev using Find Pasteboard ──
+        if event.modifierFlags.contains(.command),
+           let chars = event.charactersIgnoringModifiers,
+           chars == "g"
+        {
+            if let findText = NSPasteboard(name: .find).string(forType: .string), !findText.isEmpty {
+                let direction: UInt8 = event.modifierFlags.contains(.shift) ? 1 : 0
+                encoder.sendFindPasteboardSearch(text: findText, direction: direction)
+            }
+            return
+        }
+
         // Special keys (arrows, Enter, Escape, etc.) bypass IME.
         if let codepoint = mapKeyCode(event) {
             // If IME is composing, Escape/Enter may need special handling.
@@ -565,6 +577,13 @@ final class EditorNSView: MTKView {
             }
             return
         }
+
+        // Note: Option+Delete and Option+Arrows are handled above in the
+        // "Special keys bypass IME" section via mapKeyCode, which returns
+        // non-nil for all special key codes. The Option modifier bit is
+        // included in `mods`, so the BEAM receives the correct modifiers
+        // for word-delete and word-movement. Option+printable chars still
+        // go through IME below for dead key / accent character support.
 
         // Route through the input method system. This calls our
         // NSTextInputClient methods (insertText, setMarkedText, etc.)
