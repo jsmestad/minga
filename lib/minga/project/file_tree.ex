@@ -1,4 +1,4 @@
-defmodule Minga.FileTree do
+defmodule Minga.Project.FileTree do
   @moduledoc """
   Pure data structure for a navigable filesystem tree.
 
@@ -10,7 +10,7 @@ defmodule Minga.FileTree do
   No GenServer; the editor owns this struct in its state.
   """
 
-  alias Minga.FileTree.GitStatus
+  alias Minga.Project.FileTree.GitStatus
 
   @typedoc """
   A single visible entry in the tree.

@@ -640,11 +640,11 @@ defmodule Minga.Port.Protocol.GUI do
   Sends: selected_index, tree_width, entry_count, root_len, root, then per entry:
   path_hash, flags (is_dir, is_expanded), depth, git_status, icon, name, rel_path.
   """
-  @spec encode_gui_file_tree(Minga.FileTree.t() | nil) :: binary()
+  @spec encode_gui_file_tree(Minga.Project.FileTree.t() | nil) :: binary()
   def encode_gui_file_tree(nil), do: <<@op_gui_file_tree, 0::16, 0::16, 0::16, 0::16>>
 
-  def encode_gui_file_tree(%Minga.FileTree{} = tree) do
-    entries = Minga.FileTree.visible_entries(tree)
+  def encode_gui_file_tree(%Minga.Project.FileTree{} = tree) do
+    entries = Minga.Project.FileTree.visible_entries(tree)
     count = length(entries)
     root_bytes = :erlang.iolist_to_binary([tree.root])
 
@@ -663,7 +663,11 @@ defmodule Minga.Port.Protocol.GUI do
     ])
   end
 
-  @spec encode_file_tree_entry(Minga.FileTree.entry(), Minga.FileTree.t(), boolean()) :: binary()
+  @spec encode_file_tree_entry(
+          Minga.Project.FileTree.entry(),
+          Minga.Project.FileTree.t(),
+          boolean()
+        ) :: binary()
   defp encode_file_tree_entry(entry, tree, is_selected?) do
     is_dir = if entry[:dir?], do: 1, else: 0
     is_expanded = if entry[:dir?] && MapSet.member?(tree.expanded, entry.path), do: 1, else: 0
@@ -695,7 +699,7 @@ defmodule Minga.Port.Protocol.GUI do
   # Nerd Font folder icon (nf-md-folder)
   @folder_icon "\u{F024B}"
 
-  @spec file_tree_icon(Minga.FileTree.entry()) :: String.t()
+  @spec file_tree_icon(Minga.Project.FileTree.entry()) :: String.t()
   defp file_tree_icon(%{dir?: true}), do: @folder_icon
   defp file_tree_icon(%{name: name}), do: Devicon.icon(Filetype.detect(name))
 

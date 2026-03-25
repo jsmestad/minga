@@ -1,4 +1,4 @@
-defmodule Minga.TestRunner do
+defmodule Minga.Project.TestRunner do
   @moduledoc """
   Detects test frameworks and generates test commands for each language.
 

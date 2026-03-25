@@ -339,7 +339,7 @@ defmodule Minga.Editor.Commands.AgentSubStates do
         :exit, _ -> File.cwd!()
       end
 
-    case Minga.FileFind.list_files(root) do
+    case Minga.Project.list_files(root) do
       {:ok, paths} -> paths
       {:error, _} -> []
     end

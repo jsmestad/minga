@@ -15,7 +15,7 @@ defmodule Minga.Editor.Commands.Search do
   alias Minga.Editor.Window
   alias Minga.Mode
   alias Minga.Mode.SearchState
-  alias Minga.ProjectSearch
+  alias Minga.Project.ProjectSearch
 
   @type state :: EditorState.t()
 

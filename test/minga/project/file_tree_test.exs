@@ -1,7 +1,7 @@
-defmodule Minga.FileTreeTest do
+defmodule Minga.Project.FileTreeTest do
   use ExUnit.Case, async: true
 
-  alias Minga.FileTree
+  alias Minga.Project.FileTree
 
   @tag :tmp_dir
   test "new/1 creates tree with root expanded", %{tmp_dir: tmp_dir} do

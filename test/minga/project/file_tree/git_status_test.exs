@@ -1,9 +1,9 @@
-defmodule Minga.FileTree.GitStatusTest do
+defmodule Minga.Project.FileTree.GitStatusTest do
   use ExUnit.Case, async: true
 
-  alias Minga.FileTree.GitStatus
   alias Minga.Git.StatusEntry
   alias Minga.Git.Stub, as: GitStub
+  alias Minga.Project.FileTree.GitStatus
 
   @moduletag :tmp_dir
 

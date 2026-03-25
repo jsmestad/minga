@@ -45,11 +45,10 @@ defmodule Minga.Editor do
   alias Minga.Editor.Viewport
   # WarningLog removed in #825; warnings route through MessageLog with level override
   alias Minga.Editor.Window
-
-  alias Minga.FileTree
   alias Minga.Input
   alias Minga.LSP.SyncServer, as: LspSyncServer
   alias Minga.Mode
+  alias Minga.Project.FileTree
   # PopupLifecycle alias removed: warnings popup replaced by bottom panel (#825)
   alias Minga.Port.Protocol
 
@@ -2232,7 +2231,7 @@ defmodule Minga.Editor do
   defp refresh_tree_git_status(%{workspace: %{file_tree: %{tree: nil}}} = state), do: state
 
   defp refresh_tree_git_status(%{workspace: %{file_tree: %{tree: tree}}} = state) do
-    updated_tree = Minga.FileTree.refresh_git_status(tree)
+    updated_tree = Minga.Project.FileTree.refresh_git_status(tree)
     put_in(state.workspace.file_tree.tree, updated_tree)
   end
 

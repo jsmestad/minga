@@ -496,7 +496,7 @@ defmodule Minga.Editor.Commands.Movement do
 
   @spec maybe_focus_file_tree(state(), :left | :right | :up | :down) :: state()
   defp maybe_focus_file_tree(
-         %{workspace: %{file_tree: %{tree: %Minga.FileTree{}}}} = state,
+         %{workspace: %{file_tree: %{tree: %Minga.Project.FileTree{}}}} = state,
          :left
        ) do
     state = put_in(state.workspace.file_tree.focused, true)

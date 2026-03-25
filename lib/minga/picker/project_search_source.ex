@@ -2,7 +2,7 @@ defmodule Minga.Picker.ProjectSearchSource do
   @moduledoc """
   Picker source for project-wide search results.
 
-  Displays results from `Minga.ProjectSearch` in a filterable picker.
+  Displays results from `Minga.Project.ProjectSearch` in a filterable picker.
   Selecting a result opens the file at the matching line and column.
   """
 

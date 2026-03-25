@@ -16,8 +16,8 @@ defmodule Minga.Input.VimNavIntegrationTest do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.FileTree, as: FileTreeState
   alias Minga.Editor.Viewport
-  alias Minga.FileTree
-  alias Minga.FileTree.BufferSync
+  alias Minga.Project.FileTree
+  alias Minga.Project.FileTree.BufferSync
 
   defp walk_surface_handlers(state, cp, mods) do
     Enum.reduce_while(Minga.Input.surface_handlers(), {:passthrough, state}, fn handler,

@@ -1,11 +1,11 @@
-defmodule Minga.FileTree.BufferSyncTest do
+defmodule Minga.Project.FileTree.BufferSyncTest do
   use ExUnit.Case, async: true
 
   @moduletag :tmp_dir
 
   alias Minga.Buffer.Server, as: BufferServer
-  alias Minga.FileTree
-  alias Minga.FileTree.BufferSync
+  alias Minga.Project.FileTree
+  alias Minga.Project.FileTree.BufferSync
 
   describe "start_buffer/1" do
     test "creates a nofile buffer", %{tmp_dir: tmp_dir} do

@@ -1,4 +1,4 @@
-defmodule Minga.FileTree.GitStatus do
+defmodule Minga.Project.FileTree.GitStatus do
   @moduledoc """
   Computes git status for all files under a directory tree.
 

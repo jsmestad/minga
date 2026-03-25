@@ -1,4 +1,4 @@
-defmodule Minga.FileFind do
+defmodule Minga.Project.FileFind do
   @moduledoc """
   Discovers project files for the `SPC f f` (find file) picker.
 

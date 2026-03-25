@@ -11,8 +11,8 @@ defmodule Minga.Editor.Commands.FileTree do
   alias Minga.Editor.Layout
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.FileTree, as: FileTreeState
-  alias Minga.FileTree
-  alias Minga.FileTree.BufferSync
+  alias Minga.Project.FileTree
+  alias Minga.Project.FileTree.BufferSync
 
   @typedoc "Internal editor state."
   @type state :: EditorState.t()

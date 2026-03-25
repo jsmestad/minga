@@ -2,7 +2,7 @@ defmodule Minga.Picker.FileSource do
   @moduledoc """
   Picker source for finding and opening files in the project.
 
-  Lists all files in the project directory using `Minga.FileFind` and opens
+  Lists all files in the project directory using `Minga.Project.FileFind` and opens
   the selected file in a new buffer (or switches to it if already open).
   """
 
@@ -29,7 +29,7 @@ defmodule Minga.Picker.FileSource do
   def candidates(_context) do
     root = project_root()
 
-    case Minga.FileFind.list_files(root) do
+    case Minga.Project.list_files(root) do
       {:ok, paths} ->
         recency_map = build_recency_map()
         git_status_map = build_git_status_map()

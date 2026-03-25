@@ -6,7 +6,7 @@ defmodule Minga.Editor.State.FileTree do
   single struct with query and mutation helpers.
   """
 
-  alias Minga.FileTree
+  alias Minga.Project.FileTree
 
   @typedoc "File tree sub-state."
   @type t :: %__MODULE__{

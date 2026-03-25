@@ -14,8 +14,8 @@ defmodule Minga.Editor.TreeRenderer do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.WindowTree
   alias Minga.Face
-  alias Minga.FileTree
   alias Minga.Language.Filetype
+  alias Minga.Project.FileTree
   alias Minga.Theme
 
   # Box-drawing characters for indent guides
@@ -50,7 +50,7 @@ defmodule Minga.Editor.TreeRenderer do
             focused: boolean(),
             theme: Theme.t(),
             active_path: String.t() | nil,
-            git_status: Minga.FileTree.GitStatus.status_map(),
+            git_status: Minga.Project.FileTree.GitStatus.status_map(),
             dirty_paths: MapSet.t(String.t())
           }
   end
@@ -264,7 +264,7 @@ defmodule Minga.Editor.TreeRenderer do
     # Git status indicator (rightmost)
     if file_git_status do
       git_col = col + width - git_width
-      git_symbol = " " <> Minga.FileTree.GitStatus.symbol(file_git_status)
+      git_symbol = " " <> Minga.Project.FileTree.GitStatus.symbol(file_git_status)
       git_style = git_indicator_style(file_git_status, is_cursor, focused, theme)
       draws ++ [DisplayList.draw(row, git_col, git_symbol, git_style)]
     else
@@ -379,7 +379,7 @@ defmodule Minga.Editor.TreeRenderer do
   end
 
   @spec git_indicator_style(
-          Minga.FileTree.GitStatus.file_status(),
+          Minga.Project.FileTree.GitStatus.file_status(),
           boolean(),
           boolean(),
           Theme.t()
@@ -397,7 +397,7 @@ defmodule Minga.Editor.TreeRenderer do
     Face.new(fg: git_status_color(status, theme), bg: theme.tree.bg)
   end
 
-  @spec git_status_color(Minga.FileTree.GitStatus.file_status(), Theme.t()) ::
+  @spec git_status_color(Minga.Project.FileTree.GitStatus.file_status(), Theme.t()) ::
           non_neg_integer()
   defp git_status_color(:modified, theme), do: theme.tree.git_modified_fg || theme.tree.fg
   defp git_status_color(:staged, theme), do: theme.tree.git_staged_fg || theme.tree.fg

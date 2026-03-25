@@ -1,4 +1,4 @@
-defmodule Minga.FileTree.BufferSync do
+defmodule Minga.Project.FileTree.BufferSync do
   @moduledoc """
   Syncs the FileTree data structure into a BufferServer.
 
@@ -8,8 +8,8 @@ defmodule Minga.FileTree.BufferSync do
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Devicon
-  alias Minga.FileTree
   alias Minga.Language.Filetype
+  alias Minga.Project.FileTree
 
   # Box-drawing characters matching TreeRenderer
   @guide_pipe "│ "

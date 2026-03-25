@@ -1,8 +1,8 @@
-defmodule Minga.TestRunnerTest do
+defmodule Minga.Project.TestRunnerTest do
   use ExUnit.Case, async: true
 
-  alias Minga.TestRunner
-  alias Minga.TestRunner.Runner
+  alias Minga.Project.TestRunner
+  alias Minga.Project.TestRunner.Runner
 
   # Creates a temp project directory with the given files/dirs
   defp with_project(files, dirs, fun) do

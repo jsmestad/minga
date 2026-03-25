@@ -48,7 +48,7 @@ defmodule Minga.Editor.Commands.Testing do
     filetype = if buf, do: BufferServer.filetype(buf), else: detect_project_filetype()
     project_root = Minga.Project.root() || "."
 
-    case Minga.TestRunner.detect(filetype, project_root) do
+    case Minga.Project.detect_test_runner(filetype, project_root) do
       {:ok, runner} ->
         command = build_test_command(runner, buf, kind)
         execute_test(state, command, project_root)
@@ -58,16 +58,20 @@ defmodule Minga.Editor.Commands.Testing do
     end
   end
 
-  @spec build_test_command(Minga.TestRunner.Runner.t(), pid() | nil, :file | :all | :at_point) ::
+  @spec build_test_command(
+          Minga.Project.TestRunner.Runner.t(),
+          pid() | nil,
+          :file | :all | :at_point
+        ) ::
           String.t() | nil
   defp build_test_command(runner, _buf, :all) do
-    Minga.TestRunner.all_command(runner)
+    Minga.Project.test_all_command(runner)
   end
 
   defp build_test_command(runner, buf, :file) when is_pid(buf) do
     case BufferServer.file_path(buf) do
       nil -> nil
-      path -> Minga.TestRunner.file_command(runner, path)
+      path -> Minga.Project.test_file_command(runner, path)
     end
   end
 
@@ -76,7 +80,7 @@ defmodule Minga.Editor.Commands.Testing do
     {cursor_line, _col} = BufferServer.cursor(buf)
 
     if file_path do
-      Minga.TestRunner.at_point_command(runner, file_path, cursor_line + 1)
+      Minga.Project.test_at_point_command(runner, file_path, cursor_line + 1)
     else
       nil
     end
@@ -108,7 +112,7 @@ defmodule Minga.Editor.Commands.Testing do
 
   @spec detect_project_filetype() :: atom()
   defp detect_project_filetype do
-    Minga.TestRunner.detect_project_filetype(Minga.Project.root() || ".")
+    Minga.Project.TestRunner.detect_project_filetype(Minga.Project.root() || ".")
   end
 
   @impl Minga.Command.Provider

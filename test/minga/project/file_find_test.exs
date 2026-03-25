@@ -1,7 +1,7 @@
-defmodule Minga.FileFindTest do
+defmodule Minga.Project.FileFindTest do
   use ExUnit.Case, async: true
 
-  alias Minga.FileFind
+  alias Minga.Project.FileFind
 
   describe "detect_strategy/1" do
     test "returns a known strategy atom" do

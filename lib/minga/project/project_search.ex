@@ -1,4 +1,4 @@
-defmodule Minga.ProjectSearch do
+defmodule Minga.Project.ProjectSearch do
   @moduledoc """
   Searches across project files using `ripgrep` or `grep`.
 
@@ -70,7 +70,7 @@ defmodule Minga.ProjectSearch do
   ## Examples
 
       iex> json = ~s({"type":"match","data":{"path":{"text":"lib/foo.ex"},"lines":{"text":"defmodule Foo\\n"},"line_number":1,"submatches":[{"match":{"text":"Foo"},"start":10,"end":13}]}})
-      iex> Minga.ProjectSearch.parse_rg_json_line(json)
+      iex> Minga.Project.ProjectSearch.parse_rg_json_line(json)
       {:ok, %{file: "lib/foo.ex", line: 1, col: 10, text: "defmodule Foo"}}
   """
   @spec parse_rg_json_line(String.t()) :: {:ok, match()} | :skip
@@ -107,10 +107,10 @@ defmodule Minga.ProjectSearch do
 
   ## Examples
 
-      iex> Minga.ProjectSearch.parse_grep_line("lib/foo.ex:42:defmodule Foo")
+      iex> Minga.Project.ProjectSearch.parse_grep_line("lib/foo.ex:42:defmodule Foo")
       {:ok, %{file: "lib/foo.ex", line: 42, col: 0, text: "defmodule Foo"}}
 
-      iex> Minga.ProjectSearch.parse_grep_line("not a match")
+      iex> Minga.Project.ProjectSearch.parse_grep_line("not a match")
       :skip
   """
   @spec parse_grep_line(String.t()) :: {:ok, match()} | :skip

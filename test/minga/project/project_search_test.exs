@@ -1,7 +1,7 @@
-defmodule Minga.ProjectSearchTest do
+defmodule Minga.Project.ProjectSearchTest do
   use ExUnit.Case, async: true
 
-  alias Minga.ProjectSearch
+  alias Minga.Project.ProjectSearch
 
   defp encode_json(term), do: JSON.encode!(term)
 

@@ -11,7 +11,7 @@ defmodule Minga.Editor.LayoutTest do
   alias Minga.Editor.Viewport
   alias Minga.Editor.VimState
   alias Minga.Editor.Window
-  alias Minga.FileTree
+  alias Minga.Project.FileTree
 
   # ── Helpers ──────────────────────────────────────────────────────────────────
 

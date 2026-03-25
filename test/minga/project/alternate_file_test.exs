@@ -1,7 +1,7 @@
-defmodule Minga.AlternateFileTest do
+defmodule Minga.Project.AlternateFileTest do
   use ExUnit.Case, async: true
 
-  alias Minga.AlternateFile
+  alias Minga.Project.AlternateFile
 
   @project "/project"
 

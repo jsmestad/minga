@@ -1,4 +1,4 @@
-defmodule Minga.AlternateFile do
+defmodule Minga.Project.AlternateFile do
   @moduledoc """
   Finds the "alternate" file for a given source file.
 
@@ -35,13 +35,13 @@ defmodule Minga.AlternateFile do
 
   ## Examples
 
-      iex> Minga.AlternateFile.candidates("/project/lib/foo.ex", :elixir, "/project")
+      iex> Minga.Project.AlternateFile.candidates("/project/lib/foo.ex", :elixir, "/project")
       ["/project/test/foo_test.exs"]
 
-      iex> Minga.AlternateFile.candidates("/project/test/foo_test.exs", :elixir, "/project")
+      iex> Minga.Project.AlternateFile.candidates("/project/test/foo_test.exs", :elixir, "/project")
       ["/project/lib/foo.ex"]
 
-      iex> Minga.AlternateFile.candidates("/project/notes.txt", :text, "/project")
+      iex> Minga.Project.AlternateFile.candidates("/project/notes.txt", :text, "/project")
       []
   """
   @spec candidates(String.t(), atom(), String.t()) :: [String.t()]

@@ -17,7 +17,7 @@ defmodule Minga.Editor.Commands.FileTreeRevealTest do
   """
   use Minga.Test.EditorCase, async: true
 
-  alias Minga.FileTree
+  alias Minga.Project.FileTree
 
   @moduletag :tmp_dir
 

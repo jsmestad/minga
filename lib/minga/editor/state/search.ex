@@ -9,7 +9,7 @@ defmodule Minga.Editor.State.Search do
   @type t :: %__MODULE__{
           last_pattern: String.t() | nil,
           last_direction: Minga.Search.direction(),
-          project_results: [Minga.ProjectSearch.match()]
+          project_results: [Minga.Project.ProjectSearch.match()]
         }
 
   defstruct last_pattern: nil,

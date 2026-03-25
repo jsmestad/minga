@@ -948,7 +948,7 @@ defmodule Minga.Port.ProtocolTest do
     } do
       File.write!(Path.join(tmp_dir, "hello.ex"), "")
 
-      tree = %Minga.FileTree{
+      tree = %Minga.Project.FileTree{
         root: tmp_dir,
         expanded: MapSet.new([tmp_dir]),
         cursor: 0,
@@ -986,7 +986,7 @@ defmodule Minga.Port.ProtocolTest do
     test "path_hash is stable across encodes", %{tmp_dir: tmp_dir} do
       File.write!(Path.join(tmp_dir, "stable.txt"), "")
 
-      tree = %Minga.FileTree{
+      tree = %Minga.Project.FileTree{
         root: tmp_dir,
         expanded: MapSet.new([tmp_dir]),
         cursor: 0,
