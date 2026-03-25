@@ -184,10 +184,10 @@ defmodule Minga.Input.InterruptTest do
     end
 
     test "clears status message" do
-      state = %{base_state() | status_msg: "some message"}
+      state = Minga.Editor.State.set_status(base_state(), "some message")
 
       assert {:handled, new_state} = Interrupt.handle_key(state, @ctrl_g, 0)
-      assert new_state.status_msg == nil
+      assert new_state.shell_state.status_msg == nil
     end
   end
 
@@ -210,9 +210,10 @@ defmodule Minga.Input.InterruptTest do
               completion: completion
           },
           picker_ui: %Picker{picker: picker},
-          whichkey: %WhichKey{node: %{}, show: true},
-          status_msg: "hello"
+          whichkey: %WhichKey{node: %{}, show: true}
       }
+
+      state = Minga.Editor.State.set_status(state, "hello")
 
       assert {:handled, new_state} = Interrupt.handle_key(state, @ctrl_g, 0)
       assert new_state.workspace.keymap_scope == :editor
@@ -222,7 +223,7 @@ defmodule Minga.Input.InterruptTest do
       assert new_state.whichkey.show == false
       assert new_state.workspace.pending_conflict == nil
       assert new_state.workspace.completion == nil
-      assert new_state.status_msg == nil
+      assert new_state.shell_state.status_msg == nil
     end
   end
 

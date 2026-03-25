@@ -38,53 +38,53 @@ defmodule Minga.Editor.Commands.Lsp do
 
     case clients do
       [] ->
-        %{state | status_msg: "No language servers running"}
+        EditorState.set_status(state, "No language servers running")
 
       _ ->
         markdown = build_lsp_info_markdown(clients)
         vp = state.workspace.viewport
         popup = HoverPopup.new(markdown, div(vp.rows, 2), div(vp.cols, 4))
         popup = HoverPopup.focus(popup)
-        %{state | hover_popup: popup}
+        EditorState.set_hover_popup(state, popup)
     end
   end
 
   def execute(%{workspace: %{buffers: %{active: nil}}} = state, :lsp_restart) do
-    %{state | status_msg: "No active buffer"}
+    EditorState.set_status(state, "No active buffer")
   end
 
   def execute(state, :lsp_restart) do
     case clients_and_keys_for_active(state) do
       [] ->
-        %{state | status_msg: "No LSP server for this buffer"}
+        EditorState.set_status(state, "No LSP server for this buffer")
 
       client_keys ->
         results = Enum.map(client_keys, &restart_one/1)
         msg = format_results(results, "Restarted", "Failed to restart")
         # Status will update via :lsp_status_changed events from the new clients
-        %{state | status_msg: msg}
+        EditorState.set_status(state, msg)
     end
   end
 
   def execute(%{workspace: %{buffers: %{active: nil}}} = state, :lsp_stop) do
-    %{state | status_msg: "No active buffer"}
+    EditorState.set_status(state, "No active buffer")
   end
 
   def execute(state, :lsp_stop) do
     case clients_and_keys_for_active(state) do
       [] ->
-        %{state | status_msg: "No LSP server for this buffer"}
+        EditorState.set_status(state, "No LSP server for this buffer")
 
       client_keys ->
         results = Enum.map(client_keys, &stop_one/1)
         msg = format_results(results, "Stopped", "Failed to stop")
         # Status will update via :lsp_status_changed events from the stopped clients
-        %{state | status_msg: msg}
+        EditorState.set_status(state, msg)
     end
   end
 
   def execute(%{workspace: %{buffers: %{active: nil}}} = state, :lsp_start) do
-    %{state | status_msg: "No active buffer"}
+    EditorState.set_status(state, "No active buffer")
   end
 
   def execute(state, :lsp_start) do
@@ -94,14 +94,14 @@ defmodule Minga.Editor.Commands.Lsp do
 
     case configs do
       [] ->
-        %{state | status_msg: "No LSP server available for #{filetype}"}
+        EditorState.set_status(state, "No LSP server available for #{filetype}")
 
       _ ->
         root = Minga.Project.root() || "."
         {results, state} = start_servers(configs, root, state, buf)
         msg = format_results(results, "Started", "Failed to start")
         # Status will update via :lsp_status_changed events from the new clients
-        %{state | status_msg: msg}
+        EditorState.set_status(state, msg)
     end
   end
 

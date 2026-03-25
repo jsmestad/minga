@@ -4,20 +4,26 @@ defmodule Minga.Editor.State do
 
   ## Field categories
 
-  EditorState fields fall into two categories:
+  EditorState fields fall into three categories:
 
   **Workspace fields** live in `state.workspace` (`Minga.Workspace.State`)
   and are saved/restored when switching tabs. Each tab carries a snapshot
   of the workspace so switching tabs restores the full editing context.
 
+  **Shell fields** live in `state.shell_state` (`Minga.Shell.Traditional.State`)
+  and hold presentation concerns: chrome, overlays, transient UI state.
+  The active shell module is `state.shell`. See `Minga.Shell` for the
+  behaviour definition.
+
   **Global fields** are shared across all tabs and never snapshotted:
-  `port_manager`, `theme`, `status_msg`, `render_timer`, `focus_stack`,
+  `port_manager`, `theme`, `render_timer`, `focus_stack`,
   `tab_bar`, `capabilities`, `layout`, `modeline_click_regions`,
   `tab_bar_click_regions`, `agent`, `picker_ui`, `whichkey`.
 
   ## Composed sub-structs
 
   * `Minga.Workspace.State`           — per-tab editing context (buffers, windows, vim, etc.)
+  * `Minga.Shell.Traditional.State`   — presentation state (nav_flash, hover, dashboard, etc.)
   * `Minga.Editor.State.Picker`       — picker instance, source, restore index
   * `Minga.Editor.State.WhichKey`     — which-key popup node, timer, visibility
   * `Minga.Editor.State.Registers`    — named registers and active register selection
@@ -30,8 +36,6 @@ defmodule Minga.Editor.State do
   alias Minga.Editor.BottomPanel
   alias Minga.Editor.CompletionTrigger
   alias Minga.Editor.Dashboard
-
-  alias Minga.Editor.NavFlash
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.Buffers
@@ -66,15 +70,18 @@ defmodule Minga.Editor.State do
   @typedoc "A document highlight range from the LSP server."
   @type document_highlight :: Minga.LSP.DocumentHighlight.t()
 
+  alias Minga.Shell.Traditional.State, as: ShellState
+
   @enforce_keys [:port_manager, :workspace]
   defstruct backend: :headless,
             port_manager: nil,
             workspace: nil,
+            shell: Minga.Shell.Traditional,
+            shell_state: %ShellState{},
             picker_ui: %Picker{},
             prompt_ui: %Prompt{},
             whichkey: %WhichKey{},
             theme: Minga.UI.Theme.get!(:doom_one),
-            status_msg: nil,
             render_timer: nil,
             warning_popup_timer: nil,
             bottom_panel: %BottomPanel{},
@@ -84,7 +91,6 @@ defmodule Minga.Editor.State do
             lsp_status: :none,
             lsp_server_statuses: %{},
             parser_status: :available,
-            hover_popup: nil,
             signature_help: nil,
             focus_stack: [],
             tab_bar: nil,
@@ -93,8 +99,6 @@ defmodule Minga.Editor.State do
             modeline_click_regions: [],
             tab_bar_click_regions: [],
             agent: %AgentState{},
-            dashboard: nil,
-            nav_flash: nil,
             last_cursor_line: nil,
             last_test_command: nil,
             pending_quit: nil,
@@ -121,11 +125,12 @@ defmodule Minga.Editor.State do
           backend: backend(),
           port_manager: GenServer.server() | nil,
           workspace: WorkspaceState.t(),
+          shell: module(),
+          shell_state: ShellState.t(),
           picker_ui: Picker.t(),
           prompt_ui: Prompt.t(),
           whichkey: WhichKey.t(),
           theme: Theme.t(),
-          status_msg: String.t() | nil,
           render_timer: reference() | nil,
           warning_popup_timer: reference() | nil,
           bottom_panel: BottomPanel.t(),
@@ -140,7 +145,6 @@ defmodule Minga.Editor.State do
             atom() => :starting | :initializing | :ready | :crashed
           },
           parser_status: Minga.Editor.Modeline.parser_status(),
-          hover_popup: Minga.Editor.HoverPopup.t() | nil,
           signature_help: Minga.Editor.SignatureHelp.t() | nil,
           focus_stack: [module()],
           tab_bar: TabBar.t() | nil,
@@ -149,8 +153,6 @@ defmodule Minga.Editor.State do
           modeline_click_regions: [Minga.Editor.Modeline.click_region()],
           tab_bar_click_regions: [Minga.Editor.TabBarRenderer.click_region()],
           agent: AgentState.t(),
-          dashboard: Dashboard.state() | nil,
-          nav_flash: NavFlash.t() | nil,
           last_cursor_line: non_neg_integer() | nil,
           last_test_command: {String.t(), String.t()} | nil,
           pending_quit: :quit | :quit_all | nil,
@@ -178,6 +180,81 @@ defmodule Minga.Editor.State do
   @spec update_workspace(t(), (WorkspaceState.t() -> WorkspaceState.t())) :: t()
   def update_workspace(%__MODULE__{workspace: ws} = state, fun) when is_function(fun, 1) do
     %{state | workspace: fun.(ws)}
+  end
+
+  @doc "Applies a function to the shell state and returns the updated state."
+  @spec update_shell_state(t(), (ShellState.t() -> ShellState.t())) :: t()
+  def update_shell_state(%__MODULE__{shell_state: ss} = state, fun) when is_function(fun, 1) do
+    %{state | shell_state: fun.(ss)}
+  end
+
+  # ── Shell field accessors ─────────────────────────────────────────────────
+  # Convenience helpers for the most-accessed shell fields. These avoid
+  # the verbose `%{state | shell_state: %{state.shell_state | field: val}}`
+  # pattern at 100+ call sites.
+
+  @doc "Returns the transient status message, or nil."
+  @spec status_msg(t()) :: String.t() | nil
+  def status_msg(%__MODULE__{shell_state: ss}), do: ss.status_msg
+
+  @doc "Sets the transient status message shown in the modeline."
+  @spec set_status(t(), String.t()) :: t()
+  def set_status(%{shell_state: ss} = state, msg) when is_binary(msg) do
+    %{state | shell_state: %{ss | status_msg: msg}}
+  end
+
+  @doc "Clears the transient status message."
+  @spec clear_status(t()) :: t()
+  def clear_status(%{shell_state: ss} = state) do
+    %{state | shell_state: %{ss | status_msg: nil}}
+  end
+
+  @doc "Returns the nav flash state, or nil when inactive."
+  @spec nav_flash(t()) :: Minga.Editor.NavFlash.t() | nil
+  def nav_flash(%__MODULE__{shell_state: ss}), do: ss.nav_flash
+
+  @doc "Sets the nav flash state."
+  @spec set_nav_flash(t(), Minga.Editor.NavFlash.t()) :: t()
+  def set_nav_flash(%{shell_state: ss} = state, %Minga.Editor.NavFlash{} = flash) do
+    %{state | shell_state: %{ss | nav_flash: flash}}
+  end
+
+  @doc "Cancels the nav flash animation."
+  @spec cancel_nav_flash(t()) :: t()
+  def cancel_nav_flash(%{shell_state: ss} = state) do
+    %{state | shell_state: %{ss | nav_flash: nil}}
+  end
+
+  @doc "Returns the hover popup state, or nil when not showing."
+  @spec hover_popup(t()) :: Minga.Editor.HoverPopup.t() | nil
+  def hover_popup(%__MODULE__{shell_state: ss}), do: ss.hover_popup
+
+  @doc "Sets the hover popup state."
+  @spec set_hover_popup(t(), Minga.Editor.HoverPopup.t()) :: t()
+  def set_hover_popup(%{shell_state: ss} = state, %Minga.Editor.HoverPopup{} = popup) do
+    %{state | shell_state: %{ss | hover_popup: popup}}
+  end
+
+  @doc "Dismisses the hover popup."
+  @spec dismiss_hover_popup(t()) :: t()
+  def dismiss_hover_popup(%{shell_state: ss} = state) do
+    %{state | shell_state: %{ss | hover_popup: nil}}
+  end
+
+  @doc "Returns the dashboard home screen state, or nil."
+  @spec dashboard(t()) :: Dashboard.state() | nil
+  def dashboard(%__MODULE__{shell_state: ss}), do: ss.dashboard
+
+  @doc "Sets the dashboard home screen state."
+  @spec set_dashboard(t(), Dashboard.state()) :: t()
+  def set_dashboard(%{shell_state: ss} = state, dash) when is_map(dash) do
+    %{state | shell_state: %{ss | dashboard: dash}}
+  end
+
+  @doc "Closes the dashboard home screen."
+  @spec close_dashboard(t()) :: t()
+  def close_dashboard(%{shell_state: ss} = state) do
+    %{state | shell_state: %{ss | dashboard: nil}}
   end
 
   # ── Convenience accessors ─────────────────────────────────────────────────

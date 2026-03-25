@@ -48,7 +48,7 @@ defmodule Minga.Input.HandlerTest do
 
       assert {:handled, new_state} = ConflictPrompt.handle_key(state, ?r, 0)
       assert new_state.workspace.pending_conflict == nil
-      assert new_state.status_msg =~ "reloaded"
+      assert new_state.shell_state.status_msg =~ "reloaded"
     end
 
     test "handles 'k' key during conflict by keeping local", %{tmp_dir: tmp_dir} do

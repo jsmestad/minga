@@ -23,7 +23,7 @@ defmodule Minga.Buffer.BuftypeIntegrationTest do
       # Try entering insert mode
       state = send_key_sync(ctx, ?i)
       assert state.workspace.vim.mode == :normal
-      assert state.status_msg =~ "read-only"
+      assert state.shell_state.status_msg =~ "read-only"
     end
 
     test "dd is blocked on read-only nofile buffer" do

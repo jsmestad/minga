@@ -9,7 +9,7 @@ defmodule Minga.Editor.Commands.BufferManagement.TUI do
   @impl true
   @spec view_messages(EditorState.t()) :: EditorState.t()
   def view_messages(%{workspace: %{buffers: %{messages: nil}}} = state) do
-    %{state | status_msg: "No messages buffer"}
+    EditorState.set_status(state, "No messages buffer")
   end
 
   def view_messages(%{workspace: %{buffers: %{messages: msg_buf}}} = state) do
@@ -19,7 +19,7 @@ defmodule Minga.Editor.Commands.BufferManagement.TUI do
   @impl true
   @spec view_warnings(EditorState.t()) :: EditorState.t()
   def view_warnings(%{workspace: %{buffers: %{messages: nil}}} = state) do
-    %{state | status_msg: "No messages buffer"}
+    EditorState.set_status(state, "No messages buffer")
   end
 
   def view_warnings(%{workspace: %{buffers: %{messages: msg_buf}}} = state) do

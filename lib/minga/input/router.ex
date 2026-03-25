@@ -94,7 +94,7 @@ defmodule Minga.Input.Router do
     buf_version_before = buffer_version(state)
     old_cursor = safe_cursor(old_buffer)
 
-    state = %{state | status_msg: nil}
+    state = EditorState.clear_status(state)
 
     state = dispatch_split(state, codepoint, modifiers)
 

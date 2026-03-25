@@ -200,7 +200,7 @@ defmodule Minga.Editor.Commands.Agent do
         state
 
       AgentAccess.session(state) == nil ->
-        %{state | status_msg: "No agent session, try closing and reopening the panel"}
+        EditorState.set_status(state, "No agent session, try closing and reopening the panel")
 
       true ->
         text = UIState.prompt_text(panel)
@@ -218,7 +218,7 @@ defmodule Minga.Editor.Commands.Agent do
   defp execute_slash_command(state, text) do
     case SlashCommand.execute(state, text) do
       {:ok, state} -> state
-      {:error, msg} -> %{state | status_msg: msg}
+      {:error, msg} -> EditorState.set_status(state, msg)
     end
   end
 
@@ -235,13 +235,13 @@ defmodule Minga.Editor.Commands.Agent do
         |> deliver_prompt(resolved)
 
       {:error, msg} ->
-        %{state | status_msg: msg}
+        EditorState.set_status(state, msg)
     end
   catch
     # The :DOWN monitor clears stale session PIDs, but there's a race window:
     # the session can die while we're mid-call (before :DOWN is processed).
     # This is the user-facing hot path (Enter to send), so catch it here.
-    :exit, _ -> %{state | status_msg: "Agent session crashed, SPC a n to restart"}
+    :exit, _ -> EditorState.set_status(state, "Agent session crashed, SPC a n to restart")
   end
 
   # Clears the input and resets diff baselines after a prompt is submitted.
@@ -268,13 +268,13 @@ defmodule Minga.Editor.Commands.Agent do
         )
 
       {:error, :provider_not_ready} ->
-        %{state | status_msg: "Agent provider still starting, try again in a moment"}
+        EditorState.set_status(state, "Agent provider still starting, try again in a moment")
 
       {:error, msg} when is_binary(msg) ->
-        %{state | status_msg: msg}
+        EditorState.set_status(state, msg)
 
       {:error, reason} ->
-        %{state | status_msg: "Agent error: #{inspect(reason)}"}
+        EditorState.set_status(state, "Agent error: #{inspect(reason)}")
     end
   end
 
@@ -289,10 +289,10 @@ defmodule Minga.Editor.Commands.Agent do
         |> deliver_follow_up(resolved)
 
       {:error, msg} ->
-        %{state | status_msg: msg}
+        EditorState.set_status(state, msg)
     end
   catch
-    :exit, _ -> %{state | status_msg: "Agent session crashed, SPC a n to restart"}
+    :exit, _ -> EditorState.set_status(state, "Agent session crashed, SPC a n to restart")
   end
 
   @spec deliver_follow_up(state(), String.t() | [ReqLLM.Message.ContentPart.t()]) :: state()
@@ -308,13 +308,13 @@ defmodule Minga.Editor.Commands.Agent do
         )
 
       {:error, :provider_not_ready} ->
-        %{state | status_msg: "Agent provider still starting, try again in a moment"}
+        EditorState.set_status(state, "Agent provider still starting, try again in a moment")
 
       {:error, msg} when is_binary(msg) ->
-        %{state | status_msg: msg}
+        EditorState.set_status(state, msg)
 
       {:error, reason} ->
-        %{state | status_msg: "Agent error: #{inspect(reason)}"}
+        EditorState.set_status(state, "Agent error: #{inspect(reason)}")
     end
   end
 
@@ -402,7 +402,7 @@ defmodule Minga.Editor.Commands.Agent do
         state
 
       AgentAccess.session(state) == nil ->
-        %{state | status_msg: "No agent session, try closing and reopening the panel"}
+        EditorState.set_status(state, "No agent session, try closing and reopening the panel")
 
       AgentAccess.agent(state).status in [:thinking, :tool_executing] ->
         text = UIState.prompt_text(panel)
@@ -482,7 +482,7 @@ defmodule Minga.Editor.Commands.Agent do
         n -> "Cleared #{n} agent sessions"
       end
 
-    %{state | status_msg: msg}
+    EditorState.set_status(state, msg)
   end
 
   @doc "Switches to an existing session by pid."
@@ -575,19 +575,19 @@ defmodule Minga.Editor.Commands.Agent do
   @spec cycle_thinking_level(state()) :: state()
   def cycle_thinking_level(state) do
     if AgentAccess.session(state) == nil do
-      %{state | status_msg: "No agent session"}
+      EditorState.set_status(state, "No agent session")
     else
       case Session.cycle_thinking_level(AgentAccess.session(state)) do
         {:ok, %{"level" => level}} when is_binary(level) ->
           state = update_agent_ui(state, &UIState.set_thinking_level(&1, level))
           Session.add_system_message(AgentAccess.session(state), "Thinking: #{level}")
-          %{state | status_msg: "Thinking: #{level}"}
+          EditorState.set_status(state, "Thinking: #{level}")
 
         {:ok, nil} ->
-          %{state | status_msg: "Model does not support thinking levels"}
+          EditorState.set_status(state, "Model does not support thinking levels")
 
         {:error, reason} ->
-          %{state | status_msg: "Error: #{inspect(reason)}"}
+          EditorState.set_status(state, "Error: #{inspect(reason)}")
       end
     end
   end
@@ -598,19 +598,19 @@ defmodule Minga.Editor.Commands.Agent do
     session = AgentAccess.session(state)
 
     if session == nil do
-      %{state | status_msg: "No agent session"}
+      EditorState.set_status(state, "No agent session")
     else
       case Session.summarize(session) do
         {:ok, _summary, path} ->
           root = project_root()
           relative = Path.relative_to(path, root)
-          %{state | status_msg: "Context artifact saved to #{relative}"}
+          EditorState.set_status(state, "Context artifact saved to #{relative}")
 
         {:error, reason} when is_binary(reason) ->
-          %{state | status_msg: reason}
+          EditorState.set_status(state, reason)
 
         {:error, reason} ->
-          %{state | status_msg: "Error: #{inspect(reason)}"}
+          EditorState.set_status(state, "Error: #{inspect(reason)}")
       end
     end
   end
@@ -619,7 +619,7 @@ defmodule Minga.Editor.Commands.Agent do
   @spec cycle_model(state()) :: state()
   def cycle_model(state) do
     if AgentAccess.session(state) == nil do
-      %{state | status_msg: "No agent session"}
+      EditorState.set_status(state, "No agent session")
     else
       case Session.cycle_model(AgentAccess.session(state)) do
         {:ok, %{"model" => model, "index" => index, "total" => total}} ->
@@ -630,13 +630,13 @@ defmodule Minga.Editor.Commands.Agent do
             "Model: #{model} [#{index}/#{total}]"
           )
 
-          %{state | status_msg: "Model: #{model} [#{index}/#{total}]"}
+          EditorState.set_status(state, "Model: #{model} [#{index}/#{total}]")
 
         {:error, reason} when is_binary(reason) ->
-          %{state | status_msg: reason}
+          EditorState.set_status(state, reason)
 
         {:error, reason} ->
-          %{state | status_msg: "Error: #{inspect(reason)}"}
+          EditorState.set_status(state, "Error: #{inspect(reason)}")
       end
     end
   end
@@ -658,7 +658,7 @@ defmodule Minga.Editor.Commands.Agent do
       Session.add_system_message(AgentAccess.session(state), "Model: #{model}")
     end
 
-    %{state | status_msg: "Model: #{model}"}
+    EditorState.set_status(state, "Model: #{model}")
   end
 
   # ── Scope commands (keymap scope dispatch) ──────────────────────────────────
@@ -1041,13 +1041,13 @@ defmodule Minga.Editor.Commands.Agent do
 
   @spec do_dequeue_to_editor(state(), [String.t() | [ReqLLM.Message.ContentPart.t()]]) ::
           state()
-  defp do_dequeue_to_editor(state, []), do: %{state | status_msg: "No queued messages"}
+  defp do_dequeue_to_editor(state, []), do: EditorState.set_status(state, "No queued messages")
 
   defp do_dequeue_to_editor(state, all_queued) do
     count = length(all_queued)
     label = if count == 1, do: "message", else: "messages"
     state = restore_queued_to_prompt(state, all_queued)
-    %{state | status_msg: "Restored #{count} queued #{label} to editor"}
+    EditorState.set_status(state, "Restored #{count} queued #{label} to editor")
   end
 
   # Returns true when no agent UI is visible (panel or agent tab active),

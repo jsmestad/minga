@@ -25,7 +25,7 @@ defmodule Minga.UI.Picker.OptionScopeSourceTest do
 
       state = %{
         workspace: %{buffers: %{active: buf}},
-        status_msg: nil,
+        shell_state: %Minga.Shell.Traditional.State{status_msg: nil},
         picker_ui: %PickerState{
           context: %{option_name: :wrap, new_value: true}
         }
@@ -38,7 +38,7 @@ defmodule Minga.UI.Picker.OptionScopeSourceTest do
         )
 
       assert BufferServer.get_option(buf, :wrap) == true
-      assert result.status_msg =~ "this buffer"
+      assert result.shell_state.status_msg =~ "this buffer"
     end
   end
 
@@ -49,7 +49,7 @@ defmodule Minga.UI.Picker.OptionScopeSourceTest do
 
       state = %{
         workspace: %{buffers: %{active: buf}},
-        status_msg: nil,
+        shell_state: %Minga.Shell.Traditional.State{status_msg: nil},
         picker_ui: %PickerState{
           context: %{option_name: :wrap, new_value: !original}
         }
@@ -62,7 +62,7 @@ defmodule Minga.UI.Picker.OptionScopeSourceTest do
         )
 
       assert Options.get(:wrap) == !original
-      assert result.status_msg =~ "all buffers"
+      assert result.shell_state.status_msg =~ "all buffers"
 
       # Restore
       Options.set(:wrap, original)

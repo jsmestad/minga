@@ -42,16 +42,16 @@ defmodule Minga.Editor.Commands.BufferManagement do
       :ok ->
         name = Helpers.buffer_display_name(buf)
 
-        %{state | status_msg: "Wrote #{name}"}
+        EditorState.set_status(state, "Wrote #{name}")
 
       {:error, :file_changed} ->
-        %{state | status_msg: "WARNING: File changed on disk. Use :w! to force save."}
+        EditorState.set_status(state, "WARNING: File changed on disk. Use :w! to force save.")
 
       {:error, :no_file_path} ->
-        %{state | status_msg: "No file name — use :w <filename>"}
+        EditorState.set_status(state, "No file name — use :w <filename>")
 
       {:error, reason} ->
-        %{state | status_msg: "Save failed: #{inspect(reason)}"}
+        EditorState.set_status(state, "Save failed: #{inspect(reason)}")
     end
   end
 
@@ -59,13 +59,13 @@ defmodule Minga.Editor.Commands.BufferManagement do
     case BufferServer.force_save(buf) do
       :ok ->
         name = Helpers.buffer_display_name(buf)
-        %{state | status_msg: "Wrote #{name} (force)"}
+        EditorState.set_status(state, "Wrote #{name} (force)")
 
       {:error, :no_file_path} ->
-        %{state | status_msg: "No file name — use :w <filename>"}
+        EditorState.set_status(state, "No file name — use :w <filename>")
 
       {:error, reason} ->
-        %{state | status_msg: "Force save failed: #{inspect(reason)}"}
+        EditorState.set_status(state, "Force save failed: #{inspect(reason)}")
     end
   end
 
@@ -73,13 +73,13 @@ defmodule Minga.Editor.Commands.BufferManagement do
     case BufferServer.reload(buf) do
       :ok ->
         name = Helpers.buffer_display_name(buf)
-        %{state | status_msg: "Reloaded #{name}"}
+        EditorState.set_status(state, "Reloaded #{name}")
 
       {:error, :no_file_path} ->
-        %{state | status_msg: "No file to reload"}
+        EditorState.set_status(state, "No file to reload")
 
       {:error, reason} ->
-        %{state | status_msg: "Reload failed: #{inspect(reason)}"}
+        EditorState.set_status(state, "Reload failed: #{inspect(reason)}")
     end
   end
 
@@ -101,7 +101,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   end
 
   def execute(state, :confirm_quit_no) do
-    %{state | pending_quit: nil, status_msg: nil}
+    EditorState.clear_status(%{state | pending_quit: nil})
   end
 
   # ── Buffer navigation ─────────────────────────────────────────────────────
@@ -173,7 +173,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
     current = BufferServer.get_option(buf, :wrap)
     BufferServer.set_option(buf, :wrap, !current)
     label = if current, do: "nowrap", else: "wrap"
-    %{state | status_msg: "wrap #{label}"}
+    EditorState.set_status(state, "wrap #{label}")
   end
 
   # ── Ex commands ───────────────────────────────────────────────────────────
@@ -401,7 +401,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   def execute(state, {:execute_ex_command, {:set_filetype, [name]}}) do
     case resolve_filetype(name) do
       {:ok, filetype} -> apply_filetype_change(state, filetype)
-      {:error, message} -> %{state | status_msg: message}
+      {:error, message} -> EditorState.set_status(state, message)
     end
   end
 
@@ -487,12 +487,12 @@ defmodule Minga.Editor.Commands.BufferManagement do
       try do
         BufferServer.set_filetype(buf, filetype)
         send(self(), :setup_highlight)
-        %{state | status_msg: "Language: #{filetype}"}
+        EditorState.set_status(state, "Language: #{filetype}")
       catch
-        :exit, _ -> %{state | status_msg: "No active buffer"}
+        :exit, _ -> EditorState.set_status(state, "No active buffer")
       end
     else
-      %{state | status_msg: "No active buffer"}
+      EditorState.set_status(state, "No active buffer")
     end
   end
 
@@ -503,11 +503,11 @@ defmodule Minga.Editor.Commands.BufferManagement do
     case ConfigLoader.reload() do
       :ok ->
         Minga.Editor.log_to_messages("Config reloaded")
-        %{state | status_msg: "Config reloaded"}
+        EditorState.set_status(state, "Config reloaded")
 
       {:error, msg} ->
         Minga.Log.warning(:config, "Config reload error: #{msg}")
-        %{state | status_msg: "Config reload error: #{msg}"}
+        EditorState.set_status(state, "Config reload error: #{msg}")
     end
   end
 
@@ -520,10 +520,11 @@ defmodule Minga.Editor.Commands.BufferManagement do
     open_alternate(state, file_path, filetype)
   end
 
-  def alternate_file(state), do: %{state | status_msg: "No active buffer"}
+  def alternate_file(state), do: EditorState.set_status(state, "No active buffer")
 
   @spec open_alternate(state(), String.t() | nil, atom()) :: state()
-  defp open_alternate(state, nil, _filetype), do: %{state | status_msg: "Buffer has no file path"}
+  defp open_alternate(state, nil, _filetype),
+    do: EditorState.set_status(state, "Buffer has no file path")
 
   defp open_alternate(state, file_path, filetype) do
     project_root = Minga.Project.root() || Path.dirname(file_path)
@@ -531,7 +532,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
 
     case Enum.find(candidates, &File.exists?/1) do
       nil ->
-        %{state | status_msg: "No alternate file found for #{Path.basename(file_path)}"}
+        EditorState.set_status(state, "No alternate file found for #{Path.basename(file_path)}")
 
       alt_path ->
         execute(state, {:execute_ex_command, {:edit, alt_path}})
@@ -705,7 +706,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
         %{s | document: Document.new("")}
       end)
 
-      %{state | status_msg: "Buffer is persistent — content cleared"}
+      EditorState.set_status(state, "Buffer is persistent — content cleared")
     else
       buf_name =
         if buf do
@@ -807,7 +808,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
         do: "Agent session ended",
         else: "Agent session crashed (SPC a n to restart)"
 
-    %{state | status_msg: msg}
+    EditorState.set_status(state, msg)
   end
 
   # Shared state cleanup for agent sessions: stops spinner, clears
@@ -881,7 +882,10 @@ defmodule Minga.Editor.Commands.BufferManagement do
   @spec maybe_confirm_quit(state(), :quit | :quit_all) :: state()
   defp maybe_confirm_quit(state, kind) do
     if confirm_quit_enabled?() and any_buffer_dirty?(state) do
-      %{state | pending_quit: kind, status_msg: "Modified buffers exist. Really quit? (y/n)"}
+      EditorState.set_status(
+        %{state | pending_quit: kind},
+        "Modified buffers exist. Really quit? (y/n)"
+      )
     else
       case kind do
         :quit -> close_tab_or_quit(state)

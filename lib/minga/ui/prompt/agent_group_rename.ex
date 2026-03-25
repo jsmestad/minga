@@ -21,11 +21,13 @@ defmodule Minga.UI.Prompt.AgentGroupRename do
     trimmed = String.trim(text)
 
     if trimmed == "" do
-      %{state | status_msg: "Workspace name cannot be empty"}
+      ss = state.shell_state
+      %{state | shell_state: %{ss | status_msg: "Workspace name cannot be empty"}}
     else
       ws_id = TabBar.active_group_id(tb)
       tb = TabBar.update_group(tb, ws_id, &AgentGroup.rename(&1, trimmed))
-      %{state | tab_bar: tb, status_msg: "Renamed: #{trimmed}"}
+      ss = state.shell_state
+      %{state | tab_bar: tb, shell_state: %{ss | status_msg: "Renamed: #{trimmed}"}}
     end
   end
 

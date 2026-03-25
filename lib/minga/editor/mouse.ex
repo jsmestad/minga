@@ -257,8 +257,8 @@ defmodule Minga.Editor.Mouse do
   def handle(state, row, col, :none, _mods, :motion, _cc) do
     # Clear any existing hover popup when the mouse moves
     state =
-      if state.hover_popup != nil do
-        %{state | hover_popup: nil}
+      if state.shell_state.hover_popup != nil do
+        EditorState.dismiss_hover_popup(state)
       else
         state
       end

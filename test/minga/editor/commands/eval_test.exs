@@ -45,19 +45,19 @@ defmodule Minga.Editor.Commands.EvalTest do
     test "evaluates arithmetic and shows result on status line" do
       state = build_state()
       result = Eval.execute(state, {:eval_expression, "1 + 1"})
-      assert result.status_msg == "2"
+      assert result.shell_state.status_msg == "2"
     end
 
     test "evaluates string expressions" do
       state = build_state()
       result = Eval.execute(state, {:eval_expression, ~s("hello" <> " world")})
-      assert result.status_msg == ~s("hello world")
+      assert result.shell_state.status_msg == ~s("hello world")
     end
 
     test "evaluates list expressions" do
       state = build_state()
       result = Eval.execute(state, {:eval_expression, "Enum.map([1,2,3], & &1 * 2)"})
-      assert result.status_msg == "[2, 4, 6]"
+      assert result.shell_state.status_msg == "[2, 4, 6]"
     end
   end
 
@@ -65,7 +65,7 @@ defmodule Minga.Editor.Commands.EvalTest do
     test "editor binding contains the current process PID" do
       state = build_state()
       result = Eval.execute(state, {:eval_expression, "editor"})
-      assert result.status_msg == inspect(self())
+      assert result.shell_state.status_msg == inspect(self())
     end
   end
 
@@ -83,13 +83,13 @@ defmodule Minga.Editor.Commands.EvalTest do
           end
         end)
 
-      assert result.status_msg =~ "**"
+      assert result.shell_state.status_msg =~ "**"
     end
 
     test "runtime error returns formatted error without crashing" do
       state = build_state()
       result = Eval.execute(state, {:eval_expression, "1 / 0"})
-      assert result.status_msg =~ "ArithmeticError"
+      assert result.shell_state.status_msg =~ "ArithmeticError"
     end
 
     test "undefined variable returns error" do
@@ -105,13 +105,13 @@ defmodule Minga.Editor.Commands.EvalTest do
           end
         end)
 
-      assert result.status_msg =~ "**"
+      assert result.shell_state.status_msg =~ "**"
     end
 
     test "throw is caught and displayed" do
       state = build_state()
       result = Eval.execute(state, {:eval_expression, "throw(:oops)"})
-      assert result.status_msg =~ "**"
+      assert result.shell_state.status_msg =~ "**"
     end
   end
 
@@ -119,7 +119,7 @@ defmodule Minga.Editor.Commands.EvalTest do
     test "long-running eval times out gracefully" do
       state = build_state()
       result = Eval.execute(state, {:eval_expression, ":timer.sleep(10_000)"}, timeout: 100)
-      assert result.status_msg == "Eval timed out (0s)"
+      assert result.shell_state.status_msg == "Eval timed out (0s)"
     end
   end
 
@@ -147,7 +147,7 @@ defmodule Minga.Editor.Commands.EvalTest do
     test "works without messages buffer (nil)" do
       state = build_state(nil)
       result = Eval.execute(state, {:eval_expression, "1 + 1"})
-      assert result.status_msg == "2"
+      assert result.shell_state.status_msg == "2"
     end
   end
 end

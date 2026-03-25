@@ -63,7 +63,7 @@ defmodule Minga.Input.Interrupt do
     {state, resets} = maybe_close_conflict(state, resets)
     {state, resets} = maybe_close_completion(state, resets)
     {state, resets} = maybe_clear_agent_prefix(state, resets)
-    state = %{state | status_msg: nil}
+    state = EditorState.clear_status(state)
 
     {state, resets}
   end

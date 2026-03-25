@@ -86,7 +86,7 @@ defmodule Minga.Agent.SlashCommandTest do
           spinner_timer: nil,
           buffer: nil
         },
-        status_msg: nil
+        shell_state: %Minga.Shell.Traditional.State{status_msg: nil}
       }
     end
 
@@ -100,7 +100,7 @@ defmodule Minga.Agent.SlashCommandTest do
 
     test "/help returns ok and sets status message" do
       {:ok, state} = SlashCommand.execute(mock_state(), "/help")
-      assert state.status_msg == "Commands listed in chat"
+      assert state.shell_state.status_msg == "Commands listed in chat"
     end
 
     test "/stop aborts agent (no-op without session)" do
@@ -121,12 +121,12 @@ defmodule Minga.Agent.SlashCommandTest do
 
     test "/thinking without args cycles level (no session = status msg)" do
       {:ok, state} = SlashCommand.execute(mock_state(), "/thinking")
-      assert state.status_msg != nil
+      assert state.shell_state.status_msg != nil
     end
 
     test "/thinking with arg sets level (no session = status msg)" do
       {:ok, state} = SlashCommand.execute(mock_state(), "/thinking high")
-      assert state.status_msg == "No agent session"
+      assert state.shell_state.status_msg == "No agent session"
     end
 
     test "/model without name returns error" do
@@ -140,17 +140,17 @@ defmodule Minga.Agent.SlashCommandTest do
 
     test "/? is an alias for /help" do
       {:ok, state} = SlashCommand.execute(mock_state(), "/?")
-      assert state.status_msg == "Commands listed in chat"
+      assert state.shell_state.status_msg == "Commands listed in chat"
     end
 
     test "command parsing is case-insensitive" do
       {:ok, state} = SlashCommand.execute(mock_state(), "/HELP")
-      assert state.status_msg == "Commands listed in chat"
+      assert state.shell_state.status_msg == "Commands listed in chat"
     end
 
     test "command parsing trims whitespace" do
       {:ok, state} = SlashCommand.execute(mock_state(), "/help  ")
-      assert state.status_msg == "Commands listed in chat"
+      assert state.shell_state.status_msg == "Commands listed in chat"
     end
   end
 end

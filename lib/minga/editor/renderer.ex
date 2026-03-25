@@ -54,7 +54,7 @@ defmodule Minga.Editor.Renderer do
 
     # Dashboard state is initialized by the editor when buffers empty,
     # but fall back to an empty state if somehow nil.
-    dash_state = state.dashboard || Dashboard.new_state()
+    dash_state = state.shell_state.dashboard || Dashboard.new_state()
 
     splash_draws = Dashboard.render(cols, rows, state.theme, dash_state)
 

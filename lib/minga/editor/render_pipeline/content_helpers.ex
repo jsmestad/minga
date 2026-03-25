@@ -130,7 +130,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
       confirm_match: confirm_match,
       highlight: window_highlight(state, window),
       cursorline_bg: cursorline_bg,
-      nav_flash: state.nav_flash,
+      nav_flash: state.shell_state.nav_flash,
       nav_flash_bg: state.theme.editor.nav_flash_bg,
       editor_bg: state.theme.editor.bg,
       is_gui: is_gui,

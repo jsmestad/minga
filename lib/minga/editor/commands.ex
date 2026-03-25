@@ -166,11 +166,11 @@ defmodule Minga.Editor.Commands do
   def execute(state, {:tool_confirm_accept, name}) do
     case Minga.Tool.Manager.install(name) do
       :ok ->
-        state = %{state | status_msg: "Installing #{name}..."}
+        state = EditorState.set_status(state, "Installing #{name}...")
         drain_tool_prompt_queue(state)
 
       {:error, reason} ->
-        %{state | status_msg: "Cannot install #{name}: #{reason}"}
+        EditorState.set_status(state, "Cannot install #{name}: #{reason}")
     end
   end
 
@@ -388,7 +388,7 @@ defmodule Minga.Editor.Commands do
 
     case MacroRecorder.get_macro(Editing.macro_recorder(state), register) do
       nil ->
-        %{state | status_msg: "No macro in register @#{register}"}
+        EditorState.set_status(state, "No macro in register @#{register}")
 
       _keys ->
         rec = %{Editing.macro_recorder(state) | last_register: register}
@@ -423,14 +423,14 @@ defmodule Minga.Editor.Commands do
   def execute(state, {:execute_ex_command, {:parser_restart, []}}) do
     case ParserManager.restart() do
       :ok ->
-        %{state | status_msg: "Parser restarted"}
+        EditorState.set_status(state, "Parser restarted")
 
       {:error, :binary_not_found} ->
-        %{state | status_msg: "Parser restart failed: binary not found"}
+        EditorState.set_status(state, "Parser restart failed: binary not found")
     end
   catch
     :exit, _ ->
-      %{state | status_msg: "Parser restart failed: manager not available"}
+      EditorState.set_status(state, "Parser restart failed: manager not available")
   end
 
   def execute(state, {:execute_ex_command, {:extensions, []}}) do

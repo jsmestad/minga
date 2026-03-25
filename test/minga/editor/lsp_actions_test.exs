@@ -127,19 +127,19 @@ defmodule Minga.Editor.LspActionsTest do
     test "sets status message on error" do
       state = fake_state()
       result = LspActions.handle_definition_response(state, {:error, %{"message" => "fail"}})
-      assert result.status_msg == "Definition request failed"
+      assert result.shell_state.status_msg == "Definition request failed"
     end
 
     test "sets status message when result is nil" do
       state = fake_state()
       result = LspActions.handle_definition_response(state, {:ok, nil})
-      assert result.status_msg == "No definition found"
+      assert result.shell_state.status_msg == "No definition found"
     end
 
     test "sets status message when result is empty list" do
       state = fake_state()
       result = LspActions.handle_definition_response(state, {:ok, []})
-      assert result.status_msg == "No definition found"
+      assert result.shell_state.status_msg == "No definition found"
     end
   end
 
@@ -149,21 +149,21 @@ defmodule Minga.Editor.LspActionsTest do
     test "sets status message on error" do
       state = fake_state()
       result = LspActions.handle_hover_response(state, {:error, %{"message" => "fail"}})
-      assert result.status_msg == "Hover request failed"
+      assert result.shell_state.status_msg == "Hover request failed"
     end
 
     test "sets status message when result is nil" do
       state = fake_state()
       result = LspActions.handle_hover_response(state, {:ok, nil})
-      assert result.status_msg == "No hover information"
+      assert result.shell_state.status_msg == "No hover information"
     end
 
     test "creates hover popup for content" do
       state = fake_state()
       hover = %{"contents" => %{"kind" => "plaintext", "value" => "Returns :ok"}}
       result = LspActions.handle_hover_response(state, {:ok, hover})
-      assert %HoverPopup{} = result.hover_popup
-      assert result.hover_popup.focused == false
+      assert %HoverPopup{} = result.shell_state.hover_popup
+      assert result.shell_state.hover_popup.focused == false
     end
 
     test "creates hover popup for markdown content" do
@@ -177,14 +177,14 @@ defmodule Minga.Editor.LspActionsTest do
       }
 
       result = LspActions.handle_hover_response(state, {:ok, hover})
-      assert %HoverPopup{} = result.hover_popup
-      assert result.hover_popup.content_lines != []
+      assert %HoverPopup{} = result.shell_state.hover_popup
+      assert result.shell_state.hover_popup.content_lines != []
     end
 
     test "handles hover with no contents key" do
       state = fake_state()
       result = LspActions.handle_hover_response(state, {:ok, %{"range" => %{}}})
-      assert result.status_msg == "No hover information"
+      assert result.shell_state.status_msg == "No hover information"
     end
   end
 
@@ -194,14 +194,14 @@ defmodule Minga.Editor.LspActionsTest do
     test "sets status_msg when no active buffer" do
       state = fake_state()
       result = LspActions.code_lens(state)
-      assert result.status_msg == "No active buffer"
+      assert result.shell_state.status_msg == "No active buffer"
     end
 
     test "silently no-ops when no LSP client is registered" do
       buf = start_supervised!({BufferServer, content: "hello"})
       state = fake_state_with_buffer(buf)
       result = LspActions.code_lens(state)
-      assert result.status_msg == nil
+      assert result.shell_state.status_msg == nil
     end
   end
 
@@ -464,13 +464,13 @@ defmodule Minga.Editor.LspActionsTest do
     test "prepareRename error shows status message" do
       state = fake_state_with_vim()
       result = LspActions.handle_prepare_rename_response(state, {:error, "not renameable"})
-      assert result.status_msg == "Cannot rename at this position"
+      assert result.shell_state.status_msg == "Cannot rename at this position"
     end
 
     test "prepareRename nil shows cannot-rename message" do
       state = fake_state_with_vim()
       result = LspActions.handle_prepare_rename_response(state, {:ok, nil})
-      assert result.status_msg == "Cannot rename at this position"
+      assert result.shell_state.status_msg == "Cannot rename at this position"
     end
 
     test "prepareRename with Range but no buffer falls back to empty" do
@@ -494,7 +494,7 @@ defmodule Minga.Editor.LspActionsTest do
       state = fake_state()
       hover = %{"contents" => %{"kind" => "plaintext", "value" => "Returns :ok"}}
       result = LspActions.handle_hover_mouse_response(state, {:ok, hover}, 5, 20)
-      assert %HoverPopup{} = result.hover_popup
+      assert %HoverPopup{} = result.shell_state.hover_popup
     end
 
     test "is a no-op on error" do
@@ -524,8 +524,8 @@ defmodule Minga.Editor.LspActionsTest do
       }
 
       result = LspActions.handle_hover_mouse_response(state, {:ok, hover}, 10, 30)
-      assert %HoverPopup{} = result.hover_popup
-      assert result.hover_popup.content_lines != []
+      assert %HoverPopup{} = result.shell_state.hover_popup
+      assert result.shell_state.hover_popup.content_lines != []
     end
   end
 
@@ -570,8 +570,7 @@ defmodule Minga.Editor.LspActionsTest do
         document_highlights: nil,
         highlight: %Minga.Editor.State.Highlighting{}
       },
-      status_msg: nil,
-      hover_popup: nil,
+      shell_state: %Minga.Shell.Traditional.State{status_msg: nil, hover_popup: nil},
       code_lenses: [],
       inlay_hints: [],
       inlay_hint_debounce_timer: nil,

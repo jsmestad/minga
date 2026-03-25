@@ -61,12 +61,12 @@ defmodule Minga.UI.Picker.OptionScopeSource do
       BufferServer.set_option(buf, name, value)
     end
 
-    %{state | status_msg: format_confirmation(name, value, "this buffer")}
+    Minga.Editor.State.set_status(state, format_confirmation(name, value, "this buffer"))
   end
 
   defp apply_scoped(:global, name, value, state) do
     Options.set(name, value)
-    %{state | status_msg: format_confirmation(name, value, "all buffers")}
+    Minga.Editor.State.set_status(state, format_confirmation(name, value, "all buffers"))
   end
 
   @spec format_confirmation(atom(), term(), String.t()) :: String.t()

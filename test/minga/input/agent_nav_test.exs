@@ -329,7 +329,7 @@ defmodule Minga.Input.AgentNavTest do
       new_state = KeyDispatch.handle_key(state, ?A, 0)
 
       assert new_state.workspace.vim.mode == :insert
-      refute new_state.status_msg == "Buffer is read-only"
+      refute new_state.shell_state.status_msg == "Buffer is read-only"
     end
   end
 end

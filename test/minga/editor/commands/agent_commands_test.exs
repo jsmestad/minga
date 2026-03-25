@@ -99,7 +99,7 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
 
       new_state = AgentCommands.submit_prompt(state)
 
-      assert new_state.status_msg =~ "No agent session"
+      assert new_state.shell_state.status_msg =~ "No agent session"
     end
   end
 
@@ -208,7 +208,7 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
       state = base_state(session: nil)
       new_state = AgentCommands.cycle_thinking_level(state)
 
-      assert new_state.status_msg =~ "No agent session"
+      assert new_state.shell_state.status_msg =~ "No agent session"
     end
   end
 

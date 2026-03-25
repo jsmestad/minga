@@ -202,7 +202,7 @@ defmodule Minga.Editor.Commands.BufferManagementTest do
       state = :sys.get_state(editor)
 
       assert state.pending_quit == :quit
-      assert state.status_msg =~ "Modified buffers"
+      assert state.shell_state.status_msg =~ "Modified buffers"
     end
 
     test "quit with clean buffer exits without prompt" do
@@ -228,7 +228,7 @@ defmodule Minga.Editor.Commands.BufferManagementTest do
       send_key(editor, ?n)
       state = :sys.get_state(editor)
       assert state.pending_quit == nil
-      assert state.status_msg == nil
+      assert state.shell_state.status_msg == nil
     end
 
     test "Escape at confirmation prompt cancels quit" do

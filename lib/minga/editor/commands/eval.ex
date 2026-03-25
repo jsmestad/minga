@@ -36,7 +36,7 @@ defmodule Minga.Editor.Commands.Eval do
         display = truncate(result_str, @max_status_length)
 
         state
-        |> then(&%{&1 | status_msg: display})
+        |> then(&EditorState.set_status(&1, display))
         |> log_to_messages("Eval: #{input}\n  => #{result_str}")
 
       {:ok, {:error, kind, error, stacktrace}} ->
@@ -44,14 +44,14 @@ defmodule Minga.Editor.Commands.Eval do
         display = truncate(format_error_oneline(kind, error), @max_status_length)
 
         state
-        |> then(&%{&1 | status_msg: display})
+        |> then(&EditorState.set_status(&1, display))
         |> log_to_messages("Eval error: #{input}\n#{formatted}")
 
       nil ->
         timeout_display = "#{div(timeout, 1000)}s"
 
         state
-        |> then(&%{&1 | status_msg: "Eval timed out (#{timeout_display})"})
+        |> then(&EditorState.set_status(&1, "Eval timed out (#{timeout_display})"))
         |> log_to_messages("Eval timeout: #{input}")
     end
   end

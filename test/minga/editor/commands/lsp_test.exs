@@ -9,7 +9,7 @@ defmodule Minga.Editor.Commands.LspTest do
     test "shows 'no language servers running' when none active" do
       state = base_state()
       result = LspCommands.execute(state, :lsp_info)
-      assert result.status_msg == "No language servers running"
+      assert result.shell_state.status_msg == "No language servers running"
     end
   end
 
@@ -23,13 +23,13 @@ defmodule Minga.Editor.Commands.LspTest do
       }
 
       result = LspCommands.execute(state, :lsp_restart)
-      assert result.status_msg == "No active buffer"
+      assert result.shell_state.status_msg == "No active buffer"
     end
 
     test "shows 'no LSP server' when no clients attached" do
       state = base_state()
       result = LspCommands.execute(state, :lsp_restart)
-      assert result.status_msg == "No LSP server for this buffer"
+      assert result.shell_state.status_msg == "No LSP server for this buffer"
     end
   end
 
@@ -43,13 +43,13 @@ defmodule Minga.Editor.Commands.LspTest do
       }
 
       result = LspCommands.execute(state, :lsp_stop)
-      assert result.status_msg == "No active buffer"
+      assert result.shell_state.status_msg == "No active buffer"
     end
 
     test "shows 'no LSP server' when no clients attached" do
       state = base_state()
       result = LspCommands.execute(state, :lsp_stop)
-      assert result.status_msg == "No LSP server for this buffer"
+      assert result.shell_state.status_msg == "No LSP server for this buffer"
     end
   end
 
@@ -63,14 +63,14 @@ defmodule Minga.Editor.Commands.LspTest do
       }
 
       result = LspCommands.execute(state, :lsp_start)
-      assert result.status_msg == "No active buffer"
+      assert result.shell_state.status_msg == "No active buffer"
     end
 
     test "shows 'no LSP server available' for unsupported filetype" do
       state = base_state()
       result = LspCommands.execute(state, :lsp_start)
       # The test buffer has :text filetype with no configured LSP server
-      assert String.contains?(result.status_msg, "No LSP server available")
+      assert String.contains?(result.shell_state.status_msg, "No LSP server available")
     end
   end
 end

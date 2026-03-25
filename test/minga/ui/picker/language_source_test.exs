@@ -80,13 +80,17 @@ defmodule Minga.UI.Picker.LanguageSourceTest do
 
       new_state = BufferManagement.apply_filetype_change(state, :python)
       assert BufferServer.filetype(buf) == :python
-      assert new_state.status_msg =~ "python"
+      assert new_state.shell_state.status_msg =~ "python"
     end
 
     test "returns error message when no active buffer" do
-      state = %{workspace: %{buffers: %{active: nil}}, status_msg: nil}
+      state = %{
+        workspace: %{buffers: %{active: nil}},
+        shell_state: %Minga.Shell.Traditional.State{status_msg: nil}
+      }
+
       new_state = BufferManagement.apply_filetype_change(state, :python)
-      assert new_state.status_msg =~ "No active buffer"
+      assert new_state.shell_state.status_msg =~ "No active buffer"
     end
   end
 
@@ -97,7 +101,7 @@ defmodule Minga.UI.Picker.LanguageSourceTest do
 
     %{
       workspace: %{buffers: %{active: buf, list: [buf], active_index: 0}},
-      status_msg: nil
+      shell_state: %Minga.Shell.Traditional.State{status_msg: nil}
     }
   end
 end

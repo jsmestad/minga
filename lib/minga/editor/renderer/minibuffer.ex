@@ -159,7 +159,7 @@ defmodule Minga.Editor.Renderer.Minibuffer do
     )
   end
 
-  def render(%{status_msg: msg, theme: theme}, row, cols) when is_binary(msg) do
+  def render(%{shell_state: %{status_msg: msg}, theme: theme}, row, cols) when is_binary(msg) do
     mb = theme.minibuffer
 
     DisplayList.draw(

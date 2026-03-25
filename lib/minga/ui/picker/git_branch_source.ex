@@ -36,16 +36,16 @@ defmodule Minga.UI.Picker.GitBranchSource do
   def on_select(%Item{id: {:create, name}}, state) do
     case resolve_git_root() do
       nil ->
-        %{state | status_msg: "Not in a git repository"}
+        Minga.Editor.State.set_status(state, "Not in a git repository")
 
       git_root ->
         case Git.branch_create(git_root, name) do
           :ok ->
             refresh_repo(git_root)
-            %{state | status_msg: "Created and switched to #{name}"}
+            Minga.Editor.State.set_status(state, "Created and switched to #{name}")
 
           {:error, reason} ->
-            %{state | status_msg: "Failed: #{reason}"}
+            Minga.Editor.State.set_status(state, "Failed: #{reason}")
         end
     end
   end
@@ -53,16 +53,16 @@ defmodule Minga.UI.Picker.GitBranchSource do
   def on_select(%Item{id: {:branch, name}}, state) do
     case resolve_git_root() do
       nil ->
-        %{state | status_msg: "Not in a git repository"}
+        Minga.Editor.State.set_status(state, "Not in a git repository")
 
       git_root ->
         case Git.branch_switch(git_root, name) do
           :ok ->
             refresh_repo(git_root)
-            %{state | status_msg: "Switched to #{name}"}
+            Minga.Editor.State.set_status(state, "Switched to #{name}")
 
           {:error, reason} ->
-            %{state | status_msg: "Failed: #{reason}"}
+            Minga.Editor.State.set_status(state, "Failed: #{reason}")
         end
     end
   end

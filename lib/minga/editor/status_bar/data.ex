@@ -151,7 +151,7 @@ defmodule Minga.Editor.StatusBar.Data do
       macro_recording: Editing.macro_recording_status(state),
       agent_status: agent.status,
       agent_theme_colors: if(agent.status, do: Theme.agent_theme(state.theme), else: nil),
-      status_msg: state.status_msg
+      status_msg: state.shell_state.status_msg
     }
   end
 
@@ -225,7 +225,7 @@ defmodule Minga.Editor.StatusBar.Data do
       parser_status: state.parser_status,
       buf_index: state.workspace.buffers.active_index + 1,
       buf_count: length(state.workspace.buffers.list),
-      status_msg: state.status_msg
+      status_msg: state.shell_state.status_msg
     }
   end
 

@@ -9,7 +9,7 @@ defmodule Minga.Editor.Commands.BufferManagement.FrontendTest do
     %{
       workspace: %{buffers: %{messages: Keyword.get(opts, :messages)}},
       bottom_panel: %BottomPanel{},
-      status_msg: nil
+      shell_state: %Minga.Shell.Traditional.State{status_msg: nil}
     }
   end
 
@@ -40,14 +40,14 @@ defmodule Minga.Editor.Commands.BufferManagement.FrontendTest do
   describe "TUI.view_messages/1" do
     test "returns status message when no messages buffer" do
       state = BufTUI.view_messages(base_state(messages: nil))
-      assert state.status_msg == "No messages buffer"
+      assert state.shell_state.status_msg == "No messages buffer"
     end
   end
 
   describe "TUI.view_warnings/1" do
     test "returns status message when no messages buffer" do
       state = BufTUI.view_warnings(base_state(messages: nil))
-      assert state.status_msg == "No messages buffer"
+      assert state.shell_state.status_msg == "No messages buffer"
     end
   end
 end

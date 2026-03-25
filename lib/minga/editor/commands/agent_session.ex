@@ -33,7 +33,7 @@ defmodule Minga.Editor.Commands.AgentSession do
     end
 
     state = AgentAccess.update_agent(state, &AgentState.clear_session/1)
-    state = %{state | status_msg: message}
+    state = EditorState.set_status(state, message)
     if AgentAccess.panel(state).visible, do: start_agent_session(state), else: state
   end
 

@@ -56,31 +56,37 @@ defmodule Minga.Tool.PickerSource do
   @spec on_select(Item.t(), term()) :: term()
   def on_select(%Item{id: {name, :not_installed}}, state) do
     case ToolManager.install(name) do
-      :ok -> %{state | status_msg: "Installing #{name}..."}
-      {:error, reason} -> %{state | status_msg: "Cannot install #{name}: #{reason}"}
+      :ok ->
+        Minga.Editor.State.set_status(state, "Installing #{name}...")
+
+      {:error, reason} ->
+        Minga.Editor.State.set_status(state, "Cannot install #{name}: #{reason}")
     end
   end
 
   def on_select(%Item{id: {name, :installed}}, state) do
-    %{state | status_msg: "#{name} is already installed. Press C-o for actions."}
+    Minga.Editor.State.set_status(state, "#{name} is already installed. Press C-o for actions.")
   end
 
   def on_select(%Item{id: {name, :update_available}}, state) do
     case ToolManager.update(name) do
-      :ok -> %{state | status_msg: "Updating #{name}..."}
-      {:error, reason} -> %{state | status_msg: "Cannot update #{name}: #{reason}"}
+      :ok -> Minga.Editor.State.set_status(state, "Updating #{name}...")
+      {:error, reason} -> Minga.Editor.State.set_status(state, "Cannot update #{name}: #{reason}")
     end
   end
 
   def on_select(%Item{id: {name, :installing}}, state) do
-    %{state | status_msg: "#{name} is currently being installed..."}
+    Minga.Editor.State.set_status(state, "#{name} is currently being installed...")
   end
 
   def on_select(%Item{id: {name, :failed}}, state) do
     # Retry on failed tool
     case ToolManager.install(name) do
-      :ok -> %{state | status_msg: "Retrying #{name}..."}
-      {:error, reason} -> %{state | status_msg: "Cannot install #{name}: #{reason}"}
+      :ok ->
+        Minga.Editor.State.set_status(state, "Retrying #{name}...")
+
+      {:error, reason} ->
+        Minga.Editor.State.set_status(state, "Cannot install #{name}: #{reason}")
     end
   end
 
@@ -108,22 +114,22 @@ defmodule Minga.Tool.PickerSource do
   @spec on_action(atom(), Item.t(), term()) :: term()
   def on_action(:install, %Item{id: {name, _}}, state) do
     case ToolManager.install(name) do
-      :ok -> %{state | status_msg: "Installing #{name}..."}
-      {:error, reason} -> %{state | status_msg: "Cannot install: #{reason}"}
+      :ok -> Minga.Editor.State.set_status(state, "Installing #{name}...")
+      {:error, reason} -> Minga.Editor.State.set_status(state, "Cannot install: #{reason}")
     end
   end
 
   def on_action(:uninstall, %Item{id: {name, _}}, state) do
     case ToolManager.uninstall(name) do
-      :ok -> %{state | status_msg: "Uninstalled #{name}"}
-      {:error, reason} -> %{state | status_msg: "Cannot uninstall: #{reason}"}
+      :ok -> Minga.Editor.State.set_status(state, "Uninstalled #{name}")
+      {:error, reason} -> Minga.Editor.State.set_status(state, "Cannot uninstall: #{reason}")
     end
   end
 
   def on_action(:update, %Item{id: {name, _}}, state) do
     case ToolManager.update(name) do
-      :ok -> %{state | status_msg: "Updating #{name}..."}
-      {:error, reason} -> %{state | status_msg: "Cannot update: #{reason}"}
+      :ok -> Minga.Editor.State.set_status(state, "Updating #{name}...")
+      {:error, reason} -> Minga.Editor.State.set_status(state, "Cannot update: #{reason}")
     end
   end
 

@@ -40,7 +40,7 @@ defmodule Minga.UI.Picker.ExtensionSource do
       Updater.check_single(name)
     end)
 
-    %{state | status_msg: "Checking #{name} for updates..."}
+    Minga.Editor.State.set_status(state, "Checking #{name} for updates...")
   end
 
   @impl true

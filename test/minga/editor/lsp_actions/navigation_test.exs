@@ -12,7 +12,7 @@ defmodule Minga.Editor.LspActions.NavigationTest do
 
   defp stub_state do
     %{
-      status_msg: nil,
+      shell_state: %Minga.Shell.Traditional.State{status_msg: nil},
       buffers: %{active: nil, list: []},
       picker_ui: %Minga.Editor.State.Picker{},
       whichkey: %Minga.Editor.State.WhichKey{},
@@ -23,34 +23,34 @@ defmodule Minga.Editor.LspActions.NavigationTest do
   describe "handle_type_definition_response/2" do
     test "error sets status message" do
       state = LspActions.handle_type_definition_response(stub_state(), {:error, "timeout"})
-      assert state.status_msg == "Type definition request failed"
+      assert state.shell_state.status_msg == "Type definition request failed"
     end
 
     test "nil result sets status message" do
       state = LspActions.handle_type_definition_response(stub_state(), {:ok, nil})
-      assert state.status_msg == "No type definition found"
+      assert state.shell_state.status_msg == "No type definition found"
     end
 
     test "empty list sets status message" do
       state = LspActions.handle_type_definition_response(stub_state(), {:ok, []})
-      assert state.status_msg == "No type definition found"
+      assert state.shell_state.status_msg == "No type definition found"
     end
   end
 
   describe "handle_implementation_response/2" do
     test "error sets status message" do
       state = LspActions.handle_implementation_response(stub_state(), {:error, "timeout"})
-      assert state.status_msg == "Implementation request failed"
+      assert state.shell_state.status_msg == "Implementation request failed"
     end
 
     test "nil result sets status message" do
       state = LspActions.handle_implementation_response(stub_state(), {:ok, nil})
-      assert state.status_msg == "No implementation found"
+      assert state.shell_state.status_msg == "No implementation found"
     end
 
     test "empty list sets status message" do
       state = LspActions.handle_implementation_response(stub_state(), {:ok, []})
-      assert state.status_msg == "No implementation found"
+      assert state.shell_state.status_msg == "No implementation found"
     end
   end
 end

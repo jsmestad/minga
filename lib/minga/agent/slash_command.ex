@@ -180,13 +180,13 @@ defmodule Minga.Agent.SlashCommand do
         :ok ->
           state = AgentAccess.update_agent_ui(state, &UIState.set_thinking_level(&1, level))
           Session.add_system_message(AgentAccess.session(state), "Thinking: #{level}")
-          %{state | status_msg: "Thinking: #{level}"}
+          Minga.Editor.State.set_status(state, "Thinking: #{level}")
 
         {:error, reason} ->
-          %{state | status_msg: "Error: #{inspect(reason)}"}
+          Minga.Editor.State.set_status(state, "Error: #{inspect(reason)}")
       end
     else
-      %{state | status_msg: "No agent session"}
+      Minga.Editor.State.set_status(state, "No agent session")
     end
   end
 
@@ -209,7 +209,7 @@ defmodule Minga.Agent.SlashCommand do
       Session.add_system_message(AgentAccess.session(state), "Available commands:\n#{help_text}")
     end
 
-    %{state | status_msg: "Commands listed in chat"}
+    Minga.Editor.State.set_status(state, "Commands listed in chat")
   end
 
   @spec do_sessions(state()) :: state()
@@ -583,7 +583,7 @@ defmodule Minga.Agent.SlashCommand do
     if is_pid(session) do
       case Session.compact(session) do
         {:ok, info} ->
-          {:ok, %{state | status_msg: info}}
+          {:ok, Minga.Editor.State.set_status(state, info)}
 
         {:error, reason} ->
           {:error, reason}
@@ -691,7 +691,7 @@ defmodule Minga.Agent.SlashCommand do
     # Take only the first line for the single-line minibuffer status bar.
     # The full message is visible in the *Agent* chat buffer via add_system_message.
     first_line = message |> String.split("\n", parts: 2) |> hd() |> String.trim()
-    %{state | status_msg: String.slice(first_line, 0, 80)}
+    Minga.Editor.State.set_status(state, String.slice(first_line, 0, 80))
   end
 
   # ── Helpers ─────────────────────────────────────────────────────────────────

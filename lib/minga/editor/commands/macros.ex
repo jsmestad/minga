@@ -21,7 +21,7 @@ defmodule Minga.Editor.Commands.Macros do
       {true, _reg} ->
         rec = MacroRecorder.stop_recording(Editing.macro_recorder(state))
         state = Editing.set_macro_recorder(state, rec)
-        %{state | status_msg: "Recorded macro"}
+        EditorState.set_status(state, "Recorded macro")
 
       false ->
         Editing.update_mode_state(state, fn ms ->
@@ -34,7 +34,7 @@ defmodule Minga.Editor.Commands.Macros do
   def replay_last(state) do
     case Editing.macro_recorder(state) do
       %{last_register: nil} ->
-        %{state | status_msg: "No previous macro"}
+        EditorState.set_status(state, "No previous macro")
 
       %{last_register: reg} ->
         {state, {:replay_macro, reg}}

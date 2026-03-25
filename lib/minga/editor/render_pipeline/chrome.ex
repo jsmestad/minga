@@ -84,9 +84,13 @@ defmodule Minga.Editor.RenderPipeline.Chrome do
 
   @doc "Renders the hover popup overlay draws."
   @spec render_hover_popup(state()) :: [DisplayList.draw()]
-  def render_hover_popup(%{hover_popup: nil}), do: []
+  def render_hover_popup(%{shell_state: %{hover_popup: nil}}), do: []
 
-  def render_hover_popup(%{hover_popup: popup, viewport: vp, theme: theme}) do
+  def render_hover_popup(%{
+        shell_state: %{hover_popup: popup},
+        workspace: %{viewport: vp},
+        theme: theme
+      }) do
     HoverPopup.render(popup, {vp.rows, vp.cols}, theme)
   end
 

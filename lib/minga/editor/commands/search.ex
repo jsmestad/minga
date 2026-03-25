@@ -67,7 +67,7 @@ defmodule Minga.Editor.Commands.Search do
         state
         |> put_in_search(:last_pattern, ms.input)
         |> put_in_search(:last_direction, ms.direction)
-        |> then(&%{&1 | status_msg: "Pattern not found: #{ms.input}"})
+        |> then(&EditorState.set_status(&1, "Pattern not found: #{ms.input}"))
 
       {line, col} ->
         BufferServer.move_to(buf, {line, col})
@@ -102,7 +102,7 @@ defmodule Minga.Editor.Commands.Search do
 
     case Minga.Search.find_next(content, pattern, cursor, dir) do
       nil ->
-        %{state | status_msg: "Pattern not found: #{pattern}"}
+        EditorState.set_status(state, "Pattern not found: #{pattern}")
 
       {line, col} ->
         BufferServer.move_to(buf, {line, col})
@@ -111,7 +111,7 @@ defmodule Minga.Editor.Commands.Search do
   end
 
   def execute(state, :search_next) do
-    %{state | status_msg: "No previous search pattern"}
+    EditorState.set_status(state, "No previous search pattern")
   end
 
   def execute(
@@ -130,7 +130,7 @@ defmodule Minga.Editor.Commands.Search do
 
     case Minga.Search.find_next(content, pattern, cursor, reverse) do
       nil ->
-        %{state | status_msg: "Pattern not found: #{pattern}"}
+        EditorState.set_status(state, "Pattern not found: #{pattern}")
 
       {line, col} ->
         BufferServer.move_to(buf, {line, col})
@@ -139,7 +139,7 @@ defmodule Minga.Editor.Commands.Search do
   end
 
   def execute(state, :search_prev) do
-    %{state | status_msg: "No previous search pattern"}
+    EditorState.set_status(state, "No previous search pattern")
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :search_word_under_cursor_forward) do
@@ -148,7 +148,7 @@ defmodule Minga.Editor.Commands.Search do
 
     case Minga.Search.word_at_cursor(tmp_buf, cursor) do
       nil ->
-        %{state | status_msg: "No word under cursor"}
+        EditorState.set_status(state, "No word under cursor")
 
       word ->
         case Minga.Search.find_next(content, word, cursor, :forward) do
@@ -156,7 +156,7 @@ defmodule Minga.Editor.Commands.Search do
             state
             |> put_in_search(:last_pattern, word)
             |> put_in_search(:last_direction, :forward)
-            |> then(&%{&1 | status_msg: "Pattern not found: #{word}"})
+            |> then(&EditorState.set_status(&1, "Pattern not found: #{word}"))
 
           {line, col} ->
             BufferServer.move_to(buf, {line, col})
@@ -178,7 +178,7 @@ defmodule Minga.Editor.Commands.Search do
 
     case Minga.Search.word_at_cursor(tmp_buf, cursor) do
       nil ->
-        %{state | status_msg: "No word under cursor"}
+        EditorState.set_status(state, "No word under cursor")
 
       word ->
         case Minga.Search.find_next(content, word, cursor, :backward) do
@@ -186,7 +186,7 @@ defmodule Minga.Editor.Commands.Search do
             state
             |> put_in_search(:last_pattern, word)
             |> put_in_search(:last_direction, :backward)
-            |> then(&%{&1 | status_msg: "Pattern not found: #{word}"})
+            |> then(&EditorState.set_status(&1, "Pattern not found: #{word}"))
 
           {line, col} ->
             BufferServer.move_to(buf, {line, col})
@@ -208,22 +208,22 @@ defmodule Minga.Editor.Commands.Search do
 
     case ProjectSearch.search(query, root) do
       {:ok, [], _truncated?} ->
-        %{state | status_msg: "No results for: #{query}"}
+        EditorState.set_status(state, "No results for: #{query}")
 
       {:ok, matches, truncated?} ->
         msg = if truncated?, do: "Results truncated to 10,000", else: nil
 
         state = put_in(state.workspace.search.project_results, matches)
         state = PickerUI.open(state, Minga.UI.Picker.ProjectSearchSource)
-        if msg, do: %{state | status_msg: msg}, else: state
+        if msg, do: EditorState.set_status(state, msg), else: state
 
       {:error, msg} ->
-        %{state | status_msg: msg}
+        EditorState.set_status(state, msg)
     end
   end
 
   def execute(state, :confirm_project_search) do
-    %{state | status_msg: "Empty search query"}
+    EditorState.set_status(state, "Empty search query")
   end
 
   # Advance cursor to current match during substitute confirm
@@ -263,7 +263,7 @@ defmodule Minga.Editor.Commands.Search do
     total = length(ms.matches)
 
     if accepted_count == 0 do
-      %{state | status_msg: "No substitutions made"}
+      EditorState.set_status(state, "No substitutions made")
     else
       # Apply replacements in reverse order to preserve positions
       sorted_indices =
@@ -291,7 +291,7 @@ defmodule Minga.Editor.Commands.Search do
 
       state
       |> put_in_search(:last_pattern, ms.pattern)
-      |> then(&%{&1 | status_msg: msg})
+      |> then(&EditorState.set_status(&1, msg))
     end
   end
 
@@ -318,7 +318,7 @@ defmodule Minga.Editor.Commands.Search do
         Minga.Frontend.clipboard_write(state.port_manager, text, :find)
       end
 
-      %{state | status_msg: "Using \"#{text}\" for Find"}
+      EditorState.set_status(state, "Using \"#{text}\" for Find")
     else
       state
     end
@@ -344,7 +344,7 @@ defmodule Minga.Editor.Commands.Search do
 
     case matches do
       [] ->
-        %{state | status_msg: "Pattern not found: #{pattern}"}
+        EditorState.set_status(state, "Pattern not found: #{pattern}")
 
       _ ->
         %Minga.Search.Match{line: first_line, col: first_col} = hd(matches)
@@ -370,7 +370,7 @@ defmodule Minga.Editor.Commands.Search do
     {new_content, count} = Minga.Search.substitute(content, pattern, replacement, global?)
 
     if count == 0 do
-      %{state | status_msg: "Pattern not found: #{pattern}"}
+      EditorState.set_status(state, "Pattern not found: #{pattern}")
     else
       cursor = BufferServer.cursor(buf)
       BufferServer.replace_content(buf, new_content)
@@ -393,7 +393,7 @@ defmodule Minga.Editor.Commands.Search do
 
       state
       |> put_in_search(:last_pattern, pattern)
-      |> then(&%{&1 | status_msg: msg})
+      |> then(&EditorState.set_status(&1, msg))
     end
   end
 

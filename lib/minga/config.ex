@@ -186,7 +186,7 @@ defmodule Minga.Config do
         if state.diagnostics_count == 0 do
           execute.(state)
         else
-          %{state | status_msg: "Skipping format: has errors"}
+          Minga.Editor.State.set_status(state, "Skipping format: has errors")
         end
       end
 

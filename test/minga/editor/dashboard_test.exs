@@ -182,7 +182,7 @@ defmodule Minga.Editor.DashboardTest do
           buffers: %Buffers{active: nil}
         },
         focus_stack: Minga.Input.default_stack(),
-        dashboard: Dashboard.new_state(),
+        shell_state: %Minga.Shell.Traditional.State{dashboard: Dashboard.new_state()},
         theme: Minga.UI.Theme.get!(:doom_one),
         picker_ui: %PickerState{picker: picker, source: Minga.UI.Picker.FileSource}
       }

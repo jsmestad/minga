@@ -105,7 +105,8 @@ defmodule Minga.Editor.Startup do
       workspace: workspace,
       port_manager: port_manager,
       focus_stack: Minga.Input.default_stack(),
-      dashboard: dashboard,
+      shell: Minga.Shell.Traditional,
+      shell_state: %Minga.Shell.Traditional.State{dashboard: dashboard},
       swap_dir: Keyword.get(opts, :swap_dir),
       session_dir: Keyword.get(opts, :session_dir),
       suppress_tool_prompts: Keyword.get(opts, :suppress_tool_prompts, false)
@@ -291,7 +292,7 @@ defmodule Minga.Editor.Startup do
     try do
       case ConfigLoader.load_error() do
         nil -> state
-        error -> %{state | status_msg: error}
+        error -> EditorState.set_status(state, error)
       end
     catch
       :exit, _ -> state

@@ -13,7 +13,7 @@ defmodule Minga.Editor.Commands.UseSelectionForFindTest do
       state = Minga.Editor.Commands.execute(state, :use_selection_for_find)
 
       assert state.workspace.search.last_pattern == "hello"
-      assert state.status_msg =~ "hello"
+      assert state.shell_state.status_msg =~ "hello"
     end
 
     test "sets forward search direction" do

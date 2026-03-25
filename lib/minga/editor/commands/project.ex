@@ -38,9 +38,9 @@ defmodule Minga.Editor.Commands.Project do
 
   def execute(state, :project_invalidate) do
     Project.invalidate()
-    %{state | status_msg: "Project file cache invalidated"}
+    EditorState.set_status(state, "Project file cache invalidated")
   catch
-    :exit, _ -> %{state | status_msg: "No project active"}
+    :exit, _ -> EditorState.set_status(state, "No project active")
   end
 
   def execute(state, :project_add) do
@@ -48,11 +48,11 @@ defmodule Minga.Editor.Commands.Project do
 
     case root do
       nil ->
-        %{state | status_msg: "No project root detected"}
+        EditorState.set_status(state, "No project root detected")
 
       path ->
         Project.add(path)
-        %{state | status_msg: "Added project: #{Path.basename(path)}"}
+        EditorState.set_status(state, "Added project: #{Path.basename(path)}")
     end
   catch
     :exit, _ -> state
@@ -63,11 +63,11 @@ defmodule Minga.Editor.Commands.Project do
 
     case root do
       nil ->
-        %{state | status_msg: "No project root detected"}
+        EditorState.set_status(state, "No project root detected")
 
       path ->
         Project.remove(path)
-        %{state | status_msg: "Removed project: #{Path.basename(path)}"}
+        EditorState.set_status(state, "Removed project: #{Path.basename(path)}")
     end
   catch
     :exit, _ -> state

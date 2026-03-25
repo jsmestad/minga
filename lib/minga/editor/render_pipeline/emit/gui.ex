@@ -903,7 +903,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
   # ── Hover popup ──
 
   @spec build_gui_hover_popup_cmd(state()) :: binary() | nil
-  defp build_gui_hover_popup_cmd(%{hover_popup: popup}) do
+  defp build_gui_hover_popup_cmd(%{shell_state: %{hover_popup: popup}}) do
     fp = :erlang.phash2(popup)
 
     if fp != Process.get(:last_gui_hover_popup_fp) do
