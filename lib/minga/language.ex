@@ -65,6 +65,41 @@ defmodule Minga.Language do
     root_markers: []
   ]
 
+  # ── Language registration ─────────────────────────────────────────────────
+
+  @doc """
+  Registers a new language with Minga.
+
+  Compiles the tree-sitter grammar sources, loads them into the parser,
+  sends highlight/injection queries, and registers filetype mappings.
+  Extensions call this to add language support at runtime.
+
+  `name` is the language identifier (e.g., `"org"`).
+  `source_dir` is the path containing the grammar's `parser.c` and
+  optionally `scanner.c`.
+
+  ## Options
+
+  - `:highlights` - path to a `highlights.scm` query file
+  - `:injections` - path to an `injections.scm` query file
+  - `:filetype_extensions` - list of file extensions to map (e.g., `[".org"]`)
+  - `:filetype_filenames` - list of exact filenames to map (e.g., `["Orgfile"]`)
+  - `:filetype_atom` - the filetype atom (e.g., `:org`)
+
+  ## Example
+
+      Minga.Language.register("org", "/path/to/tree-sitter-org/src",
+        highlights: "/path/to/queries/org/highlights.scm",
+        filetype_extensions: [".org"],
+        filetype_atom: :org
+      )
+  """
+  @spec register(String.t(), String.t(), [Minga.Language.TreeSitter.register_opt()]) ::
+          :ok | {:error, String.t()}
+  defdelegate register(name, source_dir, opts \\ []),
+    to: Minga.Language.TreeSitter,
+    as: :register_grammar
+
   # ── Filetype detection delegates ──────────────────────────────────────────
 
   @doc "Detects a file's language atom from its path."
