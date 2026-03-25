@@ -252,8 +252,8 @@ defmodule Minga.Editor.MouseTest do
       {_line, col} = BufferServer.cursor(buffer)
       assert col == 8
       s = state(editor)
-      assert s.vim.mode == :visual
-      assert s.mouse.dragging == false
+      assert s.workspace.vim.mode == :visual
+      assert s.workspace.mouse.dragging == false
       send_key(editor, ?y)
       assert Process.alive?(editor)
     end
@@ -263,8 +263,8 @@ defmodule Minga.Editor.MouseTest do
       send_mouse(editor, @content_row, 3, :left, :press)
       send_mouse(editor, @content_row, 3, :left, :release)
       s = state(editor)
-      assert s.vim.mode == :normal
-      assert s.mouse.dragging == false
+      assert s.workspace.vim.mode == :normal
+      assert s.workspace.mouse.dragging == false
     end
 
     test "drag clamps to buffer bounds" do
@@ -330,8 +330,8 @@ defmodule Minga.Editor.MouseTest do
       # Inject a second tab directly via state manipulation
       :sys.replace_state(editor, fn s ->
         {tb, _tab} = TabBar.add(s.tab_bar, :file, "world.ex")
-        buffers = %{s.buffers | list: [buf1, buf2]}
-        %{s | tab_bar: tb, buffers: buffers}
+        buffers = %{s.workspace.buffers | list: [buf1, buf2]}
+        %{s | tab_bar: tb, workspace: %{s.workspace | buffers: buffers}}
       end)
 
       {editor, buf1, buf2}

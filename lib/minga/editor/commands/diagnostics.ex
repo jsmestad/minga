@@ -28,17 +28,17 @@ defmodule Minga.Editor.Commands.Diagnostics do
           EditorState.t(),
           :next_diagnostic | :prev_diagnostic | :diagnostic_list | :lsp_info
         ) :: EditorState.t()
-  def execute(%{buffers: %{active: nil}} = state, _cmd), do: state
+  def execute(%{workspace: %{buffers: %{active: nil}}} = state, _cmd), do: state
 
   def execute(state, :diagnostic_list) do
     PickerUI.open(state, DiagPickerSource)
   end
 
-  def execute(%{buffers: %{active: buf}} = state, :next_diagnostic) do
+  def execute(%{workspace: %{buffers: %{active: buf}}} = state, :next_diagnostic) do
     navigate(state, buf, &Diagnostics.next/2)
   end
 
-  def execute(%{buffers: %{active: buf}} = state, :prev_diagnostic) do
+  def execute(%{workspace: %{buffers: %{active: buf}}} = state, :prev_diagnostic) do
     navigate(state, buf, &Diagnostics.prev/2)
   end
 

@@ -123,7 +123,11 @@ defmodule Minga.Editor.SemanticWindow.Builder do
 
     # Document highlights in display coordinates
     doc_highlights =
-      build_document_highlights(state.document_highlights, viewport.top, viewport_bottom)
+      build_document_highlights(
+        state.workspace.document_highlights,
+        viewport.top,
+        viewport_bottom
+      )
 
     # Line annotations in display coordinates
     annotations =

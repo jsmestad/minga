@@ -169,12 +169,12 @@ defmodule Minga.Test.EditorCase do
   @spec ensure_test_buffer_id(pid()) :: non_neg_integer()
   defp ensure_test_buffer_id(editor) do
     state = :sys.get_state(editor)
-    buf = state.buffers.active
+    buf = state.workspace.buffers.active
 
     if buf == nil do
       0
     else
-      hl = state.highlight
+      hl = state.workspace.highlight
 
       case Map.fetch(hl.buffer_ids, buf) do
         {:ok, id} ->
@@ -185,17 +185,14 @@ defmodule Minga.Test.EditorCase do
           id = hl.next_buffer_id
 
           :sys.replace_state(editor, fn st ->
-            h = st.highlight
+            h = st.workspace.highlight
 
-            %{
-              st
-              | highlight: %{
-                  h
-                  | buffer_ids: Map.put(h.buffer_ids, buf, id),
-                    reverse_buffer_ids: Map.put(h.reverse_buffer_ids, id, buf),
-                    next_buffer_id: id + 1
-                }
-            }
+            put_in(st.workspace.highlight, %{
+              h
+              | buffer_ids: Map.put(h.buffer_ids, buf, id),
+                reverse_buffer_ids: Map.put(h.reverse_buffer_ids, id, buf),
+                next_buffer_id: id + 1
+            })
           end)
 
           id
@@ -387,19 +384,19 @@ defmodule Minga.Test.EditorCase do
   @doc "Returns the number of open buffers."
   @spec buffer_count(editor_ctx()) :: non_neg_integer()
   def buffer_count(%{editor: editor}) do
-    length(:sys.get_state(editor).buffers.list)
+    length(:sys.get_state(editor).workspace.buffers.list)
   end
 
   @doc "Returns the active buffer index (0-based)."
   @spec active_buffer_index(editor_ctx()) :: non_neg_integer()
   def active_buffer_index(%{editor: editor}) do
-    :sys.get_state(editor).buffers.active_index
+    :sys.get_state(editor).workspace.buffers.active_index
   end
 
   @doc "Returns the active buffer pid."
   @spec active_buffer(editor_ctx()) :: pid() | nil
   def active_buffer(%{editor: editor}) do
-    :sys.get_state(editor).buffers.active
+    :sys.get_state(editor).workspace.buffers.active
   end
 
   @doc "Returns the content of the active buffer."
@@ -414,19 +411,19 @@ defmodule Minga.Test.EditorCase do
   @doc "Returns whether the window tree contains a split."
   @spec has_split?(editor_ctx()) :: boolean()
   def has_split?(%{editor: editor}) do
-    Minga.Editor.State.Windows.split?(:sys.get_state(editor).windows)
+    Minga.Editor.State.Windows.split?(:sys.get_state(editor).workspace.windows)
   end
 
   @doc "Returns the number of windows."
   @spec window_count(editor_ctx()) :: non_neg_integer()
   def window_count(%{editor: editor}) do
-    map_size(:sys.get_state(editor).windows.map)
+    map_size(:sys.get_state(editor).workspace.windows.map)
   end
 
   @doc "Returns the active window id."
   @spec active_window_id(editor_ctx()) :: pos_integer()
   def active_window_id(%{editor: editor}) do
-    :sys.get_state(editor).windows.active
+    :sys.get_state(editor).workspace.windows.active
   end
 
   @doc "Returns true if a picker is currently open."

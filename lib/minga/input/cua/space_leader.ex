@@ -106,7 +106,7 @@ defmodule Minga.Input.CUA.SpaceLeader do
 
   @spec insert_space(EditorState.t()) :: EditorState.t()
   defp insert_space(state) do
-    buf = state.buffers.active
+    buf = state.workspace.buffers.active
     if is_pid(buf), do: BufferServer.insert_char(buf, " ")
     state
   catch
@@ -115,7 +115,7 @@ defmodule Minga.Input.CUA.SpaceLeader do
 
   @spec retract_space(EditorState.t()) :: EditorState.t()
   defp retract_space(state) do
-    buf = state.buffers.active
+    buf = state.workspace.buffers.active
 
     if is_pid(buf) do
       BufferServer.break_undo_coalescing(buf)

@@ -23,7 +23,8 @@ defmodule Minga.Input.FileTreeHandler do
 
   # File tree scope with tree focused
   def handle_key(
-        %{keymap_scope: :file_tree, file_tree: %{tree: %FileTree{}, focused: true}} = state,
+        %{workspace: %{keymap_scope: :file_tree, file_tree: %{tree: %FileTree{}, focused: true}}} =
+          state,
         cp,
         mods
       ) do
@@ -31,7 +32,7 @@ defmodule Minga.Input.FileTreeHandler do
   end
 
   # File tree scope but not focused
-  def handle_key(%{keymap_scope: :file_tree} = state, _cp, _mods) do
+  def handle_key(%{workspace: %{keymap_scope: :file_tree}} = state, _cp, _mods) do
     {:passthrough, state}
   end
 
@@ -51,7 +52,7 @@ defmodule Minga.Input.FileTreeHandler do
 
   # File tree: left click opens file/toggles dir, scroll wheel scrolls tree
   def handle_mouse(
-        %{keymap_scope: :file_tree, file_tree: %{tree: %FileTree{} = tree}} = state,
+        %{workspace: %{keymap_scope: :file_tree, file_tree: %{tree: %FileTree{} = tree}}} = state,
         row,
         col,
         button,
@@ -111,13 +112,13 @@ defmodule Minga.Input.FileTreeHandler do
         ) ::
           EditorState.t()
   defp delegate_to_mode_fsm_with_tree_buffer(
-         %{file_tree: %{buffer: buf}} = state,
+         %{workspace: %{file_tree: %{buffer: buf}}} = state,
          cp,
          mods
        )
        when is_pid(buf) do
-    real_active = state.buffers.active
-    state = put_in(state.buffers.active, buf)
+    real_active = state.workspace.buffers.active
+    state = put_in(state.workspace.buffers.active, buf)
     state = Minga.Editor.do_handle_key(state, cp, mods)
 
     state =
@@ -127,9 +128,9 @@ defmodule Minga.Input.FileTreeHandler do
         state
       end
 
-    state = put_in(state.buffers.active, real_active)
+    state = put_in(state.workspace.buffers.active, real_active)
 
-    if state.file_tree.tree == nil do
+    if state.workspace.file_tree.tree == nil do
       state
     else
       sync_tree_cursor_from_buffer(state, buf)
@@ -139,12 +140,12 @@ defmodule Minga.Input.FileTreeHandler do
   defp delegate_to_mode_fsm_with_tree_buffer(state, _cp, _mods), do: state
 
   @spec sync_tree_cursor_from_buffer(EditorState.t(), pid()) :: EditorState.t()
-  defp sync_tree_cursor_from_buffer(%{file_tree: %{tree: tree}} = state, buf) do
+  defp sync_tree_cursor_from_buffer(%{workspace: %{file_tree: %{tree: tree}}} = state, buf) do
     {cursor_line, _col} = BufferServer.cursor(buf)
     entries = FileTree.visible_entries(tree)
     max_cursor = max(length(entries) - 1, 0)
     clamped = min(cursor_line, max_cursor)
-    put_in(state.file_tree.tree, %{tree | cursor: clamped})
+    put_in(state.workspace.file_tree.tree, %{tree | cursor: clamped})
   end
 
   # ── File tree mouse helpers ────────────────────────────────────────────
@@ -164,7 +165,7 @@ defmodule Minga.Input.FileTreeHandler do
     entries = FileTree.visible_entries(tree)
     max_idx = max(length(entries) - 1, 0)
     new_cursor = (tree.cursor + delta) |> max(0) |> min(max_idx)
-    put_in(state.file_tree.tree, %{tree | cursor: new_cursor})
+    put_in(state.workspace.file_tree.tree, %{tree | cursor: new_cursor})
   end
 
   defp handle_file_tree_click(state, tree, row, ft_row, ft_height, :left, click_count) do
@@ -184,7 +185,7 @@ defmodule Minga.Input.FileTreeHandler do
 
         entry ->
           new_tree = %{tree | cursor: entry_idx}
-          state = put_in(state.file_tree.tree, new_tree)
+          state = put_in(state.workspace.file_tree.tree, new_tree)
           handle_tree_entry_click(state, entry, click_count)
       end
     end

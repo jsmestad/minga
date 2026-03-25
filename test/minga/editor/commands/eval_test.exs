@@ -28,8 +28,10 @@ defmodule Minga.Editor.Commands.EvalTest do
   defp build_state(messages_buf \\ nil) do
     %EditorState{
       port_manager: nil,
-      viewport: Viewport.new(24, 80),
-      buffers: %Buffers{messages: messages_buf}
+      workspace: %Minga.Workspace.State{
+        viewport: Viewport.new(24, 80),
+        buffers: %Buffers{messages: messages_buf}
+      }
     }
   end
 

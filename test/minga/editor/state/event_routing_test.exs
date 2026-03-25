@@ -16,7 +16,9 @@ defmodule Minga.Editor.State.EventRoutingTest do
 
     state = %EditorState{
       port_manager: self(),
-      viewport: Viewport.new(24, 80),
+      workspace: %Minga.Workspace.State{
+        viewport: Viewport.new(24, 80)
+      },
       tab_bar: tb,
       agent: %AgentState{session: session, status: :idle}
     }

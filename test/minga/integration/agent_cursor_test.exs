@@ -48,12 +48,12 @@ defmodule Minga.Integration.AgentCursorTest do
     {:ok, fake_session} = StubServer.start_link()
 
     :sys.replace_state(editor, fn state ->
-      win_id = state.windows.active
+      win_id = state.workspace.windows.active
       agent_window = Window.new_agent_chat(win_id, agent_buf, height, width)
 
       windows = %{
-        state.windows
-        | map: Map.put(state.windows.map, win_id, agent_window)
+        state.workspace.windows
+        | map: Map.put(state.workspace.windows.map, win_id, agent_window)
       }
 
       agent_tab_bar = TabBar.new(Tab.new_agent(1, "Agent"))
@@ -65,9 +65,8 @@ defmodule Minga.Integration.AgentCursorTest do
 
       %{
         state
-        | windows: windows,
+        | workspace: %{state.workspace | windows: windows, keymap_scope: :agent},
           tab_bar: agent_tab_bar,
-          keymap_scope: :agent,
           agent: agent_state
       }
     end)

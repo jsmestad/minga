@@ -61,17 +61,19 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
 
     %EditorState{
       port_manager: nil,
-      viewport: Viewport.new(24, 80),
-      vim: VimState.new(),
-      buffers: %Buffers{active: buf, list: [buf], active_index: 0},
-      windows: %Windows{
-        tree: {:leaf, 1},
-        map: %{1 => Window.new(1, buf, 24, 80)},
-        active: 1,
-        next_id: 2
+      workspace: %Minga.Workspace.State{
+        viewport: Viewport.new(24, 80),
+        vim: VimState.new(),
+        buffers: %Buffers{active: buf, list: [buf], active_index: 0},
+        windows: %Windows{
+          tree: {:leaf, 1},
+          map: %{1 => Window.new(1, buf, 24, 80)},
+          active: 1,
+          next_id: 2
+        },
+        agent_ui: agentic
       },
       agent: agent,
-      agent_ui: agentic,
       tab_bar: tb,
       focus_stack: Input.default_stack()
     }

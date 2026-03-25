@@ -56,11 +56,11 @@ defmodule Minga.Editor.Commands.WindowTest do
       state = get_state(editor)
 
       assert EditorState.split?(state)
-      assert map_size(state.windows.map) == 2
+      assert map_size(state.workspace.windows.map) == 2
 
       # Both windows reference the same buffer
       window_buffers =
-        state.windows.map
+        state.workspace.windows.map
         |> Map.values()
         |> Enum.map(& &1.buffer)
         |> Enum.uniq()
@@ -74,7 +74,7 @@ defmodule Minga.Editor.Commands.WindowTest do
       state = get_state(editor)
 
       viewports =
-        state.windows.map
+        state.workspace.windows.map
         |> Map.values()
         |> Enum.map(& &1.viewport)
 
@@ -95,10 +95,10 @@ defmodule Minga.Editor.Commands.WindowTest do
       state = get_state(editor)
 
       assert EditorState.split?(state)
-      assert map_size(state.windows.map) == 2
+      assert map_size(state.workspace.windows.map) == 2
 
       viewports =
-        state.windows.map
+        state.workspace.windows.map
         |> Map.values()
         |> Enum.map(& &1.viewport)
 
@@ -116,13 +116,13 @@ defmodule Minga.Editor.Commands.WindowTest do
       split_vertical(editor)
 
       state_before = get_state(editor)
-      initial_window = state_before.windows.active
+      initial_window = state_before.workspace.windows.active
 
       # Navigate right
       send_keys(editor, [?\s, ?w, ?l])
       state_after = get_state(editor)
 
-      assert state_after.windows.active != initial_window
+      assert state_after.workspace.windows.active != initial_window
     end
 
     test "SPC w h moves focus back to the left window" do
@@ -130,14 +130,14 @@ defmodule Minga.Editor.Commands.WindowTest do
       split_vertical(editor)
 
       state_before = get_state(editor)
-      initial_window = state_before.windows.active
+      initial_window = state_before.workspace.windows.active
 
       # Navigate right then left
       send_keys(editor, [?\s, ?w, ?l])
       send_keys(editor, [?\s, ?w, ?h])
       state_after = get_state(editor)
 
-      assert state_after.windows.active == initial_window
+      assert state_after.workspace.windows.active == initial_window
     end
 
     test "SPC w j moves focus to the bottom window after horizontal split" do
@@ -145,12 +145,12 @@ defmodule Minga.Editor.Commands.WindowTest do
       split_horizontal(editor)
 
       state_before = get_state(editor)
-      initial_window = state_before.windows.active
+      initial_window = state_before.workspace.windows.active
 
       send_keys(editor, [?\s, ?w, ?j])
       state_after = get_state(editor)
 
-      assert state_after.windows.active != initial_window
+      assert state_after.workspace.windows.active != initial_window
     end
 
     test "navigating with no neighbor does nothing" do
@@ -163,7 +163,7 @@ defmodule Minga.Editor.Commands.WindowTest do
       send_keys(editor, [?\s, ?w, ?h])
       state_after = get_state(editor)
 
-      assert state_after.windows.active == state_before.windows.active
+      assert state_after.workspace.windows.active == state_before.workspace.windows.active
     end
   end
 
@@ -179,7 +179,7 @@ defmodule Minga.Editor.Commands.WindowTest do
       state = get_state(editor)
 
       refute EditorState.split?(state)
-      assert map_size(state.windows.map) == 1
+      assert map_size(state.workspace.windows.map) == 1
     end
 
     test "cannot close the last window" do
@@ -204,7 +204,7 @@ defmodule Minga.Editor.Commands.WindowTest do
       state = get_state(editor)
 
       # Should be focused on the remaining window with the same buffer
-      assert state.buffers.active == buffer
+      assert state.workspace.buffers.active == buffer
       refute EditorState.split?(state)
     end
   end

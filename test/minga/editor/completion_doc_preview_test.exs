@@ -72,33 +72,33 @@ defmodule Minga.Editor.CompletionDocPreviewTest do
 
   describe "maybe_resolve_selected/1" do
     test "returns state unchanged when completion is nil" do
-      state = %{completion: nil}
+      state = %{workspace: %{completion: nil}}
       assert CompletionHandling.maybe_resolve_selected(state) == state
     end
 
     test "skips resolve when documentation already present" do
       items = [Completion.parse_item(%{"label" => "a", "documentation" => "Already here"})]
       completion = Completion.new(items, {0, 0})
-      state = %{completion: completion}
+      state = %{workspace: %{completion: completion}}
       result = CompletionHandling.maybe_resolve_selected(state)
       # No timer set because documentation is already present
-      assert result.completion.resolve_timer == nil
+      assert result.workspace.completion.resolve_timer == nil
     end
 
     test "sets a resolve timer when documentation is empty" do
       items = [Completion.parse_item(%{"label" => "a"})]
       completion = Completion.new(items, {0, 0})
-      state = %{completion: completion}
+      state = %{workspace: %{completion: completion}}
       result = CompletionHandling.maybe_resolve_selected(state)
-      assert result.completion.resolve_timer != nil
+      assert result.workspace.completion.resolve_timer != nil
     end
 
     test "skips when already resolved for this index" do
       items = [Completion.parse_item(%{"label" => "a"})]
       completion = %{Completion.new(items, {0, 0}) | last_resolved_index: 0}
-      state = %{completion: completion}
+      state = %{workspace: %{completion: completion}}
       result = CompletionHandling.maybe_resolve_selected(state)
-      assert result.completion.resolve_timer == nil
+      assert result.workspace.completion.resolve_timer == nil
     end
   end
 
@@ -108,39 +108,39 @@ defmodule Minga.Editor.CompletionDocPreviewTest do
     test "updates selected item documentation on success" do
       items = [Completion.parse_item(%{"label" => "a"})]
       completion = Completion.new(items, {0, 0})
-      state = %{completion: completion}
+      state = %{workspace: %{completion: completion}}
 
       resolved = %{"documentation" => %{"kind" => "markdown", "value" => "Full docs"}}
       result = CompletionHandling.handle_resolve_response(state, {:ok, resolved})
 
-      selected = Completion.selected_item(result.completion)
+      selected = Completion.selected_item(result.workspace.completion)
       assert selected.documentation == "Full docs"
-      assert result.completion.last_resolved_index == 0
+      assert result.workspace.completion.last_resolved_index == 0
     end
 
     test "handles plain string documentation in resolve response" do
       items = [Completion.parse_item(%{"label" => "a"})]
       completion = Completion.new(items, {0, 0})
-      state = %{completion: completion}
+      state = %{workspace: %{completion: completion}}
 
       resolved = %{"documentation" => "Plain text docs"}
       result = CompletionHandling.handle_resolve_response(state, {:ok, resolved})
 
-      selected = Completion.selected_item(result.completion)
+      selected = Completion.selected_item(result.workspace.completion)
       assert selected.documentation == "Plain text docs"
     end
 
     test "returns state unchanged on error" do
       items = [Completion.parse_item(%{"label" => "a"})]
       completion = Completion.new(items, {0, 0})
-      state = %{completion: completion}
+      state = %{workspace: %{completion: completion}}
 
       result = CompletionHandling.handle_resolve_response(state, {:error, "timeout"})
       assert result == state
     end
 
     test "returns state unchanged when completion is nil" do
-      state = %{completion: nil}
+      state = %{workspace: %{completion: nil}}
       result = CompletionHandling.handle_resolve_response(state, {:ok, %{}})
       assert result == state
     end

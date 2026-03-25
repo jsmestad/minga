@@ -23,29 +23,29 @@ defmodule Minga.Editor.Commands.Operators do
 
   # ── Operator + motion ─────────────────────────────────────────────────────
 
-  def execute(%{buffers: %{active: buf}} = state, {:delete_motion, motion}) do
+  def execute(%{workspace: %{buffers: %{active: buf}}} = state, {:delete_motion, motion}) do
     if read_only?(buf),
       do: read_only_msg(state),
       else: Helpers.apply_operator_motion(buf, state, motion, :delete)
   end
 
-  def execute(%{buffers: %{active: buf}} = state, {:change_motion, motion}) do
+  def execute(%{workspace: %{buffers: %{active: buf}}} = state, {:change_motion, motion}) do
     if read_only?(buf),
       do: read_only_msg(state),
       else: Helpers.apply_operator_motion(buf, state, motion, :delete)
   end
 
-  def execute(%{buffers: %{active: buf}} = state, {:yank_motion, motion}) do
+  def execute(%{workspace: %{buffers: %{active: buf}}} = state, {:yank_motion, motion}) do
     Helpers.apply_operator_motion(buf, state, motion, :yank)
   end
 
   # ── Line-wise operators (dd / yy / cc / S) ────────────────────────────────
 
-  def execute(%{buffers: %{active: _buf}} = state, :delete_line) do
+  def execute(%{workspace: %{buffers: %{active: _buf}}} = state, :delete_line) do
     execute(state, {:delete_lines_counted, 1})
   end
 
-  def execute(%{buffers: %{active: buf}} = state, {:delete_lines_counted, count})
+  def execute(%{workspace: %{buffers: %{active: buf}}} = state, {:delete_lines_counted, count})
       when is_integer(count) and count >= 1 do
     if read_only?(buf) do
       read_only_msg(state)
@@ -59,11 +59,11 @@ defmodule Minga.Editor.Commands.Operators do
     end
   end
 
-  def execute(%{buffers: %{active: _buf}} = state, :change_line) do
+  def execute(%{workspace: %{buffers: %{active: _buf}}} = state, :change_line) do
     execute(state, {:change_lines_counted, 1})
   end
 
-  def execute(%{buffers: %{active: buf}} = state, {:change_lines_counted, count})
+  def execute(%{workspace: %{buffers: %{active: buf}}} = state, {:change_lines_counted, count})
       when is_integer(count) and count >= 1 do
     if read_only?(buf) do
       read_only_msg(state)
@@ -82,11 +82,11 @@ defmodule Minga.Editor.Commands.Operators do
     end
   end
 
-  def execute(%{buffers: %{active: _buf}} = state, :yank_line) do
+  def execute(%{workspace: %{buffers: %{active: _buf}}} = state, :yank_line) do
     execute(state, {:yank_lines_counted, 1})
   end
 
-  def execute(%{buffers: %{active: buf}} = state, {:yank_lines_counted, count})
+  def execute(%{workspace: %{buffers: %{active: buf}}} = state, {:yank_lines_counted, count})
       when is_integer(count) and count >= 1 do
     {line, _col} = BufferServer.cursor(buf)
     total = BufferServer.line_count(buf)
@@ -97,21 +97,30 @@ defmodule Minga.Editor.Commands.Operators do
 
   # ── Text object operators ─────────────────────────────────────────────────
 
-  def execute(%{buffers: %{active: buf}} = state, {:delete_text_object, modifier, spec})
+  def execute(
+        %{workspace: %{buffers: %{active: buf}}} = state,
+        {:delete_text_object, modifier, spec}
+      )
       when is_pid(buf) do
     if read_only?(buf),
       do: read_only_msg(state),
       else: Helpers.apply_text_object(state, modifier, spec, :delete)
   end
 
-  def execute(%{buffers: %{active: buf}} = state, {:change_text_object, modifier, spec})
+  def execute(
+        %{workspace: %{buffers: %{active: buf}}} = state,
+        {:change_text_object, modifier, spec}
+      )
       when is_pid(buf) do
     if read_only?(buf),
       do: read_only_msg(state),
       else: Helpers.apply_text_object(state, modifier, spec, :delete)
   end
 
-  def execute(%{buffers: %{active: buf}} = state, {:yank_text_object, modifier, spec})
+  def execute(
+        %{workspace: %{buffers: %{active: buf}}} = state,
+        {:yank_text_object, modifier, spec}
+      )
       when is_pid(buf) do
     Helpers.apply_text_object(state, modifier, spec, :yank)
   end

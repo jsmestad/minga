@@ -20,7 +20,9 @@ defmodule Minga.Editor.Renderer.SearchHighlight do
   @spec maybe_substitute_preview(state(), [String.t()], non_neg_integer()) ::
           {[String.t()], [search_match()]}
   def maybe_substitute_preview(
-        %{vim: %{mode: :command, mode_state: %Minga.Mode.CommandState{input: input}}},
+        %{
+          workspace: %{vim: %{mode: :command, mode_state: %Minga.Mode.CommandState{input: input}}}
+        },
         lines,
         first_line
       ) do
@@ -105,27 +107,31 @@ defmodule Minga.Editor.Renderer.SearchHighlight do
 
   @spec active_search_pattern(state()) :: String.t() | nil
   defp active_search_pattern(%{
-         vim: %{mode: :search, mode_state: %Minga.Mode.SearchState{input: input}}
+         workspace: %{vim: %{mode: :search, mode_state: %Minga.Mode.SearchState{input: input}}}
        })
        when input != "" do
     input
   end
 
   defp active_search_pattern(%{
-         vim: %{mode: :command, mode_state: %Minga.Mode.CommandState{input: input}}
+         workspace: %{vim: %{mode: :command, mode_state: %Minga.Mode.CommandState{input: input}}}
        }) do
     extract_substitute_pattern(input)
   end
 
   defp active_search_pattern(%{
-         mode: :substitute_confirm,
-         mode_state: %Minga.Mode.SubstituteConfirmState{pattern: pattern}
+         workspace: %{
+           vim: %{
+             mode: :substitute_confirm,
+             mode_state: %Minga.Mode.SubstituteConfirmState{pattern: pattern}
+           }
+         }
        })
        when pattern != "" do
     pattern
   end
 
-  defp active_search_pattern(%{search: %{last_pattern: pattern}})
+  defp active_search_pattern(%{workspace: %{search: %{last_pattern: pattern}}})
        when is_binary(pattern) and pattern != "" do
     pattern
   end
@@ -135,8 +141,9 @@ defmodule Minga.Editor.Renderer.SearchHighlight do
   @doc "Returns the current match being confirmed, or nil."
   @spec current_confirm_match(state()) :: search_match() | nil
   def current_confirm_match(%{
-        mode: :substitute_confirm,
-        mode_state: %Minga.Mode.SubstituteConfirmState{} = ms
+        workspace: %{
+          vim: %{mode: :substitute_confirm, mode_state: %Minga.Mode.SubstituteConfirmState{} = ms}
+        }
       }) do
     Enum.at(ms.matches, ms.current)
   end

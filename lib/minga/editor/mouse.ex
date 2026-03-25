@@ -71,8 +71,16 @@ defmodule Minga.Editor.Mouse do
         ) :: state()
 
   # Ignore mouse events when no buffer is open.
-  def handle(%{buffers: %{active: nil}} = state, _row, _col, _button, _mods, _type, _cc),
-    do: state
+  def handle(
+        %{workspace: %{buffers: %{active: nil}}} = state,
+        _row,
+        _col,
+        _button,
+        _mods,
+        _type,
+        _cc
+      ),
+      do: state
 
   # Ignore negative coordinates.
   def handle(state, row, _col, _button, _mods, _type, _cc) when row < 0, do: state
@@ -81,7 +89,7 @@ defmodule Minga.Editor.Mouse do
   # ── Scroll wheel (vertical) ──
 
   def handle(
-        %{buffers: %{active: buf}} = state,
+        %{workspace: %{buffers: %{active: buf}}} = state,
         _r,
         _c,
         :wheel_down,
@@ -96,7 +104,7 @@ defmodule Minga.Editor.Mouse do
     put_active_window_viewport(state, new_vp) |> clamp_cursor_to_viewport(:down)
   end
 
-  def handle(%{buffers: %{active: buf}} = state, _r, _c, :wheel_up, _m, :press, _cc) do
+  def handle(%{workspace: %{buffers: %{active: buf}}} = state, _r, _c, :wheel_up, _m, :press, _cc) do
     total_lines = BufferServer.line_count(buf)
     lines = scroll_lines(state)
     vp = active_window_viewport(state)
@@ -132,7 +140,7 @@ defmodule Minga.Editor.Mouse do
             state
 
           {target_line, target_col} ->
-            BufferServer.move_to(state.buffers.active, {target_line, target_col})
+            BufferServer.move_to(state.workspace.buffers.active, {target_line, target_col})
             state = cancel_mode_for_mouse(state)
             state = EditorState.transition_mode(state, :normal)
             Minga.Editor.dispatch_command(state, :paste_after)
@@ -151,7 +159,7 @@ defmodule Minga.Editor.Mouse do
   # ── Left drag ──
 
   def handle(
-        %{mouse: %MouseState{resize_dragging: {:vertical, sep_pos}}} = state,
+        %{workspace: %{mouse: %MouseState{resize_dragging: {:vertical, sep_pos}}}} = state,
         _row,
         col,
         :left,
@@ -163,7 +171,7 @@ defmodule Minga.Editor.Mouse do
   end
 
   def handle(
-        %{mouse: %MouseState{resize_dragging: {:horizontal, sep_pos}}} = state,
+        %{workspace: %{mouse: %MouseState{resize_dragging: {:horizontal, sep_pos}}}} = state,
         row,
         _col,
         :left,
@@ -175,7 +183,8 @@ defmodule Minga.Editor.Mouse do
   end
 
   def handle(
-        %{mouse: %MouseState{dragging: true, anchor: anchor, drag_click_count: dcc}} = state,
+        %{workspace: %{mouse: %MouseState{dragging: true, anchor: anchor, drag_click_count: dcc}}} =
+          state,
         row,
         col,
         :left,
@@ -198,7 +207,7 @@ defmodule Minga.Editor.Mouse do
   # ── Left release ──
 
   def handle(
-        %{mouse: %MouseState{resize_dragging: {_, _}}} = state,
+        %{workspace: %{mouse: %MouseState{resize_dragging: {_, _}}}} = state,
         _r,
         _c,
         :left,
@@ -206,11 +215,14 @@ defmodule Minga.Editor.Mouse do
         :release,
         _cc
       ) do
-    %{state | mouse: MouseState.stop_resize(state.mouse)}
+    %{
+      state
+      | workspace: %{state.workspace | mouse: MouseState.stop_resize(state.workspace.mouse)}
+    }
   end
 
   def handle(
-        %{mouse: %MouseState{dragging: true}, vim: %{mode: :visual}} = state,
+        %{workspace: %{mouse: %MouseState{dragging: true}, vim: %{mode: :visual}}} = state,
         _r,
         _c,
         :left,
@@ -218,15 +230,26 @@ defmodule Minga.Editor.Mouse do
         :release,
         _cc
       ) do
-    state = %{state | mouse: MouseState.stop_drag(state.mouse)}
+    state = %{
+      state
+      | workspace: %{state.workspace | mouse: MouseState.stop_drag(state.workspace.mouse)}
+    }
 
     # Auto-copy selection to system clipboard on mouse release.
     # Standard terminal behavior: selecting text copies it.
     auto_copy_selection(state)
   end
 
-  def handle(%{mouse: %MouseState{dragging: true}} = state, _r, _c, :left, _m, :release, _cc) do
-    %{state | mouse: MouseState.stop_drag(state.mouse)}
+  def handle(
+        %{workspace: %{mouse: %MouseState{dragging: true}}} = state,
+        _r,
+        _c,
+        :left,
+        _m,
+        :release,
+        _cc
+      ) do
+    %{state | workspace: %{state.workspace | mouse: MouseState.stop_drag(state.workspace.mouse)}}
   end
 
   # ── Mouse motion (hover tracking) ──
@@ -240,7 +263,13 @@ defmodule Minga.Editor.Mouse do
         state
       end
 
-    %{state | mouse: MouseState.set_hover(state.mouse, row, col)}
+    %{
+      state
+      | workspace: %{
+          state.workspace
+          | mouse: MouseState.set_hover(state.workspace.mouse, row, col)
+        }
+    }
   end
 
   # ── Ignore all other mouse events ──
@@ -253,8 +282,8 @@ defmodule Minga.Editor.Mouse do
           state()
   defp handle_left_press(state, row, col, mods, native_click_count) do
     # Record press for multi-click detection
-    mouse = MouseState.record_press(state.mouse, row, col, native_click_count)
-    state = %{state | mouse: mouse}
+    mouse = MouseState.record_press(state.workspace.mouse, row, col, native_click_count)
+    state = %{state | workspace: %{state.workspace | mouse: mouse}}
     click_count = mouse.click_count
 
     # Check modifier clicks first
@@ -306,7 +335,7 @@ defmodule Minga.Editor.Mouse do
         state
 
       {line, buf_col} ->
-        buf = state.buffers.active
+        buf = state.workspace.buffers.active
 
         case word_boundaries_at(buf, line, buf_col) do
           {word_start, word_end} ->
@@ -318,7 +347,14 @@ defmodule Minga.Editor.Mouse do
             }
 
             state = EditorState.transition_mode(state, :visual, visual_state)
-            %{state | mouse: MouseState.start_drag(state.mouse, {line, word_start})}
+
+            %{
+              state
+              | workspace: %{
+                  state.workspace
+                  | mouse: MouseState.start_drag(state.workspace.mouse, {line, word_start})
+                }
+            }
 
           nil ->
             state
@@ -335,7 +371,7 @@ defmodule Minga.Editor.Mouse do
         state
 
       line ->
-        buf = state.buffers.active
+        buf = state.workspace.buffers.active
 
         line_text =
           case BufferServer.get_lines(buf, line, 1) do
@@ -352,7 +388,14 @@ defmodule Minga.Editor.Mouse do
         }
 
         state = EditorState.transition_mode(state, :visual, visual_state)
-        %{state | mouse: MouseState.start_drag(state.mouse, {line, 0})}
+
+        %{
+          state
+          | workspace: %{
+              state.workspace
+              | mouse: MouseState.start_drag(state.workspace.mouse, {line, 0})
+            }
+        }
     end
   end
 
@@ -365,7 +408,7 @@ defmodule Minga.Editor.Mouse do
         state
 
       {target_line, target_col} ->
-        buf = state.buffers.active
+        buf = state.workspace.buffers.active
 
         # Get current cursor as anchor if not already in visual mode
         anchor =
@@ -397,7 +440,7 @@ defmodule Minga.Editor.Mouse do
         state
 
       {target_line, target_col} ->
-        buf = state.buffers.active
+        buf = state.workspace.buffers.active
         BufferServer.move_to(buf, {target_line, target_col})
         state = cancel_mode_for_mouse(state)
         state = EditorState.transition_mode(state, :normal)
@@ -412,7 +455,7 @@ defmodule Minga.Editor.Mouse do
           {non_neg_integer(), non_neg_integer()}
         ) :: state()
   defp snap_selection_to_words(state, anchor) do
-    buf = state.buffers.active
+    buf = state.workspace.buffers.active
     {cursor_line, cursor_col} = BufferServer.cursor(buf)
 
     # Snap cursor to word boundary
@@ -441,7 +484,7 @@ defmodule Minga.Editor.Mouse do
           {non_neg_integer(), non_neg_integer()}
         ) :: state()
   defp snap_selection_to_lines(state, {anchor_line, _anchor_col}) do
-    buf = state.buffers.active
+    buf = state.workspace.buffers.active
     {cursor_line, _cursor_col} = BufferServer.cursor(buf)
 
     # Extend selection to full lines
@@ -534,14 +577,21 @@ defmodule Minga.Editor.Mouse do
   # ── Separator resize helpers ──────────────────────────────────────────────
 
   @spec maybe_start_separator_drag(state(), non_neg_integer(), non_neg_integer()) :: state()
-  defp maybe_start_separator_drag(%{windows: %{tree: nil}} = state, _row, _col), do: state
+  defp maybe_start_separator_drag(%{workspace: %{windows: %{tree: nil}}} = state, _row, _col),
+    do: state
 
   defp maybe_start_separator_drag(state, row, col) do
     screen = Layout.get(state).editor_area
 
-    case WindowTree.separator_at(state.windows.tree, screen, row, col) do
+    case WindowTree.separator_at(state.workspace.windows.tree, screen, row, col) do
       {:ok, {dir, sep_pos}} ->
-        %{state | mouse: MouseState.start_resize(state.mouse, dir, sep_pos)}
+        %{
+          state
+          | workspace: %{
+              state.workspace
+              | mouse: MouseState.start_resize(state.workspace.mouse, dir, sep_pos)
+            }
+        }
 
       :error ->
         state
@@ -550,7 +600,7 @@ defmodule Minga.Editor.Mouse do
 
   @spec maybe_handle_content_click(state(), non_neg_integer(), non_neg_integer()) :: state()
   defp maybe_handle_content_click(
-         %{mouse: %MouseState{resize_dragging: {_, _}}} = state,
+         %{workspace: %{mouse: %MouseState{resize_dragging: {_, _}}}} = state,
          _row,
          _col
        ),
@@ -576,12 +626,15 @@ defmodule Minga.Editor.Mouse do
   defp handle_separator_drag(state, dir, sep_pos, new_pos) do
     screen = Layout.get(state).editor_area
 
-    case WindowTree.resize_at(state.windows.tree, screen, dir, sep_pos, new_pos) do
+    case WindowTree.resize_at(state.workspace.windows.tree, screen, dir, sep_pos, new_pos) do
       {:ok, new_tree} ->
         state = %{
           state
-          | windows: %{state.windows | tree: new_tree},
-            mouse: MouseState.update_resize(state.mouse, dir, new_pos)
+          | workspace: %{
+              state.workspace
+              | windows: %{state.workspace.windows | tree: new_tree},
+                mouse: MouseState.update_resize(state.workspace.mouse, dir, new_pos)
+            }
         }
 
         resize_windows_to_layout(state)
@@ -616,29 +669,37 @@ defmodule Minga.Editor.Mouse do
             state
 
           {target_line, target_col} ->
-            BufferServer.move_to(state.buffers.active, {target_line, target_col})
+            BufferServer.move_to(state.workspace.buffers.active, {target_line, target_col})
 
             state = cancel_mode_for_mouse(state)
             state = EditorState.transition_mode(state, :normal)
-            %{state | mouse: MouseState.start_drag(state.mouse, {target_line, target_col})}
+
+            %{
+              state
+              | workspace: %{
+                  state.workspace
+                  | mouse: MouseState.start_drag(state.workspace.mouse, {target_line, target_col})
+                }
+            }
         end
     end
   end
 
   @spec maybe_focus_window_at(state(), non_neg_integer(), non_neg_integer()) :: state()
-  defp maybe_focus_window_at(%{windows: %{tree: nil}} = state, _row, _col), do: state
+  defp maybe_focus_window_at(%{workspace: %{windows: %{tree: nil}}} = state, _row, _col),
+    do: state
 
   defp maybe_focus_window_at(state, row, col) do
     screen = Layout.get(state).editor_area
 
-    case WindowTree.window_at(state.windows.tree, screen, row, col) do
+    case WindowTree.window_at(state.workspace.windows.tree, screen, row, col) do
       {:ok, id, _rect} -> EditorState.focus_window(state, id)
       :error -> state
     end
   end
 
   @spec gutter_width(state(), non_neg_integer()) :: non_neg_integer()
-  defp gutter_width(%{buffers: %{active: buf}}, total_lines) do
+  defp gutter_width(%{workspace: %{buffers: %{active: buf}}}, total_lines) do
     ln_style =
       if buf, do: BufferServer.get_option(buf, :line_numbers), else: :none
 
@@ -663,7 +724,7 @@ defmodule Minga.Editor.Mouse do
 
   # Like mouse_to_buffer_pos but only returns the line (for triple-click).
   @spec mouse_to_buffer_line(state(), non_neg_integer()) :: non_neg_integer() | nil
-  defp mouse_to_buffer_line(%{buffers: %{active: buf}} = state, row) do
+  defp mouse_to_buffer_line(%{workspace: %{buffers: %{active: buf}}} = state, row) do
     layout = Layout.get(state)
 
     case Layout.active_window_layout(layout, state) do
@@ -688,7 +749,7 @@ defmodule Minga.Editor.Mouse do
 
   @spec mouse_to_buffer_pos_single(state(), non_neg_integer(), non_neg_integer()) ::
           {non_neg_integer(), non_neg_integer()} | nil
-  defp mouse_to_buffer_pos_single(%{buffers: %{active: buf}} = state, row, col) do
+  defp mouse_to_buffer_pos_single(%{workspace: %{buffers: %{active: buf}}} = state, row, col) do
     layout = Layout.get(state)
 
     case Layout.active_window_layout(layout, state) do
@@ -722,9 +783,9 @@ defmodule Minga.Editor.Mouse do
   defp mouse_to_buffer_pos_split(state, row, col) do
     layout = Layout.get(state)
 
-    case WindowTree.window_at(state.windows.tree, layout.editor_area, row, col) do
+    case WindowTree.window_at(state.workspace.windows.tree, layout.editor_area, row, col) do
       {:ok, id, {win_row, win_col, _win_w, _win_h}} ->
-        window = Map.fetch!(state.windows.map, id)
+        window = Map.fetch!(state.workspace.windows.map, id)
         win_layout = Map.fetch!(layout.window_layouts, id)
         {_cr, _cc, content_w, content_h} = win_layout.content
         buf = window.buffer
@@ -867,7 +928,7 @@ defmodule Minga.Editor.Mouse do
 
   @spec auto_copy_selection(EditorState.t()) :: EditorState.t()
   defp auto_copy_selection(
-         %{vim: %{mode: :visual, mode_state: ms}, buffers: %{active: buf}} = state
+         %{workspace: %{vim: %{mode: :visual, mode_state: ms}, buffers: %{active: buf}}} = state
        )
        when is_pid(buf) do
     text = selection_text(buf, ms)
@@ -948,7 +1009,7 @@ defmodule Minga.Editor.Mouse do
   # - Scrolling UP: enforce bottom margin (push cursor toward top)
   # - Scrolling DOWN: enforce top margin (push cursor toward bottom)
   @spec clamp_cursor_to_viewport(state(), :up | :down) :: state()
-  defp clamp_cursor_to_viewport(%{buffers: %{active: buf}} = state, direction) do
+  defp clamp_cursor_to_viewport(%{workspace: %{buffers: %{active: buf}}} = state, direction) do
     vp = active_window_viewport(state)
     {cursor_line, cursor_col} = BufferServer.cursor(buf)
     {first_line, last_line} = Viewport.visible_range(vp)
@@ -1001,13 +1062,13 @@ defmodule Minga.Editor.Mouse do
   end
 
   @spec maybe_auto_scroll(state(), integer()) :: state()
-  defp maybe_auto_scroll(%{buffers: %{active: buf}} = state, row) when row <= 0 do
+  defp maybe_auto_scroll(%{workspace: %{buffers: %{active: buf}}} = state, row) when row <= 0 do
     vp = active_window_viewport(state)
     page_move(buf, vp, -1)
     state
   end
 
-  defp maybe_auto_scroll(%{buffers: %{active: buf}} = state, row) do
+  defp maybe_auto_scroll(%{workspace: %{buffers: %{active: buf}}} = state, row) do
     vp = active_window_viewport(state)
     scroll_threshold = Viewport.content_rows(vp) - 1
     maybe_scroll_down(state, buf, vp, row, scroll_threshold)
@@ -1027,13 +1088,13 @@ defmodule Minga.Editor.Mouse do
         state
 
       {line, c} ->
-        BufferServer.move_to(state.buffers.active, {line, c})
+        BufferServer.move_to(state.workspace.buffers.active, {line, c})
         state
     end
   end
 
   @spec enter_visual_if_needed(state(), {non_neg_integer(), non_neg_integer()}) :: state()
-  defp enter_visual_if_needed(%{vim: %{mode: :visual}} = state, _anchor), do: state
+  defp enter_visual_if_needed(%{workspace: %{vim: %{mode: :visual}}} = state, _anchor), do: state
 
   defp enter_visual_if_needed(state, anchor) do
     visual_state = %VisualState{visual_anchor: anchor, visual_type: :char}
@@ -1052,7 +1113,7 @@ defmodule Minga.Editor.Mouse do
   end
 
   @spec cancel_mode_for_mouse(state()) :: state()
-  defp cancel_mode_for_mouse(%{vim: %{mode: :command}} = state) do
+  defp cancel_mode_for_mouse(%{workspace: %{vim: %{mode: :command}}} = state) do
     %{state | whichkey: WhichKeyState.clear(state.whichkey)}
   end
 

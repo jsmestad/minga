@@ -38,10 +38,10 @@ defmodule Minga.Editor.SemanticTokenSync do
   support semantic tokens.
   """
   @spec request_tokens(EditorState.t()) :: EditorState.t()
-  def request_tokens(%EditorState{buffers: %{active: nil}} = state), do: state
+  def request_tokens(%EditorState{workspace: %{buffers: %{active: nil}}} = state), do: state
 
   def request_tokens(%EditorState{} = state) do
-    buf_pid = state.buffers.active
+    buf_pid = state.workspace.buffers.active
     file_path = BufferServer.file_path(buf_pid)
 
     with true <- is_binary(file_path),
@@ -49,8 +49,8 @@ defmodule Minga.Editor.SemanticTokenSync do
          {_types, _mods} <- safe_legend(client) do
       uri = "file://#{file_path}"
       ref = Client.request_semantic_tokens(client, uri)
-      pending = Map.put(state.lsp_pending, ref, {:semantic_tokens, buf_pid})
-      %{state | lsp_pending: pending}
+      pending = Map.put(state.workspace.lsp_pending, ref, {:semantic_tokens, buf_pid})
+      %{state | workspace: %{state.workspace | lsp_pending: pending}}
     else
       _ -> state
     end
@@ -87,7 +87,7 @@ defmodule Minga.Editor.SemanticTokenSync do
 
   @spec merge_tokens(EditorState.t(), pid(), [SemanticTokens.token()]) :: EditorState.t()
   defp merge_tokens(state, buf_pid, tokens) do
-    hl = Map.get(state.highlight.highlights, buf_pid)
+    hl = Map.get(state.workspace.highlight.highlights, buf_pid)
 
     if hl == nil do
       state
@@ -125,8 +125,8 @@ defmodule Minga.Editor.SemanticTokenSync do
 
       hl = %{hl | spans: List.to_tuple(merged)}
 
-      highlights = Map.put(state.highlight.highlights, buf_pid, hl)
-      put_in(state.highlight.highlights, highlights)
+      highlights = Map.put(state.workspace.highlight.highlights, buf_pid, hl)
+      put_in(state.workspace.highlight.highlights, highlights)
     end
   end
 

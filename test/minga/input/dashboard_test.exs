@@ -12,8 +12,10 @@ defmodule Minga.Input.DashboardTest do
 
     %EditorState{
       port_manager: self(),
-      viewport: Viewport.new(24, 80),
-      buffers: %Buffers{active: nil},
+      workspace: %Minga.Workspace.State{
+        viewport: Viewport.new(24, 80),
+        buffers: %Buffers{active: nil}
+      },
       focus_stack: Minga.Input.default_stack(),
       dashboard: dash
     }
@@ -79,8 +81,10 @@ defmodule Minga.Input.DashboardTest do
 
       state = %EditorState{
         port_manager: self(),
-        viewport: Viewport.new(24, 80),
-        buffers: %Buffers{active: buf, list: [buf]},
+        workspace: %Minga.Workspace.State{
+          viewport: Viewport.new(24, 80),
+          buffers: %Buffers{active: buf, list: [buf]}
+        },
         focus_stack: Minga.Input.default_stack()
       }
 
@@ -90,8 +94,10 @@ defmodule Minga.Input.DashboardTest do
     test "passes through when dashboard state is nil" do
       state = %EditorState{
         port_manager: self(),
-        viewport: Viewport.new(24, 80),
-        buffers: %Buffers{active: nil},
+        workspace: %Minga.Workspace.State{
+          viewport: Viewport.new(24, 80),
+          buffers: %Buffers{active: nil}
+        },
         focus_stack: Minga.Input.default_stack(),
         dashboard: nil
       }

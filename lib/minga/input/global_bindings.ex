@@ -22,8 +22,8 @@ defmodule Minga.Input.GlobalBindings do
 
   # Ctrl+S: save current buffer
   def handle_key(state, ?s, mods) when band(mods, @ctrl) != 0 do
-    if state.buffers.active do
-      case BufferServer.save(state.buffers.active) do
+    if state.workspace.buffers.active do
+      case BufferServer.save(state.workspace.buffers.active) do
         :ok -> :ok
         {:error, reason} -> Minga.Log.error(:editor, "Save failed: #{inspect(reason)}")
       end

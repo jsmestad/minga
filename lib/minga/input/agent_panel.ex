@@ -32,7 +32,7 @@ defmodule Minga.Input.AgentPanel do
           {:handled, EditorState.t()} | {:passthrough, EditorState.t()}
 
   # Editor scope with agent side panel visible + input focused
-  def handle_key(%{keymap_scope: :editor} = state, cp, mods) do
+  def handle_key(%{workspace: %{keymap_scope: :editor}} = state, cp, mods) do
     panel = AgentAccess.panel(state)
 
     if panel.visible and panel.input_focused do
@@ -171,14 +171,14 @@ defmodule Minga.Input.AgentPanel do
 
     if is_pid(prompt_pid) do
       try do
-        real_active = state.buffers.active
-        state = put_in(state.buffers.active, prompt_pid)
+        real_active = state.workspace.buffers.active
+        state = put_in(state.workspace.buffers.active, prompt_pid)
         state = Minga.Editor.do_handle_key(state, cp, mods)
 
         # Only restore if a command didn't legitimately change buffers.active.
         # Same guard as AgentNav.delegate_to_mode_fsm/4.
-        if state.buffers.active == prompt_pid do
-          put_in(state.buffers.active, real_active)
+        if state.workspace.buffers.active == prompt_pid do
+          put_in(state.workspace.buffers.active, real_active)
         else
           state
         end

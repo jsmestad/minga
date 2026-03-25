@@ -50,11 +50,13 @@ defmodule Minga.Input.AgentNavTest do
 
     %EditorState{
       port_manager: self(),
-      viewport: Viewport.new(24, 80),
-      agent: agent,
-      agent_ui: agentic,
-      buffers: %Buffers{active: file_buf, list: [file_buf]},
-      keymap_scope: :agent
+      workspace: %Minga.Workspace.State{
+        viewport: Viewport.new(24, 80),
+        agent_ui: agentic,
+        buffers: %Buffers{active: file_buf, list: [file_buf]},
+        keymap_scope: :agent
+      },
+      agent: agent
     }
   end
 
@@ -72,7 +74,7 @@ defmodule Minga.Input.AgentNavTest do
       # needed since buffers.active is already set by focus_window in prod).
       # In tests, buffers.active is the file buffer. Put the agent buffer as
       # active to simulate the real focus_window behavior.
-      state = put_in(state.buffers.active, buf)
+      state = put_in(state.workspace.buffers.active, buf)
 
       {:handled, _new_state} = AgentNav.handle_key(state, ?j, 0)
 
@@ -85,7 +87,7 @@ defmodule Minga.Input.AgentNavTest do
       buf = AgentAccess.agent(state).buffer
       BufferServer.move_to(buf, {5, 0})
 
-      state = put_in(state.buffers.active, buf)
+      state = put_in(state.workspace.buffers.active, buf)
 
       {:handled, _new_state} = AgentNav.handle_key(state, ?k, 0)
 
@@ -98,7 +100,7 @@ defmodule Minga.Input.AgentNavTest do
       buf = AgentAccess.agent(state).buffer
       BufferServer.move_to(buf, {0, 0})
 
-      state = put_in(state.buffers.active, buf)
+      state = put_in(state.workspace.buffers.active, buf)
 
       {:handled, _new_state} = AgentNav.handle_key(state, ?G, 0)
 
@@ -112,7 +114,7 @@ defmodule Minga.Input.AgentNavTest do
       buf = AgentAccess.agent(state).buffer
       BufferServer.move_to(buf, {0, 0})
 
-      state = put_in(state.buffers.active, buf)
+      state = put_in(state.workspace.buffers.active, buf)
 
       # Set up a window tree with an agent chat window to test unpinning
       window = %Window{
@@ -124,20 +126,18 @@ defmodule Minga.Input.AgentNavTest do
         pinned: true
       }
 
-      state = %{
-        state
-        | windows: %Windows{
-            tree: {:leaf, 1},
-            map: %{1 => window},
-            active: 1,
-            next_id: 2
-          }
-      }
+      state =
+        put_in(state.workspace.windows, %Windows{
+          tree: {:leaf, 1},
+          map: %{1 => window},
+          active: 1,
+          next_id: 2
+        })
 
       {:handled, new_state} = AgentNav.handle_key(state, ?j, 0)
 
       # The window should be unpinned after navigation
-      win = Map.get(new_state.windows.map, 1)
+      win = Map.get(new_state.workspace.windows.map, 1)
       assert win.pinned == false
     end
   end
@@ -149,14 +149,14 @@ defmodule Minga.Input.AgentNavTest do
   describe "delegate_to_mode_fsm/4" do
     test "swaps buffer, processes key, and restores original active buffer" do
       state = make_state()
-      original_buf = state.buffers.active
+      original_buf = state.workspace.buffers.active
       chat_buf = AgentAccess.agent(state).buffer
       BufferServer.move_to(chat_buf, {0, 0})
 
       new_state = AgentNav.delegate_to_mode_fsm(state, chat_buf, ?j, 0)
 
       # Original buffer should be restored
-      assert new_state.buffers.active == original_buf
+      assert new_state.workspace.buffers.active == original_buf
 
       # Cursor should have moved in the chat buffer
       {line, _col} = BufferServer.cursor(chat_buf)
@@ -172,7 +172,7 @@ defmodule Minga.Input.AgentNavTest do
       # but the chat buffer is read-only so mode stays normal.
       new_state = AgentNav.delegate_to_mode_fsm(state, buf, ?s, 0)
 
-      assert new_state.vim.mode == :normal
+      assert new_state.workspace.vim.mode == :normal
     end
 
     test "syncs scroll offset to cursor line" do
@@ -215,19 +215,19 @@ defmodule Minga.Input.AgentNavTest do
 
       # Simulate the restore guard: if buffers.active changed away from
       # chat_buf (because a command like :new_buffer ran), don't restore.
-      state_after_swap = put_in(state.buffers.active, chat_buf)
-      state_after_command = put_in(state_after_swap.buffers.active, new_buf)
+      state_after_swap = put_in(state.workspace.buffers.active, chat_buf)
+      state_after_command = put_in(state_after_swap.workspace.buffers.active, new_buf)
 
-      assert state_after_command.buffers.active != chat_buf
+      assert state_after_command.workspace.buffers.active != chat_buf
 
       restored =
-        if state_after_command.buffers.active == chat_buf do
-          put_in(state_after_command.buffers.active, state.buffers.active)
+        if state_after_command.workspace.buffers.active == chat_buf do
+          put_in(state_after_command.workspace.buffers.active, state.workspace.buffers.active)
         else
           state_after_command
         end
 
-      assert restored.buffers.active == new_buf
+      assert restored.workspace.buffers.active == new_buf
 
       DynamicSupervisor.terminate_child(Minga.Buffer.Supervisor, new_buf)
     end
@@ -311,7 +311,7 @@ defmodule Minga.Input.AgentNavTest do
 
     test "passthrough when keymap_scope is not :agent" do
       state = make_state()
-      state = %{state | keymap_scope: :editor}
+      state = %{state | workspace: %{state.workspace | keymap_scope: :editor}}
 
       assert {:passthrough, _} = AgentNav.handle_key(state, ?j, 0)
     end
@@ -324,11 +324,11 @@ defmodule Minga.Input.AgentNavTest do
       state = make_state(input_focused: true)
       agent_buf = AgentAccess.agent(state).buffer
       assert BufferServer.read_only?(agent_buf)
-      state = put_in(state.buffers.active, agent_buf)
+      state = put_in(state.workspace.buffers.active, agent_buf)
 
       new_state = KeyDispatch.handle_key(state, ?A, 0)
 
-      assert new_state.vim.mode == :insert
+      assert new_state.workspace.vim.mode == :insert
       refute new_state.status_msg == "Buffer is read-only"
     end
   end

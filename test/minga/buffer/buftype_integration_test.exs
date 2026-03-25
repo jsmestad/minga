@@ -22,7 +22,7 @@ defmodule Minga.Buffer.BuftypeIntegrationTest do
 
       # Try entering insert mode
       state = send_key_sync(ctx, ?i)
-      assert state.vim.mode == :normal
+      assert state.workspace.vim.mode == :normal
       assert state.status_msg =~ "read-only"
     end
 

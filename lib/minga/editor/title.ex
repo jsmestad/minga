@@ -98,8 +98,8 @@ defmodule Minga.Editor.Title do
   end
 
   # Fallback for non-EditorState maps (e.g. tests passing plain maps)
-  defp build_vars(%{vim: %{mode: mode}} = state) do
-    buf = get_in(state, [:buffers, :active])
+  defp build_vars(%{workspace: %{vim: %{mode: mode}}} = state) do
+    buf = get_in(state, [:workspace, :buffers, :active])
 
     if is_pid(buf) do
       build_vars_from_buffer(buf, mode)
@@ -148,7 +148,7 @@ defmodule Minga.Editor.Title do
   end
 
   @spec buffer_filepath(EditorState.t()) :: String.t()
-  defp buffer_filepath(%{buffers: %{active: buf}}) when is_pid(buf) do
+  defp buffer_filepath(%{workspace: %{buffers: %{active: buf}}}) when is_pid(buf) do
     BufferServer.file_path(buf) || ""
   end
 

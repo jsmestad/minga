@@ -128,7 +128,7 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       spans_a = [%{start_byte: 0, end_byte: 9, capture_id: 0}]
       inject_highlights(ctx, ["keyword"], 1, spans_a)
 
-      buf1_pid = :sys.get_state(ctx.editor).buffers.active
+      buf1_pid = :sys.get_state(ctx.editor).workspace.buffers.active
 
       # Switch to file2 via :e command (deterministic, no CWD dependency)
       send_keys_sync(ctx, ":e #{path2}<CR>")
@@ -136,10 +136,10 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       state = :sys.get_state(ctx.editor)
 
       # Verify cache was populated for file1
-      assert Map.has_key?(state.highlight.highlights, buf1_pid),
+      assert Map.has_key?(state.workspace.highlight.highlights, buf1_pid),
              "Expected file1 highlights to be cached after buffer switch"
 
-      cached = state.highlight.highlights[buf1_pid]
+      cached = state.workspace.highlight.highlights[buf1_pid]
       assert cached.spans == List.to_tuple(spans_a)
     end
   end
@@ -332,12 +332,12 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       # Inject highlights so reparse path is active
       inject_highlights(ctx, ["keyword"], 1, [%{start_byte: 0, end_byte: 4, capture_id: 0}])
 
-      version_before = :sys.get_state(ctx.editor).highlight.version
+      version_before = :sys.get_state(ctx.editor).workspace.highlight.version
 
       # dd deletes the current line
       send_keys_sync(ctx, "dd")
 
-      version_after = :sys.get_state(ctx.editor).highlight.version
+      version_after = :sys.get_state(ctx.editor).workspace.highlight.version
 
       assert version_after > version_before,
              "Expected highlight_version to increment after dd (#{version_before} → #{version_after})"
@@ -348,11 +348,11 @@ defmodule Minga.Editor.HighlightIntegrationTest do
 
       inject_highlights(ctx, ["keyword"], 1, [%{start_byte: 0, end_byte: 5, capture_id: 0}])
 
-      version_before = :sys.get_state(ctx.editor).highlight.version
+      version_before = :sys.get_state(ctx.editor).workspace.highlight.version
 
       send_key_sync(ctx, ?x)
 
-      version_after = :sys.get_state(ctx.editor).highlight.version
+      version_after = :sys.get_state(ctx.editor).workspace.highlight.version
 
       assert version_after > version_before,
              "Expected highlight_version to increment after x"
@@ -366,11 +366,11 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       # Yank a word first (yw), then paste
       send_keys_sync(ctx, "yw")
 
-      version_before = :sys.get_state(ctx.editor).highlight.version
+      version_before = :sys.get_state(ctx.editor).workspace.highlight.version
 
       send_key_sync(ctx, ?p)
 
-      version_after = :sys.get_state(ctx.editor).highlight.version
+      version_after = :sys.get_state(ctx.editor).workspace.highlight.version
 
       assert version_after > version_before,
              "Expected highlight_version to increment after p"
@@ -384,12 +384,12 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       # Make a change first
       send_key_sync(ctx, ?x)
 
-      version_before = :sys.get_state(ctx.editor).highlight.version
+      version_before = :sys.get_state(ctx.editor).workspace.highlight.version
 
       # Undo
       send_key_sync(ctx, ?u)
 
-      version_after = :sys.get_state(ctx.editor).highlight.version
+      version_after = :sys.get_state(ctx.editor).workspace.highlight.version
 
       assert version_after > version_before,
              "Expected highlight_version to increment after undo"
@@ -400,12 +400,12 @@ defmodule Minga.Editor.HighlightIntegrationTest do
 
       inject_highlights(ctx, ["keyword"], 1, [%{start_byte: 0, end_byte: 5, capture_id: 0}])
 
-      version_before = :sys.get_state(ctx.editor).highlight.version
+      version_before = :sys.get_state(ctx.editor).workspace.highlight.version
 
       # Pure motions: h, j, k, l, w
       send_keys_sync(ctx, "llljkw")
 
-      version_after = :sys.get_state(ctx.editor).highlight.version
+      version_after = :sys.get_state(ctx.editor).workspace.highlight.version
 
       assert version_after == version_before,
              "Expected highlight_version unchanged after motions (#{version_before} → #{version_after})"
@@ -479,12 +479,12 @@ defmodule Minga.Editor.HighlightIntegrationTest do
 
       inject_highlights(ctx, ["keyword"], 1, [%{start_byte: 0, end_byte: 5, capture_id: 0}])
 
-      version_before = :sys.get_state(ctx.editor).highlight.version
+      version_before = :sys.get_state(ctx.editor).workspace.highlight.version
 
       send_key_sync(ctx, ?i)
       send_key_sync(ctx, ?a)
 
-      version_after = :sys.get_state(ctx.editor).highlight.version
+      version_after = :sys.get_state(ctx.editor).workspace.highlight.version
 
       assert version_after > version_before,
              "Expected highlight_version to increment after insert mode typing"
@@ -498,9 +498,11 @@ defmodule Minga.Editor.HighlightIntegrationTest do
 
     %EditorState{
       port_manager: nil,
-      viewport: Viewport.new(24, 80),
-      vim: VimState.new()
+      workspace: %Minga.Workspace.State{
+        viewport: Viewport.new(24, 80),
+        vim: VimState.new()
+      }
     }
-    |> then(fn s -> %{s | buffers: %{s.buffers | active: pid}} end)
+    |> then(fn s -> put_in(s.workspace.buffers.active, pid) end)
   end
 end

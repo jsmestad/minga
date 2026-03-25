@@ -184,8 +184,8 @@ defmodule Minga.Editor.Commands.BufferManagementTest do
     :sys.replace_state(editor, fn state ->
       {:ok, buffer2} = BufferServer.start_link(content: "second tab content")
       {new_tb, _tab} = TabBar.add(state.tab_bar, :file, "second.txt")
-      new_buffers = Buffers.add(state.buffers, buffer2)
-      %{state | tab_bar: new_tb, buffers: new_buffers}
+      new_buffers = Buffers.add(state.workspace.buffers, buffer2)
+      %{state | tab_bar: new_tb, workspace: %{state.workspace | buffers: new_buffers}}
     end)
   end
 

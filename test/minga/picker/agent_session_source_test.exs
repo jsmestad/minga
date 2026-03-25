@@ -165,15 +165,16 @@ defmodule Minga.Picker.AgentSessionSourceTest do
 
     %EditorState{
       port_manager: self(),
-      viewport: Viewport.new(24, 80),
+      workspace: %Minga.Workspace.State{
+        viewport: Viewport.new(24, 80),
+        buffers: %Buffers{},
+        windows: %Windows{},
+        vim: VimState.new(),
+        keymap_scope: :agent,
+        agent_ui: agentic
+      },
       tab_bar: tb,
-      buffers: %Buffers{},
-      windows: %Windows{},
-      vim: VimState.new(),
-      keymap_scope: :agent,
-      agent: agent,
-      agent_ui: agentic,
-      file_tree: nil
+      agent: agent
     }
   end
 
@@ -191,15 +192,16 @@ defmodule Minga.Picker.AgentSessionSourceTest do
 
     %EditorState{
       port_manager: self(),
-      viewport: Viewport.new(24, 80),
+      workspace: %Minga.Workspace.State{
+        viewport: Viewport.new(24, 80),
+        buffers: %Buffers{},
+        windows: %Windows{},
+        vim: VimState.new(),
+        keymap_scope: :agent,
+        agent_ui: agentic
+      },
       tab_bar: tb,
-      buffers: %Buffers{},
-      windows: %Windows{},
-      vim: VimState.new(),
-      keymap_scope: :agent,
-      agent: agent,
-      agent_ui: agentic,
-      file_tree: nil
+      agent: agent
     }
   end
 
@@ -228,15 +230,16 @@ defmodule Minga.Picker.AgentSessionSourceTest do
 
     %EditorState{
       port_manager: self(),
-      viewport: Viewport.new(24, 80),
+      workspace: %Minga.Workspace.State{
+        viewport: Viewport.new(24, 80),
+        buffers: %Buffers{},
+        windows: %Windows{},
+        vim: VimState.new(),
+        keymap_scope: :editor,
+        agent_ui: agentic
+      },
       tab_bar: tb,
-      buffers: %Buffers{},
-      windows: %Windows{},
-      vim: VimState.new(),
-      keymap_scope: :editor,
-      agent: agent,
-      agent_ui: agentic,
-      file_tree: nil
+      agent: agent
     }
   end
 end

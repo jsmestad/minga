@@ -4,7 +4,7 @@ defmodule Minga.Editor.Editing do
 
   All call sites that need to query or update the editing model's state
   (mode, mode_state, registers, recorders) go through this module instead
-  of reaching into `state.vim.*` directly.
+  of reaching into `state.workspace.vim.*` directly.
 
   Query functions that have `EditingModel` behaviour callbacks dispatch
   through the active model. This means `inserting?/1`, `selecting?/1`,
@@ -71,7 +71,7 @@ defmodule Minga.Editor.Editing do
   @spec model_state(EditorState.t()) :: EditingModel.state()
   defp model_state(%EditorState{} = state) do
     case active_model() do
-      VimModel -> VimModel.from_editor(state.vim.mode, state.vim.mode_state)
+      VimModel -> VimModel.from_editor(state.workspace.vim.mode, state.workspace.vim.mode_state)
       CUAModel -> CUAModel.from_editor()
     end
   end
@@ -112,27 +112,28 @@ defmodule Minga.Editor.Editing do
 
   @doc "Returns the current editing mode atom (e.g. :normal, :insert, :visual)."
   @spec mode(EditorState.t()) :: Mode.mode()
-  def mode(%EditorState{vim: vim}), do: vim.mode
+  def mode(%EditorState{workspace: %{vim: vim}}), do: vim.mode
 
   @doc "Returns the current mode-specific state struct."
   @spec mode_state(EditorState.t()) :: Mode.state()
-  def mode_state(%EditorState{vim: vim}), do: vim.mode_state
+  def mode_state(%EditorState{workspace: %{vim: vim}}), do: vim.mode_state
 
   @doc "Returns true when in a minibuffer-occupying mode (command, search, eval, search_prompt)."
   @spec minibuffer_mode?(EditorState.t()) :: boolean()
-  def minibuffer_mode?(%EditorState{vim: vim}),
+  def minibuffer_mode?(%EditorState{workspace: %{vim: vim}}),
     do: vim.mode in [:command, :search, :eval, :search_prompt]
 
   @doc "Returns true when a leader key sequence is pending (leader_node is a map)."
   @spec in_leader?(EditorState.t()) :: boolean()
-  def in_leader?(%EditorState{vim: %{mode_state: ms}}) when is_map_key(ms, :leader_node),
-    do: is_map(ms.leader_node)
+  def in_leader?(%EditorState{workspace: %{vim: %{mode_state: ms}}})
+      when is_map_key(ms, :leader_node),
+      do: is_map(ms.leader_node)
 
   def in_leader?(_state), do: false
 
   @doc "Returns the visual anchor position from mode_state, or nil."
   @spec visual_anchor(EditorState.t()) :: {non_neg_integer(), non_neg_integer()} | nil
-  def visual_anchor(%EditorState{vim: %{mode_state: ms}})
+  def visual_anchor(%EditorState{workspace: %{vim: %{mode_state: ms}}})
       when is_map_key(ms, :visual_anchor),
       do: ms.visual_anchor
 
@@ -142,11 +143,11 @@ defmodule Minga.Editor.Editing do
 
   @doc "Returns the macro recorder struct."
   @spec macro_recorder(EditorState.t()) :: MacroRecorder.t()
-  def macro_recorder(%EditorState{vim: vim}), do: vim.macro_recorder
+  def macro_recorder(%EditorState{workspace: %{vim: vim}}), do: vim.macro_recorder
 
   @doc "Returns the change recorder struct."
   @spec change_recorder(EditorState.t()) :: term()
-  def change_recorder(%EditorState{vim: vim}), do: vim.change_recorder
+  def change_recorder(%EditorState{workspace: %{vim: vim}}), do: vim.change_recorder
 
   @doc "Returns `{true, register_name}` when recording, `false` otherwise."
   @spec macro_recording?(EditorState.t()) :: {true, String.t()} | false
@@ -163,37 +164,37 @@ defmodule Minga.Editor.Editing do
 
   @doc "Returns the active register name (empty string for unnamed)."
   @spec active_register(EditorState.t()) :: String.t()
-  def active_register(%EditorState{vim: %{reg: reg}}), do: reg.active
+  def active_register(%EditorState{workspace: %{vim: %{reg: reg}}}), do: reg.active
 
   @doc "Returns the full registers struct."
   @spec registers(EditorState.t()) :: Registers.t()
-  def registers(%EditorState{vim: %{reg: reg}}), do: reg
+  def registers(%EditorState{workspace: %{vim: %{reg: reg}}}), do: reg
 
   # ── Mutation functions ─────────────────────────────────────────────────────
 
   @doc "Sets the active register to `name`."
   @spec set_active_register(EditorState.t(), String.t()) :: EditorState.t()
   def set_active_register(%EditorState{} = state, name) do
-    put_in(state.vim.reg.active, name)
+    put_in(state.workspace.vim.reg.active, name)
   end
 
   @doc "Stores `text` in register `name` with the given type."
   @spec put_register(EditorState.t(), String.t(), String.t(), Registers.reg_type()) ::
           EditorState.t()
   def put_register(%EditorState{} = state, name, text, reg_type \\ :charwise) do
-    %{state | vim: %{state.vim | reg: Registers.put(state.vim.reg, name, text, reg_type)}}
+    put_in(state.workspace.vim.reg, Registers.put(state.workspace.vim.reg, name, text, reg_type))
   end
 
   @doc "Resets the active register back to unnamed."
   @spec reset_active_register(EditorState.t()) :: EditorState.t()
   def reset_active_register(%EditorState{} = state) do
-    %{state | vim: %{state.vim | reg: Registers.reset_active(state.vim.reg)}}
+    put_in(state.workspace.vim.reg, Registers.reset_active(state.workspace.vim.reg))
   end
 
   @doc "Sets the leader_node on mode_state."
   @spec set_leader_node(EditorState.t(), term()) :: EditorState.t()
   def set_leader_node(%EditorState{} = state, node) do
-    put_in(state.vim.mode_state.leader_node, node)
+    put_in(state.workspace.vim.mode_state.leader_node, node)
   end
 
   @doc """
@@ -206,31 +207,31 @@ defmodule Minga.Editor.Editing do
   @spec update_mode_state(EditorState.t(), (Mode.state() -> Mode.state()) | map()) ::
           EditorState.t()
   def update_mode_state(%EditorState{} = state, fun) when is_function(fun, 1) do
-    new_ms = fun.(state.vim.mode_state)
-    %{state | vim: %{state.vim | mode_state: new_ms}}
+    new_ms = fun.(state.workspace.vim.mode_state)
+    put_in(state.workspace.vim.mode_state, new_ms)
   end
 
   def update_mode_state(%EditorState{} = state, updates) when is_map(updates) do
-    new_ms = Map.merge(state.vim.mode_state, updates)
-    %{state | vim: %{state.vim | mode_state: new_ms}}
+    new_ms = Map.merge(state.workspace.vim.mode_state, updates)
+    put_in(state.workspace.vim.mode_state, new_ms)
   end
 
   @doc "Replaces the macro recorder."
   @spec set_macro_recorder(EditorState.t(), MacroRecorder.t()) :: EditorState.t()
   def set_macro_recorder(%EditorState{} = state, rec) do
-    %{state | vim: %{state.vim | macro_recorder: rec}}
+    put_in(state.workspace.vim.macro_recorder, rec)
   end
 
   @doc "Replaces the change recorder."
   @spec set_change_recorder(EditorState.t(), term()) :: EditorState.t()
   def set_change_recorder(%EditorState{} = state, rec) do
-    %{state | vim: %{state.vim | change_recorder: rec}}
+    put_in(state.workspace.vim.change_recorder, rec)
   end
 
   @doc "Saves the jump position when the cursor crosses a line boundary."
   @spec save_jump_pos(EditorState.t(), {non_neg_integer(), non_neg_integer()}) ::
           EditorState.t()
   def save_jump_pos(%EditorState{} = state, pos) do
-    %{state | vim: %{state.vim | last_jump_pos: pos}}
+    put_in(state.workspace.vim.last_jump_pos, pos)
   end
 end

@@ -60,19 +60,21 @@ defmodule Minga.Editor.Commands.AgentSplitToggleTest do
 
     state = %EditorState{
       port_manager: self(),
-      viewport: Viewport.new(24, 80),
-      vim: VimState.new(),
-      buffers: %Buffers{active: buf, list: [buf], active_index: 0},
+      workspace: %Minga.Workspace.State{
+        viewport: Viewport.new(24, 80),
+        vim: VimState.new(),
+        buffers: %Buffers{active: buf, list: [buf], active_index: 0},
+        agent_ui: agentic,
+        windows: %Minga.Editor.State.Windows{
+          tree: {:leaf, 1},
+          map: %{1 => window},
+          active: 1,
+          next_id: 2
+        }
+      },
       focus_stack: Input.default_stack(),
       agent: agent,
-      agent_ui: agentic,
-      tab_bar: tb,
-      windows: %Minga.Editor.State.Windows{
-        tree: {:leaf, 1},
-        map: %{1 => window},
-        active: 1,
-        next_id: 2
-      }
+      tab_bar: tb
     }
 
     if active do
@@ -92,11 +94,13 @@ defmodule Minga.Editor.Commands.AgentSplitToggleTest do
       tb = TabBar.update_context(tb, at.id, agent_ctx)
       tb = TabBar.switch_to(tb, file_tab.id)
 
-      state = %{
-        state
-        | tab_bar: tb,
-          agent_ui: %{agentic | view: %{agentic.view | active: true, focus: :chat}}
-      }
+      state =
+        put_in(state.workspace.agent_ui, %{
+          agentic
+          | view: %{agentic.view | active: true, focus: :chat}
+        })
+
+      state = %{state | tab_bar: tb}
 
       EditorState.switch_tab(state, at.id)
     else
@@ -134,7 +138,7 @@ defmodule Minga.Editor.Commands.AgentSplitToggleTest do
       state = base_state()
       new_state = AgentCommands.toggle_agentic_view(state)
 
-      assert new_state.keymap_scope == :agent
+      assert new_state.workspace.keymap_scope == :agent
     end
 
     test "agent tab has agent_chat window in context" do
@@ -142,7 +146,7 @@ defmodule Minga.Editor.Commands.AgentSplitToggleTest do
       new_state = AgentCommands.toggle_agentic_view(state)
 
       agent_chat_exists =
-        Enum.any?(new_state.windows.map, fn {_id, window} ->
+        Enum.any?(new_state.workspace.windows.map, fn {_id, window} ->
           Content.agent_chat?(window.content)
         end)
 
@@ -185,7 +189,7 @@ defmodule Minga.Editor.Commands.AgentSplitToggleTest do
       with_agent = AgentCommands.toggle_agentic_view(state)
       without_agent = AgentCommands.toggle_agentic_view(with_agent)
 
-      assert without_agent.keymap_scope == :editor
+      assert without_agent.workspace.keymap_scope == :editor
     end
   end
 
@@ -199,7 +203,7 @@ defmodule Minga.Editor.Commands.AgentSplitToggleTest do
       new_state = BufferManagement.execute(state, :kill_buffer)
 
       assert EditorState.active_tab_kind(new_state) == :file
-      assert new_state.keymap_scope == :editor
+      assert new_state.workspace.keymap_scope == :editor
     end
 
     test "does not crash when agent tab has no session" do
@@ -227,7 +231,7 @@ defmodule Minga.Editor.Commands.AgentSplitToggleTest do
 
       restored = AgentCommands.toggle_agentic_view(with_agent)
       assert EditorState.active_tab_kind(restored) == :file
-      assert restored.keymap_scope == :editor
+      assert restored.workspace.keymap_scope == :editor
     end
 
     test "agent tab persists through toggle cycles" do

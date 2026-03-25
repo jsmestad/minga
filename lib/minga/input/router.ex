@@ -39,10 +39,10 @@ defmodule Minga.Input.Router do
   @spec capture_snapshot(EditorState.t()) :: snapshot()
   def capture_snapshot(state) do
     %{
-      old_buffer: state.buffers.active,
+      old_buffer: state.workspace.buffers.active,
       buf_version: buffer_version(state),
       old_mode: Editing.mode(state),
-      old_cursor: safe_cursor(state.buffers.active)
+      old_cursor: safe_cursor(state.workspace.buffers.active)
     }
   end
 
@@ -76,7 +76,7 @@ defmodule Minga.Input.Router do
         # Run housekeeping so the cleared prompt triggers a render.
         post_key_housekeeping(
           new_state,
-          state.buffers.active,
+          state.workspace.buffers.active,
           buffer_version(state),
           Editing.mode(state),
           Editing.inserting?(state),
@@ -90,7 +90,7 @@ defmodule Minga.Input.Router do
 
   @spec dispatch_normal(EditorState.t(), non_neg_integer(), non_neg_integer()) :: EditorState.t()
   defp dispatch_normal(state, codepoint, modifiers) do
-    old_buffer = state.buffers.active
+    old_buffer = state.workspace.buffers.active
     old_mode = Editing.mode(state)
     was_inserting = Editing.inserting?(state)
     buf_version_before = buffer_version(state)
@@ -224,7 +224,7 @@ defmodule Minga.Input.Router do
 
   # Buffer changed: clear highlights
   defp maybe_schedule_document_highlight(
-         %EditorState{buffers: %{active: current}} = state,
+         %EditorState{workspace: %{buffers: %{active: current}}} = state,
          old_buffer,
          _old_cursor
        )
@@ -234,7 +234,7 @@ defmodule Minga.Input.Router do
 
   # Normal mode, no buffer: no-op
   defp maybe_schedule_document_highlight(
-         %EditorState{buffers: %{active: nil}} = state,
+         %EditorState{workspace: %{buffers: %{active: nil}}} = state,
          _old_buffer,
          _old_cursor
        ) do
@@ -248,7 +248,7 @@ defmodule Minga.Input.Router do
       LspActions.clear_document_highlights(state)
     else
       # Normal mode with a live buffer: schedule only if cursor moved
-      new_cursor = safe_cursor(state.buffers.active)
+      new_cursor = safe_cursor(state.workspace.buffers.active)
 
       if new_cursor != old_cursor do
         state = LspActions.schedule_document_highlight(state)
@@ -387,9 +387,9 @@ defmodule Minga.Input.Router do
   end
 
   @spec buffer_version(EditorState.t()) :: non_neg_integer()
-  defp buffer_version(%{buffers: %{active: nil}}), do: 0
+  defp buffer_version(%{workspace: %{buffers: %{active: nil}}}), do: 0
 
-  defp buffer_version(%{buffers: %{active: buf}}) do
+  defp buffer_version(%{workspace: %{buffers: %{active: buf}}}) do
     BufferServer.version(buf)
   end
 end

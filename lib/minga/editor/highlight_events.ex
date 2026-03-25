@@ -49,10 +49,10 @@ defmodule Minga.Editor.HighlightEvents do
   """
   @spec maybe_reset_highlight(EditorState.t(), pid() | nil) :: EditorState.t()
   def maybe_reset_highlight(state, old_buffer) do
-    new_buffer = state.buffers.active
+    new_buffer = state.workspace.buffers.active
 
     if new_buffer != old_buffer and new_buffer != nil do
-      hl = state.highlight
+      hl = state.workspace.highlight
 
       case Map.get(hl.highlights, new_buffer) do
         nil ->
@@ -170,7 +170,7 @@ defmodule Minga.Editor.HighlightEvents do
   # Skips entirely when the feature is disabled (the default) to avoid
   # spawning a Task on every highlight event.
   @spec maybe_apply_prettify_symbols(EditorState.t()) :: :ok
-  defp maybe_apply_prettify_symbols(%{buffers: %{active: nil}}), do: :ok
+  defp maybe_apply_prettify_symbols(%{workspace: %{buffers: %{active: nil}}}), do: :ok
 
   defp maybe_apply_prettify_symbols(state) do
     if PrettifySymbols.enabled?() do
@@ -182,7 +182,7 @@ defmodule Minga.Editor.HighlightEvents do
 
   @spec spawn_prettify_task(EditorState.t()) :: :ok
   defp spawn_prettify_task(state) do
-    buf = state.buffers.active
+    buf = state.workspace.buffers.active
     hl = HighlightSync.get_active_highlight(state)
 
     if hl.capture_names != {} and tuple_size(hl.spans) > 0 do
@@ -198,6 +198,6 @@ defmodule Minga.Editor.HighlightEvents do
   end
 
   @spec buffer_version(EditorState.t()) :: non_neg_integer()
-  defp buffer_version(%{buffers: %{active: nil}}), do: 0
-  defp buffer_version(%{buffers: %{active: buf}}), do: BufferServer.version(buf)
+  defp buffer_version(%{workspace: %{buffers: %{active: nil}}}), do: 0
+  defp buffer_version(%{workspace: %{buffers: %{active: buf}}}), do: BufferServer.version(buf)
 end

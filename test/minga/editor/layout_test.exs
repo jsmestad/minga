@@ -18,8 +18,10 @@ defmodule Minga.Editor.LayoutTest do
   defp new_state(rows, cols) do
     %EditorState{
       port_manager: nil,
-      viewport: Viewport.new(rows, cols),
-      vim: VimState.new()
+      workspace: %Minga.Workspace.State{
+        viewport: Viewport.new(rows, cols),
+        vim: VimState.new()
+      }
     }
   end
 
@@ -31,20 +33,17 @@ defmodule Minga.Editor.LayoutTest do
       viewport: Viewport.new(24, 80)
     }
 
-    %{
-      state
-      | windows: %Windows{
-          tree: {:leaf, win_id},
-          map: %{win_id => window},
-          active: win_id,
-          next_id: win_id + 1
-        }
-    }
+    put_in(state.workspace.windows, %Windows{
+      tree: {:leaf, win_id},
+      map: %{win_id => window},
+      active: win_id,
+      next_id: win_id + 1
+    })
   end
 
   defp with_file_tree(state, width) do
     tree = %FileTree{root: "/tmp", width: width}
-    put_in(state.file_tree.tree, tree)
+    put_in(state.workspace.file_tree.tree, tree)
   end
 
   defp with_agent_panel(state) do
@@ -63,7 +62,8 @@ defmodule Minga.Editor.LayoutTest do
     # Keep the file tab active
     tb = TabBar.switch_to(tb, file_tab.id)
 
-    %{state | tab_bar: tb, agent: agent, agent_ui: agentic}
+    state = put_in(state.workspace.agent_ui, agentic)
+    %{state | tab_bar: tb, agent: agent}
   end
 
   defp with_vsplit(state) do
@@ -81,15 +81,12 @@ defmodule Minga.Editor.LayoutTest do
       viewport: Viewport.new(24, 40)
     }
 
-    %{
-      state
-      | windows: %Windows{
-          tree: {:split, :vertical, {:leaf, 1}, {:leaf, 2}, 0},
-          map: %{1 => win1, 2 => win2},
-          active: 1,
-          next_id: 3
-        }
-    }
+    put_in(state.workspace.windows, %Windows{
+      tree: {:split, :vertical, {:leaf, 1}, {:leaf, 2}, 0},
+      map: %{1 => win1, 2 => win2},
+      active: 1,
+      next_id: 3
+    })
   end
 
   defp with_hsplit(state) do
@@ -107,15 +104,12 @@ defmodule Minga.Editor.LayoutTest do
       viewport: Viewport.new(12, 80)
     }
 
-    %{
-      state
-      | windows: %Windows{
-          tree: {:split, :horizontal, {:leaf, 1}, {:leaf, 2}, 0},
-          map: %{1 => win1, 2 => win2},
-          active: 1,
-          next_id: 3
-        }
-    }
+    put_in(state.workspace.windows, %Windows{
+      tree: {:split, :horizontal, {:leaf, 1}, {:leaf, 2}, 0},
+      map: %{1 => win1, 2 => win2},
+      active: 1,
+      next_id: 3
+    })
   end
 
   # ── Basic layout ─────────────────────────────────────────────────────────────
@@ -432,7 +426,7 @@ defmodule Minga.Editor.LayoutTest do
       assert layout.file_tree != nil
       assert layout.agent_panel != nil
 
-      short_state = %{state | viewport: Viewport.new(7, 80)}
+      short_state = %{state | workspace: %{state.workspace | viewport: Viewport.new(7, 80)}}
       layout = Layout.compute(short_state)
       assert layout.agent_panel == nil
       assert layout.file_tree != nil
@@ -441,7 +435,7 @@ defmodule Minga.Editor.LayoutTest do
     test "shrinking width collapses file tree, agent panel unaffected" do
       state = new_state(24, 80) |> with_window() |> with_file_tree(20) |> with_agent_panel()
 
-      narrow_state = %{state | viewport: Viewport.new(24, 25)}
+      narrow_state = %{state | workspace: %{state.workspace | viewport: Viewport.new(24, 25)}}
       layout = Layout.compute(narrow_state)
       assert layout.file_tree == nil
       assert layout.agent_panel != nil
@@ -453,7 +447,7 @@ defmodule Minga.Editor.LayoutTest do
       assert layout.agent_panel == nil
       assert layout.file_tree == nil
 
-      big_state = %{state | viewport: Viewport.new(30, 100)}
+      big_state = %{state | workspace: %{state.workspace | viewport: Viewport.new(30, 100)}}
       layout = Layout.compute(big_state)
       assert layout.agent_panel != nil
       assert layout.file_tree != nil
@@ -467,7 +461,7 @@ defmodule Minga.Editor.LayoutTest do
       state = new_state(24, 80) |> with_window()
       layout1 = Layout.compute(state)
 
-      state2 = %{state | viewport: Viewport.new(40, 120)}
+      state2 = %{state | workspace: %{state.workspace | viewport: Viewport.new(40, 120)}}
       layout2 = Layout.compute(state2)
 
       assert layout2.terminal == {0, 0, 120, 40}

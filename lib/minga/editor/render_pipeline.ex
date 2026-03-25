@@ -185,15 +185,15 @@ defmodule Minga.Editor.RenderPipeline do
   end
 
   @spec window_count(state()) :: non_neg_integer()
-  defp window_count(%{windows: %{tree: nil}}), do: 0
+  defp window_count(%{workspace: %{windows: %{tree: nil}}}), do: 0
 
-  defp window_count(%{windows: %{tree: tree}}) do
+  defp window_count(%{workspace: %{windows: %{tree: tree}}}) do
     WindowTree.count(tree)
   end
 
   @spec debug_layout(state(), Layout.t()) :: :ok
   defp debug_layout(state, layout) do
-    vp = state.viewport
+    vp = state.workspace.viewport
     ts = DateTime.utc_now() |> DateTime.to_string()
 
     log_lines = [

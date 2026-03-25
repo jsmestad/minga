@@ -26,7 +26,7 @@ defmodule Minga.Editor.Commands.FileTreeRevealTest do
   # can point to a different entry if concurrent tests create/delete
   # files that shift the sort order before this assertion runs.
   defp assert_file_visible(state, file_path) do
-    tree = state.file_tree.tree
+    tree = state.workspace.file_tree.tree
     expanded_path = Path.expand(file_path)
     entries = FileTree.visible_entries(tree)
 
@@ -43,15 +43,15 @@ defmodule Minga.Editor.Commands.FileTreeRevealTest do
 
       # Tree starts closed
       state = :sys.get_state(ctx.editor)
-      assert state.file_tree.tree == nil
+      assert state.workspace.file_tree.tree == nil
 
       # Reveal active file
       state = send_keys_sync(ctx, "<SPC>or")
 
       # Tree should be open and focused
-      assert state.file_tree.tree != nil
-      assert state.file_tree.focused == true
-      assert state.keymap_scope == :file_tree
+      assert state.workspace.file_tree.tree != nil
+      assert state.workspace.file_tree.focused == true
+      assert state.workspace.keymap_scope == :file_tree
 
       # File should be visible in the tree (ancestors expanded)
       assert_file_visible(state, file)
@@ -70,13 +70,13 @@ defmodule Minga.Editor.Commands.FileTreeRevealTest do
       # Check cursor integer directly (no filesystem rescan) to verify
       # gg worked before testing reveal.
       state = send_keys_sync(ctx, "gg")
-      assert state.file_tree.tree.cursor == 0, "gg should move cursor to top"
+      assert state.workspace.file_tree.tree.cursor == 0, "gg should move cursor to top"
 
       # Reveal without closing: this exercises the ensure_tree_open pass-through
       state = send_keys_sync(ctx, "<SPC>or")
 
       assert_file_visible(state, file)
-      assert state.file_tree.focused == true
+      assert state.workspace.file_tree.focused == true
     end
 
     test "reopens closed tree and re-reveals file", %{tmp_dir: dir} do
@@ -87,16 +87,16 @@ defmodule Minga.Editor.Commands.FileTreeRevealTest do
 
       # Open the tree and reveal the file
       state = send_keys_sync(ctx, "<SPC>or")
-      assert state.file_tree.tree != nil
+      assert state.workspace.file_tree.tree != nil
 
       # Close tree, then reveal again to reopen and re-reveal
       _state = send_keys_sync(ctx, "<SPC>op")
       state = send_keys_sync(ctx, "<SPC>or")
 
       # Tree should be open and focused after re-reveal
-      assert state.file_tree.tree != nil
-      assert state.file_tree.focused == true
-      assert state.keymap_scope == :file_tree
+      assert state.workspace.file_tree.tree != nil
+      assert state.workspace.file_tree.focused == true
+      assert state.workspace.keymap_scope == :file_tree
 
       # File should be visible (ancestors expanded)
       assert_file_visible(state, file)
@@ -111,7 +111,7 @@ defmodule Minga.Editor.Commands.FileTreeRevealTest do
       state = :sys.get_state(ctx.editor)
 
       # Tree should not have opened
-      assert state.file_tree.tree == nil
+      assert state.workspace.file_tree.tree == nil
     end
   end
 end

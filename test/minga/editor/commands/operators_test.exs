@@ -130,7 +130,7 @@ defmodule Minga.Editor.Commands.OperatorsTest do
       assert String.contains?(content, "foo")
 
       # The editor should now be in insert mode
-      %{vim: %{mode: mode}} = :sys.get_state(editor)
+      %{workspace: %{vim: %{mode: mode}}} = :sys.get_state(editor)
       assert mode == :insert
     end
 
@@ -148,7 +148,7 @@ defmodule Minga.Editor.Commands.OperatorsTest do
       assert String.contains?(content, "ddd")
 
       # Should be in insert mode
-      %{vim: %{mode: mode}} = :sys.get_state(editor)
+      %{workspace: %{vim: %{mode: mode}}} = :sys.get_state(editor)
       assert mode == :insert
 
       # Escape to normal, then paste to verify register has both lines

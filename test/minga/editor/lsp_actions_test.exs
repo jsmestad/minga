@@ -363,8 +363,8 @@ defmodule Minga.Editor.LspActionsTest do
       state =
         fake_state()
         |> Map.merge(%{inlay_hint_debounce_timer: nil, last_inlay_viewport_top: nil})
-        |> put_in([:buffers, :active], buf)
-        |> put_in([:viewport, :top], 10)
+        |> put_in([:workspace, :buffers, :active], buf)
+        |> put_in([:workspace, :viewport, :top], 10)
 
       result = LspActions.schedule_inlay_hints_on_scroll(state)
       assert result.inlay_hint_debounce_timer != nil
@@ -380,13 +380,13 @@ defmodule Minga.Editor.LspActionsTest do
       state =
         fake_state()
         |> Map.merge(%{inlay_hint_debounce_timer: nil, last_inlay_viewport_top: nil})
-        |> put_in([:buffers, :active], buf)
-        |> put_in([:viewport, :top], 5)
+        |> put_in([:workspace, :buffers, :active], buf)
+        |> put_in([:workspace, :viewport, :top], 5)
 
       state1 = LspActions.schedule_inlay_hints_on_scroll(state)
       timer1 = state1.inlay_hint_debounce_timer
 
-      state2 = state1 |> put_in([:viewport, :top], 15)
+      state2 = state1 |> put_in([:workspace, :viewport, :top], 15)
       state2 = LspActions.schedule_inlay_hints_on_scroll(state2)
       timer2 = state2.inlay_hint_debounce_timer
 
@@ -407,8 +407,8 @@ defmodule Minga.Editor.LspActionsTest do
       result =
         LspActions.handle_prepare_rename_response(state, {:ok, %{"placeholder" => "myVar"}})
 
-      assert result.vim.mode == :command
-      assert result.vim.mode_state.input == "rename myVar"
+      assert result.workspace.vim.mode == :command
+      assert result.workspace.vim.mode_state.input == "rename myVar"
     end
 
     test "prepareRename with Range + placeholder uses placeholder" do
@@ -423,13 +423,13 @@ defmodule Minga.Editor.LspActionsTest do
       }
 
       result = LspActions.handle_prepare_rename_response(state, {:ok, resp})
-      assert result.vim.mode == :command
-      assert result.vim.mode_state.input == "rename hello_world"
+      assert result.workspace.vim.mode == :command
+      assert result.workspace.vim.mode_state.input == "rename hello_world"
     end
 
     test "prepareRename with Range only reads text from buffer" do
       {:ok, buf} = BufferServer.start_link(content: "def hello_world do\n  :ok\nend")
-      state = fake_state_with_vim() |> put_in([:buffers, :active], buf)
+      state = fake_state_with_vim() |> put_in([:workspace, :buffers, :active], buf)
 
       resp = %{
         "start" => %{"line" => 0, "character" => 4},
@@ -437,15 +437,15 @@ defmodule Minga.Editor.LspActionsTest do
       }
 
       result = LspActions.handle_prepare_rename_response(state, {:ok, resp})
-      assert result.vim.mode == :command
-      assert result.vim.mode_state.input == "rename hello_world"
+      assert result.workspace.vim.mode == :command
+      assert result.workspace.vim.mode_state.input == "rename hello_world"
 
       GenServer.stop(buf)
     end
 
     test "prepareRename with wrapped Range reads text from buffer" do
       {:ok, buf} = BufferServer.start_link(content: "def hello_world do\n  :ok\nend")
-      state = fake_state_with_vim() |> put_in([:buffers, :active], buf)
+      state = fake_state_with_vim() |> put_in([:workspace, :buffers, :active], buf)
 
       resp = %{
         "range" => %{
@@ -455,8 +455,8 @@ defmodule Minga.Editor.LspActionsTest do
       }
 
       result = LspActions.handle_prepare_rename_response(state, {:ok, resp})
-      assert result.vim.mode == :command
-      assert result.vim.mode_state.input == "rename hello_world"
+      assert result.workspace.vim.mode == :command
+      assert result.workspace.vim.mode_state.input == "rename hello_world"
 
       GenServer.stop(buf)
     end
@@ -482,8 +482,8 @@ defmodule Minga.Editor.LspActionsTest do
       }
 
       result = LspActions.handle_prepare_rename_response(state, {:ok, resp})
-      assert result.vim.mode == :command
-      assert result.vim.mode_state.input == "rename "
+      assert result.workspace.vim.mode == :command
+      assert result.workspace.vim.mode_state.input == "rename "
     end
   end
 
@@ -563,27 +563,31 @@ defmodule Minga.Editor.LspActionsTest do
 
   defp fake_state do
     %{
+      workspace: %{
+        buffers: %{active: nil},
+        viewport: %{rows: 24, cols: 80, top: 0},
+        lsp_pending: %{},
+        document_highlights: nil,
+        highlight: %Minga.Editor.State.Highlighting{}
+      },
       status_msg: nil,
-      last_jump_pos: nil,
       hover_popup: nil,
-      buffers: %{active: nil},
-      viewport: %{rows: 24, cols: 80, top: 0},
       code_lenses: [],
       inlay_hints: [],
       inlay_hint_debounce_timer: nil,
-      last_inlay_viewport_top: nil
+      last_inlay_viewport_top: nil,
+      selection_ranges: nil,
+      selection_range_index: 0
     }
   end
 
   defp fake_state_with_buffer(buf) do
     fake_state()
-    |> Map.put(:buffers, %{active: buf, list: [buf]})
-    |> Map.put(:lsp_pending, %{})
+    |> put_in([:workspace, :buffers], %{active: buf, list: [buf]})
   end
 
   defp fake_state_with_vim do
     fake_state()
-    |> Map.put(:vim, %VimState{mode: :normal, mode_state: nil})
-    |> Map.put(:lsp_pending, %{})
+    |> put_in([:workspace, :vim], %VimState{mode: :normal, mode_state: nil})
   end
 end

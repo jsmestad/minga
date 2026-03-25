@@ -78,7 +78,7 @@ defmodule Minga.Picker.LocationSource do
     state = set_jump_mark(state)
 
     current_path =
-      case state.buffers.active do
+      case state.workspace.buffers.active do
         nil -> nil
         buf -> BufferServer.file_path(buf)
       end
@@ -90,7 +90,7 @@ defmodule Minga.Picker.LocationSource do
         open_or_switch_to_file(state, path)
       end
 
-    case state.buffers.active do
+    case state.workspace.buffers.active do
       nil -> state
       buf -> BufferServer.move_to(buf, {line, col})
     end
@@ -101,7 +101,7 @@ defmodule Minga.Picker.LocationSource do
   @spec open_or_switch_to_file(EditorState.t(), String.t()) :: EditorState.t()
   defp open_or_switch_to_file(state, file_path) do
     idx =
-      Enum.find_index(state.buffers.list, fn buf ->
+      Enum.find_index(state.workspace.buffers.list, fn buf ->
         try do
           BufferServer.file_path(buf) == file_path
         catch
@@ -122,9 +122,9 @@ defmodule Minga.Picker.LocationSource do
   end
 
   @spec set_jump_mark(EditorState.t()) :: EditorState.t()
-  defp set_jump_mark(%{buffers: %{active: buf}} = state) when is_pid(buf) do
+  defp set_jump_mark(%{workspace: %{buffers: %{active: buf}}} = state) when is_pid(buf) do
     pos = BufferServer.cursor(buf)
-    %{state | vim: %{state.vim | last_jump_pos: pos}}
+    %{state | workspace: %{state.workspace | vim: %{state.workspace.vim | last_jump_pos: pos}}}
   end
 
   defp set_jump_mark(state), do: state

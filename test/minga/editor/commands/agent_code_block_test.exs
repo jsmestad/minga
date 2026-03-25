@@ -13,11 +13,13 @@ defmodule Minga.Editor.Commands.AgentCodeBlockTest do
   defp base_state do
     %EditorState{
       port_manager: self(),
-      viewport: Viewport.new(24, 80),
-      vim: VimState.new(),
-      buffers: %Buffers{},
-      agent: %AgentState{},
-      agent_ui: %UIState{}
+      workspace: %Minga.Workspace.State{
+        viewport: Viewport.new(24, 80),
+        vim: VimState.new(),
+        buffers: %Buffers{},
+        agent_ui: %UIState{}
+      },
+      agent: %AgentState{}
     }
   end
 
@@ -27,7 +29,7 @@ defmodule Minga.Editor.Commands.AgentCodeBlockTest do
       content = "defmodule Foo do\n  def bar, do: :ok\nend"
       new_state = AgentCommands.open_code_block(state, "elixir", content)
 
-      buf = new_state.buffers.active
+      buf = new_state.workspace.buffers.active
       assert is_pid(buf)
       assert BufferServer.content(buf) == content
     end
@@ -36,7 +38,7 @@ defmodule Minga.Editor.Commands.AgentCodeBlockTest do
       state = base_state()
       new_state = AgentCommands.open_code_block(state, "python", "print('hi')")
 
-      buf = new_state.buffers.active
+      buf = new_state.workspace.buffers.active
       name = BufferServer.buffer_name(buf)
       assert name == "*Agent: python*"
     end
@@ -45,7 +47,7 @@ defmodule Minga.Editor.Commands.AgentCodeBlockTest do
       state = base_state()
       new_state = AgentCommands.open_code_block(state, "", "some plain text")
 
-      buf = new_state.buffers.active
+      buf = new_state.workspace.buffers.active
       name = BufferServer.buffer_name(buf)
       assert name == "*Agent: text*"
     end
@@ -54,7 +56,7 @@ defmodule Minga.Editor.Commands.AgentCodeBlockTest do
       state = base_state()
       new_state = AgentCommands.open_code_block(state, "elixir", "IO.puts(:ok)")
 
-      buf = new_state.buffers.active
+      buf = new_state.workspace.buffers.active
       assert BufferServer.filetype(buf) == :elixir
     end
 
@@ -62,7 +64,7 @@ defmodule Minga.Editor.Commands.AgentCodeBlockTest do
       state = base_state()
       new_state = AgentCommands.open_code_block(state, "brainfuck", "+++[>+<-]")
 
-      buf = new_state.buffers.active
+      buf = new_state.workspace.buffers.active
       assert is_pid(buf)
       assert BufferServer.content(buf) == "+++[>+<-]"
     end
@@ -71,13 +73,13 @@ defmodule Minga.Editor.Commands.AgentCodeBlockTest do
       state = base_state()
 
       js_state = AgentCommands.open_code_block(state, "js", "console.log('hi')")
-      assert BufferServer.filetype(js_state.buffers.active) == :javascript
+      assert BufferServer.filetype(js_state.workspace.buffers.active) == :javascript
 
       py_state = AgentCommands.open_code_block(state, "py", "print('hi')")
-      assert BufferServer.filetype(py_state.buffers.active) == :python
+      assert BufferServer.filetype(py_state.workspace.buffers.active) == :python
 
       sh_state = AgentCommands.open_code_block(state, "bash", "echo hi")
-      assert BufferServer.filetype(sh_state.buffers.active) == :bash
+      assert BufferServer.filetype(sh_state.workspace.buffers.active) == :bash
     end
   end
 end

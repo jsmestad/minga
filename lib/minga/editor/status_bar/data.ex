@@ -102,7 +102,7 @@ defmodule Minga.Editor.StatusBar.Data do
   """
   @spec from_state(EditorState.t()) :: t()
   def from_state(state) do
-    active_window = Map.get(state.windows.map, state.windows.active)
+    active_window = Map.get(state.workspace.windows.map, state.workspace.windows.active)
 
     if active_window != nil and Content.agent_chat?(active_window.content) do
       {:agent, build_agent_data(state)}
@@ -115,7 +115,7 @@ defmodule Minga.Editor.StatusBar.Data do
 
   @spec build_buffer_data(EditorState.t()) :: buffer_data()
   defp build_buffer_data(state) do
-    buf = state.buffers.active
+    buf = state.workspace.buffers.active
     {line, col} = if buf, do: BufferServer.cursor(buf), else: {0, 0}
     line_count = if buf, do: BufferServer.line_count(buf), else: 1
     file_name = if buf, do: buf_display_name(buf), else: "[no file]"
@@ -146,8 +146,8 @@ defmodule Minga.Editor.StatusBar.Data do
       diagnostic_hint: diagnostic_hint,
       lsp_status: state.lsp_status,
       parser_status: state.parser_status,
-      buf_index: state.buffers.active_index + 1,
-      buf_count: length(state.buffers.list),
+      buf_index: state.workspace.buffers.active_index + 1,
+      buf_count: length(state.workspace.buffers.list),
       macro_recording: Editing.macro_recording_status(state),
       agent_status: agent.status,
       agent_theme_colors: if(agent.status, do: Theme.agent_theme(state.theme), else: nil),
@@ -190,7 +190,7 @@ defmodule Minga.Editor.StatusBar.Data do
     model_name = if panel.model_name != "", do: panel.model_name, else: "Agent"
 
     # Pull background buffer context so the status bar stays stable
-    buf = state.buffers.active
+    buf = state.workspace.buffers.active
     {line, col} = if buf, do: BufferServer.cursor(buf), else: {0, 0}
     line_count = if buf, do: BufferServer.line_count(buf), else: 1
     file_name = if buf, do: buf_display_name(buf), else: "[no file]"
@@ -223,8 +223,8 @@ defmodule Minga.Editor.StatusBar.Data do
       diagnostic_hint: diagnostic_hint,
       lsp_status: state.lsp_status,
       parser_status: state.parser_status,
-      buf_index: state.buffers.active_index + 1,
-      buf_count: length(state.buffers.list),
+      buf_index: state.workspace.buffers.active_index + 1,
+      buf_count: length(state.workspace.buffers.list),
       status_msg: state.status_msg
     }
   end

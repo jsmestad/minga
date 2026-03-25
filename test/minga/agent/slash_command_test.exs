@@ -74,8 +74,11 @@ defmodule Minga.Agent.SlashCommandTest do
 
       %EditorState{
         port_manager: nil,
-        viewport: Viewport.new(24, 80),
-        vim: VimState.new(),
+        workspace: %Minga.Workspace.State{
+          viewport: Viewport.new(24, 80),
+          vim: VimState.new(),
+          agent_ui: UIState.new()
+        },
         agent: %AgentState{
           session: session,
           status: :idle,
@@ -83,7 +86,6 @@ defmodule Minga.Agent.SlashCommandTest do
           spinner_timer: nil,
           buffer: nil
         },
-        agent_ui: UIState.new(),
         status_msg: nil
       }
     end

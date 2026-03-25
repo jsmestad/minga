@@ -45,9 +45,11 @@ defmodule Minga.Input.AgentPanelNavTest do
 
     %EditorState{
       port_manager: self(),
-      viewport: Viewport.new(24, 80),
+      workspace: %Minga.Workspace.State{
+        viewport: Viewport.new(24, 80),
+        agent_ui: agentic
+      },
       agent: agent,
-      agent_ui: agentic,
       focus_stack: [Scoped, Minga.Input.ModeFSM]
     }
   end
@@ -119,8 +121,12 @@ defmodule Minga.Input.AgentPanelNavTest do
 
       # Simulate a leader sequence in progress (SPC b was pressed, waiting for N)
       leader_trie = KeymapActive.leader_trie()
-      mode_state = %{state.vim.mode_state | leader_node: leader_trie}
-      state = %{state | vim: %{state.vim | mode_state: mode_state}}
+      mode_state = %{state.workspace.vim.mode_state | leader_node: leader_trie}
+
+      state = %{
+        state
+        | workspace: %{state.workspace | vim: %{state.workspace.vim | mode_state: mode_state}}
+      }
 
       # Should passthrough, not route through delegate_to_mode_fsm
       # (which swaps buffers.active and could clobber it on restore).
@@ -137,7 +143,7 @@ defmodule Minga.Input.AgentPanelNavTest do
 
       {:handled, new_state} = walk_surface_handlers(state, 27, 0)
       assert AgentAccess.input_focused?(new_state) == true
-      assert new_state.vim.mode == :normal
+      assert new_state.workspace.vim.mode == :normal
     end
 
     test "input mode intercepts printable chars" do
@@ -146,7 +152,11 @@ defmodule Minga.Input.AgentPanelNavTest do
       state =
         AgentAccess.update_agent_ui(state, fn ui -> put_in(ui.panel.input_focused, true) end)
 
-      state = %{state | vim: %{state.vim | mode: :insert}}
+      state = %{
+        state
+        | workspace: %{state.workspace | vim: %{state.workspace.vim | mode: :insert}}
+      }
+
       {:handled, new_state} = walk_surface_handlers(state, ?a, 0)
       assert UIState.input_text(AgentAccess.panel(new_state)) =~ "a"
     end
@@ -187,7 +197,11 @@ defmodule Minga.Input.AgentPanelNavTest do
       state =
         AgentAccess.update_agent_ui(state, fn ui -> put_in(ui.panel.input_focused, true) end)
 
-      state = %{state | vim: %{state.vim | mode: :insert}}
+      state = %{
+        state
+        | workspace: %{state.workspace | vim: %{state.workspace.vim | mode: :insert}}
+      }
+
       {:handled, new_state} = walk_surface_handlers(state, 13, 0x01)
       # Should have a newline in the input
       assert length(UIState.input_lines(AgentAccess.panel(new_state))) > 1

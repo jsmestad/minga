@@ -101,7 +101,7 @@ defmodule Minga.Picker.CodeActionSource do
 
   @spec resolve_action(term(), map()) :: map()
   defp resolve_action(state, action) do
-    case lsp_client_for(state.buffers.active) do
+    case lsp_client_for(state.workspace.buffers.active) do
       nil ->
         Log.warning(:lsp, "No LSP client to resolve code action")
         action
@@ -128,7 +128,7 @@ defmodule Minga.Picker.CodeActionSource do
 
   @spec execute_lsp_command(term(), String.t(), map()) :: term()
   defp execute_lsp_command(state, cmd, command) do
-    buf = state.buffers.active
+    buf = state.workspace.buffers.active
 
     case lsp_client_for(buf) do
       nil ->

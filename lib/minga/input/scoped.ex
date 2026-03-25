@@ -50,7 +50,7 @@ defmodule Minga.Input.Scoped do
 
   # Editor scope with agent side panel: handled by Input.AgentPanel.
   # Editor scope (no panel): always passthrough to mode FSM.
-  def handle_key(%{keymap_scope: :editor} = state, _cp, _mods) do
+  def handle_key(%{workspace: %{keymap_scope: :editor}} = state, _cp, _mods) do
     {:passthrough, state}
   end
 
@@ -59,7 +59,7 @@ defmodule Minga.Input.Scoped do
   # Agent scope: dispatch through scope resolution.
   # Matches when in agent scope (window-level agent
   # chat split pane or full agent view).
-  def handle_key(%{keymap_scope: :agent} = state, cp, mods) do
+  def handle_key(%{workspace: %{keymap_scope: :agent}} = state, cp, mods) do
     handle_agent_key(state, cp, mods)
   end
 

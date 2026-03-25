@@ -7,8 +7,8 @@ defmodule Minga.Editor.Commands.BufferManagement.FrontendTest do
 
   defp base_state(opts \\ []) do
     %{
+      workspace: %{buffers: %{messages: Keyword.get(opts, :messages)}},
       bottom_panel: %BottomPanel{},
-      buffers: %{messages: Keyword.get(opts, :messages)},
       status_msg: nil
     }
   end

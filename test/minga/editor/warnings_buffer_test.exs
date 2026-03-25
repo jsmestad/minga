@@ -132,7 +132,7 @@ defmodule Minga.Editor.WarningsBufferTest do
       :sys.get_state(ctx.editor)
 
       state = :sys.get_state(ctx.editor)
-      content = BufferServer.content(state.buffers.messages)
+      content = BufferServer.content(state.workspace.buffers.messages)
       assert String.contains?(content, "[WARN] something broke")
     end
 

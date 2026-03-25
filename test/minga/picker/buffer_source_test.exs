@@ -25,9 +25,11 @@ defmodule Minga.Picker.BufferSourceTest do
 
   defp fake_state(buffers, opts \\ []) do
     %{
-      buffers: %Buffers{
-        list: buffers,
-        messages: Keyword.get(opts, :messages)
+      workspace: %{
+        buffers: %Buffers{
+          list: buffers,
+          messages: Keyword.get(opts, :messages)
+        }
       }
     }
   end

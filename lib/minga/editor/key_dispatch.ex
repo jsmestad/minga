@@ -69,8 +69,8 @@ defmodule Minga.Editor.KeyDispatch do
 
     # Fire mode change hook and break undo coalescing.
     if old_mode != new_mode do
-      if base_state.buffers.active,
-        do: BufferServer.break_undo_coalescing(base_state.buffers.active)
+      if base_state.workspace.buffers.active,
+        do: BufferServer.break_undo_coalescing(base_state.workspace.buffers.active)
 
       Minga.Events.broadcast(:mode_changed, %Minga.Events.ModeEvent{old: old_mode, new: new_mode})
     end
@@ -112,7 +112,7 @@ defmodule Minga.Editor.KeyDispatch do
   """
   @spec dispatch_command(EditorState.t(), Mode.command()) :: EditorState.t()
   def dispatch_command(state, cmd) do
-    old_buffer = state.buffers.active
+    old_buffer = state.workspace.buffers.active
     cmd_name = command_name(cmd)
 
     execute = fn s ->
@@ -136,7 +136,7 @@ defmodule Minga.Editor.KeyDispatch do
   defp command_name(_cmd), do: :unknown
 
   # Checks whether the buffer in the active window is read-only.
-  # Prefers the active window's buffer over state.buffers.active, since popup
+  # Prefers the active window's buffer over state.workspace.buffers.active, since popup
   # windows may display a different buffer than the one tracked in the
   # buffers struct.
   @spec active_buffer_read_only?(EditorState.t()) :: boolean()
@@ -151,11 +151,13 @@ defmodule Minga.Editor.KeyDispatch do
   end
 
   @spec check_window_buffer_read_only(EditorState.t()) :: boolean()
-  defp check_window_buffer_read_only(%{windows: %{map: map, active: active_id}} = state) do
+  defp check_window_buffer_read_only(
+         %{workspace: %{windows: %{map: map, active: active_id}}} = state
+       ) do
     buf =
       case Map.fetch(map, active_id) do
         {:ok, window} -> window.buffer
-        :error -> state.buffers.active
+        :error -> state.workspace.buffers.active
       end
 
     buf != nil and BufferServer.read_only?(buf)
@@ -209,9 +211,9 @@ defmodule Minga.Editor.KeyDispatch do
   defp set_mode_filetype(mode_state, _state), do: mode_state
 
   @spec active_filetype(EditorState.t()) :: atom()
-  defp active_filetype(%{buffers: %{active: nil}}), do: :text
+  defp active_filetype(%{workspace: %{buffers: %{active: nil}}}), do: :text
 
-  defp active_filetype(%{buffers: %{active: buf}}) do
+  defp active_filetype(%{workspace: %{buffers: %{active: buf}}}) do
     BufferServer.filetype(buf)
   catch
     :exit, _ -> :text
