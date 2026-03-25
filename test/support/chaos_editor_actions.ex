@@ -152,7 +152,7 @@ defmodule Minga.Chaos.EditorActions do
   @spec wheel_up(map()) :: map()
   def wheel_up(%{editor: editor} = ctx) do
     send(editor, {:minga_input, {:mouse_event, 10, 10, :wheel_up, 0, :press, 1}})
-    :sys.get_state(editor)
+    sync_barrier(editor)
     Invariants.collect_result(ctx)
   end
 
@@ -160,7 +160,7 @@ defmodule Minga.Chaos.EditorActions do
   @spec wheel_down(map()) :: map()
   def wheel_down(%{editor: editor} = ctx) do
     send(editor, {:minga_input, {:mouse_event, 10, 10, :wheel_down, 0, :press, 1}})
-    :sys.get_state(editor)
+    sync_barrier(editor)
     Invariants.collect_result(ctx)
   end
 
@@ -229,7 +229,7 @@ defmodule Minga.Chaos.EditorActions do
   def resize(%{editor: editor, port: port} = ctx, width, height) do
     HeadlessPort.resize(port, width, height)
     send(editor, {:minga_input, {:resize, width, height}})
-    :sys.get_state(editor)
+    sync_barrier(editor)
     Invariants.collect_result(ctx)
   end
 
@@ -237,20 +237,20 @@ defmodule Minga.Chaos.EditorActions do
   @spec mouse_click(map(), non_neg_integer(), non_neg_integer()) :: map()
   def mouse_click(%{editor: editor} = ctx, row, col) do
     send(editor, {:minga_input, {:mouse_event, row, col, :left, 0, :press, 1}})
-    :sys.get_state(editor)
+    sync_barrier(editor)
     Invariants.collect_result(ctx)
   end
 
   # ── Private helpers ────────────────────────────────────────────────────────
 
   defp send_leader_and_collect(%{editor: editor} = ctx, keys) do
-    # Send SPC (leader) then each subsequent key, with :sys.get_state barrier after each
+    # Send SPC (leader) then each subsequent key, with sync barrier after each.
     send(editor, {:minga_input, {:key_press, 32, 0}})
-    :sys.get_state(editor)
+    sync_barrier(editor)
 
     Enum.each(keys, fn key ->
       send(editor, {:minga_input, {:key_press, key, 0}})
-      :sys.get_state(editor)
+      sync_barrier(editor)
     end)
 
     Invariants.collect_result(ctx)
@@ -258,13 +258,25 @@ defmodule Minga.Chaos.EditorActions do
 
   defp send_key_and_collect(%{editor: editor} = ctx, codepoint, mods) do
     send(editor, {:minga_input, {:key_press, codepoint, mods}})
-    :sys.get_state(editor)
+    sync_barrier(editor)
     Invariants.collect_result(ctx)
   end
 
   defp send_key_sync(%{editor: editor}, codepoint, mods) do
     send(editor, {:minga_input, {:key_press, codepoint, mods}})
-    :sys.get_state(editor)
+    sync_barrier(editor)
+  end
+
+  # Synchronization barrier that returns instantly if the process is dead.
+  # :sys.get_state uses gen:call internally, which monitors the target.
+  # A dead process triggers the monitor immediately (:noproc), so the
+  # catch fires in microseconds instead of blocking until a timeout.
+  @spec sync_barrier(pid()) :: :ok | :dead
+  defp sync_barrier(pid) do
+    :sys.get_state(pid)
+    :ok
+  catch
+    :exit, _ -> :dead
   end
 
   defp motion_codepoint(:h), do: ?h

@@ -102,7 +102,12 @@ defmodule Minga.Chaos.EditorFuzzerTest do
     # Flush the editor's mailbox so the :ready handler runs and renders
     # before we wait for the frame. Without this barrier, collect_frame
     # races against the editor's scheduling on slow CI.
-    :sys.get_state(editor)
+    try do
+      :sys.get_state(editor)
+    catch
+      :exit, _ -> :ok
+    end
+
     {:ok, _snapshot} = HeadlessPort.collect_frame(ref)
 
     %{editor: editor, buffer: buffer, port: port, width: width, height: height}
