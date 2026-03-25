@@ -25,7 +25,7 @@ defmodule Minga.Editor.Commands.Visual do
   @spec execute(state(), Mode.command()) :: state()
 
   def execute(
-        %{buffers: %{active: buf}, vim: %{mode_state: %VisualState{} = ms}} = state,
+        %{workspace: %{buffers: %{active: buf}, vim: %{mode_state: %VisualState{} = ms}}} = state,
         :delete_visual_selection
       ) do
     anchor = ms.visual_anchor
@@ -55,7 +55,7 @@ defmodule Minga.Editor.Commands.Visual do
   end
 
   def execute(
-        %{buffers: %{active: buf}, vim: %{mode_state: %VisualState{} = ms}} = state,
+        %{workspace: %{buffers: %{active: buf}, vim: %{mode_state: %VisualState{} = ms}}} = state,
         :yank_visual_selection
       ) do
     anchor = ms.visual_anchor
@@ -85,7 +85,7 @@ defmodule Minga.Editor.Commands.Visual do
   end
 
   def execute(
-        %{buffers: %{active: buf}, vim: %{mode_state: %VisualState{} = ms}} = state,
+        %{workspace: %{buffers: %{active: buf}, vim: %{mode_state: %VisualState{} = ms}}} = state,
         {:wrap_visual_selection, open, close}
       ) do
     anchor = ms.visual_anchor
@@ -103,7 +103,8 @@ defmodule Minga.Editor.Commands.Visual do
   end
 
   def execute(
-        %{buffers: %{active: buf}, vim: %{mode_state: %VisualState{} = ms} = vim} = state,
+        %{workspace: %{buffers: %{active: buf}, vim: %{mode_state: %VisualState{} = ms} = vim}} =
+          state,
         {:visual_text_object, modifier, spec}
       ) do
     gb = BufferServer.snapshot(buf)
@@ -119,13 +120,13 @@ defmodule Minga.Editor.Commands.Visual do
         # Update visual anchor to start of text object, move cursor to end
         new_ms = %{ms | visual_anchor: start_pos}
         BufferServer.move_to(buf, end_pos)
-        %{state | vim: %{vim | mode_state: new_ms}}
+        %{state | workspace: %{state.workspace | vim: %{vim | mode_state: new_ms}}}
     end
   end
 
   # ── Select all ─────────────────────────────────────────────────────────────
 
-  def execute(%{buffers: %{active: buf}} = state, :select_all) when is_pid(buf) do
+  def execute(%{workspace: %{buffers: %{active: buf}}} = state, :select_all) when is_pid(buf) do
     line_count = BufferServer.line_count(buf)
     last_line = max(line_count - 1, 0)
 

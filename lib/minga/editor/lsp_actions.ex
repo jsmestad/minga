@@ -3,7 +3,7 @@ defmodule Minga.Editor.LspActions do
   LSP request/response handlers for navigation, refactoring, and code intelligence.
 
   Follows the same async pattern as completion: sends a request via
-  `Client.request/3`, stores the reference in `state.lsp_pending`, and
+  `Client.request/3`, stores the reference in `state.workspace.lsp_pending`, and
   processes the response when it arrives in `Editor.handle_info`.
 
   Supported LSP methods:
@@ -48,11 +48,11 @@ defmodule Minga.Editor.LspActions do
 
   @doc "Sends a textDocument/definition request for the symbol under the cursor."
   @spec goto_definition(state()) :: state()
-  def goto_definition(%{buffers: %{active: nil}} = state) do
+  def goto_definition(%{workspace: %{buffers: %{active: nil}}} = state) do
     %{state | status_msg: "No active buffer"}
   end
 
-  def goto_definition(%{buffers: %{active: buf}} = state) do
+  def goto_definition(%{workspace: %{buffers: %{active: buf}}} = state) do
     case lsp_client_for(state, buf) do
       nil ->
         %{state | status_msg: "No language server"}
@@ -64,11 +64,11 @@ defmodule Minga.Editor.LspActions do
 
   @doc "Sends a textDocument/hover request for the symbol under the cursor."
   @spec hover(state()) :: state()
-  def hover(%{buffers: %{active: nil}} = state) do
+  def hover(%{workspace: %{buffers: %{active: nil}}} = state) do
     %{state | status_msg: "No active buffer"}
   end
 
-  def hover(%{buffers: %{active: buf}} = state) do
+  def hover(%{workspace: %{buffers: %{active: buf}}} = state) do
     case lsp_client_for(state, buf) do
       nil ->
         %{state | status_msg: "No language server"}
@@ -82,11 +82,11 @@ defmodule Minga.Editor.LspActions do
 
   @doc "Sends a textDocument/references request for the symbol under the cursor."
   @spec find_references(state()) :: state()
-  def find_references(%{buffers: %{active: nil}} = state) do
+  def find_references(%{workspace: %{buffers: %{active: nil}}} = state) do
     %{state | status_msg: "No active buffer"}
   end
 
-  def find_references(%{buffers: %{active: buf}} = state) do
+  def find_references(%{workspace: %{buffers: %{active: buf}}} = state) do
     case lsp_client_for(state, buf) do
       nil ->
         %{state | status_msg: "No language server"}
@@ -109,7 +109,11 @@ defmodule Minga.Editor.LspActions do
             }
 
             ref = Client.request(client, "textDocument/references", params)
-            put_in(state.lsp_pending, Map.put(state.lsp_pending, ref, :references))
+
+            put_in(
+              state.workspace.lsp_pending,
+              Map.put(state.workspace.lsp_pending, ref, :references)
+            )
         end
     end
   end
@@ -120,12 +124,12 @@ defmodule Minga.Editor.LspActions do
   Sends a textDocument/documentHighlight request for the symbol under the cursor.
 
   Called on a debounce timer after cursor movement. Results are stored in
-  `state.document_highlights` for the render pipeline to consume.
+  `state.workspace.document_highlights` for the render pipeline to consume.
   """
   @spec document_highlight(state()) :: state()
-  def document_highlight(%{buffers: %{active: nil}} = state), do: state
+  def document_highlight(%{workspace: %{buffers: %{active: nil}}} = state), do: state
 
-  def document_highlight(%{buffers: %{active: buf}} = state) do
+  def document_highlight(%{workspace: %{buffers: %{active: buf}}} = state) do
     case lsp_client_for(state, buf) do
       nil ->
         state
@@ -148,14 +152,14 @@ defmodule Minga.Editor.LspActions do
   cursor movement in normal mode.
   """
   @spec schedule_document_highlight(state()) :: state()
-  def schedule_document_highlight(%{buffers: %{active: nil}} = state), do: state
+  def schedule_document_highlight(%{workspace: %{buffers: %{active: nil}}} = state), do: state
 
   def schedule_document_highlight(state) do
     # Cancel any pending timer
     state = cancel_highlight_timer(state)
 
     # Only schedule if there's an LSP client available
-    case lsp_client_for(state, state.buffers.active) do
+    case lsp_client_for(state, state.workspace.buffers.active) do
       nil ->
         state
 
@@ -170,7 +174,7 @@ defmodule Minga.Editor.LspActions do
   def clear_document_highlights(state) do
     state
     |> cancel_highlight_timer()
-    |> Map.put(:document_highlights, nil)
+    |> then(fn s -> put_in(s.workspace.document_highlights, nil) end)
   end
 
   @spec cancel_highlight_timer(state()) :: state()
@@ -185,11 +189,11 @@ defmodule Minga.Editor.LspActions do
 
   @doc "Sends a textDocument/codeAction request for the cursor position."
   @spec code_action(state()) :: state()
-  def code_action(%{buffers: %{active: nil}} = state) do
+  def code_action(%{workspace: %{buffers: %{active: nil}}} = state) do
     %{state | status_msg: "No active buffer"}
   end
 
-  def code_action(%{buffers: %{active: buf}} = state) do
+  def code_action(%{workspace: %{buffers: %{active: buf}}} = state) do
     case lsp_client_for(state, buf) do
       nil ->
         %{state | status_msg: "No language server"}
@@ -219,7 +223,11 @@ defmodule Minga.Editor.LspActions do
             }
 
             ref = Client.request(client, "textDocument/codeAction", params)
-            put_in(state.lsp_pending, Map.put(state.lsp_pending, ref, :code_action))
+
+            put_in(
+              state.workspace.lsp_pending,
+              Map.put(state.workspace.lsp_pending, ref, :code_action)
+            )
         end
     end
   end
@@ -228,11 +236,11 @@ defmodule Minga.Editor.LspActions do
 
   @doc "Sends a textDocument/prepareRename request to validate the rename position."
   @spec prepare_rename(state()) :: state()
-  def prepare_rename(%{buffers: %{active: nil}} = state) do
+  def prepare_rename(%{workspace: %{buffers: %{active: nil}}} = state) do
     %{state | status_msg: "No active buffer"}
   end
 
-  def prepare_rename(%{buffers: %{active: buf}} = state) do
+  def prepare_rename(%{workspace: %{buffers: %{active: buf}}} = state) do
     case lsp_client_for(state, buf) do
       nil ->
         %{state | status_msg: "No language server"}
@@ -244,11 +252,11 @@ defmodule Minga.Editor.LspActions do
 
   @doc "Sends a textDocument/rename request with the given new name."
   @spec rename(state(), String.t()) :: state()
-  def rename(%{buffers: %{active: nil}} = state, _new_name) do
+  def rename(%{workspace: %{buffers: %{active: nil}}} = state, _new_name) do
     %{state | status_msg: "No active buffer"}
   end
 
-  def rename(%{buffers: %{active: buf}} = state, new_name) do
+  def rename(%{workspace: %{buffers: %{active: buf}}} = state, new_name) do
     case lsp_client_for(state, buf) do
       nil ->
         %{state | status_msg: "No language server"}
@@ -271,7 +279,11 @@ defmodule Minga.Editor.LspActions do
             }
 
             ref = Client.request(client, "textDocument/rename", params)
-            put_in(state.lsp_pending, Map.put(state.lsp_pending, ref, :rename))
+
+            put_in(
+              state.workspace.lsp_pending,
+              Map.put(state.workspace.lsp_pending, ref, :rename)
+            )
         end
     end
   end
@@ -280,11 +292,11 @@ defmodule Minga.Editor.LspActions do
 
   @doc "Sends a textDocument/typeDefinition request."
   @spec goto_type_definition(state()) :: state()
-  def goto_type_definition(%{buffers: %{active: nil}} = state) do
+  def goto_type_definition(%{workspace: %{buffers: %{active: nil}}} = state) do
     %{state | status_msg: "No active buffer"}
   end
 
-  def goto_type_definition(%{buffers: %{active: buf}} = state) do
+  def goto_type_definition(%{workspace: %{buffers: %{active: buf}}} = state) do
     case lsp_client_for(state, buf) do
       nil ->
         %{state | status_msg: "No language server"}
@@ -296,11 +308,11 @@ defmodule Minga.Editor.LspActions do
 
   @doc "Sends a textDocument/implementation request."
   @spec goto_implementation(state()) :: state()
-  def goto_implementation(%{buffers: %{active: nil}} = state) do
+  def goto_implementation(%{workspace: %{buffers: %{active: nil}}} = state) do
     %{state | status_msg: "No active buffer"}
   end
 
-  def goto_implementation(%{buffers: %{active: buf}} = state) do
+  def goto_implementation(%{workspace: %{buffers: %{active: buf}}} = state) do
     case lsp_client_for(state, buf) do
       nil ->
         %{state | status_msg: "No language server"}
@@ -314,11 +326,11 @@ defmodule Minga.Editor.LspActions do
 
   @doc "Sends a textDocument/documentSymbol request."
   @spec document_symbols(state()) :: state()
-  def document_symbols(%{buffers: %{active: nil}} = state) do
+  def document_symbols(%{workspace: %{buffers: %{active: nil}}} = state) do
     %{state | status_msg: "No active buffer"}
   end
 
-  def document_symbols(%{buffers: %{active: buf}} = state) do
+  def document_symbols(%{workspace: %{buffers: %{active: buf}}} = state) do
     case lsp_client_for(state, buf) do
       nil ->
         %{state | status_msg: "No language server"}
@@ -338,7 +350,11 @@ defmodule Minga.Editor.LspActions do
             }
 
             ref = Client.request(client, "textDocument/documentSymbol", params)
-            put_in(state.lsp_pending, Map.put(state.lsp_pending, ref, :document_symbol))
+
+            put_in(
+              state.workspace.lsp_pending,
+              Map.put(state.workspace.lsp_pending, ref, :document_symbol)
+            )
         end
     end
   end
@@ -347,11 +363,11 @@ defmodule Minga.Editor.LspActions do
 
   @doc "Sends a workspace/symbol request with the given query."
   @spec workspace_symbols(state(), String.t()) :: state()
-  def workspace_symbols(%{buffers: %{active: nil}} = state, _query) do
+  def workspace_symbols(%{workspace: %{buffers: %{active: nil}}} = state, _query) do
     %{state | status_msg: "No active buffer"}
   end
 
-  def workspace_symbols(%{buffers: %{active: buf}} = state, query) do
+  def workspace_symbols(%{workspace: %{buffers: %{active: buf}}} = state, query) do
     case lsp_client_for(state, buf) do
       nil ->
         %{state | status_msg: "No language server"}
@@ -359,7 +375,11 @@ defmodule Minga.Editor.LspActions do
       client ->
         params = %{"query" => query}
         ref = Client.request(client, "workspace/symbol", params)
-        put_in(state.lsp_pending, Map.put(state.lsp_pending, ref, :workspace_symbol))
+
+        put_in(
+          state.workspace.lsp_pending,
+          Map.put(state.workspace.lsp_pending, ref, :workspace_symbol)
+        )
     end
   end
 
@@ -367,11 +387,11 @@ defmodule Minga.Editor.LspActions do
 
   @doc "Sends a textDocument/selectionRange request."
   @spec selection_range(state()) :: state()
-  def selection_range(%{buffers: %{active: nil}} = state) do
+  def selection_range(%{workspace: %{buffers: %{active: nil}}} = state) do
     %{state | status_msg: "No active buffer"}
   end
 
-  def selection_range(%{buffers: %{active: buf}} = state) do
+  def selection_range(%{workspace: %{buffers: %{active: buf}}} = state) do
     case lsp_client_for(state, buf) do
       nil ->
         %{state | status_msg: "No language server"}
@@ -393,7 +413,11 @@ defmodule Minga.Editor.LspActions do
             }
 
             ref = Client.request(client, "textDocument/selectionRange", params)
-            put_in(state.lsp_pending, Map.put(state.lsp_pending, ref, :selection_range))
+
+            put_in(
+              state.workspace.lsp_pending,
+              Map.put(state.workspace.lsp_pending, ref, :selection_range)
+            )
         end
     end
   end
@@ -436,8 +460,14 @@ defmodule Minga.Editor.LspActions do
 
   def selection_shrink(%{selection_ranges: [_ | _]} = state) do
     # At innermost range, exit visual mode
-    vim = VimState.transition(state.vim, :normal)
-    %{state | vim: vim, selection_ranges: nil, selection_range_index: 0}
+    vim = VimState.transition(state.workspace.vim, :normal)
+
+    %{
+      state
+      | workspace: %{state.workspace | vim: vim},
+        selection_ranges: nil,
+        selection_range_index: 0
+    }
   end
 
   def selection_shrink(state) do
@@ -448,11 +478,11 @@ defmodule Minga.Editor.LspActions do
 
   @doc "Sends a textDocument/prepareCallHierarchy request."
   @spec prepare_call_hierarchy(state()) :: state()
-  def prepare_call_hierarchy(%{buffers: %{active: nil}} = state) do
+  def prepare_call_hierarchy(%{workspace: %{buffers: %{active: nil}}} = state) do
     %{state | status_msg: "No active buffer"}
   end
 
-  def prepare_call_hierarchy(%{buffers: %{active: buf}} = state) do
+  def prepare_call_hierarchy(%{workspace: %{buffers: %{active: buf}}} = state) do
     case lsp_client_for(state, buf) do
       nil ->
         %{state | status_msg: "No language server"}
@@ -470,11 +500,11 @@ defmodule Minga.Editor.LspActions do
 
   @doc "Sends a textDocument/prepareCallHierarchy request for outgoing calls."
   @spec prepare_outgoing_call_hierarchy(state()) :: state()
-  def prepare_outgoing_call_hierarchy(%{buffers: %{active: nil}} = state) do
+  def prepare_outgoing_call_hierarchy(%{workspace: %{buffers: %{active: nil}}} = state) do
     %{state | status_msg: "No active buffer"}
   end
 
-  def prepare_outgoing_call_hierarchy(%{buffers: %{active: buf}} = state) do
+  def prepare_outgoing_call_hierarchy(%{workspace: %{buffers: %{active: buf}}} = state) do
     case lsp_client_for(state, buf) do
       nil ->
         %{state | status_msg: "No language server"}
@@ -494,11 +524,11 @@ defmodule Minga.Editor.LspActions do
 
   @doc "Sends a textDocument/codeLens request."
   @spec code_lens(state()) :: state()
-  def code_lens(%{buffers: %{active: nil}} = state) do
+  def code_lens(%{workspace: %{buffers: %{active: nil}}} = state) do
     %{state | status_msg: "No active buffer"}
   end
 
-  def code_lens(%{buffers: %{active: buf}} = state) do
+  def code_lens(%{workspace: %{buffers: %{active: buf}}} = state) do
     case lsp_client_for(state, buf) do
       nil ->
         state
@@ -514,7 +544,11 @@ defmodule Minga.Editor.LspActions do
             uri = SyncServer.path_to_uri(path)
             params = %{"textDocument" => %{"uri" => uri}}
             ref = Client.request(client, "textDocument/codeLens", params)
-            put_in(state.lsp_pending, Map.put(state.lsp_pending, ref, :code_lens))
+
+            put_in(
+              state.workspace.lsp_pending,
+              Map.put(state.workspace.lsp_pending, ref, :code_lens)
+            )
         end
     end
   end
@@ -523,11 +557,11 @@ defmodule Minga.Editor.LspActions do
 
   @doc "Sends a textDocument/inlayHint request for the visible range."
   @spec inlay_hints(state()) :: state()
-  def inlay_hints(%{buffers: %{active: nil}} = state) do
+  def inlay_hints(%{workspace: %{buffers: %{active: nil}}} = state) do
     %{state | status_msg: "No active buffer"}
   end
 
-  def inlay_hints(%{buffers: %{active: buf}} = state) do
+  def inlay_hints(%{workspace: %{buffers: %{active: buf}}} = state) do
     case lsp_client_for(state, buf) do
       nil ->
         state
@@ -541,7 +575,7 @@ defmodule Minga.Editor.LspActions do
 
           path ->
             uri = SyncServer.path_to_uri(path)
-            vp = state.viewport
+            vp = state.workspace.viewport
 
             params = %{
               "textDocument" => %{"uri" => uri},
@@ -552,7 +586,11 @@ defmodule Minga.Editor.LspActions do
             }
 
             ref = Client.request(client, "textDocument/inlayHint", params)
-            put_in(state.lsp_pending, Map.put(state.lsp_pending, ref, :inlay_hint))
+
+            put_in(
+              state.workspace.lsp_pending,
+              Map.put(state.workspace.lsp_pending, ref, :inlay_hint)
+            )
         end
     end
   end
@@ -567,7 +605,7 @@ defmodule Minga.Editor.LspActions do
   during rapid scrolling.
   """
   @spec schedule_inlay_hints_on_scroll(state()) :: state()
-  def schedule_inlay_hints_on_scroll(%{buffers: %{active: nil}} = state), do: state
+  def schedule_inlay_hints_on_scroll(%{workspace: %{buffers: %{active: nil}}} = state), do: state
 
   def schedule_inlay_hints_on_scroll(state) do
     vp_top = effective_viewport_top(state)
@@ -594,14 +632,14 @@ defmodule Minga.Editor.LspActions do
   end
 
   # Returns the viewport top for the active window, falling back to
-  # state.viewport.top. Uses EditorState.active_window_viewport when
-  # the state is a proper struct, otherwise reads state.viewport directly.
+  # state.workspace.viewport.top. Uses EditorState.active_window_viewport when
+  # the state is a proper struct, otherwise reads state.workspace.viewport directly.
   @spec effective_viewport_top(state()) :: non_neg_integer()
   defp effective_viewport_top(%EditorState{} = state) do
     EditorState.active_window_viewport(state).top
   end
 
-  defp effective_viewport_top(state), do: state.viewport.top
+  defp effective_viewport_top(state), do: state.workspace.viewport.top
 
   # ── Response handlers ──────────────────────────────────────────────────────
 
@@ -749,25 +787,25 @@ defmodule Minga.Editor.LspActions do
   @doc """
   Handles a textDocument/documentHighlight response.
 
-  Stores the highlight ranges in `state.document_highlights` for the
+  Stores the highlight ranges in `state.workspace.document_highlights` for the
   render pipeline to consume.
   """
   @spec handle_document_highlight_response(state(), {:ok, term()} | {:error, term()}) :: state()
   def handle_document_highlight_response(state, {:error, _error}) do
-    %{state | document_highlights: nil}
+    %{state | workspace: %{state.workspace | document_highlights: nil}}
   end
 
   def handle_document_highlight_response(state, {:ok, nil}) do
-    %{state | document_highlights: nil}
+    %{state | workspace: %{state.workspace | document_highlights: nil}}
   end
 
   def handle_document_highlight_response(state, {:ok, []}) do
-    %{state | document_highlights: nil}
+    %{state | workspace: %{state.workspace | document_highlights: nil}}
   end
 
   def handle_document_highlight_response(state, {:ok, highlights}) when is_list(highlights) do
     parsed = Enum.map(highlights, &DocumentHighlight.from_lsp/1)
-    %{state | document_highlights: parsed}
+    %{state | workspace: %{state.workspace | document_highlights: parsed}}
   end
 
   # ── Code action response ──────────────────────────────────────────────────
@@ -820,8 +858,8 @@ defmodule Minga.Editor.LspActions do
     # Enter command mode with "rename <placeholder>" pre-filled
     # The ex-command parser handles "rename <new_name>" → {:rename, new_name}
     command_state = %CommandState{input: "rename #{placeholder}"}
-    vim = VimState.transition(state.vim, :command, command_state)
-    %{state | vim: vim}
+    vim = VimState.transition(state.workspace.vim, :command, command_state)
+    %{state | workspace: %{state.workspace | vim: vim}}
   end
 
   @doc """
@@ -1305,7 +1343,7 @@ defmodule Minga.Editor.LspActions do
         }
 
         ref = Client.request(client, method, params)
-        put_in(state.lsp_pending, Map.put(state.lsp_pending, ref, kind))
+        put_in(state.workspace.lsp_pending, Map.put(state.workspace.lsp_pending, ref, kind))
     end
   end
 
@@ -1334,19 +1372,19 @@ defmodule Minga.Editor.LspActions do
   @spec jump_to_location(state(), String.t(), non_neg_integer(), non_neg_integer()) :: state()
   defp jump_to_location(state, uri, line, col) do
     target_path = SyncServer.uri_to_path(uri)
-    current_path = BufferServer.file_path(state.buffers.active)
+    current_path = BufferServer.file_path(state.workspace.buffers.active)
 
     # Set jump mark before navigating
     state = set_jump_mark(state)
 
     if target_path == current_path do
       # Same file: just move the cursor
-      BufferServer.move_to(state.buffers.active, {line, col})
+      BufferServer.move_to(state.workspace.buffers.active, {line, col})
       state
     else
       # Different file: open it, then move cursor
       state = open_or_switch_to_file(state, target_path)
-      BufferServer.move_to(state.buffers.active, {line, col})
+      BufferServer.move_to(state.workspace.buffers.active, {line, col})
       state
     end
   end
@@ -1355,7 +1393,7 @@ defmodule Minga.Editor.LspActions do
   defp open_or_switch_to_file(state, file_path) do
     # Check if already open
     idx =
-      Enum.find_index(state.buffers.list, fn buf ->
+      Enum.find_index(state.workspace.buffers.list, fn buf ->
         try do
           BufferServer.file_path(buf) == file_path
         catch
@@ -1376,9 +1414,9 @@ defmodule Minga.Editor.LspActions do
   end
 
   @spec set_jump_mark(state()) :: state()
-  defp set_jump_mark(%{buffers: %{active: buf}} = state) when is_pid(buf) do
+  defp set_jump_mark(%{workspace: %{buffers: %{active: buf}}} = state) when is_pid(buf) do
     pos = BufferServer.cursor(buf)
-    %{state | vim: %{state.vim | last_jump_pos: pos}}
+    %{state | workspace: %{state.workspace | vim: %{state.workspace.vim | last_jump_pos: pos}}}
   end
 
   defp set_jump_mark(state), do: state
@@ -1424,17 +1462,17 @@ defmodule Minga.Editor.LspActions do
   @spec hover_cursor_screen_position(state()) :: {non_neg_integer(), non_neg_integer()}
   defp hover_cursor_screen_position(state) do
     # Use the viewport cursor position from the active window
-    buf = state.buffers.active
+    buf = state.workspace.buffers.active
 
     if buf do
       {line, col} = BufferServer.cursor(buf)
       # Approximate screen position: line offset from viewport top + gutter
-      vp = state.viewport
+      vp = state.workspace.viewport
       screen_row = line - vp.top + 1
       screen_col = col + 4
       {clamp(screen_row, 1, vp.rows - 2), clamp(screen_col, 0, vp.cols - 1)}
     else
-      {div(state.viewport.rows, 2), div(state.viewport.cols, 2)}
+      {div(state.workspace.viewport.rows, 2), div(state.workspace.viewport.cols, 2)}
     end
   end
 
@@ -1551,7 +1589,7 @@ defmodule Minga.Editor.LspActions do
   defp resolve_code_lenses(state, []), do: state
 
   defp resolve_code_lenses(state, unresolved) do
-    buf = state.buffers.active
+    buf = state.workspace.buffers.active
 
     case lsp_client_for(state, buf) do
       nil ->
@@ -1560,7 +1598,11 @@ defmodule Minga.Editor.LspActions do
       client ->
         Enum.reduce(unresolved, state, fn lens, st ->
           ref = Client.request(client, "codeLens/resolve", lens)
-          put_in(st.lsp_pending, Map.put(st.lsp_pending, ref, :code_lens_resolve))
+
+          put_in(
+            st.workspace.lsp_pending,
+            Map.put(st.workspace.lsp_pending, ref, :code_lens_resolve)
+          )
         end)
     end
   end
@@ -1633,7 +1675,8 @@ defmodule Minga.Editor.LspActions do
           {non_neg_integer(), non_neg_integer()},
           {non_neg_integer(), non_neg_integer()}
         ) :: String.t()
-  defp read_range_from_buffer(%{buffers: %{active: buf}}, {sl, sc}, {el, ec}) when is_pid(buf) do
+  defp read_range_from_buffer(%{workspace: %{buffers: %{active: buf}}}, {sl, sc}, {el, ec})
+       when is_pid(buf) do
     {adj_el, adj_ec} = adjust_lsp_end_position(buf, el, ec)
     BufferServer.content_range(buf, {sl, sc}, {adj_el, adj_ec})
   rescue
@@ -1749,7 +1792,7 @@ defmodule Minga.Editor.LspActions do
 
   @spec apply_selection_range(state(), map()) :: state()
   defp apply_selection_range(state, range) do
-    buf = state.buffers.active
+    buf = state.workspace.buffers.active
 
     if buf do
       # Move cursor to the end of the range
@@ -1761,8 +1804,8 @@ defmodule Minga.Editor.LspActions do
         visual_type: :char
       }
 
-      vim = VimState.transition(state.vim, :visual, visual_state)
-      %{state | vim: vim}
+      vim = VimState.transition(state.workspace.vim, :visual, visual_state)
+      %{state | workspace: %{state.workspace | vim: vim}}
     else
       state
     end
@@ -1770,7 +1813,7 @@ defmodule Minga.Editor.LspActions do
 
   @spec request_incoming_calls(state(), map()) :: state()
   defp request_incoming_calls(state, item) do
-    buf = state.buffers.active
+    buf = state.workspace.buffers.active
 
     case lsp_client_for(state, buf) do
       nil ->
@@ -1779,13 +1822,17 @@ defmodule Minga.Editor.LspActions do
       client ->
         params = %{"item" => item}
         ref = Client.request(client, "callHierarchy/incomingCalls", params)
-        put_in(state.lsp_pending, Map.put(state.lsp_pending, ref, :incoming_calls))
+
+        put_in(
+          state.workspace.lsp_pending,
+          Map.put(state.workspace.lsp_pending, ref, :incoming_calls)
+        )
     end
   end
 
   @spec request_outgoing_calls(state(), map()) :: state()
   defp request_outgoing_calls(state, item) do
-    buf = state.buffers.active
+    buf = state.workspace.buffers.active
 
     case lsp_client_for(state, buf) do
       nil ->
@@ -1794,7 +1841,11 @@ defmodule Minga.Editor.LspActions do
       client ->
         params = %{"item" => item}
         ref = Client.request(client, "callHierarchy/outgoingCalls", params)
-        put_in(state.lsp_pending, Map.put(state.lsp_pending, ref, :outgoing_calls))
+
+        put_in(
+          state.workspace.lsp_pending,
+          Map.put(state.workspace.lsp_pending, ref, :outgoing_calls)
+        )
     end
   end
 
@@ -1827,7 +1878,7 @@ defmodule Minga.Editor.LspActions do
 
   @spec find_buffer_by_path(state(), String.t()) :: pid() | nil
   defp find_buffer_by_path(state, path) do
-    Enum.find(state.buffers.list, fn buf ->
+    Enum.find(state.workspace.buffers.list, fn buf ->
       try do
         BufferServer.file_path(buf) == path
       catch

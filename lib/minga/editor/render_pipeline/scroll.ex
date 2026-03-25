@@ -117,7 +117,7 @@ defmodule Minga.Editor.RenderPipeline.Scroll do
   def scroll_windows(state, layout) do
     layout.window_layouts
     |> Enum.reduce({%{}, state}, fn {win_id, win_layout}, {acc, st} ->
-      window = Map.get(st.windows.map, win_id)
+      window = Map.get(st.workspace.windows.map, win_id)
 
       if window == nil or window.buffer == nil or match?({:agent_chat, _}, window.content) do
         # Skip nil windows and agent chat windows (rendered by build_agent_chat_content)
@@ -143,7 +143,7 @@ defmodule Minga.Editor.RenderPipeline.Scroll do
           Layout.window_layout()
         ) :: {%{Window.id() => WindowScroll.t()}, state()}
   defp scroll_and_invalidate(state, st, acc, win_id, window, win_layout) do
-    is_active = win_id == state.windows.active
+    is_active = win_id == state.workspace.windows.active
 
     case safe_scroll_window(st, win_id, window, win_layout, is_active) do
       :skip ->
@@ -167,8 +167,8 @@ defmodule Minga.Editor.RenderPipeline.Scroll do
           )
 
         scroll = %{scroll | window: updated_window}
-        new_map = Map.put(st.windows.map, win_id, updated_window)
-        st = %{st | windows: %{st.windows | map: new_map}}
+        new_map = Map.put(st.workspace.windows.map, win_id, updated_window)
+        st = %{st | workspace: %{st.workspace | windows: %{st.workspace.windows | map: new_map}}}
         {Map.put(acc, win_id, scroll), st}
     end
   end

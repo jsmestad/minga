@@ -93,7 +93,7 @@ defmodule Minga.Picker.FileSource do
         # If the buffer already has a tab, switch to that tab instead
         # of just changing the buffer index. This correctly leaves
         # agentic view when opening a file from an agent tab.
-        pid = Enum.at(state.buffers.list, idx)
+        pid = Enum.at(state.workspace.buffers.list, idx)
         tab = EditorState.find_tab_by_buffer(state, pid)
 
         Log.debug(

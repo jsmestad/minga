@@ -16,7 +16,12 @@ defmodule Minga.Editor.Commands.LspTest do
   describe "execute/2 :lsp_restart" do
     test "shows 'no active buffer' when buffer is nil" do
       state = base_state()
-      state = %{state | buffers: %{state.buffers | active: nil}}
+
+      state = %{
+        state
+        | workspace: %{state.workspace | buffers: %{state.workspace.buffers | active: nil}}
+      }
+
       result = LspCommands.execute(state, :lsp_restart)
       assert result.status_msg == "No active buffer"
     end
@@ -31,7 +36,12 @@ defmodule Minga.Editor.Commands.LspTest do
   describe "execute/2 :lsp_stop" do
     test "shows 'no active buffer' when buffer is nil" do
       state = base_state()
-      state = %{state | buffers: %{state.buffers | active: nil}}
+
+      state = %{
+        state
+        | workspace: %{state.workspace | buffers: %{state.workspace.buffers | active: nil}}
+      }
+
       result = LspCommands.execute(state, :lsp_stop)
       assert result.status_msg == "No active buffer"
     end
@@ -46,7 +56,12 @@ defmodule Minga.Editor.Commands.LspTest do
   describe "execute/2 :lsp_start" do
     test "shows 'no active buffer' when buffer is nil" do
       state = base_state()
-      state = %{state | buffers: %{state.buffers | active: nil}}
+
+      state = %{
+        state
+        | workspace: %{state.workspace | buffers: %{state.workspace.buffers | active: nil}}
+      }
+
       result = LspCommands.execute(state, :lsp_start)
       assert result.status_msg == "No active buffer"
     end

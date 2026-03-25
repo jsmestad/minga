@@ -99,7 +99,7 @@ defmodule Minga.Editor.Commands.AgentSession do
         filetype: filetype
       )
 
-    state = put_in(state.buffers.active, buf)
+    state = put_in(state.workspace.buffers.active, buf)
 
     if AgentAccess.session(state) do
       Session.add_system_message(

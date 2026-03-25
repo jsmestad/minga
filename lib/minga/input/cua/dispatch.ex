@@ -37,8 +37,8 @@ defmodule Minga.Input.CUA.Dispatch do
       Minga.EditingModel.CUA.process_key(cua_state, key)
 
     # Break undo coalescing on Enter so each line is a separate undo step
-    if codepoint == 0x0D and state.buffers.active do
-      BufferServer.break_undo_coalescing(state.buffers.active)
+    if codepoint == 0x0D and state.workspace.buffers.active do
+      BufferServer.break_undo_coalescing(state.workspace.buffers.active)
     end
 
     state =

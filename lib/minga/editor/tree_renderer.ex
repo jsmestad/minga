@@ -78,9 +78,9 @@ defmodule Minga.Editor.TreeRenderer do
   end
 
   @spec render(EditorState.t()) :: [DisplayList.draw()]
-  def render(%EditorState{file_tree: %{tree: nil}}), do: []
+  def render(%EditorState{workspace: %{file_tree: %{tree: nil}}}), do: []
 
-  def render(%EditorState{file_tree: %{tree: tree, focused: focused}} = state) do
+  def render(%EditorState{workspace: %{file_tree: %{tree: tree, focused: focused}}} = state) do
     case EditorState.tree_rect(state) do
       nil ->
         []
@@ -476,9 +476,9 @@ defmodule Minga.Editor.TreeRenderer do
   end
 
   @spec active_buffer_path(EditorState.t()) :: String.t() | nil
-  defp active_buffer_path(%{buffers: %{active: nil}}), do: nil
+  defp active_buffer_path(%{workspace: %{buffers: %{active: nil}}}), do: nil
 
-  defp active_buffer_path(%{buffers: %{active: buf}}) do
+  defp active_buffer_path(%{workspace: %{buffers: %{active: buf}}}) do
     case BufferServer.file_path(buf) do
       nil -> nil
       path -> Path.expand(path)
@@ -486,7 +486,7 @@ defmodule Minga.Editor.TreeRenderer do
   end
 
   @spec compute_dirty_paths(EditorState.t()) :: MapSet.t(String.t())
-  defp compute_dirty_paths(%{buffers: %{list: buffer_list}}) do
+  defp compute_dirty_paths(%{workspace: %{buffers: %{list: buffer_list}}}) do
     buffer_list
     |> Enum.flat_map(fn pid ->
       try do

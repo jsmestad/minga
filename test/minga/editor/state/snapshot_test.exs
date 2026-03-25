@@ -16,13 +16,15 @@ defmodule Minga.Editor.State.SnapshotTest do
 
     %EditorState{
       port_manager: nil,
-      viewport: Viewport.new(24, 80),
-      vim: %VimState{mode: mode, mode_state: Mode.initial_state()},
-      buffers: %Buffers{
-        active: buf,
-        list: if(buf, do: [buf], else: [])
+      workspace: %Minga.Workspace.State{
+        viewport: Viewport.new(24, 80),
+        vim: %VimState{mode: mode, mode_state: Mode.initial_state()},
+        buffers: %Buffers{
+          active: buf,
+          list: if(buf, do: [buf], else: [])
+        },
+        keymap_scope: Keyword.get(opts, :keymap_scope, :editor)
       },
-      keymap_scope: Keyword.get(opts, :keymap_scope, :editor),
       tab_bar: Keyword.get(opts, :tab_bar)
     }
   end
@@ -38,7 +40,7 @@ defmodule Minga.Editor.State.SnapshotTest do
       assert ctx.keymap_scope == :agent
       assert ctx.vim.mode == :insert
       assert ctx.buffers.active == buf
-      assert ctx.windows == state.windows
+      assert ctx.windows == state.workspace.windows
 
       # No surface_* fields (old bridge format)
       refute Map.has_key?(ctx, :surface_module)
@@ -52,16 +54,16 @@ defmodule Minga.Editor.State.SnapshotTest do
       ctx = EditorState.snapshot_tab_context(state)
 
       assert ctx.buffers.active == buf
-      assert ctx.vim == state.vim
-      assert ctx.viewport == state.viewport
-      assert ctx.mouse == state.mouse
-      assert ctx.highlight == state.highlight
-      assert ctx.lsp_pending == state.lsp_pending
-      assert ctx.completion == state.completion
-      assert ctx.completion_trigger == state.completion_trigger
-      assert ctx.injection_ranges == state.injection_ranges
-      assert ctx.search == state.search
-      assert ctx.pending_conflict == state.pending_conflict
+      assert ctx.vim == state.workspace.vim
+      assert ctx.viewport == state.workspace.viewport
+      assert ctx.mouse == state.workspace.mouse
+      assert ctx.highlight == state.workspace.highlight
+      assert ctx.lsp_pending == state.workspace.lsp_pending
+      assert ctx.completion == state.workspace.completion
+      assert ctx.completion_trigger == state.workspace.completion_trigger
+      assert ctx.injection_ranges == state.workspace.injection_ranges
+      assert ctx.search == state.workspace.search
+      assert ctx.pending_conflict == state.workspace.pending_conflict
     end
   end
 
@@ -77,9 +79,9 @@ defmodule Minga.Editor.State.SnapshotTest do
       ctx = EditorState.snapshot_tab_context(state_b)
 
       restored = EditorState.restore_tab_context(state, ctx)
-      assert restored.vim.mode == :insert
-      assert restored.keymap_scope == :editor
-      assert restored.buffers.active == buf_b
+      assert restored.workspace.vim.mode == :insert
+      assert restored.workspace.keymap_scope == :editor
+      assert restored.workspace.buffers.active == buf_b
     end
 
     test "restores agent scope context correctly" do
@@ -92,8 +94,8 @@ defmodule Minga.Editor.State.SnapshotTest do
       ctx = EditorState.snapshot_tab_context(state_b)
 
       restored = EditorState.restore_tab_context(state, ctx)
-      assert restored.keymap_scope == :agent
-      assert restored.buffers.active == buf_b
+      assert restored.workspace.keymap_scope == :agent
+      assert restored.workspace.buffers.active == buf_b
     end
 
     test "migrates legacy context with active_buffer field" do
@@ -112,17 +114,17 @@ defmodule Minga.Editor.State.SnapshotTest do
       }
 
       restored = EditorState.restore_tab_context(state, ctx)
-      assert restored.keymap_scope == :editor
-      assert restored.vim.mode == :insert
-      assert restored.buffers.active == buf_b
-      assert restored.buffers.active_index == 1
+      assert restored.workspace.keymap_scope == :editor
+      assert restored.workspace.vim.mode == :insert
+      assert restored.workspace.buffers.active == buf_b
+      assert restored.workspace.buffers.active_index == 1
     end
 
     test "handles empty context gracefully" do
       state = make_state()
       restored = EditorState.restore_tab_context(state, %{})
-      assert restored.vim.mode == :normal
-      assert restored.keymap_scope == :editor
+      assert restored.workspace.vim.mode == :normal
+      assert restored.workspace.keymap_scope == :editor
     end
   end
 
@@ -152,8 +154,8 @@ defmodule Minga.Editor.State.SnapshotTest do
       switched = EditorState.switch_tab(state, tab_b.id)
 
       # Should have restored tab b's context
-      assert switched.vim.mode == :insert
-      assert switched.buffers.active == buf_b
+      assert switched.workspace.vim.mode == :insert
+      assert switched.workspace.buffers.active == buf_b
       assert switched.tab_bar.active_id == tab_b.id
 
       # Tab a should have been snapshotted with flat context

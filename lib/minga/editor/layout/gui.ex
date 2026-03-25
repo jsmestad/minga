@@ -17,7 +17,7 @@ defmodule Minga.Editor.Layout.GUI do
   """
   @spec compute(EditorState.t()) :: Layout.t()
   def compute(state) do
-    vp = state.viewport
+    vp = state.workspace.viewport
     terminal = {0, 0, vp.cols, vp.rows}
 
     # Minibuffer takes the last row (stays in Metal for command-line input).
@@ -31,12 +31,12 @@ defmodule Minga.Editor.Layout.GUI do
     {window_layouts, horizontal_separators} =
       if EditorState.split?(state) do
         Layout.compute_window_layouts_with_separators(
-          state.windows.tree,
+          state.workspace.windows.tree,
           editor_area,
-          state.windows.map
+          state.workspace.windows.map
         )
       else
-        {%{state.windows.active => Layout.subdivide_window(editor_area)}, []}
+        {%{state.workspace.windows.active => Layout.subdivide_window(editor_area)}, []}
       end
 
     %Layout{

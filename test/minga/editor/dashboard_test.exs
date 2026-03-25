@@ -177,8 +177,10 @@ defmodule Minga.Editor.DashboardTest do
 
       state = %EditorState{
         port_manager: self(),
-        viewport: Viewport.new(24, 80),
-        buffers: %Buffers{active: nil},
+        workspace: %Minga.Workspace.State{
+          viewport: Viewport.new(24, 80),
+          buffers: %Buffers{active: nil}
+        },
         focus_stack: Minga.Input.default_stack(),
         dashboard: Dashboard.new_state(),
         theme: Minga.Theme.get!(:doom_one),

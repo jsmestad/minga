@@ -60,12 +60,14 @@ defmodule Minga.Input.ScopedTest do
 
     %EditorState{
       port_manager: self(),
-      viewport: Viewport.new(24, 80),
-      vim: %VimState{mode: mode, mode_state: Mode.initial_state()},
-      buffers: %Buffers{active: buf, list: [buf]},
-      keymap_scope: Keyword.get(opts, :keymap_scope, :editor),
+      workspace: %Minga.Workspace.State{
+        viewport: Viewport.new(24, 80),
+        vim: %VimState{mode: mode, mode_state: Mode.initial_state()},
+        buffers: %Buffers{active: buf, list: [buf]},
+        keymap_scope: Keyword.get(opts, :keymap_scope, :editor),
+        agent_ui: agentic
+      },
       agent: agent,
-      agent_ui: agentic,
       tab_bar: tab_bar
     }
   end
@@ -159,7 +161,7 @@ defmodule Minga.Input.ScopedTest do
     test "ESC switches to input normal mode (editor scope side panel)", %{state: state} do
       {:handled, new_state} = walk_surface_handlers(state, 27, 0)
       assert AgentAccess.input_focused?(new_state)
-      assert new_state.vim.mode == :normal
+      assert new_state.workspace.vim.mode == :normal
     end
 
     test "Backspace on empty input is safe", %{state: state} do
@@ -221,10 +223,10 @@ defmodule Minga.Input.ScopedTest do
       # The base_state with agentic_active: true already sets up:
       # - file tab (id 1) and agent tab (id 2)
       # - agent tab is active, keymap_scope is :agent
-      assert state.keymap_scope == :agent
+      assert state.workspace.keymap_scope == :agent
 
       {:handled, new_state} = Scoped.handle_key(state, ?q, 0)
-      assert new_state.keymap_scope == :editor
+      assert new_state.workspace.keymap_scope == :editor
     end
 
     test "? toggles help", %{state: state} do
@@ -248,10 +250,7 @@ defmodule Minga.Input.ScopedTest do
 
     test "leader sequence in progress passes through", %{state: state} do
       # Simulate a leader sequence in progress
-      leader_state = %{
-        state
-        | vim: %{state.vim | mode_state: %{state.vim.mode_state | leader_node: %{}}}
-      }
+      leader_state = put_in(state.workspace.vim.mode_state.leader_node, %{})
 
       assert {:passthrough, _} = Scoped.handle_key(leader_state, ?f, 0)
     end
@@ -350,7 +349,7 @@ defmodule Minga.Input.ScopedTest do
     test "ESC switches to input normal mode", %{state: state} do
       {:handled, new_state} = Scoped.handle_key(state, 27, 0)
       assert AgentAccess.input_focused?(new_state)
-      assert new_state.vim.mode == :normal
+      assert new_state.workspace.vim.mode == :normal
     end
 
     test "printable char self-inserts", %{state: state} do
@@ -383,7 +382,7 @@ defmodule Minga.Input.ScopedTest do
 
       # Full handler chain handles it (AgentNav → Mode FSM enters search mode)
       {:handled, new_state} = walk_surface_handlers(state, ?/, 0)
-      assert new_state.vim.mode == :search
+      assert new_state.workspace.vim.mode == :search
     end
   end
 
@@ -430,15 +429,15 @@ defmodule Minga.Input.ScopedTest do
     test "q closes tree", %{tmp_dir: tmp_dir} do
       state = make_tree_state(tmp_dir)
       {:handled, new_state} = walk_surface_handlers(state, ?q, 0)
-      assert new_state.keymap_scope == :editor
-      assert new_state.file_tree.tree == nil
+      assert new_state.workspace.keymap_scope == :editor
+      assert new_state.workspace.file_tree.tree == nil
     end
 
     test "unbound key delegates to mode FSM for vim nav", %{tmp_dir: tmp_dir} do
       state = make_tree_state(tmp_dir)
       # j is not bound in file_tree scope (handled by mode FSM delegation)
       {:handled, new_state} = walk_surface_handlers(state, ?j, 0)
-      assert new_state.file_tree.tree.cursor == 1
+      assert new_state.workspace.file_tree.tree.cursor == 1
     end
 
     test "leader sequence in progress delegates to mode FSM", %{tmp_dir: tmp_dir} do
@@ -447,10 +446,7 @@ defmodule Minga.Input.ScopedTest do
       # calls Bindings.lookup on leader_node.
       leader_node = %Minga.Keymap.Bindings.Node{children: %{}, command: nil, description: nil}
 
-      leader_state = %{
-        state
-        | vim: %{state.vim | mode_state: %{state.vim.mode_state | leader_node: leader_node}}
-      }
+      leader_state = put_in(state.workspace.vim.mode_state.leader_node, leader_node)
 
       {:handled, _new_state} = walk_surface_handlers(leader_state, ?f, 0)
     end
@@ -479,9 +475,9 @@ defmodule Minga.Input.ScopedTest do
       File.write!(Path.join(tmp_dir, ".hidden"), "")
       state = make_tree_state(tmp_dir, 0)
 
-      entries_before = length(FileTree.visible_entries(state.file_tree.tree))
+      entries_before = length(FileTree.visible_entries(state.workspace.file_tree.tree))
       {:handled, new_state} = walk_surface_handlers(state, ?H, 0)
-      entries_after = length(FileTree.visible_entries(new_state.file_tree.tree))
+      entries_after = length(FileTree.visible_entries(new_state.workspace.file_tree.tree))
 
       assert entries_after != entries_before
     end
@@ -499,7 +495,7 @@ defmodule Minga.Input.ScopedTest do
 
     test "file_tree scope with tree not focused passes through", %{tmp_dir: tmp_dir} do
       state = make_tree_state(tmp_dir)
-      state = put_in(state.file_tree.focused, false)
+      state = put_in(state.workspace.file_tree.focused, false)
       assert {:passthrough, _} = FileTreeHandler.handle_key(state, ?q, 0)
     end
   end
@@ -530,10 +526,7 @@ defmodule Minga.Input.ScopedTest do
     test "leader node pending passes through in agent scope" do
       state = base_state(keymap_scope: :agent, agentic_active: true)
 
-      state = %{
-        state
-        | vim: %{state.vim | mode_state: %{state.vim.mode_state | leader_node: %{}}}
-      }
+      state = put_in(state.workspace.vim.mode_state.leader_node, %{})
 
       assert {:passthrough, _} = Scoped.handle_key(state, ?a, 0)
     end
@@ -591,7 +584,11 @@ defmodule Minga.Input.ScopedTest do
           %{p | input_focused: true, visible: true}
         end)
 
-      state = %{state | vim: %{state.vim | mode: :insert}}
+      state = %{
+        state
+        | workspace: %{state.workspace | vim: %{state.workspace.vim | mode: :insert}}
+      }
+
       {:handled, new_state} = walk_surface_handlers(state, ?y, 0)
       # Should have typed 'y' into input, not approved
       assert UIState.input_text(AgentAccess.panel(new_state)) =~ "y"
@@ -802,7 +799,7 @@ defmodule Minga.Input.ScopedTest do
     tree = FileTree.new(tmp_dir)
     buf = BufferSync.start_buffer(tree)
 
-    base_state(keymap_scope: :file_tree)
-    |> Map.put(:file_tree, %FileTreeState{tree: tree, focused: true, buffer: buf})
+    state = base_state(keymap_scope: :file_tree)
+    put_in(state.workspace.file_tree, %FileTreeState{tree: tree, focused: true, buffer: buf})
   end
 end

@@ -15,7 +15,7 @@ defmodule Minga.Editor.Commands.Formatting do
   @type state :: EditorState.t()
 
   @spec format_buffer(state()) :: state()
-  def format_buffer(%{buffers: %{active: buf}} = state) when is_pid(buf) do
+  def format_buffer(%{workspace: %{buffers: %{active: buf}}} = state) when is_pid(buf) do
     filetype = BufferServer.filetype(buf)
     file_path = BufferServer.file_path(buf)
     spec = Formatter.resolve_formatter(filetype, file_path)
@@ -79,7 +79,7 @@ defmodule Minga.Editor.Commands.Formatting do
   end
 
   @spec queue_and_show_prompt(state(), atom()) :: state()
-  defp queue_and_show_prompt(%{vim: %{mode: :normal}} = state, tool_name) do
+  defp queue_and_show_prompt(%{workspace: %{vim: %{mode: :normal}}} = state, tool_name) do
     queue = state.tool_prompt_queue ++ [tool_name]
     state = %{state | tool_prompt_queue: queue}
     ms = %ToolConfirmState{pending: queue, declined: state.tool_declined}

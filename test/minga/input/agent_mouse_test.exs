@@ -41,20 +41,22 @@ defmodule Minga.Input.AgentMouseTest do
 
     %EditorState{
       port_manager: self(),
-      viewport: Viewport.new(24, 80),
-      vim: %VimState{mode: :normal, mode_state: Mode.initial_state()},
-      buffers: %Buffers{active: buf, list: [buf]},
+      workspace: %Minga.Workspace.State{
+        viewport: Viewport.new(24, 80),
+        vim: %VimState{mode: :normal, mode_state: Mode.initial_state()},
+        buffers: %Buffers{active: buf, list: [buf]},
+        keymap_scope: Keyword.get(opts, :keymap_scope, :editor),
+        agent_ui: agentic,
+        windows: %Windows{
+          tree: {:leaf, win_id},
+          map: %{win_id => win},
+          active: win_id,
+          next_id: win_id + 1
+        }
+      },
       focus_stack: [],
-      keymap_scope: Keyword.get(opts, :keymap_scope, :editor),
       agent: agent,
-      agent_ui: agentic,
-      tab_bar: tab_bar,
-      windows: %Windows{
-        tree: {:leaf, win_id},
-        map: %{win_id => win},
-        active: win_id,
-        next_id: win_id + 1
-      }
+      tab_bar: tab_bar
     }
   end
 
@@ -81,7 +83,7 @@ defmodule Minga.Input.AgentMouseTest do
     layout = Layout.compute(state)
 
     Enum.find_value(layout.window_layouts, fn {win_id, wl} ->
-      window = Map.get(state.windows.map, win_id)
+      window = Map.get(state.workspace.windows.map, win_id)
 
       if window != nil and Content.agent_chat?(window.content) do
         wl.content
@@ -151,7 +153,7 @@ defmodule Minga.Input.AgentMouseTest do
       # The file viewer sidebar is to the right of the chat area.
       # chat_width_pct defaults to 65, so sidebar starts at ~65% of the window width.
       # Use a column well to the right of the chat area.
-      sidebar_col = state.viewport.cols - 5
+      sidebar_col = state.workspace.viewport.cols - 5
 
       {:handled, new_state} =
         AgentMouse.handle_mouse(state, row + 2, sidebar_col, :wheel_down, 0, :press, 1)
@@ -199,11 +201,11 @@ defmodule Minga.Input.AgentMouseTest do
       # The editor window should be active (not the agent)
       # Find the agent window id
       {agent_win_id, _} =
-        Enum.find(state.windows.map, fn {_id, w} ->
+        Enum.find(state.workspace.windows.map, fn {_id, w} ->
           Content.agent_chat?(w.content)
         end)
 
-      refute state.windows.active == agent_win_id
+      refute state.workspace.windows.active == agent_win_id
 
       rect = agent_chat_window_rect(state)
       {row, col, _w, _h} = rect
@@ -214,7 +216,7 @@ defmodule Minga.Input.AgentMouseTest do
       {:passthrough, new_state} =
         AgentMouse.handle_mouse(state, row + 1, col + 2, :left, 0, :press, 1)
 
-      assert new_state.windows.active == agent_win_id
+      assert new_state.workspace.windows.active == agent_win_id
     end
   end
 
@@ -229,7 +231,7 @@ defmodule Minga.Input.AgentMouseTest do
 
     test "scroll down over agent panel scrolls chat", %{state: state, panel_rect: panel_rect} do
       {row, col, _w, _h} = panel_rect
-      old_viewport_top = state.viewport.top
+      old_viewport_top = state.workspace.viewport.top
 
       {:handled, new_state} =
         AgentMouse.handle_mouse(state, row + 1, col + 2, :wheel_down, 0, :press, 1)
@@ -239,7 +241,7 @@ defmodule Minga.Input.AgentMouseTest do
       assert panel.scroll.offset > 0 or panel.scroll.pinned == false
 
       # Editor viewport should be untouched
-      assert new_state.viewport.top == old_viewport_top
+      assert new_state.workspace.viewport.top == old_viewport_top
     end
 
     test "scroll up over agent panel scrolls chat", %{state: state, panel_rect: panel_rect} do
@@ -303,7 +305,7 @@ defmodule Minga.Input.AgentMouseTest do
       rect = agent_chat_window_rect(state)
 
       # Verify we're in editor scope
-      assert state.keymap_scope == :editor
+      assert state.workspace.keymap_scope == :editor
 
       {row, col, _w, _h} = rect
 
@@ -329,9 +331,11 @@ defmodule Minga.Input.AgentMouseTest do
 
       # Window focus happened before passthrough
       {agent_win_id, _} =
-        Enum.find(new_state.windows.map, fn {_id, w} -> Content.agent_chat?(w.content) end)
+        Enum.find(new_state.workspace.windows.map, fn {_id, w} ->
+          Content.agent_chat?(w.content)
+        end)
 
-      assert new_state.windows.active == agent_win_id
+      assert new_state.workspace.windows.active == agent_win_id
     end
   end
 end

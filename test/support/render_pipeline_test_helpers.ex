@@ -41,18 +41,20 @@ defmodule Minga.Editor.RenderPipeline.TestHelpers do
 
     %EditorState{
       port_manager: self(),
-      viewport: Viewport.new(rows, cols),
-      vim: VimState.new(),
-      buffers: %Buffers{active: buf, list: [buf], active_index: 0},
-      windows: %Windows{
-        tree: WindowTree.new(win_id),
-        map: %{win_id => window},
-        active: win_id,
-        next_id: win_id + 1
+      workspace: %Minga.Workspace.State{
+        viewport: Viewport.new(rows, cols),
+        vim: VimState.new(),
+        buffers: %Buffers{active: buf, list: [buf], active_index: 0},
+        windows: %Windows{
+          tree: WindowTree.new(win_id),
+          map: %{win_id => window},
+          active: win_id,
+          next_id: win_id + 1
+        },
+        highlight: %Highlighting{}
       },
       focus_stack: Input.default_stack(),
-      theme: Theme.get!(:doom_one),
-      highlight: %Highlighting{}
+      theme: Theme.get!(:doom_one)
     }
   end
 
@@ -81,8 +83,8 @@ defmodule Minga.Editor.RenderPipeline.TestHelpers do
   """
   @spec simulate_scroll(EditorState.t(), non_neg_integer()) :: EditorState.t()
   def simulate_scroll(state, new_top) do
-    win_id = state.windows.active
-    window = Map.get(state.windows.map, win_id)
+    win_id = state.workspace.windows.active
+    window = Map.get(state.workspace.windows.map, win_id)
 
     updated_window = %{
       window
@@ -93,8 +95,8 @@ defmodule Minga.Editor.RenderPipeline.TestHelpers do
         last_cursor_line: new_top
     }
 
-    new_map = Map.put(state.windows.map, win_id, updated_window)
-    %{state | windows: %{state.windows | map: new_map}}
+    new_map = Map.put(state.workspace.windows.map, win_id, updated_window)
+    put_in(state.workspace.windows.map, new_map)
   end
 
   @doc """
@@ -114,7 +116,7 @@ defmodule Minga.Editor.RenderPipeline.TestHelpers do
     viewport_top = Keyword.get(opts, :viewport_top, 0)
     layout = Layout.put(state) |> Layout.get()
 
-    win_id = state.windows.active
+    win_id = state.workspace.windows.active
     win_layout = Map.get(layout.window_layouts, win_id)
     {_row, _col, width, height} = win_layout.content
 

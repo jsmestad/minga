@@ -74,7 +74,7 @@ defmodule Minga.Editor.RenderPipeline.ScrollTest do
     test "first frame marks all lines dirty on the window" do
       state = base_state()
       {_scrolls, state, _layout} = run_through_scroll(state)
-      [{_win_id, window}] = Map.to_list(state.windows.map)
+      [{_win_id, window}] = Map.to_list(state.workspace.windows.map)
 
       # First frame: sentinel values trigger full invalidation
       assert window.dirty_lines == :all

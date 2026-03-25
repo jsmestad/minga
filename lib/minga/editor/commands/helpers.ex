@@ -239,7 +239,7 @@ defmodule Minga.Editor.Commands.Helpers do
   # Reads clipboard mode from the active buffer's options. Falls back to
   # :none if no buffer is active (safe default: no clipboard calls).
   @spec resolve_clipboard(state()) :: clipboard_mode()
-  defp resolve_clipboard(%{buffers: %{active: buf}}) when is_pid(buf) do
+  defp resolve_clipboard(%{workspace: %{buffers: %{active: buf}}}) when is_pid(buf) do
     BufferServer.get_option(buf, :clipboard)
   catch
     :exit, _ -> :none
@@ -363,7 +363,7 @@ defmodule Minga.Editor.Commands.Helpers do
 
   @doc "Applies a delete or yank operator over a text object range."
   @spec apply_text_object(state(), atom(), term(), text_object_action()) :: state()
-  def apply_text_object(%{buffers: %{active: buf}} = state, modifier, spec, action) do
+  def apply_text_object(%{workspace: %{buffers: %{active: buf}}} = state, modifier, spec, action) do
     gb = BufferServer.snapshot(buf)
     cursor = Document.cursor(gb)
     buffer_id = HighlightSync.buffer_id_for(state, buf)

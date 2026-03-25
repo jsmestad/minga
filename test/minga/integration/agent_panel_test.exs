@@ -34,13 +34,13 @@ defmodule Minga.Integration.AgentPanelTest do
       ctx = start_editor_with_fake_session("hello world")
 
       state = :sys.get_state(ctx.editor)
-      assert state.keymap_scope == :editor
+      assert state.workspace.keymap_scope == :editor
 
       send_keys_sync(ctx, "<Space>aa")
       state = :sys.get_state(ctx.editor)
 
-      assert state.keymap_scope == :agent,
-             "SPC a a should switch to agent tab (scope :agent), got #{state.keymap_scope}"
+      assert state.workspace.keymap_scope == :agent,
+             "SPC a a should switch to agent tab (scope :agent), got #{state.workspace.keymap_scope}"
     end
 
     test "toggles back to file tab" do
@@ -48,13 +48,13 @@ defmodule Minga.Integration.AgentPanelTest do
 
       send_keys_sync(ctx, "<Space>aa")
       state = :sys.get_state(ctx.editor)
-      assert state.keymap_scope == :agent
+      assert state.workspace.keymap_scope == :agent
 
       send_keys_sync(ctx, "<Space>aa")
       state = :sys.get_state(ctx.editor)
 
-      assert state.keymap_scope == :editor,
-             "second SPC a a should return to file tab (scope :editor), got #{state.keymap_scope}"
+      assert state.workspace.keymap_scope == :editor,
+             "second SPC a a should return to file tab (scope :editor), got #{state.workspace.keymap_scope}"
     end
 
     test "buffer content is preserved through toggle cycle" do
@@ -77,7 +77,7 @@ defmodule Minga.Integration.AgentPanelTest do
       send_keys_sync(ctx, "<Space>aa")
 
       state = :sys.get_state(ctx.editor)
-      assert state.keymap_scope == :agent
+      assert state.workspace.keymap_scope == :agent
     end
 
     test "file editing works after returning from agent tab" do
@@ -115,7 +115,7 @@ defmodule Minga.Integration.AgentPanelTest do
       wait_until(
         ctx,
         fn state ->
-          state.file_tree != nil and FileTree.open?(state.file_tree)
+          state.workspace.file_tree != nil and FileTree.open?(state.workspace.file_tree)
         end,
         message: "file tree never opened"
       )

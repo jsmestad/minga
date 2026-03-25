@@ -34,7 +34,7 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
     {tab_row, _col, tab_width, _h} = layout.tab_bar
 
     hover_col =
-      case state.mouse.hover_pos do
+      case state.workspace.mouse.hover_pos do
         {^tab_row, col} -> col
         _ -> nil
       end

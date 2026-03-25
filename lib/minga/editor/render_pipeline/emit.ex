@@ -123,7 +123,7 @@ defmodule Minga.Editor.RenderPipeline.Emit do
 
     tops =
       Map.new(layout.window_layouts, fn {win_id, _wl} ->
-        window = Map.get(state.windows.map, win_id)
+        window = Map.get(state.workspace.windows.map, win_id)
 
         if window do
           {win_id, window.last_viewport_top}
@@ -139,7 +139,7 @@ defmodule Minga.Editor.RenderPipeline.Emit do
 
     gutter_ws =
       Map.new(layout.window_layouts, fn {win_id, _wl} ->
-        window = Map.get(state.windows.map, win_id)
+        window = Map.get(state.workspace.windows.map, win_id)
 
         if window do
           {win_id, window.last_gutter_w}
@@ -150,7 +150,7 @@ defmodule Minga.Editor.RenderPipeline.Emit do
 
     buf_versions =
       Map.new(layout.window_layouts, fn {win_id, _wl} ->
-        window = Map.get(state.windows.map, win_id)
+        window = Map.get(state.workspace.windows.map, win_id)
 
         if window do
           {win_id, window.last_buf_version}

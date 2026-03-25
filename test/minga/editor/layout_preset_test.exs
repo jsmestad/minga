@@ -15,13 +15,15 @@ defmodule Minga.Editor.LayoutPresetTest do
 
     %EditorState{
       port_manager: self(),
-      viewport: Viewport.new(24, 80),
-      buffers: %Buffers{active: buf, list: [buf]},
-      windows: %{
-        tree: {:leaf, 1},
-        map: %{1 => window},
-        active: 1,
-        next_id: 2
+      workspace: %Minga.Workspace.State{
+        viewport: Viewport.new(24, 80),
+        buffers: %Buffers{active: buf, list: [buf]},
+        windows: %Minga.Editor.State.Windows{
+          tree: {:leaf, 1},
+          map: %{1 => window},
+          active: 1,
+          next_id: 2
+        }
       }
     }
   end
@@ -39,18 +41,18 @@ defmodule Minga.Editor.LayoutPresetTest do
       new_state = LayoutPreset.apply(state, :agent_right, buf)
 
       # Window tree should be a vertical split
-      assert {:split, :vertical, {:leaf, 1}, {:leaf, 2}, _} = new_state.windows.tree
+      assert {:split, :vertical, {:leaf, 1}, {:leaf, 2}, _} = new_state.workspace.windows.tree
 
       # New window should have agent_chat content
-      agent_win = new_state.windows.map[2]
+      agent_win = new_state.workspace.windows.map[2]
       assert Content.agent_chat?(agent_win.content)
       assert agent_win.buffer == buf
 
       # Original window unchanged
-      assert Content.buffer?(new_state.windows.map[1].content)
+      assert Content.buffer?(new_state.workspace.windows.map[1].content)
 
       # next_id incremented
-      assert new_state.windows.next_id == 3
+      assert new_state.workspace.windows.next_id == 3
     end
 
     test "is a no-op if agent chat window already exists" do
@@ -71,8 +73,8 @@ defmodule Minga.Editor.LayoutPresetTest do
 
       new_state = LayoutPreset.apply(state, :agent_bottom, buf)
 
-      assert {:split, :horizontal, {:leaf, 1}, {:leaf, 2}, _} = new_state.windows.tree
-      assert Content.agent_chat?(new_state.windows.map[2].content)
+      assert {:split, :horizontal, {:leaf, 1}, {:leaf, 2}, _} = new_state.workspace.windows.tree
+      assert Content.agent_chat?(new_state.workspace.windows.map[2].content)
     end
   end
 
@@ -88,7 +90,7 @@ defmodule Minga.Editor.LayoutPresetTest do
       refute LayoutPreset.has_agent_chat?(state)
 
       # Back to single window
-      assert {:leaf, 1} = state.windows.tree
+      assert {:leaf, 1} = state.workspace.windows.tree
     end
 
     test "is a no-op if no agent chat window exists" do
@@ -107,13 +109,16 @@ defmodule Minga.Editor.LayoutPresetTest do
       state = LayoutPreset.apply(state, :agent_right, buf)
 
       # Set agent window as active
-      state = %{state | windows: %{state.windows | active: 2}}
+      state = %{
+        state
+        | workspace: %{state.workspace | windows: %{state.workspace.windows | active: 2}}
+      }
 
       state = LayoutPreset.restore_default(state)
 
       # Active should be the file buffer window (1), not the deleted agent window (2)
-      assert state.windows.active == 1
-      refute Map.has_key?(state.windows.map, 2)
+      assert state.workspace.windows.active == 1
+      refute Map.has_key?(state.workspace.windows.map, 2)
     end
   end
 

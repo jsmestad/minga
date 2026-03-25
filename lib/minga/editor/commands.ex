@@ -330,7 +330,7 @@ defmodule Minga.Editor.Commands do
 
   # ── Textobject navigation ─────────────────────────────────────────────────
 
-  def execute(%{buffers: %{active: buf}} = state, {:goto_next_textobject, type})
+  def execute(%{workspace: %{buffers: %{active: buf}}} = state, {:goto_next_textobject, type})
       when is_pid(buf) do
     {row, col} = BufferServer.cursor(buf)
 
@@ -350,7 +350,7 @@ defmodule Minga.Editor.Commands do
     end
   end
 
-  def execute(%{buffers: %{active: buf}} = state, {:goto_prev_textobject, type})
+  def execute(%{workspace: %{buffers: %{active: buf}}} = state, {:goto_prev_textobject, type})
       when is_pid(buf) do
     {row, col} = BufferServer.cursor(buf)
 
@@ -459,7 +459,7 @@ defmodule Minga.Editor.Commands do
 
   def execute(state, cmd) when is_atom(cmd) do
     case CommandRegistry.lookup(CommandRegistry, cmd) do
-      {:ok, %Command{requires_buffer: true}} when is_nil(state.buffers.active) ->
+      {:ok, %Command{requires_buffer: true}} when is_nil(state.workspace.buffers.active) ->
         state
 
       {:ok, %Command{execute: fun}} ->
@@ -494,7 +494,7 @@ defmodule Minga.Editor.Commands do
 
   @spec guard_buffer(state(), (-> state() | {state(), action()})) ::
           state() | {state(), action()}
-  defp guard_buffer(%{buffers: %{active: nil}} = state, _fun), do: state
+  defp guard_buffer(%{workspace: %{buffers: %{active: nil}}} = state, _fun), do: state
   defp guard_buffer(_state, fun), do: fun.()
 
   # Remove the current tool from the prompt queue after accept/decline.
@@ -553,9 +553,9 @@ defmodule Minga.Editor.Commands do
   end
 
   @spec current_filetype(EditorState.t()) :: atom()
-  defp current_filetype(%{buffers: %{active: nil}}), do: :text
+  defp current_filetype(%{workspace: %{buffers: %{active: nil}}}), do: :text
 
-  defp current_filetype(%{buffers: %{active: buf}}) do
+  defp current_filetype(%{workspace: %{buffers: %{active: buf}}}) do
     BufferServer.filetype(buf)
   catch
     :exit, _ -> :text

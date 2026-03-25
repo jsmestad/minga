@@ -18,8 +18,10 @@ defmodule Minga.Editor.StateTest do
   defp new_state do
     %EditorState{
       port_manager: nil,
-      viewport: Viewport.new(24, 80),
-      vim: VimState.new()
+      workspace: %Minga.Workspace.State{
+        viewport: Viewport.new(24, 80),
+        vim: VimState.new()
+      }
     }
   end
 
@@ -32,17 +34,24 @@ defmodule Minga.Editor.StateTest do
     buf = start_buffer(content)
 
     state =
-      %{new_state() | buffers: %Buffers{list: [buf], active_index: 0, active: buf}}
+      put_in(new_state().workspace.buffers, %Buffers{list: [buf], active_index: 0, active: buf})
       |> setup_windows()
 
     {state, buf}
   end
 
   defp setup_windows(state) do
-    buf = state.buffers.active
+    buf = state.workspace.buffers.active
     tree = WindowTree.new(1)
     window = Window.new(1, buf, 24, 80)
-    %{state | windows: %Windows{tree: tree, map: %{1 => window}, active: 1, next_id: 2}}
+
+    %{
+      state
+      | workspace: %{
+          state.workspace
+          | windows: %Windows{tree: tree, map: %{1 => window}, active: 1, next_id: 2}
+        }
+    }
   end
 
   # ── add_buffer/2 ─────────────────────────────────────────────────────────────
@@ -54,9 +63,9 @@ defmodule Minga.Editor.StateTest do
 
       new_state = EditorState.add_buffer(state, buf2)
 
-      assert new_state.buffers.active == buf2
-      assert length(new_state.buffers.list) == 2
-      assert new_state.buffers.active_index == 1
+      assert new_state.workspace.buffers.active == buf2
+      assert length(new_state.workspace.buffers.list) == 2
+      assert new_state.workspace.buffers.active_index == 1
     end
 
     test "syncs the active window's buffer reference" do
@@ -65,7 +74,7 @@ defmodule Minga.Editor.StateTest do
 
       new_state = EditorState.add_buffer(state, buf2)
 
-      window = Map.fetch!(new_state.windows.map, new_state.windows.active)
+      window = Map.fetch!(new_state.workspace.windows.map, new_state.workspace.windows.active)
       assert window.buffer == buf2
     end
 
@@ -73,22 +82,25 @@ defmodule Minga.Editor.StateTest do
       {state, _buf1} = state_with_buffer()
 
       # Create a split: window 1 (active) and window 2
-      {:ok, tree} = WindowTree.split(state.windows.tree, 1, :vertical, 2)
-      win2 = Window.new(2, state.buffers.active, 24, 40)
-      ws = state.windows
+      {:ok, tree} = WindowTree.split(state.workspace.windows.tree, 1, :vertical, 2)
+      win2 = Window.new(2, state.workspace.buffers.active, 24, 40)
+      ws = state.workspace.windows
 
-      state = %{
-        state
-        | windows: %{ws | tree: tree, map: Map.put(ws.map, 2, win2), next_id: 3}
-      }
+      state =
+        put_in(state.workspace.windows, %{
+          ws
+          | tree: tree,
+            map: Map.put(ws.map, 2, win2),
+            next_id: 3
+        })
 
       buf2 = start_buffer("new file")
       new_state = EditorState.add_buffer(state, buf2)
 
       # Active window (1) should point to new buffer
-      assert Map.fetch!(new_state.windows.map, 1).buffer == buf2
+      assert Map.fetch!(new_state.workspace.windows.map, 1).buffer == buf2
       # Inactive window (2) should still point to old buffer
-      assert Map.fetch!(new_state.windows.map, 2).buffer != buf2
+      assert Map.fetch!(new_state.workspace.windows.map, 2).buffer != buf2
     end
 
     test "works without windows initialized" do
@@ -96,7 +108,7 @@ defmodule Minga.Editor.StateTest do
       buf = start_buffer()
       new_state = EditorState.add_buffer(state, buf)
 
-      assert new_state.buffers.active == buf
+      assert new_state.workspace.buffers.active == buf
     end
   end
 
@@ -110,8 +122,8 @@ defmodule Minga.Editor.StateTest do
 
       new_state = EditorState.switch_buffer(state, 0)
 
-      assert new_state.buffers.active == buf1
-      assert new_state.buffers.active_index == 0
+      assert new_state.workspace.buffers.active == buf1
+      assert new_state.workspace.buffers.active_index == 0
     end
 
     test "syncs active window's buffer reference on switch" do
@@ -122,7 +134,7 @@ defmodule Minga.Editor.StateTest do
       # Switch back to first buffer
       new_state = EditorState.switch_buffer(state, 0)
 
-      window = Map.fetch!(new_state.windows.map, new_state.windows.active)
+      window = Map.fetch!(new_state.workspace.windows.map, new_state.workspace.windows.active)
       assert window.buffer == buf1
     end
 
@@ -132,21 +144,24 @@ defmodule Minga.Editor.StateTest do
       state = EditorState.add_buffer(state, buf2)
 
       # Create a split: window 1 (active, buf2) and window 2 (buf2)
-      {:ok, tree} = WindowTree.split(state.windows.tree, 1, :vertical, 2)
+      {:ok, tree} = WindowTree.split(state.workspace.windows.tree, 1, :vertical, 2)
       win2 = Window.new(2, buf2, 24, 40)
-      ws = state.windows
+      ws = state.workspace.windows
 
-      state = %{
-        state
-        | windows: %{ws | tree: tree, map: Map.put(ws.map, 2, win2), next_id: 3}
-      }
+      state =
+        put_in(state.workspace.windows, %{
+          ws
+          | tree: tree,
+            map: Map.put(ws.map, 2, win2),
+            next_id: 3
+        })
 
       # Switch active window to buf1
       new_state = EditorState.switch_buffer(state, 0)
 
-      assert Map.fetch!(new_state.windows.map, 1).buffer == buf1
+      assert Map.fetch!(new_state.workspace.windows.map, 1).buffer == buf1
       # Window 2 unchanged
-      assert Map.fetch!(new_state.windows.map, 2).buffer == buf2
+      assert Map.fetch!(new_state.workspace.windows.map, 2).buffer == buf2
     end
   end
 
@@ -158,15 +173,18 @@ defmodule Minga.Editor.StateTest do
       BufferServer.move_to(buf1, {2, 0})
 
       # Split: window 1 at {2,0}, window 2 gets copy
-      {:ok, tree} = WindowTree.split(state.windows.tree, 1, :vertical, 2)
+      {:ok, tree} = WindowTree.split(state.workspace.windows.tree, 1, :vertical, 2)
       cursor = BufferServer.cursor(buf1)
-      win1 = %{Map.fetch!(state.windows.map, 1) | cursor: cursor}
+      win1 = %{Map.fetch!(state.workspace.windows.map, 1) | cursor: cursor}
       win2 = Window.new(2, buf1, 24, 40, {0, 0})
 
-      state = %{
-        state
-        | windows: %Windows{tree: tree, map: %{1 => win1, 2 => win2}, active: 1, next_id: 3}
-      }
+      state =
+        put_in(state.workspace.windows, %Windows{
+          tree: tree,
+          map: %{1 => win1, 2 => win2},
+          active: 1,
+          next_id: 3
+        })
 
       # Move cursor in active window to {2,0}
       BufferServer.move_to(buf1, {2, 0})
@@ -174,21 +192,24 @@ defmodule Minga.Editor.StateTest do
       # Focus window 2 (which has stored cursor {0,0})
       new_state = EditorState.focus_window(state, 2)
 
-      assert new_state.windows.active == 2
+      assert new_state.workspace.windows.active == 2
       assert BufferServer.cursor(buf1) == {0, 0}
     end
 
     test "saves outgoing window's cursor" do
       {state, buf1} = state_with_buffer("hello\nworld\nfoo")
 
-      {:ok, tree} = WindowTree.split(state.windows.tree, 1, :vertical, 2)
+      {:ok, tree} = WindowTree.split(state.workspace.windows.tree, 1, :vertical, 2)
       win2 = Window.new(2, buf1, 24, 40)
-      ws = state.windows
+      ws = state.workspace.windows
 
-      state = %{
-        state
-        | windows: %{ws | tree: tree, map: Map.put(ws.map, 2, win2), next_id: 3}
-      }
+      state =
+        put_in(state.workspace.windows, %{
+          ws
+          | tree: tree,
+            map: Map.put(ws.map, 2, win2),
+            next_id: 3
+        })
 
       # Move cursor to {1, 3}
       BufferServer.move_to(buf1, {1, 3})
@@ -196,7 +217,7 @@ defmodule Minga.Editor.StateTest do
       new_state = EditorState.focus_window(state, 2)
 
       # Window 1 should have saved cursor {1, 3}
-      assert Map.fetch!(new_state.windows.map, 1).cursor == {1, 3}
+      assert Map.fetch!(new_state.workspace.windows.map, 1).cursor == {1, 3}
     end
 
     test "no-op when focusing already active window" do
@@ -221,7 +242,7 @@ defmodule Minga.Editor.StateTest do
 
       new_state = EditorState.sync_active_window_cursor(state)
 
-      window = Map.fetch!(new_state.windows.map, 1)
+      window = Map.fetch!(new_state.workspace.windows.map, 1)
       assert window.cursor == {1, 3}
     end
 
@@ -247,10 +268,14 @@ defmodule Minga.Editor.StateTest do
       {state, _buf1} = state_with_buffer("hello")
       buf2 = start_buffer("world")
 
-      state = %{state | buffers: Buffers.add(state.buffers, buf2)}
+      state = %{
+        state
+        | workspace: %{state.workspace | buffers: Buffers.add(state.workspace.buffers, buf2)}
+      }
+
       new_state = EditorState.sync_active_window_buffer(state)
 
-      window = Map.fetch!(new_state.windows.map, new_state.windows.active)
+      window = Map.fetch!(new_state.workspace.windows.map, new_state.workspace.windows.active)
       assert window.buffer == buf2
       assert Content.buffer?(window.content), "content should be a :buffer reference"
 
@@ -265,25 +290,38 @@ defmodule Minga.Editor.StateTest do
 
       # Build state with an agent_chat window
       state =
-        %{new_state() | buffers: %Buffers{list: [agent_buf], active_index: 0, active: agent_buf}}
+        %{
+          new_state()
+          | workspace: %{
+              new_state().workspace
+              | buffers: %Buffers{list: [agent_buf], active_index: 0, active: agent_buf}
+            }
+        }
 
       tree = WindowTree.new(1)
       agent_window = Window.new_agent_chat(1, agent_buf, 24, 80)
 
-      state = %{
-        state
-        | windows: %Windows{tree: tree, map: %{1 => agent_window}, active: 1, next_id: 2}
-      }
+      state =
+        put_in(state.workspace.windows, %Windows{
+          tree: tree,
+          map: %{1 => agent_window},
+          active: 1,
+          next_id: 2
+        })
 
       # Confirm starting state: agent_chat content
-      window = Map.fetch!(state.windows.map, 1)
+      window = Map.fetch!(state.workspace.windows.map, 1)
       assert Content.agent_chat?(window.content)
 
       # Switch active buffer to the file buffer
-      state = %{state | buffers: Buffers.add(state.buffers, file_buf)}
+      state = %{
+        state
+        | workspace: %{state.workspace | buffers: Buffers.add(state.workspace.buffers, file_buf)}
+      }
+
       new_state = EditorState.sync_active_window_buffer(state)
 
-      window = Map.fetch!(new_state.windows.map, 1)
+      window = Map.fetch!(new_state.workspace.windows.map, 1)
       assert window.buffer == file_buf
 
       assert window.content == Content.buffer(file_buf),
@@ -292,11 +330,13 @@ defmodule Minga.Editor.StateTest do
 
     test "no-op when buffer has not changed" do
       {state, buf1} = state_with_buffer("hello")
-      window_before = Map.fetch!(state.windows.map, state.windows.active)
+      window_before = Map.fetch!(state.workspace.windows.map, state.workspace.windows.active)
 
       new_state = EditorState.sync_active_window_buffer(state)
 
-      window_after = Map.fetch!(new_state.windows.map, new_state.windows.active)
+      window_after =
+        Map.fetch!(new_state.workspace.windows.map, new_state.workspace.windows.active)
+
       assert window_after.buffer == buf1
       assert window_after.content == window_before.content
     end
@@ -309,17 +349,27 @@ defmodule Minga.Editor.StateTest do
       agent_buf = start_buffer("")
 
       state =
-        %{new_state() | buffers: %Buffers{list: [agent_buf], active_index: 0, active: agent_buf}}
+        %{
+          new_state()
+          | workspace: %{
+              new_state().workspace
+              | buffers: %Buffers{list: [agent_buf], active_index: 0, active: agent_buf}
+            }
+        }
 
       tree = WindowTree.new(1)
       agent_window = Window.new_agent_chat(1, agent_buf, 24, 80)
 
-      state = %{
-        state
-        | windows: %Windows{tree: tree, map: %{1 => agent_window}, active: 1, next_id: 2},
-          tab_bar: TabBar.new(Tab.new_agent(1, "Agent")),
-          keymap_scope: :agent
-      }
+      state =
+        put_in(state.workspace.windows, %Windows{
+          tree: tree,
+          map: %{1 => agent_window},
+          active: 1,
+          next_id: 2
+        })
+
+      state = put_in(state.workspace.keymap_scope, :agent)
+      state = %{state | tab_bar: TabBar.new(Tab.new_agent(1, "Agent"))}
 
       %{state: state, agent_buf: agent_buf}
     end
@@ -336,14 +386,14 @@ defmodule Minga.Editor.StateTest do
       file_buf = start_buffer("file content")
       new_state = EditorState.add_buffer(state, file_buf)
 
-      assert new_state.keymap_scope == :editor
+      assert new_state.workspace.keymap_scope == :editor
     end
 
     test "active window buffer points to the new file buffer", %{state: state} do
       file_buf = start_buffer("file content")
       new_state = EditorState.add_buffer(state, file_buf)
 
-      window = Map.fetch!(new_state.windows.map, new_state.windows.active)
+      window = Map.fetch!(new_state.workspace.windows.map, new_state.workspace.windows.active)
       assert window.buffer == file_buf
     end
 
@@ -351,7 +401,7 @@ defmodule Minga.Editor.StateTest do
       file_buf = start_buffer("file content")
       new_state = EditorState.add_buffer(state, file_buf)
 
-      window = Map.fetch!(new_state.windows.map, new_state.windows.active)
+      window = Map.fetch!(new_state.workspace.windows.map, new_state.workspace.windows.active)
 
       assert Content.buffer?(window.content),
              "window content should be {:buffer, _} after opening file from agent tab, " <>
@@ -425,8 +475,8 @@ defmodule Minga.Editor.StateTest do
 
       state = EditorState.remove_dead_buffer(state, buf1)
 
-      refute buf1 in state.buffers.list
-      assert buf2 in state.buffers.list
+      refute buf1 in state.workspace.buffers.list
+      assert buf2 in state.workspace.buffers.list
       refute Map.has_key?(state.buffer_monitors, buf1)
       assert Map.has_key?(state.buffer_monitors, buf2)
     end
@@ -441,27 +491,30 @@ defmodule Minga.Editor.StateTest do
         |> EditorState.add_buffer(buf2)
 
       # buf2 is active (last added)
-      assert state.buffers.active == buf2
+      assert state.workspace.buffers.active == buf2
 
       state = EditorState.remove_dead_buffer(state, buf2)
 
-      assert state.buffers.active == buf1
-      assert state.buffers.list == [buf1]
+      assert state.workspace.buffers.active == buf1
+      assert state.workspace.buffers.list == [buf1]
     end
 
     test "remove_dead_buffer/2 clears special buffer slot" do
       buf = start_buffer()
 
-      state = %{
-        new_state()
-        | buffers: %Buffers{messages: buf, list: [buf], active: buf, active_index: 0}
-      }
+      state =
+        put_in(new_state().workspace.buffers, %Buffers{
+          messages: buf,
+          list: [buf],
+          active: buf,
+          active_index: 0
+        })
 
       state = EditorState.monitor_buffer(state, buf)
       state = EditorState.remove_dead_buffer(state, buf)
 
-      assert state.buffers.messages == nil
-      assert state.buffers.list == []
+      assert state.workspace.buffers.messages == nil
+      assert state.workspace.buffers.list == []
     end
   end
 end

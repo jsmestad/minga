@@ -12,7 +12,7 @@ defmodule Minga.Editor.Commands.UseSelectionForFindTest do
       state = editor_state(ctx)
       state = Minga.Editor.Commands.execute(state, :use_selection_for_find)
 
-      assert state.search.last_pattern == "hello"
+      assert state.workspace.search.last_pattern == "hello"
       assert state.status_msg =~ "hello"
     end
 
@@ -22,7 +22,7 @@ defmodule Minga.Editor.Commands.UseSelectionForFindTest do
       state = editor_state(ctx)
       state = Minga.Editor.Commands.execute(state, :use_selection_for_find)
 
-      assert state.search.last_direction == :forward
+      assert state.workspace.search.last_direction == :forward
     end
   end
 end

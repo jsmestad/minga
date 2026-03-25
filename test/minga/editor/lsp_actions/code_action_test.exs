@@ -5,13 +5,15 @@ defmodule Minga.Editor.LspActions.CodeActionTest do
 
   defp stub_state do
     %{
+      workspace: %{
+        buffers: %Minga.Editor.State.Buffers{},
+        vim: %{mode: :normal, last_jump_pos: nil},
+        viewport: %Minga.Editor.Viewport{rows: 40, cols: 120, top: 0, left: 0}
+      },
       status_msg: nil,
-      buffers: %Minga.Editor.State.Buffers{},
       picker_ui: %Minga.Editor.State.Picker{},
       whichkey: %Minga.Editor.State.WhichKey{},
-      vim: %{mode: :normal, last_jump_pos: nil},
-      theme: Minga.Theme.get!(:doom_one),
-      viewport: %Minga.Editor.Viewport{rows: 40, cols: 120, top: 0, left: 0}
+      theme: Minga.Theme.get!(:doom_one)
     }
   end
 

@@ -32,7 +32,7 @@ defmodule Minga.Integration.WindowSplitsTest do
       state = editor_state(ctx)
 
       window_bufs =
-        state.windows.map |> Map.values() |> Enum.map(&Content.buffer_pid(&1.content))
+        state.workspace.windows.map |> Map.values() |> Enum.map(&Content.buffer_pid(&1.content))
 
       assert length(Enum.uniq(window_bufs)) == 1
     end

@@ -41,7 +41,7 @@ defmodule Minga.Test.Invariants do
 
   defp collect_from_state(state) do
     mode = Minga.Editor.Editing.mode(state)
-    buf = state.buffers.active
+    buf = state.workspace.buffers.active
 
     if is_pid(buf) do
       {cursor_line, cursor_col} = BufferServer.cursor(buf)

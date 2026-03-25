@@ -48,14 +48,16 @@ defmodule Minga.Agent.View.DashboardRendererTest do
 
     %EditorState{
       port_manager: self(),
-      viewport: Viewport.new(rows, cols),
-      vim: VimState.new(),
-      buffers: %Buffers{active: buf, list: [buf], active_index: 0},
+      workspace: %Minga.Workspace.State{
+        viewport: Viewport.new(rows, cols),
+        vim: VimState.new(),
+        buffers: %Buffers{active: buf, list: [buf], active_index: 0},
+        agent_ui: agentic,
+        highlight: %Highlighting{}
+      },
       focus_stack: Input.default_stack(),
       agent: agent,
-      agent_ui: agentic,
-      theme: Theme.get!(:doom_one),
-      highlight: %Highlighting{}
+      theme: Theme.get!(:doom_one)
     }
   end
 

@@ -68,7 +68,7 @@ defmodule Minga.Editor.SemanticWindowTest do
       state = gui_state(content: "hello")
       {[wf], _cursor, _state} = build_content(state)
 
-      assert wf.semantic.window_id == state.windows.active
+      assert wf.semantic.window_id == state.workspace.windows.active
     end
   end
 

@@ -69,23 +69,28 @@ defmodule Minga.Input.Interrupt do
   end
 
   @spec maybe_reset_scope(EditorState.t(), [String.t()]) :: {EditorState.t(), [String.t()]}
-  defp maybe_reset_scope(%{keymap_scope: :editor} = state, resets), do: {state, resets}
+  defp maybe_reset_scope(%{workspace: %{keymap_scope: :editor}} = state, resets),
+    do: {state, resets}
 
-  defp maybe_reset_scope(%{keymap_scope: scope} = state, resets) do
-    {%{state | keymap_scope: :editor}, ["scope #{scope} → :editor" | resets]}
+  defp maybe_reset_scope(%{workspace: %{keymap_scope: scope}} = state, resets) do
+    {%{state | workspace: %{state.workspace | keymap_scope: :editor}},
+     ["scope #{scope} → :editor" | resets]}
   end
 
   @spec maybe_reset_mode(EditorState.t(), [String.t()]) :: {EditorState.t(), [String.t()]}
-  defp maybe_reset_mode(%{vim: %{mode: mode}} = state, resets) when mode != :normal do
+  defp maybe_reset_mode(%{workspace: %{vim: %{mode: mode}}} = state, resets)
+       when mode != :normal do
     {EditorState.transition_mode(state, :normal), ["mode #{mode} → :normal" | resets]}
   end
 
-  defp maybe_reset_mode(%{vim: vim} = state, resets) do
+  defp maybe_reset_mode(%{workspace: %{vim: vim}} = state, resets) do
     fresh_state = Mode.initial_state()
 
     if mode_state_dirty?(vim.mode_state, fresh_state) do
       new_vim = %{vim | mode_state: fresh_state}
-      {%{state | vim: new_vim}, ["mode state reset (pending sequence cleared)" | resets]}
+
+      {%{state | workspace: %{state.workspace | vim: new_vim}},
+       ["mode state reset (pending sequence cleared)" | resets]}
     else
       {state, resets}
     end
@@ -120,17 +125,20 @@ defmodule Minga.Input.Interrupt do
   end
 
   @spec maybe_close_conflict(EditorState.t(), [String.t()]) :: {EditorState.t(), [String.t()]}
-  defp maybe_close_conflict(%{pending_conflict: nil} = state, resets), do: {state, resets}
+  defp maybe_close_conflict(%{workspace: %{pending_conflict: nil}} = state, resets),
+    do: {state, resets}
 
   defp maybe_close_conflict(state, resets) do
-    {%{state | pending_conflict: nil}, ["conflict prompt dismissed" | resets]}
+    {%{state | workspace: %{state.workspace | pending_conflict: nil}},
+     ["conflict prompt dismissed" | resets]}
   end
 
   @spec maybe_close_completion(EditorState.t(), [String.t()]) :: {EditorState.t(), [String.t()]}
-  defp maybe_close_completion(%{completion: nil} = state, resets), do: {state, resets}
+  defp maybe_close_completion(%{workspace: %{completion: nil}} = state, resets),
+    do: {state, resets}
 
-  defp maybe_close_completion(%{completion: %Completion{}} = state, resets) do
-    {%{state | completion: nil}, ["completion closed" | resets]}
+  defp maybe_close_completion(%{workspace: %{completion: %Completion{}}} = state, resets) do
+    {%{state | workspace: %{state.workspace | completion: nil}}, ["completion closed" | resets]}
   end
 
   @spec maybe_clear_agent_prefix(EditorState.t(), [String.t()]) :: {EditorState.t(), [String.t()]}

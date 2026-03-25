@@ -133,7 +133,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.TUI do
 
       deltas =
         Enum.reduce_while(layout.window_layouts, [], fn {win_id, win_layout}, acc ->
-          window = Map.get(state.windows.map, win_id)
+          window = Map.get(state.workspace.windows.map, win_id)
           check_window_scroll(window, win_id, win_layout, prev, acc)
         end)
 

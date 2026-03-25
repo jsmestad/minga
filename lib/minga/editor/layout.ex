@@ -263,7 +263,7 @@ defmodule Minga.Editor.Layout do
   @doc "Returns the window layout for the active window, or nil."
   @spec active_window_layout(t(), EditorState.t()) :: window_layout() | nil
   def active_window_layout(%__MODULE__{window_layouts: wl}, state) do
-    Map.get(wl, state.windows.active)
+    Map.get(wl, state.workspace.windows.active)
   end
 
   @doc """

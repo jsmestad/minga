@@ -32,10 +32,12 @@ defmodule Minga.Picker.CommandSourceTest do
 
       state = %EditorState{
         port_manager: nil,
-        viewport: Viewport.new(24, 80),
-        buffers: %Buffers{active: buf, list: [buf], active_index: 0},
-        picker_ui: %PickerState{},
-        vim: VimState.new()
+        workspace: %Minga.Workspace.State{
+          viewport: Viewport.new(24, 80),
+          buffers: %Buffers{active: buf, list: [buf], active_index: 0},
+          vim: VimState.new()
+        },
+        picker_ui: %PickerState{}
       }
 
       result =

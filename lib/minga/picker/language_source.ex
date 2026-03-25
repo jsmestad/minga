@@ -67,7 +67,7 @@ defmodule Minga.Picker.LanguageSource do
   end
 
   @spec current_filetype(term()) :: atom()
-  defp current_filetype(%{buffers: %{active: buf}}) when is_pid(buf) do
+  defp current_filetype(%{workspace: %{buffers: %{active: buf}}}) when is_pid(buf) do
     BufferServer.filetype(buf)
   catch
     :exit, _ -> :text

@@ -41,8 +41,8 @@ defmodule Minga.Editor.Commands.Git do
   # ── Status panel toggle ────────────────────────────────────────────────────
 
   def execute(state, :git_status_toggle) do
-    if state.keymap_scope == :git_status do
-      %{state | keymap_scope: :editor, git_status_panel: nil}
+    if state.workspace.keymap_scope == :git_status do
+      %{state | workspace: %{state.workspace | keymap_scope: :editor}, git_status_panel: nil}
     else
       open_git_status_panel(state)
     end
@@ -172,7 +172,7 @@ defmodule Minga.Editor.Commands.Git do
 
   # Mutual exclusivity: close file tree when opening git status.
   @spec close_file_tree_if_open(state()) :: state()
-  defp close_file_tree_if_open(%{file_tree: %{tree: nil}} = state), do: state
+  defp close_file_tree_if_open(%{workspace: %{file_tree: %{tree: nil}}} = state), do: state
   defp close_file_tree_if_open(state), do: Commands.FileTree.close(state)
 
   @spec open_diff_view(state(), pid(), pid()) :: state()
@@ -330,7 +330,11 @@ defmodule Minga.Editor.Commands.Git do
         # Mutual exclusivity: close file tree when opening git status
         state = close_file_tree_if_open(state)
 
-        %{state | keymap_scope: :git_status, git_status_panel: panel_data}
+        %{
+          state
+          | workspace: %{state.workspace | keymap_scope: :git_status},
+            git_status_panel: panel_data
+        }
     end
   end
 
@@ -372,7 +376,7 @@ defmodule Minga.Editor.Commands.Git do
   end
 
   @spec with_git_buffer(state(), (pid(), pid() -> state())) :: state()
-  defp with_git_buffer(%{buffers: %{active: buf}} = state, fun)
+  defp with_git_buffer(%{workspace: %{buffers: %{active: buf}}} = state, fun)
        when is_pid(buf) do
     case GitTracker.lookup(buf) do
       nil ->

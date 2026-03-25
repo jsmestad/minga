@@ -20,10 +20,10 @@ defmodule Minga.Editor.HighlightSync do
   to the Zig port. Call this when a buffer is opened or switched to.
   """
   @spec setup_for_buffer(EditorState.t()) :: EditorState.t()
-  def setup_for_buffer(%EditorState{buffers: %{active: nil}} = state), do: state
+  def setup_for_buffer(%EditorState{workspace: %{buffers: %{active: nil}}} = state), do: state
 
   def setup_for_buffer(%EditorState{} = state) do
-    filetype = BufferServer.filetype(state.buffers.active)
+    filetype = BufferServer.filetype(state.workspace.buffers.active)
 
     case Grammar.language_for_filetype(filetype) do
       {:ok, language} ->
@@ -77,7 +77,7 @@ defmodule Minga.Editor.HighlightSync do
   """
   @spec request_reparse_buffer(EditorState.t(), pid()) :: EditorState.t()
   def request_reparse_buffer(%EditorState{} = state, buf_pid) when is_pid(buf_pid) do
-    hl = state.highlight
+    hl = state.workspace.highlight
 
     case Map.fetch(hl.buffer_ids, buf_pid) do
       {:ok, buffer_id} ->
@@ -86,7 +86,7 @@ defmodule Minga.Editor.HighlightSync do
         parse_cmd = Protocol.encode_parse_buffer(buffer_id, version, content)
         ParserManager.send_commands([parse_cmd])
 
-        state = %{state | highlight: %{hl | version: version}}
+        state = %{state | workspace: %{state.workspace | highlight: %{hl | version: version}}}
         touch_buffer(state, buf_pid)
 
       :error ->
@@ -105,7 +105,7 @@ defmodule Minga.Editor.HighlightSync do
   @spec send_parse_for_pid(EditorState.t(), pid(), String.t(), [setup_opt()]) :: EditorState.t()
   defp send_parse_for_pid(state, buf_pid, language, opts) do
     {buffer_id, state} = ensure_buffer_id_for(state, buf_pid)
-    hl = state.highlight
+    hl = state.workspace.highlight
     version = hl.version + 1
     content = BufferServer.content(buf_pid)
 
@@ -164,7 +164,7 @@ defmodule Minga.Editor.HighlightSync do
 
     state = put_highlight(state, buf_pid, hl_data)
 
-    hl2 = state.highlight
+    hl2 = state.workspace.highlight
 
     syntax_overrides =
       if custom_syntax do
@@ -173,7 +173,14 @@ defmodule Minga.Editor.HighlightSync do
         hl2.syntax_overrides
       end
 
-    state = %{state | highlight: %{hl2 | version: version, syntax_overrides: syntax_overrides}}
+    state = %{
+      state
+      | workspace: %{
+          state.workspace
+          | highlight: %{hl2 | version: version, syntax_overrides: syntax_overrides}
+        }
+    }
+
     touch_buffer(state, buf_pid)
   end
 
@@ -181,7 +188,7 @@ defmodule Minga.Editor.HighlightSync do
   # Private: callers should use setup_for_buffer_pid/2 or request_reparse_buffer/2
   # which handle the full language + parse protocol.
   @spec ensure_buffer_id_for(EditorState.t(), pid()) :: {non_neg_integer(), EditorState.t()}
-  defp ensure_buffer_id_for(%EditorState{highlight: hl} = state, buf_pid) do
+  defp ensure_buffer_id_for(%EditorState{workspace: %{highlight: hl}} = state, buf_pid) do
     case Map.fetch(hl.buffer_ids, buf_pid) do
       {:ok, id} ->
         {id, state}
@@ -194,18 +201,18 @@ defmodule Minga.Editor.HighlightSync do
   # Touches the last_active_at timestamp for a specific buffer PID.
   @spec touch_buffer(EditorState.t(), pid()) :: EditorState.t()
   defp touch_buffer(%EditorState{} = state, buf_pid) do
-    hl = state.highlight
+    hl = state.workspace.highlight
     now = System.monotonic_time(:millisecond)
     timestamps = Map.put(hl.last_active_at, buf_pid, now)
-    %{state | highlight: %{hl | last_active_at: timestamps}}
+    %{state | workspace: %{state.workspace | highlight: %{hl | last_active_at: timestamps}}}
   end
 
   @spec send_parse_only(EditorState.t(), String.t()) :: EditorState.t()
   defp send_parse_only(state, language) do
     {buffer_id, state} = ensure_buffer_id(state)
-    hl = state.highlight
+    hl = state.workspace.highlight
     version = hl.version + 1
-    content = BufferServer.content(state.buffers.active)
+    content = BufferServer.content(state.workspace.buffers.active)
 
     query_override = user_query_override(buffer_id, language)
     injection_override = user_injection_query_override(buffer_id, language)
@@ -227,7 +234,7 @@ defmodule Minga.Editor.HighlightSync do
     ParserManager.send_commands(commands)
 
     # Register for crash recovery re-sync (including custom queries).
-    active = state.buffers.active
+    active = state.workspace.buffers.active
 
     setup_fn = fn bid ->
       fresh_content = BufferServer.content(active)
@@ -250,8 +257,8 @@ defmodule Minga.Editor.HighlightSync do
     )
 
     state = put_active_highlight(state, Highlight.from_theme(state.theme))
-    hl2 = state.highlight
-    state = %{state | highlight: %{hl2 | version: version}}
+    hl2 = state.workspace.highlight
+    state = %{state | workspace: %{state.workspace | highlight: %{hl2 | version: version}}}
     touch_active(state)
   end
 
@@ -262,9 +269,10 @@ defmodule Minga.Editor.HighlightSync do
   incrementing u32 stored in `highlight.buffer_ids`.
   """
   @spec ensure_buffer_id(EditorState.t()) :: {non_neg_integer(), EditorState.t()}
-  def ensure_buffer_id(%EditorState{buffers: %{active: nil}} = state), do: {0, state}
+  def ensure_buffer_id(%EditorState{workspace: %{buffers: %{active: nil}}} = state),
+    do: {0, state}
 
-  def ensure_buffer_id(%EditorState{highlight: hl, buffers: %{active: buf}} = state) do
+  def ensure_buffer_id(%EditorState{workspace: %{highlight: hl, buffers: %{active: buf}}} = state) do
     case Map.fetch(hl.buffer_ids, buf) do
       {:ok, id} ->
         {id, state}
@@ -286,7 +294,7 @@ defmodule Minga.Editor.HighlightSync do
         next_buffer_id: id + 1
     }
 
-    {id, %{state | highlight: new_hl}}
+    {id, %{state | workspace: %{state.workspace | highlight: new_hl}}}
   end
 
   @doc """
@@ -295,7 +303,7 @@ defmodule Minga.Editor.HighlightSync do
   """
   @spec close_buffer(EditorState.t(), pid()) :: EditorState.t()
   def close_buffer(%EditorState{} = state, buffer_pid) do
-    hl = state.highlight
+    hl = state.workspace.highlight
 
     case Map.pop(hl.buffer_ids, buffer_pid) do
       {nil, _ids} ->
@@ -305,17 +313,14 @@ defmodule Minga.Editor.HighlightSync do
         ParserManager.close_buffer(buffer_id)
         ParserManager.unregister_buffer(buffer_id)
 
-        %{
-          state
-          | highlight: %{
-              hl
-              | buffer_ids: remaining_ids,
-                reverse_buffer_ids: Map.delete(hl.reverse_buffer_ids, buffer_id),
-                highlights: Map.delete(hl.highlights, buffer_pid),
-                last_active_at: Map.delete(hl.last_active_at, buffer_pid),
-                syntax_overrides: Map.delete(hl.syntax_overrides, buffer_pid)
-            }
-        }
+        put_in(state.workspace.highlight, %{
+          hl
+          | buffer_ids: remaining_ids,
+            reverse_buffer_ids: Map.delete(hl.reverse_buffer_ids, buffer_id),
+            highlights: Map.delete(hl.highlights, buffer_pid),
+            last_active_at: Map.delete(hl.last_active_at, buffer_pid),
+            syntax_overrides: Map.delete(hl.syntax_overrides, buffer_pid)
+        })
     end
   end
 
@@ -421,9 +426,9 @@ defmodule Minga.Editor.HighlightSync do
   Call this after content changes (insert, delete, paste, etc.).
   """
   @spec request_reparse(EditorState.t()) :: EditorState.t()
-  def request_reparse(%EditorState{buffers: %{active: nil}} = state), do: state
+  def request_reparse(%EditorState{workspace: %{buffers: %{active: nil}}} = state), do: state
 
-  def request_reparse(%EditorState{} = state) when state.buffers.active != nil do
+  def request_reparse(%EditorState{} = state) when state.workspace.buffers.active != nil do
     active_hl = get_active_highlight(state)
 
     if active_hl.spans == {} and active_hl.capture_names == {} do
@@ -436,12 +441,12 @@ defmodule Minga.Editor.HighlightSync do
 
   defp do_request_reparse(%EditorState{} = state) do
     {buffer_id, state} = ensure_buffer_id(state)
-    hl = state.highlight
+    hl = state.workspace.highlight
     version = hl.version + 1
 
     # Try incremental sync first: if the buffer has pending edit deltas,
     # send them as an edit_buffer command instead of the full content.
-    edits = BufferServer.flush_edits(state.buffers.active, :highlight)
+    edits = BufferServer.flush_edits(state.workspace.buffers.active, :highlight)
 
     commands =
       if edits != [] do
@@ -449,13 +454,13 @@ defmodule Minga.Editor.HighlightSync do
         [Protocol.encode_edit_buffer(buffer_id, version, delta_maps)]
       else
         # No deltas (e.g., undo/redo, content replaced externally): full sync
-        content = BufferServer.content(state.buffers.active)
+        content = BufferServer.content(state.workspace.buffers.active)
         [Protocol.encode_parse_buffer(buffer_id, version, content)]
       end
 
     ParserManager.send_commands(commands)
 
-    state = %{state | highlight: %{hl | version: version}}
+    state = %{state | workspace: %{state.workspace | highlight: %{hl | version: version}}}
     touch_active(state)
   end
 
@@ -476,13 +481,13 @@ defmodule Minga.Editor.HighlightSync do
   Call on every parse, edit, or buffer focus.
   """
   @spec touch_active(EditorState.t()) :: EditorState.t()
-  def touch_active(%EditorState{buffers: %{active: nil}} = state), do: state
+  def touch_active(%EditorState{workspace: %{buffers: %{active: nil}}} = state), do: state
 
   def touch_active(%EditorState{} = state) do
-    hl = state.highlight
+    hl = state.workspace.highlight
     now = System.monotonic_time(:millisecond)
-    timestamps = Map.put(hl.last_active_at, state.buffers.active, now)
-    %{state | highlight: %{hl | last_active_at: timestamps}}
+    timestamps = Map.put(hl.last_active_at, state.workspace.buffers.active, now)
+    %{state | workspace: %{state.workspace | highlight: %{hl | last_active_at: timestamps}}}
   end
 
   @doc """
@@ -500,12 +505,12 @@ defmodule Minga.Editor.HighlightSync do
 
   @spec evict_inactive(EditorState.t(), [evict_opt()]) :: EditorState.t()
   def evict_inactive(%EditorState{} = state, opts \\ []) do
-    hl = state.highlight
+    hl = state.workspace.highlight
     now = System.monotonic_time(:millisecond)
     ttl_ms = Keyword.get(opts, :ttl_ms, 300_000)
     protected_pids = Keyword.get(opts, :protected_pids, [])
 
-    active = state.buffers.active
+    active = state.workspace.buffers.active
     protected = MapSet.new([active | protected_pids] |> Enum.reject(&is_nil/1))
 
     {evicted_ids, remaining_timestamps} =
@@ -561,8 +566,10 @@ defmodule Minga.Editor.HighlightSync do
     )
 
     # Calculation: compute the new highlighting state with evicted entries removed.
-    new_hl = compute_post_eviction_state(state.highlight, evicted_ids, remaining_timestamps)
-    %{state | highlight: new_hl}
+    new_hl =
+      compute_post_eviction_state(state.workspace.highlight, evicted_ids, remaining_timestamps)
+
+    %{state | workspace: %{state.workspace | highlight: new_hl}}
   end
 
   # Pure calculation: produces the new Highlighting struct with evicted entries removed.
@@ -592,7 +599,7 @@ defmodule Minga.Editor.HighlightSync do
   Returns nil if the buffer_id is unknown (e.g., the buffer was closed).
   """
   @spec resolve_buffer_pid(EditorState.t(), non_neg_integer()) :: pid() | nil
-  def resolve_buffer_pid(%EditorState{highlight: hl}, buffer_id) do
+  def resolve_buffer_pid(%EditorState{workspace: %{highlight: hl}}, buffer_id) do
     Map.get(hl.reverse_buffer_ids, buffer_id)
   end
 
@@ -613,42 +620,60 @@ defmodule Minga.Editor.HighlightSync do
 
   @doc "Returns the parser buffer_id for a given buffer PID (read-only, no allocation)."
   @spec buffer_id_for(EditorState.t(), pid()) :: non_neg_integer()
-  def buffer_id_for(%EditorState{highlight: hl}, buf_pid) do
+  def buffer_id_for(%EditorState{workspace: %{highlight: hl}}, buf_pid) do
     Map.get(hl.buffer_ids, buf_pid, 0)
   end
 
   @doc "Returns the highlight data for the active buffer."
   @spec get_active_highlight(EditorState.t()) :: Highlight.t()
-  def get_active_highlight(%EditorState{buffers: %{active: nil}}), do: Highlight.new()
+  def get_active_highlight(%EditorState{workspace: %{buffers: %{active: nil}}}),
+    do: Highlight.new()
 
-  def get_active_highlight(%EditorState{highlight: hl, buffers: %{active: buf}}) do
+  def get_active_highlight(%EditorState{workspace: %{highlight: hl, buffers: %{active: buf}}}) do
     Map.get(hl.highlights, buf, Highlight.new())
   end
 
   @doc "Returns the highlight data for a specific buffer PID."
   @spec get_highlight(EditorState.t(), pid()) :: Highlight.t()
-  def get_highlight(%EditorState{highlight: hl}, buf_pid) do
+  def get_highlight(%EditorState{workspace: %{highlight: hl}}, buf_pid) do
     Map.get(hl.highlights, buf_pid, Highlight.new())
   end
 
   @doc "Stores highlight data for the active buffer."
   @spec put_active_highlight(EditorState.t(), Highlight.t()) :: EditorState.t()
-  def put_active_highlight(%EditorState{buffers: %{active: nil}} = state, _hl_data), do: state
+  def put_active_highlight(%EditorState{workspace: %{buffers: %{active: nil}}} = state, _hl_data),
+    do: state
 
-  def put_active_highlight(%EditorState{highlight: hl, buffers: %{active: buf}} = state, hl_data) do
-    %{state | highlight: %{hl | highlights: Map.put(hl.highlights, buf, hl_data)}}
+  def put_active_highlight(
+        %EditorState{workspace: %{highlight: hl, buffers: %{active: buf}}} = state,
+        hl_data
+      ) do
+    %{
+      state
+      | workspace: %{
+          state.workspace
+          | highlight: %{hl | highlights: Map.put(hl.highlights, buf, hl_data)}
+        }
+    }
   end
 
   @doc "Stores highlight data for a specific buffer PID."
   @spec put_highlight(EditorState.t(), pid(), Highlight.t()) :: EditorState.t()
-  def put_highlight(%EditorState{highlight: hl} = state, buf_pid, hl_data) do
-    %{state | highlight: %{hl | highlights: Map.put(hl.highlights, buf_pid, hl_data)}}
+  def put_highlight(%EditorState{workspace: %{highlight: hl}} = state, buf_pid, hl_data) do
+    %{
+      state
+      | workspace: %{
+          state.workspace
+          | highlight: %{hl | highlights: Map.put(hl.highlights, buf_pid, hl_data)}
+        }
+    }
   end
 
   # Updates the active buffer's highlight via a function.
   @spec update_active_highlight(EditorState.t(), (Highlight.t() -> Highlight.t())) ::
           EditorState.t()
-  defp update_active_highlight(%EditorState{buffers: %{active: nil}} = state, _fun), do: state
+  defp update_active_highlight(%EditorState{workspace: %{buffers: %{active: nil}}} = state, _fun),
+    do: state
 
   defp update_active_highlight(%EditorState{} = state, fun) do
     current = get_active_highlight(state)

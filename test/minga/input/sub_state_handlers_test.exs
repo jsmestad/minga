@@ -65,13 +65,15 @@ defmodule Minga.Input.SubStateHandlersTest do
 
     %EditorState{
       port_manager: self(),
-      viewport: Viewport.new(24, 80),
-      vim: VimState.new(),
-      buffers: %Buffers{active: buf, list: [buf]},
+      workspace: %Minga.Workspace.State{
+        viewport: Viewport.new(24, 80),
+        vim: VimState.new(),
+        buffers: %Buffers{active: buf, list: [buf]},
+        keymap_scope: Keyword.get(opts, :keymap_scope, :editor),
+        agent_ui: agentic
+      },
       focus_stack: [],
-      keymap_scope: Keyword.get(opts, :keymap_scope, :editor),
       agent: agent,
-      agent_ui: agentic,
       tab_bar: tab_bar
     }
   end

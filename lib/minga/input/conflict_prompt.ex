@@ -14,14 +14,21 @@ defmodule Minga.Input.ConflictPrompt do
   @impl true
   @spec handle_key(Minga.Editor.State.t(), non_neg_integer(), non_neg_integer()) ::
           Minga.Input.Handler.result()
-  def handle_key(%{pending_conflict: {buf, _path}} = state, ?r, _mods) when is_pid(buf) do
+  def handle_key(%{workspace: %{pending_conflict: {buf, _path}}} = state, ?r, _mods)
+      when is_pid(buf) do
     BufferServer.reload(buf)
     name = Path.basename(BufferServer.file_path(buf) || "buffer")
 
-    {:handled, %{state | pending_conflict: nil, status_msg: "#{name} reloaded (changed on disk)"}}
+    {:handled,
+     %{
+       state
+       | workspace: %{state.workspace | pending_conflict: nil},
+         status_msg: "#{name} reloaded (changed on disk)"
+     }}
   end
 
-  def handle_key(%{pending_conflict: {buf, _path}} = state, ?k, _mods) when is_pid(buf) do
+  def handle_key(%{workspace: %{pending_conflict: {buf, _path}}} = state, ?k, _mods)
+      when is_pid(buf) do
     buf_state = :sys.get_state(buf)
 
     case File.stat(buf_state.file_path, time: :posix) do
@@ -32,10 +39,10 @@ defmodule Minga.Input.ConflictPrompt do
         :ok
     end
 
-    {:handled, %{state | pending_conflict: nil, status_msg: nil}}
+    {:handled, %{state | workspace: %{state.workspace | pending_conflict: nil}, status_msg: nil}}
   end
 
-  def handle_key(%{pending_conflict: {_, _}} = state, _cp, _mods) do
+  def handle_key(%{workspace: %{pending_conflict: {_, _}}} = state, _cp, _mods) do
     # Swallow all other keys while conflict prompt is active
     {:handled, state}
   end

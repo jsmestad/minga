@@ -2,12 +2,14 @@ defmodule Minga.Editor.State.AgentAccess do
   @moduledoc """
   Direct accessors for agent state on EditorState.
 
-  Agent state is split across three structs on EditorState:
+  Agent state is split across two locations:
 
-  - `agent` (`Editor.State.Agent`) — session lifecycle (PIDs, monitors, status)
-  - `agent_ui` (`Agent.UIState`) — full UI state wrapping Panel and View
-  - `agent_ui.panel` (`UIState.Panel`) — prompt editing and chat display
-  - `agent_ui.view` (`UIState.View`) — layout, search, preview, toasts
+  - `state.agent` (`Editor.State.Agent`) — session lifecycle (PIDs, monitors, status).
+    This is a global field on EditorState (not per-tab).
+  - `state.workspace.agent_ui` (`Agent.UIState`) — full UI state wrapping Panel and View.
+    This is a per-tab field in the workspace.
+  - `state.workspace.agent_ui.panel` (`UIState.Panel`) — prompt editing and chat display
+  - `state.workspace.agent_ui.view` (`UIState.View`) — layout, search, preview, toasts
 
   This module provides read/write functions so callers don't need to know
   the field layout.
@@ -29,19 +31,22 @@ defmodule Minga.Editor.State.AgentAccess do
 
   @doc "Returns the full agent UI state (wrapping Panel and View)."
   @spec agent_ui(EditorState.t() | map()) :: UIState.t()
-  def agent_ui(%EditorState{agent_ui: a}), do: a
+  def agent_ui(%EditorState{workspace: %{agent_ui: a}}), do: a
+  def agent_ui(%{workspace: %{agent_ui: a}}), do: a
   def agent_ui(%{agent_ui: a}), do: a
   def agent_ui(_), do: UIState.new()
 
   @doc "Returns the agent panel state (prompt editing and chat display)."
   @spec panel(EditorState.t() | map()) :: Panel.t()
-  def panel(%EditorState{agent_ui: %UIState{panel: p}}), do: p
+  def panel(%EditorState{workspace: %{agent_ui: %UIState{panel: p}}}), do: p
+  def panel(%{workspace: %{agent_ui: %UIState{panel: p}}}), do: p
   def panel(%{agent_ui: %UIState{panel: p}}), do: p
   def panel(_), do: Panel.new()
 
   @doc "Returns the agent view state (layout, search, preview, toasts)."
   @spec view(EditorState.t() | map()) :: View.t()
-  def view(%EditorState{agent_ui: %UIState{view: v}}), do: v
+  def view(%EditorState{workspace: %{agent_ui: %UIState{view: v}}}), do: v
+  def view(%{workspace: %{agent_ui: %UIState{view: v}}}), do: v
   def view(%{agent_ui: %UIState{view: v}}), do: v
   def view(_), do: View.new()
 
@@ -74,8 +79,12 @@ defmodule Minga.Editor.State.AgentAccess do
   @doc "Updates the full agent UI state. Prefer update_panel/2 or update_view/2."
   @spec update_agent_ui(EditorState.t() | map(), (UIState.t() -> UIState.t())) ::
           EditorState.t() | map()
-  def update_agent_ui(%EditorState{agent_ui: a} = state, fun) do
-    %{state | agent_ui: fun.(a)}
+  def update_agent_ui(%EditorState{workspace: ws} = state, fun) do
+    %{state | workspace: %{ws | agent_ui: fun.(ws.agent_ui)}}
+  end
+
+  def update_agent_ui(%{workspace: %{agent_ui: a} = ws} = state, fun) do
+    %{state | workspace: %{ws | agent_ui: fun.(a)}}
   end
 
   def update_agent_ui(%{agent_ui: a} = state, fun) do
@@ -85,8 +94,15 @@ defmodule Minga.Editor.State.AgentAccess do
   @doc "Updates just the panel sub-struct via a transform function."
   @spec update_panel(EditorState.t() | map(), (Panel.t() -> Panel.t())) ::
           EditorState.t() | map()
-  def update_panel(%EditorState{agent_ui: %UIState{panel: p} = ui} = state, fun) do
-    %{state | agent_ui: %{ui | panel: fun.(p)}}
+  def update_panel(
+        %EditorState{workspace: %{agent_ui: %UIState{panel: p} = ui} = ws} = state,
+        fun
+      ) do
+    %{state | workspace: %{ws | agent_ui: %{ui | panel: fun.(p)}}}
+  end
+
+  def update_panel(%{workspace: %{agent_ui: %UIState{panel: p} = ui} = ws} = state, fun) do
+    %{state | workspace: %{ws | agent_ui: %{ui | panel: fun.(p)}}}
   end
 
   def update_panel(%{agent_ui: %UIState{panel: p} = ui} = state, fun) do
@@ -96,8 +112,12 @@ defmodule Minga.Editor.State.AgentAccess do
   @doc "Updates just the view sub-struct via a transform function."
   @spec update_view(EditorState.t() | map(), (View.t() -> View.t())) ::
           EditorState.t() | map()
-  def update_view(%EditorState{agent_ui: %UIState{view: v} = ui} = state, fun) do
-    %{state | agent_ui: %{ui | view: fun.(v)}}
+  def update_view(%EditorState{workspace: %{agent_ui: %UIState{view: v} = ui} = ws} = state, fun) do
+    %{state | workspace: %{ws | agent_ui: %{ui | view: fun.(v)}}}
+  end
+
+  def update_view(%{workspace: %{agent_ui: %UIState{view: v} = ui} = ws} = state, fun) do
+    %{state | workspace: %{ws | agent_ui: %{ui | view: fun.(v)}}}
   end
 
   def update_view(%{agent_ui: %UIState{view: v} = ui} = state, fun) do

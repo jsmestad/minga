@@ -48,7 +48,7 @@ defmodule Minga.Editor.FileChangeTest do
     _ = :sys.get_state(ctx.editor)
 
     state = :sys.get_state(ctx.editor)
-    assert state.pending_conflict != nil
+    assert state.workspace.pending_conflict != nil
     assert state.status_msg =~ "[r]eload"
     assert state.status_msg =~ "[k]eep"
   end
@@ -78,7 +78,7 @@ defmodule Minga.Editor.FileChangeTest do
 
     state = :sys.get_state(ctx.editor)
     assert state.status_msg =~ "reloaded"
-    assert state.pending_conflict == nil
+    assert state.workspace.pending_conflict == nil
   end
 
   @tag :tmp_dir
@@ -105,7 +105,7 @@ defmodule Minga.Editor.FileChangeTest do
     assert String.contains?(content, "local")
 
     state = :sys.get_state(ctx.editor)
-    assert state.pending_conflict == nil
+    assert state.workspace.pending_conflict == nil
   end
 
   @tag :tmp_dir
@@ -126,7 +126,7 @@ defmodule Minga.Editor.FileChangeTest do
     _ = :sys.get_state(ctx.editor)
 
     state = :sys.get_state(ctx.editor)
-    assert state.pending_conflict != nil
+    assert state.workspace.pending_conflict != nil
   end
 
   @tag :tmp_dir
@@ -141,7 +141,7 @@ defmodule Minga.Editor.FileChangeTest do
     _ = :sys.get_state(ctx.editor)
 
     state = :sys.get_state(ctx.editor)
-    assert state.pending_conflict == nil
+    assert state.workspace.pending_conflict == nil
     assert state.status_msg == nil
   end
 

@@ -72,7 +72,7 @@ defmodule Minga.Editor.Commands.Movement do
 
   # ── h / l (mode-aware) ────────────────────────────────────────────────────
 
-  def execute(%{buffers: %{active: buf}, vim: %{mode: mode}} = state, :move_left) do
+  def execute(%{workspace: %{buffers: %{active: buf}, vim: %{mode: mode}}} = state, :move_left) do
     if mode in [:insert, :replace] do
       BufferServer.move(buf, :left)
     else
@@ -82,7 +82,7 @@ defmodule Minga.Editor.Commands.Movement do
     state
   end
 
-  def execute(%{buffers: %{active: buf}, vim: %{mode: mode}} = state, :move_right) do
+  def execute(%{workspace: %{buffers: %{active: buf}, vim: %{mode: mode}}} = state, :move_right) do
     if mode in [:insert, :replace] do
       BufferServer.move(buf, :right)
     else
@@ -92,7 +92,7 @@ defmodule Minga.Editor.Commands.Movement do
     state
   end
 
-  def execute(%{buffers: %{active: buf}} = state, :move_up) do
+  def execute(%{workspace: %{buffers: %{active: buf}}} = state, :move_up) do
     if wrap_enabled?(buf) do
       visual_line_move(buf, state, :up)
     else
@@ -101,7 +101,7 @@ defmodule Minga.Editor.Commands.Movement do
     end
   end
 
-  def execute(%{buffers: %{active: buf}} = state, :move_down) do
+  def execute(%{workspace: %{buffers: %{active: buf}}} = state, :move_down) do
     if wrap_enabled?(buf) do
       visual_line_move(buf, state, :down)
     else
@@ -112,19 +112,19 @@ defmodule Minga.Editor.Commands.Movement do
 
   # Logical line movement (gj/gk). Always moves by logical lines regardless
   # of wrap setting.
-  def execute(%{buffers: %{active: buf}} = state, :move_logical_down) do
+  def execute(%{workspace: %{buffers: %{active: buf}}} = state, :move_logical_down) do
     BufferServer.move(buf, :down)
     state
   end
 
-  def execute(%{buffers: %{active: buf}} = state, :move_logical_up) do
+  def execute(%{workspace: %{buffers: %{active: buf}}} = state, :move_logical_up) do
     BufferServer.move(buf, :up)
     state
   end
 
   # ── Line start / end ──────────────────────────────────────────────────────
 
-  def execute(%{buffers: %{active: buf}} = state, :move_to_line_start) do
+  def execute(%{workspace: %{buffers: %{active: buf}}} = state, :move_to_line_start) do
     if wrap_enabled?(buf) do
       visual_line_edge(buf, state, :start)
     else
@@ -133,7 +133,7 @@ defmodule Minga.Editor.Commands.Movement do
     end
   end
 
-  def execute(%{buffers: %{active: buf}} = state, :move_to_line_end) do
+  def execute(%{workspace: %{buffers: %{active: buf}}} = state, :move_to_line_end) do
     if wrap_enabled?(buf) do
       visual_line_edge(buf, state, :end)
     else
@@ -143,78 +143,78 @@ defmodule Minga.Editor.Commands.Movement do
   end
 
   # g0/g$ — logical line start/end (always logical, even with wrap on)
-  def execute(%{buffers: %{active: buf}} = state, :move_to_logical_line_start) do
+  def execute(%{workspace: %{buffers: %{active: buf}}} = state, :move_to_logical_line_start) do
     logical_line_start(buf)
     state
   end
 
-  def execute(%{buffers: %{active: buf}} = state, :move_to_logical_line_end) do
+  def execute(%{workspace: %{buffers: %{active: buf}}} = state, :move_to_logical_line_end) do
     logical_line_end(buf)
     state
   end
 
   # ── Word motions (small) ───────────────────────────────────────────────────
 
-  def execute(%{buffers: %{active: buf}} = state, :word_forward) do
+  def execute(%{workspace: %{buffers: %{active: buf}}} = state, :word_forward) do
     Helpers.apply_motion(buf, &Minga.Motion.word_forward/2)
     state
   end
 
-  def execute(%{buffers: %{active: buf}} = state, :word_backward) do
+  def execute(%{workspace: %{buffers: %{active: buf}}} = state, :word_backward) do
     Helpers.apply_motion(buf, &Minga.Motion.word_backward/2)
     state
   end
 
-  def execute(%{buffers: %{active: buf}} = state, :word_end) do
+  def execute(%{workspace: %{buffers: %{active: buf}}} = state, :word_end) do
     Helpers.apply_motion(buf, &Minga.Motion.word_end/2)
     state
   end
 
   # ── Word motions (WORD / big) ─────────────────────────────────────────────
 
-  def execute(%{buffers: %{active: buf}} = state, :word_forward_big) do
+  def execute(%{workspace: %{buffers: %{active: buf}}} = state, :word_forward_big) do
     Helpers.apply_motion(buf, &Minga.Motion.word_forward_big/2)
     state
   end
 
-  def execute(%{buffers: %{active: buf}} = state, :word_backward_big) do
+  def execute(%{workspace: %{buffers: %{active: buf}}} = state, :word_backward_big) do
     Helpers.apply_motion(buf, &Minga.Motion.word_backward_big/2)
     state
   end
 
-  def execute(%{buffers: %{active: buf}} = state, :word_end_big) do
+  def execute(%{workspace: %{buffers: %{active: buf}}} = state, :word_end_big) do
     Helpers.apply_motion(buf, &Minga.Motion.word_end_big/2)
     state
   end
 
   # ── Line / document navigation ─────────────────────────────────────────────
 
-  def execute(%{buffers: %{active: buf}} = state, :move_to_first_non_blank) do
+  def execute(%{workspace: %{buffers: %{active: buf}}} = state, :move_to_first_non_blank) do
     Helpers.apply_motion(buf, &Minga.Motion.first_non_blank/2)
     state
   end
 
-  def execute(%{buffers: %{active: buf}} = state, :move_to_document_start) do
+  def execute(%{workspace: %{buffers: %{active: buf}}} = state, :move_to_document_start) do
     gb = BufferServer.snapshot(buf)
     new_pos = Minga.Motion.document_start(gb)
     BufferServer.move_to(buf, new_pos)
     state
   end
 
-  def execute(%{buffers: %{active: buf}} = state, :move_to_document_end) do
+  def execute(%{workspace: %{buffers: %{active: buf}}} = state, :move_to_document_end) do
     gb = BufferServer.snapshot(buf)
     new_pos = Minga.Motion.document_end(gb)
     BufferServer.move_to(buf, new_pos)
     maybe_repin_agent_chat(state)
   end
 
-  def execute(%{buffers: %{active: buf}} = state, {:goto_line, line_num}) do
+  def execute(%{workspace: %{buffers: %{active: buf}}} = state, {:goto_line, line_num}) do
     target_line = max(0, line_num - 1)
     BufferServer.move_to(buf, {target_line, 0})
     state
   end
 
-  def execute(%{buffers: %{active: buf}} = state, :next_line_first_non_blank) do
+  def execute(%{workspace: %{buffers: %{active: buf}}} = state, :next_line_first_non_blank) do
     gb = BufferServer.snapshot(buf)
     {line, _col} = Document.cursor(gb)
     total = Document.line_count(gb)
@@ -224,7 +224,7 @@ defmodule Minga.Editor.Commands.Movement do
     state
   end
 
-  def execute(%{buffers: %{active: buf}} = state, :prev_line_first_non_blank) do
+  def execute(%{workspace: %{buffers: %{active: buf}}} = state, :prev_line_first_non_blank) do
     gb = BufferServer.snapshot(buf)
     {line, _col} = Document.cursor(gb)
     prev_line = max(line - 1, 0)
@@ -235,13 +235,17 @@ defmodule Minga.Editor.Commands.Movement do
 
   # ── Find-char motions ─────────────────────────────────────────────────────
 
-  def execute(%{buffers: %{active: buf}} = state, {:find_char, dir, char}) do
+  def execute(%{workspace: %{buffers: %{active: buf}}} = state, {:find_char, dir, char}) do
     Helpers.apply_find_char(buf, dir, char)
-    %{state | vim: %{state.vim | last_find_char: {dir, char}}}
+
+    %{
+      state
+      | workspace: %{state.workspace | vim: %{state.workspace.vim | last_find_char: {dir, char}}}
+    }
   end
 
   def execute(
-        %{vim: %{last_find_char: {dir, char}}, buffers: %{active: buf}} = state,
+        %{workspace: %{vim: %{last_find_char: {dir, char}}, buffers: %{active: buf}}} = state,
         :repeat_find_char
       ) do
     Helpers.apply_find_char(buf, dir, char)
@@ -251,7 +255,7 @@ defmodule Minga.Editor.Commands.Movement do
   def execute(state, :repeat_find_char), do: state
 
   def execute(
-        %{vim: %{last_find_char: {dir, char}}, buffers: %{active: buf}} = state,
+        %{workspace: %{vim: %{last_find_char: {dir, char}}, buffers: %{active: buf}}} = state,
         :repeat_find_char_reverse
       ) do
     reverse_dir = Helpers.reverse_find_direction(dir)
@@ -263,26 +267,29 @@ defmodule Minga.Editor.Commands.Movement do
 
   # ── Bracket matching ──────────────────────────────────────────────────────
 
-  def execute(%{buffers: %{active: buf}} = state, :match_bracket) do
+  def execute(%{workspace: %{buffers: %{active: buf}}} = state, :match_bracket) do
     Helpers.apply_motion(buf, &Minga.Motion.match_bracket/2)
     state
   end
 
   # ── Paragraph motions ─────────────────────────────────────────────────────
 
-  def execute(%{buffers: %{active: buf}} = state, :paragraph_forward) do
+  def execute(%{workspace: %{buffers: %{active: buf}}} = state, :paragraph_forward) do
     Helpers.apply_motion(buf, &Minga.Motion.paragraph_forward/2)
     state
   end
 
-  def execute(%{buffers: %{active: buf}} = state, :paragraph_backward) do
+  def execute(%{workspace: %{buffers: %{active: buf}}} = state, :paragraph_backward) do
     Helpers.apply_motion(buf, &Minga.Motion.paragraph_backward/2)
     state
   end
 
   # ── Screen-relative motions ───────────────────────────────────────────────
 
-  def execute(%{buffers: %{active: buf}, viewport: vp} = state, {:move_to_screen, position}) do
+  def execute(
+        %{workspace: %{buffers: %{active: buf}, viewport: vp}} = state,
+        {:move_to_screen, position}
+      ) do
     {first_line, _last_line} = Viewport.visible_range(vp)
     visible_rows = Viewport.content_rows(vp)
     gb = BufferServer.snapshot(buf)
@@ -301,28 +308,28 @@ defmodule Minga.Editor.Commands.Movement do
 
   # ── Page scrolling ────────────────────────────────────────────────────────
 
-  def execute(%{buffers: %{active: buf}} = state, :half_page_down) do
+  def execute(%{workspace: %{buffers: %{active: buf}}} = state, :half_page_down) do
     vp = active_viewport(state)
     delta = decoration_aware_page_delta(buf, vp, div(Viewport.content_rows(vp), 2))
     Helpers.page_move(buf, vp, delta)
     state
   end
 
-  def execute(%{buffers: %{active: buf}} = state, :half_page_up) do
+  def execute(%{workspace: %{buffers: %{active: buf}}} = state, :half_page_up) do
     vp = active_viewport(state)
     delta = decoration_aware_page_delta(buf, vp, div(Viewport.content_rows(vp), 2))
     Helpers.page_move(buf, vp, -delta)
     state
   end
 
-  def execute(%{buffers: %{active: buf}} = state, :page_down) do
+  def execute(%{workspace: %{buffers: %{active: buf}}} = state, :page_down) do
     vp = active_viewport(state)
     delta = decoration_aware_page_delta(buf, vp, Viewport.content_rows(vp))
     Helpers.page_move(buf, vp, delta)
     state
   end
 
-  def execute(%{buffers: %{active: buf}} = state, :page_up) do
+  def execute(%{workspace: %{buffers: %{active: buf}}} = state, :page_up) do
     vp = active_viewport(state)
     delta = decoration_aware_page_delta(buf, vp, Viewport.content_rows(vp))
     Helpers.page_move(buf, vp, -delta)
@@ -331,7 +338,7 @@ defmodule Minga.Editor.Commands.Movement do
 
   # ── Scroll-without-cursor commands ─────────────────────────────────────────
 
-  def execute(%{buffers: %{active: buf}} = state, :scroll_down_line) do
+  def execute(%{workspace: %{buffers: %{active: buf}}} = state, :scroll_down_line) do
     vp = active_viewport(state)
     {cursor_line, cursor_col} = BufferServer.cursor(buf)
     total_lines = BufferServer.line_count(buf)
@@ -344,7 +351,7 @@ defmodule Minga.Editor.Commands.Movement do
     put_active_viewport(state, new_vp)
   end
 
-  def execute(%{buffers: %{active: buf}} = state, :scroll_up_line) do
+  def execute(%{workspace: %{buffers: %{active: buf}}} = state, :scroll_up_line) do
     vp = active_viewport(state)
     {cursor_line, cursor_col} = BufferServer.cursor(buf)
     total_lines = BufferServer.line_count(buf)
@@ -357,7 +364,7 @@ defmodule Minga.Editor.Commands.Movement do
     put_active_viewport(state, new_vp)
   end
 
-  def execute(%{buffers: %{active: buf}} = state, :scroll_center) do
+  def execute(%{workspace: %{buffers: %{active: buf}}} = state, :scroll_center) do
     vp = active_viewport(state)
     {cursor_line, _cursor_col} = BufferServer.cursor(buf)
     total_lines = BufferServer.line_count(buf)
@@ -365,7 +372,7 @@ defmodule Minga.Editor.Commands.Movement do
     put_active_viewport(state, new_vp)
   end
 
-  def execute(%{buffers: %{active: buf}} = state, :scroll_cursor_top) do
+  def execute(%{workspace: %{buffers: %{active: buf}}} = state, :scroll_cursor_top) do
     vp = active_viewport(state)
     {cursor_line, _cursor_col} = BufferServer.cursor(buf)
     total_lines = BufferServer.line_count(buf)
@@ -374,7 +381,7 @@ defmodule Minga.Editor.Commands.Movement do
     put_active_viewport(state, new_vp)
   end
 
-  def execute(%{buffers: %{active: buf}} = state, :scroll_cursor_bottom) do
+  def execute(%{workspace: %{buffers: %{active: buf}}} = state, :scroll_cursor_bottom) do
     vp = active_viewport(state)
     {cursor_line, _cursor_col} = BufferServer.cursor(buf)
     total_lines = BufferServer.line_count(buf)
@@ -408,10 +415,10 @@ defmodule Minga.Editor.Commands.Movement do
   end
 
   @spec split_window(state(), WindowTree.direction()) :: state()
-  defp split_window(%{windows: %{tree: nil}} = state, _direction), do: state
+  defp split_window(%{workspace: %{windows: %{tree: nil}}} = state, _direction), do: state
 
   defp split_window(state, direction) do
-    ws = state.windows
+    ws = state.workspace.windows
     active_id = ws.active
     new_id = ws.next_id
 
@@ -423,7 +430,7 @@ defmodule Minga.Editor.Commands.Movement do
 
   @spec apply_split(state(), WindowTree.t(), Window.id(), Window.id()) :: state()
   defp apply_split(state, new_tree, active_id, new_id) do
-    active_window = Map.fetch!(state.windows.map, active_id)
+    active_window = Map.fetch!(state.workspace.windows.map, active_id)
     cursor = BufferServer.cursor(active_window.buffer)
 
     # New window gets a copy of the current cursor position
@@ -432,17 +439,15 @@ defmodule Minga.Editor.Commands.Movement do
     # Also snapshot the current cursor into the active window
     state = EditorState.update_window(state, active_id, &%{&1 | cursor: cursor})
 
-    ws = state.windows
+    ws = state.workspace.windows
 
-    state = %{
-      state
-      | windows: %{
-          ws
-          | tree: new_tree,
-            map: Map.put(ws.map, new_id, new_window),
-            next_id: new_id + 1
-        }
-    }
+    state =
+      put_in(state.workspace.windows, %{
+        ws
+        | tree: new_tree,
+          map: Map.put(ws.map, new_id, new_window),
+          next_id: new_id + 1
+      })
 
     resize_windows_to_layout(state)
   end
@@ -461,20 +466,25 @@ defmodule Minga.Editor.Commands.Movement do
   end
 
   @spec navigate_window(state(), WindowTree.nav_direction()) :: state()
-  defp navigate_window(%{windows: %{tree: nil}} = state, _direction), do: state
+  defp navigate_window(%{workspace: %{windows: %{tree: nil}}} = state, _direction), do: state
 
   # When file tree is focused, navigating right unfocuses the tree
   # and restores the scope based on the active window's content type.
-  defp navigate_window(%{file_tree: %{focused: true}} = state, :right) do
-    state = put_in(state.file_tree.focused, false)
+  defp navigate_window(%{workspace: %{file_tree: %{focused: true}}} = state, :right) do
+    state = put_in(state.workspace.file_tree.focused, false)
     scope = EditorState.scope_for_active_window(state)
-    %{state | keymap_scope: scope}
+    %{state | workspace: %{state.workspace | keymap_scope: scope}}
   end
 
   defp navigate_window(state, direction) do
     screen = Layout.get(state).editor_area
 
-    case WindowTree.focus_neighbor(state.windows.tree, state.windows.active, direction, screen) do
+    case WindowTree.focus_neighbor(
+           state.workspace.windows.tree,
+           state.workspace.windows.active,
+           direction,
+           screen
+         ) do
       {:ok, neighbor_id} ->
         EditorState.focus_window(state, neighbor_id)
 
@@ -485,18 +495,21 @@ defmodule Minga.Editor.Commands.Movement do
   end
 
   @spec maybe_focus_file_tree(state(), :left | :right | :up | :down) :: state()
-  defp maybe_focus_file_tree(%{file_tree: %{tree: %Minga.FileTree{}}} = state, :left) do
-    state = put_in(state.file_tree.focused, true)
-    %{state | keymap_scope: :file_tree}
+  defp maybe_focus_file_tree(
+         %{workspace: %{file_tree: %{tree: %Minga.FileTree{}}}} = state,
+         :left
+       ) do
+    state = put_in(state.workspace.file_tree.focused, true)
+    %{state | workspace: %{state.workspace | keymap_scope: :file_tree}}
   end
 
   defp maybe_focus_file_tree(state, _direction), do: state
 
   @spec close_window(state()) :: state()
-  defp close_window(%{windows: %{tree: nil}} = state), do: state
+  defp close_window(%{workspace: %{windows: %{tree: nil}}} = state), do: state
 
   defp close_window(state) do
-    ws = state.windows
+    ws = state.workspace.windows
 
     case WindowTree.close(ws.tree, ws.active) do
       {:ok, new_tree} ->
@@ -510,8 +523,16 @@ defmodule Minga.Editor.Commands.Movement do
 
         %{
           state
-          | windows: %{ws | tree: new_tree, map: Map.delete(ws.map, old_id), active: new_active},
-            buffers: %{state.buffers | active: new_active_window.buffer}
+          | workspace: %{
+              state.workspace
+              | windows: %{
+                  ws
+                  | tree: new_tree,
+                    map: Map.delete(ws.map, old_id),
+                    active: new_active
+                },
+                buffers: %{state.workspace.buffers | active: new_active_window.buffer}
+            }
         }
 
       :error ->
@@ -576,8 +597,8 @@ defmodule Minga.Editor.Commands.Movement do
 
   @spec content_width(state()) :: pos_integer()
   defp content_width(state) do
-    vp = Viewport.new(state.viewport.rows, state.viewport.cols)
-    line_count = BufferServer.line_count(state.buffers.active)
+    vp = Viewport.new(state.workspace.viewport.rows, state.workspace.viewport.cols)
+    line_count = BufferServer.line_count(state.workspace.buffers.active)
     Viewport.content_cols(vp, line_count)
   end
 

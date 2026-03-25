@@ -68,13 +68,15 @@ defmodule Minga.Editor.Commands.AgentSplitTest do
 
     %EditorState{
       port_manager: self(),
-      viewport: Viewport.new(24, 80),
-      buffers: %Buffers{active: buf, list: [buf]},
-      windows: %{
-        tree: {:leaf, 1},
-        map: %{1 => window},
-        active: 1,
-        next_id: 2
+      workspace: %Minga.Workspace.State{
+        viewport: Viewport.new(24, 80),
+        buffers: %Buffers{active: buf, list: [buf]},
+        windows: %Minga.Editor.State.Windows{
+          tree: {:leaf, 1},
+          map: %{1 => window},
+          active: 1,
+          next_id: 2
+        }
       },
       agent: agent,
       tab_bar: tb
@@ -110,20 +112,22 @@ defmodule Minga.Editor.Commands.AgentSplitTest do
       state = AgentCommands.toggle_agent_split(state)
 
       # After switching to agent tab, the windows should include an agent_chat window
-      agent_win = Map.values(state.windows.map) |> Enum.find(&Content.agent_chat?(&1.content))
+      agent_win =
+        Map.values(state.workspace.windows.map) |> Enum.find(&Content.agent_chat?(&1.content))
+
       assert agent_win != nil
     end
 
     test "round-trip toggle restores file state" do
       state = make_state()
-      original_buf = state.buffers.active
+      original_buf = state.workspace.buffers.active
       original_active = state.tab_bar.active_id
 
       state = AgentCommands.toggle_agent_split(state)
       state = AgentCommands.toggle_agent_split(state)
 
       assert state.tab_bar.active_id == original_active
-      assert state.buffers.active == original_buf
+      assert state.workspace.buffers.active == original_buf
     end
   end
 end

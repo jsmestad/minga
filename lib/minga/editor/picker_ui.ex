@@ -98,8 +98,8 @@ defmodule Minga.Editor.PickerUI do
 
       _ ->
         # Use terminal height minus 3 (separator + prompt + at least 1 buffer line visible)
-        max_vis = state.viewport.rows - 3
-        max_vis = max(5, min(max_vis, state.viewport.rows - 3))
+        max_vis = state.workspace.viewport.rows - 3
+        max_vis = max(5, min(max_vis, state.workspace.viewport.rows - 3))
         picker = Picker.new(items, title: source_module.title(), max_visible: max_vis)
 
         # Clear whichkey state if active
@@ -117,7 +117,7 @@ defmodule Minga.Editor.PickerUI do
           | picker_ui: %PickerState{
               picker: picker,
               source: source_module,
-              restore: state.buffers.active_index,
+              restore: state.workspace.buffers.active_index,
               restore_theme: state.theme,
               context: context,
               layout: layout
@@ -706,8 +706,8 @@ defmodule Minga.Editor.PickerUI do
   @spec switch_to_source(state(), module(), String.t()) :: state()
   defp switch_to_source(%{picker_ui: %{source: current_source} = pui} = state, new_source, prefix) do
     items = new_source.candidates(state)
-    max_vis = state.viewport.rows - 3
-    max_vis = max(5, min(max_vis, state.viewport.rows - 3))
+    max_vis = state.workspace.viewport.rows - 3
+    max_vis = max(5, min(max_vis, state.workspace.viewport.rows - 3))
     picker = Picker.new(items, title: new_source.title(), max_visible: max_vis)
     layout = Minga.Picker.Source.layout(new_source)
 
@@ -730,8 +730,8 @@ defmodule Minga.Editor.PickerUI do
   @spec switch_back_to_original(state()) :: state()
   defp switch_back_to_original(%{picker_ui: %{original_source: orig} = pui} = state) do
     items = orig.candidates(state)
-    max_vis = state.viewport.rows - 3
-    max_vis = max(5, min(max_vis, state.viewport.rows - 3))
+    max_vis = state.workspace.viewport.rows - 3
+    max_vis = max(5, min(max_vis, state.workspace.viewport.rows - 3))
     picker = Picker.new(items, title: orig.title(), max_visible: max_vis)
     layout = Minga.Picker.Source.layout(orig)
 

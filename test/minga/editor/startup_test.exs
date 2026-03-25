@@ -87,14 +87,16 @@ defmodule Minga.Editor.StartupTest do
       # Simulate what build_initial_state does with the window
       state = %EditorState{
         port_manager: self(),
-        viewport: Viewport.new(24, 80),
-        vim: VimState.new(),
-        keymap_scope: :agent,
-        windows: %Windows{
-          tree: WindowTree.new(1),
-          map: %{1 => window},
-          active: 1,
-          next_id: 2
+        workspace: %Minga.Workspace.State{
+          viewport: Viewport.new(24, 80),
+          vim: VimState.new(),
+          keymap_scope: :agent,
+          windows: %Windows{
+            tree: WindowTree.new(1),
+            map: %{1 => window},
+            active: 1,
+            next_id: 2
+          }
         },
         focus_stack: Input.default_stack()
       }
@@ -102,8 +104,8 @@ defmodule Minga.Editor.StartupTest do
       assert LayoutPreset.has_agent_chat?(state),
              "agent startup must produce a state where has_agent_chat? is true"
 
-      assert {:leaf, 1} = state.windows.tree
-      assert map_size(state.windows.map) == 1
+      assert {:leaf, 1} = state.workspace.windows.tree
+      assert map_size(state.workspace.windows.map) == 1
     end
 
     test "editor mode produces has_agent_chat? == false" do
@@ -112,20 +114,22 @@ defmodule Minga.Editor.StartupTest do
 
       state = %EditorState{
         port_manager: self(),
-        viewport: Viewport.new(24, 80),
-        vim: VimState.new(),
-        keymap_scope: :editor,
-        windows: %Windows{
-          tree: WindowTree.new(1),
-          map: %{1 => window},
-          active: 1,
-          next_id: 2
+        workspace: %Minga.Workspace.State{
+          viewport: Viewport.new(24, 80),
+          vim: VimState.new(),
+          keymap_scope: :editor,
+          windows: %Windows{
+            tree: WindowTree.new(1),
+            map: %{1 => window},
+            active: 1,
+            next_id: 2
+          }
         },
         focus_stack: Input.default_stack()
       }
 
       refute LayoutPreset.has_agent_chat?(state)
-      assert Content.buffer?(state.windows.map[1].content)
+      assert Content.buffer?(state.workspace.windows.map[1].content)
     end
   end
 end
