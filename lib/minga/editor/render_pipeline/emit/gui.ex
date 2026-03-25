@@ -33,9 +33,8 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
   alias Minga.Editor.Viewport
   alias Minga.Editor.Window.Content
 
-  alias Minga.Picker
-  alias Minga.Port.Manager, as: PortManager
-  alias Minga.Port.Protocol.GUI, as: ProtocolGUI
+  alias Minga.Frontend.Protocol.GUI, as: ProtocolGUI
+  alias Minga.UI.Picker
 
   @typedoc "Internal editor state."
   @type state :: EditorState.t()
@@ -108,7 +107,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
   process dictionary to skip re-encoding and re-sending when nothing
   changed. During j/k scroll, only the status bar (cursor position)
   changes; everything else is skipped. All changed chrome commands are
-  batched into a single `PortManager.send_commands` call to reduce
+  batched into a single `Minga.Frontend.send_commands` call to reduce
   port write overhead.
 
   `status_bar_data` is pre-computed by the Chrome stage and passed through
@@ -147,7 +146,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
     chrome_cmds = if panel_cmd, do: chrome_cmds ++ [panel_cmd], else: chrome_cmds
 
     if chrome_cmds != [] do
-      PortManager.send_commands(state.port_manager, chrome_cmds)
+      Minga.Frontend.send_commands(state.port_manager, chrome_cmds)
     end
 
     state
@@ -979,7 +978,8 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
   @spec find_float_popup_window(state()) :: Minga.Editor.Window.t() | nil
   defp find_float_popup_window(state) do
     Enum.find_value(state.workspace.windows.map, fn
-      {_id, %{popup_meta: %Minga.Popup.Active{rule: %Minga.Popup.Rule{display: :float}}} = w} ->
+      {_id,
+       %{popup_meta: %Minga.UI.Popup.Active{rule: %Minga.UI.Popup.Rule{display: :float}}} = w} ->
         w
 
       _ ->
@@ -1012,7 +1012,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
     %{visible: true, title: title, lines: lines, width: width, height: height}
   end
 
-  @spec resolve_float_dim(Minga.Popup.Rule.t(), :width | :height, pos_integer()) ::
+  @spec resolve_float_dim(Minga.UI.Popup.Rule.t(), :width | :height, pos_integer()) ::
           pos_integer()
   defp resolve_float_dim(rule, dim, viewport_size) do
     val =

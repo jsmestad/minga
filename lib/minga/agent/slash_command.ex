@@ -214,7 +214,7 @@ defmodule Minga.Agent.SlashCommand do
 
   @spec do_sessions(state()) :: state()
   defp do_sessions(state) do
-    PickerUI.open(state, Minga.Picker.AgentSessionSource)
+    PickerUI.open(state, Minga.UI.Picker.AgentSessionSource)
   end
 
   # ── Auth command ─────────────────────────────────────────────────────────────

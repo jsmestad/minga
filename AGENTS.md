@@ -182,27 +182,40 @@ Minga.Devicon.icon_and_color(filetype)
 
 ### What the facade contains
 
-A facade module is mostly `defdelegate`, `@spec`, `@type`, and `@doc`. It may also contain short functions with real logic: composing two internal calls, normalizing arguments, broadcasting an event after a mutation, wrapping a result with a default. These are encouraged when they make the public API cleaner than a raw delegate. The test is volume, not presence: if removing all delegates and typespecs leaves more than ~100 lines of actual logic, the facade has too many inline functions and some should be extracted to internal modules.
+A facade exposes **domain concepts**, not internal implementation details. The public API should be stable even when the internal modules, data structures, or protocols change. Think of it as the domain's language: callers say what they want, the domain decides how.
+
+**Good facade functions** describe domain operations:
+- `Minga.Frontend.set_title(port, title)` — caller says "change the title"
+- `Minga.Frontend.configure_font(port, family, size, ligatures, weight, fallbacks)` — caller says "use this font"
+- `Minga.Frontend.clipboard_write(port, text)` — caller says "put this on the clipboard"
+- `Minga.Buffer.content(buf)` — caller says "give me the content"
+
+**Bad facade functions** mirror internal APIs:
+- `Minga.Frontend.encode_set_title(title)` — leaks that there's a binary protocol
+- `Minga.Frontend.send_commands(port, [Protocol.encode_set_font(...)])` — caller builds protocol messages
+- `Minga.Buffer.genserver_call(buf, :get_content)` — leaks the GenServer implementation
+
+The facade may contain `defdelegate` for simple pass-throughs where the internal function name already IS the domain concept (e.g., `defdelegate content(buf), to: Buffer.Server`). But prefer short wrapper functions that compose internal calls, normalize arguments, or hide encoding details. If the facade is nothing but `defdelegate`, it's probably just mirroring an internal API instead of defining a domain API.
 
 ```elixir
-# Example of what a Buffer domain facade looks like (target state):
-defmodule Minga.Buffer do
-  # Simple pass-through: defdelegate
+# Example: Frontend domain facade
+defmodule Minga.Frontend do
+  # Domain operation: "set the window title"
+  # Hides: binary protocol encoding, command batching
+  def set_title(port, title) do
+    send_commands(port, [Protocol.encode_set_title(title)])
+  end
+
+  # Domain operation: "configure the editor font"
+  # Hides: two separate protocol messages, conditional fallback
+  def configure_font(port, family, size, ligatures, weight, fallbacks \\ []) do
+    cmds = [Protocol.encode_set_font(family, size, ligatures, weight)]
+    cmds = if fallbacks != [], do: cmds ++ [Protocol.encode_set_font_fallback(fallbacks)], else: cmds
+    send_commands(port, cmds)
+  end
+
+  # Simple delegation is fine when the name IS the domain concept
   defdelegate content(buf), to: Minga.Buffer.Server
-  defdelegate cursor(buf), to: Minga.Buffer.Server
-
-  # Short glue logic is fine in the facade
-  def pid_for_path(path) do
-    Minga.Buffer.Server.pid_for_path(Path.expand(path))
-  end
-
-  # Composing two internal calls into one public operation is fine
-  def get_option(buf, name) do
-    case Minga.Buffer.Server.get_option(buf, name) do
-      nil -> Minga.Config.Options.default(name)
-      value -> value
-    end
-  end
 end
 ```
 
@@ -222,7 +235,7 @@ end
 | `ui` | `Minga.UI` | Themes, faces, highlighting, icons, fonts, picker, popups, which-key |
 | `project` | `Minga.Project` | Project root, file finding, project search, file tree, test detection |
 | `config` | `Minga.Config` | Options, hooks, advice, per-filetype overrides |
-| `port` | `Minga.Port` | Binary protocol encoding, frontend port management |
+| `frontend` | `Minga.Frontend` | Frontend communication, capabilities, port management |
 | `keymap` | `Minga.Keymap` | Key bindings, mode tries, scope management |
 | `lsp` | `Minga.LSP` | Language server client, document sync, workspace edits |
 | `command` | `Minga.Command` | Command struct, registry, provider behaviour |

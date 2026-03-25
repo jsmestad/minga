@@ -47,7 +47,7 @@ defmodule Minga.Editor.LspActions.CodeActionTest do
       # When items are empty (which they won't be since we have actions),
       # it returns state unchanged. The picker_ui.source being set confirms
       # the picker was opened.
-      assert result.picker_ui.source == Minga.Picker.CodeActionSource
+      assert result.picker_ui.source == Minga.UI.Picker.CodeActionSource
     end
   end
 end

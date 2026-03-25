@@ -11,8 +11,8 @@ defmodule Minga.Parser.IncrementalTest do
   # teardown can race with ExUnit's :standard_error capture/restore lifecycle
   use ExUnit.Case, async: false
 
+  alias Minga.Frontend.Protocol
   alias Minga.Parser.Manager, as: ParserManager
-  alias Minga.Port.Protocol
 
   @moduletag :parser_integration
   @parser_path Path.join([File.cwd!(), "priv", "minga-parser"])

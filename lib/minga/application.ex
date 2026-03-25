@@ -40,7 +40,7 @@ defmodule Minga.Application do
       │   ├── Minga.FileWatcher              (independent leaf)
       │   └── Minga.Editor.Supervisor (rest_for_one)
       │       ├── Minga.Parser.Manager
-      │       ├── Minga.Port.Manager
+      │       ├── Minga.Frontend.Manager
       │       └── Minga.Editor
       └── Minga.SystemObserver               (always-on process observer)
 

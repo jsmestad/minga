@@ -6,7 +6,7 @@ defmodule Minga.Editor.Supervisor do
 
       Editor.Supervisor (rest_for_one)
       ├── Minga.Parser.Manager     Tree-sitter parser Port
-      ├── Minga.Port.Manager       Zig renderer Port
+      ├── Minga.Frontend.Manager       Zig renderer Port
       └── Minga.Editor             Editor orchestration GenServer
 
   If Parser.Manager crashes, Port.Manager and Editor restart (Editor has
@@ -21,7 +21,7 @@ defmodule Minga.Editor.Supervisor do
   use Supervisor
 
   @typedoc "Options for starting the editor supervisor."
-  @type start_opt :: {:name, GenServer.name()} | {:backend, Minga.Port.Manager.backend()}
+  @type start_opt :: {:name, GenServer.name()} | {:backend, Minga.Frontend.Manager.backend()}
 
   @spec start_link([start_opt()]) :: Supervisor.on_start()
   def start_link(opts \\ []) do
@@ -36,7 +36,7 @@ defmodule Minga.Editor.Supervisor do
 
     children = [
       Minga.Parser.Manager,
-      {Minga.Port.Manager, [backend: backend]},
+      {Minga.Frontend.Manager, [backend: backend]},
       {Minga.Editor,
        [
          backend: backend,

@@ -149,7 +149,7 @@ defmodule Minga.Input.InterruptTest do
   describe "overlay dismissal" do
     test "closes open picker" do
       state = base_state()
-      picker = Minga.Picker.new(["a", "b", "c"])
+      picker = Minga.UI.Picker.new(["a", "b", "c"])
       state = %{state | picker_ui: %Picker{picker: picker, source: nil}}
 
       assert {:handled, new_state} = Interrupt.handle_key(state, @ctrl_g, 0)
@@ -195,7 +195,7 @@ defmodule Minga.Input.InterruptTest do
     test "resets everything at once" do
       state = base_state()
       buf = state.workspace.buffers.active
-      picker = Minga.Picker.new(["x"])
+      picker = Minga.UI.Picker.new(["x"])
       completion = %Completion{items: [], trigger_position: {0, 0}}
 
       vim = %{state.workspace.vim | mode: :visual, mode_state: Mode.initial_state()}

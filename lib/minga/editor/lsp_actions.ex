@@ -38,7 +38,7 @@ defmodule Minga.Editor.LspActions do
   alias Minga.LSP.WorkspaceEdit
   alias Minga.Mode.CommandState
   alias Minga.Mode.VisualState
-  alias Minga.Picker.LocationSource
+  alias Minga.UI.Picker.LocationSource
 
   @type state :: EditorState.t()
 
@@ -831,7 +831,7 @@ defmodule Minga.Editor.LspActions do
   end
 
   def handle_code_action_response(state, {:ok, actions}) when is_list(actions) do
-    PickerUI.open(state, Minga.Picker.CodeActionSource, %{actions: actions})
+    PickerUI.open(state, Minga.UI.Picker.CodeActionSource, %{actions: actions})
   end
 
   # ── Rename response ───────────────────────────────────────────────────────

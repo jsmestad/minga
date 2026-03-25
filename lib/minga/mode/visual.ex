@@ -59,7 +59,7 @@ defmodule Minga.Mode.Visual do
   # Special codepoints
   @escape 27
 
-  # Modifier flags (mirrors Minga.Port.Protocol)
+  # Modifier flags (mirrors Minga.Frontend.Protocol)
   @ctrl 0x02
   @super 0x08
 

@@ -8,16 +8,16 @@ defmodule Minga.Editor.State.Picker do
 
   @typedoc "Action menu state: `{actions, selected_index}` or nil when closed."
   @type action_menu ::
-          {[Minga.Picker.Source.action_entry()], non_neg_integer()} | nil
+          {[Minga.UI.Picker.Source.action_entry()], non_neg_integer()} | nil
 
   @type t :: %__MODULE__{
-          picker: Minga.Picker.t() | nil,
+          picker: Minga.UI.Picker.t() | nil,
           source: module() | nil,
           restore: non_neg_integer() | nil,
           restore_theme: Minga.UI.Theme.t() | nil,
           action_menu: action_menu(),
           context: map() | nil,
-          layout: Minga.Picker.Source.layout(),
+          layout: Minga.UI.Picker.Source.layout(),
           original_source: module() | nil,
           mode_prefix: String.t()
         }
@@ -37,8 +37,8 @@ defmodule Minga.Editor.State.Picker do
   def open?(%__MODULE__{picker: nil}), do: false
   def open?(%__MODULE__{}), do: true
 
-  @doc "Updates the inner `Minga.Picker` instance."
-  @spec update_picker(t(), Minga.Picker.t()) :: t()
+  @doc "Updates the inner `Minga.UI.Picker` instance."
+  @spec update_picker(t(), Minga.UI.Picker.t()) :: t()
   def update_picker(%__MODULE__{} = ps, picker) do
     %{ps | picker: picker}
   end

@@ -9,8 +9,8 @@ defmodule Minga.Input.PopupTest do
   alias Minga.Editor.Window
   alias Minga.Editor.WindowTree
   alias Minga.Input.Popup, as: PopupHandler
-  alias Minga.Popup.Active, as: PopupActive
-  alias Minga.Popup.Rule
+  alias Minga.UI.Popup.Active, as: PopupActive
+  alias Minga.UI.Popup.Rule
 
   defp fake_pid do
     spawn(fn -> Process.sleep(:infinity) end)

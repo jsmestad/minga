@@ -50,7 +50,7 @@ defmodule Minga.Editor do
   alias Minga.Mode
   alias Minga.Project.FileTree
   # PopupLifecycle alias removed: warnings popup replaced by bottom panel (#825)
-  alias Minga.Port.Protocol
+  alias Minga.Frontend.Protocol
 
   @typedoc "Options for starting the editor."
   @type start_opt ::

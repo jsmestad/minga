@@ -3,7 +3,7 @@ defmodule Minga.Editor.DisplayListTest do
 
   alias Minga.Editor.DisplayList
   alias Minga.Editor.DisplayList.{Cursor, Frame, Overlay, WindowFrame}
-  alias Minga.Port.Protocol
+  alias Minga.Frontend.Protocol
   alias Minga.UI.Face
 
   describe "draw/4" do

@@ -80,7 +80,7 @@ defmodule Minga.UI.Highlight do
   Only updates if the incoming version is >= the current version,
   preventing stale async results from overwriting newer ones.
   """
-  @spec put_spans(t(), non_neg_integer(), [Minga.Port.Protocol.highlight_span()]) :: t()
+  @spec put_spans(t(), non_neg_integer(), [Minga.Frontend.Protocol.highlight_span()]) :: t()
   def put_spans(%__MODULE__{version: current} = hl, version, _spans)
       when version < current do
     hl

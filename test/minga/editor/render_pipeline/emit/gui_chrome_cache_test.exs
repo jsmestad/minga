@@ -192,8 +192,8 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI.ChromeCacheTest do
     end
 
     test "picker cache fingerprints an open picker without crashing" do
-      item = %Minga.Picker.Item{id: "a", label: "a.txt"}
-      picker = Minga.Picker.new([item], title: "Test")
+      item = %Minga.UI.Picker.Item{id: "a", label: "a.txt"}
+      picker = Minga.UI.Picker.new([item], title: "Test")
       state = gui_chrome_state()
 
       # Inject an open picker into picker_ui state.
@@ -201,7 +201,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI.ChromeCacheTest do
       state = %{state | picker_ui: picker_ui}
       sb_data = StatusBarData.from_state(state)
 
-      # Before the fix, this raised KeyError: key :total not found in %Minga.Picker{}.
+      # Before the fix, this raised KeyError: key :total not found in %Minga.UI.Picker{}.
       EmitGUI.sync_swiftui_chrome(state, sb_data)
       flush_port_casts()
 

@@ -48,7 +48,7 @@ defmodule Minga.Editor.Commands do
   alias Minga.Keymap.Bindings
   alias Minga.Mode
   alias Minga.Parser.Manager, as: ParserManager
-  alias Minga.WhichKey
+  alias Minga.UI.WhichKey
 
   @typedoc "Internal editor state."
   @type state :: EditorState.t()

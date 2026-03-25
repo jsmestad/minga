@@ -23,7 +23,6 @@ defmodule Minga.Editor.Startup do
   alias Minga.Editor.VimState
   alias Minga.Editor.Window
   alias Minga.Editor.WindowTree
-  alias Minga.Port.Manager, as: PortManager
 
   @doc """
   Builds the complete initial EditorState from startup opts.
@@ -166,7 +165,7 @@ defmodule Minga.Editor.Startup do
   defp subscribe_port(nil), do: :ok
 
   defp subscribe_port(port_manager) do
-    PortManager.subscribe(port_manager)
+    Minga.Frontend.subscribe(port_manager)
   catch
     :exit, _ -> Minga.Log.warning(:editor, "Could not subscribe to port manager")
   end
@@ -225,13 +224,13 @@ defmodule Minga.Editor.Startup do
   @doc """
   Fetches port capabilities, returning defaults if no port manager is configured.
   """
-  @spec fetch_capabilities(GenServer.server() | nil) :: Minga.Port.Capabilities.t()
-  def fetch_capabilities(nil), do: %Minga.Port.Capabilities{}
+  @spec fetch_capabilities(GenServer.server() | nil) :: Minga.Frontend.Capabilities.t()
+  def fetch_capabilities(nil), do: %Minga.Frontend.Capabilities{}
 
   def fetch_capabilities(port_manager) do
-    PortManager.capabilities(port_manager)
+    Minga.Frontend.capabilities(port_manager)
   catch
-    :exit, _ -> %Minga.Port.Capabilities{}
+    :exit, _ -> %Minga.Frontend.Capabilities{}
   end
 
   @doc """
@@ -312,16 +311,7 @@ defmodule Minga.Editor.Startup do
     weight = ConfigOptions.get(:font_weight)
     fallback = ConfigOptions.get(:font_fallback)
 
-    cmds = [Minga.Port.Protocol.encode_set_font(family, size, ligatures, weight)]
-
-    cmds =
-      if fallback != [] do
-        cmds ++ [Minga.Port.Protocol.encode_set_font_fallback(fallback)]
-      else
-        cmds
-      end
-
-    Minga.Port.Manager.send_commands(port, cmds)
+    Minga.Frontend.configure_font(port, family, size, ligatures, weight, fallback || [])
   catch
     :exit, _ -> :ok
   end

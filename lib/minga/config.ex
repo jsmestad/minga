@@ -39,8 +39,8 @@ defmodule Minga.Config do
   alias Minga.Config.Options
   alias Minga.Extension.Registry, as: ExtRegistry
   alias Minga.Keymap.Active, as: KeymapActive
-  alias Minga.Popup.Registry, as: PopupRegistry
-  alias Minga.Popup.Rule, as: PopupRule
+  alias Minga.UI.Popup.Registry, as: PopupRegistry
+  alias Minga.UI.Popup.Rule, as: PopupRule
 
   @doc """
   Injects the config DSL into the calling module or script.
@@ -377,7 +377,7 @@ defmodule Minga.Config do
 
   ## Options
 
-  See `Minga.Popup.Rule` for the full list of supported options.
+  See `Minga.UI.Popup.Rule` for the full list of supported options.
   """
   @spec popup(Regex.t() | String.t(), keyword()) :: :ok
   def popup(pattern, opts \\ []) when is_binary(pattern) or is_struct(pattern, Regex) do

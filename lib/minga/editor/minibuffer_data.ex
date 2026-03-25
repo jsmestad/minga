@@ -15,7 +15,7 @@ defmodule Minga.Editor.MinibufferData do
   alias Minga.Command.Registry, as: CommandRegistry
   alias Minga.Editor.State, as: EditorState
   alias Minga.Keymap.Defaults
-  alias Minga.WhichKey
+  alias Minga.UI.WhichKey
 
   # ── Types ──────────────────────────────────────────────────────────────────
 
@@ -84,7 +84,7 @@ defmodule Minga.Editor.MinibufferData do
   Extracts structured minibuffer data from the current editor state.
 
   Returns a `t()` struct ready for protocol encoding via
-  `Minga.Port.Protocol.GUI.encode_gui_minibuffer/1`.
+  `Minga.Frontend.Protocol.GUI.encode_gui_minibuffer/1`.
   """
   @spec from_state(EditorState.t()) :: t()
 

@@ -10,7 +10,7 @@ defmodule Minga.Integration.GUIProtocolTest do
   # async: false: spawns the headless Swift test harness as a real OS process via Port.open/2
   use ExUnit.Case, async: false
 
-  alias Minga.Port.Protocol.GUI, as: ProtocolGUI
+  alias Minga.Frontend.Protocol.GUI, as: ProtocolGUI
 
   @harness_path Path.join(:code.priv_dir(:minga), "minga-test-harness")
 
@@ -401,7 +401,7 @@ defmodule Minga.Integration.GUIProtocolTest do
 
   describe "round-trip: BEAM encode → harness decode → harness sends gui_action → BEAM receives" do
     test "tab bar triggers harness to send select_tab gui_action back", %{port: port} do
-      alias Minga.Port.Protocol
+      alias Minga.Frontend.Protocol
 
       # Step 1: Send a gui_tab_bar with 2 tabs. The harness will decode it
       # and automatically send a gui_action select_tab for the second tab.
@@ -493,7 +493,7 @@ defmodule Minga.Integration.GUIProtocolTest do
 
   describe "gui_bottom_panel hidden" do
     test "round-trips hidden bottom panel", %{port: port} do
-      alias Minga.Panel.MessageStore
+      alias Minga.UI.Panel.MessageStore
       {cmd, _store} = ProtocolGUI.encode_gui_bottom_panel(%{visible: false}, %MessageStore{})
       Port.command(port, cmd)
 
@@ -977,7 +977,7 @@ defmodule Minga.Integration.GUIProtocolTest do
         ]
       }
 
-      alias Minga.Port.Protocol.GUIWindowContent
+      alias Minga.Frontend.Protocol.GUIWindowContent
       cmd = GUIWindowContent.encode(sw)
       Port.command(port, cmd)
 

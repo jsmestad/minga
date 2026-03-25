@@ -185,7 +185,7 @@ defmodule Minga.Editor.Modeline do
   an underline cursor (matching Vim's `r` feedback).
   """
   @spec cursor_shape(Mode.mode() | Minga.Editor.VimState.t()) ::
-          Minga.Port.Protocol.cursor_shape()
+          Minga.Frontend.Protocol.cursor_shape()
   def cursor_shape(%{mode: :normal, mode_state: %{pending_replace: true}}), do: :underline
   def cursor_shape(%{mode: mode}), do: cursor_shape(mode)
   def cursor_shape(:insert), do: :beam

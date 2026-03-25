@@ -16,7 +16,7 @@ defmodule Minga.Input.Popup do
 
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Window
-  alias Minga.Popup.Lifecycle
+  alias Minga.UI.Popup.Lifecycle
 
   @impl true
   @spec handle_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
@@ -72,7 +72,8 @@ defmodule Minga.Input.Popup do
   @spec find_float_popup_id(EditorState.t()) :: integer() | nil
   defp find_float_popup_id(%{workspace: %{windows: %{map: map}}}) do
     Enum.find_value(map, fn
-      {id, %Window{popup_meta: %Minga.Popup.Active{rule: %Minga.Popup.Rule{display: :float}}}} ->
+      {id,
+       %Window{popup_meta: %Minga.UI.Popup.Active{rule: %Minga.UI.Popup.Rule{display: :float}}}} ->
         id
 
       _ ->
@@ -80,7 +81,7 @@ defmodule Minga.Input.Popup do
     end)
   end
 
-  @spec active_popup_meta(EditorState.t()) :: Minga.Popup.Active.t() | nil
+  @spec active_popup_meta(EditorState.t()) :: Minga.UI.Popup.Active.t() | nil
   defp active_popup_meta(%{workspace: %{windows: %{map: map, active: active_id}}}) do
     case Map.fetch(map, active_id) do
       {:ok, %Window{popup_meta: meta}} -> meta

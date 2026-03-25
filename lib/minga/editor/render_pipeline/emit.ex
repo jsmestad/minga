@@ -23,9 +23,7 @@ defmodule Minga.Editor.RenderPipeline.Emit do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.TabBar
   alias Minga.Editor.Title
-  alias Minga.Port.Capabilities
-  alias Minga.Port.Manager, as: PortManager
-  alias Minga.Port.Protocol.GUIWindowContent
+  alias Minga.Frontend.Protocol.GUIWindowContent
   alias Minga.Telemetry
 
   @typedoc "Internal editor state."
@@ -49,7 +47,7 @@ defmodule Minga.Editor.RenderPipeline.Emit do
       Process.put(:emit_font_registry, state.font_registry)
     end
 
-    gui? = Capabilities.gui?(state.capabilities)
+    gui? = Minga.Frontend.gui?(state.capabilities)
 
     if gui? do
       emit_gui(frame, state, chrome)
@@ -82,14 +80,14 @@ defmodule Minga.Editor.RenderPipeline.Emit do
       frame_cmds ++
         window_content_cmds ++
         metal_chrome_cmds ++
-        [Minga.Port.Protocol.encode_batch_end()]
+        [Minga.Frontend.Protocol.encode_batch_end()]
 
     update_tracking(state)
 
     byte_count = IO.iodata_length(all_metal)
 
     Telemetry.span([:minga, :port, :emit], %{byte_count: byte_count}, fn ->
-      PortManager.send_commands(state.port_manager, all_metal)
+      Minga.Frontend.send_commands(state.port_manager, all_metal)
       send_title(state)
       send_window_bg(state)
 
@@ -108,7 +106,7 @@ defmodule Minga.Editor.RenderPipeline.Emit do
     byte_count = IO.iodata_length(commands)
 
     Telemetry.span([:minga, :port, :emit], %{byte_count: byte_count}, fn ->
-      PortManager.send_commands(state.port_manager, commands)
+      Minga.Frontend.send_commands(state.port_manager, commands)
       send_title(state)
       send_window_bg(state)
       state
@@ -184,7 +182,7 @@ defmodule Minga.Editor.RenderPipeline.Emit do
   @spec send_title(state()) :: :ok
   defp send_title(state) do
     title =
-      if Capabilities.gui?(state.capabilities) do
+      if Minga.Frontend.gui?(state.capabilities) do
         Title.format_gui(state)
       else
         format = Options.get(:title_format) |> to_string()
@@ -200,7 +198,7 @@ defmodule Minga.Editor.RenderPipeline.Emit do
 
     if title != Process.get(:last_title) do
       Process.put(:last_title, title)
-      PortManager.send_commands([Minga.Port.Protocol.encode_set_title(title)])
+      Minga.Frontend.set_title(title)
     end
 
     :ok
@@ -212,7 +210,7 @@ defmodule Minga.Editor.RenderPipeline.Emit do
 
     if bg != Process.get(:last_window_bg) do
       Process.put(:last_window_bg, bg)
-      PortManager.send_commands([Minga.Port.Protocol.encode_set_window_bg(bg)])
+      Minga.Frontend.set_window_bg(bg)
     end
 
     :ok

@@ -16,7 +16,7 @@ defmodule Minga.Editor.Commands.Git do
   alias Minga.Git.DiffView
   alias Minga.Git.Repo
   alias Minga.Git.Tracker, as: GitTracker
-  alias Minga.Picker.GitChangedSource
+  alias Minga.UI.Picker.GitChangedSource
 
   @type state :: EditorState.t()
 
@@ -55,7 +55,7 @@ defmodule Minga.Editor.Commands.Git do
   end
 
   def execute(state, :git_branch_picker) do
-    PickerUI.open(state, Minga.Picker.GitBranchSource)
+    PickerUI.open(state, Minga.UI.Picker.GitBranchSource)
   end
 
   def execute(state, :git_push) do

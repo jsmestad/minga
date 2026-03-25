@@ -26,8 +26,8 @@ defmodule Minga.Editor.Commands.BufferManagement do
   alias Minga.Formatter
   alias Minga.Mode
   alias Minga.Mode.ToolConfirmState
-  alias Minga.Popup.Lifecycle, as: PopupLifecycle
   alias Minga.Tool.Recipe.Registry, as: RecipeRegistry
+  alias Minga.UI.Popup.Lifecycle, as: PopupLifecycle
 
   @type state :: EditorState.t()
 
@@ -107,11 +107,11 @@ defmodule Minga.Editor.Commands.BufferManagement do
   # ── Buffer navigation ─────────────────────────────────────────────────────
 
   def execute(state, :buffer_list) do
-    PickerUI.open(state, Minga.Picker.BufferSource)
+    PickerUI.open(state, Minga.UI.Picker.BufferSource)
   end
 
   def execute(state, :buffer_list_all) do
-    PickerUI.open(state, Minga.Picker.BufferAllSource)
+    PickerUI.open(state, Minga.UI.Picker.BufferAllSource)
   end
 
   def execute(state, :buffer_next), do: next_buffer(state)
@@ -1432,7 +1432,6 @@ defmodule Minga.Editor.Commands.BufferManagement do
 
   @spec frontend(state()) :: module()
   defp frontend(%{capabilities: caps}) do
-    alias Minga.Port.Capabilities
-    if Capabilities.gui?(caps), do: __MODULE__.GUI, else: __MODULE__.TUI
+    if Minga.Frontend.gui?(caps), do: __MODULE__.GUI, else: __MODULE__.TUI
   end
 end

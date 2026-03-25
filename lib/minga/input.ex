@@ -147,4 +147,14 @@ defmodule Minga.Input do
   def key_sequence_pending?(state) do
     Minga.Editor.Editing.key_sequence_pending?(state)
   end
+
+  # ── Modifier constants ───────────────────────────────────────────────────
+
+  @doc "Keyboard modifier flag for Ctrl."
+  @spec mod_ctrl() :: non_neg_integer()
+  def mod_ctrl, do: 0x02
+
+  @doc "Keyboard modifier flag for Alt/Option."
+  @spec mod_alt() :: non_neg_integer()
+  def mod_alt, do: 0x04
 end

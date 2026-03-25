@@ -33,10 +33,9 @@ defmodule Minga.Input.Scoped do
   alias Minga.Input.AgentPanel
 
   alias Minga.Keymap.Scope
-  alias Minga.Port.Protocol
 
-  @ctrl Protocol.mod_ctrl()
-  @alt Protocol.mod_alt()
+  @ctrl Minga.Input.mod_ctrl()
+  @alt Minga.Input.mod_alt()
   @tab 9
   @space 32
 

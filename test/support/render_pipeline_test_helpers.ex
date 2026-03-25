@@ -17,7 +17,7 @@ defmodule Minga.Editor.RenderPipeline.TestHelpers do
   alias Minga.Editor.Window
   alias Minga.Editor.WindowTree
   alias Minga.Input
-  alias Minga.Port.Capabilities
+  alias Minga.Frontend.Capabilities
   alias Minga.UI.Theme
 
   @doc """

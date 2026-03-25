@@ -10,7 +10,6 @@ defmodule Minga.Editor.Commands.UI do
   alias Minga.Editor.PickerUI
   alias Minga.Editor.State, as: EditorState
   alias Minga.Parser.Manager, as: ParserManager
-  alias Minga.Port.Capabilities
 
   @impl Minga.Command.Provider
   def __commands__ do
@@ -19,13 +18,13 @@ defmodule Minga.Editor.Commands.UI do
         name: :command_palette,
         description: "Execute command",
         requires_buffer: false,
-        execute: fn state -> PickerUI.open(state, Minga.Picker.CommandSource) end
+        execute: fn state -> PickerUI.open(state, Minga.UI.Picker.CommandSource) end
       },
       %Minga.Command{
         name: :find_file,
         description: "Find file in project",
         requires_buffer: false,
-        execute: fn state -> PickerUI.open(state, Minga.Picker.FileSource) end
+        execute: fn state -> PickerUI.open(state, Minga.UI.Picker.FileSource) end
       },
       %Minga.Command{
         name: :find_file_other_window,
@@ -34,20 +33,20 @@ defmodule Minga.Editor.Commands.UI do
         execute: fn state ->
           state
           |> Minga.Editor.Commands.Movement.execute(:split_vertical)
-          |> PickerUI.open(Minga.Picker.FileSource)
+          |> PickerUI.open(Minga.UI.Picker.FileSource)
         end
       },
       %Minga.Command{
         name: :theme_picker,
         description: "Pick theme",
         requires_buffer: false,
-        execute: fn state -> PickerUI.open(state, Minga.Picker.ThemeSource) end
+        execute: fn state -> PickerUI.open(state, Minga.UI.Picker.ThemeSource) end
       },
       %Minga.Command{
         name: :set_language,
         description: "Set buffer language",
         requires_buffer: false,
-        execute: fn state -> PickerUI.open(state, Minga.Picker.LanguageSource) end
+        execute: fn state -> PickerUI.open(state, Minga.UI.Picker.LanguageSource) end
       },
       %Minga.Command{
         name: :diagnostics_list,
@@ -59,7 +58,7 @@ defmodule Minga.Editor.Commands.UI do
         name: :filetype_menu,
         description: "Show filetype actions",
         requires_buffer: true,
-        execute: fn state -> PickerUI.open(state, Minga.Picker.LanguageSource) end
+        execute: fn state -> PickerUI.open(state, Minga.UI.Picker.LanguageSource) end
       },
       %Minga.Command{
         name: :parser_restart,
@@ -99,7 +98,7 @@ defmodule Minga.Editor.Commands.UI do
 
   @spec frontend(EditorState.t()) :: module()
   defp frontend(%{capabilities: caps}) do
-    if Capabilities.gui?(caps), do: __MODULE__.GUI, else: __MODULE__.TUI
+    if Minga.Frontend.gui?(caps), do: __MODULE__.GUI, else: __MODULE__.TUI
   end
 
   @spec execute_parser_restart(EditorState.t()) :: EditorState.t()

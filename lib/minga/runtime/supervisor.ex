@@ -21,7 +21,7 @@ defmodule Minga.Runtime.Supervisor do
   use Supervisor
 
   @typedoc "Options for starting the runtime supervisor."
-  @type start_opt :: {:name, GenServer.name()} | {:backend, Minga.Port.Manager.backend()}
+  @type start_opt :: {:name, GenServer.name()} | {:backend, Minga.Frontend.Manager.backend()}
 
   @spec start_link([start_opt()]) :: Supervisor.on_start()
   def start_link(opts \\ []) do

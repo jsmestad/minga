@@ -214,7 +214,7 @@ defmodule Minga.Editor.Commands.Search do
         msg = if truncated?, do: "Results truncated to 10,000", else: nil
 
         state = put_in(state.workspace.search.project_results, matches)
-        state = PickerUI.open(state, Minga.Picker.ProjectSearchSource)
+        state = PickerUI.open(state, Minga.UI.Picker.ProjectSearchSource)
         if msg, do: %{state | status_msg: msg}, else: state
 
       {:error, msg} ->
@@ -315,8 +315,7 @@ defmodule Minga.Editor.Commands.Search do
       }
 
       if state.backend == :native_gui and state.port_manager do
-        cmd = Minga.Port.Protocol.GUI.encode_clipboard_write(text, :find)
-        Minga.Port.Manager.send_commands(state.port_manager, [cmd])
+        Minga.Frontend.clipboard_write(state.port_manager, text, :find)
       end
 
       %{state | status_msg: "Using \"#{text}\" for Find"}

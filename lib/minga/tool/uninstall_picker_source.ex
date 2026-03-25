@@ -5,10 +5,10 @@ defmodule Minga.Tool.UninstallPickerSource do
   Shows only installed tools. Selecting one triggers uninstall.
   """
 
-  @behaviour Minga.Picker.Source
+  @behaviour Minga.UI.Picker.Source
 
-  alias Minga.Picker.Item
   alias Minga.Tool.Manager, as: ToolManager
+  alias Minga.UI.Picker.Item
 
   @impl true
   @spec title() :: String.t()

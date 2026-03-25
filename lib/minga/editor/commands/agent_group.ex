@@ -63,13 +63,13 @@ defmodule Minga.Editor.Commands.AgentGroup do
   @doc "Open the agent group picker."
   @spec agent_group_list(state()) :: state()
   def agent_group_list(state) do
-    Minga.Editor.PickerUI.open(state, Minga.Picker.AgentGroupSource)
+    Minga.Editor.PickerUI.open(state, Minga.UI.Picker.AgentGroupSource)
   end
 
   @doc "Open the icon picker for the active agent group."
   @spec agent_group_set_icon(state()) :: state()
   def agent_group_set_icon(state) do
-    Minga.Editor.PickerUI.open(state, Minga.Picker.AgentGroupIconSource)
+    Minga.Editor.PickerUI.open(state, Minga.UI.Picker.AgentGroupIconSource)
   end
 
   @doc """
@@ -85,7 +85,7 @@ defmodule Minga.Editor.Commands.AgentGroup do
     ws = TabBar.active_group(tb)
     current_name = if ws, do: ws.label, else: ""
 
-    Minga.Editor.PromptUI.open(state, Minga.Prompt.AgentGroupRename, default: current_name)
+    Minga.Editor.PromptUI.open(state, Minga.UI.Prompt.AgentGroupRename, default: current_name)
   end
 
   @doc "Jump to agent group by number (1-based, 0 = ungrouped)."

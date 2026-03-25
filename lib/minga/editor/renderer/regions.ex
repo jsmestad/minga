@@ -23,7 +23,7 @@ defmodule Minga.Editor.Renderer.Regions do
   """
 
   alias Minga.Editor.Layout
-  alias Minga.Port.Protocol
+  alias Minga.Frontend.Protocol
 
   @region_file_tree 1
   @region_minibuffer 2

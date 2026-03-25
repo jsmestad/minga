@@ -22,7 +22,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.TUI do
   alias Minga.Editor.DisplayList.{Frame, Overlay, WindowFrame}
   alias Minga.Editor.Layout
   alias Minga.Editor.State, as: EditorState
-  alias Minga.Port.Protocol
+  alias Minga.Frontend.Protocol
 
   @typedoc "Internal editor state."
   @type state :: EditorState.t()

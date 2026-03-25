@@ -9,10 +9,10 @@ defmodule Minga.Tool.PickerSource do
   Accessible via `SPC c l I` (Manage tools).
   """
 
-  @behaviour Minga.Picker.Source
+  @behaviour Minga.UI.Picker.Source
 
-  alias Minga.Picker.Item
   alias Minga.Tool.Manager, as: ToolManager
+  alias Minga.UI.Picker.Item
 
   @impl true
   @spec title() :: String.t()
@@ -89,7 +89,7 @@ defmodule Minga.Tool.PickerSource do
   def on_cancel(state), do: state
 
   @impl true
-  @spec actions(Item.t()) :: [Minga.Picker.Source.action_entry()]
+  @spec actions(Item.t()) :: [Minga.UI.Picker.Source.action_entry()]
   def actions(%Item{id: {_name, :installed}}) do
     [{"Uninstall", :uninstall}, {"Update", :update}]
   end

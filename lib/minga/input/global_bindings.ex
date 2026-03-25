@@ -13,8 +13,7 @@ defmodule Minga.Input.GlobalBindings do
 
   alias Minga.Buffer.Server, as: BufferServer
 
-  alias Minga.Port.Protocol
-  @ctrl Protocol.mod_ctrl()
+  @ctrl Minga.Input.mod_ctrl()
 
   @impl true
   @spec handle_key(Minga.Editor.State.t(), non_neg_integer(), non_neg_integer()) ::

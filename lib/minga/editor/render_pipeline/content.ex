@@ -24,7 +24,6 @@ defmodule Minga.Editor.RenderPipeline.Content do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Viewport
   alias Minga.Editor.Window
-  alias Minga.Port.Capabilities
   alias Minga.UI.Face
 
   @typedoc "Internal editor state."
@@ -110,7 +109,7 @@ defmodule Minga.Editor.RenderPipeline.Content do
         content_w: content_w,
         has_sign_column: has_sign_column,
         is_active: is_active,
-        is_gui: Capabilities.gui?(state.capabilities)
+        is_gui: Minga.Frontend.gui?(state.capabilities)
       })
 
     # Compute context fingerprint and check for context changes.
@@ -193,7 +192,7 @@ defmodule Minga.Editor.RenderPipeline.Content do
     # Build semantic window for GUI frontends (Phase 1 of #828).
     # Captures the same data the draw path uses, pre-resolved for the GUI.
     semantic =
-      if Capabilities.gui?(state.capabilities) do
+      if Minga.Frontend.gui?(state.capabilities) do
         SemanticWindow.Builder.build(state, scroll, render_ctx)
       else
         nil
@@ -392,7 +391,7 @@ defmodule Minga.Editor.RenderPipeline.Content do
         content_w: content_w,
         has_sign_column: true,
         is_active: is_active,
-        is_gui: Capabilities.gui?(state.capabilities)
+        is_gui: Minga.Frontend.gui?(state.capabilities)
       })
 
     # Compute the display map (block decorations, fold regions, virtual lines).

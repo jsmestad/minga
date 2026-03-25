@@ -5,7 +5,7 @@ defmodule Minga.Input.PromptTest do
   alias Minga.Input.Prompt, as: InputPrompt
 
   defmodule TestHandler do
-    @behaviour Minga.Prompt.Handler
+    @behaviour Minga.UI.Prompt.Handler
 
     @impl true
     def label, do: "Input: "

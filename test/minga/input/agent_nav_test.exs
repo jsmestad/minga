@@ -12,7 +12,7 @@ defmodule Minga.Input.AgentNavTest do
   alias Minga.Editor.Viewport
   alias Minga.Editor.Window
   alias Minga.Input.AgentNav
-  @ctrl Minga.Port.Protocol.mod_ctrl()
+  @ctrl Minga.Frontend.Protocol.mod_ctrl()
 
   defp make_state(opts \\ []) do
     buf = AgentBufferSync.start_buffer()
