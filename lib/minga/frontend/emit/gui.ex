@@ -1,4 +1,4 @@
-defmodule Minga.Editor.RenderPipeline.Emit.GUI do
+defmodule Minga.Frontend.Emit.GUI do
   @moduledoc """
   GUI-specific emit logic for the Emit stage.
 

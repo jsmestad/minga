@@ -47,7 +47,17 @@ defmodule Minga.Editor.Renderer do
   initialized (if needed). No windows to cache.
   """
   @spec render(state()) :: state()
-  def render(%{workspace: %{buffers: %{active: nil}}} = state) do
+  def render(%{shell: shell} = state) do
+    shell.render(state)
+  end
+
+  @doc """
+  Renders the dashboard home screen (no active buffer).
+
+  Called by Shell.Traditional.render when no file buffers are open.
+  """
+  @spec render_dashboard(state()) :: state()
+  def render_dashboard(%{workspace: %{buffers: %{active: nil}}} = state) do
     rows = state.workspace.viewport.rows
     cols = state.workspace.viewport.cols
     viewport = state.workspace.viewport
@@ -88,7 +98,13 @@ defmodule Minga.Editor.Renderer do
     state
   end
 
-  def render(state) do
+  @doc """
+  Runs the full render pipeline (content, chrome, compose, emit).
+
+  Called by Shell.Traditional.render for normal buffer rendering.
+  """
+  @spec render_buffer(state()) :: state()
+  def render_buffer(state) do
     RenderPipeline.run(state)
   rescue
     e ->

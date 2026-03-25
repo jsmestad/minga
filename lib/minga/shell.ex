@@ -67,4 +67,26 @@ defmodule Minga.Shell do
   editor panes, agent panel, bottom panel, etc.).
   """
   @callback compute_layout(editor_state :: term()) :: Minga.Editor.Layout.t()
+
+  @doc """
+  Build chrome (tab bar, modeline, file tree, overlays, etc.).
+
+  Returns a chrome struct with draw lists for each UI region. The
+  shell decides which chrome elements exist and how they render.
+  """
+  @callback build_chrome(
+              editor_state :: term(),
+              layout :: Minga.Editor.Layout.t(),
+              scrolls :: map(),
+              cursor_info :: term()
+            ) :: Minga.Editor.RenderPipeline.Chrome.t()
+
+  @doc """
+  Render a complete frame.
+
+  Runs the full render pipeline (content, chrome, compose, emit) and
+  sends commands to the frontend. Returns updated state with cached
+  render data.
+  """
+  @callback render(editor_state :: term()) :: term()
 end

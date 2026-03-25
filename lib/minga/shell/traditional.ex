@@ -50,6 +50,23 @@ defmodule Minga.Shell.Traditional do
   end
 
   @impl true
+  @spec build_chrome(term(), Minga.Editor.Layout.t(), map(), term()) ::
+          Minga.Editor.RenderPipeline.Chrome.t()
+  def build_chrome(editor_state, layout, scrolls, cursor_info) do
+    Minga.Editor.RenderPipeline.Chrome.build_chrome(editor_state, layout, scrolls, cursor_info)
+  end
+
+  @impl true
+  @spec render(term()) :: term()
+  def render(%{workspace: %{buffers: %{active: nil}}} = editor_state) do
+    Minga.Editor.Renderer.render_dashboard(editor_state)
+  end
+
+  def render(editor_state) do
+    Minga.Editor.Renderer.render_buffer(editor_state)
+  end
+
+  @impl true
   @spec input_handlers(ShellState.t()) :: %{overlay: [module()], surface: [module()]}
   def input_handlers(_shell_state) do
     %{

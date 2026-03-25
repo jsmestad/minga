@@ -1,4 +1,4 @@
-defmodule Minga.Editor.RenderPipeline.Emit.GUI.ChromeCacheTest do
+defmodule Minga.Frontend.Emit.GUI.ChromeCacheTest do
   @moduledoc """
   Tests for fingerprint-based change detection in `sync_swiftui_chrome/3`.
 
@@ -10,8 +10,8 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI.ChromeCacheTest do
 
   use ExUnit.Case, async: true
 
-  alias Minga.Editor.RenderPipeline.Emit.GUI, as: EmitGUI
   alias Minga.Editor.StatusBar.Data, as: StatusBarData
+  alias Minga.Frontend.Emit.GUI, as: EmitGUI
 
   import Minga.Editor.RenderPipeline.TestHelpers
 

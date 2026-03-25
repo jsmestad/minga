@@ -1,4 +1,4 @@
-defmodule Minga.Editor.RenderPipeline.Emit.TUITest do
+defmodule Minga.Frontend.Emit.TUITest do
   @moduledoc """
   Tests for the TUI-specific Emit stage logic: scroll region detection,
   command building, and helper functions.
@@ -8,8 +8,8 @@ defmodule Minga.Editor.RenderPipeline.Emit.TUITest do
 
   alias Minga.Editor.DisplayList
   alias Minga.Editor.DisplayList.{Cursor, Frame, Overlay}
-  alias Minga.Editor.RenderPipeline.Emit
-  alias Minga.Editor.RenderPipeline.Emit.TUI, as: EmitTUI
+  alias Minga.Frontend.Emit
+  alias Minga.Frontend.Emit.TUI, as: EmitTUI
 
   import Minga.Editor.RenderPipeline.TestHelpers
 
