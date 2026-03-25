@@ -77,7 +77,7 @@ defmodule Minga.Frontend.Protocol.GUIWindowContent do
   @doc """
   Encodes a `SemanticWindow` into the 0x80 wire format.
 
-  Returns a single binary suitable for sending via `PortManager.send_commands/2`.
+  Returns a single binary suitable for sending via `Minga.Frontend.send_commands/2`.
   """
   @spec encode(SemanticWindow.t()) :: binary()
   def encode(%SemanticWindow{} = sw) do
