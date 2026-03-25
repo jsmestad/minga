@@ -127,9 +127,9 @@ defmodule Minga.Picker.BufferSource do
       _ ->
         new_active = min(bs.active_index, length(new_buffers) - 1)
         new_bs = %Buffers{bs | list: new_buffers}
+        updated_ws = %{state.workspace | buffers: Buffers.switch_to(new_bs, new_active)}
 
-        %{state | workspace: %{state.workspace | buffers: Buffers.switch_to(new_bs, new_active)}}
-        |> EditorState.sync_active_window_buffer()
+        %{state | workspace: Minga.Workspace.sync_active_window_buffer(updated_ws)}
     end
   end
 
