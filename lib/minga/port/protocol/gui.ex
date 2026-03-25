@@ -149,6 +149,8 @@ defmodule Minga.Port.Protocol.GUI do
   @gui_action_agent_group_rename 0x1F
   @gui_action_agent_group_set_icon 0x20
   @gui_action_agent_group_close 0x21
+  @gui_action_space_leader_chord 0x22
+  @gui_action_space_leader_retract 0x23
 
   # ── Types ──
 
@@ -187,6 +189,9 @@ defmodule Minga.Port.Protocol.GUI do
           | {:agent_group_rename, id :: non_neg_integer(), name :: String.t()}
           | {:agent_group_set_icon, id :: non_neg_integer(), icon :: String.t()}
           | {:agent_group_close, id :: non_neg_integer()}
+          | {:space_leader_chord, codepoint :: non_neg_integer(), modifiers :: non_neg_integer()}
+          | {:space_leader_retract, codepoint :: non_neg_integer(),
+             modifiers :: non_neg_integer()}
 
   # ═══════════════════════════════════════════════════════════════════════════
   # Encoding (BEAM → Frontend)
@@ -1479,6 +1484,18 @@ defmodule Minga.Port.Protocol.GUI do
 
   def decode_gui_action(@gui_action_agent_group_close, <<ws_id::16>>),
     do: {:ok, {:agent_group_close, ws_id}}
+
+  def decode_gui_action(
+        @gui_action_space_leader_chord,
+        <<codepoint::32, modifiers::8>>
+      ),
+      do: {:ok, {:space_leader_chord, codepoint, modifiers}}
+
+  def decode_gui_action(
+        @gui_action_space_leader_retract,
+        <<codepoint::32, modifiers::8>>
+      ),
+      do: {:ok, {:space_leader_retract, codepoint, modifiers}}
 
   def decode_gui_action(_, _), do: :error
 
