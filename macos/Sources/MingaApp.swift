@@ -258,13 +258,17 @@ struct ContentView: View {
                     )
                     .transition(
                         NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-                            ? .opacity.animation(.easeInOut(duration: 0.15))
-                            : .scale(scale: 0.95)
-                                .combined(with: .opacity)
-                                .animation(.easeOut(duration: 0.25))
+                            ? .opacity
+                            : .scale(scale: 0.97).combined(with: .opacity)
                     )
                 }
             }
+            .animation(
+                NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+                    ? .easeInOut(duration: 0.15)
+                    : .easeOut(duration: 0.25),
+                value: appState.gui.boardState.visible
+            )
 
             // Bottom panel (between editor and status bar)
             if appState.gui.bottomPanelState.visible {

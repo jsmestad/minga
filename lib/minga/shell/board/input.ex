@@ -168,12 +168,7 @@ defmodule Minga.Shell.Board.Input do
 
   @spec create_new_card(EditorState.t()) :: EditorState.t()
   defp create_new_card(state) do
-    board = state.shell_state
-    count = BoardState.card_count(board)
-    {new_board, card} = BoardState.create_card(board, task: "Agent #{count}", status: :idle)
-    # Focus the new card
-    new_board = BoardState.focus_card(new_board, card.id)
-    %{state | shell_state: new_board}
+    Minga.Editor.PromptUI.open(state, Minga.Shell.Board.DispatchPrompt)
   end
 
   # ── Helpers ────────────────────────────────────────────────────────────

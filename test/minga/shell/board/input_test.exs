@@ -160,13 +160,12 @@ defmodule Minga.Shell.Board.InputTest do
 
   # ── New card dispatch ──────────────────────────────────────────────────
 
-  describe "n dispatches new card" do
-    test "creates a new card on the board" do
+  describe "n opens dispatch prompt" do
+    test "opens the dispatch prompt for task description" do
       state = editor_with_board(2)
-      initial_count = BoardState.card_count(state.shell_state)
 
       {:handled, new_state} = BoardInput.handle_key(state, ?n, 0)
-      assert BoardState.card_count(new_state.shell_state) == initial_count + 1
+      assert Minga.Editor.PromptUI.open?(new_state)
     end
   end
 

@@ -150,11 +150,21 @@ struct BoardCardView: View {
 
     // MARK: - Status Badge
 
+    @State private var isPulsing = false
+
     private var statusBadge: some View {
         HStack(spacing: 4) {
             Circle()
                 .fill(statusColor)
                 .frame(width: 8, height: 8)
+                .opacity(isPulsing && card.status == .working ? 0.4 : 1.0)
+                .animation(
+                    card.status == .working
+                        ? .easeInOut(duration: 0.8).repeatForever(autoreverses: true)
+                        : .default,
+                    value: isPulsing
+                )
+                .onAppear { isPulsing = true }
 
             Text(card.isYouCard ? "You" : card.status.label)
                 .font(.system(size: 11, weight: .medium))
