@@ -52,6 +52,7 @@ enum RenderCommand: Sendable {
     case guiSplitSeparators(borderColor: UInt32, verticals: [GUIVerticalSeparator], horizontals: [GUIHorizontalSeparator])
     case guiGitStatus(repoState: UInt8, ahead: UInt16, behind: UInt16, branchName: String, entries: [GUIGitStatusEntry])
     case guiAgentGroups(activeGroupId: UInt16, agentGroups: [GUIAgentGroupEntry])
+    case guiBoard(visible: Bool, focusedCardId: UInt32, cards: [BoardCard])
 }
 
 // MARK: - Minibuffer data types
@@ -1894,6 +1895,64 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         }
         return (.guiAgentGroups(activeGroupId: activeGId, agentGroups: groups),
                 gPos - offset)
+
+    case OP_GUI_BOARD:
+        // visible(1) + focused_card_id(4) + card_count(2)
+        guard data.count >= rest + 7 else { throw ProtocolDecodeError.malformed }
+        let boardVisible = data[rest] != 0
+        let focusedId = readU32(data, rest + 1)
+        let cardCount = Int(readU16(data, rest + 5))
+        var boardCards: [BoardCard] = []
+        boardCards.reserveCapacity(cardCount)
+        var bPos = rest + 7
+        for _ in 0..<cardCount {
+            // card_id(4) + status(1) + flags(1) + task_len(2) + task + model_len(1) + model + elapsed(4) + file_count(1) + files
+            guard data.count >= bPos + 8 else { throw ProtocolDecodeError.malformed }
+            let cardId = readU32(data, bPos)
+            let statusRaw = data[bPos + 4]
+            let flags = data[bPos + 5]
+            let taskLen = Int(readU16(data, bPos + 6))
+            guard data.count >= bPos + 8 + taskLen else { throw ProtocolDecodeError.malformed }
+            let taskData = data[(bPos + 8)..<(bPos + 8 + taskLen)]
+            let task = String(data: taskData, encoding: .utf8) ?? ""
+            var cPos = bPos + 8 + taskLen
+            guard data.count >= cPos + 1 else { throw ProtocolDecodeError.malformed }
+            let modelLen = Int(data[cPos])
+            cPos += 1
+            guard data.count >= cPos + modelLen else { throw ProtocolDecodeError.malformed }
+            let modelData = data[cPos..<(cPos + modelLen)]
+            let model = String(data: modelData, encoding: .utf8) ?? ""
+            cPos += modelLen
+            guard data.count >= cPos + 5 else { throw ProtocolDecodeError.malformed }
+            let elapsed = readU32(data, cPos)
+            let fileCount = Int(data[cPos + 4])
+            cPos += 5
+            var recentFiles: [String] = []
+            for _ in 0..<fileCount {
+                guard data.count >= cPos + 2 else { throw ProtocolDecodeError.malformed }
+                let pathLen = Int(readU16(data, cPos))
+                cPos += 2
+                guard data.count >= cPos + pathLen else { throw ProtocolDecodeError.malformed }
+                let pathData = data[cPos..<(cPos + pathLen)]
+                recentFiles.append(String(data: pathData, encoding: .utf8) ?? "")
+                cPos += pathLen
+            }
+            let isYou = (flags & 0x01) != 0
+            let isFocused = (flags & 0x02) != 0
+            boardCards.append(BoardCard(
+                id: cardId,
+                status: CardStatus(rawValue: statusRaw) ?? .idle,
+                isYouCard: isYou,
+                isFocused: isFocused,
+                task: task,
+                model: model,
+                elapsedSeconds: elapsed,
+                recentFiles: recentFiles
+            ))
+            bPos = cPos
+        }
+        return (.guiBoard(visible: boardVisible, focusedCardId: focusedId, cards: boardCards),
+                bPos - offset)
 
     case OP_CLIPBOARD_WRITE:
         // Forward-compatible format: opcode(1) + payload_length(2) + target(1) + text_len(2) + text

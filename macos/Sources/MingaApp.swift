@@ -244,8 +244,23 @@ struct ContentView: View {
                 encoder: appState.encoder
             )
 
-            // Editor surface (Metal) with overlays
-            editorSurface
+            // Board or editor surface
+            if appState.gui.boardState.visible {
+                BoardView(
+                    state: appState.gui.boardState,
+                    theme: appState.gui.themeColors,
+                    encoder: appState.encoder
+                )
+                .transition(
+                    NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+                        ? .opacity.animation(.easeInOut(duration: 0.15))
+                        : .scale(scale: 0.95)
+                            .combined(with: .opacity)
+                            .animation(.easeOut(duration: 0.25))
+                )
+            } else {
+                editorSurface
+            }
 
             // Bottom panel (between editor and status bar)
             if appState.gui.bottomPanelState.visible {

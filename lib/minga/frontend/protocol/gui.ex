@@ -35,6 +35,7 @@ defmodule Minga.Frontend.Protocol.GUI do
   | 0x84   | gui_split_separators | Split pane separator lines |
   | 0x85   | gui_git_status       | Git status panel data      |
   | 0x86   | gui_agent_groups    | Workspace indicator + list |
+  | 0x87   | gui_board           | Board card grid state      |
 
   ## GUI Actions (Frontend → BEAM)
 
@@ -112,6 +113,7 @@ defmodule Minga.Frontend.Protocol.GUI do
   @op_gui_split_separators 0x84
   @op_gui_git_status 0x85
   @op_gui_agent_groups 0x86
+  @op_gui_board 0x87
 
   # ── Forward-compatible opcodes (0x90+, include 2-byte length prefix) ──
   # New opcodes >= 0x90 start with: opcode(1) + payload_length(2) + payload.
@@ -608,6 +610,90 @@ defmodule Minga.Frontend.Protocol.GUI do
       | entries
     ])
   end
+
+  # ── Board ──
+
+  @doc """
+  Encodes a gui_board command with the card grid state.
+
+  Wire format:
+    opcode(0x87) + visible(1) + focused_card_id(4) + card_count(2) + cards...
+
+  Per card:
+    card_id(4) + status(1) + flags(1)
+    + task_len(2) + task(task_len)
+    + model_len(1) + model(model_len)
+    + elapsed_seconds(4)
+    + recent_file_count(1) + recent_files...
+
+  Per recent_file:
+    path_len(2) + path(path_len)
+
+  Status bytes: 0=idle, 1=working, 2=iterating, 3=needs_you, 4=done, 5=errored
+  Flags: bit 0 = is_you_card, bit 1 = is_focused
+  """
+  @spec encode_gui_board(Minga.Shell.Board.State.t()) :: binary()
+  def encode_gui_board(%Minga.Shell.Board.State{} = board) do
+    cards = Minga.Shell.Board.State.sorted_cards(board)
+    visible = if Minga.Shell.Board.State.grid_view?(board), do: 1, else: 0
+    focused_id = board.focused_card || 0
+
+    card_entries =
+      Enum.map(cards, fn card ->
+        encode_board_card(card, board.focused_card)
+      end)
+
+    IO.iodata_to_binary([
+      @op_gui_board,
+      <<visible::8, focused_id::32, length(cards)::16>>
+      | card_entries
+    ])
+  end
+
+  @spec encode_board_card(Minga.Shell.Board.Card.t(), pos_integer() | nil) :: binary()
+  defp encode_board_card(card, focused_id) do
+    status_byte = board_status_byte(card.status)
+
+    is_you = if Minga.Shell.Board.Card.you_card?(card), do: 1, else: 0
+    is_focused = if card.id == focused_id, do: 1, else: 0
+    flags = Bitwise.bor(is_you, Bitwise.bsl(is_focused, 1))
+
+    task_bytes = :erlang.iolist_to_binary([card.task || ""])
+    model_bytes = :erlang.iolist_to_binary([card.model || ""])
+
+    elapsed =
+      if card.created_at do
+        DateTime.diff(DateTime.utc_now(), card.created_at, :second)
+      else
+        0
+      end
+
+    recent_files = card.recent_files || []
+
+    file_entries =
+      Enum.map(recent_files, fn path ->
+        path_bytes = :erlang.iolist_to_binary([path])
+        <<byte_size(path_bytes)::16, path_bytes::binary>>
+      end)
+
+    IO.iodata_to_binary([
+      <<card.id::32, status_byte::8, flags::8,
+        byte_size(task_bytes)::16, task_bytes::binary,
+        byte_size(model_bytes)::8, model_bytes::binary,
+        elapsed::32,
+        length(recent_files)::8>>
+      | file_entries
+    ])
+  end
+
+  @spec board_status_byte(Minga.Shell.Board.Card.status()) :: non_neg_integer()
+  defp board_status_byte(:idle), do: 0
+  defp board_status_byte(:working), do: 1
+  defp board_status_byte(:iterating), do: 2
+  defp board_status_byte(:needs_you), do: 3
+  defp board_status_byte(:done), do: 4
+  defp board_status_byte(:errored), do: 5
+  defp board_status_byte(_), do: 0
 
   # ── Clipboard write (forward-compatible, 0x90+) ──
 

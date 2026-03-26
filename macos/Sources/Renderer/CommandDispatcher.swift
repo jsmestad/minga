@@ -164,6 +164,9 @@ final class CommandDispatcher {
         case .guiAgentGroups(let activeGroupId, let agentGroups):
             guiState.tabBarState.updateAgentGroups(activeGroupId: activeGroupId, entries: agentGroups)
 
+        case .guiBoard(let visible, let focusedCardId, let cards):
+            guiState.boardState.update(visible: visible, focusedCardId: focusedCardId, cards: cards)
+
         case .clipboardWrite(let target, let text):
             handleClipboardWrite(target: target, text: text)
 
