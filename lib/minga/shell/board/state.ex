@@ -25,13 +25,55 @@ defmodule Minga.Shell.Board.State do
           cards: %{Card.id() => Card.t()},
           focused_card: Card.id() | nil,
           zoomed_into: Card.id() | nil,
-          next_id: pos_integer()
+          next_id: pos_integer(),
+          # Compatibility fields: EditorState accessors read these from
+          # shell_state during render/command dispatch. Board doesn't use
+          # them, but they need to exist to prevent KeyError crashes when
+          # transitioning between shells or when the render pipeline runs
+          # before the Board-specific renderer takes over.
+          whichkey: Minga.Editor.State.WhichKey.t(),
+          picker_ui: Minga.Editor.State.Picker.t(),
+          prompt_ui: Minga.Editor.State.Prompt.t(),
+          status_msg: String.t() | nil,
+          dashboard: nil,
+          nav_flash: nil,
+          hover_popup: nil,
+          tab_bar: nil,
+          agent: Minga.Editor.State.Agent.t(),
+          bottom_panel: Minga.Editor.BottomPanel.t(),
+          git_status_panel: nil,
+          modeline_click_regions: [],
+          tab_bar_click_regions: [],
+          warning_popup_timer: nil,
+          signature_help: nil,
+          tool_declined: MapSet.t(atom()),
+          tool_prompt_queue: [atom()],
+          suppress_tool_prompts: boolean()
         }
 
   defstruct cards: %{},
             focused_card: nil,
             zoomed_into: nil,
-            next_id: 1
+            next_id: 1,
+            # Compatibility fields (see type doc above)
+            whichkey: %Minga.Editor.State.WhichKey{},
+            picker_ui: %Minga.Editor.State.Picker{},
+            prompt_ui: %Minga.Editor.State.Prompt{},
+            status_msg: nil,
+            dashboard: nil,
+            nav_flash: nil,
+            hover_popup: nil,
+            tab_bar: nil,
+            agent: %Minga.Editor.State.Agent{},
+            bottom_panel: %Minga.Editor.BottomPanel{},
+            git_status_panel: nil,
+            modeline_click_regions: [],
+            tab_bar_click_regions: [],
+            warning_popup_timer: nil,
+            signature_help: nil,
+            tool_declined: MapSet.new(),
+            tool_prompt_queue: [],
+            suppress_tool_prompts: false
 
   @doc "Creates a fresh Board state with an empty card grid."
   @spec new() :: t()
