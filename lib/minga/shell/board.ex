@@ -97,17 +97,23 @@ defmodule Minga.Shell.Board do
   @spec input_handlers(term()) :: %{overlay: [module()], surface: [module()]}
   def input_handlers(editor_state) do
     if BoardState.grid_view?(editor_state.shell_state) do
-      # Board grid: minimal overlay stack, Board-specific surface handlers
-      # TODO: Add Board.Input handler
+      # Board grid: Board.Input handles navigation, zoom, dispatch.
+      # GlobalBindings provides Ctrl+Q/Ctrl+S. Everything else passes through.
       %{
         overlay: Minga.Input.overlay_handlers(),
-        surface: Minga.Input.surface_handlers(editor_state)
+        surface: [
+          Minga.Shell.Board.Input,
+          Minga.Input.GlobalBindings
+        ]
       }
     else
-      # Zoomed: full Traditional handler stack
+      # Zoomed into a card: full Traditional handler stack with
+      # Board.ZoomOut prepended to intercept Escape for zoom-out.
+      traditional_surface = Minga.Input.surface_handlers(editor_state)
+
       %{
         overlay: Minga.Input.overlay_handlers(),
-        surface: Minga.Input.surface_handlers(editor_state)
+        surface: [Minga.Shell.Board.ZoomOut | traditional_surface]
       }
     end
   end
