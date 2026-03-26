@@ -31,9 +31,9 @@ defmodule Minga.Editor.WarningsBufferTest do
       send_keys_sync(ctx, "<SPC>bW")
 
       state = :sys.get_state(ctx.editor)
-      assert state.bottom_panel.visible == true
-      assert state.bottom_panel.active_tab == :messages
-      assert state.bottom_panel.filter == :warnings
+      assert state.shell_state.bottom_panel.visible == true
+      assert state.shell_state.bottom_panel.active_tab == :messages
+      assert state.shell_state.bottom_panel.filter == :warnings
     end
 
     test "SPC b W resets dismissed state" do
@@ -42,13 +42,13 @@ defmodule Minga.Editor.WarningsBufferTest do
 
       # Dismiss the panel first
       :sys.replace_state(ctx.editor, fn s ->
-        %{s | bottom_panel: BottomPanel.dismiss(s.bottom_panel)}
+        Minga.Editor.State.set_bottom_panel(s, BottomPanel.dismiss(s.shell_state.bottom_panel))
       end)
 
       send_keys_sync(ctx, "<SPC>bW")
       state = :sys.get_state(ctx.editor)
-      assert state.bottom_panel.visible == true
-      assert state.bottom_panel.dismissed == false
+      assert state.shell_state.bottom_panel.visible == true
+      assert state.shell_state.bottom_panel.dismissed == false
     end
 
     test ":warnings ex-command opens bottom panel with warnings filter" do
@@ -57,8 +57,8 @@ defmodule Minga.Editor.WarningsBufferTest do
       send_keys_sync(ctx, ":warnings<CR>")
 
       state = :sys.get_state(ctx.editor)
-      assert state.bottom_panel.visible == true
-      assert state.bottom_panel.filter == :warnings
+      assert state.shell_state.bottom_panel.visible == true
+      assert state.shell_state.bottom_panel.filter == :warnings
     end
 
     test "warning auto-opens bottom panel when not dismissed" do
@@ -69,8 +69,8 @@ defmodule Minga.Editor.WarningsBufferTest do
       flush_warning_popup(ctx)
 
       state = :sys.get_state(ctx.editor)
-      assert state.bottom_panel.visible == true
-      assert state.bottom_panel.filter == :warnings
+      assert state.shell_state.bottom_panel.visible == true
+      assert state.shell_state.bottom_panel.filter == :warnings
     end
 
     test "warnings logged after dismissal do not auto-open panel" do
@@ -78,14 +78,14 @@ defmodule Minga.Editor.WarningsBufferTest do
       set_gui_capabilities(ctx)
 
       :sys.replace_state(ctx.editor, fn s ->
-        %{s | bottom_panel: BottomPanel.dismiss(s.bottom_panel)}
+        Minga.Editor.State.set_bottom_panel(s, BottomPanel.dismiss(s.shell_state.bottom_panel))
       end)
 
       Minga.Editor.log_to_warnings("test warning after dismiss", ctx.editor)
       flush_warning_popup(ctx)
 
       state = :sys.get_state(ctx.editor)
-      assert state.bottom_panel.visible == false
+      assert state.shell_state.bottom_panel.visible == false
     end
 
     test "warning does not change filter when panel already open on Messages tab" do
@@ -95,14 +95,14 @@ defmodule Minga.Editor.WarningsBufferTest do
       # Open panel manually (no filter)
       send_keys_sync(ctx, "<SPC>tp")
       state = :sys.get_state(ctx.editor)
-      assert state.bottom_panel.visible == true
-      assert state.bottom_panel.filter == nil
+      assert state.shell_state.bottom_panel.visible == true
+      assert state.shell_state.bottom_panel.filter == nil
 
       Minga.Editor.log_to_warnings("test warning", ctx.editor)
       flush_warning_popup(ctx)
 
       state = :sys.get_state(ctx.editor)
-      assert state.bottom_panel.filter == nil
+      assert state.shell_state.bottom_panel.filter == nil
     end
   end
 

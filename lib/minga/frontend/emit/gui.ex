@@ -1,4 +1,4 @@
-defmodule Minga.Editor.RenderPipeline.Emit.GUI do
+defmodule Minga.Frontend.Emit.GUI do
   @moduledoc """
   GUI-specific emit logic for the Emit stage.
 
@@ -167,7 +167,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
   # ── Tab bar ──
 
   @spec build_gui_tab_bar_cmd(state()) :: binary() | nil
-  defp build_gui_tab_bar_cmd(%{tab_bar: %TabBar{} = tb} = state) do
+  defp build_gui_tab_bar_cmd(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
     active_buf = active_window_buffer(state)
     fp = :erlang.phash2({tb, active_buf})
 
@@ -177,10 +177,10 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
     end
   end
 
-  defp build_gui_tab_bar_cmd(%{tab_bar: nil}), do: nil
+  defp build_gui_tab_bar_cmd(%{shell_state: %{tab_bar: nil}}), do: nil
 
   @spec build_gui_agent_groups_cmd(state()) :: binary() | nil
-  defp build_gui_agent_groups_cmd(%{tab_bar: %TabBar{} = tb}) do
+  defp build_gui_agent_groups_cmd(%{shell_state: %{tab_bar: %TabBar{} = tb}}) do
     # Only send workspace bar when agent workspaces exist (tier >= 1).
     # Also include workspace count so the GUI hides the indicator when
     # all agent workspaces are removed.
@@ -234,7 +234,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
   # ── Git status panel ──
 
   @spec build_gui_git_status_cmd(state()) :: binary() | nil
-  defp build_gui_git_status_cmd(%{git_status_panel: %{} = data}) do
+  defp build_gui_git_status_cmd(%{shell_state: %{git_status_panel: %{} = data}}) do
     fp = :erlang.phash2(data)
 
     if fp != Process.get(:last_gui_git_status_fp) do
@@ -260,7 +260,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
   # ── Which-key ──
 
   @spec build_gui_which_key_cmd(state()) :: binary() | nil
-  defp build_gui_which_key_cmd(%{whichkey: wk}) do
+  defp build_gui_which_key_cmd(%{shell_state: %{whichkey: wk}}) do
     fp = :erlang.phash2(wk)
 
     if fp != Process.get(:last_gui_which_key_fp) do
@@ -378,7 +378,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
   # ── Picker ──
 
   @spec build_gui_picker_cmd(state()) :: binary() | nil
-  defp build_gui_picker_cmd(%{picker_ui: %{picker: nil}}) do
+  defp build_gui_picker_cmd(%{shell_state: %{picker_ui: %{picker: nil}}}) do
     if Process.get(:last_gui_picker_fp) != :closed do
       Process.put(:last_gui_picker_fp, :closed)
       picker_cmd = ProtocolGUI.encode_gui_picker(nil)
@@ -388,7 +388,8 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
   end
 
   defp build_gui_picker_cmd(
-         %{picker_ui: %{picker: picker, source: source, action_menu: action_menu}} = state
+         %{shell_state: %{picker_ui: %{picker: picker, source: source, action_menu: action_menu}}} =
+           state
        ) do
     # Preview content is NOT in the fingerprint: a file changing on disk while
     # the picker is open won't refresh the preview. Acceptable trade-off for
@@ -410,7 +411,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
   # Build preview content for the currently selected picker item.
   # Returns a list of lines, where each line is a list of {text, fg_color, bold} segments.
   @spec build_picker_preview(state()) :: [[ProtocolGUI.preview_segment()]] | nil
-  defp build_picker_preview(%{picker_ui: %{picker: picker}} = state) do
+  defp build_picker_preview(%{shell_state: %{picker_ui: %{picker: picker}}} = state) do
     case Picker.selected_item(picker) do
       nil ->
         nil
@@ -551,7 +552,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
   defp build_gui_agent_chat_cmd(state) do
     active_window = Map.get(state.workspace.windows.map, state.workspace.windows.active)
     is_agent_chat = active_window != nil && Content.agent_chat?(active_window.content)
-    session = state.agent.session
+    session = state.shell_state.agent.session
 
     # Compute fingerprint from cheap state fields to avoid calling
     # AgentSession.messages (expensive GenServer.call that allocates a
@@ -570,8 +571,8 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
         text = safe_prompt_content(panel.prompt_buffer)
 
         {:erlang.phash2(
-           {:visible, state.agent.status, state.agent.pending_approval, styled_len,
-            panel.model_name, text, panel.message_version, view.help_visible}
+           {:visible, state.shell_state.agent.status, state.shell_state.agent.pending_approval,
+            styled_len, panel.model_name, text, panel.message_version, view.help_visible}
          ), text}
       else
         {:not_visible, ""}
@@ -605,7 +606,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
   defp build_agent_chat_data(state, prompt_text) do
     active_window = Map.get(state.workspace.windows.map, state.workspace.windows.active)
     is_agent_chat = active_window != nil && Content.agent_chat?(active_window.content)
-    session = state.agent.session
+    session = state.shell_state.agent.session
 
     if is_agent_chat && session do
       messages_with_ids =
@@ -633,10 +634,10 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
       %{
         visible: true,
         messages: gui_messages,
-        status: state.agent.status || :idle,
+        status: state.shell_state.agent.status || :idle,
         model: state.workspace.agent_ui.panel.model_name,
         prompt: prompt_text,
-        pending_approval: state.agent.pending_approval,
+        pending_approval: state.shell_state.agent.pending_approval,
         help_visible: help_visible,
         help_groups: help_groups
       }
@@ -903,7 +904,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
   # ── Hover popup ──
 
   @spec build_gui_hover_popup_cmd(state()) :: binary() | nil
-  defp build_gui_hover_popup_cmd(%{hover_popup: popup}) do
+  defp build_gui_hover_popup_cmd(%{shell_state: %{hover_popup: popup}}) do
     fp = :erlang.phash2(popup)
 
     if fp != Process.get(:last_gui_hover_popup_fp) do
@@ -915,7 +916,7 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
   # ── Signature help ──
 
   @spec build_gui_signature_help_cmd(state()) :: binary() | nil
-  defp build_gui_signature_help_cmd(%{signature_help: sh}) do
+  defp build_gui_signature_help_cmd(%{shell_state: %{signature_help: sh}}) do
     fp = :erlang.phash2(sh)
 
     if fp != Process.get(:last_gui_signature_help_fp) do
@@ -1037,7 +1038,9 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUI do
   # entries have arrived. We still fingerprint to skip encoding when the
   # panel hasn't changed.
   @spec build_gui_bottom_panel_cmd(state()) :: {binary() | nil, state()}
-  defp build_gui_bottom_panel_cmd(%{bottom_panel: panel, message_store: store} = state) do
+  defp build_gui_bottom_panel_cmd(
+         %{shell_state: %{bottom_panel: panel}, message_store: store} = state
+       ) do
     fp = :erlang.phash2({panel, store})
 
     if fp != Process.get(:last_gui_bottom_panel_fp) do

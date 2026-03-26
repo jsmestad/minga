@@ -32,8 +32,11 @@ defmodule Minga.Tool.UninstallPickerSource do
   @spec on_select(Item.t(), term()) :: term()
   def on_select(%Item{id: name}, state) do
     case ToolManager.uninstall(name) do
-      :ok -> %{state | status_msg: "Uninstalled #{name}"}
-      {:error, reason} -> %{state | status_msg: "Failed to uninstall #{name}: #{reason}"}
+      :ok ->
+        Minga.Editor.State.set_status(state, "Uninstalled #{name}")
+
+      {:error, reason} ->
+        Minga.Editor.State.set_status(state, "Failed to uninstall #{name}: #{reason}")
     end
   end
 

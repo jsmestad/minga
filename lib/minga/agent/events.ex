@@ -254,14 +254,14 @@ defmodule Minga.Agent.Events do
   # Syncs the agent_status field on the current agent tab so the tab bar
   # can render status indicators without querying the Session process.
   @spec sync_tab_agent_status(EditorState.t(), Tab.agent_status()) :: EditorState.t()
-  defp sync_tab_agent_status(%{tab_bar: nil} = state, _status), do: state
+  defp sync_tab_agent_status(%{shell_state: %{tab_bar: nil}} = state, _status), do: state
 
   defp sync_tab_agent_status(state, status) do
     session = AgentAccess.session(state)
 
-    case session && TabBar.find_by_session(state.tab_bar, session) do
+    case session && TabBar.find_by_session(EditorState.tab_bar(state), session) do
       %Tab{id: id} ->
-        tb = TabBar.update_tab(state.tab_bar, id, &Tab.set_agent_status(&1, status))
+        tb = TabBar.update_tab(EditorState.tab_bar(state), id, &Tab.set_agent_status(&1, status))
         # Also sync workspace agent status
         tb =
           case TabBar.find_group_by_session(tb, session) do
@@ -272,7 +272,7 @@ defmodule Minga.Agent.Events do
               tb
           end
 
-        %{state | tab_bar: tb}
+        EditorState.set_tab_bar(state, tb)
 
       _ ->
         state
@@ -283,16 +283,17 @@ defmodule Minga.Agent.Events do
   # modifies the file. Finds the file tab by label match, then moves
   # it to the agent session's workspace group.
   @spec associate_file_with_agent_workspace(EditorState.t(), String.t()) :: EditorState.t()
-  defp associate_file_with_agent_workspace(%{tab_bar: nil} = state, _path), do: state
+  defp associate_file_with_agent_workspace(%{shell_state: %{tab_bar: nil}} = state, _path),
+    do: state
 
   defp associate_file_with_agent_workspace(state, path) do
     session = AgentAccess.session(state)
-    tb = state.tab_bar
+    tb = EditorState.tab_bar(state)
 
     with pid when is_pid(pid) <- session,
          %AgentGroup{id: ws_id} <- TabBar.find_group_by_session(tb, pid),
          %Tab{id: tab_id} <- find_unassociated_file_tab(tb, path, ws_id) do
-      %{state | tab_bar: TabBar.move_tab_to_group(tb, tab_id, ws_id)}
+      EditorState.set_tab_bar(state, TabBar.move_tab_to_group(tb, tab_id, ws_id))
     else
       _ -> state
     end
@@ -301,22 +302,29 @@ defmodule Minga.Agent.Events do
   # Auto-names the agent workspace from the prompt text (first line, 30 chars).
   # Skips if the workspace has a custom name set by the user.
   @spec maybe_auto_name_workspace(EditorState.t(), String.t()) :: EditorState.t()
-  defp maybe_auto_name_workspace(%{tab_bar: nil} = state, _), do: state
+  defp maybe_auto_name_workspace(%{shell_state: %{tab_bar: nil}} = state, _), do: state
 
   defp maybe_auto_name_workspace(state, prompt) do
     session = AgentAccess.session(state)
+    tb = EditorState.tab_bar(state)
 
     with pid when is_pid(pid) <- session,
-         %AgentGroup{} = ws <- TabBar.find_group_by_session(state.tab_bar, pid) do
-      updated_ws = AgentGroup.auto_name(ws, prompt)
-
-      if updated_ws.label != ws.label do
-        %{state | tab_bar: TabBar.update_group(state.tab_bar, ws.id, fn _ -> updated_ws end)}
-      else
-        state
-      end
+         %AgentGroup{} = ws <- TabBar.find_group_by_session(tb, pid) do
+      maybe_apply_auto_name(state, ws, prompt)
     else
       _ -> state
+    end
+  end
+
+  @spec maybe_apply_auto_name(EditorState.t(), AgentGroup.t(), String.t()) :: EditorState.t()
+  defp maybe_apply_auto_name(state, ws, prompt) do
+    updated_ws = AgentGroup.auto_name(ws, prompt)
+
+    if updated_ws.label != ws.label do
+      tb = EditorState.tab_bar(state)
+      EditorState.set_tab_bar(state, TabBar.update_group(tb, ws.id, fn _ -> updated_ws end))
+    else
+      state
     end
   end
 

@@ -29,13 +29,13 @@ defmodule Minga.Editor.RenderPipeline do
   """
 
   alias Minga.Editor.Layout
-  alias Minga.Editor.RenderPipeline.Chrome
+
   alias Minga.Editor.RenderPipeline.Compose
   alias Minga.Editor.RenderPipeline.Content
-  alias Minga.Editor.RenderPipeline.Emit
   alias Minga.Editor.RenderPipeline.Scroll
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.WindowTree
+  alias Minga.Frontend.Emit
   alias Minga.Telemetry
 
   # ── Invalidation stub ──────────────────────────────────────────────────────
@@ -130,12 +130,21 @@ defmodule Minga.Editor.RenderPipeline do
     # Stage 5: Chrome
     chrome =
       Telemetry.span([:minga, :render, :stage], %{stage: :chrome}, fn ->
-        Chrome.build_chrome(state, layout, scrolls, cursor_info)
+        state.shell.build_chrome(state, layout, scrolls, cursor_info)
       end)
 
     # Cache click regions on state for mouse hit-testing
-    state = %{state | modeline_click_regions: chrome.modeline_click_regions}
-    state = %{state | tab_bar_click_regions: chrome.tab_bar_click_regions}
+    state =
+      EditorState.update_shell_state(
+        state,
+        &%{&1 | modeline_click_regions: chrome.modeline_click_regions}
+      )
+
+    state =
+      EditorState.update_shell_state(
+        state,
+        &%{&1 | tab_bar_click_regions: chrome.tab_bar_click_regions}
+      )
 
     # Stage 6: Compose
     frame =

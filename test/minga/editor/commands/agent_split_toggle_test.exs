@@ -73,8 +73,7 @@ defmodule Minga.Editor.Commands.AgentSplitToggleTest do
         }
       },
       focus_stack: Input.default_stack(),
-      agent: agent,
-      tab_bar: tb
+      shell_state: %Minga.Shell.Traditional.State{agent: agent, tab_bar: tb}
     }
 
     if active do
@@ -100,7 +99,7 @@ defmodule Minga.Editor.Commands.AgentSplitToggleTest do
           | view: %{agentic.view | active: true, focus: :chat}
         })
 
-      state = %{state | tab_bar: tb}
+      state = Minga.Editor.State.set_tab_bar(state, tb)
 
       EditorState.switch_tab(state, at.id)
     else
@@ -120,7 +119,7 @@ defmodule Minga.Editor.Commands.AgentSplitToggleTest do
       {tb, at} = TabBar.add(tb, :agent, "Agent")
       tb = TabBar.update_context(tb, at.id, agent_ctx)
       tb = TabBar.switch_to(tb, file_tab.id)
-      %{state | tab_bar: tb}
+      Minga.Editor.State.set_tab_bar(state, tb)
     end
   end
 
@@ -163,12 +162,12 @@ defmodule Minga.Editor.Commands.AgentSplitToggleTest do
 
     test "agent tab exists after toggle" do
       state = base_state()
-      agent_tab_before = TabBar.find_by_kind(state.tab_bar, :agent)
+      agent_tab_before = TabBar.find_by_kind(Minga.Editor.State.tab_bar(state), :agent)
       assert agent_tab_before != nil
 
       new_state = AgentCommands.toggle_agentic_view(state)
 
-      agent_tab_after = TabBar.find_by_kind(new_state.tab_bar, :agent)
+      agent_tab_after = TabBar.find_by_kind(new_state.shell_state.tab_bar, :agent)
       assert agent_tab_after != nil
       assert agent_tab_after.id == agent_tab_before.id
     end
@@ -214,10 +213,10 @@ defmodule Minga.Editor.Commands.AgentSplitToggleTest do
 
     test "removes agent tab from tab bar" do
       state = base_state(active: true)
-      assert length(TabBar.filter_by_kind(state.tab_bar, :agent)) == 1
+      assert length(TabBar.filter_by_kind(Minga.Editor.State.tab_bar(state), :agent)) == 1
 
       new_state = BufferManagement.execute(state, :kill_buffer)
-      assert TabBar.filter_by_kind(new_state.tab_bar, :agent) == []
+      assert TabBar.filter_by_kind(new_state.shell_state.tab_bar, :agent) == []
     end
   end
 
@@ -236,16 +235,16 @@ defmodule Minga.Editor.Commands.AgentSplitToggleTest do
 
     test "agent tab persists through toggle cycles" do
       state = base_state()
-      agent_tab_id = TabBar.find_by_kind(state.tab_bar, :agent).id
+      agent_tab_id = TabBar.find_by_kind(Minga.Editor.State.tab_bar(state), :agent).id
 
       first = AgentCommands.toggle_agentic_view(state)
-      assert TabBar.get(first.tab_bar, agent_tab_id) != nil
+      assert TabBar.get(first.shell_state.tab_bar, agent_tab_id) != nil
 
       second = AgentCommands.toggle_agentic_view(first)
-      assert TabBar.get(second.tab_bar, agent_tab_id) != nil
+      assert TabBar.get(second.shell_state.tab_bar, agent_tab_id) != nil
 
       third = AgentCommands.toggle_agentic_view(second)
-      assert TabBar.get(third.tab_bar, agent_tab_id) != nil
+      assert TabBar.get(third.shell_state.tab_bar, agent_tab_id) != nil
     end
   end
 end

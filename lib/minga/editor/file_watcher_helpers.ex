@@ -67,17 +67,14 @@ defmodule Minga.Editor.FileWatcherHelpers do
   defp handle_change(state, buf, path, %{dirty: false}, _mtime, _size) do
     BufferServer.reload(buf)
     name = Path.basename(path)
-    %{state | status_msg: "#{name} reloaded (changed on disk)"}
+    EditorState.set_status(state, "#{name} reloaded (changed on disk)")
   end
 
   defp handle_change(state, buf, path, _buf_state, _mtime, _size) do
     name = Path.basename(path)
 
-    %{
-      state
-      | workspace: %{state.workspace | pending_conflict: {buf, path}},
-        status_msg: "#{name} changed on disk. [r]eload / [k]eep"
-    }
+    state = %{state | workspace: %{state.workspace | pending_conflict: {buf, path}}}
+    EditorState.set_status(state, "#{name} changed on disk. [r]eload / [k]eep")
   end
 
   @spec find_buffer_for_path(state(), String.t()) :: pid() | nil

@@ -17,7 +17,7 @@ defmodule Minga.Input.DashboardTest do
         buffers: %Buffers{active: nil}
       },
       focus_stack: Minga.Input.default_stack(),
-      dashboard: dash
+      shell_state: %Minga.Shell.Traditional.State{dashboard: dash}
     }
   end
 
@@ -28,34 +28,38 @@ defmodule Minga.Input.DashboardTest do
   describe "handle_key/3 when dashboard is active" do
     test "j moves cursor down" do
       state = state_with_dashboard()
-      assert state.dashboard.cursor == 0
+      assert state.shell_state.dashboard.cursor == 0
 
       {:handled, new_state} = DashInput.handle_key(state, ?j, 0)
-      assert new_state.dashboard.cursor == 1
+      assert new_state.shell_state.dashboard.cursor == 1
     end
 
     test "k moves cursor up (wraps)" do
       state = state_with_dashboard()
-      assert state.dashboard.cursor == 0
+      assert state.shell_state.dashboard.cursor == 0
 
       {:handled, new_state} = DashInput.handle_key(state, ?k, 0)
-      assert new_state.dashboard.cursor == length(state.dashboard.items) - 1
+
+      assert new_state.shell_state.dashboard.cursor ==
+               length(state.shell_state.dashboard.items) - 1
     end
 
     test "arrow down moves cursor down" do
       state = state_with_dashboard()
-      assert state.dashboard.cursor == 0
+      assert state.shell_state.dashboard.cursor == 0
 
       {:handled, new_state} = DashInput.handle_key(state, @arrow_down, 0)
-      assert new_state.dashboard.cursor == 1
+      assert new_state.shell_state.dashboard.cursor == 1
     end
 
     test "arrow up moves cursor up (wraps)" do
       state = state_with_dashboard()
-      assert state.dashboard.cursor == 0
+      assert state.shell_state.dashboard.cursor == 0
 
       {:handled, new_state} = DashInput.handle_key(state, @arrow_up, 0)
-      assert new_state.dashboard.cursor == length(state.dashboard.items) - 1
+
+      assert new_state.shell_state.dashboard.cursor ==
+               length(state.shell_state.dashboard.items) - 1
     end
 
     test "space selects the current item and clears dashboard" do
@@ -65,7 +69,7 @@ defmodule Minga.Input.DashboardTest do
       # still be cleared. Catch the error and verify the intent.
       result = DashInput.handle_key(state, 32, 0)
       assert {:handled, new_state} = result
-      assert new_state.dashboard == nil
+      assert new_state.shell_state.dashboard == nil
     end
 
     test "other keys pass through" do
@@ -99,7 +103,7 @@ defmodule Minga.Input.DashboardTest do
           buffers: %Buffers{active: nil}
         },
         focus_stack: Minga.Input.default_stack(),
-        dashboard: nil
+        shell_state: %Minga.Shell.Traditional.State{dashboard: nil}
       }
 
       {:passthrough, _} = DashInput.handle_key(state, ?j, 0)

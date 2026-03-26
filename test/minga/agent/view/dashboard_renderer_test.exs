@@ -56,7 +56,7 @@ defmodule Minga.Agent.View.DashboardRendererTest do
         highlight: %Highlighting{}
       },
       focus_stack: Input.default_stack(),
-      agent: agent,
+      shell_state: %Minga.Shell.Traditional.State{agent: agent},
       theme: Theme.get!(:doom_one)
     }
   end

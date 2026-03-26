@@ -6,6 +6,10 @@ defmodule Minga.Editor.Startup do
   Extracted to keep the GenServer module focused on message handling.
   """
 
+  # ShellState defaults include MapSet.new() which dialyzer flags as opaque
+  # when flowing through bare-map pattern matches in accessor functions.
+  @dialyzer {:no_opaque, build_initial_state: 1}
+
   alias Minga.Agent.BufferSync, as: AgentBufferSync
   alias Minga.Agent.UIState
   alias Minga.Buffer.Server, as: BufferServer
@@ -105,13 +109,16 @@ defmodule Minga.Editor.Startup do
       workspace: workspace,
       port_manager: port_manager,
       focus_stack: Minga.Input.default_stack(),
-      dashboard: dashboard,
+      shell: Minga.Shell.Traditional,
+      shell_state: %Minga.Shell.Traditional.State{
+        dashboard: dashboard,
+        suppress_tool_prompts: Keyword.get(opts, :suppress_tool_prompts, false)
+      },
       swap_dir: Keyword.get(opts, :swap_dir),
-      session_dir: Keyword.get(opts, :session_dir),
-      suppress_tool_prompts: Keyword.get(opts, :suppress_tool_prompts, false)
+      session_dir: Keyword.get(opts, :session_dir)
     }
 
-    state = %{state | tab_bar: initial_tab_bar(active_buf, keymap_scope)}
+    state = EditorState.set_tab_bar(state, initial_tab_bar(active_buf, keymap_scope))
 
     # Store the agent buffer reference if one was created.
     state =
@@ -127,8 +134,9 @@ defmodule Minga.Editor.Startup do
     # Without this, the first tab starts with an empty context, and
     # restore_tab_context falls back to file defaults (wrong for agent tabs).
     context = EditorState.snapshot_tab_context(state)
-    tb = TabBar.update_context(state.tab_bar, state.tab_bar.active_id, context)
-    %{state | tab_bar: tb}
+    current_tb = EditorState.tab_bar(state)
+    tb = TabBar.update_context(current_tb, current_tb.active_id, context)
+    EditorState.set_tab_bar(state, tb)
   end
 
   @doc """
@@ -291,7 +299,7 @@ defmodule Minga.Editor.Startup do
     try do
       case ConfigLoader.load_error() do
         nil -> state
-        error -> %{state | status_msg: error}
+        error -> EditorState.set_status(state, error)
       end
     catch
       :exit, _ -> state

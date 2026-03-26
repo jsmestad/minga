@@ -42,16 +42,16 @@ defmodule Minga.Editor.Commands.BufferManagement do
       :ok ->
         name = Helpers.buffer_display_name(buf)
 
-        %{state | status_msg: "Wrote #{name}"}
+        EditorState.set_status(state, "Wrote #{name}")
 
       {:error, :file_changed} ->
-        %{state | status_msg: "WARNING: File changed on disk. Use :w! to force save."}
+        EditorState.set_status(state, "WARNING: File changed on disk. Use :w! to force save.")
 
       {:error, :no_file_path} ->
-        %{state | status_msg: "No file name — use :w <filename>"}
+        EditorState.set_status(state, "No file name — use :w <filename>")
 
       {:error, reason} ->
-        %{state | status_msg: "Save failed: #{inspect(reason)}"}
+        EditorState.set_status(state, "Save failed: #{inspect(reason)}")
     end
   end
 
@@ -59,13 +59,13 @@ defmodule Minga.Editor.Commands.BufferManagement do
     case BufferServer.force_save(buf) do
       :ok ->
         name = Helpers.buffer_display_name(buf)
-        %{state | status_msg: "Wrote #{name} (force)"}
+        EditorState.set_status(state, "Wrote #{name} (force)")
 
       {:error, :no_file_path} ->
-        %{state | status_msg: "No file name — use :w <filename>"}
+        EditorState.set_status(state, "No file name — use :w <filename>")
 
       {:error, reason} ->
-        %{state | status_msg: "Force save failed: #{inspect(reason)}"}
+        EditorState.set_status(state, "Force save failed: #{inspect(reason)}")
     end
   end
 
@@ -73,13 +73,13 @@ defmodule Minga.Editor.Commands.BufferManagement do
     case BufferServer.reload(buf) do
       :ok ->
         name = Helpers.buffer_display_name(buf)
-        %{state | status_msg: "Reloaded #{name}"}
+        EditorState.set_status(state, "Reloaded #{name}")
 
       {:error, :no_file_path} ->
-        %{state | status_msg: "No file to reload"}
+        EditorState.set_status(state, "No file to reload")
 
       {:error, reason} ->
-        %{state | status_msg: "Reload failed: #{inspect(reason)}"}
+        EditorState.set_status(state, "Reload failed: #{inspect(reason)}")
     end
   end
 
@@ -101,7 +101,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   end
 
   def execute(state, :confirm_quit_no) do
-    %{state | pending_quit: nil, status_msg: nil}
+    EditorState.clear_status(%{state | pending_quit: nil})
   end
 
   # ── Buffer navigation ─────────────────────────────────────────────────────
@@ -173,7 +173,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
     current = BufferServer.get_option(buf, :wrap)
     BufferServer.set_option(buf, :wrap, !current)
     label = if current, do: "nowrap", else: "wrap"
-    %{state | status_msg: "wrap #{label}"}
+    EditorState.set_status(state, "wrap #{label}")
   end
 
   # ── Ex commands ───────────────────────────────────────────────────────────
@@ -401,7 +401,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   def execute(state, {:execute_ex_command, {:set_filetype, [name]}}) do
     case resolve_filetype(name) do
       {:ok, filetype} -> apply_filetype_change(state, filetype)
-      {:error, message} -> %{state | status_msg: message}
+      {:error, message} -> EditorState.set_status(state, message)
     end
   end
 
@@ -487,12 +487,12 @@ defmodule Minga.Editor.Commands.BufferManagement do
       try do
         BufferServer.set_filetype(buf, filetype)
         send(self(), :setup_highlight)
-        %{state | status_msg: "Language: #{filetype}"}
+        EditorState.set_status(state, "Language: #{filetype}")
       catch
-        :exit, _ -> %{state | status_msg: "No active buffer"}
+        :exit, _ -> EditorState.set_status(state, "No active buffer")
       end
     else
-      %{state | status_msg: "No active buffer"}
+      EditorState.set_status(state, "No active buffer")
     end
   end
 
@@ -503,11 +503,11 @@ defmodule Minga.Editor.Commands.BufferManagement do
     case ConfigLoader.reload() do
       :ok ->
         Minga.Editor.log_to_messages("Config reloaded")
-        %{state | status_msg: "Config reloaded"}
+        EditorState.set_status(state, "Config reloaded")
 
       {:error, msg} ->
         Minga.Log.warning(:config, "Config reload error: #{msg}")
-        %{state | status_msg: "Config reload error: #{msg}"}
+        EditorState.set_status(state, "Config reload error: #{msg}")
     end
   end
 
@@ -520,10 +520,11 @@ defmodule Minga.Editor.Commands.BufferManagement do
     open_alternate(state, file_path, filetype)
   end
 
-  def alternate_file(state), do: %{state | status_msg: "No active buffer"}
+  def alternate_file(state), do: EditorState.set_status(state, "No active buffer")
 
   @spec open_alternate(state(), String.t() | nil, atom()) :: state()
-  defp open_alternate(state, nil, _filetype), do: %{state | status_msg: "Buffer has no file path"}
+  defp open_alternate(state, nil, _filetype),
+    do: EditorState.set_status(state, "Buffer has no file path")
 
   defp open_alternate(state, file_path, filetype) do
     project_root = Minga.Project.root() || Path.dirname(file_path)
@@ -531,7 +532,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
 
     case Enum.find(candidates, &File.exists?/1) do
       nil ->
-        %{state | status_msg: "No alternate file found for #{Path.basename(file_path)}"}
+        EditorState.set_status(state, "No alternate file found for #{Path.basename(file_path)}")
 
       alt_path ->
         execute(state, {:execute_ex_command, {:edit, alt_path}})
@@ -541,7 +542,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   # ── Tab goto ──────────────────────────────────────────────────────────────
 
   @spec tab_goto(state(), atom()) :: state()
-  def tab_goto(%{tab_bar: %TabBar{} = tb} = state, cmd) do
+  def tab_goto(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, cmd) do
     case parse_tab_goto(cmd) do
       {:ok, n} -> switch_tab_by_id_or_index(state, tb, n)
       :error -> state
@@ -580,7 +581,8 @@ defmodule Minga.Editor.Commands.BufferManagement do
 
   @spec switch_to_buffer(state(), non_neg_integer()) :: state()
   defp switch_to_buffer(
-         %{tab_bar: %TabBar{} = tb, workspace: %{buffers: %{list: buffers}}} = state,
+         %{shell_state: %{tab_bar: %TabBar{} = tb}, workspace: %{buffers: %{list: buffers}}} =
+           state,
          idx
        ) do
     target_buf = Enum.at(buffers, idx)
@@ -632,15 +634,15 @@ defmodule Minga.Editor.Commands.BufferManagement do
   # Cycles the buffer in the current tab. If the target buffer already
   # has its own file tab, switches to that tab instead.
   @spec cycle_buffer_in_tab(state(), non_neg_integer()) :: state()
-  defp cycle_buffer_in_tab(%{tab_bar: %TabBar{}} = state, idx) do
+  defp cycle_buffer_in_tab(%{shell_state: %{tab_bar: %TabBar{}}} = state, idx) do
     target_buf = Enum.at(state.workspace.buffers.list, idx)
 
-    case find_tab_for_buffer(state.tab_bar, target_buf) do
+    case find_tab_for_buffer(state.shell_state.tab_bar, target_buf) do
       nil ->
         # Buffer has no dedicated tab; switch in-place.
         EditorState.switch_buffer(state, idx)
 
-      tab_id when tab_id == state.tab_bar.active_id ->
+      tab_id when tab_id == state.shell_state.tab_bar.active_id ->
         # Buffer's tab is the current tab; switch in-place.
         EditorState.switch_buffer(state, idx)
 
@@ -655,7 +657,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   end
 
   @spec next_tab(state()) :: state()
-  defp next_tab(%{tab_bar: %TabBar{} = tb} = state) do
+  defp next_tab(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
     next_tb = TabBar.next(tb)
 
     if next_tb.active_id != tb.active_id do
@@ -668,7 +670,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   defp next_tab(state), do: state
 
   @spec prev_tab(state()) :: state()
-  defp prev_tab(%{tab_bar: %TabBar{} = tb} = state) do
+  defp prev_tab(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
     prev_tb = TabBar.prev(tb)
 
     if prev_tb.active_id != tb.active_id do
@@ -705,7 +707,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
         %{s | document: Document.new("")}
       end)
 
-      %{state | status_msg: "Buffer is persistent — content cleared"}
+      EditorState.set_status(state, "Buffer is persistent — content cleared")
     else
       buf_name =
         if buf do
@@ -768,7 +770,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   # Pure cleanup: stops the agent session, spinner, and group without
   # touching tabs or navigation. Callers handle tab removal separately.
   @spec cleanup_agent_session(state()) :: state()
-  defp cleanup_agent_session(%{tab_bar: %TabBar{}} = state) do
+  defp cleanup_agent_session(%{shell_state: %{tab_bar: %TabBar{}}} = state) do
     session = AgentAccess.session(state)
 
     # Stop and unsubscribe from the live session.
@@ -798,7 +800,11 @@ defmodule Minga.Editor.Commands.BufferManagement do
   clears the spinner, agent state, tab session/status, and agent group.
   """
   @spec handle_agent_session_down(state(), pid(), term()) :: state()
-  def handle_agent_session_down(%{tab_bar: %TabBar{}} = state, session_pid, reason) do
+  def handle_agent_session_down(
+        %{shell_state: %{tab_bar: %TabBar{}}} = state,
+        session_pid,
+        reason
+      ) do
     tab_status = if reason in [:normal, :shutdown], do: :idle, else: :error
     state = scrub_agent_tab_state(state, session_pid, tab_status)
 
@@ -807,7 +813,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
         do: "Agent session ended",
         else: "Agent session crashed (SPC a n to restart)"
 
-    %{state | status_msg: msg}
+    EditorState.set_status(state, msg)
   end
 
   # Shared state cleanup for agent sessions: stops spinner, clears
@@ -826,9 +832,9 @@ defmodule Minga.Editor.Commands.BufferManagement do
       end
 
     # Remove the agent's group from the tab bar.
-    case session && TabBar.find_group_by_session(state.tab_bar, session) do
+    case session && TabBar.find_group_by_session(state.shell_state.tab_bar, session) do
       %{id: group_id} ->
-        %{state | tab_bar: TabBar.remove_group(state.tab_bar, group_id)}
+        EditorState.set_tab_bar(state, TabBar.remove_group(state.shell_state.tab_bar, group_id))
 
       _ ->
         state
@@ -838,7 +844,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   # Clears session pid and sets agent_status on all tabs that reference
   # the given session pid.
   @spec clear_session_from_tabs(state(), pid(), Tab.agent_status()) :: state()
-  defp clear_session_from_tabs(%{tab_bar: tb} = state, session_pid, status) do
+  defp clear_session_from_tabs(%{shell_state: %{tab_bar: tb}} = state, session_pid, status) do
     updated_tb =
       Enum.reduce(tb.tabs, tb, fn tab, acc ->
         if tab.session == session_pid do
@@ -850,7 +856,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
         end
       end)
 
-    %{state | tab_bar: updated_tb}
+    EditorState.set_tab_bar(state, updated_tb)
   end
 
   # Closes the active agent tab: cleans up the session, removes the tab,
@@ -858,7 +864,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   # contexts (close_tab_or_quit's first clause); the last-tab case is
   # handled directly by close_tab_or_quit.
   @spec close_agent_tab(state()) :: state()
-  defp close_agent_tab(%{tab_bar: %TabBar{}} = state) do
+  defp close_agent_tab(%{shell_state: %{tab_bar: %TabBar{}}} = state) do
     state
     |> cleanup_agent_session()
     |> then(fn s -> put_in(s.workspace.keymap_scope, :editor) end)
@@ -881,7 +887,10 @@ defmodule Minga.Editor.Commands.BufferManagement do
   @spec maybe_confirm_quit(state(), :quit | :quit_all) :: state()
   defp maybe_confirm_quit(state, kind) do
     if confirm_quit_enabled?() and any_buffer_dirty?(state) do
-      %{state | pending_quit: kind, status_msg: "Modified buffers exist. Really quit? (y/n)"}
+      EditorState.set_status(
+        %{state | pending_quit: kind},
+        "Modified buffers exist. Really quit? (y/n)"
+      )
     else
       case kind do
         :quit -> close_tab_or_quit(state)
@@ -921,7 +930,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   end
 
   @spec close_tab_or_quit(state()) :: state()
-  defp close_tab_or_quit(%{tab_bar: %TabBar{tabs: [_, _ | _]}} = state) do
+  defp close_tab_or_quit(%{shell_state: %{tab_bar: %TabBar{tabs: [_, _ | _]}}} = state) do
     case EditorState.active_tab_kind(state) do
       :agent -> close_agent_tab(state)
       _ -> close_file_tab(state)
@@ -931,7 +940,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   # Last tab: replace with an empty buffer instead of quitting.
   # Matches VS Code/Zed behavior where closing the last tab leaves
   # an empty editor, not an exited process.
-  defp close_tab_or_quit(%{tab_bar: %TabBar{tabs: [only]}} = state) do
+  defp close_tab_or_quit(%{shell_state: %{tab_bar: %TabBar{tabs: [only]}}} = state) do
     # For agent tabs, clean up the session first (no tab navigation;
     # cleanup_agent_session is pure resource teardown).
     state = if only.kind == :agent, do: cleanup_agent_session(state), else: state
@@ -948,8 +957,8 @@ defmodule Minga.Editor.Commands.BufferManagement do
     state = EditorState.add_buffer(state, buf)
 
     # Now we have 2 tabs; remove the old one.
-    {:ok, tb} = TabBar.remove(state.tab_bar, only.id)
-    %{state | tab_bar: tb}
+    {:ok, tb} = TabBar.remove(state.shell_state.tab_bar, only.id)
+    EditorState.set_tab_bar(state, tb)
   end
 
   defp close_tab_or_quit(state), do: shutdown_editor(state)
@@ -985,7 +994,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   # stays in the buffer pool (matching Neovim's `:q` which closes the
   # window but leaves the buffer in the background buffer list).
   @spec close_file_tab(state()) :: state()
-  defp close_file_tab(%{tab_bar: %TabBar{}} = state) do
+  defp close_file_tab(%{shell_state: %{tab_bar: %TabBar{}}} = state) do
     active_tab = EditorState.active_tab(state)
     label = if active_tab, do: active_tab.label, else: "tab"
     Minga.Editor.log_to_messages("Closed: #{label}")
@@ -996,9 +1005,9 @@ defmodule Minga.Editor.Commands.BufferManagement do
   end
 
   @spec remove_current_tab(state()) :: state()
-  defp remove_current_tab(%{tab_bar: %TabBar{} = tb} = state) do
+  defp remove_current_tab(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
     case TabBar.remove(tb, tb.active_id) do
-      {:ok, new_tb} -> %{state | tab_bar: new_tb}
+      {:ok, new_tb} -> EditorState.set_tab_bar(state, new_tb)
       :last_tab -> state
     end
   end
@@ -1112,8 +1121,8 @@ defmodule Minga.Editor.Commands.BufferManagement do
         if EditorState.skip_tool_prompt?(state, recipe.name) do
           state
         else
-          queue = state.tool_prompt_queue ++ [recipe.name]
-          state = %{state | tool_prompt_queue: queue}
+          queue = state.shell_state.tool_prompt_queue ++ [recipe.name]
+          state = EditorState.update_shell_state(state, &%{&1 | tool_prompt_queue: queue})
           show_tool_prompt_if_normal(state)
         end
     end
@@ -1121,10 +1130,11 @@ defmodule Minga.Editor.Commands.BufferManagement do
 
   @spec show_tool_prompt_if_normal(state()) :: state()
   defp show_tool_prompt_if_normal(
-         %{workspace: %{vim: %{mode: :normal}}, tool_prompt_queue: pending} = state
+         %{workspace: %{vim: %{mode: :normal}}, shell_state: %{tool_prompt_queue: pending}} =
+           state
        )
        when pending != [] do
-    ms = %ToolConfirmState{pending: pending, declined: state.tool_declined}
+    ms = %ToolConfirmState{pending: pending, declined: state.shell_state.tool_declined}
     EditorState.transition_mode(state, :tool_confirm, ms)
   end
 

@@ -137,15 +137,15 @@ defmodule Minga.Integration.LspWiringTest do
 
       # Wait for the response to be processed and render to complete
       state =
-        wait_until(ctx, fn s -> s.hover_popup != nil end,
+        wait_until(ctx, fn s -> s.shell_state.hover_popup != nil end,
           max_attempts: 10,
           interval_ms: 10,
           message: "hover popup should be created from {:hover_mouse, ...} response"
         )
 
-      assert state.hover_popup != nil
-      assert state.hover_popup.anchor_row == 5
-      assert state.hover_popup.anchor_col == 20
+      assert state.shell_state.hover_popup != nil
+      assert state.shell_state.hover_popup.anchor_row == 5
+      assert state.shell_state.hover_popup.anchor_col == 20
     end
   end
 

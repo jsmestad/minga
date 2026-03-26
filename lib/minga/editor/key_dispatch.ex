@@ -119,7 +119,7 @@ defmodule Minga.Editor.KeyDispatch do
       case Commands.execute(s, cmd) do
         {s2, {:dot_repeat, count}} -> ChangeTracking.replay_last_change(s2, count)
         {s2, {:replay_macro, register}} -> MacroReplay.replay(s2, register)
-        {s2, {:whichkey_update, wk}} -> %{s2 | whichkey: wk}
+        {s2, {:whichkey_update, wk}} -> EditorState.set_whichkey(s2, wk)
         s2 -> s2
       end
     end
@@ -174,7 +174,7 @@ defmodule Minga.Editor.KeyDispatch do
   defp guard_read_only(mode, commands, mode_state, state)
        when mode in [:insert, :replace] do
     if active_buffer_read_only?(state) do
-      {:normal, [], Mode.initial_state(), %{state | status_msg: @read_only_msg}}
+      {:normal, [], Mode.initial_state(), EditorState.set_status(state, @read_only_msg)}
     else
       {mode, commands, mode_state, state}
     end
@@ -182,7 +182,7 @@ defmodule Minga.Editor.KeyDispatch do
 
   defp guard_read_only(:operator_pending, commands, mode_state, state) do
     if mutating_operator?(mode_state) and active_buffer_read_only?(state) do
-      {:normal, [], Mode.initial_state(), %{state | status_msg: @read_only_msg}}
+      {:normal, [], Mode.initial_state(), EditorState.set_status(state, @read_only_msg)}
     else
       {:operator_pending, commands, mode_state, state}
     end

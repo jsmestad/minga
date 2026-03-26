@@ -1,4 +1,4 @@
-defmodule Minga.Editor.RenderPipeline.Emit.GUITest do
+defmodule Minga.Frontend.Emit.GUITest do
   @moduledoc """
   Tests for the GUI-specific Emit stage logic: frame filtering and
   integration with the emit dispatcher.
@@ -8,8 +8,8 @@ defmodule Minga.Editor.RenderPipeline.Emit.GUITest do
 
   alias Minga.Editor.DisplayList
   alias Minga.Editor.DisplayList.{Cursor, Frame, Overlay, WindowFrame}
-  alias Minga.Editor.RenderPipeline.Emit
-  alias Minga.Editor.RenderPipeline.Emit.GUI, as: EmitGUI
+  alias Minga.Frontend.Emit
+  alias Minga.Frontend.Emit.GUI, as: EmitGUI
 
   import Minga.Editor.RenderPipeline.TestHelpers
 

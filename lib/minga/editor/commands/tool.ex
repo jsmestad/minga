@@ -61,33 +61,33 @@ defmodule Minga.Editor.Commands.Tool do
     name = String.to_existing_atom(name_str)
 
     case ToolManager.install(name) do
-      :ok -> %{state | status_msg: "Installing #{name_str}..."}
-      {:error, reason} -> %{state | status_msg: "Cannot install #{name_str}: #{reason}"}
+      :ok -> EditorState.set_status(state, "Installing #{name_str}...")
+      {:error, reason} -> EditorState.set_status(state, "Cannot install #{name_str}: #{reason}")
     end
   rescue
-    ArgumentError -> %{state | status_msg: "Unknown tool: #{name_str}"}
+    ArgumentError -> EditorState.set_status(state, "Unknown tool: #{name_str}")
   end
 
   def execute_named(state, :uninstall, name_str) do
     name = String.to_existing_atom(name_str)
 
     case ToolManager.uninstall(name) do
-      :ok -> %{state | status_msg: "Uninstalled #{name_str}"}
-      {:error, reason} -> %{state | status_msg: "Cannot uninstall #{name_str}: #{reason}"}
+      :ok -> EditorState.set_status(state, "Uninstalled #{name_str}")
+      {:error, reason} -> EditorState.set_status(state, "Cannot uninstall #{name_str}: #{reason}")
     end
   rescue
-    ArgumentError -> %{state | status_msg: "Unknown tool: #{name_str}"}
+    ArgumentError -> EditorState.set_status(state, "Unknown tool: #{name_str}")
   end
 
   def execute_named(state, :update, name_str) do
     name = String.to_existing_atom(name_str)
 
     case ToolManager.update(name) do
-      :ok -> %{state | status_msg: "Updating #{name_str}..."}
-      {:error, reason} -> %{state | status_msg: "Cannot update #{name_str}: #{reason}"}
+      :ok -> EditorState.set_status(state, "Updating #{name_str}...")
+      {:error, reason} -> EditorState.set_status(state, "Cannot update #{name_str}: #{reason}")
     end
   rescue
-    ArgumentError -> %{state | status_msg: "Unknown tool: #{name_str}"}
+    ArgumentError -> EditorState.set_status(state, "Unknown tool: #{name_str}")
   end
 
   @doc "Executes a tool management command."
@@ -98,7 +98,7 @@ defmodule Minga.Editor.Commands.Tool do
 
   def execute(state, :tool_uninstall) do
     if ToolManager.all_installed() == [] do
-      %{state | status_msg: "No tools installed"}
+      EditorState.set_status(state, "No tools installed")
     else
       PickerUI.open(state, UninstallPickerSource)
     end
@@ -106,7 +106,7 @@ defmodule Minga.Editor.Commands.Tool do
 
   def execute(state, :tool_update) do
     if ToolManager.all_installed() == [] do
-      %{state | status_msg: "No tools installed"}
+      EditorState.set_status(state, "No tools installed")
     else
       PickerUI.open(state, UpdatePickerSource)
     end
@@ -116,7 +116,7 @@ defmodule Minga.Editor.Commands.Tool do
     installed = ToolManager.all_installed()
 
     if installed == [] do
-      %{state | status_msg: "No tools installed"}
+      EditorState.set_status(state, "No tools installed")
     else
       lines =
         installed
@@ -126,7 +126,7 @@ defmodule Minga.Editor.Commands.Tool do
         end)
 
       msg = "Installed tools:\n#{Enum.join(lines, "\n")}"
-      %{state | status_msg: msg}
+      EditorState.set_status(state, msg)
     end
   end
 

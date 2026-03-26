@@ -86,7 +86,9 @@ defmodule Minga.Editor.Commands do
   # ── Leader / which-key (return action tuples) ─────────────────────────────
 
   def execute(state, {:leader_start, node}) do
-    if state.whichkey.timer, do: WhichKey.cancel_timeout(state.whichkey.timer)
+    if EditorState.whichkey(state).timer,
+      do: WhichKey.cancel_timeout(EditorState.whichkey(state).timer)
+
     timer = WhichKey.start_timeout()
     prefix_keys = leader_keys_from_mode(state)
 
@@ -101,7 +103,9 @@ defmodule Minga.Editor.Commands do
   end
 
   def execute(state, {:leader_progress, node}) do
-    if state.whichkey.timer, do: WhichKey.cancel_timeout(state.whichkey.timer)
+    if EditorState.whichkey(state).timer,
+      do: WhichKey.cancel_timeout(EditorState.whichkey(state).timer)
+
     timer = WhichKey.start_timeout()
     prefix_keys = leader_keys_from_mode(state)
 
@@ -110,7 +114,7 @@ defmodule Minga.Editor.Commands do
     whichkey = %EditorState.WhichKey{
       node: effective_node,
       timer: timer,
-      show: state.whichkey.show,
+      show: EditorState.whichkey(state).show,
       prefix_keys: prefix_keys
     }
 
@@ -118,7 +122,8 @@ defmodule Minga.Editor.Commands do
   end
 
   def execute(state, :leader_cancel) do
-    if state.whichkey.timer, do: WhichKey.cancel_timeout(state.whichkey.timer)
+    if EditorState.whichkey(state).timer,
+      do: WhichKey.cancel_timeout(EditorState.whichkey(state).timer)
 
     whichkey = %EditorState.WhichKey{
       node: nil,
@@ -132,12 +137,12 @@ defmodule Minga.Editor.Commands do
   end
 
   def execute(state, :whichkey_next_page) do
-    whichkey = %{state.whichkey | page: state.whichkey.page + 1}
+    whichkey = %{EditorState.whichkey(state) | page: EditorState.whichkey(state).page + 1}
     {state, {:whichkey_update, whichkey}}
   end
 
   def execute(state, :whichkey_prev_page) do
-    whichkey = %{state.whichkey | page: max(state.whichkey.page - 1, 0)}
+    whichkey = %{EditorState.whichkey(state) | page: max(EditorState.whichkey(state).page - 1, 0)}
     {state, {:whichkey_update, whichkey}}
   end
 
@@ -166,22 +171,27 @@ defmodule Minga.Editor.Commands do
   def execute(state, {:tool_confirm_accept, name}) do
     case Minga.Tool.Manager.install(name) do
       :ok ->
-        state = %{state | status_msg: "Installing #{name}..."}
+        state = EditorState.set_status(state, "Installing #{name}...")
         drain_tool_prompt_queue(state)
 
       {:error, reason} ->
-        %{state | status_msg: "Cannot install #{name}: #{reason}"}
+        EditorState.set_status(state, "Cannot install #{name}: #{reason}")
     end
   end
 
   def execute(state, {:tool_confirm_decline, name}) do
-    state = %{state | tool_declined: MapSet.put(state.tool_declined, name)}
+    state =
+      EditorState.update_shell_state(
+        state,
+        &%{&1 | tool_declined: MapSet.put(state.shell_state.tool_declined, name)}
+      )
+
     drain_tool_prompt_queue(state)
   end
 
   def execute(state, {:tool_confirm_dismiss, declined_set}) do
-    declined = MapSet.union(state.tool_declined, declined_set)
-    %{state | tool_declined: declined, tool_prompt_queue: []}
+    declined = MapSet.union(state.shell_state.tool_declined, declined_set)
+    EditorState.update_shell_state(state, &%{&1 | tool_declined: declined, tool_prompt_queue: []})
   end
 
   # ── Agent tuple commands ──────────────────────────────────────────────────
@@ -388,7 +398,7 @@ defmodule Minga.Editor.Commands do
 
     case MacroRecorder.get_macro(Editing.macro_recorder(state), register) do
       nil ->
-        %{state | status_msg: "No macro in register @#{register}"}
+        EditorState.set_status(state, "No macro in register @#{register}")
 
       _keys ->
         rec = %{Editing.macro_recorder(state) | last_register: register}
@@ -423,14 +433,14 @@ defmodule Minga.Editor.Commands do
   def execute(state, {:execute_ex_command, {:parser_restart, []}}) do
     case ParserManager.restart() do
       :ok ->
-        %{state | status_msg: "Parser restarted"}
+        EditorState.set_status(state, "Parser restarted")
 
       {:error, :binary_not_found} ->
-        %{state | status_msg: "Parser restart failed: binary not found"}
+        EditorState.set_status(state, "Parser restart failed: binary not found")
     end
   catch
     :exit, _ ->
-      %{state | status_msg: "Parser restart failed: manager not available"}
+      EditorState.set_status(state, "Parser restart failed: manager not available")
   end
 
   def execute(state, {:execute_ex_command, {:extensions, []}}) do
@@ -500,8 +510,8 @@ defmodule Minga.Editor.Commands do
   # Remove the current tool from the prompt queue after accept/decline.
   @spec drain_tool_prompt_queue(state()) :: state()
   defp drain_tool_prompt_queue(state) do
-    case state.tool_prompt_queue do
-      [_current | rest] -> %{state | tool_prompt_queue: rest}
+    case state.shell_state.tool_prompt_queue do
+      [_current | rest] -> EditorState.update_shell_state(state, &%{&1 | tool_prompt_queue: rest})
       [] -> state
     end
   end

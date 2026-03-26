@@ -208,10 +208,14 @@ defmodule Minga.Editor.Commands.FileTree do
   # Explicitly resets keymap_scope to :editor so we don't leave orphaned
   # :git_status scope if a future refactor separates the open steps.
   @spec close_git_status_if_open(state()) :: state()
-  defp close_git_status_if_open(%{git_status_panel: nil} = state), do: state
+  defp close_git_status_if_open(%{shell_state: %{git_status_panel: nil}} = state), do: state
 
   defp close_git_status_if_open(state),
-    do: %{state | git_status_panel: nil, workspace: %{state.workspace | keymap_scope: :editor}}
+    do:
+      EditorState.close_git_status_panel(%{
+        state
+        | workspace: %{state.workspace | keymap_scope: :editor}
+      })
 
   # Opens a file from the tree, reusing an existing buffer when one exists
   # for the same path. Without the dedup check, the file tree creates

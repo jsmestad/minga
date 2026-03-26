@@ -14,13 +14,18 @@ defmodule Minga.Editor.Commands.GitRemoteTest do
   # ── Helpers ──────────────────────────────────────────────────────────────
 
   defp build_state(overrides) do
-    Map.merge(
-      %EditorState{
-        port_manager: nil,
-        workspace: %Minga.Workspace.State{viewport: Viewport.new(80, 24)}
-      },
-      overrides
-    )
+    {status_msg, overrides} = Map.pop(overrides, :status_msg)
+
+    state =
+      Map.merge(
+        %EditorState{
+          port_manager: nil,
+          workspace: %Minga.Workspace.State{viewport: Viewport.new(80, 24)}
+        },
+        overrides
+      )
+
+    if status_msg, do: EditorState.set_status(state, status_msg), else: state
   end
 
   defp start_editor(content \\ "") do
@@ -82,7 +87,7 @@ defmodule Minga.Editor.Commands.GitRemoteTest do
 
       result = GitCommands.handle_remote_result(state, ref, :ok)
 
-      assert result.status_msg == "Pushed"
+      assert result.shell_state.status_msg == "Pushed"
       assert result.git_remote_op == nil
     end
 
@@ -93,7 +98,7 @@ defmodule Minga.Editor.Commands.GitRemoteTest do
 
       result = GitCommands.handle_remote_result(state, ref, {:error, "rejected"})
 
-      assert result.status_msg == "Push failed: rejected"
+      assert result.shell_state.status_msg == "Push failed: rejected"
       assert result.git_remote_op == nil
     end
 
@@ -106,18 +111,18 @@ defmodule Minga.Editor.Commands.GitRemoteTest do
 
       result = GitCommands.handle_remote_result(state, stale_ref, :ok)
 
-      assert result.status_msg == "Pushing…"
+      assert result.shell_state.status_msg == "Pushing…"
       assert result.git_remote_op == op
     end
 
     test "ignores result when no operation is in flight" do
       ref = make_ref()
-      state = build_state(%{git_remote_op: nil, status_msg: nil})
+      state = build_state(%{git_remote_op: nil})
 
       result = GitCommands.handle_remote_result(state, ref, :ok)
 
       assert result.git_remote_op == nil
-      assert result.status_msg == nil
+      assert result.shell_state.status_msg == nil
     end
   end
 
@@ -133,7 +138,7 @@ defmodule Minga.Editor.Commands.GitRemoteTest do
       result = GitCommands.handle_remote_task_down(state, task_monitor)
 
       assert result.git_remote_op == nil
-      assert result.status_msg == "Git operation failed unexpectedly"
+      assert result.shell_state.status_msg == "Git operation failed unexpectedly"
     end
 
     test "returns :not_matched when monitor ref doesn't match" do
@@ -168,7 +173,7 @@ defmodule Minga.Editor.Commands.GitRemoteTest do
       send(editor, {:git_remote_result, ref, :ok})
       state = get_state(editor)
 
-      assert state.status_msg == "Fetched"
+      assert state.shell_state.status_msg == "Fetched"
       assert state.git_remote_op == nil
     end
 
@@ -184,7 +189,7 @@ defmodule Minga.Editor.Commands.GitRemoteTest do
       send(editor, {:git_remote_result, ref, {:error, "merge conflict"}})
       state = get_state(editor)
 
-      assert state.status_msg == "Pull failed: merge conflict"
+      assert state.shell_state.status_msg == "Pull failed: merge conflict"
       assert state.git_remote_op == nil
     end
 
@@ -205,7 +210,7 @@ defmodule Minga.Editor.Commands.GitRemoteTest do
 
       state = get_state(editor)
       assert state.git_remote_op == nil
-      assert state.status_msg == "Git operation failed unexpectedly"
+      assert state.shell_state.status_msg == "Git operation failed unexpectedly"
     end
 
     test "stale :DOWN after successful result is a no-op" do
@@ -223,7 +228,7 @@ defmodule Minga.Editor.Commands.GitRemoteTest do
       _ = :sys.get_state(editor)
 
       assert get_state(editor).git_remote_op == nil
-      assert get_state(editor).status_msg == "Fetched"
+      assert get_state(editor).shell_state.status_msg == "Fetched"
 
       # A stale :DOWN arrives after (in production, demonitor(:flush) prevents this,
       # but if it slips through, it should be harmless)
@@ -233,7 +238,7 @@ defmodule Minga.Editor.Commands.GitRemoteTest do
       state = get_state(editor)
       # Op stays nil, status_msg unchanged (not overwritten with crash message)
       assert state.git_remote_op == nil
-      assert state.status_msg == "Fetched"
+      assert state.shell_state.status_msg == "Fetched"
     end
   end
 
@@ -248,7 +253,7 @@ defmodule Minga.Editor.Commands.GitRemoteTest do
 
       result = GitCommands.execute(state, :git_pull)
 
-      assert result.status_msg == "Git operation already in progress"
+      assert result.shell_state.status_msg == "Git operation already in progress"
       assert result.git_remote_op == op
     end
   end

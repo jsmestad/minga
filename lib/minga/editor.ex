@@ -466,8 +466,9 @@ defmodule Minga.Editor do
     {:noreply, new_state}
   end
 
-  def handle_info({:whichkey_timeout, ref}, %{whichkey: %{timer: ref}} = state) do
-    new_state = put_in(state.whichkey.show, true)
+  def handle_info({:whichkey_timeout, ref}, %{shell_state: %{whichkey: %{timer: ref}}} = state) do
+    wk = EditorState.whichkey(state)
+    new_state = EditorState.set_whichkey(state, %{wk | show: true})
     new_state = Renderer.render(new_state)
     {:noreply, new_state}
   end
@@ -626,7 +627,7 @@ defmodule Minga.Editor do
     # tree-sitter highlights, regardless of whether it's the active
     # buffer or not.
     new_state =
-      if pid != nil and pid == new_state.agent.buffer do
+      if pid != nil and pid == new_state.shell_state.agent.buffer do
         AgentLifecycle.update_styled_cache(new_state)
       else
         new_state
@@ -926,19 +927,19 @@ defmodule Minga.Editor do
   end
 
   # Nav-flash timer step — advance the fade or clear the flash.
-  def handle_info(:nav_flash_step, %{nav_flash: nil} = state) do
+  def handle_info(:nav_flash_step, %{shell_state: %{nav_flash: nil}} = state) do
     {:noreply, state}
   end
 
-  def handle_info(:nav_flash_step, %{nav_flash: flash} = state) do
+  def handle_info(:nav_flash_step, %{shell_state: %{nav_flash: flash}} = state) do
     case NavFlash.advance(flash) do
       {:continue, updated, effects} ->
-        state = %{state | nav_flash: apply_flash_effects(updated, effects)}
+        state = EditorState.set_nav_flash(state, apply_flash_effects(updated, effects))
         state = Renderer.render(state)
         {:noreply, state}
 
       :done ->
-        state = %{state | nav_flash: nil}
+        state = EditorState.cancel_nav_flash(state)
         state = Renderer.render(state)
         {:noreply, state}
     end
@@ -947,7 +948,7 @@ defmodule Minga.Editor do
   # Warning popup debounce timer fired — open the *Warnings* popup if not
   # already visible.
   def handle_info(:warning_popup_timeout, state) do
-    state = %{state | warning_popup_timer: nil}
+    state = EditorState.update_shell_state(state, &%{&1 | warning_popup_timer: nil})
     {:noreply, open_warnings_popup_if_needed(state)}
   end
 
@@ -1039,7 +1040,7 @@ defmodule Minga.Editor do
     # this guard, stray broadcasts (from concurrent git operations or
     # file watcher events) re-populate the panel after it was closed,
     # causing the panel to ghost back into view.
-    if state.git_status_panel != nil do
+    if EditorState.git_status_panel(state) != nil do
       git_status_data = %{
         repo_state: :normal,
         branch: branch || "",
@@ -1048,7 +1049,7 @@ defmodule Minga.Editor do
         entries: entries
       }
 
-      state = %{state | git_status_panel: git_status_data}
+      state = EditorState.set_git_status_panel(state, git_status_data)
       {:noreply, schedule_render(state, 16)}
     else
       {:noreply, state}
@@ -1075,19 +1076,19 @@ defmodule Minga.Editor do
   # ── Tool manager events ────────────────────────────────────────────────────
 
   def handle_info({:minga_event, :tool_install_started, %{name: name}}, state) do
-    state = %{state | status_msg: "Installing #{name}..."}
+    state = EditorState.set_status(state, "Installing #{name}...")
     state = maybe_refresh_tool_picker(state)
     {:noreply, Renderer.render(state)}
   end
 
   def handle_info({:minga_event, :tool_install_progress, %{name: name, message: msg}}, state) do
-    state = %{state | status_msg: "#{name}: #{msg}"}
+    state = EditorState.set_status(state, "#{name}: #{msg}")
     {:noreply, Renderer.render(state)}
   end
 
   def handle_info({:minga_event, :tool_install_complete, %{name: name, version: version}}, state) do
     state = log_message(state, "Tool installed: #{name} v#{version}")
-    state = %{state | status_msg: "✓ #{name} v#{version} installed"}
+    state = EditorState.set_status(state, "✓ #{name} v#{version} installed")
     state = maybe_refresh_tool_picker(state)
     # Clear the success message after 5 seconds
     Process.send_after(self(), :clear_tool_status, 5_000)
@@ -1097,7 +1098,7 @@ defmodule Minga.Editor do
   def handle_info({:minga_event, :tool_install_failed, %{name: name, reason: reason}}, state) do
     reason_str = if is_binary(reason), do: reason, else: inspect(reason)
     state = log_message(state, "Tool install failed: #{name} — #{reason_str}")
-    state = %{state | status_msg: "✕ #{name} install failed: #{reason_str}"}
+    state = EditorState.set_status(state, "✕ #{name} install failed: #{reason_str}")
     state = maybe_refresh_tool_picker(state)
     {:noreply, Renderer.render(state)}
   end
@@ -1111,8 +1112,12 @@ defmodule Minga.Editor do
   def handle_info(:clear_tool_status, state) do
     # Only clear if the status message is still a tool status
     state =
-      if String.starts_with?(state.status_msg || "", ["✓ ", "Installing ", "Updating "]) do
-        %{state | status_msg: nil}
+      if String.starts_with?(EditorState.status_msg(state) || "", [
+           "✓ ",
+           "Installing ",
+           "Updating "
+         ]) do
+        EditorState.clear_status(state)
       else
         state
       end
@@ -1124,7 +1129,7 @@ defmodule Minga.Editor do
 
   def handle_info(
         {:minga_event, :tool_missing, %Minga.Events.ToolMissingEvent{command: command}},
-        %{suppress_tool_prompts: true} = state
+        %{shell_state: %{suppress_tool_prompts: true}} = state
       ) do
     Minga.Log.debug(:editor, "[Editor] tool_missing suppressed for #{command}")
     {:noreply, state}
@@ -1138,8 +1143,8 @@ defmodule Minga.Editor do
 
     state =
       if recipe && not EditorState.skip_tool_prompt?(state, recipe.name) do
-        queue = state.tool_prompt_queue ++ [recipe.name]
-        state = %{state | tool_prompt_queue: queue}
+        queue = state.shell_state.tool_prompt_queue ++ [recipe.name]
+        state = EditorState.update_shell_state(state, &%{&1 | tool_prompt_queue: queue})
         maybe_show_tool_prompt(state)
       else
         state
@@ -1257,10 +1262,11 @@ defmodule Minga.Editor do
   # the Tab struct so the tab bar can render status indicators.
   @spec update_background_tab_status(EditorState.t(), pid(), term()) :: EditorState.t()
   defp update_background_tab_status(state, session_pid, {:status_changed, status}) do
-    case state.tab_bar && TabBar.find_by_session(state.tab_bar, session_pid) do
+    case state.shell_state.tab_bar &&
+           TabBar.find_by_session(state.shell_state.tab_bar, session_pid) do
       %Tab{id: id} ->
-        tb = TabBar.update_tab(state.tab_bar, id, &Tab.set_agent_status(&1, status))
-        %{state | tab_bar: tb}
+        tb = TabBar.update_tab(state.shell_state.tab_bar, id, &Tab.set_agent_status(&1, status))
+        EditorState.set_tab_bar(state, tb)
 
       _ ->
         state
@@ -1286,12 +1292,16 @@ defmodule Minga.Editor do
 
   @spec set_tab_attention(EditorState.t(), pid()) :: EditorState.t()
   defp set_tab_attention(state, session_pid) do
-    case state.tab_bar && TabBar.find_by_session(state.tab_bar, session_pid) do
+    case state.shell_state.tab_bar &&
+           TabBar.find_by_session(state.shell_state.tab_bar, session_pid) do
       nil ->
         state
 
       _tab ->
-        %{state | tab_bar: TabBar.set_attention_by_session(state.tab_bar, session_pid, true)}
+        EditorState.set_tab_bar(
+          state,
+          TabBar.set_attention_by_session(state.shell_state.tab_bar, session_pid, true)
+        )
     end
   end
 
@@ -1342,7 +1352,9 @@ defmodule Minga.Editor do
 
   @spec apply_effect(EditorState.t(), effect()) :: EditorState.t()
   defp apply_effect(state, :render), do: schedule_render(state, 16)
-  defp apply_effect(state, {:set_status, msg}) when is_binary(msg), do: %{state | status_msg: msg}
+
+  defp apply_effect(state, {:set_status, msg}) when is_binary(msg),
+    do: EditorState.set_status(state, msg)
 
   defp apply_effect(state, {:open_file, path}) when is_binary(path),
     do: Commands.execute(state, {:edit_file, path})
@@ -1502,18 +1514,19 @@ defmodule Minga.Editor do
 
   @spec start_flash(state(), non_neg_integer()) :: state()
   defp start_flash(state, line) do
-    old_timer = if state.nav_flash, do: state.nav_flash.timer, else: nil
-    {flash, effects} = NavFlash.start(line, old_timer)
-    %{state | nav_flash: apply_flash_effects(flash, effects)}
+    flash = EditorState.nav_flash(state)
+    old_timer = if flash, do: flash.timer, else: nil
+    {new_flash, effects} = NavFlash.start(line, old_timer)
+    EditorState.set_nav_flash(state, apply_flash_effects(new_flash, effects))
   end
 
   @spec cancel_flash_if_active(state()) :: state()
-  defp cancel_flash_if_active(%{nav_flash: nil} = state), do: state
+  defp cancel_flash_if_active(%{shell_state: %{nav_flash: nil}} = state), do: state
 
   defp cancel_flash_if_active(state) do
-    effects = NavFlash.cancel_effects(state.nav_flash)
+    effects = NavFlash.cancel_effects(EditorState.nav_flash(state))
     execute_flash_effects(effects)
-    %{state | nav_flash: nil}
+    EditorState.cancel_nav_flash(state)
   end
 
   # Resets nav-flash tracking after a buffer switch so the cursor
@@ -1527,12 +1540,12 @@ defmodule Minga.Editor do
 
   # Cancels any active nav-flash. Called on every keypress.
   @spec cancel_nav_flash(state()) :: state()
-  defp cancel_nav_flash(%{nav_flash: nil} = state), do: state
+  defp cancel_nav_flash(%{shell_state: %{nav_flash: nil}} = state), do: state
 
   defp cancel_nav_flash(state) do
-    effects = NavFlash.cancel_effects(state.nav_flash)
+    effects = NavFlash.cancel_effects(EditorState.nav_flash(state))
     execute_flash_effects(effects)
-    %{state | nav_flash: nil}
+    EditorState.cancel_nav_flash(state)
   end
 
   # Executes side effects from NavFlash and returns the flash struct
@@ -1779,7 +1792,7 @@ defmodule Minga.Editor do
     # it. This ensures the right tab is closed when the user clicks X
     # on a background tab.
     state =
-      if state.tab_bar.active_id != id do
+      if state.shell_state.tab_bar.active_id != id do
         EditorState.switch_tab(state, id)
       else
         state
@@ -1837,7 +1850,7 @@ defmodule Minga.Editor do
   end
 
   defp handle_gui_action(state, {:toggle_panel, 1}) do
-    %{state | bottom_panel: BottomPanel.toggle(state.bottom_panel)}
+    EditorState.set_bottom_panel(state, BottomPanel.toggle(EditorState.bottom_panel(state)))
   end
 
   defp handle_gui_action(state, {:toggle_panel, 2}) do
@@ -1857,15 +1870,21 @@ defmodule Minga.Editor do
   end
 
   defp handle_gui_action(state, {:panel_switch_tab, tab_index}) do
-    %{state | bottom_panel: BottomPanel.switch_tab(state.bottom_panel, tab_index)}
+    EditorState.set_bottom_panel(
+      state,
+      BottomPanel.switch_tab(EditorState.bottom_panel(state), tab_index)
+    )
   end
 
   defp handle_gui_action(state, :panel_dismiss) do
-    %{state | bottom_panel: BottomPanel.dismiss(state.bottom_panel)}
+    EditorState.set_bottom_panel(state, BottomPanel.dismiss(EditorState.bottom_panel(state)))
   end
 
   defp handle_gui_action(state, {:panel_resize, height_percent}) do
-    %{state | bottom_panel: BottomPanel.resize(state.bottom_panel, height_percent)}
+    EditorState.set_bottom_panel(
+      state,
+      BottomPanel.resize(EditorState.bottom_panel(state), height_percent)
+    )
   end
 
   defp handle_gui_action(state, {:open_file, path}) do
@@ -1883,7 +1902,7 @@ defmodule Minga.Editor do
       nil ->
         case Commands.start_buffer(path) do
           {:ok, pid} -> Commands.add_buffer(state, pid)
-          {:error, _reason} -> %{state | status_msg: "Could not open #{path}"}
+          {:error, _reason} -> EditorState.set_status(state, "Could not open #{path}")
         end
 
       i ->
@@ -1895,33 +1914,33 @@ defmodule Minga.Editor do
     name = String.to_existing_atom(name_str)
 
     case Minga.Tool.Manager.install(name) do
-      :ok -> %{state | status_msg: "Installing #{name_str}..."}
-      {:error, reason} -> %{state | status_msg: "Cannot install #{name_str}: #{reason}"}
+      :ok -> EditorState.set_status(state, "Installing #{name_str}...")
+      {:error, reason} -> EditorState.set_status(state, "Cannot install #{name_str}: #{reason}")
     end
   rescue
-    ArgumentError -> %{state | status_msg: "Unknown tool: #{name_str}"}
+    ArgumentError -> EditorState.set_status(state, "Unknown tool: #{name_str}")
   end
 
   defp handle_gui_action(state, {:tool_uninstall, name_str}) do
     name = String.to_existing_atom(name_str)
 
     case Minga.Tool.Manager.uninstall(name) do
-      :ok -> %{state | status_msg: "Uninstalled #{name_str}"}
-      {:error, reason} -> %{state | status_msg: "Cannot uninstall #{name_str}: #{reason}"}
+      :ok -> EditorState.set_status(state, "Uninstalled #{name_str}")
+      {:error, reason} -> EditorState.set_status(state, "Cannot uninstall #{name_str}: #{reason}")
     end
   rescue
-    ArgumentError -> %{state | status_msg: "Unknown tool: #{name_str}"}
+    ArgumentError -> EditorState.set_status(state, "Unknown tool: #{name_str}")
   end
 
   defp handle_gui_action(state, {:tool_update, name_str}) do
     name = String.to_existing_atom(name_str)
 
     case Minga.Tool.Manager.update(name) do
-      :ok -> %{state | status_msg: "Updating #{name_str}..."}
-      {:error, reason} -> %{state | status_msg: "Cannot update #{name_str}: #{reason}"}
+      :ok -> EditorState.set_status(state, "Updating #{name_str}...")
+      {:error, reason} -> EditorState.set_status(state, "Cannot update #{name_str}: #{reason}")
     end
   rescue
-    ArgumentError -> %{state | status_msg: "Unknown tool: #{name_str}"}
+    ArgumentError -> EditorState.set_status(state, "Unknown tool: #{name_str}")
   end
 
   defp handle_gui_action(state, :tool_dismiss) do
@@ -2007,33 +2026,42 @@ defmodule Minga.Editor do
   defp handle_gui_action(state, {:git_commit, message}) do
     case resolve_git_root() do
       nil ->
-        %{state | status_msg: "Not in a git repository"}
+        EditorState.set_status(state, "Not in a git repository")
 
       git_root ->
         result = Minga.Git.commit(git_root, message)
         refresh_git_repo(git_root)
 
         case result do
-          {:ok, hash} -> %{state | status_msg: "Committed #{hash}"}
-          {:error, reason} -> %{state | status_msg: "Commit failed: #{reason}"}
+          {:ok, hash} -> EditorState.set_status(state, "Committed #{hash}")
+          {:error, reason} -> EditorState.set_status(state, "Commit failed: #{reason}")
         end
     end
   end
 
-  defp handle_gui_action(%{tab_bar: %TabBar{} = tb} = state, {:agent_group_close, ws_id}) do
-    %{state | tab_bar: TabBar.remove_group(tb, ws_id)}
+  defp handle_gui_action(
+         %{shell_state: %{tab_bar: %TabBar{} = tb}} = state,
+         {:agent_group_close, ws_id}
+       ) do
+    EditorState.set_tab_bar(state, TabBar.remove_group(tb, ws_id))
   end
 
-  defp handle_gui_action(%{tab_bar: %TabBar{} = tb} = state, {:agent_group_rename, ws_id, name}) do
+  defp handle_gui_action(
+         %{shell_state: %{tab_bar: %TabBar{} = tb}} = state,
+         {:agent_group_rename, ws_id, name}
+       ) do
     alias Minga.Editor.State.AgentGroup
     tb = TabBar.update_group(tb, ws_id, &AgentGroup.rename(&1, name))
-    %{state | tab_bar: tb}
+    EditorState.set_tab_bar(state, tb)
   end
 
-  defp handle_gui_action(%{tab_bar: %TabBar{} = tb} = state, {:agent_group_set_icon, ws_id, icon}) do
+  defp handle_gui_action(
+         %{shell_state: %{tab_bar: %TabBar{} = tb}} = state,
+         {:agent_group_set_icon, ws_id, icon}
+       ) do
     alias Minga.Editor.State.AgentGroup
     tb = TabBar.update_group(tb, ws_id, &AgentGroup.set_icon(&1, icon))
-    %{state | tab_bar: tb}
+    EditorState.set_tab_bar(state, tb)
   end
 
   defp handle_gui_action(state, {:space_leader_chord, codepoint, modifiers}) do
@@ -2065,7 +2093,7 @@ defmodule Minga.Editor do
   defp handle_gui_action(state, {:git_open_file, path}) do
     case resolve_git_root() do
       nil ->
-        %{state | status_msg: "Not in a git repository"}
+        EditorState.set_status(state, "Not in a git repository")
 
       git_root ->
         abs_path = Path.join(git_root, path)
@@ -2081,13 +2109,13 @@ defmodule Minga.Editor do
       case operation.(git_root) do
         :ok ->
           refresh_git_repo(git_root)
-          %{state | status_msg: success_msg}
+          EditorState.set_status(state, success_msg)
 
         {:error, reason} ->
-          %{state | status_msg: "Git error: #{reason}"}
+          EditorState.set_status(state, "Git error: #{reason}")
       end
     else
-      %{state | status_msg: "Not in a git repository"}
+      EditorState.set_status(state, "Not in a git repository")
     end
   end
 
@@ -2106,7 +2134,7 @@ defmodule Minga.Editor do
       nil ->
         case Commands.start_buffer(abs_path) do
           {:ok, pid} -> Commands.add_buffer(state, pid)
-          {:error, _reason} -> %{state | status_msg: "Could not open #{abs_path}"}
+          {:error, _reason} -> EditorState.set_status(state, "Could not open #{abs_path}")
         end
 
       i ->
@@ -2136,7 +2164,9 @@ defmodule Minga.Editor do
   # Called when tool install events change tool status so the user
   # sees live updates (spinner → checkmark, etc.).
   @spec maybe_refresh_tool_picker(state()) :: state()
-  defp maybe_refresh_tool_picker(%{picker_ui: %{source: Minga.Tool.PickerSource}} = state) do
+  defp maybe_refresh_tool_picker(
+         %{shell_state: %{picker_ui: %{source: Minga.Tool.PickerSource}}} = state
+       ) do
     PickerUI.refresh_items(state)
   end
 
@@ -2147,10 +2177,11 @@ defmodule Minga.Editor do
   # returns to normal mode.
   @spec maybe_show_tool_prompt(state()) :: state()
   defp maybe_show_tool_prompt(
-         %{workspace: %{vim: %{mode: :normal}}, tool_prompt_queue: pending} = state
+         %{workspace: %{vim: %{mode: :normal}}, shell_state: %{tool_prompt_queue: pending}} =
+           state
        )
        when pending != [] do
-    ms = %Minga.Mode.ToolConfirmState{pending: pending, declined: state.tool_declined}
+    ms = %Minga.Mode.ToolConfirmState{pending: pending, declined: state.shell_state.tool_declined}
     EditorState.transition_mode(state, :tool_confirm, ms)
   end
 
@@ -2176,21 +2207,23 @@ defmodule Minga.Editor do
   @warning_popup_debounce_ms 200
 
   @spec maybe_schedule_warning_popup(state()) :: state()
-  defp maybe_schedule_warning_popup(%{warning_popup_timer: ref} = state) when is_reference(ref) do
+  defp maybe_schedule_warning_popup(%{shell_state: %{warning_popup_timer: ref}} = state)
+       when is_reference(ref) do
     # Timer already running; the pending timeout will open the popup.
     state
   end
 
   defp maybe_schedule_warning_popup(state) do
     ref = Process.send_after(self(), :warning_popup_timeout, @warning_popup_debounce_ms)
-    %{state | warning_popup_timer: ref}
+    EditorState.update_shell_state(state, &%{&1 | warning_popup_timer: ref})
   end
 
   @spec open_warnings_popup_if_needed(state()) :: state()
-  defp open_warnings_popup_if_needed(%{bottom_panel: %{dismissed: true}} = state), do: state
+  defp open_warnings_popup_if_needed(%{shell_state: %{bottom_panel: %{dismissed: true}}} = state),
+    do: state
 
   defp open_warnings_popup_if_needed(
-         %{bottom_panel: %{visible: true, active_tab: :messages}} = state
+         %{shell_state: %{bottom_panel: %{visible: true, active_tab: :messages}}} = state
        ) do
     # Panel already visible on Messages tab; don't change the user's filter.
     schedule_render(state, 16)
@@ -2198,8 +2231,8 @@ defmodule Minga.Editor do
 
   defp open_warnings_popup_if_needed(state) do
     # Auto-open the bottom panel with warnings filter preset
-    new_panel = BottomPanel.show(state.bottom_panel, :messages, :warnings)
-    schedule_render(%{state | bottom_panel: new_panel}, 16)
+    new_panel = BottomPanel.show(EditorState.bottom_panel(state), :messages, :warnings)
+    schedule_render(EditorState.set_bottom_panel(state, new_panel), 16)
   end
 
   # Returns true if the given buffer PID is visible in any window.

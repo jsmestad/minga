@@ -19,8 +19,10 @@ defmodule Minga.Editor.State.EventRoutingTest do
       workspace: %Minga.Workspace.State{
         viewport: Viewport.new(24, 80)
       },
-      tab_bar: tb,
-      agent: %AgentState{session: session, status: :idle}
+      shell_state: %Minga.Shell.Traditional.State{
+        tab_bar: tb,
+        agent: %AgentState{session: session, status: :idle}
+      }
     }
 
     %{state: state, session: session}
@@ -182,12 +184,12 @@ defmodule Minga.Editor.State.EventRoutingTest do
   describe "set_tab_session/3" do
     test "sets the session pid on a tab for event routing" do
       %{state: state} = make_state()
-      tab = TabBar.active(state.tab_bar)
+      tab = TabBar.active(state.shell_state.tab_bar)
       new_session = spawn(fn -> :timer.sleep(:infinity) end)
 
       state = EditorState.set_tab_session(state, tab.id, new_session)
 
-      tab = TabBar.get(state.tab_bar, tab.id)
+      tab = TabBar.get(state.shell_state.tab_bar, tab.id)
       assert tab.session == new_session
     end
   end
@@ -206,27 +208,27 @@ defmodule Minga.Editor.State.EventRoutingTest do
     test "status_changed syncs agent_status on the agent tab" do
       %{state: state, session: session} = make_state()
 
-      {tb, agent_tab} = TabBar.add(state.tab_bar, :agent, "Agent")
+      {tb, agent_tab} = TabBar.add(state.shell_state.tab_bar, :agent, "Agent")
       tb = TabBar.update_tab(tb, agent_tab.id, &Tab.set_session(&1, session))
-      state = %{state | tab_bar: tb}
+      state = Minga.Editor.State.set_tab_bar(state, tb)
 
       {new_state, _effects} = AgentEvents.handle(state, {:status_changed, :thinking})
 
-      agent_tab = TabBar.get(new_state.tab_bar, agent_tab.id)
+      agent_tab = TabBar.get(new_state.shell_state.tab_bar, agent_tab.id)
       assert agent_tab.agent_status == :thinking
     end
 
     test "status_changed to :idle updates tab status" do
       %{state: state, session: session} = make_state()
 
-      {tb, agent_tab} = TabBar.add(state.tab_bar, :agent, "Agent")
+      {tb, agent_tab} = TabBar.add(state.shell_state.tab_bar, :agent, "Agent")
       tb = TabBar.update_tab(tb, agent_tab.id, &Tab.set_session(&1, session))
-      state = %{state | tab_bar: tb}
+      state = Minga.Editor.State.set_tab_bar(state, tb)
 
       {state, _} = AgentEvents.handle(state, {:status_changed, :thinking})
       {new_state, _} = AgentEvents.handle(state, {:status_changed, :idle})
 
-      agent_tab = TabBar.get(new_state.tab_bar, agent_tab.id)
+      agent_tab = TabBar.get(new_state.shell_state.tab_bar, agent_tab.id)
       assert agent_tab.agent_status == :idle
     end
   end

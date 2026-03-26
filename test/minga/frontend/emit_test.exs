@@ -1,4 +1,4 @@
-defmodule Minga.Editor.RenderPipeline.EmitTest do
+defmodule Minga.Frontend.EmitTest do
   @moduledoc """
   Tests for the Emit stage dispatcher and shared helpers.
 
@@ -11,7 +11,7 @@ defmodule Minga.Editor.RenderPipeline.EmitTest do
   alias Minga.Editor.DisplayList
   alias Minga.Editor.DisplayList.{Cursor, Frame}
   alias Minga.Editor.Layout
-  alias Minga.Editor.RenderPipeline.Emit
+  alias Minga.Frontend.Emit
 
   import Minga.Editor.RenderPipeline.TestHelpers
 

@@ -66,10 +66,10 @@ defmodule Minga.Editor.Commands.HelpTest do
     end
 
     test "clears status message" do
-      state = %{build_state() | status_msg: "Press key to describe:"}
+      state = Minga.Editor.State.set_status(build_state(), "Press key to describe:")
       result = Help.execute(state, {:describe_key_result, "j", :move_down, "Move cursor down"})
 
-      assert result.status_msg == nil
+      assert result.shell_state.status_msg == nil
     end
   end
 

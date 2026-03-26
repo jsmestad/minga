@@ -55,8 +55,7 @@ defmodule Minga.Input.AgentMouseTest do
         }
       },
       focus_stack: [],
-      agent: agent,
-      tab_bar: tab_bar
+      shell_state: %Minga.Shell.Traditional.State{agent: agent, tab_bar: tab_bar}
     }
   end
 

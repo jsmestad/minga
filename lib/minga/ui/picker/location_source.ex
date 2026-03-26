@@ -36,7 +36,8 @@ defmodule Minga.UI.Picker.LocationSource do
 
   @impl true
   @spec candidates(term()) :: [Item.t()]
-  def candidates(%{picker_ui: %{context: %{locations: locations}}}) when is_list(locations) do
+  def candidates(%{shell_state: %{picker_ui: %{context: %{locations: locations}}}})
+      when is_list(locations) do
     Enum.map(locations, &format_location/1)
   end
 
@@ -113,7 +114,7 @@ defmodule Minga.UI.Picker.LocationSource do
       nil ->
         case Commands.start_buffer(file_path) do
           {:ok, pid} -> Commands.add_buffer(state, pid)
-          {:error, _reason} -> %{state | status_msg: "Could not open #{file_path}"}
+          {:error, _reason} -> EditorState.set_status(state, "Could not open #{file_path}")
         end
 
       i ->

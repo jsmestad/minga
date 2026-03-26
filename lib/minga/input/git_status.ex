@@ -93,7 +93,7 @@ defmodule Minga.Input.GitStatus do
 
       refresh_repo(git_root)
       msg = if entry.staged, do: "Unstaged #{entry.path}", else: "Staged #{entry.path}"
-      %{state | status_msg: msg}
+      EditorState.set_status(state, msg)
     end)
   end
 
@@ -101,37 +101,37 @@ defmodule Minga.Input.GitStatus do
     with_selected_file(state, fn entry, git_root ->
       Git.unstage(git_root, entry.path)
       refresh_repo(git_root)
-      %{state | status_msg: "Unstaged #{entry.path}"}
+      EditorState.set_status(state, "Unstaged #{entry.path}")
     end)
   end
 
   defp execute_command(state, :git_status_discard) do
     with_selected_file(state, fn entry, _git_root ->
-      %{state | status_msg: "Discard #{entry.path}? (not yet implemented in TUI)"}
+      EditorState.set_status(state, "Discard #{entry.path}? (not yet implemented in TUI)")
     end)
   end
 
   defp execute_command(state, :git_status_stage_all) do
     case resolve_git_root() do
       nil ->
-        %{state | status_msg: "Not in a git repository"}
+        EditorState.set_status(state, "Not in a git repository")
 
       git_root ->
         Git.stage(git_root, ".")
         refresh_repo(git_root)
-        %{state | status_msg: "Staged all changes"}
+        EditorState.set_status(state, "Staged all changes")
     end
   end
 
   defp execute_command(state, :git_status_unstage_all) do
     case resolve_git_root() do
       nil ->
-        %{state | status_msg: "Not in a git repository"}
+        EditorState.set_status(state, "Not in a git repository")
 
       git_root ->
         Git.unstage_all(git_root)
         refresh_repo(git_root)
-        %{state | status_msg: "Unstaged all"}
+        EditorState.set_status(state, "Unstaged all")
     end
   end
 
@@ -139,22 +139,24 @@ defmodule Minga.Input.GitStatus do
     with_selected_file(state, fn entry, git_root ->
       abs_path = Path.join(git_root, entry.path)
 
-      closed_state = %{
-        state
-        | workspace: %{state.workspace | keymap_scope: :editor},
-          git_status_panel: nil
-      }
+      closed_state =
+        %{state | workspace: %{state.workspace | keymap_scope: :editor}}
+        |> EditorState.close_git_status_panel()
 
       open_file_in_editor(closed_state, abs_path)
     end)
   end
 
   defp execute_command(state, :git_status_start_commit) do
-    %{state | status_msg: "Commit message input (use :git-commit <message> in command mode)"}
+    EditorState.set_status(
+      state,
+      "Commit message input (use :git-commit <message> in command mode)"
+    )
   end
 
   defp execute_command(state, :git_status_close) do
-    %{state | workspace: %{state.workspace | keymap_scope: :editor}, git_status_panel: nil}
+    state = %{state | workspace: %{state.workspace | keymap_scope: :editor}}
+    EditorState.close_git_status_panel(state)
   end
 
   defp execute_command(state, _cmd), do: state
@@ -176,7 +178,7 @@ defmodule Minga.Input.GitStatus do
       nil ->
         case Commands.start_buffer(abs_path) do
           {:ok, pid} -> Commands.add_buffer(state, pid)
-          {:error, _} -> %{state | status_msg: "Could not open #{abs_path}"}
+          {:error, _} -> EditorState.set_status(state, "Could not open #{abs_path}")
         end
 
       i ->
@@ -206,13 +208,14 @@ defmodule Minga.Input.GitStatus do
   end
 
   @spec update_tui_state(EditorState.t(), (TuiState.t() -> TuiState.t())) :: EditorState.t()
-  defp update_tui_state(%{git_status_panel: nil} = state, _fun), do: state
+  defp update_tui_state(%{shell_state: %{git_status_panel: nil}} = state, _fun), do: state
 
   defp update_tui_state(state, fun) do
-    panel = state.git_status_panel
+    panel = EditorState.git_status_panel(state)
     tui = Map.get(panel, :tui_state) || build_initial_tui_state(panel)
     updated = fun.(tui)
-    %{state | git_status_panel: Map.put(panel, :tui_state, updated)}
+    updated_panel = Map.put(panel, :tui_state, updated)
+    EditorState.set_git_status_panel(state, updated_panel)
   end
 
   @spec with_selected_file(EditorState.t(), (Git.StatusEntry.t(), String.t() -> EditorState.t())) ::
@@ -220,10 +223,10 @@ defmodule Minga.Input.GitStatus do
   defp with_selected_file(state, fun) do
     case resolve_git_root() do
       nil ->
-        %{state | status_msg: "Not in a git repository"}
+        EditorState.set_status(state, "Not in a git repository")
 
       git_root ->
-        panel = state.git_status_panel
+        panel = EditorState.git_status_panel(state)
         tui = Map.get(panel || %{}, :tui_state) || build_initial_tui_state(panel || %{})
 
         case Enum.at(tui.flat_entries, tui.cursor_index) do

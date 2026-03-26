@@ -37,7 +37,7 @@ defmodule Minga.Input.CUA.SpaceLeaderTest do
 
       state = editor_state(ctx)
       # Leader mode should be active
-      assert state.whichkey.node != nil
+      assert state.shell_state.whichkey.node != nil
       # Buffer should NOT have a space (clean chord)
       refute String.contains?(buffer_content(ctx), " ")
     end
@@ -67,7 +67,7 @@ defmodule Minga.Input.CUA.SpaceLeaderTest do
       _ = :sys.get_state(ctx.editor)
 
       state = editor_state(ctx)
-      assert state.whichkey.node != nil
+      assert state.shell_state.whichkey.node != nil
       # The space should have been retracted
       refute String.ends_with?(buffer_content(ctx), " f")
     end
@@ -119,7 +119,7 @@ defmodule Minga.Input.CUA.SpaceLeaderTest do
 
       state = editor_state(ctx)
       # Should NOT enter leader mode
-      assert state.whichkey.node == nil
+      assert state.shell_state.whichkey.node == nil
       # Both the withheld space AND the 'w' must appear in the buffer
       assert buffer_content(ctx) == " w"
     end
@@ -139,7 +139,7 @@ defmodule Minga.Input.CUA.SpaceLeaderTest do
       _ = :sys.get_state(ctx.editor)
 
       state = editor_state(ctx)
-      assert state.whichkey.node == nil
+      assert state.shell_state.whichkey.node == nil
       # Space was already in buffer, 'w' must also appear
       assert buffer_content(ctx) == " w"
     end

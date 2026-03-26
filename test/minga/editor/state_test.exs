@@ -369,7 +369,7 @@ defmodule Minga.Editor.StateTest do
         })
 
       state = put_in(state.workspace.keymap_scope, :agent)
-      state = %{state | tab_bar: TabBar.new(Tab.new_agent(1, "Agent"))}
+      state = EditorState.set_tab_bar(state, TabBar.new(Tab.new_agent(1, "Agent")))
 
       %{state: state, agent_buf: agent_buf}
     end
@@ -378,7 +378,7 @@ defmodule Minga.Editor.StateTest do
       file_buf = start_buffer("file content")
       new_state = EditorState.add_buffer(state, file_buf)
 
-      active_tab = TabBar.active(new_state.tab_bar)
+      active_tab = TabBar.active(new_state.shell_state.tab_bar)
       assert active_tab.kind == :file
     end
 
@@ -417,7 +417,7 @@ defmodule Minga.Editor.StateTest do
 
       # The new file tab's snapshotted context should also have the correct
       # window content type, so switching tabs restores it properly.
-      active_tab = TabBar.active(new_state.tab_bar)
+      active_tab = TabBar.active(new_state.shell_state.tab_bar)
       tab_windows = active_tab.context[:windows]
 
       if tab_windows do

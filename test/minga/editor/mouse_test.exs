@@ -329,9 +329,9 @@ defmodule Minga.Editor.MouseTest do
 
       # Inject a second tab directly via state manipulation
       :sys.replace_state(editor, fn s ->
-        {tb, _tab} = TabBar.add(s.tab_bar, :file, "world.ex")
+        {tb, _tab} = TabBar.add(s.shell_state.tab_bar, :file, "world.ex")
         buffers = %{s.workspace.buffers | list: [buf1, buf2]}
-        %{s | tab_bar: tb, workspace: %{s.workspace | buffers: buffers}}
+        Minga.Editor.State.set_tab_bar(%{s | workspace: %{s.workspace | buffers: buffers}}, tb)
       end)
 
       {editor, buf1, buf2}
@@ -339,7 +339,7 @@ defmodule Minga.Editor.MouseTest do
 
     defp inject_click_regions(editor, regions) do
       :sys.replace_state(editor, fn state ->
-        %{state | tab_bar_click_regions: regions}
+        Minga.Editor.State.update_shell_state(state, &%{&1 | tab_bar_click_regions: regions})
       end)
     end
 
@@ -347,39 +347,39 @@ defmodule Minga.Editor.MouseTest do
       {editor, _buf1, _buf2} = start_two_tab_editor()
 
       s = state(editor)
-      assert length(s.tab_bar.tabs) == 2
+      assert length(s.shell_state.tab_bar.tabs) == 2
 
       # The active tab is tab 2 (we just added it). Inject a close region for it.
-      active_id = s.tab_bar.active_id
+      active_id = s.shell_state.tab_bar.active_id
       inject_click_regions(editor, [{5, 7, :"tab_close_#{active_id}"}])
 
       # Click the close region on the tab bar row (row 0)
       send_mouse(editor, 0, 6, :left, :press)
 
       s = state(editor)
-      assert length(s.tab_bar.tabs) == 1
+      assert length(s.shell_state.tab_bar.tabs) == 1
     end
 
     test "clicking tab_close on the last remaining tab does nothing" do
       {editor, _buffer} = start_editor("hello")
 
       s = state(editor)
-      assert length(s.tab_bar.tabs) == 1
-      active_id = s.tab_bar.active_id
+      assert length(s.shell_state.tab_bar.tabs) == 1
+      active_id = s.shell_state.tab_bar.active_id
 
       inject_click_regions(editor, [{5, 7, :"tab_close_#{active_id}"}])
       send_mouse(editor, 0, 6, :left, :press)
 
       s = state(editor)
-      assert length(s.tab_bar.tabs) == 1
+      assert length(s.shell_state.tab_bar.tabs) == 1
     end
 
     test "clicking tab_goto region switches tab without closing" do
       {editor, _buf1, _buf2} = start_two_tab_editor()
 
       s = state(editor)
-      active_id = s.tab_bar.active_id
-      other_id = Enum.find(s.tab_bar.tabs, &(&1.id != active_id)).id
+      active_id = s.shell_state.tab_bar.active_id
+      other_id = Enum.find(s.shell_state.tab_bar.tabs, &(&1.id != active_id)).id
 
       inject_click_regions(editor, [
         {0, 4, :"tab_goto_#{other_id}"},
@@ -390,8 +390,8 @@ defmodule Minga.Editor.MouseTest do
       send_mouse(editor, 0, 2, :left, :press)
 
       s = state(editor)
-      assert length(s.tab_bar.tabs) == 2
-      assert s.tab_bar.active_id == other_id
+      assert length(s.shell_state.tab_bar.tabs) == 2
+      assert s.shell_state.tab_bar.active_id == other_id
     end
   end
 end

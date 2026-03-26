@@ -13,10 +13,12 @@ defmodule Minga.Editor.LspActions.ReferencesTest do
   # Only needs the fields that handlers read/write.
   defp stub_state do
     %{
-      status_msg: nil,
+      shell_state: %Minga.Shell.Traditional.State{
+        status_msg: nil,
+        picker_ui: %Minga.Editor.State.Picker{},
+        whichkey: %Minga.Editor.State.WhichKey{}
+      },
       buffers: %{active: nil, list: []},
-      picker_ui: %Minga.Editor.State.Picker{},
-      whichkey: %Minga.Editor.State.WhichKey{},
       vim: %{mode: :normal, last_jump_pos: nil}
     }
   end
@@ -24,17 +26,17 @@ defmodule Minga.Editor.LspActions.ReferencesTest do
   describe "handle_references_response/2" do
     test "error result sets status message" do
       state = LspActions.handle_references_response(stub_state(), {:error, "timeout"})
-      assert state.status_msg == "References request failed"
+      assert state.shell_state.status_msg == "References request failed"
     end
 
     test "nil result sets status message" do
       state = LspActions.handle_references_response(stub_state(), {:ok, nil})
-      assert state.status_msg == "No references found"
+      assert state.shell_state.status_msg == "No references found"
     end
 
     test "empty list sets status message" do
       state = LspActions.handle_references_response(stub_state(), {:ok, []})
-      assert state.status_msg == "No references found"
+      assert state.shell_state.status_msg == "No references found"
     end
   end
 end

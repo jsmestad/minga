@@ -59,15 +59,16 @@ defmodule Minga.Integration.AgentCursorTest do
       agent_tab_bar = TabBar.new(Tab.new_agent(1, "Agent"))
 
       agent_state =
-        state.agent
+        state.shell_state.agent
         |> Map.put(:buffer, agent_buf)
         |> Map.put(:session, fake_session)
+
+      ss = state.shell_state
 
       %{
         state
         | workspace: %{state.workspace | windows: windows, keymap_scope: :agent},
-          tab_bar: agent_tab_bar,
-          agent: agent_state
+          shell_state: %{ss | tab_bar: agent_tab_bar, agent: agent_state}
       }
     end)
 

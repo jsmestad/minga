@@ -29,16 +29,16 @@ defmodule Minga.Input.Dashboard do
   @spec handle_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           Minga.Input.Handler.result()
   def handle_key(
-        %{workspace: %{buffers: %{active: nil}}, dashboard: %{} = dash} = state,
+        %{workspace: %{buffers: %{active: nil}}, shell_state: %{dashboard: %{} = dash}} = state,
         codepoint,
         _modifiers
       ) do
     case codepoint do
       cp when cp == @key_j or cp == @arrow_down ->
-        {:handled, %{state | dashboard: Dashboard.cursor_down(dash)}}
+        {:handled, EditorState.set_dashboard(state, Dashboard.cursor_down(dash))}
 
       cp when cp == @key_k or cp == @arrow_up ->
-        {:handled, %{state | dashboard: Dashboard.cursor_up(dash)}}
+        {:handled, EditorState.set_dashboard(state, Dashboard.cursor_up(dash))}
 
       cp when cp == @key_enter or cp == @key_space ->
         handle_select(state, dash)
@@ -60,12 +60,12 @@ defmodule Minga.Input.Dashboard do
         root = safe_project_root()
         full_path = Path.join(root, path)
         state = BufferManagement.execute(state, {:execute_ex_command, {:edit, full_path}})
-        state = %{state | dashboard: nil}
+        state = EditorState.close_dashboard(state)
         {:handled, state}
 
       command when is_atom(command) ->
         state = Commands.execute(state, command)
-        state = %{state | dashboard: nil}
+        state = EditorState.close_dashboard(state)
         {:handled, state}
     end
   end

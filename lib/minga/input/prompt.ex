@@ -16,7 +16,11 @@ defmodule Minga.Input.Prompt do
   @impl true
   @spec handle_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           Minga.Input.Handler.result()
-  def handle_key(%{prompt_ui: %PromptState{handler: handler}} = state, codepoint, modifiers)
+  def handle_key(
+        %{shell_state: %{prompt_ui: %PromptState{handler: handler}}} = state,
+        codepoint,
+        modifiers
+      )
       when handler != nil do
     {new_state, _action} = PromptUI.handle_key(state, codepoint, modifiers)
     {:handled, new_state}

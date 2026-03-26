@@ -17,15 +17,17 @@ defmodule Minga.UI.Prompt.AgentGroupRename do
 
   @impl true
   @spec on_submit(String.t(), map()) :: map()
-  def on_submit(text, %{tab_bar: %TabBar{} = tb} = state) do
+  def on_submit(text, %{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
     trimmed = String.trim(text)
 
     if trimmed == "" do
-      %{state | status_msg: "Workspace name cannot be empty"}
+      ss = state.shell_state
+      %{state | shell_state: %{ss | status_msg: "Workspace name cannot be empty"}}
     else
       ws_id = TabBar.active_group_id(tb)
       tb = TabBar.update_group(tb, ws_id, &AgentGroup.rename(&1, trimmed))
-      %{state | tab_bar: tb, status_msg: "Renamed: #{trimmed}"}
+      ss = state.shell_state
+      %{state | shell_state: %{ss | tab_bar: tb, status_msg: "Renamed: #{trimmed}"}}
     end
   end
 

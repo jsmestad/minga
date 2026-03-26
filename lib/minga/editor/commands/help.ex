@@ -55,7 +55,7 @@ defmodule Minga.Editor.Commands.Help do
         Commands.add_buffer(state, help_buf)
       end
 
-    %{state | status_msg: nil}
+    EditorState.clear_status(state)
   end
 
   @spec ensure_help_buffer(state()) :: {state(), pid()}

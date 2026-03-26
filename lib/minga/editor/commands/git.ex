@@ -42,7 +42,8 @@ defmodule Minga.Editor.Commands.Git do
 
   def execute(state, :git_status_toggle) do
     if state.workspace.keymap_scope == :git_status do
-      %{state | workspace: %{state.workspace | keymap_scope: :editor}, git_status_panel: nil}
+      state = %{state | workspace: %{state.workspace | keymap_scope: :editor}}
+      EditorState.close_git_status_panel(state)
     else
       open_git_status_panel(state)
     end
@@ -86,7 +87,7 @@ defmodule Minga.Editor.Commands.Git do
       hunks = GitBuffer.hunks(git_pid)
 
       case Diff.next_hunk_line(hunks, cursor_line) do
-        nil -> %{state | status_msg: "No next hunk"}
+        nil -> EditorState.set_status(state, "No next hunk")
         line -> jump_to_line(state, buf, line)
       end
     end)
@@ -98,7 +99,7 @@ defmodule Minga.Editor.Commands.Git do
       hunks = GitBuffer.hunks(git_pid)
 
       case Diff.prev_hunk_line(hunks, cursor_line) do
-        nil -> %{state | status_msg: "No previous hunk"}
+        nil -> EditorState.set_status(state, "No previous hunk")
         line -> jump_to_line(state, buf, line)
       end
     end)
@@ -111,7 +112,7 @@ defmodule Minga.Editor.Commands.Git do
       {cursor_line, _col} = BufferServer.cursor(buf)
 
       case GitBuffer.hunk_at(git_pid, cursor_line) do
-        nil -> %{state | status_msg: "No hunk at cursor"}
+        nil -> EditorState.set_status(state, "No hunk at cursor")
         hunk -> do_stage_hunk(state, git_pid, buf, hunk)
       end
     end)
@@ -125,7 +126,7 @@ defmodule Minga.Editor.Commands.Git do
 
       case GitBuffer.hunk_at(git_pid, cursor_line) do
         nil ->
-          %{state | status_msg: "No hunk at cursor"}
+          EditorState.set_status(state, "No hunk at cursor")
 
         hunk ->
           {content, _cursor} = BufferServer.content_and_cursor(buf)
@@ -135,7 +136,7 @@ defmodule Minga.Editor.Commands.Git do
 
           BufferServer.replace_content(buf, reverted_content)
           GitBuffer.update(git_pid, reverted_content)
-          %{state | status_msg: "Hunk reverted"}
+          EditorState.set_status(state, "Hunk reverted")
       end
     end)
   end
@@ -147,8 +148,8 @@ defmodule Minga.Editor.Commands.Git do
       {cursor_line, _col} = BufferServer.cursor(buf)
 
       case GitBuffer.hunk_at(git_pid, cursor_line) do
-        nil -> %{state | status_msg: "No hunk at cursor"}
-        hunk -> %{state | status_msg: format_hunk_preview(hunk)}
+        nil -> EditorState.set_status(state, "No hunk at cursor")
+        hunk -> EditorState.set_status(state, format_hunk_preview(hunk))
       end
     end)
   end
@@ -162,8 +163,8 @@ defmodule Minga.Editor.Commands.Git do
       rel_path = GitBuffer.relative_path(git_pid)
 
       case Git.blame_line(git_root, rel_path, cursor_line) do
-        {:ok, blame_text} -> %{state | status_msg: blame_text}
-        :error -> %{state | status_msg: "Blame unavailable"}
+        {:ok, blame_text} -> EditorState.set_status(state, blame_text)
+        :error -> EditorState.set_status(state, "Blame unavailable")
       end
     end)
   end
@@ -200,10 +201,14 @@ defmodule Minga.Editor.Commands.Git do
          ) do
       {:ok, diff_buf} ->
         state = Commands.add_buffer(state, diff_buf)
-        %{state | status_msg: "Diff: #{filename} (#{length(diff_result.hunk_lines)} hunks)"}
+
+        EditorState.set_status(
+          state,
+          "Diff: #{filename} (#{length(diff_result.hunk_lines)} hunks)"
+        )
 
       {:error, reason} ->
-        %{state | status_msg: "Failed to open diff: #{inspect(reason)}"}
+        EditorState.set_status(state, "Failed to open diff: #{inspect(reason)}")
     end
   end
 
@@ -230,7 +235,7 @@ defmodule Minga.Editor.Commands.Git do
               "#{error_prefix}: #{reason}"
           end
 
-        %{state | git_remote_op: nil, status_msg: status_msg}
+        EditorState.set_status(%{state | git_remote_op: nil}, status_msg)
 
       _ ->
         # Stale result from a superseded operation; ignore
@@ -248,7 +253,7 @@ defmodule Minga.Editor.Commands.Git do
   def handle_remote_task_down(state, monitor_ref) do
     case state.git_remote_op do
       {_msg_ref, ^monitor_ref, _context} ->
-        %{state | git_remote_op: nil, status_msg: "Git operation failed unexpectedly"}
+        EditorState.set_status(%{state | git_remote_op: nil}, "Git operation failed unexpectedly")
 
       _ ->
         :not_matched
@@ -265,7 +270,7 @@ defmodule Minga.Editor.Commands.Git do
           state()
   defp git_remote_action(state, _operation, _progress_msg, _success_msg, _error_prefix)
        when state.git_remote_op != nil do
-    %{state | status_msg: "Git operation already in progress"}
+    EditorState.set_status(state, "Git operation already in progress")
   end
 
   defp git_remote_action(state, operation, progress_msg, success_msg, error_prefix) do
@@ -282,14 +287,11 @@ defmodule Minga.Editor.Commands.Git do
 
         task_monitor = Process.monitor(task_pid)
 
-        %{
-          state
-          | git_remote_op: {ref, task_monitor, {git_root, success_msg, error_prefix}},
-            status_msg: progress_msg
-        }
+        %{state | git_remote_op: {ref, task_monitor, {git_root, success_msg, error_prefix}}}
+        |> EditorState.set_status(progress_msg)
 
       :not_git ->
-        %{state | status_msg: "Not in a git repository"}
+        EditorState.set_status(state, "Not in a git repository")
     end
   end
 
@@ -305,7 +307,7 @@ defmodule Minga.Editor.Commands.Git do
   defp open_git_status_panel(state) do
     case Git.root_for(Minga.Project.resolve_root()) do
       {:ok, git_root} -> open_git_status_for_root(state, git_root)
-      :not_git -> %{state | status_msg: "Not in a git repository"}
+      :not_git -> EditorState.set_status(state, "Not in a git repository")
     end
   end
 
@@ -313,7 +315,7 @@ defmodule Minga.Editor.Commands.Git do
   defp open_git_status_for_root(state, git_root) do
     case Repo.lookup(git_root) do
       nil ->
-        %{state | status_msg: "Git.Repo not available"}
+        EditorState.set_status(state, "Git.Repo not available")
 
       repo_pid ->
         entries = Repo.status(repo_pid)
@@ -330,11 +332,8 @@ defmodule Minga.Editor.Commands.Git do
         # Mutual exclusivity: close file tree when opening git status
         state = close_file_tree_if_open(state)
 
-        %{
-          state
-          | workspace: %{state.workspace | keymap_scope: :git_status},
-            git_status_panel: panel_data
-        }
+        state = %{state | workspace: %{state.workspace | keymap_scope: :git_status}}
+        EditorState.set_git_status_panel(state, panel_data)
     end
   end
 
@@ -368,10 +367,10 @@ defmodule Minga.Editor.Commands.Git do
     case Git.stage_patch(git_root, patch) do
       :ok ->
         GitBuffer.invalidate_base(git_pid, content)
-        %{state | status_msg: "Hunk staged"}
+        EditorState.set_status(state, "Hunk staged")
 
       {:error, reason} ->
-        %{state | status_msg: "Stage failed: #{reason}"}
+        EditorState.set_status(state, "Stage failed: #{reason}")
     end
   end
 
@@ -380,7 +379,7 @@ defmodule Minga.Editor.Commands.Git do
        when is_pid(buf) do
     case GitTracker.lookup(buf) do
       nil ->
-        %{state | status_msg: "Not in a git repository"}
+        EditorState.set_status(state, "Not in a git repository")
 
       git_pid ->
         try do

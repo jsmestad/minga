@@ -7,7 +7,7 @@ defmodule Minga.UI.Picker.OptionScopeSource do
   buffer's local options) and "All Buffers (Default)" (writes to the
   global Options agent, affecting all buffers without a local override).
 
-  The picker context (stored in `state.picker_ui.context`) must include:
+  The picker context (stored in `state.shell_state.picker_ui.context`) must include:
 
   * `:option_name` — the option atom
   * `:new_value` — the computed new value
@@ -41,7 +41,7 @@ defmodule Minga.UI.Picker.OptionScopeSource do
   @impl true
   @spec on_select(Item.t(), term()) :: term()
   def on_select(%Item{id: scope}, state) when scope in [:buffer, :global] do
-    ctx = state.picker_ui.context
+    ctx = state.shell_state.picker_ui.context
     apply_scoped(scope, ctx.option_name, ctx.new_value, state)
   end
 
@@ -61,12 +61,12 @@ defmodule Minga.UI.Picker.OptionScopeSource do
       BufferServer.set_option(buf, name, value)
     end
 
-    %{state | status_msg: format_confirmation(name, value, "this buffer")}
+    Minga.Editor.State.set_status(state, format_confirmation(name, value, "this buffer"))
   end
 
   defp apply_scoped(:global, name, value, state) do
     Options.set(name, value)
-    %{state | status_msg: format_confirmation(name, value, "all buffers")}
+    Minga.Editor.State.set_status(state, format_confirmation(name, value, "all buffers"))
   end
 
   @spec format_confirmation(atom(), term(), String.t()) :: String.t()

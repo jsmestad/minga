@@ -155,7 +155,7 @@ defmodule Minga.Editor.AgentLifecycle do
   Only updates if the current label is the default "New Agent" or "minga".
   """
   @spec maybe_update_tab_label(state()) :: state()
-  def maybe_update_tab_label(%{tab_bar: %{active_id: active_id} = tb} = state) do
+  def maybe_update_tab_label(%{shell_state: %{tab_bar: %{active_id: active_id} = tb}} = state) do
     session = AgentAccess.session(state)
 
     with true <- is_pid(session),
@@ -212,7 +212,7 @@ defmodule Minga.Editor.AgentLifecycle do
 
       text ->
         label = truncate_label(text, 30)
-        %{state | tab_bar: TabBar.update_label(tb, active_id, label)}
+        EditorState.set_tab_bar(state, TabBar.update_label(tb, active_id, label))
     end
   end
 

@@ -16,7 +16,7 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpersWhichKeyTest do
     theme = Theme.get!(:doom_one)
 
     %{
-      whichkey: %{show: true, node: root},
+      shell_state: %{whichkey: %{show: true, node: root}},
       theme: theme
     }
   end
@@ -39,7 +39,7 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpersWhichKeyTest do
     end
 
     test "returns empty when whichkey is not visible" do
-      state = %{whichkey: %{show: false, node: nil}, theme: Theme.get!(:doom_one)}
+      state = %{shell_state: %{whichkey: %{show: false, node: nil}}, theme: Theme.get!(:doom_one)}
       assert [] = ChromeHelpers.render_whichkey(state, viewport(), :bottom)
     end
   end

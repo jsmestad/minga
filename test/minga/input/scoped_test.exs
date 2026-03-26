@@ -66,8 +66,7 @@ defmodule Minga.Input.ScopedTest do
         keymap_scope: Keyword.get(opts, :keymap_scope, :editor),
         agent_ui: agentic
       },
-      agent: agent,
-      tab_bar: tab_bar
+      shell_state: %Minga.Shell.Traditional.State{agent: agent, tab_bar: tab_bar}
     }
   end
 

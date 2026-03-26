@@ -1,0 +1,57 @@
+defmodule Minga.Shell.Traditional.State do
+  @moduledoc """
+  Presentation state for the traditional tab-based editor shell.
+
+  These fields are presentation concerns: they control how the editor
+  looks and behaves visually, but have no effect on the core editing
+  model. Each field was migrated from `Minga.Editor.State` as part of
+  Phase F of the Core/Shell separation.
+
+  ## Batch 1 fields
+
+  - `nav_flash` — cursor line flash after large jumps
+  - `hover_popup` — LSP hover popup (positioned text overlay)
+  - `dashboard` — home screen state (cursor, items) when no buffers open
+  - `status_msg` — transient status message in the modeline
+  """
+
+  @type t :: %__MODULE__{
+          nav_flash: Minga.Editor.NavFlash.t() | nil,
+          hover_popup: Minga.Editor.HoverPopup.t() | nil,
+          dashboard: Minga.Editor.Dashboard.state() | nil,
+          status_msg: String.t() | nil,
+          picker_ui: Minga.Editor.State.Picker.t(),
+          prompt_ui: Minga.Editor.State.Prompt.t(),
+          whichkey: Minga.Editor.State.WhichKey.t(),
+          bottom_panel: Minga.Editor.BottomPanel.t(),
+          git_status_panel: Minga.Frontend.Protocol.GUI.git_status_data() | nil,
+          tab_bar: Minga.Editor.State.TabBar.t() | nil,
+          agent: Minga.Editor.State.Agent.t(),
+          modeline_click_regions: [Minga.Editor.Modeline.click_region()],
+          tab_bar_click_regions: [Minga.Editor.TabBarRenderer.click_region()],
+          warning_popup_timer: reference() | nil,
+          signature_help: Minga.Editor.SignatureHelp.t() | nil,
+          tool_declined: MapSet.t(atom()),
+          tool_prompt_queue: [atom()],
+          suppress_tool_prompts: boolean()
+        }
+
+  defstruct nav_flash: nil,
+            hover_popup: nil,
+            dashboard: nil,
+            status_msg: nil,
+            picker_ui: %Minga.Editor.State.Picker{},
+            prompt_ui: %Minga.Editor.State.Prompt{},
+            whichkey: %Minga.Editor.State.WhichKey{},
+            bottom_panel: %Minga.Editor.BottomPanel{},
+            git_status_panel: nil,
+            tab_bar: nil,
+            agent: %Minga.Editor.State.Agent{},
+            modeline_click_regions: [],
+            tab_bar_click_regions: [],
+            warning_popup_timer: nil,
+            signature_help: nil,
+            tool_declined: MapSet.new(),
+            tool_prompt_queue: [],
+            suppress_tool_prompts: false
+end

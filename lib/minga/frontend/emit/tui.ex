@@ -1,4 +1,4 @@
-defmodule Minga.Editor.RenderPipeline.Emit.TUI do
+defmodule Minga.Frontend.Emit.TUI do
   @moduledoc """
   TUI-specific command building for the Emit stage.
 

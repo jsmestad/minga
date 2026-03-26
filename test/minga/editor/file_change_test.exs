@@ -27,7 +27,7 @@ defmodule Minga.Editor.FileChangeTest do
 
     # Status message should confirm reload
     state = :sys.get_state(ctx.editor)
-    assert state.status_msg =~ "reloaded"
+    assert state.shell_state.status_msg =~ "reloaded"
   end
 
   @tag :tmp_dir
@@ -49,8 +49,8 @@ defmodule Minga.Editor.FileChangeTest do
 
     state = :sys.get_state(ctx.editor)
     assert state.workspace.pending_conflict != nil
-    assert state.status_msg =~ "[r]eload"
-    assert state.status_msg =~ "[k]eep"
+    assert state.shell_state.status_msg =~ "[r]eload"
+    assert state.shell_state.status_msg =~ "[k]eep"
   end
 
   @tag :tmp_dir
@@ -77,7 +77,7 @@ defmodule Minga.Editor.FileChangeTest do
     assert content == "reloaded content"
 
     state = :sys.get_state(ctx.editor)
-    assert state.status_msg =~ "reloaded"
+    assert state.shell_state.status_msg =~ "reloaded"
     assert state.workspace.pending_conflict == nil
   end
 
@@ -142,7 +142,7 @@ defmodule Minga.Editor.FileChangeTest do
 
     state = :sys.get_state(ctx.editor)
     assert state.workspace.pending_conflict == nil
-    assert state.status_msg == nil
+    assert state.shell_state.status_msg == nil
   end
 
   @tag :tmp_dir

@@ -408,10 +408,7 @@ defmodule Minga.Editor.Commands.Movement do
         %{ms | pending_describe_key: true}
       end)
 
-    %{
-      state
-      | status_msg: "Press key to describe:"
-    }
+    EditorState.set_status(state, "Press key to describe:")
   end
 
   @spec split_window(state(), WindowTree.direction()) :: state()
@@ -536,7 +533,7 @@ defmodule Minga.Editor.Commands.Movement do
         }
 
       :error ->
-        %{state | status_msg: "Cannot close the last window"}
+        EditorState.set_status(state, "Cannot close the last window")
     end
   end
 

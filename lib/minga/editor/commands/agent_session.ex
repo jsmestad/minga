@@ -33,7 +33,7 @@ defmodule Minga.Editor.Commands.AgentSession do
     end
 
     state = AgentAccess.update_agent(state, &AgentState.clear_session/1)
-    state = %{state | status_msg: message}
+    state = EditorState.set_status(state, message)
     if AgentAccess.panel(state).visible, do: start_agent_session(state), else: state
   end
 
@@ -120,7 +120,7 @@ defmodule Minga.Editor.Commands.AgentSession do
   # ── Private helpers ────────────────────────────────────────────────────────
 
   @spec assign_session_to_tab(state(), pid()) :: state()
-  defp assign_session_to_tab(%{tab_bar: %TabBar{} = tb} = state, pid) do
+  defp assign_session_to_tab(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, pid) do
     case TabBar.find_sessionless_agent(tb) do
       %Tab{id: agent_tab_id} -> EditorState.set_tab_session(state, agent_tab_id, pid)
       nil -> state
@@ -204,7 +204,7 @@ defmodule Minga.Editor.Commands.AgentSession do
   # the current agent tab to it. No-op if the session already has
   # a workspace (e.g., session restart).
   @spec ensure_agent_workspace(state(), pid()) :: state()
-  defp ensure_agent_workspace(%{tab_bar: %TabBar{} = tb} = state, session_pid) do
+  defp ensure_agent_workspace(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, session_pid) do
     case TabBar.find_group_by_session(tb, session_pid) do
       %AgentGroup{} ->
         # Workspace already exists for this session
@@ -221,7 +221,7 @@ defmodule Minga.Editor.Commands.AgentSession do
             nil -> tb
           end
 
-        %{state | tab_bar: tb}
+        EditorState.set_tab_bar(state, tb)
     end
   end
 

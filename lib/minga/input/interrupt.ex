@@ -63,7 +63,7 @@ defmodule Minga.Input.Interrupt do
     {state, resets} = maybe_close_conflict(state, resets)
     {state, resets} = maybe_close_completion(state, resets)
     {state, resets} = maybe_clear_agent_prefix(state, resets)
-    state = %{state | status_msg: nil}
+    state = EditorState.clear_status(state)
 
     {state, resets}
   end
@@ -109,19 +109,23 @@ defmodule Minga.Input.Interrupt do
   end
 
   @spec maybe_close_picker(EditorState.t(), [String.t()]) :: {EditorState.t(), [String.t()]}
-  defp maybe_close_picker(%{picker_ui: %Picker{picker: nil}} = state, resets),
+  defp maybe_close_picker(%{shell_state: %{picker_ui: %Picker{picker: nil}}} = state, resets),
     do: {state, resets}
 
   defp maybe_close_picker(state, resets) do
-    {%{state | picker_ui: %Picker{}}, ["picker closed" | resets]}
+    {EditorState.set_picker_ui(state, %Picker{}), ["picker closed" | resets]}
   end
 
   @spec maybe_close_whichkey(EditorState.t(), [String.t()]) :: {EditorState.t(), [String.t()]}
-  defp maybe_close_whichkey(%{whichkey: %WhichKey{node: nil, show: false}} = state, resets),
-    do: {state, resets}
+  defp maybe_close_whichkey(
+         %{shell_state: %{whichkey: %WhichKey{node: nil, show: false}}} = state,
+         resets
+       ),
+       do: {state, resets}
 
-  defp maybe_close_whichkey(%{whichkey: wk} = state, resets) do
-    {%{state | whichkey: WhichKey.clear(wk)}, ["which-key dismissed" | resets]}
+  defp maybe_close_whichkey(state, resets) do
+    wk = EditorState.whichkey(state)
+    {EditorState.set_whichkey(state, WhichKey.clear(wk)), ["which-key dismissed" | resets]}
   end
 
   @spec maybe_close_conflict(EditorState.t(), [String.t()]) :: {EditorState.t(), [String.t()]}

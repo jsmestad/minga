@@ -17,7 +17,7 @@ defmodule Minga.Input.Picker do
   @impl true
   @spec handle_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           Minga.Input.Handler.result()
-  def handle_key(%{picker_ui: %{picker: picker}} = state, codepoint, modifiers)
+  def handle_key(%{shell_state: %{picker_ui: %{picker: picker}}} = state, codepoint, modifiers)
       when is_struct(picker, PickerData) do
     new_state =
       case PickerUI.handle_key(state, codepoint, modifiers) do
@@ -45,7 +45,7 @@ defmodule Minga.Input.Picker do
 
   # Picker active: intercept scroll and clicks
   def handle_mouse(
-        %{picker_ui: %{picker: %PickerData{} = picker, source: source}} = state,
+        %{shell_state: %{picker_ui: %{picker: %PickerData{} = picker, source: source}}} = state,
         row,
         col,
         button,
@@ -56,14 +56,15 @@ defmodule Minga.Input.Picker do
     case button do
       :wheel_down ->
         new_picker = PickerData.move_down(picker)
-        {:handled, put_in(state.picker_ui.picker, new_picker)}
+        {:handled, EditorState.update_picker_ui(state, &%{&1 | picker: new_picker})}
 
       :wheel_up ->
         new_picker = PickerData.move_up(picker)
-        {:handled, put_in(state.picker_ui.picker, new_picker)}
+        {:handled, EditorState.update_picker_ui(state, &%{&1 | picker: new_picker})}
 
       :left ->
-        if state.picker_ui.layout == :centered and not inside_centered_box?(state, row, col) do
+        if state.shell_state.picker_ui.layout == :centered and
+             not inside_centered_box?(state, row, col) do
           {:handled, PickerUI.close(state)}
         else
           {:handled, handle_picker_click(state, picker, source, row)}
@@ -84,7 +85,7 @@ defmodule Minga.Input.Picker do
   @spec handle_picker_click(EditorState.t(), PickerData.t(), module(), integer()) ::
           EditorState.t()
   defp handle_picker_click(state, picker, source, row) do
-    layout = state.picker_ui.layout
+    layout = state.shell_state.picker_ui.layout
 
     clicked_idx =
       case layout do

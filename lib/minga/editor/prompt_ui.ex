@@ -58,16 +58,13 @@ defmodule Minga.Editor.PromptUI do
 
     state = maybe_close_picker(state)
 
-    %{
-      state
-      | prompt_ui: %PromptState{
-          handler: handler_module,
-          text: default_text,
-          cursor: String.length(default_text),
-          label: label,
-          context: context
-        }
-    }
+    EditorState.set_prompt_ui(state, %PromptState{
+      handler: handler_module,
+      text: default_text,
+      cursor: String.length(default_text),
+      label: label,
+      context: context
+    })
   end
 
   @doc """
@@ -75,14 +72,14 @@ defmodule Minga.Editor.PromptUI do
   """
   @spec close(state()) :: state()
   def close(state) do
-    %{state | prompt_ui: %PromptState{}}
+    EditorState.set_prompt_ui(state, %PromptState{})
   end
 
   @doc """
   Returns true if a prompt is currently open.
   """
   @spec open?(state()) :: boolean()
-  def open?(state), do: PromptState.open?(state.prompt_ui)
+  def open?(state), do: PromptState.open?(state.shell_state.prompt_ui)
 
   @doc """
   Handles a key event while the prompt is active.
@@ -92,7 +89,7 @@ defmodule Minga.Editor.PromptUI do
   """
   @spec handle_key(state(), non_neg_integer(), non_neg_integer()) :: {state(), action()}
   def handle_key(state, key, _mods) do
-    prompt = state.prompt_ui
+    prompt = state.shell_state.prompt_ui
 
     case key do
       @escape ->
@@ -111,12 +108,12 @@ defmodule Minga.Editor.PromptUI do
 
       @arrow_left ->
         new_cursor = max(0, prompt.cursor - 1)
-        {%{state | prompt_ui: %{prompt | cursor: new_cursor}}, nil}
+        {EditorState.set_prompt_ui(state, %{prompt | cursor: new_cursor}), nil}
 
       @arrow_right ->
         max_pos = String.length(prompt.text)
         new_cursor = min(max_pos, prompt.cursor + 1)
-        {%{state | prompt_ui: %{prompt | cursor: new_cursor}}, nil}
+        {EditorState.set_prompt_ui(state, %{prompt | cursor: new_cursor}), nil}
 
       _ ->
         {do_insert(state, prompt, key), nil}
@@ -131,7 +128,7 @@ defmodule Minga.Editor.PromptUI do
   """
   @spec render_data(state()) :: {String.t(), String.t(), non_neg_integer()}
   def render_data(state) do
-    prompt = state.prompt_ui
+    prompt = state.shell_state.prompt_ui
     {prompt.label, prompt.text, prompt.cursor}
   end
 
@@ -144,9 +141,9 @@ defmodule Minga.Editor.PromptUI do
   """
   @spec render(state(), Minga.Editor.Viewport.t()) ::
           {[Minga.Editor.DisplayList.draw()], {non_neg_integer(), non_neg_integer()} | nil}
-  def render(%{prompt_ui: %PromptState{handler: nil}}, _viewport), do: {[], nil}
+  def render(%{shell_state: %{prompt_ui: %PromptState{handler: nil}}}, _viewport), do: {[], nil}
 
-  def render(%{prompt_ui: prompt, theme: theme} = _state, viewport) do
+  def render(%{shell_state: %{prompt_ui: prompt}, theme: theme} = _state, viewport) do
     alias Minga.Editor.DisplayList
     alias Minga.UI.Face
 
@@ -176,8 +173,10 @@ defmodule Minga.Editor.PromptUI do
   # ── Private ────────────────────────────────────────────────────────────────
 
   @spec maybe_close_picker(state()) :: state()
-  defp maybe_close_picker(%{picker_ui: %PickerState{picker: nil}} = state), do: state
-  defp maybe_close_picker(state), do: %{state | picker_ui: %PickerState{}}
+  defp maybe_close_picker(%{shell_state: %{picker_ui: %PickerState{picker: nil}}} = state),
+    do: state
+
+  defp maybe_close_picker(state), do: EditorState.set_picker_ui(state, %PickerState{})
 
   @spec do_backspace(state(), PromptState.t()) :: state()
   defp do_backspace(state, %{cursor: 0} = _prompt), do: state
@@ -187,7 +186,7 @@ defmodule Minga.Editor.PromptUI do
     {before, after_} = Enum.split(graphemes, prompt.cursor)
     new_text = Enum.join(Enum.drop(before, -1)) <> Enum.join(after_)
     new_cursor = prompt.cursor - 1
-    %{state | prompt_ui: %{prompt | text: new_text, cursor: new_cursor}}
+    EditorState.set_prompt_ui(state, %{prompt | text: new_text, cursor: new_cursor})
   end
 
   @spec do_delete(state(), PromptState.t()) :: state()
@@ -204,7 +203,7 @@ defmodule Minga.Editor.PromptUI do
   defp do_delete_grapheme(state, prompt, graphemes) do
     {before, [_deleted | after_]} = Enum.split(graphemes, prompt.cursor)
     new_text = Enum.join(before) <> Enum.join(after_)
-    %{state | prompt_ui: %{prompt | text: new_text}}
+    EditorState.set_prompt_ui(state, %{prompt | text: new_text})
   end
 
   @spec do_insert(state(), PromptState.t(), non_neg_integer()) :: state()
@@ -215,7 +214,7 @@ defmodule Minga.Editor.PromptUI do
     {before, after_} = Enum.split(graphemes, prompt.cursor)
     new_text = Enum.join(before) <> char <> Enum.join(after_)
     new_cursor = prompt.cursor + 1
-    %{state | prompt_ui: %{prompt | text: new_text, cursor: new_cursor}}
+    EditorState.set_prompt_ui(state, %{prompt | text: new_text, cursor: new_cursor})
   end
 
   defp do_insert(state, _prompt, _key), do: state

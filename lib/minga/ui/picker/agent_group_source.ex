@@ -20,7 +20,7 @@ defmodule Minga.UI.Picker.AgentGroupSource do
 
   @impl true
   @spec candidates(term()) :: [Item.t()]
-  def candidates(%{tab_bar: %TabBar{} = tb}) do
+  def candidates(%{shell_state: %{tab_bar: %TabBar{} = tb}}) do
     # Filter out workspaces with no tabs (empty manual workspace)
     tb.agent_groups
     |> Enum.filter(fn ws ->
@@ -59,11 +59,14 @@ defmodule Minga.UI.Picker.AgentGroupSource do
 
   @impl true
   @spec on_select(Item.t(), term()) :: term()
-  def on_select(%Item{id: workspace_id}, %{tab_bar: %TabBar{} = tb} = state) do
+  def on_select(
+        %Item{id: workspace_id},
+        %{shell_state: %{tab_bar: %TabBar{} = tb}} = state
+      ) do
     # switch_to_group activates the first tab in the target workspace,
     # then switch_tab does the full context snapshot/restore cycle.
     tb = TabBar.switch_to_group(tb, workspace_id)
-    EditorState.switch_tab(%{state | tab_bar: tb}, tb.active_id)
+    EditorState.switch_tab(EditorState.set_tab_bar(state, tb), tb.active_id)
   end
 
   def on_select(_, state), do: state

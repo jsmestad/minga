@@ -44,7 +44,7 @@ defmodule Minga.Editor.MouseHoverTooltip do
 
       message ->
         popup = HoverPopup.new(message, row, col)
-        %{state | hover_popup: popup}
+        EditorState.set_hover_popup(state, popup)
     end
   end
 

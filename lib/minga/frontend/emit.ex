@@ -1,4 +1,4 @@
-defmodule Minga.Editor.RenderPipeline.Emit do
+defmodule Minga.Frontend.Emit do
   @moduledoc """
   Stage 7: Emit.
 
@@ -18,11 +18,11 @@ defmodule Minga.Editor.RenderPipeline.Emit do
   alias Minga.Editor.DisplayList.Frame
   alias Minga.Editor.Layout
   alias Minga.Editor.RenderPipeline.Chrome
-  alias Minga.Editor.RenderPipeline.Emit.GUI, as: EmitGUI
-  alias Minga.Editor.RenderPipeline.Emit.TUI, as: EmitTUI
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.TabBar
   alias Minga.Editor.Title
+  alias Minga.Frontend.Emit.GUI, as: EmitGUI
+  alias Minga.Frontend.Emit.TUI, as: EmitTUI
   alias Minga.Frontend.Protocol.GUIWindowContent
   alias Minga.Telemetry
 
@@ -189,7 +189,9 @@ defmodule Minga.Editor.RenderPipeline.Emit do
         title = Title.format(state, format)
 
         # Prepend [!] when any agent tab needs attention (TUI only).
-        if state.tab_bar && TabBar.any_attention?(state.tab_bar) do
+        tb = state.shell_state.tab_bar
+
+        if tb && TabBar.any_attention?(tb) do
           "[!] " <> title
         else
           title

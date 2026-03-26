@@ -27,8 +27,8 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
   @doc "Renders the tab bar, returning draws and click regions."
   @spec render_tab_bar(state(), Layout.t()) ::
           {[DisplayList.draw()], [TabBarRenderer.click_region()]}
-  def render_tab_bar(%{tab_bar: nil}, _layout), do: {[], []}
-  def render_tab_bar(_state, %{tab_bar: nil}), do: {[], []}
+  def render_tab_bar(%{shell_state: %{tab_bar: nil}}, _layout), do: {[], []}
+  def render_tab_bar(_state, %{shell_state: %{tab_bar: nil}}), do: {[], []}
 
   def render_tab_bar(state, layout) do
     {tab_row, _col, tab_width, _h} = layout.tab_bar
@@ -39,7 +39,7 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
         _ -> nil
       end
 
-    TabBarRenderer.render(tab_row, tab_width, state.tab_bar, state.theme, hover_col)
+    TabBarRenderer.render(tab_row, tab_width, state.shell_state.tab_bar, state.theme, hover_col)
   end
 
   # ── Separators ─────────────────────────────────────────────────────────────
@@ -91,7 +91,11 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
   @spec render_whichkey(state(), Viewport.t(), :bottom | :float) :: [DisplayList.draw()]
   def render_whichkey(state, viewport, layout \\ Options.get(:whichkey_layout))
 
-  def render_whichkey(%{whichkey: %{show: true, node: node} = wk, theme: theme}, viewport, layout)
+  def render_whichkey(
+        %{shell_state: %{whichkey: %{show: true, node: node} = wk}, theme: theme},
+        viewport,
+        layout
+      )
       when is_map(node) do
     bindings = WhichKey.bindings_from_node(node)
     prefix_title = whichkey_prefix_title(wk)

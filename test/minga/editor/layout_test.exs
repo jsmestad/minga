@@ -55,7 +55,7 @@ defmodule Minga.Editor.LayoutTest do
     # Ensure a file tab exists and is active, then add a background agent tab.
     # TabBar.new/1 requires an initial Tab; we start with a file tab.
     file_tab = %Minga.Editor.State.Tab{id: 1, kind: :file, label: "scratch"}
-    tb = state.tab_bar || TabBar.new(file_tab)
+    tb = Minga.Editor.State.tab_bar(state) || TabBar.new(file_tab)
     {tb, agent_tab} = TabBar.add(tb, :agent, "Agent")
     tb = TabBar.update_context(tb, agent_tab.id, agent_ctx)
 
@@ -63,7 +63,8 @@ defmodule Minga.Editor.LayoutTest do
     tb = TabBar.switch_to(tb, file_tab.id)
 
     state = put_in(state.workspace.agent_ui, agentic)
-    %{state | tab_bar: tb, agent: agent}
+    ss = state.shell_state
+    %{state | shell_state: %{ss | tab_bar: tb, agent: agent}}
   end
 
   defp with_vsplit(state) do

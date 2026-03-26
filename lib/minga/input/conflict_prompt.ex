@@ -10,6 +10,7 @@ defmodule Minga.Input.ConflictPrompt do
   @behaviour Minga.Input.Handler
 
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Editor.State, as: EditorState
 
   @impl true
   @spec handle_key(Minga.Editor.State.t(), non_neg_integer(), non_neg_integer()) ::
@@ -20,11 +21,8 @@ defmodule Minga.Input.ConflictPrompt do
     name = Path.basename(BufferServer.file_path(buf) || "buffer")
 
     {:handled,
-     %{
-       state
-       | workspace: %{state.workspace | pending_conflict: nil},
-         status_msg: "#{name} reloaded (changed on disk)"
-     }}
+     %{state | workspace: %{state.workspace | pending_conflict: nil}}
+     |> EditorState.set_status("#{name} reloaded (changed on disk)")}
   end
 
   def handle_key(%{workspace: %{pending_conflict: {buf, _path}}} = state, ?k, _mods)
@@ -39,7 +37,8 @@ defmodule Minga.Input.ConflictPrompt do
         :ok
     end
 
-    {:handled, %{state | workspace: %{state.workspace | pending_conflict: nil}, status_msg: nil}}
+    state = %{state | workspace: %{state.workspace | pending_conflict: nil}}
+    {:handled, EditorState.clear_status(state)}
   end
 
   def handle_key(%{workspace: %{pending_conflict: {_, _}}} = state, _cp, _mods) do

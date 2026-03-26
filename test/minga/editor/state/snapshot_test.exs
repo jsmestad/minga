@@ -25,7 +25,7 @@ defmodule Minga.Editor.State.SnapshotTest do
         },
         keymap_scope: Keyword.get(opts, :keymap_scope, :editor)
       },
-      tab_bar: Keyword.get(opts, :tab_bar)
+      shell_state: %Minga.Shell.Traditional.State{tab_bar: Keyword.get(opts, :tab_bar)}
     }
   end
 
@@ -156,10 +156,10 @@ defmodule Minga.Editor.State.SnapshotTest do
       # Should have restored tab b's context
       assert switched.workspace.vim.mode == :insert
       assert switched.workspace.buffers.active == buf_b
-      assert switched.tab_bar.active_id == tab_b.id
+      assert switched.shell_state.tab_bar.active_id == tab_b.id
 
       # Tab a should have been snapshotted with flat context
-      saved_a = TabBar.get(switched.tab_bar, tab_a.id)
+      saved_a = TabBar.get(switched.shell_state.tab_bar, tab_a.id)
       assert saved_a.context.keymap_scope == :editor
       assert saved_a.context.vim.mode == :normal
       assert saved_a.context.buffers.active == buf_a

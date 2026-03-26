@@ -21,7 +21,7 @@ defmodule Minga.Input.SignatureHelpTest do
   defp state_with_sig_help do
     state = base_state()
     sh = SigHelp.from_response(@sample_response, 10, 20)
-    %{state | signature_help: sh}
+    Minga.Editor.State.update_shell_state(state, &%{&1 | signature_help: sh})
   end
 
   describe "handle_key/3 with no signature help" do
@@ -35,7 +35,7 @@ defmodule Minga.Input.SignatureHelpTest do
     test "C-j cycles to next signature" do
       state = state_with_sig_help()
       assert {:handled, new_state} = SigHelpInput.handle_key(state, ?j, @ctrl)
-      assert new_state.signature_help.active_signature == 1
+      assert new_state.shell_state.signature_help.active_signature == 1
     end
 
     test "C-k cycles to previous signature" do
@@ -43,19 +43,19 @@ defmodule Minga.Input.SignatureHelpTest do
       # Go to signature 1 first
       {:handled, state} = SigHelpInput.handle_key(state, ?j, @ctrl)
       assert {:handled, new_state} = SigHelpInput.handle_key(state, ?k, @ctrl)
-      assert new_state.signature_help.active_signature == 0
+      assert new_state.shell_state.signature_help.active_signature == 0
     end
 
     test "Escape dismisses" do
       state = state_with_sig_help()
       assert {:handled, new_state} = SigHelpInput.handle_key(state, @escape, 0)
-      assert new_state.signature_help == nil
+      assert new_state.shell_state.signature_help == nil
     end
 
     test "regular keys pass through (signature stays visible)" do
       state = state_with_sig_help()
       assert {:passthrough, new_state} = SigHelpInput.handle_key(state, ?a, 0)
-      assert new_state.signature_help != nil
+      assert new_state.shell_state.signature_help != nil
     end
   end
 end

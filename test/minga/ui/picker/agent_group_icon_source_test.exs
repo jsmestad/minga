@@ -15,7 +15,7 @@ defmodule Minga.UI.Picker.AgentGroupIconSourceTest do
   describe "candidates/1" do
     test "returns items for all curated icons" do
       tb = TabBar.new(Tab.new_file(1, "a.ex"))
-      items = AgentGroupIconSource.candidates(%{tab_bar: tb})
+      items = AgentGroupIconSource.candidates(%{shell_state: %{tab_bar: tb}})
       assert length(items) > 40
       assert Enum.all?(items, &match?(%Item{}, &1))
     end
@@ -27,7 +27,7 @@ defmodule Minga.UI.Picker.AgentGroupIconSourceTest do
       tb = TabBar.move_tab_to_group(tb, 2, group.id)
       tb = TabBar.switch_to_group(tb, group.id)
 
-      items = AgentGroupIconSource.candidates(%{tab_bar: tb})
+      items = AgentGroupIconSource.candidates(%{shell_state: %{tab_bar: tb}})
       cpu_item = Enum.find(items, &(&1.id == "cpu"))
       assert cpu_item.label =~ "\u{2022}"
       other = Enum.find(items, &(&1.id == "brain"))
@@ -35,7 +35,11 @@ defmodule Minga.UI.Picker.AgentGroupIconSourceTest do
     end
 
     test "items include category as description" do
-      items = AgentGroupIconSource.candidates(%{tab_bar: TabBar.new(Tab.new_file(1, "a.ex"))})
+      items =
+        AgentGroupIconSource.candidates(%{
+          shell_state: %{tab_bar: TabBar.new(Tab.new_file(1, "a.ex"))}
+        })
+
       folder_item = Enum.find(items, &(&1.id == "folder"))
       assert folder_item.description == "General"
     end
@@ -53,17 +57,17 @@ defmodule Minga.UI.Picker.AgentGroupIconSourceTest do
       tb = TabBar.move_tab_to_group(tb, 2, group.id)
       tb = TabBar.switch_to_group(tb, group.id)
 
-      state = %{tab_bar: tb}
+      state = %{shell_state: %{tab_bar: tb}}
       item = %Item{id: "brain", label: "brain"}
       new_state = AgentGroupIconSource.on_select(item, state)
-      g = TabBar.active_group(new_state.tab_bar)
+      g = TabBar.active_group(new_state.shell_state.tab_bar)
       assert g.icon == "brain"
     end
   end
 
   describe "on_cancel/1" do
     test "returns state unchanged" do
-      state = %{tab_bar: TabBar.new(Tab.new_file(1, "a.ex"))}
+      state = %{shell_state: %{tab_bar: TabBar.new(Tab.new_file(1, "a.ex"))}}
       assert AgentGroupIconSource.on_cancel(state) == state
     end
   end

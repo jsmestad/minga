@@ -22,7 +22,7 @@ defmodule Minga.Editor.Commands.Formatting do
 
     case spec do
       nil ->
-        %{state | status_msg: "No formatter configured for #{filetype}"}
+        EditorState.set_status(state, "No formatter configured for #{filetype}")
 
       _ ->
         command = spec |> String.split() |> List.first()
@@ -35,7 +35,7 @@ defmodule Minga.Editor.Commands.Formatting do
     end
   end
 
-  def format_buffer(state), do: %{state | status_msg: "No buffer to format"}
+  def format_buffer(state), do: EditorState.set_status(state, "No buffer to format")
 
   # ── Private helpers ───────────────────────────────────────────────────────
 
@@ -52,11 +52,11 @@ defmodule Minga.Editor.Commands.Formatting do
         safe_line = min(cursor_line, max(line_count - 1, 0))
         BufferServer.move_to(buf, {safe_line, cursor_col})
         Minga.Editor.log_to_messages("Formatted: #{buf_name}")
-        %{state | status_msg: "Formatted"}
+        EditorState.set_status(state, "Formatted")
 
       {:error, msg} ->
         Minga.Log.warning(:editor, "Formatter failed: #{buf_name} (#{msg})")
-        %{state | status_msg: "Format error: #{msg}"}
+        EditorState.set_status(state, "Format error: #{msg}")
     end
   end
 
@@ -67,11 +67,11 @@ defmodule Minga.Editor.Commands.Formatting do
   defp maybe_prompt_formatter_install(state, command) do
     case RecipeRegistry.for_command(command) do
       nil ->
-        %{state | status_msg: "Formatter not found: #{command}"}
+        EditorState.set_status(state, "Formatter not found: #{command}")
 
       recipe ->
         if EditorState.skip_tool_prompt?(state, recipe.name) do
-          %{state | status_msg: "Formatter not found: #{command}"}
+          EditorState.set_status(state, "Formatter not found: #{command}")
         else
           queue_and_show_prompt(state, recipe.name)
         end
@@ -80,14 +80,17 @@ defmodule Minga.Editor.Commands.Formatting do
 
   @spec queue_and_show_prompt(state(), atom()) :: state()
   defp queue_and_show_prompt(%{workspace: %{vim: %{mode: :normal}}} = state, tool_name) do
-    queue = state.tool_prompt_queue ++ [tool_name]
-    state = %{state | tool_prompt_queue: queue}
-    ms = %ToolConfirmState{pending: queue, declined: state.tool_declined}
+    queue = state.shell_state.tool_prompt_queue ++ [tool_name]
+    state = EditorState.update_shell_state(state, &%{&1 | tool_prompt_queue: queue})
+    ms = %ToolConfirmState{pending: queue, declined: state.shell_state.tool_declined}
     EditorState.transition_mode(state, :tool_confirm, ms)
   end
 
   defp queue_and_show_prompt(state, tool_name) do
-    %{state | tool_prompt_queue: state.tool_prompt_queue ++ [tool_name]}
+    EditorState.update_shell_state(
+      state,
+      &%{&1 | tool_prompt_queue: state.shell_state.tool_prompt_queue ++ [tool_name]}
+    )
   end
 
   @impl Minga.Command.Provider

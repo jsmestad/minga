@@ -25,7 +25,8 @@ defmodule Minga.Editor.State.AgentAccess do
 
   @doc "Returns the agent session lifecycle state."
   @spec agent(EditorState.t() | map()) :: AgentState.t()
-  def agent(%EditorState{agent: a}), do: a
+  def agent(%EditorState{shell_state: %{agent: a}}), do: a
+  def agent(%{shell_state: %{agent: a}}), do: a
   def agent(%{agent: a}), do: a
   def agent(_), do: %AgentState{}
 
@@ -67,8 +68,12 @@ defmodule Minga.Editor.State.AgentAccess do
   @doc "Updates agent session lifecycle state via a transform function."
   @spec update_agent(EditorState.t() | map(), (AgentState.t() -> AgentState.t())) ::
           EditorState.t() | map()
-  def update_agent(%EditorState{agent: a} = state, fun) do
-    %{state | agent: fun.(a)}
+  def update_agent(%EditorState{shell_state: %{agent: a} = ss} = state, fun) do
+    %{state | shell_state: %{ss | agent: fun.(a)}}
+  end
+
+  def update_agent(%{shell_state: %{agent: a} = ss} = state, fun) do
+    %{state | shell_state: %{ss | agent: fun.(a)}}
   end
 
   def update_agent(%{agent: a} = state, fun) do

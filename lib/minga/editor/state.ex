@@ -4,20 +4,26 @@ defmodule Minga.Editor.State do
 
   ## Field categories
 
-  EditorState fields fall into two categories:
+  EditorState fields fall into three categories:
 
   **Workspace fields** live in `state.workspace` (`Minga.Workspace.State`)
   and are saved/restored when switching tabs. Each tab carries a snapshot
   of the workspace so switching tabs restores the full editing context.
 
+  **Shell fields** live in `state.shell_state` (`Minga.Shell.Traditional.State`)
+  and hold presentation concerns: chrome, overlays, transient UI state.
+  The active shell module is `state.shell`. See `Minga.Shell` for the
+  behaviour definition.
+
   **Global fields** are shared across all tabs and never snapshotted:
-  `port_manager`, `theme`, `status_msg`, `render_timer`, `focus_stack`,
+  `port_manager`, `theme`, `render_timer`, `focus_stack`,
   `tab_bar`, `capabilities`, `layout`, `modeline_click_regions`,
   `tab_bar_click_regions`, `agent`, `picker_ui`, `whichkey`.
 
   ## Composed sub-structs
 
   * `Minga.Workspace.State`           — per-tab editing context (buffers, windows, vim, etc.)
+  * `Minga.Shell.Traditional.State`   — presentation state (nav_flash, hover, dashboard, etc.)
   * `Minga.Editor.State.Picker`       — picker instance, source, restore index
   * `Minga.Editor.State.WhichKey`     — which-key popup node, timer, visibility
   * `Minga.Editor.State.Registers`    — named registers and active register selection
@@ -30,8 +36,6 @@ defmodule Minga.Editor.State do
   alias Minga.Editor.BottomPanel
   alias Minga.Editor.CompletionTrigger
   alias Minga.Editor.Dashboard
-
-  alias Minga.Editor.NavFlash
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.Buffers
@@ -66,35 +70,24 @@ defmodule Minga.Editor.State do
   @typedoc "A document highlight range from the LSP server."
   @type document_highlight :: Minga.LSP.DocumentHighlight.t()
 
+  alias Minga.Shell.Traditional.State, as: ShellState
+
   @enforce_keys [:port_manager, :workspace]
   defstruct backend: :headless,
             port_manager: nil,
             workspace: nil,
-            picker_ui: %Picker{},
-            prompt_ui: %Prompt{},
-            whichkey: %WhichKey{},
+            shell: Minga.Shell.Traditional,
+            shell_state: %ShellState{},
             theme: Minga.UI.Theme.get!(:doom_one),
-            status_msg: nil,
             render_timer: nil,
-            warning_popup_timer: nil,
-            bottom_panel: %BottomPanel{},
             message_store: %MessageStore{},
-            git_status_panel: nil,
             git_remote_op: nil,
             lsp_status: :none,
             lsp_server_statuses: %{},
             parser_status: :available,
-            hover_popup: nil,
-            signature_help: nil,
             focus_stack: [],
-            tab_bar: nil,
             capabilities: %Capabilities{},
             layout: nil,
-            modeline_click_regions: [],
-            tab_bar_click_regions: [],
-            agent: %AgentState{},
-            dashboard: nil,
-            nav_flash: nil,
             last_cursor_line: nil,
             last_test_command: nil,
             pending_quit: nil,
@@ -108,12 +101,9 @@ defmodule Minga.Editor.State do
             inlay_hints: [],
             selection_ranges: nil,
             selection_range_index: 0,
-            tool_declined: MapSet.new(),
-            tool_prompt_queue: [],
             session_timer: nil,
             swap_dir: nil,
-            session_dir: nil,
-            suppress_tool_prompts: false
+            session_dir: nil
 
   @type backend :: :tui | :native_gui | :headless
 
@@ -121,16 +111,11 @@ defmodule Minga.Editor.State do
           backend: backend(),
           port_manager: GenServer.server() | nil,
           workspace: WorkspaceState.t(),
-          picker_ui: Picker.t(),
-          prompt_ui: Prompt.t(),
-          whichkey: WhichKey.t(),
+          shell: module(),
+          shell_state: ShellState.t(),
           theme: Theme.t(),
-          status_msg: String.t() | nil,
           render_timer: reference() | nil,
-          warning_popup_timer: reference() | nil,
-          bottom_panel: BottomPanel.t(),
           message_store: MessageStore.t(),
-          git_status_panel: Minga.Frontend.Protocol.GUI.git_status_data() | nil,
           git_remote_op:
             {msg_ref :: reference(), task_monitor :: reference(),
              {git_root :: String.t(), success_msg :: String.t(), error_prefix :: String.t()}}
@@ -140,17 +125,9 @@ defmodule Minga.Editor.State do
             atom() => :starting | :initializing | :ready | :crashed
           },
           parser_status: Minga.Editor.Modeline.parser_status(),
-          hover_popup: Minga.Editor.HoverPopup.t() | nil,
-          signature_help: Minga.Editor.SignatureHelp.t() | nil,
           focus_stack: [module()],
-          tab_bar: TabBar.t() | nil,
           capabilities: Capabilities.t(),
           layout: Minga.Editor.Layout.t() | nil,
-          modeline_click_regions: [Minga.Editor.Modeline.click_region()],
-          tab_bar_click_regions: [Minga.Editor.TabBarRenderer.click_region()],
-          agent: AgentState.t(),
-          dashboard: Dashboard.state() | nil,
-          nav_flash: NavFlash.t() | nil,
           last_cursor_line: non_neg_integer() | nil,
           last_test_command: {String.t(), String.t()} | nil,
           pending_quit: :quit | :quit_all | nil,
@@ -164,12 +141,9 @@ defmodule Minga.Editor.State do
           selection_ranges: [map()] | nil,
           selection_range_index: non_neg_integer(),
           font_registry: Minga.UI.FontRegistry.t(),
-          tool_declined: MapSet.t(atom()),
-          tool_prompt_queue: [atom()],
           session_timer: reference() | nil,
           swap_dir: String.t() | nil,
-          session_dir: String.t() | nil,
-          suppress_tool_prompts: boolean()
+          session_dir: String.t() | nil
         }
 
   # ── Workspace helpers ──────────────────────────────────────────────────────
@@ -178,6 +152,177 @@ defmodule Minga.Editor.State do
   @spec update_workspace(t(), (WorkspaceState.t() -> WorkspaceState.t())) :: t()
   def update_workspace(%__MODULE__{workspace: ws} = state, fun) when is_function(fun, 1) do
     %{state | workspace: fun.(ws)}
+  end
+
+  @doc "Applies a function to the shell state and returns the updated state."
+  @spec update_shell_state(t(), (ShellState.t() -> ShellState.t())) :: t()
+  def update_shell_state(%__MODULE__{shell_state: ss} = state, fun) when is_function(fun, 1) do
+    %{state | shell_state: fun.(ss)}
+  end
+
+  # ── Shell field accessors ─────────────────────────────────────────────────
+  # Convenience helpers for the most-accessed shell fields. These avoid
+  # the verbose `%{state | shell_state: %{state.shell_state | field: val}}`
+  # pattern at 100+ call sites.
+
+  @doc "Returns the transient status message, or nil."
+  @spec status_msg(t()) :: String.t() | nil
+  def status_msg(%__MODULE__{shell_state: ss}), do: ss.status_msg
+
+  @doc "Sets the transient status message shown in the modeline."
+  @spec set_status(t(), String.t()) :: t()
+  def set_status(%{shell_state: ss} = state, msg) when is_binary(msg) do
+    %{state | shell_state: %{ss | status_msg: msg}}
+  end
+
+  @doc "Clears the transient status message."
+  @spec clear_status(t()) :: t()
+  def clear_status(%{shell_state: ss} = state) do
+    %{state | shell_state: %{ss | status_msg: nil}}
+  end
+
+  @doc "Returns the nav flash state, or nil when inactive."
+  @spec nav_flash(t()) :: Minga.Editor.NavFlash.t() | nil
+  def nav_flash(%__MODULE__{shell_state: ss}), do: ss.nav_flash
+
+  @doc "Sets the nav flash state."
+  @spec set_nav_flash(t(), Minga.Editor.NavFlash.t()) :: t()
+  def set_nav_flash(%{shell_state: ss} = state, %Minga.Editor.NavFlash{} = flash) do
+    %{state | shell_state: %{ss | nav_flash: flash}}
+  end
+
+  @doc "Cancels the nav flash animation."
+  @spec cancel_nav_flash(t()) :: t()
+  def cancel_nav_flash(%{shell_state: ss} = state) do
+    %{state | shell_state: %{ss | nav_flash: nil}}
+  end
+
+  @doc "Returns the hover popup state, or nil when not showing."
+  @spec hover_popup(t()) :: Minga.Editor.HoverPopup.t() | nil
+  def hover_popup(%__MODULE__{shell_state: ss}), do: ss.hover_popup
+
+  @doc "Sets the hover popup state."
+  @spec set_hover_popup(t(), Minga.Editor.HoverPopup.t()) :: t()
+  def set_hover_popup(%{shell_state: ss} = state, %Minga.Editor.HoverPopup{} = popup) do
+    %{state | shell_state: %{ss | hover_popup: popup}}
+  end
+
+  @doc "Dismisses the hover popup."
+  @spec dismiss_hover_popup(t()) :: t()
+  def dismiss_hover_popup(%{shell_state: ss} = state) do
+    %{state | shell_state: %{ss | hover_popup: nil}}
+  end
+
+  @doc "Returns the dashboard home screen state, or nil."
+  @spec dashboard(t()) :: Dashboard.state() | nil
+  def dashboard(%__MODULE__{shell_state: ss}), do: ss.dashboard
+
+  @doc "Sets the dashboard home screen state."
+  @spec set_dashboard(t(), Dashboard.state()) :: t()
+  def set_dashboard(%{shell_state: ss} = state, dash) when is_map(dash) do
+    %{state | shell_state: %{ss | dashboard: dash}}
+  end
+
+  @doc "Closes the dashboard home screen."
+  @spec close_dashboard(t()) :: t()
+  def close_dashboard(%{shell_state: ss} = state) do
+    %{state | shell_state: %{ss | dashboard: nil}}
+  end
+
+  # ── Picker UI ───────────────────────────────────────────────────────────
+
+  @doc "Returns the picker UI state."
+  @spec picker_ui(t()) :: Picker.t()
+  def picker_ui(%{shell_state: ss}), do: ss.picker_ui
+
+  @doc "Replaces the picker UI state."
+  @spec set_picker_ui(t(), Picker.t()) :: t()
+  def set_picker_ui(%{shell_state: ss} = state, pui) do
+    %{state | shell_state: %{ss | picker_ui: pui}}
+  end
+
+  @doc "Applies a function to the picker UI state."
+  @spec update_picker_ui(t(), (Picker.t() -> Picker.t())) :: t()
+  def update_picker_ui(%{shell_state: ss} = state, fun) when is_function(fun, 1) do
+    %{state | shell_state: %{ss | picker_ui: fun.(ss.picker_ui)}}
+  end
+
+  # ── Prompt UI ──────────────────────────────────────────────────────────
+
+  @doc "Returns the prompt UI state."
+  @spec prompt_ui(t()) :: Prompt.t()
+  def prompt_ui(%{shell_state: ss}), do: ss.prompt_ui
+
+  @doc "Replaces the prompt UI state."
+  @spec set_prompt_ui(t(), Prompt.t()) :: t()
+  def set_prompt_ui(%{shell_state: ss} = state, prompt) do
+    %{state | shell_state: %{ss | prompt_ui: prompt}}
+  end
+
+  # ── Which-key ──────────────────────────────────────────────────────────
+
+  @doc "Returns the which-key popup state."
+  @spec whichkey(t()) :: WhichKey.t()
+  def whichkey(%{shell_state: ss}), do: ss.whichkey
+
+  @doc "Replaces the which-key popup state."
+  @spec set_whichkey(t(), WhichKey.t()) :: t()
+  def set_whichkey(%{shell_state: ss} = state, wk) do
+    %{state | shell_state: %{ss | whichkey: wk}}
+  end
+
+  # ── Bottom panel ───────────────────────────────────────────────────────
+
+  @doc "Returns the bottom panel state."
+  @spec bottom_panel(t()) :: BottomPanel.t()
+  def bottom_panel(%{shell_state: ss}), do: ss.bottom_panel
+
+  @doc "Replaces the bottom panel state."
+  @spec set_bottom_panel(t(), BottomPanel.t()) :: t()
+  def set_bottom_panel(%{shell_state: ss} = state, panel) do
+    %{state | shell_state: %{ss | bottom_panel: panel}}
+  end
+
+  # ── Git status panel ──────────────────────────────────────────────────
+
+  @doc "Returns the git status panel data, or nil."
+  @spec git_status_panel(t()) :: Minga.Frontend.Protocol.GUI.git_status_data() | nil
+  def git_status_panel(%{shell_state: ss}), do: ss.git_status_panel
+
+  @doc "Sets the git status panel data."
+  @spec set_git_status_panel(t(), map() | nil) :: t()
+  def set_git_status_panel(%{shell_state: ss} = state, data) do
+    %{state | shell_state: %{ss | git_status_panel: data}}
+  end
+
+  @doc "Clears the git status panel."
+  @spec close_git_status_panel(t()) :: t()
+  def close_git_status_panel(%{shell_state: ss} = state) do
+    %{state | shell_state: %{ss | git_status_panel: nil}}
+  end
+
+  # ── Tab bar ────────────────────────────────────────────────────────────
+
+  @doc "Returns the tab bar state, or nil."
+  @spec tab_bar(t()) :: TabBar.t() | nil
+  def tab_bar(%{shell_state: ss}), do: ss.tab_bar
+
+  @doc "Replaces the tab bar state."
+  @spec set_tab_bar(t(), TabBar.t() | nil) :: t()
+  def set_tab_bar(%{shell_state: ss} = state, tb) do
+    %{state | shell_state: %{ss | tab_bar: tb}}
+  end
+
+  # ── Agent lifecycle ────────────────────────────────────────────────────
+
+  @doc "Returns the agent session lifecycle state."
+  @spec agent(t()) :: AgentState.t()
+  def agent(%{shell_state: ss}), do: ss.agent
+
+  @doc "Replaces the agent session lifecycle state."
+  @spec set_agent(t(), AgentState.t()) :: t()
+  def set_agent(%{shell_state: ss} = state, agent) do
+    %{state | shell_state: %{ss | agent: agent}}
   end
 
   # ── Convenience accessors ─────────────────────────────────────────────────
@@ -294,8 +439,10 @@ defmodule Minga.Editor.State do
     state = %{state | workspace: %{state.workspace | buffers: new_bs}, buffer_monitors: monitors}
 
     # Clear agent buffer or prompt buffer if the dead pid matches
+    agent = state.shell_state.agent
+
     state =
-      if state.agent != nil and state.agent.buffer == pid do
+      if agent != nil and agent.buffer == pid do
         AgentAccess.update_agent(state, fn a -> %{a | buffer: nil} end)
       else
         state
@@ -539,7 +686,10 @@ defmodule Minga.Editor.State do
   dedicated file tab.
   """
   @spec add_buffer(t(), pid()) :: t()
-  def add_buffer(%__MODULE__{workspace: %{buffers: bs}, tab_bar: %TabBar{} = tb} = state, pid) do
+  def add_buffer(
+        %__MODULE__{workspace: %{buffers: bs}, shell_state: %{tab_bar: %TabBar{} = tb}} = state,
+        pid
+      ) do
     label = buffer_label(pid)
     active_tab = TabBar.active(tb)
 
@@ -578,7 +728,7 @@ defmodule Minga.Editor.State do
   # tab, creates a new one, and syncs the buffer into the new tab's window.
   @spec add_buffer_as_new_file_tab(t(), String.t()) :: t()
   defp add_buffer_as_new_file_tab(state, label) do
-    tb = state.tab_bar
+    tb = tab_bar(state)
 
     # Snapshot current tab before leaving
     current_ctx = snapshot_tab_context(state)
@@ -586,18 +736,18 @@ defmodule Minga.Editor.State do
 
     # Create file tab (TabBar.add auto-activates it)
     {tb, new_tab} = TabBar.add(tb, :file, label)
-    state = %{state | tab_bar: tb}
+    state = set_tab_bar(state, tb)
     state = sync_active_window_buffer(state)
 
     # Snapshot the new tab's context
     new_ctx = snapshot_tab_context(state)
-    tb = TabBar.update_context(state.tab_bar, new_tab.id, new_ctx)
+    tb = TabBar.update_context(tab_bar(state), new_tab.id, new_ctx)
 
     Log.debug(:editor, fn ->
       "[tab] add_buffer new file tab=#{new_tab.id} label=#{label}"
     end)
 
-    %{state | tab_bar: tb}
+    set_tab_bar(state, tb)
   end
 
   # Finds an existing file tab that shows the same buffer (by label match).
@@ -612,13 +762,15 @@ defmodule Minga.Editor.State do
   # Updates the active file tab's label to match the current buffer name.
   # No-op if there's no tab bar or the active tab isn't a file tab.
   @spec sync_active_tab_label(t()) :: t()
-  defp sync_active_tab_label(%__MODULE__{tab_bar: nil} = state), do: state
+  defp sync_active_tab_label(%__MODULE__{shell_state: %{tab_bar: nil}} = state), do: state
 
-  defp sync_active_tab_label(%__MODULE__{tab_bar: tb, workspace: %{buffers: bs}} = state) do
+  defp sync_active_tab_label(
+         %__MODULE__{shell_state: %{tab_bar: tb}, workspace: %{buffers: bs}} = state
+       ) do
     case TabBar.active(tb) do
       %Tab{kind: :file} ->
         label = buffer_label(bs.active)
-        %{state | tab_bar: TabBar.update_label(tb, tb.active_id, label)}
+        set_tab_bar(state, TabBar.update_label(tb, tb.active_id, label))
 
       _ ->
         state
@@ -629,7 +781,7 @@ defmodule Minga.Editor.State do
   # is an agent tab and we need a dedicated file tab for the buffer.
   @spec add_buffer_as_new_tab(t(), String.t()) :: t()
   defp add_buffer_as_new_tab(state, label) do
-    tb = state.tab_bar
+    tb = tab_bar(state)
 
     # Snapshot current tab before leaving.
     current_ctx = snapshot_tab_context(state)
@@ -641,18 +793,18 @@ defmodule Minga.Editor.State do
     # Leave agent UI view: reset to editor scope.
     state = AgentAccess.update_agent_ui(state, fn _ -> UIState.new() end)
     state = put_in(state.workspace.keymap_scope, :editor)
-    state = %{state | tab_bar: tb}
+    state = set_tab_bar(state, tb)
     state = sync_active_window_buffer(state)
 
     # Snapshot the new tab's context.
     new_ctx = snapshot_tab_context(state)
-    tb = TabBar.update_context(state.tab_bar, new_tab.id, new_ctx)
+    tb = TabBar.update_context(tab_bar(state), new_tab.id, new_ctx)
 
     Log.debug(:editor, fn ->
       "[tab] add_buffer new tab=#{new_tab.id} label=#{label}"
     end)
 
-    %{state | tab_bar: tb}
+    set_tab_bar(state, tb)
   end
 
   @doc """
@@ -1073,9 +1225,9 @@ defmodule Minga.Editor.State do
   entire visual context changes.
   """
   @spec switch_tab(t(), Tab.id()) :: t()
-  def switch_tab(%__MODULE__{tab_bar: nil} = state, _target_id), do: state
+  def switch_tab(%__MODULE__{shell_state: %{tab_bar: nil}} = state, _target_id), do: state
 
-  def switch_tab(%__MODULE__{tab_bar: tb} = state, target_id) do
+  def switch_tab(%__MODULE__{shell_state: %{tab_bar: tb}} = state, target_id) do
     current_id = tb.active_id
 
     if current_id == target_id do
@@ -1096,7 +1248,7 @@ defmodule Minga.Editor.State do
 
       # Restore target tab's context
       %Tab{} = target = TabBar.active(tb)
-      state = %{state | tab_bar: tb}
+      state = set_tab_bar(state, tb)
 
       state = restore_tab_context(state, target.context)
 
@@ -1106,10 +1258,11 @@ defmodule Minga.Editor.State do
       state = rebuild_agent_from_session(state, target)
 
       # Clear attention flag on the tab we're switching to.
-      state = %{
-        state
-        | tab_bar: TabBar.update_tab(state.tab_bar, target_id, &Tab.set_attention(&1, false))
-      }
+      state =
+        set_tab_bar(
+          state,
+          TabBar.update_tab(tab_bar(state), target_id, &Tab.set_attention(&1, false))
+        )
 
       # Restart spinner for incoming agent if it's busy.
       state = maybe_restart_incoming_spinner(state)
@@ -1126,14 +1279,14 @@ defmodule Minga.Editor.State do
   Returns the active tab, or nil if the tab bar isn't initialized.
   """
   @spec active_tab(t()) :: Tab.t() | nil
-  def active_tab(%__MODULE__{tab_bar: nil}), do: nil
-  def active_tab(%__MODULE__{tab_bar: tb}), do: TabBar.active(tb)
+  def active_tab(%__MODULE__{shell_state: %{tab_bar: nil}}), do: nil
+  def active_tab(%__MODULE__{shell_state: %{tab_bar: tb}}), do: TabBar.active(tb)
 
   @doc "Finds a file tab whose context has the given buffer pid as active."
   @spec find_tab_by_buffer(t(), pid()) :: Tab.t() | nil
-  def find_tab_by_buffer(%__MODULE__{tab_bar: nil}, _pid), do: nil
+  def find_tab_by_buffer(%__MODULE__{shell_state: %{tab_bar: nil}}, _pid), do: nil
 
-  def find_tab_by_buffer(%__MODULE__{tab_bar: tb}, pid) do
+  def find_tab_by_buffer(%__MODULE__{shell_state: %{tab_bar: tb}}, pid) do
     Enum.find(tb.tabs, fn tab ->
       tab.kind == :file and tab_has_active_buffer?(tab, pid)
     end)
@@ -1153,9 +1306,9 @@ defmodule Minga.Editor.State do
   Returns the kind of the active tab, or `:file` as default.
   """
   @spec active_tab_kind(t()) :: Tab.kind()
-  def active_tab_kind(%__MODULE__{tab_bar: nil}), do: :file
+  def active_tab_kind(%__MODULE__{shell_state: %{tab_bar: nil}}), do: :file
 
-  def active_tab_kind(%__MODULE__{tab_bar: tb}) do
+  def active_tab_kind(%__MODULE__{shell_state: %{tab_bar: tb}}) do
     %Tab{kind: kind} = TabBar.active(tb)
     kind
   end
@@ -1184,8 +1337,8 @@ defmodule Minga.Editor.State do
   Called when a session is started or switched so `find_by_session/2` works.
   """
   @spec set_tab_session(t(), Tab.id(), pid() | nil) :: t()
-  def set_tab_session(%__MODULE__{tab_bar: tb} = state, tab_id, session_pid) do
-    %{state | tab_bar: TabBar.update_tab(tb, tab_id, &Tab.set_session(&1, session_pid))}
+  def set_tab_session(%__MODULE__{shell_state: %{tab_bar: tb}} = state, tab_id, session_pid) do
+    set_tab_bar(state, TabBar.update_tab(tb, tab_id, &Tab.set_session(&1, session_pid)))
   end
 
   # Rebuilds state.agent from the Session process when switching to an
@@ -1253,10 +1406,10 @@ defmodule Minga.Editor.State do
   installed, currently being installed, or already in the prompt queue.
   """
   @spec skip_tool_prompt?(t(), atom()) :: boolean()
-  def skip_tool_prompt?(%__MODULE__{} = state, tool_name) do
-    MapSet.member?(state.tool_declined, tool_name) or
+  def skip_tool_prompt?(%__MODULE__{shell_state: ss}, tool_name) do
+    MapSet.member?(ss.tool_declined, tool_name) or
       ToolManager.installed?(tool_name) or
       MapSet.member?(ToolManager.installing(), tool_name) or
-      tool_name in state.tool_prompt_queue
+      tool_name in ss.tool_prompt_queue
   end
 end

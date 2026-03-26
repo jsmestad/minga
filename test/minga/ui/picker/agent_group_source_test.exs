@@ -11,7 +11,7 @@ defmodule Minga.UI.Picker.AgentGroupSourceTest do
       {tb, _} = TabBar.add(tb, :agent, "Agent")
       {tb, group} = TabBar.add_agent_group(tb, "Research")
       tb = TabBar.move_tab_to_group(tb, 2, group.id)
-      state = %{tab_bar: tb}
+      state = %{shell_state: %{tab_bar: tb}}
 
       items = AgentGroupSource.candidates(state)
       assert length(items) == 1
@@ -21,7 +21,7 @@ defmodule Minga.UI.Picker.AgentGroupSourceTest do
     test "filters out groups with no tabs" do
       tb = TabBar.new(Tab.new_file(1, "a.ex"))
       {tb, _} = TabBar.add_agent_group(tb, "Empty")
-      state = %{tab_bar: tb}
+      state = %{shell_state: %{tab_bar: tb}}
 
       items = AgentGroupSource.candidates(state)
       assert items == []
@@ -33,7 +33,7 @@ defmodule Minga.UI.Picker.AgentGroupSourceTest do
       {tb, group} = TabBar.add_agent_group(tb, "Work")
       tb = TabBar.move_tab_to_group(tb, 1, group.id)
       tb = TabBar.move_tab_to_group(tb, 2, group.id)
-      state = %{tab_bar: tb}
+      state = %{shell_state: %{tab_bar: tb}}
 
       [item] = AgentGroupSource.candidates(state)
       assert item.description =~ "editor.ex"
@@ -61,7 +61,7 @@ defmodule Minga.UI.Picker.AgentGroupSourceTest do
 
   describe "on_cancel/1" do
     test "returns state unchanged" do
-      state = %{tab_bar: TabBar.new(Tab.new_file(1, "a.ex"))}
+      state = %{shell_state: %{tab_bar: TabBar.new(Tab.new_file(1, "a.ex"))}}
       assert AgentGroupSource.on_cancel(state) == state
     end
   end

@@ -47,7 +47,7 @@ defmodule Minga.Editor.Commands.Diagnostics do
 
     case clients do
       [] ->
-        %{state | status_msg: "No language servers running"}
+        EditorState.set_status(state, "No language servers running")
 
       _ ->
         info =
@@ -62,7 +62,7 @@ defmodule Minga.Editor.Commands.Diagnostics do
             end
           end)
 
-        %{state | status_msg: "LSP: #{info}"}
+        EditorState.set_status(state, "LSP: #{info}")
     end
   end
 
@@ -73,7 +73,7 @@ defmodule Minga.Editor.Commands.Diagnostics do
 
     case file_path do
       nil ->
-        %{state | status_msg: "No file — no diagnostics"}
+        EditorState.set_status(state, "No file — no diagnostics")
 
       path ->
         uri = SyncServer.path_to_uri(path)
@@ -81,11 +81,11 @@ defmodule Minga.Editor.Commands.Diagnostics do
 
         case find_fn.(uri, cursor_line) do
           nil ->
-            %{state | status_msg: "No diagnostics"}
+            EditorState.set_status(state, "No diagnostics")
 
           diag ->
             BufferServer.move_to(buf, {diag.range.start_line, diag.range.start_col})
-            %{state | status_msg: diag.message}
+            EditorState.set_status(state, diag.message)
         end
     end
   end

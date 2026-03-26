@@ -94,7 +94,7 @@ defmodule Minga.Input.Router do
     buf_version_before = buffer_version(state)
     old_cursor = safe_cursor(old_buffer)
 
-    state = %{state | status_msg: nil}
+    state = EditorState.clear_status(state)
 
     state = dispatch_split(state, codepoint, modifiers)
 
@@ -112,8 +112,8 @@ defmodule Minga.Input.Router do
   # Walks overlay handlers first (ConflictPrompt, Picker, Completion).
   # If none consume the key, delegates to surface handlers (Scoped, GlobalBindings, ModeFSM).
   @spec dispatch_split(EditorState.t(), non_neg_integer(), non_neg_integer()) :: EditorState.t()
-  defp dispatch_split(%EditorState{} = state, codepoint, modifiers) do
-    overlay_handlers = Minga.Input.overlay_handlers()
+  defp dispatch_split(%EditorState{shell: shell, shell_state: ss} = state, codepoint, modifiers) do
+    %{overlay: overlay_handlers, surface: _surface} = shell.input_handlers(ss)
 
     case walk_handlers_until_passthrough(overlay_handlers, state, codepoint, modifiers) do
       {:handled, new_state} ->
@@ -131,8 +131,14 @@ defmodule Minga.Input.Router do
   # mode transitions) that handlers produce.
   @spec dispatch_to_surface(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           EditorState.t()
-  defp dispatch_to_surface(state, codepoint, modifiers) do
-    Enum.reduce_while(Minga.Input.surface_handlers(), state, fn handler, acc ->
+  defp dispatch_to_surface(
+         %EditorState{shell: shell, shell_state: ss} = state,
+         codepoint,
+         modifiers
+       ) do
+    %{surface: surface_handlers} = shell.input_handlers(ss)
+
+    Enum.reduce_while(surface_handlers, state, fn handler, acc ->
       case handler.handle_key(acc, codepoint, modifiers) do
         {:handled, new_state} -> {:halt, new_state}
         {:passthrough, new_state} -> {:cont, new_state}
@@ -317,8 +323,16 @@ defmodule Minga.Input.Router do
           pos_integer()
         ) ::
           EditorState.t()
-  defp dispatch_mouse_split(%EditorState{} = state, row, col, button, mods, et, cc) do
-    overlay_handlers = Minga.Input.overlay_handlers()
+  defp dispatch_mouse_split(
+         %EditorState{shell: shell, shell_state: ss} = state,
+         row,
+         col,
+         button,
+         mods,
+         et,
+         cc
+       ) do
+    %{overlay: overlay_handlers, surface: surface_handlers} = shell.input_handlers(ss)
 
     # Walk overlay handlers first for mouse events.
     result =
@@ -335,7 +349,7 @@ defmodule Minga.Input.Router do
 
       {:passthrough, state_after_overlays} ->
         # Delegate to surface-level mouse handlers.
-        Enum.reduce_while(Minga.Input.surface_handlers(), state_after_overlays, fn handler, acc ->
+        Enum.reduce_while(surface_handlers, state_after_overlays, fn handler, acc ->
           try_mouse_handler(handler, acc, row, col, button, mods, et, cc)
         end)
     end

@@ -6,43 +6,45 @@ defmodule Minga.Editor.Commands.UI.FrontendTest do
   alias Minga.Editor.Commands.UI.TUI, as: UITUI
 
   defp base_state do
-    %{bottom_panel: %BottomPanel{}}
+    %{shell_state: %Minga.Shell.Traditional.State{bottom_panel: %BottomPanel{}}}
   end
 
   describe "GUI.toggle_bottom_panel/1" do
     test "opens panel when hidden" do
       state = UIGUI.toggle_bottom_panel(base_state())
-      assert state.bottom_panel.visible == true
+      assert state.shell_state.bottom_panel.visible == true
     end
 
     test "closes panel when visible" do
-      state = %{base_state() | bottom_panel: %BottomPanel{visible: true}}
+      state = Minga.Editor.State.set_bottom_panel(base_state(), %BottomPanel{visible: true})
       state = UIGUI.toggle_bottom_panel(state)
-      assert state.bottom_panel.visible == false
+      assert state.shell_state.bottom_panel.visible == false
     end
   end
 
   describe "GUI.bottom_panel_next_tab/1" do
     test "cycles to next tab" do
-      state = %{
-        base_state()
-        | bottom_panel: %BottomPanel{tabs: [:messages, :diagnostics], active_tab: :messages}
-      }
+      state =
+        Minga.Editor.State.set_bottom_panel(
+          base_state(),
+          %BottomPanel{tabs: [:messages, :diagnostics], active_tab: :messages}
+        )
 
       state = UIGUI.bottom_panel_next_tab(state)
-      assert state.bottom_panel.active_tab == :diagnostics
+      assert state.shell_state.bottom_panel.active_tab == :diagnostics
     end
   end
 
   describe "GUI.bottom_panel_prev_tab/1" do
     test "cycles to previous tab" do
-      state = %{
-        base_state()
-        | bottom_panel: %BottomPanel{tabs: [:messages, :diagnostics], active_tab: :diagnostics}
-      }
+      state =
+        Minga.Editor.State.set_bottom_panel(
+          base_state(),
+          %BottomPanel{tabs: [:messages, :diagnostics], active_tab: :diagnostics}
+        )
 
       state = UIGUI.bottom_panel_prev_tab(state)
-      assert state.bottom_panel.active_tab == :messages
+      assert state.shell_state.bottom_panel.active_tab == :messages
     end
   end
 

@@ -136,7 +136,7 @@ defmodule Minga.UI.Picker.WorkspaceSymbolSource do
       nil ->
         case Commands.start_buffer(file_path) do
           {:ok, pid} -> Commands.add_buffer(state, pid)
-          {:error, _} -> %{state | status_msg: "Could not open #{file_path}"}
+          {:error, _} -> EditorState.set_status(state, "Could not open #{file_path}")
         end
 
       i ->

@@ -22,7 +22,7 @@ defmodule Minga.UI.Picker.TabSource do
 
   @impl true
   @spec candidates(term()) :: [Item.t()]
-  def candidates(%{tab_bar: %TabBar{} = tb}) do
+  def candidates(%{shell_state: %{tab_bar: %TabBar{} = tb}}) do
     Enum.map(tb.tabs, fn tab ->
       icon = tab_icon(tab)
       label = tab_display_label(tab)

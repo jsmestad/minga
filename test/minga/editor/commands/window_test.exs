@@ -189,7 +189,7 @@ defmodule Minga.Editor.Commands.WindowTest do
       state = get_state(editor)
 
       # Should show error message but not crash
-      assert state.status_msg == "Cannot close the last window"
+      assert state.shell_state.status_msg == "Cannot close the last window"
     end
 
     test "focus moves to remaining window after close" do

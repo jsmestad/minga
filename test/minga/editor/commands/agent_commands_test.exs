@@ -73,8 +73,7 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
         },
         agent_ui: agentic
       },
-      agent: agent,
-      tab_bar: tb,
+      shell_state: %Minga.Shell.Traditional.State{agent: agent, tab_bar: tb},
       focus_stack: Input.default_stack()
     }
   end
@@ -99,7 +98,7 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
 
       new_state = AgentCommands.submit_prompt(state)
 
-      assert new_state.status_msg =~ "No agent session"
+      assert new_state.shell_state.status_msg =~ "No agent session"
     end
   end
 
@@ -208,7 +207,7 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
       state = base_state(session: nil)
       new_state = AgentCommands.cycle_thinking_level(state)
 
-      assert new_state.status_msg =~ "No agent session"
+      assert new_state.shell_state.status_msg =~ "No agent session"
     end
   end
 
@@ -296,7 +295,7 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
       state = base_state()
       new_state = AgentCommands.cycle_agent_tabs(state)
 
-      agent_tabs = TabBar.filter_by_kind(new_state.tab_bar, :agent)
+      agent_tabs = TabBar.filter_by_kind(new_state.shell_state.tab_bar, :agent)
       assert agent_tabs != []
     end
   end

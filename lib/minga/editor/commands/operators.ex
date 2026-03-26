@@ -139,7 +139,7 @@ defmodule Minga.Editor.Commands.Operators do
   defp read_only?(buf), do: BufferServer.read_only?(buf)
 
   @spec read_only_msg(state()) :: state()
-  defp read_only_msg(state), do: %{state | status_msg: "Buffer is read-only"}
+  defp read_only_msg(state), do: EditorState.set_status(state, "Buffer is read-only")
 
   @impl Minga.Command.Provider
   def __commands__ do

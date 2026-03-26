@@ -32,7 +32,9 @@ defmodule Minga.Input.PickerMouseTest do
         vim: VimState.new(),
         viewport: Viewport.new(30, 80)
       },
-      picker_ui: %Minga.Editor.State.Picker{picker: picker, source: TestSource}
+      shell_state: %Minga.Shell.Traditional.State{
+        picker_ui: %Minga.Editor.State.Picker{picker: picker, source: TestSource}
+      }
     }
   end
 
@@ -40,7 +42,7 @@ defmodule Minga.Input.PickerMouseTest do
     test "wheel_down moves picker selection down" do
       state = picker_state([%{id: 1, label: "one"}, %{id: 2, label: "two"}])
       {:handled, new_state} = PickerInput.handle_mouse(state, 10, 10, :wheel_down, 0, :press, 1)
-      assert new_state.picker_ui.picker.selected == 1
+      assert new_state.shell_state.picker_ui.picker.selected == 1
     end
 
     test "wheel_up moves picker selection up" do
@@ -48,7 +50,7 @@ defmodule Minga.Input.PickerMouseTest do
       # Move down first, then up
       {:handled, state} = PickerInput.handle_mouse(state, 10, 10, :wheel_down, 0, :press, 1)
       {:handled, new_state} = PickerInput.handle_mouse(state, 10, 10, :wheel_up, 0, :press, 1)
-      assert new_state.picker_ui.picker.selected == 0
+      assert new_state.shell_state.picker_ui.picker.selected == 0
     end
   end
 
@@ -62,7 +64,7 @@ defmodule Minga.Input.PickerMouseTest do
       {:handled, new_state} = PickerInput.handle_mouse(state, 26, 10, :left, 0, :press, 1)
 
       # Picker should be closed
-      assert new_state.picker_ui.picker == nil
+      assert new_state.shell_state.picker_ui.picker == nil
       # Source's on_select should have been called
       assert Map.has_key?(new_state, :selected_item)
     end
@@ -74,7 +76,7 @@ defmodule Minga.Input.PickerMouseTest do
       # Click on row 0 (well above the picker)
       {:handled, new_state} = PickerInput.handle_mouse(state, 0, 10, :left, 0, :press, 1)
       # Picker should still be open
-      assert new_state.picker_ui.picker != nil
+      assert new_state.shell_state.picker_ui.picker != nil
     end
   end
 
@@ -89,10 +91,12 @@ defmodule Minga.Input.PickerMouseTest do
           vim: VimState.new(),
           viewport: Viewport.new(24, 80)
         },
-        picker_ui: %Minga.Editor.State.Picker{
-          picker: picker,
-          source: TestSource,
-          layout: :centered
+        shell_state: %Minga.Shell.Traditional.State{
+          picker_ui: %Minga.Editor.State.Picker{
+            picker: picker,
+            source: TestSource,
+            layout: :centered
+          }
         }
       }
     end
@@ -106,7 +110,7 @@ defmodule Minga.Input.PickerMouseTest do
       # First item is at interior row 0 = screen row 5
       {:handled, new_state} = PickerInput.handle_mouse(state, 5, 20, :left, 0, :press, 1)
 
-      assert new_state.picker_ui.picker == nil
+      assert new_state.shell_state.picker_ui.picker == nil
       assert Map.has_key?(new_state, :selected_item)
     end
 
@@ -118,7 +122,7 @@ defmodule Minga.Input.PickerMouseTest do
       {:handled, new_state} = PickerInput.handle_mouse(state, 0, 0, :left, 0, :press, 1)
 
       # Picker should be closed (dismissed), no item selected
-      assert new_state.picker_ui.picker == nil
+      assert new_state.shell_state.picker_ui.picker == nil
       refute Map.has_key?(new_state, :selected_item)
     end
 
@@ -129,7 +133,7 @@ defmodule Minga.Input.PickerMouseTest do
       {:handled, new_state} =
         PickerInput.handle_mouse(state, 10, 20, :wheel_down, 0, :press, 1)
 
-      assert new_state.picker_ui.picker.selected == 1
+      assert new_state.shell_state.picker_ui.picker.selected == 1
     end
   end
 
