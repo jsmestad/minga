@@ -168,7 +168,16 @@ defmodule Minga.Shell.Board.Input do
 
   @spec create_new_card(EditorState.t()) :: EditorState.t()
   defp create_new_card(state) do
-    Minga.Editor.PromptUI.open(state, Minga.Shell.Board.DispatchPrompt)
+    board = state.shell_state
+    count = BoardState.card_count(board)
+    {board, card} = BoardState.create_card(board, task: "Agent #{count}", status: :idle)
+    board = BoardState.focus_card(board, card.id)
+
+    # Snapshot current workspace onto the card and zoom in
+    workspace_snapshot = Map.from_struct(state.workspace)
+    board = BoardState.zoom_into(board, card.id, workspace_snapshot)
+
+    %{state | shell_state: board}
   end
 
   # ── Helpers ────────────────────────────────────────────────────────────
