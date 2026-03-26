@@ -55,6 +55,9 @@ final class GUIState {
     /// Float popup state (0x83).
     let floatPopupState = FloatPopupState()
 
+    /// Board card grid state (0x87).
+    let boardState = BoardState()
+
     /// Semantic window content from gui_window_content (0x80).
     /// Keyed by windowId. NOT cleared between frames; the guiWindowContent
     /// dispatch overwrites per-window data each frame. Stale entries serve

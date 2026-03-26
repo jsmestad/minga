@@ -137,7 +137,8 @@ defmodule Minga.Frontend.Emit.GUI do
         build_gui_minibuffer_cmd(state, minibuffer_data),
         build_gui_hover_popup_cmd(state),
         build_gui_signature_help_cmd(state),
-        build_gui_float_popup_cmd(state)
+        build_gui_float_popup_cmd(state),
+        build_gui_board_cmd(state)
       ]
       |> Enum.reject(&is_nil/1)
 
@@ -167,6 +168,35 @@ defmodule Minga.Frontend.Emit.GUI do
   # ── Tab bar ──
 
   @spec build_gui_tab_bar_cmd(state()) :: binary() | nil
+
+  # Board zoomed: show a single tab with the card name and a back indicator
+  defp build_gui_tab_bar_cmd(%{shell: Minga.Shell.Board, shell_state: %{zoomed_into: card_id}} = state)
+       when card_id != nil do
+    card = Minga.Shell.Board.State.zoomed(state.shell_state)
+    label = if card, do: "◇ #{card.task}", else: "◇ Board"
+
+    # Build a minimal TabBar with one active tab showing the card context
+    tab = %Minga.Editor.State.Tab{
+      id: card_id,
+      label: label,
+      kind: :file,
+      context: %{},
+      agent_status: nil,
+      attention: false
+    }
+
+    tb = %TabBar{tabs: [tab], active_id: card_id, next_id: card_id + 1}
+    fp = :erlang.phash2({:board_zoom, card_id, label})
+
+    if fp != Process.get(:last_gui_tab_bar_fp) do
+      Process.put(:last_gui_tab_bar_fp, fp)
+      ProtocolGUI.encode_gui_tab_bar(tb)
+    end
+  end
+
+  # Board grid: no tab bar needed (Board is the view)
+  defp build_gui_tab_bar_cmd(%{shell: Minga.Shell.Board}), do: nil
+
   defp build_gui_tab_bar_cmd(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
     active_buf = active_window_buffer(state)
     fp = :erlang.phash2({tb, active_buf})
@@ -1049,6 +1079,39 @@ defmodule Minga.Frontend.Emit.GUI do
       {cmd, %{state | message_store: new_store}}
     else
       {nil, state}
+    end
+  end
+
+  # ── Board ──
+
+  @spec build_gui_board_cmd(state()) :: binary() | nil
+  defp build_gui_board_cmd(%{shell: Minga.Shell.Board, shell_state: board}) do
+    # Always send when Board is active so the GUI stays in sync.
+    # The fingerprint covers card count, focused card, zoom state, and
+    # card statuses so we skip encoding when nothing changed.
+    fp =
+      :erlang.phash2({
+        Minga.Shell.Board.State.card_count(board),
+        board.focused_card,
+        board.zoomed_into,
+        Enum.map(Minga.Shell.Board.State.sorted_cards(board), &{&1.id, &1.status})
+      })
+
+    if fp != Process.get(:last_gui_board_fp) do
+      Process.put(:last_gui_board_fp, fp)
+      ProtocolGUI.encode_gui_board(board)
+    end
+  end
+
+  # Board not active: send visible=false once to dismiss.
+  # Must NOT use a default Board.State (grid_view? returns true → visible=1).
+  # Instead, build a minimal board with zoomed_into set so visible encodes as 0.
+  defp build_gui_board_cmd(_state) do
+    if Process.get(:last_gui_board_fp) != :dismissed do
+      Process.put(:last_gui_board_fp, :dismissed)
+      # zoomed_into: 0 forces grid_view? → false → visible=0
+      dismissed = %Minga.Shell.Board.State{zoomed_into: 0}
+      ProtocolGUI.encode_gui_board(dismissed)
     end
   end
 end

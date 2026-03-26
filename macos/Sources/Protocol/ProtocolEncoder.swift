@@ -71,6 +71,10 @@ protocol InputEncoder: AnyObject, Sendable {
 
     // Find Pasteboard
     func sendFindPasteboardSearch(text: String, direction: UInt8)
+
+    // Board actions
+    func sendBoardSelectCard(id: UInt32)
+    func sendBoardCloseCard(id: UInt32)
 }
 
 extension InputEncoder {
@@ -520,6 +524,26 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         if pathLen > 0 {
             buf.replaceSubrange(4..<(4 + pathLen), with: utf8[0..<pathLen])
         }
+        writeFrame(buf)
+    }
+
+    // MARK: - Board Actions
+
+    /// Send a gui_action: board_select_card. Layout: opcode(1) + action_type(1) + card_id(4).
+    func sendBoardSelectCard(id: UInt32) {
+        var buf = Data(count: 6)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_BOARD_SELECT_CARD
+        writeU32(&buf, 2, id)
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: board_close_card. Layout: opcode(1) + action_type(1) + card_id(4).
+    func sendBoardCloseCard(id: UInt32) {
+        var buf = Data(count: 6)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_BOARD_CLOSE_CARD
+        writeU32(&buf, 2, id)
         writeFrame(buf)
     }
 

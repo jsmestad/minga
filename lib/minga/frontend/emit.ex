@@ -181,22 +181,7 @@ defmodule Minga.Frontend.Emit do
 
   @spec send_title(state()) :: :ok
   defp send_title(state) do
-    title =
-      if Minga.Frontend.gui?(state.capabilities) do
-        Title.format_gui(state)
-      else
-        format = Options.get(:title_format) |> to_string()
-        title = Title.format(state, format)
-
-        # Prepend [!] when any agent tab needs attention (TUI only).
-        tb = state.shell_state.tab_bar
-
-        if tb && TabBar.any_attention?(tb) do
-          "[!] " <> title
-        else
-          title
-        end
-      end
+    title = format_title(state)
 
     if title != Process.get(:last_title) do
       Process.put(:last_title, title)
@@ -217,4 +202,34 @@ defmodule Minga.Frontend.Emit do
 
     :ok
   end
+
+  @spec format_title(state()) :: String.t()
+  defp format_title(%{shell: Minga.Shell.Board, shell_state: %{zoomed_into: card_id}} = state)
+       when card_id != nil do
+    card = Minga.Shell.Board.State.zoomed(state.shell_state)
+    card_name = if card, do: card.task, else: "Board"
+    "#{card_name} — Minga"
+  end
+
+  defp format_title(%{shell: Minga.Shell.Board}) do
+    "The Board — Minga"
+  end
+
+  defp format_title(state) do
+    if Minga.Frontend.gui?(state.capabilities) do
+      Title.format_gui(state)
+    else
+      format = Options.get(:title_format) |> to_string()
+      title = Title.format(state, format)
+
+      tb = state.shell_state.tab_bar
+
+      if tb && TabBar.any_attention?(tb) do
+        "[!] " <> title
+      else
+        title
+      end
+    end
+  end
+
 end

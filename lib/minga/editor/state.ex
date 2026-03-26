@@ -106,7 +106,8 @@ defmodule Minga.Editor.State do
             swap_dir: nil,
             session_dir: nil,
             space_leader_pending: false,
-            space_leader_timer: nil
+            space_leader_timer: nil,
+            stashed_board_state: nil
 
   @type backend :: :tui | :native_gui | :headless
 
@@ -149,7 +150,8 @@ defmodule Minga.Editor.State do
           swap_dir: String.t() | nil,
           session_dir: String.t() | nil,
           space_leader_pending: boolean(),
-          space_leader_timer: reference() | nil
+          space_leader_timer: reference() | nil,
+          stashed_board_state: Minga.Shell.Board.State.t() | nil
         }
 
   # ── Workspace helpers ──────────────────────────────────────────────────────

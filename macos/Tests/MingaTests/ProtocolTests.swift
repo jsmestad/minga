@@ -312,6 +312,8 @@ final class SpyEncoder: InputEncoder, Sendable {
         case gitUnstageAll
         case gitCommit(message: String)
         case gitOpenFile(path: String)
+        case boardSelectCard(id: UInt32)
+        case boardCloseCard(id: UInt32)
     }
 
     private let state = OSAllocatedUnfairLock(initialState: State())
@@ -392,6 +394,12 @@ final class SpyEncoder: InputEncoder, Sendable {
     func sendSpaceLeaderChord(codepoint: UInt32, modifiers: UInt8) { /* no-op for tests */ }
     func sendSpaceLeaderRetract(codepoint: UInt32, modifiers: UInt8) { /* no-op for tests */ }
     func sendFindPasteboardSearch(text: String, direction: UInt8) { /* no-op for tests */ }
+    func sendBoardSelectCard(id: UInt32) {
+        state.withLock { $0.guiActions.append(.boardSelectCard(id: id)) }
+    }
+    func sendBoardCloseCard(id: UInt32) {
+        state.withLock { $0.guiActions.append(.boardCloseCard(id: id)) }
+    }
 }
 
 @Suite("EditorNSView Resize")

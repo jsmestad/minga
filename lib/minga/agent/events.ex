@@ -57,6 +57,9 @@ defmodule Minga.Agent.Events do
     # Sync the tab's agent_status for tab bar rendering
     state = sync_tab_agent_status(state, status)
 
+    # Sync Board card status if Board shell is active
+    state = sync_board_card_status(state, status)
+
     {state, [:render | effects]}
   end
 
@@ -149,6 +152,9 @@ defmodule Minga.Agent.Events do
   def handle(state, {:file_changed, path, before_content, after_content}) do
     state =
       AgentAccess.update_agent_ui(state, &UIState.record_baseline(&1, path, before_content))
+
+    # Track the file on the Board card for recent_files display
+    state = track_board_card_file(state, path)
 
     # Associate the file's tab with the agent's workspace
     state = associate_file_with_agent_workspace(state, path)
@@ -250,6 +256,65 @@ defmodule Minga.Agent.Events do
       _ -> nil
     end
   end
+
+  # Syncs Board card status when an agent status changes. Finds the card
+  # by matching the agent session PID and updates the card's status badge.
+  @spec sync_board_card_status(EditorState.t(), Tab.agent_status()) :: EditorState.t()
+  defp sync_board_card_status(%{shell: Minga.Shell.Board} = state, status) do
+    session = AgentAccess.session(state)
+
+    if session do
+      update_board_card_by_session(state, session, fn card ->
+        Minga.Shell.Board.Card.set_status(card, agent_status_to_card_status(status))
+      end)
+    else
+      state
+    end
+  end
+
+  defp sync_board_card_status(state, _status), do: state
+
+  # Tracks a file path on the Board card associated with the current agent session.
+  # Keeps the 5 most recently touched files for the card footer display.
+  @spec track_board_card_file(EditorState.t(), String.t()) :: EditorState.t()
+  defp track_board_card_file(%{shell: Minga.Shell.Board} = state, path) do
+    session = AgentAccess.session(state)
+
+    if session do
+      short_path = Path.basename(path)
+
+      update_board_card_by_session(state, session, fn card ->
+        files = [short_path | Enum.reject(card.recent_files, &(&1 == short_path))]
+        Minga.Shell.Board.Card.set_recent_files(card, Enum.take(files, 5))
+      end)
+    else
+      state
+    end
+  end
+
+  defp track_board_card_file(state, _path), do: state
+
+  # Finds a Board card by agent session PID and applies an update function.
+  @spec update_board_card_by_session(EditorState.t(), pid(), (Minga.Shell.Board.Card.t() -> Minga.Shell.Board.Card.t())) :: EditorState.t()
+  defp update_board_card_by_session(state, session, update_fn) do
+    board = state.shell_state
+
+    case Enum.find(board.cards, fn {_id, card} -> card.session == session end) do
+      {card_id, _card} ->
+        new_board = Minga.Shell.Board.State.update_card(board, card_id, update_fn)
+        %{state | shell_state: new_board}
+
+      nil ->
+        state
+    end
+  end
+
+  @spec agent_status_to_card_status(Tab.agent_status()) :: Minga.Shell.Board.Card.status()
+  defp agent_status_to_card_status(:thinking), do: :working
+  defp agent_status_to_card_status(:tool_executing), do: :iterating
+  defp agent_status_to_card_status(:error), do: :errored
+  defp agent_status_to_card_status(:idle), do: :done
+  defp agent_status_to_card_status(_), do: :idle
 
   # Syncs the agent_status field on the current agent tab so the tab bar
   # can render status indicators without querying the Session process.

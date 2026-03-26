@@ -1790,6 +1790,17 @@ defmodule Minga.Editor do
   # unimplemented actions log a message and return state unchanged.
 
   @spec handle_gui_action(state(), Protocol.GUI.gui_action()) :: state()
+
+  # Route gui_actions through the active Shell first. Shells that handle
+  # the action return updated state; unhandled actions fall through to
+  # the Traditional-specific handlers below.
+  defp handle_gui_action(%{shell: Minga.Shell.Board} = state, action) do
+    {shell_state, workspace} =
+      Minga.Shell.Board.handle_gui_action(state.shell_state, state.workspace, action)
+
+    %{state | shell_state: shell_state, workspace: workspace}
+  end
+
   defp handle_gui_action(state, {:select_tab, id}) do
     EditorState.switch_tab(state, id)
   end

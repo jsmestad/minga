@@ -149,6 +149,7 @@ defmodule Minga.Config.Options do
           | :log_level_port
           | :parser_tree_ttl
           | :event_retention_days
+          | :default_shell
 
   @typedoc "Line number display style."
   @type line_number_style :: :hybrid | :absolute | :relative | :none
@@ -245,7 +246,8 @@ defmodule Minga.Config.Options do
     {:log_level_config, {:enum, [:default, :debug, :info, :warning, :error, :none]}, :default},
     {:log_level_port, {:enum, [:default, :debug, :info, :warning, :error, :none]}, :default},
     {:parser_tree_ttl, :integer, 300},
-    {:event_retention_days, :pos_integer, 90}
+    {:event_retention_days, :pos_integer, 90},
+    {:default_shell, {:enum, [:traditional, :board]}, :traditional}
   ]
 
   @valid_names Enum.map(@option_specs, &elem(&1, 0))

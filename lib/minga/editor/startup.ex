@@ -115,11 +115,8 @@ defmodule Minga.Editor.Startup do
       port_manager: port_manager,
       editing_model: editing_model,
       focus_stack: Minga.Input.default_stack(),
-      shell: Minga.Shell.Traditional,
-      shell_state: %Minga.Shell.Traditional.State{
-        dashboard: dashboard,
-        suppress_tool_prompts: Keyword.get(opts, :suppress_tool_prompts, false)
-      },
+      shell: resolve_shell(opts),
+      shell_state: init_shell_state(resolve_shell(opts), dashboard, opts),
       swap_dir: Keyword.get(opts, :swap_dir),
       session_dir: Keyword.get(opts, :session_dir)
     }
@@ -332,4 +329,42 @@ defmodule Minga.Editor.Startup do
 
   # NOTE: safe_recent_files/0 removed with dashboard disable.
   # Will be restored when dashboard is reimplemented as a buffer.
+
+  # ── Shell resolution ───────────────────────────────────────────────────
+
+  @spec resolve_shell(keyword()) :: module()
+  defp resolve_shell(opts) do
+    case Keyword.get(opts, :shell) do
+      :board -> Minga.Shell.Board
+      :traditional -> Minga.Shell.Traditional
+      nil -> resolve_shell_from_config()
+      module when is_atom(module) -> module
+    end
+  end
+
+  @spec resolve_shell_from_config() :: module()
+  defp resolve_shell_from_config do
+    case Minga.Config.Options.get(:default_shell) do
+      :board -> Minga.Shell.Board
+      _ -> Minga.Shell.Traditional
+    end
+  catch
+    :exit, _ -> Minga.Shell.Traditional
+  end
+
+  @spec init_shell_state(module(), term(), keyword()) :: term()
+  defp init_shell_state(Minga.Shell.Board, _dashboard, opts) do
+    Minga.Shell.Board.init(opts)
+  end
+
+  defp init_shell_state(Minga.Shell.Traditional, dashboard, opts) do
+    %Minga.Shell.Traditional.State{
+      dashboard: dashboard,
+      suppress_tool_prompts: Keyword.get(opts, :suppress_tool_prompts, false)
+    }
+  end
+
+  defp init_shell_state(module, _dashboard, opts) do
+    module.init(opts)
+  end
 end

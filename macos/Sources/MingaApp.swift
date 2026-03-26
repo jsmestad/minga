@@ -244,8 +244,34 @@ struct ContentView: View {
                 encoder: appState.encoder
             )
 
-            // Editor surface (Metal) with overlays
-            editorSurface
+            // ZStack: editor surface (always present for keyboard input)
+            // with Board overlay on top when active.
+            ZStack {
+                editorSurface
+                    .opacity(appState.gui.boardState.visible ? 0 : 1)
+
+                if appState.gui.boardState.visible {
+                    BoardView(
+                        state: appState.gui.boardState,
+                        theme: appState.gui.themeColors,
+                        encoder: appState.encoder
+                    )
+                    .transition(
+                        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+                            ? .opacity
+                            : .scale(scale: 0.97).combined(with: .opacity)
+                    )
+                }
+            }
+            .animation(
+                NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+                    ? .easeInOut(duration: 0.15)
+                    : .easeOut(duration: 0.25),
+                value: appState.gui.boardState.visible
+            )
+            .onChange(of: appState.gui.boardState.visible) { _, visible in
+                appState.editorNSView?.setBoardVisible(visible)
+            }
 
             // Bottom panel (between editor and status bar)
             if appState.gui.bottomPanelState.visible {

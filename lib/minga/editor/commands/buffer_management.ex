@@ -800,6 +800,38 @@ defmodule Minga.Editor.Commands.BufferManagement do
   """
   @spec handle_agent_session_down(state(), pid(), term()) :: state()
   def handle_agent_session_down(
+        %{shell: Minga.Shell.Board} = state,
+        session_pid,
+        reason
+      ) do
+    card_status = if reason in [:normal, :shutdown], do: :done, else: :errored
+    board = state.shell_state
+
+    # Find and update the card with this session
+    board =
+      case Enum.find(board.cards, fn {_id, card} -> card.session == session_pid end) do
+        {card_id, _card} ->
+          Minga.Shell.Board.State.update_card(board, card_id, fn card ->
+            Minga.Shell.Board.Card.set_status(card, card_status)
+          end)
+
+        nil ->
+          board
+      end
+
+    state = %{state | shell_state: board}
+    state = AgentAccess.update_agent(state, &AgentState.stop_spinner_timer/1)
+    state = AgentAccess.update_agent(state, &AgentState.clear_session/1)
+
+    msg =
+      if reason in [:normal, :shutdown],
+        do: "Agent session ended",
+        else: "Agent session crashed"
+
+    EditorState.set_status(state, msg)
+  end
+
+  def handle_agent_session_down(
         %{shell_state: %{tab_bar: %TabBar{}}} = state,
         session_pid,
         reason
