@@ -48,9 +48,26 @@ defmodule Minga.Input.Scoped do
   # ── Editor scope ─────────────────────────────────────────────────────────
 
   # Editor scope with agent side panel: handled by Input.AgentPanel.
-  # Editor scope (no panel): always passthrough to mode FSM.
-  def handle_key(%{workspace: %{keymap_scope: :editor}} = state, _cp, _mods) do
-    {:passthrough, state}
+  # Editor scope without panel: in CUA mode, resolve through the editor
+  # scope trie for Ctrl fallbacks (undo, redo, paste, etc.) before
+  # CUA.Dispatch eats the key. In vim mode, passthrough to Mode FSM.
+  def handle_key(%{workspace: %{keymap_scope: :editor}} = state, cp, mods) do
+    if Minga.Editing.active_model(state) == Minga.Editing.Model.CUA do
+      key = {cp, mods}
+
+      case Scope.resolve_key(:editor, :cua, key) do
+        {:command, command} ->
+          {:handled, Commands.execute(state, command)}
+
+        {:prefix, _node} ->
+          {:handled, state}
+
+        :not_found ->
+          {:passthrough, state}
+      end
+    else
+      {:passthrough, state}
+    end
   end
 
   # ── Agent scope ──────────────────────────────────────────────────────────
@@ -216,8 +233,8 @@ defmodule Minga.Input.Scoped do
         {:handled, AgentAccess.update_agent_ui(state, &UIState.set_prefix(&1, prefix_node))}
 
       :not_found ->
-        # No scope binding. In insert mode, self-insert printable chars.
-        if vim_state == :insert and cp >= 32 and band(mods, @ctrl) == 0 and
+        # No scope binding. In insert mode or CUA mode, self-insert printable chars.
+        if vim_state in [:insert, :cua] and cp >= 32 and band(mods, @ctrl) == 0 and
              band(mods, @alt) == 0 do
           handle_agent_self_insert(state, cp, mods)
         else

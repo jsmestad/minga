@@ -905,6 +905,24 @@ defmodule Minga.Editor.Commands.Agent do
   @spec scope_submit_or_newline(state()) :: state()
   def scope_submit_or_newline(state), do: submit_prompt(state)
 
+  @doc """
+  CUA Enter behavior: focus input if not focused, submit if focused.
+
+  CUA mode has a single trie for all agent states (no normal/insert
+  distinction). This command provides the natural Enter behavior:
+  first Enter focuses the input field, subsequent Enter submits.
+  """
+  @spec scope_focus_or_submit(state()) :: state()
+  def scope_focus_or_submit(state) do
+    panel = AgentAccess.panel(state)
+
+    if panel.input_focused do
+      submit_prompt(state)
+    else
+      scope_focus_input(state)
+    end
+  end
+
   @doc "Inserts a newline in the input field."
   @spec scope_insert_newline(state()) :: state()
   def scope_insert_newline(state) do
@@ -1256,6 +1274,7 @@ defmodule Minga.Editor.Commands.Agent do
     {:agent_copy_message, "Copy message", :scope_copy_message},
     {:agent_open_code_block, "Open code block", :scope_open_code_block},
     {:agent_focus_input, "Focus agent input", :scope_focus_input},
+    {:agent_focus_or_submit, "Focus input or submit", :scope_focus_or_submit},
     {:agent_unfocus_input, "Unfocus agent input", :scope_unfocus_input},
     {:agent_unfocus_and_quit, "Unfocus input and quit", :scope_unfocus_and_quit},
     {:agent_grow_panel, "Grow agent panel", :scope_grow_panel},

@@ -58,10 +58,19 @@ defmodule Minga.Keymap.CUADefaults do
 
   Cmd+C = copy, Cmd+X = cut, Cmd+V = paste, Cmd+Z = undo,
   Cmd+Shift+Z = redo, Cmd+A = select all, Cmd+S = save.
+
+  Also includes Ctrl fallbacks for TUI where terminals intercept
+  Cmd+key at the OS level. Ctrl+Z = undo, Ctrl+Y = redo,
+  Ctrl+V = paste, Ctrl+A = select all.
+
+  Note: Ctrl+C is NOT bound to copy here. It stays as interrupt
+  (see `interrupt_trie/0`). Selection-aware copy via Ctrl+C is
+  handled by the Interrupt handler which checks for active selection.
   """
   @spec cmd_chords_trie() :: Bindings.node_t()
   def cmd_chords_trie do
     Bindings.new()
+    # GUI (Cmd) bindings
     |> Bindings.bind([{?c, @cmd}], :yank_visual_selection, "Copy")
     |> Bindings.bind([{?x, @cmd}], :delete_visual_selection, "Cut")
     |> Bindings.bind([{?v, @cmd}], :paste_after, "Paste")
@@ -69,6 +78,11 @@ defmodule Minga.Keymap.CUADefaults do
     |> Bindings.bind([{?z, @cmd ||| @shift}], :redo, "Redo")
     |> Bindings.bind([{?a, @cmd}], :select_all, "Select all")
     |> Bindings.bind([{?s, @cmd}], :save, "Save")
+    # TUI (Ctrl) fallbacks — terminals can't send Cmd
+    |> Bindings.bind([{?z, @ctrl}], :undo, "Undo")
+    |> Bindings.bind([{?y, @ctrl}], :redo, "Redo")
+    |> Bindings.bind([{?v, @ctrl}], :paste_after, "Paste")
+    |> Bindings.bind([{?a, @ctrl}], :select_all, "Select all")
   end
 
   @doc """

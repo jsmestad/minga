@@ -56,19 +56,20 @@ defmodule Minga.Input.AgentPanel do
   @spec handle_panel_input(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           EditorState.t()
   defp handle_panel_input(state, cp, mods) do
-    if Minga.Editing.inserting?(state) do
-      # Resolve through the agent scope insert trie. This gives us the
-      # same keybindings as the split pane path (Enter, Shift+Enter,
-      # Backspace, Ctrl combos, @-mention, printable chars) without
-      # duplicating them as hardcoded function clauses.
+    binding_state = Minga.Editing.binding_state(state)
+
+    if binding_state == :cua or Minga.Editing.inserting?(state) do
+      # Resolve through the agent scope trie for the active binding state.
+      # CUA uses the :cua trie; vim insert uses the :insert trie. Both
+      # need self-insert fallback for printable chars.
       key = {cp, mods}
 
-      case Scope.resolve_key(:agent, :insert, key) do
+      case Scope.resolve_key(:agent, binding_state, key) do
         {:command, command} ->
           Commands.execute(state, command)
 
         {:prefix, _node} ->
-          # No prefix sequences in insert mode currently
+          # No prefix sequences in insert/CUA mode currently
           state
 
         :not_found ->

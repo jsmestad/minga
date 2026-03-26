@@ -61,11 +61,13 @@ defmodule Minga.Test.EditorCase do
 
     # Pin editing model per-editor so async tests don't race on global ETS.
     editing_model = Keyword.get(opts, :editing_model, :vim)
+    # Backend defaults to :headless; override to :tui for TUI-specific tests.
+    backend = Keyword.get(opts, :backend, :headless)
 
     {:ok, editor} =
       Editor.start_link(
         name: :"headless_editor_#{id}",
-        backend: :headless,
+        backend: backend,
         port_manager: port,
         buffer: buffer,
         width: width,

@@ -31,9 +31,18 @@ defmodule Minga.Input.GlobalBindings do
     {:handled, state}
   end
 
-  # Ctrl+Q: close tab or quit (tab-aware, matches :q behavior)
+  # Ctrl+Q: quit behavior depends on editing model.
+  # CUA mode: quit the entire editor (users expect Ctrl+Q = exit app).
+  # Vim mode: close current tab (:q behavior; use SPC q q for full quit).
   def handle_key(state, ?q, mods) when band(mods, @ctrl) != 0 do
-    new_state = Minga.Editor.dispatch_command(state, :quit)
+    command =
+      if Minga.Editing.active_model(state) == Minga.Editing.Model.CUA do
+        :quit_all
+      else
+        :quit
+      end
+
+    new_state = Minga.Editor.dispatch_command(state, command)
     {:handled, new_state}
   end
 

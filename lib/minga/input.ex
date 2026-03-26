@@ -124,6 +124,7 @@ defmodule Minga.Input do
       FileTreeHandler,
       GitStatus,
       Popup,
+      Minga.Input.CUA.TUISpaceLeader,
       Scoped,
       AgentNav,
       GlobalBindings,

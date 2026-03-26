@@ -321,13 +321,15 @@ defmodule Minga.Keymap.Scope.Agent do
   @spec cua_trie() :: Bindings.node_t()
   defp cua_trie do
     CUADefaults.navigation_trie()
-    # Chat navigation (not input focused)
-    |> Bindings.bind([{@enter, 0}], :agent_focus_input, "Focus input")
+    # Enter: focus input if not focused, submit if focused
+    |> Bindings.bind([{@enter, 0}], :agent_focus_or_submit, "Focus input / submit")
     |> Bindings.bind([{@escape, 0}], :agent_dismiss_or_noop, "Dismiss/cancel")
     |> Bindings.bind([{@tab, 0}], :agent_switch_focus, "Switch panel focus")
-    # Cmd chords work everywhere
+    # Cmd chords (GUI) + Ctrl fallbacks (TUI)
     |> Bindings.bind([{?c, @cmd}], :agent_copy_code_block, "Copy code block")
     |> Bindings.bind([{?a, @cmd}], :select_all, "Select all")
+    |> Bindings.bind([{?c, @ctrl}], :agent_copy_code_block, "Copy code block")
+    |> Bindings.bind([{?a, @ctrl}], :select_all, "Select all")
     # Input field bindings (used when input focused)
     |> Bindings.bind([{@backspace, 0}], :agent_input_backspace, "Delete character")
     |> Bindings.bind([{@enter, @shift}], :agent_insert_newline, "Insert newline")

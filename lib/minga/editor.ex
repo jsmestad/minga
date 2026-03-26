@@ -478,6 +478,13 @@ defmodule Minga.Editor do
     {:noreply, state}
   end
 
+  # ── TUI SPC leader timeout ──────────────────────────────────────────────
+
+  def handle_info(:space_leader_timeout, state) do
+    new_state = Minga.Input.CUA.TUISpaceLeader.handle_timeout(state)
+    {:noreply, new_state}
+  end
+
   # ── Highlight setup (async, after first paint with correct viewport) ──────────
 
   def handle_info(:setup_highlight, state) do
