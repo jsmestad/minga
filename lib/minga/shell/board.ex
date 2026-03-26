@@ -66,16 +66,38 @@ defmodule Minga.Shell.Board do
   @spec handle_gui_action(BoardState.t(), Minga.Workspace.State.t(), term()) ::
           {BoardState.t(), Minga.Workspace.State.t()}
   def handle_gui_action(shell_state, workspace, {:board_select_card, card_id}) do
-    # GUI card click: focus the card and zoom in.
-    # Store the current workspace on the card, then mark as zoomed.
+    # GUI card click: focus, zoom in, activate agent view.
+    # Same logic as Board.Input's Enter key handler.
     shell_state = BoardState.focus_card(shell_state, card_id)
     workspace_snapshot = Map.from_struct(workspace)
     shell_state = BoardState.zoom_into(shell_state, card_id, workspace_snapshot)
+
+    # Restore the card's workspace if it has one
+    card = BoardState.zoomed(shell_state)
+
+    workspace =
+      case card && card.workspace do
+        ws when is_map(ws) and map_size(ws) > 0 ->
+          struct!(Minga.Workspace.State, ws)
+
+        _ ->
+          workspace
+      end
+
+    # For agent cards, switch to agent scope
+    workspace =
+      if card && !Minga.Shell.Board.Card.you_card?(card) do
+        %{workspace | keymap_scope: :agent}
+      else
+        workspace
+      end
+
     {shell_state, workspace}
   end
 
   def handle_gui_action(shell_state, workspace, {:board_close_card, card_id}) do
     shell_state = BoardState.remove_card(shell_state, card_id)
+    Minga.Shell.Board.Persistence.save(shell_state)
     {shell_state, workspace}
   end
 

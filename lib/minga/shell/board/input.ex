@@ -251,19 +251,51 @@ defmodule Minga.Shell.Board.Input do
       new_board = BoardState.zoom_into(board, card.id, current_workspace)
       state = %{state | shell_state: new_board}
 
-      # If the card has its own workspace (from a previous zoom), restore it.
-      # If not (new card, never zoomed before), keep the current workspace.
-      # The user sees whatever buffer was open; they can open files from here.
-      case card.workspace do
-        ws when is_map(ws) and map_size(ws) > 0 ->
-          EditorState.restore_tab_context(state, ws)
+      # Restore the card's workspace if it has one from a previous zoom
+      state =
+        case card.workspace do
+          ws when is_map(ws) and map_size(ws) > 0 ->
+            EditorState.restore_tab_context(state, ws)
 
-        _ ->
-          state
+          _ ->
+            state
+        end
+
+      # For agent cards, activate the agentic view so the user sees
+      # the agent chat, not a plain buffer
+      if !Card.you_card?(card) do
+        activate_agent_view(state, card)
+      else
+        state
       end
     else
       state
     end
+  end
+
+  @spec activate_agent_view(EditorState.t(), Card.t()) :: EditorState.t()
+  defp activate_agent_view(state, card) do
+    # Attach the session so agent events route correctly
+    state =
+      if card.session do
+        Minga.Editor.State.AgentAccess.update_agent(state, fn a ->
+          Minga.Editor.State.Agent.set_session(a, card.session)
+        end)
+      else
+        state
+      end
+
+    # Switch to agent scope so the agent chat/panel renders.
+    # This is a lighter approach than toggle_agentic_view which
+    # depends on the Traditional tab system.
+    ws = %{state.workspace | keymap_scope: :agent}
+
+    # Make the agent panel visible
+    state = Minga.Editor.State.AgentAccess.update_agent_ui(state, fn ui ->
+      Minga.Agent.UIState.set_input_focused(ui, true)
+    end)
+
+    %{state | workspace: ws}
   end
 
   @spec create_new_card(EditorState.t()) :: EditorState.t()
@@ -283,8 +315,11 @@ defmodule Minga.Shell.Board.Input do
     # Snapshot current workspace and zoom into the card
     workspace_snapshot = Map.from_struct(state.workspace)
     board = BoardState.zoom_into(board, card.id, workspace_snapshot)
+    state = %{state | shell_state: board}
 
-    %{state | shell_state: board}
+    # Activate the agentic view for the new card
+    card = board.cards[card.id]
+    activate_agent_view(state, card)
   end
 
   @spec start_and_attach_session(BoardState.t(), pos_integer(), String.t(), EditorState.t()) ::

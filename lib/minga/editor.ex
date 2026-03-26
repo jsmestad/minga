@@ -1790,6 +1790,17 @@ defmodule Minga.Editor do
   # unimplemented actions log a message and return state unchanged.
 
   @spec handle_gui_action(state(), Protocol.GUI.gui_action()) :: state()
+
+  # Route gui_actions through the active Shell first. Shells that handle
+  # the action return updated state; unhandled actions fall through to
+  # the Traditional-specific handlers below.
+  defp handle_gui_action(%{shell: Minga.Shell.Board} = state, action) do
+    {shell_state, workspace} =
+      Minga.Shell.Board.handle_gui_action(state.shell_state, state.workspace, action)
+
+    %{state | shell_state: shell_state, workspace: workspace}
+  end
+
   defp handle_gui_action(state, {:select_tab, id}) do
     EditorState.switch_tab(state, id)
   end
@@ -1798,14 +1809,11 @@ defmodule Minga.Editor do
     # Switch to the target tab first (if not already active), then close
     # it. This ensures the right tab is closed when the user clicks X
     # on a background tab.
-    # Guard: tab_bar may be nil on non-Traditional shells (e.g., Board).
     state =
-      case state.shell_state.tab_bar do
-        %{active_id: active_id} when active_id != id ->
-          EditorState.switch_tab(state, id)
-
-        _ ->
-          state
+      if state.shell_state.tab_bar.active_id != id do
+        EditorState.switch_tab(state, id)
+      else
+        state
       end
 
     Commands.BufferManagement.execute(state, :force_quit)
@@ -2101,34 +2109,6 @@ defmodule Minga.Editor do
 
     cmd = if direction == 1, do: :search_prev, else: :search_next
     Minga.Editor.Commands.execute(state, cmd)
-  end
-
-  # Board gui_actions: delegate to the active shell
-  defp handle_gui_action(%{shell: Minga.Shell.Board} = state, {:board_select_card, card_id}) do
-    board = state.shell_state
-    board = Minga.Shell.Board.State.focus_card(board, card_id)
-
-    # Zoom into the card (same logic as Enter key)
-    workspace_snapshot = Map.from_struct(state.workspace)
-    board = Minga.Shell.Board.State.zoom_into(board, card_id, workspace_snapshot)
-
-    state = %{state | shell_state: board}
-
-    # Restore the card's workspace if it has one
-    card = Minga.Shell.Board.State.zoomed(board)
-
-    case card && card.workspace do
-      ws when is_map(ws) and map_size(ws) > 0 ->
-        EditorState.restore_tab_context(state, ws)
-
-      _ ->
-        state
-    end
-  end
-
-  defp handle_gui_action(%{shell: Minga.Shell.Board} = state, {:board_close_card, card_id}) do
-    board = Minga.Shell.Board.State.remove_card(state.shell_state, card_id)
-    %{state | shell_state: board}
   end
 
   defp handle_gui_action(state, {:git_open_file, path}) do
