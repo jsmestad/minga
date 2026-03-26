@@ -2040,14 +2040,14 @@ defmodule Minga.Editor do
   end
 
   defp handle_gui_action(
-         %{shell_state: %{shell_state: %{tab_bar: %TabBar{} = tb}}} = state,
+         %{shell_state: %{tab_bar: %TabBar{} = tb}} = state,
          {:agent_group_close, ws_id}
        ) do
     EditorState.set_tab_bar(state, TabBar.remove_group(tb, ws_id))
   end
 
   defp handle_gui_action(
-         %{shell_state: %{shell_state: %{tab_bar: %TabBar{} = tb}}} = state,
+         %{shell_state: %{tab_bar: %TabBar{} = tb}} = state,
          {:agent_group_rename, ws_id, name}
        ) do
     alias Minga.Editor.State.AgentGroup
@@ -2056,7 +2056,7 @@ defmodule Minga.Editor do
   end
 
   defp handle_gui_action(
-         %{shell_state: %{shell_state: %{tab_bar: %TabBar{} = tb}}} = state,
+         %{shell_state: %{tab_bar: %TabBar{} = tb}} = state,
          {:agent_group_set_icon, ws_id, icon}
        ) do
     alias Minga.Editor.State.AgentGroup

@@ -167,7 +167,7 @@ defmodule Minga.Frontend.Emit.GUI do
   # ── Tab bar ──
 
   @spec build_gui_tab_bar_cmd(state()) :: binary() | nil
-  defp build_gui_tab_bar_cmd(%{shell_state: %{shell_state: %{tab_bar: %TabBar{} = tb}}} = state) do
+  defp build_gui_tab_bar_cmd(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
     active_buf = active_window_buffer(state)
     fp = :erlang.phash2({tb, active_buf})
 
@@ -180,7 +180,7 @@ defmodule Minga.Frontend.Emit.GUI do
   defp build_gui_tab_bar_cmd(%{shell_state: %{tab_bar: nil}}), do: nil
 
   @spec build_gui_agent_groups_cmd(state()) :: binary() | nil
-  defp build_gui_agent_groups_cmd(%{shell_state: %{shell_state: %{tab_bar: %TabBar{} = tb}}}) do
+  defp build_gui_agent_groups_cmd(%{shell_state: %{tab_bar: %TabBar{} = tb}}) do
     # Only send workspace bar when agent workspaces exist (tier >= 1).
     # Also include workspace count so the GUI hides the indicator when
     # all agent workspaces are removed.

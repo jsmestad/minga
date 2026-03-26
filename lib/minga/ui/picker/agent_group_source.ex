@@ -61,7 +61,7 @@ defmodule Minga.UI.Picker.AgentGroupSource do
   @spec on_select(Item.t(), term()) :: term()
   def on_select(
         %Item{id: workspace_id},
-        %{shell_state: %{shell_state: %{tab_bar: %TabBar{} = tb}}} = state
+        %{shell_state: %{tab_bar: %TabBar{} = tb}} = state
       ) do
     # switch_to_group activates the first tab in the target workspace,
     # then switch_tab does the full context snapshot/restore cycle.
