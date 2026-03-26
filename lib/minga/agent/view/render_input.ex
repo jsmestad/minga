@@ -11,9 +11,9 @@ defmodule Minga.Agent.View.RenderInput do
 
   alias Minga.Agent.Session
   alias Minga.Agent.UIState
+  alias Minga.Editing.Scroll
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.AgentAccess
-  alias Minga.Scroll
   alias Minga.UI.Theme
 
   @enforce_keys [:theme, :agent_status, :panel, :agent_ui]
@@ -111,7 +111,7 @@ defmodule Minga.Agent.View.RenderInput do
         input_focused: panel.input_focused,
         input_lines: UIState.input_lines(panel),
         input_cursor: UIState.input_cursor(panel),
-        mode: Minga.Editor.Editing.mode(state),
+        mode: Minga.Editing.mode(state),
         mode_state: Minga.Editor.Editing.mode_state(state),
         scroll: panel.scroll,
         spinner_frame: panel.spinner_frame,

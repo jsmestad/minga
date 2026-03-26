@@ -20,7 +20,6 @@ defmodule Minga.Agent.UIState do
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.State.FileTree, as: FileTreeState
   alias Minga.Editor.State.Windows
-  alias Minga.Scroll
 
   # Re-export sub-struct types for backward compat. New code should
   # reference Panel.paste_block(), View.search_state(), etc. directly.
@@ -397,40 +396,40 @@ defmodule Minga.Agent.UIState do
 
   def history_next(%__MODULE__{} = state), do: state
 
-  # ── Scrolling (delegates to Minga.Scroll) ────────────────────────────────
+  # ── Scrolling (delegates to Minga.Editing.Scroll) ────────────────────────────────
 
-  @doc "Scrolls the content up. Delegates to `Minga.Scroll.scroll_up/2`."
+  @doc "Scrolls the content up. Delegates to `Minga.Editing.Minga.Editing.scroll_up/2`."
   @spec scroll_up(t(), non_neg_integer()) :: t()
   def scroll_up(%__MODULE__{panel: panel} = state, amount) do
-    %{state | panel: %{panel | scroll: Scroll.scroll_up(panel.scroll, amount)}}
+    %{state | panel: %{panel | scroll: Minga.Editing.scroll_up(panel.scroll, amount)}}
   end
 
-  @doc "Scrolls the content down. Delegates to `Minga.Scroll.scroll_down/2`."
+  @doc "Scrolls the content down. Delegates to `Minga.Editing.Minga.Editing.scroll_down/2`."
   @spec scroll_down(t(), non_neg_integer()) :: t()
   def scroll_down(%__MODULE__{panel: panel} = state, amount) do
-    %{state | panel: %{panel | scroll: Scroll.scroll_down(panel.scroll, amount)}}
+    %{state | panel: %{panel | scroll: Minga.Editing.scroll_down(panel.scroll, amount)}}
   end
 
-  @doc "Pins chat to bottom. Delegates to `Minga.Scroll.pin_to_bottom/1`."
+  @doc "Pins chat to bottom. Delegates to `Minga.Editing.Minga.Editing.pin_to_bottom/1`."
   @spec scroll_to_bottom(t()) :: t()
   def scroll_to_bottom(%__MODULE__{panel: panel} = state) do
-    %{state | panel: %{panel | scroll: Scroll.pin_to_bottom(panel.scroll)}}
+    %{state | panel: %{panel | scroll: Minga.Editing.pin_to_bottom(panel.scroll)}}
   end
 
-  @doc "Scrolls to top. Delegates to `Minga.Scroll.scroll_to_top/1`."
+  @doc "Scrolls to top. Delegates to `Minga.Editing.Minga.Editing.scroll_to_top/1`."
   @spec scroll_to_top(t()) :: t()
   def scroll_to_top(%__MODULE__{panel: panel} = state) do
-    %{state | panel: %{panel | scroll: Scroll.scroll_to_top(panel.scroll)}}
+    %{state | panel: %{panel | scroll: Minga.Editing.scroll_to_top(panel.scroll)}}
   end
 
   @doc "No-op. Streaming events call this; renderer handles pinning."
   @spec maybe_auto_scroll(t()) :: t()
   def maybe_auto_scroll(%__MODULE__{} = state), do: state
 
-  @doc "Re-engages auto-scroll. Delegates to `Minga.Scroll.pin_to_bottom/1`."
+  @doc "Re-engages auto-scroll. Delegates to `Minga.Editing.Minga.Editing.pin_to_bottom/1`."
   @spec engage_auto_scroll(t()) :: t()
   def engage_auto_scroll(%__MODULE__{panel: panel} = state) do
-    %{state | panel: %{panel | scroll: Scroll.pin_to_bottom(panel.scroll)}}
+    %{state | panel: %{panel | scroll: Minga.Editing.pin_to_bottom(panel.scroll)}}
   end
 
   @doc "Sets the input focus state. Entering focus ensures the prompt buffer exists."
@@ -452,7 +451,10 @@ defmodule Minga.Agent.UIState do
   """
   @spec clear_display(t(), non_neg_integer()) :: t()
   def clear_display(%__MODULE__{panel: panel} = state, message_count) do
-    %{state | panel: %{panel | display_start_index: message_count, scroll: Scroll.new()}}
+    %{
+      state
+      | panel: %{panel | display_start_index: message_count, scroll: Minga.Editing.new_scroll()}
+    }
   end
 
   @doc "Clears the input and scrolls to the bottom."
@@ -485,7 +487,7 @@ defmodule Minga.Agent.UIState do
   @spec set_scroll(t(), non_neg_integer()) :: t()
   def set_scroll(%__MODULE__{panel: panel} = state, offset)
       when is_integer(offset) and offset >= 0 do
-    %{state | panel: %{panel | scroll: Scroll.set_offset(panel.scroll, offset)}}
+    %{state | panel: %{panel | scroll: Minga.Editing.set_scroll_offset(panel.scroll, offset)}}
   end
 
   # ══════════════════════════════════════════════════════════════════════════

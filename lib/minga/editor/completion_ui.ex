@@ -12,7 +12,7 @@ defmodule Minga.Editor.CompletionUI do
   """
 
   alias Minga.Agent.Markdown
-  alias Minga.Completion
+  alias Minga.Editing.Completion
   alias Minga.Editor.DisplayList
   alias Minga.Editor.FloatingWindow
   alias Minga.Editor.MarkdownStyles

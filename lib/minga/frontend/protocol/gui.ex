@@ -715,15 +715,19 @@ defmodule Minga.Frontend.Protocol.GUI do
   # ── Completion ──
 
   @doc "Encodes a gui_completion command."
-  @spec encode_gui_completion(Minga.Completion.t() | nil, non_neg_integer(), non_neg_integer()) ::
+  @spec encode_gui_completion(
+          Minga.Editing.Completion.t() | nil,
+          non_neg_integer(),
+          non_neg_integer()
+        ) ::
           binary()
   def encode_gui_completion(nil, _row, _col), do: <<@op_gui_completion, 0::8>>
 
-  def encode_gui_completion(%Minga.Completion{filtered: []}, _row, _col) do
+  def encode_gui_completion(%Minga.Editing.Completion{filtered: []}, _row, _col) do
     <<@op_gui_completion, 0::8>>
   end
 
-  def encode_gui_completion(%Minga.Completion{} = comp, cursor_row, cursor_col) do
+  def encode_gui_completion(%Minga.Editing.Completion{} = comp, cursor_row, cursor_col) do
     items = Enum.take(comp.filtered, comp.max_visible)
 
     entries =

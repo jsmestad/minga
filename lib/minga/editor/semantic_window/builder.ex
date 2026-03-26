@@ -88,7 +88,7 @@ defmodule Minga.Editor.SemanticWindow.Builder do
 
     cursor_shape =
       if is_active do
-        Minga.Editor.Editing.cursor_shape(state)
+        Minga.Editing.cursor_shape(state)
       else
         :block
       end
@@ -98,7 +98,7 @@ defmodule Minga.Editor.SemanticWindow.Builder do
     # own cursor; having two cursors visible is confusing.
     cursor_visible =
       if is_active do
-        not Minga.Editor.Editing.minibuffer_mode?(state)
+        not Minga.Editing.minibuffer_mode?(state)
       else
         true
       end

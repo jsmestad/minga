@@ -15,8 +15,8 @@ defmodule Minga.Input.Router do
   """
 
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Editing
   alias Minga.Editor
-  alias Minga.Editor.Editing
   alias Minga.Editor.LspActions
   alias Minga.Editor.State, as: EditorState
 

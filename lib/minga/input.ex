@@ -128,9 +128,9 @@ defmodule Minga.Input do
   """
   @spec editing_dispatch_handler() :: module()
   def editing_dispatch_handler do
-    case Minga.Editor.Editing.active_model() do
-      Minga.EditingModel.Vim -> ModeFSM
-      Minga.EditingModel.CUA -> Minga.Input.CUA.Dispatch
+    case Minga.Editing.active_model() do
+      Minga.Editing.Model.Vim -> ModeFSM
+      Minga.Editing.Model.CUA -> Minga.Input.CUA.Dispatch
     end
   end
 
@@ -145,7 +145,7 @@ defmodule Minga.Input do
   """
   @spec key_sequence_pending?(Minga.Editor.State.t()) :: boolean()
   def key_sequence_pending?(state) do
-    Minga.Editor.Editing.key_sequence_pending?(state)
+    Minga.Editing.key_sequence_pending?(state)
   end
 
   # ── Modifier constants ───────────────────────────────────────────────────

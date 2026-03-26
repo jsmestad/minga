@@ -21,8 +21,8 @@ defmodule Minga.Input.CUA.SpaceLeader do
   """
 
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Editing
   alias Minga.Editor.Commands
-  alias Minga.Editor.Editing
   alias Minga.Editor.State, as: EditorState
   alias Minga.Keymap.Active, as: KeymapActive
 
@@ -89,7 +89,7 @@ defmodule Minga.Input.CUA.SpaceLeader do
   """
   @spec active?() :: boolean()
   def active? do
-    Editing.active_model() == Minga.EditingModel.CUA and
+    Editing.active_model() == Minga.Editing.Model.CUA and
       Minga.Config.Options.get(:space_leader) == :chord
   catch
     :exit, _ -> false

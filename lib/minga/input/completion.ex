@@ -14,7 +14,7 @@ defmodule Minga.Input.Completion do
   import Bitwise
 
   alias Minga.Buffer.Server, as: BufferServer
-  alias Minga.Completion
+  alias Minga.Editing.Completion
   alias Minga.Editor.CompletionHandling
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Viewport

@@ -23,7 +23,7 @@ defmodule Minga.Editor.SemanticWindowTest do
   alias Minga.Editor.State, as: EditorState
   alias Minga.UI.Face
 
-  alias Minga.Search.Match, as: SearchMatchStruct
+  alias Minga.Editing.Search.Match, as: SearchMatchStruct
 
   import Minga.Editor.RenderPipeline.TestHelpers
 

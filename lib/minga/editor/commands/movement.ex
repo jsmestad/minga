@@ -18,7 +18,6 @@ defmodule Minga.Editor.Commands.Movement do
   alias Minga.Editor.Window
   alias Minga.Editor.WindowTree
   alias Minga.Mode
-  alias Minga.Motion.VisualLine
 
   @type state :: EditorState.t()
 
@@ -156,54 +155,54 @@ defmodule Minga.Editor.Commands.Movement do
   # ── Word motions (small) ───────────────────────────────────────────────────
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :word_forward) do
-    Helpers.apply_motion(buf, &Minga.Motion.word_forward/2)
+    Helpers.apply_motion(buf, &Minga.Editing.word_forward/2)
     state
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :word_backward) do
-    Helpers.apply_motion(buf, &Minga.Motion.word_backward/2)
+    Helpers.apply_motion(buf, &Minga.Editing.word_backward/2)
     state
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :word_end) do
-    Helpers.apply_motion(buf, &Minga.Motion.word_end/2)
+    Helpers.apply_motion(buf, &Minga.Editing.word_end/2)
     state
   end
 
   # ── Word motions (WORD / big) ─────────────────────────────────────────────
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :word_forward_big) do
-    Helpers.apply_motion(buf, &Minga.Motion.word_forward_big/2)
+    Helpers.apply_motion(buf, &Minga.Editing.word_forward_big/2)
     state
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :word_backward_big) do
-    Helpers.apply_motion(buf, &Minga.Motion.word_backward_big/2)
+    Helpers.apply_motion(buf, &Minga.Editing.word_backward_big/2)
     state
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :word_end_big) do
-    Helpers.apply_motion(buf, &Minga.Motion.word_end_big/2)
+    Helpers.apply_motion(buf, &Minga.Editing.word_end_big/2)
     state
   end
 
   # ── Line / document navigation ─────────────────────────────────────────────
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :move_to_first_non_blank) do
-    Helpers.apply_motion(buf, &Minga.Motion.first_non_blank/2)
+    Helpers.apply_motion(buf, &Minga.Editing.first_non_blank/2)
     state
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :move_to_document_start) do
     gb = BufferServer.snapshot(buf)
-    new_pos = Minga.Motion.document_start(gb)
+    new_pos = Minga.Editing.document_start(gb)
     BufferServer.move_to(buf, new_pos)
     state
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :move_to_document_end) do
     gb = BufferServer.snapshot(buf)
-    new_pos = Minga.Motion.document_end(gb)
+    new_pos = Minga.Editing.document_end(gb)
     BufferServer.move_to(buf, new_pos)
     maybe_repin_agent_chat(state)
   end
@@ -219,7 +218,7 @@ defmodule Minga.Editor.Commands.Movement do
     {line, _col} = Document.cursor(gb)
     total = Document.line_count(gb)
     next_line = min(line + 1, total - 1)
-    new_pos = Minga.Motion.first_non_blank(gb, {next_line, 0})
+    new_pos = Minga.Editing.first_non_blank(gb, {next_line, 0})
     BufferServer.move_to(buf, new_pos)
     state
   end
@@ -228,7 +227,7 @@ defmodule Minga.Editor.Commands.Movement do
     gb = BufferServer.snapshot(buf)
     {line, _col} = Document.cursor(gb)
     prev_line = max(line - 1, 0)
-    new_pos = Minga.Motion.first_non_blank(gb, {prev_line, 0})
+    new_pos = Minga.Editing.first_non_blank(gb, {prev_line, 0})
     BufferServer.move_to(buf, new_pos)
     state
   end
@@ -268,19 +267,19 @@ defmodule Minga.Editor.Commands.Movement do
   # ── Bracket matching ──────────────────────────────────────────────────────
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :match_bracket) do
-    Helpers.apply_motion(buf, &Minga.Motion.match_bracket/2)
+    Helpers.apply_motion(buf, &Minga.Editing.match_bracket/2)
     state
   end
 
   # ── Paragraph motions ─────────────────────────────────────────────────────
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :paragraph_forward) do
-    Helpers.apply_motion(buf, &Minga.Motion.paragraph_forward/2)
+    Helpers.apply_motion(buf, &Minga.Editing.paragraph_forward/2)
     state
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :paragraph_backward) do
-    Helpers.apply_motion(buf, &Minga.Motion.paragraph_backward/2)
+    Helpers.apply_motion(buf, &Minga.Editing.paragraph_backward/2)
     state
   end
 
@@ -547,8 +546,8 @@ defmodule Minga.Editor.Commands.Movement do
 
     new_pos =
       case direction do
-        :down -> VisualLine.visual_down(doc, pos, content_w)
-        :up -> VisualLine.visual_up(doc, pos, content_w)
+        :down -> Minga.Editing.visual_line_down(doc, pos, content_w)
+        :up -> Minga.Editing.visual_line_up(doc, pos, content_w)
       end
 
     BufferServer.move_to(buf, new_pos)
@@ -563,8 +562,8 @@ defmodule Minga.Editor.Commands.Movement do
 
     new_pos =
       case edge do
-        :start -> VisualLine.visual_line_start(doc, pos, content_w)
-        :end -> VisualLine.visual_line_end(doc, pos, content_w)
+        :start -> Minga.Editing.visual_line_start(doc, pos, content_w)
+        :end -> Minga.Editing.visual_line_end(doc, pos, content_w)
       end
 
     BufferServer.move_to(buf, new_pos)

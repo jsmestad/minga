@@ -186,7 +186,7 @@ defmodule Minga.Editor.Renderer.Minibuffer do
   # Legacy path: fetches diagnostic from buffer (for backward compatibility)
   def render(%{workspace: %{buffers: %{active: buf}}, theme: theme} = state, row, cols)
       when is_pid(buf) do
-    mode = Minga.Editor.Editing.mode(state)
+    mode = Minga.Editing.mode(state)
 
     if mode in [:normal, :insert, :replace] do
       mb = theme.minibuffer

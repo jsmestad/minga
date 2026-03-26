@@ -99,7 +99,7 @@ defmodule Minga.Editor.RenderPipeline.ComposeHelpers do
       Cursor.new(
         input_row,
         input_col,
-        Minga.Editor.Editing.cursor_shape(state)
+        Minga.Editing.cursor_shape(state)
       )
     else
       nil

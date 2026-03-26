@@ -14,7 +14,7 @@ defmodule Minga.Agent.UIState.Panel do
 
   alias Minga.Agent.Config, as: AgentConfig
   alias Minga.Buffer.Server, as: BufferServer
-  alias Minga.Scroll
+  alias Minga.Editing.Scroll
 
   @typedoc "A collapsed paste block. Stores the original text and whether the block is currently expanded for editing."
   @type paste_block :: %{text: String.t(), expanded: boolean()}

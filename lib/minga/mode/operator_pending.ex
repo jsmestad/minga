@@ -4,7 +4,7 @@ defmodule Minga.Mode.OperatorPending do
 
   The mode waits for a **motion key** (or the operator repeated for a
   line-wise variant) and then emits the appropriate command tuple that the
-  editor can execute via `Minga.Operator`.
+  editor can execute via `Minga.Editing.Operator`.
 
   ## State keys added by this mode
 
@@ -65,7 +65,7 @@ defmodule Minga.Mode.OperatorPending do
 
   The emitted command is `{:delete_text_object, modifier, spec}` (or
   `:change_text_object` / `:yank_text_object`), which the editor executes by
-  calling the appropriate `Minga.TextObject` function.
+  calling the appropriate `Minga.Editing.TextObject` function.
   """
 
   @behaviour Minga.Mode

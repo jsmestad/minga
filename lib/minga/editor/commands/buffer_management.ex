@@ -23,7 +23,6 @@ defmodule Minga.Editor.Commands.BufferManagement do
   alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.TabBar
   alias Minga.Editor.Window
-  alias Minga.Formatter
   alias Minga.Mode
   alias Minga.Mode.ToolConfirmState
   alias Minga.Tool.Recipe.Registry, as: RecipeRegistry
@@ -1078,7 +1077,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   defp run_format_on_save(state, buf) do
     file_path = BufferServer.file_path(buf)
     filetype = BufferServer.filetype(buf)
-    spec = Formatter.resolve_formatter(filetype, file_path)
+    spec = Minga.Editing.resolve_formatter(filetype, file_path)
     buf_name = Helpers.buffer_display_name(buf)
 
     case spec do
@@ -1099,7 +1098,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
 
   @spec run_formatter_with_spec(state(), pid(), String.t(), String.t()) :: state()
   defp run_formatter_with_spec(state, buf, spec, buf_name) do
-    case Formatter.format(BufferServer.content(buf), spec) do
+    case Minga.Editing.format(BufferServer.content(buf), spec) do
       {:ok, formatted} ->
         BufferServer.replace_content(buf, formatted)
         Minga.Editor.log_to_messages("Format-on-save: #{buf_name}")
@@ -1147,7 +1146,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
 
     if needs_trim or needs_final_newline do
       content = BufferServer.content(buf)
-      transformed = Formatter.apply_save_transforms(content, needs_trim, needs_final_newline)
+      transformed = Minga.Editing.apply_save_transforms(content, needs_trim, needs_final_newline)
 
       if transformed != content do
         BufferServer.replace_content(buf, transformed)

@@ -20,7 +20,7 @@ defmodule Minga.Agent.View.Preview do
   """
 
   alias Minga.Agent.DiffReview
-  alias Minga.Scroll
+  alias Minga.Editing.Scroll
 
   @typedoc "Shell command execution status."
   @type shell_status :: :running | :done | :error
@@ -51,7 +51,7 @@ defmodule Minga.Agent.View.Preview do
   @doc "Sets the preview to show shell command output (streaming)."
   @spec set_shell(t(), String.t()) :: t()
   def set_shell(%__MODULE__{} = preview, command) do
-    %{preview | content: {:shell, command, "", :running}, scroll: Scroll.new()}
+    %{preview | content: {:shell, command, "", :running}, scroll: Minga.Editing.new_scroll()}
   end
 
   @doc "Updates the shell output with new partial content."
@@ -81,7 +81,7 @@ defmodule Minga.Agent.View.Preview do
   @doc "Sets the preview to show a diff review."
   @spec set_diff(t(), DiffReview.t()) :: t()
   def set_diff(%__MODULE__{} = preview, %DiffReview{} = review) do
-    %{preview | content: {:diff, review}, scroll: Scroll.new()}
+    %{preview | content: {:diff, review}, scroll: Minga.Editing.new_scroll()}
   end
 
   @doc "Updates the diff review within the preview."
@@ -101,45 +101,45 @@ defmodule Minga.Agent.View.Preview do
   @doc "Sets the preview to show file content."
   @spec set_file(t(), String.t(), String.t()) :: t()
   def set_file(%__MODULE__{} = preview, path, content) do
-    %{preview | content: {:file, path, content}, scroll: Scroll.new()}
+    %{preview | content: {:file, path, content}, scroll: Minga.Editing.new_scroll()}
   end
 
   @doc "Sets the preview to show a directory listing."
   @spec set_directory(t(), String.t(), [String.t()]) :: t()
   def set_directory(%__MODULE__{} = preview, path, entries) when is_list(entries) do
-    %{preview | content: {:directory, path, entries}, scroll: Scroll.new()}
+    %{preview | content: {:directory, path, entries}, scroll: Minga.Editing.new_scroll()}
   end
 
   @doc "Clears the preview to empty state."
   @spec clear(t()) :: t()
   def clear(%__MODULE__{} = preview) do
-    %{preview | content: :empty, scroll: Scroll.new()}
+    %{preview | content: :empty, scroll: Minga.Editing.new_scroll()}
   end
 
-  # ── Scrolling (delegates to Minga.Scroll) ──────────────────────────────────
+  # ── Scrolling (delegates to Minga.Editing.Scroll) ──────────────────────────────────
 
-  @doc "Scrolls down. Delegates to `Scroll.scroll_down/2`."
+  @doc "Scrolls down. Delegates to `Minga.Editing.scroll_down/2`."
   @spec scroll_down(t(), pos_integer()) :: t()
   def scroll_down(%__MODULE__{} = preview, amount) do
-    %{preview | scroll: Scroll.scroll_down(preview.scroll, amount)}
+    %{preview | scroll: Minga.Editing.scroll_down(preview.scroll, amount)}
   end
 
-  @doc "Scrolls up. Delegates to `Scroll.scroll_up/2`."
+  @doc "Scrolls up. Delegates to `Minga.Editing.scroll_up/2`."
   @spec scroll_up(t(), pos_integer()) :: t()
   def scroll_up(%__MODULE__{} = preview, amount) do
-    %{preview | scroll: Scroll.scroll_up(preview.scroll, amount)}
+    %{preview | scroll: Minga.Editing.scroll_up(preview.scroll, amount)}
   end
 
-  @doc "Scrolls to top. Delegates to `Scroll.scroll_to_top/1`."
+  @doc "Scrolls to top. Delegates to `Minga.Editing.scroll_to_top/1`."
   @spec scroll_to_top(t()) :: t()
   def scroll_to_top(%__MODULE__{} = preview) do
-    %{preview | scroll: Scroll.scroll_to_top(preview.scroll)}
+    %{preview | scroll: Minga.Editing.scroll_to_top(preview.scroll)}
   end
 
-  @doc "Pins to bottom. Delegates to `Scroll.pin_to_bottom/1`."
+  @doc "Pins to bottom. Delegates to `Minga.Editing.pin_to_bottom/1`."
   @spec scroll_to_bottom(t()) :: t()
   def scroll_to_bottom(%__MODULE__{} = preview) do
-    %{preview | scroll: Scroll.pin_to_bottom(preview.scroll)}
+    %{preview | scroll: Minga.Editing.pin_to_bottom(preview.scroll)}
   end
 
   # ── Queries ─────────────────────────────────────────────────────────────────

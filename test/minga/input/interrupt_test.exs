@@ -2,7 +2,7 @@ defmodule Minga.Input.InterruptTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Server, as: BufferServer
-  alias Minga.Completion
+  alias Minga.Editing.Completion
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Buffers
   alias Minga.Editor.State.Picker

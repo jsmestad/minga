@@ -38,9 +38,9 @@ defmodule Minga.Editor.EditingTest do
 
   describe "mode/1" do
     test "returns the current mode" do
-      assert Editing.mode(build_state(mode: :normal)) == :normal
-      assert Editing.mode(build_state(mode: :insert)) == :insert
-      assert Editing.mode(build_state(mode: :visual)) == :visual
+      assert Minga.Editing.mode(build_state(mode: :normal)) == :normal
+      assert Minga.Editing.mode(build_state(mode: :insert)) == :insert
+      assert Minga.Editing.mode(build_state(mode: :visual)) == :visual
     end
   end
 
@@ -54,71 +54,71 @@ defmodule Minga.Editor.EditingTest do
 
   describe "inserting?/1" do
     test "returns true only in insert mode" do
-      assert Editing.inserting?(build_state(mode: :insert))
-      refute Editing.inserting?(build_state(mode: :normal))
-      refute Editing.inserting?(build_state(mode: :visual))
+      assert Minga.Editing.inserting?(build_state(mode: :insert))
+      refute Minga.Editing.inserting?(build_state(mode: :normal))
+      refute Minga.Editing.inserting?(build_state(mode: :visual))
     end
   end
 
   describe "selecting?/1" do
     test "returns true for visual modes" do
-      assert Editing.selecting?(build_state(mode: :visual))
-      assert Editing.selecting?(build_state(mode: :visual_line))
-      assert Editing.selecting?(build_state(mode: :visual_block))
-      refute Editing.selecting?(build_state(mode: :normal))
-      refute Editing.selecting?(build_state(mode: :insert))
+      assert Minga.Editing.selecting?(build_state(mode: :visual))
+      assert Minga.Editing.selecting?(build_state(mode: :visual_line))
+      assert Minga.Editing.selecting?(build_state(mode: :visual_block))
+      refute Minga.Editing.selecting?(build_state(mode: :normal))
+      refute Minga.Editing.selecting?(build_state(mode: :insert))
     end
   end
 
   describe "minibuffer_mode?/1" do
     test "returns true for minibuffer modes" do
-      assert Editing.minibuffer_mode?(build_state(mode: :command))
-      assert Editing.minibuffer_mode?(build_state(mode: :search))
-      assert Editing.minibuffer_mode?(build_state(mode: :eval))
-      assert Editing.minibuffer_mode?(build_state(mode: :search_prompt))
-      refute Editing.minibuffer_mode?(build_state(mode: :normal))
-      refute Editing.minibuffer_mode?(build_state(mode: :insert))
+      assert Minga.Editing.minibuffer_mode?(build_state(mode: :command))
+      assert Minga.Editing.minibuffer_mode?(build_state(mode: :search))
+      assert Minga.Editing.minibuffer_mode?(build_state(mode: :eval))
+      assert Minga.Editing.minibuffer_mode?(build_state(mode: :search_prompt))
+      refute Minga.Editing.minibuffer_mode?(build_state(mode: :normal))
+      refute Minga.Editing.minibuffer_mode?(build_state(mode: :insert))
     end
   end
 
   describe "in_leader?/1" do
     test "returns true when leader_node is a map" do
       ms = %{Mode.initial_state() | leader_node: %{children: %{}}}
-      assert Editing.in_leader?(build_state(mode_state: ms))
+      assert Minga.Editing.in_leader?(build_state(mode_state: ms))
     end
 
     test "returns false when leader_node is nil" do
       ms = %{Mode.initial_state() | leader_node: nil}
-      refute Editing.in_leader?(build_state(mode_state: ms))
+      refute Minga.Editing.in_leader?(build_state(mode_state: ms))
     end
 
     test "returns false when mode_state has no leader_node field" do
       vim = %VimState{mode: :insert, mode_state: %{}}
-      refute Editing.in_leader?(build_state(vim: vim))
+      refute Minga.Editing.in_leader?(build_state(vim: vim))
     end
   end
 
   describe "cursor_shape/1" do
     test "returns :beam for insert mode (dispatched through VimModel)" do
-      assert Editing.cursor_shape(build_state(mode: :insert)) == :beam
+      assert Minga.Editing.cursor_shape(build_state(mode: :insert)) == :beam
     end
 
     test "returns :block for normal mode (dispatched through VimModel)" do
-      assert Editing.cursor_shape(build_state(mode: :normal)) == :block
+      assert Minga.Editing.cursor_shape(build_state(mode: :normal)) == :block
     end
 
     test "returns :underline for replace mode" do
-      assert Editing.cursor_shape(build_state(mode: :replace)) == :underline
+      assert Minga.Editing.cursor_shape(build_state(mode: :replace)) == :underline
     end
 
     test "returns :underline when pending_replace is true in normal mode" do
       ms = %{Mode.initial_state() | pending_replace: true}
-      assert Editing.cursor_shape(build_state(mode: :normal, mode_state: ms)) == :underline
+      assert Minga.Editing.cursor_shape(build_state(mode: :normal, mode_state: ms)) == :underline
     end
 
     test "returns :beam for minibuffer modes" do
       for mode <- [:command, :search, :eval, :search_prompt] do
-        assert Editing.cursor_shape(build_state(mode: mode)) == :beam,
+        assert Minga.Editing.cursor_shape(build_state(mode: mode)) == :beam,
                "expected :beam for #{mode}"
       end
     end
@@ -126,27 +126,27 @@ defmodule Minga.Editor.EditingTest do
 
   describe "key_sequence_pending?/1" do
     test "false in normal mode at rest" do
-      refute Editing.key_sequence_pending?(build_state())
+      refute Minga.Editing.key_sequence_pending?(build_state())
     end
 
     test "true when leader_node is set" do
       ms = %{Mode.initial_state() | leader_node: %{children: %{}}}
-      assert Editing.key_sequence_pending?(build_state(mode_state: ms))
+      assert Minga.Editing.key_sequence_pending?(build_state(mode_state: ms))
     end
 
     test "true when prefix_node is set" do
       ms = %{Mode.initial_state() | prefix_node: %Minga.Keymap.Bindings.Node{}}
-      assert Editing.key_sequence_pending?(build_state(mode_state: ms))
+      assert Minga.Editing.key_sequence_pending?(build_state(mode_state: ms))
     end
   end
 
   describe "status_segment/1" do
     test "returns NORMAL for normal mode" do
-      assert Editing.status_segment(build_state(mode: :normal)) == "NORMAL"
+      assert Minga.Editing.status_segment(build_state(mode: :normal)) == "NORMAL"
     end
 
     test "returns INSERT for insert mode" do
-      assert Editing.status_segment(build_state(mode: :insert)) == "INSERT"
+      assert Minga.Editing.status_segment(build_state(mode: :insert)) == "INSERT"
     end
   end
 

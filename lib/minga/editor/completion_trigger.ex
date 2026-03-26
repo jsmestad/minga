@@ -21,7 +21,7 @@ defmodule Minga.Editor.CompletionTrigger do
   """
 
   alias Minga.Buffer.Server, as: BufferServer
-  alias Minga.Completion
+  alias Minga.Editing.Completion
   alias Minga.LSP.Client
   alias Minga.LSP.SyncServer
 

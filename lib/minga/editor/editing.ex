@@ -1,135 +1,27 @@
 defmodule Minga.Editor.Editing do
   @moduledoc """
-  Facade over the active editing model's state.
+  Vim-specific EditorState mutation helpers.
 
-  All call sites that need to query or update the editing model's state
-  (mode, mode_state, registers, recorders) go through this module instead
-  of reaching into `state.workspace.vim.*` directly.
+  This module provides read/write access to vim-specific state on
+  EditorState (registers, mode_state, recorders, marks). These are
+  Editor-domain internals; external callers should use the
+  `Minga.Editing` facade for model-agnostic queries like `inserting?`,
+  `mode`, `cursor_shape`.
 
-  Query functions that have `EditingModel` behaviour callbacks dispatch
-  through the active model. This means `inserting?/1`, `selecting?/1`,
-  `cursor_shape/1`, `key_sequence_pending?/1`, and `status_segment/1`
-  all call the appropriate `EditingModel.Vim` callback today, and will
-  dispatch to `EditingModel.CUA` when CUA arrives (#306, Phase D).
-
-  The active editing model is determined by the `:editing_model` config
-  option (`:vim` by default). The model module is resolved once and
-  cached; query functions construct a lightweight model state struct to
-  call through the behaviour.
-
-  ## Categories
-
-  **Model-dispatched queries** go through `EditingModel` callbacks:
-  `inserting?/1`, `selecting?/1`, `cursor_shape/1`,
-  `key_sequence_pending?/1`, `status_segment/1`.
-
-  **Direct queries** read from the vim state directly (these will become
-  model-dispatched as CUA grows its own equivalents):
-  `mode/1`, `mode_state/1`, `minibuffer_mode?/1`, `in_leader?/1`,
-  `visual_anchor/1`.
-
-  **Mutation functions** update editing model state and return EditorState:
-  `set_active_register/2`, `put_register/3`, `reset_active_register/1`,
-  `set_leader_node/2`, `update_mode_state/2`, `set_macro_recorder/2`,
-  `set_change_recorder/2`.
-
-  **Compound accessors** read deep into sub-structs:
-  `macro_recorder/1`, `change_recorder/1`, `active_register/1`,
-  `macro_recording?/1`.
+  Model-agnostic queries (inserting?, selecting?, cursor_shape, etc.)
+  live on the `Minga.Editing` facade, not here.
   """
 
-  alias Minga.EditingModel
-  alias Minga.EditingModel.CUA, as: CUAModel
-  alias Minga.EditingModel.Vim, as: VimModel
   alias Minga.Editor.MacroRecorder
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Registers
   alias Minga.Mode
 
-  # ── Model resolution ─────────────────────────────────────────────────────
-
-  @doc """
-  Returns the active editing model module.
-
-  Reads the `:editing_model` config option and returns the corresponding
-  module. Falls back to `EditingModel.Vim` if the config is unavailable
-  (e.g., during test setup before Config is started).
-  """
-  @spec active_model() :: module()
-  def active_model do
-    case Minga.Config.Options.get(:editing_model) do
-      :vim -> VimModel
-      :cua -> CUAModel
-    end
-  catch
-    # Config.Options may not be started yet (test setup, app boot).
-    :exit, _ -> VimModel
-  end
-
-  # Builds a lightweight EditingModel state struct from EditorState
-  # for dispatching through behaviour callbacks.
-  @spec model_state(EditorState.t()) :: EditingModel.state()
-  defp model_state(%EditorState{} = state) do
-    case active_model() do
-      VimModel -> VimModel.from_editor(state.workspace.vim.mode, state.workspace.vim.mode_state)
-      CUAModel -> CUAModel.from_editor()
-    end
-  end
-
-  # ── Model-dispatched queries ─────────────────────────────────────────────
-
-  @doc "Returns true when the editing model is in an inserting state."
-  @spec inserting?(EditorState.t()) :: boolean()
-  def inserting?(%EditorState{} = state) do
-    active_model().inserting?(model_state(state))
-  end
-
-  @doc "Returns true when the editing model has an active selection."
-  @spec selecting?(EditorState.t()) :: boolean()
-  def selecting?(%EditorState{} = state) do
-    active_model().selecting?(model_state(state))
-  end
-
-  @doc "Returns the cursor shape for the current editing state."
-  @spec cursor_shape(EditorState.t()) :: :beam | :block | :underline
-  def cursor_shape(%EditorState{} = state) do
-    active_model().cursor_shape(model_state(state))
-  end
-
-  @doc "Returns true when a multi-key sequence is in progress."
-  @spec key_sequence_pending?(EditorState.t()) :: boolean()
-  def key_sequence_pending?(%EditorState{} = state) do
-    active_model().key_sequence_pending?(model_state(state))
-  end
-
-  @doc "Returns a short string for the status bar mode segment."
-  @spec status_segment(EditorState.t()) :: String.t()
-  def status_segment(%EditorState{} = state) do
-    active_model().status_segment(model_state(state))
-  end
-
-  # ── Direct queries (not yet model-dispatched) ────────────────────────────
-
-  @doc "Returns the current editing mode atom (e.g. :normal, :insert, :visual)."
-  @spec mode(EditorState.t()) :: Mode.mode()
-  def mode(%EditorState{workspace: %{vim: vim}}), do: vim.mode
+  # ── Vim-specific reads ─────────────────────────────────────────────────────
 
   @doc "Returns the current mode-specific state struct."
   @spec mode_state(EditorState.t()) :: Mode.state()
   def mode_state(%EditorState{workspace: %{vim: vim}}), do: vim.mode_state
-
-  @doc "Returns true when in a minibuffer-occupying mode (command, search, eval, search_prompt)."
-  @spec minibuffer_mode?(EditorState.t()) :: boolean()
-  def minibuffer_mode?(%EditorState{workspace: %{vim: vim}}),
-    do: vim.mode in [:command, :search, :eval, :search_prompt]
-
-  @doc "Returns true when a leader key sequence is pending (leader_node is a map)."
-  @spec in_leader?(EditorState.t()) :: boolean()
-  def in_leader?(%EditorState{workspace: %{vim: %{mode_state: ms}}})
-      when is_map_key(ms, :leader_node),
-      do: is_map(ms.leader_node)
-
-  def in_leader?(_state), do: false
 
   @doc "Returns the visual anchor position from mode_state, or nil."
   @spec visual_anchor(EditorState.t()) :: {non_neg_integer(), non_neg_integer()} | nil
@@ -138,8 +30,6 @@ defmodule Minga.Editor.Editing do
       do: ms.visual_anchor
 
   def visual_anchor(_state), do: nil
-
-  # ── Compound accessors ────────────────────────────────────────────────────
 
   @doc "Returns the macro recorder struct."
   @spec macro_recorder(EditorState.t()) :: MacroRecorder.t()
@@ -152,15 +42,6 @@ defmodule Minga.Editor.Editing do
   @doc "Returns `{true, register_name}` when recording, `false` otherwise."
   @spec macro_recording?(EditorState.t()) :: {true, String.t()} | false
   def macro_recording?(state), do: MacroRecorder.recording?(macro_recorder(state))
-
-  @doc """
-  Returns the macro recording status for display.
-
-  Returns `{true, register_name}` when recording, `false` otherwise.
-  Matches the shape expected by status bar data structs.
-  """
-  @spec macro_recording_status(EditorState.t()) :: {true, String.t()} | false
-  def macro_recording_status(state), do: MacroRecorder.recording?(macro_recorder(state))
 
   @doc "Returns the active register name (empty string for unnamed)."
   @spec active_register(EditorState.t()) :: String.t()

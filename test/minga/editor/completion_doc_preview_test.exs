@@ -6,7 +6,7 @@ defmodule Minga.Editor.CompletionDocPreviewTest do
 
   use ExUnit.Case, async: true
 
-  alias Minga.Completion
+  alias Minga.Editing.Completion
   alias Minga.Editor.CompletionHandling
   alias Minga.Editor.CompletionUI
   alias Minga.UI.Theme

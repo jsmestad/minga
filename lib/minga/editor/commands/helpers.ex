@@ -17,7 +17,6 @@ defmodule Minga.Editor.Commands.Helpers do
   alias Minga.Editor.State.Registers
   alias Minga.Editor.Viewport
   alias Minga.Mode.State, as: ModeState
-  alias Minga.TextObject
 
   @typedoc "Internal editor state."
   @type state :: EditorState.t()
@@ -269,7 +268,7 @@ defmodule Minga.Editor.Commands.Helpers do
   @doc "Applies a `(buf, pos) -> new_pos` motion function to the buffer cursor."
   @spec apply_motion(
           pid(),
-          (Document.t(), Minga.Motion.position() -> Minga.Motion.position())
+          (Document.t(), Minga.Editing.Motion.position() -> Minga.Editing.Motion.position())
         ) :: :ok
   def apply_motion(buf, motion_fn) do
     gb = BufferServer.snapshot(buf)
@@ -278,18 +277,22 @@ defmodule Minga.Editor.Commands.Helpers do
   end
 
   @doc "Resolves a motion atom to a new position in the buffer."
-  @spec resolve_motion(Document.t(), Minga.Motion.position(), atom()) ::
-          Minga.Motion.position()
-  def resolve_motion(buf, cursor, :word_forward), do: Minga.Motion.word_forward(buf, cursor)
-  def resolve_motion(buf, cursor, :word_backward), do: Minga.Motion.word_backward(buf, cursor)
-  def resolve_motion(buf, cursor, :word_end), do: Minga.Motion.word_end(buf, cursor)
-  def resolve_motion(buf, cursor, :line_start), do: Minga.Motion.line_start(buf, cursor)
-  def resolve_motion(buf, cursor, :line_end), do: Minga.Motion.line_end(buf, cursor)
-  def resolve_motion(buf, _cursor, :document_start), do: Minga.Motion.document_start(buf)
-  def resolve_motion(buf, _cursor, :document_end), do: Minga.Motion.document_end(buf)
+  @spec resolve_motion(Document.t(), Minga.Editing.Motion.position(), atom()) ::
+          Minga.Editing.Motion.position()
+  def resolve_motion(buf, cursor, :word_forward),
+    do: Minga.Editing.word_forward(buf, cursor)
+
+  def resolve_motion(buf, cursor, :word_backward),
+    do: Minga.Editing.word_backward(buf, cursor)
+
+  def resolve_motion(buf, cursor, :word_end), do: Minga.Editing.word_end(buf, cursor)
+  def resolve_motion(buf, cursor, :line_start), do: Minga.Editing.line_start(buf, cursor)
+  def resolve_motion(buf, cursor, :line_end), do: Minga.Editing.line_end(buf, cursor)
+  def resolve_motion(buf, _cursor, :document_start), do: Minga.Editing.document_start(buf)
+  def resolve_motion(buf, _cursor, :document_end), do: Minga.Editing.document_end(buf)
 
   def resolve_motion(buf, cursor, :first_non_blank),
-    do: Minga.Motion.first_non_blank(buf, cursor)
+    do: Minga.Editing.first_non_blank(buf, cursor)
 
   def resolve_motion(_buf, cursor, :half_page_down), do: cursor
   def resolve_motion(_buf, cursor, :half_page_up), do: cursor
@@ -297,20 +300,23 @@ defmodule Minga.Editor.Commands.Helpers do
   def resolve_motion(_buf, cursor, :page_up), do: cursor
 
   def resolve_motion(buf, cursor, :word_forward_big),
-    do: Minga.Motion.word_forward_big(buf, cursor)
+    do: Minga.Editing.word_forward_big(buf, cursor)
 
   def resolve_motion(buf, cursor, :word_backward_big),
-    do: Minga.Motion.word_backward_big(buf, cursor)
+    do: Minga.Editing.word_backward_big(buf, cursor)
 
-  def resolve_motion(buf, cursor, :word_end_big), do: Minga.Motion.word_end_big(buf, cursor)
+  def resolve_motion(buf, cursor, :word_end_big),
+    do: Minga.Editing.word_end_big(buf, cursor)
 
   def resolve_motion(buf, cursor, :paragraph_forward),
-    do: Minga.Motion.paragraph_forward(buf, cursor)
+    do: Minga.Editing.paragraph_forward(buf, cursor)
 
   def resolve_motion(buf, cursor, :paragraph_backward),
-    do: Minga.Motion.paragraph_backward(buf, cursor)
+    do: Minga.Editing.paragraph_backward(buf, cursor)
 
-  def resolve_motion(buf, cursor, :match_bracket), do: Minga.Motion.match_bracket(buf, cursor)
+  def resolve_motion(buf, cursor, :match_bracket),
+    do: Minga.Editing.match_bracket(buf, cursor)
+
   def resolve_motion(_buf, cursor, _unknown), do: cursor
 
   @doc "Applies a find-char motion in the given direction."
@@ -321,10 +327,10 @@ defmodule Minga.Editor.Commands.Helpers do
 
     motion_fn =
       case dir do
-        :f -> &Minga.Motion.find_char_forward/3
-        :F -> &Minga.Motion.find_char_backward/3
-        :t -> &Minga.Motion.till_char_forward/3
-        :T -> &Minga.Motion.till_char_backward/3
+        :f -> &Minga.Editing.find_char_forward/3
+        :F -> &Minga.Editing.find_char_backward/3
+        :t -> &Minga.Editing.till_char_forward/3
+        :T -> &Minga.Editing.till_char_backward/3
       end
 
     new_pos = motion_fn.(gb, cursor, char)
@@ -386,35 +392,35 @@ defmodule Minga.Editor.Commands.Helpers do
   @doc "Computes the range for a text object modifier + spec pair."
   @spec compute_text_object_range(
           Document.t(),
-          TextObject.position(),
+          Minga.Editing.TextObject.position(),
           atom(),
           term(),
           non_neg_integer()
         ) ::
-          TextObject.range()
+          Minga.Editing.TextObject.range()
   def compute_text_object_range(buf, pos, :inner, :word, _bid),
-    do: TextObject.inner_word(buf, pos)
+    do: Minga.Editing.select_inner_word(buf, pos)
 
   def compute_text_object_range(buf, pos, :around, :word, _bid),
-    do: TextObject.a_word(buf, pos)
+    do: Minga.Editing.select_around_word(buf, pos)
 
   def compute_text_object_range(buf, pos, :inner, {:quote, q}, _bid),
-    do: TextObject.inner_quotes(buf, pos, q)
+    do: Minga.Editing.select_inner_quotes(buf, pos, q)
 
   def compute_text_object_range(buf, pos, :around, {:quote, q}, _bid),
-    do: TextObject.a_quotes(buf, pos, q)
+    do: Minga.Editing.select_around_quotes(buf, pos, q)
 
   def compute_text_object_range(buf, pos, :inner, {:paren, open, close}, _bid),
-    do: TextObject.inner_parens(buf, pos, open, close)
+    do: Minga.Editing.select_inner_parens(buf, pos, open, close)
 
   def compute_text_object_range(buf, pos, :around, {:paren, open, close}, _bid),
-    do: TextObject.a_parens(buf, pos, open, close)
+    do: Minga.Editing.select_around_parens(buf, pos, open, close)
 
   def compute_text_object_range(_buf, pos, :inner, {:structural, type}, bid),
-    do: TextObject.structural_inner(type, pos, bid)
+    do: Minga.Editing.select_structural_inner(type, pos, bid)
 
   def compute_text_object_range(_buf, pos, :around, {:structural, type}, bid),
-    do: TextObject.structural_around(type, pos, bid)
+    do: Minga.Editing.select_structural_around(type, pos, bid)
 
   def compute_text_object_range(_buf, _pos, _modifier, _spec, _bid), do: nil
 

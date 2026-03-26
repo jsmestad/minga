@@ -515,7 +515,7 @@ defmodule Minga.Editor.Commands.Agent do
         end
 
       # Reset panel scroll and auto-scroll to reflect new session's content
-      AgentAccess.update_panel(state, fn p -> %{p | scroll: Minga.Scroll.new()} end)
+      AgentAccess.update_panel(state, fn p -> %{p | scroll: Minga.Editing.new_scroll()} end)
     end
   end
 
@@ -1107,7 +1107,7 @@ defmodule Minga.Editor.Commands.Agent do
       # AgentNav.sync_scroll_to_cursor, so it maps directly to
       # buffer line numbers.
       total = length(line_map)
-      target = Minga.Scroll.resolve(panel.scroll, total, 1)
+      target = Minga.Editing.resolve_scroll(panel.scroll, total, 1)
 
       case Enum.at(line_map, target) do
         {msg_idx, line_type} -> {msg_idx, Enum.at(messages, msg_idx), line_type}
@@ -1164,7 +1164,7 @@ defmodule Minga.Editor.Commands.Agent do
     line_map = cached_or_compute_line_index(panel, messages)
 
     total = length(line_map)
-    target = Minga.Scroll.resolve(panel.scroll, total, 1)
+    target = Minga.Editing.resolve_scroll(panel.scroll, total, 1)
 
     {msg_idx, _type} =
       case Enum.at(line_map, target) do

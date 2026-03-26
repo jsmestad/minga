@@ -45,7 +45,7 @@ defmodule Minga.Editor.Commands.Search do
     else
       content = BufferServer.content(buf)
 
-      case Minga.Search.find_next(content, ms.input, ms.original_cursor, ms.direction) do
+      case Minga.Editing.search_next(content, ms.input, ms.original_cursor, ms.direction) do
         nil ->
           state
 
@@ -62,7 +62,7 @@ defmodule Minga.Editor.Commands.Search do
       ) do
     content = BufferServer.content(buf)
 
-    case Minga.Search.find_next(content, ms.input, ms.original_cursor, ms.direction) do
+    case Minga.Editing.search_next(content, ms.input, ms.original_cursor, ms.direction) do
       nil ->
         state
         |> put_in_search(:last_pattern, ms.input)
@@ -100,7 +100,7 @@ defmodule Minga.Editor.Commands.Search do
     content = BufferServer.content(buf)
     cursor = BufferServer.cursor(buf)
 
-    case Minga.Search.find_next(content, pattern, cursor, dir) do
+    case Minga.Editing.search_next(content, pattern, cursor, dir) do
       nil ->
         EditorState.set_status(state, "Pattern not found: #{pattern}")
 
@@ -128,7 +128,7 @@ defmodule Minga.Editor.Commands.Search do
     content = BufferServer.content(buf)
     cursor = BufferServer.cursor(buf)
 
-    case Minga.Search.find_next(content, pattern, cursor, reverse) do
+    case Minga.Editing.search_next(content, pattern, cursor, reverse) do
       nil ->
         EditorState.set_status(state, "Pattern not found: #{pattern}")
 
@@ -146,12 +146,12 @@ defmodule Minga.Editor.Commands.Search do
     {content, cursor} = BufferServer.content_and_cursor(buf)
     tmp_buf = Document.new(content)
 
-    case Minga.Search.word_at_cursor(tmp_buf, cursor) do
+    case Minga.Editing.word_under_cursor(tmp_buf, cursor) do
       nil ->
         EditorState.set_status(state, "No word under cursor")
 
       word ->
-        case Minga.Search.find_next(content, word, cursor, :forward) do
+        case Minga.Editing.search_next(content, word, cursor, :forward) do
           nil ->
             state
             |> put_in_search(:last_pattern, word)
@@ -176,12 +176,12 @@ defmodule Minga.Editor.Commands.Search do
     {content, cursor} = BufferServer.content_and_cursor(buf)
     tmp_buf = Document.new(content)
 
-    case Minga.Search.word_at_cursor(tmp_buf, cursor) do
+    case Minga.Editing.word_under_cursor(tmp_buf, cursor) do
       nil ->
         EditorState.set_status(state, "No word under cursor")
 
       word ->
-        case Minga.Search.find_next(content, word, cursor, :backward) do
+        case Minga.Editing.search_next(content, word, cursor, :backward) do
           nil ->
             state
             |> put_in_search(:last_pattern, word)
@@ -238,7 +238,7 @@ defmodule Minga.Editor.Commands.Search do
         :substitute_confirm_advance
       ) do
     case Enum.at(ms.matches, ms.current) do
-      %Minga.Search.Match{line: line, col: col} -> BufferServer.move_to(buf, {line, col})
+      %Minga.Editing.Search.Match{line: line, col: col} -> BufferServer.move_to(buf, {line, col})
       _ -> :ok
     end
 
@@ -272,7 +272,9 @@ defmodule Minga.Editor.Commands.Search do
 
       new_content =
         Enum.reduce(sorted_indices, ms.original_content, fn idx, content ->
-          %Minga.Search.Match{line: line, col: col, length: len} = Enum.at(ms.matches, idx)
+          %Minga.Editing.Search.Match{line: line, col: col, length: len} =
+            Enum.at(ms.matches, idx)
+
           replace_match(content, line, col, len, ms.replacement)
         end)
 
@@ -329,7 +331,7 @@ defmodule Minga.Editor.Commands.Search do
   def start_substitute_confirm(state, buf, pattern, replacement, global?) do
     content = BufferServer.content(buf)
     lines = String.split(content, "\n")
-    all_matches = Minga.Search.find_all_in_range(lines, pattern, 0)
+    all_matches = Minga.Editing.search_all_in_range(lines, pattern, 0)
 
     # When not global, keep only the first match per line
     matches =
@@ -337,7 +339,7 @@ defmodule Minga.Editor.Commands.Search do
         all_matches
       else
         all_matches
-        |> Enum.group_by(fn %Minga.Search.Match{line: line} -> line end)
+        |> Enum.group_by(fn %Minga.Editing.Search.Match{line: line} -> line end)
         |> Enum.flat_map(fn {_line, line_matches} -> [hd(line_matches)] end)
         |> Enum.sort()
       end
@@ -347,7 +349,7 @@ defmodule Minga.Editor.Commands.Search do
         EditorState.set_status(state, "Pattern not found: #{pattern}")
 
       _ ->
-        %Minga.Search.Match{line: first_line, col: first_col} = hd(matches)
+        %Minga.Editing.Search.Match{line: first_line, col: first_col} = hd(matches)
         BufferServer.move_to(buf, {first_line, first_col})
 
         ms = %Minga.Mode.SubstituteConfirmState{
@@ -367,7 +369,7 @@ defmodule Minga.Editor.Commands.Search do
   @spec execute_substitute(state(), pid(), String.t(), String.t(), boolean()) :: state()
   def execute_substitute(state, buf, pattern, replacement, global?) do
     content = BufferServer.content(buf)
-    {new_content, count} = Minga.Search.substitute(content, pattern, replacement, global?)
+    {new_content, count} = Minga.Editing.substitute(content, pattern, replacement, global?)
 
     if count == 0 do
       EditorState.set_status(state, "Pattern not found: #{pattern}")
@@ -487,7 +489,7 @@ defmodule Minga.Editor.Commands.Search do
   @spec word_at_cursor(Minga.Buffer.Document.t(), {non_neg_integer(), non_neg_integer()}) ::
           String.t()
   defp word_at_cursor(gb, cursor) do
-    {start_pos, end_pos} = Minga.TextObject.inner_word(gb, cursor)
+    {start_pos, end_pos} = Minga.Editing.select_inner_word(gb, cursor)
     Minga.Buffer.Document.get_range(gb, start_pos, end_pos)
   end
 

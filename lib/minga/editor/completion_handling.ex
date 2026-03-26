@@ -9,9 +9,9 @@ defmodule Minga.Editor.CompletionHandling do
   """
 
   alias Minga.Buffer.Server, as: BufferServer
-  alias Minga.Completion
   alias Minga.Config.Completion, as: ConfigCompletion
   alias Minga.Config.Options
+  alias Minga.Editing.Completion
   alias Minga.Editor.CompletionTrigger
   alias Minga.Editor.SignatureHelp
   alias Minga.Editor.State, as: EditorState
@@ -133,7 +133,7 @@ defmodule Minga.Editor.CompletionHandling do
   @spec maybe_handle(EditorState.t(), boolean(), non_neg_integer(), non_neg_integer()) ::
           EditorState.t()
   def maybe_handle(state, was_inserting, codepoint, modifiers) do
-    if Minga.Editor.Editing.inserting?(state) and was_inserting do
+    if Minga.Editing.inserting?(state) and was_inserting do
       maybe_update(state, codepoint, modifiers)
     else
       state = dismiss(state)

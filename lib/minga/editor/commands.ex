@@ -409,7 +409,7 @@ defmodule Minga.Editor.Commands do
   # ── Minibuffer candidate acceptance ───────────────────────────────────────
 
   def execute(state, {:accept_command_candidate}) do
-    if Editing.mode(state) == :command do
+    if Minga.Editing.mode(state) == :command do
       accept_command_candidate(state)
     else
       state

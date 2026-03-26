@@ -17,6 +17,7 @@ defmodule Minga.Input.SubStateHandlersTest do
   alias Minga.Agent.UIState
   alias Minga.Agent.View.Preview
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Editing.Scroll
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.AgentAccess
@@ -28,7 +29,6 @@ defmodule Minga.Input.SubStateHandlersTest do
   alias Minga.Input.DiffReview
   alias Minga.Input.MentionCompletion
   alias Minga.Input.ToolApproval
-  alias Minga.Scroll
 
   defp base_state(opts) do
     {:ok, buf} = BufferServer.start_link(content: "hello world")
