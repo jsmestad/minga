@@ -105,6 +105,7 @@ defmodule Minga.Keymap.Scope.GitStatus do
 
   alias Minga.Keymap.CUADefaults
 
+  @ctrl 0x02
   @cmd 0x08
 
   @spec cua_trie() :: Bindings.node_t()
@@ -118,6 +119,7 @@ defmodule Minga.Keymap.Scope.GitStatus do
     # Open/commit
     |> Bindings.bind([{@enter, 0}], :git_status_open_file, "Open file")
     |> Bindings.bind([{?c, @cmd}], :git_status_start_commit, "Start commit")
+    |> Bindings.bind([{?c, @ctrl}], :git_status_start_commit, "Start commit")
     # Close
     |> Bindings.bind([{@escape, 0}], :git_status_close, "Close git status")
   end
