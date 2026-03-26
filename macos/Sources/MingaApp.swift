@@ -244,7 +244,13 @@ struct ContentView: View {
                 encoder: appState.encoder
             )
 
-            // Board or editor surface
+            // Editor surface (always present for keyboard input handling).
+            // Hidden behind BoardView when the Board is active, same
+            // pattern as the agent chat overlay.
+            editorSurface
+                .opacity(appState.gui.boardState.visible ? 0 : 1)
+
+            // Board overlay (shown on top when active)
             if appState.gui.boardState.visible {
                 BoardView(
                     state: appState.gui.boardState,
@@ -258,8 +264,6 @@ struct ContentView: View {
                             .combined(with: .opacity)
                             .animation(.easeOut(duration: 0.25))
                 )
-            } else {
-                editorSurface
             }
 
             // Bottom panel (between editor and status bar)
