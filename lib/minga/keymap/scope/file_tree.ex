@@ -33,6 +33,7 @@ defmodule Minga.Keymap.Scope.FileTree do
   @spec keymap(Minga.Keymap.Scope.vim_state(), Minga.Keymap.Scope.context()) ::
           Bindings.node_t()
   def keymap(:normal, _context), do: normal_trie()
+  def keymap(:cua, _context), do: cua_trie()
   def keymap(_state, _context), do: Bindings.new()
 
   @impl true
@@ -85,5 +86,23 @@ defmodule Minga.Keymap.Scope.FileTree do
     |> Bindings.bind([{?r, 0}], :tree_refresh, "Refresh file tree")
     |> Bindings.bind([{?q, 0}], :tree_close, "Close file tree")
     |> Bindings.bind([{@escape, 0}], :tree_close, "Close file tree")
+  end
+
+  # ── CUA mode bindings ─────────────────────────────────────────────────────
+  # Arrow keys for navigation, Enter to open, Escape to close.
+  # Left/Right expand/collapse directories (matching macOS Finder).
+
+  alias Minga.Keymap.CUADefaults
+
+  @spec cua_trie() :: Bindings.node_t()
+  defp cua_trie do
+    CUADefaults.navigation_trie()
+    |> Bindings.bind([{@enter, 0}], :tree_open_or_toggle, "Open file / toggle directory")
+    |> Bindings.bind([{@escape, 0}], :tree_close, "Close file tree")
+    # Arrow left/right: collapse/expand (Finder-style)
+    |> Bindings.bind([{57_351, 0}], :tree_expand, "Expand directory")
+    |> Bindings.bind([{57_350, 0}], :tree_collapse, "Collapse directory")
+    |> Bindings.bind([{0xF703, 0}], :tree_expand, "Expand directory")
+    |> Bindings.bind([{0xF702, 0}], :tree_collapse, "Collapse directory")
   end
 end

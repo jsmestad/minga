@@ -47,6 +47,7 @@ defmodule Minga.Keymap.Scope.Agent do
   def keymap(:normal, _context), do: normal_trie()
   def keymap(:insert, _context), do: insert_trie()
   def keymap(:input_normal, _context), do: input_normal_trie()
+  def keymap(:cua, _context), do: cua_trie()
   def keymap(_state, _context), do: Bindings.new()
 
   @impl true
@@ -306,5 +307,37 @@ defmodule Minga.Keymap.Scope.Agent do
          {"?", "This help overlay"}
        ]}
     ]
+  end
+
+  # ── CUA mode bindings ─────────────────────────────────────────────────────
+  # Combined trie for CUA users in the agent panel. The Scoped handler
+  # determines whether input is focused and routes accordingly; the trie
+  # contains bindings for both states.
+
+  alias Minga.Keymap.CUADefaults
+
+  @cmd 0x08
+
+  @spec cua_trie() :: Bindings.node_t()
+  defp cua_trie do
+    CUADefaults.navigation_trie()
+    # Chat navigation (not input focused)
+    |> Bindings.bind([{@enter, 0}], :agent_focus_input, "Focus input")
+    |> Bindings.bind([{@escape, 0}], :agent_dismiss_or_noop, "Dismiss/cancel")
+    |> Bindings.bind([{@tab, 0}], :agent_switch_focus, "Switch panel focus")
+    # Cmd chords work everywhere
+    |> Bindings.bind([{?c, @cmd}], :agent_copy_code_block, "Copy code block")
+    |> Bindings.bind([{?a, @cmd}], :select_all, "Select all")
+    # Input field bindings (used when input focused)
+    |> Bindings.bind([{@backspace, 0}], :agent_input_backspace, "Delete character")
+    |> Bindings.bind([{@enter, @shift}], :agent_insert_newline, "Insert newline")
+    |> Bindings.bind([{?j, @ctrl}], :agent_insert_newline, "Insert newline")
+    |> Bindings.bind([{0x0A, 0}], :agent_insert_newline, "Insert newline")
+    |> Bindings.bind([{@enter, @alt}], :agent_insert_newline, "Insert newline")
+    # Arrow up/down in input: history navigation
+    |> Bindings.bind([{57_352, 0}], :agent_input_up, "Move up / history prev")
+    |> Bindings.bind([{57_353, 0}], :agent_input_down, "Move down / history next")
+    |> Bindings.bind([{0xF700, 0}], :agent_input_up, "Move up / history prev")
+    |> Bindings.bind([{0xF701, 0}], :agent_input_down, "Move down / history next")
   end
 end
