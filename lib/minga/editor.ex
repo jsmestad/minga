@@ -1798,11 +1798,14 @@ defmodule Minga.Editor do
     # Switch to the target tab first (if not already active), then close
     # it. This ensures the right tab is closed when the user clicks X
     # on a background tab.
+    # Guard: tab_bar may be nil on non-Traditional shells (e.g., Board).
     state =
-      if state.shell_state.tab_bar.active_id != id do
-        EditorState.switch_tab(state, id)
-      else
-        state
+      case state.shell_state.tab_bar do
+        %{active_id: active_id} when active_id != id ->
+          EditorState.switch_tab(state, id)
+
+        _ ->
+          state
       end
 
     Commands.BufferManagement.execute(state, :force_quit)
