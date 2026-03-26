@@ -22,6 +22,8 @@ defmodule Minga.Shell.Board do
 
   @behaviour Minga.Shell
 
+  alias Minga.Editor.DisplayList
+  alias Minga.Editor.DisplayList.{Cursor, Frame}
   alias Minga.Shell.Board.State, as: BoardState
 
   @impl true
@@ -84,17 +86,33 @@ defmodule Minga.Shell.Board do
   @spec render(term()) :: term()
   def render(editor_state) do
     if BoardState.grid_view?(editor_state.shell_state) do
-      # TODO: Board grid rendering with card rectangles.
-      # For now, fall through to the buffer renderer if a buffer is active,
-      # or dashboard if not. The Board-specific TUI renderer will replace this.
-      case editor_state.workspace.buffers.active do
-        nil -> Minga.Editor.Renderer.render_dashboard(editor_state)
-        _pid -> Minga.Editor.Renderer.render_buffer(editor_state)
-      end
+      render_board_grid(editor_state)
     else
-      # Zoomed: render the active card's workspace
+      # Zoomed into a card: render the editor workspace
       Minga.Editor.Renderer.render_buffer(editor_state)
     end
+  end
+
+  @spec render_board_grid(term()) :: term()
+  defp render_board_grid(editor_state) do
+    vp = editor_state.workspace.viewport
+    board = editor_state.shell_state
+
+    splash_draws =
+      Minga.Shell.Board.Renderer.render(board, vp.cols, vp.rows, editor_state.theme)
+
+    # Park cursor at top-left (invisible, no active editing)
+    cursor = Cursor.new(0, 0, :block)
+
+    frame = %Frame{
+      cursor: cursor,
+      splash: splash_draws,
+      overlays: []
+    }
+
+    commands = DisplayList.to_commands(frame)
+    Minga.Frontend.send_commands(editor_state.port_manager, commands)
+    editor_state
   end
 
   @impl true
