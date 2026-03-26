@@ -16,7 +16,7 @@ defmodule Minga.Editor do
   alias Minga.Agent.Events
   alias Minga.Agent.UIState
   alias Minga.Buffer
-  alias Minga.Config.Options
+  alias Minga.Config
   alias Minga.Editing.Completion
 
   alias Minga.Diagnostics.Decorations, as: DiagDecorations
@@ -786,7 +786,7 @@ defmodule Minga.Editor do
   # ── LRU eviction of inactive parser trees ─────────────────────────────────────
 
   def handle_info(:evict_parser_trees, state) do
-    ttl_seconds = Options.get(:parser_tree_ttl)
+    ttl_seconds = Config.get(:parser_tree_ttl)
     # Protect the agent buffer from eviction: it's persistent and always-visible.
     agent_buf = state |> EditorState.AgentAccess.agent() |> Map.get(:buffer)
     protected = if is_pid(agent_buf), do: [agent_buf], else: []
@@ -1510,9 +1510,9 @@ defmodule Minga.Editor do
 
   defp detect_jump(state, current_line) do
     delta = abs(current_line - state.last_cursor_line)
-    threshold = Options.get(:nav_flash_threshold)
+    threshold = Config.get(:nav_flash_threshold)
 
-    if delta >= threshold and Options.get(:nav_flash) do
+    if delta >= threshold and Config.get(:nav_flash) do
       start_flash(state, current_line)
     else
       cancel_flash_if_active(state)

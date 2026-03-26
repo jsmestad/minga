@@ -16,7 +16,7 @@ defmodule Minga.Editor.AgentLifecycle do
   alias Minga.Agent.UIState
   alias Minga.Agent.View.Preview
   alias Minga.Buffer
-  alias Minga.Config.Options, as: ConfigOptions
+  alias Minga.Config
   alias Minga.Editor.Commands
   alias Minga.Editor.HighlightSync
   alias Minga.Editor.LayoutPreset
@@ -60,7 +60,7 @@ defmodule Minga.Editor.AgentLifecycle do
   @spec maybe_set_auto_context(state(), String.t(), pid()) :: state()
   def maybe_set_auto_context(state, file_path, buffer_pid) do
     cli_flags = Minga.CLI.startup_flags()
-    auto_context = ConfigOptions.get(:agent_auto_context)
+    auto_context = Config.get(:agent_auto_context)
     agent_visible = LayoutPreset.has_agent_chat?(state)
     preview_empty = AgentAccess.view(state).preview.content == :empty
 
@@ -173,7 +173,7 @@ defmodule Minga.Editor.AgentLifecycle do
   defp maybe_load_auto_context(state, %{no_context: true}), do: state
 
   defp maybe_load_auto_context(state, _flags) do
-    auto_context = ConfigOptions.get(:agent_auto_context)
+    auto_context = Config.get(:agent_auto_context)
     active_buf = state.workspace.buffers.active
 
     if auto_context and active_buf do

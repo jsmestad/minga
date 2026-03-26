@@ -15,7 +15,7 @@ defmodule Minga.Agent.SlashCommand do
   alias Minga.Agent.SessionExport
   alias Minga.Agent.Skills
   alias Minga.Agent.UIState
-  alias Minga.Config.Options
+  alias Minga.Config
   alias Minga.Editor.Commands.Agent, as: AgentCommands
   alias Minga.Editor.PickerUI
   alias Minga.Editor.State.AgentAccess
@@ -378,7 +378,7 @@ defmodule Minga.Agent.SlashCommand do
 
   @spec read_config_string(atom()) :: String.t()
   defp read_config_string(key) do
-    case Options.get(key) do
+    case Config.get(key) do
       value when is_binary(value) -> value
       _ -> ""
     end
@@ -740,7 +740,7 @@ defmodule Minga.Agent.SlashCommand do
 
   @spec maybe_add_per_provider_endpoints([String.t()]) :: [String.t()]
   defp maybe_add_per_provider_endpoints(parts) do
-    case Options.get(:agent_api_endpoints) do
+    case Config.get(:agent_api_endpoints) do
       m when is_map(m) and map_size(m) > 0 ->
         lines = Enum.map_join(m, "\n", fn {p, u} -> "    #{p}: #{u}" end)
         parts ++ ["  Endpoints (per-provider):\n#{lines}"]

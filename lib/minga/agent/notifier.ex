@@ -16,7 +16,6 @@ defmodule Minga.Agent.Notifier do
       set :agent_notify_on, [:approval, :complete, :error]  # which events trigger
   """
 
-  alias Minga.Config.Options
 
   @typedoc "Notification trigger types."
   @type trigger :: :approval | :complete | :error
@@ -59,7 +58,7 @@ defmodule Minga.Agent.Notifier do
 
   @spec enabled?() :: boolean()
   defp enabled? do
-    case Options.get(:agent_notifications) do
+    case Minga.Config.get(:agent_notifications) do
       false -> false
       _ -> true
     end
@@ -67,7 +66,7 @@ defmodule Minga.Agent.Notifier do
 
   @spec active_triggers() :: [trigger()]
   defp active_triggers do
-    case Options.get(:agent_notify_on) do
+    case Minga.Config.get(:agent_notify_on) do
       triggers when is_list(triggers) -> triggers
       _ -> [:approval, :complete, :error]
     end

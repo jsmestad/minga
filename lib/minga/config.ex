@@ -36,11 +36,149 @@ defmodule Minga.Config do
 
   alias Minga.Command.Registry, as: CommandRegistry
   alias Minga.Config.Advice
+  alias Minga.Config.Completion
+  alias Minga.Config.Loader
   alias Minga.Config.Options
   alias Minga.Extension.Registry, as: ExtRegistry
   alias Minga.Keymap.Active, as: KeymapActive
   alias Minga.UI.Popup.Registry, as: PopupRegistry
   alias Minga.UI.Popup.Rule, as: PopupRule
+
+  # ── Read options ───────────────────────────────────────────────────
+
+  @doc """
+  Reads a config option value.
+
+  ## Examples
+
+      Config.get(:tab_width)    #=> 2
+      Config.get(:theme)        #=> :doom_one
+  """
+  @spec get(Options.option_name()) :: term()
+  defdelegate get(name), to: Options
+
+  @doc """
+  Reads a config option, merging per-filetype overrides when present.
+
+  Returns the filetype-specific value if one was set via `for_filetype/2`,
+  otherwise falls back to the global value.
+  """
+  @spec get_for_filetype(Options.option_name(), atom() | nil) :: term()
+  defdelegate get_for_filetype(name, filetype), to: Options
+
+  @doc """
+  Reads an extension option value.
+
+  ## Examples
+
+      Config.get_extension_option(:minga_org, :conceal)  #=> true
+  """
+  @spec get_extension_option(atom(), atom()) :: term()
+  defdelegate get_extension_option(ext_name, opt_name), to: Options
+
+  @doc """
+  Reads an extension option, merging per-filetype overrides when present.
+  """
+  @spec get_extension_option_for_filetype(atom(), atom(), atom() | nil) :: term()
+  defdelegate get_extension_option_for_filetype(ext_name, opt_name, filetype), to: Options
+
+  # ── Write options (non-raising) ────────────────────────────────────
+
+  @doc """
+  Sets an option, returning `{:ok, value}` or `{:error, message}`.
+
+  Unlike `set/2` (used in config.exs DSL which raises on error), this
+  returns the result tuple for callers that handle errors themselves.
+  """
+  @spec set_option(Options.option_name(), term()) :: {:ok, term()} | {:error, String.t()}
+  defdelegate set_option(name, value), to: Options, as: :set
+
+  @doc """
+  Sets an extension option, returning `{:ok, value}` or `{:error, message}`.
+  """
+  @spec set_extension_option!(atom(), atom(), term()) :: {:ok, term()} | {:error, String.t()}
+  defdelegate set_extension_option!(ext_name, opt_name, value), to: Options, as: :set_extension_option
+
+  @doc """
+  Sets an extension option override for a specific filetype.
+  """
+  @spec set_extension_option_for_filetype(atom(), atom(), atom(), term()) ::
+          {:ok, term()} | {:error, String.t()}
+  defdelegate set_extension_option_for_filetype(ext_name, filetype, opt_name, value), to: Options
+
+  # ── Extension schema ───────────────────────────────────────────────
+
+  @doc """
+  Registers an extension's option schema and applies user config.
+
+  Called by the extension supervisor when loading an extension.
+  """
+  @spec register_extension_schema(atom(), [Minga.Extension.option_spec()], keyword()) ::
+          :ok | {:error, [String.t()]}
+  defdelegate register_extension_schema(ext_name, schema, user_config), to: Options
+
+  @doc """
+  Returns the registered option schema for an extension, or nil.
+  """
+  @spec extension_schema(atom()) :: [Minga.Extension.option_spec()] | nil
+  defdelegate extension_schema(ext_name), to: Options
+
+  # ── Command advice ─────────────────────────────────────────────────
+
+  @doc """
+  Wraps a command function with any registered before/after/around/override advice.
+
+  Returns a `(state -> state)` function that applies the full advice chain.
+  """
+  @spec wrap_with_advice(atom(), (term() -> term())) :: (term() -> term())
+  defdelegate wrap_with_advice(command_name, execute), to: Advice, as: :wrap
+
+  # ── Config discovery ───────────────────────────────────────────────
+
+  @doc """
+  Returns the path to the user's config file (`~/.config/minga/config.exs`).
+  """
+  @spec config_path() :: String.t()
+  defdelegate config_path(), to: Loader
+
+  @doc "Re-evaluates the user's config file. Returns `:ok` or `{:error, reason}`."
+  @spec reload() :: :ok | {:error, term()}
+  defdelegate reload(), to: Loader
+
+  @doc "Returns the error from the last config load, or nil if it loaded cleanly."
+  @spec load_error() :: term() | nil
+  defdelegate load_error(), to: Loader
+
+  # ── Completion ─────────────────────────────────────────────────────
+
+  @doc "Completion items for `:set` option names."
+  @spec option_name_completions() :: [map()]
+  defdelegate option_name_completions(), to: Completion, as: :option_name_items
+
+  @doc "Completion items for values of a specific option."
+  @spec option_value_completions(Options.option_name()) :: [map()]
+  defdelegate option_value_completions(name), to: Completion, as: :option_value_items
+
+  @doc "Completion items for filetype names."
+  @spec filetype_completions() :: [map()]
+  defdelegate filetype_completions(), to: Completion, as: :filetype_items
+
+  # ── Validation ──────────────────────────────────────────────────────
+
+  @doc "Returns the set of all recognized option names."
+  @spec valid_option_names() :: MapSet.t(atom())
+  defdelegate valid_option_names(), to: Options, as: :valid_names
+
+  @doc "Validates an option name/value pair without storing it."
+  @spec validate_option(Options.option_name(), term()) :: {:ok, term()} | {:error, String.t()}
+  defdelegate validate_option(name, value), to: Options, as: :validate_option
+
+  # ── Type re-exports ────────────────────────────────────────────────
+
+  @type option_name :: Options.option_name()
+  @type type_descriptor :: Options.type_descriptor()
+
+  # ── Config DSL ─────────────────────────────────────────────────────
 
   @doc """
   Injects the config DSL into the calling module or script.

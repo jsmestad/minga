@@ -10,7 +10,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
   """
 
   alias Minga.Buffer
-  alias Minga.Config.Options
+  alias Minga.Config
   alias Minga.Core.Decorations
   alias Minga.Core.Decorations.ConcealRange
   alias Minga.Core.Decorations.FoldRegion
@@ -112,7 +112,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
       end
 
     cursorline_bg =
-      if is_active and Options.get(:cursorline) do
+      if is_active and Config.get(:cursorline) do
         state.theme.editor.cursorline_bg
       else
         nil

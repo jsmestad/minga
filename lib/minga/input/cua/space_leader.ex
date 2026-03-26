@@ -89,7 +89,7 @@ defmodule Minga.Input.CUA.SpaceLeader do
   @spec active?(map()) :: boolean()
   def active?(state) do
     Minga.Editing.active_model(state) == Minga.Editing.Model.CUA and
-      Minga.Config.Options.get(:space_leader) == :chord
+      Minga.Config.get(:space_leader) == :chord
   catch
     :exit, _ -> false
   end

@@ -21,7 +21,7 @@ defmodule Minga.Frontend.Emit.GUI do
 
   alias Minga.Agent.Session, as: AgentSession
   alias Minga.Buffer
-  alias Minga.Config.Options
+  alias Minga.Config
   alias Minga.Editor.DisplayList.Frame
   alias Minga.Editor.Layout
   alias Minga.Editor.MinibufferData
@@ -715,7 +715,7 @@ defmodule Minga.Frontend.Emit.GUI do
 
   @spec build_gui_gutter_separator_commands(state()) :: [binary()]
   defp build_gui_gutter_separator_commands(state) do
-    show? = Options.get(:show_gutter_separator)
+    show? = Config.get(:show_gutter_separator)
     active_window = Map.get(state.workspace.windows.map, state.workspace.windows.active)
     gutter_w = if active_window, do: active_window.last_gutter_w, else: 0
 
@@ -738,7 +738,7 @@ defmodule Minga.Frontend.Emit.GUI do
   @spec build_gui_cursorline_commands(state()) :: [binary()]
   defp build_gui_cursorline_commands(state) do
     active_window = Map.get(state.workspace.windows.map, state.workspace.windows.active)
-    cursorline_enabled = Options.get(:cursorline)
+    cursorline_enabled = Config.get(:cursorline)
 
     {row, bg_rgb} =
       if active_window && cursorline_enabled do

@@ -8,7 +8,7 @@ defmodule Minga.Editor.Viewport do
   """
 
   alias Minga.Buffer
-  alias Minga.Config.Options
+  alias Minga.Config
 
   @enforce_keys [:top, :left, :rows, :cols]
   defstruct [:top, :left, :rows, :cols, reserved: 2]
@@ -67,7 +67,7 @@ defmodule Minga.Editor.Viewport do
   def scroll_to_cursor(%__MODULE__{} = vp, {cursor_line, cursor_col}) do
     margin =
       try do
-        Options.get(:scroll_margin)
+        Config.get(:scroll_margin)
       catch
         :exit, _ -> 5
       end
@@ -243,7 +243,7 @@ defmodule Minga.Editor.Viewport do
   # Default scroll margin. Reads from config, falls back to 5.
   @spec default_scroll_margin() :: non_neg_integer()
   defp default_scroll_margin do
-    Options.get(:scroll_margin)
+    Config.get(:scroll_margin)
   catch
     :exit, _ -> 5
   end

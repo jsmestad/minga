@@ -10,7 +10,7 @@ defmodule Minga.Editor.KeyDispatch do
   """
 
   alias Minga.Buffer
-  alias Minga.Config.Advice, as: ConfigAdvice
+  alias Minga.Config
 
   alias Minga.Editing.Model.Vim, as: VimModel
   alias Minga.Editor.BufferLifecycle
@@ -125,7 +125,7 @@ defmodule Minga.Editor.KeyDispatch do
       end
     end
 
-    result = ConfigAdvice.wrap(cmd_name, execute).(state)
+    result = Config.wrap_with_advice(cmd_name, execute).(state)
 
     BufferLifecycle.lsp_after_command(result, cmd, old_buffer)
   end

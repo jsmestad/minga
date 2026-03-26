@@ -26,7 +26,7 @@ defmodule Minga.UI.PrettifySymbols do
   """
 
   alias Minga.Buffer
-  alias Minga.Config.Options
+  alias Minga.Config
   alias Minga.Core.Decorations
   alias Minga.UI.Face
   alias Minga.UI.Highlight
@@ -171,7 +171,7 @@ defmodule Minga.UI.PrettifySymbols do
   @doc "Returns true if prettify-symbols is enabled in config."
   @spec enabled?() :: boolean()
   def enabled? do
-    Options.get(:prettify_symbols)
+    Config.get(:prettify_symbols)
   end
 
   @typep position :: {non_neg_integer(), non_neg_integer()}

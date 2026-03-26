@@ -51,7 +51,7 @@ defmodule Minga.Application do
   use Application
 
   alias Minga.Agent.SessionStore
-  alias Minga.Config.Options
+  alias Minga.Config
   alias Minga.Telemetry.DevHandler
   alias Minga.Tool.Manager, as: ToolManager
   alias Minga.UI.Highlight.Grammar
@@ -147,7 +147,7 @@ defmodule Minga.Application do
 
   @spec prune_old_sessions() :: :ok
   defp prune_old_sessions do
-    retention_days = Options.get(:agent_session_retention_days)
+    retention_days = Config.get(:agent_session_retention_days)
 
     pruned = SessionStore.prune(retention_days)
 

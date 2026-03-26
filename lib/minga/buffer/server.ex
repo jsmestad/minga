@@ -21,7 +21,7 @@ defmodule Minga.Buffer.Server do
   alias Minga.Buffer.Document
   alias Minga.Buffer.EditDelta
   alias Minga.Buffer.EditSource
-  alias Minga.Config.Options
+  alias Minga.Config
   alias Minga.Core.Decorations
   alias Minga.Core.Unicode
   alias Minga.Editing.NavigableContent.BufferSnapshot
@@ -1399,7 +1399,7 @@ defmodule Minga.Buffer.Server do
   end
 
   def handle_call({:set_option, name, value}, _from, state) do
-    case Options.validate_option(name, value) do
+    case Config.validate_option(name, value) do
       :ok ->
         new_state = %{
           state
@@ -1857,7 +1857,7 @@ defmodule Minga.Buffer.Server do
   defp resolve_option(%{options: opts, filetype: ft}, name) do
     case Map.fetch(opts, name) do
       {:ok, value} -> value
-      :error -> Options.get_for_filetype(name, ft)
+      :error -> Config.get_for_filetype(name, ft)
     end
   end
 
@@ -1883,7 +1883,7 @@ defmodule Minga.Buffer.Server do
   @spec seed_options(atom()) :: %{atom() => term()}
   defp seed_options(filetype) do
     Map.new(@buffer_local_options, fn name ->
-      {name, Options.get_for_filetype(name, filetype)}
+      {name, Config.get_for_filetype(name, filetype)}
     end)
   catch
     :exit, _ -> %{}

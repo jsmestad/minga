@@ -24,7 +24,7 @@ defmodule Minga.Input.AgentMouse do
 
   alias Minga.Agent.UIState
   alias Minga.Agent.View.PromptRenderer
-  alias Minga.Config.Options
+  alias Minga.Config
   alias Minga.Editor.Layout
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.AgentAccess
@@ -278,6 +278,6 @@ defmodule Minga.Input.AgentMouse do
 
   @spec scroll_lines() :: pos_integer()
   defp scroll_lines do
-    Options.get(:scroll_lines)
+    Config.get(:scroll_lines)
   end
 end

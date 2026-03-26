@@ -9,8 +9,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   alias Minga.Agent.Session
   alias Minga.Buffer
   alias Minga.Buffer.Document
-  alias Minga.Config.Loader, as: ConfigLoader
-  alias Minga.Config.Options, as: ConfigOptions
+  alias Minga.Config
 
   alias Minga.Editor.Commands
   alias Minga.Editor.Commands.Helpers
@@ -314,17 +313,17 @@ defmodule Minga.Editor.Commands.BufferManagement do
   # ── :setglobal — writes to the global Options agent ───────────────────────
 
   def execute(state, {:execute_ex_command, {:setglobal, :number}}) do
-    ConfigOptions.set(:line_numbers, :absolute)
+    Config.set_option(:line_numbers, :absolute)
     state
   end
 
   def execute(state, {:execute_ex_command, {:setglobal, :nonumber}}) do
-    ConfigOptions.set(:line_numbers, :none)
+    Config.set_option(:line_numbers, :none)
     state
   end
 
   def execute(state, {:execute_ex_command, {:setglobal, :relativenumber}}) do
-    current = ConfigOptions.get(:line_numbers)
+    current = Config.get(:line_numbers)
 
     next =
       case current do
@@ -332,12 +331,12 @@ defmodule Minga.Editor.Commands.BufferManagement do
         _ -> :relative
       end
 
-    ConfigOptions.set(:line_numbers, next)
+    Config.set_option(:line_numbers, next)
     state
   end
 
   def execute(state, {:execute_ex_command, {:setglobal, :norelativenumber}}) do
-    current = ConfigOptions.get(:line_numbers)
+    current = Config.get(:line_numbers)
 
     next =
       case current do
@@ -345,17 +344,17 @@ defmodule Minga.Editor.Commands.BufferManagement do
         _ -> :none
       end
 
-    ConfigOptions.set(:line_numbers, next)
+    Config.set_option(:line_numbers, next)
     state
   end
 
   def execute(state, {:execute_ex_command, {:setglobal, :wrap}}) do
-    ConfigOptions.set(:wrap, true)
+    Config.set_option(:wrap, true)
     state
   end
 
   def execute(state, {:execute_ex_command, {:setglobal, :nowrap}}) do
-    ConfigOptions.set(:wrap, false)
+    Config.set_option(:wrap, false)
     state
   end
 
@@ -414,7 +413,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   def execute(state, :open_config) do
     config_path =
       try do
-        ConfigLoader.config_path()
+        Config.config_path()
       catch
         :exit, _ -> Path.expand("~/.config/minga/config.exs")
       end
@@ -499,7 +498,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
 
   @spec reload_config(state()) :: state()
   def reload_config(state) do
-    case ConfigLoader.reload() do
+    case Config.reload() do
       :ok ->
         Minga.Editor.log_to_messages("Config reloaded")
         EditorState.set_status(state, "Config reloaded")
@@ -943,7 +942,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
 
   @spec confirm_quit_enabled?() :: boolean()
   defp confirm_quit_enabled? do
-    ConfigOptions.get(:confirm_quit)
+    Config.get(:confirm_quit)
   end
 
   # Validates a filetype name string against the Language registry.

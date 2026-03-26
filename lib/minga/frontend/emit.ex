@@ -13,7 +13,7 @@ defmodule Minga.Frontend.Emit do
   protocol opcodes (see `Emit.GUI`).
   """
 
-  alias Minga.Config.Options
+  alias Minga.Config
   alias Minga.Editor.DisplayList
   alias Minga.Editor.DisplayList.Frame
   alias Minga.Editor.Layout
@@ -219,7 +219,7 @@ defmodule Minga.Frontend.Emit do
     if Minga.Frontend.gui?(state.capabilities) do
       Title.format_gui(state)
     else
-      format = Options.get(:title_format) |> to_string()
+      format = Config.get(:title_format) |> to_string()
       title = Title.format(state, format)
 
       tb = state.shell_state.tab_bar

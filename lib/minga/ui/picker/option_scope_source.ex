@@ -16,10 +16,10 @@ defmodule Minga.UI.Picker.OptionScopeSource do
 
   @behaviour Minga.UI.Picker.Source
 
+  alias Minga.Config
   alias Minga.UI.Picker.Item
 
   alias Minga.Buffer
-  alias Minga.Config.Options
 
   @impl true
   @spec title() :: String.t()
@@ -65,7 +65,7 @@ defmodule Minga.UI.Picker.OptionScopeSource do
   end
 
   defp apply_scoped(:global, name, value, state) do
-    Options.set(name, value)
+    Config.set_option(name, value)
     Minga.Editor.State.set_status(state, format_confirmation(name, value, "all buffers"))
   end
 

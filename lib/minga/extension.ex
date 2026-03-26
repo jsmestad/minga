@@ -63,7 +63,7 @@ defmodule Minga.Extension do
 
   ## Reading options at runtime
 
-      Minga.Config.Options.get_extension_option(:minga_org, :conceal)
+      Minga.Config.get_extension_option(:minga_org, :conceal)
       # => false
 
   ## Lifecycle
@@ -121,7 +121,7 @@ defmodule Minga.Extension do
   introspection features.
   """
   @type option_spec ::
-          {atom(), Minga.Config.Options.type_descriptor(), term(), description :: String.t()}
+          {atom(), Minga.Config.type_descriptor(), term(), description :: String.t()}
 
   @typedoc """
   A single command specification: `{name, description, opts}`.

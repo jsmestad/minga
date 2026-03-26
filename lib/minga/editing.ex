@@ -180,7 +180,7 @@ defmodule Minga.Editing do
   @doc "Returns the active editing model module from global config. Prefer active_model/1 when state is available."
   @spec active_model() :: module()
   def active_model do
-    case Minga.Config.Options.get(:editing_model) do
+    case Minga.Config.get(:editing_model) do
       :vim -> VimModel
       :cua -> CUAModel
     end

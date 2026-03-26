@@ -372,7 +372,7 @@ defmodule Minga.Shell.Board.Input do
 
   @spec resolve_model() :: String.t()
   defp resolve_model do
-    case Minga.Config.Options.get(:agent_model) do
+    case Minga.Config.get(:agent_model) do
       nil -> "claude-sonnet-4-20250514"
       model -> to_string(model)
     end
@@ -382,7 +382,7 @@ defmodule Minga.Shell.Board.Input do
 
   @spec resolve_provider() :: atom()
   defp resolve_provider do
-    Minga.Config.Options.get(:agent_provider) || :auto
+    Minga.Config.get(:agent_provider) || :auto
   catch
     :exit, _ -> :auto
   end

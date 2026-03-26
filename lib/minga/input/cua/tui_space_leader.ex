@@ -116,7 +116,7 @@ defmodule Minga.Input.CUA.TUISpaceLeader do
   @spec active?(map()) :: boolean()
   def active?(state) do
     Minga.Editing.active_model(state) == Minga.Editing.Model.CUA and
-      Minga.Config.Options.get(:space_leader) == :chord and
+      Minga.Config.get(:space_leader) == :chord and
       state.backend == :tui
   catch
     :exit, _ -> false

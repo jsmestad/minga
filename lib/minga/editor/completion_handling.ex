@@ -9,8 +9,7 @@ defmodule Minga.Editor.CompletionHandling do
   """
 
   alias Minga.Buffer
-  alias Minga.Config.Completion, as: ConfigCompletion
-  alias Minga.Config.Options
+  alias Minga.Config
   alias Minga.Editing.Completion
   alias Minga.Editor.CompletionTrigger
   alias Minga.Editor.SignatureHelp
@@ -289,7 +288,7 @@ defmodule Minga.Editor.CompletionHandling do
   defp matches_config_path?(path) do
     config_path =
       try do
-        Minga.Config.Loader.config_path()
+        Minga.Config.config_path()
       catch
         :exit, _ -> nil
       end
@@ -338,7 +337,7 @@ defmodule Minga.Editor.CompletionHandling do
       [_full, name_str] ->
         name = String.to_existing_atom(name_str)
 
-        if name in Options.valid_names() do
+        if name in Config.valid_option_names() do
           {:option_value, name}
         else
           nil
@@ -391,12 +390,12 @@ defmodule Minga.Editor.CompletionHandling do
   @type active_config_context :: :option_name | {:option_value, atom()} | :filetype
 
   @spec config_items_for_context(active_config_context()) :: [Completion.item()]
-  defp config_items_for_context(:option_name), do: ConfigCompletion.option_name_items()
+  defp config_items_for_context(:option_name), do: Config.option_name_completions()
 
   defp config_items_for_context({:option_value, name}),
-    do: ConfigCompletion.option_value_items(name)
+    do: Config.option_value_completions(name)
 
-  defp config_items_for_context(:filetype), do: ConfigCompletion.filetype_items()
+  defp config_items_for_context(:filetype), do: Config.filetype_completions()
 
   @spec config_trigger_col(pid(), non_neg_integer(), non_neg_integer(), active_config_context()) ::
           non_neg_integer()

@@ -28,7 +28,7 @@ defmodule Minga.Editor.Mouse do
   import Bitwise
 
   alias Minga.Buffer
-  alias Minga.Config.Options
+  alias Minga.Config
   alias Minga.Core.Decorations
   alias Minga.Core.Unicode
   alias Minga.Editor.DisplayMap
@@ -953,7 +953,7 @@ defmodule Minga.Editor.Mouse do
   end
 
   defp maybe_copy_to_clipboard(text) when is_binary(text) and text != "" do
-    case Options.get(:clipboard) do
+    case Config.get(:clipboard) do
       :none -> :ok
       _ -> Minga.Clipboard.write(text)
     end
@@ -1057,7 +1057,7 @@ defmodule Minga.Editor.Mouse do
 
   @spec scroll_margin() :: non_neg_integer()
   defp scroll_margin do
-    Options.get(:scroll_margin)
+    Config.get(:scroll_margin)
   catch
     :exit, _ -> 5
   end
@@ -1247,7 +1247,7 @@ defmodule Minga.Editor.Mouse do
     do: @gui_scroll_lines
 
   defp scroll_lines(_state) do
-    Options.get(:scroll_lines)
+    Config.get(:scroll_lines)
   catch
     :exit, _ -> 1
   end

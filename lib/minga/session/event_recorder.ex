@@ -104,7 +104,7 @@ defmodule Minga.Session.EventRecorder do
 
     retention_days =
       Keyword.get_lazy(opts, :retention_days, fn ->
-        Minga.Config.Options.get(:event_retention_days)
+        Minga.Config.get(:event_retention_days)
       end)
 
     path = Path.join(db_dir, @db_filename)

@@ -24,7 +24,7 @@ defmodule Minga.Editing.Formatter do
       :javascript / :typescript / :jsx / :tsx → "prettier --stdin-filepath {file}"
   """
 
-  alias Minga.Config.Options
+  alias Minga.Config
   alias Minga.Language.Registry, as: LangRegistry
 
   @typedoc "A shell command string, optionally containing `{file}`."
@@ -47,7 +47,7 @@ defmodule Minga.Editing.Formatter do
   """
   @spec resolve_formatter(atom(), String.t() | nil) :: formatter_spec() | nil
   def resolve_formatter(filetype, file_path \\ nil) do
-    user_formatter = Options.get_for_filetype(:formatter, filetype)
+    user_formatter = Config.get_for_filetype(:formatter, filetype)
 
     default =
       case LangRegistry.get(filetype) do
@@ -110,8 +110,8 @@ defmodule Minga.Editing.Formatter do
   """
   @spec apply_save_transforms(String.t(), atom()) :: String.t()
   def apply_save_transforms(content, filetype) when is_atom(filetype) do
-    trim = Options.get_for_filetype(:trim_trailing_whitespace, filetype)
-    final_nl = Options.get_for_filetype(:insert_final_newline, filetype)
+    trim = Config.get_for_filetype(:trim_trailing_whitespace, filetype)
+    final_nl = Config.get_for_filetype(:insert_final_newline, filetype)
     apply_save_transforms(content, trim, final_nl)
   end
 
