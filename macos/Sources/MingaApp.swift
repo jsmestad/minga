@@ -244,26 +244,26 @@ struct ContentView: View {
                 encoder: appState.encoder
             )
 
-            // Editor surface (always present for keyboard input handling).
-            // Hidden behind BoardView when the Board is active, same
-            // pattern as the agent chat overlay.
-            editorSurface
-                .opacity(appState.gui.boardState.visible ? 0 : 1)
+            // ZStack: editor surface (always present for keyboard input)
+            // with Board overlay on top when active.
+            ZStack {
+                editorSurface
+                    .opacity(appState.gui.boardState.visible ? 0 : 1)
 
-            // Board overlay (shown on top when active)
-            if appState.gui.boardState.visible {
-                BoardView(
-                    state: appState.gui.boardState,
-                    theme: appState.gui.themeColors,
-                    encoder: appState.encoder
-                )
-                .transition(
-                    NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-                        ? .opacity.animation(.easeInOut(duration: 0.15))
-                        : .scale(scale: 0.95)
-                            .combined(with: .opacity)
-                            .animation(.easeOut(duration: 0.25))
-                )
+                if appState.gui.boardState.visible {
+                    BoardView(
+                        state: appState.gui.boardState,
+                        theme: appState.gui.themeColors,
+                        encoder: appState.encoder
+                    )
+                    .transition(
+                        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+                            ? .opacity.animation(.easeInOut(duration: 0.15))
+                            : .scale(scale: 0.95)
+                                .combined(with: .opacity)
+                                .animation(.easeOut(duration: 0.25))
+                    )
+                }
             }
 
             // Bottom panel (between editor and status bar)
