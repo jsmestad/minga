@@ -49,7 +49,7 @@ defmodule Minga.Shell.Board.Renderer do
     blank = String.duplicate(" ", cols)
     bg_draws = for row <- 0..(rows - 1), do: DisplayList.draw(row, 0, blank, bg_face)
 
-    header_draws = render_header(layout, cols, theme)
+    header_draws = render_header(board, cols, theme)
 
     card_draws =
       board
@@ -68,19 +68,25 @@ defmodule Minga.Shell.Board.Renderer do
         []
       end
 
-    bg_draws ++ header_draws ++ card_draws ++ empty_draws
+    footer_draws = render_footer(cols, rows, board, theme)
+
+    bg_draws ++ header_draws ++ card_draws ++ empty_draws ++ footer_draws
   end
 
   # ── Header ─────────────────────────────────────────────────────────────
 
-  @spec render_header(Layout.t(), pos_integer(), Minga.UI.Theme.t()) :: [DisplayList.draw()]
-  defp render_header(_layout, cols, theme) do
+  @spec render_header(State.t(), pos_integer(), Minga.UI.Theme.t()) :: [DisplayList.draw()]
+  defp render_header(board, cols, theme) do
     face = Face.new(fg: theme.editor.fg, bg: theme.editor.bg, bold: true)
+    dim_face = Face.new(fg: 0x5C6370, bg: theme.editor.bg)
     title = " ◇ The Board"
-    count_text = ""
-    padding = String.duplicate(" ", max(cols - String.length(title) - String.length(count_text), 0))
+    count = State.card_count(board)
+    count_text = "  #{count} card#{if count != 1, do: "s", else: ""} "
 
-    [DisplayList.draw(0, 0, title <> padding <> count_text, face)]
+    [
+      DisplayList.draw(0, 0, title, face),
+      DisplayList.draw(0, String.length(title), pad_right(count_text, max(cols - String.length(title), 0)), dim_face)
+    ]
   end
 
   # ── Card rendering ─────────────────────────────────────────────────────
@@ -99,9 +105,10 @@ defmodule Minga.Shell.Board.Renderer do
     dim_face = Face.new(fg: 0x5C6370, bg: theme.editor.bg)
     status_face = status_face(card.status, theme)
 
+    # inner_width: card width minus border chars (│ + space on each side = 4 cells)
     inner_width = max(width - 4, 1)
     content_start = row + 1
-    content_end = row + height - 2
+    content_end = max(row + height - 2, content_start)
 
     # Build draws list (prepend, reverse at end)
     draws = []
@@ -122,48 +129,36 @@ defmodule Minga.Shell.Board.Renderer do
         label = if Card.you_card?(card), do: "You", else: status_label(card.status)
         elapsed = format_elapsed(card.created_at)
 
-        left = " #{icon} #{label}"
-        right = "#{elapsed} "
-        gap = max(inner_width - String.length(left) - String.length(right), 0)
-        line = @v <> " " <> pad_or_truncate(left <> String.duplicate(" ", gap) <> right, inner_width) <> " " <> @v
-
-        [DisplayList.draw(content_start, col, line, status_face) | draws]
+        line = build_two_column_line(icon <> " " <> label, elapsed, inner_width)
+        [DisplayList.draw(content_start, col, @v <> " " <> line <> " " <> @v, status_face) | draws]
       else
         draws
       end
 
-    # Row 2: Task description
+    # Row 2: Task description (bold)
     draws =
       if content_start + 1 <= content_end do
-        task = pad_or_truncate(" #{card.task}", inner_width)
-        line = @v <> " " <> task <> " " <> @v
-        [DisplayList.draw(content_start + 1, col, line, content_face) | draws]
+        task = pad_right(card.task, inner_width)
+        [DisplayList.draw(content_start + 1, col, @v <> " " <> task <> " " <> @v, content_face) | draws]
       else
         draws
       end
 
-    # Row 3: blank separator
+    # Row 3+: blank separator rows
     draws =
-      if content_start + 2 <= content_end do
+      Enum.reduce((content_start + 2)..max(content_end - 1, content_start + 1)//1, draws, fn r, acc ->
         blank_line = String.duplicate(" ", inner_width)
-        line = @v <> " " <> blank_line <> " " <> @v
-        [DisplayList.draw(content_start + 2, col, line, content_face) | draws]
-      else
-        draws
-      end
+        [DisplayList.draw(r, col, @v <> " " <> blank_line <> " " <> @v, content_face) | acc]
+      end)
 
-    # Row 4: Model + file count
+    # Last content row: Model + file count (footer)
     draws =
-      if content_start + 3 <= content_end do
+      if content_end > content_start + 1 do
         model = card.model || ""
         files = if card.recent_files != [], do: "#{length(card.recent_files)} files", else: ""
 
-        left = " #{model}"
-        right = "#{files} "
-        gap = max(inner_width - String.length(left) - String.length(right), 0)
-        line = @v <> " " <> pad_or_truncate(left <> String.duplicate(" ", gap) <> right, inner_width) <> " " <> @v
-
-        [DisplayList.draw(content_start + 3, col, line, dim_face) | draws]
+        line = build_two_column_line(model, files, inner_width)
+        [DisplayList.draw(content_end, col, @v <> " " <> line <> " " <> @v, dim_face) | draws]
       else
         draws
       end
@@ -188,6 +183,55 @@ defmodule Minga.Shell.Board.Renderer do
       end
 
     Enum.reverse(draws)
+  end
+
+  # ── Footer (keyboard hints) ──────────────────────────────────────────
+
+  @spec render_footer(pos_integer(), pos_integer(), State.t(), Minga.UI.Theme.t()) ::
+          [DisplayList.draw()]
+  defp render_footer(cols, rows, board, theme) do
+    face = Face.new(fg: 0x5C6370, bg: theme.editor.bg)
+    key_face = Face.new(fg: theme.editor.fg, bg: theme.editor.bg, bold: true)
+
+    card_count = State.card_count(board)
+    focused = State.focused(board)
+    focused_label = if focused, do: " #{focused.task}", else: ""
+
+    # Build hint segments: key = description
+    hints = [
+      {"↑↓←→", "navigate"},
+      {"Enter", "zoom in"},
+      {"n", "new agent"},
+      {"q", "back to editor"}
+    ]
+
+    # Render as: ↑↓←→ navigate  Enter zoom in  n new agent  q back
+    hint_parts =
+      Enum.map(hints, fn {key, desc} ->
+        [{key, key_face}, {" #{desc}  ", face}]
+      end)
+      |> List.flatten()
+
+    # Left side: card count
+    left = " #{card_count} card#{if card_count != 1, do: "s", else: ""}#{focused_label}"
+    left_draw = DisplayList.draw(rows - 1, 0, pad_right(left, cols), face)
+
+    # Right side: hints (draw on second-to-last row if space)
+    hint_row = rows - 2
+
+    hint_draws =
+      if hint_row > 2 do
+        {draws, _col} =
+          Enum.reduce(hint_parts, {[], 2}, fn {text, f}, {acc, c} ->
+            {[DisplayList.draw(hint_row, c, text, f) | acc], c + String.length(text)}
+          end)
+
+        draws
+      else
+        []
+      end
+
+    [left_draw | hint_draws]
   end
 
   # ── Empty prompt ───────────────────────────────────────────────────────
@@ -239,14 +283,32 @@ defmodule Minga.Shell.Board.Renderer do
   defp cond_elapsed(s) when s < 3600, do: "#{div(s, 60)}m"
   defp cond_elapsed(s), do: "#{div(s, 3600)}h #{div(rem(s, 3600), 60)}m"
 
-  @spec pad_or_truncate(String.t(), pos_integer()) :: String.t()
-  defp pad_or_truncate(text, width) do
+  @spec pad_right(String.t(), pos_integer()) :: String.t()
+  defp pad_right(text, width) do
     len = String.length(text)
 
-    if len >= width do
+    if len > width do
       String.slice(text, 0, max(width - 1, 0)) <> "…"
     else
-      text <> String.duplicate(" ", width - len)
+      text <> String.duplicate(" ", max(width - len, 0))
+    end
+  end
+
+  @spec build_two_column_line(String.t(), String.t(), pos_integer()) :: String.t()
+  defp build_two_column_line(left, right, width) do
+    left_len = String.length(left)
+    right_len = String.length(right)
+    gap = max(width - left_len - right_len, 1)
+
+    total = left <> String.duplicate(" ", gap) <> right
+    total_len = String.length(total)
+
+    if total_len > width do
+      # Truncate left side, keep right visible
+      avail = max(width - right_len - 2, 0)
+      String.slice(left, 0, avail) <> "… " <> right
+    else
+      total <> String.duplicate(" ", max(width - total_len, 0))
     end
   end
 

@@ -27,8 +27,8 @@ defmodule Minga.Shell.Board.Layout do
   @phi 1.618
 
   # Minimum card dimensions in cells
-  @min_card_width 24
-  @min_card_height 8
+  @min_card_width 30
+  @min_card_height 9
 
   # Base gap between cards (in cells)
   @base_gap 2

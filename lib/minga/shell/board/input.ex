@@ -98,10 +98,14 @@ defmodule Minga.Shell.Board.Input do
     {:handled, create_new_card(state)}
   end
 
-  # Escape / q (unmodified): no-op for now (Board is the root view)
-  # TODO: switch to Shell.Traditional when shell switching is wired
+  # Escape / q (unmodified): toggle back to Shell.Traditional
   defp dispatch_grid_key(state, cp, 0) when cp in [@key_escape, @key_q] do
-    {:handled, state}
+    traditional_state = %Minga.Shell.Traditional.State{
+      suppress_tool_prompts: state.shell_state.suppress_tool_prompts
+    }
+
+    new_state = %{state | shell: Minga.Shell.Traditional, shell_state: traditional_state, layout: nil}
+    {:handled, new_state}
   end
 
   # Ctrl/Cmd-modified keys pass through to GlobalBindings (Ctrl+Q quit,
@@ -157,7 +161,10 @@ defmodule Minga.Shell.Board.Input do
   @spec create_new_card(EditorState.t()) :: EditorState.t()
   defp create_new_card(state) do
     board = state.shell_state
-    {new_board, _card} = BoardState.create_card(board, task: "New agent", status: :idle)
+    count = BoardState.card_count(board)
+    {new_board, card} = BoardState.create_card(board, task: "Agent #{count}", status: :idle)
+    # Focus the new card
+    new_board = BoardState.focus_card(new_board, card.id)
     %{state | shell_state: new_board}
   end
 
