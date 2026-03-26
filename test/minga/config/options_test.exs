@@ -95,7 +95,8 @@ defmodule Minga.Config.OptionsTest do
                log_level_config: :default,
                log_level_port: :default,
                parser_tree_ttl: 300,
-               event_retention_days: 90
+               event_retention_days: 90,
+               default_shell: :traditional
              }
     end
   end
