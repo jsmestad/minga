@@ -168,6 +168,35 @@ defmodule Minga.Frontend.Emit.GUI do
   # ── Tab bar ──
 
   @spec build_gui_tab_bar_cmd(state()) :: binary() | nil
+
+  # Board zoomed: show a single tab with the card name and a back indicator
+  defp build_gui_tab_bar_cmd(%{shell: Minga.Shell.Board, shell_state: %{zoomed_into: card_id}} = state)
+       when card_id != nil do
+    card = Minga.Shell.Board.State.zoomed(state.shell_state)
+    label = if card, do: "◇ #{card.task}", else: "◇ Board"
+
+    # Build a minimal TabBar with one active tab showing the card context
+    tab = %Minga.Editor.State.Tab{
+      id: card_id,
+      label: label,
+      kind: :file,
+      context: %{},
+      agent_status: nil,
+      attention: false
+    }
+
+    tb = %TabBar{tabs: [tab], active_id: card_id, next_id: card_id + 1}
+    fp = :erlang.phash2({:board_zoom, card_id, label})
+
+    if fp != Process.get(:last_gui_tab_bar_fp) do
+      Process.put(:last_gui_tab_bar_fp, fp)
+      ProtocolGUI.encode_gui_tab_bar(tb)
+    end
+  end
+
+  # Board grid: no tab bar needed (Board is the view)
+  defp build_gui_tab_bar_cmd(%{shell: Minga.Shell.Board}), do: nil
+
   defp build_gui_tab_bar_cmd(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
     active_buf = active_window_buffer(state)
     fp = :erlang.phash2({tb, active_buf})
