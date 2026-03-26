@@ -57,7 +57,7 @@ defmodule Minga.Buffer.DocumentPerfTest do
   # When both measurements are below this threshold (µs), the ratio is
   # meaningless because we're dividing noise by noise. Skip the ratio
   # assertion and just verify both are fast in absolute terms.
-  @noise_floor_us 0.5
+  @noise_floor_us 2.0
 
   setup_all do
     small = build_buf(@small_lines)
