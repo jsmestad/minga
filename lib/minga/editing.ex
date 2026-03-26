@@ -213,6 +213,25 @@ defmodule Minga.Editing do
   @spec mode(map()) :: atom()
   def mode(%{workspace: %{editing: vim}}), do: vim.mode
 
+  @doc """
+  Returns the keymap binding state for scope trie resolution.
+
+  This is the discriminator that `Scope.resolve_key/3` uses to select
+  which trie of bindings to look up. CUA always returns `:cua`. Vim
+  returns the current mode mapped to the scope-relevant subset
+  (`:normal`, `:insert`, `:input_normal`).
+
+  Use this instead of manually checking `cua_active?` and branching
+  on the editing model in input handlers.
+  """
+  @spec binding_state(map()) :: atom()
+  def binding_state(state) do
+    case active_model(state) do
+      CUAModel -> :cua
+      VimModel -> state.workspace.editing.mode
+    end
+  end
+
   @doc "Is a leader key sequence in progress?"
   @spec in_leader?(map()) :: boolean()
   def in_leader?(%{workspace: %{editing: %{mode_state: ms}}}) when is_map_key(ms, :leader_node),
