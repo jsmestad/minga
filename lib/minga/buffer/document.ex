@@ -861,7 +861,7 @@ defmodule Minga.Buffer.Document do
   end
 end
 
-defimpl Minga.Text.Readable, for: Minga.Buffer.Document do
+defimpl Minga.Editing.Text.Readable, for: Minga.Buffer.Document do
   @moduledoc false
 
   alias Minga.Buffer.Document

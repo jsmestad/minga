@@ -14,7 +14,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpersTest do
   }
 
   defp make_match(line, col, len) do
-    %Minga.Search.Match{line: line, col: col, length: len}
+    %Minga.Editing.Search.Match{line: line, col: col, length: len}
   end
 
   describe "merge_search_decorations/5" do

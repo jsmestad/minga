@@ -685,8 +685,8 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
   """
   @spec merge_search_decorations(
           Decorations.t(),
-          [Minga.Search.Match.t()],
-          Minga.Search.Match.t() | nil,
+          [Minga.Editing.Search.Match.t()],
+          Minga.Editing.Search.Match.t() | nil,
           map(),
           search_cache()
         ) :: {Decorations.t(), search_cache()}
@@ -727,7 +727,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
 
   defp add_search_highlight(
          decs,
-         %Minga.Search.Match{line: line, col: col, length: len} = match,
+         %Minga.Editing.Search.Match{line: line, col: col, length: len} = match,
          confirm_match,
          colors
        ) do

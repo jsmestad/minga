@@ -105,14 +105,14 @@ defmodule Minga.Agent.View.PreviewTest do
     end
 
     test "scroll_up decreases offset, clamped at 0" do
-      p = %{Preview.new() | scroll: Minga.Scroll.new(3)}
+      p = %{Preview.new() | scroll: Minga.Editing.Scroll.new(3)}
       p = Preview.scroll_up(p, 10)
       assert p.scroll.offset == 0
       assert p.scroll.pinned == false
     end
 
     test "scroll_to_top resets to 0" do
-      p = %{Preview.new() | scroll: Minga.Scroll.new(50)}
+      p = %{Preview.new() | scroll: Minga.Editing.Scroll.new(50)}
       p = Preview.scroll_to_top(p)
       assert p.scroll.offset == 0
     end

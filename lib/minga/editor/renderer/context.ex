@@ -13,8 +13,8 @@ defmodule Minga.Editor.Renderer.Context do
 
   alias Minga.Buffer.Decorations
   alias Minga.Diagnostics.Diagnostic
+  alias Minga.Editing.Search.Match
   alias Minga.Editor.Viewport
-  alias Minga.Search.Match
   alias Minga.UI.Highlight
 
   @enforce_keys [:viewport, :gutter_w, :content_w]

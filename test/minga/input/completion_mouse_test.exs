@@ -2,7 +2,7 @@ defmodule Minga.Input.CompletionMouseTest do
   @moduledoc "Tests for mouse interaction with the completion popup."
   use ExUnit.Case, async: true
 
-  alias Minga.Completion
+  alias Minga.Editing.Completion
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Viewport
   alias Minga.Editor.VimState

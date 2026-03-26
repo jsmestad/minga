@@ -93,7 +93,7 @@ defmodule Minga.Input.FileTreeHandler do
       key = {cp, mods}
 
       vim_state =
-        if Minga.Editor.Editing.active_model() == Minga.EditingModel.CUA, do: :cua, else: :normal
+        if Minga.Editing.active_model() == Minga.Editing.Model.CUA, do: :cua, else: :normal
 
       case Scope.resolve_key(:file_tree, vim_state, key) do
         {:command, command} ->
@@ -125,7 +125,7 @@ defmodule Minga.Input.FileTreeHandler do
     state = Minga.Editor.do_handle_key(state, cp, mods)
 
     state =
-      if Minga.Editor.Editing.mode(state) != :normal do
+      if Minga.Editing.mode(state) != :normal do
         EditorState.transition_mode(state, :normal)
       else
         state

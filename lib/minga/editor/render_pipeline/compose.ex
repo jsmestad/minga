@@ -46,7 +46,7 @@ defmodule Minga.Editor.RenderPipeline.Compose do
     # command/search/eval mode.
     active_wf_cursor = Enum.find_value(window_frames, fn wf -> wf.cursor end)
     minibuffer_result = ComposeHelpers.resolve_cursor(state, cursor_info, minibuffer_row)
-    minibuffer_mode? = Minga.Editor.Editing.minibuffer_mode?(state)
+    minibuffer_mode? = Minga.Editing.minibuffer_mode?(state)
 
     cursor =
       resolve_frame_cursor(
@@ -55,7 +55,7 @@ defmodule Minga.Editor.RenderPipeline.Compose do
         ComposeHelpers.agent_cursor_from_layout(state, layout),
         active_wf_cursor,
         minibuffer_result,
-        Minga.Editor.Editing.cursor_shape(state)
+        Minga.Editing.cursor_shape(state)
       )
 
     %Frame{

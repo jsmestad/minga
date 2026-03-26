@@ -16,8 +16,8 @@ defmodule Minga.Editor do
   alias Minga.Agent.Events
   alias Minga.Agent.UIState
   alias Minga.Buffer.Server, as: BufferServer
-  alias Minga.Completion
   alias Minga.Config.Options
+  alias Minga.Editing.Completion
 
   alias Minga.Diagnostics.Decorations, as: DiagDecorations
   alias Minga.Session
@@ -278,7 +278,7 @@ defmodule Minga.Editor do
   end
 
   def handle_call(:api_mode, _from, state) do
-    {:reply, Minga.Editor.Editing.mode(state), state}
+    {:reply, Minga.Editing.mode(state), state}
   end
 
   def handle_call(:api_save, _from, %{workspace: %{buffers: %{active: nil}}} = state) do

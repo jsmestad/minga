@@ -56,7 +56,7 @@ defmodule Minga.Input.AgentPanel do
   @spec handle_panel_input(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           EditorState.t()
   defp handle_panel_input(state, cp, mods) do
-    if Minga.Editor.Editing.inserting?(state) do
+    if Minga.Editing.inserting?(state) do
       # Resolve through the agent scope insert trie. This gives us the
       # same keybindings as the split pane path (Enter, Shift+Enter,
       # Backspace, Ctrl combos, @-mention, printable chars) without
@@ -111,7 +111,7 @@ defmodule Minga.Input.AgentPanel do
   # discarded the actual key and could clobber buffers.active if the
   # leader command (e.g. :new_buffer) changed it during execution.
   defp handle_panel_nav(state, cp, mods) do
-    if Minga.Editor.Editing.in_leader?(state) do
+    if Minga.Editing.in_leader?(state) do
       {:passthrough, state}
     else
       handle_panel_nav_dispatch(state, cp, mods)

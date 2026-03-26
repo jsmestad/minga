@@ -26,7 +26,7 @@ defmodule Minga.Application do
       │   │   ├── Minga.CommandOutput.Registry
       │   │   ├── Minga.Eval.TaskSupervisor
       │   │   ├── Minga.Command.Registry
-      │   │   ├── Minga.Fold.Registry
+      │   │   ├── Minga.Editing.Fold.Registry
       │   │   └── Minga.Diagnostics
       │   ├── Minga.Extension.Registry
       │   ├── Minga.Extension.Supervisor

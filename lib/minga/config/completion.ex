@@ -16,7 +16,7 @@ defmodule Minga.Config.Completion do
   alias Minga.Config.Options
   alias Minga.Language.Filetype
 
-  @typedoc "A completion item compatible with `Minga.Completion.item()`."
+  @typedoc "A completion item compatible with `Minga.Editing.Completion.item()`."
   @type item :: %{
           label: String.t(),
           kind: atom(),

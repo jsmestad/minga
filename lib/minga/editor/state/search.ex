@@ -8,7 +8,7 @@ defmodule Minga.Editor.State.Search do
 
   @type t :: %__MODULE__{
           last_pattern: String.t() | nil,
-          last_direction: Minga.Search.direction(),
+          last_direction: Minga.Editing.Search.direction(),
           project_results: [Minga.Project.ProjectSearch.match()]
         }
 
@@ -17,7 +17,7 @@ defmodule Minga.Editor.State.Search do
             project_results: []
 
   @doc "Records the last search pattern and direction."
-  @spec record(t(), String.t(), Minga.Search.direction()) :: t()
+  @spec record(t(), String.t(), Minga.Editing.Search.direction()) :: t()
   def record(%__MODULE__{} = s, pattern, direction) do
     %{s | last_pattern: pattern, last_direction: direction}
   end

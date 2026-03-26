@@ -29,7 +29,7 @@ defmodule Minga.Input.Interrupt do
   @behaviour Minga.Input.Handler
 
   alias Minga.Agent.UIState
-  alias Minga.Completion
+  alias Minga.Editing.Completion
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.Picker

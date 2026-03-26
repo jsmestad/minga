@@ -17,7 +17,7 @@ defmodule Minga.Editor.Commands.SelectAllTest do
       state = editor_state(ctx)
       state = Minga.Editor.Commands.execute(state, :select_all)
 
-      assert Minga.Editor.Editing.mode(state) == :visual
+      assert Minga.Editing.mode(state) == :visual
       ms = Minga.Editor.Editing.mode_state(state)
       assert ms.visual_anchor == {0, 0}
       assert ms.visual_type == :line
@@ -29,7 +29,7 @@ defmodule Minga.Editor.Commands.SelectAllTest do
       state = editor_state(ctx)
       state = Minga.Editor.Commands.execute(state, :select_all)
 
-      assert Minga.Editor.Editing.mode(state) == :visual
+      assert Minga.Editing.mode(state) == :visual
       ms = Minga.Editor.Editing.mode_state(state)
       assert ms.visual_anchor == {0, 0}
     end

@@ -184,7 +184,7 @@ defmodule Minga.Editor.RenderPipeline.Content do
           Decorations.buf_col_to_display_col(render_ctx.decorations, cursor_line, cursor_col)
 
         cc = gutter_w + adjusted_cursor_col - viewport.left + col_off
-        Cursor.new(cr, cc, Minga.Editor.Editing.cursor_shape(state))
+        Cursor.new(cr, cc, Minga.Editing.cursor_shape(state))
       else
         nil
       end
@@ -473,7 +473,7 @@ defmodule Minga.Editor.RenderPipeline.Content do
 
         cr = cursor_line - viewport.top + row_off
         cc = gutter_w + adjusted_cc - viewport.left + col_off
-        Cursor.new(cr, cc, Minga.Editor.Editing.cursor_shape(state))
+        Cursor.new(cr, cc, Minga.Editing.cursor_shape(state))
       else
         nil
       end

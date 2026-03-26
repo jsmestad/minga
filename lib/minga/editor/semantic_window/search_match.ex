@@ -22,8 +22,8 @@ defmodule Minga.Editor.SemanticWindow.SearchMatch do
 
   @doc "Converts search matches from the render context to display coordinates."
   @spec from_context_matches(
-          [Minga.Search.Match.t()],
-          Minga.Search.Match.t() | nil,
+          [Minga.Editing.Search.Match.t()],
+          Minga.Editing.Search.Match.t() | nil,
           non_neg_integer(),
           non_neg_integer()
         ) :: [t()]

@@ -35,7 +35,7 @@ defmodule Minga.Input.AgentNavTest do
       panel: %UIState.Panel{
         visible: true,
         input_focused: Keyword.get(opts, :input_focused, false),
-        scroll: Minga.Scroll.new(),
+        scroll: Minga.Editing.Scroll.new(),
         spinner_frame: 0,
         provider_name: "anthropic",
         model_name: "claude-sonnet-4",

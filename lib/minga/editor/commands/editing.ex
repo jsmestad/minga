@@ -8,7 +8,6 @@ defmodule Minga.Editor.Commands.Editing do
 
   alias Minga.Buffer.Document
   alias Minga.Buffer.Server, as: BufferServer
-  alias Minga.Comment
 
   alias Minga.Editor.Commands.Helpers
   alias Minga.Editor.HighlightSync
@@ -453,7 +452,7 @@ defmodule Minga.Editor.Commands.Editing do
     {line, _col} = BufferServer.cursor(buf)
     filetype = BufferServer.filetype(buf)
     injection_ranges = Map.get(state.workspace.injection_ranges, buf, [])
-    Comment.toggle_lines(buf, line, line, filetype, injection_ranges)
+    Minga.Editing.toggle_comment(buf, line, line, filetype, injection_ranges)
     state
   end
 
@@ -465,7 +464,7 @@ defmodule Minga.Editor.Commands.Editing do
     end_line = max(cursor_line, target_line)
     filetype = BufferServer.filetype(buf)
     injection_ranges = Map.get(state.workspace.injection_ranges, buf, [])
-    Comment.toggle_lines(buf, start_line, end_line, filetype, injection_ranges)
+    Minga.Editing.toggle_comment(buf, start_line, end_line, filetype, injection_ranges)
     state
   end
 
@@ -481,7 +480,7 @@ defmodule Minga.Editor.Commands.Editing do
     end_line = max(anchor_line, cursor_line)
     filetype = BufferServer.filetype(buf)
     injection_ranges = Map.get(state.workspace.injection_ranges, buf, [])
-    Comment.toggle_lines(buf, start_line, end_line, filetype, injection_ranges)
+    Minga.Editing.toggle_comment(buf, start_line, end_line, filetype, injection_ranges)
     state
   end
 
@@ -492,7 +491,7 @@ defmodule Minga.Editor.Commands.Editing do
     gb = BufferServer.snapshot(buf)
     cursor = Document.cursor(gb)
 
-    case Minga.AutoPair.on_backspace(gb, cursor) do
+    case Minga.Editing.backspace_with_pairs(gb, cursor) do
       :delete_pair ->
         BufferServer.delete_before(buf)
         BufferServer.delete_at(buf)
@@ -509,7 +508,7 @@ defmodule Minga.Editor.Commands.Editing do
     gb = BufferServer.snapshot(buf)
     cursor = Document.cursor(gb)
 
-    case Minga.AutoPair.on_insert(gb, cursor, char) do
+    case Minga.Editing.insert_with_pairs(gb, cursor, char) do
       {:pair, open, close} ->
         BufferServer.insert_char(buf, open)
         BufferServer.insert_char(buf, close)

@@ -7,8 +7,8 @@ defmodule Minga.Editor.Renderer.SearchHighlight do
   in `ContentHelpers.maybe_update_search_decorations/4`.
   """
 
+  alias Minga.Editing.Search.Match
   alias Minga.Editor.State, as: EditorState
-  alias Minga.Search.Match
 
   @typedoc "A search match with buffer position and length."
   @type search_match :: Match.t()
@@ -44,7 +44,7 @@ defmodule Minga.Editor.Renderer.SearchHighlight do
     pattern = active_search_pattern(state)
 
     if is_binary(pattern) and pattern != "" do
-      Minga.Search.find_all_in_range(lines, pattern, first_line)
+      Minga.Editing.search_all_in_range(lines, pattern, first_line)
     else
       []
     end
@@ -64,7 +64,7 @@ defmodule Minga.Editor.Renderer.SearchHighlight do
     |> Enum.with_index(first_line)
     |> Enum.map_reduce([], fn {line, line_num}, acc ->
       {new_line, _count, spans} =
-        Minga.Search.substitute_line_with_spans(line, pattern, replacement, global?)
+        Minga.Editing.substitute_line_preview(line, pattern, replacement, global?)
 
       matches = Enum.map(spans, fn {col, len} -> Match.new(line_num, col, len) end)
       {new_line, acc ++ matches}

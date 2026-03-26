@@ -566,7 +566,7 @@ defmodule Minga.Integration.GUIProtocolTest do
 
   describe "gui_completion visible" do
     test "round-trips visible completion with items", %{port: port} do
-      comp = %Minga.Completion{
+      comp = %Minga.Editing.Completion{
         items: [],
         filtered: [
           %{

@@ -24,10 +24,10 @@ defmodule Minga.Buffer.Server do
   alias Minga.Buffer.EditSource
   alias Minga.Buffer.Unicode
   alias Minga.Config.Options
+  alias Minga.Editing.NavigableContent.BufferSnapshot
+  alias Minga.Editing.Scroll
   alias Minga.Events
   alias Minga.Language.Filetype
-  alias Minga.NavigableContent.BufferSnapshot
-  alias Minga.Scroll
 
   alias Minga.Buffer.State, as: BufState
 

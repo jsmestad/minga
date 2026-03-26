@@ -47,7 +47,7 @@ defmodule Minga.Editor.Commands.Marks do
         current_pos = BufferServer.cursor(buf)
         {content, _} = BufferServer.content_and_cursor(buf)
         tmp_buf = Document.new(content)
-        target = Minga.Motion.first_non_blank(tmp_buf, {mark_line, 0})
+        target = Minga.Editing.first_non_blank(tmp_buf, {mark_line, 0})
         BufferServer.move_to(buf, target)
         Helpers.save_jump_pos(state, current_pos, target)
     end
@@ -80,7 +80,7 @@ defmodule Minga.Editor.Commands.Marks do
     {last_line, _} = last_pos
     {content, _} = BufferServer.content_and_cursor(buf)
     tmp_buf = Document.new(content)
-    target = Minga.Motion.first_non_blank(tmp_buf, {last_line, 0})
+    target = Minga.Editing.first_non_blank(tmp_buf, {last_line, 0})
     BufferServer.move_to(buf, target)
 
     %{

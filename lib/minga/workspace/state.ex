@@ -13,7 +13,7 @@ defmodule Minga.Workspace.State do
   """
 
   alias Minga.Agent.UIState
-  alias Minga.Completion
+  alias Minga.Editing.Completion
   alias Minga.Editor.CompletionTrigger
   alias Minga.Editor.State.Buffers
   alias Minga.Editor.State.FileTree, as: FileTreeState

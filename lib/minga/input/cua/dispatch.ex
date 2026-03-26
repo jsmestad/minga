@@ -31,10 +31,10 @@ defmodule Minga.Input.CUA.Dispatch do
           Minga.Input.Handler.result()
   def handle_key(state, codepoint, modifiers) do
     key = {codepoint, modifiers}
-    cua_state = Minga.EditingModel.CUA.from_editor()
+    cua_state = Minga.Editing.Model.CUA.from_editor()
 
     {_mode, commands, _new_cua_state} =
-      Minga.EditingModel.CUA.process_key(cua_state, key)
+      Minga.Editing.Model.CUA.process_key(cua_state, key)
 
     # Break undo coalescing on Enter so each line is a separate undo step
     if codepoint == 0x0D and state.workspace.buffers.active do
