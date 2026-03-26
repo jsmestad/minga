@@ -24,7 +24,7 @@ defmodule Minga.Shell.Traditional do
   alias Minga.Shell.Traditional.State, as: ShellState
 
   @impl true
-  @spec init(keyword()) :: ShellState.t()
+  @spec init(keyword()) :: Minga.Shell.shell_state()
   def init(_opts) do
     %ShellState{}
   end

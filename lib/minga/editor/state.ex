@@ -290,7 +290,7 @@ defmodule Minga.Editor.State do
   def git_status_panel(%{shell_state: ss}), do: ss.git_status_panel
 
   @doc "Sets the git status panel data."
-  @spec set_git_status_panel(t(), Minga.Frontend.Protocol.GUI.git_status_data() | nil) :: t()
+  @spec set_git_status_panel(t(), map() | nil) :: t()
   def set_git_status_panel(%{shell_state: ss} = state, data) do
     %{state | shell_state: %{ss | git_status_panel: data}}
   end

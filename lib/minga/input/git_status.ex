@@ -214,7 +214,8 @@ defmodule Minga.Input.GitStatus do
     panel = EditorState.git_status_panel(state)
     tui = Map.get(panel, :tui_state) || build_initial_tui_state(panel)
     updated = fun.(tui)
-    EditorState.set_git_status_panel(state, Map.put(panel, :tui_state, updated))
+    updated_panel = Map.put(panel, :tui_state, updated)
+    EditorState.set_git_status_panel(state, updated_panel)
   end
 
   @spec with_selected_file(EditorState.t(), (Git.StatusEntry.t(), String.t() -> EditorState.t())) ::

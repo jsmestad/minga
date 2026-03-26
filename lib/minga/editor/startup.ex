@@ -6,6 +6,10 @@ defmodule Minga.Editor.Startup do
   Extracted to keep the GenServer module focused on message handling.
   """
 
+  # ShellState defaults include MapSet.new() which dialyzer flags as opaque
+  # when flowing through bare-map pattern matches in accessor functions.
+  @dialyzer {:no_opaque, build_initial_state: 1}
+
   alias Minga.Agent.BufferSync, as: AgentBufferSync
   alias Minga.Agent.UIState
   alias Minga.Buffer.Server, as: BufferServer
