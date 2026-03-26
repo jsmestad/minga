@@ -45,7 +45,7 @@ defmodule Minga.UI.Popup.LifecycleTest do
       port_manager: nil,
       workspace: %Minga.Workspace.State{
         viewport: Viewport.new(24, 80),
-        vim: VimState.new(),
+        editing: VimState.new(),
         buffers: %Buffers{active: main_buf, list: [main_buf]},
         windows: %Windows{
           tree: WindowTree.new(1),

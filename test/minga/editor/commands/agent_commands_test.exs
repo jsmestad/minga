@@ -63,7 +63,7 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
       port_manager: nil,
       workspace: %Minga.Workspace.State{
         viewport: Viewport.new(24, 80),
-        vim: VimState.new(),
+        editing: VimState.new(),
         buffers: %Buffers{active: buf, list: [buf], active_index: 0},
         windows: %Windows{
           tree: {:leaf, 1},

@@ -1,5 +1,5 @@
 defmodule Minga.Editor.Commands.MarksTest do
-  use ExUnit.Case, async: true
+  use Minga.Test.EditingModelCase, async: true
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor
@@ -16,7 +16,8 @@ defmodule Minga.Editor.Commands.MarksTest do
         port_manager: nil,
         buffer: buffer,
         width: 40,
-        height: 10
+        height: 10,
+        editing_model: :vim
       )
 
     # Drain init-phase messages (timers, PubSub subscriptions) so they
@@ -52,7 +53,7 @@ defmodule Minga.Editor.Commands.MarksTest do
       send_key(editor, ?a)
 
       s = state(editor)
-      assert get_in(s.workspace.vim.marks, [buffer, "a"]) == {1, 3}
+      assert get_in(s.workspace.editing.marks, [buffer, "a"]) == {1, 3}
     end
 
     test "setting the same mark again overwrites the previous position" do
@@ -66,7 +67,7 @@ defmodule Minga.Editor.Commands.MarksTest do
       send_key(editor, ?z)
 
       s = state(editor)
-      assert get_in(s.workspace.vim.marks, [buffer, "z"]) == {2, 2}
+      assert get_in(s.workspace.editing.marks, [buffer, "z"]) == {2, 2}
     end
 
     test "multiple different marks can coexist" do
@@ -81,8 +82,8 @@ defmodule Minga.Editor.Commands.MarksTest do
       send_key(editor, ?b)
 
       s = state(editor)
-      assert get_in(s.workspace.vim.marks, [buffer, "a"]) == {0, 1}
-      assert get_in(s.workspace.vim.marks, [buffer, "b"]) == {2, 0}
+      assert get_in(s.workspace.editing.marks, [buffer, "a"]) == {0, 1}
+      assert get_in(s.workspace.editing.marks, [buffer, "b"]) == {2, 0}
     end
 
     test "incomplete m sequence (non-letter) cancels without effect" do
@@ -94,7 +95,7 @@ defmodule Minga.Editor.Commands.MarksTest do
       send_key(editor, 27)
 
       s = state(editor)
-      assert Map.get(s.workspace.vim.marks, buffer, %{}) == %{}
+      assert Map.get(s.workspace.editing.marks, buffer, %{}) == %{}
     end
   end
 
@@ -138,7 +139,7 @@ defmodule Minga.Editor.Commands.MarksTest do
       send_key(editor, ?a)
 
       s = state(editor)
-      assert s.workspace.vim.last_jump_pos == {0, 0}
+      assert s.workspace.editing.last_jump_pos == {0, 0}
     end
 
     test "jumping within same line does not update last_jump_pos" do
@@ -153,7 +154,7 @@ defmodule Minga.Editor.Commands.MarksTest do
       send_key(editor, ?a)
 
       s = state(editor)
-      assert is_nil(s.workspace.vim.last_jump_pos)
+      assert is_nil(s.workspace.editing.last_jump_pos)
     end
   end
 
@@ -194,7 +195,7 @@ defmodule Minga.Editor.Commands.MarksTest do
       send_key(editor, ?c)
 
       s = state(editor)
-      assert s.workspace.vim.last_jump_pos == {0, 2}
+      assert s.workspace.editing.last_jump_pos == {0, 2}
     end
   end
 
@@ -299,7 +300,7 @@ defmodule Minga.Editor.Commands.MarksTest do
       move_cursor(editor, buffer, {0, 0})
 
       s = state(editor)
-      assert get_in(s.workspace.vim.marks, [buffer, "p"]) == {1, 0}
+      assert get_in(s.workspace.editing.marks, [buffer, "p"]) == {1, 0}
     end
   end
 end

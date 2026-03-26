@@ -206,7 +206,8 @@ defmodule Minga.Editor.Commands.Editing do
   # ── Replace mode ──────────────────────────────────────────────────────────
 
   def execute(
-        %{workspace: %{vim: %{mode_state: %ReplaceState{} = ms}, buffers: %{active: buf}}} = state,
+        %{workspace: %{editing: %{mode_state: %ReplaceState{} = ms}, buffers: %{active: buf}}} =
+          state,
         {:replace_overwrite, char}
       ) do
     {line, col} = BufferServer.cursor(buf)
@@ -228,7 +229,11 @@ defmodule Minga.Editor.Commands.Editing do
     BufferServer.delete_at(buf)
     BufferServer.insert_char(buf, char)
     new_ms = %{ms | original_chars: [original | ms.original_chars]}
-    %{state | workspace: %{state.workspace | vim: %{state.workspace.vim | mode_state: new_ms}}}
+
+    %{
+      state
+      | workspace: %{state.workspace | editing: %{state.workspace.editing | mode_state: new_ms}}
+    }
   end
 
   def execute(state, {:replace_overwrite, _char}), do: state
@@ -237,7 +242,7 @@ defmodule Minga.Editor.Commands.Editing do
         %{
           workspace: %{
             buffers: %{active: buf},
-            vim: %{mode_state: %ReplaceState{original_chars: [orig | rest]} = ms}
+            editing: %{mode_state: %ReplaceState{original_chars: [orig | rest]} = ms}
           }
         } = state,
         :replace_restore
@@ -246,11 +251,15 @@ defmodule Minga.Editor.Commands.Editing do
     BufferServer.insert_char(buf, orig)
     BufferServer.move(buf, :left)
     new_ms = %{ms | original_chars: rest}
-    %{state | workspace: %{state.workspace | vim: %{state.workspace.vim | mode_state: new_ms}}}
+
+    %{
+      state
+      | workspace: %{state.workspace | editing: %{state.workspace.editing | mode_state: new_ms}}
+    }
   end
 
   def execute(
-        %{workspace: %{vim: %{mode_state: %ReplaceState{original_chars: []}}}} = state,
+        %{workspace: %{editing: %{mode_state: %ReplaceState{original_chars: []}}}} = state,
         :replace_restore
       ),
       do: state
@@ -363,7 +372,8 @@ defmodule Minga.Editor.Commands.Editing do
   end
 
   def execute(
-        %{workspace: %{vim: %{mode_state: %VisualState{} = ms}, buffers: %{active: buf}}} = state,
+        %{workspace: %{editing: %{mode_state: %VisualState{} = ms}, buffers: %{active: buf}}} =
+          state,
         :indent_visual_selection
       ) do
     anchor = ms.visual_anchor
@@ -377,7 +387,8 @@ defmodule Minga.Editor.Commands.Editing do
   end
 
   def execute(
-        %{workspace: %{vim: %{mode_state: %VisualState{} = ms}, buffers: %{active: buf}}} = state,
+        %{workspace: %{editing: %{mode_state: %VisualState{} = ms}, buffers: %{active: buf}}} =
+          state,
         :dedent_visual_selection
       ) do
     anchor = ms.visual_anchor
@@ -413,7 +424,8 @@ defmodule Minga.Editor.Commands.Editing do
   end
 
   def execute(
-        %{workspace: %{vim: %{mode_state: %VisualState{} = ms}, buffers: %{active: buf}}} = state,
+        %{workspace: %{editing: %{mode_state: %VisualState{} = ms}, buffers: %{active: buf}}} =
+          state,
         :reindent_visual_selection
       ) do
     anchor = ms.visual_anchor
@@ -469,7 +481,8 @@ defmodule Minga.Editor.Commands.Editing do
   end
 
   def execute(
-        %{workspace: %{vim: %{mode_state: %VisualState{} = ms}, buffers: %{active: buf}}} = state,
+        %{workspace: %{editing: %{mode_state: %VisualState{} = ms}, buffers: %{active: buf}}} =
+          state,
         :comment_visual_selection
       ) do
     anchor = ms.visual_anchor

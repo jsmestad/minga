@@ -36,7 +36,7 @@ defmodule Minga.Input.PopupTest do
       port_manager: nil,
       workspace: %Minga.Workspace.State{
         viewport: Viewport.new(24, 80),
-        vim: vim,
+        editing: vim,
         buffers: %Buffers{active: main_buf, list: [main_buf]},
         windows: %Windows{
           tree: {:split, :horizontal, {:leaf, 1}, {:leaf, 2}, 16},

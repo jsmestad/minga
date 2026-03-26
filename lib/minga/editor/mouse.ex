@@ -222,7 +222,7 @@ defmodule Minga.Editor.Mouse do
   end
 
   def handle(
-        %{workspace: %{mouse: %MouseState{dragging: true}, vim: %{mode: :visual}}} = state,
+        %{workspace: %{mouse: %MouseState{dragging: true}, editing: %{mode: :visual}}} = state,
         _r,
         _c,
         :left,
@@ -928,7 +928,8 @@ defmodule Minga.Editor.Mouse do
 
   @spec auto_copy_selection(EditorState.t()) :: EditorState.t()
   defp auto_copy_selection(
-         %{workspace: %{vim: %{mode: :visual, mode_state: ms}, buffers: %{active: buf}}} = state
+         %{workspace: %{editing: %{mode: :visual, mode_state: ms}, buffers: %{active: buf}}} =
+           state
        )
        when is_pid(buf) do
     text = selection_text(buf, ms)
@@ -1094,7 +1095,8 @@ defmodule Minga.Editor.Mouse do
   end
 
   @spec enter_visual_if_needed(state(), {non_neg_integer(), non_neg_integer()}) :: state()
-  defp enter_visual_if_needed(%{workspace: %{vim: %{mode: :visual}}} = state, _anchor), do: state
+  defp enter_visual_if_needed(%{workspace: %{editing: %{mode: :visual}}} = state, _anchor),
+    do: state
 
   defp enter_visual_if_needed(state, anchor) do
     visual_state = %VisualState{visual_anchor: anchor, visual_type: :char}
@@ -1113,7 +1115,7 @@ defmodule Minga.Editor.Mouse do
   end
 
   @spec cancel_mode_for_mouse(state()) :: state()
-  defp cancel_mode_for_mouse(%{workspace: %{vim: %{mode: :command}}} = state) do
+  defp cancel_mode_for_mouse(%{workspace: %{editing: %{mode: :command}}} = state) do
     EditorState.set_whichkey(state, WhichKeyState.clear(EditorState.whichkey(state)))
   end
 

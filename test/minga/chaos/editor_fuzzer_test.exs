@@ -15,7 +15,7 @@ defmodule Minga.Chaos.EditorFuzzerTest do
   """
 
   # Mutates Application env (:minga, :shutdown_fn); must not run concurrently with other tests.
-  use ExUnit.Case, async: false
+  use Minga.Test.EditingModelCase, async: false
   use PropCheck
   use PropCheck.StateM.ModelDSL
 
@@ -91,7 +91,8 @@ defmodule Minga.Chaos.EditorFuzzerTest do
         port_manager: port,
         buffer: buffer,
         width: width,
-        height: height
+        height: height,
+        editing_model: :vim
       )
 
     # Allow the editor process to use our Mox stubs

@@ -175,7 +175,7 @@ defmodule Minga.Config.Options do
   @type table :: :ets.table()
 
   @option_specs [
-    {:editing_model, {:enum, [:vim, :cua]}, :vim},
+    {:editing_model, {:enum, [:vim, :cua]}, :cua},
     {:space_leader, {:enum, [:chord, :off]}, :chord},
     {:tab_width, :pos_integer, 2},
     {:line_numbers, {:enum, [:hybrid, :absolute, :relative, :none]}, :hybrid},

@@ -88,7 +88,7 @@ defmodule Minga.Editor.MinibufferData do
   """
   @spec from_state(EditorState.t()) :: t()
 
-  def from_state(%{workspace: %{vim: %{mode: :command, mode_state: ms}}}) do
+  def from_state(%{workspace: %{editing: %{mode: :command, mode_state: ms}}}) do
     input = ms.input
     {candidates, total} = complete_ex_command(input)
     raw_index = ms.candidate_index
@@ -107,7 +107,7 @@ defmodule Minga.Editor.MinibufferData do
     }
   end
 
-  def from_state(%{workspace: %{vim: %{mode: :search, mode_state: ms}}}) do
+  def from_state(%{workspace: %{editing: %{mode: :search, mode_state: ms}}}) do
     {mode, prefix} = search_mode_and_prefix(ms.direction)
     context = format_search_context(ms)
 
@@ -123,7 +123,7 @@ defmodule Minga.Editor.MinibufferData do
     }
   end
 
-  def from_state(%{workspace: %{vim: %{mode: :search_prompt, mode_state: ms}}}) do
+  def from_state(%{workspace: %{editing: %{mode: :search_prompt, mode_state: ms}}}) do
     %__MODULE__{
       visible: true,
       mode: @mode_search_prompt,
@@ -136,7 +136,7 @@ defmodule Minga.Editor.MinibufferData do
     }
   end
 
-  def from_state(%{workspace: %{vim: %{mode: :eval, mode_state: ms}}}) do
+  def from_state(%{workspace: %{editing: %{mode: :eval, mode_state: ms}}}) do
     %__MODULE__{
       visible: true,
       mode: @mode_eval,
@@ -149,7 +149,7 @@ defmodule Minga.Editor.MinibufferData do
     }
   end
 
-  def from_state(%{workspace: %{vim: %{mode: :substitute_confirm, mode_state: ms}}}) do
+  def from_state(%{workspace: %{editing: %{mode: :substitute_confirm, mode_state: ms}}}) do
     current = ms.current + 1
     total = length(ms.matches)
 
@@ -165,7 +165,7 @@ defmodule Minga.Editor.MinibufferData do
     }
   end
 
-  def from_state(%{workspace: %{vim: %{mode: :extension_confirm, mode_state: ms}}}) do
+  def from_state(%{workspace: %{editing: %{mode: :extension_confirm, mode_state: ms}}}) do
     prompt = Minga.Mode.display(:extension_confirm, ms)
 
     %__MODULE__{
@@ -182,7 +182,7 @@ defmodule Minga.Editor.MinibufferData do
 
   def from_state(%{
         workspace: %{
-          vim: %{
+          editing: %{
             mode: :normal,
             mode_state: %{pending_describe_key: true, describe_key_keys: keys}
           }

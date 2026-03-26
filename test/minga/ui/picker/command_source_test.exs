@@ -35,7 +35,7 @@ defmodule Minga.UI.Picker.CommandSourceTest do
         workspace: %Minga.Workspace.State{
           viewport: Viewport.new(24, 80),
           buffers: %Buffers{active: buf, list: [buf], active_index: 0},
-          vim: VimState.new()
+          editing: VimState.new()
         },
         shell_state: %Minga.Shell.Traditional.State{picker_ui: %PickerState{}}
       }

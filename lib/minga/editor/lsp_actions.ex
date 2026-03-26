@@ -460,11 +460,11 @@ defmodule Minga.Editor.LspActions do
 
   def selection_shrink(%{selection_ranges: [_ | _]} = state) do
     # At innermost range, exit visual mode
-    vim = VimState.transition(state.workspace.vim, :normal)
+    vim = VimState.transition(state.workspace.editing, :normal)
 
     %{
       state
-      | workspace: %{state.workspace | vim: vim},
+      | workspace: %{state.workspace | editing: vim},
         selection_ranges: nil,
         selection_range_index: 0
     }
@@ -858,8 +858,8 @@ defmodule Minga.Editor.LspActions do
     # Enter command mode with "rename <placeholder>" pre-filled
     # The ex-command parser handles "rename <new_name>" → {:rename, new_name}
     command_state = %CommandState{input: "rename #{placeholder}"}
-    vim = VimState.transition(state.workspace.vim, :command, command_state)
-    %{state | workspace: %{state.workspace | vim: vim}}
+    vim = VimState.transition(state.workspace.editing, :command, command_state)
+    %{state | workspace: %{state.workspace | editing: vim}}
   end
 
   @doc """
@@ -1419,7 +1419,11 @@ defmodule Minga.Editor.LspActions do
   @spec set_jump_mark(state()) :: state()
   defp set_jump_mark(%{workspace: %{buffers: %{active: buf}}} = state) when is_pid(buf) do
     pos = BufferServer.cursor(buf)
-    %{state | workspace: %{state.workspace | vim: %{state.workspace.vim | last_jump_pos: pos}}}
+
+    %{
+      state
+      | workspace: %{state.workspace | editing: %{state.workspace.editing | last_jump_pos: pos}}
+    }
   end
 
   defp set_jump_mark(state), do: state
@@ -1807,8 +1811,8 @@ defmodule Minga.Editor.LspActions do
         visual_type: :char
       }
 
-      vim = VimState.transition(state.workspace.vim, :visual, visual_state)
-      %{state | workspace: %{state.workspace | vim: vim}}
+      vim = VimState.transition(state.workspace.editing, :visual, visual_state)
+      %{state | workspace: %{state.workspace | editing: vim}}
     else
       state
     end

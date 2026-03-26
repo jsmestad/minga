@@ -21,7 +21,6 @@ defmodule Minga.Input.CUA.SpaceLeader do
   """
 
   alias Minga.Buffer.Server, as: BufferServer
-  alias Minga.Editing
   alias Minga.Editor.Commands
   alias Minga.Editor.State, as: EditorState
   alias Minga.Keymap.Active, as: KeymapActive
@@ -34,7 +33,7 @@ defmodule Minga.Input.CUA.SpaceLeader do
   """
   @spec handle_chord(EditorState.t(), non_neg_integer(), non_neg_integer()) :: EditorState.t()
   def handle_chord(state, codepoint, modifiers) do
-    if active?() do
+    if active?(state) do
       trie = leader_trie()
 
       case lookup_leader(trie, codepoint, modifiers) do
@@ -65,7 +64,7 @@ defmodule Minga.Input.CUA.SpaceLeader do
   """
   @spec handle_retract(EditorState.t(), non_neg_integer(), non_neg_integer()) :: EditorState.t()
   def handle_retract(state, codepoint, modifiers) do
-    if active?() do
+    if active?(state) do
       trie = leader_trie()
 
       case lookup_leader(trie, codepoint, modifiers) do
@@ -87,9 +86,9 @@ defmodule Minga.Input.CUA.SpaceLeader do
   @doc """
   Returns true when the space leader feature is active.
   """
-  @spec active?() :: boolean()
-  def active? do
-    Editing.active_model() == Minga.Editing.Model.CUA and
+  @spec active?(map()) :: boolean()
+  def active?(state) do
+    Minga.Editing.active_model(state) == Minga.Editing.Model.CUA and
       Minga.Config.Options.get(:space_leader) == :chord
   catch
     :exit, _ -> false

@@ -42,7 +42,7 @@ defmodule Minga.Workspace.State do
           injection_ranges: %{pid() => [Minga.UI.Highlight.InjectionRange.t()]},
           search: Search.t(),
           pending_conflict: {pid(), String.t()} | nil,
-          vim: VimState.t(),
+          editing: VimState.t(),
           document_highlights: [document_highlight()] | nil,
           agent_ui: UIState.t()
         }
@@ -61,7 +61,7 @@ defmodule Minga.Workspace.State do
             injection_ranges: %{},
             search: %Search{},
             pending_conflict: nil,
-            vim: VimState.new(),
+            editing: VimState.new(),
             document_highlights: nil,
             agent_ui: UIState.new()
 
@@ -151,8 +151,8 @@ defmodule Minga.Workspace.State do
 
   @doc "Transitions the editing model to a new mode."
   @spec transition_mode(t(), atom(), term()) :: t()
-  def transition_mode(%__MODULE__{vim: vim} = wspace, mode, mode_state \\ nil) do
-    %{wspace | vim: VimState.transition(vim, mode, mode_state)}
+  def transition_mode(%__MODULE__{editing: vim} = wspace, mode, mode_state \\ nil) do
+    %{wspace | editing: VimState.transition(vim, mode, mode_state)}
   end
 
   @doc """

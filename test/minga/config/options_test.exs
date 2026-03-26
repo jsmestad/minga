@@ -27,7 +27,7 @@ defmodule Minga.Config.OptionsTest do
 
     test "all/1 returns all defaults", %{server: s} do
       assert Options.all(s) == %{
-               editing_model: :vim,
+               editing_model: :cua,
                space_leader: :chord,
                tab_width: 2,
                line_numbers: :hybrid,

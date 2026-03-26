@@ -25,7 +25,8 @@ defmodule Minga.Editor.Commands.Visual do
   @spec execute(state(), Mode.command()) :: state()
 
   def execute(
-        %{workspace: %{buffers: %{active: buf}, vim: %{mode_state: %VisualState{} = ms}}} = state,
+        %{workspace: %{buffers: %{active: buf}, editing: %{mode_state: %VisualState{} = ms}}} =
+          state,
         :delete_visual_selection
       ) do
     anchor = ms.visual_anchor
@@ -55,7 +56,8 @@ defmodule Minga.Editor.Commands.Visual do
   end
 
   def execute(
-        %{workspace: %{buffers: %{active: buf}, vim: %{mode_state: %VisualState{} = ms}}} = state,
+        %{workspace: %{buffers: %{active: buf}, editing: %{mode_state: %VisualState{} = ms}}} =
+          state,
         :yank_visual_selection
       ) do
     anchor = ms.visual_anchor
@@ -85,7 +87,8 @@ defmodule Minga.Editor.Commands.Visual do
   end
 
   def execute(
-        %{workspace: %{buffers: %{active: buf}, vim: %{mode_state: %VisualState{} = ms}}} = state,
+        %{workspace: %{buffers: %{active: buf}, editing: %{mode_state: %VisualState{} = ms}}} =
+          state,
         {:wrap_visual_selection, open, close}
       ) do
     anchor = ms.visual_anchor
@@ -103,7 +106,9 @@ defmodule Minga.Editor.Commands.Visual do
   end
 
   def execute(
-        %{workspace: %{buffers: %{active: buf}, vim: %{mode_state: %VisualState{} = ms} = vim}} =
+        %{
+          workspace: %{buffers: %{active: buf}, editing: %{mode_state: %VisualState{} = ms} = vim}
+        } =
           state,
         {:visual_text_object, modifier, spec}
       ) do
@@ -120,7 +125,7 @@ defmodule Minga.Editor.Commands.Visual do
         # Update visual anchor to start of text object, move cursor to end
         new_ms = %{ms | visual_anchor: start_pos}
         BufferServer.move_to(buf, end_pos)
-        %{state | workspace: %{state.workspace | vim: %{vim | mode_state: new_ms}}}
+        %{state | workspace: %{state.workspace | editing: %{vim | mode_state: new_ms}}}
     end
   end
 

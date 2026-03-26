@@ -5,7 +5,7 @@ defmodule Minga.DotRepeatTest do
   Tests the full flow through the Editor GenServer: key events →
   Mode FSM → ChangeRecorder → replay.
   """
-  use ExUnit.Case, async: true
+  use Minga.Test.EditingModelCase, async: true
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor
@@ -23,7 +23,8 @@ defmodule Minga.DotRepeatTest do
         port_manager: nil,
         buffer: buffer,
         width: 80,
-        height: 24
+        height: 24,
+        editing_model: :vim
       )
 
     {editor, buffer}

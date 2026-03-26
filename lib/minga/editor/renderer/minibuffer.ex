@@ -31,7 +31,7 @@ defmodule Minga.Editor.Renderer.Minibuffer do
 
   @doc "Renders the minibuffer at `row` with a max width of `cols`."
   @spec render(input(), non_neg_integer(), pos_integer()) :: DisplayList.draw()
-  def render(%{workspace: %{vim: %{mode: :search, mode_state: ms}}, theme: theme}, row, cols) do
+  def render(%{workspace: %{editing: %{mode: :search, mode_state: ms}}, theme: theme}, row, cols) do
     prefix = if ms.direction == :forward, do: "/", else: "?"
     search_text = prefix <> ms.input
     mb = theme.minibuffer
@@ -45,7 +45,7 @@ defmodule Minga.Editor.Renderer.Minibuffer do
   end
 
   def render(
-        %{workspace: %{vim: %{mode: :search_prompt, mode_state: ms}}, theme: theme},
+        %{workspace: %{editing: %{mode: :search_prompt, mode_state: ms}}, theme: theme},
         row,
         cols
       ) do
@@ -61,7 +61,7 @@ defmodule Minga.Editor.Renderer.Minibuffer do
   end
 
   def render(
-        %{workspace: %{vim: %{mode: :substitute_confirm, mode_state: ms}}, theme: theme},
+        %{workspace: %{editing: %{mode: :substitute_confirm, mode_state: ms}}, theme: theme},
         row,
         cols
       ) do
@@ -79,7 +79,7 @@ defmodule Minga.Editor.Renderer.Minibuffer do
   end
 
   def render(
-        %{workspace: %{vim: %{mode: :extension_confirm, mode_state: ms}}, theme: theme},
+        %{workspace: %{editing: %{mode: :extension_confirm, mode_state: ms}}, theme: theme},
         row,
         cols
       ) do
@@ -95,7 +95,7 @@ defmodule Minga.Editor.Renderer.Minibuffer do
   end
 
   def render(
-        %{workspace: %{vim: %{mode: :tool_confirm, mode_state: ms}}, theme: theme},
+        %{workspace: %{editing: %{mode: :tool_confirm, mode_state: ms}}, theme: theme},
         row,
         cols
       ) do
@@ -110,7 +110,7 @@ defmodule Minga.Editor.Renderer.Minibuffer do
     )
   end
 
-  def render(%{workspace: %{vim: %{mode: :command, mode_state: ms}}, theme: theme}, row, cols) do
+  def render(%{workspace: %{editing: %{mode: :command, mode_state: ms}}, theme: theme}, row, cols) do
     cmd_text = ":" <> ms.input
     mb = theme.minibuffer
 
@@ -122,7 +122,7 @@ defmodule Minga.Editor.Renderer.Minibuffer do
     )
   end
 
-  def render(%{workspace: %{vim: %{mode: :eval, mode_state: ms}}, theme: theme}, row, cols) do
+  def render(%{workspace: %{editing: %{mode: :eval, mode_state: ms}}, theme: theme}, row, cols) do
     eval_text = "Eval: " <> ms.input
     mb = theme.minibuffer
 

@@ -5,7 +5,7 @@ defmodule Minga.Editor.Commands.ScrollCommandsTest do
   Verifies the full execute path: read cursor, scroll viewport,
   clamp cursor, write to the correct window's viewport.
   """
-  use ExUnit.Case, async: true
+  use Minga.Test.EditingModelCase, async: true
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor
@@ -19,7 +19,8 @@ defmodule Minga.Editor.Commands.ScrollCommandsTest do
         port_manager: nil,
         buffer: buffer,
         width: Keyword.get(opts, :width, 80),
-        height: Keyword.get(opts, :height, 24)
+        height: Keyword.get(opts, :height, 24),
+        editing_model: :vim
       )
 
     {editor, buffer}

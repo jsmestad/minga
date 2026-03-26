@@ -1,5 +1,5 @@
 defmodule Minga.Editor.Commands.MovementTest do
-  use ExUnit.Case, async: true
+  use Minga.Test.EditingModelCase, async: true
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor
@@ -13,7 +13,8 @@ defmodule Minga.Editor.Commands.MovementTest do
         port_manager: nil,
         buffer: buffer,
         width: 40,
-        height: 10
+        height: 10,
+        editing_model: :vim
       )
 
     {editor, buffer}
@@ -164,7 +165,8 @@ defmodule Minga.Editor.Commands.MovementTest do
           port_manager: nil,
           buffer: buffer,
           width: 40,
-          height: 10
+          height: 10,
+          editing_model: :vim
         )
 
       {editor, buffer}

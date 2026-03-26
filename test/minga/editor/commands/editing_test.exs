@@ -1,5 +1,5 @@
 defmodule Minga.Editor.Commands.EditingTest do
-  use ExUnit.Case, async: true
+  use Minga.Test.EditingModelCase, async: true
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor
@@ -13,7 +13,8 @@ defmodule Minga.Editor.Commands.EditingTest do
         port_manager: nil,
         buffer: buffer,
         width: 40,
-        height: 10
+        height: 10,
+        editing_model: :vim
       )
 
     {editor, buffer}
@@ -320,7 +321,7 @@ defmodule Minga.Editor.Commands.EditingTest do
       send_key(editor, ?c)
 
       s = :sys.get_state(editor)
-      assert Map.get(s.workspace.vim.reg.registers, "") == {"hello\n", :linewise}
+      assert Map.get(s.workspace.editing.reg.registers, "") == {"hello\n", :linewise}
     end
   end
 
@@ -452,7 +453,7 @@ defmodule Minga.Editor.Commands.EditingTest do
 
       assert BufferServer.content(buffer) == "bc"
       s = :sys.get_state(editor)
-      assert Map.get(s.workspace.vim.reg.registers, "") == {"a", :charwise}
+      assert Map.get(s.workspace.editing.reg.registers, "") == {"a", :charwise}
     end
 
     test "xp transposes two characters" do
@@ -470,7 +471,7 @@ defmodule Minga.Editor.Commands.EditingTest do
 
       assert BufferServer.content(buffer) == ""
       s = :sys.get_state(editor)
-      refute Map.has_key?(s.workspace.vim.reg.registers, "")
+      refute Map.has_key?(s.workspace.editing.reg.registers, "")
     end
 
     test ~S["ax stores deleted char in named register a] do
@@ -482,7 +483,7 @@ defmodule Minga.Editor.Commands.EditingTest do
 
       assert BufferServer.content(buffer) == "bc"
       s = :sys.get_state(editor)
-      assert Map.get(s.workspace.vim.reg.registers, "a") == {"a", :charwise}
+      assert Map.get(s.workspace.editing.reg.registers, "a") == {"a", :charwise}
     end
 
     test ~S["_x deletes without touching any register] do
@@ -491,7 +492,7 @@ defmodule Minga.Editor.Commands.EditingTest do
       # First yank something into unnamed so we can verify it's not overwritten
       send_key(editor, ?y)
       send_key(editor, ?w)
-      previous_unnamed = Map.get(:sys.get_state(editor).workspace.vim.reg.registers, "")
+      previous_unnamed = Map.get(:sys.get_state(editor).workspace.editing.reg.registers, "")
 
       send_key(editor, ?")
       send_key(editor, ?_)
@@ -499,7 +500,7 @@ defmodule Minga.Editor.Commands.EditingTest do
 
       assert BufferServer.content(buffer) == "bc"
       s = :sys.get_state(editor)
-      assert Map.get(s.workspace.vim.reg.registers, "") == previous_unnamed
+      assert Map.get(s.workspace.editing.reg.registers, "") == previous_unnamed
     end
 
     test "multiple x's each yank the char they delete" do
@@ -511,7 +512,7 @@ defmodule Minga.Editor.Commands.EditingTest do
       assert BufferServer.content(buffer) == "cd"
       # Last deleted char ('b') should be in unnamed
       s = :sys.get_state(editor)
-      assert Map.get(s.workspace.vim.reg.registers, "") == {"b", :charwise}
+      assert Map.get(s.workspace.editing.reg.registers, "") == {"b", :charwise}
     end
   end
 
@@ -524,7 +525,7 @@ defmodule Minga.Editor.Commands.EditingTest do
 
       assert BufferServer.content(buffer) == "def"
       s = :sys.get_state(editor)
-      assert Map.get(s.workspace.vim.reg.registers, "") == {"abc", :charwise}
+      assert Map.get(s.workspace.editing.reg.registers, "") == {"abc", :charwise}
     end
 
     test "3x then p pastes all three deleted characters" do
@@ -547,7 +548,7 @@ defmodule Minga.Editor.Commands.EditingTest do
 
       assert BufferServer.content(buffer) == ""
       s = :sys.get_state(editor)
-      assert Map.get(s.workspace.vim.reg.registers, "") == {"ab", :charwise}
+      assert Map.get(s.workspace.editing.reg.registers, "") == {"ab", :charwise}
     end
 
     test "3X deletes three characters before cursor and yanks all three" do
@@ -559,7 +560,7 @@ defmodule Minga.Editor.Commands.EditingTest do
       assert BufferServer.content(buffer) == "aef"
       s = :sys.get_state(editor)
       # Deleted chars in reading order: "bcd"
-      assert Map.get(s.workspace.vim.reg.registers, "") == {"bcd", :charwise}
+      assert Map.get(s.workspace.editing.reg.registers, "") == {"bcd", :charwise}
     end
   end
 
@@ -571,7 +572,7 @@ defmodule Minga.Editor.Commands.EditingTest do
 
       assert BufferServer.content(buffer) == "bc"
       s = :sys.get_state(editor)
-      assert Map.get(s.workspace.vim.reg.registers, "") == {"a", :charwise}
+      assert Map.get(s.workspace.editing.reg.registers, "") == {"a", :charwise}
     end
 
     test "X at col 0 is a no-op" do
@@ -581,7 +582,7 @@ defmodule Minga.Editor.Commands.EditingTest do
 
       assert BufferServer.content(buffer) == "abc"
       s = :sys.get_state(editor)
-      refute Map.has_key?(s.workspace.vim.reg.registers, "")
+      refute Map.has_key?(s.workspace.editing.reg.registers, "")
     end
 
     test ~S["aX stores deleted char in named register a] do
@@ -593,7 +594,7 @@ defmodule Minga.Editor.Commands.EditingTest do
 
       assert BufferServer.content(buffer) == "ac"
       s = :sys.get_state(editor)
-      assert Map.get(s.workspace.vim.reg.registers, "a") == {"b", :charwise}
+      assert Map.get(s.workspace.editing.reg.registers, "a") == {"b", :charwise}
     end
   end
 
@@ -609,7 +610,7 @@ defmodule Minga.Editor.Commands.EditingTest do
       assert BufferServer.content(buffer) == "ac"
       s = :sys.get_state(editor)
       # Register should be empty since insert-mode backspace doesn't yank
-      refute Map.has_key?(s.workspace.vim.reg.registers, "")
+      refute Map.has_key?(s.workspace.editing.reg.registers, "")
     end
   end
 
@@ -621,8 +622,8 @@ defmodule Minga.Editor.Commands.EditingTest do
 
       assert BufferServer.content(buffer) == "bc"
       s = :sys.get_state(editor)
-      assert s.workspace.vim.mode == :insert
-      assert Map.get(s.workspace.vim.reg.registers, "") == {"a", :charwise}
+      assert s.workspace.editing.mode == :insert
+      assert Map.get(s.workspace.editing.reg.registers, "") == {"a", :charwise}
     end
   end
 
@@ -692,7 +693,7 @@ defmodule Minga.Editor.Commands.EditingTest do
         workspace: %Minga.Workspace.State{
           viewport: %Minga.Editor.Viewport{top: 0, left: 0, rows: 10, cols: 40},
           buffers: %Minga.Editor.State.Buffers{active: buffer, list: [buffer]},
-          vim: Minga.Editor.VimState.new()
+          editing: Minga.Editor.VimState.new()
         }
       }
 
@@ -714,7 +715,7 @@ defmodule Minga.Editor.Commands.EditingTest do
         workspace: %Minga.Workspace.State{
           viewport: %Minga.Editor.Viewport{top: 0, left: 0, rows: 10, cols: 40},
           buffers: %Minga.Editor.State.Buffers{active: buffer, list: [buffer]},
-          vim: Minga.Editor.VimState.new()
+          editing: Minga.Editor.VimState.new()
         }
       }
 

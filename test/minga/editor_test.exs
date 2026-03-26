@@ -1,5 +1,5 @@
 defmodule Minga.EditorTest do
-  use ExUnit.Case, async: true
+  use Minga.Test.EditingModelCase, async: true
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor
@@ -14,7 +14,8 @@ defmodule Minga.EditorTest do
         port_manager: nil,
         buffer: buffer,
         width: 40,
-        height: 10
+        height: 10,
+        editing_model: :vim
       )
 
     {editor, buffer}
@@ -28,7 +29,8 @@ defmodule Minga.EditorTest do
         port_manager: nil,
         buffer: nil,
         width: 40,
-        height: 10
+        height: 10,
+        editing_model: :vim
       )
 
     editor
@@ -113,7 +115,8 @@ defmodule Minga.EditorTest do
           port_manager: nil,
           buffer: nil,
           width: 40,
-          height: 10
+          height: 10,
+          editing_model: :vim
         )
 
       assert :ok = Editor.open_file(editor, path)
@@ -146,13 +149,14 @@ defmodule Minga.EditorTest do
           port_manager: nil,
           buffer: buffer,
           width: 40,
-          height: 10
+          height: 10,
+          editing_model: :vim
         )
 
       # Try pressing 'i' to enter insert mode
       send(editor, {:minga_input, {:key_press, ?i, 0}})
       state = :sys.get_state(editor)
-      assert state.workspace.vim.mode == :normal
+      assert state.workspace.editing.mode == :normal
       assert state.shell_state.status_msg == "Buffer is read-only"
     end
 
@@ -165,13 +169,14 @@ defmodule Minga.EditorTest do
           port_manager: nil,
           buffer: buffer,
           width: 40,
-          height: 10
+          height: 10,
+          editing_model: :vim
         )
 
       # Try pressing 'R' to enter replace mode
       send(editor, {:minga_input, {:key_press, ?R, 0}})
       state = :sys.get_state(editor)
-      assert state.workspace.vim.mode == :normal
+      assert state.workspace.editing.mode == :normal
       assert state.shell_state.status_msg == "Buffer is read-only"
     end
   end

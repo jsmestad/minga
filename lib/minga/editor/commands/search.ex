@@ -36,7 +36,8 @@ defmodule Minga.Editor.Commands.Search do
   @spec execute(state(), Mode.command()) :: state()
 
   def execute(
-        %{workspace: %{buffers: %{active: buf}, vim: %{mode_state: %SearchState{} = ms}}} = state,
+        %{workspace: %{buffers: %{active: buf}, editing: %{mode_state: %SearchState{} = ms}}} =
+          state,
         :incremental_search
       ) do
     if ms.input == "" do
@@ -57,7 +58,8 @@ defmodule Minga.Editor.Commands.Search do
   end
 
   def execute(
-        %{workspace: %{buffers: %{active: buf}, vim: %{mode_state: %SearchState{} = ms}}} = state,
+        %{workspace: %{buffers: %{active: buf}, editing: %{mode_state: %SearchState{} = ms}}} =
+          state,
         :confirm_search
       ) do
     content = BufferServer.content(buf)
@@ -80,7 +82,8 @@ defmodule Minga.Editor.Commands.Search do
   end
 
   def execute(
-        %{workspace: %{buffers: %{active: buf}, vim: %{mode_state: %SearchState{} = ms}}} = state,
+        %{workspace: %{buffers: %{active: buf}, editing: %{mode_state: %SearchState{} = ms}}} =
+          state,
         :cancel_search
       ) do
     BufferServer.move_to(buf, ms.original_cursor)
@@ -200,7 +203,7 @@ defmodule Minga.Editor.Commands.Search do
   end
 
   def execute(
-        %{workspace: %{vim: %{mode_state: %{input: query}}}} = state,
+        %{workspace: %{editing: %{mode_state: %{input: query}}}} = state,
         :confirm_project_search
       )
       when is_binary(query) and query != "" do
@@ -231,7 +234,7 @@ defmodule Minga.Editor.Commands.Search do
         %{
           workspace: %{
             buffers: %{active: buf},
-            vim: %{mode_state: %Minga.Mode.SubstituteConfirmState{} = ms}
+            editing: %{mode_state: %Minga.Mode.SubstituteConfirmState{} = ms}
           }
         } =
           state,
@@ -252,7 +255,7 @@ defmodule Minga.Editor.Commands.Search do
         %{
           workspace: %{
             buffers: %{active: buf},
-            vim: %{mode_state: %Minga.Mode.SubstituteConfirmState{} = ms}
+            editing: %{mode_state: %Minga.Mode.SubstituteConfirmState{} = ms}
           }
         } =
           state,

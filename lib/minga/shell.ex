@@ -57,7 +57,7 @@ defmodule Minga.Shell do
   file tree, agent panel, mode dispatch) handle keys when no overlay
   claims them. The Editor walks overlays first, then surfaces.
   """
-  @callback input_handlers(shell_state()) :: %{overlay: [module()], surface: [module()]}
+  @callback input_handlers(editor_state :: term()) :: %{overlay: [module()], surface: [module()]}
 
   @doc """
   Compute spatial layout for the current state.

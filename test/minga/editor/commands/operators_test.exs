@@ -1,5 +1,5 @@
 defmodule Minga.Editor.Commands.OperatorsTest do
-  use ExUnit.Case, async: true
+  use Minga.Test.EditingModelCase, async: true
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor
@@ -13,7 +13,8 @@ defmodule Minga.Editor.Commands.OperatorsTest do
         port_manager: nil,
         buffer: buffer,
         width: 40,
-        height: 10
+        height: 10,
+        editing_model: :vim
       )
 
     {editor, buffer}
@@ -130,7 +131,7 @@ defmodule Minga.Editor.Commands.OperatorsTest do
       assert String.contains?(content, "foo")
 
       # The editor should now be in insert mode
-      %{workspace: %{vim: %{mode: mode}}} = :sys.get_state(editor)
+      %{workspace: %{editing: %{mode: mode}}} = :sys.get_state(editor)
       assert mode == :insert
     end
 
@@ -148,7 +149,7 @@ defmodule Minga.Editor.Commands.OperatorsTest do
       assert String.contains?(content, "ddd")
 
       # Should be in insert mode
-      %{workspace: %{vim: %{mode: mode}}} = :sys.get_state(editor)
+      %{workspace: %{editing: %{mode: mode}}} = :sys.get_state(editor)
       assert mode == :insert
 
       # Escape to normal, then paste to verify register has both lines

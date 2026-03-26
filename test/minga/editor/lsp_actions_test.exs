@@ -407,8 +407,8 @@ defmodule Minga.Editor.LspActionsTest do
       result =
         LspActions.handle_prepare_rename_response(state, {:ok, %{"placeholder" => "myVar"}})
 
-      assert result.workspace.vim.mode == :command
-      assert result.workspace.vim.mode_state.input == "rename myVar"
+      assert result.workspace.editing.mode == :command
+      assert result.workspace.editing.mode_state.input == "rename myVar"
     end
 
     test "prepareRename with Range + placeholder uses placeholder" do
@@ -423,8 +423,8 @@ defmodule Minga.Editor.LspActionsTest do
       }
 
       result = LspActions.handle_prepare_rename_response(state, {:ok, resp})
-      assert result.workspace.vim.mode == :command
-      assert result.workspace.vim.mode_state.input == "rename hello_world"
+      assert result.workspace.editing.mode == :command
+      assert result.workspace.editing.mode_state.input == "rename hello_world"
     end
 
     test "prepareRename with Range only reads text from buffer" do
@@ -437,8 +437,8 @@ defmodule Minga.Editor.LspActionsTest do
       }
 
       result = LspActions.handle_prepare_rename_response(state, {:ok, resp})
-      assert result.workspace.vim.mode == :command
-      assert result.workspace.vim.mode_state.input == "rename hello_world"
+      assert result.workspace.editing.mode == :command
+      assert result.workspace.editing.mode_state.input == "rename hello_world"
 
       GenServer.stop(buf)
     end
@@ -455,8 +455,8 @@ defmodule Minga.Editor.LspActionsTest do
       }
 
       result = LspActions.handle_prepare_rename_response(state, {:ok, resp})
-      assert result.workspace.vim.mode == :command
-      assert result.workspace.vim.mode_state.input == "rename hello_world"
+      assert result.workspace.editing.mode == :command
+      assert result.workspace.editing.mode_state.input == "rename hello_world"
 
       GenServer.stop(buf)
     end
@@ -482,8 +482,8 @@ defmodule Minga.Editor.LspActionsTest do
       }
 
       result = LspActions.handle_prepare_rename_response(state, {:ok, resp})
-      assert result.workspace.vim.mode == :command
-      assert result.workspace.vim.mode_state.input == "rename "
+      assert result.workspace.editing.mode == :command
+      assert result.workspace.editing.mode_state.input == "rename "
     end
   end
 
@@ -587,6 +587,6 @@ defmodule Minga.Editor.LspActionsTest do
 
   defp fake_state_with_vim do
     fake_state()
-    |> put_in([:workspace, :vim], %VimState{mode: :normal, mode_state: nil})
+    |> put_in([:workspace, :editing], %VimState{mode: :normal, mode_state: nil})
   end
 end

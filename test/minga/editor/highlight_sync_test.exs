@@ -15,7 +15,7 @@ defmodule Minga.Editor.HighlightSyncTest do
       port_manager: nil,
       workspace: %Minga.Workspace.State{
         viewport: Viewport.new(24, 80),
-        vim: VimState.new()
+        editing: VimState.new()
       }
     }
     |> then(fn s -> put_in(s.workspace.buffers.active, pid) end)
@@ -91,7 +91,7 @@ defmodule Minga.Editor.HighlightSyncTest do
         port_manager: nil,
         workspace: %Minga.Workspace.State{
           viewport: Viewport.new(24, 80),
-          vim: VimState.new()
+          editing: VimState.new()
         }
       }
 
@@ -176,7 +176,7 @@ defmodule Minga.Editor.HighlightSyncTest do
         port_manager: nil,
         workspace: %Minga.Workspace.State{
           viewport: Viewport.new(24, 80),
-          vim: VimState.new()
+          editing: VimState.new()
         }
       }
 

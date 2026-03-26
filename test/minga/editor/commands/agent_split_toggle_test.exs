@@ -62,7 +62,7 @@ defmodule Minga.Editor.Commands.AgentSplitToggleTest do
       port_manager: self(),
       workspace: %Minga.Workspace.State{
         viewport: Viewport.new(24, 80),
-        vim: VimState.new(),
+        editing: VimState.new(),
         buffers: %Buffers{active: buf, list: [buf], active_index: 0},
         agent_ui: agentic,
         windows: %Minga.Editor.State.Windows{

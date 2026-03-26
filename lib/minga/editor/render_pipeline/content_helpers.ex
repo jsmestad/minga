@@ -905,7 +905,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
   @doc "Computes raw visual selection bounds (byte columns)."
   @spec visual_selection_bounds(state(), Document.position()) :: visual_selection()
   def visual_selection_bounds(
-        %{workspace: %{vim: %{mode: :visual, mode_state: %VisualState{} = ms}}},
+        %{workspace: %{editing: %{mode: :visual, mode_state: %VisualState{} = ms}}},
         cursor
       ) do
     anchor = ms.visual_anchor

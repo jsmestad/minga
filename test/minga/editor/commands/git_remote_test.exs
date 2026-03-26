@@ -3,7 +3,7 @@ defmodule Minga.Editor.Commands.GitRemoteTest do
   Tests for async git remote operations (push/pull/fetch) and the
   `:git_pull` command wiring.
   """
-  use ExUnit.Case, async: true
+  use Minga.Test.EditingModelCase, async: true
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor
@@ -37,7 +37,8 @@ defmodule Minga.Editor.Commands.GitRemoteTest do
         port_manager: nil,
         buffer: buffer,
         width: 40,
-        height: 10
+        height: 10,
+        editing_model: :vim
       )
 
     {editor, buffer}

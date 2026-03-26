@@ -285,7 +285,8 @@ defmodule Minga.Editor.HighlightIntegrationTest do
           port_manager: port,
           buffer: buffer,
           width: 80,
-          height: 24
+          height: 24,
+          editing_model: :vim
         )
 
       state = :sys.get_state(editor)
@@ -500,7 +501,7 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       port_manager: nil,
       workspace: %Minga.Workspace.State{
         viewport: Viewport.new(24, 80),
-        vim: VimState.new()
+        editing: VimState.new()
       }
     }
     |> then(fn s -> put_in(s.workspace.buffers.active, pid) end)

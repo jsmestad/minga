@@ -59,6 +59,9 @@ defmodule Minga.Test.EditorCase do
     # reads the global Config.Options for clipboard. Each test is isolated.
     BufferServer.set_option(buffer, :clipboard, clipboard)
 
+    # Pin editing model per-editor so async tests don't race on global ETS.
+    editing_model = Keyword.get(opts, :editing_model, :vim)
+
     {:ok, editor} =
       Editor.start_link(
         name: :"headless_editor_#{id}",
@@ -67,6 +70,7 @@ defmodule Minga.Test.EditorCase do
         buffer: buffer,
         width: width,
         height: height,
+        editing_model: editing_model,
         suppress_tool_prompts: true
       )
 
@@ -105,6 +109,8 @@ defmodule Minga.Test.EditorCase do
     # reads the global Config.Options for clipboard. Each test is isolated.
     BufferServer.set_option(buffer, :clipboard, clipboard)
 
+    editing_model = Keyword.get(opts, :editing_model, :vim)
+
     {:ok, editor} =
       Editor.start_link(
         name: :"headless_editor_#{id}",
@@ -113,6 +119,7 @@ defmodule Minga.Test.EditorCase do
         buffer: buffer,
         width: width,
         height: height,
+        editing_model: editing_model,
         suppress_tool_prompts: true
       )
 

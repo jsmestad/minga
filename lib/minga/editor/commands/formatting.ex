@@ -78,7 +78,7 @@ defmodule Minga.Editor.Commands.Formatting do
   end
 
   @spec queue_and_show_prompt(state(), atom()) :: state()
-  defp queue_and_show_prompt(%{workspace: %{vim: %{mode: :normal}}} = state, tool_name) do
+  defp queue_and_show_prompt(%{workspace: %{editing: %{mode: :normal}}} = state, tool_name) do
     queue = state.shell_state.tool_prompt_queue ++ [tool_name]
     state = EditorState.update_shell_state(state, &%{&1 | tool_prompt_queue: queue})
     ms = %ToolConfirmState{pending: queue, declined: state.shell_state.tool_declined}

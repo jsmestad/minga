@@ -340,7 +340,7 @@ defmodule Minga.Editor.RenderPipelineTest do
         state
         | workspace: %{
             state.workspace
-            | vim: %{state.workspace.vim | mode: :visual, mode_state: visual_state}
+            | editing: %{state.workspace.editing | mode: :visual, mode_state: visual_state}
           }
       }
 

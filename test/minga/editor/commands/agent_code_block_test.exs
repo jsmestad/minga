@@ -15,7 +15,7 @@ defmodule Minga.Editor.Commands.AgentCodeBlockTest do
       port_manager: self(),
       workspace: %Minga.Workspace.State{
         viewport: Viewport.new(24, 80),
-        vim: VimState.new(),
+        editing: VimState.new(),
         buffers: %Buffers{},
         agent_ui: %UIState{}
       },

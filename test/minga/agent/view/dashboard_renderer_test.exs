@@ -50,7 +50,7 @@ defmodule Minga.Agent.View.DashboardRendererTest do
       port_manager: self(),
       workspace: %Minga.Workspace.State{
         viewport: Viewport.new(rows, cols),
-        vim: VimState.new(),
+        editing: VimState.new(),
         buffers: %Buffers{active: buf, list: [buf], active_index: 0},
         agent_ui: agentic,
         highlight: %Highlighting{}

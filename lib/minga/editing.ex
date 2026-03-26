@@ -171,7 +171,13 @@ defmodule Minga.Editing do
   alias Minga.Editing.Model.CUA, as: CUAModel
   alias Minga.Editing.Model.Vim, as: VimModel
 
-  @doc "Returns the active editing model module (Vim or CUA)."
+  @doc "Returns the active editing model module from editor state."
+  @spec active_model(map()) :: module()
+  def active_model(%{editing_model: :cua}), do: CUAModel
+  def active_model(%{editing_model: :vim}), do: VimModel
+  def active_model(_state), do: VimModel
+
+  @doc "Returns the active editing model module from global config. Prefer active_model/1 when state is available."
   @spec active_model() :: module()
   def active_model do
     case Minga.Config.Options.get(:editing_model) do
@@ -184,52 +190,56 @@ defmodule Minga.Editing do
 
   @doc "Is the user currently inserting text?"
   @spec inserting?(map()) :: boolean()
-  def inserting?(state), do: active_model().inserting?(model_state(state))
+  def inserting?(state), do: active_model(state).inserting?(model_state(state))
 
   @doc "Does the user have an active selection?"
   @spec selecting?(map()) :: boolean()
-  def selecting?(state), do: active_model().selecting?(model_state(state))
+  def selecting?(state), do: active_model(state).selecting?(model_state(state))
 
   @doc "What cursor shape should the frontend render?"
   @spec cursor_shape(map()) :: :beam | :block | :underline
-  def cursor_shape(state), do: active_model().cursor_shape(model_state(state))
+  def cursor_shape(state), do: active_model(state).cursor_shape(model_state(state))
 
   @doc "Is a multi-key sequence in progress (leader key, operator-pending, etc.)?"
   @spec key_sequence_pending?(map()) :: boolean()
-  def key_sequence_pending?(state), do: active_model().key_sequence_pending?(model_state(state))
+  def key_sequence_pending?(state),
+    do: active_model(state).key_sequence_pending?(model_state(state))
 
   @doc "Short mode label for the status bar (e.g., 'NORMAL', 'INSERT', '')."
   @spec status_segment(map()) :: String.t()
-  def status_segment(state), do: active_model().status_segment(model_state(state))
+  def status_segment(state), do: active_model(state).status_segment(model_state(state))
 
   @doc "Current editing mode atom (e.g., :normal, :insert, :visual, :cua)."
   @spec mode(map()) :: atom()
-  def mode(%{workspace: %{vim: vim}}), do: vim.mode
+  def mode(%{workspace: %{editing: vim}}), do: vim.mode
 
   @doc "Is a leader key sequence in progress?"
   @spec in_leader?(map()) :: boolean()
-  def in_leader?(%{workspace: %{vim: %{mode_state: ms}}}) when is_map_key(ms, :leader_node),
+  def in_leader?(%{workspace: %{editing: %{mode_state: ms}}}) when is_map_key(ms, :leader_node),
     do: is_map(ms.leader_node)
 
   def in_leader?(_state), do: false
 
   @doc "Is the editor in a minibuffer-occupying mode (command line, search, eval)?"
   @spec minibuffer_mode?(map()) :: boolean()
-  def minibuffer_mode?(%{workspace: %{vim: vim}}),
+  def minibuffer_mode?(%{workspace: %{editing: vim}}),
     do: vim.mode in [:command, :search, :eval, :search_prompt]
 
   @doc "Is a macro currently being recorded? Returns {true, register} or false."
   @spec macro_recording_status(map()) :: {true, String.t()} | false
-  def macro_recording_status(%{workspace: %{vim: vim}}) do
+  def macro_recording_status(%{workspace: %{editing: vim}}) do
     Minga.Editor.MacroRecorder.recording?(vim.macro_recorder)
   end
 
   # Builds a lightweight model state struct for behaviour dispatch.
   @spec model_state(map()) :: Minga.Editing.Model.state()
   defp model_state(state) do
-    case active_model() do
-      VimModel -> VimModel.from_editor(state.workspace.vim.mode, state.workspace.vim.mode_state)
-      CUAModel -> CUAModel.from_editor()
+    case active_model(state) do
+      VimModel ->
+        VimModel.from_editor(state.workspace.editing.mode, state.workspace.editing.mode_state)
+
+      CUAModel ->
+        CUAModel.from_editor()
     end
   end
 end

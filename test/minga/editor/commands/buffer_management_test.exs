@@ -1,5 +1,5 @@
 defmodule Minga.Editor.Commands.BufferManagementTest do
-  use ExUnit.Case, async: true
+  use Minga.Test.EditingModelCase, async: true
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Config.Options
@@ -16,7 +16,8 @@ defmodule Minga.Editor.Commands.BufferManagementTest do
         port_manager: nil,
         buffer: buffer,
         width: 40,
-        height: 10
+        height: 10,
+        editing_model: :vim
       )
 
     {editor, buffer}
@@ -52,7 +53,8 @@ defmodule Minga.Editor.Commands.BufferManagementTest do
           port_manager: nil,
           buffer: buffer,
           width: 40,
-          height: 10
+          height: 10,
+          editing_model: :vim
         )
 
       send_key(editor, ?:)
@@ -110,7 +112,8 @@ defmodule Minga.Editor.Commands.BufferManagementTest do
           port_manager: nil,
           buffer: buffer,
           width: 40,
-          height: 10
+          height: 10,
+          editing_model: :vim
         )
 
       send_key(editor, ?s, 0x02)
@@ -129,7 +132,8 @@ defmodule Minga.Editor.Commands.BufferManagementTest do
           port_manager: nil,
           buffer: nil,
           width: 40,
-          height: 10
+          height: 10,
+          editing_model: :vim
         )
 
       send_key(editor, ?s, 0x02)

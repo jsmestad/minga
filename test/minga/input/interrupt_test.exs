@@ -23,7 +23,7 @@ defmodule Minga.Input.InterruptTest do
       port_manager: self(),
       workspace: %Minga.Workspace.State{
         viewport: Viewport.new(24, 80),
-        vim: VimState.new(),
+        editing: VimState.new(),
         buffers: %Buffers{
           active: buf,
           list: [buf],
@@ -54,7 +54,7 @@ defmodule Minga.Input.InterruptTest do
       state = base_state()
       assert {:handled, new_state} = Interrupt.handle_key(state, @ctrl_g, 0)
       assert new_state.workspace.keymap_scope == :editor
-      assert new_state.workspace.vim.mode == :normal
+      assert new_state.workspace.editing.mode == :normal
       assert new_state.shell_state.picker_ui.picker == nil
       assert new_state.shell_state.whichkey.node == nil
     end
@@ -84,65 +84,65 @@ defmodule Minga.Input.InterruptTest do
   describe "mode reset" do
     test "resets :insert to :normal" do
       state = base_state()
-      vim = %{state.workspace.vim | mode: :insert, mode_state: Mode.initial_state()}
-      state = %{state | workspace: %{state.workspace | vim: vim}}
+      vim = %{state.workspace.editing | mode: :insert, mode_state: Mode.initial_state()}
+      state = %{state | workspace: %{state.workspace | editing: vim}}
 
       assert {:handled, new_state} = Interrupt.handle_key(state, @ctrl_g, 0)
-      assert new_state.workspace.vim.mode == :normal
+      assert new_state.workspace.editing.mode == :normal
     end
 
     test "resets :visual to :normal" do
       state = base_state()
-      vim = %{state.workspace.vim | mode: :visual, mode_state: Mode.initial_state()}
-      state = %{state | workspace: %{state.workspace | vim: vim}}
+      vim = %{state.workspace.editing | mode: :visual, mode_state: Mode.initial_state()}
+      state = %{state | workspace: %{state.workspace | editing: vim}}
 
       assert {:handled, new_state} = Interrupt.handle_key(state, @ctrl_g, 0)
-      assert new_state.workspace.vim.mode == :normal
+      assert new_state.workspace.editing.mode == :normal
     end
 
     test "resets :operator_pending to :normal" do
       state = base_state()
-      vim = %{state.workspace.vim | mode: :operator_pending, mode_state: Mode.initial_state()}
-      state = %{state | workspace: %{state.workspace | vim: vim}}
+      vim = %{state.workspace.editing | mode: :operator_pending, mode_state: Mode.initial_state()}
+      state = %{state | workspace: %{state.workspace | editing: vim}}
 
       assert {:handled, new_state} = Interrupt.handle_key(state, @ctrl_g, 0)
-      assert new_state.workspace.vim.mode == :normal
+      assert new_state.workspace.editing.mode == :normal
     end
 
     test "resets :command to :normal" do
       state = base_state()
-      vim = %{state.workspace.vim | mode: :command, mode_state: Mode.initial_state()}
-      state = %{state | workspace: %{state.workspace | vim: vim}}
+      vim = %{state.workspace.editing | mode: :command, mode_state: Mode.initial_state()}
+      state = %{state | workspace: %{state.workspace | editing: vim}}
 
       assert {:handled, new_state} = Interrupt.handle_key(state, @ctrl_g, 0)
-      assert new_state.workspace.vim.mode == :normal
+      assert new_state.workspace.editing.mode == :normal
     end
 
     test "fresh mode_state clears prefix_node" do
       state = base_state()
       mode_state = %{Mode.initial_state() | prefix_node: %{?a => :fold_toggle}}
-      vim = %{state.workspace.vim | mode: :normal, mode_state: mode_state}
-      state = %{state | workspace: %{state.workspace | vim: vim}}
+      vim = %{state.workspace.editing | mode: :normal, mode_state: mode_state}
+      state = %{state | workspace: %{state.workspace | editing: vim}}
 
       assert {:handled, new_state} = Interrupt.handle_key(state, @ctrl_g, 0)
-      assert new_state.workspace.vim.mode_state.prefix_node == nil
+      assert new_state.workspace.editing.mode_state.prefix_node == nil
     end
 
     test "fresh mode_state clears leader_node" do
       state = base_state()
       mode_state = %{Mode.initial_state() | leader_node: %{?b => {:command, :list_buffers}}}
-      vim = %{state.workspace.vim | mode_state: mode_state}
-      state = %{state | workspace: %{state.workspace | vim: vim}}
+      vim = %{state.workspace.editing | mode_state: mode_state}
+      state = %{state | workspace: %{state.workspace | editing: vim}}
 
       assert {:handled, new_state} = Interrupt.handle_key(state, @ctrl_g, 0)
-      assert new_state.workspace.vim.mode_state.leader_node == nil
+      assert new_state.workspace.editing.mode_state.leader_node == nil
     end
 
     test "leaves :normal mode unchanged" do
       state = base_state()
-      assert state.workspace.vim.mode == :normal
+      assert state.workspace.editing.mode == :normal
       assert {:handled, new_state} = Interrupt.handle_key(state, @ctrl_g, 0)
-      assert new_state.workspace.vim.mode == :normal
+      assert new_state.workspace.editing.mode == :normal
     end
   end
 
@@ -198,14 +198,14 @@ defmodule Minga.Input.InterruptTest do
       picker = Minga.UI.Picker.new(["x"])
       completion = %Completion{items: [], trigger_position: {0, 0}}
 
-      vim = %{state.workspace.vim | mode: :visual, mode_state: Mode.initial_state()}
+      vim = %{state.workspace.editing | mode: :visual, mode_state: Mode.initial_state()}
 
       state = %{
         state
         | workspace: %{
             state.workspace
             | keymap_scope: :agent,
-              vim: vim,
+              editing: vim,
               pending_conflict: {buf, "/tmp/x"},
               completion: completion
           }
@@ -217,7 +217,7 @@ defmodule Minga.Input.InterruptTest do
 
       assert {:handled, new_state} = Interrupt.handle_key(state, @ctrl_g, 0)
       assert new_state.workspace.keymap_scope == :editor
-      assert new_state.workspace.vim.mode == :normal
+      assert new_state.workspace.editing.mode == :normal
       assert new_state.shell_state.picker_ui.picker == nil
       assert new_state.shell_state.whichkey.node == nil
       assert new_state.shell_state.whichkey.show == false

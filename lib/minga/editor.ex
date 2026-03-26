@@ -1964,7 +1964,7 @@ defmodule Minga.Editor do
   end
 
   defp handle_gui_action(state, {:minibuffer_select, index}) do
-    case state.workspace.vim do
+    case state.workspace.editing do
       %{mode: :command, mode_state: ms} ->
         {candidates, _total} = MinibufferData.complete_ex_command(ms.input)
         clamped = MinibufferData.clamp_index(index, length(candidates))
@@ -1978,7 +1978,10 @@ defmodule Minga.Editor do
 
             %{
               state
-              | workspace: %{state.workspace | vim: %{state.workspace.vim | mode_state: new_ms}}
+              | workspace: %{
+                  state.workspace
+                  | editing: %{state.workspace.editing | mode_state: new_ms}
+                }
             }
         end
 
@@ -2177,7 +2180,7 @@ defmodule Minga.Editor do
   # returns to normal mode.
   @spec maybe_show_tool_prompt(state()) :: state()
   defp maybe_show_tool_prompt(
-         %{workspace: %{vim: %{mode: :normal}}, shell_state: %{tool_prompt_queue: pending}} =
+         %{workspace: %{editing: %{mode: :normal}}, shell_state: %{tool_prompt_queue: pending}} =
            state
        )
        when pending != [] do

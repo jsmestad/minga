@@ -172,7 +172,7 @@ defmodule Minga.Input.AgentNavTest do
       # but the chat buffer is read-only so mode stays normal.
       new_state = AgentNav.delegate_to_mode_fsm(state, buf, ?s, 0)
 
-      assert new_state.workspace.vim.mode == :normal
+      assert new_state.workspace.editing.mode == :normal
     end
 
     test "syncs scroll offset to cursor line" do
@@ -328,7 +328,7 @@ defmodule Minga.Input.AgentNavTest do
 
       new_state = KeyDispatch.handle_key(state, ?A, 0)
 
-      assert new_state.workspace.vim.mode == :insert
+      assert new_state.workspace.editing.mode == :insert
       refute new_state.shell_state.status_msg == "Buffer is read-only"
     end
   end

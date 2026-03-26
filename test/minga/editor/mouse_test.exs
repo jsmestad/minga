@@ -1,5 +1,5 @@
 defmodule Minga.Editor.MouseTest do
-  use ExUnit.Case, async: true
+  use Minga.Test.EditingModelCase, async: true
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor
@@ -16,7 +16,8 @@ defmodule Minga.Editor.MouseTest do
         port_manager: nil,
         buffer: buffer,
         width: 40,
-        height: 10
+        height: 10,
+        editing_model: :vim
       )
 
     {editor, buffer}
@@ -29,7 +30,8 @@ defmodule Minga.Editor.MouseTest do
         port_manager: nil,
         buffer: nil,
         width: 40,
-        height: 10
+        height: 10,
+        editing_model: :vim
       )
 
     editor
@@ -58,7 +60,8 @@ defmodule Minga.Editor.MouseTest do
           port_manager: nil,
           buffer: buffer,
           width: 40,
-          height: 10
+          height: 10,
+          editing_model: :vim
         )
 
       {editor, buffer}
@@ -154,7 +157,8 @@ defmodule Minga.Editor.MouseTest do
           port_manager: nil,
           buffer: buffer,
           width: 40,
-          height: 10
+          height: 10,
+          editing_model: :vim
         )
 
       # Scroll down then click. Default scroll_lines=1, so 4 scrolls = viewport top at 4.
@@ -252,7 +256,7 @@ defmodule Minga.Editor.MouseTest do
       {_line, col} = BufferServer.cursor(buffer)
       assert col == 8
       s = state(editor)
-      assert s.workspace.vim.mode == :visual
+      assert s.workspace.editing.mode == :visual
       assert s.workspace.mouse.dragging == false
       send_key(editor, ?y)
       assert Process.alive?(editor)
@@ -263,7 +267,7 @@ defmodule Minga.Editor.MouseTest do
       send_mouse(editor, @content_row, 3, :left, :press)
       send_mouse(editor, @content_row, 3, :left, :release)
       s = state(editor)
-      assert s.workspace.vim.mode == :normal
+      assert s.workspace.editing.mode == :normal
       assert s.workspace.mouse.dragging == false
     end
 
@@ -324,7 +328,8 @@ defmodule Minga.Editor.MouseTest do
           port_manager: nil,
           buffer: buf1,
           width: 80,
-          height: 10
+          height: 10,
+          editing_model: :vim
         )
 
       # Inject a second tab directly via state manipulation

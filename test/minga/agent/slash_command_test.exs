@@ -76,7 +76,7 @@ defmodule Minga.Agent.SlashCommandTest do
         port_manager: nil,
         workspace: %Minga.Workspace.State{
           viewport: Viewport.new(24, 80),
-          vim: VimState.new(),
+          editing: VimState.new(),
           agent_ui: UIState.new()
         },
         shell_state: %Minga.Shell.Traditional.State{

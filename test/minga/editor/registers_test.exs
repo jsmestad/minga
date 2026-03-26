@@ -1,5 +1,5 @@
 defmodule Minga.Editor.RegistersTest do
-  use ExUnit.Case, async: true
+  use Minga.Test.EditingModelCase, async: true
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor
@@ -15,7 +15,8 @@ defmodule Minga.Editor.RegistersTest do
         port_manager: nil,
         buffer: buffer,
         width: 40,
-        height: 10
+        height: 10,
+        editing_model: :vim
       )
 
     {editor, buffer}
@@ -35,42 +36,42 @@ defmodule Minga.Editor.RegistersTest do
       {editor, _buffer} = start_editor()
       send_key(editor, ?")
       send_key(editor, ?a)
-      assert state(editor).workspace.vim.reg.active == "a"
+      assert state(editor).workspace.editing.reg.active == "a"
     end
 
     test ~S["A selects register A for appending] do
       {editor, _buffer} = start_editor()
       send_key(editor, ?")
       send_key(editor, ?A)
-      assert state(editor).workspace.vim.reg.active == "A"
+      assert state(editor).workspace.editing.reg.active == "A"
     end
 
     test ~S["0 selects the yank register] do
       {editor, _buffer} = start_editor()
       send_key(editor, ?")
       send_key(editor, ?0)
-      assert state(editor).workspace.vim.reg.active == "0"
+      assert state(editor).workspace.editing.reg.active == "0"
     end
 
     test ~S["_ selects the black-hole register] do
       {editor, _buffer} = start_editor()
       send_key(editor, ?")
       send_key(editor, ?_)
-      assert state(editor).workspace.vim.reg.active == "_"
+      assert state(editor).workspace.editing.reg.active == "_"
     end
 
     test ~S["" selects the unnamed register] do
       {editor, _buffer} = start_editor()
       send_key(editor, ?")
       send_key(editor, ?")
-      assert state(editor).workspace.vim.reg.active == ""
+      assert state(editor).workspace.editing.reg.active == ""
     end
 
     test "invalid register char cancels selection" do
       {editor, _buffer} = start_editor()
       send_key(editor, ?")
       send_key(editor, ?!)
-      assert state(editor).workspace.vim.reg.active == ""
+      assert state(editor).workspace.editing.reg.active == ""
     end
 
     test "active_register resets to empty after an operation" do
@@ -80,7 +81,7 @@ defmodule Minga.Editor.RegistersTest do
       send_key(editor, ?a)
       send_key(editor, ?y)
       send_key(editor, ?y)
-      assert state(editor).workspace.vim.reg.active == ""
+      assert state(editor).workspace.editing.reg.active == ""
     end
   end
 
@@ -97,9 +98,9 @@ defmodule Minga.Editor.RegistersTest do
       send_key(editor, ?y)
 
       s = state(editor)
-      assert Map.get(s.workspace.vim.reg.registers, "a") == {"hello\n", :linewise}
-      assert Map.get(s.workspace.vim.reg.registers, "0") == {"hello\n", :linewise}
-      assert Map.get(s.workspace.vim.reg.registers, "") == {"hello\n", :linewise}
+      assert Map.get(s.workspace.editing.reg.registers, "a") == {"hello\n", :linewise}
+      assert Map.get(s.workspace.editing.reg.registers, "0") == {"hello\n", :linewise}
+      assert Map.get(s.workspace.editing.reg.registers, "") == {"hello\n", :linewise}
     end
 
     test ~S["ayy / "ap round-trip pastes from register a] do
@@ -134,8 +135,8 @@ defmodule Minga.Editor.RegistersTest do
       send_key(editor, ?y)
 
       s = state(editor)
-      assert Map.get(s.workspace.vim.reg.registers, "a") == {"hello\n", :linewise}
-      assert Map.get(s.workspace.vim.reg.registers, "b") == {"world\n", :linewise}
+      assert Map.get(s.workspace.editing.reg.registers, "a") == {"hello\n", :linewise}
+      assert Map.get(s.workspace.editing.reg.registers, "b") == {"world\n", :linewise}
     end
   end
 
@@ -158,7 +159,7 @@ defmodule Minga.Editor.RegistersTest do
       send_key(editor, ?y)
 
       s = state(editor)
-      assert Map.get(s.workspace.vim.reg.registers, "a") == {"hello\nworld\n", :linewise}
+      assert Map.get(s.workspace.editing.reg.registers, "a") == {"hello\nworld\n", :linewise}
     end
 
     test "appending to an empty register is the same as writing" do
@@ -170,7 +171,7 @@ defmodule Minga.Editor.RegistersTest do
       send_key(editor, ?y)
       send_key(editor, ?y)
 
-      assert Map.get(state(editor).workspace.vim.reg.registers, "a") == {"hello\n", :linewise}
+      assert Map.get(state(editor).workspace.editing.reg.registers, "a") == {"hello\n", :linewise}
     end
   end
 
@@ -183,15 +184,15 @@ defmodule Minga.Editor.RegistersTest do
 
       send_key(editor, ?y)
       send_key(editor, ?y)
-      assert Map.get(state(editor).workspace.vim.reg.registers, "0") == {"hello\n", :linewise}
+      assert Map.get(state(editor).workspace.editing.reg.registers, "0") == {"hello\n", :linewise}
 
       BufferServer.move_to(buffer, {1, 0})
       send_key(editor, ?d)
       send_key(editor, ?d)
 
       s = state(editor)
-      assert Map.get(s.workspace.vim.reg.registers, "0") == {"hello\n", :linewise}
-      assert Map.get(s.workspace.vim.reg.registers, "") == {"world\n", :linewise}
+      assert Map.get(s.workspace.editing.reg.registers, "0") == {"hello\n", :linewise}
+      assert Map.get(s.workspace.editing.reg.registers, "") == {"world\n", :linewise}
     end
 
     test "consecutive deletes do not update 0" do
@@ -207,7 +208,7 @@ defmodule Minga.Editor.RegistersTest do
       send_key(editor, ?d)
       send_key(editor, ?d)
 
-      assert Map.get(state(editor).workspace.vim.reg.registers, "0") == {"hello\n", :linewise}
+      assert Map.get(state(editor).workspace.editing.reg.registers, "0") == {"hello\n", :linewise}
     end
   end
 
@@ -220,7 +221,7 @@ defmodule Minga.Editor.RegistersTest do
 
       send_key(editor, ?y)
       send_key(editor, ?y)
-      assert Map.get(state(editor).workspace.vim.reg.registers, "") == {"hello\n", :linewise}
+      assert Map.get(state(editor).workspace.editing.reg.registers, "") == {"hello\n", :linewise}
 
       BufferServer.move_to(buffer, {1, 0})
       send_key(editor, ?")
@@ -229,9 +230,9 @@ defmodule Minga.Editor.RegistersTest do
       send_key(editor, ?d)
 
       s = state(editor)
-      assert Map.get(s.workspace.vim.reg.registers, "") == {"hello\n", :linewise}
-      assert Map.get(s.workspace.vim.reg.registers, "0") == {"hello\n", :linewise}
-      refute Map.has_key?(s.workspace.vim.reg.registers, "_")
+      assert Map.get(s.workspace.editing.reg.registers, "") == {"hello\n", :linewise}
+      assert Map.get(s.workspace.editing.reg.registers, "0") == {"hello\n", :linewise}
+      refute Map.has_key?(s.workspace.editing.reg.registers, "_")
     end
 
     test ~S["_yy yanks into black hole — registers unchanged] do
@@ -240,14 +241,14 @@ defmodule Minga.Editor.RegistersTest do
 
       send_key(editor, ?y)
       send_key(editor, ?y)
-      previous_unnamed = Map.get(state(editor).workspace.vim.reg.registers, "")
+      previous_unnamed = Map.get(state(editor).workspace.editing.reg.registers, "")
 
       send_key(editor, ?")
       send_key(editor, ?_)
       send_key(editor, ?y)
       send_key(editor, ?y)
 
-      assert Map.get(state(editor).workspace.vim.reg.registers, "") == previous_unnamed
+      assert Map.get(state(editor).workspace.editing.reg.registers, "") == previous_unnamed
     end
   end
 
@@ -259,7 +260,7 @@ defmodule Minga.Editor.RegistersTest do
       BufferServer.move_to(buffer, {0, 0})
       send_key(editor, ?y)
       send_key(editor, ?y)
-      assert Map.get(state(editor).workspace.vim.reg.registers, "") == {"hello\n", :linewise}
+      assert Map.get(state(editor).workspace.editing.reg.registers, "") == {"hello\n", :linewise}
     end
 
     test "dd without prefix writes to unnamed" do
@@ -267,7 +268,7 @@ defmodule Minga.Editor.RegistersTest do
       BufferServer.move_to(buffer, {0, 0})
       send_key(editor, ?d)
       send_key(editor, ?d)
-      assert Map.get(state(editor).workspace.vim.reg.registers, "") == {"hello\n", :linewise}
+      assert Map.get(state(editor).workspace.editing.reg.registers, "") == {"hello\n", :linewise}
     end
 
     test "p pastes from unnamed when no register selected" do
@@ -314,8 +315,8 @@ defmodule Minga.Editor.RegistersTest do
       send_key(editor, ?d)
 
       s = state(editor)
-      assert Map.get(s.workspace.vim.reg.registers, "") == {"world\n", :linewise}
-      assert Map.get(s.workspace.vim.reg.registers, "a") == {"hello\n", :linewise}
+      assert Map.get(s.workspace.editing.reg.registers, "") == {"world\n", :linewise}
+      assert Map.get(s.workspace.editing.reg.registers, "a") == {"hello\n", :linewise}
 
       # "ap should paste "hello" from register a
       send_key(editor, ?")

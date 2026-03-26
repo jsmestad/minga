@@ -110,21 +110,21 @@ defmodule Minga.Input.VimNavIntegrationTest do
       # i is not a tree-specific key, so it delegates to mode FSM
       # The mode FSM should block insert on read-only buffer
       {:handled, state} = walk_surface_handlers(state, ?i, 0)
-      assert state.workspace.vim.mode == :normal
+      assert state.workspace.editing.mode == :normal
     end
 
     test "a does not enter insert mode", %{tmp_dir: tmp_dir} do
       state = make_tree_state(tmp_dir)
 
       {:handled, state} = walk_surface_handlers(state, ?a, 0)
-      assert state.workspace.vim.mode == :normal
+      assert state.workspace.editing.mode == :normal
     end
 
     test "o does not enter insert mode", %{tmp_dir: tmp_dir} do
       state = make_tree_state(tmp_dir)
 
       {:handled, state} = walk_surface_handlers(state, ?o, 0)
-      assert state.workspace.vim.mode == :normal
+      assert state.workspace.editing.mode == :normal
     end
   end
 
@@ -196,7 +196,7 @@ defmodule Minga.Input.VimNavIntegrationTest do
 
       # g should delegate to mode FSM (prefix trie)
       {:handled, state} = walk_surface_handlers(state, ?g, 0)
-      assert state.workspace.vim.mode_state.prefix_node != nil
+      assert state.workspace.editing.mode_state.prefix_node != nil
 
       # second g should trigger gg (go to top)
       {:handled, state} = walk_surface_handlers(state, ?g, 0)

@@ -45,6 +45,8 @@ defmodule Minga.Editor.State.Tab do
           optional(:injection_ranges) => term(),
           optional(:search) => term(),
           optional(:pending_conflict) => term(),
+          optional(:editing) => Minga.Editor.VimState.t(),
+          # Legacy: old contexts may have :vim instead of :editing
           optional(:vim) => Minga.Editor.VimState.t(),
           optional(:document_highlights) => term(),
           optional(:agent_ui) => term(),

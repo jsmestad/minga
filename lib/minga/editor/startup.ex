@@ -94,7 +94,7 @@ defmodule Minga.Editor.Startup do
         messages: messages_buf
       },
       viewport: Viewport.new(height, width),
-      vim: VimState.new(),
+      editing: VimState.new(),
       windows: %Windows{
         tree: WindowTree.new(initial_window_id),
         map: windows,
@@ -104,10 +104,16 @@ defmodule Minga.Editor.Startup do
       keymap_scope: keymap_scope
     }
 
+    editing_model =
+      Keyword.get_lazy(opts, :editing_model, fn ->
+        Minga.Config.Options.get(:editing_model)
+      end)
+
     state = %EditorState{
       backend: backend,
       workspace: workspace,
       port_manager: port_manager,
+      editing_model: editing_model,
       focus_stack: Minga.Input.default_stack(),
       shell: Minga.Shell.Traditional,
       shell_state: %Minga.Shell.Traditional.State{

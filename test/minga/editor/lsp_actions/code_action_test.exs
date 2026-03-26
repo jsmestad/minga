@@ -7,7 +7,7 @@ defmodule Minga.Editor.LspActions.CodeActionTest do
     %{
       workspace: %{
         buffers: %Minga.Editor.State.Buffers{},
-        vim: %{mode: :normal, last_jump_pos: nil},
+        editing: %{mode: :normal, last_jump_pos: nil},
         viewport: %Minga.Editor.Viewport{rows: 40, cols: 120, top: 0, left: 0}
       },
       shell_state: %Minga.Shell.Traditional.State{

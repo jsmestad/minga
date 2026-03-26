@@ -30,7 +30,7 @@ defmodule Minga.Editor.RenderPipeline.ComposeHelpers do
           non_neg_integer()
         ) :: {non_neg_integer(), non_neg_integer()}
   def resolve_cursor(
-        %{workspace: %{vim: %{mode: :search, mode_state: mode_state}}},
+        %{workspace: %{editing: %{mode: :search, mode_state: mode_state}}},
         _cursor_info,
         minibuffer_row
       ) do
@@ -39,7 +39,7 @@ defmodule Minga.Editor.RenderPipeline.ComposeHelpers do
   end
 
   def resolve_cursor(
-        %{workspace: %{vim: %{mode: :command, mode_state: mode_state}}},
+        %{workspace: %{editing: %{mode: :command, mode_state: mode_state}}},
         _cursor_info,
         minibuffer_row
       ) do
@@ -48,7 +48,7 @@ defmodule Minga.Editor.RenderPipeline.ComposeHelpers do
   end
 
   def resolve_cursor(
-        %{workspace: %{vim: %{mode: :eval, mode_state: mode_state}}},
+        %{workspace: %{editing: %{mode: :eval, mode_state: mode_state}}},
         _cursor_info,
         minibuffer_row
       ) do
@@ -57,7 +57,7 @@ defmodule Minga.Editor.RenderPipeline.ComposeHelpers do
   end
 
   def resolve_cursor(
-        %{workspace: %{vim: %{mode: :search_prompt, mode_state: mode_state}}},
+        %{workspace: %{editing: %{mode: :search_prompt, mode_state: mode_state}}},
         _cursor_info,
         minibuffer_row
       ) do

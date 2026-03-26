@@ -98,7 +98,7 @@ defmodule Minga.Editor.Title do
   end
 
   # Fallback for non-EditorState maps (e.g. tests passing plain maps)
-  defp build_vars(%{workspace: %{vim: %{mode: mode}}} = state) do
+  defp build_vars(%{workspace: %{editing: %{mode: mode}}} = state) do
     buf = get_in(state, [:workspace, :buffers, :active])
 
     if is_pid(buf) do

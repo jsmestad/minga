@@ -19,7 +19,8 @@ defmodule Minga.Test.Invariants do
     :search,
     :search_prompt,
     :substitute_confirm,
-    :extension_confirm
+    :extension_confirm,
+    :cua
   ]
 
   @doc "Collects editor state into a result map for postcondition checking."

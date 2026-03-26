@@ -7,7 +7,7 @@ defmodule Minga.Editor.Commands.MinibufferTest do
   and resets the candidate_index after acceptance.
   """
 
-  use ExUnit.Case, async: true
+  use Minga.Test.EditingModelCase, async: true
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor
@@ -21,7 +21,8 @@ defmodule Minga.Editor.Commands.MinibufferTest do
         port_manager: nil,
         buffer: buffer,
         width: 80,
-        height: 24
+        height: 24,
+        editing_model: :vim
       )
 
     {editor, buffer}
@@ -34,7 +35,7 @@ defmodule Minga.Editor.Commands.MinibufferTest do
 
   defp get_mode_state(editor) do
     state = :sys.get_state(editor)
-    {state.workspace.vim.mode, state.workspace.vim.mode_state}
+    {state.workspace.editing.mode, state.workspace.editing.mode_state}
   end
 
   describe "accept_command_candidate via Tab in command mode" do

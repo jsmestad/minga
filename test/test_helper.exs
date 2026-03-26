@@ -36,3 +36,9 @@ ExUnit.start(capture_log: true, exclude: [:pi | swift_exclude])
 # parallel tests sharing the system clipboard. Tests that specifically
 # test clipboard behavior set clipboard: :unnamedplus in their setup.
 Minga.Config.Options.set(:clipboard, :none)
+
+# Pin editing model to :vim at boot. Individual test modules that create
+# editors directly (without EditorCase) and need vim dispatch should add
+# @moduletag editing_model: :vim and use Minga.Test.EditingModelCase.
+# CUA tests use @moduletag editing_model: :cua.
+Minga.Config.Options.set(:editing_model, :vim)

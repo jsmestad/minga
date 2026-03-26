@@ -16,7 +16,7 @@ defmodule Minga.Input.CompletionMouseTest do
     %EditorState{
       port_manager: nil,
       workspace: %Minga.Workspace.State{
-        vim: %VimState{mode: :insert, mode_state: Mode.initial_state()},
+        editing: %VimState{mode: :insert, mode_state: Mode.initial_state()},
         viewport: Viewport.new(30, 80),
         completion: completion
       }
@@ -54,7 +54,7 @@ defmodule Minga.Input.CompletionMouseTest do
       state = %EditorState{
         port_manager: nil,
         workspace: %Minga.Workspace.State{
-          vim: %VimState{mode: :normal, mode_state: Mode.initial_state()},
+          editing: %VimState{mode: :normal, mode_state: Mode.initial_state()},
           viewport: Viewport.new(30, 80),
           completion: nil
         }
@@ -68,7 +68,7 @@ defmodule Minga.Input.CompletionMouseTest do
 
       state = %{
         state
-        | workspace: %{state.workspace | vim: %{state.workspace.vim | mode: :normal}}
+        | workspace: %{state.workspace | editing: %{state.workspace.editing | mode: :normal}}
       }
 
       {:passthrough, ^state} = CompletionInput.handle_mouse(state, 10, 10, :left, 0, :press, 1)
