@@ -1103,12 +1103,15 @@ defmodule Minga.Frontend.Emit.GUI do
     end
   end
 
-  # Board not active: send visible=false once to dismiss
+  # Board not active: send visible=false once to dismiss.
+  # Must NOT use a default Board.State (grid_view? returns true → visible=1).
+  # Instead, build a minimal board with zoomed_into set so visible encodes as 0.
   defp build_gui_board_cmd(_state) do
     if Process.get(:last_gui_board_fp) != :dismissed do
       Process.put(:last_gui_board_fp, :dismissed)
-      # Encode a minimal board with visible=false
-      ProtocolGUI.encode_gui_board(%Minga.Shell.Board.State{})
+      # zoomed_into: 0 forces grid_view? → false → visible=0
+      dismissed = %Minga.Shell.Board.State{zoomed_into: 0}
+      ProtocolGUI.encode_gui_board(dismissed)
     end
   end
 end
