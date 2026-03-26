@@ -8,7 +8,7 @@ defmodule Minga.Editor.Commands.Eval do
   """
 
   alias Minga.Buffer.Document
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Editor.State, as: EditorState
   alias Minga.Mode
 
@@ -95,14 +95,14 @@ defmodule Minga.Editor.Commands.Eval do
 
   defp log_to_messages(%{workspace: %{buffers: %{messages: buf}}} = state, text) do
     time = Calendar.strftime(DateTime.utc_now(), "%H:%M:%S")
-    BufferServer.append(buf, "[#{time}] #{text}\n")
+    Buffer.append(buf, "[#{time}] #{text}\n")
 
     # Trim to max lines (same as Editor.log_message/2)
-    line_count = BufferServer.line_count(buf)
+    line_count = Buffer.line_count(buf)
 
     if line_count > 1000 do
       excess = line_count - 1000
-      content = BufferServer.content(buf)
+      content = Buffer.content(buf)
       lines = String.split(content, "\n")
       trimmed = lines |> Enum.drop(excess) |> Enum.join("\n")
 

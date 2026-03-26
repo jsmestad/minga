@@ -18,7 +18,7 @@ defmodule Minga.UI.Picker.OptionScopeSource do
 
   alias Minga.UI.Picker.Item
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Config.Options
 
   @impl true
@@ -58,7 +58,7 @@ defmodule Minga.UI.Picker.OptionScopeSource do
     buf = state.workspace.buffers.active
 
     if is_pid(buf) do
-      BufferServer.set_option(buf, name, value)
+      Buffer.set_option(buf, name, value)
     end
 
     Minga.Editor.State.set_status(state, format_confirmation(name, value, "this buffer"))

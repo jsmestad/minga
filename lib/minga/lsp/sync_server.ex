@@ -28,7 +28,7 @@ defmodule Minga.LSP.SyncServer do
 
   use GenServer
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Events
   alias Minga.Events.ToolMissingEvent
   alias Minga.LSP.Client
@@ -156,8 +156,8 @@ defmodule Minga.LSP.SyncServer do
 
   @spec do_buffer_open(state(), pid()) :: state()
   defp do_buffer_open(state, buffer_pid) do
-    filetype = BufferServer.filetype(buffer_pid)
-    file_path = BufferServer.file_path(buffer_pid)
+    filetype = Buffer.filetype(buffer_pid)
+    file_path = Buffer.file_path(buffer_pid)
 
     case file_path do
       nil ->
@@ -166,7 +166,7 @@ defmodule Minga.LSP.SyncServer do
       path ->
         configs = ServerRegistry.servers_for(filetype)
         uri = path_to_uri(path)
-        {content, _cursor} = BufferServer.content_and_cursor(buffer_pid)
+        {content, _cursor} = Buffer.content_and_cursor(buffer_pid)
         language_id = to_string(filetype)
 
         results =
@@ -477,7 +477,7 @@ defmodule Minga.LSP.SyncServer do
         Client.did_change_incremental(client, uri, changes)
 
       _ ->
-        {content, _cursor} = BufferServer.content_and_cursor(buffer_pid)
+        {content, _cursor} = Buffer.content_and_cursor(buffer_pid)
         Client.did_change(client, uri, content)
     end
   end
@@ -492,7 +492,7 @@ defmodule Minga.LSP.SyncServer do
 
   @spec buffer_uri(pid()) :: String.t() | nil
   defp buffer_uri(buffer_pid) do
-    case BufferServer.file_path(buffer_pid) do
+    case Buffer.file_path(buffer_pid) do
       nil -> nil
       path -> path_to_uri(path)
     end

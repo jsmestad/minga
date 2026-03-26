@@ -30,7 +30,7 @@ defmodule Minga.Input.AgentNav do
   import Bitwise
 
   alias Minga.Agent.UIState
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.AgentAccess
 
@@ -136,7 +136,7 @@ defmodule Minga.Input.AgentNav do
     # Sync buffer cursor to chat scroll offset so the side panel renderer
     # shows the region around the cursor. Unpins auto-scroll since the
     # user is navigating manually.
-    {cursor_line, _col} = BufferServer.cursor(chat_buffer)
+    {cursor_line, _col} = Buffer.cursor(chat_buffer)
     state = sync_scroll_to_cursor(state, cursor_line)
 
     # Only restore the original active buffer if a command didn't

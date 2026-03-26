@@ -15,7 +15,7 @@ defmodule Minga.Editor.AgentLifecycle do
   alias Minga.Agent.Session, as: AgentSession
   alias Minga.Agent.UIState
   alias Minga.Agent.View.Preview
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Config.Options, as: ConfigOptions
   alias Minga.Editor.Commands
   alias Minga.Editor.HighlightSync
@@ -65,7 +65,7 @@ defmodule Minga.Editor.AgentLifecycle do
     preview_empty = AgentAccess.view(state).preview.content == :empty
 
     if agent_visible and preview_empty and auto_context and not cli_flags.no_context do
-      content = BufferServer.content(buffer_pid)
+      content = Buffer.content(buffer_pid)
       update_preview(state, &Preview.set_file(&1, file_path, content))
     else
       state
@@ -185,12 +185,12 @@ defmodule Minga.Editor.AgentLifecycle do
 
   @spec load_buffer_as_preview(state(), pid()) :: state()
   defp load_buffer_as_preview(state, buffer_pid) do
-    case BufferServer.file_path(buffer_pid) do
+    case Buffer.file_path(buffer_pid) do
       nil ->
         state
 
       path ->
-        content = BufferServer.content(buffer_pid)
+        content = Buffer.content(buffer_pid)
         update_preview(state, &Preview.set_file(&1, path, content))
     end
   end

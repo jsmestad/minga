@@ -18,7 +18,7 @@ defmodule Minga.Editor.SemanticWindow.Builder do
   alias Minga.Buffer.Decorations
   alias Minga.Buffer.Decorations.BlockDecoration
   alias Minga.Buffer.Decorations.FoldRegion
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Buffer.Unicode
   alias Minga.Diagnostics
   alias Minga.Editor.DisplayMap
@@ -363,7 +363,7 @@ defmodule Minga.Editor.SemanticWindow.Builder do
     buf = window.buffer
 
     if is_pid(buf) do
-      case BufferServer.file_path(buf) do
+      case Buffer.file_path(buf) do
         nil ->
           []
 

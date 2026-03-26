@@ -8,7 +8,7 @@ defmodule Minga.Editor.Commands.AgentSession do
 
   alias Minga.Agent.BufferSync, as: AgentBufferSync
   alias Minga.Agent.Session
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Editor.AgentLifecycle
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
@@ -93,7 +93,7 @@ defmodule Minga.Editor.Commands.AgentSession do
     filetype = filetype_from_language(language)
 
     {:ok, buf} =
-      BufferServer.start_link(
+      Buffer.start_link(
         content: content,
         buffer_name: name,
         filetype: filetype

@@ -24,7 +24,7 @@ defmodule Minga.Editor.LspActions do
   - textDocument/inlayHint (inline type hints)
   """
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Editor.Commands
   alias Minga.Editor.HoverPopup
   alias Minga.Editor.LspDecorations
@@ -92,7 +92,7 @@ defmodule Minga.Editor.LspActions do
         EditorState.set_status(state, "No language server")
 
       client ->
-        file_path = BufferServer.file_path(buf)
+        file_path = Buffer.file_path(buf)
 
         case file_path do
           nil ->
@@ -100,7 +100,7 @@ defmodule Minga.Editor.LspActions do
 
           path ->
             uri = SyncServer.path_to_uri(path)
-            {line, col} = BufferServer.cursor(buf)
+            {line, col} = Buffer.cursor(buf)
 
             params = %{
               "textDocument" => %{"uri" => uri},
@@ -199,7 +199,7 @@ defmodule Minga.Editor.LspActions do
         EditorState.set_status(state, "No language server")
 
       client ->
-        file_path = BufferServer.file_path(buf)
+        file_path = Buffer.file_path(buf)
 
         case file_path do
           nil ->
@@ -207,7 +207,7 @@ defmodule Minga.Editor.LspActions do
 
           path ->
             uri = SyncServer.path_to_uri(path)
-            {line, col} = BufferServer.cursor(buf)
+            {line, col} = Buffer.cursor(buf)
 
             # Build the range (cursor position for point actions, or selection for visual mode)
             range = build_action_range(state, buf, line, col)
@@ -262,7 +262,7 @@ defmodule Minga.Editor.LspActions do
         EditorState.set_status(state, "No language server")
 
       client ->
-        file_path = BufferServer.file_path(buf)
+        file_path = Buffer.file_path(buf)
 
         case file_path do
           nil ->
@@ -270,7 +270,7 @@ defmodule Minga.Editor.LspActions do
 
           path ->
             uri = SyncServer.path_to_uri(path)
-            {line, col} = BufferServer.cursor(buf)
+            {line, col} = Buffer.cursor(buf)
 
             params = %{
               "textDocument" => %{"uri" => uri},
@@ -336,7 +336,7 @@ defmodule Minga.Editor.LspActions do
         EditorState.set_status(state, "No language server")
 
       client ->
-        file_path = BufferServer.file_path(buf)
+        file_path = Buffer.file_path(buf)
 
         case file_path do
           nil ->
@@ -397,7 +397,7 @@ defmodule Minga.Editor.LspActions do
         EditorState.set_status(state, "No language server")
 
       client ->
-        file_path = BufferServer.file_path(buf)
+        file_path = Buffer.file_path(buf)
 
         case file_path do
           nil ->
@@ -405,7 +405,7 @@ defmodule Minga.Editor.LspActions do
 
           path ->
             uri = SyncServer.path_to_uri(path)
-            {line, col} = BufferServer.cursor(buf)
+            {line, col} = Buffer.cursor(buf)
 
             params = %{
               "textDocument" => %{"uri" => uri},
@@ -534,7 +534,7 @@ defmodule Minga.Editor.LspActions do
         state
 
       client ->
-        file_path = BufferServer.file_path(buf)
+        file_path = Buffer.file_path(buf)
 
         case file_path do
           nil ->
@@ -567,7 +567,7 @@ defmodule Minga.Editor.LspActions do
         state
 
       client ->
-        file_path = BufferServer.file_path(buf)
+        file_path = Buffer.file_path(buf)
 
         case file_path do
           nil ->
@@ -1261,7 +1261,7 @@ defmodule Minga.Editor.LspActions do
         {st, fc, ec}
 
       pid ->
-        BufferServer.apply_text_edits(pid, edits)
+        Buffer.apply_edits(pid, edits)
         {st, fc + 1, ec + length(edits)}
     end
   end
@@ -1330,7 +1330,7 @@ defmodule Minga.Editor.LspActions do
 
   @spec send_lsp_request(state(), pid(), pid(), String.t(), atom()) :: state()
   defp send_lsp_request(state, client, buffer_pid, method, kind) do
-    file_path = BufferServer.file_path(buffer_pid)
+    file_path = Buffer.file_path(buffer_pid)
 
     case file_path do
       nil ->
@@ -1338,7 +1338,7 @@ defmodule Minga.Editor.LspActions do
 
       path ->
         uri = SyncServer.path_to_uri(path)
-        {line, col} = BufferServer.cursor(buffer_pid)
+        {line, col} = Buffer.cursor(buffer_pid)
 
         params = %{
           "textDocument" => %{"uri" => uri},
@@ -1375,19 +1375,19 @@ defmodule Minga.Editor.LspActions do
   @spec jump_to_location(state(), String.t(), non_neg_integer(), non_neg_integer()) :: state()
   defp jump_to_location(state, uri, line, col) do
     target_path = SyncServer.uri_to_path(uri)
-    current_path = BufferServer.file_path(state.workspace.buffers.active)
+    current_path = Buffer.file_path(state.workspace.buffers.active)
 
     # Set jump mark before navigating
     state = set_jump_mark(state)
 
     if target_path == current_path do
       # Same file: just move the cursor
-      BufferServer.move_to(state.workspace.buffers.active, {line, col})
+      Buffer.move_to(state.workspace.buffers.active, {line, col})
       state
     else
       # Different file: open it, then move cursor
       state = open_or_switch_to_file(state, target_path)
-      BufferServer.move_to(state.workspace.buffers.active, {line, col})
+      Buffer.move_to(state.workspace.buffers.active, {line, col})
       state
     end
   end
@@ -1398,7 +1398,7 @@ defmodule Minga.Editor.LspActions do
     idx =
       Enum.find_index(state.workspace.buffers.list, fn buf ->
         try do
-          BufferServer.file_path(buf) == file_path
+          Buffer.file_path(buf) == file_path
         catch
           :exit, _ -> false
         end
@@ -1418,7 +1418,7 @@ defmodule Minga.Editor.LspActions do
 
   @spec set_jump_mark(state()) :: state()
   defp set_jump_mark(%{workspace: %{buffers: %{active: buf}}} = state) when is_pid(buf) do
-    pos = BufferServer.cursor(buf)
+    pos = Buffer.cursor(buf)
 
     %{
       state
@@ -1472,7 +1472,7 @@ defmodule Minga.Editor.LspActions do
     buf = state.workspace.buffers.active
 
     if buf do
-      {line, col} = BufferServer.cursor(buf)
+      {line, col} = Buffer.cursor(buf)
       # Approximate screen position: line offset from viewport top + gutter
       vp = state.workspace.viewport
       screen_row = line - vp.top + 1
@@ -1685,7 +1685,7 @@ defmodule Minga.Editor.LspActions do
   defp read_range_from_buffer(%{workspace: %{buffers: %{active: buf}}}, {sl, sc}, {el, ec})
        when is_pid(buf) do
     {adj_el, adj_ec} = adjust_lsp_end_position(buf, el, ec)
-    BufferServer.content_range(buf, {sl, sc}, {adj_el, adj_ec})
+    Buffer.text_between(buf, {sl, sc}, {adj_el, adj_ec})
   rescue
     _ -> ""
   catch
@@ -1701,7 +1701,7 @@ defmodule Minga.Editor.LspActions do
   defp adjust_lsp_end_position(_buf, el, ec) when ec > 0, do: {el, ec - 1}
 
   defp adjust_lsp_end_position(buf, el, 0) when el > 0 do
-    case BufferServer.get_lines(buf, el - 1, 1) do
+    case Buffer.lines(buf, el - 1, 1) do
       [prev_line] -> {el - 1, byte_size(prev_line)}
       _ -> {el, 0}
     end
@@ -1803,7 +1803,7 @@ defmodule Minga.Editor.LspActions do
 
     if buf do
       # Move cursor to the end of the range
-      BufferServer.move_to(buf, {range.end_line, range.end_col})
+      Buffer.move_to(buf, {range.end_line, range.end_col})
 
       # Enter visual mode with the anchor at the start of the range
       visual_state = %VisualState{
@@ -1887,7 +1887,7 @@ defmodule Minga.Editor.LspActions do
   defp find_buffer_by_path(state, path) do
     Enum.find(state.workspace.buffers.list, fn buf ->
       try do
-        BufferServer.file_path(buf) == path
+        Buffer.file_path(buf) == path
       catch
         :exit, _ -> false
       end

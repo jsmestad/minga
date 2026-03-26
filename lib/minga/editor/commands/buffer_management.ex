@@ -8,7 +8,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
 
   alias Minga.Agent.Session
   alias Minga.Buffer.Document
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Config.Loader, as: ConfigLoader
   alias Minga.Config.Options, as: ConfigOptions
 
@@ -37,7 +37,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :save) do
     state = apply_pre_save_transforms(state, buf)
 
-    case BufferServer.save(buf) do
+    case Buffer.save(buf) do
       :ok ->
         name = Helpers.buffer_display_name(buf)
 
@@ -55,7 +55,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :force_save) do
-    case BufferServer.force_save(buf) do
+    case Buffer.force_save(buf) do
       :ok ->
         name = Helpers.buffer_display_name(buf)
         EditorState.set_status(state, "Wrote #{name} (force)")
@@ -69,7 +69,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :reload) do
-    case BufferServer.reload(buf) do
+    case Buffer.reload(buf) do
       :ok ->
         name = Helpers.buffer_display_name(buf)
         EditorState.set_status(state, "Reloaded #{name}")
@@ -131,7 +131,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
 
     case DynamicSupervisor.start_child(
            Minga.Buffer.Supervisor,
-           {BufferServer, content: "", buffer_name: name}
+           {Minga.Buffer, content: "", buffer_name: name}
          ) do
       {:ok, pid} ->
         Commands.add_buffer(state, pid)
@@ -154,7 +154,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :cycle_line_numbers)
       when is_pid(buf) do
-    current = BufferServer.get_option(buf, :line_numbers)
+    current = Buffer.get_option(buf, :line_numbers)
 
     next =
       case current do
@@ -164,13 +164,13 @@ defmodule Minga.Editor.Commands.BufferManagement do
         :none -> :hybrid
       end
 
-    BufferServer.set_option(buf, :line_numbers, next)
+    Buffer.set_option(buf, :line_numbers, next)
     state
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :toggle_wrap) when is_pid(buf) do
-    current = BufferServer.get_option(buf, :wrap)
-    BufferServer.set_option(buf, :wrap, !current)
+    current = Buffer.get_option(buf, :wrap)
+    Buffer.set_option(buf, :wrap, !current)
     label = if current, do: "nowrap", else: "wrap"
     EditorState.set_status(state, "wrap #{label}")
   end
@@ -237,7 +237,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
         {:execute_ex_command, {:goto_line, line_num}}
       ) do
     target_line = max(0, line_num - 1)
-    BufferServer.move_to(buf, {target_line, 0})
+    Buffer.move_to(buf, {target_line, 0})
     state
   end
 
@@ -246,7 +246,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
         {:execute_ex_command, {:set, :number}}
       )
       when is_pid(buf) do
-    BufferServer.set_option(buf, :line_numbers, :absolute)
+    Buffer.set_option(buf, :line_numbers, :absolute)
     state
   end
 
@@ -255,7 +255,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
         {:execute_ex_command, {:set, :nonumber}}
       )
       when is_pid(buf) do
-    BufferServer.set_option(buf, :line_numbers, :none)
+    Buffer.set_option(buf, :line_numbers, :none)
     state
   end
 
@@ -264,7 +264,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
         {:execute_ex_command, {:set, :relativenumber}}
       )
       when is_pid(buf) do
-    current = BufferServer.get_option(buf, :line_numbers)
+    current = Buffer.get_option(buf, :line_numbers)
 
     next =
       case current do
@@ -272,7 +272,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
         _ -> :relative
       end
 
-    BufferServer.set_option(buf, :line_numbers, next)
+    Buffer.set_option(buf, :line_numbers, next)
     state
   end
 
@@ -281,7 +281,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
         {:execute_ex_command, {:set, :norelativenumber}}
       )
       when is_pid(buf) do
-    current = BufferServer.get_option(buf, :line_numbers)
+    current = Buffer.get_option(buf, :line_numbers)
 
     next =
       case current do
@@ -289,7 +289,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
         _ -> :none
       end
 
-    BufferServer.set_option(buf, :line_numbers, next)
+    Buffer.set_option(buf, :line_numbers, next)
     state
   end
 
@@ -298,7 +298,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
         {:execute_ex_command, {:set, :wrap}}
       )
       when is_pid(buf) do
-    BufferServer.set_option(buf, :wrap, true)
+    Buffer.set_option(buf, :wrap, true)
     state
   end
 
@@ -307,7 +307,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
         {:execute_ex_command, {:set, :nowrap}}
       )
       when is_pid(buf) do
-    BufferServer.set_option(buf, :wrap, false)
+    Buffer.set_option(buf, :wrap, false)
     state
   end
 
@@ -484,7 +484,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
 
     if is_pid(buf) do
       try do
-        BufferServer.set_filetype(buf, filetype)
+        Buffer.set_filetype(buf, filetype)
         send(self(), :setup_highlight)
         EditorState.set_status(state, "Language: #{filetype}")
       catch
@@ -514,8 +514,8 @@ defmodule Minga.Editor.Commands.BufferManagement do
 
   @spec alternate_file(state()) :: state()
   def alternate_file(%{workspace: %{buffers: %{active: buf}}} = state) when is_pid(buf) do
-    file_path = BufferServer.file_path(buf)
-    filetype = BufferServer.filetype(buf)
+    file_path = Buffer.file_path(buf)
+    filetype = Buffer.filetype(buf)
     open_alternate(state, file_path, filetype)
   end
 
@@ -692,7 +692,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
     persistent? =
       if buf do
         try do
-          BufferServer.persistent?(buf)
+          Buffer.persistent?(buf)
         catch
           :exit, _ -> false
         end
@@ -721,7 +721,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
 
       if buf do
         try do
-          path = BufferServer.file_path(buf) || :scratch
+          path = Buffer.file_path(buf) || :scratch
 
           Minga.Events.broadcast(
             :buffer_closed,
@@ -934,7 +934,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   defp any_buffer_dirty?(state) do
     Enum.any?(state.workspace.buffers.list, fn pid ->
       try do
-        BufferServer.dirty?(pid)
+        Buffer.dirty?(pid)
       catch
         :exit, _ -> false
       end
@@ -979,7 +979,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
     {:ok, buf} =
       DynamicSupervisor.start_child(
         Minga.Buffer.Supervisor,
-        {BufferServer, content: "", buffer_name: "[new]"}
+        {Minga.Buffer, content: "", buffer_name: "[new]"}
       )
 
     # add_buffer creates a new file tab (for agent tabs, via
@@ -1000,7 +1000,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   defp save_all_buffers(state) do
     Enum.each(state.workspace.buffers.list, fn buf ->
       try do
-        if BufferServer.dirty?(buf), do: BufferServer.save(buf)
+        if Buffer.dirty?(buf), do: Buffer.save(buf)
       catch
         :exit, _ -> :ok
       end
@@ -1065,7 +1065,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
       buffers
       |> Enum.flat_map(fn buf ->
         try do
-          [BufferServer.buffer_name(buf)]
+          [Buffer.buffer_name(buf)]
         catch
           :exit, _ -> []
         end
@@ -1098,7 +1098,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
 
   @spec maybe_format_on_save(state(), pid(), atom()) :: state()
   defp maybe_format_on_save(state, buf, _filetype) do
-    if BufferServer.get_option(buf, :format_on_save) do
+    if Buffer.get_option(buf, :format_on_save) do
       run_format_on_save(state, buf)
     else
       state
@@ -1107,8 +1107,8 @@ defmodule Minga.Editor.Commands.BufferManagement do
 
   @spec run_format_on_save(state(), pid()) :: state()
   defp run_format_on_save(state, buf) do
-    file_path = BufferServer.file_path(buf)
-    filetype = BufferServer.filetype(buf)
+    file_path = Buffer.file_path(buf)
+    filetype = Buffer.filetype(buf)
     spec = Minga.Editing.resolve_formatter(filetype, file_path)
     buf_name = Helpers.buffer_display_name(buf)
 
@@ -1130,9 +1130,9 @@ defmodule Minga.Editor.Commands.BufferManagement do
 
   @spec run_formatter_with_spec(state(), pid(), String.t(), String.t()) :: state()
   defp run_formatter_with_spec(state, buf, spec, buf_name) do
-    case Minga.Editing.format(BufferServer.content(buf), spec) do
+    case Minga.Editing.format(Buffer.content(buf), spec) do
       {:ok, formatted} ->
-        BufferServer.replace_content(buf, formatted)
+        Buffer.replace_content(buf, formatted)
         Minga.Editor.log_to_messages("Format-on-save: #{buf_name}")
         state
 
@@ -1173,15 +1173,15 @@ defmodule Minga.Editor.Commands.BufferManagement do
 
   @spec apply_whitespace_transforms(pid()) :: :ok
   defp apply_whitespace_transforms(buf) do
-    needs_trim = BufferServer.get_option(buf, :trim_trailing_whitespace)
-    needs_final_newline = BufferServer.get_option(buf, :insert_final_newline)
+    needs_trim = Buffer.get_option(buf, :trim_trailing_whitespace)
+    needs_final_newline = Buffer.get_option(buf, :insert_final_newline)
 
     if needs_trim or needs_final_newline do
-      content = BufferServer.content(buf)
+      content = Buffer.content(buf)
       transformed = Minga.Editing.apply_save_transforms(content, needs_trim, needs_final_newline)
 
       if transformed != content do
-        BufferServer.replace_content(buf, transformed)
+        Buffer.replace_content(buf, transformed)
       end
     end
 
@@ -1269,7 +1269,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   defp create_fallback_buffer(state, bs) do
     case DynamicSupervisor.start_child(
            Minga.Buffer.Supervisor,
-           {BufferServer, content: "", buffer_name: "[new 1]"}
+           {Minga.Buffer, content: "", buffer_name: "[new 1]"}
          ) do
       {:ok, new_buf} ->
         %{

@@ -109,12 +109,17 @@ defmodule Minga.Credo.DomainBoundaryCheck do
   end
 
   # Determine which domain a file belongs to from its path.
+  # Matches both internal modules (lib/minga/{domain}/*.ex) and the
+  # facade file itself (lib/minga/{domain}.ex).
   @spec domain_for_file(String.t()) :: atom() | nil
   defp domain_for_file(filename) do
     expanded = Path.expand(filename)
 
     Enum.find_value(@domains, fn {domain, _facade} ->
-      if String.contains?(expanded, "/minga/#{domain}/"), do: domain
+      if String.contains?(expanded, "/minga/#{domain}/") ||
+           String.ends_with?(expanded, "/minga/#{domain}.ex") do
+        domain
+      end
     end)
   end
 

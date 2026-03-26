@@ -10,7 +10,7 @@ defmodule Minga.Editor.RenderPipeline.Content do
   alias Minga.Agent.View.DashboardRenderer
   alias Minga.Agent.View.PromptRenderer
   alias Minga.Buffer.Decorations
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Buffer.Unicode
   alias Minga.Editor.DisplayList
   alias Minga.Editor.DisplayList.{Cursor, WindowFrame}
@@ -352,7 +352,7 @@ defmodule Minga.Editor.RenderPipeline.Content do
     is_active = agent_window_active?(state, window)
     {cursor_line, cursor_byte_col} = agent_window_cursor(window, buf, is_active)
 
-    line_count = BufferServer.line_count(buf)
+    line_count = Buffer.line_count(buf)
     viewport = agent_chat_viewport(window, chat_height, chat_width, cursor_line, line_count, buf)
 
     # Store the computed viewport back on the window so the mouse handler
@@ -369,12 +369,12 @@ defmodule Minga.Editor.RenderPipeline.Content do
     # Fetch enough lines to cover decorations that consume screen rows.
     # Over-fetch slightly so block decorations don't cause missing lines.
     fetch_rows = visible_rows + div(visible_rows, 2)
-    snapshot = BufferServer.render_snapshot(buf, first_line, fetch_rows)
+    snapshot = Buffer.render_snapshot(buf, first_line, fetch_rows)
 
     cursor_line_text = cursor_text_from_snapshot(snapshot.lines, cursor_line, first_line)
 
     cursor_col = Unicode.display_col(cursor_line_text, cursor_byte_col)
-    line_number_style = BufferServer.get_option(buf, :line_numbers)
+    line_number_style = Buffer.get_option(buf, :line_numbers)
     number_w = if line_number_style == :none, do: 0, else: Viewport.gutter_width(line_count)
     gutter_w = Minga.Editor.Renderer.Gutter.total_width(number_w)
     content_w = max(chat_width - gutter_w, 1)
@@ -415,7 +415,7 @@ defmodule Minga.Editor.RenderPipeline.Content do
     # Detect scroll/structural invalidation (viewport_top, gutter, line count,
     # buffer version). The normal buffer path does this in the Scroll stage;
     # agent chat skips that stage, so we must do it here.
-    buf_version = BufferServer.version(buf)
+    buf_version = Buffer.version(buf)
     window = Window.detect_invalidation(window, viewport.top, gutter_w, line_count, buf_version)
 
     # Detect context changes to invalidate dirty-line cache
@@ -640,7 +640,7 @@ defmodule Minga.Editor.RenderPipeline.Content do
       Map.get(state.workspace.windows.map, state.workspace.windows.active) == window
   end
 
-  defp agent_window_cursor(_window, buf, true), do: BufferServer.cursor(buf)
+  defp agent_window_cursor(_window, buf, true), do: Buffer.cursor(buf)
   defp agent_window_cursor(window, _buf, false), do: window.cursor
 
   defp cursor_text_from_snapshot(lines, cursor_line, first_line) do

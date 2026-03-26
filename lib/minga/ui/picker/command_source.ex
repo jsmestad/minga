@@ -12,7 +12,7 @@ defmodule Minga.UI.Picker.CommandSource do
 
   alias Minga.UI.Picker.Item
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Command
   alias Minga.Command.Registry, as: CommandRegistry
   alias Minga.Editor.PickerUI
@@ -85,7 +85,7 @@ defmodule Minga.UI.Picker.CommandSource do
 
     current_value =
       if is_pid(buf) do
-        BufferServer.get_option(buf, option_name)
+        Buffer.get_option(buf, option_name)
       else
         nil
       end

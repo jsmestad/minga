@@ -10,7 +10,7 @@ defmodule Minga.UI.Picker.LanguageSource do
 
   @behaviour Minga.UI.Picker.Source
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Editor.Commands.BufferManagement
   alias Minga.Language
   alias Minga.Language.Registry, as: LangRegistry
@@ -68,7 +68,7 @@ defmodule Minga.UI.Picker.LanguageSource do
 
   @spec current_filetype(term()) :: atom()
   defp current_filetype(%{workspace: %{buffers: %{active: buf}}}) when is_pid(buf) do
-    BufferServer.filetype(buf)
+    Buffer.filetype(buf)
   catch
     :exit, _ -> :text
   end

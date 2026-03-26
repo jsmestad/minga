@@ -6,7 +6,7 @@ defmodule Minga.Editor.Commands.Git do
 
   @behaviour Minga.Command.Provider
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Editor.Commands
   alias Minga.Editor.PickerUI
   alias Minga.Editor.State, as: EditorState
@@ -83,7 +83,7 @@ defmodule Minga.Editor.Commands.Git do
 
   def execute(state, :next_git_hunk) do
     with_git_buffer(state, fn git_pid, buf ->
-      {cursor_line, _col} = BufferServer.cursor(buf)
+      {cursor_line, _col} = Buffer.cursor(buf)
       hunks = GitBuffer.hunks(git_pid)
 
       case Diff.next_hunk_line(hunks, cursor_line) do
@@ -95,7 +95,7 @@ defmodule Minga.Editor.Commands.Git do
 
   def execute(state, :prev_git_hunk) do
     with_git_buffer(state, fn git_pid, buf ->
-      {cursor_line, _col} = BufferServer.cursor(buf)
+      {cursor_line, _col} = Buffer.cursor(buf)
       hunks = GitBuffer.hunks(git_pid)
 
       case Diff.prev_hunk_line(hunks, cursor_line) do
@@ -109,7 +109,7 @@ defmodule Minga.Editor.Commands.Git do
 
   def execute(state, :git_stage_hunk) do
     with_git_buffer(state, fn git_pid, buf ->
-      {cursor_line, _col} = BufferServer.cursor(buf)
+      {cursor_line, _col} = Buffer.cursor(buf)
 
       case GitBuffer.hunk_at(git_pid, cursor_line) do
         nil -> EditorState.set_status(state, "No hunk at cursor")
@@ -122,19 +122,19 @@ defmodule Minga.Editor.Commands.Git do
 
   def execute(state, :git_revert_hunk) do
     with_git_buffer(state, fn git_pid, buf ->
-      {cursor_line, _col} = BufferServer.cursor(buf)
+      {cursor_line, _col} = Buffer.cursor(buf)
 
       case GitBuffer.hunk_at(git_pid, cursor_line) do
         nil ->
           EditorState.set_status(state, "No hunk at cursor")
 
         hunk ->
-          {content, _cursor} = BufferServer.content_and_cursor(buf)
+          {content, _cursor} = Buffer.content_and_cursor(buf)
           current_lines = String.split(content, "\n")
           reverted_lines = Diff.revert_hunk(current_lines, hunk)
           reverted_content = Enum.join(reverted_lines, "\n")
 
-          BufferServer.replace_content(buf, reverted_content)
+          Buffer.replace_content(buf, reverted_content)
           GitBuffer.update(git_pid, reverted_content)
           EditorState.set_status(state, "Hunk reverted")
       end
@@ -145,7 +145,7 @@ defmodule Minga.Editor.Commands.Git do
 
   def execute(state, :git_preview_hunk) do
     with_git_buffer(state, fn git_pid, buf ->
-      {cursor_line, _col} = BufferServer.cursor(buf)
+      {cursor_line, _col} = Buffer.cursor(buf)
 
       case GitBuffer.hunk_at(git_pid, cursor_line) do
         nil -> EditorState.set_status(state, "No hunk at cursor")
@@ -158,7 +158,7 @@ defmodule Minga.Editor.Commands.Git do
 
   def execute(state, :git_blame_line) do
     with_git_buffer(state, fn git_pid, buf ->
-      {cursor_line, _col} = BufferServer.cursor(buf)
+      {cursor_line, _col} = Buffer.cursor(buf)
       git_root = GitBuffer.git_root(git_pid)
       rel_path = GitBuffer.relative_path(git_pid)
 
@@ -180,7 +180,7 @@ defmodule Minga.Editor.Commands.Git do
   defp open_diff_view(state, git_pid, buf) do
     git_root = GitBuffer.git_root(git_pid)
     rel_path = GitBuffer.relative_path(git_pid)
-    {current_content, _cursor} = BufferServer.content_and_cursor(buf)
+    {current_content, _cursor} = Buffer.content_and_cursor(buf)
 
     base_content =
       case Git.show_head(git_root, rel_path) do
@@ -192,7 +192,7 @@ defmodule Minga.Editor.Commands.Git do
     filename = Path.basename(rel_path)
     filetype = Minga.Language.Filetype.detect(filename)
 
-    case BufferServer.start_link(
+    case Buffer.start_link(
            content: diff_result.text,
            buffer_type: :nofile,
            read_only: true,
@@ -358,7 +358,7 @@ defmodule Minga.Editor.Commands.Git do
   defp do_stage_hunk(state, git_pid, buf, hunk) do
     git_root = GitBuffer.git_root(git_pid)
     rel_path = GitBuffer.relative_path(git_pid)
-    {content, _cursor} = BufferServer.content_and_cursor(buf)
+    {content, _cursor} = Buffer.content_and_cursor(buf)
     base_lines = get_base_lines(git_pid)
     current_lines = String.split(content, "\n")
 
@@ -394,7 +394,7 @@ defmodule Minga.Editor.Commands.Git do
 
   @spec jump_to_line(state(), pid(), non_neg_integer()) :: state()
   defp jump_to_line(state, buf, line) do
-    BufferServer.move_to(buf, {line, 0})
+    Buffer.move_to(buf, {line, 0})
     state
   end
 

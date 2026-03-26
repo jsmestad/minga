@@ -18,7 +18,7 @@ defmodule Minga.Editor.TabBarRenderer do
   blank (fg matches bg). Tab widths are stable regardless of hover state.
   """
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Buffer.Unicode
   alias Minga.Editor.DisplayList
   alias Minga.Editor.State.Tab
@@ -421,7 +421,7 @@ defmodule Minga.Editor.TabBarRenderer do
 
     if is_pid(buf) do
       try do
-        if BufferServer.dirty?(buf), do: " ●", else: ""
+        if Buffer.dirty?(buf), do: " ●", else: ""
       catch
         :exit, _ -> ""
       end

@@ -10,7 +10,7 @@ defmodule Minga.UI.Picker.ProjectSearchSource do
 
   alias Minga.UI.Picker.Item
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Editor.State, as: EditorState
   alias Minga.Language.Filetype
   alias Minga.UI.Devicon
@@ -70,7 +70,7 @@ defmodule Minga.UI.Picker.ProjectSearchSource do
     case EditorState.start_buffer(abs_path) do
       {:ok, pid} ->
         new_state = EditorState.add_buffer(state, pid)
-        BufferServer.move_to(pid, {line, col})
+        Buffer.move_to(pid, {line, col})
         new_state
 
       {:error, reason} ->
@@ -83,7 +83,7 @@ defmodule Minga.UI.Picker.ProjectSearchSource do
   defp jump_to_buffer(state, buf_idx, line, col) do
     new_state = EditorState.switch_buffer(state, buf_idx)
     pid = Enum.at(state.workspace.buffers.list, buf_idx)
-    BufferServer.move_to(pid, {line, col})
+    Buffer.move_to(pid, {line, col})
     new_state
   end
 

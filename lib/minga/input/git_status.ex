@@ -9,7 +9,7 @@ defmodule Minga.Input.GitStatus do
 
   @behaviour Minga.Input.Handler
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Editor.Commands
   alias Minga.Editor.State, as: EditorState
   alias Minga.Git
@@ -170,7 +170,7 @@ defmodule Minga.Input.GitStatus do
     idx =
       Enum.find_index(state.workspace.buffers.list, fn buf ->
         try do
-          BufferServer.file_path(buf) == abs_path
+          Buffer.file_path(buf) == abs_path
         catch
           :exit, _ -> false
         end

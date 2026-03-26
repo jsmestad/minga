@@ -20,7 +20,7 @@ defmodule Minga.UI.Picker.LocationSource do
 
   @behaviour Minga.UI.Picker.Source
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Editor.Commands
   alias Minga.Editor.State, as: EditorState
   alias Minga.UI.Picker.Item
@@ -81,7 +81,7 @@ defmodule Minga.UI.Picker.LocationSource do
     current_path =
       case state.workspace.buffers.active do
         nil -> nil
-        buf -> BufferServer.file_path(buf)
+        buf -> Buffer.file_path(buf)
       end
 
     state =
@@ -93,7 +93,7 @@ defmodule Minga.UI.Picker.LocationSource do
 
     case state.workspace.buffers.active do
       nil -> state
-      buf -> BufferServer.move_to(buf, {line, col})
+      buf -> Buffer.move_to(buf, {line, col})
     end
 
     state
@@ -104,7 +104,7 @@ defmodule Minga.UI.Picker.LocationSource do
     idx =
       Enum.find_index(state.workspace.buffers.list, fn buf ->
         try do
-          BufferServer.file_path(buf) == file_path
+          Buffer.file_path(buf) == file_path
         catch
           :exit, _ -> false
         end
@@ -124,7 +124,7 @@ defmodule Minga.UI.Picker.LocationSource do
 
   @spec set_jump_mark(EditorState.t()) :: EditorState.t()
   defp set_jump_mark(%{workspace: %{buffers: %{active: buf}}} = state) when is_pid(buf) do
-    pos = BufferServer.cursor(buf)
+    pos = Buffer.cursor(buf)
 
     %{
       state

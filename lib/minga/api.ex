@@ -20,7 +20,7 @@ defmodule Minga.API do
   possible. They never raise on bad input.
   """
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
 
   @typedoc "Editor GenServer reference."
   @type editor :: GenServer.server()
@@ -28,7 +28,7 @@ defmodule Minga.API do
   @default_editor Minga.Editor
 
   # ── Buffer-level functions ──────────────────────────────────────────────────
-  # These call BufferServer directly for speed (no Editor GenServer round-trip).
+  # These call Buffer directly for speed (no Editor GenServer round-trip).
 
   @doc """
   Inserts text at the current cursor position in the active buffer.
@@ -41,7 +41,7 @@ defmodule Minga.API do
   @spec insert(String.t(), editor()) :: :ok | {:error, :no_buffer}
   def insert(text, editor \\ @default_editor) when is_binary(text) do
     with_buffer(editor, fn buf ->
-      Enum.each(String.graphemes(text), &BufferServer.insert_char(buf, &1))
+      Enum.each(String.graphemes(text), &Buffer.insert_char(buf, &1))
       :ok
     end)
   end
@@ -56,7 +56,7 @@ defmodule Minga.API do
   @spec content(editor()) :: {:ok, String.t()} | {:error, :no_buffer}
   def content(editor \\ @default_editor) do
     with_buffer(editor, fn buf ->
-      {:ok, BufferServer.content(buf)}
+      {:ok, Buffer.content(buf)}
     end)
   end
 
@@ -70,7 +70,7 @@ defmodule Minga.API do
   @spec cursor(editor()) :: {:ok, {non_neg_integer(), non_neg_integer()}} | {:error, :no_buffer}
   def cursor(editor \\ @default_editor) do
     with_buffer(editor, fn buf ->
-      {:ok, BufferServer.cursor(buf)}
+      {:ok, Buffer.cursor(buf)}
     end)
   end
 
@@ -87,7 +87,7 @@ defmodule Minga.API do
   def move_to(line, col, editor \\ @default_editor)
       when is_integer(line) and is_integer(col) and line >= 0 and col >= 0 do
     with_buffer(editor, fn buf ->
-      BufferServer.move_to(buf, {line, col})
+      Buffer.move_to(buf, {line, col})
       :ok
     end)
   end
@@ -102,7 +102,7 @@ defmodule Minga.API do
   @spec line_count(editor()) :: {:ok, non_neg_integer()} | {:error, :no_buffer}
   def line_count(editor \\ @default_editor) do
     with_buffer(editor, fn buf ->
-      {:ok, BufferServer.line_count(buf)}
+      {:ok, Buffer.line_count(buf)}
     end)
   end
 

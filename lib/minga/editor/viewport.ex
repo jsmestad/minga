@@ -7,7 +7,7 @@ defmodule Minga.Editor.Viewport do
   scrolls to keep the cursor visible.
   """
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Config.Options
 
   @enforce_keys [:top, :left, :rows, :cols]
@@ -88,7 +88,7 @@ defmodule Minga.Editor.Viewport do
   def scroll_to_cursor(%__MODULE__{} = vp, {cursor_line, cursor_col}, buf) when is_pid(buf) do
     margin =
       try do
-        BufferServer.get_option(buf, :scroll_margin)
+        Buffer.get_option(buf, :scroll_margin)
       catch
         :exit, _ -> 5
       end

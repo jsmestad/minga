@@ -23,7 +23,7 @@ defmodule Minga.Editor.Layout do
   constraint.
   """
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Window
   alias Minga.Editor.WindowTree
@@ -206,14 +206,14 @@ defmodule Minga.Editor.Layout do
   end
 
   # Returns the display filename of the first (top-left) leaf in a subtree.
-  # Uses BufferServer.display_name/1 which handles named buffers (e.g. *Messages*)
+  # Uses Buffer.display_name/1 which handles named buffers (e.g. *Messages*)
   # and the [RO] suffix in a single round-trip.
   @spec first_window_filename(WindowTree.t(), map()) :: String.t()
   defp first_window_filename({:leaf, id}, window_map) do
     case Map.get(window_map, id) do
       %{buffer: buf} when is_pid(buf) ->
         try do
-          BufferServer.display_name(buf)
+          Buffer.display_name(buf)
         catch
           :exit, _ -> "[no file]"
         end

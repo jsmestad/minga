@@ -6,7 +6,7 @@ defmodule Minga.Editor.Commands.Operators do
 
   @behaviour Minga.Command.Provider
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Editor.Commands.Helpers
   alias Minga.Editor.State, as: EditorState
   alias Minga.Mode
@@ -50,11 +50,11 @@ defmodule Minga.Editor.Commands.Operators do
     if read_only?(buf) do
       read_only_msg(state)
     else
-      {line, _col} = BufferServer.cursor(buf)
-      total = BufferServer.line_count(buf)
+      {line, _col} = Buffer.cursor(buf)
+      total = Buffer.line_count(buf)
       end_line = min(line + count - 1, total - 1)
-      yanked = BufferServer.get_lines_content(buf, line, end_line)
-      BufferServer.delete_lines(buf, line, end_line)
+      yanked = Buffer.lines_content(buf, line, end_line)
+      Buffer.delete_lines(buf, line, end_line)
       Helpers.put_register(state, yanked <> "\n", :delete, :linewise)
     end
   end
@@ -68,16 +68,16 @@ defmodule Minga.Editor.Commands.Operators do
     if read_only?(buf) do
       read_only_msg(state)
     else
-      {line, _col} = BufferServer.cursor(buf)
-      total = BufferServer.line_count(buf)
+      {line, _col} = Buffer.cursor(buf)
+      total = Buffer.line_count(buf)
       end_line = min(line + count - 1, total - 1)
 
       # Yank all lines first, then clear/delete
-      yanked = BufferServer.get_lines_content(buf, line, end_line)
+      yanked = Buffer.lines_content(buf, line, end_line)
 
       # Delete extra lines (all but the first), then clear the remaining one
       delete_trailing_lines(buf, line, end_line)
-      {:ok, _} = BufferServer.clear_line(buf, line)
+      {:ok, _} = Buffer.clear_line(buf, line)
       Helpers.put_register(state, yanked <> "\n", :delete, :linewise)
     end
   end
@@ -88,10 +88,10 @@ defmodule Minga.Editor.Commands.Operators do
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, {:yank_lines_counted, count})
       when is_integer(count) and count >= 1 do
-    {line, _col} = BufferServer.cursor(buf)
-    total = BufferServer.line_count(buf)
+    {line, _col} = Buffer.cursor(buf)
+    total = Buffer.line_count(buf)
     end_line = min(line + count - 1, total - 1)
-    yanked = BufferServer.get_lines_content(buf, line, end_line)
+    yanked = Buffer.lines_content(buf, line, end_line)
     Helpers.put_register(state, yanked <> "\n", :yank, :linewise)
   end
 
@@ -131,12 +131,12 @@ defmodule Minga.Editor.Commands.Operators do
   defp delete_trailing_lines(_buf, same, same), do: :ok
 
   defp delete_trailing_lines(buf, start_line, end_line) do
-    BufferServer.delete_lines(buf, start_line + 1, end_line)
+    Buffer.delete_lines(buf, start_line + 1, end_line)
     :ok
   end
 
   @spec read_only?(pid()) :: boolean()
-  defp read_only?(buf), do: BufferServer.read_only?(buf)
+  defp read_only?(buf), do: Buffer.read_only?(buf)
 
   @spec read_only_msg(state()) :: state()
   defp read_only_msg(state), do: EditorState.set_status(state, "Buffer is read-only")

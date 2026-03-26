@@ -20,7 +20,7 @@ defmodule Minga.Input.CUA.SpaceLeader do
   In vim mode, SPC is already a pure leader key in normal mode.
   """
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Editor.Commands
   alias Minga.Editor.State, as: EditorState
   alias Minga.Keymap.Active, as: KeymapActive
@@ -113,7 +113,7 @@ defmodule Minga.Input.CUA.SpaceLeader do
   @spec insert_space(EditorState.t()) :: EditorState.t()
   defp insert_space(state) do
     buf = state.workspace.buffers.active
-    if is_pid(buf), do: BufferServer.insert_char(buf, " ")
+    if is_pid(buf), do: Buffer.insert_char(buf, " ")
     state
   catch
     :exit, _ -> state
@@ -124,9 +124,9 @@ defmodule Minga.Input.CUA.SpaceLeader do
     buf = state.workspace.buffers.active
 
     if is_pid(buf) do
-      BufferServer.break_undo_coalescing(buf)
-      BufferServer.delete_before(buf)
-      BufferServer.break_undo_coalescing(buf)
+      Buffer.break_undo_coalescing(buf)
+      Buffer.delete_before(buf)
+      Buffer.break_undo_coalescing(buf)
     end
 
     state

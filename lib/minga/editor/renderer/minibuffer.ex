@@ -10,7 +10,7 @@ defmodule Minga.Editor.Renderer.Minibuffer do
   Returns `DisplayList.draw()` tuples.
   """
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Diagnostics
   alias Minga.Editor.DisplayList
   alias Minga.LSP.SyncServer
@@ -233,7 +233,7 @@ defmodule Minga.Editor.Renderer.Minibuffer do
 
   @spec cursor_line_diagnostic(pid()) :: String.t() | nil
   defp cursor_line_diagnostic(buf) do
-    file_path = BufferServer.file_path(buf)
+    file_path = Buffer.file_path(buf)
 
     case file_path do
       nil ->
@@ -241,7 +241,7 @@ defmodule Minga.Editor.Renderer.Minibuffer do
 
       path ->
         uri = SyncServer.path_to_uri(path)
-        {cursor_line, _col} = BufferServer.cursor(buf)
+        {cursor_line, _col} = Buffer.cursor(buf)
         first_on_line(uri, cursor_line)
     end
   end

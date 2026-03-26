@@ -10,7 +10,7 @@ defmodule Minga.Agent.Tools.MultiEditFile do
   If any edit fails, subsequent edits still attempt and all results are reported.
   """
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Editor
 
   @typedoc "A single edit operation."
@@ -44,7 +44,7 @@ defmodule Minga.Agent.Tools.MultiEditFile do
         {edit["old_text"] || "", edit["new_text"] || ""}
       end)
 
-    case BufferServer.find_and_replace_batch(pid, edit_pairs) do
+    case Buffer.find_and_replace_batch(pid, edit_pairs) do
       {:ok, results} -> {:ok, format_buffer_results(path, results)}
       {:error, msg} -> {:error, "#{path}: #{msg}"}
     end
@@ -62,7 +62,7 @@ defmodule Minga.Agent.Tools.MultiEditFile do
     :exit, _ -> :unavailable
   end
 
-  @spec format_buffer_results(String.t(), [BufferServer.replace_result()]) :: String.t()
+  @spec format_buffer_results(String.t(), [Buffer.replace_result()]) :: String.t()
   defp format_buffer_results(path, results) do
     total = length(results)
     succeeded = Enum.count(results, &match?({:ok, _}, &1))

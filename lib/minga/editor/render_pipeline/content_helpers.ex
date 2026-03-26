@@ -13,7 +13,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
   alias Minga.Buffer.Decorations.ConcealRange
   alias Minga.Buffer.Decorations.FoldRegion
   alias Minga.Buffer.Document
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Buffer.Unicode
   alias Minga.Config.Options
   alias Minga.Diagnostics
@@ -814,7 +814,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
   @doc "Returns the decorations for a window's buffer."
   @spec window_decorations(Window.t()) :: Decorations.t()
   def window_decorations(%{buffer: buf}) when is_pid(buf) do
-    BufferServer.decorations(buf)
+    Buffer.decorations(buf)
     |> Decorations.build_vt_line_cache()
   catch
     :exit, _ -> Decorations.new()
@@ -870,7 +870,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
   @doc "Returns diagnostic signs for a window's buffer."
   @spec diagnostic_signs_for_window(state(), Window.t()) :: %{non_neg_integer() => atom()}
   def diagnostic_signs_for_window(_state, %{buffer: buf}) when is_pid(buf) do
-    case BufferServer.file_path(buf) do
+    case Buffer.file_path(buf) do
       nil -> %{}
       path -> Diagnostics.severity_by_line(SyncServer.path_to_uri(path))
     end
@@ -955,7 +955,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
 
   @spec wrap_option(pid(), atom()) :: boolean()
   defp wrap_option(buf, name) do
-    BufferServer.get_option(buf, name)
+    Buffer.get_option(buf, name)
   catch
     :exit, _ -> true
   end

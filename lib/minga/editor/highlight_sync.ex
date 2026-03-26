@@ -6,7 +6,7 @@ defmodule Minga.Editor.HighlightSync do
   highlight response events back into editor state.
   """
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Editor.State, as: EditorState
   alias Minga.Frontend.Protocol
   alias Minga.Parser.Manager, as: ParserManager
@@ -23,7 +23,7 @@ defmodule Minga.Editor.HighlightSync do
   def setup_for_buffer(%EditorState{workspace: %{buffers: %{active: nil}}} = state), do: state
 
   def setup_for_buffer(%EditorState{} = state) do
-    filetype = BufferServer.filetype(state.workspace.buffers.active)
+    filetype = Buffer.filetype(state.workspace.buffers.active)
 
     case Grammar.language_for_filetype(filetype) do
       {:ok, language} ->
@@ -57,7 +57,7 @@ defmodule Minga.Editor.HighlightSync do
   def setup_for_buffer_pid(state, buf_pid, opts \\ [])
 
   def setup_for_buffer_pid(%EditorState{} = state, buf_pid, opts) when is_pid(buf_pid) do
-    filetype = BufferServer.filetype(buf_pid)
+    filetype = Buffer.filetype(buf_pid)
 
     case Grammar.language_for_filetype(filetype) do
       {:ok, language} ->
@@ -82,7 +82,7 @@ defmodule Minga.Editor.HighlightSync do
     case Map.fetch(hl.buffer_ids, buf_pid) do
       {:ok, buffer_id} ->
         version = hl.version + 1
-        content = BufferServer.content(buf_pid)
+        content = Buffer.content(buf_pid)
         parse_cmd = Protocol.encode_parse_buffer(buffer_id, version, content)
         ParserManager.send_commands([parse_cmd])
 
@@ -107,7 +107,7 @@ defmodule Minga.Editor.HighlightSync do
     {buffer_id, state} = ensure_buffer_id_for(state, buf_pid)
     hl = state.workspace.highlight
     version = hl.version + 1
-    content = BufferServer.content(buf_pid)
+    content = Buffer.content(buf_pid)
 
     query_override = user_query_override(buffer_id, language)
     injection_override = user_injection_query_override(buffer_id, language)
@@ -132,7 +132,7 @@ defmodule Minga.Editor.HighlightSync do
     # replays the full command set (including custom queries) so user overrides
     # survive a parser crash.
     setup_fn = fn bid ->
-      fresh_content = BufferServer.content(buf_pid)
+      fresh_content = Buffer.content(buf_pid)
 
       Enum.concat([
         [Protocol.encode_set_language(bid, language)],
@@ -147,7 +147,7 @@ defmodule Minga.Editor.HighlightSync do
     ParserManager.register_buffer(
       buffer_id,
       language,
-      fn -> BufferServer.content(buf_pid) end,
+      fn -> Buffer.content(buf_pid) end,
       setup_commands_fn: setup_fn
     )
 
@@ -212,7 +212,7 @@ defmodule Minga.Editor.HighlightSync do
     {buffer_id, state} = ensure_buffer_id(state)
     hl = state.workspace.highlight
     version = hl.version + 1
-    content = BufferServer.content(state.workspace.buffers.active)
+    content = Buffer.content(state.workspace.buffers.active)
 
     query_override = user_query_override(buffer_id, language)
     injection_override = user_injection_query_override(buffer_id, language)
@@ -237,7 +237,7 @@ defmodule Minga.Editor.HighlightSync do
     active = state.workspace.buffers.active
 
     setup_fn = fn bid ->
-      fresh_content = BufferServer.content(active)
+      fresh_content = Buffer.content(active)
 
       Enum.concat([
         [Protocol.encode_set_language(bid, language)],
@@ -252,7 +252,7 @@ defmodule Minga.Editor.HighlightSync do
     ParserManager.register_buffer(
       buffer_id,
       language,
-      fn -> BufferServer.content(active) end,
+      fn -> Buffer.content(active) end,
       setup_commands_fn: setup_fn
     )
 
@@ -446,7 +446,7 @@ defmodule Minga.Editor.HighlightSync do
 
     # Try incremental sync first: if the buffer has pending edit deltas,
     # send them as an edit_buffer command instead of the full content.
-    edits = BufferServer.flush_edits(state.workspace.buffers.active, :highlight)
+    edits = Buffer.flush_edits(state.workspace.buffers.active, :highlight)
 
     commands =
       if edits != [] do
@@ -454,7 +454,7 @@ defmodule Minga.Editor.HighlightSync do
         [Protocol.encode_edit_buffer(buffer_id, version, delta_maps)]
       else
         # No deltas (e.g., undo/redo, content replaced externally): full sync
-        content = BufferServer.content(state.workspace.buffers.active)
+        content = Buffer.content(state.workspace.buffers.active)
         [Protocol.encode_parse_buffer(buffer_id, version, content)]
       end
 

@@ -16,7 +16,7 @@ defmodule Minga.Git.Tracker do
 
   use GenServer
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Git
   alias Minga.Git.Buffer, as: GitBuffer
 
@@ -143,7 +143,7 @@ defmodule Minga.Git.Tracker do
         :ok
 
       git_pid ->
-        {content, _cursor} = BufferServer.content_and_cursor(buffer_pid)
+        {content, _cursor} = Buffer.content_and_cursor(buffer_pid)
         GitBuffer.update(git_pid, content)
         :ok
     end
@@ -154,7 +154,7 @@ defmodule Minga.Git.Tracker do
   @spec maybe_start_git_buffer(map(), pid(), String.t()) :: map()
   defp maybe_start_git_buffer(state, buffer_pid, path) do
     with {:ok, git_root} <- Git.root_for(path),
-         {content, _cursor} <- BufferServer.content_and_cursor(buffer_pid),
+         {content, _cursor} <- Buffer.content_and_cursor(buffer_pid),
          {:ok, git_pid} <-
            DynamicSupervisor.start_child(
              Minga.Buffer.Supervisor,
@@ -256,7 +256,7 @@ defmodule Minga.Git.Tracker do
         :ok
 
       git_pid ->
-        {content, _cursor} = BufferServer.content_and_cursor(buf)
+        {content, _cursor} = Buffer.content_and_cursor(buf)
         GitBuffer.invalidate_base(git_pid, content)
         :ok
     end

@@ -10,7 +10,7 @@ defmodule Minga.Editor.Commands.Folding do
   @behaviour Minga.Command.Provider
 
   alias Minga.Buffer.Decorations
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Editor.FoldMap
   alias Minga.Editor.FoldRange
   alias Minga.Editor.State, as: EditorState
@@ -114,7 +114,7 @@ defmodule Minga.Editor.Commands.Folding do
   @spec apply_decoration_fold(state(), pid(), non_neg_integer(), :toggle | :close | :open) ::
           state()
   defp apply_decoration_fold(state, buf, cursor_line, action) do
-    decs = BufferServer.decorations(buf)
+    decs = Buffer.decorations(buf)
 
     case Decorations.fold_region_at(decs, cursor_line) do
       nil -> state
@@ -128,7 +128,7 @@ defmodule Minga.Editor.Commands.Folding do
     should_act = should_toggle?(action, closed)
 
     if should_act do
-      BufferServer.batch_decorations(buf, fn d -> Decorations.toggle_fold_region(d, id) end)
+      Buffer.batch_decorations(buf, fn d -> Decorations.toggle_fold_region(d, id) end)
     end
 
     state
@@ -151,7 +151,7 @@ defmodule Minga.Editor.Commands.Folding do
   defp set_all_decoration_folds(state, direction) do
     buf = state.workspace.buffers.active
 
-    BufferServer.batch_decorations(buf, fn decs ->
+    Buffer.batch_decorations(buf, fn decs ->
       Enum.reduce(decs.fold_regions, decs, fn fold, d ->
         toggle_if_needed(d, fold, direction)
       end)

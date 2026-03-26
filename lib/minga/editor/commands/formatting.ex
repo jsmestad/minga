@@ -5,7 +5,7 @@ defmodule Minga.Editor.Commands.Formatting do
 
   @behaviour Minga.Command.Provider
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Editor.State, as: EditorState
   alias Minga.Mode.ToolConfirmState
   alias Minga.Tool.Recipe.Registry, as: RecipeRegistry
@@ -15,8 +15,8 @@ defmodule Minga.Editor.Commands.Formatting do
 
   @spec format_buffer(state()) :: state()
   def format_buffer(%{workspace: %{buffers: %{active: buf}}} = state) when is_pid(buf) do
-    filetype = BufferServer.filetype(buf)
-    file_path = BufferServer.file_path(buf)
+    filetype = Buffer.filetype(buf)
+    file_path = Buffer.file_path(buf)
     spec = Minga.Editing.resolve_formatter(filetype, file_path)
 
     case spec do
@@ -40,16 +40,16 @@ defmodule Minga.Editor.Commands.Formatting do
 
   @spec format_and_replace(state(), pid(), Minga.Editing.Formatter.formatter_spec()) :: state()
   defp format_and_replace(state, buf, spec) do
-    content = BufferServer.content(buf)
-    buf_name = BufferServer.file_path(buf) |> Path.basename()
+    content = Buffer.content(buf)
+    buf_name = Buffer.file_path(buf) |> Path.basename()
 
     case Minga.Editing.format(content, spec) do
       {:ok, formatted} ->
-        {cursor_line, cursor_col} = BufferServer.cursor(buf)
-        BufferServer.replace_content(buf, formatted)
-        line_count = BufferServer.line_count(buf)
+        {cursor_line, cursor_col} = Buffer.cursor(buf)
+        Buffer.replace_content(buf, formatted)
+        line_count = Buffer.line_count(buf)
         safe_line = min(cursor_line, max(line_count - 1, 0))
-        BufferServer.move_to(buf, {safe_line, cursor_col})
+        Buffer.move_to(buf, {safe_line, cursor_col})
         Minga.Editor.log_to_messages("Formatted: #{buf_name}")
         EditorState.set_status(state, "Formatted")
 

@@ -13,7 +13,7 @@ defmodule Minga.Agent.UIState.Panel do
   """
 
   alias Minga.Agent.Config, as: AgentConfig
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Editing.Scroll
 
   @typedoc "A collapsed paste block. Stores the original text and whether the block is currently expanded for editing."
@@ -65,7 +65,7 @@ defmodule Minga.Agent.UIState.Panel do
   @doc "Returns the input lines as a list of strings."
   @spec input_lines(t()) :: [String.t()]
   def input_lines(%__MODULE__{prompt_buffer: pid}) when is_pid(pid) do
-    BufferServer.content(pid) |> String.split("\n")
+    Buffer.content(pid) |> String.split("\n")
   end
 
   def input_lines(%__MODULE__{}), do: [""]
@@ -73,7 +73,7 @@ defmodule Minga.Agent.UIState.Panel do
   @doc "Returns the input cursor position as `{line, col}`."
   @spec input_cursor(t()) :: {non_neg_integer(), non_neg_integer()}
   def input_cursor(%__MODULE__{prompt_buffer: pid}) when is_pid(pid) do
-    BufferServer.cursor(pid)
+    Buffer.cursor(pid)
   end
 
   def input_cursor(%__MODULE__{}), do: {0, 0}
@@ -81,7 +81,7 @@ defmodule Minga.Agent.UIState.Panel do
   @doc "Returns the number of input lines."
   @spec input_line_count(t()) :: pos_integer()
   def input_line_count(%__MODULE__{prompt_buffer: pid}) when is_pid(pid) do
-    BufferServer.line_count(pid)
+    Buffer.line_count(pid)
   end
 
   def input_line_count(%__MODULE__{}), do: 1
@@ -89,7 +89,7 @@ defmodule Minga.Agent.UIState.Panel do
   @doc "Returns true if the input is empty (single empty line)."
   @spec input_empty?(t()) :: boolean()
   def input_empty?(%__MODULE__{prompt_buffer: pid}) when is_pid(pid) do
-    BufferServer.content(pid) == ""
+    Buffer.content(pid) == ""
   end
 
   def input_empty?(%__MODULE__{}), do: true
@@ -97,7 +97,7 @@ defmodule Minga.Agent.UIState.Panel do
   @doc "Returns the raw input text (with placeholders, not substituted)."
   @spec input_text(t()) :: String.t()
   def input_text(%__MODULE__{prompt_buffer: pid}) when is_pid(pid) do
-    BufferServer.content(pid)
+    Buffer.content(pid)
   end
 
   def input_text(%__MODULE__{}), do: ""

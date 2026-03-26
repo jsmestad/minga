@@ -8,7 +8,7 @@ defmodule Minga.Editor.Commands.Lsp do
 
   @behaviour Minga.Command.Provider
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Editor.HoverPopup
   alias Minga.Editor.LspActions
   alias Minga.Editor.PickerUI
@@ -89,7 +89,7 @@ defmodule Minga.Editor.Commands.Lsp do
 
   def execute(state, :lsp_start) do
     buf = state.workspace.buffers.active
-    filetype = BufferServer.filetype(buf)
+    filetype = Buffer.filetype(buf)
     configs = ServerRegistry.available_servers_for(filetype)
 
     case configs do
@@ -155,7 +155,7 @@ defmodule Minga.Editor.Commands.Lsp do
   # started LSP servers.
   @spec maybe_broadcast_buffer_opened(pid()) :: :ok
   defp maybe_broadcast_buffer_opened(buf) do
-    path = BufferServer.file_path(buf)
+    path = Buffer.file_path(buf)
 
     if path do
       Minga.Events.broadcast(:buffer_opened, %Minga.Events.BufferEvent{buffer: buf, path: path})

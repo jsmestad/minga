@@ -9,7 +9,7 @@ defmodule Minga.Input.ConflictPrompt do
 
   @behaviour Minga.Input.Handler
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Editor.State, as: EditorState
 
   @impl true
@@ -17,8 +17,8 @@ defmodule Minga.Input.ConflictPrompt do
           Minga.Input.Handler.result()
   def handle_key(%{workspace: %{pending_conflict: {buf, _path}}} = state, ?r, _mods)
       when is_pid(buf) do
-    BufferServer.reload(buf)
-    name = Path.basename(BufferServer.file_path(buf) || "buffer")
+    Buffer.reload(buf)
+    name = Path.basename(Buffer.file_path(buf) || "buffer")
 
     {:handled,
      %{state | workspace: %{state.workspace | pending_conflict: nil}}

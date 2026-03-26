@@ -79,7 +79,7 @@ defmodule Minga.Frontend.Protocol.GUI do
 
   import Bitwise
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Editor.MinibufferData
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
@@ -554,7 +554,7 @@ defmodule Minga.Frontend.Protocol.GUI do
 
   defp tab_dirty_bit(tab, is_active, active_win_buffer) do
     pid = resolve_tab_buffer(tab, is_active, active_win_buffer)
-    if pid && BufferServer.dirty?(pid), do: 1, else: 0
+    if pid && Buffer.dirty?(pid), do: 1, else: 0
   end
 
   @spec resolve_tab_buffer(Tab.t(), 0 | 1, pid() | nil) :: pid() | nil
@@ -963,7 +963,7 @@ defmodule Minga.Frontend.Protocol.GUI do
     # Status message (shown in status bar center, takes priority over diagnostic hint)
     message = :erlang.iolist_to_binary([d.status_msg || ""])
 
-    # cursor_line/cursor_col are 0-indexed from BufferServer; encode as 1-indexed for the GUI
+    # cursor_line/cursor_col are 0-indexed from Buffer; encode as 1-indexed for the GUI
     <<@op_gui_status_bar, 0::8, mode_byte::8, d.cursor_line + 1::32, d.cursor_col + 1::32,
       d.line_count::32, flags::8, lsp_byte::8, byte_size(git_branch)::8, git_branch::binary,
       byte_size(message)::16, message::binary, byte_size(filetype)::8, filetype::binary,

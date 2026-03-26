@@ -12,7 +12,7 @@ defmodule Minga.Editing.Comment do
   the least-indented non-empty line, preserving relative indentation.
   """
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Language.Registry, as: LangRegistry
 
   @typedoc "A single injection range from tree-sitter."
@@ -95,7 +95,7 @@ defmodule Minga.Editing.Comment do
           :ok
   def toggle_lines(buf, start_line, end_line, filetype, injection_ranges \\ []) do
     prefix = resolve_comment_prefix(buf, start_line, filetype, injection_ranges)
-    raw = BufferServer.get_lines_content(buf, start_line, end_line)
+    raw = Buffer.lines_content(buf, start_line, end_line)
     lines = String.split(raw, "\n")
 
     non_empty = Enum.reject(lines, &blank?/1)
@@ -119,7 +119,7 @@ defmodule Minga.Editing.Comment do
 
   defp resolve_comment_prefix(buf, start_line, filetype, injection_ranges) do
     # Get byte offset of the start line to determine which language context we're in
-    byte_offset = BufferServer.byte_offset_for_line(buf, start_line)
+    byte_offset = Buffer.byte_offset_for_line(buf, start_line)
     comment_string_at(filetype, byte_offset, injection_ranges)
   end
 
@@ -184,13 +184,13 @@ defmodule Minga.Editing.Comment do
           | {:delete, non_neg_integer(), non_neg_integer(), non_neg_integer()}
         ) :: :ok
   defp apply_edit(buf, {:insert, line, col, text}) do
-    BufferServer.move_to(buf, {line, col})
-    BufferServer.insert_text(buf, text)
+    Buffer.move_to(buf, {line, col})
+    Buffer.insert_text(buf, text)
   end
 
   defp apply_edit(buf, {:delete, line, col, len}) do
     # delete_range is inclusive on both ends, so end col is col + len - 1
-    BufferServer.apply_text_edit(buf, line, col, line, col + len - 1, "")
+    Buffer.apply_edit(buf, line, col, line, col + len - 1, "")
   end
 
   @spec blank?(String.t()) :: boolean()

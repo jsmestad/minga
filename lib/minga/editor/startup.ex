@@ -12,7 +12,7 @@ defmodule Minga.Editor.Startup do
 
   alias Minga.Agent.BufferSync, as: AgentBufferSync
   alias Minga.Agent.UIState
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Config.Loader, as: ConfigLoader
   alias Minga.Config.Options, as: ConfigOptions
   alias Minga.Editor.Commands
@@ -67,7 +67,7 @@ defmodule Minga.Editor.Startup do
           {:ok, buf} =
             DynamicSupervisor.start_child(
               Minga.Buffer.Supervisor,
-              {BufferServer, content: "", buffer_name: "[new 1]"}
+              {Buffer, content: "", buffer_name: "[new 1]"}
             )
 
           {buf, [buf]}
@@ -278,7 +278,7 @@ defmodule Minga.Editor.Startup do
     child_opts =
       [buffer_name: name, unlisted: true, persistent: true] ++ opts
 
-    case DynamicSupervisor.start_child(Minga.Buffer.Supervisor, {BufferServer, child_opts}) do
+    case DynamicSupervisor.start_child(Minga.Buffer.Supervisor, {Buffer, child_opts}) do
       {:ok, pid} -> pid
       _ -> nil
     end

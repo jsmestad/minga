@@ -20,7 +20,7 @@ defmodule Minga.Editor.CompletionTrigger do
   the user is typing quickly.
   """
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Editing.Completion
   alias Minga.LSP.Client
   alias Minga.LSP.SyncServer
@@ -179,7 +179,7 @@ defmodule Minga.Editor.CompletionTrigger do
   # Tracks all refs so responses from any client can be merged.
   @spec send_completion_requests(t(), [pid()], pid()) :: {t(), nil}
   defp send_completion_requests(bridge, clients, buffer_pid) do
-    file_path = BufferServer.file_path(buffer_pid)
+    file_path = Buffer.file_path(buffer_pid)
 
     case file_path do
       nil ->
@@ -257,7 +257,7 @@ defmodule Minga.Editor.CompletionTrigger do
 
   @spec get_cursor_position(pid()) :: {non_neg_integer(), non_neg_integer()}
   defp get_cursor_position(buffer_pid) do
-    {_content, {line, col}} = BufferServer.content_and_cursor(buffer_pid)
+    {_content, {line, col}} = Buffer.content_and_cursor(buffer_pid)
     {line, col}
   end
 
@@ -265,7 +265,7 @@ defmodule Minga.Editor.CompletionTrigger do
   @doc "Returns the text typed since the trigger position (for prefix filtering)."
   @spec get_typed_since_trigger(pid(), {non_neg_integer(), non_neg_integer()}) :: String.t()
   def get_typed_since_trigger(buffer_pid, {trigger_line, trigger_col}) do
-    {content, {cursor_line, cursor_col}} = BufferServer.content_and_cursor(buffer_pid)
+    {content, {cursor_line, cursor_col}} = Buffer.content_and_cursor(buffer_pid)
 
     # Only makes sense on the same line
     if cursor_line == trigger_line and cursor_col > trigger_col do
@@ -283,7 +283,7 @@ defmodule Minga.Editor.CompletionTrigger do
   @spec identifier_prefix_length(pid(), non_neg_integer(), non_neg_integer()) ::
           non_neg_integer()
   defp identifier_prefix_length(buffer_pid, line, col) do
-    {content, _cursor} = BufferServer.content_and_cursor(buffer_pid)
+    {content, _cursor} = Buffer.content_and_cursor(buffer_pid)
     lines = String.split(content, "\n")
 
     case Enum.at(lines, line) do

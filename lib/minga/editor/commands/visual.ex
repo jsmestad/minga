@@ -7,7 +7,7 @@ defmodule Minga.Editor.Commands.Visual do
   @behaviour Minga.Command.Provider
 
   alias Minga.Buffer.Document
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Editor.Commands.Helpers
   alias Minga.Editor.HighlightSync
   alias Minga.Editor.State, as: EditorState
@@ -31,13 +31,13 @@ defmodule Minga.Editor.Commands.Visual do
       ) do
     anchor = ms.visual_anchor
     visual_type = ms.visual_type
-    cursor = BufferServer.cursor(buf)
+    cursor = Buffer.cursor(buf)
 
     {yanked, reg_type} =
       case visual_type do
         :char ->
-          text = BufferServer.get_range(buf, anchor, cursor)
-          BufferServer.delete_range(buf, anchor, cursor)
+          text = Buffer.text_between_inclusive(buf, anchor, cursor)
+          Buffer.delete_range(buf, anchor, cursor)
           {text, :charwise}
 
         :line ->
@@ -45,8 +45,8 @@ defmodule Minga.Editor.Commands.Visual do
           {cursor_line, _} = cursor
           start_line = min(anchor_line, cursor_line)
           end_line = max(anchor_line, cursor_line)
-          text = BufferServer.get_lines_content(buf, start_line, end_line)
-          BufferServer.delete_lines(buf, start_line, end_line)
+          text = Buffer.lines_content(buf, start_line, end_line)
+          Buffer.delete_lines(buf, start_line, end_line)
           {text <> "\n", :linewise}
       end
 
@@ -62,19 +62,19 @@ defmodule Minga.Editor.Commands.Visual do
       ) do
     anchor = ms.visual_anchor
     visual_type = ms.visual_type
-    cursor = BufferServer.cursor(buf)
+    cursor = Buffer.cursor(buf)
 
     {yanked, reg_type} =
       case visual_type do
         :char ->
-          {BufferServer.get_range(buf, anchor, cursor), :charwise}
+          {Buffer.text_between_inclusive(buf, anchor, cursor), :charwise}
 
         :line ->
           {anchor_line, _} = anchor
           {cursor_line, _} = cursor
           start_line = min(anchor_line, cursor_line)
           end_line = max(anchor_line, cursor_line)
-          {BufferServer.get_lines_content(buf, start_line, end_line) <> "\n", :linewise}
+          {Buffer.lines_content(buf, start_line, end_line) <> "\n", :linewise}
       end
 
     state = Helpers.put_register(state, yanked, :yank, reg_type)
@@ -92,16 +92,16 @@ defmodule Minga.Editor.Commands.Visual do
         {:wrap_visual_selection, open, close}
       ) do
     anchor = ms.visual_anchor
-    cursor = BufferServer.cursor(buf)
+    cursor = Buffer.cursor(buf)
     {start_pos, end_pos} = Helpers.sort_positions(anchor, cursor)
     {end_line, end_col} = end_pos
     {start_line, start_col} = start_pos
 
-    BufferServer.move_to(buf, {end_line, end_col + 1})
-    BufferServer.insert_char(buf, close)
-    BufferServer.move_to(buf, {start_line, start_col})
-    BufferServer.insert_char(buf, open)
-    BufferServer.move_to(buf, {start_line, start_col})
+    Buffer.move_to(buf, {end_line, end_col + 1})
+    Buffer.insert_char(buf, close)
+    Buffer.move_to(buf, {start_line, start_col})
+    Buffer.insert_char(buf, open)
+    Buffer.move_to(buf, {start_line, start_col})
     state
   end
 
@@ -112,7 +112,7 @@ defmodule Minga.Editor.Commands.Visual do
           state,
         {:visual_text_object, modifier, spec}
       ) do
-    gb = BufferServer.snapshot(buf)
+    gb = Buffer.snapshot(buf)
     cursor = Document.cursor(gb)
     buffer_id = HighlightSync.buffer_id_for(state, buf)
     range = Helpers.compute_text_object_range(gb, cursor, modifier, spec, buffer_id)
@@ -124,7 +124,7 @@ defmodule Minga.Editor.Commands.Visual do
       {start_pos, end_pos} ->
         # Update visual anchor to start of text object, move cursor to end
         new_ms = %{ms | visual_anchor: start_pos}
-        BufferServer.move_to(buf, end_pos)
+        Buffer.move_to(buf, end_pos)
         %{state | workspace: %{state.workspace | editing: %{vim | mode_state: new_ms}}}
     end
   end
@@ -132,17 +132,17 @@ defmodule Minga.Editor.Commands.Visual do
   # ── Select all ─────────────────────────────────────────────────────────────
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :select_all) when is_pid(buf) do
-    line_count = BufferServer.line_count(buf)
+    line_count = Buffer.line_count(buf)
     last_line = max(line_count - 1, 0)
 
     last_col =
-      case BufferServer.get_lines(buf, last_line, 1) do
+      case Buffer.lines(buf, last_line, 1) do
         [text] -> max(byte_size(text) - 1, 0)
         _ -> 0
       end
 
     # Enter visual line mode with anchor at start, cursor at end
-    BufferServer.move_to(buf, {last_line, last_col})
+    Buffer.move_to(buf, {last_line, last_col})
 
     visual_state = %VisualState{
       visual_anchor: {0, 0},

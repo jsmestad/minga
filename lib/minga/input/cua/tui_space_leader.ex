@@ -27,7 +27,7 @@ defmodule Minga.Input.CUA.TUISpaceLeader do
 
   @behaviour Minga.Input.Handler
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Editor.Commands
   alias Minga.Editor.State, as: EditorState
   alias Minga.Keymap.Active, as: KeymapActive
@@ -48,7 +48,7 @@ defmodule Minga.Input.CUA.TUISpaceLeader do
 
       if is_pid(buf) do
         try do
-          BufferServer.insert_char(buf, " ")
+          Buffer.insert_char(buf, " ")
         catch
           :exit, _ -> :ok
         end
@@ -151,9 +151,9 @@ defmodule Minga.Input.CUA.TUISpaceLeader do
     buf = state.workspace.buffers.active
 
     if is_pid(buf) do
-      BufferServer.break_undo_coalescing(buf)
-      BufferServer.delete_before(buf)
-      BufferServer.break_undo_coalescing(buf)
+      Buffer.break_undo_coalescing(buf)
+      Buffer.delete_before(buf)
+      Buffer.break_undo_coalescing(buf)
     end
 
     state

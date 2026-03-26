@@ -14,7 +14,7 @@ defmodule Minga.Editor.Commands.AgentSubStates do
   alias Minga.Agent.UIState
   alias Minga.Agent.UIState.Panel
   alias Minga.Agent.View.Preview
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Editor.Commands.Agent, as: AgentCommands
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
@@ -449,8 +449,8 @@ defmodule Minga.Editor.Commands.AgentSubStates do
     panel = AgentAccess.panel(state)
 
     if is_pid(panel.prompt_buffer) do
-      BufferServer.replace_content(panel.prompt_buffer, content)
-      BufferServer.set_cursor(panel.prompt_buffer, {line, col})
+      Buffer.replace_content(panel.prompt_buffer, content)
+      Buffer.move_to(panel.prompt_buffer, {line, col})
     end
 
     state

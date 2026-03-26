@@ -30,7 +30,7 @@ defmodule Minga.UI.Popup.Lifecycle do
   removes its own window without affecting other open popups.
   """
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Editor.DisplayList
   alias Minga.Editor.FloatingWindow
   alias Minga.Editor.Layout
@@ -222,7 +222,7 @@ defmodule Minga.UI.Popup.Lifecycle do
     lines =
       if is_pid(buffer_pid) do
         try do
-          snapshot = BufferServer.render_snapshot(buffer_pid, 0, interior_h)
+          snapshot = Buffer.render_snapshot(buffer_pid, 0, interior_h)
           snapshot.lines
         catch
           :exit, _ -> []
@@ -246,7 +246,7 @@ defmodule Minga.UI.Popup.Lifecycle do
 
   @spec buffer_title(pid()) :: String.t() | nil
   defp buffer_title(pid) when is_pid(pid) do
-    BufferServer.buffer_name(pid)
+    Buffer.buffer_name(pid)
   catch
     :exit, _ -> nil
   end

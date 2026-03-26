@@ -7,7 +7,7 @@ defmodule Minga.Editor.Commands.Editing do
   @behaviour Minga.Command.Provider
 
   alias Minga.Buffer.Document
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
 
   alias Minga.Editor.Commands.Helpers
   alias Minga.Editor.HighlightSync
@@ -47,16 +47,16 @@ defmodule Minga.Editor.Commands.Editing do
   # ── Deletion ──────────────────────────────────────────────────────────────
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :delete_before) do
-    if BufferServer.get_option(buf, :autopair) do
+    if Buffer.get_option(buf, :autopair) do
       execute_autopair_delete(state, buf)
     else
-      BufferServer.delete_before(buf)
+      Buffer.delete_before(buf)
       state
     end
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :delete_at) do
-    BufferServer.delete_at(buf)
+    Buffer.delete_at(buf)
     state
   end
 
@@ -87,18 +87,18 @@ defmodule Minga.Editor.Commands.Editing do
   # ── Insertion ─────────────────────────────────────────────────────────────
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :insert_newline) do
-    {line, _col} = BufferServer.cursor(buf)
+    {line, _col} = Buffer.cursor(buf)
     indent = Indent.compute_for_newline(buf, line)
-    BufferServer.insert_char(buf, "\n" <> indent)
+    Buffer.insert_char(buf, "\n" <> indent)
     state
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, {:insert_char, char})
       when is_binary(char) do
-    if BufferServer.get_option(buf, :autopair) do
+    if Buffer.get_option(buf, :autopair) do
       execute_autopair_insert(buf, char)
     else
-      BufferServer.insert_char(buf, char)
+      Buffer.insert_char(buf, char)
     end
 
     state
@@ -107,49 +107,49 @@ defmodule Minga.Editor.Commands.Editing do
   # ── Open lines ────────────────────────────────────────────────────────────
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :insert_line_below) do
-    {line, _col} = BufferServer.cursor(buf)
+    {line, _col} = Buffer.cursor(buf)
 
     end_col =
-      case BufferServer.get_lines(buf, line, 1) do
+      case Buffer.lines(buf, line, 1) do
         [text] -> byte_size(text)
         [] -> 0
       end
 
     indent = Indent.compute_for_newline(buf, line)
-    BufferServer.move_to(buf, {line, end_col})
-    BufferServer.insert_char(buf, "\n" <> indent)
+    Buffer.move_to(buf, {line, end_col})
+    Buffer.insert_char(buf, "\n" <> indent)
     state
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :insert_line_above) do
-    {line, _col} = BufferServer.cursor(buf)
+    {line, _col} = Buffer.cursor(buf)
     indent = Indent.compute_for_newline(buf, max(line - 1, 0))
-    BufferServer.move_to(buf, {line, 0})
-    BufferServer.insert_char(buf, indent <> "\n")
-    BufferServer.move_to(buf, {line, byte_size(indent)})
+    Buffer.move_to(buf, {line, 0})
+    Buffer.insert_char(buf, indent <> "\n")
+    Buffer.move_to(buf, {line, byte_size(indent)})
     state
   end
 
   # ── Single-key editing ────────────────────────────────────────────────────
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :join_lines) do
-    {line, _col} = BufferServer.cursor(buf)
-    total_lines = BufferServer.line_count(buf)
+    {line, _col} = Buffer.cursor(buf)
+    total_lines = Buffer.line_count(buf)
 
     if line < total_lines - 1 do
       current_line =
-        case BufferServer.get_lines(buf, line, 1) do
+        case Buffer.lines(buf, line, 1) do
           [text] -> text
           [] -> ""
         end
 
       end_col = byte_size(current_line)
-      BufferServer.move_to(buf, {line, end_col})
-      BufferServer.delete_at(buf)
+      Buffer.move_to(buf, {line, end_col})
+      Buffer.delete_at(buf)
 
       # After deleting the newline, the joined line contains current + next content.
       joined_line =
-        case BufferServer.get_lines(buf, line, 1) do
+        case Buffer.lines(buf, line, 1) do
           [text] -> text
           [] -> ""
         end
@@ -160,11 +160,11 @@ defmodule Minga.Editor.Commands.Editing do
       spaces_to_delete = byte_size(suffix) - byte_size(trimmed)
 
       for _ <- 1..max(spaces_to_delete, 0)//1 do
-        BufferServer.delete_at(buf)
+        Buffer.delete_at(buf)
       end
 
       if end_col > 0 and trimmed != "" do
-        BufferServer.insert_char(buf, " ")
+        Buffer.insert_char(buf, " ")
       end
     end
 
@@ -172,16 +172,16 @@ defmodule Minga.Editor.Commands.Editing do
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, {:replace_char, char}) do
-    BufferServer.delete_at(buf)
-    BufferServer.insert_char(buf, char)
-    BufferServer.move(buf, :left)
+    Buffer.delete_at(buf)
+    Buffer.insert_char(buf, char)
+    Buffer.move(buf, :left)
     state
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :toggle_case) do
-    {line, col} = BufferServer.cursor(buf)
+    {line, col} = Buffer.cursor(buf)
 
-    case BufferServer.get_lines(buf, line, 1) do
+    case Buffer.lines(buf, line, 1) do
       [text] when col < byte_size(text) ->
         # Extract grapheme at byte_col
         rest = binary_part(text, col, byte_size(text) - col)
@@ -189,8 +189,8 @@ defmodule Minga.Editor.Commands.Editing do
         case String.next_grapheme(rest) do
           {char, _} ->
             toggled = Helpers.toggle_char_case(char)
-            BufferServer.delete_at(buf)
-            BufferServer.insert_char(buf, toggled)
+            Buffer.delete_at(buf)
+            Buffer.insert_char(buf, toggled)
 
           nil ->
             :ok
@@ -210,10 +210,10 @@ defmodule Minga.Editor.Commands.Editing do
           state,
         {:replace_overwrite, char}
       ) do
-    {line, col} = BufferServer.cursor(buf)
+    {line, col} = Buffer.cursor(buf)
 
     original =
-      case BufferServer.get_lines(buf, line, 1) do
+      case Buffer.lines(buf, line, 1) do
         [text] when col < byte_size(text) ->
           rest = binary_part(text, col, byte_size(text) - col)
 
@@ -226,8 +226,8 @@ defmodule Minga.Editor.Commands.Editing do
           " "
       end
 
-    BufferServer.delete_at(buf)
-    BufferServer.insert_char(buf, char)
+    Buffer.delete_at(buf)
+    Buffer.insert_char(buf, char)
     new_ms = %{ms | original_chars: [original | ms.original_chars]}
 
     %{
@@ -247,9 +247,9 @@ defmodule Minga.Editor.Commands.Editing do
         } = state,
         :replace_restore
       ) do
-    BufferServer.delete_before(buf)
-    BufferServer.insert_char(buf, orig)
-    BufferServer.move(buf, :left)
+    Buffer.delete_before(buf)
+    Buffer.insert_char(buf, orig)
+    Buffer.move(buf, :left)
     new_ms = %{ms | original_chars: rest}
 
     %{
@@ -269,12 +269,12 @@ defmodule Minga.Editor.Commands.Editing do
   # ── Undo / redo ───────────────────────────────────────────────────────────
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :undo) do
-    BufferServer.undo(buf)
+    Buffer.undo(buf)
     state
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :redo) do
-    BufferServer.redo(buf)
+    Buffer.redo(buf)
     state
   end
 
@@ -311,17 +311,17 @@ defmodule Minga.Editor.Commands.Editing do
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :indent_line) do
     tw = tab_width(buf)
     indent = String.duplicate(" ", tw)
-    {line, col} = BufferServer.cursor(buf)
-    BufferServer.move_to(buf, {line, 0})
-    BufferServer.insert_char(buf, indent)
-    BufferServer.move_to(buf, {line, col + tw})
+    {line, col} = Buffer.cursor(buf)
+    Buffer.move_to(buf, {line, 0})
+    Buffer.insert_char(buf, indent)
+    Buffer.move_to(buf, {line, col + tw})
     state
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :dedent_line) do
-    {line, col} = BufferServer.cursor(buf)
+    {line, col} = Buffer.cursor(buf)
 
-    case BufferServer.get_lines(buf, line, 1) do
+    case Buffer.lines(buf, line, 1) do
       [text] -> dedent_single_line(buf, line, col, text)
       _ -> :ok
     end
@@ -332,23 +332,23 @@ defmodule Minga.Editor.Commands.Editing do
   # ── Indent / dedent (multiple lines via count or motion) ─────────────────
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, {:indent_lines, n}) do
-    {cursor_line, _} = BufferServer.cursor(buf)
-    total = BufferServer.line_count(buf)
+    {cursor_line, _} = Buffer.cursor(buf)
+    total = Buffer.line_count(buf)
     end_line = min(cursor_line + n - 1, total - 1)
     do_indent_lines(buf, cursor_line, end_line)
     state
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, {:dedent_lines, n}) do
-    {cursor_line, _} = BufferServer.cursor(buf)
-    total = BufferServer.line_count(buf)
+    {cursor_line, _} = Buffer.cursor(buf)
+    total = Buffer.line_count(buf)
     end_line = min(cursor_line + n - 1, total - 1)
     do_dedent_lines(buf, cursor_line, end_line)
     state
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, {:indent_motion, motion}) do
-    gb = BufferServer.snapshot(buf)
+    gb = Buffer.snapshot(buf)
     cursor = Document.cursor(gb)
     target = Helpers.resolve_motion(gb, cursor, motion)
     {cursor_line, _} = cursor
@@ -360,7 +360,7 @@ defmodule Minga.Editor.Commands.Editing do
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, {:dedent_motion, motion}) do
-    gb = BufferServer.snapshot(buf)
+    gb = Buffer.snapshot(buf)
     cursor = Document.cursor(gb)
     target = Helpers.resolve_motion(gb, cursor, motion)
     {cursor_line, _} = cursor
@@ -377,7 +377,7 @@ defmodule Minga.Editor.Commands.Editing do
         :indent_visual_selection
       ) do
     anchor = ms.visual_anchor
-    cursor = BufferServer.cursor(buf)
+    cursor = Buffer.cursor(buf)
     {anchor_line, _} = anchor
     {cursor_line, _} = cursor
     start_line = min(anchor_line, cursor_line)
@@ -392,7 +392,7 @@ defmodule Minga.Editor.Commands.Editing do
         :dedent_visual_selection
       ) do
     anchor = ms.visual_anchor
-    cursor = BufferServer.cursor(buf)
+    cursor = Buffer.cursor(buf)
     {anchor_line, _} = anchor
     {cursor_line, _} = cursor
     start_line = min(anchor_line, cursor_line)
@@ -404,15 +404,15 @@ defmodule Minga.Editor.Commands.Editing do
   # ── Reindent (= operator) ──────────────────────────────────────────────────
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, {:reindent_lines, n}) do
-    {cursor_line, _} = BufferServer.cursor(buf)
-    total = BufferServer.line_count(buf)
+    {cursor_line, _} = Buffer.cursor(buf)
+    total = Buffer.line_count(buf)
     end_line = min(cursor_line + n - 1, total - 1)
     do_reindent_lines(buf, cursor_line, end_line)
     state
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, {:reindent_motion, motion}) do
-    gb = BufferServer.snapshot(buf)
+    gb = Buffer.snapshot(buf)
     cursor = Document.cursor(gb)
     target = Helpers.resolve_motion(gb, cursor, motion)
     {cursor_line, _} = cursor
@@ -429,7 +429,7 @@ defmodule Minga.Editor.Commands.Editing do
         :reindent_visual_selection
       ) do
     anchor = ms.visual_anchor
-    cursor = BufferServer.cursor(buf)
+    cursor = Buffer.cursor(buf)
     {anchor_line, _} = anchor
     {cursor_line, _} = cursor
     start_line = min(anchor_line, cursor_line)
@@ -443,7 +443,7 @@ defmodule Minga.Editor.Commands.Editing do
         {:reindent_text_object, modifier, spec}
       )
       when is_pid(buf) do
-    gb = BufferServer.snapshot(buf)
+    gb = Buffer.snapshot(buf)
     cursor = Document.cursor(gb)
     buffer_id = HighlightSync.buffer_id_for(state, buf)
     range = Helpers.compute_text_object_range(gb, cursor, modifier, spec, buffer_id)
@@ -461,8 +461,8 @@ defmodule Minga.Editor.Commands.Editing do
   # ── Comment toggling ────────────────────────────────────────────────────────
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :comment_line) when is_pid(buf) do
-    {line, _col} = BufferServer.cursor(buf)
-    filetype = BufferServer.filetype(buf)
+    {line, _col} = Buffer.cursor(buf)
+    filetype = Buffer.filetype(buf)
     injection_ranges = Map.get(state.workspace.injection_ranges, buf, [])
     Minga.Editing.toggle_comment(buf, line, line, filetype, injection_ranges)
     state
@@ -470,11 +470,11 @@ defmodule Minga.Editor.Commands.Editing do
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, {:comment_motion, motion})
       when is_pid(buf) do
-    {cursor_line, _col} = BufferServer.cursor(buf)
+    {cursor_line, _col} = Buffer.cursor(buf)
     target_line = resolve_motion_line(buf, motion, cursor_line)
     start_line = min(cursor_line, target_line)
     end_line = max(cursor_line, target_line)
-    filetype = BufferServer.filetype(buf)
+    filetype = Buffer.filetype(buf)
     injection_ranges = Map.get(state.workspace.injection_ranges, buf, [])
     Minga.Editing.toggle_comment(buf, start_line, end_line, filetype, injection_ranges)
     state
@@ -486,12 +486,12 @@ defmodule Minga.Editor.Commands.Editing do
         :comment_visual_selection
       ) do
     anchor = ms.visual_anchor
-    cursor = BufferServer.cursor(buf)
+    cursor = Buffer.cursor(buf)
     {anchor_line, _} = anchor
     {cursor_line, _} = cursor
     start_line = min(anchor_line, cursor_line)
     end_line = max(anchor_line, cursor_line)
-    filetype = BufferServer.filetype(buf)
+    filetype = Buffer.filetype(buf)
     injection_ranges = Map.get(state.workspace.injection_ranges, buf, [])
     Minga.Editing.toggle_comment(buf, start_line, end_line, filetype, injection_ranges)
     state
@@ -501,16 +501,16 @@ defmodule Minga.Editor.Commands.Editing do
 
   @spec execute_autopair_delete(state(), pid()) :: state()
   defp execute_autopair_delete(state, buf) do
-    gb = BufferServer.snapshot(buf)
+    gb = Buffer.snapshot(buf)
     cursor = Document.cursor(gb)
 
     case Minga.Editing.backspace_with_pairs(gb, cursor) do
       :delete_pair ->
-        BufferServer.delete_before(buf)
-        BufferServer.delete_at(buf)
+        Buffer.delete_before(buf)
+        Buffer.delete_at(buf)
 
       :passthrough ->
-        BufferServer.delete_before(buf)
+        Buffer.delete_before(buf)
     end
 
     state
@@ -518,20 +518,20 @@ defmodule Minga.Editor.Commands.Editing do
 
   @spec execute_autopair_insert(pid(), String.t()) :: :ok
   defp execute_autopair_insert(buf, char) do
-    gb = BufferServer.snapshot(buf)
+    gb = Buffer.snapshot(buf)
     cursor = Document.cursor(gb)
 
     case Minga.Editing.insert_with_pairs(gb, cursor, char) do
       {:pair, open, close} ->
-        BufferServer.insert_char(buf, open)
-        BufferServer.insert_char(buf, close)
-        BufferServer.move(buf, :left)
+        Buffer.insert_char(buf, open)
+        Buffer.insert_char(buf, close)
+        Buffer.move(buf, :left)
 
       {:skip, _char} ->
-        BufferServer.move(buf, :right)
+        Buffer.move(buf, :right)
 
       {:passthrough, char} ->
-        BufferServer.insert_char(buf, char)
+        Buffer.insert_char(buf, char)
     end
 
     :ok
@@ -541,20 +541,20 @@ defmodule Minga.Editor.Commands.Editing do
 
   @spec do_reindent_lines(pid(), non_neg_integer(), non_neg_integer()) :: :ok
   defp do_reindent_lines(buf, start_line, end_line) do
-    {cursor_line, _} = BufferServer.cursor(buf)
+    {cursor_line, _} = Buffer.cursor(buf)
 
     for line <- start_line..end_line do
       reindent_single_line(buf, line)
     end
 
     # Move cursor to first non-blank on cursor line
-    case BufferServer.get_lines(buf, cursor_line, 1) do
+    case Buffer.lines(buf, cursor_line, 1) do
       [text] ->
         first_non_blank = Indent.first_non_blank_col(text)
-        BufferServer.move_to(buf, {cursor_line, first_non_blank})
+        Buffer.move_to(buf, {cursor_line, first_non_blank})
 
       [] ->
-        BufferServer.move_to(buf, {cursor_line, 0})
+        Buffer.move_to(buf, {cursor_line, 0})
     end
 
     :ok
@@ -579,14 +579,14 @@ defmodule Minga.Editor.Commands.Editing do
       end
 
     # Get current line text and its existing indent
-    case BufferServer.get_lines(buf, line, 1) do
+    case Buffer.lines(buf, line, 1) do
       [text] ->
         current_indent = Indent.extract_leading_ws(text)
 
         if current_indent != desired_indent do
           # Replace leading whitespace using apply_text_edit
           indent_end_col = byte_size(current_indent)
-          BufferServer.apply_text_edit(buf, line, 0, line, indent_end_col, desired_indent)
+          Buffer.apply_edit(buf, line, 0, line, indent_end_col, desired_indent)
         end
 
         :ok
@@ -601,11 +601,11 @@ defmodule Minga.Editor.Commands.Editing do
   @spec do_indent_lines(pid(), non_neg_integer(), non_neg_integer()) :: :ok
   defp do_indent_lines(buf, start_line, end_line) do
     {indent, indent_bytes} = indent_string(buf)
-    {cursor_line, cursor_col} = BufferServer.cursor(buf)
+    {cursor_line, cursor_col} = Buffer.cursor(buf)
 
     for line <- start_line..end_line do
-      BufferServer.move_to(buf, {line, 0})
-      BufferServer.insert_char(buf, indent)
+      Buffer.move_to(buf, {line, 0})
+      Buffer.insert_char(buf, indent)
     end
 
     new_col =
@@ -613,13 +613,13 @@ defmodule Minga.Editor.Commands.Editing do
         do: cursor_col + indent_bytes,
         else: cursor_col
 
-    BufferServer.move_to(buf, {cursor_line, new_col})
+    Buffer.move_to(buf, {cursor_line, new_col})
     :ok
   end
 
   @spec do_dedent_lines(pid(), non_neg_integer(), non_neg_integer()) :: :ok
   defp do_dedent_lines(buf, start_line, end_line) do
-    {cursor_line, cursor_col} = BufferServer.cursor(buf)
+    {cursor_line, cursor_col} = Buffer.cursor(buf)
     cursor_removed = cursor_line_chars_to_remove(buf, cursor_line, start_line, end_line)
 
     for line <- start_line..end_line do
@@ -627,7 +627,7 @@ defmodule Minga.Editor.Commands.Editing do
     end
 
     new_col = max(0, cursor_col - cursor_removed)
-    BufferServer.move_to(buf, {cursor_line, new_col})
+    Buffer.move_to(buf, {cursor_line, new_col})
     :ok
   end
 
@@ -639,7 +639,7 @@ defmodule Minga.Editor.Commands.Editing do
         ) :: non_neg_integer()
   defp cursor_line_chars_to_remove(buf, cursor_line, start_line, end_line) do
     if cursor_line >= start_line and cursor_line <= end_line do
-      case BufferServer.get_lines(buf, cursor_line, 1) do
+      case Buffer.lines(buf, cursor_line, 1) do
         [text] -> dedent_amount(buf, text)
         _ -> 0
       end
@@ -650,7 +650,7 @@ defmodule Minga.Editor.Commands.Editing do
 
   @spec dedent_line_at(pid(), non_neg_integer()) :: :ok
   defp dedent_line_at(buf, line) do
-    case BufferServer.get_lines(buf, line, 1) do
+    case Buffer.lines(buf, line, 1) do
       [text] -> remove_leading_indent(buf, line, dedent_amount(buf, text))
       _ -> :ok
     end
@@ -660,7 +660,7 @@ defmodule Minga.Editor.Commands.Editing do
   defp dedent_single_line(buf, line, col, text) do
     to_remove = dedent_amount(buf, text)
     remove_leading_indent(buf, line, to_remove)
-    if to_remove > 0, do: BufferServer.move_to(buf, {line, max(0, col - to_remove)})
+    if to_remove > 0, do: Buffer.move_to(buf, {line, max(0, col - to_remove)})
     :ok
   end
 
@@ -678,8 +678,8 @@ defmodule Minga.Editor.Commands.Editing do
   defp remove_leading_indent(_buf, _line, 0), do: :ok
 
   defp remove_leading_indent(buf, line, n) when n > 0 do
-    BufferServer.move_to(buf, {line, 0})
-    for _ <- 1..n, do: BufferServer.delete_at(buf)
+    Buffer.move_to(buf, {line, 0})
+    for _ <- 1..n, do: Buffer.delete_at(buf)
     :ok
   end
 
@@ -703,14 +703,14 @@ defmodule Minga.Editor.Commands.Editing do
 
   @spec uses_tabs?(pid()) :: boolean()
   defp uses_tabs?(buf) do
-    BufferServer.get_option(buf, :indent_with) == :tabs
+    Buffer.get_option(buf, :indent_with) == :tabs
   catch
     :exit, _ -> false
   end
 
   @spec tab_width(pid()) :: pos_integer()
   defp tab_width(buf) when is_pid(buf) do
-    BufferServer.get_option(buf, :tab_width)
+    Buffer.get_option(buf, :tab_width)
   catch
     :exit, _ -> 2
   end
@@ -724,17 +724,17 @@ defmodule Minga.Editor.Commands.Editing do
   defp resolve_motion_line(_buf, :document_start, _cursor_line), do: 0
 
   defp resolve_motion_line(buf, :document_end, _cursor_line) do
-    max(0, BufferServer.line_count(buf) - 1)
+    max(0, Buffer.line_count(buf) - 1)
   end
 
   defp resolve_motion_line(buf, :paragraph_forward, cursor_line) do
-    content = BufferServer.content(buf)
+    content = Buffer.content(buf)
     lines = String.split(content, "\n")
     find_paragraph_boundary(lines, cursor_line, :forward)
   end
 
   defp resolve_motion_line(buf, :paragraph_backward, cursor_line) do
-    content = BufferServer.content(buf)
+    content = Buffer.content(buf)
     lines = String.split(content, "\n")
     find_paragraph_boundary(lines, cursor_line, :backward)
   end
@@ -777,22 +777,22 @@ defmodule Minga.Editor.Commands.Editing do
   # Charwise: inserts inline at (or one past) the cursor position.
   @spec paste_content(pid(), String.t(), Registers.reg_type(), :before | :after) :: :ok
   defp paste_content(buf, text, :linewise, direction) do
-    {line, _col} = BufferServer.cursor(buf)
+    {line, _col} = Buffer.cursor(buf)
     # Strip the trailing newline that linewise yanks append
     content = String.trim_trailing(text, "\n")
 
     case direction do
       :after ->
-        line_text = BufferServer.get_lines(buf, line, 1) |> List.first() |> then(&(&1 || ""))
-        BufferServer.move_to(buf, {line, byte_size(line_text)})
-        BufferServer.insert_char(buf, "\n" <> content)
-        BufferServer.move_to(buf, {line + 1, 0})
+        line_text = Buffer.lines(buf, line, 1) |> List.first() |> then(&(&1 || ""))
+        Buffer.move_to(buf, {line, byte_size(line_text)})
+        Buffer.insert_char(buf, "\n" <> content)
+        Buffer.move_to(buf, {line + 1, 0})
         move_to_first_nonblank(buf)
 
       :before ->
-        BufferServer.move_to(buf, {line, 0})
-        BufferServer.insert_char(buf, content <> "\n")
-        BufferServer.move_to(buf, {line, 0})
+        Buffer.move_to(buf, {line, 0})
+        Buffer.insert_char(buf, content <> "\n")
+        Buffer.move_to(buf, {line, 0})
         move_to_first_nonblank(buf)
     end
 
@@ -800,23 +800,23 @@ defmodule Minga.Editor.Commands.Editing do
   end
 
   defp paste_content(buf, text, :charwise, :before) do
-    BufferServer.insert_char(buf, text)
+    Buffer.insert_char(buf, text)
     :ok
   end
 
   defp paste_content(buf, text, :charwise, :after) do
-    BufferServer.move(buf, :right)
-    BufferServer.insert_char(buf, text)
+    Buffer.move(buf, :right)
+    Buffer.insert_char(buf, text)
     :ok
   end
 
   # Moves cursor to the first non-whitespace character on the current line.
   @spec move_to_first_nonblank(pid()) :: :ok
   defp move_to_first_nonblank(buf) do
-    {line, _col} = BufferServer.cursor(buf)
-    line_text = BufferServer.get_lines(buf, line, 1) |> List.first() |> then(&(&1 || ""))
+    {line, _col} = Buffer.cursor(buf)
+    line_text = Buffer.lines(buf, line, 1) |> List.first() |> then(&(&1 || ""))
     indent = byte_size(line_text) - byte_size(String.trim_leading(line_text))
-    BufferServer.move_to(buf, {line, indent})
+    Buffer.move_to(buf, {line, indent})
     :ok
   end
 
@@ -829,7 +829,7 @@ defmodule Minga.Editor.Commands.Editing do
           acc
 
         grapheme ->
-          BufferServer.delete_at(buf)
+          Buffer.delete_at(buf)
           acc <> grapheme
       end
     end)
@@ -845,7 +845,7 @@ defmodule Minga.Editor.Commands.Editing do
           acc
 
         grapheme ->
-          BufferServer.delete_before(buf)
+          Buffer.delete_before(buf)
           # Prepend because we're deleting right-to-left
           grapheme <> acc
       end
@@ -855,8 +855,8 @@ defmodule Minga.Editor.Commands.Editing do
   # Returns the single grapheme at the cursor position, or "" if at end of line.
   @spec grapheme_at_cursor(pid()) :: String.t()
   defp grapheme_at_cursor(buf) do
-    {line, col} = BufferServer.cursor(buf)
-    line_text = BufferServer.get_lines(buf, line, 1) |> List.first() |> then(&(&1 || ""))
+    {line, col} = Buffer.cursor(buf)
+    line_text = Buffer.lines(buf, line, 1) |> List.first() |> then(&(&1 || ""))
 
     if col >= byte_size(line_text) do
       ""
@@ -872,12 +872,12 @@ defmodule Minga.Editor.Commands.Editing do
   # Returns the single grapheme before the cursor position, or "" if at col 0.
   @spec grapheme_before_cursor(pid()) :: String.t()
   defp grapheme_before_cursor(buf) do
-    {line, col} = BufferServer.cursor(buf)
+    {line, col} = Buffer.cursor(buf)
 
     if col == 0 do
       ""
     else
-      line_text = BufferServer.get_lines(buf, line, 1) |> List.first() |> then(&(&1 || ""))
+      line_text = Buffer.lines(buf, line, 1) |> List.first() |> then(&(&1 || ""))
       before = binary_part(line_text, 0, col)
       before |> String.graphemes() |> List.last() |> then(&(&1 || ""))
     end

@@ -8,7 +8,7 @@ defmodule Minga.Editor.Commands.Diagnostics do
 
   @behaviour Minga.Command.Provider
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Diagnostics
   alias Minga.Diagnostics.PickerSource, as: DiagPickerSource
   alias Minga.Editor.PickerUI
@@ -69,7 +69,7 @@ defmodule Minga.Editor.Commands.Diagnostics do
   @spec navigate(EditorState.t(), pid(), (String.t(), non_neg_integer() -> term())) ::
           EditorState.t()
   defp navigate(state, buf, find_fn) do
-    file_path = BufferServer.file_path(buf)
+    file_path = Buffer.file_path(buf)
 
     case file_path do
       nil ->
@@ -77,14 +77,14 @@ defmodule Minga.Editor.Commands.Diagnostics do
 
       path ->
         uri = SyncServer.path_to_uri(path)
-        {cursor_line, _col} = BufferServer.cursor(buf)
+        {cursor_line, _col} = Buffer.cursor(buf)
 
         case find_fn.(uri, cursor_line) do
           nil ->
             EditorState.set_status(state, "No diagnostics")
 
           diag ->
-            BufferServer.move_to(buf, {diag.range.start_line, diag.range.start_col})
+            Buffer.move_to(buf, {diag.range.start_line, diag.range.start_col})
             EditorState.set_status(state, diag.message)
         end
     end

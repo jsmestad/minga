@@ -8,7 +8,7 @@ defmodule Minga.Agent.Tools.WriteFile do
   creation).
   """
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Editor
 
   @doc """
@@ -23,7 +23,7 @@ defmodule Minga.Agent.Tools.WriteFile do
   """
   @spec execute(String.t(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
   def execute(path, content) when is_binary(path) and is_binary(content) do
-    case BufferServer.pid_for_path(path) do
+    case Buffer.pid_for_path(path) do
       {:ok, pid} ->
         # Buffer already open, replace content in-memory
         execute_via_buffer(pid, path, content)
@@ -45,7 +45,7 @@ defmodule Minga.Agent.Tools.WriteFile do
   @spec execute_via_buffer(pid(), String.t(), String.t()) ::
           {:ok, String.t()} | {:error, String.t()}
   defp execute_via_buffer(pid, path, content) do
-    case BufferServer.replace_content(pid, content, :agent) do
+    case Buffer.replace_content(pid, content, :agent) do
       :ok -> {:ok, "wrote #{byte_size(content)} bytes to #{path} (via buffer)"}
       {:error, :read_only} -> {:error, "buffer is read-only: #{path}"}
     end

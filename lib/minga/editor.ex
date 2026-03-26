@@ -15,7 +15,7 @@ defmodule Minga.Editor do
 
   alias Minga.Agent.Events
   alias Minga.Agent.UIState
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Config.Options
   alias Minga.Editing.Completion
 
@@ -134,7 +134,7 @@ defmodule Minga.Editor do
   def ensure_buffer_for_path(path, server \\ __MODULE__) do
     abs_path = Path.expand(path)
 
-    case BufferServer.pid_for_path(abs_path) do
+    case Buffer.pid_for_path(abs_path) do
       {:ok, pid} -> {:ok, pid}
       :not_found -> GenServer.call(server, {:ensure_buffer, abs_path})
     end
@@ -253,7 +253,7 @@ defmodule Minga.Editor do
   def handle_call({:ensure_buffer, abs_path}, _from, state) do
     # Double-check: another call may have opened it between the caller's
     # pid_for_path check and this handle_call arriving.
-    case BufferServer.pid_for_path(abs_path) do
+    case Buffer.pid_for_path(abs_path) do
       {:ok, pid} ->
         {:reply, {:ok, pid}, state}
 
@@ -286,7 +286,7 @@ defmodule Minga.Editor do
   end
 
   def handle_call(:api_save, _from, %{workspace: %{buffers: %{active: buf}}} = state) do
-    result = BufferServer.save(buf)
+    result = Buffer.save(buf)
 
     new_state =
       case result do
@@ -1476,7 +1476,7 @@ defmodule Minga.Editor do
     buf_pid =
       Enum.find(state.workspace.buffers.list, fn buf ->
         try do
-          BufferServer.file_path(buf) == path
+          Buffer.file_path(buf) == path
         catch
           :exit, _ -> false
         end
@@ -1499,7 +1499,7 @@ defmodule Minga.Editor do
 
   defp maybe_trigger_nav_flash(state) do
     buf = state.workspace.buffers.active
-    {current_line, _col} = BufferServer.cursor(buf)
+    {current_line, _col} = Buffer.cursor(buf)
 
     state = detect_jump(state, current_line)
     %{state | last_cursor_line: current_line}
@@ -1616,8 +1616,8 @@ defmodule Minga.Editor do
   @spec handle_paste_event_editor(state(), String.t()) :: state()
   defp handle_paste_event_editor(%{workspace: %{buffers: %{active: buf}}} = state, text)
        when is_pid(buf) do
-    {line, col} = BufferServer.cursor(buf)
-    BufferServer.apply_text_edit(buf, line, col, line, col, text)
+    {line, col} = Buffer.cursor(buf)
+    Buffer.apply_edit(buf, line, col, line, col, text)
     state
   end
 
@@ -1694,7 +1694,7 @@ defmodule Minga.Editor do
     if File.exists?(file) do
       case Commands.start_buffer(file) do
         {:ok, pid} ->
-          :ok = BufferServer.move_to(pid, {entry.cursor_line, entry.cursor_col})
+          :ok = Buffer.move_to(pid, {entry.cursor_line, entry.cursor_col})
           register_buffer(state, pid, file)
 
         {:error, _} ->
@@ -1713,7 +1713,7 @@ defmodule Minga.Editor do
       {:ok, pid} ->
         # Replace buffer content with the recovered swap data.
         # This marks the buffer dirty (unsaved changes from the crash).
-        case BufferServer.replace_content(pid, content, :recovery) do
+        case Buffer.replace_content(pid, content, :recovery) do
           :ok ->
             register_buffer(state, pid, file_path)
 
@@ -1910,7 +1910,7 @@ defmodule Minga.Editor do
     idx =
       Enum.find_index(state.workspace.buffers.list, fn buf ->
         try do
-          BufferServer.file_path(buf) == path
+          Buffer.file_path(buf) == path
         catch
           :exit, _ -> false
         end
@@ -2145,7 +2145,7 @@ defmodule Minga.Editor do
     idx =
       Enum.find_index(state.workspace.buffers.list, fn buf ->
         try do
-          BufferServer.file_path(buf) == abs_path
+          Buffer.file_path(buf) == abs_path
         catch
           :exit, _ -> false
         end

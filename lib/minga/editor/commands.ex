@@ -24,7 +24,7 @@ defmodule Minga.Editor.Commands do
   `{state, {:dot_repeat, count}}`. The caller (`Editor`) dispatches it.
   """
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Command
   alias Minga.Command.Registry, as: CommandRegistry
   alias Minga.Editor.Commands.Agent, as: AgentCommands
@@ -342,7 +342,7 @@ defmodule Minga.Editor.Commands do
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, {:goto_next_textobject, type})
       when is_pid(buf) do
-    {row, col} = BufferServer.cursor(buf)
+    {row, col} = Buffer.cursor(buf)
 
     case EditorState.active_window_struct(state) do
       nil ->
@@ -354,7 +354,7 @@ defmodule Minga.Editor.Commands do
             state
 
           {target_row, target_col} ->
-            BufferServer.move_to(buf, {target_row, target_col})
+            Buffer.move_to(buf, {target_row, target_col})
             state
         end
     end
@@ -362,7 +362,7 @@ defmodule Minga.Editor.Commands do
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, {:goto_prev_textobject, type})
       when is_pid(buf) do
-    {row, col} = BufferServer.cursor(buf)
+    {row, col} = Buffer.cursor(buf)
 
     case EditorState.active_window_struct(state) do
       nil ->
@@ -374,7 +374,7 @@ defmodule Minga.Editor.Commands do
             state
 
           {target_row, target_col} ->
-            BufferServer.move_to(buf, {target_row, target_col})
+            Buffer.move_to(buf, {target_row, target_col})
             state
         end
     end
@@ -492,7 +492,7 @@ defmodule Minga.Editor.Commands do
   def start_buffer(file_path) do
     DynamicSupervisor.start_child(
       Minga.Buffer.Supervisor,
-      {BufferServer, file_path: file_path}
+      {Minga.Buffer, file_path: file_path}
     )
   end
 
@@ -566,7 +566,7 @@ defmodule Minga.Editor.Commands do
   defp current_filetype(%{workspace: %{buffers: %{active: nil}}}), do: :text
 
   defp current_filetype(%{workspace: %{buffers: %{active: buf}}}) do
-    BufferServer.filetype(buf)
+    Buffer.filetype(buf)
   catch
     :exit, _ -> :text
   end

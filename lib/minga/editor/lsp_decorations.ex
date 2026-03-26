@@ -11,7 +11,7 @@ defmodule Minga.Editor.LspDecorations do
   placement) with subtle styling.
   """
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.UI.Face
 
   @type state :: Minga.Editor.State.t()
@@ -28,13 +28,13 @@ defmodule Minga.Editor.LspDecorations do
 
   def apply_code_lenses(%{workspace: %{buffers: %{active: buf}}, code_lenses: lenses} = state) do
     # Remove old code lens decorations
-    BufferServer.remove_highlight_group(buf, :code_lens)
+    Buffer.remove_highlight_group(buf, :code_lens)
 
     # Add new ones
     Enum.each(lenses, fn lens ->
       segments = [{lens.title, Face.new(fg: 0x6B7280, italic: true)}]
 
-      BufferServer.add_virtual_text(buf, {lens.line, 0},
+      Buffer.add_virtual_text(buf, {lens.line, 0},
         segments: segments,
         placement: :above,
         priority: -20,
@@ -57,14 +57,14 @@ defmodule Minga.Editor.LspDecorations do
 
   def apply_inlay_hints(%{workspace: %{buffers: %{active: buf}}, inlay_hints: hints} = state) do
     # Remove old inlay hint decorations
-    BufferServer.remove_highlight_group(buf, :inlay_hint)
+    Buffer.remove_highlight_group(buf, :inlay_hint)
 
     # Add new ones
     Enum.each(hints, fn hint ->
       label = format_hint_label(hint)
       segments = [{label, Face.new(fg: 0x6B7280, italic: true)}]
 
-      BufferServer.add_virtual_text(buf, {hint.line, hint.col},
+      Buffer.add_virtual_text(buf, {hint.line, hint.col},
         segments: segments,
         placement: :inline,
         priority: -25,

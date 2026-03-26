@@ -53,9 +53,13 @@ defmodule Minga.Buffer do
   @spec lines_content(server(), non_neg_integer(), non_neg_integer()) :: [String.t()]
   defdelegate lines_content(server, start_line, end_line), to: Server, as: :get_lines_content
 
-  @doc "Text between two positions."
-  @spec text_in_range(server(), position(), position()) :: String.t()
-  defdelegate text_in_range(server, start_pos, end_pos), to: Server, as: :get_range
+  @doc "Text between two positions (end exclusive)."
+  @spec text_between(server(), position(), position()) :: String.t()
+  defdelegate text_between(server, from_pos, to_pos), to: Server, as: :content_range
+
+  @doc "Text between two positions (end inclusive, includes the character at end_pos)."
+  @spec text_between_inclusive(server(), position(), position()) :: String.t()
+  defdelegate text_between_inclusive(server, start_pos, end_pos), to: Server, as: :get_range
 
   @doc "Number of lines in the buffer."
   @spec line_count(server()) :: pos_integer()

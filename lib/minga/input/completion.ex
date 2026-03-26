@@ -13,7 +13,7 @@ defmodule Minga.Input.Completion do
 
   import Bitwise
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Editing.Completion
   alias Minga.Editor.CompletionHandling
   alias Minga.Editor.State, as: EditorState
@@ -141,9 +141,9 @@ defmodule Minga.Input.Completion do
     buf = state.workspace.buffers.active
 
     if buf do
-      {line, col} = BufferServer.cursor(buf)
+      {line, col} = Buffer.cursor(buf)
       screen_row = line - state.workspace.viewport.top
-      total_lines = BufferServer.line_count(buf)
+      total_lines = Buffer.line_count(buf)
 
       number_w =
         if state.line_numbers == :none,
