@@ -141,6 +141,11 @@ struct BoardCardView: View {
                 isHovered = hovering
             }
         }
+        // VoiceOver: announce card as a single element with combined label
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(card.task), \(card.isYouCard ? "You" : card.status.label), \(card.elapsedDisplay)")
+        .accessibilityHint("Double tap to open")
+        .accessibilityAddTraits(.isButton)
     }
 
     // MARK: - Status Badge
@@ -166,9 +171,9 @@ struct BoardCardView: View {
 
     private var cardBackground: Color {
         if isHovered {
-            theme.editorBg.opacity(0.95).blend(with: .white, amount: 0.08)
+            Color.blend(theme.editorBg, with: .white, amount: 0.12)
         } else {
-            theme.editorBg.opacity(0.85).blend(with: .white, amount: 0.04)
+            Color.blend(theme.editorBg, with: .white, amount: 0.05)
         }
     }
 }
@@ -176,9 +181,18 @@ struct BoardCardView: View {
 // MARK: - Color Blending Extension
 
 private extension Color {
-    /// Blends this color with another color by the given amount (0-1).
-    func blend(with other: Color, amount: Double) -> Color {
-        // SwiftUI doesn't have direct blend; use opacity layering
-        self.opacity(1 - amount)
+    /// Blends two colors by the given amount (0 = all base, 1 = all target).
+    /// Uses NSColor component interpolation for true color mixing.
+    static func blend(_ base: Color, with target: Color, amount: Double) -> Color {
+        let nsBase = NSColor(base).usingColorSpace(.sRGB) ?? NSColor(base)
+        let nsTarget = NSColor(target).usingColorSpace(.sRGB) ?? NSColor(target)
+        let t = max(0, min(1, amount))
+
+        let r = nsBase.redComponent * (1 - t) + nsTarget.redComponent * t
+        let g = nsBase.greenComponent * (1 - t) + nsTarget.greenComponent * t
+        let b = nsBase.blueComponent * (1 - t) + nsTarget.blueComponent * t
+        let a = nsBase.alphaComponent * (1 - t) + nsTarget.alphaComponent * t
+
+        return Color(nsColor: NSColor(srgbRed: r, green: g, blue: b, alpha: a))
     }
 }

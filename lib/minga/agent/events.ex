@@ -262,24 +262,11 @@ defmodule Minga.Agent.Events do
   @spec sync_board_card_status(EditorState.t(), Tab.agent_status()) :: EditorState.t()
   defp sync_board_card_status(%{shell: Minga.Shell.Board} = state, status) do
     session = AgentAccess.session(state)
-    board = state.shell_state
 
     if session do
-      card_status = agent_status_to_card_status(status)
-
-      # Find the card with this session PID
-      case Enum.find(board.cards, fn {_id, card} -> card.session == session end) do
-        {card_id, _card} ->
-          new_board =
-            Minga.Shell.Board.State.update_card(board, card_id, fn card ->
-              Minga.Shell.Board.Card.set_status(card, card_status)
-            end)
-
-          %{state | shell_state: new_board}
-
-        nil ->
-          state
-      end
+      update_board_card_by_session(state, session, fn card ->
+        Minga.Shell.Board.Card.set_status(card, agent_status_to_card_status(status))
+      end)
     else
       state
     end
@@ -292,30 +279,35 @@ defmodule Minga.Agent.Events do
   @spec track_board_card_file(EditorState.t(), String.t()) :: EditorState.t()
   defp track_board_card_file(%{shell: Minga.Shell.Board} = state, path) do
     session = AgentAccess.session(state)
-    board = state.shell_state
 
     if session do
-      case Enum.find(board.cards, fn {_id, card} -> card.session == session end) do
-        {card_id, _card} ->
-          short_path = Path.basename(path)
+      short_path = Path.basename(path)
 
-          new_board =
-            Minga.Shell.Board.State.update_card(board, card_id, fn card ->
-              files = [short_path | Enum.reject(card.recent_files, &(&1 == short_path))]
-              Minga.Shell.Board.Card.set_recent_files(card, Enum.take(files, 5))
-            end)
-
-          %{state | shell_state: new_board}
-
-        nil ->
-          state
-      end
+      update_board_card_by_session(state, session, fn card ->
+        files = [short_path | Enum.reject(card.recent_files, &(&1 == short_path))]
+        Minga.Shell.Board.Card.set_recent_files(card, Enum.take(files, 5))
+      end)
     else
       state
     end
   end
 
   defp track_board_card_file(state, _path), do: state
+
+  # Finds a Board card by agent session PID and applies an update function.
+  @spec update_board_card_by_session(EditorState.t(), pid(), (Minga.Shell.Board.Card.t() -> Minga.Shell.Board.Card.t())) :: EditorState.t()
+  defp update_board_card_by_session(state, session, update_fn) do
+    board = state.shell_state
+
+    case Enum.find(board.cards, fn {_id, card} -> card.session == session end) do
+      {card_id, _card} ->
+        new_board = Minga.Shell.Board.State.update_card(board, card_id, update_fn)
+        %{state | shell_state: new_board}
+
+      nil ->
+        state
+    end
+  end
 
   @spec agent_status_to_card_status(Tab.agent_status()) :: Minga.Shell.Board.Card.status()
   defp agent_status_to_card_status(:thinking), do: :working

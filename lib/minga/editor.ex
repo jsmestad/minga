@@ -2103,6 +2103,21 @@ defmodule Minga.Editor do
     Minga.Editor.Commands.execute(state, cmd)
   end
 
+  # Board gui_actions: delegate to the active shell's handle_gui_action
+  defp handle_gui_action(%{shell: Minga.Shell.Board} = state, {:board_select_card, _} = action) do
+    {shell_state, workspace} =
+      Minga.Shell.Board.handle_gui_action(state.shell_state, state.workspace, action)
+
+    %{state | shell_state: shell_state, workspace: workspace}
+  end
+
+  defp handle_gui_action(%{shell: Minga.Shell.Board} = state, {:board_close_card, _} = action) do
+    {shell_state, workspace} =
+      Minga.Shell.Board.handle_gui_action(state.shell_state, state.workspace, action)
+
+    %{state | shell_state: shell_state, workspace: workspace}
+  end
+
   defp handle_gui_action(state, {:git_open_file, path}) do
     case resolve_git_root() do
       nil ->

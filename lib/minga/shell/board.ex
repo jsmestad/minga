@@ -52,8 +52,18 @@ defmodule Minga.Shell.Board do
   @impl true
   @spec handle_gui_action(BoardState.t(), Minga.Workspace.State.t(), term()) ::
           {BoardState.t(), Minga.Workspace.State.t()}
+  def handle_gui_action(shell_state, workspace, {:board_select_card, card_id}) do
+    # GUI card click: zoom into the card
+    shell_state = BoardState.focus_card(shell_state, card_id)
+    {shell_state, workspace}
+  end
+
+  def handle_gui_action(shell_state, workspace, {:board_close_card, card_id}) do
+    shell_state = BoardState.remove_card(shell_state, card_id)
+    {shell_state, workspace}
+  end
+
   def handle_gui_action(shell_state, workspace, _action) do
-    # TODO: handle card clicks, zoom gestures from GUI
     {shell_state, workspace}
   end
 
