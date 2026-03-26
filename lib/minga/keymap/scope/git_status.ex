@@ -32,6 +32,7 @@ defmodule Minga.Keymap.Scope.GitStatus do
   @spec keymap(Minga.Keymap.Scope.vim_state(), Minga.Keymap.Scope.context()) ::
           Bindings.node_t()
   def keymap(:normal, _context), do: normal_trie()
+  def keymap(:cua, _context), do: cua_trie()
   def keymap(_state, _context), do: Bindings.new()
 
   @impl true
@@ -97,6 +98,27 @@ defmodule Minga.Keymap.Scope.GitStatus do
     |> Bindings.bind([{?c, 0}, {?c, 0}], :git_status_start_commit, "Start commit")
     # Close
     |> Bindings.bind([{?q, 0}], :git_status_close, "Close git status")
+    |> Bindings.bind([{@escape, 0}], :git_status_close, "Close git status")
+  end
+
+  # ── CUA mode bindings ─────────────────────────────────────────────────
+
+  alias Minga.Keymap.CUADefaults
+
+  @cmd 0x08
+
+  @spec cua_trie() :: Bindings.node_t()
+  defp cua_trie do
+    CUADefaults.navigation_trie()
+    # Git operations (same keys as normal, these are domain-specific not vim-specific)
+    |> Bindings.bind([{?s, 0}], :git_status_stage, "Stage file")
+    |> Bindings.bind([{?u, 0}], :git_status_unstage, "Unstage file")
+    |> Bindings.bind([{?d, 0}], :git_status_discard, "Discard changes")
+    |> Bindings.bind([{@tab, 0}], :git_status_toggle_section, "Toggle section collapse")
+    # Open/commit
+    |> Bindings.bind([{@enter, 0}], :git_status_open_file, "Open file")
+    |> Bindings.bind([{?c, @cmd}], :git_status_start_commit, "Start commit")
+    # Close
     |> Bindings.bind([{@escape, 0}], :git_status_close, "Close git status")
   end
 end

@@ -107,7 +107,18 @@ defmodule Minga.Input.Scoped do
     # separate Input.Handler modules in the surface handler list. They run
     # before Scoped in the focus stack walk. See Input.surface_handlers/0.
 
-    # Normal dispatch: determine vim state and resolve through scope
+    # CUA mode: resolve all keys through the :cua trie. No vim modes.
+    if cua_active?() do
+      resolve_agent_key(state, :cua, cp, mods)
+    else
+      dispatch_agent_key_vim(state, panel, cp, mods)
+    end
+  end
+
+  # Vim-mode agent key dispatch. Split out so CUA path stays clean.
+  @spec dispatch_agent_key_vim(EditorState.t(), Panel.t(), non_neg_integer(), non_neg_integer()) ::
+          {:handled, EditorState.t()} | {:passthrough, EditorState.t()}
+  defp dispatch_agent_key_vim(state, panel, cp, mods) do
     # Tab on a paste placeholder line: toggle expand/collapse
     if cp == @tab and mods == 0 and panel.input_focused do
       {cursor_line, _} = UIState.input_cursor(panel)
@@ -137,6 +148,11 @@ defmodule Minga.Input.Scoped do
       # targeting the prompt buffer.
       {:handled, AgentPanel.dispatch_prompt_via_mode_fsm(state, cp, mods)}
     end
+  end
+
+  @spec cua_active?() :: boolean()
+  defp cua_active? do
+    Minga.Editor.Editing.active_model() == Minga.EditingModel.CUA
   end
 
   # ── Agent scope trie resolution ────────────────────────────────────────────
