@@ -38,8 +38,8 @@ defmodule Minga.Frontend.Protocol.GUIBoardTest do
 
       assert card_id == 1
       assert status == 0
-      # is_you_card (session: nil)
-      assert (flags &&& 0x01) == 1
+      # is_you_card (kind: :agent, not :you)
+      assert (flags &&& 0x01) == 0
       # is_focused
       assert (flags &&& 0x02) != 0
       assert task == "refactor auth"

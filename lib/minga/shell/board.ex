@@ -32,7 +32,7 @@ defmodule Minga.Shell.Board do
     state = BoardState.new()
 
     # Create the "You" card (manual editing, no agent session)
-    {state, _you_card} = BoardState.create_card(state, task: "You", status: :idle)
+    {state, _you_card} = BoardState.create_card(state, task: "You", status: :idle, kind: :you)
 
     # If initial cards were passed (e.g., restored from session), add them
     Enum.reduce(Keyword.get(opts, :cards, []), state, fn card_attrs, acc ->
@@ -53,8 +53,11 @@ defmodule Minga.Shell.Board do
   @spec handle_gui_action(BoardState.t(), Minga.Workspace.State.t(), term()) ::
           {BoardState.t(), Minga.Workspace.State.t()}
   def handle_gui_action(shell_state, workspace, {:board_select_card, card_id}) do
-    # GUI card click: zoom into the card
+    # GUI card click: focus the card and zoom in.
+    # Store the current workspace on the card, then mark as zoomed.
     shell_state = BoardState.focus_card(shell_state, card_id)
+    workspace_snapshot = Map.from_struct(workspace)
+    shell_state = BoardState.zoom_into(shell_state, card_id, workspace_snapshot)
     {shell_state, workspace}
   end
 

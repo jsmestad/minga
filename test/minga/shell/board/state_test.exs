@@ -253,9 +253,14 @@ defmodule Minga.Shell.Board.StateTest do
   # ── Card struct ────────────────────────────────────────────────────────
 
   describe "Card" do
-    test "you_card? is true when session is nil" do
-      card = Card.new(1, task: "You")
+    test "you_card? is true when kind is :you" do
+      card = Card.new(1, task: "You", kind: :you)
       assert Card.you_card?(card)
+    end
+
+    test "you_card? is false for agent cards" do
+      card = Card.new(1, task: "Agent")
+      refute Card.you_card?(card)
     end
 
     test "you_card? is false when session is attached" do

@@ -31,6 +31,7 @@ defmodule Minga.Shell.Board.Card do
           task: String.t(),
           status: status(),
           model: String.t() | nil,
+          kind: :you | :agent,
           created_at: DateTime.t(),
           recent_files: [String.t()]
         }
@@ -42,6 +43,7 @@ defmodule Minga.Shell.Board.Card do
             task: "",
             status: :idle,
             model: nil,
+            kind: :agent,
             created_at: nil,
             recent_files: []
 
@@ -55,6 +57,7 @@ defmodule Minga.Shell.Board.Card do
       model: Keyword.get(attrs, :model),
       workspace: Keyword.get(attrs, :workspace),
       status: Keyword.get(attrs, :status, :idle),
+      kind: Keyword.get(attrs, :kind, :agent),
       created_at: DateTime.utc_now(),
       recent_files: Keyword.get(attrs, :recent_files, [])
     }
@@ -90,8 +93,8 @@ defmodule Minga.Shell.Board.Card do
     %{card | recent_files: files}
   end
 
-  @doc "Returns true if this is the 'You' card (no agent session)."
+  @doc "Returns true if this is the 'You' card (manual editing)."
   @spec you_card?(t()) :: boolean()
-  def you_card?(%__MODULE__{session: nil}), do: true
+  def you_card?(%__MODULE__{kind: :you}), do: true
   def you_card?(%__MODULE__{}), do: false
 end
