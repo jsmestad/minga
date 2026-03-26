@@ -154,7 +154,13 @@ defmodule Minga.Shell.Board do
     if BoardState.grid_view?(editor_state.shell_state) do
       render_board_grid(editor_state)
     else
-      # Zoomed into a card: render the editor workspace
+      # Zoomed into a card: dismiss the Board overlay on GUI,
+      # then render the editor workspace normally.
+      if Minga.Frontend.gui?(editor_state.capabilities) do
+        # Send gui_board with visible=false to hide BoardView
+        Minga.Frontend.Emit.GUI.sync_swiftui_chrome(editor_state)
+      end
+
       Minga.Editor.Renderer.render_buffer(editor_state)
     end
   end
