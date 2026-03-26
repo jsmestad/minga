@@ -98,15 +98,22 @@ defmodule Minga.Shell.Board.Input do
     {:handled, create_new_card(state)}
   end
 
-  # Escape / q: no-op for now (Board is the root view)
+  # Escape / q (unmodified): no-op for now (Board is the root view)
   # TODO: switch to Shell.Traditional when shell switching is wired
-  defp dispatch_grid_key(state, cp, _mods) when cp in [@key_escape, @key_q] do
+  defp dispatch_grid_key(state, cp, 0) when cp in [@key_escape, @key_q] do
     {:handled, state}
   end
 
-  # Everything else passes through (Ctrl+Q quit, Ctrl+S save, etc.)
-  defp dispatch_grid_key(state, _cp, _mods) do
+  # Ctrl/Cmd-modified keys pass through to GlobalBindings (Ctrl+Q quit,
+  # Ctrl+S save, etc.). All other unbound keys are consumed: in grid mode
+  # there's no buffer to type into, and letting keys reach the vim Mode FSM
+  # would crash on Board.State (no :whichkey field).
+  defp dispatch_grid_key(state, _cp, mods) when mods != 0 do
     {:passthrough, state}
+  end
+
+  defp dispatch_grid_key(state, _cp, _mods) do
+    {:handled, state}
   end
 
   # ── Actions ────────────────────────────────────────────────────────────

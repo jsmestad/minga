@@ -173,11 +173,18 @@ defmodule Minga.Shell.Board.InputTest do
   # ── Passthrough ────────────────────────────────────────────────────────
 
   describe "passthrough" do
-    test "unbound keys pass through to global bindings" do
+    test "unbound keys without modifiers are consumed (no vim fallthrough)" do
       state = editor_with_board(3)
 
-      {:passthrough, _state} = BoardInput.handle_key(state, ?x, 0)
-      {:passthrough, _state} = BoardInput.handle_key(state, ?z, 0x02)
+      {:handled, _state} = BoardInput.handle_key(state, ?x, 0)
+      {:handled, _state} = BoardInput.handle_key(state, ?z, 0)
+    end
+
+    test "Ctrl-modified keys pass through to GlobalBindings" do
+      state = editor_with_board(3)
+
+      {:passthrough, _state} = BoardInput.handle_key(state, ?q, 0x02)
+      {:passthrough, _state} = BoardInput.handle_key(state, ?s, 0x02)
     end
 
     test "handler passes through when shell is not Board" do
