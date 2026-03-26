@@ -1,8 +1,8 @@
 defmodule Minga.Diagnostics.DecorationsTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Core.Decorations
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Core.Decorations
   alias Minga.Diagnostics
   alias Minga.Diagnostics.Decorations, as: DiagDecorations
   alias Minga.Diagnostics.Diagnostic

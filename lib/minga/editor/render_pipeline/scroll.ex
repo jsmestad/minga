@@ -10,8 +10,8 @@ defmodule Minga.Editor.RenderPipeline.Scroll do
   tracking fields from the previous frame.
   """
 
-  alias Minga.Core.Decorations
   alias Minga.Buffer
+  alias Minga.Core.Decorations
   alias Minga.Core.Unicode
   alias Minga.Editor.DisplayMap
   alias Minga.Editor.FoldMap

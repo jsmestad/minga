@@ -20,8 +20,8 @@ defmodule Minga.Diagnostics.Decorations do
   diagnostics, and calls `apply/3` to update the decorations.
   """
 
-  alias Minga.Core.Decorations
   alias Minga.Buffer
+  alias Minga.Core.Decorations
   alias Minga.Diagnostics
   alias Minga.Diagnostics.Diagnostic
   alias Minga.UI.Face

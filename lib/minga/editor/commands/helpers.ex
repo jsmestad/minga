@@ -8,8 +8,8 @@ defmodule Minga.Editor.Commands.Helpers do
   """
 
   alias Minga.Buffer
-  alias Minga.Core.Unicode
   alias Minga.Clipboard
+  alias Minga.Core.Unicode
   alias Minga.Editor.Editing
   alias Minga.Editor.HighlightSync
   alias Minga.Editor.State, as: EditorState

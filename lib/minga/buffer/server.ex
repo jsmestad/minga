@@ -18,12 +18,12 @@ defmodule Minga.Buffer.Server do
 
   use GenServer
 
-  alias Minga.Core.Decorations
   alias Minga.Buffer.Document
   alias Minga.Buffer.EditDelta
   alias Minga.Buffer.EditSource
-  alias Minga.Core.Unicode
   alias Minga.Config.Options
+  alias Minga.Core.Decorations
+  alias Minga.Core.Unicode
   alias Minga.Editing.NavigableContent.BufferSnapshot
   alias Minga.Editing.Scroll
   alias Minga.Events

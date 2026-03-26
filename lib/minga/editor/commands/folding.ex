@@ -9,8 +9,8 @@ defmodule Minga.Editor.Commands.Folding do
 
   @behaviour Minga.Command.Provider
 
-  alias Minga.Core.Decorations
   alias Minga.Buffer
+  alias Minga.Core.Decorations
   alias Minga.Editor.FoldMap
   alias Minga.Editor.FoldRange
   alias Minga.Editor.State, as: EditorState

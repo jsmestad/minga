@@ -8,8 +8,8 @@ defmodule Minga.Integration.AnnotationSnapshotTest do
 
   use Minga.Test.EditorCase, async: true
 
-  alias Minga.Core.Decorations
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Core.Decorations
 
   describe "line annotations" do
     test "inline pill renders with background after line content" do

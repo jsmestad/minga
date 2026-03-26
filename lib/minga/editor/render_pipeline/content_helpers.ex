@@ -9,19 +9,19 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
   Extracted from `RenderPipeline` to reduce module size.
   """
 
+  alias Minga.Buffer
+  alias Minga.Config.Options
   alias Minga.Core.Decorations
   alias Minga.Core.Decorations.ConcealRange
   alias Minga.Core.Decorations.FoldRegion
-  alias Minga.Buffer
   alias Minga.Core.Unicode
-  alias Minga.Config.Options
   alias Minga.Diagnostics
   alias Minga.Editor.DisplayList
+  alias Minga.Editor.RenderPosition
   alias Minga.Editor.Renderer.BufferLine
   alias Minga.Editor.Renderer.Context
   alias Minga.Editor.Renderer.Gutter
   alias Minga.Editor.Renderer.SearchHighlight
-  alias Minga.Editor.RenderPosition
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Window
   alias Minga.Editor.WrapMap

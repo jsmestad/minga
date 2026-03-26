@@ -11,8 +11,8 @@ defmodule Minga.Agent.ChatDecorations do
   buffer pipeline.
   """
 
-  alias Minga.Core.Decorations
   alias Minga.Buffer
+  alias Minga.Core.Decorations
   alias Minga.UI.Face
 
   # All decorations created by this module belong to the :chat group.

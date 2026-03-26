@@ -2,9 +2,9 @@ defmodule Minga.Buffer.DecorationGapsTest do
   @moduledoc "Tests for #611 decoration system gap fixes."
   use ExUnit.Case, async: true
 
+  alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Core.Decorations
   alias Minga.Core.IntervalTree
-  alias Minga.Buffer.Server, as: BufferServer
 
   describe "content replacement clears decorations" do
     test "replace_content_force resets decorations" do

@@ -6,8 +6,8 @@ defmodule Minga.Editor.Commands.Search do
 
   @behaviour Minga.Command.Provider
 
-  alias Minga.Core.Decorations
   alias Minga.Buffer
+  alias Minga.Core.Decorations
   alias Minga.Core.Unicode
   alias Minga.Editor.PickerUI
   alias Minga.Editor.State, as: EditorState
