@@ -77,7 +77,8 @@ defmodule Minga.Test.EditorCase do
       suppress_tool_prompts: true
     ]
 
-    editor_opts = if shell, do: [{:shell, shell}, {:skip_persistence, true} | editor_opts], else: editor_opts
+    editor_opts =
+      if shell, do: [{:shell, shell}, {:skip_persistence, true} | editor_opts], else: editor_opts
 
     {:ok, editor} = Editor.start_link(editor_opts)
 

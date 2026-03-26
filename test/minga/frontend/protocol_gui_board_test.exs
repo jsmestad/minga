@@ -14,9 +14,8 @@ defmodule Minga.Frontend.Protocol.GUIBoardTest do
 
   # Helper: parse the gui_board header and return the card data portion
   defp parse_board_header(binary) do
-    <<0x87, visible::8, focused_id::32, card_count::16,
-      filter_mode::8, filter_len::16, _filter::binary-size(filter_len),
-      card_data::binary>> = binary
+    <<0x87, visible::8, focused_id::32, card_count::16, filter_mode::8, filter_len::16,
+      _filter::binary-size(filter_len), card_data::binary>> = binary
 
     %{
       visible: visible,
@@ -33,8 +32,9 @@ defmodule Minga.Frontend.Protocol.GUIBoardTest do
       binary = GUI.encode_gui_board(state)
 
       # opcode(0x87) + visible(1) + focused_card_id(4) + card_count(2) + filter_mode(1) + filter_len(2)
-      assert <<0x87, visible::8, _focused::32, card_count::16, filter_mode::8,
-               filter_len::16, _rest::binary>> = binary
+      assert <<0x87, visible::8, _focused::32, card_count::16, filter_mode::8, filter_len::16,
+               _rest::binary>> = binary
+
       assert visible == 1
       assert card_count == 0
       assert filter_mode == 0
@@ -45,16 +45,15 @@ defmodule Minga.Frontend.Protocol.GUIBoardTest do
       {state, _card} = State.create_card(State.new(), task: "refactor auth", model: "claude-4")
       binary = GUI.encode_gui_board(state)
 
-      <<0x87, _visible::8, focused_id::32, card_count::16,
-        _filter_mode::8, filter_len::16, _filter::binary-size(filter_len),
-        rest::binary>> = binary
+      <<0x87, _visible::8, focused_id::32, card_count::16, _filter_mode::8, filter_len::16,
+        _filter::binary-size(filter_len), rest::binary>> = binary
+
       assert card_count == 1
       assert focused_id == 1
 
       # Parse the card: id(4) + status(1) + flags(1) + task_len(2) + task
-      <<card_id::32, status::8, flags::8, task_len::16, task::binary-size(task_len),
-        model_len::8, model::binary-size(model_len), _elapsed::32, file_count::8,
-        _rest::binary>> = rest
+      <<card_id::32, status::8, flags::8, task_len::16, task::binary-size(task_len), model_len::8,
+        model::binary-size(model_len), _elapsed::32, file_count::8, _rest::binary>> = rest
 
       assert card_id == 1
       assert status == 0
@@ -119,8 +118,9 @@ defmodule Minga.Frontend.Protocol.GUIBoardTest do
       {state, _} = State.create_card(State.new(), task: "修复认证 🔐", model: "gemini-2")
 
       %{card_data: data} = GUI.encode_gui_board(state) |> parse_board_header()
-      <<_id::32, _s::8, _f::8, task_len::16, task::binary-size(task_len),
-        model_len::8, model::binary-size(model_len), _::binary>> = data
+
+      <<_id::32, _s::8, _f::8, task_len::16, task::binary-size(task_len), model_len::8,
+        model::binary-size(model_len), _::binary>> = data
 
       assert task == "修复认证 🔐"
       assert model == "gemini-2"
@@ -128,14 +128,17 @@ defmodule Minga.Frontend.Protocol.GUIBoardTest do
 
     test "encodes recent files" do
       {state, card} =
-        State.create_card(State.new(), task: "t", recent_files: ["lib/auth.ex", "test/auth_test.exs"])
+        State.create_card(State.new(),
+          task: "t",
+          recent_files: ["lib/auth.ex", "test/auth_test.exs"]
+        )
 
       state = State.update_card(state, card.id, & &1)
 
       %{card_data: data} = GUI.encode_gui_board(state) |> parse_board_header()
-      <<_id::32, _s::8, _f::8, task_len::16, _task::binary-size(task_len),
-        model_len::8, _model::binary-size(model_len), _elapsed::32,
-        file_count::8, rest::binary>> = data
+
+      <<_id::32, _s::8, _f::8, task_len::16, _task::binary-size(task_len), model_len::8,
+        _model::binary-size(model_len), _elapsed::32, file_count::8, rest::binary>> = data
 
       assert file_count == 2
       <<p1_len::16, p1::binary-size(p1_len), p2_len::16, p2::binary-size(p2_len)>> = rest

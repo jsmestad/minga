@@ -126,7 +126,10 @@ defmodule Minga.Shell.Board.Persistence do
 
         _ ->
           Path.join(
-            System.get_env("XDG_DATA_HOME", Path.join(System.get_env("HOME", "~"), ".local/share")),
+            System.get_env(
+              "XDG_DATA_HOME",
+              Path.join(System.get_env("HOME", "~"), ".local/share")
+            ),
             "minga"
           )
       end

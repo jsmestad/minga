@@ -295,7 +295,9 @@ defmodule Minga.Agent.Events do
   defp track_board_card_file(state, _path), do: state
 
   # Finds a Board card by agent session PID and applies an update function.
-  @spec update_board_card_by_session(EditorState.t(), pid(), (Minga.Shell.Board.Card.t() -> Minga.Shell.Board.Card.t())) :: EditorState.t()
+  @spec update_board_card_by_session(EditorState.t(), pid(), (Minga.Shell.Board.Card.t() ->
+                                                                Minga.Shell.Board.Card.t())) ::
+          EditorState.t()
   defp update_board_card_by_session(state, session, update_fn) do
     board = state.shell_state
 

@@ -1,30 +1,16 @@
 defmodule Minga.Credo.DomainBoundaryCheck do
   @moduledoc """
-  Enforces domain boundaries between Minga.Agent and Minga.Buffer.
+  Enforces domain boundaries for all facade'd domains in Minga.
 
-  These are separate bounded contexts that share infrastructure through
-  Minga.Editor, Minga.EditingModel, and Minga.NavigableContent, but must
-  never import from each other directly.
+  Each domain has a facade module (e.g., `Minga.Buffer`) that is the
+  only valid entry point from outside the domain. Any reference to an
+  internal module (alias, import, require, use) from outside the domain
+  is a violation. No exceptions for struct types, protocols, or
+  behaviours: if something is genuinely needed across multiple domains,
+  it should be promoted to a core entity at the top level.
 
-  ## Why this exists
-
-  The original Minga architecture had agent code scattered inside the
-  editor namespace (editor/commands/agent.ex, input/scoped.ex with agent
-  branches). Every feature required changes in multiple domains. This
-  check prevents that coupling from creeping back in after the domain
-  reorganization.
-
-  See docs/REFACTOR.md § "Why Not Surfaces?" for the full history.
-
-  ## Rules
-
-  - `Minga.Agent.*` modules must not alias, import, require, or use
-    any `Minga.Buffer.*` module.
-  - `Minga.Buffer.*` modules must not alias, import, require, or use
-    any `Minga.Agent.*` module.
-  - Both may freely reference `Minga.Editor.*`, `Minga.EditingModel.*`,
-    `Minga.NavigableContent`, `Minga.Input.*`, and other shared
-    infrastructure.
+  See AGENTS.md § "Domain Architecture" and BIG_REFACTOR_PLAN.md
+  § "Domain Architecture Integration" for the full rationale.
   """
 
   use Credo.Check,
@@ -33,56 +19,51 @@ defmodule Minga.Credo.DomainBoundaryCheck do
     category: :design,
     explanations: [
       check: """
-      Minga.Agent and Minga.Buffer are separate domains that must not
-      import from each other. Both may use shared infrastructure
-      (Minga.Editor, Minga.EditingModel, Minga.NavigableContent) but
-      never cross-reference each other's modules.
+      Minga uses bounded contexts (domains) with facade modules as the
+      only valid entry point. Code outside a domain must go through the
+      facade, not reference internal modules directly.
 
-      If you need shared functionality, move it to shared infrastructure
-      or use the NavigableContent protocol.
+      Example: use `Minga.Buffer.content(buf)` instead of
+      `Minga.Buffer.Server.content(buf)`.
+
+      If a struct, protocol, or behaviour is needed across domains,
+      promote it to a core entity rather than reaching past the facade.
       """
     ]
 
   @reference_forms [:alias, :import, :require, :use]
 
-  # Agent modules that are allowed to reference Buffer.Server.
-  # The agent's prompt buffer is a Buffer.Server instance, so these
-  # cross-domain references are deliberate and unavoidable.
-  @allowed_agent_buffer_modules [
-    "Minga.Agent.View.PromptRenderer",
-    "Minga.Agent.View.DashboardRenderer",
-    "Minga.Agent.View.RenderInput",
-    # Macro.camelize turns "ui_state" → "UiState", not "UIState"
-    "Minga.Agent.UiState",
-    "Minga.Agent.UiState.Panel",
-    "Minga.Agent.BufferSync",
-    "Minga.Agent.ChatDecorations",
-    # Agent tools route through Buffer.Server when a buffer is open (#905).
-    # This is the core of buffer-routed agent edits.
-    "Minga.Agent.Tools.EditFile",
-    "Minga.Agent.Tools.MultiEditFile",
-    "Minga.Agent.Tools.WriteFile"
-  ]
+  # Domain facade modules. The facade is the only valid entry point.
+  @domains %{
+    agent: "Minga.Agent",
+    buffer: "Minga.Buffer",
+    editing: "Minga.Editing",
+    frontend: "Minga.Frontend",
+    ui: "Minga.UI",
+    project: "Minga.Project",
+    language: "Minga.Language",
+    session: "Minga.Session",
+    config: "Minga.Config",
+    keymap: "Minga.Keymap",
+    command: "Minga.Command",
+    git: "Minga.Git",
+    input: "Minga.Input",
+    mode: "Minga.Mode"
+  }
 
   @impl Credo.Check
   def run(%SourceFile{} = source_file, params) do
     issue_meta = IssueMeta.for(source_file, params)
-
-    # Determine what domain this file's module is in from the filename.
-    # This avoids tracking module names through AST traversal state.
     filename = source_file.filename
-
     source_domain = domain_for_file(filename)
-    source_module = module_for_file(filename)
 
-    # Skip files outside agent/buffer domains, and skip test files
-    # (tests naturally need to reference the modules they test).
-    if source_domain && source_module do
-      source_file
-      |> Credo.Code.prewalk(&find_violations(&1, &2, source_domain, source_module, issue_meta))
-      |> Enum.filter(&is_map/1)
-    else
+    # Skip test files (tests naturally reference the modules they test)
+    if test_file?(filename) do
       []
+    else
+      source_file
+      |> Credo.Code.prewalk(&find_violations(&1, &2, source_domain, issue_meta))
+      |> Enum.filter(&is_map/1)
     end
   end
 
@@ -90,73 +71,60 @@ defmodule Minga.Credo.DomainBoundaryCheck do
          {form, meta, [{:__aliases__, _, ref_parts} | _]} = ast,
          issues,
          source_domain,
-         source_module,
          issue_meta
        )
        when form in @reference_forms do
-    ref_name = Enum.join(ref_parts, ".")
-    target_domain = domain_for_module(ref_name)
+    if Enum.all?(ref_parts, &is_atom/1) do
+      ref_name = Enum.map_join(ref_parts, ".", &Atom.to_string/1)
+      target_domain = domain_for_module(ref_name)
 
-    if target_domain && violates_boundary?(source_domain, target_domain) &&
-         not allowed?(source_module, source_domain, target_domain) do
-      issue =
-        format_issue(issue_meta,
-          message:
-            "#{source_domain} must not reference #{target_domain} (domain boundary violation: #{form} #{ref_name})",
-          trigger: ref_name,
-          line_no: meta[:line]
-        )
+      if target_domain &&
+           target_domain != source_domain &&
+           ref_name != Map.fetch!(@domains, target_domain) do
+        facade = Map.fetch!(@domains, target_domain)
 
-      {ast, [issue | issues]}
+        issue =
+          format_issue(issue_meta,
+            message:
+              "Domain boundary violation: #{form} #{ref_name}. " <>
+                "Use the `#{facade}` facade instead.",
+            trigger: ref_name,
+            line_no: meta[:line]
+          )
+
+        {ast, [issue | issues]}
+      else
+        {ast, issues}
+      end
     else
       {ast, issues}
     end
   end
 
-  defp find_violations(ast, issues, _source_domain, _source_module, _issue_meta),
+  defp find_violations(ast, issues, _source_domain, _issue_meta),
     do: {ast, issues}
 
-  # Check if this specific module is allowed to cross the boundary.
-  defp allowed?(nil, _source_domain, _target_domain), do: false
-
-  defp allowed?(source_module, :agent, :buffer) do
-    source_module in @allowed_agent_buffer_modules
+  defp test_file?(filename) do
+    String.contains?(Path.expand(filename), "/test/")
   end
 
-  defp allowed?(_source_module, _source_domain, _target_domain), do: false
-
-  # Extract a likely module name from the file path.
-  # Returns nil for test files (tests are always allowed to cross boundaries).
-  defp module_for_file(filename) do
-    expanded = Path.expand(filename)
-
-    if String.contains?(expanded, "/test/") do
-      nil
-    else
-      expanded
-      |> String.split("/lib/")
-      |> List.last()
-      |> String.trim_trailing(".ex")
-      |> String.split("/")
-      |> Enum.map_join(".", &Macro.camelize/1)
-    end
-  end
-
+  # Determine which domain a file belongs to from its path.
+  @spec domain_for_file(String.t()) :: atom() | nil
   defp domain_for_file(filename) do
     expanded = Path.expand(filename)
 
-    cond do
-      String.contains?(expanded, "/minga/agent/") -> :agent
-      String.contains?(expanded, "/minga/buffer/") -> :buffer
-      true -> nil
-    end
+    Enum.find_value(@domains, fn {domain, _facade} ->
+      if String.contains?(expanded, "/minga/#{domain}/"), do: domain
+    end)
   end
 
-  defp domain_for_module("Minga.Agent." <> _), do: :agent
-  defp domain_for_module("Minga.Buffer." <> _), do: :buffer
-  defp domain_for_module(_), do: nil
-
-  defp violates_boundary?(:agent, :buffer), do: true
-  defp violates_boundary?(:buffer, :agent), do: true
-  defp violates_boundary?(_, _), do: false
+  # Determine which domain a module belongs to from its name.
+  @spec domain_for_module(String.t()) :: atom() | nil
+  defp domain_for_module(ref_name) do
+    Enum.find_value(@domains, fn {domain, facade} ->
+      if ref_name == facade || String.starts_with?(ref_name, facade <> ".") do
+        domain
+      end
+    end)
+  end
 end

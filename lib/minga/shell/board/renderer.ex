@@ -97,7 +97,12 @@ defmodule Minga.Shell.Board.Renderer do
 
     [
       DisplayList.draw(0, 0, title, face),
-      DisplayList.draw(0, String.length(title), pad_right(count_text, max(cols - String.length(title), 0)), dim_face)
+      DisplayList.draw(
+        0,
+        String.length(title),
+        pad_right(count_text, max(cols - String.length(title), 0)),
+        dim_face
+      )
     ]
   end
 
@@ -145,7 +150,11 @@ defmodule Minga.Shell.Board.Renderer do
         elapsed = format_elapsed(card.created_at)
 
         line = build_two_column_line(icon <> " " <> label, elapsed, inner_width)
-        [DisplayList.draw(content_start, col, @v <> " " <> line <> " " <> @v, status_face) | draws]
+
+        [
+          DisplayList.draw(content_start, col, @v <> " " <> line <> " " <> @v, status_face)
+          | draws
+        ]
       else
         draws
       end
@@ -154,7 +163,11 @@ defmodule Minga.Shell.Board.Renderer do
     draws =
       if content_start + 1 <= content_end do
         task = pad_right(card.task, inner_width)
-        [DisplayList.draw(content_start + 1, col, @v <> " " <> task <> " " <> @v, content_face) | draws]
+
+        [
+          DisplayList.draw(content_start + 1, col, @v <> " " <> task <> " " <> @v, content_face)
+          | draws
+        ]
       else
         draws
       end
@@ -163,7 +176,8 @@ defmodule Minga.Shell.Board.Renderer do
     fill_face = Face.new(fg: 0x5C6370, bg: card_bg)
 
     draws =
-      Enum.reduce((content_start + 2)..max(content_end - 1, content_start + 1)//1, draws, fn r, acc ->
+      Enum.reduce((content_start + 2)..max(content_end - 1, content_start + 1)//1, draws, fn r,
+                                                                                             acc ->
         blank_line = String.duplicate(" ", inner_width)
         [DisplayList.draw(r, col, @v <> " " <> blank_line <> " " <> @v, fill_face) | acc]
       end)
@@ -277,7 +291,12 @@ defmodule Minga.Shell.Board.Renderer do
     [
       DisplayList.draw(bar_row, 0, prompt, bar_face),
       DisplayList.draw(bar_row, String.length(prompt), filter_text <> cursor, text_face),
-      DisplayList.draw(bar_row, String.length(line), String.duplicate(" ", max(cols - String.length(line), 0)), bar_face)
+      DisplayList.draw(
+        bar_row,
+        String.length(line),
+        String.duplicate(" ", max(cols - String.length(line), 0)),
+        bar_face
+      )
     ]
   end
 

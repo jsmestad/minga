@@ -160,9 +160,11 @@ defmodule Minga.Shell.Board.LayoutTest do
   # ── Property: non-overlap invariant ────────────────────────────────────
 
   property "card rects never overlap for any viewport size and card count" do
-    check all width <- integer(20..200),
-              height <- integer(8..60),
-              card_count <- integer(1..20) do
+    check all(
+            width <- integer(20..200),
+            height <- integer(8..60),
+            card_count <- integer(1..20)
+          ) do
       state = build_board(card_count)
       layout = Layout.compute(state, width, height)
 
@@ -180,9 +182,11 @@ defmodule Minga.Shell.Board.LayoutTest do
   # ── Property: bounds invariant ─────────────────────────────────────────
 
   property "all card rects fit within viewport bounds" do
-    check all width <- integer(20..200),
-              height <- integer(8..60),
-              card_count <- integer(1..20) do
+    check all(
+            width <- integer(20..200),
+            height <- integer(8..60),
+            card_count <- integer(1..20)
+          ) do
       state = build_board(card_count)
       layout = Layout.compute(state, width, height)
 
@@ -191,7 +195,9 @@ defmodule Minga.Shell.Board.LayoutTest do
         assert col >= 0, "col #{col} is negative"
         assert w > 0, "width #{w} is not positive"
         assert h > 0, "height #{h} is not positive"
-        assert col + w <= width, "card exceeds viewport width: col=#{col} w=#{w} viewport=#{width}"
+
+        assert col + w <= width,
+               "card exceeds viewport width: col=#{col} w=#{w} viewport=#{width}"
       end
     end
   end
@@ -199,9 +205,11 @@ defmodule Minga.Shell.Board.LayoutTest do
   # ── Property: all cards get a rect ─────────────────────────────────────
 
   property "every card gets a rect in the layout" do
-    check all width <- integer(30..200),
-              height <- integer(10..60),
-              card_count <- integer(1..15) do
+    check all(
+            width <- integer(30..200),
+            height <- integer(10..60),
+            card_count <- integer(1..15)
+          ) do
       state = build_board(card_count)
       layout = Layout.compute(state, width, height)
 

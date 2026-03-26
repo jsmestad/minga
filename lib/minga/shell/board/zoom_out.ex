@@ -53,9 +53,10 @@ defmodule Minga.Shell.Board.ZoomOut do
     # Store the live (zoomed) workspace onto the card for next zoom-in
     live_workspace = Map.from_struct(state.workspace)
 
-    board = BoardState.update_card(board, card_id, fn c ->
-      Card.store_workspace(c, live_workspace)
-    end)
+    board =
+      BoardState.update_card(board, card_id, fn c ->
+        Card.store_workspace(c, live_workspace)
+      end)
 
     # Clear zoom state
     board = %{board | zoomed_into: nil}

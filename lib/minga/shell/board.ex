@@ -38,7 +38,9 @@ defmodule Minga.Shell.Board do
         if Enum.any?(restored.cards, fn {_id, c} -> c.kind == :you end) do
           restored
         else
-          {restored, _you} = BoardState.create_card(restored, task: "You", status: :idle, kind: :you)
+          {restored, _you} =
+            BoardState.create_card(restored, task: "You", status: :idle, kind: :you)
+
           restored
         end
 
@@ -121,7 +123,8 @@ defmodule Minga.Shell.Board do
   @spec build_chrome(term(), Minga.Editor.Layout.t(), map(), term()) ::
           Minga.Editor.RenderPipeline.Chrome.t()
   def build_chrome(editor_state, layout, scrolls, cursor_info) do
-    chrome = Minga.Editor.RenderPipeline.Chrome.build_chrome(editor_state, layout, scrolls, cursor_info)
+    chrome =
+      Minga.Editor.RenderPipeline.Chrome.build_chrome(editor_state, layout, scrolls, cursor_info)
 
     if BoardState.grid_view?(editor_state.shell_state) do
       chrome
@@ -178,7 +181,10 @@ defmodule Minga.Shell.Board do
 
   @spec zoom_status_face(Minga.Shell.Board.Card.status(), Minga.UI.Theme.t()) :: Minga.UI.Face.t()
   defp zoom_status_face(:working, theme), do: Minga.UI.Face.new(fg: 0x98C379, bg: theme.editor.bg)
-  defp zoom_status_face(:needs_you, theme), do: Minga.UI.Face.new(fg: 0xE5C07B, bg: theme.editor.bg)
+
+  defp zoom_status_face(:needs_you, theme),
+    do: Minga.UI.Face.new(fg: 0xE5C07B, bg: theme.editor.bg)
+
   defp zoom_status_face(:done, theme), do: Minga.UI.Face.new(fg: 0x61AFEF, bg: theme.editor.bg)
   defp zoom_status_face(:errored, theme), do: Minga.UI.Face.new(fg: 0xE06C75, bg: theme.editor.bg)
   defp zoom_status_face(_, theme), do: Minga.UI.Face.new(fg: 0x5C6370, bg: theme.editor.bg)

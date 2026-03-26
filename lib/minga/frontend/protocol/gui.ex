@@ -652,8 +652,8 @@ defmodule Minga.Frontend.Protocol.GUI do
 
     IO.iodata_to_binary([
       @op_gui_board,
-      <<visible::8, focused_id::32, length(cards)::16,
-        filter_mode::8, byte_size(filter_bytes)::16, filter_bytes::binary>>
+      <<visible::8, focused_id::32, length(cards)::16, filter_mode::8,
+        byte_size(filter_bytes)::16, filter_bytes::binary>>
       | card_entries
     ])
   end
@@ -685,11 +685,8 @@ defmodule Minga.Frontend.Protocol.GUI do
       end)
 
     IO.iodata_to_binary([
-      <<card.id::32, status_byte::8, flags::8,
-        byte_size(task_bytes)::16, task_bytes::binary,
-        byte_size(model_bytes)::8, model_bytes::binary,
-        elapsed::32,
-        length(recent_files)::8>>
+      <<card.id::32, status_byte::8, flags::8, byte_size(task_bytes)::16, task_bytes::binary,
+        byte_size(model_bytes)::8, model_bytes::binary, elapsed::32, length(recent_files)::8>>
       | file_entries
     ])
   end
