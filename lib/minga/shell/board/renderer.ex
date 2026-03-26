@@ -90,7 +90,7 @@ defmodule Minga.Shell.Board.Renderer do
   defp render_card(card, {row, col, width, height}, focused, theme) do
     border_face =
       if focused do
-        Face.new(fg: theme.editor.cursor_line_bg || 0x61AFEF, bg: theme.editor.bg)
+        Face.new(fg: theme.editor.cursorline_bg || 0x61AFEF, bg: theme.editor.bg)
       else
         Face.new(fg: 0x5C6370, bg: theme.editor.bg)
       end

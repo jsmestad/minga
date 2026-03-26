@@ -63,18 +63,23 @@ defmodule Minga.Test.EditorCase do
     editing_model = Keyword.get(opts, :editing_model, :vim)
     # Backend defaults to :headless; override to :tui for TUI-specific tests.
     backend = Keyword.get(opts, :backend, :headless)
+    # Shell defaults to nil (uses config); override to :board for Board tests.
+    shell = Keyword.get(opts, :shell)
 
-    {:ok, editor} =
-      Editor.start_link(
-        name: :"headless_editor_#{id}",
-        backend: backend,
-        port_manager: port,
-        buffer: buffer,
-        width: width,
-        height: height,
-        editing_model: editing_model,
-        suppress_tool_prompts: true
-      )
+    editor_opts = [
+      name: :"headless_editor_#{id}",
+      backend: backend,
+      port_manager: port,
+      buffer: buffer,
+      width: width,
+      height: height,
+      editing_model: editing_model,
+      suppress_tool_prompts: true
+    ]
+
+    editor_opts = if shell, do: [{:shell, shell} | editor_opts], else: editor_opts
+
+    {:ok, editor} = Editor.start_link(editor_opts)
 
     # Send ready event to trigger initial render
     ref = HeadlessPort.prepare_await(port)
