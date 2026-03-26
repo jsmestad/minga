@@ -145,7 +145,7 @@ defmodule Minga.Editor.PromptUI do
 
   def render(%{shell_state: %{prompt_ui: prompt}, theme: theme} = _state, viewport) do
     alias Minga.Editor.DisplayList
-    alias Minga.UI.Face
+    alias Minga.Core.Face
 
     pc = theme.picker
     row = viewport.rows - 1

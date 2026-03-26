@@ -50,7 +50,7 @@ defmodule Minga.Core.Decorations.BlockDecoration do
   - `[{text, style}]` — single-line block
   - `[[{text, style}]]` — multi-line block (list of lines, each a list of segments)
   """
-  @type render_result :: [{String.t(), Minga.UI.Face.t()}] | [[{String.t(), Minga.UI.Face.t()}]]
+  @type render_result :: [{String.t(), Minga.Core.Face.t()}] | [[{String.t(), Minga.Core.Face.t()}]]
 
   @typedoc "Click callback: receives row offset within block and column."
   @type click_fn :: (row :: non_neg_integer(), col :: non_neg_integer() -> :ok) | nil
@@ -85,7 +85,7 @@ defmodule Minga.Core.Decorations.BlockDecoration do
   Normalizes the render callback result into a list of segment lists
   (one per display line).
   """
-  @spec normalize_render_result(render_result()) :: [[{String.t(), Minga.UI.Face.t()}]]
+  @spec normalize_render_result(render_result()) :: [[{String.t(), Minga.Core.Face.t()}]]
   def normalize_render_result([]), do: [[]]
 
   def normalize_render_result([[_ | _] | _] = multi_line), do: multi_line

@@ -7,8 +7,8 @@ defmodule Minga.Agent.View.DirectoryRenderer do
   with a folder icon and trailing slash.
   """
 
+  alias Minga.Core.Face
   alias Minga.Editor.DisplayList
-  alias Minga.UI.Face
   alias Minga.UI.Theme
 
   @typedoc "A draw rectangle: {row_offset, col_offset, width, height}."

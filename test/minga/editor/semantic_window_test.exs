@@ -21,7 +21,7 @@ defmodule Minga.Editor.SemanticWindowTest do
   alias Minga.Editor.SemanticWindow.Span
   alias Minga.Editor.SemanticWindow.VisualRow
   alias Minga.Editor.State, as: EditorState
-  alias Minga.UI.Face
+  alias Minga.Core.Face
 
   alias Minga.Editing.Search.Match, as: SearchMatchStruct
 

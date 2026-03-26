@@ -16,11 +16,11 @@ defmodule Minga.Editor.Renderer.Line do
 
   alias Minga.Core.Decorations
   alias Minga.Core.Decorations.ConcealRange
+  alias Minga.Core.Face
   alias Minga.Core.Unicode
   alias Minga.Editor.DisplayList
   alias Minga.Editor.Renderer.Composition
   alias Minga.Editor.Renderer.Context
-  alias Minga.UI.Face
   alias Minga.UI.Highlight
 
   @typedoc "Column range of a selection on a single line (display columns, end exclusive)."

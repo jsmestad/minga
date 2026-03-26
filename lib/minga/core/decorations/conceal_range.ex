@@ -33,8 +33,8 @@ defmodule Minga.Core.Decorations.ConcealRange do
   rendering pipeline, mouse handling, and selection logic depend on.
   """
 
+  alias Minga.Core.Face
   alias Minga.Core.IntervalTree
-  alias Minga.UI.Face
 
   @enforce_keys [:id, :start_pos, :end_pos]
   defstruct [

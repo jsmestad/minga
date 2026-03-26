@@ -6,8 +6,8 @@ defmodule Minga.Agent.View.ShellRenderer do
   scrollable output content with line numbers.
   """
 
+  alias Minga.Core.Face
   alias Minga.Editor.DisplayList
-  alias Minga.UI.Face
   alias Minga.UI.Theme
 
   @typedoc "Bounding rectangle: `{row, col, width, height}`."

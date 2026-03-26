@@ -19,6 +19,7 @@ defmodule Minga.Editor.Renderer.BufferLine do
   """
 
   alias Minga.Core.Decorations
+  alias Minga.Core.Face
   alias Minga.Core.Unicode
   alias Minga.Editor.DisplayList
   alias Minga.Editor.NavFlash
@@ -26,7 +27,6 @@ defmodule Minga.Editor.Renderer.BufferLine do
   alias Minga.Editor.Renderer.Gutter
   alias Minga.Editor.Renderer.Line, as: LineRenderer
   alias Minga.Editor.WrapMap
-  alias Minga.UI.Face
   alias Minga.UI.Highlight
 
   @typedoc """

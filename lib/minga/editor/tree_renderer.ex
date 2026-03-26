@@ -9,13 +9,13 @@ defmodule Minga.Editor.TreeRenderer do
   """
 
   alias Minga.Buffer
+  alias Minga.Core.Face
   alias Minga.Editor.DisplayList
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.WindowTree
   alias Minga.Language.Filetype
   alias Minga.Project.FileTree
   alias Minga.UI.Devicon
-  alias Minga.UI.Face
   alias Minga.UI.Theme
 
   # Box-drawing characters for indent guides

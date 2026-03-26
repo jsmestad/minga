@@ -26,8 +26,8 @@ defmodule Minga.Editor.FloatingWindow do
       draws = FloatingWindow.render(spec)
   """
 
+  alias Minga.Core.Face
   alias Minga.Editor.DisplayList
-  alias Minga.UI.Face
 
   # ── Border character sets ────────────────────────────────────────────────
 

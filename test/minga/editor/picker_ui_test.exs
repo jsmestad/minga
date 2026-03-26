@@ -82,7 +82,7 @@ defmodule Minga.Editor.PickerUITest do
         assert is_integer(row)
         assert is_integer(col)
         assert is_binary(text)
-        assert %Minga.UI.Face{} = style
+        assert %Minga.Core.Face{} = style
       end)
     end
   end

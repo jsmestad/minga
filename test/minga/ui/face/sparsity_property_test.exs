@@ -1,4 +1,4 @@
-defmodule Minga.UI.Face.SparsityPropertyTest do
+defmodule Minga.Core.Face.SparsityPropertyTest do
   @moduledoc """
   Property-based tests verifying the style sparsity contract.
 
@@ -16,7 +16,7 @@ defmodule Minga.UI.Face.SparsityPropertyTest do
 
   import StreamData
 
-  alias Minga.UI.Face
+  alias Minga.Core.Face
   alias Minga.UI.Face.Registry
 
   # ── Generators ──

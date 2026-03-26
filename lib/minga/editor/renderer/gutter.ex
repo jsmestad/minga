@@ -11,9 +11,9 @@ defmodule Minga.Editor.Renderer.Gutter do
   All render functions return `DisplayList.draw()` tuples (or `[]`).
   """
 
+  alias Minga.Core.Face
   alias Minga.Diagnostics.Diagnostic
   alias Minga.Editor.DisplayList
-  alias Minga.UI.Face
 
   @sign_col_width 2
 

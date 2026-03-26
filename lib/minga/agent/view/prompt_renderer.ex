@@ -14,10 +14,10 @@ defmodule Minga.Agent.View.PromptRenderer do
   alias Minga.Agent.Config, as: AgentConfig
   alias Minga.Agent.UIState
   alias Minga.Agent.View.RenderInput
+  alias Minga.Core.Face
   alias Minga.Editor.DisplayList
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.AgentAccess
-  alias Minga.UI.Face
 
   alias Minga.Input.Wrap, as: InputWrap
   alias Minga.UI.Theme

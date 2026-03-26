@@ -137,7 +137,7 @@ defmodule Minga.Editor.SignatureHelpTest do
       bar_draws = Enum.filter(draws, fn {_r, _c, text, _s} -> text == "bar" end)
       assert bar_draws != []
 
-      [{_r, _c, _text, %Minga.UI.Face{} = face}] = bar_draws
+      [{_r, _c, _text, %Minga.Core.Face{} = face}] = bar_draws
       assert face.bold == true
     end
 

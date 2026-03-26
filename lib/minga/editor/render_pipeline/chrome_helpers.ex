@@ -9,6 +9,7 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
   """
 
   alias Minga.Config
+  alias Minga.Core.Face
   alias Minga.Editor.DisplayList
   alias Minga.Editor.FloatingWindow
   alias Minga.Editor.Layout
@@ -16,7 +17,6 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
   alias Minga.Editor.TabBarRenderer
   alias Minga.Editor.Viewport
   alias Minga.Editor.WindowTree
-  alias Minga.UI.Face
   alias Minga.UI.Theme
   alias Minga.UI.WhichKey
 

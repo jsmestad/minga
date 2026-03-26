@@ -38,7 +38,7 @@ defmodule Minga.UI.Popup.Lifecycle do
   alias Minga.Editor.Viewport
   alias Minga.Editor.Window
   alias Minga.Editor.WindowTree
-  alias Minga.UI.Face
+  alias Minga.Core.Face
   alias Minga.UI.Popup.Active, as: PopupActive
   alias Minga.UI.Popup.Registry, as: PopupRegistry
   alias Minga.UI.Popup.Rule

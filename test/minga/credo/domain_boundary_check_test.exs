@@ -76,7 +76,7 @@ defmodule Minga.Credo.DomainBoundaryCheckTest do
       defmodule Minga.Agent.Foo do
         alias Minga.Buffer.Server
         alias Minga.Config.Options
-        alias Minga.UI.Face
+        alias Minga.UI.Theme
       end
       """
       |> check("lib/minga/agent/foo.ex")

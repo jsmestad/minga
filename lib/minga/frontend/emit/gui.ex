@@ -541,7 +541,7 @@ defmodule Minga.Frontend.Emit.GUI do
   end
 
   # Convert a Face's fg color to a 24-bit RGB integer.
-  @spec face_to_rgb(Minga.UI.Face.t(), non_neg_integer()) :: non_neg_integer()
+  @spec face_to_rgb(Minga.Core.Face.t(), non_neg_integer()) :: non_neg_integer()
   defp face_to_rgb(%{fg: nil}, default), do: default
   defp face_to_rgb(%{fg: fg}, _default) when is_integer(fg), do: fg
   defp face_to_rgb(_, default), do: default

@@ -12,11 +12,11 @@ defmodule Minga.Editor.CompletionUI do
   """
 
   alias Minga.Agent.Markdown
+  alias Minga.Core.Face
   alias Minga.Editing.Completion
   alias Minga.Editor.DisplayList
   alias Minga.Editor.FloatingWindow
   alias Minga.Editor.MarkdownStyles
-  alias Minga.UI.Face
 
   @max_rows 10
   @max_width 50

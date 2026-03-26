@@ -25,7 +25,7 @@ defmodule Minga.UI.Face.Registry do
   merged attribute-by-attribute, and the resolution cache is rebuilt.
   """
 
-  alias Minga.UI.Face
+  alias Minga.Core.Face
 
   @enforce_keys [:faces, :resolved]
   defstruct faces: %{},

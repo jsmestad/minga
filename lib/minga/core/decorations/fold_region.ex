@@ -29,7 +29,7 @@ defmodule Minga.Core.Decorations.FoldRegion do
   """
   @type placeholder_fn ::
           (non_neg_integer(), non_neg_integer(), pos_integer() ->
-             [{String.t(), Minga.UI.Face.t()}])
+             [{String.t(), Minga.Core.Face.t()}])
           | nil
 
   @type t :: %__MODULE__{

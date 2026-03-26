@@ -22,9 +22,9 @@ defmodule Minga.Diagnostics.Decorations do
 
   alias Minga.Buffer
   alias Minga.Core.Decorations
+  alias Minga.Core.Face
   alias Minga.Diagnostics
   alias Minga.Diagnostics.Diagnostic
-  alias Minga.UI.Face
 
   @diagnostic_group :diagnostics
 

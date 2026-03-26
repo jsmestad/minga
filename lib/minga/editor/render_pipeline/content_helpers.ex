@@ -14,6 +14,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
   alias Minga.Core.Decorations
   alias Minga.Core.Decorations.ConcealRange
   alias Minga.Core.Decorations.FoldRegion
+  alias Minga.Core.Face
   alias Minga.Core.Unicode
   alias Minga.Diagnostics
   alias Minga.Editor.DisplayList
@@ -29,7 +30,6 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
   alias Minga.Git.Tracker, as: GitTracker
   alias Minga.LSP.SyncServer
   alias Minga.Mode.VisualState
-  alias Minga.UI.Face
   alias Minga.UI.Highlight
 
   @type state :: EditorState.t()

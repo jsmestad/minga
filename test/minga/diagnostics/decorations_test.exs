@@ -167,7 +167,7 @@ defmodule Minga.Diagnostics.DecorationsTest do
       BufferServer.batch_decorations(pid, fn decs ->
         {_id, decs} =
           Decorations.add_highlight(decs, {0, 0}, {0, 5},
-            style: Minga.UI.Face.new(fg: 0x00FF00),
+            style: Minga.Core.Face.new(fg: 0x00FF00),
             group: :search
           )
 

@@ -7,7 +7,8 @@ defmodule Minga.UI.Highlight do
   to split a line into styled segments for rendering.
   """
 
-  alias Minga.UI.Face
+  alias Minga.Core.Face
+  alias Minga.UI.Face.Registry, as: FaceRegistry
   alias Minga.UI.Theme
 
   @enforce_keys [:version, :spans, :capture_names, :theme, :face_registry]
@@ -19,7 +20,7 @@ defmodule Minga.UI.Highlight do
           spans: tuple() | [map()],
           capture_names: tuple(),
           theme: Theme.syntax(),
-          face_registry: Face.Registry.t()
+          face_registry: FaceRegistry.t()
         }
 
   @typedoc "Style resolver: a function that maps capture names to Face structs."
@@ -43,7 +44,7 @@ defmodule Minga.UI.Highlight do
   """
   @spec new(Theme.syntax()) :: t()
   def new(syntax) when is_map(syntax) do
-    registry = Face.Registry.from_syntax(syntax)
+    registry = FaceRegistry.from_syntax(syntax)
 
     %__MODULE__{
       version: 0,
@@ -57,7 +58,7 @@ defmodule Minga.UI.Highlight do
   @doc "Creates an empty highlight state using the syntax map from a `Minga.UI.Theme.t()` struct."
   @spec from_theme(Minga.UI.Theme.t()) :: t()
   def from_theme(%Minga.UI.Theme{} = theme) do
-    registry = Face.Registry.from_theme(theme)
+    registry = FaceRegistry.from_theme(theme)
 
     %__MODULE__{
       version: 0,
@@ -413,7 +414,7 @@ defmodule Minga.UI.Highlight do
         if resolver do
           resolver.(name)
         else
-          Face.Registry.style_for(hl.face_registry, name)
+          FaceRegistry.style_for(hl.face_registry, name)
         end
     end
   end
@@ -425,9 +426,9 @@ defmodule Minga.UI.Highlight do
   the Highlight struct's built-in face registry (e.g., with buffer-local
   face overrides applied).
   """
-  @spec resolver_for(Face.Registry.t()) :: style_resolver()
+  @spec resolver_for(FaceRegistry.t()) :: style_resolver()
   def resolver_for(registry) do
-    fn name -> Face.Registry.style_for(registry, name) end
+    fn name -> FaceRegistry.style_for(registry, name) end
   end
 
   # Safely extract a substring using byte offsets. When highlight spans are

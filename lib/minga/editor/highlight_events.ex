@@ -11,11 +11,11 @@ defmodule Minga.Editor.HighlightEvents do
 
   alias Minga.Buffer
   alias Minga.Core.Decorations
+  alias Minga.Core.Face
   alias Minga.Editor.HighlightSync
   alias Minga.Editor.Renderer
   alias Minga.Editor.State, as: EditorState
   alias Minga.Language.Filetype
-  alias Minga.UI.Face
   alias Minga.UI.PrettifySymbols
 
   @doc """

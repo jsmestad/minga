@@ -13,7 +13,7 @@ defmodule Minga.Agent.ChatDecorations do
 
   alias Minga.Buffer
   alias Minga.Core.Decorations
-  alias Minga.UI.Face
+  alias Minga.Core.Face
 
   # All decorations created by this module belong to the :chat group.
   # This allows remove_group(:chat) to clear chat decorations without

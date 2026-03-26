@@ -18,13 +18,13 @@ defmodule Minga.Editor.RenderPipeline.Content do
   alias Minga.Editor.FoldMap
   alias Minga.Editor.Layout
 
+  alias Minga.Core.Face
   alias Minga.Editor.RenderPipeline.ContentHelpers
   alias Minga.Editor.RenderPipeline.Scroll.WindowScroll
   alias Minga.Editor.SemanticWindow
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Viewport
   alias Minga.Editor.Window
-  alias Minga.UI.Face
 
   @typedoc "Internal editor state."
   @type state :: EditorState.t()

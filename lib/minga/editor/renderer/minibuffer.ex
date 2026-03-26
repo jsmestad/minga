@@ -11,10 +11,10 @@ defmodule Minga.Editor.Renderer.Minibuffer do
   """
 
   alias Minga.Buffer
+  alias Minga.Core.Face
   alias Minga.Diagnostics
   alias Minga.Editor.DisplayList
   alias Minga.LSP.SyncServer
-  alias Minga.UI.Face
 
   @typedoc """
   Focused input for minibuffer rendering.

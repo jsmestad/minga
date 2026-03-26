@@ -14,7 +14,7 @@ defmodule Minga.Editor.HighlightIntegrationTest do
   alias Minga.Editor.Viewport
   alias Minga.Editor.VimState
   alias Minga.Test.HeadlessPort
-  alias Minga.UI.Face
+  alias Minga.Core.Face
   alias Minga.UI.Highlight
 
   # Helper: builds a %Highlight{} with a face registry from a theme map.
@@ -26,7 +26,7 @@ defmodule Minga.Editor.HighlightIntegrationTest do
       spans: Keyword.get(attrs, :spans, {}),
       capture_names: attrs |> Keyword.get(:capture_names, []) |> List.to_tuple(),
       theme: theme,
-      face_registry: Face.Registry.from_syntax(theme)
+      face_registry: Minga.UI.Face.Registry.from_syntax(theme)
     }
   end
 

@@ -1,4 +1,4 @@
-defmodule Minga.UI.Face do
+defmodule Minga.Core.Face do
   @moduledoc """
   A named, inheritable bundle of visual attributes.
 

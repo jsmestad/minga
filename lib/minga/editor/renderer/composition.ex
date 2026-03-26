@@ -18,8 +18,8 @@ defmodule Minga.Editor.Renderer.Composition do
 
   alias Minga.Core.Decorations
   alias Minga.Core.Decorations.ConcealRange
+  alias Minga.Core.Face
   alias Minga.Core.Unicode
-  alias Minga.UI.Face
 
   @type styled_segment :: {String.t(), Face.t()}
 

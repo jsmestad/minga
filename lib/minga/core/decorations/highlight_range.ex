@@ -9,8 +9,8 @@ defmodule Minga.Core.Decorations.HighlightRange do
   per-property.
   """
 
+  alias Minga.Core.Face
   alias Minga.Core.IntervalTree
-  alias Minga.UI.Face
 
   @enforce_keys [:id, :start, :end_, :style]
   defstruct id: nil,

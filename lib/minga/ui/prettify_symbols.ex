@@ -28,7 +28,7 @@ defmodule Minga.UI.PrettifySymbols do
   alias Minga.Buffer
   alias Minga.Config
   alias Minga.Core.Decorations
-  alias Minga.UI.Face
+  alias Minga.Core.Face
   alias Minga.UI.Highlight
 
   @typedoc "A substitution rule: source text, replacement character, and matching captures."

@@ -315,7 +315,7 @@ defmodule Minga.Editor.SemanticWindow.Builder do
     # Start with highlight segments or plain text
     segments =
       case hl_segments do
-        nil -> [{line_text, Minga.UI.Face.new()}]
+        nil -> [{line_text, Minga.Core.Face.new()}]
         segs -> segs
       end
 
@@ -463,7 +463,7 @@ defmodule Minga.Editor.SemanticWindow.Builder do
     segments_to_spans(segments)
   end
 
-  @spec segments_to_spans([{String.t(), Minga.UI.Face.t()}]) :: [Span.t()]
+  @spec segments_to_spans([{String.t(), Minga.Core.Face.t()}]) :: [Span.t()]
   defp segments_to_spans(segments) do
     {spans, _col} =
       Enum.reduce(segments, {[], 0}, fn {text, style}, {acc, col} ->

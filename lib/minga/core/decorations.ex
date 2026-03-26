@@ -43,8 +43,8 @@ defmodule Minga.Core.Decorations do
   alias Minga.Core.Decorations.HighlightRange
   alias Minga.Core.Decorations.LineAnnotation
   alias Minga.Core.Decorations.VirtualText
+  alias Minga.Core.Face
   alias Minga.Core.IntervalTree
-  alias Minga.UI.Face
 
   @mergeable_style_fields [
     :fg,

@@ -17,9 +17,9 @@ defmodule Minga.Core.Decorations.VirtualText do
   - `:below` - entire styled lines injected below the anchor line
   """
 
+  alias Minga.Core.Face
   alias Minga.Core.IntervalTree
   alias Minga.Core.Unicode
-  alias Minga.UI.Face
 
   @enforce_keys [:id, :anchor, :segments, :placement]
   defstruct id: nil,

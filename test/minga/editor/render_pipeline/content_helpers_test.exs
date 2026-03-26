@@ -41,7 +41,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpersTest do
       {_id, decs_v1} =
         Decorations.add_block_decoration(decs_v1, 0,
           placement: :above,
-          render: fn _w -> [{"Header v1", Minga.UI.Face.new(bold: true)}] end,
+          render: fn _w -> [{"Header v1", Minga.Core.Face.new(bold: true)}] end,
           priority: 10
         )
 
@@ -58,14 +58,14 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpersTest do
       {_id, decs_v2} =
         Decorations.add_block_decoration(decs_v2, 0,
           placement: :above,
-          render: fn _w -> [{"Header A", Minga.UI.Face.new(bold: true)}] end,
+          render: fn _w -> [{"Header A", Minga.Core.Face.new(bold: true)}] end,
           priority: 10
         )
 
       {_id, decs_v2} =
         Decorations.add_block_decoration(decs_v2, 1,
           placement: :above,
-          render: fn _w -> [{"Header B", Minga.UI.Face.new(bold: true)}] end,
+          render: fn _w -> [{"Header B", Minga.Core.Face.new(bold: true)}] end,
           priority: 10
         )
 

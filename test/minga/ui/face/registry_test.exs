@@ -1,7 +1,7 @@
 defmodule Minga.UI.Face.RegistryTest do
   use ExUnit.Case, async: true
 
-  alias Minga.UI.Face
+  alias Minga.Core.Face
   alias Minga.UI.Face.Registry
 
   describe "new/0" do
