@@ -24,10 +24,10 @@ defmodule Minga.Editor.DisplayMap do
   pipeline.
   """
 
-  alias Minga.Buffer.Decorations
-  alias Minga.Buffer.Decorations.BlockDecoration
-  alias Minga.Buffer.Decorations.FoldRegion
-  alias Minga.Buffer.Decorations.VirtualText
+  alias Minga.Core.Decorations
+  alias Minga.Core.Decorations.BlockDecoration
+  alias Minga.Core.Decorations.FoldRegion
+  alias Minga.Core.Decorations.VirtualText
   alias Minga.Editor.FoldMap
   alias Minga.Editor.FoldRange
 

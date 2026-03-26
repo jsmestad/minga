@@ -2,7 +2,7 @@ defmodule Minga.Agent.ChatDecorationsTest do
   use ExUnit.Case, async: true
 
   alias Minga.Agent.ChatDecorations
-  alias Minga.Buffer.Decorations
+  alias Minga.Core.Decorations
 
   defp test_theme do
     Minga.UI.Theme.agent_theme(Minga.UI.Theme.get!(Minga.UI.Theme.default()))

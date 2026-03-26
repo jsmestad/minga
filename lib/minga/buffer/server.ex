@@ -18,11 +18,11 @@ defmodule Minga.Buffer.Server do
 
   use GenServer
 
-  alias Minga.Buffer.Decorations
+  alias Minga.Core.Decorations
   alias Minga.Buffer.Document
   alias Minga.Buffer.EditDelta
   alias Minga.Buffer.EditSource
-  alias Minga.Buffer.Unicode
+  alias Minga.Core.Unicode
   alias Minga.Config.Options
   alias Minga.Editing.NavigableContent.BufferSnapshot
   alias Minga.Editing.Scroll
@@ -675,7 +675,7 @@ defmodule Minga.Buffer.Server do
   Adds a highlight range decoration to the buffer.
 
   Returns the decoration ID (a reference) for later removal.
-  See `Minga.Buffer.Decorations.add_highlight/4` for options.
+  See `Minga.Core.Decorations.add_highlight/4` for options.
   """
   @spec add_highlight(
           GenServer.server(),
@@ -731,7 +731,7 @@ defmodule Minga.Buffer.Server do
   Adds a virtual text decoration to the buffer.
 
   Returns the decoration ID (a reference) for later removal.
-  See `Minga.Buffer.Decorations.add_virtual_text/3` for options.
+  See `Minga.Core.Decorations.add_virtual_text/3` for options.
   """
   @spec add_virtual_text(GenServer.server(), Decorations.highlight_range_pos(), keyword()) ::
           reference()
@@ -749,7 +749,7 @@ defmodule Minga.Buffer.Server do
   Adds a block decoration to the buffer.
 
   Returns the decoration ID for later removal.
-  See `Minga.Buffer.Decorations.add_block_decoration/3` for options.
+  See `Minga.Core.Decorations.add_block_decoration/3` for options.
   """
   @spec add_block_decoration(GenServer.server(), non_neg_integer(), keyword()) :: reference()
   def add_block_decoration(server, anchor_line, opts) do

@@ -27,9 +27,9 @@ defmodule Minga.Editor.Mouse do
 
   import Bitwise
 
-  alias Minga.Buffer.Decorations
+  alias Minga.Core.Decorations
   alias Minga.Buffer
-  alias Minga.Buffer.Unicode
+  alias Minga.Core.Unicode
   alias Minga.Config.Options
   alias Minga.Editor.DisplayMap
   alias Minga.Editor.FoldMap

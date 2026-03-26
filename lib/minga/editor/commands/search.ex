@@ -6,10 +6,9 @@ defmodule Minga.Editor.Commands.Search do
 
   @behaviour Minga.Command.Provider
 
-  alias Minga.Buffer.Decorations
-  alias Minga.Buffer.Document
+  alias Minga.Core.Decorations
   alias Minga.Buffer
-  alias Minga.Buffer.Unicode
+  alias Minga.Core.Unicode
   alias Minga.Editor.PickerUI
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Window
@@ -147,7 +146,7 @@ defmodule Minga.Editor.Commands.Search do
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :search_word_under_cursor_forward) do
     {content, cursor} = Buffer.content_and_cursor(buf)
-    tmp_buf = Document.new(content)
+    tmp_buf = Buffer.new_document(content)
 
     case Minga.Editing.word_under_cursor(tmp_buf, cursor) do
       nil ->
@@ -177,7 +176,7 @@ defmodule Minga.Editor.Commands.Search do
         :search_word_under_cursor_backward
       ) do
     {content, cursor} = Buffer.content_and_cursor(buf)
-    tmp_buf = Document.new(content)
+    tmp_buf = Buffer.new_document(content)
 
     case Minga.Editing.word_under_cursor(tmp_buf, cursor) do
       nil ->
@@ -307,7 +306,7 @@ defmodule Minga.Editor.Commands.Search do
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :use_selection_for_find)
       when is_pid(buf) do
     gb = Buffer.snapshot(buf)
-    cursor = Minga.Buffer.Document.cursor(gb)
+    cursor = Buffer.document_cursor(gb)
     text = word_at_cursor(gb, cursor)
 
     if text != "" do
@@ -489,11 +488,11 @@ defmodule Minga.Editor.Commands.Search do
   defp open_decoration_fold_at(_buf, _line), do: :ok
 
   @spec active_foldable_window(state()) :: Window.t() | nil
-  @spec word_at_cursor(Minga.Buffer.Document.t(), {non_neg_integer(), non_neg_integer()}) ::
+  @spec word_at_cursor(Buffer.document(), {non_neg_integer(), non_neg_integer()}) ::
           String.t()
   defp word_at_cursor(gb, cursor) do
     {start_pos, end_pos} = Minga.Editing.select_inner_word(gb, cursor)
-    Minga.Buffer.Document.get_range(gb, start_pos, end_pos)
+    Buffer.document_text_between(gb, start_pos, end_pos)
   end
 
   defp active_foldable_window(state) do

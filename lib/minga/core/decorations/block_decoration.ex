@@ -1,4 +1,4 @@
-defmodule Minga.Buffer.Decorations.BlockDecoration do
+defmodule Minga.Core.Decorations.BlockDecoration do
   @moduledoc """
   A block decoration: fully custom-rendered lines injected between buffer lines.
 

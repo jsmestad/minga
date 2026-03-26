@@ -1,8 +1,8 @@
 defmodule Minga.Buffer.BlockDecorationTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Decorations
-  alias Minga.Buffer.Decorations.BlockDecoration
+  alias Minga.Core.Decorations
+  alias Minga.Core.Decorations.BlockDecoration
   alias Minga.Editor.DisplayMap
   alias Minga.Editor.FoldMap
   alias Minga.Editor.FoldRange

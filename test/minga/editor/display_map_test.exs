@@ -1,8 +1,8 @@
 defmodule Minga.Editor.DisplayMapTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Decorations
-  alias Minga.Buffer.Decorations.FoldRegion
+  alias Minga.Core.Decorations
+  alias Minga.Core.Decorations.FoldRegion
   alias Minga.Editor.DisplayMap
   alias Minga.Editor.FoldMap
   alias Minga.Editor.FoldRange

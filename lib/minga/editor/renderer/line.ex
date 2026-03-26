@@ -14,9 +14,9 @@ defmodule Minga.Editor.Renderer.Line do
   All render functions return `DisplayList.draw()` tuples.
   """
 
-  alias Minga.Buffer.Decorations
-  alias Minga.Buffer.Decorations.ConcealRange
-  alias Minga.Buffer.Unicode
+  alias Minga.Core.Decorations
+  alias Minga.Core.Decorations.ConcealRange
+  alias Minga.Core.Unicode
   alias Minga.Editor.DisplayList
   alias Minga.Editor.Renderer.Composition
   alias Minga.Editor.Renderer.Context

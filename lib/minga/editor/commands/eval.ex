@@ -7,7 +7,6 @@ defmodule Minga.Editor.Commands.Eval do
   line and logged to the `*Messages*` buffer.
   """
 
-  alias Minga.Buffer.Document
   alias Minga.Buffer
   alias Minga.Editor.State, as: EditorState
   alias Minga.Mode
@@ -107,7 +106,7 @@ defmodule Minga.Editor.Commands.Eval do
       trimmed = lines |> Enum.drop(excess) |> Enum.join("\n")
 
       :sys.replace_state(buf, fn s ->
-        %{s | document: Document.new(trimmed)}
+        %{s | document: Buffer.new_document(trimmed)}
       end)
     end
 

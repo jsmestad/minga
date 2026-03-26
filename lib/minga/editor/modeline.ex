@@ -14,7 +14,7 @@ defmodule Minga.Editor.Modeline do
   layout.
   """
 
-  alias Minga.Buffer.Unicode
+  alias Minga.Core.Unicode
   alias Minga.Editor.DisplayList
   alias Minga.Mode
   alias Minga.UI.Devicon

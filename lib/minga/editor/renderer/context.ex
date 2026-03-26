@@ -11,7 +11,7 @@ defmodule Minga.Editor.Renderer.Context do
   per-line values that actually vary (line text, screen row, buffer line).
   """
 
-  alias Minga.Buffer.Decorations
+  alias Minga.Core.Decorations
   alias Minga.Diagnostics.Diagnostic
   alias Minga.Editing.Search.Match
   alias Minga.Editor.Viewport

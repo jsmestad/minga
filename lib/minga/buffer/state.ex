@@ -13,7 +13,7 @@ defmodule Minga.Buffer.State do
   under burst editing while preserving correct undo for human-speed edits.
   """
 
-  alias Minga.Buffer.Decorations
+  alias Minga.Core.Decorations
   alias Minga.Buffer.Document
   alias Minga.Buffer.EditDelta
 

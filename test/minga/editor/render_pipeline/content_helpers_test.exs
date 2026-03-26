@@ -1,7 +1,7 @@
 defmodule Minga.Editor.RenderPipeline.ContentHelpersTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Decorations
+  alias Minga.Core.Decorations
   alias Minga.Editor.Renderer.Context
   alias Minga.Editor.RenderPipeline.ContentHelpers
   alias Minga.Editor.Viewport

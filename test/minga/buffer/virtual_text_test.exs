@@ -1,8 +1,8 @@
 defmodule Minga.Buffer.VirtualTextTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Decorations
-  alias Minga.Buffer.Decorations.VirtualText
+  alias Minga.Core.Decorations
+  alias Minga.Core.Decorations.VirtualText
 
   # ── CRUD ─────────────────────────────────────────────────────────────────
 

@@ -11,11 +11,13 @@ defmodule Minga.Buffer do
   should never reference those modules directly.
   """
 
+  alias Minga.Buffer.Document
   alias Minga.Buffer.Server
 
   @type server :: GenServer.server()
   @type position :: {line :: non_neg_integer(), col :: non_neg_integer()}
   @type direction :: :left | :right | :up | :down
+  @type document :: Document.t()
 
   # ── Lifecycle ──────────────────────────────────────────────────────
 
@@ -248,14 +250,48 @@ defmodule Minga.Buffer do
   @spec set_option(server(), atom(), term()) :: :ok
   defdelegate set_option(server, name, value), to: Server
 
+  # ── Document (pure data structure) ───────────────────────────────
+
+  @doc "Create an empty document."
+  @spec new_document() :: document()
+  def new_document, do: Document.new()
+
+  @doc "Create a document with initial content."
+  @spec new_document(String.t()) :: document()
+  def new_document(content), do: Document.new(content)
+
+  @doc "Read the cursor position from a document snapshot."
+  @spec document_cursor(document()) :: position()
+  def document_cursor(doc), do: Document.cursor(doc)
+
+  @doc "Read a single line from a document snapshot (0-indexed)."
+  @spec document_line_at(document(), non_neg_integer()) :: String.t()
+  def document_line_at(doc, line), do: Document.line_at(doc, line)
+
+  @doc "Number of lines in a document snapshot."
+  @spec document_line_count(document()) :: pos_integer()
+  def document_line_count(doc), do: Document.line_count(doc)
+
+  @doc "Lines from a document snapshot starting at `start` (0-indexed), returning `count` lines."
+  @spec document_lines(document(), non_neg_integer(), non_neg_integer()) :: [String.t()]
+  def document_lines(doc, start, count), do: Document.lines(doc, start, count)
+
+  @doc "Full text content of a document snapshot."
+  @spec document_content(document()) :: String.t()
+  def document_content(doc), do: Document.content(doc)
+
+  @doc "Text between two positions in a document snapshot (end inclusive)."
+  @spec document_text_between(document(), position(), position()) :: String.t()
+  def document_text_between(doc, start_pos, end_pos), do: Document.get_range(doc, start_pos, end_pos)
+
   # ── Snapshots ──────────────────────────────────────────────────────
 
   @doc "Capture a snapshot of the document state (for undo boundaries and tab switching)."
-  @spec snapshot(server()) :: Minga.Buffer.Document.t()
+  @spec snapshot(server()) :: document()
   defdelegate snapshot(server), to: Server
 
   @doc "Restore a previously captured document snapshot."
-  @spec apply_snapshot(server(), Minga.Buffer.Document.t()) :: :ok
+  @spec apply_snapshot(server(), document()) :: :ok
   defdelegate apply_snapshot(server, new_buf), to: Server
 
   @doc "Render-ready snapshot of visible lines for the rendering pipeline."
@@ -272,7 +308,7 @@ defmodule Minga.Buffer do
   # ── Decorations ────────────────────────────────────────────────────
 
   @doc "Current decoration state (highlights, virtual text, folds, etc.)."
-  @spec decorations(server()) :: Minga.Buffer.Decorations.t()
+  @spec decorations(server()) :: Minga.Core.Decorations.t()
   defdelegate decorations(server), to: Server
 
   @doc "Version counter for decorations (for change detection)."
@@ -280,7 +316,7 @@ defmodule Minga.Buffer do
   defdelegate decorations_version(server), to: Server
 
   @doc "Apply a batch of decoration changes atomically."
-  @spec batch_decorations(server(), (Minga.Buffer.Decorations.t() -> Minga.Buffer.Decorations.t())) ::
+  @spec batch_decorations(server(), (Minga.Core.Decorations.t() -> Minga.Core.Decorations.t())) ::
           :ok
   defdelegate batch_decorations(server, fun), to: Server
 

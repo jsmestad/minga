@@ -15,11 +15,11 @@ defmodule Minga.Editor.SemanticWindow.Builder do
   window's content rect, with fold/wrap adjustments applied).
   """
 
-  alias Minga.Buffer.Decorations
-  alias Minga.Buffer.Decorations.BlockDecoration
-  alias Minga.Buffer.Decorations.FoldRegion
+  alias Minga.Core.Decorations
+  alias Minga.Core.Decorations.BlockDecoration
+  alias Minga.Core.Decorations.FoldRegion
   alias Minga.Buffer
-  alias Minga.Buffer.Unicode
+  alias Minga.Core.Unicode
   alias Minga.Diagnostics
   alias Minga.Editor.DisplayMap
   alias Minga.Editor.FoldMap

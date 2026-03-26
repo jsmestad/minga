@@ -1,7 +1,7 @@
-defmodule Minga.Buffer.UnicodeTest do
+defmodule Minga.Core.UnicodeTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Unicode
+  alias Minga.Core.Unicode
 
   # ── graphemes_with_byte_offsets/1 ─────────────────────────────────────────
 

@@ -9,7 +9,7 @@ defmodule Minga.Editor.HighlightEvents do
   in `highlight.highlights`. There is no separate "current" field.
   """
 
-  alias Minga.Buffer.Decorations
+  alias Minga.Core.Decorations
   alias Minga.Buffer
   alias Minga.Editor.HighlightSync
   alias Minga.Editor.Renderer

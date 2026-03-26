@@ -1,4 +1,4 @@
-defmodule Minga.Buffer.Decorations.ConcealRange do
+defmodule Minga.Core.Decorations.ConcealRange do
   @moduledoc """
   A conceal range decoration: hides buffer characters from the display
   without removing them from the buffer.
@@ -33,7 +33,7 @@ defmodule Minga.Buffer.Decorations.ConcealRange do
   rendering pipeline, mouse handling, and selection logic depend on.
   """
 
-  alias Minga.Buffer.IntervalTree
+  alias Minga.Core.IntervalTree
   alias Minga.UI.Face
 
   @enforce_keys [:id, :start_pos, :end_pos]

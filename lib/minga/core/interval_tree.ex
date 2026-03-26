@@ -1,4 +1,4 @@
-defmodule Minga.Buffer.IntervalTree do
+defmodule Minga.Core.IntervalTree do
   @moduledoc """
   Augmented interval tree for efficient range queries over buffer decorations.
 

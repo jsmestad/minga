@@ -1,4 +1,4 @@
-defmodule Minga.Buffer.Decorations.VirtualText do
+defmodule Minga.Core.Decorations.VirtualText do
   @moduledoc """
   A virtual text decoration: display-only text injected at a buffer position.
 
@@ -17,8 +17,8 @@ defmodule Minga.Buffer.Decorations.VirtualText do
   - `:below` - entire styled lines injected below the anchor line
   """
 
-  alias Minga.Buffer.IntervalTree
-  alias Minga.Buffer.Unicode
+  alias Minga.Core.IntervalTree
+  alias Minga.Core.Unicode
   alias Minga.UI.Face
 
   @enforce_keys [:id, :anchor, :segments, :placement]

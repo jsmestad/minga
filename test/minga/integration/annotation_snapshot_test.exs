@@ -8,7 +8,7 @@ defmodule Minga.Integration.AnnotationSnapshotTest do
 
   use Minga.Test.EditorCase, async: true
 
-  alias Minga.Buffer.Decorations
+  alias Minga.Core.Decorations
   alias Minga.Buffer.Server, as: BufferServer
 
   describe "line annotations" do

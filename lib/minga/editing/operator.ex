@@ -25,7 +25,7 @@ defmodule Minga.Editing.Operator do
   """
 
   alias Minga.Buffer.{Document, Server}
-  alias Minga.Buffer.Unicode
+  alias Minga.Core.Unicode
 
   @typedoc "A zero-indexed {line, col} cursor position."
   @type position :: Document.position()

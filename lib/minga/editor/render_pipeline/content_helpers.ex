@@ -9,12 +9,11 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
   Extracted from `RenderPipeline` to reduce module size.
   """
 
-  alias Minga.Buffer.Decorations
-  alias Minga.Buffer.Decorations.ConcealRange
-  alias Minga.Buffer.Decorations.FoldRegion
-  alias Minga.Buffer.Document
+  alias Minga.Core.Decorations
+  alias Minga.Core.Decorations.ConcealRange
+  alias Minga.Core.Decorations.FoldRegion
   alias Minga.Buffer
-  alias Minga.Buffer.Unicode
+  alias Minga.Core.Unicode
   alias Minga.Config.Options
   alias Minga.Diagnostics
   alias Minga.Editor.DisplayList
@@ -881,7 +880,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
   @doc "Computes visual selection bounds in display columns."
   @spec visual_selection_grapheme_bounds(
           state(),
-          Document.position(),
+          Buffer.position(),
           [String.t()],
           non_neg_integer()
         ) :: visual_selection()
@@ -903,7 +902,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
   end
 
   @doc "Computes raw visual selection bounds (byte columns)."
-  @spec visual_selection_bounds(state(), Document.position()) :: visual_selection()
+  @spec visual_selection_bounds(state(), Buffer.position()) :: visual_selection()
   def visual_selection_bounds(
         %{workspace: %{editing: %{mode: :visual, mode_state: %VisualState{} = ms}}},
         cursor
@@ -983,8 +982,8 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
     Unicode.display_col(line_text, next_byte)
   end
 
-  @spec sort_positions(Document.position(), Document.position()) ::
-          {Document.position(), Document.position()}
+  @spec sort_positions(Buffer.position(), Buffer.position()) ::
+          {Buffer.position(), Buffer.position()}
   defp sort_positions({l1, c1} = p1, {l2, c2} = p2) do
     if {l1, c1} <= {l2, c2}, do: {p1, p2}, else: {p2, p1}
   end

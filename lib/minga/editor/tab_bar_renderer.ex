@@ -19,7 +19,7 @@ defmodule Minga.Editor.TabBarRenderer do
   """
 
   alias Minga.Buffer
-  alias Minga.Buffer.Unicode
+  alias Minga.Core.Unicode
   alias Minga.Editor.DisplayList
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar

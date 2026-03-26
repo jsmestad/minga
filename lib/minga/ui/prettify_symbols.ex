@@ -25,7 +25,7 @@ defmodule Minga.UI.PrettifySymbols do
   new ones based on the current highlight spans.
   """
 
-  alias Minga.Buffer.Decorations
+  alias Minga.Core.Decorations
   alias Minga.Buffer
   alias Minga.Config.Options
   alias Minga.UI.Face

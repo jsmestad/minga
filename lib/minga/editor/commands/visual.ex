@@ -6,7 +6,6 @@ defmodule Minga.Editor.Commands.Visual do
 
   @behaviour Minga.Command.Provider
 
-  alias Minga.Buffer.Document
   alias Minga.Buffer
   alias Minga.Editor.Commands.Helpers
   alias Minga.Editor.HighlightSync
@@ -113,7 +112,7 @@ defmodule Minga.Editor.Commands.Visual do
         {:visual_text_object, modifier, spec}
       ) do
     gb = Buffer.snapshot(buf)
-    cursor = Document.cursor(gb)
+    cursor = Buffer.document_cursor(gb)
     buffer_id = HighlightSync.buffer_id_for(state, buf)
     range = Helpers.compute_text_object_range(gb, cursor, modifier, spec, buffer_id)
 

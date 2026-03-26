@@ -7,7 +7,6 @@ defmodule Minga.Editor.Commands.BufferManagement do
   @behaviour Minga.Command.Provider
 
   alias Minga.Agent.Session
-  alias Minga.Buffer.Document
   alias Minga.Buffer
   alias Minga.Config.Loader, as: ConfigLoader
   alias Minga.Config.Options, as: ConfigOptions
@@ -703,7 +702,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
     if persistent? do
       # Clear buffer content instead of killing it
       :sys.replace_state(buf, fn s ->
-        %{s | document: Document.new("")}
+        %{s | document: Buffer.new_document("")}
       end)
 
       EditorState.set_status(state, "Buffer is persistent — content cleared")

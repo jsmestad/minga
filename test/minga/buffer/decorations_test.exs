@@ -1,7 +1,7 @@
-defmodule Minga.Buffer.DecorationsTest do
+defmodule Minga.Core.DecorationsTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Decorations
+  alias Minga.Core.Decorations
   alias Minga.UI.Face
 
   # ── Helpers ──────────────────────────────────────────────────────────────

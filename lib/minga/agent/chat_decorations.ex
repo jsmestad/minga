@@ -11,7 +11,7 @@ defmodule Minga.Agent.ChatDecorations do
   buffer pipeline.
   """
 
-  alias Minga.Buffer.Decorations
+  alias Minga.Core.Decorations
   alias Minga.Buffer
   alias Minga.UI.Face
 

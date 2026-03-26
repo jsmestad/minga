@@ -1,4 +1,4 @@
-defmodule Minga.Buffer.UnicodeWidthTest do
+defmodule Minga.Core.UnicodeWidthTest do
   @moduledoc """
   Comprehensive tests for BEAM-side Unicode display width computation.
 
@@ -15,7 +15,7 @@ defmodule Minga.Buffer.UnicodeWidthTest do
   use ExUnit.Case, async: true
   use ExUnitProperties
 
-  alias Minga.Buffer.Unicode
+  alias Minga.Core.Unicode
 
   describe "ASCII" do
     test "printable ASCII characters are width 1" do

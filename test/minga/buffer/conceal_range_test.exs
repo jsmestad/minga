@@ -2,8 +2,8 @@ defmodule Minga.Buffer.ConcealRangeTest do
   use ExUnit.Case, async: true
   use ExUnitProperties
 
-  alias Minga.Buffer.Decorations
-  alias Minga.Buffer.Decorations.ConcealRange
+  alias Minga.Core.Decorations
+  alias Minga.Core.Decorations.ConcealRange
 
   # ── ConcealRange struct ─────────────────────────────────────────────────
 

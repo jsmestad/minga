@@ -9,9 +9,9 @@ defmodule Minga.Editor.RenderPipeline.Content do
 
   alias Minga.Agent.View.DashboardRenderer
   alias Minga.Agent.View.PromptRenderer
-  alias Minga.Buffer.Decorations
+  alias Minga.Core.Decorations
   alias Minga.Buffer
-  alias Minga.Buffer.Unicode
+  alias Minga.Core.Unicode
   alias Minga.Editor.DisplayList
   alias Minga.Editor.DisplayList.{Cursor, WindowFrame}
   alias Minga.Editor.DisplayMap

@@ -14,7 +14,7 @@ defmodule Minga.Editor.PickerUI do
   The caller (`Editor`) is responsible for dispatching that action.
   """
 
-  alias Minga.Buffer.Unicode
+  alias Minga.Core.Unicode
   alias Minga.Editor.DisplayList
   alias Minga.Editor.FloatingWindow
   alias Minga.Editor.State, as: EditorState

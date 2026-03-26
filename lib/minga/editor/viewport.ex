@@ -308,11 +308,11 @@ defmodule Minga.Editor.Viewport do
   @spec effective_page_lines(
           non_neg_integer(),
           pos_integer(),
-          Minga.Buffer.Decorations.t(),
+          Minga.Core.Decorations.t(),
           non_neg_integer()
         ) :: pos_integer()
   def effective_page_lines(cursor_line, display_rows, decorations, total_lines) do
-    alias Minga.Buffer.Decorations
+    alias Minga.Core.Decorations
 
     if not Decorations.has_block_decorations?(decorations) and
          Decorations.virtual_line_count(decorations, cursor_line, cursor_line + display_rows) == 0 do
@@ -334,8 +334,8 @@ defmodule Minga.Editor.Viewport do
   end
 
   defp do_effective_page_lines(line, display_budget, decorations, total, buf_count, display_used) do
-    alias Minga.Buffer.Decorations
-    alias Minga.Buffer.Decorations.BlockDecoration
+    alias Minga.Core.Decorations
+    alias Minga.Core.Decorations.BlockDecoration
 
     # Count display rows consumed by this buffer line:
     # 1 for the line itself + virtual lines + block decorations

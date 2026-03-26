@@ -867,7 +867,7 @@ defmodule Minga.Frontend.Emit.GUI do
           non_neg_integer(),
           %{non_neg_integer() => atom()},
           %{non_neg_integer() => atom()},
-          Minga.Buffer.Decorations.t()
+          Minga.Core.Decorations.t()
         ) :: ProtocolGUI.gutter_entry()
   defp resolve_gutter_entry(buf_line, diag_signs, git_signs, decorations) do
     sign_type = resolve_sign_type(buf_line, diag_signs, git_signs)
@@ -882,12 +882,12 @@ defmodule Minga.Frontend.Emit.GUI do
   end
 
   # Checks for :gutter_icon annotations when no diagnostic or git sign is present.
-  @spec resolve_annotation_entry(non_neg_integer(), Minga.Buffer.Decorations.t()) ::
+  @spec resolve_annotation_entry(non_neg_integer(), Minga.Core.Decorations.t()) ::
           ProtocolGUI.gutter_entry()
   defp resolve_annotation_entry(buf_line, decorations) do
     icons =
       decorations
-      |> Minga.Buffer.Decorations.annotations_for_line(buf_line)
+      |> Minga.Core.Decorations.annotations_for_line(buf_line)
       |> Enum.filter(fn ann -> ann.kind == :gutter_icon end)
 
     case icons do

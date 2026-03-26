@@ -1,4 +1,4 @@
-defmodule Minga.Buffer.Decorations.FoldRegion do
+defmodule Minga.Core.Decorations.FoldRegion do
   @moduledoc """
   A buffer-level fold region decoration: a collapsible range with a
   custom placeholder.

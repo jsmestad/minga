@@ -1,4 +1,4 @@
-defmodule Minga.Buffer.DecorationsBenchmarkTest do
+defmodule Minga.Core.DecorationsBenchmarkTest do
   @moduledoc """
   Structural tests verifying decoration batch performance characteristics.
 
@@ -18,7 +18,7 @@ defmodule Minga.Buffer.DecorationsBenchmarkTest do
   """
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Decorations
+  alias Minga.Core.Decorations
 
   describe "batch deferred execution" do
     test "batch commits with single version bump regardless of operation count" do

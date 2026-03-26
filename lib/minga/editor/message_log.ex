@@ -14,7 +14,6 @@ defmodule Minga.Editor.MessageLog do
   Extracted from `Minga.Editor` to reduce GenServer module size.
   """
 
-  alias Minga.Buffer.Document
   alias Minga.Buffer
   alias Minga.Editor.State, as: EditorState
   alias Minga.UI.Panel.MessageStore
@@ -79,7 +78,7 @@ defmodule Minga.Editor.MessageLog do
       trimmed = lines |> Enum.drop(excess) |> Enum.join("\n")
 
       :sys.replace_state(buf, fn s ->
-        %{s | document: Document.new(trimmed)}
+        %{s | document: Buffer.new_document(trimmed)}
       end)
     end
 
