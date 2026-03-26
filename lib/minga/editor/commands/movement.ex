@@ -7,6 +7,7 @@ defmodule Minga.Editor.Commands.Movement do
   @behaviour Minga.Command.Provider
 
   alias Minga.Buffer
+  alias Minga.Buffer.Document
   alias Minga.Core.Unicode
 
   alias Minga.Editor.Commands.Helpers
@@ -220,8 +221,8 @@ defmodule Minga.Editor.Commands.Movement do
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :next_line_first_non_blank) do
     gb = Buffer.snapshot(buf)
-    {line, _col} = Buffer.document_cursor(gb)
-    total = Buffer.document_line_count(gb)
+    {line, _col} = Document.cursor(gb)
+    total = Document.line_count(gb)
     next_line = min(line + 1, total - 1)
     new_pos = Minga.Editing.first_non_blank(gb, {next_line, 0})
     Buffer.move_to(buf, new_pos)
@@ -230,7 +231,7 @@ defmodule Minga.Editor.Commands.Movement do
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :prev_line_first_non_blank) do
     gb = Buffer.snapshot(buf)
-    {line, _col} = Buffer.document_cursor(gb)
+    {line, _col} = Document.cursor(gb)
     prev_line = max(line - 1, 0)
     new_pos = Minga.Editing.first_non_blank(gb, {prev_line, 0})
     Buffer.move_to(buf, new_pos)
@@ -300,7 +301,7 @@ defmodule Minga.Editor.Commands.Movement do
     {first_line, _last_line} = Viewport.visible_range(vp)
     visible_rows = Viewport.content_rows(vp)
     gb = Buffer.snapshot(buf)
-    total_lines = Buffer.document_line_count(gb)
+    total_lines = Document.line_count(gb)
 
     target_line =
       case position do
@@ -549,7 +550,7 @@ defmodule Minga.Editor.Commands.Movement do
   @spec visual_line_move(GenServer.server(), state(), :up | :down) :: state()
   defp visual_line_move(buf, state, direction) do
     doc = Buffer.snapshot(buf)
-    pos = Buffer.document_cursor(doc)
+    pos = Document.cursor(doc)
     content_w = content_width(state)
 
     new_pos =
@@ -565,7 +566,7 @@ defmodule Minga.Editor.Commands.Movement do
   @spec visual_line_edge(GenServer.server(), state(), :start | :end) :: state()
   defp visual_line_edge(buf, state, edge) do
     doc = Buffer.snapshot(buf)
-    pos = Buffer.document_cursor(doc)
+    pos = Document.cursor(doc)
     content_w = content_width(state)
 
     new_pos =
@@ -581,17 +582,17 @@ defmodule Minga.Editor.Commands.Movement do
   @spec logical_line_start(GenServer.server()) :: :ok
   defp logical_line_start(buf) do
     gb = Buffer.snapshot(buf)
-    {line, _col} = Buffer.document_cursor(gb)
+    {line, _col} = Document.cursor(gb)
     Buffer.move_to(buf, {line, 0})
   end
 
   @spec logical_line_end(GenServer.server()) :: :ok
   defp logical_line_end(buf) do
     gb = Buffer.snapshot(buf)
-    {line, _col} = Buffer.document_cursor(gb)
+    {line, _col} = Document.cursor(gb)
 
     end_col =
-      case Buffer.document_lines(gb, line, 1) do
+      case Document.lines(gb, line, 1) do
         [text] when byte_size(text) > 0 -> Unicode.last_grapheme_byte_offset(text)
         _ -> 0
       end

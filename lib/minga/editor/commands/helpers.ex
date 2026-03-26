@@ -8,6 +8,7 @@ defmodule Minga.Editor.Commands.Helpers do
   """
 
   alias Minga.Buffer
+  alias Minga.Buffer.Document
   alias Minga.Clipboard
   alias Minga.Core.Unicode
   alias Minga.Editor.Editing
@@ -271,7 +272,7 @@ defmodule Minga.Editor.Commands.Helpers do
         ) :: :ok
   def apply_motion(buf, motion_fn) do
     gb = Buffer.snapshot(buf)
-    new_pos = motion_fn.(gb, Buffer.document_cursor(gb))
+    new_pos = motion_fn.(gb, Document.cursor(gb))
     Buffer.move_to(buf, new_pos)
   end
 
@@ -322,7 +323,7 @@ defmodule Minga.Editor.Commands.Helpers do
   @spec apply_find_char(pid(), ModeState.find_direction(), String.t()) :: :ok
   def apply_find_char(buf, dir, char) do
     gb = Buffer.snapshot(buf)
-    cursor = Buffer.document_cursor(gb)
+    cursor = Document.cursor(gb)
 
     motion_fn =
       case dir do
@@ -349,18 +350,18 @@ defmodule Minga.Editor.Commands.Helpers do
   @spec apply_operator_motion(pid(), state(), atom(), operator_action()) :: state()
   def apply_operator_motion(buf, state, motion, action) do
     gb = Buffer.snapshot(buf)
-    cursor = Buffer.document_cursor(gb)
+    cursor = Document.cursor(gb)
     target = resolve_motion(gb, cursor, motion)
     {start_pos, end_pos} = sort_positions(cursor, target)
 
     case action do
       :delete ->
-        text = Buffer.document_text_between(gb, start_pos, end_pos)
+        text = Document.get_range(gb, start_pos, end_pos)
         Buffer.delete_range(buf, start_pos, end_pos)
         put_register(state, text, :delete)
 
       :yank ->
-        text = Buffer.document_text_between(gb, start_pos, end_pos)
+        text = Document.get_range(gb, start_pos, end_pos)
         put_register(state, text, :yank)
     end
   end
@@ -369,7 +370,7 @@ defmodule Minga.Editor.Commands.Helpers do
   @spec apply_text_object(state(), atom(), term(), text_object_action()) :: state()
   def apply_text_object(%{workspace: %{buffers: %{active: buf}}} = state, modifier, spec, action) do
     gb = Buffer.snapshot(buf)
-    cursor = Buffer.document_cursor(gb)
+    cursor = Document.cursor(gb)
     buffer_id = HighlightSync.buffer_id_for(state, buf)
     range = compute_text_object_range(gb, cursor, modifier, spec, buffer_id)
 
@@ -378,12 +379,12 @@ defmodule Minga.Editor.Commands.Helpers do
         state
 
       {:delete, {start_pos, end_pos}} ->
-        text = Buffer.document_text_between(gb, start_pos, end_pos)
+        text = Document.get_range(gb, start_pos, end_pos)
         Buffer.delete_range(buf, start_pos, end_pos)
         put_register(state, text, :delete)
 
       {:yank, {start_pos, end_pos}} ->
-        text = Buffer.document_text_between(gb, start_pos, end_pos)
+        text = Document.get_range(gb, start_pos, end_pos)
         put_register(state, text, :yank)
     end
   end
@@ -427,12 +428,12 @@ defmodule Minga.Editor.Commands.Helpers do
   @spec page_move(pid(), Viewport.t(), integer()) :: :ok
   def page_move(buf, _vp, delta) do
     gb = Buffer.snapshot(buf)
-    {line, col} = Buffer.document_cursor(gb)
-    total_lines = Buffer.document_line_count(gb)
+    {line, col} = Document.cursor(gb)
+    total_lines = Document.line_count(gb)
     target_line = max(0, min(line + delta, total_lines - 1))
 
     target_col =
-      case Buffer.document_lines(gb, target_line, 1) do
+      case Document.lines(gb, target_line, 1) do
         [text] when byte_size(text) > 0 ->
           min(col, Unicode.last_grapheme_byte_offset(text))
 

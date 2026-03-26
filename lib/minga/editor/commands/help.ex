@@ -7,6 +7,7 @@ defmodule Minga.Editor.Commands.Help do
   """
 
   alias Minga.Buffer
+  alias Minga.Buffer.Document
   alias Minga.Editor.Commands
   alias Minga.Editor.State, as: EditorState
   alias Minga.Mode
@@ -85,7 +86,7 @@ defmodule Minga.Editor.Commands.Help do
   @spec replace_help_content(pid(), String.t()) :: :ok
   defp replace_help_content(buf, content) do
     :sys.replace_state(buf, fn s ->
-      %{s | document: Buffer.new_document(content)}
+      %{s | document: Document.new(content)}
     end)
 
     Buffer.move_to(buf, {0, 0})

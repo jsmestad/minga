@@ -7,6 +7,7 @@ defmodule Minga.Editor.Commands.Marks do
   @behaviour Minga.Command.Provider
 
   alias Minga.Buffer
+  alias Minga.Buffer.Document
   alias Minga.Editor.Commands.Helpers
   alias Minga.Editor.State, as: EditorState
   alias Minga.Mode
@@ -49,7 +50,7 @@ defmodule Minga.Editor.Commands.Marks do
       {mark_line, _mark_col} ->
         current_pos = Buffer.cursor(buf)
         {content, _} = Buffer.content_and_cursor(buf)
-        tmp_buf = Buffer.new_document(content)
+        tmp_buf = Document.new(content)
         target = Minga.Editing.first_non_blank(tmp_buf, {mark_line, 0})
         Buffer.move_to(buf, target)
         Helpers.save_jump_pos(state, current_pos, target)
@@ -82,7 +83,7 @@ defmodule Minga.Editor.Commands.Marks do
     current_pos = Buffer.cursor(buf)
     {last_line, _} = last_pos
     {content, _} = Buffer.content_and_cursor(buf)
-    tmp_buf = Buffer.new_document(content)
+    tmp_buf = Document.new(content)
     target = Minga.Editing.first_non_blank(tmp_buf, {last_line, 0})
     Buffer.move_to(buf, target)
 

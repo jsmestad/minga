@@ -250,40 +250,6 @@ defmodule Minga.Buffer do
   @spec set_option(server(), atom(), term()) :: :ok
   defdelegate set_option(server, name, value), to: Server
 
-  # ── Document (pure data structure) ───────────────────────────────
-
-  @doc "Create an empty document."
-  @spec new_document() :: document()
-  def new_document, do: Document.new()
-
-  @doc "Create a document with initial content."
-  @spec new_document(String.t()) :: document()
-  def new_document(content), do: Document.new(content)
-
-  @doc "Read the cursor position from a document snapshot."
-  @spec document_cursor(document()) :: position()
-  def document_cursor(doc), do: Document.cursor(doc)
-
-  @doc "Read a single line from a document snapshot (0-indexed)."
-  @spec document_line_at(document(), non_neg_integer()) :: String.t()
-  def document_line_at(doc, line), do: Document.line_at(doc, line)
-
-  @doc "Number of lines in a document snapshot."
-  @spec document_line_count(document()) :: pos_integer()
-  def document_line_count(doc), do: Document.line_count(doc)
-
-  @doc "Lines from a document snapshot starting at `start` (0-indexed), returning `count` lines."
-  @spec document_lines(document(), non_neg_integer(), non_neg_integer()) :: [String.t()]
-  def document_lines(doc, start, count), do: Document.lines(doc, start, count)
-
-  @doc "Full text content of a document snapshot."
-  @spec document_content(document()) :: String.t()
-  def document_content(doc), do: Document.content(doc)
-
-  @doc "Text between two positions in a document snapshot (end inclusive)."
-  @spec document_text_between(document(), position(), position()) :: String.t()
-  def document_text_between(doc, start_pos, end_pos), do: Document.get_range(doc, start_pos, end_pos)
-
   # ── Snapshots ──────────────────────────────────────────────────────
 
   @doc "Capture a snapshot of the document state (for undo boundaries and tab switching)."

@@ -7,6 +7,7 @@ defmodule Minga.Editor.Commands.Editing do
   @behaviour Minga.Command.Provider
 
   alias Minga.Buffer
+  alias Minga.Buffer.Document
 
   alias Minga.Editor.Commands.Helpers
   alias Minga.Editor.HighlightSync
@@ -348,7 +349,7 @@ defmodule Minga.Editor.Commands.Editing do
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, {:indent_motion, motion}) do
     gb = Buffer.snapshot(buf)
-    cursor = Buffer.document_cursor(gb)
+    cursor = Document.cursor(gb)
     target = Helpers.resolve_motion(gb, cursor, motion)
     {cursor_line, _} = cursor
     {target_line, _} = target
@@ -360,7 +361,7 @@ defmodule Minga.Editor.Commands.Editing do
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, {:dedent_motion, motion}) do
     gb = Buffer.snapshot(buf)
-    cursor = Buffer.document_cursor(gb)
+    cursor = Document.cursor(gb)
     target = Helpers.resolve_motion(gb, cursor, motion)
     {cursor_line, _} = cursor
     {target_line, _} = target
@@ -412,7 +413,7 @@ defmodule Minga.Editor.Commands.Editing do
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, {:reindent_motion, motion}) do
     gb = Buffer.snapshot(buf)
-    cursor = Buffer.document_cursor(gb)
+    cursor = Document.cursor(gb)
     target = Helpers.resolve_motion(gb, cursor, motion)
     {cursor_line, _} = cursor
     {target_line, _} = target
@@ -443,7 +444,7 @@ defmodule Minga.Editor.Commands.Editing do
       )
       when is_pid(buf) do
     gb = Buffer.snapshot(buf)
-    cursor = Buffer.document_cursor(gb)
+    cursor = Document.cursor(gb)
     buffer_id = HighlightSync.buffer_id_for(state, buf)
     range = Helpers.compute_text_object_range(gb, cursor, modifier, spec, buffer_id)
 
@@ -501,7 +502,7 @@ defmodule Minga.Editor.Commands.Editing do
   @spec execute_autopair_delete(state(), pid()) :: state()
   defp execute_autopair_delete(state, buf) do
     gb = Buffer.snapshot(buf)
-    cursor = Buffer.document_cursor(gb)
+    cursor = Document.cursor(gb)
 
     case Minga.Editing.backspace_with_pairs(gb, cursor) do
       :delete_pair ->
@@ -518,7 +519,7 @@ defmodule Minga.Editor.Commands.Editing do
   @spec execute_autopair_insert(pid(), String.t()) :: :ok
   defp execute_autopair_insert(buf, char) do
     gb = Buffer.snapshot(buf)
-    cursor = Buffer.document_cursor(gb)
+    cursor = Document.cursor(gb)
 
     case Minga.Editing.insert_with_pairs(gb, cursor, char) do
       {:pair, open, close} ->

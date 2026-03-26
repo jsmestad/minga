@@ -15,6 +15,7 @@ defmodule Minga.Editor.MessageLog do
   """
 
   alias Minga.Buffer
+  alias Minga.Buffer.Document
   alias Minga.Editor.State, as: EditorState
   alias Minga.UI.Panel.MessageStore
 
@@ -78,7 +79,7 @@ defmodule Minga.Editor.MessageLog do
       trimmed = lines |> Enum.drop(excess) |> Enum.join("\n")
 
       :sys.replace_state(buf, fn s ->
-        %{s | document: Buffer.new_document(trimmed)}
+        %{s | document: Document.new(trimmed)}
       end)
     end
 
