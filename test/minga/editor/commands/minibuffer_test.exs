@@ -7,7 +7,7 @@ defmodule Minga.Editor.Commands.MinibufferTest do
   and resets the candidate_index after acceptance.
   """
 
-  use ExUnit.Case, async: true
+  use Minga.Test.EditingModelCase, async: true
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor

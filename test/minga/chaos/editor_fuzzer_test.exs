@@ -15,7 +15,7 @@ defmodule Minga.Chaos.EditorFuzzerTest do
   """
 
   # Mutates Application env (:minga, :shutdown_fn); must not run concurrently with other tests.
-  use ExUnit.Case, async: false
+  use Minga.Test.EditingModelCase, async: false
   use PropCheck
   use PropCheck.StateM.ModelDSL
 
