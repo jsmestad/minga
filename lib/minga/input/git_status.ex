@@ -28,7 +28,9 @@ defmodule Minga.Input.GitStatus do
     else
       key = {cp, mods}
 
-      case Scope.resolve_key(:git_status, :normal, key) do
+      binding_state = Minga.Editing.binding_state(state)
+
+      case Scope.resolve_key(:git_status, binding_state, key) do
         {:command, cmd} ->
           {:handled, execute_command(state, cmd)}
 
