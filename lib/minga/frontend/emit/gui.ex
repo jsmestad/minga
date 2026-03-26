@@ -170,7 +170,9 @@ defmodule Minga.Frontend.Emit.GUI do
   @spec build_gui_tab_bar_cmd(state()) :: binary() | nil
 
   # Board zoomed: show a single tab with the card name and a back indicator
-  defp build_gui_tab_bar_cmd(%{shell: Minga.Shell.Board, shell_state: %{zoomed_into: card_id}} = state)
+  defp build_gui_tab_bar_cmd(
+         %{shell: Minga.Shell.Board, shell_state: %{zoomed_into: card_id}} = state
+       )
        when card_id != nil do
     card = Minga.Shell.Board.State.zoomed(state.shell_state)
     label = if card, do: "◇ #{card.task}", else: "◇ Board"

@@ -162,11 +162,12 @@ defmodule Minga.Shell.Board.Input do
       suppress_tool_prompts: board_state.suppress_tool_prompts
     }
 
-    new_state = %{state |
-      shell: Minga.Shell.Traditional,
-      shell_state: traditional_state,
-      layout: nil,
-      stashed_board_state: board_state
+    new_state = %{
+      state
+      | shell: Minga.Shell.Traditional,
+        shell_state: traditional_state,
+        layout: nil,
+        stashed_board_state: board_state
     }
 
     {:handled, new_state}
@@ -204,8 +205,11 @@ defmodule Minga.Shell.Board.Input do
 
     board =
       case matches do
-        [first | _] -> BoardState.focus_card(%{board | filter_mode: false, filter_text: ""}, first.id)
-        [] -> %{board | filter_mode: false, filter_text: ""}
+        [first | _] ->
+          BoardState.focus_card(%{board | filter_mode: false, filter_text: ""}, first.id)
+
+        [] ->
+          %{board | filter_mode: false, filter_text: ""}
       end
 
     {:handled, %{state | shell_state: board}}
@@ -291,9 +295,10 @@ defmodule Minga.Shell.Board.Input do
     ws = %{state.workspace | keymap_scope: :agent}
 
     # Make the agent panel visible
-    state = Minga.Editor.State.AgentAccess.update_agent_ui(state, fn ui ->
-      Minga.Agent.UIState.set_input_focused(ui, true)
-    end)
+    state =
+      Minga.Editor.State.AgentAccess.update_agent_ui(state, fn ui ->
+        Minga.Agent.UIState.set_input_focused(ui, true)
+      end)
 
     %{state | workspace: ws}
   end

@@ -48,7 +48,7 @@ defmodule Minga.Shell.Board.StateTest do
   # ── Card ID uniqueness (property) ──────────────────────────────────────
 
   property "card IDs are always unique across any number of creates" do
-    check all n <- integer(1..50) do
+    check all(n <- integer(1..50)) do
       state =
         Enum.reduce(1..n, State.new(), fn _, acc ->
           {acc, _card} = State.create_card(acc, task: "t")
@@ -206,7 +206,7 @@ defmodule Minga.Shell.Board.StateTest do
   # ── Zoom round-trip (property) ─────────────────────────────────────────
 
   property "zoom_into then zoom_out restores the original workspace snapshot" do
-    check all task <- string(:printable, min_length: 1, max_length: 100) do
+    check all(task <- string(:printable, min_length: 1, max_length: 100)) do
       {state, card} = State.create_card(State.new(), task: task)
       workspace = %{content: task, cursor: {0, 0}}
 

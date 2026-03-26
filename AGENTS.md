@@ -221,10 +221,8 @@ end
 
 ### What crosses boundaries
 
-- **Function calls** go through the facade. Always.
-- **Struct types** in `@spec` annotations may reference internal modules directly (e.g., `Minga.UI.Face.t()` in a spec is fine). Types are data, not behavior.
-- **Behaviours** that other domains implement (like `Minga.Command.Provider`) are part of the public API.
-- **Protocols** (like `Minga.Editing.Text.Readable`) are part of the public API since implementors need to reference them.
+- **Function calls** go through the facade. Always. No exceptions.
+- **Struct types, protocols, and behaviours** follow the same rule. If a struct or protocol is needed across multiple domains, it should be promoted to a **core entity** at the top level (alongside `Minga.Events`, `Minga.Log`, etc.), not given a special exemption. Reaching past a facade to grab an internal type is still a boundary violation.
 
 ### Domains
 
@@ -253,9 +251,11 @@ end
 
 ### Enforcement
 
-`Minga.Credo.DomainBoundaryCheck` (in `credo/checks/domain_boundary_check.exs`) enforces domain boundaries at lint time. Today it only covers the Agent <-> Buffer boundary. As domains are migrated to the facade pattern, the check will be generalized to enforce all domain boundaries: each domain will declare its facade and a `public` list of struct types allowed across boundaries. The `public` list should shrink over time as facade APIs stabilize.
+`Minga.Credo.DomainBoundaryCheck` (in `credo/checks/domain_boundary_check.exs`) enforces domain boundaries at lint time for all 14 facade'd domains. Any `alias`, `import`, `require`, or `use` of an internal module from outside the domain is flagged as a violation. The only reference that passes cleanly is the facade module itself.
 
-Run `mix credo` to check. The check runs at `:high` priority.
+There is no allowlist. Existing violations show up in `mix credo` output as visible debt. New violations are immediately obvious as new entries.
+
+Run `mix credo` to check. The check runs at `:high` priority with `exit_status: 0` (warns without blocking CI).
 
 ### Adding a new domain
 

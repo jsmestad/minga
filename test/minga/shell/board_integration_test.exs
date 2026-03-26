@@ -42,10 +42,11 @@ defmodule Minga.Shell.BoardIntegrationTest do
       # Toggle back via :sys.replace_state (Board grid consumes
       # unmodified keys, so SPC leader doesn't work from grid view).
       :sys.replace_state(ctx.editor, fn state ->
-        %{state |
-          shell: Minga.Shell.Traditional,
-          shell_state: %Minga.Shell.Traditional.State{},
-          layout: nil
+        %{
+          state
+          | shell: Minga.Shell.Traditional,
+            shell_state: %Minga.Shell.Traditional.State{},
+            layout: nil
         }
       end)
 

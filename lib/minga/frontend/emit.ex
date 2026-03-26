@@ -231,5 +231,4 @@ defmodule Minga.Frontend.Emit do
       end
     end
   end
-
 end
