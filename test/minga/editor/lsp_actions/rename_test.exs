@@ -13,7 +13,7 @@ defmodule Minga.Editor.LspActions.RenameTest do
     %{
       workspace: %{
         buffers: %Buffers{},
-        vim: VimState.new(),
+        editing: VimState.new(),
         viewport: Viewport.new(40, 120)
       },
       shell_state: %Minga.Shell.Traditional.State{
@@ -46,8 +46,8 @@ defmodule Minga.Editor.LspActions.RenameTest do
       }
 
       state = LspActions.handle_prepare_rename_response(stub_state(), {:ok, result})
-      assert state.workspace.vim.mode == :command
-      assert state.workspace.vim.mode_state.input == "rename my_func"
+      assert state.workspace.editing.mode == :command
+      assert state.workspace.editing.mode_state.input == "rename my_func"
     end
 
     test "prepare with range-only response enters command mode" do
@@ -57,8 +57,8 @@ defmodule Minga.Editor.LspActions.RenameTest do
       }
 
       state = LspActions.handle_prepare_rename_response(stub_state(), {:ok, result})
-      assert state.workspace.vim.mode == :command
-      assert state.workspace.vim.mode_state.input == "rename "
+      assert state.workspace.editing.mode == :command
+      assert state.workspace.editing.mode_state.input == "rename "
     end
   end
 

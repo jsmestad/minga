@@ -43,7 +43,7 @@ defmodule Minga.Editor.RenderPipeline.TestHelpers do
       port_manager: self(),
       workspace: %Minga.Workspace.State{
         viewport: Viewport.new(rows, cols),
-        vim: VimState.new(),
+        editing: VimState.new(),
         buffers: %Buffers{active: buf, list: [buf], active_index: 0},
         windows: %Windows{
           tree: WindowTree.new(win_id),

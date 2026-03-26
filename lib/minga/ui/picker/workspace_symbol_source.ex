@@ -116,7 +116,11 @@ defmodule Minga.UI.Picker.WorkspaceSymbolSource do
   @spec set_jump_mark(EditorState.t()) :: EditorState.t()
   defp set_jump_mark(%{workspace: %{buffers: %{active: buf}}} = state) when is_pid(buf) do
     pos = BufferServer.cursor(buf)
-    %{state | workspace: %{state.workspace | vim: %{state.workspace.vim | last_jump_pos: pos}}}
+
+    %{
+      state
+      | workspace: %{state.workspace | editing: %{state.workspace.editing | last_jump_pos: pos}}
+    }
   end
 
   defp set_jump_mark(state), do: state

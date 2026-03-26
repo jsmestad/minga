@@ -29,7 +29,7 @@ defmodule Minga.Input.PickerMouseTest do
     %EditorState{
       port_manager: nil,
       workspace: %Minga.Workspace.State{
-        vim: VimState.new(),
+        editing: VimState.new(),
         viewport: Viewport.new(30, 80)
       },
       shell_state: %Minga.Shell.Traditional.State{
@@ -88,7 +88,7 @@ defmodule Minga.Input.PickerMouseTest do
       %EditorState{
         port_manager: nil,
         workspace: %Minga.Workspace.State{
-          vim: VimState.new(),
+          editing: VimState.new(),
           viewport: Viewport.new(24, 80)
         },
         shell_state: %Minga.Shell.Traditional.State{
@@ -142,7 +142,7 @@ defmodule Minga.Input.PickerMouseTest do
       state = %EditorState{
         port_manager: nil,
         workspace: %Minga.Workspace.State{
-          vim: VimState.new(),
+          editing: VimState.new(),
           viewport: Viewport.new(30, 80)
         }
       }

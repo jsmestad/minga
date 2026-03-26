@@ -78,18 +78,18 @@ defmodule Minga.Input.Interrupt do
   end
 
   @spec maybe_reset_mode(EditorState.t(), [String.t()]) :: {EditorState.t(), [String.t()]}
-  defp maybe_reset_mode(%{workspace: %{vim: %{mode: mode}}} = state, resets)
+  defp maybe_reset_mode(%{workspace: %{editing: %{mode: mode}}} = state, resets)
        when mode != :normal do
     {EditorState.transition_mode(state, :normal), ["mode #{mode} → :normal" | resets]}
   end
 
-  defp maybe_reset_mode(%{workspace: %{vim: vim}} = state, resets) do
+  defp maybe_reset_mode(%{workspace: %{editing: vim}} = state, resets) do
     fresh_state = Mode.initial_state()
 
     if mode_state_dirty?(vim.mode_state, fresh_state) do
       new_vim = %{vim | mode_state: fresh_state}
 
-      {%{state | workspace: %{state.workspace | vim: new_vim}},
+      {%{state | workspace: %{state.workspace | editing: new_vim}},
        ["mode state reset (pending sequence cleared)" | resets]}
     else
       {state, resets}

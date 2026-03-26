@@ -102,7 +102,18 @@ defmodule Minga.Input do
   """
   @spec surface_handlers() :: [module()]
   def surface_handlers do
-    bottom_handler = editing_dispatch_handler()
+    surface_handlers(%{editing_model: Minga.Editing.active_model()})
+  end
+
+  @doc """
+  Returns the surface handlers for the given editor state.
+
+  The editing model is read from `state.editing_model` to determine
+  whether the bottom-of-stack handler is ModeFSM (vim) or CUA.Dispatch.
+  """
+  @spec surface_handlers(map()) :: [module()]
+  def surface_handlers(state) do
+    bottom_handler = editing_dispatch_handler(state)
 
     base = [
       Dashboard,
@@ -126,9 +137,9 @@ defmodule Minga.Input do
   Returns the appropriate bottom-of-stack dispatch handler for the
   active editing model.
   """
-  @spec editing_dispatch_handler() :: module()
-  def editing_dispatch_handler do
-    case Minga.Editing.active_model() do
+  @spec editing_dispatch_handler(map()) :: module()
+  def editing_dispatch_handler(state) do
+    case Minga.Editing.active_model(state) do
       Minga.Editing.Model.Vim -> ModeFSM
       Minga.Editing.Model.CUA -> Minga.Input.CUA.Dispatch
     end

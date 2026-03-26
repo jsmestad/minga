@@ -71,7 +71,10 @@ defmodule Minga.Editor.Commands.Movement do
 
   # ── h / l (mode-aware) ────────────────────────────────────────────────────
 
-  def execute(%{workspace: %{buffers: %{active: buf}, vim: %{mode: mode}}} = state, :move_left) do
+  def execute(
+        %{workspace: %{buffers: %{active: buf}, editing: %{mode: mode}}} = state,
+        :move_left
+      ) do
     if mode in [:insert, :replace] do
       BufferServer.move(buf, :left)
     else
@@ -81,7 +84,10 @@ defmodule Minga.Editor.Commands.Movement do
     state
   end
 
-  def execute(%{workspace: %{buffers: %{active: buf}, vim: %{mode: mode}}} = state, :move_right) do
+  def execute(
+        %{workspace: %{buffers: %{active: buf}, editing: %{mode: mode}}} = state,
+        :move_right
+      ) do
     if mode in [:insert, :replace] do
       BufferServer.move(buf, :right)
     else
@@ -239,12 +245,15 @@ defmodule Minga.Editor.Commands.Movement do
 
     %{
       state
-      | workspace: %{state.workspace | vim: %{state.workspace.vim | last_find_char: {dir, char}}}
+      | workspace: %{
+          state.workspace
+          | editing: %{state.workspace.editing | last_find_char: {dir, char}}
+        }
     }
   end
 
   def execute(
-        %{workspace: %{vim: %{last_find_char: {dir, char}}, buffers: %{active: buf}}} = state,
+        %{workspace: %{editing: %{last_find_char: {dir, char}}, buffers: %{active: buf}}} = state,
         :repeat_find_char
       ) do
     Helpers.apply_find_char(buf, dir, char)
@@ -254,7 +263,7 @@ defmodule Minga.Editor.Commands.Movement do
   def execute(state, :repeat_find_char), do: state
 
   def execute(
-        %{workspace: %{vim: %{last_find_char: {dir, char}}, buffers: %{active: buf}}} = state,
+        %{workspace: %{editing: %{last_find_char: {dir, char}}, buffers: %{active: buf}}} = state,
         :repeat_find_char_reverse
       ) do
     reverse_dir = Helpers.reverse_find_direction(dir)

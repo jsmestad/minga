@@ -67,11 +67,11 @@ defmodule Minga.Shell.Traditional do
   end
 
   @impl true
-  @spec input_handlers(ShellState.t()) :: %{overlay: [module()], surface: [module()]}
-  def input_handlers(_shell_state) do
+  @spec input_handlers(term()) :: %{overlay: [module()], surface: [module()]}
+  def input_handlers(editor_state) do
     %{
       overlay: Minga.Input.overlay_handlers(),
-      surface: Minga.Input.surface_handlers()
+      surface: Minga.Input.surface_handlers(editor_state)
     }
   end
 end

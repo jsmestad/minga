@@ -5,7 +5,7 @@ defmodule Minga.Editor.VimState do
   Groups the modal FSM state, registers, marks, and recording state
   that are specific to vim-style editing. This substruct on EditorState
   creates the swap boundary for alternative editing models (CUA, #306):
-  replace `state.workspace.vim` with a different struct to change the editing model.
+  replace `state.workspace.editing` with a different struct to change the editing model.
 
   ## Fields
 

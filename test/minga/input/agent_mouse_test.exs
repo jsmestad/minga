@@ -43,7 +43,7 @@ defmodule Minga.Input.AgentMouseTest do
       port_manager: self(),
       workspace: %Minga.Workspace.State{
         viewport: Viewport.new(24, 80),
-        vim: %VimState{mode: :normal, mode_state: Mode.initial_state()},
+        editing: %VimState{mode: :normal, mode_state: Mode.initial_state()},
         buffers: %Buffers{active: buf, list: [buf]},
         keymap_scope: Keyword.get(opts, :keymap_scope, :editor),
         agent_ui: agentic,

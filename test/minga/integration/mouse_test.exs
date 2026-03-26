@@ -462,7 +462,7 @@ defmodule Minga.Integration.MouseTest do
       # Verify the editor is still in a consistent state after the full
       # housekeeping pipeline ran.
       state = :sys.get_state(ctx.editor)
-      assert state.workspace.vim.mode == :normal
+      assert state.workspace.editing.mode == :normal
       assert state.workspace.buffers.active != nil
     end
 

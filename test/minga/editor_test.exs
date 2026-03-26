@@ -152,7 +152,7 @@ defmodule Minga.EditorTest do
       # Try pressing 'i' to enter insert mode
       send(editor, {:minga_input, {:key_press, ?i, 0}})
       state = :sys.get_state(editor)
-      assert state.workspace.vim.mode == :normal
+      assert state.workspace.editing.mode == :normal
       assert state.shell_state.status_msg == "Buffer is read-only"
     end
 
@@ -171,7 +171,7 @@ defmodule Minga.EditorTest do
       # Try pressing 'R' to enter replace mode
       send(editor, {:minga_input, {:key_press, ?R, 0}})
       state = :sys.get_state(editor)
-      assert state.workspace.vim.mode == :normal
+      assert state.workspace.editing.mode == :normal
       assert state.shell_state.status_msg == "Buffer is read-only"
     end
   end

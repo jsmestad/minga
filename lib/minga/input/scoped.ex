@@ -108,7 +108,7 @@ defmodule Minga.Input.Scoped do
     # before Scoped in the focus stack walk. See Input.surface_handlers/0.
 
     # CUA mode: resolve all keys through the :cua trie. No vim modes.
-    if cua_active?() do
+    if cua_active?(state) do
       resolve_agent_key(state, :cua, cp, mods)
     else
       dispatch_agent_key_vim(state, panel, cp, mods)
@@ -150,9 +150,9 @@ defmodule Minga.Input.Scoped do
     end
   end
 
-  @spec cua_active?() :: boolean()
-  defp cua_active? do
-    Minga.Editing.active_model() == Minga.Editing.Model.CUA
+  @spec cua_active?(map()) :: boolean()
+  defp cua_active?(state) do
+    Minga.Editing.active_model(state) == Minga.Editing.Model.CUA
   end
 
   # ── Agent scope trie resolution ────────────────────────────────────────────

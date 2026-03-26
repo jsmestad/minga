@@ -22,18 +22,22 @@ defmodule Minga.Editor.Commands.Marks do
   @spec execute(state(), Mode.command()) :: state()
 
   def execute(
-        %{workspace: %{buffers: %{active: buf}, vim: %{marks: marks}}} = state,
+        %{workspace: %{buffers: %{active: buf}, editing: %{marks: marks}}} = state,
         {:set_mark, char}
       )
       when is_binary(char) and is_pid(buf) do
     pos = BufferServer.cursor(buf)
     buf_marks = Map.get(marks, buf, %{})
     new_marks = Map.put(marks, buf, Map.put(buf_marks, char, pos))
-    %{state | workspace: %{state.workspace | vim: %{state.workspace.vim | marks: new_marks}}}
+
+    %{
+      state
+      | workspace: %{state.workspace | editing: %{state.workspace.editing | marks: new_marks}}
+    }
   end
 
   def execute(
-        %{workspace: %{buffers: %{active: buf}, vim: %{marks: marks}}} = state,
+        %{workspace: %{buffers: %{active: buf}, editing: %{marks: marks}}} = state,
         {:jump_to_mark_line, char}
       )
       when is_binary(char) and is_pid(buf) do
@@ -54,7 +58,7 @@ defmodule Minga.Editor.Commands.Marks do
   end
 
   def execute(
-        %{workspace: %{buffers: %{active: buf}, vim: %{marks: marks}}} = state,
+        %{workspace: %{buffers: %{active: buf}, editing: %{marks: marks}}} = state,
         {:jump_to_mark_exact, char}
       )
       when is_binary(char) and is_pid(buf) do
@@ -72,7 +76,7 @@ defmodule Minga.Editor.Commands.Marks do
   end
 
   def execute(
-        %{workspace: %{buffers: %{active: buf}, vim: %{last_jump_pos: last_pos}}} = state,
+        %{workspace: %{buffers: %{active: buf}, editing: %{last_jump_pos: last_pos}}} = state,
         :jump_to_last_pos_line
       )
       when is_pid(buf) and not is_nil(last_pos) do
@@ -85,14 +89,17 @@ defmodule Minga.Editor.Commands.Marks do
 
     %{
       state
-      | workspace: %{state.workspace | vim: %{state.workspace.vim | last_jump_pos: current_pos}}
+      | workspace: %{
+          state.workspace
+          | editing: %{state.workspace.editing | last_jump_pos: current_pos}
+        }
     }
   end
 
   def execute(state, :jump_to_last_pos_line), do: state
 
   def execute(
-        %{workspace: %{buffers: %{active: buf}, vim: %{last_jump_pos: last_pos}}} = state,
+        %{workspace: %{buffers: %{active: buf}, editing: %{last_jump_pos: last_pos}}} = state,
         :jump_to_last_pos_exact
       )
       when is_pid(buf) and not is_nil(last_pos) do
@@ -101,7 +108,10 @@ defmodule Minga.Editor.Commands.Marks do
 
     %{
       state
-      | workspace: %{state.workspace | vim: %{state.workspace.vim | last_jump_pos: current_pos}}
+      | workspace: %{
+          state.workspace
+          | editing: %{state.workspace.editing | last_jump_pos: current_pos}
+        }
     }
   end
 

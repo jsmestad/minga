@@ -112,8 +112,8 @@ defmodule Minga.Input.Router do
   # Walks overlay handlers first (ConflictPrompt, Picker, Completion).
   # If none consume the key, delegates to surface handlers (Scoped, GlobalBindings, ModeFSM).
   @spec dispatch_split(EditorState.t(), non_neg_integer(), non_neg_integer()) :: EditorState.t()
-  defp dispatch_split(%EditorState{shell: shell, shell_state: ss} = state, codepoint, modifiers) do
-    %{overlay: overlay_handlers, surface: _surface} = shell.input_handlers(ss)
+  defp dispatch_split(%EditorState{shell: shell, shell_state: _ss} = state, codepoint, modifiers) do
+    %{overlay: overlay_handlers, surface: _surface} = shell.input_handlers(state)
 
     case walk_handlers_until_passthrough(overlay_handlers, state, codepoint, modifiers) do
       {:handled, new_state} ->
@@ -132,11 +132,11 @@ defmodule Minga.Input.Router do
   @spec dispatch_to_surface(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           EditorState.t()
   defp dispatch_to_surface(
-         %EditorState{shell: shell, shell_state: ss} = state,
+         %EditorState{shell: shell, shell_state: _ss} = state,
          codepoint,
          modifiers
        ) do
-    %{surface: surface_handlers} = shell.input_handlers(ss)
+    %{surface: surface_handlers} = shell.input_handlers(state)
 
     Enum.reduce_while(surface_handlers, state, fn handler, acc ->
       case handler.handle_key(acc, codepoint, modifiers) do
@@ -324,7 +324,7 @@ defmodule Minga.Input.Router do
         ) ::
           EditorState.t()
   defp dispatch_mouse_split(
-         %EditorState{shell: shell, shell_state: ss} = state,
+         %EditorState{shell: shell, shell_state: _ss} = state,
          row,
          col,
          button,
@@ -332,7 +332,7 @@ defmodule Minga.Input.Router do
          et,
          cc
        ) do
-    %{overlay: overlay_handlers, surface: surface_handlers} = shell.input_handlers(ss)
+    %{overlay: overlay_handlers, surface: surface_handlers} = shell.input_handlers(state)
 
     # Walk overlay handlers first for mouse events.
     result =

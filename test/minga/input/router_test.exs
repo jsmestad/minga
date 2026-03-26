@@ -16,7 +16,7 @@ defmodule Minga.Input.RouterTest do
       port_manager: self(),
       workspace: %Minga.Workspace.State{
         viewport: Viewport.new(24, 80),
-        vim: VimState.new(),
+        editing: VimState.new(),
         buffers: %Buffers{
           active: buf,
           list: [buf],
@@ -70,7 +70,7 @@ defmodule Minga.Input.RouterTest do
 
       # Press 'd' to enter operator_pending mode (no buffer mutation)
       new_state = Router.dispatch(state, ?d, 0)
-      assert new_state.workspace.vim.mode == :operator_pending
+      assert new_state.workspace.editing.mode == :operator_pending
 
       # Only a single no-op batch_end message should be sent (no full render).
       # port_manager is self(), so GenServer.cast sends a $gen_cast message.
@@ -136,7 +136,7 @@ defmodule Minga.Input.RouterTest do
 
       # Enter visual mode by pressing 'v'
       state = Router.dispatch(state, ?v, 0)
-      assert state.workspace.vim.mode == :visual
+      assert state.workspace.editing.mode == :visual
 
       snapshot = Router.capture_snapshot(state)
       assert snapshot.old_mode == :visual

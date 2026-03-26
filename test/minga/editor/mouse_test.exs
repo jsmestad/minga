@@ -252,7 +252,7 @@ defmodule Minga.Editor.MouseTest do
       {_line, col} = BufferServer.cursor(buffer)
       assert col == 8
       s = state(editor)
-      assert s.workspace.vim.mode == :visual
+      assert s.workspace.editing.mode == :visual
       assert s.workspace.mouse.dragging == false
       send_key(editor, ?y)
       assert Process.alive?(editor)
@@ -263,7 +263,7 @@ defmodule Minga.Editor.MouseTest do
       send_mouse(editor, @content_row, 3, :left, :press)
       send_mouse(editor, @content_row, 3, :left, :release)
       s = state(editor)
-      assert s.workspace.vim.mode == :normal
+      assert s.workspace.editing.mode == :normal
       assert s.workspace.mouse.dragging == false
     end
 

@@ -76,6 +76,7 @@ defmodule Minga.Editor.State do
   defstruct backend: :headless,
             port_manager: nil,
             workspace: nil,
+            editing_model: :vim,
             shell: Minga.Shell.Traditional,
             shell_state: %ShellState{},
             theme: Minga.UI.Theme.get!(:doom_one),
@@ -111,6 +112,7 @@ defmodule Minga.Editor.State do
           backend: backend(),
           port_manager: GenServer.server() | nil,
           workspace: WorkspaceState.t(),
+          editing_model: :vim | :cua,
           shell: module(),
           shell_state: ShellState.t(),
           theme: Theme.t(),
@@ -1052,7 +1054,7 @@ defmodule Minga.Editor.State do
       injection_ranges: %{},
       search: %Search{},
       pending_conflict: nil,
-      vim: VimState.new(),
+      editing: VimState.new(),
       document_highlights: nil,
       agent_ui: UIState.new()
     }
@@ -1085,7 +1087,7 @@ defmodule Minga.Editor.State do
       injection_ranges: %{},
       search: %Search{},
       pending_conflict: nil,
-      vim: VimState.new(),
+      editing: VimState.new(),
       document_highlights: nil,
       agent_ui: UIState.new()
     }
@@ -1124,7 +1126,7 @@ defmodule Minga.Editor.State do
       injection_ranges: Map.get(ss, :injection_ranges, %{}),
       search: Map.get(ss, :search, %Search{}),
       pending_conflict: Map.get(ss, :pending_conflict),
-      vim: vim
+      editing: vim
     }
   end
 
@@ -1151,7 +1153,7 @@ defmodule Minga.Editor.State do
     # Preserve vim-related fields from the original context so they can be migrated
     # Drop the vim field from the snapshot so maybe_migrate_vim_fields will migrate the flat fields
     snapshot_workspace_fields(ws)
-    |> Map.drop([:vim])
+    |> Map.drop([:vim, :editing])
     |> Map.merge(
       Map.take(context, [:mode, :mode_state, :reg, :marks, :last_jump_pos, :last_find_char])
     )
@@ -1186,8 +1188,12 @@ defmodule Minga.Editor.State do
     end
   end
 
-  # Migrates old contexts with separate vim fields to the new VimState substruct
+  # Migrates old contexts with separate vim fields to the new VimState substruct.
+  # The :editing and :vim guards are defensive: earlier migration steps strip
+  # these keys before calling here, but persisted session data may have them.
+  @dialyzer {:no_match, maybe_migrate_vim_fields: 1}
   @spec maybe_migrate_vim_fields(Tab.context()) :: Tab.context()
+  defp maybe_migrate_vim_fields(%{editing: _} = context), do: context
   defp maybe_migrate_vim_fields(%{vim: _} = context), do: context
 
   defp maybe_migrate_vim_fields(%{mode: mode} = context) do
@@ -1211,7 +1217,7 @@ defmodule Minga.Editor.State do
       :change_recorder,
       :macro_recorder
     ])
-    |> Map.put(:vim, vim)
+    |> Map.put(:editing, vim)
   end
 
   defp maybe_migrate_vim_fields(context), do: context

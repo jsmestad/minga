@@ -20,7 +20,7 @@ defmodule Minga.Editor.EditingTest do
 
   defp build_state(overrides \\ []) do
     vim =
-      Keyword.get(overrides, :vim, %VimState{
+      Keyword.get(overrides, :editing, %VimState{
         mode: Keyword.get(overrides, :mode, :normal),
         mode_state: Keyword.get(overrides, :mode_state, Mode.initial_state())
       })
@@ -29,7 +29,7 @@ defmodule Minga.Editor.EditingTest do
       port_manager: @port_manager,
       workspace: %Minga.Workspace.State{
         viewport: Viewport.new(24, 80),
-        vim: vim
+        editing: vim
       }
     }
   end
@@ -94,7 +94,7 @@ defmodule Minga.Editor.EditingTest do
 
     test "returns false when mode_state has no leader_node field" do
       vim = %VimState{mode: :insert, mode_state: %{}}
-      refute Minga.Editing.in_leader?(build_state(vim: vim))
+      refute Minga.Editing.in_leader?(build_state(editing: vim))
     end
   end
 
@@ -154,7 +154,7 @@ defmodule Minga.Editor.EditingTest do
     test "returns the anchor from mode_state" do
       ms = %Minga.Mode.VisualState{visual_anchor: {5, 3}, visual_type: :char}
       vim = %VimState{mode: :visual, mode_state: ms}
-      assert Editing.visual_anchor(build_state(vim: vim)) == {5, 3}
+      assert Editing.visual_anchor(build_state(editing: vim)) == {5, 3}
     end
 
     test "returns nil when mode_state has no visual_anchor" do
@@ -241,7 +241,7 @@ defmodule Minga.Editor.EditingTest do
   describe "save_jump_pos/2" do
     test "stores the jump position" do
       state = Editing.save_jump_pos(build_state(), {10, 5})
-      assert state.workspace.vim.last_jump_pos == {10, 5}
+      assert state.workspace.editing.last_jump_pos == {10, 5}
     end
   end
 end

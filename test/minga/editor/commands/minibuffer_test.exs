@@ -34,7 +34,7 @@ defmodule Minga.Editor.Commands.MinibufferTest do
 
   defp get_mode_state(editor) do
     state = :sys.get_state(editor)
-    {state.workspace.vim.mode, state.workspace.vim.mode_state}
+    {state.workspace.editing.mode, state.workspace.editing.mode_state}
   end
 
   describe "accept_command_candidate via Tab in command mode" do

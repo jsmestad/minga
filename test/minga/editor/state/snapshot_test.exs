@@ -18,7 +18,7 @@ defmodule Minga.Editor.State.SnapshotTest do
       port_manager: nil,
       workspace: %Minga.Workspace.State{
         viewport: Viewport.new(24, 80),
-        vim: %VimState{mode: mode, mode_state: Mode.initial_state()},
+        editing: %VimState{mode: mode, mode_state: Mode.initial_state()},
         buffers: %Buffers{
           active: buf,
           list: if(buf, do: [buf], else: [])
@@ -38,7 +38,7 @@ defmodule Minga.Editor.State.SnapshotTest do
 
       # Per-tab fields stored directly
       assert ctx.keymap_scope == :agent
-      assert ctx.vim.mode == :insert
+      assert ctx.editing.mode == :insert
       assert ctx.buffers.active == buf
       assert ctx.windows == state.workspace.windows
 
@@ -54,7 +54,7 @@ defmodule Minga.Editor.State.SnapshotTest do
       ctx = EditorState.snapshot_tab_context(state)
 
       assert ctx.buffers.active == buf
-      assert ctx.vim == state.workspace.vim
+      assert ctx.editing == state.workspace.editing
       assert ctx.viewport == state.workspace.viewport
       assert ctx.mouse == state.workspace.mouse
       assert ctx.highlight == state.workspace.highlight
@@ -79,7 +79,7 @@ defmodule Minga.Editor.State.SnapshotTest do
       ctx = EditorState.snapshot_tab_context(state_b)
 
       restored = EditorState.restore_tab_context(state, ctx)
-      assert restored.workspace.vim.mode == :insert
+      assert restored.workspace.editing.mode == :insert
       assert restored.workspace.keymap_scope == :editor
       assert restored.workspace.buffers.active == buf_b
     end
@@ -115,7 +115,7 @@ defmodule Minga.Editor.State.SnapshotTest do
 
       restored = EditorState.restore_tab_context(state, ctx)
       assert restored.workspace.keymap_scope == :editor
-      assert restored.workspace.vim.mode == :insert
+      assert restored.workspace.editing.mode == :insert
       assert restored.workspace.buffers.active == buf_b
       assert restored.workspace.buffers.active_index == 1
     end
@@ -123,7 +123,7 @@ defmodule Minga.Editor.State.SnapshotTest do
     test "handles empty context gracefully" do
       state = make_state()
       restored = EditorState.restore_tab_context(state, %{})
-      assert restored.workspace.vim.mode == :normal
+      assert restored.workspace.editing.mode == :normal
       assert restored.workspace.keymap_scope == :editor
     end
   end
@@ -154,14 +154,14 @@ defmodule Minga.Editor.State.SnapshotTest do
       switched = EditorState.switch_tab(state, tab_b.id)
 
       # Should have restored tab b's context
-      assert switched.workspace.vim.mode == :insert
+      assert switched.workspace.editing.mode == :insert
       assert switched.workspace.buffers.active == buf_b
       assert switched.shell_state.tab_bar.active_id == tab_b.id
 
       # Tab a should have been snapshotted with flat context
       saved_a = TabBar.get(switched.shell_state.tab_bar, tab_a.id)
       assert saved_a.context.keymap_scope == :editor
-      assert saved_a.context.vim.mode == :normal
+      assert saved_a.context.editing.mode == :normal
       assert saved_a.context.buffers.active == buf_a
     end
 

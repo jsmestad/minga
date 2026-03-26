@@ -21,7 +21,9 @@ defmodule Minga.Editor.Renderer.SearchHighlight do
           {[String.t()], [search_match()]}
   def maybe_substitute_preview(
         %{
-          workspace: %{vim: %{mode: :command, mode_state: %Minga.Mode.CommandState{input: input}}}
+          workspace: %{
+            editing: %{mode: :command, mode_state: %Minga.Mode.CommandState{input: input}}
+          }
         },
         lines,
         first_line
@@ -107,21 +109,25 @@ defmodule Minga.Editor.Renderer.SearchHighlight do
 
   @spec active_search_pattern(state()) :: String.t() | nil
   defp active_search_pattern(%{
-         workspace: %{vim: %{mode: :search, mode_state: %Minga.Mode.SearchState{input: input}}}
+         workspace: %{
+           editing: %{mode: :search, mode_state: %Minga.Mode.SearchState{input: input}}
+         }
        })
        when input != "" do
     input
   end
 
   defp active_search_pattern(%{
-         workspace: %{vim: %{mode: :command, mode_state: %Minga.Mode.CommandState{input: input}}}
+         workspace: %{
+           editing: %{mode: :command, mode_state: %Minga.Mode.CommandState{input: input}}
+         }
        }) do
     extract_substitute_pattern(input)
   end
 
   defp active_search_pattern(%{
          workspace: %{
-           vim: %{
+           editing: %{
              mode: :substitute_confirm,
              mode_state: %Minga.Mode.SubstituteConfirmState{pattern: pattern}
            }
@@ -142,7 +148,10 @@ defmodule Minga.Editor.Renderer.SearchHighlight do
   @spec current_confirm_match(state()) :: search_match() | nil
   def current_confirm_match(%{
         workspace: %{
-          vim: %{mode: :substitute_confirm, mode_state: %Minga.Mode.SubstituteConfirmState{} = ms}
+          editing: %{
+            mode: :substitute_confirm,
+            mode_state: %Minga.Mode.SubstituteConfirmState{} = ms
+          }
         }
       }) do
     Enum.at(ms.matches, ms.current)

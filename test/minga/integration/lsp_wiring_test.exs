@@ -29,7 +29,7 @@ defmodule Minga.Integration.LspWiringTest do
 
       # Sync: if the handler crashed, get_state would raise.
       state = :sys.get_state(ctx.editor)
-      assert state.workspace.vim.mode == :normal
+      assert state.workspace.editing.mode == :normal
     end
 
     test "timer message with no active buffer is gracefully handled" do
@@ -59,7 +59,7 @@ defmodule Minga.Integration.LspWiringTest do
 
       # Sync and verify the editor is still alive
       state = :sys.get_state(ctx.editor)
-      assert state.workspace.vim.mode == :normal
+      assert state.workspace.editing.mode == :normal
     end
   end
 

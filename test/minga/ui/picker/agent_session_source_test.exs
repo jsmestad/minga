@@ -154,7 +154,7 @@ defmodule Minga.UI.Picker.AgentSessionSourceTest do
       agent_ui: %UIState{view: %UIState.View{active: true, focus: :chat}},
       windows: %Windows{},
       file_tree: nil,
-      vim: VimState.new(),
+      editing: VimState.new(),
       keymap_scope: :agent,
       active_buffer: nil,
       active_buffer_index: 0
@@ -171,7 +171,7 @@ defmodule Minga.UI.Picker.AgentSessionSourceTest do
         viewport: Viewport.new(24, 80),
         buffers: %Buffers{},
         windows: %Windows{},
-        vim: VimState.new(),
+        editing: VimState.new(),
         keymap_scope: :agent,
         agent_ui: agentic
       },
@@ -197,7 +197,7 @@ defmodule Minga.UI.Picker.AgentSessionSourceTest do
         viewport: Viewport.new(24, 80),
         buffers: %Buffers{},
         windows: %Windows{},
-        vim: VimState.new(),
+        editing: VimState.new(),
         keymap_scope: :agent,
         agent_ui: agentic
       },
@@ -217,7 +217,7 @@ defmodule Minga.UI.Picker.AgentSessionSourceTest do
       agent_ui: %UIState{view: %UIState.View{active: true, focus: :chat}},
       windows: %Windows{},
       file_tree: nil,
-      vim: VimState.new(),
+      editing: VimState.new(),
       keymap_scope: :agent,
       active_buffer: nil,
       active_buffer_index: 0
@@ -236,7 +236,7 @@ defmodule Minga.UI.Picker.AgentSessionSourceTest do
         viewport: Viewport.new(24, 80),
         buffers: %Buffers{},
         windows: %Windows{},
-        vim: VimState.new(),
+        editing: VimState.new(),
         keymap_scope: :editor,
         agent_ui: agentic
       },

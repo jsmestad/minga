@@ -121,11 +121,14 @@ defmodule Minga.Input.AgentPanelNavTest do
 
       # Simulate a leader sequence in progress (SPC b was pressed, waiting for N)
       leader_trie = KeymapActive.leader_trie()
-      mode_state = %{state.workspace.vim.mode_state | leader_node: leader_trie}
+      mode_state = %{state.workspace.editing.mode_state | leader_node: leader_trie}
 
       state = %{
         state
-        | workspace: %{state.workspace | vim: %{state.workspace.vim | mode_state: mode_state}}
+        | workspace: %{
+            state.workspace
+            | editing: %{state.workspace.editing | mode_state: mode_state}
+          }
       }
 
       # Should passthrough, not route through delegate_to_mode_fsm
@@ -143,7 +146,7 @@ defmodule Minga.Input.AgentPanelNavTest do
 
       {:handled, new_state} = walk_surface_handlers(state, 27, 0)
       assert AgentAccess.input_focused?(new_state) == true
-      assert new_state.workspace.vim.mode == :normal
+      assert new_state.workspace.editing.mode == :normal
     end
 
     test "input mode intercepts printable chars" do
@@ -154,7 +157,7 @@ defmodule Minga.Input.AgentPanelNavTest do
 
       state = %{
         state
-        | workspace: %{state.workspace | vim: %{state.workspace.vim | mode: :insert}}
+        | workspace: %{state.workspace | editing: %{state.workspace.editing | mode: :insert}}
       }
 
       {:handled, new_state} = walk_surface_handlers(state, ?a, 0)
@@ -199,7 +202,7 @@ defmodule Minga.Input.AgentPanelNavTest do
 
       state = %{
         state
-        | workspace: %{state.workspace | vim: %{state.workspace.vim | mode: :insert}}
+        | workspace: %{state.workspace | editing: %{state.workspace.editing | mode: :insert}}
       }
 
       {:handled, new_state} = walk_surface_handlers(state, 13, 0x01)

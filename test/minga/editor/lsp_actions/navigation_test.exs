@@ -18,7 +18,7 @@ defmodule Minga.Editor.LspActions.NavigationTest do
         whichkey: %Minga.Editor.State.WhichKey{}
       },
       buffers: %{active: nil, list: []},
-      vim: %{mode: :normal, last_jump_pos: nil}
+      editing: %{mode: :normal, last_jump_pos: nil}
     }
   end
 

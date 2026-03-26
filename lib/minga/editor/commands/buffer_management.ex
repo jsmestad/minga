@@ -1129,7 +1129,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
 
   @spec show_tool_prompt_if_normal(state()) :: state()
   defp show_tool_prompt_if_normal(
-         %{workspace: %{vim: %{mode: :normal}}, shell_state: %{tool_prompt_queue: pending}} =
+         %{workspace: %{editing: %{mode: :normal}}, shell_state: %{tool_prompt_queue: pending}} =
            state
        )
        when pending != [] do

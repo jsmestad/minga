@@ -32,7 +32,7 @@ defmodule Minga.Input.Completion do
   @spec handle_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           Minga.Input.Handler.result()
   def handle_key(
-        %{workspace: %{vim: %{mode: :insert}, completion: %Completion{} = completion}} = state,
+        %{workspace: %{editing: %{mode: :insert}, completion: %Completion{} = completion}} = state,
         cp,
         mods
       ) do
@@ -59,7 +59,7 @@ defmodule Minga.Input.Completion do
 
   # Completion popup active: intercept scroll and clicks
   def handle_mouse(
-        %{workspace: %{vim: %{mode: :insert}, completion: %Completion{} = completion}} = state,
+        %{workspace: %{editing: %{mode: :insert}, completion: %Completion{} = completion}} = state,
         row,
         col,
         button,

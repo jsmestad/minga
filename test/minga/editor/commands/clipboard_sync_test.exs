@@ -94,7 +94,7 @@ defmodule Minga.Editor.Commands.ClipboardSyncTest do
 
     test "named register also syncs to clipboard", %{clipboard: agent} do
       sentinel = "named-sync-#{System.unique_integer([:positive])}"
-      state = put_in(make_state().workspace.vim.reg.active, "a")
+      state = put_in(make_state().workspace.editing.reg.active, "a")
 
       Helpers.put_register_with_clipboard_override(
         state,
@@ -111,7 +111,7 @@ defmodule Minga.Editor.Commands.ClipboardSyncTest do
     test "black hole register does not sync to clipboard", %{clipboard: agent} do
       sentinel = "blackhole-guard-#{System.unique_integer([:positive])}"
       Agent.update(agent, fn _ -> sentinel end)
-      state = put_in(make_state().workspace.vim.reg.active, "_")
+      state = put_in(make_state().workspace.editing.reg.active, "_")
 
       Helpers.put_register_with_clipboard_override(
         state,
@@ -128,7 +128,7 @@ defmodule Minga.Editor.Commands.ClipboardSyncTest do
 
     test "explicit + register still works", %{clipboard: agent} do
       sentinel = "explicit-clip-#{System.unique_integer([:positive])}"
-      state = put_in(make_state().workspace.vim.reg.active, "+")
+      state = put_in(make_state().workspace.editing.reg.active, "+")
 
       Helpers.put_register_with_clipboard_override(
         state,
@@ -163,7 +163,7 @@ defmodule Minga.Editor.Commands.ClipboardSyncTest do
 
     test "explicit + register still works even with clipboard: :none", %{clipboard: agent} do
       sentinel = "none-explicit-#{System.unique_integer([:positive])}"
-      state = put_in(make_state().workspace.vim.reg.active, "+")
+      state = put_in(make_state().workspace.editing.reg.active, "+")
       Helpers.put_register_with_clipboard_override(state, sentinel, :yank, :charwise, :none)
 
       assert_receive {:clipboard_written, ^sentinel}, 200
@@ -223,7 +223,7 @@ defmodule Minga.Editor.Commands.ClipboardSyncTest do
       state = make_state()
       sentinel = "reg-a-#{System.unique_integer([:positive])}"
       state = Helpers.put_in_register(state, "a", sentinel)
-      state = put_in(state.workspace.vim.reg.active, "a")
+      state = put_in(state.workspace.editing.reg.active, "a")
 
       {text, _type, _state} = Helpers.get_register(state, :unnamedplus)
       assert text == sentinel

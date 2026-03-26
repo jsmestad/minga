@@ -15,11 +15,9 @@ defmodule Minga.Input.CUA.SpaceLeaderTest do
   alias Minga.Input.CUA.SpaceLeader
 
   setup do
-    Options.set(:editing_model, :cua)
     Options.set(:space_leader, :chord)
 
     on_exit(fn ->
-      Options.set(:editing_model, :vim)
       Options.set(:space_leader, :chord)
     end)
 
@@ -28,7 +26,7 @@ defmodule Minga.Input.CUA.SpaceLeaderTest do
 
   describe "handle_chord (clean chord, no space sent)" do
     test "leader-matching key enters leader mode" do
-      ctx = start_editor("hello")
+      ctx = start_editor("hello", editing_model: :cua)
 
       # Simulate Swift sending space_leader_chord with 'f' key
       # (SPC f = +file group in default keymap)
@@ -43,7 +41,7 @@ defmodule Minga.Input.CUA.SpaceLeaderTest do
     end
 
     test "non-matching key inserts space and types the key" do
-      ctx = start_editor("")
+      ctx = start_editor("", editing_model: :cua)
 
       # '!' is not a leader trie prefix
       send(ctx.editor, {:minga_input, {:gui_action, {:space_leader_chord, ?!, 0}}})
@@ -57,7 +55,7 @@ defmodule Minga.Input.CUA.SpaceLeaderTest do
 
   describe "handle_retract (fallback chord, space already sent)" do
     test "leader-matching key retracts space and enters leader mode" do
-      ctx = start_editor("hello")
+      ctx = start_editor("hello", editing_model: :cua)
 
       # First: simulate the space being sent (grace timer fired on Swift side)
       send_key(ctx, 0x20)
@@ -73,7 +71,7 @@ defmodule Minga.Input.CUA.SpaceLeaderTest do
     end
 
     test "non-matching key leaves space, types key normally" do
-      ctx = start_editor("")
+      ctx = start_editor("", editing_model: :cua)
 
       # Space was sent
       send_key(ctx, 0x20)
@@ -89,24 +87,23 @@ defmodule Minga.Input.CUA.SpaceLeaderTest do
 
   describe "active? guard" do
     test "inactive when editing_model is :vim" do
-      Options.set(:editing_model, :vim)
-      refute SpaceLeader.active?()
+      refute SpaceLeader.active?(%{editing_model: :vim})
     end
 
     test "inactive when space_leader is :off" do
       Options.set(:space_leader, :off)
-      refute SpaceLeader.active?()
+      refute SpaceLeader.active?(%{editing_model: :cua})
     end
 
     test "active when CUA mode and chord enabled" do
-      assert SpaceLeader.active?()
+      assert SpaceLeader.active?(%{editing_model: :cua})
     end
   end
 
   describe "keystroke replay when inactive" do
     test "chord replays withheld space and dispatches key in vim insert mode" do
       Options.set(:editing_model, :vim)
-      ctx = start_editor("")
+      ctx = start_editor("", editing_model: :vim)
 
       # Enter insert mode
       send_key(ctx, ?i)
@@ -126,7 +123,7 @@ defmodule Minga.Input.CUA.SpaceLeaderTest do
 
     test "retract dispatches key normally in vim insert mode" do
       Options.set(:editing_model, :vim)
-      ctx = start_editor("")
+      ctx = start_editor("", editing_model: :vim)
 
       # Enter insert mode
       send_key(ctx, ?i)
@@ -147,7 +144,7 @@ defmodule Minga.Input.CUA.SpaceLeaderTest do
     test "chord replays space and key in CUA mode without :chord enabled" do
       Options.set(:editing_model, :cua)
       Options.set(:space_leader, :off)
-      ctx = start_editor("")
+      ctx = start_editor("", editing_model: :cua)
 
       send(ctx.editor, {:minga_input, {:gui_action, {:space_leader_chord, ?x, 0}}})
       _ = :sys.get_state(ctx.editor)

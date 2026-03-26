@@ -20,7 +20,7 @@ defmodule Minga.Editor.StateTest do
       port_manager: nil,
       workspace: %Minga.Workspace.State{
         viewport: Viewport.new(24, 80),
-        vim: VimState.new()
+        editing: VimState.new()
       }
     }
   end

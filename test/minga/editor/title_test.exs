@@ -31,7 +31,7 @@ defmodule Minga.Editor.TitleTest do
     %{
       workspace: %{
         buffers: %{active: buf},
-        vim: %{mode: mode}
+        editing: %{mode: mode}
       }
     }
   end
@@ -92,7 +92,7 @@ defmodule Minga.Editor.TitleTest do
     end
 
     test "no active buffer falls back to no file" do
-      state = %{buffers: %{active: nil}, vim: %{mode: :normal}}
+      state = %{buffers: %{active: nil}, editing: %{mode: :normal}}
       result = Title.format(state, "{filename} - Minga")
       assert result == "[no file] - Minga"
     end
@@ -108,7 +108,7 @@ defmodule Minga.Editor.TitleTest do
         port_manager: self(),
         workspace: %Minga.Workspace.State{
           viewport: Viewport.new(24, 80),
-          vim: VimState.new(),
+          editing: VimState.new(),
           buffers: %Buffers{active: file_buf, list: []},
           windows: %Windows{
             tree: WindowTree.new(1),
@@ -138,7 +138,7 @@ defmodule Minga.Editor.TitleTest do
         port_manager: self(),
         workspace: %Minga.Workspace.State{
           viewport: Viewport.new(24, 80),
-          vim: VimState.new(),
+          editing: VimState.new(),
           buffers: %Buffers{active: buf, list: [buf]},
           windows: %Windows{
             tree: WindowTree.new(1),
@@ -170,7 +170,7 @@ defmodule Minga.Editor.TitleTest do
         port_manager: self(),
         workspace: %Minga.Workspace.State{
           viewport: Viewport.new(24, 80),
-          vim: VimState.new(),
+          editing: VimState.new(),
           buffers: %Buffers{active: buf, list: [buf]},
           windows: %Windows{
             tree: WindowTree.new(1),
@@ -200,7 +200,7 @@ defmodule Minga.Editor.TitleTest do
         port_manager: self(),
         workspace: %Minga.Workspace.State{
           viewport: Viewport.new(24, 80),
-          vim: VimState.new(),
+          editing: VimState.new(),
           buffers: %Buffers{active: buf, list: [buf]},
           windows: %Windows{
             tree: WindowTree.new(1),
@@ -229,7 +229,7 @@ defmodule Minga.Editor.TitleTest do
         port_manager: self(),
         workspace: %Minga.Workspace.State{
           viewport: Viewport.new(24, 80),
-          vim: VimState.new(),
+          editing: VimState.new(),
           buffers: %Buffers{active: buf, list: [buf]},
           windows: %Windows{
             tree: WindowTree.new(1),
@@ -254,7 +254,7 @@ defmodule Minga.Editor.TitleTest do
         port_manager: self(),
         workspace: %Minga.Workspace.State{
           viewport: Viewport.new(24, 80),
-          vim: VimState.new(),
+          editing: VimState.new(),
           buffers: %Buffers{active: file_buf, list: []},
           windows: %Windows{
             tree: WindowTree.new(1),
