@@ -161,13 +161,18 @@ defmodule Minga.Shell.Board.InputTest do
   # ── New card dispatch ──────────────────────────────────────────────────
 
   describe "n creates and zooms into new card" do
-    test "creates a new card and auto-zooms into it" do
+    test "creates a new card, starts agent session, and auto-zooms" do
       state = editor_with_board(2)
       initial_count = BoardState.card_count(state.shell_state)
 
       {:handled, new_state} = BoardInput.handle_key(state, ?n, 0)
       assert BoardState.card_count(new_state.shell_state) == initial_count + 1
       assert new_state.shell_state.zoomed_into != nil
+
+      # New card should have a model set
+      new_card_id = new_state.shell_state.zoomed_into
+      card = new_state.shell_state.cards[new_card_id]
+      assert card.model != nil
     end
   end
 

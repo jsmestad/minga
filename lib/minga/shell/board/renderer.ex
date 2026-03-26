@@ -16,11 +16,11 @@ defmodule Minga.Shell.Board.Renderer do
   alias Minga.Shell.Board.State
   alias Minga.UI.Face
 
-  # Box-drawing characters (Unicode)
-  @tl "╭"
-  @tr "╮"
-  @bl "╰"
-  @br "╯"
+  # Box-drawing characters (simple ASCII for maximum terminal compatibility)
+  @tl "┌"
+  @tr "┐"
+  @bl "└"
+  @br "┘"
   @h "─"
   @v "│"
 

@@ -2103,19 +2103,32 @@ defmodule Minga.Editor do
     Minga.Editor.Commands.execute(state, cmd)
   end
 
-  # Board gui_actions: delegate to the active shell's handle_gui_action
-  defp handle_gui_action(%{shell: Minga.Shell.Board} = state, {:board_select_card, _} = action) do
-    {shell_state, workspace} =
-      Minga.Shell.Board.handle_gui_action(state.shell_state, state.workspace, action)
+  # Board gui_actions: delegate to the active shell
+  defp handle_gui_action(%{shell: Minga.Shell.Board} = state, {:board_select_card, card_id}) do
+    board = state.shell_state
+    board = Minga.Shell.Board.State.focus_card(board, card_id)
 
-    %{state | shell_state: shell_state, workspace: workspace}
+    # Zoom into the card (same logic as Enter key)
+    workspace_snapshot = Map.from_struct(state.workspace)
+    board = Minga.Shell.Board.State.zoom_into(board, card_id, workspace_snapshot)
+
+    state = %{state | shell_state: board}
+
+    # Restore the card's workspace if it has one
+    card = Minga.Shell.Board.State.zoomed(board)
+
+    case card && card.workspace do
+      ws when is_map(ws) and map_size(ws) > 0 ->
+        EditorState.restore_tab_context(state, ws)
+
+      _ ->
+        state
+    end
   end
 
-  defp handle_gui_action(%{shell: Minga.Shell.Board} = state, {:board_close_card, _} = action) do
-    {shell_state, workspace} =
-      Minga.Shell.Board.handle_gui_action(state.shell_state, state.workspace, action)
-
-    %{state | shell_state: shell_state, workspace: workspace}
+  defp handle_gui_action(%{shell: Minga.Shell.Board} = state, {:board_close_card, card_id}) do
+    board = Minga.Shell.Board.State.remove_card(state.shell_state, card_id)
+    %{state | shell_state: board}
   end
 
   defp handle_gui_action(state, {:git_open_file, path}) do

@@ -19,6 +19,7 @@ defmodule Minga.Shell.Board.Input do
 
   alias Minga.Editor.State, as: EditorState
   alias Minga.Shell.Board
+  alias Minga.Shell.Board.Card
   alias Minga.Shell.Board.State, as: BoardState
 
   # ── Key constants ──────────────────────────────────────────────────────
@@ -170,14 +171,81 @@ defmodule Minga.Shell.Board.Input do
   defp create_new_card(state) do
     board = state.shell_state
     count = BoardState.card_count(board)
-    {board, card} = BoardState.create_card(board, task: "Agent #{count}", status: :idle)
+    model = resolve_model()
+
+    {board, card} =
+      BoardState.create_card(board, task: "Agent #{count}", model: model, status: :working)
+
     board = BoardState.focus_card(board, card.id)
 
-    # Snapshot current workspace onto the card and zoom in
+    # Start an agent session and attach it to the card
+    {board, state} = start_and_attach_session(board, card.id, model, state)
+
+    # Snapshot current workspace and zoom into the card
     workspace_snapshot = Map.from_struct(state.workspace)
     board = BoardState.zoom_into(board, card.id, workspace_snapshot)
 
     %{state | shell_state: board}
+  end
+
+  @spec start_and_attach_session(BoardState.t(), pos_integer(), String.t(), EditorState.t()) ::
+          {BoardState.t(), EditorState.t()}
+  defp start_and_attach_session(board, card_id, model, state) do
+    opts = [
+      provider_opts: [
+        provider: resolve_provider(),
+        model: model
+      ]
+    ]
+
+    case DynamicSupervisor.start_child(Minga.Agent.Supervisor, {Minga.Agent.Session, opts}) do
+      {:ok, pid} ->
+        board = BoardState.update_card(board, card_id, &Card.attach_session(&1, pid))
+
+        # Monitor session for :DOWN
+        ref = Process.monitor(pid)
+        monitors = Map.put(state.buffer_monitors, pid, ref)
+        state = %{state | buffer_monitors: monitors}
+
+        # Subscribe editor to agent events
+        Minga.Agent.Session.subscribe(pid)
+
+        # Store session on agent state so events route correctly
+        state =
+          Minga.Editor.State.AgentAccess.update_agent(state, fn a ->
+            Minga.Editor.State.Agent.set_session(a, pid)
+          end)
+
+        Minga.Log.info(:agent, "Board: started agent session for card #{card_id} (#{model})")
+        {board, state}
+
+      {:error, reason} ->
+        Minga.Log.error(:agent, "Board: failed to start agent: #{inspect(reason)}")
+        board = BoardState.update_card(board, card_id, &Card.set_status(&1, :errored))
+        {board, state}
+    end
+  catch
+    :exit, reason ->
+      Minga.Log.error(:agent, "Board: agent supervisor not available: #{inspect(reason)}")
+      board = BoardState.update_card(board, card_id, &Card.set_status(&1, :errored))
+      {board, state}
+  end
+
+  @spec resolve_model() :: String.t()
+  defp resolve_model do
+    case Minga.Config.Options.get(:agent_model) do
+      nil -> "claude-sonnet-4-20250514"
+      model -> to_string(model)
+    end
+  catch
+    :exit, _ -> "claude-sonnet-4-20250514"
+  end
+
+  @spec resolve_provider() :: atom()
+  defp resolve_provider do
+    Minga.Config.Options.get(:agent_provider) || :auto
+  catch
+    :exit, _ -> :auto
   end
 
   # ── Helpers ────────────────────────────────────────────────────────────
