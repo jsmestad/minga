@@ -84,9 +84,13 @@ defmodule Minga.Shell.Board do
   @spec render(term()) :: term()
   def render(editor_state) do
     if BoardState.grid_view?(editor_state.shell_state) do
-      # TODO: Board grid rendering
-      # For now, render the dashboard (empty buffer state)
-      Minga.Editor.Renderer.render_dashboard(editor_state)
+      # TODO: Board grid rendering with card rectangles.
+      # For now, fall through to the buffer renderer if a buffer is active,
+      # or dashboard if not. The Board-specific TUI renderer will replace this.
+      case editor_state.workspace.buffers.active do
+        nil -> Minga.Editor.Renderer.render_dashboard(editor_state)
+        _pid -> Minga.Editor.Renderer.render_buffer(editor_state)
+      end
     else
       # Zoomed: render the active card's workspace
       Minga.Editor.Renderer.render_buffer(editor_state)
