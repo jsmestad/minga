@@ -51,9 +51,10 @@ defmodule Minga.Shell.Board.Renderer do
 
     header_draws = render_header(board, cols, theme)
 
+    visible_cards = State.filtered_cards(board)
+
     card_draws =
-      board
-      |> State.sorted_cards()
+      visible_cards
       |> Enum.flat_map(fn card ->
         case Map.get(layout.card_rects, card.id) do
           nil -> []
@@ -62,15 +63,26 @@ defmodule Minga.Shell.Board.Renderer do
       end)
 
     empty_draws =
-      if State.card_count(board) == 0 do
-        render_empty_prompt(cols, rows, theme)
+      if visible_cards == [] do
+        if board.filter_mode do
+          render_no_matches(cols, rows, board.filter_text, theme)
+        else
+          render_empty_prompt(cols, rows, theme)
+        end
+      else
+        []
+      end
+
+    filter_draws =
+      if board.filter_mode do
+        render_filter_bar(cols, rows, board.filter_text, theme)
       else
         []
       end
 
     footer_draws = render_footer(cols, rows, board, theme)
 
-    bg_draws ++ header_draws ++ card_draws ++ empty_draws ++ footer_draws
+    bg_draws ++ header_draws ++ card_draws ++ empty_draws ++ filter_draws ++ footer_draws
   end
 
   # ── Header ─────────────────────────────────────────────────────────────
@@ -212,8 +224,10 @@ defmodule Minga.Shell.Board.Renderer do
       {"↑↓←→", "navigate"},
       {"Enter", "zoom in"},
       {"n", "new agent"},
-      {"d", "delete card"},
-      {"q", "back to editor"}
+      {"/", "search"},
+      {"1-9", "jump"},
+      {"d", "delete"},
+      {"q", "back"}
     ]
 
     # Render as: ↑↓←→ navigate  Enter zoom in  n new agent  q back
@@ -243,6 +257,41 @@ defmodule Minga.Shell.Board.Renderer do
       end
 
     [left_draw | hint_draws]
+  end
+
+  # ── Filter bar ──────────────────────────────────────────────────────────
+
+  @spec render_filter_bar(pos_integer(), pos_integer(), String.t(), Minga.UI.Theme.t()) ::
+          [DisplayList.draw()]
+  defp render_filter_bar(cols, rows, filter_text, theme) do
+    bar_face = Face.new(fg: theme.editor.fg, bg: theme.editor.bg, bold: true)
+    text_face = Face.new(fg: 0x61AFEF, bg: theme.editor.bg)
+
+    prompt = " / "
+    cursor = "▏"
+    line = prompt <> filter_text <> cursor
+
+    # Draw on the row just above the footer
+    bar_row = max(rows - 3, 1)
+
+    [
+      DisplayList.draw(bar_row, 0, prompt, bar_face),
+      DisplayList.draw(bar_row, String.length(prompt), filter_text <> cursor, text_face),
+      DisplayList.draw(bar_row, String.length(line), String.duplicate(" ", max(cols - String.length(line), 0)), bar_face)
+    ]
+  end
+
+  @spec render_no_matches(pos_integer(), pos_integer(), String.t(), Minga.UI.Theme.t()) ::
+          [DisplayList.draw()]
+  defp render_no_matches(cols, rows, filter_text, theme) do
+    face = Face.new(fg: 0x5C6370, bg: theme.editor.bg)
+
+    center_row = div(rows, 2)
+
+    [
+      centered_draw(center_row, cols, "No cards matching \"#{filter_text}\"", face),
+      centered_draw(center_row + 1, cols, "Press Escape to clear", face)
+    ]
   end
 
   # ── Empty prompt ───────────────────────────────────────────────────────

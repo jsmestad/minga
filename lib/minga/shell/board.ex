@@ -29,16 +29,29 @@ defmodule Minga.Shell.Board do
   @impl true
   @spec init(keyword()) :: Minga.Shell.shell_state()
   def init(opts \\ []) do
-    state = BoardState.new()
+    # Try to restore persisted board state from disk (skip in test env)
+    skip_persistence = Keyword.get(opts, :skip_persistence, false)
 
-    # Create the "You" card (manual editing, no agent session)
-    {state, _you_card} = BoardState.create_card(state, task: "You", status: :idle, kind: :you)
+    case if(skip_persistence, do: nil, else: Minga.Shell.Board.Persistence.load()) do
+      %BoardState{} = restored ->
+        # Ensure a "You" card exists (may have been removed in a bug)
+        if Enum.any?(restored.cards, fn {_id, c} -> c.kind == :you end) do
+          restored
+        else
+          {restored, _you} = BoardState.create_card(restored, task: "You", status: :idle, kind: :you)
+          restored
+        end
 
-    # If initial cards were passed (e.g., restored from session), add them
-    Enum.reduce(Keyword.get(opts, :cards, []), state, fn card_attrs, acc ->
-      {acc, _card} = BoardState.create_card(acc, card_attrs)
-      acc
-    end)
+      nil ->
+        state = BoardState.new()
+        {state, _you_card} = BoardState.create_card(state, task: "You", status: :idle, kind: :you)
+
+        # If initial cards were passed (e.g., tests), add them
+        Enum.reduce(Keyword.get(opts, :cards, []), state, fn card_attrs, acc ->
+          {acc, _card} = BoardState.create_card(acc, card_attrs)
+          acc
+        end)
+    end
   end
 
   @impl true

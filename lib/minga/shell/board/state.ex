@@ -25,6 +25,8 @@ defmodule Minga.Shell.Board.State do
           cards: %{Card.id() => Card.t()},
           focused_card: Card.id() | nil,
           zoomed_into: Card.id() | nil,
+          filter_mode: boolean(),
+          filter_text: String.t(),
           next_id: pos_integer(),
           # Compatibility fields: EditorState accessors read these from
           # shell_state during render/command dispatch. Board doesn't use
@@ -54,6 +56,8 @@ defmodule Minga.Shell.Board.State do
   defstruct cards: %{},
             focused_card: nil,
             zoomed_into: nil,
+            filter_mode: false,
+            filter_text: "",
             next_id: 1,
             # Compatibility fields (see type doc above)
             whichkey: %Minga.Editor.State.WhichKey{},
@@ -208,6 +212,23 @@ defmodule Minga.Shell.Board.State do
   @spec sorted_cards(t()) :: [Card.t()]
   def sorted_cards(%__MODULE__{cards: cards}) do
     cards |> Map.values() |> Enum.sort_by(& &1.id)
+  end
+
+  @doc "Returns cards filtered by the current filter text, sorted by ID."
+  @spec filtered_cards(t()) :: [Card.t()]
+  def filtered_cards(%__MODULE__{filter_mode: false} = state), do: sorted_cards(state)
+
+  def filtered_cards(%__MODULE__{filter_text: ""} = state), do: sorted_cards(state)
+
+  def filtered_cards(%__MODULE__{filter_text: filter} = state) do
+    needle = String.downcase(filter)
+
+    state
+    |> sorted_cards()
+    |> Enum.filter(fn card ->
+      String.downcase(card.task) |> String.contains?(needle) or
+        (card.model && String.downcase(card.model) |> String.contains?(needle))
+    end)
   end
 
   @doc "Returns the number of cards on the board."

@@ -54,6 +54,15 @@ defmodule Minga.Shell.Board.Input do
   @spec handle_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           Minga.Input.Handler.result()
 
+  # Filter mode: route keys to filter input
+  def handle_key(
+        %{shell: Board, shell_state: %BoardState{zoomed_into: nil, filter_mode: true}} = state,
+        cp,
+        mods
+      ) do
+    dispatch_filter_key(state, cp, mods)
+  end
+
   # Only active when Board shell is showing the grid
   def handle_key(%{shell: Board, shell_state: %BoardState{zoomed_into: nil}} = state, cp, mods) do
     dispatch_grid_key(state, cp, mods)
@@ -98,7 +107,27 @@ defmodule Minga.Shell.Board.Input do
 
   # n: dispatch a new agent
   defp dispatch_grid_key(state, @key_n, _mods) do
-    {:handled, create_new_card(state)}
+    state = create_new_card(state)
+    persist_board(state)
+    {:handled, state}
+  end
+
+  # 1-9: jump to card by position
+  defp dispatch_grid_key(state, cp, 0) when cp >= ?1 and cp <= ?9 do
+    board = state.shell_state
+    index = cp - ?1
+    cards = BoardState.sorted_cards(board)
+
+    case Enum.at(cards, index) do
+      nil -> {:handled, state}
+      card -> {:handled, %{state | shell_state: BoardState.focus_card(board, card.id)}}
+    end
+  end
+
+  # /: open search filter
+  defp dispatch_grid_key(state, ?/, 0) do
+    board = state.shell_state
+    {:handled, %{state | shell_state: %{board | filter_mode: true, filter_text: ""}}}
   end
 
   # d / x: delete the focused card (can't delete "You" card)
@@ -117,7 +146,9 @@ defmodule Minga.Shell.Board.Input do
       end
 
       new_board = BoardState.remove_card(board, card.id)
-      {:handled, %{state | shell_state: new_board}}
+      state = %{state | shell_state: new_board}
+      persist_board(state)
+      {:handled, state}
     else
       {:handled, state}
     end
@@ -152,6 +183,50 @@ defmodule Minga.Shell.Board.Input do
   defp dispatch_grid_key(state, _cp, _mods) do
     {:handled, state}
   end
+
+  # ── Filter input ────────────────────────────────────────────────────────
+
+  @backspace 127
+
+  @spec dispatch_filter_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
+          Minga.Input.Handler.result()
+
+  # Escape: cancel filter
+  defp dispatch_filter_key(state, @key_escape, 0) do
+    board = %{state.shell_state | filter_mode: false, filter_text: ""}
+    {:handled, %{state | shell_state: board}}
+  end
+
+  # Enter: select the first matching card and exit filter
+  defp dispatch_filter_key(state, @key_enter, _mods) do
+    board = state.shell_state
+    matches = BoardState.filtered_cards(board)
+
+    board =
+      case matches do
+        [first | _] -> BoardState.focus_card(%{board | filter_mode: false, filter_text: ""}, first.id)
+        [] -> %{board | filter_mode: false, filter_text: ""}
+      end
+
+    {:handled, %{state | shell_state: board}}
+  end
+
+  # Backspace: delete last character
+  defp dispatch_filter_key(state, @backspace, _mods) do
+    board = state.shell_state
+    new_text = String.slice(board.filter_text, 0..-2//1)
+    {:handled, %{state | shell_state: %{board | filter_text: new_text}}}
+  end
+
+  # Printable characters: append to filter
+  defp dispatch_filter_key(state, cp, _mods) when cp >= 32 do
+    board = state.shell_state
+    new_text = board.filter_text <> <<cp::utf8>>
+    {:handled, %{state | shell_state: %{board | filter_text: new_text}}}
+  end
+
+  # Everything else: passthrough for Ctrl combos
+  defp dispatch_filter_key(state, _cp, _mods), do: {:passthrough, state}
 
   # ── Actions ────────────────────────────────────────────────────────────
 
@@ -283,4 +358,13 @@ defmodule Minga.Shell.Board.Input do
   end
 
   defp grid_cols(_state), do: 3
+
+  @spec persist_board(EditorState.t()) :: :ok
+  defp persist_board(%{shell_state: %BoardState{} = board}) do
+    # Fire and forget: persistence errors are logged but don't affect UX
+    Task.start(fn -> Minga.Shell.Board.Persistence.save(board) end)
+    :ok
+  end
+
+  defp persist_board(_state), do: :ok
 end

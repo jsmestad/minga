@@ -20,10 +20,19 @@ final class BoardState {
     /// The cards on the board, in display order.
     var cards: [BoardCard] = []
 
+    /// Whether the search filter is active.
+    var filterMode: Bool = false
+
+    /// Current search filter text.
+    var filterText: String = ""
+
     /// Updates the board state from a decoded protocol command.
-    func update(visible: Bool, focusedCardId: UInt32, cards: [BoardCard]) {
+    func update(visible: Bool, focusedCardId: UInt32, cards: [BoardCard],
+                filterMode: Bool, filterText: String) {
         self.visible = visible
         self.focusedCardId = focusedCardId
         self.cards = cards
+        self.filterMode = filterMode
+        self.filterText = filterText
     }
 }

@@ -52,7 +52,7 @@ enum RenderCommand: Sendable {
     case guiSplitSeparators(borderColor: UInt32, verticals: [GUIVerticalSeparator], horizontals: [GUIHorizontalSeparator])
     case guiGitStatus(repoState: UInt8, ahead: UInt16, behind: UInt16, branchName: String, entries: [GUIGitStatusEntry])
     case guiAgentGroups(activeGroupId: UInt16, agentGroups: [GUIAgentGroupEntry])
-    case guiBoard(visible: Bool, focusedCardId: UInt32, cards: [BoardCard])
+    case guiBoard(visible: Bool, focusedCardId: UInt32, cards: [BoardCard], filterMode: Bool, filterText: String)
 }
 
 // MARK: - Minibuffer data types
@@ -1897,14 +1897,19 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                 gPos - offset)
 
     case OP_GUI_BOARD:
-        // visible(1) + focused_card_id(4) + card_count(2)
-        guard data.count >= rest + 7 else { throw ProtocolDecodeError.malformed }
+        // visible(1) + focused_card_id(4) + card_count(2) + filter_mode(1) + filter_len(2) + filter
+        guard data.count >= rest + 10 else { throw ProtocolDecodeError.malformed }
         let boardVisible = data[rest] != 0
         let focusedId = readU32(data, rest + 1)
         let cardCount = Int(readU16(data, rest + 5))
+        let boardFilterMode = data[rest + 7] != 0
+        let filterLen = Int(readU16(data, rest + 8))
+        guard data.count >= rest + 10 + filterLen else { throw ProtocolDecodeError.malformed }
+        let filterData = data[(rest + 10)..<(rest + 10 + filterLen)]
+        let boardFilterText = String(data: filterData, encoding: .utf8) ?? ""
         var boardCards: [BoardCard] = []
         boardCards.reserveCapacity(cardCount)
-        var bPos = rest + 7
+        var bPos = rest + 10 + filterLen
         for _ in 0..<cardCount {
             // card_id(4) + status(1) + flags(1) + task_len(2) + task + model_len(1) + model + elapsed(4) + file_count(1) + files
             guard data.count >= bPos + 8 else { throw ProtocolDecodeError.malformed }
@@ -1951,7 +1956,8 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             ))
             bPos = cPos
         }
-        return (.guiBoard(visible: boardVisible, focusedCardId: focusedId, cards: boardCards),
+        return (.guiBoard(visible: boardVisible, focusedCardId: focusedId, cards: boardCards,
+                         filterMode: boardFilterMode, filterText: boardFilterText),
                 bPos - offset)
 
     case OP_CLIPBOARD_WRITE:

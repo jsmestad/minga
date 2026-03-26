@@ -20,21 +20,84 @@ struct BoardView: View {
     private let columns = [GridItem(.adaptive(minimum: 220, maximum: 380), spacing: 16)]
 
     var body: some View {
-        ScrollView {
-            if state.cards.isEmpty {
-                emptyState
-            } else {
-                cardGrid
+        VStack(spacing: 0) {
+            if state.filterMode {
+                searchBar
+            }
+
+            ScrollView {
+                if filteredCards.isEmpty {
+                    if state.filterMode {
+                        noMatchesState
+                    } else {
+                        emptyState
+                    }
+                } else {
+                    cardGrid
+                }
             }
         }
         .background(theme.editorBg)
+    }
+
+    /// Cards filtered by search text.
+    private var filteredCards: [BoardCard] {
+        if state.filterText.isEmpty {
+            return state.cards
+        }
+        let needle = state.filterText.lowercased()
+        return state.cards.filter { card in
+            card.task.lowercased().contains(needle) ||
+            card.model.lowercased().contains(needle)
+        }
+    }
+
+    // MARK: - Search Bar
+
+    private var searchBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            Text(state.filterText)
+                .font(.system(size: 14))
+                .foregroundStyle(theme.editorFg)
+            Text("▏")
+                .font(.system(size: 14))
+                .foregroundStyle(Color(red: 0.38, green: 0.69, blue: 0.93))
+            Spacer()
+            Text("ESC to clear")
+                .font(.system(size: 11))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(Color.blend(theme.editorBg, with: .white, amount: 0.05))
+    }
+
+    // MARK: - No Matches
+
+    private var noMatchesState: some View {
+        VStack(spacing: 12) {
+            Spacer()
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 36))
+                .foregroundStyle(.tertiary)
+            Text("No cards matching \"\(state.filterText)\"")
+                .font(.system(size: 14))
+                .foregroundStyle(.secondary)
+            Text("Press Escape to clear")
+                .font(.system(size: 12))
+                .foregroundStyle(.tertiary)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // MARK: - Card Grid
 
     private var cardGrid: some View {
         LazyVGrid(columns: columns, spacing: CGFloat(16 / phi)) {
-            ForEach(state.cards) { card in
+            ForEach(filteredCards) { card in
                 BoardCardView(card: card, theme: theme)
                     .onTapGesture {
                         encoder?.sendBoardSelectCard(id: card.id)

@@ -647,9 +647,13 @@ defmodule Minga.Frontend.Protocol.GUI do
         encode_board_card(card, board.focused_card)
       end)
 
+    filter_mode = if board.filter_mode, do: 1, else: 0
+    filter_bytes = :erlang.iolist_to_binary([board.filter_text || ""])
+
     IO.iodata_to_binary([
       @op_gui_board,
-      <<visible::8, focused_id::32, length(cards)::16>>
+      <<visible::8, focused_id::32, length(cards)::16,
+        filter_mode::8, byte_size(filter_bytes)::16, filter_bytes::binary>>
       | card_entries
     ])
   end
