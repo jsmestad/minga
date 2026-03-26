@@ -53,10 +53,14 @@ defmodule Minga.Shell.Board.Input do
 
   # Only active when Board shell is showing the grid
   def handle_key(%{shell: Board, shell_state: %BoardState{zoomed_into: nil}} = state, cp, mods) do
+    Minga.Log.debug(:editor, "[Board.Input] grid key: cp=#{cp} mods=#{mods}")
     dispatch_grid_key(state, cp, mods)
   end
 
-  def handle_key(state, _cp, _mods), do: {:passthrough, state}
+  def handle_key(state, _cp, _mods) do
+    Minga.Log.debug(:editor, "[Board.Input] passthrough: shell=#{inspect(state.shell)} zoomed=#{inspect(state.shell_state[:zoomed_into] || "n/a")}")
+    {:passthrough, state}
+  end
 
   # ── Grid key dispatch ──────────────────────────────────────────────────
 

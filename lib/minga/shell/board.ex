@@ -158,23 +158,32 @@ defmodule Minga.Shell.Board do
 
   @spec render_board_grid(term()) :: term()
   defp render_board_grid(editor_state) do
-    vp = editor_state.workspace.viewport
-    board = editor_state.shell_state
+    gui? = Minga.Frontend.gui?(editor_state.capabilities)
 
-    splash_draws =
-      Minga.Shell.Board.Renderer.render(board, vp.cols, vp.rows, editor_state.theme)
+    if gui? do
+      # GUI: send the gui_board opcode so Swift shows BoardView.
+      # Also send chrome sync (status bar, theme, etc.).
+      Minga.Frontend.Emit.GUI.sync_swiftui_chrome(editor_state)
+    else
+      # TUI: render card grid as cell grid commands
+      vp = editor_state.workspace.viewport
+      board = editor_state.shell_state
 
-    # Park cursor at top-left (invisible, no active editing)
-    cursor = Cursor.new(0, 0, :block)
+      splash_draws =
+        Minga.Shell.Board.Renderer.render(board, vp.cols, vp.rows, editor_state.theme)
 
-    frame = %Frame{
-      cursor: cursor,
-      splash: splash_draws,
-      overlays: []
-    }
+      cursor = Cursor.new(0, 0, :block)
 
-    commands = DisplayList.to_commands(frame)
-    Minga.Frontend.send_commands(editor_state.port_manager, commands)
+      frame = %Frame{
+        cursor: cursor,
+        splash: splash_draws,
+        overlays: []
+      }
+
+      commands = DisplayList.to_commands(frame)
+      Minga.Frontend.send_commands(editor_state.port_manager, commands)
+    end
+
     editor_state
   end
 
