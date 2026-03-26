@@ -96,14 +96,17 @@ defmodule Minga.Shell.Board.Renderer do
   defp render_card(card, {row, col, width, height}, focused, theme) do
     border_face =
       if focused do
-        Face.new(fg: theme.editor.cursorline_bg || 0x61AFEF, bg: theme.editor.bg)
+        Face.new(fg: 0x61AFEF, bg: theme.editor.bg, bold: true)
       else
         Face.new(fg: 0x5C6370, bg: theme.editor.bg)
       end
 
-    content_face = Face.new(fg: theme.editor.fg, bg: theme.editor.bg)
-    dim_face = Face.new(fg: 0x5C6370, bg: theme.editor.bg)
-    status_face = status_face(card.status, theme)
+    # Focused cards get a slightly lighter background for contrast
+    card_bg = if focused, do: 0x323842, else: theme.editor.bg
+
+    content_face = Face.new(fg: theme.editor.fg, bg: card_bg)
+    dim_face = Face.new(fg: 0x5C6370, bg: card_bg)
+    status_face = status_face(card.status, card_bg)
 
     # inner_width: card width minus border chars (│ + space on each side = 4 cells)
     inner_width = max(width - 4, 1)
@@ -144,11 +147,13 @@ defmodule Minga.Shell.Board.Renderer do
         draws
       end
 
-    # Row 3+: blank separator rows
+    # Row 3+: blank separator rows (use card bg for fill)
+    fill_face = Face.new(fg: 0x5C6370, bg: card_bg)
+
     draws =
       Enum.reduce((content_start + 2)..max(content_end - 1, content_start + 1)//1, draws, fn r, acc ->
         blank_line = String.duplicate(" ", inner_width)
-        [DisplayList.draw(r, col, @v <> " " <> blank_line <> " " <> @v, content_face) | acc]
+        [DisplayList.draw(r, col, @v <> " " <> blank_line <> " " <> @v, fill_face) | acc]
       end)
 
     # Last content row: Model + file count (footer)
@@ -253,14 +258,14 @@ defmodule Minga.Shell.Board.Renderer do
 
   # ── Helpers ────────────────────────────────────────────────────────────
 
-  @spec status_face(Card.status(), Minga.UI.Theme.t()) :: Face.t()
-  defp status_face(:idle, theme), do: Face.new(fg: 0x5C6370, bg: theme.editor.bg)
-  defp status_face(:working, theme), do: Face.new(fg: 0x98C379, bg: theme.editor.bg)
-  defp status_face(:iterating, theme), do: Face.new(fg: 0x98C379, bg: theme.editor.bg)
-  defp status_face(:needs_you, theme), do: Face.new(fg: 0xE5C07B, bg: theme.editor.bg)
-  defp status_face(:done, theme), do: Face.new(fg: 0x61AFEF, bg: theme.editor.bg)
-  defp status_face(:errored, theme), do: Face.new(fg: 0xE06C75, bg: theme.editor.bg)
-  defp status_face(_, theme), do: Face.new(fg: 0x5C6370, bg: theme.editor.bg)
+  @spec status_face(Card.status(), non_neg_integer()) :: Face.t()
+  defp status_face(:idle, bg), do: Face.new(fg: 0x5C6370, bg: bg)
+  defp status_face(:working, bg), do: Face.new(fg: 0x98C379, bg: bg)
+  defp status_face(:iterating, bg), do: Face.new(fg: 0x98C379, bg: bg)
+  defp status_face(:needs_you, bg), do: Face.new(fg: 0xE5C07B, bg: bg)
+  defp status_face(:done, bg), do: Face.new(fg: 0x61AFEF, bg: bg)
+  defp status_face(:errored, bg), do: Face.new(fg: 0xE06C75, bg: bg)
+  defp status_face(_, bg), do: Face.new(fg: 0x5C6370, bg: bg)
 
   @spec status_label(Card.status()) :: String.t()
   defp status_label(:idle), do: "Idle"

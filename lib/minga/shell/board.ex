@@ -73,14 +73,67 @@ defmodule Minga.Shell.Board do
   @spec build_chrome(term(), Minga.Editor.Layout.t(), map(), term()) ::
           Minga.Editor.RenderPipeline.Chrome.t()
   def build_chrome(editor_state, layout, scrolls, cursor_info) do
+    chrome = Minga.Editor.RenderPipeline.Chrome.build_chrome(editor_state, layout, scrolls, cursor_info)
+
     if BoardState.grid_view?(editor_state.shell_state) do
-      # TODO: Board grid chrome (card rectangles)
-      Minga.Editor.RenderPipeline.Chrome.build_chrome(editor_state, layout, scrolls, cursor_info)
+      chrome
     else
-      # Zoomed: use Traditional chrome
-      Minga.Editor.RenderPipeline.Chrome.build_chrome(editor_state, layout, scrolls, cursor_info)
+      # Zoomed: inject context bar into the tab_bar chrome slot
+      inject_zoom_context_bar(chrome, editor_state)
     end
   end
+
+  @spec inject_zoom_context_bar(Minga.Editor.RenderPipeline.Chrome.t(), term()) ::
+          Minga.Editor.RenderPipeline.Chrome.t()
+  defp inject_zoom_context_bar(chrome, editor_state) do
+    board = editor_state.shell_state
+    card = BoardState.zoomed(board)
+    cols = editor_state.workspace.viewport.cols
+    theme = editor_state.theme
+
+    if card do
+      icon = zoom_status_icon(card.status)
+      task = card.task || "Untitled"
+      model = if card.model, do: " · #{card.model}", else: ""
+      hint = "ESC back to Board"
+
+      bg = theme.editor.bg
+      bar_face = Minga.UI.Face.new(fg: theme.editor.fg, bg: bg, bold: true)
+      hint_face = Minga.UI.Face.new(fg: 0x5C6370, bg: bg)
+      status_face = zoom_status_face(card.status, theme)
+
+      left = " #{icon} #{task}#{model}"
+      right = " #{hint} "
+      gap = max(cols - String.length(left) - String.length(right), 0)
+
+      context_draws = [
+        DisplayList.draw(0, 0, left, bar_face),
+        DisplayList.draw(0, String.length(left), String.duplicate(" ", gap), status_face),
+        DisplayList.draw(0, String.length(left) + gap, right, hint_face)
+      ]
+
+      # Replace the tab_bar draws with our context bar
+      %{chrome | tab_bar: context_draws}
+    else
+      chrome
+    end
+  end
+
+  @spec zoom_status_icon(Minga.Shell.Board.Card.status()) :: String.t()
+  defp zoom_status_icon(:idle), do: "○"
+  defp zoom_status_icon(:working), do: "●"
+  defp zoom_status_icon(:iterating), do: "◉"
+  defp zoom_status_icon(:needs_you), do: "◆"
+  defp zoom_status_icon(:done), do: "✓"
+  defp zoom_status_icon(:errored), do: "✗"
+  defp zoom_status_icon(_), do: "○"
+
+  @spec zoom_status_face(Minga.Shell.Board.Card.status(), Minga.UI.Theme.t()) :: Minga.UI.Face.t()
+  defp zoom_status_face(:working, theme), do: Minga.UI.Face.new(fg: 0x98C379, bg: theme.editor.bg)
+  defp zoom_status_face(:needs_you, theme), do: Minga.UI.Face.new(fg: 0xE5C07B, bg: theme.editor.bg)
+  defp zoom_status_face(:done, theme), do: Minga.UI.Face.new(fg: 0x61AFEF, bg: theme.editor.bg)
+  defp zoom_status_face(:errored, theme), do: Minga.UI.Face.new(fg: 0xE06C75, bg: theme.editor.bg)
+  defp zoom_status_face(_, theme), do: Minga.UI.Face.new(fg: 0x5C6370, bg: theme.editor.bg)
 
   @impl true
   @spec render(term()) :: term()
