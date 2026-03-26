@@ -6,7 +6,7 @@ defmodule Minga.Editor.Commands.EditingReindentTest do
   operator-pending mode and return to normal mode. Content-level indent
   correctness is tested in `test/minga/editor/indent_test.exs`.
   """
-  use ExUnit.Case, async: true
+  use Minga.Test.EditingModelCase, async: true
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor

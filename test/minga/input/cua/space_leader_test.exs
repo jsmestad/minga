@@ -102,7 +102,6 @@ defmodule Minga.Input.CUA.SpaceLeaderTest do
 
   describe "keystroke replay when inactive" do
     test "chord replays withheld space and dispatches key in vim insert mode" do
-      Options.set(:editing_model, :vim)
       ctx = start_editor("", editing_model: :vim)
 
       # Enter insert mode
@@ -122,7 +121,6 @@ defmodule Minga.Input.CUA.SpaceLeaderTest do
     end
 
     test "retract dispatches key normally in vim insert mode" do
-      Options.set(:editing_model, :vim)
       ctx = start_editor("", editing_model: :vim)
 
       # Enter insert mode
@@ -142,7 +140,6 @@ defmodule Minga.Input.CUA.SpaceLeaderTest do
     end
 
     test "chord replays space and key in CUA mode without :chord enabled" do
-      Options.set(:editing_model, :cua)
       Options.set(:space_leader, :off)
       ctx = start_editor("", editing_model: :cua)
 
