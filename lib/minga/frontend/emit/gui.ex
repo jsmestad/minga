@@ -137,7 +137,8 @@ defmodule Minga.Frontend.Emit.GUI do
         build_gui_minibuffer_cmd(state, minibuffer_data),
         build_gui_hover_popup_cmd(state),
         build_gui_signature_help_cmd(state),
-        build_gui_float_popup_cmd(state)
+        build_gui_float_popup_cmd(state),
+        build_gui_board_cmd(state)
       ]
       |> Enum.reject(&is_nil/1)
 
@@ -1049,6 +1050,36 @@ defmodule Minga.Frontend.Emit.GUI do
       {cmd, %{state | message_store: new_store}}
     else
       {nil, state}
+    end
+  end
+
+  # ── Board ──
+
+  @spec build_gui_board_cmd(state()) :: binary() | nil
+  defp build_gui_board_cmd(%{shell: Minga.Shell.Board, shell_state: board}) do
+    # Always send when Board is active so the GUI stays in sync.
+    # The fingerprint covers card count, focused card, zoom state, and
+    # card statuses so we skip encoding when nothing changed.
+    fp =
+      :erlang.phash2({
+        Minga.Shell.Board.State.card_count(board),
+        board.focused_card,
+        board.zoomed_into,
+        Enum.map(Minga.Shell.Board.State.sorted_cards(board), &{&1.id, &1.status})
+      })
+
+    if fp != Process.get(:last_gui_board_fp) do
+      Process.put(:last_gui_board_fp, fp)
+      ProtocolGUI.encode_gui_board(board)
+    end
+  end
+
+  # Board not active: send visible=false once to dismiss
+  defp build_gui_board_cmd(_state) do
+    if Process.get(:last_gui_board_fp) != :dismissed do
+      Process.put(:last_gui_board_fp, :dismissed)
+      # Encode a minimal board with visible=false
+      ProtocolGUI.encode_gui_board(%Minga.Shell.Board.State{})
     end
   end
 end
