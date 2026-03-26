@@ -44,16 +44,28 @@ defmodule Minga.Shell.Board.ZoomOut do
     board = state.shell_state
     card_id = board.zoomed_into
 
-    # Snapshot the live workspace onto the card before leaving
-    workspace_snapshot = Map.from_struct(state.workspace)
+    # The card currently holds the "board grid" workspace snapshot
+    # (stored by zoom_into). Swap: put the live workspace on the card,
+    # get the grid workspace back.
+    card = Map.get(board.cards, card_id)
+    grid_workspace = if card, do: card.workspace, else: nil
 
-    board = BoardState.update_card(board, card_id, fn card ->
-      Card.store_workspace(card, workspace_snapshot)
+    # Store the live (zoomed) workspace onto the card for next zoom-in
+    live_workspace = Map.from_struct(state.workspace)
+
+    board = BoardState.update_card(board, card_id, fn c ->
+      Card.store_workspace(c, live_workspace)
     end)
 
     # Clear zoom state
     board = %{board | zoomed_into: nil}
+    state = %{state | shell_state: board}
 
-    %{state | shell_state: board}
+    # Restore the grid workspace if we have one
+    if grid_workspace && is_map(grid_workspace) && map_size(grid_workspace) > 0 do
+      EditorState.restore_tab_context(state, grid_workspace)
+    else
+      state
+    end
   end
 end

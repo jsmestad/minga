@@ -98,13 +98,21 @@ defmodule Minga.Shell.Board.Input do
     {:handled, create_new_card(state)}
   end
 
-  # Escape / q (unmodified): toggle back to Shell.Traditional
+  # Escape / q (unmodified): toggle back to Shell.Traditional, stash Board state
   defp dispatch_grid_key(state, cp, 0) when cp in [@key_escape, @key_q] do
+    board_state = state.shell_state
+
     traditional_state = %Minga.Shell.Traditional.State{
-      suppress_tool_prompts: state.shell_state.suppress_tool_prompts
+      suppress_tool_prompts: board_state.suppress_tool_prompts
     }
 
-    new_state = %{state | shell: Minga.Shell.Traditional, shell_state: traditional_state, layout: nil}
+    new_state = %{state |
+      shell: Minga.Shell.Traditional,
+      shell_state: traditional_state,
+      layout: nil,
+      stashed_board_state: board_state
+    }
+
     {:handled, new_state}
   end
 
@@ -137,21 +145,21 @@ defmodule Minga.Shell.Board.Input do
     card = BoardState.focused(board)
 
     if card do
-      # Snapshot the current (minimal) workspace state onto the board
-      # context, then restore the card's workspace as the live workspace
-      workspace_snapshot = Map.from_struct(state.workspace)
-
-      new_board = BoardState.zoom_into(board, card.id, workspace_snapshot)
-
+      # Store the current workspace as the "board grid" snapshot on
+      # the zoomed card. This gets restored when zooming back out.
+      current_workspace = Map.from_struct(state.workspace)
+      new_board = BoardState.zoom_into(board, card.id, current_workspace)
       state = %{state | shell_state: new_board}
 
-      # If the card has a stored workspace, restore it
+      # If the card has its own workspace (from a previous zoom), restore it.
+      # If not (new card, never zoomed before), keep the current workspace.
+      # The user sees whatever buffer was open; they can open files from here.
       case card.workspace do
-        nil ->
-          state
-
-        ws when is_map(ws) ->
+        ws when is_map(ws) and map_size(ws) > 0 ->
           EditorState.restore_tab_context(state, ws)
+
+        _ ->
+          state
       end
     else
       state
