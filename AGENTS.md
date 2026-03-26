@@ -400,16 +400,25 @@ mix zig.lint                      # zig fmt --check + zig build test (only if .z
 
 If any check fails, fix it before committing. No exceptions.
 
-**Run reviewer and intent-reviewer in parallel.** These are independent checks (code quality vs ticket intent). Always invoke them together using the `tasks` array:
+**Handling test failures (no escape hatches):**
+
+When a test fails, you have exactly two options:
+1. **Fix the code** so the test passes.
+2. **Fix the test** if it's genuinely wrong (outdated assertion, testing removed behavior).
+
+You do NOT have the option to:
+- Claim the failure is "flaky" and move on. If it's flaky, fix the flakiness.
+- Claim "not caused by my changes." If it fails on your branch, it's your problem. Prove it by running the test on `main` if you believe it's pre-existing.
+- Re-run and hope it passes. If it failed once, understand why before re-running.
+- Skip the test suite because "I only changed one file."
+
+**Before commit: one reviewer, one verdict.** The reviewer subagent is the single gate. It runs CI checks, reviews code quality, and verifies acceptance criteria. One call:
 
 ```
-subagent({ tasks: [
-  { agent: "reviewer", task: "Review the current git diff for code quality, CI parity, and cleanup. Run: git diff --cached" },
-  { agent: "intent-reviewer", task: "Compare the ticket intent against the implementation. Run: git diff main" }
-], agentScope: "both", confirmProjectAgents: false })
+subagent({ agent: "reviewer", task: "Review for commit. Ticket: #{N}. Run: git diff main", agentScope: "both", confirmProjectAgents: false })
 ```
 
-If either returns BLOCKED, fix the issues and re-run both (fresh, in parallel). The reviewer always starts from scratch to avoid confirmation bias on re-review.
+The reviewer runs `mix lint` and `mix test.llm` itself and blocks on any failure. It also checks each acceptance criterion against the diff. If it returns BLOCKED, fix the issues and re-run. The reviewer always starts from scratch to avoid confirmation bias on re-review.
 
 Example:
 
