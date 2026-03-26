@@ -176,6 +176,21 @@ defmodule Minga.Shell.Board.InputTest do
     end
   end
 
+  # ── Delete card ─────────────────────────────────────────────────────────
+
+  describe "d deletes focused card" do
+    test "removes the focused agent card" do
+      state = editor_with_board(3)
+      # Focus the second card (not the "You" card placeholder)
+      board = BoardState.focus_card(state.shell_state, 2)
+      state = %{state | shell_state: board}
+
+      initial_count = BoardState.card_count(state.shell_state)
+      {:handled, new_state} = BoardInput.handle_key(state, ?d, 0)
+      assert BoardState.card_count(new_state.shell_state) == initial_count - 1
+    end
+  end
+
   # ── Passthrough ────────────────────────────────────────────────────────
 
   describe "passthrough" do

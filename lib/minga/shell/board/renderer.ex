@@ -128,7 +128,7 @@ defmodule Minga.Shell.Board.Renderer do
     # Row 1: Status badge + elapsed time
     draws =
       if content_start <= content_end do
-        icon = Map.get(@status_icons, card.status, "○")
+        icon = if Card.you_card?(card), do: "◈", else: Map.get(@status_icons, card.status, "○")
         label = if Card.you_card?(card), do: "You", else: status_label(card.status)
         elapsed = format_elapsed(card.created_at)
 
@@ -160,7 +160,12 @@ defmodule Minga.Shell.Board.Renderer do
     draws =
       if content_end > content_start + 1 do
         model = card.model || ""
-        files = if card.recent_files != [], do: "#{length(card.recent_files)} files", else: ""
+
+        files =
+          case card.recent_files do
+            [] -> ""
+            names -> names |> Enum.take(2) |> Enum.join(", ")
+          end
 
         line = build_two_column_line(model, files, inner_width)
         [DisplayList.draw(content_end, col, @v <> " " <> line <> " " <> @v, dim_face) | draws]
@@ -207,6 +212,7 @@ defmodule Minga.Shell.Board.Renderer do
       {"↑↓←→", "navigate"},
       {"Enter", "zoom in"},
       {"n", "new agent"},
+      {"d", "delete card"},
       {"q", "back to editor"}
     ]
 

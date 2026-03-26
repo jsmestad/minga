@@ -35,6 +35,8 @@ defmodule Minga.Shell.Board.Input do
   @key_escape 27
   @key_q ?q
   @key_n ?n
+  @key_d ?d
+  @key_x ?x
 
   # Kitty keyboard protocol arrow keys
   @arrow_up 57_352
@@ -97,6 +99,28 @@ defmodule Minga.Shell.Board.Input do
   # n: dispatch a new agent
   defp dispatch_grid_key(state, @key_n, _mods) do
     {:handled, create_new_card(state)}
+  end
+
+  # d / x: delete the focused card (can't delete "You" card)
+  defp dispatch_grid_key(state, cp, 0) when cp in [@key_d, @key_x] do
+    board = state.shell_state
+    card = BoardState.focused(board)
+
+    if card && !Card.you_card?(card) do
+      # Kill the agent session if running
+      if card.session do
+        try do
+          Minga.Agent.Session.abort(card.session)
+        catch
+          :exit, _ -> :ok
+        end
+      end
+
+      new_board = BoardState.remove_card(board, card.id)
+      {:handled, %{state | shell_state: new_board}}
+    else
+      {:handled, state}
+    end
   end
 
   # Escape / q (unmodified): toggle back to Shell.Traditional, stash Board state

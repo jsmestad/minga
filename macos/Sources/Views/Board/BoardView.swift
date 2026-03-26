@@ -113,9 +113,11 @@ struct BoardCardView: View {
                 }
                 Spacer()
                 if !card.recentFiles.isEmpty {
-                    Text("\(card.recentFiles.count) files")
+                    Text(card.recentFiles.prefix(3).joined(separator: ", "))
                         .font(.system(size: 11))
                         .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                 }
             }
         }
@@ -154,21 +156,27 @@ struct BoardCardView: View {
 
     private var statusBadge: some View {
         HStack(spacing: 4) {
-            Circle()
-                .fill(statusColor)
-                .frame(width: 8, height: 8)
-                .opacity(isPulsing && card.status == .working ? 0.4 : 1.0)
-                .animation(
-                    card.status == .working
-                        ? .easeInOut(duration: 0.8).repeatForever(autoreverses: true)
-                        : .default,
-                    value: isPulsing
-                )
-                .onAppear { isPulsing = true }
+            if card.isYouCard {
+                Image(systemName: "person.crop.circle")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            } else {
+                Circle()
+                    .fill(statusColor)
+                    .frame(width: 8, height: 8)
+                    .opacity(isPulsing && card.status == .working ? 0.4 : 1.0)
+                    .animation(
+                        card.status == .working
+                            ? .easeInOut(duration: 0.8).repeatForever(autoreverses: true)
+                            : .default,
+                        value: isPulsing
+                    )
+                    .onAppear { isPulsing = true }
+            }
 
             Text(card.isYouCard ? "You" : card.status.label)
                 .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(card.isYouCard ? .primary : .secondary)
         }
     }
 

@@ -269,6 +269,9 @@ struct ContentView: View {
                     : .easeOut(duration: 0.25),
                 value: appState.gui.boardState.visible
             )
+            .onChange(of: appState.gui.boardState.visible) { _, visible in
+                appState.editorNSView?.setBoardVisible(visible)
+            }
 
             // Bottom panel (between editor and status bar)
             if appState.gui.bottomPanelState.visible {
