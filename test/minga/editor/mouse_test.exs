@@ -16,7 +16,8 @@ defmodule Minga.Editor.MouseTest do
         port_manager: nil,
         buffer: buffer,
         width: 40,
-        height: 10
+        height: 10,
+        editing_model: :vim
       )
 
     {editor, buffer}
@@ -29,7 +30,8 @@ defmodule Minga.Editor.MouseTest do
         port_manager: nil,
         buffer: nil,
         width: 40,
-        height: 10
+        height: 10,
+        editing_model: :vim
       )
 
     editor
@@ -58,7 +60,8 @@ defmodule Minga.Editor.MouseTest do
           port_manager: nil,
           buffer: buffer,
           width: 40,
-          height: 10
+          height: 10,
+          editing_model: :vim
         )
 
       {editor, buffer}
@@ -154,7 +157,8 @@ defmodule Minga.Editor.MouseTest do
           port_manager: nil,
           buffer: buffer,
           width: 40,
-          height: 10
+          height: 10,
+          editing_model: :vim
         )
 
       # Scroll down then click. Default scroll_lines=1, so 4 scrolls = viewport top at 4.
@@ -324,7 +328,8 @@ defmodule Minga.Editor.MouseTest do
           port_manager: nil,
           buffer: buf1,
           width: 80,
-          height: 10
+          height: 10,
+          editing_model: :vim
         )
 
       # Inject a second tab directly via state manipulation

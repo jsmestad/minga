@@ -42,7 +42,8 @@ defmodule Minga.Telemetry.IntegrationTest do
         port_manager: nil,
         buffer: buffer,
         width: 80,
-        height: 24
+        height: 24,
+        editing_model: :vim
       )
 
     on_exit(fn ->

@@ -42,7 +42,8 @@ defmodule Minga.Integration.AgentCursorTest do
         port_manager: port,
         buffer: file_buf,
         width: width,
-        height: height
+        height: height,
+        editing_model: :vim
       )
 
     {:ok, fake_session} = StubServer.start_link()

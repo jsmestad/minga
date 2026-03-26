@@ -91,7 +91,8 @@ defmodule Minga.Chaos.EditorFuzzerTest do
         port_manager: port,
         buffer: buffer,
         width: width,
-        height: height
+        height: height,
+        editing_model: :vim
       )
 
     # Allow the editor process to use our Mox stubs

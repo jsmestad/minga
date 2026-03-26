@@ -20,7 +20,8 @@ defmodule Minga.Editor.Commands.EditingReindentTest do
         port_manager: nil,
         buffer: buffer,
         width: 80,
-        height: 24
+        height: 24,
+        editing_model: :vim
       )
 
     {editor, buffer}

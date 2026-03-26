@@ -16,7 +16,8 @@ defmodule Minga.Editor.Commands.MarksTest do
         port_manager: nil,
         buffer: buffer,
         width: 40,
-        height: 10
+        height: 10,
+        editing_model: :vim
       )
 
     # Drain init-phase messages (timers, PubSub subscriptions) so they

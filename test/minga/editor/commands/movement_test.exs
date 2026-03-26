@@ -13,7 +13,8 @@ defmodule Minga.Editor.Commands.MovementTest do
         port_manager: nil,
         buffer: buffer,
         width: 40,
-        height: 10
+        height: 10,
+        editing_model: :vim
       )
 
     {editor, buffer}
@@ -164,7 +165,8 @@ defmodule Minga.Editor.Commands.MovementTest do
           port_manager: nil,
           buffer: buffer,
           width: 40,
-          height: 10
+          height: 10,
+          editing_model: :vim
         )
 
       {editor, buffer}

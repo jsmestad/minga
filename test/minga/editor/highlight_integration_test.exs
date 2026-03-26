@@ -285,7 +285,8 @@ defmodule Minga.Editor.HighlightIntegrationTest do
           port_manager: port,
           buffer: buffer,
           width: 80,
-          height: 24
+          height: 24,
+          editing_model: :vim
         )
 
       state = :sys.get_state(editor)

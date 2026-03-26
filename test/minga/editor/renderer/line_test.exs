@@ -196,7 +196,8 @@ defmodule Minga.Editor.Renderer.LineTest do
           port_manager: port,
           buffer: nil,
           width: 80,
-          height: 24
+          height: 24,
+          editing_model: :vim
         )
 
       send(editor, {:minga_input, {:ready, 80, 24}})

@@ -56,7 +56,8 @@ defmodule Minga.Integration.FileOpenFromAgentTabTest do
         port_manager: port,
         buffer: file_buf,
         width: width,
-        height: height
+        height: height,
+        editing_model: :vim
       )
 
     # Reconfigure the editor state to agent mode. This replicates what

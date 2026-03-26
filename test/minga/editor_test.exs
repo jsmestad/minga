@@ -14,7 +14,8 @@ defmodule Minga.EditorTest do
         port_manager: nil,
         buffer: buffer,
         width: 40,
-        height: 10
+        height: 10,
+        editing_model: :vim
       )
 
     {editor, buffer}
@@ -28,7 +29,8 @@ defmodule Minga.EditorTest do
         port_manager: nil,
         buffer: nil,
         width: 40,
-        height: 10
+        height: 10,
+        editing_model: :vim
       )
 
     editor
@@ -113,7 +115,8 @@ defmodule Minga.EditorTest do
           port_manager: nil,
           buffer: nil,
           width: 40,
-          height: 10
+          height: 10,
+          editing_model: :vim
         )
 
       assert :ok = Editor.open_file(editor, path)
@@ -146,7 +149,8 @@ defmodule Minga.EditorTest do
           port_manager: nil,
           buffer: buffer,
           width: 40,
-          height: 10
+          height: 10,
+          editing_model: :vim
         )
 
       # Try pressing 'i' to enter insert mode
@@ -165,7 +169,8 @@ defmodule Minga.EditorTest do
           port_manager: nil,
           buffer: buffer,
           width: 40,
-          height: 10
+          height: 10,
+          editing_model: :vim
         )
 
       # Try pressing 'R' to enter replace mode

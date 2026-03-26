@@ -19,7 +19,8 @@ defmodule Minga.Editor.Commands.ScrollCommandsTest do
         port_manager: nil,
         buffer: buffer,
         width: Keyword.get(opts, :width, 80),
-        height: Keyword.get(opts, :height, 24)
+        height: Keyword.get(opts, :height, 24),
+        editing_model: :vim
       )
 
     {editor, buffer}
