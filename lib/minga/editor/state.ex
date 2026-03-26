@@ -104,7 +104,9 @@ defmodule Minga.Editor.State do
             selection_range_index: 0,
             session_timer: nil,
             swap_dir: nil,
-            session_dir: nil
+            session_dir: nil,
+            space_leader_pending: false,
+            space_leader_timer: nil
 
   @type backend :: :tui | :native_gui | :headless
 
@@ -145,7 +147,9 @@ defmodule Minga.Editor.State do
           font_registry: Minga.UI.FontRegistry.t(),
           session_timer: reference() | nil,
           swap_dir: String.t() | nil,
-          session_dir: String.t() | nil
+          session_dir: String.t() | nil,
+          space_leader_pending: boolean(),
+          space_leader_timer: reference() | nil
         }
 
   # ── Workspace helpers ──────────────────────────────────────────────────────
