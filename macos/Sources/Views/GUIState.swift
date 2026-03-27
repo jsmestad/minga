@@ -61,6 +61,9 @@ final class GUIState {
     /// Agent dispatch sheet state.
     let dispatchSheetState = DispatchSheetState()
 
+    /// Agent context bar state (0x88).
+    let agentContextBarState = AgentContextBarState()
+
     /// Semantic window content from gui_window_content (0x80).
     /// Keyed by windowId. NOT cleared between frames; the guiWindowContent
     /// dispatch overwrites per-window data each frame. Stale entries serve

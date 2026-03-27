@@ -77,6 +77,11 @@ protocol InputEncoder: AnyObject, Sendable {
     func sendBoardCloseCard(id: UInt32)
     func sendBoardReorder(cardId: UInt32, newIndex: UInt16)
     func sendDispatchAgent(task: String, model: String)
+
+    // Agent review actions
+    func sendAgentApprove()
+    func sendAgentRequestChanges()
+    func sendAgentDismiss()
 }
 
 extension InputEncoder {
@@ -584,6 +589,30 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
             buf.replaceSubrange((taskOffset + 2)..<(taskOffset + 2 + taskLen), with: taskUtf8[0..<taskLen])
         }
 
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: agent_approve. Layout: opcode(1) + action_type(1).
+    func sendAgentApprove() {
+        var buf = Data(count: 2)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_AGENT_APPROVE
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: agent_request_changes. Layout: opcode(1) + action_type(1).
+    func sendAgentRequestChanges() {
+        var buf = Data(count: 2)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_AGENT_REQUEST_CHANGES
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: agent_dismiss. Layout: opcode(1) + action_type(1).
+    func sendAgentDismiss() {
+        var buf = Data(count: 2)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_AGENT_DISMISS
         writeFrame(buf)
     }
 

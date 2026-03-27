@@ -168,6 +168,10 @@ final class CommandDispatcher {
             guiState.boardState.update(visible: visible, focusedCardId: focusedCardId, cards: cards,
                                         filterMode: filterMode, filterText: filterText)
 
+        case .guiAgentContext(let visible, let task, let dispatchTimestamp, let status, let canApprove):
+            guiState.agentContextBarState.update(visible: visible, task: task, dispatchTimestamp: dispatchTimestamp,
+                                                  status: status, canApprove: canApprove)
+
         case .clipboardWrite(let target, let text):
             handleClipboardWrite(target: target, text: text)
 

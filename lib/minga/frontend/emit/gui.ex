@@ -142,7 +142,8 @@ defmodule Minga.Frontend.Emit.GUI do
         build_gui_hover_popup_cmd(state),
         build_gui_signature_help_cmd(state),
         build_gui_float_popup_cmd(state),
-        build_gui_board_cmd(state)
+        build_gui_board_cmd(state),
+        build_gui_agent_context_cmd(state)
       ]
       |> Enum.reject(&is_nil/1)
 
@@ -1341,5 +1342,72 @@ defmodule Minga.Frontend.Emit.GUI do
       dismissed = %Minga.Shell.Board.State{zoomed_into: 1}
       ProtocolGUI.encode_gui_board(dismissed)
     end
+  end
+
+  # ── Agent context bar ──
+
+  @spec build_gui_agent_context_cmd(state()) :: binary() | nil
+  defp build_gui_agent_context_cmd(%{
+         shell: Minga.Shell.Board,
+         shell_state: %{zoomed_into: nil}
+       }) do
+    send_hide_if_needed(:hidden)
+  end
+
+  defp build_gui_agent_context_cmd(%{shell: Minga.Shell.Board, shell_state: board}) do
+    card = Minga.Shell.Board.State.zoomed(board)
+    send_agent_context_if_applicable(board.zoomed_into, card)
+  end
+
+  # Not Board shell: hide context bar
+  defp build_gui_agent_context_cmd(_state) do
+    send_hide_if_needed(:not_board)
+  end
+
+  @spec send_hide_if_needed(atom()) :: binary() | nil
+  defp send_hide_if_needed(fp_key) do
+    if Process.get(:last_gui_agent_context_fp) != fp_key do
+      Process.put(:last_gui_agent_context_fp, fp_key)
+      encode_hidden_agent_context()
+    end
+  end
+
+  @spec send_agent_context_if_applicable(pos_integer(), Minga.Shell.Board.Card.t() | nil) ::
+          binary() | nil
+  defp send_agent_context_if_applicable(card_id, card)
+       when is_map(card) and not is_nil(card) do
+    if Minga.Shell.Board.Card.you_card?(card) do
+      send_hide_if_needed(:you_card)
+    else
+      send_agent_context_for_card(card_id, card)
+    end
+  end
+
+  defp send_agent_context_if_applicable(_card_id, _card) do
+    send_hide_if_needed(:you_card)
+  end
+
+  @spec send_agent_context_for_card(pos_integer(), Minga.Shell.Board.Card.t()) ::
+          binary() | nil
+  defp send_agent_context_for_card(card_id, card) do
+    can_approve = card.status in [:needs_you, :done]
+    fp = :erlang.phash2({card_id, card.task, card.created_at, card.status, can_approve})
+
+    if fp != Process.get(:last_gui_agent_context_fp) do
+      Process.put(:last_gui_agent_context_fp, fp)
+
+      ProtocolGUI.encode_gui_agent_context(
+        true,
+        card.task,
+        card.created_at,
+        card.status,
+        can_approve
+      )
+    end
+  end
+
+  @spec encode_hidden_agent_context() :: binary()
+  defp encode_hidden_agent_context do
+    ProtocolGUI.encode_gui_agent_context(false, "", DateTime.utc_now(), :idle, false)
   end
 end

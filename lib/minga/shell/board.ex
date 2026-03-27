@@ -24,6 +24,7 @@ defmodule Minga.Shell.Board do
 
   alias Minga.Editor.DisplayList
   alias Minga.Editor.DisplayList.{Cursor, Frame}
+  alias Minga.Shell.Board.Card
   alias Minga.Shell.Board.State, as: BoardState
 
   @impl true
@@ -139,6 +140,85 @@ defmodule Minga.Shell.Board do
 
         Minga.Shell.Board.Persistence.save(shell_state)
         {shell_state, workspace}
+    end
+  end
+
+  def handle_gui_action(shell_state, workspace, :agent_approve) do
+    # Approve the agent's work: transition card to :done status
+    case shell_state.zoomed_into do
+      nil ->
+        {shell_state, workspace}
+
+      card_id ->
+        card = Map.get(shell_state.cards, card_id)
+
+        if card && !Card.you_card?(card) do
+          updated_card = Card.set_status(card, :done)
+          shell_state = %{shell_state | cards: Map.put(shell_state.cards, card_id, updated_card)}
+          Minga.Shell.Board.Persistence.save(shell_state)
+          {shell_state, workspace}
+        else
+          {shell_state, workspace}
+        end
+    end
+  end
+
+  def handle_gui_action(shell_state, workspace, :agent_request_changes) do
+    # Request changes from the agent: transition card to :needs_you status
+    case shell_state.zoomed_into do
+      nil ->
+        {shell_state, workspace}
+
+      card_id ->
+        card = Map.get(shell_state.cards, card_id)
+
+        if card && !Card.you_card?(card) do
+          updated_card = Card.set_status(card, :needs_you)
+          shell_state = %{shell_state | cards: Map.put(shell_state.cards, card_id, updated_card)}
+          Minga.Shell.Board.Persistence.save(shell_state)
+          {shell_state, workspace}
+        else
+          {shell_state, workspace}
+        end
+    end
+  end
+
+  def handle_gui_action(shell_state, workspace, :agent_dismiss) do
+    # Dismiss the agent: zoom out to the Board grid
+    case shell_state.zoomed_into do
+      nil ->
+        {shell_state, workspace}
+
+      card_id ->
+        card = Map.get(shell_state.cards, card_id)
+
+        if card do
+          # Get the grid workspace that was stored on the card when we zoomed in
+          grid_workspace = card.workspace
+
+          # Store the current workspace back onto the card
+          live_workspace = Map.from_struct(workspace)
+          updated_card = Card.store_workspace(card, live_workspace)
+          shell_state = %{shell_state | cards: Map.put(shell_state.cards, card_id, updated_card)}
+
+          # Zoom out to grid
+          shell_state = %{shell_state | zoomed_into: nil}
+
+          # Restore the grid workspace if available, otherwise use the current workspace
+          workspace =
+            case grid_workspace do
+              ws when is_map(ws) and map_size(ws) > 0 ->
+                struct!(Minga.Workspace.State, ws)
+
+              _ ->
+                workspace
+            end
+
+          Minga.Shell.Board.Persistence.save(shell_state)
+          {shell_state, workspace}
+        else
+          {shell_state, workspace}
+        end
     end
   end
 
