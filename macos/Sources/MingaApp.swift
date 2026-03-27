@@ -234,6 +234,8 @@ struct ContentView: View {
 
     // MARK: - Editor Body
 
+    @Namespace private var zoomNamespace
+
     private var editorBody: some View {
         VStack(spacing: 0) {
 
@@ -247,31 +249,40 @@ struct ContentView: View {
             // ZStack: editor surface (always present for keyboard input)
             // with Board overlay on top when active.
             ZStack {
+                // Editor surface with matched geometry effect for zoom-in
                 editorSurface
                     .opacity(appState.gui.boardState.visible ? 0 : 1)
+                    .matchedGeometryEffect(
+                        id: "zoomContainer",
+                        in: zoomNamespace,
+                        isSource: !appState.gui.boardState.visible
+                    )
 
                 if appState.gui.boardState.visible {
                     BoardView(
                         state: appState.gui.boardState,
                         dispatchSheet: appState.gui.dispatchSheetState,
                         theme: appState.gui.themeColors,
-                        encoder: appState.encoder
+                        encoder: appState.encoder,
+                        namespace: zoomNamespace
                     )
-                    .transition(
-                        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-                            ? .opacity
-                            : .scale(scale: 0.97).combined(with: .opacity)
-                    )
+                    .transition(.opacity)
                 }
             }
             .animation(
                 NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-                    ? .easeInOut(duration: 0.15)
-                    : .easeOut(duration: 0.25),
+                    ? nil
+                    : .spring(response: 0.25, dampingFraction: 0.85),
                 value: appState.gui.boardState.visible
             )
-            .onChange(of: appState.gui.boardState.visible) { _, visible in
-                appState.editorNSView?.setBoardVisible(visible)
+            .animation(
+                NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+                    ? nil
+                    : .spring(response: 0.25, dampingFraction: 0.85),
+                value: appState.gui.boardState.zoomedCardId
+            )
+            .onChange(of: appState.gui.boardState.visible) { _, newVisible in
+                appState.editorNSView?.setBoardVisible(newVisible)
             }
 
             // Bottom panel (between editor and status bar)
