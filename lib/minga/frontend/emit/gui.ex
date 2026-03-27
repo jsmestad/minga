@@ -144,6 +144,7 @@ defmodule Minga.Frontend.Emit.GUI do
         build_gui_float_popup_cmd(state),
         build_gui_board_cmd(state),
         build_gui_agent_context_cmd(state)
+        build_gui_change_summary_cmd(state)
       ]
       |> Enum.reject(&is_nil/1)
 
@@ -1409,5 +1410,34 @@ defmodule Minga.Frontend.Emit.GUI do
   @spec encode_hidden_agent_context() :: binary()
   defp encode_hidden_agent_context do
     ProtocolGUI.encode_gui_agent_context(false, "", DateTime.utc_now(), :idle, false)
+  end
+  # ── Change Summary ──
+
+  @spec build_gui_change_summary_cmd(state()) :: binary() | nil
+
+  # Change summary visible when zoomed into an agent card (not You card)
+  defp build_gui_change_summary_cmd(
+         %{shell: Minga.Shell.Board, shell_state: %{zoomed_into: card_id}} = _state
+       )
+       when card_id != nil do
+    # TODO: Compute diff stats from the card's touched files
+    # For now, send empty list to test the UI
+    entries = []
+    selected_index = 0
+
+    fp = :erlang.phash2({card_id, entries})
+
+    if fp != Process.get(:last_gui_change_summary_fp) do
+      Process.put(:last_gui_change_summary_fp, fp)
+      ProtocolGUI.encode_gui_change_summary(entries, selected_index)
+    end
+  end
+
+  # Board grid or other shells: hide change summary
+  defp build_gui_change_summary_cmd(_state) do
+    if Process.get(:last_gui_change_summary_fp) != :hidden do
+      Process.put(:last_gui_change_summary_fp, :hidden)
+      ProtocolGUI.encode_gui_change_summary([], 0)
+    end
   end
 end

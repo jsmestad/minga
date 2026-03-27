@@ -134,9 +134,14 @@ struct ContentView: View {
     @ObservedObject var appState: AppState
     @State private var rightPaneHeight: CGFloat = 600
     @State private var sidebarWidth: CGFloat = 240
+    @State private var changeSummaryWidth: CGFloat = 280
 
     private var showSidebar: Bool {
         appState.gui.fileTreeState.visible || appState.gui.gitStatusState.visible
+    }
+
+    private var showChangeSummary: Bool {
+        appState.gui.changeSummaryState.visible
     }
 
     private var theme: ThemeColors { appState.gui.themeColors }
@@ -232,6 +237,55 @@ struct ContentView: View {
         }
     }
 
+    // MARK: - Change Summary Sidebar
+
+    @State private var changeSummaryMinWidth: CGFloat = 200
+    @State private var changeSummaryMaxWidth: CGFloat = 400
+    @State private var isDraggingChangeSummaryResize: Bool = false
+
+    @ViewBuilder
+    private var changeSummarySidebar: some View {
+        HStack(spacing: 0) {
+            VStack(spacing: 0) {
+                ChangeSummaryView(
+                    state: appState.gui.changeSummaryState,
+                    theme: theme,
+                    encoder: appState.encoder
+                )
+            }
+            .frame(width: changeSummaryWidth)
+            .background(theme.treeBg)
+
+            // Resize handle (8px hit target with 1px visible separator)
+            Color.clear
+                .frame(width: 8)
+                .overlay(alignment: .leading) {
+                    Rectangle()
+                        .fill(isDraggingChangeSummaryResize ? theme.treeActiveFg.opacity(0.3) : theme.treeSeparatorFg.opacity(0.4))
+                        .frame(width: 1)
+                }
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 1)
+                        .onChanged { value in
+                            isDraggingChangeSummaryResize = true
+                            let newWidth = changeSummaryWidth + value.translation.width
+                            changeSummaryWidth = min(max(newWidth, changeSummaryMinWidth), changeSummaryMaxWidth)
+                        }
+                        .onEnded { _ in
+                            isDraggingChangeSummaryResize = false
+                        }
+                )
+                .onHover { hovering in
+                    if hovering {
+                        NSCursor.resizeLeftRight.push()
+                    } else {
+                        NSCursor.pop()
+                    }
+                }
+        }
+    }
+
     // MARK: - Editor Body
 
     @Namespace private var zoomNamespace
@@ -276,6 +330,30 @@ struct ContentView: View {
                         namespace: zoomNamespace
                     )
                     .transition(.opacity)
+            // HStack: change summary sidebar (when zoomed into agent card) + editor
+            HStack(spacing: 0) {
+                if showChangeSummary {
+                    changeSummarySidebar
+                }
+
+                // ZStack: editor surface (always present for keyboard input)
+                // with Board overlay on top when active.
+                ZStack {
+                    editorSurface
+                        .opacity(appState.gui.boardState.visible ? 0 : 1)
+
+                    if appState.gui.boardState.visible {
+                        BoardView(
+                            state: appState.gui.boardState,
+                            theme: appState.gui.themeColors,
+                            encoder: appState.encoder
+                        )
+                        .transition(
+                            NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+                                ? .opacity
+                                : .scale(scale: 0.97).combined(with: .opacity)
+                        )
+                    }
                 }
             }
             .animation(

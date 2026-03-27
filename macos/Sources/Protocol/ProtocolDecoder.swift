@@ -58,6 +58,7 @@ enum RenderCommand: Sendable {
     case guiAgentGroups(activeGroupId: UInt16, agentGroups: [Wire.AgentGroupEntry])
     case guiBoard(visible: Bool, focusedCardId: UInt32, cards: [BoardCard], filterMode: Bool, filterText: String)
     case guiAgentContext(visible: Bool, task: String, dispatchTimestamp: Date, status: CardStatus, canApprove: Bool)
+    case guiChangeSummary(visible: Bool, entries: [ChangeSummaryEntry], selectedIndex: Int)
 }
 
 // MARK: - Decoder
@@ -1826,6 +1827,36 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         return (.guiAgentContext(visible: contextVisible, task: task, dispatchTimestamp: dispatchTimestamp,
                                  status: CardStatus(rawValue: statusRaw) ?? .idle, canApprove: canApprove),
                 timestampPos + 10 - offset)
+    case OP_GUI_CHANGE_SUMMARY:
+        // visible(1) + selected_index(2) + entry_count(2)
+        guard data.count >= rest + 5 else { throw ProtocolDecodeError.malformed }
+        let csVisible = data[rest] != 0
+        let csSelectedIndex = Int(readU16(data, rest + 1))
+        let entryCount = Int(readU16(data, rest + 3))
+        var csEntries: [ChangeSummaryEntry] = []
+        csEntries.reserveCapacity(entryCount)
+        var csPos = rest + 5
+        for idx in 0..<entryCount {
+            // path_len(2) + path + action(1) + lines_added(4) + lines_removed(4)
+            guard data.count >= csPos + 2 else { throw ProtocolDecodeError.malformed }
+            let pathLen = Int(readU16(data, csPos))
+            guard data.count >= csPos + 2 + pathLen + 1 + 4 + 4 else { throw ProtocolDecodeError.malformed }
+            let pathData = data[(csPos + 2)..<(csPos + 2 + pathLen)]
+            let path = String(data: pathData, encoding: .utf8) ?? ""
+            let actionByte = data[csPos + 2 + pathLen]
+            let linesAdded = readU32(data, csPos + 2 + pathLen + 1)
+            let linesRemoved = readU32(data, csPos + 2 + pathLen + 5)
+            csEntries.append(ChangeSummaryEntry(
+                id: idx,
+                path: path,
+                action: ChangeSummaryEntry.FileAction(rawValue: actionByte) ?? .modified,
+                linesAdded: linesAdded,
+                linesRemoved: linesRemoved
+            ))
+            csPos += 2 + pathLen + 1 + 4 + 4
+        }
+        return (.guiChangeSummary(visible: csVisible, entries: csEntries, selectedIndex: csSelectedIndex),
+                csPos - offset)
 
     case OP_CLIPBOARD_WRITE:
         // Forward-compatible format: opcode(1) + payload_length(2) + target(1) + text_len(2) + text
