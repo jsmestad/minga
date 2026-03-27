@@ -25,13 +25,30 @@ defmodule Minga.Agent.Tools do
   | `git_stage`       | Stage files for commit (destructive)                 |
   | `git_commit`      | Create a commit with a message (destructive)         |
   | `memory_write`    | Save a learning or preference to persistent memory   |
+  | `diagnostics`     | Get current LSP diagnostics for a file (read-only)   |
+  | `definition`      | Find where a symbol is defined via LSP (read-only)   |
+  | `references`      | Find all usages of a symbol via LSP (read-only)      |
+  | `hover`           | Get type info and docs for a symbol via LSP (read-only)|
+  | `document_symbols`| List all symbols in a file via LSP (read-only)       |
+  | `workspace_symbols`| Search for symbols project-wide via LSP (read-only) |
+  | `rename`          | Semantic rename across the project via LSP (destructive)|
+  | `code_actions`    | List/apply LSP code actions (apply is destructive)   |
   """
 
+  alias Minga.Agent.Tools.DiagnosticFeedback
   alias Minga.Agent.Tools.EditFile
   alias Minga.Agent.Tools.Find
   alias Minga.Agent.Tools.Git, as: GitTools
   alias Minga.Agent.Tools.Grep
   alias Minga.Agent.Tools.ListDirectory
+  alias Minga.Agent.Tools.LspCodeActions
+  alias Minga.Agent.Tools.LspDefinition
+  alias Minga.Agent.Tools.LspDiagnostics
+  alias Minga.Agent.Tools.LspDocumentSymbols
+  alias Minga.Agent.Tools.LspHover
+  alias Minga.Agent.Tools.LspReferences
+  alias Minga.Agent.Tools.LspRename
+  alias Minga.Agent.Tools.LspWorkspaceSymbols
   alias Minga.Agent.Tools.MemoryWrite
   alias Minga.Agent.Tools.MultiEditFile
   alias Minga.Agent.Tools.ReadFile
@@ -44,7 +61,7 @@ defmodule Minga.Agent.Tools do
   @typedoc "Options passed to `all/1`."
   @type tools_opts :: [project_root: String.t()]
 
-  @default_destructive_tools ~w(write_file edit_file multi_edit_file shell git_stage git_commit)
+  @default_destructive_tools ~w(write_file edit_file multi_edit_file shell git_stage git_commit rename)
 
   @doc """
   Returns true if the named tool is classified as destructive.
@@ -52,12 +69,26 @@ defmodule Minga.Agent.Tools do
   Reads the configured list from `:agent_destructive_tools` (defaults to
   `["write_file", "edit_file", "shell"]`). Accepts an optional list override
   for testing without starting the Options agent.
+
+  Some tools have conditional destructiveness based on their arguments.
+  Pass the tool arguments map to check parameter-dependent cases like
+  `code_actions` with `apply` set.
   """
   @spec destructive?(String.t()) :: boolean()
-  def destructive?(name), do: destructive?(name, configured_destructive_tools())
+  def destructive?(name), do: destructive?(name, %{}, configured_destructive_tools())
 
-  @spec destructive?(String.t(), [String.t()]) :: boolean()
-  def destructive?(name, destructive_list) when is_list(destructive_list) do
+  @spec destructive?(String.t(), map()) :: boolean()
+  def destructive?(name, args) when is_map(args) do
+    destructive?(name, args, configured_destructive_tools())
+  end
+
+  @spec destructive?(String.t(), map(), [String.t()]) :: boolean()
+  def destructive?("code_actions", args, _destructive_list) when is_map(args) do
+    # code_actions is destructive only when applying an action
+    args["apply"] != nil
+  end
+
+  def destructive?(name, _args, destructive_list) when is_list(destructive_list) do
     name in destructive_list
   end
 
@@ -94,7 +125,15 @@ defmodule Minga.Agent.Tools do
       git_log(root),
       git_stage(root),
       git_commit(root),
-      memory_write()
+      memory_write(),
+      lsp_diagnostics(root),
+      lsp_definition(root),
+      lsp_references(root),
+      lsp_hover(root),
+      lsp_document_symbols(root),
+      lsp_workspace_symbols(),
+      lsp_rename(root),
+      lsp_code_actions(root)
     ]
   end
 
@@ -168,7 +207,11 @@ defmodule Minga.Agent.Tools do
       },
       callback: fn args ->
         path = resolve_and_validate_path!(root, args["path"])
-        WriteFile.execute(path, args["content"])
+
+        case WriteFile.execute(path, args["content"]) do
+          {:ok, msg} -> {:ok, maybe_append_diagnostics(path, msg)}
+          error -> error
+        end
       end
     )
   end
@@ -202,7 +245,11 @@ defmodule Minga.Agent.Tools do
       },
       callback: fn args ->
         path = resolve_and_validate_path!(root, args["path"])
-        EditFile.execute(path, args["old_text"], args["new_text"])
+
+        case EditFile.execute(path, args["old_text"], args["new_text"]) do
+          {:ok, msg} -> {:ok, maybe_append_diagnostics(path, msg)}
+          error -> error
+        end
       end
     )
   end
@@ -248,7 +295,11 @@ defmodule Minga.Agent.Tools do
       callback: fn args ->
         path = resolve_and_validate_path!(root, args["path"])
         edits = args["edits"] || []
-        MultiEditFile.execute(path, edits)
+
+        case MultiEditFile.execute(path, edits) do
+          {:ok, msg} -> {:ok, maybe_append_diagnostics(path, msg)}
+          error -> error
+        end
       end
     )
   end
@@ -579,6 +630,290 @@ defmodule Minga.Agent.Tools do
         MemoryWrite.execute(args["text"] || "")
       end
     )
+  end
+
+  # ── LSP tools ──────────────────────────────────────────────────────────────
+
+  @spec lsp_diagnostics(String.t()) :: Tool.t()
+  defp lsp_diagnostics(root) do
+    Tool.new!(
+      name: "diagnostics",
+      description: """
+      Get current LSP diagnostics (errors, warnings, hints) for a file.
+      Returns compiler-verified diagnostics in 1-3 seconds instead of
+      running `mix compile` (5-30 seconds). The file must be open in
+      the editor for LSP features to work.
+      """,
+      parameter_schema: %{
+        "type" => "object",
+        "properties" => %{
+          "path" => %{
+            "type" => "string",
+            "description" => "Path to the file, relative to the project root"
+          }
+        },
+        "required" => ["path"]
+      },
+      callback: fn args ->
+        path = resolve_and_validate_path!(root, args["path"])
+        LspDiagnostics.execute(path)
+      end
+    )
+  end
+
+  @spec lsp_definition(String.t()) :: Tool.t()
+  defp lsp_definition(root) do
+    Tool.new!(
+      name: "definition",
+      description: """
+      Find where a symbol is defined. Returns the file path, line, and
+      context. Uses LSP for compiler-verified semantic resolution (handles
+      macros, re-exports, dynamic dispatch). Line and column are 0-indexed.
+      """,
+      parameter_schema: %{
+        "type" => "object",
+        "properties" => %{
+          "path" => %{
+            "type" => "string",
+            "description" => "File containing the symbol reference"
+          },
+          "line" => %{
+            "type" => "integer",
+            "description" => "Line number (0-indexed)"
+          },
+          "column" => %{
+            "type" => "integer",
+            "description" => "Column number (0-indexed)"
+          }
+        },
+        "required" => ["path", "line", "column"]
+      },
+      callback: fn args ->
+        path = resolve_and_validate_path!(root, args["path"])
+        LspDefinition.execute(path, args["line"], args["column"])
+      end
+    )
+  end
+
+  @spec lsp_references(String.t()) :: Tool.t()
+  defp lsp_references(root) do
+    Tool.new!(
+      name: "references",
+      description: """
+      Find all usages of a symbol across the project. Returns file paths,
+      line numbers, and context for each reference. Uses LSP for semantic
+      search (finds references through aliases, imports, re-exports).
+      Line and column are 0-indexed.
+      """,
+      parameter_schema: %{
+        "type" => "object",
+        "properties" => %{
+          "path" => %{
+            "type" => "string",
+            "description" => "File containing the symbol"
+          },
+          "line" => %{
+            "type" => "integer",
+            "description" => "Line number (0-indexed)"
+          },
+          "column" => %{
+            "type" => "integer",
+            "description" => "Column number (0-indexed)"
+          }
+        },
+        "required" => ["path", "line", "column"]
+      },
+      callback: fn args ->
+        path = resolve_and_validate_path!(root, args["path"])
+        LspReferences.execute(path, args["line"], args["column"])
+      end
+    )
+  end
+
+  @spec lsp_hover(String.t()) :: Tool.t()
+  defp lsp_hover(root) do
+    Tool.new!(
+      name: "hover",
+      description: """
+      Get type signature and documentation for a symbol. Returns the same
+      hover information a human developer sees: type signatures, @doc content,
+      parameter descriptions. Line and column are 0-indexed.
+      """,
+      parameter_schema: %{
+        "type" => "object",
+        "properties" => %{
+          "path" => %{
+            "type" => "string",
+            "description" => "File containing the symbol"
+          },
+          "line" => %{
+            "type" => "integer",
+            "description" => "Line number (0-indexed)"
+          },
+          "column" => %{
+            "type" => "integer",
+            "description" => "Column number (0-indexed)"
+          }
+        },
+        "required" => ["path", "line", "column"]
+      },
+      callback: fn args ->
+        path = resolve_and_validate_path!(root, args["path"])
+        LspHover.execute(path, args["line"], args["column"])
+      end
+    )
+  end
+
+  @spec lsp_document_symbols(String.t()) :: Tool.t()
+  defp lsp_document_symbols(root) do
+    Tool.new!(
+      name: "document_symbols",
+      description: """
+      List all symbols (functions, types, modules) defined in a file.
+      Returns a hierarchical outline with symbol kind, name, and line number.
+      Faster than reading the entire file to understand module structure.
+      """,
+      parameter_schema: %{
+        "type" => "object",
+        "properties" => %{
+          "path" => %{
+            "type" => "string",
+            "description" => "Path to the file, relative to the project root"
+          }
+        },
+        "required" => ["path"]
+      },
+      callback: fn args ->
+        path = resolve_and_validate_path!(root, args["path"])
+        LspDocumentSymbols.execute(path)
+      end
+    )
+  end
+
+  @spec lsp_workspace_symbols() :: Tool.t()
+  defp lsp_workspace_symbols do
+    Tool.new!(
+      name: "workspace_symbols",
+      description: """
+      Search for symbols (modules, functions, types) across the entire project.
+      Faster and more precise than grep for "where is module X defined?".
+      Results are limited to 50 to avoid context overflow.
+      """,
+      parameter_schema: %{
+        "type" => "object",
+        "properties" => %{
+          "query" => %{
+            "type" => "string",
+            "description" => "Symbol name to search for (fuzzy matching)"
+          }
+        },
+        "required" => ["query"]
+      },
+      callback: fn args ->
+        LspWorkspaceSymbols.execute(args["query"])
+      end
+    )
+  end
+
+  @spec lsp_rename(String.t()) :: Tool.t()
+  defp lsp_rename(root) do
+    Tool.new!(
+      name: "rename",
+      description: """
+      Rename a symbol across the entire project using LSP semantic rename.
+      Safer than find-and-replace: knows every location that needs to change
+      (including aliases, imports, re-exports) and nothing else. Destructive:
+      requires approval. Line and column are 0-indexed.
+      """,
+      parameter_schema: %{
+        "type" => "object",
+        "properties" => %{
+          "path" => %{
+            "type" => "string",
+            "description" => "File containing the symbol to rename"
+          },
+          "line" => %{
+            "type" => "integer",
+            "description" => "Line number (0-indexed)"
+          },
+          "column" => %{
+            "type" => "integer",
+            "description" => "Column number (0-indexed)"
+          },
+          "new_name" => %{
+            "type" => "string",
+            "description" => "The new name for the symbol"
+          }
+        },
+        "required" => ["path", "line", "column", "new_name"]
+      },
+      callback: fn args ->
+        path = resolve_and_validate_path!(root, args["path"])
+        LspRename.execute(path, args["line"], args["column"], args["new_name"])
+      end
+    )
+  end
+
+  @spec lsp_code_actions(String.t()) :: Tool.t()
+  defp lsp_code_actions(root) do
+    Tool.new!(
+      name: "code_actions",
+      description: """
+      List or apply LSP code actions (quickfixes, refactorings, source actions)
+      at a position. Without `apply`, lists available actions. With `apply` set
+      to an action number or title, applies that action. Listing is read-only;
+      applying is destructive (requires approval). Line is 0-indexed.
+      """,
+      parameter_schema: %{
+        "type" => "object",
+        "properties" => %{
+          "path" => %{
+            "type" => "string",
+            "description" => "File path"
+          },
+          "line" => %{
+            "type" => "integer",
+            "description" => "Line number (0-indexed)"
+          },
+          "column" => %{
+            "type" => "integer",
+            "description" => "Column number (0-indexed, default: 0)"
+          },
+          "apply" => %{
+            "type" => ["string", "integer"],
+            "description" =>
+              "Action to apply: title string or 1-indexed number. Omit to list actions."
+          }
+        },
+        "required" => ["path", "line"]
+      },
+      callback: fn args ->
+        path = resolve_and_validate_path!(root, args["path"])
+        opts = []
+        opts = if args["column"], do: [{:col, args["column"]} | opts], else: opts
+        opts = if args["apply"], do: [{:apply, args["apply"]} | opts], else: opts
+        LspCodeActions.execute(path, args["line"], opts)
+      end
+    )
+  end
+
+  # ── Diagnostic feedback ──────────────────────────────────────────────────────
+
+  @spec maybe_append_diagnostics(String.t(), String.t()) :: String.t()
+  defp maybe_append_diagnostics(path, base_message) do
+    if diagnostic_feedback_enabled?() do
+      result = DiagnosticFeedback.await(path)
+      DiagnosticFeedback.append_to_result(base_message, result)
+    else
+      base_message
+    end
+  end
+
+  @spec diagnostic_feedback_enabled?() :: boolean()
+  defp diagnostic_feedback_enabled? do
+    Config.get(:agent_diagnostic_feedback)
+  rescue
+    _ -> true
   end
 
   # ── Path safety ─────────────────────────────────────────────────────────────

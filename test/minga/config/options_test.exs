@@ -51,7 +51,15 @@ defmodule Minga.Config.OptionsTest do
                agent_provider: :auto,
                agent_model: nil,
                agent_tool_approval: :destructive,
-               agent_destructive_tools: ["write_file", "edit_file", "multi_edit_file", "shell"],
+               agent_destructive_tools: [
+                 "write_file",
+                 "edit_file",
+                 "multi_edit_file",
+                 "shell",
+                 "git_stage",
+                 "git_commit",
+                 "rename"
+               ],
                agent_session_retention_days: 30,
                agent_panel_split: 65,
                startup_view: :agent,
@@ -70,6 +78,7 @@ defmodule Minga.Config.OptionsTest do
                agent_subagent_timeout: 300_000,
                agent_mention_max_file_size: 262_144,
                agent_notify_debounce: 5_000,
+               agent_diagnostic_feedback: true,
                agent_api_base_url: "",
                agent_api_endpoints: nil,
                confirm_quit: true,
@@ -341,7 +350,10 @@ defmodule Minga.Config.OptionsTest do
                "write_file",
                "edit_file",
                "multi_edit_file",
-               "shell"
+               "shell",
+               "git_stage",
+               "git_commit",
+               "rename"
              ]
     end
 
