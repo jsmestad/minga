@@ -67,6 +67,11 @@ final class AgentChatState {
     /// Whether the prompt is in insert mode (for SwiftUI styling).
     var isPromptInsertMode: Bool { promptVimMode == 1 }
 
+    // ── Prompt completion popup ──
+
+    /// Active completion popup for @-mention or /slash commands. Nil when no popup is showing.
+    var promptCompletion: GUIPromptCompletion?
+
     struct PendingApproval {
         let toolName: String
         let summary: String
@@ -84,7 +89,7 @@ final class AgentChatState {
 
     var isThinking: Bool { status == 1 || status == 2 }
 
-    func update(visible: Bool, status: UInt8, model: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptVimMode: UInt8, promptVisibleRows: UInt8, pendingToolName: String?, pendingToolSummary: String, helpVisible: Bool, helpGroups: [HelpGroup], rawMessages: [GUIChatMessage]) {
+    func update(visible: Bool, status: UInt8, model: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptVimMode: UInt8, promptVisibleRows: UInt8, promptCompletion: GUIPromptCompletion?, pendingToolName: String?, pendingToolSummary: String, helpVisible: Bool, helpGroups: [HelpGroup], rawMessages: [GUIChatMessage]) {
         self.visible = visible
         self.status = status
         self.model = model
@@ -94,6 +99,7 @@ final class AgentChatState {
         self.promptCursorCol = promptCursorCol
         self.promptVimMode = promptVimMode
         self.promptVisibleRows = promptVisibleRows
+        self.promptCompletion = promptCompletion
         self.promptVersion += 1
         self.pendingApproval = pendingToolName.map { PendingApproval(toolName: $0, summary: pendingToolSummary) }
         self.helpVisible = helpVisible

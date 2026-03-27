@@ -117,6 +117,11 @@ struct AgentChatView: View {
                 approvalBanner(approval)
             }
 
+            // Prompt completion popup (floats above the prompt area)
+            if let completion = state.promptCompletion {
+                promptCompletionPopup(completion)
+            }
+
             // Prompt area
             promptArea
         }
@@ -605,6 +610,58 @@ struct AgentChatView: View {
         .accessibilityLabel(isStreaming ? "Stop generating" : "Send message")
         .accessibilityHint(isStreaming ? "Sends Ctrl+C to abort" : "Sends the current prompt")
         .accessibilityAddTraits(.isButton)
+    }
+
+    // MARK: - Prompt completion popup
+
+    /// Renders a floating completion popup for @-mention or /slash commands.
+    /// Styled to match the existing CompletionOverlay used for LSP completions.
+    @ViewBuilder
+    private func promptCompletionPopup(_ completion: GUIPromptCompletion) -> some View {
+        let isSlash = completion.type == 1
+        let maxVisible = min(completion.candidates.count, 10)
+
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(completion.candidates.prefix(10).enumerated()), id: \.offset) { index, candidate in
+                HStack(spacing: 6) {
+                    Image(systemName: isSlash ? "command" : "doc")
+                        .font(.system(size: 10))
+                        .foregroundStyle(theme.popupFg.opacity(0.4))
+                        .frame(width: 14)
+
+                    Text(candidate.name)
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundStyle(theme.popupFg)
+                        .lineLimit(1)
+
+                    if !candidate.description.isEmpty {
+                        Text(candidate.description)
+                            .font(.system(size: 11))
+                            .foregroundStyle(theme.popupFg.opacity(0.4))
+                            .lineLimit(1)
+                    }
+
+                    Spacer()
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(index == Int(completion.selected) ? theme.accent.opacity(0.15) : Color.clear)
+            }
+        }
+        .frame(maxWidth: 400)
+        .frame(maxHeight: CGFloat(maxVisible) * 24)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(theme.popupBg)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .strokeBorder(theme.popupBorder.opacity(0.4), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.2), radius: 8, y: -4)
+        .padding(.horizontal, 16)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(isSlash ? "Slash command completion" : "File mention completion")
     }
 
     // MARK: - Help overlay

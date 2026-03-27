@@ -307,7 +307,7 @@ struct CommandDispatcherRoutingTests {
                                            prompt: "Fix this", promptLineCount: 1,
                                            promptCursorLine: 0, promptCursorCol: 0,
                                            promptVimMode: 1, promptVisibleRows: 1,
-                                           pendingToolName: nil,
+                                           promptCompletion: nil, pendingToolName: nil,
                                            pendingToolSummary: "", helpVisible: false, helpGroups: [], messages: messages))
 
         #expect(gui.agentChatState.visible == true)
@@ -322,7 +322,7 @@ struct CommandDispatcherRoutingTests {
                                            prompt: "", promptLineCount: 1,
                                            promptCursorLine: 0, promptCursorCol: 0,
                                            promptVimMode: 0, promptVisibleRows: 1,
-                                           pendingToolName: nil,
+                                           promptCompletion: nil, pendingToolName: nil,
                                            pendingToolSummary: "", helpVisible: false, helpGroups: [], messages: []))
 
         #expect(gui.agentChatState.visible == false)

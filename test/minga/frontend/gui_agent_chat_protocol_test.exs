@@ -128,8 +128,8 @@ defmodule Minga.Frontend.GUIAgentChatProtocolTest do
 
       # Parse the envelope to get to the message payload
       <<0x78, 1::8, _status::8, model_len::16, _model::binary-size(model_len), prompt_len::16,
-        _prompt::binary-size(prompt_len), _prompt_meta::binary-size(7), 0::8, 0::8, msg_count::16,
-        msg_data::binary>> = binary
+        _prompt::binary-size(prompt_len), _prompt_meta::binary-size(7), 0::8, 0::8, 0::8,
+        msg_count::16, msg_data::binary>> = binary
 
       assert msg_count == 2
 
@@ -155,7 +155,7 @@ defmodule Minga.Frontend.GUIAgentChatProtocolTest do
       binary = ProtocolGUI.encode_gui_agent_chat(data)
 
       <<0x78, 1::8, _status::8, model_len::16, _model::binary-size(model_len), prompt_len::16,
-        _prompt::binary-size(prompt_len), _prompt_meta::binary-size(7), 0::8, 0::8, 1::16,
+        _prompt::binary-size(prompt_len), _prompt_meta::binary-size(7), 0::8, 0::8, 0::8, 1::16,
         msg_data::binary>> = binary
 
       # ID prefix should be 0 for bare tuples
@@ -196,8 +196,8 @@ defmodule Minga.Frontend.GUIAgentChatProtocolTest do
       binary = ProtocolGUI.encode_gui_agent_chat(data)
 
       <<0x78, 1::8, _status::8, model_len::16, _model::binary-size(model_len), prompt_len::16,
-        _prompt::binary-size(prompt_len), _prompt_meta::binary-size(7), 0::8, 0::8, msg_count::16,
-        _msg_data::binary>> = binary
+        _prompt::binary-size(prompt_len), _prompt_meta::binary-size(7), 0::8, 0::8, 0::8,
+        msg_count::16, _msg_data::binary>> = binary
 
       assert msg_count == 6
 
@@ -228,7 +228,7 @@ defmodule Minga.Frontend.GUIAgentChatProtocolTest do
       binary = ProtocolGUI.encode_gui_agent_chat(data)
 
       # After opcode, visible, status, model, prompt, pending (0x00), then help_visible (0x00)
-      <<0x78, 1::8, _status::8, 0::16, 0::16, _pm::binary-size(7), 0::8, help_visible::8,
+      <<0x78, 1::8, _status::8, 0::16, 0::16, _pm::binary-size(7), 0::8, 0::8, help_visible::8,
         msg_count::16>> = binary
 
       assert help_visible == 0
@@ -253,8 +253,8 @@ defmodule Minga.Frontend.GUIAgentChatProtocolTest do
       binary = ProtocolGUI.encode_gui_agent_chat(data)
 
       # Parse the help overlay section
-      <<0x78, 1::8, _status::8, 0::16, 0::16, _pm::binary-size(7), 0::8, 1::8, group_count::8,
-        rest::binary>> =
+      <<0x78, 1::8, _status::8, 0::16, 0::16, _pm::binary-size(7), 0::8, 0::8, 1::8,
+        group_count::8, rest::binary>> =
         binary
 
       assert group_count == 2
@@ -305,7 +305,7 @@ defmodule Minga.Frontend.GUIAgentChatProtocolTest do
 
       binary = ProtocolGUI.encode_gui_agent_chat(data)
 
-      <<0x78, 1::8, _status::8, 0::16, 0::16, _pm::binary-size(7), 0::8, help_visible::8,
+      <<0x78, 1::8, _status::8, 0::16, 0::16, _pm::binary-size(7), 0::8, 0::8, help_visible::8,
         msg_count::16>> = binary
 
       assert help_visible == 0

@@ -1060,7 +1060,7 @@ defmodule Minga.Frontend.ProtocolTest do
 
       # Prompt metadata: line_count(u8), cursor_line(u16), cursor_col(u16), vim_mode(u8), visible_rows(u8)
       assert <<_line_count::8, _cursor_line::16, _cursor_col::16, _vim_mode::8, _visible_rows::8,
-               rest5::binary>> = rest4
+               _completion::8, rest5::binary>> = rest4
 
       # Pending approval flag = 1, name = "shell" (len=5), summary = "ls -la" (len=6)
       assert <<1::8, 0::8, 5::8, "shell", 0::8, 6::8, "ls -la", _msg_rest::binary>> = rest5
@@ -1088,7 +1088,7 @@ defmodule Minga.Frontend.ProtocolTest do
 
       # Prompt metadata: line_count(u8), cursor_line(u16), cursor_col(u16), vim_mode(u8), visible_rows(u8)
       assert <<_line_count::8, _cursor_line::16, _cursor_col::16, _vim_mode::8, _visible_rows::8,
-               rest4::binary>> = rest3
+               _completion::8, rest4::binary>> = rest3
 
       # Pending approval flag = 0
       assert <<0::8, _msg_rest::binary>> = rest4
@@ -1121,8 +1121,8 @@ defmodule Minga.Frontend.ProtocolTest do
       # Verify the styled assistant message is encoded with opcode 0x07
       # Find the message section (after header + pending + msg count)
       <<0x78, 1::8, _status::8, model_len::16, _model::binary-size(model_len), prompt_len::16,
-        _prompt::binary-size(prompt_len), _prompt_meta::binary-size(7), 0::8, 0::8, msg_count::16,
-        msg_data::binary>> = encoded
+        _prompt::binary-size(prompt_len), _prompt_meta::binary-size(7), 0::8, 0::8, 0::8,
+        msg_count::16, msg_data::binary>> = encoded
 
       assert msg_count == 1
 

@@ -291,7 +291,7 @@ struct AgentChatStateLifecycleTests {
         state.update(visible: true, status: 1, model: "claude", prompt: "fix bug",
                      promptLineCount: 1, promptCursorLine: 0, promptCursorCol: 0,
                      promptVimMode: 1, promptVisibleRows: 1,
-                     pendingToolName: "write_file",
+                     promptCompletion: nil, pendingToolName: "write_file",
                      pendingToolSummary: "Writing config.toml",
                      helpVisible: false, helpGroups: [],
                      rawMessages: raw)
@@ -313,7 +313,7 @@ struct AgentChatStateLifecycleTests {
         state.update(visible: true, status: 1, model: "claude", prompt: "test",
                      promptLineCount: 1, promptCursorLine: 0, promptCursorCol: 0,
                      promptVimMode: 1, promptVisibleRows: 1,
-                     pendingToolName: nil, pendingToolSummary: "",
+                     promptCompletion: nil, pendingToolName: nil, pendingToolSummary: "",
                      helpVisible: false, helpGroups: [],
                      rawMessages: [GUIChatMessage(beamId: 1, content: .user(text: "hi"))])
         state.hide()

@@ -89,6 +89,19 @@ defmodule Minga.Input.AgentPanel do
     AgentCommands.scope_trigger_mention(state)
   end
 
+  defp handle_panel_self_insert(state, ?/, _mods) do
+    # Trigger slash command completion when / is typed at position (0, 0)
+    panel = Minga.Editor.State.AgentAccess.panel(state)
+    {line, col} = Minga.Agent.UIState.input_cursor(panel)
+
+    if line == 0 and col == 0 do
+      state = AgentCommands.input_char(state, "/")
+      AgentCommands.scope_trigger_slash_completion(state)
+    else
+      AgentCommands.input_char(state, "/")
+    end
+  end
+
   defp handle_panel_self_insert(state, cp, _mods)
        when cp >= 32 do
     AgentCommands.input_char(state, <<cp::utf8>>)

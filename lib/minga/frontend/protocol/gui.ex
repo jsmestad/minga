@@ -1259,6 +1259,7 @@ defmodule Minga.Frontend.Protocol.GUI do
     prompt_vim_mode = encode_vim_mode(data[:prompt_vim_mode])
     prompt_visible_rows = data[:prompt_visible_rows] || 1
 
+    completion_bytes = encode_prompt_completion(data[:prompt_completion])
     pending_bytes = encode_pending_approval(data[:pending_approval])
     help_bytes = encode_help_overlay(data[:help_visible], data[:help_groups])
 
@@ -1273,12 +1274,49 @@ defmodule Minga.Frontend.Protocol.GUI do
         byte_size(prompt_bytes)::16, prompt_bytes::binary, prompt_line_count::8,
         prompt_cursor_line::16, prompt_cursor_col::16, prompt_vim_mode::8,
         prompt_visible_rows::8>>,
+      completion_bytes,
       pending_bytes,
       help_bytes,
       <<length(msg_binaries)::16>>
       | msg_binaries
     ])
   end
+
+  # Encodes prompt completion popup state for @-mention or /slash completion.
+  # Wire format: visible(u8) [type(u8) selected(u8) anchor_line(u16) anchor_col(u16)
+  #   candidate_count(u8) [name_len(u16) name(utf8) desc_len(u16) desc(utf8)]*]
+  # type: 0=mention, 1=slash
+  @spec encode_prompt_completion(map() | nil) :: binary()
+  defp encode_prompt_completion(nil), do: <<0::8>>
+
+  defp encode_prompt_completion(%{type: type, candidates: candidates, selected: selected} = comp)
+       when is_list(candidates) and candidates != [] do
+    type_byte = if type == :slash, do: 1, else: 0
+    anchor_line = comp[:anchor_line] || 0
+    anchor_col = comp[:anchor_col] || 0
+
+    candidate_bins =
+      candidates
+      |> Enum.take(10)
+      |> Enum.map(fn
+        {name, desc} ->
+          n = :erlang.iolist_to_binary([name])
+          d = :erlang.iolist_to_binary([desc])
+          <<byte_size(n)::16, n::binary, byte_size(d)::16, d::binary>>
+
+        name when is_binary(name) ->
+          n = :erlang.iolist_to_binary([name])
+          <<byte_size(n)::16, n::binary, 0::16>>
+      end)
+
+    IO.iodata_to_binary([
+      <<1::8, type_byte::8, min(selected, 255)::8, anchor_line::16, anchor_col::16,
+        min(length(candidates), 10)::8>>
+      | candidate_bins
+    ])
+  end
+
+  defp encode_prompt_completion(_), do: <<0::8>>
 
   @spec encode_pending_approval(map() | nil) :: binary()
   defp encode_pending_approval(nil), do: <<0::8>>

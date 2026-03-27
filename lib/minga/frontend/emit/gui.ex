@@ -608,7 +608,7 @@ defmodule Minga.Frontend.Emit.GUI do
         {:erlang.phash2(
            {:visible, state.shell_state.agent.status, state.shell_state.agent.pending_approval,
             styled_len, panel.model_name, text, panel.message_version, view.help_visible,
-            Minga.Editing.mode(state)}
+            Minga.Editing.mode(state), panel.mention_completion}
          ), text}
       else
         {:not_visible, ""}
@@ -632,6 +632,33 @@ defmodule Minga.Frontend.Emit.GUI do
       end
     end
   end
+
+  # Builds the prompt completion popup data for @-mention or /slash completion.
+  # Returns a map suitable for encode_prompt_completion, or nil if no completion active.
+  @spec build_prompt_completion(Minga.Agent.UIState.Panel.t()) :: map() | nil
+  defp build_prompt_completion(%{mention_completion: %{candidates: candidates} = comp})
+       when is_list(candidates) and candidates != [] do
+    # Slash completions carry {name, description} tuples in :slash_candidates.
+    # Mention completions are plain file path strings.
+    {type, formatted_candidates} =
+      case comp[:slash_candidates] do
+        slash when is_list(slash) and slash != [] ->
+          {:slash, slash}
+
+        _ ->
+          {:mention, candidates}
+      end
+
+    %{
+      type: type,
+      candidates: formatted_candidates,
+      selected: comp.selected,
+      anchor_line: comp.anchor_line,
+      anchor_col: comp.anchor_col
+    }
+  end
+
+  defp build_prompt_completion(_panel), do: nil
 
   # Builds the prompt SemanticWindow (0x80) alongside the chat.
   # The prompt is rendered by the Metal renderer at the bottom of the
@@ -691,6 +718,7 @@ defmodule Minga.Frontend.Emit.GUI do
       vim_mode = Minga.Editing.mode(state)
       inner_width = max(state.workspace.viewport.cols - 10, 20)
       visible_rows = PromptSemanticWindow.visible_rows(panel, inner_width)
+      prompt_completion = build_prompt_completion(panel)
 
       %{
         visible: true,
@@ -705,7 +733,8 @@ defmodule Minga.Frontend.Emit.GUI do
         prompt_cursor_line: cursor_line,
         prompt_cursor_col: cursor_col,
         prompt_vim_mode: vim_mode,
-        prompt_visible_rows: visible_rows
+        prompt_visible_rows: visible_rows,
+        prompt_completion: prompt_completion
       }
     else
       %{visible: false}
