@@ -787,6 +787,29 @@ Mode color slots fall back to `modeline.bar_fg` / `modeline.bar_bg` when a mode 
 | 0x57 | git_modified_fg | `git.modified_fg` | Git modified sign color |
 | 0x58 | git_deleted_fg | `git.deleted_fg` | Git deleted sign color |
 
+## Forward-Compatibility: Skip-Length for Unknown Opcodes
+
+All new opcodes >= 0x90 use a mandatory 2-byte big-endian length prefix after the opcode byte:
+
+```
+<<opcode::8, payload_length::16-big, payload::binary-size(payload_length)>>
+```
+
+This allows older frontends to skip unknown opcodes gracefully without crashing. When a decoder encounters an opcode >= 0x90 that it doesn't recognize, it:
+
+1. Reads the 2-byte length field
+2. Skips `length` bytes forward
+3. Continues decoding the next command
+
+For opcodes < 0x90 that are unknown, the decoder must throw an error (it cannot determine the payload size).
+
+**Example:** A BEAM running version 0.3.0 introduces a new `OP_GUI_NEW_FEATURE = 0x91`. A macOS frontend running 0.2.0 receives this opcode. Because 0x91 >= 0x90, it reads the length prefix, skips that many bytes, and continues. The frontend remains functional even though it doesn't render the new feature.
+
+This convention is enforced on the BEAM side: all new opcodes >= 0x90 must use the length-prefixed encoding. See `lib/minga/frontend/protocol/gui.ex` for the encoder implementation.
+
+**Current 0x90+ opcodes:**
+- `OP_CLIPBOARD_WRITE (0x90)` — clipboard write command (length-prefixed)
+
 ## Behavioral Contract
 
 A GUI frontend must satisfy these requirements:

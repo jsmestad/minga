@@ -382,3 +382,99 @@ struct DecoderEdgeCaseTests {
         #expect(segments.isEmpty)
     }
 }
+
+// MARK: - Forward-compatibility tests
+
+@Suite("Decoder Robustness: Forward-Compatible Skip")
+struct DecoderForwardCompatTests {
+
+    @Test("Unknown opcode < 0x90 throws unknownOpcode")
+    func unknownOpcodeBelow90Throws() {
+        let data = Data([0x8F])  // Below 0x90, no length prefix convention
+        #expect(throws: ProtocolDecodeError.self) {
+            try decodeCommand(data: data, offset: 0)
+        }
+    }
+
+    @Test("Unknown opcode >= 0x90 with length prefix is skipped silently")
+    func unknownOpcode90PlusSkipped() throws {
+        // Opcode 0x95 doesn't exist yet, but it's >= 0x90 so it has a length prefix
+        // Format: opcode(1) + payload_length(2) + payload
+        var data = Data()
+        data.append(0x95)  // Unknown opcode >= 0x90
+        data.append(contentsOf: [0x00, 0x08])  // payload_length = 8 bytes
+        data.append(contentsOf: Array(repeating: UInt8(0xFF), count: 8))  // 8 bytes of payload
+
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        // Should return nil (ignored) and consume opcode(1) + length(2) + payload(8) = 11 bytes
+        #expect(cmd == nil, "Unknown 0x90+ opcode should return nil")
+        #expect(size == 11, "Should skip opcode + length field + payload")
+    }
+
+    @Test("Batch with unknown 0x90+ opcode followed by known command decodes correctly")
+    func batchWithUnknownOpcodeSkipsToNextCommand() throws {
+        // Build a batch: unknown 0x95 opcode + valid clear command
+        var data = Data()
+        data.append(0x95)  // Unknown opcode
+        data.append(contentsOf: [0x00, 0x05])  // payload_length = 5
+        data.append(contentsOf: [0xAA, 0xBB, 0xCC, 0xDD, 0xEE])  // 5 bytes of garbage
+        data.append(OP_CLEAR)  // Valid command
+
+        var commands: [RenderCommand] = []
+        try decodeCommands(from: data) { cmd in
+            commands.append(cmd)
+        }
+
+        // Should decode exactly 1 command (the clear, skipping the unknown 0x95)
+        #expect(commands.count == 1)
+        guard case .clear = commands[0] else {
+            Issue.record("Expected .clear"); return
+        }
+    }
+
+    @Test("OP_CLIPBOARD_WRITE uses length-prefixed format (0x90)")
+    func clipboardWriteUsesLengthPrefix() throws {
+        // OP_CLIPBOARD_WRITE is the first 0x90+ opcode, should use length prefix
+        // Format: opcode(1) + payload_length(2) + target(1) + text_len(2) + text
+        let text = "Hello"
+        let payloadLen = 1 + 2 + text.utf8.count  // target(1) + text_len(2) + text
+
+        var data = Data()
+        data.append(OP_CLIPBOARD_WRITE)
+        data.append(contentsOf: [UInt8(payloadLen >> 8), UInt8(payloadLen & 0xFF)])  // payload_length as u16 BE
+        data.append(0x00)  // target = general
+        data.append(contentsOf: [0x00, UInt8(text.utf8.count)])  // text_len
+        data.append(contentsOf: text.utf8)
+
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == 1 + 2 + payloadLen)
+        guard case .clipboardWrite(let target, let decodedText) = cmd else {
+            Issue.record("Expected .clipboardWrite"); return
+        }
+        #expect(target == 0x00)
+        #expect(decodedText == text)
+    }
+
+    @Test("Unknown 0x90+ opcode with truncated length field throws malformed")
+    func unknownOpcodeTruncatedLengthThrows() {
+        var data = Data()
+        data.append(0x99)  // Unknown opcode >= 0x90
+        data.append(0x00)  // Only 1 byte of length field (need 2)
+
+        #expect(throws: ProtocolDecodeError.self) {
+            try decodeCommand(data: data, offset: 0)
+        }
+    }
+
+    @Test("Unknown 0x90+ opcode with truncated payload throws malformed")
+    func unknownOpcodeTruncatedPayloadThrows() {
+        var data = Data()
+        data.append(0x99)
+        data.append(contentsOf: [0x00, 0x10])  // Claim 16 bytes of payload
+        data.append(contentsOf: Array(repeating: UInt8(0), count: 5))  // Only provide 5
+
+        #expect(throws: ProtocolDecodeError.self) {
+            try decodeCommand(data: data, offset: 0)
+        }
+    }
+}
