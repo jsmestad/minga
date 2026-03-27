@@ -52,10 +52,17 @@ final class EditorNSView: MTKView {
     private var firstResponderGuard: FirstResponderGuard?
 
     /// When true, the agent chat SwiftUI overlay is visible. The Metal
-    /// surface stays visible to render the prompt cell-grid at the bottom.
-    /// The FirstResponderGuard remains active so keys flow through the
-    /// normal keyDown path without needing an event monitor hack.
+    /// surface is at opacity(0) so the SwiftUI overlay is not occluded
+    /// by the NSView layer. A local key event monitor forwards keyboard
+    /// events to keyDown since opacity(0) disconnects normal event
+    /// delivery from the SwiftUI hosting layer.
     private(set) var agentChatVisible: Bool = false
+
+    /// Local event monitor that forwards keyboard events to keyDown
+    /// when the agent chat overlay is visible. Installed/removed by
+    /// setAgentChatVisible. This is Apple's documented API for event
+    /// interception when NSWindow subclassing isn't available.
+    private var agentKeyMonitor: Any?
 
     /// Status bar state from the BEAM. Used by the space leader key-chord
     /// logic to check whether insert mode is active (SPC is always literal
@@ -386,18 +393,68 @@ final class EditorNSView: MTKView {
         firstResponderGuard?.suspended = visible
     }
 
-    /// Activates the agent chat overlay mode. The Metal surface stays
-    /// visible to render the prompt cell-grid. The FirstResponderGuard
-    /// remains active, so keys flow through the normal keyDown path.
-    /// SwiftUI text selection still works because the guard yields to
-    /// NSText field editors (see FirstResponderGuard.checkFirstResponder).
+    /// Activates the agent chat overlay mode. The Metal surface goes to
+    /// opacity(0) so the SwiftUI chat overlay is visible. Since opacity(0)
+    /// disconnects normal event delivery, a local event monitor forwards
+    /// keyboard events to keyDown. SwiftUI text selection still works
+    /// because the monitor yields to NSText field editors.
     func setAgentChatVisible(_ visible: Bool) {
         agentChatVisible = visible
-        // Don't suspend the guard: EditorNSView stays first responder.
-        // Keys flow through keyDown normally. The guard already yields
-        // to NSText (field editors) for SwiftUI text selection to work.
-        if !visible {
+
+        if visible {
+            installAgentKeyMonitor()
+        } else {
+            removeAgentKeyMonitor()
             claimFirstResponder()
+        }
+    }
+
+    /// Installs a local key event monitor that forwards keyboard events
+    /// to EditorNSView when the agent chat overlay is visible. This is
+    /// needed because SwiftUI's opacity(0) on the NSViewRepresentable
+    /// parent disconnects the underlying NSView from event delivery.
+    ///
+    /// Uses Apple's NSEvent.addLocalMonitorForEvents API, the documented
+    /// approach for event interception when NSWindow subclassing isn't
+    /// available. Chosen over NSPanel child windows (coordinate coupling,
+    /// focus model mismatch, rendering seam on resize) and NSWindow
+    /// sendEvent override (not possible with SwiftUI App lifecycle).
+    ///
+    /// Monitors keyDown, keyUp, and flagsChanged:
+    /// - keyDown: all typing, Cmd+key combos (fires before responder chain,
+    ///   so it catches performKeyEquivalent events too)
+    /// - keyUp: needed for space leader chord cleanup (spacePending flag)
+    /// - flagsChanged: bare modifier presses (no-op today, future-proofing)
+    /// - Key repeat events arrive as keyDown with isARepeat=true and are
+    ///   handled correctly by the existing keyDown space leader code path
+    private func installAgentKeyMonitor() {
+        guard agentKeyMonitor == nil else { return }
+        agentKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp, .flagsChanged]) { [weak self] event in
+            guard let self, self.agentChatVisible else { return event }
+            // Yield to active text field editors (SwiftUI text selection).
+            // The FirstResponderGuard also yields to NSText, but the
+            // monitor fires before the responder chain so we check here too.
+            if let window = self.window, window.firstResponder is NSText {
+                return event
+            }
+            switch event.type {
+            case .keyDown:
+                self.keyDown(with: event)
+            case .keyUp:
+                self.keyUp(with: event)
+            case .flagsChanged:
+                self.flagsChanged(with: event)
+            default:
+                return event
+            }
+            return nil // consumed
+        }
+    }
+
+    private func removeAgentKeyMonitor() {
+        if let monitor = agentKeyMonitor {
+            NSEvent.removeMonitor(monitor)
+            agentKeyMonitor = nil
         }
     }
 
