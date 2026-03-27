@@ -51,16 +51,15 @@ final class EditorNSView: MTKView {
     /// Installed when the view moves to a window.
     private var firstResponderGuard: FirstResponderGuard?
 
-    /// When true, the agent chat SwiftUI overlay is visible. A local key
-    /// event monitor intercepts all keyboard input and forwards it to
-    /// `keyDown` so the BEAM still receives keys even though the
-    /// FirstResponderGuard is suspended (needed for SwiftUI text selection).
+    /// When true, the agent chat SwiftUI overlay is visible. The Metal
+    /// surface stays visible to render the prompt cell-grid at the bottom.
+    /// The FirstResponderGuard remains active so keys flow through the
+    /// normal keyDown path without needing an event monitor hack.
     private(set) var agentChatVisible: Bool = false
-    private var agentKeyMonitor: Any?
 
-    /// Status bar state from the BEAM. Used by the agent key monitor to
-    /// check the current vim mode so `y` is only intercepted as copy in
-    /// normal mode, not swallowed while the user is typing in insert mode.
+    /// Status bar state from the BEAM. Used by the space leader key-chord
+    /// logic to check whether insert mode is active (SPC is always literal
+    /// in insert mode, never a leader key).
     var statusBarState: StatusBarState?
 
     // MARK: - Space leader key-chord state
@@ -387,58 +386,18 @@ final class EditorNSView: MTKView {
         firstResponderGuard?.suspended = visible
     }
 
-    /// Activates the agent chat overlay mode: suspends the first responder
-    /// guard (so SwiftUI text selection works) and installs a local key
-    /// monitor that forwards all keyboard input to `keyDown` (so the BEAM
-    /// still receives keys for vim navigation and prompt typing).
+    /// Activates the agent chat overlay mode. The Metal surface stays
+    /// visible to render the prompt cell-grid. The FirstResponderGuard
+    /// remains active, so keys flow through the normal keyDown path.
+    /// SwiftUI text selection still works because the guard yields to
+    /// NSText field editors (see FirstResponderGuard.checkFirstResponder).
     func setAgentChatVisible(_ visible: Bool) {
         agentChatVisible = visible
-        firstResponderGuard?.suspended = visible
-
-        if visible {
-            installAgentKeyMonitor()
-        } else {
-            removeAgentKeyMonitor()
+        // Don't suspend the guard: EditorNSView stays first responder.
+        // Keys flow through keyDown normally. The guard already yields
+        // to NSText (field editors) for SwiftUI text selection to work.
+        if !visible {
             claimFirstResponder()
-        }
-    }
-
-    private func installAgentKeyMonitor() {
-        guard agentKeyMonitor == nil else { return }
-        agentKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self else { return event }
-
-            // CMD+C: trigger system copy for SwiftUI text selection
-            if event.modifierFlags.contains(.command),
-               let chars = event.charactersIgnoringModifiers,
-               chars == "c"
-            {
-                NSApp.sendAction(#selector(NSText.copy(_:)), to: nil, from: nil)
-                return nil
-            }
-
-            // `y` with no modifiers in normal mode: trigger copy, swallow
-            // the event. Without swallowing, the BEAM enters operator-pending
-            // yank mode and the next keypress is misinterpreted as a motion.
-            // Only intercept in normal mode (mode == 0) so the user can still
-            // type `y` in the agent chat input field during insert mode.
-            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-            let isNormalMode = self.statusBarState?.mode == 0
-            if event.characters == "y" && flags.isEmpty && isNormalMode {
-                NSApp.sendAction(#selector(NSText.copy(_:)), to: nil, from: nil)
-                return nil
-            }
-
-            // Forward all other keys to keyDown so the BEAM receives them
-            self.keyDown(with: event)
-            return nil
-        }
-    }
-
-    private func removeAgentKeyMonitor() {
-        if let monitor = agentKeyMonitor {
-            NSEvent.removeMonitor(monitor)
-            agentKeyMonitor = nil
         }
     }
 

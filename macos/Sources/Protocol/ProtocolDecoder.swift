@@ -35,7 +35,7 @@ enum RenderCommand: Sendable {
     case guiStatusBar(contentKind: UInt8, mode: UInt8, cursorLine: UInt32, cursorCol: UInt32, lineCount: UInt32, flags: UInt8, lspStatus: UInt8, gitBranch: String, message: String, filetype: String, errorCount: UInt16, warningCount: UInt16, modelName: String, messageCount: UInt32, sessionStatus: UInt8, infoCount: UInt16, hintCount: UInt16, macroRecording: UInt8, parserStatus: UInt8, agentStatus: UInt8, gitAdded: UInt16, gitModified: UInt16, gitDeleted: UInt16, icon: String, iconColorR: UInt8, iconColorG: UInt8, iconColorB: UInt8, filename: String, diagnosticHint: String)
     case guiPicker(visible: Bool, selectedIndex: UInt16, filteredCount: UInt16, totalCount: UInt16, title: String, query: String, hasPreview: Bool, items: [GUIPickerItem], actionMenu: GUIPickerActionMenu?)
     case guiPickerPreview(visible: Bool, lines: [GUIPickerPreviewLine])
-    case guiAgentChat(visible: Bool, status: UInt8, model: String, prompt: String, pendingToolName: String?, pendingToolSummary: String, helpVisible: Bool, helpGroups: [GUIHelpGroup], messages: [GUIChatMessage])
+    case guiAgentChat(visible: Bool, status: UInt8, model: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptVimMode: UInt8, promptVisibleRows: UInt8, pendingToolName: String?, pendingToolSummary: String, helpVisible: Bool, helpGroups: [GUIHelpGroup], messages: [GUIChatMessage])
     case guiGutterSeparator(col: UInt16, r: UInt8, g: UInt8, b: UInt8)
     case guiCursorline(row: UInt16, r: UInt8, g: UInt8, b: UInt8)
     case guiGutter(data: GUIWindowGutter)
@@ -969,7 +969,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
         let visible = data[rest] != 0
         if !visible {
-            return (.guiAgentChat(visible: false, status: 0, model: "", prompt: "", pendingToolName: nil, pendingToolSummary: "", helpVisible: false, helpGroups: [], messages: []), 2)
+            return (.guiAgentChat(visible: false, status: 0, model: "", prompt: "", promptLineCount: 1, promptCursorLine: 0, promptCursorCol: 0, promptVimMode: 0, promptVisibleRows: 1, pendingToolName: nil, pendingToolSummary: "", helpVisible: false, helpGroups: [], messages: []), 2)
         }
         guard data.count >= rest + 4 else { throw ProtocolDecodeError.malformed }
         let status = data[rest + 1]
@@ -979,8 +979,16 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         let promptLen = Int(readU16(data, rest + 4 + modelLen))
         guard data.count >= rest + 6 + modelLen + promptLen + 2 else { throw ProtocolDecodeError.malformed }
         let prompt = String(data: data[(rest + 6 + modelLen)..<(rest + 6 + modelLen + promptLen)], encoding: .utf8) ?? ""
+        // Parse prompt metadata: line_count(u8), cursor_line(u16), cursor_col(u16), vim_mode(u8), visible_rows(u8)
+        let promptMetaStart = rest + 6 + modelLen + promptLen
+        guard data.count >= promptMetaStart + 7 else { throw ProtocolDecodeError.malformed }
+        let promptLineCount = data[promptMetaStart]
+        let promptCursorLine = readU16(data, promptMetaStart + 1)
+        let promptCursorCol = readU16(data, promptMetaStart + 3)
+        let promptVimMode = data[promptMetaStart + 5]
+        let promptVisibleRows = data[promptMetaStart + 6]
         // Parse pending_approval: 0 = none, 1 = has approval
-        var pendingPos = rest + 6 + modelLen + promptLen
+        var pendingPos = promptMetaStart + 7
         guard data.count >= pendingPos + 1 else { throw ProtocolDecodeError.malformed }
         let hasPending = data[pendingPos] != 0
         pendingPos += 1
@@ -1186,7 +1194,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                 break
             }
         }
-        return (.guiAgentChat(visible: true, status: status, model: model, prompt: prompt, pendingToolName: pendingToolName, pendingToolSummary: pendingToolSummary, helpVisible: helpVisible, helpGroups: helpGroups, messages: messages), pos - offset)
+        return (.guiAgentChat(visible: true, status: status, model: model, prompt: prompt, promptLineCount: promptLineCount, promptCursorLine: promptCursorLine, promptCursorCol: promptCursorCol, promptVimMode: promptVimMode, promptVisibleRows: promptVisibleRows, pendingToolName: pendingToolName, pendingToolSummary: pendingToolSummary, helpVisible: helpVisible, helpGroups: helpGroups, messages: messages), pos - offset)
 
     case OP_GUI_GUTTER_SEP:
         // col:2, r:1, g:1, b:1 = 5 bytes after opcode

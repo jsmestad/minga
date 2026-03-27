@@ -1014,6 +1014,7 @@ defmodule Minga.Frontend.Protocol.GUI do
   defp encode_vim_mode(:normal), do: 0
   defp encode_vim_mode(:insert), do: 1
   defp encode_vim_mode(:visual), do: 2
+  defp encode_vim_mode(:visual_line), do: 2
   defp encode_vim_mode(:command), do: 3
   defp encode_vim_mode(:operator_pending), do: 4
   defp encode_vim_mode(:search), do: 5
@@ -1249,6 +1250,15 @@ defmodule Minga.Frontend.Protocol.GUI do
     model_bytes = :erlang.iolist_to_binary([model || ""])
     prompt_bytes = :erlang.iolist_to_binary([prompt || ""])
 
+    # Prompt metadata for the cell-grid renderer (cursor, mode, line count).
+    # These fields are appended after the prompt string so existing decoders
+    # that stop reading after the prompt still work for the messages payload.
+    prompt_line_count = data[:prompt_line_count] || 1
+    prompt_cursor_line = data[:prompt_cursor_line] || 0
+    prompt_cursor_col = data[:prompt_cursor_col] || 0
+    prompt_vim_mode = encode_vim_mode(data[:prompt_vim_mode])
+    prompt_visible_rows = data[:prompt_visible_rows] || 1
+
     pending_bytes = encode_pending_approval(data[:pending_approval])
     help_bytes = encode_help_overlay(data[:help_visible], data[:help_groups])
 
@@ -1260,7 +1270,9 @@ defmodule Minga.Frontend.Protocol.GUI do
     IO.iodata_to_binary([
       @op_gui_agent_chat,
       <<1::8, status_byte::8, byte_size(model_bytes)::16, model_bytes::binary,
-        byte_size(prompt_bytes)::16, prompt_bytes::binary>>,
+        byte_size(prompt_bytes)::16, prompt_bytes::binary, prompt_line_count::8,
+        prompt_cursor_line::16, prompt_cursor_col::16, prompt_vim_mode::8,
+        prompt_visible_rows::8>>,
       pending_bytes,
       help_bytes,
       <<length(msg_binaries)::16>>

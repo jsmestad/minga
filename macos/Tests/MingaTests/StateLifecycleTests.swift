@@ -289,6 +289,8 @@ struct AgentChatStateLifecycleTests {
             GUIChatMessage(beamId: 6, content: .usage(input: 100, output: 50, cacheRead: 80, cacheWrite: 20, costMicros: 5000))
         ]
         state.update(visible: true, status: 1, model: "claude", prompt: "fix bug",
+                     promptLineCount: 1, promptCursorLine: 0, promptCursorCol: 0,
+                     promptVimMode: 1, promptVisibleRows: 1,
                      pendingToolName: "write_file",
                      pendingToolSummary: "Writing config.toml",
                      helpVisible: false, helpGroups: [],
@@ -309,6 +311,8 @@ struct AgentChatStateLifecycleTests {
     @MainActor func hideClearsAll() {
         let state = AgentChatState()
         state.update(visible: true, status: 1, model: "claude", prompt: "test",
+                     promptLineCount: 1, promptCursorLine: 0, promptCursorCol: 0,
+                     promptVimMode: 1, promptVisibleRows: 1,
                      pendingToolName: nil, pendingToolSummary: "",
                      helpVisible: false, helpGroups: [],
                      rawMessages: [GUIChatMessage(beamId: 1, content: .user(text: "hi"))])

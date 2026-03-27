@@ -21,6 +21,8 @@ struct AgentChatView: View {
     let theme: ThemeColors
     let isInsertMode: Bool
     let encoder: InputEncoder?
+    /// Cell dimensions from the Metal renderer, used to size the prompt gap.
+    var cellHeight: CGFloat = 16
 
     @State private var scrollViewHeight: CGFloat = 0
     /// Tracks whether the user has scrolled away from the bottom.
@@ -541,94 +543,45 @@ struct AgentChatView: View {
         return theme.popupFg.opacity(0.2)
     }
 
-    /// Capsule border color: accent when in insert mode, subtle border otherwise.
-    private var capsuleBorderColor: Color {
-        if isInsertMode { return theme.accent.opacity(0.5) }
-        return theme.popupBorder.opacity(0.3)
-    }
-
-    /// Capsule background opacity shifts with mode.
-    private var capsuleBgOpacity: Double {
-        if isInsertMode { return 0.8 }
-        if isStreaming { return 0.6 }
-        return 0.4
+    /// Height of the Metal-rendered prompt area in points.
+    /// The prompt SemanticWindow is rendered by Metal through this transparent gap.
+    /// +2 rows for the top/bottom border of the prompt box.
+    private var promptGapHeight: CGFloat {
+        let rows = max(Int(state.promptVisibleRows), 1) + 2
+        return CGFloat(rows) * cellHeight + 16 // +16 for padding
     }
 
     @ViewBuilder
     private var promptArea: some View {
         HStack(spacing: 8) {
-            promptCapsule
-            actionButton
+            // Transparent gap where Metal renders the prompt cell-grid.
+            // The BEAM sends the prompt as a SemanticWindow (0x80) with
+            // window_id 65534, positioned at the bottom of the editor surface.
+            Color.clear
+                .frame(height: promptGapHeight)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    if !isInsertMode && !isStreaming {
+                        // Send 'i' to enter insert mode
+                        encoder?.sendKeyPress(codepoint: 0x69, modifiers: 0)
+                    }
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Chat input")
+                .accessibilityValue(state.prompt.isEmpty ? "Empty" : state.prompt)
+                .accessibilityHint(isInsertMode ? "Type a message, press Return to send" : "Press i to start typing")
+
+            // Action button (send / stop)
+            VStack {
+                Spacer()
+                actionButton
+                    .padding(.bottom, 8)
+            }
+            .frame(height: promptGapHeight)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 4)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Agent prompt")
-    }
-
-    @ViewBuilder
-    private var promptCapsule: some View {
-        HStack(spacing: 0) {
-            if isStreaming && state.prompt.isEmpty {
-                Text("Generating...")
-                    .font(.system(size: 13))
-                    .foregroundStyle(theme.popupFg.opacity(0.3))
-                    .italic()
-            } else if state.prompt.isEmpty && !isInsertMode {
-                Text("Ask anything...")
-                    .font(.system(size: 13))
-                    .foregroundStyle(theme.popupFg.opacity(0.25))
-            } else if state.prompt.isEmpty && isInsertMode {
-                // Show blinking cursor alone in empty insert mode
-                BlinkingCursor(color: theme.accent, resetToken: state.promptVersion)
-            } else {
-                // Text + cursor with zero spacing so cursor sits at the insertion point
-                Text(state.prompt)
-                    .font(.system(size: 13))
-                    .foregroundStyle(theme.popupFg.opacity(isStreaming ? 0.4 : 1.0))
-                    .lineLimit(3)
-                if isInsertMode && !isStreaming {
-                    BlinkingCursor(color: theme.accent, resetToken: state.promptVersion)
-                }
-            }
-
-            Spacer(minLength: 4)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(theme.popupBg.opacity(capsuleBgOpacity))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .strokeBorder(capsuleBorderColor, lineWidth: 1)
-        )
-        .contentShape(RoundedRectangle(cornerRadius: 12))
-        .onTapGesture {
-            if !isInsertMode && !isStreaming {
-                // Send 'i' to enter insert mode
-                encoder?.sendKeyPress(codepoint: 0x69, modifiers: 0)
-            }
-        }
-        .help("Press i to start typing")
-        .animation(
-            NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-                ? nil
-                : .easeInOut(duration: 0.15),
-            value: isInsertMode
-        )
-        .animation(
-            NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-                ? nil
-                : .easeInOut(duration: 0.15),
-            value: isStreaming
-        )
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Chat input")
-        .accessibilityValue(state.prompt.isEmpty ? "Empty" : state.prompt)
-        .accessibilityHint(isInsertMode ? "Type a message, press Return to send" : "Press i to start typing")
-        .accessibilityAddTraits(isInsertMode ? .isSearchField : .isStaticText)
     }
 
     @ViewBuilder
