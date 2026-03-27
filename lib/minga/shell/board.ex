@@ -79,10 +79,30 @@ defmodule Minga.Shell.Board do
           workspace
       end
 
-    # For agent cards, switch to agent scope
+    # For agent cards, switch to agent scope and set agent_chat content
+    # so the GUI renders the AgentChatView instead of a raw buffer.
     workspace =
       if card && !Minga.Shell.Board.Card.you_card?(card) do
-        %{workspace | keymap_scope: :agent}
+        ws = %{workspace | keymap_scope: :agent}
+
+        if card.session do
+          active_id = ws.windows.active
+          active_win = Map.get(ws.windows.map, active_id)
+
+          if active_win do
+            updated_win = %{
+              active_win
+              | content: Minga.Editor.Window.Content.agent_chat(card.session)
+            }
+
+            new_map = Map.put(ws.windows.map, active_id, updated_win)
+            %{ws | windows: %{ws.windows | map: new_map}}
+          else
+            ws
+          end
+        else
+          ws
+        end
       else
         workspace
       end

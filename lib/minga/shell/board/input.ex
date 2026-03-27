@@ -294,6 +294,28 @@ defmodule Minga.Shell.Board.Input do
     # depends on the Traditional tab system.
     ws = %{state.workspace | keymap_scope: :agent}
 
+    # Set the active window's content to agent_chat so the GUI
+    # renders the SwiftUI AgentChatView instead of a raw buffer.
+    ws =
+      if card.session do
+        active_id = ws.windows.active
+        active_win = Map.get(ws.windows.map, active_id)
+
+        if active_win do
+          updated_win = %{
+            active_win
+            | content: Minga.Editor.Window.Content.agent_chat(card.session)
+          }
+
+          new_map = Map.put(ws.windows.map, active_id, updated_win)
+          %{ws | windows: %{ws.windows | map: new_map}}
+        else
+          ws
+        end
+      else
+        ws
+      end
+
     # Make the agent panel visible
     state =
       Minga.Editor.State.AgentAccess.update_agent_ui(state, fn ui ->

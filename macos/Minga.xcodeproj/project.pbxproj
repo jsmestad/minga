@@ -363,11 +363,11 @@
 				65D15FC229A7AAA6AD493D1F /* AgentContextBarState.swift */,
 				2F80894B4E875FD2C66F14CC /* BoardState.swift */,
 				CC4D2EC281455699168DA872 /* BoardView.swift */,
-				9958CDCF40B9580E12AD1A81 /* SparklineView.swift */,
-				A4322CD8BEEFC8C2FB832438 /* DispatchSheetState.swift */,
-				BF5A488C20326CCE3A7FC46E /* DispatchSheetView.swift */,
 				03E3D96CF06FCC7F116AF4DC /* ChangeSummaryState.swift */,
 				2812AE57C17D25D125076FA3 /* ChangeSummaryView.swift */,
+				A4322CD8BEEFC8C2FB832438 /* DispatchSheetState.swift */,
+				BF5A488C20326CCE3A7FC46E /* DispatchSheetView.swift */,
+				9958CDCF40B9580E12AD1A81 /* SparklineView.swift */,
 			);
 			path = Board;
 			sourceTree = "<group>";
