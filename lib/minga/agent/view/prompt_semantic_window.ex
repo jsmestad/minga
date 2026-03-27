@@ -135,20 +135,23 @@ defmodule Minga.Agent.View.PromptSemanticWindow do
           pos_integer()
         ) :: VisualRow.t()
   defp build_visual_row(vl, line_text, _logical_idx, panel, at, inner_width) do
-    {display_text, fg_color} =
+    {display_text, fg_color, bg_color} =
       if UIState.paste_placeholder?(line_text) and vl.col_offset == 0 do
         case UIState.paste_block_index(line_text) do
           nil ->
-            {vl.text, rgb_to_int(at.text_fg)}
+            {vl.text, rgb_to_int(at.text_fg), rgb_to_int(at.input_bg)}
 
           block_index ->
             line_count = paste_block_line_count(panel.pasted_blocks, block_index)
             indicator = "󰆏 [pasted #{line_count} lines]"
             text = String.slice(indicator, 0, inner_width)
-            {text, rgb_to_int(at.hint_fg)}
+            # Paste pills use a distinct background for visual separation.
+            # Blend the input_bg with a subtle highlight to create a pill effect.
+            pill_bg = paste_pill_bg(at.input_bg)
+            {text, rgb_to_int(at.hint_fg), pill_bg}
         end
       else
-        {vl.text, rgb_to_int(at.text_fg)}
+        {vl.text, rgb_to_int(at.text_fg), rgb_to_int(at.input_bg)}
       end
 
     # Build a single span covering the entire text with the appropriate color
@@ -161,7 +164,7 @@ defmodule Minga.Agent.View.PromptSemanticWindow do
             start_col: 0,
             end_col: text_width,
             fg: fg_color,
-            bg: rgb_to_int(at.input_bg),
+            bg: bg_color,
             attrs: 0,
             font_weight: 0,
             font_id: 0
@@ -251,6 +254,20 @@ defmodule Minga.Agent.View.PromptSemanticWindow do
       %{text: text} -> text |> String.split("\n") |> length()
       nil -> 0
     end
+  end
+
+  # Computes a subtle highlight background for paste pill indicators.
+  # Lightens the input background by blending toward white (~10%).
+  @spec paste_pill_bg(non_neg_integer()) :: non_neg_integer()
+  defp paste_pill_bg(input_bg) do
+    r = Bitwise.band(Bitwise.bsr(input_bg, 16), 0xFF)
+    g = Bitwise.band(Bitwise.bsr(input_bg, 8), 0xFF)
+    b = Bitwise.band(input_bg, 0xFF)
+    # Lighten by ~10%: blend 90% original + 10% white
+    r2 = min(r + div(255 - r, 10), 255)
+    g2 = min(g + div(255 - g, 10), 255)
+    b2 = min(b + div(255 - b, 10), 255)
+    Bitwise.bor(Bitwise.bor(Bitwise.bsl(r2, 16), Bitwise.bsl(g2, 8)), b2)
   end
 
   # Convert a theme color integer to a 24-bit RGB integer.

@@ -46,4 +46,19 @@ defmodule Minga.Agent.View.PromptSemanticWindowTest do
       assert PromptSemanticWindow.build(%{}, 0) == nil
     end
   end
+
+  describe "visible_rows/2 with paste placeholders" do
+    test "paste placeholder counts as one visual row" do
+      # Insert a paste placeholder token into the buffer
+      {:ok, buf} = Buffer.start_link(content: "before\n\0PASTE:0\nafter")
+
+      panel = %UIState.Panel{
+        prompt_buffer: buf,
+        pasted_blocks: [%{text: "line1\nline2\nline3\nline4\nline5", expanded: false}]
+      }
+
+      # 3 logical lines (before, placeholder, after) -> 3 visible rows
+      assert PromptSemanticWindow.visible_rows(panel, 40) == 3
+    end
+  end
 end

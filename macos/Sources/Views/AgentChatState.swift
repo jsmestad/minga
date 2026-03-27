@@ -47,8 +47,8 @@ final class AgentChatState {
     var helpVisible: Bool = false
     var helpGroups: [HelpGroup] = []
 
-    /// Monotonically increasing counter for BlinkingCursor reset token.
-    /// Increments on every update() so the cursor resets on each BEAM frame.
+    /// Monotonically increasing counter for change detection.
+    /// Increments on every update() so SwiftUI observers detect frame changes.
     var promptVersion: Int = 0
 
     // ── Prompt cell-grid metadata (for Metal rendering) ──
