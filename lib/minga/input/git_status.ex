@@ -13,7 +13,6 @@ defmodule Minga.Input.GitStatus do
   alias Minga.Editor.Commands
   alias Minga.Editor.State, as: EditorState
   alias Minga.Git
-  alias Minga.Git.Repo
   alias Minga.Input
   alias Minga.Input.GitStatus.TuiState
   alias Minga.Keymap
@@ -242,7 +241,7 @@ defmodule Minga.Input.GitStatus do
   defp refresh_repo(git_root) do
     case Git.lookup_repo(git_root) do
       nil -> :ok
-      pid -> Repo.refresh(pid)
+      pid -> Git.refresh_repo(pid)
     end
   end
 

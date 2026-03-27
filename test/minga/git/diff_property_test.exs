@@ -1,4 +1,4 @@
-defmodule Minga.Git.DiffPropertyTest do
+defmodule Minga.Core.DiffPropertyTest do
   @moduledoc """
   Property-based tests for Git.Diff.
 
@@ -10,7 +10,7 @@ defmodule Minga.Git.DiffPropertyTest do
   use ExUnit.Case, async: true
   use ExUnitProperties
 
-  alias Minga.Git.Diff
+  alias Minga.Core.Diff
 
   import Minga.Test.Generators
 

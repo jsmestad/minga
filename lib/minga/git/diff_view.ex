@@ -1,4 +1,4 @@
-defmodule Minga.Git.DiffView do
+defmodule Minga.Core.DiffView do
   @moduledoc """
   Pure calculation module for building unified diff views.
 
@@ -6,7 +6,7 @@ defmodule Minga.Git.DiffView do
   text with line metadata for rendering as a read-only buffer with decorations.
   """
 
-  alias Minga.Git.Diff
+  alias Minga.Core.Diff
 
   @typedoc "Metadata for a single display line in the diff view."
   @type line_meta :: %{

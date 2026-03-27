@@ -19,8 +19,7 @@ defmodule Minga.Editor.StatusBar.Data do
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.Window.Content
-  alias Minga.Git.Buffer, as: GitBuffer
-  alias Minga.Git.Tracker, as: GitTracker
+  alias Minga.Git
   alias Minga.LSP.SyncServer
   alias Minga.UI.Theme
 
@@ -236,13 +235,13 @@ defmodule Minga.Editor.StatusBar.Data do
   def git_modeline_data(nil), do: {nil, nil}
 
   def git_modeline_data(buf) when is_pid(buf) do
-    case GitTracker.lookup(buf) do
+    case Git.tracking_pid(buf) do
       nil ->
         {nil, nil}
 
       git_pid ->
         try do
-          GitBuffer.modeline_info(git_pid)
+          Git.modeline_info(git_pid)
         catch
           :exit, _ -> {nil, nil}
         end

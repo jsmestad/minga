@@ -1,9 +1,9 @@
-defmodule Minga.Git.DiffTest do
+defmodule Minga.Core.DiffTest do
   @moduledoc "Tests for in-memory line diffing and hunk operations."
 
   use ExUnit.Case, async: true
 
-  alias Minga.Git.Diff
+  alias Minga.Core.Diff
 
   # ── diff_lines/2 ───────────────────────────────────────────────────────────
 

@@ -205,15 +205,54 @@ defmodule Minga.Git do
   @spec lookup_repo(String.t()) :: pid() | nil
   defdelegate lookup_repo(git_root), to: Minga.Git.Repo, as: :lookup
 
+  # ── Per-buffer git state ─────────────────────────────────────────────────
+
+  @doc "Returns cached status entries from a running Repo process."
+  @spec repo_status(pid()) :: [status_entry()]
+  defdelegate repo_status(repo_pid), to: Minga.Git.Repo, as: :status
+
+  @doc "Returns a summary map (branch, ahead/behind, file counts) from a Repo."
+  @spec repo_summary(pid()) :: map()
+  defdelegate repo_summary(repo_pid), to: Minga.Git.Repo, as: :summary
+
+  @doc "Triggers a background refresh of the Repo's cached git state."
+  @spec refresh_repo(pid()) :: :ok
+  defdelegate refresh_repo(repo_pid), to: Minga.Git.Repo, as: :refresh
+
+  @doc """
+  Returns the git tracking process for a buffer, or nil if untracked.
+
+  Composes the Tracker lookup so callers don't need to know about
+  the Tracker → Buffer two-step.
+  """
+  @spec tracking_pid(pid()) :: pid() | nil
+  defdelegate tracking_pid(buffer_pid), to: Minga.Git.Tracker, as: :lookup
+
+  @doc "Returns gutter sign indicators (line → hunk type) for a tracked buffer."
+  @spec gutter_signs(GenServer.server()) :: %{non_neg_integer() => atom()}
+  defdelegate gutter_signs(git_buffer), to: Minga.Git.Buffer, as: :signs
+
+  @doc "Returns modeline-ready git info (branch, hunk counts) for a tracked buffer."
+  @spec modeline_info(GenServer.server()) :: map()
+  defdelegate modeline_info(git_buffer), to: Minga.Git.Buffer, as: :modeline_info
+
+  @doc "Returns all diff hunks for a tracked buffer."
+  @spec hunks(GenServer.server()) :: [Minga.Core.Diff.hunk()]
+  defdelegate hunks(git_buffer), to: Minga.Git.Buffer, as: :hunks
+
+  @doc "Returns the hunk at a specific line, or nil."
+  @spec hunk_at(GenServer.server(), non_neg_integer()) :: Minga.Core.Diff.hunk() | nil
+  defdelegate hunk_at(git_buffer, line), to: Minga.Git.Buffer, as: :hunk_at
+
   # ── Pure diff computation ──────────────────────────────────────────────
 
   @doc "Computes line-level diff hunks between two lists of lines."
-  @spec diff_lines([String.t()], [String.t()]) :: [Minga.Git.Diff.hunk()]
-  defdelegate diff_lines(base_lines, current_lines), to: Minga.Git.Diff
+  @spec diff_lines([String.t()], [String.t()]) :: [Minga.Core.Diff.hunk()]
+  defdelegate diff_lines(base_lines, current_lines), to: Minga.Core.Diff
 
   @doc "Reverts a single hunk, restoring the base content for those lines."
-  @spec revert_hunk([String.t()], Minga.Git.Diff.hunk()) :: [String.t()]
-  defdelegate revert_hunk(current_lines, hunk), to: Minga.Git.Diff
+  @spec revert_hunk([String.t()], Minga.Core.Diff.hunk()) :: [String.t()]
+  defdelegate revert_hunk(current_lines, hunk), to: Minga.Core.Diff
 
   # ── Pure calculations (no backend needed) ──────────────────────────────
 

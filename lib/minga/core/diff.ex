@@ -1,14 +1,12 @@
-defmodule Minga.Git.Diff do
+defmodule Minga.Core.Diff do
   @moduledoc """
   In-memory line diffing and hunk operations.
 
-  Uses `List.myers_difference/2` to diff base (HEAD) lines against current
-  buffer lines. Produces hunk structs that the gutter renderer and hunk
-  commands consume.
+  Uses `List.myers_difference/2` to compute line-level diffs between
+  two versions of text. Produces hunk structs consumed by git gutter
+  rendering, hunk navigation, AI diff review, and patch generation.
 
-  This module is pure (no side effects, no git calls) so it's fast and
-  easy to test. Designed to run on every buffer change without spawning
-  any OS processes.
+  Pure computation with no side effects.
   """
 
   @typedoc """

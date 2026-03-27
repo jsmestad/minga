@@ -8,8 +8,8 @@ defmodule Minga.Agent.DiffReview do
   or reject individual hunks without leaving the agentic view.
   """
 
+  alias Minga.Core.Diff
   alias Minga.Git
-  alias Minga.Git.Diff
 
   @typedoc "Resolution status for a single hunk."
   @type resolution :: :accepted | :rejected
