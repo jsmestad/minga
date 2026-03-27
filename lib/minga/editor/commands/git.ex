@@ -132,7 +132,7 @@ defmodule Minga.Editor.Commands.Git do
         hunk ->
           {content, _cursor} = Buffer.content_and_cursor(buf)
           current_lines = String.split(content, "\n")
-          reverted_lines = Diff.revert_hunk(current_lines, hunk)
+          reverted_lines = Git.revert_hunk(current_lines, hunk)
           reverted_content = Enum.join(reverted_lines, "\n")
 
           Buffer.replace_content(buf, reverted_content)
@@ -298,7 +298,7 @@ defmodule Minga.Editor.Commands.Git do
 
   @spec refresh_repo(String.t()) :: :ok
   defp refresh_repo(git_root) do
-    case Repo.lookup(git_root) do
+    case Git.lookup_repo(git_root) do
       nil -> :ok
       pid -> Repo.refresh(pid)
     end
@@ -314,7 +314,7 @@ defmodule Minga.Editor.Commands.Git do
 
   @spec open_git_status_for_root(state(), String.t()) :: state()
   defp open_git_status_for_root(state, git_root) do
-    case Repo.lookup(git_root) do
+    case Git.lookup_repo(git_root) do
       nil ->
         EditorState.set_status(state, "Git.Repo not available")
 

@@ -19,7 +19,7 @@ defmodule Minga.Editor.Commands.AgentSubStates do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.AgentAccess
-  alias Minga.Git.Diff
+  alias Minga.Git
 
   import Bitwise
 
@@ -395,7 +395,7 @@ defmodule Minga.Editor.Commands.AgentSubStates do
     case File.read(path) do
       {:ok, content} ->
         current_lines = String.split(content, "\n")
-        reverted = Diff.revert_hunk(current_lines, hunk)
+        reverted = Git.revert_hunk(current_lines, hunk)
         File.write(path, Enum.join(reverted, "\n"))
 
       {:error, _} ->
@@ -411,7 +411,7 @@ defmodule Minga.Editor.Commands.AgentSubStates do
 
         reverted =
           Enum.reduce(hunks, current_lines, fn hunk, lines ->
-            Diff.revert_hunk(lines, hunk)
+            Git.revert_hunk(lines, hunk)
           end)
 
         File.write(path, Enum.join(reverted, "\n"))

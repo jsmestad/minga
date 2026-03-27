@@ -18,11 +18,11 @@ defmodule Minga.Editor do
   alias Minga.Buffer
   alias Minga.Config
   alias Minga.Editing.Completion
+  alias Minga.Git
 
   alias Minga.Diagnostics.Decorations, as: DiagDecorations
   alias Minga.Session
 
-  alias Minga.Git.Repo, as: GitRepo
 
   alias Minga.Editor.AgentLifecycle
   alias Minga.Editor.BottomPanel
@@ -2175,9 +2175,9 @@ defmodule Minga.Editor do
 
   @spec refresh_git_repo(String.t()) :: :ok
   defp refresh_git_repo(git_root) do
-    case GitRepo.lookup(git_root) do
+    case Git.lookup_repo(git_root) do
       nil -> :ok
-      pid -> GitRepo.refresh(pid)
+      pid -> Git.Repo.refresh(pid)
     end
   end
 

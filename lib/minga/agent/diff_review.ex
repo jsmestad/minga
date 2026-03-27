@@ -8,6 +8,7 @@ defmodule Minga.Agent.DiffReview do
   or reject individual hunks without leaving the agentic view.
   """
 
+  alias Minga.Git
   alias Minga.Git.Diff
 
   @typedoc "Resolution status for a single hunk."
@@ -45,7 +46,7 @@ defmodule Minga.Agent.DiffReview do
       when is_binary(path) and is_binary(before_content) and is_binary(after_content) do
     before_lines = String.split(before_content, "\n")
     after_lines = String.split(after_content, "\n")
-    hunks = Diff.diff_lines(before_lines, after_lines)
+    hunks = Git.diff_lines(before_lines, after_lines)
 
     case hunks do
       [] ->
@@ -77,7 +78,7 @@ defmodule Minga.Agent.DiffReview do
       )
       when is_binary(new_after_content) do
     new_after_lines = String.split(new_after_content, "\n")
-    new_hunks = Diff.diff_lines(before_lines, new_after_lines)
+    new_hunks = Git.diff_lines(before_lines, new_after_lines)
 
     case new_hunks do
       [] -> nil

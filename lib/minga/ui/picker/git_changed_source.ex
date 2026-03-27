@@ -9,7 +9,7 @@ defmodule Minga.UI.Picker.GitChangedSource do
   @behaviour Minga.UI.Picker.Source
 
   alias Minga.Editor.State, as: EditorState
-  alias Minga.Git.Repo, as: GitRepo
+  alias Minga.Git
   alias Minga.Language
   alias Minga.Log
   alias Minga.UI.Devicon
@@ -75,12 +75,12 @@ defmodule Minga.UI.Picker.GitChangedSource do
 
   @spec build_candidates(String.t()) :: [Item.t()]
   defp build_candidates(git_root) do
-    case GitRepo.lookup(git_root) do
+    case Git.lookup_repo(git_root) do
       nil ->
         []
 
       repo_pid ->
-        GitRepo.status(repo_pid)
+        Git.Repo.status(repo_pid)
         |> Enum.map(&format_entry/1)
     end
   end

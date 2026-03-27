@@ -199,6 +199,22 @@ defmodule Minga.Git do
   @spec fetch_remotes(String.t(), keyword()) :: :ok | {:error, String.t()}
   def fetch_remotes(git_root, opts \\ []), do: impl().fetch_remotes(git_root, opts)
 
+  # ── Repository process lookup ────────────────────────────────────────────
+
+  @doc "Finds the Repo process for a git root path, or nil if not started."
+  @spec lookup_repo(String.t()) :: pid() | nil
+  defdelegate lookup_repo(git_root), to: Minga.Git.Repo, as: :lookup
+
+  # ── Pure diff computation ──────────────────────────────────────────────
+
+  @doc "Computes line-level diff hunks between two lists of lines."
+  @spec diff_lines([String.t()], [String.t()]) :: [Minga.Git.Diff.hunk()]
+  defdelegate diff_lines(base_lines, current_lines), to: Minga.Git.Diff
+
+  @doc "Reverts a single hunk, restoring the base content for those lines."
+  @spec revert_hunk([String.t()], Minga.Git.Diff.hunk()) :: [String.t()]
+  defdelegate revert_hunk(current_lines, hunk), to: Minga.Git.Diff
+
   # ── Pure calculations (no backend needed) ──────────────────────────────
 
   @doc """

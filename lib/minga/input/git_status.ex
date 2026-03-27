@@ -240,7 +240,7 @@ defmodule Minga.Input.GitStatus do
 
   @spec refresh_repo(String.t()) :: :ok
   defp refresh_repo(git_root) do
-    case Repo.lookup(git_root) do
+    case Git.lookup_repo(git_root) do
       nil -> :ok
       pid -> Repo.refresh(pid)
     end
