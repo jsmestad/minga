@@ -149,44 +149,47 @@ struct BoardCardView: View {
     @State private var isHovered = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            // Header: status badge + elapsed time
-            HStack {
-                statusBadge
-                Spacer()
-                Text(card.elapsedDisplay)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.tertiary)
-            }
-
-            // Task description
-            Text(card.task)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(theme.editorFg.opacity(0.9))
-                .lineLimit(2)
-
-            Spacer(minLength: 4)
-
-            // Footer: model name + file count
-            HStack {
-                if !card.model.isEmpty {
-                    Text(card.model)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                if !card.recentFiles.isEmpty {
-                    Text(card.recentFiles.prefix(3).joined(separator: ", "))
-                        .font(.system(size: 11))
+        // TimelineView updates elapsed time every minute
+        TimelineView(.periodic(from: .now, by: 60)) { _ in
+            VStack(alignment: .leading, spacing: 8) {
+                // Header: status badge + elapsed time
+                HStack {
+                    statusBadge
+                    Spacer()
+                    Text(card.elapsedDisplay)
+                        .font(.system(size: 11).monospacedDigit())
                         .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
+                }
+
+                // Task description (or "Manual editing" for You card)
+                Text(card.isYouCard ? "Manual editing" : card.task)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(theme.editorFg.opacity(0.9))
+                    .lineLimit(2)
+
+                Spacer(minLength: 4)
+
+                // Footer: model name + touched files
+                HStack {
+                    if !card.model.isEmpty {
+                        Text(card.model)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if !card.recentFiles.isEmpty {
+                        Text(formattedFiles)
+                            .font(.system(size: 10))
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
                 }
             }
+            // Internal padding: vertical = horizontal × φ (golden ratio emphasis)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 12 * phi)
         }
-        // Internal padding: vertical = horizontal × φ (golden ratio emphasis)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 12 * phi)
         .background(
             RoundedRectangle(cornerRadius: 10)
                 .fill(cardBackground)
@@ -208,9 +211,24 @@ struct BoardCardView: View {
         }
         // VoiceOver: announce card as a single element with combined label
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(card.task), \(card.isYouCard ? "You" : card.status.label), \(card.elapsedDisplay)")
+        .accessibilityLabel("\(card.isYouCard ? "Manual editing" : card.task), \(card.isYouCard ? "You" : card.status.label), \(card.elapsedDisplay)")
         .accessibilityHint("Double tap to open")
         .accessibilityAddTraits(.isButton)
+    }
+
+    // MARK: - Formatted Files
+
+    /// Formats touched files as comma-separated basenames, max 3 with "+N more" suffix.
+    private var formattedFiles: String {
+        let basenames = card.recentFiles.map { URL(fileURLWithPath: $0).lastPathComponent }
+        let total = basenames.count
+        if total <= 3 {
+            return basenames.joined(separator: ", ")
+        } else {
+            let first3 = basenames.prefix(3).joined(separator: ", ")
+            let remaining = total - 3
+            return "\(first3) +\(remaining) more"
+        }
     }
 
     // MARK: - Status Badge

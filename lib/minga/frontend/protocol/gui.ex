@@ -715,7 +715,8 @@ defmodule Minga.Frontend.Protocol.GUI do
     task_bytes = :erlang.iolist_to_binary([card.task])
     model_bytes = :erlang.iolist_to_binary([card.model || ""])
 
-    elapsed = DateTime.diff(DateTime.utc_now(), card.created_at, :second)
+    # Send Unix timestamp so Swift can compute elapsed time locally
+    dispatch_timestamp = DateTime.to_unix(card.created_at)
 
     recent_files = card.recent_files
 
@@ -727,7 +728,8 @@ defmodule Minga.Frontend.Protocol.GUI do
 
     IO.iodata_to_binary([
       <<card.id::32, status_byte::8, flags::8, byte_size(task_bytes)::16, task_bytes::binary,
-        byte_size(model_bytes)::8, model_bytes::binary, elapsed::32, length(recent_files)::8>>
+        byte_size(model_bytes)::8, model_bytes::binary, dispatch_timestamp::32,
+        length(recent_files)::8>>
       | file_entries
     ])
   end
