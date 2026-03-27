@@ -79,43 +79,10 @@ defmodule Minga.Shell.Board do
           workspace
       end
 
-    # For agent cards, switch to agent scope, set agent_chat content,
-    # attach session, focus the prompt, and ensure the prompt buffer exists.
-    workspace =
-      if card && !Minga.Shell.Board.Card.you_card?(card) do
-        ws = %{workspace | keymap_scope: :agent}
-
-        # Set window content to agent_chat so GUI shows AgentChatView
-        ws =
-          if card.session do
-            active_id = ws.windows.active
-            active_win = Map.get(ws.windows.map, active_id)
-
-            if active_win do
-              updated_win = %{
-                active_win
-                | content: Minga.Editor.Window.Content.agent_chat(card.session)
-              }
-
-              new_map = Map.put(ws.windows.map, active_id, updated_win)
-              %{ws | windows: %{ws.windows | map: new_map}}
-            else
-              ws
-            end
-          else
-            ws
-          end
-
-        # Focus the prompt and ensure the prompt buffer exists.
-        # Session attachment happens via shell_state.agent (not workspace),
-        # so it's handled by the Editor GenServer when it processes
-        # the updated shell_state from this return value.
-        agent_ui = Minga.Agent.UIState.set_input_focused(ws.agent_ui, true)
-
-        %{ws | agent_ui: agent_ui}
-      else
-        workspace
-      end
+    # Agent activation (session, scope, window content, prompt focus) is
+    # handled by Editor.AgentActivation.activate_for_card/2 after this
+    # function returns. The Shell behaviour only has (shell_state, workspace)
+    # access; full EditorState is needed for session attachment.
 
     {shell_state, workspace}
   end

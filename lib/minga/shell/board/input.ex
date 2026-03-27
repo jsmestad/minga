@@ -267,62 +267,10 @@ defmodule Minga.Shell.Board.Input do
 
       # For agent cards, activate the agentic view so the user sees
       # the agent chat, not a plain buffer
-      if Card.you_card?(card) do
-        state
-      else
-        activate_agent_view(state, card)
-      end
+      Minga.Editor.AgentActivation.activate_for_card(state, card)
     else
       state
     end
-  end
-
-  @spec activate_agent_view(EditorState.t(), Card.t()) :: EditorState.t()
-  defp activate_agent_view(state, card) do
-    # Attach the session so agent events route correctly
-    state =
-      if card.session do
-        Minga.Editor.State.AgentAccess.update_agent(state, fn a ->
-          Minga.Editor.State.Agent.set_session(a, card.session)
-        end)
-      else
-        state
-      end
-
-    # Switch to agent scope so the agent chat/panel renders.
-    # This is a lighter approach than toggle_agentic_view which
-    # depends on the Traditional tab system.
-    ws = %{state.workspace | keymap_scope: :agent}
-
-    # Set the active window's content to agent_chat so the GUI
-    # renders the SwiftUI AgentChatView instead of a raw buffer.
-    ws =
-      if card.session do
-        active_id = ws.windows.active
-        active_win = Map.get(ws.windows.map, active_id)
-
-        if active_win do
-          updated_win = %{
-            active_win
-            | content: Minga.Editor.Window.Content.agent_chat(card.session)
-          }
-
-          new_map = Map.put(ws.windows.map, active_id, updated_win)
-          %{ws | windows: %{ws.windows | map: new_map}}
-        else
-          ws
-        end
-      else
-        ws
-      end
-
-    # Make the agent panel visible
-    state =
-      Minga.Editor.State.AgentAccess.update_agent_ui(state, fn ui ->
-        Minga.Agent.UIState.set_input_focused(ui, true)
-      end)
-
-    %{state | workspace: ws}
   end
 
   @spec create_new_card(EditorState.t()) :: EditorState.t()
@@ -346,7 +294,7 @@ defmodule Minga.Shell.Board.Input do
 
     # Activate the agentic view for the new card
     card = board.cards[card.id]
-    activate_agent_view(state, card)
+    Minga.Editor.AgentActivation.activate_for_card(state, card)
   end
 
   @spec start_and_attach_session(BoardState.t(), pos_integer(), String.t(), EditorState.t()) ::
