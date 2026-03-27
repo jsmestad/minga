@@ -315,6 +315,7 @@ final class SpyEncoder: InputEncoder, Sendable {
         case boardSelectCard(id: UInt32)
         case boardCloseCard(id: UInt32)
         case boardReorder(cardId: UInt32, newIndex: UInt16)
+        case boardDispatchAgent(task: String, model: String)
     }
 
     private let state = OSAllocatedUnfairLock(initialState: State())
@@ -403,6 +404,9 @@ final class SpyEncoder: InputEncoder, Sendable {
     }
     func sendBoardReorder(cardId: UInt32, newIndex: UInt16) {
         state.withLock { $0.guiActions.append(.boardReorder(cardId: cardId, newIndex: newIndex)) }
+    }
+    func sendDispatchAgent(task: String, model: String) {
+        state.withLock { $0.guiActions.append(.boardDispatchAgent(task: task, model: model)) }
     }
 }
 

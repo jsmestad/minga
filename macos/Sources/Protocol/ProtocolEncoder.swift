@@ -76,6 +76,7 @@ protocol InputEncoder: AnyObject, Sendable {
     func sendBoardSelectCard(id: UInt32)
     func sendBoardCloseCard(id: UInt32)
     func sendBoardReorder(cardId: UInt32, newIndex: UInt16)
+    func sendDispatchAgent(task: String, model: String)
 }
 
 extension InputEncoder {
@@ -555,6 +556,34 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         buf[1] = GUI_ACTION_BOARD_REORDER
         writeU32(&buf, 2, cardId)
         writeU16(&buf, 6, newIndex)
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: board_dispatch_agent.
+    /// Layout: opcode(1) + action_type(1) + model_len(2) + model_name + task_len(2) + task_text.
+    func sendDispatchAgent(task: String, model: String) {
+        let taskUtf8 = Array(task.utf8)
+        let modelUtf8 = Array(model.utf8)
+        let taskLen = min(taskUtf8.count, Int(UInt16.max))
+        let modelLen = min(modelUtf8.count, Int(UInt16.max))
+
+        var buf = Data(count: 6 + modelLen + taskLen)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_BOARD_DISPATCH_AGENT
+
+        // Write model
+        writeU16(&buf, 2, UInt16(modelLen))
+        if modelLen > 0 {
+            buf.replaceSubrange(4..<(4 + modelLen), with: modelUtf8[0..<modelLen])
+        }
+
+        // Write task
+        let taskOffset = 4 + modelLen
+        writeU16(&buf, taskOffset, UInt16(taskLen))
+        if taskLen > 0 {
+            buf.replaceSubrange((taskOffset + 2)..<(taskOffset + 2 + taskLen), with: taskUtf8[0..<taskLen])
+        }
+
         writeFrame(buf)
     }
 

@@ -253,6 +253,7 @@ struct ContentView: View {
                 if appState.gui.boardState.visible {
                     BoardView(
                         state: appState.gui.boardState,
+                        dispatchSheet: appState.gui.dispatchSheetState,
                         theme: appState.gui.themeColors,
                         encoder: appState.encoder
                     )

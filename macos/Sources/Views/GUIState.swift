@@ -58,6 +58,9 @@ final class GUIState {
     /// Board card grid state (0x87).
     let boardState = BoardState()
 
+    /// Agent dispatch sheet state.
+    let dispatchSheetState = DispatchSheetState()
+
     /// Semantic window content from gui_window_content (0x80).
     /// Keyed by windowId. NOT cleared between frames; the guiWindowContent
     /// dispatch overwrites per-window data each frame. Stale entries serve

@@ -10,6 +10,7 @@ import SwiftUI
 /// zoom-in by switching the workspace and hiding the Board.
 struct BoardView: View {
     let state: BoardState
+    let dispatchSheet: DispatchSheetState
     let theme: ThemeColors
     let encoder: InputEncoder?
 
@@ -39,6 +40,9 @@ struct BoardView: View {
                 }
             }
             .background(theme.editorBg)
+        }
+        .overlay {
+            DispatchSheetView(state: dispatchSheet, theme: theme, encoder: encoder)
         }
     }
 
