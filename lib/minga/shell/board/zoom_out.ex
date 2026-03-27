@@ -22,20 +22,33 @@ defmodule Minga.Shell.Board.ZoomOut do
   @spec handle_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           Minga.Input.Handler.result()
 
-  # Escape when zoomed: zoom out back to the grid
+  # Escape when zoomed: zoom out back to the grid.
+  # But when the agent panel is in insert mode, let ESC pass through
+  # so it switches to normal mode first. The user presses ESC again
+  # (in normal mode) to zoom out.
   def handle_key(
         %{shell: Board, shell_state: %BoardState{zoomed_into: card_id}} = state,
         @key_escape,
         0
       )
       when card_id != nil do
-    # Don't intercept Escape if a modal overlay is open (picker, completion, etc.)
-    # Those are handled by overlay handlers above us in the stack.
-    # We only get here if overlays passed through.
-    {:handled, zoom_out(state)}
+    if agent_panel_in_insert_mode?(state) do
+      {:passthrough, state}
+    else
+      {:handled, zoom_out(state)}
+    end
   end
 
   def handle_key(state, _cp, _mods), do: {:passthrough, state}
+
+  # Returns true when the agent panel is focused and in insert mode.
+  # In this state, ESC should toggle vim mode, not zoom out.
+  @spec agent_panel_in_insert_mode?(EditorState.t()) :: boolean()
+  defp agent_panel_in_insert_mode?(state) do
+    state.workspace.keymap_scope == :agent and
+      state.workspace.agent_ui.panel.input_focused and
+      Minga.Editing.mode(state) == :insert
+  end
 
   # ── Zoom out ───────────────────────────────────────────────────────────
 

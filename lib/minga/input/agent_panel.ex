@@ -48,6 +48,30 @@ defmodule Minga.Input.AgentPanel do
     end
   end
 
+  # Board shell with agent scope (zoomed into agent card): handles
+  # prompt input and navigation when the Board has zoomed into an agent.
+  # Only matches when the shell is Board to avoid interfering with
+  # the TUI's agent scope which has its own input handling.
+  def handle_key(
+        %{shell: Minga.Shell.Board, workspace: %{keymap_scope: :agent}} = state,
+        cp,
+        mods
+      ) do
+    panel = AgentAccess.panel(state)
+
+    if panel.input_focused do
+      {:handled, handle_panel_input(state, cp, mods)}
+    else
+      agent = AgentAccess.agent(state)
+
+      if is_pid(agent.buffer) do
+        handle_panel_nav(state, cp, mods)
+      else
+        {:passthrough, state}
+      end
+    end
+  end
+
   # Not our concern
   def handle_key(state, _cp, _mods), do: {:passthrough, state}
 
