@@ -314,6 +314,7 @@ final class SpyEncoder: InputEncoder, Sendable {
         case gitOpenFile(path: String)
         case boardSelectCard(id: UInt32)
         case boardCloseCard(id: UInt32)
+        case boardReorder(cardId: UInt32, newIndex: UInt16)
     }
 
     private let state = OSAllocatedUnfairLock(initialState: State())
@@ -399,6 +400,9 @@ final class SpyEncoder: InputEncoder, Sendable {
     }
     func sendBoardCloseCard(id: UInt32) {
         state.withLock { $0.guiActions.append(.boardCloseCard(id: id)) }
+    }
+    func sendBoardReorder(cardId: UInt32, newIndex: UInt16) {
+        state.withLock { $0.guiActions.append(.boardReorder(cardId: cardId, newIndex: newIndex)) }
     }
 }
 
