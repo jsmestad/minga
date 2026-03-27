@@ -26,7 +26,6 @@ defmodule Minga.Editor.Commands do
 
   alias Minga.Buffer
   alias Minga.Command
-  alias Minga.Command.Registry, as: CommandRegistry
   alias Minga.Editor.Commands.Agent, as: AgentCommands
   alias Minga.Editor.Commands.BufferManagement
   alias Minga.Editor.Commands.Editing, as: EditingCommands
@@ -468,7 +467,7 @@ defmodule Minga.Editor.Commands do
   # we return state unchanged. Otherwise, call the registered execute function.
 
   def execute(state, cmd) when is_atom(cmd) do
-    case CommandRegistry.lookup(CommandRegistry, cmd) do
+    case Command.lookup(cmd) do
       {:ok, %Command{requires_buffer: true}} when is_nil(state.workspace.buffers.active) ->
         state
 

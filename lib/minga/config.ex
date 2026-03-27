@@ -34,7 +34,7 @@ defmodule Minga.Config do
   See `Minga.Config.Options` for the full list of supported options.
   """
 
-  alias Minga.Command.Registry, as: CommandRegistry
+  alias Minga.Command
   alias Minga.Config.Advice
   alias Minga.Config.Completion
   alias Minga.Config.Loader
@@ -392,7 +392,7 @@ defmodule Minga.Config do
       state
     end
 
-    CommandRegistry.register(CommandRegistry, name, description, execute_fn)
+    Command.register(name, description, execute_fn)
     :ok
   end
 

@@ -12,7 +12,6 @@ defmodule Minga.Editor.MinibufferData do
   """
 
   alias Minga.Command
-  alias Minga.Command.Registry, as: CommandRegistry
   alias Minga.Editor.State, as: EditorState
   alias Minga.Keymap
   alias Minga.UI.WhichKey
@@ -243,7 +242,7 @@ defmodule Minga.Editor.MinibufferData do
     keybind_map = build_keybind_map()
 
     matched =
-      CommandRegistry.all(CommandRegistry)
+      Command.all_commands()
       |> Enum.map(fn %Command{} = cmd ->
         name = to_string(cmd.name)
         score = fuzzy_score(name, input_lower)
@@ -276,7 +275,7 @@ defmodule Minga.Editor.MinibufferData do
     popular = ~w(write quit edit save-buffer find-file split vsplit set help)a
     keybind_map = build_keybind_map()
 
-    all = CommandRegistry.all(CommandRegistry)
+    all = Command.all_commands()
     total = length(all)
 
     popular_cmds =

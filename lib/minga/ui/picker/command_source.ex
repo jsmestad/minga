@@ -15,7 +15,6 @@ defmodule Minga.UI.Picker.CommandSource do
 
   alias Minga.Buffer
   alias Minga.Command
-  alias Minga.Command.Registry, as: CommandRegistry
   alias Minga.Editor.PickerUI
   alias Minga.UI.Picker.OptionScopeSource
 
@@ -29,7 +28,7 @@ defmodule Minga.UI.Picker.CommandSource do
     keybind_map = build_keybind_map()
 
     try do
-      CommandRegistry.all(CommandRegistry)
+      Command.all_commands()
       |> Enum.map(fn cmd ->
         keybind = Map.get(keybind_map, cmd.name, "")
         annotation = if keybind != "", do: "SPC #{keybind}", else: ""
@@ -68,7 +67,7 @@ defmodule Minga.UI.Picker.CommandSource do
 
   @spec lookup_command(atom()) :: Command.t() | nil
   defp lookup_command(name) do
-    case CommandRegistry.lookup(CommandRegistry, name) do
+    case Command.lookup(name) do
       {:ok, cmd} -> cmd
       :error -> nil
     end
