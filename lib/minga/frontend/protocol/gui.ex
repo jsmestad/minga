@@ -200,6 +200,7 @@ defmodule Minga.Frontend.Protocol.GUI do
   @gui_action_board_select_card 0x25
   @gui_action_board_close_card 0x26
   @gui_action_board_reorder 0x27
+  @gui_action_board_dispatch_agent 0x28
 
   # ── Types ──
 
@@ -245,6 +246,7 @@ defmodule Minga.Frontend.Protocol.GUI do
           | {:board_select_card, card_id :: pos_integer()}
           | {:board_close_card, card_id :: pos_integer()}
           | {:board_reorder, card_id :: pos_integer(), new_index :: non_neg_integer()}
+          | {:board_dispatch_agent, task :: String.t(), model :: String.t()}
 
   # ═══════════════════════════════════════════════════════════════════════════
   # Encoding (BEAM → Frontend)
@@ -1766,6 +1768,12 @@ defmodule Minga.Frontend.Protocol.GUI do
 
   def decode_gui_action(@gui_action_board_reorder, <<card_id::32, new_index::16>>),
     do: {:ok, {:board_reorder, card_id, new_index}}
+
+  def decode_gui_action(
+        @gui_action_board_dispatch_agent,
+        <<model_len::16, model::binary-size(model_len), task_len::16, task::binary-size(task_len)>>
+      ),
+      do: {:ok, {:board_dispatch_agent, task, model}}
 
   def decode_gui_action(_, _), do: :error
 

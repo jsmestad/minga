@@ -101,6 +101,47 @@ defmodule Minga.Shell.Board do
     {shell_state, workspace}
   end
 
+  def handle_gui_action(shell_state, workspace, {:board_dispatch_agent, task, model}) do
+    {shell_state, card} =
+      BoardState.create_card(shell_state,
+        task: task,
+        model: model,
+        status: :working,
+        kind: :agent
+      )
+
+    Minga.Log.info(:agent, "Board: dispatched agent card ##{card.id} (#{model}): #{task}")
+
+    # Start an agent session for this card
+    case Minga.Agent.Supervisor.start_session(
+           provider_opts: [model: model],
+           thinking_level: :normal
+         ) do
+      {:ok, pid} ->
+        shell_state =
+          BoardState.update_card(shell_state, card.id, fn c ->
+            %{c | session: pid}
+          end)
+
+        # Send the task as the initial prompt
+        Minga.Agent.Session.send_prompt(pid, task)
+
+        Minga.Shell.Board.Persistence.save(shell_state)
+        {shell_state, workspace}
+
+      {:error, reason} ->
+        Minga.Log.warning(:agent, "Board: failed to start session for card ##{card.id}: #{inspect(reason)}")
+
+        shell_state =
+          BoardState.update_card(shell_state, card.id, fn c ->
+            %{c | status: :errored}
+          end)
+
+        Minga.Shell.Board.Persistence.save(shell_state)
+        {shell_state, workspace}
+    end
+  end
+
   def handle_gui_action(shell_state, workspace, _action) do
     {shell_state, workspace}
   end
