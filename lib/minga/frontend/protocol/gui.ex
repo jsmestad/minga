@@ -131,6 +131,26 @@ defmodule Minga.Frontend.Protocol.GUI do
   @section_recording 0x08
   @section_agent 0x09
 
+  # gui_gutter sections
+  @section_gutter_window 0x01
+  @section_gutter_config 0x02
+  @section_gutter_entries 0x03
+
+  # gui_picker sections
+  @section_picker_header 0x01
+  @section_picker_query 0x02
+  @section_picker_items 0x03
+  @section_picker_action_menu 0x04
+
+  # gui_agent_chat sections
+  @section_chat_header 0x01
+  @section_chat_model 0x02
+  @section_chat_prompt 0x03
+  @section_chat_pending 0x04
+  @section_chat_help 0x05
+  @section_chat_messages 0x06
+  @section_chat_completion 0x07
+
   # ── Forward-compatible opcodes (0x90+, include 2-byte length prefix) ──
   # New opcodes >= 0x90 start with: opcode(1) + payload_length(2) + payload.
   # Old frontends skip unknown 0x90+ opcodes by reading the length and
@@ -327,8 +347,8 @@ defmodule Minga.Frontend.Protocol.GUI do
         entries: entries
       }) do
     style_byte = encode_line_number_style(style)
-    count = length(entries)
     active_byte = if active, do: 1, else: 0
+    count = length(entries)
 
     entry_binaries =
       Enum.map(entries, fn entry ->
@@ -351,11 +371,21 @@ defmodule Minga.Frontend.Protocol.GUI do
         end
       end)
 
-    IO.iodata_to_binary([
-      <<@op_gui_gutter, window_id::16, row::16, col::16, height::16, active_byte::8,
-        cursor_line::32, style_byte::8, ln_width::8, sign_width::8, count::16>>
-      | entry_binaries
-    ])
+    entries_payload = IO.iodata_to_binary([<<count::16>> | entry_binaries])
+
+    sections = [
+      encode_section(
+        @section_gutter_window,
+        <<window_id::16, row::16, col::16, height::16, active_byte::8>>
+      ),
+      encode_section(
+        @section_gutter_config,
+        <<cursor_line::32, style_byte::8, ln_width::8, sign_width::8>>
+      ),
+      encode_section(@section_gutter_entries, entries_payload)
+    ]
+
+    IO.iodata_to_binary([<<@op_gui_gutter, length(sections)::8>> | sections])
   end
 
   @spec encode_line_number_style(line_number_style()) :: non_neg_integer()
@@ -1139,7 +1169,6 @@ defmodule Minga.Frontend.Protocol.GUI do
 
         flags = encode_picker_item_flags(item, picker)
 
-        # Match positions: list of uint16 character indices
         positions = item.match_positions
         pos_count = min(length(positions), 255)
 
@@ -1151,16 +1180,21 @@ defmodule Minga.Frontend.Protocol.GUI do
           annotation_bytes::binary, pos_count::8, pos_bytes::binary>>
       end)
 
+    items_payload = IO.iodata_to_binary([<<length(items)::16>> | entries])
     action_menu_bytes = encode_picker_action_menu(action_menu)
 
-    IO.iodata_to_binary([
-      @op_gui_picker,
-      <<1::8, picker.selected::16, filtered_count::16, total_count::16,
-        byte_size(title_bytes)::16, title_bytes::binary, byte_size(query_bytes)::16,
-        query_bytes::binary, has_preview_byte::8, length(items)::16>>,
-      entries,
-      action_menu_bytes
-    ])
+    sections = [
+      encode_section(
+        @section_picker_header,
+        <<1::8, picker.selected::16, filtered_count::16, total_count::16, has_preview_byte::8,
+          byte_size(title_bytes)::16, title_bytes::binary>>
+      ),
+      encode_section(@section_picker_query, <<byte_size(query_bytes)::16, query_bytes::binary>>),
+      encode_section(@section_picker_items, items_payload),
+      encode_section(@section_picker_action_menu, action_menu_bytes)
+    ]
+
+    IO.iodata_to_binary([<<@op_gui_picker, length(sections)::8>> | sections])
   end
 
   @spec encode_picker_action_menu(action_menu_state()) :: binary()
@@ -1283,18 +1317,24 @@ defmodule Minga.Frontend.Protocol.GUI do
       |> Enum.take(100)
       |> Enum.map(&encode_chat_message/1)
 
-    IO.iodata_to_binary([
-      @op_gui_agent_chat,
-      <<1::8, status_byte::8, byte_size(model_bytes)::16, model_bytes::binary,
-        byte_size(prompt_bytes)::16, prompt_bytes::binary, prompt_line_count::8,
-        prompt_cursor_line::16, prompt_cursor_col::16, prompt_vim_mode::8,
-        prompt_visible_rows::8>>,
-      completion_bytes,
-      pending_bytes,
-      help_bytes,
-      <<length(msg_binaries)::16>>
-      | msg_binaries
-    ])
+    messages_payload = IO.iodata_to_binary([<<length(msg_binaries)::16>> | msg_binaries])
+
+    sections = [
+      encode_section(@section_chat_header, <<1::8, status_byte::8>>),
+      encode_section(@section_chat_model, <<byte_size(model_bytes)::16, model_bytes::binary>>),
+      encode_section(
+        @section_chat_prompt,
+        <<byte_size(prompt_bytes)::16, prompt_bytes::binary, prompt_line_count::8,
+          prompt_cursor_line::16, prompt_cursor_col::16, prompt_vim_mode::8,
+          prompt_visible_rows::8>>
+      ),
+      encode_section(@section_chat_completion, completion_bytes),
+      encode_section(@section_chat_pending, pending_bytes),
+      encode_section(@section_chat_help, help_bytes),
+      encode_section(@section_chat_messages, messages_payload)
+    ]
+
+    IO.iodata_to_binary([<<@op_gui_agent_chat, length(sections)::8>> | sections])
   end
 
   # Encodes prompt completion popup state for @-mention or /slash completion.

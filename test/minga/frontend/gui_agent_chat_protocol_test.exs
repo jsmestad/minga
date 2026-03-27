@@ -3,6 +3,26 @@ defmodule Minga.Frontend.GUIAgentChatProtocolTest do
 
   alias Minga.Frontend.Protocol.GUI, as: ProtocolGUI
 
+  # Extracts a section payload by ID from a sectioned binary (skips opcode + section_count header)
+  defp extract_section(binary, target_id) do
+    <<_opcode::8, section_count::8, rest::binary>> = binary
+    find_section(rest, section_count, target_id)
+  end
+
+  defp find_section(_rest, 0, _target_id), do: nil
+
+  defp find_section(
+         <<section_id::8, section_len::16, payload::binary-size(section_len), rest::binary>>,
+         remaining,
+         target_id
+       ) do
+    if section_id == target_id do
+      payload
+    else
+      find_section(rest, remaining - 1, target_id)
+    end
+  end
+
   describe "decode_gui_action for agent_tool_toggle" do
     test "decodes a valid agent_tool_toggle action" do
       assert {:ok, {:agent_tool_toggle, 7}} ==
@@ -126,10 +146,10 @@ defmodule Minga.Frontend.GUIAgentChatProtocolTest do
 
       binary = ProtocolGUI.encode_gui_agent_chat(data)
 
-      # Parse the envelope to get to the message payload
-      <<0x78, 1::8, _status::8, model_len::16, _model::binary-size(model_len), prompt_len::16,
-        _prompt::binary-size(prompt_len), _prompt_meta::binary-size(7), 0::8, 0::8, 0::8,
-        msg_count::16, msg_data::binary>> = binary
+      # Extract messages section (0x06)
+      messages_payload = extract_section(binary, 0x06)
+      assert messages_payload != nil
+      <<msg_count::16, msg_data::binary>> = messages_payload
 
       assert msg_count == 2
 
@@ -138,7 +158,7 @@ defmodule Minga.Frontend.GUIAgentChatProtocolTest do
       assert text == "hello"
 
       # Second message: ID=99, type=0x02 (assistant), text="hi"
-      <<99::32, 0x02::8, text2_len::32, text2::binary-size(text2_len)>> = rest
+      <<99::32, 0x02::8, text2_len::32, text2::binary-size(text2_len), _::binary>> = rest
       assert text2 == "hi"
     end
 
@@ -154,9 +174,8 @@ defmodule Minga.Frontend.GUIAgentChatProtocolTest do
 
       binary = ProtocolGUI.encode_gui_agent_chat(data)
 
-      <<0x78, 1::8, _status::8, model_len::16, _model::binary-size(model_len), prompt_len::16,
-        _prompt::binary-size(prompt_len), _prompt_meta::binary-size(7), 0::8, 0::8, 0::8, 1::16,
-        msg_data::binary>> = binary
+      messages_payload = extract_section(binary, 0x06)
+      <<1::16, msg_data::binary>> = messages_payload
 
       # ID prefix should be 0 for bare tuples
       <<0::32, 0x01::8, _rest::binary>> = msg_data
@@ -195,16 +214,11 @@ defmodule Minga.Frontend.GUIAgentChatProtocolTest do
 
       binary = ProtocolGUI.encode_gui_agent_chat(data)
 
-      <<0x78, 1::8, _status::8, model_len::16, _model::binary-size(model_len), prompt_len::16,
-        _prompt::binary-size(prompt_len), _prompt_meta::binary-size(7), 0::8, 0::8, 0::8,
-        msg_count::16, _msg_data::binary>> = binary
+      messages_payload = extract_section(binary, 0x06)
+      <<msg_count::16, _msg_data::binary>> = messages_payload
 
       assert msg_count == 6
 
-      # Verify each message starts with its expected ID by scanning the binary.
-      # The messages are sequential, so we check the first 4 bytes of each.
-      # Rather than parsing all message bodies, just verify the binary contains
-      # the expected ID values in order.
       for {id, _msg} <- messages do
         assert :binary.match(binary, <<id::32>>) != :nomatch,
                "Expected message ID #{id} in encoded binary"
@@ -227,12 +241,9 @@ defmodule Minga.Frontend.GUIAgentChatProtocolTest do
 
       binary = ProtocolGUI.encode_gui_agent_chat(data)
 
-      # After opcode, visible, status, model, prompt, pending (0x00), then help_visible (0x00)
-      <<0x78, 1::8, _status::8, 0::16, 0::16, _pm::binary-size(7), 0::8, 0::8, help_visible::8,
-        msg_count::16>> = binary
-
-      assert help_visible == 0
-      assert msg_count == 0
+      # Help section (0x05) should contain a single 0x00 byte (not visible)
+      help_payload = extract_section(binary, 0x05)
+      assert help_payload == <<0x00>>
     end
 
     test "encodes help_visible=true with help groups" do
@@ -252,10 +263,9 @@ defmodule Minga.Frontend.GUIAgentChatProtocolTest do
 
       binary = ProtocolGUI.encode_gui_agent_chat(data)
 
-      # Parse the help overlay section
-      <<0x78, 1::8, _status::8, 0::16, 0::16, _pm::binary-size(7), 0::8, 0::8, 1::8,
-        group_count::8, rest::binary>> =
-        binary
+      # Extract help section (0x05) and parse
+      help_payload = extract_section(binary, 0x05)
+      <<1::8, group_count::8, rest::binary>> = help_payload
 
       assert group_count == 2
 
@@ -264,14 +274,12 @@ defmodule Minga.Frontend.GUIAgentChatProtocolTest do
       assert nav == "Navigation"
       assert nav_count == 2
 
-      # First binding: "j / k" -> "Scroll down / up"
       <<k1_len::8, k1::binary-size(k1_len), d1_len::16, d1::binary-size(d1_len),
         nav_rest2::binary>> = nav_rest
 
       assert k1 == "j / k"
       assert d1 == "Scroll down / up"
 
-      # Second binding: "gg / G" -> "Top / bottom"
       <<k2_len::8, k2::binary-size(k2_len), d2_len::16, d2::binary-size(d2_len),
         copy_rest::binary>> = nav_rest2
 
@@ -285,12 +293,11 @@ defmodule Minga.Frontend.GUIAgentChatProtocolTest do
       assert copy_title == "Copy"
       assert copy_count == 1
 
-      <<ck_len::8, ck::binary-size(ck_len), cd_len::16, cd::binary-size(cd_len), msg_count::16>> =
+      <<ck_len::8, ck::binary-size(ck_len), cd_len::16, cd::binary-size(cd_len)>> =
         copy_bindings
 
       assert ck == "y"
       assert cd == "Copy code block"
-      assert msg_count == 0
     end
 
     test "nil help_visible encodes as not visible" do
@@ -305,11 +312,8 @@ defmodule Minga.Frontend.GUIAgentChatProtocolTest do
 
       binary = ProtocolGUI.encode_gui_agent_chat(data)
 
-      <<0x78, 1::8, _status::8, 0::16, 0::16, _pm::binary-size(7), 0::8, 0::8, help_visible::8,
-        msg_count::16>> = binary
-
-      assert help_visible == 0
-      assert msg_count == 0
+      help_payload = extract_section(binary, 0x05)
+      assert help_payload == <<0x00>>
     end
   end
 end

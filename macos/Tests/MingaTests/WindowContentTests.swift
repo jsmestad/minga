@@ -43,70 +43,94 @@ struct WindowContentBuilder {
     }
 
     func build() -> Data {
-        var data = Data()
-        data.append(OP_GUI_WINDOW_CONTENT)
-        appendU16(&data, windowId)
-        data.append(flags)
-        appendU16(&data, cursorRow)
-        appendU16(&data, cursorCol)
-        data.append(cursorShape)
-        appendU16(&data, scrollLeft)
-        appendU16(&data, UInt16(rows.count))
+        // Sectioned format: opcode(1) + section_count(1) + sections...
+        var headerPayload = Data()
+        appendU16(&headerPayload, windowId)
+        headerPayload.append(flags)
+        appendU16(&headerPayload, cursorRow)
+        appendU16(&headerPayload, cursorCol)
+        headerPayload.append(cursorShape)
+        appendU16(&headerPayload, scrollLeft)
 
+        var rowsPayload = Data()
+        appendU16(&rowsPayload, UInt16(rows.count))
         for row in rows {
-            data.append(row.rowType)
-            appendU32(&data, row.bufLine)
-            appendU32(&data, row.contentHash)
+            rowsPayload.append(row.rowType)
+            appendU32(&rowsPayload, row.bufLine)
+            appendU32(&rowsPayload, row.contentHash)
             let textBytes = Array(row.text.utf8)
-            appendU32(&data, UInt32(textBytes.count))
-            data.append(contentsOf: textBytes)
-            appendU16(&data, UInt16(row.spans.count))
+            appendU32(&rowsPayload, UInt32(textBytes.count))
+            rowsPayload.append(contentsOf: textBytes)
+            appendU16(&rowsPayload, UInt16(row.spans.count))
             for span in row.spans {
-                appendU16(&data, span.startCol)
-                appendU16(&data, span.endCol)
-                data.append(contentsOf: [span.fgR, span.fgG, span.fgB])
-                data.append(contentsOf: [span.bgR, span.bgG, span.bgB])
-                data.append(span.attrs)
-                data.append(span.fontWeight)
-                data.append(span.fontId)
+                appendU16(&rowsPayload, span.startCol)
+                appendU16(&rowsPayload, span.endCol)
+                rowsPayload.append(contentsOf: [span.fgR, span.fgG, span.fgB])
+                rowsPayload.append(contentsOf: [span.bgR, span.bgG, span.bgB])
+                rowsPayload.append(span.attrs)
+                rowsPayload.append(span.fontWeight)
+                rowsPayload.append(span.fontId)
             }
         }
 
-        data.append(selectionType)
+        var selPayload = Data()
+        selPayload.append(selectionType)
         if selectionType != 0, let coords = selectionCoords {
-            appendU16(&data, coords.0)
-            appendU16(&data, coords.1)
-            appendU16(&data, coords.2)
-            appendU16(&data, coords.3)
+            appendU16(&selPayload, coords.0)
+            appendU16(&selPayload, coords.1)
+            appendU16(&selPayload, coords.2)
+            appendU16(&selPayload, coords.3)
         }
 
-        appendU16(&data, UInt16(searchMatches.count))
+        var matchPayload = Data()
+        appendU16(&matchPayload, UInt16(searchMatches.count))
         for m in searchMatches {
-            appendU16(&data, m.row)
-            appendU16(&data, m.startCol)
-            appendU16(&data, m.endCol)
-            data.append(m.isCurrent)
+            appendU16(&matchPayload, m.row)
+            appendU16(&matchPayload, m.startCol)
+            appendU16(&matchPayload, m.endCol)
+            matchPayload.append(m.isCurrent)
         }
 
-        appendU16(&data, UInt16(diagnosticRanges.count))
+        var diagPayload = Data()
+        appendU16(&diagPayload, UInt16(diagnosticRanges.count))
         for d in diagnosticRanges {
-            appendU16(&data, d.startRow)
-            appendU16(&data, d.startCol)
-            appendU16(&data, d.endRow)
-            appendU16(&data, d.endCol)
-            data.append(d.severity)
+            appendU16(&diagPayload, d.startRow)
+            appendU16(&diagPayload, d.startCol)
+            appendU16(&diagPayload, d.endRow)
+            appendU16(&diagPayload, d.endCol)
+            diagPayload.append(d.severity)
         }
 
-        appendU16(&data, UInt16(documentHighlights.count))
+        var highlightPayload = Data()
+        appendU16(&highlightPayload, UInt16(documentHighlights.count))
         for h in documentHighlights {
-            appendU16(&data, h.startRow)
-            appendU16(&data, h.startCol)
-            appendU16(&data, h.endRow)
-            appendU16(&data, h.endCol)
-            data.append(h.kind)
+            appendU16(&highlightPayload, h.startRow)
+            appendU16(&highlightPayload, h.startCol)
+            appendU16(&highlightPayload, h.endRow)
+            appendU16(&highlightPayload, h.endCol)
+            highlightPayload.append(h.kind)
         }
 
+        // Build sections
+        var data = Data()
+        data.append(OP_GUI_WINDOW_CONTENT)
+        data.append(7) // section_count
+        data.append(contentsOf: buildSection(0x01, headerPayload))
+        data.append(contentsOf: buildSection(0x02, rowsPayload))
+        data.append(contentsOf: buildSection(0x03, selPayload))
+        data.append(contentsOf: buildSection(0x04, matchPayload))
+        data.append(contentsOf: buildSection(0x05, diagPayload))
+        data.append(contentsOf: buildSection(0x06, highlightPayload))
+        data.append(contentsOf: buildSection(0x07, Data())) // empty annotations
         return data
+    }
+
+    private func buildSection(_ id: UInt8, _ payload: Data) -> Data {
+        var section = Data()
+        section.append(id)
+        appendU16(&section, UInt16(payload.count))
+        section.append(payload)
+        return section
     }
 
     private func appendU16(_ data: inout Data, _ value: UInt16) {

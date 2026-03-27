@@ -219,9 +219,16 @@ Macro recording: 0=not recording, 1-26=recording register a-z
 
 `icon` is a UTF-8 encoded Nerd Font glyph for the filetype (e.g., "" for Elixir). `icon_color` is 24-bit RGB split into 3 bytes. `filename` is the display name of the active buffer (for accessibility/tooltip use). `git_added`, `git_modified`, `git_deleted` are line counts from the buffer's diff against HEAD.
 
-### 0x77 — gui_picker
+### 0x77 — gui_picker (sectioned format)
 
-Fuzzy finder / command palette state (v2 extended format).
+Fuzzy finder / command palette state. Uses sectioned envelope: `opcode(1) + section_count(1) + sections...`. Hidden picker: section_count=0.
+
+| Section ID | Name | Content |
+|-----------|------|--------|
+| 0x01 | Header | visible, selected_index, filtered_count, total_count, has_preview, title |
+| 0x02 | Query | query string |
+| 0x03 | Items | item_count + items (positional per item) |
+| 0x04 | ActionMenu | visible flag + selected + actions |
 
 ```
 When visible:
@@ -275,10 +282,20 @@ When hidden:
   opcode(1) + 0(1)
 ```
 
-### 0x78 — gui_agent_chat
+### 0x78 — gui_agent_chat (sectioned format)
 
-Agent conversation view state.
+Agent conversation view state. Uses sectioned envelope: `opcode(1) + section_count(1) + sections...`. Hidden: section_count=0.
 
+| Section ID | Name | Content |
+|-----------|------|--------|
+| 0x01 | Header | visible, status |
+| 0x02 | Model | model name |
+| 0x03 | Prompt | prompt text |
+| 0x04 | Pending | pending approval (tool name + summary) |
+| 0x05 | Help | help overlay visibility + groups |
+| 0x06 | Messages | message_count + messages (same nested format as before) |
+
+**Legacy positional format (deprecated):**
 ```
 When visible:
   opcode(1) + 1(1) + status(1) + model_len(2) + model(model_len) + prompt_len(2) + prompt(prompt_len) + pending_approval + message_count(2) + messages...
@@ -325,9 +342,15 @@ opcode(1) + row(2) + r(1) + g(1) + b(1)
 
 The GUI frontend draws the cursorline as a full-width colored rectangle behind the text on this row. This replaces the TUI approach of prepending a full-width space fill draw to paint the background.
 
-### 0x7B — gui_gutter
+### 0x7B — gui_gutter (sectioned format)
 
-Structured gutter data for native line number and sign rendering. One message is sent per editor window (split pane), each including the window's screen position. Agent chat windows are skipped.
+Structured gutter data for native line number and sign rendering. One message is sent per editor window (split pane), each including the window's screen position. Agent chat windows are skipped. Uses sectioned envelope: `opcode(1) + section_count(1) + sections...`.
+
+| Section ID | Name | Content |
+|-----------|------|--------|
+| 0x01 | Window | window_id, content_row, content_col, content_height, is_active |
+| 0x02 | Config | cursor_line, line_number_style, line_number_width, sign_col_width |
+| 0x03 | Entries | entry_count + entries (positional per entry) |
 
 ```
 opcode(1) + window_id(2) + content_row(2) + content_col(2) + content_height(2) + is_active(1)
@@ -504,11 +527,21 @@ Mode values:
 
 `cursor_pos` is the 0-indexed character position within `input` for the beam cursor. `0xFFFF` means no cursor (prompt-only modes 5-7). `context` is right-aligned supplementary text. `match_score` is 0-255 fuzzy match quality. `candidate_count == 0` naturally represents "input visible, no completions."
 
-### 0x80 — gui_window_content
+### 0x80 — gui_window_content (sectioned format)
 
 Semantic rendering data for a buffer window. Replaces draw_text commands for buffer content. The BEAM pre-resolves all layout (word wrap, folding, virtual text splicing, conceal ranges) and all styling (syntax highlighting colors). The frontend renders directly from this data via CoreText, with selection/search/diagnostics as overlay quads (not baked into text colors).
 
-One 0x80 message is sent per buffer window per frame. Agent chat windows do not use this opcode.
+One 0x80 message is sent per buffer window per frame. Agent chat windows do not use this opcode. Uses sectioned envelope: `opcode(1) + section_count(1) + sections...`.
+
+| Section ID | Name | Content |
+|-----------|------|--------|
+| 0x01 | Header | window_id, flags, cursor_row, cursor_col, cursor_shape, scroll_left |
+| 0x02 | Rows | row_count + rows (positional per row with spans) |
+| 0x03 | Selection | selection_type + coordinates |
+| 0x04 | SearchMatches | match_count + matches |
+| 0x05 | Diagnostics | range_count + diagnostic ranges |
+| 0x06 | DocumentHighlights | highlight_count + highlights |
+| 0x07 | LineAnnotations | annotation_count + annotations |
 
 ```
 opcode(1) + window_id(2) + flags(1) + cursor_row(2) + cursor_col(2) + cursor_shape(1) + scroll_left(2) + visible_row_count(2) + rows... + selection + search_matches + diagnostic_ranges

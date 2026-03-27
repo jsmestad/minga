@@ -12,33 +12,85 @@ defmodule Minga.Test.GUIWindowContentDecoder do
 
   @doc "Decodes an 0x80 binary back into a map for test assertions."
   @spec decode(binary()) :: map()
-  def decode(
-        <<0x80, window_id::16, flags::8, cursor_row::16, cursor_col::16, cursor_shape::8,
-          scroll_left::16, row_count::16, rest::binary>>
-      ) do
-    {rows, rest} = decode_rows(rest, row_count, [])
-    {selection, rest} = decode_selection(rest)
-    {search_matches, rest} = decode_search_matches(rest)
-    {diagnostic_ranges, rest} = decode_diagnostic_ranges(rest)
-    {document_highlights, rest} = decode_document_highlights(rest)
-    {annotations, <<>>} = decode_annotations(rest)
+  def decode(<<0x80, section_count::8, rest::binary>>) do
+    result = %{
+      window_id: 0,
+      full_refresh: true,
+      cursor_visible: true,
+      cursor_row: 0,
+      cursor_col: 0,
+      cursor_shape: :block,
+      scroll_left: 0,
+      rows: [],
+      selection: nil,
+      search_matches: [],
+      diagnostic_ranges: [],
+      document_highlights: [],
+      annotations: []
+    }
+
+    {result, <<>>} = decode_sections(rest, section_count, result)
+    result
+  end
+
+  defp decode_sections(rest, 0, result), do: {result, rest}
+
+  defp decode_sections(
+         <<section_id::8, section_len::16, payload::binary-size(section_len), rest::binary>>,
+         remaining,
+         result
+       ) do
+    result = decode_section(section_id, payload, result)
+    decode_sections(rest, remaining - 1, result)
+  end
+
+  defp decode_section(0x01, payload, result) do
+    <<window_id::16, flags::8, cursor_row::16, cursor_col::16, cursor_shape::8, scroll_left::16>> =
+      payload
 
     %{
-      window_id: window_id,
-      full_refresh: (flags &&& 1) == 1,
-      cursor_visible: (flags &&& 2) == 2,
-      cursor_row: cursor_row,
-      cursor_col: cursor_col,
-      cursor_shape: decode_cursor_shape(cursor_shape),
-      scroll_left: scroll_left,
-      rows: rows,
-      selection: selection,
-      search_matches: search_matches,
-      diagnostic_ranges: diagnostic_ranges,
-      document_highlights: document_highlights,
-      annotations: annotations
+      result
+      | window_id: window_id,
+        full_refresh: (flags &&& 1) == 1,
+        cursor_visible: (flags &&& 2) == 2,
+        cursor_row: cursor_row,
+        cursor_col: cursor_col,
+        cursor_shape: decode_cursor_shape(cursor_shape),
+        scroll_left: scroll_left
     }
   end
+
+  defp decode_section(0x02, <<row_count::16, rest::binary>>, result) do
+    {rows, <<>>} = decode_rows(rest, row_count, [])
+    %{result | rows: rows}
+  end
+
+  defp decode_section(0x03, payload, result) do
+    {selection, <<>>} = decode_selection(payload)
+    %{result | selection: selection}
+  end
+
+  defp decode_section(0x04, payload, result) do
+    {search_matches, <<>>} = decode_search_matches(payload)
+    %{result | search_matches: search_matches}
+  end
+
+  defp decode_section(0x05, payload, result) do
+    {diagnostic_ranges, <<>>} = decode_diagnostic_ranges(payload)
+    %{result | diagnostic_ranges: diagnostic_ranges}
+  end
+
+  defp decode_section(0x06, payload, result) do
+    {document_highlights, <<>>} = decode_document_highlights(payload)
+    %{result | document_highlights: document_highlights}
+  end
+
+  defp decode_section(0x07, payload, result) do
+    {annotations, <<>>} = decode_annotations(payload)
+    %{result | annotations: annotations}
+  end
+
+  defp decode_section(_unknown, _payload, result), do: result
 
   # ── Rows ─────────────────────────────────────────────────────────────────
 

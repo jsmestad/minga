@@ -579,76 +579,108 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         return (.guiStatusBar(contentKind: contentKind, mode: mode, cursorLine: cursorLine, cursorCol: cursorCol, lineCount: lineCount, flags: flags, lspStatus: lspStatus, gitBranch: gitBranch, message: message, filetype: filetype, errorCount: errorCount, warningCount: warningCount, modelName: modelName, messageCount: messageCount, sessionStatus: sessionStatus, infoCount: infoCount, hintCount: hintCount, macroRecording: macroRecording, parserStatus: parserStatus, agentStatus: agentStatus, gitAdded: gitAdded, gitModified: gitModified, gitDeleted: gitDeleted, icon: icon, iconColorR: iconColorR, iconColorG: iconColorG, iconColorB: iconColorB, filename: filename, diagnosticHint: diagnosticHint), pos - offset)
 
     case OP_GUI_PICKER:
+        // Sectioned format: opcode(1) + section_count(1) + sections...
+        // Hidden picker: opcode(1) + 0(1) (zero sections, visible defaults to false)
         guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
-        let visible = data[rest] != 0
-        if !visible {
+        let pickerSectionCount = Int(data[rest])
+        if pickerSectionCount == 0 {
             return (.guiPicker(visible: false, selectedIndex: 0, filteredCount: 0, totalCount: 0, title: "", query: "", hasPreview: false, items: [], actionMenu: nil), 2)
         }
-        // v2 header: selected(2) + filtered_count(2) + total_count(2) + title_len(2) + title + query_len(2) + query + has_preview(1) + item_count(2)
-        guard data.count >= rest + 7 else { throw ProtocolDecodeError.malformed }
-        let selectedIndex = readU16(data, rest + 1)
-        let filteredCount = readU16(data, rest + 3)
-        let totalCount = readU16(data, rest + 5)
-        let titleLen = Int(readU16(data, rest + 7))
-        guard data.count >= rest + 9 + titleLen + 2 else { throw ProtocolDecodeError.malformed }
-        let title = String(data: data[(rest + 9)..<(rest + 9 + titleLen)], encoding: .utf8) ?? ""
-        let queryLen = Int(readU16(data, rest + 9 + titleLen))
-        guard data.count >= rest + 11 + titleLen + queryLen + 3 else { throw ProtocolDecodeError.malformed }
-        let query = String(data: data[(rest + 11 + titleLen)..<(rest + 11 + titleLen + queryLen)], encoding: .utf8) ?? ""
-        let hasPreview = data[rest + 11 + titleLen + queryLen] != 0
-        let itemCount = Int(readU16(data, rest + 12 + titleLen + queryLen))
-        var items: [Wire.PickerItem] = []
-        items.reserveCapacity(itemCount)
-        var pos = rest + 14 + titleLen + queryLen
-        for _ in 0..<itemCount {
-            // Per item: icon_color(3) + flags(1) + label_len(2) + label + desc_len(2) + desc + annotation_len(2) + annotation + match_pos_count(1) + positions
-            guard data.count >= pos + 6 else { throw ProtocolDecodeError.malformed }
-            let iconColor = readU24(data, pos)
-            let itemFlags = data[pos + 3]
-            let labelLen = Int(readU16(data, pos + 4))
-            guard data.count >= pos + 6 + labelLen + 2 else { throw ProtocolDecodeError.malformed }
-            let label = String(data: data[(pos + 6)..<(pos + 6 + labelLen)], encoding: .utf8) ?? ""
-            let descLen = Int(readU16(data, pos + 6 + labelLen))
-            guard data.count >= pos + 8 + labelLen + descLen + 2 else { throw ProtocolDecodeError.malformed }
-            let desc = String(data: data[(pos + 8 + labelLen)..<(pos + 8 + labelLen + descLen)], encoding: .utf8) ?? ""
-            let annotationLen = Int(readU16(data, pos + 8 + labelLen + descLen))
-            guard data.count >= pos + 10 + labelLen + descLen + annotationLen + 1 else { throw ProtocolDecodeError.malformed }
-            let annotation = String(data: data[(pos + 10 + labelLen + descLen)..<(pos + 10 + labelLen + descLen + annotationLen)], encoding: .utf8) ?? ""
-            let matchPosCount = Int(data[pos + 10 + labelLen + descLen + annotationLen])
-            guard data.count >= pos + 11 + labelLen + descLen + annotationLen + matchPosCount * 2 else { throw ProtocolDecodeError.malformed }
-            var matchPositions: [UInt16] = []
-            matchPositions.reserveCapacity(matchPosCount)
-            var mpos = pos + 11 + labelLen + descLen + annotationLen
-            for _ in 0..<matchPosCount {
-                matchPositions.append(readU16(data, mpos))
-                mpos += 2
+        var pickerPos = rest + 1
+        var pkVisible = false
+        var pkSelectedIndex: UInt16 = 0
+        var pkFilteredCount: UInt16 = 0
+        var pkTotalCount: UInt16 = 0
+        var pkHasPreview = false
+        var pkTitle = ""
+        var pkQuery = ""
+        var pkItems: [Wire.PickerItem] = []
+        var pkActionMenu: Wire.PickerActionMenu? = nil
+
+        for _ in 0..<pickerSectionCount {
+            guard data.count >= pickerPos + 3 else { throw ProtocolDecodeError.malformed }
+            let psId = data[pickerPos]
+            let psLen = Int(readU16(data, pickerPos + 1))
+            let psStart = pickerPos + 3
+            guard data.count >= psStart + psLen else { throw ProtocolDecodeError.malformed }
+
+            switch psId {
+            case 0x01: // Header: visible(1) + selected(2) + filtered(2) + total(2) + has_preview(1) + title_len(2) + title
+                guard psLen >= 8 else { break }
+                pkVisible = data[psStart] != 0
+                pkSelectedIndex = readU16(data, psStart + 1)
+                pkFilteredCount = readU16(data, psStart + 3)
+                pkTotalCount = readU16(data, psStart + 5)
+                pkHasPreview = data[psStart + 7] != 0
+                if psLen >= 10 {
+                    let tLen = Int(readU16(data, psStart + 8))
+                    if psLen >= 10 + tLen {
+                        pkTitle = String(data: data[(psStart + 10)..<(psStart + 10 + tLen)], encoding: .utf8) ?? ""
+                    }
+                }
+
+            case 0x02: // Query: query_len(2) + query
+                guard psLen >= 2 else { break }
+                let qLen = Int(readU16(data, psStart))
+                if psLen >= 2 + qLen {
+                    pkQuery = String(data: data[(psStart + 2)..<(psStart + 2 + qLen)], encoding: .utf8) ?? ""
+                }
+
+            case 0x03: // Items: item_count(2) + items...
+                guard psLen >= 2 else { break }
+                let itemCount = Int(readU16(data, psStart))
+                pkItems.reserveCapacity(itemCount)
+                var iPos = psStart + 2
+                let sectionEnd = psStart + psLen
+                for _ in 0..<itemCount {
+                    guard iPos + 6 <= sectionEnd else { break }
+                    let iconColor = readU24(data, iPos)
+                    let itemFlags = data[iPos + 3]
+                    let labelLen = Int(readU16(data, iPos + 4))
+                    iPos += 6
+                    guard iPos + labelLen + 2 <= sectionEnd else { break }
+                    let label = String(data: data[iPos..<(iPos + labelLen)], encoding: .utf8) ?? ""
+                    iPos += labelLen
+                    let descLen = Int(readU16(data, iPos)); iPos += 2
+                    guard iPos + descLen + 2 <= sectionEnd else { break }
+                    let desc = String(data: data[iPos..<(iPos + descLen)], encoding: .utf8) ?? ""
+                    iPos += descLen
+                    let annotLen = Int(readU16(data, iPos)); iPos += 2
+                    guard iPos + annotLen + 1 <= sectionEnd else { break }
+                    let annot = String(data: data[iPos..<(iPos + annotLen)], encoding: .utf8) ?? ""
+                    iPos += annotLen
+                    let mpc = Int(data[iPos]); iPos += 1
+                    guard iPos + mpc * 2 <= sectionEnd else { break }
+                    var matchPos: [UInt16] = []
+                    for _ in 0..<mpc { matchPos.append(readU16(data, iPos)); iPos += 2 }
+                    pkItems.append(Wire.PickerItem(iconColor: UInt32(iconColor), flags: itemFlags, label: label, description: desc, annotation: annot, matchPositions: matchPos))
+                }
+
+            case 0x04: // Action menu: visible(1), if visible: selected(1) + count(1) + actions
+                guard psLen >= 1 else { break }
+                let amVisible = data[psStart] != 0
+                if amVisible, psLen >= 3 {
+                    let amSelected = data[psStart + 1]
+                    let amCount = Int(data[psStart + 2])
+                    var amPos = psStart + 3
+                    var amNames: [String] = []
+                    for _ in 0..<amCount {
+                        guard amPos + 2 <= psStart + psLen else { break }
+                        let nLen = Int(readU16(data, amPos)); amPos += 2
+                        guard amPos + nLen <= psStart + psLen else { break }
+                        amNames.append(String(data: data[amPos..<(amPos + nLen)], encoding: .utf8) ?? "")
+                        amPos += nLen
+                    }
+                    pkActionMenu = Wire.PickerActionMenu(selectedIndex: amSelected, actions: amNames)
+                }
+
+            default: break
             }
-            items.append(Wire.PickerItem(iconColor: UInt32(iconColor), flags: itemFlags, label: label, description: desc, annotation: annotation, matchPositions: matchPositions))
-            pos = mpos
+
+            pickerPos = psStart + psLen
         }
-        // Parse action menu: visible(1), if visible: selected(1) + count(1) + actions
-        var actionMenu: Wire.PickerActionMenu? = nil
-        guard data.count >= pos + 1 else { throw ProtocolDecodeError.malformed }
-        let actionMenuVisible = data[pos] != 0
-        pos += 1
-        if actionMenuVisible {
-            guard data.count >= pos + 2 else { throw ProtocolDecodeError.malformed }
-            let actionSelected = data[pos]
-            let actionCount = Int(data[pos + 1])
-            pos += 2
-            var actionNames: [String] = []
-            actionNames.reserveCapacity(actionCount)
-            for _ in 0..<actionCount {
-                guard data.count >= pos + 2 else { throw ProtocolDecodeError.malformed }
-                let nameLen = Int(readU16(data, pos))
-                guard data.count >= pos + 2 + nameLen else { throw ProtocolDecodeError.malformed }
-                let name = String(data: data[(pos + 2)..<(pos + 2 + nameLen)], encoding: .utf8) ?? ""
-                actionNames.append(name)
-                pos += 2 + nameLen
-            }
-            actionMenu = Wire.PickerActionMenu(selectedIndex: actionSelected, actions: actionNames)
-        }
-        return (.guiPicker(visible: true, selectedIndex: selectedIndex, filteredCount: filteredCount, totalCount: totalCount, title: title, query: query, hasPreview: hasPreview, items: items, actionMenu: actionMenu), pos - offset)
+
+        return (.guiPicker(visible: pkVisible, selectedIndex: pkSelectedIndex, filteredCount: pkFilteredCount, totalCount: pkTotalCount, title: pkTitle, query: pkQuery, hasPreview: pkHasPreview, items: pkItems, actionMenu: pkActionMenu), pickerPos - offset)
 
     case OP_GUI_PICKER_PREVIEW:
         guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
@@ -682,109 +714,134 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         return (.guiPickerPreview(visible: true, lines: lines), pos2 - offset)
 
     case OP_GUI_AGENT_CHAT:
+        // Sectioned format: opcode(1) + section_count(1) + sections...
+        // Hidden: opcode(1) + 0(1)
         guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
-        let visible = data[rest] != 0
-        if !visible {
+        let chatSectionCount = Int(data[rest])
+        if chatSectionCount == 0 {
             return (.guiAgentChat(visible: false, status: 0, model: "", prompt: "", promptLineCount: 1, promptCursorLine: 0, promptCursorCol: 0, promptVimMode: 0, promptVisibleRows: 1, promptCompletion: nil, pendingToolName: nil, pendingToolSummary: "", helpVisible: false, helpGroups: [], messages: []), 2)
         }
-        guard data.count >= rest + 4 else { throw ProtocolDecodeError.malformed }
-        let status = data[rest + 1]
-        let modelLen = Int(readU16(data, rest + 2))
-        guard data.count >= rest + 4 + modelLen + 2 else { throw ProtocolDecodeError.malformed }
-        let model = String(data: data[(rest + 4)..<(rest + 4 + modelLen)], encoding: .utf8) ?? ""
-        let promptLen = Int(readU16(data, rest + 4 + modelLen))
-        guard data.count >= rest + 6 + modelLen + promptLen + 2 else { throw ProtocolDecodeError.malformed }
-        let prompt = String(data: data[(rest + 6 + modelLen)..<(rest + 6 + modelLen + promptLen)], encoding: .utf8) ?? ""
-        // Parse prompt metadata: line_count(u8), cursor_line(u16), cursor_col(u16), vim_mode(u8), visible_rows(u8)
-        let promptMetaStart = rest + 6 + modelLen + promptLen
-        guard data.count >= promptMetaStart + 7 else { throw ProtocolDecodeError.malformed }
-        let promptLineCount = data[promptMetaStart]
-        let promptCursorLine = readU16(data, promptMetaStart + 1)
-        let promptCursorCol = readU16(data, promptMetaStart + 3)
-        let promptVimMode = data[promptMetaStart + 5]
-        let promptVisibleRows = data[promptMetaStart + 6]
-        // Parse prompt completion: 0 = none, 1 = has completion popup
-        var completionPos = promptMetaStart + 7
-        guard data.count >= completionPos + 1 else { throw ProtocolDecodeError.malformed }
-        let hasCompletion = data[completionPos] != 0
-        completionPos += 1
+        var chatPos = rest + 1
+        var chatVisible = false
+        var chatStatus: UInt8 = 0
+        var chatModel = ""
+        var chatPrompt = ""
+        var promptLineCount: UInt8 = 1
+        var promptCursorLine: UInt16 = 0
+        var promptCursorCol: UInt16 = 0
+        var promptVimMode: UInt8 = 0
+        var promptVisibleRows: UInt8 = 1
         var promptCompletion: Wire.PromptCompletion? = nil
-        if hasCompletion {
-            guard data.count >= completionPos + 6 else { throw ProtocolDecodeError.malformed }
-            let compType = data[completionPos]
-            let compSelected = data[completionPos + 1]
-            let compAnchorLine = readU16(data, completionPos + 2)
-            let compAnchorCol = readU16(data, completionPos + 4)
-            let compCandidateCount = Int(data[completionPos + 6])
-            completionPos += 7
-            var candidates: [(name: String, description: String)] = []
-            candidates.reserveCapacity(compCandidateCount)
-            for _ in 0..<compCandidateCount {
-                guard data.count >= completionPos + 2 else { throw ProtocolDecodeError.malformed }
-                let nameLen = Int(readU16(data, completionPos))
-                guard data.count >= completionPos + 2 + nameLen + 2 else { throw ProtocolDecodeError.malformed }
-                let name = String(data: data[(completionPos + 2)..<(completionPos + 2 + nameLen)], encoding: .utf8) ?? ""
-                let descLen = Int(readU16(data, completionPos + 2 + nameLen))
-                guard data.count >= completionPos + 4 + nameLen + descLen else { throw ProtocolDecodeError.malformed }
-                let desc = String(data: data[(completionPos + 4 + nameLen)..<(completionPos + 4 + nameLen + descLen)], encoding: .utf8) ?? ""
-                candidates.append((name: name, description: desc))
-                completionPos += 4 + nameLen + descLen
-            }
-            promptCompletion = Wire.PromptCompletion(type: compType, selected: compSelected, anchorLine: compAnchorLine, anchorCol: compAnchorCol, candidates: candidates)
-        }
-        // Parse pending_approval: 0 = none, 1 = has approval
-        var pendingPos = completionPos
-        guard data.count >= pendingPos + 1 else { throw ProtocolDecodeError.malformed }
-        let hasPending = data[pendingPos] != 0
-        pendingPos += 1
         var pendingToolName: String? = nil
         var pendingToolSummary: String = ""
-        if hasPending {
-            guard data.count >= pendingPos + 2 else { throw ProtocolDecodeError.malformed }
-            let pNameLen = Int(readU16(data, pendingPos))
-            guard data.count >= pendingPos + 2 + pNameLen + 2 else { throw ProtocolDecodeError.malformed }
-            pendingToolName = String(data: data[(pendingPos + 2)..<(pendingPos + 2 + pNameLen)], encoding: .utf8) ?? ""
-            let pSummaryLen = Int(readU16(data, pendingPos + 2 + pNameLen))
-            guard data.count >= pendingPos + 4 + pNameLen + pSummaryLen else { throw ProtocolDecodeError.malformed }
-            pendingToolSummary = String(data: data[(pendingPos + 4 + pNameLen)..<(pendingPos + 4 + pNameLen + pSummaryLen)], encoding: .utf8) ?? ""
-            pendingPos += 4 + pNameLen + pSummaryLen
-        }
-        // Parse help overlay: visible(1) [group_count(1) [title_len(2) title key_count(1) [key_len(1) key desc_len(2) desc]...]*]
-        guard data.count >= pendingPos + 1 else { throw ProtocolDecodeError.malformed }
-        let helpVisible = data[pendingPos] != 0
-        pendingPos += 1
+        var helpVisible = false
         var helpGroups: [Wire.HelpGroup] = []
-        if helpVisible {
-            guard data.count >= pendingPos + 1 else { throw ProtocolDecodeError.malformed }
-            let groupCount = Int(data[pendingPos])
-            pendingPos += 1
-            for _ in 0..<groupCount {
-                guard data.count >= pendingPos + 2 else { throw ProtocolDecodeError.malformed }
-                let titleLen = Int(readU16(data, pendingPos))
-                guard data.count >= pendingPos + 2 + titleLen + 1 else { throw ProtocolDecodeError.malformed }
-                let title = String(data: data[(pendingPos + 2)..<(pendingPos + 2 + titleLen)], encoding: .utf8) ?? ""
-                let bindingCount = Int(data[pendingPos + 2 + titleLen])
-                pendingPos += 3 + titleLen
-                var bindings: [(key: String, description: String)] = []
-                for _ in 0..<bindingCount {
-                    guard data.count >= pendingPos + 1 else { throw ProtocolDecodeError.malformed }
-                    let keyLen = Int(data[pendingPos])
-                    guard data.count >= pendingPos + 1 + keyLen + 2 else { throw ProtocolDecodeError.malformed }
-                    let key = String(data: data[(pendingPos + 1)..<(pendingPos + 1 + keyLen)], encoding: .utf8) ?? ""
-                    let descLen = Int(readU16(data, pendingPos + 1 + keyLen))
-                    guard data.count >= pendingPos + 3 + keyLen + descLen else { throw ProtocolDecodeError.malformed }
-                    let desc = String(data: data[(pendingPos + 3 + keyLen)..<(pendingPos + 3 + keyLen + descLen)], encoding: .utf8) ?? ""
-                    bindings.append((key: key, description: desc))
-                    pendingPos += 3 + keyLen + descLen
-                }
-                helpGroups.append(Wire.HelpGroup(title: title, bindings: bindings))
-            }
-        }
-        guard data.count >= pendingPos + 2 else { throw ProtocolDecodeError.malformed }
-        let msgCount = Int(readU16(data, pendingPos))
         var messages: [Wire.ChatMessage] = []
-        messages.reserveCapacity(msgCount)
-        var pos = pendingPos + 2
+
+        for _ in 0..<chatSectionCount {
+            guard data.count >= chatPos + 3 else { throw ProtocolDecodeError.malformed }
+            let csId = data[chatPos]
+            let csLen = Int(readU16(data, chatPos + 1))
+            let csStart = chatPos + 3
+            guard data.count >= csStart + csLen else { throw ProtocolDecodeError.malformed }
+
+            switch csId {
+            case 0x01: // Header: visible(1) + status(1)
+                guard csLen >= 2 else { break }
+                chatVisible = data[csStart] != 0
+                chatStatus = data[csStart + 1]
+
+            case 0x02: // Model: model_len(2) + model
+                guard csLen >= 2 else { break }
+                let mLen = Int(readU16(data, csStart))
+                if csLen >= 2 + mLen { chatModel = String(data: data[(csStart + 2)..<(csStart + 2 + mLen)], encoding: .utf8) ?? "" }
+
+            case 0x03: // Prompt: prompt_len(2) + prompt + line_count(1) + cursor_line(2) + cursor_col(2) + vim_mode(1) + visible_rows(1)
+                guard csLen >= 2 else { break }
+                let pLen = Int(readU16(data, csStart))
+                if csLen >= 2 + pLen { chatPrompt = String(data: data[(csStart + 2)..<(csStart + 2 + pLen)], encoding: .utf8) ?? "" }
+                let metaStart = csStart + 2 + pLen
+                if csLen >= 2 + pLen + 7 {
+                    promptLineCount = data[metaStart]
+                    promptCursorLine = readU16(data, metaStart + 1)
+                    promptCursorCol = readU16(data, metaStart + 3)
+                    promptVimMode = data[metaStart + 5]
+                    promptVisibleRows = data[metaStart + 6]
+                }
+
+            case 0x07: // Completion: visible(1) [type(1) selected(1) anchor_line(2) anchor_col(2) count(1) candidates...]
+                guard csLen >= 1 else { break }
+                let hasCompletion = data[csStart] != 0
+                if hasCompletion, csLen >= 8 {
+                    let compType = data[csStart + 1]
+                    let compSelected = data[csStart + 2]
+                    let compAnchorLine = readU16(data, csStart + 3)
+                    let compAnchorCol = readU16(data, csStart + 5)
+                    let compCount = Int(data[csStart + 7])
+                    var candidates: [(name: String, description: String)] = []
+                    var cp = csStart + 8
+                    for _ in 0..<compCount {
+                        guard cp + 2 <= csStart + csLen else { break }
+                        let nLen = Int(readU16(data, cp)); cp += 2
+                        guard cp + nLen + 2 <= csStart + csLen else { break }
+                        let name = String(data: data[cp..<(cp + nLen)], encoding: .utf8) ?? ""; cp += nLen
+                        let dLen = Int(readU16(data, cp)); cp += 2
+                        guard cp + dLen <= csStart + csLen else { break }
+                        let desc = String(data: data[cp..<(cp + dLen)], encoding: .utf8) ?? ""; cp += dLen
+                        candidates.append((name: name, description: desc))
+                    }
+                    promptCompletion = Wire.PromptCompletion(type: compType, selected: compSelected, anchorLine: compAnchorLine, anchorCol: compAnchorCol, candidates: candidates)
+                }
+
+            case 0x04: // Pending: same format as before (has_pending(1) [name_len(2) name summary_len(2) summary])
+                guard csLen >= 1 else { break }
+                let hasPending = data[csStart] != 0
+                if hasPending, csLen >= 3 {
+                    var pp = csStart + 1
+                    let pnLen = Int(readU16(data, pp)); pp += 2
+                    guard pp + pnLen + 2 <= csStart + csLen else { break }
+                    pendingToolName = String(data: data[pp..<(pp + pnLen)], encoding: .utf8) ?? ""
+                    pp += pnLen
+                    let psLen = Int(readU16(data, pp)); pp += 2
+                    guard pp + psLen <= csStart + csLen else { break }
+                    pendingToolSummary = String(data: data[pp..<(pp + psLen)], encoding: .utf8) ?? ""
+                }
+
+            case 0x05: // Help: same format as before (visible(1) [group_count(1) ...])
+                guard csLen >= 1 else { break }
+                helpVisible = data[csStart] != 0
+                if helpVisible, csLen >= 2 {
+                    let groupCount = Int(data[csStart + 1])
+                    var hp = csStart + 2
+                    for _ in 0..<groupCount {
+                        guard hp + 2 <= csStart + csLen else { break }
+                        let tLen = Int(readU16(data, hp)); hp += 2
+                        guard hp + tLen + 1 <= csStart + csLen else { break }
+                        let title = String(data: data[hp..<(hp + tLen)], encoding: .utf8) ?? ""
+                        hp += tLen
+                        let bCount = Int(data[hp]); hp += 1
+                        var bindings: [(key: String, description: String)] = []
+                        for _ in 0..<bCount {
+                            guard hp + 1 <= csStart + csLen else { break }
+                            let kLen = Int(data[hp]); hp += 1
+                            guard hp + kLen + 2 <= csStart + csLen else { break }
+                            let key = String(data: data[hp..<(hp + kLen)], encoding: .utf8) ?? ""
+                            hp += kLen
+                            let dLen = Int(readU16(data, hp)); hp += 2
+                            guard hp + dLen <= csStart + csLen else { break }
+                            let desc = String(data: data[hp..<(hp + dLen)], encoding: .utf8) ?? ""
+                            hp += dLen
+                            bindings.append((key: key, description: desc))
+                        }
+                        helpGroups.append(Wire.HelpGroup(title: title, bindings: bindings))
+                    }
+                }
+
+            case 0x06: // Messages: msg_count(2) + messages... (same internal format as before)
+                guard csLen >= 2 else { break }
+                let msgCount = Int(readU16(data, csStart))
+                messages.reserveCapacity(msgCount)
+                var pos = csStart + 2
         for _ in 0..<msgCount {
             // Each message is prefixed with a stable uint32 ID from the BEAM
             guard data.count >= pos + 5 else { throw ProtocolDecodeError.malformed }
@@ -939,7 +996,14 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                 break
             }
         }
-        return (.guiAgentChat(visible: true, status: status, model: model, prompt: prompt, promptLineCount: promptLineCount, promptCursorLine: promptCursorLine, promptCursorCol: promptCursorCol, promptVimMode: promptVimMode, promptVisibleRows: promptVisibleRows, promptCompletion: promptCompletion, pendingToolName: pendingToolName, pendingToolSummary: pendingToolSummary, helpVisible: helpVisible, helpGroups: helpGroups, messages: messages), pos - offset)
+
+            default: break
+            }
+
+            chatPos = csStart + csLen
+        }
+
+        return (.guiAgentChat(visible: chatVisible, status: chatStatus, model: chatModel, prompt: chatPrompt, promptLineCount: promptLineCount, promptCursorLine: promptCursorLine, promptCursorCol: promptCursorCol, promptVimMode: promptVimMode, promptVisibleRows: promptVisibleRows, promptCompletion: promptCompletion, pendingToolName: pendingToolName, pendingToolSummary: pendingToolSummary, helpVisible: helpVisible, helpGroups: helpGroups, messages: messages), chatPos - offset)
 
     case OP_GUI_GUTTER_SEP:
         // col:2, r:1, g:1, b:1 = 5 bytes after opcode
@@ -954,55 +1018,83 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         return (.guiCursorline(row: row, r: data[rest + 2], g: data[rest + 3], b: data[rest + 4]), 6)
 
     case OP_GUI_GUTTER:
-        // Per-window format: window_id:2 + content_row:2 + content_col:2 + content_height:2
-        // + is_active:1 + cursor_line:4 + style:1 + ln_width:1 + sign_width:1 + line_count:2 = 18 bytes header
-        guard data.count >= rest + 18 else { throw ProtocolDecodeError.malformed }
-        let windowId = readU16(data, rest)
-        let contentRow = readU16(data, rest + 2)
-        let contentCol = readU16(data, rest + 4)
-        let contentHeight = readU16(data, rest + 6)
-        let isActive = data[rest + 8] != 0
-        let cursorLine = readU32(data, rest + 9)
-        let styleRaw = data[rest + 13]
-        let lnWidth = data[rest + 14]
-        let signWidth = data[rest + 15]
-        let lineCount = Int(readU16(data, rest + 16))
-        let style = Wire.LineNumberStyle(rawValue: styleRaw) ?? .hybrid
+        // Sectioned format: opcode(1) + section_count(1) + sections...
+        guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
+        let gutterSectionCount = Int(data[rest])
+        var gutterPos = rest + 1
 
-        // Entries: 6 bytes each (buf_line:4 + display_type:1 + sign_type:1).
-        // Annotation entries (sign_type=8) have extra bytes: fg:3 + text_len:1 + text.
+        var windowId: UInt16 = 0
+        var contentRow: UInt16 = 0
+        var contentCol: UInt16 = 0
+        var contentHeight: UInt16 = 0
+        var isActive = false
+        var cursorLine: UInt32 = 0
+        var style: Wire.LineNumberStyle = .hybrid
+        var lnWidth: UInt8 = 0
+        var signWidth: UInt8 = 0
         var entries: [Wire.GutterEntry] = []
-        entries.reserveCapacity(lineCount)
-        var pos = rest + 18
-        for _ in 0..<lineCount {
-            guard data.count >= pos + 6 else { throw ProtocolDecodeError.malformed }
-            let bufLine = readU32(data, pos)
-            let dt = Wire.GutterDisplayType(rawValue: data[pos + 4]) ?? .normal
-            let st = Wire.GutterSignType(rawValue: data[pos + 5]) ?? .none
-            pos += 6
 
-            if st == .annotation {
-                // Read annotation-specific data: fg:3 + text_len:1 + text
-                guard data.count >= pos + 4 else { throw ProtocolDecodeError.malformed }
-                let fg = readU24(data, pos)
-                let textLen = Int(data[pos + 3])
-                pos += 4
-                guard data.count >= pos + textLen else { throw ProtocolDecodeError.malformed }
-                let text = String(data: Data(data[pos..<(pos + textLen)]), encoding: .utf8) ?? ""
-                pos += textLen
-                entries.append(Wire.GutterEntry(bufLine: bufLine, displayType: dt, signType: st,
-                                              signFg: fg, signText: text))
-            } else {
-                entries.append(Wire.GutterEntry(bufLine: bufLine, displayType: dt, signType: st))
+        for _ in 0..<gutterSectionCount {
+            guard data.count >= gutterPos + 3 else { throw ProtocolDecodeError.malformed }
+            let gsId = data[gutterPos]
+            let gsLen = Int(readU16(data, gutterPos + 1))
+            let gsStart = gutterPos + 3
+            guard data.count >= gsStart + gsLen else { throw ProtocolDecodeError.malformed }
+
+            switch gsId {
+            case 0x01: // Window: window_id(2) + row(2) + col(2) + height(2) + is_active(1)
+                guard gsLen >= 9 else { break }
+                windowId = readU16(data, gsStart)
+                contentRow = readU16(data, gsStart + 2)
+                contentCol = readU16(data, gsStart + 4)
+                contentHeight = readU16(data, gsStart + 6)
+                isActive = data[gsStart + 8] != 0
+
+            case 0x02: // Config: cursor_line(4) + style(1) + ln_width(1) + sign_width(1)
+                guard gsLen >= 7 else { break }
+                cursorLine = readU32(data, gsStart)
+                style = Wire.LineNumberStyle(rawValue: data[gsStart + 4]) ?? .hybrid
+                lnWidth = data[gsStart + 5]
+                signWidth = data[gsStart + 6]
+
+            case 0x03: // Entries: count(2) + entries...
+                guard gsLen >= 2 else { break }
+                let lineCount = Int(readU16(data, gsStart))
+                entries.reserveCapacity(lineCount)
+                var ePos = gsStart + 2
+                for _ in 0..<lineCount {
+                    guard data.count >= ePos + 6 else { break }
+                    let bufLine = readU32(data, ePos)
+                    let dt = Wire.GutterDisplayType(rawValue: data[ePos + 4]) ?? .normal
+                    let st = Wire.GutterSignType(rawValue: data[ePos + 5]) ?? .none
+                    ePos += 6
+                    if st == .annotation {
+                        guard data.count >= ePos + 4 else { break }
+                        let fg = readU24(data, ePos)
+                        let textLen = Int(data[ePos + 3])
+                        ePos += 4
+                        guard data.count >= ePos + textLen else { break }
+                        let text = String(data: Data(data[ePos..<(ePos + textLen)]), encoding: .utf8) ?? ""
+                        ePos += textLen
+                        entries.append(Wire.GutterEntry(bufLine: bufLine, displayType: dt, signType: st, signFg: fg, signText: text))
+                    } else {
+                        entries.append(Wire.GutterEntry(bufLine: bufLine, displayType: dt, signType: st))
+                    }
+                }
+
+            default: break
             }
+
+            gutterPos = gsStart + gsLen
         }
+
         let windowGutter = Wire.WindowGutter(
-            windowId: windowId,
-            contentRow: contentRow, contentCol: contentCol, contentHeight: contentHeight,
-            isActive: isActive, cursorLine: cursorLine, lineNumberStyle: style,
-            lineNumberWidth: lnWidth, signColWidth: signWidth, entries: entries
+            windowId: windowId, contentRow: contentRow, contentCol: contentCol,
+            contentHeight: contentHeight, isActive: isActive, cursorLine: cursorLine,
+            lineNumberStyle: style, lineNumberWidth: lnWidth, signColWidth: signWidth,
+            entries: entries
         )
-        return (.guiGutter(data: windowGutter), pos - offset)
+        return (.guiGutter(data: windowGutter), gutterPos - offset)
 
     case OP_GUI_BOTTOM_PANEL:
         // visible(1)
@@ -1066,177 +1158,168 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                                  tabs: tabs, entries: entries), pos - offset)
 
     case OP_GUI_WINDOW_CONTENT:
-        // Header: window_id:2 + flags:1 + cursor_row:2 + cursor_col:2 + cursor_shape:1 + scroll_left:2 + row_count:2 = 12
-        guard data.count >= rest + 12 else { throw ProtocolDecodeError.malformed }
-        let windowId = readU16(data, rest)
-        let flags = data[rest + 2]
-        let cursorRow = readU16(data, rest + 3)
-        let cursorCol = readU16(data, rest + 5)
-        let cursorShape = CursorShape(rawValue: data[rest + 7]) ?? .block
-        let scrollLeft = readU16(data, rest + 8)
-        let rowCount = Int(readU16(data, rest + 10))
-        var pos = rest + 12
+        // Sectioned format: opcode(1) + section_count(1) + sections...
+        guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
+        let wcSectionCount = Int(data[rest])
+        var wcPos = rest + 1
 
-        // Decode rows
-        var rows: [GUIVisualRow] = []
-        rows.reserveCapacity(rowCount)
-        for _ in 0..<rowCount {
-            // row_type:1 + buf_line:4 + content_hash:4 + text_len:4 = 13
-            guard data.count >= pos + 13 else { throw ProtocolDecodeError.malformed }
-            let rowType = GUIVisualRowType(rawValue: data[pos]) ?? .normal
-            let bufLine = readU32(data, pos + 1)
-            let contentHash = readU32(data, pos + 5)
-            let textLen = Int(readU32(data, pos + 9))
-            pos += 13
-            guard data.count >= pos + textLen else { throw ProtocolDecodeError.malformed }
-            let text = String(data: data[pos..<(pos + textLen)], encoding: .utf8) ?? ""
-            pos += textLen
+        var wcWindowId: UInt16 = 0
+        var wcFlags: UInt8 = 0
+        var wcCursorRow: UInt16 = 0
+        var wcCursorCol: UInt16 = 0
+        var wcCursorShape: CursorShape = .block
+        var wcScrollLeft: UInt16 = 0
+        var wcRows: [GUIVisualRow] = []
+        var wcSelection: GUISelectionOverlay? = nil
+        var wcMatches: [GUISearchMatch] = []
+        var wcDiags: [GUIDiagnosticUnderline] = []
+        var wcHighlights: [GUIDocumentHighlight] = []
+        var wcAnnotations: [GUILineAnnotation] = []
 
-            // span_count:2
-            guard data.count >= pos + 2 else { throw ProtocolDecodeError.malformed }
-            let spanCount = Int(readU16(data, pos))
-            pos += 2
+        for _ in 0..<wcSectionCount {
+            guard data.count >= wcPos + 3 else { throw ProtocolDecodeError.malformed }
+            let wcSId = data[wcPos]
+            let wcSLen = Int(readU16(data, wcPos + 1))
+            let wcSStart = wcPos + 3
+            guard data.count >= wcSStart + wcSLen else { throw ProtocolDecodeError.malformed }
 
-            // Each span: start_col:2 + end_col:2 + fg:3 + bg:3 + attrs:1 + font_weight:1 + font_id:1 = 13
-            var spans: [GUIHighlightSpan] = []
-            spans.reserveCapacity(spanCount)
-            for _ in 0..<spanCount {
-                guard data.count >= pos + 13 else { throw ProtocolDecodeError.malformed }
-                let startCol = readU16(data, pos)
-                let endCol = readU16(data, pos + 2)
-                let fg = readU24(data, pos + 4)
-                let bg = readU24(data, pos + 7)
-                let attrs = data[pos + 10]
-                let fontWeight = data[pos + 11]
-                let fontId = data[pos + 12]
-                spans.append(GUIHighlightSpan(
-                    startCol: startCol, endCol: endCol,
-                    fg: fg, bg: bg, attrs: attrs,
-                    fontWeight: fontWeight, fontId: fontId
-                ))
-                pos += 13
+            switch wcSId {
+            case 0x01: // Header: window_id(2) + flags(1) + cursor_row(2) + cursor_col(2) + cursor_shape(1) + scroll_left(2)
+                guard wcSLen >= 10 else { break }
+                wcWindowId = readU16(data, wcSStart)
+                wcFlags = data[wcSStart + 2]
+                wcCursorRow = readU16(data, wcSStart + 3)
+                wcCursorCol = readU16(data, wcSStart + 5)
+                wcCursorShape = CursorShape(rawValue: data[wcSStart + 7]) ?? .block
+                wcScrollLeft = readU16(data, wcSStart + 8)
+
+            case 0x02: // Rows: row_count(2) + rows...
+                guard wcSLen >= 2 else { break }
+                let rowCount = Int(readU16(data, wcSStart))
+                wcRows.reserveCapacity(rowCount)
+                var rp = wcSStart + 2
+                for _ in 0..<rowCount {
+                    guard rp + 13 <= wcSStart + wcSLen else { break }
+                    let rowType = GUIVisualRowType(rawValue: data[rp]) ?? .normal
+                    let bufLine = readU32(data, rp + 1)
+                    let contentHash = readU32(data, rp + 5)
+                    let textLen = Int(readU32(data, rp + 9))
+                    rp += 13
+                    guard rp + textLen <= wcSStart + wcSLen else { break }
+                    let text = String(data: data[rp..<(rp + textLen)], encoding: .utf8) ?? ""
+                    rp += textLen
+                    guard rp + 2 <= wcSStart + wcSLen else { break }
+                    let spanCount = Int(readU16(data, rp)); rp += 2
+                    var spans: [GUIHighlightSpan] = []
+                    spans.reserveCapacity(spanCount)
+                    for _ in 0..<spanCount {
+                        guard rp + 13 <= wcSStart + wcSLen else { break }
+                        spans.append(GUIHighlightSpan(
+                            startCol: readU16(data, rp), endCol: readU16(data, rp + 2),
+                            fg: readU24(data, rp + 4), bg: readU24(data, rp + 7),
+                            attrs: data[rp + 10], fontWeight: data[rp + 11], fontId: data[rp + 12]
+                        ))
+                        rp += 13
+                    }
+                    wcRows.append(GUIVisualRow(rowType: rowType, bufLine: bufLine, contentHash: contentHash, text: text, spans: spans))
+                }
+
+            case 0x03: // Selection: type(1), if != 0: start_row(2) + start_col(2) + end_row(2) + end_col(2)
+                guard wcSLen >= 1 else { break }
+                let selType = data[wcSStart]
+                if selType != 0, wcSLen >= 9 {
+                    wcSelection = GUISelectionOverlay(
+                        type: GUISelectionType(rawValue: selType) ?? .char,
+                        startRow: readU16(data, wcSStart + 1), startCol: readU16(data, wcSStart + 3),
+                        endRow: readU16(data, wcSStart + 5), endCol: readU16(data, wcSStart + 7)
+                    )
+                }
+
+            case 0x04: // Search matches: count(2) + matches...
+                guard wcSLen >= 2 else { break }
+                let mc = Int(readU16(data, wcSStart))
+                wcMatches.reserveCapacity(mc)
+                var mp = wcSStart + 2
+                for _ in 0..<mc {
+                    guard mp + 7 <= wcSStart + wcSLen else { break }
+                    wcMatches.append(GUISearchMatch(
+                        row: readU16(data, mp), startCol: readU16(data, mp + 2),
+                        endCol: readU16(data, mp + 4), isCurrent: data[mp + 6] != 0
+                    ))
+                    mp += 7
+                }
+
+            case 0x05: // Diagnostics: count(2) + ranges...
+                guard wcSLen >= 2 else { break }
+                let dc = Int(readU16(data, wcSStart))
+                wcDiags.reserveCapacity(dc)
+                var dp = wcSStart + 2
+                for _ in 0..<dc {
+                    guard dp + 9 <= wcSStart + wcSLen else { break }
+                    wcDiags.append(GUIDiagnosticUnderline(
+                        startRow: readU16(data, dp), startCol: readU16(data, dp + 2),
+                        endRow: readU16(data, dp + 4), endCol: readU16(data, dp + 6),
+                        severity: GUIDiagnosticSeverity(rawValue: data[dp + 8]) ?? .error
+                    ))
+                    dp += 9
+                }
+
+            case 0x06: // Document highlights: count(2) + highlights...
+                guard wcSLen >= 2 else { break }
+                let hc = Int(readU16(data, wcSStart))
+                wcHighlights.reserveCapacity(hc)
+                var hp = wcSStart + 2
+                for _ in 0..<hc {
+                    guard hp + 9 <= wcSStart + wcSLen else { break }
+                    wcHighlights.append(GUIDocumentHighlight(
+                        startRow: readU16(data, hp), startCol: readU16(data, hp + 2),
+                        endRow: readU16(data, hp + 4), endCol: readU16(data, hp + 6),
+                        kind: GUIDocumentHighlightKind(rawValue: data[hp + 8]) ?? .text
+                    ))
+                    hp += 9
+                }
+
+            case 0x07: // Line annotations: count(2) + annotations...
+                guard wcSLen >= 2 else { break }
+                let ac = Int(readU16(data, wcSStart))
+                wcAnnotations.reserveCapacity(ac)
+                var ap = wcSStart + 2
+                for _ in 0..<ac {
+                    guard ap + 11 <= wcSStart + wcSLen else { break }
+                    let annRow = readU16(data, ap)
+                    let annKind = GUILineAnnotationKind(rawValue: data[ap + 2]) ?? .inlinePill
+                    let annFg = readU24(data, ap + 3)
+                    let annBg = readU24(data, ap + 6)
+                    let annTextLen = Int(readU16(data, ap + 9))
+                    ap += 11
+                    guard ap + annTextLen <= wcSStart + wcSLen else { break }
+                    let annText = String(data: Data(data[ap..<(ap + annTextLen)]), encoding: .utf8) ?? ""
+                    ap += annTextLen
+                    wcAnnotations.append(GUILineAnnotation(row: annRow, kind: annKind, fg: annFg, bg: annBg, text: annText))
+                }
+
+            default: break
             }
 
-            rows.append(GUIVisualRow(
-                rowType: rowType, bufLine: bufLine,
-                contentHash: contentHash, text: text, spans: spans
-            ))
-        }
-
-        // Selection: type:1, then if type != 0: start_row:2 + start_col:2 + end_row:2 + end_col:2
-        guard data.count >= pos + 1 else { throw ProtocolDecodeError.malformed }
-        let selType = data[pos]
-        pos += 1
-        var selection: GUISelectionOverlay? = nil
-        if selType != 0 {
-            guard data.count >= pos + 8 else { throw ProtocolDecodeError.malformed }
-            selection = GUISelectionOverlay(
-                type: GUISelectionType(rawValue: selType) ?? .char,
-                startRow: readU16(data, pos),
-                startCol: readU16(data, pos + 2),
-                endRow: readU16(data, pos + 4),
-                endCol: readU16(data, pos + 6)
-            )
-            pos += 8
-        }
-
-        // Search matches: count:2, then per match: row:2 + start_col:2 + end_col:2 + is_current:1 = 7
-        guard data.count >= pos + 2 else { throw ProtocolDecodeError.malformed }
-        let matchCount = Int(readU16(data, pos))
-        pos += 2
-        var matches: [GUISearchMatch] = []
-        matches.reserveCapacity(matchCount)
-        for _ in 0..<matchCount {
-            guard data.count >= pos + 7 else { throw ProtocolDecodeError.malformed }
-            matches.append(GUISearchMatch(
-                row: readU16(data, pos),
-                startCol: readU16(data, pos + 2),
-                endCol: readU16(data, pos + 4),
-                isCurrent: data[pos + 6] != 0
-            ))
-            pos += 7
-        }
-
-        // Diagnostic ranges: count:2, then per range: start_row:2 + start_col:2 + end_row:2 + end_col:2 + severity:1 = 9
-        guard data.count >= pos + 2 else { throw ProtocolDecodeError.malformed }
-        let diagCount = Int(readU16(data, pos))
-        pos += 2
-        var diags: [GUIDiagnosticUnderline] = []
-        diags.reserveCapacity(diagCount)
-        for _ in 0..<diagCount {
-            guard data.count >= pos + 9 else { throw ProtocolDecodeError.malformed }
-            diags.append(GUIDiagnosticUnderline(
-                startRow: readU16(data, pos),
-                startCol: readU16(data, pos + 2),
-                endRow: readU16(data, pos + 4),
-                endCol: readU16(data, pos + 6),
-                severity: GUIDiagnosticSeverity(rawValue: data[pos + 8]) ?? .error
-            ))
-            pos += 9
-        }
-
-        // Document highlights: count:2, then per highlight: start_row:2 + start_col:2 + end_row:2 + end_col:2 + kind:1 = 9
-        var docHighlights: [GUIDocumentHighlight] = []
-        if data.count >= pos + 2 {
-            let highlightCount = Int(readU16(data, pos))
-            pos += 2
-            docHighlights.reserveCapacity(highlightCount)
-            for _ in 0..<highlightCount {
-                guard data.count >= pos + 9 else { throw ProtocolDecodeError.malformed }
-                docHighlights.append(GUIDocumentHighlight(
-                    startRow: readU16(data, pos),
-                    startCol: readU16(data, pos + 2),
-                    endRow: readU16(data, pos + 4),
-                    endCol: readU16(data, pos + 6),
-                    kind: GUIDocumentHighlightKind(rawValue: data[pos + 8]) ?? .text
-                ))
-                pos += 9
-            }
-        }
-
-        // Line annotations: count:2, then per annotation: row:2 + kind:1 + fg:3 + bg:3 + text_len:2 + text
-        var lineAnnotations: [GUILineAnnotation] = []
-        if data.count >= pos + 2 {
-            let annotationCount = Int(readU16(data, pos))
-            pos += 2
-            lineAnnotations.reserveCapacity(annotationCount)
-            for _ in 0..<annotationCount {
-                guard data.count >= pos + 11 else { throw ProtocolDecodeError.malformed }
-                let annRow = readU16(data, pos)
-                let annKind = GUILineAnnotationKind(rawValue: data[pos + 2]) ?? .inlinePill
-                let annFg = readU24(data, pos + 3)
-                let annBg = readU24(data, pos + 6)
-                let annTextLen = Int(readU16(data, pos + 9))
-                pos += 11
-                guard data.count >= pos + annTextLen else { throw ProtocolDecodeError.malformed }
-                let annText = String(data: Data(data[pos..<(pos + annTextLen)]), encoding: .utf8) ?? ""
-                pos += annTextLen
-                lineAnnotations.append(GUILineAnnotation(
-                    row: annRow,
-                    kind: annKind,
-                    fg: annFg,
-                    bg: annBg,
-                    text: annText
-                ))
-            }
+            wcPos = wcSStart + wcSLen
         }
 
         let content = GUIWindowContent(
-            windowId: windowId,
-            fullRefresh: (flags & 0x01) != 0,
-            cursorVisible: (flags & 0x02) != 0,
-            cursorRow: cursorRow,
-            cursorCol: cursorCol,
-            cursorShape: cursorShape,
-            scrollLeft: scrollLeft,
-            rows: rows,
-            selection: selection,
-            searchMatches: matches,
-            diagnosticUnderlines: diags,
-            documentHighlights: docHighlights,
-            lineAnnotations: lineAnnotations
+            windowId: wcWindowId,
+            fullRefresh: (wcFlags & 0x01) != 0,
+            cursorVisible: (wcFlags & 0x02) != 0,
+            cursorRow: wcCursorRow,
+            cursorCol: wcCursorCol,
+            cursorShape: wcCursorShape,
+            scrollLeft: wcScrollLeft,
+            rows: wcRows,
+            selection: wcSelection,
+            searchMatches: wcMatches,
+            diagnosticUnderlines: wcDiags,
+            documentHighlights: wcHighlights,
+            lineAnnotations: wcAnnotations
         )
-        return (.guiWindowContent(data: content), pos - offset)
+        return (.guiWindowContent(data: content), wcPos - offset)
 
     case OP_GUI_TOOL_MANAGER:
         // visible(1)

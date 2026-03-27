@@ -74,8 +74,17 @@ defmodule Minga.Frontend.Protocol.GUIWindowContent do
 
   @op_gui_window_content 0x80
 
+  # Sectioned format section IDs
+  @section_wc_header 0x01
+  @section_wc_rows 0x02
+  @section_wc_selection 0x03
+  @section_wc_search 0x04
+  @section_wc_diagnostics 0x05
+  @section_wc_highlights 0x06
+  @section_wc_annotations 0x07
+
   @doc """
-  Encodes a `SemanticWindow` into the 0x80 wire format.
+  Encodes a `SemanticWindow` into the 0x80 wire format (sectioned).
 
   Returns a single binary suitable for sending via `Minga.Frontend.send_commands/2`.
   """
@@ -89,26 +98,33 @@ defmodule Minga.Frontend.Protocol.GUIWindowContent do
     cursor_shape = encode_cursor_shape(sw.cursor_shape)
     row_count = length(sw.rows)
 
-    header =
-      <<@op_gui_window_content, sw.window_id::16, flags::8, sw.cursor_row::16, sw.cursor_col::16,
-        cursor_shape::8, sw.scroll_left::16, row_count::16>>
+    header_payload =
+      <<sw.window_id::16, flags::8, sw.cursor_row::16, sw.cursor_col::16, cursor_shape::8,
+        sw.scroll_left::16>>
 
-    rows_binary = encode_rows(sw.rows)
-    selection_binary = encode_selection(sw.selection)
-    matches_binary = encode_search_matches(sw.search_matches)
-    diag_binary = encode_diagnostic_ranges(sw.diagnostic_ranges)
-    highlight_binary = encode_document_highlights(sw.document_highlights)
-    annotation_binary = encode_annotations(sw.annotations)
+    rows_payload = IO.iodata_to_binary([<<row_count::16>> | encode_rows(sw.rows)])
+    selection_payload = IO.iodata_to_binary(encode_selection(sw.selection))
+    matches_payload = IO.iodata_to_binary(encode_search_matches(sw.search_matches))
+    diag_payload = IO.iodata_to_binary(encode_diagnostic_ranges(sw.diagnostic_ranges))
+    highlight_payload = IO.iodata_to_binary(encode_document_highlights(sw.document_highlights))
+    annotation_payload = IO.iodata_to_binary(encode_annotations(sw.annotations))
 
-    IO.iodata_to_binary([
-      header,
-      rows_binary,
-      selection_binary,
-      matches_binary,
-      diag_binary,
-      highlight_binary,
-      annotation_binary
-    ])
+    sections = [
+      encode_section(@section_wc_header, header_payload),
+      encode_section(@section_wc_rows, rows_payload),
+      encode_section(@section_wc_selection, selection_payload),
+      encode_section(@section_wc_search, matches_payload),
+      encode_section(@section_wc_diagnostics, diag_payload),
+      encode_section(@section_wc_highlights, highlight_payload),
+      encode_section(@section_wc_annotations, annotation_payload)
+    ]
+
+    IO.iodata_to_binary([<<@op_gui_window_content, length(sections)::8>> | sections])
+  end
+
+  @spec encode_section(non_neg_integer(), binary()) :: binary()
+  defp encode_section(section_id, payload) do
+    <<section_id::8, byte_size(payload)::16, payload::binary>>
   end
 
   @doc """

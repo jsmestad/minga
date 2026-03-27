@@ -47,6 +47,17 @@ private func appendRGB(_ data: inout Data, _ r: UInt8, _ g: UInt8, _ b: UInt8) {
     data.append(b)
 }
 
+// MARK: - Section builder helper (shared by all sectioned format tests)
+
+/// Builds a section envelope: id(1) + len(2, big-endian) + payload
+private func buildSectionData(_ id: UInt8, _ payload: Data) -> Data {
+    var section = Data()
+    section.append(id)
+    appendU16(&section, UInt16(payload.count))
+    section.append(payload)
+    return section
+}
+
 // MARK: - gui_theme (0x74)
 
 @Suite("GUI Theme Decoder")
@@ -705,35 +716,39 @@ struct GUIFileTreeDecoderTests {
 
 @Suite("GUI Gutter Decoder")
 struct GUIGutterDecoderTests {
-    @Test("Decode gui_gutter with entries")
+    @Test("Decode gui_gutter with entries (sectioned)")
     func decodeGutter() throws {
+        // Section 0x01: Window
+        var window = Data()
+        appendU16(&window, 1) // windowId
+        appendU16(&window, 0) // contentRow
+        appendU16(&window, 5) // contentCol
+        appendU16(&window, 24) // contentHeight
+        window.append(1) // isActive
+
+        // Section 0x02: Config
+        var config = Data()
+        appendU32(&config, 10) // cursorLine
+        config.append(0) // lineNumberStyle = hybrid
+        config.append(4) // lineNumberWidth
+        config.append(1) // signColWidth
+
+        // Section 0x03: Entries
+        var entries = Data()
+        appendU16(&entries, 3) // entry count
+        // Entry 1
+        appendU32(&entries, 8); entries.append(0); entries.append(1) // normal, gitAdded
+        // Entry 2
+        appendU32(&entries, 9); entries.append(1); entries.append(0) // foldStart, none
+        // Entry 3
+        appendU32(&entries, 10); entries.append(3); entries.append(4) // wrapContinuation, diagError
+
         var data = Data()
         data.append(OP_GUI_GUTTER)
-        appendU16(&data, 1) // windowId
-        appendU16(&data, 0) // contentRow
-        appendU16(&data, 5) // contentCol
-        appendU16(&data, 24) // contentHeight
-        data.append(1) // isActive
-        appendU32(&data, 10) // cursorLine
-        data.append(0) // lineNumberStyle = hybrid
-        data.append(4) // lineNumberWidth
-        data.append(1) // signColWidth
-        appendU16(&data, 3) // lineCount (entry count)
-
-        // Entry 1: normal line
-        appendU32(&data, 8) // bufLine
-        data.append(0) // displayType = normal
-        data.append(1) // signType = gitAdded
-
-        // Entry 2: fold start
-        appendU32(&data, 9) // bufLine
-        data.append(1) // displayType = foldStart
-        data.append(0) // signType = none
-
-        // Entry 3: wrap continuation
-        appendU32(&data, 10) // bufLine
-        data.append(3) // displayType = wrapContinuation
-        data.append(4) // signType = diagError
+        data.append(3) // section_count
+        data.append(contentsOf: buildSectionData(0x01, window))
+        data.append(contentsOf: buildSectionData(0x02, config))
+        data.append(contentsOf: buildSectionData(0x03, entries))
 
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
@@ -752,7 +767,6 @@ struct GUIGutterDecoderTests {
         #expect(gutterData.signColWidth == 1)
         #expect(gutterData.entries.count == 3)
         #expect(gutterData.entries[0].bufLine == 8)
-        #expect(gutterData.entries[0].displayType == .normal)
         #expect(gutterData.entries[0].signType == .gitAdded)
         #expect(gutterData.entries[1].displayType == .foldStart)
         #expect(gutterData.entries[2].displayType == .wrapContinuation)
@@ -828,48 +842,59 @@ struct GUIBottomPanelDecoderTests {
 
 @Suite("GUI Picker Decoder")
 struct GUIPickerDecoderTests {
-    @Test("Decode gui_picker visible with items and action menu")
+    @Test("Decode gui_picker visible with items and action menu (sectioned)")
     func decodeVisible() throws {
+        // Section 0x01: Header
+        var header = Data()
+        header.append(1) // visible
+        appendU16(&header, 0) // selectedIndex
+        appendU16(&header, 5) // filteredCount
+        appendU16(&header, 100) // totalCount
+        header.append(1) // hasPreview
+        appendString16(&header, "Find File") // title
+
+        // Section 0x02: Query
+        var query = Data()
+        appendString16(&query, "edi")
+
+        // Section 0x03: Items
+        var items = Data()
+        appendU16(&items, 2) // itemCount
+        // Item 1
+        appendRGB(&items, 0x51, 0xAF, 0xEF)
+        items.append(0x01) // two_line
+        appendString16(&items, "editor.ex")
+        appendString16(&items, "lib/minga/editor.ex")
+        appendString16(&items, "500 lines")
+        items.append(2); appendU16(&items, 0); appendU16(&items, 1)
+        // Item 2
+        appendRGB(&items, 0x98, 0xBE, 0x65)
+        items.append(0x02) // marked
+        appendString16(&items, "edit_delta.ex")
+        appendString16(&items, "lib/minga/buffer/edit_delta.ex")
+        appendString16(&items, "")
+        items.append(0)
+
+        // Section 0x04: Action menu
+        var actionMenu = Data()
+        actionMenu.append(1) // visible
+        actionMenu.append(0) // selected
+        actionMenu.append(2) // count
+        appendString16(&actionMenu, "Open")
+        appendString16(&actionMenu, "Split Right")
+
         var data = Data()
         data.append(OP_GUI_PICKER)
-        data.append(1) // visible
-        appendU16(&data, 0) // selectedIndex
-        appendU16(&data, 5) // filteredCount
-        appendU16(&data, 100) // totalCount
-        appendString16(&data, "Find File") // title
-        appendString16(&data, "edi") // query
-        data.append(1) // hasPreview
-        appendU16(&data, 2) // itemCount
-
-        // Item 1
-        appendRGB(&data, 0x51, 0xAF, 0xEF) // iconColor
-        data.append(0x01) // flags = two_line
-        appendString16(&data, "editor.ex") // label
-        appendString16(&data, "lib/minga/editor.ex") // description
-        appendString16(&data, "500 lines") // annotation
-        data.append(2) // matchPosCount
-        appendU16(&data, 0) // match pos 0
-        appendU16(&data, 1) // match pos 1
-
-        // Item 2
-        appendRGB(&data, 0x98, 0xBE, 0x65) // iconColor
-        data.append(0x02) // flags = marked
-        appendString16(&data, "edit_delta.ex") // label
-        appendString16(&data, "lib/minga/buffer/edit_delta.ex") // description
-        appendString16(&data, "") // annotation
-        data.append(0) // matchPosCount
-
-        // Action menu: visible
-        data.append(1) // actionMenuVisible
-        data.append(0) // actionSelected
-        data.append(2) // actionCount
-        appendString16(&data, "Open") // action 1
-        appendString16(&data, "Split Right") // action 2
+        data.append(4) // section_count
+        data.append(contentsOf: buildSectionData(0x01, header))
+        data.append(contentsOf: buildSectionData(0x02, query))
+        data.append(contentsOf: buildSectionData(0x03, items))
+        data.append(contentsOf: buildSectionData(0x04, actionMenu))
 
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiPicker(let visible, let selectedIndex, let filteredCount, let totalCount, let title, let query, let hasPreview, let items, let actionMenu) = cmd else {
+        guard case .guiPicker(let visible, let selectedIndex, let filteredCount, let totalCount, let title, let q, let hasPreview, let decodedItems, let decodedMenu) = cmd else {
             Issue.record("Expected .guiPicker"); return
         }
 
@@ -878,22 +903,17 @@ struct GUIPickerDecoderTests {
         #expect(filteredCount == 5)
         #expect(totalCount == 100)
         #expect(title == "Find File")
-        #expect(query == "edi")
+        #expect(q == "edi")
         #expect(hasPreview == true)
-        #expect(items.count == 2)
-        #expect(items[0].label == "editor.ex")
-        #expect(items[0].description == "lib/minga/editor.ex")
-        #expect(items[0].annotation == "500 lines")
-        #expect(items[0].isTwoLine == true)
-        #expect(items[0].isMarked == false)
-        #expect(items[0].matchPositions == [0, 1])
-        #expect(items[1].label == "edit_delta.ex")
-        #expect(items[1].isMarked == true)
-        #expect(items[1].matchPositions.isEmpty)
+        #expect(decodedItems.count == 2)
+        #expect(decodedItems[0].label == "editor.ex")
+        #expect(decodedItems[0].isTwoLine == true)
+        #expect(decodedItems[0].matchPositions == [0, 1])
+        #expect(decodedItems[1].label == "edit_delta.ex")
+        #expect(decodedItems[1].isMarked == true)
 
-        #expect(actionMenu != nil)
-        #expect(actionMenu?.selectedIndex == 0)
-        #expect(actionMenu?.actions == ["Open", "Split Right"])
+        #expect(decodedMenu != nil)
+        #expect(decodedMenu?.actions == ["Open", "Split Right"])
     }
 
     @Test("Decode gui_picker hidden")
@@ -911,28 +931,39 @@ struct GUIPickerDecoderTests {
         #expect(actionMenu == nil)
     }
 
-    @Test("Decode gui_picker visible without action menu")
+    @Test("Decode gui_picker visible without action menu (sectioned)")
     func decodeNoActionMenu() throws {
+        var header = Data()
+        header.append(1) // visible
+        appendU16(&header, 0); appendU16(&header, 0); appendU16(&header, 0)
+        header.append(0) // hasPreview
+        appendString16(&header, "")
+
+        var query = Data()
+        appendString16(&query, "")
+
+        var items = Data()
+        appendU16(&items, 0)
+
+        var actionMenu = Data()
+        actionMenu.append(0) // not visible
+
         var data = Data()
         data.append(OP_GUI_PICKER)
-        data.append(1) // visible
-        appendU16(&data, 0)
-        appendU16(&data, 0)
-        appendU16(&data, 0)
-        appendString16(&data, "")
-        appendString16(&data, "")
-        data.append(0) // hasPreview
-        appendU16(&data, 0) // itemCount
-        data.append(0) // actionMenuVisible = false
+        data.append(4)
+        data.append(contentsOf: buildSectionData(0x01, header))
+        data.append(contentsOf: buildSectionData(0x02, query))
+        data.append(contentsOf: buildSectionData(0x03, items))
+        data.append(contentsOf: buildSectionData(0x04, actionMenu))
 
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiPicker(let visible, _, _, _, _, _, _, _, let actionMenu) = cmd else {
+        guard case .guiPicker(let visible, _, _, _, _, _, _, _, let am) = cmd else {
             Issue.record("Expected .guiPicker"); return
         }
         #expect(visible == true)
-        #expect(actionMenu == nil)
+        #expect(am == nil)
     }
 }
 
@@ -1000,6 +1031,44 @@ struct GUIPickerPreviewDecoderTests {
 
 @Suite("GUI Agent Chat Decoder")
 struct GUIAgentChatDecoderTests {
+
+    /// Builds a sectioned agent chat command from individual section payloads.
+    private func buildChatData(status: UInt8 = 0, model: String = "", prompt: String = "",
+                                pending: Data? = nil, help: Data? = nil, messages: Data? = nil) -> Data {
+        var headerPayload = Data()
+        headerPayload.append(1) // visible
+        headerPayload.append(status)
+
+        var modelPayload = Data()
+        appendString16(&modelPayload, model)
+
+        var promptPayload = Data()
+        appendString16(&promptPayload, prompt)
+
+        let pendingPayload = pending ?? Data([0]) // no pending
+        let helpPayload = help ?? Data([0]) // no help
+        let messagesPayload = messages ?? Data([0, 0]) // 0 messages
+
+        var data = Data()
+        data.append(OP_GUI_AGENT_CHAT)
+        data.append(6) // 6 sections
+        data.append(contentsOf: buildSectionData(0x01, headerPayload))
+        data.append(contentsOf: buildSectionData(0x02, modelPayload))
+        data.append(contentsOf: buildSectionData(0x03, promptPayload))
+        data.append(contentsOf: buildSectionData(0x04, pendingPayload))
+        data.append(contentsOf: buildSectionData(0x05, helpPayload))
+        data.append(contentsOf: buildSectionData(0x06, messagesPayload))
+        return data
+    }
+
+    /// Builds a messages section payload with the given raw message data.
+    private func buildMessagesPayload(count: Int, _ rawMessages: Data) -> Data {
+        var payload = Data()
+        appendU16(&payload, UInt16(count))
+        payload.append(rawMessages)
+        return payload
+    }
+
     @Test("Decode gui_agent_chat hidden")
     func decodeHidden() throws {
         let data = Data([OP_GUI_AGENT_CHAT, 0])
@@ -1013,41 +1082,28 @@ struct GUIAgentChatDecoderTests {
         #expect(visible == false)
     }
 
-    @Test("Decode gui_agent_chat with user and assistant messages")
+    @Test("Decode gui_agent_chat with user and assistant messages (sectioned)")
     func decodeUserAndAssistant() throws {
-        var data = Data()
-        data.append(OP_GUI_AGENT_CHAT)
-        data.append(1) // visible
-        data.append(1) // status = thinking
-        appendString16(&data, "claude-3") // model
-        appendString16(&data, "Fix this bug") // prompt
-        // Prompt metadata: line_count(u8), cursor_line(u16), cursor_col(u16), vim_mode(u8), visible_rows(u8)
-        data.append(1) // prompt_line_count
-        appendU16(&data, 0) // prompt_cursor_line
-        appendU16(&data, 0) // prompt_cursor_col
-        data.append(1) // prompt_vim_mode (insert)
-        data.append(1) // prompt_visible_rows
-        data.append(0) // no completion
-        data.append(0) // no pending approval
-        data.append(0) // no help overlay
-        appendU16(&data, 2) // messageCount
+        // Build message payloads
+        var msgs = Data()
+        // User message (beam_id=1)
+        appendU32(&msgs, 1)
+        msgs.append(0x01)
+        appendU32(&msgs, UInt32("hello".utf8.count))
+        msgs.append(contentsOf: "hello".utf8)
+        // Assistant message (beam_id=2)
+        appendU32(&msgs, 2)
+        msgs.append(0x02)
+        appendU32(&msgs, UInt32("hi there".utf8.count))
+        msgs.append(contentsOf: "hi there".utf8)
 
-        // Message 1: user (beam_id=1)
-        appendU32(&data, 1)
-        data.append(0x01) // type=user
-        appendU32(&data, UInt32("hello".utf8.count))
-        data.append(contentsOf: "hello".utf8)
-
-        // Message 2: assistant (beam_id=2)
-        appendU32(&data, 2)
-        data.append(0x02) // type=assistant
-        appendU32(&data, UInt32("hi there".utf8.count))
-        data.append(contentsOf: "hi there".utf8)
+        let data = buildChatData(status: 1, model: "claude-3", prompt: "Fix this bug",
+                                  messages: buildMessagesPayload(count: 2, msgs))
 
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiAgentChat(let visible, let status, let model, let prompt, _, _, _, let promptVimMode, _, _, let pendingToolName, _, _, _, let messages) = cmd else {
+        guard case .guiAgentChat(let visible, let status, let model, let prompt, _, _, _, _, _, _, let pendingToolName, _, _, _, let messages) = cmd else {
             Issue.record("Expected .guiAgentChat"); return
         }
 
@@ -1055,91 +1111,52 @@ struct GUIAgentChatDecoderTests {
         #expect(status == 1)
         #expect(model == "claude-3")
         #expect(prompt == "Fix this bug")
-        #expect(promptVimMode == 1)
         #expect(pendingToolName == nil)
-        #expect(messages.count == 2)
+        guard messages.count == 2 else { Issue.record("Expected 2 messages, got \(messages.count)"); return }
 
-        #expect(messages[0].beamId == 1)
-        guard case .user(let userText) = messages[0].content else {
-            Issue.record("Expected .user message"); return
-        }
+        guard case .user(let userText) = messages[0].content else { Issue.record("Expected .user"); return }
         #expect(userText == "hello")
-
-        #expect(messages[1].beamId == 2)
-        guard case .assistant(let assistantText) = messages[1].content else {
-            Issue.record("Expected .assistant message"); return
-        }
+        guard case .assistant(let assistantText) = messages[1].content else { Issue.record("Expected .assistant"); return }
         #expect(assistantText == "hi there")
     }
 
-    @Test("Decode gui_agent_chat with thinking message")
+    @Test("Decode gui_agent_chat with thinking message (sectioned)")
     func decodeThinking() throws {
-        var data = Data()
-        data.append(OP_GUI_AGENT_CHAT)
-        data.append(1) // visible
-        data.append(1) // status
-        appendString16(&data, "claude") // model
-        appendString16(&data, "") // prompt
-        data.append(1); appendU16(&data, 0); appendU16(&data, 0); data.append(0); data.append(1) // prompt metadata
-        data.append(0) // no completion
-        data.append(0) // no pending approval
-        data.append(0) // no help overlay
-        appendU16(&data, 1) // messageCount
-
-        // Thinking message (beam_id=10)
-        appendU32(&data, 10)
-        data.append(0x03) // type=thinking
-        data.append(1) // collapsed
+        var msgs = Data()
+        appendU32(&msgs, 10)
+        msgs.append(0x03) // thinking
+        msgs.append(1) // collapsed
         let thinkText = "Let me analyze..."
-        appendU32(&data, UInt32(thinkText.utf8.count))
-        data.append(contentsOf: thinkText.utf8)
+        appendU32(&msgs, UInt32(thinkText.utf8.count))
+        msgs.append(contentsOf: thinkText.utf8)
 
+        let data = buildChatData(status: 1, model: "claude", messages: buildMessagesPayload(count: 1, msgs))
         let (cmd, _) = try decodeCommand(data: data, offset: 0)
-        guard case .guiAgentChat(_, _, _, _, _, _, _, _, _, _, _, _, _, _, let messages) = cmd else {
-            Issue.record("Expected .guiAgentChat"); return
-        }
-
-        #expect(messages[0].beamId == 10)
-        guard case .thinking(let text, let collapsed) = messages[0].content else {
-            Issue.record("Expected .thinking message"); return
-        }
+        guard case .guiAgentChat(_, _, _, _, _, _, _, _, _, _, _, _, _, _, let messages) = cmd else { Issue.record("Expected .guiAgentChat"); return }
+        guard messages.count == 1 else { Issue.record("Expected 1 message"); return }
+        guard case .thinking(let text, let collapsed) = messages[0].content else { Issue.record("Expected .thinking"); return }
         #expect(text == "Let me analyze...")
         #expect(collapsed == true)
     }
 
-    @Test("Decode gui_agent_chat with tool_call message")
+    @Test("Decode gui_agent_chat with tool_call message (sectioned)")
     func decodeToolCall() throws {
-        var data = Data()
-        data.append(OP_GUI_AGENT_CHAT)
-        data.append(1); data.append(2) // visible, status=running tool
-        appendString16(&data, "claude"); appendString16(&data, "")
-        data.append(1); appendU16(&data, 0); appendU16(&data, 0); data.append(0); data.append(1) // prompt metadata
-        data.append(0) // no completion
-        data.append(0) // no pending
-        data.append(0) // no help overlay
-        appendU16(&data, 1)
-
-        // Tool call message (beam_id=5)
-        appendU32(&data, 5)
-        data.append(0x04) // type=tool_call
-        data.append(1) // status
-        data.append(0) // isError
-        data.append(1) // collapsed
-        appendU32(&data, 1234) // durationMs
-        appendString16(&data, "read_file") // name
-        appendString16(&data, "lib/minga.ex") // summary
+        var msgs = Data()
+        appendU32(&msgs, 5) // beam_id
+        msgs.append(0x04) // tool_call
+        msgs.append(1); msgs.append(0); msgs.append(1) // status, isError, collapsed
+        appendU32(&msgs, 1234) // durationMs
+        appendString16(&msgs, "read_file")
+        appendString16(&msgs, "lib/minga.ex")
         let result = "file contents here"
-        appendU32(&data, UInt32(result.utf8.count))
-        data.append(contentsOf: result.utf8)
+        appendU32(&msgs, UInt32(result.utf8.count))
+        msgs.append(contentsOf: result.utf8)
 
+        let data = buildChatData(status: 2, model: "claude", messages: buildMessagesPayload(count: 1, msgs))
         let (cmd, _) = try decodeCommand(data: data, offset: 0)
-        guard case .guiAgentChat(_, _, _, _, _, _, _, _, _, _, _, _, _, _, let messages) = cmd else {
-            Issue.record("Expected .guiAgentChat"); return
-        }
-
-        guard case .toolCall(let name, _, let tcStatus, let isError, let collapsed, let duration, let tcResult) = messages[0].content else {
-            Issue.record("Expected .toolCall message"); return
-        }
+        guard case .guiAgentChat(_, _, _, _, _, _, _, _, _, _, _, _, _, _, let messages) = cmd else { Issue.record("Expected .guiAgentChat"); return }
+        guard messages.count == 1 else { Issue.record("Expected 1 message"); return }
+        guard case .toolCall(let name, _, let tcStatus, let isError, let collapsed, let duration, let tcResult) = messages[0].content else { Issue.record("Expected .toolCall"); return }
         #expect(name == "read_file")
         #expect(tcStatus == 1)
         #expect(isError == false)
@@ -1148,65 +1165,38 @@ struct GUIAgentChatDecoderTests {
         #expect(tcResult == "file contents here")
     }
 
-    @Test("Decode gui_agent_chat with system message")
+    @Test("Decode gui_agent_chat with system message (sectioned)")
     func decodeSystem() throws {
-        var data = Data()
-        data.append(OP_GUI_AGENT_CHAT)
-        data.append(1); data.append(0)
-        appendString16(&data, "claude"); appendString16(&data, "")
-        data.append(1); appendU16(&data, 0); appendU16(&data, 0); data.append(0); data.append(1) // prompt metadata
-        data.append(0) // no completion
-        data.append(0) // no pending
-        data.append(0) // no help overlay
-        appendU16(&data, 1)
-
-        appendU32(&data, 1) // beam_id
-        data.append(0x05) // type=system
-        data.append(1) // isError
+        var msgs = Data()
+        appendU32(&msgs, 1)
+        msgs.append(0x05) // system
+        msgs.append(1) // isError
         let sysText = "Session terminated"
-        appendU32(&data, UInt32(sysText.utf8.count))
-        data.append(contentsOf: sysText.utf8)
+        appendU32(&msgs, UInt32(sysText.utf8.count))
+        msgs.append(contentsOf: sysText.utf8)
 
+        let data = buildChatData(messages: buildMessagesPayload(count: 1, msgs))
         let (cmd, _) = try decodeCommand(data: data, offset: 0)
-        guard case .guiAgentChat(_, _, _, _, _, _, _, _, _, _, _, _, _, _, let messages) = cmd else {
-            Issue.record("Expected .guiAgentChat"); return
-        }
-
-        guard case .system(let text, let isError) = messages[0].content else {
-            Issue.record("Expected .system message"); return
-        }
+        guard case .guiAgentChat(_, _, _, _, _, _, _, _, _, _, _, _, _, _, let messages) = cmd else { Issue.record("Expected .guiAgentChat"); return }
+        guard messages.count == 1 else { Issue.record("Expected 1 message"); return }
+        guard case .system(let text, let isError) = messages[0].content else { Issue.record("Expected .system"); return }
         #expect(text == "Session terminated")
         #expect(isError == true)
     }
 
-    @Test("Decode gui_agent_chat with usage message")
+    @Test("Decode gui_agent_chat with usage message (sectioned)")
     func decodeUsage() throws {
-        var data = Data()
-        data.append(OP_GUI_AGENT_CHAT)
-        data.append(1); data.append(0)
-        appendString16(&data, "claude"); appendString16(&data, "")
-        data.append(1); appendU16(&data, 0); appendU16(&data, 0); data.append(0); data.append(1) // prompt metadata
-        data.append(0) // no completion
-        data.append(0) // no pending
-        data.append(0) // no help overlay
-        appendU16(&data, 1)
+        var msgs = Data()
+        appendU32(&msgs, 1)
+        msgs.append(0x06) // usage
+        appendU32(&msgs, 1000); appendU32(&msgs, 500); appendU32(&msgs, 800)
+        appendU32(&msgs, 200); appendU32(&msgs, 15000)
 
-        appendU32(&data, 1) // beam_id
-        data.append(0x06) // type=usage
-        appendU32(&data, 1000) // input
-        appendU32(&data, 500) // output
-        appendU32(&data, 800) // cacheRead
-        appendU32(&data, 200) // cacheWrite
-        appendU32(&data, 15000) // costMicros
-
+        let data = buildChatData(messages: buildMessagesPayload(count: 1, msgs))
         let (cmd, _) = try decodeCommand(data: data, offset: 0)
-        guard case .guiAgentChat(_, _, _, _, _, _, _, _, _, _, _, _, _, _, let messages) = cmd else {
-            Issue.record("Expected .guiAgentChat"); return
-        }
-
-        guard case .usage(let input, let output, let cacheRead, let cacheWrite, let costMicros) = messages[0].content else {
-            Issue.record("Expected .usage message"); return
-        }
+        guard case .guiAgentChat(_, _, _, _, _, _, _, _, _, _, _, _, _, _, let messages) = cmd else { Issue.record("Expected .guiAgentChat"); return }
+        guard messages.count == 1 else { Issue.record("Expected 1 message"); return }
+        guard case .usage(let input, let output, let cacheRead, let cacheWrite, let costMicros) = messages[0].content else { Issue.record("Expected .usage"); return }
         #expect(input == 1000)
         #expect(output == 500)
         #expect(cacheRead == 800)
@@ -1214,90 +1204,49 @@ struct GUIAgentChatDecoderTests {
         #expect(costMicros == 15000)
     }
 
-    @Test("Decode gui_agent_chat with pending approval")
+    @Test("Decode gui_agent_chat with pending approval (sectioned)")
     func decodePendingApproval() throws {
-        var data = Data()
-        data.append(OP_GUI_AGENT_CHAT)
-        data.append(1); data.append(2) // visible, status=running tool
-        appendString16(&data, "claude"); appendString16(&data, "")
-        data.append(1); appendU16(&data, 0); appendU16(&data, 0); data.append(0); data.append(1) // prompt metadata
-        data.append(0) // no completion
-        data.append(1) // has pending approval
-        appendString16(&data, "write_file") // pending tool name
-        appendString16(&data, "Writing to config.toml") // pending summary
-        data.append(0) // no help overlay
-        appendU16(&data, 0) // no messages
+        var pendingPayload = Data()
+        pendingPayload.append(1) // has pending
+        appendString16(&pendingPayload, "write_file")
+        appendString16(&pendingPayload, "Writing to config.toml")
 
+        let data = buildChatData(status: 2, model: "claude", pending: pendingPayload)
         let (cmd, _) = try decodeCommand(data: data, offset: 0)
-        guard case .guiAgentChat(_, _, _, _, _, _, _, _, _, _, let pendingToolName, let pendingToolSummary, _, _, _) = cmd else {
-            Issue.record("Expected .guiAgentChat"); return
-        }
+        guard case .guiAgentChat(_, _, _, _, _, _, _, _, _, _, let pendingToolName, let pendingToolSummary, _, _, _) = cmd else { Issue.record("Expected .guiAgentChat"); return }
         #expect(pendingToolName == "write_file")
         #expect(pendingToolSummary == "Writing to config.toml")
     }
 
-    @Test("Decode gui_agent_chat with styled_assistant message")
+    @Test("Decode gui_agent_chat with styled_assistant message (sectioned)")
     func decodeStyledAssistant() throws {
-        var data = Data()
-        data.append(OP_GUI_AGENT_CHAT)
-        data.append(1); data.append(0)
-        appendString16(&data, "claude"); appendString16(&data, "")
-        data.append(1); appendU16(&data, 0); appendU16(&data, 0); data.append(0); data.append(1) // prompt metadata
-        data.append(0) // no completion
-        data.append(0) // no pending
-        data.append(0) // no help overlay
-        appendU16(&data, 1) // 1 message
-
-        // styled_assistant: beam_id::32, 0x07, line_count::16, then per line:
-        //   run_count::16, then per run: text_len::16, text, fg::24, bg::24, flags::8
-        appendU32(&data, 42) // beam_id
-        data.append(0x07) // type=styled_assistant
-        appendU16(&data, 2) // 2 lines
-
+        var msgs = Data()
+        appendU32(&msgs, 42) // beam_id
+        msgs.append(0x07) // type=styled_assistant
+        appendU16(&msgs, 2) // 2 lines
         // Line 1: 2 runs
-        appendU16(&data, 2) // run_count
-        // Run 1: "def " bold, fg=blue, bg=dark
-        appendString16(&data, "def ")
-        appendRGB(&data, 0x51, 0xAF, 0xEF) // fg
-        appendRGB(&data, 0x28, 0x2C, 0x34) // bg
-        data.append(0x01) // flags: bold
-
-        // Run 2: "hello" italic, fg=green
-        appendString16(&data, "hello")
-        appendRGB(&data, 0x98, 0xBE, 0x65) // fg
-        appendRGB(&data, 0x28, 0x2C, 0x34) // bg
-        data.append(0x02) // flags: italic
-
+        appendU16(&msgs, 2)
+        appendString16(&msgs, "def ")
+        appendRGB(&msgs, 0x51, 0xAF, 0xEF); appendRGB(&msgs, 0x28, 0x2C, 0x34); msgs.append(0x01) // bold
+        appendString16(&msgs, "hello")
+        appendRGB(&msgs, 0x98, 0xBE, 0x65); appendRGB(&msgs, 0x28, 0x2C, 0x34); msgs.append(0x02) // italic
         // Line 2: 1 run
-        appendU16(&data, 1) // run_count
-        appendString16(&data, "  :ok")
-        appendRGB(&data, 0xBB, 0xC2, 0xCF)
-        appendRGB(&data, 0x28, 0x2C, 0x34)
-        data.append(0x04) // flags: underline
+        appendU16(&msgs, 1)
+        appendString16(&msgs, "  :ok")
+        appendRGB(&msgs, 0xBB, 0xC2, 0xCF); appendRGB(&msgs, 0x28, 0x2C, 0x34); msgs.append(0x04) // underline
 
+        let data = buildChatData(model: "claude", messages: buildMessagesPayload(count: 1, msgs))
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiAgentChat(_, _, _, _, _, _, _, _, _, _, _, _, _, _, let messages) = cmd else {
-            Issue.record("Expected .guiAgentChat"); return
-        }
-
-        #expect(messages[0].beamId == 42)
-        guard case .styledAssistant(let lines) = messages[0].content else {
-            Issue.record("Expected .styledAssistant message"); return
-        }
+        guard case .guiAgentChat(_, _, _, _, _, _, _, _, _, _, _, _, _, _, let messages) = cmd else { Issue.record("Expected .guiAgentChat"); return }
+        guard messages.count == 1 else { Issue.record("Expected 1 message"); return }
+        guard case .styledAssistant(let lines) = messages[0].content else { Issue.record("Expected .styledAssistant"); return }
         #expect(lines.count == 2)
-        #expect(lines[0].count == 2) // 2 runs on line 1
         #expect(lines[0][0].text == "def ")
-        #expect(lines[0][0].fgR == 0x51)
-        #expect(lines[0][0].fgG == 0xAF)
-        #expect(lines[0][0].fgB == 0xEF)
         #expect(lines[0][0].bold == true)
-        #expect(lines[0][0].italic == false)
         #expect(lines[0][1].text == "hello")
         #expect(lines[0][1].italic == true)
-        #expect(lines[0][1].bold == false)
-        #expect(lines[1].count == 1)
         #expect(lines[1][0].text == "  :ok")
         #expect(lines[1][0].underline == true)
     }

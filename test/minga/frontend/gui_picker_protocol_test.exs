@@ -40,8 +40,9 @@ defmodule Minga.Frontend.GUIPickerProtocolTest do
 
       binary = ProtocolGUI.encode_gui_picker(picker)
 
-      # Should start with opcode 0x77 and visible=1
-      assert <<0x77, 1, _rest::binary>> = binary
+      # Sectioned: opcode(1) + section_count(1) + sections...
+      assert <<0x77, section_count, _rest::binary>> = binary
+      assert section_count == 4
     end
 
     test "encodes has_preview flag" do
@@ -51,10 +52,10 @@ defmodule Minga.Frontend.GUIPickerProtocolTest do
       without_preview = ProtocolGUI.encode_gui_picker(picker, false)
       with_preview = ProtocolGUI.encode_gui_picker(picker, true)
 
-      # Both should be valid (different has_preview byte)
-      assert <<0x77, 1, _::binary>> = without_preview
-      assert <<0x77, 1, _::binary>> = with_preview
-      # They should differ (the has_preview byte)
+      # Both should be valid sectioned format
+      assert <<0x77, 4, _::binary>> = without_preview
+      assert <<0x77, 4, _::binary>> = with_preview
+      # They should differ (the has_preview byte in the header section)
       assert without_preview != with_preview
     end
 
@@ -70,8 +71,11 @@ defmodule Minga.Frontend.GUIPickerProtocolTest do
 
       binary = ProtocolGUI.encode_gui_picker(picker)
 
-      # Parse header: opcode(1) + visible(1) + selected(2) + filtered(2) + total(2)
-      <<0x77, 1, _selected::16, filtered::16, total::16, _rest::binary>> = binary
+      # Sectioned: opcode(1) + section_count(1) + section_0x01 header
+      # Section header: id(1) + len(2) + payload
+      # Payload: visible(1) + selected(2) + filtered(2) + total(2) + has_preview(1) + title_len(2) + title
+      <<0x77, 4, 0x01, _slen::16, 1, _selected::16, filtered::16, total::16, _rest::binary>> =
+        binary
 
       assert filtered == 1
       assert total == 3
