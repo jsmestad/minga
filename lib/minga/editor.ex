@@ -1806,7 +1806,26 @@ defmodule Minga.Editor do
     {shell_state, workspace} =
       Minga.Shell.Board.handle_gui_action(state.shell_state, state.workspace, action)
 
-    %{state | shell_state: shell_state, workspace: workspace}
+    state = %{state | shell_state: shell_state, workspace: workspace}
+
+    # After Board zoom into an agent card, attach the session to the
+    # editor-level agent state so events route correctly. The Board
+    # handler can't do this because it only has (shell_state, workspace).
+    case action do
+      {:board_select_card, card_id} ->
+        card = Map.get(shell_state.cards, card_id)
+
+        if card && card.session do
+          Minga.Editor.State.AgentAccess.update_agent(state, fn a ->
+            Minga.Editor.State.Agent.set_session(a, card.session)
+          end)
+        else
+          state
+        end
+
+      _ ->
+        state
+    end
   end
 
   defp handle_gui_action(state, {:select_tab, id}) do
