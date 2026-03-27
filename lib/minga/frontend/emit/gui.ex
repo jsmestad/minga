@@ -24,6 +24,7 @@ defmodule Minga.Frontend.Emit.GUI do
   alias Minga.Agent.View.PromptSemanticWindow
   alias Minga.Buffer
   alias Minga.Config
+  alias Minga.Editor.Commands.Helpers, as: CommandHelpers
   alias Minga.Editor.DisplayList.Frame
   alias Minga.Editor.Layout
   alias Minga.Editor.MinibufferData
@@ -172,30 +173,19 @@ defmodule Minga.Frontend.Emit.GUI do
 
   @spec build_gui_tab_bar_cmd(state()) :: binary() | nil
 
-  # Board zoomed: show a single tab with the card name and a back indicator
+  # Board zoomed: show scoped tab bar for agent's touched files or full buffer list for "You"
   defp build_gui_tab_bar_cmd(
          %{shell: Minga.Shell.Board, shell_state: %{zoomed_into: card_id}} = state
        )
        when card_id != nil do
     card = Minga.Shell.Board.State.zoomed(state.shell_state)
-    label = if card, do: "◇ #{card.task}", else: "◇ Board"
 
-    # Build a minimal TabBar with one active tab showing the card context
-    tab = %Minga.Editor.State.Tab{
-      id: card_id,
-      label: label,
-      kind: :file,
-      context: %{},
-      agent_status: nil,
-      attention: false
-    }
-
-    tb = %TabBar{tabs: [tab], active_id: card_id, next_id: card_id + 1}
-    fp = :erlang.phash2({:board_zoom, card_id, label})
-
-    if fp != Process.get(:last_gui_tab_bar_fp) do
-      Process.put(:last_gui_tab_bar_fp, fp)
-      ProtocolGUI.encode_gui_tab_bar(tb)
+    if card && Minga.Shell.Board.Card.you_card?(card) do
+      # "You" card: show full buffer list from workspace
+      build_you_card_tab_bar(state)
+    else
+      # Agent card: show only files touched by this agent
+      build_agent_scoped_tab_bar(state, card)
     end
   end
 
@@ -213,6 +203,137 @@ defmodule Minga.Frontend.Emit.GUI do
   end
 
   defp build_gui_tab_bar_cmd(%{shell_state: %{tab_bar: nil}}), do: nil
+
+  # Builds the tab bar for Board's "You" card, showing workspace buffers.
+  @spec build_you_card_tab_bar(state()) :: binary() | nil
+  defp build_you_card_tab_bar(%{workspace: %{buffers: buffers}} = state) do
+    # Board "You" card: build tab bar from workspace buffers
+    tabs =
+      buffers.list
+      |> Enum.with_index(1)
+      |> Enum.map(fn {buf_pid, idx} ->
+        label =
+          try do
+            CommandHelpers.buffer_display_name(buf_pid)
+          catch
+            :exit, _ -> "[buffer]"
+          end
+
+        %Minga.Editor.State.Tab{
+          id: idx,
+          label: label,
+          kind: :file,
+          context: %{buffer: buf_pid},
+          agent_status: nil,
+          attention: false
+        }
+      end)
+
+    if tabs == [] do
+      # No buffers: show a single "You" tab
+      tab = %Minga.Editor.State.Tab{
+        id: 1,
+        label: "You",
+        kind: :file,
+        context: %{},
+        agent_status: nil,
+        attention: false
+      }
+
+      tb = %TabBar{tabs: [tab], active_id: 1, next_id: 2}
+      fp = :erlang.phash2({:board_you_empty})
+
+      if fp != Process.get(:last_gui_tab_bar_fp) do
+        Process.put(:last_gui_tab_bar_fp, fp)
+        ProtocolGUI.encode_gui_tab_bar(tb)
+      end
+    else
+      active_idx = buffers.active_index
+      active_id = if active_idx < length(tabs), do: active_idx + 1, else: 1
+      tb = %TabBar{tabs: tabs, active_id: active_id, next_id: length(tabs) + 1}
+      active_buf = active_window_buffer(state)
+      fp = :erlang.phash2({:board_you_tb, buffers.list, active_idx, active_buf})
+
+      if fp != Process.get(:last_gui_tab_bar_fp) do
+        Process.put(:last_gui_tab_bar_fp, fp)
+        ProtocolGUI.encode_gui_tab_bar(tb, active_buf)
+      end
+    end
+  end
+
+  defp build_you_card_tab_bar(_state), do: nil
+
+  # Builds a scoped tab bar showing only files touched by the agent session.
+  @spec build_agent_scoped_tab_bar(state(), Minga.Shell.Board.Card.t() | nil) :: binary() | nil
+  defp build_agent_scoped_tab_bar(_state, nil), do: nil
+
+  defp build_agent_scoped_tab_bar(_state, %{session: nil}), do: nil
+
+  defp build_agent_scoped_tab_bar(state, %{session: session_pid, task: task})
+       when is_pid(session_pid) do
+    touched =
+      try do
+        AgentSession.touched_files(session_pid)
+      catch
+        :exit, _ -> []
+      end
+
+    # Build tabs for touched files, most recent first
+    tabs =
+      touched
+      |> Enum.with_index(1)
+      |> Enum.map(fn {file, idx} ->
+        # Extract filename for the label
+        label = Path.basename(file.path)
+
+        # Find the buffer pid for this path to check dirty state
+        buf_pid =
+          case Buffer.pid_for_path(file.path) do
+            {:ok, pid} -> pid
+            :not_found -> nil
+          end
+
+        %Minga.Editor.State.Tab{
+          id: idx,
+          label: label,
+          kind: :file,
+          context: %{path: file.path, buffer: buf_pid},
+          agent_status: nil,
+          attention: false
+        }
+      end)
+
+    # If no files touched yet, show a single "Agent Chat" tab
+    tabs =
+      if tabs == [] do
+        label = if is_binary(task), do: task, else: "Agent"
+
+        [
+          %Minga.Editor.State.Tab{
+            id: 1,
+            label: label,
+            kind: :agent,
+            context: %{},
+            agent_status: nil,
+            attention: false
+          }
+        ]
+      else
+        tabs
+      end
+
+    # Most recent file is the active tab (tabs is guaranteed non-empty after the if above)
+    active_id = hd(tabs).id
+    tb = %TabBar{tabs: tabs, active_id: active_id, next_id: length(tabs) + 1}
+    active_buf = active_window_buffer(state)
+
+    fp = :erlang.phash2({:agent_scoped, session_pid, touched, active_buf})
+
+    if fp != Process.get(:last_gui_tab_bar_fp) do
+      Process.put(:last_gui_tab_bar_fp, fp)
+      ProtocolGUI.encode_gui_tab_bar(tb, active_buf)
+    end
+  end
 
   @spec build_gui_agent_groups_cmd(state()) :: binary() | nil
   defp build_gui_agent_groups_cmd(%{shell_state: %{tab_bar: %TabBar{} = tb}}) do

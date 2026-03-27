@@ -39,6 +39,13 @@ defmodule Minga.Agent.Session do
   @typedoc "Pending tool approval data."
   @type pending_approval :: Minga.Agent.ToolApproval.t()
 
+  @typedoc "File touch record."
+  @type file_touch :: %{
+          path: String.t(),
+          action: :created | :modified | :deleted,
+          timestamp: integer()
+        }
+
   @typedoc "Internal session state."
   @type state :: %{
           session_id: String.t(),
@@ -59,7 +66,8 @@ defmodule Minga.Agent.Session do
           save_timer: reference() | nil,
           branches: [Branch.t()],
           steering_queue: [String.t() | [ReqLLM.Message.ContentPart.t()]],
-          follow_up_queue: [String.t() | [ReqLLM.Message.ContentPart.t()]]
+          follow_up_queue: [String.t() | [ReqLLM.Message.ContentPart.t()]],
+          touched_files: %{String.t() => file_touch()}
         }
 
   # ── Public API ──────────────────────────────────────────────────────────────
@@ -323,6 +331,21 @@ defmodule Minga.Agent.Session do
   end
 
   @doc """
+  Returns files touched by this agent session, ordered by most recent first.
+
+  Each entry contains:
+  - `path`: relative file path
+  - `action`: `:created`, `:modified`, or `:deleted`
+  - `timestamp`: monotonic timestamp of the last touch
+
+  Derived from tool call history (file_write, file_edit, multi_edit_file).
+  """
+  @spec touched_files(GenServer.server()) :: [file_touch()]
+  def touched_files(session) do
+    GenServer.call(session, :touched_files)
+  end
+
+  @doc """
   Returns both queues and clears them. Used by abort (Ctrl-C) and dequeue (Alt+Up)
   so pending messages can be restored to the prompt input.
   """
@@ -419,7 +442,8 @@ defmodule Minga.Agent.Session do
       created_at: DateTime.utc_now(),
       branches: [],
       steering_queue: [],
-      follow_up_queue: []
+      follow_up_queue: [],
+      touched_files: %{}
     }
 
     # Start provider asynchronously so init doesn't block
@@ -520,6 +544,15 @@ defmodule Minga.Agent.Session do
     {:reply, {state.steering_queue, state.follow_up_queue}, state}
   end
 
+  def handle_call(:touched_files, _from, state) do
+    files =
+      state.touched_files
+      |> Map.values()
+      |> Enum.sort_by(& &1.timestamp, :desc)
+
+    {:reply, files, state}
+  end
+
   def handle_call(:abort, _from, %{provider: nil} = state) do
     {:reply, :ok, state}
   end
@@ -559,7 +592,8 @@ defmodule Minga.Agent.Session do
         error_message: nil,
         pending_approval: nil,
         steering_queue: [],
-        follow_up_queue: []
+        follow_up_queue: [],
+        touched_files: %{}
     }
 
     state = reset_messages(state, [Message.system("Session cleared · #{timestamp}")])
@@ -587,7 +621,8 @@ defmodule Minga.Agent.Session do
             error_message: nil,
             pending_approval: nil,
             steering_queue: [],
-            follow_up_queue: []
+            follow_up_queue: [],
+            touched_files: %{}
         }
 
         state = reset_messages(state, data.messages)
@@ -1013,6 +1048,7 @@ defmodule Minga.Agent.Session do
 
   defp handle_provider_event(%Event.ToolFileChanged{} = event, state) do
     broadcast(state, {:file_changed, event.path, event.before_content, event.after_content})
+    state = record_file_touch(state, event.path, event.before_content, event.after_content)
     state
   end
 
@@ -1383,6 +1419,33 @@ defmodule Minga.Agent.Session do
       {first, rest} = String.split_at(word, 1)
       String.upcase(first) <> rest
     end)
+  end
+
+  # Records a file touch from a ToolFileChanged event.
+  @spec record_file_touch(state(), String.t(), String.t(), String.t()) :: state()
+  defp record_file_touch(state, path, "", after_content) when byte_size(after_content) > 0 do
+    record_file_touch_with_action(state, path, :created)
+  end
+
+  defp record_file_touch(state, path, before_content, "") when byte_size(before_content) > 0 do
+    record_file_touch_with_action(state, path, :deleted)
+  end
+
+  defp record_file_touch(state, path, _before, _after) do
+    record_file_touch_with_action(state, path, :modified)
+  end
+
+  @spec record_file_touch_with_action(state(), String.t(), :created | :modified | :deleted) ::
+          state()
+  defp record_file_touch_with_action(state, path, action) do
+    touch = %{
+      path: path,
+      action: action,
+      timestamp: System.monotonic_time()
+    }
+
+    touched_files = Map.put(state.touched_files, path, touch)
+    %{state | touched_files: touched_files}
   end
 
   @impl GenServer
