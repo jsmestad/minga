@@ -367,14 +367,14 @@ The `commit-gate` extension blocks every `git commit` until all checks pass. You
 
 **Before requesting review, do this self-check:**
 
-1. **Run `mix lint`** (format + credo + compile + dialyzer). Fix any failures.
+1. **Run `make lint`** (format + credo + compile + dialyzer). All four steps run even if one fails, so dialyzer is never skipped. Fix any failures.
 2. **Run `mix test.llm`**. Fix any failures.
 3. **Check every touched `.ex` file:** does every public function have `@spec`? Does the module have `@moduledoc`? Do structs have `@enforce_keys`?
 4. **If you touched `.zig` files**, run `mix zig.lint`.
 5. **If you touched `.swift` files**, run `mix swift.build` and Swift tests.
 
 ```bash
-mix lint                          # Format + credo + compile + dialyzer (dev env)
+make lint                         # Format + credo + compile + dialyzer (all steps, even on failure)
 mix test.llm                      # Tests with LLM-optimized output (excludes :heavy)
 mix test.heavy                    # Only :heavy tests (OS process, timeout, multi-turn)
 mix test.debug test/minga/foo_test.exs  # Single file, verbose (faster iteration)
@@ -402,7 +402,7 @@ You do NOT have the option to:
 subagent({ agent: "reviewer", task: "Review for commit. Ticket: #{N}. Run: git diff main", agentScope: "both", confirmProjectAgents: false })
 ```
 
-The reviewer runs `mix lint` and `mix test.llm` itself and blocks on any failure. It also checks each acceptance criterion against the diff. If it returns BLOCKED, fix the issues and re-run. The reviewer always starts from scratch to avoid confirmation bias on re-review.
+The reviewer runs `make lint` and `mix test.llm` itself and blocks on any failure. It also checks each acceptance criterion against the diff. If it returns BLOCKED, fix the issues and re-run. The reviewer always starts from scratch to avoid confirmation bias on re-review.
 
 Example:
 
@@ -422,6 +422,76 @@ end
 - **Property-based tests** with StreamData for data structure modules
 - **Edge cases always tested**: empty state, boundaries, unicode
 - **Screen snapshot tests** for UI regression detection. See [docs/SNAPSHOT_TESTING.md](docs/SNAPSHOT_TESTING.md) for how to write, update, and review snapshot tests. When your change modifies the rendered UI, run `UPDATE_SNAPSHOTS=1 mix test test/minga/integration/` to regenerate baselines, then review the diffs before committing.
+
+#### Test Layer Selection
+
+Pick the lightest test layer that covers the behavior. Heavier tests are slower, flakier, and more sensitive to unrelated changes. Use this decision tree:
+
+**1. Pure function?** (Motion, TextObject, Operator, Document operations) → Test the function directly with `Document.new()` + assertion. No GenServer, no Editor, no HeadlessPort.
+
+```elixir
+# ✅ Good: pure function test (microseconds, never flakes)
+test "word_forward moves to start of next word" do
+  doc = Document.new("hello world")
+  assert Motion.word_forward(doc, {0, 0}) == {0, 6}
+end
+
+# ❌ Bad: booting 3 GenServers to test a pure function
+test "w moves cursor to next word" do
+  ctx = start_editor("hello world")
+  send_keys_sync(ctx, "w")
+  state = editor_state(ctx)
+  assert state.workspace.buffers.active.cursor == {0, 6}
+end
+```
+
+**2. Single GenServer operation?** (Buffer.Server insert, delete, undo) → Start the GenServer, call the function, assert. No Editor or HeadlessPort needed.
+
+```elixir
+# ✅ Good: test the GenServer directly
+test "insert_text adds text at cursor" do
+  {:ok, buf} = start_supervised({BufferServer, content: "hello"})
+  BufferServer.insert_text(buf, " world")
+  assert BufferServer.content(buf) == "hello world"
+end
+```
+
+**3. Input dispatch wiring?** (key X reaches command Y) → Use EditorCase with `send_key_sync` + `editor_state()`. Screen assertions are unnecessary here since you're verifying wiring, not rendering.
+
+```elixir
+# ✅ Good: verifying wiring through EditorCase
+test "dd deletes current line" do
+  ctx = start_editor("line one\nline two\nline three")
+  send_keys_sync(ctx, "dd")
+  assert buffer_content(ctx) == "line two\nline three"
+end
+```
+
+**4. Rendered output?** (screen shows correct text after an action) → Use EditorCase with `send_key` + `assert_row_contains` or snapshot. This is the heaviest layer; use it only when verifying what the user actually sees on screen.
+
+```elixir
+# ✅ Good: verifying rendered output
+test "status line shows mode after ESC" do
+  ctx = start_editor("hello")
+  send_keys_sync(ctx, "i")
+  send_keys_sync(ctx, "<Esc>")
+  assert_row_contains(ctx, last_row(ctx), "NORMAL")
+end
+```
+
+**Reference patterns:** `test/minga/editing/motion/word_test.exs` (pure function tests), `test/minga/editing/text_object_test.exs` (pure text objects), `test/minga/mode/operator_pending_test.exs` (FSM dispatch without GenServer). These are the gold standard.
+
+#### `:sys.get_state` Usage in Tests
+
+EditorCase tests must not assert on internal state fields via `:sys.get_state` unless the test is specifically verifying state machine transitions. Use EditorCase query helpers instead:
+
+- `buffer_content(ctx)` instead of `:sys.get_state(editor).workspace.buffers.active.document |> Document.content()`
+- `buffer_cursor(ctx)` instead of `:sys.get_state(editor).workspace.buffers.active.cursor`
+- `editor_mode(ctx)` instead of `:sys.get_state(editor).workspace.editing.mode`
+- `screen_row(ctx, n)` / `assert_row_contains(ctx, n, text)` for rendered output
+
+`:sys.get_state/1` remains valid as a **synchronization barrier** (ensuring messages are processed before asserting). Just don't pattern-match on the returned state fields.
+
 **Running tests (prefer these aliases over raw `mix test`):**
 
 ```bash

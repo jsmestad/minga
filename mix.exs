@@ -292,12 +292,8 @@ defmodule Minga.MixProject do
       "test.debug": ["test --warnings-as-errors --trace --max-failures 3"],
       "test.quick": ["test --warnings-as-errors --stale --max-failures 5 --exclude heavy"],
       "test.heavy": ["test --warnings-as-errors --only heavy"],
-      lint: [
-        "format --check-formatted",
-        "credo --strict",
-        "compile --warnings-as-errors",
-        "dialyzer"
-      ],
+      # lint runs via Makefile (`make lint`) so all steps run even if one
+      # fails. Mix aliases stop on first failure, which skips dialyzer.
       "lint.fix": ["format", "credo --strict"]
     ]
   end

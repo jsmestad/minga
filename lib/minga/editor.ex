@@ -1435,6 +1435,15 @@ defmodule Minga.Editor do
   @spec schedule_render(state(), non_neg_integer()) :: state()
   defp schedule_render(%{render_timer: ref} = state, _delay_ms) when is_reference(ref), do: state
 
+  # In test mode (headless backend), render synchronously to eliminate timer
+  # races that cause CI flakiness. No debounce needed when there's no real
+  # display to coalesce frames for.
+  defp schedule_render(%{backend: :headless} = state, _delay_ms) do
+    state = maybe_trigger_nav_flash(state)
+    state = Renderer.render(state)
+    %{state | render_timer: nil}
+  end
+
   defp schedule_render(state, delay_ms) do
     ref = Process.send_after(self(), :debounced_render, delay_ms)
     %{state | render_timer: ref}

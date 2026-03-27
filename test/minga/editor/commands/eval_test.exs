@@ -1,10 +1,6 @@
 defmodule Minga.Editor.Commands.EvalTest do
   @moduledoc false
-  # async: false because capture_io(:stderr) replaces the global :standard_error
-  # process, which breaks concurrent tests that compile code (e.g., extension tests).
-  use ExUnit.Case, async: false
-
-  import ExUnit.CaptureIO
+  use ExUnit.Case, async: true
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.Commands.Eval
@@ -70,19 +66,10 @@ defmodule Minga.Editor.Commands.EvalTest do
   end
 
   describe "error handling" do
+    @tag capture_log: true
     test "syntax error returns formatted error on status line" do
       state = build_state()
-
-      result =
-        capture_io(:stderr, fn ->
-          send(self(), {:result, Eval.execute(state, {:eval_expression, "1 +"})})
-        end)
-        |> then(fn _io ->
-          receive do
-            {:result, r} -> r
-          end
-        end)
-
+      result = Eval.execute(state, {:eval_expression, "1 +"})
       assert result.shell_state.status_msg =~ "**"
     end
 
@@ -92,19 +79,10 @@ defmodule Minga.Editor.Commands.EvalTest do
       assert result.shell_state.status_msg =~ "ArithmeticError"
     end
 
+    @tag capture_log: true
     test "undefined variable returns error" do
       state = build_state()
-
-      result =
-        capture_io(:stderr, fn ->
-          send(self(), {:result, Eval.execute(state, {:eval_expression, "undefined_var"})})
-        end)
-        |> then(fn _io ->
-          receive do
-            {:result, r} -> r
-          end
-        end)
-
+      result = Eval.execute(state, {:eval_expression, "undefined_var"})
       assert result.shell_state.status_msg =~ "**"
     end
 

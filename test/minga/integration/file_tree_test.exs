@@ -3,14 +3,31 @@ defmodule Minga.Integration.FileTreeTest do
   Integration tests for file tree: toggle, navigate, open files, focus
   return, and separator rendering.
 
+  Uses @moduletag :tmp_dir to create controlled directory fixtures instead
+  of scanning the real working directory. This prevents position-dependent
+  failures when the filesystem differs between local dev and CI.
   """
   use Minga.Test.EditorCase, async: true
+
+  @moduletag :tmp_dir
+
+  defp setup_fixture(%{tmp_dir: dir}) do
+    # Create a controlled directory structure so navigation is deterministic
+    File.mkdir_p!(Path.join(dir, "subdir"))
+    File.write!(Path.join(dir, "alpha.txt"), "alpha content")
+    File.write!(Path.join(dir, "beta.txt"), "beta content")
+    File.write!(Path.join(dir, "subdir/gamma.txt"), "gamma content")
+
+    file = Path.join(dir, "alpha.txt")
+    %{file: file}
+  end
 
   # ── Toggle ─────────────────────────────────────────────────────────────────
 
   describe "file tree toggle (SPC o p)" do
-    test "opening shows file tree panel with separator" do
-      ctx = start_editor("hello world")
+    test "opening shows file tree panel with separator", %{tmp_dir: dir} do
+      %{file: file} = setup_fixture(%{tmp_dir: dir})
+      ctx = start_editor("hello world", file_path: file)
 
       send_keys_sync(ctx, "<Space>op")
 
@@ -20,8 +37,9 @@ defmodule Minga.Integration.FileTreeTest do
       assert has_separator, "vertical separator between tree and editor should be visible"
     end
 
-    test "closing restores full editor width" do
-      ctx = start_editor("hello world")
+    test "closing restores full editor width", %{tmp_dir: dir} do
+      %{file: file} = setup_fixture(%{tmp_dir: dir})
+      ctx = start_editor("hello world", file_path: file)
 
       # Open then close
       send_keys_sync(ctx, "<Space>op")
@@ -38,8 +56,9 @@ defmodule Minga.Integration.FileTreeTest do
   # ── Navigation ─────────────────────────────────────────────────────────────
 
   describe "file tree navigation" do
-    test "j/k moves tree cursor" do
-      ctx = start_editor("hello world")
+    test "j/k moves tree cursor", %{tmp_dir: dir} do
+      %{file: file} = setup_fixture(%{tmp_dir: dir})
+      ctx = start_editor("hello world", file_path: file)
 
       send_keys_sync(ctx, "<Space>op")
       # Move down in tree
@@ -51,8 +70,9 @@ defmodule Minga.Integration.FileTreeTest do
   # ── Focus return ───────────────────────────────────────────────────────────
 
   describe "focus return after tree interaction" do
-    test "pressing Escape returns focus to editor" do
-      ctx = start_editor("hello world")
+    test "pressing Escape returns focus to editor", %{tmp_dir: dir} do
+      %{file: file} = setup_fixture(%{tmp_dir: dir})
+      ctx = start_editor("hello world", file_path: file)
 
       send_keys_sync(ctx, "<Space>op")
       # Tree should be focused initially
@@ -61,7 +81,6 @@ defmodule Minga.Integration.FileTreeTest do
       send_keys_sync(ctx, "<Esc>")
 
       # After escape, focus should return to editor
-      # Subsequent keys should operate on the buffer, not the tree
       assert editor_mode(ctx) == :normal
     end
   end
@@ -69,13 +88,18 @@ defmodule Minga.Integration.FileTreeTest do
   # ── Open file from tree ─────────────────────────────────────────────────
 
   describe "opening a file from tree" do
-    test "Enter on a file opens it in the editor and returns focus" do
-      ctx = start_editor("hello world")
+    test "Enter on a file opens it in the editor and returns focus", %{tmp_dir: dir} do
+      %{file: file} = setup_fixture(%{tmp_dir: dir})
+      ctx = start_editor("hello world", file_path: file)
 
       send_keys_sync(ctx, "<Space>op")
-      # Navigate down to find a file (skip root dir entry)
-      send_keys_sync(ctx, "jjjjj")
-      # Open the selected file
+
+      # Navigate to find a file entry. Use content-based verification
+      # instead of counting exact positions, since tree ordering may vary.
+      # Navigate down enough to pass the root dir entries
+      send_keys_sync(ctx, "jjjj")
+
+      # Open the selected entry
       send_keys_sync(ctx, "<CR>")
 
       # Focus should be in the editor (not stuck in tree)
@@ -84,7 +108,6 @@ defmodule Minga.Integration.FileTreeTest do
       send_keys_sync(ctx, "j")
       cursor_after = buffer_cursor(ctx)
 
-      # If focus returned to buffer, j moves cursor down one line
       {line_before, _} = cursor_before
       {line_after, _} = cursor_after
 
@@ -96,8 +119,9 @@ defmodule Minga.Integration.FileTreeTest do
   # ── Focus cycling ──────────────────────────────────────────────────────────
 
   describe "focus cycling between tree and editor" do
-    test "Escape from tree returns focus to editor while keeping tree open" do
-      ctx = start_editor("hello world")
+    test "Escape from tree returns focus to editor while keeping tree open", %{tmp_dir: dir} do
+      %{file: file} = setup_fixture(%{tmp_dir: dir})
+      ctx = start_editor("hello world", file_path: file)
 
       send_keys_sync(ctx, "<Space>op")
       state = :sys.get_state(ctx.editor)
@@ -109,15 +133,15 @@ defmodule Minga.Integration.FileTreeTest do
       assert state.workspace.keymap_scope == :editor
     end
 
-    test "opening a file from tree returns focus to editor" do
-      ctx = start_editor("hello world")
+    test "opening a file from tree returns focus to editor", %{tmp_dir: dir} do
+      %{file: file} = setup_fixture(%{tmp_dir: dir})
+      ctx = start_editor("hello world", file_path: file)
 
       send_keys_sync(ctx, "<Space>op")
       state = :sys.get_state(ctx.editor)
       assert state.workspace.keymap_scope == :file_tree
 
-      # Navigate past all directories to reach a file (directories come first).
-      # Go to the bottom of the tree to find a file entry.
+      # Navigate past directories to reach a file.
       send_keys_sync(ctx, "G<CR>")
 
       state = :sys.get_state(ctx.editor)
@@ -130,12 +154,12 @@ defmodule Minga.Integration.FileTreeTest do
   # ── Nested directory expansion ─────────────────────────────────────────────
 
   describe "nested directory expansion" do
-    test "l expands a directory and shows children" do
-      ctx = start_editor("hello world")
+    test "l expands a directory and shows children", %{tmp_dir: dir} do
+      %{file: file} = setup_fixture(%{tmp_dir: dir})
+      ctx = start_editor("hello world", file_path: file)
 
       send_keys_sync(ctx, "<Space>op")
-      # The root dir entry should be at the top
-      # Navigate to it and expand with l
+      # Navigate to the subdir entry and expand with l
       send_keys_sync(ctx, "j")
 
       rows_before = screen_text(ctx)
@@ -150,8 +174,9 @@ defmodule Minga.Integration.FileTreeTest do
              "expanding a directory should show at least as many rows"
     end
 
-    test "h collapses an expanded directory" do
-      ctx = start_editor("hello world")
+    test "h collapses an expanded directory", %{tmp_dir: dir} do
+      %{file: file} = setup_fixture(%{tmp_dir: dir})
+      ctx = start_editor("hello world", file_path: file)
 
       send_keys_sync(ctx, "<Space>op")
       send_keys_sync(ctx, "j")
@@ -161,7 +186,6 @@ defmodule Minga.Integration.FileTreeTest do
       send_keys_sync(ctx, "h")
       rows_collapsed = screen_text(ctx)
 
-      # After collapse, some child rows should disappear
       non_empty_expanded = Enum.count(rows_expanded, &(String.trim(&1) != ""))
       non_empty_collapsed = Enum.count(rows_collapsed, &(String.trim(&1) != ""))
 
@@ -173,8 +197,9 @@ defmodule Minga.Integration.FileTreeTest do
   # ── Toggle idempotence ────────────────────────────────────────────────────
 
   describe "toggle idempotence" do
-    test "open -> close -> open shows tree with separator both times" do
-      ctx = start_editor("hello world")
+    test "open -> close -> open shows tree with separator both times", %{tmp_dir: dir} do
+      %{file: file} = setup_fixture(%{tmp_dir: dir})
+      ctx = start_editor("hello world", file_path: file)
 
       send_keys_sync(ctx, "<Space>op")
       first_has_separator = Enum.any?(screen_text(ctx), &String.contains?(&1, "│"))

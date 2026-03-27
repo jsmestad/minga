@@ -14,7 +14,7 @@ defmodule Minga.Editor.HighlightIntegrationTest do
   alias Minga.Editor.Viewport
   alias Minga.Editor.VimState
   alias Minga.Test.HeadlessPort
-  alias Minga.Core.Face
+
   alias Minga.UI.Highlight
 
   # Helper: builds a %Highlight{} with a face registry from a theme map.

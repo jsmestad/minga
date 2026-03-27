@@ -2,7 +2,7 @@ defmodule Minga.Agent.MarkdownHighlightTest do
   use ExUnit.Case, async: true
 
   alias Minga.Agent.MarkdownHighlight
-  alias Minga.Core.Face
+
   alias Minga.UI.Highlight
 
   defp make_highlight(attrs) do
