@@ -5,6 +5,8 @@
 /// consumes them for rendering). Kept in Protocol/ so the headless
 /// test harness can compile them without SwiftUI/Observation dependencies.
 
+import Foundation
+
 /// A single card on The Board, decoded from the gui_board opcode.
 struct BoardCard: Identifiable, Equatable, Sendable {
     let id: UInt32
@@ -13,15 +15,16 @@ struct BoardCard: Identifiable, Equatable, Sendable {
     let isFocused: Bool
     let task: String
     let model: String
-    let elapsedSeconds: UInt32
+    let dispatchTimestamp: UInt32  // Unix seconds when card was created
     let recentFiles: [String]
 
-    /// Formatted elapsed time string.
+    /// Formatted elapsed time string computed from dispatch timestamp.
     var elapsedDisplay: String {
-        let s = Int(elapsedSeconds)
-        if s < 60 { return "\(s)s" }
-        if s < 3600 { return "\(s / 60)m" }
-        return "\(s / 3600)h \((s % 3600) / 60)m"
+        let now = UInt32(Date().timeIntervalSince1970)
+        let elapsed = Int(now - dispatchTimestamp)
+        if elapsed < 60 { return "\(elapsed)s" }
+        if elapsed < 3600 { return "\(elapsed / 60)m" }
+        return "\(elapsed / 3600)h \((elapsed % 3600) / 60)m"
     }
 }
 

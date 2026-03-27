@@ -1999,7 +1999,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                 isFocused: isFocused,
                 task: task,
                 model: model,
-                elapsedSeconds: elapsed,
+                dispatchTimestamp: elapsed,  // Now treated as Unix timestamp, not elapsed seconds
                 recentFiles: recentFiles
             ))
             bPos = cPos
