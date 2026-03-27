@@ -16,8 +16,8 @@ struct CompletionStateLifecycleTests {
     @MainActor func updateConverts() {
         let state = CompletionState()
         let raw = [
-            GUICompletionItem(kind: 1, label: "def", detail: "keyword"),
-            GUICompletionItem(kind: 6, label: "my_var", detail: "String.t()")
+            Wire.CompletionItem(kind: 1, label: "def", detail: "keyword"),
+            Wire.CompletionItem(kind: 6, label: "my_var", detail: "String.t()")
         ]
         state.update(visible: true, anchorRow: 5, anchorCol: 10,
                      selectedIndex: 1, rawItems: raw)
@@ -38,7 +38,7 @@ struct CompletionStateLifecycleTests {
         let state = CompletionState()
         state.update(visible: true, anchorRow: 5, anchorCol: 10,
                      selectedIndex: 0,
-                     rawItems: [GUICompletionItem(kind: 1, label: "x", detail: "")])
+                     rawItems: [Wire.CompletionItem(kind: 1, label: "x", detail: "")])
         state.hide()
 
         #expect(state.visible == false)
@@ -54,8 +54,8 @@ struct WhichKeyStateLifecycleTests {
     @MainActor func updateConverts() {
         let state = WhichKeyState()
         let raw = [
-            GUIWhichKeyBinding(kind: 0, key: "f", description: "Find file", icon: "🔍"),
-            GUIWhichKeyBinding(kind: 1, key: "b", description: "Buffers", icon: "")
+            Wire.WhichKeyBinding(kind: 0, key: "f", description: "Find file", icon: "🔍"),
+            Wire.WhichKeyBinding(kind: 1, key: "b", description: "Buffers", icon: "")
         ]
         state.update(visible: true, prefix: "SPC", page: 0, pageCount: 2,
                      rawBindings: raw)
@@ -75,7 +75,7 @@ struct WhichKeyStateLifecycleTests {
     @MainActor func hideClearsAll() {
         let state = WhichKeyState()
         state.update(visible: true, prefix: "SPC", page: 0, pageCount: 1,
-                     rawBindings: [GUIWhichKeyBinding(kind: 0, key: "f",
+                     rawBindings: [Wire.WhichKeyBinding(kind: 0, key: "f",
                                                       description: "Find", icon: "")])
         state.hide()
 
@@ -92,14 +92,14 @@ struct PickerStateLifecycleTests {
     @MainActor func updateConverts() {
         let state = PickerState()
         let raw = [
-            GUIPickerItem(iconColor: 0x51AFEF, flags: 0x01, label: "editor.ex",
+            Wire.PickerItem(iconColor: 0x51AFEF, flags: 0x01, label: "editor.ex",
                          description: "lib/minga/editor.ex", annotation: "500 lines",
                          matchPositions: [0, 3]),
-            GUIPickerItem(iconColor: 0x98BE65, flags: 0x02, label: "test.ex",
+            Wire.PickerItem(iconColor: 0x98BE65, flags: 0x02, label: "test.ex",
                          description: "test/test.ex", annotation: "",
                          matchPositions: [])
         ]
-        let actionMenu = GUIPickerActionMenu(selectedIndex: 0, actions: ["Open", "Split"])
+        let actionMenu = Wire.PickerActionMenu(selectedIndex: 0, actions: ["Open", "Split"])
 
         state.update(visible: true, selectedIndex: 0, filteredCount: 2,
                      totalCount: 50, title: "Find File", query: "edi",
@@ -123,9 +123,9 @@ struct PickerStateLifecycleTests {
     @Test("updatePreview() converts styled segments")
     @MainActor func updatePreviewConverts() {
         let state = PickerState()
-        let lines: [GUIPickerPreviewLine] = [
-            [GUIPickerPreviewSegment(fgColor: 0xFF0000, bold: true, text: "def ")],
-            [GUIPickerPreviewSegment(fgColor: 0x00FF00, bold: false, text: "  :ok")]
+        let lines: [Wire.PickerPreviewLine] = [
+            [Wire.PickerPreviewSegment(fgColor: 0xFF0000, bold: true, text: "def ")],
+            [Wire.PickerPreviewSegment(fgColor: 0x00FF00, bold: false, text: "  :ok")]
         ]
         state.updatePreview(lines: lines)
 
@@ -140,11 +140,11 @@ struct PickerStateLifecycleTests {
         state.update(visible: true, selectedIndex: 0, filteredCount: 1,
                      totalCount: 1, title: "Test", query: "q",
                      hasPreview: true,
-                     rawItems: [GUIPickerItem(iconColor: 0, flags: 0, label: "x",
+                     rawItems: [Wire.PickerItem(iconColor: 0, flags: 0, label: "x",
                                              description: "", annotation: "",
                                              matchPositions: [])],
-                     actionMenu: GUIPickerActionMenu(selectedIndex: 0, actions: ["A"]))
-        state.updatePreview(lines: [[GUIPickerPreviewSegment(fgColor: 0, bold: false, text: "x")]])
+                     actionMenu: Wire.PickerActionMenu(selectedIndex: 0, actions: ["A"]))
+        state.updatePreview(lines: [[Wire.PickerPreviewSegment(fgColor: 0, bold: false, text: "x")]])
 
         state.hide()
 
@@ -164,10 +164,10 @@ struct FileTreeStateLifecycleTests {
     @MainActor func updateConverts() {
         let state = FileTreeState()
         let raw = [
-            GUIFileTreeEntry(pathHash: 0xAABB, isDir: true, isExpanded: true,
+            Wire.FileTreeEntry(pathHash: 0xAABB, isDir: true, isExpanded: true,
                            isSelected: false, depth: 0, gitStatus: 0,
                            icon: "", name: "lib", relPath: "lib"),
-            GUIFileTreeEntry(pathHash: 0xCCDD, isDir: false, isExpanded: false,
+            Wire.FileTreeEntry(pathHash: 0xCCDD, isDir: false, isExpanded: false,
                            isSelected: true, depth: 1, gitStatus: 1,
                            icon: "", name: "editor.ex", relPath: "lib/editor.ex")
         ]
@@ -187,7 +187,7 @@ struct FileTreeStateLifecycleTests {
     @MainActor func fullPathComputation() {
         let state = FileTreeState()
         state.update(selectedIndex: 0, treeWidth: 30, rootPath: "/home/user/project",
-                     rawEntries: [GUIFileTreeEntry(pathHash: 1, isDir: false,
+                     rawEntries: [Wire.FileTreeEntry(pathHash: 1, isDir: false,
                                                    isExpanded: false, isSelected: false,
                                                    depth: 1, gitStatus: 0, icon: "",
                                                    name: "editor.ex",
@@ -201,7 +201,7 @@ struct FileTreeStateLifecycleTests {
     @MainActor func hideClearsAll() {
         let state = FileTreeState()
         state.update(selectedIndex: 0, treeWidth: 30, rootPath: "/project",
-                     rawEntries: [GUIFileTreeEntry(pathHash: 1, isDir: false,
+                     rawEntries: [Wire.FileTreeEntry(pathHash: 1, isDir: false,
                                                    isExpanded: false, isSelected: false,
                                                    depth: 0, gitStatus: 0, icon: "",
                                                    name: "a", relPath: "a")])
@@ -221,9 +221,9 @@ struct TabBarStateLifecycleTests {
     @MainActor func updateConverts() {
         let state = TabBarState()
         let raw = [
-            GUITabEntry(id: 42, groupId: 0, isActive: true, isDirty: true, isAgent: false,
+            Wire.TabEntry(id: 42, groupId: 0, isActive: true, isDirty: true, isAgent: false,
                        hasAttention: false, agentStatus: 0, icon: "", label: "editor.ex"),
-            GUITabEntry(id: 99, groupId: 0, isActive: false, isDirty: false, isAgent: true,
+            Wire.TabEntry(id: 99, groupId: 0, isActive: false, isDirty: false, isAgent: true,
                        hasAttention: true, agentStatus: 1, icon: "", label: "Agent")
         ]
         state.update(activeIndex: 0, entries: raw)
@@ -242,7 +242,7 @@ struct TabBarStateLifecycleTests {
     @MainActor func hideClearsAll() {
         let state = TabBarState()
         state.update(activeIndex: 1, entries: [
-            GUITabEntry(id: 1, groupId: 0, isActive: true, isDirty: false, isAgent: false,
+            Wire.TabEntry(id: 1, groupId: 0, isActive: true, isDirty: false, isAgent: false,
                        hasAttention: false, agentStatus: 0, icon: "", label: "a")
         ])
         state.hide()
@@ -279,14 +279,14 @@ struct AgentChatStateLifecycleTests {
     @Test("update() converts all message types")
     @MainActor func updateConvertsMessages() {
         let state = AgentChatState()
-        let raw: [GUIChatMessage] = [
-            GUIChatMessage(beamId: 1, content: .user(text: "hello")),
-            GUIChatMessage(beamId: 2, content: .assistant(text: "hi")),
-            GUIChatMessage(beamId: 3, content: .thinking(text: "analyzing...", collapsed: false)),
-            GUIChatMessage(beamId: 4, content: .toolCall(name: "read_file", summary: "lib/minga.ex", status: 1, isError: false,
+        let raw: [Wire.ChatMessage] = [
+            Wire.ChatMessage(beamId: 1, content: .user(text: "hello")),
+            Wire.ChatMessage(beamId: 2, content: .assistant(text: "hi")),
+            Wire.ChatMessage(beamId: 3, content: .thinking(text: "analyzing...", collapsed: false)),
+            Wire.ChatMessage(beamId: 4, content: .toolCall(name: "read_file", summary: "lib/minga.ex", status: 1, isError: false,
                      collapsed: true, durationMs: 500, result: "contents")),
-            GUIChatMessage(beamId: 5, content: .system(text: "session started", isError: false)),
-            GUIChatMessage(beamId: 6, content: .usage(input: 100, output: 50, cacheRead: 80, cacheWrite: 20, costMicros: 5000))
+            Wire.ChatMessage(beamId: 5, content: .system(text: "session started", isError: false)),
+            Wire.ChatMessage(beamId: 6, content: .usage(input: 100, output: 50, cacheRead: 80, cacheWrite: 20, costMicros: 5000))
         ]
         state.update(visible: true, status: 1, model: "claude", prompt: "fix bug",
                      promptLineCount: 1, promptCursorLine: 0, promptCursorCol: 0,
@@ -315,7 +315,7 @@ struct AgentChatStateLifecycleTests {
                      promptVimMode: 1, promptVisibleRows: 1,
                      promptCompletion: nil, pendingToolName: nil, pendingToolSummary: "",
                      helpVisible: false, helpGroups: [],
-                     rawMessages: [GUIChatMessage(beamId: 1, content: .user(text: "hi"))])
+                     rawMessages: [Wire.ChatMessage(beamId: 1, content: .user(text: "hi"))])
         state.hide()
 
         #expect(state.visible == false)
@@ -389,7 +389,7 @@ struct BottomPanelStateLifecycleTests {
     @MainActor func hideKeepsMessages() {
         let state = BottomPanelState()
         state.messagesState.appendEntries([
-            GUIMessageEntry(id: 1, level: 1, subsystem: 0,
+            Wire.MessageEntry(id: 1, level: 1, subsystem: 0,
                            timestampSecs: 0, filePath: "", text: "test")
         ])
         state.hide()
@@ -409,7 +409,7 @@ struct MessagesContentStateLifecycleTests {
 
         // Add 5 entries
         let entries = (0..<5).map {
-            GUIMessageEntry(id: UInt32($0), level: 1, subsystem: 0,
+            Wire.MessageEntry(id: UInt32($0), level: 1, subsystem: 0,
                            timestampSecs: UInt32($0), filePath: "", text: "msg \($0)")
         }
         state.appendEntries(entries)
@@ -420,11 +420,11 @@ struct MessagesContentStateLifecycleTests {
     @MainActor func filteringWorks() {
         let state = MessagesContentState()
         state.appendEntries([
-            GUIMessageEntry(id: 0, level: 0, subsystem: 0, timestampSecs: 0,
+            Wire.MessageEntry(id: 0, level: 0, subsystem: 0, timestampSecs: 0,
                            filePath: "", text: "debug msg"),
-            GUIMessageEntry(id: 1, level: 1, subsystem: 0, timestampSecs: 0,
+            Wire.MessageEntry(id: 1, level: 1, subsystem: 0, timestampSecs: 0,
                            filePath: "", text: "info msg"),
-            GUIMessageEntry(id: 2, level: 3, subsystem: 1, timestampSecs: 0,
+            Wire.MessageEntry(id: 2, level: 3, subsystem: 1, timestampSecs: 0,
                            filePath: "", text: "error in LSP"),
         ])
 
@@ -441,9 +441,9 @@ struct MessagesContentStateLifecycleTests {
     @MainActor func searchFilters() {
         let state = MessagesContentState()
         state.appendEntries([
-            GUIMessageEntry(id: 0, level: 1, subsystem: 0, timestampSecs: 0,
+            Wire.MessageEntry(id: 0, level: 1, subsystem: 0, timestampSecs: 0,
                            filePath: "", text: "File opened: editor.ex"),
-            GUIMessageEntry(id: 1, level: 1, subsystem: 0, timestampSecs: 0,
+            Wire.MessageEntry(id: 1, level: 1, subsystem: 0, timestampSecs: 0,
                            filePath: "", text: "File saved: buffer.ex"),
         ])
 
@@ -492,7 +492,7 @@ struct MessagesContentStateLifecycleTests {
 
         // New entries while scrolled up show "new entries" indicator
         state.appendEntries([
-            GUIMessageEntry(id: 0, level: 1, subsystem: 0, timestampSecs: 0,
+            Wire.MessageEntry(id: 0, level: 1, subsystem: 0, timestampSecs: 0,
                            filePath: "", text: "new")
         ])
         #expect(state.hasNewEntries == true)

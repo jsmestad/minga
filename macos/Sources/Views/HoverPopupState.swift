@@ -5,14 +5,14 @@ import SwiftUI
 /// A styled text segment for rendering in the hover popup.
 struct HoverSegment: Identifiable {
     let id: Int
-    let style: GUIHoverStyle
+    let style: Wire.HoverStyle
     let text: String
 }
 
 /// A line of hover content with its block type.
 struct HoverLine: Identifiable {
     let id: Int
-    let lineType: GUIHoverLineType
+    let lineType: Wire.HoverLineType
     let segments: [HoverSegment]
 }
 
@@ -27,7 +27,7 @@ final class HoverPopupState {
     var lines: [HoverLine] = []
 
     func update(visible: Bool, anchorRow: UInt16, anchorCol: UInt16,
-                focused: Bool, scrollOffset: UInt16, rawLines: [GUIHoverLine]) {
+                focused: Bool, scrollOffset: UInt16, rawLines: [Wire.HoverLine]) {
         self.visible = visible
         self.anchorRow = Int(anchorRow)
         self.anchorCol = Int(anchorCol)

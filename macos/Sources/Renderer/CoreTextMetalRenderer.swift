@@ -474,7 +474,7 @@ final class CoreTextMetalRenderer {
         }
 
         // Native gutter rendering from structured data.
-        // One GUIWindowGutter per editor window (split pane).
+        // One Wire.WindowGutter per editor window (split pane).
         for (_, windowGutter) in frameState.windowGutters {
             renderGutterEntries(
                 gutter: windowGutter,
@@ -740,7 +740,7 @@ final class CoreTextMetalRenderer {
     /// WindowContentRenderer. Git signs are drawn as colored Metal quads.
     /// Diagnostic signs are rendered as CTLine textures.
     private func renderGutterEntries(
-        gutter: GUIWindowGutter,
+        gutter: Wire.WindowGutter,
         frameState: FrameState,
         cellW: Float, cellH: Float, scale: Float,
         gutterLeftMarginPx: Float,
@@ -787,7 +787,7 @@ final class CoreTextMetalRenderer {
     /// using Metal quads. Diagnostic signs (E/W/I/H) are rendered as
     /// CTLine textures in the diagnostic color.
     private func renderGutterSign(
-        entry: GUIGutterEntry, screenRow: UInt16, yPos: Float, xOffset: Float,
+        entry: Wire.GutterEntry, screenRow: UInt16, yPos: Float, xOffset: Float,
         cellW: Float, cellH: Float, scale: Float,
         frameState: FrameState,
         bgQuads: inout [QuadGPU],
@@ -862,7 +862,7 @@ final class CoreTextMetalRenderer {
 
     /// Renders a line number for one gutter row.
     private func renderGutterLineNumber(
-        entry: GUIGutterEntry, gutter: GUIWindowGutter,
+        entry: Wire.GutterEntry, gutter: Wire.WindowGutter,
         screenRow: UInt16, yPos: Float, xOffset: Float,
         signColWidth: Int,
         cellW: Float, cellH: Float, scale: Float,
@@ -903,7 +903,7 @@ final class CoreTextMetalRenderer {
 
     /// Computes the display string and current-line flag for a gutter line number.
     private func gutterNumberString(
-        bufLine: UInt32, cursorLine: UInt32, style: GUILineNumberStyle
+        bufLine: UInt32, cursorLine: UInt32, style: Wire.LineNumberStyle
     ) -> (String, Bool) {
         let isCursor = bufLine == cursorLine
         switch style {
@@ -925,7 +925,7 @@ final class CoreTextMetalRenderer {
     }
 
     /// Returns the color for a git/diagnostic gutter sign from the line buffer's theme colors.
-    private func gutterSignColor(_ signType: GUIGutterSignType, frameState: FrameState) -> SIMD3<Float> {
+    private func gutterSignColor(_ signType: Wire.GutterSignType, frameState: FrameState) -> SIMD3<Float> {
         switch signType {
         case .gitAdded: return colorFromU24(frameState.gutterColors.gitAddedFg, default: .zero)
         case .gitModified: return colorFromU24(frameState.gutterColors.gitModifiedFg, default: .zero)
@@ -940,7 +940,7 @@ final class CoreTextMetalRenderer {
     }
 
     /// Returns the sign character and fg color (as U24) for a diagnostic sign type.
-    private func diagnosticSignTextAndColor(_ signType: GUIGutterSignType, frameState: FrameState) -> (String, UInt32) {
+    private func diagnosticSignTextAndColor(_ signType: Wire.GutterSignType, frameState: FrameState) -> (String, UInt32) {
         switch signType {
         case .diagError: return ("E", frameState.gutterColors.errorFg)
         case .diagWarning: return ("W", frameState.gutterColors.warningFg)

@@ -18,7 +18,7 @@ final class CompletionState {
     var selectedIndex: Int = 0
     var items: [CompletionItem] = []
 
-    func update(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, selectedIndex: UInt16, rawItems: [GUICompletionItem]) {
+    func update(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, selectedIndex: UInt16, rawItems: [Wire.CompletionItem]) {
         self.visible = visible
         self.anchorRow = Int(anchorRow)
         self.anchorCol = Int(anchorCol)

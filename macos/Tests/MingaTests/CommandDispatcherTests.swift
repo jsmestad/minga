@@ -32,7 +32,7 @@ struct CommandDispatcherRoutingTests {
         )
         gui.windowContents[1] = content
 
-        let gutter = GUIWindowGutter(
+        let gutter = Wire.WindowGutter(
             windowId: 1, contentRow: 0, contentCol: 5, contentHeight: 24,
             isActive: true, cursorLine: 10, lineNumberStyle: .hybrid,
             lineNumberWidth: 4, signColWidth: 1, entries: []
@@ -81,7 +81,7 @@ struct CommandDispatcherRoutingTests {
     @MainActor func guiTabBarRouting() {
         let (dispatcher, gui) = makeDispatcher()
         let tabs = [
-            GUITabEntry(id: 1, groupId: 0, isActive: true, isDirty: false, isAgent: false,
+            Wire.TabEntry(id: 1, groupId: 0, isActive: true, isDirty: false, isAgent: false,
                        hasAttention: false, agentStatus: 0, icon: "", label: "test.ex")
         ]
         dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: tabs))
@@ -95,7 +95,7 @@ struct CommandDispatcherRoutingTests {
     @MainActor func guiFileTreeRouting() {
         let (dispatcher, gui) = makeDispatcher()
         let entries = [
-            GUIFileTreeEntry(pathHash: 123, isDir: true, isExpanded: true,
+            Wire.FileTreeEntry(pathHash: 123, isDir: true, isExpanded: true,
                            isSelected: false, depth: 0, gitStatus: 0,
                            icon: "", name: "lib", relPath: "lib")
         ]
@@ -114,7 +114,7 @@ struct CommandDispatcherRoutingTests {
         // First show it
         dispatcher.dispatch(.guiFileTree(selectedIndex: 0, treeWidth: 30,
                                           rootPath: "/project",
-                                          entries: [GUIFileTreeEntry(pathHash: 1, isDir: false,
+                                          entries: [Wire.FileTreeEntry(pathHash: 1, isDir: false,
                                                                      isExpanded: false, isSelected: false,
                                                                      depth: 0, gitStatus: 0,
                                                                      icon: "", name: "a", relPath: "a")]))
@@ -130,7 +130,7 @@ struct CommandDispatcherRoutingTests {
     @MainActor func guiGitStatusRouting() {
         let (dispatcher, gui) = makeDispatcher()
         let rawEntries = [
-            GUIGitStatusEntry(pathHash: 12345, section: 1, status: 1, path: "lib/editor.ex")
+            Wire.GitStatusEntry(pathHash: 12345, section: 1, status: 1, path: "lib/editor.ex")
         ]
         dispatcher.dispatch(.guiGitStatus(repoState: 0, ahead: 2, behind: 0,
                                            branchName: "main", entries: rawEntries))
@@ -147,7 +147,7 @@ struct CommandDispatcherRoutingTests {
         let (dispatcher, gui) = makeDispatcher()
         // First show it with real data
         let rawEntries = [
-            GUIGitStatusEntry(pathHash: 12345, section: 1, status: 1, path: "lib/editor.ex")
+            Wire.GitStatusEntry(pathHash: 12345, section: 1, status: 1, path: "lib/editor.ex")
         ]
         dispatcher.dispatch(.guiGitStatus(repoState: 0, ahead: 0, behind: 0,
                                            branchName: "main", entries: rawEntries))
@@ -173,7 +173,7 @@ struct CommandDispatcherRoutingTests {
     @Test("guiCompletion visible updates completionState")
     @MainActor func guiCompletionVisible() {
         let (dispatcher, gui) = makeDispatcher()
-        let items = [GUICompletionItem(kind: 1, label: "def", detail: "keyword")]
+        let items = [Wire.CompletionItem(kind: 1, label: "def", detail: "keyword")]
         dispatcher.dispatch(.guiCompletion(visible: true, anchorRow: 5, anchorCol: 10,
                                             selectedIndex: 0, items: items))
 
@@ -186,7 +186,7 @@ struct CommandDispatcherRoutingTests {
     @MainActor func guiCompletionHidden() {
         let (dispatcher, gui) = makeDispatcher()
         // Show then hide
-        let items = [GUICompletionItem(kind: 1, label: "def", detail: "keyword")]
+        let items = [Wire.CompletionItem(kind: 1, label: "def", detail: "keyword")]
         dispatcher.dispatch(.guiCompletion(visible: true, anchorRow: 5, anchorCol: 10,
                                             selectedIndex: 0, items: items))
         dispatcher.dispatch(.guiCompletion(visible: false, anchorRow: 0, anchorCol: 0,
@@ -199,7 +199,7 @@ struct CommandDispatcherRoutingTests {
     @Test("guiWhichKey visible updates whichKeyState")
     @MainActor func guiWhichKeyVisible() {
         let (dispatcher, gui) = makeDispatcher()
-        let bindings = [GUIWhichKeyBinding(kind: 0, key: "f", description: "Find file", icon: "")]
+        let bindings = [Wire.WhichKeyBinding(kind: 0, key: "f", description: "Find file", icon: "")]
         dispatcher.dispatch(.guiWhichKey(visible: true, prefix: "SPC",
                                           page: 0, pageCount: 1, bindings: bindings))
 
@@ -302,7 +302,7 @@ struct CommandDispatcherRoutingTests {
     @Test("guiAgentChat visible updates agentChatState")
     @MainActor func guiAgentChatVisible() {
         let (dispatcher, gui) = makeDispatcher()
-        let messages: [GUIChatMessage] = [GUIChatMessage(beamId: 1, content: .user(text: "hello"))]
+        let messages: [Wire.ChatMessage] = [Wire.ChatMessage(beamId: 1, content: .user(text: "hello"))]
         dispatcher.dispatch(.guiAgentChat(visible: true, status: 1, model: "claude",
                                            prompt: "Fix this", promptLineCount: 1,
                                            promptCursorLine: 0, promptCursorCol: 0,
@@ -332,8 +332,8 @@ struct CommandDispatcherRoutingTests {
     @Test("guiBottomPanel visible updates bottomPanelState and appends entries")
     @MainActor func guiBottomPanelVisible() {
         let (dispatcher, gui) = makeDispatcher()
-        let tabs = [GUIBottomPanelTab(tabType: 0, name: "Messages")]
-        let entries = [GUIMessageEntry(id: 1, level: 1, subsystem: 0,
+        let tabs = [Wire.BottomPanelTab(tabType: 0, name: "Messages")]
+        let entries = [Wire.MessageEntry(id: 1, level: 1, subsystem: 0,
                                        timestampSecs: 3600, filePath: "", text: "test")]
         dispatcher.dispatch(.guiBottomPanel(visible: true, activeTabIndex: 0,
                                              heightPercent: 30, filterPreset: 0,
@@ -356,7 +356,7 @@ struct CommandDispatcherRoutingTests {
     @Test("guiToolManager visible updates toolManagerState")
     @MainActor func guiToolManagerVisible() {
         let (dispatcher, gui) = makeDispatcher()
-        let tools = [GUIToolEntry(name: "elixir_ls", label: "ElixirLS",
+        let tools = [Wire.ToolEntry(name: "elixir_ls", label: "ElixirLS",
                                   description: "LSP", category: 0, status: 1,
                                   method: 0, languages: ["elixir"], version: "0.22",
                                   homepage: "", provides: ["elixir-ls"],
@@ -417,7 +417,7 @@ struct CommandDispatcherRoutingTests {
     @Test("guiGutter stores gutter data in frameState")
     @MainActor func guiGutterRouting() {
         let (dispatcher, _) = makeDispatcher()
-        let gutter = GUIWindowGutter(
+        let gutter = Wire.WindowGutter(
             windowId: 1, contentRow: 0, contentCol: 5, contentHeight: 24,
             isActive: true, cursorLine: 10, lineNumberStyle: .hybrid,
             lineNumberWidth: 4, signColWidth: 1, entries: []

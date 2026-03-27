@@ -49,7 +49,7 @@ final class TabBarState {
     }
 
     /// Update from a decoded gui_tab_bar protocol message.
-    func update(activeIndex: UInt8, entries: [GUITabEntry]) {
+    func update(activeIndex: UInt8, entries: [Wire.TabEntry]) {
         self.activeIndex = Int(activeIndex)
         self.tabs = entries.map { entry in
             TabEntry(
@@ -67,7 +67,7 @@ final class TabBarState {
     }
 
     /// Update from a decoded gui_agent_groups protocol message.
-    func updateAgentGroups(activeGroupId: UInt16, entries: [GUIAgentGroupEntry]) {
+    func updateAgentGroups(activeGroupId: UInt16, entries: [Wire.AgentGroupEntry]) {
         self.activeGroupId = activeGroupId
         self.agentGroups = entries.map { entry in
             AgentGroupEntry(

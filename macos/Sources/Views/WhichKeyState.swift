@@ -19,7 +19,7 @@ final class WhichKeyState {
     var pageCount: Int = 0
     var bindings: [WhichKeyBinding] = []
 
-    func update(visible: Bool, prefix: String, page: UInt8, pageCount: UInt8, rawBindings: [GUIWhichKeyBinding]) {
+    func update(visible: Bool, prefix: String, page: UInt8, pageCount: UInt8, rawBindings: [Wire.WhichKeyBinding]) {
         self.visible = visible
         self.prefix = prefix
         self.page = Int(page)

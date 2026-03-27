@@ -42,8 +42,8 @@ struct CompletionOverlayViewTests {
         state.update(
             visible: true, anchorRow: 5, anchorCol: 10, selectedIndex: 0,
             rawItems: [
-                GUICompletionItem(kind: 1, label: "def", detail: "keyword"),
-                GUICompletionItem(kind: 2, label: "defmodule", detail: "keyword"),
+                Wire.CompletionItem(kind: 1, label: "def", detail: "keyword"),
+                Wire.CompletionItem(kind: 2, label: "defmodule", detail: "keyword"),
             ]
         )
 
@@ -84,8 +84,8 @@ struct WhichKeyOverlayViewTests {
         state.update(
             visible: true, prefix: "SPC", page: 0, pageCount: 1,
             rawBindings: [
-                GUIWhichKeyBinding(kind: 0, key: "f", description: "Find file", icon: ""),
-                GUIWhichKeyBinding(kind: 1, key: "b", description: "Buffers", icon: ""),
+                Wire.WhichKeyBinding(kind: 0, key: "f", description: "Find file", icon: ""),
+                Wire.WhichKeyBinding(kind: 1, key: "b", description: "Buffers", icon: ""),
             ]
         )
 
@@ -107,7 +107,7 @@ struct WhichKeyOverlayViewTests {
         state.update(
             visible: true, prefix: "SPC", page: 0, pageCount: 3,
             rawBindings: [
-                GUIWhichKeyBinding(kind: 0, key: "a", description: "test", icon: ""),
+                Wire.WhichKeyBinding(kind: 0, key: "a", description: "test", icon: ""),
             ]
         )
 
@@ -274,9 +274,9 @@ struct TabBarViewViewTests {
     @MainActor func showsAllTabs() throws {
         let state = TabBarState()
         state.update(activeIndex: 0, entries: [
-            GUITabEntry(id: 1, groupId: 0, isActive: true, isDirty: false, isAgent: false,
+            Wire.TabEntry(id: 1, groupId: 0, isActive: true, isDirty: false, isAgent: false,
                        hasAttention: false, agentStatus: 0, icon: "", label: "editor.ex"),
-            GUITabEntry(id: 2, groupId: 0, isActive: false, isDirty: false, isAgent: false,
+            Wire.TabEntry(id: 2, groupId: 0, isActive: false, isDirty: false, isAgent: false,
                        hasAttention: false, agentStatus: 0, icon: "", label: "test.ex"),
         ])
 

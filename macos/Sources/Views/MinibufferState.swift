@@ -73,7 +73,7 @@ final class MinibufferState {
     func update(visible: Bool, mode: UInt8, cursorPos: UInt16, prompt: String,
                 input: String, context: String, selectedIndex: UInt16,
                 totalCandidates: UInt16 = 0,
-                rawCandidates: [GUIMinibufferCandidate]) {
+                rawCandidates: [Wire.MinibufferCandidate]) {
         self.visible = visible
         self.mode = mode
         self.cursorPos = cursorPos

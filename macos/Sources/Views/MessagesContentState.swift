@@ -169,7 +169,7 @@ final class MessagesContentState {
     private let maxEntries = 1000
 
     /// Append new entries from the protocol decoder.
-    func appendEntries(_ rawEntries: [GUIMessageEntry]) {
+    func appendEntries(_ rawEntries: [Wire.MessageEntry]) {
         for raw in rawEntries {
             let entry = MessageEntry(
                 id: raw.id,

@@ -2,6 +2,10 @@
 ///
 /// Each command starts with a 1-byte opcode followed by opcode-specific
 /// fields. Multi-byte integers are big-endian. See `docs/PROTOCOL.md`.
+///
+/// Data types live in `ProtocolTypes.swift` under the `Wire` namespace.
+/// This file contains only the `RenderCommand` enum, decode functions,
+/// and private helpers.
 
 import Foundation
 
@@ -27,370 +31,32 @@ enum RenderCommand: Sendable {
     case setFontFallback(families: [String])
     case registerFont(id: UInt8, family: String)
     case guiTheme(slots: [(slotId: UInt8, r: UInt8, g: UInt8, b: UInt8)])
-    case guiTabBar(activeIndex: UInt8, tabs: [GUITabEntry])
-    case guiFileTree(selectedIndex: UInt16, treeWidth: UInt16, rootPath: String, entries: [GUIFileTreeEntry])
-    case guiCompletion(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, selectedIndex: UInt16, items: [GUICompletionItem])
-    case guiWhichKey(visible: Bool, prefix: String, page: UInt8, pageCount: UInt8, bindings: [GUIWhichKeyBinding])
+    case guiTabBar(activeIndex: UInt8, tabs: [Wire.TabEntry])
+    case guiFileTree(selectedIndex: UInt16, treeWidth: UInt16, rootPath: String, entries: [Wire.FileTreeEntry])
+    case guiCompletion(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, selectedIndex: UInt16, items: [Wire.CompletionItem])
+    case guiWhichKey(visible: Bool, prefix: String, page: UInt8, pageCount: UInt8, bindings: [Wire.WhichKeyBinding])
     case guiBreadcrumb(segments: [String])
     case guiStatusBar(contentKind: UInt8, mode: UInt8, cursorLine: UInt32, cursorCol: UInt32, lineCount: UInt32, flags: UInt8, lspStatus: UInt8, gitBranch: String, message: String, filetype: String, errorCount: UInt16, warningCount: UInt16, modelName: String, messageCount: UInt32, sessionStatus: UInt8, infoCount: UInt16, hintCount: UInt16, macroRecording: UInt8, parserStatus: UInt8, agentStatus: UInt8, gitAdded: UInt16, gitModified: UInt16, gitDeleted: UInt16, icon: String, iconColorR: UInt8, iconColorG: UInt8, iconColorB: UInt8, filename: String, diagnosticHint: String)
-    case guiPicker(visible: Bool, selectedIndex: UInt16, filteredCount: UInt16, totalCount: UInt16, title: String, query: String, hasPreview: Bool, items: [GUIPickerItem], actionMenu: GUIPickerActionMenu?)
-    case guiPickerPreview(visible: Bool, lines: [GUIPickerPreviewLine])
-    case guiAgentChat(visible: Bool, status: UInt8, model: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptVimMode: UInt8, promptVisibleRows: UInt8, promptCompletion: GUIPromptCompletion?, pendingToolName: String?, pendingToolSummary: String, helpVisible: Bool, helpGroups: [GUIHelpGroup], messages: [GUIChatMessage])
+    case guiPicker(visible: Bool, selectedIndex: UInt16, filteredCount: UInt16, totalCount: UInt16, title: String, query: String, hasPreview: Bool, items: [Wire.PickerItem], actionMenu: Wire.PickerActionMenu?)
+    case guiPickerPreview(visible: Bool, lines: [Wire.PickerPreviewLine])
+    case guiAgentChat(visible: Bool, status: UInt8, model: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptVimMode: UInt8, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?, pendingToolName: String?, pendingToolSummary: String, helpVisible: Bool, helpGroups: [Wire.HelpGroup], messages: [Wire.ChatMessage])
     case guiGutterSeparator(col: UInt16, r: UInt8, g: UInt8, b: UInt8)
     case guiCursorline(row: UInt16, r: UInt8, g: UInt8, b: UInt8)
-    case guiGutter(data: GUIWindowGutter)
+    case guiGutter(data: Wire.WindowGutter)
     case guiBottomPanel(visible: Bool, activeTabIndex: UInt8, heightPercent: UInt8,
-                         filterPreset: UInt8, tabs: [GUIBottomPanelTab],
-                         entries: [GUIMessageEntry])
+                         filterPreset: UInt8, tabs: [Wire.BottomPanelTab],
+                         entries: [Wire.MessageEntry])
     case guiWindowContent(data: GUIWindowContent)
-    case guiToolManager(visible: Bool, filter: UInt8, selectedIndex: UInt16, tools: [GUIToolEntry])
-    case guiMinibuffer(visible: Bool, mode: UInt8, cursorPos: UInt16, prompt: String, input: String, context: String, selectedIndex: UInt16, totalCandidates: UInt16, candidates: [GUIMinibufferCandidate])
-    case guiHoverPopup(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, focused: Bool, scrollOffset: UInt16, lines: [GUIHoverLine])
-    case guiSignatureHelp(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, activeSignature: UInt8, activeParameter: UInt8, signatures: [GUISignature])
+    case guiToolManager(visible: Bool, filter: UInt8, selectedIndex: UInt16, tools: [Wire.ToolEntry])
+    case guiMinibuffer(visible: Bool, mode: UInt8, cursorPos: UInt16, prompt: String, input: String, context: String, selectedIndex: UInt16, totalCandidates: UInt16, candidates: [Wire.MinibufferCandidate])
+    case guiHoverPopup(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, focused: Bool, scrollOffset: UInt16, lines: [Wire.HoverLine])
+    case guiSignatureHelp(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, activeSignature: UInt8, activeParameter: UInt8, signatures: [Wire.Signature])
     case guiFloatPopup(visible: Bool, width: UInt16, height: UInt16, title: String, lines: [String])
     case clipboardWrite(target: UInt8, text: String)
-    case guiSplitSeparators(borderColor: UInt32, verticals: [GUIVerticalSeparator], horizontals: [GUIHorizontalSeparator])
-    case guiGitStatus(repoState: UInt8, ahead: UInt16, behind: UInt16, branchName: String, entries: [GUIGitStatusEntry])
-    case guiAgentGroups(activeGroupId: UInt16, agentGroups: [GUIAgentGroupEntry])
+    case guiSplitSeparators(borderColor: UInt32, verticals: [Wire.VerticalSeparator], horizontals: [Wire.HorizontalSeparator])
+    case guiGitStatus(repoState: UInt8, ahead: UInt16, behind: UInt16, branchName: String, entries: [Wire.GitStatusEntry])
+    case guiAgentGroups(activeGroupId: UInt16, agentGroups: [Wire.AgentGroupEntry])
     case guiBoard(visible: Bool, focusedCardId: UInt32, cards: [BoardCard], filterMode: Bool, filterText: String)
-}
-
-// MARK: - Minibuffer data types
-
-struct GUIMinibufferCandidate: Sendable {
-    let matchScore: UInt8
-    let label: String
-    let description: String
-    let annotation: String
-    let matchPositions: [UInt16]
-}
-
-// MARK: - Hover popup data types
-
-/// Markdown style for a hover text segment.
-enum GUIHoverStyle: UInt8, Sendable {
-    case plain = 0
-    case bold = 1
-    case italic = 2
-    case boldItalic = 3
-    case code = 4
-    case codeBlock = 5
-    case codeContent = 6
-    case header1 = 7
-    case header2 = 8
-    case header3 = 9
-    case blockquote = 10
-    case listBullet = 11
-    case rule = 12
-}
-
-/// Line type for hover content (block context).
-enum GUIHoverLineType: UInt8, Sendable {
-    case text = 0
-    case code = 1
-    case codeHeader = 2
-    case header = 3
-    case blockquote = 4
-    case listItem = 5
-    case rule = 6
-    case empty = 7
-}
-
-/// A styled text segment within a hover line.
-struct GUIHoverSegment: Sendable {
-    let style: GUIHoverStyle
-    let text: String
-}
-
-/// A line of hover content with its block type and styled segments.
-struct GUIHoverLine: Sendable {
-    let lineType: GUIHoverLineType
-    let segments: [GUIHoverSegment]
-}
-
-// MARK: - Signature help data types
-
-/// A parameter in a function signature.
-struct GUISignatureParameter: Sendable {
-    let label: String
-    let documentation: String
-}
-
-/// A function signature with its parameters.
-struct GUISignature: Sendable {
-    let label: String
-    let documentation: String
-    let parameters: [GUISignatureParameter]
-}
-
-// MARK: - Split separator data types
-
-/// A vertical split separator line.
-struct GUIVerticalSeparator: Sendable {
-    let col: UInt16
-    let startRow: UInt16
-    let endRow: UInt16
-}
-
-/// A horizontal split separator with a centered filename.
-struct GUIHorizontalSeparator: Sendable {
-    let row: UInt16
-    let col: UInt16
-    let width: UInt16
-    let filename: String
-}
-
-// MARK: - Git status panel data types
-
-/// Raw decoded entry from gui_git_status protocol message.
-struct GUIGitStatusEntry: Sendable {
-    let pathHash: UInt32
-    let section: UInt8
-    let status: UInt8
-    let path: String
-}
-
-// MARK: - Tool Manager data types
-
-struct GUIToolEntry {
-    let name: String
-    let label: String
-    let description: String
-    let category: UInt8
-    let status: UInt8
-    let method: UInt8
-    let languages: [String]
-    let version: String
-    let homepage: String
-    let provides: [String]
-    let errorReason: String
-}
-
-/// Line number display style from the BEAM.
-enum GUILineNumberStyle: UInt8, Sendable {
-    case hybrid = 0
-    case absolute = 1
-    case relative = 2
-    case none = 3
-}
-
-/// Display type for a gutter row.
-enum GUIGutterDisplayType: UInt8, Sendable {
-    case normal = 0
-    case foldStart = 1
-    case foldContinuation = 2
-    case wrapContinuation = 3
-}
-
-/// Sign type for the gutter sign column.
-enum GUIGutterSignType: UInt8, Sendable {
-    case none = 0
-    case gitAdded = 1
-    case gitModified = 2
-    case gitDeleted = 3
-    case diagError = 4
-    case diagWarning = 5
-    case diagInfo = 6
-    case diagHint = 7
-    case annotation = 8
-}
-
-/// A single gutter entry for one visible line.
-struct GUIGutterEntry: Sendable {
-    let bufLine: UInt32
-    let displayType: GUIGutterDisplayType
-    let signType: GUIGutterSignType
-    /// Annotation icon foreground color (24-bit RGB). Only valid when signType == .annotation.
-    let signFg: UInt32
-    /// Annotation icon text. Only valid when signType == .annotation.
-    let signText: String
-
-    init(bufLine: UInt32, displayType: GUIGutterDisplayType, signType: GUIGutterSignType,
-         signFg: UInt32 = 0, signText: String = "") {
-        self.bufLine = bufLine
-        self.displayType = displayType
-        self.signType = signType
-        self.signFg = signFg
-        self.signText = signText
-    }
-}
-
-/// Gutter data for one window, including its screen position.
-/// One message per window arrives each frame.
-struct GUIWindowGutter: Sendable {
-    /// Window ID matching the gui_window_content (0x80) windowId.
-    let windowId: UInt16
-    /// Screen row where this window's content area begins.
-    let contentRow: UInt16
-    /// Screen column where this window's content area begins.
-    let contentCol: UInt16
-    /// Height of this window's content area in rows.
-    let contentHeight: UInt16
-    /// Whether this is the active (focused) window.
-    let isActive: Bool
-
-    let cursorLine: UInt32
-    let lineNumberStyle: GUILineNumberStyle
-    let lineNumberWidth: UInt8
-    let signColWidth: UInt8
-    var entries: [GUIGutterEntry]
-}
-
-/// A tab definition from gui_bottom_panel.
-struct GUIBottomPanelTab: Sendable {
-    let tabType: UInt8
-    let name: String
-}
-
-/// A structured log entry from the Messages tab content.
-struct GUIMessageEntry: Sendable {
-    let id: UInt32
-    let level: UInt8
-    let subsystem: UInt8
-    let timestampSecs: UInt32
-    let filePath: String
-    let text: String
-}
-
-/// A styled text run for GUI rendering. Carries pre-computed colors from the BEAM.
-struct StyledTextRun: Sendable {
-    let text: String
-    let fgR: UInt8
-    let fgG: UInt8
-    let fgB: UInt8
-    let bgR: UInt8
-    let bgG: UInt8
-    let bgB: UInt8
-    let bold: Bool
-    let italic: Bool
-    let underline: Bool
-}
-
-/// Prompt completion popup data from gui_agent_chat.
-/// Carries @-mention or /slash command completion candidates.
-struct GUIPromptCompletion: Sendable {
-    /// 0 = mention (@file), 1 = slash (/command).
-    let type: UInt8
-    let selected: UInt8
-    let anchorLine: UInt16
-    let anchorCol: UInt16
-    let candidates: [(name: String, description: String)]
-}
-
-/// A help group from gui_agent_chat, containing a category title and keybindings.
-struct GUIHelpGroup: Sendable {
-    let title: String
-    let bindings: [(key: String, description: String)]
-}
-
-/// A chat message from gui_agent_chat, with a stable BEAM-assigned ID.
-struct GUIChatMessage: Sendable {
-    /// Stable uint32 ID assigned by the BEAM. Persists across streaming updates.
-    let beamId: UInt32
-    let content: GUIChatMessageContent
-}
-
-/// The payload of a chat message (type-specific data).
-enum GUIChatMessageContent: Sendable {
-    case user(text: String)
-    case assistant(text: String)
-    /// Assistant message with pre-styled text runs from tree-sitter.
-    case styledAssistant(lines: [[StyledTextRun]])
-    case thinking(text: String, collapsed: Bool)
-    case toolCall(name: String, summary: String, status: UInt8, isError: Bool, collapsed: Bool, durationMs: UInt32, result: String)
-    /// Tool call with pre-styled result runs from tree-sitter.
-    case styledToolCall(name: String, summary: String, status: UInt8, isError: Bool, collapsed: Bool, durationMs: UInt32, resultLines: [[StyledTextRun]])
-    case system(text: String, isError: Bool)
-    case usage(input: UInt32, output: UInt32, cacheRead: UInt32, cacheWrite: UInt32, costMicros: UInt32)
-}
-
-/// A picker item from gui_picker (v2 extended format).
-struct GUIPickerItem: Sendable {
-    let iconColor: UInt32  // 24-bit RGB
-    let flags: UInt8       // bit 0: two_line, bit 1: marked
-    let label: String
-    let description: String
-    let annotation: String
-    let matchPositions: [UInt16]  // 0-based character indices of matched chars in label
-
-    var isTwoLine: Bool { flags & 0x01 != 0 }
-    var isMarked: Bool { flags & 0x02 != 0 }
-}
-
-/// An action menu for the picker (C-o menu).
-struct GUIPickerActionMenu: Sendable {
-    let selectedIndex: UInt8
-    let actions: [String]
-}
-
-/// A styled text segment for picker preview content.
-struct GUIPickerPreviewSegment: Sendable {
-    let fgColor: UInt32   // 24-bit RGB
-    let bold: Bool
-    let text: String
-}
-
-/// A line of preview content (array of styled segments).
-typealias GUIPickerPreviewLine = [GUIPickerPreviewSegment]
-
-/// A completion item from gui_completion.
-struct GUICompletionItem: Sendable {
-    let kind: UInt8
-    let label: String
-    let detail: String
-}
-
-/// A which-key binding from gui_which_key.
-struct GUIWhichKeyBinding: Sendable {
-    let kind: UInt8  // 0 = command, 1 = group
-    let key: String
-    let description: String
-    let icon: String
-}
-
-/// A single file tree entry decoded from the gui_file_tree protocol message.
-struct GUIFileTreeEntry: Sendable {
-    let pathHash: UInt32
-    let isDir: Bool
-    let isExpanded: Bool
-    let isSelected: Bool
-    let depth: UInt8
-    let gitStatus: UInt8
-    let icon: String
-    let name: String
-    let relPath: String
-}
-
-/// A single tab entry decoded from the gui_tab_bar protocol message.
-struct GUITabEntry: Sendable {
-    let id: UInt32
-    let groupId: UInt16
-    let isActive: Bool
-    let isDirty: Bool
-    let isAgent: Bool
-    let hasAttention: Bool
-    let agentStatus: UInt8
-    let icon: String
-    let label: String
-}
-
-/// An agent group entry decoded from the gui_agent_groups protocol message.
-struct GUIAgentGroupEntry: Sendable {
-    let id: UInt16
-    let agentStatus: UInt8
-    let colorR: UInt8
-    let colorG: UInt8
-    let colorB: UInt8
-    let tabCount: UInt16
-    let label: String
-    let icon: String
-}
-
-/// Cursor shape matching the protocol constants.
-enum CursorShape: UInt8, Sendable {
-    case block = 0x00
-    case beam = 0x01
-    case underline = 0x02
 }
 
 // MARK: - Decoder
@@ -613,7 +279,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         guard data.count >= rest + 8 + rootLen else { throw ProtocolDecodeError.malformed }
         let rootData = data[(rest + 8)..<(rest + 8 + rootLen)]
         let rootPath = String(data: rootData, encoding: .utf8) ?? ""
-        var entries: [GUIFileTreeEntry] = []
+        var entries: [Wire.FileTreeEntry] = []
         entries.reserveCapacity(entryCount)
         var pos = rest + 8 + rootLen
         for _ in 0..<entryCount {
@@ -634,7 +300,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             guard data.count >= pos + 12 + iconLen + nameLen + relPathLen else { throw ProtocolDecodeError.malformed }
             let relPathData = data[(pos + 12 + iconLen + nameLen)..<(pos + 12 + iconLen + nameLen + relPathLen)]
             let relPath = String(data: relPathData, encoding: .utf8) ?? ""
-            entries.append(GUIFileTreeEntry(
+            entries.append(Wire.FileTreeEntry(
                 pathHash: pathHash,
                 isDir: flags & 0x01 != 0,
                 isExpanded: flags & 0x02 != 0,
@@ -654,7 +320,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
         let activeIndex = data[rest]
         let tabCount = Int(data[rest + 1])
-        var tabs: [GUITabEntry] = []
+        var tabs: [Wire.TabEntry] = []
         tabs.reserveCapacity(tabCount)
         var pos = rest + 2
         for _ in 0..<tabCount {
@@ -670,7 +336,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             guard data.count >= pos + 8 + iconLen + 2 + labelLen else { throw ProtocolDecodeError.malformed }
             let labelData = data[(pos + 10 + iconLen)..<(pos + 10 + iconLen + labelLen)]
             let label = String(data: labelData, encoding: .utf8) ?? ""
-            tabs.append(GUITabEntry(
+            tabs.append(Wire.TabEntry(
                 id: tabId,
                 groupId: groupId,
                 isActive: flags & 0x01 != 0,
@@ -709,7 +375,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         let anchorCol = readU16(data, rest + 3)
         let selectedIndex = readU16(data, rest + 5)
         let itemCount = Int(readU16(data, rest + 7))
-        var items: [GUICompletionItem] = []
+        var items: [Wire.CompletionItem] = []
         items.reserveCapacity(itemCount)
         var pos = rest + 9
         for _ in 0..<itemCount {
@@ -721,7 +387,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             let detailLen = Int(readU16(data, pos + 3 + labelLen))
             guard data.count >= pos + 5 + labelLen + detailLen else { throw ProtocolDecodeError.malformed }
             let detail = String(data: data[(pos + 5 + labelLen)..<(pos + 5 + labelLen + detailLen)], encoding: .utf8) ?? ""
-            items.append(GUICompletionItem(kind: kind, label: label, detail: detail))
+            items.append(Wire.CompletionItem(kind: kind, label: label, detail: detail))
             pos += 5 + labelLen + detailLen
         }
         return (.guiCompletion(visible: true, anchorRow: anchorRow, anchorCol: anchorCol, selectedIndex: selectedIndex, items: items), pos - offset)
@@ -739,7 +405,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         let page = data[rest + 3 + prefixLen]
         let pageCount = data[rest + 4 + prefixLen]
         let bindingCount = Int(readU16(data, rest + 5 + prefixLen))
-        var bindings: [GUIWhichKeyBinding] = []
+        var bindings: [Wire.WhichKeyBinding] = []
         bindings.reserveCapacity(bindingCount)
         var pos = rest + 7 + prefixLen
         for _ in 0..<bindingCount {
@@ -754,7 +420,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             let iconLen = Int(data[pos + 4 + keyLen + descLen])
             guard data.count >= pos + 5 + keyLen + descLen + iconLen else { throw ProtocolDecodeError.malformed }
             let icon = String(data: data[(pos + 5 + keyLen + descLen)..<(pos + 5 + keyLen + descLen + iconLen)], encoding: .utf8) ?? ""
-            bindings.append(GUIWhichKeyBinding(kind: bKind, key: key, description: desc, icon: icon))
+            bindings.append(Wire.WhichKeyBinding(kind: bKind, key: key, description: desc, icon: icon))
             pos += 5 + keyLen + descLen + iconLen
         }
         return (.guiWhichKey(visible: true, prefix: prefix, page: page, pageCount: pageCount, bindings: bindings), pos - offset)
@@ -892,7 +558,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         let query = String(data: data[(rest + 11 + titleLen)..<(rest + 11 + titleLen + queryLen)], encoding: .utf8) ?? ""
         let hasPreview = data[rest + 11 + titleLen + queryLen] != 0
         let itemCount = Int(readU16(data, rest + 12 + titleLen + queryLen))
-        var items: [GUIPickerItem] = []
+        var items: [Wire.PickerItem] = []
         items.reserveCapacity(itemCount)
         var pos = rest + 14 + titleLen + queryLen
         for _ in 0..<itemCount {
@@ -918,11 +584,11 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                 matchPositions.append(readU16(data, mpos))
                 mpos += 2
             }
-            items.append(GUIPickerItem(iconColor: UInt32(iconColor), flags: itemFlags, label: label, description: desc, annotation: annotation, matchPositions: matchPositions))
+            items.append(Wire.PickerItem(iconColor: UInt32(iconColor), flags: itemFlags, label: label, description: desc, annotation: annotation, matchPositions: matchPositions))
             pos = mpos
         }
         // Parse action menu: visible(1), if visible: selected(1) + count(1) + actions
-        var actionMenu: GUIPickerActionMenu? = nil
+        var actionMenu: Wire.PickerActionMenu? = nil
         guard data.count >= pos + 1 else { throw ProtocolDecodeError.malformed }
         let actionMenuVisible = data[pos] != 0
         pos += 1
@@ -941,7 +607,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                 actionNames.append(name)
                 pos += 2 + nameLen
             }
-            actionMenu = GUIPickerActionMenu(selectedIndex: actionSelected, actions: actionNames)
+            actionMenu = Wire.PickerActionMenu(selectedIndex: actionSelected, actions: actionNames)
         }
         return (.guiPicker(visible: true, selectedIndex: selectedIndex, filteredCount: filteredCount, totalCount: totalCount, title: title, query: query, hasPreview: hasPreview, items: items, actionMenu: actionMenu), pos - offset)
 
@@ -953,14 +619,14 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         }
         guard data.count >= rest + 3 else { throw ProtocolDecodeError.malformed }
         let lineCount = Int(readU16(data, rest + 1))
-        var lines: [GUIPickerPreviewLine] = []
+        var lines: [Wire.PickerPreviewLine] = []
         lines.reserveCapacity(lineCount)
         var pos2 = rest + 3
         for _ in 0..<lineCount {
             guard data.count >= pos2 + 1 else { throw ProtocolDecodeError.malformed }
             let segCount = Int(data[pos2])
             pos2 += 1
-            var segments: GUIPickerPreviewLine = []
+            var segments: Wire.PickerPreviewLine = []
             segments.reserveCapacity(segCount)
             for _ in 0..<segCount {
                 guard data.count >= pos2 + 6 else { throw ProtocolDecodeError.malformed }
@@ -969,7 +635,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                 let textLen = Int(readU16(data, pos2 + 4))
                 guard data.count >= pos2 + 6 + textLen else { throw ProtocolDecodeError.malformed }
                 let text = String(data: data[(pos2 + 6)..<(pos2 + 6 + textLen)], encoding: .utf8) ?? ""
-                segments.append(GUIPickerPreviewSegment(fgColor: UInt32(fgColor), bold: segFlags & 0x01 != 0, text: text))
+                segments.append(Wire.PickerPreviewSegment(fgColor: UInt32(fgColor), bold: segFlags & 0x01 != 0, text: text))
                 pos2 += 6 + textLen
             }
             lines.append(segments)
@@ -1003,7 +669,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         guard data.count >= completionPos + 1 else { throw ProtocolDecodeError.malformed }
         let hasCompletion = data[completionPos] != 0
         completionPos += 1
-        var promptCompletion: GUIPromptCompletion? = nil
+        var promptCompletion: Wire.PromptCompletion? = nil
         if hasCompletion {
             guard data.count >= completionPos + 6 else { throw ProtocolDecodeError.malformed }
             let compType = data[completionPos]
@@ -1025,7 +691,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                 candidates.append((name: name, description: desc))
                 completionPos += 4 + nameLen + descLen
             }
-            promptCompletion = GUIPromptCompletion(type: compType, selected: compSelected, anchorLine: compAnchorLine, anchorCol: compAnchorCol, candidates: candidates)
+            promptCompletion = Wire.PromptCompletion(type: compType, selected: compSelected, anchorLine: compAnchorLine, anchorCol: compAnchorCol, candidates: candidates)
         }
         // Parse pending_approval: 0 = none, 1 = has approval
         var pendingPos = completionPos
@@ -1048,7 +714,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         guard data.count >= pendingPos + 1 else { throw ProtocolDecodeError.malformed }
         let helpVisible = data[pendingPos] != 0
         pendingPos += 1
-        var helpGroups: [GUIHelpGroup] = []
+        var helpGroups: [Wire.HelpGroup] = []
         if helpVisible {
             guard data.count >= pendingPos + 1 else { throw ProtocolDecodeError.malformed }
             let groupCount = Int(data[pendingPos])
@@ -1072,12 +738,12 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                     bindings.append((key: key, description: desc))
                     pendingPos += 3 + keyLen + descLen
                 }
-                helpGroups.append(GUIHelpGroup(title: title, bindings: bindings))
+                helpGroups.append(Wire.HelpGroup(title: title, bindings: bindings))
             }
         }
         guard data.count >= pendingPos + 2 else { throw ProtocolDecodeError.malformed }
         let msgCount = Int(readU16(data, pendingPos))
-        var messages: [GUIChatMessage] = []
+        var messages: [Wire.ChatMessage] = []
         messages.reserveCapacity(msgCount)
         var pos = pendingPos + 2
         for _ in 0..<msgCount {
@@ -1092,14 +758,14 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                 let tLen = Int(readU32(data, pos + 1))
                 guard data.count >= pos + 5 + tLen else { throw ProtocolDecodeError.malformed }
                 let t = String(data: data[(pos + 5)..<(pos + 5 + tLen)], encoding: .utf8) ?? ""
-                messages.append(GUIChatMessage(beamId: beamId, content: .user(text: t)))
+                messages.append(Wire.ChatMessage(beamId: beamId, content: .user(text: t)))
                 pos += 5 + tLen
             case 0x02: // assistant
                 guard data.count >= pos + 5 else { throw ProtocolDecodeError.malformed }
                 let tLen = Int(readU32(data, pos + 1))
                 guard data.count >= pos + 5 + tLen else { throw ProtocolDecodeError.malformed }
                 let t = String(data: data[(pos + 5)..<(pos + 5 + tLen)], encoding: .utf8) ?? ""
-                messages.append(GUIChatMessage(beamId: beamId, content: .assistant(text: t)))
+                messages.append(Wire.ChatMessage(beamId: beamId, content: .assistant(text: t)))
                 pos += 5 + tLen
             case 0x03: // thinking
                 guard data.count >= pos + 6 else { throw ProtocolDecodeError.malformed }
@@ -1107,7 +773,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                 let tLen = Int(readU32(data, pos + 2))
                 guard data.count >= pos + 6 + tLen else { throw ProtocolDecodeError.malformed }
                 let t = String(data: data[(pos + 6)..<(pos + 6 + tLen)], encoding: .utf8) ?? ""
-                messages.append(GUIChatMessage(beamId: beamId, content: .thinking(text: t, collapsed: collapsed)))
+                messages.append(Wire.ChatMessage(beamId: beamId, content: .thinking(text: t, collapsed: collapsed)))
                 pos += 6 + tLen
             case 0x04: // tool_call
                 guard data.count >= pos + 10 else { throw ProtocolDecodeError.malformed }
@@ -1124,7 +790,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                 let resultLen = Int(readU32(data, pos + 12 + nameLen + summaryLen))
                 guard data.count >= pos + 16 + nameLen + summaryLen + resultLen else { throw ProtocolDecodeError.malformed }
                 let result = String(data: data[(pos + 16 + nameLen + summaryLen)..<(pos + 16 + nameLen + summaryLen + resultLen)], encoding: .utf8) ?? ""
-                messages.append(GUIChatMessage(beamId: beamId, content: .toolCall(name: name, summary: summary, status: tcStatus, isError: isError, collapsed: tcCollapsed, durationMs: duration, result: result)))
+                messages.append(Wire.ChatMessage(beamId: beamId, content: .toolCall(name: name, summary: summary, status: tcStatus, isError: isError, collapsed: tcCollapsed, durationMs: duration, result: result)))
                 pos += 16 + nameLen + summaryLen + resultLen
             case 0x05: // system
                 guard data.count >= pos + 6 else { throw ProtocolDecodeError.malformed }
@@ -1132,7 +798,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                 let tLen = Int(readU32(data, pos + 2))
                 guard data.count >= pos + 6 + tLen else { throw ProtocolDecodeError.malformed }
                 let t = String(data: data[(pos + 6)..<(pos + 6 + tLen)], encoding: .utf8) ?? ""
-                messages.append(GUIChatMessage(beamId: beamId, content: .system(text: t, isError: isError)))
+                messages.append(Wire.ChatMessage(beamId: beamId, content: .system(text: t, isError: isError)))
                 pos += 6 + tLen
             case 0x06: // usage
                 guard data.count >= pos + 21 else { throw ProtocolDecodeError.malformed }
@@ -1141,20 +807,20 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                 let cacheR = readU32(data, pos + 9)
                 let cacheW = readU32(data, pos + 13)
                 let costM = readU32(data, pos + 17)
-                messages.append(GUIChatMessage(beamId: beamId, content: .usage(input: inp, output: outp, cacheRead: cacheR, cacheWrite: cacheW, costMicros: costM)))
+                messages.append(Wire.ChatMessage(beamId: beamId, content: .usage(input: inp, output: outp, cacheRead: cacheR, cacheWrite: cacheW, costMicros: costM)))
                 pos += 21
             case 0x07: // styled_assistant
                 // Format: 0x07, line_count::16, then per line:
                 //   run_count::16, then per run: text_len::16, text, fg::24, bg::24, flags::8
                 guard data.count >= pos + 3 else { throw ProtocolDecodeError.malformed }
                 let lineCount = Int(readU16(data, pos + 1))
-                var lines: [[StyledTextRun]] = []
+                var lines: [[Wire.StyledTextRun]] = []
                 lines.reserveCapacity(lineCount)
                 var rPos = pos + 3
                 for _ in 0..<lineCount {
                     guard data.count >= rPos + 2 else { throw ProtocolDecodeError.malformed }
                     let runCount = Int(readU16(data, rPos))
-                    var runs: [StyledTextRun] = []
+                    var runs: [Wire.StyledTextRun] = []
                     runs.reserveCapacity(runCount)
                     rPos += 2
                     for _ in 0..<runCount {
@@ -1170,7 +836,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                         let bgG = data[fgOff + 4]
                         let bgB = data[fgOff + 5]
                         let flags = data[fgOff + 6]
-                        runs.append(StyledTextRun(
+                        runs.append(Wire.StyledTextRun(
                             text: runText,
                             fgR: fgR, fgG: fgG, fgB: fgB,
                             bgR: bgR, bgG: bgG, bgB: bgB,
@@ -1182,7 +848,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                     }
                     lines.append(runs)
                 }
-                messages.append(GUIChatMessage(beamId: beamId, content: .styledAssistant(lines: lines)))
+                messages.append(Wire.ChatMessage(beamId: beamId, content: .styledAssistant(lines: lines)))
                 pos = rPos
             case 0x08: // styled_tool_call
                 // Same header as tool_call (0x04) but result is styled runs instead of plain text.
@@ -1201,13 +867,13 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                 guard data.count >= pos + 12 + stcNameLen + stcSummaryLen + 2 else { throw ProtocolDecodeError.malformed }
                 let stcSummary = String(data: data[(pos + 12 + stcNameLen)..<(pos + 12 + stcNameLen + stcSummaryLen)], encoding: .utf8) ?? ""
                 let stcLineCount = Int(readU16(data, pos + 12 + stcNameLen + stcSummaryLen))
-                var stcLines: [[StyledTextRun]] = []
+                var stcLines: [[Wire.StyledTextRun]] = []
                 stcLines.reserveCapacity(stcLineCount)
                 var stcPos = pos + 14 + stcNameLen + stcSummaryLen
                 for _ in 0..<stcLineCount {
                     guard data.count >= stcPos + 2 else { throw ProtocolDecodeError.malformed }
                     let runCount = Int(readU16(data, stcPos))
-                    var runs: [StyledTextRun] = []
+                    var runs: [Wire.StyledTextRun] = []
                     runs.reserveCapacity(runCount)
                     stcPos += 2
                     for _ in 0..<runCount {
@@ -1216,7 +882,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                         guard data.count >= stcPos + 2 + textLen + 7 else { throw ProtocolDecodeError.malformed }
                         let runText = String(data: data[(stcPos + 2)..<(stcPos + 2 + textLen)], encoding: .utf8) ?? ""
                         let fgOff = stcPos + 2 + textLen
-                        runs.append(StyledTextRun(
+                        runs.append(Wire.StyledTextRun(
                             text: runText,
                             fgR: data[fgOff], fgG: data[fgOff + 1], fgB: data[fgOff + 2],
                             bgR: data[fgOff + 3], bgG: data[fgOff + 4], bgB: data[fgOff + 5],
@@ -1228,7 +894,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                     }
                     stcLines.append(runs)
                 }
-                messages.append(GUIChatMessage(beamId: beamId, content: .styledToolCall(name: stcName, summary: stcSummary, status: stcStatus, isError: stcIsError, collapsed: stcCollapsed, durationMs: stcDuration, resultLines: stcLines)))
+                messages.append(Wire.ChatMessage(beamId: beamId, content: .styledToolCall(name: stcName, summary: stcSummary, status: stcStatus, isError: stcIsError, collapsed: stcCollapsed, durationMs: stcDuration, resultLines: stcLines)))
                 pos = stcPos
             default:
                 break
@@ -1262,18 +928,18 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         let lnWidth = data[rest + 14]
         let signWidth = data[rest + 15]
         let lineCount = Int(readU16(data, rest + 16))
-        let style = GUILineNumberStyle(rawValue: styleRaw) ?? .hybrid
+        let style = Wire.LineNumberStyle(rawValue: styleRaw) ?? .hybrid
 
         // Entries: 6 bytes each (buf_line:4 + display_type:1 + sign_type:1).
         // Annotation entries (sign_type=8) have extra bytes: fg:3 + text_len:1 + text.
-        var entries: [GUIGutterEntry] = []
+        var entries: [Wire.GutterEntry] = []
         entries.reserveCapacity(lineCount)
         var pos = rest + 18
         for _ in 0..<lineCount {
             guard data.count >= pos + 6 else { throw ProtocolDecodeError.malformed }
             let bufLine = readU32(data, pos)
-            let dt = GUIGutterDisplayType(rawValue: data[pos + 4]) ?? .normal
-            let st = GUIGutterSignType(rawValue: data[pos + 5]) ?? .none
+            let dt = Wire.GutterDisplayType(rawValue: data[pos + 4]) ?? .normal
+            let st = Wire.GutterSignType(rawValue: data[pos + 5]) ?? .none
             pos += 6
 
             if st == .annotation {
@@ -1285,13 +951,13 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                 guard data.count >= pos + textLen else { throw ProtocolDecodeError.malformed }
                 let text = String(data: Data(data[pos..<(pos + textLen)]), encoding: .utf8) ?? ""
                 pos += textLen
-                entries.append(GUIGutterEntry(bufLine: bufLine, displayType: dt, signType: st,
+                entries.append(Wire.GutterEntry(bufLine: bufLine, displayType: dt, signType: st,
                                               signFg: fg, signText: text))
             } else {
-                entries.append(GUIGutterEntry(bufLine: bufLine, displayType: dt, signType: st))
+                entries.append(Wire.GutterEntry(bufLine: bufLine, displayType: dt, signType: st))
             }
         }
-        let windowGutter = GUIWindowGutter(
+        let windowGutter = Wire.WindowGutter(
             windowId: windowId,
             contentRow: contentRow, contentCol: contentCol, contentHeight: contentHeight,
             isActive: isActive, cursorLine: cursorLine, lineNumberStyle: style,
@@ -1314,7 +980,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         let filterPreset = data[rest + 3]
         let tabCount = Int(data[rest + 4])
         var pos = rest + 5
-        var tabs: [GUIBottomPanelTab] = []
+        var tabs: [Wire.BottomPanelTab] = []
         for _ in 0..<tabCount {
             guard data.count >= pos + 2 else { throw ProtocolDecodeError.malformed }
             let tabType = data[pos]
@@ -1323,10 +989,10 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             guard data.count >= pos + nameLen else { throw ProtocolDecodeError.malformed }
             let name = String(data: data[pos..<(pos + nameLen)], encoding: .utf8) ?? ""
             pos += nameLen
-            tabs.append(GUIBottomPanelTab(tabType: tabType, name: name))
+            tabs.append(Wire.BottomPanelTab(tabType: tabType, name: name))
         }
         // Content payload: entry_count(2) + entries...
-        var entries: [GUIMessageEntry] = []
+        var entries: [Wire.MessageEntry] = []
         guard data.count >= pos + 2 else {
             return (.guiBottomPanel(visible: true, activeTabIndex: activeTabIndex,
                                      heightPercent: heightPercent, filterPreset: filterPreset,
@@ -1353,7 +1019,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             guard data.count >= pos + textLen else { break }
             let text = String(data: data[pos..<(pos + textLen)], encoding: .utf8) ?? ""
             pos += textLen
-            entries.append(GUIMessageEntry(id: entryId, level: level, subsystem: subsystem,
+            entries.append(Wire.MessageEntry(id: entryId, level: level, subsystem: subsystem,
                                             timestampSecs: tsSecs, filePath: filePath, text: text))
         }
         return (.guiBottomPanel(visible: true, activeTabIndex: activeTabIndex,
@@ -1546,7 +1212,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         let tmSelectedIndex = readU16(data, rest + 2)
         let toolCount = Int(readU16(data, rest + 4))
         var pos = rest + 6
-        var tools: [GUIToolEntry] = []
+        var tools: [Wire.ToolEntry] = []
         tools.reserveCapacity(toolCount)
         for _ in 0..<toolCount {
             // name_len(1) + name
@@ -1615,7 +1281,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                 ? (String(data: data[pos..<(pos + errLen)], encoding: .utf8) ?? "")
                 : ""
             pos += errLen
-            tools.append(GUIToolEntry(
+            tools.append(Wire.ToolEntry(
                 name: name, label: toolLabel, description: desc,
                 category: cat, status: stat, method: meth,
                 languages: langs, version: version,
@@ -1662,7 +1328,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         let mbCandCount = Int(readU16(data, mbPos)); mbPos += 2
         let mbTotalCandidates = readU16(data, mbPos); mbPos += 2
         // candidates
-        var mbCandidates: [GUIMinibufferCandidate] = []
+        var mbCandidates: [Wire.MinibufferCandidate] = []
         mbCandidates.reserveCapacity(mbCandCount)
         for _ in 0..<mbCandCount {
             // match_score(1) + label_len(2)
@@ -1693,7 +1359,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                 guard data.count >= mbPos + 2 else { break }
                 matchPositions.append(readU16(data, mbPos)); mbPos += 2
             }
-            mbCandidates.append(GUIMinibufferCandidate(matchScore: score, label: candLabel, description: candDesc, annotation: candAnnot, matchPositions: matchPositions))
+            mbCandidates.append(Wire.MinibufferCandidate(matchScore: score, label: candLabel, description: candDesc, annotation: candAnnot, matchPositions: matchPositions))
         }
         return (.guiMinibuffer(visible: true, mode: mbMode, cursorPos: mbCursorPos,
                                 prompt: mbPrompt, input: mbInput, context: mbContext,
@@ -1716,28 +1382,28 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         let hScrollOffset = readU16(data, rest + 6)
         let hLineCount = Int(readU16(data, rest + 8))
         var hPos = rest + 10
-        var hLines: [GUIHoverLine] = []
+        var hLines: [Wire.HoverLine] = []
         hLines.reserveCapacity(hLineCount)
         for _ in 0..<hLineCount {
             // line_type(1) + segment_count(2)
             guard data.count >= hPos + 3 else { break }
-            let lineType = GUIHoverLineType(rawValue: data[hPos]) ?? .text
+            let lineType = Wire.HoverLineType(rawValue: data[hPos]) ?? .text
             let segCount = Int(readU16(data, hPos + 1))
             hPos += 3
-            var segments: [GUIHoverSegment] = []
+            var segments: [Wire.HoverSegment] = []
             segments.reserveCapacity(segCount)
             for _ in 0..<segCount {
                 // style(1) + text_len(2) + text
                 guard data.count >= hPos + 3 else { break }
-                let style = GUIHoverStyle(rawValue: data[hPos]) ?? .plain
+                let style = Wire.HoverStyle(rawValue: data[hPos]) ?? .plain
                 let textLen = Int(readU16(data, hPos + 1))
                 hPos += 3
                 guard data.count >= hPos + textLen else { break }
                 let text = String(data: data[hPos..<(hPos + textLen)], encoding: .utf8) ?? ""
                 hPos += textLen
-                segments.append(GUIHoverSegment(style: style, text: text))
+                segments.append(Wire.HoverSegment(style: style, text: text))
             }
-            hLines.append(GUIHoverLine(lineType: lineType, segments: segments))
+            hLines.append(Wire.HoverLine(lineType: lineType, segments: segments))
         }
         return (.guiHoverPopup(visible: true, anchorRow: hAnchorRow, anchorCol: hAnchorCol,
                                 focused: hFocused, scrollOffset: hScrollOffset, lines: hLines),
@@ -1759,7 +1425,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         let shActiveParam = data[rest + 6]
         let shSigCount = Int(data[rest + 7])
         var shPos = rest + 8
-        var signatures: [GUISignature] = []
+        var signatures: [Wire.Signature] = []
         signatures.reserveCapacity(shSigCount)
         for _ in 0..<shSigCount {
             // label_len(2) + label
@@ -1777,7 +1443,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             // param_count(1)
             guard data.count >= shPos + 1 else { break }
             let paramCount = Int(data[shPos]); shPos += 1
-            var params: [GUISignatureParameter] = []
+            var params: [Wire.SignatureParameter] = []
             params.reserveCapacity(paramCount)
             for _ in 0..<paramCount {
                 // label_len(2) + label + doc_len(2) + doc
@@ -1791,9 +1457,9 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                 guard data.count >= shPos + pDocLen else { break }
                 let pDoc = String(data: data[shPos..<(shPos + pDocLen)], encoding: .utf8) ?? ""
                 shPos += pDocLen
-                params.append(GUISignatureParameter(label: pLabel, documentation: pDoc))
+                params.append(Wire.SignatureParameter(label: pLabel, documentation: pDoc))
             }
-            signatures.append(GUISignature(label: label, documentation: doc, parameters: params))
+            signatures.append(Wire.Signature(label: label, documentation: doc, parameters: params))
         }
         return (.guiSignatureHelp(visible: true, anchorRow: shAnchorRow, anchorCol: shAnchorCol,
                                    activeSignature: shActiveSig, activeParameter: shActiveParam,
@@ -1840,7 +1506,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         let sepColor: UInt32 = (UInt32(sepR) << 16) | (UInt32(sepG) << 8) | UInt32(sepB)
         let vertCount = Int(data[rest + 3])
         var sepPos = rest + 4
-        var verts: [GUIVerticalSeparator] = []
+        var verts: [Wire.VerticalSeparator] = []
         verts.reserveCapacity(vertCount)
         for _ in 0..<vertCount {
             // col(2) + start_row(2) + end_row(2)
@@ -1849,12 +1515,12 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             let startRow = readU16(data, sepPos + 2)
             let endRow = readU16(data, sepPos + 4)
             sepPos += 6
-            verts.append(GUIVerticalSeparator(col: col, startRow: startRow, endRow: endRow))
+            verts.append(Wire.VerticalSeparator(col: col, startRow: startRow, endRow: endRow))
         }
         // horizontal_count(1)
         guard data.count >= sepPos + 1 else { throw ProtocolDecodeError.malformed }
         let horizCount = Int(data[sepPos]); sepPos += 1
-        var horizs: [GUIHorizontalSeparator] = []
+        var horizs: [Wire.HorizontalSeparator] = []
         horizs.reserveCapacity(horizCount)
         for _ in 0..<horizCount {
             // row(2) + col(2) + width(2) + filename_len(2)
@@ -1867,7 +1533,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             guard data.count >= sepPos + fnLen else { throw ProtocolDecodeError.malformed }
             let fn = String(data: data[sepPos..<(sepPos + fnLen)], encoding: .utf8) ?? ""
             sepPos += fnLen
-            horizs.append(GUIHorizontalSeparator(row: hRow, col: hCol, width: hWidth, filename: fn))
+            horizs.append(Wire.HorizontalSeparator(row: hRow, col: hCol, width: hWidth, filename: fn))
         }
         return (.guiSplitSeparators(borderColor: sepColor, verticals: verts, horizontals: horizs),
                 sepPos - offset)
@@ -1883,7 +1549,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         let gsBranchData = data[(rest + 7)..<(rest + 7 + gsBranchLen)]
         let gsBranchName = String(data: gsBranchData, encoding: .utf8) ?? ""
         let gsEntryCount = Int(readU16(data, rest + 7 + gsBranchLen))
-        var gsEntries: [GUIGitStatusEntry] = []
+        var gsEntries: [Wire.GitStatusEntry] = []
         gsEntries.reserveCapacity(gsEntryCount)
         var gsPos = rest + 9 + gsBranchLen
         for _ in 0..<gsEntryCount {
@@ -1896,7 +1562,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             guard data.count >= gsPos + 8 + gsPathLen else { throw ProtocolDecodeError.malformed }
             let gsPathData = data[(gsPos + 8)..<(gsPos + 8 + gsPathLen)]
             let gsPath = String(data: gsPathData, encoding: .utf8) ?? ""
-            gsEntries.append(GUIGitStatusEntry(pathHash: gsPathHash, section: gsSection, status: gsStatus, path: gsPath))
+            gsEntries.append(Wire.GitStatusEntry(pathHash: gsPathHash, section: gsSection, status: gsStatus, path: gsPath))
             gsPos += 8 + gsPathLen
         }
         return (.guiGitStatus(repoState: gsRepoState, ahead: gsAhead, behind: gsBehind, branchName: gsBranchName, entries: gsEntries),
@@ -1908,7 +1574,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         guard data.count >= rest + 3 else { throw ProtocolDecodeError.malformed }
         let activeGId = readU16(data, rest)
         let groupCount = Int(data[rest + 2])
-        var groups: [GUIAgentGroupEntry] = []
+        var groups: [Wire.AgentGroupEntry] = []
         groups.reserveCapacity(groupCount)
         var gPos = rest + 3
         for _ in 0..<groupCount {
@@ -1929,7 +1595,7 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             guard data.count >= gIconBase + 1 + gIconLen else { throw ProtocolDecodeError.malformed }
             let gIconData = data[(gIconBase + 1)..<(gIconBase + 1 + gIconLen)]
             let gIcon = String(data: gIconData, encoding: .utf8) ?? "cpu"
-            groups.append(GUIAgentGroupEntry(
+            groups.append(Wire.AgentGroupEntry(
                 id: gId,
                 agentStatus: gStatus,
                 colorR: gR,

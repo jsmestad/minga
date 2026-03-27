@@ -29,7 +29,7 @@ final class SignatureHelpState {
 
     func update(visible: Bool, anchorRow: UInt16, anchorCol: UInt16,
                 activeSignature: UInt8, activeParameter: UInt8,
-                rawSignatures: [GUISignature]) {
+                rawSignatures: [Wire.Signature]) {
         self.visible = visible
         self.anchorRow = Int(anchorRow)
         self.anchorCol = Int(anchorCol)
