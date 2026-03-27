@@ -310,8 +310,10 @@ struct AgentChatViewTests {
         // Header shows model name and status
         #expect(strings.contains("claude-sonnet-4"))
         #expect(strings.contains("idle"))
-        // Prompt capsule shows placeholder text
-        #expect(strings.contains("Ask anything..."))
+        // Prompt is now Metal-rendered (cell-grid), not a SwiftUI Text view.
+        // The "Ask anything..." placeholder is no longer in SwiftUI; it's
+        // rendered by the BEAM's PromptSemanticWindow when the buffer is empty.
+        #expect(!strings.contains("Ask anything..."))
         // NORMAL badge moved to unified status bar, no longer in prompt area
         #expect(!strings.contains("NORMAL"))
     }

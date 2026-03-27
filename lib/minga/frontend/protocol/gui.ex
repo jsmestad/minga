@@ -1014,6 +1014,7 @@ defmodule Minga.Frontend.Protocol.GUI do
   defp encode_vim_mode(:normal), do: 0
   defp encode_vim_mode(:insert), do: 1
   defp encode_vim_mode(:visual), do: 2
+  defp encode_vim_mode(:visual_line), do: 2
   defp encode_vim_mode(:command), do: 3
   defp encode_vim_mode(:operator_pending), do: 4
   defp encode_vim_mode(:search), do: 5
@@ -1249,6 +1250,16 @@ defmodule Minga.Frontend.Protocol.GUI do
     model_bytes = :erlang.iolist_to_binary([model || ""])
     prompt_bytes = :erlang.iolist_to_binary([prompt || ""])
 
+    # Prompt metadata for the cell-grid renderer (cursor, mode, line count).
+    # These fields are appended after the prompt string so existing decoders
+    # that stop reading after the prompt still work for the messages payload.
+    prompt_line_count = data[:prompt_line_count] || 1
+    prompt_cursor_line = data[:prompt_cursor_line] || 0
+    prompt_cursor_col = data[:prompt_cursor_col] || 0
+    prompt_vim_mode = encode_vim_mode(data[:prompt_vim_mode])
+    prompt_visible_rows = data[:prompt_visible_rows] || 1
+
+    completion_bytes = encode_prompt_completion(data[:prompt_completion])
     pending_bytes = encode_pending_approval(data[:pending_approval])
     help_bytes = encode_help_overlay(data[:help_visible], data[:help_groups])
 
@@ -1260,13 +1271,52 @@ defmodule Minga.Frontend.Protocol.GUI do
     IO.iodata_to_binary([
       @op_gui_agent_chat,
       <<1::8, status_byte::8, byte_size(model_bytes)::16, model_bytes::binary,
-        byte_size(prompt_bytes)::16, prompt_bytes::binary>>,
+        byte_size(prompt_bytes)::16, prompt_bytes::binary, prompt_line_count::8,
+        prompt_cursor_line::16, prompt_cursor_col::16, prompt_vim_mode::8,
+        prompt_visible_rows::8>>,
+      completion_bytes,
       pending_bytes,
       help_bytes,
       <<length(msg_binaries)::16>>
       | msg_binaries
     ])
   end
+
+  # Encodes prompt completion popup state for @-mention or /slash completion.
+  # Wire format: visible(u8) [type(u8) selected(u8) anchor_line(u16) anchor_col(u16)
+  #   candidate_count(u8) [name_len(u16) name(utf8) desc_len(u16) desc(utf8)]*]
+  # type: 0=mention, 1=slash
+  @spec encode_prompt_completion(map() | nil) :: binary()
+  defp encode_prompt_completion(nil), do: <<0::8>>
+
+  defp encode_prompt_completion(%{type: type, candidates: candidates, selected: selected} = comp)
+       when is_list(candidates) and candidates != [] do
+    type_byte = if type == :slash, do: 1, else: 0
+    anchor_line = comp[:anchor_line] || 0
+    anchor_col = comp[:anchor_col] || 0
+
+    candidate_bins =
+      candidates
+      |> Enum.take(10)
+      |> Enum.map(fn
+        {name, desc} ->
+          n = :erlang.iolist_to_binary([name])
+          d = :erlang.iolist_to_binary([desc])
+          <<byte_size(n)::16, n::binary, byte_size(d)::16, d::binary>>
+
+        name when is_binary(name) ->
+          n = :erlang.iolist_to_binary([name])
+          <<byte_size(n)::16, n::binary, 0::16>>
+      end)
+
+    IO.iodata_to_binary([
+      <<1::8, type_byte::8, min(selected, 255)::8, anchor_line::16, anchor_col::16,
+        min(length(candidates), 10)::8>>
+      | candidate_bins
+    ])
+  end
+
+  defp encode_prompt_completion(_), do: <<0::8>>
 
   @spec encode_pending_approval(map() | nil) :: binary()
   defp encode_pending_approval(nil), do: <<0::8>>

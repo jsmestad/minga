@@ -149,13 +149,32 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
         }
         return ["type": "gui_picker_preview", "visible": visible, "lines": lineArray]
 
-    case .guiAgentChat(let visible, let status, let model, let prompt, let pendingToolName, let pendingToolSummary, let helpVisible, let helpGroups, let messages):
+    case .guiAgentChat(let visible, let status, let model, let prompt, let promptLineCount, let promptCursorLine, let promptCursorCol, let promptVimMode, let promptVisibleRows, let promptCompletion, let pendingToolName, let pendingToolSummary, let helpVisible, let helpGroups, let messages):
         let msgArray = messages.map { chatMessageToJSON($0) }
         let helpGroupArray = helpGroups.map { group -> [String: Any] in
             let bindings = group.bindings.map { ["key": $0.key, "description": $0.description] }
             return ["title": group.title, "bindings": bindings]
         }
-        return ["type": "gui_agent_chat", "visible": visible, "status": Int(status), "model": model, "prompt": prompt, "pending_tool_name": pendingToolName ?? "", "pending_tool_summary": pendingToolSummary, "help_visible": helpVisible, "help_groups": helpGroupArray, "messages": msgArray]
+        var result: [String: Any] = [
+            "type": "gui_agent_chat",
+            "visible": visible,
+            "status": Int(status),
+            "model": model,
+            "prompt": prompt,
+            "prompt_line_count": Int(promptLineCount),
+            "prompt_cursor_line": Int(promptCursorLine),
+            "prompt_cursor_col": Int(promptCursorCol),
+            "prompt_vim_mode": Int(promptVimMode),
+            "prompt_visible_rows": Int(promptVisibleRows),
+            "has_completion": promptCompletion != nil,
+            "pending_tool_name": pendingToolName ?? "",
+            "pending_tool_summary": pendingToolSummary,
+            "help_visible": helpVisible,
+            "help_groups": helpGroupArray,
+            "messages": msgArray
+        ]
+        _ = result // suppress unused warning
+        return result
 
     case .guiGutterSeparator(let col, let r, let g, let b):
         return ["type": "gui_gutter_separator", "col": Int(col), "r": Int(r), "g": Int(g), "b": Int(b)]

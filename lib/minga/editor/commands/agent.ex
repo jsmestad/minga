@@ -1026,6 +1026,11 @@ defmodule Minga.Editor.Commands.Agent do
   @spec scope_trigger_mention(state()) :: state()
   defdelegate scope_trigger_mention(state), to: AgentSubStates, as: :trigger_mention
 
+  @spec scope_trigger_slash_completion(state()) :: state()
+  defdelegate scope_trigger_slash_completion(state),
+    to: AgentSubStates,
+    as: :trigger_slash_completion
+
   # ── Delegated to AgentSession ──────────────────────────────────────────────
 
   defdelegate open_code_block(state, language, content), to: AgentSession

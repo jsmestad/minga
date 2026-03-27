@@ -147,6 +147,33 @@ defmodule Minga.Editor.Commands.AgentSubStates do
     end
   end
 
+  @doc "Triggers /slash command completion when / is typed at position (0, 0)."
+  @spec trigger_slash_completion(state()) :: state()
+  def trigger_slash_completion(state) do
+    commands = Minga.Agent.SlashCommand.completions("")
+
+    candidates =
+      Enum.map(commands, fn cmd ->
+        {cmd.name, cmd.description}
+      end)
+
+    if candidates != [] do
+      comp = %{
+        prefix: "",
+        all_files: [],
+        candidates: Enum.map(candidates, fn {name, _} -> name end),
+        selected: 0,
+        anchor_line: 0,
+        anchor_col: 0,
+        slash_candidates: candidates
+      }
+
+      update_panel(state, fn p -> %{p | mention_completion: comp} end)
+    else
+      state
+    end
+  end
+
   # ── Diff review commands ───────────────────────────────────────────────────
 
   @doc "Accepts the current diff hunk during review."

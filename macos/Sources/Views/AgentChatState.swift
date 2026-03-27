@@ -47,9 +47,30 @@ final class AgentChatState {
     var helpVisible: Bool = false
     var helpGroups: [HelpGroup] = []
 
-    /// Monotonically increasing counter for BlinkingCursor reset token.
-    /// Increments on every update() so the cursor resets on each BEAM frame.
+    /// Monotonically increasing counter for change detection.
+    /// Increments on every update() so SwiftUI observers detect frame changes.
     var promptVersion: Int = 0
+
+    // ── Prompt cell-grid metadata (for Metal rendering) ──
+
+    /// Number of logical lines in the prompt buffer.
+    var promptLineCount: UInt8 = 1
+    /// Cursor row within the prompt buffer.
+    var promptCursorLine: UInt16 = 0
+    /// Cursor column within the prompt buffer.
+    var promptCursorCol: UInt16 = 0
+    /// Vim mode: 0=normal, 1=insert, 2=visual, 3=visual_line, 4=operator_pending.
+    var promptVimMode: UInt8 = 0
+    /// Number of visible rows in the prompt (after wrapping, clamped to max).
+    var promptVisibleRows: UInt8 = 1
+
+    /// Whether the prompt is in insert mode (for SwiftUI styling).
+    var isPromptInsertMode: Bool { promptVimMode == 1 }
+
+    // ── Prompt completion popup ──
+
+    /// Active completion popup for @-mention or /slash commands. Nil when no popup is showing.
+    var promptCompletion: GUIPromptCompletion?
 
     struct PendingApproval {
         let toolName: String
@@ -68,11 +89,17 @@ final class AgentChatState {
 
     var isThinking: Bool { status == 1 || status == 2 }
 
-    func update(visible: Bool, status: UInt8, model: String, prompt: String, pendingToolName: String?, pendingToolSummary: String, helpVisible: Bool, helpGroups: [HelpGroup], rawMessages: [GUIChatMessage]) {
+    func update(visible: Bool, status: UInt8, model: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptVimMode: UInt8, promptVisibleRows: UInt8, promptCompletion: GUIPromptCompletion?, pendingToolName: String?, pendingToolSummary: String, helpVisible: Bool, helpGroups: [HelpGroup], rawMessages: [GUIChatMessage]) {
         self.visible = visible
         self.status = status
         self.model = model
         self.prompt = prompt
+        self.promptLineCount = promptLineCount
+        self.promptCursorLine = promptCursorLine
+        self.promptCursorCol = promptCursorCol
+        self.promptVimMode = promptVimMode
+        self.promptVisibleRows = promptVisibleRows
+        self.promptCompletion = promptCompletion
         self.promptVersion += 1
         self.pendingApproval = pendingToolName.map { PendingApproval(toolName: $0, summary: pendingToolSummary) }
         self.helpVisible = helpVisible
