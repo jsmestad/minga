@@ -56,6 +56,7 @@ let OP_GUI_SPLIT_SEPARATORS: UInt8 = 0x84
 let OP_GUI_GIT_STATUS: UInt8 = 0x85
 let OP_GUI_AGENT_GROUPS: UInt8 = 0x86
 let OP_GUI_BOARD: UInt8 = 0x87
+let OP_GUI_AGENT_CONTEXT: UInt8 = 0x88
 
 // MARK: - Forward-compatible opcodes (0x90+, include 2-byte length prefix)
 // All opcodes >= 0x90 use the format: opcode(1) + payload_length(2) + payload.
@@ -251,6 +252,9 @@ let GUI_ACTION_BOARD_SELECT_CARD: UInt8 = 0x25
 let GUI_ACTION_BOARD_CLOSE_CARD: UInt8 = 0x26
 let GUI_ACTION_BOARD_REORDER: UInt8 = 0x27
 let GUI_ACTION_BOARD_DISPATCH_AGENT: UInt8 = 0x28
+let GUI_ACTION_AGENT_APPROVE: UInt8 = 0x29
+let GUI_ACTION_AGENT_REQUEST_CHANGES: UInt8 = 0x2A
+let GUI_ACTION_AGENT_DISMISS: UInt8 = 0x2B
 
 // MARK: - Log message opcode (frontend → BEAM)
 

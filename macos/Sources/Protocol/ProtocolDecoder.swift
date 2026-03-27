@@ -57,6 +57,7 @@ enum RenderCommand: Sendable {
     case guiGitStatus(repoState: UInt8, ahead: UInt16, behind: UInt16, branchName: String, entries: [Wire.GitStatusEntry])
     case guiAgentGroups(activeGroupId: UInt16, agentGroups: [Wire.AgentGroupEntry])
     case guiBoard(visible: Bool, focusedCardId: UInt32, cards: [BoardCard], filterMode: Bool, filterText: String)
+    case guiAgentContext(visible: Bool, task: String, dispatchTimestamp: Date, status: CardStatus, canApprove: Bool)
 }
 
 // MARK: - Decoder
@@ -1809,6 +1810,23 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                          filterMode: boardFilterMode, filterText: boardFilterText),
                 bPos - offset)
 
+    case OP_GUI_AGENT_CONTEXT:
+        // visible(1) + task_len(2) + task + dispatch_timestamp(8) + status(1) + can_approve(1)
+        guard data.count >= rest + 3 else { throw ProtocolDecodeError.malformed }
+        let contextVisible = data[rest] != 0
+        let taskLen = Int(readU16(data, rest + 1))
+        guard data.count >= rest + 3 + taskLen + 10 else { throw ProtocolDecodeError.malformed }
+        let taskData = data[(rest + 3)..<(rest + 3 + taskLen)]
+        let task = String(data: taskData, encoding: .utf8) ?? ""
+        let timestampPos = rest + 3 + taskLen
+        let timestampSeconds = readU64(data, timestampPos)
+        let dispatchTimestamp = Date(timeIntervalSince1970: TimeInterval(timestampSeconds))
+        let statusRaw = data[timestampPos + 8]
+        let canApprove = data[timestampPos + 9] != 0
+        return (.guiAgentContext(visible: contextVisible, task: task, dispatchTimestamp: dispatchTimestamp,
+                                 status: CardStatus(rawValue: statusRaw) ?? .idle, canApprove: canApprove),
+                timestampPos + 10 - offset)
+
     case OP_CLIPBOARD_WRITE:
         // Forward-compatible format: opcode(1) + payload_length(2) + target(1) + text_len(2) + text
         guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
@@ -1853,4 +1871,11 @@ private func readU24(_ data: Data, _ offset: Int) -> UInt32 {
 private func readU32(_ data: Data, _ offset: Int) -> UInt32 {
     return UInt32(data[offset]) << 24 | UInt32(data[offset + 1]) << 16 |
            UInt32(data[offset + 2]) << 8 | UInt32(data[offset + 3])
+}
+
+private func readU64(_ data: Data, _ offset: Int) -> UInt64 {
+    return UInt64(data[offset]) << 56 | UInt64(data[offset + 1]) << 48 |
+           UInt64(data[offset + 2]) << 40 | UInt64(data[offset + 3]) << 32 |
+           UInt64(data[offset + 4]) << 24 | UInt64(data[offset + 5]) << 16 |
+           UInt64(data[offset + 6]) << 8 | UInt64(data[offset + 7])
 }

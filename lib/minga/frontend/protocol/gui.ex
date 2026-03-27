@@ -114,6 +114,7 @@ defmodule Minga.Frontend.Protocol.GUI do
   @op_gui_git_status 0x85
   @op_gui_agent_groups 0x86
   @op_gui_board 0x87
+  @op_gui_agent_context 0x88
 
   # ── Sectioned format section IDs ──
   # Used by opcodes that encode their fields in self-describing sections.
@@ -201,6 +202,9 @@ defmodule Minga.Frontend.Protocol.GUI do
   @gui_action_board_close_card 0x26
   @gui_action_board_reorder 0x27
   @gui_action_board_dispatch_agent 0x28
+  @gui_action_agent_approve 0x29
+  @gui_action_agent_request_changes 0x2A
+  @gui_action_agent_dismiss 0x2B
 
   # ── Types ──
 
@@ -247,6 +251,9 @@ defmodule Minga.Frontend.Protocol.GUI do
           | {:board_close_card, card_id :: pos_integer()}
           | {:board_reorder, card_id :: pos_integer(), new_index :: non_neg_integer()}
           | {:board_dispatch_agent, task :: String.t(), model :: String.t()}
+          | :agent_approve
+          | :agent_request_changes
+          | :agent_dismiss
 
   # ═══════════════════════════════════════════════════════════════════════════
   # Encoding (BEAM → Frontend)
@@ -765,6 +772,35 @@ defmodule Minga.Frontend.Protocol.GUI do
   defp board_status_byte(:done), do: 4
   defp board_status_byte(:errored), do: 5
   defp board_status_byte(_), do: 0
+
+  # ── Agent context bar (0x88) ──
+
+  @doc """
+  Encodes the agent context bar state when zoomed into an agent card.
+
+  Layout:
+    - visible(1): 1 if zoomed into a non-You agent card, 0 otherwise
+    - task_len(2): length of task string
+    - task(N): task description
+    - dispatch_timestamp(8): Unix timestamp when the task was dispatched
+    - status(1): current card status (0-5)
+    - can_approve(1): 1 if the user can approve the agent's work, 0 otherwise
+  """
+  @spec encode_gui_agent_context(boolean(), String.t(), DateTime.t(), atom(), boolean()) ::
+          binary()
+  def encode_gui_agent_context(visible, task, dispatch_timestamp, status, can_approve) do
+    visible_byte = if visible, do: 1, else: 0
+    task_bytes = :erlang.iolist_to_binary([task])
+    timestamp_seconds = DateTime.to_unix(dispatch_timestamp)
+    status_byte = board_status_byte(status)
+    can_approve_byte = if can_approve, do: 1, else: 0
+
+    IO.iodata_to_binary([
+      @op_gui_agent_context,
+      <<visible_byte::8, byte_size(task_bytes)::16, task_bytes::binary, timestamp_seconds::64,
+        status_byte::8, can_approve_byte::8>>
+    ])
+  end
 
   # ── Clipboard write (forward-compatible, 0x90+) ──
 
@@ -1774,6 +1810,15 @@ defmodule Minga.Frontend.Protocol.GUI do
         <<model_len::16, model::binary-size(model_len), task_len::16, task::binary-size(task_len)>>
       ),
       do: {:ok, {:board_dispatch_agent, task, model}}
+
+  def decode_gui_action(@gui_action_agent_approve, <<>>),
+    do: {:ok, :agent_approve}
+
+  def decode_gui_action(@gui_action_agent_request_changes, <<>>),
+    do: {:ok, :agent_request_changes}
+
+  def decode_gui_action(@gui_action_agent_dismiss, <<>>),
+    do: {:ok, :agent_dismiss}
 
   def decode_gui_action(_, _), do: :error
 

@@ -239,12 +239,21 @@ struct ContentView: View {
     private var editorBody: some View {
         VStack(spacing: 0) {
 
-            // Breadcrumb path bar
-            BreadcrumbBar(
-                state: appState.gui.breadcrumbState,
-                theme: appState.gui.themeColors,
-                encoder: appState.encoder
-            )
+            // Conditionally show agent context bar (when zoomed into an agent card)
+            // or breadcrumb bar (when in traditional editor or zoomed into You card)
+            if appState.gui.agentContextBarState.visible {
+                AgentContextBar(
+                    state: appState.gui.agentContextBarState,
+                    theme: appState.gui.themeColors,
+                    encoder: appState.encoder
+                )
+            } else {
+                BreadcrumbBar(
+                    state: appState.gui.breadcrumbState,
+                    theme: appState.gui.themeColors,
+                    encoder: appState.encoder
+                )
+            }
 
             // ZStack: editor surface (always present for keyboard input)
             // with Board overlay on top when active.
