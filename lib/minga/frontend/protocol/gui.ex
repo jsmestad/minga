@@ -1852,7 +1852,8 @@ defmodule Minga.Frontend.Protocol.GUI do
 
   def decode_gui_action(
         @gui_action_board_dispatch_agent,
-        <<model_len::16, model::binary-size(model_len), task_len::16, task::binary-size(task_len)>>
+        <<model_len::16, model::binary-size(model_len), task_len::16,
+          task::binary-size(task_len)>>
       ),
       do: {:ok, {:board_dispatch_agent, task, model}}
 
@@ -1864,6 +1865,7 @@ defmodule Minga.Frontend.Protocol.GUI do
 
   def decode_gui_action(@gui_action_agent_dismiss, <<>>),
     do: {:ok, :agent_dismiss}
+
   def decode_gui_action(@gui_action_change_summary_click, <<index::32>>),
     do: {:ok, {:change_summary_click, index}}
 

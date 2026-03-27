@@ -408,6 +408,10 @@ final class SpyEncoder: InputEncoder, Sendable {
     func sendDispatchAgent(task: String, model: String) {
         state.withLock { $0.guiActions.append(.boardDispatchAgent(task: task, model: model)) }
     }
+    func sendAgentApprove() { /* no-op for tests */ }
+    func sendAgentRequestChanges() { /* no-op for tests */ }
+    func sendAgentDismiss() { /* no-op for tests */ }
+    func sendChangeSummaryClick(index: UInt32) { /* no-op for tests */ }
 }
 
 @Suite("EditorNSView Resize")

@@ -134,25 +134,26 @@ struct BoardView: View {
                     } else {
                         BoardCardView(card: card, theme: theme)
                     }
-                    .draggable(String(card.id)) {
-                        // Drag preview: mini card with just the task
-                        Text(card.task)
-                            .font(.system(size: 13, weight: .medium))
-                            .padding(8)
-                            .background(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .fill(Color.blend(theme.editorBg, with: .white, amount: 0.15))
-                            )
-                    }
-                    .dropDestination(for: String.self) { droppedIds, _ in
-                        guard let draggedIdStr = droppedIds.first,
-                              let draggedId = UInt32(draggedIdStr) else { return false }
-                        handleCardDrop(draggedId: draggedId, targetId: card.id)
-                        return true
-                    }
-                    .onTapGesture {
-                        encoder?.sendBoardSelectCard(id: card.id)
-                    }
+                }
+                .draggable(String(card.id)) {
+                    // Drag preview: mini card with just the task
+                    Text(card.task)
+                        .font(.system(size: 13, weight: .medium))
+                        .padding(8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6)
+                                .fill(Color.blend(theme.editorBg, with: .white, amount: 0.15))
+                        )
+                }
+                .dropDestination(for: String.self) { droppedIds, _ in
+                    guard let draggedIdStr = droppedIds.first,
+                          let draggedId = UInt32(draggedIdStr) else { return false }
+                    handleCardDrop(draggedId: draggedId, targetId: card.id)
+                    return true
+                }
+                .onTapGesture {
+                    encoder?.sendBoardSelectCard(id: card.id)
+                }
             }
         }
         // Outer margin = inner gap × φ (golden ratio breathing room)

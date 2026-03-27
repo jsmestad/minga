@@ -614,6 +614,9 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         var buf = Data(count: 2)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_AGENT_DISMISS
+        writeFrame(buf)
+    }
+
     /// Send a gui_action: change_summary_click. Layout: opcode(1) + action_type(1) + index(4).
     func sendChangeSummaryClick(index: UInt32) {
         var buf = Data(count: 6)

@@ -309,27 +309,6 @@ struct ContentView: View {
                 )
             }
 
-            // ZStack: editor surface (always present for keyboard input)
-            // with Board overlay on top when active.
-            ZStack {
-                // Editor surface with matched geometry effect for zoom-in
-                editorSurface
-                    .opacity(appState.gui.boardState.visible ? 0 : 1)
-                    .matchedGeometryEffect(
-                        id: "zoomContainer",
-                        in: zoomNamespace,
-                        isSource: !appState.gui.boardState.visible
-                    )
-
-                if appState.gui.boardState.visible {
-                    BoardView(
-                        state: appState.gui.boardState,
-                        dispatchSheet: appState.gui.dispatchSheetState,
-                        theme: appState.gui.themeColors,
-                        encoder: appState.encoder,
-                        namespace: zoomNamespace
-                    )
-                    .transition(.opacity)
             // HStack: change summary sidebar (when zoomed into agent card) + editor
             HStack(spacing: 0) {
                 if showChangeSummary {
@@ -345,8 +324,10 @@ struct ContentView: View {
                     if appState.gui.boardState.visible {
                         BoardView(
                             state: appState.gui.boardState,
+                            dispatchSheet: appState.gui.dispatchSheetState,
                             theme: appState.gui.themeColors,
-                            encoder: appState.encoder
+                            encoder: appState.encoder,
+                            namespace: zoomNamespace
                         )
                         .transition(
                             NSWorkspace.shared.accessibilityDisplayShouldReduceMotion

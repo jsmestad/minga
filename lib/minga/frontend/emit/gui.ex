@@ -143,7 +143,7 @@ defmodule Minga.Frontend.Emit.GUI do
         build_gui_signature_help_cmd(state),
         build_gui_float_popup_cmd(state),
         build_gui_board_cmd(state),
-        build_gui_agent_context_cmd(state)
+        build_gui_agent_context_cmd(state),
         build_gui_change_summary_cmd(state)
       ]
       |> Enum.reject(&is_nil/1)
@@ -1411,6 +1411,7 @@ defmodule Minga.Frontend.Emit.GUI do
   defp encode_hidden_agent_context do
     ProtocolGUI.encode_gui_agent_context(false, "", DateTime.utc_now(), :idle, false)
   end
+
   # ── Change Summary ──
 
   @spec build_gui_change_summary_cmd(state()) :: binary() | nil

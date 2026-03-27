@@ -131,7 +131,10 @@ defmodule Minga.Shell.Board do
         {shell_state, workspace}
 
       {:error, reason} ->
-        Minga.Log.warning(:agent, "Board: failed to start session for card ##{card.id}: #{inspect(reason)}")
+        Minga.Log.warning(
+          :agent,
+          "Board: failed to start session for card ##{card.id}: #{inspect(reason)}"
+        )
 
         shell_state =
           BoardState.update_card(shell_state, card.id, fn c ->
