@@ -726,12 +726,31 @@ defmodule Minga.Frontend.Protocol.GUI do
         <<byte_size(path_bytes)::16, path_bytes::binary>>
       end)
 
+    # Encode sparkline data as half-precision floats (Float16)
+    sparkline = card.sparkline
+    sparkline_count = length(sparkline)
+
+    sparkline_bytes =
+      sparkline
+      |> Enum.map(&encode_float16/1)
+      |> IO.iodata_to_binary()
+
     IO.iodata_to_binary([
       <<card.id::32, status_byte::8, flags::8, byte_size(task_bytes)::16, task_bytes::binary,
         byte_size(model_bytes)::8, model_bytes::binary, dispatch_timestamp::32,
-        length(recent_files)::8>>
-      | file_entries
+        length(recent_files)::8>>,
+      file_entries,
+      <<sparkline_count::8, sparkline_bytes::binary>>
     ])
+  end
+
+  # Encode a float as Float16 (half-precision, 16 bits)
+  # Simple approximation: clamp to [0.0, 1.0], scale to [0, 65535]
+  @spec encode_float16(float()) :: binary()
+  defp encode_float16(value) do
+    clamped = max(0.0, min(1.0, value))
+    scaled = round(clamped * 65_535.0)
+    <<scaled::16>>
   end
 
   @spec board_status_byte(Minga.Shell.Board.Card.status()) :: non_neg_integer()

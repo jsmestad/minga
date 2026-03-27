@@ -17,6 +17,7 @@ struct BoardCard: Identifiable, Equatable, Sendable {
     let model: String
     let dispatchTimestamp: UInt32  // Unix seconds when card was created
     let recentFiles: [String]
+    let sparkline: [Float]
 
     /// Formatted elapsed time string computed from dispatch timestamp.
     var elapsedDisplay: String {
