@@ -141,9 +141,13 @@ defmodule Minga.Frontend.Protocol.GUIBoardTest do
         _model::binary-size(model_len), _elapsed::32, file_count::8, rest::binary>> = data
 
       assert file_count == 2
-      <<p1_len::16, p1::binary-size(p1_len), p2_len::16, p2::binary-size(p2_len)>> = rest
+
+      <<p1_len::16, p1::binary-size(p1_len), p2_len::16, p2::binary-size(p2_len),
+        sparkline_count::8, _sparkline_data::binary>> = rest
+
       assert p1 == "lib/auth.ex"
       assert p2 == "test/auth_test.exs"
+      assert sparkline_count == 0
     end
 
     test "visible flag is 0 when zoomed into a card" do
@@ -159,6 +163,28 @@ defmodule Minga.Frontend.Protocol.GUIBoardTest do
 
       %{filter_mode: fm} = GUI.encode_gui_board(state) |> parse_board_header()
       assert fm == 1
+    end
+
+    test "encodes sparkline data as Float16" do
+      {state, card} =
+        State.create_card(State.new(),
+          task: "t",
+          sparkline: [0.0, 0.5, 1.0]
+        )
+
+      state = State.update_card(state, card.id, & &1)
+
+      %{card_data: data} = GUI.encode_gui_board(state) |> parse_board_header()
+
+      <<_id::32, _s::8, _f::8, task_len::16, _task::binary-size(task_len), model_len::8,
+        _model::binary-size(model_len), _elapsed::32, _file_count::8, sparkline_count::8, s1::16,
+        s2::16, s3::16>> = data
+
+      assert sparkline_count == 3
+      # 0.0 -> 0, 0.5 -> 32768, 1.0 -> 65535
+      assert s1 == 0
+      assert s2 == 32_768
+      assert s3 == 65_535
     end
   end
 end

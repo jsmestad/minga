@@ -1778,6 +1778,18 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                 recentFiles.append(String(data: pathData, encoding: .utf8) ?? "")
                 cPos += pathLen
             }
+            // sparkline_count(1) + sparkline_data(count * 2 bytes as Float16)
+            guard data.count >= cPos + 1 else { throw ProtocolDecodeError.malformed }
+            let sparklineCount = Int(data[cPos])
+            cPos += 1
+            guard data.count >= cPos + sparklineCount * 2 else { throw ProtocolDecodeError.malformed }
+            var sparkline: [Float] = []
+            sparkline.reserveCapacity(sparklineCount)
+            for _ in 0..<sparklineCount {
+                let raw = readU16(data, cPos)
+                sparkline.append(Float(raw) / 65535.0)
+                cPos += 2
+            }
             let isYou = (flags & 0x01) != 0
             let isFocused = (flags & 0x02) != 0
             boardCards.append(BoardCard(
@@ -1787,8 +1799,9 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                 isFocused: isFocused,
                 task: task,
                 model: model,
-                dispatchTimestamp: elapsed,  // Now treated as Unix timestamp, not elapsed seconds
-                recentFiles: recentFiles
+                dispatchTimestamp: elapsed,
+                recentFiles: recentFiles,
+                sparkline: sparkline
             ))
             bPos = cPos
         }

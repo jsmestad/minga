@@ -33,7 +33,8 @@ defmodule Minga.Shell.Board.Card do
           model: String.t() | nil,
           kind: :you | :agent,
           created_at: DateTime.t(),
-          recent_files: [String.t()]
+          recent_files: [String.t()],
+          sparkline: [float()]
         }
 
   @enforce_keys [:id, :task]
@@ -45,7 +46,8 @@ defmodule Minga.Shell.Board.Card do
             model: nil,
             kind: :agent,
             created_at: nil,
-            recent_files: []
+            recent_files: [],
+            sparkline: []
 
   @doc "Creates a new card with the given attributes."
   @spec new(id(), keyword()) :: t()
@@ -59,7 +61,8 @@ defmodule Minga.Shell.Board.Card do
       status: Keyword.get(attrs, :status, :idle),
       kind: Keyword.get(attrs, :kind, :agent),
       created_at: DateTime.utc_now(),
-      recent_files: Keyword.get(attrs, :recent_files, [])
+      recent_files: Keyword.get(attrs, :recent_files, []),
+      sparkline: Keyword.get(attrs, :sparkline, [])
     }
   end
 

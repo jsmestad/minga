@@ -169,6 +169,12 @@ struct BoardCardView: View {
 
                 Spacer(minLength: 4)
 
+                // Sparkline (activity indicator, hidden for You card)
+                if !card.isYouCard && !card.sparkline.isEmpty {
+                    SparklineView(data: card.sparkline, color: statusColor)
+                        .frame(height: 24)
+                }
+
                 // Footer: model name + touched files
                 HStack {
                     if !card.model.isEmpty {
