@@ -15,7 +15,7 @@ defmodule Minga.Editor.HighlightEvents do
   alias Minga.Editor.HighlightSync
   alias Minga.Editor.Renderer
   alias Minga.Editor.State, as: EditorState
-  alias Minga.Language.Filetype
+  alias Minga.Language
   alias Minga.UI.PrettifySymbols
 
   @doc """
@@ -187,7 +187,7 @@ defmodule Minga.Editor.HighlightEvents do
 
     if hl.capture_names != {} and tuple_size(hl.spans) > 0 do
       file_path = Buffer.file_path(buf)
-      filetype = Filetype.detect(file_path)
+      filetype = Language.detect_filetype(file_path)
 
       Task.start(fn ->
         PrettifySymbols.apply(buf, hl, filetype)

@@ -83,7 +83,7 @@ defmodule Minga.Frontend.Protocol.GUI do
   alias Minga.Editor.MinibufferData
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
-  alias Minga.Language.Filetype
+  alias Minga.Language
   alias Minga.UI.Devicon
   alias Minga.UI.Theme.Slots
 
@@ -574,7 +574,7 @@ defmodule Minga.Frontend.Protocol.GUI do
 
   @spec tab_icon(Tab.t()) :: String.t()
   defp tab_icon(%{kind: :agent}), do: Devicon.icon(:agent)
-  defp tab_icon(%{kind: :file, label: label}), do: Devicon.icon(Filetype.detect(label))
+  defp tab_icon(%{kind: :file, label: label}), do: Devicon.icon(Language.detect_filetype(label))
 
   # ── Workspace bar ──
 
@@ -792,7 +792,7 @@ defmodule Minga.Frontend.Protocol.GUI do
 
   @spec file_tree_icon(Minga.Project.FileTree.entry()) :: String.t()
   defp file_tree_icon(%{dir?: true}), do: @folder_icon
-  defp file_tree_icon(%{name: name}), do: Devicon.icon(Filetype.detect(name))
+  defp file_tree_icon(%{name: name}), do: Devicon.icon(Language.detect_filetype(name))
 
   @spec encode_git_status(atom() | nil) :: non_neg_integer()
   defp encode_git_status(nil), do: 0

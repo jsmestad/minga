@@ -13,7 +13,6 @@ defmodule Minga.UI.Picker.LanguageSource do
   alias Minga.Buffer
   alias Minga.Editor.Commands.BufferManagement
   alias Minga.Language
-  alias Minga.Language.Registry, as: LangRegistry
   alias Minga.UI.Devicon
   alias Minga.UI.Picker.Item
 
@@ -26,7 +25,7 @@ defmodule Minga.UI.Picker.LanguageSource do
   def candidates(state) do
     current_ft = current_filetype(state)
 
-    LangRegistry.all()
+    Language.all()
     |> Enum.map(fn %Language{} = lang -> format_candidate(lang, current_ft) end)
     |> Enum.sort_by(& &1.label)
   end

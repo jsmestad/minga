@@ -27,7 +27,7 @@ defmodule Minga.Buffer.Server do
   alias Minga.Editing.NavigableContent.BufferSnapshot
   alias Minga.Editing.Scroll
   alias Minga.Events
-  alias Minga.Language.Filetype
+  alias Minga.Language
 
   alias Minga.Buffer.State, as: BufState
 
@@ -794,7 +794,7 @@ defmodule Minga.Buffer.Server do
           case Keyword.get(opts, :filetype) do
             nil ->
               first_line = text |> String.split("\n", parts: 2) |> List.first("")
-              Filetype.detect_from_content(path, first_line)
+              Language.detect_filetype_from_content(path, first_line)
 
             ft when is_atom(ft) ->
               ft
@@ -841,7 +841,7 @@ defmodule Minga.Buffer.Server do
     case File.read(file_path) do
       {:ok, text} ->
         first_line = text |> String.split("\n", parts: 2) |> List.first("")
-        filetype = Filetype.detect_from_content(file_path, first_line)
+        filetype = Language.detect_filetype_from_content(file_path, first_line)
 
         {mtime, size} = file_stat_info(file_path)
 
@@ -1162,7 +1162,7 @@ defmodule Minga.Buffer.Server do
 
         new_buf = Document.move_to(new_buf, {clamped_line, clamped_col})
         first_line = text |> String.split("\n", parts: 2) |> List.first("")
-        filetype = Filetype.detect_from_content(state.file_path, first_line)
+        filetype = Language.detect_filetype_from_content(state.file_path, first_line)
 
         {new_mtime, new_size} = file_stat_info(state.file_path)
 

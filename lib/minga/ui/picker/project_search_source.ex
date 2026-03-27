@@ -8,11 +8,11 @@ defmodule Minga.UI.Picker.ProjectSearchSource do
 
   @behaviour Minga.UI.Picker.Source
 
+  alias Minga.Language
   alias Minga.UI.Picker.Item
 
   alias Minga.Buffer
   alias Minga.Editor.State, as: EditorState
-  alias Minga.Language.Filetype
   alias Minga.UI.Devicon
   alias Minga.UI.Picker.Source
 
@@ -31,7 +31,7 @@ defmodule Minga.UI.Picker.ProjectSearchSource do
     |> Enum.with_index()
     |> Enum.map(fn {match, idx} ->
       filename = Path.basename(match.file)
-      ft = Filetype.detect(filename)
+      ft = Language.detect_filetype(filename)
       {icon, color} = Devicon.icon_and_color(ft)
       label = "#{icon} #{match.file}:#{match.line}"
       desc = String.trim(match.text)

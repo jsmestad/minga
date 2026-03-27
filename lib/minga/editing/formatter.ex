@@ -25,7 +25,7 @@ defmodule Minga.Editing.Formatter do
   """
 
   alias Minga.Config
-  alias Minga.Language.Registry, as: LangRegistry
+  alias Minga.Language
 
   @typedoc "A shell command string, optionally containing `{file}`."
   @type formatter_spec :: String.t()
@@ -33,7 +33,7 @@ defmodule Minga.Editing.Formatter do
   @doc "Returns the default formatter map (filetype atom to command string)."
   @spec default_formatters() :: %{atom() => formatter_spec()}
   def default_formatters do
-    LangRegistry.all()
+    Language.all()
     |> Enum.filter(fn lang -> lang.formatter != nil end)
     |> Map.new(fn lang -> {lang.name, lang.formatter} end)
   end
@@ -50,7 +50,7 @@ defmodule Minga.Editing.Formatter do
     user_formatter = Config.get_for_filetype(:formatter, filetype)
 
     default =
-      case LangRegistry.get(filetype) do
+      case Language.get(filetype) do
         %{formatter: fmt} when is_binary(fmt) -> fmt
         _ -> nil
       end

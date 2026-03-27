@@ -19,8 +19,8 @@ defmodule Minga.LSP.ServerRegistry do
   or extend these defaults without modifying source code.
   """
 
-  alias Minga.Language.Registry, as: LangRegistry
   alias Minga.LSP.ServerConfig
+  alias Minga.Language
 
   @typedoc "Configuration for a single language server."
   @type server_config :: ServerConfig.t()
@@ -43,7 +43,7 @@ defmodule Minga.LSP.ServerRegistry do
   """
   @spec servers_for(atom()) :: [server_config()]
   def servers_for(filetype) when is_atom(filetype) do
-    case LangRegistry.get(filetype) do
+    case Language.get(filetype) do
       %{language_servers: servers} when is_list(servers) -> servers
       _ -> []
     end
@@ -60,7 +60,7 @@ defmodule Minga.LSP.ServerRegistry do
   """
   @spec supported_filetypes() :: [atom()]
   def supported_filetypes do
-    LangRegistry.all()
+    Language.all()
     |> Enum.filter(fn lang -> lang.language_servers != [] end)
     |> Enum.map(fn lang -> lang.name end)
   end
@@ -98,7 +98,7 @@ defmodule Minga.LSP.ServerRegistry do
   """
   @spec find_config(atom()) :: server_config() | nil
   def find_config(server_name) when is_atom(server_name) do
-    LangRegistry.all()
+    Language.all()
     |> Enum.flat_map(fn lang -> lang.language_servers end)
     |> Enum.find(fn %ServerConfig{name: name} -> name == server_name end)
   end

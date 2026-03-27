@@ -16,6 +16,7 @@ defmodule Minga.Editor.Commands.Git do
   alias Minga.Git.DiffView
   alias Minga.Git.Repo
   alias Minga.Git.Tracker, as: GitTracker
+  alias Minga.Language
   alias Minga.UI.Picker.GitChangedSource
 
   @type state :: EditorState.t()
@@ -190,7 +191,7 @@ defmodule Minga.Editor.Commands.Git do
 
     diff_result = DiffView.build(base_content, current_content)
     filename = Path.basename(rel_path)
-    filetype = Minga.Language.Filetype.detect(filename)
+    filetype = Language.detect_filetype(filename)
 
     case Buffer.start_link(
            content: diff_result.text,

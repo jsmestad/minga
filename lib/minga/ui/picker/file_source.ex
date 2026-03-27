@@ -10,7 +10,7 @@ defmodule Minga.UI.Picker.FileSource do
 
   alias Minga.Editor.State, as: EditorState
   alias Minga.Git.Repo, as: GitRepo
-  alias Minga.Language.Filetype
+  alias Minga.Language
   alias Minga.Log
   alias Minga.UI.Devicon
   alias Minga.UI.Picker.Item
@@ -48,7 +48,7 @@ defmodule Minga.UI.Picker.FileSource do
   defp format_file_candidate(path, git_status_map) do
     filename = Path.basename(path)
     dir = Path.dirname(path)
-    ft = Filetype.detect(filename)
+    ft = Language.detect_filetype(filename)
     {icon, color} = Devicon.icon_and_color(ft)
     dir_display = if dir == ".", do: "", else: dir
 

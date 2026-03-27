@@ -100,7 +100,17 @@ defmodule Minga.Language do
     to: Minga.Language.TreeSitter,
     as: :register_grammar
 
-  # ── Filetype detection delegates ──────────────────────────────────────────
+  # ── Language lookup ──────────────────────────────────────────────────────
+
+  @doc "Returns the language definition for a name atom (e.g., `:elixir`), or nil."
+  @spec get(atom()) :: t() | nil
+  defdelegate get(name), to: Minga.Language.Registry
+
+  @doc "Returns all registered language definitions."
+  @spec all() :: [t()]
+  defdelegate all, to: Minga.Language.Registry
+
+  # ── Filetype detection ─────────────────────────────────────────────────────
 
   @doc "Detects a file's language atom from its path."
   @spec detect_filetype(String.t() | nil) :: atom()

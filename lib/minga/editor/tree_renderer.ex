@@ -13,7 +13,7 @@ defmodule Minga.Editor.TreeRenderer do
   alias Minga.Editor.DisplayList
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.WindowTree
-  alias Minga.Language.Filetype
+  alias Minga.Language
   alias Minga.Project.FileTree
   alias Minga.UI.Devicon
   alias Minga.UI.Theme
@@ -316,7 +316,7 @@ defmodule Minga.Editor.TreeRenderer do
   end
 
   defp entry_icon(%{path: path}, _expanded) do
-    filetype = Filetype.detect(path)
+    filetype = Language.detect_filetype(path)
     Devicon.icon_and_color(filetype)
   end
 

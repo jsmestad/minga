@@ -24,7 +24,7 @@ defmodule Minga.Editor.TabBarRenderer do
   alias Minga.Editor.DisplayList
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
-  alias Minga.Language.Filetype
+  alias Minga.Language
   alias Minga.UI.Devicon
   alias Minga.UI.Theme
 
@@ -409,7 +409,7 @@ defmodule Minga.Editor.TabBarRenderer do
 
   @spec tab_icon(Tab.t()) :: String.t()
   defp tab_icon(%Tab{kind: :agent}), do: Devicon.icon(:agent)
-  defp tab_icon(%Tab{kind: :file, label: label}), do: Devicon.icon(Filetype.detect(label))
+  defp tab_icon(%Tab{kind: :file, label: label}), do: Devicon.icon(Language.detect_filetype(label))
 
   @spec tab_label(Tab.t()) :: String.t()
   defp tab_label(%Tab{label: ""}), do: "[No Name]"

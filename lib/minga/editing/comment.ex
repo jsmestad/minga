@@ -13,7 +13,7 @@ defmodule Minga.Editing.Comment do
   """
 
   alias Minga.Buffer
-  alias Minga.Language.Registry, as: LangRegistry
+  alias Minga.Language
 
   @typedoc "A single injection range from tree-sitter."
   @type injection_range :: Minga.UI.Highlight.InjectionRange.t()
@@ -39,7 +39,7 @@ defmodule Minga.Editing.Comment do
   """
   @spec comment_string(atom()) :: String.t()
   def comment_string(filetype) do
-    case LangRegistry.get(filetype) do
+    case Language.get(filetype) do
       %{comment_token: token} when is_binary(token) -> token
       _ -> "# "
     end

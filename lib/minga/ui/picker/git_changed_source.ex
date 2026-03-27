@@ -10,7 +10,7 @@ defmodule Minga.UI.Picker.GitChangedSource do
 
   alias Minga.Editor.State, as: EditorState
   alias Minga.Git.Repo, as: GitRepo
-  alias Minga.Language.Filetype
+  alias Minga.Language
   alias Minga.Log
   alias Minga.UI.Devicon
   alias Minga.UI.Picker.Item
@@ -89,7 +89,7 @@ defmodule Minga.UI.Picker.GitChangedSource do
   defp format_entry(entry) do
     filename = Path.basename(entry.path)
     dir = Path.dirname(entry.path)
-    ft = Filetype.detect(filename)
+    ft = Language.detect_filetype(filename)
     {icon, color} = Devicon.icon_and_color(ft)
     dir_display = if dir == ".", do: "", else: dir
     annotation = status_annotation(entry.status)
