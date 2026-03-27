@@ -31,7 +31,7 @@ defmodule Minga.Shell.Traditional.State do
           tab_bar_click_regions: [Minga.Editor.TabBarRenderer.click_region()],
           warning_popup_timer: reference() | nil,
           signature_help: Minga.Editor.SignatureHelp.t() | nil,
-          tool_declined: MapSet.t(atom()),
+          tool_declined: MapSet.t(),
           tool_prompt_queue: [atom()],
           suppress_tool_prompts: boolean()
         }

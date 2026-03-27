@@ -50,7 +50,7 @@ defmodule Minga.Keymap do
   `{:command, name, desc}`, `{:prefix, node}`, or `:unbound`.
   """
   @spec resolve_binding(atom(), atom() | nil, Bindings.key()) ::
-          {:command, atom(), String.t()} | {:prefix, Bindings.node_t()} | :unbound
+          {:command, atom()} | :not_found
   defdelegate resolve_binding(mode, filetype, key), to: Active, as: :resolve_mode_binding
 
   # ── Key resolution (scoped dispatch) ───────────────────────────────
@@ -95,7 +95,7 @@ defmodule Minga.Keymap do
   defdelegate default_leader_trie, to: Defaults, as: :leader_trie
 
   @doc "Returns all default bindings as a flat list."
-  @spec default_bindings() :: [{atom(), String.t(), atom(), String.t()}]
+  @spec default_bindings() :: [{[Bindings.key()], atom(), String.t()}]
   defdelegate default_bindings, to: Defaults, as: :all_bindings
 
   @doc "Returns the default normal-mode single-key bindings."

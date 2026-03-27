@@ -71,6 +71,7 @@ defmodule Minga.Editor.State do
   @type document_highlight :: Minga.LSP.DocumentHighlight.t()
 
   alias Minga.Shell.Traditional.State, as: ShellState
+  alias Minga.Shell.Board.State, as: BoardState
 
   @enforce_keys [:port_manager, :workspace]
   defstruct backend: :headless,
@@ -117,7 +118,7 @@ defmodule Minga.Editor.State do
           workspace: WorkspaceState.t(),
           editing_model: :vim | :cua,
           shell: module(),
-          shell_state: ShellState.t(),
+          shell_state: ShellState.t() | BoardState.t(),
           theme: Theme.t(),
           render_timer: reference() | nil,
           message_store: MessageStore.t(),

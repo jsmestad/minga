@@ -648,7 +648,7 @@ defmodule Minga.Frontend.Protocol.GUI do
       end)
 
     filter_mode = if board.filter_mode, do: 1, else: 0
-    filter_bytes = :erlang.iolist_to_binary([board.filter_text || ""])
+    filter_bytes = :erlang.iolist_to_binary([board.filter_text])
 
     IO.iodata_to_binary([
       @op_gui_board,
@@ -666,17 +666,12 @@ defmodule Minga.Frontend.Protocol.GUI do
     is_focused = if card.id == focused_id, do: 1, else: 0
     flags = Bitwise.bor(is_you, Bitwise.bsl(is_focused, 1))
 
-    task_bytes = :erlang.iolist_to_binary([card.task || ""])
+    task_bytes = :erlang.iolist_to_binary([card.task])
     model_bytes = :erlang.iolist_to_binary([card.model || ""])
 
-    elapsed =
-      if card.created_at do
-        DateTime.diff(DateTime.utc_now(), card.created_at, :second)
-      else
-        0
-      end
+    elapsed = DateTime.diff(DateTime.utc_now(), card.created_at, :second)
 
-    recent_files = card.recent_files || []
+    recent_files = card.recent_files
 
     file_entries =
       Enum.map(recent_files, fn path ->

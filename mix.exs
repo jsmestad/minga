@@ -13,7 +13,10 @@ defmodule Minga.MixProject do
       deps: deps(),
       aliases: aliases(),
       compilers: Mix.compilers() ++ [:minga_zig],
-      dialyzer: [plt_add_apps: [:mix, :credo]],
+      dialyzer: [
+        plt_add_apps: [:mix, :credo],
+        ignore_warnings: ".dialyzer_ignore.exs"
+      ],
       consolidate_protocols: Mix.env() != :prod,
       releases: releases(),
 

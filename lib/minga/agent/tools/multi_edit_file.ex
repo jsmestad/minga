@@ -62,7 +62,7 @@ defmodule Minga.Agent.Tools.MultiEditFile do
     :exit, _ -> :unavailable
   end
 
-  @spec format_buffer_results(String.t(), [Buffer.replace_result()]) :: String.t()
+  @spec format_buffer_results(String.t(), [Minga.Buffer.Server.replace_result()]) :: String.t()
   defp format_buffer_results(path, results) do
     total = length(results)
     succeeded = Enum.count(results, &match?({:ok, _}, &1))
