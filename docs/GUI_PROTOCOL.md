@@ -37,6 +37,24 @@ The BEAM checks `Capabilities.gui?` (true when `frontend_type == :native_gui`) t
 
 GUI chrome opcodes live in the range 0x70-0x7F. GUI content opcodes (semantic buffer rendering, overlays) start at 0x80. Frontends can classify an opcode as GUI by checking `opcode >= 0x70`.
 
+### Forward-Compatible Opcodes (0x90+)
+
+All opcodes at 0x90 and above use a length-prefixed envelope:
+
+```
+opcode(1) + payload_length(2, big-endian) + payload(payload_length)
+```
+
+This allows old frontends to skip unknown opcodes without crashing. When a frontend encounters an unrecognized opcode >= 0x90, it reads the 2-byte length, advances past the payload, and continues decoding the rest of the batch.
+
+Opcodes below 0x90 do NOT include a length prefix and retain their existing positional wire format. If a frontend encounters an unknown opcode below 0x90, it cannot determine the message size and must abort decoding.
+
+The BEAM-side encoder must use this envelope for all new opcodes (0x90+). Currently defined 0x90+ opcodes:
+
+| Opcode | Name | Description |
+|--------|------|-------------|
+| 0x90 | clipboard_write | Write text to the system clipboard |
+
 ### 0x70 — gui_file_tree
 
 File tree sidebar entries for the native sidebar view.
@@ -822,7 +840,7 @@ A GUI frontend must satisfy these requirements:
 
 4. **Send `gui_action` events for user interactions with chrome.** When a user clicks a tab, selects a completion item, or toggles a panel, encode the action and send it to the BEAM on stdout.
 
-5. **Handle missing opcodes gracefully.** New GUI opcodes may be added in the 0x70-0x7F range. Frontends should skip unknown opcodes rather than crashing.
+5. **Handle missing opcodes gracefully.** New GUI opcodes may be added in the 0x70-0x8F range. Frontends should skip unknown opcodes rather than crashing. All new opcodes (0x90+) use a length-prefixed envelope (`opcode + payload_length:2 + payload`) so frontends can skip unknown opcodes by reading the length. See "Forward-Compatible Opcodes (0x90+)" above.
 
 6. **Process `gui_theme` before rendering other chrome.** The theme command typically arrives early in the first frame. Apply colors before rendering chrome elements to avoid a flash of unstyled content.
 

@@ -292,6 +292,141 @@ struct DecoderTruncatedGUIChromeTests {
     }
 }
 
+// MARK: - Forward-compatible unknown opcodes (0x90+)
+
+@Suite("Decoder Robustness: Forward-Compatible Unknown Opcodes")
+struct DecoderForwardCompatTests {
+
+    @Test("Unknown opcode >= 0x90 with valid length prefix is skipped")
+    func skipUnknownOpcode() throws {
+        // Opcode 0xA0 is not defined. It uses the 0x90+ convention:
+        // opcode(1) + payload_length(2, big-endian) + payload(payload_length)
+        var data = Data()
+        data.append(0xA0)                       // unknown opcode
+        data.append(contentsOf: [0x00, 0x04])   // payload_length = 4
+        data.append(contentsOf: [0xDE, 0xAD, 0xBE, 0xEF]) // payload (4 bytes)
+
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(cmd == nil, "Unknown opcode should be skipped (nil command)")
+        #expect(size == 7, "Should consume opcode(1) + length(2) + payload(4) = 7 bytes")
+    }
+
+    @Test("Unknown opcode skipped, subsequent commands decoded correctly")
+    func skipThenDecode() throws {
+        // Build a batch: unknown 0xA0 (5-byte payload) + clear + batch_end
+        var data = Data()
+        // Unknown opcode
+        data.append(0xA0)
+        data.append(contentsOf: [0x00, 0x05]) // payload_length = 5
+        data.append(contentsOf: [0x01, 0x02, 0x03, 0x04, 0x05]) // 5 bytes of payload
+        // Known commands that follow
+        data.append(OP_CLEAR)
+        data.append(OP_BATCH_END)
+
+        var commands: [RenderCommand] = []
+        try decodeCommands(from: data) { cmd in
+            commands.append(cmd)
+        }
+        // The unknown opcode is skipped (nil), so only clear and batchEnd are collected
+        #expect(commands.count == 2)
+        guard case .clear = commands[0] else {
+            Issue.record("Expected .clear after skipped opcode"); return
+        }
+        guard case .batchEnd = commands[1] else {
+            Issue.record("Expected .batchEnd"); return
+        }
+    }
+
+    @Test("Unknown opcode with zero-length payload is skipped")
+    func skipZeroPayload() throws {
+        var data = Data()
+        data.append(0xB0)                       // unknown opcode
+        data.append(contentsOf: [0x00, 0x00])   // payload_length = 0
+
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(cmd == nil)
+        #expect(size == 3, "opcode(1) + length(2) + payload(0) = 3")
+    }
+
+    @Test("Multiple unknown opcodes in a row are all skipped")
+    func skipMultipleUnknown() throws {
+        var data = Data()
+        // First unknown opcode (3-byte payload)
+        data.append(0xA1)
+        data.append(contentsOf: [0x00, 0x03])
+        data.append(contentsOf: [0xAA, 0xBB, 0xCC])
+        // Second unknown opcode (0-byte payload)
+        data.append(0xA2)
+        data.append(contentsOf: [0x00, 0x00])
+        // Known command
+        data.append(OP_CLEAR)
+
+        var commands: [RenderCommand] = []
+        try decodeCommands(from: data) { cmd in
+            commands.append(cmd)
+        }
+        #expect(commands.count == 1)
+        guard case .clear = commands[0] else {
+            Issue.record("Expected .clear"); return
+        }
+    }
+
+    @Test("Known opcode 0x90 (clipboard_write) is NOT skipped")
+    func knownOpcodeNotSkipped() throws {
+        // OP_CLIPBOARD_WRITE (0x90) uses the length-prefixed format but is a known opcode
+        var data = Data()
+        data.append(OP_CLIPBOARD_WRITE) // 0x90
+        // payload: target(1) + text_len(2) + text
+        let text = "hello"
+        let payloadLen = 1 + 2 + text.utf8.count // 8
+        data.append(UInt8(payloadLen >> 8))
+        data.append(UInt8(payloadLen & 0xFF))
+        data.append(0x00) // target = general pasteboard
+        data.append(contentsOf: [0x00, UInt8(text.utf8.count)])
+        data.append(contentsOf: text.utf8)
+
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(cmd != nil, "Known 0x90 opcode should decode, not skip")
+        #expect(size == 1 + 2 + payloadLen)
+        guard case .clipboardWrite(let target, let decoded) = cmd else {
+            Issue.record("Expected .clipboardWrite, got \(String(describing: cmd))"); return
+        }
+        #expect(target == 0x00)
+        #expect(decoded == "hello")
+    }
+
+    @Test("Unknown opcode below 0x90 still throws unknownOpcode")
+    func unknownBelowThreshold() {
+        // Opcode 0x8F is below the forward-compat threshold
+        let data = Data([0x8F])
+        #expect(throws: ProtocolDecodeError.self) {
+            try decodeCommand(data: data, offset: 0)
+        }
+    }
+
+    @Test("Unknown opcode >= 0x90 with truncated length throws malformed")
+    func truncatedLengthThrows() {
+        // Only 1 byte of the 2-byte length prefix
+        let data = Data([0xA0, 0x00])
+        #expect(throws: ProtocolDecodeError.self) {
+            try decodeCommand(data: data, offset: 0)
+        }
+    }
+
+    @Test("Unknown opcode >= 0x90 with truncated payload throws malformed")
+    func truncatedPayloadThrows() {
+        // Length says 10 bytes but only 3 available
+        var data = Data()
+        data.append(0xA0)
+        data.append(contentsOf: [0x00, 0x0A]) // payload_length = 10
+        data.append(contentsOf: [0x01, 0x02, 0x03]) // only 3 bytes
+
+        #expect(throws: ProtocolDecodeError.self) {
+            try decodeCommand(data: data, offset: 0)
+        }
+    }
+}
+
 // MARK: - Edge cases
 
 @Suite("Decoder Robustness: Edge Cases")
