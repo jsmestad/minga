@@ -65,6 +65,25 @@ Before proposing any test, ask: **"If I refactored the internals without changin
 
 A second filter: **"Does this test verify a behavior the user (or calling module) cares about, or does it just prove the code does what the code does?"** Tautological tests that mirror the implementation provide zero bug-catching value. A test that asserts `add(2, 3) == 5` verifies behavior. A test that asserts "the function calls `Kernel.+/2` with 2 and 3" verifies implementation.
 
+### Layer Selection: When NOT to Use EditorCase
+
+Before recommending EditorCase, ask whether a lighter test layer would suffice. EditorCase boots 3 GenServers (Editor + HeadlessPort + BufferServer) and runs the full render pipeline. That's expensive, slow, and sensitive to unrelated changes. Pick the lightest layer that covers the behavior:
+
+**1. Pure function?** (Motion, TextObject, Operator, Document operations) → Test the function directly with `Document.new()` + assertion. No GenServer needed. These tests run in microseconds and never flake.
+
+**2. Single GenServer operation?** (Buffer.Server insert, delete, undo) → Start the GenServer with `start_supervised!`, call the function, assert. No Editor or HeadlessPort.
+
+**3. Input dispatch wiring?** (key X reaches command Y) → EditorCase with `send_key_sync` + EditorCase query helpers (`buffer_content`, `buffer_cursor`, `editor_mode`). No screen assertions needed.
+
+**4. Rendered output?** (screen shows correct text after an action) → EditorCase with `send_key` + `assert_row_contains` or snapshot. This is the heaviest layer; recommend it only when verifying what the user sees.
+
+When asked "how should I test this key binding?", check whether the underlying behavior is a pure function. If `w` just calls `Motion.word_forward`, recommend testing the motion directly (Layer 1) and only testing the key wiring (Layer 3) if the wiring itself is new or changed.
+
+**Reference patterns to cite:**
+- `test/minga/editing/motion/word_test.exs` (pure motion tests, `Document.new` + direct call)
+- `test/minga/editing/text_object_test.exs` (pure text object tests)
+- `test/minga/mode/operator_pending_test.exs` (FSM dispatch without GenServer)
+
 ## What You Design
 
 **1. Behavior tests.** What does this code do? Each meaningful behavior gets a test. Name tests after the behavior, not the function: `"deleting at start of line joins with previous line"` not `"test delete_before/1"`.

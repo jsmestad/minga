@@ -1111,8 +1111,8 @@ defmodule Minga.Frontend.Emit.GUI do
   defp build_gui_board_cmd(_state) do
     if Process.get(:last_gui_board_fp) != :dismissed do
       Process.put(:last_gui_board_fp, :dismissed)
-      # zoomed_into: 0 forces grid_view? → false → visible=0
-      dismissed = %Minga.Shell.Board.State{zoomed_into: 0}
+      # zoomed_into: 1 forces grid_view? → false → visible=0
+      dismissed = %Minga.Shell.Board.State{zoomed_into: 1}
       ProtocolGUI.encode_gui_board(dismissed)
     end
   end

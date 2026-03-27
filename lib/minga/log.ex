@@ -152,7 +152,7 @@ defmodule Minga.Log do
     :ok
   end
 
-  @spec safe_get_option(Config.option_name()) :: atom()
+  @spec safe_get_option(Minga.Config.option_name()) :: atom()
   defp safe_get_option(name) do
     Minga.Config.get(name)
   rescue

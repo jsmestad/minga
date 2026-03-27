@@ -339,7 +339,6 @@ defmodule Minga.Shell.Board.Renderer do
   defp status_face(:needs_you, bg), do: Face.new(fg: 0xE5C07B, bg: bg)
   defp status_face(:done, bg), do: Face.new(fg: 0x61AFEF, bg: bg)
   defp status_face(:errored, bg), do: Face.new(fg: 0xE06C75, bg: bg)
-  defp status_face(_, bg), do: Face.new(fg: 0x5C6370, bg: bg)
 
   @spec status_label(Card.status()) :: String.t()
   defp status_label(:idle), do: "Idle"
@@ -348,11 +347,8 @@ defmodule Minga.Shell.Board.Renderer do
   defp status_label(:needs_you), do: "Needs you"
   defp status_label(:done), do: "Done"
   defp status_label(:errored), do: "Errored"
-  defp status_label(_), do: ""
 
-  @spec format_elapsed(DateTime.t() | nil) :: String.t()
-  defp format_elapsed(nil), do: ""
-
+  @spec format_elapsed(DateTime.t()) :: String.t()
   defp format_elapsed(created_at) do
     seconds = DateTime.diff(DateTime.utc_now(), created_at, :second)
     cond_elapsed(seconds)

@@ -168,11 +168,11 @@ defmodule Minga.Config do
   # ── Validation ──────────────────────────────────────────────────────
 
   @doc "Returns the set of all recognized option names."
-  @spec valid_option_names() :: MapSet.t(atom())
+  @spec valid_option_names() :: [Options.option_name()]
   defdelegate valid_option_names(), to: Options, as: :valid_names
 
   @doc "Validates an option name/value pair without storing it."
-  @spec validate_option(Options.option_name(), term()) :: {:ok, term()} | {:error, String.t()}
+  @spec validate_option(Options.option_name(), term()) :: :ok | {:error, String.t()}
   defdelegate validate_option(name, value), to: Options, as: :validate_option
 
   # ── Type re-exports ────────────────────────────────────────────────

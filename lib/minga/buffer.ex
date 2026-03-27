@@ -52,7 +52,7 @@ defmodule Minga.Buffer do
   defdelegate lines(server, start, count), to: Server, as: :get_lines
 
   @doc "Content of lines from `start_line` to `end_line` (inclusive, 0-indexed)."
-  @spec lines_content(server(), non_neg_integer(), non_neg_integer()) :: [String.t()]
+  @spec lines_content(server(), non_neg_integer(), non_neg_integer()) :: String.t()
   defdelegate lines_content(server, start_line, end_line), to: Server, as: :get_lines_content
 
   @doc "Text between two positions (end exclusive)."
@@ -103,15 +103,24 @@ defmodule Minga.Buffer do
   @doc "Replace text in a range with new text (the general-purpose edit operation)."
   @spec apply_edit(
           server(),
-          position(),
-          position(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
           String.t(),
-          Minga.Buffer.EditSource.t(),
-          keyword()
+          Minga.Buffer.EditSource.t()
         ) :: :ok
-  defdelegate apply_edit(server, start_pos, end_pos, new_text, source, opts \\ []),
-    to: Server,
-    as: :apply_text_edit
+  defdelegate apply_edit(
+                server,
+                start_line,
+                start_col,
+                end_line,
+                end_col,
+                new_text,
+                source \\ Minga.Buffer.EditSource.user()
+              ),
+              to: Server,
+              as: :apply_text_edit
 
   @doc "Apply a batch of edits atomically (for LSP workspace edits)."
   @spec apply_edits(server(), [Server.text_edit()], Minga.Buffer.EditSource.t()) :: :ok
@@ -136,7 +145,7 @@ defmodule Minga.Buffer do
   defdelegate delete_lines(server, start_line, end_line), to: Server
 
   @doc "Clear the contents of a single line."
-  @spec clear_line(server(), non_neg_integer()) :: :ok
+  @spec clear_line(server(), non_neg_integer()) :: {:ok, String.t()}
   defdelegate clear_line(server, line), to: Server
 
   @doc "Replace the entire buffer content."
@@ -150,12 +159,12 @@ defmodule Minga.Buffer do
 
   @doc "Find and replace the first occurrence of `old_text` with `new_text`."
   @spec find_and_replace(server(), String.t(), String.t()) ::
-          {:ok, non_neg_integer()} | {:error, :not_found}
+          {:ok, String.t()} | {:error, String.t()}
   defdelegate find_and_replace(server, old_text, new_text), to: Server
 
   @doc "Find and replace multiple patterns atomically."
   @spec find_and_replace_batch(server(), [Server.replace_edit()]) ::
-          {:ok, [{:ok, non_neg_integer()} | {:error, :not_found}]}
+          {:ok, [Server.replace_result()]} | {:error, String.t()}
   defdelegate find_and_replace_batch(server, edits), to: Server
 
   @doc "Append text to the end of the buffer."
@@ -247,7 +256,7 @@ defmodule Minga.Buffer do
   defdelegate get_option(server, name), to: Server
 
   @doc "Set a per-buffer option override."
-  @spec set_option(server(), atom(), term()) :: :ok
+  @spec set_option(server(), atom(), term()) :: {:ok, term()} | {:error, String.t()}
   defdelegate set_option(server, name, value), to: Server
 
   # ── Snapshots ──────────────────────────────────────────────────────
@@ -292,11 +301,16 @@ defmodule Minga.Buffer do
     to: Server
 
   @doc "Add a highlight range."
-  @spec add_highlight(server(), position(), position(), keyword()) :: non_neg_integer()
+  @spec add_highlight(
+          server(),
+          Minga.Core.Decorations.highlight_range_pos(),
+          Minga.Core.Decorations.highlight_range_pos(),
+          keyword()
+        ) :: reference()
   defdelegate add_highlight(server, start_pos, end_pos, opts), to: Server
 
   @doc "Remove a highlight by ID."
-  @spec remove_highlight(server(), non_neg_integer()) :: :ok
+  @spec remove_highlight(server(), reference()) :: :ok
   defdelegate remove_highlight(server, id), to: Server
 
   @doc "Remove all highlights in a group."
@@ -304,19 +318,20 @@ defmodule Minga.Buffer do
   defdelegate remove_highlight_group(server, group), to: Server
 
   @doc "Add virtual text anchored to a line."
-  @spec add_virtual_text(server(), non_neg_integer(), keyword()) :: non_neg_integer()
+  @spec add_virtual_text(server(), Minga.Core.Decorations.highlight_range_pos(), keyword()) ::
+          reference()
   defdelegate add_virtual_text(server, anchor, opts), to: Server
 
   @doc "Remove virtual text by ID."
-  @spec remove_virtual_text(server(), non_neg_integer()) :: :ok
+  @spec remove_virtual_text(server(), reference()) :: :ok
   defdelegate remove_virtual_text(server, id), to: Server
 
   @doc "Add a block decoration (multi-line annotation) anchored to a line."
-  @spec add_block_decoration(server(), non_neg_integer(), keyword()) :: non_neg_integer()
+  @spec add_block_decoration(server(), non_neg_integer(), keyword()) :: reference()
   defdelegate add_block_decoration(server, anchor_line, opts), to: Server
 
   @doc "Remove a block decoration by ID."
-  @spec remove_block_decoration(server(), non_neg_integer()) :: :ok
+  @spec remove_block_decoration(server(), reference()) :: :ok
   defdelegate remove_block_decoration(server, id), to: Server
 
   # ── Face overrides (per-buffer syntax highlighting customization) ──

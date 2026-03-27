@@ -233,7 +233,7 @@ defmodule Minga.Git do
   defdelegate gutter_signs(git_buffer), to: Minga.Git.Buffer, as: :signs
 
   @doc "Returns modeline-ready git info (branch, hunk counts) for a tracked buffer."
-  @spec modeline_info(GenServer.server()) :: map()
+  @spec modeline_info(GenServer.server()) :: Minga.Git.Buffer.modeline_info()
   defdelegate modeline_info(git_buffer), to: Minga.Git.Buffer, as: :modeline_info
 
   @doc "Returns all diff hunks for a tracked buffer."

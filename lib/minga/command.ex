@@ -101,7 +101,7 @@ defmodule Minga.Command do
   # ── Parsing ────────────────────────────────────────────────────────────
 
   @doc "Parses a command-line string into a structured command invocation."
-  @spec parse(String.t()) :: Minga.Command.Parser.result()
+  @spec parse(String.t()) :: Minga.Command.Parser.parsed()
   defdelegate parse(input), to: Minga.Command.Parser
 
   # ── Command properties ─────────────────────────────────────────────────
