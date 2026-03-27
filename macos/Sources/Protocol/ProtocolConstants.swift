@@ -63,6 +63,20 @@ let OP_GUI_BOARD: UInt8 = 0x87
 
 let OP_CLIPBOARD_WRITE: UInt8 = 0x90
 
+// MARK: - Sectioned format section IDs
+// Used by opcodes with self-describing sections (gui_status_bar, etc.).
+// Format: section_id(1) + section_len(2, big-endian) + payload(section_len)
+
+let SECTION_IDENTITY: UInt8 = 0x01
+let SECTION_CURSOR: UInt8 = 0x02
+let SECTION_DIAGNOSTICS: UInt8 = 0x03
+let SECTION_LANGUAGE: UInt8 = 0x04
+let SECTION_GIT: UInt8 = 0x05
+let SECTION_FILE: UInt8 = 0x06
+let SECTION_MESSAGE: UInt8 = 0x07
+let SECTION_RECORDING: UInt8 = 0x08
+let SECTION_AGENT: UInt8 = 0x09
+
 // GUI theme color slot IDs
 let GUI_COLOR_EDITOR_BG: UInt8 = 0x01
 let GUI_COLOR_EDITOR_FG: UInt8 = 0x02

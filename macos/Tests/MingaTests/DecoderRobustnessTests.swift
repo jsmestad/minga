@@ -183,12 +183,12 @@ struct DecoderTruncatedGUIChromeTests {
         }
     }
 
-    @Test("gui_status_bar truncated header")
+    @Test("gui_status_bar truncated section header")
     func truncatedStatusBar() {
         var data = Data([OP_GUI_STATUS_BAR])
-        data.append(0) // contentKind
-        data.append(0) // mode
-        // Missing rest of header (cursorLine, cursorCol, etc.)
+        data.append(1) // section_count = 1
+        data.append(0x01) // section_id = identity
+        // Missing section_len (needs 2 bytes)
 
         #expect(throws: ProtocolDecodeError.self) {
             try decodeCommand(data: data, offset: 0)

@@ -442,102 +442,141 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         return (.guiBreadcrumb(segments: segments), pos - offset)
 
     case OP_GUI_STATUS_BAR:
-        // Unified wire format for both buffer (contentKind=0) and agent (contentKind=1).
-        // Both variants encode the full buffer field set. The agent variant appends
-        // model_name, message_count, and session_status at the end.
-        //
-        // Layout:
-        //   content_kind:1 mode:1 cursor_line:4 cursor_col:4 line_count:4
-        //   flags:1 lsp:1 git_len:1 git(:git_len) msg_len:2 msg(:msg_len)
-        //   ft_len:1 ft(:ft_len) error_count:2 warning_count:2
-        //   info_count:2 hint_count:2 macro_recording:1 parser_status:1 agent_status:1
-        //   git_added:2 git_modified:2 git_deleted:2
-        //   icon_len:1 icon(:icon_len) icon_r:1 icon_g:1 icon_b:1
-        //   filename_len:2 filename(:filename_len)
-        //   diag_hint_len:2 diag_hint(:diag_hint_len)
-        //   [agent only] model_name_len:1 model_name(:model_name_len) message_count:4 session_status:1
-        guard data.count >= rest + 17 else { throw ProtocolDecodeError.malformed }
-        let contentKind = data[rest]
-        let mode = data[rest + 1]
-        let cursorLine = readU32(data, rest + 2)
-        let cursorCol = readU32(data, rest + 6)
-        let lineCount = readU32(data, rest + 10)
-        let flags = data[rest + 14]
-        let lspStatus = data[rest + 15]
-        let gitLen = Int(data[rest + 16])
-        guard data.count >= rest + 17 + gitLen + 2 else { throw ProtocolDecodeError.malformed }
-        let gitBranch = String(data: data[(rest + 17)..<(rest + 17 + gitLen)], encoding: .utf8) ?? ""
-        let msgLen = Int(readU16(data, rest + 17 + gitLen))
-        guard data.count >= rest + 19 + gitLen + msgLen + 1 else { throw ProtocolDecodeError.malformed }
-        let message = String(data: data[(rest + 19 + gitLen)..<(rest + 19 + gitLen + msgLen)], encoding: .utf8) ?? ""
-        let ftLen = Int(data[rest + 19 + gitLen + msgLen])
-        guard data.count >= rest + 20 + gitLen + msgLen + ftLen + 4 else { throw ProtocolDecodeError.malformed }
-        let filetype = String(data: data[(rest + 20 + gitLen + msgLen)..<(rest + 20 + gitLen + msgLen + ftLen)], encoding: .utf8) ?? ""
-        let diagBase = rest + 20 + gitLen + msgLen + ftLen
-        let errorCount: UInt16 = readU16(data, diagBase)
-        let warningCount: UInt16 = readU16(data, diagBase + 2)
-        var totalConsumed = diagBase + 4
+        // Sectioned wire format: opcode(1) + section_count(1) + sections...
+        // Each section: section_id(1) + section_len(2) + payload(section_len)
+        // Unknown sections are skipped (forward compatibility).
+        guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }
+        let sectionCount = Int(data[rest])
+        var pos = rest + 1
 
-        // Extended fields (shared by both variants)
-        guard data.count >= totalConsumed + 13 else { throw ProtocolDecodeError.malformed }
-        let infoCount: UInt16 = readU16(data, totalConsumed)
-        let hintCount: UInt16 = readU16(data, totalConsumed + 2)
-        let macroRecording: UInt8 = data[totalConsumed + 4]
-        let parserStatus: UInt8 = data[totalConsumed + 5]
-        let agentStatus: UInt8 = data[totalConsumed + 6]
-        let gitAdded: UInt16 = readU16(data, totalConsumed + 7)
-        let gitModified: UInt16 = readU16(data, totalConsumed + 9)
-        let gitDeleted: UInt16 = readU16(data, totalConsumed + 11)
-        totalConsumed += 13
-
-        // icon: len:1 + data + color:3
-        guard data.count >= totalConsumed + 1 else { throw ProtocolDecodeError.malformed }
-        let iconLen = Int(data[totalConsumed])
-        totalConsumed += 1
-        guard data.count >= totalConsumed + iconLen + 3 else { throw ProtocolDecodeError.malformed }
-        let icon = String(data: data[totalConsumed..<(totalConsumed + iconLen)], encoding: .utf8) ?? ""
-        totalConsumed += iconLen
-        let iconColorR = data[totalConsumed]
-        let iconColorG = data[totalConsumed + 1]
-        let iconColorB = data[totalConsumed + 2]
-        totalConsumed += 3
-
-        // filename: len:2 + data
-        guard data.count >= totalConsumed + 2 else { throw ProtocolDecodeError.malformed }
-        let filenameLen = Int(readU16(data, totalConsumed))
-        totalConsumed += 2
-        guard data.count >= totalConsumed + filenameLen else { throw ProtocolDecodeError.malformed }
-        let filename = String(data: data[totalConsumed..<(totalConsumed + filenameLen)], encoding: .utf8) ?? ""
-        totalConsumed += filenameLen
-
-        // diagnostic_hint: len:2 + data
+        // Defaults for all fields (sections may be absent or in any order)
+        var contentKind: UInt8 = 0
+        var mode: UInt8 = 0
+        var flags: UInt8 = 0
+        var cursorLine: UInt32 = 0
+        var cursorCol: UInt32 = 0
+        var lineCount: UInt32 = 0
+        var errorCount: UInt16 = 0
+        var warningCount: UInt16 = 0
+        var infoCount: UInt16 = 0
+        var hintCount: UInt16 = 0
         var diagnosticHint = ""
-        if data.count >= totalConsumed + 2 {
-            let diagHintLen = Int(readU16(data, totalConsumed))
-            totalConsumed += 2
-            if data.count >= totalConsumed + diagHintLen, diagHintLen > 0 {
-                diagnosticHint = String(data: data[totalConsumed..<(totalConsumed + diagHintLen)], encoding: .utf8) ?? ""
-                totalConsumed += diagHintLen
-            }
-        }
-
-        // Agent-only trailing fields (only present when contentKind == 1)
+        var lspStatus: UInt8 = 0
+        var parserStatus: UInt8 = 0
+        var gitBranch = ""
+        var gitAdded: UInt16 = 0
+        var gitModified: UInt16 = 0
+        var gitDeleted: UInt16 = 0
+        var icon = ""
+        var iconColorR: UInt8 = 0
+        var iconColorG: UInt8 = 0
+        var iconColorB: UInt8 = 0
+        var filename = ""
+        var filetype = ""
+        var message = ""
+        var macroRecording: UInt8 = 0
         var modelName = ""
         var messageCount: UInt32 = 0
         var sessionStatus: UInt8 = 0
+        var agentStatus: UInt8 = 0
 
-        if contentKind == 1, data.count >= totalConsumed + 1 {
-            let modelNameLen = Int(data[totalConsumed])
-            totalConsumed += 1
-            guard data.count >= totalConsumed + modelNameLen + 5 else { throw ProtocolDecodeError.malformed }
-            modelName = String(data: data[totalConsumed..<(totalConsumed + modelNameLen)], encoding: .utf8) ?? ""
-            totalConsumed += modelNameLen
-            messageCount = readU32(data, totalConsumed)
-            sessionStatus = data[totalConsumed + 4]
-            totalConsumed += 5
+        for _ in 0..<sectionCount {
+            guard data.count >= pos + 3 else { throw ProtocolDecodeError.malformed }
+            let sectionId = data[pos]
+            let sectionLen = Int(readU16(data, pos + 1))
+            let sStart = pos + 3
+            guard data.count >= sStart + sectionLen else { throw ProtocolDecodeError.malformed }
+
+            switch sectionId {
+            case 0x01: // Identity: content_kind(1) + mode(1) + flags(1)
+                guard sectionLen >= 3 else { break }
+                contentKind = data[sStart]
+                mode = data[sStart + 1]
+                flags = data[sStart + 2]
+
+            case 0x02: // Cursor: cursor_line(4) + cursor_col(4) + line_count(4)
+                guard sectionLen >= 12 else { break }
+                cursorLine = readU32(data, sStart)
+                cursorCol = readU32(data, sStart + 4)
+                lineCount = readU32(data, sStart + 8)
+
+            case 0x03: // Diagnostics: error(2) + warning(2) + info(2) + hint(2) + diag_hint_len(2) + diag_hint
+                guard sectionLen >= 8 else { break }
+                errorCount = readU16(data, sStart)
+                warningCount = readU16(data, sStart + 2)
+                infoCount = readU16(data, sStart + 4)
+                hintCount = readU16(data, sStart + 6)
+                if sectionLen >= 10 {
+                    let dhLen = Int(readU16(data, sStart + 8))
+                    if sectionLen >= 10 + dhLen, dhLen > 0 {
+                        diagnosticHint = String(data: data[(sStart + 10)..<(sStart + 10 + dhLen)], encoding: .utf8) ?? ""
+                    }
+                }
+
+            case 0x04: // Language: lsp_status(1) + parser_status(1)
+                guard sectionLen >= 2 else { break }
+                lspStatus = data[sStart]
+                parserStatus = data[sStart + 1]
+
+            case 0x05: // Git: branch_len(1) + branch + added(2) + modified(2) + deleted(2)
+                guard sectionLen >= 1 else { break }
+                let brLen = Int(data[sStart])
+                guard sectionLen >= 1 + brLen + 6 else { break }
+                gitBranch = String(data: data[(sStart + 1)..<(sStart + 1 + brLen)], encoding: .utf8) ?? ""
+                gitAdded = readU16(data, sStart + 1 + brLen)
+                gitModified = readU16(data, sStart + 3 + brLen)
+                gitDeleted = readU16(data, sStart + 5 + brLen)
+
+            case 0x06: // File: icon_len(1) + icon + r(1) + g(1) + b(1) + filename_len(2) + filename + filetype_len(1) + filetype
+                guard sectionLen >= 1 else { break }
+                let iLen = Int(data[sStart])
+                guard sectionLen >= 1 + iLen + 3 + 2 else { break }
+                icon = String(data: data[(sStart + 1)..<(sStart + 1 + iLen)], encoding: .utf8) ?? ""
+                iconColorR = data[sStart + 1 + iLen]
+                iconColorG = data[sStart + 2 + iLen]
+                iconColorB = data[sStart + 3 + iLen]
+                let fnLen = Int(readU16(data, sStart + 4 + iLen))
+                guard sectionLen >= 6 + iLen + fnLen + 1 else { break }
+                filename = String(data: data[(sStart + 6 + iLen)..<(sStart + 6 + iLen + fnLen)], encoding: .utf8) ?? ""
+                let ftLen = Int(data[sStart + 6 + iLen + fnLen])
+                guard sectionLen >= 7 + iLen + fnLen + ftLen else { break }
+                filetype = String(data: data[(sStart + 7 + iLen + fnLen)..<(sStart + 7 + iLen + fnLen + ftLen)], encoding: .utf8) ?? ""
+
+            case 0x07: // Message: msg_len(2) + msg
+                guard sectionLen >= 2 else { break }
+                let mLen = Int(readU16(data, sStart))
+                if sectionLen >= 2 + mLen, mLen > 0 {
+                    message = String(data: data[(sStart + 2)..<(sStart + 2 + mLen)], encoding: .utf8) ?? ""
+                }
+
+            case 0x08: // Recording: macro_recording(1)
+                guard sectionLen >= 1 else { break }
+                macroRecording = data[sStart]
+
+            case 0x09: // Agent: varies by content_kind
+                if sectionLen >= 1 {
+                    // Buffer variant: just agent_status(1)
+                    // Agent variant: model_name_len(1) + model_name + message_count(4) + session_status(1) + agent_status(1)
+                    if sectionLen == 1 {
+                        agentStatus = data[sStart]
+                    } else {
+                        let mnLen = Int(data[sStart])
+                        guard sectionLen >= 1 + mnLen + 6 else { break }
+                        modelName = String(data: data[(sStart + 1)..<(sStart + 1 + mnLen)], encoding: .utf8) ?? ""
+                        messageCount = readU32(data, sStart + 1 + mnLen)
+                        sessionStatus = data[sStart + 5 + mnLen]
+                        agentStatus = data[sStart + 6 + mnLen]
+                    }
+                }
+
+            default:
+                break // Skip unknown sections (forward compatibility)
+            }
+
+            pos = sStart + sectionLen
         }
 
-        return (.guiStatusBar(contentKind: contentKind, mode: mode, cursorLine: cursorLine, cursorCol: cursorCol, lineCount: lineCount, flags: flags, lspStatus: lspStatus, gitBranch: gitBranch, message: message, filetype: filetype, errorCount: errorCount, warningCount: warningCount, modelName: modelName, messageCount: messageCount, sessionStatus: sessionStatus, infoCount: infoCount, hintCount: hintCount, macroRecording: macroRecording, parserStatus: parserStatus, agentStatus: agentStatus, gitAdded: gitAdded, gitModified: gitModified, gitDeleted: gitDeleted, icon: icon, iconColorR: iconColorR, iconColorG: iconColorG, iconColorB: iconColorB, filename: filename, diagnosticHint: diagnosticHint), totalConsumed - offset)
+        return (.guiStatusBar(contentKind: contentKind, mode: mode, cursorLine: cursorLine, cursorCol: cursorCol, lineCount: lineCount, flags: flags, lspStatus: lspStatus, gitBranch: gitBranch, message: message, filetype: filetype, errorCount: errorCount, warningCount: warningCount, modelName: modelName, messageCount: messageCount, sessionStatus: sessionStatus, infoCount: infoCount, hintCount: hintCount, macroRecording: macroRecording, parserStatus: parserStatus, agentStatus: agentStatus, gitAdded: gitAdded, gitModified: gitModified, gitDeleted: gitDeleted, icon: icon, iconColorR: iconColorR, iconColorG: iconColorG, iconColorB: iconColorB, filename: filename, diagnosticHint: diagnosticHint), pos - offset)
 
     case OP_GUI_PICKER:
         guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }

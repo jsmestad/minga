@@ -291,7 +291,7 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
     }
 }
 
-func chatMessageToJSON(_ msg: GUIChatMessage) -> [String: Any] {
+func chatMessageToJSON(_ msg: Wire.ChatMessage) -> [String: Any] {
     var result: [String: Any] = ["beam_id": Int(msg.beamId)]
     switch msg.content {
     case .user(let text):

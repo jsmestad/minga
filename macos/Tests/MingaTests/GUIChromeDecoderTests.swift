@@ -324,34 +324,76 @@ struct GUIBreadcrumbDecoderTests {
 
 @Suite("GUI Status Bar Decoder")
 struct GUIStatusBarDecoderTests {
-    @Test("Decode gui_status_bar buffer variant")
+
+    /// Builds a section: id(1) + len(2) + payload
+    private func buildSection(_ id: UInt8, _ payload: Data) -> Data {
+        var section = Data()
+        section.append(id)
+        appendU16(&section, UInt16(payload.count))
+        section.append(payload)
+        return section
+    }
+
+    @Test("Decode gui_status_bar buffer variant (sectioned format)")
     func decodeBufferVariant() throws {
+        var identity = Data()
+        identity.append(0) // contentKind = buffer
+        identity.append(1) // mode = insert
+        identity.append(0x03) // flags
+
+        var cursor = Data()
+        appendU32(&cursor, 42) // cursorLine
+        appendU32(&cursor, 9) // cursorCol
+        appendU32(&cursor, 500) // lineCount
+
+        var diagnostics = Data()
+        appendU16(&diagnostics, 3) // errorCount
+        appendU16(&diagnostics, 7) // warningCount
+        appendU16(&diagnostics, 1) // infoCount
+        appendU16(&diagnostics, 2) // hintCount
+        appendString16(&diagnostics, "") // diagnosticHint
+
+        var language = Data()
+        language.append(1) // lspStatus = ready
+        language.append(1) // parserStatus
+
+        var git = Data()
+        appendString8(&git, "main") // gitBranch
+        appendU16(&git, 5) // gitAdded
+        appendU16(&git, 3) // gitModified
+        appendU16(&git, 1) // gitDeleted
+
+        var file = Data()
+        appendString8(&file, "") // icon
+        file.append(0); file.append(0); file.append(0) // icon color
+        appendString16(&file, "editor.ex") // filename
+        appendString8(&file, "elixir") // filetype
+
+        var msg = Data()
+        appendString16(&msg, "-- INSERT --")
+
+        var recording = Data()
+        recording.append(0) // macroRecording
+
+        var agent = Data()
+        agent.append(0) // agentStatus (buffer variant: just 1 byte)
+
+        let sections = [
+            buildSection(SECTION_IDENTITY, identity),
+            buildSection(SECTION_CURSOR, cursor),
+            buildSection(SECTION_DIAGNOSTICS, diagnostics),
+            buildSection(SECTION_LANGUAGE, language),
+            buildSection(SECTION_GIT, git),
+            buildSection(SECTION_FILE, file),
+            buildSection(SECTION_MESSAGE, msg),
+            buildSection(SECTION_RECORDING, recording),
+            buildSection(SECTION_AGENT, agent),
+        ]
+
         var data = Data()
         data.append(OP_GUI_STATUS_BAR)
-        data.append(0) // contentKind = buffer
-        data.append(1) // mode = insert
-        appendU32(&data, 42) // cursorLine
-        appendU32(&data, 9) // cursorCol
-        appendU32(&data, 500) // lineCount
-        data.append(0x03) // flags (has_lsp + has_git)
-        data.append(1) // lspStatus = ready
-        appendString8(&data, "main") // gitBranch
-        appendString16(&data, "-- INSERT --") // message
-        appendString8(&data, "elixir") // filetype
-        appendU16(&data, 3) // errorCount
-        appendU16(&data, 7) // warningCount
-        // Extended buffer fields
-        appendU16(&data, 1) // infoCount
-        appendU16(&data, 2) // hintCount
-        data.append(0) // macroRecording
-        data.append(1) // parserStatus
-        data.append(0) // agentStatus
-        appendU16(&data, 5) // gitAdded
-        appendU16(&data, 3) // gitModified
-        appendU16(&data, 1) // gitDeleted
-        appendString8(&data, "") // icon
-        data.append(0); data.append(0); data.append(0) // icon color RGB
-        appendString16(&data, "editor.ex") // filename
+        data.append(UInt8(sections.count)) // section_count
+        for s in sections { data.append(s) }
 
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
@@ -368,7 +410,7 @@ struct GUIStatusBarDecoderTests {
         }
 
         #expect(contentKind == 0)
-        #expect(mode == 1) // insert
+        #expect(mode == 1)
         #expect(cursorLine == 42)
         #expect(cursorCol == 9)
         #expect(lineCount == 500)
@@ -390,39 +432,70 @@ struct GUIStatusBarDecoderTests {
         #expect(filename == "editor.ex")
     }
 
-    @Test("Decode gui_status_bar agent variant with background buffer context")
+    @Test("Decode gui_status_bar agent variant (sectioned format)")
     func decodeAgentVariant() throws {
+        var identity = Data()
+        identity.append(1) // contentKind = agent
+        identity.append(0) // mode = normal
+        identity.append(0x03) // flags
+
+        var cursor = Data()
+        appendU32(&cursor, 11)
+        appendU32(&cursor, 6)
+        appendU32(&cursor, 100)
+
+        var diagnostics = Data()
+        appendU16(&diagnostics, 1) // errorCount
+        appendU16(&diagnostics, 2) // warningCount
+        appendU16(&diagnostics, 0) // infoCount
+        appendU16(&diagnostics, 1) // hintCount
+        appendString16(&diagnostics, "")
+
+        var language = Data()
+        language.append(1) // lspStatus
+        language.append(0) // parserStatus
+
+        var git = Data()
+        appendString8(&git, "feat/agent")
+        appendU16(&git, 3)
+        appendU16(&git, 2)
+        appendU16(&git, 0)
+
+        var file = Data()
+        appendString8(&file, "")
+        file.append(0); file.append(0); file.append(0)
+        appendString16(&file, "editor.ex")
+        appendString8(&file, "elixir")
+
+        var msg = Data()
+        appendString16(&msg, "")
+
+        var recording = Data()
+        recording.append(0)
+
+        // Agent section: model_name_len(1) + model_name + message_count(4) + session_status(1) + agent_status(1)
+        var agent = Data()
+        appendString8(&agent, "claude-3-5-sonnet")
+        appendU32(&agent, 12) // messageCount
+        agent.append(1) // sessionStatus
+        agent.append(1) // agentStatus
+
+        let sections = [
+            buildSection(SECTION_IDENTITY, identity),
+            buildSection(SECTION_CURSOR, cursor),
+            buildSection(SECTION_DIAGNOSTICS, diagnostics),
+            buildSection(SECTION_LANGUAGE, language),
+            buildSection(SECTION_GIT, git),
+            buildSection(SECTION_FILE, file),
+            buildSection(SECTION_MESSAGE, msg),
+            buildSection(SECTION_RECORDING, recording),
+            buildSection(SECTION_AGENT, agent),
+        ]
+
         var data = Data()
         data.append(OP_GUI_STATUS_BAR)
-        data.append(1) // contentKind = agent
-        data.append(0) // mode = normal
-        appendU32(&data, 11) // cursorLine (1-indexed)
-        appendU32(&data, 6)  // cursorCol (1-indexed)
-        appendU32(&data, 100) // lineCount
-        data.append(0x03) // flags (hasLsp=1, hasGit=1)
-        data.append(1) // lspStatus = ready
-        appendString8(&data, "feat/agent") // gitBranch
-        appendString16(&data, "") // message
-        appendString8(&data, "elixir") // filetype
-        appendU16(&data, 1) // errorCount
-        appendU16(&data, 2) // warningCount
-        // Extended fields (same as buffer variant)
-        appendU16(&data, 0) // infoCount
-        appendU16(&data, 1) // hintCount
-        data.append(0) // macroRecording
-        data.append(0) // parserStatus
-        data.append(1) // agentStatus = thinking
-        appendU16(&data, 3) // gitAdded
-        appendU16(&data, 2) // gitModified
-        appendU16(&data, 0) // gitDeleted
-        appendString8(&data, "") // icon
-        data.append(0); data.append(0); data.append(0) // icon color
-        appendString16(&data, "editor.ex") // filename
-        appendString16(&data, "") // diagnosticHint
-        // Agent-only trailing fields
-        appendString8(&data, "claude-3-5-sonnet") // modelName
-        appendU32(&data, 12) // messageCount
-        data.append(1) // sessionStatus = thinking
+        data.append(UInt8(sections.count))
+        for s in sections { data.append(s) }
 
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
@@ -434,8 +507,7 @@ struct GUIStatusBarDecoderTests {
         #expect(contentKind == 1)
         #expect(modelName == "claude-3-5-sonnet")
         #expect(messageCount == 12)
-        #expect(sessionStatus == 1) // thinking
-        // Background buffer fields populated
+        #expect(sessionStatus == 1)
         #expect(cursorLine == 11)
         #expect(lineCount == 100)
         #expect(gitBranch == "feat/agent")
@@ -446,6 +518,66 @@ struct GUIStatusBarDecoderTests {
         #expect(gitAdded == 3)
         #expect(gitModified == 2)
         #expect(filename == "editor.ex")
+    }
+
+    @Test("Unknown sections are skipped (forward compatibility)")
+    func skipUnknownSections() throws {
+        // Build a status bar with an unknown section 0xFF between known sections
+        var identity = Data()
+        identity.append(0); identity.append(0); identity.append(0)
+
+        var unknown = Data([0xDE, 0xAD, 0xBE, 0xEF])
+
+        var cursor = Data()
+        appendU32(&cursor, 10)
+        appendU32(&cursor, 5)
+        appendU32(&cursor, 200)
+
+        let sections = [
+            buildSection(SECTION_IDENTITY, identity),
+            buildSection(0xFF, unknown), // unknown section
+            buildSection(SECTION_CURSOR, cursor),
+        ]
+
+        var data = Data()
+        data.append(OP_GUI_STATUS_BAR)
+        data.append(UInt8(sections.count))
+        for s in sections { data.append(s) }
+
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == data.count)
+
+        guard case .guiStatusBar(_, _, let cursorLine, let cursorCol, let lineCount, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = cmd else {
+            Issue.record("Expected .guiStatusBar"); return
+        }
+
+        #expect(cursorLine == 10)
+        #expect(cursorCol == 5)
+        #expect(lineCount == 200)
+    }
+
+    @Test("Missing sections use defaults")
+    func missingSectionsDefaults() throws {
+        // Only send identity section, all others missing
+        var identity = Data()
+        identity.append(0); identity.append(2); identity.append(0) // mode=visual
+
+        var data = Data()
+        data.append(OP_GUI_STATUS_BAR)
+        data.append(1) // only 1 section
+        data.append(contentsOf: buildSection(SECTION_IDENTITY, identity))
+
+        let (cmd, _) = try decodeCommand(data: data, offset: 0)
+
+        guard case .guiStatusBar(let contentKind, let mode, let cursorLine, _, _, _, _, let gitBranch, _, _, let errorCount, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = cmd else {
+            Issue.record("Expected .guiStatusBar"); return
+        }
+
+        #expect(contentKind == 0)
+        #expect(mode == 2) // visual
+        #expect(cursorLine == 0) // default
+        #expect(gitBranch == "") // default
+        #expect(errorCount == 0) // default
     }
 }
 

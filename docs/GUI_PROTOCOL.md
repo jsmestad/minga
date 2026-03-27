@@ -176,34 +176,30 @@ When nil (no file):
 
 Segments are the path components relative to the project root. For example, `lib/minga/editor.ex` produces `["lib", "minga", "editor.ex"]`.
 
-### 0x76 — gui_status_bar
+### 0x76 — gui_status_bar (sectioned format)
 
-Status bar data for the focused window. Both variants use the same unified wire format so the status bar layout stays stable across mode switches. The first byte after the opcode is `content_kind`:
-- `0` — buffer window
-- `1` — agent chat window (background buffer fields populate the standard slots; agent-specific fields are appended at the end)
+Status bar data for the focused window. Uses a sectioned wire format where each field group is wrapped in a self-describing section. Unknown sections are skipped by the frontend, enabling forward/backward compatibility when new fields are added.
 
-**Unified layout (both variants):**
+**Envelope:**
 ```
-opcode(1) + content_kind(1) + mode(1) + cursor_line(4) + cursor_col(4) + line_count(4)
-+ flags(1) + lsp_status(1) + git_branch_len(1) + git_branch(git_branch_len)
-+ message_len(2) + message(message_len) + filetype_len(1) + filetype(filetype_len)
-+ error_count(2) + warning_count(2)
--- Extended fields --
-+ info_count(2) + hint_count(2)
-+ macro_recording(1) + parser_status(1) + agent_status(1)
-+ git_added(2) + git_modified(2) + git_deleted(2)
-+ icon_len(1) + icon(icon_len) + icon_color_r(1) + icon_color_g(1) + icon_color_b(1)
-+ filename_len(2) + filename(filename_len)
-+ diagnostic_hint_len(2) + diagnostic_hint(diagnostic_hint_len)
+opcode(1) + section_count(1) + [section_id(1) + section_len(2) + payload(section_len)]*
 ```
 
-**Agent trailing fields (content_kind == 1 only, appended after diagnostic_hint):**
-```
-+ model_name_len(1) + model_name(model_name_len)
-+ message_count(4) + session_status(1)
-```
+**Sections:**
 
-When `content_kind == 1`, the standard slots (cursor_line, git_branch, diagnostics, etc.) are populated from the background buffer so the status bar can show them alongside agent-specific info.
+| ID | Name | Payload |
+|----|------|---------|
+| 0x01 | Identity | content_kind(1) + mode(1) + flags(1) |
+| 0x02 | Cursor | cursor_line(4) + cursor_col(4) + line_count(4) |
+| 0x03 | Diagnostics | error_count(2) + warning_count(2) + info_count(2) + hint_count(2) + diag_hint_len(2) + diag_hint |
+| 0x04 | Language | lsp_status(1) + parser_status(1) |
+| 0x05 | Git | branch_len(1) + branch + added(2) + modified(2) + deleted(2) |
+| 0x06 | File | icon_len(1) + icon + icon_r(1) + icon_g(1) + icon_b(1) + filename_len(2) + filename + filetype_len(1) + filetype |
+| 0x07 | Message | msg_len(2) + msg |
+| 0x08 | Recording | macro_recording(1) |
+| 0x09 | Agent | buffer variant: agent_status(1). Agent variant: model_name_len(1) + model_name + message_count(4) + session_status(1) + agent_status(1) |
+
+`content_kind`: 0 = buffer window, 1 = agent chat window. When `content_kind == 1`, the standard sections (cursor, git, diagnostics, etc.) contain background buffer data and section 0x09 includes agent-specific fields.
 
 `cursor_line` and `cursor_col` are 1-indexed on the wire.
 

@@ -20,6 +20,7 @@ defmodule Mix.Tasks.Swift.Harness do
   def run(_args) do
     sources = [
       "macos/Sources/Protocol/ProtocolConstants.swift",
+      "macos/Sources/Protocol/ProtocolTypes.swift",
       "macos/Sources/Protocol/ProtocolDecoder.swift",
       "macos/Sources/Renderer/WindowContent.swift",
       "macos/Sources/Protocol/BoardTypes.swift",
