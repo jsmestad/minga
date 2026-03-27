@@ -63,9 +63,8 @@ defmodule Minga.Mode.Normal do
 
   import Bitwise
 
-  alias Minga.Keymap.Active, as: KeymapActive
+  alias Minga.Keymap
   alias Minga.Keymap.Bindings
-  alias Minga.Keymap.Defaults
   alias Minga.Mode
   alias Minga.Mode.State, as: ModeState
   alias Minga.UI.WhichKey
@@ -832,16 +831,16 @@ defmodule Minga.Mode.Normal do
 
   @spec get_leader_trie() :: Bindings.node_t()
   defp get_leader_trie do
-    KeymapActive.leader_trie()
+    Keymap.leader_trie()
   catch
-    :exit, _ -> Defaults.leader_trie()
+    :exit, _ -> Keymap.default_leader_trie()
   end
 
   @spec get_normal_bindings() :: %{Bindings.key() => {atom(), String.t()}}
   defp get_normal_bindings do
-    KeymapActive.normal_bindings()
+    Keymap.normal_bindings()
   catch
-    :exit, _ -> Defaults.normal_bindings()
+    :exit, _ -> Keymap.default_normal_bindings()
   end
 
   @prefix_trie Minga.Keymap.NormalPrefixes.trie()

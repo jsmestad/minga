@@ -14,7 +14,7 @@ defmodule Minga.Editor.MinibufferData do
   alias Minga.Command
   alias Minga.Command.Registry, as: CommandRegistry
   alias Minga.Editor.State, as: EditorState
-  alias Minga.Keymap.Defaults
+  alias Minga.Keymap
   alias Minga.UI.WhichKey
 
   # ── Types ──────────────────────────────────────────────────────────────────
@@ -355,7 +355,7 @@ defmodule Minga.Editor.MinibufferData do
   # Uses WhichKey.format_key for proper display (SPC, C-s, etc.).
   @spec build_keybind_map() :: %{atom() => String.t()}
   defp build_keybind_map do
-    Defaults.all_bindings()
+    Keymap.default_bindings()
     |> Enum.into(%{}, fn {keys, command, _desc} ->
       key_str = Enum.map_join(keys, " ", &WhichKey.format_key/1)
       {command, key_str}

@@ -15,7 +15,7 @@ defmodule Minga.Input.FileTreeHandler do
   alias Minga.Editor.Layout
   alias Minga.Editor.State, as: EditorState
   alias Minga.Input
-  alias Minga.Keymap.Scope
+  alias Minga.Keymap
   alias Minga.Project.FileTree
   @impl true
   @spec handle_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
@@ -95,7 +95,7 @@ defmodule Minga.Input.FileTreeHandler do
       vim_state =
         if Minga.Editing.active_model(state) == Minga.Editing.Model.CUA, do: :cua, else: :normal
 
-      case Scope.resolve_key(:file_tree, vim_state, key) do
+      case Keymap.resolve_scoped_key(:file_tree, vim_state, key) do
         {:command, command} ->
           {:handled, Commands.execute(state, command)}
 

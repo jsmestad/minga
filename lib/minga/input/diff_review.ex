@@ -14,7 +14,7 @@ defmodule Minga.Input.DiffReview do
   alias Minga.Editor.Commands
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.AgentAccess
-  alias Minga.Keymap.Scope
+  alias Minga.Keymap
 
   @impl true
   @spec handle_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
@@ -47,7 +47,7 @@ defmodule Minga.Input.DiffReview do
   defp dispatch_diff_key(state, cp) do
     key = {cp, 0}
 
-    case Scope.resolve_key(:agent, :normal, key) do
+    case Keymap.resolve_scoped_key(:agent, :normal, key) do
       {:command, command} -> {:handled, Commands.execute(state, command)}
       {:prefix, _node} -> {:handled, state}
       :not_found -> {:handled, state}

@@ -52,7 +52,7 @@ defmodule Minga.Mode.Visual do
 
   import Bitwise
 
-  alias Minga.Keymap.Active, as: KeymapActive
+  alias Minga.Keymap
   alias Minga.Mode
   alias Minga.Mode.VisualState
 
@@ -379,7 +379,7 @@ defmodule Minga.Mode.Visual do
 
   @spec check_user_override(atom(), atom() | nil, Mode.key()) :: {:command, atom()} | :not_found
   defp check_user_override(mode, filetype, key) do
-    KeymapActive.resolve_mode_binding(mode, filetype, key)
+    Keymap.resolve_binding(mode, filetype, key)
   catch
     :exit, _ -> :not_found
   end

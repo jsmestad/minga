@@ -23,7 +23,7 @@ defmodule Minga.Input.CUA.SpaceLeader do
   alias Minga.Buffer
   alias Minga.Editor.Commands
   alias Minga.Editor.State, as: EditorState
-  alias Minga.Keymap.Active, as: KeymapActive
+  alias Minga.Keymap
 
   @doc """
   Handles a `space_leader_chord` gui_action.
@@ -151,7 +151,7 @@ defmodule Minga.Input.CUA.SpaceLeader do
 
   @spec leader_trie() :: Minga.Keymap.Bindings.node_t()
   defp leader_trie do
-    KeymapActive.leader_trie()
+    Keymap.leader_trie()
   catch
     :exit, _ -> Minga.Keymap.Bindings.new()
   end

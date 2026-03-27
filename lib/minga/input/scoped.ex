@@ -31,6 +31,7 @@ defmodule Minga.Input.Scoped do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.AgentAccess
   alias Minga.Input.AgentPanel
+  alias Minga.Keymap
 
   alias Minga.Keymap.Scope
 
@@ -55,7 +56,7 @@ defmodule Minga.Input.Scoped do
     if Minga.Editing.active_model(state) == Minga.Editing.Model.CUA do
       key = {cp, mods}
 
-      case Scope.resolve_key(:editor, :cua, key) do
+      case Keymap.resolve_scoped_key(:editor, :cua, key) do
         {:command, command} ->
           {:handled, Commands.execute(state, command)}
 
@@ -194,7 +195,7 @@ defmodule Minga.Input.Scoped do
         # Continuing a prefix sequence stored as a trie node
         state = AgentAccess.update_agent_ui(state, &UIState.clear_prefix/1)
 
-        case Scope.resolve_key_in_node(prefix_node, key) do
+        case Keymap.Bindings.lookup(prefix_node, key) do
           {:command, command} ->
             {:handled, Commands.execute(state, command)}
 
@@ -224,7 +225,7 @@ defmodule Minga.Input.Scoped do
         ) ::
           {:handled, EditorState.t()} | {:passthrough, EditorState.t()}
   defp resolve_scope_key(state, scope_name, vim_state, key, cp, mods) do
-    case Scope.resolve_key(scope_name, vim_state, key) do
+    case Keymap.resolve_scoped_key(scope_name, vim_state, key) do
       {:command, command} ->
         {:handled, Commands.execute(state, command)}
 

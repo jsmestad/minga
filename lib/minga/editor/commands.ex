@@ -44,7 +44,7 @@ defmodule Minga.Editor.Commands do
   alias Minga.Editor.MinibufferData
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Window
-  alias Minga.Keymap.Active, as: KeymapActive
+  alias Minga.Keymap
   alias Minga.Keymap.Bindings
   alias Minga.Mode
   alias Minga.Parser.Manager, as: ParserManager
@@ -573,7 +573,7 @@ defmodule Minga.Editor.Commands do
 
   @spec filetype_trie_for(atom()) :: Bindings.node_t()
   defp filetype_trie_for(filetype) do
-    KeymapActive.filetype_trie(filetype)
+    Keymap.filetype_trie(filetype)
   catch
     :exit, _ -> Bindings.new()
   end

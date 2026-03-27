@@ -30,7 +30,7 @@ defmodule Minga.Input.CUA.TUISpaceLeader do
   alias Minga.Buffer
   alias Minga.Editor.Commands
   alias Minga.Editor.State, as: EditorState
-  alias Minga.Keymap.Active, as: KeymapActive
+  alias Minga.Keymap
   alias Minga.Keymap.Bindings
 
   @space 32
@@ -186,7 +186,7 @@ defmodule Minga.Input.CUA.TUISpaceLeader do
 
   @spec leader_trie() :: Bindings.node_t()
   defp leader_trie do
-    KeymapActive.leader_trie()
+    Keymap.leader_trie()
   catch
     :exit, _ -> Bindings.new()
   end

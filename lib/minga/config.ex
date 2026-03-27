@@ -40,7 +40,7 @@ defmodule Minga.Config do
   alias Minga.Config.Loader
   alias Minga.Config.Options
   alias Minga.Extension.Registry, as: ExtRegistry
-  alias Minga.Keymap.Active, as: KeymapActive
+  alias Minga.Keymap
   alias Minga.UI.Popup.Registry, as: PopupRegistry
   alias Minga.UI.Popup.Rule, as: PopupRule
 
@@ -262,9 +262,9 @@ defmodule Minga.Config do
 
     result =
       if filetype do
-        KeymapActive.bind(mode, key_str, command_name, description, filetype: filetype)
+        Keymap.bind(mode, key_str, command_name, description, filetype: filetype)
       else
-        KeymapActive.bind(mode, key_str, command_name, description)
+        Keymap.bind(mode, key_str, command_name, description)
       end
 
     case result do
@@ -290,7 +290,7 @@ defmodule Minga.Config do
   def bind(mode, key_str, command_name, description, opts)
       when is_atom(mode) and is_binary(key_str) and is_atom(command_name) and
              is_binary(description) and is_list(opts) do
-    case KeymapActive.bind(mode, key_str, command_name, description, opts) do
+    case Keymap.bind(mode, key_str, command_name, description, opts) do
       :ok -> :ok
       {:error, reason} -> Minga.Log.warning(:config, "bind failed: #{reason}")
     end

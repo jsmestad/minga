@@ -31,7 +31,7 @@ defmodule Minga.Config.Loader do
   alias Minga.Config.Options
   alias Minga.Extension.Registry, as: ExtRegistry
   alias Minga.Extension.Supervisor, as: ExtSupervisor
-  alias Minga.Keymap.Active, as: KeymapActive
+  alias Minga.Keymap
   alias Minga.UI.Popup.Registry, as: PopupRegistry
   alias Minga.UI.Theme.Loader, as: ThemeLoader
 
@@ -127,7 +127,7 @@ defmodule Minga.Config.Loader do
     Options.reset()
     Hooks.reset()
     Advice.reset()
-    KeymapActive.reset()
+    Keymap.reset()
     CommandRegistry.reset()
     ExtRegistry.reset()
     PopupRegistry.clear()

@@ -1,90 +1,102 @@
 defmodule Minga.Keymap do
   @moduledoc """
-  Mode-specific keymap management for Minga.
+  Keymap domain facade.
 
-  Provides a trie-based keymap for each editor mode. Default keybindings
-  are defined as data and loaded on demand via `keymap_for/1`.
+  Manages key bindings across editor modes, scopes, and filetypes.
+  Internally backed by a trie data structure (`Keymap.Bindings`) for
+  prefix-matching key sequences, and an ETS-backed GenServer
+  (`Keymap.Active`) for live binding state that merges defaults with
+  user overrides.
 
-  ## Modifier constants (bitmask)
-
-  * `0x00` — no modifier
-  * `0x01` — Shift
-  * `0x02` — Ctrl
-  * `0x04` — Alt
-  * `0x08` — Super
+  External callers use this facade for binding lookups, key resolution,
+  and runtime rebinding. The `Keymap.Bindings` trie type appears in
+  specs across mode dispatch and input handling code.
   """
 
+  alias Minga.Keymap.Active
   alias Minga.Keymap.Bindings
+  alias Minga.Keymap.Defaults
+  alias Minga.Keymap.Scope
 
   @typedoc "Supported editor modes."
   @type mode :: :normal | :insert | :visual | :command
 
-  # Modifier bitmasks (mirrors Port.Protocol constants)
-  @none 0x00
-  @ctrl 0x02
+  # ── Binding lookup ─────────────────────────────────────────────────
 
-  # ── Default keybinding data ─────────────────────────────────────────────────
-  #
-  # Format: {[{codepoint, modifiers}], command_atom, description_string}
-  # Defined as module attributes so they are pure data with no runtime cost.
+  @doc "Returns the merged leader trie (defaults + user overrides)."
+  @spec leader_trie() :: Bindings.node_t()
+  defdelegate leader_trie, to: Active
 
-  @normal_bindings [
-    # Movement
-    {[{?h, @none}], :move_left, "Move cursor left"},
-    {[{?j, @none}], :move_down, "Move cursor down"},
-    {[{?k, @none}], :move_up, "Move cursor up"},
-    {[{?l, @none}], :move_right, "Move cursor right"},
-    # Deletion
-    {[{?x, @none}], :delete_at, "Delete character at cursor"},
-    {[{?X, @none}], :delete_before, "Delete character before cursor"},
-    # Save / quit
-    {[{?Z, @none}, {?Z, @none}], :save, "Save file (ZZ)"},
-    {[{?Z, @none}, {?Q, @none}], :force_quit, "Force quit (ZQ)"}
-  ]
+  @doc "Returns the merged normal-mode single-key bindings."
+  @spec normal_bindings() :: %{Bindings.key() => {atom(), String.t()}}
+  defdelegate normal_bindings, to: Active
 
-  @insert_bindings [
-    # Ctrl+S → save
-    {[{?s, @ctrl}], :save, "Save file"},
-    # Ctrl+Q → quit
-    {[{?q, @ctrl}], :quit, "Quit editor"}
-  ]
+  @doc "Returns the mode-specific trie for the given mode."
+  @spec mode_trie(atom()) :: Bindings.node_t()
+  defdelegate mode_trie(mode), to: Active
 
-  @visual_bindings [
-    # Movement (same as normal)
-    {[{?h, @none}], :move_left, "Move cursor left"},
-    {[{?j, @none}], :move_down, "Move cursor down"},
-    {[{?k, @none}], :move_up, "Move cursor up"},
-    {[{?l, @none}], :move_right, "Move cursor right"},
-    # Operators on selection
-    {[{?d, @none}], :delete_selection, "Delete selection"},
-    {[{?y, @none}], :yank_selection, "Yank selection"},
-    {[{?c, @none}], :change_selection, "Change selection"}
-  ]
+  @doc "Returns the filetype-scoped trie (SPC m bindings)."
+  @spec filetype_trie(atom()) :: Bindings.node_t()
+  defdelegate filetype_trie(filetype), to: Active
 
-  @command_bindings []
-
-  # ── Public API ───────────────────────────────────────────────────────────────
+  @doc "Returns the scope-specific trie for a given scope and vim state."
+  @spec scope_trie(Scope.scope_name(), Scope.vim_state()) :: Bindings.node_t()
+  defdelegate scope_trie(scope, vim_state), to: Active
 
   @doc """
-  Returns the default keymap trie for the given editor mode.
+  Resolves a single key press against a mode's merged bindings.
 
-  Each call builds a fresh trie from the static binding data. The result
-  can be cached by the caller if needed.
+  Checks mode-specific trie first, then normal overrides. Returns
+  `{:command, name, desc}`, `{:prefix, node}`, or `:unbound`.
   """
-  @spec keymap_for(mode()) :: Bindings.node_t()
-  def keymap_for(mode) when mode in [:normal, :insert, :visual, :command] do
-    bindings_for(mode)
-    |> Enum.reduce(Bindings.new(), fn {keys, command, description}, trie ->
-      Bindings.bind(trie, keys, command, description)
-    end)
-  end
+  @spec resolve_binding(atom(), atom() | nil, Bindings.key()) ::
+          {:command, atom(), String.t()} | {:prefix, Bindings.node_t()} | :unbound
+  defdelegate resolve_binding(mode, filetype, key), to: Active, as: :resolve_mode_binding
 
-  # ── Private helpers ──────────────────────────────────────────────────────────
+  # ── Key resolution (scoped dispatch) ───────────────────────────────
 
-  @spec bindings_for(mode()) ::
-          [{[Bindings.key()], atom(), String.t()}]
-  defp bindings_for(:normal), do: @normal_bindings
-  defp bindings_for(:insert), do: @insert_bindings
-  defp bindings_for(:visual), do: @visual_bindings
-  defp bindings_for(:command), do: @command_bindings
+  @doc """
+  Resolves a key press within a scope (e.g., `:editor`, `:agent`, `:file_tree`).
+
+  Checks scope-specific bindings first, then falls through to the
+  scope's fallback chain. Returns `{:command, name, desc}`,
+  `{:prefix, node}`, or `:unbound`.
+  """
+  @spec resolve_scoped_key(Scope.scope_name(), Scope.vim_state(), Bindings.key(), keyword()) ::
+          Scope.resolve_result()
+  defdelegate resolve_scoped_key(scope, vim_state, key, context \\ []), to: Scope, as: :resolve_key
+
+  # ── Runtime rebinding ──────────────────────────────────────────────
+
+  @doc "Binds a key sequence to a command in the given mode."
+  @spec bind(atom() | {atom(), atom()}, String.t(), atom(), String.t()) ::
+          :ok | {:error, String.t()}
+  defdelegate bind(mode, key_str, command, description), to: Active
+
+  @doc "Binds a key sequence with options (e.g., `filetype:`)."
+  @spec bind(atom() | {atom(), atom()}, String.t(), atom(), String.t(), keyword()) ::
+          :ok | {:error, String.t()}
+  defdelegate bind(mode, key_str, command, description, opts), to: Active
+
+  @doc "Removes a key binding from a mode."
+  @spec unbind(atom(), String.t()) :: :ok | {:error, String.t()}
+  defdelegate unbind(mode, key_str), to: Active
+
+  @doc "Resets all bindings to defaults (discards user overrides)."
+  @spec reset() :: :ok
+  defdelegate reset, to: Active
+
+  # ── Default bindings ───────────────────────────────────────────────
+
+  @doc "Returns the default leader trie (before user overrides)."
+  @spec default_leader_trie() :: Bindings.node_t()
+  defdelegate default_leader_trie, to: Defaults, as: :leader_trie
+
+  @doc "Returns all default bindings as a flat list."
+  @spec default_bindings() :: [{atom(), String.t(), atom(), String.t()}]
+  defdelegate default_bindings, to: Defaults, as: :all_bindings
+
+  @doc "Returns the default normal-mode single-key bindings."
+  @spec default_normal_bindings() :: %{Bindings.key() => {atom(), String.t()}}
+  defdelegate default_normal_bindings, to: Defaults, as: :normal_bindings
 end

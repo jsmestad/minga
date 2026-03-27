@@ -16,7 +16,7 @@ defmodule Minga.Input.GitStatus do
   alias Minga.Git.Repo
   alias Minga.Input
   alias Minga.Input.GitStatus.TuiState
-  alias Minga.Keymap.Scope
+  alias Minga.Keymap
 
   @impl true
   @spec handle_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
@@ -30,7 +30,7 @@ defmodule Minga.Input.GitStatus do
 
       binding_state = Minga.Editing.binding_state(state)
 
-      case Scope.resolve_key(:git_status, binding_state, key) do
+      case Keymap.resolve_scoped_key(:git_status, binding_state, key) do
         {:command, cmd} ->
           {:handled, execute_command(state, cmd)}
 

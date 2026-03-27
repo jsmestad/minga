@@ -16,7 +16,7 @@ defmodule Minga.Mode.Insert do
 
   @behaviour Minga.Mode
 
-  alias Minga.Keymap.Active, as: KeymapActive
+  alias Minga.Keymap
   alias Minga.Mode
 
   # Special codepoints
@@ -33,7 +33,7 @@ defmodule Minga.Mode.Insert do
   @doc """
   Handles a key event in Insert mode.
 
-  User-defined insert-mode bindings (via `Keymap.Active.mode_trie(:insert)`)
+  User-defined insert-mode bindings (via `Keymap.mode_trie(:insert)`)
   are checked first. If a match is found, the bound command is executed.
   Otherwise, the default insert-mode handling applies.
 
@@ -106,7 +106,7 @@ defmodule Minga.Mode.Insert do
 
   @spec check_user_override(atom(), atom() | nil, Mode.key()) :: {:command, atom()} | :not_found
   defp check_user_override(mode, filetype, key) do
-    KeymapActive.resolve_mode_binding(mode, filetype, key)
+    Keymap.resolve_binding(mode, filetype, key)
   catch
     :exit, _ -> :not_found
   end
