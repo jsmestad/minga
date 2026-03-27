@@ -8,7 +8,6 @@ defmodule Minga.UI.Highlight.Grammar do
   in `~/.config/minga/queries/{language}/highlights.scm`.
   """
 
-
   alias Minga.Language
 
   @typedoc "A tree-sitter language name."

@@ -97,7 +97,9 @@ defmodule Minga.Config do
   Sets an extension option, returning `{:ok, value}` or `{:error, message}`.
   """
   @spec set_extension_option!(atom(), atom(), term()) :: {:ok, term()} | {:error, String.t()}
-  defdelegate set_extension_option!(ext_name, opt_name, value), to: Options, as: :set_extension_option
+  defdelegate set_extension_option!(ext_name, opt_name, value),
+    to: Options,
+    as: :set_extension_option
 
   @doc """
   Sets an extension option override for a specific filetype.

@@ -36,7 +36,6 @@ defmodule Minga.Log do
 
   require Logger
 
-
   @type subsystem :: :render | :lsp | :agent | :editor | :config | :port
 
   @type level :: :debug | :info | :warning | :error

@@ -8,7 +8,6 @@ defmodule Minga.Agent.DiffSnapshot do
   diff review is dismissed or the session ends.
   """
 
-
   @typedoc "A diff snapshot, either memory-backed or file-backed."
   @type t ::
           {:memory, String.t()}

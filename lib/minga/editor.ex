@@ -23,7 +23,6 @@ defmodule Minga.Editor do
   alias Minga.Diagnostics.Decorations, as: DiagDecorations
   alias Minga.Session
 
-
   alias Minga.Editor.AgentLifecycle
   alias Minga.Editor.BottomPanel
 

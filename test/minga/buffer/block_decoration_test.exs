@@ -114,7 +114,9 @@ defmodule Minga.Buffer.BlockDecorationTest do
         anchor_line: 0,
         placement: :above,
         height: :dynamic,
-        render: fn _w -> [[{"line1", Minga.Core.Face.new()}], [{"line2", Minga.Core.Face.new()}]] end
+        render: fn _w ->
+          [[{"line1", Minga.Core.Face.new()}], [{"line2", Minga.Core.Face.new()}]]
+        end
       }
 
       assert BlockDecoration.resolve_height(block, 80) == 2
@@ -135,7 +137,9 @@ defmodule Minga.Buffer.BlockDecorationTest do
 
   describe "normalize_render_result/1" do
     test "single-line segments wrapped in list" do
-      result = BlockDecoration.normalize_render_result([{"hello", Minga.Core.Face.new(bold: true)}])
+      result =
+        BlockDecoration.normalize_render_result([{"hello", Minga.Core.Face.new(bold: true)}])
+
       assert result == [[{"hello", Minga.Core.Face.new(bold: true)}]]
     end
 

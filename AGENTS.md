@@ -10,6 +10,13 @@ Native GUI experiences lead the design. The macOS frontend (Swift/Metal) is the 
 
 When building new features, design for the GUI rendering path first, then ensure the TUI has a reasonable equivalent.
 
+### Frontend-specific guides
+
+Each frontend has its own AGENTS.md with architecture, coding standards, and conventions specific to that platform. **Read the relevant frontend guide before working on frontend code.**
+
+- **macOS (Swift/Metal):** `macos/AGENTS.md` — CoreText rendering pipeline, State+View pattern, Metal shader conventions, protocol sync rules
+- **TUI + Parser (Zig/libvaxis):** `zig/AGENTS.md` — two-binary architecture, Surface abstraction, arena-per-frame memory, tree-sitter grammar registration
+
 ## Tech Stack
 
 - **Elixir 1.19** / OTP 28 — editor core (buffers, modes, commands, orchestration)
@@ -160,113 +167,104 @@ This applies to internal infrastructure like data structures, coordinate mapping
 
 The test: if cutting the corner means the next team building on this code has to work around the limitation or refactor the foundation, it's not a valid shortcut. Build the foundation once, correctly.
 
-## Domain Architecture (Bounded Contexts)
+## Code Organization
 
-Minga is organized into bounded contexts. Each domain is a directory under `lib/minga/` with a facade module at `lib/minga/{domain}.ex` that is the **only valid entry point** from outside the domain. This is the same pattern HeadsDown uses (e.g., `HeadsDown.Accounts` delegates to `Registration`, `UserIdentities`, etc. and no outside module ever calls those internal modules directly).
+Minga's code is organized by **dependency direction** and **state ownership**, not by domain-driven design bounded contexts. The goal is a stable core that doesn't change when we experiment with different UX patterns (traditional editor, Board, future shells). These rules are designed to be mechanically verifiable: you can check them by looking at imports and struct updates without understanding architectural philosophy.
 
-### The rule
+### Rule 1: Dependencies flow one way
 
-If you're in `Minga.Editor` and you need buffer content, you call `Minga.Buffer.content(buf)`. You never call `Minga.Buffer.Server.content(buf)` directly. The facade curates the public API; internal modules are implementation details.
+Code is organized in three layers. Dependencies flow downward only. A module in Layer 0 never imports from Layer 1 or 2. A module in Layer 1 never imports from Layer 2. If you find yourself adding an upward dependency, you're putting logic in the wrong layer.
+
+**Layer 0 — Pure foundations (no dependencies on other Minga modules):**
+`Buffer.Document`, `Editing.Motion`, `Editing.TextObject`, `Editing.Operator`, `Editing.Search`, `Editing.AutoPair`, `Core.IntervalTree`, `Core.Face`, `Core.Decorations`, `Core.Diff`, `Core.Unicode`, `Editing.Text.Readable` (protocol), `Mode.*` (FSM modules)
+
+These are pure functions and data structures. They take values in and return values out. They don't call GenServers, don't subscribe to events, don't log. They're the stable core that everything else builds on.
+
+**Layer 1 — Stateful services (depend on Layer 0 only):**
+`Buffer.Server`, `Config.*`, `Events`, `Language.*`, `LSP.*`, `Git.*`, `Project.*`, `Agent.*` (session management, tool execution), `Keymap.*`, `Parser.Manager`, `Frontend.Manager`, `Frontend.Protocol`
+
+These are GenServers, registries, and OTP processes. They manage state and coordinate work. They use Layer 0 data structures and algorithms but don't know anything about how the editor presents itself.
+
+**Layer 2 — Orchestration and presentation (depends on everything):**
+`Editor.*`, `Shell.*`, `Input.*`, `Editor.Commands.*`, `Editor.RenderPipeline.*`, `Workspace.State`
+
+This is where editing state, input dispatch, layout, rendering, and chrome live. It consumes everything from Layers 0 and 1. This layer changes the most because it's where UX experiments happen.
+
+**Cross-cutting modules** (used by all layers): `Minga.Events`, `Minga.Log`, `Minga.Telemetry`, `Minga.Clipboard`. These are infrastructure, not domain logic.
+
+**How to check:** look at the `alias`/`import` lines in a module. If a Layer 0 module aliases something from `Minga.Editor.*`, that's a violation. Fix it by moving the logic to the right layer or passing the needed data as a function argument.
+
+### Rule 2: State ownership (one writer per struct)
+
+Each struct has **one module** that's allowed to construct and update it. Other modules may read fields but never do `%{thing | field: value}` on a struct they don't own. This is the single most important rule for preventing spaghetti code.
 
 ```elixir
-# Good: go through the domain facade
-content = Minga.Buffer.content(buf)
-Minga.Editing.word_forward(readable, cursor)
-{icon, color} = Minga.UI.icon_and_color(filetype)
+# Good: VimState owns its own transitions
+new_editing = Minga.Editor.VimState.transition(state.workspace.editing, :insert, mode_state)
 
-# Bad: reaching past the facade into internal modules
-content = Minga.Buffer.Server.content(buf)
-Minga.Motion.word_forward(readable, cursor)
-Minga.Devicon.icon_and_color(filetype)
+# Bad: random module reaches in and mutates VimState
+new_editing = %{state.workspace.editing | mode: :insert, mode_state: mode_state}
 ```
 
-### What the facade contains
+If you need to change a struct's field from outside its owning module, add a function to the owning module and call that instead. If no suitable function exists, add one. The function name should describe the domain operation, not the field being changed: `VimState.transition(vim, :insert, ms)` not `VimState.set_mode(vim, :insert)`.
 
-A facade exposes **domain concepts**, not internal implementation details. The public API should be stable even when the internal modules, data structures, or protocols change. Think of it as the domain's language: callers say what they want, the domain decides how.
+**The test:** grep for `%{thing |` and `%Module{thing |` across the codebase. Every instance should be in the struct's owning module. Violations mean someone is scattering mutation logic that should be centralized.
 
-**Good facade functions** describe domain operations:
-- `Minga.Frontend.set_title(port, title)` — caller says "change the title"
-- `Minga.Frontend.configure_font(port, family, size, ligatures, weight, fallbacks)` — caller says "use this font"
-- `Minga.Frontend.clipboard_write(port, text)` — caller says "put this on the clipboard"
-- `Minga.Buffer.content(buf)` — caller says "give me the content"
+**No struct may have more than ~15 fields.** If a struct is growing beyond that, it's accumulating unrelated concerns. Group related fields into sub-structs with their own modules and mutation functions. `Editor.State` is the biggest offender here and is being decomposed into `Workspace.State`, `Shell.Traditional.State`, and focused sub-structs (`State.Buffers`, `State.Windows`, `State.Search`, etc.).
 
-**Bad facade functions** mirror internal APIs:
-- `Minga.Frontend.encode_set_title(title)` — leaks that there's a binary protocol
-- `Minga.Frontend.send_commands(port, [Protocol.encode_set_font(...)])` — caller builds protocol messages
-- `Minga.Buffer.genserver_call(buf, :get_content)` — leaks the GenServer implementation
+### Rule 3: Extract, don't branch
 
-The facade may contain `defdelegate` for simple pass-throughs where the internal function name already IS the domain concept (e.g., `defdelegate content(buf), to: Buffer.Server`). But prefer short wrapper functions that compose internal calls, normalize arguments, or hide encoding details. If the facade is nothing but `defdelegate`, it's probably just mirroring an internal API instead of defining a domain API.
+When you need different behavior based on a condition, don't add an `if` or `case` at the call site. Extract the varying behavior into a function on the module that owns the condition. The caller should not know *why* the behavior differs.
 
 ```elixir
-# Example: Frontend domain facade
-defmodule Minga.Frontend do
-  # Domain operation: "set the window title"
-  # Hides: binary protocol encoding, command batching
-  def set_title(port, title) do
-    send_commands(port, [Protocol.encode_set_title(title)])
-  end
-
-  # Domain operation: "configure the editor font"
-  # Hides: two separate protocol messages, conditional fallback
-  def configure_font(port, family, size, ligatures, weight, fallbacks \\ []) do
-    cmds = [Protocol.encode_set_font(family, size, ligatures, weight)]
-    cmds = if fallbacks != [], do: cmds ++ [Protocol.encode_set_font_fallback(fallbacks)], else: cmds
-    send_commands(port, cmds)
-  end
-
-  # Simple delegation is fine when the name IS the domain concept
-  defdelegate content(buf), to: Minga.Buffer.Server
+# Bad: scattered conditional in 12 input handlers
+if state.editing_model == :cua do
+  handle_cua(key, state)
+else
+  handle_vim(key, state)
 end
+
+# Good: one dispatch point, callers don't know about editing models
+Minga.Editing.active_model(state).handle_key(key, model_state)
 ```
 
-### What crosses boundaries
+The smell: if the same condition appears in 3+ files, it should be a function or behaviour dispatch in one place. Every new `if gui?` or `if vim?` or `if agent_active?` scattered across the codebase is a future maintenance burden.
 
-- **Function calls** go through the facade. Always. No exceptions.
-- **Struct types, protocols, and behaviours** follow the same rule. If a struct or protocol is needed across multiple domains, it should be promoted to a **core entity** at the top level (alongside `Minga.Events`, `Minga.Log`, etc.), not given a special exemption. Reaching past a facade to grab an internal type is still a boundary violation.
+### Rule 4: Module grouping (directories, not facades)
 
-### Domains
+Directories under `lib/minga/` group related modules. Some have a top-level entry-point module (e.g., `Minga.Buffer` delegates to `Buffer.Server`), others don't (e.g., `core/` is just a collection of pure data structures). Both patterns are fine. The entry-point module is a convenience for callers, not an access-control gate.
 
-| Domain | Facade | Responsibility |
-|--------|--------|----------------|
-| `buffer` | `Minga.Buffer` | Document storage, gap buffer, undo/redo, decorations |
-| `editing` | `Minga.Editing` | Vim motions, operators, text objects, search, auto-pair, completion, formatting |
-| `ui` | `Minga.UI` | Themes, faces, highlighting, icons, fonts, picker, popups, which-key |
-| `project` | `Minga.Project` | Project root, file finding, project search, file tree, test detection |
-| `config` | `Minga.Config` | Options, hooks, advice, per-filetype overrides |
-| `frontend` | `Minga.Frontend` | Frontend communication, capabilities, port management |
-| `keymap` | `Minga.Keymap` | Key bindings, mode tries, scope management |
-| `lsp` | `Minga.LSP` | Language server client, document sync, workspace edits |
-| `command` | `Minga.Command` | Command struct, registry, provider behaviour |
-| `git` | `Minga.Git` | Git operations, diff, blame, status |
-| `agent` | `Minga.Agent` | AI agent sessions, tools, providers |
-| `mode` | `Minga.Mode` | Vim modal dispatch (normal, insert, visual, etc.) |
-| `input` | `Minga.Input` | Input routing, focus stack, handler behaviour |
-| `language` | `Minga.Language` | Language definitions, filetype detection, tree-sitter |
-| `session` | `Minga.Session` | Session persistence, swap files, event recording |
-| `editor` | `Minga.Editor` | Orchestration GenServer (consumes all other domains) |
+The practical rule: **prefer the entry-point module when one exists**, because it gives you a stable API if the internals are reorganized. But reaching into `Buffer.Document` directly from `Editing.Motion` is fine when you need the data structure, not the GenServer. The Layer rules (Rule 1) are what actually prevent bad coupling, not module access.
 
-**Cross-cutting modules** that stay at the top level (used by every domain, no single owner): `Minga.Events`, `Minga.Log`, `Minga.Telemetry`, `Minga.Clipboard`.
+| Directory | Entry point | What lives here |
+|-----------|------------|-----------------|
+| `buffer/` | `Minga.Buffer` | Document storage, gap buffer, undo/redo, edit deltas |
+| `editing/` | `Minga.Editing` | Motions, operators, text objects, search, auto-pair, completion, formatting |
+| `core/` | (none) | Pure data structures: IntervalTree, Decorations, Face, Diff, Unicode |
+| `editor/` | `Minga.Editor` | Editor GenServer, commands, rendering, layout, viewport, windows |
+| `shell/` | `Minga.Shell` | Shell behaviour + implementations (Traditional, Board) |
+| `input/` | `Minga.Input` | Input handler behaviour, focus stack, all handler modules |
+| `mode/` | `Minga.Mode` | Vim modal FSM behaviour + mode implementations |
+| `frontend/` | `Minga.Frontend` | Frontend communication, protocol encoding, capabilities |
+| `ui/` | `Minga.UI` | Themes, faces, highlighting, icons, fonts, picker, popups, which-key |
+| `config/` | `Minga.Config` | Options, hooks, advice, per-filetype overrides |
+| `keymap/` | `Minga.Keymap` | Key bindings, mode tries, scope management |
+| `lsp/` | `Minga.LSP` | Language server client, document sync, workspace edits |
+| `command/` | `Minga.Command` | Command struct, registry, provider behaviour |
+| `git/` | `Minga.Git` | Git operations, diff, blame, status |
+| `agent/` | `Minga.Agent` | AI agent sessions, tools, providers |
+| `language/` | `Minga.Language` | Language definitions, filetype detection, tree-sitter |
+| `session/` | `Minga.Session` | Session persistence, swap files, event recording |
+| `project/` | `Minga.Project` | Project root, file finding, project search, file tree, test detection |
 
-> **Migration note:** Several domains don't have proper facades yet and many modules are still at the wrong level (e.g., `Minga.Motion` should be `Minga.Editing.Motion` behind the `Minga.Editing` facade). The domain table above is the target state. New code should follow these boundaries; existing violations will be migrated domain by domain.
+### Shell architecture
 
-### Enforcement
+The `Minga.Shell` behaviour is the plug-in point for different UX models. Each shell owns its own layout, chrome, input routing, and rendering. The workspace (core editing state) is shared; the shell decides how to present it.
 
-`Minga.Credo.DomainBoundaryCheck` (in `credo/checks/domain_boundary_check.exs`) enforces domain boundaries at lint time for all 14 facade'd domains. Any `alias`, `import`, `require`, or `use` of an internal module from outside the domain is flagged as a violation. The only reference that passes cleanly is the facade module itself.
+- `Minga.Shell.Traditional` — tab-based editor with file tree, modeline, picker, agent panel
+- `Minga.Shell.Board` — agent supervisor card view with zoom-in editing
 
-There is no allowlist. Existing violations show up in `mix credo` output as visible debt. New violations are immediately obvious as new entries.
-
-Run `mix credo` to check. The check runs at `:high` priority with `exit_status: 0` (warns without blocking CI).
-
-### Adding a new domain
-
-If a group of modules forms a natural bounded context (tight internal coupling, clear external API surface, 3+ modules that mostly reference each other):
-
-1. Create the directory `lib/minga/{domain}/` and move internal modules into it
-2. Create the facade at `lib/minga/{domain}.ex` with `defdelegate` + short glue logic
-3. Update all external callers to use the facade
-4. Add the domain to `@domains` in `Minga.Credo.DomainBoundaryCheck`
-5. Add the domain to the table above in AGENTS.md
-6. Verify with `mix credo` that no external code reaches past the facade
+Shells should be as independent as possible. The ideal: a new shell can be built by implementing the Shell behaviour and using only Layer 0 + Layer 1 modules, without importing anything from another shell's implementation. We're not there yet (both shells currently depend on Editor internals), but that's the direction.
 
 ## Coding Standards
 
@@ -319,23 +317,9 @@ Define `@type` aliases at the top of any module where a type appears in 3+ specs
 
 Name the alias after the domain concept (`@type user :: User.t()`, not `@type u :: User.t()`). This is a readability choice, not a correctness choice; both compile identically.
 
-### Module Aliases (convention, not linted)
-
-Prefer fully qualified module names by default. Aliases add indirection that hurts LLM comprehension: when reading a snippet or diff, the alias block at the top of the file may not be visible, and `Document.insert_text(...)` is ambiguous where `Minga.Buffer.Document.insert_text(...)` is not. Fully qualified names also make grep/search reliable across the codebase.
-
-**Alias when the module path is 4+ segments deep** (e.g., `Minga.Agent.Tools.FileOperations`). At that depth, the fully qualified name eats enough line width to obscure the actual logic. Aliasing to `FileOperations` is a reasonable tradeoff.
-
-**For 2-3 segments** (`Minga.Motion`, `Minga.Buffer.Document`), use the fully qualified name. It's short enough to carry everywhere without readability cost.
-
-**Exception:** if a 3-segment module appears 8+ times in one file and the repetition genuinely hurts human readability, aliasing is fine. But that frequency is also a signal the function may be doing too much or the modules are too tightly coupled.
-
-The `Credo.Check.Design.AliasUsage` lint is disabled. This is a judgment call, not an automated rule.
-
 ### Module Decomposition
 
-A facade module should be mostly `defdelegate`, `@spec`, and `@doc`, with short glue logic where it helps (see "Domain Architecture" above for examples). If removing all `defdelegate` lines and all typespecs leaves more than ~100 lines of actual logic, the module is doing too much. Extract to an internal module and delegate.
-
-**Domain facades follow this rule.** `Minga.Buffer` delegates to `Buffer.Server`. `Minga.Editing` delegates to `Editing.Motion`, `Editing.Operator`, etc. The facade is the public contract; internal modules do the work. When adding a new public function to a domain, add it to the facade, not directly to the internal module's public API. Other domains should never need to know which internal module implements the function.
+Entry-point modules (like `Minga.Buffer`, `Minga.Editing`) should be mostly `defdelegate`, `@spec`, and `@doc`, with short glue logic where needed. If removing all `defdelegate` lines and all typespecs leaves more than ~100 lines of actual logic, the module is doing too much. Extract to an internal module and delegate.
 
 **GenServer modules specifically** should contain OTP callbacks (`init`, `handle_call`, `handle_cast`, `handle_info`, `terminate`) and route to handler modules for the actual logic. Each `handle_info` or `handle_call` clause should be 1-3 lines that extract data and call a handler function in a dedicated module. The GenServer is the process wrapper; the handler module is where the logic lives.
 
@@ -508,11 +492,12 @@ Tests must not spawn OS processes during concurrent (async) execution. The BEAM'
 
 ### Zig
 
+See `zig/AGENTS.md` for the full Zig developer guide. Quick reference:
+
+- `zig fmt` for all formatting, `mix zig.lint` must pass
 - Doc comments (`///`) on all public functions
-- Explicit error handling — no `catch unreachable` outside tests
-- `std.log` for debug output (stderr), never stdout (that's the Port channel)
-- `zig fmt` for all formatting (no manual style debates)
-- `mix zig.lint` must pass (`zig fmt --check` + `zig build test`)
+- Explicit error handling, no `catch unreachable` outside tests
+- `std.log` for debug output, never write to stdout (that's the Port channel)
 
 ### Logging and the `*Messages*` Buffer
 
@@ -684,11 +669,11 @@ If a doc reads like a dry API reference with no narrative, it needs a rewrite. T
 
 ## Adding New Features
 
-### New feature in an existing domain
-1. Implement the logic in an internal module under `lib/minga/{domain}/`
-2. Add the public API to the domain facade at `lib/minga/{domain}.ex` (as `defdelegate` or short glue function)
-3. Callers outside the domain use only the facade
-4. Run `mix credo` to verify no boundary violations
+### New feature in an existing module group
+1. Implement the logic in a module under the appropriate `lib/minga/{group}/` directory
+2. If the group has an entry-point module, add a `defdelegate` or short wrapper there
+3. Verify the new module sits in the correct layer (Rule 1): pure logic in Layer 0, stateful services in Layer 1, presentation in Layer 2
+4. Verify struct mutations follow Rule 2: updates go through the owning module
 
 ### Dual-surface rule for status/chrome features
 Any new modeline data (diagnostic counts, indent info, selection size, etc.) must appear in **both** the cell-painted TUI modeline (`Chrome.TUI`) and the GUI status bar (`ProtocolGUI.encode_gui_status_bar/1`). The GUI status bar opcode (0x76) uses structured data with explicit fields, so adding new data means extending the wire format in `docs/PROTOCOL.md` and updating `gui_protocol_test.exs`. Design the GUI status bar fields first, then map them into TUI modeline cells. Forgetting to update one surface is a common mistake.
@@ -700,21 +685,21 @@ Any new modeline data (diagnostic counts, indent info, selection size, etc.) mus
 
 ### New motion
 1. Add the implementation in the appropriate `Minga.Editing.Motion.*` sub-module (e.g., `Motion.Word`, `Motion.Line`)
-2. Add a `defdelegate` in `Minga.Editing.Motion` (the internal facade)
-3. Add a `defdelegate` in `Minga.Editing` (the domain facade) so external callers use `Minga.Editing.my_motion/2`
+2. Add a `defdelegate` in `Minga.Editing.Motion` (entry point for motions)
+3. Add a `defdelegate` in `Minga.Editing` (entry point for the editing group) so callers can use `Minga.Editing.my_motion/2`
 4. Register in `Minga.Mode.Normal` and `Minga.Mode.OperatorPending`
 5. Test against known buffer content
 
 ### New text object
 1. Add the implementation in `Minga.Editing.TextObject` with `@spec`
-2. Add a `defdelegate` in `Minga.Editing` (the domain facade) so external callers use `Minga.Editing.my_text_object/2`
+2. Add a `defdelegate` in `Minga.Editing` (entry point) so callers can use `Minga.Editing.my_text_object/2`
 3. Register in `Minga.Mode.OperatorPending`
 4. Test with edge cases (cursor outside delimiters, nested, empty)
 
 ### New or modified agent tool
 Agent tools live in `lib/minga/agent/tools/`. When adding or modifying a tool that reads or writes file content:
 
-1. **Prefer `Minga.Buffer` over filesystem I/O.** If a buffer is open for the file, route through the `Minga.Buffer` facade (not `Buffer.Server` directly). Use `Minga.Buffer.content/1` instead of `File.read/1`, and `Minga.Buffer.apply_edit/6` instead of `File.write/2`. This gives you undo integration, tree-sitter sync, instant visibility, and no file watcher noise. Fall back to filesystem I/O only when no buffer exists for the file. See [BUFFER-AWARE-AGENTS.md](docs/BUFFER-AWARE-AGENTS.md) for the full rationale.
+1. **Prefer `Minga.Buffer` over filesystem I/O.** If a buffer is open for the file, route through `Minga.Buffer`. Use `Minga.Buffer.content/1` instead of `File.read/1`, and `Minga.Buffer.apply_edit/6` instead of `File.write/2`. This gives you undo integration, tree-sitter sync, instant visibility, and no file watcher noise. Fall back to filesystem I/O only when no buffer exists for the file. See [BUFFER-AWARE-AGENTS.md](docs/BUFFER-AWARE-AGENTS.md) for the full rationale.
 2. **Batch edits into a single call** rather than making N separate calls. One call = one undo entry, one version bump.
 3. **Test the tool function** in `test/minga/agent/tools/`.
 
@@ -728,14 +713,5 @@ Agent tools live in `lib/minga/agent/tools/`. When adding or modifying a tool th
 5. Test encode/decode round-trip on all sides. GUI chrome opcodes (0x70-0x78) only need GUI frontend support; the TUI ignores them.
 
 ### New tree-sitter grammar
-Adding syntax highlighting for a new language touches four places:
 
-1. **Vendor the grammar** — clone or copy the tree-sitter grammar's `src/` directory into `zig/vendor/grammars/{lang}/src/`. You need `parser.c` and optionally `scanner.c`. Add a `VERSION` file with the grammar version.
-2. **Add the highlight query** — place a `highlights.scm` file at `zig/src/queries/{lang}/highlights.scm`. You can start with the query from the grammar's repo and trim capture names to the set Minga supports (keyword, string, comment, function, type, number, operator, punctuation, variable, constant, etc.).
-3. **Register in the Zig build** — add a `Grammar` entry to the `grammars` array in `zig/build.zig`. Set `has_scanner: true` if the grammar has a `scanner.c`.
-4. **Register in the Zig highlighter** — in `zig/src/highlighter.zig`, add an `extern fn tree_sitter_{lang}()` declaration and an entry in the `languages` array with the grammar function and `@embedFile` for the query.
-5. **Register the filetype** (if new) — add extension/filename mappings in `lib/minga/filetype.ex` so the BEAM detects the filetype and sends the correct language name to Zig.
-
-After rebuilding (`zig build` or `mix compile`), the grammar is compiled into the binary and available immediately. No runtime loading needed.
-
-Users can override highlight queries without recompiling by placing `.scm` files at `~/.config/minga/queries/{lang}/highlights.scm`.
+See `zig/AGENTS.md` § "Adding a New Tree-Sitter Grammar" for the full 5-step process (vendor grammar, add query, register in build.zig, register in highlighter.zig, register filetype in Elixir).

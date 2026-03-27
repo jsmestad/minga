@@ -50,7 +50,8 @@ defmodule Minga.Core.Decorations.BlockDecoration do
   - `[{text, style}]` — single-line block
   - `[[{text, style}]]` — multi-line block (list of lines, each a list of segments)
   """
-  @type render_result :: [{String.t(), Minga.Core.Face.t()}] | [[{String.t(), Minga.Core.Face.t()}]]
+  @type render_result ::
+          [{String.t(), Minga.Core.Face.t()}] | [[{String.t(), Minga.Core.Face.t()}]]
 
   @typedoc "Click callback: receives row offset within block and column."
   @type click_fn :: (row :: non_neg_integer(), col :: non_neg_integer() -> :ok) | nil

@@ -18,7 +18,6 @@ defmodule Minga.Agent.Config do
   4. If internal-only, the struct default is sufficient
   """
 
-
   @default_model "anthropic:claude-sonnet-4"
 
   defstruct [

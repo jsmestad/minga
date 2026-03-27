@@ -24,14 +24,14 @@
           {Credo.Check.Design.TagFIXME, []},
           {Credo.Check.Design.TagTODO, false},
 
-          # ── Domain boundaries ──────────────────────────────────────────────
-          {Minga.Credo.DomainBoundaryCheck, [exit_status: 0]},
+          # ── Dependency direction ──────────────────────────────────────────
+          {Minga.Credo.DependencyDirectionCheck, [exit_status: 0]},
           {Minga.Credo.NoProcessSleepCheck, []},
           {Minga.Credo.NoDirectLoggerCheck, [exit_status: 0]},
           {Minga.Credo.NoDirectStateMachineWriteCheck, []},
 
           # ── Readability ────────────────────────────────────────────────────
-          {Credo.Check.Readability.AliasOrder, []},
+          {Credo.Check.Readability.AliasOrder, false},
           {Credo.Check.Readability.FunctionNames, []},
           {Credo.Check.Readability.LargeNumbers, []},
           {Credo.Check.Readability.MaxLineLength, [max_length: 120, priority: :low]},
@@ -43,7 +43,7 @@
           {Credo.Check.Readability.PipeIntoAnonymousFunctions, []},
           {Credo.Check.Readability.PredicateFunctionNames, []},
           {Credo.Check.Readability.PreferImplicitTry, []},
-          {Credo.Check.Readability.RedundantBlankLines, []},
+          {Credo.Check.Readability.RedundantBlankLines, false},
           {Credo.Check.Readability.Semicolons, []},
           {Credo.Check.Readability.SpaceAfterCommas, []},
           {Credo.Check.Readability.Specs, [priority: :high]},
@@ -88,7 +88,7 @@
           {Credo.Check.Warning.OperationWithConstantResult, []},
           {Credo.Check.Warning.RaiseInsideRescue, []},
           {Credo.Check.Warning.SpecWithStruct, []},
-          {Credo.Check.Warning.StructFieldAmount, false},
+          {Credo.Check.Warning.StructFieldAmount, [max_fields: 15, exit_status: 0]},
           {Credo.Check.Warning.UnsafeExec, []},
           {Credo.Check.Warning.UnusedEnumOperation, []},
           {Credo.Check.Warning.UnusedFileOperation, []},

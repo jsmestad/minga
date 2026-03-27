@@ -64,7 +64,9 @@ defmodule Minga.Keymap do
   """
   @spec resolve_scoped_key(Scope.scope_name(), Scope.vim_state(), Bindings.key(), keyword()) ::
           Scope.resolve_result()
-  defdelegate resolve_scoped_key(scope, vim_state, key, context \\ []), to: Scope, as: :resolve_key
+  defdelegate resolve_scoped_key(scope, vim_state, key, context \\ []),
+    to: Scope,
+    as: :resolve_key
 
   # ── Runtime rebinding ──────────────────────────────────────────────
 

@@ -10,7 +10,6 @@ defmodule Minga.UI.Devicon do
   displays a filename alongside a visual indicator.
   """
 
-
   alias Minga.Language
 
   @type filetype :: atom()

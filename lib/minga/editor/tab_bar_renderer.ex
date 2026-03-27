@@ -409,7 +409,9 @@ defmodule Minga.Editor.TabBarRenderer do
 
   @spec tab_icon(Tab.t()) :: String.t()
   defp tab_icon(%Tab{kind: :agent}), do: Devicon.icon(:agent)
-  defp tab_icon(%Tab{kind: :file, label: label}), do: Devicon.icon(Language.detect_filetype(label))
+
+  defp tab_icon(%Tab{kind: :file, label: label}),
+    do: Devicon.icon(Language.detect_filetype(label))
 
   @spec tab_label(Tab.t()) :: String.t()
   defp tab_label(%Tab{label: ""}), do: "[No Name]"

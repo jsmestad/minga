@@ -16,7 +16,6 @@ defmodule Minga.Agent.Notifier do
       set :agent_notify_on, [:approval, :complete, :error]  # which events trigger
   """
 
-
   @typedoc "Notification trigger types."
   @type trigger :: :approval | :complete | :error
 

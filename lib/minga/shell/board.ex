@@ -179,14 +179,19 @@ defmodule Minga.Shell.Board do
   defp zoom_status_icon(:errored), do: "✗"
   defp zoom_status_icon(_), do: "○"
 
-  @spec zoom_status_face(Minga.Shell.Board.Card.status(), Minga.UI.Theme.t()) :: Minga.Core.Face.t()
-  defp zoom_status_face(:working, theme), do: Minga.Core.Face.new(fg: 0x98C379, bg: theme.editor.bg)
+  @spec zoom_status_face(Minga.Shell.Board.Card.status(), Minga.UI.Theme.t()) ::
+          Minga.Core.Face.t()
+  defp zoom_status_face(:working, theme),
+    do: Minga.Core.Face.new(fg: 0x98C379, bg: theme.editor.bg)
 
   defp zoom_status_face(:needs_you, theme),
     do: Minga.Core.Face.new(fg: 0xE5C07B, bg: theme.editor.bg)
 
   defp zoom_status_face(:done, theme), do: Minga.Core.Face.new(fg: 0x61AFEF, bg: theme.editor.bg)
-  defp zoom_status_face(:errored, theme), do: Minga.Core.Face.new(fg: 0xE06C75, bg: theme.editor.bg)
+
+  defp zoom_status_face(:errored, theme),
+    do: Minga.Core.Face.new(fg: 0xE06C75, bg: theme.editor.bg)
+
   defp zoom_status_face(_, theme), do: Minga.Core.Face.new(fg: 0x5C6370, bg: theme.editor.bg)
 
   @impl true
