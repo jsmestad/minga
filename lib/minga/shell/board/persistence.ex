@@ -35,6 +35,7 @@ defmodule Minga.Shell.Board.Persistence do
       "version" => 1,
       "next_id" => state.next_id,
       "focused_card" => state.focused_card,
+      "card_order" => state.card_order,
       "cards" => cards
     }
 
@@ -104,8 +105,17 @@ defmodule Minga.Shell.Board.Persistence do
         Map.put(acc, id, card)
       end)
 
+    # Restore card_order if present, otherwise fall back to ID order for backward compatibility
+    card_order =
+      case Map.get(data, "card_order") do
+        nil -> Enum.sort(Map.keys(cards))
+        order when is_list(order) -> order
+        _ -> Enum.sort(Map.keys(cards))
+      end
+
     %State{
       cards: cards,
+      card_order: card_order,
       next_id: next_id,
       focused_card: if(Map.has_key?(cards, focused), do: focused, else: nil)
     }

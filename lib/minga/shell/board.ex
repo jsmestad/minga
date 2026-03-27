@@ -103,6 +103,12 @@ defmodule Minga.Shell.Board do
     {shell_state, workspace}
   end
 
+  def handle_gui_action(shell_state, workspace, {:board_reorder, card_id, new_index}) do
+    shell_state = BoardState.reorder_card(shell_state, card_id, new_index)
+    Minga.Shell.Board.Persistence.save(shell_state)
+    {shell_state, workspace}
+  end
+
   def handle_gui_action(shell_state, workspace, _action) do
     {shell_state, workspace}
   end
