@@ -1,13 +1,13 @@
 defmodule Minga.Project.FileTree.BufferSync do
   @moduledoc """
-  Syncs the FileTree data structure into a BufferServer.
+  Syncs the FileTree data structure into a Buffer.
 
   Converts visible tree entries to text lines and writes them into
   the buffer. The buffer cursor line maps 1:1 to the tree cursor index.
   """
 
-  alias Minga.Buffer.Server, as: BufferServer
-  alias Minga.Language.Filetype
+  alias Minga.Buffer
+  alias Minga.Language
   alias Minga.Project.FileTree
   alias Minga.UI.Devicon
 
@@ -29,7 +29,7 @@ defmodule Minga.Project.FileTree.BufferSync do
   @spec start_buffer(FileTree.t()) :: pid() | nil
   def start_buffer(tree) do
     pid =
-      case BufferServer.start_link(
+      case Buffer.start_link(
              content: "",
              buffer_type: :nofile,
              buffer_name: "*File Tree*",
@@ -52,9 +52,9 @@ defmodule Minga.Project.FileTree.BufferSync do
   def sync(pid, tree) do
     entries = FileTree.visible_entries(tree)
     text = entries_to_text(entries, tree.expanded)
-    BufferServer.replace_content_force(pid, text)
+    Buffer.replace_content_force(pid, text)
     # Move buffer cursor to match tree cursor
-    BufferServer.move_to(pid, {tree.cursor, 0})
+    Buffer.move_to(pid, {tree.cursor, 0})
     :ok
   end
 
@@ -76,7 +76,7 @@ defmodule Minga.Project.FileTree.BufferSync do
       case {entry.dir?, is_expanded} do
         {true, true} -> @folder_open
         {true, false} -> @folder_closed
-        {false, _} -> Devicon.icon(Filetype.detect(entry.path))
+        {false, _} -> Devicon.icon(Language.detect_filetype(entry.path))
       end
 
     name = if entry.dir?, do: entry.name <> "/", else: entry.name

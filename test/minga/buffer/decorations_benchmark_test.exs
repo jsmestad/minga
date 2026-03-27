@@ -1,4 +1,4 @@
-defmodule Minga.Buffer.DecorationsBenchmarkTest do
+defmodule Minga.Core.DecorationsBenchmarkTest do
   @moduledoc """
   Structural tests verifying decoration batch performance characteristics.
 
@@ -18,7 +18,7 @@ defmodule Minga.Buffer.DecorationsBenchmarkTest do
   """
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Decorations
+  alias Minga.Core.Decorations
 
   describe "batch deferred execution" do
     test "batch commits with single version bump regardless of operation count" do
@@ -32,7 +32,7 @@ defmodule Minga.Buffer.DecorationsBenchmarkTest do
           Enum.reduce(0..499, d, fn i, acc ->
             {_id, acc} =
               Decorations.add_highlight(acc, {i, 0}, {i, 20},
-                style: Minga.UI.Face.new(bg: 0xECBE7B),
+                style: Minga.Core.Face.new(bg: 0xECBE7B),
                 group: :diagnostics
               )
 
@@ -50,7 +50,7 @@ defmodule Minga.Buffer.DecorationsBenchmarkTest do
 
       {_id, decs} =
         Decorations.add_highlight(decs, {0, 0}, {0, 10},
-          style: Minga.UI.Face.new(bg: 0xFF0000),
+          style: Minga.Core.Face.new(bg: 0xFF0000),
           group: :test
         )
 
@@ -58,7 +58,7 @@ defmodule Minga.Buffer.DecorationsBenchmarkTest do
 
       {_id, decs} =
         Decorations.add_highlight(decs, {1, 0}, {1, 10},
-          style: Minga.UI.Face.new(bg: 0xFF0000),
+          style: Minga.Core.Face.new(bg: 0xFF0000),
           group: :test
         )
 
@@ -102,7 +102,7 @@ defmodule Minga.Buffer.DecorationsBenchmarkTest do
           Enum.reduce(0..4_999, d, fn i, acc ->
             {_id, acc} =
               Decorations.add_highlight(acc, {i, 0}, {i, 20},
-                style: Minga.UI.Face.new(bg: 0xECBE7B),
+                style: Minga.Core.Face.new(bg: 0xECBE7B),
                 group: :diagnostics
               )
 
@@ -121,7 +121,7 @@ defmodule Minga.Buffer.DecorationsBenchmarkTest do
           Enum.reduce(0..99, d, fn i, acc ->
             {_id, acc} =
               Decorations.add_highlight(acc, {0, i}, {0, i + 20},
-                style: Minga.UI.Face.new(bg: 0xECBE7B),
+                style: Minga.Core.Face.new(bg: 0xECBE7B),
                 group: :test
               )
 
@@ -145,7 +145,7 @@ defmodule Minga.Buffer.DecorationsBenchmarkTest do
           Enum.reduce(0..999, d, fn i, acc ->
             {_id, acc} =
               Decorations.add_highlight(acc, {i, 0}, {i, 20},
-                style: Minga.UI.Face.new(bg: 0xECBE7B),
+                style: Minga.Core.Face.new(bg: 0xECBE7B),
                 group: :diagnostics
               )
 
@@ -170,7 +170,7 @@ defmodule Minga.Buffer.DecorationsBenchmarkTest do
           Enum.reduce(0..9_999, d, fn i, acc ->
             {_id, acc} =
               Decorations.add_highlight(acc, {i, 0}, {i, 20},
-                style: Minga.UI.Face.new(bg: 0xECBE7B),
+                style: Minga.Core.Face.new(bg: 0xECBE7B),
                 group: :diagnostics
               )
 
@@ -191,7 +191,7 @@ defmodule Minga.Buffer.DecorationsBenchmarkTest do
           Enum.reduce(0..9, d, fn i, acc ->
             {_id, acc} =
               Decorations.add_highlight(acc, {i, 0}, {i, 10},
-                style: Minga.UI.Face.new(bg: 0xECBE7B),
+                style: Minga.Core.Face.new(bg: 0xECBE7B),
                 group: :test
               )
 
@@ -237,7 +237,7 @@ defmodule Minga.Buffer.DecorationsBenchmarkTest do
       merged =
         for {line, i} <- Enum.with_index(lines, 5_000) do
           ranges = Decorations.highlights_for_line(decs, i)
-          Decorations.merge_highlights([{line, Minga.UI.Face.new()}], ranges, i)
+          Decorations.merge_highlights([{line, Minga.Core.Face.new()}], ranges, i)
         end
 
       # Should produce 30 lines of merged results
@@ -277,7 +277,7 @@ defmodule Minga.Buffer.DecorationsBenchmarkTest do
       Enum.reduce(0..(count - 1), d, fn i, acc ->
         {_id, acc} =
           Decorations.add_highlight(acc, {i, 0}, {i, 20},
-            style: Minga.UI.Face.new(bg: 0xECBE7B),
+            style: Minga.Core.Face.new(bg: 0xECBE7B),
             group: :diagnostics
           )
 
@@ -291,7 +291,7 @@ defmodule Minga.Buffer.DecorationsBenchmarkTest do
     Enum.reduce(0..(count - 1), Decorations.new(), fn i, decs ->
       {_id, decs} =
         Decorations.add_highlight(decs, {i, 0}, {i, 20},
-          style: Minga.UI.Face.new(bg: 0x3E4452),
+          style: Minga.Core.Face.new(bg: 0x3E4452),
           priority: rem(i, 5),
           group: :diagnostics
         )

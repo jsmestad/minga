@@ -12,15 +12,14 @@ defmodule Minga.Editor.StatusBar.Data do
   """
 
   alias Minga.Agent.Session
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Diagnostics
   alias Minga.Editor.Editing
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.Window.Content
-  alias Minga.Git.Buffer, as: GitBuffer
-  alias Minga.Git.Tracker, as: GitTracker
+  alias Minga.Git
   alias Minga.LSP.SyncServer
   alias Minga.UI.Theme
 
@@ -116,10 +115,10 @@ defmodule Minga.Editor.StatusBar.Data do
   @spec build_buffer_data(EditorState.t()) :: buffer_data()
   defp build_buffer_data(state) do
     buf = state.workspace.buffers.active
-    {line, col} = if buf, do: BufferServer.cursor(buf), else: {0, 0}
-    line_count = if buf, do: BufferServer.line_count(buf), else: 1
+    {line, col} = if buf, do: Buffer.cursor(buf), else: {0, 0}
+    line_count = if buf, do: Buffer.line_count(buf), else: 1
     file_name = if buf, do: buf_display_name(buf), else: "[no file]"
-    dirty = buf != nil and BufferServer.dirty?(buf)
+    dirty = buf != nil and Buffer.dirty?(buf)
     filetype = if buf, do: buffer_filetype(buf), else: :text
 
     {git_branch, git_diff_summary} = git_modeline_data(buf)
@@ -157,14 +156,14 @@ defmodule Minga.Editor.StatusBar.Data do
 
   @spec buf_display_name(pid()) :: String.t()
   defp buf_display_name(buf) do
-    BufferServer.display_name(buf)
+    Buffer.display_name(buf)
   catch
     :exit, _ -> "[no file]"
   end
 
   @spec buffer_filetype(pid()) :: atom()
   defp buffer_filetype(buf) do
-    BufferServer.filetype(buf) || :text
+    Buffer.filetype(buf) || :text
   catch
     :exit, _ -> :text
   end
@@ -191,10 +190,10 @@ defmodule Minga.Editor.StatusBar.Data do
 
     # Pull background buffer context so the status bar stays stable
     buf = state.workspace.buffers.active
-    {line, col} = if buf, do: BufferServer.cursor(buf), else: {0, 0}
-    line_count = if buf, do: BufferServer.line_count(buf), else: 1
+    {line, col} = if buf, do: Buffer.cursor(buf), else: {0, 0}
+    line_count = if buf, do: Buffer.line_count(buf), else: 1
     file_name = if buf, do: buf_display_name(buf), else: "[no file]"
-    dirty = buf != nil and BufferServer.dirty?(buf)
+    dirty = buf != nil and Buffer.dirty?(buf)
     filetype = if buf, do: buffer_filetype(buf), else: :text
 
     {git_branch, git_diff_summary} = git_modeline_data(buf)
@@ -236,13 +235,13 @@ defmodule Minga.Editor.StatusBar.Data do
   def git_modeline_data(nil), do: {nil, nil}
 
   def git_modeline_data(buf) when is_pid(buf) do
-    case GitTracker.lookup(buf) do
+    case Git.tracking_pid(buf) do
       nil ->
         {nil, nil}
 
       git_pid ->
         try do
-          GitBuffer.modeline_info(git_pid)
+          Git.modeline_info(git_pid)
         catch
           :exit, _ -> {nil, nil}
         end
@@ -257,7 +256,7 @@ defmodule Minga.Editor.StatusBar.Data do
   def diagnostic_modeline_data(buf) when is_pid(buf) do
     path =
       try do
-        BufferServer.file_path(buf)
+        Buffer.file_path(buf)
       catch
         :exit, _ -> nil
       end
@@ -284,7 +283,7 @@ defmodule Minga.Editor.StatusBar.Data do
   def cursor_line_diagnostic_hint(buf, line) when is_pid(buf) do
     file_path =
       try do
-        BufferServer.file_path(buf)
+        Buffer.file_path(buf)
       catch
         :exit, _ -> nil
       end

@@ -6,16 +6,14 @@ defmodule Minga.Editor.Commands.Git do
 
   @behaviour Minga.Command.Provider
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
+  alias Minga.Core.Diff
+  alias Minga.Core.DiffView
   alias Minga.Editor.Commands
   alias Minga.Editor.PickerUI
   alias Minga.Editor.State, as: EditorState
   alias Minga.Git
-  alias Minga.Git.Buffer, as: GitBuffer
-  alias Minga.Git.Diff
-  alias Minga.Git.DiffView
-  alias Minga.Git.Repo
-  alias Minga.Git.Tracker, as: GitTracker
+  alias Minga.Language
   alias Minga.UI.Picker.GitChangedSource
 
   @type state :: EditorState.t()
@@ -83,8 +81,8 @@ defmodule Minga.Editor.Commands.Git do
 
   def execute(state, :next_git_hunk) do
     with_git_buffer(state, fn git_pid, buf ->
-      {cursor_line, _col} = BufferServer.cursor(buf)
-      hunks = GitBuffer.hunks(git_pid)
+      {cursor_line, _col} = Buffer.cursor(buf)
+      hunks = Git.hunks(git_pid)
 
       case Diff.next_hunk_line(hunks, cursor_line) do
         nil -> EditorState.set_status(state, "No next hunk")
@@ -95,8 +93,8 @@ defmodule Minga.Editor.Commands.Git do
 
   def execute(state, :prev_git_hunk) do
     with_git_buffer(state, fn git_pid, buf ->
-      {cursor_line, _col} = BufferServer.cursor(buf)
-      hunks = GitBuffer.hunks(git_pid)
+      {cursor_line, _col} = Buffer.cursor(buf)
+      hunks = Git.hunks(git_pid)
 
       case Diff.prev_hunk_line(hunks, cursor_line) do
         nil -> EditorState.set_status(state, "No previous hunk")
@@ -109,9 +107,9 @@ defmodule Minga.Editor.Commands.Git do
 
   def execute(state, :git_stage_hunk) do
     with_git_buffer(state, fn git_pid, buf ->
-      {cursor_line, _col} = BufferServer.cursor(buf)
+      {cursor_line, _col} = Buffer.cursor(buf)
 
-      case GitBuffer.hunk_at(git_pid, cursor_line) do
+      case Git.hunk_at(git_pid, cursor_line) do
         nil -> EditorState.set_status(state, "No hunk at cursor")
         hunk -> do_stage_hunk(state, git_pid, buf, hunk)
       end
@@ -122,20 +120,20 @@ defmodule Minga.Editor.Commands.Git do
 
   def execute(state, :git_revert_hunk) do
     with_git_buffer(state, fn git_pid, buf ->
-      {cursor_line, _col} = BufferServer.cursor(buf)
+      {cursor_line, _col} = Buffer.cursor(buf)
 
-      case GitBuffer.hunk_at(git_pid, cursor_line) do
+      case Git.hunk_at(git_pid, cursor_line) do
         nil ->
           EditorState.set_status(state, "No hunk at cursor")
 
         hunk ->
-          {content, _cursor} = BufferServer.content_and_cursor(buf)
+          {content, _cursor} = Buffer.content_and_cursor(buf)
           current_lines = String.split(content, "\n")
-          reverted_lines = Diff.revert_hunk(current_lines, hunk)
+          reverted_lines = Git.revert_hunk(current_lines, hunk)
           reverted_content = Enum.join(reverted_lines, "\n")
 
-          BufferServer.replace_content(buf, reverted_content)
-          GitBuffer.update(git_pid, reverted_content)
+          Buffer.replace_content(buf, reverted_content)
+          Git.Buffer.update(git_pid, reverted_content)
           EditorState.set_status(state, "Hunk reverted")
       end
     end)
@@ -145,9 +143,9 @@ defmodule Minga.Editor.Commands.Git do
 
   def execute(state, :git_preview_hunk) do
     with_git_buffer(state, fn git_pid, buf ->
-      {cursor_line, _col} = BufferServer.cursor(buf)
+      {cursor_line, _col} = Buffer.cursor(buf)
 
-      case GitBuffer.hunk_at(git_pid, cursor_line) do
+      case Git.hunk_at(git_pid, cursor_line) do
         nil -> EditorState.set_status(state, "No hunk at cursor")
         hunk -> EditorState.set_status(state, format_hunk_preview(hunk))
       end
@@ -158,9 +156,9 @@ defmodule Minga.Editor.Commands.Git do
 
   def execute(state, :git_blame_line) do
     with_git_buffer(state, fn git_pid, buf ->
-      {cursor_line, _col} = BufferServer.cursor(buf)
-      git_root = GitBuffer.git_root(git_pid)
-      rel_path = GitBuffer.relative_path(git_pid)
+      {cursor_line, _col} = Buffer.cursor(buf)
+      git_root = Git.Buffer.git_root(git_pid)
+      rel_path = Git.Buffer.relative_path(git_pid)
 
       case Git.blame_line(git_root, rel_path, cursor_line) do
         {:ok, blame_text} -> EditorState.set_status(state, blame_text)
@@ -178,9 +176,9 @@ defmodule Minga.Editor.Commands.Git do
 
   @spec open_diff_view(state(), pid(), pid()) :: state()
   defp open_diff_view(state, git_pid, buf) do
-    git_root = GitBuffer.git_root(git_pid)
-    rel_path = GitBuffer.relative_path(git_pid)
-    {current_content, _cursor} = BufferServer.content_and_cursor(buf)
+    git_root = Git.Buffer.git_root(git_pid)
+    rel_path = Git.Buffer.relative_path(git_pid)
+    {current_content, _cursor} = Buffer.content_and_cursor(buf)
 
     base_content =
       case Git.show_head(git_root, rel_path) do
@@ -190,9 +188,9 @@ defmodule Minga.Editor.Commands.Git do
 
     diff_result = DiffView.build(base_content, current_content)
     filename = Path.basename(rel_path)
-    filetype = Minga.Language.Filetype.detect(filename)
+    filetype = Language.detect_filetype(filename)
 
-    case BufferServer.start_link(
+    case Buffer.start_link(
            content: diff_result.text,
            buffer_type: :nofile,
            read_only: true,
@@ -297,9 +295,9 @@ defmodule Minga.Editor.Commands.Git do
 
   @spec refresh_repo(String.t()) :: :ok
   defp refresh_repo(git_root) do
-    case Repo.lookup(git_root) do
+    case Git.lookup_repo(git_root) do
       nil -> :ok
-      pid -> Repo.refresh(pid)
+      pid -> Git.refresh_repo(pid)
     end
   end
 
@@ -313,13 +311,13 @@ defmodule Minga.Editor.Commands.Git do
 
   @spec open_git_status_for_root(state(), String.t()) :: state()
   defp open_git_status_for_root(state, git_root) do
-    case Repo.lookup(git_root) do
+    case Git.lookup_repo(git_root) do
       nil ->
         EditorState.set_status(state, "Git.Repo not available")
 
       repo_pid ->
-        entries = Repo.status(repo_pid)
-        summary = Repo.summary(repo_pid)
+        entries = Git.repo_status(repo_pid)
+        summary = Git.repo_summary(repo_pid)
 
         panel_data = %{
           repo_state: :normal,
@@ -356,9 +354,9 @@ defmodule Minga.Editor.Commands.Git do
 
   @spec do_stage_hunk(state(), pid(), pid(), Diff.hunk()) :: state()
   defp do_stage_hunk(state, git_pid, buf, hunk) do
-    git_root = GitBuffer.git_root(git_pid)
-    rel_path = GitBuffer.relative_path(git_pid)
-    {content, _cursor} = BufferServer.content_and_cursor(buf)
+    git_root = Git.Buffer.git_root(git_pid)
+    rel_path = Git.Buffer.relative_path(git_pid)
+    {content, _cursor} = Buffer.content_and_cursor(buf)
     base_lines = get_base_lines(git_pid)
     current_lines = String.split(content, "\n")
 
@@ -366,7 +364,7 @@ defmodule Minga.Editor.Commands.Git do
 
     case Git.stage_patch(git_root, patch) do
       :ok ->
-        GitBuffer.invalidate_base(git_pid, content)
+        Git.Buffer.invalidate_base(git_pid, content)
         EditorState.set_status(state, "Hunk staged")
 
       {:error, reason} ->
@@ -377,7 +375,7 @@ defmodule Minga.Editor.Commands.Git do
   @spec with_git_buffer(state(), (pid(), pid() -> state())) :: state()
   defp with_git_buffer(%{workspace: %{buffers: %{active: buf}}} = state, fun)
        when is_pid(buf) do
-    case GitTracker.lookup(buf) do
+    case Git.tracking_pid(buf) do
       nil ->
         EditorState.set_status(state, "Not in a git repository")
 
@@ -394,7 +392,7 @@ defmodule Minga.Editor.Commands.Git do
 
   @spec jump_to_line(state(), pid(), non_neg_integer()) :: state()
   defp jump_to_line(state, buf, line) do
-    BufferServer.move_to(buf, {line, 0})
+    Buffer.move_to(buf, {line, 0})
     state
   end
 

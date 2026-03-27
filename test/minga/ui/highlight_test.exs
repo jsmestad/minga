@@ -1,7 +1,7 @@
 defmodule Minga.HighlightTest do
   use ExUnit.Case, async: true
 
-  alias Minga.UI.Face
+  alias Minga.Core.Face
   alias Minga.UI.Highlight
 
   # Helper: asserts styled segments match expected {text, face_attrs} pairs.
@@ -32,7 +32,7 @@ defmodule Minga.HighlightTest do
       spans: Keyword.get(attrs, :spans, {}),
       capture_names: attrs |> Keyword.get(:capture_names, []) |> List.to_tuple(),
       theme: theme,
-      face_registry: Face.Registry.from_syntax(theme)
+      face_registry: Minga.UI.Face.Registry.from_syntax(theme)
     }
   end
 
@@ -177,7 +177,7 @@ defmodule Minga.HighlightTest do
         )
 
       result = Highlight.styles_for_line(hl, "hello", 5)
-      assert [{text, %Minga.UI.Face{} = style}] = result
+      assert [{text, %Minga.Core.Face{} = style}] = result
       assert text == "hello"
       assert style.fg == 0x888888
       assert style.italic == true

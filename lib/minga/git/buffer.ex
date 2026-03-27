@@ -3,7 +3,7 @@ defmodule Minga.Git.Buffer do
   Per-buffer GenServer that tracks git diff state.
 
   Caches the HEAD version of the file on startup, then recomputes an
-  in-memory diff (via `Minga.Git.Diff`) whenever the buffer content
+  in-memory diff (via `Minga.Core.Diff`) whenever the buffer content
   changes. This design means buffer edits never spawn git processes;
   only buffer open and git index invalidation do.
 
@@ -13,8 +13,8 @@ defmodule Minga.Git.Buffer do
 
   use GenServer
 
+  alias Minga.Core.Diff
   alias Minga.Git
-  alias Minga.Git.Diff
 
   @typedoc "Internal state."
   @type state :: %{

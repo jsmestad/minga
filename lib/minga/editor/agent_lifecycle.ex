@@ -15,8 +15,8 @@ defmodule Minga.Editor.AgentLifecycle do
   alias Minga.Agent.Session, as: AgentSession
   alias Minga.Agent.UIState
   alias Minga.Agent.View.Preview
-  alias Minga.Buffer.Server, as: BufferServer
-  alias Minga.Config.Options, as: ConfigOptions
+  alias Minga.Buffer
+  alias Minga.Config
   alias Minga.Editor.Commands
   alias Minga.Editor.HighlightSync
   alias Minga.Editor.LayoutPreset
@@ -60,12 +60,12 @@ defmodule Minga.Editor.AgentLifecycle do
   @spec maybe_set_auto_context(state(), String.t(), pid()) :: state()
   def maybe_set_auto_context(state, file_path, buffer_pid) do
     cli_flags = Minga.CLI.startup_flags()
-    auto_context = ConfigOptions.get(:agent_auto_context)
+    auto_context = Config.get(:agent_auto_context)
     agent_visible = LayoutPreset.has_agent_chat?(state)
     preview_empty = AgentAccess.view(state).preview.content == :empty
 
     if agent_visible and preview_empty and auto_context and not cli_flags.no_context do
-      content = BufferServer.content(buffer_pid)
+      content = Buffer.content(buffer_pid)
       update_preview(state, &Preview.set_file(&1, file_path, content))
     else
       state
@@ -173,7 +173,7 @@ defmodule Minga.Editor.AgentLifecycle do
   defp maybe_load_auto_context(state, %{no_context: true}), do: state
 
   defp maybe_load_auto_context(state, _flags) do
-    auto_context = ConfigOptions.get(:agent_auto_context)
+    auto_context = Config.get(:agent_auto_context)
     active_buf = state.workspace.buffers.active
 
     if auto_context and active_buf do
@@ -185,12 +185,12 @@ defmodule Minga.Editor.AgentLifecycle do
 
   @spec load_buffer_as_preview(state(), pid()) :: state()
   defp load_buffer_as_preview(state, buffer_pid) do
-    case BufferServer.file_path(buffer_pid) do
+    case Buffer.file_path(buffer_pid) do
       nil ->
         state
 
       path ->
-        content = BufferServer.content(buffer_pid)
+        content = Buffer.content(buffer_pid)
         update_preview(state, &Preview.set_file(&1, path, content))
     end
   end

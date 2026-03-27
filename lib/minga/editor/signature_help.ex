@@ -18,10 +18,10 @@ defmodule Minga.Editor.SignatureHelp do
   """
 
   alias Minga.Agent.Markdown
+  alias Minga.Core.Face
   alias Minga.Editor.DisplayList
   alias Minga.Editor.FloatingWindow
   alias Minga.Editor.MarkdownStyles
-  alias Minga.UI.Face
 
   @enforce_keys [:signatures, :active_signature, :active_parameter, :anchor_row, :anchor_col]
   defstruct signatures: [],

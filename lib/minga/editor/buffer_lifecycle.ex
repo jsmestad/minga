@@ -9,7 +9,7 @@ defmodule Minga.Editor.BufferLifecycle do
   This module retains the post-command hook that broadcasts `:buffer_saved`.
   """
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Editor.State, as: EditorState
   alias Minga.Mode
 
@@ -37,7 +37,7 @@ defmodule Minga.Editor.BufferLifecycle do
          {:execute_ex_command, {:save, []}},
          {:execute_ex_command, {:save_quit, []}}
        ] do
-      path = BufferServer.file_path(buf)
+      path = Buffer.file_path(buf)
 
       if path,
         do:

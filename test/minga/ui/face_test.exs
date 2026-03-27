@@ -1,7 +1,7 @@
 defmodule Minga.FaceTest do
   use ExUnit.Case, async: true
 
-  alias Minga.UI.Face
+  alias Minga.Core.Face
 
   describe "default/0" do
     test "returns a fully populated face with no nil fields" do

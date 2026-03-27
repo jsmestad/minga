@@ -11,7 +11,7 @@ defmodule Minga.Editor.Renderer.Context do
   per-line values that actually vary (line text, screen row, buffer line).
   """
 
-  alias Minga.Buffer.Decorations
+  alias Minga.Core.Decorations
   alias Minga.Diagnostics.Diagnostic
   alias Minga.Editing.Search.Match
   alias Minga.Editor.Viewport
@@ -76,7 +76,7 @@ defmodule Minga.Editor.Renderer.Context do
           is_gui: boolean(),
           has_sign_column: boolean(),
           diagnostic_signs: %{non_neg_integer() => Diagnostic.severity()},
-          git_signs: %{non_neg_integer() => Minga.Git.Diff.hunk_type()},
+          git_signs: %{non_neg_integer() => Minga.Core.Diff.hunk_type()},
           decorations: Decorations.t(),
           git_colors: Minga.UI.Theme.Git.t(),
           gutter_colors: Minga.UI.Theme.Gutter.t()

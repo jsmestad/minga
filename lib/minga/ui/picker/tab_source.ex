@@ -9,11 +9,11 @@ defmodule Minga.UI.Picker.TabSource do
 
   @behaviour Minga.UI.Picker.Source
 
+  alias Minga.Language
   alias Minga.UI.Picker.Item
 
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.TabBar
-  alias Minga.Language.Filetype
   alias Minga.UI.Devicon
 
   @impl true
@@ -51,7 +51,7 @@ defmodule Minga.UI.Picker.TabSource do
   defp tab_icon(%{kind: :agent}), do: Devicon.icon(:agent)
 
   defp tab_icon(%{kind: :file, label: label}) do
-    Devicon.icon(Filetype.detect(label))
+    Devicon.icon(Language.detect_filetype(label))
   end
 
   @spec tab_display_label(Minga.Editor.State.Tab.t()) :: String.t()

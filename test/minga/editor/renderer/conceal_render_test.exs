@@ -9,8 +9,8 @@ defmodule Minga.Editor.Renderer.ConcealRenderTest do
 
   use Minga.Test.EditorCase, async: true
 
-  alias Minga.Buffer.Decorations
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Core.Decorations
 
   # Content starts at row 1 because the tab bar occupies row 0.
   @content_row 1

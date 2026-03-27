@@ -4,7 +4,7 @@ defmodule Minga.Agent.Config do
 
   Reads user-facing settings from `Minga.Config.Options` and defines
   sensible defaults for internal tunables. No other agent module should
-  define `@default_*` constants or call `Options.get(:agent_*)` directly.
+  define `@default_*` constants or call `Config.get(:agent_*)` directly.
 
   Call `resolve/0` once at session or provider init, then thread the
   resulting `%Config{}` through state and function arguments.
@@ -18,7 +18,6 @@ defmodule Minga.Agent.Config do
   4. If internal-only, the struct default is sufficient
   """
 
-  alias Minga.Config.Options
 
   @default_model "anthropic:claude-sonnet-4"
 
@@ -190,7 +189,7 @@ defmodule Minga.Agent.Config do
   # given default when the table doesn't exist yet (tests, standalone).
   @spec get(atom(), term()) :: term()
   defp get(key, default) do
-    Options.get(key)
+    Minga.Config.get(key)
   rescue
     ArgumentError -> default
   catch

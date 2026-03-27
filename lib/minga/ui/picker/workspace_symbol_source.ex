@@ -12,7 +12,7 @@ defmodule Minga.UI.Picker.WorkspaceSymbolSource do
 
   @behaviour Minga.UI.Picker.Source
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Editor.Commands
   alias Minga.Editor.State, as: EditorState
   alias Minga.LSP.Client
@@ -58,7 +58,7 @@ defmodule Minga.UI.Picker.WorkspaceSymbolSource do
 
     case state.workspace.buffers.active do
       nil -> state
-      buf -> BufferServer.move_to(buf, {line, col})
+      buf -> Buffer.move_to(buf, {line, col})
     end
 
     state
@@ -115,7 +115,7 @@ defmodule Minga.UI.Picker.WorkspaceSymbolSource do
 
   @spec set_jump_mark(EditorState.t()) :: EditorState.t()
   defp set_jump_mark(%{workspace: %{buffers: %{active: buf}}} = state) when is_pid(buf) do
-    pos = BufferServer.cursor(buf)
+    pos = Buffer.cursor(buf)
 
     %{
       state
@@ -130,7 +130,7 @@ defmodule Minga.UI.Picker.WorkspaceSymbolSource do
     idx =
       Enum.find_index(state.workspace.buffers.list, fn buf ->
         try do
-          BufferServer.file_path(buf) == file_path
+          Buffer.file_path(buf) == file_path
         catch
           :exit, _ -> false
         end

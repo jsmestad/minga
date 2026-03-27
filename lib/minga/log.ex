@@ -36,7 +36,6 @@ defmodule Minga.Log do
 
   require Logger
 
-  alias Minga.Config.Options
 
   @type subsystem :: :render | :lsp | :agent | :editor | :config | :port
 
@@ -154,9 +153,9 @@ defmodule Minga.Log do
     :ok
   end
 
-  @spec safe_get_option(Options.option_name()) :: atom()
+  @spec safe_get_option(Config.option_name()) :: atom()
   defp safe_get_option(name) do
-    Options.get(name)
+    Minga.Config.get(name)
   rescue
     # Options agent may not be running (e.g., early startup or tests
     # that don't start the application). Fall back to sensible defaults.

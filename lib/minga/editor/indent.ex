@@ -12,7 +12,7 @@ defmodule Minga.Editor.Indent do
   fall back to pure copy-indent.
   """
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
 
   @typedoc "A computed indentation result."
   @type indent_result :: %{indent: String.t(), dedent: boolean()}
@@ -25,11 +25,11 @@ defmodule Minga.Editor.Indent do
   @spec compute_for_newline(pid(), non_neg_integer()) :: String.t()
   def compute_for_newline(buf, line_num) do
     base_indent = leading_whitespace(buf, line_num)
-    tab_size = BufferServer.get_option(buf, :tab_size) || 2
-    indent_with = BufferServer.get_option(buf, :indent_with) || :spaces
+    tab_size = Buffer.get_option(buf, :tab_size) || 2
+    indent_with = Buffer.get_option(buf, :indent_with) || :spaces
     unit = indent_unit(indent_with, tab_size)
 
-    filetype = BufferServer.filetype(buf)
+    filetype = Buffer.filetype(buf)
 
     case get_line_text(buf, line_num) do
       nil ->
@@ -57,7 +57,7 @@ defmodule Minga.Editor.Indent do
   def should_dedent_line?(buf, line_num) do
     case get_line_text(buf, line_num) do
       nil -> false
-      text -> dedent_trigger?(String.trim(text), BufferServer.filetype(buf))
+      text -> dedent_trigger?(String.trim(text), Buffer.filetype(buf))
     end
   end
 
@@ -84,7 +84,7 @@ defmodule Minga.Editor.Indent do
   """
   @spec remove_one_indent_level(String.t(), pid()) :: String.t()
   def remove_one_indent_level(indent, buf) do
-    tab_size = BufferServer.get_option(buf, :tab_size) || 2
+    tab_size = Buffer.get_option(buf, :tab_size) || 2
 
     if String.ends_with?(indent, "\t") do
       String.slice(indent, 0, String.length(indent) - 1)
@@ -106,7 +106,7 @@ defmodule Minga.Editor.Indent do
 
   @spec get_line_text(pid(), non_neg_integer()) :: String.t() | nil
   defp get_line_text(buf, line_num) do
-    case BufferServer.get_lines(buf, line_num, 1) do
+    case Buffer.lines(buf, line_num, 1) do
       [text] -> text
       [] -> nil
     end

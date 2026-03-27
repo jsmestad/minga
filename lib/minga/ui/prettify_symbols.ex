@@ -25,10 +25,10 @@ defmodule Minga.UI.PrettifySymbols do
   new ones based on the current highlight spans.
   """
 
-  alias Minga.Buffer.Decorations
-  alias Minga.Buffer.Server, as: BufferServer
-  alias Minga.Config.Options
-  alias Minga.UI.Face
+  alias Minga.Buffer
+  alias Minga.Config
+  alias Minga.Core.Decorations
+  alias Minga.Core.Face
   alias Minga.UI.Highlight
 
   @typedoc "A substitution rule: source text, replacement character, and matching captures."
@@ -124,7 +124,7 @@ defmodule Minga.UI.PrettifySymbols do
   Only applies when the `prettify_symbols` config option is enabled.
 
   Returns `:ok`. Decorations are applied directly to the buffer via
-  `BufferServer.batch_decorations/2`.
+  `Buffer.batch_decorations/2`.
   """
   @spec apply(pid(), Highlight.t(), atom()) :: :ok
   def apply(buf, %Highlight{} = hl, filetype) do
@@ -137,7 +137,7 @@ defmodule Minga.UI.PrettifySymbols do
 
   @spec clear_conceals(pid()) :: :ok
   defp clear_conceals(buf) do
-    BufferServer.batch_decorations(buf, fn decs ->
+    Buffer.batch_decorations(buf, fn decs ->
       Decorations.remove_conceal_group(decs, :prettify_symbols)
     end)
 
@@ -151,14 +151,14 @@ defmodule Minga.UI.PrettifySymbols do
     if rules == [] do
       clear_conceals(buf)
     else
-      content = BufferServer.content(buf)
+      content = Buffer.content(buf)
       lines = String.split(content, "\n")
       capture_names = Tuple.to_list(hl.capture_names)
       spans = Tuple.to_list(hl.spans)
 
       conceals = find_conceals(spans, rules, capture_names, content, lines)
 
-      BufferServer.batch_decorations(buf, fn decs ->
+      Buffer.batch_decorations(buf, fn decs ->
         decs
         |> Decorations.remove_conceal_group(:prettify_symbols)
         |> add_all_conceals(conceals)
@@ -171,7 +171,7 @@ defmodule Minga.UI.PrettifySymbols do
   @doc "Returns true if prettify-symbols is enabled in config."
   @spec enabled?() :: boolean()
   def enabled? do
-    Options.get(:prettify_symbols)
+    Config.get(:prettify_symbols)
   end
 
   @typep position :: {non_neg_integer(), non_neg_integer()}

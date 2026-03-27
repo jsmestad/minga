@@ -24,8 +24,8 @@ defmodule Minga.Editing.Formatter do
       :javascript / :typescript / :jsx / :tsx → "prettier --stdin-filepath {file}"
   """
 
-  alias Minga.Config.Options
-  alias Minga.Language.Registry, as: LangRegistry
+  alias Minga.Config
+  alias Minga.Language
 
   @typedoc "A shell command string, optionally containing `{file}`."
   @type formatter_spec :: String.t()
@@ -33,7 +33,7 @@ defmodule Minga.Editing.Formatter do
   @doc "Returns the default formatter map (filetype atom to command string)."
   @spec default_formatters() :: %{atom() => formatter_spec()}
   def default_formatters do
-    LangRegistry.all()
+    Language.all()
     |> Enum.filter(fn lang -> lang.formatter != nil end)
     |> Map.new(fn lang -> {lang.name, lang.formatter} end)
   end
@@ -47,10 +47,10 @@ defmodule Minga.Editing.Formatter do
   """
   @spec resolve_formatter(atom(), String.t() | nil) :: formatter_spec() | nil
   def resolve_formatter(filetype, file_path \\ nil) do
-    user_formatter = Options.get_for_filetype(:formatter, filetype)
+    user_formatter = Config.get_for_filetype(:formatter, filetype)
 
     default =
-      case LangRegistry.get(filetype) do
+      case Language.get(filetype) do
         %{formatter: fmt} when is_binary(fmt) -> fmt
         _ -> nil
       end
@@ -110,8 +110,8 @@ defmodule Minga.Editing.Formatter do
   """
   @spec apply_save_transforms(String.t(), atom()) :: String.t()
   def apply_save_transforms(content, filetype) when is_atom(filetype) do
-    trim = Options.get_for_filetype(:trim_trailing_whitespace, filetype)
-    final_nl = Options.get_for_filetype(:insert_final_newline, filetype)
+    trim = Config.get_for_filetype(:trim_trailing_whitespace, filetype)
+    final_nl = Config.get_for_filetype(:insert_final_newline, filetype)
     apply_save_transforms(content, trim, final_nl)
   end
 

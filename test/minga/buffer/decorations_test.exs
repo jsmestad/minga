@@ -1,8 +1,8 @@
-defmodule Minga.Buffer.DecorationsTest do
+defmodule Minga.Core.DecorationsTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Decorations
-  alias Minga.UI.Face
+  alias Minga.Core.Decorations
+  alias Minga.Core.Face
 
   # ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -585,7 +585,7 @@ defmodule Minga.Buffer.DecorationsTest do
   end
 
   describe "merge_style_props/2" do
-    alias Minga.UI.Face
+    alias Minga.Core.Face
 
     test "overlay properties override base" do
       result = Decorations.merge_style_props(Face.new(fg: 0xFF0000), Face.new(fg: 0x00FF00))

@@ -14,7 +14,7 @@ defmodule Minga.Input.Router do
   GUI actions).
   """
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Editing
   alias Minga.Editor
   alias Minga.Editor.LspActions
@@ -267,7 +267,7 @@ defmodule Minga.Input.Router do
   defp safe_cursor(nil), do: nil
 
   defp safe_cursor(buf) do
-    BufferServer.cursor(buf)
+    Buffer.cursor(buf)
   catch
     :exit, _ -> nil
   end
@@ -402,6 +402,6 @@ defmodule Minga.Input.Router do
   defp buffer_version(%{workspace: %{buffers: %{active: nil}}}), do: 0
 
   defp buffer_version(%{workspace: %{buffers: %{active: buf}}}) do
-    BufferServer.version(buf)
+    Buffer.version(buf)
   end
 end

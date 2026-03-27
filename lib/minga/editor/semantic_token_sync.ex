@@ -24,7 +24,7 @@ defmodule Minga.Editor.SemanticTokenSync do
   and injections (layer 1) when they overlap.
   """
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Editor.State, as: EditorState
   alias Minga.LSP.Client
   alias Minga.LSP.SemanticTokens
@@ -42,7 +42,7 @@ defmodule Minga.Editor.SemanticTokenSync do
 
   def request_tokens(%EditorState{} = state) do
     buf_pid = state.workspace.buffers.active
-    file_path = BufferServer.file_path(buf_pid)
+    file_path = Buffer.file_path(buf_pid)
 
     with true <- is_binary(file_path),
          client when is_pid(client) <- find_lsp_client(state, buf_pid),
@@ -96,7 +96,7 @@ defmodule Minga.Editor.SemanticTokenSync do
       {hl, name_to_id} = ensure_capture_names(hl, tokens)
 
       # Build line byte offset map from buffer content
-      content = BufferServer.content(buf_pid)
+      content = Buffer.content(buf_pid)
       line_byte_offsets = build_line_offsets(content)
 
       # Get line text lookup
@@ -179,7 +179,7 @@ defmodule Minga.Editor.SemanticTokenSync do
   defp find_lsp_client(state, buf_pid) do
     case Map.get(state, :lsp_clients, %{}) do
       clients when is_map(clients) ->
-        filetype = BufferServer.filetype(buf_pid)
+        filetype = Buffer.filetype(buf_pid)
         Map.get(clients, filetype)
 
       _ ->

@@ -31,7 +31,7 @@ defmodule Minga.Editing.TextObject do
   Delimiter search spans multiple lines.
   """
 
-  alias Minga.Buffer.Unicode
+  alias Minga.Core.Unicode
   alias Minga.Editing.Motion.Helpers
   alias Minga.Editing.Text.Readable
   alias Minga.Parser.Manager, as: ParserManager

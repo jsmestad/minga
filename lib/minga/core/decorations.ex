@@ -1,4 +1,4 @@
-defmodule Minga.Buffer.Decorations do
+defmodule Minga.Core.Decorations do
   @moduledoc """
   Buffer decoration storage and API.
 
@@ -26,7 +26,7 @@ defmodule Minga.Buffer.Decorations do
 
   ## Performance
 
-  Ranges are backed by an interval tree (`Minga.Buffer.IntervalTree`)
+  Ranges are backed by an interval tree (`Minga.Core.IntervalTree`)
   providing O(log n + k) range queries. This handles 10,000+ decorations
   per buffer (LSP diagnostics scale) without measurable frame-time impact.
 
@@ -37,14 +37,14 @@ defmodule Minga.Buffer.Decorations do
   at once (e.g., agent chat sync or LSP diagnostic refresh).
   """
 
-  alias Minga.Buffer.Decorations.BlockDecoration
-  alias Minga.Buffer.Decorations.ConcealRange
-  alias Minga.Buffer.Decorations.FoldRegion
-  alias Minga.Buffer.Decorations.HighlightRange
-  alias Minga.Buffer.Decorations.LineAnnotation
-  alias Minga.Buffer.Decorations.VirtualText
-  alias Minga.Buffer.IntervalTree
-  alias Minga.UI.Face
+  alias Minga.Core.Decorations.BlockDecoration
+  alias Minga.Core.Decorations.ConcealRange
+  alias Minga.Core.Decorations.FoldRegion
+  alias Minga.Core.Decorations.HighlightRange
+  alias Minga.Core.Decorations.LineAnnotation
+  alias Minga.Core.Decorations.VirtualText
+  alias Minga.Core.Face
+  alias Minga.Core.IntervalTree
 
   @mergeable_style_fields [
     :fg,

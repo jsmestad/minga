@@ -74,6 +74,38 @@ defmodule Minga.Command do
           scope: scope() | nil
         }
 
+  # ── Registry lookup ──────────────────────────────────────────────────
+
+  @doc "Looks up a command by name. Returns `{:ok, command}` or `:error`."
+  @spec lookup(atom()) :: {:ok, t()} | :error
+  def lookup(name) when is_atom(name) do
+    Minga.Command.Registry.lookup(Minga.Command.Registry, name)
+  end
+
+  @doc "Returns all registered commands as a list."
+  @spec all_commands() :: [t()]
+  def all_commands do
+    Minga.Command.Registry.all(Minga.Command.Registry)
+  end
+
+  @doc "Registers a command with name, description, and execute function."
+  @spec register(atom(), String.t(), (term() -> term())) :: :ok
+  def register(name, description, execute) do
+    Minga.Command.Registry.register(Minga.Command.Registry, name, description, execute)
+  end
+
+  @doc "Resets the registry to built-in commands (discards user/extension commands)."
+  @spec reset_registry() :: :ok
+  defdelegate reset_registry, to: Minga.Command.Registry, as: :reset
+
+  # ── Parsing ────────────────────────────────────────────────────────────
+
+  @doc "Parses a command-line string into a structured command invocation."
+  @spec parse(String.t()) :: Minga.Command.Parser.result()
+  defdelegate parse(input), to: Minga.Command.Parser
+
+  # ── Command properties ─────────────────────────────────────────────────
+
   @doc "Returns true if this command is scopeable (toggles a buffer-local option)."
   @spec scopeable?(t()) :: boolean()
   def scopeable?(%__MODULE__{scope: nil}), do: false

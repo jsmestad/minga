@@ -10,7 +10,6 @@ defmodule Minga.UI.Picker.GitBranchSource do
   @behaviour Minga.UI.Picker.Source
 
   alias Minga.Git
-  alias Minga.Git.Repo, as: GitRepo
   alias Minga.Log
   alias Minga.UI.Picker.Item
 
@@ -138,9 +137,9 @@ defmodule Minga.UI.Picker.GitBranchSource do
 
   @spec refresh_repo(String.t()) :: :ok
   defp refresh_repo(git_root) do
-    case GitRepo.lookup(git_root) do
+    case Git.lookup_repo(git_root) do
       nil -> :ok
-      pid -> GitRepo.refresh(pid)
+      pid -> Git.Repo.refresh(pid)
     end
   end
 end

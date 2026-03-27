@@ -8,7 +8,7 @@ defmodule Minga.Editor.ModeTransitions do
   transform mode state based on the old and new mode.
   """
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Editor.State, as: EditorState
   alias Minga.Mode
   alias Minga.Mode.CommandState
@@ -25,7 +25,7 @@ defmodule Minga.Editor.ModeTransitions do
   # Entering visual mode: capture cursor as selection anchor.
   def adjust(mode_state, old_mode, :visual, %{workspace: %{buffers: %{active: buf}}})
       when old_mode != :visual and is_pid(buf) do
-    anchor = BufferServer.cursor(buf)
+    anchor = Buffer.cursor(buf)
     %{mode_state | visual_anchor: anchor}
   end
 
@@ -53,7 +53,7 @@ defmodule Minga.Editor.ModeTransitions do
         %{workspace: %{buffers: %{active: buf}}}
       )
       when old_mode != :search and is_pid(buf) do
-    cursor = BufferServer.cursor(buf)
+    cursor = Buffer.cursor(buf)
     %{mode_state | original_cursor: cursor}
   end
 

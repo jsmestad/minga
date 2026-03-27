@@ -6,10 +6,10 @@ defmodule Minga.Editor.Commands.Search do
 
   @behaviour Minga.Command.Provider
 
-  alias Minga.Buffer.Decorations
+  alias Minga.Buffer
   alias Minga.Buffer.Document
-  alias Minga.Buffer.Server, as: BufferServer
-  alias Minga.Buffer.Unicode
+  alias Minga.Core.Decorations
+  alias Minga.Core.Unicode
   alias Minga.Editor.PickerUI
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Window
@@ -41,17 +41,17 @@ defmodule Minga.Editor.Commands.Search do
         :incremental_search
       ) do
     if ms.input == "" do
-      BufferServer.move_to(buf, ms.original_cursor)
+      Buffer.move_to(buf, ms.original_cursor)
       state
     else
-      content = BufferServer.content(buf)
+      content = Buffer.content(buf)
 
       case Minga.Editing.search_next(content, ms.input, ms.original_cursor, ms.direction) do
         nil ->
           state
 
         {line, col} ->
-          BufferServer.move_to(buf, {line, col})
+          Buffer.move_to(buf, {line, col})
           state
       end
     end
@@ -62,7 +62,7 @@ defmodule Minga.Editor.Commands.Search do
           state,
         :confirm_search
       ) do
-    content = BufferServer.content(buf)
+    content = Buffer.content(buf)
 
     case Minga.Editing.search_next(content, ms.input, ms.original_cursor, ms.direction) do
       nil ->
@@ -72,7 +72,7 @@ defmodule Minga.Editor.Commands.Search do
         |> then(&EditorState.set_status(&1, "Pattern not found: #{ms.input}"))
 
       {line, col} ->
-        BufferServer.move_to(buf, {line, col})
+        Buffer.move_to(buf, {line, col})
 
         state
         |> auto_unfold_at(line)
@@ -86,7 +86,7 @@ defmodule Minga.Editor.Commands.Search do
           state,
         :cancel_search
       ) do
-    BufferServer.move_to(buf, ms.original_cursor)
+    Buffer.move_to(buf, ms.original_cursor)
     state
   end
 
@@ -100,15 +100,15 @@ defmodule Minga.Editor.Commands.Search do
         :search_next
       )
       when is_binary(pattern) do
-    content = BufferServer.content(buf)
-    cursor = BufferServer.cursor(buf)
+    content = Buffer.content(buf)
+    cursor = Buffer.cursor(buf)
 
     case Minga.Editing.search_next(content, pattern, cursor, dir) do
       nil ->
         EditorState.set_status(state, "Pattern not found: #{pattern}")
 
       {line, col} ->
-        BufferServer.move_to(buf, {line, col})
+        Buffer.move_to(buf, {line, col})
         auto_unfold_at(state, line)
     end
   end
@@ -128,15 +128,15 @@ defmodule Minga.Editor.Commands.Search do
       )
       when is_binary(pattern) do
     reverse = if dir == :forward, do: :backward, else: :forward
-    content = BufferServer.content(buf)
-    cursor = BufferServer.cursor(buf)
+    content = Buffer.content(buf)
+    cursor = Buffer.cursor(buf)
 
     case Minga.Editing.search_next(content, pattern, cursor, reverse) do
       nil ->
         EditorState.set_status(state, "Pattern not found: #{pattern}")
 
       {line, col} ->
-        BufferServer.move_to(buf, {line, col})
+        Buffer.move_to(buf, {line, col})
         auto_unfold_at(state, line)
     end
   end
@@ -146,7 +146,7 @@ defmodule Minga.Editor.Commands.Search do
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :search_word_under_cursor_forward) do
-    {content, cursor} = BufferServer.content_and_cursor(buf)
+    {content, cursor} = Buffer.content_and_cursor(buf)
     tmp_buf = Document.new(content)
 
     case Minga.Editing.word_under_cursor(tmp_buf, cursor) do
@@ -162,7 +162,7 @@ defmodule Minga.Editor.Commands.Search do
             |> then(&EditorState.set_status(&1, "Pattern not found: #{word}"))
 
           {line, col} ->
-            BufferServer.move_to(buf, {line, col})
+            Buffer.move_to(buf, {line, col})
 
             state
             |> auto_unfold_at(line)
@@ -176,7 +176,7 @@ defmodule Minga.Editor.Commands.Search do
         %{workspace: %{buffers: %{active: buf}}} = state,
         :search_word_under_cursor_backward
       ) do
-    {content, cursor} = BufferServer.content_and_cursor(buf)
+    {content, cursor} = Buffer.content_and_cursor(buf)
     tmp_buf = Document.new(content)
 
     case Minga.Editing.word_under_cursor(tmp_buf, cursor) do
@@ -192,7 +192,7 @@ defmodule Minga.Editor.Commands.Search do
             |> then(&EditorState.set_status(&1, "Pattern not found: #{word}"))
 
           {line, col} ->
-            BufferServer.move_to(buf, {line, col})
+            Buffer.move_to(buf, {line, col})
 
             state
             |> auto_unfold_at(line)
@@ -241,7 +241,7 @@ defmodule Minga.Editor.Commands.Search do
         :substitute_confirm_advance
       ) do
     case Enum.at(ms.matches, ms.current) do
-      %Minga.Editing.Search.Match{line: line, col: col} -> BufferServer.move_to(buf, {line, col})
+      %Minga.Editing.Search.Match{line: line, col: col} -> Buffer.move_to(buf, {line, col})
       _ -> :ok
     end
 
@@ -281,13 +281,13 @@ defmodule Minga.Editor.Commands.Search do
           replace_match(content, line, col, len, ms.replacement)
         end)
 
-      BufferServer.replace_content(buf, new_content)
+      Buffer.replace_content(buf, new_content)
 
       # Restore cursor to a safe position
       cursor_line = hd(ms.matches).line
-      total_lines = BufferServer.line_count(buf)
+      total_lines = Buffer.line_count(buf)
       safe_line = min(cursor_line, max(0, total_lines - 1))
-      BufferServer.move_to(buf, {safe_line, 0})
+      Buffer.move_to(buf, {safe_line, 0})
 
       msg =
         if accepted_count == 1,
@@ -306,8 +306,8 @@ defmodule Minga.Editor.Commands.Search do
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :use_selection_for_find)
       when is_pid(buf) do
-    gb = BufferServer.snapshot(buf)
-    cursor = Minga.Buffer.Document.cursor(gb)
+    gb = Buffer.snapshot(buf)
+    cursor = Document.cursor(gb)
     text = word_at_cursor(gb, cursor)
 
     if text != "" do
@@ -332,7 +332,7 @@ defmodule Minga.Editor.Commands.Search do
   @doc "Starts substitute confirm mode by finding all matches and transitioning."
   @spec start_substitute_confirm(state(), pid(), String.t(), String.t(), boolean()) :: state()
   def start_substitute_confirm(state, buf, pattern, replacement, global?) do
-    content = BufferServer.content(buf)
+    content = Buffer.content(buf)
     lines = String.split(content, "\n")
     all_matches = Minga.Editing.search_all_in_range(lines, pattern, 0)
 
@@ -353,7 +353,7 @@ defmodule Minga.Editor.Commands.Search do
 
       _ ->
         %Minga.Editing.Search.Match{line: first_line, col: first_col} = hd(matches)
-        BufferServer.move_to(buf, {first_line, first_col})
+        Buffer.move_to(buf, {first_line, first_col})
 
         ms = %Minga.Mode.SubstituteConfirmState{
           matches: matches,
@@ -371,20 +371,20 @@ defmodule Minga.Editor.Commands.Search do
   @doc "Executes a `:substitute` ex-command against the buffer."
   @spec execute_substitute(state(), pid(), String.t(), String.t(), boolean()) :: state()
   def execute_substitute(state, buf, pattern, replacement, global?) do
-    content = BufferServer.content(buf)
+    content = Buffer.content(buf)
     {new_content, count} = Minga.Editing.substitute(content, pattern, replacement, global?)
 
     if count == 0 do
       EditorState.set_status(state, "Pattern not found: #{pattern}")
     else
-      cursor = BufferServer.cursor(buf)
-      BufferServer.replace_content(buf, new_content)
+      cursor = Buffer.cursor(buf)
+      Buffer.replace_content(buf, new_content)
       {line, col} = cursor
-      total = BufferServer.line_count(buf)
+      total = Buffer.line_count(buf)
       safe_line = min(line, max(0, total - 1))
 
       safe_col =
-        case BufferServer.get_lines(buf, safe_line, 1) do
+        case Buffer.lines(buf, safe_line, 1) do
           [text] when byte_size(text) > 0 ->
             min(col, Unicode.last_grapheme_byte_offset(text))
 
@@ -392,7 +392,7 @@ defmodule Minga.Editor.Commands.Search do
             0
         end
 
-      BufferServer.move_to(buf, {safe_line, safe_col})
+      Buffer.move_to(buf, {safe_line, safe_col})
 
       msg = if count == 1, do: "1 substitution", else: "#{count} substitutions"
 
@@ -475,11 +475,11 @@ defmodule Minga.Editor.Commands.Search do
 
   @spec open_decoration_fold_at(pid() | nil, non_neg_integer()) :: :ok
   defp open_decoration_fold_at(buf, line) when is_pid(buf) do
-    decs = BufferServer.decorations(buf)
+    decs = Buffer.decorations(buf)
 
     case Decorations.fold_region_at(decs, line) do
       %{closed: true, id: id} ->
-        BufferServer.batch_decorations(buf, fn d -> Decorations.toggle_fold_region(d, id) end)
+        Buffer.batch_decorations(buf, fn d -> Decorations.toggle_fold_region(d, id) end)
 
       _ ->
         :ok
@@ -489,11 +489,11 @@ defmodule Minga.Editor.Commands.Search do
   defp open_decoration_fold_at(_buf, _line), do: :ok
 
   @spec active_foldable_window(state()) :: Window.t() | nil
-  @spec word_at_cursor(Minga.Buffer.Document.t(), {non_neg_integer(), non_neg_integer()}) ::
+  @spec word_at_cursor(Buffer.document(), {non_neg_integer(), non_neg_integer()}) ::
           String.t()
   defp word_at_cursor(gb, cursor) do
     {start_pos, end_pos} = Minga.Editing.select_inner_word(gb, cursor)
-    Minga.Buffer.Document.get_range(gb, start_pos, end_pos)
+    Document.get_range(gb, start_pos, end_pos)
   end
 
   defp active_foldable_window(state) do

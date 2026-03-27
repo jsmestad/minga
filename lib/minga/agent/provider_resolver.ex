@@ -14,7 +14,7 @@ defmodule Minga.Agent.ProviderResolver do
   """
 
   alias Minga.Agent.Credentials
-  alias Minga.Config.Options, as: ConfigOptions
+  alias Minga.Config
 
   defmodule Resolved do
     @moduledoc false
@@ -111,11 +111,11 @@ defmodule Minga.Agent.ProviderResolver do
 
   @spec read_config_provider() :: :auto | :native | :pi_rpc
   defp read_config_provider do
-    ConfigOptions.get(:agent_provider)
+    Config.get(:agent_provider)
   end
 
   @spec read_config_model() :: String.t() | nil
   defp read_config_model do
-    ConfigOptions.get(:agent_model)
+    Config.get(:agent_model)
   end
 end

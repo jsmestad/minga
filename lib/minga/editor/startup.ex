@@ -12,9 +12,8 @@ defmodule Minga.Editor.Startup do
 
   alias Minga.Agent.BufferSync, as: AgentBufferSync
   alias Minga.Agent.UIState
-  alias Minga.Buffer.Server, as: BufferServer
-  alias Minga.Config.Loader, as: ConfigLoader
-  alias Minga.Config.Options, as: ConfigOptions
+  alias Minga.Buffer
+  alias Minga.Config
   alias Minga.Editor.Commands
   alias Minga.Editor.FileWatcherHelpers
   alias Minga.Editor.State, as: EditorState
@@ -67,7 +66,7 @@ defmodule Minga.Editor.Startup do
           {:ok, buf} =
             DynamicSupervisor.start_child(
               Minga.Buffer.Supervisor,
-              {BufferServer, content: "", buffer_name: "[new 1]"}
+              {Buffer, content: "", buffer_name: "[new 1]"}
             )
 
           {buf, [buf]}
@@ -106,7 +105,7 @@ defmodule Minga.Editor.Startup do
 
     editing_model =
       Keyword.get_lazy(opts, :editing_model, fn ->
-        Minga.Config.Options.get(:editing_model)
+        Minga.Config.get(:editing_model)
       end)
 
     state = %EditorState{
@@ -221,7 +220,7 @@ defmodule Minga.Editor.Startup do
     want_agent? =
       backend == :tui and
         not cli_flags.force_editor and
-        ConfigOptions.get(:startup_view) == :agent
+        Config.get(:startup_view) == :agent
 
     if want_agent? do
       base = UIState.new()
@@ -278,7 +277,7 @@ defmodule Minga.Editor.Startup do
     child_opts =
       [buffer_name: name, unlisted: true, persistent: true] ++ opts
 
-    case DynamicSupervisor.start_child(Minga.Buffer.Supervisor, {BufferServer, child_opts}) do
+    case DynamicSupervisor.start_child(Minga.Buffer.Supervisor, {Buffer, child_opts}) do
       {:ok, pid} -> pid
       _ -> nil
     end
@@ -291,7 +290,7 @@ defmodule Minga.Editor.Startup do
   def apply_config_options(state) do
     state =
       try do
-        theme_name = ConfigOptions.get(:theme)
+        theme_name = Config.get(:theme)
         theme = Minga.UI.Theme.get!(theme_name)
 
         %{state | theme: theme}
@@ -300,7 +299,7 @@ defmodule Minga.Editor.Startup do
       end
 
     try do
-      case ConfigLoader.load_error() do
+      case Config.load_error() do
         nil -> state
         error -> EditorState.set_status(state, error)
       end
@@ -316,11 +315,11 @@ defmodule Minga.Editor.Startup do
   def send_font_config(%{port_manager: nil}), do: :ok
 
   def send_font_config(%{port_manager: port}) do
-    family = ConfigOptions.get(:font_family)
-    size = ConfigOptions.get(:font_size)
-    ligatures = ConfigOptions.get(:font_ligatures)
-    weight = ConfigOptions.get(:font_weight)
-    fallback = ConfigOptions.get(:font_fallback)
+    family = Config.get(:font_family)
+    size = Config.get(:font_size)
+    ligatures = Config.get(:font_ligatures)
+    weight = Config.get(:font_weight)
+    fallback = Config.get(:font_fallback)
 
     Minga.Frontend.configure_font(port, family, size, ligatures, weight, fallback || [])
   catch
@@ -344,7 +343,7 @@ defmodule Minga.Editor.Startup do
 
   @spec resolve_shell_from_config() :: module()
   defp resolve_shell_from_config do
-    case Minga.Config.Options.get(:default_shell) do
+    case Minga.Config.get(:default_shell) do
       :board -> Minga.Shell.Board
       _ -> Minga.Shell.Traditional
     end

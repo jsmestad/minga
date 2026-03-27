@@ -7,7 +7,7 @@ defmodule Minga.Editor.MouseHoverTooltip do
   diagnostic message) or triggers an LSP hover request for the symbol.
   """
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Diagnostics
   alias Minga.Editor.HoverPopup
   alias Minga.Editor.State, as: EditorState
@@ -52,7 +52,7 @@ defmodule Minga.Editor.MouseHoverTooltip do
 
   @spec check_diagnostic(pid(), non_neg_integer()) :: String.t() | nil
   defp check_diagnostic(buf, line) do
-    file_path = BufferServer.file_path(buf)
+    file_path = Buffer.file_path(buf)
 
     case file_path do
       nil ->
@@ -87,7 +87,7 @@ defmodule Minga.Editor.MouseHoverTooltip do
         state
 
       [client | _] ->
-        file_path = BufferServer.file_path(buf)
+        file_path = Buffer.file_path(buf)
 
         case file_path do
           nil ->

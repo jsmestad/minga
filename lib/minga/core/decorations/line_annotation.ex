@@ -1,4 +1,4 @@
-defmodule Minga.Buffer.Decorations.LineAnnotation do
+defmodule Minga.Core.Decorations.LineAnnotation do
   @moduledoc """
   A line annotation decoration: structured metadata attached to a buffer line.
 

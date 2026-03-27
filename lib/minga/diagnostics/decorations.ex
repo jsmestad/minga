@@ -20,11 +20,11 @@ defmodule Minga.Diagnostics.Decorations do
   diagnostics, and calls `apply/3` to update the decorations.
   """
 
-  alias Minga.Buffer.Decorations
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
+  alias Minga.Core.Decorations
+  alias Minga.Core.Face
   alias Minga.Diagnostics
   alias Minga.Diagnostics.Diagnostic
-  alias Minga.UI.Face
 
   @diagnostic_group :diagnostics
 
@@ -43,7 +43,7 @@ defmodule Minga.Diagnostics.Decorations do
       when is_pid(buf_pid) and is_binary(uri) do
     diagnostics = Diagnostics.for_uri(diag_server, uri)
 
-    BufferServer.batch_decorations(buf_pid, fn decs ->
+    Buffer.batch_decorations(buf_pid, fn decs ->
       decs
       |> Decorations.remove_group(@diagnostic_group)
       |> add_diagnostic_ranges(diagnostics, gutter_colors)
@@ -55,7 +55,7 @@ defmodule Minga.Diagnostics.Decorations do
   """
   @spec clear(pid()) :: :ok
   def clear(buf_pid) when is_pid(buf_pid) do
-    BufferServer.batch_decorations(buf_pid, fn decs ->
+    Buffer.batch_decorations(buf_pid, fn decs ->
       Decorations.remove_group(decs, @diagnostic_group)
     end)
   end

@@ -7,7 +7,7 @@ defmodule Minga.Editor.SemanticWindow.ResolvedAnnotation do
   by the GUI protocol encoder (0x80 wire format) and the TUI render pipeline.
   """
 
-  alias Minga.Buffer.Decorations.LineAnnotation
+  alias Minga.Core.Decorations.LineAnnotation
 
   @enforce_keys [:row, :kind, :fg, :bg, :text]
   defstruct [:row, :kind, :fg, :bg, :text]

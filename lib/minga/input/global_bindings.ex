@@ -11,7 +11,7 @@ defmodule Minga.Input.GlobalBindings do
 
   import Bitwise
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
 
   @ctrl Minga.Input.mod_ctrl()
 
@@ -22,7 +22,7 @@ defmodule Minga.Input.GlobalBindings do
   # Ctrl+S: save current buffer
   def handle_key(state, ?s, mods) when band(mods, @ctrl) != 0 do
     if state.workspace.buffers.active do
-      case BufferServer.save(state.workspace.buffers.active) do
+      case Buffer.save(state.workspace.buffers.active) do
         :ok -> :ok
         {:error, reason} -> Minga.Log.error(:editor, "Save failed: #{inspect(reason)}")
       end

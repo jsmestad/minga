@@ -7,10 +7,10 @@ defmodule Minga.Editor.Commands.Helpers do
   should use `Editor.Commands.execute/2` instead.
   """
 
+  alias Minga.Buffer
   alias Minga.Buffer.Document
-  alias Minga.Buffer.Server, as: BufferServer
-  alias Minga.Buffer.Unicode
   alias Minga.Clipboard
+  alias Minga.Core.Unicode
   alias Minga.Editor.Editing
   alias Minga.Editor.HighlightSync
   alias Minga.Editor.State, as: EditorState
@@ -238,7 +238,7 @@ defmodule Minga.Editor.Commands.Helpers do
   # :none if no buffer is active (safe default: no clipboard calls).
   @spec resolve_clipboard(state()) :: clipboard_mode()
   defp resolve_clipboard(%{workspace: %{buffers: %{active: buf}}}) when is_pid(buf) do
-    BufferServer.get_option(buf, :clipboard)
+    Buffer.get_option(buf, :clipboard)
   catch
     :exit, _ -> :none
   end
@@ -248,14 +248,14 @@ defmodule Minga.Editor.Commands.Helpers do
   # ── Positional helpers ──────────────────────────────────────────────────────
 
   @doc "Returns the two positions sorted so the lesser comes first."
-  @spec sort_positions(Document.position(), Document.position()) ::
-          {Document.position(), Document.position()}
+  @spec sort_positions(Buffer.position(), Buffer.position()) ::
+          {Buffer.position(), Buffer.position()}
   def sort_positions({l1, c1} = p1, {l2, c2} = p2) do
     if {l1, c1} <= {l2, c2}, do: {p1, p2}, else: {p2, p1}
   end
 
   @doc "Saves the jump position when the cursor crosses a line boundary."
-  @spec save_jump_pos(state(), Document.position(), Document.position()) :: state()
+  @spec save_jump_pos(state(), Buffer.position(), Buffer.position()) :: state()
   def save_jump_pos(state, {from_line, _} = from_pos, {to_line, _})
       when from_line != to_line do
     Editing.save_jump_pos(state, from_pos)
@@ -268,16 +268,16 @@ defmodule Minga.Editor.Commands.Helpers do
   @doc "Applies a `(buf, pos) -> new_pos` motion function to the buffer cursor."
   @spec apply_motion(
           pid(),
-          (Document.t(), Minga.Editing.Motion.position() -> Minga.Editing.Motion.position())
+          (Buffer.document(), Minga.Editing.Motion.position() -> Minga.Editing.Motion.position())
         ) :: :ok
   def apply_motion(buf, motion_fn) do
-    gb = BufferServer.snapshot(buf)
+    gb = Buffer.snapshot(buf)
     new_pos = motion_fn.(gb, Document.cursor(gb))
-    BufferServer.move_to(buf, new_pos)
+    Buffer.move_to(buf, new_pos)
   end
 
   @doc "Resolves a motion atom to a new position in the buffer."
-  @spec resolve_motion(Document.t(), Minga.Editing.Motion.position(), atom()) ::
+  @spec resolve_motion(Buffer.document(), Minga.Editing.Motion.position(), atom()) ::
           Minga.Editing.Motion.position()
   def resolve_motion(buf, cursor, :word_forward),
     do: Minga.Editing.word_forward(buf, cursor)
@@ -322,7 +322,7 @@ defmodule Minga.Editor.Commands.Helpers do
   @doc "Applies a find-char motion in the given direction."
   @spec apply_find_char(pid(), ModeState.find_direction(), String.t()) :: :ok
   def apply_find_char(buf, dir, char) do
-    gb = BufferServer.snapshot(buf)
+    gb = Buffer.snapshot(buf)
     cursor = Document.cursor(gb)
 
     motion_fn =
@@ -334,7 +334,7 @@ defmodule Minga.Editor.Commands.Helpers do
       end
 
     new_pos = motion_fn.(gb, cursor, char)
-    BufferServer.move_to(buf, new_pos)
+    Buffer.move_to(buf, new_pos)
   end
 
   @doc "Reverses a find-char direction (`f`↔`F`, `t`↔`T`)."
@@ -349,7 +349,7 @@ defmodule Minga.Editor.Commands.Helpers do
   @doc "Applies a delete or yank operator over a motion range."
   @spec apply_operator_motion(pid(), state(), atom(), operator_action()) :: state()
   def apply_operator_motion(buf, state, motion, action) do
-    gb = BufferServer.snapshot(buf)
+    gb = Buffer.snapshot(buf)
     cursor = Document.cursor(gb)
     target = resolve_motion(gb, cursor, motion)
     {start_pos, end_pos} = sort_positions(cursor, target)
@@ -357,7 +357,7 @@ defmodule Minga.Editor.Commands.Helpers do
     case action do
       :delete ->
         text = Document.get_range(gb, start_pos, end_pos)
-        BufferServer.delete_range(buf, start_pos, end_pos)
+        Buffer.delete_range(buf, start_pos, end_pos)
         put_register(state, text, :delete)
 
       :yank ->
@@ -369,7 +369,7 @@ defmodule Minga.Editor.Commands.Helpers do
   @doc "Applies a delete or yank operator over a text object range."
   @spec apply_text_object(state(), atom(), term(), text_object_action()) :: state()
   def apply_text_object(%{workspace: %{buffers: %{active: buf}}} = state, modifier, spec, action) do
-    gb = BufferServer.snapshot(buf)
+    gb = Buffer.snapshot(buf)
     cursor = Document.cursor(gb)
     buffer_id = HighlightSync.buffer_id_for(state, buf)
     range = compute_text_object_range(gb, cursor, modifier, spec, buffer_id)
@@ -380,7 +380,7 @@ defmodule Minga.Editor.Commands.Helpers do
 
       {:delete, {start_pos, end_pos}} ->
         text = Document.get_range(gb, start_pos, end_pos)
-        BufferServer.delete_range(buf, start_pos, end_pos)
+        Buffer.delete_range(buf, start_pos, end_pos)
         put_register(state, text, :delete)
 
       {:yank, {start_pos, end_pos}} ->
@@ -391,7 +391,7 @@ defmodule Minga.Editor.Commands.Helpers do
 
   @doc "Computes the range for a text object modifier + spec pair."
   @spec compute_text_object_range(
-          Document.t(),
+          Buffer.document(),
           Minga.Editing.TextObject.position(),
           atom(),
           term(),
@@ -427,7 +427,7 @@ defmodule Minga.Editor.Commands.Helpers do
   @doc "Scrolls the buffer cursor by `delta` lines, clamping to bounds."
   @spec page_move(pid(), Viewport.t(), integer()) :: :ok
   def page_move(buf, _vp, delta) do
-    gb = BufferServer.snapshot(buf)
+    gb = Buffer.snapshot(buf)
     {line, col} = Document.cursor(gb)
     total_lines = Document.line_count(gb)
     target_line = max(0, min(line + delta, total_lines - 1))
@@ -441,7 +441,7 @@ defmodule Minga.Editor.Commands.Helpers do
           0
       end
 
-    BufferServer.move_to(buf, {target_line, target_col})
+    Buffer.move_to(buf, {target_line, target_col})
   end
 
   @doc "Toggles the case of a single grapheme."
@@ -454,9 +454,9 @@ defmodule Minga.Editor.Commands.Helpers do
   @doc "Returns a human-readable name for the buffer (buffer name, basename, or `[no file]`)."
   @spec buffer_display_name(pid()) :: String.t()
   def buffer_display_name(buf) do
-    case BufferServer.buffer_name(buf) do
+    case Buffer.buffer_name(buf) do
       nil ->
-        case BufferServer.file_path(buf) do
+        case Buffer.file_path(buf) do
           nil -> "[no file]"
           path -> Path.basename(path)
         end

@@ -10,7 +10,8 @@ defmodule Minga.UI.Devicon do
   displays a filename alongside a visual indicator.
   """
 
-  alias Minga.Language.Registry, as: LangRegistry
+
+  alias Minga.Language
 
   @type filetype :: atom()
 
@@ -38,7 +39,7 @@ defmodule Minga.UI.Devicon do
   # ── Language-backed lookup ─────────────────────────────────────────────────
 
   def icon_and_color(filetype) when is_atom(filetype) do
-    case LangRegistry.get(filetype) do
+    case Language.get(filetype) do
       %{icon: icon, icon_color: color} when is_binary(icon) and is_integer(color) ->
         {icon, color}
 

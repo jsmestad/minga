@@ -10,11 +10,11 @@ defmodule Minga.Shell.Board.Renderer do
   get composed into the splash layer of a `DisplayList.Frame`.
   """
 
+  alias Minga.Core.Face
   alias Minga.Editor.DisplayList
   alias Minga.Shell.Board.Card
   alias Minga.Shell.Board.Layout
   alias Minga.Shell.Board.State
-  alias Minga.UI.Face
 
   # Box-drawing characters (simple ASCII for maximum terminal compatibility)
   @tl "┌"

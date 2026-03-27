@@ -1,4 +1,4 @@
-defmodule Minga.Buffer.Decorations.HighlightRange do
+defmodule Minga.Core.Decorations.HighlightRange do
   @moduledoc """
   A highlight range decoration: custom visual styling on an arbitrary
   buffer span without modifying the buffer text.
@@ -9,8 +9,8 @@ defmodule Minga.Buffer.Decorations.HighlightRange do
   per-property.
   """
 
-  alias Minga.Buffer.IntervalTree
-  alias Minga.UI.Face
+  alias Minga.Core.Face
+  alias Minga.Core.IntervalTree
 
   @enforce_keys [:id, :start, :end_, :style]
   defstruct id: nil,

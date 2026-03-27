@@ -16,10 +16,10 @@ defmodule Minga.Editor.Renderer.Composition do
   and return styled segments.
   """
 
-  alias Minga.Buffer.Decorations
-  alias Minga.Buffer.Decorations.ConcealRange
-  alias Minga.Buffer.Unicode
-  alias Minga.UI.Face
+  alias Minga.Core.Decorations
+  alias Minga.Core.Decorations.ConcealRange
+  alias Minga.Core.Face
+  alias Minga.Core.Unicode
 
   @type styled_segment :: {String.t(), Face.t()}
 

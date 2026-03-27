@@ -8,14 +8,14 @@ defmodule Minga.Editor.TreeRenderer do
   match neo-tree.nvim's visual style.
   """
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
+  alias Minga.Core.Face
   alias Minga.Editor.DisplayList
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.WindowTree
-  alias Minga.Language.Filetype
+  alias Minga.Language
   alias Minga.Project.FileTree
   alias Minga.UI.Devicon
-  alias Minga.UI.Face
   alias Minga.UI.Theme
 
   # Box-drawing characters for indent guides
@@ -316,7 +316,7 @@ defmodule Minga.Editor.TreeRenderer do
   end
 
   defp entry_icon(%{path: path}, _expanded) do
-    filetype = Filetype.detect(path)
+    filetype = Language.detect_filetype(path)
     Devicon.icon_and_color(filetype)
   end
 
@@ -479,7 +479,7 @@ defmodule Minga.Editor.TreeRenderer do
   defp active_buffer_path(%{workspace: %{buffers: %{active: nil}}}), do: nil
 
   defp active_buffer_path(%{workspace: %{buffers: %{active: buf}}}) do
-    case BufferServer.file_path(buf) do
+    case Buffer.file_path(buf) do
       nil -> nil
       path -> Path.expand(path)
     end
@@ -490,7 +490,7 @@ defmodule Minga.Editor.TreeRenderer do
     buffer_list
     |> Enum.flat_map(fn pid ->
       try do
-        if BufferServer.dirty?(pid), do: [BufferServer.file_path(pid)], else: []
+        if Buffer.dirty?(pid), do: [Buffer.file_path(pid)], else: []
       catch
         :exit, _ -> []
       end

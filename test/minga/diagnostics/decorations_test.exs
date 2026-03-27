@@ -1,8 +1,8 @@
 defmodule Minga.Diagnostics.DecorationsTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Decorations
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Core.Decorations
   alias Minga.Diagnostics
   alias Minga.Diagnostics.Decorations, as: DiagDecorations
   alias Minga.Diagnostics.Diagnostic
@@ -167,7 +167,7 @@ defmodule Minga.Diagnostics.DecorationsTest do
       BufferServer.batch_decorations(pid, fn decs ->
         {_id, decs} =
           Decorations.add_highlight(decs, {0, 0}, {0, 5},
-            style: Minga.UI.Face.new(fg: 0x00FF00),
+            style: Minga.Core.Face.new(fg: 0x00FF00),
             group: :search
           )
 

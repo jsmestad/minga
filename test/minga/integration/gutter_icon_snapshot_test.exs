@@ -8,8 +8,8 @@ defmodule Minga.Integration.GutterIconSnapshotTest do
 
   use Minga.Test.EditorCase, async: true
 
-  alias Minga.Buffer.Decorations
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Core.Decorations
 
   describe "gutter icon annotations" do
     test "gutter icon renders in sign column" do

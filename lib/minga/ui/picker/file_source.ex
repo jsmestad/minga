@@ -9,8 +9,8 @@ defmodule Minga.UI.Picker.FileSource do
   @behaviour Minga.UI.Picker.Source
 
   alias Minga.Editor.State, as: EditorState
-  alias Minga.Git.Repo, as: GitRepo
-  alias Minga.Language.Filetype
+  alias Minga.Git
+  alias Minga.Language
   alias Minga.Log
   alias Minga.UI.Devicon
   alias Minga.UI.Picker.Item
@@ -48,7 +48,7 @@ defmodule Minga.UI.Picker.FileSource do
   defp format_file_candidate(path, git_status_map) do
     filename = Path.basename(path)
     dir = Path.dirname(path)
-    ft = Filetype.detect(filename)
+    ft = Language.detect_filetype(filename)
     {icon, color} = Devicon.icon_and_color(ft)
     dir_display = if dir == ".", do: "", else: dir
 
@@ -163,8 +163,8 @@ defmodule Minga.UI.Picker.FileSource do
     root = project_root()
 
     with {:ok, git_root} <- Minga.Git.root_for(root),
-         repo_pid when is_pid(repo_pid) <- GitRepo.lookup(git_root) do
-      GitRepo.status(repo_pid)
+         repo_pid when is_pid(repo_pid) <- Git.lookup_repo(git_root) do
+      Git.Repo.status(repo_pid)
       |> Enum.into(%{}, fn entry -> {entry.path, entry.status} end)
     else
       _ -> %{}

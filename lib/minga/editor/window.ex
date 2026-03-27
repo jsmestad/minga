@@ -29,7 +29,7 @@ defmodule Minga.Editor.Window do
   full-invalidation triggers automatically.
   """
 
-  alias Minga.Buffer.Document
+  alias Minga.Buffer
   alias Minga.Editor.DisplayList
   alias Minga.Editor.FoldMap
   alias Minga.Editor.FoldRange
@@ -56,7 +56,7 @@ defmodule Minga.Editor.Window do
           content: Content.t(),
           buffer: pid(),
           viewport: Viewport.t(),
-          cursor: Document.position(),
+          cursor: Buffer.position(),
           pinned: boolean(),
           fold_map: FoldMap.t(),
           fold_ranges: [FoldRange.t()],
@@ -139,7 +139,7 @@ defmodule Minga.Editor.Window do
   end
 
   @doc "Creates a new window with the given id, buffer, viewport dimensions, and cursor position."
-  @spec new(id(), pid(), pos_integer(), pos_integer(), Document.position()) :: t()
+  @spec new(id(), pid(), pos_integer(), pos_integer(), Buffer.position()) :: t()
   def new(id, buffer, rows, cols, cursor)
       when is_integer(id) and id > 0 and is_pid(buffer) and
              is_integer(rows) and rows > 0 and is_integer(cols) and cols > 0 and

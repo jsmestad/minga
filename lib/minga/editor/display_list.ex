@@ -26,9 +26,9 @@ defmodule Minga.Editor.DisplayList do
   * `render_layer()` — rows mapped to their display lines.
   """
 
+  alias Minga.Core.Face
   alias Minga.Editor.Layout
   alias Minga.Frontend.Protocol
-  alias Minga.UI.Face
 
   # ── Fundamental types ──────────────────────────────────────────────────────
 

@@ -11,9 +11,9 @@ defmodule Minga.Editor.Renderer.Gutter do
   All render functions return `DisplayList.draw()` tuples (or `[]`).
   """
 
+  alias Minga.Core.Face
   alias Minga.Diagnostics.Diagnostic
   alias Minga.Editor.DisplayList
-  alias Minga.UI.Face
 
   @sign_col_width 2
 
@@ -56,7 +56,7 @@ defmodule Minga.Editor.Renderer.Gutter do
           %{non_neg_integer() => atom()},
           colors(),
           git_colors(),
-          Minga.Buffer.Decorations.t()
+          Minga.Core.Decorations.t()
         ) :: DisplayList.draw() | []
   def render_sign(
         screen_row,
@@ -66,7 +66,7 @@ defmodule Minga.Editor.Renderer.Gutter do
         git_signs,
         colors,
         git_colors,
-        decorations \\ %Minga.Buffer.Decorations{}
+        decorations \\ %Minga.Core.Decorations{}
       ) do
     diag = Map.get(diag_signs, buf_line)
     git = Map.get(git_signs, buf_line)
@@ -92,7 +92,7 @@ defmodule Minga.Editor.Renderer.Gutter do
           atom() | nil,
           colors(),
           git_colors(),
-          Minga.Buffer.Decorations.t()
+          Minga.Core.Decorations.t()
         ) :: DisplayList.draw() | []
   defp render_sign_for_line(
          screen_row,
@@ -171,14 +171,14 @@ defmodule Minga.Editor.Renderer.Gutter do
           non_neg_integer(),
           non_neg_integer(),
           non_neg_integer(),
-          Minga.Buffer.Decorations.t()
+          Minga.Core.Decorations.t()
         ) :: DisplayList.draw() | []
   defp render_annotation_sign(_screen_row, _col_offset, _buf_line, %{annotations: []}), do: []
 
   defp render_annotation_sign(screen_row, col_offset, buf_line, decorations) do
     icons =
       decorations
-      |> Minga.Buffer.Decorations.annotations_for_line(buf_line)
+      |> Minga.Core.Decorations.annotations_for_line(buf_line)
       |> Enum.filter(fn ann -> ann.kind == :gutter_icon end)
 
     case icons do

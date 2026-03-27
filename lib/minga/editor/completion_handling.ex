@@ -8,9 +8,8 @@ defmodule Minga.Editor.CompletionHandling do
   orchestration. All functions are pure state transforms.
   """
 
-  alias Minga.Buffer.Server, as: BufferServer
-  alias Minga.Config.Completion, as: ConfigCompletion
-  alias Minga.Config.Options
+  alias Minga.Buffer
+  alias Minga.Config
   alias Minga.Editing.Completion
   alias Minga.Editor.CompletionTrigger
   alias Minga.Editor.SignatureHelp
@@ -162,12 +161,12 @@ defmodule Minga.Editor.CompletionHandling do
   defp accept_text(%{workspace: %{buffers: %{active: buf}}} = state, completion, text)
        when is_pid(buf) do
     {trigger_line, trigger_col} = completion.trigger_position
-    {_content, {cursor_line, cursor_col}} = BufferServer.content_and_cursor(buf)
+    {_content, {cursor_line, cursor_col}} = Buffer.content_and_cursor(buf)
 
     if cursor_line == trigger_line and cursor_col > trigger_col do
-      BufferServer.apply_text_edit(buf, trigger_line, trigger_col, cursor_line, cursor_col, text)
+      Buffer.apply_edit(buf, trigger_line, trigger_col, cursor_line, cursor_col, text)
     else
-      BufferServer.insert_text(buf, text)
+      Buffer.insert_text(buf, text)
     end
 
     # Buffer.Server now broadcasts :buffer_changed with delta from record_edit
@@ -178,7 +177,7 @@ defmodule Minga.Editor.CompletionHandling do
 
   @spec apply_text_edit(EditorState.t(), Completion.text_edit()) :: EditorState.t()
   defp apply_text_edit(%{workspace: %{buffers: %{active: buf}}} = state, edit) when is_pid(buf) do
-    BufferServer.apply_text_edit(
+    Buffer.apply_edit(
       buf,
       edit.range.start_line,
       edit.range.start_col,
@@ -259,10 +258,10 @@ defmodule Minga.Editor.CompletionHandling do
   @doc false
   @spec config_completion_context(pid()) :: config_context()
   def config_completion_context(buf) do
-    file_path = BufferServer.file_path(buf)
+    file_path = Buffer.file_path(buf)
 
     if config_file?(file_path) do
-      {content, {cursor_line, cursor_col}} = BufferServer.content_and_cursor(buf)
+      {content, {cursor_line, cursor_col}} = Buffer.content_and_cursor(buf)
       lines = String.split(content, "\n")
 
       case Enum.at(lines, cursor_line) do
@@ -289,7 +288,7 @@ defmodule Minga.Editor.CompletionHandling do
   defp matches_config_path?(path) do
     config_path =
       try do
-        Minga.Config.Loader.config_path()
+        Minga.Config.config_path()
       catch
         :exit, _ -> nil
       end
@@ -338,7 +337,7 @@ defmodule Minga.Editor.CompletionHandling do
       [_full, name_str] ->
         name = String.to_existing_atom(name_str)
 
-        if name in Options.valid_names() do
+        if name in Config.valid_option_names() do
           {:option_value, name}
         else
           nil
@@ -373,7 +372,7 @@ defmodule Minga.Editor.CompletionHandling do
           active_config_context()
         ) :: EditorState.t()
   defp build_config_completion(state, buf, items, context) do
-    {cursor_line, cursor_col} = BufferServer.cursor(buf)
+    {cursor_line, cursor_col} = Buffer.cursor(buf)
     trigger_col = config_trigger_col(buf, cursor_line, cursor_col, context)
     completion = Completion.new(items, {cursor_line, trigger_col})
 
@@ -391,17 +390,17 @@ defmodule Minga.Editor.CompletionHandling do
   @type active_config_context :: :option_name | {:option_value, atom()} | :filetype
 
   @spec config_items_for_context(active_config_context()) :: [Completion.item()]
-  defp config_items_for_context(:option_name), do: ConfigCompletion.option_name_items()
+  defp config_items_for_context(:option_name), do: Config.option_name_completions()
 
   defp config_items_for_context({:option_value, name}),
-    do: ConfigCompletion.option_value_items(name)
+    do: Config.option_value_completions(name)
 
-  defp config_items_for_context(:filetype), do: ConfigCompletion.filetype_items()
+  defp config_items_for_context(:filetype), do: Config.filetype_completions()
 
   @spec config_trigger_col(pid(), non_neg_integer(), non_neg_integer(), active_config_context()) ::
           non_neg_integer()
   defp config_trigger_col(buf, cursor_line, cursor_col, context) do
-    {content, _cursor} = BufferServer.content_and_cursor(buf)
+    {content, _cursor} = Buffer.content_and_cursor(buf)
     lines = String.split(content, "\n")
     line_text = Enum.at(lines, cursor_line) || ""
     before_cursor = String.slice(line_text, 0, cursor_col)
@@ -434,7 +433,7 @@ defmodule Minga.Editor.CompletionHandling do
           String.t()
   defp config_prefix(buf, cursor_line, trigger_col, cursor_col) do
     if cursor_col > trigger_col do
-      {content, _cursor} = BufferServer.content_and_cursor(buf)
+      {content, _cursor} = Buffer.content_and_cursor(buf)
       lines = String.split(content, "\n")
 
       case Enum.at(lines, cursor_line) do
@@ -448,7 +447,7 @@ defmodule Minga.Editor.CompletionHandling do
 
   @spec completion_prefix(pid(), {non_neg_integer(), non_neg_integer()}) :: String.t() | nil
   defp completion_prefix(buf, {trigger_line, trigger_col}) do
-    {content, {cursor_line, cursor_col}} = BufferServer.content_and_cursor(buf)
+    {content, {cursor_line, cursor_col}} = Buffer.content_and_cursor(buf)
 
     if cursor_line == trigger_line and cursor_col >= trigger_col do
       lines = String.split(content, "\n")
@@ -609,11 +608,11 @@ defmodule Minga.Editor.CompletionHandling do
         state
 
       client ->
-        file_path = BufferServer.file_path(buf)
+        file_path = Buffer.file_path(buf)
 
         if file_path do
           uri = SyncServer.path_to_uri(file_path)
-          {line, col} = BufferServer.cursor(buf)
+          {line, col} = Buffer.cursor(buf)
 
           params = %{
             "textDocument" => %{"uri" => uri},
@@ -638,7 +637,7 @@ defmodule Minga.Editor.CompletionHandling do
     buf = state.workspace.buffers.active
 
     if buf do
-      {line, col} = BufferServer.cursor(buf)
+      {line, col} = Buffer.cursor(buf)
       vp = state.workspace.viewport
       screen_row = max(line - vp.top + 1, 1)
       screen_col = min(col + 4, vp.cols - 1)

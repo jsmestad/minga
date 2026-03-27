@@ -24,9 +24,8 @@ defmodule Minga.Editor.Commands do
   `{state, {:dot_repeat, count}}`. The caller (`Editor`) dispatches it.
   """
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Command
-  alias Minga.Command.Registry, as: CommandRegistry
   alias Minga.Editor.Commands.Agent, as: AgentCommands
   alias Minga.Editor.Commands.BufferManagement
   alias Minga.Editor.Commands.Editing, as: EditingCommands
@@ -44,7 +43,7 @@ defmodule Minga.Editor.Commands do
   alias Minga.Editor.MinibufferData
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Window
-  alias Minga.Keymap.Active, as: KeymapActive
+  alias Minga.Keymap
   alias Minga.Keymap.Bindings
   alias Minga.Mode
   alias Minga.Parser.Manager, as: ParserManager
@@ -342,7 +341,7 @@ defmodule Minga.Editor.Commands do
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, {:goto_next_textobject, type})
       when is_pid(buf) do
-    {row, col} = BufferServer.cursor(buf)
+    {row, col} = Buffer.cursor(buf)
 
     case EditorState.active_window_struct(state) do
       nil ->
@@ -354,7 +353,7 @@ defmodule Minga.Editor.Commands do
             state
 
           {target_row, target_col} ->
-            BufferServer.move_to(buf, {target_row, target_col})
+            Buffer.move_to(buf, {target_row, target_col})
             state
         end
     end
@@ -362,7 +361,7 @@ defmodule Minga.Editor.Commands do
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, {:goto_prev_textobject, type})
       when is_pid(buf) do
-    {row, col} = BufferServer.cursor(buf)
+    {row, col} = Buffer.cursor(buf)
 
     case EditorState.active_window_struct(state) do
       nil ->
@@ -374,7 +373,7 @@ defmodule Minga.Editor.Commands do
             state
 
           {target_row, target_col} ->
-            BufferServer.move_to(buf, {target_row, target_col})
+            Buffer.move_to(buf, {target_row, target_col})
             state
         end
     end
@@ -468,7 +467,7 @@ defmodule Minga.Editor.Commands do
   # we return state unchanged. Otherwise, call the registered execute function.
 
   def execute(state, cmd) when is_atom(cmd) do
-    case CommandRegistry.lookup(CommandRegistry, cmd) do
+    case Command.lookup(cmd) do
       {:ok, %Command{requires_buffer: true}} when is_nil(state.workspace.buffers.active) ->
         state
 
@@ -492,7 +491,7 @@ defmodule Minga.Editor.Commands do
   def start_buffer(file_path) do
     DynamicSupervisor.start_child(
       Minga.Buffer.Supervisor,
-      {BufferServer, file_path: file_path}
+      {Minga.Buffer, file_path: file_path}
     )
   end
 
@@ -566,14 +565,14 @@ defmodule Minga.Editor.Commands do
   defp current_filetype(%{workspace: %{buffers: %{active: nil}}}), do: :text
 
   defp current_filetype(%{workspace: %{buffers: %{active: buf}}}) do
-    BufferServer.filetype(buf)
+    Buffer.filetype(buf)
   catch
     :exit, _ -> :text
   end
 
   @spec filetype_trie_for(atom()) :: Bindings.node_t()
   defp filetype_trie_for(filetype) do
-    KeymapActive.filetype_trie(filetype)
+    Keymap.filetype_trie(filetype)
   catch
     :exit, _ -> Bindings.new()
   end

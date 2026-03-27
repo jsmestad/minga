@@ -15,7 +15,7 @@ defmodule Minga.Frontend.Emit.GUITest do
 
   describe "filter_frame_for_gui/1" do
     test "clears splash and passes through already-empty chrome fields" do
-      face = Minga.UI.Face.new(fg: 0xBBC2CF, bg: 0x282C34)
+      face = Minga.Core.Face.new(fg: 0xBBC2CF, bg: 0x282C34)
 
       frame = %Frame{
         cursor: Cursor.new(0, 0, :block),
@@ -33,8 +33,8 @@ defmodule Minga.Frontend.Emit.GUITest do
     end
 
     test "passes through minibuffer, separators, and overlays unchanged" do
-      face = Minga.UI.Face.new(fg: 0xBBC2CF, bg: 0x282C34)
-      hover_face = Minga.UI.Face.new(fg: 0xBBC2CF, bg: 0x3E4451)
+      face = Minga.Core.Face.new(fg: 0xBBC2CF, bg: 0x282C34)
+      hover_face = Minga.Core.Face.new(fg: 0xBBC2CF, bg: 0x3E4451)
 
       # In practice Chrome.GUI produces [] for all of these, but
       # filter_frame_for_gui does not strip them (it only strips
@@ -58,7 +58,7 @@ defmodule Minga.Frontend.Emit.GUITest do
     end
 
     test "strips gutter from all window frames" do
-      face = Minga.UI.Face.new(fg: 0x5B6268, bg: 0x282C34)
+      face = Minga.Core.Face.new(fg: 0x5B6268, bg: 0x282C34)
 
       wf1 = %WindowFrame{
         rect: {0, 0, 40, 20},
@@ -90,8 +90,8 @@ defmodule Minga.Frontend.Emit.GUITest do
     end
 
     test "preserves lines and tilde_lines when no semantic content" do
-      face = Minga.UI.Face.new(fg: 0xBBC2CF, bg: 0x282C34)
-      tilde_face = Minga.UI.Face.new(fg: 0x5B6268, bg: 0x282C34)
+      face = Minga.Core.Face.new(fg: 0xBBC2CF, bg: 0x282C34)
+      tilde_face = Minga.Core.Face.new(fg: 0x5B6268, bg: 0x282C34)
 
       content_layer = DisplayList.draws_to_layer([DisplayList.draw(0, 4, "hello world", face)])
       tilde_layer = DisplayList.draws_to_layer([DisplayList.draw(5, 0, "~", tilde_face)])
@@ -118,7 +118,7 @@ defmodule Minga.Frontend.Emit.GUITest do
     end
 
     test "strips lines and tilde_lines from windows with semantic content" do
-      face = Minga.UI.Face.new(fg: 0xBBC2CF, bg: 0x282C34)
+      face = Minga.Core.Face.new(fg: 0xBBC2CF, bg: 0x282C34)
 
       content_layer = DisplayList.draws_to_layer([DisplayList.draw(0, 4, "hello world", face)])
       tilde_layer = DisplayList.draws_to_layer([DisplayList.draw(5, 0, "~", face)])
@@ -155,7 +155,7 @@ defmodule Minga.Frontend.Emit.GUITest do
     end
 
     test "mixed windows: semantic gets stripped, non-semantic preserved" do
-      face = Minga.UI.Face.new(fg: 0xBBC2CF, bg: 0x282C34)
+      face = Minga.Core.Face.new(fg: 0xBBC2CF, bg: 0x282C34)
       content = DisplayList.draws_to_layer([DisplayList.draw(0, 4, "text", face)])
 
       semantic = %Minga.Editor.SemanticWindow{
@@ -215,7 +215,7 @@ defmodule Minga.Frontend.Emit.GUITest do
 
       frame = build_frame_with_window(state, viewport_top: 0)
 
-      face = Minga.UI.Face.new(fg: 0xBBC2CF, bg: 0x21242B)
+      face = Minga.Core.Face.new(fg: 0xBBC2CF, bg: 0x21242B)
 
       frame_with_splash = %{
         frame
@@ -242,7 +242,7 @@ defmodule Minga.Frontend.Emit.GUITest do
       frame = build_frame_with_window(state, viewport_top: 0)
 
       hover_draw =
-        DisplayList.draw(5, 10, "hover info", Minga.UI.Face.new(fg: 0xBBC2CF, bg: 0x3E4451))
+        DisplayList.draw(5, 10, "hover info", Minga.Core.Face.new(fg: 0xBBC2CF, bg: 0x3E4451))
 
       frame_with_overlay = %{
         frame

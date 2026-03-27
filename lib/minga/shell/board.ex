@@ -149,8 +149,8 @@ defmodule Minga.Shell.Board do
       hint = "ESC back to Board"
 
       bg = theme.editor.bg
-      bar_face = Minga.UI.Face.new(fg: theme.editor.fg, bg: bg, bold: true)
-      hint_face = Minga.UI.Face.new(fg: 0x5C6370, bg: bg)
+      bar_face = Minga.Core.Face.new(fg: theme.editor.fg, bg: bg, bold: true)
+      hint_face = Minga.Core.Face.new(fg: 0x5C6370, bg: bg)
       status_face = zoom_status_face(card.status, theme)
 
       left = " #{icon} #{task}#{model}"
@@ -179,15 +179,15 @@ defmodule Minga.Shell.Board do
   defp zoom_status_icon(:errored), do: "✗"
   defp zoom_status_icon(_), do: "○"
 
-  @spec zoom_status_face(Minga.Shell.Board.Card.status(), Minga.UI.Theme.t()) :: Minga.UI.Face.t()
-  defp zoom_status_face(:working, theme), do: Minga.UI.Face.new(fg: 0x98C379, bg: theme.editor.bg)
+  @spec zoom_status_face(Minga.Shell.Board.Card.status(), Minga.UI.Theme.t()) :: Minga.Core.Face.t()
+  defp zoom_status_face(:working, theme), do: Minga.Core.Face.new(fg: 0x98C379, bg: theme.editor.bg)
 
   defp zoom_status_face(:needs_you, theme),
-    do: Minga.UI.Face.new(fg: 0xE5C07B, bg: theme.editor.bg)
+    do: Minga.Core.Face.new(fg: 0xE5C07B, bg: theme.editor.bg)
 
-  defp zoom_status_face(:done, theme), do: Minga.UI.Face.new(fg: 0x61AFEF, bg: theme.editor.bg)
-  defp zoom_status_face(:errored, theme), do: Minga.UI.Face.new(fg: 0xE06C75, bg: theme.editor.bg)
-  defp zoom_status_face(_, theme), do: Minga.UI.Face.new(fg: 0x5C6370, bg: theme.editor.bg)
+  defp zoom_status_face(:done, theme), do: Minga.Core.Face.new(fg: 0x61AFEF, bg: theme.editor.bg)
+  defp zoom_status_face(:errored, theme), do: Minga.Core.Face.new(fg: 0xE06C75, bg: theme.editor.bg)
+  defp zoom_status_face(_, theme), do: Minga.Core.Face.new(fg: 0x5C6370, bg: theme.editor.bg)
 
   @impl true
   @spec render(term()) :: term()

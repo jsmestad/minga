@@ -20,8 +20,8 @@ defmodule Minga.Frontend.Emit.GUI do
   """
 
   alias Minga.Agent.Session, as: AgentSession
-  alias Minga.Buffer.Server, as: BufferServer
-  alias Minga.Config.Options
+  alias Minga.Buffer
+  alias Minga.Config
   alias Minga.Editor.DisplayList.Frame
   alias Minga.Editor.Layout
   alias Minga.Editor.MinibufferData
@@ -111,7 +111,7 @@ defmodule Minga.Frontend.Emit.GUI do
   port write overhead.
 
   `status_bar_data` is pre-computed by the Chrome stage and passed through
-  to avoid re-calling BufferServer for cursor/file info on the same frame.
+  to avoid re-calling Buffer for cursor/file info on the same frame.
   When nil (e.g. non-GUI fallback paths), it is computed here.
   """
   @spec sync_swiftui_chrome(state(), StatusBarData.t() | nil, MinibufferData.t() | nil) :: state()
@@ -323,7 +323,7 @@ defmodule Minga.Frontend.Emit.GUI do
         buf = state.workspace.buffers.active
 
         if buf do
-          {line, column} = BufferServer.cursor(buf)
+          {line, column} = Buffer.cursor(buf)
           vp = state.workspace.viewport
           {row + line - vp.top, col + column}
         else
@@ -359,7 +359,7 @@ defmodule Minga.Frontend.Emit.GUI do
   defp active_buffer_path(state) do
     case state.workspace.buffers.active do
       nil -> nil
-      buf -> BufferServer.file_path(buf)
+      buf -> Buffer.file_path(buf)
     end
   end
 
@@ -496,7 +496,7 @@ defmodule Minga.Frontend.Emit.GUI do
   defp find_buffer_for_path(state, abs_path) do
     Enum.find_value(state.workspace.buffers.list, fn buf_pid ->
       try do
-        case BufferServer.file_path(buf_pid) do
+        case Buffer.file_path(buf_pid) do
           ^abs_path ->
             highlight = Map.get(state.workspace.highlight.highlights, buf_pid)
             {buf_pid, highlight}
@@ -516,7 +516,7 @@ defmodule Minga.Frontend.Emit.GUI do
   @spec build_highlighted_preview(pid(), Minga.UI.Highlight.t(), state()) ::
           [[ProtocolGUI.preview_segment()]] | nil
   defp build_highlighted_preview(buf_pid, highlight, state) do
-    content = BufferServer.content(buf_pid)
+    content = Buffer.content(buf_pid)
     lines = content |> String.split("\n") |> Enum.take(@preview_max_lines)
     default_fg = Map.get(state.theme, :fg, 0xCCCCCC)
 
@@ -541,7 +541,7 @@ defmodule Minga.Frontend.Emit.GUI do
   end
 
   # Convert a Face's fg color to a 24-bit RGB integer.
-  @spec face_to_rgb(Minga.UI.Face.t(), non_neg_integer()) :: non_neg_integer()
+  @spec face_to_rgb(Minga.Core.Face.t(), non_neg_integer()) :: non_neg_integer()
   defp face_to_rgb(%{fg: nil}, default), do: default
   defp face_to_rgb(%{fg: fg}, _default) when is_integer(fg), do: fg
   defp face_to_rgb(_, default), do: default
@@ -573,7 +573,7 @@ defmodule Minga.Frontend.Emit.GUI do
 
   @spec safe_file_path(pid()) :: String.t() | nil
   defp safe_file_path(pid) do
-    BufferServer.file_path(pid)
+    Buffer.file_path(pid)
   catch
     :exit, _ -> nil
   end
@@ -629,7 +629,7 @@ defmodule Minga.Frontend.Emit.GUI do
   defp safe_prompt_content(nil), do: ""
 
   defp safe_prompt_content(buf) do
-    BufferServer.content(buf) |> String.trim_trailing("\n")
+    Buffer.content(buf) |> String.trim_trailing("\n")
   catch
     :exit, _ -> ""
   end
@@ -715,7 +715,7 @@ defmodule Minga.Frontend.Emit.GUI do
 
   @spec build_gui_gutter_separator_commands(state()) :: [binary()]
   defp build_gui_gutter_separator_commands(state) do
-    show? = Options.get(:show_gutter_separator)
+    show? = Config.get(:show_gutter_separator)
     active_window = Map.get(state.workspace.windows.map, state.workspace.windows.active)
     gutter_w = if active_window, do: active_window.last_gutter_w, else: 0
 
@@ -738,7 +738,7 @@ defmodule Minga.Frontend.Emit.GUI do
   @spec build_gui_cursorline_commands(state()) :: [binary()]
   defp build_gui_cursorline_commands(state) do
     active_window = Map.get(state.workspace.windows.map, state.workspace.windows.active)
-    cursorline_enabled = Options.get(:cursorline)
+    cursorline_enabled = Config.get(:cursorline)
 
     {row, bg_rgb} =
       if active_window && cursorline_enabled do
@@ -828,7 +828,7 @@ defmodule Minga.Frontend.Emit.GUI do
           ProtocolGUI.gutter_data()
   defp build_gutter_entries(state, window, buf, win_pos, params) do
     %{cursor_line: cursor_line, viewport_top: viewport_top, line_count: line_count} = params
-    line_number_style = BufferServer.get_option(buf, :line_numbers)
+    line_number_style = Buffer.get_option(buf, :line_numbers)
 
     # Sign column is always reserved for consistent gutter layout.
     sign_col_width = Minga.Editor.Renderer.Gutter.sign_column_width()
@@ -837,7 +837,7 @@ defmodule Minga.Frontend.Emit.GUI do
       if line_number_style == :none, do: 0, else: Viewport.gutter_width(line_count)
 
     # Get signs and decorations for the buffer
-    decorations = BufferServer.decorations(buf)
+    decorations = Buffer.decorations(buf)
     diag_signs = ContentHelpers.diagnostic_signs_for_window(state, window)
     git_signs = ContentHelpers.git_signs_for_window(state, window)
 
@@ -867,7 +867,7 @@ defmodule Minga.Frontend.Emit.GUI do
           non_neg_integer(),
           %{non_neg_integer() => atom()},
           %{non_neg_integer() => atom()},
-          Minga.Buffer.Decorations.t()
+          Minga.Core.Decorations.t()
         ) :: ProtocolGUI.gutter_entry()
   defp resolve_gutter_entry(buf_line, diag_signs, git_signs, decorations) do
     sign_type = resolve_sign_type(buf_line, diag_signs, git_signs)
@@ -882,12 +882,12 @@ defmodule Minga.Frontend.Emit.GUI do
   end
 
   # Checks for :gutter_icon annotations when no diagnostic or git sign is present.
-  @spec resolve_annotation_entry(non_neg_integer(), Minga.Buffer.Decorations.t()) ::
+  @spec resolve_annotation_entry(non_neg_integer(), Minga.Core.Decorations.t()) ::
           ProtocolGUI.gutter_entry()
   defp resolve_annotation_entry(buf_line, decorations) do
     icons =
       decorations
-      |> Minga.Buffer.Decorations.annotations_for_line(buf_line)
+      |> Minga.Core.Decorations.annotations_for_line(buf_line)
       |> Enum.filter(fn ann -> ann.kind == :gutter_icon end)
 
     case icons do
@@ -1034,8 +1034,8 @@ defmodule Minga.Frontend.Emit.GUI do
 
     {title, lines} =
       try do
-        name = BufferServer.buffer_name(window.buffer)
-        snapshot = BufferServer.render_snapshot(window.buffer, 0, interior_h)
+        name = Buffer.buffer_name(window.buffer)
+        snapshot = Buffer.render_snapshot(window.buffer, 0, interior_h)
         trimmed = Enum.map(snapshot.lines, &String.slice(&1, 0, interior_w))
         {name, trimmed}
       catch

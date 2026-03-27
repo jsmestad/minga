@@ -7,7 +7,7 @@ defmodule Minga.Editor.FileWatcherHelpers do
   ignore the event. Also provides helpers for watching new buffers.
   """
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Editor.State, as: EditorState
   alias Minga.FileWatcher
 
@@ -40,7 +40,7 @@ defmodule Minga.Editor.FileWatcherHelpers do
   def maybe_watch_buffer(nil), do: :ok
 
   def maybe_watch_buffer(buf) do
-    case {watcher_pid(), BufferServer.file_path(buf)} do
+    case {watcher_pid(), Buffer.file_path(buf)} do
       {nil, _} -> :ok
       {_, nil} -> :ok
       {watcher, path} -> FileWatcher.watch_path(watcher, path)
@@ -65,7 +65,7 @@ defmodule Minga.Editor.FileWatcherHelpers do
   defp handle_change(state, _buf, _path, %{mtime: mtime, file_size: size}, mtime, size), do: state
 
   defp handle_change(state, buf, path, %{dirty: false}, _mtime, _size) do
-    BufferServer.reload(buf)
+    Buffer.reload(buf)
     name = Path.basename(path)
     EditorState.set_status(state, "#{name} reloaded (changed on disk)")
   end
@@ -83,7 +83,7 @@ defmodule Minga.Editor.FileWatcherHelpers do
 
     Enum.find(buffers, fn buf ->
       try do
-        BufferServer.file_path(buf) == expanded
+        Buffer.file_path(buf) == expanded
       catch
         :exit, _ -> false
       end

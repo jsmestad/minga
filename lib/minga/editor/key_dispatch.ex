@@ -9,8 +9,8 @@ defmodule Minga.Editor.KeyDispatch do
   Extracted from `Minga.Editor` to reduce GenServer module size.
   """
 
-  alias Minga.Buffer.Server, as: BufferServer
-  alias Minga.Config.Advice, as: ConfigAdvice
+  alias Minga.Buffer
+  alias Minga.Config
 
   alias Minga.Editing.Model.Vim, as: VimModel
   alias Minga.Editor.BufferLifecycle
@@ -70,7 +70,7 @@ defmodule Minga.Editor.KeyDispatch do
     # Fire mode change hook and break undo coalescing.
     if old_mode != new_mode do
       if base_state.workspace.buffers.active,
-        do: BufferServer.break_undo_coalescing(base_state.workspace.buffers.active)
+        do: Buffer.break_undo_coalescing(base_state.workspace.buffers.active)
 
       Minga.Events.broadcast(:mode_changed, %Minga.Events.ModeEvent{old: old_mode, new: new_mode})
     end
@@ -125,7 +125,7 @@ defmodule Minga.Editor.KeyDispatch do
       end
     end
 
-    result = ConfigAdvice.wrap(cmd_name, execute).(state)
+    result = Config.wrap_with_advice(cmd_name, execute).(state)
 
     BufferLifecycle.lsp_after_command(result, cmd, old_buffer)
   end
@@ -161,7 +161,7 @@ defmodule Minga.Editor.KeyDispatch do
         :error -> state.workspace.buffers.active
       end
 
-    buf != nil and BufferServer.read_only?(buf)
+    buf != nil and Buffer.read_only?(buf)
   catch
     :exit, _ -> false
   end
@@ -215,7 +215,7 @@ defmodule Minga.Editor.KeyDispatch do
   defp active_filetype(%{workspace: %{buffers: %{active: nil}}}), do: :text
 
   defp active_filetype(%{workspace: %{buffers: %{active: buf}}}) do
-    BufferServer.filetype(buf)
+    Buffer.filetype(buf)
   catch
     :exit, _ -> :text
   end

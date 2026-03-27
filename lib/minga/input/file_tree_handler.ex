@@ -10,12 +10,12 @@ defmodule Minga.Input.FileTreeHandler do
 
   @behaviour Minga.Input.Handler
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Editor.Commands
   alias Minga.Editor.Layout
   alias Minga.Editor.State, as: EditorState
   alias Minga.Input
-  alias Minga.Keymap.Scope
+  alias Minga.Keymap
   alias Minga.Project.FileTree
   @impl true
   @spec handle_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
@@ -95,7 +95,7 @@ defmodule Minga.Input.FileTreeHandler do
       vim_state =
         if Minga.Editing.active_model(state) == Minga.Editing.Model.CUA, do: :cua, else: :normal
 
-      case Scope.resolve_key(:file_tree, vim_state, key) do
+      case Keymap.resolve_scoped_key(:file_tree, vim_state, key) do
         {:command, command} ->
           {:handled, Commands.execute(state, command)}
 
@@ -144,7 +144,7 @@ defmodule Minga.Input.FileTreeHandler do
 
   @spec sync_tree_cursor_from_buffer(EditorState.t(), pid()) :: EditorState.t()
   defp sync_tree_cursor_from_buffer(%{workspace: %{file_tree: %{tree: tree}}} = state, buf) do
-    {cursor_line, _col} = BufferServer.cursor(buf)
+    {cursor_line, _col} = Buffer.cursor(buf)
     entries = FileTree.visible_entries(tree)
     max_cursor = max(length(entries) - 1, 0)
     clamped = min(cursor_line, max_cursor)

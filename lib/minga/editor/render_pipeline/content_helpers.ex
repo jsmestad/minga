@@ -9,28 +9,26 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
   Extracted from `RenderPipeline` to reduce module size.
   """
 
-  alias Minga.Buffer.Decorations
-  alias Minga.Buffer.Decorations.ConcealRange
-  alias Minga.Buffer.Decorations.FoldRegion
-  alias Minga.Buffer.Document
-  alias Minga.Buffer.Server, as: BufferServer
-  alias Minga.Buffer.Unicode
-  alias Minga.Config.Options
+  alias Minga.Buffer
+  alias Minga.Config
+  alias Minga.Core.Decorations
+  alias Minga.Core.Decorations.ConcealRange
+  alias Minga.Core.Decorations.FoldRegion
+  alias Minga.Core.Face
+  alias Minga.Core.Unicode
   alias Minga.Diagnostics
   alias Minga.Editor.DisplayList
+  alias Minga.Editor.RenderPosition
   alias Minga.Editor.Renderer.BufferLine
   alias Minga.Editor.Renderer.Context
   alias Minga.Editor.Renderer.Gutter
   alias Minga.Editor.Renderer.SearchHighlight
-  alias Minga.Editor.RenderPosition
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Window
   alias Minga.Editor.WrapMap
-  alias Minga.Git.Buffer, as: GitBuffer
-  alias Minga.Git.Tracker, as: GitTracker
+  alias Minga.Git
   alias Minga.LSP.SyncServer
   alias Minga.Mode.VisualState
-  alias Minga.UI.Face
   alias Minga.UI.Highlight
 
   @type state :: EditorState.t()
@@ -113,7 +111,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
       end
 
     cursorline_bg =
-      if is_active and Options.get(:cursorline) do
+      if is_active and Config.get(:cursorline) do
         state.theme.editor.cursorline_bg
       else
         nil
@@ -814,7 +812,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
   @doc "Returns the decorations for a window's buffer."
   @spec window_decorations(Window.t()) :: Decorations.t()
   def window_decorations(%{buffer: buf}) when is_pid(buf) do
-    BufferServer.decorations(buf)
+    Buffer.decorations(buf)
     |> Decorations.build_vt_line_cache()
   catch
     :exit, _ -> Decorations.new()
@@ -854,13 +852,13 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
   @doc "Returns git signs for a window's buffer."
   @spec git_signs_for_window(state(), Window.t()) :: %{non_neg_integer() => atom()}
   def git_signs_for_window(_state, %{buffer: buf}) when is_pid(buf) do
-    case GitTracker.lookup(buf) do
+    case Git.tracking_pid(buf) do
       nil ->
         %{}
 
       git_pid ->
         try do
-          GitBuffer.signs(git_pid)
+          Git.gutter_signs(git_pid)
         catch
           :exit, _ -> %{}
         end
@@ -870,7 +868,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
   @doc "Returns diagnostic signs for a window's buffer."
   @spec diagnostic_signs_for_window(state(), Window.t()) :: %{non_neg_integer() => atom()}
   def diagnostic_signs_for_window(_state, %{buffer: buf}) when is_pid(buf) do
-    case BufferServer.file_path(buf) do
+    case Buffer.file_path(buf) do
       nil -> %{}
       path -> Diagnostics.severity_by_line(SyncServer.path_to_uri(path))
     end
@@ -881,7 +879,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
   @doc "Computes visual selection bounds in display columns."
   @spec visual_selection_grapheme_bounds(
           state(),
-          Document.position(),
+          Buffer.position(),
           [String.t()],
           non_neg_integer()
         ) :: visual_selection()
@@ -903,7 +901,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
   end
 
   @doc "Computes raw visual selection bounds (byte columns)."
-  @spec visual_selection_bounds(state(), Document.position()) :: visual_selection()
+  @spec visual_selection_bounds(state(), Buffer.position()) :: visual_selection()
   def visual_selection_bounds(
         %{workspace: %{editing: %{mode: :visual, mode_state: %VisualState{} = ms}}},
         cursor
@@ -955,7 +953,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
 
   @spec wrap_option(pid(), atom()) :: boolean()
   defp wrap_option(buf, name) do
-    BufferServer.get_option(buf, name)
+    Buffer.get_option(buf, name)
   catch
     :exit, _ -> true
   end
@@ -983,8 +981,8 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
     Unicode.display_col(line_text, next_byte)
   end
 
-  @spec sort_positions(Document.position(), Document.position()) ::
-          {Document.position(), Document.position()}
+  @spec sort_positions(Buffer.position(), Buffer.position()) ::
+          {Buffer.position(), Buffer.position()}
   defp sort_positions({l1, c1} = p1, {l2, c2} = p2) do
     if {l1, c1} <= {l2, c2}, do: {p1, p2}, else: {p2, p1}
   end

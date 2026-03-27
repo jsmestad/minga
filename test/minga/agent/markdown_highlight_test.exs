@@ -2,7 +2,7 @@ defmodule Minga.Agent.MarkdownHighlightTest do
   use ExUnit.Case, async: true
 
   alias Minga.Agent.MarkdownHighlight
-  alias Minga.UI.Face
+  alias Minga.Core.Face
   alias Minga.UI.Highlight
 
   defp make_highlight(attrs) do
@@ -13,7 +13,7 @@ defmodule Minga.Agent.MarkdownHighlightTest do
       spans: Keyword.get(attrs, :spans, {}),
       capture_names: attrs |> Keyword.get(:capture_names, []) |> List.to_tuple(),
       theme: theme,
-      face_registry: Face.Registry.from_syntax(theme)
+      face_registry: Minga.UI.Face.Registry.from_syntax(theme)
     }
   end
 

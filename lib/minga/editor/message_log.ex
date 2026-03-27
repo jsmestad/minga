@@ -14,8 +14,8 @@ defmodule Minga.Editor.MessageLog do
   Extracted from `Minga.Editor` to reduce GenServer module size.
   """
 
+  alias Minga.Buffer
   alias Minga.Buffer.Document
-  alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.State, as: EditorState
   alias Minga.UI.Panel.MessageStore
 
@@ -54,7 +54,7 @@ defmodule Minga.Editor.MessageLog do
       end
 
     time = Calendar.strftime(DateTime.utc_now(), "%H:%M:%S")
-    BufferServer.append(buf, "[#{time}] #{display_text}\n")
+    Buffer.append(buf, "[#{time}] #{display_text}\n")
     maybe_trim(buf)
 
     # Dual-write: also append to the structured store for GUI rendering.
@@ -70,11 +70,11 @@ defmodule Minga.Editor.MessageLog do
 
   @spec maybe_trim(pid()) :: :ok
   defp maybe_trim(buf) do
-    line_count = BufferServer.line_count(buf)
+    line_count = Buffer.line_count(buf)
 
     if line_count > @max_lines do
       excess = line_count - @max_lines
-      content = BufferServer.content(buf)
+      content = Buffer.content(buf)
       lines = String.split(content, "\n")
       trimmed = lines |> Enum.drop(excess) |> Enum.join("\n")
 

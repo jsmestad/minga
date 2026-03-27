@@ -6,8 +6,8 @@ defmodule Minga.Editor.Commands.Marks do
 
   @behaviour Minga.Command.Provider
 
+  alias Minga.Buffer
   alias Minga.Buffer.Document
-  alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.Commands.Helpers
   alias Minga.Editor.State, as: EditorState
   alias Minga.Mode
@@ -26,7 +26,7 @@ defmodule Minga.Editor.Commands.Marks do
         {:set_mark, char}
       )
       when is_binary(char) and is_pid(buf) do
-    pos = BufferServer.cursor(buf)
+    pos = Buffer.cursor(buf)
     buf_marks = Map.get(marks, buf, %{})
     new_marks = Map.put(marks, buf, Map.put(buf_marks, char, pos))
 
@@ -48,11 +48,11 @@ defmodule Minga.Editor.Commands.Marks do
         state
 
       {mark_line, _mark_col} ->
-        current_pos = BufferServer.cursor(buf)
-        {content, _} = BufferServer.content_and_cursor(buf)
+        current_pos = Buffer.cursor(buf)
+        {content, _} = Buffer.content_and_cursor(buf)
         tmp_buf = Document.new(content)
         target = Minga.Editing.first_non_blank(tmp_buf, {mark_line, 0})
-        BufferServer.move_to(buf, target)
+        Buffer.move_to(buf, target)
         Helpers.save_jump_pos(state, current_pos, target)
     end
   end
@@ -69,8 +69,8 @@ defmodule Minga.Editor.Commands.Marks do
         state
 
       mark_pos ->
-        current_pos = BufferServer.cursor(buf)
-        BufferServer.move_to(buf, mark_pos)
+        current_pos = Buffer.cursor(buf)
+        Buffer.move_to(buf, mark_pos)
         Helpers.save_jump_pos(state, current_pos, mark_pos)
     end
   end
@@ -80,12 +80,12 @@ defmodule Minga.Editor.Commands.Marks do
         :jump_to_last_pos_line
       )
       when is_pid(buf) and not is_nil(last_pos) do
-    current_pos = BufferServer.cursor(buf)
+    current_pos = Buffer.cursor(buf)
     {last_line, _} = last_pos
-    {content, _} = BufferServer.content_and_cursor(buf)
+    {content, _} = Buffer.content_and_cursor(buf)
     tmp_buf = Document.new(content)
     target = Minga.Editing.first_non_blank(tmp_buf, {last_line, 0})
-    BufferServer.move_to(buf, target)
+    Buffer.move_to(buf, target)
 
     %{
       state
@@ -103,8 +103,8 @@ defmodule Minga.Editor.Commands.Marks do
         :jump_to_last_pos_exact
       )
       when is_pid(buf) and not is_nil(last_pos) do
-    current_pos = BufferServer.cursor(buf)
-    BufferServer.move_to(buf, last_pos)
+    current_pos = Buffer.cursor(buf)
+    Buffer.move_to(buf, last_pos)
 
     %{
       state

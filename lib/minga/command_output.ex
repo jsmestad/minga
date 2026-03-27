@@ -4,7 +4,7 @@ defmodule Minga.CommandOutput do
 
   Each named output (e.g., `"*test*"`) is a GenServer that owns an Erlang
   Port running the command. stdout and stderr are streamed line-by-line
-  into a `:nowrite` BufferServer. If a command with the same name is already
+  into a `:nowrite` Buffer. If a command with the same name is already
   running, it is killed before starting the new one.
 
   This is a generic primitive reusable for test runners, build commands,
@@ -13,7 +13,7 @@ defmodule Minga.CommandOutput do
 
   use GenServer
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
 
   @type t :: %__MODULE__{
           name: String.t(),
@@ -118,7 +118,7 @@ defmodule Minga.CommandOutput do
 
     # Clear the buffer and write a header
     cwd = Keyword.get(opts, :cwd, Minga.Project.root() || ".")
-    BufferServer.replace_content_force(state.buffer, "$ #{command}\n\n")
+    Buffer.replace_content_force(state.buffer, "$ #{command}\n\n")
 
     port =
       Port.open({:spawn, command}, [
@@ -149,13 +149,13 @@ defmodule Minga.CommandOutput do
 
   @impl true
   def handle_info({port, {:data, data}}, %{port: port} = state) when is_binary(data) do
-    if state.buffer, do: BufferServer.append(state.buffer, data)
+    if state.buffer, do: Buffer.append(state.buffer, data)
     {:noreply, state}
   end
 
   def handle_info({port, {:exit_status, code}}, %{port: port} = state) do
     if state.buffer do
-      BufferServer.append(state.buffer, "\n\n[Process exited with code #{code}]")
+      Buffer.append(state.buffer, "\n\n[Process exited with code #{code}]")
     end
 
     Minga.Events.broadcast(
@@ -191,7 +191,7 @@ defmodule Minga.CommandOutput do
 
   @spec ensure_buffer(t()) :: t()
   defp ensure_buffer(%{buffer: buf} = state) when is_pid(buf) do
-    BufferServer.buffer_name(buf)
+    Buffer.buffer_name(buf)
     state
   catch
     # Liveness probe: the monitor handles the common case, but there's a narrow
@@ -208,7 +208,7 @@ defmodule Minga.CommandOutput do
 
     case DynamicSupervisor.start_child(
            Minga.Buffer.Supervisor,
-           {BufferServer,
+           {Minga.Buffer,
             buffer_name: state.name,
             content: "",
             read_only: true,

@@ -19,7 +19,7 @@ defmodule Minga.Editor.Title do
   | `{bufname}`     | Same as `{filename}` (backward compat)        |
   """
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Editor.State, as: EditorState
 
   @typedoc "Editor state (same as Minga.Editor.State.t())."
@@ -114,9 +114,9 @@ defmodule Minga.Editor.Title do
 
   @spec build_vars_from_buffer(pid(), atom()) :: [{String.t(), String.t()}]
   defp build_vars_from_buffer(buf, mode) do
-    path = BufferServer.file_path(buf)
-    dirty = BufferServer.dirty?(buf)
-    name = BufferServer.buffer_name(buf)
+    path = Buffer.file_path(buf)
+    dirty = Buffer.dirty?(buf)
+    name = Buffer.buffer_name(buf)
 
     filename = if path, do: Path.basename(path), else: name || "[no file]"
     directory = if path, do: path |> Path.dirname() |> Path.basename(), else: ""
@@ -149,7 +149,7 @@ defmodule Minga.Editor.Title do
 
   @spec buffer_filepath(EditorState.t()) :: String.t()
   defp buffer_filepath(%{workspace: %{buffers: %{active: buf}}}) when is_pid(buf) do
-    BufferServer.file_path(buf) || ""
+    Buffer.file_path(buf) || ""
   end
 
   defp buffer_filepath(_), do: ""

@@ -31,7 +31,7 @@ defmodule Minga.Editor.State do
 
   alias Minga.Agent.Session, as: AgentSession
   alias Minga.Agent.UIState
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
 
   alias Minga.Editor.BottomPanel
   alias Minga.Editor.CompletionTrigger
@@ -357,7 +357,7 @@ defmodule Minga.Editor.State do
   def find_buffer_by_path(%{workspace: %{buffers: %{list: buffers}}}, file_path) do
     Enum.find_index(buffers, fn buf ->
       try do
-        BufferServer.file_path(buf) == file_path
+        Buffer.file_path(buf) == file_path
       catch
         :exit, _ -> false
       end
@@ -369,7 +369,7 @@ defmodule Minga.Editor.State do
   def start_buffer(file_path) do
     DynamicSupervisor.start_child(
       Minga.Buffer.Supervisor,
-      {BufferServer, file_path: file_path}
+      {Minga.Buffer, file_path: file_path}
     )
   end
 
@@ -511,10 +511,10 @@ defmodule Minga.Editor.State do
   @spec buffer_content_context(t()) :: content_context()
   defp buffer_content_context(%__MODULE__{workspace: %{buffers: %{active: buf}}})
        when is_pid(buf) do
-    path = BufferServer.file_path(buf)
-    name = BufferServer.buffer_name(buf)
-    dirty = BufferServer.dirty?(buf)
-    filetype = BufferServer.filetype(buf)
+    path = Buffer.file_path(buf)
+    name = Buffer.buffer_name(buf)
+    dirty = Buffer.dirty?(buf)
+    filetype = Buffer.filetype(buf)
 
     display_name = if path, do: Path.basename(path), else: name || "[no file]"
     directory = if path, do: path |> Path.dirname() |> Path.basename(), else: ""
@@ -634,7 +634,7 @@ defmodule Minga.Editor.State do
         state
 
       {win_id, window} ->
-        total_lines = BufferServer.line_count(window.buffer)
+        total_lines = Buffer.line_count(window.buffer)
         updated = Window.scroll_viewport(window, delta, total_lines)
         update_window(state, win_id, fn _ -> updated end)
     end
@@ -845,7 +845,7 @@ defmodule Minga.Editor.State do
       ) do
     case Map.fetch(windows, id) do
       {:ok, window} ->
-        cursor = BufferServer.cursor(buf)
+        cursor = Buffer.cursor(buf)
 
         %{
           state
@@ -885,11 +885,11 @@ defmodule Minga.Editor.State do
     case {Map.fetch(windows, old_id), Map.fetch(windows, target_id)} do
       {{:ok, old_win}, {:ok, target_win}} ->
         # Save current cursor to outgoing window
-        current_cursor = BufferServer.cursor(buffers.active)
+        current_cursor = Buffer.cursor(buffers.active)
         windows = Map.put(windows, old_id, %{old_win | cursor: current_cursor})
 
         # Restore target window's cursor into its buffer
-        BufferServer.move_to(target_win.buffer, target_win.cursor)
+        Buffer.move_to(target_win.buffer, target_win.cursor)
 
         # Derive keymap_scope from the target window's content type.
         # Agent chat windows use :agent scope; buffer windows use the
@@ -944,9 +944,9 @@ defmodule Minga.Editor.State do
 
   @spec live_buffer_label(pid()) :: String.t()
   defp live_buffer_label(pid) do
-    case BufferServer.buffer_name(pid) do
+    case Buffer.buffer_name(pid) do
       nil ->
-        case BufferServer.file_path(pid) do
+        case Buffer.file_path(pid) do
           nil -> "[no file]"
           path -> Path.basename(path)
         end

@@ -1,4 +1,4 @@
-defmodule Minga.Buffer.Decorations.FoldRegion do
+defmodule Minga.Core.Decorations.FoldRegion do
   @moduledoc """
   A buffer-level fold region decoration: a collapsible range with a
   custom placeholder.
@@ -29,7 +29,7 @@ defmodule Minga.Buffer.Decorations.FoldRegion do
   """
   @type placeholder_fn ::
           (non_neg_integer(), non_neg_integer(), pos_integer() ->
-             [{String.t(), Minga.UI.Face.t()}])
+             [{String.t(), Minga.Core.Face.t()}])
           | nil
 
   @type t :: %__MODULE__{

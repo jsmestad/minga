@@ -12,9 +12,8 @@ defmodule Minga.Editor.MinibufferData do
   """
 
   alias Minga.Command
-  alias Minga.Command.Registry, as: CommandRegistry
   alias Minga.Editor.State, as: EditorState
-  alias Minga.Keymap.Defaults
+  alias Minga.Keymap
   alias Minga.UI.WhichKey
 
   # ── Types ──────────────────────────────────────────────────────────────────
@@ -243,7 +242,7 @@ defmodule Minga.Editor.MinibufferData do
     keybind_map = build_keybind_map()
 
     matched =
-      CommandRegistry.all(CommandRegistry)
+      Command.all_commands()
       |> Enum.map(fn %Command{} = cmd ->
         name = to_string(cmd.name)
         score = fuzzy_score(name, input_lower)
@@ -276,7 +275,7 @@ defmodule Minga.Editor.MinibufferData do
     popular = ~w(write quit edit save-buffer find-file split vsplit set help)a
     keybind_map = build_keybind_map()
 
-    all = CommandRegistry.all(CommandRegistry)
+    all = Command.all_commands()
     total = length(all)
 
     popular_cmds =
@@ -355,7 +354,7 @@ defmodule Minga.Editor.MinibufferData do
   # Uses WhichKey.format_key for proper display (SPC, C-s, etc.).
   @spec build_keybind_map() :: %{atom() => String.t()}
   defp build_keybind_map do
-    Defaults.all_bindings()
+    Keymap.default_bindings()
     |> Enum.into(%{}, fn {keys, command, _desc} ->
       key_str = Enum.map_join(keys, " ", &WhichKey.format_key/1)
       {command, key_str}

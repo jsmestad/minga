@@ -10,9 +10,9 @@ defmodule Minga.Editor.RenderPipeline.Scroll do
   tracking fields from the previous frame.
   """
 
-  alias Minga.Buffer.Decorations
-  alias Minga.Buffer.Server, as: BufferServer
-  alias Minga.Buffer.Unicode
+  alias Minga.Buffer
+  alias Minga.Core.Decorations
+  alias Minga.Core.Unicode
   alias Minga.Editor.DisplayMap
   alias Minga.Editor.FoldMap
   alias Minga.Editor.FoldMap.VisibleLines
@@ -242,7 +242,7 @@ defmodule Minga.Editor.RenderPipeline.Scroll do
     # The DisplayMap merges per-window folds, decoration folds, and virtual
     # lines into a unified mapping. Falls back to VisibleLines when there
     # are no decoration folds or virtual lines (pure window-fold case).
-    line_count_approx = BufferServer.line_count(window.buffer)
+    line_count_approx = Buffer.line_count(window.buffer)
     decorations = fetch_decorations(window.buffer)
 
     # Two-pass scroll: compute DisplayMap, then verify cursor is visible.
@@ -270,7 +270,7 @@ defmodule Minga.Editor.RenderPipeline.Scroll do
           {buf_first, buf_last - buf_first + 1}
       end
 
-    snapshot = BufferServer.render_snapshot(window.buffer, fetch_first, fetch_count)
+    snapshot = Buffer.render_snapshot(window.buffer, fetch_first, fetch_count)
     lines = snapshot.lines
     line_count = snapshot.line_count
 
@@ -279,7 +279,7 @@ defmodule Minga.Editor.RenderPipeline.Scroll do
     cursor_col = Unicode.display_col(cursor_line_text, cursor_byte_col)
 
     # Gutter dimensions
-    line_number_style = BufferServer.get_option(window.buffer, :line_numbers)
+    line_number_style = Buffer.get_option(window.buffer, :line_numbers)
 
     {has_sign_column, gutter_w} =
       gutter_dimensions(state, window.buffer, line_number_style, line_count)
@@ -326,7 +326,7 @@ defmodule Minga.Editor.RenderPipeline.Scroll do
 
   @spec fetch_decorations(pid()) :: Decorations.t()
   defp fetch_decorations(buf) do
-    BufferServer.decorations(buf)
+    Buffer.decorations(buf)
   catch
     :exit, _ -> Decorations.new()
   end
@@ -369,7 +369,7 @@ defmodule Minga.Editor.RenderPipeline.Scroll do
   end
 
   @spec window_cursor(Window.t(), boolean()) :: {non_neg_integer(), non_neg_integer()}
-  defp window_cursor(window, true), do: BufferServer.cursor(window.buffer)
+  defp window_cursor(window, true), do: Buffer.cursor(window.buffer)
   defp window_cursor(window, false), do: window.cursor
 
   @spec scroll_horizontal(
@@ -396,7 +396,7 @@ defmodule Minga.Editor.RenderPipeline.Scroll do
 
   @spec wrap_enabled?(pid()) :: boolean()
   defp wrap_enabled?(buf) do
-    BufferServer.get_option(buf, :wrap)
+    Buffer.get_option(buf, :wrap)
   catch
     :exit, _ -> false
   end

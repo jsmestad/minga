@@ -21,7 +21,7 @@ defmodule Minga.Input.CUA.Dispatch do
 
   @behaviour Minga.Input.Handler
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Editor.Commands
   alias Minga.Editor.Mouse
   alias Minga.Editor.State, as: EditorState
@@ -38,7 +38,7 @@ defmodule Minga.Input.CUA.Dispatch do
 
     # Break undo coalescing on Enter so each line is a separate undo step
     if codepoint == 0x0D and state.workspace.buffers.active do
-      BufferServer.break_undo_coalescing(state.workspace.buffers.active)
+      Buffer.break_undo_coalescing(state.workspace.buffers.active)
     end
 
     state =

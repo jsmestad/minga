@@ -18,14 +18,14 @@ defmodule Minga.Editor.TabBarRenderer do
   blank (fg matches bg). Tab widths are stable regardless of hover state.
   """
 
-  alias Minga.Buffer.Server, as: BufferServer
-  alias Minga.Buffer.Unicode
+  alias Minga.Buffer
+  alias Minga.Core.Face
+  alias Minga.Core.Unicode
   alias Minga.Editor.DisplayList
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
-  alias Minga.Language.Filetype
+  alias Minga.Language
   alias Minga.UI.Devicon
-  alias Minga.UI.Face
   alias Minga.UI.Theme
 
   @typedoc "A clickable region: column range mapping to a command."
@@ -409,7 +409,7 @@ defmodule Minga.Editor.TabBarRenderer do
 
   @spec tab_icon(Tab.t()) :: String.t()
   defp tab_icon(%Tab{kind: :agent}), do: Devicon.icon(:agent)
-  defp tab_icon(%Tab{kind: :file, label: label}), do: Devicon.icon(Filetype.detect(label))
+  defp tab_icon(%Tab{kind: :file, label: label}), do: Devicon.icon(Language.detect_filetype(label))
 
   @spec tab_label(Tab.t()) :: String.t()
   defp tab_label(%Tab{label: ""}), do: "[No Name]"
@@ -421,7 +421,7 @@ defmodule Minga.Editor.TabBarRenderer do
 
     if is_pid(buf) do
       try do
-        if BufferServer.dirty?(buf), do: " ●", else: ""
+        if Buffer.dirty?(buf), do: " ●", else: ""
       catch
         :exit, _ -> ""
       end

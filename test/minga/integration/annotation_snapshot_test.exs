@@ -8,8 +8,8 @@ defmodule Minga.Integration.AnnotationSnapshotTest do
 
   use Minga.Test.EditorCase, async: true
 
-  alias Minga.Buffer.Decorations
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Core.Decorations
 
   describe "line annotations" do
     test "inline pill renders with background after line content" do
@@ -93,7 +93,7 @@ defmodule Minga.Integration.AnnotationSnapshotTest do
       BufferServer.batch_decorations(ctx.buffer, fn decs ->
         {_id, decs} =
           Decorations.add_virtual_text(decs, {0, 0},
-            segments: [{"← hint", Minga.UI.Face.new(fg: 0x555555, italic: true)}],
+            segments: [{"← hint", Minga.Core.Face.new(fg: 0x555555, italic: true)}],
             placement: :eol,
             group: :test_hints
           )

@@ -1,6 +1,6 @@
 defmodule Minga.Agent.BufferSync do
   @moduledoc """
-  Syncs agent conversation messages into a `*Agent*` BufferServer.
+  Syncs agent conversation messages into a `*Agent*` Buffer.
 
   Converts the session's message list into markdown text and writes
   it into the buffer. The buffer provides a vim-navigable view of
@@ -8,7 +8,7 @@ defmodule Minga.Agent.BufferSync do
   """
 
   alias Minga.Agent.ChatDecorations
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
 
   @doc """
   Starts the `*Agent*` buffer.
@@ -19,7 +19,7 @@ defmodule Minga.Agent.BufferSync do
   """
   @spec start_buffer() :: pid() | nil
   def start_buffer do
-    case BufferServer.start_link(
+    case Buffer.start_link(
            content: "",
            buffer_type: :nofile,
            buffer_name: "*Agent*",
@@ -29,11 +29,11 @@ defmodule Minga.Agent.BufferSync do
            persistent: true
          ) do
       {:ok, pid} ->
-        BufferServer.set_option(pid, :line_numbers, :none)
+        Buffer.set_option(pid, :line_numbers, :none)
         # Word wrapping is desired but currently mutually exclusive with
         # DisplayMap (block decorations). Leave off until that interaction
         # is resolved. See render_pipeline/content.ex line ~135.
-        # BufferServer.set_option(pid, :wrap, true)
+        # Buffer.set_option(pid, :wrap, true)
         pid
 
       _ ->
@@ -76,7 +76,7 @@ defmodule Minga.Agent.BufferSync do
     last_line = max(length(text_lines) - 1, 0)
 
     try do
-      BufferServer.replace_content_with_decorations(
+      Buffer.replace_content_with_decorations(
         pid,
         text,
         fn decs ->
@@ -92,7 +92,7 @@ defmodule Minga.Agent.BufferSync do
         )
 
         # Fallback: at least replace content
-        BufferServer.replace_content_force(pid, text)
+        Buffer.replace_content_force(pid, text)
     end
 
     # Return the line index, reusing the already-computed text and offsets

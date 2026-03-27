@@ -8,11 +8,11 @@ defmodule Minga.UI.Picker.ProjectSearchSource do
 
   @behaviour Minga.UI.Picker.Source
 
+  alias Minga.Language
   alias Minga.UI.Picker.Item
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Editor.State, as: EditorState
-  alias Minga.Language.Filetype
   alias Minga.UI.Devicon
   alias Minga.UI.Picker.Source
 
@@ -31,7 +31,7 @@ defmodule Minga.UI.Picker.ProjectSearchSource do
     |> Enum.with_index()
     |> Enum.map(fn {match, idx} ->
       filename = Path.basename(match.file)
-      ft = Filetype.detect(filename)
+      ft = Language.detect_filetype(filename)
       {icon, color} = Devicon.icon_and_color(ft)
       label = "#{icon} #{match.file}:#{match.line}"
       desc = String.trim(match.text)
@@ -70,7 +70,7 @@ defmodule Minga.UI.Picker.ProjectSearchSource do
     case EditorState.start_buffer(abs_path) do
       {:ok, pid} ->
         new_state = EditorState.add_buffer(state, pid)
-        BufferServer.move_to(pid, {line, col})
+        Buffer.move_to(pid, {line, col})
         new_state
 
       {:error, reason} ->
@@ -83,7 +83,7 @@ defmodule Minga.UI.Picker.ProjectSearchSource do
   defp jump_to_buffer(state, buf_idx, line, col) do
     new_state = EditorState.switch_buffer(state, buf_idx)
     pid = Enum.at(state.workspace.buffers.list, buf_idx)
-    BufferServer.move_to(pid, {line, col})
+    Buffer.move_to(pid, {line, col})
     new_state
   end
 

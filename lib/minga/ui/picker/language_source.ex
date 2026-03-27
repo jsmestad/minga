@@ -10,10 +10,9 @@ defmodule Minga.UI.Picker.LanguageSource do
 
   @behaviour Minga.UI.Picker.Source
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Editor.Commands.BufferManagement
   alias Minga.Language
-  alias Minga.Language.Registry, as: LangRegistry
   alias Minga.UI.Devicon
   alias Minga.UI.Picker.Item
 
@@ -26,7 +25,7 @@ defmodule Minga.UI.Picker.LanguageSource do
   def candidates(state) do
     current_ft = current_filetype(state)
 
-    LangRegistry.all()
+    Language.all()
     |> Enum.map(fn %Language{} = lang -> format_candidate(lang, current_ft) end)
     |> Enum.sort_by(& &1.label)
   end
@@ -68,7 +67,7 @@ defmodule Minga.UI.Picker.LanguageSource do
 
   @spec current_filetype(term()) :: atom()
   defp current_filetype(%{workspace: %{buffers: %{active: buf}}}) when is_pid(buf) do
-    BufferServer.filetype(buf)
+    Buffer.filetype(buf)
   catch
     :exit, _ -> :text
   end

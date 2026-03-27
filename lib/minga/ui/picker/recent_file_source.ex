@@ -8,10 +8,10 @@ defmodule Minga.UI.Picker.RecentFileSource do
 
   @behaviour Minga.UI.Picker.Source
 
+  alias Minga.Language
   alias Minga.UI.Picker.Item
 
   alias Minga.Editor.State, as: EditorState
-  alias Minga.Language.Filetype
   alias Minga.Project
   alias Minga.UI.Devicon
   alias Minga.UI.Picker.Source
@@ -32,7 +32,7 @@ defmodule Minga.UI.Picker.RecentFileSource do
     Enum.map(files, fn rel_path ->
       filename = Path.basename(rel_path)
       dir = Path.dirname(rel_path)
-      ft = Filetype.detect(filename)
+      ft = Language.detect_filetype(filename)
       {icon, color} = Devicon.icon_and_color(ft)
       dir_display = if dir == ".", do: "", else: dir
 

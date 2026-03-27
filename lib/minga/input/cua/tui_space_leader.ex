@@ -27,10 +27,10 @@ defmodule Minga.Input.CUA.TUISpaceLeader do
 
   @behaviour Minga.Input.Handler
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Editor.Commands
   alias Minga.Editor.State, as: EditorState
-  alias Minga.Keymap.Active, as: KeymapActive
+  alias Minga.Keymap
   alias Minga.Keymap.Bindings
 
   @space 32
@@ -48,7 +48,7 @@ defmodule Minga.Input.CUA.TUISpaceLeader do
 
       if is_pid(buf) do
         try do
-          BufferServer.insert_char(buf, " ")
+          Buffer.insert_char(buf, " ")
         catch
           :exit, _ -> :ok
         end
@@ -116,7 +116,7 @@ defmodule Minga.Input.CUA.TUISpaceLeader do
   @spec active?(map()) :: boolean()
   def active?(state) do
     Minga.Editing.active_model(state) == Minga.Editing.Model.CUA and
-      Minga.Config.Options.get(:space_leader) == :chord and
+      Minga.Config.get(:space_leader) == :chord and
       state.backend == :tui
   catch
     :exit, _ -> false
@@ -151,9 +151,9 @@ defmodule Minga.Input.CUA.TUISpaceLeader do
     buf = state.workspace.buffers.active
 
     if is_pid(buf) do
-      BufferServer.break_undo_coalescing(buf)
-      BufferServer.delete_before(buf)
-      BufferServer.break_undo_coalescing(buf)
+      Buffer.break_undo_coalescing(buf)
+      Buffer.delete_before(buf)
+      Buffer.break_undo_coalescing(buf)
     end
 
     state
@@ -186,7 +186,7 @@ defmodule Minga.Input.CUA.TUISpaceLeader do
 
   @spec leader_trie() :: Bindings.node_t()
   defp leader_trie do
-    KeymapActive.leader_trie()
+    Keymap.leader_trie()
   catch
     :exit, _ -> Bindings.new()
   end

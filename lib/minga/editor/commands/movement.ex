@@ -6,9 +6,9 @@ defmodule Minga.Editor.Commands.Movement do
 
   @behaviour Minga.Command.Provider
 
+  alias Minga.Buffer
   alias Minga.Buffer.Document
-  alias Minga.Buffer.Server, as: BufferServer
-  alias Minga.Buffer.Unicode
+  alias Minga.Core.Unicode
 
   alias Minga.Editor.Commands.Helpers
   alias Minga.Editor.FoldMap
@@ -76,9 +76,9 @@ defmodule Minga.Editor.Commands.Movement do
         :move_left
       ) do
     if mode in [:insert, :replace] do
-      BufferServer.move(buf, :left)
+      Buffer.move(buf, :left)
     else
-      BufferServer.move_if_possible(buf, :left)
+      Buffer.move_if_possible(buf, :left)
     end
 
     state
@@ -89,9 +89,9 @@ defmodule Minga.Editor.Commands.Movement do
         :move_right
       ) do
     if mode in [:insert, :replace] do
-      BufferServer.move(buf, :right)
+      Buffer.move(buf, :right)
     else
-      BufferServer.move_if_possible(buf, :right)
+      Buffer.move_if_possible(buf, :right)
     end
 
     state
@@ -101,7 +101,7 @@ defmodule Minga.Editor.Commands.Movement do
     if wrap_enabled?(buf) do
       visual_line_move(buf, state, :up)
     else
-      BufferServer.move(buf, :up)
+      Buffer.move(buf, :up)
       skip_folded_line(state, buf, :up)
     end
   end
@@ -110,7 +110,7 @@ defmodule Minga.Editor.Commands.Movement do
     if wrap_enabled?(buf) do
       visual_line_move(buf, state, :down)
     else
-      BufferServer.move(buf, :down)
+      Buffer.move(buf, :down)
       skip_folded_line(state, buf, :down)
     end
   end
@@ -118,12 +118,12 @@ defmodule Minga.Editor.Commands.Movement do
   # Logical line movement (gj/gk). Always moves by logical lines regardless
   # of wrap setting.
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :move_logical_down) do
-    BufferServer.move(buf, :down)
+    Buffer.move(buf, :down)
     state
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :move_logical_up) do
-    BufferServer.move(buf, :up)
+    Buffer.move(buf, :up)
     state
   end
 
@@ -200,41 +200,41 @@ defmodule Minga.Editor.Commands.Movement do
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :move_to_document_start) do
-    gb = BufferServer.snapshot(buf)
+    gb = Buffer.snapshot(buf)
     new_pos = Minga.Editing.document_start(gb)
-    BufferServer.move_to(buf, new_pos)
+    Buffer.move_to(buf, new_pos)
     state
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :move_to_document_end) do
-    gb = BufferServer.snapshot(buf)
+    gb = Buffer.snapshot(buf)
     new_pos = Minga.Editing.document_end(gb)
-    BufferServer.move_to(buf, new_pos)
+    Buffer.move_to(buf, new_pos)
     maybe_repin_agent_chat(state)
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, {:goto_line, line_num}) do
     target_line = max(0, line_num - 1)
-    BufferServer.move_to(buf, {target_line, 0})
+    Buffer.move_to(buf, {target_line, 0})
     state
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :next_line_first_non_blank) do
-    gb = BufferServer.snapshot(buf)
+    gb = Buffer.snapshot(buf)
     {line, _col} = Document.cursor(gb)
     total = Document.line_count(gb)
     next_line = min(line + 1, total - 1)
     new_pos = Minga.Editing.first_non_blank(gb, {next_line, 0})
-    BufferServer.move_to(buf, new_pos)
+    Buffer.move_to(buf, new_pos)
     state
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :prev_line_first_non_blank) do
-    gb = BufferServer.snapshot(buf)
+    gb = Buffer.snapshot(buf)
     {line, _col} = Document.cursor(gb)
     prev_line = max(line - 1, 0)
     new_pos = Minga.Editing.first_non_blank(gb, {prev_line, 0})
-    BufferServer.move_to(buf, new_pos)
+    Buffer.move_to(buf, new_pos)
     state
   end
 
@@ -300,7 +300,7 @@ defmodule Minga.Editor.Commands.Movement do
       ) do
     {first_line, _last_line} = Viewport.visible_range(vp)
     visible_rows = Viewport.content_rows(vp)
-    gb = BufferServer.snapshot(buf)
+    gb = Buffer.snapshot(buf)
     total_lines = Document.line_count(gb)
 
     target_line =
@@ -310,7 +310,7 @@ defmodule Minga.Editor.Commands.Movement do
         :bottom -> min(first_line + visible_rows - 1, total_lines - 1)
       end
 
-    BufferServer.move_to(buf, {target_line, 0})
+    Buffer.move_to(buf, {target_line, 0})
     state
   end
 
@@ -348,12 +348,12 @@ defmodule Minga.Editor.Commands.Movement do
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :scroll_down_line) do
     vp = active_viewport(state)
-    {cursor_line, cursor_col} = BufferServer.cursor(buf)
-    total_lines = BufferServer.line_count(buf)
+    {cursor_line, cursor_col} = Buffer.cursor(buf)
+    total_lines = Buffer.line_count(buf)
     {new_vp, clamped_cursor} = Viewport.scroll_line_down(vp, cursor_line, total_lines)
 
     if clamped_cursor != cursor_line do
-      BufferServer.move_to(buf, {clamped_cursor, cursor_col})
+      Buffer.move_to(buf, {clamped_cursor, cursor_col})
     end
 
     put_active_viewport(state, new_vp)
@@ -361,12 +361,12 @@ defmodule Minga.Editor.Commands.Movement do
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :scroll_up_line) do
     vp = active_viewport(state)
-    {cursor_line, cursor_col} = BufferServer.cursor(buf)
-    total_lines = BufferServer.line_count(buf)
+    {cursor_line, cursor_col} = Buffer.cursor(buf)
+    total_lines = Buffer.line_count(buf)
     {new_vp, clamped_cursor} = Viewport.scroll_line_up(vp, cursor_line, total_lines)
 
     if clamped_cursor != cursor_line do
-      BufferServer.move_to(buf, {clamped_cursor, cursor_col})
+      Buffer.move_to(buf, {clamped_cursor, cursor_col})
     end
 
     put_active_viewport(state, new_vp)
@@ -374,16 +374,16 @@ defmodule Minga.Editor.Commands.Movement do
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :scroll_center) do
     vp = active_viewport(state)
-    {cursor_line, _cursor_col} = BufferServer.cursor(buf)
-    total_lines = BufferServer.line_count(buf)
+    {cursor_line, _cursor_col} = Buffer.cursor(buf)
+    total_lines = Buffer.line_count(buf)
     new_vp = Viewport.center_on(vp, cursor_line, total_lines)
     put_active_viewport(state, new_vp)
   end
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :scroll_cursor_top) do
     vp = active_viewport(state)
-    {cursor_line, _cursor_col} = BufferServer.cursor(buf)
-    total_lines = BufferServer.line_count(buf)
+    {cursor_line, _cursor_col} = Buffer.cursor(buf)
+    total_lines = Buffer.line_count(buf)
     margin = scroll_margin(buf)
     new_vp = Viewport.top_on(vp, cursor_line, total_lines, margin)
     put_active_viewport(state, new_vp)
@@ -391,8 +391,8 @@ defmodule Minga.Editor.Commands.Movement do
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :scroll_cursor_bottom) do
     vp = active_viewport(state)
-    {cursor_line, _cursor_col} = BufferServer.cursor(buf)
-    total_lines = BufferServer.line_count(buf)
+    {cursor_line, _cursor_col} = Buffer.cursor(buf)
+    total_lines = Buffer.line_count(buf)
     margin = scroll_margin(buf)
     new_vp = Viewport.bottom_on(vp, cursor_line, total_lines, margin)
     put_active_viewport(state, new_vp)
@@ -436,7 +436,7 @@ defmodule Minga.Editor.Commands.Movement do
   @spec apply_split(state(), WindowTree.t(), Window.id(), Window.id()) :: state()
   defp apply_split(state, new_tree, active_id, new_id) do
     active_window = Map.fetch!(state.workspace.windows.map, active_id)
-    cursor = BufferServer.cursor(active_window.buffer)
+    cursor = Buffer.cursor(active_window.buffer)
 
     # New window gets a copy of the current cursor position
     new_window = Window.new(new_id, active_window.buffer, 24, 80, cursor)
@@ -524,7 +524,7 @@ defmodule Minga.Editor.Commands.Movement do
         new_active_window = Map.fetch!(ws.map, new_active)
 
         # Restore the surviving window's cursor into the buffer
-        BufferServer.move_to(new_active_window.buffer, new_active_window.cursor)
+        Buffer.move_to(new_active_window.buffer, new_active_window.cursor)
 
         %{
           state
@@ -549,7 +549,7 @@ defmodule Minga.Editor.Commands.Movement do
 
   @spec visual_line_move(GenServer.server(), state(), :up | :down) :: state()
   defp visual_line_move(buf, state, direction) do
-    doc = BufferServer.snapshot(buf)
+    doc = Buffer.snapshot(buf)
     pos = Document.cursor(doc)
     content_w = content_width(state)
 
@@ -559,13 +559,13 @@ defmodule Minga.Editor.Commands.Movement do
         :up -> Minga.Editing.visual_line_up(doc, pos, content_w)
       end
 
-    BufferServer.move_to(buf, new_pos)
+    Buffer.move_to(buf, new_pos)
     state
   end
 
   @spec visual_line_edge(GenServer.server(), state(), :start | :end) :: state()
   defp visual_line_edge(buf, state, edge) do
-    doc = BufferServer.snapshot(buf)
+    doc = Buffer.snapshot(buf)
     pos = Document.cursor(doc)
     content_w = content_width(state)
 
@@ -575,20 +575,20 @@ defmodule Minga.Editor.Commands.Movement do
         :end -> Minga.Editing.visual_line_end(doc, pos, content_w)
       end
 
-    BufferServer.move_to(buf, new_pos)
+    Buffer.move_to(buf, new_pos)
     state
   end
 
   @spec logical_line_start(GenServer.server()) :: :ok
   defp logical_line_start(buf) do
-    gb = BufferServer.snapshot(buf)
+    gb = Buffer.snapshot(buf)
     {line, _col} = Document.cursor(gb)
-    BufferServer.move_to(buf, {line, 0})
+    Buffer.move_to(buf, {line, 0})
   end
 
   @spec logical_line_end(GenServer.server()) :: :ok
   defp logical_line_end(buf) do
-    gb = BufferServer.snapshot(buf)
+    gb = Buffer.snapshot(buf)
     {line, _col} = Document.cursor(gb)
 
     end_col =
@@ -597,19 +597,19 @@ defmodule Minga.Editor.Commands.Movement do
         _ -> 0
       end
 
-    BufferServer.move_to(buf, {line, end_col})
+    Buffer.move_to(buf, {line, end_col})
   end
 
   @spec content_width(state()) :: pos_integer()
   defp content_width(state) do
     vp = Viewport.new(state.workspace.viewport.rows, state.workspace.viewport.cols)
-    line_count = BufferServer.line_count(state.workspace.buffers.active)
+    line_count = Buffer.line_count(state.workspace.buffers.active)
     Viewport.content_cols(vp, line_count)
   end
 
   @spec wrap_enabled?(pid()) :: boolean()
   defp wrap_enabled?(buf) do
-    BufferServer.get_option(buf, :wrap)
+    Buffer.get_option(buf, :wrap)
   catch
     :exit, _ -> false
   end
@@ -634,11 +634,11 @@ defmodule Minga.Editor.Commands.Movement do
 
   @spec maybe_skip_fold(FoldMap.t(), pid(), :up | :down, state()) :: state()
   defp maybe_skip_fold(fm, buf, direction, state) do
-    {cursor_line, _col} = BufferServer.cursor(buf)
+    {cursor_line, _col} = Buffer.cursor(buf)
 
     if FoldMap.folded?(fm, cursor_line) do
       target = fold_skip_target(fm, cursor_line, direction)
-      BufferServer.move_to(buf, {target, 0})
+      Buffer.move_to(buf, {target, 0})
     end
 
     state
@@ -658,7 +658,7 @@ defmodule Minga.Editor.Commands.Movement do
 
   @spec scroll_margin(pid()) :: non_neg_integer()
   defp scroll_margin(buf) do
-    BufferServer.get_option(buf, :scroll_margin)
+    Buffer.get_option(buf, :scroll_margin)
   catch
     :exit, _ -> 5
   end
@@ -668,9 +668,9 @@ defmodule Minga.Editor.Commands.Movement do
   # when no decorations exist (fast path).
   @spec decoration_aware_page_delta(pid(), Viewport.t(), pos_integer()) :: pos_integer()
   defp decoration_aware_page_delta(buf, _vp, display_rows) do
-    decorations = BufferServer.decorations(buf)
-    {cursor_line, _} = BufferServer.cursor(buf)
-    total = BufferServer.line_count(buf)
+    decorations = Buffer.decorations(buf)
+    {cursor_line, _} = Buffer.cursor(buf)
+    total = Buffer.line_count(buf)
     Viewport.effective_page_lines(cursor_line, display_rows, decorations, total)
   catch
     :exit, _ -> display_rows

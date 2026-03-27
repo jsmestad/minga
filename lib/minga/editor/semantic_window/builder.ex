@@ -15,17 +15,17 @@ defmodule Minga.Editor.SemanticWindow.Builder do
   window's content rect, with fold/wrap adjustments applied).
   """
 
-  alias Minga.Buffer.Decorations
-  alias Minga.Buffer.Decorations.BlockDecoration
-  alias Minga.Buffer.Decorations.FoldRegion
-  alias Minga.Buffer.Server, as: BufferServer
-  alias Minga.Buffer.Unicode
+  alias Minga.Buffer
+  alias Minga.Core.Decorations
+  alias Minga.Core.Decorations.BlockDecoration
+  alias Minga.Core.Decorations.FoldRegion
+  alias Minga.Core.Unicode
   alias Minga.Diagnostics
   alias Minga.Editor.DisplayMap
   alias Minga.Editor.FoldMap
+  alias Minga.Editor.RenderPipeline.Scroll.WindowScroll
   alias Minga.Editor.Renderer.Composition
   alias Minga.Editor.Renderer.Context
-  alias Minga.Editor.RenderPipeline.Scroll.WindowScroll
   alias Minga.Editor.SemanticWindow
   alias Minga.Editor.SemanticWindow.DiagnosticRange
   alias Minga.Editor.SemanticWindow.DocumentHighlightRange
@@ -315,7 +315,7 @@ defmodule Minga.Editor.SemanticWindow.Builder do
     # Start with highlight segments or plain text
     segments =
       case hl_segments do
-        nil -> [{line_text, Minga.UI.Face.new()}]
+        nil -> [{line_text, Minga.Core.Face.new()}]
         segs -> segs
       end
 
@@ -363,7 +363,7 @@ defmodule Minga.Editor.SemanticWindow.Builder do
     buf = window.buffer
 
     if is_pid(buf) do
-      case BufferServer.file_path(buf) do
+      case Buffer.file_path(buf) do
         nil ->
           []
 
@@ -463,7 +463,7 @@ defmodule Minga.Editor.SemanticWindow.Builder do
     segments_to_spans(segments)
   end
 
-  @spec segments_to_spans([{String.t(), Minga.UI.Face.t()}]) :: [Span.t()]
+  @spec segments_to_spans([{String.t(), Minga.Core.Face.t()}]) :: [Span.t()]
   defp segments_to_spans(segments) do
     {spans, _col} =
       Enum.reduce(segments, {[], 0}, fn {text, style}, {acc, col} ->

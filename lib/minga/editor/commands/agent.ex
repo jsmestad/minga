@@ -20,7 +20,7 @@ defmodule Minga.Editor.Commands.Agent do
   alias Minga.Agent.UIState
   alias Minga.Agent.UIState.Panel
   alias Minga.Agent.View.Preview
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Clipboard
   alias Minga.Editor.AgentLifecycle
   alias Minga.Editor.Commands
@@ -90,7 +90,7 @@ defmodule Minga.Editor.Commands.Agent do
     else
       try do
         # Verify the buffer is responsive
-        BufferServer.buffer_name(agent.buffer)
+        Buffer.buffer_name(agent.buffer)
         state
       catch
         :exit, _ -> ensure_agent_tab(state)
@@ -143,7 +143,7 @@ defmodule Minga.Editor.Commands.Agent do
 
     if is_pid(agent.buffer) do
       try do
-        BufferServer.buffer_name(agent.buffer)
+        Buffer.buffer_name(agent.buffer)
         state
       catch
         :exit, _ -> create_agent_buffer(state)

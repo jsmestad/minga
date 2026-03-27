@@ -5,7 +5,7 @@ defmodule Minga.Editing.Motion.Line do
   Accepts any text container that implements `Minga.Editing.Text.Readable`.
   """
 
-  alias Minga.Buffer.Unicode
+  alias Minga.Core.Unicode
   alias Minga.Editing.Text.Readable
 
   @typedoc "A zero-indexed {line, col} cursor position."

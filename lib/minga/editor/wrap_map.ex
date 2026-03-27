@@ -20,7 +20,7 @@ defmodule Minga.Editor.WrapMap do
     stores logical lines unchanged.
   """
 
-  alias Minga.Buffer.Unicode
+  alias Minga.Core.Unicode
 
   @typedoc """
   A single visual row within a wrapped logical line.

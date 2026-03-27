@@ -4,7 +4,7 @@ defmodule Minga.Editor.Mouse do
 
   Handles scroll, click, drag, and release events, translating screen
   coordinates to buffer positions. All functions are pure `state -> state`
-  transformations; the buffer is mutated via `BufferServer` calls, but the
+  transformations; the buffer is mutated via `Buffer` calls, but the
   GenServer state struct is returned unchanged or updated.
 
   ## Multi-click selection
@@ -27,10 +27,10 @@ defmodule Minga.Editor.Mouse do
 
   import Bitwise
 
-  alias Minga.Buffer.Decorations
-  alias Minga.Buffer.Server, as: BufferServer
-  alias Minga.Buffer.Unicode
-  alias Minga.Config.Options
+  alias Minga.Buffer
+  alias Minga.Config
+  alias Minga.Core.Decorations
+  alias Minga.Core.Unicode
   alias Minga.Editor.DisplayMap
   alias Minga.Editor.FoldMap
   alias Minga.Editor.Layout
@@ -97,7 +97,7 @@ defmodule Minga.Editor.Mouse do
         :press,
         _cc
       ) do
-    total_lines = BufferServer.line_count(buf)
+    total_lines = Buffer.line_count(buf)
     lines = scroll_lines(state)
     vp = active_window_viewport(state)
     new_vp = scroll_viewport(vp, lines, total_lines)
@@ -105,7 +105,7 @@ defmodule Minga.Editor.Mouse do
   end
 
   def handle(%{workspace: %{buffers: %{active: buf}}} = state, _r, _c, :wheel_up, _m, :press, _cc) do
-    total_lines = BufferServer.line_count(buf)
+    total_lines = Buffer.line_count(buf)
     lines = scroll_lines(state)
     vp = active_window_viewport(state)
     new_vp = scroll_viewport(vp, -lines, total_lines)
@@ -140,7 +140,7 @@ defmodule Minga.Editor.Mouse do
             state
 
           {target_line, target_col} ->
-            BufferServer.move_to(state.workspace.buffers.active, {target_line, target_col})
+            Buffer.move_to(state.workspace.buffers.active, {target_line, target_col})
             state = cancel_mode_for_mouse(state)
             state = EditorState.transition_mode(state, :normal)
             Minga.Editor.dispatch_command(state, :paste_after)
@@ -339,7 +339,7 @@ defmodule Minga.Editor.Mouse do
 
         case word_boundaries_at(buf, line, buf_col) do
           {word_start, word_end} ->
-            BufferServer.move_to(buf, {line, word_end})
+            Buffer.move_to(buf, {line, word_end})
 
             visual_state = %VisualState{
               visual_anchor: {line, word_start},
@@ -374,13 +374,13 @@ defmodule Minga.Editor.Mouse do
         buf = state.workspace.buffers.active
 
         line_text =
-          case BufferServer.get_lines(buf, line, 1) do
+          case Buffer.lines(buf, line, 1) do
             [text] -> text
             _ -> ""
           end
 
         line_len = max(byte_size(line_text) - 1, 0)
-        BufferServer.move_to(buf, {line, line_len})
+        Buffer.move_to(buf, {line, line_len})
 
         visual_state = %VisualState{
           visual_anchor: {line, 0},
@@ -417,10 +417,10 @@ defmodule Minga.Editor.Mouse do
               Minga.Editor.Editing.visual_anchor(state)
 
             _ ->
-              BufferServer.cursor(buf)
+              Buffer.cursor(buf)
           end
 
-        BufferServer.move_to(buf, {target_line, target_col})
+        Buffer.move_to(buf, {target_line, target_col})
 
         visual_state = %VisualState{
           visual_anchor: anchor,
@@ -441,7 +441,7 @@ defmodule Minga.Editor.Mouse do
 
       {target_line, target_col} ->
         buf = state.workspace.buffers.active
-        BufferServer.move_to(buf, {target_line, target_col})
+        Buffer.move_to(buf, {target_line, target_col})
         state = cancel_mode_for_mouse(state)
         state = EditorState.transition_mode(state, :normal)
         Minga.Editor.dispatch_command(state, :goto_definition)
@@ -456,7 +456,7 @@ defmodule Minga.Editor.Mouse do
         ) :: state()
   defp snap_selection_to_words(state, anchor) do
     buf = state.workspace.buffers.active
-    {cursor_line, cursor_col} = BufferServer.cursor(buf)
+    {cursor_line, cursor_col} = Buffer.cursor(buf)
 
     # Snap cursor to word boundary
     case word_boundaries_at(buf, cursor_line, cursor_col) do
@@ -465,9 +465,9 @@ defmodule Minga.Editor.Mouse do
 
         # If cursor is after anchor, extend to word end; otherwise to word start
         if {cursor_line, cursor_col} >= {anchor_line, 0} do
-          BufferServer.move_to(buf, {cursor_line, word_end})
+          Buffer.move_to(buf, {cursor_line, word_end})
         else
-          BufferServer.move_to(buf, {cursor_line, word_start})
+          Buffer.move_to(buf, {cursor_line, word_start})
         end
 
         enter_visual_if_needed(state, anchor)
@@ -485,21 +485,21 @@ defmodule Minga.Editor.Mouse do
         ) :: state()
   defp snap_selection_to_lines(state, {anchor_line, _anchor_col}) do
     buf = state.workspace.buffers.active
-    {cursor_line, _cursor_col} = BufferServer.cursor(buf)
+    {cursor_line, _cursor_col} = Buffer.cursor(buf)
 
     # Extend selection to full lines
     if cursor_line >= anchor_line do
       # Dragging down: cursor at end of current line
       line_text =
-        case BufferServer.get_lines(buf, cursor_line, 1) do
+        case Buffer.lines(buf, cursor_line, 1) do
           [text] -> text
           _ -> ""
         end
 
-      BufferServer.move_to(buf, {cursor_line, max(byte_size(line_text) - 1, 0)})
+      Buffer.move_to(buf, {cursor_line, max(byte_size(line_text) - 1, 0)})
     else
       # Dragging up: cursor at start of current line
-      BufferServer.move_to(buf, {cursor_line, 0})
+      Buffer.move_to(buf, {cursor_line, 0})
     end
 
     visual_state = %VisualState{
@@ -515,7 +515,7 @@ defmodule Minga.Editor.Mouse do
   @spec word_boundaries_at(pid(), non_neg_integer(), non_neg_integer()) ::
           {non_neg_integer(), non_neg_integer()} | nil
   defp word_boundaries_at(buf, line, col) do
-    case BufferServer.get_lines(buf, line, 1) do
+    case Buffer.lines(buf, line, 1) do
       [text] when byte_size(text) > 0 ->
         find_word_at(String.graphemes(text), col)
 
@@ -669,7 +669,7 @@ defmodule Minga.Editor.Mouse do
             state
 
           {target_line, target_col} ->
-            BufferServer.move_to(state.workspace.buffers.active, {target_line, target_col})
+            Buffer.move_to(state.workspace.buffers.active, {target_line, target_col})
 
             state = cancel_mode_for_mouse(state)
             state = EditorState.transition_mode(state, :normal)
@@ -701,7 +701,7 @@ defmodule Minga.Editor.Mouse do
   @spec gutter_width(state(), non_neg_integer()) :: non_neg_integer()
   defp gutter_width(%{workspace: %{buffers: %{active: buf}}}, total_lines) do
     ln_style =
-      if buf, do: BufferServer.get_option(buf, :line_numbers), else: :none
+      if buf, do: Buffer.get_option(buf, :line_numbers), else: :none
 
     number_w =
       if ln_style == :none, do: 0, else: Viewport.gutter_width(total_lines)
@@ -730,8 +730,8 @@ defmodule Minga.Editor.Mouse do
     case Layout.active_window_layout(layout, state) do
       %{content: {win_row, _win_col, content_w, win_h}} ->
         window = EditorState.active_window_struct(state)
-        total_lines = BufferServer.line_count(buf)
-        {cursor_line, _} = BufferServer.cursor(buf)
+        total_lines = Buffer.line_count(buf)
+        {cursor_line, _} = Buffer.cursor(buf)
         scroll_top = window_scroll_top(window, win_h, content_w, cursor_line, buf)
         local_row = row - win_row
         target_line = local_row + scroll_top
@@ -755,9 +755,9 @@ defmodule Minga.Editor.Mouse do
     case Layout.active_window_layout(layout, state) do
       %{content: {win_row, win_col, content_w, win_h}} ->
         window = EditorState.active_window_struct(state)
-        total_lines = BufferServer.line_count(buf)
+        total_lines = Buffer.line_count(buf)
         gutter_w = gutter_width(state, total_lines)
-        {cursor_line, _} = BufferServer.cursor(buf)
+        {cursor_line, _} = Buffer.cursor(buf)
         scroll_top = window_scroll_top(window, win_h, content_w, cursor_line, buf)
         local_row = row - win_row
         local_col = max(col - win_col - gutter_w, 0) + scroll_left(state, buf)
@@ -789,7 +789,7 @@ defmodule Minga.Editor.Mouse do
         win_layout = Map.fetch!(layout.window_layouts, id)
         {_cr, _cc, content_w, content_h} = win_layout.content
         buf = window.buffer
-        total_lines = BufferServer.line_count(buf)
+        total_lines = Buffer.line_count(buf)
         gutter_w = gutter_width(state, total_lines)
         {cursor_line, _} = window.cursor
         scroll_top = window_scroll_top(window, content_h, content_w, cursor_line, buf)
@@ -835,7 +835,7 @@ defmodule Minga.Editor.Mouse do
          content_w,
          total_lines
        ) do
-    decs = BufferServer.decorations(buf)
+    decs = Buffer.decorations(buf)
     fold_map = if window, do: window.fold_map, else: FoldMap.new()
 
     case DisplayMap.compute(fold_map, decs, scroll_top, win_h, total_lines, content_w) do
@@ -943,17 +943,17 @@ defmodule Minga.Editor.Mouse do
 
   @spec selection_text(pid(), map()) :: String.t() | nil
   defp selection_text(buf, %{visual_type: :char} = ms) do
-    BufferServer.get_range(buf, ms.visual_anchor, BufferServer.cursor(buf))
+    Buffer.text_between_inclusive(buf, ms.visual_anchor, Buffer.cursor(buf))
   end
 
   defp selection_text(buf, %{visual_type: :line} = ms) do
     {a_line, _} = ms.visual_anchor
-    {c_line, _} = BufferServer.cursor(buf)
-    BufferServer.get_lines_content(buf, min(a_line, c_line), max(a_line, c_line))
+    {c_line, _} = Buffer.cursor(buf)
+    Buffer.lines_content(buf, min(a_line, c_line), max(a_line, c_line))
   end
 
   defp maybe_copy_to_clipboard(text) when is_binary(text) and text != "" do
-    case Options.get(:clipboard) do
+    case Config.get(:clipboard) do
       :none -> :ok
       _ -> Minga.Clipboard.write(text)
     end
@@ -964,7 +964,7 @@ defmodule Minga.Editor.Mouse do
   @spec adjust_col_for_virtual_text(pid(), non_neg_integer(), non_neg_integer()) ::
           non_neg_integer()
   defp adjust_col_for_virtual_text(buf, line, display_col) do
-    Decorations.display_col_to_buf_col(BufferServer.decorations(buf), line, display_col)
+    Decorations.display_col_to_buf_col(Buffer.decorations(buf), line, display_col)
   catch
     :exit, _ -> display_col
   end
@@ -1012,7 +1012,7 @@ defmodule Minga.Editor.Mouse do
   @spec clamp_cursor_to_viewport(state(), :up | :down) :: state()
   defp clamp_cursor_to_viewport(%{workspace: %{buffers: %{active: buf}}} = state, direction) do
     vp = active_window_viewport(state)
-    {cursor_line, cursor_col} = BufferServer.cursor(buf)
+    {cursor_line, cursor_col} = Buffer.cursor(buf)
     {first_line, last_line} = Viewport.visible_range(vp)
 
     margin = scroll_margin()
@@ -1023,7 +1023,7 @@ defmodule Minga.Editor.Mouse do
       clamp_with_margin(cursor_line, first_line, last_line, effective_margin, direction)
 
     if target_line != cursor_line do
-      BufferServer.move_to(buf, {target_line, clamp_col_to_line(buf, target_line, cursor_col)})
+      Buffer.move_to(buf, {target_line, clamp_col_to_line(buf, target_line, cursor_col)})
     end
 
     state
@@ -1057,7 +1057,7 @@ defmodule Minga.Editor.Mouse do
 
   @spec scroll_margin() :: non_neg_integer()
   defp scroll_margin do
-    Options.get(:scroll_margin)
+    Config.get(:scroll_margin)
   catch
     :exit, _ -> 5
   end
@@ -1089,7 +1089,7 @@ defmodule Minga.Editor.Mouse do
         state
 
       {line, c} ->
-        BufferServer.move_to(state.workspace.buffers.active, {line, c})
+        Buffer.move_to(state.workspace.buffers.active, {line, c})
         state
     end
   end
@@ -1105,7 +1105,7 @@ defmodule Minga.Editor.Mouse do
 
   @spec clamp_col_to_line(pid(), non_neg_integer(), non_neg_integer()) :: non_neg_integer()
   defp clamp_col_to_line(buf, line, col) do
-    case BufferServer.get_lines(buf, line, 1) do
+    case Buffer.lines(buf, line, 1) do
       [text] when byte_size(text) > 0 ->
         min(col, Unicode.last_grapheme_byte_offset(text))
 
@@ -1123,13 +1123,13 @@ defmodule Minga.Editor.Mouse do
 
   @spec page_move(pid(), Viewport.t(), integer()) :: :ok
   defp page_move(buf, _vp, delta) do
-    {line, col} = BufferServer.cursor(buf)
-    total_lines = BufferServer.line_count(buf)
+    {line, col} = Buffer.cursor(buf)
+    total_lines = Buffer.line_count(buf)
     target_line = line + delta
     target_line = max(0, min(target_line, total_lines - 1))
 
     target_col =
-      case BufferServer.get_lines(buf, target_line, 1) do
+      case Buffer.lines(buf, target_line, 1) do
         [text] when byte_size(text) > 0 ->
           min(col, Unicode.last_grapheme_byte_offset(text))
 
@@ -1137,7 +1137,7 @@ defmodule Minga.Editor.Mouse do
           0
       end
 
-    BufferServer.move_to(buf, {target_line, target_col})
+    Buffer.move_to(buf, {target_line, target_col})
   end
 
   # ── Tab bar close (middle-click) ─────────────────────────────────────────
@@ -1247,7 +1247,7 @@ defmodule Minga.Editor.Mouse do
     do: @gui_scroll_lines
 
   defp scroll_lines(_state) do
-    Options.get(:scroll_lines)
+    Config.get(:scroll_lines)
   catch
     :exit, _ -> 1
   end

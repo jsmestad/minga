@@ -6,7 +6,7 @@ defmodule Minga.Editor.Commands.FileTree do
 
   @behaviour Minga.Command.Provider
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Editor.Commands
   alias Minga.Editor.Layout
   alias Minga.Editor.State, as: EditorState
@@ -154,7 +154,7 @@ defmodule Minga.Editor.Commands.FileTree do
     # instead, which always holds the real editing buffer.
     buf = active_editing_buffer(state)
 
-    case buf && BufferServer.file_path(buf) do
+    case buf && Buffer.file_path(buf) do
       nil ->
         state
 
@@ -280,7 +280,7 @@ defmodule Minga.Editor.Commands.FileTree do
   defp reveal_active(tree, nil), do: tree
 
   defp reveal_active(tree, buf) do
-    case BufferServer.file_path(buf) do
+    case Buffer.file_path(buf) do
       nil -> tree
       path -> FileTree.reveal(tree, path)
     end

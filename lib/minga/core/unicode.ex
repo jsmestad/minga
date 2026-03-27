@@ -1,12 +1,10 @@
-defmodule Minga.Buffer.Unicode do
+defmodule Minga.Core.Unicode do
   @moduledoc """
-  Byte ↔ grapheme conversion utilities for byte-indexed buffer positions.
+  Byte ↔ grapheme conversion utilities for UTF-8 text.
 
-  This module is the single source of truth for converting between byte
-  offsets (used internally by the gap buffer, motions, and tree-sitter)
-  and grapheme indices (used for display rendering).
-
-  All functions operate on UTF-8 binary strings.
+  Pure string functions for converting between byte offsets and grapheme
+  indices, computing display widths, and navigating grapheme boundaries.
+  Used by the buffer, editing, and rendering domains.
   """
 
   # ── Grapheme table ────────────────────────────────────────────────────────
@@ -23,7 +21,7 @@ defmodule Minga.Buffer.Unicode do
 
   ## Examples
 
-      iex> {gs, os} = Minga.Buffer.Unicode.graphemes_with_byte_offsets("café")
+      iex> {gs, os} = Minga.Core.Unicode.graphemes_with_byte_offsets("café")
       iex> tuple_size(gs)
       4
       iex> elem(os, 3)
@@ -60,8 +58,8 @@ defmodule Minga.Buffer.Unicode do
 
   ## Examples
 
-      iex> {_, os} = Minga.Buffer.Unicode.graphemes_with_byte_offsets("café")
-      iex> Minga.Buffer.Unicode.grapheme_index_to_byte_offset(os, 3, 5)
+      iex> {_, os} = Minga.Core.Unicode.graphemes_with_byte_offsets("café")
+      iex> Minga.Core.Unicode.grapheme_index_to_byte_offset(os, 3, 5)
       4
   """
   @spec grapheme_index_to_byte_offset(tuple(), non_neg_integer(), non_neg_integer()) ::
@@ -80,8 +78,8 @@ defmodule Minga.Buffer.Unicode do
 
   ## Examples
 
-      iex> {_, os} = Minga.Buffer.Unicode.graphemes_with_byte_offsets("café")
-      iex> Minga.Buffer.Unicode.byte_offset_to_grapheme_index(os, 4)
+      iex> {_, os} = Minga.Core.Unicode.graphemes_with_byte_offsets("café")
+      iex> Minga.Core.Unicode.byte_offset_to_grapheme_index(os, 4)
       3
   """
   @spec byte_offset_to_grapheme_index(tuple(), non_neg_integer()) :: non_neg_integer()
@@ -117,7 +115,7 @@ defmodule Minga.Buffer.Unicode do
 
   ## Examples
 
-      iex> Minga.Buffer.Unicode.byte_offset_for(["hello", "world"], 1, 3)
+      iex> Minga.Core.Unicode.byte_offset_for(["hello", "world"], 1, 3)
       9
   """
   @spec byte_offset_for([String.t()], non_neg_integer(), non_neg_integer()) ::
@@ -139,10 +137,10 @@ defmodule Minga.Buffer.Unicode do
 
   ## Examples
 
-      iex> Minga.Buffer.Unicode.last_grapheme_byte_offset("café")
+      iex> Minga.Core.Unicode.last_grapheme_byte_offset("café")
       4
 
-      iex> Minga.Buffer.Unicode.last_grapheme_byte_offset("")
+      iex> Minga.Core.Unicode.last_grapheme_byte_offset("")
       0
   """
   @spec last_grapheme_byte_offset(String.t()) :: non_neg_integer()
@@ -171,7 +169,7 @@ defmodule Minga.Buffer.Unicode do
 
   ## Examples
 
-      iex> Minga.Buffer.Unicode.prev_grapheme_byte_offset("café", 4)
+      iex> Minga.Core.Unicode.prev_grapheme_byte_offset("café", 4)
       3
   """
   @spec prev_grapheme_byte_offset(String.t(), non_neg_integer()) :: non_neg_integer()
@@ -205,7 +203,7 @@ defmodule Minga.Buffer.Unicode do
 
   ## Examples
 
-      iex> Minga.Buffer.Unicode.next_grapheme_byte_offset("café", 3)
+      iex> Minga.Core.Unicode.next_grapheme_byte_offset("café", 3)
       5
   """
   @spec next_grapheme_byte_offset(String.t(), non_neg_integer()) :: non_neg_integer()
@@ -236,10 +234,10 @@ defmodule Minga.Buffer.Unicode do
 
   ## Examples
 
-      iex> Minga.Buffer.Unicode.grapheme_at("café", 3)
+      iex> Minga.Core.Unicode.grapheme_at("café", 3)
       "é"
 
-      iex> Minga.Buffer.Unicode.grapheme_at("café", 10)
+      iex> Minga.Core.Unicode.grapheme_at("café", 10)
       nil
   """
   @spec grapheme_at(String.t(), non_neg_integer()) :: String.t() | nil
@@ -260,10 +258,10 @@ defmodule Minga.Buffer.Unicode do
 
   ## Examples
 
-      iex> Minga.Buffer.Unicode.clamp_to_grapheme_boundary("café", 4)
+      iex> Minga.Core.Unicode.clamp_to_grapheme_boundary("café", 4)
       4
 
-      iex> Minga.Buffer.Unicode.clamp_to_grapheme_boundary("café", 5)
+      iex> Minga.Core.Unicode.clamp_to_grapheme_boundary("café", 5)
       4
   """
   @spec clamp_to_grapheme_boundary(String.t(), non_neg_integer()) :: non_neg_integer()
@@ -298,7 +296,7 @@ defmodule Minga.Buffer.Unicode do
 
   ## Examples
 
-      iex> Minga.Buffer.Unicode.grapheme_col("café", 4)
+      iex> Minga.Core.Unicode.grapheme_col("café", 4)
       3
   """
   @spec grapheme_col(String.t(), non_neg_integer()) :: non_neg_integer()
@@ -334,13 +332,13 @@ defmodule Minga.Buffer.Unicode do
 
   ## Examples
 
-      iex> Minga.Buffer.Unicode.display_col("hello", 3)
+      iex> Minga.Core.Unicode.display_col("hello", 3)
       3
 
-      iex> Minga.Buffer.Unicode.display_col("你好世界", 6)
+      iex> Minga.Core.Unicode.display_col("你好世界", 6)
       4
 
-      iex> Minga.Buffer.Unicode.display_col("café", 4)
+      iex> Minga.Core.Unicode.display_col("café", 4)
       3
   """
   @spec display_col(String.t(), non_neg_integer()) :: non_neg_integer()
@@ -375,16 +373,16 @@ defmodule Minga.Buffer.Unicode do
 
   ## Examples
 
-      iex> Minga.Buffer.Unicode.display_width("hello")
+      iex> Minga.Core.Unicode.display_width("hello")
       5
 
-      iex> Minga.Buffer.Unicode.display_width("café")
+      iex> Minga.Core.Unicode.display_width("café")
       4
 
-      iex> Minga.Buffer.Unicode.display_width("你好")
+      iex> Minga.Core.Unicode.display_width("你好")
       4
 
-      iex> Minga.Buffer.Unicode.display_width("")
+      iex> Minga.Core.Unicode.display_width("")
       0
   """
   @spec display_width(String.t()) :: non_neg_integer()
@@ -411,10 +409,10 @@ defmodule Minga.Buffer.Unicode do
 
   ## Examples
 
-      iex> Minga.Buffer.Unicode.display_col_to_byte("hello", 3)
+      iex> Minga.Core.Unicode.display_col_to_byte("hello", 3)
       3
 
-      iex> Minga.Buffer.Unicode.display_col_to_byte("你好世界", 2)
+      iex> Minga.Core.Unicode.display_col_to_byte("你好世界", 2)
       3
   """
   @spec display_col_to_byte(String.t(), non_neg_integer()) :: non_neg_integer()
@@ -455,10 +453,10 @@ defmodule Minga.Buffer.Unicode do
 
   ## Examples
 
-      iex> Minga.Buffer.Unicode.grapheme_width("a")
+      iex> Minga.Core.Unicode.grapheme_width("a")
       1
 
-      iex> Minga.Buffer.Unicode.grapheme_width("你")
+      iex> Minga.Core.Unicode.grapheme_width("你")
       2
   """
   @spec grapheme_width(String.t()) :: non_neg_integer()
@@ -537,7 +535,7 @@ defmodule Minga.Buffer.Unicode do
 
   ## Examples
 
-      iex> Minga.Buffer.Unicode.byte_col_for_grapheme("café", 3)
+      iex> Minga.Core.Unicode.byte_col_for_grapheme("café", 3)
       4
   """
   @spec byte_col_for_grapheme(String.t(), non_neg_integer()) :: non_neg_integer()

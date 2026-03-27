@@ -25,13 +25,13 @@ defmodule Minga.Config.Loader do
 
   use Agent
 
-  alias Minga.Command.Registry, as: CommandRegistry
+  alias Minga.Command
   alias Minga.Config.Advice
   alias Minga.Config.Hooks
   alias Minga.Config.Options
   alias Minga.Extension.Registry, as: ExtRegistry
   alias Minga.Extension.Supervisor, as: ExtSupervisor
-  alias Minga.Keymap.Active, as: KeymapActive
+  alias Minga.Keymap
   alias Minga.UI.Popup.Registry, as: PopupRegistry
   alias Minga.UI.Theme.Loader, as: ThemeLoader
 
@@ -127,8 +127,8 @@ defmodule Minga.Config.Loader do
     Options.reset()
     Hooks.reset()
     Advice.reset()
-    KeymapActive.reset()
-    CommandRegistry.reset()
+    Keymap.reset()
+    Command.reset_registry()
     ExtRegistry.reset()
     PopupRegistry.clear()
 

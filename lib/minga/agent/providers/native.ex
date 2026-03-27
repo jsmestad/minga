@@ -50,7 +50,7 @@ defmodule Minga.Agent.Providers.Native do
   alias Minga.Agent.Tools.Notebook
   alias Minga.Agent.Tools.Shell
   alias Minga.Agent.Tools.Todo
-  alias Minga.Config.Options
+  alias Minga.Config
   alias ReqLLM.Context
   alias ReqLLM.StreamResponse
   alias ReqLLM.ToolCall
@@ -1481,7 +1481,7 @@ defmodule Minga.Agent.Providers.Native do
 
   @spec read_config_string(atom()) :: String.t()
   defp read_config_string(key) do
-    case Options.get(key) do
+    case Config.get(key) do
       value when is_binary(value) -> value
       _ -> ""
     end
@@ -1526,7 +1526,7 @@ defmodule Minga.Agent.Providers.Native do
   # remaining consumer functions are updated to use config from state.
   @spec read_config_model_list() :: [String.t()]
   defp read_config_model_list do
-    Options.get(:agent_models)
+    Config.get(:agent_models)
   end
 
   # Works with both LoopCtx and state since both have max_cost/session_cost fields.

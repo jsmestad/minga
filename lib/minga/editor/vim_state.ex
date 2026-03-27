@@ -19,7 +19,7 @@ defmodule Minga.Editor.VimState do
   * `macro_recorder` — tracks macro recording state
   """
 
-  alias Minga.Buffer.Document
+  alias Minga.Buffer
   alias Minga.Editor.ChangeRecorder
   alias Minga.Editor.MacroRecorder
   alias Minga.Editor.State.Registers
@@ -29,14 +29,14 @@ defmodule Minga.Editor.VimState do
   @type last_find_char :: {Minga.Mode.State.find_direction(), String.t()} | nil
 
   @typedoc "Buffer-local marks: outer key is buffer pid, inner key is mark name."
-  @type marks :: %{pid() => %{String.t() => Document.position()}}
+  @type marks :: %{pid() => %{String.t() => Buffer.position()}}
 
   @type t :: %__MODULE__{
           mode: Mode.mode(),
           mode_state: Mode.state(),
           reg: Registers.t(),
           marks: marks(),
-          last_jump_pos: Document.position() | nil,
+          last_jump_pos: Buffer.position() | nil,
           last_find_char: last_find_char(),
           change_recorder: ChangeRecorder.t(),
           macro_recorder: MacroRecorder.t()

@@ -261,7 +261,7 @@ defmodule Minga.Frontend.Protocol.GUIWindowContent do
       text_bytes::binary>>
   end
 
-  @spec encode_annotation_kind(Minga.Buffer.Decorations.LineAnnotation.kind()) ::
+  @spec encode_annotation_kind(Minga.Core.Decorations.LineAnnotation.kind()) ::
           non_neg_integer()
   defp encode_annotation_kind(:inline_pill), do: 0
   defp encode_annotation_kind(:inline_text), do: 1

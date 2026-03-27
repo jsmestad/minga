@@ -8,7 +8,8 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
   Extracted from `RenderPipeline` to reduce module size.
   """
 
-  alias Minga.Config.Options
+  alias Minga.Config
+  alias Minga.Core.Face
   alias Minga.Editor.DisplayList
   alias Minga.Editor.FloatingWindow
   alias Minga.Editor.Layout
@@ -16,7 +17,6 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
   alias Minga.Editor.TabBarRenderer
   alias Minga.Editor.Viewport
   alias Minga.Editor.WindowTree
-  alias Minga.UI.Face
   alias Minga.UI.Theme
   alias Minga.UI.WhichKey
 
@@ -89,7 +89,7 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
 
   @doc "Renders the which-key popup overlay."
   @spec render_whichkey(state(), Viewport.t(), :bottom | :float) :: [DisplayList.draw()]
-  def render_whichkey(state, viewport, layout \\ Options.get(:whichkey_layout))
+  def render_whichkey(state, viewport, layout \\ Config.get(:whichkey_layout))
 
   def render_whichkey(
         %{shell_state: %{whichkey: %{show: true, node: node} = wk}, theme: theme},

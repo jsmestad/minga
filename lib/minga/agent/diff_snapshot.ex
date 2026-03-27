@@ -8,7 +8,6 @@ defmodule Minga.Agent.DiffSnapshot do
   diff review is dismissed or the session ends.
   """
 
-  alias Minga.Config.Options
 
   @typedoc "A diff snapshot, either memory-backed or file-backed."
   @type t ::
@@ -66,6 +65,6 @@ defmodule Minga.Agent.DiffSnapshot do
 
   @spec read_threshold() :: pos_integer()
   defp read_threshold do
-    Options.get(:agent_diff_size_threshold)
+    Minga.Config.get(:agent_diff_size_threshold)
   end
 end

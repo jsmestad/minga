@@ -6,7 +6,7 @@ defmodule Minga.Editing.Motion.Char do
   track byte offsets while scanning graphemes.
   """
 
-  alias Minga.Buffer.Unicode
+  alias Minga.Core.Unicode
   alias Minga.Editing.Motion.Helpers
   alias Minga.Editing.Text.Readable
 

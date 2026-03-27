@@ -9,13 +9,13 @@ defmodule Minga.Editor.HighlightEvents do
   in `highlight.highlights`. There is no separate "current" field.
   """
 
-  alias Minga.Buffer.Decorations
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
+  alias Minga.Core.Decorations
+  alias Minga.Core.Face
   alias Minga.Editor.HighlightSync
   alias Minga.Editor.Renderer
   alias Minga.Editor.State, as: EditorState
-  alias Minga.Language.Filetype
-  alias Minga.UI.Face
+  alias Minga.Language
   alias Minga.UI.PrettifySymbols
 
   @doc """
@@ -106,10 +106,10 @@ defmodule Minga.Editor.HighlightEvents do
   """
   @spec handle_conceal_spans(EditorState.t(), pid(), [map()]) :: :ok
   def handle_conceal_spans(_state, buf, spans) when is_pid(buf) do
-    content = BufferServer.content(buf)
+    content = Buffer.content(buf)
     lines = String.split(content, "\n")
 
-    BufferServer.batch_decorations(buf, fn decs ->
+    Buffer.batch_decorations(buf, fn decs ->
       decs
       |> Decorations.remove_conceal_group(:ts_conceal)
       |> add_conceal_spans(spans, lines)
@@ -186,8 +186,8 @@ defmodule Minga.Editor.HighlightEvents do
     hl = HighlightSync.get_active_highlight(state)
 
     if hl.capture_names != {} and tuple_size(hl.spans) > 0 do
-      file_path = BufferServer.file_path(buf)
-      filetype = Filetype.detect(file_path)
+      file_path = Buffer.file_path(buf)
+      filetype = Language.detect_filetype(file_path)
 
       Task.start(fn ->
         PrettifySymbols.apply(buf, hl, filetype)
@@ -199,5 +199,5 @@ defmodule Minga.Editor.HighlightEvents do
 
   @spec buffer_version(EditorState.t()) :: non_neg_integer()
   defp buffer_version(%{workspace: %{buffers: %{active: nil}}}), do: 0
-  defp buffer_version(%{workspace: %{buffers: %{active: buf}}}), do: BufferServer.version(buf)
+  defp buffer_version(%{workspace: %{buffers: %{active: buf}}}), do: Buffer.version(buf)
 end

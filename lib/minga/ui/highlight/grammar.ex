@@ -8,7 +8,8 @@ defmodule Minga.UI.Highlight.Grammar do
   in `~/.config/minga/queries/{language}/highlights.scm`.
   """
 
-  alias Minga.Language.Registry, as: LangRegistry
+
+  alias Minga.Language
 
   @typedoc "A tree-sitter language name."
   @type language :: String.t()
@@ -165,7 +166,7 @@ defmodule Minga.UI.Highlight.Grammar do
       end
 
     static =
-      LangRegistry.all()
+      Language.all()
       |> Enum.filter(fn lang -> lang.grammar != nil end)
       |> Map.new(fn lang -> {lang.name, lang.grammar} end)
 
@@ -188,7 +189,7 @@ defmodule Minga.UI.Highlight.Grammar do
 
   @spec lookup_static(atom()) :: {:ok, language()} | :unsupported
   defp lookup_static(filetype) do
-    case LangRegistry.get(filetype) do
+    case Language.get(filetype) do
       %{grammar: grammar} when is_binary(grammar) -> {:ok, grammar}
       _ -> :unsupported
     end

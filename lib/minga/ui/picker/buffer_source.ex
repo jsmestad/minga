@@ -12,7 +12,7 @@ defmodule Minga.UI.Picker.BufferSource do
   alias Minga.UI.Picker.Item
   alias Minga.UI.Picker.Source
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Buffers
   alias Minga.UI.Devicon
@@ -140,7 +140,7 @@ defmodule Minga.UI.Picker.BufferSource do
   """
   @spec special?(pid()) :: boolean()
   def special?(buf) do
-    case BufferServer.buffer_name(buf) do
+    case Buffer.buffer_name(buf) do
       nil -> false
       name -> String.match?(name, ~r/^\*.+\*$/)
     end
@@ -159,12 +159,12 @@ defmodule Minga.UI.Picker.BufferSource do
   @spec do_reject?(pid(), boolean()) :: boolean()
   defp do_reject?(buf, true = _include_special) do
     # When showing all: only reject unlisted non-special buffers
-    BufferServer.unlisted?(buf) and not special?(buf)
+    Buffer.unlisted?(buf) and not special?(buf)
   end
 
   defp do_reject?(buf, false = _include_special) do
     # Default: reject unlisted buffers and special buffers
-    BufferServer.unlisted?(buf) or special?(buf)
+    Buffer.unlisted?(buf) or special?(buf)
   end
 
   # ── Private ─────────────────────────────────────────────────────────────────
@@ -172,11 +172,11 @@ defmodule Minga.UI.Picker.BufferSource do
   @spec format_candidate(pid(), term()) :: Item.t()
   defp format_candidate(buf, key) do
     name = display_name(buf)
-    ft = BufferServer.filetype(buf)
+    ft = Buffer.filetype(buf)
     {icon, color} = Devicon.icon_and_color(ft)
-    desc = BufferServer.file_path(buf) || ""
-    dirty = if BufferServer.dirty?(buf), do: " [+]", else: ""
-    ro = if BufferServer.read_only?(buf), do: " [RO]", else: ""
+    desc = Buffer.file_path(buf) || ""
+    dirty = if Buffer.dirty?(buf), do: " [+]", else: ""
+    ro = if Buffer.read_only?(buf), do: " [RO]", else: ""
 
     %Item{
       id: key,
@@ -189,8 +189,8 @@ defmodule Minga.UI.Picker.BufferSource do
 
   @spec display_name(pid()) :: String.t()
   defp display_name(buf) do
-    case BufferServer.buffer_name(buf) do
-      nil -> Path.basename(BufferServer.file_path(buf) || "[no file]")
+    case Buffer.buffer_name(buf) do
+      nil -> Path.basename(Buffer.file_path(buf) || "[no file]")
       name -> name
     end
   end

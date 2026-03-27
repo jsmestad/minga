@@ -9,8 +9,8 @@ defmodule Minga.UI.Picker.GitChangedSource do
   @behaviour Minga.UI.Picker.Source
 
   alias Minga.Editor.State, as: EditorState
-  alias Minga.Git.Repo, as: GitRepo
-  alias Minga.Language.Filetype
+  alias Minga.Git
+  alias Minga.Language
   alias Minga.Log
   alias Minga.UI.Devicon
   alias Minga.UI.Picker.Item
@@ -75,12 +75,12 @@ defmodule Minga.UI.Picker.GitChangedSource do
 
   @spec build_candidates(String.t()) :: [Item.t()]
   defp build_candidates(git_root) do
-    case GitRepo.lookup(git_root) do
+    case Git.lookup_repo(git_root) do
       nil ->
         []
 
       repo_pid ->
-        GitRepo.status(repo_pid)
+        Git.Repo.status(repo_pid)
         |> Enum.map(&format_entry/1)
     end
   end
@@ -89,7 +89,7 @@ defmodule Minga.UI.Picker.GitChangedSource do
   defp format_entry(entry) do
     filename = Path.basename(entry.path)
     dir = Path.dirname(entry.path)
-    ft = Filetype.detect(filename)
+    ft = Language.detect_filetype(filename)
     {icon, color} = Devicon.icon_and_color(ft)
     dir_display = if dir == ".", do: "", else: dir
     annotation = status_annotation(entry.status)

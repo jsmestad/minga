@@ -1,8 +1,8 @@
-defmodule Minga.Buffer.IntervalTreeTest do
+defmodule Minga.Core.IntervalTreeTest do
   use ExUnit.Case, async: true
   use ExUnitProperties
 
-  alias Minga.Buffer.IntervalTree
+  alias Minga.Core.IntervalTree
 
   # ── Helpers ──────────────────────────────────────────────────────────────
 

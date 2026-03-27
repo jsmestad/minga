@@ -579,7 +579,7 @@ defmodule Minga.Extension.Supervisor do
   defp register_and_validate_options(name, module, config) do
     if function_exported?(module, :__option_schema__, 0) do
       schema = module.__option_schema__()
-      Minga.Config.Options.register_extension_schema(name, schema, config)
+      Minga.Config.register_extension_schema(name, schema, config)
     else
       :ok
     end

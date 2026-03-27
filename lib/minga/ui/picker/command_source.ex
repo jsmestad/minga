@@ -10,13 +10,12 @@ defmodule Minga.UI.Picker.CommandSource do
 
   @behaviour Minga.UI.Picker.Source
 
+  alias Minga.Keymap
   alias Minga.UI.Picker.Item
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Command
-  alias Minga.Command.Registry, as: CommandRegistry
   alias Minga.Editor.PickerUI
-  alias Minga.Keymap.Defaults
   alias Minga.UI.Picker.OptionScopeSource
 
   @impl true
@@ -29,7 +28,7 @@ defmodule Minga.UI.Picker.CommandSource do
     keybind_map = build_keybind_map()
 
     try do
-      CommandRegistry.all(CommandRegistry)
+      Command.all_commands()
       |> Enum.map(fn cmd ->
         keybind = Map.get(keybind_map, cmd.name, "")
         annotation = if keybind != "", do: "SPC #{keybind}", else: ""
@@ -68,7 +67,7 @@ defmodule Minga.UI.Picker.CommandSource do
 
   @spec lookup_command(atom()) :: Command.t() | nil
   defp lookup_command(name) do
-    case CommandRegistry.lookup(CommandRegistry, name) do
+    case Command.lookup(name) do
       {:ok, cmd} -> cmd
       :error -> nil
     end
@@ -85,7 +84,7 @@ defmodule Minga.UI.Picker.CommandSource do
 
     current_value =
       if is_pid(buf) do
-        BufferServer.get_option(buf, option_name)
+        Buffer.get_option(buf, option_name)
       else
         nil
       end
@@ -104,7 +103,7 @@ defmodule Minga.UI.Picker.CommandSource do
 
   @spec build_keybind_map() :: %{atom() => String.t()}
   defp build_keybind_map do
-    Defaults.all_bindings()
+    Keymap.default_bindings()
     |> Enum.into(%{}, fn {keys, command, _desc} ->
       key_str =
         Enum.map_join(keys, " ", fn {codepoint, _mods} ->

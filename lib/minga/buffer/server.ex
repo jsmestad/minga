@@ -18,16 +18,16 @@ defmodule Minga.Buffer.Server do
 
   use GenServer
 
-  alias Minga.Buffer.Decorations
   alias Minga.Buffer.Document
   alias Minga.Buffer.EditDelta
   alias Minga.Buffer.EditSource
-  alias Minga.Buffer.Unicode
-  alias Minga.Config.Options
+  alias Minga.Config
+  alias Minga.Core.Decorations
+  alias Minga.Core.Unicode
   alias Minga.Editing.NavigableContent.BufferSnapshot
   alias Minga.Editing.Scroll
   alias Minga.Events
-  alias Minga.Language.Filetype
+  alias Minga.Language
 
   alias Minga.Buffer.State, as: BufState
 
@@ -675,7 +675,7 @@ defmodule Minga.Buffer.Server do
   Adds a highlight range decoration to the buffer.
 
   Returns the decoration ID (a reference) for later removal.
-  See `Minga.Buffer.Decorations.add_highlight/4` for options.
+  See `Minga.Core.Decorations.add_highlight/4` for options.
   """
   @spec add_highlight(
           GenServer.server(),
@@ -731,7 +731,7 @@ defmodule Minga.Buffer.Server do
   Adds a virtual text decoration to the buffer.
 
   Returns the decoration ID (a reference) for later removal.
-  See `Minga.Buffer.Decorations.add_virtual_text/3` for options.
+  See `Minga.Core.Decorations.add_virtual_text/3` for options.
   """
   @spec add_virtual_text(GenServer.server(), Decorations.highlight_range_pos(), keyword()) ::
           reference()
@@ -749,7 +749,7 @@ defmodule Minga.Buffer.Server do
   Adds a block decoration to the buffer.
 
   Returns the decoration ID for later removal.
-  See `Minga.Buffer.Decorations.add_block_decoration/3` for options.
+  See `Minga.Core.Decorations.add_block_decoration/3` for options.
   """
   @spec add_block_decoration(GenServer.server(), non_neg_integer(), keyword()) :: reference()
   def add_block_decoration(server, anchor_line, opts) do
@@ -794,7 +794,7 @@ defmodule Minga.Buffer.Server do
           case Keyword.get(opts, :filetype) do
             nil ->
               first_line = text |> String.split("\n", parts: 2) |> List.first("")
-              Filetype.detect_from_content(path, first_line)
+              Language.detect_filetype_from_content(path, first_line)
 
             ft when is_atom(ft) ->
               ft
@@ -841,7 +841,7 @@ defmodule Minga.Buffer.Server do
     case File.read(file_path) do
       {:ok, text} ->
         first_line = text |> String.split("\n", parts: 2) |> List.first("")
-        filetype = Filetype.detect_from_content(file_path, first_line)
+        filetype = Language.detect_filetype_from_content(file_path, first_line)
 
         {mtime, size} = file_stat_info(file_path)
 
@@ -1162,7 +1162,7 @@ defmodule Minga.Buffer.Server do
 
         new_buf = Document.move_to(new_buf, {clamped_line, clamped_col})
         first_line = text |> String.split("\n", parts: 2) |> List.first("")
-        filetype = Filetype.detect_from_content(state.file_path, first_line)
+        filetype = Language.detect_filetype_from_content(state.file_path, first_line)
 
         {new_mtime, new_size} = file_stat_info(state.file_path)
 
@@ -1399,7 +1399,7 @@ defmodule Minga.Buffer.Server do
   end
 
   def handle_call({:set_option, name, value}, _from, state) do
-    case Options.validate_option(name, value) do
+    case Config.validate_option(name, value) do
       :ok ->
         new_state = %{
           state
@@ -1857,7 +1857,7 @@ defmodule Minga.Buffer.Server do
   defp resolve_option(%{options: opts, filetype: ft}, name) do
     case Map.fetch(opts, name) do
       {:ok, value} -> value
-      :error -> Options.get_for_filetype(name, ft)
+      :error -> Config.get_for_filetype(name, ft)
     end
   end
 
@@ -1883,7 +1883,7 @@ defmodule Minga.Buffer.Server do
   @spec seed_options(atom()) :: %{atom() => term()}
   defp seed_options(filetype) do
     Map.new(@buffer_local_options, fn name ->
-      {name, Options.get_for_filetype(name, filetype)}
+      {name, Config.get_for_filetype(name, filetype)}
     end)
   catch
     :exit, _ -> %{}

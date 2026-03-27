@@ -39,7 +39,7 @@ defmodule Minga.Editor.Renderer.LineHighlightTest do
     }
   end
 
-  defp decode_draw({row, col, text, %Minga.UI.Face{} = face}) do
+  defp decode_draw({row, col, text, %Minga.Core.Face{} = face}) do
     %{
       row: row,
       col: col,
@@ -50,7 +50,7 @@ defmodule Minga.Editor.Renderer.LineHighlightTest do
     }
   end
 
-  defp decode_attrs(%Minga.UI.Face{} = face) do
+  defp decode_attrs(%Minga.Core.Face{} = face) do
     []
     |> then(fn a -> if face.bold, do: [:bold | a], else: a end)
     |> then(fn a -> if face.italic, do: [:italic | a], else: a end)

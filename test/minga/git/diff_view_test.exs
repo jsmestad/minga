@@ -1,8 +1,8 @@
-defmodule Minga.Git.DiffViewTest do
-  @moduledoc "Tests for Minga.Git.DiffView: unified diff view builder."
+defmodule Minga.Core.DiffViewTest do
+  @moduledoc "Tests for Minga.Core.DiffView: unified diff view builder."
   use ExUnit.Case, async: true
 
-  alias Minga.Git.DiffView
+  alias Minga.Core.DiffView
 
   describe "build/2" do
     test "returns 'No changes' for identical content" do

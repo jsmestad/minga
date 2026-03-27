@@ -7,8 +7,8 @@ defmodule Minga.Editor.Viewport do
   scrolls to keep the cursor visible.
   """
 
-  alias Minga.Buffer.Server, as: BufferServer
-  alias Minga.Config.Options
+  alias Minga.Buffer
+  alias Minga.Config
 
   @enforce_keys [:top, :left, :rows, :cols]
   defstruct [:top, :left, :rows, :cols, reserved: 2]
@@ -67,7 +67,7 @@ defmodule Minga.Editor.Viewport do
   def scroll_to_cursor(%__MODULE__{} = vp, {cursor_line, cursor_col}) do
     margin =
       try do
-        Options.get(:scroll_margin)
+        Config.get(:scroll_margin)
       catch
         :exit, _ -> 5
       end
@@ -88,7 +88,7 @@ defmodule Minga.Editor.Viewport do
   def scroll_to_cursor(%__MODULE__{} = vp, {cursor_line, cursor_col}, buf) when is_pid(buf) do
     margin =
       try do
-        BufferServer.get_option(buf, :scroll_margin)
+        Buffer.get_option(buf, :scroll_margin)
       catch
         :exit, _ -> 5
       end
@@ -243,7 +243,7 @@ defmodule Minga.Editor.Viewport do
   # Default scroll margin. Reads from config, falls back to 5.
   @spec default_scroll_margin() :: non_neg_integer()
   defp default_scroll_margin do
-    Options.get(:scroll_margin)
+    Config.get(:scroll_margin)
   catch
     :exit, _ -> 5
   end
@@ -308,11 +308,11 @@ defmodule Minga.Editor.Viewport do
   @spec effective_page_lines(
           non_neg_integer(),
           pos_integer(),
-          Minga.Buffer.Decorations.t(),
+          Minga.Core.Decorations.t(),
           non_neg_integer()
         ) :: pos_integer()
   def effective_page_lines(cursor_line, display_rows, decorations, total_lines) do
-    alias Minga.Buffer.Decorations
+    alias Minga.Core.Decorations
 
     if not Decorations.has_block_decorations?(decorations) and
          Decorations.virtual_line_count(decorations, cursor_line, cursor_line + display_rows) == 0 do
@@ -334,8 +334,8 @@ defmodule Minga.Editor.Viewport do
   end
 
   defp do_effective_page_lines(line, display_budget, decorations, total, buf_count, display_used) do
-    alias Minga.Buffer.Decorations
-    alias Minga.Buffer.Decorations.BlockDecoration
+    alias Minga.Core.Decorations
+    alias Minga.Core.Decorations.BlockDecoration
 
     # Count display rows consumed by this buffer line:
     # 1 for the line itself + virtual lines + block decorations

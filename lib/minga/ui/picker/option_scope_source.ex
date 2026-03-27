@@ -16,10 +16,10 @@ defmodule Minga.UI.Picker.OptionScopeSource do
 
   @behaviour Minga.UI.Picker.Source
 
+  alias Minga.Config
   alias Minga.UI.Picker.Item
 
-  alias Minga.Buffer.Server, as: BufferServer
-  alias Minga.Config.Options
+  alias Minga.Buffer
 
   @impl true
   @spec title() :: String.t()
@@ -58,14 +58,14 @@ defmodule Minga.UI.Picker.OptionScopeSource do
     buf = state.workspace.buffers.active
 
     if is_pid(buf) do
-      BufferServer.set_option(buf, name, value)
+      Buffer.set_option(buf, name, value)
     end
 
     Minga.Editor.State.set_status(state, format_confirmation(name, value, "this buffer"))
   end
 
   defp apply_scoped(:global, name, value, state) do
-    Options.set(name, value)
+    Config.set_option(name, value)
     Minga.Editor.State.set_status(state, format_confirmation(name, value, "all buffers"))
   end
 

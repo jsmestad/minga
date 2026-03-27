@@ -50,7 +50,7 @@ defmodule Minga.Session do
     buffers =
       editor_state.workspace.buffers.list
       |> Enum.flat_map(fn pid ->
-        file_path = Buffer.Server.file_path(pid)
+        file_path = Buffer.file_path(pid)
 
         case file_path do
           nil ->
@@ -65,7 +65,7 @@ defmodule Minga.Session do
     active_file =
       case editor_state.workspace.buffers.active do
         nil -> nil
-        pid -> Buffer.Server.file_path(pid)
+        pid -> Buffer.file_path(pid)
       end
 
     %Snapshot{
@@ -138,7 +138,7 @@ defmodule Minga.Session do
 
   @spec get_cursor(pid()) :: {non_neg_integer(), non_neg_integer()}
   defp get_cursor(pid) do
-    Buffer.Server.cursor(pid)
+    Buffer.cursor(pid)
   catch
     # Race window: buffer may exit between snapshot iteration and this call.
     :exit, _ -> {0, 0}

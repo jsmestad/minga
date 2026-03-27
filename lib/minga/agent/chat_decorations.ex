@@ -11,9 +11,9 @@ defmodule Minga.Agent.ChatDecorations do
   buffer pipeline.
   """
 
-  alias Minga.Buffer.Decorations
-  alias Minga.Buffer.Server, as: BufferServer
-  alias Minga.UI.Face
+  alias Minga.Buffer
+  alias Minga.Core.Decorations
+  alias Minga.Core.Face
 
   # All decorations created by this module belong to the :chat group.
   # This allows remove_group(:chat) to clear chat decorations without
@@ -59,7 +59,7 @@ defmodule Minga.Agent.ChatDecorations do
   """
   @spec apply(pid(), [term()], [line_offset()], Minga.UI.Theme.Agent.t(), keyword()) :: :ok
   def apply(buf, messages, line_offsets, agent_theme, opts \\ []) do
-    BufferServer.batch_decorations(buf, fn decs ->
+    Buffer.batch_decorations(buf, fn decs ->
       decs
       |> Decorations.remove_group(:chat)
       |> build_decorations(messages, line_offsets, agent_theme, opts)

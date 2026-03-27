@@ -18,15 +18,15 @@ defmodule Minga.Editor.Renderer.BufferLine do
   All render functions return `DisplayList.draw()` tuples.
   """
 
-  alias Minga.Buffer.Decorations
-  alias Minga.Buffer.Unicode
+  alias Minga.Core.Decorations
+  alias Minga.Core.Face
+  alias Minga.Core.Unicode
   alias Minga.Editor.DisplayList
   alias Minga.Editor.NavFlash
   alias Minga.Editor.Renderer.Context
   alias Minga.Editor.Renderer.Gutter
   alias Minga.Editor.Renderer.Line, as: LineRenderer
   alias Minga.Editor.WrapMap
-  alias Minga.UI.Face
   alias Minga.UI.Highlight
 
   @typedoc """
@@ -343,7 +343,7 @@ defmodule Minga.Editor.Renderer.BufferLine do
 
   # Check if a highlight range overlaps a draw command's column span.
   @spec range_overlaps_draw?(
-          Minga.Buffer.Decorations.HighlightRange.t(),
+          Minga.Core.Decorations.HighlightRange.t(),
           non_neg_integer(),
           non_neg_integer(),
           non_neg_integer()
@@ -369,7 +369,7 @@ defmodule Minga.Editor.Renderer.BufferLine do
           non_neg_integer(),
           String.t(),
           Face.t(),
-          [Minga.Buffer.Decorations.HighlightRange.t()],
+          [Minga.Core.Decorations.HighlightRange.t()],
           non_neg_integer()
         ) :: [DisplayList.draw()]
   defp split_and_merge(row, col, text, base_style, ranges, buf_line) do
@@ -403,7 +403,7 @@ defmodule Minga.Editor.Renderer.BufferLine do
           non_neg_integer(),
           String.t(),
           Face.t(),
-          [Minga.Buffer.Decorations.HighlightRange.t()],
+          [Minga.Core.Decorations.HighlightRange.t()],
           non_neg_integer(),
           non_neg_integer(),
           non_neg_integer()

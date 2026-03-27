@@ -17,7 +17,7 @@ defmodule Minga.Agent.UIState do
   alias Minga.Agent.UIState.Panel
   alias Minga.Agent.UIState.View
   alias Minga.Agent.View.Preview
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Editor.State.FileTree, as: FileTreeState
   alias Minga.Editor.State.Windows
 
@@ -81,7 +81,7 @@ defmodule Minga.Agent.UIState do
   @spec ensure_prompt_buffer(t()) :: t()
   def ensure_prompt_buffer(%__MODULE__{panel: %Panel{prompt_buffer: pid} = panel} = state)
       when is_pid(pid) do
-    BufferServer.buffer_name(pid)
+    Buffer.buffer_name(pid)
     state
   catch
     # Liveness probe: prompt buffer may die between pid check and this call.
@@ -95,7 +95,7 @@ defmodule Minga.Agent.UIState do
   end
 
   defp start_prompt_buffer(%Panel{} = panel, content) do
-    {:ok, pid} = BufferServer.start_link(content: content)
+    {:ok, pid} = Buffer.start_link(content: content)
     %{panel | prompt_buffer: pid}
   end
 
@@ -112,7 +112,7 @@ defmodule Minga.Agent.UIState do
 
   def prompt_text(%Panel{prompt_buffer: pid, pasted_blocks: blocks})
       when is_pid(pid) do
-    content = BufferServer.content(pid)
+    content = Buffer.content(pid)
     substitute_placeholders(content, blocks)
   end
 
@@ -161,7 +161,7 @@ defmodule Minga.Agent.UIState do
   @spec insert_char(t(), String.t()) :: t()
   def insert_char(%__MODULE__{panel: %Panel{prompt_buffer: pid}} = state, char)
       when is_pid(pid) do
-    BufferServer.insert_text(pid, char)
+    Buffer.insert_text(pid, char)
     %{state | panel: %{state.panel | history_index: -1}}
   end
 
@@ -173,7 +173,7 @@ defmodule Minga.Agent.UIState do
   @doc "Inserts a newline at the cursor, splitting the current line."
   @spec insert_newline(t()) :: t()
   def insert_newline(%__MODULE__{panel: %Panel{prompt_buffer: pid}} = state) when is_pid(pid) do
-    BufferServer.insert_text(pid, "\n")
+    Buffer.insert_text(pid, "\n")
     %{state | panel: %{state.panel | history_index: -1}}
   end
 
@@ -190,12 +190,12 @@ defmodule Minga.Agent.UIState do
   """
   @spec delete_char(t()) :: t()
   def delete_char(%__MODULE__{panel: %Panel{prompt_buffer: pid}} = state) when is_pid(pid) do
-    {line, col} = BufferServer.cursor(pid)
+    {line, col} = Buffer.cursor(pid)
 
     if line == 0 and col == 0 do
       state
     else
-      BufferServer.delete_before(pid)
+      Buffer.delete_before(pid)
     end
 
     %{state | panel: %{state.panel | history_index: -1}}
@@ -210,7 +210,7 @@ defmodule Minga.Agent.UIState do
   @spec set_prompt_text(t(), String.t()) :: t()
   def set_prompt_text(%__MODULE__{panel: %Panel{prompt_buffer: pid}} = state, text)
       when is_pid(pid) do
-    BufferServer.replace_content(pid, text)
+    Buffer.replace_content(pid, text)
     %{state | panel: %{state.panel | pasted_blocks: []}}
   end
 
@@ -222,7 +222,7 @@ defmodule Minga.Agent.UIState do
     state = save_to_history(state)
 
     if is_pid(state.panel.prompt_buffer) do
-      BufferServer.replace_content(state.panel.prompt_buffer, "")
+      Buffer.replace_content(state.panel.prompt_buffer, "")
     end
 
     %{state | panel: %{state.panel | history_index: -1, pasted_blocks: []}}
@@ -233,12 +233,12 @@ defmodule Minga.Agent.UIState do
   @doc "Moves cursor up within the input. Returns `:at_top` if already on the first line."
   @spec move_cursor_up(t()) :: t() | :at_top
   def move_cursor_up(%__MODULE__{panel: %Panel{prompt_buffer: pid}} = state) when is_pid(pid) do
-    {line, _col} = BufferServer.cursor(pid)
+    {line, _col} = Buffer.cursor(pid)
 
     if line == 0 do
       :at_top
     else
-      BufferServer.move_cursor(pid, :up)
+      Buffer.move(pid, :up)
       state
     end
   end
@@ -248,13 +248,13 @@ defmodule Minga.Agent.UIState do
   @doc "Moves cursor down within the input. Returns `:at_bottom` if already on the last line."
   @spec move_cursor_down(t()) :: t() | :at_bottom
   def move_cursor_down(%__MODULE__{panel: %Panel{prompt_buffer: pid}} = state) when is_pid(pid) do
-    {line, _col} = BufferServer.cursor(pid)
-    total = BufferServer.line_count(pid)
+    {line, _col} = Buffer.cursor(pid)
+    total = Buffer.line_count(pid)
 
     if line >= total - 1 do
       :at_bottom
     else
-      BufferServer.move_cursor(pid, :down)
+      Buffer.move(pid, :down)
       state
     end
   end
@@ -283,7 +283,7 @@ defmodule Minga.Agent.UIState do
     line_count = length(lines)
 
     if line_count < @paste_collapse_threshold do
-      BufferServer.insert_text(pid, clean_text)
+      Buffer.insert_text(pid, clean_text)
       %{state | panel: %{state.panel | history_index: -1}}
     else
       insert_collapsed_paste(state, clean_text)
@@ -301,7 +301,7 @@ defmodule Minga.Agent.UIState do
   @spec toggle_paste_expand(t()) :: t()
   def toggle_paste_expand(%__MODULE__{panel: %Panel{prompt_buffer: pid}} = state)
       when is_pid(pid) do
-    {cursor_line, _} = BufferServer.cursor(pid)
+    {cursor_line, _} = Buffer.cursor(pid)
     lines = input_lines(state)
     current_line = Enum.at(lines, cursor_line)
 
@@ -369,7 +369,7 @@ defmodule Minga.Agent.UIState do
   def history_prev(%__MODULE__{panel: panel} = state) when is_pid(panel.prompt_buffer) do
     new_idx = min(panel.history_index + 1, length(panel.prompt_history) - 1)
     text = Enum.at(panel.prompt_history, new_idx)
-    BufferServer.replace_content(panel.prompt_buffer, text)
+    Buffer.replace_content(panel.prompt_buffer, text)
     %{state | panel: %{panel | history_index: new_idx}}
   end
 
@@ -383,14 +383,14 @@ defmodule Minga.Agent.UIState do
         %__MODULE__{panel: %Panel{history_index: 0, prompt_buffer: pid} = panel} = state
       )
       when is_pid(pid) do
-    BufferServer.replace_content(pid, "")
+    Buffer.replace_content(pid, "")
     %{state | panel: %{panel | history_index: -1}}
   end
 
   def history_next(%__MODULE__{panel: panel} = state) when is_pid(panel.prompt_buffer) do
     new_idx = panel.history_index - 1
     text = Enum.at(panel.prompt_history, new_idx)
-    BufferServer.replace_content(panel.prompt_buffer, text)
+    Buffer.replace_content(panel.prompt_buffer, text)
     %{state | panel: %{panel | history_index: new_idx}}
   end
 
@@ -710,7 +710,7 @@ defmodule Minga.Agent.UIState do
   @spec insert_collapsed_paste(t(), String.t()) :: t()
   defp insert_collapsed_paste(%__MODULE__{panel: panel} = state, text) do
     pid = panel.prompt_buffer
-    {cursor_line, cursor_col} = BufferServer.cursor(pid)
+    {cursor_line, cursor_col} = Buffer.cursor(pid)
     lines = input_lines(state)
 
     block_index = length(panel.pasted_blocks)
@@ -729,8 +729,8 @@ defmodule Minga.Agent.UIState do
     new_cursor_col =
       if new_cursor_line > placeholder_line_idx, do: 0, else: String.length(placeholder)
 
-    BufferServer.replace_content(pid, new_content)
-    BufferServer.set_cursor(pid, {new_cursor_line, new_cursor_col})
+    Buffer.replace_content(pid, new_content)
+    Buffer.move_to(pid, {new_cursor_line, new_cursor_col})
 
     new_panel = %{panel | pasted_blocks: panel.pasted_blocks ++ [new_block], history_index: -1}
     %{state | panel: new_panel}
@@ -768,7 +768,7 @@ defmodule Minga.Agent.UIState do
   @spec expand_block(t(), non_neg_integer()) :: t()
   defp expand_block(%__MODULE__{panel: panel} = state, block_index) do
     pid = panel.prompt_buffer
-    {cursor_line, _} = BufferServer.cursor(pid)
+    {cursor_line, _} = Buffer.cursor(pid)
     lines = input_lines(state)
     block = Enum.at(panel.pasted_blocks, block_index)
     placeholder = @paste_placeholder_prefix <> Integer.to_string(block_index)
@@ -788,8 +788,8 @@ defmodule Minga.Agent.UIState do
       new_cursor_line =
         if cursor_line > placeholder_line_idx, do: cursor_line + expansion, else: cursor_line
 
-      BufferServer.replace_content(pid, Enum.join(new_lines, "\n"))
-      BufferServer.set_cursor(pid, {new_cursor_line, 0})
+      Buffer.replace_content(pid, Enum.join(new_lines, "\n"))
+      Buffer.move_to(pid, {new_cursor_line, 0})
 
       %{state | panel: %{panel | pasted_blocks: new_blocks}}
     else
@@ -800,7 +800,7 @@ defmodule Minga.Agent.UIState do
   @spec collapse_block(t(), non_neg_integer()) :: t()
   defp collapse_block(%__MODULE__{panel: panel} = state, block_index) do
     pid = panel.prompt_buffer
-    {cursor_line, _} = BufferServer.cursor(pid)
+    {cursor_line, _} = Buffer.cursor(pid)
     lines = input_lines(state)
     block = Enum.at(panel.pasted_blocks, block_index)
     text_lines = String.split(block.text, "\n")
@@ -820,8 +820,8 @@ defmodule Minga.Agent.UIState do
       contraction = text_line_count - 1
       new_cursor_line = collapse_cursor_line(cursor_line, start_idx, text_line_count, contraction)
 
-      BufferServer.replace_content(pid, Enum.join(new_lines, "\n"))
-      BufferServer.set_cursor(pid, {new_cursor_line, 0})
+      Buffer.replace_content(pid, Enum.join(new_lines, "\n"))
+      Buffer.move_to(pid, {new_cursor_line, 0})
 
       %{state | panel: %{panel | pasted_blocks: new_blocks}}
     else

@@ -10,8 +10,8 @@ defmodule Minga.Editor.Dashboard do
   and returns a list of `DisplayList.draw()` tuples. No side effects.
   """
 
+  alias Minga.Core.Face
   alias Minga.Editor.DisplayList
-  alias Minga.UI.Face
   alias Minga.UI.Theme
   alias Minga.UI.Theme.Dashboard, as: DashTheme
 

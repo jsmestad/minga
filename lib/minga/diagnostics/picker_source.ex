@@ -11,7 +11,7 @@ defmodule Minga.Diagnostics.PickerSource do
 
   alias Minga.UI.Picker.Item
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Diagnostics
   alias Minga.LSP.SyncServer
 
@@ -27,7 +27,7 @@ defmodule Minga.Diagnostics.PickerSource do
   @spec candidates(term()) :: [Item.t()]
   def candidates(%{workspace: %{buffers: %{active: buf}}}) when is_pid(buf) do
     buf
-    |> BufferServer.file_path()
+    |> Buffer.file_path()
     |> candidates_for_path()
   end
 
@@ -62,7 +62,7 @@ defmodule Minga.Diagnostics.PickerSource do
         state
 
       buf ->
-        BufferServer.move_to(buf, {line, col})
+        Buffer.move_to(buf, {line, col})
         state
     end
   end

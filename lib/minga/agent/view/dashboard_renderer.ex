@@ -10,9 +10,9 @@ defmodule Minga.Agent.View.DashboardRenderer do
   alias Minga.Agent.Config, as: AgentConfig
   alias Minga.Agent.ModelLimits
   alias Minga.Agent.View.RenderInput
+  alias Minga.Core.Face
   alias Minga.Editor.DisplayList
   alias Minga.Editor.State, as: EditorState
-  alias Minga.UI.Face
   alias Minga.UI.Theme
 
   @typedoc "Screen rectangle {row_offset, col_offset, width, height}."

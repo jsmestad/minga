@@ -14,7 +14,7 @@ defmodule Minga.Config.Completion do
   """
 
   alias Minga.Config.Options
-  alias Minga.Language.Filetype
+  alias Minga.Language
 
   @typedoc "A completion item compatible with `Minga.Editing.Completion.item()`."
   @type item :: %{
@@ -142,8 +142,8 @@ defmodule Minga.Config.Completion do
   @spec filetype_items() :: [item()]
   def filetype_items do
     filetypes =
-      (Map.values(Filetype.filenames()) ++ Map.values(Filetype.extensions()))
-      |> Enum.uniq()
+      Language.all()
+      |> Enum.map(& &1.name)
       |> Enum.sort()
 
     Enum.map(filetypes, fn ft ->
@@ -368,16 +368,16 @@ defmodule Minga.Config.Completion do
 
   @spec extensions_for_filetype(atom()) :: String.t()
   defp extensions_for_filetype(filetype) do
-    exts =
-      Filetype.extensions()
-      |> Enum.filter(fn {_ext, ft} -> ft == filetype end)
-      |> Enum.map(fn {ext, _ft} -> ".#{ext}" end)
-      |> Enum.sort()
-      |> Enum.take(4)
+    case Language.get(filetype) do
+      nil ->
+        ""
 
-    case exts do
-      [] -> ""
-      list -> Enum.join(list, ", ")
+      lang ->
+        lang.extensions
+        |> Enum.map(&".#{&1}")
+        |> Enum.sort()
+        |> Enum.take(4)
+        |> Enum.join(", ")
     end
   end
 end

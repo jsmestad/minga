@@ -6,8 +6,8 @@ defmodule Minga.Editor.Commands.Help do
   invocations, and is always read-only.
   """
 
+  alias Minga.Buffer
   alias Minga.Buffer.Document
-  alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.Commands
   alias Minga.Editor.State, as: EditorState
   alias Minga.Mode
@@ -61,7 +61,7 @@ defmodule Minga.Editor.Commands.Help do
   @spec ensure_help_buffer(state()) :: {state(), pid()}
   defp ensure_help_buffer(%{workspace: %{buffers: %{help: buf}}} = state)
        when is_pid(buf) and buf != nil do
-    BufferServer.buffer_name(buf)
+    Buffer.buffer_name(buf)
     {state, buf}
   catch
     :exit, _ -> start_help_buffer(state)
@@ -76,7 +76,7 @@ defmodule Minga.Editor.Commands.Help do
     {:ok, pid} =
       DynamicSupervisor.start_child(
         Minga.Buffer.Supervisor,
-        {BufferServer,
+        {Minga.Buffer,
          content: "", buffer_name: "*Help*", read_only: true, unlisted: true, persistent: true}
       )
 
@@ -89,6 +89,6 @@ defmodule Minga.Editor.Commands.Help do
       %{s | document: Document.new(content)}
     end)
 
-    BufferServer.move_to(buf, {0, 0})
+    Buffer.move_to(buf, {0, 0})
   end
 end

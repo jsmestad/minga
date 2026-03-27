@@ -26,7 +26,7 @@ defmodule Minga.Project do
 
   use GenServer
 
-  alias Minga.Config.Options, as: ConfigOptions
+  alias Minga.Config
   alias Minga.Project.Detector
 
   defstruct current_root: nil,
@@ -392,12 +392,12 @@ defmodule Minga.Project do
 
   @spec recent_files_limit() :: pos_integer()
   defp recent_files_limit do
-    ConfigOptions.get(:recent_files_limit)
+    Config.get(:recent_files_limit)
   end
 
   @spec persist_recent_files?() :: boolean()
   defp persist_recent_files? do
-    ConfigOptions.get(:persist_recent_files)
+    Config.get(:persist_recent_files)
   end
 
   @spec persist_known_projects([String.t()]) :: :ok

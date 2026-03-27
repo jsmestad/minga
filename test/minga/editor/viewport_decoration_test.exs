@@ -1,7 +1,7 @@
 defmodule Minga.Editor.ViewportDecorationTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Buffer.Decorations
+  alias Minga.Core.Decorations
   alias Minga.Editor.Viewport
 
   describe "effective_page_lines/4" do

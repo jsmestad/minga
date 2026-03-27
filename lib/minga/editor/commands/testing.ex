@@ -6,7 +6,7 @@ defmodule Minga.Editor.Commands.Testing do
 
   @behaviour Minga.Command.Provider
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Editor.Commands.BufferManagement
   alias Minga.Editor.State, as: EditorState
 
@@ -45,7 +45,7 @@ defmodule Minga.Editor.Commands.Testing do
 
   @spec run_test_command(state(), pid() | nil, :file | :all | :at_point) :: state()
   defp run_test_command(state, buf, kind) do
-    filetype = if buf, do: BufferServer.filetype(buf), else: detect_project_filetype()
+    filetype = if buf, do: Buffer.filetype(buf), else: detect_project_filetype()
     project_root = Minga.Project.root() || "."
 
     case Minga.Project.detect_test_runner(filetype, project_root) do
@@ -69,15 +69,15 @@ defmodule Minga.Editor.Commands.Testing do
   end
 
   defp build_test_command(runner, buf, :file) when is_pid(buf) do
-    case BufferServer.file_path(buf) do
+    case Buffer.file_path(buf) do
       nil -> nil
       path -> Minga.Project.test_file_command(runner, path)
     end
   end
 
   defp build_test_command(runner, buf, :at_point) when is_pid(buf) do
-    file_path = BufferServer.file_path(buf)
-    {cursor_line, _col} = BufferServer.cursor(buf)
+    file_path = Buffer.file_path(buf)
+    {cursor_line, _col} = Buffer.cursor(buf)
 
     if file_path do
       Minga.Project.test_at_point_command(runner, file_path, cursor_line + 1)

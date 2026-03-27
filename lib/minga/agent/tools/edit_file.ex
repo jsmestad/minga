@@ -9,7 +9,7 @@ defmodule Minga.Agent.Tools.EditFile do
   The old text must match exactly, including whitespace and indentation.
   """
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Editor
 
   @doc """
@@ -34,7 +34,7 @@ defmodule Minga.Agent.Tools.EditFile do
   @spec execute_via_buffer(pid(), String.t(), String.t(), String.t()) ::
           {:ok, String.t()} | {:error, String.t()}
   defp execute_via_buffer(pid, path, old_text, new_text) do
-    case BufferServer.find_and_replace(pid, old_text, new_text) do
+    case Buffer.find_and_replace(pid, old_text, new_text) do
       {:ok, _} -> {:ok, "edited #{path}"}
       {:error, reason} -> {:error, "#{reason} in #{path}. Read the file first to get exact text."}
     end

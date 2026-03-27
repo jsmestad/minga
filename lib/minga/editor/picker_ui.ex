@@ -14,13 +14,13 @@ defmodule Minga.Editor.PickerUI do
   The caller (`Editor`) is responsible for dispatching that action.
   """
 
-  alias Minga.Buffer.Unicode
+  alias Minga.Core.Face
+  alias Minga.Core.Unicode
   alias Minga.Editor.DisplayList
   alias Minga.Editor.FloatingWindow
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Picker, as: PickerState
   alias Minga.Editor.State.WhichKey, as: WhichKeyState
-  alias Minga.UI.Face
   alias Minga.UI.Picker
 
   import Bitwise

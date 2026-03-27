@@ -25,7 +25,7 @@ defmodule Minga.Input.AgentPanel do
   alias Minga.Editor.State.AgentAccess
   alias Minga.Input
   alias Minga.Input.AgentNav
-  alias Minga.Keymap.Scope
+  alias Minga.Keymap
 
   @impl true
   @spec handle_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
@@ -64,7 +64,7 @@ defmodule Minga.Input.AgentPanel do
       # need self-insert fallback for printable chars.
       key = {cp, mods}
 
-      case Scope.resolve_key(:agent, binding_state, key) do
+      case Keymap.resolve_scoped_key(:agent, binding_state, key) do
         {:command, command} ->
           Commands.execute(state, command)
 
@@ -192,7 +192,7 @@ defmodule Minga.Input.AgentPanel do
       # No prompt buffer, try scope bindings
       key = {cp, mods}
 
-      case Scope.resolve_key(:agent, :input_normal, key) do
+      case Keymap.resolve_scoped_key(:agent, :input_normal, key) do
         {:command, command} -> Commands.execute(state, command)
         {:prefix, _node} -> state
         :not_found -> state

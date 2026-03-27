@@ -12,7 +12,7 @@ defmodule Minga.Editing.Motion.VisualLine do
   """
 
   alias Minga.Buffer.Document
-  alias Minga.Buffer.Unicode
+  alias Minga.Core.Unicode
   alias Minga.Editor.WrapMap
 
   @type position :: Document.position()

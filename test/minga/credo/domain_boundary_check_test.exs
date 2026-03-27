@@ -64,11 +64,11 @@ defmodule Minga.Credo.DomainBoundaryCheckTest do
     test "flags deeply nested internal module" do
       """
       defmodule Minga.Editor.Foo do
-        alias Minga.Buffer.Decorations.FoldRegion
+        alias Minga.Buffer.Document
       end
       """
       |> check("lib/minga/editor/foo.ex")
-      |> assert_issue(%{trigger: "Minga.Buffer.Decorations.FoldRegion"})
+      |> assert_issue(%{trigger: "Minga.Buffer.Document"})
     end
 
     test "flags multiple violations in one file" do
@@ -76,7 +76,7 @@ defmodule Minga.Credo.DomainBoundaryCheckTest do
       defmodule Minga.Agent.Foo do
         alias Minga.Buffer.Server
         alias Minga.Config.Options
-        alias Minga.UI.Face
+        alias Minga.UI.Theme
       end
       """
       |> check("lib/minga/agent/foo.ex")

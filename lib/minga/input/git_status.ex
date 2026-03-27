@@ -9,14 +9,13 @@ defmodule Minga.Input.GitStatus do
 
   @behaviour Minga.Input.Handler
 
-  alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Buffer
   alias Minga.Editor.Commands
   alias Minga.Editor.State, as: EditorState
   alias Minga.Git
-  alias Minga.Git.Repo
   alias Minga.Input
   alias Minga.Input.GitStatus.TuiState
-  alias Minga.Keymap.Scope
+  alias Minga.Keymap
 
   @impl true
   @spec handle_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
@@ -30,7 +29,7 @@ defmodule Minga.Input.GitStatus do
 
       binding_state = Minga.Editing.binding_state(state)
 
-      case Scope.resolve_key(:git_status, binding_state, key) do
+      case Keymap.resolve_scoped_key(:git_status, binding_state, key) do
         {:command, cmd} ->
           {:handled, execute_command(state, cmd)}
 
@@ -170,7 +169,7 @@ defmodule Minga.Input.GitStatus do
     idx =
       Enum.find_index(state.workspace.buffers.list, fn buf ->
         try do
-          BufferServer.file_path(buf) == abs_path
+          Buffer.file_path(buf) == abs_path
         catch
           :exit, _ -> false
         end
@@ -240,9 +239,9 @@ defmodule Minga.Input.GitStatus do
 
   @spec refresh_repo(String.t()) :: :ok
   defp refresh_repo(git_root) do
-    case Repo.lookup(git_root) do
+    case Git.lookup_repo(git_root) do
       nil -> :ok
-      pid -> Repo.refresh(pid)
+      pid -> Git.refresh_repo(pid)
     end
   end
 
