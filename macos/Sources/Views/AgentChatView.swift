@@ -548,45 +548,148 @@ struct AgentChatView: View {
         return theme.popupFg.opacity(0.2)
     }
 
-    /// Height of the Metal-rendered prompt area in points.
-    /// The prompt SemanticWindow is rendered by Metal through this transparent gap.
-    /// +2 rows for the top/bottom border of the prompt box.
-    private var promptGapHeight: CGFloat {
-        let rows = max(Int(state.promptVisibleRows), 1) + 2
-        return CGFloat(rows) * cellHeight + 16 // +16 for padding
+    /// Capsule border color: accent when in insert mode, subtle border otherwise.
+    private var capsuleBorderColor: Color {
+        if isInsertMode { return theme.accent.opacity(0.5) }
+        return theme.popupBorder.opacity(0.3)
+    }
+
+    /// Capsule background opacity shifts with mode.
+    private var capsuleBgOpacity: Double {
+        if isInsertMode { return 0.8 }
+        if isStreaming { return 0.6 }
+        return 0.4
+    }
+
+    /// Vim mode label shown in the prompt border.
+    private var modeLabel: String {
+        switch state.promptVimMode {
+        case 0: return "NORMAL"
+        case 2: return "VISUAL"
+        case 3: return "V-LINE"
+        case 4: return "OP"
+        default: return "" // insert mode: no label
+        }
     }
 
     @ViewBuilder
     private var promptArea: some View {
         HStack(spacing: 8) {
-            // Transparent gap where Metal renders the prompt cell-grid.
-            // The BEAM sends the prompt as a SemanticWindow (0x80) with
-            // window_id 65534, positioned at the bottom of the editor surface.
-            Color.clear
-                .frame(height: promptGapHeight)
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    if !isInsertMode && !isStreaming {
-                        // Send 'i' to enter insert mode
-                        encoder?.sendKeyPress(codepoint: 0x69, modifiers: 0)
-                    }
-                }
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel("Chat input")
-                .accessibilityValue(state.prompt.isEmpty ? "Empty" : state.prompt)
-                .accessibilityHint(isInsertMode ? "Type a message, press Return to send" : "Press i to start typing")
-
-            // Action button (send / stop)
-            VStack {
-                Spacer()
-                actionButton
-                    .padding(.bottom, 8)
-            }
-            .frame(height: promptGapHeight)
+            promptCapsule
+            actionButton
         }
-        .padding(.horizontal, 4)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Agent prompt")
+    }
+
+    @ViewBuilder
+    private var promptCapsule: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Mode indicator bar (only in non-insert modes)
+            if !modeLabel.isEmpty {
+                HStack(spacing: 4) {
+                    Text(modeLabel)
+                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .foregroundStyle(theme.accent)
+                    Spacer()
+                }
+                .padding(.horizontal, 12)
+                .padding(.top, 4)
+                .padding(.bottom, 2)
+            }
+
+            // Prompt text with monospaced font and cursor
+            HStack(spacing: 0) {
+                if isStreaming && state.prompt.isEmpty {
+                    Text("Generating...")
+                        .font(.system(size: 13, design: .monospaced))
+                        .foregroundStyle(theme.popupFg.opacity(0.3))
+                        .italic()
+                } else if state.prompt.isEmpty && !isInsertMode {
+                    Text("Ask anything...")
+                        .font(.system(size: 13, design: .monospaced))
+                        .foregroundStyle(theme.popupFg.opacity(0.25))
+                } else {
+                    // Render prompt text with cursor overlay
+                    promptTextWithCursor
+                }
+
+                Spacer(minLength: 4)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, modeLabel.isEmpty ? 10 : 6)
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(theme.popupBg.opacity(capsuleBgOpacity))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(capsuleBorderColor, lineWidth: 1)
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 12))
+        .onTapGesture {
+            if !isInsertMode && !isStreaming {
+                encoder?.sendKeyPress(codepoint: 0x69, modifiers: 0)
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Chat input")
+        .accessibilityValue(state.prompt.isEmpty ? "Empty" : state.prompt)
+        .accessibilityHint(isInsertMode ? "Type a message, press Return to send" : "Press i to start typing")
+    }
+
+    /// Monospace character width at the prompt font size, computed from actual font metrics.
+    private var promptCharWidth: CGFloat {
+        let font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+        let size = ("M" as NSString).size(withAttributes: [.font: font])
+        return size.width
+    }
+
+    /// Line height for the prompt font, derived from actual font metrics.
+    private var promptLineHeight: CGFloat {
+        let font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+        return ceil(font.ascender - font.descender + font.leading)
+    }
+
+    /// Renders the prompt text with a cursor at the BEAM-reported position.
+    /// Uses monospaced font so cursor positioning aligns with character columns.
+    @ViewBuilder
+    private var promptTextWithCursor: some View {
+        let lines = state.prompt.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        let cursorLine = Int(state.promptCursorLine)
+        let cursorCol = Int(state.promptCursorCol)
+        let isBlock = state.promptVimMode == 0 || state.promptVimMode >= 2
+        let charW = promptCharWidth
+        let lineH = promptLineHeight
+
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(Array(lines.prefix(8).enumerated()), id: \.offset) { lineIdx, line in
+                ZStack(alignment: .leading) {
+                    Text(line.isEmpty ? " " : line)
+                        .font(.system(size: 13, design: .monospaced))
+                        .foregroundStyle(theme.popupFg.opacity(isStreaming ? 0.4 : 1.0))
+
+                    if lineIdx == cursorLine && !isStreaming {
+                        let cursorX = CGFloat(cursorCol) * charW
+
+                        if isBlock {
+                            Rectangle()
+                                .fill(theme.accent.opacity(0.7))
+                                .frame(width: charW, height: lineH)
+                                .offset(x: cursorX)
+                        } else {
+                            Rectangle()
+                                .fill(theme.accent)
+                                .frame(width: 1.5, height: lineH)
+                                .offset(x: cursorX)
+                        }
+                    }
+                }
+            }
+        }
     }
 
     @ViewBuilder

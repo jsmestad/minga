@@ -397,9 +397,9 @@ struct ContentView: View {
     private var editorSurface: some View {
         ZStack(alignment: .topLeading) {
             // Metal editor surface (always present for input handling).
-            // When agent chat is visible, Metal stays visible to render
-            // the prompt cell-grid at the bottom. The SwiftUI chat overlay
-            // covers the rest with its own opaque background.
+            // Hidden when agent chat is visible so the SwiftUI chat overlay
+            // is not occluded by the NSView layer (AppKit NSViews render
+            // above SwiftUI views in a ZStack regardless of child order).
             Group {
                 if let nsView = appState.editorNSView {
                     EditorView(editorNSView: nsView)
@@ -407,6 +407,7 @@ struct ContentView: View {
                     Color(red: 0.12, green: 0.12, blue: 0.14)
                 }
             }
+            .opacity(appState.gui.agentChatState.visible ? 0 : 1)
             .onChange(of: appState.gui.agentChatState.visible) { _, visible in
                 appState.editorNSView?.setAgentChatVisible(visible)
             }
