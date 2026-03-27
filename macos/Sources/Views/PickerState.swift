@@ -71,7 +71,7 @@ final class PickerState {
     var previewLines: [PreviewLine] = []
     var actionMenu: PickerActionMenu? = nil
 
-    func update(visible: Bool, selectedIndex: UInt16, filteredCount: UInt16, totalCount: UInt16, title: String, query: String, hasPreview: Bool, rawItems: [GUIPickerItem], actionMenu: GUIPickerActionMenu?) {
+    func update(visible: Bool, selectedIndex: UInt16, filteredCount: UInt16, totalCount: UInt16, title: String, query: String, hasPreview: Bool, rawItems: [Wire.PickerItem], actionMenu: Wire.PickerActionMenu?) {
         self.visible = visible
         self.selectedIndex = Int(selectedIndex)
         self.filteredCount = Int(filteredCount)
@@ -101,7 +101,7 @@ final class PickerState {
         }
     }
 
-    func updatePreview(lines: [GUIPickerPreviewLine]) {
+    func updatePreview(lines: [Wire.PickerPreviewLine]) {
         self.previewLines = lines.enumerated().map { lineIdx, segments in
             PreviewLine(
                 id: lineIdx,

@@ -252,7 +252,7 @@ struct AgentChatView: View {
     }
 
     @ViewBuilder
-    private func styledAssistantBlock(_ lines: [[StyledTextRun]]) -> some View {
+    private func styledAssistantBlock(_ lines: [[Wire.StyledTextRun]]) -> some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
                 ForEach(Array(lines.enumerated()), id: \.offset) { _, runs in
@@ -272,7 +272,7 @@ struct AgentChatView: View {
         }
     }
 
-    private func buildAttributedString(_ runs: [StyledTextRun], baseFontSize: CGFloat = 13, monospaced: Bool = false) -> AttributedString {
+    private func buildAttributedString(_ runs: [Wire.StyledTextRun], baseFontSize: CGFloat = 13, monospaced: Bool = false) -> AttributedString {
         var result = AttributedString()
         for run in runs {
             var attr = AttributedString(run.text)
@@ -337,7 +337,7 @@ struct AgentChatView: View {
     }
 
     @ViewBuilder
-    private func toolCallCard(messageIndex: Int, name: String, summary: String, status: UInt8, isError: Bool, collapsed: Bool, durationMs: UInt32, result: String?, resultLines: [[StyledTextRun]]?) -> some View {
+    private func toolCallCard(messageIndex: Int, name: String, summary: String, status: UInt8, isError: Bool, collapsed: Bool, durationMs: UInt32, result: String?, resultLines: [[Wire.StyledTextRun]]?) -> some View {
         let hasResult = (result != nil && !result!.isEmpty) || (resultLines != nil && !resultLines!.isEmpty)
 
         VStack(alignment: .leading, spacing: 0) {
@@ -617,7 +617,7 @@ struct AgentChatView: View {
     /// Renders a floating completion popup for @-mention or /slash commands.
     /// Styled to match the existing CompletionOverlay used for LSP completions.
     @ViewBuilder
-    private func promptCompletionPopup(_ completion: GUIPromptCompletion) -> some View {
+    private func promptCompletionPopup(_ completion: Wire.PromptCompletion) -> some View {
         let isSlash = completion.type == 1
         let maxVisible = min(completion.candidates.count, 10)
 

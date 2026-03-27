@@ -182,7 +182,7 @@ struct HoverPopupOverlay: View {
             .foregroundStyle(segmentColor(seg.style))
     }
 
-    private func segmentFont(_ style: GUIHoverStyle) -> Font {
+    private func segmentFont(_ style: Wire.HoverStyle) -> Font {
         switch style {
         case .bold:
             return .system(size: 13, weight: .semibold)
@@ -203,7 +203,7 @@ struct HoverPopupOverlay: View {
         }
     }
 
-    private func segmentColor(_ style: GUIHoverStyle) -> Color {
+    private func segmentColor(_ style: Wire.HoverStyle) -> Color {
         switch style {
         case .code, .codeBlock, .codeContent:
             return theme.popupFg.opacity(0.85)

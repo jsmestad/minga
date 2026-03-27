@@ -37,6 +37,24 @@ The BEAM checks `Capabilities.gui?` (true when `frontend_type == :native_gui`) t
 
 GUI chrome opcodes live in the range 0x70-0x7F. GUI content opcodes (semantic buffer rendering, overlays) start at 0x80. Frontends can classify an opcode as GUI by checking `opcode >= 0x70`.
 
+### Forward-Compatible Opcodes (0x90+)
+
+All opcodes at 0x90 and above use a length-prefixed envelope:
+
+```
+opcode(1) + payload_length(2, big-endian) + payload(payload_length)
+```
+
+This allows old frontends to skip unknown opcodes without crashing. When a frontend encounters an unrecognized opcode >= 0x90, it reads the 2-byte length, advances past the payload, and continues decoding the rest of the batch.
+
+Opcodes below 0x90 do NOT include a length prefix and retain their existing positional wire format. If a frontend encounters an unknown opcode below 0x90, it cannot determine the message size and must abort decoding.
+
+The BEAM-side encoder must use this envelope for all new opcodes (0x90+). Currently defined 0x90+ opcodes:
+
+| Opcode | Name | Description |
+|--------|------|-------------|
+| 0x90 | clipboard_write | Write text to the system clipboard |
+
 ### 0x70 — gui_file_tree
 
 File tree sidebar entries for the native sidebar view.
@@ -158,34 +176,30 @@ When nil (no file):
 
 Segments are the path components relative to the project root. For example, `lib/minga/editor.ex` produces `["lib", "minga", "editor.ex"]`.
 
-### 0x76 — gui_status_bar
+### 0x76 — gui_status_bar (sectioned format)
 
-Status bar data for the focused window. Both variants use the same unified wire format so the status bar layout stays stable across mode switches. The first byte after the opcode is `content_kind`:
-- `0` — buffer window
-- `1` — agent chat window (background buffer fields populate the standard slots; agent-specific fields are appended at the end)
+Status bar data for the focused window. Uses a sectioned wire format where each field group is wrapped in a self-describing section. Unknown sections are skipped by the frontend, enabling forward/backward compatibility when new fields are added.
 
-**Unified layout (both variants):**
+**Envelope:**
 ```
-opcode(1) + content_kind(1) + mode(1) + cursor_line(4) + cursor_col(4) + line_count(4)
-+ flags(1) + lsp_status(1) + git_branch_len(1) + git_branch(git_branch_len)
-+ message_len(2) + message(message_len) + filetype_len(1) + filetype(filetype_len)
-+ error_count(2) + warning_count(2)
--- Extended fields --
-+ info_count(2) + hint_count(2)
-+ macro_recording(1) + parser_status(1) + agent_status(1)
-+ git_added(2) + git_modified(2) + git_deleted(2)
-+ icon_len(1) + icon(icon_len) + icon_color_r(1) + icon_color_g(1) + icon_color_b(1)
-+ filename_len(2) + filename(filename_len)
-+ diagnostic_hint_len(2) + diagnostic_hint(diagnostic_hint_len)
+opcode(1) + section_count(1) + [section_id(1) + section_len(2) + payload(section_len)]*
 ```
 
-**Agent trailing fields (content_kind == 1 only, appended after diagnostic_hint):**
-```
-+ model_name_len(1) + model_name(model_name_len)
-+ message_count(4) + session_status(1)
-```
+**Sections:**
 
-When `content_kind == 1`, the standard slots (cursor_line, git_branch, diagnostics, etc.) are populated from the background buffer so the status bar can show them alongside agent-specific info.
+| ID | Name | Payload |
+|----|------|---------|
+| 0x01 | Identity | content_kind(1) + mode(1) + flags(1) |
+| 0x02 | Cursor | cursor_line(4) + cursor_col(4) + line_count(4) |
+| 0x03 | Diagnostics | error_count(2) + warning_count(2) + info_count(2) + hint_count(2) + diag_hint_len(2) + diag_hint |
+| 0x04 | Language | lsp_status(1) + parser_status(1) |
+| 0x05 | Git | branch_len(1) + branch + added(2) + modified(2) + deleted(2) |
+| 0x06 | File | icon_len(1) + icon + icon_r(1) + icon_g(1) + icon_b(1) + filename_len(2) + filename + filetype_len(1) + filetype |
+| 0x07 | Message | msg_len(2) + msg |
+| 0x08 | Recording | macro_recording(1) |
+| 0x09 | Agent | buffer variant: agent_status(1). Agent variant: model_name_len(1) + model_name + message_count(4) + session_status(1) + agent_status(1) |
+
+`content_kind`: 0 = buffer window, 1 = agent chat window. When `content_kind == 1`, the standard sections (cursor, git, diagnostics, etc.) contain background buffer data and section 0x09 includes agent-specific fields.
 
 `cursor_line` and `cursor_col` are 1-indexed on the wire.
 
@@ -205,9 +219,16 @@ Macro recording: 0=not recording, 1-26=recording register a-z
 
 `icon` is a UTF-8 encoded Nerd Font glyph for the filetype (e.g., "" for Elixir). `icon_color` is 24-bit RGB split into 3 bytes. `filename` is the display name of the active buffer (for accessibility/tooltip use). `git_added`, `git_modified`, `git_deleted` are line counts from the buffer's diff against HEAD.
 
-### 0x77 — gui_picker
+### 0x77 — gui_picker (sectioned format)
 
-Fuzzy finder / command palette state (v2 extended format).
+Fuzzy finder / command palette state. Uses sectioned envelope: `opcode(1) + section_count(1) + sections...`. Hidden picker: section_count=0.
+
+| Section ID | Name | Content |
+|-----------|------|--------|
+| 0x01 | Header | visible, selected_index, filtered_count, total_count, has_preview, title |
+| 0x02 | Query | query string |
+| 0x03 | Items | item_count + items (positional per item) |
+| 0x04 | ActionMenu | visible flag + selected + actions |
 
 ```
 When visible:
@@ -261,10 +282,20 @@ When hidden:
   opcode(1) + 0(1)
 ```
 
-### 0x78 — gui_agent_chat
+### 0x78 — gui_agent_chat (sectioned format)
 
-Agent conversation view state.
+Agent conversation view state. Uses sectioned envelope: `opcode(1) + section_count(1) + sections...`. Hidden: section_count=0.
 
+| Section ID | Name | Content |
+|-----------|------|--------|
+| 0x01 | Header | visible, status |
+| 0x02 | Model | model name |
+| 0x03 | Prompt | prompt text |
+| 0x04 | Pending | pending approval (tool name + summary) |
+| 0x05 | Help | help overlay visibility + groups |
+| 0x06 | Messages | message_count + messages (same nested format as before) |
+
+**Legacy positional format (deprecated):**
 ```
 When visible:
   opcode(1) + 1(1) + status(1) + model_len(2) + model(model_len) + prompt_len(2) + prompt(prompt_len) + pending_approval + message_count(2) + messages...
@@ -311,9 +342,15 @@ opcode(1) + row(2) + r(1) + g(1) + b(1)
 
 The GUI frontend draws the cursorline as a full-width colored rectangle behind the text on this row. This replaces the TUI approach of prepending a full-width space fill draw to paint the background.
 
-### 0x7B — gui_gutter
+### 0x7B — gui_gutter (sectioned format)
 
-Structured gutter data for native line number and sign rendering. One message is sent per editor window (split pane), each including the window's screen position. Agent chat windows are skipped.
+Structured gutter data for native line number and sign rendering. One message is sent per editor window (split pane), each including the window's screen position. Agent chat windows are skipped. Uses sectioned envelope: `opcode(1) + section_count(1) + sections...`.
+
+| Section ID | Name | Content |
+|-----------|------|--------|
+| 0x01 | Window | window_id, content_row, content_col, content_height, is_active |
+| 0x02 | Config | cursor_line, line_number_style, line_number_width, sign_col_width |
+| 0x03 | Entries | entry_count + entries (positional per entry) |
 
 ```
 opcode(1) + window_id(2) + content_row(2) + content_col(2) + content_height(2) + is_active(1)
@@ -490,11 +527,21 @@ Mode values:
 
 `cursor_pos` is the 0-indexed character position within `input` for the beam cursor. `0xFFFF` means no cursor (prompt-only modes 5-7). `context` is right-aligned supplementary text. `match_score` is 0-255 fuzzy match quality. `candidate_count == 0` naturally represents "input visible, no completions."
 
-### 0x80 — gui_window_content
+### 0x80 — gui_window_content (sectioned format)
 
 Semantic rendering data for a buffer window. Replaces draw_text commands for buffer content. The BEAM pre-resolves all layout (word wrap, folding, virtual text splicing, conceal ranges) and all styling (syntax highlighting colors). The frontend renders directly from this data via CoreText, with selection/search/diagnostics as overlay quads (not baked into text colors).
 
-One 0x80 message is sent per buffer window per frame. Agent chat windows do not use this opcode.
+One 0x80 message is sent per buffer window per frame. Agent chat windows do not use this opcode. Uses sectioned envelope: `opcode(1) + section_count(1) + sections...`.
+
+| Section ID | Name | Content |
+|-----------|------|--------|
+| 0x01 | Header | window_id, flags, cursor_row, cursor_col, cursor_shape, scroll_left |
+| 0x02 | Rows | row_count + rows (positional per row with spans) |
+| 0x03 | Selection | selection_type + coordinates |
+| 0x04 | SearchMatches | match_count + matches |
+| 0x05 | Diagnostics | range_count + diagnostic ranges |
+| 0x06 | DocumentHighlights | highlight_count + highlights |
+| 0x07 | LineAnnotations | annotation_count + annotations |
 
 ```
 opcode(1) + window_id(2) + flags(1) + cursor_row(2) + cursor_col(2) + cursor_shape(1) + scroll_left(2) + visible_row_count(2) + rows... + selection + search_matches + diagnostic_ranges
@@ -822,7 +869,7 @@ A GUI frontend must satisfy these requirements:
 
 4. **Send `gui_action` events for user interactions with chrome.** When a user clicks a tab, selects a completion item, or toggles a panel, encode the action and send it to the BEAM on stdout.
 
-5. **Handle missing opcodes gracefully.** New GUI opcodes may be added in the 0x70-0x7F range. Frontends should skip unknown opcodes rather than crashing.
+5. **Handle missing opcodes gracefully.** New GUI opcodes may be added in the 0x70-0x8F range. Frontends should skip unknown opcodes rather than crashing. All new opcodes (0x90+) use a length-prefixed envelope (`opcode + payload_length:2 + payload`) so frontends can skip unknown opcodes by reading the length. See "Forward-Compatible Opcodes (0x90+)" above.
 
 6. **Process `gui_theme` before rendering other chrome.** The theme command typically arrives early in the first frame. Apply colors before rendering chrome elements to avoid a flash of unstyled content.
 

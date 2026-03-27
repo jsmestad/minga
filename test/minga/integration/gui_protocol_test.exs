@@ -660,19 +660,27 @@ defmodule Minga.Integration.GUIProtocolTest do
 
   describe "gui_picker visible" do
     test "round-trips visible picker with items", %{port: port} do
-      title = "Find File"
-      query = "edi"
+      item = %Minga.UI.Picker.Item{
+        id: "editor.ex",
+        label: "editor.ex",
+        description: "lib",
+        annotation: "",
+        icon_color: 0x51AFEF,
+        two_line: false,
+        match_positions: [0, 3]
+      }
 
-      # Item: icon_color(3) + flags(1) + label_len(2) + label + desc_len(2) + desc
-      #       + annotation_len(2) + annotation + match_pos_count(1) + positions(2 each)
-      item1 =
-        <<0x51, 0xAF, 0xEF, 0x00, 9::16, "editor.ex"::binary, 3::16, "lib"::binary, 0::16, 2::8,
-          0::16, 3::16>>
+      picker = %Minga.UI.Picker{
+        title: "Find File",
+        query: "edi",
+        selected: 0,
+        max_visible: 50,
+        items: [item],
+        filtered: [item],
+        marked: MapSet.new()
+      }
 
-      cmd =
-        <<0x77, 1::8, 0::16, 1::16, 10::16, byte_size(title)::16, title::binary,
-          byte_size(query)::16, query::binary, 0::8, 1::16, item1::binary, 0::8>>
-
+      cmd = ProtocolGUI.encode_gui_picker(picker)
       Port.command(port, cmd)
 
       assert_receive {^port, {:data, json}}, 5_000
@@ -683,7 +691,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert decoded["title"] == "Find File"
       assert decoded["query"] == "edi"
       assert decoded["filtered_count"] == 1
-      assert decoded["total_count"] == 10
+      assert decoded["total_count"] == 1
       assert length(decoded["items"]) == 1
 
       item = hd(decoded["items"])

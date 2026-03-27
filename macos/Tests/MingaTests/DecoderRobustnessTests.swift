@@ -183,46 +183,36 @@ struct DecoderTruncatedGUIChromeTests {
         }
     }
 
-    @Test("gui_status_bar truncated header")
+    @Test("gui_status_bar truncated section header")
     func truncatedStatusBar() {
         var data = Data([OP_GUI_STATUS_BAR])
-        data.append(0) // contentKind
-        data.append(0) // mode
-        // Missing rest of header (cursorLine, cursorCol, etc.)
+        data.append(1) // section_count = 1
+        data.append(0x01) // section_id = identity
+        // Missing section_len (needs 2 bytes)
 
         #expect(throws: ProtocolDecodeError.self) {
             try decodeCommand(data: data, offset: 0)
         }
     }
 
-    @Test("gui_picker visible but truncated items")
+    @Test("gui_picker truncated section header")
     func truncatedPicker() {
         var data = Data([OP_GUI_PICKER])
-        data.append(1) // visible
-        data.append(contentsOf: [0x00, 0x00]) // selectedIndex
-        data.append(contentsOf: [0x00, 0x01]) // filteredCount
-        data.append(contentsOf: [0x00, 0x01]) // totalCount
-        data.append(contentsOf: [0x00, 0x00]) // title_len=0
-        data.append(contentsOf: [0x00, 0x00]) // query_len=0
-        data.append(0) // hasPreview
-        data.append(contentsOf: [0x00, 0x02]) // itemCount=2
-        // No item data
+        data.append(1) // section_count = 1
+        data.append(0x01) // section_id
+        // Missing section_len (needs 2 bytes)
 
         #expect(throws: ProtocolDecodeError.self) {
             try decodeCommand(data: data, offset: 0)
         }
     }
 
-    @Test("gui_agent_chat visible but truncated messages")
+    @Test("gui_agent_chat truncated section header")
     func truncatedAgentChat() {
         var data = Data([OP_GUI_AGENT_CHAT])
-        data.append(1) // visible
-        data.append(0) // status
-        data.append(contentsOf: [0x00, 0x00]) // model_len=0
-        data.append(contentsOf: [0x00, 0x00]) // prompt_len=0
-        data.append(0) // no pending
-        data.append(contentsOf: [0x00, 0x03]) // messageCount=3
-        // No message data
+        data.append(2) // section_count = 2
+        data.append(0x01) // section_id
+        // Missing section_len
 
         #expect(throws: ProtocolDecodeError.self) {
             try decodeCommand(data: data, offset: 0)
@@ -245,14 +235,12 @@ struct DecoderTruncatedGUIChromeTests {
         }
     }
 
-    @Test("gui_gutter truncated entries")
+    @Test("gui_gutter truncated section payload")
     func truncatedGutter() {
         var data = Data([OP_GUI_GUTTER])
-        // Header: window_id(2)+content_row(2)+content_col(2)+content_height(2)
-        //         +is_active(1)+cursor_line(4)+style(1)+ln_width(1)+sign_width(1)+line_count(2) = 18
-        data.append(contentsOf: Array(repeating: UInt8(0), count: 16))
-        data.append(contentsOf: [0x00, 0x05]) // lineCount=5
-        // Each entry is 6 bytes; claim 5 entries but provide none
+        data.append(1) // section_count = 1
+        data.append(0x01) // section_id
+        data.append(contentsOf: [0x00, 0x20]) // section_len = 32 (but only 0 bytes follow)
 
         #expect(throws: ProtocolDecodeError.self) {
             try decodeCommand(data: data, offset: 0)
@@ -274,17 +262,147 @@ struct DecoderTruncatedGUIChromeTests {
         }
     }
 
-    @Test("gui_window_content truncated rows")
+    @Test("gui_window_content truncated section payload")
     func truncatedWindowContent() {
         var data = Data([OP_GUI_WINDOW_CONTENT])
-        // Header: window_id(2)+flags(1)+cursor_row(2)+cursor_col(2)+cursor_shape(1)+scroll_left(2)+row_count(2) = 12
-        data.append(contentsOf: [0x00, 0x01]) // windowId
-        data.append(0x01) // flags
-        data.append(contentsOf: [0x00, 0x00, 0x00, 0x00]) // cursor
-        data.append(0x00) // cursor_shape
-        data.append(contentsOf: [0x00, 0x00]) // scrollLeft
-        data.append(contentsOf: [0x00, 0x05]) // rowCount=5
-        // No row data
+        data.append(1) // section_count = 1
+        data.append(0x01) // section_id
+        data.append(contentsOf: [0x00, 0x40]) // section_len = 64 (but only 0 bytes follow)
+
+        #expect(throws: ProtocolDecodeError.self) {
+            try decodeCommand(data: data, offset: 0)
+        }
+    }
+}
+
+// MARK: - Forward-compatible unknown opcodes (0x90+)
+
+@Suite("Decoder Robustness: Forward-Compatible Unknown Opcodes")
+struct DecoderForwardCompatTests {
+
+    @Test("Unknown opcode >= 0x90 with valid length prefix is skipped")
+    func skipUnknownOpcode() throws {
+        // Opcode 0xA0 is not defined. It uses the 0x90+ convention:
+        // opcode(1) + payload_length(2, big-endian) + payload(payload_length)
+        var data = Data()
+        data.append(0xA0)                       // unknown opcode
+        data.append(contentsOf: [0x00, 0x04])   // payload_length = 4
+        data.append(contentsOf: [0xDE, 0xAD, 0xBE, 0xEF]) // payload (4 bytes)
+
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(cmd == nil, "Unknown opcode should be skipped (nil command)")
+        #expect(size == 7, "Should consume opcode(1) + length(2) + payload(4) = 7 bytes")
+    }
+
+    @Test("Unknown opcode skipped, subsequent commands decoded correctly")
+    func skipThenDecode() throws {
+        // Build a batch: unknown 0xA0 (5-byte payload) + clear + batch_end
+        var data = Data()
+        // Unknown opcode
+        data.append(0xA0)
+        data.append(contentsOf: [0x00, 0x05]) // payload_length = 5
+        data.append(contentsOf: [0x01, 0x02, 0x03, 0x04, 0x05]) // 5 bytes of payload
+        // Known commands that follow
+        data.append(OP_CLEAR)
+        data.append(OP_BATCH_END)
+
+        var commands: [RenderCommand] = []
+        try decodeCommands(from: data) { cmd in
+            commands.append(cmd)
+        }
+        // The unknown opcode is skipped (nil), so only clear and batchEnd are collected
+        #expect(commands.count == 2)
+        guard case .clear = commands[0] else {
+            Issue.record("Expected .clear after skipped opcode"); return
+        }
+        guard case .batchEnd = commands[1] else {
+            Issue.record("Expected .batchEnd"); return
+        }
+    }
+
+    @Test("Unknown opcode with zero-length payload is skipped")
+    func skipZeroPayload() throws {
+        var data = Data()
+        data.append(0xB0)                       // unknown opcode
+        data.append(contentsOf: [0x00, 0x00])   // payload_length = 0
+
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(cmd == nil)
+        #expect(size == 3, "opcode(1) + length(2) + payload(0) = 3")
+    }
+
+    @Test("Multiple unknown opcodes in a row are all skipped")
+    func skipMultipleUnknown() throws {
+        var data = Data()
+        // First unknown opcode (3-byte payload)
+        data.append(0xA1)
+        data.append(contentsOf: [0x00, 0x03])
+        data.append(contentsOf: [0xAA, 0xBB, 0xCC])
+        // Second unknown opcode (0-byte payload)
+        data.append(0xA2)
+        data.append(contentsOf: [0x00, 0x00])
+        // Known command
+        data.append(OP_CLEAR)
+
+        var commands: [RenderCommand] = []
+        try decodeCommands(from: data) { cmd in
+            commands.append(cmd)
+        }
+        #expect(commands.count == 1)
+        guard case .clear = commands[0] else {
+            Issue.record("Expected .clear"); return
+        }
+    }
+
+    @Test("Known opcode 0x90 (clipboard_write) is NOT skipped")
+    func knownOpcodeNotSkipped() throws {
+        // OP_CLIPBOARD_WRITE (0x90) uses the length-prefixed format but is a known opcode
+        var data = Data()
+        data.append(OP_CLIPBOARD_WRITE) // 0x90
+        // payload: target(1) + text_len(2) + text
+        let text = "hello"
+        let payloadLen = 1 + 2 + text.utf8.count // 8
+        data.append(UInt8(payloadLen >> 8))
+        data.append(UInt8(payloadLen & 0xFF))
+        data.append(0x00) // target = general pasteboard
+        data.append(contentsOf: [0x00, UInt8(text.utf8.count)])
+        data.append(contentsOf: text.utf8)
+
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(cmd != nil, "Known 0x90 opcode should decode, not skip")
+        #expect(size == 1 + 2 + payloadLen)
+        guard case .clipboardWrite(let target, let decoded) = cmd else {
+            Issue.record("Expected .clipboardWrite, got \(String(describing: cmd))"); return
+        }
+        #expect(target == 0x00)
+        #expect(decoded == "hello")
+    }
+
+    @Test("Unknown opcode below 0x90 still throws unknownOpcode")
+    func unknownBelowThreshold() {
+        // Opcode 0x8F is below the forward-compat threshold
+        let data = Data([0x8F])
+        #expect(throws: ProtocolDecodeError.self) {
+            try decodeCommand(data: data, offset: 0)
+        }
+    }
+
+    @Test("Unknown opcode >= 0x90 with truncated length throws malformed")
+    func truncatedLengthThrows() {
+        // Only 1 byte of the 2-byte length prefix
+        let data = Data([0xA0, 0x00])
+        #expect(throws: ProtocolDecodeError.self) {
+            try decodeCommand(data: data, offset: 0)
+        }
+    }
+
+    @Test("Unknown opcode >= 0x90 with truncated payload throws malformed")
+    func truncatedPayloadThrows() {
+        // Length says 10 bytes but only 3 available
+        var data = Data()
+        data.append(0xA0)
+        data.append(contentsOf: [0x00, 0x0A]) // payload_length = 10
+        data.append(contentsOf: [0x01, 0x02, 0x03]) // only 3 bytes
 
         #expect(throws: ProtocolDecodeError.self) {
             try decodeCommand(data: data, offset: 0)
@@ -380,101 +498,5 @@ struct DecoderEdgeCaseTests {
             Issue.record("Expected .guiBreadcrumb"); return
         }
         #expect(segments.isEmpty)
-    }
-}
-
-// MARK: - Forward-compatibility tests
-
-@Suite("Decoder Robustness: Forward-Compatible Skip")
-struct DecoderForwardCompatTests {
-
-    @Test("Unknown opcode < 0x90 throws unknownOpcode")
-    func unknownOpcodeBelow90Throws() {
-        let data = Data([0x8F])  // Below 0x90, no length prefix convention
-        #expect(throws: ProtocolDecodeError.self) {
-            try decodeCommand(data: data, offset: 0)
-        }
-    }
-
-    @Test("Unknown opcode >= 0x90 with length prefix is skipped silently")
-    func unknownOpcode90PlusSkipped() throws {
-        // Opcode 0x95 doesn't exist yet, but it's >= 0x90 so it has a length prefix
-        // Format: opcode(1) + payload_length(2) + payload
-        var data = Data()
-        data.append(0x95)  // Unknown opcode >= 0x90
-        data.append(contentsOf: [0x00, 0x08])  // payload_length = 8 bytes
-        data.append(contentsOf: Array(repeating: UInt8(0xFF), count: 8))  // 8 bytes of payload
-
-        let (cmd, size) = try decodeCommand(data: data, offset: 0)
-        // Should return nil (ignored) and consume opcode(1) + length(2) + payload(8) = 11 bytes
-        #expect(cmd == nil, "Unknown 0x90+ opcode should return nil")
-        #expect(size == 11, "Should skip opcode + length field + payload")
-    }
-
-    @Test("Batch with unknown 0x90+ opcode followed by known command decodes correctly")
-    func batchWithUnknownOpcodeSkipsToNextCommand() throws {
-        // Build a batch: unknown 0x95 opcode + valid clear command
-        var data = Data()
-        data.append(0x95)  // Unknown opcode
-        data.append(contentsOf: [0x00, 0x05])  // payload_length = 5
-        data.append(contentsOf: [0xAA, 0xBB, 0xCC, 0xDD, 0xEE])  // 5 bytes of garbage
-        data.append(OP_CLEAR)  // Valid command
-
-        var commands: [RenderCommand] = []
-        try decodeCommands(from: data) { cmd in
-            commands.append(cmd)
-        }
-
-        // Should decode exactly 1 command (the clear, skipping the unknown 0x95)
-        #expect(commands.count == 1)
-        guard case .clear = commands[0] else {
-            Issue.record("Expected .clear"); return
-        }
-    }
-
-    @Test("OP_CLIPBOARD_WRITE uses length-prefixed format (0x90)")
-    func clipboardWriteUsesLengthPrefix() throws {
-        // OP_CLIPBOARD_WRITE is the first 0x90+ opcode, should use length prefix
-        // Format: opcode(1) + payload_length(2) + target(1) + text_len(2) + text
-        let text = "Hello"
-        let payloadLen = 1 + 2 + text.utf8.count  // target(1) + text_len(2) + text
-
-        var data = Data()
-        data.append(OP_CLIPBOARD_WRITE)
-        data.append(contentsOf: [UInt8(payloadLen >> 8), UInt8(payloadLen & 0xFF)])  // payload_length as u16 BE
-        data.append(0x00)  // target = general
-        data.append(contentsOf: [0x00, UInt8(text.utf8.count)])  // text_len
-        data.append(contentsOf: text.utf8)
-
-        let (cmd, size) = try decodeCommand(data: data, offset: 0)
-        #expect(size == 1 + 2 + payloadLen)
-        guard case .clipboardWrite(let target, let decodedText) = cmd else {
-            Issue.record("Expected .clipboardWrite"); return
-        }
-        #expect(target == 0x00)
-        #expect(decodedText == text)
-    }
-
-    @Test("Unknown 0x90+ opcode with truncated length field throws malformed")
-    func unknownOpcodeTruncatedLengthThrows() {
-        var data = Data()
-        data.append(0x99)  // Unknown opcode >= 0x90
-        data.append(0x00)  // Only 1 byte of length field (need 2)
-
-        #expect(throws: ProtocolDecodeError.self) {
-            try decodeCommand(data: data, offset: 0)
-        }
-    }
-
-    @Test("Unknown 0x90+ opcode with truncated payload throws malformed")
-    func unknownOpcodeTruncatedPayloadThrows() {
-        var data = Data()
-        data.append(0x99)
-        data.append(contentsOf: [0x00, 0x10])  // Claim 16 bytes of payload
-        data.append(contentsOf: Array(repeating: UInt8(0), count: 5))  // Only provide 5
-
-        #expect(throws: ProtocolDecodeError.self) {
-            try decodeCommand(data: data, offset: 0)
-        }
     }
 }

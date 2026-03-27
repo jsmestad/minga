@@ -462,26 +462,25 @@ defmodule Minga.Frontend.Protocol.GUIWindowContentTest do
   # ── Wire format pinning (Swift compatibility contract) ─────────────────
 
   describe "wire format pinning" do
-    test "header layout: opcode(1) + wid(2) + flags(1) + crow(2) + ccol(2) + shape(1) + count(2)" do
+    test "sectioned envelope: opcode(1) + section_count(1) + first section header" do
       sw = minimal_window(window_id: 1, cursor_row: 2, cursor_col: 3, cursor_shape: :block)
       binary = GUIWindowContent.encode(sw)
 
-      # flags = 0x03: bit 0 = full_refresh, bit 1 = cursor_visible (both true by default)
-      <<0x80, 0x00, 0x01, 0x03, 0x00, 0x02, 0x00, 0x03, 0x00, 0x00, 0x00, _rest::binary>> =
-        binary
+      # Sectioned: opcode(1) + section_count(1) + section_id(1) + section_len(2) + payload...
+      <<0x80, section_count::8, 0x01, section_len::16, _rest::binary>> = binary
+      assert section_count == 7
+
+      # Header section payload: wid(2) + flags(1) + crow(2) + ccol(2) + shape(1) + scroll_left(2) = 10
+      assert section_len == 10
     end
 
-    test "span layout: start_col(2) + end_col(2) + fg(3) + bg(3) + attrs(1) + fw(1) + fid(1)" do
-      span =
-        make_span(1, 10, fg: 0xAA_BB_CC, bg: 0x11_22_33, attrs: 0x07, font_weight: 3, font_id: 1)
+    test "header section contains window_id, flags, cursor, shape, scroll_left" do
+      sw = minimal_window(window_id: 1, cursor_row: 2, cursor_col: 3, cursor_shape: :block)
+      binary = GUIWindowContent.encode(sw)
 
-      row = make_row("x", spans: [span], content_hash: 0)
-      binary = GUIWindowContent.encode(minimal_window(rows: [row]))
-
-      # header(13) + row fields(16) = 29
-      # header: op(1) wid(2) flags(1) crow(2) ccol(2) shape(1) sleft(2) rows(2)
-      <<_header::binary-size(29), 0x00, 0x01, 0x00, 0x0A, 0xAA, 0xBB, 0xCC, 0x11, 0x22, 0x33,
-        0x07, 0x03, 0x01, _rest::binary>> = binary
+      # Skip opcode(1) + section_count(1) + section_id(1) + section_len(2) = 5
+      <<_envelope::binary-size(5), 0x00, 0x01, 0x03, 0x00, 0x02, 0x00, 0x03, 0x00, 0x00, 0x00,
+        _rest::binary>> = binary
     end
 
     test "opcode is 0x80" do

@@ -115,6 +115,42 @@ defmodule Minga.Frontend.Protocol.GUI do
   @op_gui_agent_groups 0x86
   @op_gui_board 0x87
 
+  # ── Sectioned format section IDs ──
+  # Used by opcodes that encode their fields in self-describing sections.
+  # Format: section_id(1) + section_len(2, big-endian) + payload(section_len)
+  # Unknown sections are skipped by reading the length. See #1228.
+
+  # gui_status_bar sections
+  @section_identity 0x01
+  @section_cursor 0x02
+  @section_diagnostics 0x03
+  @section_language 0x04
+  @section_git 0x05
+  @section_file 0x06
+  @section_message 0x07
+  @section_recording 0x08
+  @section_agent 0x09
+
+  # gui_gutter sections
+  @section_gutter_window 0x01
+  @section_gutter_config 0x02
+  @section_gutter_entries 0x03
+
+  # gui_picker sections
+  @section_picker_header 0x01
+  @section_picker_query 0x02
+  @section_picker_items 0x03
+  @section_picker_action_menu 0x04
+
+  # gui_agent_chat sections
+  @section_chat_header 0x01
+  @section_chat_model 0x02
+  @section_chat_prompt 0x03
+  @section_chat_pending 0x04
+  @section_chat_help 0x05
+  @section_chat_messages 0x06
+  @section_chat_completion 0x07
+
   # ── Forward-compatible opcodes (0x90+, include 2-byte length prefix) ──
   # New opcodes >= 0x90 start with: opcode(1) + payload_length(2) + payload.
   # Old frontends skip unknown 0x90+ opcodes by reading the length and
@@ -311,8 +347,8 @@ defmodule Minga.Frontend.Protocol.GUI do
         entries: entries
       }) do
     style_byte = encode_line_number_style(style)
-    count = length(entries)
     active_byte = if active, do: 1, else: 0
+    count = length(entries)
 
     entry_binaries =
       Enum.map(entries, fn entry ->
@@ -335,11 +371,21 @@ defmodule Minga.Frontend.Protocol.GUI do
         end
       end)
 
-    IO.iodata_to_binary([
-      <<@op_gui_gutter, window_id::16, row::16, col::16, height::16, active_byte::8,
-        cursor_line::32, style_byte::8, ln_width::8, sign_width::8, count::16>>
-      | entry_binaries
-    ])
+    entries_payload = IO.iodata_to_binary([<<count::16>> | entry_binaries])
+
+    sections = [
+      encode_section(
+        @section_gutter_window,
+        <<window_id::16, row::16, col::16, height::16, active_byte::8>>
+      ),
+      encode_section(
+        @section_gutter_config,
+        <<cursor_line::32, style_byte::8, ln_width::8, sign_width::8>>
+      ),
+      encode_section(@section_gutter_entries, entries_payload)
+    ]
+
+    IO.iodata_to_binary([<<@op_gui_gutter, length(sections)::8>> | sections])
   end
 
   @spec encode_line_number_style(line_number_style()) :: non_neg_integer()
@@ -898,92 +944,62 @@ defmodule Minga.Frontend.Protocol.GUI do
     IO.iodata_to_binary([@op_gui_breadcrumb, <<length(segments)::8>> | entries])
   end
 
-  # ── Status bar ──
+  # ── Section encoding helper ──
+
+  @doc false
+  @spec encode_section(non_neg_integer(), binary()) :: binary()
+  defp encode_section(section_id, payload) do
+    <<section_id::8, byte_size(payload)::16, payload::binary>>
+  end
+
+  # ── Status bar (sectioned format) ──
 
   @doc """
   Encodes a gui_status_bar command from a `StatusBar.Data.t()` tagged union.
 
-  Wire format (opcode 0x76):
+  Wire format (opcode 0x76, sectioned):
 
-  Buffer variant (content_kind == 0):
-    [opcode:1][content_kind=0:1][mode:1][cursor_line:4][cursor_col:4][line_count:4]
-    [flags:1][lsp_status:1][git_branch_len:1][git_branch:N]
-    [message_len:2][message:N][filetype_len:1][filetype:N]
-    [error_count:2][warning_count:2]
-    -- Extended fields (parity with TUI modeline) --
-    [info_count:2][hint_count:2]
-    [macro_recording:1]
-    [parser_status:1][agent_status:1]
-    [git_added:2][git_modified:2][git_deleted:2]
-    [icon_len:1][icon:N][icon_color_r:1][icon_color_g:1][icon_color_b:1]
-    [filename_len:2][filename:N]
+    [opcode:1][section_count:1][section_id:1][section_len:2][payload:N]...
 
-  Agent variant (content_kind == 1):
-    [opcode:1][content_kind=1:1][mode:1]
-    [zeros:4][zeros:4][zeros:4]        <- shared header slots, zero for agent
-    [zeros:1][zeros:1][zeros:1][zeros:2][zeros:1][zeros:2][zeros:2]
-    [model_name_len:1][model_name:N]
-    [message_count:4][session_status:1]
+  Sections are self-describing: each starts with a 1-byte ID and 2-byte
+  length. Unknown sections are skipped by the frontend. New fields can be
+  added without changing the decoder for existing sections.
 
-  `content_kind`: 0 = buffer window, 1 = agent chat window.
-  `cursor_line`/`cursor_col` are 1-indexed on the wire (0-indexed in BEAM state).
+  Section IDs:
+    0x01 - Identity: content_kind, mode, flags
+    0x02 - Cursor: cursor_line, cursor_col, line_count
+    0x03 - Diagnostics: error/warning/info/hint counts, diagnostic_hint
+    0x04 - Language: lsp_status, parser_status
+    0x05 - Git: branch, added, modified, deleted
+    0x06 - File: icon, icon_color, filename, filetype
+    0x07 - Message: status message
+    0x08 - Recording: macro_recording
+    0x09 - Agent: model_name, message_count, session_status, agent_status
   """
   @spec encode_gui_status_bar(Minga.Editor.StatusBar.Data.t()) :: binary()
   def encode_gui_status_bar({:buffer, d}) do
-    mode_byte = encode_vim_mode(d.mode)
-    lsp_byte = encode_lsp_status(d.lsp_status)
-    flags = build_status_flags(d)
-
-    git_branch = :erlang.iolist_to_binary([d.git_branch || ""])
-    filetype = :erlang.iolist_to_binary([Atom.to_string(d.filetype || :text)])
-
-    {error_count, warning_count, info_count, hint_count} =
-      full_diagnostic_counts(d)
-
-    # Extended fields for TUI modeline parity
-    macro_byte = encode_macro_recording(d.macro_recording)
-    parser_byte = encode_parser_status(d.parser_status)
-    agent_byte = encode_agent_session_status(d.agent_status)
-    {git_added, git_modified, git_deleted} = git_diff_counts(d)
-    {icon, icon_color} = Minga.UI.Devicon.icon_and_color(d.filetype)
-    icon_bytes = :erlang.iolist_to_binary([icon])
-    icon_r = icon_color >>> 16 &&& 0xFF
-    icon_g = icon_color >>> 8 &&& 0xFF
-    icon_b = icon_color &&& 0xFF
-    filename = :erlang.iolist_to_binary([d.file_name || ""])
-
-    # Diagnostic hint for the cursor line (shown in status bar center when idle)
-    diag_hint = :erlang.iolist_to_binary([d.diagnostic_hint || ""])
-
-    # Status message (shown in status bar center, takes priority over diagnostic hint)
-    message = :erlang.iolist_to_binary([d.status_msg || ""])
-
-    # cursor_line/cursor_col are 0-indexed from Buffer; encode as 1-indexed for the GUI
-    <<@op_gui_status_bar, 0::8, mode_byte::8, d.cursor_line + 1::32, d.cursor_col + 1::32,
-      d.line_count::32, flags::8, lsp_byte::8, byte_size(git_branch)::8, git_branch::binary,
-      byte_size(message)::16, message::binary, byte_size(filetype)::8, filetype::binary,
-      error_count::16, warning_count::16, info_count::16, hint_count::16, macro_byte::8,
-      parser_byte::8, agent_byte::8, git_added::16, git_modified::16, git_deleted::16,
-      byte_size(icon_bytes)::8, icon_bytes::binary, icon_r::8, icon_g::8, icon_b::8,
-      byte_size(filename)::16, filename::binary, byte_size(diag_hint)::16, diag_hint::binary>>
+    sections = encode_status_bar_sections(d, 0)
+    IO.iodata_to_binary([<<@op_gui_status_bar, length(sections)::8>> | sections])
   end
 
   def encode_gui_status_bar({:agent, d}) do
-    # Same wire format as the buffer variant (background buffer context fills
-    # all the standard slots), plus agent-specific fields appended at the end.
+    sections = encode_status_bar_sections(d, 1)
+    IO.iodata_to_binary([<<@op_gui_status_bar, length(sections)::8>> | sections])
+  end
+
+  @spec encode_status_bar_sections(map(), 0 | 1) :: [binary()]
+  defp encode_status_bar_sections(d, content_kind) do
     mode_byte = encode_vim_mode(d.mode)
-    lsp_byte = encode_lsp_status(d.lsp_status)
     flags = build_status_flags(d)
+    lsp_byte = encode_lsp_status(d.lsp_status)
+    parser_byte = encode_parser_status(d.parser_status)
+    agent_byte = encode_agent_session_status(d.agent_status)
 
     git_branch = :erlang.iolist_to_binary([d.git_branch || ""])
     filetype = :erlang.iolist_to_binary([Atom.to_string(d.filetype || :text)])
 
-    {error_count, warning_count, info_count, hint_count} =
-      full_diagnostic_counts(d)
-
+    {error_count, warning_count, info_count, hint_count} = full_diagnostic_counts(d)
     macro_byte = encode_macro_recording(d.macro_recording)
-    parser_byte = encode_parser_status(d.parser_status)
-    agent_byte = encode_agent_session_status(d.agent_status)
     {git_added, git_modified, git_deleted} = git_diff_counts(d)
     {icon, icon_color} = Minga.UI.Devicon.icon_and_color(d.filetype)
     icon_bytes = :erlang.iolist_to_binary([icon])
@@ -991,23 +1007,52 @@ defmodule Minga.Frontend.Protocol.GUI do
     icon_g = icon_color >>> 8 &&& 0xFF
     icon_b = icon_color &&& 0xFF
     filename = :erlang.iolist_to_binary([d.file_name || ""])
-
     diag_hint = :erlang.iolist_to_binary([d.diagnostic_hint || ""])
     message = :erlang.iolist_to_binary([d.status_msg || ""])
 
-    # Agent-specific trailing fields
-    model_name = :erlang.iolist_to_binary([d.model_name || "Agent"])
-    session_status_byte = encode_agent_session_status(d.session_status)
+    # Shared sections (both buffer and agent variants)
+    sections = [
+      encode_section(@section_identity, <<content_kind::8, mode_byte::8, flags::8>>),
+      encode_section(
+        @section_cursor,
+        <<d.cursor_line + 1::32, d.cursor_col + 1::32, d.line_count::32>>
+      ),
+      encode_section(
+        @section_diagnostics,
+        <<error_count::16, warning_count::16, info_count::16, hint_count::16,
+          byte_size(diag_hint)::16, diag_hint::binary>>
+      ),
+      encode_section(@section_language, <<lsp_byte::8, parser_byte::8>>),
+      encode_section(
+        @section_git,
+        <<byte_size(git_branch)::8, git_branch::binary, git_added::16, git_modified::16,
+          git_deleted::16>>
+      ),
+      encode_section(
+        @section_file,
+        <<byte_size(icon_bytes)::8, icon_bytes::binary, icon_r::8, icon_g::8, icon_b::8,
+          byte_size(filename)::16, filename::binary, byte_size(filetype)::8, filetype::binary>>
+      ),
+      encode_section(@section_message, <<byte_size(message)::16, message::binary>>),
+      encode_section(@section_recording, <<macro_byte::8>>)
+    ]
 
-    # content_kind=1 signals agent mode; cursor_line/col are 0-indexed, +1 for GUI
-    <<@op_gui_status_bar, 1::8, mode_byte::8, d.cursor_line + 1::32, d.cursor_col + 1::32,
-      d.line_count::32, flags::8, lsp_byte::8, byte_size(git_branch)::8, git_branch::binary,
-      byte_size(message)::16, message::binary, byte_size(filetype)::8, filetype::binary,
-      error_count::16, warning_count::16, info_count::16, hint_count::16, macro_byte::8,
-      parser_byte::8, agent_byte::8, git_added::16, git_modified::16, git_deleted::16,
-      byte_size(icon_bytes)::8, icon_bytes::binary, icon_r::8, icon_g::8, icon_b::8,
-      byte_size(filename)::16, filename::binary, byte_size(diag_hint)::16, diag_hint::binary,
-      byte_size(model_name)::8, model_name::binary, d.message_count::32, session_status_byte::8>>
+    # Agent section (only when content_kind == 1)
+    if content_kind == 1 do
+      model_name = :erlang.iolist_to_binary([d.model_name || "Agent"])
+      session_status_byte = encode_agent_session_status(d.session_status)
+
+      sections ++
+        [
+          encode_section(
+            @section_agent,
+            <<byte_size(model_name)::8, model_name::binary, d.message_count::32,
+              session_status_byte::8, agent_byte::8>>
+          )
+        ]
+    else
+      sections ++ [encode_section(@section_agent, <<agent_byte::8>>)]
+    end
   end
 
   @spec encode_vim_mode(atom()) :: non_neg_integer()
@@ -1124,7 +1169,6 @@ defmodule Minga.Frontend.Protocol.GUI do
 
         flags = encode_picker_item_flags(item, picker)
 
-        # Match positions: list of uint16 character indices
         positions = item.match_positions
         pos_count = min(length(positions), 255)
 
@@ -1136,16 +1180,21 @@ defmodule Minga.Frontend.Protocol.GUI do
           annotation_bytes::binary, pos_count::8, pos_bytes::binary>>
       end)
 
+    items_payload = IO.iodata_to_binary([<<length(items)::16>> | entries])
     action_menu_bytes = encode_picker_action_menu(action_menu)
 
-    IO.iodata_to_binary([
-      @op_gui_picker,
-      <<1::8, picker.selected::16, filtered_count::16, total_count::16,
-        byte_size(title_bytes)::16, title_bytes::binary, byte_size(query_bytes)::16,
-        query_bytes::binary, has_preview_byte::8, length(items)::16>>,
-      entries,
-      action_menu_bytes
-    ])
+    sections = [
+      encode_section(
+        @section_picker_header,
+        <<1::8, picker.selected::16, filtered_count::16, total_count::16, has_preview_byte::8,
+          byte_size(title_bytes)::16, title_bytes::binary>>
+      ),
+      encode_section(@section_picker_query, <<byte_size(query_bytes)::16, query_bytes::binary>>),
+      encode_section(@section_picker_items, items_payload),
+      encode_section(@section_picker_action_menu, action_menu_bytes)
+    ]
+
+    IO.iodata_to_binary([<<@op_gui_picker, length(sections)::8>> | sections])
   end
 
   @spec encode_picker_action_menu(action_menu_state()) :: binary()
@@ -1268,18 +1317,24 @@ defmodule Minga.Frontend.Protocol.GUI do
       |> Enum.take(100)
       |> Enum.map(&encode_chat_message/1)
 
-    IO.iodata_to_binary([
-      @op_gui_agent_chat,
-      <<1::8, status_byte::8, byte_size(model_bytes)::16, model_bytes::binary,
-        byte_size(prompt_bytes)::16, prompt_bytes::binary, prompt_line_count::8,
-        prompt_cursor_line::16, prompt_cursor_col::16, prompt_vim_mode::8,
-        prompt_visible_rows::8>>,
-      completion_bytes,
-      pending_bytes,
-      help_bytes,
-      <<length(msg_binaries)::16>>
-      | msg_binaries
-    ])
+    messages_payload = IO.iodata_to_binary([<<length(msg_binaries)::16>> | msg_binaries])
+
+    sections = [
+      encode_section(@section_chat_header, <<1::8, status_byte::8>>),
+      encode_section(@section_chat_model, <<byte_size(model_bytes)::16, model_bytes::binary>>),
+      encode_section(
+        @section_chat_prompt,
+        <<byte_size(prompt_bytes)::16, prompt_bytes::binary, prompt_line_count::8,
+          prompt_cursor_line::16, prompt_cursor_col::16, prompt_vim_mode::8,
+          prompt_visible_rows::8>>
+      ),
+      encode_section(@section_chat_completion, completion_bytes),
+      encode_section(@section_chat_pending, pending_bytes),
+      encode_section(@section_chat_help, help_bytes),
+      encode_section(@section_chat_messages, messages_payload)
+    ]
+
+    IO.iodata_to_binary([<<@op_gui_agent_chat, length(sections)::8>> | sections])
   end
 
   # Encodes prompt completion popup state for @-mention or /slash completion.

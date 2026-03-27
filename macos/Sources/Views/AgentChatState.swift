@@ -7,10 +7,10 @@ enum ChatMessageEntry: Identifiable {
     case user(id: Int, text: String)
     case assistant(id: Int, text: String)
     /// Assistant message with pre-styled text runs from the BEAM (tree-sitter or markdown parser).
-    case styledAssistant(id: Int, lines: [[StyledTextRun]])
+    case styledAssistant(id: Int, lines: [[Wire.StyledTextRun]])
     case thinking(id: Int, text: String, collapsed: Bool)
     case toolCall(id: Int, name: String, summary: String, status: UInt8, isError: Bool, collapsed: Bool, durationMs: UInt32, result: String)
-    case styledToolCall(id: Int, name: String, summary: String, status: UInt8, isError: Bool, collapsed: Bool, durationMs: UInt32, resultLines: [[StyledTextRun]])
+    case styledToolCall(id: Int, name: String, summary: String, status: UInt8, isError: Bool, collapsed: Bool, durationMs: UInt32, resultLines: [[Wire.StyledTextRun]])
     case system(id: Int, text: String, isError: Bool)
     case usage(id: Int, input: UInt32, output: UInt32, cacheRead: UInt32, cacheWrite: UInt32, costMicros: UInt32)
 
@@ -70,7 +70,7 @@ final class AgentChatState {
     // ── Prompt completion popup ──
 
     /// Active completion popup for @-mention or /slash commands. Nil when no popup is showing.
-    var promptCompletion: GUIPromptCompletion?
+    var promptCompletion: Wire.PromptCompletion?
 
     struct PendingApproval {
         let toolName: String
@@ -89,7 +89,7 @@ final class AgentChatState {
 
     var isThinking: Bool { status == 1 || status == 2 }
 
-    func update(visible: Bool, status: UInt8, model: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptVimMode: UInt8, promptVisibleRows: UInt8, promptCompletion: GUIPromptCompletion?, pendingToolName: String?, pendingToolSummary: String, helpVisible: Bool, helpGroups: [HelpGroup], rawMessages: [GUIChatMessage]) {
+    func update(visible: Bool, status: UInt8, model: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptVimMode: UInt8, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?, pendingToolName: String?, pendingToolSummary: String, helpVisible: Bool, helpGroups: [HelpGroup], rawMessages: [Wire.ChatMessage]) {
         self.visible = visible
         self.status = status
         self.model = model

@@ -53,12 +53,12 @@ struct FrameState {
     // Per-window gutter data from gui_gutter (0x7B).
     // NOT cleared between frames: stale data serves as fallback to
     // prevent blank-gutter flash if the gutter command hasn't arrived yet.
-    var windowGutters: [UInt16: GUIWindowGutter] = [:]
+    var windowGutters: [UInt16: Wire.WindowGutter] = [:]
 
     // Split separator data from gui_split_separators (0x84).
     var splitBorderColor: UInt32 = 0
-    var verticalSeparators: [GUIVerticalSeparator] = []
-    var horizontalSeparators: [GUIHorizontalSeparator] = []
+    var verticalSeparators: [Wire.VerticalSeparator] = []
+    var horizontalSeparators: [Wire.HorizontalSeparator] = []
 
     // Gutter theme colors
     var gutterColors: GutterThemeColors = GutterThemeColors()
