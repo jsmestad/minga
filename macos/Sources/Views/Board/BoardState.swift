@@ -26,9 +26,19 @@ final class BoardState {
     /// Current search filter text.
     var filterText: String = ""
 
+    /// ID of the card being zoomed. Set when transitioning from Board
+    /// to editor (visible true→false) or editor to Board (visible false→true).
+    /// Used by matchedGeometryEffect for spatial zoom animation.
+    var zoomedCardId: UInt32? = nil
+
     /// Updates the board state from a decoded protocol command.
     func update(visible: Bool, focusedCardId: UInt32, cards: [BoardCard],
                 filterMode: Bool, filterText: String) {
+        // Detect zoom transitions and track the card being zoomed
+        if self.visible != visible && focusedCardId != 0 {
+            self.zoomedCardId = focusedCardId
+        }
+
         self.visible = visible
         self.focusedCardId = focusedCardId
         self.cards = cards

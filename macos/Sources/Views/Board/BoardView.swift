@@ -13,6 +13,7 @@ struct BoardView: View {
     let dispatchSheet: DispatchSheetState
     let theme: ThemeColors
     let encoder: InputEncoder?
+    let namespace: Namespace.ID
 
     /// Golden ratio for proportional spacing.
     private let phi: CGFloat = 1.618
@@ -122,9 +123,16 @@ struct BoardView: View {
     private func cardGrid(width: CGFloat) -> some View {
         LazyVGrid(columns: columns(for: width), spacing: CGFloat(16 / phi)) {
             ForEach(filteredCards) { card in
-                BoardCardView(card: card, theme: theme)
-                    .onTapGesture {
-                        encoder?.sendBoardSelectCard(id: card.id)
+                Group {
+                    if card.id == state.zoomedCardId {
+                        BoardCardView(card: card, theme: theme)
+                            .matchedGeometryEffect(
+                                id: "zoomContainer",
+                                in: namespace,
+                                isSource: state.visible
+                            )
+                    } else {
+                        BoardCardView(card: card, theme: theme)
                     }
                     .draggable(String(card.id)) {
                         // Drag preview: mini card with just the task
@@ -141,6 +149,9 @@ struct BoardView: View {
                               let draggedId = UInt32(draggedIdStr) else { return false }
                         handleCardDrop(draggedId: draggedId, targetId: card.id)
                         return true
+                    }
+                    .onTapGesture {
+                        encoder?.sendBoardSelectCard(id: card.id)
                     }
             }
         }
