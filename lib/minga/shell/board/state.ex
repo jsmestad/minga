@@ -23,6 +23,7 @@ defmodule Minga.Shell.Board.State do
 
   @type t :: %__MODULE__{
           cards: %{Card.id() => Card.t()},
+          card_order: [Card.id()],
           focused_card: Card.id() | nil,
           zoomed_into: Card.id() | nil,
           filter_mode: boolean(),
@@ -54,6 +55,7 @@ defmodule Minga.Shell.Board.State do
         }
 
   defstruct cards: %{},
+            card_order: [],
             focused_card: nil,
             zoomed_into: nil,
             filter_mode: false,
@@ -103,6 +105,7 @@ defmodule Minga.Shell.Board.State do
     state = %{
       state
       | cards: Map.put(state.cards, card.id, card),
+        card_order: state.card_order ++ [card.id],
         next_id: state.next_id + 1,
         focused_card: focused
     }
@@ -120,11 +123,12 @@ defmodule Minga.Shell.Board.State do
   @spec remove_card(t(), Card.id()) :: t()
   def remove_card(%__MODULE__{} = state, card_id) do
     cards = Map.delete(state.cards, card_id)
+    card_order = Enum.reject(state.card_order, &(&1 == card_id))
 
     focused =
       if state.focused_card == card_id do
-        # Pick the next card by ID, or nil if empty
-        cards |> Map.keys() |> Enum.sort() |> List.first()
+        # Pick the next card in display order, or nil if empty
+        List.first(card_order)
       else
         state.focused_card
       end
@@ -136,7 +140,7 @@ defmodule Minga.Shell.Board.State do
         state.zoomed_into
       end
 
-    %{state | cards: cards, focused_card: focused, zoomed_into: zoomed}
+    %{state | cards: cards, card_order: card_order, focused_card: focused, zoomed_into: zoomed}
   end
 
   @doc "Updates a card by applying a function to it."
@@ -208,13 +212,15 @@ defmodule Minga.Shell.Board.State do
     {state, snapshot}
   end
 
-  @doc "Returns all cards sorted by ID (creation order)."
+  @doc "Returns all cards in display order (respecting user reordering)."
   @spec sorted_cards(t()) :: [Card.t()]
-  def sorted_cards(%__MODULE__{cards: cards}) do
-    cards |> Map.values() |> Enum.sort_by(& &1.id)
+  def sorted_cards(%__MODULE__{cards: cards, card_order: order}) do
+    # Return cards in the order specified by card_order, filtering out any stale IDs
+    Enum.map(order, &Map.get(cards, &1))
+    |> Enum.reject(&is_nil/1)
   end
 
-  @doc "Returns cards filtered by the current filter text, sorted by ID."
+  @doc "Returns cards filtered by the current filter text, in display order."
   @spec filtered_cards(t()) :: [Card.t()]
   def filtered_cards(%__MODULE__{filter_mode: false} = state), do: sorted_cards(state)
 
@@ -234,6 +240,32 @@ defmodule Minga.Shell.Board.State do
   @doc "Returns the number of cards on the board."
   @spec card_count(t()) :: non_neg_integer()
   def card_count(%__MODULE__{cards: cards}), do: map_size(cards)
+
+  @doc """
+  Reorders a card to a new position in the display order.
+
+  Moves the card with the given ID to the specified index in the card_order list.
+  If the card or index is invalid, returns the state unchanged.
+  """
+  @spec reorder_card(t(), Card.id(), non_neg_integer()) :: t()
+  def reorder_card(%__MODULE__{} = state, card_id, new_index) do
+    # Check if the card exists
+    if Map.has_key?(state.cards, card_id) do
+      # Remove the card from its current position
+      order_without_card = Enum.reject(state.card_order, &(&1 == card_id))
+
+      # Clamp the new index to valid range
+      max_index = length(order_without_card)
+      clamped_index = min(new_index, max_index)
+
+      # Insert the card at the new position
+      new_order = List.insert_at(order_without_card, clamped_index, card_id)
+
+      %{state | card_order: new_order}
+    else
+      state
+    end
+  end
 
   @doc """
   Moves focus in the given direction within the grid.

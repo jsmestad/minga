@@ -75,6 +75,7 @@ protocol InputEncoder: AnyObject, Sendable {
     // Board actions
     func sendBoardSelectCard(id: UInt32)
     func sendBoardCloseCard(id: UInt32)
+    func sendBoardReorder(cardId: UInt32, newIndex: UInt16)
 }
 
 extension InputEncoder {
@@ -544,6 +545,16 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_BOARD_CLOSE_CARD
         writeU32(&buf, 2, id)
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: board_reorder. Layout: opcode(1) + action_type(1) + card_id(4) + new_index(2).
+    func sendBoardReorder(cardId: UInt32, newIndex: UInt16) {
+        var buf = Data(count: 8)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_BOARD_REORDER
+        writeU32(&buf, 2, cardId)
+        writeU16(&buf, 6, newIndex)
         writeFrame(buf)
     }
 

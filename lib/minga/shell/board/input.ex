@@ -267,10 +267,10 @@ defmodule Minga.Shell.Board.Input do
 
       # For agent cards, activate the agentic view so the user sees
       # the agent chat, not a plain buffer
-      if !Card.you_card?(card) do
-        activate_agent_view(state, card)
-      else
+      if Card.you_card?(card) do
         state
+      else
+        activate_agent_view(state, card)
       end
     else
       state

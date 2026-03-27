@@ -34,15 +34,7 @@ defmodule Minga.Shell.Board do
 
     case if(skip_persistence, do: nil, else: Minga.Shell.Board.Persistence.load()) do
       %BoardState{} = restored ->
-        # Ensure a "You" card exists (may have been removed in a bug)
-        if Enum.any?(restored.cards, fn {_id, c} -> c.kind == :you end) do
-          restored
-        else
-          {restored, _you} =
-            BoardState.create_card(restored, task: "You", status: :idle, kind: :you)
-
-          restored
-        end
+        ensure_you_card(restored)
 
       nil ->
         state = BoardState.new()
@@ -99,6 +91,12 @@ defmodule Minga.Shell.Board do
 
   def handle_gui_action(shell_state, workspace, {:board_close_card, card_id}) do
     shell_state = BoardState.remove_card(shell_state, card_id)
+    Minga.Shell.Board.Persistence.save(shell_state)
+    {shell_state, workspace}
+  end
+
+  def handle_gui_action(shell_state, workspace, {:board_reorder, card_id, new_index}) do
+    shell_state = BoardState.reorder_card(shell_state, card_id, new_index)
     Minga.Shell.Board.Persistence.save(shell_state)
     {shell_state, workspace}
   end
@@ -264,6 +262,19 @@ defmodule Minga.Shell.Board do
         overlay: Minga.Input.overlay_handlers(),
         surface: [Minga.Shell.Board.ZoomOut | traditional_surface]
       }
+    end
+  end
+
+  # Ensure a "You" card exists in restored board state (may have been removed in a bug).
+  @spec ensure_you_card(BoardState.t()) :: BoardState.t()
+  defp ensure_you_card(state) do
+    has_you = Enum.any?(state.cards, fn {_id, c} -> c.kind == :you end)
+
+    if has_you do
+      state
+    else
+      {state, _you} = BoardState.create_card(state, task: "You", status: :idle, kind: :you)
+      state
     end
   end
 end

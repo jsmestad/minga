@@ -16,28 +16,48 @@ struct BoardView: View {
     /// Golden ratio for proportional spacing.
     private let phi: CGFloat = 1.618
 
-    /// Responsive columns: minimum card width 220pt, adapts to window size.
-    private let columns = [GridItem(.adaptive(minimum: 220, maximum: 380), spacing: 16)]
+    /// State for drag-to-reorder tracking.
+    @State private var draggedCardId: UInt32?
 
     var body: some View {
-        VStack(spacing: 0) {
-            if state.filterMode {
-                searchBar
-            }
+        GeometryReader { geometry in
+            VStack(spacing: 0) {
+                if state.filterMode {
+                    searchBar
+                }
 
-            ScrollView {
-                if filteredCards.isEmpty {
-                    if state.filterMode {
-                        noMatchesState
+                ScrollView {
+                    if filteredCards.isEmpty {
+                        if state.filterMode {
+                            noMatchesState
+                        } else {
+                            emptyState
+                        }
                     } else {
-                        emptyState
+                        cardGrid(width: geometry.size.width)
                     }
-                } else {
-                    cardGrid
                 }
             }
+            .background(theme.editorBg)
         }
-        .background(theme.editorBg)
+    }
+
+    /// Computes the number of columns based on window width.
+    /// 2 columns on narrow (< 900pt), 3 on medium (900-1400pt), 4 on wide (> 1400pt).
+    private func columnCount(for width: CGFloat) -> Int {
+        if width < 900 {
+            return 2
+        } else if width < 1400 {
+            return 3
+        } else {
+            return 4
+        }
+    }
+
+    /// Generates responsive grid columns for the given width.
+    private func columns(for width: CGFloat) -> [GridItem] {
+        let count = columnCount(for: width)
+        return Array(repeating: GridItem(.flexible(), spacing: 16), count: count)
     }
 
     /// Cards filtered by search text.
@@ -95,18 +115,50 @@ struct BoardView: View {
 
     // MARK: - Card Grid
 
-    private var cardGrid: some View {
-        LazyVGrid(columns: columns, spacing: CGFloat(16 / phi)) {
+    private func cardGrid(width: CGFloat) -> some View {
+        LazyVGrid(columns: columns(for: width), spacing: CGFloat(16 / phi)) {
             ForEach(filteredCards) { card in
                 BoardCardView(card: card, theme: theme)
                     .onTapGesture {
                         encoder?.sendBoardSelectCard(id: card.id)
+                    }
+                    .draggable(String(card.id)) {
+                        // Drag preview: mini card with just the task
+                        Text(card.task)
+                            .font(.system(size: 13, weight: .medium))
+                            .padding(8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .fill(Color.blend(theme.editorBg, with: .white, amount: 0.15))
+                            )
+                    }
+                    .dropDestination(for: String.self) { droppedIds, _ in
+                        guard let draggedIdStr = droppedIds.first,
+                              let draggedId = UInt32(draggedIdStr) else { return false }
+                        handleCardDrop(draggedId: draggedId, targetId: card.id)
+                        return true
                     }
             }
         }
         // Outer margin = inner gap × φ (golden ratio breathing room)
         .padding(.horizontal, 16 * phi)
         .padding(.vertical, 16)
+    }
+
+    /// Handles dropping a card onto another card.
+    /// Calculates the new index and sends the reorder action to the BEAM.
+    private func handleCardDrop(draggedId: UInt32, targetId: UInt32) {
+        guard draggedId != targetId else { return }
+
+        // Find the index of the target card in the current sorted list
+        let allCards = state.cards
+        guard let targetIndex = allCards.firstIndex(where: { $0.id == targetId }) else { return }
+
+        // Animate the reorder with a spring curve
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+            // Send the reorder action with the target index
+            encoder?.sendBoardReorder(cardId: draggedId, newIndex: UInt16(targetIndex))
+        }
     }
 
     // MARK: - Empty State

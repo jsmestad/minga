@@ -199,6 +199,7 @@ defmodule Minga.Frontend.Protocol.GUI do
   @gui_action_find_pasteboard_search 0x24
   @gui_action_board_select_card 0x25
   @gui_action_board_close_card 0x26
+  @gui_action_board_reorder 0x27
 
   # ── Types ──
 
@@ -243,6 +244,7 @@ defmodule Minga.Frontend.Protocol.GUI do
           | {:find_pasteboard_search, text :: String.t(), direction :: non_neg_integer()}
           | {:board_select_card, card_id :: pos_integer()}
           | {:board_close_card, card_id :: pos_integer()}
+          | {:board_reorder, card_id :: pos_integer(), new_index :: non_neg_integer()}
 
   # ═══════════════════════════════════════════════════════════════════════════
   # Encoding (BEAM → Frontend)
@@ -1761,6 +1763,9 @@ defmodule Minga.Frontend.Protocol.GUI do
 
   def decode_gui_action(@gui_action_board_close_card, <<card_id::32>>),
     do: {:ok, {:board_close_card, card_id}}
+
+  def decode_gui_action(@gui_action_board_reorder, <<card_id::32, new_index::16>>),
+    do: {:ok, {:board_reorder, card_id, new_index}}
 
   def decode_gui_action(_, _), do: :error
 
