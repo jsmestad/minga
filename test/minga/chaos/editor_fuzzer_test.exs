@@ -337,6 +337,11 @@ defmodule Minga.Chaos.EditorFuzzerTest do
     max_size: 100,
     max_shrinks: 200 do
     forall {content, cmds} <- content_and_commands() do
+      # Trap exits so that if the editor or buffer crashes mid-sequence,
+      # the test process survives and PropCheck can report/shrink the
+      # failure instead of the EXIT signal killing us.
+      prev_trap = Process.flag(:trap_exit, true)
+
       ctx = start_chaos_editor(content)
       store_ctx(ctx)
 
@@ -345,6 +350,11 @@ defmodule Minga.Chaos.EditorFuzzerTest do
       # Clean up
       if Process.alive?(ctx.editor), do: GenServer.stop(ctx.editor, :normal, 1000)
       if Process.alive?(ctx.port), do: GenServer.stop(ctx.port, :normal, 1000)
+
+      # Drain any EXIT messages from crashed child processes
+      drain_exit_messages()
+
+      Process.flag(:trap_exit, prev_trap)
 
       result == :ok
     end
@@ -376,6 +386,16 @@ defmodule Minga.Chaos.EditorFuzzerTest do
       let chars <- vector(len, integer(32, 126)) do
         List.to_string(chars)
       end
+    end
+  end
+
+  # Drain any {:EXIT, pid, reason} messages left in the mailbox from
+  # crashed linked processes so they don't leak into subsequent test runs.
+  defp drain_exit_messages do
+    receive do
+      {:EXIT, _pid, _reason} -> drain_exit_messages()
+    after
+      0 -> :ok
     end
   end
 end

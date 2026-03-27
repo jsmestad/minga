@@ -195,8 +195,11 @@ defmodule Minga.Config.Loader do
     # 6. Apply log level from config
     apply_log_level()
 
-    # 7. Start declared extensions (if the supervisor is running)
-    if Process.whereis(Minga.Extension.Supervisor) do
+    # 7. Start declared extensions (if the supervisor is running).
+    # Skip in test mode so user-installed extensions don't affect test
+    # determinism (e.g., extra keybindings altering which-key snapshots).
+    if Process.whereis(Minga.Extension.Supervisor) != nil &&
+         Application.get_env(:minga, :load_extensions, true) do
       ExtSupervisor.start_all()
     end
 

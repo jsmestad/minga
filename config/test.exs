@@ -21,6 +21,10 @@ config :minga, editor_wait_params: {5, 4}
 # instantly and satisfies the Session GenServer lifecycle.
 config :minga, test_provider_module: Minga.Test.StubProvider
 
+# Disable user extension loading so tests are deterministic regardless
+# of which extensions the developer has installed locally.
+config :minga, load_extensions: false
+
 # Use stub installers in tests to avoid spawning npm/pip/cargo/go/curl
 # subprocesses during concurrent test runs (same EPIPE concern as git).
 config :minga,
