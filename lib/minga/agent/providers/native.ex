@@ -989,7 +989,7 @@ defmodule Minga.Agent.Providers.Native do
   end
 
   defp execute_with_global_mode(provider_pid, tool_call, available_tools, :ask, config) do
-    if Tools.destructive?(tool_call.name) do
+    if Tools.destructive?(tool_call.name, tool_call.arguments || %{}) do
       request_approval(provider_pid, tool_call, available_tools, config)
     else
       {result, is_error} = run_single_tool(tool_call, available_tools, provider_pid)

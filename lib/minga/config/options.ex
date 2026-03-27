@@ -129,6 +129,7 @@ defmodule Minga.Config.Options do
           | :agent_subagent_timeout
           | :agent_mention_max_file_size
           | :agent_notify_debounce
+          | :agent_diagnostic_feedback
           | :confirm_quit
           | :font_family
           | :font_size
@@ -201,7 +202,7 @@ defmodule Minga.Config.Options do
     {:agent_model, :string_or_nil, nil},
     {:agent_tool_approval, {:enum, [:destructive, :all, :none]}, :destructive},
     {:agent_destructive_tools, :string_list,
-     ["write_file", "edit_file", "multi_edit_file", "shell"]},
+     ["write_file", "edit_file", "multi_edit_file", "shell", "git_stage", "git_commit", "rename"]},
     {:agent_tool_permissions, :map_or_nil, nil},
     {:agent_session_retention_days, :pos_integer, 30},
     {:agent_panel_split, :pos_integer, 65},
@@ -226,6 +227,7 @@ defmodule Minga.Config.Options do
     {:agent_subagent_timeout, :pos_integer, 300_000},
     {:agent_mention_max_file_size, :pos_integer, 262_144},
     {:agent_notify_debounce, :pos_integer, 5_000},
+    {:agent_diagnostic_feedback, :boolean, true},
     {:confirm_quit, :boolean, true},
     {:cursorline, :boolean, true},
     {:nav_flash, :boolean, true},

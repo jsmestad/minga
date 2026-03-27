@@ -37,7 +37,7 @@ defmodule Minga.Agent.ToolsTest do
   describe "all/1" do
     test "returns the expected number of tools", %{tmp_dir: dir} do
       tools = Tools.all(project_root: dir)
-      assert length(tools) == 15
+      assert length(tools) == 23
 
       names = Enum.map(tools, & &1.name)
       assert "read_file" in names
@@ -49,6 +49,16 @@ defmodule Minga.Agent.ToolsTest do
       assert "grep" in names
       assert "shell" in names
       assert "subagent" in names
+
+      # LSP tools
+      assert "diagnostics" in names
+      assert "definition" in names
+      assert "references" in names
+      assert "hover" in names
+      assert "document_symbols" in names
+      assert "workspace_symbols" in names
+      assert "rename" in names
+      assert "code_actions" in names
     end
 
     test "all tools have descriptions and callbacks", %{tmp_dir: dir} do
@@ -81,18 +91,46 @@ defmodule Minga.Agent.ToolsTest do
       refute Tools.destructive?("list_directory")
     end
 
+    test "rename is destructive by default" do
+      assert Tools.destructive?("rename")
+    end
+
+    test "diagnostics is not destructive" do
+      refute Tools.destructive?("diagnostics")
+    end
+
+    test "definition is not destructive" do
+      refute Tools.destructive?("definition")
+    end
+
+    test "code_actions listing is not destructive" do
+      refute Tools.destructive?("code_actions", %{"path" => "foo.ex", "line" => 0})
+    end
+
+    test "code_actions with apply is destructive" do
+      assert Tools.destructive?("code_actions", %{"path" => "foo.ex", "line" => 0, "apply" => 1})
+    end
+
+    test "code_actions with apply title is destructive" do
+      assert Tools.destructive?("code_actions", %{
+               "path" => "foo.ex",
+               "line" => 0,
+               "apply" => "Add missing import"
+             })
+    end
+
     test "unknown tools are not destructive" do
       refute Tools.destructive?("foobar")
     end
 
     test "accepts a custom destructive list" do
-      assert Tools.destructive?("read_file", ["read_file", "shell"])
-      refute Tools.destructive?("write_file", ["read_file", "shell"])
+      assert Tools.destructive?("read_file", %{}, ["read_file", "shell"])
+      refute Tools.destructive?("write_file", %{}, ["read_file", "shell"])
     end
 
     test "empty list makes nothing destructive" do
-      refute Tools.destructive?("write_file", [])
-      refute Tools.destructive?("shell", [])
+      refute Tools.destructive?("write_file", %{}, [])
+      refute Tools.destructive?("shell", %{}, [])
     end
   end
 end
