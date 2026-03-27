@@ -63,6 +63,8 @@ final class GUIState {
 
     /// Agent context bar state (0x88).
     let agentContextBarState = AgentContextBarState()
+    /// Change summary sidebar for agent card zoomed-in view.
+    let changeSummaryState = ChangeSummaryState()
 
     /// Semantic window content from gui_window_content (0x80).
     /// Keyed by windowId. NOT cleared between frames; the guiWindowContent

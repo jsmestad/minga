@@ -82,6 +82,7 @@ protocol InputEncoder: AnyObject, Sendable {
     func sendAgentApprove()
     func sendAgentRequestChanges()
     func sendAgentDismiss()
+    func sendChangeSummaryClick(index: UInt32)
 }
 
 extension InputEncoder {
@@ -613,6 +614,12 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         var buf = Data(count: 2)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_AGENT_DISMISS
+    /// Send a gui_action: change_summary_click. Layout: opcode(1) + action_type(1) + index(4).
+    func sendChangeSummaryClick(index: UInt32) {
+        var buf = Data(count: 6)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_CHANGE_SUMMARY_CLICK
+        writeU32(&buf, 2, index)
         writeFrame(buf)
     }
 

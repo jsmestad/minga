@@ -115,6 +115,7 @@ defmodule Minga.Frontend.Protocol.GUI do
   @op_gui_agent_groups 0x86
   @op_gui_board 0x87
   @op_gui_agent_context 0x88
+  @op_gui_change_summary 0x88
 
   # ── Sectioned format section IDs ──
   # Used by opcodes that encode their fields in self-describing sections.
@@ -205,6 +206,7 @@ defmodule Minga.Frontend.Protocol.GUI do
   @gui_action_agent_approve 0x29
   @gui_action_agent_request_changes 0x2A
   @gui_action_agent_dismiss 0x2B
+  @gui_action_change_summary_click 0x2C
 
   # ── Types ──
 
@@ -254,6 +256,7 @@ defmodule Minga.Frontend.Protocol.GUI do
           | :agent_approve
           | :agent_request_changes
           | :agent_dismiss
+          | {:change_summary_click, index :: non_neg_integer()}
 
   # ═══════════════════════════════════════════════════════════════════════════
   # Encoding (BEAM → Frontend)
@@ -801,6 +804,48 @@ defmodule Minga.Frontend.Protocol.GUI do
         status_byte::8, can_approve_byte::8>>
     ])
   end
+
+  # ── Change Summary ──
+
+  @doc """
+  Encodes a gui_change_summary command (0x88).
+
+  Sends the list of changed files with diff stats when zoomed into an agent card.
+  The Swift frontend renders this as a resizable sidebar on the left.
+
+  Wire format:
+    opcode(1) + visible(1) + selected_index(2) + entry_count(2) + entries...
+
+  Each entry:
+    path_len(2) + path + action(1) + lines_added(4) + lines_removed(4)
+
+  Action: 0=modified, 1=added, 2=deleted, 3=renamed
+  """
+  @spec encode_gui_change_summary([map()], non_neg_integer()) :: binary()
+  def encode_gui_change_summary(entries, selected_index \\ 0) when is_list(entries) do
+    visible = if entries == [], do: 0, else: 1
+
+    entry_binaries =
+      Enum.map(entries, fn entry ->
+        path_bytes = :erlang.iolist_to_binary([entry.path])
+        action_byte = file_action_byte(entry.action)
+
+        <<byte_size(path_bytes)::16, path_bytes::binary, action_byte::8, entry.lines_added::32,
+          entry.lines_removed::32>>
+      end)
+
+    IO.iodata_to_binary([
+      <<@op_gui_change_summary, visible::8, selected_index::16, length(entries)::16>>
+      | entry_binaries
+    ])
+  end
+
+  @spec file_action_byte(:modified | :added | :deleted | :renamed) :: non_neg_integer()
+  defp file_action_byte(:modified), do: 0
+  defp file_action_byte(:added), do: 1
+  defp file_action_byte(:deleted), do: 2
+  defp file_action_byte(:renamed), do: 3
+  defp file_action_byte(_), do: 0
 
   # ── Clipboard write (forward-compatible, 0x90+) ──
 
@@ -1819,6 +1864,8 @@ defmodule Minga.Frontend.Protocol.GUI do
 
   def decode_gui_action(@gui_action_agent_dismiss, <<>>),
     do: {:ok, :agent_dismiss}
+  def decode_gui_action(@gui_action_change_summary_click, <<index::32>>),
+    do: {:ok, {:change_summary_click, index}}
 
   def decode_gui_action(_, _), do: :error
 

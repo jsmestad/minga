@@ -171,6 +171,8 @@ final class CommandDispatcher {
         case .guiAgentContext(let visible, let task, let dispatchTimestamp, let status, let canApprove):
             guiState.agentContextBarState.update(visible: visible, task: task, dispatchTimestamp: dispatchTimestamp,
                                                   status: status, canApprove: canApprove)
+        case .guiChangeSummary(let visible, let entries, let selectedIndex):
+            guiState.changeSummaryState.update(visible: visible, entries: entries, selectedIndex: selectedIndex)
 
         case .clipboardWrite(let target, let text):
             handleClipboardWrite(target: target, text: text)

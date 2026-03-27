@@ -57,6 +57,7 @@ let OP_GUI_GIT_STATUS: UInt8 = 0x85
 let OP_GUI_AGENT_GROUPS: UInt8 = 0x86
 let OP_GUI_BOARD: UInt8 = 0x87
 let OP_GUI_AGENT_CONTEXT: UInt8 = 0x88
+let OP_GUI_CHANGE_SUMMARY: UInt8 = 0x88
 
 // MARK: - Forward-compatible opcodes (0x90+, include 2-byte length prefix)
 // All opcodes >= 0x90 use the format: opcode(1) + payload_length(2) + payload.
@@ -255,6 +256,7 @@ let GUI_ACTION_BOARD_DISPATCH_AGENT: UInt8 = 0x28
 let GUI_ACTION_AGENT_APPROVE: UInt8 = 0x29
 let GUI_ACTION_AGENT_REQUEST_CHANGES: UInt8 = 0x2A
 let GUI_ACTION_AGENT_DISMISS: UInt8 = 0x2B
+let GUI_ACTION_CHANGE_SUMMARY_CLICK: UInt8 = 0x2C
 
 // MARK: - Log message opcode (frontend → BEAM)
 
