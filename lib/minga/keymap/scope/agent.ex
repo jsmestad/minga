@@ -60,6 +60,16 @@ defmodule Minga.Keymap.Scope.Agent do
   def help_groups(_focus), do: chat_help()
 
   @impl true
+  @spec included_groups() :: [atom() | {atom(), keyword()}]
+  def included_groups do
+    [
+      :ctrl_agent_common,
+      :newline_variants,
+      {:cua_navigation, exclude: [:half_page_up, :half_page_down]}
+    ]
+  end
+
+  @impl true
   @spec on_enter(term()) :: term()
   def on_enter(state), do: state
 
@@ -139,31 +149,14 @@ defmodule Minga.Keymap.Scope.Agent do
   @spec insert_trie() :: Bindings.node_t()
   defp insert_trie do
     Bindings.new()
+    # Shared Ctrl shortcuts (Ctrl+C, D, U, L, S, Q) from group
+    |> Bindings.merge_group(:ctrl_agent_common)
+    # Newline variants (Shift+Enter across all terminal encodings) from group
+    |> Bindings.merge_group(:newline_variants)
     # ESC switches to input normal mode (vim-style)
     |> Bindings.bind([{@escape, 0}], :agent_input_to_normal, "Normal mode")
-    # Ctrl+Q unfocus + quit
-    |> Bindings.bind([{?q, @ctrl}], :agent_unfocus_and_quit, "Unfocus input and quit")
-    # Enter submits; Shift+Enter inserts a newline.
-    #
-    # Why four bindings for "insert newline":
-    #
-    # 1. {Enter, shift} — correct Kitty protocol behavior (CSI 13;2 u).
-    #    Works on terminals where Shift+Enter is truly "modified Enter."
-    #
-    # 2. {?j, ctrl} — Ghostty/macOS. Shift+Enter produces LF (0x0A) at
-    #    the OS level. The Kitty protocol disambiguates LF as Ctrl+J
-    #    (codepoint 'j' with ctrl). Also standard Vim: Ctrl+J = newline.
-    #
-    # 3. {0x0A, 0} — legacy terminals without Kitty protocol. Shift+Enter
-    #    sends raw LF (0x0A) with no modifier info.
-    #
-    # 4. {Enter, alt} — universal fallback. Alt+Enter works everywhere
-    #    because Alt changes the escape sequence even in legacy mode.
+    # Enter submits
     |> Bindings.bind([{@enter, 0}], :agent_submit_or_newline, "Submit prompt")
-    |> Bindings.bind([{@enter, @shift}], :agent_insert_newline, "Insert newline")
-    |> Bindings.bind([{?j, @ctrl}], :agent_insert_newline, "Insert newline")
-    |> Bindings.bind([{0x0A, 0}], :agent_insert_newline, "Insert newline")
-    |> Bindings.bind([{@enter, @alt}], :agent_insert_newline, "Insert newline")
     # Backspace
     |> Bindings.bind([{@backspace, 0}], :agent_input_backspace, "Delete character")
     # Left/right arrows handled by Vim.handle_key (shared primitive).
@@ -173,20 +166,14 @@ defmodule Minga.Keymap.Scope.Agent do
     |> Bindings.bind([{57_352, 0}], :agent_input_up, "Move up / history prev")
     |> Bindings.bind([{57_353, 0}], :agent_input_down, "Move down / history next")
     # Ctrl+Enter queues as follow-up during streaming; submits normally when idle.
-    # Uses the same multi-encoding strategy as Shift+Enter:
-    # 1. Kitty protocol (CSI 13;5 u)
-    # 2. Some terminals send plain Enter for Ctrl+Enter — no reliable legacy fallback.
     |> Bindings.bind([{@enter, @ctrl}], :agent_queue_follow_up, "Queue as follow-up")
     # Alt+Up dequeues pending messages back into the prompt buffer.
     |> Bindings.bind([{0xF700, @alt}], :agent_dequeue, "Dequeue to editor")
     |> Bindings.bind([{57_352, @alt}], :agent_dequeue, "Dequeue to editor")
-    # Ctrl modifiers
-    # Ctrl-C: abort+restore queues if streaming, else return to normal mode.
-    |> Bindings.bind([{?c, @ctrl}], :agent_ctrl_c, "Abort (streaming) or normal mode (idle)")
+    # Scope-specific overrides on top of group bindings:
+    # Ctrl+D/U get more specific descriptions in insert context
     |> Bindings.bind([{?d, @ctrl}], :agent_scroll_half_down, "Scroll down (while typing)")
     |> Bindings.bind([{?u, @ctrl}], :agent_scroll_half_up, "Scroll up (while typing)")
-    |> Bindings.bind([{?l, @ctrl}], :agent_clear_chat, "Clear chat display")
-    |> Bindings.bind([{?s, @ctrl}], :agent_save_buffer, "Save buffer")
   end
 
   # ── Input normal mode meta keys ──────────────────────────────────────────
@@ -198,15 +185,11 @@ defmodule Minga.Keymap.Scope.Agent do
   @spec input_normal_trie() :: Bindings.node_t()
   defp input_normal_trie do
     Bindings.new()
+    # Shared Ctrl shortcuts from group (Ctrl+C, D, U, L, S, Q)
+    |> Bindings.merge_group(:ctrl_agent_common)
     # No Escape binding: in normal mode, Escape is a no-op (vim semantics).
     # Use `q` or Ctrl+Q to leave the input field.
     |> Bindings.bind([{?q, 0}], :agent_unfocus_input, "Back to chat nav")
-    |> Bindings.bind([{?c, @ctrl}], :agent_ctrl_c, "Abort (streaming) or normal mode (idle)")
-    |> Bindings.bind([{?d, @ctrl}], :agent_scroll_half_down, "Scroll down")
-    |> Bindings.bind([{?u, @ctrl}], :agent_scroll_half_up, "Scroll up")
-    |> Bindings.bind([{?l, @ctrl}], :agent_clear_chat, "Clear chat")
-    |> Bindings.bind([{?s, @ctrl}], :agent_save_buffer, "Save buffer")
-    |> Bindings.bind([{?q, @ctrl}], :agent_unfocus_and_quit, "Unfocus and quit")
   end
 
   # ── Shared bindings (both normal and insert) ───────────────────────────────

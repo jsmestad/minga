@@ -118,41 +118,67 @@ defmodule Minga.Shell.Board.Renderer do
         Face.new(fg: 0x5C6370, bg: theme.editor.bg)
       end
 
-    # Focused cards get a slightly lighter background for contrast
     card_bg = if focused, do: 0x323842, else: theme.editor.bg
-
-    content_face = Face.new(fg: theme.editor.fg, bg: card_bg)
-    dim_face = Face.new(fg: 0x5C6370, bg: card_bg)
-    status_face = status_face(card.status, card_bg)
-
-    # inner_width: card width minus border chars (│ + space on each side = 4 cells)
     inner_width = max(width - 4, 1)
     content_start = row + 1
     content_end = max(row + height - 2, content_start)
 
-    # Build draws list (prepend, reverse at end)
-    draws = []
+    faces = %{
+      border: border_face,
+      content: Face.new(fg: theme.editor.fg, bg: card_bg),
+      dim: Face.new(fg: 0x5C6370, bg: card_bg),
+      status: status_face(card.status, card_bg),
+      fill: Face.new(fg: 0x5C6370, bg: card_bg)
+    }
 
-    # Top border
+    draws = render_card_top_border([], row, col, width, height, faces.border)
+
     draws =
-      if height >= 1 do
-        top_inner = String.duplicate(@h, max(width - 2, 0))
-        [DisplayList.draw(row, col, @tl <> top_inner <> @tr, border_face) | draws]
-      else
-        draws
-      end
+      render_card_content_rows(draws, card, col, inner_width, content_start, content_end, faces)
 
+    draws =
+      render_card_fill_rows(draws, col, inner_width, content_start, content_end, faces.border)
+
+    draws = render_card_bottom_border(draws, row, col, width, height, faces.border)
+
+    Enum.reverse(draws)
+  end
+
+  @spec render_card_top_border(
+          [DisplayList.draw()],
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          Face.t()
+        ) :: [DisplayList.draw()]
+  defp render_card_top_border(draws, row, col, width, height, border_face) when height >= 1 do
+    top_inner = String.duplicate(@h, max(width - 2, 0))
+    [DisplayList.draw(row, col, @tl <> top_inner <> @tr, border_face) | draws]
+  end
+
+  defp render_card_top_border(draws, _row, _col, _width, _height, _border_face), do: draws
+
+  @spec render_card_content_rows(
+          [DisplayList.draw()],
+          Card.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          map()
+        ) :: [DisplayList.draw()]
+  defp render_card_content_rows(draws, card, col, inner_width, content_start, content_end, faces) do
     # Row 1: Status badge + elapsed time
     draws =
       if content_start <= content_end do
         icon = if Card.you_card?(card), do: "◈", else: Map.get(@status_icons, card.status, "○")
         label = if Card.you_card?(card), do: "You", else: status_label(card.status)
         elapsed = format_elapsed(card.created_at)
-
         line = build_two_column_line(icon <> " " <> label, elapsed, inner_width)
 
         [
-          DisplayList.draw(content_start, col, @v <> " " <> line <> " " <> @v, status_face)
+          DisplayList.draw(content_start, col, @v <> " " <> line <> " " <> @v, faces.status)
           | draws
         ]
       else
@@ -165,61 +191,70 @@ defmodule Minga.Shell.Board.Renderer do
         task = pad_right(card.task, inner_width)
 
         [
-          DisplayList.draw(content_start + 1, col, @v <> " " <> task <> " " <> @v, content_face)
+          DisplayList.draw(content_start + 1, col, @v <> " " <> task <> " " <> @v, faces.content)
           | draws
         ]
       else
         draws
       end
 
-    # Row 3+: blank separator rows (use card bg for fill)
-    fill_face = Face.new(fg: 0x5C6370, bg: card_bg)
-
+    # Row 3+: blank separator rows
     draws =
       Enum.reduce((content_start + 2)..max(content_end - 1, content_start + 1)//1, draws, fn r,
                                                                                              acc ->
         blank_line = String.duplicate(" ", inner_width)
-        [DisplayList.draw(r, col, @v <> " " <> blank_line <> " " <> @v, fill_face) | acc]
+        [DisplayList.draw(r, col, @v <> " " <> blank_line <> " " <> @v, faces.fill) | acc]
       end)
 
     # Last content row: Model + file count (footer)
-    draws =
-      if content_end > content_start + 1 do
-        model = card.model || ""
+    if content_end > content_start + 1 do
+      model = card.model || ""
 
-        files =
-          case card.recent_files do
-            [] -> ""
-            names -> names |> Enum.take(2) |> Enum.join(", ")
-          end
+      files =
+        case card.recent_files do
+          [] -> ""
+          names -> names |> Enum.take(2) |> Enum.join(", ")
+        end
 
-        line = build_two_column_line(model, files, inner_width)
-        [DisplayList.draw(content_end, col, @v <> " " <> line <> " " <> @v, dim_face) | draws]
-      else
-        draws
-      end
+      line = build_two_column_line(model, files, inner_width)
+      [DisplayList.draw(content_end, col, @v <> " " <> line <> " " <> @v, faces.dim) | draws]
+    else
+      draws
+    end
+  end
 
-    # Fill remaining content rows with empty bordered lines
+  @spec render_card_fill_rows(
+          [DisplayList.draw()],
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          Face.t()
+        ) :: [DisplayList.draw()]
+  defp render_card_fill_rows(draws, col, inner_width, content_start, content_end, border_face) do
     filled_rows = min(4, max(content_end - content_start + 1, 0))
 
-    draws =
-      Enum.reduce((content_start + filled_rows)..content_end//1, draws, fn r, acc ->
-        blank_line = String.duplicate(" ", inner_width)
-        line = @v <> " " <> blank_line <> " " <> @v
-        [DisplayList.draw(r, col, line, border_face) | acc]
-      end)
-
-    # Bottom border
-    draws =
-      if height >= 2 do
-        bottom_inner = String.duplicate(@h, max(width - 2, 0))
-        [DisplayList.draw(row + height - 1, col, @bl <> bottom_inner <> @br, border_face) | draws]
-      else
-        draws
-      end
-
-    Enum.reverse(draws)
+    Enum.reduce((content_start + filled_rows)..content_end//1, draws, fn r, acc ->
+      blank_line = String.duplicate(" ", inner_width)
+      line = @v <> " " <> blank_line <> " " <> @v
+      [DisplayList.draw(r, col, line, border_face) | acc]
+    end)
   end
+
+  @spec render_card_bottom_border(
+          [DisplayList.draw()],
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          Face.t()
+        ) :: [DisplayList.draw()]
+  defp render_card_bottom_border(draws, row, col, width, height, border_face) when height >= 2 do
+    bottom_inner = String.duplicate(@h, max(width - 2, 0))
+    [DisplayList.draw(row + height - 1, col, @bl <> bottom_inner <> @br, border_face) | draws]
+  end
+
+  defp render_card_bottom_border(draws, _row, _col, _width, _height, _border_face), do: draws
 
   # ── Footer (keyboard hints) ──────────────────────────────────────────
 

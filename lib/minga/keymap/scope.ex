@@ -118,6 +118,19 @@ defmodule Minga.Keymap.Scope do
   """
   @callback help_groups(focus :: atom()) :: [help_group()]
 
+  @doc """
+  Returns the shared binding groups this scope includes.
+
+  Each entry is either a group name atom or a `{group_name, opts}` tuple
+  with exclusion options. Used for introspection and documentation; the
+  actual merge happens in the scope's trie-building functions.
+
+  Optional callback. Returns `[]` by default.
+  """
+  @callback included_groups() :: [atom() | {atom(), keyword()}]
+
+  @optional_callbacks [included_groups: 0]
+
   @doc "Called when this scope becomes active. Initialize scope-specific state."
   @callback on_enter(state :: term()) :: term()
 

@@ -808,7 +808,7 @@ defmodule Minga.Frontend.Protocol.GUI do
   # ── Change Summary ──
 
   @doc """
-  Encodes a gui_change_summary command (0x88).
+  Encodes a gui_change_summary command (0x89).
 
   Sends the list of changed files with diff stats when zoomed into an agent card.
   The Swift frontend renders this as a resizable sidebar on the left.

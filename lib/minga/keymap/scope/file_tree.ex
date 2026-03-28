@@ -66,6 +66,10 @@ defmodule Minga.Keymap.Scope.FileTree do
   end
 
   @impl true
+  @spec included_groups() :: [atom() | {atom(), keyword()}]
+  def included_groups, do: [:cua_navigation]
+
+  @impl true
   @spec on_enter(term()) :: term()
   def on_enter(state), do: state
 

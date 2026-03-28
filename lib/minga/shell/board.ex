@@ -190,35 +190,7 @@ defmodule Minga.Shell.Board do
         {shell_state, workspace}
 
       card_id ->
-        card = Map.get(shell_state.cards, card_id)
-
-        if card do
-          # Get the grid workspace that was stored on the card when we zoomed in
-          grid_workspace = card.workspace
-
-          # Store the current workspace back onto the card
-          live_workspace = Map.from_struct(workspace)
-          updated_card = Card.store_workspace(card, live_workspace)
-          shell_state = %{shell_state | cards: Map.put(shell_state.cards, card_id, updated_card)}
-
-          # Zoom out to grid
-          shell_state = %{shell_state | zoomed_into: nil}
-
-          # Restore the grid workspace if available, otherwise use the current workspace
-          workspace =
-            case grid_workspace do
-              ws when is_map(ws) and map_size(ws) > 0 ->
-                struct!(Minga.Workspace.State, ws)
-
-              _ ->
-                workspace
-            end
-
-          Minga.Shell.Board.Persistence.save(shell_state)
-          {shell_state, workspace}
-        else
-          {shell_state, workspace}
-        end
+        zoom_out_card(shell_state, workspace, card_id)
     end
   end
 
@@ -385,6 +357,37 @@ defmodule Minga.Shell.Board do
       }
     end
   end
+
+  # Zoom out from a card: store the live workspace on the card, restore the grid workspace.
+  @spec zoom_out_card(BoardState.t(), Minga.Workspace.State.t(), String.t()) ::
+          {BoardState.t(), Minga.Workspace.State.t()}
+  defp zoom_out_card(shell_state, workspace, card_id) do
+    card = Map.get(shell_state.cards, card_id)
+
+    if card do
+      grid_workspace = card.workspace
+      live_workspace = Map.from_struct(workspace)
+      updated_card = Card.store_workspace(card, live_workspace)
+      shell_state = %{shell_state | cards: Map.put(shell_state.cards, card_id, updated_card)}
+      shell_state = %{shell_state | zoomed_into: nil}
+
+      workspace = restore_grid_workspace(grid_workspace, workspace)
+
+      Minga.Shell.Board.Persistence.save(shell_state)
+      {shell_state, workspace}
+    else
+      {shell_state, workspace}
+    end
+  end
+
+  @spec restore_grid_workspace(map() | nil, Minga.Workspace.State.t()) ::
+          Minga.Workspace.State.t()
+  defp restore_grid_workspace(grid_workspace, _fallback)
+       when is_map(grid_workspace) and map_size(grid_workspace) > 0 do
+    struct!(Minga.Workspace.State, grid_workspace)
+  end
+
+  defp restore_grid_workspace(_grid_workspace, fallback), do: fallback
 
   # Ensure a "You" card exists in restored board state (may have been removed in a bug).
   @spec ensure_you_card(BoardState.t()) :: BoardState.t()
