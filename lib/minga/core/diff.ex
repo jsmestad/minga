@@ -231,6 +231,195 @@ defmodule Minga.Core.Diff do
     build_hunks(rest, cur + length(ins_lines), base, [hunk | acc])
   end
 
+  # ── Three-way merge ─────────────────────────────────────────────────────────
+
+  @typedoc """
+  A hunk in a three-way merge result.
+
+  * `{:resolved, lines}` — auto-merged content (from either side or unchanged)
+  * `{:conflict, fork_lines, parent_lines}` — both sides changed the same region
+  """
+  @type merge_hunk :: {:resolved, [String.t()]} | {:conflict, [String.t()], [String.t()]}
+
+  @typedoc "Result of a three-way merge."
+  @type merge3_result :: {:ok, [String.t()]} | {:conflict, [merge_hunk()]}
+
+  @doc """
+  Three-way merge: given a common ancestor and two divergent versions (fork and parent),
+  produces a merged result or identifies conflicts.
+
+  Non-overlapping changes from both sides are merged automatically.
+  Overlapping changes (both sides modified the same region of the ancestor)
+  become conflicts.
+
+  Returns `{:ok, merged_lines}` when all changes merge cleanly, or
+  `{:conflict, merge_hunks}` when at least one conflict exists.
+  The hunks list contains both resolved and conflicting regions.
+  """
+  @spec merge3([String.t()], [String.t()], [String.t()]) ::
+          {:ok, [String.t()]} | {:conflict, [merge_hunk()]}
+  def merge3(ancestor, fork, parent) do
+    # Compute diffs from ancestor to each side
+    fork_ops = List.myers_difference(ancestor, fork)
+    parent_ops = List.myers_difference(ancestor, parent)
+
+    # Convert myers ops to indexed edit regions
+    fork_edits = ops_to_edits(fork_ops)
+    parent_edits = ops_to_edits(parent_ops)
+
+    # Walk both edit lists and merge
+    hunks = merge_edits(ancestor, fork_edits, parent_edits)
+
+    if Enum.any?(hunks, &match?({:conflict, _, _}, &1)) do
+      {:conflict, hunks}
+    else
+      merged = Enum.flat_map(hunks, fn {:resolved, lines} -> lines end)
+      {:ok, merged}
+    end
+  end
+
+  # Converts myers_difference ops into a list of {start, count, replacement_lines}
+  # edit records, where start/count refer to the ancestor line range.
+  @spec ops_to_edits([{atom(), [String.t()]}]) :: [
+          {non_neg_integer(), non_neg_integer(), [String.t()]}
+        ]
+  defp ops_to_edits(ops) do
+    {edits, _pos} =
+      Enum.reduce(ops, {[], 0}, fn
+        {:eq, lines}, {acc, pos} ->
+          {acc, pos + length(lines)}
+
+        {:del, del_lines}, {acc, pos} ->
+          {[{pos, length(del_lines), :pending_del} | acc], pos + length(del_lines)}
+
+        {:ins, ins_lines}, {[{start, count, :pending_del} | rest], pos} ->
+          # del followed by ins = replacement
+          {[{start, count, ins_lines} | rest], pos}
+
+        {:ins, ins_lines}, {acc, pos} ->
+          # pure insertion at current position
+          {[{pos, 0, ins_lines} | acc], pos}
+      end)
+
+    # Resolve any trailing pending_del (pure deletion)
+    edits
+    |> Enum.map(fn
+      {start, count, :pending_del} -> {start, count, []}
+      edit -> edit
+    end)
+    |> Enum.reverse()
+  end
+
+  # Walks both edit lists against the ancestor, producing merge hunks.
+  @spec merge_edits([String.t()], [{non_neg_integer(), non_neg_integer(), [String.t()]}], [
+          {non_neg_integer(), non_neg_integer(), [String.t()]}
+        ]) :: [merge_hunk()]
+  defp merge_edits(ancestor, fork_edits, parent_edits) do
+    do_merge(ancestor, 0, fork_edits, parent_edits, [])
+    |> Enum.reverse()
+  end
+
+  # Both edit lists exhausted: emit remaining ancestor lines
+  defp do_merge(ancestor, pos, [], [], acc) do
+    remaining = Enum.drop(ancestor, pos)
+
+    if remaining == [] do
+      acc
+    else
+      [{:resolved, remaining} | acc]
+    end
+  end
+
+  # Only fork edits remain
+  defp do_merge(ancestor, pos, [fe | fork_rest], [], acc) do
+    {start, count, replacement} = fe
+    # Emit unchanged lines before this edit
+    unchanged = Enum.slice(ancestor, pos, max(start - pos, 0))
+    acc = if unchanged != [], do: [{:resolved, unchanged} | acc], else: acc
+    acc = [{:resolved, replacement} | acc]
+    do_merge(ancestor, start + count, fork_rest, [], acc)
+  end
+
+  # Only parent edits remain
+  defp do_merge(ancestor, pos, [], [pe | parent_rest], acc) do
+    {start, count, replacement} = pe
+    unchanged = Enum.slice(ancestor, pos, max(start - pos, 0))
+    acc = if unchanged != [], do: [{:resolved, unchanged} | acc], else: acc
+    acc = [{:resolved, replacement} | acc]
+    do_merge(ancestor, start + count, [], parent_rest, acc)
+  end
+
+  # Both sides have edits: pick the earlier one, detect overlaps
+  defp do_merge(
+         ancestor,
+         pos,
+         [fe | fork_rest] = fork_edits,
+         [pe | parent_rest] = parent_edits,
+         acc
+       ) do
+    {f_start, f_count, f_replacement} = fe
+    {p_start, p_count, p_replacement} = pe
+
+    f_end = f_start + f_count
+    p_end = p_start + p_count
+
+    cond do
+      # Both sides made the same change (identical replacement for the same region).
+      # Must be checked before the "before" conditions because identical insertions
+      # at the same position (f_end == p_start) would otherwise be duplicated.
+      f_start == p_start and f_count == p_count and f_replacement == p_replacement ->
+        unchanged = Enum.slice(ancestor, pos, max(f_start - pos, 0))
+        acc = if unchanged != [], do: [{:resolved, unchanged} | acc], else: acc
+        acc = [{:resolved, f_replacement} | acc]
+        do_merge(ancestor, f_end, fork_rest, parent_rest, acc)
+
+      # Fork edit is entirely before parent edit (no overlap)
+      f_end <= p_start ->
+        unchanged = Enum.slice(ancestor, pos, max(f_start - pos, 0))
+        acc = if unchanged != [], do: [{:resolved, unchanged} | acc], else: acc
+        acc = [{:resolved, f_replacement} | acc]
+        do_merge(ancestor, f_end, fork_rest, parent_edits, acc)
+
+      # Parent edit is entirely before fork edit (no overlap)
+      p_end <= f_start ->
+        unchanged = Enum.slice(ancestor, pos, max(p_start - pos, 0))
+        acc = if unchanged != [], do: [{:resolved, unchanged} | acc], else: acc
+        acc = [{:resolved, p_replacement} | acc]
+        do_merge(ancestor, p_end, fork_edits, parent_rest, acc)
+
+      # Overlap: conflict
+      true ->
+        # Emit unchanged lines before the conflict region
+        conflict_start = min(f_start, p_start)
+        conflict_end = max(f_end, p_end)
+        unchanged = Enum.slice(ancestor, pos, max(conflict_start - pos, 0))
+        acc = if unchanged != [], do: [{:resolved, unchanged} | acc], else: acc
+        acc = [{:conflict, f_replacement, p_replacement} | acc]
+
+        # Skip past all edits consumed by this conflict region
+        {fork_rest2, parent_rest2} = skip_consumed_edits(fork_rest, parent_rest, conflict_end)
+        do_merge(ancestor, conflict_end, fork_rest2, parent_rest2, acc)
+    end
+  end
+
+  # Skip edits that fall within the conflict region
+  @spec skip_consumed_edits(
+          [{non_neg_integer(), non_neg_integer(), [String.t()]}],
+          [{non_neg_integer(), non_neg_integer(), [String.t()]}],
+          non_neg_integer()
+        ) ::
+          {[{non_neg_integer(), non_neg_integer(), [String.t()]}],
+           [{non_neg_integer(), non_neg_integer(), [String.t()]}]}
+  defp skip_consumed_edits(fork_edits, parent_edits, conflict_end) do
+    fork_rest =
+      Enum.drop_while(fork_edits, fn {start, count, _} -> start + count <= conflict_end end)
+
+    parent_rest =
+      Enum.drop_while(parent_edits, fn {start, count, _} -> start + count <= conflict_end end)
+
+    {fork_rest, parent_rest}
+  end
+
   # ── Private: patch generation ──────────────────────────────────────────────
 
   @spec base_range(hunk(), non_neg_integer(), non_neg_integer()) ::
