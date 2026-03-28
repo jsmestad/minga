@@ -17,7 +17,7 @@ defmodule Minga.Input.Wrap do
   All functions are pure; there is no state. Call them at render time
   with the current text and width.
 
-  ## Comparison with `Minga.Editor.WrapMap`
+  ## Comparison with `Minga.Core.WrapMap`
 
   `WrapMap` serves the main editor buffer and tracks byte offsets for
   syntax highlighting alignment. It also supports breakindent (preserving

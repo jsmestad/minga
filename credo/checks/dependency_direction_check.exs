@@ -57,6 +57,7 @@ defmodule Minga.Credo.DependencyDirectionCheck do
     "Minga.Editing.Model",
     "Minga.Core",
     "Minga.Mode",
+    "Minga.Command.Parser",
     "Minga.Keymap.Bindings",
     "Minga.Keymap.NormalPrefixes"
   ]

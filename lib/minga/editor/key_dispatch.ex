@@ -21,6 +21,7 @@ defmodule Minga.Editor.KeyDispatch do
   alias Minga.Editor.ModeTransitions
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.AgentAccess
+  alias Minga.Keymap
   alias Minga.Mode
 
   @doc """
@@ -40,7 +41,8 @@ defmodule Minga.Editor.KeyDispatch do
     # This proves the EditingModel abstraction under real load. When CUA
     # (#306) arrives, this call site dispatches through the active editing
     # model instead of hardcoding Vim.
-    vim_state = VimModel.from_editor(old_mode, Editing.mode_state(state))
+    mode_state = populate_mode_tries(Editing.mode_state(state), old_mode, state)
+    vim_state = VimModel.from_editor(old_mode, mode_state)
     {new_mode, commands, new_vim_state} = VimModel.process_key(vim_state, key)
     {_, new_mode_state} = VimModel.to_editor(new_vim_state)
 
@@ -218,5 +220,67 @@ defmodule Minga.Editor.KeyDispatch do
     Buffer.filetype(buf)
   catch
     :exit, _ -> :text
+  end
+
+  # ── Mode trie population ──────────────────────────────────────────────────
+  # Populates leader_trie, normal_bindings, and mode_trie on the mode state
+  # so Mode FSM modules (Layer 0) never need to call the Keymap GenServer
+  # (Layer 1) directly.
+
+  @spec populate_mode_tries(Mode.state(), Mode.mode(), EditorState.t()) :: Mode.state()
+  defp populate_mode_tries(%Minga.Mode.State{} = mode_state, mode, state) do
+    %{
+      mode_state
+      | leader_trie: fetch_leader_trie(),
+        normal_bindings: fetch_normal_bindings(),
+        mode_trie: fetch_mode_trie(mode, active_filetype(state))
+    }
+  end
+
+  defp populate_mode_tries(%{mode_trie: _} = mode_state, mode, state) do
+    %{mode_state | mode_trie: fetch_mode_trie(mode, active_filetype(state))}
+  end
+
+  defp populate_mode_tries(mode_state, _mode, _state), do: mode_state
+
+  @spec fetch_leader_trie() :: Minga.Keymap.Bindings.node_t()
+  defp fetch_leader_trie do
+    Keymap.leader_trie()
+  catch
+    :exit, _ -> Keymap.default_leader_trie()
+  end
+
+  @spec fetch_normal_bindings() :: %{Minga.Keymap.Bindings.key() => {atom(), String.t()}}
+  defp fetch_normal_bindings do
+    Keymap.normal_bindings()
+  catch
+    :exit, _ -> Keymap.default_normal_bindings()
+  end
+
+  @spec fetch_mode_trie(Mode.mode(), atom()) :: Minga.Keymap.Bindings.node_t() | nil
+  defp fetch_mode_trie(mode, filetype) when mode in [:insert, :visual] do
+    global = Keymap.mode_trie(mode)
+    ft = Keymap.Active.filetype_mode_trie(filetype, mode)
+    merge_tries(global, ft)
+  catch
+    :exit, _ -> nil
+  end
+
+  defp fetch_mode_trie(_mode, _filetype), do: nil
+
+  # Merges filetype-specific bindings on top of global mode bindings.
+  # Filetype bindings override global ones on conflict (same key).
+  @spec merge_tries(Minga.Keymap.Bindings.node_t(), Minga.Keymap.Bindings.node_t()) ::
+          Minga.Keymap.Bindings.node_t()
+  defp merge_tries(base, %{children: ft_children}) when map_size(ft_children) == 0, do: base
+
+  defp merge_tries(base, %{children: ft_children}) do
+    Enum.reduce(ft_children, base, fn {key, %{command: cmd, description: desc}}, acc ->
+      if cmd do
+        Minga.Keymap.Bindings.bind(acc, [key], cmd, desc || "")
+      else
+        acc
+      end
+    end)
   end
 end

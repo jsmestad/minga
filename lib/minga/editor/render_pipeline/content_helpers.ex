@@ -25,7 +25,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
   alias Minga.Editor.Renderer.SearchHighlight
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Window
-  alias Minga.Editor.WrapMap
+  alias Minga.Core.WrapMap
   alias Minga.Git
   alias Minga.LSP.SyncServer
   alias Minga.Mode.VisualState

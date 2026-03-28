@@ -28,7 +28,7 @@ defmodule Minga.Mode.Command do
 
   @behaviour Minga.Mode
 
-  alias Minga.Command
+  alias Minga.Command.Parser, as: CommandParser
   alias Minga.Mode
   alias Minga.Mode.CommandState
 
@@ -53,7 +53,7 @@ defmodule Minga.Mode.Command do
 
   # Enter → parse the accumulated input and emit an :execute_ex_command
   def handle_key({@enter, _mods}, %CommandState{input: input} = state) do
-    parsed = Command.parse(input)
+    parsed = CommandParser.parse(input)
     {:execute_then_transition, [{:execute_ex_command, parsed}], :normal, %{state | input: ""}}
   end
 

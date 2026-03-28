@@ -11,6 +11,7 @@ defmodule Minga.Mode.VisualState do
             visual_type: :char,
             visual_anchor: {0, 0},
             count: nil,
+            mode_trie: nil,
             leader_node: nil,
             leader_keys: [],
             text_object_modifier: nil
@@ -26,6 +27,7 @@ defmodule Minga.Mode.VisualState do
           visual_type: selection_type(),
           visual_anchor: {non_neg_integer(), non_neg_integer()},
           count: non_neg_integer() | nil,
+          mode_trie: Minga.Keymap.Bindings.node_t() | nil,
           leader_node: Minga.Keymap.Bindings.node_t() | nil,
           leader_keys: [String.t()],
           text_object_modifier: text_object_modifier()

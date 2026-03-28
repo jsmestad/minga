@@ -1,4 +1,4 @@
-defmodule Minga.Editor.WrapMap do
+defmodule Minga.Core.WrapMap do
   @moduledoc """
   Computes visual line breaks for soft word-wrapping.
 

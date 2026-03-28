@@ -98,10 +98,25 @@ defmodule Minga.Mode.Insert.UserOverrideTest do
   use ExUnit.Case, async: false
 
   alias Minga.Keymap.Active, as: KeymapActive
+  alias Minga.Keymap.Bindings
   alias Minga.Mode
   alias Minga.Mode.Insert
 
   defp fresh_state, do: Mode.initial_state()
+
+  # Builds a mode_trie by merging filetype bindings on top of global insert bindings.
+  defp state_with_trie(filetype \\ :text) do
+    global = KeymapActive.mode_trie(:insert)
+
+    ft_trie = KeymapActive.filetype_mode_trie(filetype, :insert)
+
+    mode_trie =
+      Enum.reduce(ft_trie.children, global, fn {key, %{command: cmd, description: desc}}, acc ->
+        if cmd, do: Bindings.bind(acc, [key], cmd, desc || ""), else: acc
+      end)
+
+    %{fresh_state() | filetype: filetype, mode_trie: mode_trie}
+  end
 
   setup do
     case KeymapActive.start_link() do
@@ -124,31 +139,32 @@ defmodule Minga.Mode.Insert.UserOverrideTest do
     test "Ctrl+J bound to :next_line overrides default (continue)" do
       KeymapActive.bind(:insert, "C-j", :next_line, "Next line")
 
-      assert {:execute, :next_line, _} = Insert.handle_key({?j, 0x02}, fresh_state())
+      assert {:execute, :next_line, _} = Insert.handle_key({?j, 0x02}, state_with_trie())
     end
 
     test "Ctrl+K bound to :prev_line overrides default (continue)" do
       KeymapActive.bind(:insert, "C-k", :prev_line, "Prev line")
 
-      assert {:execute, :prev_line, _} = Insert.handle_key({?k, 0x02}, fresh_state())
+      assert {:execute, :prev_line, _} = Insert.handle_key({?k, 0x02}, state_with_trie())
     end
 
     test "unbound key falls through to default handling" do
       # Ctrl+C is not bound, should be :continue
-      assert {:continue, _} = Insert.handle_key({?c, 0x02}, fresh_state())
+      assert {:continue, _} = Insert.handle_key({?c, 0x02}, state_with_trie())
     end
 
     test "built-in keys still work when user overrides exist" do
       KeymapActive.bind(:insert, "C-j", :next_line, "Next line")
+      state = state_with_trie()
 
       # Escape should still transition to normal
-      assert {:transition, :normal, _} = Insert.handle_key({27, 0}, fresh_state())
+      assert {:transition, :normal, _} = Insert.handle_key({27, 0}, state)
 
       # Backspace should still delete
-      assert {:execute, :delete_before, _} = Insert.handle_key({127, 0}, fresh_state())
+      assert {:execute, :delete_before, _} = Insert.handle_key({127, 0}, state)
 
       # Printable chars should still insert
-      assert {:execute, {:insert_char, "a"}, _} = Insert.handle_key({?a, 0}, fresh_state())
+      assert {:execute, {:insert_char, "a"}, _} = Insert.handle_key({?a, 0}, state)
     end
   end
 
@@ -156,33 +172,27 @@ defmodule Minga.Mode.Insert.UserOverrideTest do
     test "filetype binding fires when filetype matches" do
       KeymapActive.bind(:insert, "C-j", :org_special, "Org special", filetype: :org)
 
-      state = %{fresh_state() | filetype: :org}
-      assert {:execute, :org_special, _} = Insert.handle_key({?j, 0x02}, state)
+      assert {:execute, :org_special, _} = Insert.handle_key({?j, 0x02}, state_with_trie(:org))
     end
 
     test "filetype binding does not fire for different filetype" do
       KeymapActive.bind(:insert, "C-j", :org_special, "Org special", filetype: :org)
 
-      state = %{fresh_state() | filetype: :elixir}
-      assert {:continue, _} = Insert.handle_key({?j, 0x02}, state)
+      assert {:continue, _} = Insert.handle_key({?j, 0x02}, state_with_trie(:elixir))
     end
 
     test "filetype binding shadows global binding for same key" do
       KeymapActive.bind(:insert, "C-j", :global_next, "Global next")
       KeymapActive.bind(:insert, "C-j", :org_special, "Org special", filetype: :org)
 
-      org_state = %{fresh_state() | filetype: :org}
-      assert {:execute, :org_special, _} = Insert.handle_key({?j, 0x02}, org_state)
-
-      elixir_state = %{fresh_state() | filetype: :elixir}
-      assert {:execute, :global_next, _} = Insert.handle_key({?j, 0x02}, elixir_state)
+      assert {:execute, :org_special, _} = Insert.handle_key({?j, 0x02}, state_with_trie(:org))
+      assert {:execute, :global_next, _} = Insert.handle_key({?j, 0x02}, state_with_trie(:elixir))
     end
 
     test "global binding fires when no filetype binding exists" do
       KeymapActive.bind(:insert, "C-k", :global_prev, "Global prev")
 
-      state = %{fresh_state() | filetype: :org}
-      assert {:execute, :global_prev, _} = Insert.handle_key({?k, 0x02}, state)
+      assert {:execute, :global_prev, _} = Insert.handle_key({?k, 0x02}, state_with_trie(:org))
     end
   end
 end
