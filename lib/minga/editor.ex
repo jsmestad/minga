@@ -71,7 +71,6 @@ defmodule Minga.Editor do
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.Buffers
-  alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
 
   alias Minga.Editor.MinibufferData
@@ -1025,11 +1024,12 @@ defmodule Minga.Editor do
       state = dispatch_agent_event(state, event)
       {:noreply, state}
     else
-      # Background tab: update tab metadata and attention. The Session
-      # process holds the real state; we only track status and attention
-      # on the Tab struct for tab bar rendering.
-      state = update_background_tab_status(state, session_pid, event)
-      state = maybe_set_background_attention(state, session_pid, event)
+      # Background session: dispatch to shell for presentation updates
+      # (tab badges, card status, attention flags, etc.)
+      {shell_state, workspace} =
+        state.shell.on_agent_event(state.shell_state, state.workspace, session_pid, event)
+
+      state = %{state | shell_state: shell_state, workspace: workspace}
       {:noreply, state}
     end
   end
@@ -1332,54 +1332,6 @@ defmodule Minga.Editor do
   defp dispatch_agent_event(state, event) do
     {state, effects} = Events.handle(state, event)
     apply_effects(state, effects)
-  end
-
-  # Updates a background agent tab's metadata from a session event.
-  # The Session process holds the real state; we only track status on
-  # the Tab struct so the tab bar can render status indicators.
-  @spec update_background_tab_status(EditorState.t(), pid(), term()) :: EditorState.t()
-  defp update_background_tab_status(state, session_pid, {:status_changed, status}) do
-    case state.shell_state.tab_bar &&
-           TabBar.find_by_session(state.shell_state.tab_bar, session_pid) do
-      %Tab{id: id} ->
-        tb = TabBar.update_tab(state.shell_state.tab_bar, id, &Tab.set_agent_status(&1, status))
-        EditorState.set_tab_bar(state, tb)
-
-      _ ->
-        state
-    end
-  end
-
-  defp update_background_tab_status(state, _session_pid, _event), do: state
-
-  # Sets the attention flag on a background agent tab when the session
-  # reaches a state that needs user input. Derived from domain events;
-  # the Session process doesn't know about UI attention.
-  @spec maybe_set_background_attention(EditorState.t(), pid(), term()) :: EditorState.t()
-  defp maybe_set_background_attention(state, session_pid, {:status_changed, status})
-       when status in [:idle, :error] do
-    set_tab_attention(state, session_pid)
-  end
-
-  defp maybe_set_background_attention(state, session_pid, {:approval_pending, _}) do
-    set_tab_attention(state, session_pid)
-  end
-
-  defp maybe_set_background_attention(state, _session_pid, _event), do: state
-
-  @spec set_tab_attention(EditorState.t(), pid()) :: EditorState.t()
-  defp set_tab_attention(state, session_pid) do
-    case state.shell_state.tab_bar &&
-           TabBar.find_by_session(state.shell_state.tab_bar, session_pid) do
-      nil ->
-        state
-
-      _tab ->
-        EditorState.set_tab_bar(
-          state,
-          TabBar.set_attention_by_session(state.shell_state.tab_bar, session_pid, true)
-        )
-    end
   end
 
   # ── Agent lifecycle ──────────────────────────────────────────────────────

@@ -129,4 +129,26 @@ defmodule Minga.Shell do
   """
   @callback on_buffer_died(shell_state(), workspace(), dead_pid :: pid()) ::
               {shell_state(), workspace()}
+
+  # -------------------------------------------------------------------
+  # Agent event callbacks
+  #
+  # Called by the Editor GenServer when an agent session emits an event
+  # for a background tab/card (not the active one). Each shell decides
+  # how to reflect the status change in its chrome (tab badges, card
+  # status icons, etc.).
+  # -------------------------------------------------------------------
+
+  @doc """
+  A background agent session emitted an event.
+
+  Called when `session_pid` is not the active session. The shell updates
+  its presentation state (tab badges, card status, attention flags, etc.).
+  """
+  @callback on_agent_event(
+              shell_state(),
+              workspace(),
+              session_pid :: pid(),
+              event :: term()
+            ) :: {shell_state(), workspace()}
 end

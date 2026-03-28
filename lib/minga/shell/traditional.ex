@@ -131,6 +131,55 @@ defmodule Minga.Shell.Traditional do
   end
 
   # -------------------------------------------------------------------
+  # Agent event callbacks
+  # -------------------------------------------------------------------
+
+  @impl true
+  @spec on_agent_event(ShellState.t(), WorkspaceState.t(), pid(), term()) ::
+          {ShellState.t(), WorkspaceState.t()}
+  def on_agent_event(%ShellState{tab_bar: nil} = shell_state, workspace, _session_pid, _event) do
+    {shell_state, workspace}
+  end
+
+  def on_agent_event(
+        %ShellState{tab_bar: %TabBar{} = tb} = shell_state,
+        workspace,
+        session_pid,
+        {:status_changed, status}
+      ) do
+    # Update the tab's agent status badge
+    tb =
+      case TabBar.find_by_session(tb, session_pid) do
+        %Tab{id: id} -> TabBar.update_tab(tb, id, &Tab.set_agent_status(&1, status))
+        nil -> tb
+      end
+
+    # Set attention flag when agent needs user input
+    tb =
+      if status in [:idle, :error] do
+        TabBar.set_attention_by_session(tb, session_pid, true)
+      else
+        tb
+      end
+
+    {%{shell_state | tab_bar: tb}, workspace}
+  end
+
+  def on_agent_event(
+        %ShellState{tab_bar: %TabBar{} = tb} = shell_state,
+        workspace,
+        session_pid,
+        {:approval_pending, _}
+      ) do
+    tb = TabBar.set_attention_by_session(tb, session_pid, true)
+    {%{shell_state | tab_bar: tb}, workspace}
+  end
+
+  def on_agent_event(shell_state, workspace, _session_pid, _event) do
+    {shell_state, workspace}
+  end
+
+  # -------------------------------------------------------------------
   # Buffer lifecycle helpers
   # -------------------------------------------------------------------
 
