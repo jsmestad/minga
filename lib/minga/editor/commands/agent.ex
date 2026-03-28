@@ -1077,7 +1077,9 @@ defmodule Minga.Editor.Commands.Agent do
   # meaning agent input/scroll commands should be no-ops.
   @spec no_agent_ui?(state()) :: boolean()
   defp no_agent_ui?(state) do
-    not AgentAccess.panel(state).visible and EditorState.active_tab_kind(state) != :agent
+    state.workspace.keymap_scope != :agent and
+      not AgentAccess.panel(state).visible and
+      EditorState.active_tab_kind(state) != :agent
   end
 
   @spec update_agent(state(), (AgentState.t() -> AgentState.t())) :: state()
