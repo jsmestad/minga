@@ -67,10 +67,18 @@ inline float3 srgbToLinear(float3 c) {
 
 // ── Background fill pass ──────────────────────────────────────────────────────
 
+/// Per-draw-call parameters for the background/cursor pass.
+/// Bound at fragment buffer(0). Non-cursor draws set cornerRadius = 0.
+struct BgParams {
+    float cornerRadius;
+};
+
 struct BgVertexOut {
     float4 position [[position]];
     float3 color;
     float alpha;
+    float2 localPos;    // [0,1] UV within the quad (for SDF)
+    float2 quadSize;    // quad size in pixels (for SDF)
 };
 
 vertex BgVertexOut ct_bg_vertex(
@@ -87,11 +95,34 @@ vertex BgVertexOut ct_bg_vertex(
     out.position = float4(pixelToNDC(pixel_pos, uniforms.viewport_size), 0.0, 1.0);
     out.color = quad.color;
     out.alpha = quad.alpha;
+    out.localPos = pos;         // unit quad UV, interpolates to [0,1]
+    out.quadSize = quad.size;   // pixel size, constant across quad vertices
     return out;
 }
 
-fragment float4 ct_bg_fragment(BgVertexOut in [[stage_in]]) {
-    return float4(srgbToLinear(in.color) * in.alpha, in.alpha);
+fragment float4 ct_bg_fragment(
+    BgVertexOut in [[stage_in]],
+    constant BgParams& params [[buffer(0)]]
+) {
+    float3 linearColor = srgbToLinear(in.color);
+    float alpha = in.alpha;
+
+    if (params.cornerRadius > 0.0) {
+        // SDF rounded rectangle in pixel space.
+        float2 pixelPos = in.localPos * in.quadSize;
+        float2 halfSize = in.quadSize * 0.5;
+        float r = params.cornerRadius;
+
+        // Signed distance from rounded rect boundary (negative = inside).
+        float2 d = abs(pixelPos - halfSize) - (halfSize - float2(r));
+        float dist = length(max(d, 0.0)) + min(max(d.x, d.y), 0.0) - r;
+
+        // 1px anti-aliased edge (subpixel on Retina).
+        alpha *= 1.0 - smoothstep(-0.5, 0.5, dist);
+    }
+
+    // Premultiplied alpha output.
+    return float4(linearColor * alpha, alpha);
 }
 
 // ── Line texture blit pass ────────────────────────────────────────────────────
