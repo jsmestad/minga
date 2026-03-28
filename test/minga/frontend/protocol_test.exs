@@ -968,10 +968,66 @@ defmodule Minga.Frontend.ProtocolTest do
 
       # Should have a reasonable number of color slots
       assert count > 20
-      assert count < 70
+      assert count < 85
 
       # Each entry is 4 bytes (slot_id, r, g, b)
       assert byte_size(rest) == count * 4
+    end
+
+    test "encodes agent chat theme color slots from Theme.Agent" do
+      theme = Minga.UI.Theme.get!(:doom_one)
+      encoded = ProtocolGUI.encode_gui_theme(theme)
+
+      assert <<0x74, count::8, rest::binary>> = encoded
+
+      # Parse all slots into a map of {slot_id => {r, g, b}}
+      slots = parse_theme_slots(rest, count)
+
+      # Agent chat slots should be present (0xA0-0xAE)
+      agent = Minga.UI.Theme.agent_theme(theme)
+
+      assert_color_slot(slots, 0xA0, agent.panel_bg)
+      assert_color_slot(slots, 0xA1, agent.header_bg)
+      assert_color_slot(slots, 0xA2, agent.header_fg)
+      assert_color_slot(slots, 0xA3, agent.user_border)
+      assert_color_slot(slots, 0xA4, agent.user_label)
+      assert_color_slot(slots, 0xA5, agent.assistant_border)
+      assert_color_slot(slots, 0xA6, agent.assistant_label)
+      assert_color_slot(slots, 0xA7, agent.input_border)
+      assert_color_slot(slots, 0xA8, agent.input_bg)
+      assert_color_slot(slots, 0xA9, agent.input_placeholder)
+      assert_color_slot(slots, 0xAA, agent.text_fg)
+      assert_color_slot(slots, 0xAB, agent.tool_border)
+      assert_color_slot(slots, 0xAC, agent.tool_header)
+      assert_color_slot(slots, 0xAD, agent.code_bg)
+      assert_color_slot(slots, 0xAE, agent.code_border)
+    end
+
+    test "agent chat slots encode correct RGB values for doom_one input_border" do
+      # Acceptance criteria: Doom One input_border should be 0x51AFEF (blue)
+      theme = Minga.UI.Theme.get!(:doom_one)
+      encoded = ProtocolGUI.encode_gui_theme(theme)
+      <<0x74, count::8, rest::binary>> = encoded
+      slots = parse_theme_slots(rest, count)
+
+      # input_border slot (0xA7) should be {0x51, 0xAF, 0xEF}
+      assert Map.get(slots, 0xA7) == {0x51, 0xAF, 0xEF}
+    end
+
+    test "agent chat slots are present for all built-in themes" do
+      agent_slot_ids = Enum.to_list(0xA0..0xAE)
+
+      for theme_name <- Minga.UI.Theme.available() do
+        theme = Minga.UI.Theme.get!(theme_name)
+        encoded = ProtocolGUI.encode_gui_theme(theme)
+        <<0x74, count::8, rest::binary>> = encoded
+        slots = parse_theme_slots(rest, count)
+
+        for slot_id <- agent_slot_ids do
+          assert Map.has_key?(slots, slot_id),
+                 "Theme #{theme_name} missing agent slot 0x#{Integer.to_string(slot_id, 16)}"
+        end
+      end
     end
 
     @tag :tmp_dir
@@ -1356,5 +1412,29 @@ defmodule Minga.Frontend.ProtocolTest do
                "Expected sign_type byte #{expected_byte} in encoded binary"
       end
     end
+  end
+
+  # ── Theme slot test helpers ──
+
+  defp parse_theme_slots(binary, count) do
+    parse_theme_slots(binary, count, %{})
+  end
+
+  defp parse_theme_slots(_rest, 0, acc), do: acc
+
+  defp parse_theme_slots(<<slot::8, r::8, g::8, b::8, rest::binary>>, remaining, acc) do
+    parse_theme_slots(rest, remaining - 1, Map.put(acc, slot, {r, g, b}))
+  end
+
+  defp assert_color_slot(slots, slot_id, expected_rgb) do
+    expected_r = Bitwise.bsr(Bitwise.band(expected_rgb, 0xFF0000), 16)
+    expected_g = Bitwise.bsr(Bitwise.band(expected_rgb, 0x00FF00), 8)
+    expected_b = Bitwise.band(expected_rgb, 0x0000FF)
+
+    assert Map.has_key?(slots, slot_id),
+           "Missing slot 0x#{Integer.to_string(slot_id, 16)}"
+
+    assert Map.get(slots, slot_id) == {expected_r, expected_g, expected_b},
+           "Slot 0x#{Integer.to_string(slot_id, 16)}: expected #{inspect({expected_r, expected_g, expected_b})}, got #{inspect(Map.get(slots, slot_id))}"
   end
 end
