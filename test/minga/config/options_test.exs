@@ -80,7 +80,6 @@ defmodule Minga.Config.OptionsTest do
                agent_mention_max_file_size: 262_144,
                agent_notify_debounce: 5_000,
                agent_diagnostic_feedback: true,
-               agent_flush_before_shell: true,
                agent_api_base_url: "",
                agent_api_endpoints: nil,
                confirm_quit: true,
