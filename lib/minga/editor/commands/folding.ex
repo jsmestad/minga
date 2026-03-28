@@ -12,7 +12,7 @@ defmodule Minga.Editor.Commands.Folding do
   alias Minga.Buffer
   alias Minga.Core.Decorations
   alias Minga.Editor.FoldMap
-  alias Minga.Editor.FoldRange
+  alias Minga.Editing.Fold.Range, as: FoldRange
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Window
 

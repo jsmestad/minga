@@ -37,6 +37,53 @@ defmodule Minga.Buffer do
   @spec pid_for_path(String.t()) :: {:ok, pid()} | :not_found
   defdelegate pid_for_path(path), to: Server
 
+  @doc """
+  Returns the pid for a buffer at `path`, starting one if it doesn't exist.
+
+  If a buffer is already registered for `path`, returns its pid immediately.
+  Otherwise, starts a new buffer under `Minga.Buffer.Supervisor` and
+  broadcasts a `:buffer_opened` event so the Editor and other subscribers
+  can pick it up.
+
+  Used by agent tools to guarantee every edited file has a buffer with
+  undo integration, without depending on the Editor (Layer 2).
+  """
+  @spec ensure_for_path(String.t()) :: {:ok, pid()} | {:error, term()}
+  def ensure_for_path(path) when is_binary(path) do
+    abs_path = Path.expand(path)
+
+    case pid_for_path(abs_path) do
+      {:ok, pid} ->
+        {:ok, pid}
+
+      :not_found ->
+        if File.exists?(abs_path) do
+          start_buffer_for_path(abs_path)
+        else
+          {:error, :enoent}
+        end
+    end
+  end
+
+  @spec start_buffer_for_path(String.t()) :: {:ok, pid()} | {:error, term()}
+  defp start_buffer_for_path(abs_path) do
+    case DynamicSupervisor.start_child(
+           Minga.Buffer.Supervisor,
+           {__MODULE__, file_path: abs_path}
+         ) do
+      {:ok, pid} ->
+        Minga.Events.broadcast(:buffer_opened, %Minga.Events.BufferEvent{
+          buffer: pid,
+          path: abs_path
+        })
+
+        {:ok, pid}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
   # ── Content ────────────────────────────────────────────────────────
 
   @doc "Full text content of the buffer."

@@ -9,7 +9,6 @@ defmodule Minga.Agent.Tools.WriteFile do
   """
 
   alias Minga.Buffer
-  alias Minga.Editor
 
   @doc """
   Writes `content` to the file at `path`.
@@ -55,10 +54,10 @@ defmodule Minga.Agent.Tools.WriteFile do
   end
 
   # Opens a buffer for a file that was just written to disk.
-  # Best-effort: if the Editor isn't running, the file still exists on disk.
+  # Best-effort: if the supervisor isn't running, the file still exists on disk.
   @spec open_buffer_for_written_file(String.t()) :: :ok
   defp open_buffer_for_written_file(path) do
-    Editor.ensure_buffer_for_path(path)
+    Buffer.ensure_for_path(path)
     :ok
   catch
     :exit, _ -> :ok

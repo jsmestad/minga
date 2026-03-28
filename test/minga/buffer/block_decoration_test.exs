@@ -5,7 +5,7 @@ defmodule Minga.Buffer.BlockDecorationTest do
   alias Minga.Core.Decorations.BlockDecoration
   alias Minga.Editor.DisplayMap
   alias Minga.Editor.FoldMap
-  alias Minga.Editor.FoldRange
+  alias Minga.Editing.Fold.Range, as: FoldRange
 
   # ── CRUD ─────────────────────────────────────────────────────────────────
 

@@ -3,7 +3,7 @@ defmodule Minga.Editor.FoldMap.VisibleLinesTest do
 
   alias Minga.Editor.FoldMap
   alias Minga.Editor.FoldMap.VisibleLines
-  alias Minga.Editor.FoldRange
+  alias Minga.Editing.Fold.Range, as: FoldRange
 
   describe "compute/4" do
     test "returns nil when fold map is empty" do

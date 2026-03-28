@@ -2,6 +2,7 @@ defmodule Minga.Agent.Tools.MultiEditFileTest do
   use ExUnit.Case, async: true
 
   alias Minga.Agent.Tools.MultiEditFile
+  alias Minga.Buffer
   alias Minga.Buffer.Server, as: BufferServer
 
   @moduletag :tmp_dir
@@ -25,7 +26,7 @@ defmodule Minga.Agent.Tools.MultiEditFileTest do
       assert {:ok, result} = MultiEditFile.execute(path, edits)
       assert result =~ "2/2 edits applied"
 
-      content = File.read!(path)
+      content = buffer_content(path)
       assert content =~ ":universe"
       assert content =~ ":mars"
     end
@@ -50,7 +51,7 @@ defmodule Minga.Agent.Tools.MultiEditFileTest do
       assert result =~ "1 failed"
       assert result =~ "old_text not found"
 
-      content = File.read!(path)
+      content = buffer_content(path)
       assert content =~ "LINE ONE"
       assert content =~ "line two"
       assert content =~ "LINE THREE"
@@ -110,12 +111,11 @@ defmodule Minga.Agent.Tools.MultiEditFileTest do
       assert {:ok, result} = MultiEditFile.execute(path, edits)
       assert result =~ "1/2 edits applied"
 
-      content = File.read!(path)
       # "foo" was replaced with "bar", but "bar" is now ambiguous
-      assert content == "bar bar baz"
+      assert buffer_content(path) == "bar bar baz"
     end
 
-    test "does not write file when all edits fail", %{tmp_dir: dir} do
+    test "does not modify buffer content when all edits fail", %{tmp_dir: dir} do
       path = Path.join(dir, "test.txt")
       File.write!(path, "original content")
 
@@ -125,8 +125,8 @@ defmodule Minga.Agent.Tools.MultiEditFileTest do
 
       assert {:ok, _} = MultiEditFile.execute(path, edits)
 
-      # File should not have been rewritten
-      assert File.read!(path) == "original content"
+      # Buffer content should be unchanged (the failed edit was a no-op)
+      assert buffer_content(path) == "original content"
     end
   end
 
@@ -156,13 +156,23 @@ defmodule Minga.Agent.Tools.MultiEditFileTest do
       assert BufferServer.content(pid) == "aaa bbb ccc"
     end
 
-    test "falls back to filesystem when no buffer is open", %{tmp_dir: dir} do
+    test "ensure_for_path creates buffer when none exists", %{tmp_dir: dir} do
       path = Path.join(dir, "no_buffer.ex")
       File.write!(path, "aaa bbb")
 
       edits = [%{"old_text" => "aaa", "new_text" => "AAA"}]
       assert {:ok, _} = MultiEditFile.execute(path, edits)
-      assert File.read!(path) == "AAA bbb"
+
+      # Buffer was created by ensure_for_path; edit went through buffer
+      {:ok, pid} = Buffer.pid_for_path(Path.expand(path))
+      assert BufferServer.content(pid) == "AAA bbb"
+      assert BufferServer.dirty?(pid)
     end
+  end
+
+  # Helper to read content from the buffer that ensure_for_path created.
+  defp buffer_content(path) do
+    {:ok, pid} = Buffer.pid_for_path(Path.expand(path))
+    BufferServer.content(pid)
   end
 end

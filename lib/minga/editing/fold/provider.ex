@@ -13,7 +13,7 @@ defmodule Minga.Editing.Fold.Provider do
   to find the appropriate provider.
   """
 
-  alias Minga.Editor.FoldRange
+  alias Minga.Editing.Fold.Range, as: FoldRange
 
   @doc """
   Returns the list of filetypes this provider handles.

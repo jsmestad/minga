@@ -208,7 +208,7 @@ defmodule Minga.API do
   logic (e.g., org-mode heading ranges). The editor will preserve any
   existing folds that match the new ranges.
   """
-  @spec set_fold_ranges([Minga.Editor.FoldRange.t()], editor()) :: :ok
+  @spec set_fold_ranges([Minga.Editing.Fold.Range.t()], editor()) :: :ok
   def set_fold_ranges(ranges, editor \\ @default_editor) when is_list(ranges) do
     GenServer.call(editor, {:api_set_fold_ranges, ranges})
   end

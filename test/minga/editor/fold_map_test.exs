@@ -3,7 +3,7 @@ defmodule Minga.Editor.FoldMapTest do
   use ExUnitProperties
 
   alias Minga.Editor.FoldMap
-  alias Minga.Editor.FoldRange
+  alias Minga.Editing.Fold.Range, as: FoldRange
 
   # ── Generators ─────────────────────────────────────────────────────────────
 

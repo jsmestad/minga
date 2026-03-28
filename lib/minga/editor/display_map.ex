@@ -29,7 +29,7 @@ defmodule Minga.Editor.DisplayMap do
   alias Minga.Core.Decorations.FoldRegion
   alias Minga.Core.Decorations.VirtualText
   alias Minga.Editor.FoldMap
-  alias Minga.Editor.FoldRange
+  alias Minga.Editing.Fold.Range, as: FoldRange
 
   @typedoc """
   What to render at a display row.

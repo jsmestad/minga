@@ -2,6 +2,7 @@ defmodule Minga.Agent.Tools.EditFileTest do
   use ExUnit.Case, async: true
 
   alias Minga.Agent.Tools.EditFile
+  alias Minga.Buffer
   alias Minga.Buffer.Server, as: BufferServer
 
   @moduletag :tmp_dir
@@ -12,7 +13,7 @@ defmodule Minga.Agent.Tools.EditFileTest do
       File.write!(path, "defmodule Foo do\n  def hello, do: :world\nend\n")
 
       assert {:ok, _} = EditFile.execute(path, "def hello, do: :world", "def hello, do: :earth")
-      assert File.read!(path) == "defmodule Foo do\n  def hello, do: :earth\nend\n"
+      assert buffer_content(path) == "defmodule Foo do\n  def hello, do: :earth\nend\n"
     end
 
     test "returns error when old_text is not found", %{tmp_dir: dir} do
@@ -41,7 +42,7 @@ defmodule Minga.Agent.Tools.EditFileTest do
       File.write!(path, "line1\nline2\nline3\n")
 
       assert {:ok, _} = EditFile.execute(path, "line1\nline2", "replaced1\nreplaced2")
-      assert File.read!(path) == "replaced1\nreplaced2\nline3\n"
+      assert buffer_content(path) == "replaced1\nreplaced2\nline3\n"
     end
 
     test "preserves whitespace-sensitive content", %{tmp_dir: dir} do
@@ -50,7 +51,7 @@ defmodule Minga.Agent.Tools.EditFileTest do
       File.write!(path, content)
 
       assert {:ok, _} = EditFile.execute(path, "        pass", "        return 42")
-      assert File.read!(path) == "def foo():\n    if True:\n        return 42\n"
+      assert buffer_content(path) == "def foo():\n    if True:\n        return 42\n"
     end
   end
 
@@ -83,26 +84,36 @@ defmodule Minga.Agent.Tools.EditFileTest do
     end
 
     test "return value contract is identical for both paths", %{tmp_dir: dir} do
-      # Filesystem path
-      fs_path = Path.join(dir, "fs.ex")
-      File.write!(fs_path, "hello world")
-      assert {:ok, fs_msg} = EditFile.execute(fs_path, "hello", "goodbye")
-      assert is_binary(fs_msg)
+      # Buffer path (ensure_for_path creates a buffer)
+      path1 = Path.join(dir, "first.ex")
+      File.write!(path1, "hello world")
+      assert {:ok, msg1} = EditFile.execute(path1, "hello", "goodbye")
+      assert is_binary(msg1)
 
-      # Buffer path
-      buf_path = Path.join(dir, "buf.ex")
-      File.write!(buf_path, "hello world")
-      _pid = start_supervised!({BufferServer, file_path: buf_path})
-      assert {:ok, buf_msg} = EditFile.execute(buf_path, "hello", "goodbye")
-      assert is_binary(buf_msg)
+      # Pre-opened buffer path
+      path2 = Path.join(dir, "second.ex")
+      File.write!(path2, "hello world")
+      _pid = start_supervised!({BufferServer, file_path: path2})
+      assert {:ok, msg2} = EditFile.execute(path2, "hello", "goodbye")
+      assert is_binary(msg2)
     end
 
-    test "falls back to filesystem when no buffer is open", %{tmp_dir: dir} do
+    test "ensure_for_path creates buffer when none exists", %{tmp_dir: dir} do
       path = Path.join(dir, "no_buffer.ex")
       File.write!(path, "hello world")
 
       assert {:ok, _} = EditFile.execute(path, "hello", "goodbye")
-      assert File.read!(path) == "goodbye world"
+
+      # Buffer was created by ensure_for_path; edit went through buffer
+      {:ok, pid} = Buffer.pid_for_path(Path.expand(path))
+      assert BufferServer.content(pid) == "goodbye world"
+      assert BufferServer.dirty?(pid)
     end
+  end
+
+  # Helper to read content from the buffer that ensure_for_path created.
+  defp buffer_content(path) do
+    {:ok, pid} = Buffer.pid_for_path(Path.expand(path))
+    BufferServer.content(pid)
   end
 end

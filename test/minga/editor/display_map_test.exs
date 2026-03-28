@@ -5,7 +5,7 @@ defmodule Minga.Editor.DisplayMapTest do
   alias Minga.Core.Decorations.FoldRegion
   alias Minga.Editor.DisplayMap
   alias Minga.Editor.FoldMap
-  alias Minga.Editor.FoldRange
+  alias Minga.Editing.Fold.Range, as: FoldRange
 
   # ── No folds or decorations ──────────────────────────────────────────────
 

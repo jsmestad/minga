@@ -31,7 +31,7 @@ defmodule Minga.Editor.FoldMap do
   concern. Pure functions, stateless computation, per-window ownership.
   """
 
-  alias Minga.Editor.FoldRange
+  alias Minga.Editing.Fold.Range, as: FoldRange
 
   @enforce_keys [:folds]
   defstruct folds: []
