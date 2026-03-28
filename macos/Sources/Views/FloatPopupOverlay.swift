@@ -61,8 +61,12 @@ struct FloatPopupOverlay: View {
             }
             .frame(width: panelWidth, height: panelHeight)
             .background(
+                VibrancyBackground(material: .popover)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+            )
+            .background(
                 RoundedRectangle(cornerRadius: 8)
-                    .fill(theme.popupBg)
+                    .fill(theme.popupBg.opacity(0.5))
                     .shadow(color: .black.opacity(0.5), radius: 16, y: 4)
             )
             .overlay(
