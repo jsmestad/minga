@@ -52,6 +52,8 @@ defmodule Minga.Config.Advice do
 
   @table __MODULE__
 
+  @circuit_breaker_threshold 5
+
   @typedoc "Advice phase."
   @type phase :: :before | :after | :around | :override
 
@@ -152,9 +154,9 @@ defmodule Minga.Config.Advice do
 
       fn state ->
         state
-        |> run_chain(befores, :before, command)
+        |> run_chain(table, befores, :before, command)
         |> run_core(core, command)
-        |> run_chain(afters, :after, command)
+        |> run_chain(table, afters, :after, command)
       end
     end
   end
@@ -182,7 +184,13 @@ defmodule Minga.Config.Advice do
     Enum.any?(@valid_phases, &has_advice?(table, &1, command))
   end
 
-  @doc "Removes all registered advice."
+  @doc "Returns true if a specific advice function has been disabled by the circuit breaker."
+  @spec disabled?(atom(), phase(), atom(), function()) :: boolean()
+  def disabled?(table, phase, command, fun) do
+    cb_disabled?(table, {:cb_disabled, phase, command, fun})
+  end
+
+  @doc "Removes all registered advice and resets circuit breaker state."
   @spec reset() :: :ok
   def reset, do: reset(@table)
 
@@ -225,27 +233,108 @@ defmodule Minga.Config.Advice do
     end)
   end
 
-  @spec run_chain(map(), [state_fun()], phase(), atom()) :: map()
-  defp run_chain(state, [], _phase, _command), do: state
+  @spec run_chain(map(), atom(), [state_fun()], phase(), atom()) :: map()
+  defp run_chain(state, _table, [], _phase, _command), do: state
 
-  defp run_chain(state, funs, phase, command) do
+  defp run_chain(state, table, funs, phase, command) do
     Enum.reduce(funs, state, fn fun, acc ->
-      try do
-        fun.(acc)
-      rescue
-        e ->
-          Minga.Log.warning(:config, "Advice #{phase}:#{command} failed: #{Exception.message(e)}")
-          acc
-      catch
-        kind, reason ->
-          Minga.Log.warning(
-            :config,
-            "Advice #{phase}:#{command} crashed: #{inspect(kind)} #{inspect(reason)}"
-          )
+      cb_key = {:cb_disabled, phase, command, fun}
 
-          acc
+      if cb_disabled?(table, cb_key) do
+        acc
+      else
+        try do
+          result = fun.(acc)
+          reset_failures(table, phase, command, fun)
+          result
+        rescue
+          e ->
+            record_failure(table, phase, command, fun)
+
+            Minga.Log.warning(
+              :config,
+              "Advice #{phase}:#{command} failed: #{Exception.message(e)}"
+            )
+
+            acc
+        catch
+          kind, reason ->
+            record_failure(table, phase, command, fun)
+
+            Minga.Log.warning(
+              :config,
+              "Advice #{phase}:#{command} crashed: #{inspect(kind)} #{inspect(reason)}"
+            )
+
+            acc
+        end
       end
     end)
+  end
+
+  @spec cb_disabled?(atom(), tuple()) :: boolean()
+  defp cb_disabled?(table, cb_key) do
+    case :ets.lookup(table, cb_key) do
+      [{_, true}] -> true
+      _ -> false
+    end
+  end
+
+  @spec record_failure(atom(), phase(), atom(), function()) :: :ok
+  defp record_failure(table, phase, command, fun) do
+    failures_key = {:cb_failures, phase, command, fun}
+
+    count =
+      case :ets.lookup(table, failures_key) do
+        [{_, n}] -> n + 1
+        [] -> 1
+      end
+
+    :ets.insert(table, {failures_key, count})
+
+    if count >= @circuit_breaker_threshold do
+      :ets.insert(table, {{:cb_disabled, phase, command, fun}, true})
+      source = identify_source(fun)
+
+      Minga.Log.warning(
+        :config,
+        "Advice #{phase}:#{command} disabled after #{count} consecutive failures#{source}"
+      )
+    end
+
+    :ok
+  end
+
+  @spec reset_failures(atom(), phase(), atom(), function()) :: :ok
+  defp reset_failures(table, phase, command, fun) do
+    failures_key = {:cb_failures, phase, command, fun}
+
+    case :ets.lookup(table, failures_key) do
+      [{_, _}] -> :ets.delete(table, failures_key)
+      [] -> :ok
+    end
+
+    :ok
+  end
+
+  @spec identify_source(function()) :: String.t()
+  defp identify_source(fun) do
+    case Function.info(fun, :module) do
+      {:module, :erl_eval} -> ""
+      {:module, mod} -> source_label(inspect(mod))
+      _ -> ""
+    end
+  end
+
+  @spec source_label(String.t()) :: String.t()
+  defp source_label(""), do: ""
+
+  defp source_label(mod_str) do
+    if String.contains?(mod_str, "minga_org") do
+      " (source: minga_org)"
+    else
+      " (source: #{mod_str})"
+    end
   end
 
   @spec run_core(map(), (map() -> map()), atom()) :: map()
