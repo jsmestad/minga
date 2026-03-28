@@ -294,18 +294,40 @@ defmodule Minga.Editor.State do
   end
 
   @doc """
+  Pure variant of `remove_dead_buffer/2`. Returns `{state, effects}` instead
+  of performing side effects directly.
+
+  Removes the pid from the buffer list, clears it from special buffer slots,
+  switches to another buffer if the active one died, and cleans up the
+  monitor ref. This function is already pure (no process calls), so the
+  effects list is always empty.
+  """
+  @spec close_buffer_pure(t(), pid()) :: {t(), [Minga.Editor.effect()]}
+  def close_buffer_pure(%__MODULE__{} = state, pid) do
+    {do_remove_dead_buffer(state, pid), []}
+  end
+
+  @doc """
   Removes a dead buffer pid from all state locations.
 
   Called from the Editor's `:DOWN` handler. Removes the pid from the buffer
   list, clears it from special buffer slots (messages, warnings, help), and
   switches to another buffer if the active one died. Also cleans up the
   monitor ref.
+
+  Thin wrapper around `close_buffer_pure/2` that applies effects inline.
   """
   @spec remove_dead_buffer(t(), pid()) :: t()
-  def remove_dead_buffer(
-        %__MODULE__{workspace: %{buffers: %Buffers{} = bs}, buffer_monitors: monitors} = state,
-        pid
-      ) do
+  def remove_dead_buffer(%__MODULE__{} = state, pid) do
+    {state, effects} = close_buffer_pure(state, pid)
+    apply_buffer_effects(state, effects)
+  end
+
+  @spec do_remove_dead_buffer(t(), pid()) :: t()
+  defp do_remove_dead_buffer(
+         %__MODULE__{workspace: %{buffers: %Buffers{} = bs}, buffer_monitors: monitors} = state,
+         pid
+       ) do
     # Clean up monitor ref
     monitors = Map.delete(monitors, pid)
 
@@ -577,17 +599,19 @@ defmodule Minga.Editor.State do
   end
 
   @doc """
-  Adds a new buffer and makes it the active buffer for the current window.
+  Pure variant of `add_buffer/2`. Returns `{state, effects}` instead of
+  performing side effects directly.
 
-  When the active tab is a file tab, the buffer replaces the current
-  tab's buffer in-place (like Vim `:e`). When the active tab is an
-  agent tab, a new file tab is created and switched to. This matches
-  the expected workflow: opening files from the tree or picker reuses
-  the current file tab; opening from the agent UI view creates a
-  dedicated file tab.
+  The returned effects list may include:
+  - `{:monitor, pid}` — monitor the new buffer process
+  - Effects from `switch_tab_pure/2` when switching to an existing tab
+
+  All state transformations (tab lookup, snapshot/restore, buffer pool update)
+  are applied to the returned state. The caller is responsible for applying
+  the effects.
   """
-  @spec add_buffer(t(), pid()) :: t()
-  def add_buffer(
+  @spec add_buffer_pure(t(), pid()) :: {t(), [Minga.Editor.effect()]}
+  def add_buffer_pure(
         %__MODULE__{workspace: %{buffers: bs}, shell_state: %{tab_bar: %TabBar{} = tb}} = state,
         pid
       ) do
@@ -600,29 +624,53 @@ defmodule Minga.Editor.State do
 
     # Add the buffer to the pool (Buffers.add auto-activates it)
     state = put_in(state.workspace.buffers, Buffers.add(bs, pid))
-    state = monitor_buffer(state, pid)
+    effects = [{:monitor, pid}]
 
     # Check if a tab for this buffer already exists (by label match).
     # If so, switch to it. Otherwise, create a new tab.
     case find_tab_for_buffer(tb, pid, label) do
       %Tab{id: tab_id} ->
-        switch_tab(state, tab_id)
+        {state, switch_effects} = switch_tab_pure(state, tab_id)
+        {state, effects ++ switch_effects}
 
       nil ->
-        case active_tab.kind do
-          :agent ->
-            add_buffer_as_new_tab(state, label)
+        state =
+          case active_tab.kind do
+            :agent ->
+              add_buffer_as_new_tab(state, label)
 
-          :file ->
-            add_buffer_as_new_file_tab(state, label)
-        end
+            :file ->
+              add_buffer_as_new_file_tab(state, label)
+          end
+
+        {state, effects}
     end
   end
 
-  def add_buffer(%__MODULE__{workspace: %{buffers: bs} = wspace} = state, pid) do
-    %{state | workspace: %{wspace | buffers: Buffers.add(bs, pid)}}
-    |> monitor_buffer(pid)
-    |> sync_active_window_buffer()
+  def add_buffer_pure(%__MODULE__{workspace: %{buffers: bs} = wspace} = state, pid) do
+    state =
+      %{state | workspace: %{wspace | buffers: Buffers.add(bs, pid)}}
+      |> sync_active_window_buffer()
+
+    {state, [{:monitor, pid}]}
+  end
+
+  @doc """
+  Adds a new buffer and makes it the active buffer for the current window.
+
+  When the active tab is a file tab, the buffer replaces the current
+  tab's buffer in-place (like Vim `:e`). When the active tab is an
+  agent tab, a new file tab is created and switched to. This matches
+  the expected workflow: opening files from the tree or picker reuses
+  the current file tab; opening from the agent UI view creates a
+  dedicated file tab.
+
+  Thin wrapper around `add_buffer_pure/2` that applies effects inline.
+  """
+  @spec add_buffer(t(), pid()) :: t()
+  def add_buffer(%__MODULE__{} = state, pid) do
+    {state, effects} = add_buffer_pure(state, pid)
+    apply_buffer_effects(state, effects)
   end
 
   # Creates a new file tab from a file tab context. Snapshots the current
@@ -1153,29 +1201,31 @@ defmodule Minga.Editor.State do
   defp maybe_migrate_vim_fields(context), do: context
 
   @doc """
-  Switches to the tab with `target_id`.
+  Pure variant of `switch_tab/2`. Returns `{state, effects}` instead of
+  performing side effects directly.
 
-  Snapshots the current tab's context, stores it, updates the tab bar's
-  active pointer, and restores the target tab's saved context into the
-  live editor state. Invalidates layout and window caches since the
-  entire visual context changes.
+  Snapshots the current tab's context, updates the tab bar pointer,
+  restores the target tab's context, invalidates layout. Side effects
+  (spinner stop/start, agent session rebuild) are returned as effects.
+
+  The returned effects list may include:
+  - `:stop_spinner` — cancel the outgoing agent's spinner timer
+  - `{:rebuild_agent_session, tab}` — rebuild agent state from session process
+  - `:start_spinner` — conditionally restart spinner for incoming agent
   """
-  @spec switch_tab(t(), Tab.id()) :: t()
-  def switch_tab(%__MODULE__{shell_state: %{tab_bar: nil}} = state, _target_id), do: state
+  @spec switch_tab_pure(t(), Tab.id()) :: {t(), [Minga.Editor.effect()]}
+  def switch_tab_pure(%__MODULE__{shell_state: %{tab_bar: nil}} = state, _target_id),
+    do: {state, []}
 
-  def switch_tab(%__MODULE__{shell_state: %{tab_bar: tb}} = state, target_id) do
+  def switch_tab_pure(%__MODULE__{shell_state: %{tab_bar: tb}} = state, target_id) do
     current_id = tb.active_id
 
     if current_id == target_id do
-      state
+      {state, []}
     else
       log_switch_tab(tb, current_id, target_id)
 
-      # Stop the outgoing agent's spinner timer so it doesn't leak.
-      # The timer ref is in state.agent (the live field) before snapshot.
-      state = stop_outgoing_spinner(state)
-
-      # Snapshot current tab
+      # Snapshot current tab (spinner stop is deferred as effect)
       context = snapshot_tab_context_no_sync(state)
       tb = TabBar.update_context(tb, current_id, context)
 
@@ -1188,11 +1238,6 @@ defmodule Minga.Editor.State do
 
       state = restore_tab_context(state, target.context)
 
-      # If switching to an agent tab, rebuild agent state from the
-      # Session process (the source of truth for status, pending
-      # approval, and error).
-      state = rebuild_agent_from_session(state, target)
-
       # Clear attention flag on the tab we're switching to.
       state =
         set_tab_bar(
@@ -1200,15 +1245,34 @@ defmodule Minga.Editor.State do
           TabBar.update_tab(tab_bar(state), target_id, &Tab.set_attention(&1, false))
         )
 
-      # Restart spinner for incoming agent if it's busy.
-      state = maybe_restart_incoming_spinner(state)
-
       log_switch_tab_result(state)
 
-      state
-      |> invalidate_all_windows()
-      |> Map.put(:layout, nil)
+      state =
+        state
+        |> invalidate_all_windows()
+        |> Map.put(:layout, nil)
+
+      # Collect side effects: stop outgoing spinner, rebuild session, maybe restart spinner
+      effects = [:stop_spinner, {:rebuild_agent_session, target}, :start_spinner]
+
+      {state, effects}
     end
+  end
+
+  @doc """
+  Switches to the tab with `target_id`.
+
+  Snapshots the current tab's context, stores it, updates the tab bar's
+  active pointer, and restores the target tab's saved context into the
+  live editor state. Invalidates layout and window caches since the
+  entire visual context changes.
+
+  Thin wrapper around `switch_tab_pure/2` that applies effects inline.
+  """
+  @spec switch_tab(t(), Tab.id()) :: t()
+  def switch_tab(%__MODULE__{} = state, target_id) do
+    {state, effects} = switch_tab_pure(state, target_id)
+    apply_buffer_effects(state, effects)
   end
 
   @spec active_tab(t()) :: Tab.t() | nil
@@ -1271,13 +1335,15 @@ defmodule Minga.Editor.State do
     }
   end
 
-  # Rebuilds state.agent from the Session process when switching to an
-  # agent tab. The Session is the source of truth for status, pending
-  # approval, and error. The editor's agent field is a rendering cache,
-  # not a source of truth.
+  @doc """
+  Rebuilds state.agent from the Session process when switching to an
+  agent tab. The Session is the source of truth for status, pending
+  approval, and error. The editor's agent field is a rendering cache,
+  not a source of truth.
+  """
   @spec rebuild_agent_from_session(t(), Tab.t()) :: t()
-  defp rebuild_agent_from_session(state, %Tab{kind: :agent, session: session_pid})
-       when is_pid(session_pid) do
+  def rebuild_agent_from_session(state, %Tab{kind: :agent, session: session_pid})
+      when is_pid(session_pid) do
     snapshot =
       try do
         AgentSession.editor_snapshot(session_pid)
@@ -1302,7 +1368,7 @@ defmodule Minga.Editor.State do
     end
   end
 
-  defp rebuild_agent_from_session(state, _tab), do: state
+  def rebuild_agent_from_session(state, _tab), do: state
 
   # ── Mode transitions ────────────────────────────────────────────────────────
 
@@ -1339,4 +1405,32 @@ defmodule Minga.Editor.State do
   def skip_tool_prompt?(%__MODULE__{shell_state: ss}, tool_name) do
     ShellState.skip_tool_prompt?(ss, tool_name)
   end
+
+  # ── Buffer lifecycle effect application ──────────────────────────────────────
+  #
+  # Applies effects returned by `add_buffer_pure/2`, `switch_tab_pure/2`, and
+  # `close_buffer_pure/2`. These thin wrappers live here (not in Editor) to
+  # avoid a circular dependency. Only handles the effect types produced by
+  # buffer lifecycle operations.
+
+  @spec apply_buffer_effects(t(), [Minga.Editor.effect()]) :: t()
+  defp apply_buffer_effects(state, []), do: state
+
+  defp apply_buffer_effects(state, [effect | rest]) do
+    state = apply_buffer_effect(state, effect)
+    apply_buffer_effects(state, rest)
+  end
+
+  @spec apply_buffer_effect(t(), Minga.Editor.effect()) :: t()
+  defp apply_buffer_effect(state, {:monitor, pid}) when is_pid(pid),
+    do: monitor_buffer(state, pid)
+
+  defp apply_buffer_effect(state, :stop_spinner),
+    do: stop_outgoing_spinner(state)
+
+  defp apply_buffer_effect(state, :start_spinner),
+    do: maybe_restart_incoming_spinner(state)
+
+  defp apply_buffer_effect(state, {:rebuild_agent_session, tab}),
+    do: rebuild_agent_from_session(state, tab)
 end
