@@ -11,7 +11,9 @@ defmodule Minga.Editor.Commands.Visual do
   alias Minga.Editor.Commands.Helpers
   alias Minga.Editor.HighlightSync
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.VimState
   alias Minga.Mode
+  alias Minga.Workspace.State, as: WorkspaceState
   alias Minga.Mode.VisualState
 
   @type state :: EditorState.t()
@@ -125,7 +127,11 @@ defmodule Minga.Editor.Commands.Visual do
         # Update visual anchor to start of text object, move cursor to end
         new_ms = %{ms | visual_anchor: start_pos}
         Buffer.move_to(buf, end_pos)
-        %{state | workspace: %{state.workspace | editing: %{vim | mode_state: new_ms}}}
+
+        EditorState.update_workspace(
+          state,
+          &WorkspaceState.set_editing(&1, VimState.set_mode_state(vim, new_ms))
+        )
     end
   end
 

@@ -11,6 +11,7 @@ defmodule Minga.Editor.Commands.FileTree do
   alias Minga.Editor.Layout
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.FileTree, as: FileTreeState
+  alias Minga.Workspace.State, as: WorkspaceState
   alias Minga.Project.FileTree
   alias Minga.Project.FileTree.BufferSync
 
@@ -23,27 +24,25 @@ defmodule Minga.Editor.Commands.FileTree do
   def toggle(%{workspace: %{file_tree: %{buffer: buf}}} = state) when is_pid(buf) do
     GenServer.stop(buf, :normal)
 
-    %{
-      state
-      | workspace: %{
-          state.workspace
-          | file_tree: FileTreeState.close(state.workspace.file_tree),
-            keymap_scope: restore_scope(state)
-        }
-    }
+    scope = restore_scope(state)
+
+    EditorState.update_workspace(state, fn ws ->
+      ws
+      |> Map.put(:file_tree, FileTreeState.close(ws.file_tree))
+      |> WorkspaceState.set_keymap_scope(scope)
+    end)
     |> Layout.invalidate()
     |> EditorState.invalidate_all_windows()
   end
 
   def toggle(state) do
-    %{
-      state
-      | workspace: %{
-          state.workspace
-          | file_tree: FileTreeState.close(state.workspace.file_tree),
-            keymap_scope: restore_scope(state)
-        }
-    }
+    scope = restore_scope(state)
+
+    EditorState.update_workspace(state, fn ws ->
+      ws
+      |> Map.put(:file_tree, FileTreeState.close(ws.file_tree))
+      |> WorkspaceState.set_keymap_scope(scope)
+    end)
     |> Layout.invalidate()
     |> EditorState.invalidate_all_windows()
   end
@@ -64,7 +63,7 @@ defmodule Minga.Editor.Commands.FileTree do
         state = put_in(state.workspace.file_tree.focused, false)
         # Opening a file buffer always uses :editor scope (not restore_scope)
         # because the new buffer becomes the active window content.
-        state = %{state | workspace: %{state.workspace | keymap_scope: :editor}}
+        state = EditorState.update_workspace(state, &WorkspaceState.set_keymap_scope(&1, :editor))
         open_file_from_tree(state, path, tree)
 
       nil ->
@@ -164,7 +163,7 @@ defmodule Minga.Editor.Commands.FileTree do
         state = sync_and_update(state, tree)
         state = put_in(state.workspace.file_tree.focused, true)
 
-        %{state | workspace: %{state.workspace | keymap_scope: :file_tree}}
+        EditorState.update_workspace(state, &WorkspaceState.set_keymap_scope(&1, :file_tree))
         |> Layout.invalidate()
         |> EditorState.invalidate_all_windows()
     end
@@ -182,25 +181,24 @@ defmodule Minga.Editor.Commands.FileTree do
   def close(%{workspace: %{file_tree: %{buffer: buf}}} = state) when is_pid(buf) do
     GenServer.stop(buf, :normal)
 
-    %{
-      state
-      | workspace: %{
-          state.workspace
-          | file_tree: FileTreeState.close(state.workspace.file_tree),
-            keymap_scope: restore_scope(state)
-        }
-    }
+    scope = restore_scope(state)
+
+    EditorState.update_workspace(state, fn ws ->
+      ws
+      |> Map.put(:file_tree, FileTreeState.close(ws.file_tree))
+      |> WorkspaceState.set_keymap_scope(scope)
+    end)
   end
 
-  def close(state),
-    do: %{
-      state
-      | workspace: %{
-          state.workspace
-          | file_tree: FileTreeState.close(state.workspace.file_tree),
-            keymap_scope: restore_scope(state)
-        }
-    }
+  def close(state) do
+    scope = restore_scope(state)
+
+    EditorState.update_workspace(state, fn ws ->
+      ws
+      |> Map.put(:file_tree, FileTreeState.close(ws.file_tree))
+      |> WorkspaceState.set_keymap_scope(scope)
+    end)
+  end
 
   # ── Private helpers ───────────────────────────────────────────────────────
 
@@ -212,10 +210,9 @@ defmodule Minga.Editor.Commands.FileTree do
 
   defp close_git_status_if_open(state),
     do:
-      EditorState.close_git_status_panel(%{
-        state
-        | workspace: %{state.workspace | keymap_scope: :editor}
-      })
+      state
+      |> EditorState.update_workspace(&WorkspaceState.set_keymap_scope(&1, :editor))
+      |> EditorState.close_git_status_panel()
 
   # Opens a file from the tree, reusing an existing buffer when one exists
   # for the same path. Without the dedup check, the file tree creates
@@ -264,14 +261,11 @@ defmodule Minga.Editor.Commands.FileTree do
     tree = reveal_active(tree, state.workspace.buffers.active)
     buf = BufferSync.start_buffer(tree)
 
-    %{
-      state
-      | workspace: %{
-          state.workspace
-          | file_tree: FileTreeState.open(state.workspace.file_tree, tree, buf),
-            keymap_scope: :file_tree
-        }
-    }
+    EditorState.update_workspace(state, fn ws ->
+      ws
+      |> Map.put(:file_tree, FileTreeState.open(ws.file_tree, tree, buf))
+      |> WorkspaceState.set_keymap_scope(:file_tree)
+    end)
     |> Layout.invalidate()
     |> EditorState.invalidate_all_windows()
   end

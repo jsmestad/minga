@@ -34,7 +34,9 @@ defmodule Minga.Input.Interrupt do
   alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.Picker
   alias Minga.Editor.State.WhichKey
+  alias Minga.Editor.VimState
   alias Minga.Mode
+  alias Minga.Workspace.State, as: WorkspaceState
 
   # Ctrl-G sends codepoint 7 (BEL / ASCII control code for ^G).
   @ctrl_g 7
@@ -73,7 +75,7 @@ defmodule Minga.Input.Interrupt do
     do: {state, resets}
 
   defp maybe_reset_scope(%{workspace: %{keymap_scope: scope}} = state, resets) do
-    {%{state | workspace: %{state.workspace | keymap_scope: :editor}},
+    {EditorState.update_workspace(state, &WorkspaceState.set_keymap_scope(&1, :editor)),
      ["scope #{scope} → :editor" | resets]}
   end
 
@@ -87,9 +89,9 @@ defmodule Minga.Input.Interrupt do
     fresh_state = Mode.initial_state()
 
     if mode_state_dirty?(vim.mode_state, fresh_state) do
-      new_vim = %{vim | mode_state: fresh_state}
+      new_vim = VimState.set_mode_state(vim, fresh_state)
 
-      {%{state | workspace: %{state.workspace | editing: new_vim}},
+      {EditorState.update_workspace(state, &WorkspaceState.set_editing(&1, new_vim)),
        ["mode state reset (pending sequence cleared)" | resets]}
     else
       {state, resets}
@@ -133,7 +135,7 @@ defmodule Minga.Input.Interrupt do
     do: {state, resets}
 
   defp maybe_close_conflict(state, resets) do
-    {%{state | workspace: %{state.workspace | pending_conflict: nil}},
+    {EditorState.update_workspace(state, &WorkspaceState.set_pending_conflict(&1, nil)),
      ["conflict prompt dismissed" | resets]}
   end
 
@@ -142,7 +144,8 @@ defmodule Minga.Input.Interrupt do
     do: {state, resets}
 
   defp maybe_close_completion(%{workspace: %{completion: %Completion{}}} = state, resets) do
-    {%{state | workspace: %{state.workspace | completion: nil}}, ["completion closed" | resets]}
+    {EditorState.update_workspace(state, &WorkspaceState.set_completion(&1, nil)),
+     ["completion closed" | resets]}
   end
 
   @spec maybe_clear_agent_prefix(EditorState.t(), [String.t()]) :: {EditorState.t(), [String.t()]}

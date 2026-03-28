@@ -42,6 +42,7 @@ defmodule Minga.UI.Popup.Lifecycle do
   alias Minga.UI.Popup.Active, as: PopupActive
   alias Minga.UI.Popup.Registry, as: PopupRegistry
   alias Minga.UI.Popup.Rule
+  alias Minga.Workspace.State, as: WorkspaceState
 
   @type state :: EditorState.t()
 
@@ -297,21 +298,8 @@ defmodule Minga.UI.Popup.Lifecycle do
         new_map = Map.put(ws.map, next_id, popup_window)
         new_windows = %{ws | tree: new_tree, map: new_map, next_id: next_id + 1}
 
-        state = %{state | workspace: %{state.workspace | windows: new_windows}}
-
-        # Optionally switch focus to the popup
-        state =
-          if rule.focus do
-            %{
-              state
-              | workspace: %{
-                  state.workspace
-                  | windows: %{state.workspace.windows | active: next_id}
-                }
-            }
-          else
-            state
-          end
+        windows = if rule.focus, do: %{new_windows | active: next_id}, else: new_windows
+        state = EditorState.update_workspace(state, &WorkspaceState.set_windows(&1, windows))
 
         Layout.invalidate(state)
 
@@ -335,15 +323,14 @@ defmodule Minga.UI.Popup.Lifecycle do
     # Add window to map but NOT to the tree (floats overlay the layout)
     new_map = Map.put(ws.map, next_id, popup_window)
     new_windows = %{ws | map: new_map, next_id: next_id + 1}
-    state = %{state | workspace: %{state.workspace | windows: new_windows}}
+    state = EditorState.update_workspace(state, &WorkspaceState.set_windows(&1, new_windows))
 
     # Optionally switch focus to the popup
     state =
       if rule.focus do
-        %{
-          state
-          | workspace: %{state.workspace | windows: %{state.workspace.windows | active: next_id}}
-        }
+        EditorState.update_workspace(state, fn wspace ->
+          WorkspaceState.set_windows(wspace, %{wspace.windows | active: next_id})
+        end)
       else
         state
       end
@@ -366,7 +353,9 @@ defmodule Minga.UI.Popup.Lifecycle do
             find_non_popup_window(ws.map, window_id)
           end
 
-        %{state | workspace: %{state.workspace | windows: %{ws | active: restore_id}}}
+        EditorState.update_workspace(state, fn wspace ->
+          WorkspaceState.set_windows(wspace, %{wspace.windows | active: restore_id})
+        end)
       else
         state
       end
@@ -385,7 +374,7 @@ defmodule Minga.UI.Popup.Lifecycle do
     # Remove the popup window from the map
     new_map = Map.delete(ws.map, window_id)
     new_windows = %{ws | tree: new_tree, map: new_map}
-    state = %{state | workspace: %{state.workspace | windows: new_windows}}
+    state = EditorState.update_workspace(state, &WorkspaceState.set_windows(&1, new_windows))
 
     Layout.invalidate(state)
   end

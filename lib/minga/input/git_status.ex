@@ -16,6 +16,7 @@ defmodule Minga.Input.GitStatus do
   alias Minga.Input
   alias Minga.Input.GitStatus.TuiState
   alias Minga.Keymap
+  alias Minga.Workspace.State, as: WorkspaceState
 
   @impl true
   @spec handle_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
@@ -141,7 +142,7 @@ defmodule Minga.Input.GitStatus do
       abs_path = Path.join(git_root, entry.path)
 
       closed_state =
-        %{state | workspace: %{state.workspace | keymap_scope: :editor}}
+        EditorState.update_workspace(state, &WorkspaceState.set_keymap_scope(&1, :editor))
         |> EditorState.close_git_status_panel()
 
       open_file_in_editor(closed_state, abs_path)
@@ -156,7 +157,7 @@ defmodule Minga.Input.GitStatus do
   end
 
   defp execute_command(state, :git_status_close) do
-    state = %{state | workspace: %{state.workspace | keymap_scope: :editor}}
+    state = EditorState.update_workspace(state, &WorkspaceState.set_keymap_scope(&1, :editor))
     EditorState.close_git_status_panel(state)
   end
 

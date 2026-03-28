@@ -336,13 +336,14 @@ defmodule Minga.Editor.State do
         help: help
     }
 
-    state = %{state | workspace: %{state.workspace | buffers: new_bs}, buffer_monitors: monitors}
+    state = %{
+      update_workspace(state, &WorkspaceState.set_buffers(&1, new_bs))
+      | buffer_monitors: monitors
+    }
 
     # Clear agent buffer or prompt buffer if the dead pid matches
-    agent = state.shell_state.agent
-
     state =
-      if agent != nil and agent.buffer == pid do
+      if state.shell_state.agent.buffer == pid do
         AgentAccess.update_agent(state, fn a -> %{a | buffer: nil} end)
       else
         state

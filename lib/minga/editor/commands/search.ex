@@ -13,6 +13,7 @@ defmodule Minga.Editor.Commands.Search do
   alias Minga.Editor.PickerUI
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Window
+  alias Minga.Workspace.State, as: WorkspaceState
   alias Minga.Mode
   alias Minga.Mode.SearchState
   alias Minga.Project.ProjectSearch
@@ -416,10 +417,9 @@ defmodule Minga.Editor.Commands.Search do
   end
 
   defp put_in_search(state, :last_direction, value) do
-    %{
-      state
-      | workspace: %{state.workspace | search: %{state.workspace.search | last_direction: value}}
-    }
+    EditorState.update_workspace(state, fn ws ->
+      WorkspaceState.update_search(ws, fn s -> %{s | last_direction: value} end)
+    end)
   end
 
   # Replace a match at a specific line/col/length in content string.

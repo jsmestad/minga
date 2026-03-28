@@ -33,6 +33,7 @@ defmodule Minga.Editor.LspActions do
   alias Minga.Editor.State.LSP, as: LSPState
   alias Minga.Editor.VimState
   alias Minga.Log
+  alias Minga.Workspace.State, as: WorkspaceState
   alias Minga.LSP.Client
   alias Minga.LSP.DocumentHighlight
   alias Minga.LSP.SyncServer
@@ -461,9 +462,8 @@ defmodule Minga.Editor.LspActions do
     vim = VimState.transition(state.workspace.editing, :normal)
 
     %{
-      state
-      | workspace: %{state.workspace | editing: vim},
-        lsp: LSPState.clear_selection_ranges(state.lsp)
+      EditorState.update_workspace(state, &WorkspaceState.set_editing(&1, vim))
+      | lsp: LSPState.clear_selection_ranges(state.lsp)
     }
   end
 
@@ -786,20 +786,20 @@ defmodule Minga.Editor.LspActions do
   """
   @spec handle_document_highlight_response(state(), {:ok, term()} | {:error, term()}) :: state()
   def handle_document_highlight_response(state, {:error, _error}) do
-    %{state | workspace: %{state.workspace | document_highlights: nil}}
+    EditorState.update_workspace(state, &WorkspaceState.set_document_highlights(&1, nil))
   end
 
   def handle_document_highlight_response(state, {:ok, nil}) do
-    %{state | workspace: %{state.workspace | document_highlights: nil}}
+    EditorState.update_workspace(state, &WorkspaceState.set_document_highlights(&1, nil))
   end
 
   def handle_document_highlight_response(state, {:ok, []}) do
-    %{state | workspace: %{state.workspace | document_highlights: nil}}
+    EditorState.update_workspace(state, &WorkspaceState.set_document_highlights(&1, nil))
   end
 
   def handle_document_highlight_response(state, {:ok, highlights}) when is_list(highlights) do
     parsed = Enum.map(highlights, &DocumentHighlight.from_lsp/1)
-    %{state | workspace: %{state.workspace | document_highlights: parsed}}
+    EditorState.update_workspace(state, &WorkspaceState.set_document_highlights(&1, parsed))
   end
 
   # ── Code action response ──────────────────────────────────────────────────
@@ -853,7 +853,7 @@ defmodule Minga.Editor.LspActions do
     # The ex-command parser handles "rename <new_name>" → {:rename, new_name}
     command_state = %CommandState{input: "rename #{placeholder}"}
     vim = VimState.transition(state.workspace.editing, :command, command_state)
-    %{state | workspace: %{state.workspace | editing: vim}}
+    EditorState.update_workspace(state, &WorkspaceState.set_editing(&1, vim))
   end
 
   @doc """
@@ -1414,10 +1414,9 @@ defmodule Minga.Editor.LspActions do
   defp set_jump_mark(%{workspace: %{buffers: %{active: buf}}} = state) when is_pid(buf) do
     pos = Buffer.cursor(buf)
 
-    %{
-      state
-      | workspace: %{state.workspace | editing: %{state.workspace.editing | last_jump_pos: pos}}
-    }
+    EditorState.update_workspace(state, fn ws ->
+      WorkspaceState.update_editing(ws, &VimState.set_last_jump_pos(&1, pos))
+    end)
   end
 
   defp set_jump_mark(state), do: state
@@ -1806,7 +1805,7 @@ defmodule Minga.Editor.LspActions do
       }
 
       vim = VimState.transition(state.workspace.editing, :visual, visual_state)
-      %{state | workspace: %{state.workspace | editing: vim}}
+      EditorState.update_workspace(state, &WorkspaceState.set_editing(&1, vim))
     else
       state
     end

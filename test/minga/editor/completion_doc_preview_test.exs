@@ -9,9 +9,24 @@ defmodule Minga.Editor.CompletionDocPreviewTest do
   alias Minga.Editing.Completion
   alias Minga.Editor.CompletionHandling
   alias Minga.Editor.CompletionUI
+  alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.Viewport
   alias Minga.UI.Theme
+  alias Minga.Workspace.State, as: WorkspaceState
 
   @theme Theme.get!(:doom_one)
+
+  defp make_state(completion) do
+    ws = %WorkspaceState{
+      viewport: %Viewport{top: 0, left: 0, rows: 24, cols: 80},
+      completion: completion
+    }
+
+    %EditorState{
+      port_manager: self(),
+      workspace: ws
+    }
+  end
 
   # ── Completion item parsing ──────────────────────────────────────────────
 
@@ -72,14 +87,14 @@ defmodule Minga.Editor.CompletionDocPreviewTest do
 
   describe "maybe_resolve_selected/1" do
     test "returns state unchanged when completion is nil" do
-      state = %{workspace: %{completion: nil}}
+      state = make_state(nil)
       assert CompletionHandling.maybe_resolve_selected(state) == state
     end
 
     test "skips resolve when documentation already present" do
       items = [Completion.parse_item(%{"label" => "a", "documentation" => "Already here"})]
       completion = Completion.new(items, {0, 0})
-      state = %{workspace: %{completion: completion}}
+      state = make_state(completion)
       result = CompletionHandling.maybe_resolve_selected(state)
       # No timer set because documentation is already present
       assert result.workspace.completion.resolve_timer == nil
@@ -88,7 +103,7 @@ defmodule Minga.Editor.CompletionDocPreviewTest do
     test "sets a resolve timer when documentation is empty" do
       items = [Completion.parse_item(%{"label" => "a"})]
       completion = Completion.new(items, {0, 0})
-      state = %{workspace: %{completion: completion}}
+      state = make_state(completion)
       result = CompletionHandling.maybe_resolve_selected(state)
       assert result.workspace.completion.resolve_timer != nil
     end
@@ -96,7 +111,7 @@ defmodule Minga.Editor.CompletionDocPreviewTest do
     test "skips when already resolved for this index" do
       items = [Completion.parse_item(%{"label" => "a"})]
       completion = %{Completion.new(items, {0, 0}) | last_resolved_index: 0}
-      state = %{workspace: %{completion: completion}}
+      state = make_state(completion)
       result = CompletionHandling.maybe_resolve_selected(state)
       assert result.workspace.completion.resolve_timer == nil
     end
@@ -108,7 +123,7 @@ defmodule Minga.Editor.CompletionDocPreviewTest do
     test "updates selected item documentation on success" do
       items = [Completion.parse_item(%{"label" => "a"})]
       completion = Completion.new(items, {0, 0})
-      state = %{workspace: %{completion: completion}}
+      state = make_state(completion)
 
       resolved = %{"documentation" => %{"kind" => "markdown", "value" => "Full docs"}}
       result = CompletionHandling.handle_resolve_response(state, {:ok, resolved})
@@ -121,7 +136,7 @@ defmodule Minga.Editor.CompletionDocPreviewTest do
     test "handles plain string documentation in resolve response" do
       items = [Completion.parse_item(%{"label" => "a"})]
       completion = Completion.new(items, {0, 0})
-      state = %{workspace: %{completion: completion}}
+      state = make_state(completion)
 
       resolved = %{"documentation" => "Plain text docs"}
       result = CompletionHandling.handle_resolve_response(state, {:ok, resolved})
@@ -133,14 +148,14 @@ defmodule Minga.Editor.CompletionDocPreviewTest do
     test "returns state unchanged on error" do
       items = [Completion.parse_item(%{"label" => "a"})]
       completion = Completion.new(items, {0, 0})
-      state = %{workspace: %{completion: completion}}
+      state = make_state(completion)
 
       result = CompletionHandling.handle_resolve_response(state, {:error, "timeout"})
       assert result == state
     end
 
     test "returns state unchanged when completion is nil" do
-      state = %{workspace: %{completion: nil}}
+      state = make_state(nil)
       result = CompletionHandling.handle_resolve_response(state, {:ok, %{}})
       assert result == state
     end

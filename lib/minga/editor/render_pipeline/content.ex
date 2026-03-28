@@ -23,6 +23,7 @@ defmodule Minga.Editor.RenderPipeline.Content do
   alias Minga.Editor.RenderPipeline.Scroll.WindowScroll
   alias Minga.Editor.SemanticWindow
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Workspace.State, as: WorkspaceState
   alias Minga.Editor.Viewport
   alias Minga.Editor.Window
 
@@ -227,10 +228,10 @@ defmodule Minga.Editor.RenderPipeline.Content do
 
     new_map = Map.put(state.workspace.windows.map, scroll.win_id, updated_window)
 
-    state = %{
-      state
-      | workspace: %{state.workspace | windows: %{state.workspace.windows | map: new_map}}
-    }
+    state =
+      EditorState.update_workspace(state, fn ws ->
+        WorkspaceState.set_windows(ws, %{ws.windows | map: new_map})
+      end)
 
     {win_frame, cursor_info, state}
   end

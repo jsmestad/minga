@@ -15,7 +15,9 @@ defmodule Minga.Editor.Editing do
   alias Minga.Editor.MacroRecorder
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Registers
+  alias Minga.Editor.VimState
   alias Minga.Mode
+  alias Minga.Workspace.State, as: WorkspaceState
 
   # ── Vim-specific reads ─────────────────────────────────────────────────────
 
@@ -116,6 +118,8 @@ defmodule Minga.Editor.Editing do
   @spec save_jump_pos(EditorState.t(), {non_neg_integer(), non_neg_integer()}) ::
           EditorState.t()
   def save_jump_pos(%EditorState{} = state, pos) do
-    put_in(state.workspace.editing.last_jump_pos, pos)
+    EditorState.update_workspace(state, fn ws ->
+      WorkspaceState.update_editing(ws, &VimState.set_last_jump_pos(&1, pos))
+    end)
   end
 end

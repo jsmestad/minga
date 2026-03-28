@@ -14,6 +14,8 @@ defmodule Minga.Editor.Commands.Editing do
   alias Minga.Editor.Indent
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Registers
+  alias Minga.Editor.VimState
+  alias Minga.Workspace.State, as: WorkspaceState
   alias Minga.Mode
   alias Minga.Mode.ReplaceState
   alias Minga.Mode.VisualState
@@ -230,10 +232,9 @@ defmodule Minga.Editor.Commands.Editing do
     Buffer.insert_char(buf, char)
     new_ms = %{ms | original_chars: [original | ms.original_chars]}
 
-    %{
-      state
-      | workspace: %{state.workspace | editing: %{state.workspace.editing | mode_state: new_ms}}
-    }
+    EditorState.update_workspace(state, fn ws ->
+      WorkspaceState.update_editing(ws, &VimState.set_mode_state(&1, new_ms))
+    end)
   end
 
   def execute(state, {:replace_overwrite, _char}), do: state
@@ -252,10 +253,9 @@ defmodule Minga.Editor.Commands.Editing do
     Buffer.move(buf, :left)
     new_ms = %{ms | original_chars: rest}
 
-    %{
-      state
-      | workspace: %{state.workspace | editing: %{state.workspace.editing | mode_state: new_ms}}
-    }
+    EditorState.update_workspace(state, fn ws ->
+      WorkspaceState.update_editing(ws, &VimState.set_mode_state(&1, new_ms))
+    end)
   end
 
   def execute(

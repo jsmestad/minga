@@ -27,6 +27,7 @@ defmodule Minga.Editor.SemanticTokenSync do
   alias Minga.Buffer
   alias Minga.Editor.State, as: EditorState
   alias Minga.LSP.Client
+  alias Minga.Workspace.State, as: WorkspaceState
   alias Minga.LSP.SemanticTokens
   alias Minga.UI.Highlight
 
@@ -50,7 +51,7 @@ defmodule Minga.Editor.SemanticTokenSync do
       uri = "file://#{file_path}"
       ref = Client.request_semantic_tokens(client, uri)
       pending = Map.put(state.workspace.lsp_pending, ref, {:semantic_tokens, buf_pid})
-      %{state | workspace: %{state.workspace | lsp_pending: pending}}
+      EditorState.update_workspace(state, &WorkspaceState.set_lsp_pending(&1, pending))
     else
       _ -> state
     end

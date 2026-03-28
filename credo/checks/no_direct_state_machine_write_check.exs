@@ -43,7 +43,13 @@ defmodule Minga.Credo.NoDirectStateMachineWriteCheck do
     category: :design,
     param_defaults: [
       gated_fields: [:mode],
-      allowed_files: ["vim_state.ex", "state.ex"]
+      guarded_struct_fields: [
+        # VimState fields: must use VimState.set_*/transition instead of direct writes
+        {:editing, [:mode_state, :marks, :last_jump_pos, :last_find_char, :macro_recorder, :change_recorder, :reg]},
+        # Workspace.State fields: must use WorkspaceState.set_* instead of direct writes
+        {:workspace, [:keymap_scope, :completion, :completion_trigger, :highlight, :mouse, :document_highlights, :search, :pending_conflict, :lsp_pending, :viewport, :windows, :buffers, :agent_ui, :injection_ranges, :editing]}
+      ],
+      allowed_files: ["vim_state.ex", "state.ex", "workspace/state.ex"]
     ],
     explanations: [
       check: """
@@ -54,9 +60,13 @@ defmodule Minga.Credo.NoDirectStateMachineWriteCheck do
 
       Use `EditorState.transition_mode(state, mode)` or
       `VimState.transition(vim, mode)` instead of setting `mode:` directly.
+
+      Use `WorkspaceState.set_completion(ws, completion)` instead of
+      `%{ws | completion: completion}`.
       """,
       params: [
         gated_fields: "List of field atoms to flag when set in map updates.",
+        guarded_struct_fields: "List of {parent_field, [child_fields]} tuples for nested struct checks.",
         allowed_files: "Filename suffixes where direct writes are permitted (gate function homes)."
       ]
     ]

@@ -23,7 +23,9 @@ defmodule Minga.UI.Picker.LocationSource do
   alias Minga.Buffer
   alias Minga.Editor.Commands
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.VimState
   alias Minga.UI.Picker.Item
+  alias Minga.Workspace.State, as: WorkspaceState
   alias Minga.UI.Picker.Source
 
   @impl true
@@ -126,10 +128,9 @@ defmodule Minga.UI.Picker.LocationSource do
   defp set_jump_mark(%{workspace: %{buffers: %{active: buf}}} = state) when is_pid(buf) do
     pos = Buffer.cursor(buf)
 
-    %{
-      state
-      | workspace: %{state.workspace | editing: %{state.workspace.editing | last_jump_pos: pos}}
-    }
+    EditorState.update_workspace(state, fn ws ->
+      WorkspaceState.update_editing(ws, &VimState.set_last_jump_pos(&1, pos))
+    end)
   end
 
   defp set_jump_mark(state), do: state

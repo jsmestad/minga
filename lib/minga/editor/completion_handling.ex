@@ -15,6 +15,7 @@ defmodule Minga.Editor.CompletionHandling do
   alias Minga.Editor.SignatureHelp
   alias Minga.Editor.State, as: EditorState
   alias Minga.LSP.Client
+  alias Minga.Workspace.State, as: WorkspaceState
   alias Minga.LSP.SyncServer
 
   @resolve_debounce_ms 150
@@ -47,7 +48,7 @@ defmodule Minga.Editor.CompletionHandling do
         Process.send_after(self(), {:completion_resolve, selected_idx}, @resolve_debounce_ms)
 
       completion = %{completion | resolve_timer: timer}
-      %{state | workspace: %{state.workspace | completion: completion}}
+      EditorState.update_workspace(state, &WorkspaceState.set_completion(&1, completion))
     end
   end
 
@@ -99,7 +100,7 @@ defmodule Minga.Editor.CompletionHandling do
     doc_text = extract_resolve_documentation(resolved)
     completion = Completion.update_selected_documentation(completion, doc_text)
     completion = %{completion | last_resolved_index: completion.selected}
-    %{state | workspace: %{state.workspace | completion: completion}}
+    EditorState.update_workspace(state, &WorkspaceState.set_completion(&1, completion))
   end
 
   @doc """
@@ -152,7 +153,7 @@ defmodule Minga.Editor.CompletionHandling do
     end
 
     new_bridge = CompletionTrigger.dismiss(state.workspace.completion_trigger)
-    %{state | workspace: %{state.workspace | completion: nil, completion_trigger: new_bridge}}
+    EditorState.update_workspace(state, &WorkspaceState.clear_completion(&1, new_bridge))
   end
 
   # ── Private helpers ────────────────────────────────────────────────────────
@@ -230,7 +231,7 @@ defmodule Minga.Editor.CompletionHandling do
     filtered = Completion.filter(completion, prefix)
 
     if Completion.active?(filtered) do
-      %{state | workspace: %{state.workspace | completion: filtered}}
+      EditorState.update_workspace(state, &WorkspaceState.set_completion(&1, filtered))
     else
       dismiss(state)
     end
@@ -246,7 +247,10 @@ defmodule Minga.Editor.CompletionHandling do
         {new_bridge, _comp} =
           CompletionTrigger.maybe_trigger(state.workspace.completion_trigger, char, buf)
 
-        %{state | workspace: %{state.workspace | completion_trigger: new_bridge}}
+        EditorState.update_workspace(
+          state,
+          &WorkspaceState.set_completion_trigger(&1, new_bridge)
+        )
     end
   end
 
@@ -380,7 +384,7 @@ defmodule Minga.Editor.CompletionHandling do
     completion = Completion.filter(completion, prefix)
 
     if Completion.active?(completion) do
-      %{state | workspace: %{state.workspace | completion: completion}}
+      EditorState.update_workspace(state, &WorkspaceState.set_completion(&1, completion))
     else
       state
     end
@@ -481,7 +485,8 @@ defmodule Minga.Editor.CompletionHandling do
         buffer_pid
       )
 
-    new_state = %{state | workspace: %{state.workspace | completion_trigger: new_bridge}}
+    new_state =
+      EditorState.update_workspace(state, &WorkspaceState.set_completion_trigger(&1, new_bridge))
 
     case completion do
       nil ->
@@ -513,7 +518,7 @@ defmodule Minga.Editor.CompletionHandling do
           CompletionTrigger.get_typed_since_trigger(state.workspace.buffers.active, trigger_pos)
 
         completion = Completion.filter(completion, prefix)
-        %{state | workspace: %{state.workspace | completion: completion}}
+        EditorState.update_workspace(state, &WorkspaceState.set_completion(&1, completion))
 
       %Completion{} = existing ->
         # Merge into existing completion
@@ -527,7 +532,7 @@ defmodule Minga.Editor.CompletionHandling do
           )
 
         completion = Completion.filter(completion, prefix)
-        %{state | workspace: %{state.workspace | completion: completion}}
+        EditorState.update_workspace(state, &WorkspaceState.set_completion(&1, completion))
     end
   end
 

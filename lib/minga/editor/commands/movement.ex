@@ -14,7 +14,9 @@ defmodule Minga.Editor.Commands.Movement do
   alias Minga.Editor.FoldMap
   alias Minga.Editor.Layout
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.VimState
   alias Minga.Editor.Viewport
+  alias Minga.Workspace.State, as: WorkspaceState
   alias Minga.Editor.Window
   alias Minga.Editor.WindowTree
   alias Minga.Mode
@@ -243,13 +245,9 @@ defmodule Minga.Editor.Commands.Movement do
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, {:find_char, dir, char}) do
     Helpers.apply_find_char(buf, dir, char)
 
-    %{
-      state
-      | workspace: %{
-          state.workspace
-          | editing: %{state.workspace.editing | last_find_char: {dir, char}}
-        }
-    }
+    EditorState.update_workspace(state, fn ws ->
+      WorkspaceState.update_editing(ws, &VimState.set_last_find_char(&1, {dir, char}))
+    end)
   end
 
   def execute(
@@ -478,7 +476,7 @@ defmodule Minga.Editor.Commands.Movement do
   defp navigate_window(%{workspace: %{file_tree: %{focused: true}}} = state, :right) do
     state = put_in(state.workspace.file_tree.focused, false)
     scope = EditorState.scope_for_active_window(state)
-    %{state | workspace: %{state.workspace | keymap_scope: scope}}
+    EditorState.update_workspace(state, &WorkspaceState.set_keymap_scope(&1, scope))
   end
 
   defp navigate_window(state, direction) do
@@ -505,7 +503,7 @@ defmodule Minga.Editor.Commands.Movement do
          :left
        ) do
     state = put_in(state.workspace.file_tree.focused, true)
-    %{state | workspace: %{state.workspace | keymap_scope: :file_tree}}
+    EditorState.update_workspace(state, &WorkspaceState.set_keymap_scope(&1, :file_tree))
   end
 
   defp maybe_focus_file_tree(state, _direction), do: state
