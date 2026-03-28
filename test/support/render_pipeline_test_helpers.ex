@@ -88,11 +88,14 @@ defmodule Minga.Editor.RenderPipeline.TestHelpers do
 
     updated_window = %{
       window
-      | last_viewport_top: new_top,
-        last_gutter_w: 4,
-        last_buf_version: 1,
-        last_line_count: 100,
-        last_cursor_line: new_top
+      | render_cache: %{
+          window.render_cache
+          | last_viewport_top: new_top,
+            last_gutter_w: 4,
+            last_buf_version: 1,
+            last_line_count: 100,
+            last_cursor_line: new_top
+        }
     }
 
     new_map = Map.put(state.workspace.windows.map, win_id, updated_window)

@@ -222,8 +222,8 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
             win = Window.cache_line(win, buf_line, g_cmds, c_cmds)
             {g_cmds ++ g, prepend_all(c, c_cmds), next_byte_off, win}
           else
-            g_cmds = Map.get(win.cached_gutter, buf_line, [])
-            c_cmds = Map.get(win.cached_content, buf_line, [])
+            g_cmds = Map.get(win.render_cache.cached_gutter, buf_line, [])
+            c_cmds = Map.get(win.render_cache.cached_content, buf_line, [])
             {g_cmds ++ g, prepend_all(c, c_cmds), next_byte_off, win}
           end
         end
@@ -512,8 +512,8 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
       win = Window.cache_line(win, buf_line, fold_g ++ g_cmds, c_cmds)
       {(fold_g ++ g_cmds) ++ g, prepend_all(c, c_cmds), win}
     else
-      g_cmds = Map.get(win.cached_gutter, buf_line, [])
-      c_cmds = Map.get(win.cached_content, buf_line, [])
+      g_cmds = Map.get(win.render_cache.cached_gutter, buf_line, [])
+      c_cmds = Map.get(win.render_cache.cached_content, buf_line, [])
       {g_cmds ++ g, prepend_all(c, c_cmds), win}
     end
   end
@@ -926,7 +926,8 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
   # ── Context fingerprint ─────────────────────────────────────────────────────
 
   @doc "Computes a fingerprint from the render context for change detection."
-  @spec context_fingerprint(Context.t(), boolean()) :: Window.context_fingerprint()
+  @spec context_fingerprint(Context.t(), boolean()) ::
+          Minga.Editor.Window.RenderCache.context_fingerprint()
   def context_fingerprint(%Context{} = ctx, is_active) do
     hl_id =
       case ctx.highlight do

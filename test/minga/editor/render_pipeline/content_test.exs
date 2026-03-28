@@ -65,12 +65,12 @@ defmodule Minga.Editor.RenderPipeline.ContentTest do
       [{_win_id, window}] = Map.to_list(state.workspace.windows.map)
 
       # After rendering, dirty_lines should be cleared
-      assert window.dirty_lines == %{}
+      assert window.render_cache.dirty_lines == %{}
       # Tracking fields should be set (no longer sentinels)
-      assert window.last_viewport_top >= 0
-      assert window.last_gutter_w >= 0
-      assert window.last_line_count > 0
-      assert window.last_buf_version >= 0
+      assert window.render_cache.last_viewport_top >= 0
+      assert window.render_cache.last_gutter_w >= 0
+      assert window.render_cache.last_line_count > 0
+      assert window.render_cache.last_buf_version >= 0
     end
   end
 end

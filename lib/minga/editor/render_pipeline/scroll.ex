@@ -348,7 +348,7 @@ defmodule Minga.Editor.RenderPipeline.Scroll do
   # gutter content so we only mark the old and new cursor lines.
   @spec detect_gutter_invalidation(Window.t(), non_neg_integer(), atom()) :: Window.t()
   defp detect_gutter_invalidation(window, cursor_line, line_number_style) do
-    old_cursor = window.last_cursor_line
+    old_cursor = window.render_cache.last_cursor_line
 
     if old_cursor == cursor_line or old_cursor < 0 do
       # Cursor didn't move or first frame (already :all dirty)
