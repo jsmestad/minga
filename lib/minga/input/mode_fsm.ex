@@ -13,12 +13,12 @@ defmodule Minga.Input.ModeFSM do
 
   @behaviour Minga.Input.Handler
 
+  @type state :: Minga.Input.Handler.handler_state()
+
   alias Minga.Editor.Mouse
-  alias Minga.Editor.State, as: EditorState
 
   @impl true
-  @spec handle_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
-          Minga.Input.Handler.result()
+  @spec handle_key(state(), non_neg_integer(), non_neg_integer()) :: Minga.Input.Handler.result()
   def handle_key(state, codepoint, modifiers) do
     new_state = Minga.Editor.do_handle_key(state, codepoint, modifiers)
     {:handled, new_state}
@@ -26,7 +26,7 @@ defmodule Minga.Input.ModeFSM do
 
   @impl true
   @spec handle_mouse(
-          EditorState.t(),
+          state(),
           integer(),
           integer(),
           atom(),

@@ -10,6 +10,8 @@ defmodule Minga.Input.Dashboard do
 
   @behaviour Minga.Input.Handler
 
+  @type state :: Minga.Input.Handler.handler_state()
+
   alias Minga.Editor.Commands
   alias Minga.Editor.Commands.BufferManagement
   alias Minga.Editor.Dashboard
@@ -26,8 +28,7 @@ defmodule Minga.Input.Dashboard do
   @arrow_down 57_353
 
   @impl true
-  @spec handle_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
-          Minga.Input.Handler.result()
+  @spec handle_key(state(), non_neg_integer(), non_neg_integer()) :: Minga.Input.Handler.result()
   def handle_key(
         %{workspace: %{buffers: %{active: nil}}, shell_state: %{dashboard: %{} = dash}} = state,
         codepoint,

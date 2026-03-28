@@ -14,13 +14,14 @@ defmodule Minga.Input.Popup do
 
   @behaviour Minga.Input.Handler
 
+  @type state :: Minga.Input.Handler.handler_state()
+
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Window
   alias Minga.UI.Popup.Lifecycle
 
   @impl true
-  @spec handle_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
-          {:handled, EditorState.t()} | {:passthrough, EditorState.t()}
+  @spec handle_key(state(), non_neg_integer(), non_neg_integer()) :: Minga.Input.Handler.result()
   def handle_key(state, codepoint, _modifiers) do
     case active_popup_meta(state) do
       nil ->
@@ -39,14 +40,14 @@ defmodule Minga.Input.Popup do
 
   @impl true
   @spec handle_mouse(
-          EditorState.t(),
+          state(),
           integer(),
           integer(),
           atom(),
           non_neg_integer(),
           atom(),
           pos_integer()
-        ) :: {:handled, EditorState.t()} | {:passthrough, EditorState.t()}
+        ) :: Minga.Input.Handler.result()
   def handle_mouse(state, row, col, :left, _mods, :press, _cc) do
     # Check if any float popups are visible. Clicks outside their box
     # dismiss them; clicks inside are passed through to the buffer.

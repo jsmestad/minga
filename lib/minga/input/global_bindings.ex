@@ -9,6 +9,8 @@ defmodule Minga.Input.GlobalBindings do
 
   @behaviour Minga.Input.Handler
 
+  @type state :: Minga.Input.Handler.handler_state()
+
   import Bitwise
 
   alias Minga.Buffer
@@ -16,8 +18,7 @@ defmodule Minga.Input.GlobalBindings do
   @ctrl Minga.Input.mod_ctrl()
 
   @impl true
-  @spec handle_key(Minga.Editor.State.t(), non_neg_integer(), non_neg_integer()) ::
-          Minga.Input.Handler.result()
+  @spec handle_key(state(), non_neg_integer(), non_neg_integer()) :: Minga.Input.Handler.result()
 
   # Ctrl+S: save current buffer
   def handle_key(state, ?s, mods) when band(mods, @ctrl) != 0 do

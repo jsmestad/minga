@@ -10,13 +10,14 @@ defmodule Minga.Input.Picker do
 
   @behaviour Minga.Input.Handler
 
+  @type state :: Minga.Input.Handler.handler_state()
+
   alias Minga.Editor.PickerUI
   alias Minga.Editor.State, as: EditorState
   alias Minga.UI.Picker, as: PickerData
 
   @impl true
-  @spec handle_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
-          Minga.Input.Handler.result()
+  @spec handle_key(state(), non_neg_integer(), non_neg_integer()) :: Minga.Input.Handler.result()
   def handle_key(%{shell_state: %{picker_ui: %{picker: picker}}} = state, codepoint, modifiers)
       when is_struct(picker, PickerData) do
     new_state =
@@ -34,7 +35,7 @@ defmodule Minga.Input.Picker do
 
   @impl true
   @spec handle_mouse(
-          EditorState.t(),
+          state(),
           integer(),
           integer(),
           atom(),

@@ -9,13 +9,13 @@ defmodule Minga.Input.Prompt do
 
   @behaviour Minga.Input.Handler
 
+  @type state :: Minga.Input.Handler.handler_state()
+
   alias Minga.Editor.PromptUI
-  alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Prompt, as: PromptState
 
   @impl true
-  @spec handle_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
-          Minga.Input.Handler.result()
+  @spec handle_key(state(), non_neg_integer(), non_neg_integer()) :: Minga.Input.Handler.result()
   def handle_key(
         %{shell_state: %{prompt_ui: %PromptState{handler: handler}}} = state,
         codepoint,
@@ -32,7 +32,7 @@ defmodule Minga.Input.Prompt do
 
   @impl true
   @spec handle_mouse(
-          EditorState.t(),
+          state(),
           integer(),
           integer(),
           atom(),

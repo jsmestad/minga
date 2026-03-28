@@ -17,6 +17,8 @@ defmodule Minga.Input.AgentPanel do
 
   @behaviour Minga.Input.Handler
 
+  @type state :: Minga.Input.Handler.handler_state()
+
   alias Minga.Agent.UIState
   alias Minga.Editor.Commands
   alias Minga.Editor.Commands.Agent, as: AgentCommands
@@ -28,8 +30,7 @@ defmodule Minga.Input.AgentPanel do
   alias Minga.Keymap
 
   @impl true
-  @spec handle_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
-          {:handled, EditorState.t()} | {:passthrough, EditorState.t()}
+  @spec handle_key(state(), non_neg_integer(), non_neg_integer()) :: Minga.Input.Handler.result()
 
   # Editor scope with agent side panel visible + input focused
   def handle_key(%{workspace: %{keymap_scope: :editor}} = state, cp, mods) do
