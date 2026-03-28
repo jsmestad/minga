@@ -115,7 +115,7 @@ defmodule Minga.Frontend.Protocol.GUI do
   @op_gui_agent_groups 0x86
   @op_gui_board 0x87
   @op_gui_agent_context 0x88
-  @op_gui_change_summary 0x88
+  @op_gui_change_summary 0x89
 
   # ── Sectioned format section IDs ──
   # Used by opcodes that encode their fields in self-describing sections.
@@ -808,7 +808,7 @@ defmodule Minga.Frontend.Protocol.GUI do
   # ── Change Summary ──
 
   @doc """
-  Encodes a gui_change_summary command (0x88).
+  Encodes a gui_change_summary command (0x89).
 
   Sends the list of changed files with diff stats when zoomed into an agent card.
   The Swift frontend renders this as a resizable sidebar on the left.

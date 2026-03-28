@@ -1905,8 +1905,9 @@ private func readU32(_ data: Data, _ offset: Int) -> UInt32 {
 }
 
 private func readU64(_ data: Data, _ offset: Int) -> UInt64 {
-    return UInt64(data[offset]) << 56 | UInt64(data[offset + 1]) << 48 |
-           UInt64(data[offset + 2]) << 40 | UInt64(data[offset + 3]) << 32 |
-           UInt64(data[offset + 4]) << 24 | UInt64(data[offset + 5]) << 16 |
-           UInt64(data[offset + 6]) << 8 | UInt64(data[offset + 7])
+    let hi: UInt64 = UInt64(data[offset]) << 56 | UInt64(data[offset + 1]) << 48 |
+                     UInt64(data[offset + 2]) << 40 | UInt64(data[offset + 3]) << 32
+    let lo: UInt64 = UInt64(data[offset + 4]) << 24 | UInt64(data[offset + 5]) << 16 |
+                     UInt64(data[offset + 6]) << 8 | UInt64(data[offset + 7])
+    return hi | lo
 }
