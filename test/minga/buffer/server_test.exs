@@ -1403,4 +1403,102 @@ defmodule Minga.Buffer.ServerTest do
       assert {:ok, ^pid_b} = Server.pid_for_path(path_b)
     end
   end
+
+  describe "find_and_replace/4 with boundary" do
+    test "edit within boundary succeeds" do
+      {:ok, pid} = Server.start_link(content: "line0\nline1\nline2\nline3\nline4")
+
+      assert {:ok, _} = Server.find_and_replace(pid, "line2", "REPLACED", {1, 3})
+      assert Server.content(pid) =~ "REPLACED"
+    end
+
+    test "edit outside boundary is rejected with descriptive error" do
+      {:ok, pid} = Server.start_link(content: "line0\nline1\nline2\nline3\nline4")
+
+      assert {:error, msg} = Server.find_and_replace(pid, "line0", "NOPE", {1, 3})
+      assert msg =~ "outside boundary"
+      assert msg =~ "lines 0-0"
+      assert msg =~ "1-3"
+      assert Server.content(pid) == "line0\nline1\nline2\nline3\nline4"
+    end
+
+    test "edit at boundary start line succeeds (inclusive)" do
+      {:ok, pid} = Server.start_link(content: "line0\nline1\nline2\nline3\nline4")
+
+      assert {:ok, _} = Server.find_and_replace(pid, "line2", "OK", {2, 4})
+    end
+
+    test "edit at boundary end line succeeds (inclusive)" do
+      {:ok, pid} = Server.start_link(content: "line0\nline1\nline2\nline3\nline4")
+
+      assert {:ok, _} = Server.find_and_replace(pid, "line4", "OK", {2, 4})
+    end
+
+    test "nil boundary allows any edit (backward compatible)" do
+      {:ok, pid} = Server.start_link(content: "line0\nline1\nline2")
+
+      assert {:ok, _} = Server.find_and_replace(pid, "line0", "OK", nil)
+      assert {:ok, _} = Server.find_and_replace(pid, "OK", "DONE")
+    end
+
+    test "multi-line match spanning boundary is rejected" do
+      {:ok, pid} = Server.start_link(content: "aaa\nbbb\nccc\nddd")
+
+      assert {:error, msg} = Server.find_and_replace(pid, "bbb\nccc\nddd", "NOPE", {1, 2})
+      assert msg =~ "outside boundary"
+    end
+
+    test "multi-line match fully within boundary succeeds" do
+      {:ok, pid} = Server.start_link(content: "aaa\nbbb\nccc\nddd\neee")
+
+      assert {:ok, _} = Server.find_and_replace(pid, "bbb\nccc\nddd", "OK", {1, 3})
+    end
+
+    test "edit on single-line boundary at line 0 succeeds" do
+      {:ok, pid} = Server.start_link(content: "only_line")
+
+      assert {:ok, _} = Server.find_and_replace(pid, "only_line", "replaced", {0, 0})
+    end
+
+    test "unicode content does not confuse boundary check" do
+      {:ok, pid} = Server.start_link(content: "café\n日本語\ntarget\nmore")
+
+      assert {:ok, _} = Server.find_and_replace(pid, "target", "hit", {2, 2})
+      assert Server.content(pid) =~ "hit"
+    end
+
+    test "ambiguous match returns ambiguous error, not boundary error" do
+      {:ok, pid} = Server.start_link(content: "foo\nfoo")
+
+      assert {:error, msg} = Server.find_and_replace(pid, "foo", "bar", {0, 0})
+      assert msg =~ "2 times"
+    end
+  end
+
+  describe "find_and_replace_batch/3 with boundary" do
+    test "rejects individual edits outside boundary while applying valid ones" do
+      {:ok, pid} = Server.start_link(content: "line0\nline1\nline2\nline3")
+
+      edits = [{"line1", "OK1"}, {"line0", "NOPE"}, {"line2", "OK2"}]
+      assert {:ok, results} = Server.find_and_replace_batch(pid, edits, {1, 2})
+
+      assert [{:ok, _}, {:error, _}, {:ok, _}] = results
+
+      content = Server.content(pid)
+      assert content =~ "OK1"
+      assert content =~ "OK2"
+      assert content =~ "line0"
+    end
+
+    test "all edits outside boundary leaves buffer unchanged" do
+      {:ok, pid} = Server.start_link(content: "line0\nline1\nline2")
+
+      edits = [{"line0", "X"}, {"line2", "Y"}]
+      assert {:ok, results} = Server.find_and_replace_batch(pid, edits, {1, 1})
+
+      assert [{:error, _}, {:error, _}] = results
+      refute Server.dirty?(pid)
+      assert Server.content(pid) == "line0\nline1\nline2"
+    end
+  end
 end

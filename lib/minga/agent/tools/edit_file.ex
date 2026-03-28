@@ -22,19 +22,23 @@ defmodule Minga.Agent.Tools.EditFile do
   Returns `{:ok, message}` on success. Fails if the file doesn't exist, if
   `old_text` is not found, or if `old_text` appears more than once (ambiguous edit).
   """
-  @spec execute(String.t(), String.t(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
-  def execute(path, old_text, new_text)
+  @typedoc "An edit boundary as `{start_line, end_line}` (both inclusive, 0-indexed), or nil for unbounded."
+  @type boundary :: {non_neg_integer(), non_neg_integer()} | nil
+
+  @spec execute(String.t(), String.t(), String.t(), boundary()) ::
+          {:ok, String.t()} | {:error, String.t()}
+  def execute(path, old_text, new_text, boundary \\ nil)
       when is_binary(path) and is_binary(old_text) and is_binary(new_text) do
     case ensure_buffer(path) do
-      {:ok, pid} -> execute_via_buffer(pid, path, old_text, new_text)
+      {:ok, pid} -> execute_via_buffer(pid, path, old_text, new_text, boundary)
       :unavailable -> execute_via_filesystem(path, old_text, new_text)
     end
   end
 
-  @spec execute_via_buffer(pid(), String.t(), String.t(), String.t()) ::
+  @spec execute_via_buffer(pid(), String.t(), String.t(), String.t(), boundary()) ::
           {:ok, String.t()} | {:error, String.t()}
-  defp execute_via_buffer(pid, path, old_text, new_text) do
-    case Buffer.find_and_replace(pid, old_text, new_text) do
+  defp execute_via_buffer(pid, path, old_text, new_text, boundary) do
+    case Buffer.find_and_replace(pid, old_text, new_text, boundary) do
       {:ok, _} -> {:ok, "edited #{path}"}
       {:error, reason} -> {:error, "#{reason} in #{path}. Read the file first to get exact text."}
     end

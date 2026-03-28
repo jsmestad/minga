@@ -26,25 +26,28 @@ defmodule Minga.Agent.Tools.MultiEditFile do
   Each edit in `edits` must have `"old_text"` and `"new_text"` keys.
   Returns `{:ok, summary}` with a per-edit status report.
   """
-  @spec execute(String.t(), [edit()]) :: {:ok, String.t()} | {:error, String.t()}
-  def execute(path, edits) when is_binary(path) and is_list(edits) do
+  @typedoc "An edit boundary as `{start_line, end_line}` (both inclusive, 0-indexed), or nil for unbounded."
+  @type boundary :: {non_neg_integer(), non_neg_integer()} | nil
+
+  @spec execute(String.t(), [edit()], boundary()) :: {:ok, String.t()} | {:error, String.t()}
+  def execute(path, edits, boundary \\ nil) when is_binary(path) and is_list(edits) do
     case ensure_buffer(path) do
-      {:ok, pid} -> execute_via_buffer(pid, path, edits)
+      {:ok, pid} -> execute_via_buffer(pid, path, edits, boundary)
       :unavailable -> execute_via_filesystem(path, edits)
     end
   end
 
   # ── Buffer path ──
 
-  @spec execute_via_buffer(pid(), String.t(), [edit()]) ::
+  @spec execute_via_buffer(pid(), String.t(), [edit()], boundary()) ::
           {:ok, String.t()} | {:error, String.t()}
-  defp execute_via_buffer(pid, path, edits) do
+  defp execute_via_buffer(pid, path, edits, boundary) do
     edit_pairs =
       Enum.map(edits, fn edit ->
         {edit["old_text"] || "", edit["new_text"] || ""}
       end)
 
-    case Buffer.find_and_replace_batch(pid, edit_pairs) do
+    case Buffer.find_and_replace_batch(pid, edit_pairs, boundary) do
       {:ok, results} -> {:ok, format_buffer_results(path, results)}
       {:error, msg} -> {:error, "#{path}: #{msg}"}
     end

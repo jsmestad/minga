@@ -158,14 +158,14 @@ defmodule Minga.Buffer do
   defdelegate replace_content_force(server, new_content), to: Server
 
   @doc "Find and replace the first occurrence of `old_text` with `new_text`."
-  @spec find_and_replace(server(), String.t(), String.t()) ::
+  @spec find_and_replace(server(), String.t(), String.t(), Server.boundary()) ::
           {:ok, String.t()} | {:error, String.t()}
-  defdelegate find_and_replace(server, old_text, new_text), to: Server
+  defdelegate find_and_replace(server, old_text, new_text, boundary \\ nil), to: Server
 
   @doc "Find and replace multiple patterns atomically."
-  @spec find_and_replace_batch(server(), [Server.replace_edit()]) ::
+  @spec find_and_replace_batch(server(), [Server.replace_edit()], Server.boundary()) ::
           {:ok, [Server.replace_result()]} | {:error, String.t()}
-  defdelegate find_and_replace_batch(server, edits), to: Server
+  defdelegate find_and_replace_batch(server, edits, boundary \\ nil), to: Server
 
   @doc "Append text to the end of the buffer."
   @spec append(server(), String.t()) :: :ok
