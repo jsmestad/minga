@@ -986,9 +986,14 @@ defmodule Minga.Editor.Commands.BufferManagement do
     # and resets the agent UI). For file tabs it replaces in place.
     state = EditorState.add_buffer(state, buf)
 
-    # Now we have 2 tabs; remove the old one.
-    {:ok, tb} = TabBar.remove(state.shell_state.tab_bar, only.id)
-    EditorState.set_tab_bar(state, tb)
+    # Now we have 2 tabs; remove the old one. add_buffer may have reused
+    # the existing tab (replaced in-place), leaving only one tab, so
+    # TabBar.remove returns :last_tab. That's fine: the buffer was
+    # already swapped.
+    case TabBar.remove(state.shell_state.tab_bar, only.id) do
+      {:ok, tb} -> EditorState.set_tab_bar(state, tb)
+      :last_tab -> state
+    end
   end
 
   defp close_tab_or_quit(state), do: shutdown_editor(state)
