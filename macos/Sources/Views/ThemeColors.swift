@@ -112,6 +112,14 @@ final class ThemeColors {
     var gitModifiedFgRGB: UInt32 = 0x51AFEF
     var gitDeletedFgRGB: UInt32 = 0xFF6C6B
 
+    // ── Agent status (shared across Board cards, tab badges, chat header) ──
+    var agentStatusIdle: Color = color(0x555555)
+    var agentStatusWorking: Color = color(0x98BE65)
+    var agentStatusIterating: Color = color(0x98BE65)
+    var agentStatusNeedsYou: Color = color(0xECBE7B)
+    var agentStatusDone: Color = color(0x51AFEF)
+    var agentStatusErrored: Color = color(0xFF6C6B)
+
     // ── Accent ──
     var accent: Color = color(0x51AFEF)
 
@@ -201,6 +209,12 @@ final class ThemeColors {
         case GUI_COLOR_SELECTION_BG:
             selectionBg = c
             selectionBgSIMD = rgbToSIMD3(rgb)
+        case GUI_COLOR_AGENT_STATUS_IDLE: agentStatusIdle = c
+        case GUI_COLOR_AGENT_STATUS_WORKING: agentStatusWorking = c
+        case GUI_COLOR_AGENT_STATUS_ITERATING: agentStatusIterating = c
+        case GUI_COLOR_AGENT_STATUS_NEEDS_YOU: agentStatusNeedsYou = c
+        case GUI_COLOR_AGENT_STATUS_DONE: agentStatusDone = c
+        case GUI_COLOR_AGENT_STATUS_ERRORED: agentStatusErrored = c
         default: break
         }
     }

@@ -307,7 +307,16 @@ struct BoardCardView: View {
 
     // MARK: - Status Badge
 
+    /// Drives the working-state pulse animation (opacity 0.6 ↔ 1.0).
     @State private var isPulsing = false
+
+    /// Drives the one-shot glow for the "needs you" state.
+    @State private var showGlow = false
+
+    /// Whether to skip animations for accessibility.
+    private var reduceMotion: Bool {
+        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    }
 
     private var statusBadge: some View {
         HStack(spacing: 4) {
@@ -317,16 +326,35 @@ struct BoardCardView: View {
                     .foregroundStyle(.secondary)
             } else {
                 Circle()
-                    .fill(statusColor)
+                    .fill(badgeColor)
                     .frame(width: 8, height: 8)
-                    .opacity(isPulsing && card.status == .working ? 0.4 : 1.0)
-                    .animation(
-                        card.status == .working
-                            ? .easeInOut(duration: 0.8).repeatForever(autoreverses: true)
-                            : .default,
-                        value: isPulsing
+                    .opacity(badgeOpacity)
+                    .shadow(
+                        color: card.status == .needsYou && showGlow
+                            ? badgeColor.opacity(0.6) : .clear,
+                        radius: card.status == .needsYou && showGlow ? 6 : 0
                     )
-                    .onAppear { isPulsing = true }
+                    .animation(pulseAnimation, value: isPulsing)
+                    .onAppear {
+                        guard !reduceMotion else { return }
+                        isPulsing = true
+                        if card.status == .needsYou {
+                            withAnimation(.spring(response: 0.6, dampingFraction: 0.5)) {
+                                showGlow = true
+                            }
+                        }
+                    }
+                    .onChange(of: card.status) { _, newStatus in
+                        guard !reduceMotion else { return }
+                        if newStatus == .needsYou {
+                            showGlow = false
+                            withAnimation(.spring(response: 0.6, dampingFraction: 0.5)) {
+                                showGlow = true
+                            }
+                        } else {
+                            showGlow = false
+                        }
+                    }
             }
 
             Text(card.isYouCard ? "You" : card.status.label)
@@ -335,10 +363,36 @@ struct BoardCardView: View {
         }
     }
 
-    private var statusColor: Color {
-        let c = card.status.color
-        return Color(red: c.r, green: c.g, blue: c.b)
+    /// Badge color from theme, mapped by card status.
+    private var badgeColor: Color {
+        switch card.status {
+        case .idle: theme.agentStatusIdle
+        case .working: theme.agentStatusWorking
+        case .iterating: theme.agentStatusIterating
+        case .needsYou: theme.agentStatusNeedsYou
+        case .done: theme.agentStatusDone
+        case .errored: theme.agentStatusErrored
+        }
     }
+
+    /// Badge opacity: pulsing for "working", solid for everything else.
+    /// When reduced motion is on, always returns 1.0 (static badge).
+    private var badgeOpacity: Double {
+        if !reduceMotion && card.status == .working && isPulsing {
+            return 0.6
+        }
+        return 1.0
+    }
+
+    /// Animation for the pulse effect: only active for "working" status.
+    /// Returns nil when reduced motion is on (static badge).
+    private var pulseAnimation: Animation? {
+        guard !reduceMotion, card.status == .working else { return .default }
+        return .easeInOut(duration: 1.0).repeatForever(autoreverses: true)
+    }
+
+    /// Status color used by non-badge elements (sparkline).
+    private var statusColor: Color { badgeColor }
 
     // MARK: - Background
 

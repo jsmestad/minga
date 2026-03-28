@@ -16,7 +16,8 @@ defmodule Minga.UI.Theme.Slots do
   | 0x20-0x29 | Popups + Breadcrumb |
   | 0x30-0x3A | Modeline + Status bar |
   | 0x40      | Accent        |
-  | 0x50-0x58 | Gutter + Git  |
+  | 0x50-0x5B | Gutter + Git + Highlights |
+  | 0x5C-0x61 | Agent status  |
   """
 
   # ── Editor + Tree ──
@@ -86,6 +87,14 @@ defmodule Minga.UI.Theme.Slots do
   @highlight_read_bg 0x59
   @highlight_write_bg 0x5A
   @selection_bg 0x5B
+
+  # ── Agent status (shared across Board cards, tab badges, chat header) ──
+  @agent_status_idle 0x5C
+  @agent_status_working 0x5D
+  @agent_status_iterating 0x5E
+  @agent_status_needs_you 0x5F
+  @agent_status_done 0x60
+  @agent_status_errored 0x61
 
   # ── Accent ──
   @accent 0x40
@@ -168,6 +177,18 @@ defmodule Minga.UI.Theme.Slots do
       {@highlight_read_bg, e.highlight_read_bg || 0x3A3F4B},
       {@highlight_write_bg, e.highlight_write_bg || 0x4A3F2B},
       {@selection_bg, e.selection_bg || 0x264F78}
+    ] ++ agent_status_pairs(theme, tb)
+  end
+
+  @spec agent_status_pairs(Minga.UI.Theme.t(), Minga.UI.Theme.TabBar.t() | nil) :: [color_pair()]
+  defp agent_status_pairs(theme, tb) do
+    [
+      {@agent_status_idle, theme.gutter.fg},
+      {@agent_status_working, theme.git.added_fg},
+      {@agent_status_iterating, theme.git.added_fg},
+      {@agent_status_needs_you, tb && tb.modified_fg},
+      {@agent_status_done, theme.tree.active_fg},
+      {@agent_status_errored, theme.gutter.error_fg}
     ]
   end
 

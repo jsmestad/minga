@@ -120,6 +120,28 @@ defmodule Minga.UI.Theme.SlotsTest do
       end
     end
 
+    test "agent status slots map to expected theme colors" do
+      theme = Minga.UI.Theme.get!(:doom_one)
+      pair_map = Map.new(Slots.to_color_pairs(theme))
+
+      assert pair_map[0x5C] == theme.gutter.fg
+      assert pair_map[0x5D] == theme.git.added_fg
+      assert pair_map[0x5E] == theme.git.added_fg
+      assert pair_map[0x5F] == theme.tab_bar.modified_fg
+      assert pair_map[0x60] == theme.tree.active_fg
+      assert pair_map[0x61] == theme.gutter.error_fg
+    end
+
+    test "agent status needs_you is nil when tab_bar is nil" do
+      theme = %{Minga.UI.Theme.get!(:doom_one) | tab_bar: nil}
+      pair_map = Map.new(Slots.to_color_pairs(theme))
+
+      assert is_nil(pair_map[0x5F])
+      # Other agent status slots should still have values
+      assert pair_map[0x5C] != nil
+      assert pair_map[0x5D] != nil
+    end
+
     test "all slot IDs are unique" do
       theme = Minga.UI.Theme.get!(:doom_one)
       pairs = Slots.to_color_pairs(theme)
