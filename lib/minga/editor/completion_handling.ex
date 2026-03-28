@@ -36,7 +36,7 @@ defmodule Minga.Editor.CompletionHandling do
 
     # Skip if already resolved for this index, or if doc is already present
     if item == nil or selected_idx == completion.last_resolved_index or
-         (item.documentation != "" and item.documentation != nil) do
+         item.documentation != "" do
       state
     else
       # Cancel previous resolve timer

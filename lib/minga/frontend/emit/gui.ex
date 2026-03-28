@@ -942,7 +942,7 @@ defmodule Minga.Frontend.Emit.GUI do
         # Skip agent chat windows (they don't have gutter)
         if window && is_pid(window.buffer) && !Content.agent_chat?(window.content) do
           is_active = win_id == ctx.windows.active
-          gutter_data = build_window_gutter(ctx, window, win_id, win_layout, is_active)
+          gutter_data = build_window_gutter(window, win_id, win_layout, is_active)
           [ProtocolGUI.encode_gui_gutter(gutter_data)]
         else
           []
@@ -955,13 +955,12 @@ defmodule Minga.Frontend.Emit.GUI do
   # Builds a minimal gutter entry for the agent prompt SemanticWindow.
   # Positions it at the bottom of the grid with no line numbers or sign column.
   @spec build_window_gutter(
-          ctx(),
           Minga.Editor.Window.t(),
           pos_integer(),
           Layout.window_layout(),
           boolean()
         ) :: ProtocolGUI.gutter_data()
-  defp build_window_gutter(ctx, window, win_id, win_layout, is_active) do
+  defp build_window_gutter(window, win_id, win_layout, is_active) do
     buf = window.buffer
     cursor_line = max(window.last_cursor_line, 0)
     viewport_top = max(window.last_viewport_top, 0)
@@ -987,7 +986,7 @@ defmodule Minga.Frontend.Emit.GUI do
         entries: []
       })
     else
-      build_gutter_entries(ctx, window, buf, win_pos, %{
+      build_gutter_entries(window, buf, win_pos, %{
         cursor_line: cursor_line,
         viewport_top: viewport_top,
         line_count: line_count
@@ -995,9 +994,9 @@ defmodule Minga.Frontend.Emit.GUI do
     end
   end
 
-  @spec build_gutter_entries(ctx(), Minga.Editor.Window.t(), pid(), map(), map()) ::
+  @spec build_gutter_entries(Minga.Editor.Window.t(), pid(), map(), map()) ::
           ProtocolGUI.gutter_data()
-  defp build_gutter_entries(ctx, window, buf, win_pos, params) do
+  defp build_gutter_entries(window, buf, win_pos, params) do
     %{cursor_line: cursor_line, viewport_top: viewport_top, line_count: line_count} = params
     line_number_style = Buffer.get_option(buf, :line_numbers)
 
@@ -1009,8 +1008,8 @@ defmodule Minga.Frontend.Emit.GUI do
 
     # Get signs and decorations for the buffer
     decorations = Buffer.decorations(buf)
-    diag_signs = ContentHelpers.diagnostic_signs_for_window(ctx, window)
-    git_signs = ContentHelpers.git_signs_for_window(ctx, window)
+    diag_signs = ContentHelpers.diagnostic_signs_for_window(window)
+    git_signs = ContentHelpers.git_signs_for_window(window)
 
     # Build entries for each visible line
     entries =

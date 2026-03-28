@@ -134,8 +134,8 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
       is_gui: is_gui,
       has_sign_column: has_sign_column,
       decorations: decorations,
-      diagnostic_signs: diagnostic_signs_for_window(state, window),
-      git_signs: git_signs_for_window(state, window),
+      diagnostic_signs: diagnostic_signs_for_window(window),
+      git_signs: git_signs_for_window(window),
       gutter_colors: state.theme.gutter,
       git_colors: state.theme.git
     }
@@ -850,8 +850,8 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
   end
 
   @doc "Returns git signs for a window's buffer."
-  @spec git_signs_for_window(state(), Window.t()) :: %{non_neg_integer() => atom()}
-  def git_signs_for_window(_state, %{buffer: buf}) when is_pid(buf) do
+  @spec git_signs_for_window(Window.t()) :: %{non_neg_integer() => atom()}
+  def git_signs_for_window(%{buffer: buf}) when is_pid(buf) do
     case Git.tracking_pid(buf) do
       nil ->
         %{}
@@ -866,8 +866,8 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpers do
   end
 
   @doc "Returns diagnostic signs for a window's buffer."
-  @spec diagnostic_signs_for_window(state(), Window.t()) :: %{non_neg_integer() => atom()}
-  def diagnostic_signs_for_window(_state, %{buffer: buf}) when is_pid(buf) do
+  @spec diagnostic_signs_for_window(Window.t()) :: %{non_neg_integer() => atom()}
+  def diagnostic_signs_for_window(%{buffer: buf}) when is_pid(buf) do
     case Buffer.file_path(buf) do
       nil -> %{}
       path -> Diagnostics.severity_by_line(SyncServer.path_to_uri(path))
