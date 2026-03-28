@@ -359,6 +359,7 @@ defmodule Minga.Editor do
   def handle_info({:minga_input, {:ready, width, height}}, state) do
     # Query capabilities from the frontend (may have been sent in extended ready).
     caps = Startup.fetch_capabilities(state.port_manager)
+    Startup.apply_gui_defaults(caps)
 
     new_state = %{
       EditorState.update_workspace(

@@ -309,6 +309,34 @@ defmodule Minga.Editor.Startup do
   end
 
   @doc """
+  Applies GUI-specific option defaults when the frontend is a native GUI.
+
+  Called after capabilities are fetched during the `:ready` handshake.
+  Only overrides options the user has not explicitly customized. Uses the
+  heuristic that if an option still holds its TUI-era default value, the
+  user did not set it.
+
+  Currently overrides:
+  - `:line_numbers` — `:hybrid` → `:absolute` (GUI users expect VS Code/Zed-style
+    absolute numbers; relative numbers look alien in a GUI context)
+  """
+  @spec apply_gui_defaults(Minga.Frontend.Capabilities.t()) :: :ok
+  def apply_gui_defaults(caps) do
+    alias Minga.Frontend.Capabilities
+
+    if Capabilities.gui?(caps) do
+      # Only override if the user hasn't explicitly set a preference.
+      # :hybrid is the TUI default; if it's still :hybrid, the user
+      # hasn't touched it, so we can safely switch to :absolute.
+      if Config.get(:line_numbers) == :hybrid do
+        Minga.Config.Options.set(:line_numbers, :absolute)
+      end
+    end
+
+    :ok
+  end
+
+  @doc """
   Sends font configuration to the frontend via the port protocol.
   """
   @spec send_font_config(Minga.Editor.State.t()) :: :ok
