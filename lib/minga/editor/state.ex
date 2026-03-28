@@ -635,7 +635,6 @@ defmodule Minga.Editor.State do
     apply_buffer_effects(state, effects)
   end
 
-
   @doc """
   Switches to the buffer at `idx`, making it active for the current window.
 
@@ -759,7 +758,6 @@ defmodule Minga.Editor.State do
   def scope_for_active_window(%{workspace: ws}) do
     WorkspaceState.scope_for_active_window(ws)
   end
-
 
   # ── Tab bar helpers ───────────────────────────────────────────────────────
 
