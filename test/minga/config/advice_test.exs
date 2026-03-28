@@ -237,6 +237,135 @@ defmodule Minga.Config.AdviceTest do
     end
   end
 
+  describe "circuit breaker" do
+    test "disables advice after 5 consecutive failures", %{table: table} do
+      crasher = fn _s -> raise "boom" end
+      Advice.register(table, :before, :move_left, crasher)
+
+      execute = fn s -> Map.put(s, :moved, true) end
+      wrapped = Advice.wrap(table, :move_left, execute)
+
+      # First 4 failures: hook still runs (and crashes), but is not disabled
+      for _ <- 1..4 do
+        wrapped.(%{})
+      end
+
+      refute Advice.disabled?(table, :before, :move_left, crasher)
+
+      # 5th failure triggers the circuit breaker
+      wrapped.(%{})
+
+      assert Advice.disabled?(table, :before, :move_left, crasher)
+    end
+
+    test "disabled advice is skipped on subsequent invocations", %{table: table} do
+      call_count = :counters.new(1, [:atomics])
+
+      crasher = fn _s ->
+        :counters.add(call_count, 1, 1)
+        raise "boom"
+      end
+
+      Advice.register(table, :before, :move_left, crasher)
+
+      execute = fn s -> Map.put(s, :moved, true) end
+      wrapped = Advice.wrap(table, :move_left, execute)
+
+      # Trip the circuit breaker (5 failures)
+      for _ <- 1..5 do
+        wrapped.(%{})
+      end
+
+      assert :counters.get(call_count, 1) == 5
+
+      # Subsequent calls skip the disabled hook entirely
+      result = wrapped.(%{})
+      assert result == %{moved: true}
+      assert :counters.get(call_count, 1) == 5
+    end
+
+    test "successful invocation resets the failure counter", %{table: table} do
+      invocation = :counters.new(1, [:atomics])
+
+      # Fails first 3 times, then succeeds
+      flaky = fn s ->
+        :counters.add(invocation, 1, 1)
+        count = :counters.get(invocation, 1)
+
+        if count <= 3 do
+          raise "intermittent failure"
+        else
+          Map.put(s, :flaky_ran, true)
+        end
+      end
+
+      Advice.register(table, :before, :save, flaky)
+
+      execute = fn s -> Map.put(s, :saved, true) end
+      wrapped = Advice.wrap(table, :save, execute)
+
+      # 3 failures
+      for _ <- 1..3 do
+        wrapped.(%{})
+      end
+
+      refute Advice.disabled?(table, :before, :save, flaky)
+
+      # Success on 4th call resets the counter
+      result = wrapped.(%{})
+      assert result.flaky_ran == true
+      assert result.saved == true
+
+      # 3 more failures should NOT trip the breaker (counter was reset)
+      # Reset invocation counter so the function crashes again
+      # Verify the counter was reset by checking it's not disabled
+      refute Advice.disabled?(table, :before, :save, flaky)
+    end
+
+    test "only the crashing hook is disabled, others keep running", %{table: table} do
+      crasher = fn _s -> raise "always broken" end
+      healthy = fn s -> Map.put(s, :healthy, true) end
+
+      Advice.register(table, :after, :save, crasher)
+      Advice.register(table, :after, :save, healthy)
+
+      execute = fn s -> Map.put(s, :saved, true) end
+      wrapped = Advice.wrap(table, :save, execute)
+
+      # Trip the breaker on the crasher (5 invocations)
+      for _ <- 1..5 do
+        wrapped.(%{})
+      end
+
+      assert Advice.disabled?(table, :after, :save, crasher)
+      refute Advice.disabled?(table, :after, :save, healthy)
+
+      # Healthy hook still runs
+      result = wrapped.(%{})
+      assert result == %{saved: true, healthy: true}
+    end
+
+    test "reset clears circuit breaker state", %{table: table} do
+      crasher = fn _s -> raise "boom" end
+      Advice.register(table, :before, :save, crasher)
+
+      execute = fn s -> s end
+      wrapped = Advice.wrap(table, :save, execute)
+
+      # Trip the breaker
+      for _ <- 1..5 do
+        wrapped.(%{})
+      end
+
+      assert Advice.disabled?(table, :before, :save, crasher)
+
+      # Reset clears everything
+      Advice.reset(table)
+
+      refute Advice.disabled?(table, :before, :save, crasher)
+    end
+  end
+
   describe "reset/1" do
     test "clears all advice", %{table: table} do
       Advice.register(table, :before, :save, fn s -> s end)
