@@ -130,6 +130,7 @@ defmodule Minga.Config.Options do
           | :agent_mention_max_file_size
           | :agent_notify_debounce
           | :agent_diagnostic_feedback
+          | :agent_flush_before_shell
           | :confirm_quit
           | :font_family
           | :font_size
@@ -228,6 +229,7 @@ defmodule Minga.Config.Options do
     {:agent_mention_max_file_size, :pos_integer, 262_144},
     {:agent_notify_debounce, :pos_integer, 5_000},
     {:agent_diagnostic_feedback, :boolean, true},
+    {:agent_flush_before_shell, :boolean, true},
     {:confirm_quit, :boolean, true},
     {:cursorline, :boolean, true},
     {:nav_flash, :boolean, true},

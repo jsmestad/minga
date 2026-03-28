@@ -440,6 +440,7 @@ defmodule Minga.Agent.Tools do
         "required" => ["command"]
       },
       callback: fn args ->
+        flush_before_shell()
         timeout_secs = min(args["timeout"] || 30, 300)
         Shell.execute(args["command"], root, timeout_secs)
       end
@@ -895,6 +896,34 @@ defmodule Minga.Agent.Tools do
         LspCodeActions.execute(path, args["line"], opts)
       end
     )
+  end
+
+  # ── Pre-shell buffer flush ─────────────────────────────────────────────────
+
+  # Saves all dirty file-backed buffers to disk before running shell commands.
+  # Build tools read from the filesystem, not from buffer memory, so in-memory
+  # edits must be flushed for the build to see them. Gated by the
+  # :agent_flush_before_shell config option (default: true).
+  @spec flush_before_shell() :: :ok
+  defp flush_before_shell do
+    if Config.get(:agent_flush_before_shell) do
+      {saved, warnings} = Minga.Buffer.save_all_dirty()
+
+      if saved > 0 do
+        Minga.Log.debug(:agent, "Flushed #{saved} dirty buffer(s) to disk before shell command")
+      end
+
+      for warning <- warnings do
+        Minga.Log.warning(:agent, "Pre-shell flush: #{warning}")
+      end
+
+      :ok
+    else
+      :ok
+    end
+  rescue
+    # Config not available (headless/test mode)
+    _ -> :ok
   end
 
   # ── Diagnostic feedback ──────────────────────────────────────────────────────

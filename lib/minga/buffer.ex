@@ -191,6 +191,45 @@ defmodule Minga.Buffer do
   @spec save(server()) :: :ok | {:error, term()}
   defdelegate save(server), to: Server
 
+  @doc """
+  Saves all dirty file-backed buffers to disk.
+
+  Enumerates the Buffer.Registry, filters for dirty buffers, and saves each one.
+  Read-only buffers and save failures are logged as warnings but do not block
+  other saves. Returns the count of successfully saved buffers and a list of
+  any warnings (path + error reason).
+  """
+  @spec save_all_dirty() :: {non_neg_integer(), [String.t()]}
+  def save_all_dirty do
+    pids = Registry.select(Minga.Buffer.Registry, [{{:_, :"$1", :_}, [], [:"$1"]}])
+
+    {saved, warnings} =
+      Enum.reduce(pids, {0, []}, fn pid, {count, warns} ->
+        save_if_dirty(pid, count, warns)
+      end)
+
+    {saved, Enum.reverse(warnings)}
+  end
+
+  @spec save_if_dirty(pid(), non_neg_integer(), [String.t()]) ::
+          {non_neg_integer(), [String.t()]}
+  defp save_if_dirty(pid, count, warns) do
+    if Process.alive?(pid) and Server.dirty?(pid) do
+      case Server.save(pid) do
+        :ok ->
+          {count + 1, warns}
+
+        {:error, reason} ->
+          path = Server.file_path(pid) || "unknown"
+          {count, ["failed to save #{path}: #{inspect(reason)}" | warns]}
+      end
+    else
+      {count, warns}
+    end
+  catch
+    :exit, _ -> {count, warns}
+  end
+
   @doc "Save even if the buffer appears clean."
   @spec force_save(server()) :: :ok | {:error, term()}
   defdelegate force_save(server), to: Server
