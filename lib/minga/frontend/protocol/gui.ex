@@ -159,6 +159,7 @@ defmodule Minga.Frontend.Protocol.GUI do
   # advancing, instead of crashing. See ProtocolDecoder.swift default case.
 
   @op_clipboard_write 0x90
+  @op_gui_line_spacing 0x92
 
   # ── GUI action sub-opcodes (Frontend → BEAM) ──
 
@@ -868,6 +869,21 @@ defmodule Minga.Frontend.Protocol.GUI do
     payload_len = 1 + 2 + text_len
 
     <<@op_clipboard_write, payload_len::16, target_byte::8, text_len::16, text_bytes::binary>>
+  end
+
+  # ── Line spacing (forward-compatible, 0x92) ──
+
+  @doc """
+  Encodes a gui_line_spacing command.
+
+  Uses the forward-compatible 0x90+ format: opcode(1) + payload_length(2) + payload.
+  Payload: spacing_x100(2) — the spacing multiplier times 100 as a 16-bit unsigned integer.
+  For example, 1.2 is encoded as 120, 1.0 as 100.
+  """
+  @spec encode_gui_line_spacing(number()) :: binary()
+  def encode_gui_line_spacing(spacing) when is_number(spacing) and spacing >= 1.0 do
+    spacing_x100 = round(spacing * 100)
+    <<@op_gui_line_spacing, 2::16, spacing_x100::16>>
   end
 
   # ── File tree ──

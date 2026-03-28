@@ -319,6 +319,8 @@ defmodule Minga.Editor.Startup do
   Currently overrides:
   - `:line_numbers` — `:hybrid` → `:absolute` (GUI users expect VS Code/Zed-style
     absolute numbers; relative numbers look alien in a GUI context)
+  - `:line_spacing` — `1.0` → `1.2` (GUI text benefits from breathing room;
+    TUI stays at 1.0 because terminal cells have fixed height)
   """
   @spec apply_gui_defaults(Minga.Frontend.Capabilities.t()) :: :ok
   def apply_gui_defaults(caps) do
@@ -331,6 +333,10 @@ defmodule Minga.Editor.Startup do
       if Config.get(:line_numbers) == :hybrid do
         Minga.Config.Options.set(:line_numbers, :absolute)
       end
+
+      if Config.get(:line_spacing) == 1.0 do
+        Minga.Config.Options.set(:line_spacing, 1.2)
+      end
     end
 
     :ok
@@ -338,6 +344,9 @@ defmodule Minga.Editor.Startup do
 
   @doc """
   Sends font configuration to the frontend via the port protocol.
+
+  Also sends the line_spacing value so the frontend can apply the
+  spacing multiplier to row positioning.
   """
   @spec send_font_config(Minga.Editor.State.t()) :: :ok
   def send_font_config(%{port_manager: nil}), do: :ok
@@ -350,6 +359,9 @@ defmodule Minga.Editor.Startup do
     fallback = Config.get(:font_fallback)
 
     Minga.Frontend.configure_font(port, family, size, ligatures, weight, fallback || [])
+
+    line_spacing = Config.get(:line_spacing) || 1.0
+    Minga.Frontend.send_line_spacing(port, line_spacing)
   catch
     :exit, _ -> :ok
   end

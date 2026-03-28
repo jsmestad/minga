@@ -132,6 +132,7 @@ defmodule Minga.Config.Options do
           | :agent_diagnostic_feedback
           | :agent_flush_before_shell
           | :confirm_quit
+          | :line_spacing
           | :font_family
           | :font_size
           | :font_weight
@@ -235,6 +236,7 @@ defmodule Minga.Config.Options do
     {:nav_flash, :boolean, true},
     {:nav_flash_threshold, :pos_integer, 5},
     {:whichkey_layout, {:enum, [:bottom, :float]}, :bottom},
+    {:line_spacing, :float_or_nil, 1.0},
     {:font_family, :string, "Menlo"},
     {:font_size, :pos_integer, 13},
     {:font_weight, {:enum, [:thin, :light, :regular, :medium, :semibold, :bold, :heavy, :black]},

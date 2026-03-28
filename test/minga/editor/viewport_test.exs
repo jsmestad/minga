@@ -301,4 +301,39 @@ defmodule Minga.Editor.ViewportTest do
       assert Viewport.content_cols(vp, 100) >= 1
     end
   end
+
+  describe "effective_rows/2" do
+    test "line_spacing 1.0 returns raw rows unchanged" do
+      assert Viewport.effective_rows(30, 1.0) == 30
+    end
+
+    test "line_spacing 1.5 reduces visible rows" do
+      # 30 / 1.5 = 20
+      assert Viewport.effective_rows(30, 1.5) == 20
+    end
+
+    test "line_spacing 1.2 reduces visible rows (GUI default)" do
+      # 30 / 1.2 = 25
+      assert Viewport.effective_rows(30, 1.2) == 25
+    end
+
+    test "line_spacing 2.0 halves visible rows" do
+      # 20 / 2.0 = 10
+      assert Viewport.effective_rows(20, 2.0) == 10
+    end
+
+    test "fractional result floors to integer" do
+      # 30 / 1.3 ≈ 23.076... → 23
+      assert Viewport.effective_rows(30, 1.3) == 23
+    end
+
+    test "effective_rows is always at least 1" do
+      assert Viewport.effective_rows(1, 3.0) == 1
+      assert Viewport.effective_rows(2, 5.0) == 1
+    end
+
+    test "default spacing (no second arg) returns raw rows" do
+      assert Viewport.effective_rows(24) == 24
+    end
+  end
 end

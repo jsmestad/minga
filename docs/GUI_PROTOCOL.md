@@ -54,6 +54,7 @@ The BEAM-side encoder must use this envelope for all new opcodes (0x90+). Curren
 | Opcode | Name | Description |
 |--------|------|-------------|
 | 0x90 | clipboard_write | Write text to the system clipboard |
+| 0x92 | gui_line_spacing | Line spacing multiplier for the renderer |
 
 ### 0x70 — gui_file_tree
 
@@ -856,6 +857,20 @@ This convention is enforced on the BEAM side: all new opcodes >= 0x90 must use t
 
 **Current 0x90+ opcodes:**
 - `OP_CLIPBOARD_WRITE (0x90)` — clipboard write command (length-prefixed)
+- `OP_GUI_LINE_SPACING (0x92)` — line spacing multiplier (length-prefixed)
+
+### 0x92 — gui_line_spacing
+
+Sends the line spacing multiplier to the GUI frontend. Sent once during startup (alongside `set_font`) and again if the user changes the config at runtime.
+
+```
+opcode(1=0x92) + payload_length(2=0x0002) + spacing_x100(2)
+```
+
+Fields:
+- `spacing_x100`: the spacing multiplier times 100 as a 16-bit unsigned integer. For example, 1.0 is 100, 1.2 is 120, 1.5 is 150.
+
+The frontend uses this to compute `displayCellH = cellH * (spacing_x100 / 100.0)` for all row positioning. The BEAM adjusts its viewport row count using the same multiplier, so scrolling math stays correct on both sides.
 
 ## Behavioral Contract
 

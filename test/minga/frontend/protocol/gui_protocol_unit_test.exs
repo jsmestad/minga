@@ -187,4 +187,30 @@ defmodule Minga.Frontend.Protocol.GUIProtocolUnitTest do
                ProtocolGUI.decode_gui_action(0x24, payload)
     end
   end
+
+  describe "encode_gui_line_spacing/1" do
+    test "encodes spacing 1.2 as 120" do
+      binary = ProtocolGUI.encode_gui_line_spacing(1.2)
+
+      <<0x92, payload_len::16, spacing_encoded::16>> = binary
+
+      assert payload_len == 2
+      assert spacing_encoded == 120
+    end
+
+    test "encodes spacing 1.0 as 100" do
+      <<0x92, _::16, spacing_encoded::16>> = ProtocolGUI.encode_gui_line_spacing(1.0)
+      assert spacing_encoded == 100
+    end
+
+    test "encodes spacing 1.5 as 150" do
+      <<0x92, _::16, spacing_encoded::16>> = ProtocolGUI.encode_gui_line_spacing(1.5)
+      assert spacing_encoded == 150
+    end
+
+    test "forward-compatible: opcode + length prefix is skippable" do
+      binary = ProtocolGUI.encode_gui_line_spacing(1.2)
+      <<0x92, payload_len::16, _payload::binary-size(payload_len)>> = binary
+    end
+  end
 end
