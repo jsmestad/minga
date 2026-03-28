@@ -416,6 +416,7 @@ final class SpyEncoder: InputEncoder, Sendable {
     func sendAgentRequestChanges() { /* no-op for tests */ }
     func sendAgentDismiss() { /* no-op for tests */ }
     func sendChangeSummaryClick(index: UInt32) { /* no-op for tests */ }
+    func sendScrollToLine(line: UInt32) { /* no-op for tests */ }
 }
 
 @Suite("EditorNSView Resize")

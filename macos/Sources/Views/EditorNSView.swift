@@ -239,7 +239,9 @@ final class EditorNSView: MTKView {
         }
 
         // Flash scroll indicator when viewport position changes (keyboard scroll, cursor movement).
-        if fs.viewportTopLine != lastViewportTopForScroll && fs.viewportTopLine != 0xFFFF_FFFF {
+        // Skip scroll indicator updates while the user is dragging to prevent feedback loops.
+        if !isDraggingScrollIndicator &&
+            fs.viewportTopLine != lastViewportTopForScroll && fs.viewportTopLine != 0xFFFF_FFFF {
             lastViewportTopForScroll = fs.viewportTopLine
             flashScrollIndicator()
         }
@@ -377,6 +379,34 @@ final class EditorNSView: MTKView {
             encoder.sendResize(cols: newCols, rows: newRows)
             PortLogger.info("Window resized: \(newCols)x\(newRows) cells")
         }
+    }
+
+    // MARK: - Scroll indicator interaction
+
+    /// Width of the scroll indicator hit-test region (wider than the visual indicator for easy clicking).
+    private let scrollTrackHitWidth: CGFloat = 20.0
+
+    /// Whether the user is currently dragging the scroll indicator.
+    private var isDraggingScrollIndicator = false
+
+    /// Tests whether a point is in the scroll indicator track region (right edge).
+    private func isInScrollTrack(_ point: NSPoint) -> Bool {
+        let trackX = bounds.width - scrollTrackHitWidth
+        return point.x >= trackX && point.x <= bounds.width
+    }
+
+    /// Converts a Y coordinate in the scroll track to a target line number.
+    private func scrollTrackYToLine(_ y: CGFloat) -> UInt32 {
+        let fs = dispatcher.frameState
+        let totalLines = fs.totalLineCount
+        let visibleRows = UInt32(fs.rows)
+        guard totalLines > visibleRows else { return 0 }
+
+        // In AppKit, Y increases upward. Convert to top-down.
+        let flippedY = bounds.height - y
+        let proportion = max(0, min(1, flippedY / bounds.height))
+        let maxTop = Int64(totalLines) - Int64(visibleRows)
+        return UInt32(max(0, min(maxTop, Int64(Double(proportion) * Double(maxTop)))))
     }
 
     // MARK: - Tracking area
@@ -678,6 +708,16 @@ final class EditorNSView: MTKView {
     // MARK: - Mouse
 
     override func mouseDown(with event: NSEvent) {
+        // Scroll indicator track: intercept clicks on the right edge.
+        let point = convert(event.locationInWindow, from: nil)
+        if isInScrollTrack(point) {
+            isDraggingScrollIndicator = true
+            let line = scrollTrackYToLine(point.y)
+            encoder.sendScrollToLine(line: line)
+            flashScrollIndicator()
+            return
+        }
+
         resetCursorBlink()
         let (row, col) = cellPosition(from: event)
         let cc = UInt8(clamping: event.clickCount)
@@ -687,6 +727,12 @@ final class EditorNSView: MTKView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        if isDraggingScrollIndicator {
+            isDraggingScrollIndicator = false
+            flashScrollIndicator()
+            return
+        }
+
         let (row, col) = cellPosition(from: event)
         encoder.sendMouseEvent(row: row, col: col, button: MOUSE_BUTTON_LEFT,
                                modifiers: modifierBits(from: event.modifierFlags),
@@ -722,6 +768,13 @@ final class EditorNSView: MTKView {
     }
 
     override func mouseDragged(with event: NSEvent) {
+        if isDraggingScrollIndicator {
+            let point = convert(event.locationInWindow, from: nil)
+            let line = scrollTrackYToLine(point.y)
+            encoder.sendScrollToLine(line: line)
+            return
+        }
+
         let (row, col) = cellPosition(from: event)
         encoder.sendMouseEvent(row: row, col: col, button: MOUSE_BUTTON_LEFT,
                                modifiers: modifierBits(from: event.modifierFlags),

@@ -738,6 +738,7 @@ opcode(1) + action_type(1) + payload...
 | 0x1C | git_unstage_all | (empty) | Unstage all |
 | 0x1D | git_commit | msg_len(2) + msg(msg_len) | Commit with message |
 | 0x1E | git_open_file | path_len(2) + path(path_len) | Open file in editor |
+| 0x2F | scroll_to_line | line(4) | Scroll viewport to target line (from scroll indicator click/drag) |
 
 ## Theme Color Slots
 
