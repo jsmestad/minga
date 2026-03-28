@@ -95,7 +95,8 @@ defmodule Minga.Frontend.Emit.GUI do
     build_gui_gutter_commands(ctx) ++
       build_gui_cursorline_commands(ctx) ++
       build_gui_gutter_separator_commands(ctx) ++
-      build_gui_split_separator_commands(ctx)
+      build_gui_split_separator_commands(ctx) ++
+      build_gui_indent_guide_commands(ctx)
   end
 
   @doc """
@@ -1384,4 +1385,109 @@ defmodule Minga.Frontend.Emit.GUI do
       ProtocolGUI.encode_gui_change_summary([], 0)
     end
   end
+
+  # ── Indent guides ──
+
+  @spec build_gui_indent_guide_commands(ctx()) :: [binary()]
+  defp build_gui_indent_guide_commands(ctx) do
+    indent_guides_enabled? =
+      try do
+        Config.get(:indent_guides)
+      catch
+        :exit, _ -> true
+      end
+
+    if indent_guides_enabled? do
+      layout = ctx.layout
+      windows = ctx.windows.map
+
+      Enum.flat_map(layout.window_layouts, fn {win_id, win_layout} ->
+        build_indent_guide_for_window(Map.get(windows, win_id), win_id, win_layout)
+      end)
+    else
+      []
+    end
+  end
+
+  @spec build_indent_guide_for_window(
+          Minga.Editor.Window.t() | nil,
+          pos_integer(),
+          Layout.window_layout()
+        ) ::
+          [binary()]
+  defp build_indent_guide_for_window(nil, win_id, _layout), do: return_empty_guides(win_id)
+
+  defp build_indent_guide_for_window(window, win_id, win_layout) do
+    if is_pid(window.buffer) && !Content.agent_chat?(window.content) do
+      {_cr, _cc, _cw, content_height} = win_layout.content
+      build_window_indent_guides(window, win_id, content_height)
+    else
+      return_empty_guides(win_id)
+    end
+  end
+
+  @spec build_window_indent_guides(Minga.Editor.Window.t(), pos_integer(), non_neg_integer()) ::
+          [binary()]
+  defp build_window_indent_guides(window, win_id, content_height) do
+    buf = window.buffer
+    viewport_top = max(window.last_viewport_top, 0)
+    line_count = max(window.last_line_count, 0)
+    visible_count = min(content_height, max(line_count - viewport_top, 0))
+
+    if visible_count <= 0 or line_count == 0 do
+      return_empty_guides(win_id)
+    else
+      compute_and_encode_guides(window, win_id, buf, viewport_top, visible_count)
+    end
+  end
+
+  @spec compute_and_encode_guides(
+          Minga.Editor.Window.t(),
+          pos_integer(),
+          pid(),
+          non_neg_integer(),
+          pos_integer()
+        ) ::
+          [binary()]
+  defp compute_and_encode_guides(window, win_id, buf, viewport_top, visible_count) do
+    {_cursor_line, cursor_col} = window.cursor
+
+    tab_width =
+      try do
+        Buffer.get_option(buf, :tab_width)
+      catch
+        :exit, _ -> 2
+      end
+
+    lines =
+      try do
+        Buffer.Server.get_lines(buf, viewport_top, visible_count)
+      catch
+        :exit, _ -> []
+      end
+
+    guides = Minga.Core.IndentGuide.compute(lines, tab_width, cursor_col)
+    encode_guides(guides, win_id, tab_width)
+  end
+
+  @spec encode_guides([Minga.Core.IndentGuide.guide()], pos_integer(), pos_integer()) ::
+          [binary()]
+  defp encode_guides([], win_id, _tab_width), do: return_empty_guides(win_id)
+
+  defp encode_guides(guides, win_id, tab_width) do
+    active_guide = Enum.find(guides, fn g -> g.active end)
+    active_col = if active_guide, do: active_guide.col, else: 0xFFFF
+
+    guide_data = %{
+      window_id: win_id,
+      tab_width: tab_width,
+      active_guide_col: active_col,
+      guide_cols: Enum.map(guides, & &1.col)
+    }
+
+    [ProtocolGUI.encode_gui_indent_guides(guide_data)]
+  end
+
+  @spec return_empty_guides(pos_integer()) :: [binary()]
+  defp return_empty_guides(win_id), do: [ProtocolGUI.encode_gui_indent_guides_empty(win_id)]
 end

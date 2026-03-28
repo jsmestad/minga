@@ -54,10 +54,8 @@ The BEAM-side encoder must use this envelope for all new opcodes (0x90+). Curren
 | Opcode | Name | Description |
 |--------|------|-------------|
 | 0x90 | clipboard_write | Write text to the system clipboard |
+| 0x91 | gui_indent_guides | Indent guide positions per window |
 | 0x92 | gui_line_spacing | Line spacing multiplier for the renderer |
-
-### 0x70 — gui_file_tree
-
 File tree sidebar entries for the native sidebar view.
 
 ```
@@ -857,7 +855,28 @@ This convention is enforced on the BEAM side: all new opcodes >= 0x90 must use t
 
 **Current 0x90+ opcodes:**
 - `OP_CLIPBOARD_WRITE (0x90)` — clipboard write command (length-prefixed)
+- `OP_GUI_INDENT_GUIDES (0x91)` — indent guide positions per window (length-prefixed)
 - `OP_GUI_LINE_SPACING (0x92)` — line spacing multiplier (length-prefixed)
+
+### 0x91 — gui_indent_guides
+
+Sends indent guide column positions for one window. Each guide is a vertical line the frontend draws at the given character column. The active guide (containing the cursor) is identified so the frontend can highlight it.
+
+```
+opcode(1=0x91) + payload_length(2) + window_id(2) + tab_width(1) + active_guide_col(2) + guide_count(1) + guide_cols...
+
+Per guide:
+  col(2)
+```
+
+Fields:
+- `window_id`: which editor window these guides belong to
+- `tab_width`: the tab width used for indent computation (for frontend reference)
+- `active_guide_col`: the character column of the active guide (0xFFFF = no active guide)
+- `guide_count`: number of guide columns that follow
+- `col`: character column offset from content start (not screen left). The frontend converts to pixel position using `col * cellWidth + gutterPixelWidth`
+
+The BEAM sends this per frame as part of the atomic Metal command batch. Guides are gated by the `indent_guides` config option (default `true`). When disabled, no opcode is sent.
 
 ### 0x92 — gui_line_spacing
 

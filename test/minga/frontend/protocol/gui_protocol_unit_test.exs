@@ -188,6 +188,65 @@ defmodule Minga.Frontend.Protocol.GUIProtocolUnitTest do
     end
   end
 
+  describe "encode_gui_indent_guides/1" do
+    test "encodes guides with correct opcode, window_id, and columns" do
+      data = %{
+        window_id: 1,
+        tab_width: 2,
+        active_guide_col: 4,
+        guide_cols: [2, 4]
+      }
+
+      binary = ProtocolGUI.encode_gui_indent_guides(data)
+
+      # 0x91 opcode, payload_len, window_id, tab_width, active_col, guide_count, cols
+      <<0x91, payload_len::16, win_id::16, tw::8, active_col::16, count::8, rest::binary>> =
+        binary
+
+      assert win_id == 1
+      assert tw == 2
+      assert active_col == 4
+      assert count == 2
+      assert payload_len == 6 + 2 * 2
+
+      <<col1::16, col2::16>> = rest
+      assert col1 == 2
+      assert col2 == 4
+    end
+
+    test "encodes empty guide list" do
+      binary = ProtocolGUI.encode_gui_indent_guides_empty(3)
+
+      <<0x91, payload_len::16, win_id::16, _tw::8, active_col::16, count::8>> = binary
+
+      assert win_id == 3
+      assert active_col == 0xFFFF
+      assert count == 0
+      assert payload_len == 6
+    end
+
+    test "guide columns round-trip through binary encoding" do
+      cols = [4, 8, 12, 16]
+
+      data = %{
+        window_id: 2,
+        tab_width: 4,
+        active_guide_col: 8,
+        guide_cols: cols
+      }
+
+      binary = ProtocolGUI.encode_gui_indent_guides(data)
+
+      <<0x91, _len::16, _win::16, _tw::8, _active::16, count::8, col_data::binary>> = binary
+
+      decoded_cols =
+        for <<col::16 <- col_data>>, do: col
+
+      assert count == 4
+      assert decoded_cols == cols
+    end
+  end
+
   describe "encode_gui_line_spacing/1" do
     test "encodes spacing 1.2 as 120" do
       binary = ProtocolGUI.encode_gui_line_spacing(1.2)
