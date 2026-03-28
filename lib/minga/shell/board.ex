@@ -24,6 +24,7 @@ defmodule Minga.Shell.Board do
 
   alias Minga.Editor.DisplayList
   alias Minga.Editor.DisplayList.{Cursor, Frame}
+  alias Minga.Frontend.Emit.Context, as: EmitContext
   alias Minga.Shell.Board.Card
   alias Minga.Shell.Board.State, as: BoardState
 
@@ -295,7 +296,8 @@ defmodule Minga.Shell.Board do
       # then render the editor workspace normally.
       if Minga.Frontend.gui?(editor_state.capabilities) do
         # Send gui_board with visible=false to hide BoardView
-        Minga.Frontend.Emit.GUI.sync_swiftui_chrome(editor_state)
+        ctx = EmitContext.from_editor_state(editor_state)
+        Minga.Frontend.Emit.GUI.sync_swiftui_chrome(ctx)
       end
 
       Minga.Editor.Renderer.render_buffer(editor_state)
@@ -309,7 +311,8 @@ defmodule Minga.Shell.Board do
     if gui? do
       # GUI: send the gui_board opcode so Swift shows BoardView.
       # Also send chrome sync (status bar, theme, etc.).
-      Minga.Frontend.Emit.GUI.sync_swiftui_chrome(editor_state)
+      ctx = EmitContext.from_editor_state(editor_state)
+      Minga.Frontend.Emit.GUI.sync_swiftui_chrome(ctx)
     else
       # TUI: render card grid as cell grid commands
       vp = editor_state.workspace.viewport
