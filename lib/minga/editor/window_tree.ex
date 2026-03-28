@@ -412,6 +412,22 @@ defmodule Minga.Editor.WindowTree do
   end
 
   defp do_resize(
+         {:split, :vertical, left, right, size},
+         {rect_row, rect_col, width, height},
+         :horizontal,
+         separator_pos,
+         new_pos
+       ) do
+    usable = width - 1
+    left_width = clamp_size(size, usable)
+    left_rect = {rect_row, rect_col, left_width, height}
+    right_rect = {rect_row, rect_col + left_width + 1, max(usable - left_width, 1), height}
+    node = {:split, :vertical, left, right, size}
+
+    recurse_resize_children(node, left_rect, right_rect, :horizontal, separator_pos, new_pos)
+  end
+
+  defp do_resize(
          {:split, :horizontal, left, right, size},
          {rect_row, rect_col, width, height},
          :vertical,
