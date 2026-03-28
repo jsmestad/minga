@@ -8,6 +8,7 @@ defmodule Minga.UI.Picker.ProjectSource do
 
   @behaviour Minga.UI.Picker.Source
 
+  alias Minga.UI.Picker.Context
   alias Minga.UI.Picker.Item
 
   alias Minga.Project
@@ -17,8 +18,8 @@ defmodule Minga.UI.Picker.ProjectSource do
   def title, do: "Switch project"
 
   @impl true
-  @spec candidates(term()) :: [Item.t()]
-  def candidates(_context) do
+  @spec candidates(Context.t()) :: [Item.t()]
+  def candidates(_ctx) do
     Project.known_projects()
     |> Enum.with_index()
     |> Enum.map(fn {root, _idx} ->

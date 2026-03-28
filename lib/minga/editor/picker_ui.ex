@@ -22,6 +22,7 @@ defmodule Minga.Editor.PickerUI do
   alias Minga.Editor.State.Picker, as: PickerState
   alias Minga.Editor.State.WhichKey, as: WhichKeyState
   alias Minga.UI.Picker
+  alias Minga.UI.Picker.Context
 
   import Bitwise
 
@@ -89,7 +90,9 @@ defmodule Minga.Editor.PickerUI do
         state
       end
 
-    items = source_module.candidates(state_with_ctx)
+    # Build Context for source
+    ctx = Context.from_editor_state(state_with_ctx)
+    items = source_module.candidates(ctx)
 
     case items do
       [] ->
@@ -509,7 +512,8 @@ defmodule Minga.Editor.PickerUI do
   def refresh_items(%{shell_state: %{picker_ui: %{picker: nil}}} = state), do: state
 
   def refresh_items(%{shell_state: %{picker_ui: %{picker: picker, source: source} = pui}} = state) do
-    items = source.candidates(state)
+    ctx = Context.from_editor_state(state)
+    items = source.candidates(ctx)
     refreshed = %{picker | items: items}
     refreshed = Picker.filter(refreshed, picker.query)
 
@@ -731,7 +735,8 @@ defmodule Minga.Editor.PickerUI do
          new_source,
          prefix
        ) do
-    items = new_source.candidates(state)
+    ctx = Context.from_editor_state(state)
+    items = new_source.candidates(ctx)
     max_vis = state.workspace.viewport.rows - 3
     max_vis = max(5, min(max_vis, state.workspace.viewport.rows - 3))
     picker = Picker.new(items, title: new_source.title(), max_visible: max_vis)
@@ -754,7 +759,8 @@ defmodule Minga.Editor.PickerUI do
   defp switch_back_to_original(
          %{shell_state: %{picker_ui: %{original_source: orig} = pui}} = state
        ) do
-    items = orig.candidates(state)
+    ctx = Context.from_editor_state(state)
+    items = orig.candidates(ctx)
     max_vis = state.workspace.viewport.rows - 3
     max_vis = max(5, min(max_vis, state.workspace.viewport.rows - 3))
     picker = Picker.new(items, title: orig.title(), max_visible: max_vis)

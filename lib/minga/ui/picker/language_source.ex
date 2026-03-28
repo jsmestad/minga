@@ -14,6 +14,7 @@ defmodule Minga.UI.Picker.LanguageSource do
   alias Minga.Editor.Commands.BufferManagement
   alias Minga.Language
   alias Minga.UI.Devicon
+  alias Minga.UI.Picker.Context
   alias Minga.UI.Picker.Item
 
   @impl true
@@ -21,9 +22,9 @@ defmodule Minga.UI.Picker.LanguageSource do
   def title, do: "Set language"
 
   @impl true
-  @spec candidates(term()) :: [Item.t()]
-  def candidates(state) do
-    current_ft = current_filetype(state)
+  @spec candidates(Context.t()) :: [Item.t()]
+  def candidates(ctx) do
+    current_ft = current_filetype(ctx)
 
     Language.all()
     |> Enum.map(fn %Language{} = lang -> format_candidate(lang, current_ft) end)
@@ -65,12 +66,12 @@ defmodule Minga.UI.Picker.LanguageSource do
     |> Enum.map_join(", ", &".#{&1}")
   end
 
-  @spec current_filetype(term()) :: atom()
-  defp current_filetype(%{workspace: %{buffers: %{active: buf}}}) when is_pid(buf) do
+  @spec current_filetype(Context.t()) :: atom()
+  defp current_filetype(%Context{buffers: %{active: buf}}) when is_pid(buf) do
     Buffer.filetype(buf)
   catch
     :exit, _ -> :text
   end
 
-  defp current_filetype(_state), do: :text
+  defp current_filetype(_ctx), do: :text
 end

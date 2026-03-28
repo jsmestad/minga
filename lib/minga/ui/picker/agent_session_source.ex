@@ -9,6 +9,7 @@ defmodule Minga.UI.Picker.AgentSessionSource do
 
   @behaviour Minga.UI.Picker.Source
 
+  alias Minga.UI.Picker.Context
   alias Minga.UI.Picker.Item
 
   alias Minga.Agent.Session
@@ -27,8 +28,8 @@ defmodule Minga.UI.Picker.AgentSessionSource do
   def preview?, do: false
 
   @impl true
-  @spec candidates(term()) :: [Item.t()]
-  def candidates(%{shell_state: %{tab_bar: %TabBar{} = tb}} = _state) do
+  @spec candidates(Context.t()) :: [Item.t()]
+  def candidates(%Context{tab_bar: %TabBar{} = tb}) do
     live = tab_candidates(tb)
     disk = disk_candidates()
     live_ids = MapSet.new(live, fn %Item{id: {id, _}} -> id end)

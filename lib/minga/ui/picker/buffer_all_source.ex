@@ -9,6 +9,7 @@ defmodule Minga.UI.Picker.BufferAllSource do
 
   @behaviour Minga.UI.Picker.Source
 
+  alias Minga.UI.Picker.Context
   alias Minga.UI.Picker.Item
 
   alias Minga.UI.Picker.BufferSource
@@ -22,8 +23,8 @@ defmodule Minga.UI.Picker.BufferAllSource do
   def preview?, do: true
 
   @impl true
-  @spec candidates(term()) :: [Item.t()]
-  def candidates(state), do: BufferSource.build_candidates(state, include_special: true)
+  @spec candidates(Context.t()) :: [Item.t()]
+  def candidates(ctx), do: BufferSource.build_candidates(ctx, include_special: true)
 
   @impl true
   @spec on_select(Item.t(), term()) :: term()

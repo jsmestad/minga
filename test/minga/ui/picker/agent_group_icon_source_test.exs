@@ -1,10 +1,31 @@
 defmodule Minga.UI.Picker.AgentGroupIconSourceTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Editor.State.Buffers
+  alias Minga.Editor.State.Search
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
+  alias Minga.Editor.VimState
+  alias Minga.Editor.Viewport
   alias Minga.UI.Picker.AgentGroupIconSource
+  alias Minga.UI.Picker.Context
   alias Minga.UI.Picker.Item
+  alias Minga.UI.Theme
+
+  defp fake_context(tab_bar) do
+    %Context{
+      buffers: %Buffers{list: [], active: nil, active_index: 0},
+      editing: VimState.new(),
+      file_tree: nil,
+      search: %Search{},
+      viewport: Viewport.new(80, 24),
+      tab_bar: tab_bar,
+      agent_session: nil,
+      picker_ui: %{},
+      capabilities: %{},
+      theme: Theme.get!(:doom_one)
+    }
+  end
 
   describe "title/0" do
     test "returns a descriptive title" do
@@ -15,7 +36,7 @@ defmodule Minga.UI.Picker.AgentGroupIconSourceTest do
   describe "candidates/1" do
     test "returns items for all curated icons" do
       tb = TabBar.new(Tab.new_file(1, "a.ex"))
-      items = AgentGroupIconSource.candidates(%{shell_state: %{tab_bar: tb}})
+      items = AgentGroupIconSource.candidates(fake_context(tb))
       assert length(items) > 40
       assert Enum.all?(items, &match?(%Item{}, &1))
     end
@@ -27,7 +48,7 @@ defmodule Minga.UI.Picker.AgentGroupIconSourceTest do
       tb = TabBar.move_tab_to_group(tb, 2, group.id)
       tb = TabBar.switch_to_group(tb, group.id)
 
-      items = AgentGroupIconSource.candidates(%{shell_state: %{tab_bar: tb}})
+      items = AgentGroupIconSource.candidates(fake_context(tb))
       cpu_item = Enum.find(items, &(&1.id == "cpu"))
       assert cpu_item.label =~ "\u{2022}"
       other = Enum.find(items, &(&1.id == "brain"))
@@ -35,17 +56,28 @@ defmodule Minga.UI.Picker.AgentGroupIconSourceTest do
     end
 
     test "items include category as description" do
-      items =
-        AgentGroupIconSource.candidates(%{
-          shell_state: %{tab_bar: TabBar.new(Tab.new_file(1, "a.ex"))}
-        })
+      tb = TabBar.new(Tab.new_file(1, "a.ex"))
+      items = AgentGroupIconSource.candidates(fake_context(tb))
 
       folder_item = Enum.find(items, &(&1.id == "folder"))
       assert folder_item.description == "General"
     end
 
-    test "returns empty for state without tab_bar" do
-      assert AgentGroupIconSource.candidates(%{}) == []
+    test "returns empty for context without TabBar struct" do
+      ctx = %Context{
+        buffers: %Buffers{list: [], active: nil, active_index: 0},
+        editing: VimState.new(),
+        file_tree: nil,
+        search: %Search{},
+        viewport: Viewport.new(80, 24),
+        tab_bar: %{},
+        agent_session: nil,
+        picker_ui: %{},
+        capabilities: %{},
+        theme: Theme.get!(:doom_one)
+      }
+
+      assert AgentGroupIconSource.candidates(ctx) == []
     end
   end
 

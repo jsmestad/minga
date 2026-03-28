@@ -9,6 +9,7 @@ defmodule Minga.UI.Picker.RecentFileSource do
   @behaviour Minga.UI.Picker.Source
 
   alias Minga.Language
+  alias Minga.UI.Picker.Context
   alias Minga.UI.Picker.Item
 
   alias Minga.Editor.State, as: EditorState
@@ -25,8 +26,8 @@ defmodule Minga.UI.Picker.RecentFileSource do
   def preview?, do: true
 
   @impl true
-  @spec candidates(term()) :: [Item.t()]
-  def candidates(_context) do
+  @spec candidates(Context.t()) :: [Item.t()]
+  def candidates(_ctx) do
     files = Project.recent_files()
 
     Enum.map(files, fn rel_path ->

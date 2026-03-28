@@ -10,6 +10,7 @@ defmodule Minga.UI.Picker.TabSource do
   @behaviour Minga.UI.Picker.Source
 
   alias Minga.Language
+  alias Minga.UI.Picker.Context
   alias Minga.UI.Picker.Item
 
   alias Minga.Editor.State, as: EditorState
@@ -21,8 +22,8 @@ defmodule Minga.UI.Picker.TabSource do
   def title, do: "Switch Tab"
 
   @impl true
-  @spec candidates(term()) :: [Item.t()]
-  def candidates(%{shell_state: %{tab_bar: %TabBar{} = tb}}) do
+  @spec candidates(Context.t()) :: [Item.t()]
+  def candidates(%Context{tab_bar: %TabBar{} = tb}) do
     Enum.map(tb.tabs, fn tab ->
       icon = tab_icon(tab)
       label = tab_display_label(tab)

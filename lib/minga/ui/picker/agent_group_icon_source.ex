@@ -10,6 +10,7 @@ defmodule Minga.UI.Picker.AgentGroupIconSource do
 
   alias Minga.Editor.State.AgentGroup
   alias Minga.Editor.State.TabBar
+  alias Minga.UI.Picker.Context
   alias Minga.UI.Picker.Item
 
   @icons [
@@ -69,8 +70,8 @@ defmodule Minga.UI.Picker.AgentGroupIconSource do
   def title, do: "Set Workspace Icon"
 
   @impl true
-  @spec candidates(term()) :: [Item.t()]
-  def candidates(%{shell_state: %{tab_bar: %TabBar{} = tb}}) do
+  @spec candidates(Context.t()) :: [Item.t()]
+  def candidates(%Context{tab_bar: %TabBar{} = tb}) do
     current_icon =
       case TabBar.active_group(tb) do
         %AgentGroup{icon: icon} -> icon

@@ -3,8 +3,14 @@ defmodule Minga.UI.Picker.LanguageSourceTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Editor.State.Buffers
+  alias Minga.Editor.State.Search
+  alias Minga.Editor.VimState
+  alias Minga.Editor.Viewport
+  alias Minga.UI.Picker.Context
   alias Minga.UI.Picker.Item
   alias Minga.UI.Picker.LanguageSource
+  alias Minga.UI.Theme
 
   describe "title/0" do
     test "returns Set language" do
@@ -14,16 +20,16 @@ defmodule Minga.UI.Picker.LanguageSourceTest do
 
   describe "candidates/1" do
     test "returns all registered languages" do
-      state = state_with_buffer("hello", :elixir)
-      candidates = LanguageSource.candidates(state)
+      ctx = context_with_buffer("hello", :elixir)
+      candidates = LanguageSource.candidates(ctx)
 
       assert candidates != []
       assert Enum.all?(candidates, &match?(%Item{}, &1))
     end
 
     test "each candidate has an icon and label" do
-      state = state_with_buffer("hello", :elixir)
-      candidates = LanguageSource.candidates(state)
+      ctx = context_with_buffer("hello", :elixir)
+      candidates = LanguageSource.candidates(ctx)
 
       elixir = Enum.find(candidates, fn %Item{id: id} -> id == :elixir end)
       assert elixir != nil
@@ -31,8 +37,8 @@ defmodule Minga.UI.Picker.LanguageSourceTest do
     end
 
     test "current filetype is marked with a bullet" do
-      state = state_with_buffer("hello", :elixir)
-      candidates = LanguageSource.candidates(state)
+      ctx = context_with_buffer("hello", :elixir)
+      candidates = LanguageSource.candidates(ctx)
 
       elixir = Enum.find(candidates, fn %Item{id: id} -> id == :elixir end)
       assert elixir.label =~ "•"
@@ -42,16 +48,16 @@ defmodule Minga.UI.Picker.LanguageSourceTest do
     end
 
     test "shows file extensions in description" do
-      state = state_with_buffer("hello", :text)
-      candidates = LanguageSource.candidates(state)
+      ctx = context_with_buffer("hello", :text)
+      candidates = LanguageSource.candidates(ctx)
 
       elixir = Enum.find(candidates, fn %Item{id: id} -> id == :elixir end)
       assert elixir.description =~ ".ex"
     end
 
     test "candidates are sorted by label" do
-      state = state_with_buffer("hello", :text)
-      candidates = LanguageSource.candidates(state)
+      ctx = context_with_buffer("hello", :text)
+      candidates = LanguageSource.candidates(ctx)
       labels = Enum.map(candidates, & &1.label)
       assert labels == Enum.sort(labels)
     end
@@ -95,6 +101,23 @@ defmodule Minga.UI.Picker.LanguageSourceTest do
   end
 
   # ── Helpers ─────────────────────────────────────────────────────────────────
+
+  defp context_with_buffer(content, filetype) do
+    {:ok, buf} = BufferServer.start_link(content: content, filetype: filetype)
+
+    %Context{
+      buffers: %Buffers{list: [buf], active: buf, active_index: 0},
+      editing: VimState.new(),
+      file_tree: nil,
+      search: %Search{},
+      viewport: Viewport.new(80, 24),
+      tab_bar: %{},
+      agent_session: nil,
+      picker_ui: %{},
+      capabilities: %{},
+      theme: Theme.get!(:doom_one)
+    }
+  end
 
   defp state_with_buffer(content, filetype) do
     {:ok, buf} = BufferServer.start_link(content: content, filetype: filetype)

@@ -13,10 +13,10 @@ defmodule Minga.UI.Picker.AgentModelSource do
 
   @behaviour Minga.UI.Picker.Source
 
+  alias Minga.UI.Picker.Context
   alias Minga.UI.Picker.Item
 
   alias Minga.Agent.Session
-  alias Minga.Editor.State.AgentAccess
 
   @impl true
   @spec title() :: String.t()
@@ -31,10 +31,8 @@ defmodule Minga.UI.Picker.AgentModelSource do
   def layout, do: :centered
 
   @impl true
-  @spec candidates(term()) :: [Item.t()]
-  def candidates(state) do
-    session = AgentAccess.session(state)
-
+  @spec candidates(Context.t()) :: [Item.t()]
+  def candidates(%Context{agent_session: session}) do
     with true <- is_pid(session),
          {:ok, models} when is_list(models) <- fetch_models(session) do
       Enum.map(models, &format_model/1)

@@ -5,9 +5,14 @@ defmodule Minga.UI.Picker.BufferSourceTest do
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.State.Buffers
+  alias Minga.Editor.State.Search
+  alias Minga.Editor.VimState
+  alias Minga.Editor.Viewport
   alias Minga.UI.Picker.BufferAllSource
   alias Minga.UI.Picker.BufferSource
+  alias Minga.UI.Picker.Context
   alias Minga.UI.Picker.Item
+  alias Minga.UI.Theme
 
   defp start_buffer(opts) do
     {:ok, pid} = BufferServer.start_link(opts)
@@ -24,13 +29,22 @@ defmodule Minga.UI.Picker.BufferSourceTest do
   end
 
   defp fake_state(buffers, opts \\ []) do
-    %{
-      workspace: %{
-        buffers: %Buffers{
-          list: buffers,
-          messages: Keyword.get(opts, :messages)
-        }
-      }
+    %Context{
+      buffers: %Buffers{
+        list: buffers,
+        active: nil,
+        active_index: 0,
+        messages: Keyword.get(opts, :messages)
+      },
+      editing: VimState.new(),
+      file_tree: nil,
+      search: %Search{},
+      viewport: Viewport.new(80, 24),
+      tab_bar: %{},
+      agent_session: nil,
+      picker_ui: %{},
+      capabilities: %{},
+      theme: Theme.get!(:doom_one)
     }
   end
 

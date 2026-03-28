@@ -9,6 +9,7 @@ defmodule Minga.UI.Picker.ProjectSearchSource do
   @behaviour Minga.UI.Picker.Source
 
   alias Minga.Language
+  alias Minga.UI.Picker.Context
   alias Minga.UI.Picker.Item
 
   alias Minga.Buffer
@@ -25,8 +26,8 @@ defmodule Minga.UI.Picker.ProjectSearchSource do
   def preview?, do: true
 
   @impl true
-  @spec candidates(term()) :: [Item.t()]
-  def candidates(%{workspace: %{search: %{project_results: results}}}) when is_list(results) do
+  @spec candidates(Context.t()) :: [Item.t()]
+  def candidates(%Context{search: %{project_results: results}}) when is_list(results) do
     results
     |> Enum.with_index()
     |> Enum.map(fn {match, idx} ->

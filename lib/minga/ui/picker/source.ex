@@ -35,15 +35,13 @@ defmodule Minga.UI.Picker.Source do
 
   alias Minga.Editor.State, as: EditorState
   alias Minga.UI.Picker
-
-  @typedoc "Context passed to `candidates/1` — typically editor state or options."
-  @type context :: term()
+  alias Minga.UI.Picker.Context
 
   @doc "Returns the display title for this picker source."
   @callback title() :: String.t()
 
   @doc "Returns the list of candidates to display in the picker."
-  @callback candidates(context()) :: [Picker.item()]
+  @callback candidates(Context.t()) :: [Picker.item()]
 
   @doc "Called when the user selects an item. Returns the new editor state."
   @callback on_select(Picker.item(), state :: term()) :: term()
