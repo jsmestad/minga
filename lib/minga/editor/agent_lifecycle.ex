@@ -167,6 +167,9 @@ defmodule Minga.Editor.AgentLifecycle do
     end
   end
 
+  # No tab_bar (e.g., Board shell) — nothing to update.
+  def maybe_update_tab_label(state), do: state
+
   # ── Private helpers ──────────────────────────────────────────────────────
 
   @spec maybe_load_auto_context(state(), Minga.CLI.flags()) :: state()

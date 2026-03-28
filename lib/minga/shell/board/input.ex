@@ -17,6 +17,7 @@ defmodule Minga.Shell.Board.Input do
 
   @behaviour Minga.Input.Handler
 
+  alias Minga.Agent.Config, as: AgentConfig
   alias Minga.Editor.State, as: EditorState
   alias Minga.Shell.Board
   alias Minga.Shell.Board.Card
@@ -340,22 +341,8 @@ defmodule Minga.Shell.Board.Input do
       {board, state}
   end
 
-  @spec resolve_model() :: String.t()
-  defp resolve_model do
-    case Minga.Config.get(:agent_model) do
-      nil -> "claude-sonnet-4-20250514"
-      model -> to_string(model)
-    end
-  catch
-    :exit, _ -> "claude-sonnet-4-20250514"
-  end
-
-  @spec resolve_provider() :: atom()
-  defp resolve_provider do
-    Minga.Config.get(:agent_provider) || :auto
-  catch
-    :exit, _ -> :auto
-  end
+  defp resolve_model, do: AgentConfig.resolve_model()
+  defp resolve_provider, do: AgentConfig.resolve_provider()
 
   # ── Helpers ────────────────────────────────────────────────────────────
 

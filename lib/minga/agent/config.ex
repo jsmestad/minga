@@ -159,9 +159,32 @@ defmodule Minga.Agent.Config do
     }
   end
 
-  @doc "Returns the default model string."
+  @doc "Returns the default model string (with provider prefix)."
   @spec default_model() :: String.t()
   def default_model, do: @default_model
+
+  @doc """
+  Returns the configured model, falling back to the default.
+
+  Safe to call before Config is running (catches exits).
+  """
+  @spec resolve_model() :: String.t()
+  def resolve_model do
+    case get(:agent_model, nil) do
+      nil -> @default_model
+      model -> to_string(model)
+    end
+  end
+
+  @doc """
+  Returns the configured provider, falling back to `:auto`.
+
+  Safe to call before Config is running (catches exits).
+  """
+  @spec resolve_provider() :: :auto | :native | :pi_rpc
+  def resolve_provider do
+    get(:agent_provider, :auto)
+  end
 
   @doc """
   Strips the "provider:" prefix from a model spec string.
