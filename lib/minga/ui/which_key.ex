@@ -25,8 +25,6 @@ defmodule Minga.UI.WhichKey do
   | `{?j, 0x00}`            | `"j"`   |
   """
 
-  import Bitwise
-
   alias Minga.Keymap.Bindings
   alias Minga.UI.WhichKey.Icons
 
@@ -123,15 +121,7 @@ defmodule Minga.UI.WhichKey do
       "j"
   """
   @spec format_key(Bindings.key()) :: String.t()
-  def format_key({32, 0}), do: "SPC"
-  def format_key({9, _}), do: "TAB"
-  def format_key({13, _}), do: "RET"
-  def format_key({27, _}), do: "ESC"
-
-  def format_key({codepoint, modifiers}) do
-    char = <<codepoint::utf8>>
-    modifier_prefix(modifiers) <> char
-  end
+  defdelegate format_key(key), to: Bindings
 
   # ── Binding display ───────────────────────────────────────────────────────────
 
@@ -173,19 +163,6 @@ defmodule Minga.UI.WhichKey do
   end
 
   # ── Private ───────────────────────────────────────────────────────────────────
-
-  @spec modifier_prefix(non_neg_integer()) :: String.t()
-  defp modifier_prefix(modifiers) do
-    ctrl = band(modifiers, 0x02) != 0
-    alt = band(modifiers, 0x04) != 0
-    modifier_string(ctrl, alt)
-  end
-
-  @spec modifier_string(boolean(), boolean()) :: String.t()
-  defp modifier_string(true, true), do: "C-M-"
-  defp modifier_string(true, false), do: "C-"
-  defp modifier_string(false, true), do: "M-"
-  defp modifier_string(false, false), do: ""
 
   @spec format_label(String.t() | atom()) :: String.t()
   defp format_label(label) when is_binary(label), do: label

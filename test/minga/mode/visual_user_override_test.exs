@@ -10,6 +10,12 @@ defmodule Minga.Mode.Visual.UserOverrideTest do
     %VisualState{visual_anchor: anchor, visual_type: type}
   end
 
+  defp visual_state_with_trie(anchor \\ {0, 0}, type \\ :char) do
+    global = KeymapActive.mode_trie(:visual)
+
+    %VisualState{visual_anchor: anchor, visual_type: type, mode_trie: global}
+  end
+
   setup do
     # KeymapActive is a global singleton; start_supervised! won't work until
     # it accepts a name: param. See autoresearch.md for the planned refactor.
@@ -33,7 +39,7 @@ defmodule Minga.Mode.Visual.UserOverrideTest do
     test "Ctrl+X bound to :custom_cut executes the command" do
       KeymapActive.bind(:visual, "C-x", :custom_cut, "Custom cut")
 
-      state = visual_state()
+      state = visual_state_with_trie()
       assert {:execute, :custom_cut, _} = Visual.handle_key({?x, 0x02}, state)
     end
 

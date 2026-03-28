@@ -6,7 +6,15 @@ defmodule Minga.Mode.NormalTest do
   alias Minga.Mode.Normal
 
   # Shorthand: call Normal.handle_key directly with a fresh state.
-  defp fresh_state, do: Mode.initial_state()
+  # Populates leader_trie and normal_bindings so the FSM can resolve
+  # leader sequences and normal bindings without calling the Keymap GenServer.
+  defp fresh_state do
+    %{
+      Mode.initial_state()
+      | leader_trie: Defaults.leader_trie(),
+        normal_bindings: Defaults.normal_bindings()
+    }
+  end
 
   describe "mode transitions" do
     test "i produces {:transition, :insert, state}" do

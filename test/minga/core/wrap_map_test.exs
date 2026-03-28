@@ -1,7 +1,7 @@
-defmodule Minga.Editor.WrapMapTest do
+defmodule Minga.Core.WrapMapTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Editor.WrapMap
+  alias Minga.Core.WrapMap
 
   describe "compute/3 with no wrapping needed" do
     test "short line produces a single visual row" do

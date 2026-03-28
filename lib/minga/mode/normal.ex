@@ -63,11 +63,9 @@ defmodule Minga.Mode.Normal do
 
   import Bitwise
 
-  alias Minga.Keymap
   alias Minga.Keymap.Bindings
   alias Minga.Mode
   alias Minga.Mode.State, as: ModeState
-  alias Minga.UI.WhichKey
 
   # Special codepoints
   @escape 27
@@ -76,6 +74,9 @@ defmodule Minga.Mode.Normal do
   # Modifier flags (mirrors Minga.Frontend.Protocol)
   @ctrl 0x02
   @alt 0x04
+
+  # Normal-mode prefix trie (g, z, [, ]) — must be defined before handle_key
+  @prefix_trie Minga.Keymap.NormalPrefixes.trie()
 
   # Arrow key codepoints sent by libvaxis
   @arrow_up 57_352
@@ -107,9 +108,8 @@ defmodule Minga.Mode.Normal do
         {@space, 0},
         %ModeState{pending_describe_key: true, describe_key_leader_node: nil} = state
       ) do
-    trie = get_leader_trie()
-
-    {:continue, %{state | describe_key_leader_node: trie, describe_key_keys: ["SPC"]}}
+    {:continue,
+     %{state | describe_key_leader_node: state.leader_trie, describe_key_keys: ["SPC"]}}
   end
 
   # Key while walking leader trie in describe-key mode
@@ -118,7 +118,7 @@ defmodule Minga.Mode.Normal do
         %ModeState{pending_describe_key: true, describe_key_leader_node: node} = state
       )
       when is_map(node) do
-    formatted = WhichKey.format_key(key)
+    formatted = Bindings.format_key(key)
     keys_so_far = [formatted | state.describe_key_keys]
 
     case Bindings.lookup(node, key) do
@@ -153,9 +153,9 @@ defmodule Minga.Mode.Normal do
 
   # Any other key while in describe-key (not leader) → look up in normal bindings
   def handle_key(key, %ModeState{pending_describe_key: true} = state) do
-    formatted = WhichKey.format_key(key)
+    formatted = Bindings.format_key(key)
 
-    case Map.fetch(get_normal_bindings(), key) do
+    case Map.fetch(state.normal_bindings, key) do
       {:ok, {command, description}} ->
         {:execute, {:describe_key_result, formatted, command, description},
          %{
@@ -180,16 +180,14 @@ defmodule Minga.Mode.Normal do
 
   # SPC pressed while not in leader mode → start leader sequence.
   def handle_key({@space, 0}, %ModeState{leader_node: nil} = state) do
-    trie = get_leader_trie()
-    new_state = %{state | leader_node: trie, leader_keys: ["SPC"]}
-    {:execute, {:leader_start, trie}, new_state}
+    new_state = %{state | leader_node: state.leader_trie, leader_keys: ["SPC"]}
+    {:execute, {:leader_start, state.leader_trie}, new_state}
   end
 
   # SPC pressed while already in leader mode → cancel and restart.
   def handle_key({@space, 0}, %ModeState{leader_node: _node} = state) do
-    trie = get_leader_trie()
-    new_state = %{state | leader_node: trie, leader_keys: ["SPC"]}
-    {:execute, [:leader_cancel, {:leader_start, trie}], new_state}
+    new_state = %{state | leader_node: state.leader_trie, leader_keys: ["SPC"]}
+    {:execute, [:leader_cancel, {:leader_start, state.leader_trie}], new_state}
   end
 
   # Ctrl+D / Ctrl+U while in leader mode → paginate which-key popup.
@@ -210,7 +208,7 @@ defmodule Minga.Mode.Normal do
         {:execute, :leader_cancel, new_state}
 
       {:prefix, sub_node} ->
-        formatted = WhichKey.format_key(key)
+        formatted = Bindings.format_key(key)
         new_keys = [formatted | state.leader_keys]
         new_state = %{state | leader_node: sub_node, leader_keys: new_keys}
         {:execute, {:leader_progress, sub_node}, new_state}
@@ -318,11 +316,9 @@ defmodule Minga.Mode.Normal do
   # Trigger keys: start walking the prefix trie.
   def handle_key({key, 0}, %ModeState{prefix_node: nil} = state)
       when key in [?g, ?z, ?], ?[] do
-    trie = get_prefix_trie()
-
-    case Bindings.lookup(trie, {key, 0}) do
+    case Bindings.lookup(@prefix_trie, {key, 0}) do
       {:prefix, sub_node} ->
-        formatted = WhichKey.format_key({key, 0})
+        formatted = Bindings.format_key({key, 0})
         {:continue, %{state | prefix_node: sub_node, prefix_keys: [formatted]}}
 
       {:command, command} ->
@@ -337,7 +333,7 @@ defmodule Minga.Mode.Normal do
   def handle_key(key, %ModeState{prefix_node: node} = state) when is_map(node) do
     case Bindings.lookup(node, key) do
       {:prefix, sub_node} ->
-        formatted = WhichKey.format_key(key)
+        formatted = Bindings.format_key(key)
         new_keys = [formatted | state.prefix_keys]
         {:continue, %{state | prefix_node: sub_node, prefix_keys: new_keys}}
 
@@ -828,25 +824,6 @@ defmodule Minga.Mode.Normal do
   end
 
   # ── Private helpers ──────────────────────────────────────────────────────
-
-  @spec get_leader_trie() :: Bindings.node_t()
-  defp get_leader_trie do
-    Keymap.leader_trie()
-  catch
-    :exit, _ -> Keymap.default_leader_trie()
-  end
-
-  @spec get_normal_bindings() :: %{Bindings.key() => {atom(), String.t()}}
-  defp get_normal_bindings do
-    Keymap.normal_bindings()
-  catch
-    :exit, _ -> Keymap.default_normal_bindings()
-  end
-
-  @prefix_trie Minga.Keymap.NormalPrefixes.trie()
-
-  @spec get_prefix_trie() :: Bindings.node_t()
-  defp get_prefix_trie, do: @prefix_trie
 
   # Dispatches a command from the prefix trie. Most commands are simple
   # :execute results. A few need special handling (mode transitions).

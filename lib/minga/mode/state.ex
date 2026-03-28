@@ -12,6 +12,9 @@ defmodule Minga.Mode.State do
 
   defstruct filetype: :text,
             count: nil,
+            leader_trie: nil,
+            normal_bindings: %{},
+            mode_trie: nil,
             leader_node: nil,
             leader_keys: [],
             prefix_node: nil,
@@ -32,9 +35,15 @@ defmodule Minga.Mode.State do
   @typedoc "Pending mark operation kind."
   @type pending_mark_kind :: :set | :jump_line | :jump_exact
 
+  @typedoc "Single-key normal bindings map: key => {command, description}."
+  @type normal_bindings_map :: %{Bindings.key() => {atom(), String.t()}}
+
   @type t :: %__MODULE__{
           filetype: atom(),
           count: non_neg_integer() | nil,
+          leader_trie: Bindings.node_t() | nil,
+          normal_bindings: normal_bindings_map(),
+          mode_trie: Bindings.node_t() | nil,
           leader_node: Bindings.node_t() | nil,
           leader_keys: [String.t()],
           prefix_node: Bindings.node_t() | nil,

@@ -26,7 +26,7 @@ defmodule Minga.Editor.Renderer.BufferLine do
   alias Minga.Editor.Renderer.Context
   alias Minga.Editor.Renderer.Gutter
   alias Minga.Editor.Renderer.Line, as: LineRenderer
-  alias Minga.Editor.WrapMap
+  alias Minga.Core.WrapMap
   alias Minga.UI.Highlight
 
   @typedoc """
