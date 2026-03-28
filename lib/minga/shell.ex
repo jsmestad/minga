@@ -151,4 +151,38 @@ defmodule Minga.Shell do
               session_pid :: pid(),
               event :: term()
             ) :: {shell_state(), workspace()}
+
+  # -------------------------------------------------------------------
+  # Tab query/mutation delegates
+  #
+  # EditorState delegates these to the active shell so it never
+  # pattern-matches on `tab_bar:` directly. Traditional implements
+  # with TabBar lookups; Board returns static defaults.
+  # -------------------------------------------------------------------
+
+  @doc """
+  Returns the currently active tab, or `nil` if the shell has no tabs.
+  """
+  @callback active_tab(shell_state()) :: Minga.Editor.State.Tab.t() | nil
+
+  @doc """
+  Finds the file tab whose snapshotted workspace has `pid` as active buffer.
+
+  Returns `nil` if the shell has no tabs or no matching tab exists.
+  """
+  @callback find_tab_by_buffer(shell_state(), pid()) :: Minga.Editor.State.Tab.t() | nil
+
+  @doc """
+  Returns the kind (`:file` or `:agent`) of the active tab.
+
+  Shells without tabs return `:file` (the default content kind).
+  """
+  @callback active_tab_kind(shell_state()) :: atom()
+
+  @doc """
+  Associates a session pid with a tab. Returns updated shell state.
+
+  No-op for shells without tabs.
+  """
+  @callback set_tab_session(shell_state(), tab_id :: term(), pid() | nil) :: shell_state()
 end
