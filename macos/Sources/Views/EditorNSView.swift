@@ -401,6 +401,25 @@ final class EditorNSView: MTKView {
         return UInt32(max(0, min(maxTop, Int64(Double(proportion) * Double(maxTop)))))
     }
 
+    // MARK: - Line spacing
+
+    /// Called when the BEAM sends a new line_spacing value. Recomputes the grid
+    /// row count based on the new effective cell height and sends a resize event
+    /// so the BEAM adjusts its viewport.
+    func lineSpacingChanged(_ spacing: Float) {
+        guard frame.width > 0, frame.height > 0 else { return }
+        let effectiveCellH = cellHeight * CGFloat(spacing)
+        guard effectiveCellH > 0 else { return }
+
+        let newRows = UInt16(max(frame.height / effectiveCellH, 1))
+        let cols = UInt16(max(frame.width / cellWidth, 1))
+
+        if newRows != dispatcher.frameState.rows {
+            dispatcher.frameState.resize(newCols: cols, newRows: newRows)
+            encoder.sendResize(cols: cols, rows: newRows)
+        }
+    }
+
     // MARK: - Tracking area
 
     private func updateTrackingArea() {

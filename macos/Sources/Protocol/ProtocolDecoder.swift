@@ -54,6 +54,7 @@ enum RenderCommand: Sendable {
     case guiFloatPopup(visible: Bool, width: UInt16, height: UInt16, title: String, lines: [String])
     case clipboardWrite(target: UInt8, text: String)
     case guiIndentGuides(data: IndentGuideData)
+    case guiLineSpacing(spacing: Float)
     case guiSplitSeparators(borderColor: UInt32, verticals: [Wire.VerticalSeparator], horizontals: [Wire.HorizontalSeparator])
     case guiGitStatus(repoState: UInt8, ahead: UInt16, behind: UInt16, branchName: String, entries: [Wire.GitStatusEntry])
     case guiAgentGroups(activeGroupId: UInt16, agentGroups: [Wire.AgentGroupEntry])
@@ -1905,6 +1906,17 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         let igData = IndentGuideData(windowId: igWinId, tabWidth: igTabWidth,
                                      activeGuideCol: igActiveCol, guideCols: igCols)
         return (.guiIndentGuides(data: igData), 1 + 2 + igPayloadLen)
+
+    case OP_GUI_LINE_SPACING:
+        // Forward-compatible format: opcode(1) + payload_length(2) + spacing_x100(2)
+        guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
+        let lsPayloadLen = Int(readU16(data, rest))
+        guard data.count >= rest + 2 + lsPayloadLen, lsPayloadLen >= 2 else {
+            throw ProtocolDecodeError.malformed
+        }
+        let spacingX100 = readU16(data, rest + 2)
+        let spacing = Float(spacingX100) / 100.0
+        return (.guiLineSpacing(spacing: spacing), 1 + 2 + lsPayloadLen)
 
     case OP_CLIPBOARD_WRITE:
         // Forward-compatible format: opcode(1) + payload_length(2) + target(1) + text_len(2) + text

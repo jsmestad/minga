@@ -53,6 +53,9 @@ final class CommandDispatcher {
     /// can miss updates during animated transitions.
     var onAgentChatVisibilityChanged: ((Bool) -> Void)?
 
+    /// Called when line_spacing changes, so EditorNSView can trigger a resize.
+    var onLineSpacingChanged: ((Float) -> Void)?
+
     /// Called once after the first `batch_end` is received from the BEAM.
     /// Used in bundle mode to flush pending file URLs after the BEAM is ready.
     var onFirstRender: (() -> Void)?
@@ -182,6 +185,14 @@ final class CommandDispatcher {
         case .guiIndentGuides(let data):
             frameState.windowIndentGuides[data.windowId] = data
             frameState.dirty = true
+
+        case .guiLineSpacing(let spacing):
+            let oldSpacing = frameState.lineSpacing
+            frameState.lineSpacing = max(spacing, 1.0)
+            frameState.dirty = true
+            if oldSpacing != frameState.lineSpacing {
+                onLineSpacingChanged?(frameState.lineSpacing)
+            }
 
         case .clipboardWrite(let target, let text):
             handleClipboardWrite(target: target, text: text)

@@ -688,6 +688,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 userInfo: [.announcement: "\(modeName) mode"]
             )
         }
+        disp.onLineSpacingChanged = { [weak nsView] spacing in
+            nsView?.lineSpacingChanged(spacing)
+        }
         disp.onTitleChanged = { [weak appState] title in
             Task { @MainActor in
                 appState?.windowTitle = title

@@ -65,6 +65,7 @@ let OP_GUI_CHANGE_SUMMARY: UInt8 = 0x89
 
 let OP_CLIPBOARD_WRITE: UInt8 = 0x90
 let OP_GUI_INDENT_GUIDES: UInt8 = 0x91
+let OP_GUI_LINE_SPACING: UInt8 = 0x92
 
 // MARK: - Sectioned format section IDs
 // Used by opcodes with self-describing sections (gui_status_bar, etc.).
