@@ -63,6 +63,8 @@ defmodule Minga.Editor do
   alias Minga.Agent.Session, as: AgentSession
 
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.State.LSP, as: LSPState
+  alias Minga.Editor.State.Session, as: SessionState
 
   alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.Buffers
@@ -374,7 +376,7 @@ defmodule Minga.Editor do
     # that the port is connected and the viewport is known.
     new_state = AgentLifecycle.maybe_start_session(new_state)
     # Start the periodic session save timer (30 seconds)
-    new_state = maybe_start_session_timer(new_state)
+    new_state = %{new_state | session: SessionState.start_timer(new_state.session)}
 
     {:noreply, new_state}
   end
@@ -496,12 +498,12 @@ defmodule Minga.Editor do
   # ── Swap file recovery ────────────────────────────────────────────────────────
 
   def handle_info(:check_swap_recovery, state) do
-    recoverable = Minga.Session.scan_recoverable_swaps(swap_dir: state.swap_dir)
+    recoverable = Minga.Session.scan_recoverable_swaps(SessionState.swap_opts(state.session))
 
     new_state =
       case recoverable do
         [] ->
-          if Session.clean_shutdown?(session_dir: state.session_dir) do
+          if Session.clean_shutdown?(SessionState.session_opts(state.session)) do
             state
           else
             # Restore open files from the previous session
@@ -519,10 +521,10 @@ defmodule Minga.Editor do
 
   def handle_info(:save_session, state) do
     snapshot = Session.snapshot(state)
-    session_opts = [session_dir: state.session_dir]
+    opts = SessionState.session_opts(state.session)
 
     Task.start(fn ->
-      case Session.save(snapshot, session_opts) do
+      case Session.save(snapshot, opts) do
         :ok -> :ok
         {:error, reason} -> Minga.Log.warning(:editor, "Session save failed: #{inspect(reason)}")
       end
@@ -531,9 +533,7 @@ defmodule Minga.Editor do
     # Cancel any existing timer and schedule a new one.
     # This prevents timer accumulation when file saves trigger
     # immediate :save_session messages alongside the periodic timer.
-    state = cancel_session_timer(state)
-    ref = Process.send_after(self(), :save_session, 30_000)
-    {:noreply, %{state | session_timer: ref}}
+    {:noreply, %{state | session: SessionState.restart_timer(state.session)}}
   end
 
   # ── Highlight events from Parser.Manager ──────────────────────────────────────
@@ -867,13 +867,13 @@ defmodule Minga.Editor do
 
   # Document highlight debounce timer fired
   def handle_info(:inlay_hint_scroll_debounce, state) do
-    state = %{state | inlay_hint_debounce_timer: nil}
+    state = %{state | lsp: LSPState.clear_inlay_hint_timer(state.lsp)}
     state = LspActions.inlay_hints(state)
     {:noreply, state}
   end
 
   def handle_info(:document_highlight_debounce, state) do
-    state = %{state | highlight_debounce_timer: nil}
+    state = %{state | lsp: LSPState.clear_highlight_timer(state.lsp)}
     state = LspActions.document_highlight(state)
     {:noreply, state}
   end
@@ -923,17 +923,10 @@ defmodule Minga.Editor do
          %Minga.Events.LspStatusEvent{name: name, status: status}},
         state
       ) do
-    old_status = state.lsp_status
-
-    server_statuses =
-      case status do
-        :stopped -> Map.delete(state.lsp_server_statuses, name)
-        s -> Map.put(state.lsp_server_statuses, name, s)
-      end
-
-    lsp_status = aggregate_lsp_server_statuses(server_statuses)
-    state = %{state | lsp_server_statuses: server_statuses, lsp_status: lsp_status}
-    state = if lsp_status != old_status, do: schedule_render(state, 16), else: state
+    old_status = state.lsp.status
+    new_lsp = LSPState.update_server_status(state.lsp, name, status)
+    state = %{state | lsp: new_lsp}
+    state = if new_lsp.status != old_status, do: schedule_render(state, 16), else: state
     {:noreply, state}
   end
 
@@ -1472,29 +1465,7 @@ defmodule Minga.Editor do
     %{state | render_timer: ref}
   end
 
-  # ── LSP status aggregation ────────────────────────────────────────────────────
-
-  # Derives an aggregate LSP status from the per-server status map.
-  # Priority: :ready > :error > :initializing > :starting > :none
-  @spec aggregate_lsp_server_statuses(%{atom() => :starting | :initializing | :ready | :crashed}) ::
-          Minga.Editor.Modeline.lsp_status()
-  defp aggregate_lsp_server_statuses(server_statuses) when server_statuses == %{}, do: :none
-
-  defp aggregate_lsp_server_statuses(server_statuses) do
-    server_statuses
-    |> Map.values()
-    |> Enum.reduce(:none, fn
-      :ready, _acc -> :ready
-      _status, :ready -> :ready
-      :crashed, _acc -> :error
-      _status, :error -> :error
-      :initializing, _acc -> :initializing
-      _status, :initializing -> :initializing
-      :starting, _acc -> :starting
-      _status, :starting -> :starting
-      _status, acc -> acc
-    end)
-  end
+  # LSP status aggregation moved to Minga.Editor.State.LSP
 
   # ── Diagnostic decorations ──────────────────────────────────────────────────
 
@@ -1688,29 +1659,18 @@ defmodule Minga.Editor do
   end
 
   @spec maybe_check_swap_recovery(state()) :: :ok
-  defp maybe_check_swap_recovery(%{swap_dir: nil}), do: :ok
-  defp maybe_check_swap_recovery(_state), do: send(self(), :check_swap_recovery)
+  defp maybe_check_swap_recovery(state) do
+    if SessionState.swap_enabled?(state.session) do
+      send(self(), :check_swap_recovery)
+    end
 
-  @spec maybe_start_session_timer(state()) :: state()
-  defp maybe_start_session_timer(%{session_dir: nil} = state), do: state
-
-  defp maybe_start_session_timer(state) do
-    ref = Process.send_after(self(), :save_session, 30_000)
-    %{state | session_timer: ref}
-  end
-
-  @spec cancel_session_timer(state()) :: state()
-  defp cancel_session_timer(%{session_timer: nil} = state), do: state
-
-  defp cancel_session_timer(%{session_timer: ref} = state) when is_reference(ref) do
-    Process.cancel_timer(ref)
-    %{state | session_timer: nil}
+    :ok
   end
 
   # Restores open files and cursor positions from the previous session.
   @spec restore_session(state()) :: state()
   defp restore_session(state) do
-    case Session.load(session_dir: state.session_dir) do
+    case Session.load(SessionState.session_opts(state.session)) do
       {:ok, session} ->
         state = log_message(state, "Restored from previous session")
         Enum.reduce(session.buffers, state, &restore_session_buffer/2)

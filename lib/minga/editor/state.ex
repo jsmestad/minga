@@ -38,6 +38,8 @@ defmodule Minga.Editor.State do
   alias Minga.Editor.Dashboard
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.AgentAccess
+  alias Minga.Editor.State.LSP, as: LSPState
+  alias Minga.Editor.State.Session, as: SessionState
   alias Minga.Editor.State.Buffers
   alias Minga.Editor.State.FileTree, as: FileTreeState
   alias Minga.Editor.State.Highlighting
@@ -84,8 +86,7 @@ defmodule Minga.Editor.State do
             render_timer: nil,
             message_store: %MessageStore{},
             git_remote_op: nil,
-            lsp_status: :none,
-            lsp_server_statuses: %{},
+            lsp: %LSPState{},
             parser_status: :available,
             focus_stack: [],
             capabilities: %Capabilities{},
@@ -96,16 +97,7 @@ defmodule Minga.Editor.State do
             buffer_monitors: %{},
             face_override_registries: %{},
             font_registry: Minga.UI.FontRegistry.new(),
-            highlight_debounce_timer: nil,
-            inlay_hint_debounce_timer: nil,
-            last_inlay_viewport_top: nil,
-            code_lenses: [],
-            inlay_hints: [],
-            selection_ranges: nil,
-            selection_range_index: 0,
-            session_timer: nil,
-            swap_dir: nil,
-            session_dir: nil,
+            session: %SessionState{},
             space_leader_pending: false,
             space_leader_timer: nil,
             stashed_board_state: nil
@@ -126,10 +118,7 @@ defmodule Minga.Editor.State do
             {msg_ref :: reference(), task_monitor :: reference(),
              {git_root :: String.t(), success_msg :: String.t(), error_prefix :: String.t()}}
             | nil,
-          lsp_status: Minga.Editor.Modeline.lsp_status(),
-          lsp_server_statuses: %{
-            atom() => :starting | :initializing | :ready | :crashed
-          },
+          lsp: LSPState.t(),
           parser_status: Minga.Editor.Modeline.parser_status(),
           focus_stack: [module()],
           capabilities: Capabilities.t(),
@@ -139,17 +128,8 @@ defmodule Minga.Editor.State do
           pending_quit: :quit | :quit_all | nil,
           buffer_monitors: %{pid() => reference()},
           face_override_registries: %{pid() => Minga.UI.Face.Registry.t()},
-          highlight_debounce_timer: reference() | nil,
-          inlay_hint_debounce_timer: reference() | nil,
-          last_inlay_viewport_top: non_neg_integer() | nil,
-          code_lenses: [map()],
-          inlay_hints: [map()],
-          selection_ranges: [map()] | nil,
-          selection_range_index: non_neg_integer(),
           font_registry: Minga.UI.FontRegistry.t(),
-          session_timer: reference() | nil,
-          swap_dir: String.t() | nil,
-          session_dir: String.t() | nil,
+          session: SessionState.t(),
           space_leader_pending: boolean(),
           space_leader_timer: reference() | nil,
           stashed_board_state: Minga.Shell.Board.State.t() | nil

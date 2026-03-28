@@ -221,27 +221,27 @@ defmodule Minga.Editor.LspActionsTest do
       }
 
       result = LspActions.handle_code_lens_response(state, {:ok, [lens]})
-      assert length(result.code_lenses) == 1
-      assert hd(result.code_lenses).title == "1 reference"
-      assert hd(result.code_lenses).line == 0
+      assert length(result.lsp.code_lenses) == 1
+      assert hd(result.lsp.code_lenses).title == "1 reference"
+      assert hd(result.lsp.code_lenses).line == 0
 
       GenServer.stop(buf)
     end
 
     test "error returns state unchanged" do
-      state = fake_state() |> Map.put(:code_lenses, [])
+      state = fake_state()
       result = LspActions.handle_code_lens_response(state, {:error, "timeout"})
       assert result == state
     end
 
     test "nil returns state unchanged" do
-      state = fake_state() |> Map.put(:code_lenses, [])
+      state = fake_state()
       result = LspActions.handle_code_lens_response(state, {:ok, nil})
       assert result == state
     end
 
     test "empty list returns state unchanged" do
-      state = fake_state() |> Map.put(:code_lenses, [])
+      state = fake_state()
       result = LspActions.handle_code_lens_response(state, {:ok, []})
       assert result == state
     end
@@ -252,7 +252,7 @@ defmodule Minga.Editor.LspActionsTest do
   describe "handle_code_lens_resolve_response/2" do
     test "merges resolved lens into existing lenses" do
       {:ok, buf} = BufferServer.start_link(content: "def hello do\n  :ok\nend")
-      state = fake_state_with_buffer(buf) |> Map.put(:code_lenses, [])
+      state = fake_state_with_buffer(buf)
 
       resolved = %{
         "range" => %{
@@ -263,20 +263,27 @@ defmodule Minga.Editor.LspActionsTest do
       }
 
       result = LspActions.handle_code_lens_resolve_response(state, {:ok, resolved})
-      assert length(result.code_lenses) == 1
-      assert hd(result.code_lenses).title == "2 references"
+      assert length(result.lsp.code_lenses) == 1
+      assert hd(result.lsp.code_lenses).title == "2 references"
 
       GenServer.stop(buf)
     end
 
     test "ignores errors gracefully" do
-      state = fake_state() |> Map.put(:code_lenses, [%{line: 0, title: "existing"}])
+      state = fake_state()
+
+      state =
+        put_in(
+          state.lsp,
+          Minga.Editor.State.LSP.set_code_lenses(state.lsp, [%{line: 0, title: "existing"}])
+        )
+
       result = LspActions.handle_code_lens_resolve_response(state, {:error, "timeout"})
-      assert result.code_lenses == [%{line: 0, title: "existing"}]
+      assert result.lsp.code_lenses == [%{line: 0, title: "existing"}]
     end
 
     test "ignores nil result" do
-      state = fake_state() |> Map.put(:code_lenses, [])
+      state = fake_state()
       result = LspActions.handle_code_lens_resolve_response(state, {:ok, nil})
       assert result == state
     end
@@ -287,7 +294,7 @@ defmodule Minga.Editor.LspActionsTest do
   describe "handle_inlay_hint_response/2" do
     test "stores parsed hints with correct line/col/label" do
       {:ok, buf} = BufferServer.start_link(content: "x = 1 + 2")
-      state = fake_state_with_buffer(buf) |> Map.put(:inlay_hints, [])
+      state = fake_state_with_buffer(buf)
 
       hint = %{
         "position" => %{"line" => 0, "character" => 2},
@@ -298,8 +305,8 @@ defmodule Minga.Editor.LspActionsTest do
       }
 
       result = LspActions.handle_inlay_hint_response(state, {:ok, [hint]})
-      assert length(result.inlay_hints) == 1
-      parsed = hd(result.inlay_hints)
+      assert length(result.lsp.inlay_hints) == 1
+      parsed = hd(result.lsp.inlay_hints)
       assert parsed.line == 0
       assert parsed.col == 2
       assert parsed.label == ": integer"
@@ -312,7 +319,7 @@ defmodule Minga.Editor.LspActionsTest do
 
     test "handles label as array of InlayHintLabelPart" do
       {:ok, buf} = BufferServer.start_link(content: "x = 1")
-      state = fake_state_with_buffer(buf) |> Map.put(:inlay_hints, [])
+      state = fake_state_with_buffer(buf)
 
       hint = %{
         "position" => %{"line" => 0, "character" => 2},
@@ -321,25 +328,28 @@ defmodule Minga.Editor.LspActionsTest do
       }
 
       result = LspActions.handle_inlay_hint_response(state, {:ok, [hint]})
-      assert hd(result.inlay_hints).label == ": int"
+      assert hd(result.lsp.inlay_hints).label == ": int"
 
       GenServer.stop(buf)
     end
 
     test "error is a no-op" do
-      state = fake_state() |> Map.put(:inlay_hints, [%{line: 0}])
+      state = fake_state()
+      state = put_in(state.lsp, Minga.Editor.State.LSP.set_inlay_hints(state.lsp, [%{line: 0}]))
       result = LspActions.handle_inlay_hint_response(state, {:error, "fail"})
       assert result == state
     end
 
     test "nil is a no-op" do
-      state = fake_state() |> Map.put(:inlay_hints, [%{line: 0}])
+      state = fake_state()
+      state = put_in(state.lsp, Minga.Editor.State.LSP.set_inlay_hints(state.lsp, [%{line: 0}]))
       result = LspActions.handle_inlay_hint_response(state, {:ok, nil})
       assert result == state
     end
 
     test "empty list is a no-op" do
-      state = fake_state() |> Map.put(:inlay_hints, [%{line: 0}])
+      state = fake_state()
+      state = put_in(state.lsp, Minga.Editor.State.LSP.set_inlay_hints(state.lsp, [%{line: 0}]))
       result = LspActions.handle_inlay_hint_response(state, {:ok, []})
       assert result == state
     end
@@ -349,12 +359,11 @@ defmodule Minga.Editor.LspActionsTest do
 
   describe "schedule_inlay_hints_on_scroll/1" do
     test "no-op when viewport hasn't changed" do
-      state =
-        fake_state()
-        |> Map.merge(%{inlay_hint_debounce_timer: nil, last_inlay_viewport_top: 0})
+      state = fake_state()
+      state = put_in(state.lsp, %{state.lsp | last_inlay_viewport_top: 0})
 
       result = LspActions.schedule_inlay_hints_on_scroll(state)
-      assert result.inlay_hint_debounce_timer == nil
+      assert result.lsp.inlay_hint_debounce_timer == nil
     end
 
     test "sets timer when viewport top changes" do
@@ -362,15 +371,14 @@ defmodule Minga.Editor.LspActionsTest do
 
       state =
         fake_state()
-        |> Map.merge(%{inlay_hint_debounce_timer: nil, last_inlay_viewport_top: nil})
         |> put_in([:workspace, :buffers, :active], buf)
         |> put_in([:workspace, :viewport, :top], 10)
 
       result = LspActions.schedule_inlay_hints_on_scroll(state)
-      assert result.inlay_hint_debounce_timer != nil
-      assert result.last_inlay_viewport_top == 10
+      assert result.lsp.inlay_hint_debounce_timer != nil
+      assert result.lsp.last_inlay_viewport_top == 10
       # Clean up timer
-      Process.cancel_timer(result.inlay_hint_debounce_timer)
+      Process.cancel_timer(result.lsp.inlay_hint_debounce_timer)
       GenServer.stop(buf)
     end
 
@@ -379,19 +387,18 @@ defmodule Minga.Editor.LspActionsTest do
 
       state =
         fake_state()
-        |> Map.merge(%{inlay_hint_debounce_timer: nil, last_inlay_viewport_top: nil})
         |> put_in([:workspace, :buffers, :active], buf)
         |> put_in([:workspace, :viewport, :top], 5)
 
       state1 = LspActions.schedule_inlay_hints_on_scroll(state)
-      timer1 = state1.inlay_hint_debounce_timer
+      timer1 = state1.lsp.inlay_hint_debounce_timer
 
       state2 = state1 |> put_in([:workspace, :viewport, :top], 15)
       state2 = LspActions.schedule_inlay_hints_on_scroll(state2)
-      timer2 = state2.inlay_hint_debounce_timer
+      timer2 = state2.lsp.inlay_hint_debounce_timer
 
       assert timer1 != timer2
-      assert state2.last_inlay_viewport_top == 15
+      assert state2.lsp.last_inlay_viewport_top == 15
       # Clean up
       Process.cancel_timer(timer2)
       GenServer.stop(buf)
@@ -571,12 +578,7 @@ defmodule Minga.Editor.LspActionsTest do
         highlight: %Minga.Editor.State.Highlighting{}
       },
       shell_state: %Minga.Shell.Traditional.State{status_msg: nil, hover_popup: nil},
-      code_lenses: [],
-      inlay_hints: [],
-      inlay_hint_debounce_timer: nil,
-      last_inlay_viewport_top: nil,
-      selection_ranges: nil,
-      selection_range_index: 0
+      lsp: %Minga.Editor.State.LSP{}
     }
   end
 

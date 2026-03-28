@@ -425,12 +425,17 @@ defmodule Minga.Integration.MouseTest do
 
       # Inject LSP selection ranges into state (normally set by an LSP response)
       :sys.replace_state(ctx.editor, fn state ->
-        %{state | selection_ranges: [%{"range" => %{}}], selection_range_index: 1}
+        %{
+          state
+          | lsp:
+              Minga.Editor.State.LSP.set_selection_ranges(state.lsp, [%{"range" => %{}}])
+              |> Map.put(:selection_range_index, 1)
+        }
       end)
 
       # Verify precondition
       state = :sys.get_state(ctx.editor)
-      assert state.selection_ranges != nil
+      assert state.lsp.selection_ranges != nil
 
       # Click to exit visual mode; post_action_housekeeping should clear ranges
       send_mouse(ctx, 2, 5, :left)
@@ -439,10 +444,10 @@ defmodule Minga.Integration.MouseTest do
 
       state = :sys.get_state(ctx.editor)
 
-      assert state.selection_ranges == nil,
+      assert state.lsp.selection_ranges == nil,
              "mouse click exiting visual mode should clear LSP selection ranges"
 
-      assert state.selection_range_index == 0
+      assert state.lsp.selection_range_index == 0
     end
 
     test "gui_action select_tab runs full housekeeping pipeline" do
