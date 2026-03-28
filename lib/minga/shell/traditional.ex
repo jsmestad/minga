@@ -28,7 +28,15 @@ defmodule Minga.Shell.Traditional do
 
   @behaviour Minga.Shell
 
+  alias Minga.Agent.UIState
+  alias Minga.Buffer
+  alias Minga.Editor.State.Tab
+  alias Minga.Editor.State.TabBar
+  alias Minga.Editor.Window
+  alias Minga.Editor.Window.Content
+  alias Minga.Log
   alias Minga.Shell.Traditional.State, as: ShellState
+  alias Minga.Workspace.State, as: WorkspaceState
 
   @impl true
   @spec init(keyword()) :: Minga.Shell.shell_state()
@@ -78,24 +86,188 @@ defmodule Minga.Shell.Traditional do
   # -------------------------------------------------------------------
 
   @impl true
-  @spec on_buffer_added(ShellState.t(), Minga.Workspace.State.t(), pid()) ::
-          {ShellState.t(), Minga.Workspace.State.t()}
-  def on_buffer_added(shell_state, workspace, _buffer_pid) do
-    # Stub: tab bar logic will move here in C2.
+  @spec on_buffer_added(ShellState.t(), WorkspaceState.t(), pid()) ::
+          {ShellState.t(), WorkspaceState.t()}
+  def on_buffer_added(%ShellState{tab_bar: nil} = shell_state, workspace, _buffer_pid) do
+    workspace = WorkspaceState.sync_active_window_buffer(workspace)
     {shell_state, workspace}
   end
 
+  def on_buffer_added(%ShellState{tab_bar: %TabBar{} = tb} = shell_state, workspace, buffer_pid) do
+    label = buffer_label(buffer_pid)
+    active_tab = TabBar.active(tb)
+
+    Log.debug(:editor, fn ->
+      "[tab] on_buffer_added label=#{label} tab=#{tb.active_id} kind=#{active_tab.kind}"
+    end)
+
+    case find_tab_for_buffer(tb, label) do
+      %Tab{id: tab_id} ->
+        switch_to_buffer_tab(shell_state, workspace, tab_id)
+
+      nil ->
+        case active_tab.kind do
+          :agent ->
+            open_buffer_from_agent_tab(shell_state, workspace, label)
+
+          :file ->
+            open_buffer_in_file_tab(shell_state, workspace, label)
+        end
+    end
+  end
+
   @impl true
-  @spec on_buffer_switched(ShellState.t(), Minga.Workspace.State.t()) ::
-          {ShellState.t(), Minga.Workspace.State.t()}
+  @spec on_buffer_switched(ShellState.t(), WorkspaceState.t()) ::
+          {ShellState.t(), WorkspaceState.t()}
   def on_buffer_switched(shell_state, workspace) do
     {shell_state, workspace}
   end
 
   @impl true
-  @spec on_buffer_died(ShellState.t(), Minga.Workspace.State.t(), pid()) ::
-          {ShellState.t(), Minga.Workspace.State.t()}
+  @spec on_buffer_died(ShellState.t(), WorkspaceState.t(), pid()) ::
+          {ShellState.t(), WorkspaceState.t()}
   def on_buffer_died(shell_state, workspace, _dead_pid) do
     {shell_state, workspace}
   end
+
+  # -------------------------------------------------------------------
+  # Buffer lifecycle helpers
+  # -------------------------------------------------------------------
+
+  @spec find_tab_for_buffer(TabBar.t(), String.t()) :: Tab.t() | nil
+  defp find_tab_for_buffer(%TabBar{tabs: tabs}, label) do
+    Enum.find(tabs, fn tab ->
+      tab.kind == :file and tab.label == label
+    end)
+  end
+
+  # Switch to an existing file tab that matches the buffer being opened.
+  @spec switch_to_buffer_tab(ShellState.t(), WorkspaceState.t(), Tab.id()) ::
+          {ShellState.t(), WorkspaceState.t()}
+  defp switch_to_buffer_tab(%ShellState{tab_bar: tb} = shell_state, workspace, target_id) do
+    current_id = tb.active_id
+
+    if current_id == target_id do
+      {shell_state, workspace}
+    else
+      # Snapshot current workspace onto outgoing tab
+      context = Map.from_struct(workspace)
+      tb = TabBar.update_context(tb, current_id, context)
+
+      # Switch pointer and restore target tab's workspace
+      tb = TabBar.switch_to(tb, target_id)
+      target = TabBar.active(tb)
+      workspace = restore_workspace(workspace, target.context)
+
+      # Clear attention flag on the tab we're switching to
+      tb = TabBar.update_tab(tb, target_id, &Tab.set_attention(&1, false))
+
+      workspace = WorkspaceState.invalidate_all_windows(workspace)
+      {%{shell_state | tab_bar: tb}, workspace}
+    end
+  end
+
+  # Opens a file buffer when the active tab is an agent tab.
+  # Creates a new file tab, resets agent UI state, and syncs the window.
+  @spec open_buffer_from_agent_tab(ShellState.t(), WorkspaceState.t(), String.t()) ::
+          {ShellState.t(), WorkspaceState.t()}
+  defp open_buffer_from_agent_tab(%ShellState{tab_bar: tb} = shell_state, workspace, label) do
+    # Snapshot current agent tab before leaving
+    context = Map.from_struct(workspace)
+    tb = TabBar.update_context(tb, tb.active_id, context)
+
+    # Create file tab (TabBar.add auto-activates it)
+    {tb, new_tab} = TabBar.add(tb, :file, label)
+
+    # Leave agent UI view: reset to editor scope and window content type
+    workspace = %{workspace | agent_ui: UIState.new(), keymap_scope: :editor}
+    workspace = reset_active_window_to_buffer(workspace)
+    workspace = WorkspaceState.sync_active_window_buffer(workspace)
+
+    # Snapshot the new tab's context
+    new_context = Map.from_struct(workspace)
+    tb = TabBar.update_context(tb, new_tab.id, new_context)
+
+    Log.debug(:editor, fn -> "[tab] on_buffer_added new tab=#{new_tab.id} label=#{label}" end)
+
+    {%{shell_state | tab_bar: tb}, workspace}
+  end
+
+  # Opens a file buffer when the active tab is already a file tab.
+  # Creates a new file tab and syncs the buffer into the window.
+  @spec open_buffer_in_file_tab(ShellState.t(), WorkspaceState.t(), String.t()) ::
+          {ShellState.t(), WorkspaceState.t()}
+  defp open_buffer_in_file_tab(%ShellState{tab_bar: tb} = shell_state, workspace, label) do
+    # Snapshot current tab before leaving
+    context = Map.from_struct(workspace)
+    tb = TabBar.update_context(tb, tb.active_id, context)
+
+    # Create file tab (TabBar.add auto-activates it)
+    {tb, new_tab} = TabBar.add(tb, :file, label)
+    workspace = WorkspaceState.sync_active_window_buffer(workspace)
+
+    # Snapshot the new tab's context
+    new_context = Map.from_struct(workspace)
+    tb = TabBar.update_context(tb, new_tab.id, new_context)
+
+    Log.debug(:editor, fn ->
+      "[tab] on_buffer_added new file tab=#{new_tab.id} label=#{label}"
+    end)
+
+    {%{shell_state | tab_bar: tb}, workspace}
+  end
+
+  @spec restore_workspace(WorkspaceState.t(), map()) :: WorkspaceState.t()
+  defp restore_workspace(workspace, context) when is_map(context) and map_size(context) > 0 do
+    Enum.reduce(WorkspaceState.field_names(), workspace, fn field, acc ->
+      case Map.fetch(context, field) do
+        {:ok, value} -> Map.put(acc, field, value)
+        :error -> acc
+      end
+    end)
+  end
+
+  defp restore_workspace(workspace, _context), do: workspace
+
+  # Resets the active window's content type from agent_chat back to buffer.
+  @spec reset_active_window_to_buffer(WorkspaceState.t()) :: WorkspaceState.t()
+  defp reset_active_window_to_buffer(workspace) do
+    %{windows: %{map: map, active: id}, buffers: buffers} = workspace
+    window = Map.get(map, id)
+
+    case window do
+      %Window{content: {:buffer, _}} ->
+        workspace
+
+      %Window{} ->
+        updated = %{
+          Window.invalidate(window)
+          | buffer: buffers.active,
+            content: Content.buffer(buffers.active)
+        }
+
+        %{workspace | windows: %{workspace.windows | map: Map.put(map, id, updated)}}
+
+      nil ->
+        workspace
+    end
+  end
+
+  @spec buffer_label(pid()) :: String.t()
+  defp buffer_label(pid) when is_pid(pid) do
+    case Buffer.buffer_name(pid) do
+      nil ->
+        case Buffer.file_path(pid) do
+          nil -> "[no file]"
+          path -> Path.basename(path)
+        end
+
+      name ->
+        name
+    end
+  catch
+    :exit, _ -> "[dead]"
+  end
+
+  defp buffer_label(_), do: "[unknown]"
 end
