@@ -60,6 +60,12 @@ defmodule Minga.Keymap.Scope.FileTree do
          {"H", "Toggle hidden files"},
          {"r", "Refresh tree"}
        ]},
+      {"File Operations",
+       [
+         {"a", "New file"},
+         {"A", "New folder"},
+         {"R", "Rename"}
+       ]},
       {"View",
        [
          {"q / Esc", "Close file tree"}
@@ -80,6 +86,9 @@ defmodule Minga.Keymap.Scope.FileTree do
     |> Bindings.bind([{?r, 0}], :tree_refresh, "Refresh file tree")
     |> Bindings.bind([{?q, 0}], :tree_close, "Close file tree")
     |> Bindings.bind([{@escape, 0}], :tree_close, "Close file tree")
+    |> Bindings.bind([{?a, 0}], :tree_new_file, "New file")
+    |> Bindings.bind([{?A, 0}], :tree_new_folder, "New folder")
+    |> Bindings.bind([{?R, 0}], :tree_rename, "Rename")
   end
 
   # ── CUA mode bindings ─────────────────────────────────────────────────────

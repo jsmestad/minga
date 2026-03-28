@@ -112,33 +112,137 @@ defmodule Minga.Editor.Commands.FileTree do
   end
 
   @doc """
-  Stub for creating a new file at the selected directory.
-  Requires a name prompt UI (not yet implemented). Logs intent to *Messages*.
+  Enters inline editing mode to create a new file.
+
+  If the selected entry is a directory, the new file appears inside it
+  (expanding the directory if collapsed). If the selected entry is a
+  file, the new file appears as a sibling in the same directory.
   """
   @spec new_file(state()) :: state()
   def new_file(%{workspace: %{file_tree: %{tree: nil}}} = state), do: state
 
-  def new_file(state) do
-    Minga.Editor.log_to_messages(
-      "[file-tree] New file: requires name prompt (not yet implemented)"
-    )
-
-    state
+  def new_file(%{workspace: %{file_tree: %{tree: tree}}} = state) do
+    {index, tree} = editing_insertion_index(tree)
+    ft = FileTreeState.start_editing(state.workspace.file_tree, index, :new_file)
+    state = put_in(state.workspace.file_tree, %{ft | tree: tree})
+    sync_buffer(state)
   end
 
   @doc """
-  Stub for creating a new folder at the selected directory.
-  Requires a name prompt UI (not yet implemented). Logs intent to *Messages*.
+  Enters inline editing mode to create a new folder.
+
+  Same positioning logic as `new_file/1`.
   """
   @spec new_folder(state()) :: state()
   def new_folder(%{workspace: %{file_tree: %{tree: nil}}} = state), do: state
 
-  def new_folder(state) do
-    Minga.Editor.log_to_messages(
-      "[file-tree] New folder: requires name prompt (not yet implemented)"
-    )
+  def new_folder(%{workspace: %{file_tree: %{tree: tree}}} = state) do
+    {index, tree} = editing_insertion_index(tree)
+    ft = FileTreeState.start_editing(state.workspace.file_tree, index, :new_folder)
+    state = put_in(state.workspace.file_tree, %{ft | tree: tree})
+    sync_buffer(state)
+  end
 
-    state
+  @doc """
+  Enters inline editing mode to rename the selected entry.
+
+  Pre-fills the input with the current entry name.
+  """
+  @spec rename(state()) :: state()
+  def rename(%{workspace: %{file_tree: %{tree: nil}}} = state), do: state
+
+  def rename(%{workspace: %{file_tree: %{tree: tree}}} = state) do
+    case FileTree.selected_entry(tree) do
+      nil ->
+        state
+
+      entry ->
+        ft =
+          FileTreeState.start_editing(
+            state.workspace.file_tree,
+            tree.cursor,
+            :rename,
+            entry.name
+          )
+
+        put_in(state.workspace.file_tree, ft)
+    end
+  end
+
+  @doc """
+  Confirms the current inline edit.
+
+  Dispatches on the editing type:
+  - `:new_file` creates the file on disk, opens it as a buffer.
+  - `:new_folder` creates the directory on disk.
+  - `:rename` renames the file/directory and updates any open buffer.
+  """
+  @spec confirm_editing(state()) :: state()
+  def confirm_editing(%{workspace: %{file_tree: %{editing: nil}}} = state), do: state
+
+  def confirm_editing(%{workspace: %{file_tree: %{editing: %{text: text}}}} = state)
+      when text == "" do
+    cancel_editing(state)
+  end
+
+  def confirm_editing(
+        %{workspace: %{file_tree: %{editing: %{type: :new_file} = editing}}} = state
+      ) do
+    parent_dir = editing_parent_dir(state)
+    full_path = Path.join(parent_dir, editing.text)
+
+    File.mkdir_p!(Path.dirname(full_path))
+    File.touch!(full_path)
+
+    state = clear_editing_and_refresh(state)
+
+    case Commands.start_buffer(full_path) do
+      {:ok, pid} ->
+        Minga.Editor.do_file_tree_open(state, pid, full_path, state.workspace.file_tree.tree)
+
+      {:error, reason} ->
+        Minga.Editor.log_to_messages(
+          "[file-tree] Failed to open #{full_path}: #{inspect(reason)}"
+        )
+
+        state
+    end
+  end
+
+  def confirm_editing(
+        %{workspace: %{file_tree: %{editing: %{type: :new_folder} = editing}}} = state
+      ) do
+    parent_dir = editing_parent_dir(state)
+    full_path = Path.join(parent_dir, editing.text)
+
+    case File.mkdir_p(full_path) do
+      :ok ->
+        Minga.Editor.log_to_messages("[file-tree] Created folder: #{editing.text}")
+        clear_editing_and_refresh(state)
+
+      {:error, reason} ->
+        Minga.Editor.log_to_messages("[file-tree] Failed to create folder: #{inspect(reason)}")
+
+        cancel_editing(state)
+    end
+  end
+
+  def confirm_editing(
+        %{workspace: %{file_tree: %{editing: %{type: :rename} = _editing, tree: tree}}} = state
+      ) do
+    case FileTree.selected_entry(tree) do
+      nil -> cancel_editing(state)
+      entry -> do_rename(state, entry, state.workspace.file_tree.editing.text)
+    end
+  end
+
+  @doc "Cancels the current inline edit without making changes."
+  @spec cancel_editing(state()) :: state()
+  def cancel_editing(%{workspace: %{file_tree: %{editing: nil}}} = state), do: state
+
+  def cancel_editing(state) do
+    ft = FileTreeState.cancel_editing(state.workspace.file_tree)
+    put_in(state.workspace.file_tree, ft)
   end
 
   @doc """
@@ -291,6 +395,114 @@ defmodule Minga.Editor.Commands.FileTree do
     put_in(state.workspace.file_tree.tree, new_tree)
   end
 
+  # Computes the insertion index for a new file/folder.
+  # If the selected entry is a directory, inserts inside it (expanding if needed).
+  # If the selected entry is a file, inserts as a sibling after the cursor.
+  @spec editing_insertion_index(FileTree.t()) :: {non_neg_integer(), FileTree.t()}
+  defp editing_insertion_index(tree) do
+    case FileTree.selected_entry(tree) do
+      nil ->
+        {0, tree}
+
+      %{dir?: true, path: dir_path} ->
+        tree = ensure_expanded(tree, dir_path)
+        {tree.cursor + 1, tree}
+
+      %{dir?: false} ->
+        {tree.cursor + 1, tree}
+    end
+  end
+
+  @spec ensure_expanded(FileTree.t(), String.t()) :: FileTree.t()
+  defp ensure_expanded(tree, dir_path) do
+    if MapSet.member?(tree.expanded, dir_path), do: tree, else: FileTree.toggle_expand(tree)
+  end
+
+  # Determines the parent directory path for the current editing operation.
+  @spec editing_parent_dir(state()) :: String.t()
+  defp editing_parent_dir(%{workspace: %{file_tree: %{editing: editing, tree: tree}}}) do
+    entries = FileTree.visible_entries(tree)
+
+    case editing.type do
+      type when type in [:new_file, :new_folder] ->
+        prev_entry = if editing.index > 0, do: Enum.at(entries, editing.index - 1)
+
+        case prev_entry do
+          %{dir?: true, path: path} -> path
+          %{path: path} -> Path.dirname(path)
+          nil -> tree.root
+        end
+
+      :rename ->
+        case Enum.at(entries, editing.index) do
+          %{path: path} -> Path.dirname(path)
+          nil -> tree.root
+        end
+    end
+  end
+
+  # Clears editing state and refreshes the tree from disk.
+  @spec clear_editing_and_refresh(state()) :: state()
+  defp clear_editing_and_refresh(state) do
+    ft = FileTreeState.cancel_editing(state.workspace.file_tree)
+    state = put_in(state.workspace.file_tree, ft)
+    refresh(state)
+  end
+
+  # Syncs the buffer after editing state changes.
+  @spec sync_buffer(state()) :: state()
+  defp sync_buffer(%{workspace: %{file_tree: %{buffer: buf, tree: tree}}} = state)
+       when is_pid(buf) do
+    BufferSync.sync(buf, tree)
+    state
+  end
+
+  defp sync_buffer(state), do: state
+
+  @spec do_rename(state(), FileTree.entry(), String.t()) :: state()
+  defp do_rename(state, entry, new_name) do
+    old_path = entry.path
+    new_path = Path.join(Path.dirname(old_path), new_name)
+
+    if old_path == new_path do
+      cancel_editing(state)
+    else
+      execute_rename(state, old_path, new_path, new_name)
+    end
+  end
+
+  @spec execute_rename(state(), String.t(), String.t(), String.t()) :: state()
+  defp execute_rename(state, old_path, new_path, new_name) do
+    case File.rename(old_path, new_path) do
+      :ok ->
+        state = update_buffer_path(state, old_path, new_path)
+
+        Minga.Editor.log_to_messages(
+          "[file-tree] Renamed: #{Path.basename(old_path)} \u2192 #{new_name}"
+        )
+
+        clear_editing_and_refresh(state)
+
+      {:error, reason} ->
+        Minga.Editor.log_to_messages("[file-tree] Rename failed: #{inspect(reason)}")
+        cancel_editing(state)
+    end
+  end
+
+  # Updates any open buffer that references the old path to the new path.
+  @spec update_buffer_path(state(), String.t(), String.t()) :: state()
+  defp update_buffer_path(state, old_path, new_path) do
+    case EditorState.find_buffer_by_path(state, old_path) do
+      nil ->
+        state
+
+      idx ->
+        pid = Enum.at(state.workspace.buffers.list, idx)
+        Buffer.save_as(pid, new_path)
+        state
+    end
+  end
+
   @impl Minga.Command.Provider
   def __commands__ do
     [
@@ -359,6 +571,24 @@ defmodule Minga.Editor.Commands.FileTree do
         description: "Create new folder in tree",
         requires_buffer: false,
         execute: &new_folder/1
+      },
+      %Minga.Command{
+        name: :tree_rename,
+        description: "Rename file or folder in tree",
+        requires_buffer: false,
+        execute: &rename/1
+      },
+      %Minga.Command{
+        name: :tree_confirm_editing,
+        description: "Confirm file tree inline edit",
+        requires_buffer: false,
+        execute: &confirm_editing/1
+      },
+      %Minga.Command{
+        name: :tree_cancel_editing,
+        description: "Cancel file tree inline edit",
+        requires_buffer: false,
+        execute: &cancel_editing/1
       },
       %Minga.Command{
         name: :tree_reveal_active,

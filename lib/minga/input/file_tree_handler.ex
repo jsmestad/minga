@@ -16,11 +16,21 @@ defmodule Minga.Input.FileTreeHandler do
   alias Minga.Editor.Commands
   alias Minga.Editor.Layout
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.State.FileTree, as: FileTreeState
   alias Minga.Input
   alias Minga.Keymap
   alias Minga.Project.FileTree
   @impl true
   @spec handle_key(state(), non_neg_integer(), non_neg_integer()) :: Minga.Input.Handler.result()
+
+  # Inline editing active: capture all keys before they reach the mode FSM or scope trie
+  def handle_key(
+        %{workspace: %{keymap_scope: :file_tree, file_tree: %{editing: %{} = _editing}}} = state,
+        cp,
+        mods
+      ) do
+    {:handled, handle_inline_edit_key(state, cp, mods)}
+  end
 
   # File tree scope with tree focused
   def handle_key(
@@ -211,6 +221,48 @@ defmodule Minga.Input.FileTreeHandler do
   defp tree_scroll_offset(cursor, visible_rows) when visible_rows <= 0, do: cursor
   defp tree_scroll_offset(cursor, visible_rows) when cursor < visible_rows, do: 0
   defp tree_scroll_offset(cursor, visible_rows), do: cursor - visible_rows + 1
+
+  # ── Inline editing key handler ──────────────────────────────────────────
+
+  @enter 13
+  @escape 27
+  @backspace 127
+
+  @spec handle_inline_edit_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
+          EditorState.t()
+  defp handle_inline_edit_key(state, @enter, 0) do
+    Commands.FileTree.confirm_editing(state)
+  end
+
+  defp handle_inline_edit_key(state, @escape, 0) do
+    Commands.FileTree.cancel_editing(state)
+  end
+
+  defp handle_inline_edit_key(state, @backspace, 0) do
+    editing = state.workspace.file_tree.editing
+
+    if editing.text == "" do
+      Commands.FileTree.cancel_editing(state)
+    else
+      # Delete the last grapheme from the editing text.
+      # Use String.slice/3 (start, length) to avoid negative index issues.
+      new_text = String.slice(editing.text, 0, max(String.length(editing.text) - 1, 0))
+      ft = FileTreeState.update_editing_text(state.workspace.file_tree, new_text)
+      put_in(state.workspace.file_tree, ft)
+    end
+  end
+
+  # Printable characters: append to editing text
+  defp handle_inline_edit_key(state, cp, 0) when cp >= 32 do
+    char = <<cp::utf8>>
+    editing = state.workspace.file_tree.editing
+    new_text = editing.text <> char
+    ft = FileTreeState.update_editing_text(state.workspace.file_tree, new_text)
+    put_in(state.workspace.file_tree, ft)
+  end
+
+  # All other keys (with modifiers, control chars): swallow them
+  defp handle_inline_edit_key(state, _cp, _mods), do: state
 
   # ── Shared helpers ──────────────────────────────────────────────────────
 end
