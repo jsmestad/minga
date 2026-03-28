@@ -104,10 +104,8 @@ defmodule Minga.Input.Interrupt do
   defp mode_state_dirty?(current, fresh) do
     current.leader_node != fresh.leader_node or
       current.prefix_node != fresh.prefix_node or
-      current.pending_find != fresh.pending_find or
-      current.pending_replace != fresh.pending_replace or
-      current.pending_mark != fresh.pending_mark or
-      current.pending_register != fresh.pending_register or
+      current.pending != fresh.pending or
+      current.describe_key != fresh.describe_key or
       current.count != fresh.count
   end
 

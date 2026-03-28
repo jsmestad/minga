@@ -185,7 +185,7 @@ defmodule Minga.Editor.MinibufferDataTest do
         workspace: %{
           editing: %{
             mode: :normal,
-            mode_state: %{pending_describe_key: true, describe_key_keys: ["b", "SPC"]}
+            mode_state: %{describe_key: %Minga.Mode.DescribeKey{keys: ["b", "SPC"]}}
           }
         }
       }
@@ -204,7 +204,7 @@ defmodule Minga.Editor.MinibufferDataTest do
         workspace: %{
           editing: %{
             mode: :normal,
-            mode_state: %{pending_describe_key: true, describe_key_keys: []}
+            mode_state: %{describe_key: %Minga.Mode.DescribeKey{keys: []}}
           }
         }
       }

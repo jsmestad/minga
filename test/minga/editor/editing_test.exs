@@ -111,8 +111,8 @@ defmodule Minga.Editor.EditingTest do
       assert Minga.Editing.cursor_shape(build_state(mode: :replace)) == :underline
     end
 
-    test "returns :underline when pending_replace is true in normal mode" do
-      ms = %{Mode.initial_state() | pending_replace: true}
+    test "returns :underline when pending replace is active in normal mode" do
+      ms = %{Mode.initial_state() | pending: :replace}
       assert Minga.Editing.cursor_shape(build_state(mode: :normal, mode_state: ms)) == :underline
     end
 
@@ -223,10 +223,10 @@ defmodule Minga.Editor.EditingTest do
     test "applies function to mode state" do
       state =
         Editing.update_mode_state(build_state(), fn ms ->
-          %{ms | pending_describe_key: true}
+          %{ms | describe_key: %Minga.Mode.DescribeKey{}}
         end)
 
-      assert Editing.mode_state(state).pending_describe_key == true
+      assert Editing.mode_state(state).describe_key != nil
     end
   end
 

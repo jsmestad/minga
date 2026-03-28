@@ -73,7 +73,7 @@ defmodule Minga.Editing.Model.Vim do
 
   @impl Minga.Editing.Model
   @spec cursor_shape(t()) :: :beam | :block | :underline
-  def cursor_shape(%__MODULE__{mode: :normal, mode_state: %{pending_replace: true}}),
+  def cursor_shape(%__MODULE__{mode: :normal, mode_state: %{pending: :replace}}),
     do: :underline
 
   def cursor_shape(%__MODULE__{mode: :insert}), do: :beam

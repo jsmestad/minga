@@ -411,7 +411,7 @@ defmodule Minga.Editor.Commands.Movement do
   def execute(state, :describe_key) do
     state =
       Minga.Editor.Editing.update_mode_state(state, fn ms ->
-        %{ms | pending_describe_key: true}
+        %{ms | describe_key: %Minga.Mode.DescribeKey{}}
       end)
 
     EditorState.set_status(state, "Press key to describe:")

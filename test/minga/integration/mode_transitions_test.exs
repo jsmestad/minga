@@ -296,7 +296,7 @@ defmodule Minga.Integration.ModeTransitionsTest do
     test "r awaits replacement char, shows underline cursor" do
       ctx = start_editor("hello world")
 
-      # r sets pending_replace in normal mode state, not a mode transition
+      # r sets pending: :replace in normal mode state, not a mode transition
       send_keys_sync(ctx, "r")
 
       assert_modeline_contains(ctx, "NORMAL")
