@@ -371,13 +371,13 @@ defmodule Minga.Frontend.Emit.GUI do
 
   @spec build_gui_file_tree_cmd(ctx()) :: binary() | nil
   defp build_gui_file_tree_cmd(%{
-         file_tree: %{tree: %Minga.Project.FileTree{} = tree}
+         file_tree: %{tree: %Minga.Project.FileTree{} = tree, editing: editing}
        }) do
-    fp = :erlang.phash2(tree)
+    fp = :erlang.phash2({tree, editing})
 
     if fp != Process.get(:last_gui_file_tree_fp) do
       Process.put(:last_gui_file_tree_fp, fp)
-      ProtocolGUI.encode_gui_file_tree(tree)
+      ProtocolGUI.encode_gui_file_tree(tree, editing)
     end
   end
 

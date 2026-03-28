@@ -155,6 +155,54 @@ struct FileTreeView: View {
 
     @ViewBuilder
     private func entryRow(_ entry: FileTreeEntry) -> some View {
+        if entry.isEditing {
+            editingEntryRow(entry)
+        } else {
+            normalEntryRow(entry)
+        }
+    }
+
+    @ViewBuilder
+    private func editingEntryRow(_ entry: FileTreeEntry) -> some View {
+        HStack(spacing: 0) {
+            disclosureChevron(entry)
+
+            Text(entry.icon)
+                .font(.custom("Symbols Nerd Font Mono", size: 12))
+                .foregroundStyle(iconColor(entry))
+                .frame(width: 16, alignment: .center)
+
+            Spacer().frame(width: 4)
+
+            InlineEditField(
+                initialText: entry.editingText,
+                selectStem: entry.editingType == 2,  // rename
+                onCommit: { text in
+                    encoder?.sendFileTreeEditConfirm(text: text)
+                },
+                onCancel: {
+                    encoder?.sendFileTreeEditCancel()
+                }
+            )
+            .frame(height: rowHeight)
+        }
+        .padding(.leading, leadingPadding(entry))
+        .padding(.trailing, 8)
+        .frame(height: rowHeight)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 4)
+                .fill(theme.treeSelectionBg)
+                .padding(.horizontal, 4)
+        )
+        .overlay(alignment: .leading) {
+            indentGuides(entry)
+        }
+        .id(entry.id)
+    }
+
+    @ViewBuilder
+    private func normalEntryRow(_ entry: FileTreeEntry) -> some View {
         HStack(spacing: 0) {
             // Disclosure chevron (directories) or alignment spacer (files)
             disclosureChevron(entry)
@@ -215,10 +263,10 @@ struct FileTreeView: View {
     private func entryContextMenu(_ entry: FileTreeEntry) -> some View {
         if entry.isDir {
             Button("New File…") {
-                encoder?.sendFileTreeNewFile()
+                encoder?.sendFileTreeNewFile(parentIndex: UInt16(entry.index))
             }
             Button("New Folder…") {
-                encoder?.sendFileTreeNewFolder()
+                encoder?.sendFileTreeNewFolder(parentIndex: UInt16(entry.index))
             }
             Divider()
         }

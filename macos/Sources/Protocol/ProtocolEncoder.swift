@@ -21,8 +21,10 @@ protocol InputEncoder: AnyObject, Sendable {
     func sendCloseTab(id: UInt32)
     func sendFileTreeClick(index: UInt16)
     func sendFileTreeToggle(index: UInt16)
-    func sendFileTreeNewFile()
-    func sendFileTreeNewFolder()
+    func sendFileTreeNewFile(parentIndex: UInt16)
+    func sendFileTreeNewFolder(parentIndex: UInt16)
+    func sendFileTreeEditConfirm(text: String)
+    func sendFileTreeEditCancel()
     func sendFileTreeCollapseAll()
     func sendFileTreeRefresh()
     func sendCompletionSelect(index: UInt16)
@@ -221,19 +223,43 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         writeFrame(buf)
     }
 
-    /// Send a gui_action: file_tree_new_file. Layout: opcode(1) + action_type(1).
-    func sendFileTreeNewFile() {
-        var buf = Data(count: 2)
+    /// Send a gui_action: file_tree_new_file. Layout: opcode(1) + action_type(1) + parent_index(2).
+    func sendFileTreeNewFile(parentIndex: UInt16) {
+        var buf = Data(count: 4)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_FILE_TREE_NEW_FILE
+        buf[2] = UInt8(parentIndex >> 8)
+        buf[3] = UInt8(parentIndex & 0xFF)
         writeFrame(buf)
     }
 
-    /// Send a gui_action: file_tree_new_folder. Layout: opcode(1) + action_type(1).
-    func sendFileTreeNewFolder() {
-        var buf = Data(count: 2)
+    /// Send a gui_action: file_tree_new_folder. Layout: opcode(1) + action_type(1) + parent_index(2).
+    func sendFileTreeNewFolder(parentIndex: UInt16) {
+        var buf = Data(count: 4)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_FILE_TREE_NEW_FOLDER
+        buf[2] = UInt8(parentIndex >> 8)
+        buf[3] = UInt8(parentIndex & 0xFF)
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: file_tree_edit_confirm. Layout: opcode(1) + action_type(1) + text_len(2) + text(N).
+    func sendFileTreeEditConfirm(text: String) {
+        let textData = text.data(using: .utf8) ?? Data()
+        var buf = Data(count: 4 + textData.count)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_FILE_TREE_EDIT_CONFIRM
+        buf[2] = UInt8(textData.count >> 8)
+        buf[3] = UInt8(textData.count & 0xFF)
+        buf.replaceSubrange(4..<(4 + textData.count), with: textData)
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: file_tree_edit_cancel. Layout: opcode(1) + action_type(1).
+    func sendFileTreeEditCancel() {
+        var buf = Data(count: 2)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_FILE_TREE_EDIT_CANCEL
         writeFrame(buf)
     }
 

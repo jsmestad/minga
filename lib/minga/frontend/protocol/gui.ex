@@ -55,6 +55,8 @@ defmodule Minga.Frontend.Protocol.GUI do
   | 0x0C       | open_file            |
   | 0x0D       | file_tree_new_file   |
   | 0x0E       | file_tree_new_folder |
+  | 0x2D       | file_tree_edit_confirm |
+  | 0x2E       | file_tree_edit_cancel  |
   | 0x0F       | file_tree_collapse_all |
   | 0x10       | file_tree_refresh    |
   | 0x11       | tool_install         |
@@ -208,6 +210,8 @@ defmodule Minga.Frontend.Protocol.GUI do
   @gui_action_agent_request_changes 0x2A
   @gui_action_agent_dismiss 0x2B
   @gui_action_change_summary_click 0x2C
+  @gui_action_file_tree_edit_confirm 0x2D
+  @gui_action_file_tree_edit_cancel 0x2E
 
   # ── Types ──
 
@@ -225,8 +229,10 @@ defmodule Minga.Frontend.Protocol.GUI do
           | :panel_dismiss
           | {:panel_resize, height_percent :: non_neg_integer()}
           | {:open_file, path :: String.t()}
-          | :file_tree_new_file
-          | :file_tree_new_folder
+          | {:file_tree_new_file, index :: non_neg_integer()}
+          | {:file_tree_new_folder, index :: non_neg_integer()}
+          | {:file_tree_edit_confirm, text :: String.t()}
+          | :file_tree_edit_cancel
           | :file_tree_collapse_all
           | :file_tree_refresh
           | {:tool_install, name :: String.t()}
@@ -894,10 +900,17 @@ defmodule Minga.Frontend.Protocol.GUI do
   Sends: selected_index, tree_width, entry_count, root_len, root, then per entry:
   path_hash, flags (is_dir, is_expanded), depth, git_status, icon, name, rel_path.
   """
-  @spec encode_gui_file_tree(Minga.Project.FileTree.t() | nil) :: binary()
-  def encode_gui_file_tree(nil), do: <<@op_gui_file_tree, 0::16, 0::16, 0::16, 0::16>>
+  @spec encode_gui_file_tree(
+          Minga.Project.FileTree.t() | nil,
+          Minga.Editor.State.FileTree.editing() | nil
+        ) ::
+          binary()
+  def encode_gui_file_tree(tree, editing \\ nil)
 
-  def encode_gui_file_tree(%Minga.Project.FileTree{} = tree) do
+  def encode_gui_file_tree(nil, _editing),
+    do: <<@op_gui_file_tree, 0::16, 0::16, 0::16, 0::16>>
+
+  def encode_gui_file_tree(%Minga.Project.FileTree{} = tree, editing) do
     entries = Minga.Project.FileTree.visible_entries(tree)
     count = length(entries)
     root_bytes = :erlang.iolist_to_binary([tree.root])
@@ -906,7 +919,8 @@ defmodule Minga.Frontend.Protocol.GUI do
       entries
       |> Enum.with_index()
       |> Enum.map(fn {entry, index} ->
-        encode_file_tree_entry(entry, tree, index == tree.cursor)
+        is_editing = editing != nil and index == editing.index
+        encode_file_tree_entry(entry, tree, index == tree.cursor, is_editing, editing)
       end)
 
     IO.iodata_to_binary([
@@ -920,17 +934,20 @@ defmodule Minga.Frontend.Protocol.GUI do
   @spec encode_file_tree_entry(
           Minga.Project.FileTree.entry(),
           Minga.Project.FileTree.t(),
-          boolean()
+          boolean(),
+          boolean(),
+          Minga.Editor.State.FileTree.editing() | nil
         ) :: binary()
-  defp encode_file_tree_entry(entry, tree, is_selected?) do
+  defp encode_file_tree_entry(entry, tree, is_selected?, is_editing, editing) do
     is_dir = if entry[:dir?], do: 1, else: 0
     is_expanded = if entry[:dir?] && MapSet.member?(tree.expanded, entry.path), do: 1, else: 0
     selected_bit = if is_selected?, do: 1, else: 0
+    editing_bit = if is_editing, do: 1, else: 0
 
     flags =
       bor(
         is_dir,
-        bor(bsl(is_expanded, 1), bsl(selected_bit, 2))
+        bor(bsl(is_expanded, 1), bor(bsl(selected_bit, 2), bsl(editing_bit, 3)))
       )
 
     git_status = encode_git_status(Map.get(tree.git_status, entry.path))
@@ -945,10 +962,26 @@ defmodule Minga.Frontend.Protocol.GUI do
     # persistent SwiftUI identity across tree updates.
     path_hash = :erlang.phash2(entry.path, 0xFFFFFFFF)
 
-    <<path_hash::32, flags::8, entry.depth::8, git_status::8, byte_size(icon_bytes)::8,
-      icon_bytes::binary, byte_size(name_bytes)::16, name_bytes::binary,
-      byte_size(rel_path_bytes)::16, rel_path_bytes::binary>>
+    base =
+      <<path_hash::32, flags::8, entry.depth::8, git_status::8, byte_size(icon_bytes)::8,
+        icon_bytes::binary, byte_size(name_bytes)::16, name_bytes::binary,
+        byte_size(rel_path_bytes)::16, rel_path_bytes::binary>>
+
+    # Append editing payload only when this entry is being edited
+    if is_editing and editing != nil do
+      editing_type = encode_editing_type(editing.type)
+      editing_text_bytes = :erlang.iolist_to_binary([editing.text])
+
+      base <> <<editing_type::8, byte_size(editing_text_bytes)::16, editing_text_bytes::binary>>
+    else
+      base
+    end
   end
+
+  @spec encode_editing_type(atom()) :: non_neg_integer()
+  defp encode_editing_type(:new_file), do: 0
+  defp encode_editing_type(:new_folder), do: 1
+  defp encode_editing_type(:rename), do: 2
 
   # Nerd Font folder icon (nf-md-folder)
   @folder_icon "\u{F024B}"
@@ -1758,10 +1791,20 @@ defmodule Minga.Frontend.Protocol.GUI do
   def decode_gui_action(@gui_action_open_file, <<path_len::16, path::binary-size(path_len)>>),
     do: {:ok, {:open_file, path}}
 
-  def decode_gui_action(@gui_action_file_tree_new_file, <<>>), do: {:ok, :file_tree_new_file}
+  def decode_gui_action(@gui_action_file_tree_new_file, <<parent_index::16>>),
+    do: {:ok, {:file_tree_new_file, parent_index}}
 
-  def decode_gui_action(@gui_action_file_tree_new_folder, <<>>),
-    do: {:ok, :file_tree_new_folder}
+  def decode_gui_action(@gui_action_file_tree_new_folder, <<parent_index::16>>),
+    do: {:ok, {:file_tree_new_folder, parent_index}}
+
+  def decode_gui_action(
+        @gui_action_file_tree_edit_confirm,
+        <<text_len::16, text::binary-size(text_len)>>
+      ),
+      do: {:ok, {:file_tree_edit_confirm, text}}
+
+  def decode_gui_action(@gui_action_file_tree_edit_cancel, <<>>),
+    do: {:ok, :file_tree_edit_cancel}
 
   def decode_gui_action(@gui_action_file_tree_collapse_all, <<>>),
     do: {:ok, :file_tree_collapse_all}

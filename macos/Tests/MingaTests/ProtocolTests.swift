@@ -284,8 +284,10 @@ final class SpyEncoder: InputEncoder, Sendable {
         case closeTab(id: UInt32)
         case fileTreeClick(index: UInt16)
         case fileTreeToggle(index: UInt16)
-        case fileTreeNewFile
-        case fileTreeNewFolder
+        case fileTreeNewFile(parentIndex: UInt16)
+        case fileTreeNewFolder(parentIndex: UInt16)
+        case fileTreeEditConfirm(text: String)
+        case fileTreeEditCancel
         case fileTreeCollapseAll
         case fileTreeRefresh
         case completionSelect(index: UInt16)
@@ -362,8 +364,10 @@ final class SpyEncoder: InputEncoder, Sendable {
     func sendCloseTab(id: UInt32) { state.withLock { $0.guiActions.append(.closeTab(id: id)) } }
     func sendFileTreeClick(index: UInt16) { state.withLock { $0.guiActions.append(.fileTreeClick(index: index)) } }
     func sendFileTreeToggle(index: UInt16) { state.withLock { $0.guiActions.append(.fileTreeToggle(index: index)) } }
-    func sendFileTreeNewFile() { state.withLock { $0.guiActions.append(.fileTreeNewFile) } }
-    func sendFileTreeNewFolder() { state.withLock { $0.guiActions.append(.fileTreeNewFolder) } }
+    func sendFileTreeNewFile(parentIndex: UInt16) { state.withLock { $0.guiActions.append(.fileTreeNewFile(parentIndex: parentIndex)) } }
+    func sendFileTreeNewFolder(parentIndex: UInt16) { state.withLock { $0.guiActions.append(.fileTreeNewFolder(parentIndex: parentIndex)) } }
+    func sendFileTreeEditConfirm(text: String) { state.withLock { $0.guiActions.append(.fileTreeEditConfirm(text: text)) } }
+    func sendFileTreeEditCancel() { state.withLock { $0.guiActions.append(.fileTreeEditCancel) } }
     func sendFileTreeCollapseAll() { state.withLock { $0.guiActions.append(.fileTreeCollapseAll) } }
     func sendFileTreeRefresh() { state.withLock { $0.guiActions.append(.fileTreeRefresh) } }
     func sendCompletionSelect(index: UInt16) { state.withLock { $0.guiActions.append(.completionSelect(index: index)) } }

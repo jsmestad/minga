@@ -96,8 +96,9 @@ struct CommandDispatcherRoutingTests {
         let (dispatcher, gui) = makeDispatcher()
         let entries = [
             Wire.FileTreeEntry(pathHash: 123, isDir: true, isExpanded: true,
-                           isSelected: false, depth: 0, gitStatus: 0,
-                           icon: "", name: "lib", relPath: "lib")
+                           isSelected: false, isEditing: false, depth: 0, gitStatus: 0,
+                           icon: "", name: "lib", relPath: "lib",
+                           editingType: 0, editingText: "")
         ]
         dispatcher.dispatch(.guiFileTree(selectedIndex: 0, treeWidth: 30,
                                           rootPath: "/project", entries: entries))
@@ -116,8 +117,9 @@ struct CommandDispatcherRoutingTests {
                                           rootPath: "/project",
                                           entries: [Wire.FileTreeEntry(pathHash: 1, isDir: false,
                                                                      isExpanded: false, isSelected: false,
-                                                                     depth: 0, gitStatus: 0,
-                                                                     icon: "", name: "a", relPath: "a")]))
+                                                                     isEditing: false, depth: 0, gitStatus: 0,
+                                                                     icon: "", name: "a", relPath: "a",
+                                                                     editingType: 0, editingText: "")]))
         #expect(gui.fileTreeState.visible == true)
 
         // Then hide with empty entries

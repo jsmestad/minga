@@ -169,13 +169,15 @@ struct FileTreeViewTests {
         state.entries = [
             FileTreeEntry(
                 id: 1, index: 0, isDir: true, isExpanded: true,
-                isSelected: false, depth: 0, gitStatus: 0,
-                icon: "\u{F024B}", name: "lib", relPath: "lib"
+                isSelected: false, isEditing: false, depth: 0, gitStatus: 0,
+                icon: "\u{F024B}", name: "lib", relPath: "lib",
+                editingType: 0, editingText: ""
             ),
             FileTreeEntry(
                 id: 2, index: 1, isDir: false, isExpanded: false,
-                isSelected: true, depth: 1, gitStatus: 0,
-                icon: "\u{E62D}", name: "editor.ex", relPath: "lib/editor.ex"
+                isSelected: true, isEditing: false, depth: 1, gitStatus: 0,
+                icon: "\u{E62D}", name: "editor.ex", relPath: "lib/editor.ex",
+                editingType: 0, editingText: ""
             ),
         ]
 

@@ -108,14 +108,27 @@ struct GUIActionEncoderTests {
     func fileTreeManagement() {
         let spy = SpyEncoder()
         let encoder: InputEncoder = spy
-        encoder.sendFileTreeNewFile()
-        encoder.sendFileTreeNewFolder()
+        encoder.sendFileTreeNewFile(parentIndex: 5)
+        encoder.sendFileTreeNewFolder(parentIndex: 3)
         encoder.sendFileTreeCollapseAll()
         encoder.sendFileTreeRefresh()
 
         #expect(spy.guiActions == [
-            .fileTreeNewFile, .fileTreeNewFolder,
+            .fileTreeNewFile(parentIndex: 5), .fileTreeNewFolder(parentIndex: 3),
             .fileTreeCollapseAll, .fileTreeRefresh
+        ])
+    }
+
+    @Test("file tree edit confirm and cancel actions record correctly")
+    func fileTreeEditActions() {
+        let spy = SpyEncoder()
+        let encoder: InputEncoder = spy
+        encoder.sendFileTreeEditConfirm(text: "newfile.txt")
+        encoder.sendFileTreeEditCancel()
+
+        #expect(spy.guiActions == [
+            .fileTreeEditConfirm(text: "newfile.txt"),
+            .fileTreeEditCancel
         ])
     }
 

@@ -913,14 +913,29 @@ defmodule Minga.Frontend.ProtocolTest do
       assert {:ok, {:gui_action, :new_tab}} = Protocol.decode_event(payload)
     end
 
-    test "file_tree_new_file with no payload" do
-      payload = <<0x07, 0x0D>>
-      assert {:ok, {:gui_action, :file_tree_new_file}} = Protocol.decode_event(payload)
+    test "file_tree_new_file with parent_index" do
+      payload = <<0x07, 0x0D, 0x00, 0x05>>
+      assert {:ok, {:gui_action, {:file_tree_new_file, 5}}} = Protocol.decode_event(payload)
     end
 
-    test "file_tree_new_folder with no payload" do
-      payload = <<0x07, 0x0E>>
-      assert {:ok, {:gui_action, :file_tree_new_folder}} = Protocol.decode_event(payload)
+    test "file_tree_new_folder with parent_index" do
+      payload = <<0x07, 0x0E, 0x00, 0x03>>
+      assert {:ok, {:gui_action, {:file_tree_new_folder, 3}}} = Protocol.decode_event(payload)
+    end
+
+    test "file_tree_edit_confirm with text" do
+      text = "newfile.txt"
+      text_bytes = text
+      text_len = byte_size(text_bytes)
+      payload = <<0x07, 0x2D, text_len::16, text_bytes::binary>>
+
+      assert {:ok, {:gui_action, {:file_tree_edit_confirm, "newfile.txt"}}} =
+               Protocol.decode_event(payload)
+    end
+
+    test "file_tree_edit_cancel" do
+      payload = <<0x07, 0x2E>>
+      assert {:ok, {:gui_action, :file_tree_edit_cancel}} = Protocol.decode_event(payload)
     end
 
     test "file_tree_collapse_all with no payload" do
@@ -1027,6 +1042,41 @@ defmodule Minga.Frontend.ProtocolTest do
     test "encodes gui_file_tree nil as zero entries" do
       encoded = ProtocolGUI.encode_gui_file_tree(nil)
       assert <<0x70, 0::16, 0::16, 0::16, 0::16>> = encoded
+    end
+
+    @tag :tmp_dir
+    test "encodes gui_file_tree with editing payload on the editing entry", %{tmp_dir: tmp_dir} do
+      File.write!(Path.join(tmp_dir, "target.txt"), "")
+
+      tree = %Minga.Project.FileTree{
+        root: tmp_dir,
+        expanded: MapSet.new([tmp_dir]),
+        cursor: 0,
+        width: 30
+      }
+
+      editing = %{index: 0, text: "renamed.txt", type: :rename, original_name: "target.txt"}
+      encoded = ProtocolGUI.encode_gui_file_tree(tree, editing)
+
+      # Skip header
+      root_len = byte_size(tmp_dir)
+
+      <<0x70, _cursor::16, _width::16, _count::16, ^root_len::16, _root::binary-size(root_len),
+        entry_rest::binary>> = encoded
+
+      # Entry fields: path_hash(4) + flags(1) + depth(1) + git(1) + icon_len(1) + icon
+      # + name_len(2) + name + rel_path_len(2) + rel_path + editing_payload
+      <<_hash::32, flags::8, _depth::8, _git::8, icon_len::8, _icon::binary-size(icon_len),
+        name_len::16, _name::binary-size(name_len), rel_path_len::16,
+        _rel_path::binary-size(rel_path_len), editing_type::8, editing_text_len::16,
+        editing_text::binary-size(editing_text_len)>> =
+        entry_rest
+
+      # flags bit 3 should be set (is_editing)
+      assert Bitwise.band(flags, 0x08) != 0
+      # editing_type 2 = rename
+      assert editing_type == 2
+      assert editing_text == "renamed.txt"
     end
 
     test "encodes gui_tab_bar with tabs" do
