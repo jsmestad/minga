@@ -236,7 +236,7 @@ defmodule Minga.Shell.Board do
 
     if card do
       icon = zoom_status_icon(card.status)
-      task = card.task || "Untitled"
+      task = if card.task == "", do: "Untitled", else: card.task
       model = if card.model, do: " · #{card.model}", else: ""
       hint = "ESC back to Board"
 
@@ -269,7 +269,6 @@ defmodule Minga.Shell.Board do
   defp zoom_status_icon(:needs_you), do: "◆"
   defp zoom_status_icon(:done), do: "✓"
   defp zoom_status_icon(:errored), do: "✗"
-  defp zoom_status_icon(_), do: "○"
 
   @spec zoom_status_face(Minga.Shell.Board.Card.status(), Minga.UI.Theme.t()) ::
           Minga.Core.Face.t()

@@ -538,10 +538,10 @@ defmodule Minga.Editor.RenderPipeline.Content do
 
     # Header
     header_face = Face.new(fg: at.text_fg, bg: at.panel_bg, bold: true)
-    hint_face = Face.new(fg: at.text_dim, bg: at.panel_bg)
+    hint_face = Face.new(fg: at.hint_fg, bg: at.panel_bg)
     label_face = Face.new(fg: at.dashboard_label, bg: at.panel_bg, bold: true)
     key_face = Face.new(fg: at.text_fg, bg: at.panel_bg)
-    desc_face = Face.new(fg: at.text_dim, bg: at.panel_bg)
+    desc_face = Face.new(fg: at.hint_fg, bg: at.panel_bg)
 
     header_row = 1
 
