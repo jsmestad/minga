@@ -61,7 +61,7 @@ defmodule Minga.Editor.State do
   alias Minga.Log
   alias Minga.Mode
   alias Minga.Project.FileTree
-  alias Minga.Tool.Manager, as: ToolManager
+
   alias Minga.UI.Panel.MessageStore
   alias Minga.UI.Theme
   alias Minga.Workspace.State, as: WorkspaceState
@@ -145,174 +145,85 @@ defmodule Minga.Editor.State do
 
   @doc "Applies a function to the shell state and returns the updated state."
   @spec update_shell_state(t(), (ShellState.t() -> ShellState.t())) :: t()
-  def update_shell_state(%__MODULE__{shell_state: ss} = state, fun) when is_function(fun, 1) do
+  def update_shell_state(%{shell_state: ss} = state, fun) when is_function(fun, 1) do
     %{state | shell_state: fun.(ss)}
   end
 
-  # ── Shell field accessors ─────────────────────────────────────────────────
-  # Convenience helpers for the most-accessed shell fields. These avoid
-  # the verbose `%{state | shell_state: %{state.shell_state | field: val}}`
-  # pattern at 100+ call sites.
+  # ── Shell field delegates ────────────────────────────────────────────────
+  # Thin wrappers that delegate to `ShellState` through `update_shell_state/2`.
+  # Both `update_shell_state` and `ShellState` methods use bare-map patterns
+  # so they work with Traditional state, Board state, and test stubs alike.
+  # The canonical @doc lives in `Minga.Shell.Traditional.State`.
 
-  @doc "Returns the transient status message, or nil."
   @spec status_msg(t()) :: String.t() | nil
-  def status_msg(%__MODULE__{shell_state: ss}), do: ss.status_msg
-
-  @doc "Sets the transient status message shown in the modeline."
+  def status_msg(%{shell_state: ss}), do: ShellState.status_msg(ss)
   @spec set_status(t(), String.t()) :: t()
-  def set_status(%{shell_state: ss} = state, msg) when is_binary(msg) do
-    %{state | shell_state: %{ss | status_msg: msg}}
-  end
-
-  @doc "Clears the transient status message."
+  def set_status(s, msg), do: update_shell_state(s, &ShellState.set_status(&1, msg))
   @spec clear_status(t()) :: t()
-  def clear_status(%{shell_state: ss} = state) do
-    %{state | shell_state: %{ss | status_msg: nil}}
-  end
+  def clear_status(s), do: update_shell_state(s, &ShellState.clear_status/1)
 
-  @doc "Returns the nav flash state, or nil when inactive."
   @spec nav_flash(t()) :: Minga.Editor.NavFlash.t() | nil
-  def nav_flash(%__MODULE__{shell_state: ss}), do: ss.nav_flash
-
-  @doc "Sets the nav flash state."
+  def nav_flash(%{shell_state: ss}), do: ShellState.nav_flash(ss)
   @spec set_nav_flash(t(), Minga.Editor.NavFlash.t()) :: t()
-  def set_nav_flash(%{shell_state: ss} = state, %Minga.Editor.NavFlash{} = flash) do
-    %{state | shell_state: %{ss | nav_flash: flash}}
-  end
-
-  @doc "Cancels the nav flash animation."
+  def set_nav_flash(s, flash), do: update_shell_state(s, &ShellState.set_nav_flash(&1, flash))
   @spec cancel_nav_flash(t()) :: t()
-  def cancel_nav_flash(%{shell_state: ss} = state) do
-    %{state | shell_state: %{ss | nav_flash: nil}}
-  end
+  def cancel_nav_flash(s), do: update_shell_state(s, &ShellState.cancel_nav_flash/1)
 
-  @doc "Returns the hover popup state, or nil when not showing."
   @spec hover_popup(t()) :: Minga.Editor.HoverPopup.t() | nil
-  def hover_popup(%__MODULE__{shell_state: ss}), do: ss.hover_popup
-
-  @doc "Sets the hover popup state."
+  def hover_popup(%{shell_state: ss}), do: ShellState.hover_popup(ss)
   @spec set_hover_popup(t(), Minga.Editor.HoverPopup.t()) :: t()
-  def set_hover_popup(%{shell_state: ss} = state, %Minga.Editor.HoverPopup{} = popup) do
-    %{state | shell_state: %{ss | hover_popup: popup}}
-  end
-
-  @doc "Dismisses the hover popup."
+  def set_hover_popup(s, popup), do: update_shell_state(s, &ShellState.set_hover_popup(&1, popup))
   @spec dismiss_hover_popup(t()) :: t()
-  def dismiss_hover_popup(%{shell_state: ss} = state) do
-    %{state | shell_state: %{ss | hover_popup: nil}}
-  end
+  def dismiss_hover_popup(s), do: update_shell_state(s, &ShellState.dismiss_hover_popup/1)
 
-  @doc "Returns the dashboard home screen state, or nil."
   @spec dashboard(t()) :: Dashboard.state() | nil
-  def dashboard(%__MODULE__{shell_state: ss}), do: ss.dashboard
-
-  @doc "Sets the dashboard home screen state."
+  def dashboard(%{shell_state: ss}), do: ShellState.dashboard(ss)
   @spec set_dashboard(t(), Dashboard.state()) :: t()
-  def set_dashboard(%{shell_state: ss} = state, dash) when is_map(dash) do
-    %{state | shell_state: %{ss | dashboard: dash}}
-  end
-
-  @doc "Closes the dashboard home screen."
+  def set_dashboard(s, dash), do: update_shell_state(s, &ShellState.set_dashboard(&1, dash))
   @spec close_dashboard(t()) :: t()
-  def close_dashboard(%{shell_state: ss} = state) do
-    %{state | shell_state: %{ss | dashboard: nil}}
-  end
+  def close_dashboard(s), do: update_shell_state(s, &ShellState.close_dashboard/1)
 
-  # ── Picker UI ───────────────────────────────────────────────────────────
-
-  @doc "Returns the picker UI state."
   @spec picker_ui(t()) :: Picker.t()
-  def picker_ui(%{shell_state: ss}), do: ss.picker_ui
-
-  @doc "Replaces the picker UI state."
+  def picker_ui(%{shell_state: ss}), do: ShellState.picker_ui(ss)
   @spec set_picker_ui(t(), Picker.t()) :: t()
-  def set_picker_ui(%{shell_state: ss} = state, pui) do
-    %{state | shell_state: %{ss | picker_ui: pui}}
-  end
-
-  @doc "Applies a function to the picker UI state."
+  def set_picker_ui(s, pui), do: update_shell_state(s, &ShellState.set_picker_ui(&1, pui))
   @spec update_picker_ui(t(), (Picker.t() -> Picker.t())) :: t()
-  def update_picker_ui(%{shell_state: ss} = state, fun) when is_function(fun, 1) do
-    %{state | shell_state: %{ss | picker_ui: fun.(ss.picker_ui)}}
-  end
+  def update_picker_ui(s, fun), do: update_shell_state(s, &ShellState.update_picker_ui(&1, fun))
 
-  # ── Prompt UI ──────────────────────────────────────────────────────────
-
-  @doc "Returns the prompt UI state."
   @spec prompt_ui(t()) :: Prompt.t()
-  def prompt_ui(%{shell_state: ss}), do: ss.prompt_ui
-
-  @doc "Replaces the prompt UI state."
+  def prompt_ui(%{shell_state: ss}), do: ShellState.prompt_ui(ss)
   @spec set_prompt_ui(t(), Prompt.t()) :: t()
-  def set_prompt_ui(%{shell_state: ss} = state, prompt) do
-    %{state | shell_state: %{ss | prompt_ui: prompt}}
-  end
+  def set_prompt_ui(s, prompt), do: update_shell_state(s, &ShellState.set_prompt_ui(&1, prompt))
 
-  # ── Which-key ──────────────────────────────────────────────────────────
-
-  @doc "Returns the which-key popup state."
   @spec whichkey(t()) :: WhichKey.t()
-  def whichkey(%{shell_state: ss}), do: ss.whichkey
-
-  @doc "Replaces the which-key popup state."
+  def whichkey(%{shell_state: ss}), do: ShellState.whichkey(ss)
   @spec set_whichkey(t(), WhichKey.t()) :: t()
-  def set_whichkey(%{shell_state: ss} = state, wk) do
-    %{state | shell_state: %{ss | whichkey: wk}}
-  end
+  def set_whichkey(s, wk), do: update_shell_state(s, &ShellState.set_whichkey(&1, wk))
 
-  # ── Bottom panel ───────────────────────────────────────────────────────
-
-  @doc "Returns the bottom panel state."
   @spec bottom_panel(t()) :: BottomPanel.t()
-  def bottom_panel(%{shell_state: ss}), do: ss.bottom_panel
-
-  @doc "Replaces the bottom panel state."
+  def bottom_panel(%{shell_state: ss}), do: ShellState.bottom_panel(ss)
   @spec set_bottom_panel(t(), BottomPanel.t()) :: t()
-  def set_bottom_panel(%{shell_state: ss} = state, panel) do
-    %{state | shell_state: %{ss | bottom_panel: panel}}
-  end
+  def set_bottom_panel(s, panel),
+    do: update_shell_state(s, &ShellState.set_bottom_panel(&1, panel))
 
-  # ── Git status panel ──────────────────────────────────────────────────
-
-  @doc "Returns the git status panel data, or nil."
   @spec git_status_panel(t()) :: Minga.Frontend.Protocol.GUI.git_status_data() | nil
-  def git_status_panel(%{shell_state: ss}), do: ss.git_status_panel
-
-  @doc "Sets the git status panel data."
+  def git_status_panel(%{shell_state: ss}), do: ShellState.git_status_panel(ss)
   @spec set_git_status_panel(t(), map() | nil) :: t()
-  def set_git_status_panel(%{shell_state: ss} = state, data) do
-    %{state | shell_state: %{ss | git_status_panel: data}}
-  end
+  def set_git_status_panel(s, data),
+    do: update_shell_state(s, &ShellState.set_git_status_panel(&1, data))
 
-  @doc "Clears the git status panel."
   @spec close_git_status_panel(t()) :: t()
-  def close_git_status_panel(%{shell_state: ss} = state) do
-    %{state | shell_state: %{ss | git_status_panel: nil}}
-  end
+  def close_git_status_panel(s), do: update_shell_state(s, &ShellState.close_git_status_panel/1)
 
-  # ── Tab bar ────────────────────────────────────────────────────────────
-
-  @doc "Returns the tab bar state, or nil."
   @spec tab_bar(t()) :: TabBar.t() | nil
-  def tab_bar(%{shell_state: ss}), do: ss.tab_bar
-
-  @doc "Replaces the tab bar state."
+  def tab_bar(%{shell_state: ss}), do: ShellState.tab_bar(ss)
   @spec set_tab_bar(t(), TabBar.t() | nil) :: t()
-  def set_tab_bar(%{shell_state: ss} = state, tb) do
-    %{state | shell_state: %{ss | tab_bar: tb}}
-  end
+  def set_tab_bar(s, tb), do: update_shell_state(s, &ShellState.set_tab_bar(&1, tb))
 
-  # ── Agent lifecycle ────────────────────────────────────────────────────
-
-  @doc "Returns the agent session lifecycle state."
   @spec agent(t()) :: AgentState.t()
-  def agent(%{shell_state: ss}), do: ss.agent
-
-  @doc "Replaces the agent session lifecycle state."
+  def agent(%{shell_state: ss}), do: ShellState.agent(ss)
   @spec set_agent(t(), AgentState.t()) :: t()
-  def set_agent(%{shell_state: ss} = state, agent) do
-    %{state | shell_state: %{ss | agent: agent}}
-  end
+  def set_agent(s, agent), do: update_shell_state(s, &ShellState.set_agent(&1, agent))
 
   # ── Convenience accessors ─────────────────────────────────────────────────
 
@@ -1268,14 +1179,10 @@ defmodule Minga.Editor.State do
     end
   end
 
-  @doc """
-  Returns the active tab, or nil if the tab bar isn't initialized.
-  """
   @spec active_tab(t()) :: Tab.t() | nil
   def active_tab(%__MODULE__{shell_state: %{tab_bar: nil}}), do: nil
   def active_tab(%__MODULE__{shell_state: %{tab_bar: tb}}), do: TabBar.active(tb)
 
-  @doc "Finds a file tab whose context has the given buffer pid as active."
   @spec find_tab_by_buffer(t(), pid()) :: Tab.t() | nil
   def find_tab_by_buffer(%__MODULE__{shell_state: %{tab_bar: nil}}, _pid), do: nil
 
@@ -1295,9 +1202,6 @@ defmodule Minga.Editor.State do
     end
   end
 
-  @doc """
-  Returns the kind of the active tab, or `:file` as default.
-  """
   @spec active_tab_kind(t()) :: Tab.kind()
   def active_tab_kind(%__MODULE__{shell_state: %{tab_bar: nil}}), do: :file
 
@@ -1324,14 +1228,15 @@ defmodule Minga.Editor.State do
     end
   end
 
-  @doc """
-  Sets the `Tab.session` field for the tab with the given id.
-
-  Called when a session is started or switched so `find_by_session/2` works.
-  """
   @spec set_tab_session(t(), Tab.id(), pid() | nil) :: t()
-  def set_tab_session(%__MODULE__{shell_state: %{tab_bar: tb}} = state, tab_id, session_pid) do
-    set_tab_bar(state, TabBar.update_tab(tb, tab_id, &Tab.set_session(&1, session_pid)))
+  def set_tab_session(%__MODULE__{shell_state: %{tab_bar: tb} = ss} = state, tab_id, session_pid) do
+    %{
+      state
+      | shell_state: %{
+          ss
+          | tab_bar: TabBar.update_tab(tb, tab_id, &Tab.set_session(&1, session_pid))
+        }
+    }
   end
 
   # Rebuilds state.agent from the Session process when switching to an
@@ -1400,9 +1305,6 @@ defmodule Minga.Editor.State do
   """
   @spec skip_tool_prompt?(t(), atom()) :: boolean()
   def skip_tool_prompt?(%__MODULE__{shell_state: ss}, tool_name) do
-    MapSet.member?(ss.tool_declined, tool_name) or
-      ToolManager.installed?(tool_name) or
-      MapSet.member?(ToolManager.installing(), tool_name) or
-      tool_name in ss.tool_prompt_queue
+    ShellState.skip_tool_prompt?(ss, tool_name)
   end
 end

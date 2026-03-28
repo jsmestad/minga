@@ -9,16 +9,14 @@ defmodule Minga.Editor.LspActions.NavigationTest do
   use ExUnit.Case, async: true
 
   alias Minga.Editor.LspActions
+  alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.Viewport
+  alias Minga.Workspace.State, as: WorkspaceState
 
   defp stub_state do
-    %{
-      shell_state: %Minga.Shell.Traditional.State{
-        status_msg: nil,
-        picker_ui: %Minga.Editor.State.Picker{},
-        whichkey: %Minga.Editor.State.WhichKey{}
-      },
-      buffers: %{active: nil, list: []},
-      editing: %{mode: :normal, last_jump_pos: nil}
+    %EditorState{
+      port_manager: nil,
+      workspace: %WorkspaceState{viewport: Viewport.new(40, 120)}
     }
   end
 

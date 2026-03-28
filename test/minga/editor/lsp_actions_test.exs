@@ -6,8 +6,13 @@ defmodule Minga.Editor.LspActionsTest do
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.HoverPopup
   alias Minga.Editor.LspActions
+  alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.State.Buffers
+  alias Minga.Editor.State.Highlighting
   alias Minga.Editor.VimState
+  alias Minga.Editor.Viewport
   alias Minga.UI.Picker.CodeActionSource
+  alias Minga.Workspace.State, as: WorkspaceState
 
   # ── parse_location/1 ──────────────────────────────────────────────────────
 
@@ -369,10 +374,15 @@ defmodule Minga.Editor.LspActionsTest do
     test "sets timer when viewport top changes" do
       {:ok, buf} = BufferServer.start_link(content: "hello")
 
-      state =
-        fake_state()
-        |> put_in([:workspace, :buffers, :active], buf)
-        |> put_in([:workspace, :viewport, :top], 10)
+      state = fake_state()
+
+      ws = %{
+        state.workspace
+        | buffers: %{state.workspace.buffers | active: buf},
+          viewport: %{state.workspace.viewport | top: 10}
+      }
+
+      state = %{state | workspace: ws}
 
       result = LspActions.schedule_inlay_hints_on_scroll(state)
       assert result.lsp.inlay_hint_debounce_timer != nil
@@ -385,15 +395,24 @@ defmodule Minga.Editor.LspActionsTest do
     test "cancels previous timer and sets new one" do
       {:ok, buf} = BufferServer.start_link(content: "hello")
 
-      state =
-        fake_state()
-        |> put_in([:workspace, :buffers, :active], buf)
-        |> put_in([:workspace, :viewport, :top], 5)
+      state = fake_state()
+
+      ws = %{
+        state.workspace
+        | buffers: %{state.workspace.buffers | active: buf},
+          viewport: %{state.workspace.viewport | top: 5}
+      }
+
+      state = %{state | workspace: ws}
 
       state1 = LspActions.schedule_inlay_hints_on_scroll(state)
       timer1 = state1.lsp.inlay_hint_debounce_timer
 
-      state2 = state1 |> put_in([:workspace, :viewport, :top], 15)
+      state2 = %{
+        state1
+        | workspace: %{state1.workspace | viewport: %{state1.workspace.viewport | top: 15}}
+      }
+
       state2 = LspActions.schedule_inlay_hints_on_scroll(state2)
       timer2 = state2.lsp.inlay_hint_debounce_timer
 
@@ -436,7 +455,8 @@ defmodule Minga.Editor.LspActionsTest do
 
     test "prepareRename with Range only reads text from buffer" do
       {:ok, buf} = BufferServer.start_link(content: "def hello_world do\n  :ok\nend")
-      state = fake_state_with_vim() |> put_in([:workspace, :buffers, :active], buf)
+      state = fake_state_with_buffer(buf)
+      state = %{state | workspace: %{state.workspace | editing: VimState.new()}}
 
       resp = %{
         "start" => %{"line" => 0, "character" => 4},
@@ -452,7 +472,8 @@ defmodule Minga.Editor.LspActionsTest do
 
     test "prepareRename with wrapped Range reads text from buffer" do
       {:ok, buf} = BufferServer.start_link(content: "def hello_world do\n  :ok\nend")
-      state = fake_state_with_vim() |> put_in([:workspace, :buffers, :active], buf)
+      state = fake_state_with_buffer(buf)
+      state = %{state | workspace: %{state.workspace | editing: VimState.new()}}
 
       resp = %{
         "range" => %{
@@ -569,26 +590,24 @@ defmodule Minga.Editor.LspActionsTest do
   # ── Helpers ────────────────────────────────────────────────────────────────
 
   defp fake_state do
-    %{
-      workspace: %{
-        buffers: %{active: nil},
-        viewport: %{rows: 24, cols: 80, top: 0},
-        lsp_pending: %{},
-        document_highlights: nil,
-        highlight: %Minga.Editor.State.Highlighting{}
-      },
-      shell_state: %Minga.Shell.Traditional.State{status_msg: nil, hover_popup: nil},
-      lsp: %Minga.Editor.State.LSP{}
+    %EditorState{
+      port_manager: nil,
+      workspace: %WorkspaceState{
+        viewport: Viewport.new(24, 80),
+        highlight: %Highlighting{}
+      }
     }
   end
 
   defp fake_state_with_buffer(buf) do
-    fake_state()
-    |> put_in([:workspace, :buffers], %{active: buf, list: [buf]})
+    state = fake_state()
+    ws = %{state.workspace | buffers: %Buffers{active: buf, list: [buf]}}
+    %{state | workspace: ws}
   end
 
   defp fake_state_with_vim do
-    fake_state()
-    |> put_in([:workspace, :editing], %VimState{mode: :normal, mode_state: nil})
+    state = fake_state()
+    ws = %{state.workspace | editing: VimState.new()}
+    %{state | workspace: ws}
   end
 end
