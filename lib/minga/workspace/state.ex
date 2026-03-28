@@ -135,7 +135,8 @@ defmodule Minga.Workspace.State do
         %__MODULE__{windows: %{map: windows, active: id} = ws, buffers: buffers} = wspace
       ) do
     case Map.fetch(windows, id) do
-      {:ok, %Window{buffer: existing} = window} when existing != buffers.active ->
+      {:ok, %Window{buffer: existing, content: {:buffer, _}} = window}
+      when existing != buffers.active ->
         window = %{
           Window.invalidate(window)
           | buffer: buffers.active,

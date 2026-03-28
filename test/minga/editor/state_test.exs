@@ -284,7 +284,7 @@ defmodule Minga.Editor.StateTest do
                "got #{inspect(window.content)}"
     end
 
-    test "updates content from agent_chat to buffer when buffer changes" do
+    test "preserves agent_chat content when buffer changes" do
       agent_buf = start_buffer("")
       file_buf = start_buffer("defmodule Foo, do: :ok")
 
@@ -319,13 +319,14 @@ defmodule Minga.Editor.StateTest do
         | workspace: %{state.workspace | buffers: Buffers.add(state.workspace.buffers, file_buf)}
       }
 
+      # sync_active_window_buffer should NOT overwrite agent_chat content
       new_state = EditorState.sync_active_window_buffer(state)
 
       window = Map.fetch!(new_state.workspace.windows.map, 1)
-      assert window.buffer == file_buf
+      assert window.buffer == agent_buf
 
-      assert window.content == Content.buffer(file_buf),
-             "content should switch from agent_chat to buffer, got #{inspect(window.content)}"
+      assert Content.agent_chat?(window.content),
+             "content should remain agent_chat, got #{inspect(window.content)}"
     end
 
     test "no-op when buffer has not changed" do

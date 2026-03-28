@@ -691,9 +691,13 @@ defmodule Minga.Editor.State do
     # Create file tab (TabBar.add auto-activates it)
     {tb, new_tab} = TabBar.add(tb, :file, label)
 
-    # Leave agent UI view: reset to editor scope.
+    # Leave agent UI view: reset to editor scope and window content type.
+    # Explicitly transition the active window from agent_chat to buffer
+    # so sync_active_window_buffer (which only syncs buffer windows) can
+    # update the buffer pid.
     state = AgentAccess.update_agent_ui(state, fn _ -> UIState.new() end)
     state = put_in(state.workspace.keymap_scope, :editor)
+    state = reset_active_window_to_buffer(state)
     state = set_tab_bar(state, tb)
     state = sync_active_window_buffer(state)
 
@@ -706,6 +710,33 @@ defmodule Minga.Editor.State do
     end)
 
     set_tab_bar(state, tb)
+  end
+
+  # Resets the active window's content type from agent_chat (or any non-buffer
+  # type) back to {:buffer, buffers.active}. Used when transitioning from an
+  # agent tab to a file tab, where the content type change is intentional.
+  @spec reset_active_window_to_buffer(t()) :: t()
+  defp reset_active_window_to_buffer(%__MODULE__{workspace: ws} = state) do
+    %{windows: %{map: map, active: id}, buffers: buffers} = ws
+    window = Map.get(map, id)
+
+    case window do
+      %Window{content: {:buffer, _}} ->
+        state
+
+      %Window{} ->
+        updated = %{
+          Window.invalidate(window)
+          | buffer: buffers.active,
+            content: Content.buffer(buffers.active)
+        }
+
+        new_map = Map.put(map, id, updated)
+        %{state | workspace: %{ws | windows: %{ws.windows | map: new_map}}}
+
+      nil ->
+        state
+    end
   end
 
   @doc """
