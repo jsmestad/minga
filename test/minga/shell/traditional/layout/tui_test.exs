@@ -1,8 +1,8 @@
-defmodule Minga.Editor.Layout.TUITest do
+defmodule Minga.Shell.Traditional.Layout.TUITest do
   use ExUnit.Case, async: true
 
   alias Minga.Editor.Layout
-  alias Minga.Editor.Layout.TUI, as: LayoutTUI
+  alias Minga.Shell.Traditional.Layout.TUI, as: LayoutTUI
 
   import Minga.Editor.RenderPipeline.TestHelpers
 

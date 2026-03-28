@@ -1,4 +1,4 @@
-defmodule Minga.Editor.TabBarRenderer do
+defmodule Minga.Shell.Traditional.TabBarRenderer do
   @moduledoc """
   Renders the tab bar at the top of the screen.
 

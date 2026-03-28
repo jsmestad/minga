@@ -1,4 +1,4 @@
-defmodule Minga.Editor.RenderPipeline.Chrome.TUI do
+defmodule Minga.Shell.Traditional.Chrome.TUI do
   @moduledoc """
   TUI chrome builder.
 
@@ -11,17 +11,17 @@ defmodule Minga.Editor.RenderPipeline.Chrome.TUI do
   alias Minga.Editor.DisplayList
   alias Minga.Editor.DisplayList.{Cursor, Overlay}
   alias Minga.Editor.Layout
-  alias Minga.Editor.Modeline
   alias Minga.Editor.PickerUI
   alias Minga.Editor.Renderer.Caps
   alias Minga.Editor.Renderer.Minibuffer
   alias Minga.Editor.Renderer.Regions
   alias Minga.Editor.RenderPipeline.Chrome
-  alias Minga.Editor.RenderPipeline.ChromeHelpers
   alias Minga.Editor.RenderPipeline.Scroll.WindowScroll
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.StatusBar.Data, as: StatusBarData
-  alias Minga.Editor.TreeRenderer
+  alias Minga.Shell.Traditional.Chrome.Helpers, as: ChromeHelpers
+  alias Minga.Shell.Traditional.Modeline
+  alias Minga.Shell.Traditional.TreeRenderer
   alias Minga.UI.Popup.Lifecycle, as: PopupLifecycle
 
   @typedoc "Internal editor state."
@@ -95,7 +95,8 @@ defmodule Minga.Editor.RenderPipeline.Chrome.TUI do
   end
 
   @spec build_status_bar(state(), Layout.t()) ::
-          {[DisplayList.draw()], StatusBarData.t(), [Minga.Editor.Modeline.click_region()]}
+          {[DisplayList.draw()], StatusBarData.t(),
+           [Minga.Shell.Traditional.Modeline.click_region()]}
   defp build_status_bar(_state, %{status_bar: nil}) do
     {[], nil, []}
   end

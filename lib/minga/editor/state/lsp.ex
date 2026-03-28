@@ -14,7 +14,7 @@ defmodule Minga.Editor.State.LSP do
   @type server_status :: :starting | :initializing | :ready | :crashed
 
   @type t :: %__MODULE__{
-          status: Minga.Editor.Modeline.lsp_status(),
+          status: Minga.Shell.Traditional.Modeline.lsp_status(),
           server_statuses: %{atom() => server_status()},
           code_lenses: [map()],
           inlay_hints: [map()],
@@ -152,7 +152,7 @@ defmodule Minga.Editor.State.LSP do
 
   # Derives an aggregate LSP status from the per-server status map.
   # Priority: :ready > :error > :initializing > :starting > :none
-  @spec aggregate(%{atom() => server_status()}) :: Minga.Editor.Modeline.lsp_status()
+  @spec aggregate(%{atom() => server_status()}) :: Minga.Shell.Traditional.Modeline.lsp_status()
   defp aggregate(server_statuses) when server_statuses == %{}, do: :none
 
   defp aggregate(server_statuses) do

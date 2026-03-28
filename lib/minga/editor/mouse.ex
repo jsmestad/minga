@@ -1208,7 +1208,7 @@ defmodule Minga.Editor.Mouse do
   end
 
   @spec find_tab_bar_region(
-          [Minga.Editor.TabBarRenderer.click_region()],
+          [Minga.Shell.Traditional.TabBarRenderer.click_region()],
           non_neg_integer()
         ) :: {:command, atom()} | :not_tab_bar
   defp find_tab_bar_region(regions, col) do
@@ -1263,7 +1263,7 @@ defmodule Minga.Editor.Mouse do
   defp put_active_window_viewport(state, new_vp),
     do: EditorState.put_active_window_viewport(state, new_vp)
 
-  @spec find_click_region([Minga.Editor.Modeline.click_region()], non_neg_integer()) ::
+  @spec find_click_region([Minga.Shell.Traditional.Modeline.click_region()], non_neg_integer()) ::
           {:command, atom()} | :not_modeline
   defp find_click_region(regions, col) do
     case Enum.find(regions, fn {col_start, col_end, _cmd} ->

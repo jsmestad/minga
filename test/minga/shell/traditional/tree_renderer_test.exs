@@ -1,10 +1,10 @@
-defmodule Minga.Editor.TreeRendererTest do
+defmodule Minga.Shell.Traditional.TreeRendererTest do
   @moduledoc "Tests TreeRenderer with focused RenderInput (no EditorState needed)."
 
   use ExUnit.Case, async: true
 
-  alias Minga.Editor.TreeRenderer
-  alias Minga.Editor.TreeRenderer.RenderInput
+  alias Minga.Shell.Traditional.TreeRenderer
+  alias Minga.Shell.Traditional.TreeRenderer.RenderInput
   alias Minga.Project.FileTree
   alias Minga.UI.Theme
 

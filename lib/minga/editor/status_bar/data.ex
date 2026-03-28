@@ -324,7 +324,7 @@ defmodule Minga.Editor.StatusBar.Data do
 
   Both variants carry the same buffer fields and produce identical modeline data.
   """
-  @spec to_modeline_data(t()) :: Minga.Editor.Modeline.modeline_data()
+  @spec to_modeline_data(t()) :: Minga.Shell.Traditional.Modeline.modeline_data()
   def to_modeline_data({_variant, d}) do
     %{
       mode: d.mode,

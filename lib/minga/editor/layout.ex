@@ -94,7 +94,7 @@ defmodule Minga.Editor.Layout do
   """
   @spec get(EditorState.t()) :: t()
   def get(%{layout: %__MODULE__{} = cached}), do: cached
-  def get(state), do: compute(state)
+  def get(%{shell: shell} = state), do: shell.compute_layout(state)
 
   @doc """
   Computes the layout and stores it in state for reuse within the same frame.
@@ -115,21 +115,12 @@ defmodule Minga.Editor.Layout do
   @doc """
   Computes the complete layout for the current frame.
 
-  This is a pure function: given the same state, it always produces the
-  same rectangles. No side effects, no GenServer calls.
-
-  In GUI mode (`Minga.Frontend.gui?`), the Metal viewport IS the editor
-  area. SwiftUI handles tab bar, file tree sidebar, breadcrumb, and
-  status bar outside the Metal view. The BEAM doesn't reserve rows or
-  columns for chrome that SwiftUI renders natively.
+  Delegates to the shell's `compute_layout` callback, which dispatches
+  to the appropriate TUI or GUI layout module.
   """
   @spec compute(EditorState.t()) :: t()
-  def compute(state) do
-    if Minga.Frontend.gui?(state.capabilities) do
-      __MODULE__.GUI.compute(state)
-    else
-      __MODULE__.TUI.compute(state)
-    end
+  def compute(%{shell: shell} = state) do
+    shell.compute_layout(state)
   end
 
   # ── Shared helpers (used by Layout.TUI and Layout.GUI) ─────────────────────

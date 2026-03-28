@@ -1,11 +1,9 @@
-defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
+defmodule Minga.Shell.Traditional.Chrome.Helpers do
   @moduledoc """
-  Helper functions for the Chrome stage of the render pipeline.
+  Helper functions for Traditional shell chrome building.
 
   Renders modelines, tab bars, window separators, which-key popups,
   and snapshot display names.
-
-  Extracted from `RenderPipeline` to reduce module size.
   """
 
   alias Minga.Config
@@ -14,7 +12,7 @@ defmodule Minga.Editor.RenderPipeline.ChromeHelpers do
   alias Minga.Editor.FloatingWindow
   alias Minga.Editor.Layout
   alias Minga.Editor.State, as: EditorState
-  alias Minga.Editor.TabBarRenderer
+  alias Minga.Shell.Traditional.TabBarRenderer
   alias Minga.Editor.Viewport
   alias Minga.Editor.WindowTree
   alias Minga.UI.Theme

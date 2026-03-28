@@ -119,7 +119,7 @@ defmodule Minga.Editor.State do
              {git_root :: String.t(), success_msg :: String.t(), error_prefix :: String.t()}}
             | nil,
           lsp: LSPState.t(),
-          parser_status: Minga.Editor.Modeline.parser_status(),
+          parser_status: Minga.Shell.Traditional.Modeline.parser_status(),
           focus_stack: [module()],
           capabilities: Capabilities.t(),
           layout: Minga.Editor.Layout.t() | nil,

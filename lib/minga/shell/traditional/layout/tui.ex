@@ -1,4 +1,4 @@
-defmodule Minga.Editor.Layout.TUI do
+defmodule Minga.Shell.Traditional.Layout.TUI do
   @moduledoc """
   TUI layout computation.
 
