@@ -47,7 +47,7 @@ cd zig && zig build test       # Zig renderer tests
 All three must pass:
 
 ```bash
-mix lint                          # Formatting + Credo + compile warnings
+make lint                         # Formatting + Credo + compile warnings
 mix test --warnings-as-errors     # Tests
 mix dialyzer                      # Typespec consistency
 ```

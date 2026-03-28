@@ -45,7 +45,7 @@ git diff main --name-only | sed 's|.*/||' | sed 's/.*\.//' | sort -u
 
 | File types in diff | Checks to run |
 |-------------------|---------------|
-| `.ex`, `.exs` (always) | `mix lint` + `mix test.llm` |
+| `.ex`, `.exs` (always) | `make lint` + `mix test.llm` |
 | `.zig` | `mix zig.lint` |
 | `.swift`, `.metal` | `mix swift.build` + Swift tests |
 | Only `.md`, `.yml`, `.json` | Skip CI checks entirely |
@@ -57,10 +57,10 @@ Run each applicable check and record the exit code. **Do not skip a check. Do no
 **Always run (when Elixir files changed):**
 
 ```bash
-mix lint
+make lint
 ```
 
-If `mix lint` fails, **BLOCKED**. Report the exact error output.
+If `make lint` fails, **BLOCKED**. Report the exact error output.
 
 ```bash
 mix test.llm
@@ -89,7 +89,7 @@ Include a CI results table in your review output:
 
 | Check | Result |
 |-------|--------|
-| mix lint | ✅ pass |
+| make lint | ✅ pass |
 | mix test.llm | ❌ FAIL — 3 failures (see output below) |
 ```
 
@@ -253,7 +253,7 @@ or
 
 | Check | Result |
 |-------|--------|
-| mix lint | ✅ pass |
+| make lint | ✅ pass |
 | mix test.llm | ✅ pass |
 
 ## Acceptance Criteria

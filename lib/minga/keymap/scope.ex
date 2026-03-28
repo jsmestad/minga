@@ -3,23 +3,45 @@ defmodule Minga.Keymap.Scope do
   Behaviour and resolution logic for buffer-type-specific keybindings.
 
   A keymap scope determines which keybindings are active based on the type of
-  view the user is interacting with. Think of scopes as Minga's equivalent of
-  Emacs major modes or Vim buffer-local keymaps.
+  view the user is interacting with. Think of scopes as Neovim's which-key
+  groups: flat, explicit declarations of what keys do in a given context.
 
-  Three built-in scopes ship with Minga:
+  ## Design rules
+
+  The keymap follows Neovim's flat model, not Emacs's composed hierarchy.
+  See AGENTS.md § "Keymap Architecture" for the full rationale. Three rules:
+
+  1. **Keymap is the single authority.** If a key resolves through a scope
+     trie, the command runs. Commands never re-check context internally.
+     Don't bind a command in a scope where it shouldn't run.
+
+  2. **Scopes are flat.** No implicit inheritance or minor-mode stacking.
+     Shared bindings come in through bulk registration helpers that merge
+     named binding groups at compile time. See #1278.
+
+  3. **Derived scope.** The active scope should follow from what's on screen,
+     not from a manually managed field. (Target architecture; today
+     `workspace.keymap_scope` is still a field.)
+
+  ## Built-in scopes
 
   * `:editor` — normal text editing (default)
-  * `:agent` — full-screen agentic view
+  * `:agent` — agent chat view (Board zoom or side panel)
   * `:file_tree` — file tree panel
+  * `:git_status` — git status panel
+
+  ## Resolution layers
 
   Each scope module implements this behaviour and declares its own keybindings
   as trie data. Keymap resolution walks layers in priority order:
 
-  1. User overrides for the active scope + vim state (phase 2; empty for now)
-  2. Vim-state-specific bindings for the active scope
+  1. User overrides for the active scope + vim state
+  2. Vim-state-specific bindings from the scope module
   3. Shared bindings that apply across all vim states for the scope
-  4. Global bindings (leader sequences via SPC, Ctrl+S, Ctrl+Q)
-  5. Fallback to `Mode.process/3` for the `:editor` scope
+  4. `:not_found` (caller decides what to do: self-insert, passthrough, etc.)
+
+  Global bindings (leader sequences, Ctrl+S) and the Mode FSM fallback are
+  handled by the caller, not by this module.
 
   ## Context parameter
 

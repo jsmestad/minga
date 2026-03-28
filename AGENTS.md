@@ -678,6 +678,31 @@ Key design decisions:
 - **Per-window render state:** Each `Window` carries cached draw commands and a dirty-line set for incremental rendering.
 - **Pipeline stages:** Seven named stages (Invalidation, Layout, Scroll, Content, Chrome, Compose, Emit) with per-stage timing via telemetry.
 
+## Keymap Architecture
+
+Minga follows the Neovim/which-key model: flat, explicit, debuggable. This is a deliberate choice over Emacs's deep keymap hierarchy. The guiding principle is transparency: when you press a key, you should be able to look at one scope module and know exactly what will happen. No invisible stacks of keymaps silently shadowing each other.
+
+### Three rules
+
+**1. The keymap is the single authority for "should this command run here."** If a key resolves to a command through the scope trie, the command runs. Period. Commands never contain internal guards that re-check whether the context is appropriate (no `no_agent_ui?` patterns). If a command shouldn't run in a context, don't bind it in that context's scope. The dispatch layer is the gate; commands trust their caller.
+
+**2. Scopes are flat, explicit declarations.** Each scope module (`Keymap.Scope.Agent`, `Keymap.Scope.Editor`, etc.) declares its own trie. No automatic composition, no implicit inheritance, no minor-mode-style stacking. Shared bindings (SPC leader sequences, Ctrl+S) use bulk registration helpers that merge named binding groups into a scope's trie at compile time. A scope declares which groups it includes; the helper merges them. Scope-specific bindings override group bindings on conflict. See #1278 for the bulk registration design.
+
+**3. Derived scope, not managed scope.** The active scope should follow from what's on screen (window content type, focused panel), not from a field that activation code manually sets and command code manually checks. When the scope is derived, you can't forget to set it and you can't forget to check it. (This is the target architecture. Today `workspace.keymap_scope` is still a manually managed field. Move toward derived scope when touching this code.)
+
+### Why flat over composed
+
+Emacs's keymap hierarchy is powerful but opaque. With 15 minor mode keymaps stacked, "why doesn't my keybinding work?" requires mentally simulating the entire stack. Neovim's ecosystem moved away from this toward explicit which-key registration because debuggability matters more than automatic composition. Minga makes the same bet: a slightly less flexible system that's transparent beats a powerful system that's invisible.
+
+The tradeoff: scopes can't automatically inherit bindings from a parent scope. If the agent scope needs the same SPC leader keys as the editor scope, those bindings come in through a shared group, not through implicit fallback. The bulk registration helper (#1278) makes this low-cost. The payoff: you can read one scope module and know exactly what keys do in that context. No surprises from implicit composition.
+
+### What this means in practice
+
+- **Adding a new keybinding:** Add it to the scope trie where it should be active. If it should work in multiple scopes, add it to a shared binding group.
+- **Adding a new command:** Register it in the command provider. Bind it in the appropriate scope trie. Don't add context guards inside the command function.
+- **Adding a new scope:** Create a new `Keymap.Scope.*` module implementing the `Keymap.Scope` behaviour. Declare its tries. Include shared groups for common bindings. Register it in `Scope.@scope_modules`.
+- **Debugging "key does nothing":** Look at the active scope module's trie for that vim state. If the key isn't there, it's not bound. No need to trace through handler stacks or check command guards.
+
 ## Mouse Support (first-class citizen)
 
 Mouse support is not optional or secondary to keyboard input. Minga ships multiple frontends (macOS GUI via Swift/Metal, TUI via Zig/libvaxis, Linux GUI via GTK4 planned), and all must handle mouse interactions properly. The bar is **Doom Emacs**: if Doom supports a mouse interaction, Minga should too.
