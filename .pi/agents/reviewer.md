@@ -240,6 +240,46 @@ When a PR adds or modifies test files, check these in addition to the code quali
 - [ ] Mox stubs/expects actually get called in the test. Dead stubs copied between files are cleanup items.
 - [ ] Tests asserting on lists of filesystem entries (file tree, directory listings) assert on content/presence, not index position.
 
+## Test Design Review
+
+This step runs after CI checks pass but before issuing a verdict. It enforces the project rule that test-advisor must be consulted before writing significant new tests. Without this gate, LLMs write tests at the wrong layer (EditorCase integration tests for pure function behavior), with internal state assertions (`:sys.get_state` + field checks), and without considering the right test strategy. Those tests pass locally, flake on CI, and break on the next refactor.
+
+### Step 1: Count new test functions in the diff
+
+```bash
+git diff main -- '*.exs' | grep -c '^\+.*test "'
+git diff main -- '*.swift' | grep -c '^\+.*@Test('
+```
+
+If both counts are zero, skip this section entirely. No new tests means no gate to enforce.
+
+### Step 2: Determine if the additions are exempt
+
+New tests are exempt from the test-advisor gate when **all** of these are true:
+- The diff adds 1-2 new test functions total (across all files)
+- The new tests are inside an existing `describe` block (not a new one)
+- The new tests clearly follow the exact structure of the test immediately above them in the same file
+
+Check exemption by inspecting context around each new `test "` line in the diff. If the test is in a new file or a new `describe` block, it is not exempt regardless of count.
+
+### Step 3: Check for test-advisor consultation
+
+If the diff adds 3+ new test functions, or the additions are not exempt per Step 2:
+
+1. Check whether the implementing agent mentioned consulting test-advisor in their review request or task description. Look for phrases like "consulted test-advisor", "test-advisor recommended", or evidence that test strategy was discussed with the subagent.
+2. If no evidence of consultation exists, issue a **BLOCKED** verdict with: "New tests written without consulting test-advisor. Run test-advisor with a description of what you built and what tests you need, then re-request review."
+
+### Step 4: Verify tests follow advisor recommendations
+
+If test-advisor was consulted, verify the resulting tests align with the project's test layer selection rules (from AGENTS.md):
+
+- [ ] Pure functions are tested directly, not through EditorCase or GenServer wrappers
+- [ ] No `:sys.get_state` field assertions (use EditorCase query helpers like `buffer_content`, `buffer_cursor`, `editor_mode` instead)
+- [ ] Test layer matches the behavior being tested (pure function test for pure functions, GenServer test for GenServer operations, EditorCase only for input dispatch or rendered output)
+- [ ] No `Process.sleep` for synchronization in unit or integration tests
+
+Violations here are **Critical** items, same as any other code quality issue.
+
 ## Output Format
 
 **Verdict goes first.** The parent agent may only see the first ~200 characters of your output (subagent truncation). Put the machine-readable verdict and actionable items at the top. Details follow for human readers.
