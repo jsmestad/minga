@@ -117,6 +117,7 @@ defmodule Minga.Frontend.Protocol do
   @op_textobject_result 0x38
   @op_textobject_positions 0x39
   @op_conceal_spans 0x3A
+  @op_request_reparse 0x3B
 
   # Config commands (BEAM → frontend)
   @op_set_font 0x50
@@ -205,6 +206,7 @@ defmodule Minga.Frontend.Protocol do
                | nil}
           | {:textobject_positions, buffer_id :: non_neg_integer(), version :: non_neg_integer(),
              %{atom() => [{non_neg_integer(), non_neg_integer()}]}}
+          | {:request_reparse, buffer_id :: non_neg_integer()}
           | {:log_message, level :: String.t(), text :: String.t()}
           | {:gui_action, ProtocolGUI.gui_action()}
 
@@ -769,6 +771,10 @@ defmodule Minga.Frontend.Protocol do
       {:ok, spans} -> {:ok, {:conceal_spans, buffer_id, version, spans}}
       :error -> {:error, :malformed}
     end
+  end
+
+  def decode_event(<<@op_request_reparse, buffer_id::32>>) do
+    {:ok, {:request_reparse, buffer_id}}
   end
 
   def decode_event(<<@op_log_message, level_byte::8, msg_len::16, msg::binary-size(msg_len)>>) do

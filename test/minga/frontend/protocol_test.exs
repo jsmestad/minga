@@ -728,6 +728,23 @@ defmodule Minga.Frontend.ProtocolTest do
     end
   end
 
+  describe "request_reparse protocol" do
+    test "decode_event request_reparse extracts buffer_id" do
+      payload = <<0x3B, 42::32>>
+      assert {:ok, {:request_reparse, 42}} = Protocol.decode_event(payload)
+    end
+
+    test "decode_event request_reparse with buffer_id zero" do
+      payload = <<0x3B, 0::32>>
+      assert {:ok, {:request_reparse, 0}} = Protocol.decode_event(payload)
+    end
+
+    test "decode_event request_reparse with large buffer_id" do
+      payload = <<0x3B, 0xFFFFFFFF::32>>
+      assert {:ok, {:request_reparse, 0xFFFFFFFF}} = Protocol.decode_event(payload)
+    end
+  end
+
   describe "incremental content sync" do
     test "encode_edit_buffer with a single edit" do
       edits = [
