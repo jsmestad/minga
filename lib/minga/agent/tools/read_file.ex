@@ -2,6 +2,10 @@ defmodule Minga.Agent.Tools.ReadFile do
   @moduledoc """
   Reads the contents of a file and returns it as a string.
 
+  Routes through `Buffer.Server.content/1` when a buffer is open for the
+  file, returning the live in-memory content instead of stale disk content.
+  Falls back to `File.read/1` when no buffer exists.
+
   Handles missing files, permission errors, and binary files gracefully.
   Large files are truncated with a notice to prevent context window bloat.
 
@@ -10,6 +14,8 @@ defmodule Minga.Agent.Tools.ReadFile do
   is returned with a position header so the model knows where it is in the file.
   """
 
+  alias Minga.Buffer
+
   @max_bytes 256_000
 
   @typedoc "Options for partial file reads."
@@ -17,6 +23,11 @@ defmodule Minga.Agent.Tools.ReadFile do
 
   @doc """
   Reads the file at `path` and returns its content.
+
+  When a buffer is open for the file, returns the live in-memory content
+  (which may differ from disk if the buffer has unsaved changes). When no
+  buffer exists, reads from disk. Buffer content is always valid UTF-8, so
+  the binary file check is skipped for buffer reads.
 
   Files larger than #{div(@max_bytes, 1000)}KB are truncated. Binary (non-UTF-8)
   files are rejected with an error message.
@@ -31,11 +42,16 @@ defmodule Minga.Agent.Tools.ReadFile do
   """
   @spec execute(String.t(), read_opts()) :: {:ok, String.t()} | {:error, String.t()}
   def execute(path, opts \\ []) when is_binary(path) do
+    abs_path = Path.expand(path)
     offset = Keyword.get(opts, :offset)
     limit = Keyword.get(opts, :limit)
 
-    case File.read(path) do
-      {:ok, content} ->
+    case read_content(abs_path) do
+      {:ok, content, :buffer} ->
+        # Buffer content is always valid UTF-8, skip binary check
+        format_content(path, content, offset, limit)
+
+      {:ok, content, :disk} ->
         validate_and_read(path, content, offset, limit)
 
       {:error, :enoent} ->
@@ -47,6 +63,49 @@ defmodule Minga.Agent.Tools.ReadFile do
       {:error, reason} ->
         {:error, "failed to read #{path}: #{reason}"}
     end
+  end
+
+  # Tries the open buffer first, then falls back to disk.
+  # Does NOT open a buffer on demand (ReadFile should not pollute the buffer list).
+  @spec read_content(String.t()) ::
+          {:ok, String.t(), :buffer | :disk} | {:error, File.posix() | :eisdir}
+  defp read_content(abs_path) do
+    case Buffer.pid_for_path(abs_path) do
+      {:ok, pid} ->
+        content = Buffer.content(pid)
+        {:ok, content, :buffer}
+
+      :not_found ->
+        case File.read(abs_path) do
+          {:ok, content} -> {:ok, content, :disk}
+          {:error, reason} -> {:error, reason}
+        end
+    end
+  catch
+    # Buffer process died between pid_for_path and content call
+    :exit, _ ->
+      case File.read(abs_path) do
+        {:ok, content} -> {:ok, content, :disk}
+        {:error, reason} -> {:error, reason}
+      end
+  end
+
+  # Formats buffer-sourced content (always valid UTF-8, no binary check needed).
+  @spec format_content(String.t(), String.t(), pos_integer() | nil, pos_integer() | nil) ::
+          {:ok, String.t()}
+  defp format_content(_path, content, nil, nil) do
+    if byte_size(content) > @max_bytes do
+      truncated = binary_part(content, 0, @max_bytes)
+      {:ok, truncated <> "\n\n[truncated at #{div(@max_bytes, 1000)}KB]"}
+    else
+      {:ok, content}
+    end
+  end
+
+  defp format_content(_path, content, offset, limit) do
+    all_lines = String.split(content, "\n")
+    total_lines = length(all_lines)
+    read_partial(all_lines, total_lines, offset, limit)
   end
 
   @spec validate_and_read(String.t(), String.t(), pos_integer() | nil, pos_integer() | nil) ::
