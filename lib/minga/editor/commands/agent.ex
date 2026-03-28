@@ -1314,7 +1314,6 @@ defmodule Minga.Editor.Commands.Agent do
         %Minga.Command{
           name: cmd_name,
           description: desc,
-          requires_buffer: false,
           execute: fn state -> apply(__MODULE__, fun_name, [state]) end
         }
       end)
@@ -1324,7 +1323,6 @@ defmodule Minga.Editor.Commands.Agent do
         %Minga.Command{
           name: cmd_name,
           description: desc,
-          requires_buffer: false,
           scope: :agent,
           execute: fn state -> apply(__MODULE__, fun_name, [state]) end
         }
