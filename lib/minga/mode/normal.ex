@@ -204,7 +204,14 @@ defmodule Minga.Mode.Normal do
   def handle_key(key, %ModeState{leader_node: node} = state) when is_map(node) do
     case Bindings.lookup(node, key) do
       :not_found ->
-        new_state = %{state | leader_node: nil, leader_keys: [], count: nil, pending_replace: false}
+        new_state = %{
+          state
+          | leader_node: nil,
+            leader_keys: [],
+            count: nil,
+            pending_replace: false
+        }
+
         {:execute, :leader_cancel, new_state}
 
       {:prefix, sub_node} ->

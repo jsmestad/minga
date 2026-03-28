@@ -21,11 +21,15 @@ defmodule Minga.Editor.Commands.AgentGroupTest do
     agent_tab_1 = %{Tab.new_agent(2, "Agent 1") | group_id: 1}
     agent_tab_2 = %{Tab.new_agent(3, "Agent 2") | group_id: 2}
 
-    {tb, _} = TabBar.add_agent_group(%TabBar{
-      tabs: [file_tab, agent_tab_1, agent_tab_2],
-      active_id: 1,
-      next_id: 4
-    }, "Agent 1")
+    {tb, _} =
+      TabBar.add_agent_group(
+        %TabBar{
+          tabs: [file_tab, agent_tab_1, agent_tab_2],
+          active_id: 1,
+          next_id: 4
+        },
+        "Agent 1"
+      )
 
     {tb, _} = TabBar.add_agent_group(tb, "Agent 2")
 
