@@ -1848,12 +1848,30 @@ defmodule Minga.Editor do
     gui_tree_action(state, index, :toggle)
   end
 
-  defp handle_gui_action(state, :file_tree_new_file) do
+  defp handle_gui_action(state, {:file_tree_new_file, index}) do
+    state = move_tree_cursor(state, index)
     Commands.FileTree.new_file(state)
   end
 
-  defp handle_gui_action(state, :file_tree_new_folder) do
+  defp handle_gui_action(state, {:file_tree_new_folder, index}) do
+    state = move_tree_cursor(state, index)
     Commands.FileTree.new_folder(state)
+  end
+
+  defp handle_gui_action(state, {:file_tree_edit_confirm, text}) do
+    case state.workspace.file_tree.editing do
+      nil ->
+        state
+
+      %{} ->
+        ft = Minga.Editor.State.FileTree.update_editing_text(state.workspace.file_tree, text)
+        state = put_in(state.workspace.file_tree, ft)
+        Commands.FileTree.confirm_editing(state)
+    end
+  end
+
+  defp handle_gui_action(state, :file_tree_edit_cancel) do
+    Commands.FileTree.cancel_editing(state)
   end
 
   defp handle_gui_action(state, :file_tree_collapse_all) do
@@ -2134,6 +2152,14 @@ defmodule Minga.Editor do
         abs_path = Path.join(git_root, path)
         open_file_by_path(state, abs_path)
     end
+  end
+
+  # Moves the tree cursor to a specific index (used by GUI context menu / header actions).
+  @spec move_tree_cursor(state(), non_neg_integer()) :: state()
+  defp move_tree_cursor(%{workspace: %{file_tree: %{tree: nil}}} = state, _index), do: state
+
+  defp move_tree_cursor(state, index) do
+    put_in(state.workspace.file_tree.tree.cursor, index)
   end
 
   @spec git_action(state(), (String.t() -> :ok | {:error, String.t()}), String.t()) :: state()

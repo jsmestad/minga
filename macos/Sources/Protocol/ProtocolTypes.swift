@@ -48,11 +48,16 @@ enum Wire {
         let isDir: Bool
         let isExpanded: Bool
         let isSelected: Bool
+        let isEditing: Bool
         let depth: UInt8
         let gitStatus: UInt8
         let icon: String
         let name: String
         let relPath: String
+        /// Only present when isEditing is true. 0=new_file, 1=new_folder, 2=rename.
+        let editingType: UInt8
+        /// Only present when isEditing is true. Pre-filled text for the editing field.
+        let editingText: String
     }
 
     // MARK: - Completion

@@ -233,8 +233,10 @@ struct FileTreePathTests {
         state.projectRoot = ""
         let entry = FileTreeEntry(id: 1, index: 0, isDir: false,
                                   isExpanded: false, isSelected: false,
+                                  isEditing: false,
                                   depth: 0, gitStatus: 0, icon: "",
-                                  name: "test", relPath: "lib/test.ex")
+                                  name: "test", relPath: "lib/test.ex",
+                                  editingType: 0, editingText: "")
         #expect(state.fullPath(for: entry) == "lib/test.ex")
     }
 
@@ -244,8 +246,10 @@ struct FileTreePathTests {
         state.projectRoot = "/project"
         let entry = FileTreeEntry(id: 1, index: 0, isDir: false,
                                   isExpanded: false, isSelected: false,
+                                  isEditing: false,
                                   depth: 0, gitStatus: 0, icon: "",
-                                  name: "test", relPath: "")
+                                  name: "test", relPath: "",
+                                  editingType: 0, editingText: "")
         #expect(state.fullPath(for: entry) == "")
     }
 }

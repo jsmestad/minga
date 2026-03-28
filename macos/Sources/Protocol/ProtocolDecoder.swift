@@ -302,18 +302,40 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             guard data.count >= pos + 12 + iconLen + nameLen + relPathLen else { throw ProtocolDecodeError.malformed }
             let relPathData = data[(pos + 12 + iconLen + nameLen)..<(pos + 12 + iconLen + nameLen + relPathLen)]
             let relPath = String(data: relPathData, encoding: .utf8) ?? ""
+            let isEditing = flags & 0x08 != 0
+            var editingType: UInt8 = 0
+            var editingText = ""
+            var editingPayloadSize = 0
+
+            if isEditing {
+                guard data.count >= pos + 12 + iconLen + nameLen + relPathLen + 3 else {
+                    throw ProtocolDecodeError.malformed
+                }
+                editingType = data[pos + 12 + iconLen + nameLen + relPathLen]
+                let editingTextLen = Int(readU16(data, pos + 12 + iconLen + nameLen + relPathLen + 1))
+                guard data.count >= pos + 12 + iconLen + nameLen + relPathLen + 3 + editingTextLen else {
+                    throw ProtocolDecodeError.malformed
+                }
+                let editingTextData = data[(pos + 12 + iconLen + nameLen + relPathLen + 3)..<(pos + 12 + iconLen + nameLen + relPathLen + 3 + editingTextLen)]
+                editingText = String(data: editingTextData, encoding: .utf8) ?? ""
+                editingPayloadSize = 3 + editingTextLen
+            }
+
             entries.append(Wire.FileTreeEntry(
                 pathHash: pathHash,
                 isDir: flags & 0x01 != 0,
                 isExpanded: flags & 0x02 != 0,
                 isSelected: flags & 0x04 != 0,
+                isEditing: isEditing,
                 depth: depth,
                 gitStatus: gitStatus,
                 icon: icon,
                 name: name,
-                relPath: relPath
+                relPath: relPath,
+                editingType: editingType,
+                editingText: editingText
             ))
-            pos += 12 + iconLen + nameLen + relPathLen
+            pos += 12 + iconLen + nameLen + relPathLen + editingPayloadSize
         }
         return (.guiFileTree(selectedIndex: selectedIndex, treeWidth: treeWidth, rootPath: rootPath, entries: entries), pos - offset)
 

@@ -27,10 +27,10 @@ struct FileTreeHeaderContent: View {
 
             HStack(spacing: 2) {
                 headerButton(systemName: "doc.badge.plus", tooltip: "New File…") {
-                    encoder?.sendFileTreeNewFile()
+                    encoder?.sendFileTreeNewFile(parentIndex: UInt16(fileTreeState.selectedIndex))
                 }
                 headerButton(systemName: "folder.badge.plus", tooltip: "New Folder…") {
-                    encoder?.sendFileTreeNewFolder()
+                    encoder?.sendFileTreeNewFolder(parentIndex: UInt16(fileTreeState.selectedIndex))
                 }
                 headerButton(systemName: "arrow.clockwise", tooltip: "Refresh") {
                     encoder?.sendFileTreeRefresh()

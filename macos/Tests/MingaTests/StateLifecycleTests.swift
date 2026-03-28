@@ -165,11 +165,13 @@ struct FileTreeStateLifecycleTests {
         let state = FileTreeState()
         let raw = [
             Wire.FileTreeEntry(pathHash: 0xAABB, isDir: true, isExpanded: true,
-                           isSelected: false, depth: 0, gitStatus: 0,
-                           icon: "", name: "lib", relPath: "lib"),
+                           isSelected: false, isEditing: false, depth: 0, gitStatus: 0,
+                           icon: "", name: "lib", relPath: "lib",
+                           editingType: 0, editingText: ""),
             Wire.FileTreeEntry(pathHash: 0xCCDD, isDir: false, isExpanded: false,
-                           isSelected: true, depth: 1, gitStatus: 1,
-                           icon: "", name: "editor.ex", relPath: "lib/editor.ex")
+                           isSelected: true, isEditing: false, depth: 1, gitStatus: 1,
+                           icon: "", name: "editor.ex", relPath: "lib/editor.ex",
+                           editingType: 0, editingText: "")
         ]
         state.update(selectedIndex: 1, treeWidth: 30, rootPath: "/project", rawEntries: raw)
 
@@ -189,9 +191,10 @@ struct FileTreeStateLifecycleTests {
         state.update(selectedIndex: 0, treeWidth: 30, rootPath: "/home/user/project",
                      rawEntries: [Wire.FileTreeEntry(pathHash: 1, isDir: false,
                                                    isExpanded: false, isSelected: false,
-                                                   depth: 1, gitStatus: 0, icon: "",
+                                                   isEditing: false, depth: 1, gitStatus: 0, icon: "",
                                                    name: "editor.ex",
-                                                   relPath: "lib/editor.ex")])
+                                                   relPath: "lib/editor.ex",
+                                                   editingType: 0, editingText: "")])
 
         let path = state.fullPath(for: state.entries[0])
         #expect(path == "/home/user/project/lib/editor.ex")
@@ -203,8 +206,9 @@ struct FileTreeStateLifecycleTests {
         state.update(selectedIndex: 0, treeWidth: 30, rootPath: "/project",
                      rawEntries: [Wire.FileTreeEntry(pathHash: 1, isDir: false,
                                                    isExpanded: false, isSelected: false,
-                                                   depth: 0, gitStatus: 0, icon: "",
-                                                   name: "a", relPath: "a")])
+                                                   isEditing: false, depth: 0, gitStatus: 0, icon: "",
+                                                   name: "a", relPath: "a",
+                                                   editingType: 0, editingText: "")])
         state.hide()
 
         #expect(state.visible == false)

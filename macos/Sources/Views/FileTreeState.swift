@@ -14,12 +14,17 @@ struct FileTreeEntry: Identifiable {
     let isDir: Bool
     let isExpanded: Bool
     let isSelected: Bool
+    let isEditing: Bool
     let depth: Int
     let gitStatus: UInt8
     let icon: String
     let name: String
     /// Path relative to the project root (e.g., "lib/minga/editor.ex").
     let relPath: String
+    /// 0=new_file, 1=new_folder, 2=rename. Only meaningful when isEditing is true.
+    let editingType: UInt8
+    /// Pre-filled text for the editing field. Only meaningful when isEditing is true.
+    let editingText: String
 }
 
 /// Observable state for the file tree sidebar, driven by BEAM protocol messages.
@@ -32,6 +37,8 @@ final class FileTreeState {
     var visible: Bool = false
     /// Project root path sent by the BEAM (e.g., "/Users/foo/myproject").
     var projectRoot: String = ""
+    /// Index of the entry currently being edited, or nil if no editing is active.
+    var editingIndex: Int? = nil
 
     /// Update from a decoded gui_file_tree protocol message.
     ///
@@ -52,13 +59,18 @@ final class FileTreeState {
                 isDir: entry.isDir,
                 isExpanded: entry.isExpanded,
                 isSelected: entry.isSelected,
+                isEditing: entry.isEditing,
                 depth: Int(entry.depth),
                 gitStatus: entry.gitStatus,
                 icon: entry.icon,
                 name: entry.name,
-                relPath: entry.relPath
+                relPath: entry.relPath,
+                editingType: entry.editingType,
+                editingText: entry.editingText
             )
         }
+        // Track which entry is being edited for quick lookup
+        self.editingIndex = rawEntries.firstIndex(where: { $0.isEditing })
     }
 
     /// Computes the full absolute path for an entry.
