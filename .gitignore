@@ -31,6 +31,11 @@ erl_crash.dump
 .DS_Store
 Thumbs.db
 
+# Claude Code
+.claude/settings.json
+.claude/settings.local.json
+.claude/worktrees/
+
 # Environment
 .env
 .env.local
