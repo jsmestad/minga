@@ -12,7 +12,7 @@ defmodule Minga.Editor.Commands.AgentGroup do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.TabBar
 
-  @type state :: map()
+  @type state :: EditorState.t()
 
   @doc "Switch to the next agent group's first tab."
   @spec agent_group_next(state()) :: state()
@@ -108,7 +108,7 @@ defmodule Minga.Editor.Commands.AgentGroup do
   # and restores happen properly. No-op if the active tab didn't change.
   @spec switch_via_group(state(), TabBar.t()) :: state()
   defp switch_via_group(state, %TabBar{active_id: new_id}) do
-    if new_id == state.tab_bar.active_id do
+    if new_id == state.shell_state.tab_bar.active_id do
       state
     else
       EditorState.switch_tab(state, new_id)

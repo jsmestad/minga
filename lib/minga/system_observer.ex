@@ -37,8 +37,6 @@ defmodule Minga.SystemObserver do
   alias Minga.SystemObserver.ProcessSnapshot
   alias Minga.SystemObserver.RestartRecord
 
-  require Logger
-
   # ── Configuration ─────────────────────────────────────────────────────────
 
   @poll_interval_ms 1_000

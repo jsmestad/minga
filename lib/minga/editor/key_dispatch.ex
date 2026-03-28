@@ -98,10 +98,10 @@ defmodule Minga.Editor.KeyDispatch do
     # When leaving :tool_confirm, check if more tools were queued during
     # the session and re-enter :tool_confirm to prompt for them.
     if old_mode == :tool_confirm and Minga.Editing.mode(result) == :normal and
-         result.tool_prompt_queue != [] do
+         result.shell_state.tool_prompt_queue != [] do
       ms = %Minga.Mode.ToolConfirmState{
-        pending: result.tool_prompt_queue,
-        declined: result.tool_declined
+        pending: result.shell_state.tool_prompt_queue,
+        declined: result.shell_state.tool_declined
       }
 
       EditorState.transition_mode(result, :tool_confirm, ms)

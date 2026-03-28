@@ -141,7 +141,7 @@ defmodule Minga.LSP.JsonRpc do
     with [headers_section, body_and_rest] <- :binary.split(buffer, "\r\n\r\n"),
          {:ok, content_length} <- parse_content_length(headers_section),
          true <- byte_size(body_and_rest) >= content_length do
-      <<json::binary-size(content_length), rest::binary>> = body_and_rest
+      <<json::binary-size(^content_length), rest::binary>> = body_and_rest
       {:ok, JSON.decode!(json), rest}
     else
       _ -> :incomplete

@@ -204,7 +204,14 @@ defmodule Minga.Mode.Normal do
   def handle_key(key, %ModeState{leader_node: node} = state) when is_map(node) do
     case Bindings.lookup(node, key) do
       :not_found ->
-        new_state = %{state | leader_node: nil, leader_keys: []}
+        new_state = %{
+          state
+          | leader_node: nil,
+            leader_keys: [],
+            count: nil,
+            pending_replace: false
+        }
+
         {:execute, :leader_cancel, new_state}
 
       {:prefix, sub_node} ->
@@ -755,13 +762,10 @@ defmodule Minga.Mode.Normal do
     {:continue, %{state | pending_mark: :jump_exact}}
   end
 
-  # ── Escape: already in Normal, clear count and cancel any leader sequence ──
-
-  def handle_key({@escape, _mods}, %ModeState{leader_node: node} = state)
-      when is_map(node) do
-    new_state = %{state | leader_node: nil, leader_keys: [], count: nil, pending_replace: false}
-    {:execute, :leader_cancel, new_state}
-  end
+  # ── Escape: already in Normal, clear count and cancel pending state ──
+  # Note: escape during a leader sequence is handled by the catch-all leader
+  # handler above (line ~204), which clears count and pending_replace in its
+  # :not_found branch. No separate clause is needed here.
 
   def handle_key({@escape, _mods}, %ModeState{pending_replace: true} = state) do
     {:continue, %{state | pending_replace: false, count: nil}}
