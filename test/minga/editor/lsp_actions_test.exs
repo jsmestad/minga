@@ -375,7 +375,7 @@ defmodule Minga.Editor.LspActionsTest do
     test "sets timer when viewport top changes" do
       {:ok, buf} = BufferServer.start_link(content: "hello")
 
-      state = fake_state()
+      state = %{fake_state() | backend: :zig}
 
       ws = %{
         state.workspace
@@ -393,10 +393,28 @@ defmodule Minga.Editor.LspActionsTest do
       GenServer.stop(buf)
     end
 
-    test "cancels previous timer and sets new one" do
+    test "skips timer in headless mode" do
       {:ok, buf} = BufferServer.start_link(content: "hello")
 
       state = fake_state()
+
+      ws = %{
+        state.workspace
+        | buffers: %{state.workspace.buffers | active: buf},
+          viewport: %{state.workspace.viewport | top: 10}
+      }
+
+      state = %{state | workspace: ws}
+
+      result = LspActions.schedule_inlay_hints_on_scroll(state)
+      assert result.lsp.inlay_hint_debounce_timer == nil
+      GenServer.stop(buf)
+    end
+
+    test "cancels previous timer and sets new one" do
+      {:ok, buf} = BufferServer.start_link(content: "hello")
+
+      state = %{fake_state() | backend: :zig}
 
       ws = %{
         state.workspace

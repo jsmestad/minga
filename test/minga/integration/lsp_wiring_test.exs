@@ -66,47 +66,18 @@ defmodule Minga.Integration.LspWiringTest do
   # ── Inlay hints on scroll ──────────────────────────────────────────────────
 
   describe "inlay hints on scroll" do
-    test "scroll wheel schedules debounced inlay hint refresh" do
+    test "scroll wheel skips inlay hint timer in headless mode" do
       ctx = start_editor(@scroll_content)
-
-      # Record initial viewport top
-      state_before = :sys.get_state(ctx.editor)
-      initial_vp_top = state_before.lsp.last_inlay_viewport_top
 
       # Scroll down with the mouse wheel
       send_mouse(ctx, 10, 10, :wheel_down)
 
-      # The viewport should have moved, scheduling an inlay hint timer
+      # In headless mode, the inlay hint debounce timer is quarantined
+      # (skipped) to avoid non-deterministic timer messages in tests.
       state = :sys.get_state(ctx.editor)
 
-      assert state.lsp.inlay_hint_debounce_timer != nil,
-             "scroll wheel should schedule inlay hint debounce timer"
-
-      assert state.lsp.last_inlay_viewport_top != initial_vp_top,
-             "viewport top should have changed after scroll"
-
-      # Clean up: cancel the timer to avoid late messages
-      Process.cancel_timer(state.lsp.inlay_hint_debounce_timer)
-    end
-
-    test "inlay hint debounce timer fires and clears itself" do
-      ctx = start_editor(@scroll_content)
-
-      # Scroll to trigger the debounce timer
-      send_mouse(ctx, 10, 10, :wheel_down)
-
-      state = :sys.get_state(ctx.editor)
-      assert state.lsp.inlay_hint_debounce_timer != nil
-
-      # Wait for the debounce timer to fire (200ms + margin)
-      state =
-        wait_until(ctx, fn s -> s.lsp.inlay_hint_debounce_timer == nil end,
-          max_attempts: 30,
-          interval_ms: 20,
-          message: "inlay hint debounce timer should have fired and cleared itself"
-        )
-
-      assert state.lsp.inlay_hint_debounce_timer == nil
+      assert state.lsp.inlay_hint_debounce_timer == nil,
+             "inlay hint debounce timer should be skipped in headless mode"
     end
   end
 

@@ -17,6 +17,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
   alias Minga.Editor.Commands.Search, as: SearchCommands
   alias Minga.Editor.HighlightSync
   alias Minga.Editor.PickerUI
+  alias Minga.Editor.SemanticTokenSync
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.AgentAccess
@@ -484,7 +485,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
     if is_pid(buf) do
       try do
         Buffer.set_filetype(buf, filetype)
-        send(self(), :setup_highlight)
+        state = setup_highlight_or_defer(state)
         EditorState.set_status(state, "Language: #{filetype}")
       catch
         :exit, _ -> EditorState.set_status(state, "No active buffer")
@@ -1477,5 +1478,17 @@ defmodule Minga.Editor.Commands.BufferManagement do
   @spec frontend(state()) :: module()
   defp frontend(%{capabilities: caps}) do
     if Minga.Frontend.gui?(caps), do: __MODULE__.GUI, else: __MODULE__.TUI
+  end
+
+  # In headless mode, apply highlight setup synchronously; otherwise defer.
+  @spec setup_highlight_or_defer(state()) :: state()
+  defp setup_highlight_or_defer(%{backend: :headless} = state) do
+    state = HighlightSync.setup_for_buffer(state)
+    SemanticTokenSync.request_tokens(state)
+  end
+
+  defp setup_highlight_or_defer(state) do
+    send(self(), :setup_highlight)
+    state
   end
 end

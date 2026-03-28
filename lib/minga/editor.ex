@@ -218,7 +218,9 @@ defmodule Minga.Editor do
     state = EditorState.monitor_buffers(state, all_initial_pids)
 
     # Schedule periodic eviction of inactive tree-sitter parse trees.
-    Process.send_after(self(), :evict_parser_trees, HighlightSync.eviction_check_interval_ms())
+    if state.backend != :headless do
+      Process.send_after(self(), :evict_parser_trees, HighlightSync.eviction_check_interval_ms())
+    end
 
     # Set up tree-sitter markdown highlighting for the agent buffer
     # so it's ready before the first sync. Idempotent: also called from
@@ -377,15 +379,21 @@ defmodule Minga.Editor do
     Startup.send_font_config(new_state)
     new_state = Renderer.render(new_state)
     # Setup highlighting after first paint with correct viewport
-    send(self(), :setup_highlight)
+    new_state = setup_highlight_or_defer(new_state)
 
     maybe_check_swap_recovery(new_state)
 
     # If the agentic view was activated at init, start the session now
     # that the port is connected and the viewport is known.
     new_state = AgentLifecycle.maybe_start_session(new_state)
-    # Start the periodic session save timer (30 seconds)
-    new_state = %{new_state | session: SessionState.start_timer(new_state.session)}
+    # Start the periodic session save timer (30 seconds); skip in headless
+    # to avoid non-deterministic timer messages during tests.
+    new_state =
+      if new_state.backend != :headless do
+        %{new_state | session: SessionState.start_timer(new_state.session)}
+      else
+        new_state
+      end
 
     {:noreply, new_state}
   end
@@ -550,7 +558,15 @@ defmodule Minga.Editor do
     # Cancel any existing timer and schedule a new one.
     # This prevents timer accumulation when file saves trigger
     # immediate :save_session messages alongside the periodic timer.
-    {:noreply, %{state | session: SessionState.restart_timer(state.session)}}
+    # In headless mode, skip the timer to avoid non-deterministic messages.
+    session =
+      if state.backend != :headless do
+        SessionState.restart_timer(state.session)
+      else
+        SessionState.cancel_timer(state.session)
+      end
+
+    {:noreply, %{state | session: session}}
   end
 
   # ── Highlight events from Parser.Manager ──────────────────────────────────────
@@ -836,7 +852,10 @@ defmodule Minga.Editor do
         protected_pids: protected
       )
 
-    Process.send_after(self(), :evict_parser_trees, HighlightSync.eviction_check_interval_ms())
+    if state.backend != :headless do
+      Process.send_after(self(), :evict_parser_trees, HighlightSync.eviction_check_interval_ms())
+    end
+
     {:noreply, state}
   end
 
@@ -974,7 +993,7 @@ defmodule Minga.Editor do
   def handle_info(:nav_flash_step, %{shell_state: %{nav_flash: flash}} = state) do
     case NavFlash.advance(flash) do
       {:continue, updated, effects} ->
-        state = EditorState.set_nav_flash(state, apply_flash_effects(updated, effects))
+        state = EditorState.set_nav_flash(state, apply_flash_effects(state, updated, effects))
         state = Renderer.render(state)
         {:noreply, state}
 
@@ -1059,7 +1078,7 @@ defmodule Minga.Editor do
   def handle_info(:dismiss_toast, state) do
     state = dispatch_agent_event(state, :dismiss_toast)
 
-    if UIState.toast_visible?(AgentAccess.agent_ui(state)) do
+    if UIState.toast_visible?(AgentAccess.agent_ui(state)) and state.backend != :headless do
       Process.send_after(self(), :dismiss_toast, @toast_duration_ms)
     end
 
@@ -1102,7 +1121,7 @@ defmodule Minga.Editor do
     state = LspActions.code_lens(state)
     state = LspActions.inlay_hints(state)
     # Save session state on every file save
-    send(self(), :save_session)
+    if state.backend != :headless, do: send(self(), :save_session)
     {:noreply, state}
   end
 
@@ -1131,7 +1150,10 @@ defmodule Minga.Editor do
     state = EditorState.set_status(state, "✓ #{name} v#{version} installed")
     state = maybe_refresh_tool_picker(state)
     # Clear the success message after 5 seconds
-    Process.send_after(self(), :clear_tool_status, 5_000)
+    if state.backend != :headless do
+      Process.send_after(self(), :clear_tool_status, 5_000)
+    end
+
     {:noreply, Renderer.render(state)}
   end
 
@@ -1195,6 +1217,20 @@ defmodule Minga.Editor do
 
   def handle_info(_msg, state) do
     {:noreply, state}
+  end
+
+  # In headless mode, apply highlight setup synchronously so tests get
+  # deterministic highlights without timer races. In normal mode, defer
+  # via a self-send so the first paint isn't blocked.
+  @spec setup_highlight_or_defer(state()) :: state()
+  defp setup_highlight_or_defer(%{backend: :headless} = state) do
+    state = HighlightSync.setup_for_buffer(state)
+    SemanticTokenSync.request_tokens(state)
+  end
+
+  defp setup_highlight_or_defer(state) do
+    send(self(), :setup_highlight)
+    state
   end
 
   # ── :DOWN classifier ────────────────────────────────────────────────────────
@@ -1544,7 +1580,7 @@ defmodule Minga.Editor do
     flash = EditorState.nav_flash(state)
     old_timer = if flash, do: flash.timer, else: nil
     {new_flash, effects} = NavFlash.start(line, old_timer)
-    EditorState.set_nav_flash(state, apply_flash_effects(new_flash, effects))
+    EditorState.set_nav_flash(state, apply_flash_effects(state, new_flash, effects))
   end
 
   @spec cancel_flash_if_active(state()) :: state()
@@ -1552,7 +1588,7 @@ defmodule Minga.Editor do
 
   defp cancel_flash_if_active(state) do
     effects = NavFlash.cancel_effects(EditorState.nav_flash(state))
-    execute_flash_effects(effects)
+    execute_flash_effects(state, effects)
     EditorState.cancel_nav_flash(state)
   end
 
@@ -1571,18 +1607,22 @@ defmodule Minga.Editor do
 
   defp cancel_nav_flash(state) do
     effects = NavFlash.cancel_effects(EditorState.nav_flash(state))
-    execute_flash_effects(effects)
+    execute_flash_effects(state, effects)
     EditorState.cancel_nav_flash(state)
   end
 
   # Executes side effects from NavFlash and returns the flash struct
   # with the timer reference filled in.
-  @spec apply_flash_effects(NavFlash.t(), [NavFlash.side_effect()]) :: NavFlash.t()
-  defp apply_flash_effects(flash, effects) do
+  @spec apply_flash_effects(state(), NavFlash.t(), [NavFlash.side_effect()]) :: NavFlash.t()
+  defp apply_flash_effects(state, flash, effects) do
     Enum.reduce(effects, flash, fn
       {:send_after, msg, interval}, acc ->
-        ref = Process.send_after(self(), msg, interval)
-        %{acc | timer: ref}
+        if state.backend != :headless do
+          ref = Process.send_after(self(), msg, interval)
+          %{acc | timer: ref}
+        else
+          acc
+        end
 
       {:cancel_timer, ref}, acc ->
         Process.cancel_timer(ref)
@@ -1591,11 +1631,16 @@ defmodule Minga.Editor do
   end
 
   # Executes side effects without updating a flash struct (for cancellation).
-  @spec execute_flash_effects([NavFlash.side_effect()]) :: :ok
-  defp execute_flash_effects(effects) do
+  @spec execute_flash_effects(state(), [NavFlash.side_effect()]) :: :ok
+  defp execute_flash_effects(state, effects) do
     Enum.each(effects, fn
-      {:cancel_timer, ref} -> Process.cancel_timer(ref)
-      {:send_after, msg, interval} -> Process.send_after(self(), msg, interval)
+      {:cancel_timer, ref} ->
+        Process.cancel_timer(ref)
+
+      {:send_after, msg, interval} ->
+        if state.backend != :headless do
+          Process.send_after(self(), msg, interval)
+        end
     end)
   end
 
@@ -1678,7 +1723,7 @@ defmodule Minga.Editor do
 
   @spec maybe_check_swap_recovery(state()) :: :ok
   defp maybe_check_swap_recovery(state) do
-    if SessionState.swap_enabled?(state.session) do
+    if SessionState.swap_enabled?(state.session) and state.backend != :headless do
       send(self(), :check_swap_recovery)
     end
 
@@ -1759,7 +1804,9 @@ defmodule Minga.Editor do
     # Schedule code lens and inlay hint requests after LSP clients connect.
     # The SyncServer handles didOpen via the event bus; by the time 800ms
     # elapses the LSP client should be ready to serve requests.
-    Process.send_after(self(), :request_code_lens_and_inlay_hints, 800)
+    if state.backend != :headless do
+      Process.send_after(self(), :request_code_lens_and_inlay_hints, 800)
+    end
 
     state
   end
@@ -2294,6 +2341,8 @@ defmodule Minga.Editor do
     # Timer already running; the pending timeout will open the popup.
     state
   end
+
+  defp maybe_schedule_warning_popup(%{backend: :headless} = state), do: state
 
   defp maybe_schedule_warning_popup(state) do
     ref = Process.send_after(self(), :warning_popup_timeout, @warning_popup_debounce_ms)

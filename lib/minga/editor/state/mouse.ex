@@ -140,10 +140,15 @@ defmodule Minga.Editor.State.Mouse do
   # ── Hover tracking ─────────────────────────────────────────────────────────
 
   @doc "Sets the hover position and starts a debounce timer."
-  @spec set_hover(t(), integer(), integer()) :: t()
-  def set_hover(%__MODULE__{} = mouse, row, col) do
+  @spec set_hover(t(), integer(), integer(), keyword()) :: t()
+  def set_hover(%__MODULE__{} = mouse, row, col, opts \\ []) do
     cancel_hover_timer(mouse)
-    timer = Process.send_after(self(), :mouse_hover_timeout, 500)
+
+    timer =
+      if Keyword.get(opts, :backend) != :headless do
+        Process.send_after(self(), :mouse_hover_timeout, 500)
+      end
+
     %{mouse | hover_pos: {row, col}, hover_timer: timer}
   end
 

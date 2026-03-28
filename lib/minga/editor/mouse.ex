@@ -272,7 +272,7 @@ defmodule Minga.Editor.Mouse do
       state
       | workspace: %{
           state.workspace
-          | mouse: MouseState.set_hover(state.workspace.mouse, row, col)
+          | mouse: MouseState.set_hover(state.workspace.mouse, row, col, backend: state.backend)
         }
     }
   end
