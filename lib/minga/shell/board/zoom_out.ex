@@ -11,6 +11,7 @@ defmodule Minga.Shell.Board.ZoomOut do
 
   @behaviour Minga.Input.Handler
 
+  alias Minga.Editor.AgentActivation
   alias Minga.Editor.State, as: EditorState
   alias Minga.Shell.Board
   alias Minga.Shell.Board.Card
@@ -76,10 +77,14 @@ defmodule Minga.Shell.Board.ZoomOut do
     state = %{state | shell_state: board}
 
     # Restore the grid workspace if we have one
-    if grid_workspace && is_map(grid_workspace) && map_size(grid_workspace) > 0 do
-      EditorState.restore_tab_context(state, grid_workspace)
-    else
-      state
-    end
+    state =
+      if grid_workspace && is_map(grid_workspace) && map_size(grid_workspace) > 0 do
+        EditorState.restore_tab_context(state, grid_workspace)
+      else
+        state
+      end
+
+    # Deactivate the agent view (clear session, reset scope, unfocus prompt)
+    AgentActivation.deactivate(state)
   end
 end
