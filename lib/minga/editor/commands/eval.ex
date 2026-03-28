@@ -61,7 +61,8 @@ defmodule Minga.Editor.Commands.Eval do
   @spec eval_in_sandbox(String.t(), pid()) ::
           {:ok, term()} | {:error, atom(), term(), Exception.stacktrace()}
   defp eval_in_sandbox(input, editor_pid) do
-    {result, _bindings} = Code.eval_string(input, [editor: editor_pid], __ENV__)
+    env = %{__ENV__ | file: "eval", line: 1}
+    {result, _bindings} = Code.eval_string(input, [editor: editor_pid], env)
     {:ok, result}
   rescue
     e -> {:error, :error, e, __STACKTRACE__}

@@ -82,7 +82,15 @@ defmodule Minga.Editor.Commands.EvalTest do
     @tag capture_log: true
     test "undefined variable returns error" do
       state = build_state()
-      result = Eval.execute(state, {:eval_expression, "undefined_var"})
+
+      # Capture stderr to suppress compiler diagnostic noise from Code.eval_string
+      _stderr =
+        ExUnit.CaptureIO.capture_io(:stderr, fn ->
+          send(self(), {:result, Eval.execute(state, {:eval_expression, "undefined_var"})})
+        end)
+
+      assert_received {:result, result}
+
       assert result.shell_state.status_msg =~ "**"
     end
 
