@@ -85,6 +85,7 @@ protocol InputEncoder: AnyObject, Sendable {
     func sendAgentRequestChanges()
     func sendAgentDismiss()
     func sendChangeSummaryClick(index: UInt32)
+    func sendScrollToLine(line: UInt32)
 }
 
 extension InputEncoder {
@@ -649,6 +650,15 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_CHANGE_SUMMARY_CLICK
         writeU32(&buf, 2, index)
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: scroll_to_line. Layout: opcode(1) + action_type(1) + line(4).
+    func sendScrollToLine(line: UInt32) {
+        var buf = Data(count: 6)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_SCROLL_TO_LINE
+        writeU32(&buf, 2, line)
         writeFrame(buf)
     }
 

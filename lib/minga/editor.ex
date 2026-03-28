@@ -2143,6 +2143,25 @@ defmodule Minga.Editor do
     Minga.Editor.Commands.execute(state, cmd)
   end
 
+  defp handle_gui_action(state, {:scroll_to_line, line}) do
+    # Scroll the active window's viewport to the target line.
+    active_win_id = state.workspace.windows.active
+    win_map = state.workspace.windows.map
+
+    case Map.get(win_map, active_win_id) do
+      nil ->
+        state
+
+      window ->
+        vp = window.viewport
+        new_vp = %{vp | top: max(line, 0)}
+        new_win = %{window | viewport: new_vp}
+        new_map = Map.put(win_map, active_win_id, new_win)
+        new_state = put_in(state.workspace.windows.map, new_map)
+        Renderer.render(new_state)
+    end
+  end
+
   defp handle_gui_action(state, {:git_open_file, path}) do
     case resolve_git_root() do
       nil ->
