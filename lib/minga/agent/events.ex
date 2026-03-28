@@ -68,11 +68,13 @@ defmodule Minga.Agent.Events do
   # multiple deltas arriving in the same millisecond into one render.
   def handle(state, {:text_delta, _delta}) do
     state = AgentAccess.update_agent_ui(state, &UIState.maybe_auto_scroll/1)
+    state = AgentAccess.update_panel(state, &Panel.bump_message_version/1)
     {state, [{:render, 1}, :sync_agent_buffer]}
   end
 
   def handle(state, {:thinking_delta, _delta}) do
     state = AgentAccess.update_agent_ui(state, &UIState.maybe_auto_scroll/1)
+    state = AgentAccess.update_panel(state, &Panel.bump_message_version/1)
     {state, [{:render, 50}, :sync_agent_buffer]}
   end
 

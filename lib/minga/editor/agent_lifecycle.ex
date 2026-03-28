@@ -137,6 +137,17 @@ defmodule Minga.Editor.AgentLifecycle do
     # re-caches with full tree-sitter quality.
     styled = compute_styled_messages(state, buffer, messages)
 
+    styled_assistant_count =
+      Enum.count(styled, fn
+        nil -> false
+        _ -> true
+      end)
+
+    Minga.Log.debug(
+      :agent,
+      "[sync] styled cache: #{length(styled)} entries, #{styled_assistant_count} with content (#{length(messages)} messages)"
+    )
+
     # Cache the line index and styled messages in the UI state so
     # callers can read them without recomputing.
     state =

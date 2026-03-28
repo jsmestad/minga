@@ -742,11 +742,27 @@ defmodule Minga.Frontend.Emit.GUI do
       data = build_agent_chat_data(ctx, prompt_text)
 
       if data.visible do
-        Minga.Log.debug(:render, "[gui] sending agent chat: #{length(data.messages)} messages")
+        log_agent_chat_message_stats(data.messages)
       end
 
       ProtocolGUI.encode_gui_agent_chat(data)
     end
+  end
+
+  @spec log_agent_chat_message_stats([{pos_integer(), term()}]) :: :ok
+  defp log_agent_chat_message_stats(messages) do
+    {styled, plain} =
+      Enum.reduce(messages, {0, 0}, fn
+        {_, {:styled_assistant, _}}, {s, p} -> {s + 1, p}
+        {_, {:styled_tool_call, _, _}}, {s, p} -> {s + 1, p}
+        {_, {:assistant, _}}, {s, p} -> {s, p + 1}
+        _, acc -> acc
+      end)
+
+    Minga.Log.debug(
+      :render,
+      "[gui] sending agent chat: #{length(messages)} msgs (#{styled} styled, #{plain} plain assistant)"
+    )
   end
 
   # Builds the prompt completion popup data for @-mention or /slash completion.
