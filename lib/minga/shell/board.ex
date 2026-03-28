@@ -24,6 +24,8 @@ defmodule Minga.Shell.Board do
 
   alias Minga.Editor.DisplayList
   alias Minga.Editor.DisplayList.{Cursor, Frame}
+  alias Minga.Editor.RenderPipeline.Chrome
+  alias Minga.Editor.Renderer.Regions
   alias Minga.Frontend.Emit.Context, as: EmitContext
   alias Minga.Shell.Board.Card
   alias Minga.Shell.Board.State, as: BoardState
@@ -202,33 +204,73 @@ defmodule Minga.Shell.Board do
   @impl true
   @spec compute_layout(term()) :: Minga.Editor.Layout.t()
   def compute_layout(editor_state) do
-    # Board currently reuses Traditional's layout computation for both
-    # grid and zoomed modes. #1342 will give Board its own layout.
     if Minga.Frontend.gui?(editor_state.capabilities) do
+      # GUI: Metal viewport is the full editor area, no shell chrome rects
       Minga.Editor.Layout.GUI.compute(editor_state)
     else
-      Minga.Shell.Traditional.Layout.TUI.compute(editor_state)
+      compute_board_tui_layout(editor_state)
+    end
+  end
+
+  # Board TUI layout: no tab bar, no file tree, no modeline.
+  # Grid view uses the full viewport. Zoomed view reserves row 0
+  # for the context bar and the last row for the minibuffer.
+  @spec compute_board_tui_layout(term()) :: Minga.Editor.Layout.t()
+  defp compute_board_tui_layout(editor_state) do
+    alias Minga.Editor.Layout
+    vp = editor_state.workspace.viewport
+    {rows, cols} = {vp.rows, vp.cols}
+
+    if BoardState.grid_view?(editor_state.shell_state) do
+      # Grid: full viewport as editor_area, 1-row minibuffer at bottom
+      editor_rows = max(rows - 1, 1)
+
+      %Layout{
+        terminal: {0, 0, cols, rows},
+        editor_area: {0, 0, cols, editor_rows},
+        minibuffer: {editor_rows, 0, cols, 1}
+      }
+    else
+      # Zoomed: row 0 = context bar, last row = minibuffer, rest = editor
+      context_bar_height = 1
+      minibuffer_height = 1
+      editor_rows = max(rows - context_bar_height - minibuffer_height, 1)
+      editor_top = context_bar_height
+
+      {window_layouts, h_seps} =
+        Layout.compute_window_layouts_with_separators(
+          editor_state.workspace.windows.tree,
+          {editor_top, 0, cols, editor_rows},
+          editor_state.workspace.windows.map
+        )
+
+      %Layout{
+        terminal: {0, 0, cols, rows},
+        editor_area: {editor_top, 0, cols, editor_rows},
+        window_layouts: window_layouts,
+        horizontal_separators: h_seps,
+        minibuffer: {editor_top + editor_rows, 0, cols, minibuffer_height}
+      }
     end
   end
 
   @impl true
   @spec build_chrome(term(), Minga.Editor.Layout.t(), map(), term()) ::
-          Minga.Editor.RenderPipeline.Chrome.t()
-  def build_chrome(editor_state, layout, scrolls, cursor_info) do
-    chrome =
-      Minga.Shell.Traditional.Chrome.build_chrome(editor_state, layout, scrolls, cursor_info)
-
+          Chrome.t()
+  def build_chrome(editor_state, layout, _scrolls, _cursor_info) do
     if BoardState.grid_view?(editor_state.shell_state) do
-      chrome
+      # Grid view: BoardView overlay handles everything, empty chrome
+      %Chrome{}
     else
-      # Zoomed: inject context bar into the tab_bar chrome slot
-      inject_zoom_context_bar(chrome, editor_state)
+      # Zoomed: context bar in tab_bar slot, everything else empty
+      context_draws = build_zoom_context_bar(editor_state)
+      regions = Regions.define_regions(layout)
+      %Chrome{tab_bar: context_draws, regions: regions}
     end
   end
 
-  @spec inject_zoom_context_bar(Minga.Editor.RenderPipeline.Chrome.t(), term()) ::
-          Minga.Editor.RenderPipeline.Chrome.t()
-  defp inject_zoom_context_bar(chrome, editor_state) do
+  @spec build_zoom_context_bar(term()) :: [DisplayList.draw()]
+  defp build_zoom_context_bar(editor_state) do
     board = editor_state.shell_state
     card = BoardState.zoomed(board)
     cols = editor_state.workspace.viewport.cols
@@ -249,16 +291,13 @@ defmodule Minga.Shell.Board do
       right = " #{hint} "
       gap = max(cols - String.length(left) - String.length(right), 0)
 
-      context_draws = [
+      [
         DisplayList.draw(0, 0, left, bar_face),
         DisplayList.draw(0, String.length(left), String.duplicate(" ", gap), status_face),
         DisplayList.draw(0, String.length(left) + gap, right, hint_face)
       ]
-
-      # Replace the tab_bar draws with our context bar
-      %{chrome | tab_bar: context_draws}
     else
-      chrome
+      []
     end
   end
 
