@@ -1446,22 +1446,21 @@ defmodule Minga.Editor.Commands.BufferManagement do
         description: "Cycle line number style (hybrid → absolute → relative → none)",
         requires_buffer: true,
         execute: fn state -> execute(state, :cycle_line_numbers) end,
-        scope: %{
-          option: :line_numbers,
-          toggle: fn
-            :hybrid -> :absolute
-            :absolute -> :relative
-            :relative -> :none
-            :none -> :hybrid
-          end
-        }
+        option_toggle:
+          {:line_numbers,
+           fn
+             :hybrid -> :absolute
+             :absolute -> :relative
+             :relative -> :none
+             :none -> :hybrid
+           end}
       },
       %Minga.Command{
         name: :toggle_wrap,
         description: "Toggle word wrap",
         requires_buffer: true,
         execute: fn state -> execute(state, :toggle_wrap) end,
-        scope: %{option: :wrap, toggle: true}
+        option_toggle: :wrap
       }
     ]
 

@@ -522,10 +522,6 @@ defmodule Minga.Editor.Commands.Agent do
   @doc "Scrolls the chat panel up by half the panel height."
   @spec scroll_chat_up(state()) :: state()
   def scroll_chat_up(state) do
-    if no_agent_ui?(state), do: state, else: do_scroll_chat_up(state)
-  end
-
-  defp do_scroll_chat_up(state) do
     amount = div(panel_height(state), 2)
     state = update_agent_ui(state, &UIState.scroll_up(&1, amount))
     scroll_agent_chat_window(state, -amount)
@@ -534,10 +530,6 @@ defmodule Minga.Editor.Commands.Agent do
   @doc "Scrolls the chat panel down by half the panel height."
   @spec scroll_chat_down(state()) :: state()
   def scroll_chat_down(state) do
-    if no_agent_ui?(state), do: state, else: do_scroll_chat_down(state)
-  end
-
-  defp do_scroll_chat_down(state) do
     amount = div(panel_height(state), 2)
     state = update_agent_ui(state, &UIState.scroll_down(&1, amount))
     scroll_agent_chat_window(state, amount)
@@ -546,17 +538,13 @@ defmodule Minga.Editor.Commands.Agent do
   @doc "Handles a character input in the agent prompt."
   @spec input_char(state(), String.t()) :: state()
   def input_char(state, char) do
-    if no_agent_ui?(state),
-      do: state,
-      else: update_agent_ui(state, &UIState.insert_char(&1, char))
+    update_agent_ui(state, &UIState.insert_char(&1, char))
   end
 
   @doc "Inserts pasted text into the agent prompt. Collapses multi-line pastes into a compact indicator."
   @spec input_paste(state(), String.t()) :: state()
   def input_paste(state, text) do
-    if no_agent_ui?(state),
-      do: state,
-      else: update_agent_ui(state, &UIState.insert_paste(&1, text))
+    update_agent_ui(state, &UIState.insert_paste(&1, text))
   end
 
   @doc "Toggles expand/collapse on the paste block at the cursor."
@@ -568,7 +556,7 @@ defmodule Minga.Editor.Commands.Agent do
   @doc "Deletes the last character from the agent prompt."
   @spec input_backspace(state()) :: state()
   def input_backspace(state) do
-    if no_agent_ui?(state), do: state, else: update_agent_ui(state, &UIState.delete_char/1)
+    update_agent_ui(state, &UIState.delete_char/1)
   end
 
   @doc "Cycles the thinking level (off → low → medium → high)."
@@ -1073,15 +1061,6 @@ defmodule Minga.Editor.Commands.Agent do
     EditorState.set_status(state, "Restored #{count} queued #{label} to editor")
   end
 
-  # Returns true when no agent UI is visible (panel or agent tab active),
-  # meaning agent input/scroll commands should be no-ops.
-  @spec no_agent_ui?(state()) :: boolean()
-  defp no_agent_ui?(state) do
-    state.workspace.keymap_scope != :agent and
-      not AgentAccess.panel(state).visible and
-      EditorState.active_tab_kind(state) != :agent
-  end
-
   @spec update_agent(state(), (AgentState.t() -> AgentState.t())) :: state()
   defp update_agent(state, fun), do: AgentAccess.update_agent(state, fun)
 
@@ -1252,9 +1231,11 @@ defmodule Minga.Editor.Commands.Agent do
   defp scroll_agent_chat_window(state, delta),
     do: EditorState.scroll_agent_chat_window(state, delta)
 
-  # Maps command name atoms to their implementing function names.
-  # All agent commands work without a buffer.
-  @agent_command_specs [
+  # Commands callable from any keymap scope. This includes:
+  # - Toggle/lifecycle/session management (invoked from editor scope leader keys)
+  # - Input commands used in the side panel (AgentPanel resolves from the
+  #   :agent trie but keymap_scope stays :editor, so these can't require :agent)
+  @global_agent_commands [
     {:toggle_agentic_view, "Toggle agent split pane", :toggle_agentic_view},
     {:toggle_agent_split, "Toggle agent split", :toggle_agent_split},
     {:cycle_agent_tabs, "Cycle agent tabs (opens split if none)", :cycle_agent_tabs},
@@ -1263,8 +1244,32 @@ defmodule Minga.Editor.Commands.Agent do
     {:agent_cycle_model, "Cycle AI agent model", :cycle_model},
     {:agent_summarize, "Summarize session to context artifact", :summarize},
     {:agent_cycle_thinking, "Cycle AI thinking level", :cycle_thinking_level},
+    {:agent_clear_history, "Clear all saved agent sessions", :clear_session_history},
+    # Input commands shared between editor scope (side panel) and agent scope
     {:agent_scroll_half_down, "Scroll agent chat down", :scroll_chat_down},
     {:agent_scroll_half_up, "Scroll agent chat up", :scroll_chat_up},
+    {:agent_submit_or_newline, "Submit or newline", :scope_submit_or_newline},
+    {:agent_insert_newline, "Insert newline in agent input", :scope_insert_newline},
+    {:agent_submit_or_abort, "Submit or abort agent", :scope_submit_or_abort},
+    {:agent_ctrl_c, "Abort (streaming) or normal mode (idle)", :scope_ctrl_c},
+    {:agent_queue_follow_up, "Queue as follow-up or submit if idle", :scope_queue_follow_up},
+    {:agent_dequeue, "Dequeue messages back to editor", :scope_dequeue},
+    {:agent_input_backspace, "Agent input backspace", :input_backspace},
+    {:agent_input_up, "Agent input up", :scope_input_up},
+    {:agent_input_down, "Agent input down", :scope_input_down},
+    {:agent_save_buffer, "Save buffer from agent", :scope_save_buffer},
+    {:agent_input_to_normal, "Agent input to normal mode", :input_to_normal},
+    {:agent_unfocus_and_quit, "Unfocus input and quit", :scope_unfocus_and_quit},
+    {:agent_clear_chat, "Clear agent chat", :scope_clear_chat},
+    {:agent_trigger_mention, "Trigger agent mention", :scope_trigger_mention}
+  ]
+
+  # Commands that require `keymap_scope == :agent`. These only make sense
+  # in the full agent view (navigation, fold, copy, diff review, panel
+  # management). The dispatch layer (Commands.execute/2) enforces this
+  # via the `scope` field, so individual command functions no
+  # longer need internal guards.
+  @scoped_agent_commands [
     {:agent_toggle_collapse, "Toggle collapse at cursor", :scope_toggle_collapse},
     {:agent_toggle_all_collapse, "Toggle collapse all", :scope_toggle_all_collapse},
     {:agent_expand_at_cursor, "Expand at cursor", :scope_expand_at_cursor},
@@ -1283,7 +1288,6 @@ defmodule Minga.Editor.Commands.Agent do
     {:agent_focus_input, "Focus agent input", :scope_focus_input},
     {:agent_focus_or_submit, "Focus input or submit", :scope_focus_or_submit},
     {:agent_unfocus_input, "Unfocus agent input", :scope_unfocus_input},
-    {:agent_unfocus_and_quit, "Unfocus input and quit", :scope_unfocus_and_quit},
     {:agent_grow_panel, "Grow agent panel", :scope_grow_panel},
     {:agent_shrink_panel, "Shrink agent panel", :scope_shrink_panel},
     {:agent_reset_panel, "Reset agent panel size", :scope_reset_panel},
@@ -1295,39 +1299,36 @@ defmodule Minga.Editor.Commands.Agent do
     {:agent_toggle_help, "Toggle agent help", :scope_toggle_help},
     {:agent_close, "Close agent panel", :scope_close},
     {:agent_dismiss_or_noop, "Dismiss agent or no-op", :scope_dismiss_or_noop},
-    {:agent_clear_history, "Clear all saved agent sessions", :clear_session_history},
-    {:agent_clear_chat, "Clear agent chat", :scope_clear_chat},
-    {:agent_submit_or_newline, "Submit or newline", :scope_submit_or_newline},
-    {:agent_insert_newline, "Insert newline in agent input", :scope_insert_newline},
-    {:agent_submit_or_abort, "Submit or abort agent", :scope_submit_or_abort},
-    {:agent_ctrl_c, "Abort (streaming) or normal mode (idle)", :scope_ctrl_c},
-    {:agent_queue_follow_up, "Queue as follow-up or submit if idle", :scope_queue_follow_up},
-    {:agent_dequeue, "Dequeue messages back to editor", :scope_dequeue},
-    {:agent_input_backspace, "Agent input backspace", :input_backspace},
-    {:agent_input_up, "Agent input up", :scope_input_up},
-    {:agent_input_down, "Agent input down", :scope_input_down},
-    {:agent_save_buffer, "Save buffer from agent", :scope_save_buffer},
-    {:agent_input_to_normal, "Agent input to normal mode", :input_to_normal},
     {:agent_accept_hunk, "Accept agent hunk", :scope_accept_hunk},
     {:agent_reject_hunk, "Reject agent hunk", :scope_reject_hunk},
     {:agent_accept_all_hunks, "Accept all agent hunks", :scope_accept_all_hunks},
     {:agent_reject_all_hunks, "Reject all agent hunks", :scope_reject_all_hunks},
     {:agent_approve_tool, "Approve agent tool", :scope_approve_tool},
-    {:agent_deny_tool, "Deny agent tool", :scope_deny_tool},
-    {:agent_trigger_mention, "Trigger agent mention", :scope_trigger_mention}
+    {:agent_deny_tool, "Deny agent tool", :scope_deny_tool}
   ]
 
   @impl Minga.Command.Provider
   def __commands__ do
-    dispatched =
-      Enum.map(@agent_command_specs, fn {cmd_name, desc, fun_name} ->
+    global =
+      Enum.map(@global_agent_commands, fn {cmd_name, desc, fun_name} ->
         %Minga.Command{
           name: cmd_name,
           description: desc,
-          requires_buffer: false,
           execute: fn state -> apply(__MODULE__, fun_name, [state]) end
         }
       end)
+
+    scoped =
+      Enum.map(@scoped_agent_commands, fn {cmd_name, desc, fun_name} ->
+        %Minga.Command{
+          name: cmd_name,
+          description: desc,
+          scope: :agent,
+          execute: fn state -> apply(__MODULE__, fun_name, [state]) end
+        }
+      end)
+
+    dispatched = global ++ scoped
 
     pickers = [
       %Minga.Command{

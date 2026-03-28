@@ -296,20 +296,20 @@ defmodule Minga.Command.RegistryTest do
       assert registered.requires_buffer == true
     end
 
-    test "preserves requires_buffer and scope fields", %{registry: r} do
+    test "preserves requires_buffer and option_toggle fields", %{registry: r} do
       cmd = %Command{
         name: :scoped_cmd,
         description: "Scopeable",
         execute: fn s -> s end,
         requires_buffer: true,
-        scope: %{option: :wrap, toggle: true}
+        option_toggle: :wrap
       }
 
       :ok = Registry.register_command(r, cmd)
 
       assert {:ok, registered} = Registry.lookup(r, :scoped_cmd)
       assert registered.requires_buffer == true
-      assert registered.scope == %{option: :wrap, toggle: true}
+      assert registered.option_toggle == :wrap
     end
   end
 

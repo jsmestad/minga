@@ -51,8 +51,8 @@ defmodule Minga.UI.Picker.CommandSource do
   @spec on_select(Item.t(), term()) :: term()
   def on_select(%Item{id: command_name}, state) do
     case lookup_command(command_name) do
-      %Command{scope: %{} = scope} = cmd ->
-        open_scope_picker(state, cmd, scope)
+      %Command{option_toggle: opt} = cmd when opt != nil ->
+        open_scope_picker(state, cmd)
 
       _ ->
         Map.update(state, :pending_command, command_name, fn _ -> command_name end)
@@ -78,8 +78,9 @@ defmodule Minga.UI.Picker.CommandSource do
   # Opens the scope picker for a scopeable command. Reads the current
   # value from the active buffer, computes the new value, and passes
   # both through the picker context.
-  @spec open_scope_picker(term(), Command.t(), Command.scope()) :: term()
-  defp open_scope_picker(state, cmd, %{option: option_name} = _scope) do
+  @spec open_scope_picker(term(), Command.t()) :: term()
+  defp open_scope_picker(state, cmd) do
+    option_name = Command.option_name(cmd)
     buf = state.workspace.buffers.active
 
     current_value =

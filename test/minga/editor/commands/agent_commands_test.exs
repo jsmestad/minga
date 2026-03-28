@@ -105,12 +105,6 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
   # ── scroll_chat ──────────────────────────────────────────────────────────
 
   describe "scroll_chat_up/1 and scroll_chat_down/1" do
-    test "no-ops when panel is hidden and agentic view is inactive" do
-      state = base_state(panel_visible: false, active_agent: false)
-      assert AgentCommands.scroll_chat_up(state) == state
-      assert AgentCommands.scroll_chat_down(state) == state
-    end
-
     test "scrolls when panel is visible" do
       state = base_state(panel_visible: true)
       new_state = AgentCommands.scroll_chat_up(state)
@@ -123,11 +117,6 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
   # ── input_char / input_backspace / input_paste ───────────────────────────
 
   describe "input_char/2" do
-    test "no-ops when panel is hidden and agentic view is inactive" do
-      state = base_state(panel_visible: false, active_agent: false)
-      assert AgentCommands.input_char(state, "a") == state
-    end
-
     test "inserts character when panel is visible" do
       state = base_state(panel_visible: true, input_focused: true)
       new_state = AgentCommands.input_char(state, "a")
@@ -148,11 +137,6 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
   end
 
   describe "input_backspace/1" do
-    test "no-ops when panel is hidden and agentic view is inactive" do
-      state = base_state(panel_visible: false, active_agent: false)
-      assert AgentCommands.input_backspace(state) == state
-    end
-
     test "deletes last character when panel is visible" do
       state = base_state(panel_visible: true, input_focused: true)
 
@@ -167,11 +151,6 @@ defmodule Minga.Editor.Commands.AgentCommandsTest do
   end
 
   describe "input_paste/2" do
-    test "no-ops when panel is hidden and agentic view is inactive" do
-      state = base_state(panel_visible: false, active_agent: false)
-      assert AgentCommands.input_paste(state, "pasted text") == state
-    end
-
     test "inserts pasted text when panel is visible" do
       state = base_state(panel_visible: true, input_focused: true)
       new_state = AgentCommands.input_paste(state, "pasted")
