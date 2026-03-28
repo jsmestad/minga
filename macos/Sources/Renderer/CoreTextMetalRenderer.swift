@@ -251,6 +251,9 @@ final class CoreTextMetalRenderer {
         let cellW = Float(fontManager.cellWidth)
         let cellH = Float(fontManager.cellHeight)
         let scale = contentScale
+        // Display cell height includes line spacing. Use for all row Y positioning
+        // and quad heights. The original cellH is used for text texture sizing only.
+        let displayCellH = cellH * frameState.lineSpacing
 
         // Advance semantic content renderer.
         if let wcr = windowContentRenderer {
@@ -312,10 +315,10 @@ final class CoreTextMetalRenderer {
 
         // Cursorline: draw a full-width bg fill on the cursor row.
         if frameState.cursorlineRow != 0xFFFF && frameState.cursorlineBg != 0 {
-            let yPos = Float(frameState.cursorlineRow) * cellH * scale
+            let yPos = Float(frameState.cursorlineRow) * displayCellH * scale
             var clQuad = QuadGPU()
             clQuad.position = SIMD2<Float>(0, yPos)
-            clQuad.size = SIMD2<Float>(Float(viewportSize.width), cellH * scale)
+            clQuad.size = SIMD2<Float>(Float(viewportSize.width), displayCellH * scale)
             clQuad.color = colorFromU24(frameState.cursorlineBg, default: defaultBg)
             clQuad.alpha = 1.0
             bgQuads.append(clQuad)
@@ -335,7 +338,7 @@ final class CoreTextMetalRenderer {
                     continue
                 }
 
-                let windowRowOffset = Float(gutter.contentRow) * cellH * scale
+                let windowRowOffset = Float(gutter.contentRow) * displayCellH * scale
                 let gutterWidth = Float(gutter.lineNumberWidth) + Float(gutter.signColWidth)
                 let contentColOffset = (Float(gutter.contentCol) + gutterWidth) * cellW * scale + gutterLeftMarginPx + gutterPaddingPx
 
@@ -349,7 +352,7 @@ final class CoreTextMetalRenderer {
                         selection: sel,
                         rowOffset: windowRowOffset,
                         colOffset: contentColOffset - hScrollPx,
-                        cellW: cellW, cellH: cellH, scale: scale,
+                        cellW: cellW, cellH: displayCellH, scale: scale,
                         viewportWidth: Float(viewportSize.width),
                         quads: &semanticOverlayQuads
                     )
@@ -360,13 +363,13 @@ final class CoreTextMetalRenderer {
                 for highlight in content.documentHighlights {
                     // Document highlights are typically single-line (one identifier).
                     // Draw on startRow only; multi-row highlights are rare for this feature.
-                    let hlY = windowRowOffset + Float(highlight.startRow) * cellH * scale
+                    let hlY = windowRowOffset + Float(highlight.startRow) * displayCellH * scale
                     let hlX = contentColOffset + Float(highlight.startCol) * cellW * scale - hScrollPx
                     let hlW = Float(highlight.endCol - highlight.startCol) * cellW * scale
 
                     var quad = QuadGPU()
                     quad.position = SIMD2<Float>(hlX, hlY)
-                    quad.size = SIMD2<Float>(hlW, cellH * scale)
+                    quad.size = SIMD2<Float>(hlW, displayCellH * scale)
                     // Write references get a warmer amber tint; read/text get a subtle blue-gray.
                     // Colors are driven by the theme via ThemeColors slots 0x59/0x5A.
                     quad.color = highlight.kind == .write
@@ -378,13 +381,13 @@ final class CoreTextMetalRenderer {
 
                 // Search match overlay quads (drawn before text).
                 for match in content.searchMatches {
-                    let matchY = windowRowOffset + Float(match.row) * cellH * scale
+                    let matchY = windowRowOffset + Float(match.row) * displayCellH * scale
                     let matchX = contentColOffset + Float(match.startCol) * cellW * scale - hScrollPx
                     let matchW = Float(match.endCol - match.startCol) * cellW * scale
 
                     var quad = QuadGPU()
                     quad.position = SIMD2<Float>(matchX, matchY)
-                    quad.size = SIMD2<Float>(matchW, cellH * scale)
+                    quad.size = SIMD2<Float>(matchW, displayCellH * scale)
                     quad.color = match.isCurrent
                         ? SIMD3<Float>(0.95, 0.75, 0.0)    // current match: gold
                         : SIMD3<Float>(0.35, 0.35, 0.15)   // other matches: dim gold
@@ -395,11 +398,13 @@ final class CoreTextMetalRenderer {
                 // Render line textures from semantic content into atlas.
                 for (rowIdx, row) in content.rows.enumerated() {
                     if let atlas, let entry = wcr.renderRowToAtlas(displayRow: UInt16(rowIdx), row: row, atlas: atlas) {
-                        let yPos = windowRowOffset + Float(rowIdx) * cellH * scale
+                        let yPos = windowRowOffset + Float(rowIdx) * displayCellH * scale
+                        // Center text vertically within the expanded row when line spacing > 1.0.
+                        let textYOffset = (displayCellH - cellH) * scale * 0.5
 
                         let (uvOrigin, uvSize) = atlas.uvForSlot(entry.slotIndex, pixelWidth: entry.pixelWidth)
                         var lineGPU = LineGPU()
-                        lineGPU.position = SIMD2<Float>(contentColOffset - hScrollPx, yPos)
+                        lineGPU.position = SIMD2<Float>(contentColOffset - hScrollPx, yPos + textYOffset)
                         lineGPU.size = SIMD2<Float>(Float(entry.pixelWidth), Float(entry.pixelHeight))
                         lineGPU.uvOrigin = uvOrigin
                         lineGPU.uvSize = uvSize
@@ -430,7 +435,7 @@ final class CoreTextMetalRenderer {
                             linePixelWidth = 0
                         }
 
-                        let rowY = windowRowOffset + Float(rowIndex) * cellH * scale
+                        let rowY = windowRowOffset + Float(rowIndex) * displayCellH * scale
                         var cursorX = contentColOffset - hScrollPx + linePixelWidth
                             + Float(wcr.annotationGap) * scale
 
@@ -468,7 +473,7 @@ final class CoreTextMetalRenderer {
                     case .hint:    SIMD3<Float>(0.33, 0.33, 0.33)  // gray
                     }
 
-                    let diagY = windowRowOffset + Float(diag.startRow) * cellH * scale + cellH * scale - 2.0 * scale
+                    let diagY = windowRowOffset + Float(diag.startRow) * displayCellH * scale + displayCellH * scale - 2.0 * scale
                     let diagX = contentColOffset + Float(diag.startCol) * cellW * scale - hScrollPx
                     let diagW = Float(diag.endCol - diag.startCol) * cellW * scale
 
@@ -488,7 +493,7 @@ final class CoreTextMetalRenderer {
             renderGutterEntries(
                 gutter: windowGutter,
                 frameState: frameState,
-                cellW: cellW, cellH: cellH, scale: scale,
+                cellW: cellW, cellH: displayCellH, scale: scale,
                 gutterLeftMarginPx: gutterLeftMarginPx,
                 gutterPaddingPx: gutterPaddingPx,
                 bgQuads: &bgQuads,
@@ -588,8 +593,8 @@ final class CoreTextMetalRenderer {
                 ? gutterLeftMarginPx + gutterPaddingPx : 0
 
             var cursorQuad = QuadGPU()
-            cursorQuad.position = SIMD2<Float>(cursorCol * cellW * scale + cursorPadding, cursorRow * cellH * scale)
-            cursorQuad.size = SIMD2<Float>(cellW * scale, cellH * scale)
+            cursorQuad.position = SIMD2<Float>(cursorCol * cellW * scale + cursorPadding, cursorRow * displayCellH * scale)
+            cursorQuad.size = SIMD2<Float>(cellW * scale, displayCellH * scale)
             cursorQuad.color = cursorColor
             cursorQuad.alpha = 1.0
 
@@ -681,8 +686,8 @@ final class CoreTextMetalRenderer {
             // Vertical separators: 1px-wide lines spanning startRow..endRow
             for vert in frameState.verticalSeparators {
                 let sepX = Float(vert.col) * cellW * scale
-                let sepY = Float(vert.startRow) * cellH * scale
-                let sepH = Float(vert.endRow &- vert.startRow &+ 1) * cellH * scale
+                let sepY = Float(vert.startRow) * displayCellH * scale
+                let sepH = Float(vert.endRow &- vert.startRow &+ 1) * displayCellH * scale
 
                 var vertQuad = QuadGPU()
                 vertQuad.position = SIMD2<Float>(sepX, sepY)
@@ -698,7 +703,7 @@ final class CoreTextMetalRenderer {
 
             // Horizontal separators: 1px-high line + centered filename label
             for horiz in frameState.horizontalSeparators {
-                let hY = Float(horiz.row) * cellH * scale + (cellH * scale * 0.5) - 0.5
+                let hY = Float(horiz.row) * displayCellH * scale + (displayCellH * scale * 0.5) - 0.5
                 let hX = Float(horiz.col) * cellW * scale
                 let hW = Float(horiz.width) * cellW * scale
 
@@ -723,7 +728,7 @@ final class CoreTextMetalRenderer {
                         // Center the label text within the separator width
                         let labelW = Float(entry.pixelWidth)
                         let centerX = hX + (hW - labelW) * 0.5
-                        let labelY = Float(horiz.row) * cellH * scale
+                        let labelY = Float(horiz.row) * displayCellH * scale
 
                         // Small bg fill behind label so it "breaks" the horizontal line
                         let padPx: Float = 4.0 * scale
@@ -769,12 +774,12 @@ final class CoreTextMetalRenderer {
 
             case .beam:
                 let beamWidth: Float = 2.0 * scale
-                cursorQuad.position = SIMD2<Float>(cursorCol * cellW * scale + cursorPadding, cursorRow * cellH * scale)
-                cursorQuad.size = SIMD2<Float>(beamWidth, cellH * scale)
+                cursorQuad.position = SIMD2<Float>(cursorCol * cellW * scale + cursorPadding, cursorRow * displayCellH * scale)
+                cursorQuad.size = SIMD2<Float>(beamWidth, displayCellH * scale)
 
             case .underline:
                 let ulHeight: Float = 2.0 * scale
-                let cellBottom = (cursorRow + 1) * cellH * scale
+                let cellBottom = (cursorRow + 1) * displayCellH * scale
                 cursorQuad.position = SIMD2<Float>(cursorCol * cellW * scale + cursorPadding, cellBottom - ulHeight)
                 cursorQuad.size = SIMD2<Float>(cellW * scale, ulHeight)
             }
