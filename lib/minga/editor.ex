@@ -68,6 +68,7 @@ defmodule Minga.Editor do
   alias Minga.Editor.State.LSP, as: LSPState
   alias Minga.Editor.State.Session, as: SessionState
 
+  alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.Buffers
   alias Minga.Editor.State.Tab
@@ -1384,7 +1385,7 @@ defmodule Minga.Editor do
   # ── Agent lifecycle ──────────────────────────────────────────────────────
 
   @typedoc """
-  Side effects returned by agent event handlers.
+  Side effects returned by event handlers and pure state functions.
 
   * `:render` — schedule a debounced render
   * `{:render, delay_ms}` — schedule render with custom delay
@@ -1397,6 +1398,10 @@ defmodule Minga.Editor do
   * `{:log_warning, msg}` — log to both *Messages* and *Warnings* (warning level)
   * `:sync_agent_buffer` — sync agent buffer with session output
   * `{:update_tab_label, label}` — update active tab label
+  * `{:monitor, pid}` — monitor a buffer process
+  * `{:stop_spinner}` — cancel outgoing agent spinner timer
+  * `{:start_spinner}` — start incoming agent spinner timer
+  * `{:rebuild_agent_session, tab}` — rebuild agent state from session process
   """
   @type effect ::
           :render
@@ -1410,6 +1415,10 @@ defmodule Minga.Editor do
           | {:log_warning, String.t()}
           | :sync_agent_buffer
           | {:update_tab_label, String.t()}
+          | {:monitor, pid()}
+          | :stop_spinner
+          | :start_spinner
+          | {:rebuild_agent_session, Minga.Editor.State.Tab.t()}
 
   @doc """
   Applies a list of effects to the editor state.
@@ -1463,6 +1472,25 @@ defmodule Minga.Editor do
 
   defp apply_effect(state, {:update_tab_label, _label}),
     do: AgentLifecycle.maybe_update_tab_label(state)
+
+  defp apply_effect(state, {:monitor, pid}) when is_pid(pid),
+    do: EditorState.monitor_buffer(state, pid)
+
+  defp apply_effect(state, :stop_spinner),
+    do: AgentAccess.update_agent(state, &AgentState.stop_spinner_timer/1)
+
+  defp apply_effect(state, :start_spinner) do
+    agent = AgentAccess.agent(state)
+
+    if AgentState.busy?(agent) and agent.spinner_timer == nil do
+      AgentAccess.update_agent(state, &AgentState.start_spinner_timer/1)
+    else
+      state
+    end
+  end
+
+  defp apply_effect(state, {:rebuild_agent_session, tab}),
+    do: EditorState.rebuild_agent_from_session(state, tab)
 
   # Tab bar, view state, capabilities, parser subscription helpers
 
