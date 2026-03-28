@@ -11,7 +11,6 @@ defmodule Minga.Agent.Tools.MultiEditFile do
   """
 
   alias Minga.Buffer
-  alias Minga.Editor
 
   @typedoc "A single edit operation."
   @type edit :: %{String.t() => String.t()}
@@ -19,9 +18,8 @@ defmodule Minga.Agent.Tools.MultiEditFile do
   @doc """
   Applies a list of edits to the file at `path`.
 
-  Opens a buffer for the file if one doesn't exist, ensuring undo integration
-  and visibility in the buffer list. Falls back to filesystem I/O only when
-  the Editor is not running.
+  Opens a buffer for the file if one doesn't exist, ensuring undo integration.
+  Falls back to filesystem I/O only when the Buffer supervisor is not running.
 
   Each edit in `edits` must have `"old_text"` and `"new_text"` keys.
   Returns `{:ok, summary}` with a per-edit status report.
@@ -57,12 +55,10 @@ defmodule Minga.Agent.Tools.MultiEditFile do
 
   @spec ensure_buffer(String.t()) :: {:ok, pid()} | :unavailable
   defp ensure_buffer(path) do
-    case Editor.ensure_buffer_for_path(path) do
+    case Buffer.ensure_for_path(path) do
       {:ok, pid} -> {:ok, pid}
       {:error, _} -> :unavailable
     end
-  catch
-    :exit, _ -> :unavailable
   end
 
   @spec format_buffer_results(String.t(), [Minga.Buffer.Server.replace_result()]) :: String.t()

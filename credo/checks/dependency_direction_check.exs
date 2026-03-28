@@ -7,10 +7,12 @@ defmodule Minga.Credo.DependencyDirectionCheck do
   - **Layer 0** (pure foundations): Buffer.Document, Editing.Motion, Core.*,
     Mode.* FSM modules. No dependencies on other Minga modules.
   - **Layer 1** (stateful services): Buffer.Server, Config.*, Language.*,
-    LSP.*, Git.*, Project.*, Agent.*, Keymap.*, Parser.*, Frontend.*.
+    LSP.*, Git.*, Project.*, Keymap.*, Parser.*, Frontend.Manager/Protocol.
     May depend on Layer 0 only.
   - **Layer 2** (orchestration/presentation): Editor.*, Shell.*, Input.*,
-    Workspace.*. May depend on Layers 0 and 1.
+    Workspace.*, plus presentation sub-namespaces from Frontend (Emit,
+    Protocol.GUI), UI (Picker, Popup.Lifecycle, Prompt), and Agent (View,
+    UIState, Events, SlashCommand). May depend on Layers 0 and 1.
 
   An upward dependency (Layer 0 importing from Layer 1 or 2, or Layer 1
   importing from Layer 2) is flagged as a violation.
@@ -54,21 +56,68 @@ defmodule Minga.Credo.DependencyDirectionCheck do
     "Minga.Editing.Text.Readable",
     "Minga.Editing.NavigableContent",
     "Minga.Editing.Scroll",
+    "Minga.Editing.Fold.Range",
     "Minga.Editing.Model",
     "Minga.Core",
     "Minga.Mode",
     "Minga.Command.Parser",
     "Minga.Keymap.Bindings",
-    "Minga.Keymap.NormalPrefixes"
+    "Minga.Keymap.NormalPrefixes",
+    # Pure data struct under the UI.Picker blanket; must be accessible from Layer 1.
+    "Minga.UI.Picker.Item"
   ]
 
   # Layer 2: Orchestration and presentation.
+  #
+  # Some namespaces (Frontend, UI, Agent) are split across layers. The
+  # sub-namespaces listed here are presentation modules that legitimately
+  # depend on Editor/Shell state. The rest of those namespaces stays Layer 1.
   @layer_2_prefixes [
     "Minga.Editor",
     "Minga.Shell",
     "Minga.Input",
-    "Minga.Workspace"
+    "Minga.Workspace",
+    # Render pipeline tail (emit + GUI protocol encoding)
+    "Minga.Frontend.Emit",
+    "Minga.Frontend.Protocol.GUI",
+    "Minga.Frontend.Protocol.GUIWindowContent",
+    # UI presentation (picker, popup lifecycle, prompts).
+    # Blanket prefix: Picker and Picker.Item are technically pure data, but
+    # nothing in Layer 1 references them today. Picker.Item is carved out in
+    # @layer_0_prefixes above so Layer 1 can use it if needed.
+    "Minga.UI.Picker",
+    "Minga.UI.Popup.Lifecycle",
+    "Minga.UI.Popup.Active",
+    "Minga.UI.Prompt",
+    # Agent presentation
+    "Minga.Agent.View",
+    "Minga.Agent.UIState",
+    "Minga.Agent.ViewContext",
+    "Minga.Agent.Events",
+    "Minga.Agent.SlashCommand",
+    "Minga.Agent.DiffReview",
+    "Minga.Agent.DiffRenderer",
+    # Picker source implementations in other namespaces.
+    # These depend on Editor.State via on_select/on_cancel callbacks.
+    "Minga.Tool.PickerSource",
+    "Minga.Tool.UninstallPickerSource",
+    "Minga.Tool.UpdatePickerSource",
+    "Minga.Diagnostics.PickerSource"
   ]
+
+  # Allowed cross-layer references for structural dispatch.
+  #
+  # This map should stay small. Each entry must explain why the cross-layer
+  # reference is wire-format dispatch rather than an architectural violation.
+  # Do not add entries to silence violations that should be fixed with code changes.
+  @allowed_references %{
+    # Protocol.decode_event/1 dispatches GUI action decoding to Protocol.GUI.
+    # This is wire-format dispatch, not a dependency on presentation state.
+    "Minga.Frontend.Protocol" => ["Minga.Frontend.Protocol.GUI"],
+    # Frontend facade calls Protocol.GUI for GUI-specific config encoding
+    # (line spacing, etc.). Same structural dispatch pattern.
+    "Minga.Frontend" => ["Minga.Frontend.Protocol.GUI"]
+  }
 
   # Cross-cutting modules allowed everywhere.
   @cross_cutting [
@@ -87,9 +136,10 @@ defmodule Minga.Credo.DependencyDirectionCheck do
       []
     else
       source_layer = layer_for_file(filename)
+      source_module = file_to_module_name(filename)
 
       source_file
-      |> Credo.Code.prewalk(&find_violations(&1, &2, source_layer, issue_meta))
+      |> Credo.Code.prewalk(&find_violations(&1, &2, source_layer, source_module, issue_meta))
       |> Enum.filter(&is_map/1)
     end
   end
@@ -98,6 +148,7 @@ defmodule Minga.Credo.DependencyDirectionCheck do
          {form, meta, [{:__aliases__, _, ref_parts} | _]} = ast,
          issues,
          source_layer,
+         source_module,
          issue_meta
        )
        when form in @reference_forms and source_layer != nil do
@@ -108,20 +159,26 @@ defmodule Minga.Credo.DependencyDirectionCheck do
         {ast, issues}
       else
         target_layer = layer_for_module(ref_name)
-        check_violation(ast, issues, source_layer, target_layer, ref_name, meta, issue_meta)
+
+        check_violation(
+          ast, issues, source_layer, source_module, target_layer, ref_name, meta, issue_meta
+        )
       end
     else
       {ast, issues}
     end
   end
 
-  defp find_violations(ast, issues, _source_layer, _issue_meta),
+  defp find_violations(ast, issues, _source_layer, _source_module, _issue_meta),
     do: {ast, issues}
 
-  defp check_violation(ast, issues, source_layer, target_layer, ref_name, meta, issue_meta) do
+  defp check_violation(ast, issues, source_layer, source_module, target_layer, ref_name, meta, issue_meta) do
     cond do
       target_layer == nil ->
         # Unknown module, skip
+        {ast, issues}
+
+      allowed_reference?(source_module, ref_name) ->
         {ast, issues}
 
       source_layer == 0 and target_layer > 0 ->
@@ -214,5 +271,32 @@ defmodule Minga.Credo.DependencyDirectionCheck do
 
   defp module_to_path_fragment(module_name) do
     "/" <> Enum.map_join(String.split(module_name, "."), "/", &Macro.underscore/1)
+  end
+
+  defp allowed_reference?(source_module, ref_name) do
+    case Map.get(@allowed_references, source_module) do
+      nil -> false
+      allowed -> Enum.any?(allowed, fn prefix ->
+        ref_name == prefix || String.starts_with?(ref_name, prefix <> ".")
+      end)
+    end
+  end
+
+  # Convert a file path like "lib/minga/frontend/protocol.ex" to a module
+  # name like "Minga.Frontend.Protocol". Used for @allowed_references lookup.
+  defp file_to_module_name(filename) do
+    filename
+    |> Path.expand()
+    |> then(fn path ->
+      case Regex.run(~r{lib/(.+)\.ex$}, path) do
+        [_, rel] ->
+          rel
+          |> String.split("/")
+          |> Enum.map_join(".", &Macro.camelize/1)
+
+        _ ->
+          nil
+      end
+    end)
   end
 end

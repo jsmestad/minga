@@ -15,12 +15,12 @@ defmodule Minga.Editor.EnsureBufferTest do
       assert {:ok, ^pid} = Editor.ensure_buffer_for_path(path)
     end
 
-    test "exits when Editor not running and no buffer registered", %{tmp_dir: dir} do
+    test "returns error for nonexistent file when no buffer registered", %{tmp_dir: dir} do
       path = Path.join(dir, "nonexistent.ex")
 
-      # Editor isn't running in tests. pid_for_path returns :not_found,
-      # then the GenServer.call to the Editor exits.
-      assert {:noproc, _} = catch_exit(Editor.ensure_buffer_for_path(path))
+      # Buffer.ensure_for_path checks File.exists? before starting a buffer.
+      # No buffer exists and the file doesn't exist on disk, so we get :enoent.
+      assert {:error, :enoent} = Editor.ensure_buffer_for_path(path)
     end
 
     test "skips GenServer call when buffer is already in the Registry", %{tmp_dir: dir} do
@@ -36,19 +36,9 @@ defmodule Minga.Editor.EnsureBufferTest do
     end
   end
 
-  # NOTE: The handle_call({:ensure_buffer, path}) path requires a running
-  # Editor GenServer, which depends on the full supervision tree (Port.Manager,
-  # Parser.Manager, Config.Options, etc.). No existing tests in the project
-  # start a real Editor. The auto-open path composes three well-tested
-  # primitives:
-  #   1. BufferServer.pid_for_path/1 (tested in server_test.exs)
-  #   2. Commands.start_buffer/1 (used by :edit, file_tree, LSP go-to-def)
-  #   3. register_buffer_background/3 which calls:
-  #      - Buffers.add_background/2 (tested in buffers_test.exs)
-  #      - EditorState.monitor_buffer/2 (tested in editor state tests)
-  #      - LSP status is event-driven via :lsp_status_changed (tested in LSP tests)
-  #      - Events.broadcast/2 (tested in events tests)
-  #
-  # Full integration coverage lives in the snapshot test suite which
-  # exercises the Editor end-to-end with real rendering.
+  # NOTE: ensure_buffer_for_path now delegates to Buffer.ensure_for_path
+  # (Layer 1) for the actual buffer start, then casts to the Editor for
+  # workspace registration. This means it works even without a running
+  # Editor: the buffer starts, and the cast to register it is a no-op.
+  # Full integration coverage lives in the snapshot test suite.
 end

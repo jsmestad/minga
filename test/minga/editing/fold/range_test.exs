@@ -1,7 +1,7 @@
-defmodule Minga.Editor.FoldRangeTest do
+defmodule Minga.Editing.Fold.RangeTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Editor.FoldRange
+  alias Minga.Editing.Fold.Range, as: FoldRange
 
   describe "new/3" do
     test "creates a valid range" do

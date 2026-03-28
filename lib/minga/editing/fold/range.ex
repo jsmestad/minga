@@ -1,4 +1,4 @@
-defmodule Minga.Editor.FoldRange do
+defmodule Minga.Editing.Fold.Range do
   @moduledoc """
   A foldable range within a buffer.
 

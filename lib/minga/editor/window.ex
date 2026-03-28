@@ -32,7 +32,7 @@ defmodule Minga.Editor.Window do
   alias Minga.Buffer
   alias Minga.Editor.DisplayList
   alias Minga.Editor.FoldMap
-  alias Minga.Editor.FoldRange
+  alias Minga.Editing.Fold.Range, as: FoldRange
   alias Minga.Editor.Viewport
   alias Minga.Editor.Window.Content
   alias Minga.UI.Popup.Active, as: PopupActive

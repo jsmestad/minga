@@ -9,7 +9,7 @@ defmodule Minga.Editor.FoldMap.VisibleLines do
   """
 
   alias Minga.Editor.FoldMap
-  alias Minga.Editor.FoldRange
+  alias Minga.Editing.Fold.Range, as: FoldRange
 
   @typedoc """
   What to render at a screen row.

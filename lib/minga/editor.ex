@@ -30,7 +30,7 @@ defmodule Minga.Editor do
   alias Minga.Editor.CompletionHandling
   alias Minga.Editor.CompletionTrigger
   alias Minga.Editor.FileWatcherHelpers
-  alias Minga.Editor.FoldRange
+  alias Minga.Editing.Fold.Range, as: FoldRange
   alias Minga.Editor.HighlightEvents
   alias Minga.Editor.HighlightSync
   alias Minga.Editor.KeyDispatch
@@ -124,22 +124,27 @@ defmodule Minga.Editor do
   @doc """
   Ensures a buffer exists for the given file path, opening one if needed.
 
-  If a buffer is already registered for `path`, returns its pid. Otherwise,
-  starts a new buffer through the Editor GenServer so it gets full tracking:
-  buffer list, monitoring, LSP sync, event broadcast. The buffer is added
-  in the background without switching the active window.
+  Delegates to `Buffer.ensure_for_path/1` for the actual buffer start, then
+  casts to the Editor to register the buffer in the workspace (buffer list,
+  monitoring, log message). The buffer is added in the background without
+  switching the active window.
 
-  Used by agent tools to guarantee every edited file has a buffer with
-  undo integration and visibility in the buffer list.
+  Layer 2 callers that need workspace registration should use this function.
+  Layer 1 callers (agent tools) should use `Buffer.ensure_for_path/1` directly.
   """
   @spec ensure_buffer_for_path(String.t(), GenServer.server()) ::
           {:ok, pid()} | {:error, term()}
   def ensure_buffer_for_path(path, server \\ __MODULE__) do
-    abs_path = Path.expand(path)
+    case Buffer.ensure_for_path(path) do
+      {:ok, pid} ->
+        # Notify the Editor to register this buffer in the workspace
+        # (monitoring, buffer list, log message). The cast is fire-and-forget;
+        # the tools only need the pid for Buffer.Server calls.
+        GenServer.cast(server, {:register_background_buffer, pid, Path.expand(path)})
+        {:ok, pid}
 
-    case Buffer.pid_for_path(abs_path) do
-      {:ok, pid} -> {:ok, pid}
-      :not_found -> GenServer.call(server, {:ensure_buffer, abs_path})
+      error ->
+        error
     end
   end
 
@@ -253,25 +258,6 @@ defmodule Minga.Editor do
     end
   end
 
-  def handle_call({:ensure_buffer, abs_path}, _from, state) do
-    # Double-check: another call may have opened it between the caller's
-    # pid_for_path check and this handle_call arriving.
-    case Buffer.pid_for_path(abs_path) do
-      {:ok, pid} ->
-        {:reply, {:ok, pid}, state}
-
-      :not_found ->
-        case Commands.start_buffer(abs_path) do
-          {:ok, pid} ->
-            state = register_buffer_background(state, pid, abs_path)
-            {:reply, {:ok, pid}, state}
-
-          {:error, reason} ->
-            {:reply, {:error, reason}, state}
-        end
-    end
-  end
-
   def handle_call(:api_active_buffer, _from, %{workspace: %{buffers: %{active: nil}}} = state) do
     {:reply, {:error, :no_buffer}, state}
   end
@@ -331,6 +317,21 @@ defmodule Minga.Editor do
 
   @impl true
   @spec handle_cast(term(), state()) :: {:noreply, state()}
+  def handle_cast({:register_background_buffer, pid, abs_path}, state) do
+    # Register a buffer that was started by Buffer.ensure_for_path (called
+    # from agent tools or Editor.ensure_buffer_for_path). Only register if
+    # the buffer isn't already tracked in the workspace.
+    already_tracked? =
+      Enum.any?(state.workspace.buffers.list, fn {_, bp} -> bp == pid end)
+
+    if already_tracked? do
+      {:noreply, state}
+    else
+      state = register_buffer_background(state, pid, abs_path)
+      {:noreply, state}
+    end
+  end
+
   def handle_cast({:log_to_messages, text}, state) do
     {:noreply, log_message(state, text)}
   end
@@ -1779,14 +1780,7 @@ defmodule Minga.Editor do
     }
 
     state = EditorState.monitor_buffer(state, buffer_pid)
-    state = log_message(state, "Opened (agent): #{file_path}")
-
-    Minga.Events.broadcast(:buffer_opened, %Minga.Events.BufferEvent{
-      buffer: buffer_pid,
-      path: file_path
-    })
-
-    state
+    log_message(state, "Opened (agent): #{file_path}")
   end
 
   @spec log_message(state(), String.t()) :: state()
