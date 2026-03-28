@@ -30,6 +30,7 @@ defmodule Minga.Shell.Traditional do
 
   alias Minga.Agent.UIState
   alias Minga.Buffer
+  alias Minga.Editor.State.AgentGroup
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
   alias Minga.Editor.Window
@@ -54,6 +55,52 @@ defmodule Minga.Shell.Traditional do
   @impl true
   @spec handle_gui_action(ShellState.t(), Minga.Workspace.State.t(), term()) ::
           {ShellState.t(), Minga.Workspace.State.t()}
+
+  # No tab bar yet (GUI not initialized): close_tab is a no-op.
+  def handle_gui_action(%ShellState{tab_bar: nil} = shell_state, workspace, {:close_tab, _id}) do
+    {shell_state, workspace}
+  end
+
+  # Switch to the target tab if not already active. The actual buffer
+  # close is handled by the Editor after this returns.
+  def handle_gui_action(
+        %ShellState{tab_bar: %TabBar{} = tb} = shell_state,
+        workspace,
+        {:close_tab, id}
+      ) do
+    if tb.active_id != id do
+      switch_to_buffer_tab(shell_state, workspace, id)
+    else
+      {shell_state, workspace}
+    end
+  end
+
+  def handle_gui_action(
+        %ShellState{tab_bar: %TabBar{} = tb} = shell_state,
+        workspace,
+        {:agent_group_close, ws_id}
+      ) do
+    {%{shell_state | tab_bar: TabBar.remove_group(tb, ws_id)}, workspace}
+  end
+
+  def handle_gui_action(
+        %ShellState{tab_bar: %TabBar{} = tb} = shell_state,
+        workspace,
+        {:agent_group_rename, ws_id, name}
+      ) do
+    tb = TabBar.update_group(tb, ws_id, &AgentGroup.rename(&1, name))
+    {%{shell_state | tab_bar: tb}, workspace}
+  end
+
+  def handle_gui_action(
+        %ShellState{tab_bar: %TabBar{} = tb} = shell_state,
+        workspace,
+        {:agent_group_set_icon, ws_id, icon}
+      ) do
+    tb = TabBar.update_group(tb, ws_id, &AgentGroup.set_icon(&1, icon))
+    {%{shell_state | tab_bar: tb}, workspace}
+  end
+
   def handle_gui_action(shell_state, workspace, _action) do
     {shell_state, workspace}
   end
