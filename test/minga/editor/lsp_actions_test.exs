@@ -12,6 +12,7 @@ defmodule Minga.Editor.LspActionsTest do
   alias Minga.Editor.VimState
   alias Minga.Editor.Viewport
   alias Minga.UI.Picker.CodeActionSource
+  alias Minga.UI.Picker.Context, as: PickerContext
   alias Minga.Workspace.State, as: WorkspaceState
 
   # ── parse_location/1 ──────────────────────────────────────────────────────
@@ -574,8 +575,20 @@ defmodule Minga.Editor.LspActionsTest do
         %{"title" => "Extract variable", "kind" => "refactor.extract", "isPreferred" => true}
       ]
 
-      state = %{shell_state: %{picker_ui: %{context: %{actions: actions}}}}
-      items = CodeActionSource.candidates(state)
+      tab = Minga.Editor.State.Tab.new_file(1, "test")
+
+      ctx = %PickerContext{
+        buffers: %Buffers{},
+        editing: VimState.new(),
+        search: %Minga.Editor.State.Search{},
+        viewport: Viewport.new(24, 80),
+        tab_bar: Minga.Editor.State.TabBar.new(tab),
+        picker_ui: %{context: %{actions: actions}},
+        capabilities: %{},
+        theme: Minga.UI.Theme.get!(:doom_one)
+      }
+
+      items = CodeActionSource.candidates(ctx)
 
       assert length(items) == 2
       assert Enum.any?(items, fn item -> String.contains?(item.label, "Fix import") end)

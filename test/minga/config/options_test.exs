@@ -72,6 +72,7 @@ defmodule Minga.Config.OptionsTest do
                agent_notify_on: [:approval, :complete, :error],
                agent_max_turns: 100,
                agent_max_cost: nil,
+               agent_flush_before_shell: true,
                agent_compaction_threshold: 0.80,
                agent_compaction_keep_recent: 6,
                agent_approval_timeout: 300_000,
