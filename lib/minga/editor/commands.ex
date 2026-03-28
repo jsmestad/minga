@@ -193,6 +193,51 @@ defmodule Minga.Editor.Commands do
     EditorState.update_shell_state(state, &%{&1 | tool_declined: declined, tool_prompt_queue: []})
   end
 
+  # ── File tree delete confirmation commands ─────────────────────────────────
+
+  def execute(state, {:delete_confirm_trash, path}) do
+    case Minga.Platform.trash(path) do
+      :ok ->
+        name = Path.basename(path)
+        Minga.Editor.log_to_messages("[file-tree] Moved to trash: #{name}")
+
+        state
+        |> restore_file_tree_scope()
+        |> Minga.Editor.Commands.FileTree.refresh()
+
+      {:error, reason} ->
+        # Trash failed, offer permanent delete as fallback
+        Minga.Editor.log_to_messages("[file-tree] Trash failed: #{reason}")
+        ms = state.workspace.editing.mode_state
+
+        EditorState.transition_mode(
+          state,
+          :delete_confirm,
+          Minga.Mode.DeleteConfirmState.to_permanent(ms)
+        )
+    end
+  end
+
+  def execute(state, {:delete_confirm_permanent, path}) do
+    case Minga.Platform.permanent_delete(path) do
+      :ok ->
+        name = Path.basename(path)
+        Minga.Editor.log_to_messages("[file-tree] Permanently deleted: #{name}")
+
+        state
+        |> restore_file_tree_scope()
+        |> Minga.Editor.Commands.FileTree.refresh()
+
+      {:error, reason} ->
+        Minga.Editor.log_to_messages("[file-tree] Delete failed: #{reason}")
+        restore_file_tree_scope(state)
+    end
+  end
+
+  def execute(state, :delete_confirm_cancel) do
+    restore_file_tree_scope(state)
+  end
+
   # ── Agent tuple commands ──────────────────────────────────────────────────
 
   def execute(state, {:agent_set_provider, [provider]}),
@@ -529,6 +574,17 @@ defmodule Minga.Editor.Commands do
 
   # Remove the current tool from the prompt queue after accept/decline.
   @spec drain_tool_prompt_queue(state()) :: state()
+  # After delete confirmation, restore the file tree keymap scope so the user
+  # is back in the file tree, not stuck in editor scope.
+  @spec restore_file_tree_scope(EditorState.t()) :: EditorState.t()
+  defp restore_file_tree_scope(state) do
+    if state.workspace.file_tree.tree != nil do
+      EditorState.update_workspace(state, &Minga.Workspace.State.set_keymap_scope(&1, :file_tree))
+    else
+      state
+    end
+  end
+
   defp drain_tool_prompt_queue(state) do
     case state.shell_state.tool_prompt_queue do
       [_current | rest] -> EditorState.update_shell_state(state, &%{&1 | tool_prompt_queue: rest})

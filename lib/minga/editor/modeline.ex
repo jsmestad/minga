@@ -353,6 +353,7 @@ defmodule Minga.Editor.Modeline do
   defp mode_badge(:substitute_confirm, _state), do: "SUBSTITUTE"
   defp mode_badge(:extension_confirm, _state), do: "UPDATE"
   defp mode_badge(:tool_confirm, _state), do: "INSTALL"
+  defp mode_badge(:delete_confirm, _state), do: "DELETE"
 
   @spec filetype_label(atom()) :: String.t()
   defp filetype_label(filetype) do

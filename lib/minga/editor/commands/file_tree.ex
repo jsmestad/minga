@@ -11,6 +11,7 @@ defmodule Minga.Editor.Commands.FileTree do
   alias Minga.Editor.Layout
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.FileTree, as: FileTreeState
+  alias Minga.Mode.DeleteConfirmState
   alias Minga.Workspace.State, as: WorkspaceState
   alias Minga.Project.FileTree
   alias Minga.Project.FileTree.BufferSync
@@ -233,6 +234,27 @@ defmodule Minga.Editor.Commands.FileTree do
     case FileTree.selected_entry(tree) do
       nil -> cancel_editing(state)
       entry -> do_rename(state, entry, state.workspace.file_tree.editing.text)
+    end
+  end
+
+  @doc """
+  Enters delete confirmation mode for the selected file tree entry.
+
+  Transitions to `:delete_confirm` mode, prompting the user with y/n.
+  For directories, includes a child count in the prompt.
+  """
+  @spec delete(state()) :: state()
+  def delete(%{workspace: %{file_tree: %{tree: nil}}} = state), do: state
+
+  def delete(%{workspace: %{file_tree: %{tree: tree}}} = state) do
+    case FileTree.selected_entry(tree) do
+      nil ->
+        state
+
+      entry ->
+        child_count = if entry.dir?, do: count_children(entry.path), else: 0
+        ms = DeleteConfirmState.new(entry.path, entry.name, entry.dir?, child_count)
+        EditorState.transition_mode(state, :delete_confirm, ms)
     end
   end
 
@@ -490,6 +512,26 @@ defmodule Minga.Editor.Commands.FileTree do
   end
 
   # Updates any open buffer that references the old path to the new path.
+  # Counts all files and directories recursively under the given path.
+  @spec count_children(String.t()) :: non_neg_integer()
+  defp count_children(path) do
+    case File.ls(path) do
+      {:ok, children} -> Enum.reduce(children, 0, &count_child(path, &1, &2))
+      {:error, _} -> 0
+    end
+  end
+
+  @spec count_child(String.t(), String.t(), non_neg_integer()) :: non_neg_integer()
+  defp count_child(parent, name, acc) do
+    child_path = Path.join(parent, name)
+
+    if File.dir?(child_path) do
+      acc + 1 + count_children(child_path)
+    else
+      acc + 1
+    end
+  end
+
   @spec update_buffer_path(state(), String.t(), String.t()) :: state()
   defp update_buffer_path(state, old_path, new_path) do
     case EditorState.find_buffer_by_path(state, old_path) do
@@ -595,6 +637,12 @@ defmodule Minga.Editor.Commands.FileTree do
         description: "Reveal active file in tree",
         requires_buffer: false,
         execute: &reveal_active_file/1
+      },
+      %Minga.Command{
+        name: :tree_delete,
+        description: "Delete file or folder in tree",
+        requires_buffer: false,
+        execute: &delete/1
       }
     ]
   end

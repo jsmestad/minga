@@ -10,6 +10,10 @@ config :logger, level: :warning
 # Tests that need real git (git integration tests) override this in setup.
 config :minga, git_module: Minga.Git.Stub
 
+# Use the platform stub so tests don't shell out to osascript/gio for
+# trash operations. Tests that need real trash behavior override this in setup.
+config :minga, platform_module: Minga.Platform.Stub
+
 # Speed up CLI tests: the editor isn't running in test, so
 # wait_for_editor always times out. Use fast poll params (5ms × 4 = 20ms)
 # instead of the production default (50ms × 20 = 1s).

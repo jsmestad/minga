@@ -58,6 +58,7 @@ defmodule Minga.Frontend.Protocol.GUI do
   | 0x2D       | file_tree_edit_confirm |
   | 0x2E       | file_tree_edit_cancel  |
   | 0x2F       | scroll_to_line         |
+  | 0x30       | file_tree_delete       |
   | 0x0F       | file_tree_collapse_all |
   | 0x10       | file_tree_refresh    |
   | 0x11       | tool_install         |
@@ -215,6 +216,7 @@ defmodule Minga.Frontend.Protocol.GUI do
   @gui_action_file_tree_edit_confirm 0x2D
   @gui_action_file_tree_edit_cancel 0x2E
   @gui_action_scroll_to_line 0x2F
+  @gui_action_file_tree_delete 0x30
 
   # ── Types ──
 
@@ -1977,6 +1979,9 @@ defmodule Minga.Frontend.Protocol.GUI do
 
   def decode_gui_action(@gui_action_scroll_to_line, <<line::32>>),
     do: {:ok, {:scroll_to_line, line}}
+
+  def decode_gui_action(@gui_action_file_tree_delete, <<index::16>>),
+    do: {:ok, {:file_tree_delete, index}}
 
   def decode_gui_action(_, _), do: :error
 
