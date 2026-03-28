@@ -2,6 +2,7 @@ defmodule Minga.Agent.Tools.ReadFileTest do
   use ExUnit.Case, async: true
 
   alias Minga.Agent.Tools.ReadFile
+  alias Minga.Buffer
 
   @moduletag :tmp_dir
 
@@ -109,6 +110,102 @@ defmodule Minga.Agent.Tools.ReadFileTest do
       assert result =~ "[lines 1-2 of 100]"
       assert result =~ "line 1"
       assert result =~ "line 2"
+    end
+  end
+
+  describe "buffer-first routing" do
+    test "returns in-memory buffer content instead of disk content", %{tmp_dir: dir} do
+      path = Path.join(dir, "buffered.txt")
+      File.write!(path, "disk content")
+
+      # Start a buffer for the file, which registers in the Buffer.Registry
+      {:ok, pid} = start_supervised({Buffer.Server, file_path: path})
+
+      # Modify the buffer in-memory without saving to disk
+      :ok = Buffer.Server.insert_text(pid, " MODIFIED")
+
+      # ReadFile should return the in-memory content, not the disk content
+      assert {:ok, result} = ReadFile.execute(path)
+      assert result =~ "MODIFIED"
+      refute result == "disk content"
+
+      # Disk should still have the original content
+      assert File.read!(path) == "disk content"
+    end
+
+    test "buffer routing works with offset and limit", %{tmp_dir: dir} do
+      path = Path.join(dir, "buffered_lines.txt")
+      disk_lines = Enum.map_join(1..10, "\n", &"disk line #{&1}")
+      File.write!(path, disk_lines)
+
+      {:ok, pid} = start_supervised({Buffer.Server, file_path: path})
+
+      # Replace content in buffer with different lines
+      :ok = Buffer.Server.replace_content(pid, Enum.map_join(1..10, "\n", &"buffer line #{&1}"))
+
+      assert {:ok, result} = ReadFile.execute(path, offset: 3, limit: 2)
+      assert result =~ "[lines 3-4 of 10]"
+      assert result =~ "buffer line 3"
+      assert result =~ "buffer line 4"
+      refute result =~ "disk line"
+    end
+
+    test "falls back to disk when no buffer is open", %{tmp_dir: dir} do
+      path = Path.join(dir, "no_buffer.txt")
+      File.write!(path, "disk only content")
+
+      # No buffer started, should read from disk
+      assert {:ok, "disk only content"} = ReadFile.execute(path)
+    end
+
+    test "truncates large buffer content", %{tmp_dir: dir} do
+      path = Path.join(dir, "large_buffer.txt")
+      File.write!(path, "small")
+
+      {:ok, pid} = start_supervised({Buffer.Server, file_path: path})
+
+      # Replace with large content in buffer
+      large_content = String.duplicate("x", 300_000)
+      :ok = Buffer.Server.replace_content(pid, large_content)
+
+      assert {:ok, result} = ReadFile.execute(path)
+      assert result =~ "[truncated at 256KB]"
+    end
+
+    test "works with expanded paths", %{tmp_dir: dir} do
+      path = Path.join(dir, "expanded.txt")
+      File.write!(path, "disk content")
+
+      {:ok, pid} = start_supervised({Buffer.Server, file_path: path})
+      :ok = Buffer.Server.replace_content(pid, "buffer content")
+
+      # ReadFile expands the path, so relative/absolute should both work
+      assert {:ok, "buffer content"} = ReadFile.execute(path)
+    end
+  end
+
+  describe "EditDelta tree-sitter sync" do
+    test "find_and_replace broadcasts buffer_changed event", %{tmp_dir: dir} do
+      path = Path.join(dir, "delta.txt")
+      File.write!(path, "hello world")
+
+      {:ok, pid} = start_supervised({Buffer.Server, file_path: path})
+
+      # Subscribe to buffer change events
+      Minga.Events.subscribe(:buffer_changed)
+
+      # Apply an agent edit via find_and_replace (same path as agent tools)
+      {:ok, _msg} = Buffer.Server.find_and_replace(pid, "hello", "goodbye")
+
+      # The buffer should broadcast a :buffer_changed event that the parser
+      # would use for tree-sitter incremental updates
+      assert_receive {:minga_event, :buffer_changed, %{buffer: ^pid, version: version}},
+                     1_000
+
+      assert is_integer(version)
+
+      # Verify the content was actually changed
+      assert Buffer.Server.content(pid) =~ "goodbye world"
     end
   end
 end
