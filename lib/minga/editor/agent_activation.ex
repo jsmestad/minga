@@ -43,6 +43,23 @@ defmodule Minga.Editor.AgentActivation do
     end
   end
 
+  @doc """
+  Deactivates the agent view, reversing the activation steps.
+
+  Clears the session singleton, resets keymap scope to `:editor`,
+  and unfocuses the prompt. Does NOT modify `workspace.windows` —
+  that is handled by the workspace restore in zoom_out.
+
+  Symmetric counterpart to `activate_for_card/2`.
+  """
+  @spec deactivate(EditorState.t()) :: EditorState.t()
+  def deactivate(state) do
+    state
+    |> clear_session()
+    |> reset_scope()
+    |> unfocus_prompt()
+  end
+
   # ── Private steps ───────────────────────────────────────────────────────
 
   @spec attach_session(EditorState.t(), pid()) :: EditorState.t()
@@ -75,6 +92,27 @@ defmodule Minga.Editor.AgentActivation do
   defp focus_prompt(state) do
     AgentAccess.update_agent_ui(state, fn ui ->
       UIState.set_input_focused(ui, true)
+    end)
+  end
+
+  # ── Deactivation steps ─────────────────────────────────────────────────
+
+  @spec clear_session(EditorState.t()) :: EditorState.t()
+  defp clear_session(state) do
+    AgentAccess.update_agent(state, fn a ->
+      AgentState.clear_session(a)
+    end)
+  end
+
+  @spec reset_scope(EditorState.t()) :: EditorState.t()
+  defp reset_scope(state) do
+    put_in(state.workspace.keymap_scope, :editor)
+  end
+
+  @spec unfocus_prompt(EditorState.t()) :: EditorState.t()
+  defp unfocus_prompt(state) do
+    AgentAccess.update_agent_ui(state, fn ui ->
+      UIState.set_input_focused(ui, false)
     end)
   end
 end
