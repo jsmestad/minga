@@ -9,6 +9,7 @@ defmodule Minga.Frontend.Emit.TUITest do
   alias Minga.Editor.DisplayList
   alias Minga.Editor.DisplayList.{Cursor, Frame, Overlay}
   alias Minga.Frontend.Emit
+  alias Minga.Frontend.Emit.Context
   alias Minga.Frontend.Emit.TUI, as: EmitTUI
 
   import Minga.Editor.RenderPipeline.TestHelpers
@@ -28,7 +29,7 @@ defmodule Minga.Frontend.Emit.TUITest do
       }
 
       state = base_state()
-      Emit.emit(frame, state)
+      Emit.emit(frame, Context.from_editor_state(state))
 
       assert_receive {:"$gen_cast", {:send_commands, commands}}
       assert [<<0x12>> | _] = commands
@@ -41,7 +42,7 @@ defmodule Minga.Frontend.Emit.TUITest do
       }
 
       state = base_state()
-      Emit.emit(frame, state)
+      Emit.emit(frame, Context.from_editor_state(state))
 
       assert_receive {:"$gen_cast", {:send_commands, commands}}
       assert is_list(commands)
@@ -63,12 +64,12 @@ defmodule Minga.Frontend.Emit.TUITest do
 
       state1 = seed_state(state, 0)
       frame1 = build_frame_with_window(state1, viewport_top: 0)
-      Emit.emit(frame1, state1)
+      Emit.emit(frame1, Context.from_editor_state(state1))
       assert_receive {:"$gen_cast", {:send_commands, _first_commands}}
 
       state2 = simulate_scroll(state, 1)
       frame2 = build_frame_with_window(state2, viewport_top: 1)
-      Emit.emit(frame2, state2)
+      Emit.emit(frame2, Context.from_editor_state(state2))
 
       assert_receive {:"$gen_cast", {:send_commands, scroll_commands}}
       refute match?([<<0x12>> | _], scroll_commands)
@@ -84,12 +85,12 @@ defmodule Minga.Frontend.Emit.TUITest do
 
       state1 = seed_state(state, 0)
       frame1 = build_frame_with_window(state1, viewport_top: 0)
-      Emit.emit(frame1, state1)
+      Emit.emit(frame1, Context.from_editor_state(state1))
       assert_receive {:"$gen_cast", {:send_commands, _}}
 
       state2 = simulate_scroll(state, 3)
       frame2 = build_frame_with_window(state2, viewport_top: 3)
-      Emit.emit(frame2, state2)
+      Emit.emit(frame2, Context.from_editor_state(state2))
 
       assert_receive {:"$gen_cast", {:send_commands, scroll_commands}}
       refute match?([<<0x12>> | _], scroll_commands)
@@ -105,12 +106,12 @@ defmodule Minga.Frontend.Emit.TUITest do
 
       state1 = seed_state(state, 0)
       frame1 = build_frame_with_window(state1, viewport_top: 0)
-      Emit.emit(frame1, state1)
+      Emit.emit(frame1, Context.from_editor_state(state1))
       assert_receive {:"$gen_cast", {:send_commands, _}}
 
       state2 = simulate_scroll(state, 4)
       frame2 = build_frame_with_window(state2, viewport_top: 4)
-      Emit.emit(frame2, state2)
+      Emit.emit(frame2, Context.from_editor_state(state2))
 
       assert_receive {:"$gen_cast", {:send_commands, commands}}
       assert [<<0x12>> | _] = commands
@@ -121,11 +122,11 @@ defmodule Minga.Frontend.Emit.TUITest do
 
       state1 = seed_state(state, 5)
       frame1 = build_frame_with_window(state1, viewport_top: 5)
-      Emit.emit(frame1, state1)
+      Emit.emit(frame1, Context.from_editor_state(state1))
       assert_receive {:"$gen_cast", {:send_commands, _}}
 
       frame2 = build_frame_with_window(state1, viewport_top: 5)
-      Emit.emit(frame2, state1)
+      Emit.emit(frame2, Context.from_editor_state(state1))
 
       assert_receive {:"$gen_cast", {:send_commands, commands}}
       assert [<<0x12>> | _] = commands
@@ -137,12 +138,12 @@ defmodule Minga.Frontend.Emit.TUITest do
 
       state1 = seed_state(state, 10)
       frame1 = build_frame_with_window(state1, viewport_top: 10)
-      Emit.emit(frame1, state1)
+      Emit.emit(frame1, Context.from_editor_state(state1))
       assert_receive {:"$gen_cast", {:send_commands, _}}
 
       state2 = simulate_scroll(state, 8)
       frame2 = build_frame_with_window(state2, viewport_top: 8)
-      Emit.emit(frame2, state2)
+      Emit.emit(frame2, Context.from_editor_state(state2))
 
       assert_receive {:"$gen_cast", {:send_commands, scroll_commands}}
       refute match?([<<0x12>> | _], scroll_commands)
@@ -160,12 +161,12 @@ defmodule Minga.Frontend.Emit.TUITest do
 
       state1 = seed_state(state, 0)
       frame1 = build_frame_with_window(state1, viewport_top: 0)
-      Emit.emit(frame1, state1)
+      Emit.emit(frame1, Context.from_editor_state(state1))
       assert_receive {:"$gen_cast", {:send_commands, _}}
 
       state2 = simulate_scroll(state, 1)
       frame2 = build_frame_with_window(state2, viewport_top: 1)
-      Emit.emit(frame2, state2)
+      Emit.emit(frame2, Context.from_editor_state(state2))
 
       assert_receive {:"$gen_cast", {:send_commands, commands}}
       assert <<0x13>> = List.last(commands)
@@ -177,12 +178,12 @@ defmodule Minga.Frontend.Emit.TUITest do
 
       state1 = seed_state(state, 0)
       frame1 = build_frame_with_window(state1, viewport_top: 0)
-      Emit.emit(frame1, state1)
+      Emit.emit(frame1, Context.from_editor_state(state1))
       assert_receive {:"$gen_cast", {:send_commands, _}}
 
       state2 = simulate_scroll(state, 1)
       frame2 = build_frame_with_window(state2, viewport_top: 1)
-      Emit.emit(frame2, state2)
+      Emit.emit(frame2, Context.from_editor_state(state2))
 
       assert_receive {:"$gen_cast", {:send_commands, commands}}
       assert Enum.any?(commands, fn cmd -> match?(<<0x11, _::binary>>, cmd) end)

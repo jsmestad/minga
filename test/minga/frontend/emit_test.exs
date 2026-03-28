@@ -12,6 +12,7 @@ defmodule Minga.Frontend.EmitTest do
   alias Minga.Editor.DisplayList.{Cursor, Frame}
   alias Minga.Editor.Layout
   alias Minga.Frontend.Emit
+  alias Minga.Frontend.Emit.Context
 
   import Minga.Editor.RenderPipeline.TestHelpers
 
@@ -27,7 +28,8 @@ defmodule Minga.Frontend.EmitTest do
       }
 
       state = base_state()
-      Emit.emit(frame, state)
+      ctx = Context.from_editor_state(state)
+      Emit.emit(frame, ctx)
 
       assert_receive {:"$gen_cast", {:send_commands, commands}}
       assert [<<0x12>> | _] = commands
@@ -40,7 +42,8 @@ defmodule Minga.Frontend.EmitTest do
       }
 
       state = gui_state()
-      Emit.emit(frame, state)
+      ctx = Context.from_editor_state(state)
+      Emit.emit(frame, ctx)
 
       assert_receive {:"$gen_cast", {:send_commands, commands}}
       assert is_list(commands)
@@ -58,8 +61,9 @@ defmodule Minga.Frontend.EmitTest do
       frame = build_frame_with_window(base_state(), viewport_top: 0)
       state = base_state()
       _layout = Layout.put(state)
+      ctx = Context.from_editor_state(state)
 
-      Emit.emit(frame, state)
+      Emit.emit(frame, ctx)
       assert_receive {:"$gen_cast", {:send_commands, _}}
 
       assert is_map(Process.get(:emit_prev_viewport_tops))
@@ -79,7 +83,8 @@ defmodule Minga.Frontend.EmitTest do
       }
 
       state = base_state()
-      Emit.emit(frame, state)
+      ctx = Context.from_editor_state(state)
+      Emit.emit(frame, ctx)
 
       # Flush first commands + title
       assert_receive {:"$gen_cast", {:send_commands, _commands}}
@@ -88,8 +93,8 @@ defmodule Minga.Frontend.EmitTest do
       title_sent_first = Process.get(:last_title)
       assert is_binary(title_sent_first)
 
-      # Emit again with same state, title should not be re-sent
-      Emit.emit(frame, state)
+      # Emit again with same ctx, title should not be re-sent
+      Emit.emit(frame, ctx)
       assert_receive {:"$gen_cast", {:send_commands, _commands2}}
 
       # Title in process dictionary unchanged
@@ -107,14 +112,15 @@ defmodule Minga.Frontend.EmitTest do
       }
 
       state = base_state()
-      Emit.emit(frame, state)
+      ctx = Context.from_editor_state(state)
+      Emit.emit(frame, ctx)
 
       assert_receive {:"$gen_cast", {:send_commands, _}}
       bg = Process.get(:last_window_bg)
       assert bg == state.theme.editor.bg
 
       # Emit again, should not re-send
-      Emit.emit(frame, state)
+      Emit.emit(frame, ctx)
       assert_receive {:"$gen_cast", {:send_commands, _}}
       assert Process.get(:last_window_bg) == bg
     end

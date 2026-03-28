@@ -13,21 +13,17 @@ defmodule Minga.Frontend.Emit do
   protocol opcodes (see `Emit.GUI`).
   """
 
-  alias Minga.Config
   alias Minga.Editor.DisplayList
   alias Minga.Editor.DisplayList.Frame
-  alias Minga.Editor.Layout
   alias Minga.Editor.RenderPipeline.Chrome
-  alias Minga.Editor.State, as: EditorState
-  alias Minga.Editor.State.TabBar
-  alias Minga.Editor.Title
+  alias Minga.Frontend.Emit.Context
   alias Minga.Frontend.Emit.GUI, as: EmitGUI
   alias Minga.Frontend.Emit.TUI, as: EmitTUI
   alias Minga.Frontend.Protocol.GUIWindowContent
   alias Minga.Telemetry
 
-  @typedoc "Internal editor state."
-  @type state :: EditorState.t()
+  @typedoc "Emit context containing only the data emit needs."
+  @type ctx :: Context.t()
 
   @doc """
   Converts the frame to protocol command binaries and sends them to
@@ -37,22 +33,22 @@ defmodule Minga.Frontend.Emit do
   Also sends title and window background color when they change
   (side-channel writes).
   """
-  @spec emit(Frame.t(), state(), Chrome.t() | nil) :: state()
-  def emit(frame, state, chrome \\ nil) do
+  @spec emit(Frame.t(), ctx(), Chrome.t() | nil) :: :ok
+  def emit(frame, ctx, chrome \\ nil) do
     # Make the font registry available for font_family → font_id resolution
     # during draws_to_commands. Initialize only on first frame; subsequent
     # frames reuse the accumulated registry so IDs are stable and register_font
     # commands are only sent once per font family.
     if Process.get(:emit_font_registry) == nil do
-      Process.put(:emit_font_registry, state.font_registry)
+      Process.put(:emit_font_registry, ctx.font_registry)
     end
 
-    gui? = Minga.Frontend.gui?(state.capabilities)
+    gui? = Minga.Frontend.gui?(ctx.capabilities)
 
     if gui? do
-      emit_gui(frame, state, chrome)
+      emit_gui(frame, ctx, chrome)
     else
-      emit_tui(frame, state)
+      emit_tui(frame, ctx)
     end
   end
 
@@ -61,8 +57,8 @@ defmodule Minga.Frontend.Emit do
   # message so they arrive atomically in one DispatchQueue.main.async block.
   # SwiftUI chrome (tab bar, file tree, status bar, etc.) is sent separately
   # since it doesn't affect the Metal render pass.
-  @spec emit_gui(Frame.t(), state(), Chrome.t() | nil) :: state()
-  defp emit_gui(frame, state, chrome) do
+  @spec emit_gui(Frame.t(), ctx(), Chrome.t() | nil) :: :ok
+  defp emit_gui(frame, ctx, chrome) do
     # Frame commands WITHOUT batch_end (we append it after Metal-critical chrome)
     frame_cmds =
       frame
@@ -73,7 +69,7 @@ defmodule Minga.Frontend.Emit do
     window_content_cmds = build_gui_window_content_commands(frame)
 
     # Metal-critical chrome: gutter, cursorline, gutter separator
-    metal_chrome_cmds = EmitGUI.build_metal_commands(state)
+    metal_chrome_cmds = EmitGUI.build_metal_commands(ctx)
 
     # Bundle everything into one atomic port message, with batch_end last
     all_metal =
@@ -82,46 +78,47 @@ defmodule Minga.Frontend.Emit do
         metal_chrome_cmds ++
         [Minga.Frontend.Protocol.encode_batch_end()]
 
-    update_tracking(state)
+    update_tracking(ctx)
 
     byte_count = IO.iodata_length(all_metal)
 
     Telemetry.span([:minga, :port, :emit], %{byte_count: byte_count}, fn ->
-      Minga.Frontend.send_commands(state.port_manager, all_metal)
-      send_title(state)
-      send_window_bg(state)
+      Minga.Frontend.send_commands(ctx.port_manager, all_metal)
+      send_title(ctx)
+      send_window_bg(ctx)
 
       # SwiftUI chrome: separate messages, safe (no Metal impact)
       status_bar_data = chrome && chrome.status_bar_data
       minibuffer_data = chrome && chrome.minibuffer_data
-      EmitGUI.sync_swiftui_chrome(state, status_bar_data, minibuffer_data)
+      EmitGUI.sync_swiftui_chrome(ctx, status_bar_data, minibuffer_data)
+      :ok
     end)
   end
 
   # TUI emit: single send_commands call (already atomic).
-  @spec emit_tui(Frame.t(), state()) :: state()
-  defp emit_tui(frame, state) do
-    commands = EmitTUI.build_commands(frame, state)
-    update_tracking(state)
+  @spec emit_tui(Frame.t(), ctx()) :: :ok
+  defp emit_tui(frame, ctx) do
+    commands = EmitTUI.build_commands(frame, ctx)
+    update_tracking(ctx)
     byte_count = IO.iodata_length(commands)
 
     Telemetry.span([:minga, :port, :emit], %{byte_count: byte_count}, fn ->
-      Minga.Frontend.send_commands(state.port_manager, commands)
-      send_title(state)
-      send_window_bg(state)
-      state
+      Minga.Frontend.send_commands(ctx.port_manager, commands)
+      send_title(ctx)
+      send_window_bg(ctx)
+      :ok
     end)
   end
 
   # ── Tracking state (shared) ──────────────────────────────────────────────
 
-  @spec update_tracking(state()) :: :ok
-  defp update_tracking(state) do
-    layout = Layout.get(state)
+  @spec update_tracking(ctx()) :: :ok
+  defp update_tracking(ctx) do
+    layout = ctx.layout
 
     tops =
       Map.new(layout.window_layouts, fn {win_id, _wl} ->
-        window = Map.get(state.workspace.windows.map, win_id)
+        window = Map.get(ctx.windows.map, win_id)
 
         if window do
           {win_id, window.last_viewport_top}
@@ -137,7 +134,7 @@ defmodule Minga.Frontend.Emit do
 
     gutter_ws =
       Map.new(layout.window_layouts, fn {win_id, _wl} ->
-        window = Map.get(state.workspace.windows.map, win_id)
+        window = Map.get(ctx.windows.map, win_id)
 
         if window do
           {win_id, window.last_gutter_w}
@@ -148,7 +145,7 @@ defmodule Minga.Frontend.Emit do
 
     buf_versions =
       Map.new(layout.window_layouts, fn {win_id, _wl} ->
-        window = Map.get(state.workspace.windows.map, win_id)
+        window = Map.get(ctx.windows.map, win_id)
 
         if window do
           {win_id, window.last_buf_version}
@@ -179,9 +176,9 @@ defmodule Minga.Frontend.Emit do
 
   # ── Side-channel writes (shared) ─────────────────────────────────────────
 
-  @spec send_title(state()) :: :ok
-  defp send_title(state) do
-    title = format_title(state)
+  @spec send_title(ctx()) :: :ok
+  defp send_title(ctx) do
+    title = ctx.title
 
     if title != Process.get(:last_title) do
       Process.put(:last_title, title)
@@ -191,9 +188,9 @@ defmodule Minga.Frontend.Emit do
     :ok
   end
 
-  @spec send_window_bg(state()) :: :ok
-  defp send_window_bg(state) do
-    bg = state.theme.editor.bg
+  @spec send_window_bg(ctx()) :: :ok
+  defp send_window_bg(ctx) do
+    bg = ctx.theme.editor.bg
 
     if bg != Process.get(:last_window_bg) do
       Process.put(:last_window_bg, bg)
@@ -201,34 +198,5 @@ defmodule Minga.Frontend.Emit do
     end
 
     :ok
-  end
-
-  @spec format_title(state()) :: String.t()
-  defp format_title(%{shell: Minga.Shell.Board, shell_state: %{zoomed_into: card_id}} = state)
-       when card_id != nil do
-    card = Minga.Shell.Board.State.zoomed(state.shell_state)
-    card_name = if card, do: card.task, else: "Board"
-    "#{card_name} — Minga"
-  end
-
-  defp format_title(%{shell: Minga.Shell.Board}) do
-    "The Board — Minga"
-  end
-
-  defp format_title(state) do
-    if Minga.Frontend.gui?(state.capabilities) do
-      Title.format_gui(state)
-    else
-      format = Config.get(:title_format) |> to_string()
-      title = Title.format(state, format)
-
-      tb = state.shell_state.tab_bar
-
-      if tb && TabBar.any_attention?(tb) do
-        "[!] " <> title
-      else
-        title
-      end
-    end
   end
 end

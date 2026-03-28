@@ -30,17 +30,17 @@ defmodule Minga.Frontend.Emit.GUI do
   alias Minga.Editor.MinibufferData
   alias Minga.Editor.RenderPipeline.ChromeHelpers
   alias Minga.Editor.RenderPipeline.ContentHelpers
-  alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.TabBar
   alias Minga.Editor.StatusBar.Data, as: StatusBarData
   alias Minga.Editor.Viewport
   alias Minga.Editor.Window.Content
+  alias Minga.Frontend.Emit.Context
 
   alias Minga.Frontend.Protocol.GUI, as: ProtocolGUI
   alias Minga.UI.Picker
 
-  @typedoc "Internal editor state."
-  @type state :: EditorState.t()
+  @typedoc "Emit context for the GUI stage."
+  @type ctx :: Context.t()
 
   # ── Frame filtering ──────────────────────────────────────────────────────
 
@@ -90,12 +90,12 @@ defmodule Minga.Frontend.Emit.GUI do
   Returns encoded command binaries for the caller to bundle with the
   main frame commands before `batch_end`.
   """
-  @spec build_metal_commands(state()) :: [binary()]
-  def build_metal_commands(state) do
-    build_gui_gutter_commands(state) ++
-      build_gui_cursorline_commands(state) ++
-      build_gui_gutter_separator_commands(state) ++
-      build_gui_split_separator_commands(state)
+  @spec build_metal_commands(ctx()) :: [binary()]
+  def build_metal_commands(ctx) do
+    build_gui_gutter_commands(ctx) ++
+      build_gui_cursorline_commands(ctx) ++
+      build_gui_gutter_separator_commands(ctx) ++
+      build_gui_split_separator_commands(ctx)
   end
 
   @doc """
@@ -117,84 +117,84 @@ defmodule Minga.Frontend.Emit.GUI do
   to avoid re-calling Buffer for cursor/file info on the same frame.
   When nil (e.g. non-GUI fallback paths), it is computed here.
   """
-  @spec sync_swiftui_chrome(state(), StatusBarData.t() | nil, MinibufferData.t() | nil) :: state()
-  def sync_swiftui_chrome(state, status_bar_data \\ nil, minibuffer_data \\ nil) do
-    sb_data = status_bar_data || StatusBarData.from_state(state)
+  @spec sync_swiftui_chrome(ctx(), StatusBarData.t() | nil, MinibufferData.t() | nil) :: ctx()
+  def sync_swiftui_chrome(ctx, status_bar_data \\ nil, minibuffer_data \\ nil) do
+    sb_data = status_bar_data || ctx.status_bar_data
 
     # Collect changed chrome commands into a single list.
     # Each build_gui_* function returns nil when the data hasn't changed
     # (fingerprint cache hit), or an encoded binary when it has.
     chrome_cmds =
       [
-        build_gui_theme_cmd(state),
-        build_gui_tab_bar_cmd(state),
-        build_gui_agent_groups_cmd(state),
-        build_gui_file_tree_cmd(state),
-        build_gui_git_status_cmd(state),
-        build_gui_which_key_cmd(state),
-        build_gui_completion_cmd(state),
-        build_gui_breadcrumb_cmd(state),
-        build_gui_status_bar_cmd(state, sb_data),
-        build_gui_picker_cmd(state),
-        build_gui_agent_chat_cmd(state),
-        build_gui_minibuffer_cmd(state, minibuffer_data),
-        build_gui_hover_popup_cmd(state),
-        build_gui_signature_help_cmd(state),
-        build_gui_float_popup_cmd(state),
-        build_gui_board_cmd(state),
-        build_gui_agent_context_cmd(state),
-        build_gui_change_summary_cmd(state)
+        build_gui_theme_cmd(ctx),
+        build_gui_tab_bar_cmd(ctx),
+        build_gui_agent_groups_cmd(ctx),
+        build_gui_file_tree_cmd(ctx),
+        build_gui_git_status_cmd(ctx),
+        build_gui_which_key_cmd(ctx),
+        build_gui_completion_cmd(ctx),
+        build_gui_breadcrumb_cmd(ctx),
+        build_gui_status_bar_cmd(ctx, sb_data),
+        build_gui_picker_cmd(ctx),
+        build_gui_agent_chat_cmd(ctx),
+        build_gui_minibuffer_cmd(ctx, minibuffer_data),
+        build_gui_hover_popup_cmd(ctx),
+        build_gui_signature_help_cmd(ctx),
+        build_gui_float_popup_cmd(ctx),
+        build_gui_board_cmd(ctx),
+        build_gui_agent_context_cmd(ctx),
+        build_gui_change_summary_cmd(ctx)
       ]
       |> Enum.reject(&is_nil/1)
 
     # Bottom panel is special: it returns updated message_store state.
-    {panel_cmd, state} = build_gui_bottom_panel_cmd(state)
+    {panel_cmd, ctx} = build_gui_bottom_panel_cmd(ctx)
     chrome_cmds = if panel_cmd, do: chrome_cmds ++ [panel_cmd], else: chrome_cmds
 
     if chrome_cmds != [] do
-      Minga.Frontend.send_commands(state.port_manager, chrome_cmds)
+      Minga.Frontend.send_commands(ctx.port_manager, chrome_cmds)
     end
 
-    state
+    ctx
   end
 
   # ── Theme ──
 
-  @spec build_gui_theme_cmd(state()) :: binary() | nil
-  defp build_gui_theme_cmd(state) do
-    theme_name = state.theme.name
+  @spec build_gui_theme_cmd(ctx()) :: binary() | nil
+  defp build_gui_theme_cmd(ctx) do
+    theme_name = ctx.theme.name
 
     if theme_name != Process.get(:last_gui_theme) do
       Process.put(:last_gui_theme, theme_name)
-      ProtocolGUI.encode_gui_theme(state.theme)
+      ProtocolGUI.encode_gui_theme(ctx.theme)
     end
   end
 
   # ── Tab bar ──
 
-  @spec build_gui_tab_bar_cmd(state()) :: binary() | nil
+  @spec build_gui_tab_bar_cmd(ctx()) :: binary() | nil
 
   # Board zoomed: show scoped tab bar for agent's touched files or full buffer list for "You"
   defp build_gui_tab_bar_cmd(
-         %{shell: Minga.Shell.Board, shell_state: %{zoomed_into: card_id}} = state
+         %{shell: Minga.Shell.Board, shell_state: %{zoomed_into: card_id}} = ctx
        )
        when card_id != nil do
-    card = Minga.Shell.Board.State.zoomed(state.shell_state)
+    card = Minga.Shell.Board.State.zoomed(ctx.shell_state)
 
     if card && Minga.Shell.Board.Card.you_card?(card) do
       # "You" card: show full buffer list from workspace
-      build_you_card_tab_bar(state)
+      build_you_card_tab_bar(ctx)
     else
       # Agent card: show only files touched by this agent
-      build_agent_scoped_tab_bar(state, card)
+      build_agent_scoped_tab_bar(ctx, card)
     end
   end
 
   # Board grid: no tab bar needed (Board is the view)
   defp build_gui_tab_bar_cmd(%{shell: Minga.Shell.Board}), do: nil
 
-  defp build_gui_tab_bar_cmd(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
-    active_buf = active_window_buffer(state)
+  defp build_gui_tab_bar_cmd(%{shell_state: %{tab_bar: %TabBar{} = tb}} = ctx) do
+    active_buf = active_window_buffer(ctx)
     fp = :erlang.phash2({tb, active_buf})
 
     if fp != Process.get(:last_gui_tab_bar_fp) do
@@ -206,8 +206,8 @@ defmodule Minga.Frontend.Emit.GUI do
   defp build_gui_tab_bar_cmd(%{shell_state: %{tab_bar: nil}}), do: nil
 
   # Builds the tab bar for Board's "You" card, showing workspace buffers.
-  @spec build_you_card_tab_bar(state()) :: binary() | nil
-  defp build_you_card_tab_bar(%{workspace: %{buffers: buffers}} = state) do
+  @spec build_you_card_tab_bar(ctx()) :: binary() | nil
+  defp build_you_card_tab_bar(%{buffers: buffers} = ctx) do
     # Board "You" card: build tab bar from workspace buffers
     tabs =
       buffers.list
@@ -252,7 +252,7 @@ defmodule Minga.Frontend.Emit.GUI do
       active_idx = buffers.active_index
       active_id = if active_idx < length(tabs), do: active_idx + 1, else: 1
       tb = %TabBar{tabs: tabs, active_id: active_id, next_id: length(tabs) + 1}
-      active_buf = active_window_buffer(state)
+      active_buf = active_window_buffer(ctx)
       fp = :erlang.phash2({:board_you_tb, buffers.list, active_idx, active_buf})
 
       if fp != Process.get(:last_gui_tab_bar_fp) do
@@ -262,15 +262,15 @@ defmodule Minga.Frontend.Emit.GUI do
     end
   end
 
-  defp build_you_card_tab_bar(_state), do: nil
+  defp build_you_card_tab_bar(_ctx), do: nil
 
   # Builds a scoped tab bar showing only files touched by the agent session.
-  @spec build_agent_scoped_tab_bar(state(), Minga.Shell.Board.Card.t() | nil) :: binary() | nil
-  defp build_agent_scoped_tab_bar(_state, nil), do: nil
+  @spec build_agent_scoped_tab_bar(ctx(), Minga.Shell.Board.Card.t() | nil) :: binary() | nil
+  defp build_agent_scoped_tab_bar(_ctx, nil), do: nil
 
-  defp build_agent_scoped_tab_bar(_state, %{session: nil}), do: nil
+  defp build_agent_scoped_tab_bar(_ctx, %{session: nil}), do: nil
 
-  defp build_agent_scoped_tab_bar(state, %{session: session_pid, task: task})
+  defp build_agent_scoped_tab_bar(ctx, %{session: session_pid, task: task})
        when is_pid(session_pid) do
     touched =
       try do
@@ -326,7 +326,7 @@ defmodule Minga.Frontend.Emit.GUI do
     # Most recent file is the active tab (tabs is guaranteed non-empty after the if above)
     active_id = hd(tabs).id
     tb = %TabBar{tabs: tabs, active_id: active_id, next_id: length(tabs) + 1}
-    active_buf = active_window_buffer(state)
+    active_buf = active_window_buffer(ctx)
 
     fp = :erlang.phash2({:agent_scoped, session_pid, touched, active_buf})
 
@@ -336,7 +336,7 @@ defmodule Minga.Frontend.Emit.GUI do
     end
   end
 
-  @spec build_gui_agent_groups_cmd(state()) :: binary() | nil
+  @spec build_gui_agent_groups_cmd(ctx()) :: binary() | nil
   defp build_gui_agent_groups_cmd(%{shell_state: %{tab_bar: %TabBar{} = tb}}) do
     # Only send workspace bar when agent workspaces exist (tier >= 1).
     # Also include workspace count so the GUI hides the indicator when
@@ -359,8 +359,8 @@ defmodule Minga.Frontend.Emit.GUI do
 
   defp build_gui_agent_groups_cmd(_), do: nil
 
-  @spec active_window_buffer(state()) :: pid() | nil
-  defp active_window_buffer(%{workspace: %{windows: %{active: win_id, map: map}}}) do
+  @spec active_window_buffer(ctx()) :: pid() | nil
+  defp active_window_buffer(%{windows: %{active: win_id, map: map}}) do
     case Map.get(map, win_id) do
       %{buffer: buf} when is_pid(buf) -> buf
       _ -> nil
@@ -369,9 +369,9 @@ defmodule Minga.Frontend.Emit.GUI do
 
   # ── File tree ──
 
-  @spec build_gui_file_tree_cmd(state()) :: binary() | nil
+  @spec build_gui_file_tree_cmd(ctx()) :: binary() | nil
   defp build_gui_file_tree_cmd(%{
-         workspace: %{file_tree: %{tree: %Minga.Project.FileTree{} = tree}}
+         file_tree: %{tree: %Minga.Project.FileTree{} = tree}
        }) do
     fp = :erlang.phash2(tree)
 
@@ -381,7 +381,7 @@ defmodule Minga.Frontend.Emit.GUI do
     end
   end
 
-  defp build_gui_file_tree_cmd(_state) do
+  defp build_gui_file_tree_cmd(_ctx) do
     if Process.get(:last_gui_file_tree_fp) != :no_tree do
       Process.put(:last_gui_file_tree_fp, :no_tree)
       ProtocolGUI.encode_gui_file_tree(nil)
@@ -390,7 +390,7 @@ defmodule Minga.Frontend.Emit.GUI do
 
   # ── Git status panel ──
 
-  @spec build_gui_git_status_cmd(state()) :: binary() | nil
+  @spec build_gui_git_status_cmd(ctx()) :: binary() | nil
   defp build_gui_git_status_cmd(%{shell_state: %{git_status_panel: %{} = data}}) do
     fp = :erlang.phash2(data)
 
@@ -400,7 +400,7 @@ defmodule Minga.Frontend.Emit.GUI do
     end
   end
 
-  defp build_gui_git_status_cmd(_state) do
+  defp build_gui_git_status_cmd(_ctx) do
     if Process.get(:last_gui_git_status_fp) != :no_git do
       Process.put(:last_gui_git_status_fp, :no_git)
 
@@ -416,7 +416,7 @@ defmodule Minga.Frontend.Emit.GUI do
 
   # ── Which-key ──
 
-  @spec build_gui_which_key_cmd(state()) :: binary() | nil
+  @spec build_gui_which_key_cmd(ctx()) :: binary() | nil
   defp build_gui_which_key_cmd(%{shell_state: %{whichkey: wk}}) do
     fp = :erlang.phash2(wk)
 
@@ -428,9 +428,9 @@ defmodule Minga.Frontend.Emit.GUI do
 
   # ── Completion ──
 
-  @spec build_gui_completion_cmd(state()) :: binary() | nil
-  defp build_gui_completion_cmd(%{workspace: %{completion: comp}} = state) do
-    {cursor_row, cursor_col} = current_cursor_screen_pos(state)
+  @spec build_gui_completion_cmd(ctx()) :: binary() | nil
+  defp build_gui_completion_cmd(%{completion: comp} = ctx) do
+    {cursor_row, cursor_col} = current_cursor_screen_pos(ctx)
     fp = :erlang.phash2({comp, cursor_row, cursor_col})
 
     if fp != Process.get(:last_gui_completion_fp) do
@@ -439,17 +439,17 @@ defmodule Minga.Frontend.Emit.GUI do
     end
   end
 
-  @spec current_cursor_screen_pos(state()) :: {non_neg_integer(), non_neg_integer()}
-  defp current_cursor_screen_pos(state) do
-    layout = Layout.get(state)
+  @spec current_cursor_screen_pos(ctx()) :: {non_neg_integer(), non_neg_integer()}
+  defp current_cursor_screen_pos(ctx) do
+    layout = ctx.layout
 
-    case Layout.active_window_layout(layout, state) do
+    case Map.get(layout.window_layouts, ctx.windows.active) do
       %{content: {row, col, _w, _h}} ->
-        buf = state.workspace.buffers.active
+        buf = ctx.buffers.active
 
         if buf do
           {line, column} = Buffer.cursor(buf)
-          vp = state.workspace.viewport
+          vp = ctx.viewport
           {row + line - vp.top, col + column}
         else
           {row, col}
@@ -462,12 +462,12 @@ defmodule Minga.Frontend.Emit.GUI do
 
   # ── Breadcrumb ──
 
-  @spec build_gui_breadcrumb_cmd(state()) :: binary() | nil
-  defp build_gui_breadcrumb_cmd(state) do
-    file_path = active_buffer_path(state)
+  @spec build_gui_breadcrumb_cmd(ctx()) :: binary() | nil
+  defp build_gui_breadcrumb_cmd(ctx) do
+    file_path = active_buffer_path(ctx)
 
     root =
-      case state.workspace.file_tree do
+      case ctx.file_tree do
         %{tree: %{root: r}} -> r
         _ -> ""
       end
@@ -480,9 +480,9 @@ defmodule Minga.Frontend.Emit.GUI do
     end
   end
 
-  @spec active_buffer_path(state()) :: String.t() | nil
-  defp active_buffer_path(state) do
-    case state.workspace.buffers.active do
+  @spec active_buffer_path(ctx()) :: String.t() | nil
+  defp active_buffer_path(ctx) do
+    case ctx.buffers.active do
       nil -> nil
       buf -> Buffer.file_path(buf)
     end
@@ -492,8 +492,8 @@ defmodule Minga.Frontend.Emit.GUI do
   # Status bar changes on every scroll frame (cursor line), so it's always sent.
   # No fingerprint caching; the encoding cost is small (fixed-size struct).
 
-  @spec build_gui_status_bar_cmd(state(), StatusBarData.t()) :: binary()
-  defp build_gui_status_bar_cmd(_state, status_bar_data) do
+  @spec build_gui_status_bar_cmd(ctx(), StatusBarData.t()) :: binary()
+  defp build_gui_status_bar_cmd(_ctx, status_bar_data) do
     ProtocolGUI.encode_gui_status_bar(status_bar_data)
   end
 
@@ -503,8 +503,8 @@ defmodule Minga.Frontend.Emit.GUI do
   # the last frame. Uses a content hash to avoid re-encoding and resending
   # identical minibuffer state every render cycle.
 
-  @spec build_gui_minibuffer_cmd(state(), MinibufferData.t() | nil) :: binary() | nil
-  defp build_gui_minibuffer_cmd(_state, %MinibufferData{} = data) do
+  @spec build_gui_minibuffer_cmd(ctx(), MinibufferData.t() | nil) :: binary() | nil
+  defp build_gui_minibuffer_cmd(_ctx, %MinibufferData{} = data) do
     fingerprint = minibuffer_fingerprint(data)
 
     if fingerprint != Process.get(:last_gui_minibuffer) do
@@ -513,7 +513,7 @@ defmodule Minga.Frontend.Emit.GUI do
     end
   end
 
-  defp build_gui_minibuffer_cmd(_state, nil) do
+  defp build_gui_minibuffer_cmd(_ctx, nil) do
     if Process.get(:last_gui_minibuffer) != :hidden do
       Process.put(:last_gui_minibuffer, :hidden)
       ProtocolGUI.encode_gui_minibuffer(%MinibufferData{visible: false})
@@ -534,7 +534,7 @@ defmodule Minga.Frontend.Emit.GUI do
 
   # ── Picker ──
 
-  @spec build_gui_picker_cmd(state()) :: binary() | nil
+  @spec build_gui_picker_cmd(ctx()) :: binary() | nil
   defp build_gui_picker_cmd(%{shell_state: %{picker_ui: %{picker: nil}}}) do
     if Process.get(:last_gui_picker_fp) != :closed do
       Process.put(:last_gui_picker_fp, :closed)
@@ -546,7 +546,7 @@ defmodule Minga.Frontend.Emit.GUI do
 
   defp build_gui_picker_cmd(
          %{shell_state: %{picker_ui: %{picker: picker, source: source, action_menu: action_menu}}} =
-           state
+           ctx
        ) do
     # Preview content is NOT in the fingerprint: a file changing on disk while
     # the picker is open won't refresh the preview. Acceptable trade-off for
@@ -556,7 +556,7 @@ defmodule Minga.Frontend.Emit.GUI do
     if fp != Process.get(:last_gui_picker_fp) do
       Process.put(:last_gui_picker_fp, fp)
       has_preview = source != nil and Picker.Source.preview?(source)
-      preview_lines = if has_preview, do: build_picker_preview(state)
+      preview_lines = if has_preview, do: build_picker_preview(ctx)
       # Picker always pairs with its preview; concatenate so they arrive as
       # adjacent frames in the batched port write.
       picker_cmd = ProtocolGUI.encode_gui_picker(picker, has_preview, action_menu, 100)
@@ -567,63 +567,63 @@ defmodule Minga.Frontend.Emit.GUI do
 
   # Build preview content for the currently selected picker item.
   # Returns a list of lines, where each line is a list of {text, fg_color, bold} segments.
-  @spec build_picker_preview(state()) :: [[ProtocolGUI.preview_segment()]] | nil
-  defp build_picker_preview(%{shell_state: %{picker_ui: %{picker: picker}}} = state) do
+  @spec build_picker_preview(ctx()) :: [[ProtocolGUI.preview_segment()]] | nil
+  defp build_picker_preview(%{shell_state: %{picker_ui: %{picker: picker}}} = ctx) do
     case Picker.selected_item(picker) do
       nil ->
         nil
 
       %Picker.Item{id: id} ->
-        build_preview_for_item(state, id)
+        build_preview_for_item(ctx, id)
     end
   end
 
   # Build preview lines for a file path item.
   # Uses syntax highlighting from an open buffer when available, falls back to plain text.
-  @spec build_preview_for_item(state(), term()) :: [[ProtocolGUI.preview_segment()]] | nil
-  defp build_preview_for_item(state, id) when is_binary(id) do
+  @spec build_preview_for_item(ctx(), term()) :: [[ProtocolGUI.preview_segment()]] | nil
+  defp build_preview_for_item(ctx, id) when is_binary(id) do
     abs_path = resolve_preview_path(id)
 
     # Check if the file is already open in a buffer with highlights
-    case find_buffer_for_path(state, abs_path) do
+    case find_buffer_for_path(ctx, abs_path) do
       {buf_pid, highlight} when highlight != nil ->
-        build_highlighted_preview(buf_pid, highlight, state)
+        build_highlighted_preview(buf_pid, highlight, ctx)
 
       _ ->
-        read_file_preview(abs_path, state)
+        read_file_preview(abs_path, ctx)
     end
   end
 
   # For buffer index items, use the buffer directly.
-  defp build_preview_for_item(state, idx) when is_integer(idx) do
-    case Enum.at(state.workspace.buffers.list, idx) do
+  defp build_preview_for_item(ctx, idx) when is_integer(idx) do
+    case Enum.at(ctx.buffers.list, idx) do
       nil -> nil
-      buf_pid -> preview_from_buffer(state, buf_pid)
+      buf_pid -> preview_from_buffer(ctx, buf_pid)
     end
   end
 
-  defp build_preview_for_item(_state, _id), do: nil
+  defp build_preview_for_item(_ctx, _id), do: nil
 
-  @spec preview_from_buffer(state(), pid()) :: [[ProtocolGUI.preview_segment()]] | nil
-  defp preview_from_buffer(state, buf_pid) do
-    case Map.get(state.workspace.highlight.highlights, buf_pid) do
+  @spec preview_from_buffer(ctx(), pid()) :: [[ProtocolGUI.preview_segment()]] | nil
+  defp preview_from_buffer(ctx, buf_pid) do
+    case Map.get(ctx.highlight.highlights, buf_pid) do
       nil ->
         path = safe_file_path(buf_pid)
-        if path, do: read_file_preview(path, state), else: nil
+        if path, do: read_file_preview(path, ctx), else: nil
 
       highlight ->
-        build_highlighted_preview(buf_pid, highlight, state)
+        build_highlighted_preview(buf_pid, highlight, ctx)
     end
   end
 
   # Find a buffer PID for a given file path, along with its highlight state.
-  @spec find_buffer_for_path(state(), String.t()) :: {pid(), Minga.UI.Highlight.t() | nil} | nil
-  defp find_buffer_for_path(state, abs_path) do
-    Enum.find_value(state.workspace.buffers.list, fn buf_pid ->
+  @spec find_buffer_for_path(ctx(), String.t()) :: {pid(), Minga.UI.Highlight.t() | nil} | nil
+  defp find_buffer_for_path(ctx, abs_path) do
+    Enum.find_value(ctx.buffers.list, fn buf_pid ->
       try do
         case Buffer.file_path(buf_pid) do
           ^abs_path ->
-            highlight = Map.get(state.workspace.highlight.highlights, buf_pid)
+            highlight = Map.get(ctx.highlight.highlights, buf_pid)
             {buf_pid, highlight}
 
           _ ->
@@ -638,12 +638,12 @@ defmodule Minga.Frontend.Emit.GUI do
   @preview_max_lines 50
 
   # Build syntax-highlighted preview from a buffer with tree-sitter highlights.
-  @spec build_highlighted_preview(pid(), Minga.UI.Highlight.t(), state()) ::
+  @spec build_highlighted_preview(pid(), Minga.UI.Highlight.t(), ctx()) ::
           [[ProtocolGUI.preview_segment()]] | nil
-  defp build_highlighted_preview(buf_pid, highlight, state) do
+  defp build_highlighted_preview(buf_pid, highlight, ctx) do
     content = Buffer.content(buf_pid)
     lines = content |> String.split("\n") |> Enum.take(@preview_max_lines)
-    default_fg = Map.get(state.theme, :fg, 0xCCCCCC)
+    default_fg = Map.get(ctx.theme, :fg, 0xCCCCCC)
 
     # Build {line_text, byte_offset} tuples for batch highlighting
     {line_tuples, _} =
@@ -680,11 +680,11 @@ defmodule Minga.Frontend.Emit.GUI do
   end
 
   # Read file from disk and return plain-text styled segments (no syntax highlighting).
-  @spec read_file_preview(String.t(), state()) :: [[ProtocolGUI.preview_segment()]] | nil
-  defp read_file_preview(abs_path, state) do
+  @spec read_file_preview(String.t(), ctx()) :: [[ProtocolGUI.preview_segment()]] | nil
+  defp read_file_preview(abs_path, ctx) do
     case File.read(abs_path) do
       {:ok, content} ->
-        fg_color = Map.get(state.theme, :fg, 0xCCCCCC)
+        fg_color = Map.get(ctx.theme, :fg, 0xCCCCCC)
 
         content
         |> String.split("\n")
@@ -705,11 +705,11 @@ defmodule Minga.Frontend.Emit.GUI do
 
   # ── Agent chat ──
 
-  @spec build_gui_agent_chat_cmd(state()) :: binary() | nil
-  defp build_gui_agent_chat_cmd(state) do
-    active_window = Map.get(state.workspace.windows.map, state.workspace.windows.active)
+  @spec build_gui_agent_chat_cmd(ctx()) :: binary() | nil
+  defp build_gui_agent_chat_cmd(ctx) do
+    active_window = Map.get(ctx.windows.map, ctx.windows.active)
     is_agent_chat = active_window != nil && Content.agent_chat?(active_window.content)
-    session = state.shell_state.agent.session
+    session = ctx.shell_state.agent.session
 
     # Compute fingerprint from cheap state fields to avoid calling
     # AgentSession.messages (expensive GenServer.call that allocates a
@@ -722,15 +722,15 @@ defmodule Minga.Frontend.Emit.GUI do
     # including collapse toggles, ensuring the fingerprint changes.
     {fp, prompt_text} =
       if is_agent_chat && session do
-        panel = state.workspace.agent_ui.panel
-        view = state.workspace.agent_ui.view
+        panel = ctx.agent_ui.panel
+        view = ctx.agent_ui.view
         styled_len = length(panel.cached_styled_messages || [])
         text = safe_prompt_content(panel.prompt_buffer)
 
         {:erlang.phash2(
-           {:visible, state.shell_state.agent.status, state.shell_state.agent.pending_approval,
+           {:visible, ctx.shell_state.agent.status, ctx.shell_state.agent.pending_approval,
             styled_len, panel.model_name, text, panel.message_version, view.help_visible,
-            Minga.Editing.mode(state), panel.mention_completion}
+            ctx.editing.mode, panel.mention_completion}
          ), text}
       else
         {:not_visible, ""}
@@ -738,7 +738,7 @@ defmodule Minga.Frontend.Emit.GUI do
 
     if fp != Process.get(:last_gui_agent_chat_fp) do
       Process.put(:last_gui_agent_chat_fp, fp)
-      data = build_agent_chat_data(state, prompt_text)
+      data = build_agent_chat_data(ctx, prompt_text)
 
       if data.visible do
         Minga.Log.debug(:render, "[gui] sending agent chat: #{length(data.messages)} messages")
@@ -787,11 +787,11 @@ defmodule Minga.Frontend.Emit.GUI do
     :exit, _ -> ""
   end
 
-  @spec build_agent_chat_data(state(), String.t()) :: map()
-  defp build_agent_chat_data(state, prompt_text) do
-    active_window = Map.get(state.workspace.windows.map, state.workspace.windows.active)
+  @spec build_agent_chat_data(ctx(), String.t()) :: map()
+  defp build_agent_chat_data(ctx, prompt_text) do
+    active_window = Map.get(ctx.windows.map, ctx.windows.active)
     is_agent_chat = active_window != nil && Content.agent_chat?(active_window.content)
-    session = state.shell_state.agent.session
+    session = ctx.shell_state.agent.session
 
     if is_agent_chat && session do
       messages_with_ids =
@@ -803,10 +803,10 @@ defmodule Minga.Frontend.Emit.GUI do
 
       # Use cached styled runs for assistant messages when available.
       # This avoids recomputing tree-sitter/markdown styling per frame.
-      styled_cache = state.workspace.agent_ui.panel.cached_styled_messages
+      styled_cache = ctx.agent_ui.panel.cached_styled_messages
       gui_messages = build_gui_messages(messages_with_ids, styled_cache)
 
-      view = state.workspace.agent_ui.view
+      view = ctx.agent_ui.view
       help_visible = view.help_visible
 
       help_groups =
@@ -816,20 +816,20 @@ defmodule Minga.Frontend.Emit.GUI do
           []
         end
 
-      panel = state.workspace.agent_ui.panel
+      panel = ctx.agent_ui.panel
       {cursor_line, cursor_col} = UIState.input_cursor(panel)
-      vim_mode = Minga.Editing.mode(state)
-      inner_width = max(state.workspace.viewport.cols - 10, 20)
+      vim_mode = ctx.editing.mode
+      inner_width = max(ctx.viewport.cols - 10, 20)
       visible_rows = PromptSemanticWindow.visible_rows(panel, inner_width)
       prompt_completion = build_prompt_completion(panel)
 
       %{
         visible: true,
         messages: gui_messages,
-        status: state.shell_state.agent.status || :idle,
-        model: state.workspace.agent_ui.panel.model_name,
+        status: ctx.shell_state.agent.status || :idle,
+        model: ctx.agent_ui.panel.model_name,
         prompt: prompt_text,
-        pending_approval: state.shell_state.agent.pending_approval,
+        pending_approval: ctx.shell_state.agent.pending_approval,
         help_visible: help_visible,
         help_groups: help_groups,
         prompt_line_count: UIState.input_line_count(panel),
@@ -879,10 +879,10 @@ defmodule Minga.Frontend.Emit.GUI do
 
   # ── Gutter separator ──
 
-  @spec build_gui_gutter_separator_commands(state()) :: [binary()]
-  defp build_gui_gutter_separator_commands(state) do
+  @spec build_gui_gutter_separator_commands(ctx()) :: [binary()]
+  defp build_gui_gutter_separator_commands(ctx) do
     show? = Config.get(:show_gutter_separator)
-    active_window = Map.get(state.workspace.windows.map, state.workspace.windows.active)
+    active_window = Map.get(ctx.windows.map, ctx.windows.active)
     gutter_w = if active_window, do: active_window.last_gutter_w, else: 0
 
     # Only send separator when enabled, visible gutter (gutter_w > 0).
@@ -890,7 +890,7 @@ defmodule Minga.Frontend.Emit.GUI do
     # Theme colors are already 24-bit RGB integers.
     {col, color_rgb} =
       if show? and gutter_w > 0 do
-        color = state.theme.gutter.separator_fg || state.theme.gutter.fg
+        color = ctx.theme.gutter.separator_fg || ctx.theme.gutter.fg
         {gutter_w, color}
       else
         {0, 0}
@@ -901,22 +901,22 @@ defmodule Minga.Frontend.Emit.GUI do
 
   # ── Cursorline ──
 
-  @spec build_gui_cursorline_commands(state()) :: [binary()]
-  defp build_gui_cursorline_commands(state) do
-    active_window = Map.get(state.workspace.windows.map, state.workspace.windows.active)
+  @spec build_gui_cursorline_commands(ctx()) :: [binary()]
+  defp build_gui_cursorline_commands(ctx) do
+    active_window = Map.get(ctx.windows.map, ctx.windows.active)
     cursorline_enabled = Config.get(:cursorline)
 
     {row, bg_rgb} =
       if active_window && cursorline_enabled do
         # Compute screen row of cursor: content_rect row + (cursor_line - viewport_top)
-        layout = Layout.get(state)
+        layout = ctx.layout
 
-        case Layout.active_window_layout(layout, state) do
+        case Map.get(layout.window_layouts, ctx.windows.active) do
           %{content: {content_row, _col, _w, _h}} ->
             cursor_line = active_window.last_cursor_line || 0
             viewport_top = active_window.last_viewport_top || 0
             screen_row = content_row + cursor_line - viewport_top
-            bg = state.theme.editor.cursorline_bg || 0
+            bg = ctx.theme.editor.cursorline_bg || 0
             {screen_row, bg}
 
           nil ->
@@ -931,18 +931,18 @@ defmodule Minga.Frontend.Emit.GUI do
 
   # ── Gutter ──
 
-  @spec build_gui_gutter_commands(state()) :: [binary()]
-  defp build_gui_gutter_commands(state) do
-    layout = Layout.get(state)
+  @spec build_gui_gutter_commands(ctx()) :: [binary()]
+  defp build_gui_gutter_commands(ctx) do
+    layout = ctx.layout
 
     window_gutters =
       Enum.flat_map(layout.window_layouts, fn {win_id, win_layout} ->
-        window = Map.get(state.workspace.windows.map, win_id)
+        window = Map.get(ctx.windows.map, win_id)
 
         # Skip agent chat windows (they don't have gutter)
         if window && is_pid(window.buffer) && !Content.agent_chat?(window.content) do
-          is_active = win_id == state.workspace.windows.active
-          gutter_data = build_window_gutter(state, window, win_id, win_layout, is_active)
+          is_active = win_id == ctx.windows.active
+          gutter_data = build_window_gutter(ctx, window, win_id, win_layout, is_active)
           [ProtocolGUI.encode_gui_gutter(gutter_data)]
         else
           []
@@ -955,13 +955,13 @@ defmodule Minga.Frontend.Emit.GUI do
   # Builds a minimal gutter entry for the agent prompt SemanticWindow.
   # Positions it at the bottom of the grid with no line numbers or sign column.
   @spec build_window_gutter(
-          state(),
+          ctx(),
           Minga.Editor.Window.t(),
           pos_integer(),
           Layout.window_layout(),
           boolean()
         ) :: ProtocolGUI.gutter_data()
-  defp build_window_gutter(state, window, win_id, win_layout, is_active) do
+  defp build_window_gutter(ctx, window, win_id, win_layout, is_active) do
     buf = window.buffer
     cursor_line = max(window.last_cursor_line, 0)
     viewport_top = max(window.last_viewport_top, 0)
@@ -987,7 +987,7 @@ defmodule Minga.Frontend.Emit.GUI do
         entries: []
       })
     else
-      build_gutter_entries(state, window, buf, win_pos, %{
+      build_gutter_entries(ctx, window, buf, win_pos, %{
         cursor_line: cursor_line,
         viewport_top: viewport_top,
         line_count: line_count
@@ -995,9 +995,9 @@ defmodule Minga.Frontend.Emit.GUI do
     end
   end
 
-  @spec build_gutter_entries(state(), Minga.Editor.Window.t(), pid(), map(), map()) ::
+  @spec build_gutter_entries(ctx(), Minga.Editor.Window.t(), pid(), map(), map()) ::
           ProtocolGUI.gutter_data()
-  defp build_gutter_entries(state, window, buf, win_pos, params) do
+  defp build_gutter_entries(ctx, window, buf, win_pos, params) do
     %{cursor_line: cursor_line, viewport_top: viewport_top, line_count: line_count} = params
     line_number_style = Buffer.get_option(buf, :line_numbers)
 
@@ -1009,8 +1009,8 @@ defmodule Minga.Frontend.Emit.GUI do
 
     # Get signs and decorations for the buffer
     decorations = Buffer.decorations(buf)
-    diag_signs = ContentHelpers.diagnostic_signs_for_window(state, window)
-    git_signs = ContentHelpers.git_signs_for_window(state, window)
+    diag_signs = ContentHelpers.diagnostic_signs_for_window(ctx, window)
+    git_signs = ContentHelpers.git_signs_for_window(ctx, window)
 
     # Build entries for each visible line
     entries =
@@ -1106,7 +1106,7 @@ defmodule Minga.Frontend.Emit.GUI do
 
   # ── Hover popup ──
 
-  @spec build_gui_hover_popup_cmd(state()) :: binary() | nil
+  @spec build_gui_hover_popup_cmd(ctx()) :: binary() | nil
   defp build_gui_hover_popup_cmd(%{shell_state: %{hover_popup: popup}}) do
     fp = :erlang.phash2(popup)
 
@@ -1118,7 +1118,7 @@ defmodule Minga.Frontend.Emit.GUI do
 
   # ── Signature help ──
 
-  @spec build_gui_signature_help_cmd(state()) :: binary() | nil
+  @spec build_gui_signature_help_cmd(ctx()) :: binary() | nil
   defp build_gui_signature_help_cmd(%{shell_state: %{signature_help: sh}}) do
     fp = :erlang.phash2(sh)
 
@@ -1130,16 +1130,16 @@ defmodule Minga.Frontend.Emit.GUI do
 
   # ── Split separators ──
 
-  @spec build_gui_split_separator_commands(state()) :: [binary()]
-  defp build_gui_split_separator_commands(state) do
-    if EditorState.split?(state) do
-      layout = Layout.get(state)
-      border_color = state.theme.editor.split_border_fg
+  @spec build_gui_split_separator_commands(ctx()) :: [binary()]
+  defp build_gui_split_separator_commands(ctx) do
+    if Minga.Editor.State.Windows.split?(ctx.windows) do
+      layout = ctx.layout
+      border_color = ctx.theme.editor.split_border_fg
 
       # Collect vertical separators from the window tree
       verticals =
         ChromeHelpers.collect_vertical_separators(
-          state.workspace.windows.tree,
+          ctx.windows.tree,
           layout.editor_area
         )
 
@@ -1155,9 +1155,9 @@ defmodule Minga.Frontend.Emit.GUI do
 
   # ── Float popup ──
 
-  @spec build_gui_float_popup_cmd(state()) :: binary() | nil
-  defp build_gui_float_popup_cmd(state) do
-    float_window = find_float_popup_window(state)
+  @spec build_gui_float_popup_cmd(ctx()) :: binary() | nil
+  defp build_gui_float_popup_cmd(ctx) do
+    float_window = find_float_popup_window(ctx)
 
     fp = :erlang.phash2(float_window && {float_window.buffer, float_window.popup_meta})
 
@@ -1165,7 +1165,7 @@ defmodule Minga.Frontend.Emit.GUI do
       Process.put(:last_gui_float_popup_fp, fp)
 
       if float_window do
-        data = build_float_popup_data(state, float_window)
+        data = build_float_popup_data(ctx, float_window)
         ProtocolGUI.encode_gui_float_popup(data)
       else
         ProtocolGUI.encode_gui_float_popup(%{
@@ -1179,9 +1179,9 @@ defmodule Minga.Frontend.Emit.GUI do
     end
   end
 
-  @spec find_float_popup_window(state()) :: Minga.Editor.Window.t() | nil
-  defp find_float_popup_window(state) do
-    Enum.find_value(state.workspace.windows.map, fn
+  @spec find_float_popup_window(ctx()) :: Minga.Editor.Window.t() | nil
+  defp find_float_popup_window(ctx) do
+    Enum.find_value(ctx.windows.map, fn
       {_id,
        %{popup_meta: %Minga.UI.Popup.Active{rule: %Minga.UI.Popup.Rule{display: :float}}} = w} ->
         w
@@ -1191,10 +1191,10 @@ defmodule Minga.Frontend.Emit.GUI do
     end)
   end
 
-  @spec build_float_popup_data(state(), Minga.Editor.Window.t()) :: ProtocolGUI.float_popup_data()
-  defp build_float_popup_data(state, window) do
+  @spec build_float_popup_data(ctx(), Minga.Editor.Window.t()) :: ProtocolGUI.float_popup_data()
+  defp build_float_popup_data(ctx, window) do
     rule = window.popup_meta.rule
-    vp = state.workspace.viewport
+    vp = ctx.viewport
 
     width = resolve_float_dim(rule, :width, vp.cols)
     height = resolve_float_dim(rule, :height, vp.rows)
@@ -1240,24 +1240,24 @@ defmodule Minga.Frontend.Emit.GUI do
   # encode_gui_bottom_panel may advance the message_store cursor when new
   # entries have arrived. We still fingerprint to skip encoding when the
   # panel hasn't changed.
-  @spec build_gui_bottom_panel_cmd(state()) :: {binary() | nil, state()}
+  @spec build_gui_bottom_panel_cmd(ctx()) :: {binary() | nil, ctx()}
   defp build_gui_bottom_panel_cmd(
-         %{shell_state: %{bottom_panel: panel}, message_store: store} = state
+         %{shell_state: %{bottom_panel: panel}, message_store: store} = ctx
        ) do
     fp = :erlang.phash2({panel, store})
 
     if fp != Process.get(:last_gui_bottom_panel_fp) do
       Process.put(:last_gui_bottom_panel_fp, fp)
       {cmd, new_store} = ProtocolGUI.encode_gui_bottom_panel(panel, store)
-      {cmd, %{state | message_store: new_store}}
+      {cmd, %{ctx | message_store: new_store}}
     else
-      {nil, state}
+      {nil, ctx}
     end
   end
 
   # ── Board ──
 
-  @spec build_gui_board_cmd(state()) :: binary() | nil
+  @spec build_gui_board_cmd(ctx()) :: binary() | nil
   defp build_gui_board_cmd(%{shell: Minga.Shell.Board, shell_state: board}) do
     # Always send when Board is active so the GUI stays in sync.
     # The fingerprint covers card count, focused card, zoom state, and
@@ -1279,7 +1279,7 @@ defmodule Minga.Frontend.Emit.GUI do
   # Board not active: send visible=false once to dismiss.
   # Must NOT use a default Board.State (grid_view? returns true → visible=1).
   # Instead, build a minimal board with zoomed_into set so visible encodes as 0.
-  defp build_gui_board_cmd(_state) do
+  defp build_gui_board_cmd(_ctx) do
     if Process.get(:last_gui_board_fp) != :dismissed do
       Process.put(:last_gui_board_fp, :dismissed)
       # zoomed_into: 1 forces grid_view? → false → visible=0
@@ -1290,7 +1290,7 @@ defmodule Minga.Frontend.Emit.GUI do
 
   # ── Agent context bar ──
 
-  @spec build_gui_agent_context_cmd(state()) :: binary() | nil
+  @spec build_gui_agent_context_cmd(ctx()) :: binary() | nil
   defp build_gui_agent_context_cmd(%{
          shell: Minga.Shell.Board,
          shell_state: %{zoomed_into: nil}
@@ -1357,11 +1357,11 @@ defmodule Minga.Frontend.Emit.GUI do
 
   # ── Change Summary ──
 
-  @spec build_gui_change_summary_cmd(state()) :: binary() | nil
+  @spec build_gui_change_summary_cmd(ctx()) :: binary() | nil
 
   # Change summary visible when zoomed into an agent card (not You card)
   defp build_gui_change_summary_cmd(
-         %{shell: Minga.Shell.Board, shell_state: %{zoomed_into: card_id}} = _state
+         %{shell: Minga.Shell.Board, shell_state: %{zoomed_into: card_id}} = _ctx
        )
        when card_id != nil do
     # TODO: Compute diff stats from the card's touched files
@@ -1378,7 +1378,7 @@ defmodule Minga.Frontend.Emit.GUI do
   end
 
   # Board grid or other shells: hide change summary
-  defp build_gui_change_summary_cmd(_state) do
+  defp build_gui_change_summary_cmd(_ctx) do
     if Process.get(:last_gui_change_summary_fp) != :hidden do
       Process.put(:last_gui_change_summary_fp, :hidden)
       ProtocolGUI.encode_gui_change_summary([], 0)

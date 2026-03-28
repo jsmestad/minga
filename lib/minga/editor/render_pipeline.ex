@@ -152,9 +152,11 @@ defmodule Minga.Editor.RenderPipeline do
         Compose.compose_windows(window_frames, chrome, cursor_info, state)
       end)
 
-    # Stage 7: Emit (returns updated state with message_store tracking)
+    # Stage 7: Emit
     Telemetry.span([:minga, :render, :stage], %{stage: :emit}, fn ->
-      Emit.emit(frame, state, chrome)
+      ctx = Minga.Frontend.Emit.Context.from_editor_state(state)
+      Emit.emit(frame, ctx, chrome)
+      state
     end)
   end
 

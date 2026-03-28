@@ -15,5 +15,7 @@
   {"lib/minga/frontend/emit/gui.ex", :call_without_opaque},
   # emit/gui.ex has dialyzer false positives on pattern match (tabs list handling, build_you_card_tab_bar catch-all)
   {"lib/minga/frontend/emit/gui.ex", :pattern_match},
-  {"lib/minga/frontend/emit/gui.ex", :pattern_match_cov}
+  {"lib/minga/frontend/emit/gui.ex", :pattern_match_cov},
+  # build_gutter_entries return type narrowing after emit decoupling
+  {"lib/minga/frontend/emit/gui.ex", :invalid_contract}
 ]

@@ -9,6 +9,7 @@ defmodule Minga.Frontend.Emit.GUITest do
   alias Minga.Editor.DisplayList
   alias Minga.Editor.DisplayList.{Cursor, Frame, Overlay, WindowFrame}
   alias Minga.Frontend.Emit
+  alias Minga.Frontend.Emit.Context
   alias Minga.Frontend.Emit.GUI, as: EmitGUI
 
   import Minga.Editor.RenderPipeline.TestHelpers
@@ -222,7 +223,7 @@ defmodule Minga.Frontend.Emit.GUITest do
         | splash: [DisplayList.draw(5, 0, "Welcome to Minga", face)]
       }
 
-      Emit.emit(frame_with_splash, state)
+      Emit.emit(frame_with_splash, Context.from_editor_state(state))
 
       assert_receive {:"$gen_cast", {:send_commands, commands}}
 
@@ -249,7 +250,7 @@ defmodule Minga.Frontend.Emit.GUITest do
         | overlays: [%Overlay{draws: [hover_draw]}]
       }
 
-      Emit.emit(frame_with_overlay, state)
+      Emit.emit(frame_with_overlay, Context.from_editor_state(state))
 
       assert_receive {:"$gen_cast", {:send_commands, commands}}
       draw_commands = Enum.filter(commands, &match?(<<0x10, _::binary>>, &1))
