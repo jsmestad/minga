@@ -71,7 +71,6 @@ defmodule Minga.Editor do
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.Buffers
-  alias Minga.Editor.State.TabBar
 
   alias Minga.Editor.MinibufferData
   alias Minga.Editor.MouseHoverTooltip
@@ -1847,21 +1846,21 @@ defmodule Minga.Editor do
     EditorState.switch_tab(state, id)
   end
 
-  # Board mode has no tab bar; ignore close_tab events from phantom GUI state.
-  defp handle_gui_action(%{shell_state: %{tab_bar: nil}} = state, {:close_tab, _id}), do: state
-
   defp handle_gui_action(state, {:close_tab, id}) do
-    # Switch to the target tab first (if not already active), then close
-    # it. This ensures the right tab is closed when the user clicks X
-    # on a background tab.
-    state =
-      if state.shell_state.tab_bar.active_id != id do
-        EditorState.switch_tab(state, id)
-      else
-        state
-      end
+    # Delegate to the shell: Traditional switches to the target tab when
+    # needed; Board and tab-bar-less Traditional return unchanged.
+    {shell_state, workspace} =
+      state.shell.handle_gui_action(state.shell_state, state.workspace, {:close_tab, id})
 
-    Commands.BufferManagement.execute(state, :force_quit)
+    state = %{state | shell_state: shell_state, workspace: workspace}
+
+    # Only close the buffer when the shell has a tab bar.
+    # EditorState.active_tab/1 returns nil when there are no tabs.
+    if EditorState.active_tab(state) do
+      Commands.BufferManagement.execute(state, :force_quit)
+    else
+      state
+    end
   end
 
   defp handle_gui_action(state, {:file_tree_click, index}) do
@@ -2121,29 +2120,25 @@ defmodule Minga.Editor do
     end
   end
 
-  defp handle_gui_action(
-         %{shell_state: %{tab_bar: %TabBar{} = tb}} = state,
-         {:agent_group_close, ws_id}
-       ) do
-    EditorState.set_tab_bar(state, TabBar.remove_group(tb, ws_id))
+  defp handle_gui_action(state, {:agent_group_close, _ws_id} = action) do
+    {shell_state, workspace} =
+      state.shell.handle_gui_action(state.shell_state, state.workspace, action)
+
+    %{state | shell_state: shell_state, workspace: workspace}
   end
 
-  defp handle_gui_action(
-         %{shell_state: %{tab_bar: %TabBar{} = tb}} = state,
-         {:agent_group_rename, ws_id, name}
-       ) do
-    alias Minga.Editor.State.AgentGroup
-    tb = TabBar.update_group(tb, ws_id, &AgentGroup.rename(&1, name))
-    EditorState.set_tab_bar(state, tb)
+  defp handle_gui_action(state, {:agent_group_rename, _ws_id, _name} = action) do
+    {shell_state, workspace} =
+      state.shell.handle_gui_action(state.shell_state, state.workspace, action)
+
+    %{state | shell_state: shell_state, workspace: workspace}
   end
 
-  defp handle_gui_action(
-         %{shell_state: %{tab_bar: %TabBar{} = tb}} = state,
-         {:agent_group_set_icon, ws_id, icon}
-       ) do
-    alias Minga.Editor.State.AgentGroup
-    tb = TabBar.update_group(tb, ws_id, &AgentGroup.set_icon(&1, icon))
-    EditorState.set_tab_bar(state, tb)
+  defp handle_gui_action(state, {:agent_group_set_icon, _ws_id, _icon} = action) do
+    {shell_state, workspace} =
+      state.shell.handle_gui_action(state.shell_state, state.workspace, action)
+
+    %{state | shell_state: shell_state, workspace: workspace}
   end
 
   defp handle_gui_action(state, {:space_leader_chord, codepoint, modifiers}) do
