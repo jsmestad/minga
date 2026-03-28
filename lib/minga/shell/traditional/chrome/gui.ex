@@ -1,4 +1,4 @@
-defmodule Minga.Editor.RenderPipeline.Chrome.GUI do
+defmodule Minga.Shell.Traditional.Chrome.GUI do
   @moduledoc """
   GUI chrome builder.
 

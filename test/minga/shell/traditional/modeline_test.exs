@@ -1,7 +1,7 @@
-defmodule Minga.Editor.ModelineTest do
+defmodule Minga.Shell.Traditional.ModelineTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Editor.Modeline
+  alias Minga.Shell.Traditional.Modeline
   alias Minga.Mode
 
   @base_data %{

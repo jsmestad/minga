@@ -28,7 +28,7 @@ defmodule Minga.Frontend.Emit.GUI do
   alias Minga.Editor.DisplayList.Frame
   alias Minga.Editor.Layout
   alias Minga.Editor.MinibufferData
-  alias Minga.Editor.RenderPipeline.ChromeHelpers
+  alias Minga.Shell.Traditional.Chrome.Helpers, as: ChromeHelpers
   alias Minga.Editor.RenderPipeline.ContentHelpers
   alias Minga.Editor.State.TabBar
   alias Minga.Editor.StatusBar.Data, as: StatusBarData

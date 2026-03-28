@@ -1,10 +1,10 @@
-defmodule Minga.Editor.RenderPipeline.Chrome.TUITest do
+defmodule Minga.Shell.Traditional.Chrome.TUITest do
   use ExUnit.Case, async: true
 
   alias Minga.Editor.Layout
   alias Minga.Editor.RenderPipeline
   alias Minga.Editor.RenderPipeline.Chrome
-  alias Minga.Editor.RenderPipeline.Chrome.TUI, as: ChromeTUI
+  alias Minga.Shell.Traditional.Chrome.TUI, as: ChromeTUI
   alias Minga.Editor.RenderPipeline.Content
   alias Minga.Editor.RenderPipeline.Scroll
   alias Minga.Editor.State, as: EditorState

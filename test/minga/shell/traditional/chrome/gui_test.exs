@@ -1,10 +1,10 @@
-defmodule Minga.Editor.RenderPipeline.Chrome.GUITest do
+defmodule Minga.Shell.Traditional.Chrome.GUITest do
   use ExUnit.Case, async: true
 
   alias Minga.Editor.Layout
   alias Minga.Editor.RenderPipeline
   alias Minga.Editor.RenderPipeline.Chrome
-  alias Minga.Editor.RenderPipeline.Chrome.GUI, as: ChromeGUI
+  alias Minga.Shell.Traditional.Chrome.GUI, as: ChromeGUI
   alias Minga.Editor.RenderPipeline.Content
   alias Minga.Editor.RenderPipeline.Scroll
   alias Minga.Editor.State, as: EditorState

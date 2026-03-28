@@ -1,4 +1,4 @@
-defmodule Minga.Editor.TreeRenderer do
+defmodule Minga.Shell.Traditional.TreeRenderer do
   @moduledoc """
   Renders the file tree panel into draw tuples for the left side of the screen.
 

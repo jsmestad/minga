@@ -29,7 +29,7 @@ defmodule Minga.Editor.RenderPipeline.ChromeTest do
       state = base_state()
       {scrolls, cursor_info, state, layout} = run_through_content(state)
 
-      chrome = Chrome.build_chrome(state, layout, scrolls, cursor_info)
+      chrome = state.shell.build_chrome(state, layout, scrolls, cursor_info)
 
       assert %Chrome{} = chrome
     end
@@ -38,7 +38,7 @@ defmodule Minga.Editor.RenderPipeline.ChromeTest do
       state = base_state()
       {scrolls, cursor_info, state, layout} = run_through_content(state)
 
-      chrome = Chrome.build_chrome(state, layout, scrolls, cursor_info)
+      chrome = state.shell.build_chrome(state, layout, scrolls, cursor_info)
 
       assert [_ | _] = chrome.minibuffer
       assert Enum.all?(chrome.minibuffer, &is_tuple/1)
@@ -48,7 +48,7 @@ defmodule Minga.Editor.RenderPipeline.ChromeTest do
       state = base_state()
       {scrolls, cursor_info, state, layout} = run_through_content(state)
 
-      chrome = Chrome.build_chrome(state, layout, scrolls, cursor_info)
+      chrome = state.shell.build_chrome(state, layout, scrolls, cursor_info)
 
       assert [_ | _] = chrome.status_bar_draws
     end
@@ -57,7 +57,7 @@ defmodule Minga.Editor.RenderPipeline.ChromeTest do
       state = base_state()
       {scrolls, cursor_info, state, layout} = run_through_content(state)
 
-      chrome = Chrome.build_chrome(state, layout, scrolls, cursor_info)
+      chrome = state.shell.build_chrome(state, layout, scrolls, cursor_info)
 
       assert is_list(chrome.regions)
       assert Enum.all?(chrome.regions, &is_binary/1)
@@ -69,7 +69,7 @@ defmodule Minga.Editor.RenderPipeline.ChromeTest do
       state = gui_state()
       {scrolls, cursor_info, state, layout} = run_through_content(state)
 
-      chrome = Chrome.build_chrome(state, layout, scrolls, cursor_info)
+      chrome = state.shell.build_chrome(state, layout, scrolls, cursor_info)
 
       assert %Chrome{} = chrome
     end
@@ -78,7 +78,7 @@ defmodule Minga.Editor.RenderPipeline.ChromeTest do
       state = gui_state()
       {scrolls, cursor_info, state, layout} = run_through_content(state)
 
-      chrome = Chrome.build_chrome(state, layout, scrolls, cursor_info)
+      chrome = state.shell.build_chrome(state, layout, scrolls, cursor_info)
 
       assert chrome.tab_bar == []
       assert chrome.tab_bar_click_regions == []
@@ -89,7 +89,7 @@ defmodule Minga.Editor.RenderPipeline.ChromeTest do
       state = gui_state()
       {scrolls, cursor_info, state, layout} = run_through_content(state)
 
-      chrome = Chrome.build_chrome(state, layout, scrolls, cursor_info)
+      chrome = state.shell.build_chrome(state, layout, scrolls, cursor_info)
 
       assert chrome.status_bar_draws == []
       assert chrome.modeline_click_regions == []
@@ -99,7 +99,7 @@ defmodule Minga.Editor.RenderPipeline.ChromeTest do
       state = gui_state()
       {scrolls, cursor_info, state, layout} = run_through_content(state)
 
-      chrome = Chrome.build_chrome(state, layout, scrolls, cursor_info)
+      chrome = state.shell.build_chrome(state, layout, scrolls, cursor_info)
 
       assert {:buffer, _} = chrome.status_bar_data
     end
@@ -108,7 +108,7 @@ defmodule Minga.Editor.RenderPipeline.ChromeTest do
       state = gui_state()
       {scrolls, cursor_info, state, layout} = run_through_content(state)
 
-      chrome = Chrome.build_chrome(state, layout, scrolls, cursor_info)
+      chrome = state.shell.build_chrome(state, layout, scrolls, cursor_info)
 
       assert chrome.minibuffer == []
     end
@@ -117,7 +117,7 @@ defmodule Minga.Editor.RenderPipeline.ChromeTest do
       state = gui_state()
       {scrolls, cursor_info, state, layout} = run_through_content(state)
 
-      chrome = Chrome.build_chrome(state, layout, scrolls, cursor_info)
+      chrome = state.shell.build_chrome(state, layout, scrolls, cursor_info)
 
       assert is_list(chrome.regions)
       assert Enum.all?(chrome.regions, &is_binary/1)

@@ -202,12 +202,12 @@ defmodule Minga.Shell.Board do
   @impl true
   @spec compute_layout(term()) :: Minga.Editor.Layout.t()
   def compute_layout(editor_state) do
-    if BoardState.grid_view?(editor_state.shell_state) do
-      # TODO: Board grid layout computation
-      Minga.Editor.Layout.compute(editor_state)
+    # Board currently reuses Traditional's layout computation for both
+    # grid and zoomed modes. #1342 will give Board its own layout.
+    if Minga.Frontend.gui?(editor_state.capabilities) do
+      Minga.Editor.Layout.GUI.compute(editor_state)
     else
-      # Zoomed: use Traditional layout
-      Minga.Editor.Layout.compute(editor_state)
+      Minga.Shell.Traditional.Layout.TUI.compute(editor_state)
     end
   end
 
@@ -216,7 +216,7 @@ defmodule Minga.Shell.Board do
           Minga.Editor.RenderPipeline.Chrome.t()
   def build_chrome(editor_state, layout, scrolls, cursor_info) do
     chrome =
-      Minga.Editor.RenderPipeline.Chrome.build_chrome(editor_state, layout, scrolls, cursor_info)
+      Minga.Shell.Traditional.Chrome.build_chrome(editor_state, layout, scrolls, cursor_info)
 
     if BoardState.grid_view?(editor_state.shell_state) do
       chrome

@@ -1,7 +1,7 @@
-defmodule Minga.Editor.RenderPipeline.ChromeHelpersWhichKeyTest do
+defmodule Minga.Shell.Traditional.Chrome.HelpersWhichKeyTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Editor.RenderPipeline.ChromeHelpers
+  alias Minga.Shell.Traditional.Chrome.Helpers, as: ChromeHelpers
   alias Minga.Editor.Viewport
   alias Minga.Keymap.Bindings
   alias Minga.UI.Theme

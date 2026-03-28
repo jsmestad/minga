@@ -1,4 +1,4 @@
-defmodule Minga.Editor.Modeline do
+defmodule Minga.Shell.Traditional.Modeline do
   @moduledoc """
   Doom Emacs-style modeline rendering.
 

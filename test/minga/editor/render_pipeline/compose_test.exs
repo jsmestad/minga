@@ -8,7 +8,6 @@ defmodule Minga.Editor.RenderPipeline.ComposeTest do
   alias Minga.Editor.DisplayList.{Cursor, Frame}
   alias Minga.Editor.Layout
   alias Minga.Editor.RenderPipeline
-  alias Minga.Editor.RenderPipeline.Chrome
   alias Minga.Editor.RenderPipeline.Compose
   alias Minga.Editor.RenderPipeline.Content
   alias Minga.Editor.RenderPipeline.Scroll
@@ -23,7 +22,7 @@ defmodule Minga.Editor.RenderPipeline.ComposeTest do
     layout = Layout.get(state)
     {scrolls, state} = Scroll.scroll_windows(state, layout)
     {frames, cursor_info, state} = Content.build_content(state, scrolls)
-    chrome = Chrome.build_chrome(state, layout, scrolls, cursor_info)
+    chrome = state.shell.build_chrome(state, layout, scrolls, cursor_info)
     {frames, chrome, cursor_info, state}
   end
 
