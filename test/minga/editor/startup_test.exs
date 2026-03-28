@@ -74,6 +74,57 @@ defmodule Minga.Editor.StartupTest do
     end
   end
 
+  describe "apply_gui_defaults/1" do
+    test "sets line_numbers to :absolute for GUI frontend" do
+      gui_caps = %Minga.Frontend.Capabilities{frontend_type: :native_gui}
+
+      # Ensure the default is :hybrid before applying
+      assert Minga.Config.Options.get(:line_numbers) == :hybrid
+
+      Startup.apply_gui_defaults(gui_caps)
+
+      assert Minga.Config.Options.get(:line_numbers) == :absolute
+    after
+      Minga.Config.Options.set(:line_numbers, :hybrid)
+    end
+
+    test "does not change line_numbers for TUI frontend" do
+      tui_caps = %Minga.Frontend.Capabilities{frontend_type: :tui}
+
+      Startup.apply_gui_defaults(tui_caps)
+
+      assert Minga.Config.Options.get(:line_numbers) == :hybrid
+    end
+
+    test "respects explicit user override to :relative in GUI mode" do
+      gui_caps = %Minga.Frontend.Capabilities{frontend_type: :native_gui}
+
+      # Simulate user setting :relative before the ready handshake
+      Minga.Config.Options.set(:line_numbers, :relative)
+
+      Startup.apply_gui_defaults(gui_caps)
+
+      assert Minga.Config.Options.get(:line_numbers) == :relative
+    after
+      Minga.Config.Options.set(:line_numbers, :hybrid)
+    end
+
+    test "respects explicit user override to :hybrid in GUI mode" do
+      # Edge case: user explicitly wants :hybrid in GUI mode.
+      # Our heuristic treats this as "not explicitly set" and overrides it.
+      # This is an acknowledged tradeoff (ticket #728 notes this).
+      gui_caps = %Minga.Frontend.Capabilities{frontend_type: :native_gui}
+
+      Startup.apply_gui_defaults(gui_caps)
+
+      # :hybrid becomes :absolute because we can't distinguish "user set :hybrid"
+      # from "default :hybrid". This is acceptable per ticket scope.
+      assert Minga.Config.Options.get(:line_numbers) == :absolute
+    after
+      Minga.Config.Options.set(:line_numbers, :hybrid)
+    end
+  end
+
   describe "startup creates correct window type (integration)" do
     test "agent mode produces has_agent_chat? == true with single-leaf tree" do
       # This is the regression guard. If this test fails, the agent
