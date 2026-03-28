@@ -462,9 +462,7 @@ defmodule Minga.Editor.Commands.Editing do
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :comment_line) when is_pid(buf) do
     {line, _col} = Buffer.cursor(buf)
-    filetype = Buffer.filetype(buf)
-    injection_ranges = Map.get(state.workspace.injection_ranges, buf, [])
-    Minga.Editing.toggle_comment(buf, line, line, filetype, injection_ranges)
+    toggle_comment(buf, line, line, state)
     state
   end
 
@@ -474,9 +472,7 @@ defmodule Minga.Editor.Commands.Editing do
     target_line = resolve_motion_line(buf, motion, cursor_line)
     start_line = min(cursor_line, target_line)
     end_line = max(cursor_line, target_line)
-    filetype = Buffer.filetype(buf)
-    injection_ranges = Map.get(state.workspace.injection_ranges, buf, [])
-    Minga.Editing.toggle_comment(buf, start_line, end_line, filetype, injection_ranges)
+    toggle_comment(buf, start_line, end_line, state)
     state
   end
 
@@ -491,10 +487,62 @@ defmodule Minga.Editor.Commands.Editing do
     {cursor_line, _} = cursor
     start_line = min(anchor_line, cursor_line)
     end_line = max(anchor_line, cursor_line)
+    toggle_comment(buf, start_line, end_line, state)
+    state
+  end
+
+  # ── Private comment helpers ──────────────────────────────────────────────
+
+  @spec toggle_comment(pid(), non_neg_integer(), non_neg_integer(), state()) :: :ok
+  defp toggle_comment(buf, start_line, end_line, state) do
     filetype = Buffer.filetype(buf)
     injection_ranges = Map.get(state.workspace.injection_ranges, buf, [])
-    Minga.Editing.toggle_comment(buf, start_line, end_line, filetype, injection_ranges)
-    state
+
+    prefix = resolve_comment_prefix(buf, start_line, filetype, injection_ranges)
+    raw = Buffer.lines_content(buf, start_line, end_line)
+    lines = String.split(raw, "\n")
+
+    edits = Minga.Editing.Comment.compute_toggle_edits(lines, prefix, start_line)
+
+    Enum.each(edits, fn edit -> apply_comment_edit(buf, edit) end)
+
+    :ok
+  end
+
+  @spec resolve_comment_prefix(pid(), non_neg_integer(), atom(), [map()]) :: String.t()
+  defp resolve_comment_prefix(_buf, _start_line, filetype, []) do
+    language_comment_token(filetype)
+    |> Minga.Editing.Comment.comment_prefix()
+  end
+
+  defp resolve_comment_prefix(buf, start_line, filetype, injection_ranges) do
+    byte_offset = Buffer.byte_offset_for_line(buf, start_line)
+    default_token = language_comment_token(filetype)
+
+    Minga.Editing.Comment.comment_prefix_at(
+      default_token,
+      byte_offset,
+      injection_ranges,
+      &language_comment_token/1
+    )
+  end
+
+  @spec language_comment_token(atom()) :: String.t() | nil
+  defp language_comment_token(filetype) do
+    case Minga.Language.get(filetype) do
+      %{comment_token: token} when is_binary(token) -> token
+      _ -> nil
+    end
+  end
+
+  @spec apply_comment_edit(pid(), Minga.Editing.Comment.edit()) :: :ok
+  defp apply_comment_edit(buf, {:insert, line, col, text}) do
+    Buffer.move_to(buf, {line, col})
+    Buffer.insert_text(buf, text)
+  end
+
+  defp apply_comment_edit(buf, {:delete, line, col, len}) do
+    Buffer.apply_edit(buf, line, col, line, col + len - 1, "")
   end
 
   # ── Private autopair helpers ──────────────────────────────────────────────
