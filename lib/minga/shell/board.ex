@@ -399,6 +399,61 @@ defmodule Minga.Shell.Board do
     end
   end
 
+  # -------------------------------------------------------------------
+  # Buffer lifecycle callbacks
+  # -------------------------------------------------------------------
+
+  @impl true
+  @spec on_buffer_added(BoardState.t(), Minga.Workspace.State.t(), pid()) ::
+          {BoardState.t(), Minga.Workspace.State.t()}
+  def on_buffer_added(shell_state, workspace, _buffer_pid) do
+    # Board: sync the active window buffer. A1's content-type guard
+    # ensures agent_chat windows are left untouched.
+    workspace = Minga.Workspace.State.sync_active_window_buffer(workspace)
+    {shell_state, workspace}
+  end
+
+  @impl true
+  @spec on_buffer_switched(BoardState.t(), Minga.Workspace.State.t()) ::
+          {BoardState.t(), Minga.Workspace.State.t()}
+  def on_buffer_switched(shell_state, workspace) do
+    {shell_state, workspace}
+  end
+
+  @impl true
+  @spec on_buffer_died(BoardState.t(), Minga.Workspace.State.t(), pid()) ::
+          {BoardState.t(), Minga.Workspace.State.t()}
+  def on_buffer_died(shell_state, workspace, _dead_pid) do
+    {shell_state, workspace}
+  end
+
+  # -------------------------------------------------------------------
+  # Agent event callbacks
+  # -------------------------------------------------------------------
+
+  @impl true
+  @spec on_agent_event(BoardState.t(), Minga.Workspace.State.t(), pid(), term()) ::
+          {BoardState.t(), Minga.Workspace.State.t()}
+  def on_agent_event(shell_state, workspace, session_pid, {:status_changed, status}) do
+    shell_state = update_card_by_session(shell_state, session_pid, &Card.set_status(&1, status))
+    {shell_state, workspace}
+  end
+
+  def on_agent_event(shell_state, workspace, _session_pid, _event) do
+    {shell_state, workspace}
+  end
+
+  @spec update_card_by_session(BoardState.t(), pid(), (Card.t() -> Card.t())) :: BoardState.t()
+  defp update_card_by_session(shell_state, session_pid, fun) do
+    case Enum.find(shell_state.cards, fn {_id, c} -> c.session == session_pid end) do
+      {card_id, _card} ->
+        BoardState.update_card(shell_state, card_id, fun)
+
+      nil ->
+        shell_state
+    end
+  end
+
   # Zoom out from a card: store the live workspace on the card, restore the grid workspace.
   @spec zoom_out_card(BoardState.t(), Minga.Workspace.State.t(), String.t()) ::
           {BoardState.t(), Minga.Workspace.State.t()}

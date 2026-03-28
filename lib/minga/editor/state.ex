@@ -602,68 +602,24 @@ defmodule Minga.Editor.State do
   Pure variant of `add_buffer/2`. Returns `{state, effects}` instead of
   performing side effects directly.
 
-  The returned effects list may include:
-  - `{:monitor, pid}` — monitor the new buffer process
-  - Effects from `switch_tab_pure/2` when switching to an existing tab
-
-  All state transformations (tab lookup, snapshot/restore, buffer pool update)
-  are applied to the returned state. The caller is responsible for applying
-  the effects.
+  Generic concerns (buffer pool) are handled here. Shell-specific
+  presentation logic (tab bar, card routing) is dispatched through
+  `shell.on_buffer_added/3`. The only effect returned is `{:monitor, pid}`.
   """
   @spec add_buffer_pure(t(), pid()) :: {t(), [Minga.Editor.effect()]}
-  def add_buffer_pure(
-        %__MODULE__{workspace: %{buffers: bs}, shell_state: %{tab_bar: %TabBar{} = tb}} = state,
-        pid
-      ) do
-    label = buffer_label(pid)
-    active_tab = TabBar.active(tb)
-
-    Log.debug(:editor, fn ->
-      "[tab] add_buffer label=#{label} tab=#{tb.active_id} kind=#{active_tab.kind}"
-    end)
-
-    # Add the buffer to the pool (Buffers.add auto-activates it)
+  def add_buffer_pure(%__MODULE__{workspace: %{buffers: bs}} = state, pid) do
     state = put_in(state.workspace.buffers, Buffers.add(bs, pid))
-    effects = [{:monitor, pid}]
 
-    # Check if a tab for this buffer already exists (by label match).
-    # If so, switch to it. Otherwise, create a new tab.
-    case find_tab_for_buffer(tb, pid, label) do
-      %Tab{id: tab_id} ->
-        {state, switch_effects} = switch_tab_pure(state, tab_id)
-        {state, effects ++ switch_effects}
+    # Dispatch to the active shell for presentation logic
+    {shell_state, workspace} =
+      state.shell.on_buffer_added(state.shell_state, state.workspace, pid)
 
-      nil ->
-        state =
-          case active_tab.kind do
-            :agent ->
-              add_buffer_as_new_tab(state, label)
-
-            :file ->
-              add_buffer_as_new_file_tab(state, label)
-          end
-
-        {state, effects}
-    end
-  end
-
-  def add_buffer_pure(%__MODULE__{workspace: %{buffers: bs} = wspace} = state, pid) do
-    state =
-      %{state | workspace: %{wspace | buffers: Buffers.add(bs, pid)}}
-      |> sync_active_window_buffer()
-
+    state = %{state | shell_state: shell_state, workspace: workspace}
     {state, [{:monitor, pid}]}
   end
 
   @doc """
   Adds a new buffer and makes it the active buffer for the current window.
-
-  When the active tab is a file tab, the buffer replaces the current
-  tab's buffer in-place (like Vim `:e`). When the active tab is an
-  agent tab, a new file tab is created and switched to. This matches
-  the expected workflow: opening files from the tree or picker reuses
-  the current file tab; opening from the agent UI view creates a
-  dedicated file tab.
 
   Thin wrapper around `add_buffer_pure/2` that applies effects inline.
   """
@@ -671,41 +627,6 @@ defmodule Minga.Editor.State do
   def add_buffer(%__MODULE__{} = state, pid) do
     {state, effects} = add_buffer_pure(state, pid)
     apply_buffer_effects(state, effects)
-  end
-
-  # Creates a new file tab from a file tab context. Snapshots the current
-  # tab, creates a new one, and syncs the buffer into the new tab's window.
-  @spec add_buffer_as_new_file_tab(t(), String.t()) :: t()
-  defp add_buffer_as_new_file_tab(state, label) do
-    tb = tab_bar(state)
-
-    # Snapshot current tab before leaving
-    current_ctx = snapshot_tab_context(state)
-    tb = TabBar.update_context(tb, tb.active_id, current_ctx)
-
-    # Create file tab (TabBar.add auto-activates it)
-    {tb, new_tab} = TabBar.add(tb, :file, label)
-    state = set_tab_bar(state, tb)
-    state = sync_active_window_buffer(state)
-
-    # Snapshot the new tab's context
-    new_ctx = snapshot_tab_context(state)
-    tb = TabBar.update_context(tab_bar(state), new_tab.id, new_ctx)
-
-    Log.debug(:editor, fn ->
-      "[tab] add_buffer new file tab=#{new_tab.id} label=#{label}"
-    end)
-
-    set_tab_bar(state, tb)
-  end
-
-  # Finds an existing file tab that shows the same buffer (by label match).
-  # Returns the tab or nil.
-  @spec find_tab_for_buffer(TabBar.t(), pid(), String.t()) :: Tab.t() | nil
-  defp find_tab_for_buffer(%TabBar{tabs: tabs}, _pid, label) do
-    Enum.find(tabs, fn tab ->
-      tab.kind == :file and tab.label == label
-    end)
   end
 
   # Updates the active file tab's label to match the current buffer name.
@@ -722,67 +643,6 @@ defmodule Minga.Editor.State do
         set_tab_bar(state, TabBar.update_label(tb, tb.active_id, label))
 
       _ ->
-        state
-    end
-  end
-
-  # Creates a new file tab and switches to it. Used when the active tab
-  # is an agent tab and we need a dedicated file tab for the buffer.
-  @spec add_buffer_as_new_tab(t(), String.t()) :: t()
-  defp add_buffer_as_new_tab(state, label) do
-    tb = tab_bar(state)
-
-    # Snapshot current tab before leaving.
-    current_ctx = snapshot_tab_context(state)
-    tb = TabBar.update_context(tb, tb.active_id, current_ctx)
-
-    # Create file tab (TabBar.add auto-activates it)
-    {tb, new_tab} = TabBar.add(tb, :file, label)
-
-    # Leave agent UI view: reset to editor scope and window content type.
-    # Explicitly transition the active window from agent_chat to buffer
-    # so sync_active_window_buffer (which only syncs buffer windows) can
-    # update the buffer pid.
-    state = AgentAccess.update_agent_ui(state, fn _ -> UIState.new() end)
-    state = put_in(state.workspace.keymap_scope, :editor)
-    state = reset_active_window_to_buffer(state)
-    state = set_tab_bar(state, tb)
-    state = sync_active_window_buffer(state)
-
-    # Snapshot the new tab's context.
-    new_ctx = snapshot_tab_context(state)
-    tb = TabBar.update_context(tab_bar(state), new_tab.id, new_ctx)
-
-    Log.debug(:editor, fn ->
-      "[tab] add_buffer new tab=#{new_tab.id} label=#{label}"
-    end)
-
-    set_tab_bar(state, tb)
-  end
-
-  # Resets the active window's content type from agent_chat (or any non-buffer
-  # type) back to {:buffer, buffers.active}. Used when transitioning from an
-  # agent tab to a file tab, where the content type change is intentional.
-  @spec reset_active_window_to_buffer(t()) :: t()
-  defp reset_active_window_to_buffer(%__MODULE__{workspace: ws} = state) do
-    %{windows: %{map: map, active: id}, buffers: buffers} = ws
-    window = Map.get(map, id)
-
-    case window do
-      %Window{content: {:buffer, _}} ->
-        state
-
-      %Window{} ->
-        updated = %{
-          Window.invalidate(window)
-          | buffer: buffers.active,
-            content: Content.buffer(buffers.active)
-        }
-
-        new_map = Map.put(map, id, updated)
-        %{state | workspace: %{ws | windows: %{ws.windows | map: new_map}}}
-
-      nil ->
         state
     end
   end
