@@ -72,6 +72,9 @@ struct FrameState {
     /// Foreground color for the scroll indicator (derived from theme gutter fg).
     var scrollIndicatorColor: UInt32 = 0x555555
 
+    // Indent guides (from 0x91 opcode)
+    var windowIndentGuides: [UInt16: IndentGuideData] = [:]
+
     // Dirty tracking
     var dirty: Bool = true
 

@@ -373,3 +373,13 @@ enum CursorShape: UInt8, Sendable {
     case beam = 0x01
     case underline = 0x02
 }
+
+/// Indent guide data from the BEAM (opcode 0x91).
+struct IndentGuideData: Sendable {
+    let windowId: UInt16
+    let tabWidth: UInt8
+    /// Character column of the active guide. 0xFFFF = no active guide.
+    let activeGuideCol: UInt16
+    /// Character columns where guides appear (content-relative, not screen-relative).
+    let guideCols: [UInt16]
+}
