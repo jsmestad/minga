@@ -25,7 +25,7 @@ defmodule Minga.Editor.Commands.Macros do
 
       false ->
         Editing.update_mode_state(state, fn ms ->
-          %{ms | pending_macro_register: true}
+          %{ms | pending: :macro_register}
         end)
     end
   end

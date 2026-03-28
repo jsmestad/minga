@@ -65,6 +65,7 @@ defmodule Minga.Mode.Normal do
 
   alias Minga.Keymap.Bindings
   alias Minga.Mode
+  alias Minga.Mode.DescribeKey
   alias Minga.Mode.State, as: ModeState
 
   # Special codepoints
@@ -98,28 +99,27 @@ defmodule Minga.Mode.Normal do
   # trigger the normal leader sequence.
 
   # Escape cancels describe-key
-  def handle_key({@escape, _mods}, %ModeState{pending_describe_key: true} = state) do
-    {:continue,
-     %{state | pending_describe_key: false, describe_key_leader_node: nil, describe_key_keys: []}}
+  def handle_key({@escape, _mods}, %ModeState{describe_key: %DescribeKey{}} = state) do
+    {:continue, %{state | describe_key: nil}}
   end
 
   # SPC while in describe-key (not already walking leader trie) → start walking leader trie
   def handle_key(
         {@space, 0},
-        %ModeState{pending_describe_key: true, describe_key_leader_node: nil} = state
+        %ModeState{describe_key: %DescribeKey{leader_node: nil}} = state
       ) do
     {:continue,
-     %{state | describe_key_leader_node: state.leader_trie, describe_key_keys: ["SPC"]}}
+     %{state | describe_key: %DescribeKey{leader_node: state.leader_trie, keys: ["SPC"]}}}
   end
 
   # Key while walking leader trie in describe-key mode
   def handle_key(
         key,
-        %ModeState{pending_describe_key: true, describe_key_leader_node: node} = state
+        %ModeState{describe_key: %DescribeKey{leader_node: node, keys: dk_keys}} = state
       )
       when is_map(node) do
     formatted = Bindings.format_key(key)
-    keys_so_far = [formatted | state.describe_key_keys]
+    keys_so_far = [formatted | dk_keys]
 
     case Bindings.lookup(node, key) do
       {:command, command} ->
@@ -128,51 +128,29 @@ defmodule Minga.Mode.Normal do
         key_str = keys_so_far |> Enum.reverse() |> Enum.join(" ")
 
         {:execute, {:describe_key_result, key_str, command, description},
-         %{
-           state
-           | pending_describe_key: false,
-             describe_key_leader_node: nil,
-             describe_key_keys: []
-         }}
+         %{state | describe_key: nil}}
 
       {:prefix, sub_node} ->
-        {:continue, %{state | describe_key_leader_node: sub_node, describe_key_keys: keys_so_far}}
+        {:continue,
+         %{state | describe_key: %DescribeKey{leader_node: sub_node, keys: keys_so_far}}}
 
       :not_found ->
         key_str = keys_so_far |> Enum.reverse() |> Enum.join(" ")
-
-        {:execute, {:describe_key_not_found, key_str},
-         %{
-           state
-           | pending_describe_key: false,
-             describe_key_leader_node: nil,
-             describe_key_keys: []
-         }}
+        {:execute, {:describe_key_not_found, key_str}, %{state | describe_key: nil}}
     end
   end
 
   # Any other key while in describe-key (not leader) → look up in normal bindings
-  def handle_key(key, %ModeState{pending_describe_key: true} = state) do
+  def handle_key(key, %ModeState{describe_key: %DescribeKey{}} = state) do
     formatted = Bindings.format_key(key)
 
     case Map.fetch(state.normal_bindings, key) do
       {:ok, {command, description}} ->
         {:execute, {:describe_key_result, formatted, command, description},
-         %{
-           state
-           | pending_describe_key: false,
-             describe_key_leader_node: nil,
-             describe_key_keys: []
-         }}
+         %{state | describe_key: nil}}
 
       :error ->
-        {:execute, {:describe_key_not_found, formatted},
-         %{
-           state
-           | pending_describe_key: false,
-             describe_key_leader_node: nil,
-             describe_key_keys: []
-         }}
+        {:execute, {:describe_key_not_found, formatted}, %{state | describe_key: nil}}
     end
   end
 
@@ -209,7 +187,7 @@ defmodule Minga.Mode.Normal do
           | leader_node: nil,
             leader_keys: [],
             count: nil,
-            pending_replace: false
+            pending: nil
         }
 
         {:execute, :leader_cancel, new_state}
@@ -233,86 +211,86 @@ defmodule Minga.Mode.Normal do
 
   # Complete register selection: " + valid register char
   # Valid: a-z, A-Z, 0, +, _, " (unnamed)
-  def handle_key({char, 0}, %ModeState{pending_register: true} = state)
+  def handle_key({char, 0}, %ModeState{pending: :register} = state)
       when char in ?a..?z or char in ?A..?Z or char == ?0 or
              char == ?+ or char == ?_ or char == ?" do
-    {:execute, {:select_register, <<char::utf8>>}, %{state | pending_register: false}}
+    {:execute, {:select_register, <<char::utf8>>}, %{state | pending: nil}}
   end
 
   # Cancel register selection on any other key
-  def handle_key(_key, %ModeState{pending_register: true} = state) do
-    {:continue, %{state | pending_register: false}}
+  def handle_key(_key, %ModeState{pending: :register} = state) do
+    {:continue, %{state | pending: nil}}
   end
 
   # Complete set-mark: m + {a-z}
-  def handle_key({char, 0}, %ModeState{pending_mark: :set} = state)
+  def handle_key({char, 0}, %ModeState{pending: {:mark, :set}} = state)
       when char in ?a..?z do
-    {:execute, {:set_mark, <<char::utf8>>}, %{state | pending_mark: nil}}
+    {:execute, {:set_mark, <<char::utf8>>}, %{state | pending: nil}}
   end
 
   # Complete jump-to-mark-line: ' + {a-z}
-  def handle_key({char, 0}, %ModeState{pending_mark: :jump_line} = state)
+  def handle_key({char, 0}, %ModeState{pending: {:mark, :jump_line}} = state)
       when char in ?a..?z do
-    {:execute, {:jump_to_mark_line, <<char::utf8>>}, %{state | pending_mark: nil}}
+    {:execute, {:jump_to_mark_line, <<char::utf8>>}, %{state | pending: nil}}
   end
 
   # '' → jump to last jump position (line, first non-blank)
-  def handle_key({?', 0}, %ModeState{pending_mark: :jump_line} = state) do
-    {:execute, :jump_to_last_pos_line, %{state | pending_mark: nil}}
+  def handle_key({?', 0}, %ModeState{pending: {:mark, :jump_line}} = state) do
+    {:execute, :jump_to_last_pos_line, %{state | pending: nil}}
   end
 
   # Complete jump-to-mark-exact: ` + {a-z}
-  def handle_key({char, 0}, %ModeState{pending_mark: :jump_exact} = state)
+  def handle_key({char, 0}, %ModeState{pending: {:mark, :jump_exact}} = state)
       when char in ?a..?z do
-    {:execute, {:jump_to_mark_exact, <<char::utf8>>}, %{state | pending_mark: nil}}
+    {:execute, {:jump_to_mark_exact, <<char::utf8>>}, %{state | pending: nil}}
   end
 
   # `` → jump to last jump position (exact position)
-  def handle_key({?`, 0}, %ModeState{pending_mark: :jump_exact} = state) do
-    {:execute, :jump_to_last_pos_exact, %{state | pending_mark: nil}}
+  def handle_key({?`, 0}, %ModeState{pending: {:mark, :jump_exact}} = state) do
+    {:execute, :jump_to_last_pos_exact, %{state | pending: nil}}
   end
 
   # Cancel pending mark on any other key
-  def handle_key(_key, %ModeState{pending_mark: kind} = state) when kind != nil do
-    {:continue, %{state | pending_mark: nil}}
+  def handle_key(_key, %ModeState{pending: {:mark, _kind}} = state) do
+    {:continue, %{state | pending: nil}}
   end
 
   # Complete macro register selection: q + {a-z} → start recording
-  def handle_key({char, 0}, %ModeState{pending_macro_register: true} = state)
+  def handle_key({char, 0}, %ModeState{pending: :macro_register} = state)
       when char in ?a..?z do
-    {:execute, {:start_macro_recording, <<char::utf8>>}, %{state | pending_macro_register: false}}
+    {:execute, {:start_macro_recording, <<char::utf8>>}, %{state | pending: nil}}
   end
 
   # Cancel macro register selection on any other key
-  def handle_key(_key, %ModeState{pending_macro_register: true} = state) do
-    {:continue, %{state | pending_macro_register: false}}
+  def handle_key(_key, %ModeState{pending: :macro_register} = state) do
+    {:continue, %{state | pending: nil}}
   end
 
   # Complete macro replay: @ + {a-z} → replay macro
-  def handle_key({char, 0}, %ModeState{pending_macro_replay: true} = state)
+  def handle_key({char, 0}, %ModeState{pending: :macro_replay} = state)
       when char in ?a..?z do
-    {:execute, {:replay_macro, <<char::utf8>>}, %{state | pending_macro_replay: false}}
+    {:execute, {:replay_macro, <<char::utf8>>}, %{state | pending: nil}}
   end
 
   # @@ → replay last macro
-  def handle_key({?@, 0}, %ModeState{pending_macro_replay: true} = state) do
-    {:execute, :replay_last_macro, %{state | pending_macro_replay: false}}
+  def handle_key({?@, 0}, %ModeState{pending: :macro_replay} = state) do
+    {:execute, :replay_last_macro, %{state | pending: nil}}
   end
 
   # Cancel macro replay selection on any other key
-  def handle_key(_key, %ModeState{pending_macro_replay: true} = state) do
-    {:continue, %{state | pending_macro_replay: false}}
+  def handle_key(_key, %ModeState{pending: :macro_replay} = state) do
+    {:continue, %{state | pending: nil}}
   end
 
   # ── Complete find-char motion (must be before letter key handlers) ────────
 
-  # When pending_find is set (after f/F/t/T), any printable character
+  # When pending find is set (after f/F/t/T), any printable character
   # completes the motion. This must appear before the letter key handlers
   # (i, a, o, etc.) to prevent them from matching first.
-  def handle_key({codepoint, 0}, %ModeState{pending_find: dir} = state)
+  def handle_key({codepoint, 0}, %ModeState{pending: {:find, dir}} = state)
       when dir in [:f, :F, :t, :T] and codepoint >= 32 do
     char = <<codepoint::utf8>>
-    {:execute, {:find_char, dir, char}, %{state | pending_find: nil}}
+    {:execute, {:find_char, dir, char}, %{state | pending: nil}}
   end
 
   # ── Normal prefix trie (g, z, [, ]) ──────────────────────────────────────
@@ -480,19 +458,19 @@ defmodule Minga.Mode.Normal do
   # ── Find-char motions (f/F/t/T) ──────────────────────────────────────────
 
   def handle_key({?f, 0}, state) do
-    {:continue, %{state | pending_find: :f}}
+    {:continue, %{state | pending: {:find, :f}}}
   end
 
   def handle_key({?F, 0}, state) do
-    {:continue, %{state | pending_find: :F}}
+    {:continue, %{state | pending: {:find, :F}}}
   end
 
   def handle_key({?t, 0}, state) do
-    {:continue, %{state | pending_find: :t}}
+    {:continue, %{state | pending: {:find, :t}}}
   end
 
   def handle_key({?T, 0}, state) do
-    {:continue, %{state | pending_find: :T}}
+    {:continue, %{state | pending: {:find, :T}}}
   end
 
   # ── Repeat find-char (;  ,) ─────────────────────────────────────────────
@@ -611,17 +589,17 @@ defmodule Minga.Mode.Normal do
   # ── Single-key editing commands ────────────────────────────────────────────
 
   # r — replace char (wait for next char)
-  def handle_key({?r, 0}, %ModeState{pending_replace: false} = state) do
-    {:continue, %{state | pending_replace: true}}
+  def handle_key({?r, 0}, %ModeState{pending: nil} = state) do
+    {:continue, %{state | pending: :replace}}
   end
 
   # Complete replace with the target character.
   # MUST come before x/X/J/etc. so those codepoints are correctly captured
-  # as the replacement target when pending_replace is true.
-  def handle_key({codepoint, 0}, %ModeState{pending_replace: true} = state)
+  # as the replacement target when pending replace is active.
+  def handle_key({codepoint, 0}, %ModeState{pending: :replace} = state)
       when codepoint >= 32 do
     char = <<codepoint::utf8>>
-    {:execute, {:replace_char, char}, %{state | pending_replace: false}}
+    {:execute, {:replace_char, char}, %{state | pending: nil}}
   end
 
   # x — delete char(s) at cursor (yanks into register)
@@ -706,16 +684,16 @@ defmodule Minga.Mode.Normal do
   # ── Macro recording / replay ─────────────────────────────────────────────
 
   # q — toggle macro recording or start register selection
-  # Note: this is only reached when NOT in pending_macro_register (handled above)
+  # Note: this is only reached when NOT in pending :macro_register (handled above)
   def handle_key({?q, 0}, state) do
     # If currently recording, this is handled at the editor level via
     # :stop_macro_recording. We emit it as a command.
-    {:execute, :toggle_macro_recording, %{state | pending_macro_register: false}}
+    {:execute, :toggle_macro_recording, %{state | pending: nil}}
   end
 
   # @ — start macro replay register selection
   def handle_key({?@, 0}, state) do
-    {:continue, %{state | pending_macro_replay: true}}
+    {:continue, %{state | pending: :macro_replay}}
   end
 
   # ── Dot repeat ──────────────────────────────────────────────────────────
@@ -740,7 +718,7 @@ defmodule Minga.Mode.Normal do
 
   # " → start register-selection sequence (completion is in the pending block above)
   def handle_key({?", 0}, state) do
-    {:continue, %{state | pending_register: true}}
+    {:continue, %{state | pending: :register}}
   end
 
   # ── Marks: starters ───────────────────────────────────────────────────────
@@ -749,26 +727,26 @@ defmodule Minga.Mode.Normal do
 
   # m → start set-mark sequence
   def handle_key({?m, 0}, state) do
-    {:continue, %{state | pending_mark: :set}}
+    {:continue, %{state | pending: {:mark, :set}}}
   end
 
   # ' → start jump-to-mark-line sequence
   def handle_key({?', 0}, state) do
-    {:continue, %{state | pending_mark: :jump_line}}
+    {:continue, %{state | pending: {:mark, :jump_line}}}
   end
 
   # ` → start jump-to-mark-exact sequence
   def handle_key({?`, 0}, state) do
-    {:continue, %{state | pending_mark: :jump_exact}}
+    {:continue, %{state | pending: {:mark, :jump_exact}}}
   end
 
   # ── Escape: already in Normal, clear count and cancel pending state ──
   # Note: escape during a leader sequence is handled by the catch-all leader
-  # handler above (line ~204), which clears count and pending_replace in its
+  # handler above (line ~204), which clears count and pending :replace in its
   # :not_found branch. No separate clause is needed here.
 
-  def handle_key({@escape, _mods}, %ModeState{pending_replace: true} = state) do
-    {:continue, %{state | pending_replace: false, count: nil}}
+  def handle_key({@escape, _mods}, %ModeState{pending: :replace} = state) do
+    {:continue, %{state | pending: nil, count: nil}}
   end
 
   def handle_key({@escape, _mods}, %ModeState{} = state) do

@@ -318,15 +318,15 @@ defmodule Minga.Mode.NormalTest do
       assert new_state.leader_node == nil
     end
 
-    test "escape during leader mode clears pending_replace" do
+    test "escape during leader mode clears pending" do
       state =
         fresh_state()
-        |> Map.put(:pending_replace, true)
+        |> Map.put(:pending, :replace)
         |> Map.put(:leader_node, Defaults.leader_trie())
         |> Map.put(:leader_keys, ["SPC"])
 
       {:execute, :leader_cancel, new_state} = Normal.handle_key({27, 0}, state)
-      assert new_state.pending_replace == false
+      assert new_state.pending == nil
       assert new_state.leader_node == nil
     end
 
@@ -468,62 +468,62 @@ defmodule Minga.Mode.NormalTest do
   end
 
   describe "describe-key (SPC h k)" do
-    test "pending_describe_key captures a normal key and emits describe_key_result" do
-      state = %{fresh_state() | pending_describe_key: true}
+    test "describe_key captures a normal key and emits describe_key_result" do
+      state = %{fresh_state() | describe_key: %Minga.Mode.DescribeKey{}}
       result = Normal.handle_key({?j, 0}, state)
 
       assert {:execute, {:describe_key_result, "j", :move_down, "Move cursor down"}, new_state} =
                result
 
-      refute new_state.pending_describe_key
+      assert new_state.describe_key == nil
     end
 
-    test "pending_describe_key on unbound key emits describe_key_not_found" do
-      state = %{fresh_state() | pending_describe_key: true}
+    test "describe_key on unbound key emits describe_key_not_found" do
+      state = %{fresh_state() | describe_key: %Minga.Mode.DescribeKey{}}
       # Use a key that has no normal binding
       result = Normal.handle_key({?Z, 0}, state)
 
       assert {:execute, {:describe_key_not_found, "Z"}, new_state} = result
-      refute new_state.pending_describe_key
+      assert new_state.describe_key == nil
     end
 
     test "Escape cancels describe-key" do
-      state = %{fresh_state() | pending_describe_key: true}
+      state = %{fresh_state() | describe_key: %Minga.Mode.DescribeKey{}}
       assert {:continue, new_state} = Normal.handle_key({27, 0}, state)
-      refute new_state.pending_describe_key
+      assert new_state.describe_key == nil
     end
 
     test "SPC in describe-key starts leader trie walk" do
-      state = %{fresh_state() | pending_describe_key: true}
+      state = %{fresh_state() | describe_key: %Minga.Mode.DescribeKey{}}
       assert {:continue, new_state} = Normal.handle_key({32, 0}, state)
-      assert new_state.describe_key_leader_node != nil
-      assert new_state.describe_key_keys == ["SPC"]
+      assert new_state.describe_key.leader_node != nil
+      assert new_state.describe_key.keys == ["SPC"]
     end
 
     test "SPC f f in describe-key resolves to find_file" do
-      state = %{fresh_state() | pending_describe_key: true}
+      state = %{fresh_state() | describe_key: %Minga.Mode.DescribeKey{}}
 
       # SPC → start leader walk
       {:continue, s1} = Normal.handle_key({32, 0}, state)
       # f → prefix (stored reversed)
       {:continue, s2} = Normal.handle_key({?f, 0}, s1)
-      assert s2.describe_key_keys == ["f", "SPC"]
+      assert s2.describe_key.keys == ["f", "SPC"]
       # f → command
       {:execute, {:describe_key_result, "SPC f f", :find_file, "Find file"}, s3} =
         Normal.handle_key({?f, 0}, s2)
 
-      refute s3.pending_describe_key
+      assert s3.describe_key == nil
     end
 
     test "SPC z in describe-key reports not found" do
-      state = %{fresh_state() | pending_describe_key: true}
+      state = %{fresh_state() | describe_key: %Minga.Mode.DescribeKey{}}
 
       {:continue, s1} = Normal.handle_key({32, 0}, state)
 
       {:execute, {:describe_key_not_found, "SPC z"}, s2} =
         Normal.handle_key({?z, 0}, s1)
 
-      refute s2.pending_describe_key
+      assert s2.describe_key == nil
     end
   end
 

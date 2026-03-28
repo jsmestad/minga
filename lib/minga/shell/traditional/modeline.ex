@@ -181,12 +181,12 @@ defmodule Minga.Shell.Traditional.Modeline do
   Returns the cursor shape for the given mode.
 
   Accepts either a bare mode atom or the full vim state map. When the
-  vim state is passed, `pending_replace: true` in normal mode produces
+  vim state is passed, `pending: :replace` in normal mode produces
   an underline cursor (matching Vim's `r` feedback).
   """
   @spec cursor_shape(Mode.mode() | Minga.Editor.VimState.t()) ::
           Minga.Frontend.Protocol.cursor_shape()
-  def cursor_shape(%{mode: :normal, mode_state: %{pending_replace: true}}), do: :underline
+  def cursor_shape(%{mode: :normal, mode_state: %{pending: :replace}}), do: :underline
   def cursor_shape(%{mode: mode}), do: cursor_shape(mode)
   def cursor_shape(:insert), do: :beam
   def cursor_shape(:search), do: :beam

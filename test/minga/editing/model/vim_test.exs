@@ -156,8 +156,8 @@ defmodule Minga.Editing.Model.VimTest do
       assert Vim.cursor_shape(state) == :beam
     end
 
-    test "underline when pending_replace is true" do
-      state = %Vim{mode: :normal, mode_state: %Mode.State{pending_replace: true}}
+    test "underline when pending replace is active" do
+      state = %Vim{mode: :normal, mode_state: %Mode.State{pending: :replace}}
       assert Vim.cursor_shape(state) == :underline
     end
 
