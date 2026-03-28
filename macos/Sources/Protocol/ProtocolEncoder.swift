@@ -96,14 +96,32 @@ extension InputEncoder {
 }
 
 /// Thread-safe encoder that writes `{:packet, 4}` framed events to stdout.
+///
+/// Uses POSIX `write()` instead of `FileHandle.write()` to avoid
+/// `NSFileHandleOperationException` (ObjC exception) on broken pipes.
+/// ObjC exceptions cannot be caught from Swift, so `FileHandle.write()`
+/// to a dead pipe zombifies the app (beachball). POSIX `write()` returns
+/// -1 with `errno = EPIPE`, which we handle by marking the encoder as
+/// disconnected and silently dropping subsequent writes.
 final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
     private let lock = NSLock()
-    private let output: FileHandle
+    private let fd: Int32
+    /// Once a write fails with EPIPE, all subsequent writes are dropped.
+    private var connected: Bool = true
 
     /// Creates an encoder. Defaults to stdout for production use.
     /// Pass a pipe's write handle for testing binary layout.
     init(output: FileHandle = .standardOutput) {
-        self.output = output
+        self.fd = output.fileDescriptor
+    }
+
+    /// Mark the encoder as disconnected. Called by the reader's
+    /// `onDisconnect` callback so writes stop immediately without
+    /// waiting for the next EPIPE.
+    func disconnect() {
+        lock.lock()
+        defer { lock.unlock() }
+        connected = false
     }
 
     /// Send the ready event with initial dimensions and capabilities.
@@ -664,8 +682,18 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
 
     // MARK: - Private
 
-    /// Write a length-prefixed frame to stdout.
+    /// Write a length-prefixed frame using POSIX `write()`.
+    ///
+    /// `FileHandle.write()` raises an ObjC `NSFileHandleOperationException`
+    /// on EPIPE that Swift cannot catch, zombifying the app. POSIX `write()`
+    /// returns -1 and sets `errno = EPIPE`, which we handle by flipping
+    /// `connected` to false.
     private func writeFrame(_ payload: Data) {
+        lock.lock()
+        defer { lock.unlock() }
+
+        guard connected else { return }
+
         var frame = Data(count: 4 + payload.count)
         let len = UInt32(payload.count)
         frame[0] = UInt8((len >> 24) & 0xFF)
@@ -674,9 +702,22 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         frame[3] = UInt8(len & 0xFF)
         frame.replaceSubrange(4..<(4 + payload.count), with: payload)
 
-        lock.lock()
-        defer { lock.unlock() }
-        output.write(frame)
+        frame.withUnsafeBytes { buffer in
+            guard let ptr = buffer.baseAddress else { return }
+            var remaining = frame.count
+            var offset = 0
+            while remaining > 0 {
+                let written = Darwin.write(fd, ptr + offset, remaining)
+                if written < 0 {
+                    if errno == EINTR { continue }
+                    // EPIPE or other fatal error: pipe is broken.
+                    connected = false
+                    return
+                }
+                offset += written
+                remaining -= written
+            }
+        }
     }
 
     private func writeU16(_ buf: inout Data, _ offset: Int, _ value: UInt16) {
