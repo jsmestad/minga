@@ -221,7 +221,7 @@ When adding or changing opcodes, update all three files. The BEAM side is the so
 
 ### Swift
 
-- **Swift 6 concurrency model.** Use `@MainActor`, `Sendable`, and structured concurrency. No `@preconcurrency` escape hatches unless absolutely necessary.
+- **Swift 6 concurrency model.** Use `@MainActor`, `Sendable`, and structured concurrency. No `@preconcurrency` escape hatches unless absolutely necessary. See the "Swift 6 Concurrency Patterns" section below for specific guidance.
 - **camelCase** for all Swift properties and methods.
 - **No force unwraps** except `Bundle.main.executableURL!` (guaranteed by the OS).
 - **`final class`** for non-inheritable classes. Every class in this project should be `final`.
@@ -241,6 +241,53 @@ When adding or changing opcodes, update all three files. The BEAM side is the so
 mix swift.build          # Build the macOS app
 mix swift.test           # Run protocol round-trip tests
 ```
+
+### Swift 6 Concurrency Patterns
+
+Swift 6 strict concurrency is enforced project-wide. The compiler must be able to prove actor isolation statically. When it can't, you have a design problem, not a compiler limitation.
+
+**Never use `MainActor.assumeIsolated`.** It's a runtime assertion that bypasses the compiler's static checking. If you need it, you've chosen an API that doesn't carry isolation information in its types. Pick a different API.
+
+**NotificationCenter: use async sequences, not callback observers.** The callback-based `addObserver(forName:object:queue:)` returns a `@Sendable` closure. Even with `queue: .main`, Swift 6 can't prove the closure runs on the main actor. Use the async sequence instead:
+
+```swift
+// ❌ Bad: callback is @Sendable, can't access @MainActor properties
+NotificationCenter.default.addObserver(
+    forName: NSScroller.preferredScrollerStyleDidChangeNotification,
+    object: nil, queue: .main
+) { [weak self] _ in
+    self?.handleStyleChange()  // compiler error: main actor-isolated
+}
+
+// ✅ Good: @MainActor Task gives the compiler static proof
+observerTask = Task { @MainActor [weak self] in
+    for await _ in NotificationCenter.default.notifications(
+        named: NSScroller.preferredScrollerStyleDidChangeNotification
+    ) {
+        guard let self else { return }
+        self.handleStyleChange()
+    }
+}
+```
+
+Store the `Task` handle and cancel it in `deinit` (or when the observation should stop). The `for await` loop exits naturally when `self` is deallocated via the `weak` capture.
+
+**KVO: use `AsyncStream` or `values(for:)` over `observe(_:options:changeHandler:)`.** Same problem: the KVO change handler is `@Sendable`. Wrap it in a `@MainActor` Task with an `AsyncStream` if needed.
+
+**Timer: use `Task.sleep` in a loop, not `Timer.scheduledTimer`.** The Timer callback has the same `@Sendable` issue. A structured concurrency loop is both safer and easier to cancel:
+
+```swift
+blinkTask = Task { @MainActor [weak self] in
+    while !Task.isCancelled {
+        try? await Task.sleep(for: .milliseconds(500))
+        guard let self else { return }
+        self.cursorVisible.toggle()
+        self.setNeedsDisplay(self.cursorRect)
+    }
+}
+```
+
+**General rule:** if an API gives you a `@Sendable` closure and you need `@MainActor` access inside it, don't bridge with `assumeIsolated`. Find the structured concurrency equivalent of that API. AppKit and Foundation have async alternatives for nearly everything: `NotificationCenter.notifications(named:)`, `URLSession.data(from:)`, `Task.sleep`, `AsyncStream` for custom event sources.
 
 ## Logging
 

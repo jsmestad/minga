@@ -32,7 +32,7 @@ import AppKit
 final class FirstResponderGuard {
     private weak var window: NSWindow?
     private weak var editorView: EditorNSView?
-    private nonisolated(unsafe) var observer: NSObjectProtocol?
+    private var observerTask: Task<Void, Never>?
 
     /// When true, the guard does not reclaim first responder. Set this
     /// when a SwiftUI overlay (like the agent chat view) needs to handle
@@ -46,13 +46,10 @@ final class FirstResponderGuard {
         // Observe window update notifications. These fire on every
         // event cycle, giving us a chance to reclaim first responder
         // if SwiftUI or AppKit stole it.
-        observer = NotificationCenter.default.addObserver(
-            forName: NSWindow.didUpdateNotification,
-            object: window,
-            queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated {
-                self?.checkFirstResponder()
+        observerTask = Task { @MainActor [weak self] in
+            for await _ in NotificationCenter.default.notifications(named: NSWindow.didUpdateNotification, object: window) {
+                guard let self else { return }
+                self.checkFirstResponder()
             }
         }
     }
@@ -72,8 +69,6 @@ final class FirstResponderGuard {
     }
 
     deinit {
-        if let observer {
-            NotificationCenter.default.removeObserver(observer)
-        }
+        observerTask?.cancel()
     }
 }

@@ -100,8 +100,8 @@ final class EditorNSView: MTKView {
     /// cursor hide, or dealloc.
     private var blinkTask: Task<Void, Never>?
 
-    /// Observation token for accessibility display options changes.
-    private var accessibilityObserver: NSObjectProtocol?
+    /// Task observing accessibility display options changes.
+    private var accessibilityTask: Task<Void, Never>?
 
     init(encoder: InputEncoder, fontFace: FontFace, dispatcher: CommandDispatcher,
          coreTextRenderer: CoreTextMetalRenderer, fontManager: FontManager) {
@@ -130,10 +130,8 @@ final class EditorNSView: MTKView {
     private func cleanupBlinkResources() {
         blinkTask?.cancel()
         blinkTask = nil
-        if let observer = accessibilityObserver {
-            NotificationCenter.default.removeObserver(observer)
-            accessibilityObserver = nil
-        }
+        accessibilityTask?.cancel()
+        accessibilityTask = nil
     }
 
     override var acceptsFirstResponder: Bool { true }
@@ -181,20 +179,14 @@ final class EditorNSView: MTKView {
     /// timer responds to live Reduce Motion toggles. Idempotent: only
     /// registers once (guards against repeated viewDidMoveToWindow calls).
     private func observeAccessibilityChanges() {
-        guard accessibilityObserver == nil else { return }
-        accessibilityObserver = NotificationCenter.default.addObserver(
-            forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            // queue: .main guarantees main thread, but Swift 6 strict
-            // concurrency can't verify this statically. Use
-            // assumeIsolated to bridge the gap.
-            MainActor.assumeIsolated {
+        guard accessibilityTask == nil else { return }
+        accessibilityTask = Task { @MainActor [weak self] in
+            for await _ in NotificationCenter.default.notifications(named: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification) {
+                guard let self else { return }
                 if SystemBlinkTiming.blinkingDisabled {
-                    self?.stopCursorBlink()
+                    self.stopCursorBlink()
                 } else {
-                    self?.resetCursorBlink()
+                    self.resetCursorBlink()
                 }
             }
         }
