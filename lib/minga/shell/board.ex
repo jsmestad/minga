@@ -399,6 +399,33 @@ defmodule Minga.Shell.Board do
     end
   end
 
+  # -------------------------------------------------------------------
+  # Buffer lifecycle callbacks
+  # -------------------------------------------------------------------
+
+  @impl true
+  @spec on_buffer_added(BoardState.t(), Minga.Workspace.State.t(), pid()) ::
+          {BoardState.t(), Minga.Workspace.State.t()}
+  def on_buffer_added(shell_state, workspace, _buffer_pid) do
+    # Stub: Board-specific buffer routing will move here in C3.
+    # V1: buffer is already in workspace.buffers; no tab bar to update.
+    {shell_state, workspace}
+  end
+
+  @impl true
+  @spec on_buffer_switched(BoardState.t(), Minga.Workspace.State.t()) ::
+          {BoardState.t(), Minga.Workspace.State.t()}
+  def on_buffer_switched(shell_state, workspace) do
+    {shell_state, workspace}
+  end
+
+  @impl true
+  @spec on_buffer_died(BoardState.t(), Minga.Workspace.State.t(), pid()) ::
+          {BoardState.t(), Minga.Workspace.State.t()}
+  def on_buffer_died(shell_state, workspace, _dead_pid) do
+    {shell_state, workspace}
+  end
+
   # Zoom out from a card: store the live workspace on the card, restore the grid workspace.
   @spec zoom_out_card(BoardState.t(), Minga.Workspace.State.t(), String.t()) ::
           {BoardState.t(), Minga.Workspace.State.t()}

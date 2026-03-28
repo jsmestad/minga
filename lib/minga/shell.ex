@@ -89,4 +89,44 @@ defmodule Minga.Shell do
   render data.
   """
   @callback render(editor_state :: term()) :: term()
+
+  # -------------------------------------------------------------------
+  # Buffer lifecycle callbacks
+  #
+  # The Editor GenServer calls these when buffers are added, switched,
+  # or die. Each shell decides how to present the change (e.g.,
+  # Traditional manages tab bar state, Board ignores or routes to cards).
+  #
+  # Callbacks receive (shell_state, workspace, ...) — never full
+  # EditorState — so they cannot touch process monitors, render timers,
+  # or port managers. Generic concerns stay in EditorState.
+  # -------------------------------------------------------------------
+
+  @doc """
+  A buffer was added to the workspace.
+
+  Called after the buffer pid is in `workspace.buffers` and monitored.
+  The shell decides how to present it (e.g., create/update tabs, route
+  to a card, or ignore).
+  """
+  @callback on_buffer_added(shell_state(), workspace(), buffer_pid :: pid()) ::
+              {shell_state(), workspace()}
+
+  @doc """
+  The active buffer changed.
+
+  Called after `workspace.buffers.active` has been updated. The shell
+  decides whether to sync the active window, update chrome, etc.
+  """
+  @callback on_buffer_switched(shell_state(), workspace()) ::
+              {shell_state(), workspace()}
+
+  @doc """
+  A buffer process died.
+
+  Called after the dead buffer has been removed from `workspace.buffers`.
+  The shell cleans up any references (tab entries, card associations, etc.).
+  """
+  @callback on_buffer_died(shell_state(), workspace(), dead_pid :: pid()) ::
+              {shell_state(), workspace()}
 end

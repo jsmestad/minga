@@ -72,4 +72,30 @@ defmodule Minga.Shell.Traditional do
       surface: Minga.Input.surface_handlers(editor_state)
     }
   end
+
+  # -------------------------------------------------------------------
+  # Buffer lifecycle callbacks
+  # -------------------------------------------------------------------
+
+  @impl true
+  @spec on_buffer_added(ShellState.t(), Minga.Workspace.State.t(), pid()) ::
+          {ShellState.t(), Minga.Workspace.State.t()}
+  def on_buffer_added(shell_state, workspace, _buffer_pid) do
+    # Stub: tab bar logic will move here in C2.
+    {shell_state, workspace}
+  end
+
+  @impl true
+  @spec on_buffer_switched(ShellState.t(), Minga.Workspace.State.t()) ::
+          {ShellState.t(), Minga.Workspace.State.t()}
+  def on_buffer_switched(shell_state, workspace) do
+    {shell_state, workspace}
+  end
+
+  @impl true
+  @spec on_buffer_died(ShellState.t(), Minga.Workspace.State.t(), pid()) ::
+          {ShellState.t(), Minga.Workspace.State.t()}
+  def on_buffer_died(shell_state, workspace, _dead_pid) do
+    {shell_state, workspace}
+  end
 end
