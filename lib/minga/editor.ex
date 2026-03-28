@@ -739,6 +739,29 @@ defmodule Minga.Editor do
   end
 
   # Parser process crashed; Manager is scheduling a restart.
+  # Parser detected stale edit deltas (byte offsets don't match its stored
+  # source). This typically happens after system sleep/wake. The parser has
+  # already discarded the buffer's tree and source. We resend the full content
+  # so highlighting recovers without user intervention.
+  def handle_info({:minga_highlight, {:request_reparse, buffer_id}}, state) do
+    case HighlightSync.resolve_buffer_pid(state, buffer_id) do
+      nil ->
+        {:noreply, state}
+
+      buf_pid ->
+        Minga.Log.info(:editor, "Parser requested full reparse for buffer #{buffer_id}")
+
+        new_state =
+          if buf_pid == state.workspace.buffers.active do
+            HighlightSync.setup_for_buffer(state)
+          else
+            HighlightSync.request_reparse_buffer(state, buf_pid)
+          end
+
+        {:noreply, new_state}
+    end
+  end
+
   def handle_info({:minga_highlight, :parser_crashed}, state) do
     {:noreply, %{state | parser_status: :restarting}}
   end

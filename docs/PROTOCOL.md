@@ -83,6 +83,7 @@ The frontend runs as a child process of the BEAM. Communication uses stdin (BEAM
 | `0x37` | indent_result | 13 | Indent level result for a line |
 | `0x38` | textobject_result | variable | Text object range result (or nil) |
 | `0x39` | textobject_positions | 9 + count × 9 | Proactive text object position cache |
+| `0x3B` | request_reparse | 5 | Parser requests full reparse after stale edit deltas |
 
 ### Frontend → BEAM (Diagnostics)
 
@@ -581,6 +582,19 @@ Total size: 9 + count × 9 bytes.
 
 **Behavior:** The Zig parser runs the `textobjects.scm` query against the parse tree and collects the start positions of all `.around` captures (e.g., `@function.around`, `@class.around`). Entries are sorted by (row, col) before sending. The BEAM decodes them into a `%{atom => [{row, col}]}` map and stores them on the active window struct. Navigation commands (`]f`, `[f`, etc.) scan this cached data with no further IPC to Zig.
 
+### `0x3B` request_reparse
+
+Sent by the parser when it receives an `edit_buffer` command with stale edit deltas (byte offsets that don't match the parser's stored source for that buffer). This typically happens after system sleep/wake, when the BEAM's view of the buffer has drifted from the parser's. The parser discards the buffer's tree and source and asks the BEAM to resend the full content via `parse_buffer`.
+
+```
+opcode:     u8  = 0x3B
+buffer_id:  u32          the buffer that needs a full reparse
+```
+
+Total size: 5 bytes.
+
+**Behavior:** The BEAM receives this event, looks up the buffer PID for the given `buffer_id`, and sends a full `set_language` + `parse_buffer` sequence for that buffer. This is the same path used when setting up a buffer for the first time, so custom user queries are replayed correctly.
+
 ---
 
 ## Log Messages (Frontend → BEAM)
@@ -627,7 +641,7 @@ Total size: 4 + msg_len bytes.
 
 ### Current design
 
-Tree-sitter parsing runs in a dedicated `minga-parser` Zig process, separate from the rendering frontend. The renderer process handles only render commands (`0x10`-`0x1B` plus GUI chrome `0x70`-`0x78`). The parser process handles highlight commands (`0x20`-`0x26`) and sends highlight responses (`0x30`-`0x39`). Both use the same `{:packet, 4}` framing on their respective stdin/stdout pipes. The BEAM manages both Port processes, routing commands to the appropriate one.
+Tree-sitter parsing runs in a dedicated `minga-parser` Zig process, separate from the rendering frontend. The renderer process handles only render commands (`0x10`-`0x1B` plus GUI chrome `0x70`-`0x78`). The parser process handles highlight commands (`0x20`-`0x26`) and sends highlight responses (`0x30`-`0x3B`). Both use the same `{:packet, 4}` framing on their respective stdin/stdout pipes. The BEAM manages both Port processes, routing commands to the appropriate one.
 
 This separation means rendering frontends (Swift/Metal, GTK4, Zig/libvaxis) only need to implement render commands. Tree-sitter parsing is handled by the shared parser process regardless of which frontend is active.
 

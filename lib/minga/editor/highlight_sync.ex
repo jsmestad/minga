@@ -86,7 +86,11 @@ defmodule Minga.Editor.HighlightSync do
         parse_cmd = Protocol.encode_parse_buffer(buffer_id, version, content)
         ParserManager.send_commands([parse_cmd])
 
-        state = %{state | workspace: %{state.workspace | highlight: %{hl | version: version}}}
+        state = %{
+          state
+          | workspace: %{state.workspace | highlight: %{hl | version: version}}
+        }
+
         touch_buffer(state, buf_pid)
 
       :error ->
@@ -177,7 +181,11 @@ defmodule Minga.Editor.HighlightSync do
       state
       | workspace: %{
           state.workspace
-          | highlight: %{hl2 | version: version, syntax_overrides: syntax_overrides}
+          | highlight: %{
+              hl2
+              | version: version,
+                syntax_overrides: syntax_overrides
+            }
         }
     }
 
@@ -258,7 +266,18 @@ defmodule Minga.Editor.HighlightSync do
 
     state = put_active_highlight(state, Highlight.from_theme(state.theme))
     hl2 = state.workspace.highlight
-    state = %{state | workspace: %{state.workspace | highlight: %{hl2 | version: version}}}
+
+    state = %{
+      state
+      | workspace: %{
+          state.workspace
+          | highlight: %{
+              hl2
+              | version: version
+            }
+        }
+    }
+
     touch_active(state)
   end
 

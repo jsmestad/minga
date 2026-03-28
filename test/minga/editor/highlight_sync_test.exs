@@ -189,4 +189,21 @@ defmodule Minga.Editor.HighlightSyncTest do
       assert HighlightSync.request_reparse(state) == state
     end
   end
+
+  describe "resolve_buffer_pid/2" do
+    test "returns the buffer PID for a known buffer_id" do
+      state = base_state()
+      {:ok, md_buf} = BufferServer.start_link(content: "# Hello", filetype: :markdown)
+
+      new_state = HighlightSync.setup_for_buffer_pid(state, md_buf)
+      buffer_id = Map.get(new_state.workspace.highlight.buffer_ids, md_buf)
+
+      assert HighlightSync.resolve_buffer_pid(new_state, buffer_id) == md_buf
+    end
+
+    test "returns nil for an unknown buffer_id" do
+      state = base_state()
+      assert HighlightSync.resolve_buffer_pid(state, 999) == nil
+    end
+  end
 end

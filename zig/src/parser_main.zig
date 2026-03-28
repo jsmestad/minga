@@ -160,13 +160,20 @@ const BufferState = struct {
     }
 
     /// Apply edit deltas to the stored source, in order.
+    /// Returns error.StaleEdit if any delta's byte range is inconsistent with
+    /// the current source length, which indicates the BEAM and parser are out
+    /// of sync (e.g., after system sleep/wake). Callers should fall back to a
+    /// full reparse when this happens.
     fn applyEdits(self: *BufferState, alloc: std.mem.Allocator, edits: []const protocol.EditDelta) !void {
         for (edits) |edit| {
             const start: usize = @intCast(edit.start_byte);
             const old_end: usize = @intCast(edit.old_end_byte);
 
-            if (start > self.source.items.len) continue;
+            // Stale delta: old_end before start, or start past source length.
+            // This means the BEAM's view of the buffer doesn't match ours.
+            if (old_end < edit.start_byte or start > self.source.items.len) return error.StaleEdit;
             const clamped_old_end = @min(old_end, self.source.items.len);
+            if (clamped_old_end < start) return error.StaleEdit;
 
             // Replace [start..old_end) with inserted_text.
             try self.source.replaceRange(alloc, start, clamped_old_end - start, edit.inserted_text);
@@ -396,8 +403,29 @@ fn handleEditBuffer(
 
     const bs = try getOrCreateBuffer(buffers, alloc, decoded.buffer_id);
 
-    // Apply edits to stored source.
-    bs.applyEdits(alloc, decoded.edits) catch return;
+    // Apply edits to stored source. If the deltas are stale (byte offsets
+    // don't match our source), discard the tree and ask the BEAM to send
+    // a full parse_buffer. Attempting to parse with mismatched source and
+    // tree causes memory corruption in tree-sitter.
+    bs.applyEdits(alloc, decoded.edits) catch |err| {
+        if (err == error.StaleEdit) {
+            // Source and tree are out of sync. Delete the tree so the next
+            // parse_buffer from the BEAM starts fresh.
+            if (bs.tree) |t| {
+                c.ts_tree_delete(t);
+                bs.tree = null;
+            }
+            bs.source.clearRetainingCapacity();
+            std.log.warn("edit_buffer: stale deltas for buffer {d}, requesting full reparse", .{decoded.buffer_id});
+
+            // Tell the BEAM to resend the full buffer content.
+            var reparse_buf: [5]u8 = undefined;
+            const len = protocol.encodeRequestReparse(&reparse_buf, decoded.buffer_id) catch return;
+            protocol.writeMessage(stdout, reparse_buf[0..len]) catch return;
+            stdout.flush() catch {};
+        }
+        return;
+    };
 
     // Activate this buffer (sets language, installs its tree for incremental parsing).
     if (!activateBuffer(hl, bs)) return;
@@ -519,6 +547,142 @@ fn readExact(fd: std.posix.fd_t, buf: []u8) !bool {
         total += n;
     }
     return true;
+}
+
+// ── BufferState.applyEdits tests ──────────────────────────────────────────────
+
+const testing = std.testing;
+
+test "applyEdits: valid edit replaces text" {
+    var bs: BufferState = .{};
+    defer bs.deinit(testing.allocator);
+    try bs.setSource(testing.allocator, "hello world");
+
+    const edits = [_]protocol.EditDelta{.{
+        .start_byte = 5,
+        .old_end_byte = 11,
+        .new_end_byte = 13,
+        .start_row = 0,
+        .start_col = 5,
+        .old_end_row = 0,
+        .old_end_col = 11,
+        .new_end_row = 0,
+        .new_end_col = 13,
+        .inserted_text = " universe",
+    }};
+
+    try bs.applyEdits(testing.allocator, &edits);
+    try testing.expectEqualStrings("hello universe", bs.source.items);
+}
+
+test "applyEdits: returns StaleEdit when old_end_byte < start_byte" {
+    var bs: BufferState = .{};
+    defer bs.deinit(testing.allocator);
+    try bs.setSource(testing.allocator, "hello world");
+
+    const edits = [_]protocol.EditDelta{.{
+        .start_byte = 8,
+        .old_end_byte = 3, // before start: stale/corrupted delta
+        .new_end_byte = 8,
+        .start_row = 0,
+        .start_col = 8,
+        .old_end_row = 0,
+        .old_end_col = 3,
+        .new_end_row = 0,
+        .new_end_col = 8,
+        .inserted_text = "",
+    }};
+
+    try testing.expectError(error.StaleEdit, bs.applyEdits(testing.allocator, &edits));
+    // Source should be unchanged after the error.
+    try testing.expectEqualStrings("hello world", bs.source.items);
+}
+
+test "applyEdits: returns StaleEdit when start_byte exceeds source length" {
+    var bs: BufferState = .{};
+    defer bs.deinit(testing.allocator);
+    try bs.setSource(testing.allocator, "hi");
+
+    const edits = [_]protocol.EditDelta{.{
+        .start_byte = 100,
+        .old_end_byte = 105,
+        .new_end_byte = 103,
+        .start_row = 5,
+        .start_col = 0,
+        .old_end_row = 5,
+        .old_end_col = 5,
+        .new_end_row = 5,
+        .new_end_col = 3,
+        .inserted_text = "abc",
+    }};
+
+    try testing.expectError(error.StaleEdit, bs.applyEdits(testing.allocator, &edits));
+    try testing.expectEqualStrings("hi", bs.source.items);
+}
+
+test "applyEdits: returns StaleEdit on empty source with non-zero offsets" {
+    var bs: BufferState = .{};
+    defer bs.deinit(testing.allocator);
+    // Source is empty (simulates a cleared buffer after previous StaleEdit).
+
+    const edits = [_]protocol.EditDelta{.{
+        .start_byte = 10,
+        .old_end_byte = 15,
+        .new_end_byte = 12,
+        .start_row = 0,
+        .start_col = 10,
+        .old_end_row = 0,
+        .old_end_col = 15,
+        .new_end_row = 0,
+        .new_end_col = 12,
+        .inserted_text = "ab",
+    }};
+
+    try testing.expectError(error.StaleEdit, bs.applyEdits(testing.allocator, &edits));
+}
+
+test "applyEdits: valid insert at beginning of source" {
+    var bs: BufferState = .{};
+    defer bs.deinit(testing.allocator);
+    try bs.setSource(testing.allocator, "world");
+
+    const edits = [_]protocol.EditDelta{.{
+        .start_byte = 0,
+        .old_end_byte = 0,
+        .new_end_byte = 6,
+        .start_row = 0,
+        .start_col = 0,
+        .old_end_row = 0,
+        .old_end_col = 0,
+        .new_end_row = 0,
+        .new_end_col = 6,
+        .inserted_text = "hello ",
+    }};
+
+    try bs.applyEdits(testing.allocator, &edits);
+    try testing.expectEqualStrings("hello world", bs.source.items);
+}
+
+test "applyEdits: clamped_old_end < start returns StaleEdit" {
+    // old_end is valid (within source) but less than start after clamping.
+    var bs: BufferState = .{};
+    defer bs.deinit(testing.allocator);
+    try bs.setSource(testing.allocator, "hello world");
+
+    const edits = [_]protocol.EditDelta{.{
+        .start_byte = 8,
+        .old_end_byte = 5, // clamped to 5, which is < start(8)
+        .new_end_byte = 8,
+        .start_row = 0,
+        .start_col = 8,
+        .old_end_row = 0,
+        .old_end_col = 5,
+        .new_end_row = 0,
+        .new_end_col = 8,
+        .inserted_text = "",
+    }};
+
+    try testing.expectError(error.StaleEdit, bs.applyEdits(testing.allocator, &edits));
 }
 
 // Pull in tests from imported modules for the parser test step.

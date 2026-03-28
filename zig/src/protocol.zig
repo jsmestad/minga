@@ -88,6 +88,11 @@ pub const OP_TEXTOBJECT_RESULT: u8 = 0x38;
 pub const OP_TEXTOBJECT_POSITIONS: u8 = 0x39;
 pub const OP_CONCEAL_SPANS: u8 = 0x3A;
 
+/// Requests that the BEAM send a full parse_buffer for this buffer_id.
+/// Sent when the parser detects stale edit deltas (byte offsets don't match
+/// the stored source), typically after system sleep/wake.
+pub const OP_REQUEST_REPARSE: u8 = 0x3B;
+
 // Log messages (Zig → BEAM)
 pub const OP_LOG_MESSAGE: u8 = 0x60;
 
@@ -599,6 +604,18 @@ pub fn encodeGrammarLoaded(buf: []u8, success: bool, name: []const u8) !usize {
     buf[1] = if (success) 1 else 0;
     std.mem.writeInt(u16, buf[2..4], @intCast(name.len), .big);
     @memcpy(buf[4 .. 4 + name.len], name);
+    return total;
+}
+
+/// Encodes request_reparse: opcode(1) + buffer_id:u32
+/// Wire format: `<0x3B, buffer_id:32>`
+/// Sent when the parser detects stale edit deltas and needs the BEAM
+/// to resend the full buffer content via parse_buffer.
+pub fn encodeRequestReparse(buf: []u8, buffer_id: u32) !usize {
+    const total = 5;
+    if (buf.len < total) return error.Malformed;
+    buf[0] = OP_REQUEST_REPARSE;
+    std.mem.writeInt(u32, buf[1..5], buffer_id, .big);
     return total;
 }
 
@@ -2143,6 +2160,36 @@ test "encodeLogMessage empty message" {
 test "encodeLogMessage buffer too small returns error" {
     var buf: [3]u8 = undefined; // needs at least 4
     const result = encodeLogMessage(&buf, LOG_LEVEL_ERR, "");
+    try std.testing.expectError(error.Malformed, result);
+}
+
+// ── Request reparse protocol tests ────────────────────────────────────────────
+
+test "encodeRequestReparse byte layout" {
+    var buf: [5]u8 = undefined;
+    const len = try encodeRequestReparse(&buf, 42);
+    try std.testing.expectEqual(@as(usize, 5), len);
+    try std.testing.expectEqual(OP_REQUEST_REPARSE, buf[0]);
+    try std.testing.expectEqual(@as(u32, 42), std.mem.readInt(u32, buf[1..5], .big));
+}
+
+test "encodeRequestReparse with zero buffer_id" {
+    var buf: [5]u8 = undefined;
+    const len = try encodeRequestReparse(&buf, 0);
+    try std.testing.expectEqual(@as(usize, 5), len);
+    try std.testing.expectEqual(@as(u32, 0), std.mem.readInt(u32, buf[1..5], .big));
+}
+
+test "encodeRequestReparse with max buffer_id" {
+    var buf: [5]u8 = undefined;
+    const len = try encodeRequestReparse(&buf, std.math.maxInt(u32));
+    try std.testing.expectEqual(@as(usize, 5), len);
+    try std.testing.expectEqual(std.math.maxInt(u32), std.mem.readInt(u32, buf[1..5], .big));
+}
+
+test "encodeRequestReparse buffer too small returns error" {
+    var buf: [4]u8 = undefined;
+    const result = encodeRequestReparse(&buf, 1);
     try std.testing.expectError(error.Malformed, result);
 }
 
