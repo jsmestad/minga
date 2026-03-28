@@ -278,6 +278,24 @@ defmodule Minga.Test.EditorCase do
     :sys.get_state(editor)
   end
 
+  @doc """
+  Syncs the port so its grid reflects the latest render from the editor.
+
+  After `send_keys_sync` returns, the editor has finished processing all
+  keys and sent the render cast to the port. But the port processes that
+  cast asynchronously. This function uses `:sys.get_state` on the port as
+  a barrier, ensuring the port has processed all pending render commands
+  before the test reads the screen.
+
+  Call this before `assert_screen_snapshot` when using `send_keys_sync`.
+  Not needed after `send_key` (which captures a frame snapshot directly).
+  """
+  @spec sync_screen(editor_ctx()) :: :ok
+  def sync_screen(%{port: port}) do
+    :sys.get_state(port)
+    :ok
+  end
+
   @doc "Sends each character in the string as a key press, waiting after each."
   @spec type_text(editor_ctx(), String.t()) :: :ok
   def type_text(ctx, text) do
