@@ -45,7 +45,9 @@ defmodule Minga.Editor.CompletionHandling do
       end
 
       timer =
-        Process.send_after(self(), {:completion_resolve, selected_idx}, @resolve_debounce_ms)
+        if state.backend != :headless do
+          Process.send_after(self(), {:completion_resolve, selected_idx}, @resolve_debounce_ms)
+        end
 
       completion = %{completion | resolve_timer: timer}
       EditorState.update_workspace(state, &WorkspaceState.set_completion(&1, completion))

@@ -166,8 +166,12 @@ defmodule Minga.Editor.LspActions do
         state
 
       _client ->
-        timer = Process.send_after(self(), :document_highlight_debounce, @highlight_debounce_ms)
-        %{state | lsp: LSPState.set_highlight_timer(state.lsp, timer)}
+        if state.backend != :headless do
+          timer = Process.send_after(self(), :document_highlight_debounce, @highlight_debounce_ms)
+          %{state | lsp: LSPState.set_highlight_timer(state.lsp, timer)}
+        else
+          state
+        end
     end
   end
 
@@ -607,7 +611,7 @@ defmodule Minga.Editor.LspActions do
   def schedule_inlay_hints_on_scroll(state) do
     vp_top = effective_viewport_top(state)
 
-    if vp_top == state.lsp.last_inlay_viewport_top do
+    if vp_top == state.lsp.last_inlay_viewport_top or state.backend == :headless do
       state
     else
       # Cancel any pending timer

@@ -14,6 +14,7 @@ defmodule Minga.Editor.HighlightEvents do
   alias Minga.Core.Face
   alias Minga.Editor.HighlightSync
   alias Minga.Editor.Renderer
+  alias Minga.Editor.SemanticTokenSync
   alias Minga.Editor.State, as: EditorState
   alias Minga.Language
   alias Minga.UI.PrettifySymbols
@@ -56,9 +57,9 @@ defmodule Minga.Editor.HighlightEvents do
 
       case Map.get(hl.highlights, new_buffer) do
         nil ->
-          # New buffer with no highlights: schedule setup.
-          send(self(), :setup_highlight)
-          state
+          # New buffer with no highlights: in headless mode apply
+          # synchronously; otherwise defer via self-send.
+          setup_highlight_or_defer(state)
 
         _cached ->
           # Buffer has cached highlights: nothing to do, they're already
@@ -195,6 +196,18 @@ defmodule Minga.Editor.HighlightEvents do
     end
 
     :ok
+  end
+
+  # In headless mode, apply highlight setup synchronously; otherwise defer.
+  @spec setup_highlight_or_defer(EditorState.t()) :: EditorState.t()
+  defp setup_highlight_or_defer(%{backend: :headless} = state) do
+    state = HighlightSync.setup_for_buffer(state)
+    SemanticTokenSync.request_tokens(state)
+  end
+
+  defp setup_highlight_or_defer(state) do
+    send(self(), :setup_highlight)
+    state
   end
 
   @spec buffer_version(EditorState.t()) :: non_neg_integer()

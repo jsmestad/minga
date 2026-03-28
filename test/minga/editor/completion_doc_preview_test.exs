@@ -103,9 +103,17 @@ defmodule Minga.Editor.CompletionDocPreviewTest do
     test "sets a resolve timer when documentation is empty" do
       items = [Completion.parse_item(%{"label" => "a"})]
       completion = Completion.new(items, {0, 0})
-      state = make_state(completion)
+      state = %{make_state(completion) | backend: :zig}
       result = CompletionHandling.maybe_resolve_selected(state)
       assert result.workspace.completion.resolve_timer != nil
+    end
+
+    test "skips resolve timer in headless mode" do
+      items = [Completion.parse_item(%{"label" => "a"})]
+      completion = Completion.new(items, {0, 0})
+      state = make_state(completion)
+      result = CompletionHandling.maybe_resolve_selected(state)
+      assert result.workspace.completion.resolve_timer == nil
     end
 
     test "skips when already resolved for this index" do
