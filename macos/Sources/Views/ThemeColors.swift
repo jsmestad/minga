@@ -120,6 +120,23 @@ final class ThemeColors {
     var agentStatusDone: Color = color(0x51AFEF)
     var agentStatusErrored: Color = color(0xFF6C6B)
 
+    // ── Agent chat theme ──
+    var agentPanelBg: Color = color(0x282C34)
+    var agentHeaderBg: Color = color(0x1E2127)
+    var agentHeaderFg: Color = color(0x51AFEF)
+    var agentUserBorder: Color = color(0x51AFEF)
+    var agentUserLabel: Color = color(0x51AFEF)
+    var agentAssistantBorder: Color = color(0x98BE65)
+    var agentAssistantLabel: Color = color(0x98BE65)
+    var agentInputBorder: Color = color(0x51AFEF)
+    var agentInputBg: Color = color(0x282C34)
+    var agentInputPlaceholder: Color = color(0x5B6268)
+    var agentTextFg: Color = color(0xBBC2CF)
+    var agentToolBorder: Color = color(0xECBE7B)
+    var agentToolHeader: Color = color(0xECBE7B)
+    var agentCodeBg: Color = color(0x1E2127)
+    var agentCodeBorder: Color = color(0x5B6268)
+
     // ── Accent ──
     var accent: Color = color(0x51AFEF)
 
@@ -215,6 +232,21 @@ final class ThemeColors {
         case GUI_COLOR_AGENT_STATUS_NEEDS_YOU: agentStatusNeedsYou = c
         case GUI_COLOR_AGENT_STATUS_DONE: agentStatusDone = c
         case GUI_COLOR_AGENT_STATUS_ERRORED: agentStatusErrored = c
+        case GUI_COLOR_AGENT_PANEL_BG: agentPanelBg = c
+        case GUI_COLOR_AGENT_HEADER_BG: agentHeaderBg = c
+        case GUI_COLOR_AGENT_HEADER_FG: agentHeaderFg = c
+        case GUI_COLOR_AGENT_USER_BORDER: agentUserBorder = c
+        case GUI_COLOR_AGENT_USER_LABEL: agentUserLabel = c
+        case GUI_COLOR_AGENT_ASSISTANT_BORDER: agentAssistantBorder = c
+        case GUI_COLOR_AGENT_ASSISTANT_LABEL: agentAssistantLabel = c
+        case GUI_COLOR_AGENT_INPUT_BORDER: agentInputBorder = c
+        case GUI_COLOR_AGENT_INPUT_BG: agentInputBg = c
+        case GUI_COLOR_AGENT_INPUT_PLACEHOLDER: agentInputPlaceholder = c
+        case GUI_COLOR_AGENT_TEXT_FG: agentTextFg = c
+        case GUI_COLOR_AGENT_TOOL_BORDER: agentToolBorder = c
+        case GUI_COLOR_AGENT_TOOL_HEADER: agentToolHeader = c
+        case GUI_COLOR_AGENT_CODE_BG: agentCodeBg = c
+        case GUI_COLOR_AGENT_CODE_BORDER: agentCodeBorder = c
         default: break
         }
     }

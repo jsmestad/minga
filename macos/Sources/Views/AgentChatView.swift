@@ -125,7 +125,7 @@ struct AgentChatView: View {
             // Prompt area
             promptArea
         }
-        .background(theme.editorBg)
+        .background(theme.agentPanelBg)
     }
 
     // MARK: - Header
@@ -140,7 +140,7 @@ struct AgentChatView: View {
 
             Text(state.model.isEmpty ? "Agent" : state.model)
                 .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(theme.popupFg)
+                .foregroundStyle(theme.agentHeaderFg)
 
             if state.isThinking {
                 ProgressView()
@@ -152,7 +152,7 @@ struct AgentChatView: View {
 
             Text(state.statusLabel)
                 .font(.system(size: 11))
-                .foregroundStyle(theme.popupFg.opacity(0.4))
+                .foregroundStyle(theme.agentTextFg.opacity(0.4))
 
             Button {
                 // Send '?' to toggle help overlay
@@ -160,7 +160,7 @@ struct AgentChatView: View {
             } label: {
                 Image(systemName: "questionmark.circle")
                     .font(.system(size: 13))
-                    .foregroundStyle(state.helpVisible ? theme.accent : theme.popupFg.opacity(0.4))
+                    .foregroundStyle(state.helpVisible ? theme.agentHeaderFg : theme.agentTextFg.opacity(0.4))
             }
             .buttonStyle(.plain)
             .help("Keyboard shortcuts (?)")
@@ -169,10 +169,10 @@ struct AgentChatView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
-        .background(theme.modelineBarBg)
+        .background(theme.agentHeaderBg)
 
         Rectangle()
-            .fill(theme.popupBorder.opacity(0.3))
+            .fill(theme.agentCodeBorder.opacity(0.3))
             .frame(height: 1)
     }
 
@@ -186,7 +186,7 @@ struct AgentChatView: View {
         VStack(spacing: 8) {
             if index > 0 && shouldShowDivider(before: msg, after: state.messages[index - 1]) {
                 Rectangle()
-                    .fill(theme.popupBorder.opacity(0.15))
+                    .fill(theme.agentCodeBorder.opacity(0.15))
                     .frame(height: 1)
                     .padding(.horizontal, 4)
             }
@@ -226,17 +226,17 @@ struct AgentChatView: View {
                 Text("You")
                     .font(.system(size: 11, weight: .medium))
             }
-            .foregroundStyle(theme.popupFg.opacity(0.45))
+            .foregroundStyle(theme.agentUserLabel)
 
             Text(text)
                 .font(.system(size: 13))
-                .foregroundStyle(theme.popupFg)
+                .foregroundStyle(theme.agentTextFg)
                 .textSelection(.enabled)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(theme.accent.opacity(0.04))
+        .background(theme.agentUserBorder.opacity(0.06))
     }
 
     @ViewBuilder
@@ -244,11 +244,17 @@ struct AgentChatView: View {
         HStack {
             Text(text)
                 .font(.system(size: 13))
-                .foregroundStyle(theme.popupFg.opacity(0.9))
+                .foregroundStyle(theme.agentTextFg.opacity(0.9))
                 .textSelection(.enabled)
                 .lineSpacing(4)
             Spacer(minLength: 40)
         }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(theme.agentAssistantBorder.opacity(0.03))
+        )
     }
 
     @ViewBuilder
@@ -285,7 +291,7 @@ struct AgentChatView: View {
             if run.fgR != 0 || run.fgG != 0 || run.fgB != 0 {
                 attr.foregroundColor = fg
             } else {
-                attr.foregroundColor = theme.popupFg.opacity(0.9)
+                attr.foregroundColor = theme.agentTextFg.opacity(0.9)
             }
             // Apply background if non-zero
             if run.bgR != 0 || run.bgG != 0 || run.bgB != 0 {
@@ -323,12 +329,12 @@ struct AgentChatView: View {
                     .font(.system(size: 11, weight: .medium))
                 Spacer()
             }
-            .foregroundStyle(theme.popupFg.opacity(0.4))
+            .foregroundStyle(theme.agentTextFg.opacity(0.4))
 
             if !collapsed && !text.isEmpty {
                 Text(text)
                     .font(.system(size: 12))
-                    .foregroundStyle(theme.popupFg.opacity(0.35))
+                    .foregroundStyle(theme.agentTextFg.opacity(0.35))
                     .textSelection(.enabled)
                     .lineSpacing(3)
                     .padding(.leading, 14)
@@ -347,7 +353,7 @@ struct AgentChatView: View {
                 if hasResult {
                     Image(systemName: collapsed ? "chevron.right" : "chevron.down")
                         .font(.system(size: 9, weight: .medium))
-                        .foregroundStyle(theme.popupFg.opacity(0.4))
+                        .foregroundStyle(theme.agentTextFg.opacity(0.4))
                 }
 
                 // Running spinner or status icon
@@ -358,19 +364,19 @@ struct AgentChatView: View {
                 } else {
                     Image(systemName: toolIcon(status))
                         .font(.system(size: 10))
-                        .foregroundStyle(isError ? Color.red.opacity(0.8) : theme.accent)
+                        .foregroundStyle(isError ? Color.red.opacity(0.8) : theme.agentToolHeader)
                 }
 
                 Text(name)
                     .font(.system(size: 12, weight: .medium, design: .monospaced))
-                    .foregroundStyle(theme.popupFg)
+                    .foregroundStyle(theme.agentTextFg)
                     .layoutPriority(1)
 
                 // Tool summary (command, path, etc.)
                 if !summary.isEmpty {
                     Text(summary)
                         .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(theme.popupFg.opacity(0.5))
+                        .foregroundStyle(theme.agentTextFg.opacity(0.5))
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
@@ -380,7 +386,7 @@ struct AgentChatView: View {
                 if durationMs > 0 {
                     Text(formatDuration(durationMs))
                         .font(.system(size: 10))
-                        .foregroundStyle(theme.popupFg.opacity(0.3))
+                        .foregroundStyle(theme.agentTextFg.opacity(0.3))
                 }
 
                 statusBadge(status, isError: isError)
@@ -397,7 +403,7 @@ struct AgentChatView: View {
             // Result (collapsed by default, supports styled or plain text)
             if !collapsed && hasResult {
                 Rectangle()
-                    .fill(theme.popupBorder.opacity(0.2))
+                    .fill(theme.agentToolBorder.opacity(0.2))
                     .frame(height: 1)
 
                 ScrollView(.vertical) {
@@ -420,7 +426,7 @@ struct AgentChatView: View {
                         // Plain text fallback
                         Text(text)
                             .font(.system(size: 11, design: .monospaced))
-                            .foregroundStyle(theme.popupFg.opacity(0.7))
+                            .foregroundStyle(theme.agentTextFg.opacity(0.7))
                             .textSelection(.enabled)
                             .padding(10)
                     }
@@ -430,11 +436,11 @@ struct AgentChatView: View {
         }
         .background(
             RoundedRectangle(cornerRadius: 8)
-                .fill(theme.popupBg)
+                .fill(theme.agentCodeBg)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(isError ? Color.red.opacity(0.3) : theme.popupBorder.opacity(0.3), lineWidth: 1)
+                .strokeBorder(isError ? Color.red.opacity(0.3) : theme.agentToolBorder.opacity(0.3), lineWidth: 1)
         )
     }
 
@@ -447,7 +453,7 @@ struct AgentChatView: View {
                 .font(.system(size: 11))
                 .textSelection(.enabled)
         }
-        .foregroundStyle(isError ? Color.red.opacity(0.7) : theme.popupFg.opacity(0.4))
+        .foregroundStyle(isError ? Color.red.opacity(0.7) : theme.agentTextFg.opacity(0.4))
         .frame(maxWidth: .infinity, alignment: .center)
     }
 
@@ -461,7 +467,7 @@ struct AgentChatView: View {
             Text(String(format: "$%.4f", cost))
         }
         .font(.system(size: 10))
-        .foregroundStyle(theme.popupFg.opacity(0.3))
+        .foregroundStyle(theme.agentTextFg.opacity(0.3))
     }
 
     // MARK: - Prompt
@@ -472,7 +478,7 @@ struct AgentChatView: View {
     private func approvalBanner(_ approval: AgentChatState.PendingApproval) -> some View {
         VStack(spacing: 6) {
             Rectangle()
-                .fill(theme.popupBorder.opacity(0.3))
+                .fill(theme.agentCodeBorder.opacity(0.3))
                 .frame(height: 1)
 
             HStack(spacing: 10) {
@@ -483,17 +489,17 @@ struct AgentChatView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Tool needs approval")
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(theme.popupFg)
+                        .foregroundStyle(theme.agentTextFg)
 
                     HStack(spacing: 4) {
                         Text(approval.toolName)
                             .font(.system(size: 11, weight: .medium, design: .monospaced))
-                            .foregroundStyle(theme.accent)
+                            .foregroundStyle(theme.agentToolHeader)
 
                         if !approval.summary.isEmpty {
                             Text(approval.summary)
                                 .font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(theme.popupFg.opacity(0.6))
+                                .foregroundStyle(theme.agentTextFg.opacity(0.6))
                                 .lineLimit(1)
                                 .truncationMode(.tail)
                         }
@@ -510,7 +516,7 @@ struct AgentChatView: View {
                     .background(RoundedRectangle(cornerRadius: 4).fill(Color.green.opacity(0.1)))
                 Text("approve")
                     .font(.system(size: 10))
-                    .foregroundStyle(theme.popupFg.opacity(0.5))
+                    .foregroundStyle(theme.agentTextFg.opacity(0.5))
 
                 Text("n")
                     .font(.system(size: 11, weight: .bold, design: .monospaced))
@@ -520,7 +526,7 @@ struct AgentChatView: View {
                     .background(RoundedRectangle(cornerRadius: 4).fill(Color.red.opacity(0.1)))
                 Text("reject")
                     .font(.system(size: 10))
-                    .foregroundStyle(theme.popupFg.opacity(0.5))
+                    .foregroundStyle(theme.agentTextFg.opacity(0.5))
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
@@ -544,14 +550,14 @@ struct AgentChatView: View {
     /// The action button's foreground color based on state.
     private var actionButtonColor: Color {
         if isStreaming { return .red }
-        if canSend { return theme.accent }
-        return theme.popupFg.opacity(0.2)
+        if canSend { return theme.agentInputBorder }
+        return theme.agentTextFg.opacity(0.2)
     }
 
     /// Capsule border color: accent when in insert mode, subtle border otherwise.
     private var capsuleBorderColor: Color {
-        if isInsertMode { return theme.accent.opacity(0.5) }
-        return theme.popupBorder.opacity(0.3)
+        if isInsertMode { return theme.agentInputBorder.opacity(0.5) }
+        return theme.agentCodeBorder.opacity(0.3)
     }
 
     /// Capsule background opacity shifts with mode.
@@ -592,7 +598,7 @@ struct AgentChatView: View {
                 HStack(spacing: 4) {
                     Text(modeLabel)
                         .font(.system(size: 9, weight: .bold, design: .monospaced))
-                        .foregroundStyle(theme.accent)
+                        .foregroundStyle(theme.agentInputBorder)
                     Spacer()
                 }
                 .padding(.horizontal, 12)
@@ -605,12 +611,12 @@ struct AgentChatView: View {
                 if isStreaming && state.prompt.isEmpty {
                     Text("Generating...")
                         .font(.system(size: 13, design: .monospaced))
-                        .foregroundStyle(theme.popupFg.opacity(0.3))
+                        .foregroundStyle(theme.agentInputPlaceholder)
                         .italic()
                 } else if state.prompt.isEmpty && !isInsertMode {
                     Text("Ask anything...")
                         .font(.system(size: 13, design: .monospaced))
-                        .foregroundStyle(theme.popupFg.opacity(0.25))
+                        .foregroundStyle(theme.agentInputPlaceholder)
                 } else {
                     // Render prompt text with cursor overlay
                     promptTextWithCursor
@@ -623,7 +629,7 @@ struct AgentChatView: View {
         }
         .background(
             RoundedRectangle(cornerRadius: 12)
-                .fill(theme.popupBg.opacity(capsuleBgOpacity))
+                .fill(theme.agentInputBg.opacity(capsuleBgOpacity))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 12)
@@ -670,19 +676,19 @@ struct AgentChatView: View {
                 ZStack(alignment: .leading) {
                     Text(line.isEmpty ? " " : line)
                         .font(.system(size: 13, design: .monospaced))
-                        .foregroundStyle(theme.popupFg.opacity(isStreaming ? 0.4 : 1.0))
+                        .foregroundStyle(theme.agentTextFg.opacity(isStreaming ? 0.4 : 1.0))
 
                     if lineIdx == cursorLine && !isStreaming {
                         let cursorX = CGFloat(cursorCol) * charW
 
                         if isBlock {
                             Rectangle()
-                                .fill(theme.accent.opacity(0.7))
+                                .fill(theme.agentInputBorder.opacity(0.7))
                                 .frame(width: charW, height: lineH)
                                 .offset(x: cursorX)
                         } else {
                             Rectangle()
-                                .fill(theme.accent)
+                                .fill(theme.agentInputBorder)
                                 .frame(width: 1.5, height: lineH)
                                 .offset(x: cursorX)
                         }
@@ -729,18 +735,18 @@ struct AgentChatView: View {
                 HStack(spacing: 6) {
                     Image(systemName: isSlash ? "command" : "doc")
                         .font(.system(size: 10))
-                        .foregroundStyle(theme.popupFg.opacity(0.4))
+                        .foregroundStyle(theme.agentTextFg.opacity(0.4))
                         .frame(width: 14)
 
                     Text(candidate.name)
                         .font(.system(size: 12, design: .monospaced))
-                        .foregroundStyle(theme.popupFg)
+                        .foregroundStyle(theme.agentTextFg)
                         .lineLimit(1)
 
                     if !candidate.description.isEmpty {
                         Text(candidate.description)
                             .font(.system(size: 11))
-                            .foregroundStyle(theme.popupFg.opacity(0.4))
+                            .foregroundStyle(theme.agentTextFg.opacity(0.4))
                             .lineLimit(1)
                     }
 
@@ -748,18 +754,18 @@ struct AgentChatView: View {
                 }
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
-                .background(index == Int(completion.selected) ? theme.accent.opacity(0.15) : Color.clear)
+                .background(index == Int(completion.selected) ? theme.agentInputBorder.opacity(0.15) : Color.clear)
             }
         }
         .frame(maxWidth: 400)
         .frame(maxHeight: CGFloat(maxVisible) * 24)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(theme.popupBg)
+                .fill(theme.agentCodeBg)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 6)
-                .strokeBorder(theme.popupBorder.opacity(0.4), lineWidth: 1)
+                .strokeBorder(theme.agentCodeBorder.opacity(0.4), lineWidth: 1)
         )
         .shadow(color: .black.opacity(0.2), radius: 8, y: -4)
         .padding(.horizontal, 16)
@@ -776,11 +782,11 @@ struct AgentChatView: View {
                 HStack {
                     Text("Keyboard Shortcuts")
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(theme.popupFg)
+                        .foregroundStyle(theme.agentTextFg)
                     Spacer()
                     Text("Press ? or Esc to close")
                         .font(.system(size: 11))
-                        .foregroundStyle(theme.popupFg.opacity(0.4))
+                        .foregroundStyle(theme.agentTextFg.opacity(0.4))
                 }
 
                 ForEach(state.helpGroups) { group in
@@ -791,11 +797,11 @@ struct AgentChatView: View {
         }
         .background(
             RoundedRectangle(cornerRadius: 12)
-                .fill(theme.popupBg.opacity(0.95))
+                .fill(theme.agentPanelBg.opacity(0.95))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 12)
-                .strokeBorder(theme.popupBorder.opacity(0.3), lineWidth: 1)
+                .strokeBorder(theme.agentCodeBorder.opacity(0.3), lineWidth: 1)
         )
         .padding(16)
         .transition(.opacity)
@@ -808,18 +814,18 @@ struct AgentChatView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text(group.title)
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(theme.accent)
+                .foregroundStyle(theme.agentHeaderFg)
 
             ForEach(Array(group.bindings.enumerated()), id: \.offset) { _, binding in
                 HStack(spacing: 0) {
                     Text(binding.key)
                         .font(.system(size: 12, weight: .medium, design: .monospaced))
-                        .foregroundStyle(theme.popupFg.opacity(0.9))
+                        .foregroundStyle(theme.agentTextFg.opacity(0.9))
                         .frame(width: 140, alignment: .leading)
 
                     Text(binding.description)
                         .font(.system(size: 12))
-                        .foregroundStyle(theme.popupFg.opacity(0.6))
+                        .foregroundStyle(theme.agentTextFg.opacity(0.6))
 
                     Spacer()
                 }
@@ -837,16 +843,16 @@ struct AgentChatView: View {
             Text("Follow output")
                 .font(.system(size: 11, weight: .medium))
         }
-        .foregroundStyle(theme.popupFg.opacity(0.8))
+        .foregroundStyle(theme.agentTextFg.opacity(0.8))
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .background(
             Capsule()
-                .fill(theme.popupBg.opacity(0.9))
+                .fill(theme.agentCodeBg.opacity(0.9))
         )
         .overlay(
             Capsule()
-                .strokeBorder(theme.popupBorder.opacity(0.3), lineWidth: 1)
+                .strokeBorder(theme.agentCodeBorder.opacity(0.3), lineWidth: 1)
         )
     }
 
@@ -879,7 +885,7 @@ struct AgentChatView: View {
     private var statusColor: Color {
         switch state.status {
         case 0: return Color.gray
-        case 1: return theme.accent
+        case 1: return theme.agentHeaderFg
         case 2: return Color.orange
         case 3: return Color.red
         default: return Color.gray

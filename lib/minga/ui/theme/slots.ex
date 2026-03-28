@@ -18,6 +18,7 @@ defmodule Minga.UI.Theme.Slots do
   | 0x40      | Accent        |
   | 0x50-0x5B | Gutter + Git + Highlights |
   | 0x5C-0x61 | Agent status  |
+  | 0xA0-0xAE | Agent chat    |
   """
 
   # ── Editor + Tree ──
@@ -99,6 +100,23 @@ defmodule Minga.UI.Theme.Slots do
   # ── Accent ──
   @accent 0x40
 
+  # ── Agent chat theme (populated from Theme.Agent) ──
+  @agent_panel_bg 0xA0
+  @agent_header_bg 0xA1
+  @agent_header_fg 0xA2
+  @agent_user_border 0xA3
+  @agent_user_label 0xA4
+  @agent_assistant_border 0xA5
+  @agent_assistant_label 0xA6
+  @agent_input_border 0xA7
+  @agent_input_bg 0xA8
+  @agent_input_placeholder 0xA9
+  @agent_text_fg 0xAA
+  @agent_tool_border 0xAB
+  @agent_tool_header 0xAC
+  @agent_code_bg 0xAD
+  @agent_code_border 0xAE
+
   @typedoc "A color slot pair: `{slot_id, rgb_color | nil}`."
   @type color_pair :: {non_neg_integer(), non_neg_integer() | nil}
 
@@ -177,7 +195,7 @@ defmodule Minga.UI.Theme.Slots do
       {@highlight_read_bg, e.highlight_read_bg || 0x3A3F4B},
       {@highlight_write_bg, e.highlight_write_bg || 0x4A3F2B},
       {@selection_bg, e.selection_bg || 0x264F78}
-    ] ++ agent_status_pairs(theme, tb)
+    ] ++ agent_status_pairs(theme, tb) ++ agent_chat_pairs(theme)
   end
 
   @spec agent_status_pairs(Minga.UI.Theme.t(), Minga.UI.Theme.TabBar.t() | nil) :: [color_pair()]
@@ -189,6 +207,29 @@ defmodule Minga.UI.Theme.Slots do
       {@agent_status_needs_you, tb && tb.modified_fg},
       {@agent_status_done, theme.tree.active_fg},
       {@agent_status_errored, theme.gutter.error_fg}
+    ]
+  end
+
+  @spec agent_chat_pairs(Minga.UI.Theme.t()) :: [color_pair()]
+  defp agent_chat_pairs(theme) do
+    agent = Minga.UI.Theme.agent_theme(theme)
+
+    [
+      {@agent_panel_bg, agent.panel_bg},
+      {@agent_header_bg, agent.header_bg},
+      {@agent_header_fg, agent.header_fg},
+      {@agent_user_border, agent.user_border},
+      {@agent_user_label, agent.user_label},
+      {@agent_assistant_border, agent.assistant_border},
+      {@agent_assistant_label, agent.assistant_label},
+      {@agent_input_border, agent.input_border},
+      {@agent_input_bg, agent.input_bg},
+      {@agent_input_placeholder, agent.input_placeholder},
+      {@agent_text_fg, agent.text_fg},
+      {@agent_tool_border, agent.tool_border},
+      {@agent_tool_header, agent.tool_header},
+      {@agent_code_bg, agent.code_bg},
+      {@agent_code_border, agent.code_border}
     ]
   end
 
