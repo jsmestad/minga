@@ -10,23 +10,26 @@ defmodule Minga.Keymap.Scope.GitStatus do
   to insert or visual are blocked.
   """
 
-  @behaviour Minga.Keymap.Scope
+  use Minga.Keymap.Scope.Builder,
+    name: :git_status,
+    display_name: "Git Status"
 
   alias Minga.Keymap.Bindings
 
   @enter 13
   @escape 27
   @tab 9
+  @ctrl 0x02
+  @cmd 0x08
 
-  # ── Behaviour callbacks ────────────────────────────────────────────────
+  # Groups included by this scope.
+  @cua_groups [:cua_navigation, :cua_cmd_chords]
 
   @impl true
-  @spec name() :: :git_status
-  def name, do: :git_status
+  @spec included_groups() :: [atom() | {atom(), keyword()}]
+  def included_groups, do: @cua_groups
 
-  @impl true
-  @spec display_name() :: String.t()
-  def display_name, do: "Git Status"
+  # ── Keymap ─────────────────────────────────────────────────────────────────
 
   @impl true
   @spec keymap(Minga.Keymap.Scope.vim_state(), Minga.Keymap.Scope.context()) ::
@@ -67,18 +70,6 @@ defmodule Minga.Keymap.Scope.GitStatus do
     ]
   end
 
-  @impl true
-  @spec included_groups() :: [atom() | {atom(), keyword()}]
-  def included_groups, do: [:cua_navigation, :cua_cmd_chords]
-
-  @impl true
-  @spec on_enter(term()) :: term()
-  def on_enter(state), do: state
-
-  @impl true
-  @spec on_exit(term()) :: term()
-  def on_exit(state), do: state
-
   # ── Normal mode bindings ───────────────────────────────────────────────
 
   @spec normal_trie() :: Bindings.node_t()
@@ -107,24 +98,24 @@ defmodule Minga.Keymap.Scope.GitStatus do
 
   # ── CUA mode bindings ─────────────────────────────────────────────────
 
-  alias Minga.Keymap.CUADefaults
-
-  @ctrl 0x02
-  @cmd 0x08
-
   @spec cua_trie() :: Bindings.node_t()
   defp cua_trie do
-    CUADefaults.navigation_trie()
-    # Git operations (same keys as normal, these are domain-specific not vim-specific)
-    |> Bindings.bind([{?s, 0}], :git_status_stage, "Stage file")
-    |> Bindings.bind([{?u, 0}], :git_status_unstage, "Unstage file")
-    |> Bindings.bind([{?d, 0}], :git_status_discard, "Discard changes")
-    |> Bindings.bind([{@tab, 0}], :git_status_toggle_section, "Toggle section collapse")
-    # Open/commit
-    |> Bindings.bind([{@enter, 0}], :git_status_open_file, "Open file")
-    |> Bindings.bind([{?c, @cmd}], :git_status_start_commit, "Start commit")
-    |> Bindings.bind([{?c, @ctrl}], :git_status_start_commit, "Start commit")
-    # Close
-    |> Bindings.bind([{@escape, 0}], :git_status_close, "Close git status")
+    build_trie(
+      groups: @cua_groups,
+      then: fn trie ->
+        trie
+        # Git operations (same keys as normal, domain-specific not vim-specific)
+        |> Bindings.bind([{?s, 0}], :git_status_stage, "Stage file")
+        |> Bindings.bind([{?u, 0}], :git_status_unstage, "Unstage file")
+        |> Bindings.bind([{?d, 0}], :git_status_discard, "Discard changes")
+        |> Bindings.bind([{@tab, 0}], :git_status_toggle_section, "Toggle section collapse")
+        # Open/commit
+        |> Bindings.bind([{@enter, 0}], :git_status_open_file, "Open file")
+        |> Bindings.bind([{?c, @cmd}], :git_status_start_commit, "Start commit")
+        |> Bindings.bind([{?c, @ctrl}], :git_status_start_commit, "Start commit")
+        # Close
+        |> Bindings.bind([{@escape, 0}], :git_status_close, "Close git status")
+      end
+    )
   end
 end

@@ -11,7 +11,9 @@ defmodule Minga.Keymap.Scope.FileTree do
   or visual are blocked.
   """
 
-  @behaviour Minga.Keymap.Scope
+  use Minga.Keymap.Scope.Builder,
+    name: :file_tree,
+    display_name: "File Tree"
 
   alias Minga.Keymap.Bindings
 
@@ -19,15 +21,15 @@ defmodule Minga.Keymap.Scope.FileTree do
   @enter 13
   @escape 27
 
-  # ── Behaviour callbacks ────────────────────────────────────────────────────
+  # Groups included by this scope, per vim state.
+  # CUA mode gets arrow-key navigation from the shared group.
+  @cua_groups [:cua_navigation]
 
   @impl true
-  @spec name() :: :file_tree
-  def name, do: :file_tree
+  @spec included_groups() :: [atom() | {atom(), keyword()}]
+  def included_groups, do: @cua_groups
 
-  @impl true
-  @spec display_name() :: String.t()
-  def display_name, do: "File Tree"
+  # ── Keymap ─────────────────────────────────────────────────────────────────
 
   @impl true
   @spec keymap(Minga.Keymap.Scope.vim_state(), Minga.Keymap.Scope.context()) ::
@@ -65,18 +67,6 @@ defmodule Minga.Keymap.Scope.FileTree do
     ]
   end
 
-  @impl true
-  @spec included_groups() :: [atom() | {atom(), keyword()}]
-  def included_groups, do: [:cua_navigation]
-
-  @impl true
-  @spec on_enter(term()) :: term()
-  def on_enter(state), do: state
-
-  @impl true
-  @spec on_exit(term()) :: term()
-  def on_exit(state), do: state
-
   # ── Normal mode bindings ───────────────────────────────────────────────────
 
   @spec normal_trie() :: Bindings.node_t()
@@ -96,17 +86,20 @@ defmodule Minga.Keymap.Scope.FileTree do
   # Arrow keys for navigation, Enter to open, Escape to close.
   # Left/Right expand/collapse directories (matching macOS Finder).
 
-  alias Minga.Keymap.CUADefaults
-
   @spec cua_trie() :: Bindings.node_t()
   defp cua_trie do
-    CUADefaults.navigation_trie()
-    |> Bindings.bind([{@enter, 0}], :tree_open_or_toggle, "Open file / toggle directory")
-    |> Bindings.bind([{@escape, 0}], :tree_close, "Close file tree")
-    # Arrow left/right: collapse/expand (Finder-style)
-    |> Bindings.bind([{57_351, 0}], :tree_expand, "Expand directory")
-    |> Bindings.bind([{57_350, 0}], :tree_collapse, "Collapse directory")
-    |> Bindings.bind([{0xF703, 0}], :tree_expand, "Expand directory")
-    |> Bindings.bind([{0xF702, 0}], :tree_collapse, "Collapse directory")
+    build_trie(
+      groups: @cua_groups,
+      then: fn trie ->
+        trie
+        |> Bindings.bind([{@enter, 0}], :tree_open_or_toggle, "Open file / toggle directory")
+        |> Bindings.bind([{@escape, 0}], :tree_close, "Close file tree")
+        # Arrow left/right: collapse/expand (Finder-style)
+        |> Bindings.bind([{57_351, 0}], :tree_expand, "Expand directory")
+        |> Bindings.bind([{57_350, 0}], :tree_collapse, "Collapse directory")
+        |> Bindings.bind([{0xF703, 0}], :tree_expand, "Expand directory")
+        |> Bindings.bind([{0xF702, 0}], :tree_collapse, "Collapse directory")
+      end
+    )
   end
 end
