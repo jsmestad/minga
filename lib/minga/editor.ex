@@ -63,6 +63,7 @@ defmodule Minga.Editor do
   alias Minga.Agent.Session, as: AgentSession
 
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.State.LSP, as: LSPState
 
   alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.Buffers
@@ -867,13 +868,13 @@ defmodule Minga.Editor do
 
   # Document highlight debounce timer fired
   def handle_info(:inlay_hint_scroll_debounce, state) do
-    state = %{state | inlay_hint_debounce_timer: nil}
+    state = %{state | lsp: LSPState.clear_inlay_hint_timer(state.lsp)}
     state = LspActions.inlay_hints(state)
     {:noreply, state}
   end
 
   def handle_info(:document_highlight_debounce, state) do
-    state = %{state | highlight_debounce_timer: nil}
+    state = %{state | lsp: LSPState.clear_highlight_timer(state.lsp)}
     state = LspActions.document_highlight(state)
     {:noreply, state}
   end
@@ -923,17 +924,10 @@ defmodule Minga.Editor do
          %Minga.Events.LspStatusEvent{name: name, status: status}},
         state
       ) do
-    old_status = state.lsp_status
-
-    server_statuses =
-      case status do
-        :stopped -> Map.delete(state.lsp_server_statuses, name)
-        s -> Map.put(state.lsp_server_statuses, name, s)
-      end
-
-    lsp_status = aggregate_lsp_server_statuses(server_statuses)
-    state = %{state | lsp_server_statuses: server_statuses, lsp_status: lsp_status}
-    state = if lsp_status != old_status, do: schedule_render(state, 16), else: state
+    old_status = state.lsp.status
+    new_lsp = LSPState.update_server_status(state.lsp, name, status)
+    state = %{state | lsp: new_lsp}
+    state = if new_lsp.status != old_status, do: schedule_render(state, 16), else: state
     {:noreply, state}
   end
 
@@ -1472,29 +1466,7 @@ defmodule Minga.Editor do
     %{state | render_timer: ref}
   end
 
-  # ── LSP status aggregation ────────────────────────────────────────────────────
-
-  # Derives an aggregate LSP status from the per-server status map.
-  # Priority: :ready > :error > :initializing > :starting > :none
-  @spec aggregate_lsp_server_statuses(%{atom() => :starting | :initializing | :ready | :crashed}) ::
-          Minga.Editor.Modeline.lsp_status()
-  defp aggregate_lsp_server_statuses(server_statuses) when server_statuses == %{}, do: :none
-
-  defp aggregate_lsp_server_statuses(server_statuses) do
-    server_statuses
-    |> Map.values()
-    |> Enum.reduce(:none, fn
-      :ready, _acc -> :ready
-      _status, :ready -> :ready
-      :crashed, _acc -> :error
-      _status, :error -> :error
-      :initializing, _acc -> :initializing
-      _status, :initializing -> :initializing
-      :starting, _acc -> :starting
-      _status, :starting -> :starting
-      _status, acc -> acc
-    end)
-  end
+  # LSP status aggregation moved to Minga.Editor.State.LSP
 
   # ── Diagnostic decorations ──────────────────────────────────────────────────
 

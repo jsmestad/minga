@@ -204,10 +204,13 @@ defmodule Minga.Input.Router do
   # This ensures the stored selection range chain doesn't linger after
   # the user exits visual mode (Escape, entering normal mode, switching buffers).
   @spec maybe_clear_selection_ranges(EditorState.t(), atom()) :: EditorState.t()
-  defp maybe_clear_selection_ranges(%EditorState{selection_ranges: ranges} = state, old_mode)
+  defp maybe_clear_selection_ranges(
+         %EditorState{lsp: %{selection_ranges: ranges}} = state,
+         old_mode
+       )
        when old_mode == :visual and ranges != nil do
     if Editing.mode(state) != :visual do
-      %{state | selection_ranges: nil, selection_range_index: 0}
+      %{state | lsp: Minga.Editor.State.LSP.clear_selection_ranges(state.lsp)}
     else
       state
     end

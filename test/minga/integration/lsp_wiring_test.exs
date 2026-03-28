@@ -71,7 +71,7 @@ defmodule Minga.Integration.LspWiringTest do
 
       # Record initial viewport top
       state_before = :sys.get_state(ctx.editor)
-      initial_vp_top = state_before.last_inlay_viewport_top
+      initial_vp_top = state_before.lsp.last_inlay_viewport_top
 
       # Scroll down with the mouse wheel
       send_mouse(ctx, 10, 10, :wheel_down)
@@ -79,14 +79,14 @@ defmodule Minga.Integration.LspWiringTest do
       # The viewport should have moved, scheduling an inlay hint timer
       state = :sys.get_state(ctx.editor)
 
-      assert state.inlay_hint_debounce_timer != nil,
+      assert state.lsp.inlay_hint_debounce_timer != nil,
              "scroll wheel should schedule inlay hint debounce timer"
 
-      assert state.last_inlay_viewport_top != initial_vp_top,
+      assert state.lsp.last_inlay_viewport_top != initial_vp_top,
              "viewport top should have changed after scroll"
 
       # Clean up: cancel the timer to avoid late messages
-      Process.cancel_timer(state.inlay_hint_debounce_timer)
+      Process.cancel_timer(state.lsp.inlay_hint_debounce_timer)
     end
 
     test "inlay hint debounce timer fires and clears itself" do
@@ -96,17 +96,17 @@ defmodule Minga.Integration.LspWiringTest do
       send_mouse(ctx, 10, 10, :wheel_down)
 
       state = :sys.get_state(ctx.editor)
-      assert state.inlay_hint_debounce_timer != nil
+      assert state.lsp.inlay_hint_debounce_timer != nil
 
       # Wait for the debounce timer to fire (200ms + margin)
       state =
-        wait_until(ctx, fn s -> s.inlay_hint_debounce_timer == nil end,
+        wait_until(ctx, fn s -> s.lsp.inlay_hint_debounce_timer == nil end,
           max_attempts: 30,
           interval_ms: 20,
           message: "inlay hint debounce timer should have fired and cleared itself"
         )
 
-      assert state.inlay_hint_debounce_timer == nil
+      assert state.lsp.inlay_hint_debounce_timer == nil
     end
   end
 
@@ -159,10 +159,11 @@ defmodule Minga.Integration.LspWiringTest do
       :sys.replace_state(ctx.editor, fn state ->
         %{
           state
-          | selection_ranges: [
-              %{"range" => %{"start" => %{"line" => 0}, "end" => %{"line" => 1}}}
-            ],
-            selection_range_index: 1
+          | lsp:
+              Minga.Editor.State.LSP.set_selection_ranges(state.lsp, [
+                %{"range" => %{"start" => %{"line" => 0}, "end" => %{"line" => 1}}}
+              ])
+              |> Map.put(:selection_range_index, 1)
         }
       end)
 
@@ -175,8 +176,8 @@ defmodule Minga.Integration.LspWiringTest do
 
       # Selection range state should be cleared
       state = :sys.get_state(ctx.editor)
-      assert state.selection_ranges == nil
-      assert state.selection_range_index == 0
+      assert state.lsp.selection_ranges == nil
+      assert state.lsp.selection_range_index == 0
     end
   end
 end
