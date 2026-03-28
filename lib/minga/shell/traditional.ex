@@ -17,6 +17,13 @@ defmodule Minga.Shell.Traditional do
   Phase F for the full plan.
 
   Batch 1 (current): `nav_flash`, `hover_popup`, `dashboard`, `status_msg`
+
+  ## Rendering architecture
+
+  Layout, chrome, and rendering are owned by modules under
+  `Shell.Traditional.*`: `Layout`, `Chrome`, and `Renderer`. These
+  currently delegate to `Editor.*` modules; the implementations will
+  move here as the shell independence refactor progresses.
   """
 
   @behaviour Minga.Shell
@@ -45,26 +52,17 @@ defmodule Minga.Shell.Traditional do
 
   @impl true
   @spec compute_layout(term()) :: Minga.Editor.Layout.t()
-  def compute_layout(editor_state) do
-    Minga.Editor.Layout.compute(editor_state)
-  end
+  defdelegate compute_layout(editor_state), to: Minga.Shell.Traditional.Layout, as: :compute
 
   @impl true
   @spec build_chrome(term(), Minga.Editor.Layout.t(), map(), term()) ::
           Minga.Editor.RenderPipeline.Chrome.t()
-  def build_chrome(editor_state, layout, scrolls, cursor_info) do
-    Minga.Editor.RenderPipeline.Chrome.build_chrome(editor_state, layout, scrolls, cursor_info)
-  end
+  defdelegate build_chrome(editor_state, layout, scrolls, cursor_info),
+    to: Minga.Shell.Traditional.Chrome
 
   @impl true
   @spec render(term()) :: term()
-  def render(%{workspace: %{buffers: %{active: nil}}} = editor_state) do
-    Minga.Editor.Renderer.render_dashboard(editor_state)
-  end
-
-  def render(editor_state) do
-    Minga.Editor.Renderer.render_buffer(editor_state)
-  end
+  defdelegate render(editor_state), to: Minga.Shell.Traditional.Renderer
 
   @impl true
   @spec input_handlers(term()) :: %{overlay: [module()], surface: [module()]}
