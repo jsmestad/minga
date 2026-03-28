@@ -11,6 +11,7 @@ defmodule Minga.Frontend.Emit.GUI.ChromeCacheTest do
   use ExUnit.Case, async: true
 
   alias Minga.Editor.StatusBar.Data, as: StatusBarData
+  alias Minga.Frontend.Emit.Context
   alias Minga.Frontend.Emit.GUI, as: EmitGUI
 
   import Minga.Editor.RenderPipeline.TestHelpers
@@ -69,7 +70,7 @@ defmodule Minga.Frontend.Emit.GUI.ChromeCacheTest do
       state = gui_chrome_state()
       sb_data = StatusBarData.from_state(state)
 
-      EmitGUI.sync_swiftui_chrome(state, sb_data)
+      EmitGUI.sync_swiftui_chrome(Context.from_editor_state(state), sb_data)
 
       # Should receive at least one send_commands cast with chrome data.
       casts = collect_port_casts()
@@ -85,12 +86,12 @@ defmodule Minga.Frontend.Emit.GUI.ChromeCacheTest do
       sb_data = StatusBarData.from_state(state)
 
       # First call: populates caches.
-      EmitGUI.sync_swiftui_chrome(state, sb_data)
+      EmitGUI.sync_swiftui_chrome(Context.from_editor_state(state), sb_data)
       flush_port_casts()
 
       # Second call with the same state: only status bar should be sent
       # (it has no caching since cursor position changes every frame).
-      EmitGUI.sync_swiftui_chrome(state, sb_data)
+      EmitGUI.sync_swiftui_chrome(Context.from_editor_state(state), sb_data)
       casts = collect_port_casts()
 
       # Status bar always returns a binary (no fingerprint cache), so
@@ -120,14 +121,14 @@ defmodule Minga.Frontend.Emit.GUI.ChromeCacheTest do
       sb_data = StatusBarData.from_state(state)
 
       # First call to populate caches.
-      EmitGUI.sync_swiftui_chrome(state, sb_data)
+      EmitGUI.sync_swiftui_chrome(Context.from_editor_state(state), sb_data)
       flush_port_casts()
 
       # Change the theme to force a cache miss on the theme fingerprint.
       changed_state = %{state | theme: Minga.UI.Theme.get!(:one_dark)}
       sb_data2 = StatusBarData.from_state(changed_state)
 
-      EmitGUI.sync_swiftui_chrome(changed_state, sb_data2)
+      EmitGUI.sync_swiftui_chrome(Context.from_editor_state(changed_state), sb_data2)
       casts = collect_port_casts()
 
       all_cmds = List.flatten(casts)
@@ -150,7 +151,7 @@ defmodule Minga.Frontend.Emit.GUI.ChromeCacheTest do
 
       assert Process.get(:last_gui_file_tree_fp) == nil
 
-      EmitGUI.sync_swiftui_chrome(state, sb_data)
+      EmitGUI.sync_swiftui_chrome(Context.from_editor_state(state), sb_data)
       flush_port_casts()
 
       # After first call, the file tree cache should be set.
@@ -163,7 +164,7 @@ defmodule Minga.Frontend.Emit.GUI.ChromeCacheTest do
       sb_data = StatusBarData.from_state(state)
 
       # No picker is open in the test state.
-      EmitGUI.sync_swiftui_chrome(state, sb_data)
+      EmitGUI.sync_swiftui_chrome(Context.from_editor_state(state), sb_data)
       flush_port_casts()
 
       assert Process.get(:last_gui_picker_fp) == :closed
@@ -173,7 +174,7 @@ defmodule Minga.Frontend.Emit.GUI.ChromeCacheTest do
       state = gui_chrome_state()
       sb_data = StatusBarData.from_state(state)
 
-      EmitGUI.sync_swiftui_chrome(state, sb_data)
+      EmitGUI.sync_swiftui_chrome(Context.from_editor_state(state), sb_data)
       flush_port_casts()
 
       assert Process.get(:last_gui_agent_chat_fp) == :not_visible
@@ -184,7 +185,7 @@ defmodule Minga.Frontend.Emit.GUI.ChromeCacheTest do
       sb_data = StatusBarData.from_state(state)
 
       # sync_swiftui_chrome returns the updated state (for message_store).
-      new_state = EmitGUI.sync_swiftui_chrome(state, sb_data)
+      new_state = EmitGUI.sync_swiftui_chrome(Context.from_editor_state(state), sb_data)
       flush_port_casts()
 
       assert is_map(new_state)
@@ -202,7 +203,7 @@ defmodule Minga.Frontend.Emit.GUI.ChromeCacheTest do
       sb_data = StatusBarData.from_state(state)
 
       # Before the fix, this raised KeyError: key :total not found in %Minga.UI.Picker{}.
-      EmitGUI.sync_swiftui_chrome(state, sb_data)
+      EmitGUI.sync_swiftui_chrome(Context.from_editor_state(state), sb_data)
       flush_port_casts()
 
       refute Process.get(:last_gui_picker_fp) in [:closed, nil]
@@ -226,7 +227,7 @@ defmodule Minga.Frontend.Emit.GUI.ChromeCacheTest do
       sb_data = StatusBarData.from_state(state)
 
       # Should not crash; the dead buffer is handled via catch :exit.
-      new_state = EmitGUI.sync_swiftui_chrome(state, sb_data)
+      new_state = EmitGUI.sync_swiftui_chrome(Context.from_editor_state(state), sb_data)
       flush_port_casts()
 
       assert is_map(new_state)
