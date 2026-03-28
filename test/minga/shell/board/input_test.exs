@@ -8,6 +8,8 @@ defmodule Minga.Shell.Board.InputTest do
   use ExUnit.Case, async: true
 
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.State.Agent, as: AgentState
+  alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.Viewport
   alias Minga.Shell.Board
   alias Minga.Shell.Board.Input, as: BoardInput
@@ -142,6 +144,21 @@ defmodule Minga.Shell.Board.InputTest do
       assert new_state.shell_state.zoomed_into == nil
       # Workspace was stored on the card
       assert new_state.shell_state.cards[1].workspace != nil
+    end
+
+    test "clears agent session singleton on zoom-out" do
+      state = editor_zoomed_into(3, 1)
+
+      # Simulate an active agent session on the board's agent singleton
+      fake_pid = spawn(fn -> Process.sleep(:infinity) end)
+
+      board = %{state.shell_state | agent: %AgentState{session: fake_pid, status: :idle}}
+      state = %{state | shell_state: board}
+      assert AgentAccess.session(state) == fake_pid
+
+      {:handled, new_state} = ZoomOut.handle_key(state, @escape, 0)
+      assert new_state.shell_state.zoomed_into == nil
+      assert AgentAccess.session(new_state) == nil
     end
 
     test "passes through when not zoomed" do
