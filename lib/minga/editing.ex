@@ -77,11 +77,11 @@ defmodule Minga.Editing do
     to: Minga.Editing.TextObject,
     as: :a_parens
 
-  defdelegate select_structural_inner(type, pos, buffer_id),
+  defdelegate select_structural_inner(tree_data),
     to: Minga.Editing.TextObject,
     as: :structural_inner
 
-  defdelegate select_structural_around(type, pos, buffer_id),
+  defdelegate select_structural_around(tree_data),
     to: Minga.Editing.TextObject,
     as: :structural_around
 

@@ -17,6 +17,7 @@ defmodule Minga.Editor.Commands.Helpers do
   alias Minga.Editor.State.Registers
   alias Minga.Editor.Viewport
   alias Minga.Mode.State, as: ModeState
+  alias Minga.Parser.Manager, as: ParserManager
 
   @typedoc "Internal editor state."
   @type state :: EditorState.t()
@@ -416,11 +417,17 @@ defmodule Minga.Editor.Commands.Helpers do
   def compute_text_object_range(buf, pos, :around, {:paren, open, close}, _bid),
     do: Minga.Editing.select_around_parens(buf, pos, open, close)
 
-  def compute_text_object_range(_buf, pos, :inner, {:structural, type}, bid),
-    do: Minga.Editing.select_structural_inner(type, pos, bid)
+  def compute_text_object_range(_buf, {line, col}, :inner, {:structural, type}, bid) do
+    capture = Atom.to_string(type) <> ".inside"
+    tree_data = request_textobject(bid, line, col, capture)
+    Minga.Editing.select_structural_inner(tree_data)
+  end
 
-  def compute_text_object_range(_buf, pos, :around, {:structural, type}, bid),
-    do: Minga.Editing.select_structural_around(type, pos, bid)
+  def compute_text_object_range(_buf, {line, col}, :around, {:structural, type}, bid) do
+    capture = Atom.to_string(type) <> ".around"
+    tree_data = request_textobject(bid, line, col, capture)
+    Minga.Editing.select_structural_around(tree_data)
+  end
 
   def compute_text_object_range(_buf, _pos, _modifier, _spec, _bid), do: nil
 
@@ -464,5 +471,15 @@ defmodule Minga.Editor.Commands.Helpers do
       name ->
         name
     end
+  end
+
+  # Queries the tree-sitter parser for a textobject range, returning the raw
+  # 4-tuple or nil. Gracefully returns nil when the parser is not running.
+  @spec request_textobject(non_neg_integer(), non_neg_integer(), non_neg_integer(), String.t()) ::
+          Minga.Editing.TextObject.tree_range()
+  defp request_textobject(buffer_id, row, col, capture_name) do
+    ParserManager.request_textobject(buffer_id, row, col, capture_name)
+  catch
+    :exit, _ -> nil
   end
 end

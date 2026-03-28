@@ -34,7 +34,6 @@ defmodule Minga.Editing.TextObject do
   alias Minga.Core.Unicode
   alias Minga.Editing.Motion.Helpers
   alias Minga.Editing.Text.Readable
-  alias Minga.Parser.Manager, as: ParserManager
 
   @typedoc "A zero-indexed `{line, byte_col}` position."
   @type position :: {non_neg_integer(), non_neg_integer()}
@@ -234,43 +233,44 @@ defmodule Minga.Editing.TextObject do
   @typedoc "Structural text object type."
   @type structural_type :: :function | :class | :parameter | :block | :comment | :test
 
-  @doc """
-  Returns the inner range of a structural text object (e.g., function body,
-  class body, parameter) at the cursor position.
+  @typedoc "Raw tree-sitter textobject result: `{start_row, start_col, end_row, end_col}` or `nil`."
+  @type tree_range ::
+          {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()} | nil
 
-  Uses tree-sitter textobjects.scm queries. Returns `nil` if no text object
-  of the requested type contains the cursor, or if tree-sitter is unavailable.
+  @doc """
+  Converts a raw tree-sitter textobject range into an inclusive Vim-style
+  inner range.
+
+  The caller is responsible for querying the parser (via
+  `Parser.Manager.request_textobject/4`) and passing the result here.
+  Returns `nil` when `tree_data` is `nil` (no match found by the parser).
   """
-  @spec structural_inner(structural_type(), position(), non_neg_integer()) :: range()
-  def structural_inner(type, {line, col}, buffer_id) when is_atom(type) do
-    capture = Atom.to_string(type) <> ".inside"
-    query_structural(line, col, capture, buffer_id)
+  @spec structural_inner(tree_range()) :: range()
+  def structural_inner(tree_data) do
+    convert_tree_range(tree_data)
   end
 
   @doc """
-  Returns the outer range of a structural text object at the cursor position.
+  Converts a raw tree-sitter textobject range into an inclusive Vim-style
+  outer range.
 
-  Includes the structural delimiters (e.g., `def...end`, braces, etc.).
+  Semantically identical to `structural_inner/1` (tree-sitter already
+  distinguishes inside vs around via the capture name). This function exists
+  so callers can express intent clearly.
   """
-  @spec structural_around(structural_type(), position(), non_neg_integer()) :: range()
-  def structural_around(type, {line, col}, buffer_id) when is_atom(type) do
-    capture = Atom.to_string(type) <> ".around"
-    query_structural(line, col, capture, buffer_id)
+  @spec structural_around(tree_range()) :: range()
+  def structural_around(tree_data) do
+    convert_tree_range(tree_data)
   end
 
-  @spec query_structural(non_neg_integer(), non_neg_integer(), String.t(), non_neg_integer()) ::
-          range()
-  defp query_structural(row, col, capture_name, buffer_id) do
-    case ParserManager.request_textobject(buffer_id, row, col, capture_name) do
-      {start_row, start_col, end_row, end_col} ->
-        # Zig returns byte columns. The end position from tree-sitter is
-        # exclusive, so we subtract 1 to make it inclusive for Vim semantics.
-        end_pos = adjust_end_position(end_row, end_col)
-        {{start_row, start_col}, end_pos}
+  @spec convert_tree_range(tree_range()) :: range()
+  defp convert_tree_range(nil), do: nil
 
-      nil ->
-        nil
-    end
+  defp convert_tree_range({start_row, start_col, end_row, end_col}) do
+    # Zig returns byte columns. The end position from tree-sitter is
+    # exclusive, so we subtract 1 to make it inclusive for Vim semantics.
+    end_pos = adjust_end_position(end_row, end_col)
+    {{start_row, start_col}, end_pos}
   end
 
   # Tree-sitter end positions are exclusive. Convert to inclusive for Vim.
