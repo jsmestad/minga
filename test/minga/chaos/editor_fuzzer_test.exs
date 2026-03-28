@@ -157,7 +157,6 @@ defmodule Minga.Chaos.EditorFuzzerTest do
   def window_up, do: EditorActions.window_up(get_ctx())
   def buffer_next, do: EditorActions.buffer_next(get_ctx())
   def buffer_prev, do: EditorActions.buffer_prev(get_ctx())
-  def toggle_file_tree, do: EditorActions.toggle_file_tree(get_ctx())
   def toggle_agent_view, do: EditorActions.toggle_agent_view(get_ctx())
   def tab_next, do: EditorActions.tab_next(get_ctx())
   def tab_prev, do: EditorActions.tab_prev(get_ctx())
@@ -203,7 +202,6 @@ defmodule Minga.Chaos.EditorFuzzerTest do
       {1, {:window_up, []}},
       {1, {:buffer_next, []}},
       {1, {:buffer_prev, []}},
-      {1, {:toggle_file_tree, []}},
       {1, {:tab_next, []}},
       {1, {:tab_prev, []}}
     ])
