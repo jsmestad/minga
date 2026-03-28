@@ -25,6 +25,7 @@ protocol InputEncoder: AnyObject, Sendable {
     func sendFileTreeNewFolder(parentIndex: UInt16)
     func sendFileTreeEditConfirm(text: String)
     func sendFileTreeEditCancel()
+    func sendFileTreeDelete(index: UInt16)
     func sendFileTreeCollapseAll()
     func sendFileTreeRefresh()
     func sendCompletionSelect(index: UInt16)
@@ -279,6 +280,16 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         var buf = Data(count: 2)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_FILE_TREE_EDIT_CANCEL
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: file_tree_delete. Layout: opcode(1) + action_type(1) + index(2).
+    func sendFileTreeDelete(index: UInt16) {
+        var buf = Data(count: 4)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_FILE_TREE_DELETE
+        buf[2] = UInt8(index >> 8)
+        buf[3] = UInt8(index & 0xFF)
         writeFrame(buf)
     }
 

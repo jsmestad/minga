@@ -110,6 +110,22 @@ defmodule Minga.Editor.Renderer.Minibuffer do
     )
   end
 
+  def render(
+        %{workspace: %{editing: %{mode: :delete_confirm, mode_state: ms}}, theme: theme},
+        row,
+        cols
+      ) do
+    prompt = Minga.Mode.display(:delete_confirm, ms)
+    mb = theme.minibuffer
+
+    DisplayList.draw(
+      row,
+      0,
+      String.pad_trailing(prompt, cols),
+      Face.new(fg: mb.fg, bg: mb.bg)
+    )
+  end
+
   def render(%{workspace: %{editing: %{mode: :command, mode_state: ms}}, theme: theme}, row, cols) do
     cmd_text = ":" <> ms.input
     mb = theme.minibuffer

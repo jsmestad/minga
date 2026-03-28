@@ -282,6 +282,12 @@ struct FileTreeView: View {
             let path = fileTreeState.fullPath(for: entry)
             NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
         }
+        Divider()
+        Button(role: .destructive) {
+            encoder?.sendFileTreeDelete(index: UInt16(entry.index))
+        } label: {
+            Text("Delete")
+        }
     }
 
     private func copyToClipboard(_ string: String) {

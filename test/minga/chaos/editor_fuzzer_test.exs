@@ -305,7 +305,9 @@ defmodule Minga.Chaos.EditorFuzzerTest do
     :search,
     :search_prompt,
     :substitute_confirm,
-    :extension_confirm
+    :extension_confirm,
+    :tool_confirm,
+    :delete_confirm
   ]
 
   def postcondition(%Model{}, {:call, _, _, _}, result) do

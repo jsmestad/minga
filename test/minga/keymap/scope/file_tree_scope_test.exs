@@ -25,6 +25,10 @@ defmodule Minga.Keymap.Scope.FileTreeScopeTest do
     test "R resolves to tree_rename" do
       assert {:command, :tree_rename} = Scope.resolve_key(:file_tree, :normal, {?R, 0})
     end
+
+    test "d resolves to tree_delete" do
+      assert {:command, :tree_delete} = Scope.resolve_key(:file_tree, :normal, {?d, 0})
+    end
   end
 
   describe "CUA mode: file operation bindings not present" do
@@ -38,6 +42,10 @@ defmodule Minga.Keymap.Scope.FileTreeScopeTest do
 
     test "R is not bound in CUA mode" do
       assert :not_found = Scope.resolve_key(:file_tree, :cua, {?R, 0})
+    end
+
+    test "d is not bound in CUA mode" do
+      assert :not_found = Scope.resolve_key(:file_tree, :cua, {?d, 0})
     end
   end
 
@@ -87,6 +95,7 @@ defmodule Minga.Keymap.Scope.FileTreeScopeTest do
       assert Enum.any?(bindings, fn {key, _desc} -> key == "a" end)
       assert Enum.any?(bindings, fn {key, _desc} -> key == "A" end)
       assert Enum.any?(bindings, fn {key, _desc} -> key == "R" end)
+      assert Enum.any?(bindings, fn {key, _desc} -> key == "d" end)
     end
   end
 end

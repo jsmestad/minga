@@ -43,6 +43,7 @@ defmodule Minga.Mode do
           | :substitute_confirm
           | :extension_confirm
           | :tool_confirm
+          | :delete_confirm
 
   @typedoc """
   A command to execute. Either a bare atom (e.g. `:move_left`) or a
@@ -68,6 +69,7 @@ defmodule Minga.Mode do
           | Minga.Mode.SubstituteConfirmState.t()
           | Minga.Mode.ExtensionConfirmState.t()
           | Minga.Mode.ToolConfirmState.t()
+          | Minga.Mode.DeleteConfirmState.t()
 
   @typedoc """
   Result returned by a mode's `handle_key/2`.
@@ -133,6 +135,7 @@ defmodule Minga.Mode do
   def display(:substitute_confirm), do: "-- SUBSTITUTE --"
   def display(:extension_confirm), do: "-- UPDATE --"
   def display(:tool_confirm), do: "-- INSTALL? --"
+  def display(:delete_confirm), do: "-- DELETE? --"
 
   @doc """
   Returns the status-line label for a mode, using the FSM state for
@@ -173,6 +176,18 @@ defmodule Minga.Mode do
     "#{label} not found. Install? [y/n]"
   end
 
+  def display(:delete_confirm, %Minga.Mode.DeleteConfirmState{phase: :trash} = s) do
+    if s.dir? do
+      "Delete '#{s.name}/' and #{s.child_count} files? (y/n)"
+    else
+      "Delete '#{s.name}'? (y/n)"
+    end
+  end
+
+  def display(:delete_confirm, %Minga.Mode.DeleteConfirmState{phase: :permanent} = s) do
+    "Cannot trash. Permanently delete '#{s.name}'? (y/n)"
+  end
+
   def display(mode, _state), do: display(mode)
 
   # ── Private ──────────────────────────────────────────────────────────────────
@@ -190,6 +205,7 @@ defmodule Minga.Mode do
   defp mode_module(:substitute_confirm), do: Minga.Mode.SubstituteConfirm
   defp mode_module(:extension_confirm), do: Minga.Mode.ExtensionConfirm
   defp mode_module(:tool_confirm), do: Minga.Mode.ToolConfirm
+  defp mode_module(:delete_confirm), do: Minga.Mode.DeleteConfirm
 
   @spec apply_result(mode(), result()) :: {mode(), [command()], state()}
   defp apply_result(mode, {:continue, state}) do

@@ -64,7 +64,8 @@ defmodule Minga.Keymap.Scope.FileTree do
        [
          {"a", "New file"},
          {"A", "New folder"},
-         {"R", "Rename"}
+         {"R", "Rename"},
+         {"d", "Delete"}
        ]},
       {"View",
        [
@@ -89,6 +90,7 @@ defmodule Minga.Keymap.Scope.FileTree do
     |> Bindings.bind([{?a, 0}], :tree_new_file, "New file")
     |> Bindings.bind([{?A, 0}], :tree_new_folder, "New folder")
     |> Bindings.bind([{?R, 0}], :tree_rename, "Rename")
+    |> Bindings.bind([{?d, 0}], :tree_delete, "Delete")
   end
 
   # ── CUA mode bindings ─────────────────────────────────────────────────────

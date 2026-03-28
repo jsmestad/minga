@@ -1874,6 +1874,11 @@ defmodule Minga.Editor do
     Commands.FileTree.cancel_editing(state)
   end
 
+  defp handle_gui_action(state, {:file_tree_delete, index}) do
+    state = move_tree_cursor(state, index)
+    Commands.FileTree.delete(state)
+  end
+
   defp handle_gui_action(state, :file_tree_collapse_all) do
     Commands.FileTree.collapse_all(state)
   end
