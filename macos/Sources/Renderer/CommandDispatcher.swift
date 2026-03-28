@@ -179,6 +179,10 @@ final class CommandDispatcher {
         case .guiChangeSummary(let visible, let entries, let selectedIndex):
             guiState.changeSummaryState.update(visible: visible, entries: entries, selectedIndex: selectedIndex)
 
+        case .guiIndentGuides(let data):
+            frameState.windowIndentGuides[data.windowId] = data
+            frameState.dirty = true
+
         case .clipboardWrite(let target, let text):
             handleClipboardWrite(target: target, text: text)
 

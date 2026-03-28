@@ -53,6 +53,7 @@ enum RenderCommand: Sendable {
     case guiSignatureHelp(visible: Bool, anchorRow: UInt16, anchorCol: UInt16, activeSignature: UInt8, activeParameter: UInt8, signatures: [Wire.Signature])
     case guiFloatPopup(visible: Bool, width: UInt16, height: UInt16, title: String, lines: [String])
     case clipboardWrite(target: UInt8, text: String)
+    case guiIndentGuides(data: IndentGuideData)
     case guiSplitSeparators(borderColor: UInt32, verticals: [Wire.VerticalSeparator], horizontals: [Wire.HorizontalSeparator])
     case guiGitStatus(repoState: UInt8, ahead: UInt16, behind: UInt16, branchName: String, entries: [Wire.GitStatusEntry])
     case guiAgentGroups(activeGroupId: UInt16, agentGroups: [Wire.AgentGroupEntry])
@@ -1879,6 +1880,31 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
         }
         return (.guiChangeSummary(visible: csVisible, entries: csEntries, selectedIndex: csSelectedIndex),
                 csPos - offset)
+
+    case OP_GUI_INDENT_GUIDES:
+        // Forward-compatible format: opcode(1) + payload_length(2) + payload
+        // Payload: window_id(2) + tab_width(1) + active_guide_col(2) + guide_count(1) + guide_cols(2 each)
+        guard data.count >= rest + 2 else { throw ProtocolDecodeError.malformed }
+        let igPayloadLen = Int(readU16(data, rest))
+        guard data.count >= rest + 2 + igPayloadLen, igPayloadLen >= 6 else {
+            throw ProtocolDecodeError.malformed
+        }
+        let igStart = rest + 2
+        let igWinId = readU16(data, igStart)
+        let igTabWidth = data[igStart + 2]
+        let igActiveCol = readU16(data, igStart + 3)
+        let igGuideCount = Int(data[igStart + 5])
+        var igCols: [UInt16] = []
+        igCols.reserveCapacity(igGuideCount)
+        var igPos = igStart + 6
+        for _ in 0..<igGuideCount {
+            guard igPos + 2 <= rest + 2 + igPayloadLen else { break }
+            igCols.append(readU16(data, igPos))
+            igPos += 2
+        }
+        let igData = IndentGuideData(windowId: igWinId, tabWidth: igTabWidth,
+                                     activeGuideCol: igActiveCol, guideCols: igCols)
+        return (.guiIndentGuides(data: igData), 1 + 2 + igPayloadLen)
 
     case OP_CLIPBOARD_WRITE:
         // Forward-compatible format: opcode(1) + payload_length(2) + target(1) + text_len(2) + text
