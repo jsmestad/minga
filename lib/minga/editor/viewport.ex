@@ -56,6 +56,29 @@ defmodule Minga.Editor.Viewport do
   def footer_rows, do: 2
 
   @doc """
+  Adjusts the raw row count for a line spacing multiplier.
+
+  When `line_spacing > 1.0`, each line takes more vertical space, so fewer
+  lines fit on screen. Returns `floor(rows / line_spacing)`, clamped to at
+  least 1. Returns the input unchanged when spacing is 1.0 (the TUI default).
+
+  The caller reads `Config.get(:line_spacing)` and passes it here. This keeps
+  Viewport a pure module with no config dependency.
+  """
+  @spec effective_rows(pos_integer(), number()) :: pos_integer()
+  def effective_rows(raw_rows, line_spacing \\ 1.0)
+
+  def effective_rows(raw_rows, line_spacing)
+      when is_integer(raw_rows) and raw_rows > 0 and is_number(line_spacing) and
+             line_spacing > 1.0 do
+    max(floor(raw_rows / line_spacing), 1)
+  end
+
+  def effective_rows(raw_rows, _line_spacing) when is_integer(raw_rows) and raw_rows > 0 do
+    raw_rows
+  end
+
+  @doc """
   Scrolls the viewport to keep the cursor visible.
 
   Returns a new viewport adjusted so that the cursor position `{line, col}`

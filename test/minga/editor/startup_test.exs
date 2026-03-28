@@ -42,39 +42,40 @@ defmodule Minga.Editor.StartupTest do
     end
   end
 
-  describe "build_initial_window/5" do
-    test "agent mode creates a full-screen agent_chat window" do
-      {window, update} = Startup.build_initial_window(:agent, 1, self(), 24, 80)
-
-      assert %Window{} = window
-      assert Content.agent_chat?(window.content)
-      refute Content.buffer?(window.content)
-      assert {:agent_buffer, pid} = update
-      assert is_pid(pid)
-      assert Process.alive?(pid)
-    end
-
-    test "editor mode creates a buffer window" do
-      {:ok, buf} = BufferServer.start_link(content: "hello")
-
-      {window, update} = Startup.build_initial_window(:editor, 1, buf, 24, 80)
-
-      assert %Window{} = window
-      assert Content.buffer?(window.content)
-      refute Content.agent_chat?(window.content)
-      assert window.buffer == buf
-      assert update == :noop
-    end
-
-    test "editor mode with nil buffer returns nil window" do
-      {window, update} = Startup.build_initial_window(:editor, 1, nil, 24, 80)
-
-      assert window == nil
-      assert update == :noop
-    end
-  end
-
   describe "apply_gui_defaults/1" do
+    test "sets line_spacing to 1.2 for GUI frontend" do
+      gui_caps = %Minga.Frontend.Capabilities{frontend_type: :native_gui}
+      Minga.Config.Options.set(:line_spacing, 1.0)
+
+      Startup.apply_gui_defaults(gui_caps)
+
+      assert Minga.Config.Options.get(:line_spacing) == 1.2
+    after
+      Minga.Config.Options.set(:line_spacing, 1.0)
+      Minga.Config.Options.set(:line_numbers, :hybrid)
+    end
+
+    test "does not change line_spacing for TUI frontend" do
+      tui_caps = %Minga.Frontend.Capabilities{frontend_type: :tui}
+      Minga.Config.Options.set(:line_spacing, 1.0)
+
+      Startup.apply_gui_defaults(tui_caps)
+
+      assert Minga.Config.Options.get(:line_spacing) == 1.0
+    end
+
+    test "respects explicit user override to custom line_spacing in GUI mode" do
+      gui_caps = %Minga.Frontend.Capabilities{frontend_type: :native_gui}
+      Minga.Config.Options.set(:line_spacing, 1.5)
+
+      Startup.apply_gui_defaults(gui_caps)
+
+      assert Minga.Config.Options.get(:line_spacing) == 1.5
+    after
+      Minga.Config.Options.set(:line_spacing, 1.0)
+      Minga.Config.Options.set(:line_numbers, :hybrid)
+    end
+
     test "sets line_numbers to :absolute for GUI frontend" do
       gui_caps = %Minga.Frontend.Capabilities{frontend_type: :native_gui}
 
@@ -86,6 +87,7 @@ defmodule Minga.Editor.StartupTest do
       assert Minga.Config.Options.get(:line_numbers) == :absolute
     after
       Minga.Config.Options.set(:line_numbers, :hybrid)
+      Minga.Config.Options.set(:line_spacing, 1.0)
     end
 
     test "does not change line_numbers for TUI frontend" do
@@ -122,6 +124,38 @@ defmodule Minga.Editor.StartupTest do
       assert Minga.Config.Options.get(:line_numbers) == :absolute
     after
       Minga.Config.Options.set(:line_numbers, :hybrid)
+    end
+  end
+
+  describe "build_initial_window/5" do
+    test "agent mode creates a full-screen agent_chat window" do
+      {window, update} = Startup.build_initial_window(:agent, 1, self(), 24, 80)
+
+      assert %Window{} = window
+      assert Content.agent_chat?(window.content)
+      refute Content.buffer?(window.content)
+      assert {:agent_buffer, pid} = update
+      assert is_pid(pid)
+      assert Process.alive?(pid)
+    end
+
+    test "editor mode creates a buffer window" do
+      {:ok, buf} = BufferServer.start_link(content: "hello")
+
+      {window, update} = Startup.build_initial_window(:editor, 1, buf, 24, 80)
+
+      assert %Window{} = window
+      assert Content.buffer?(window.content)
+      refute Content.agent_chat?(window.content)
+      assert window.buffer == buf
+      assert update == :noop
+    end
+
+    test "editor mode with nil buffer returns nil window" do
+      {window, update} = Startup.build_initial_window(:editor, 1, nil, 24, 80)
+
+      assert window == nil
+      assert update == :noop
     end
   end
 

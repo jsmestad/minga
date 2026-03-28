@@ -97,6 +97,12 @@ defmodule Minga.Frontend do
     send_commands(port, cmds)
   end
 
+  @doc "Sends the line_spacing multiplier to the GUI frontend."
+  @spec send_line_spacing(GenServer.server(), number()) :: :ok
+  def send_line_spacing(port, spacing) when is_number(spacing) and spacing >= 1.0 do
+    send_commands(port, [Minga.Frontend.Protocol.GUI.encode_gui_line_spacing(spacing)])
+  end
+
   # ── Parser/Highlight commands ────────────────────────────────────────────
 
   @doc """

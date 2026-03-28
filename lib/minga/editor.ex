@@ -361,10 +361,13 @@ defmodule Minga.Editor do
     caps = Startup.fetch_capabilities(state.port_manager)
     Startup.apply_gui_defaults(caps)
 
+    line_spacing = Config.get(:line_spacing) || 1.0
+    effective_height = Viewport.effective_rows(height, line_spacing)
+
     new_state = %{
       EditorState.update_workspace(
         state,
-        &WorkspaceState.set_viewport(&1, Viewport.new(height, width))
+        &WorkspaceState.set_viewport(&1, Viewport.new(effective_height, width))
       )
       | capabilities: caps,
         layout: nil
@@ -399,10 +402,13 @@ defmodule Minga.Editor do
   end
 
   def handle_info({:minga_input, {:resize, width, height}}, state) do
+    line_spacing = Config.get(:line_spacing) || 1.0
+    effective_height = Viewport.effective_rows(height, line_spacing)
+
     new_state =
       EditorState.update_workspace(
         state,
-        &WorkspaceState.set_viewport(&1, Viewport.new(height, width))
+        &WorkspaceState.set_viewport(&1, Viewport.new(effective_height, width))
       )
 
     # Invalidate the cached layout so resize_all_windows computes fresh
