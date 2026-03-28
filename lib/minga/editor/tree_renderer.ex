@@ -12,6 +12,7 @@ defmodule Minga.Editor.TreeRenderer do
   alias Minga.Core.Face
   alias Minga.Editor.DisplayList
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.State.FileTree, as: FileTreeState
   alias Minga.Editor.WindowTree
   alias Minga.Language
   alias Minga.Project.FileTree
@@ -40,6 +41,7 @@ defmodule Minga.Editor.TreeRenderer do
       :focused,
       :theme,
       :active_path,
+      editing: nil,
       git_status: %{},
       dirty_paths: MapSet.new()
     ]
@@ -50,6 +52,7 @@ defmodule Minga.Editor.TreeRenderer do
             focused: boolean(),
             theme: Theme.t(),
             active_path: String.t() | nil,
+            editing: FileTreeState.editing() | nil,
             git_status: Minga.Project.FileTree.GitStatus.status_map(),
             dirty_paths: MapSet.t(String.t())
           }
@@ -72,6 +75,7 @@ defmodule Minga.Editor.TreeRenderer do
       input.focused,
       input.theme,
       input.active_path,
+      input.editing,
       input.git_status,
       input.dirty_paths
     )
@@ -92,6 +96,7 @@ defmodule Minga.Editor.TreeRenderer do
           focused: focused,
           theme: state.theme,
           active_path: active_buffer_path(state),
+          editing: state.workspace.file_tree.editing,
           git_status: tree.git_status,
           dirty_paths: compute_dirty_paths(state)
         }
@@ -106,6 +111,7 @@ defmodule Minga.Editor.TreeRenderer do
           boolean(),
           Theme.t(),
           String.t() | nil,
+          FileTreeState.editing() | nil,
           FileTree.GitStatus.status_map(),
           MapSet.t(String.t())
         ) :: [DisplayList.draw()]
@@ -115,6 +121,7 @@ defmodule Minga.Editor.TreeRenderer do
          focused,
          theme,
          active_path,
+         editing,
          git_status,
          dirty_paths
        ) do
@@ -146,6 +153,7 @@ defmodule Minga.Editor.TreeRenderer do
       width: width,
       theme: theme,
       expanded: tree.expanded,
+      editing: editing,
       git_status: git_status,
       dirty_paths: dirty_paths
     }
@@ -157,7 +165,13 @@ defmodule Minga.Editor.TreeRenderer do
       |> Enum.take(content_rows)
       |> Enum.with_index()
       |> Enum.flat_map(fn {{entry, global_idx}, screen_row} ->
-        render_entry(entry, global_idx, row_off + 1 + screen_row, render_opts)
+        row = row_off + 1 + screen_row
+
+        if editing != nil and global_idx == editing.index do
+          render_editing_entry(entry, row, render_opts)
+        else
+          render_entry(entry, global_idx, row, render_opts)
+        end
       end)
 
     # Fill remaining rows with blanks
@@ -279,6 +293,70 @@ defmodule Minga.Editor.TreeRenderer do
         draws
       end
     end
+  end
+
+  # ── Editing entry rendering ─────────────────────────────────────────────
+
+  # Renders the inline editing entry with highlighted styling and a cursor indicator.
+  # The editing row shows the entry's indent guides, a type indicator icon, the
+  # current editing text, and a block cursor at the insertion point.
+  @spec render_editing_entry(FileTree.entry(), non_neg_integer(), map()) :: [DisplayList.draw()]
+  defp render_editing_entry(entry, row, opts) do
+    %{col_off: col, width: width, theme: theme, editing: editing} = opts
+
+    # Build indent guides (same depth as the entry being edited/created)
+    guide_prefix = build_guides(entry.guides, entry.last_child?)
+    guide_len = String.length(guide_prefix)
+
+    # Type indicator: file icon for new file, folder icon for new folder,
+    # the entry's own icon for rename
+    {icon, _icon_color} =
+      case editing.type do
+        :new_file -> {"", 0x519ABA}
+        :new_folder -> {@folder_open, 0x519ABA}
+        :rename -> entry_icon(entry, false)
+      end
+
+    prefix = guide_prefix <> icon <> " "
+    prefix_len = String.length(prefix)
+
+    # Editing text with cursor
+    text = editing.text
+    cursor_char = "▏"
+    display_text = text <> cursor_char
+
+    # Truncate to fit
+    max_text_len = max(width - prefix_len, 0)
+    display_text = String.slice(display_text, 0, max_text_len)
+
+    # Pad to fill the row
+    total_drawn = prefix_len + String.length(display_text)
+    pad = if total_drawn < width, do: String.duplicate(" ", width - total_drawn), else: ""
+
+    # Editing row uses inverse video (selection highlight)
+    editing_bg = theme.tree.dir_fg
+    editing_fg = theme.tree.bg
+
+    guide_style = Face.new(fg: editing_fg, bg: editing_bg)
+    icon_style = Face.new(fg: editing_fg, bg: editing_bg)
+    text_style = Face.new(fg: editing_fg, bg: editing_bg, bold: true)
+
+    draws = []
+
+    draws =
+      if guide_len > 0 do
+        draws ++ [DisplayList.draw(row, col, guide_prefix, guide_style)]
+      else
+        draws
+      end
+
+    icon_col = col + guide_len
+    draws = draws ++ [DisplayList.draw(row, icon_col, icon <> " ", icon_style)]
+
+    text_col = col + prefix_len
+    draws = draws ++ [DisplayList.draw(row, text_col, display_text <> pad, text_style)]
+
+    draws
   end
 
   # ── Indent guides ──────────────────────────────────────────────────────
