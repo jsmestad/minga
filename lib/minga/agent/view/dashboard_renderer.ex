@@ -10,9 +10,9 @@ defmodule Minga.Agent.View.DashboardRenderer do
   alias Minga.Agent.Config, as: AgentConfig
   alias Minga.Agent.ModelLimits
   alias Minga.Agent.View.RenderInput
+  alias Minga.Agent.ViewContext
   alias Minga.Core.Face
   alias Minga.Editor.DisplayList
-  alias Minga.Editor.State, as: EditorState
   alias Minga.UI.Theme
 
   @typedoc "Screen rectangle {row_offset, col_offset, width, height}."
@@ -21,9 +21,9 @@ defmodule Minga.Agent.View.DashboardRenderer do
   # ── Public API ──────────────────────────────────────────────────────────────
 
   @doc "Renders the agent dashboard sidebar (Context, Model, LSP, Directory)."
-  @spec render(EditorState.t(), rect()) :: [DisplayList.draw()]
-  def render(%EditorState{} = state, rect) do
-    input = RenderInput.extract(state)
+  @spec render(ViewContext.t(), rect()) :: [DisplayList.draw()]
+  def render(%ViewContext{} = ctx, rect) do
+    input = RenderInput.extract(ctx)
     render_dashboard(input, rect)
   end
 

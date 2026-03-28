@@ -3,6 +3,7 @@ defmodule Minga.Agent.View.PromptRendererTest do
 
   alias Minga.Agent.UIState
   alias Minga.Agent.View.PromptRenderer
+  alias Minga.Agent.ViewContext
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
@@ -64,12 +65,14 @@ defmodule Minga.Agent.View.PromptRendererTest do
   describe "cursor_position_in_rect/2" do
     test "returns nil when input is not focused" do
       state = base_state(rows: 40, input_focused: false)
-      assert PromptRenderer.cursor_position_in_rect(state, {0, 0, 80, 40}) == nil
+      ctx = ViewContext.from_editor_state(state)
+      assert PromptRenderer.cursor_position_in_rect(ctx, {0, 0, 80, 40}) == nil
     end
 
     test "returns {row, col} when input is focused" do
       state = base_state(rows: 40, input_focused: true)
-      result = PromptRenderer.cursor_position_in_rect(state, {0, 0, 80, 40})
+      ctx = ViewContext.from_editor_state(state)
+      result = PromptRenderer.cursor_position_in_rect(ctx, {0, 0, 80, 40})
 
       assert {row, col} = result
       assert is_integer(row)
@@ -80,29 +83,34 @@ defmodule Minga.Agent.View.PromptRendererTest do
 
     test "cursor column advances with input text length" do
       state_empty = base_state(input_focused: true, input_text: "")
+      ctx_empty = ViewContext.from_editor_state(state_empty)
       state_hello = base_state(input_focused: true, input_text: "hello")
+      ctx_hello = ViewContext.from_editor_state(state_hello)
 
-      {_r, col_empty} = PromptRenderer.cursor_position_in_rect(state_empty, {0, 0, 80, 40})
-      {_r, col_hello} = PromptRenderer.cursor_position_in_rect(state_hello, {0, 0, 80, 40})
+      {_r, col_empty} = PromptRenderer.cursor_position_in_rect(ctx_empty, {0, 0, 80, 40})
+      {_r, col_hello} = PromptRenderer.cursor_position_in_rect(ctx_hello, {0, 0, 80, 40})
 
       assert col_hello == col_empty + String.length("hello")
     end
 
     test "cursor row is the same regardless of short input text" do
       state_short = base_state(input_focused: true, input_text: "hi")
+      ctx_short = ViewContext.from_editor_state(state_short)
       state_long = base_state(input_focused: true, input_text: "a long message here")
+      ctx_long = ViewContext.from_editor_state(state_long)
 
-      {row_short, _} = PromptRenderer.cursor_position_in_rect(state_short, {0, 0, 80, 40})
-      {row_long, _} = PromptRenderer.cursor_position_in_rect(state_long, {0, 0, 80, 40})
+      {row_short, _} = PromptRenderer.cursor_position_in_rect(ctx_short, {0, 0, 80, 40})
+      {row_long, _} = PromptRenderer.cursor_position_in_rect(ctx_long, {0, 0, 80, 40})
 
       assert row_short == row_long
     end
 
     test "cursor position is offset by the rect origin" do
       state = base_state(rows: 40, input_focused: true, input_text: "test")
+      ctx = ViewContext.from_editor_state(state)
 
-      {row_origin, _col_origin} = PromptRenderer.cursor_position_in_rect(state, {0, 0, 80, 40})
-      {row_offset, _col_offset} = PromptRenderer.cursor_position_in_rect(state, {5, 0, 80, 40})
+      {row_origin, _col_origin} = PromptRenderer.cursor_position_in_rect(ctx, {0, 0, 80, 40})
+      {row_offset, _col_offset} = PromptRenderer.cursor_position_in_rect(ctx, {5, 0, 80, 40})
 
       assert row_offset == row_origin + 5
     end
@@ -111,17 +119,20 @@ defmodule Minga.Agent.View.PromptRendererTest do
   describe "prompt_height/2" do
     test "returns a positive integer" do
       state = base_state()
-      height = PromptRenderer.prompt_height(state, 80)
+      ctx = ViewContext.from_editor_state(state)
+      height = PromptRenderer.prompt_height(ctx, 80)
       assert is_integer(height)
       assert height >= 3
     end
 
     test "grows with multiline input" do
       state_single = base_state(input_lines: ["hello"])
+      ctx_single = ViewContext.from_editor_state(state_single)
       state_multi = base_state(input_lines: ["line 1", "line 2", "line 3"])
+      ctx_multi = ViewContext.from_editor_state(state_multi)
 
-      h_single = PromptRenderer.prompt_height(state_single, 80)
-      h_multi = PromptRenderer.prompt_height(state_multi, 80)
+      h_single = PromptRenderer.prompt_height(ctx_single, 80)
+      h_multi = PromptRenderer.prompt_height(ctx_multi, 80)
 
       assert h_multi > h_single
     end
@@ -130,7 +141,8 @@ defmodule Minga.Agent.View.PromptRendererTest do
   describe "render/2" do
     test "returns draw tuples with prompt border" do
       state = base_state()
-      commands = PromptRenderer.render(state, {30, 0, 80, 5})
+      ctx = ViewContext.from_editor_state(state)
+      commands = PromptRenderer.render(ctx, {30, 0, 80, 5})
 
       assert [_ | _] = commands
       texts = Enum.map(commands, fn d -> elem(d, 2) end)
@@ -140,7 +152,8 @@ defmodule Minga.Agent.View.PromptRendererTest do
 
     test "model info is embedded in bottom border" do
       state = base_state()
-      commands = PromptRenderer.render(state, {30, 0, 80, 5})
+      ctx = ViewContext.from_editor_state(state)
+      commands = PromptRenderer.render(ctx, {30, 0, 80, 5})
       texts = Enum.map(commands, fn d -> elem(d, 2) end)
 
       assert Enum.any?(texts, fn text ->
@@ -174,7 +187,8 @@ defmodule Minga.Agent.View.PromptRendererTest do
   describe "model name display with provider prefix" do
     test "prompt bar strips provider prefix from model name" do
       state = base_state()
-      commands = PromptRenderer.render(state, {30, 0, 80, 5})
+      ctx = ViewContext.from_editor_state(state)
+      commands = PromptRenderer.render(ctx, {30, 0, 80, 5})
       texts = Enum.map(commands, fn d -> elem(d, 2) end)
 
       # model_name defaults to "anthropic:claude-sonnet-4" but the display

@@ -16,17 +16,16 @@ defmodule Minga.Agent.View.PromptSemanticWindow do
 
   alias Minga.Agent.UIState
   alias Minga.Agent.UIState.Panel
+  alias Minga.Agent.ViewContext
   alias Minga.Editor.SemanticWindow
   alias Minga.Editor.SemanticWindow.Selection
   alias Minga.Editor.SemanticWindow.Span
   alias Minga.Editor.SemanticWindow.VisualRow
-  alias Minga.Editor.State, as: EditorState
-  alias Minga.Editor.State.AgentAccess
   alias Minga.Input.Wrap, as: InputWrap
   alias Minga.UI.Theme
 
-  @typedoc "Internal editor state."
-  @type state :: EditorState.t()
+  @typedoc "Agent view context."
+  @type ctx :: ViewContext.t()
 
   @doc "Reserved window_id for the agent prompt SemanticWindow."
   @spec prompt_window_id() :: pos_integer()
@@ -44,12 +43,12 @@ defmodule Minga.Agent.View.PromptSemanticWindow do
   inside the prompt box (excluding borders and padding). The caller
   computes this from the chat panel width.
   """
-  @spec build(state(), pos_integer()) :: SemanticWindow.t() | nil
-  def build(%EditorState{} = state, inner_width) when inner_width > 0 do
-    panel = AgentAccess.panel(state)
+  @spec build(ctx(), pos_integer()) :: SemanticWindow.t() | nil
+  def build(%ViewContext{} = ctx, inner_width) when inner_width > 0 do
+    panel = ctx.ui_state.panel
 
     if is_pid(panel.prompt_buffer) do
-      build_from_panel(state, panel, inner_width)
+      build_from_panel(ctx, panel, inner_width)
     end
   end
 
@@ -71,13 +70,13 @@ defmodule Minga.Agent.View.PromptSemanticWindow do
 
   # ── Private ─────────────────────────────────────────────────────────────
 
-  @spec build_from_panel(state(), Panel.t(), pos_integer()) :: SemanticWindow.t()
-  defp build_from_panel(state, panel, inner_width) do
+  @spec build_from_panel(ctx(), Panel.t(), pos_integer()) :: SemanticWindow.t()
+  defp build_from_panel(ctx, panel, inner_width) do
     lines = Panel.input_lines(panel)
     cursor = Panel.input_cursor(panel)
-    mode = Minga.Editing.mode(state)
-    mode_state = Minga.Editor.Editing.mode_state(state)
-    theme = state.theme
+    mode = ctx.editing.mode
+    mode_state = ctx.editing.mode_state
+    theme = ctx.theme
     at = Theme.agent_theme(theme)
 
     total_visual = InputWrap.visual_line_count(lines, inner_width)

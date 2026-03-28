@@ -9,6 +9,7 @@ defmodule Minga.Editor.RenderPipeline.Content do
 
   alias Minga.Agent.View.DashboardRenderer
   alias Minga.Agent.View.PromptRenderer
+  alias Minga.Agent.ViewContext
   alias Minga.Buffer
   alias Minga.Core.Decorations
   alias Minga.Core.Unicode
@@ -265,6 +266,9 @@ defmodule Minga.Editor.RenderPipeline.Content do
   @spec render_agent_chat_window(state(), Window.t(), Window.id(), Layout.window_layout()) ::
           {WindowFrame.t(), Cursor.t() | nil, state()}
   defp render_agent_chat_window(state, window, _win_id, win_layout) do
+    # Build ViewContext once for all agent renderers
+    ctx = ViewContext.from_editor_state(state)
+
     # Split the content rect to carve out a sidebar when wide enough.
     win_layout = Layout.add_sidebar(win_layout)
     {row_off, col_off, chat_width, height} = win_layout.content
@@ -285,7 +289,7 @@ defmodule Minga.Editor.RenderPipeline.Content do
               )
             end
 
-          separator ++ DashboardRenderer.render(state, {sr, sc, sw, sh})
+          separator ++ DashboardRenderer.render(ctx, {sr, sc, sw, sh})
 
         nil ->
           []
@@ -293,14 +297,14 @@ defmodule Minga.Editor.RenderPipeline.Content do
 
     # Compute prompt height and subdivide the content rect.
     # Subdivide the content rect for chat content vs prompt input.
-    prompt_height = PromptRenderer.prompt_height(state, chat_width)
+    prompt_height = PromptRenderer.prompt_height(ctx, chat_width)
     input_v_gap = 1
     chat_height = max(height - prompt_height - input_v_gap, 1)
     prompt_row = row_off + chat_height + input_v_gap
 
     # Render the prompt (agent chrome, not buffer content)
     prompt_rect = {prompt_row, col_off, chat_width, prompt_height}
-    prompt_draws = PromptRenderer.render(state, prompt_rect)
+    prompt_draws = PromptRenderer.render(ctx, prompt_rect)
 
     # When help overlay is visible, render help content instead of buffer
     help_visible = state.workspace.agent_ui.view.help_visible
@@ -322,7 +326,7 @@ defmodule Minga.Editor.RenderPipeline.Content do
 
       {frame, nil, state}
     else
-      render_agent_chat_buffer(state, window, win_layout, sidebar_draws, prompt_draws,
+      render_agent_chat_buffer(state, ctx, window, win_layout, sidebar_draws, prompt_draws,
         row_off: row_off,
         col_off: col_off,
         chat_width: chat_width,
@@ -334,13 +338,22 @@ defmodule Minga.Editor.RenderPipeline.Content do
 
   @spec render_agent_chat_buffer(
           state(),
+          ViewContext.t(),
           Window.t(),
           Layout.window_layout(),
           [DisplayList.draw()],
           [DisplayList.draw()],
           keyword()
         ) :: {WindowFrame.t(), Cursor.t() | nil, state()}
-  defp render_agent_chat_buffer(state, window, _win_layout, sidebar_draws, prompt_draws, opts) do
+  defp render_agent_chat_buffer(
+         state,
+         ctx,
+         window,
+         _win_layout,
+         sidebar_draws,
+         prompt_draws,
+         opts
+       ) do
     row_off = Keyword.fetch!(opts, :row_off)
     col_off = Keyword.fetch!(opts, :col_off)
     chat_width = Keyword.fetch!(opts, :chat_width)
@@ -485,7 +498,7 @@ defmodule Minga.Editor.RenderPipeline.Content do
     full_rect = {row_off, col_off, chat_width, height}
 
     prompt_cursor =
-      case PromptRenderer.cursor_position_in_rect(state, full_rect) do
+      case PromptRenderer.cursor_position_in_rect(ctx, full_rect) do
         {row, col} -> Cursor.new(row, col, :beam)
         nil -> nil
       end

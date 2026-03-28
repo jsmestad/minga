@@ -11,9 +11,8 @@ defmodule Minga.Agent.View.RenderInput do
 
   alias Minga.Agent.Session
   alias Minga.Agent.UIState
+  alias Minga.Agent.ViewContext
   alias Minga.Editing.Scroll
-  alias Minga.Editor.State, as: EditorState
-  alias Minga.Editor.State.AgentAccess
   alias Minga.UI.Theme
 
   @enforce_keys [:theme, :agent_status, :panel, :agent_ui]
@@ -69,18 +68,17 @@ defmodule Minga.Agent.View.RenderInput do
         }
 
   @doc """
-  Extracts a focused `RenderInput` from full editor state.
+  Extracts a focused `RenderInput` from agent view context.
 
   Reads the agent session (messages, usage) and agent UI state, producing
   a self-contained struct that both `PromptRenderer` and `DashboardRenderer`
-  can render from without touching `EditorState` again.
+  can render from without touching `ViewContext` again.
   """
-  @spec extract(EditorState.t()) :: t()
-  def extract(%EditorState{} = state) do
-    agent = AgentAccess.agent(state)
-    panel = AgentAccess.panel(state)
-    session = AgentAccess.session(state)
-    view = AgentAccess.view(state)
+  @spec extract(ViewContext.t()) :: t()
+  def extract(%ViewContext{} = ctx) do
+    panel = ctx.ui_state.panel
+    view = ctx.ui_state.view
+    session = ctx.session
 
     messages =
       if session do
@@ -105,14 +103,14 @@ defmodule Minga.Agent.View.RenderInput do
       end
 
     %__MODULE__{
-      theme: state.theme,
-      agent_status: agent.status,
+      theme: ctx.theme,
+      agent_status: ctx.agent_status,
       panel: %{
         input_focused: panel.input_focused,
         input_lines: UIState.input_lines(panel),
         input_cursor: UIState.input_cursor(panel),
-        mode: Minga.Editing.mode(state),
-        mode_state: Minga.Editor.Editing.mode_state(state),
+        mode: ctx.editing.mode,
+        mode_state: ctx.editing.mode_state,
         scroll: panel.scroll,
         spinner_frame: panel.spinner_frame,
         model_name: panel.model_name,
@@ -132,7 +130,7 @@ defmodule Minga.Agent.View.RenderInput do
       },
       messages: messages,
       usage: usage,
-      pending_approval: agent.pending_approval,
+      pending_approval: ctx.pending_approval,
       session_title: session_title(messages),
       lsp_servers: safe_lsp_servers()
     }

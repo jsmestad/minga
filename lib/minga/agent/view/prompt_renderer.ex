@@ -14,10 +14,9 @@ defmodule Minga.Agent.View.PromptRenderer do
   alias Minga.Agent.Config, as: AgentConfig
   alias Minga.Agent.UIState
   alias Minga.Agent.View.RenderInput
+  alias Minga.Agent.ViewContext
   alias Minga.Core.Face
   alias Minga.Editor.DisplayList
-  alias Minga.Editor.State, as: EditorState
-  alias Minga.Editor.State.AgentAccess
 
   alias Minga.Input.Wrap, as: InputWrap
   alias Minga.UI.Theme
@@ -37,9 +36,9 @@ defmodule Minga.Agent.View.PromptRenderer do
   Used by the Content stage to determine how much space to reserve for
   the prompt at the bottom of the agent chat window.
   """
-  @spec prompt_height(EditorState.t(), pos_integer()) :: pos_integer()
-  def prompt_height(%EditorState{} = state, chat_width) do
-    input = RenderInput.extract(state)
+  @spec prompt_height(ViewContext.t(), pos_integer()) :: pos_integer()
+  def prompt_height(%ViewContext{} = ctx, chat_width) do
+    input = RenderInput.extract(ctx)
     box_width = max(chat_width - 2 * @input_h_margin, 10)
     compute_input_height(input.panel.input_lines, input_inner_width(box_width))
   end
@@ -50,9 +49,9 @@ defmodule Minga.Agent.View.PromptRenderer do
   Used by the Content stage when the chat content is rendered through
   the standard buffer pipeline with decorations.
   """
-  @spec render(EditorState.t(), rect()) :: [DisplayList.draw()]
-  def render(%EditorState{} = state, {row, col, width, _height}) do
-    input = RenderInput.extract(state)
+  @spec render(ViewContext.t(), rect()) :: [DisplayList.draw()]
+  def render(%ViewContext{} = ctx, {row, col, width, _height}) do
+    input = RenderInput.extract(ctx)
     box_width = max(width - 2 * @input_h_margin, 10)
     box_col = col + @input_h_margin
     render_input_from_input(input, row, box_col, box_width)
@@ -67,13 +66,13 @@ defmodule Minga.Agent.View.PromptRenderer do
 
   Returns nil when input is not focused (cursor hidden).
   """
-  @spec cursor_position_in_rect(EditorState.t(), rect()) ::
+  @spec cursor_position_in_rect(ViewContext.t(), rect()) ::
           {non_neg_integer(), non_neg_integer()} | nil
-  def cursor_position_in_rect(state, {row_off, col_off, width, height}) do
-    panel = AgentAccess.panel(state)
+  def cursor_position_in_rect(ctx, {row_off, col_off, width, height}) do
+    panel = ctx.ui_state.panel
 
     if panel.input_focused do
-      view = AgentAccess.view(state)
+      view = ctx.ui_state.view
       chat_width_pct = view.chat_width_pct
       chat_width = max(div(width * chat_width_pct, 100), 20)
       box_width = max(chat_width - 2 * @input_h_margin, 10)

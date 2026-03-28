@@ -3,6 +3,7 @@ defmodule Minga.Agent.View.DashboardRendererTest do
 
   alias Minga.Agent.UIState
   alias Minga.Agent.View.DashboardRenderer
+  alias Minga.Agent.ViewContext
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
@@ -64,7 +65,8 @@ defmodule Minga.Agent.View.DashboardRendererTest do
   describe "render/2" do
     test "shows context, model, LSP, and directory sections" do
       state = base_state()
-      commands = DashboardRenderer.render(state, {0, 80, 40, 30})
+      ctx = ViewContext.from_editor_state(state)
+      commands = DashboardRenderer.render(ctx, {0, 80, 40, 30})
       texts = Enum.map(commands, fn d -> elem(d, 2) end)
 
       assert Enum.any?(texts, &String.contains?(&1, "Context"))
@@ -75,7 +77,8 @@ defmodule Minga.Agent.View.DashboardRendererTest do
 
     test "shows LSP section with no servers when list is empty" do
       state = base_state()
-      commands = DashboardRenderer.render(state, {0, 80, 40, 30})
+      ctx = ViewContext.from_editor_state(state)
+      commands = DashboardRenderer.render(ctx, {0, 80, 40, 30})
       texts = Enum.map(commands, fn d -> elem(d, 2) end)
 
       assert Enum.any?(texts, &String.contains?(&1, "LSP"))
@@ -84,7 +87,8 @@ defmodule Minga.Agent.View.DashboardRendererTest do
 
     test "dashboard model section strips provider prefix" do
       state = base_state()
-      commands = DashboardRenderer.render(state, {0, 80, 40, 30})
+      ctx = ViewContext.from_editor_state(state)
+      commands = DashboardRenderer.render(ctx, {0, 80, 40, 30})
       texts = Enum.map(commands, fn d -> elem(d, 2) end)
 
       # The model section should show bare model name, not the prefixed spec
