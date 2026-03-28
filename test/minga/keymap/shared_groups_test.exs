@@ -9,7 +9,7 @@ defmodule Minga.Keymap.SharedGroupsTest do
       for name <- SharedGroups.group_names() do
         bindings = SharedGroups.get(name)
         assert is_list(bindings), "group #{name} should return a list"
-        assert length(bindings) > 0, "group #{name} should not be empty"
+        assert [_ | _] = bindings, "group #{name} should not be empty"
 
         for {keys, command, description} <- bindings do
           assert is_list(keys), "keys should be a list in group #{name}"
