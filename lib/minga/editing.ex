@@ -95,10 +95,17 @@ defmodule Minga.Editing do
 
   # ── Comment toggling ───────────────────────────────────────────────────
 
-  @doc "Toggle line comments for the given line range."
-  defdelegate toggle_comment(buf, start_line, end_line, filetype, injection_ranges \\ []),
+  @doc "Compute comment toggle edits for the given lines (pure, no Buffer I/O)."
+  defdelegate compute_comment_edits(lines, prefix, start_line),
     to: Minga.Editing.Comment,
-    as: :toggle_lines
+    as: :compute_toggle_edits
+
+  @doc "Resolve comment prefix with nil fallback."
+  defdelegate comment_prefix(token), to: Minga.Editing.Comment
+
+  @doc "Resolve comment prefix accounting for injection ranges."
+  defdelegate comment_prefix_at(default_token, byte_offset, injection_ranges, token_for_lang),
+    to: Minga.Editing.Comment
 
   # ── Search ─────────────────────────────────────────────────────────────
 
