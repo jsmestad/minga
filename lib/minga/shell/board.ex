@@ -424,8 +424,31 @@ defmodule Minga.Shell.Board do
   @spec on_buffer_died(BoardState.t(), Minga.Workspace.State.t(), pid()) ::
           {BoardState.t(), Minga.Workspace.State.t()}
   def on_buffer_died(shell_state, workspace, _dead_pid) do
+    # Board: sync the window if it's showing a buffer. The content-type
+    # guard in sync_active_window_buffer ensures agent_chat is untouched.
+    workspace = Minga.Workspace.State.sync_active_window_buffer(workspace)
     {shell_state, workspace}
   end
+
+  # -------------------------------------------------------------------
+  # Tab query/mutation delegates
+  # -------------------------------------------------------------------
+
+  @impl true
+  @spec active_tab(BoardState.t()) :: nil
+  def active_tab(_shell_state), do: nil
+
+  @impl true
+  @spec find_tab_by_buffer(BoardState.t(), pid()) :: nil
+  def find_tab_by_buffer(_shell_state, _pid), do: nil
+
+  @impl true
+  @spec active_tab_kind(BoardState.t()) :: atom()
+  def active_tab_kind(_shell_state), do: :file
+
+  @impl true
+  @spec set_tab_session(BoardState.t(), term(), pid() | nil) :: BoardState.t()
+  def set_tab_session(shell_state, _tab_id, _session_pid), do: shell_state
 
   # -------------------------------------------------------------------
   # Agent event callbacks

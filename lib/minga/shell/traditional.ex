@@ -166,14 +166,27 @@ defmodule Minga.Shell.Traditional do
   @impl true
   @spec on_buffer_switched(ShellState.t(), WorkspaceState.t()) ::
           {ShellState.t(), WorkspaceState.t()}
-  def on_buffer_switched(shell_state, workspace) do
+  def on_buffer_switched(%ShellState{tab_bar: nil} = shell_state, workspace) do
     {shell_state, workspace}
+  end
+
+  def on_buffer_switched(%ShellState{tab_bar: %TabBar{} = tb} = shell_state, workspace) do
+    case TabBar.active(tb) do
+      %Tab{kind: :file} ->
+        label = buffer_label(workspace.buffers.active)
+        tb = TabBar.update_label(tb, tb.active_id, label)
+        {%{shell_state | tab_bar: tb}, workspace}
+
+      _ ->
+        {shell_state, workspace}
+    end
   end
 
   @impl true
   @spec on_buffer_died(ShellState.t(), WorkspaceState.t(), pid()) ::
           {ShellState.t(), WorkspaceState.t()}
   def on_buffer_died(shell_state, workspace, _dead_pid) do
+    workspace = WorkspaceState.sync_active_window_buffer(workspace)
     {shell_state, workspace}
   end
 
@@ -224,6 +237,44 @@ defmodule Minga.Shell.Traditional do
 
   def on_agent_event(shell_state, workspace, _session_pid, _event) do
     {shell_state, workspace}
+  end
+
+  # -------------------------------------------------------------------
+  # Tab query/mutation delegates
+  # -------------------------------------------------------------------
+
+  @impl true
+  @spec active_tab(ShellState.t()) :: Tab.t() | nil
+  def active_tab(%ShellState{tab_bar: nil}), do: nil
+  def active_tab(%ShellState{tab_bar: tb}), do: TabBar.active(tb)
+
+  @impl true
+  @spec find_tab_by_buffer(ShellState.t(), pid()) :: Tab.t() | nil
+  def find_tab_by_buffer(%ShellState{tab_bar: nil}, _pid), do: nil
+
+  def find_tab_by_buffer(%ShellState{tab_bar: tb}, pid) do
+    Enum.find(tb.tabs, fn tab ->
+      tab.kind == :file and tab_has_active_buffer?(tab, pid)
+    end)
+  end
+
+  @impl true
+  @spec active_tab_kind(ShellState.t()) :: atom()
+  def active_tab_kind(%ShellState{tab_bar: nil}), do: :file
+
+  def active_tab_kind(%ShellState{tab_bar: tb}) do
+    %Tab{kind: kind} = TabBar.active(tb)
+    kind
+  end
+
+  @impl true
+  @spec set_tab_session(ShellState.t(), Tab.id(), pid() | nil) :: ShellState.t()
+  def set_tab_session(%ShellState{tab_bar: nil} = shell_state, _tab_id, _session_pid) do
+    shell_state
+  end
+
+  def set_tab_session(%ShellState{tab_bar: tb} = shell_state, tab_id, session_pid) do
+    %{shell_state | tab_bar: TabBar.update_tab(tb, tab_id, &Tab.set_session(&1, session_pid))}
   end
 
   # -------------------------------------------------------------------
@@ -366,4 +417,14 @@ defmodule Minga.Shell.Traditional do
   end
 
   defp buffer_label(_), do: "[unknown]"
+
+  @spec tab_has_active_buffer?(Tab.t(), pid()) :: boolean()
+  defp tab_has_active_buffer?(tab, pid) do
+    case tab.context do
+      %{buffers: %{active: ^pid}} -> true
+      %{surface_state: %{buffers: %{active: ^pid}}} -> true
+      %{active_buffer: ^pid} -> true
+      _ -> false
+    end
+  end
 end
