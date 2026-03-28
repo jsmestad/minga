@@ -9,17 +9,17 @@ defmodule Minga.Command do
 
   ## Scopeable commands
 
-  Commands that toggle buffer-local options can declare a `scope`
-  descriptor. When invoked from a keybinding, scopeable commands
-  apply to the current buffer (fast path). When invoked from the
-  command palette, the palette presents a scope picker ("This Buffer"
-  / "All Buffers") so the user can choose where the change applies.
+  Commands that toggle buffer-local options can declare an `option_toggle`.
+  When invoked from a keybinding, scopeable commands apply to the current
+  buffer (fast path). When invoked from the command palette, the palette
+  presents a scope picker ("This Buffer" / "All Buffers") so the user can
+  choose where the change applies.
 
-  The scope descriptor is a map with:
+  The `option_toggle` field is either:
 
-  * `:option` — the option name atom (e.g. `:wrap`)
-  * `:toggle` — `true` for boolean toggle, or a function
-    `(current_value -> new_value)` for non-boolean cycling
+  * an atom (e.g. `:wrap`) for boolean toggles
+  * a `{atom, function}` tuple (e.g. `{:line_numbers, fn :hybrid -> :absolute end}`)
+    for non-boolean cycling
 
   ## Buffer requirement
 
@@ -42,20 +42,19 @@ defmodule Minga.Command do
         description: "Toggle word wrap",
         execute: fn state -> Minga.Editor.Commands.BufferManagement.execute(state, :toggle_wrap) end,
         requires_buffer: true,
-        scope: %{option: :wrap, toggle: true}
+        option_toggle: :wrap
       }
   """
 
   @enforce_keys [:name, :description, :execute]
-  defstruct [:name, :description, :execute, :scope, requires_buffer: false]
+  defstruct [:name, :description, :execute, :option_toggle, :scope, requires_buffer: false]
 
   @typedoc """
-  Scope descriptor for commands that toggle buffer-local options.
+  Descriptor for commands that toggle buffer-local options.
 
-  * `:option` — the option name atom
-  * `:toggle` — `true` for boolean negation, or a `(term -> term)` function
+  An atom for boolean toggles, or `{atom, function}` for custom cycling.
   """
-  @type scope :: %{option: atom(), toggle: true | (term() -> term())}
+  @type option_toggle :: atom() | {atom(), (term() -> term())}
 
   @typedoc """
   An editor command struct.
@@ -64,14 +63,16 @@ defmodule Minga.Command do
   * `description`     — human-readable label shown in which-key popups
   * `execute`         — function applied to the editor state, returns new state
   * `requires_buffer` — when true, command is skipped if no buffer is active
-  * `scope`           — optional scope descriptor for buffer-local option toggles
+  * `option_toggle`   — option to toggle: atom for boolean flip, `{atom, fun}` for custom cycling
+  * `scope`           — keymap scope required for this command to run (e.g. `:agent`); `nil` means any scope
   """
   @type t :: %__MODULE__{
           name: atom(),
           description: String.t(),
           execute: function(),
           requires_buffer: boolean(),
-          scope: scope() | nil
+          option_toggle: option_toggle() | nil,
+          scope: atom() | nil
         }
 
   # ── Registry lookup ──────────────────────────────────────────────────
@@ -106,19 +107,25 @@ defmodule Minga.Command do
 
   # ── Command properties ─────────────────────────────────────────────────
 
-  @doc "Returns true if this command is scopeable (toggles a buffer-local option)."
+  @doc "Extracts the option name from an `option_toggle` field."
+  @spec option_name(t()) :: atom() | nil
+  def option_name(%__MODULE__{option_toggle: nil}), do: nil
+  def option_name(%__MODULE__{option_toggle: opt}) when is_atom(opt), do: opt
+  def option_name(%__MODULE__{option_toggle: {opt, _}}), do: opt
+
+  @doc "Returns true if this command toggles a buffer-local option."
   @spec scopeable?(t()) :: boolean()
-  def scopeable?(%__MODULE__{scope: nil}), do: false
-  def scopeable?(%__MODULE__{scope: %{option: _, toggle: _}}), do: true
+  def scopeable?(%__MODULE__{option_toggle: nil}), do: false
+  def scopeable?(%__MODULE__{}), do: true
 
   @doc """
   Computes the new value for a scopeable command given the current value.
 
-  For `toggle: true`, negates the boolean. For a function, calls it.
+  Atom toggles negate the boolean. Tuple toggles call the cycling function.
   """
   @spec compute_new_value(t(), term()) :: term()
-  def compute_new_value(%__MODULE__{scope: %{toggle: true}}, current), do: !current
+  def compute_new_value(%__MODULE__{option_toggle: opt}, current) when is_atom(opt), do: !current
 
-  def compute_new_value(%__MODULE__{scope: %{toggle: f}}, current) when is_function(f, 1),
+  def compute_new_value(%__MODULE__{option_toggle: {_opt, f}}, current) when is_function(f, 1),
     do: f.(current)
 end

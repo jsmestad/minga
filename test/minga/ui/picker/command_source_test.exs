@@ -63,7 +63,7 @@ defmodule Minga.UI.Picker.CommandSourceTest do
         name: :toggle_wrap,
         description: "Toggle wrap",
         execute: & &1,
-        scope: %{option: :wrap, toggle: true}
+        option_toggle: :wrap
       }
 
       assert Command.scopeable?(cmd)
@@ -81,7 +81,7 @@ defmodule Minga.UI.Picker.CommandSourceTest do
         name: :test,
         description: "Test",
         execute: & &1,
-        scope: %{option: :wrap, toggle: true}
+        option_toggle: :wrap
       }
 
       assert Command.compute_new_value(cmd, true) == false
@@ -99,7 +99,7 @@ defmodule Minga.UI.Picker.CommandSourceTest do
         name: :test,
         description: "Test",
         execute: & &1,
-        scope: %{option: :mode, toggle: cycle}
+        option_toggle: {:mode, cycle}
       }
 
       assert Command.compute_new_value(cmd, :a) == :b

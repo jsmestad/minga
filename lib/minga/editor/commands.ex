@@ -200,8 +200,13 @@ defmodule Minga.Editor.Commands do
 
   def execute(state, {:agent_set_model, [model]}), do: AgentCommands.set_model(state, model)
 
-  def execute(state, {:agent_self_insert, char}),
-    do: AgentCommands.scope_self_insert(state, char)
+  def execute(state, {:agent_self_insert, char}) do
+    if state.workspace.keymap_scope == :agent do
+      AgentCommands.scope_self_insert(state, char)
+    else
+      state
+    end
+  end
 
   # ── Parameterized movement ────────────────────────────────────────────────
 
@@ -468,13 +473,8 @@ defmodule Minga.Editor.Commands do
 
   def execute(state, cmd) when is_atom(cmd) do
     case Command.lookup(cmd) do
-      {:ok, %Command{requires_buffer: true}} when is_nil(state.workspace.buffers.active) ->
-        state
-
-      {:ok, %Command{execute: fun}} ->
-        Minga.Telemetry.span([:minga, :command, :execute], %{command: cmd}, fn ->
-          fun.(state)
-        end)
+      {:ok, %Command{} = command} ->
+        execute_checked(state, cmd, command)
 
       :error ->
         state
@@ -483,6 +483,27 @@ defmodule Minga.Editor.Commands do
 
   # Unknown / unimplemented commands are silently ignored.
   def execute(state, _cmd), do: state
+
+  # Checks scope and buffer requirements before executing a registry command.
+  # Scope is checked first: a command with `scope: :agent` is a silent
+  # no-op when the current keymap scope is not `:agent`. Buffer requirement is
+  # checked second.
+  @spec execute_checked(state(), atom(), Command.t()) :: state() | {state(), action()}
+  defp execute_checked(state, _cmd, %Command{scope: scope})
+       when is_atom(scope) and scope != nil and scope != state.workspace.keymap_scope do
+    state
+  end
+
+  defp execute_checked(state, _cmd, %Command{requires_buffer: true})
+       when is_nil(state.workspace.buffers.active) do
+    state
+  end
+
+  defp execute_checked(state, cmd, %Command{execute: fun}) do
+    Minga.Telemetry.span([:minga, :command, :execute], %{command: cmd}, fn ->
+      fun.(state)
+    end)
+  end
 
   # ── Public buffer helpers (called directly from Editor) ───────────────────
 
