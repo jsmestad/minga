@@ -73,6 +73,10 @@ final class CoreTextMetalRenderer {
     /// for blending, so passing sRGB here is correct for visual accuracy.
     private(set) var cursorColor: SIMD3<Float>
 
+    /// Scroll indicator opacity (0.0 = hidden, 1.0 = fully visible).
+    /// Set by EditorNSView based on scroll activity and fade timer.
+    var scrollIndicatorAlpha: Float = 0.0
+
     /// Notification observer for system color changes. Stored so we can
     /// remove it in deinit if needed (though the renderer lives for the
     /// app's entire lifetime in practice).
@@ -739,6 +743,40 @@ final class CoreTextMetalRenderer {
 
             encoder.setRenderPipelineState(bgPipeline)
             encoder.setVertexBytes(&cursorQuad, length: MemoryLayout<QuadGPU>.stride, index: 0)
+            encoder.setVertexBytes(&uniforms, length: MemoryLayout<CTUniformsGPU>.size, index: 1)
+            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: 1)
+        }
+
+        // Pass 7: Scroll indicator (overlay scrollbar).
+        // A thin rect on the right edge showing viewport position within the document.
+        // Only shown when the document is taller than the viewport.
+        let totalLines = frameState.totalLineCount
+        let visibleRows = UInt32(frameState.rows)
+        let viewportTop = frameState.viewportTopLine
+
+        if totalLines > visibleRows && viewportTop != 0xFFFF_FFFF && scrollIndicatorAlpha > 0 {
+            let viewportH = Float(viewportSize.height) * scale
+            let indicatorWidth: Float = 6.0 * scale
+            let indicatorMargin: Float = 2.0 * scale
+            let trackHeight = viewportH
+
+            // Compute thumb size and position.
+            let proportion = Float(visibleRows) / Float(totalLines)
+            let thumbHeight = max(proportion * trackHeight, 20.0 * scale)
+            let maxTop = Float(max(Int64(totalLines) - Int64(visibleRows), 1))
+            let thumbY = (Float(viewportTop) / maxTop) * (trackHeight - thumbHeight)
+
+            let thumbX = Float(viewportSize.width) * scale - indicatorWidth - indicatorMargin
+
+            var scrollQuad = QuadGPU()
+            scrollQuad.position = SIMD2<Float>(thumbX, thumbY)
+            scrollQuad.size = SIMD2<Float>(indicatorWidth, thumbHeight)
+            // Use gutter fg color at reduced alpha for the indicator.
+            scrollQuad.color = colorFromU24(frameState.scrollIndicatorColor, default: SIMD3<Float>(0.4, 0.4, 0.4))
+            scrollQuad.alpha = 0.4 * scrollIndicatorAlpha
+
+            encoder.setRenderPipelineState(bgPipeline)
+            encoder.setVertexBytes(&scrollQuad, length: MemoryLayout<QuadGPU>.stride, index: 0)
             encoder.setVertexBytes(&uniforms, length: MemoryLayout<CTUniformsGPU>.size, index: 1)
             encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: 1)
         }
