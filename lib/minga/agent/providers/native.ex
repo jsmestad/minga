@@ -1123,6 +1123,7 @@ defmodule Minga.Agent.Providers.Native do
   # Runs the shell tool with incremental output streaming via ToolUpdate events.
   @spec run_shell_with_streaming(map(), pid()) :: {String.t(), boolean()}
   defp run_shell_with_streaming(tool_call, provider_pid) do
+    flush_before_shell()
     args = tool_call.arguments
     root = detect_project_root()
     timeout_secs = min(args["timeout"] || 30, 300)
@@ -1704,5 +1705,30 @@ defmodule Minga.Agent.Providers.Native do
   defp notify(subscriber, event) do
     send(subscriber, {:agent_provider_event, event})
     event
+  end
+
+  # Saves all dirty file-backed buffers to disk before running shell commands.
+  # Build tools read from the filesystem, not from buffer memory, so in-memory
+  # edits must be flushed for the build to see them.
+  @spec flush_before_shell() :: :ok
+  defp flush_before_shell do
+    if Config.get(:agent_flush_before_shell) do
+      {saved, warnings} = Minga.Buffer.save_all_dirty()
+
+      if saved > 0 do
+        Minga.Log.debug(:agent, "Flushed #{saved} dirty buffer(s) to disk before shell command")
+      end
+
+      for warning <- warnings do
+        Minga.Log.warning(:agent, "Pre-shell flush: #{warning}")
+      end
+
+      :ok
+    else
+      :ok
+    end
+  rescue
+    # Config not available (headless/test mode)
+    _ -> :ok
   end
 end
