@@ -85,7 +85,7 @@ final class CoreTextMetalRenderer {
     /// System selection color from NSColor.selectedTextBackgroundColor.
     /// Used as fallback when no theme override is set. Computed once at
     /// class load time (macOS caches the system color).
-    nonisolated(unsafe) private static let systemSelectionColor: SIMD3<Float> = {
+    private static let systemSelectionColor: SIMD3<Float> = {
         let nsColor = NSColor.selectedTextBackgroundColor.usingColorSpace(.sRGB)
             ?? NSColor.selectedTextBackgroundColor
         return SIMD3<Float>(
