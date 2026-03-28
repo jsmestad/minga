@@ -574,6 +574,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var editorNSView: EditorNSView?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Ignore SIGPIPE so broken pipe writes return EPIPE instead of
+        // killing the process. Without this, any write to the BEAM pipe
+        // after Ctrl+C delivers SIGPIPE (default action: terminate).
+        signal(SIGPIPE, SIG_IGN)
+
         os_signpost(.begin, log: startupLog, name: "AppStartup")
 
         // Register the bundled Nerd Font for devicon rendering.
@@ -707,6 +712,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // once SwiftUI assigns the real frame dimensions. This avoids
         // the BEAM rendering at hardcoded 800x600 defaults.
 
+        // Capture the encoder for the disconnect callback. The closure
+        // runs on the reader's background thread; ProtocolEncoder is
+        // @unchecked Sendable and disconnect() is lock-protected.
+        let disconnectEncoder = enc
+
         // Start reading protocol commands.
         let reader = ProtocolReader(
             input: protocolInput,
@@ -716,6 +726,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             },
             onDisconnect: { [weak self] in
+                // Immediately mark the encoder as disconnected so any
+                // in-flight writes (keystrokes, mouse events) on the
+                // main thread are silently dropped instead of hitting
+                // a broken pipe. This runs on the reader's background
+                // thread, but ProtocolEncoder.disconnect() is lock-
+                // protected and safe to call from any thread.
+                disconnectEncoder.disconnect()
+
                 DispatchQueue.main.async {
                     // In bundle mode, BEAMProcessManager handles restart/error.
                     // In dev mode, our parent (BEAM) exited; shut down.
@@ -807,6 +825,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appState.encoder = enc
         PortLogger.setup(encoder: enc)
 
+        // Capture for the background-thread disconnect callback.
+        let disconnectEncoder = enc
+
         // Create new reader for the new pipe.
         let reader = ProtocolReader(
             input: readHandle,
@@ -816,6 +837,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             },
             onDisconnect: { [weak self] in
+                disconnectEncoder.disconnect()
+
                 DispatchQueue.main.async {
                     if self?.beamManager == nil {
                         NSApp.terminate(nil)
