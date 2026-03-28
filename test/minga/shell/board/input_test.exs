@@ -10,7 +10,10 @@ defmodule Minga.Shell.Board.InputTest do
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.AgentAccess
+  alias Minga.Editor.State.Windows
   alias Minga.Editor.Viewport
+  alias Minga.Editor.Window
+  alias Minga.Editor.Window.Content
   alias Minga.Shell.Board
   alias Minga.Shell.Board.Input, as: BoardInput
   alias Minga.Shell.Board.State, as: BoardState
@@ -130,6 +133,47 @@ defmodule Minga.Shell.Board.InputTest do
 
       {:handled, new_state} = BoardInput.handle_key(state, @enter, 0)
       assert new_state.shell_state.zoomed_into == nil
+    end
+
+    test "first-time zoom into agent card builds fresh workspace and activates agent view" do
+      # Set up a board with one agent card that has a session but no workspace
+      fake_session = spawn(fn -> Process.sleep(:infinity) end)
+      {:ok, buf_pid} = Minga.Buffer.start_link(content: "")
+
+      board =
+        BoardState.new()
+        |> then(fn b ->
+          {b, _card} = BoardState.create_card(b, task: "Agent 1", session: fake_session)
+          b
+        end)
+
+      # Ensure the focused card has workspace: nil (first-time zoom)
+      focused_id = board.focused_card
+      assert board.cards[focused_id].workspace == nil
+
+      # Build state with a window in the map so activate_for_card can set content
+      win = Window.new(1, buf_pid, 24, 80)
+      windows = %Windows{map: %{1 => win}, active: 1, next_id: 2}
+
+      state = %EditorState{
+        port_manager: self(),
+        shell: Board,
+        shell_state: board,
+        workspace: %Minga.Workspace.State{
+          viewport: Viewport.new(24, 80),
+          windows: windows
+        },
+        focus_stack: [BoardInput, Minga.Input.GlobalBindings]
+      }
+
+      {:handled, new_state} = BoardInput.handle_key(state, @enter, 0)
+
+      # Agent activation should have set keymap scope to :agent
+      assert new_state.workspace.keymap_scope == :agent
+
+      # Window content should be agent_chat
+      active_win = new_state.workspace.windows.map[new_state.workspace.windows.active]
+      assert Content.agent_chat?(active_win.content)
     end
   end
 
