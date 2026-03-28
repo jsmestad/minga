@@ -244,6 +244,26 @@ struct ThemeColorsSlotMappingTests {
     @Test("Slot 0x40 maps to accent")
     @MainActor func accent() { #expect(applySlot(GUI_COLOR_ACCENT).accent == expectedColor()) }
 
+    // MARK: - Agent status slots
+
+    @Test("Slot 0x5C maps to agentStatusIdle")
+    @MainActor func agentStatusIdle() { #expect(applySlot(GUI_COLOR_AGENT_STATUS_IDLE).agentStatusIdle == expectedColor()) }
+
+    @Test("Slot 0x5D maps to agentStatusWorking")
+    @MainActor func agentStatusWorking() { #expect(applySlot(GUI_COLOR_AGENT_STATUS_WORKING).agentStatusWorking == expectedColor()) }
+
+    @Test("Slot 0x5E maps to agentStatusIterating")
+    @MainActor func agentStatusIterating() { #expect(applySlot(GUI_COLOR_AGENT_STATUS_ITERATING).agentStatusIterating == expectedColor()) }
+
+    @Test("Slot 0x5F maps to agentStatusNeedsYou")
+    @MainActor func agentStatusNeedsYou() { #expect(applySlot(GUI_COLOR_AGENT_STATUS_NEEDS_YOU).agentStatusNeedsYou == expectedColor()) }
+
+    @Test("Slot 0x60 maps to agentStatusDone")
+    @MainActor func agentStatusDone() { #expect(applySlot(GUI_COLOR_AGENT_STATUS_DONE).agentStatusDone == expectedColor()) }
+
+    @Test("Slot 0x61 maps to agentStatusErrored")
+    @MainActor func agentStatusErrored() { #expect(applySlot(GUI_COLOR_AGENT_STATUS_ERRORED).agentStatusErrored == expectedColor()) }
+
     // MARK: - Batch application
 
     @Test("Multiple slots applied in one call all take effect")

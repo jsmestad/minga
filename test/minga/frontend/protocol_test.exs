@@ -953,7 +953,7 @@ defmodule Minga.Frontend.ProtocolTest do
 
       # Should have a reasonable number of color slots
       assert count > 20
-      assert count < 60
+      assert count < 70
 
       # Each entry is 4 bytes (slot_id, r, g, b)
       assert byte_size(rest) == count * 4
