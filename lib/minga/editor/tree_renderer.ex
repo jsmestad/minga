@@ -85,24 +85,22 @@ defmodule Minga.Editor.TreeRenderer do
   def render(%EditorState{workspace: %{file_tree: %{tree: nil}}}), do: []
 
   def render(%EditorState{workspace: %{file_tree: %{tree: tree, focused: focused}}} = state) do
-    case EditorState.tree_rect(state) do
-      nil ->
-        []
+    # tree_rect/1 never returns nil here because the clause above already
+    # matched tree: nil and returned [].
+    rect = EditorState.tree_rect(state)
 
-      rect ->
-        input = %RenderInput{
-          tree: tree,
-          rect: rect,
-          focused: focused,
-          theme: state.theme,
-          active_path: active_buffer_path(state),
-          editing: state.workspace.file_tree.editing,
-          git_status: tree.git_status,
-          dirty_paths: compute_dirty_paths(state)
-        }
+    input = %RenderInput{
+      tree: tree,
+      rect: rect,
+      focused: focused,
+      theme: state.theme,
+      active_path: active_buffer_path(state),
+      editing: state.workspace.file_tree.editing,
+      git_status: tree.git_status,
+      dirty_paths: compute_dirty_paths(state)
+    }
 
-        render(input)
-    end
+    render(input)
   end
 
   @spec do_render(

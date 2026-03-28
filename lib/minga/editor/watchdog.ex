@@ -29,8 +29,6 @@ defmodule Minga.Editor.Watchdog do
 
   use GenServer
 
-  require Logger
-
   @typedoc "Options for starting the watchdog."
   @type start_opt :: {:name, GenServer.name()} | {:editor_name, GenServer.name()}
 
