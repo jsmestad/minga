@@ -251,4 +251,157 @@ defmodule Minga.Editor.TreeRendererTest do
       assert [_ | _] = draws
     end
   end
+
+  describe "editing entry rendering" do
+    test "editing entry renders with inverse video styling", %{tmp_dir: tmp_dir} do
+      theme = Theme.get!(:doom_one)
+
+      input = %RenderInput{
+        tree: sample_tree(tmp_dir),
+        rect: {0, 0, 30, 10},
+        focused: true,
+        theme: theme,
+        active_path: nil,
+        editing: %{index: 0, text: "new_file.ex", type: :new_file, original_name: nil}
+      }
+
+      draws = TreeRenderer.render(input)
+
+      # Row 1 is the first entry (header is row 0). Find the text segment.
+      row1_draws = Enum.filter(draws, fn {r, _c, _t, _s} -> r == 1 end)
+      assert row1_draws != []
+
+      # The text segment should have inverse video: fg = tree.bg, bg = tree.dir_fg
+      text_draw =
+        Enum.find(row1_draws, fn {_r, _c, text, _s} -> String.contains?(text, "new_file.ex") end)
+
+      assert text_draw != nil
+      {_r, _c, _text, style} = text_draw
+      assert style.fg == theme.tree.bg
+      assert style.bg == theme.tree.dir_fg
+    end
+
+    test "editing entry shows cursor indicator at end of text", %{tmp_dir: tmp_dir} do
+      input = %RenderInput{
+        tree: sample_tree(tmp_dir),
+        rect: {0, 0, 30, 10},
+        focused: true,
+        theme: Theme.get!(:doom_one),
+        active_path: nil,
+        editing: %{index: 0, text: "hello", type: :new_file, original_name: nil}
+      }
+
+      draws = TreeRenderer.render(input)
+      row1_draws = Enum.filter(draws, fn {r, _c, _t, _s} -> r == 1 end)
+      texts = Enum.map(row1_draws, fn {_r, _c, text, _s} -> text end)
+      all_text = Enum.join(texts)
+
+      # Should contain the text followed by the cursor indicator
+      assert String.contains?(all_text, "hello▏")
+    end
+
+    test "editing entry with empty text shows only cursor indicator", %{tmp_dir: tmp_dir} do
+      input = %RenderInput{
+        tree: sample_tree(tmp_dir),
+        rect: {0, 0, 30, 10},
+        focused: true,
+        theme: Theme.get!(:doom_one),
+        active_path: nil,
+        editing: %{index: 0, text: "", type: :new_file, original_name: nil}
+      }
+
+      draws = TreeRenderer.render(input)
+      row1_draws = Enum.filter(draws, fn {r, _c, _t, _s} -> r == 1 end)
+      texts = Enum.map(row1_draws, fn {_r, _c, text, _s} -> text end)
+      all_text = Enum.join(texts)
+
+      assert String.contains?(all_text, "▏")
+    end
+
+    test "editing entry shows correct indent guides at depth", %{tmp_dir: tmp_dir} do
+      # main.ex is inside expanded lib/, so it has depth > 0 and should have guides.
+      # Index 1 in sample_tree is lib/main.ex (inside expanded lib/).
+      input = %RenderInput{
+        tree: sample_tree(tmp_dir),
+        rect: {0, 0, 30, 10},
+        focused: true,
+        theme: Theme.get!(:doom_one),
+        active_path: nil,
+        editing: %{index: 1, text: "renamed.ex", type: :rename, original_name: "main.ex"}
+      }
+
+      draws = TreeRenderer.render(input)
+      row2_draws = Enum.filter(draws, fn {r, _c, _t, _s} -> r == 2 end)
+      texts = Enum.map(row2_draws, fn {_r, _c, text, _s} -> text end)
+      all_text = Enum.join(texts)
+
+      # The entry at depth 1 should have a guide connector (└─ since it's last child)
+      assert String.contains?(all_text, "└─") or String.contains?(all_text, "├─")
+    end
+
+    test "non-editing entries render normally when editing is active", %{tmp_dir: tmp_dir} do
+      theme = Theme.get!(:doom_one)
+
+      input = %RenderInput{
+        tree: sample_tree(tmp_dir),
+        rect: {0, 0, 30, 10},
+        focused: false,
+        theme: theme,
+        active_path: nil,
+        editing: %{index: 0, text: "new.txt", type: :new_file, original_name: nil}
+      }
+
+      draws = TreeRenderer.render(input)
+
+      # Row 2 is the second entry (not being edited). It should have normal styling.
+      row2_draws = Enum.filter(draws, fn {r, _c, _t, _s} -> r == 2 end)
+      assert row2_draws != []
+
+      # Non-editing, non-cursor entries should have the normal tree bg
+      name_draw =
+        Enum.find(row2_draws, fn {_r, _c, _text, style} -> style.bg == theme.tree.bg end)
+
+      assert name_draw != nil
+    end
+
+    test "editing type :new_folder shows folder icon", %{tmp_dir: tmp_dir} do
+      input = %RenderInput{
+        tree: sample_tree(tmp_dir),
+        rect: {0, 0, 30, 10},
+        focused: true,
+        theme: Theme.get!(:doom_one),
+        active_path: nil,
+        editing: %{index: 0, text: "new_dir", type: :new_folder, original_name: nil}
+      }
+
+      draws = TreeRenderer.render(input)
+      row1_draws = Enum.filter(draws, fn {r, _c, _t, _s} -> r == 1 end)
+      texts = Enum.map(row1_draws, fn {_r, _c, text, _s} -> text end)
+      all_text = Enum.join(texts)
+
+      # Should contain the folder-open icon (U+F0256)
+      assert String.contains?(all_text, "\u{F0256}")
+    end
+
+    test "editing text style is bold", %{tmp_dir: tmp_dir} do
+      input = %RenderInput{
+        tree: sample_tree(tmp_dir),
+        rect: {0, 0, 30, 10},
+        focused: true,
+        theme: Theme.get!(:doom_one),
+        active_path: nil,
+        editing: %{index: 0, text: "test.txt", type: :new_file, original_name: nil}
+      }
+
+      draws = TreeRenderer.render(input)
+      row1_draws = Enum.filter(draws, fn {r, _c, _t, _s} -> r == 1 end)
+
+      text_draw =
+        Enum.find(row1_draws, fn {_r, _c, text, _s} -> String.contains?(text, "test.txt") end)
+
+      assert text_draw != nil
+      {_r, _c, _text, style} = text_draw
+      assert style.bold == true
+    end
+  end
 end
