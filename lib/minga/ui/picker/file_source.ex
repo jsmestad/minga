@@ -13,6 +13,7 @@ defmodule Minga.UI.Picker.FileSource do
   alias Minga.Language
   alias Minga.Log
   alias Minga.UI.Devicon
+  alias Minga.UI.Picker.Context
   alias Minga.UI.Picker.Item
   alias Minga.UI.Picker.Source
 
@@ -25,8 +26,8 @@ defmodule Minga.UI.Picker.FileSource do
   def preview?, do: true
 
   @impl true
-  @spec candidates(term()) :: [Item.t()]
-  def candidates(_context) do
+  @spec candidates(Context.t()) :: [Item.t()]
+  def candidates(_ctx) do
     root = project_root()
 
     case Minga.Project.list_files(root) do

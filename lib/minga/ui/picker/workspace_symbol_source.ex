@@ -19,6 +19,7 @@ defmodule Minga.UI.Picker.WorkspaceSymbolSource do
   alias Minga.LSP.Client
   alias Minga.Workspace.State, as: WorkspaceState
   alias Minga.LSP.SyncServer
+  alias Minga.UI.Picker.Context
   alias Minga.UI.Picker.Item
   alias Minga.UI.Picker.Source
 
@@ -31,8 +32,8 @@ defmodule Minga.UI.Picker.WorkspaceSymbolSource do
   def preview?, do: true
 
   @impl true
-  @spec candidates(term()) :: [Item.t()]
-  def candidates(%{workspace: %{buffers: %{active: buf}}} = _state) when is_pid(buf) do
+  @spec candidates(Context.t()) :: [Item.t()]
+  def candidates(%Context{buffers: %{active: buf}}) when is_pid(buf) do
     # Send a synchronous workspace/symbol request with empty query.
     # Most servers return commonly-used symbols for "".
     case lsp_client_for(buf) do

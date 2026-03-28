@@ -9,6 +9,7 @@ defmodule Minga.UI.Picker.ThemeSource do
 
   @behaviour Minga.UI.Picker.Source
 
+  alias Minga.UI.Picker.Context
   alias Minga.UI.Picker.Item
 
   alias Minga.UI.Theme
@@ -22,8 +23,8 @@ defmodule Minga.UI.Picker.ThemeSource do
   def preview?, do: true
 
   @impl true
-  @spec candidates(term()) :: [Item.t()]
-  def candidates(_context) do
+  @spec candidates(Context.t()) :: [Item.t()]
+  def candidates(_ctx) do
     Theme.available()
     |> Enum.sort()
     |> Enum.map(fn name ->

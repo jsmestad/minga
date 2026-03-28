@@ -9,6 +9,7 @@ defmodule Minga.UI.Picker.SessionHistorySource do
 
   @behaviour Minga.UI.Picker.Source
 
+  alias Minga.UI.Picker.Context
   alias Minga.UI.Picker.Item
 
   alias Minga.Agent.Session
@@ -24,8 +25,8 @@ defmodule Minga.UI.Picker.SessionHistorySource do
   def preview?, do: false
 
   @impl true
-  @spec candidates(term()) :: [Item.t()]
-  def candidates(_state) do
+  @spec candidates(Context.t()) :: [Item.t()]
+  def candidates(_ctx) do
     SessionStore.list()
     |> Enum.map(fn meta ->
       label = format_label(meta)

@@ -11,6 +11,7 @@ defmodule Minga.UI.Picker.CommandSource do
   @behaviour Minga.UI.Picker.Source
 
   alias Minga.Keymap
+  alias Minga.UI.Picker.Context
   alias Minga.UI.Picker.Item
 
   alias Minga.Buffer
@@ -23,8 +24,8 @@ defmodule Minga.UI.Picker.CommandSource do
   def title, do: "Commands"
 
   @impl true
-  @spec candidates(term()) :: [Item.t()]
-  def candidates(_context) do
+  @spec candidates(Context.t()) :: [Item.t()]
+  def candidates(_ctx) do
     keybind_map = build_keybind_map()
 
     try do

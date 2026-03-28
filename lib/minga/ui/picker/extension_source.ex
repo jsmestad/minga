@@ -9,6 +9,7 @@ defmodule Minga.UI.Picker.ExtensionSource do
 
   @behaviour Minga.UI.Picker.Source
 
+  alias Minga.UI.Picker.Context
   alias Minga.UI.Picker.Item
 
   alias Minga.Extension.Registry, as: ExtRegistry
@@ -19,8 +20,8 @@ defmodule Minga.UI.Picker.ExtensionSource do
   def title, do: "Extension"
 
   @impl true
-  @spec candidates(term()) :: [Item.t()]
-  def candidates(_context) do
+  @spec candidates(Context.t()) :: [Item.t()]
+  def candidates(_ctx) do
     extensions = ExtSupervisor.list_extensions()
     all_entries = ExtRegistry.all()
 

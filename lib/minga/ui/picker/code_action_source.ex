@@ -15,6 +15,7 @@ defmodule Minga.UI.Picker.CodeActionSource do
   alias Minga.Log
   alias Minga.LSP.Client
   alias Minga.LSP.SyncServer
+  alias Minga.UI.Picker.Context
   alias Minga.UI.Picker.Item
 
   @impl true
@@ -26,8 +27,8 @@ defmodule Minga.UI.Picker.CodeActionSource do
   def layout, do: :centered
 
   @impl true
-  @spec candidates(term()) :: [Item.t()]
-  def candidates(%{shell_state: %{picker_ui: %{context: %{actions: actions}}}})
+  @spec candidates(Context.t()) :: [Item.t()]
+  def candidates(%Context{picker_ui: %{context: %{actions: actions}}})
       when is_list(actions) do
     actions
     |> Enum.with_index()

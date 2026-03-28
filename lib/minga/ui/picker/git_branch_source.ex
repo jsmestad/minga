@@ -11,6 +11,7 @@ defmodule Minga.UI.Picker.GitBranchSource do
 
   alias Minga.Git
   alias Minga.Log
+  alias Minga.UI.Picker.Context
   alias Minga.UI.Picker.Item
 
   @impl true
@@ -18,8 +19,8 @@ defmodule Minga.UI.Picker.GitBranchSource do
   def title, do: "Switch Branch"
 
   @impl true
-  @spec candidates(term()) :: [Item.t()]
-  def candidates(_context) do
+  @spec candidates(Context.t()) :: [Item.t()]
+  def candidates(_ctx) do
     root = Minga.Project.resolve_root()
 
     case Git.root_for(root) do

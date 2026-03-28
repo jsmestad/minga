@@ -1,9 +1,30 @@
 defmodule Minga.UI.Picker.AgentGroupSourceTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Editor.State.Buffers
+  alias Minga.Editor.State.Search
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
+  alias Minga.Editor.VimState
+  alias Minga.Editor.Viewport
   alias Minga.UI.Picker.AgentGroupSource
+  alias Minga.UI.Picker.Context
+  alias Minga.UI.Theme
+
+  defp fake_context(tab_bar) do
+    %Context{
+      buffers: %Buffers{list: [], active: nil, active_index: 0},
+      editing: VimState.new(),
+      file_tree: nil,
+      search: %Search{},
+      viewport: Viewport.new(80, 24),
+      tab_bar: tab_bar,
+      agent_session: nil,
+      picker_ui: %{},
+      capabilities: %{},
+      theme: Theme.get!(:doom_one)
+    }
+  end
 
   describe "candidates/1" do
     test "returns one item per agent group with tabs" do
@@ -11,9 +32,8 @@ defmodule Minga.UI.Picker.AgentGroupSourceTest do
       {tb, _} = TabBar.add(tb, :agent, "Agent")
       {tb, group} = TabBar.add_agent_group(tb, "Research")
       tb = TabBar.move_tab_to_group(tb, 2, group.id)
-      state = %{shell_state: %{tab_bar: tb}}
 
-      items = AgentGroupSource.candidates(state)
+      items = AgentGroupSource.candidates(fake_context(tb))
       assert length(items) == 1
       assert hd(items).id == group.id
     end
@@ -21,9 +41,8 @@ defmodule Minga.UI.Picker.AgentGroupSourceTest do
     test "filters out groups with no tabs" do
       tb = TabBar.new(Tab.new_file(1, "a.ex"))
       {tb, _} = TabBar.add_agent_group(tb, "Empty")
-      state = %{shell_state: %{tab_bar: tb}}
 
-      items = AgentGroupSource.candidates(state)
+      items = AgentGroupSource.candidates(fake_context(tb))
       assert items == []
     end
 
@@ -33,15 +52,27 @@ defmodule Minga.UI.Picker.AgentGroupSourceTest do
       {tb, group} = TabBar.add_agent_group(tb, "Work")
       tb = TabBar.move_tab_to_group(tb, 1, group.id)
       tb = TabBar.move_tab_to_group(tb, 2, group.id)
-      state = %{shell_state: %{tab_bar: tb}}
 
-      [item] = AgentGroupSource.candidates(state)
+      [item] = AgentGroupSource.candidates(fake_context(tb))
       assert item.description =~ "editor.ex"
       assert item.description =~ "main.ex"
     end
 
-    test "returns empty for state without tab_bar" do
-      assert AgentGroupSource.candidates(%{}) == []
+    test "returns empty for context without TabBar struct" do
+      ctx = %Context{
+        buffers: %Buffers{list: [], active: nil, active_index: 0},
+        editing: VimState.new(),
+        file_tree: nil,
+        search: %Search{},
+        viewport: Viewport.new(80, 24),
+        tab_bar: %{},
+        agent_session: nil,
+        picker_ui: %{},
+        capabilities: %{},
+        theme: Theme.get!(:doom_one)
+      }
+
+      assert AgentGroupSource.candidates(ctx) == []
     end
   end
 

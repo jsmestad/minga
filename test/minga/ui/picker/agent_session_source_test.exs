@@ -1,6 +1,7 @@
 defmodule Minga.UI.Picker.AgentSessionSourceTest do
   use ExUnit.Case, async: true
 
+  alias Minga.UI.Picker.Context
   alias Minga.UI.Picker.Item
 
   alias Minga.Agent.Session
@@ -30,8 +31,20 @@ defmodule Minga.UI.Picker.AgentSessionSourceTest do
   describe "candidates/1" do
     test "returns only disk candidates when no agent tabs" do
       tb = TabBar.new(Tab.new_file(1, "main.ex"))
-      state = %{tab_bar: tb, agent: %AgentState{session: nil}}
-      candidates = AgentSessionSource.candidates(state)
+
+      state = %EditorState{
+        port_manager: self(),
+        workspace: %Minga.Workspace.State{
+          viewport: Viewport.new(24, 80),
+          buffers: %Buffers{},
+          windows: %Windows{},
+          editing: VimState.new()
+        },
+        shell_state: %Minga.Shell.Traditional.State{tab_bar: tb, agent: %AgentState{session: nil}}
+      }
+
+      ctx = Context.from_editor_state(state)
+      candidates = AgentSessionSource.candidates(ctx)
 
       Enum.each(candidates, fn %Item{id: {_, tag}} ->
         assert tag == :disk
@@ -43,7 +56,8 @@ defmodule Minga.UI.Picker.AgentSessionSourceTest do
       Session.subscribe(pid)
 
       state = state_with_agent_tab(pid)
-      candidates = AgentSessionSource.candidates(state)
+      ctx = Context.from_editor_state(state)
+      candidates = AgentSessionSource.candidates(ctx)
       tab_entries = Enum.filter(candidates, fn %Item{id: {_, tag}} -> match?({:tab, _}, tag) end)
       assert tab_entries != []
 
@@ -60,7 +74,8 @@ defmodule Minga.UI.Picker.AgentSessionSourceTest do
       Session.subscribe(pid)
 
       state = state_with_agent_tab(pid)
-      candidates = AgentSessionSource.candidates(state)
+      ctx = Context.from_editor_state(state)
+      candidates = AgentSessionSource.candidates(ctx)
 
       active =
         Enum.find(candidates, fn
@@ -81,7 +96,8 @@ defmodule Minga.UI.Picker.AgentSessionSourceTest do
       Session.subscribe(pid2)
 
       state = state_with_two_agent_tabs(pid1, pid2)
-      candidates = AgentSessionSource.candidates(state)
+      ctx = Context.from_editor_state(state)
+      candidates = AgentSessionSource.candidates(ctx)
 
       # Active tab is the first one (pid1). Background tab (pid2) should not have bullet.
       bg_tabs =

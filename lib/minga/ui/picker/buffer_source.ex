@@ -9,6 +9,7 @@ defmodule Minga.UI.Picker.BufferSource do
 
   @behaviour Minga.UI.Picker.Source
 
+  alias Minga.UI.Picker.Context
   alias Minga.UI.Picker.Item
   alias Minga.UI.Picker.Source
 
@@ -27,8 +28,8 @@ defmodule Minga.UI.Picker.BufferSource do
   def preview?, do: true
 
   @impl true
-  @spec candidates(term()) :: [Item.t()]
-  def candidates(state), do: build_candidates(state, include_special: false)
+  @spec candidates(Context.t()) :: [Item.t()]
+  def candidates(ctx), do: build_candidates(ctx, include_special: false)
 
   @doc """
   Builds picker candidates from the buffer list.
@@ -38,8 +39,8 @@ defmodule Minga.UI.Picker.BufferSource do
   * `:include_special` — when `true`, includes special buffers (`*Messages*`,
     `*Warnings*`, etc.) in the results. Defaults to `false`.
   """
-  @spec build_candidates(term(), keyword()) :: [Item.t()]
-  def build_candidates(%{workspace: %{buffers: buffers_state}}, opts \\ []) do
+  @spec build_candidates(Context.t(), keyword()) :: [Item.t()]
+  def build_candidates(%Context{buffers: buffers_state}, opts \\ []) do
     %{list: buffers} = buffers_state
     include_special = Keyword.get(opts, :include_special, false)
 

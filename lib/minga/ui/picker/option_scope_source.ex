@@ -17,6 +17,7 @@ defmodule Minga.UI.Picker.OptionScopeSource do
   @behaviour Minga.UI.Picker.Source
 
   alias Minga.Config
+  alias Minga.UI.Picker.Context
   alias Minga.UI.Picker.Item
 
   alias Minga.Buffer
@@ -26,8 +27,8 @@ defmodule Minga.UI.Picker.OptionScopeSource do
   def title, do: "Apply to..."
 
   @impl true
-  @spec candidates(term()) :: [Item.t()]
-  def candidates(_context) do
+  @spec candidates(Context.t()) :: [Item.t()]
+  def candidates(_ctx) do
     [
       %Item{id: :buffer, label: "This Buffer", description: "Set for the current buffer only"},
       %Item{

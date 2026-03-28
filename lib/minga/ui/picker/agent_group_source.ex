@@ -8,6 +8,7 @@ defmodule Minga.UI.Picker.AgentGroupSource do
 
   @behaviour Minga.UI.Picker.Source
 
+  alias Minga.UI.Picker.Context
   alias Minga.UI.Picker.Item
 
   alias Minga.Editor.State, as: EditorState
@@ -19,8 +20,8 @@ defmodule Minga.UI.Picker.AgentGroupSource do
   def title, do: "Switch Workspace"
 
   @impl true
-  @spec candidates(term()) :: [Item.t()]
-  def candidates(%{shell_state: %{tab_bar: %TabBar{} = tb}}) do
+  @spec candidates(Context.t()) :: [Item.t()]
+  def candidates(%Context{tab_bar: %TabBar{} = tb}) do
     # Filter out workspaces with no tabs (empty manual workspace)
     tb.agent_groups
     |> Enum.filter(fn ws ->
