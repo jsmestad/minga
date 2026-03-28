@@ -37,7 +37,6 @@ defmodule Minga.Frontend.Emit.GUI do
   alias Minga.Editor.Window.Content
 
   alias Minga.Frontend.Protocol.GUI, as: ProtocolGUI
-  alias Minga.Frontend.Protocol.GUIWindowContent
   alias Minga.UI.Picker
 
   @typedoc "Internal editor state."
@@ -745,14 +744,7 @@ defmodule Minga.Frontend.Emit.GUI do
         Minga.Log.debug(:render, "[gui] sending agent chat: #{length(data.messages)} messages")
       end
 
-      chat_cmd = ProtocolGUI.encode_gui_agent_chat(data)
-      prompt_cmd = build_prompt_semantic_window_cmd(state, data.visible)
-
-      if prompt_cmd do
-        IO.iodata_to_binary([chat_cmd, prompt_cmd])
-      else
-        chat_cmd
-      end
+      ProtocolGUI.encode_gui_agent_chat(data)
     end
   end
 
@@ -782,18 +774,6 @@ defmodule Minga.Frontend.Emit.GUI do
   end
 
   defp build_prompt_completion(_panel), do: nil
-
-  # Builds the prompt SemanticWindow (0x80) alongside the chat.
-  # The prompt is rendered by the Metal renderer at the bottom of the
-  # agent chat panel, positioned using cell coordinates from the gutter.
-  @spec build_prompt_semantic_window_cmd(state(), boolean()) :: binary() | nil
-  defp build_prompt_semantic_window_cmd(state, true) do
-    inner_width = max(state.workspace.viewport.cols - 10, 20)
-    prompt_sw = PromptSemanticWindow.build(state, inner_width)
-    if prompt_sw, do: GUIWindowContent.encode(prompt_sw)
-  end
-
-  defp build_prompt_semantic_window_cmd(_state, _visible), do: nil
 
   # Reads prompt buffer content, guarding against a dead process.
   # The prompt buffer can die between state updates; the :DOWN handler
@@ -969,48 +949,11 @@ defmodule Minga.Frontend.Emit.GUI do
         end
       end)
 
-    # Add a gutter entry for the agent prompt window when agent chat is visible.
-    # This tells the Metal renderer where to position the prompt SemanticWindow.
-    # The prompt is placed at the bottom of the editor surface.
-    prompt_gutter = build_prompt_gutter(state)
-    if prompt_gutter, do: window_gutters ++ [prompt_gutter], else: window_gutters
+    window_gutters
   end
 
   # Builds a minimal gutter entry for the agent prompt SemanticWindow.
   # Positions it at the bottom of the grid with no line numbers or sign column.
-  @spec build_prompt_gutter(state()) :: binary() | nil
-  defp build_prompt_gutter(state) do
-    active_window = Map.get(state.workspace.windows.map, state.workspace.windows.active)
-    is_agent_chat = active_window != nil && Content.agent_chat?(active_window.content)
-
-    if is_agent_chat do
-      panel = state.workspace.agent_ui.panel
-      inner_width = max(state.workspace.viewport.cols - 10, 20)
-      visible_rows = PromptSemanticWindow.visible_rows(panel, inner_width)
-
-      # Place the prompt at the very bottom of the grid.
-      # +2 accounts for top/bottom borders of the prompt box.
-      total_rows = state.workspace.viewport.rows
-      prompt_height = visible_rows + 2
-      content_row = max(total_rows - prompt_height, 0)
-
-      gutter_data = %{
-        window_id: PromptSemanticWindow.prompt_window_id(),
-        content_row: content_row,
-        content_col: 0,
-        content_height: visible_rows,
-        is_active: true,
-        cursor_line: 0,
-        line_number_style: :none,
-        line_number_width: 0,
-        sign_col_width: 0,
-        entries: []
-      }
-
-      ProtocolGUI.encode_gui_gutter(gutter_data)
-    end
-  end
-
   @spec build_window_gutter(
           state(),
           Minga.Editor.Window.t(),

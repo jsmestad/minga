@@ -48,6 +48,11 @@ final class CommandDispatcher {
     /// Parameter: mode name string (e.g., "NORMAL", "INSERT", "VISUAL").
     var onModeChanged: ((String) -> Void)?
 
+    /// Called when agent chat visibility changes. Used to install/remove
+    /// the keyboard event monitor on EditorNSView since SwiftUI onChange
+    /// can miss updates during animated transitions.
+    var onAgentChatVisibilityChanged: ((Bool) -> Void)?
+
     /// Called once after the first `batch_end` is received from the BEAM.
     /// Used in bundle mode to flush pending file URLs after the BEAM is ready.
     var onFirstRender: (() -> Void)?
@@ -236,6 +241,7 @@ final class CommandDispatcher {
             }
 
         case .guiAgentChat(let visible, let status, let model, let prompt, let promptLineCount, let promptCursorLine, let promptCursorCol, let promptVimMode, let promptVisibleRows, let promptCompletion, let pendingToolName, let pendingToolSummary, let helpVisible, let helpGroups, let messages):
+            let wasVisible = guiState.agentChatState.visible
             if visible {
                 let groups = helpGroups.map { g in
                     HelpGroup(title: g.title, bindings: g.bindings.map { ($0.key, $0.description) })
@@ -243,6 +249,9 @@ final class CommandDispatcher {
                 guiState.agentChatState.update(visible: true, status: status, model: model, prompt: prompt, promptLineCount: promptLineCount, promptCursorLine: promptCursorLine, promptCursorCol: promptCursorCol, promptVimMode: promptVimMode, promptVisibleRows: promptVisibleRows, promptCompletion: promptCompletion, pendingToolName: pendingToolName, pendingToolSummary: pendingToolSummary, helpVisible: helpVisible, helpGroups: groups, rawMessages: messages)
             } else {
                 guiState.agentChatState.hide()
+            }
+            if guiState.agentChatState.visible != wasVisible {
+                onAgentChatVisibilityChanged?(guiState.agentChatState.visible)
             }
 
         case .guiGutterSeparator(let col, let r, let g, let b):

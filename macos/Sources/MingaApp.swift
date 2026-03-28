@@ -352,6 +352,9 @@ struct ContentView: View {
             .onChange(of: appState.gui.boardState.visible) { _, newVisible in
                 appState.editorNSView?.setBoardVisible(newVisible)
             }
+            .onChange(of: appState.gui.agentChatState.visible) { _, visible in
+                appState.editorNSView?.setAgentChatVisible(visible)
+            }
 
             // Bottom panel (between editor and status bar)
             if appState.gui.bottomPanelState.visible {
@@ -408,9 +411,6 @@ struct ContentView: View {
                 }
             }
             .opacity(appState.gui.agentChatState.visible ? 0 : 1)
-            .onChange(of: appState.gui.agentChatState.visible) { _, visible in
-                appState.editorNSView?.setAgentChatVisible(visible)
-            }
 
             if appState.gui.agentChatState.visible {
                 AgentChatView(
@@ -671,6 +671,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         disp.onFrameReady = { [weak nsView] in
             nsView?.renderFrame()
+        }
+        disp.onAgentChatVisibilityChanged = { [weak nsView] visible in
+            nsView?.setAgentChatVisible(visible)
         }
         disp.onModeChanged = { [weak nsView] modeName in
             guard let nsView else { return }
