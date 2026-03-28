@@ -30,7 +30,6 @@ defmodule Minga.Editor do
   alias Minga.Editor.CompletionHandling
   alias Minga.Editor.CompletionTrigger
   alias Minga.Editor.FileWatcherHelpers
-  alias Minga.Editing.Fold.Range, as: FoldRange
   alias Minga.Editor.HighlightEvents
   alias Minga.Editor.HighlightSync
   alias Minga.Editor.KeyDispatch
@@ -42,6 +41,11 @@ defmodule Minga.Editor do
   alias Minga.Editor.SemanticTokenSync
   alias Minga.Editor.Startup
   alias Minga.Editor.Viewport
+
+  alias Minga.Editor.Handlers.FileEventHandler
+  alias Minga.Editor.Handlers.HighlightHandler
+  alias Minga.Editor.Handlers.SessionHandler
+  alias Minga.Editor.Handlers.ToolHandler
   # WarningLog removed in #825; warnings route through MessageLog with level override
   alias Minga.Editor.Window
   alias Minga.Input
@@ -510,352 +514,83 @@ defmodule Minga.Editor do
     {:noreply, new_state}
   end
 
-  # ── Highlight setup (async, after first paint with correct viewport) ──────────
+  # ── Highlight setup + session events (delegated to handler modules) ────────
+  # :setup_highlight, :check_swap_recovery, :save_session are handled by
+  # HighlightHandler and SessionHandler respectively.
 
   def handle_info(:setup_highlight, state) do
-    new_state = HighlightSync.setup_for_buffer(state)
-    # Also request semantic tokens from LSP if available
-    new_state = SemanticTokenSync.request_tokens(new_state)
-    {:noreply, new_state}
+    {state, effects} = HighlightHandler.handle(state, :setup_highlight)
+    {:noreply, apply_effects(state, effects)}
   end
-
-  # ── Swap file recovery ────────────────────────────────────────────────────────
 
   def handle_info(:check_swap_recovery, state) do
-    recoverable = Minga.Session.scan_recoverable_swaps(SessionState.swap_opts(state.session))
-
-    new_state =
-      case recoverable do
-        [] ->
-          if Session.clean_shutdown?(SessionState.session_opts(state.session)) do
-            state
-          else
-            # Restore open files from the previous session
-            restore_session(state)
-          end
-
-        entries ->
-          recover_swap_entries(state, entries)
-      end
-
-    {:noreply, new_state}
+    {state, effects} = SessionHandler.handle(state, :check_swap_recovery)
+    {:noreply, apply_effects(state, effects)}
   end
 
-  # ── Session persistence ───────────────────────────────────────────────────────
-
   def handle_info(:save_session, state) do
-    snapshot = Session.snapshot(state)
-    opts = SessionState.session_opts(state.session)
-
-    Task.start(fn ->
-      case Session.save(snapshot, opts) do
-        :ok -> :ok
-        {:error, reason} -> Minga.Log.warning(:editor, "Session save failed: #{inspect(reason)}")
-      end
-    end)
-
-    # Cancel any existing timer and schedule a new one.
-    # This prevents timer accumulation when file saves trigger
-    # immediate :save_session messages alongside the periodic timer.
-    # In headless mode, skip the timer to avoid non-deterministic messages.
-    session =
-      if state.backend != :headless do
-        SessionState.restart_timer(state.session)
-      else
-        SessionState.cancel_timer(state.session)
-      end
-
-    {:noreply, %{state | session: session}}
+    {state, effects} = SessionHandler.handle(state, :save_session)
+    {:noreply, apply_effects(state, effects)}
   end
 
   # ── Highlight events from Parser.Manager ──────────────────────────────────────
   # These arrive as {:minga_highlight, event} from the dedicated parser process.
   # Legacy {:minga_input, event} forms are also accepted for backward
   # compatibility during the transition (headless tests, etc.).
+  # Log messages from the renderer port also arrive via {:minga_input, {:log_message, ...}}.
 
-  def handle_info({tag, {:highlight_names, buffer_id, names}}, state)
-      when tag in [:minga_highlight, :minga_input] do
-    pid = HighlightSync.resolve_buffer_pid(state, buffer_id)
-
-    new_state =
-      case pid do
-        nil ->
-          Minga.Log.warning(
-            :editor,
-            "highlight_names for unknown buffer_id=#{buffer_id}, discarding"
-          )
-
-          state
-
-        ^pid when pid == state.workspace.buffers.active ->
-          HighlightEvents.handle_names(state, names)
-
-        _ ->
-          existing = HighlightSync.get_highlight(state, pid)
-          updated = Minga.UI.Highlight.put_names(existing, names)
-          HighlightSync.put_highlight(state, pid, updated)
-      end
-
-    {:noreply, new_state}
+  def handle_info({:minga_input, {:log_message, _level, _text}} = msg, state) do
+    {state, effects} = HighlightHandler.handle(state, msg)
+    {:noreply, apply_effects(state, effects)}
   end
 
-  def handle_info({tag, {:injection_ranges, buffer_id, ranges}}, state)
-      when tag in [:minga_highlight, :minga_input] do
-    pid = HighlightSync.resolve_buffer_pid(state, buffer_id)
-
-    new_state =
-      if pid do
-        %{
-          state
-          | workspace: %{
-              state.workspace
-              | injection_ranges: Map.put(state.workspace.injection_ranges, pid, ranges)
-            }
-        }
-      else
-        Minga.Log.warning(
-          :editor,
-          "injection_ranges for unknown buffer_id=#{buffer_id}, discarding"
-        )
-
-        state
-      end
-
-    {:noreply, new_state}
+  def handle_info({tag, _} = msg, state) when tag == :minga_highlight do
+    {state, effects} = HighlightHandler.handle(state, msg)
+    {:noreply, apply_effects(state, effects)}
   end
 
-  def handle_info({tag, {:language_at_response, _request_id, _language}}, state)
-      when tag in [:minga_highlight, :minga_input] do
-    {:noreply, state}
+  def handle_info({:minga_input, {highlight_event, _buffer_id}} = msg, state)
+      when highlight_event in [
+             :highlight_names,
+             :injection_ranges,
+             :language_at_response,
+             :conceal_spans,
+             :fold_ranges,
+             :textobject_positions,
+             :grammar_loaded
+           ] do
+    {state, effects} = HighlightHandler.handle(state, msg)
+    {:noreply, apply_effects(state, effects)}
   end
 
-  def handle_info({tag, {:highlight_spans, buffer_id, version, spans}}, state)
-      when tag in [:minga_highlight, :minga_input] do
-    pid = HighlightSync.resolve_buffer_pid(state, buffer_id)
-
-    new_state =
-      case pid do
-        nil ->
-          Minga.Log.warning(
-            :editor,
-            "highlight_spans for unknown buffer_id=#{buffer_id}, discarding"
-          )
-
-          state
-
-        ^pid when pid == state.workspace.buffers.active ->
-          HighlightEvents.handle_spans(state, version, spans)
-
-        _ ->
-          # Non-active buffer: store spans in highlights map.
-          existing = HighlightSync.get_highlight(state, pid)
-          updated = Minga.UI.Highlight.put_spans(existing, version, spans)
-          state_with_hl = HighlightSync.put_highlight(state, pid, updated)
-
-          # If this buffer is visible in any window (e.g., agent panel),
-          # trigger a render so the highlights appear immediately.
-          if buffer_visible_in_window?(state_with_hl, pid) do
-            Renderer.render(state_with_hl)
-          else
-            state_with_hl
-          end
-      end
-
-    # Re-cache GUI styled messages whenever the agent buffer gets new
-    # tree-sitter highlights, regardless of whether it's the active
-    # buffer or not.
-    new_state =
-      if pid != nil and pid == new_state.shell_state.agent.buffer do
-        AgentLifecycle.update_styled_cache(new_state)
-      else
-        new_state
-      end
-
-    {:noreply, new_state}
+  def handle_info({:minga_input, {highlight_event, _buffer_id, _a}} = msg, state)
+      when highlight_event in [
+             :highlight_names,
+             :injection_ranges,
+             :language_at_response,
+             :conceal_spans,
+             :fold_ranges,
+             :textobject_positions,
+             :grammar_loaded
+           ] do
+    {state, effects} = HighlightHandler.handle(state, msg)
+    {:noreply, apply_effects(state, effects)}
   end
 
-  def handle_info({tag, {:conceal_spans, buffer_id, _version, spans}}, state)
-      when tag in [:minga_highlight, :minga_input] do
-    pid = HighlightSync.resolve_buffer_pid(state, buffer_id)
-
-    if pid do
-      HighlightEvents.handle_conceal_spans(state, pid, spans)
-    else
-      Minga.Log.warning(:editor, "conceal_spans for unknown buffer_id=#{buffer_id}, discarding")
-    end
-
-    {:noreply, state}
+  def handle_info({:minga_input, {highlight_event, _buffer_id, _a, _b}} = msg, state)
+      when highlight_event in [
+             :highlight_spans,
+             :conceal_spans,
+             :fold_ranges,
+             :textobject_positions
+           ] do
+    {state, effects} = HighlightHandler.handle(state, msg)
+    {:noreply, apply_effects(state, effects)}
   end
-
-  def handle_info({tag, {:fold_ranges, buffer_id, _version, ranges}}, state)
-      when tag in [:minga_highlight, :minga_input] do
-    Minga.Log.debug(:editor, "Fold ranges received: buffer=#{buffer_id}, count=#{length(ranges)}")
-
-    pid = HighlightSync.resolve_buffer_pid(state, buffer_id)
-
-    new_state =
-      case pid do
-        nil ->
-          Minga.Log.warning(:editor, "fold_ranges for unknown buffer_id=#{buffer_id}, discarding")
-          state
-
-        ^pid when pid == state.workspace.buffers.active ->
-          fold_ranges =
-            Enum.map(ranges, fn {start_line, end_line} ->
-              FoldRange.new!(start_line, end_line)
-            end)
-
-          case EditorState.active_window_struct(state) do
-            nil ->
-              state
-
-            %Window{id: id} ->
-              EditorState.update_window(state, id, &Window.set_fold_ranges(&1, fold_ranges))
-          end
-
-        _ ->
-          # Response for a non-active buffer; discard.
-          state
-      end
-
-    {:noreply, new_state}
-  end
-
-  def handle_info({tag, {:textobject_positions, buffer_id, _version, positions}}, state)
-      when tag in [:minga_highlight, :minga_input] do
-    pid = HighlightSync.resolve_buffer_pid(state, buffer_id)
-
-    new_state =
-      case pid do
-        nil ->
-          Minga.Log.warning(
-            :editor,
-            "textobject_positions for unknown buffer_id=#{buffer_id}, discarding"
-          )
-
-          state
-
-        ^pid when pid == state.workspace.buffers.active ->
-          apply_textobject_positions(state, positions)
-
-        _ ->
-          # Response for a non-active buffer; discard.
-          state
-      end
-
-    {:noreply, new_state}
-  end
-
-  def handle_info({tag, {:grammar_loaded, true, name}}, state)
-      when tag in [:minga_highlight, :minga_input] do
-    Minga.Log.info(:editor, "Grammar loaded: #{name}")
-    {:noreply, state}
-  end
-
-  def handle_info({tag, {:grammar_loaded, false, name}}, state)
-      when tag in [:minga_highlight, :minga_input] do
-    Minga.Log.warning(:editor, "Grammar failed to load: #{name}")
-    {:noreply, state}
-  end
-
-  def handle_info({:minga_input, {:log_message, level, text}}, state) do
-    prefix = MessageLog.frontend_prefix(state)
-    new_state = log_message(state, "[#{prefix}/#{level}] #{text}")
-    {:noreply, new_state}
-  end
-
-  # Parser log messages (routed over the protocol, same format as renderer logs).
-  def handle_info({:minga_highlight, {:log_message, level, text}}, state) do
-    new_state = log_message(state, "[PARSER/#{level}] #{text}")
-    {:noreply, new_state}
-  end
-
-  # Parser process crashed; Manager is scheduling a restart.
-  # Parser detected stale edit deltas (byte offsets don't match its stored
-  # source). This typically happens after system sleep/wake. The parser has
-  # already discarded the buffer's tree and source. We resend the full content
-  # so highlighting recovers without user intervention.
-  def handle_info({:minga_highlight, {:request_reparse, buffer_id}}, state) do
-    case HighlightSync.resolve_buffer_pid(state, buffer_id) do
-      nil ->
-        {:noreply, state}
-
-      buf_pid ->
-        Minga.Log.info(:editor, "Parser requested full reparse for buffer #{buffer_id}")
-
-        new_state =
-          if buf_pid == state.workspace.buffers.active do
-            HighlightSync.setup_for_buffer(state)
-          else
-            HighlightSync.request_reparse_buffer(state, buf_pid)
-          end
-
-        {:noreply, new_state}
-    end
-  end
-
-  def handle_info({:minga_highlight, :parser_crashed}, state) do
-    {:noreply, %{state | parser_status: :restarting}}
-  end
-
-  # Parser recovered after a crash; buffer re-sync already happened in Manager.
-  # Reset both the global highlight version AND each per-buffer highlight's
-  # version to 0 so resync spans (sent at version 0) pass the version guard
-  # in Highlight.put_spans/3. Without resetting per-buffer versions, the
-  # resync spans would be silently discarded (0 < previous_version).
-  def handle_info({:minga_highlight, :parser_restarted}, state) do
-    hl = state.workspace.highlight
-
-    reset_highlights =
-      Map.new(hl.highlights, fn {pid, buf_hl} ->
-        {pid, %{buf_hl | version: 0}}
-      end)
-
-    new_state = %{
-      state
-      | workspace: %{
-          state.workspace
-          | highlight: %{hl | version: 0, highlights: reset_highlights}
-        },
-        parser_status: :available
-    }
-
-    new_state = log_message(new_state, "Parser restarted, syntax highlighting recovered")
-    {:noreply, new_state}
-  end
-
-  # Parser gave up retrying after repeated crashes.
-  def handle_info({:minga_highlight, :parser_gave_up}, state) do
-    new_state = %{state | parser_status: :unavailable}
-
-    new_state =
-      log_message(
-        new_state,
-        "Parser crashed repeatedly, syntax highlighting disabled. Use :parser-restart to retry."
-      )
-
-    {:noreply, new_state}
-  end
-
-  # ── LRU eviction of inactive parser trees ─────────────────────────────────────
 
   def handle_info(:evict_parser_trees, state) do
-    ttl_seconds = Config.get(:parser_tree_ttl)
-    # Protect the agent buffer from eviction: it's persistent and always-visible.
-    agent_buf = state |> EditorState.AgentAccess.agent() |> Map.get(:buffer)
-    protected = if is_pid(agent_buf), do: [agent_buf], else: []
-
-    state =
-      HighlightSync.evict_inactive(state,
-        ttl_ms: ttl_seconds * 1_000,
-        protected_pids: protected
-      )
-
-    if state.backend != :headless do
-      Process.send_after(self(), :evict_parser_trees, HighlightSync.eviction_check_interval_ms())
-    end
-
-    {:noreply, state}
+    {state, effects} = HighlightHandler.handle(state, :evict_parser_trees)
+    {:noreply, apply_effects(state, effects)}
   end
 
   # Completion debounce timer fired — send the actual completion request
@@ -1085,134 +820,58 @@ defmodule Minga.Editor do
     {:noreply, state}
   end
 
-  def handle_info(
-        {:minga_event, :git_status_changed,
-         %Minga.Events.GitStatusEvent{
-           entries: entries,
-           branch: branch,
-           ahead: ahead,
-           behind: behind
-         }},
-        state
-      ) do
-    # Only update when the git status panel is actually open. Without
-    # this guard, stray broadcasts (from concurrent git operations or
-    # file watcher events) re-populate the panel after it was closed,
-    # causing the panel to ghost back into view.
-    if EditorState.git_status_panel(state) != nil do
-      git_status_data = %{
-        repo_state: :normal,
-        branch: branch || "",
-        ahead: ahead,
-        behind: behind,
-        entries: entries
-      }
+  # ── File/git events (delegated to FileEventHandler) ─────────────────────────
 
-      state = EditorState.set_git_status_panel(state, git_status_data)
-      {:noreply, schedule_render(state, 16)}
-    else
-      {:noreply, state}
-    end
+  def handle_info({:minga_event, :git_status_changed, _event} = msg, state) do
+    {state, effects} = FileEventHandler.handle(state, msg)
+    {:noreply, apply_effects(state, effects)}
   end
 
-  def handle_info({:minga_event, :buffer_saved, %Minga.Events.BufferEvent{}}, state) do
-    state = refresh_tree_git_status(state)
-    # Request fresh code lenses and inlay hints after save
-    state = LspActions.code_lens(state)
-    state = LspActions.inlay_hints(state)
-    # Save session state on every file save
-    if state.backend != :headless, do: send(self(), :save_session)
-    {:noreply, state}
+  def handle_info({:minga_event, :buffer_saved, %Minga.Events.BufferEvent{}} = msg, state) do
+    {state, effects} = FileEventHandler.handle(state, msg)
+    {:noreply, apply_effects(state, effects)}
   end
 
-  # ── Async git remote operations ─────────────────────────────────────────────
-
-  def handle_info({:git_remote_result, ref, result}, state) when is_reference(ref) do
-    state = Commands.Git.handle_remote_result(state, ref, result)
-    {:noreply, Renderer.render(state)}
+  def handle_info({:git_remote_result, ref, _result} = msg, state) when is_reference(ref) do
+    {state, effects} = FileEventHandler.handle(state, msg)
+    {:noreply, apply_effects(state, effects)}
   end
 
-  # ── Tool manager events ────────────────────────────────────────────────────
+  # ── Tool manager events (delegated to ToolHandler) ─────────────────────────
 
-  def handle_info({:minga_event, :tool_install_started, %{name: name}}, state) do
-    state = EditorState.set_status(state, "Installing #{name}...")
-    state = maybe_refresh_tool_picker(state)
-    {:noreply, Renderer.render(state)}
+  def handle_info({:minga_event, :tool_install_started, _} = msg, state) do
+    {state, effects} = ToolHandler.handle(state, msg)
+    {:noreply, apply_effects(state, effects)}
   end
 
-  def handle_info({:minga_event, :tool_install_progress, %{name: name, message: msg}}, state) do
-    state = EditorState.set_status(state, "#{name}: #{msg}")
-    {:noreply, Renderer.render(state)}
+  def handle_info({:minga_event, :tool_install_progress, _} = msg, state) do
+    {state, effects} = ToolHandler.handle(state, msg)
+    {:noreply, apply_effects(state, effects)}
   end
 
-  def handle_info({:minga_event, :tool_install_complete, %{name: name, version: version}}, state) do
-    state = log_message(state, "Tool installed: #{name} v#{version}")
-    state = EditorState.set_status(state, "✓ #{name} v#{version} installed")
-    state = maybe_refresh_tool_picker(state)
-    # Clear the success message after 5 seconds
-    if state.backend != :headless do
-      Process.send_after(self(), :clear_tool_status, 5_000)
-    end
-
-    {:noreply, Renderer.render(state)}
+  def handle_info({:minga_event, :tool_install_complete, _} = msg, state) do
+    {state, effects} = ToolHandler.handle(state, msg)
+    {:noreply, apply_effects(state, effects)}
   end
 
-  def handle_info({:minga_event, :tool_install_failed, %{name: name, reason: reason}}, state) do
-    reason_str = if is_binary(reason), do: reason, else: inspect(reason)
-    state = log_message(state, "Tool install failed: #{name} — #{reason_str}")
-    state = EditorState.set_status(state, "✕ #{name} install failed: #{reason_str}")
-    state = maybe_refresh_tool_picker(state)
-    {:noreply, Renderer.render(state)}
+  def handle_info({:minga_event, :tool_install_failed, _} = msg, state) do
+    {state, effects} = ToolHandler.handle(state, msg)
+    {:noreply, apply_effects(state, effects)}
   end
 
-  def handle_info({:minga_event, :tool_uninstall_complete, %{name: name}}, state) do
-    state = log_message(state, "Tool uninstalled: #{name}")
-    state = maybe_refresh_tool_picker(state)
-    {:noreply, Renderer.render(state)}
+  def handle_info({:minga_event, :tool_uninstall_complete, _} = msg, state) do
+    {state, effects} = ToolHandler.handle(state, msg)
+    {:noreply, apply_effects(state, effects)}
   end
 
   def handle_info(:clear_tool_status, state) do
-    # Only clear if the status message is still a tool status
-    state =
-      if String.starts_with?(EditorState.status_msg(state) || "", [
-           "✓ ",
-           "Installing ",
-           "Updating "
-         ]) do
-        EditorState.clear_status(state)
-      else
-        state
-      end
-
-    {:noreply, Renderer.render(state)}
+    {state, effects} = ToolHandler.handle(state, :clear_tool_status)
+    {:noreply, apply_effects(state, effects)}
   end
 
-  # ── Tool missing prompt ────────────────────────────────────────────────────
-
-  def handle_info(
-        {:minga_event, :tool_missing, %Minga.Events.ToolMissingEvent{command: command}},
-        %{shell_state: %{suppress_tool_prompts: true}} = state
-      ) do
-    Minga.Log.debug(:editor, "[Editor] tool_missing suppressed for #{command}")
-    {:noreply, state}
-  end
-
-  def handle_info(
-        {:minga_event, :tool_missing, %Minga.Events.ToolMissingEvent{command: command}},
-        state
-      ) do
-    recipe = Minga.Tool.Recipe.Registry.for_command(command)
-
-    state =
-      if recipe && not EditorState.skip_tool_prompt?(state, recipe.name) do
-        queue = state.shell_state.tool_prompt_queue ++ [recipe.name]
-        state = EditorState.update_shell_state(state, &%{&1 | tool_prompt_queue: queue})
-        maybe_show_tool_prompt(state)
-      else
-        state
-      end
-
-    {:noreply, Renderer.render(state)}
+  def handle_info({:minga_event, :tool_missing, %Minga.Events.ToolMissingEvent{}} = msg, state) do
+    {state, effects} = ToolHandler.handle(state, msg)
+    {:noreply, apply_effects(state, effects)}
   end
 
   def handle_info(_msg, state) do
@@ -1343,16 +1002,34 @@ defmodule Minga.Editor do
   * `{:open_file, path}` — open a file in a new or existing buffer
   * `{:switch_buffer, pid}` — make this buffer active
   * `{:set_status, msg}` — show a status message in the minibuffer
+  * `:clear_status` — clear the status message
   * `{:push_overlay, module}` — push an overlay handler onto the focus stack
   * `{:pop_overlay, module}` — pop an overlay handler from the focus stack
   * `{:log_message, msg}` — log to *Messages* buffer
   * `{:log_warning, msg}` — log to both *Messages* and *Warnings* (warning level)
+  * `{:log, subsystem, level, msg}` — log via Minga.Log
   * `:sync_agent_buffer` — sync agent buffer with session output
   * `{:update_tab_label, label}` — update active tab label
   * `{:monitor, pid}` — monitor a buffer process
   * `{:stop_spinner}` — cancel outgoing agent spinner timer
   * `{:start_spinner}` — start incoming agent spinner timer
   * `{:rebuild_agent_session, tab}` — rebuild agent state from session process
+  * `{:request_semantic_tokens}` — request semantic tokens from LSP
+  * `{:send_after, msg, delay}` — schedule a self-send after delay
+  * `{:conceal_spans, pid, spans}` — apply conceal spans to a buffer
+  * `{:prettify_symbols, pid}` — run prettify symbols on a buffer
+  * `{:update_agent_styled_cache}` — re-cache GUI styled messages
+  * `{:evict_parser_trees_timer}` — schedule next eviction check
+  * `{:refresh_tool_picker}` — refresh tool picker if open
+  * `{:save_session_async, snapshot, opts}` — persist session in background
+  * `{:restart_session_timer}` — restart the periodic session timer
+  * `{:cancel_session_timer}` — cancel the periodic session timer
+  * `{:recover_swap_entries, entries}` — recover swap file entries
+  * `{:restore_session, opts}` — restore session from disk
+  * `{:request_code_lens}` — request fresh code lenses from LSP
+  * `{:request_inlay_hints}` — request fresh inlay hints from LSP
+  * `{:save_session_deferred}` — send :save_session to self
+  * `{:handle_git_remote_result, ref, result}` — process git remote result
   """
   @type effect ::
           :render
@@ -1360,16 +1037,34 @@ defmodule Minga.Editor do
           | {:open_file, String.t()}
           | {:switch_buffer, pid()}
           | {:set_status, String.t()}
+          | :clear_status
           | {:push_overlay, module()}
           | {:pop_overlay, module()}
           | {:log_message, String.t()}
           | {:log_warning, String.t()}
+          | {:log, atom(), atom(), String.t()}
           | :sync_agent_buffer
           | {:update_tab_label, String.t()}
           | {:monitor, pid()}
           | :stop_spinner
           | :start_spinner
           | {:rebuild_agent_session, Minga.Editor.State.Tab.t()}
+          | {:request_semantic_tokens}
+          | {:send_after, term(), non_neg_integer()}
+          | {:conceal_spans, pid(), [map()]}
+          | {:prettify_symbols, pid()}
+          | {:update_agent_styled_cache}
+          | {:evict_parser_trees_timer}
+          | {:refresh_tool_picker}
+          | {:save_session_async, term(), keyword()}
+          | {:restart_session_timer}
+          | {:cancel_session_timer}
+          | {:recover_swap_entries, [Session.swap_entry()]}
+          | {:restore_session, keyword()}
+          | {:request_code_lens}
+          | {:request_inlay_hints}
+          | {:save_session_deferred}
+          | {:handle_git_remote_result, reference(), term()}
 
   @doc """
   Applies a list of effects to the editor state.
@@ -1443,6 +1138,123 @@ defmodule Minga.Editor do
   defp apply_effect(state, {:rebuild_agent_session, tab}),
     do: EditorState.rebuild_agent_from_session(state, tab)
 
+  defp apply_effect(state, :clear_status), do: EditorState.clear_status(state)
+
+  defp apply_effect(state, {:log, subsystem, level, msg})
+       when is_atom(subsystem) and is_atom(level) and is_binary(msg) do
+    apply_log_effect(subsystem, level, msg)
+    state
+  end
+
+  defp apply_effect(state, {:request_semantic_tokens}),
+    do: SemanticTokenSync.request_tokens(state)
+
+  defp apply_effect(state, {:send_after, msg, delay}) when is_integer(delay) do
+    if state.backend != :headless do
+      Process.send_after(self(), msg, delay)
+    end
+
+    state
+  end
+
+  defp apply_effect(state, {:conceal_spans, pid, spans}) when is_pid(pid) do
+    Minga.Editor.HighlightEvents.handle_conceal_spans(state, pid, spans)
+    state
+  end
+
+  defp apply_effect(state, {:prettify_symbols, pid}) when is_pid(pid) do
+    maybe_spawn_prettify(state)
+    state
+  end
+
+  defp apply_effect(state, {:update_agent_styled_cache}),
+    do: AgentLifecycle.update_styled_cache(state)
+
+  defp apply_effect(state, {:evict_parser_trees_timer}) do
+    if state.backend != :headless do
+      Process.send_after(
+        self(),
+        :evict_parser_trees,
+        HighlightSync.eviction_check_interval_ms()
+      )
+    end
+
+    state
+  end
+
+  defp apply_effect(state, {:refresh_tool_picker}),
+    do: maybe_refresh_tool_picker(state)
+
+  defp apply_effect(state, {:save_session_async, snapshot, opts}) do
+    Task.start(fn ->
+      case Session.save(snapshot, opts) do
+        :ok -> :ok
+        {:error, reason} -> Minga.Log.warning(:editor, "Session save failed: #{inspect(reason)}")
+      end
+    end)
+
+    state
+  end
+
+  defp apply_effect(state, {:restart_session_timer}),
+    do: %{state | session: SessionState.restart_timer(state.session)}
+
+  defp apply_effect(state, {:cancel_session_timer}),
+    do: %{state | session: SessionState.cancel_timer(state.session)}
+
+  defp apply_effect(state, {:recover_swap_entries, entries}),
+    do: recover_swap_entries(state, entries)
+
+  defp apply_effect(state, {:restore_session, _opts}),
+    do: restore_session(state)
+
+  defp apply_effect(state, {:request_code_lens}),
+    do: LspActions.code_lens(state)
+
+  defp apply_effect(state, {:request_inlay_hints}),
+    do: LspActions.inlay_hints(state)
+
+  defp apply_effect(state, {:save_session_deferred}) do
+    if state.backend != :headless, do: send(self(), :save_session)
+    state
+  end
+
+  defp apply_effect(state, {:handle_git_remote_result, ref, result}),
+    do: Renderer.render(Commands.Git.handle_remote_result(state, ref, result))
+
+  # Dispatches a log effect to the appropriate Minga.Log function.
+  @spec apply_log_effect(atom(), atom(), String.t()) :: :ok
+  defp apply_log_effect(subsystem, :debug, msg), do: Minga.Log.debug(subsystem, msg)
+  defp apply_log_effect(subsystem, :info, msg), do: Minga.Log.info(subsystem, msg)
+  defp apply_log_effect(subsystem, :warning, msg), do: Minga.Log.warning(subsystem, msg)
+  defp apply_log_effect(subsystem, :error, msg), do: Minga.Log.error(subsystem, msg)
+
+  # Spawns a prettify-symbols Task if enabled and the active buffer has highlights.
+  @spec maybe_spawn_prettify(state()) :: :ok
+  defp maybe_spawn_prettify(%{workspace: %{buffers: %{active: nil}}}), do: :ok
+
+  defp maybe_spawn_prettify(state) do
+    if Minga.UI.PrettifySymbols.enabled?() do
+      spawn_prettify_task(state)
+    end
+
+    :ok
+  end
+
+  @spec spawn_prettify_task(state()) :: :ok
+  defp spawn_prettify_task(state) do
+    hl = HighlightSync.get_active_highlight(state)
+
+    if hl.capture_names != {} and tuple_size(hl.spans) > 0 do
+      buf = state.workspace.buffers.active
+      file_path = Minga.Buffer.file_path(buf)
+      filetype = Minga.Language.detect_filetype(file_path)
+      Task.start(fn -> Minga.UI.PrettifySymbols.apply(buf, hl, filetype) end)
+    end
+
+    :ok
+  end
+
   # Tab bar, view state, capabilities, parser subscription helpers
 
   # Agent lifecycle helpers (session startup, auto-context, buffer sync,
@@ -1470,16 +1282,7 @@ defmodule Minga.Editor do
   # 2. Deltas arriving mid-window are picked up by the pending timer.
   # 3. The timer fires, renders the latest state, and clears the guard
   #    so the next delta can schedule again.
-  @spec apply_textobject_positions(state(), map()) :: state()
-  defp apply_textobject_positions(state, positions) do
-    case EditorState.active_window_struct(state) do
-      nil ->
-        state
-
-      %Window{id: id} ->
-        EditorState.update_window(state, id, &%{&1 | textobject_positions: positions})
-    end
-  end
+  # apply_textobject_positions moved to HighlightHandler
 
   @spec schedule_render(state(), non_neg_integer()) :: state()
   defp schedule_render(%{render_timer: ref} = state, _delay_ms) when is_reference(ref), do: state
@@ -2276,20 +2079,7 @@ defmodule Minga.Editor do
 
   defp maybe_refresh_tool_picker(state), do: state
 
-  # Transitions to :tool_confirm mode if in normal mode and there are
-  # pending tool prompts. Otherwise the prompt waits until the user
-  # returns to normal mode.
-  @spec maybe_show_tool_prompt(state()) :: state()
-  defp maybe_show_tool_prompt(
-         %{workspace: %{editing: %{mode: :normal}}, shell_state: %{tool_prompt_queue: pending}} =
-           state
-       )
-       when pending != [] do
-    ms = %Minga.Mode.ToolConfirmState{pending: pending, declined: state.shell_state.tool_declined}
-    EditorState.transition_mode(state, :tool_confirm, ms)
-  end
-
-  defp maybe_show_tool_prompt(state), do: state
+  # maybe_show_tool_prompt moved to ToolHandler
 
   # Moves the file tree cursor to the given index and performs the action.
   @spec gui_tree_action(state(), non_neg_integer(), :click | :toggle) :: state()
@@ -2341,11 +2131,7 @@ defmodule Minga.Editor do
     schedule_render(EditorState.set_bottom_panel(state, new_panel), 16)
   end
 
-  # Returns true if the given buffer PID is visible in any window.
-  @spec buffer_visible_in_window?(state(), pid()) :: boolean()
-  defp buffer_visible_in_window?(state, buf_pid) do
-    Enum.any?(state.workspace.windows.map, fn {_id, win} -> win.buffer == buf_pid end)
-  end
+  # buffer_visible_in_window? moved to HighlightHandler
 
   # ── Window resize ────────────────────────────────────────────────────────
 
@@ -2366,13 +2152,7 @@ defmodule Minga.Editor do
 
   # ── File tree helpers ────────────────────────────────────────────────────
 
-  @spec refresh_tree_git_status(state()) :: state()
-  defp refresh_tree_git_status(%{workspace: %{file_tree: %{tree: nil}}} = state), do: state
-
-  defp refresh_tree_git_status(%{workspace: %{file_tree: %{tree: tree}}} = state) do
-    updated_tree = Minga.Project.FileTree.refresh_git_status(tree)
-    put_in(state.workspace.file_tree.tree, updated_tree)
-  end
+  # refresh_tree_git_status moved to FileEventHandler
 
   # ── Public housekeeping API for Input.Router ───────────────────────────────
 
