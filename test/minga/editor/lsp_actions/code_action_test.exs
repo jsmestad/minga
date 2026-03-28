@@ -2,19 +2,14 @@ defmodule Minga.Editor.LspActions.CodeActionTest do
   use ExUnit.Case, async: true
 
   alias Minga.Editor.LspActions
+  alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.Viewport
+  alias Minga.Workspace.State, as: WorkspaceState
 
   defp stub_state do
-    %{
-      workspace: %{
-        buffers: %Minga.Editor.State.Buffers{},
-        editing: %{mode: :normal, last_jump_pos: nil},
-        viewport: %Minga.Editor.Viewport{rows: 40, cols: 120, top: 0, left: 0}
-      },
-      shell_state: %Minga.Shell.Traditional.State{
-        status_msg: nil,
-        picker_ui: %Minga.Editor.State.Picker{},
-        whichkey: %Minga.Editor.State.WhichKey{}
-      },
+    %EditorState{
+      port_manager: nil,
+      workspace: %WorkspaceState{viewport: Viewport.new(40, 120)},
       theme: Minga.UI.Theme.get!(:doom_one)
     }
   end

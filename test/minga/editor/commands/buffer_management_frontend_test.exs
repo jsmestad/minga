@@ -4,11 +4,18 @@ defmodule Minga.Editor.Commands.BufferManagement.FrontendTest do
   alias Minga.Editor.BottomPanel
   alias Minga.Editor.Commands.BufferManagement.GUI, as: BufGUI
   alias Minga.Editor.Commands.BufferManagement.TUI, as: BufTUI
+  alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.State.Buffers
+  alias Minga.Editor.Viewport
+  alias Minga.Workspace.State, as: WorkspaceState
 
   defp base_state(opts \\ []) do
-    %{
-      workspace: %{buffers: %{messages: Keyword.get(opts, :messages)}},
-      shell_state: %Minga.Shell.Traditional.State{bottom_panel: %BottomPanel{}, status_msg: nil}
+    %EditorState{
+      port_manager: nil,
+      workspace: %WorkspaceState{
+        viewport: Viewport.new(40, 120),
+        buffers: %Buffers{messages: Keyword.get(opts, :messages)}
+      }
     }
   end
 
