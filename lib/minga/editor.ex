@@ -63,6 +63,8 @@ defmodule Minga.Editor do
   alias Minga.Agent.Session, as: AgentSession
 
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.VimState
+  alias Minga.Workspace.State, as: WorkspaceState
   alias Minga.Editor.State.LSP, as: LSPState
   alias Minga.Editor.State.Session, as: SessionState
 
@@ -359,9 +361,11 @@ defmodule Minga.Editor do
     caps = Startup.fetch_capabilities(state.port_manager)
 
     new_state = %{
-      state
-      | workspace: %{state.workspace | viewport: Viewport.new(height, width)},
-        capabilities: caps,
+      EditorState.update_workspace(
+        state,
+        &WorkspaceState.set_viewport(&1, Viewport.new(height, width))
+      )
+      | capabilities: caps,
         layout: nil
     }
 
@@ -394,7 +398,12 @@ defmodule Minga.Editor do
   end
 
   def handle_info({:minga_input, {:resize, width, height}}, state) do
-    new_state = %{state | workspace: %{state.workspace | viewport: Viewport.new(height, width)}}
+    new_state =
+      EditorState.update_workspace(
+        state,
+        &WorkspaceState.set_viewport(&1, Viewport.new(height, width))
+      )
+
     # Invalidate the cached layout so resize_all_windows computes fresh
     # rectangles from the new viewport dimensions.
     new_state = Layout.invalidate(new_state)
@@ -828,7 +837,8 @@ defmodule Minga.Editor do
     new_bridge =
       CompletionTrigger.flush_debounce(state.workspace.completion_trigger, clients, buffer_pid)
 
-    {:noreply, %{state | workspace: %{state.workspace | completion_trigger: new_bridge}}}
+    {:noreply,
+     EditorState.update_workspace(state, &WorkspaceState.set_completion_trigger(&1, new_bridge))}
   end
 
   # LSP async response — route to the appropriate handler based on lsp.pending
@@ -1853,7 +1863,7 @@ defmodule Minga.Editor do
         updated = %{comp | selected: index}
 
         do_accept_completion(
-          %{state | workspace: %{state.workspace | completion: updated}},
+          EditorState.update_workspace(state, &WorkspaceState.set_completion(&1, updated)),
           updated
         )
 
@@ -1997,14 +2007,7 @@ defmodule Minga.Editor do
 
           %{label: label} ->
             new_ms = %{ms | input: label, candidate_index: 0}
-
-            %{
-              state
-              | workspace: %{
-                  state.workspace
-                  | editing: %{state.workspace.editing | mode_state: new_ms}
-                }
-            }
+            set_vim_mode_state(state, new_ms)
         end
 
       _ ->
@@ -2317,4 +2320,11 @@ defmodule Minga.Editor do
   defdelegate do_dismiss_completion(state), to: CompletionHandling, as: :dismiss
 
   # Sets the manual workspace label to the project directory name.
+
+  @spec set_vim_mode_state(state(), term()) :: state()
+  defp set_vim_mode_state(state, new_ms) do
+    EditorState.update_workspace(state, fn ws ->
+      WorkspaceState.update_editing(ws, &VimState.set_mode_state(&1, new_ms))
+    end)
+  end
 end

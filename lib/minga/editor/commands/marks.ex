@@ -10,7 +10,9 @@ defmodule Minga.Editor.Commands.Marks do
   alias Minga.Buffer.Document
   alias Minga.Editor.Commands.Helpers
   alias Minga.Editor.State, as: EditorState
+  alias Minga.Editor.VimState
   alias Minga.Mode
+  alias Minga.Workspace.State, as: WorkspaceState
 
   @type state :: EditorState.t()
 
@@ -30,10 +32,9 @@ defmodule Minga.Editor.Commands.Marks do
     buf_marks = Map.get(marks, buf, %{})
     new_marks = Map.put(marks, buf, Map.put(buf_marks, char, pos))
 
-    %{
-      state
-      | workspace: %{state.workspace | editing: %{state.workspace.editing | marks: new_marks}}
-    }
+    EditorState.update_workspace(state, fn ws ->
+      WorkspaceState.update_editing(ws, &VimState.set_marks(&1, new_marks))
+    end)
   end
 
   def execute(
@@ -87,13 +88,9 @@ defmodule Minga.Editor.Commands.Marks do
     target = Minga.Editing.first_non_blank(tmp_buf, {last_line, 0})
     Buffer.move_to(buf, target)
 
-    %{
-      state
-      | workspace: %{
-          state.workspace
-          | editing: %{state.workspace.editing | last_jump_pos: current_pos}
-        }
-    }
+    EditorState.update_workspace(state, fn ws ->
+      WorkspaceState.update_editing(ws, &VimState.set_last_jump_pos(&1, current_pos))
+    end)
   end
 
   def execute(state, :jump_to_last_pos_line), do: state
@@ -106,13 +103,9 @@ defmodule Minga.Editor.Commands.Marks do
     current_pos = Buffer.cursor(buf)
     Buffer.move_to(buf, last_pos)
 
-    %{
-      state
-      | workspace: %{
-          state.workspace
-          | editing: %{state.workspace.editing | last_jump_pos: current_pos}
-        }
-    }
+    EditorState.update_workspace(state, fn ws ->
+      WorkspaceState.update_editing(ws, &VimState.set_last_jump_pos(&1, current_pos))
+    end)
   end
 
   def execute(state, :jump_to_last_pos_exact), do: state

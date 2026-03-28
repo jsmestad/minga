@@ -18,6 +18,7 @@ defmodule Minga.Input.Completion do
   alias Minga.Editor.CompletionHandling
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.Viewport
+  alias Minga.Workspace.State, as: WorkspaceState
 
   @ctrl Minga.Input.mod_ctrl()
   @escape 27
@@ -70,11 +71,17 @@ defmodule Minga.Input.Completion do
     case button do
       :wheel_down ->
         {:handled,
-         %{state | workspace: %{state.workspace | completion: Completion.move_down(completion)}}}
+         EditorState.update_workspace(
+           state,
+           &WorkspaceState.set_completion(&1, Completion.move_down(completion))
+         )}
 
       :wheel_up ->
         {:handled,
-         %{state | workspace: %{state.workspace | completion: Completion.move_up(completion)}}}
+         EditorState.update_workspace(
+           state,
+           &WorkspaceState.set_completion(&1, Completion.move_up(completion))
+         )}
 
       :left ->
         handle_completion_click(state, completion, row, col)
@@ -184,10 +191,11 @@ defmodule Minga.Input.Completion do
   # C-n or arrow down: move selection down
   defp do_handle(state, completion, cp, mods)
        when (cp == ?n and band(mods, @ctrl) != 0) or cp == @arrow_down do
-    state = %{
-      state
-      | workspace: %{state.workspace | completion: Completion.move_down(completion)}
-    }
+    state =
+      EditorState.update_workspace(
+        state,
+        &WorkspaceState.set_completion(&1, Completion.move_down(completion))
+      )
 
     {:handled, CompletionHandling.maybe_resolve_selected(state)}
   end
@@ -195,7 +203,12 @@ defmodule Minga.Input.Completion do
   # C-p or arrow up: move selection up
   defp do_handle(state, completion, cp, mods)
        when (cp == ?p and band(mods, @ctrl) != 0) or cp == @arrow_up do
-    state = %{state | workspace: %{state.workspace | completion: Completion.move_up(completion)}}
+    state =
+      EditorState.update_workspace(
+        state,
+        &WorkspaceState.set_completion(&1, Completion.move_up(completion))
+      )
+
     {:handled, CompletionHandling.maybe_resolve_selected(state)}
   end
 

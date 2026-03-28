@@ -97,4 +97,54 @@ defmodule Minga.Editor.VimState do
           "Mode #{inspect(mode)} requires an explicit mode_state argument. " <>
             "Call VimState.transition(vim, #{inspect(mode)}, mode_state) instead."
   end
+
+  # ── Field mutation functions (Rule 2 enforcement) ──────────────────────
+
+  @doc "Updates mode_state without changing the mode."
+  @spec set_mode_state(t(), Mode.state()) :: t()
+  def set_mode_state(%__MODULE__{} = vim, mode_state) do
+    %{vim | mode_state: mode_state}
+  end
+
+  @doc "Sets the marks map for a specific buffer."
+  @spec set_buffer_marks(t(), pid(), %{String.t() => Buffer.position()}) :: t()
+  def set_buffer_marks(%__MODULE__{marks: marks} = vim, buf_pid, buf_marks) do
+    %{vim | marks: Map.put(marks, buf_pid, buf_marks)}
+  end
+
+  @doc "Replaces the entire marks map."
+  @spec set_marks(t(), marks()) :: t()
+  def set_marks(%__MODULE__{} = vim, marks) do
+    %{vim | marks: marks}
+  end
+
+  @doc "Records the cursor position before a jump."
+  @spec set_last_jump_pos(t(), Buffer.position() | nil) :: t()
+  def set_last_jump_pos(%__MODULE__{} = vim, pos) do
+    %{vim | last_jump_pos: pos}
+  end
+
+  @doc "Records the last f/F/t/T char for ; and , repeat."
+  @spec set_last_find_char(t(), last_find_char()) :: t()
+  def set_last_find_char(%__MODULE__{} = vim, find_char) do
+    %{vim | last_find_char: find_char}
+  end
+
+  @doc "Updates the macro recorder state."
+  @spec set_macro_recorder(t(), MacroRecorder.t()) :: t()
+  def set_macro_recorder(%__MODULE__{} = vim, recorder) do
+    %{vim | macro_recorder: recorder}
+  end
+
+  @doc "Updates the change recorder state."
+  @spec set_change_recorder(t(), ChangeRecorder.t()) :: t()
+  def set_change_recorder(%__MODULE__{} = vim, recorder) do
+    %{vim | change_recorder: recorder}
+  end
+
+  @doc "Updates the register state."
+  @spec set_registers(t(), Registers.t()) :: t()
+  def set_registers(%__MODULE__{} = vim, reg) do
+    %{vim | reg: reg}
+  end
 end

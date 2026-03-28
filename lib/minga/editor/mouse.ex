@@ -37,6 +37,7 @@ defmodule Minga.Editor.Mouse do
   alias Minga.Editor.Renderer.Gutter
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Mouse, as: MouseState
+  alias Minga.Workspace.State, as: WorkspaceState
   alias Minga.Editor.State.WhichKey, as: WhichKeyState
   alias Minga.Editor.Viewport
   alias Minga.Editor.Window
@@ -215,10 +216,10 @@ defmodule Minga.Editor.Mouse do
         :release,
         _cc
       ) do
-    %{
-      state
-      | workspace: %{state.workspace | mouse: MouseState.stop_resize(state.workspace.mouse)}
-    }
+    EditorState.update_workspace(
+      state,
+      &WorkspaceState.set_mouse(&1, MouseState.stop_resize(&1.mouse))
+    )
   end
 
   def handle(
@@ -230,10 +231,11 @@ defmodule Minga.Editor.Mouse do
         :release,
         _cc
       ) do
-    state = %{
-      state
-      | workspace: %{state.workspace | mouse: MouseState.stop_drag(state.workspace.mouse)}
-    }
+    state =
+      EditorState.update_workspace(
+        state,
+        &WorkspaceState.set_mouse(&1, MouseState.stop_drag(&1.mouse))
+      )
 
     # Auto-copy selection to system clipboard on mouse release.
     # Standard terminal behavior: selecting text copies it.
@@ -249,7 +251,10 @@ defmodule Minga.Editor.Mouse do
         :release,
         _cc
       ) do
-    %{state | workspace: %{state.workspace | mouse: MouseState.stop_drag(state.workspace.mouse)}}
+    EditorState.update_workspace(
+      state,
+      &WorkspaceState.set_mouse(&1, MouseState.stop_drag(&1.mouse))
+    )
   end
 
   # ── Mouse motion (hover tracking) ──
@@ -283,7 +288,7 @@ defmodule Minga.Editor.Mouse do
   defp handle_left_press(state, row, col, mods, native_click_count) do
     # Record press for multi-click detection
     mouse = MouseState.record_press(state.workspace.mouse, row, col, native_click_count)
-    state = %{state | workspace: %{state.workspace | mouse: mouse}}
+    state = EditorState.update_workspace(state, &WorkspaceState.set_mouse(&1, mouse))
     click_count = mouse.click_count
 
     # Check modifier clicks first

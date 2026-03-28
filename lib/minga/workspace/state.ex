@@ -177,4 +177,120 @@ defmodule Minga.Workspace.State do
       nil -> :editor
     end
   end
+
+  # ── Field mutation functions (Rule 2 enforcement) ──────────────────────
+
+  @doc "Updates the editing (VimState) sub-struct."
+  @spec update_editing(t(), (VimState.t() -> VimState.t())) :: t()
+  def update_editing(%__MODULE__{editing: vim} = wspace, fun) when is_function(fun, 1) do
+    %{wspace | editing: fun.(vim)}
+  end
+
+  @doc "Replaces the editing (VimState) sub-struct."
+  @spec set_editing(t(), VimState.t()) :: t()
+  def set_editing(%__MODULE__{} = wspace, vim) do
+    %{wspace | editing: vim}
+  end
+
+  @doc "Sets the keymap scope."
+  @spec set_keymap_scope(t(), Scope.scope_name()) :: t()
+  def set_keymap_scope(%__MODULE__{} = wspace, scope) do
+    %{wspace | keymap_scope: scope}
+  end
+
+  @doc "Updates the completion state."
+  @spec set_completion(t(), Completion.t() | nil) :: t()
+  def set_completion(%__MODULE__{} = wspace, completion) do
+    %{wspace | completion: completion}
+  end
+
+  @doc "Updates the completion trigger bridge."
+  @spec set_completion_trigger(t(), CompletionTrigger.t()) :: t()
+  def set_completion_trigger(%__MODULE__{} = wspace, trigger) do
+    %{wspace | completion_trigger: trigger}
+  end
+
+  @doc "Clears completion and resets the trigger bridge."
+  @spec clear_completion(t(), CompletionTrigger.t()) :: t()
+  def clear_completion(%__MODULE__{} = wspace, new_bridge) do
+    %{wspace | completion: nil, completion_trigger: new_bridge}
+  end
+
+  @doc "Updates the highlighting sub-struct."
+  @spec set_highlight(t(), Highlighting.t()) :: t()
+  def set_highlight(%__MODULE__{} = wspace, highlight) do
+    %{wspace | highlight: highlight}
+  end
+
+  @doc "Updates the highlighting sub-struct via a mapper function."
+  @spec update_highlight(t(), (Highlighting.t() -> Highlighting.t())) :: t()
+  def update_highlight(%__MODULE__{highlight: hl} = wspace, fun) when is_function(fun, 1) do
+    %{wspace | highlight: fun.(hl)}
+  end
+
+  @doc "Updates the mouse sub-struct."
+  @spec set_mouse(t(), Mouse.t()) :: t()
+  def set_mouse(%__MODULE__{} = wspace, mouse) do
+    %{wspace | mouse: mouse}
+  end
+
+  @doc "Updates the document highlights from LSP."
+  @spec set_document_highlights(t(), [document_highlight()] | nil) :: t()
+  def set_document_highlights(%__MODULE__{} = wspace, highlights) do
+    %{wspace | document_highlights: highlights}
+  end
+
+  @doc "Updates the search sub-struct."
+  @spec set_search(t(), Search.t()) :: t()
+  def set_search(%__MODULE__{} = wspace, search) do
+    %{wspace | search: search}
+  end
+
+  @doc "Updates the search sub-struct via a mapper function."
+  @spec update_search(t(), (Search.t() -> Search.t())) :: t()
+  def update_search(%__MODULE__{search: s} = wspace, fun) when is_function(fun, 1) do
+    %{wspace | search: fun.(s)}
+  end
+
+  @doc "Sets the pending conflict state."
+  @spec set_pending_conflict(t(), {pid(), String.t()} | nil) :: t()
+  def set_pending_conflict(%__MODULE__{} = wspace, conflict) do
+    %{wspace | pending_conflict: conflict}
+  end
+
+  @doc "Updates the LSP pending requests map."
+  @spec set_lsp_pending(t(), %{reference() => atom() | tuple()}) :: t()
+  def set_lsp_pending(%__MODULE__{} = wspace, pending) do
+    %{wspace | lsp_pending: pending}
+  end
+
+  @doc "Sets the viewport dimensions."
+  @spec set_viewport(t(), Viewport.t()) :: t()
+  def set_viewport(%__MODULE__{} = wspace, viewport) do
+    %{wspace | viewport: viewport}
+  end
+
+  @doc "Replaces the windows sub-struct."
+  @spec set_windows(t(), Windows.t()) :: t()
+  def set_windows(%__MODULE__{} = wspace, windows) do
+    %{wspace | windows: windows}
+  end
+
+  @doc "Replaces the buffers sub-struct."
+  @spec set_buffers(t(), Buffers.t()) :: t()
+  def set_buffers(%__MODULE__{} = wspace, buffers) do
+    %{wspace | buffers: buffers}
+  end
+
+  @doc "Updates the agent UI state."
+  @spec set_agent_ui(t(), UIState.t()) :: t()
+  def set_agent_ui(%__MODULE__{} = wspace, agent_ui) do
+    %{wspace | agent_ui: agent_ui}
+  end
+
+  @doc "Updates the injection ranges map."
+  @spec set_injection_ranges(t(), %{pid() => [Minga.UI.Highlight.InjectionRange.t()]}) :: t()
+  def set_injection_ranges(%__MODULE__{} = wspace, ranges) do
+    %{wspace | injection_ranges: ranges}
+  end
 end

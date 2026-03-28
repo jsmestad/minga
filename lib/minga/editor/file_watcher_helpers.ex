@@ -10,6 +10,7 @@ defmodule Minga.Editor.FileWatcherHelpers do
   alias Minga.Buffer
   alias Minga.Editor.State, as: EditorState
   alias Minga.FileWatcher
+  alias Minga.Workspace.State, as: WorkspaceState
 
   @type state :: EditorState.t()
 
@@ -73,7 +74,9 @@ defmodule Minga.Editor.FileWatcherHelpers do
   defp handle_change(state, buf, path, _buf_state, _mtime, _size) do
     name = Path.basename(path)
 
-    state = %{state | workspace: %{state.workspace | pending_conflict: {buf, path}}}
+    state =
+      EditorState.update_workspace(state, &WorkspaceState.set_pending_conflict(&1, {buf, path}))
+
     EditorState.set_status(state, "#{name} changed on disk. [r]eload / [k]eep")
   end
 

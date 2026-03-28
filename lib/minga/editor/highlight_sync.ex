@@ -9,6 +9,7 @@ defmodule Minga.Editor.HighlightSync do
   alias Minga.Buffer
   alias Minga.Editor.State, as: EditorState
   alias Minga.Frontend.Protocol
+  alias Minga.Workspace.State, as: WorkspaceState
   alias Minga.Parser.Manager, as: ParserManager
   alias Minga.UI.Highlight
   alias Minga.UI.Highlight.Grammar
@@ -86,10 +87,11 @@ defmodule Minga.Editor.HighlightSync do
         parse_cmd = Protocol.encode_parse_buffer(buffer_id, version, content)
         ParserManager.send_commands([parse_cmd])
 
-        state = %{
-          state
-          | workspace: %{state.workspace | highlight: %{hl | version: version}}
-        }
+        state =
+          EditorState.update_workspace(
+            state,
+            &WorkspaceState.update_highlight(&1, fn h -> %{h | version: version} end)
+          )
 
         touch_buffer(state, buf_pid)
 
@@ -212,7 +214,11 @@ defmodule Minga.Editor.HighlightSync do
     hl = state.workspace.highlight
     now = System.monotonic_time(:millisecond)
     timestamps = Map.put(hl.last_active_at, buf_pid, now)
-    %{state | workspace: %{state.workspace | highlight: %{hl | last_active_at: timestamps}}}
+
+    EditorState.update_workspace(
+      state,
+      &WorkspaceState.update_highlight(&1, fn h -> %{h | last_active_at: timestamps} end)
+    )
   end
 
   @spec send_parse_only(EditorState.t(), String.t()) :: EditorState.t()
@@ -313,7 +319,7 @@ defmodule Minga.Editor.HighlightSync do
         next_buffer_id: id + 1
     }
 
-    {id, %{state | workspace: %{state.workspace | highlight: new_hl}}}
+    {id, EditorState.update_workspace(state, &WorkspaceState.set_highlight(&1, new_hl))}
   end
 
   @doc """
@@ -479,7 +485,12 @@ defmodule Minga.Editor.HighlightSync do
 
     ParserManager.send_commands(commands)
 
-    state = %{state | workspace: %{state.workspace | highlight: %{hl | version: version}}}
+    state =
+      EditorState.update_workspace(
+        state,
+        &WorkspaceState.update_highlight(&1, fn h -> %{h | version: version} end)
+      )
+
     touch_active(state)
   end
 
@@ -506,7 +517,11 @@ defmodule Minga.Editor.HighlightSync do
     hl = state.workspace.highlight
     now = System.monotonic_time(:millisecond)
     timestamps = Map.put(hl.last_active_at, state.workspace.buffers.active, now)
-    %{state | workspace: %{state.workspace | highlight: %{hl | last_active_at: timestamps}}}
+
+    EditorState.update_workspace(
+      state,
+      &WorkspaceState.update_highlight(&1, fn h -> %{h | last_active_at: timestamps} end)
+    )
   end
 
   @doc """
@@ -588,7 +603,7 @@ defmodule Minga.Editor.HighlightSync do
     new_hl =
       compute_post_eviction_state(state.workspace.highlight, evicted_ids, remaining_timestamps)
 
-    %{state | workspace: %{state.workspace | highlight: new_hl}}
+    EditorState.update_workspace(state, &WorkspaceState.set_highlight(&1, new_hl))
   end
 
   # Pure calculation: produces the new Highlighting struct with evicted entries removed.
