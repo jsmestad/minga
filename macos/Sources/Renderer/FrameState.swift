@@ -63,6 +63,15 @@ struct FrameState {
     // Gutter theme colors
     var gutterColors: GutterThemeColors = GutterThemeColors()
 
+    // Scroll indicator (derived from gutter + status bar data)
+    /// Viewport top line (first visible buffer line, 0-indexed). Derived from the active
+    /// window's first gutter entry. 0xFFFFFFFF = unknown.
+    var viewportTopLine: UInt32 = 0xFFFF_FFFF
+    /// Total line count in the active buffer. From StatusBarState.
+    var totalLineCount: UInt32 = 0
+    /// Foreground color for the scroll indicator (derived from theme gutter fg).
+    var scrollIndicatorColor: UInt32 = 0x555555
+
     // Dirty tracking
     var dirty: Bool = true
 

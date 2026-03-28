@@ -221,6 +221,7 @@ final class CommandDispatcher {
                 filename: filename, diagnosticHint: diagnosticHint
             )
             guiState.statusBarState.update(from: update)
+            frameState.totalLineCount = lineCount
             if mode != lastMode {
                 lastMode = mode
                 onModeChanged?(guiState.statusBarState.modeName)
@@ -256,6 +257,8 @@ final class CommandDispatcher {
 
         case .guiGutterSeparator(let col, let r, let g, let b):
             let rgb: UInt32 = (UInt32(r) << 16) | (UInt32(g) << 8) | UInt32(b)
+            // Use the gutter fg color for the scroll indicator.
+            frameState.scrollIndicatorColor = rgb
             frameState.gutterCol = col
             frameState.gutterSeparatorColor = rgb
             frameState.dirty = true
@@ -270,6 +273,10 @@ final class CommandDispatcher {
             frameState.windowGutters[data.windowId] = data
             if data.isActive {
                 frameState.gutterCol = UInt16(data.lineNumberWidth) + UInt16(data.signColWidth)
+                // Derive viewport top from the first gutter entry's buffer line.
+                if let firstEntry = data.entries.first {
+                    frameState.viewportTopLine = firstEntry.bufLine
+                }
             }
             frameState.dirty = true
 

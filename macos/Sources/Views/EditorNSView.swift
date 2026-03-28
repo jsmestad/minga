@@ -47,6 +47,9 @@ final class EditorNSView: MTKView {
     /// setFrameSize so we send the actual window dimensions, not hardcoded defaults.
     private var readySent = false
 
+    /// Last viewport top used for scroll indicator change detection.
+    private var lastViewportTopForScroll: UInt32 = 0xFFFF_FFFF
+
     /// First responder guard that prevents SwiftUI from stealing keyboard focus.
     /// Installed when the view moves to a window.
     private var firstResponderGuard: FirstResponderGuard?
@@ -120,6 +123,9 @@ final class EditorNSView: MTKView {
         // Standard Metal layer config.
         colorPixelFormat = .bgra8Unorm_srgb
         layer?.isOpaque = true
+
+        // Observe system scroller style preference.
+        observeScrollerStyle()
     }
 
     @available(*, unavailable)
@@ -230,6 +236,12 @@ final class EditorNSView: MTKView {
             lastAccessibilityCursorCol = fs.cursorCol
             NSAccessibility.post(element: self, notification: .selectedTextChanged)
             resetCursorBlink()
+        }
+
+        // Flash scroll indicator when viewport position changes (keyboard scroll, cursor movement).
+        if fs.viewportTopLine != lastViewportTopForScroll && fs.viewportTopLine != 0xFFFF_FFFF {
+            lastViewportTopForScroll = fs.viewportTopLine
+            flashScrollIndicator()
         }
 
         coreTextRenderer.render(frameState: fs, fontManager: fontManager,
@@ -730,9 +742,79 @@ final class EditorNSView: MTKView {
     /// pure struct so the accumulation math is unit-testable.
     private var scrollAccumulator = ScrollAccumulator()
 
+    // MARK: - Scroll indicator fade
+
+    /// Pending work item that fades the scroll indicator after idle.
+    private var scrollFadeWorkItem: DispatchWorkItem?
+
+    /// Whether the system prefers always-visible scrollers.
+    private var alwaysShowScrollbar: Bool = false
+
+    /// Shows the scroll indicator and starts a fade timer.
+    /// Called on scroll events and when viewport position changes.
+    func flashScrollIndicator() {
+        coreTextRenderer.scrollIndicatorAlpha = 1.0
+        setNeedsDisplay(bounds)
+
+        // Cancel any pending fade.
+        scrollFadeWorkItem?.cancel()
+
+        // Don't fade if system preference is "Always show".
+        guard !alwaysShowScrollbar else { return }
+
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            // Animate fade out over 0.3s using a simple step approach.
+            // We could use CADisplayLink for smoother animation, but
+            // a timer with 3 steps is sufficient for a scroll indicator.
+            self.fadeScrollIndicator(steps: 6)
+        }
+        scrollFadeWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: work)
+    }
+
+    /// Gradually fades the scroll indicator alpha to zero.
+    private func fadeScrollIndicator(steps remaining: Int) {
+        guard remaining > 0 else {
+            coreTextRenderer.scrollIndicatorAlpha = 0.0
+            setNeedsDisplay(bounds)
+            return
+        }
+        coreTextRenderer.scrollIndicatorAlpha = Float(remaining) / 6.0
+        setNeedsDisplay(bounds)
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            self?.fadeScrollIndicator(steps: remaining - 1)
+        }
+    }
+
+    /// Call once during setup to observe the system scroller style preference.
+    func observeScrollerStyle() {
+        alwaysShowScrollbar = NSScroller.preferredScrollerStyle == .legacy
+        if alwaysShowScrollbar {
+            coreTextRenderer.scrollIndicatorAlpha = 1.0
+        }
+
+        Task { @MainActor [weak self] in
+            for await _ in NotificationCenter.default.notifications(named: NSScroller.preferredScrollerStyleDidChangeNotification) {
+                guard let self else { return }
+                self.alwaysShowScrollbar = NSScroller.preferredScrollerStyle == .legacy
+                if self.alwaysShowScrollbar {
+                    self.coreTextRenderer.scrollIndicatorAlpha = 1.0
+                    self.setNeedsDisplay(self.bounds)
+                } else {
+                    self.flashScrollIndicator()
+                }
+            }
+        }
+    }
+
     override func scrollWheel(with event: NSEvent) {
         let (row, col) = cellPosition(from: event)
         let mods = modifierBits(from: event.modifierFlags)
+
+        // Flash the scroll indicator on any scroll activity.
+        flashScrollIndicator()
 
         if event.hasPreciseScrollingDeltas {
             handleTrackpadScroll(event: event, row: row, col: col, mods: mods)
