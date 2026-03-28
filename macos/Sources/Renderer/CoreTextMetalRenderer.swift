@@ -41,6 +41,11 @@ struct CTUniformsGPU {
     var scrollOffset: SIMD2<Float> = .zero
 }
 
+/// Per-draw-call parameters for bg/cursor passes (must match BgParams in CoreTextShaders.metal).
+struct BgParamsGPU {
+    var cornerRadius: Float = 0.0
+}
+
 /// Default background clear color (dark gray matching the default bg).
 /// Linear equivalents of sRGB (0.12, 0.12, 0.14).
 private let ctBgClearColorDefault = MTLClearColor(red: 0.01298, green: 0.01298, blue: 0.01681, alpha: 1.0)
@@ -502,6 +507,11 @@ final class CoreTextMetalRenderer {
             scrollOffset: SIMD2<Float>(scrollOffset.x * scale, scrollOffset.y * scale)
         )
 
+        // Default fragment params: no corner radius (sharp rectangles).
+        // The cursor draw call overrides this with a nonzero radius.
+        var defaultBgParams = BgParamsGPU(cornerRadius: 0.0)
+        encoder.setFragmentBytes(&defaultBgParams, length: MemoryLayout<BgParamsGPU>.size, index: 0)
+
         // Pass 1: Background fills.
         if !bgQuads.isEmpty {
             encoder.setRenderPipelineState(bgPipeline)
@@ -541,10 +551,16 @@ final class CoreTextMetalRenderer {
             cursorQuad.color = cursorColor
             cursorQuad.alpha = 1.0
 
+            // Rounded corners on the block cursor (~3pt radius, snapped to backing pixels).
+            var cursorBgParams = BgParamsGPU(cornerRadius: round(3.0 * scale))
             encoder.setRenderPipelineState(bgPipeline)
             encoder.setVertexBytes(&cursorQuad, length: MemoryLayout<QuadGPU>.stride, index: 0)
             encoder.setVertexBytes(&uniforms, length: MemoryLayout<CTUniformsGPU>.size, index: 1)
+            encoder.setFragmentBytes(&cursorBgParams, length: MemoryLayout<BgParamsGPU>.size, index: 0)
             encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: 1)
+
+            // Restore default (no rounding) for subsequent draws.
+            encoder.setFragmentBytes(&defaultBgParams, length: MemoryLayout<BgParamsGPU>.size, index: 0)
         }
 
         // Pass 3: Line textures — one instanced draw call with the atlas texture.
