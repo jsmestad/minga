@@ -90,6 +90,7 @@ defmodule Minga.Config.Options do
           | :scroll_lines
           | :theme
           | :indent_with
+          | :indent_guides
           | :trim_trailing_whitespace
           | :insert_final_newline
           | :format_on_save
@@ -189,6 +190,7 @@ defmodule Minga.Config.Options do
     {:scroll_lines, :pos_integer, 1},
     {:theme, :theme_atom, :doom_one},
     {:indent_with, {:enum, [:spaces, :tabs]}, :spaces},
+    {:indent_guides, :boolean, true},
     {:trim_trailing_whitespace, :boolean, false},
     {:insert_final_newline, :boolean, false},
     {:format_on_save, :boolean, false},

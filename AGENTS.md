@@ -176,7 +176,7 @@ Minga's code is organized by **dependency direction** and **state ownership**, n
 Code is organized in three layers. Dependencies flow downward only. A module in Layer 0 never imports from Layer 1 or 2. A module in Layer 1 never imports from Layer 2. If you find yourself adding an upward dependency, you're putting logic in the wrong layer.
 
 **Layer 0 — Pure foundations (no dependencies on other Minga modules):**
-`Buffer.Document`, `Editing.Motion`, `Editing.TextObject`, `Editing.Operator`, `Editing.Search`, `Editing.AutoPair`, `Core.IntervalTree`, `Core.Face`, `Core.Decorations`, `Core.Diff`, `Core.Unicode`, `Editing.Text.Readable` (protocol), `Mode.*` (FSM modules)
+`Buffer.Document`, `Editing.Motion`, `Editing.TextObject`, `Editing.Operator`, `Editing.Search`, `Editing.AutoPair`, `Core.IntervalTree`, `Core.Face`, `Core.Decorations`, `Core.Diff`, `Core.Unicode`, `Core.IndentGuide`, `Editing.Text.Readable` (protocol), `Mode.*` (FSM modules)
 
 These are pure functions and data structures. They take values in and return values out. They don't call GenServers, don't subscribe to events, don't log. They're the stable core that everything else builds on.
 

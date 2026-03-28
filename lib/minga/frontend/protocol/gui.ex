@@ -159,6 +159,7 @@ defmodule Minga.Frontend.Protocol.GUI do
   # advancing, instead of crashing. See ProtocolDecoder.swift default case.
 
   @op_clipboard_write 0x90
+  @op_gui_indent_guides 0x91
   @op_gui_line_spacing 0x92
 
   # ── GUI action sub-opcodes (Frontend → BEAM) ──
@@ -869,6 +870,50 @@ defmodule Minga.Frontend.Protocol.GUI do
     payload_len = 1 + 2 + text_len
 
     <<@op_clipboard_write, payload_len::16, target_byte::8, text_len::16, text_bytes::binary>>
+  end
+
+  # ── Indent guides (forward-compatible, 0x91) ──
+
+  @typedoc "Indent guide data for one window."
+  @type indent_guide_data :: %{
+          window_id: non_neg_integer(),
+          tab_width: pos_integer(),
+          active_guide_col: non_neg_integer(),
+          guide_cols: [non_neg_integer()]
+        }
+
+  @doc """
+  Encodes a gui_indent_guides command for one window.
+
+  Uses the forward-compatible 0x90+ format: opcode(1) + payload_length(2) + payload.
+  Payload: window_id(2) + tab_width(1) + active_guide_col(2) + guide_count(1) + guide_cols(2 each).
+
+  `active_guide_col` of 0xFFFF means no active guide. Guide columns are
+  character-unit offsets from the content start (not screen left).
+  """
+  @spec encode_gui_indent_guides(indent_guide_data()) :: binary()
+  def encode_gui_indent_guides(%{
+        window_id: win_id,
+        tab_width: tab_width,
+        active_guide_col: active_col,
+        guide_cols: cols
+      }) do
+    guide_count = length(cols)
+    guide_bytes = for col <- cols, into: <<>>, do: <<col::16>>
+    # 2 (win_id) + 1 (tab_width) + 2 (active_col) + 1 (guide_count) + 2*guide_count
+    payload_len = 6 + 2 * guide_count
+
+    <<@op_gui_indent_guides, payload_len::16, win_id::16, tab_width::8, active_col::16,
+      guide_count::8, guide_bytes::binary>>
+  end
+
+  @doc """
+  Encodes a gui_indent_guides command with no guides (empty).
+  """
+  @spec encode_gui_indent_guides_empty(non_neg_integer()) :: binary()
+  def encode_gui_indent_guides_empty(win_id) do
+    # payload: win_id(2) + tab_width(1) + active_col(2) + guide_count(1) = 6 bytes
+    <<@op_gui_indent_guides, 6::16, win_id::16, 0::8, 0xFFFF::16, 0::8>>
   end
 
   # ── Line spacing (forward-compatible, 0x92) ──
