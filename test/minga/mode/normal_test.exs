@@ -306,6 +306,42 @@ defmodule Minga.Mode.NormalTest do
       assert new_state.leader_keys == []
     end
 
+    test "escape during leader mode clears count" do
+      state =
+        fresh_state()
+        |> Map.put(:count, 3)
+        |> Map.put(:leader_node, Defaults.leader_trie())
+        |> Map.put(:leader_keys, ["SPC"])
+
+      {:execute, :leader_cancel, new_state} = Normal.handle_key({27, 0}, state)
+      assert new_state.count == nil
+      assert new_state.leader_node == nil
+    end
+
+    test "escape during leader mode clears pending_replace" do
+      state =
+        fresh_state()
+        |> Map.put(:pending_replace, true)
+        |> Map.put(:leader_node, Defaults.leader_trie())
+        |> Map.put(:leader_keys, ["SPC"])
+
+      {:execute, :leader_cancel, new_state} = Normal.handle_key({27, 0}, state)
+      assert new_state.pending_replace == false
+      assert new_state.leader_node == nil
+    end
+
+    test "unbound key during leader mode clears count" do
+      state =
+        fresh_state()
+        |> Map.put(:count, 5)
+        |> Map.put(:leader_node, Defaults.leader_trie())
+        |> Map.put(:leader_keys, ["SPC"])
+
+      # Press an unbound key (unlikely to be in leader trie)
+      {:execute, :leader_cancel, new_state} = Normal.handle_key({?Z, 0}, state)
+      assert new_state.count == nil
+    end
+
     test "valid leader prefix key advances trie" do
       # SPC f should be a prefix (file commands)
       {:execute, {:leader_start, _node}, state} = Normal.handle_key({32, 0}, fresh_state())
