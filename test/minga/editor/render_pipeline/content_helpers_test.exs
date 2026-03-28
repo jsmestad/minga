@@ -113,7 +113,7 @@ defmodule Minga.Editor.RenderPipeline.ContentHelpersTest do
         content: Window.Content.buffer(buf),
         buffer: buf,
         viewport: viewport,
-        dirty_lines: :all
+        render_cache: Minga.Editor.Window.RenderCache.reset()
       }
 
       %{buf: buf, ctx: ctx, window: window}

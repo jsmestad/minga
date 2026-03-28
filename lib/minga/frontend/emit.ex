@@ -121,7 +121,7 @@ defmodule Minga.Frontend.Emit do
         window = Map.get(ctx.windows.map, win_id)
 
         if window do
-          {win_id, window.last_viewport_top}
+          {win_id, window.render_cache.last_viewport_top}
         else
           {win_id, -1}
         end
@@ -137,7 +137,7 @@ defmodule Minga.Frontend.Emit do
         window = Map.get(ctx.windows.map, win_id)
 
         if window do
-          {win_id, window.last_gutter_w}
+          {win_id, window.render_cache.last_gutter_w}
         else
           {win_id, -1}
         end
@@ -148,7 +148,7 @@ defmodule Minga.Frontend.Emit do
         window = Map.get(ctx.windows.map, win_id)
 
         if window do
-          {win_id, window.last_buf_version}
+          {win_id, window.render_cache.last_buf_version}
         else
           {win_id, -1}
         end

@@ -77,7 +77,7 @@ defmodule Minga.Editor.RenderPipeline.ScrollTest do
       [{_win_id, window}] = Map.to_list(state.workspace.windows.map)
 
       # First frame: sentinel values trigger full invalidation
-      assert window.dirty_lines == :all
+      assert window.render_cache.dirty_lines == :all
     end
   end
 end

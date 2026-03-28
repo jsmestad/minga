@@ -753,7 +753,7 @@ defmodule Minga.Frontend.Emit.GUI do
   defp build_gui_gutter_separator_commands(ctx) do
     show? = Config.get(:show_gutter_separator)
     active_window = Map.get(ctx.windows.map, ctx.windows.active)
-    gutter_w = if active_window, do: active_window.last_gutter_w, else: 0
+    gutter_w = if active_window, do: active_window.render_cache.last_gutter_w, else: 0
 
     # Only send separator when enabled, visible gutter (gutter_w > 0).
     # Use the theme's gutter separator color, falling back to gutter fg.
@@ -783,8 +783,8 @@ defmodule Minga.Frontend.Emit.GUI do
 
         case Map.get(layout.window_layouts, ctx.windows.active) do
           %{content: {content_row, _col, _w, _h}} ->
-            cursor_line = active_window.last_cursor_line || 0
-            viewport_top = active_window.last_viewport_top || 0
+            cursor_line = active_window.render_cache.last_cursor_line || 0
+            viewport_top = active_window.render_cache.last_viewport_top || 0
             screen_row = content_row + cursor_line - viewport_top
             bg = ctx.theme.editor.cursorline_bg || 0
             {screen_row, bg}
@@ -832,9 +832,9 @@ defmodule Minga.Frontend.Emit.GUI do
         ) :: ProtocolGUI.gutter_data()
   defp build_window_gutter(window, win_id, win_layout, is_active) do
     buf = window.buffer
-    cursor_line = max(window.last_cursor_line, 0)
-    viewport_top = max(window.last_viewport_top, 0)
-    line_count = max(window.last_line_count, 0)
+    cursor_line = max(window.render_cache.last_cursor_line, 0)
+    viewport_top = max(window.render_cache.last_viewport_top, 0)
+    line_count = max(window.render_cache.last_line_count, 0)
 
     {content_row, content_col, _content_w, content_height} = win_layout.content
 
@@ -1298,8 +1298,8 @@ defmodule Minga.Frontend.Emit.GUI do
           [binary()]
   defp build_window_indent_guides(window, win_id, content_height) do
     buf = window.buffer
-    viewport_top = max(window.last_viewport_top, 0)
-    line_count = max(window.last_line_count, 0)
+    viewport_top = max(window.render_cache.last_viewport_top, 0)
+    line_count = max(window.render_cache.last_line_count, 0)
     visible_count = min(content_height, max(line_count - viewport_top, 0))
 
     if visible_count <= 0 or line_count == 0 do

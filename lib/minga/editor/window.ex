@@ -35,21 +35,11 @@ defmodule Minga.Editor.Window do
   alias Minga.Editing.Fold.Range, as: FoldRange
   alias Minga.Editor.Viewport
   alias Minga.Editor.Window.Content
+  alias Minga.Editor.Window.RenderCache
   alias Minga.UI.Popup.Active, as: PopupActive
 
   @typedoc "Unique identifier for a window."
   @type id :: pos_integer()
-
-  @typedoc """
-  Context fingerprint: a term derived from the render context that
-  captures all per-frame inputs affecting every visible line. When
-  the fingerprint changes between frames, all lines are re-rendered.
-
-  Built from: visual selection, search matches, highlight version,
-  diagnostic signs, git signs, viewport left scroll, active status,
-  and theme color structs.
-  """
-  @type context_fingerprint :: term()
 
   @type t :: %__MODULE__{
           id: id(),
@@ -62,15 +52,7 @@ defmodule Minga.Editor.Window do
           fold_ranges: [FoldRange.t()],
           textobject_positions: %{atom() => [{non_neg_integer(), non_neg_integer()}]},
           popup_meta: PopupActive.t() | nil,
-          dirty_lines: :all | %{optional(non_neg_integer()) => true},
-          cached_gutter: %{optional(non_neg_integer()) => [DisplayList.draw()]},
-          cached_content: %{optional(non_neg_integer()) => [DisplayList.draw()]},
-          last_viewport_top: integer(),
-          last_gutter_w: integer(),
-          last_line_count: integer(),
-          last_cursor_line: integer(),
-          last_buf_version: integer(),
-          last_context_fingerprint: context_fingerprint()
+          render_cache: RenderCache.t()
         }
 
   @enforce_keys [:id, :content, :buffer, :viewport]
@@ -85,15 +67,7 @@ defmodule Minga.Editor.Window do
     fold_ranges: [],
     textobject_positions: %{},
     popup_meta: nil,
-    dirty_lines: %{},
-    cached_gutter: %{},
-    cached_content: %{},
-    last_viewport_top: -1,
-    last_gutter_w: -1,
-    last_line_count: -1,
-    last_cursor_line: -1,
-    last_buf_version: -1,
-    last_context_fingerprint: nil
+    render_cache: %RenderCache{}
   ]
 
   @doc """
@@ -134,7 +108,7 @@ defmodule Minga.Editor.Window do
       buffer: agent_buffer,
       viewport: Viewport.new(rows, cols),
       pinned: true,
-      dirty_lines: :all
+      render_cache: RenderCache.reset()
     }
   end
 
@@ -344,15 +318,8 @@ defmodule Minga.Editor.Window do
   If the window is already fully dirty, adding specific lines is a no-op.
   """
   @spec mark_dirty(t(), [non_neg_integer()] | :all) :: t()
-  def mark_dirty(%__MODULE__{} = window, :all) do
-    %{window | dirty_lines: :all}
-  end
-
-  def mark_dirty(%__MODULE__{dirty_lines: :all} = window, _lines), do: window
-
-  def mark_dirty(%__MODULE__{dirty_lines: existing} = window, lines) when is_list(lines) do
-    new_dirty = Enum.reduce(lines, existing, fn line, acc -> Map.put(acc, line, true) end)
-    %{window | dirty_lines: new_dirty}
+  def mark_dirty(%__MODULE__{render_cache: cache} = window, lines) do
+    %{window | render_cache: RenderCache.mark_dirty(cache, lines)}
   end
 
   @doc """
@@ -365,18 +332,7 @@ defmodule Minga.Editor.Window do
   """
   @spec invalidate(t()) :: t()
   def invalidate(%__MODULE__{} = window) do
-    %{
-      window
-      | dirty_lines: :all,
-        cached_gutter: %{},
-        cached_content: %{},
-        last_viewport_top: -1,
-        last_gutter_w: -1,
-        last_line_count: -1,
-        last_cursor_line: -1,
-        last_buf_version: -1,
-        last_context_fingerprint: nil
-    }
+    %{window | render_cache: RenderCache.reset()}
   end
 
   @doc """
@@ -385,8 +341,7 @@ defmodule Minga.Editor.Window do
   Always true when `dirty_lines` is `:all`.
   """
   @spec dirty?(t(), non_neg_integer()) :: boolean()
-  def dirty?(%__MODULE__{dirty_lines: :all}, _line), do: true
-  def dirty?(%__MODULE__{dirty_lines: dirty}, line), do: Map.has_key?(dirty, line)
+  def dirty?(%__MODULE__{render_cache: cache}, line), do: RenderCache.dirty?(cache, line)
 
   @doc """
   Checks current frame parameters against last-frame tracking fields
@@ -407,22 +362,18 @@ defmodule Minga.Editor.Window do
           non_neg_integer(),
           non_neg_integer()
         ) :: t()
-  def detect_invalidation(%__MODULE__{} = window, viewport_top, gutter_w, line_count, buf_version) do
-    first_frame = window.last_buf_version < 0
-
-    needs_full =
-      first_frame or
-        window.last_viewport_top != viewport_top or
-        window.last_gutter_w != gutter_w or
-        window.last_line_count != line_count
-
-    window = if needs_full, do: %{window | dirty_lines: :all}, else: window
-
-    if window.last_buf_version != buf_version and window.last_buf_version >= 0 do
-      %{window | dirty_lines: :all}
-    else
+  def detect_invalidation(
+        %__MODULE__{render_cache: cache} = window,
+        viewport_top,
+        gutter_w,
+        line_count,
+        buf_version
+      ) do
+    %{
       window
-    end
+      | render_cache:
+          RenderCache.detect_invalidation(cache, viewport_top, gutter_w, line_count, buf_version)
+    }
   end
 
   @doc """
@@ -433,14 +384,9 @@ defmodule Minga.Editor.Window do
   git signs, horizontal scroll, active/inactive status, and theme colors,
   all of which affect every visible line's draw output.
   """
-  @spec detect_context_change(t(), context_fingerprint()) :: t()
-  def detect_context_change(%__MODULE__{} = window, fingerprint) do
-    if window.last_context_fingerprint != nil and
-         window.last_context_fingerprint != fingerprint do
-      %{window | dirty_lines: :all}
-    else
-      window
-    end
+  @spec detect_context_change(t(), RenderCache.context_fingerprint()) :: t()
+  def detect_context_change(%__MODULE__{render_cache: cache} = window, fingerprint) do
+    %{window | render_cache: RenderCache.detect_context_change(cache, fingerprint)}
   end
 
   @doc """
@@ -455,12 +401,8 @@ defmodule Minga.Editor.Window do
           [DisplayList.draw()],
           [DisplayList.draw()]
         ) :: t()
-  def cache_line(%__MODULE__{} = window, buf_line, gutter_draws, content_draws) do
-    %{
-      window
-      | cached_gutter: Map.put(window.cached_gutter, buf_line, gutter_draws),
-        cached_content: Map.put(window.cached_content, buf_line, content_draws)
-    }
+  def cache_line(%__MODULE__{render_cache: cache} = window, buf_line, gutter_draws, content_draws) do
+    %{window | render_cache: RenderCache.cache_line(cache, buf_line, gutter_draws, content_draws)}
   end
 
   @doc """
@@ -478,26 +420,29 @@ defmodule Minga.Editor.Window do
           non_neg_integer(),
           non_neg_integer(),
           non_neg_integer(),
-          context_fingerprint()
+          RenderCache.context_fingerprint()
         ) :: t()
   def snapshot_after_render(
-        %__MODULE__{} = window,
+        %__MODULE__{render_cache: cache} = window,
         viewport_top,
         gutter_w,
         line_count,
         cursor_line,
         buf_version,
-        context_fingerprint
+        ctx_fingerprint
       ) do
     %{
       window
-      | dirty_lines: %{},
-        last_viewport_top: viewport_top,
-        last_gutter_w: gutter_w,
-        last_line_count: line_count,
-        last_cursor_line: cursor_line,
-        last_buf_version: buf_version,
-        last_context_fingerprint: context_fingerprint
+      | render_cache:
+          RenderCache.snapshot(
+            cache,
+            viewport_top,
+            gutter_w,
+            line_count,
+            cursor_line,
+            buf_version,
+            ctx_fingerprint
+          )
     }
   end
 
@@ -508,13 +453,7 @@ defmodule Minga.Editor.Window do
   through a large file.
   """
   @spec prune_cache(t(), non_neg_integer(), non_neg_integer()) :: t()
-  def prune_cache(%__MODULE__{} = window, first_visible, last_visible) do
-    filter = fn {line, _draws} -> line >= first_visible and line <= last_visible end
-
-    %{
-      window
-      | cached_gutter: Map.filter(window.cached_gutter, filter),
-        cached_content: Map.filter(window.cached_content, filter)
-    }
+  def prune_cache(%__MODULE__{render_cache: cache} = window, first_visible, last_visible) do
+    %{window | render_cache: RenderCache.prune(cache, first_visible, last_visible)}
   end
 end

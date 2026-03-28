@@ -25,22 +25,22 @@ defmodule Minga.Editor.WindowTest do
 
     test "initializes with empty dirty set (sentinel values trigger full redraw on first detect)" do
       window = make_window()
-      assert window.dirty_lines == %{}
+      assert window.render_cache.dirty_lines == %{}
     end
 
     test "initializes with empty caches" do
       window = make_window()
-      assert window.cached_gutter == %{}
-      assert window.cached_content == %{}
+      assert window.render_cache.cached_gutter == %{}
+      assert window.render_cache.cached_content == %{}
     end
 
     test "initializes tracking fields to sentinel values" do
       window = make_window()
-      assert window.last_viewport_top == -1
-      assert window.last_gutter_w == -1
-      assert window.last_line_count == -1
-      assert window.last_cursor_line == -1
-      assert window.last_buf_version == -1
+      assert window.render_cache.last_viewport_top == -1
+      assert window.render_cache.last_gutter_w == -1
+      assert window.render_cache.last_line_count == -1
+      assert window.render_cache.last_cursor_line == -1
+      assert window.render_cache.last_buf_version == -1
     end
   end
 
@@ -58,48 +58,59 @@ defmodule Minga.Editor.WindowTest do
       window = make_window()
       # Simulate a previous render with populated caches
       window = Window.cache_line(window, 0, [{0, 0, "1", []}], [{0, 4, "hi", []}])
-      window = %{window | dirty_lines: %{}, last_buf_version: 5, last_context_fingerprint: :fp}
+
+      window = %{
+        window
+        | render_cache: %{
+            window.render_cache
+            | dirty_lines: %{},
+              last_buf_version: 5,
+              last_context_fingerprint: :fp
+          }
+      }
+
       resized = Window.resize(window, 12, 40)
 
-      assert resized.dirty_lines == :all
-      assert resized.cached_gutter == %{}
-      assert resized.cached_content == %{}
-      assert resized.last_buf_version == -1
-      assert resized.last_context_fingerprint == nil
+      assert resized.render_cache.dirty_lines == :all
+      assert resized.render_cache.cached_gutter == %{}
+      assert resized.render_cache.cached_content == %{}
+      assert resized.render_cache.last_buf_version == -1
+      assert resized.render_cache.last_context_fingerprint == nil
     end
   end
 
   describe "mark_dirty/2" do
     test "marks specific lines dirty" do
-      window = %{make_window() | dirty_lines: %{}}
+      window = make_window()
       window = Window.mark_dirty(window, [5, 10, 15])
 
-      assert Map.has_key?(window.dirty_lines, 5)
-      assert Map.has_key?(window.dirty_lines, 10)
-      assert Map.has_key?(window.dirty_lines, 15)
-      refute Map.has_key?(window.dirty_lines, 6)
+      assert Map.has_key?(window.render_cache.dirty_lines, 5)
+      assert Map.has_key?(window.render_cache.dirty_lines, 10)
+      assert Map.has_key?(window.render_cache.dirty_lines, 15)
+      refute Map.has_key?(window.render_cache.dirty_lines, 6)
     end
 
     test "accumulates dirty lines across calls" do
-      window = %{make_window() | dirty_lines: %{}}
+      window = make_window()
       window = Window.mark_dirty(window, [5])
       window = Window.mark_dirty(window, [10])
 
-      assert Map.has_key?(window.dirty_lines, 5)
-      assert Map.has_key?(window.dirty_lines, 10)
+      assert Map.has_key?(window.render_cache.dirty_lines, 5)
+      assert Map.has_key?(window.render_cache.dirty_lines, 10)
     end
 
     test "marks all lines dirty with :all" do
-      window = %{make_window() | dirty_lines: Map.new([1, 2, 3], &{&1, true})}
+      window = make_window()
+      window = Window.mark_dirty(window, [1, 2, 3])
       window = Window.mark_dirty(window, :all)
-      assert window.dirty_lines == :all
+      assert window.render_cache.dirty_lines == :all
     end
 
     test "adding specific lines to :all is a no-op" do
       window = Window.invalidate(make_window())
-      assert window.dirty_lines == :all
+      assert window.render_cache.dirty_lines == :all
       window = Window.mark_dirty(window, [5, 10])
-      assert window.dirty_lines == :all
+      assert window.render_cache.dirty_lines == :all
     end
   end
 
@@ -110,22 +121,25 @@ defmodule Minga.Editor.WindowTest do
 
       window = %{
         window
-        | dirty_lines: Map.new([1, 2], &{&1, true}),
-          last_buf_version: 5,
-          last_context_fingerprint: :fp
+        | render_cache: %{
+            window.render_cache
+            | dirty_lines: Map.new([1, 2], &{&1, true}),
+              last_buf_version: 5,
+              last_context_fingerprint: :fp
+          }
       }
 
       window = Window.invalidate(window)
 
-      assert window.dirty_lines == :all
-      assert window.cached_gutter == %{}
-      assert window.cached_content == %{}
-      assert window.last_viewport_top == -1
-      assert window.last_gutter_w == -1
-      assert window.last_line_count == -1
-      assert window.last_cursor_line == -1
-      assert window.last_buf_version == -1
-      assert window.last_context_fingerprint == nil
+      assert window.render_cache.dirty_lines == :all
+      assert window.render_cache.cached_gutter == %{}
+      assert window.render_cache.cached_content == %{}
+      assert window.render_cache.last_viewport_top == -1
+      assert window.render_cache.last_gutter_w == -1
+      assert window.render_cache.last_line_count == -1
+      assert window.render_cache.last_cursor_line == -1
+      assert window.render_cache.last_buf_version == -1
+      assert window.render_cache.last_context_fingerprint == nil
     end
   end
 
@@ -137,7 +151,8 @@ defmodule Minga.Editor.WindowTest do
     end
 
     test "returns true only for lines in the dirty set" do
-      window = %{make_window() | dirty_lines: Map.new([5, 10], &{&1, true})}
+      window = make_window()
+      window = Window.mark_dirty(window, [5, 10])
       assert Window.dirty?(window, 5)
       assert Window.dirty?(window, 10)
       refute Window.dirty?(window, 0)
@@ -145,7 +160,7 @@ defmodule Minga.Editor.WindowTest do
     end
 
     test "returns false for any line when dirty set is empty" do
-      window = %{make_window() | dirty_lines: %{}}
+      window = make_window()
       refute Window.dirty?(window, 0)
       refute Window.dirty?(window, 5)
     end
@@ -172,40 +187,40 @@ defmodule Minga.Editor.WindowTest do
 
     test "no invalidation when nothing changed", %{window: window} do
       result = Window.detect_invalidation(window, 0, 4, 100, 5)
-      assert result.dirty_lines == %{}
+      assert result.render_cache.dirty_lines == %{}
     end
 
     test "full invalidation when viewport scrolled", %{window: window} do
       result = Window.detect_invalidation(window, 5, 4, 100, 5)
-      assert result.dirty_lines == :all
+      assert result.render_cache.dirty_lines == :all
     end
 
     test "full invalidation when gutter width changed", %{window: window} do
       result = Window.detect_invalidation(window, 0, 5, 100, 5)
-      assert result.dirty_lines == :all
+      assert result.render_cache.dirty_lines == :all
     end
 
     test "full invalidation when line count changed", %{window: window} do
       result = Window.detect_invalidation(window, 0, 4, 101, 5)
-      assert result.dirty_lines == :all
+      assert result.render_cache.dirty_lines == :all
     end
 
     test "full invalidation when buffer version changed", %{window: window} do
       result = Window.detect_invalidation(window, 0, 4, 100, 6)
-      assert result.dirty_lines == :all
+      assert result.render_cache.dirty_lines == :all
     end
 
     test "full invalidation on first frame (sentinel tracking values)", %{window: _window} do
       # Fresh window has sentinel last_buf_version=-1 → always full redraw
-      fresh = %{make_window() | dirty_lines: %{}}
+      fresh = make_window()
       result = Window.detect_invalidation(fresh, 0, 4, 100, 1)
-      assert result.dirty_lines == :all
+      assert result.render_cache.dirty_lines == :all
     end
 
     test "preserves existing dirty lines when no full invalidation needed", %{window: window} do
       window = Window.mark_dirty(window, [5, 10])
       result = Window.detect_invalidation(window, 0, 4, 100, 5)
-      assert result.dirty_lines == Map.new([5, 10], &{&1, true})
+      assert result.render_cache.dirty_lines == Map.new([5, 10], &{&1, true})
     end
   end
 
@@ -217,8 +232,8 @@ defmodule Minga.Editor.WindowTest do
 
       window = Window.cache_line(window, 0, gutter, content)
 
-      assert window.cached_gutter[0] == gutter
-      assert window.cached_content[0] == content
+      assert window.render_cache.cached_gutter[0] == gutter
+      assert window.render_cache.cached_content[0] == content
     end
 
     test "overwrites previous cache for the same line" do
@@ -229,7 +244,7 @@ defmodule Minga.Editor.WindowTest do
       window = Window.cache_line(window, 5, [], old_content)
       window = Window.cache_line(window, 5, [], new_content)
 
-      assert window.cached_content[5] == new_content
+      assert window.render_cache.cached_content[5] == new_content
     end
 
     test "caching multiple lines builds up the map" do
@@ -239,29 +254,29 @@ defmodule Minga.Editor.WindowTest do
       window = Window.cache_line(window, 1, [{1, 0, "2", []}], [{1, 4, "line 1", []}])
       window = Window.cache_line(window, 2, [{2, 0, "3", []}], [{2, 4, "line 2", []}])
 
-      assert map_size(window.cached_gutter) == 3
-      assert map_size(window.cached_content) == 3
+      assert map_size(window.render_cache.cached_gutter) == 3
+      assert map_size(window.render_cache.cached_content) == 3
     end
   end
 
   describe "snapshot_after_render/7" do
     test "clears the dirty set" do
       window = Window.invalidate(make_window())
-      assert window.dirty_lines == :all
+      assert window.render_cache.dirty_lines == :all
 
       window = Window.snapshot_after_render(window, 0, 4, 100, 10, 5, :test_fp)
-      assert window.dirty_lines == %{}
+      assert window.render_cache.dirty_lines == %{}
     end
 
     test "updates all tracking fields" do
       window = make_window()
       window = Window.snapshot_after_render(window, 10, 5, 200, 25, 42, :test_fp)
 
-      assert window.last_viewport_top == 10
-      assert window.last_gutter_w == 5
-      assert window.last_line_count == 200
-      assert window.last_cursor_line == 25
-      assert window.last_buf_version == 42
+      assert window.render_cache.last_viewport_top == 10
+      assert window.render_cache.last_gutter_w == 5
+      assert window.render_cache.last_line_count == 200
+      assert window.render_cache.last_cursor_line == 25
+      assert window.render_cache.last_buf_version == 42
     end
   end
 
@@ -269,27 +284,27 @@ defmodule Minga.Editor.WindowTest do
     test "marks all dirty when fingerprint changes" do
       window = make_window()
       window = Window.snapshot_after_render(window, 0, 4, 100, 5, 1, :fp_a)
-      assert window.dirty_lines == %{}
+      assert window.render_cache.dirty_lines == %{}
 
       window = Window.detect_context_change(window, :fp_b)
-      assert window.dirty_lines == :all
+      assert window.render_cache.dirty_lines == :all
     end
 
     test "no-op when fingerprint is the same" do
       window = make_window()
       window = Window.snapshot_after_render(window, 0, 4, 100, 5, 1, :fp_a)
-      assert window.dirty_lines == %{}
+      assert window.render_cache.dirty_lines == %{}
 
       window = Window.detect_context_change(window, :fp_a)
-      assert window.dirty_lines == %{}
+      assert window.render_cache.dirty_lines == %{}
     end
 
     test "no-op when last fingerprint is nil (first frame)" do
       window = make_window()
-      assert window.last_context_fingerprint == nil
+      assert window.render_cache.last_context_fingerprint == nil
 
       window = Window.detect_context_change(window, :fp_a)
-      assert window.dirty_lines == %{}
+      assert window.render_cache.dirty_lines == %{}
     end
 
     test "detects changes in complex fingerprint tuples" do
@@ -299,7 +314,7 @@ defmodule Minga.Editor.WindowTest do
       window = make_window()
       window = Window.snapshot_after_render(window, 0, 4, 100, 5, 1, fp1)
       window = Window.detect_context_change(window, fp2)
-      assert window.dirty_lines == :all
+      assert window.render_cache.dirty_lines == :all
     end
   end
 
@@ -312,15 +327,15 @@ defmodule Minga.Editor.WindowTest do
           Window.cache_line(w, line, [{line, 0, "#{line}", []}], [{line, 4, "text", []}])
         end)
 
-      assert map_size(window.cached_content) == 21
+      assert map_size(window.render_cache.cached_content) == 21
 
       window = Window.prune_cache(window, 5, 15)
 
-      assert map_size(window.cached_content) == 11
-      refute Map.has_key?(window.cached_content, 4)
-      assert Map.has_key?(window.cached_content, 5)
-      assert Map.has_key?(window.cached_content, 15)
-      refute Map.has_key?(window.cached_content, 16)
+      assert map_size(window.render_cache.cached_content) == 11
+      refute Map.has_key?(window.render_cache.cached_content, 4)
+      assert Map.has_key?(window.render_cache.cached_content, 5)
+      assert Map.has_key?(window.render_cache.cached_content, 15)
+      refute Map.has_key?(window.render_cache.cached_content, 16)
     end
 
     test "gutter cache is also pruned" do
@@ -332,14 +347,14 @@ defmodule Minga.Editor.WindowTest do
         end)
 
       window = Window.prune_cache(window, 3, 7)
-      assert map_size(window.cached_gutter) == 5
+      assert map_size(window.render_cache.cached_gutter) == 5
     end
 
     test "handles empty cache gracefully" do
       window = make_window()
       window = Window.prune_cache(window, 0, 10)
-      assert window.cached_content == %{}
-      assert window.cached_gutter == %{}
+      assert window.render_cache.cached_content == %{}
+      assert window.render_cache.cached_gutter == %{}
     end
   end
 
@@ -348,11 +363,11 @@ defmodule Minga.Editor.WindowTest do
       window = make_window()
 
       # Before detect_invalidation, window has empty dirty set
-      assert window.dirty_lines == %{}
+      assert window.render_cache.dirty_lines == %{}
 
       # detect_invalidation sees sentinel values → marks all dirty
       window = Window.detect_invalidation(window, 0, 4, 100, 1)
-      assert window.dirty_lines == :all
+      assert window.render_cache.dirty_lines == :all
       assert Window.dirty?(window, 0)
       assert Window.dirty?(window, 99)
 
@@ -364,11 +379,11 @@ defmodule Minga.Editor.WindowTest do
 
       # Snapshot after render
       window = Window.snapshot_after_render(window, 0, 4, 100, 5, 1, :test_fp)
-      assert window.dirty_lines == %{}
+      assert window.render_cache.dirty_lines == %{}
 
       # Frame 2: nothing changed → nothing dirty
       window = Window.detect_invalidation(window, 0, 4, 100, 1)
-      assert window.dirty_lines == %{}
+      assert window.render_cache.dirty_lines == %{}
       refute Window.dirty?(window, 0)
       refute Window.dirty?(window, 5)
     end
@@ -388,11 +403,11 @@ defmodule Minga.Editor.WindowTest do
       # The pipeline detects version change and marks :all dirty
       # (conservative; future optimization can narrow this)
       window = Window.detect_invalidation(window, 0, 4, 100, 2)
-      assert window.dirty_lines == :all
+      assert window.render_cache.dirty_lines == :all
 
       # After rendering, snapshot with new version
       window = Window.snapshot_after_render(window, 0, 4, 100, 5, 2, :test_fp)
-      assert window.dirty_lines == %{}
+      assert window.render_cache.dirty_lines == %{}
     end
 
     test "scroll cycle: viewport_top changes → full invalidation" do
@@ -401,7 +416,7 @@ defmodule Minga.Editor.WindowTest do
 
       # Scroll down
       window = Window.detect_invalidation(window, 10, 4, 100, 1)
-      assert window.dirty_lines == :all
+      assert window.render_cache.dirty_lines == :all
     end
   end
 

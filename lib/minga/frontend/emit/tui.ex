@@ -173,13 +173,13 @@ defmodule Minga.Frontend.Emit.TUI do
     current_rect = win_layout.content
 
     prev_gutter_w = Map.get(prev.gutter_ws, win_id)
-    current_gutter_w = window.last_gutter_w
+    current_gutter_w = window.render_cache.last_gutter_w
 
     prev_top = Map.get(prev.tops, win_id)
-    current_top = window.last_viewport_top
+    current_top = window.render_cache.last_viewport_top
 
     prev_version = Map.get(prev.buf_versions, win_id)
-    current_version = window.last_buf_version
+    current_version = window.render_cache.last_buf_version
 
     classify_scroll_delta(
       %{
