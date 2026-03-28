@@ -1826,6 +1826,9 @@ defmodule Minga.Editor do
     EditorState.switch_tab(state, id)
   end
 
+  # Board mode has no tab bar; ignore close_tab events from phantom GUI state.
+  defp handle_gui_action(%{shell_state: %{tab_bar: nil}} = state, {:close_tab, _id}), do: state
+
   defp handle_gui_action(state, {:close_tab, id}) do
     # Switch to the target tab first (if not already active), then close
     # it. This ensures the right tab is closed when the user clicks X
