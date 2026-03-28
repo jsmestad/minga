@@ -16,14 +16,18 @@ defmodule Minga.Keymap.Scope.Agent do
   functions, not separate dispatch paths.
   """
 
-  @behaviour Minga.Keymap.Scope
+  use Minga.Keymap.Scope.Builder,
+    name: :agent,
+    display_name: "Agent"
 
   alias Minga.Keymap.Bindings
+  alias Minga.Keymap.CUADefaults
 
   # Modifier bitmasks
   @ctrl 0x02
   @shift 0x01
   @alt 0x04
+  @cmd 0x08
 
   # Special codepoints
   @tab 9
@@ -31,15 +35,12 @@ defmodule Minga.Keymap.Scope.Agent do
   @escape 27
   @backspace 127
 
+  # Group specs for each vim state.
+  @insert_groups [:ctrl_agent_common, :newline_variants]
+  @input_normal_groups [:ctrl_agent_common]
+  @cua_groups [{:cua_navigation, exclude: [:half_page_up, :half_page_down]}]
+
   # ── Behaviour callbacks ────────────────────────────────────────────────────
-
-  @impl true
-  @spec name() :: :agent
-  def name, do: :agent
-
-  @impl true
-  @spec display_name() :: String.t()
-  def display_name, do: "Agent"
 
   @impl true
   @spec keymap(Minga.Keymap.Scope.vim_state(), Minga.Keymap.Scope.context()) ::
@@ -52,7 +53,7 @@ defmodule Minga.Keymap.Scope.Agent do
 
   @impl true
   @spec shared_keymap() :: Bindings.node_t()
-  def shared_keymap, do: shared_trie()
+  def shared_keymap, do: Bindings.new()
 
   @impl true
   @spec help_groups(atom()) :: [Minga.Keymap.Scope.help_group()]
@@ -68,14 +69,6 @@ defmodule Minga.Keymap.Scope.Agent do
       {:cua_navigation, exclude: [:half_page_up, :half_page_down]}
     ]
   end
-
-  @impl true
-  @spec on_enter(term()) :: term()
-  def on_enter(state), do: state
-
-  @impl true
-  @spec on_exit(term()) :: term()
-  def on_exit(state), do: state
 
   # ── Normal mode bindings ───────────────────────────────────────────────────
 
@@ -148,32 +141,33 @@ defmodule Minga.Keymap.Scope.Agent do
 
   @spec insert_trie() :: Bindings.node_t()
   defp insert_trie do
-    Bindings.new()
-    # Shared Ctrl shortcuts (Ctrl+C, D, U, L, S, Q) from group
-    |> Bindings.merge_group(:ctrl_agent_common)
-    # Newline variants (Shift+Enter across all terminal encodings) from group
-    |> Bindings.merge_group(:newline_variants)
-    # ESC switches to input normal mode (vim-style)
-    |> Bindings.bind([{@escape, 0}], :agent_input_to_normal, "Normal mode")
-    # Enter submits
-    |> Bindings.bind([{@enter, 0}], :agent_submit_or_newline, "Submit prompt")
-    # Backspace
-    |> Bindings.bind([{@backspace, 0}], :agent_input_backspace, "Delete character")
-    # Left/right arrows handled by Vim.handle_key (shared primitive).
-    # Up/down arrows handled here: moves cursor OR recalls prompt history.
-    |> Bindings.bind([{0xF700, 0}], :agent_input_up, "Move up / history prev")
-    |> Bindings.bind([{0xF701, 0}], :agent_input_down, "Move down / history next")
-    |> Bindings.bind([{57_352, 0}], :agent_input_up, "Move up / history prev")
-    |> Bindings.bind([{57_353, 0}], :agent_input_down, "Move down / history next")
-    # Ctrl+Enter queues as follow-up during streaming; submits normally when idle.
-    |> Bindings.bind([{@enter, @ctrl}], :agent_queue_follow_up, "Queue as follow-up")
-    # Alt+Up dequeues pending messages back into the prompt buffer.
-    |> Bindings.bind([{0xF700, @alt}], :agent_dequeue, "Dequeue to editor")
-    |> Bindings.bind([{57_352, @alt}], :agent_dequeue, "Dequeue to editor")
-    # Scope-specific overrides on top of group bindings:
-    # Ctrl+D/U get more specific descriptions in insert context
-    |> Bindings.bind([{?d, @ctrl}], :agent_scroll_half_down, "Scroll down (while typing)")
-    |> Bindings.bind([{?u, @ctrl}], :agent_scroll_half_up, "Scroll up (while typing)")
+    build_trie(
+      groups: @insert_groups,
+      then: fn trie ->
+        trie
+        # ESC switches to input normal mode (vim-style)
+        |> Bindings.bind([{@escape, 0}], :agent_input_to_normal, "Normal mode")
+        # Enter submits
+        |> Bindings.bind([{@enter, 0}], :agent_submit_or_newline, "Submit prompt")
+        # Backspace
+        |> Bindings.bind([{@backspace, 0}], :agent_input_backspace, "Delete character")
+        # Left/right arrows handled by Vim.handle_key (shared primitive).
+        # Up/down arrows handled here: moves cursor OR recalls prompt history.
+        |> Bindings.bind([{0xF700, 0}], :agent_input_up, "Move up / history prev")
+        |> Bindings.bind([{0xF701, 0}], :agent_input_down, "Move down / history next")
+        |> Bindings.bind([{57_352, 0}], :agent_input_up, "Move up / history prev")
+        |> Bindings.bind([{57_353, 0}], :agent_input_down, "Move down / history next")
+        # Ctrl+Enter queues as follow-up during streaming; submits normally when idle.
+        |> Bindings.bind([{@enter, @ctrl}], :agent_queue_follow_up, "Queue as follow-up")
+        # Alt+Up dequeues pending messages back into the prompt buffer.
+        |> Bindings.bind([{0xF700, @alt}], :agent_dequeue, "Dequeue to editor")
+        |> Bindings.bind([{57_352, @alt}], :agent_dequeue, "Dequeue to editor")
+        # Scope-specific overrides on top of group bindings:
+        # Ctrl+D/U get more specific descriptions in insert context
+        |> Bindings.bind([{?d, @ctrl}], :agent_scroll_half_down, "Scroll down (while typing)")
+        |> Bindings.bind([{?u, @ctrl}], :agent_scroll_half_up, "Scroll up (while typing)")
+      end
+    )
   end
 
   # ── Input normal mode meta keys ──────────────────────────────────────────
@@ -184,20 +178,15 @@ defmodule Minga.Keymap.Scope.Agent do
 
   @spec input_normal_trie() :: Bindings.node_t()
   defp input_normal_trie do
-    Bindings.new()
-    # Shared Ctrl shortcuts from group (Ctrl+C, D, U, L, S, Q)
-    |> Bindings.merge_group(:ctrl_agent_common)
-    # No Escape binding: in normal mode, Escape is a no-op (vim semantics).
-    # Use `q` or Ctrl+Q to leave the input field.
-    |> Bindings.bind([{?q, 0}], :agent_unfocus_input, "Back to chat nav")
-  end
-
-  # ── Shared bindings (both normal and insert) ───────────────────────────────
-
-  @spec shared_trie() :: Bindings.node_t()
-  defp shared_trie do
-    # Ctrl+C works the same in both modes
-    Bindings.new()
+    build_trie(
+      groups: @input_normal_groups,
+      then: fn trie ->
+        trie
+        # No Escape binding: in normal mode, Escape is a no-op (vim semantics).
+        # Use `q` or Ctrl+Q to leave the input field.
+        |> Bindings.bind([{?q, 0}], :agent_unfocus_input, "Back to chat nav")
+      end
+    )
   end
 
   # ── Help content ───────────────────────────────────────────────────────────
@@ -297,32 +286,47 @@ defmodule Minga.Keymap.Scope.Agent do
   # determines whether input is focused and routes accordingly; the trie
   # contains bindings for both states.
 
-  alias Minga.Keymap.CUADefaults
-
-  @cmd 0x08
-
   @spec cua_trie() :: Bindings.node_t()
   defp cua_trie do
-    CUADefaults.navigation_trie()
-    # Enter: focus input if not focused, submit if focused
-    |> Bindings.bind([{@enter, 0}], :agent_focus_or_submit, "Focus input / submit")
-    |> Bindings.bind([{@escape, 0}], :agent_dismiss_or_noop, "Dismiss/cancel")
-    |> Bindings.bind([{@tab, 0}], :agent_switch_focus, "Switch panel focus")
-    # Cmd chords (GUI) + Ctrl fallbacks (TUI)
-    |> Bindings.bind([{?c, @cmd}], :agent_copy_code_block, "Copy code block")
-    |> Bindings.bind([{?a, @cmd}], :select_all, "Select all")
-    |> Bindings.bind([{?c, @ctrl}], :agent_copy_code_block, "Copy code block")
-    |> Bindings.bind([{?a, @ctrl}], :select_all, "Select all")
-    # Input field bindings (used when input focused)
-    |> Bindings.bind([{@backspace, 0}], :agent_input_backspace, "Delete character")
-    |> Bindings.bind([{@enter, @shift}], :agent_insert_newline, "Insert newline")
-    |> Bindings.bind([{?j, @ctrl}], :agent_insert_newline, "Insert newline")
-    |> Bindings.bind([{0x0A, 0}], :agent_insert_newline, "Insert newline")
-    |> Bindings.bind([{@enter, @alt}], :agent_insert_newline, "Insert newline")
-    # Arrow up/down in input: history navigation
-    |> Bindings.bind([{57_352, 0}], :agent_input_up, "Move up / history prev")
-    |> Bindings.bind([{57_353, 0}], :agent_input_down, "Move down / history next")
-    |> Bindings.bind([{0xF700, 0}], :agent_input_up, "Move up / history prev")
-    |> Bindings.bind([{0xF701, 0}], :agent_input_down, "Move down / history next")
+    build_trie(
+      groups: @cua_groups,
+      then: fn trie ->
+        CUADefaults.navigation_trie()
+        |> merge_trie(trie)
+        # Enter: focus input if not focused, submit if focused
+        |> Bindings.bind([{@enter, 0}], :agent_focus_or_submit, "Focus input / submit")
+        |> Bindings.bind([{@escape, 0}], :agent_dismiss_or_noop, "Dismiss/cancel")
+        |> Bindings.bind([{@tab, 0}], :agent_switch_focus, "Switch panel focus")
+        # Cmd chords (GUI) + Ctrl fallbacks (TUI)
+        |> Bindings.bind([{?c, @cmd}], :agent_copy_code_block, "Copy code block")
+        |> Bindings.bind([{?a, @cmd}], :select_all, "Select all")
+        |> Bindings.bind([{?c, @ctrl}], :agent_copy_code_block, "Copy code block")
+        |> Bindings.bind([{?a, @ctrl}], :select_all, "Select all")
+        # Input field bindings (used when input focused)
+        |> Bindings.bind([{@backspace, 0}], :agent_input_backspace, "Delete character")
+        |> Bindings.bind([{@enter, @shift}], :agent_insert_newline, "Insert newline")
+        |> Bindings.bind([{?j, @ctrl}], :agent_insert_newline, "Insert newline")
+        |> Bindings.bind([{0x0A, 0}], :agent_insert_newline, "Insert newline")
+        |> Bindings.bind([{@enter, @alt}], :agent_insert_newline, "Insert newline")
+        # Arrow up/down in input: history navigation
+        |> Bindings.bind([{57_352, 0}], :agent_input_up, "Move up / history prev")
+        |> Bindings.bind([{57_353, 0}], :agent_input_down, "Move down / history next")
+        |> Bindings.bind([{0xF700, 0}], :agent_input_up, "Move up / history prev")
+        |> Bindings.bind([{0xF701, 0}], :agent_input_down, "Move down / history next")
+      end
+    )
+  end
+
+  # Merge two tries together (source wins on conflict).
+  @spec merge_trie(Bindings.node_t(), Bindings.node_t()) :: Bindings.node_t()
+  defp merge_trie(target, %Bindings.Node{children: children}) do
+    Enum.reduce(children, target, fn {key, %Bindings.Node{command: cmd, description: desc}},
+                                     acc ->
+      if cmd do
+        Bindings.bind(acc, [key], cmd, desc || "")
+      else
+        acc
+      end
+    end)
   end
 end

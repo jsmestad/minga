@@ -15,18 +15,22 @@ defmodule Minga.Keymap.Scope.Editor do
   `CUA.Dispatch` (CUA) when this scope returns `:not_found`.
   """
 
-  @behaviour Minga.Keymap.Scope
+  use Minga.Keymap.Scope.Builder,
+    name: :editor,
+    display_name: "Editor"
 
   alias Minga.Keymap.Bindings
-  alias Minga.Keymap.CUADefaults
+
+  @ctrl 0x02
+
+  # Groups included by this scope.
+  @cua_groups [:cua_cmd_chords]
 
   @impl true
-  @spec name() :: :editor
-  def name, do: :editor
+  @spec included_groups() :: [atom() | {atom(), keyword()}]
+  def included_groups, do: @cua_groups
 
-  @impl true
-  @spec display_name() :: String.t()
-  def display_name, do: "Editor"
+  # ── Keymap ─────────────────────────────────────────────────────────────────
 
   @impl true
   @spec keymap(Minga.Keymap.Scope.vim_state(), Minga.Keymap.Scope.context()) ::
@@ -42,25 +46,16 @@ defmodule Minga.Keymap.Scope.Editor do
   @spec help_groups(atom()) :: [Minga.Keymap.Scope.help_group()]
   def help_groups(_focus), do: []
 
-  @impl true
-  @spec included_groups() :: [atom() | {atom(), keyword()}]
-  def included_groups, do: [:cua_cmd_chords]
-
-  @impl true
-  @spec on_enter(term()) :: term()
-  def on_enter(state), do: state
-
-  @impl true
-  @spec on_exit(term()) :: term()
-  def on_exit(state), do: state
-
   # ── CUA bindings ───────────────────────────────────────────────────────
-
-  @ctrl 0x02
 
   @spec cua_trie() :: Bindings.node_t()
   defp cua_trie do
-    CUADefaults.cmd_chords_trie()
-    |> Bindings.bind([{?p, @ctrl}], :command_palette, "Command palette")
+    build_trie(
+      groups: @cua_groups,
+      then: fn trie ->
+        trie
+        |> Bindings.bind([{?p, @ctrl}], :command_palette, "Command palette")
+      end
+    )
   end
 end
