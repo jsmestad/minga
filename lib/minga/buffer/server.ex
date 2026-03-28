@@ -160,11 +160,14 @@ defmodule Minga.Buffer.Server do
   if the text is not found, is ambiguous (multiple matches), or the buffer
   is read-only.
   """
-  @spec find_and_replace(GenServer.server(), String.t(), String.t()) ::
+  @typedoc "An edit boundary as `{start_line, end_line}` (both inclusive, 0-indexed), or nil for unbounded."
+  @type boundary :: {non_neg_integer(), non_neg_integer()} | nil
+
+  @spec find_and_replace(GenServer.server(), String.t(), String.t(), boundary()) ::
           {:ok, String.t()} | {:error, String.t()}
-  def find_and_replace(server, old_text, new_text)
+  def find_and_replace(server, old_text, new_text, boundary \\ nil)
       when is_binary(old_text) and is_binary(new_text) do
-    GenServer.call(server, {:find_and_replace, old_text, new_text})
+    GenServer.call(server, {:find_and_replace, old_text, new_text, boundary})
   end
 
   @typedoc "A find-and-replace edit pair for batch operations."
@@ -181,12 +184,15 @@ defmodule Minga.Buffer.Server do
   don't block subsequent edits. A single undo entry is pushed for the entire
   batch.
 
+  When `boundary` is provided, each edit is checked against the boundary and
+  rejected if the match falls outside the allowed line range.
+
   Returns `{:ok, results}` where results is a list of per-edit outcomes.
   """
-  @spec find_and_replace_batch(GenServer.server(), [replace_edit()]) ::
+  @spec find_and_replace_batch(GenServer.server(), [replace_edit()], boundary()) ::
           {:ok, [replace_result()]} | {:error, String.t()}
-  def find_and_replace_batch(server, edits) when is_list(edits) do
-    GenServer.call(server, {:find_and_replace_batch, edits})
+  def find_and_replace_batch(server, edits, boundary \\ nil) when is_list(edits) do
+    GenServer.call(server, {:find_and_replace_batch, edits, boundary})
   end
 
   @doc "Deletes the character before the cursor (backspace)."
@@ -970,40 +976,48 @@ defmodule Minga.Buffer.Server do
 
   # ── Find and Replace ──
 
-  def handle_call({:find_and_replace, _old, _new}, _from, %{read_only: true} = state) do
+  def handle_call({:find_and_replace, _old, _new, _boundary}, _from, %{read_only: true} = state) do
     {:reply, {:error, "buffer is read-only"}, state}
   end
 
-  def handle_call({:find_and_replace, "", _new}, _from, state) do
+  def handle_call({:find_and_replace, "", _new, _boundary}, _from, state) do
     {:reply, {:error, "old_text is empty"}, state}
   end
 
-  def handle_call({:find_and_replace, old_text, new_text}, _from, state) do
+  def handle_call({:find_and_replace, old_text, new_text, boundary}, _from, state) do
     content = Document.content(state.document)
 
     case do_find_and_replace(content, old_text, new_text) do
       {:ok, new_doc, msg} ->
-        {:reply, {:ok, msg},
-         push_undo_force(state, new_doc, :agent)
-         |> mark_dirty()
-         |> clear_edits(EditSource.agent(self(), "unknown"))}
+        case check_boundary(content, old_text, boundary) do
+          :ok ->
+            {:reply, {:ok, msg},
+             push_undo_force(state, new_doc, :agent)
+             |> mark_dirty()
+             |> clear_edits(EditSource.agent(self(), "unknown"))}
+
+          {:error, _} = err ->
+            {:reply, err, state}
+        end
 
       {:error, _} = err ->
         {:reply, err, state}
     end
   end
 
-  def handle_call({:find_and_replace_batch, _edits}, _from, %{read_only: true} = state) do
+  def handle_call({:find_and_replace_batch, _edits, _boundary}, _from, %{read_only: true} = state) do
     {:reply, {:error, "buffer is read-only"}, state}
   end
 
-  def handle_call({:find_and_replace_batch, []}, _from, state) do
+  def handle_call({:find_and_replace_batch, [], _boundary}, _from, state) do
     {:reply, {:ok, []}, state}
   end
 
-  def handle_call({:find_and_replace_batch, edits}, _from, state) do
+  def handle_call({:find_and_replace_batch, edits, boundary}, _from, state) do
     {final_doc, results_reversed} =
-      Enum.reduce(edits, {state.document, []}, &apply_batch_edit/2)
+      Enum.reduce(edits, {state.document, []}, fn edit, acc ->
+        apply_batch_edit(edit, acc, boundary)
+      end)
 
     results = Enum.reverse(results_reversed)
     any_applied = Enum.any?(results, &match?({:ok, _}, &1))
@@ -1725,19 +1739,63 @@ defmodule Minga.Buffer.Server do
 
   # ── Find and Replace helpers ──
 
-  @spec apply_batch_edit({String.t(), String.t()}, {Document.t(), [replace_result()]}) ::
+  @spec apply_batch_edit({String.t(), String.t()}, {Document.t(), [replace_result()]}, boundary()) ::
           {Document.t(), [replace_result()]}
-  defp apply_batch_edit({"", _new_text}, {doc, acc}) do
+  defp apply_batch_edit({"", _new_text}, {doc, acc}, _boundary) do
     {doc, [{:error, "old_text is empty"} | acc]}
   end
 
-  defp apply_batch_edit({old_text, new_text}, {doc, acc}) do
+  defp apply_batch_edit({old_text, new_text}, {doc, acc}, boundary) do
     content = Document.content(doc)
 
     case do_find_and_replace(content, old_text, new_text) do
-      {:ok, new_doc, msg} -> {new_doc, [{:ok, msg} | acc]}
-      {:error, _} = err -> {doc, [err | acc]}
+      {:ok, new_doc, msg} ->
+        case check_boundary(content, old_text, boundary) do
+          :ok -> {new_doc, [{:ok, msg} | acc]}
+          {:error, _} = err -> {doc, [err | acc]}
+        end
+
+      {:error, _} = err ->
+        {doc, [err | acc]}
     end
+  end
+
+  # Checks whether a text match falls within the allowed boundary.
+  # Returns :ok if no boundary is set or the match is within bounds.
+  # Returns {:error, reason} if the match is outside the boundary.
+  @spec check_boundary(String.t(), String.t(), boundary()) :: :ok | {:error, String.t()}
+  defp check_boundary(_content, _old_text, nil), do: :ok
+
+  defp check_boundary(content, old_text, {boundary_start, boundary_end}) do
+    case :binary.matches(content, old_text) do
+      [{offset, len}] ->
+        # Count newlines before the match to determine the start line
+        before_match = binary_part(content, 0, offset)
+        match_start_line = count_newlines(before_match)
+
+        # Count newlines within the match to determine the end line
+        match_text = binary_part(content, offset, len)
+        match_end_line = match_start_line + count_newlines(match_text)
+
+        if match_start_line >= boundary_start and match_end_line <= boundary_end do
+          :ok
+        else
+          {:error,
+           "edit outside boundary: match spans lines #{match_start_line}-#{match_end_line}, " <>
+             "allowed range is #{boundary_start}-#{boundary_end}"}
+        end
+
+      # Not found or ambiguous: let do_find_and_replace handle the error
+      _ ->
+        :ok
+    end
+  end
+
+  @spec count_newlines(binary()) :: non_neg_integer()
+  defp count_newlines(binary) do
+    binary
+    |> :binary.matches("\n")
+    |> length()
   end
 
   # Performs the actual string search and replace on raw content.
