@@ -257,6 +257,93 @@ defmodule Minga.Keymap.Bindings do
   end
 
   @doc """
+  Merges a list of binding tuples into a trie.
+
+  Each binding is a `{key_sequence, command, description}` tuple. Bindings
+  are applied in order, so later entries override earlier ones on conflict.
+
+  This is the bulk registration helper for shared binding groups. Scope
+  modules call this to include a group's bindings, then apply scope-specific
+  bindings on top (which override group bindings on conflict).
+
+  ## Examples
+
+      iex> bindings = [
+      ...>   {[{?j, 0}], :move_down, "Move down"},
+      ...>   {[{?k, 0}], :move_up, "Move up"}
+      ...> ]
+      iex> trie = Minga.Keymap.Bindings.merge_bindings(Minga.Keymap.Bindings.new(), bindings)
+      iex> {:command, :move_down} = Minga.Keymap.Bindings.lookup(trie, {?j, 0})
+      iex> {:command, :move_up} = Minga.Keymap.Bindings.lookup(trie, {?k, 0})
+  """
+  @spec merge_bindings(node_t(), [{[key()], atom() | tuple(), String.t()}]) :: node_t()
+  def merge_bindings(trie, bindings) when is_list(bindings) do
+    Enum.reduce(bindings, trie, fn {keys, command, description}, acc ->
+      bind(acc, keys, command, description)
+    end)
+  end
+
+  @doc """
+  Merges a list of binding tuples into a trie, excluding specific commands.
+
+  Same as `merge_bindings/2` but skips any binding whose command atom
+  appears in the `exclude` list. Use this when a scope includes a shared
+  group but needs to override specific commands with different semantics.
+
+  ## Examples
+
+      iex> bindings = [
+      ...>   {[{?j, 0}], :move_down, "Move down"},
+      ...>   {[{?q, 0}], :quit_editor, "Quit"}
+      ...> ]
+      iex> trie = Minga.Keymap.Bindings.merge_bindings(Minga.Keymap.Bindings.new(), bindings, exclude: [:quit_editor])
+      iex> {:command, :move_down} = Minga.Keymap.Bindings.lookup(trie, {?j, 0})
+      iex> :not_found = Minga.Keymap.Bindings.lookup(trie, {?q, 0})
+  """
+  @spec merge_bindings(node_t(), [{[key()], atom() | tuple(), String.t()}], keyword()) ::
+          node_t()
+  def merge_bindings(trie, bindings, opts) when is_list(bindings) and is_list(opts) do
+    excluded = MapSet.new(Keyword.get(opts, :exclude, []))
+
+    Enum.reduce(bindings, trie, fn {keys, command, description}, acc ->
+      if MapSet.member?(excluded, command) do
+        acc
+      else
+        bind(acc, keys, command, description)
+      end
+    end)
+  end
+
+  @doc """
+  Merges a named shared group into a trie.
+
+  Convenience wrapper that calls `SharedGroups.get/1` and `merge_bindings/2`.
+
+  ## Examples
+
+      trie = Bindings.new()
+      |> Bindings.merge_group(:cua_navigation)
+      |> Bindings.bind([{?q, 0}], :quit, "Quit")
+  """
+  @spec merge_group(node_t(), atom()) :: node_t()
+  def merge_group(trie, group_name) when is_atom(group_name) do
+    merge_bindings(trie, Minga.Keymap.SharedGroups.get(group_name))
+  end
+
+  @doc """
+  Merges a named shared group into a trie with exclusions.
+
+  ## Examples
+
+      trie = Bindings.new()
+      |> Bindings.merge_group(:cua_navigation, exclude: [:move_up])
+  """
+  @spec merge_group(node_t(), atom(), keyword()) :: node_t()
+  def merge_group(trie, group_name, opts) when is_atom(group_name) and is_list(opts) do
+    merge_bindings(trie, Minga.Keymap.SharedGroups.get(group_name), opts)
+  end
+
+  @doc """
   Returns the direct children of a trie node for which-key display.
 
   Each entry is a `{key, label}` tuple where `label` is either the

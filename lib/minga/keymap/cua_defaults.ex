@@ -14,26 +14,14 @@ defmodule Minga.Keymap.CUADefaults do
 
   alias Minga.Keymap.Bindings
 
-  import Bitwise
-
-  # Modifier bitmasks (matching port protocol)
-  @shift 0x01
+  # Modifier bitmask (used by interrupt_trie)
   @ctrl 0x02
-  @cmd 0x08
 
-  # Arrow keys (Kitty keyboard protocol codepoints)
-  @arrow_up 57_352
-  @arrow_down 57_353
+  # Common keys (still used by editing_trie and horizontal_nav_trie)
   @arrow_left 57_350
   @arrow_right 57_351
-
-  # macOS NSEvent arrow key codepoints (GUI frontend)
-  @ns_up 0xF700
-  @ns_down 0xF701
   @ns_left 0xF702
   @ns_right 0xF703
-
-  # Common keys
   @escape 27
   @backspace 127
   @tab 9
@@ -46,11 +34,7 @@ defmodule Minga.Keymap.CUADefaults do
   """
   @spec navigation_trie() :: Bindings.node_t()
   def navigation_trie do
-    Bindings.new()
-    |> Bindings.bind([{@arrow_up, 0}], :move_up, "Move up")
-    |> Bindings.bind([{@arrow_down, 0}], :move_down, "Move down")
-    |> Bindings.bind([{@ns_up, 0}], :move_up, "Move up")
-    |> Bindings.bind([{@ns_down, 0}], :move_down, "Move down")
+    Bindings.merge_group(Bindings.new(), :cua_navigation)
   end
 
   @doc """
@@ -69,20 +53,7 @@ defmodule Minga.Keymap.CUADefaults do
   """
   @spec cmd_chords_trie() :: Bindings.node_t()
   def cmd_chords_trie do
-    Bindings.new()
-    # GUI (Cmd) bindings
-    |> Bindings.bind([{?c, @cmd}], :yank_visual_selection, "Copy")
-    |> Bindings.bind([{?x, @cmd}], :delete_visual_selection, "Cut")
-    |> Bindings.bind([{?v, @cmd}], :paste_after, "Paste")
-    |> Bindings.bind([{?z, @cmd}], :undo, "Undo")
-    |> Bindings.bind([{?z, @cmd ||| @shift}], :redo, "Redo")
-    |> Bindings.bind([{?a, @cmd}], :select_all, "Select all")
-    |> Bindings.bind([{?s, @cmd}], :save, "Save")
-    # TUI (Ctrl) fallbacks — terminals can't send Cmd
-    |> Bindings.bind([{?z, @ctrl}], :undo, "Undo")
-    |> Bindings.bind([{?y, @ctrl}], :redo, "Redo")
-    |> Bindings.bind([{?v, @ctrl}], :paste_after, "Paste")
-    |> Bindings.bind([{?a, @ctrl}], :select_all, "Select all")
+    Bindings.merge_group(Bindings.new(), :cua_cmd_chords)
   end
 
   @doc """

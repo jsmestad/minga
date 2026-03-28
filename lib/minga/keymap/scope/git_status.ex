@@ -68,6 +68,10 @@ defmodule Minga.Keymap.Scope.GitStatus do
   end
 
   @impl true
+  @spec included_groups() :: [atom() | {atom(), keyword()}]
+  def included_groups, do: [:cua_navigation, :cua_cmd_chords]
+
+  @impl true
   @spec on_enter(term()) :: term()
   def on_enter(state), do: state
 

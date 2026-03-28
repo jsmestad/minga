@@ -43,6 +43,10 @@ defmodule Minga.Keymap.Scope.Editor do
   def help_groups(_focus), do: []
 
   @impl true
+  @spec included_groups() :: [atom() | {atom(), keyword()}]
+  def included_groups, do: [:cua_cmd_chords]
+
+  @impl true
   @spec on_enter(term()) :: term()
   def on_enter(state), do: state
 
