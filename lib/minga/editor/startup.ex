@@ -18,6 +18,7 @@ defmodule Minga.Editor.Startup do
   alias Minga.Editor.FileWatcherHelpers
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.AgentAccess
+  alias Minga.Editor.State.Session, as: SessionState
   alias Minga.Editor.State.Buffers
   alias Minga.Editor.State.Tab
   alias Minga.Editor.State.TabBar
@@ -116,8 +117,7 @@ defmodule Minga.Editor.Startup do
       focus_stack: Minga.Input.default_stack(),
       shell: resolve_shell(opts),
       shell_state: init_shell_state(resolve_shell(opts), dashboard, opts),
-      swap_dir: Keyword.get(opts, :swap_dir),
-      session_dir: Keyword.get(opts, :session_dir)
+      session: SessionState.new(Keyword.take(opts, [:swap_dir, :session_dir]))
     }
 
     state = EditorState.set_tab_bar(state, initial_tab_bar(active_buf, keymap_scope))

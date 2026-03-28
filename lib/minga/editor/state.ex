@@ -39,6 +39,7 @@ defmodule Minga.Editor.State do
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.LSP, as: LSPState
+  alias Minga.Editor.State.Session, as: SessionState
   alias Minga.Editor.State.Buffers
   alias Minga.Editor.State.FileTree, as: FileTreeState
   alias Minga.Editor.State.Highlighting
@@ -96,9 +97,7 @@ defmodule Minga.Editor.State do
             buffer_monitors: %{},
             face_override_registries: %{},
             font_registry: Minga.UI.FontRegistry.new(),
-            session_timer: nil,
-            swap_dir: nil,
-            session_dir: nil,
+            session: %SessionState{},
             space_leader_pending: false,
             space_leader_timer: nil,
             stashed_board_state: nil
@@ -130,9 +129,7 @@ defmodule Minga.Editor.State do
           buffer_monitors: %{pid() => reference()},
           face_override_registries: %{pid() => Minga.UI.Face.Registry.t()},
           font_registry: Minga.UI.FontRegistry.t(),
-          session_timer: reference() | nil,
-          swap_dir: String.t() | nil,
-          session_dir: String.t() | nil,
+          session: SessionState.t(),
           space_leader_pending: boolean(),
           space_leader_timer: reference() | nil,
           stashed_board_state: Minga.Shell.Board.State.t() | nil
