@@ -9,6 +9,8 @@ defmodule Minga.Input.GitStatus do
 
   @behaviour Minga.Input.Handler
 
+  @type state :: Minga.Input.Handler.handler_state()
+
   alias Minga.Buffer
   alias Minga.Editor.Commands
   alias Minga.Editor.State, as: EditorState
@@ -19,8 +21,7 @@ defmodule Minga.Input.GitStatus do
   alias Minga.Workspace.State, as: WorkspaceState
 
   @impl true
-  @spec handle_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
-          {:handled, EditorState.t()} | {:passthrough, EditorState.t()}
+  @spec handle_key(state(), non_neg_integer(), non_neg_integer()) :: Minga.Input.Handler.result()
   def handle_key(%{workspace: %{keymap_scope: :git_status}} = state, cp, mods) do
     if Input.key_sequence_pending?(state) do
       # Multi-key sequence in progress; delegate to mode FSM

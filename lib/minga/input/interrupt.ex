@@ -28,6 +28,8 @@ defmodule Minga.Input.Interrupt do
 
   @behaviour Minga.Input.Handler
 
+  @type state :: Minga.Input.Handler.handler_state()
+
   alias Minga.Agent.UIState
   alias Minga.Editing.Completion
   alias Minga.Editor.State, as: EditorState
@@ -42,8 +44,7 @@ defmodule Minga.Input.Interrupt do
   @ctrl_g 7
 
   @impl true
-  @spec handle_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
-          Minga.Input.Handler.result()
+  @spec handle_key(state(), non_neg_integer(), non_neg_integer()) :: Minga.Input.Handler.result()
   def handle_key(state, @ctrl_g, 0) do
     {new_state, resets} = reset_to_known_good(state)
     new_state = log_resets(new_state, resets)

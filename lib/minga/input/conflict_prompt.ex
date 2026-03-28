@@ -9,13 +9,14 @@ defmodule Minga.Input.ConflictPrompt do
 
   @behaviour Minga.Input.Handler
 
+  @type state :: Minga.Input.Handler.handler_state()
+
   alias Minga.Buffer
   alias Minga.Editor.State, as: EditorState
   alias Minga.Workspace.State, as: WorkspaceState
 
   @impl true
-  @spec handle_key(Minga.Editor.State.t(), non_neg_integer(), non_neg_integer()) ::
-          Minga.Input.Handler.result()
+  @spec handle_key(state(), non_neg_integer(), non_neg_integer()) :: Minga.Input.Handler.result()
   def handle_key(%{workspace: %{pending_conflict: {buf, _path}}} = state, ?r, _mods)
       when is_pid(buf) do
     Buffer.reload(buf)

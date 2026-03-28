@@ -7,6 +7,15 @@ defmodule Minga.Input.Handler do
   return `{:passthrough, state}` when their feature is inactive (e.g.,
   the picker handler passes through when no picker is open).
 
+  ## State contract
+
+  Input handlers receive a `handler_state()` which is currently
+  `Editor.State.t()`. This type alias is the narrowing point: as the
+  shell independence refactor progresses, it will be replaced by a
+  focused contract struct containing only what handlers need (workspace,
+  capabilities, layout, shell_state). Handlers should avoid accessing
+  fields outside these four to prepare for that narrowing.
+
   ## Implementing a handler
 
       defmodule MyHandler do
@@ -25,8 +34,17 @@ defmodule Minga.Input.Handler do
 
   alias Minga.Editor.State, as: EditorState
 
+  @typedoc """
+  The state type passed to input handlers.
+
+  Currently `Editor.State.t()`. This alias is the single point to narrow
+  when the input contract is fully decoupled from `Editor.State`. Handlers
+  should access only: `workspace`, `capabilities`, `layout`, `shell_state`.
+  """
+  @type handler_state :: EditorState.t()
+
   @typedoc "Result of handling a key press."
-  @type result :: {:handled, EditorState.t()} | {:passthrough, EditorState.t()}
+  @type result :: {:handled, handler_state()} | {:passthrough, handler_state()}
 
   @doc """
   Processes a key press event.
@@ -37,7 +55,7 @@ defmodule Minga.Input.Handler do
   through (e.g., clearing a transient flag).
   """
   @callback handle_key(
-              EditorState.t(),
+              handler_state(),
               codepoint :: non_neg_integer(),
               modifiers :: non_neg_integer()
             ) :: result()
@@ -52,7 +70,7 @@ defmodule Minga.Input.Handler do
   this callback to intercept mouse events for your UI region.
   """
   @callback handle_mouse(
-              EditorState.t(),
+              handler_state(),
               row :: integer(),
               col :: integer(),
               button :: atom(),

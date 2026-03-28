@@ -10,6 +10,8 @@ defmodule Minga.Input.FileTreeHandler do
 
   @behaviour Minga.Input.Handler
 
+  @type state :: Minga.Input.Handler.handler_state()
+
   alias Minga.Buffer
   alias Minga.Editor.Commands
   alias Minga.Editor.Layout
@@ -18,8 +20,7 @@ defmodule Minga.Input.FileTreeHandler do
   alias Minga.Keymap
   alias Minga.Project.FileTree
   @impl true
-  @spec handle_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
-          {:handled, EditorState.t()} | {:passthrough, EditorState.t()}
+  @spec handle_key(state(), non_neg_integer(), non_neg_integer()) :: Minga.Input.Handler.result()
 
   # File tree scope with tree focused
   def handle_key(
@@ -41,14 +42,14 @@ defmodule Minga.Input.FileTreeHandler do
 
   @impl true
   @spec handle_mouse(
-          EditorState.t(),
+          state(),
           integer(),
           integer(),
           atom(),
           non_neg_integer(),
           atom(),
           pos_integer()
-        ) :: {:handled, EditorState.t()} | {:passthrough, EditorState.t()}
+        ) :: Minga.Input.Handler.result()
 
   # File tree: left click opens file/toggles dir, scroll wheel scrolls tree
   def handle_mouse(
@@ -85,7 +86,7 @@ defmodule Minga.Input.FileTreeHandler do
   # ── File tree key dispatch ─────────────────────────────────────────────
 
   @spec handle_file_tree_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
-          {:handled, EditorState.t()} | {:passthrough, EditorState.t()}
+          Minga.Input.Handler.result()
   defp handle_file_tree_key(state, cp, mods) do
     if Input.key_sequence_pending?(state) do
       {:handled, delegate_to_mode_fsm_with_tree_buffer(state, cp, mods)}

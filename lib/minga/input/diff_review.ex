@@ -10,6 +10,8 @@ defmodule Minga.Input.DiffReview do
 
   @behaviour Minga.Input.Handler
 
+  @type state :: Minga.Input.Handler.handler_state()
+
   alias Minga.Agent.View.Preview
   alias Minga.Editor.Commands
   alias Minga.Editor.State, as: EditorState
@@ -17,8 +19,7 @@ defmodule Minga.Input.DiffReview do
   alias Minga.Keymap
 
   @impl true
-  @spec handle_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
-          {:handled, EditorState.t()} | {:passthrough, EditorState.t()}
+  @spec handle_key(state(), non_neg_integer(), non_neg_integer()) :: Minga.Input.Handler.result()
   def handle_key(state, cp, _mods) do
     view = AgentAccess.view(state)
     panel = AgentAccess.panel(state)
@@ -32,8 +33,7 @@ defmodule Minga.Input.DiffReview do
     end
   end
 
-  @spec dispatch_diff_key(EditorState.t(), non_neg_integer()) ::
-          {:handled, EditorState.t()} | {:passthrough, EditorState.t()}
+  @spec dispatch_diff_key(EditorState.t(), non_neg_integer()) :: Minga.Input.Handler.result()
   defp dispatch_diff_key(state, ?y), do: {:handled, Commands.execute(state, :agent_accept_hunk)}
   defp dispatch_diff_key(state, ?x), do: {:handled, Commands.execute(state, :agent_reject_hunk)}
 

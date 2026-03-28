@@ -22,6 +22,8 @@ defmodule Minga.Input.Scoped do
 
   @behaviour Minga.Input.Handler
 
+  @type state :: Minga.Input.Handler.handler_state()
+
   import Bitwise
 
   alias Minga.Agent.UIState
@@ -43,8 +45,7 @@ defmodule Minga.Input.Scoped do
   # ── Handler callback ───────────────────────────────────────────────────────
 
   @impl true
-  @spec handle_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
-          {:handled, EditorState.t()} | {:passthrough, EditorState.t()}
+  @spec handle_key(state(), non_neg_integer(), non_neg_integer()) :: Minga.Input.Handler.result()
 
   # ── Editor scope ─────────────────────────────────────────────────────────
 
@@ -90,7 +91,7 @@ defmodule Minga.Input.Scoped do
   # ══════════════════════════════════════════════════════════════════════════
 
   @spec handle_agent_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
-          {:handled, EditorState.t()} | {:passthrough, EditorState.t()}
+          Minga.Input.Handler.result()
 
   # Dismiss toast on any key (then re-process)
   defp handle_agent_key(state, cp, mods) do
@@ -135,7 +136,7 @@ defmodule Minga.Input.Scoped do
 
   # Vim-mode agent key dispatch. Split out so CUA path stays clean.
   @spec dispatch_agent_key_vim(EditorState.t(), Panel.t(), non_neg_integer(), non_neg_integer()) ::
-          {:handled, EditorState.t()} | {:passthrough, EditorState.t()}
+          Minga.Input.Handler.result()
   defp dispatch_agent_key_vim(state, panel, cp, mods) do
     # Tab on a paste placeholder line: toggle expand/collapse
     if cp == @tab and mods == 0 and panel.input_focused do
@@ -181,7 +182,7 @@ defmodule Minga.Input.Scoped do
           non_neg_integer(),
           non_neg_integer()
         ) ::
-          {:handled, EditorState.t()} | {:passthrough, EditorState.t()}
+          Minga.Input.Handler.result()
   defp resolve_agent_key(state, vim_state, cp, mods) do
     key = {cp, mods}
 
@@ -223,7 +224,7 @@ defmodule Minga.Input.Scoped do
           non_neg_integer(),
           non_neg_integer()
         ) ::
-          {:handled, EditorState.t()} | {:passthrough, EditorState.t()}
+          Minga.Input.Handler.result()
   defp resolve_scope_key(state, scope_name, vim_state, key, cp, mods) do
     case Keymap.resolve_scoped_key(scope_name, vim_state, key) do
       {:command, command} ->

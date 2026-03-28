@@ -11,6 +11,8 @@ defmodule Minga.Input.Completion do
 
   @behaviour Minga.Input.Handler
 
+  @type state :: Minga.Input.Handler.handler_state()
+
   import Bitwise
 
   alias Minga.Buffer
@@ -30,8 +32,7 @@ defmodule Minga.Input.Completion do
   @max_rows 10
 
   @impl true
-  @spec handle_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
-          Minga.Input.Handler.result()
+  @spec handle_key(state(), non_neg_integer(), non_neg_integer()) :: Minga.Input.Handler.result()
   def handle_key(
         %{workspace: %{editing: %{mode: :insert}, completion: %Completion{} = completion}} = state,
         cp,
@@ -49,7 +50,7 @@ defmodule Minga.Input.Completion do
 
   @impl true
   @spec handle_mouse(
-          EditorState.t(),
+          state(),
           integer(),
           integer(),
           atom(),

@@ -15,6 +15,8 @@ defmodule Minga.Input.Hover do
 
   @behaviour Minga.Input.Handler
 
+  @type state :: Minga.Input.Handler.handler_state()
+
   alias Minga.Editor.HoverPopup
   alias Minga.Editor.State, as: EditorState
 
@@ -22,8 +24,7 @@ defmodule Minga.Input.Hover do
   @key_escape 27
 
   @impl true
-  @spec handle_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
-          Minga.Input.Handler.result()
+  @spec handle_key(state(), non_neg_integer(), non_neg_integer()) :: Minga.Input.Handler.result()
   def handle_key(%{shell_state: %{hover_popup: nil}} = state, _codepoint, _modifiers) do
     {:passthrough, state}
   end
@@ -75,7 +76,7 @@ defmodule Minga.Input.Hover do
 
   @impl true
   @spec handle_mouse(
-          EditorState.t(),
+          state(),
           integer(),
           integer(),
           atom(),

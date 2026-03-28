@@ -22,6 +22,8 @@ defmodule Minga.Input.AgentMouse do
 
   @behaviour Minga.Input.Handler
 
+  @type state :: Minga.Input.Handler.handler_state()
+
   alias Minga.Agent.UIState
   alias Minga.Agent.View.PromptRenderer
   alias Minga.Config
@@ -42,20 +44,19 @@ defmodule Minga.Input.AgentMouse do
   # ── Handler callbacks ──────────────────────────────────────────────────────
 
   @impl true
-  @spec handle_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
-          {:handled, EditorState.t()} | {:passthrough, EditorState.t()}
+  @spec handle_key(state(), non_neg_integer(), non_neg_integer()) :: Minga.Input.Handler.result()
   def handle_key(state, _cp, _mods), do: {:passthrough, state}
 
   @impl true
   @spec handle_mouse(
-          EditorState.t(),
+          state(),
           integer(),
           integer(),
           atom(),
           non_neg_integer(),
           atom(),
           pos_integer()
-        ) :: {:handled, EditorState.t()} | {:passthrough, EditorState.t()}
+        ) :: Minga.Input.Handler.result()
 
   def handle_mouse(state, row, col, button, mods, event_type, click_count) do
     layout = Layout.get(state)

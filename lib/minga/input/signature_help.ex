@@ -9,6 +9,8 @@ defmodule Minga.Input.SignatureHelp do
 
   @behaviour Minga.Input.Handler
 
+  @type state :: Minga.Input.Handler.handler_state()
+
   alias Minga.Editor.SignatureHelp, as: SigHelp
   alias Minga.Editor.State, as: EditorState
 
@@ -18,8 +20,7 @@ defmodule Minga.Input.SignatureHelp do
   @key_escape 27
 
   @impl true
-  @spec handle_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
-          Minga.Input.Handler.result()
+  @spec handle_key(state(), non_neg_integer(), non_neg_integer()) :: Minga.Input.Handler.result()
   def handle_key(%{shell_state: %{signature_help: nil}} = state, _cp, _mods) do
     {:passthrough, state}
   end

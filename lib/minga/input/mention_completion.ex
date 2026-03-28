@@ -10,13 +10,13 @@ defmodule Minga.Input.MentionCompletion do
 
   @behaviour Minga.Input.Handler
 
+  @type state :: Minga.Input.Handler.handler_state()
+
   alias Minga.Editor.Commands.Agent, as: AgentCommands
-  alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.AgentAccess
 
   @impl true
-  @spec handle_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
-          {:handled, EditorState.t()} | {:passthrough, EditorState.t()}
+  @spec handle_key(state(), non_neg_integer(), non_neg_integer()) :: Minga.Input.Handler.result()
 
   # Agent scope: mention completion active in insert mode
   def handle_key(%{workspace: %{keymap_scope: :agent}} = state, cp, mods) do
