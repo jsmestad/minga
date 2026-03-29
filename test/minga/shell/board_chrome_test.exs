@@ -179,4 +179,37 @@ defmodule Minga.Shell.Board.ChromeTest do
       assert frame.cursor.shape in [:block, :beam, :underline]
     end
   end
+
+  # ── Independence from Traditional ───────────────────────────────────────
+
+  describe "build_chrome/4 independence from Traditional layout" do
+    test "Board grid chrome has no status bar, no tab bar, no file tree regardless of viewport" do
+      for cols <- [40, 80, 120, 200] do
+        board = BoardState.new()
+        state = base_state(cols: cols)
+        state = %{state | shell: Board, shell_state: board}
+
+        {scrolls, _frames, cursor_info, state, layout} = run_through_content(state)
+        chrome = Board.build_chrome(state, layout, scrolls, cursor_info)
+
+        assert chrome.tab_bar == [], "tab_bar should be empty at cols=#{cols}"
+        assert chrome.status_bar_draws == [], "status_bar should be empty at cols=#{cols}"
+        assert chrome.file_tree == [], "file_tree should be empty at cols=#{cols}"
+      end
+    end
+
+    test "Board zoomed chrome produces context bar draws independent of Traditional modeline fields" do
+      # Even if the shell_state has Traditional-like fields, Board uses its own context bar
+      state = zoomed_board_state(task: "My task")
+      {scrolls, _frames, cursor_info, state, layout} = run_through_content(state)
+
+      chrome = Board.build_chrome(state, layout, scrolls, cursor_info)
+
+      # Context bar is in tab_bar slot (Board's convention)
+      assert [_ | _] = chrome.tab_bar
+      # No Traditional-style status bar
+      assert chrome.status_bar_draws == []
+      assert chrome.status_bar_data == nil
+    end
+  end
 end
