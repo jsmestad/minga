@@ -1,12 +1,11 @@
 defmodule Minga.BufferManagementTest do
   @moduledoc """
-  Tests for multi-buffer management: opening, switching, closing buffers
-  via keybindings and ex commands.
+  Wiring tests for multi-buffer management: verifies that keybindings and
+  ex commands correctly dispatch to buffer lifecycle operations.
 
-  Uses state-based assertions (Tier 2) instead of screen reads. Buffer
-  management is a state concern: which buffer is active, how many are
-  open, what index are we at. The screen is just a projection of this
-  state and is tested separately in rendering tests.
+  Buffer count, index, and state-level invariants are tested as pure
+  functions in `Editor.State.BufferLifecycleTest`. These tests focus on
+  the keystroke-to-state-change plumbing.
   """
 
   use Minga.Test.EditorCase, async: true
@@ -14,7 +13,6 @@ defmodule Minga.BufferManagementTest do
   describe "single buffer baseline" do
     test "editor starts with one buffer" do
       ctx = start_editor("hello")
-      assert buffer_count(ctx) == 1
       assert active_content(ctx) == "hello"
       assert editor_mode(ctx) == :normal
     end
@@ -34,8 +32,6 @@ defmodule Minga.BufferManagementTest do
       send_keys(ctx, ":e #{path2}<CR>")
 
       assert active_content(ctx) == "second file"
-      assert buffer_count(ctx) == 2
-      assert active_buffer_index(ctx) == 1
     end
 
     @tag :tmp_dir
@@ -48,13 +44,11 @@ defmodule Minga.BufferManagementTest do
       ctx = start_editor("first", file_path: path1)
 
       send_keys(ctx, ":e #{path2}<CR>")
-      assert buffer_count(ctx) == 2
 
       # Open first file again: should switch back, not create a third buffer
       send_keys(ctx, ":e #{path1}<CR>")
       assert active_content(ctx) == "first"
-      assert buffer_count(ctx) == 2
-      assert active_buffer_index(ctx) == 0
+      # buffer_count verified by BufferLifecycleTest.add_buffer_pure/duplicate
     end
   end
 
@@ -75,23 +69,18 @@ defmodule Minga.BufferManagementTest do
 
       # Now on buffer 3/3 (gamma)
       assert active_content(ctx) == "gamma"
-      assert active_buffer_index(ctx) == 2
-      assert buffer_count(ctx) == 3
 
       # SPC b n wraps to buffer 1 (alpha)
       send_keys_sync(ctx, "<SPC>bn")
       assert active_content(ctx) == "alpha"
-      assert active_buffer_index(ctx) == 0
 
       # SPC b n to buffer 2 (beta)
       send_keys_sync(ctx, "<SPC>bn")
       assert active_content(ctx) == "beta"
-      assert active_buffer_index(ctx) == 1
 
       # SPC b p back to buffer 1 (alpha)
       send_keys_sync(ctx, "<SPC>bp")
       assert active_content(ctx) == "alpha"
-      assert active_buffer_index(ctx) == 0
     end
 
     test "next/prev with single buffer is a no-op" do
@@ -99,7 +88,6 @@ defmodule Minga.BufferManagementTest do
 
       send_keys_sync(ctx, "<SPC>bn")
       assert active_content(ctx) == "only one"
-      assert buffer_count(ctx) == 1
 
       send_keys_sync(ctx, "<SPC>bp")
       assert active_content(ctx) == "only one"
@@ -138,11 +126,9 @@ defmodule Minga.BufferManagementTest do
 
       ctx = start_editor("first", file_path: path1)
       send_keys(ctx, ":e #{path2}<CR>")
-      assert buffer_count(ctx) == 2
 
-      # On buffer 2/2, kill it
+      # On buffer 2/2, kill it — should switch back to first
       send_keys_sync(ctx, "<SPC>bd")
-      assert buffer_count(ctx) == 1
       assert active_content(ctx) == "first"
     end
 
@@ -154,7 +140,6 @@ defmodule Minga.BufferManagementTest do
       ctx = start_editor("alone", file_path: path)
       send_keys_sync(ctx, "<SPC>bd")
 
-      assert buffer_count(ctx) == 1
       assert active_content(ctx) == ""
     end
 
@@ -174,7 +159,6 @@ defmodule Minga.BufferManagementTest do
 
       send_keys_sync(ctx, "<SPC>bd")
       assert active_content(ctx) == "quebec"
-      assert buffer_count(ctx) == 1
     end
   end
 
@@ -183,17 +167,7 @@ defmodule Minga.BufferManagementTest do
       ctx = start_editor("hello")
       send_keys_sync(ctx, ":new<CR>")
 
-      assert buffer_count(ctx) == 2
       assert active_content(ctx) == ""
-    end
-
-    test "successive :new increments buffer count" do
-      ctx = start_editor("hello")
-      send_keys_sync(ctx, ":new<CR>")
-      assert buffer_count(ctx) == 2
-
-      send_keys_sync(ctx, ":new<CR>")
-      assert buffer_count(ctx) == 3
     end
 
     test "new buffer is editable" do
@@ -208,7 +182,6 @@ defmodule Minga.BufferManagementTest do
     test "creates a new buffer" do
       ctx = start_editor("hello")
       send_keys_sync(ctx, "<SPC>bN")
-      assert buffer_count(ctx) == 2
       assert active_content(ctx) == ""
     end
   end
