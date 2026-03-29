@@ -133,19 +133,25 @@ defmodule Minga.Shell.Traditional do
   # -------------------------------------------------------------------
 
   @impl true
-  @spec on_buffer_added(ShellState.t(), WorkspaceState.t(), pid()) ::
+  @spec on_buffer_added(ShellState.t(), WorkspaceState.t(), pid(), atom()) ::
           {ShellState.t(), WorkspaceState.t()}
-  def on_buffer_added(%ShellState{tab_bar: nil} = shell_state, workspace, _buffer_pid) do
+  def on_buffer_added(shell_state, workspace, buffer_pid, context \\ :open)
+
+  def on_buffer_added(%ShellState{tab_bar: nil} = shell_state, workspace, _buffer_pid, _context) do
     workspace = WorkspaceState.sync_active_window_buffer(workspace)
     {shell_state, workspace}
   end
 
-  def on_buffer_added(%ShellState{tab_bar: %TabBar{} = tb} = shell_state, workspace, buffer_pid) do
+  def on_buffer_added(
+        %ShellState{tab_bar: %TabBar{} = tb} = shell_state,
+        workspace,
+        buffer_pid,
+        context
+      ) do
     label = buffer_label(buffer_pid)
-    active_tab = TabBar.active(tb)
 
     Log.debug(:editor, fn ->
-      "[tab] on_buffer_added label=#{label} tab=#{tb.active_id} kind=#{active_tab.kind}"
+      "[tab] on_buffer_added label=#{label} context=#{context} tab=#{tb.active_id}"
     end)
 
     case find_tab_for_buffer(tb, label) do
@@ -153,11 +159,18 @@ defmodule Minga.Shell.Traditional do
         switch_to_buffer_tab(shell_state, workspace, tab_id)
 
       nil ->
-        case active_tab.kind do
-          :agent ->
+        case {context, TabBar.active(tb).kind} do
+          {:preview, _} ->
+            # Preview: sync window content only, leave tab bar unchanged.
+            # The tab label stays as-is so confirm can detect "no tab for
+            # this buffer" and create a new one.
+            workspace = WorkspaceState.sync_active_window_buffer(workspace)
+            {shell_state, workspace}
+
+          {_, :agent} ->
             open_buffer_from_agent_tab(shell_state, workspace, label)
 
-          :file ->
+          {_, :file} ->
             open_buffer_in_file_tab(shell_state, workspace, label)
         end
     end
@@ -342,6 +355,7 @@ defmodule Minga.Shell.Traditional do
 
   # Opens a file buffer when the active tab is already a file tab.
   # Creates a new file tab and syncs the buffer into the window.
+  # Used for permanent opens: file tree, `:e`, picker confirm, LSP jump.
   @spec open_buffer_in_file_tab(ShellState.t(), WorkspaceState.t(), String.t()) ::
           {ShellState.t(), WorkspaceState.t()}
   defp open_buffer_in_file_tab(%ShellState{tab_bar: tb} = shell_state, workspace, label) do
@@ -357,12 +371,9 @@ defmodule Minga.Shell.Traditional do
     new_context = Map.from_struct(workspace)
     tb = TabBar.update_context(tb, new_tab.id, new_context)
 
-    Log.debug(:editor, fn ->
-      "[tab] on_buffer_added new file tab=#{new_tab.id} label=#{label}"
-    end)
-
     {%{shell_state | tab_bar: tb}, workspace}
   end
+
 
   @spec restore_workspace(WorkspaceState.t(), map()) :: WorkspaceState.t()
   defp restore_workspace(workspace, context) when is_map(context) and map_size(context) > 0 do

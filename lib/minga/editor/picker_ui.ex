@@ -347,12 +347,22 @@ defmodule Minga.Editor.PickerUI do
       new_state = source.on_select(item, state)
       refresh_items(new_state)
     else
-      new_state = close(state)
-      new_state = source.on_select(item, new_state)
+      if Picker.Source.preview?(source) and previewed?(state) do
+        # Preview loaded a different buffer into the window. Close the
+        # picker and promote the previewed buffer to a proper new tab
+        # via add_buffer(:open). The tab bar was never modified by
+        # preview, so on_buffer_added will create a fresh tab.
+        previewed_pid = state.workspace.buffers.active
+        new_state = close(state)
+        EditorState.add_buffer(new_state, previewed_pid, context: :open)
+      else
+        new_state = close(state)
+        new_state = source.on_select(item, new_state)
 
-      case Map.get(new_state, :pending_command) do
-        nil -> new_state
-        cmd -> {Map.delete(new_state, :pending_command), {:execute_command, cmd}}
+        case Map.get(new_state, :pending_command) do
+          nil -> new_state
+          cmd -> {Map.delete(new_state, :pending_command), {:execute_command, cmd}}
+        end
       end
     end
   end
@@ -779,14 +789,30 @@ defmodule Minga.Editor.PickerUI do
   # ── Private helpers ──────────────────────────────────────────────────────────
 
   # Preview: temporarily apply the source's on_select for the highlighted item.
+  # Sets buffer_add_context to :preview so any add_buffer calls inside
+  # Returns true when preview navigation changed the active buffer from
+  # what it was when the picker opened (stored in picker_ui.restore).
+  @spec previewed?(state()) :: boolean()
+  defp previewed?(%{shell_state: %{picker_ui: %{restore: restore}}, workspace: %{buffers: bs}})
+       when is_integer(restore) do
+    bs.active_index != restore
+  end
+
+  defp previewed?(_state), do: false
+
+  # on_select update the current tab in-place instead of creating a new tab.
   @spec maybe_preview_selection(state()) :: state()
   defp maybe_preview_selection(
          %{shell_state: %{picker_ui: %{picker: picker, source: source}}} = state
        ) do
     if Picker.Source.preview?(source) do
       case Picker.selected_item(picker) do
-        nil -> state
-        item -> source.on_select(item, state)
+        nil ->
+          state
+
+        item ->
+          state = EditorState.set_buffer_add_context(state, :preview)
+          source.on_select(item, state)
       end
     else
       state

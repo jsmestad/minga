@@ -98,6 +98,7 @@ defmodule Minga.Editor.State do
             face_override_registries: %{},
             font_registry: Minga.UI.FontRegistry.new(),
             session: %SessionState{},
+            buffer_add_context: :open,
             space_leader_pending: false,
             space_leader_timer: nil,
             stashed_board_state: nil
@@ -129,6 +130,7 @@ defmodule Minga.Editor.State do
           buffer_monitors: %{pid() => reference()},
           face_override_registries: %{pid() => Minga.UI.Face.Registry.t()},
           font_registry: Minga.UI.FontRegistry.t(),
+          buffer_add_context: Minga.Shell.buffer_add_context(),
           session: SessionState.t(),
           space_leader_pending: boolean(),
           space_leader_timer: reference() | nil,
@@ -605,33 +607,66 @@ defmodule Minga.Editor.State do
   end
 
   @doc """
+  Sets the context for the next `add_buffer` call.
+
+  Used by picker preview to mark buffer additions as transient previews
+  rather than permanent opens. The context is consumed and reset to
+  `:open` by `add_buffer_pure/3`.
+  """
+  @spec set_buffer_add_context(t(), Minga.Shell.buffer_add_context()) :: t()
+  def set_buffer_add_context(%__MODULE__{} = state, context)
+      when context in [:open, :preview] do
+    %{state | buffer_add_context: context}
+  end
+
+  @doc """
   Pure variant of `add_buffer/2`. Returns `{state, effects}` instead of
   performing side effects directly.
 
   Generic concerns (buffer pool) are handled here. Shell-specific
   presentation logic (tab bar, card routing) is dispatched through
-  `shell.on_buffer_added/3`. The only effect returned is `{:monitor, pid}`.
+  `shell.on_buffer_added/4`. The only effect returned is `{:monitor, pid}`.
+
+  The buffer-add context is read from `state.buffer_add_context` (set by
+  picker preview) or overridden via `opts[:context]`. After dispatch the
+  field is reset to `:open`.
   """
-  @spec add_buffer_pure(t(), pid()) :: {t(), [Minga.Editor.effect()]}
-  def add_buffer_pure(%__MODULE__{workspace: %{buffers: bs}} = state, pid) do
-    state = put_in(state.workspace.buffers, Buffers.add(bs, pid))
+  @spec add_buffer_pure(t(), pid(), keyword()) :: {t(), [Minga.Editor.effect()]}
+  def add_buffer_pure(%__MODULE__{workspace: %{buffers: bs}} = state, pid, opts \\ []) do
+    context = Keyword.get_lazy(opts, :context, fn -> state.buffer_add_context end)
+
+    # Idempotent: if the buffer is already in the pool, just activate it
+    # instead of appending a duplicate. This lets confirm call add_buffer
+    # for a buffer that preview already loaded.
+    already_pooled = pid in bs.list
+
+    new_bs =
+      if already_pooled do
+        Buffers.switch_to(bs, Enum.find_index(bs.list, &(&1 == pid)))
+      else
+        Buffers.add(bs, pid)
+      end
+
+    state = put_in(state.workspace.buffers, new_bs)
 
     # Dispatch to the active shell for presentation logic
     {shell_state, workspace} =
-      state.shell.on_buffer_added(state.shell_state, state.workspace, pid)
+      state.shell.on_buffer_added(state.shell_state, state.workspace, pid, context)
 
-    state = %{state | shell_state: shell_state, workspace: workspace}
-    {state, [{:monitor, pid}]}
+    state = %{state | shell_state: shell_state, workspace: workspace, buffer_add_context: :open}
+
+    effects = if already_pooled, do: [], else: [{:monitor, pid}]
+    {state, effects}
   end
 
   @doc """
   Adds a new buffer and makes it the active buffer for the current window.
 
-  Thin wrapper around `add_buffer_pure/2` that applies effects inline.
+  Thin wrapper around `add_buffer_pure/3` that applies effects inline.
   """
-  @spec add_buffer(t(), pid()) :: t()
-  def add_buffer(%__MODULE__{} = state, pid) do
-    {state, effects} = add_buffer_pure(state, pid)
+  @spec add_buffer(t(), pid(), keyword()) :: t()
+  def add_buffer(%__MODULE__{} = state, pid, opts \\ []) do
+    {state, effects} = add_buffer_pure(state, pid, opts)
     apply_buffer_effects(state, effects)
   end
 

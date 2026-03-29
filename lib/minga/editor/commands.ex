@@ -562,8 +562,8 @@ defmodule Minga.Editor.Commands do
   end
 
   @doc "Adds a new buffer to the list and makes it active."
-  @spec add_buffer(state(), pid()) :: state()
-  def add_buffer(state, pid), do: EditorState.add_buffer(state, pid)
+  @spec add_buffer(state(), pid(), keyword()) :: state()
+  def add_buffer(state, pid, opts \\ []), do: EditorState.add_buffer(state, pid, opts)
 
   # ── Private helpers ───────────────────────────────────────────────────────
 

@@ -169,8 +169,8 @@ defmodule Minga.Editor.State.BufferLifecycleTest do
 
       # The first buffer should now be active
       assert new_state.workspace.buffers.active == buf
-      # Monitor effect should still be issued
-      assert {:monitor, buf} in effects
+      # No monitor effect — buffer was already monitored from the first add
+      assert effects == []
     end
 
     test "syncs the active window buffer reference" do

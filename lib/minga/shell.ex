@@ -102,14 +102,30 @@ defmodule Minga.Shell do
   # or port managers. Generic concerns stay in EditorState.
   # -------------------------------------------------------------------
 
+  @typedoc """
+  Why a buffer was added. Shells use this to decide tab presentation.
+
+  - `:open` — permanent open (file tree, `:e`, LSP jump, picker confirm).
+    Creates a new tab or switches to an existing one.
+  - `:preview` — transient picker preview. Updates the current tab
+    in-place so navigating the picker doesn't spawn new tabs.
+  """
+  @type buffer_add_context :: :open | :preview
+
   @doc """
   A buffer was added to the workspace.
 
   Called after the buffer pid is in `workspace.buffers` and monitored.
   The shell decides how to present it (e.g., create/update tabs, route
-  to a card, or ignore).
+  to a card, or ignore). `context` tells the shell WHY the buffer was
+  added so it can choose the right presentation strategy.
   """
-  @callback on_buffer_added(shell_state(), workspace(), buffer_pid :: pid()) ::
+  @callback on_buffer_added(
+              shell_state(),
+              workspace(),
+              buffer_pid :: pid(),
+              context :: buffer_add_context()
+            ) ::
               {shell_state(), workspace()}
 
   @doc """

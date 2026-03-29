@@ -404,9 +404,9 @@ defmodule Minga.Shell.Board do
   # -------------------------------------------------------------------
 
   @impl true
-  @spec on_buffer_added(BoardState.t(), Minga.Workspace.State.t(), pid()) ::
+  @spec on_buffer_added(BoardState.t(), Minga.Workspace.State.t(), pid(), atom()) ::
           {BoardState.t(), Minga.Workspace.State.t()}
-  def on_buffer_added(shell_state, workspace, _buffer_pid) do
+  def on_buffer_added(shell_state, workspace, _buffer_pid, _context \\ :open) do
     # Board: sync the active window buffer. A1's content-type guard
     # ensures agent_chat windows are left untouched.
     workspace = Minga.Workspace.State.sync_active_window_buffer(workspace)
