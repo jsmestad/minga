@@ -131,7 +131,7 @@ struct StartupOverlay: View {
 /// containing the sidebar header (project name/branch) and the tab bar.
 /// One shared background eliminates visual seams between sidebar and editor.
 struct ContentView: View {
-    @ObservedObject var appState: AppState
+    var appState: AppState
     @State private var rightPaneHeight: CGFloat = 600
     @State private var sidebarWidth: CGFloat = 240
     @State private var changeSummaryWidth: CGFloat = 280
@@ -539,16 +539,17 @@ struct ContentView: View {
 
 /// Observable state shared between the app delegate and views.
 @MainActor
-final class AppState: ObservableObject {
-    @Published var windowTitle: String = "Minga"
-    @Published var editorNSView: EditorNSView?
+@Observable
+final class AppState {
+    var windowTitle: String = "Minga"
+    var editorNSView: EditorNSView?
     /// Theme background color for the title bar, sent by the BEAM via set_window_bg.
-    @Published var windowBgColor: Color?
+    var windowBgColor: Color?
     /// Whether the theme is dark (luminance < 0.5). Drives toolbarColorScheme.
-    @Published var windowBgIsDark: Bool = true
+    var windowBgIsDark: Bool = true
     /// Flipped once when the first complete frame (batch_end) arrives from
     /// the BEAM. The startup overlay fades out when this becomes true.
-    @Published var hasReceivedFirstFrame: Bool = false
+    var hasReceivedFirstFrame: Bool = false
     /// All GUI chrome sub-states in a single container.
     let gui = GUIState()
     /// Protocol encoder for sending gui_action events from SwiftUI chrome.
