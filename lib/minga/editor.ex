@@ -495,16 +495,15 @@ defmodule Minga.Editor do
     {:noreply, new_state}
   end
 
-  def handle_info({:whichkey_timeout, ref}, %{shell_state: %{whichkey: %{timer: ref}}} = state) do
-    wk = EditorState.whichkey(state)
-    new_state = EditorState.set_whichkey(state, %{wk | show: true})
-    new_state = Renderer.render(new_state)
-    {:noreply, new_state}
-  end
-
-  def handle_info({:whichkey_timeout, _ref}, state) do
-    # Stale timer — ignore.
-    {:noreply, state}
+  def handle_info({:whichkey_timeout, ref}, state) do
+    if ref == state.shell_state.whichkey.timer do
+      wk = EditorState.whichkey(state)
+      new_state = EditorState.set_whichkey(state, %{wk | show: true})
+      {:noreply, Renderer.render(new_state)}
+    else
+      # Stale timer — ignore.
+      {:noreply, state}
+    end
   end
 
   # ── TUI SPC leader timeout ──────────────────────────────────────────────
@@ -514,22 +513,21 @@ defmodule Minga.Editor do
     {:noreply, new_state}
   end
 
-  # ── Highlight setup + session events (delegated to handler modules) ────────
-  # :setup_highlight, :check_swap_recovery, :save_session are handled by
-  # HighlightHandler and SessionHandler respectively.
+  # ── Handler-delegated bare atom events ─────────────────────────────────────
+  # Bare atom messages routed to HighlightHandler, SessionHandler, or
+  # ToolHandler via a module attribute map (guard-safe via is_map_key/2).
 
-  def handle_info(:setup_highlight, state) do
-    {state, effects} = HighlightHandler.handle(state, :setup_highlight)
-    {:noreply, apply_effects(state, effects)}
-  end
+  @handler_atom_dispatch %{
+    setup_highlight: HighlightHandler,
+    evict_parser_trees: HighlightHandler,
+    check_swap_recovery: SessionHandler,
+    save_session: SessionHandler,
+    clear_tool_status: ToolHandler
+  }
 
-  def handle_info(:check_swap_recovery, state) do
-    {state, effects} = SessionHandler.handle(state, :check_swap_recovery)
-    {:noreply, apply_effects(state, effects)}
-  end
-
-  def handle_info(:save_session, state) do
-    {state, effects} = SessionHandler.handle(state, :save_session)
+  def handle_info(msg, state) when is_map_key(@handler_atom_dispatch, msg) do
+    handler = @handler_atom_dispatch[msg]
+    {state, effects} = handler.handle(state, msg)
     {:noreply, apply_effects(state, effects)}
   end
 
@@ -538,58 +536,19 @@ defmodule Minga.Editor do
   # Legacy {:minga_input, event} forms are also accepted for backward
   # compatibility during the transition (headless tests, etc.).
   # Log messages from the renderer port also arrive via {:minga_input, {:log_message, ...}}.
+  # All {:minga_highlight, _} messages go straight to HighlightHandler.
 
-  def handle_info({:minga_input, {:log_message, _level, _text}} = msg, state) do
+  def handle_info({:minga_highlight, _} = msg, state) do
     {state, effects} = HighlightHandler.handle(state, msg)
     {:noreply, apply_effects(state, effects)}
   end
 
-  def handle_info({tag, _} = msg, state) when tag == :minga_highlight do
+  # Remaining {:minga_input, _} messages are highlight/parser events forwarded
+  # via the legacy input tag. All input-specific :minga_input clauses (ready,
+  # resize, key_press, paste_event, mouse_event, gui_action,
+  # capabilities_updated) are matched above, so this catch-all is safe.
+  def handle_info({:minga_input, _} = msg, state) do
     {state, effects} = HighlightHandler.handle(state, msg)
-    {:noreply, apply_effects(state, effects)}
-  end
-
-  def handle_info({:minga_input, {highlight_event, _buffer_id}} = msg, state)
-      when highlight_event in [
-             :highlight_names,
-             :injection_ranges,
-             :language_at_response,
-             :conceal_spans,
-             :fold_ranges,
-             :textobject_positions,
-             :grammar_loaded
-           ] do
-    {state, effects} = HighlightHandler.handle(state, msg)
-    {:noreply, apply_effects(state, effects)}
-  end
-
-  def handle_info({:minga_input, {highlight_event, _buffer_id, _a}} = msg, state)
-      when highlight_event in [
-             :highlight_names,
-             :injection_ranges,
-             :language_at_response,
-             :conceal_spans,
-             :fold_ranges,
-             :textobject_positions,
-             :grammar_loaded
-           ] do
-    {state, effects} = HighlightHandler.handle(state, msg)
-    {:noreply, apply_effects(state, effects)}
-  end
-
-  def handle_info({:minga_input, {highlight_event, _buffer_id, _a, _b}} = msg, state)
-      when highlight_event in [
-             :highlight_spans,
-             :conceal_spans,
-             :fold_ranges,
-             :textobject_positions
-           ] do
-    {state, effects} = HighlightHandler.handle(state, msg)
-    {:noreply, apply_effects(state, effects)}
-  end
-
-  def handle_info(:evict_parser_trees, state) do
-    {state, effects} = HighlightHandler.handle(state, :evict_parser_trees)
     {:noreply, apply_effects(state, effects)}
   end
 
@@ -636,17 +595,11 @@ defmodule Minga.Editor do
     end
   end
 
-  # Document highlight debounce timer fired
-  def handle_info(:inlay_hint_scroll_debounce, state) do
-    state = %{state | lsp: LSPState.clear_inlay_hint_timer(state.lsp)}
-    state = LspActions.inlay_hints(state)
-    {:noreply, state}
-  end
+  # LSP debounce timers (inlay hints and document highlight)
+  @lsp_debounce_atoms [:inlay_hint_scroll_debounce, :document_highlight_debounce]
 
-  def handle_info(:document_highlight_debounce, state) do
-    state = %{state | lsp: LSPState.clear_highlight_timer(state.lsp)}
-    state = LspActions.document_highlight(state)
-    {:noreply, state}
+  def handle_info(msg, state) when msg in @lsp_debounce_atoms do
+    {:noreply, handle_lsp_debounce(state, msg)}
   end
 
   # Completion resolve debounce timer fired — send the actual resolve request
@@ -688,28 +641,12 @@ defmodule Minga.Editor do
     {:noreply, state}
   end
 
-  # LSP status changed — update per-server status map and derive aggregate for modeline.
-  def handle_info(
-        {:minga_event, :lsp_status_changed,
-         %Minga.Events.LspStatusEvent{name: name, status: status}},
-        state
-      ) do
-    old_status = state.lsp.status
-    new_lsp = LSPState.update_server_status(state.lsp, name, status)
-    state = %{state | lsp: new_lsp}
-    state = if new_lsp.status != old_status, do: schedule_render(state, 16), else: state
-    {:noreply, state}
-  end
-
-  # Diagnostics changed — re-render to update gutter signs and minibuffer hint.
-  # Debounced because multiple diagnostics may arrive in rapid succession.
-  def handle_info(
-        {:minga_event, :diagnostics_updated, %Minga.Events.DiagnosticsUpdatedEvent{uri: uri}},
-        state
-      ) do
-    # Apply diagnostic underline decorations to the affected buffer
-    apply_diagnostic_decorations(state, uri)
-    {:noreply, schedule_render(state, 16)}
+  # ── Event bus messages ────────────────────────────────────────────────────────
+  # All {:minga_event, event, payload} messages are routed through a single
+  # catch-all to the appropriate handler or inline logic. This replaces 10
+  # individual thin router clauses (LSP, diagnostics, tool, file events).
+  def handle_info({:minga_event, event, payload} = msg, state) do
+    {:noreply, dispatch_minga_event(state, event, payload, msg)}
   end
 
   # Debounced render timer fired — perform the actual render.
@@ -720,21 +657,20 @@ defmodule Minga.Editor do
   end
 
   # Nav-flash timer step — advance the fade or clear the flash.
-  def handle_info(:nav_flash_step, %{shell_state: %{nav_flash: nil}} = state) do
-    {:noreply, state}
-  end
-
-  def handle_info(:nav_flash_step, %{shell_state: %{nav_flash: flash}} = state) do
-    case NavFlash.advance(flash) do
-      {:continue, updated, effects} ->
-        state = EditorState.set_nav_flash(state, apply_flash_effects(state, updated, effects))
-        state = Renderer.render(state)
+  def handle_info(:nav_flash_step, state) do
+    case state.shell_state.nav_flash do
+      nil ->
         {:noreply, state}
 
-      :done ->
-        state = EditorState.cancel_nav_flash(state)
-        state = Renderer.render(state)
-        {:noreply, state}
+      flash ->
+        case NavFlash.advance(flash) do
+          {:continue, updated, effects} ->
+            state = EditorState.set_nav_flash(state, apply_flash_effects(state, updated, effects))
+            {:noreply, Renderer.render(state)}
+
+          :done ->
+            {:noreply, Renderer.render(EditorState.cancel_nav_flash(state))}
+        end
     end
   end
 
@@ -822,55 +758,8 @@ defmodule Minga.Editor do
 
   # ── File/git events (delegated to FileEventHandler) ─────────────────────────
 
-  def handle_info({:minga_event, :git_status_changed, _event} = msg, state) do
-    {state, effects} = FileEventHandler.handle(state, msg)
-    {:noreply, apply_effects(state, effects)}
-  end
-
-  def handle_info({:minga_event, :buffer_saved, %Minga.Events.BufferEvent{}} = msg, state) do
-    {state, effects} = FileEventHandler.handle(state, msg)
-    {:noreply, apply_effects(state, effects)}
-  end
-
   def handle_info({:git_remote_result, ref, _result} = msg, state) when is_reference(ref) do
     {state, effects} = FileEventHandler.handle(state, msg)
-    {:noreply, apply_effects(state, effects)}
-  end
-
-  # ── Tool manager events (delegated to ToolHandler) ─────────────────────────
-
-  def handle_info({:minga_event, :tool_install_started, _} = msg, state) do
-    {state, effects} = ToolHandler.handle(state, msg)
-    {:noreply, apply_effects(state, effects)}
-  end
-
-  def handle_info({:minga_event, :tool_install_progress, _} = msg, state) do
-    {state, effects} = ToolHandler.handle(state, msg)
-    {:noreply, apply_effects(state, effects)}
-  end
-
-  def handle_info({:minga_event, :tool_install_complete, _} = msg, state) do
-    {state, effects} = ToolHandler.handle(state, msg)
-    {:noreply, apply_effects(state, effects)}
-  end
-
-  def handle_info({:minga_event, :tool_install_failed, _} = msg, state) do
-    {state, effects} = ToolHandler.handle(state, msg)
-    {:noreply, apply_effects(state, effects)}
-  end
-
-  def handle_info({:minga_event, :tool_uninstall_complete, _} = msg, state) do
-    {state, effects} = ToolHandler.handle(state, msg)
-    {:noreply, apply_effects(state, effects)}
-  end
-
-  def handle_info(:clear_tool_status, state) do
-    {state, effects} = ToolHandler.handle(state, :clear_tool_status)
-    {:noreply, apply_effects(state, effects)}
-  end
-
-  def handle_info({:minga_event, :tool_missing, %Minga.Events.ToolMissingEvent{}} = msg, state) do
-    {state, effects} = ToolHandler.handle(state, msg)
     {:noreply, apply_effects(state, effects)}
   end
 
@@ -914,6 +803,55 @@ defmodule Minga.Editor do
         end
     end
   end
+
+  # ── Minga event dispatch ──────────────────────────────────────────────────
+
+  # Routes {:minga_event, event, payload} to the correct handler or inline logic.
+  @tool_events [
+    :tool_install_started,
+    :tool_install_progress,
+    :tool_install_complete,
+    :tool_install_failed,
+    :tool_uninstall_complete,
+    :tool_missing
+  ]
+
+  @file_events [:git_status_changed, :buffer_saved]
+
+  @spec dispatch_minga_event(EditorState.t(), atom(), term(), term()) :: EditorState.t()
+  defp dispatch_minga_event(state, event, _payload, msg) when event in @tool_events do
+    {state, effects} = ToolHandler.handle(state, msg)
+    apply_effects(state, effects)
+  end
+
+  defp dispatch_minga_event(state, event, _payload, msg) when event in @file_events do
+    {state, effects} = FileEventHandler.handle(state, msg)
+    apply_effects(state, effects)
+  end
+
+  defp dispatch_minga_event(
+         state,
+         :lsp_status_changed,
+         %Minga.Events.LspStatusEvent{name: name, status: status},
+         _msg
+       ) do
+    old_status = state.lsp.status
+    new_lsp = LSPState.update_server_status(state.lsp, name, status)
+    state = %{state | lsp: new_lsp}
+    if new_lsp.status != old_status, do: schedule_render(state, 16), else: state
+  end
+
+  defp dispatch_minga_event(
+         state,
+         :diagnostics_updated,
+         %Minga.Events.DiagnosticsUpdatedEvent{uri: uri},
+         _msg
+       ) do
+    apply_diagnostic_decorations(state, uri)
+    schedule_render(state, 16)
+  end
+
+  defp dispatch_minga_event(state, _event, _payload, _msg), do: state
 
   # ── LSP response dispatch ──────────────────────────────────────────────────
 
@@ -1258,6 +1196,17 @@ defmodule Minga.Editor do
   # Tab bar, view state, capabilities, parser subscription helpers
 
   # Agent lifecycle helpers (session startup, auto-context, buffer sync,
+
+  @spec handle_lsp_debounce(state(), atom()) :: state()
+  defp handle_lsp_debounce(state, :inlay_hint_scroll_debounce) do
+    state = %{state | lsp: LSPState.clear_inlay_hint_timer(state.lsp)}
+    LspActions.inlay_hints(state)
+  end
+
+  defp handle_lsp_debounce(state, :document_highlight_debounce) do
+    state = %{state | lsp: LSPState.clear_highlight_timer(state.lsp)}
+    LspActions.document_highlight(state)
+  end
 
   @spec handle_lsp_completion_response(reference(), term(), state()) :: {:noreply, state()}
   defp handle_lsp_completion_response(ref, result, state) do
