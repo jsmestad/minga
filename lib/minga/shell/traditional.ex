@@ -374,7 +374,6 @@ defmodule Minga.Shell.Traditional do
     {%{shell_state | tab_bar: tb}, workspace}
   end
 
-
   @spec restore_workspace(WorkspaceState.t(), map()) :: WorkspaceState.t()
   defp restore_workspace(workspace, context) when is_map(context) and map_size(context) > 0 do
     Enum.reduce(WorkspaceState.field_names(), workspace, fn field, acc ->

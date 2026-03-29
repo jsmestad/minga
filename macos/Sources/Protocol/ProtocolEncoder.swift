@@ -26,6 +26,9 @@ protocol InputEncoder: AnyObject, Sendable {
     func sendFileTreeEditConfirm(text: String)
     func sendFileTreeEditCancel()
     func sendFileTreeDelete(index: UInt16)
+    func sendFileTreeRename(index: UInt16)
+    func sendFileTreeDuplicate(index: UInt16)
+    func sendFileTreeMove(sourceIndex: UInt16, targetDirIndex: UInt16)
     func sendFileTreeCollapseAll()
     func sendFileTreeRefresh()
     func sendCompletionSelect(index: UInt16)
@@ -290,6 +293,38 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         buf[1] = GUI_ACTION_FILE_TREE_DELETE
         buf[2] = UInt8(index >> 8)
         buf[3] = UInt8(index & 0xFF)
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: file_tree_rename. Layout: opcode(1) + action_type(1) + index(2).
+    func sendFileTreeRename(index: UInt16) {
+        var buf = Data(count: 4)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_FILE_TREE_RENAME
+        buf[2] = UInt8(index >> 8)
+        buf[3] = UInt8(index & 0xFF)
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: file_tree_duplicate. Layout: opcode(1) + action_type(1) + index(2).
+    func sendFileTreeDuplicate(index: UInt16) {
+        var buf = Data(count: 4)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_FILE_TREE_DUPLICATE
+        buf[2] = UInt8(index >> 8)
+        buf[3] = UInt8(index & 0xFF)
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: file_tree_move. Layout: opcode(1) + action_type(1) + source(2) + target(2).
+    func sendFileTreeMove(sourceIndex: UInt16, targetDirIndex: UInt16) {
+        var buf = Data(count: 6)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_FILE_TREE_MOVE
+        buf[2] = UInt8(sourceIndex >> 8)
+        buf[3] = UInt8(sourceIndex & 0xFF)
+        buf[4] = UInt8(targetDirIndex >> 8)
+        buf[5] = UInt8(targetDirIndex & 0xFF)
         writeFrame(buf)
     }
 

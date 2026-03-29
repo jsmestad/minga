@@ -217,6 +217,9 @@ defmodule Minga.Frontend.Protocol.GUI do
   @gui_action_file_tree_edit_cancel 0x2E
   @gui_action_scroll_to_line 0x2F
   @gui_action_file_tree_delete 0x30
+  @gui_action_file_tree_rename 0x31
+  @gui_action_file_tree_duplicate 0x32
+  @gui_action_file_tree_move 0x33
 
   # ── Types ──
 
@@ -269,6 +272,11 @@ defmodule Minga.Frontend.Protocol.GUI do
           | :agent_request_changes
           | :agent_dismiss
           | {:change_summary_click, index :: non_neg_integer()}
+          | {:file_tree_delete, index :: non_neg_integer()}
+          | {:file_tree_rename, index :: non_neg_integer()}
+          | {:file_tree_duplicate, index :: non_neg_integer()}
+          | {:file_tree_move, source_index :: non_neg_integer(),
+             target_dir_index :: non_neg_integer()}
 
   # ═══════════════════════════════════════════════════════════════════════════
   # Encoding (BEAM → Frontend)
@@ -1982,6 +1990,18 @@ defmodule Minga.Frontend.Protocol.GUI do
 
   def decode_gui_action(@gui_action_file_tree_delete, <<index::16>>),
     do: {:ok, {:file_tree_delete, index}}
+
+  def decode_gui_action(@gui_action_file_tree_rename, <<index::16>>),
+    do: {:ok, {:file_tree_rename, index}}
+
+  def decode_gui_action(@gui_action_file_tree_duplicate, <<index::16>>),
+    do: {:ok, {:file_tree_duplicate, index}}
+
+  def decode_gui_action(
+        @gui_action_file_tree_move,
+        <<source_index::16, target_dir_index::16>>
+      ),
+      do: {:ok, {:file_tree_move, source_index, target_dir_index}}
 
   def decode_gui_action(_, _), do: :error
 

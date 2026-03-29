@@ -258,6 +258,81 @@ defmodule Minga.Editor.Commands.FileTree do
     end
   end
 
+  @doc "Duplicates the selected file or directory with a \" copy\" suffix."
+  @spec duplicate(state()) :: state()
+  def duplicate(%{workspace: %{file_tree: %{tree: nil}}} = state), do: state
+
+  def duplicate(%{workspace: %{file_tree: %{tree: tree}}} = state) do
+    case FileTree.selected_entry(tree) do
+      nil ->
+        state
+
+      entry ->
+        dest = unique_copy_path(entry.path)
+
+        result =
+          if entry.dir?,
+            do: File.cp_r(entry.path, dest),
+            else: File.cp(entry.path, dest)
+
+        case result do
+          :ok ->
+            Minga.Editor.log_to_messages(
+              "[file-tree] Duplicated: #{entry.name} → #{Path.basename(dest)}"
+            )
+
+            refresh(state)
+
+          {:ok, _} ->
+            Minga.Editor.log_to_messages(
+              "[file-tree] Duplicated: #{entry.name} → #{Path.basename(dest)}"
+            )
+
+            refresh(state)
+
+          {:error, reason, _} ->
+            Minga.Editor.log_to_messages("[file-tree] Duplicate failed: #{inspect(reason)}")
+            state
+
+          {:error, reason} ->
+            Minga.Editor.log_to_messages("[file-tree] Duplicate failed: #{inspect(reason)}")
+            state
+        end
+    end
+  end
+
+  @doc """
+  Moves a file/directory from `source_index` into the directory at `target_dir_index`.
+
+  If the target is not a directory, uses its parent directory.
+  """
+  @spec move(state(), non_neg_integer(), non_neg_integer()) :: state()
+  def move(%{workspace: %{file_tree: %{tree: nil}}} = state, _source, _target), do: state
+
+  def move(%{workspace: %{file_tree: %{tree: tree}}} = state, source_index, target_dir_index) do
+    entries = FileTree.visible_entries(tree)
+    source = Enum.at(entries, source_index)
+    target = Enum.at(entries, target_dir_index)
+
+    case {source, target} do
+      {nil, _} ->
+        state
+
+      {_, nil} ->
+        state
+
+      {src, tgt} ->
+        target_dir = if tgt.dir?, do: tgt.path, else: Path.dirname(tgt.path)
+        new_path = Path.join(target_dir, src.name)
+
+        if src.path == new_path do
+          state
+        else
+          execute_move(state, src.path, new_path, src.name)
+        end
+    end
+  end
+
   @doc "Cancels the current inline edit without making changes."
   @spec cancel_editing(state()) :: state()
   def cancel_editing(%{workspace: %{file_tree: %{editing: nil}}} = state), do: state
@@ -545,6 +620,44 @@ defmodule Minga.Editor.Commands.FileTree do
     end
   end
 
+  @spec unique_copy_path(String.t()) :: String.t()
+  defp unique_copy_path(path) do
+    ext = Path.extname(path)
+    base = Path.rootname(path)
+    candidate = "#{base} copy#{ext}"
+
+    if File.exists?(candidate) do
+      find_unique_copy(base, ext, 2)
+    else
+      candidate
+    end
+  end
+
+  @spec find_unique_copy(String.t(), String.t(), pos_integer()) :: String.t()
+  defp find_unique_copy(base, ext, n) do
+    candidate = "#{base} copy #{n}#{ext}"
+
+    if File.exists?(candidate),
+      do: find_unique_copy(base, ext, n + 1),
+      else: candidate
+  end
+
+  @spec execute_move(state(), String.t(), String.t(), String.t()) :: state()
+  defp execute_move(state, old_path, new_path, name) do
+    case File.rename(old_path, new_path) do
+      :ok ->
+        state = update_buffer_path(state, old_path, new_path)
+
+        Minga.Editor.log_to_messages("[file-tree] Moved: #{name} → #{Path.dirname(new_path)}")
+
+        refresh(state)
+
+      {:error, reason} ->
+        Minga.Editor.log_to_messages("[file-tree] Move failed: #{inspect(reason)}")
+        state
+    end
+  end
+
   @impl Minga.Command.Provider
   def __commands__ do
     [
@@ -643,6 +756,12 @@ defmodule Minga.Editor.Commands.FileTree do
         description: "Delete file or folder in tree",
         requires_buffer: false,
         execute: &delete/1
+      },
+      %Minga.Command{
+        name: :tree_duplicate,
+        description: "Duplicate file or folder in tree",
+        requires_buffer: false,
+        execute: &duplicate/1
       }
     ]
   end

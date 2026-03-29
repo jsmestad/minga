@@ -24,6 +24,7 @@ struct FileTreeView: View {
 
     @State private var hoveredEntryId: UInt32? = nil
     @State private var scrollOffset: CGFloat = 0
+    @State private var dropTargetEntryId: UInt32? = nil
 
     var body: some View {
         VStack(spacing: 0) {
@@ -254,6 +255,22 @@ struct FileTreeView: View {
             }
         }
         .contextMenu { entryContextMenu(entry) }
+        .draggable(URL(fileURLWithPath: fileTreeState.fullPath(for: entry))) {
+            HStack(spacing: 4) {
+                Text(entry.icon)
+                    .font(.system(size: 12))
+                Text(entry.name)
+                    .font(.system(size: 12))
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 4))
+        }
+        .dropDestination(for: URL.self) { urls, _ in
+            handleDrop(urls: urls, onto: entry)
+        } isTargeted: { isTargeted in
+            dropTargetEntryId = isTargeted && entry.isDir ? entry.id : nil
+        }
         .accessibilityLabel(entry.isDir ? "Folder: \(entry.name)" : "File: \(entry.name)")
     }
 
@@ -271,28 +288,103 @@ struct FileTreeView: View {
             Divider()
         }
 
+        Button("Rename") {
+            encoder?.sendFileTreeRename(index: UInt16(entry.index))
+        }
+        Button("Duplicate") {
+            encoder?.sendFileTreeDuplicate(index: UInt16(entry.index))
+        }
+
+        Divider()
+
         Button("Copy Path") {
             copyToClipboard(fileTreeState.fullPath(for: entry))
         }
         Button("Copy Relative Path") {
             copyToClipboard(entry.relPath)
         }
+
         Divider()
+
         Button("Reveal in Finder") {
             let path = fileTreeState.fullPath(for: entry)
             NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
         }
+        Button("Open in Terminal") {
+            let path = fileTreeState.fullPath(for: entry)
+            let dirPath = entry.isDir ? path : (path as NSString).deletingLastPathComponent
+            let dirURL = URL(fileURLWithPath: dirPath)
+            NSWorkspace.shared.open(
+                [dirURL],
+                withApplicationAt: URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app"),
+                configuration: NSWorkspace.OpenConfiguration()
+            )
+        }
+
         Divider()
+
         Button(role: .destructive) {
             encoder?.sendFileTreeDelete(index: UInt16(entry.index))
         } label: {
-            Text("Delete")
+            Text("Move to Trash")
         }
     }
 
     private func copyToClipboard(_ string: String) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(string, forType: .string)
+    }
+
+    // MARK: - Drop handling
+
+    /// Handles a drop of URLs onto a tree entry.
+    /// Internal moves (within the project) are sent to the BEAM as move operations.
+    /// External files (from Finder) are copied into the target directory.
+    private func handleDrop(urls: [URL], onto entry: FileTreeEntry) -> Bool {
+        let targetDir: String
+        if entry.isDir {
+            targetDir = fileTreeState.fullPath(for: entry)
+        } else {
+            targetDir = (fileTreeState.fullPath(for: entry) as NSString).deletingLastPathComponent
+        }
+
+        let projectRoot = fileTreeState.projectRoot
+        var handledAny = false
+
+        for url in urls {
+            let sourcePath = url.path
+            let isInternal = sourcePath.hasPrefix(projectRoot)
+
+            if isInternal {
+                // Internal move: find the source entry index and send move to BEAM
+                if let sourceEntry = fileTreeState.entries.first(where: {
+                    fileTreeState.fullPath(for: $0) == sourcePath
+                }) {
+                    encoder?.sendFileTreeMove(
+                        sourceIndex: UInt16(sourceEntry.index),
+                        targetDirIndex: UInt16(entry.index)
+                    )
+                    handledAny = true
+                }
+            } else {
+                // External file: copy into target directory
+                let destPath = (targetDir as NSString).appendingPathComponent(url.lastPathComponent)
+                let destURL = URL(fileURLWithPath: destPath)
+                do {
+                    try FileManager.default.copyItem(at: url, to: destURL)
+                    handledAny = true
+                } catch {
+                    encoder?.sendLog(level: 3, message: "Drop copy failed: \(error.localizedDescription)")
+                }
+            }
+        }
+
+        if handledAny {
+            // Refresh tree after external copies
+            encoder?.sendFileTreeRefresh()
+        }
+
+        return handledAny
     }
 
     // MARK: - Disclosure chevron
@@ -357,7 +449,11 @@ struct FileTreeView: View {
 
     @ViewBuilder
     private func rowBackground(_ entry: FileTreeEntry) -> some View {
-        if entry.isSelected {
+        if dropTargetEntryId == entry.id {
+            RoundedRectangle(cornerRadius: 4)
+                .fill(theme.treeSelectionBg.opacity(0.5))
+                .padding(.horizontal, 4)
+        } else if entry.isSelected {
             RoundedRectangle(cornerRadius: 4)
                 .fill(theme.treeSelectionBg)
                 .padding(.horizontal, 4)

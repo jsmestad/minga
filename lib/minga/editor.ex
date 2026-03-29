@@ -1654,6 +1654,20 @@ defmodule Minga.Editor do
     Commands.FileTree.delete(state)
   end
 
+  defp handle_gui_action(state, {:file_tree_rename, index}) do
+    state = move_tree_cursor(state, index)
+    Commands.FileTree.rename(state)
+  end
+
+  defp handle_gui_action(state, {:file_tree_duplicate, index}) do
+    state = move_tree_cursor(state, index)
+    Commands.FileTree.duplicate(state)
+  end
+
+  defp handle_gui_action(state, {:file_tree_move, source_index, target_dir_index}) do
+    Commands.FileTree.move(state, source_index, target_dir_index)
+  end
+
   defp handle_gui_action(state, :file_tree_collapse_all) do
     Commands.FileTree.collapse_all(state)
   end
