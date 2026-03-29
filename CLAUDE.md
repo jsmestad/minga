@@ -109,5 +109,4 @@ Types: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`. Scopes: `buffer`, `ed
 ## Active plans
 
 - `docs/PLAN-ui-stability.md` — Coordinated plan for Board zoom fixes, test stabilization, and shell-owned state transitions
-- `docs/PROPOSAL-deterministic-editor-testing.md` — Extracting pure `{state, effects}` functions from the Editor GenServer
 - `docs/UI-STATE-ANALYSIS.md` — Analysis of why overlay state gets stuck (bag of nullable fields vs state machine)
