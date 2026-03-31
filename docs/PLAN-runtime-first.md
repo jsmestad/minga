@@ -51,11 +51,11 @@ Remaining upward dependencies (Layer 0/1 modules importing from Editor):
 **Agents:** 3 (one per track, all start from `main`)
 **Gate:** `make lint` (with boundary check) passes, `mix test.llm` passes 3x clean
 
-### Track A: Boundary check (1 agent)
+### Track A: Boundary check (1 agent) ✅ DONE
 
-Create `mix check.layers` that enforces layer rules. This must land first in the wave so Tracks B and C are verified against it.
+~~Create `mix check.layers` that enforces layer rules.~~ Existing `Minga.Credo.DependencyDirectionCheck` already does this. Promoted from warning (`exit_status: 0`) to hard failure in PR #1364.
 
-**What:** A Mix task that scans every `.ex` file under `lib/`, extracts `alias`/`import` lines, and fails if a module in a lower layer imports from a higher layer.
+**What:** ~~A Mix task that scans every `.ex` file under `lib/`, extracts `alias`/`import` lines, and fails if a module in a lower layer imports from a higher layer.~~ Already implemented as a credo check in `credo/checks/dependency_direction_check.exs`. Uses AST walking (not regex), classifies modules into three layers, has an `@allowed_references` allowlist for structural dispatch, and exempts cross-cutting modules. The only change needed was removing `exit_status: 0` from `.credo.exs`.
 
 **Files to read:**
 - `AGENTS.md` § "Code Organization" → the three layer definitions and module assignments
@@ -775,6 +775,7 @@ Buffer.Fork processes, three-way merge, self-description tools, documentation pa
 | Date | Wave / Track | PRs | What shipped |
 |------|-------------|-----|-------------|
 | pre-plan | Wave 1 (prior work) | various | A1-A4, B2-B3, C1-C4 from UI stability plan already shipped |
+| 2026-03-31 | Wave 1 / Track A | #1364 | Boundary check promoted to hard failure. Existing `Minga.Credo.DependencyDirectionCheck` already covered everything the planned `mix check.layers` task would do; flipped `exit_status: 0` to default (non-zero). |
 
 ---
 
@@ -782,4 +783,4 @@ Buffer.Fork processes, three-way merge, self-description tools, documentation pa
 
 Notes from completed tracks that affect future waves. Tag the wave so agents can find relevant context.
 
-(none yet)
+- **Wave 1 Track A:** The plan called for a new `mix check.layers` Mix task, but `Minga.Credo.DependencyDirectionCheck` (in `credo/checks/dependency_direction_check.exs`) already enforces the same rules via AST walking. It has its own `@allowed_references` allowlist for structural dispatch. Future waves that reference `mix check.layers` should use `mix credo --checks Minga.Credo.DependencyDirectionCheck` instead, or just rely on `make lint` which runs the full credo suite.
