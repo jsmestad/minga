@@ -19,7 +19,7 @@ defmodule Minga.Frontend.Emit.GUI do
   Called from `Emit.emit/3` only when the frontend has GUI capabilities.
   """
 
-  alias Minga.Agent.Session, as: AgentSession
+  alias MingaAgent.Session, as: AgentSession
   alias Minga.Agent.UIState
   alias Minga.Agent.View.PromptSemanticWindow
   alias Minga.Buffer

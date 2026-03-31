@@ -6,7 +6,7 @@ defmodule Minga.Editor.Commands.BufferManagement do
 
   @behaviour Minga.Command.Provider
 
-  alias Minga.Agent.Session
+  alias MingaAgent.Session
   alias Minga.Buffer
   alias Minga.Buffer.Document
   alias Minga.Config

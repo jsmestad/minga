@@ -9,8 +9,8 @@ defmodule Minga.Editor.Commands.AgentSubStates do
   alias Minga.Agent.BufferSync, as: AgentBufferSync
   alias Minga.Agent.ChatSearch
   alias Minga.Agent.DiffReview
-  alias Minga.Agent.FileMention
-  alias Minga.Agent.Session
+  alias MingaAgent.FileMention
+  alias MingaAgent.Session
   alias Minga.Agent.UIState
   alias Minga.Agent.UIState.Panel
   alias Minga.Agent.View.Preview

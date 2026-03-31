@@ -29,7 +29,7 @@ defmodule Minga.Editor.State do
   * `Minga.Editor.State.Registers`    — named registers and active register selection
   """
 
-  alias Minga.Agent.Session, as: AgentSession
+  alias MingaAgent.Session, as: AgentSession
   alias Minga.Agent.UIState
   alias Minga.Buffer
 

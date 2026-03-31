@@ -7,8 +7,8 @@ defmodule Minga.Agent.View.DashboardRenderer do
   chat windows with a sidebar layout.
   """
 
-  alias Minga.Agent.Config, as: AgentConfig
-  alias Minga.Agent.ModelLimits
+  alias MingaAgent.Config, as: AgentConfig
+  alias MingaAgent.ModelLimits
   alias Minga.Agent.View.RenderInput
   alias Minga.Agent.ViewContext
   alias Minga.Core.Face
@@ -32,7 +32,7 @@ defmodule Minga.Agent.View.DashboardRenderer do
 
   Returns nil if the model has no known context limit.
   """
-  @spec context_fill_pct(Minga.Agent.TurnUsage.t() | map(), String.t(), non_neg_integer()) ::
+  @spec context_fill_pct(MingaAgent.TurnUsage.t() | map(), String.t(), non_neg_integer()) ::
           non_neg_integer() | nil
   def context_fill_pct(usage, model_name, context_estimate \\ 0) do
     limit = ModelLimits.context_limit(model_name)

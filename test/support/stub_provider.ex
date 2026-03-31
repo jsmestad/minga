@@ -12,25 +12,25 @@ defmodule Minga.Test.StubProvider do
       config :minga, test_provider_module: Minga.Test.StubProvider
   """
 
-  @behaviour Minga.Agent.Provider
+  @behaviour MingaAgent.Provider
 
   use GenServer
 
-  @impl Minga.Agent.Provider
+  @impl MingaAgent.Provider
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts)
   end
 
-  @impl Minga.Agent.Provider
+  @impl MingaAgent.Provider
   def send_prompt(_pid, _text), do: :ok
 
-  @impl Minga.Agent.Provider
+  @impl MingaAgent.Provider
   def abort(_pid), do: :ok
 
-  @impl Minga.Agent.Provider
+  @impl MingaAgent.Provider
   def new_session(_pid), do: :ok
 
-  @impl Minga.Agent.Provider
+  @impl MingaAgent.Provider
   def get_state(_pid) do
     {:ok,
      %{

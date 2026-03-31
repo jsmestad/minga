@@ -8,12 +8,12 @@ defmodule Minga.Agent.SlashCommand do
   and any arguments after the command name.
   """
 
-  alias Minga.Agent.Credentials
-  alias Minga.Agent.Instructions
-  alias Minga.Agent.Memory
-  alias Minga.Agent.Session
-  alias Minga.Agent.SessionExport
-  alias Minga.Agent.Skills
+  alias MingaAgent.Credentials
+  alias MingaAgent.Instructions
+  alias MingaAgent.Memory
+  alias MingaAgent.Session
+  alias MingaAgent.SessionExport
+  alias MingaAgent.Skills
   alias Minga.Agent.UIState
   alias Minga.Config
   alias Minga.Editor.Commands.Agent, as: AgentCommands

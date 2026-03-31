@@ -7,7 +7,7 @@ defmodule Minga.Editor.Commands.AgentSession do
   """
 
   alias Minga.Agent.BufferSync, as: AgentBufferSync
-  alias Minga.Agent.Session
+  alias MingaAgent.Session
   alias Minga.Buffer
   alias Minga.Editor.AgentLifecycle
   alias Minga.Editor.State, as: EditorState
@@ -131,14 +131,14 @@ defmodule Minga.Editor.Commands.AgentSession do
 
   @spec start_and_subscribe(keyword()) :: {:ok, pid()} | {:error, term()}
   defp start_and_subscribe(opts) do
-    case Minga.Agent.Supervisor.start_session(opts) do
+    case MingaAgent.Supervisor.start_session(opts) do
       {:ok, pid} ->
         try do
           Session.subscribe(pid)
           {:ok, pid}
         catch
           :exit, reason ->
-            Minga.Agent.Supervisor.stop_session(pid)
+            MingaAgent.Supervisor.stop_session(pid)
             {:error, reason}
         end
 

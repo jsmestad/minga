@@ -12,8 +12,8 @@ defmodule Minga.UI.Picker.AgentSessionSource do
   alias Minga.UI.Picker.Context
   alias Minga.UI.Picker.Item
 
-  alias Minga.Agent.Session
-  alias Minga.Agent.SessionStore
+  alias MingaAgent.Session
+  alias MingaAgent.SessionStore
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.AgentAccess
   alias Minga.Editor.State.Tab

@@ -92,7 +92,7 @@ defmodule Minga.Credo.DependencyDirectionCheckTest do
 
     test "flags Agent module depending on Shell" do
       """
-      defmodule Minga.Agent.Session do
+      defmodule MingaAgent.Session do
         alias Minga.Shell.Traditional
       end
       """

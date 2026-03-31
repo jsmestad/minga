@@ -271,6 +271,8 @@ Merge order: Track A first (boundary check), then B and C (either order).
 **Agents:** 1 (sequential PRs, too much file overlap for parallel work)
 **Gate:** Three namespaces exist, boundary check uses namespace prefixes, all tests pass
 
+### NS-1: Create `MingaAgent.*` ✅ DONE
+
 This is purely mechanical: move files, rename module prefixes, update aliases. No behavioral changes. Do it in a quiet window with no other branches in flight.
 
 ### NS-1: Create `MingaAgent.*` (1 PR)
@@ -802,6 +804,12 @@ Buffer.Fork processes, three-way merge, self-description tools, documentation pa
 ## Discoveries
 
 Notes from completed tracks that affect future waves. Tag the wave so agents can find relevant context.
+
+- **Wave 2 NS-1:** `lib/minga/tool/` is the extension/plugin management system (installs LSP servers, formatters, etc.), NOT the AI agent tool infrastructure described in the plan. The plan's NS-1 section listed non-existent files (`spec.ex`, `registry.ex`, `executor.ex`, `approval.ex`, `schema.ex`). `lib/minga/tool/` stays as `Minga.Tool.*` — it's a Layer 1 service and doesn't belong in `MingaAgent.*`. Future Wave 3 AI agent tool infrastructure will create `MingaAgent.Tool.*` afresh.
+
+- **Wave 2 NS-1:** `edit_boundary.ex` was listed as a "presentation module" that should stay for NS-2, but it's actually a pure domain struct (no presentation deps). Moved to `lib/minga_agent/edit_boundary.ex` → `MingaAgent.EditBoundary` in NS-1. NS-2 no longer needs to handle it.
+
+- **Wave 2 NS-1:** Used a Python migration script (`scripts/ns1_migrate.py`) to automate the rename. The script: (1) git-moves 57 lib files + 47 test files, (2) applies word-boundary aware module renames across 146 files. Key edge case: `test/minga_agent/providers/pi_rpc_test.exs` needed its `@fake_pi` relative path adjusted from `../../../` to `../../` after the directory depth changed.
 
 - **Wave 1 Track A:** The plan called for a new `mix check.layers` Mix task, but `Minga.Credo.DependencyDirectionCheck` (in `credo/checks/dependency_direction_check.exs`) already enforces the same rules via AST walking. It has its own `@allowed_references` allowlist for structural dispatch. Future waves that reference `mix check.layers` should use `mix credo --checks Minga.Credo.DependencyDirectionCheck` instead, or just rely on `make lint` which runs the full credo suite.
 

@@ -34,7 +34,7 @@ defmodule Minga.Application do
       │   ├── Minga.LSP.Supervisor
       │   ├── Minga.LSP.SyncServer
       │   ├── Minga.Project
-      │   └── Minga.Agent.Supervisor
+      │   └── MingaAgent.Supervisor
       ├── Minga.Runtime.Supervisor (one_for_one, conditional)
       │   ├── Minga.Editor.Watchdog          (independent leaf)
       │   ├── Minga.FileWatcher              (independent leaf)
@@ -50,7 +50,7 @@ defmodule Minga.Application do
 
   use Application
 
-  alias Minga.Agent.SessionStore
+  alias MingaAgent.SessionStore
   alias Minga.Config
   alias Minga.Telemetry.DevHandler
   alias Minga.Tool.Manager, as: ToolManager

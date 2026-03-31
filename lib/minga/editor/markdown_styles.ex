@@ -1,13 +1,13 @@
 defmodule Minga.Editor.MarkdownStyles do
   @moduledoc """
-  Maps `Minga.Agent.Markdown` style atoms to Face structs for rendering.
+  Maps `MingaAgent.Markdown` style atoms to Face structs for rendering.
 
   Shared by all UI components that render markdown content: hover popup,
   completion doc preview, and future signature help. Centralizes the
   style-to-theme-color mapping so it doesn't drift across consumers.
   """
 
-  alias Minga.Agent.Markdown
+  alias MingaAgent.Markdown
   alias Minga.Core.Face
 
   @doc """

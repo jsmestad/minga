@@ -8,8 +8,8 @@ defmodule Minga.Shell.Board.DispatchPrompt do
   sends the task as the initial prompt.
   """
 
-  alias Minga.Agent.Config, as: AgentConfig
-  alias Minga.Agent.Session, as: AgentSession
+  alias MingaAgent.Config, as: AgentConfig
+  alias MingaAgent.Session, as: AgentSession
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
   alias Minga.Editor.State.AgentAccess
@@ -91,7 +91,7 @@ defmodule Minga.Shell.Board.DispatchPrompt do
     ]
 
     case DynamicSupervisor.start_child(
-           Minga.Agent.Supervisor,
+           MingaAgent.Supervisor,
            {AgentSession, opts}
          ) do
       {:ok, pid} -> {:ok, pid}

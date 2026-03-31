@@ -16,7 +16,7 @@ defmodule Minga.UI.Picker.AgentModelSource do
   alias Minga.UI.Picker.Context
   alias Minga.UI.Picker.Item
 
-  alias Minga.Agent.Session
+  alias MingaAgent.Session
 
   @impl true
   @spec title() :: String.t()

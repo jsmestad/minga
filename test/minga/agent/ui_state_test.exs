@@ -1,7 +1,7 @@
 defmodule Minga.Agent.UIStateTest do
   use ExUnit.Case, async: true
 
-  alias Minga.Agent.Config, as: AgentConfig
+  alias MingaAgent.Config, as: AgentConfig
   alias Minga.Agent.UIState
   alias Minga.Agent.UIState.Panel
   alias Minga.Buffer.Server, as: BufferServer

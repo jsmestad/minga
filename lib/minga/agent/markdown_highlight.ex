@@ -14,7 +14,7 @@ defmodule Minga.Agent.MarkdownHighlight do
   blocks only when highlight spans are available.
   """
 
-  alias Minga.Agent.Markdown
+  alias MingaAgent.Markdown
   alias Minga.UI.Highlight
 
   @typedoc "A single styled text run: {text, fg_rgb, bg_rgb, flags}."

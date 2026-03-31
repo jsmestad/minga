@@ -11,7 +11,7 @@ defmodule Minga.Agent.View.PromptRenderer do
   chat windows.
   """
 
-  alias Minga.Agent.Config, as: AgentConfig
+  alias MingaAgent.Config, as: AgentConfig
   alias Minga.Agent.UIState
   alias Minga.Agent.View.RenderInput
   alias Minga.Agent.ViewContext
