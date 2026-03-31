@@ -3,7 +3,18 @@
     "allow": [
       "Bash(grep:*)",
       "Bash(find /Users/justinsmestad/code/self/minga/lib -name \"*.ex\" -exec grep -l \"default_stack\\\\|Minga.Input\\\\s\" {})",
-      "Bash(find /Users/justinsmestad/code/self/minga -name \"*.ex\" -type f -exec grep -l \"defprotocol\\\\|@behaviour\" {})"
+      "Bash(find /Users/justinsmestad/code/self/minga -name \"*.ex\" -type f -exec grep -l \"defprotocol\\\\|@behaviour\" {})",
+      "Bash(mix compile:*)",
+      "Bash(mix credo:*)",
+      "Bash(make lint:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(mix test.llm)",
+      "Bash(git merge:*)",
+      "Bash(mix:*)",
+      "Bash(xcodebuild -project Minga.xcodeproj -scheme Minga -configuration Debug build)",
+      "Bash(gh issue:*)"
     ]
   }
 }

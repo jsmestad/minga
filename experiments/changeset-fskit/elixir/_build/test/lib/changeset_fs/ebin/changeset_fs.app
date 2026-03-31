@@ -1,0 +1,1 @@
+{application,changeset_fs,[{modules,['Elixir.ChangesetFs.Application','Elixir.ChangesetFs.Protocol','Elixir.ChangesetFs.Server']},{optional_applications,[]},{applications,[kernel,stdlib,elixir,logger]},{description,"changeset_fs"},{registered,[]},{vsn,"0.1.0"},{mod,{'Elixir.ChangesetFs.Application',[]}}]}.
