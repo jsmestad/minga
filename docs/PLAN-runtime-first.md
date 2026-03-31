@@ -28,7 +28,7 @@ Most of the UI stability plan has already shipped:
 | A2: agent deactivation on zoom-out | ✅ Done |
 | A3: fresh workspace for first-time zoom | ✅ Done |
 | A4: deactivate counterpart | ✅ Done |
-| B1: timer quarantine in headless mode | ❌ ~10 of 19 sites still unguarded |
+| B1: timer quarantine in headless mode | ✅ Done |
 | B2: pure state functions | ✅ Done |
 | B3: pure state tests | ✅ Done |
 | C1-C4: shell lifecycle callbacks | ✅ Done |
@@ -223,9 +223,26 @@ Verify `handle_setup_highlight` exists or extract the logic from the `:setup_hig
 
 **Verification:**
 ```bash
-# All timer sites are guarded:
-grep -n "send(self()\|Process\.send_after(self()" lib/minga/editor.ex | grep -v "headless"
-# Expected: 0 results (every site is behind a headless guard or inside schedule_render which has its own)
+# All timer sites are guarded (use context-aware check, not same-line grep):
+# Note: state/session.ex:start_timer is excluded below — it is protected by
+# session_dir: nil (nil-clause guard) and by its call sites in editor.ex.
+python3 -c "
+import re, os
+timer_p = re.compile(r'send\\(self\\(\\)|Process\\.send_after\\(self\\(\\)')
+headless_p = re.compile(r'headless')
+exclude = {'lib/minga/editor/state/session.ex'}
+for root, _, files in os.walk('lib/minga/editor'):
+  for f in files:
+    if not f.endswith('.ex'): continue
+    path = os.path.join(root, f)
+    if path in exclude: continue
+    lines = open(path).readlines()
+    for i, l in enumerate(lines):
+      if timer_p.search(l):
+        ctx = ''.join(lines[max(0,i-10):i+1])
+        if not headless_p.search(ctx): print(path+':'+str(i+1)+' UNGUARDED')
+"
+# Expected: no output (all sites are guarded)
 
 make lint && mix test.llm
 # Run 3 times to check for flakes:
@@ -776,6 +793,7 @@ Buffer.Fork processes, three-way merge, self-description tools, documentation pa
 |------|-------------|-----|-------------|
 | pre-plan | Wave 1 (prior work) | various | A1-A4, B2-B3, C1-C4 from UI stability plan already shipped |
 | 2026-03-31 | Wave 1 / Track A | #1364 | Boundary check promoted to hard failure. Existing `Minga.Credo.DependencyDirectionCheck` already covered everything the planned `mix check.layers` task would do; flipped `exit_status: 0` to default (non-zero). |
+| 2026-03-31 | Wave 1 / Track C | — | All timer quarantine guards already in place; verified all sites in editor.ex and sub-modules; updated plan status and fixed verification command |
 
 ---
 
@@ -784,3 +802,7 @@ Buffer.Fork processes, three-way merge, self-description tools, documentation pa
 Notes from completed tracks that affect future waves. Tag the wave so agents can find relevant context.
 
 - **Wave 1 Track A:** The plan called for a new `mix check.layers` Mix task, but `Minga.Credo.DependencyDirectionCheck` (in `credo/checks/dependency_direction_check.exs`) already enforces the same rules via AST walking. It has its own `@allowed_references` allowlist for structural dispatch. Future waves that reference `mix check.layers` should use `mix credo --checks Minga.Credo.DependencyDirectionCheck` instead, or just rely on `make lint` which runs the full credo suite.
+
+- **Wave 1 / Track C:** `lib/minga/editor/state/session.ex:start_timer` calls `Process.send_after` without an inline headless guard. In practice it is triple-protected: (1) `EditorCase` does not pass `session_dir`, so the nil-clause guard in `start_timer` fires before reaching the send; (2) `editor.ex:396` already wraps the call in `if new_state.backend != :headless`; (3) `session_handler.ex` only emits `{:restart_session_timer}` when `state.backend != :headless`. When Wave 2 moves `State.Session` out of `lib/minga/editor/`, consider adding a `backend` parameter to `start_timer` so the guard is internal and the function is self-contained.
+
+- **Wave 1 / Track C:** The original verification command `grep ... | grep -v "headless"` was written incorrectly — it checks for the word "headless" on the *same line* as the timer call, but all guards are on a separate `if` line. The context-aware Python check is the correct approach. Updated the verification command in the Track C section above.
