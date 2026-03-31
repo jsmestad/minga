@@ -5,14 +5,14 @@ defmodule Minga.Runtime.Supervisor do
   Uses `one_for_one` so that each child restarts independently:
 
       Runtime.Supervisor (one_for_one)
-      ├── Minga.Editor.Watchdog      SIGUSR1 recovery (independent leaf)
+      ├── MingaEditor.Watchdog      SIGUSR1 recovery (independent leaf)
       ├── Minga.FileWatcher          FSEvents/inotify watcher (independent leaf)
-      └── Minga.Editor.Supervisor    Parser → Port → Editor (rest_for_one)
+      └── MingaEditor.Supervisor    Parser → Port → Editor (rest_for_one)
 
   A FileWatcher crash restarts only FileWatcher. A Watchdog crash restarts
-  only Watchdog. Neither cascades into the Editor.Supervisor or each other.
+  only Watchdog. Neither cascades into the MingaEditor.Supervisor or each other.
   The tight Parser → Port → Editor cascade is handled internally by
-  Editor.Supervisor's own `rest_for_one` strategy.
+  MingaEditor.Supervisor's own `rest_for_one` strategy.
 
   This supervisor is conditionally started: it only appears in the tree
   when the editor UI is active (not in test mode or headless operation).
@@ -21,7 +21,8 @@ defmodule Minga.Runtime.Supervisor do
   use Supervisor
 
   @typedoc "Options for starting the runtime supervisor."
-  @type start_opt :: {:name, GenServer.name()} | {:backend, Minga.Frontend.Manager.backend()}
+  @type start_opt ::
+          {:name, GenServer.name()} | {:backend, MingaEditor.Frontend.Manager.backend()}
 
   @spec start_link([start_opt()]) :: Supervisor.on_start()
   def start_link(opts \\ []) do
@@ -38,14 +39,14 @@ defmodule Minga.Runtime.Supervisor do
       # Watchdog starts first so it's ready to receive SIGUSR1 from the
       # moment the Editor boots. It's an independent leaf: its crash
       # restarts only itself under one_for_one.
-      Minga.Editor.Watchdog,
+      MingaEditor.Watchdog,
       # FileWatcher is a leaf: Editor receives messages from it but doesn't
       # depend on it structurally. A filesystem watcher flake restarts only
       # FileWatcher, not the renderer.
       Minga.FileWatcher,
       # Editor.Supervisor groups the tightly-coupled trio with rest_for_one:
       # Parser crash → Port + Editor restart, Port crash → Editor restart.
-      {Minga.Editor.Supervisor, [backend: backend]}
+      {MingaEditor.Supervisor, [backend: backend]}
     ]
 
     Supervisor.init(children, strategy: :one_for_one)

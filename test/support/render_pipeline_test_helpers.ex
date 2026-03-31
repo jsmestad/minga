@@ -1,4 +1,4 @@
-defmodule Minga.Editor.RenderPipeline.TestHelpers do
+defmodule MingaEditor.RenderPipeline.TestHelpers do
   @moduledoc """
   Shared helpers for render pipeline stage tests.
 
@@ -7,18 +7,18 @@ defmodule Minga.Editor.RenderPipeline.TestHelpers do
   """
 
   alias Minga.Buffer.Server, as: BufferServer
-  alias Minga.Editor.DisplayList
-  alias Minga.Editor.DisplayList.{Cursor, Frame, WindowFrame}
-  alias Minga.Editor.Layout
-  alias Minga.Editor.State, as: EditorState
-  alias Minga.Editor.State.{Buffers, Highlighting, Windows}
-  alias Minga.Editor.Viewport
-  alias Minga.Editor.VimState
-  alias Minga.Editor.Window
-  alias Minga.Editor.WindowTree
-  alias Minga.Input
-  alias Minga.Frontend.Capabilities
-  alias Minga.UI.Theme
+  alias MingaEditor.DisplayList
+  alias MingaEditor.DisplayList.{Cursor, Frame, WindowFrame}
+  alias MingaEditor.Layout
+  alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.{Buffers, Highlighting, Windows}
+  alias MingaEditor.Viewport
+  alias MingaEditor.VimState
+  alias MingaEditor.Window
+  alias MingaEditor.WindowTree
+  alias MingaEditor.Input
+  alias MingaEditor.Frontend.Capabilities
+  alias MingaEditor.UI.Theme
 
   @doc """
   Constructs a minimal EditorState for pipeline stage tests.
@@ -41,7 +41,7 @@ defmodule Minga.Editor.RenderPipeline.TestHelpers do
 
     %EditorState{
       port_manager: self(),
-      workspace: %Minga.Workspace.State{
+      workspace: %MingaEditor.Workspace.State{
         viewport: Viewport.new(rows, cols),
         editing: VimState.new(),
         buffers: %Buffers{active: buf, list: [buf], active_index: 0},

@@ -26,7 +26,7 @@ defmodule Minga.LoggerHandlerTest do
   describe "log/2 buffering when Editor is down" do
     test "buffers messages when Editor is not running" do
       # Editor is not started in this test, so whereis returns nil
-      refute Process.whereis(Minga.Editor)
+      refute Process.whereis(MingaEditor)
 
       event = %{level: :error, msg: {:string, "boom"}, meta: %{}}
       LoggerHandler.log(event, %{})
@@ -39,7 +39,7 @@ defmodule Minga.LoggerHandlerTest do
     end
 
     test "buffers multiple messages in order" do
-      refute Process.whereis(Minga.Editor)
+      refute Process.whereis(MingaEditor)
 
       for i <- 1..5 do
         event = %{level: :info, msg: {:string, "msg #{i}"}, meta: %{}}
@@ -61,7 +61,7 @@ defmodule Minga.LoggerHandlerTest do
     end
 
     test "trims buffer to max size" do
-      refute Process.whereis(Minga.Editor)
+      refute Process.whereis(MingaEditor)
 
       # Buffer 60 messages (max is 50)
       for i <- 1..60 do
@@ -86,7 +86,7 @@ defmodule Minga.LoggerHandlerTest do
     end
 
     test "clears the buffer after flushing" do
-      refute Process.whereis(Minga.Editor)
+      refute Process.whereis(MingaEditor)
 
       event = %{level: :info, msg: {:string, "test"}, meta: %{}}
       LoggerHandler.log(event, %{})
@@ -100,7 +100,7 @@ defmodule Minga.LoggerHandlerTest do
     end
 
     test "returns the count of flushed messages" do
-      refute Process.whereis(Minga.Editor)
+      refute Process.whereis(MingaEditor)
 
       for i <- 1..3 do
         event = %{level: :warning, msg: {:string, "warn #{i}"}, meta: %{}}
@@ -113,7 +113,7 @@ defmodule Minga.LoggerHandlerTest do
 
   describe "log/2 message formatting" do
     test "formats string messages" do
-      refute Process.whereis(Minga.Editor)
+      refute Process.whereis(MingaEditor)
 
       event = %{level: :info, msg: {:string, "hello world"}, meta: %{}}
       LoggerHandler.log(event, %{})
@@ -123,7 +123,7 @@ defmodule Minga.LoggerHandlerTest do
     end
 
     test "formats report messages" do
-      refute Process.whereis(Minga.Editor)
+      refute Process.whereis(MingaEditor)
 
       event = %{level: :error, msg: {:report, %{reason: :crashed}}, meta: %{}}
       LoggerHandler.log(event, %{})
@@ -134,7 +134,7 @@ defmodule Minga.LoggerHandlerTest do
     end
 
     test "formats erlang format string messages" do
-      refute Process.whereis(Minga.Editor)
+      refute Process.whereis(MingaEditor)
 
       event = %{level: :warning, msg: {~c"process ~p crashed", [self()]}, meta: %{}}
       LoggerHandler.log(event, %{})
@@ -145,7 +145,7 @@ defmodule Minga.LoggerHandlerTest do
     end
 
     test "preserves level for warning/error routing" do
-      refute Process.whereis(Minga.Editor)
+      refute Process.whereis(MingaEditor)
 
       LoggerHandler.log(%{level: :error, msg: {:string, "err"}, meta: %{}}, %{})
       LoggerHandler.log(%{level: :warning, msg: {:string, "warn"}, meta: %{}}, %{})

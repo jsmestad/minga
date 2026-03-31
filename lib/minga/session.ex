@@ -45,7 +45,7 @@ defmodule Minga.Session do
   Queries each open buffer for its file path and cursor position.
   Only includes file-backed buffers (not scratch, nofile, or log buffers).
   """
-  @spec snapshot(Minga.Editor.State.t()) :: snapshot()
+  @spec snapshot(MingaEditor.State.t()) :: snapshot()
   def snapshot(editor_state) do
     buffers =
       editor_state.workspace.buffers.list

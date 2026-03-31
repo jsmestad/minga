@@ -6,7 +6,7 @@ defmodule Minga.Parser.CrashRecoveryTest do
   """
   use ExUnit.Case, async: false
 
-  alias Minga.Frontend.Protocol
+  alias MingaEditor.Frontend.Protocol
   alias Minga.Parser.Manager, as: ParserManager
 
   @moduletag :parser_integration

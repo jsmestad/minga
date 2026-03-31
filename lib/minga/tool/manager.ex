@@ -549,8 +549,8 @@ defmodule Minga.Tool.Manager do
 
   @spec log_message(String.t()) :: :ok
   defp log_message(text) do
-    if Process.whereis(Minga.Editor) do
-      Minga.Editor.log_to_messages(text)
+    if Process.whereis(MingaEditor) do
+      MingaEditor.log_to_messages(text)
     end
 
     :ok

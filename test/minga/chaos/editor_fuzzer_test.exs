@@ -21,7 +21,7 @@ defmodule Minga.Chaos.EditorFuzzerTest do
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Chaos.EditorActions
-  alias Minga.Editor
+  alias MingaEditor
   alias Minga.Test.HeadlessPort
 
   @moduletag :chaos
@@ -86,7 +86,7 @@ defmodule Minga.Chaos.EditorFuzzerTest do
     end)
 
     {:ok, editor} =
-      Editor.start_link(
+      MingaEditor.start_link(
         name: :"chaos_editor_#{id}",
         port_manager: port,
         buffer: buffer,

@@ -164,7 +164,7 @@ defmodule Minga.Events do
     Payload for `:log_message` events.
 
     Sent by Layer 0/1 modules (LSP, Git, Agent) when they want to log to
-    `*Messages*` without importing `Minga.Editor`. The Editor subscribes
+    `*Messages*` without importing `MingaEditor`. The Editor subscribes
     to this topic and routes the message through `MessageLog`.
     """
     @enforce_keys [:text, :level]

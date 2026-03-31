@@ -36,12 +36,12 @@ defmodule Minga.Application do
       │   ├── Minga.Project
       │   └── MingaAgent.Supervisor
       ├── Minga.Runtime.Supervisor (one_for_one, conditional)
-      │   ├── Minga.Editor.Watchdog          (independent leaf)
+      │   ├── MingaEditor.Watchdog          (independent leaf)
       │   ├── Minga.FileWatcher              (independent leaf)
-      │   └── Minga.Editor.Supervisor (rest_for_one)
+      │   └── MingaEditor.Supervisor (rest_for_one)
       │       ├── Minga.Parser.Manager
-      │       ├── Minga.Frontend.Manager
-      │       └── Minga.Editor
+      │       ├── MingaEditor.Frontend.Manager
+      │       └── MingaEditor
       └── Minga.SystemObserver               (always-on process observer)
 
   In standalone (Burrito) mode, automatically processes CLI arguments
@@ -54,7 +54,7 @@ defmodule Minga.Application do
   alias Minga.Config
   alias Minga.Telemetry.DevHandler
   alias Minga.Tool.Manager, as: ToolManager
-  alias Minga.UI.Highlight.Grammar
+  alias MingaEditor.UI.Highlight.Grammar
 
   @impl true
   @spec start(Application.start_type(), term()) :: {:ok, pid()} | {:error, term()}

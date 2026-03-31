@@ -1,0 +1,523 @@
+defmodule MingaEditor.Shell.Board do
+  @moduledoc """
+  The Board shell: agent supervisor card view.
+
+  Displays agent sessions as cards on a spatial grid. Each card shows
+  task description, status, model, and elapsed time. Clicking a card
+  (or pressing Enter) zooms into its workspace for full editing.
+
+  The Board stays the active shell even when zoomed into a card. In
+  grid mode, it renders the card grid and handles navigation input.
+  In zoomed mode, it delegates rendering and input to the traditional
+  editor pipeline for the active card's workspace.
+
+  ## Two rendering modes
+
+  - **Grid view** (`zoomed_into: nil`): card rectangles with status
+    badges, task text, and model labels. Board-specific input handlers.
+  - **Zoomed view** (`zoomed_into: card_id`): full editor rendering
+    using the card's restored workspace. Traditional input handlers
+    plus an Escape binding to zoom back out.
+  """
+
+  @behaviour MingaEditor.Shell
+
+  alias MingaEditor.DisplayList
+  alias MingaEditor.DisplayList.{Cursor, Frame}
+  alias MingaEditor.RenderPipeline.Chrome
+  alias MingaEditor.Renderer.Regions
+  alias MingaEditor.Frontend.Emit.Context, as: EmitContext
+  alias MingaEditor.Shell.Board.Card
+  alias MingaEditor.Shell.Board.State, as: BoardState
+
+  @impl true
+  @spec init(keyword()) :: MingaEditor.Shell.shell_state()
+  def init(opts \\ []) do
+    # Try to restore persisted board state from disk (skip in test env)
+    skip_persistence = Keyword.get(opts, :skip_persistence, false)
+
+    case if(skip_persistence, do: nil, else: MingaEditor.Shell.Board.Persistence.load()) do
+      %BoardState{} = restored ->
+        ensure_you_card(restored)
+
+      nil ->
+        state = BoardState.new()
+        {state, _you_card} = BoardState.create_card(state, task: "You", status: :idle, kind: :you)
+
+        # If initial cards were passed (e.g., tests), add them
+        Enum.reduce(Keyword.get(opts, :cards, []), state, fn card_attrs, acc ->
+          {acc, _card} = BoardState.create_card(acc, card_attrs)
+          acc
+        end)
+    end
+  end
+
+  @impl true
+  @spec handle_event(BoardState.t(), MingaEditor.Workspace.State.t(), term()) ::
+          {BoardState.t(), MingaEditor.Workspace.State.t()}
+  def handle_event(shell_state, workspace, _event) do
+    # TODO: handle agent status updates, card lifecycle events
+    {shell_state, workspace}
+  end
+
+  @impl true
+  @spec handle_gui_action(BoardState.t(), MingaEditor.Workspace.State.t(), term()) ::
+          {BoardState.t(), MingaEditor.Workspace.State.t()}
+  def handle_gui_action(shell_state, workspace, {:board_select_card, card_id}) do
+    # GUI card click: focus, zoom in, activate agent view.
+    # Same logic as Board.Input's Enter key handler.
+    shell_state = BoardState.focus_card(shell_state, card_id)
+    workspace_snapshot = Map.from_struct(workspace)
+    shell_state = BoardState.zoom_into(shell_state, card_id, workspace_snapshot)
+
+    # Restore the card's workspace if it has one
+    card = BoardState.zoomed(shell_state)
+
+    workspace =
+      case card && card.workspace do
+        ws when is_map(ws) and map_size(ws) > 0 ->
+          struct!(MingaEditor.Workspace.State, ws)
+
+        _ ->
+          workspace
+      end
+
+    # Agent activation (session, scope, window content, prompt focus) is
+    # handled by Editor.AgentActivation.activate_for_card/2 after this
+    # function returns. The Shell behaviour only has (shell_state, workspace)
+    # access; full EditorState is needed for session attachment.
+
+    {shell_state, workspace}
+  end
+
+  def handle_gui_action(shell_state, workspace, {:board_close_card, card_id}) do
+    shell_state = BoardState.remove_card(shell_state, card_id)
+    MingaEditor.Shell.Board.Persistence.save(shell_state)
+    {shell_state, workspace}
+  end
+
+  def handle_gui_action(shell_state, workspace, {:board_reorder, card_id, new_index}) do
+    shell_state = BoardState.reorder_card(shell_state, card_id, new_index)
+    MingaEditor.Shell.Board.Persistence.save(shell_state)
+    {shell_state, workspace}
+  end
+
+  def handle_gui_action(shell_state, workspace, {:board_dispatch_agent, task, model}) do
+    {shell_state, card} =
+      BoardState.create_card(shell_state,
+        task: task,
+        model: model,
+        status: :working,
+        kind: :agent
+      )
+
+    Minga.Log.info(:agent, "Board: dispatched agent card ##{card.id} (#{model}): #{task}")
+
+    # Start an agent session for this card
+    case MingaAgent.Supervisor.start_session(
+           provider_opts: [model: model],
+           thinking_level: :normal
+         ) do
+      {:ok, pid} ->
+        shell_state =
+          BoardState.update_card(shell_state, card.id, fn c ->
+            %{c | session: pid}
+          end)
+
+        # Send the task as the initial prompt
+        MingaAgent.Session.send_prompt(pid, task)
+
+        MingaEditor.Shell.Board.Persistence.save(shell_state)
+        {shell_state, workspace}
+
+      {:error, reason} ->
+        Minga.Log.warning(
+          :agent,
+          "Board: failed to start session for card ##{card.id}: #{inspect(reason)}"
+        )
+
+        shell_state =
+          BoardState.update_card(shell_state, card.id, fn c ->
+            %{c | status: :errored}
+          end)
+
+        MingaEditor.Shell.Board.Persistence.save(shell_state)
+        {shell_state, workspace}
+    end
+  end
+
+  def handle_gui_action(shell_state, workspace, :agent_approve) do
+    # Approve the agent's work: transition card to :done status
+    case shell_state.zoomed_into do
+      nil ->
+        {shell_state, workspace}
+
+      card_id ->
+        card = Map.get(shell_state.cards, card_id)
+
+        if card && !Card.you_card?(card) do
+          updated_card = Card.set_status(card, :done)
+          shell_state = %{shell_state | cards: Map.put(shell_state.cards, card_id, updated_card)}
+          MingaEditor.Shell.Board.Persistence.save(shell_state)
+          {shell_state, workspace}
+        else
+          {shell_state, workspace}
+        end
+    end
+  end
+
+  def handle_gui_action(shell_state, workspace, :agent_request_changes) do
+    # Request changes from the agent: transition card to :needs_you status
+    case shell_state.zoomed_into do
+      nil ->
+        {shell_state, workspace}
+
+      card_id ->
+        card = Map.get(shell_state.cards, card_id)
+
+        if card && !Card.you_card?(card) do
+          updated_card = Card.set_status(card, :needs_you)
+          shell_state = %{shell_state | cards: Map.put(shell_state.cards, card_id, updated_card)}
+          MingaEditor.Shell.Board.Persistence.save(shell_state)
+          {shell_state, workspace}
+        else
+          {shell_state, workspace}
+        end
+    end
+  end
+
+  def handle_gui_action(shell_state, workspace, :agent_dismiss) do
+    # Dismiss the agent: zoom out to the Board grid
+    case shell_state.zoomed_into do
+      nil ->
+        {shell_state, workspace}
+
+      card_id ->
+        zoom_out_card(shell_state, workspace, card_id)
+    end
+  end
+
+  def handle_gui_action(shell_state, workspace, _action) do
+    {shell_state, workspace}
+  end
+
+  @impl true
+  @spec compute_layout(term()) :: MingaEditor.Layout.t()
+  def compute_layout(editor_state) do
+    if MingaEditor.Frontend.gui?(editor_state.capabilities) do
+      # GUI: Metal viewport is the full editor area, no shell chrome rects
+      MingaEditor.Layout.GUI.compute(editor_state)
+    else
+      compute_board_tui_layout(editor_state)
+    end
+  end
+
+  # Board TUI layout: no tab bar, no file tree, no modeline.
+  # Grid view uses the full viewport. Zoomed view reserves row 0
+  # for the context bar and the last row for the minibuffer.
+  @spec compute_board_tui_layout(term()) :: MingaEditor.Layout.t()
+  defp compute_board_tui_layout(editor_state) do
+    alias MingaEditor.Layout
+    vp = editor_state.workspace.viewport
+    {rows, cols} = {vp.rows, vp.cols}
+
+    if BoardState.grid_view?(editor_state.shell_state) do
+      # Grid: full viewport as editor_area, 1-row minibuffer at bottom
+      editor_rows = max(rows - 1, 1)
+
+      %Layout{
+        terminal: {0, 0, cols, rows},
+        editor_area: {0, 0, cols, editor_rows},
+        minibuffer: {editor_rows, 0, cols, 1}
+      }
+    else
+      # Zoomed: row 0 = context bar, last row = minibuffer, rest = editor
+      context_bar_height = 1
+      minibuffer_height = 1
+      editor_rows = max(rows - context_bar_height - minibuffer_height, 1)
+      editor_top = context_bar_height
+
+      {window_layouts, h_seps} =
+        Layout.compute_window_layouts_with_separators(
+          editor_state.workspace.windows.tree,
+          {editor_top, 0, cols, editor_rows},
+          editor_state.workspace.windows.map
+        )
+
+      %Layout{
+        terminal: {0, 0, cols, rows},
+        editor_area: {editor_top, 0, cols, editor_rows},
+        window_layouts: window_layouts,
+        horizontal_separators: h_seps,
+        minibuffer: {editor_top + editor_rows, 0, cols, minibuffer_height}
+      }
+    end
+  end
+
+  @impl true
+  @spec build_chrome(term(), MingaEditor.Layout.t(), map(), term()) ::
+          Chrome.t()
+  def build_chrome(editor_state, layout, _scrolls, _cursor_info) do
+    if BoardState.grid_view?(editor_state.shell_state) do
+      # Grid view: BoardView overlay handles everything, empty chrome
+      %Chrome{}
+    else
+      # Zoomed: context bar in tab_bar slot, everything else empty
+      context_draws = build_zoom_context_bar(editor_state)
+      regions = Regions.define_regions(layout)
+      %Chrome{tab_bar: context_draws, regions: regions}
+    end
+  end
+
+  @spec build_zoom_context_bar(term()) :: [DisplayList.draw()]
+  defp build_zoom_context_bar(editor_state) do
+    board = editor_state.shell_state
+    card = BoardState.zoomed(board)
+    cols = editor_state.workspace.viewport.cols
+    theme = editor_state.theme
+
+    if card do
+      icon = zoom_status_icon(card.status)
+      task = if card.task == "", do: "Untitled", else: card.task
+      model = if card.model, do: " · #{card.model}", else: ""
+      hint = "ESC back to Board"
+
+      bg = theme.editor.bg
+      bar_face = Minga.Core.Face.new(fg: theme.editor.fg, bg: bg, bold: true)
+      hint_face = Minga.Core.Face.new(fg: 0x5C6370, bg: bg)
+      status_face = zoom_status_face(card.status, theme)
+
+      left = " #{icon} #{task}#{model}"
+      right = " #{hint} "
+      gap = max(cols - String.length(left) - String.length(right), 0)
+
+      [
+        DisplayList.draw(0, 0, left, bar_face),
+        DisplayList.draw(0, String.length(left), String.duplicate(" ", gap), status_face),
+        DisplayList.draw(0, String.length(left) + gap, right, hint_face)
+      ]
+    else
+      []
+    end
+  end
+
+  @spec zoom_status_icon(MingaEditor.Shell.Board.Card.status()) :: String.t()
+  defp zoom_status_icon(:idle), do: "○"
+  defp zoom_status_icon(:working), do: "●"
+  defp zoom_status_icon(:iterating), do: "◉"
+  defp zoom_status_icon(:needs_you), do: "◆"
+  defp zoom_status_icon(:done), do: "✓"
+  defp zoom_status_icon(:errored), do: "✗"
+
+  @spec zoom_status_face(MingaEditor.Shell.Board.Card.status(), MingaEditor.UI.Theme.t()) ::
+          Minga.Core.Face.t()
+  defp zoom_status_face(:working, theme),
+    do: Minga.Core.Face.new(fg: 0x98C379, bg: theme.editor.bg)
+
+  defp zoom_status_face(:needs_you, theme),
+    do: Minga.Core.Face.new(fg: 0xE5C07B, bg: theme.editor.bg)
+
+  defp zoom_status_face(:done, theme), do: Minga.Core.Face.new(fg: 0x61AFEF, bg: theme.editor.bg)
+
+  defp zoom_status_face(:errored, theme),
+    do: Minga.Core.Face.new(fg: 0xE06C75, bg: theme.editor.bg)
+
+  defp zoom_status_face(_, theme), do: Minga.Core.Face.new(fg: 0x5C6370, bg: theme.editor.bg)
+
+  @impl true
+  @spec render(term()) :: term()
+  def render(editor_state) do
+    if BoardState.grid_view?(editor_state.shell_state) do
+      render_board_grid(editor_state)
+    else
+      # Zoomed into a card: dismiss the Board overlay on GUI,
+      # then render the editor workspace normally.
+      if MingaEditor.Frontend.gui?(editor_state.capabilities) do
+        # Send gui_board with visible=false to hide BoardView
+        ctx = EmitContext.from_editor_state(editor_state)
+        MingaEditor.Frontend.Emit.GUI.sync_swiftui_chrome(ctx)
+      end
+
+      MingaEditor.Renderer.render_buffer(editor_state)
+    end
+  end
+
+  @spec render_board_grid(term()) :: term()
+  defp render_board_grid(editor_state) do
+    gui? = MingaEditor.Frontend.gui?(editor_state.capabilities)
+
+    if gui? do
+      # GUI: send the gui_board opcode so Swift shows BoardView.
+      # Also send chrome sync (status bar, theme, etc.).
+      ctx = EmitContext.from_editor_state(editor_state)
+      MingaEditor.Frontend.Emit.GUI.sync_swiftui_chrome(ctx)
+    else
+      # TUI: render card grid as cell grid commands
+      vp = editor_state.workspace.viewport
+      board = editor_state.shell_state
+
+      splash_draws =
+        MingaEditor.Shell.Board.Renderer.render(board, vp.cols, vp.rows, editor_state.theme)
+
+      cursor = Cursor.new(0, 0, :block)
+
+      frame = %Frame{
+        cursor: cursor,
+        splash: splash_draws,
+        overlays: []
+      }
+
+      commands = DisplayList.to_commands(frame)
+      MingaEditor.Frontend.send_commands(editor_state.port_manager, commands)
+    end
+
+    editor_state
+  end
+
+  @impl true
+  @spec input_handlers(term()) :: %{overlay: [module()], surface: [module()]}
+  def input_handlers(editor_state) do
+    if BoardState.grid_view?(editor_state.shell_state) do
+      # Board grid: Board.Input handles navigation, zoom, dispatch.
+      # GlobalBindings provides Ctrl+Q/Ctrl+S. Everything else passes through.
+      %{
+        overlay: MingaEditor.Input.overlay_handlers(),
+        surface: [
+          MingaEditor.Shell.Board.Input,
+          MingaEditor.Input.GlobalBindings
+        ]
+      }
+    else
+      # Zoomed into a card: full Traditional handler stack with
+      # Board.ZoomOut prepended to intercept Escape for zoom-out.
+      traditional_surface = MingaEditor.Input.surface_handlers(editor_state)
+
+      %{
+        overlay: MingaEditor.Input.overlay_handlers(),
+        surface: [MingaEditor.Shell.Board.ZoomOut | traditional_surface]
+      }
+    end
+  end
+
+  # -------------------------------------------------------------------
+  # Buffer lifecycle callbacks
+  # -------------------------------------------------------------------
+
+  @impl true
+  @spec on_buffer_added(BoardState.t(), MingaEditor.Workspace.State.t(), pid(), atom()) ::
+          {BoardState.t(), MingaEditor.Workspace.State.t()}
+  def on_buffer_added(shell_state, workspace, _buffer_pid, _context \\ :open) do
+    # Board: sync the active window buffer. A1's content-type guard
+    # ensures agent_chat windows are left untouched.
+    workspace = MingaEditor.Workspace.State.sync_active_window_buffer(workspace)
+    {shell_state, workspace}
+  end
+
+  @impl true
+  @spec on_buffer_switched(BoardState.t(), MingaEditor.Workspace.State.t()) ::
+          {BoardState.t(), MingaEditor.Workspace.State.t()}
+  def on_buffer_switched(shell_state, workspace) do
+    {shell_state, workspace}
+  end
+
+  @impl true
+  @spec on_buffer_died(BoardState.t(), MingaEditor.Workspace.State.t(), pid()) ::
+          {BoardState.t(), MingaEditor.Workspace.State.t()}
+  def on_buffer_died(shell_state, workspace, _dead_pid) do
+    # Board: sync the window if it's showing a buffer. The content-type
+    # guard in sync_active_window_buffer ensures agent_chat is untouched.
+    workspace = MingaEditor.Workspace.State.sync_active_window_buffer(workspace)
+    {shell_state, workspace}
+  end
+
+  # -------------------------------------------------------------------
+  # Tab query/mutation delegates
+  # -------------------------------------------------------------------
+
+  @impl true
+  @spec active_tab(BoardState.t()) :: nil
+  def active_tab(_shell_state), do: nil
+
+  @impl true
+  @spec find_tab_by_buffer(BoardState.t(), pid()) :: nil
+  def find_tab_by_buffer(_shell_state, _pid), do: nil
+
+  @impl true
+  @spec active_tab_kind(BoardState.t()) :: atom()
+  def active_tab_kind(_shell_state), do: :file
+
+  @impl true
+  @spec set_tab_session(BoardState.t(), term(), pid() | nil) :: BoardState.t()
+  def set_tab_session(shell_state, _tab_id, _session_pid), do: shell_state
+
+  # -------------------------------------------------------------------
+  # Agent event callbacks
+  # -------------------------------------------------------------------
+
+  @impl true
+  @spec on_agent_event(BoardState.t(), MingaEditor.Workspace.State.t(), pid(), term()) ::
+          {BoardState.t(), MingaEditor.Workspace.State.t()}
+  def on_agent_event(shell_state, workspace, session_pid, {:status_changed, status}) do
+    shell_state = update_card_by_session(shell_state, session_pid, &Card.set_status(&1, status))
+    {shell_state, workspace}
+  end
+
+  def on_agent_event(shell_state, workspace, _session_pid, _event) do
+    {shell_state, workspace}
+  end
+
+  @spec update_card_by_session(BoardState.t(), pid(), (Card.t() -> Card.t())) :: BoardState.t()
+  defp update_card_by_session(shell_state, session_pid, fun) do
+    case Enum.find(shell_state.cards, fn {_id, c} -> c.session == session_pid end) do
+      {card_id, _card} ->
+        BoardState.update_card(shell_state, card_id, fun)
+
+      nil ->
+        shell_state
+    end
+  end
+
+  # Zoom out from a card: store the live workspace on the card, restore the grid workspace.
+  @spec zoom_out_card(BoardState.t(), MingaEditor.Workspace.State.t(), String.t()) ::
+          {BoardState.t(), MingaEditor.Workspace.State.t()}
+  defp zoom_out_card(shell_state, workspace, card_id) do
+    card = Map.get(shell_state.cards, card_id)
+
+    if card do
+      grid_workspace = card.workspace
+      live_workspace = Map.from_struct(workspace)
+      updated_card = Card.store_workspace(card, live_workspace)
+      shell_state = %{shell_state | cards: Map.put(shell_state.cards, card_id, updated_card)}
+      shell_state = %{shell_state | zoomed_into: nil}
+
+      workspace = restore_grid_workspace(grid_workspace, workspace)
+
+      MingaEditor.Shell.Board.Persistence.save(shell_state)
+      {shell_state, workspace}
+    else
+      {shell_state, workspace}
+    end
+  end
+
+  @spec restore_grid_workspace(map() | nil, MingaEditor.Workspace.State.t()) ::
+          MingaEditor.Workspace.State.t()
+  defp restore_grid_workspace(grid_workspace, _fallback)
+       when is_map(grid_workspace) and map_size(grid_workspace) > 0 do
+    struct!(MingaEditor.Workspace.State, grid_workspace)
+  end
+
+  defp restore_grid_workspace(_grid_workspace, fallback), do: fallback
+
+  # Ensure a "You" card exists in restored board state (may have been removed in a bug).
+  @spec ensure_you_card(BoardState.t()) :: BoardState.t()
+  defp ensure_you_card(state) do
+    has_you = Enum.any?(state.cards, fn {_id, c} -> c.kind == :you end)
+
+    if has_you do
+      state
+    else
+      {state, _you} = BoardState.create_card(state, task: "You", status: :idle, kind: :you)
+      state
+    end
+  end
+end

@@ -7,7 +7,7 @@ defmodule Minga.Diagnostics.DecorationsTest do
   alias Minga.Diagnostics.Decorations, as: DiagDecorations
   alias Minga.Diagnostics.Diagnostic
 
-  @gutter_colors %Minga.UI.Theme.Gutter{
+  @gutter_colors %MingaEditor.UI.Theme.Gutter{
     fg: 0x555555,
     current_fg: 0xBBC2CF,
     error_fg: 0xFF6C6B,

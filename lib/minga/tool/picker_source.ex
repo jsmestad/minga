@@ -9,10 +9,10 @@ defmodule Minga.Tool.PickerSource do
   Accessible via `SPC c l I` (Manage tools).
   """
 
-  @behaviour Minga.UI.Picker.Source
+  @behaviour MingaEditor.UI.Picker.Source
 
   alias Minga.Tool.Manager, as: ToolManager
-  alias Minga.UI.Picker.Item
+  alias MingaEditor.UI.Picker.Item
 
   @impl true
   @spec title() :: String.t()
@@ -57,36 +57,36 @@ defmodule Minga.Tool.PickerSource do
   def on_select(%Item{id: {name, :not_installed}}, state) do
     case ToolManager.install(name) do
       :ok ->
-        Minga.Editor.State.set_status(state, "Installing #{name}...")
+        MingaEditor.State.set_status(state, "Installing #{name}...")
 
       {:error, reason} ->
-        Minga.Editor.State.set_status(state, "Cannot install #{name}: #{reason}")
+        MingaEditor.State.set_status(state, "Cannot install #{name}: #{reason}")
     end
   end
 
   def on_select(%Item{id: {name, :installed}}, state) do
-    Minga.Editor.State.set_status(state, "#{name} is already installed. Press C-o for actions.")
+    MingaEditor.State.set_status(state, "#{name} is already installed. Press C-o for actions.")
   end
 
   def on_select(%Item{id: {name, :update_available}}, state) do
     case ToolManager.update(name) do
-      :ok -> Minga.Editor.State.set_status(state, "Updating #{name}...")
-      {:error, reason} -> Minga.Editor.State.set_status(state, "Cannot update #{name}: #{reason}")
+      :ok -> MingaEditor.State.set_status(state, "Updating #{name}...")
+      {:error, reason} -> MingaEditor.State.set_status(state, "Cannot update #{name}: #{reason}")
     end
   end
 
   def on_select(%Item{id: {name, :installing}}, state) do
-    Minga.Editor.State.set_status(state, "#{name} is currently being installed...")
+    MingaEditor.State.set_status(state, "#{name} is currently being installed...")
   end
 
   def on_select(%Item{id: {name, :failed}}, state) do
     # Retry on failed tool
     case ToolManager.install(name) do
       :ok ->
-        Minga.Editor.State.set_status(state, "Retrying #{name}...")
+        MingaEditor.State.set_status(state, "Retrying #{name}...")
 
       {:error, reason} ->
-        Minga.Editor.State.set_status(state, "Cannot install #{name}: #{reason}")
+        MingaEditor.State.set_status(state, "Cannot install #{name}: #{reason}")
     end
   end
 
@@ -95,7 +95,7 @@ defmodule Minga.Tool.PickerSource do
   def on_cancel(state), do: state
 
   @impl true
-  @spec actions(Item.t()) :: [Minga.UI.Picker.Source.action_entry()]
+  @spec actions(Item.t()) :: [MingaEditor.UI.Picker.Source.action_entry()]
   def actions(%Item{id: {_name, :installed}}) do
     [{"Uninstall", :uninstall}, {"Update", :update}]
   end
@@ -114,22 +114,22 @@ defmodule Minga.Tool.PickerSource do
   @spec on_action(atom(), Item.t(), term()) :: term()
   def on_action(:install, %Item{id: {name, _}}, state) do
     case ToolManager.install(name) do
-      :ok -> Minga.Editor.State.set_status(state, "Installing #{name}...")
-      {:error, reason} -> Minga.Editor.State.set_status(state, "Cannot install: #{reason}")
+      :ok -> MingaEditor.State.set_status(state, "Installing #{name}...")
+      {:error, reason} -> MingaEditor.State.set_status(state, "Cannot install: #{reason}")
     end
   end
 
   def on_action(:uninstall, %Item{id: {name, _}}, state) do
     case ToolManager.uninstall(name) do
-      :ok -> Minga.Editor.State.set_status(state, "Uninstalled #{name}")
-      {:error, reason} -> Minga.Editor.State.set_status(state, "Cannot uninstall: #{reason}")
+      :ok -> MingaEditor.State.set_status(state, "Uninstalled #{name}")
+      {:error, reason} -> MingaEditor.State.set_status(state, "Cannot uninstall: #{reason}")
     end
   end
 
   def on_action(:update, %Item{id: {name, _}}, state) do
     case ToolManager.update(name) do
-      :ok -> Minga.Editor.State.set_status(state, "Updating #{name}...")
-      {:error, reason} -> Minga.Editor.State.set_status(state, "Cannot update: #{reason}")
+      :ok -> MingaEditor.State.set_status(state, "Updating #{name}...")
+      {:error, reason} -> MingaEditor.State.set_status(state, "Cannot update: #{reason}")
     end
   end
 

@@ -14,7 +14,7 @@ defmodule Minga.Test.EditorCase do
   """
   use ExUnit.CaseTemplate
   alias Minga.Buffer.Server, as: BufferServer
-  alias Minga.Editor
+  alias MingaEditor
   alias Minga.Test.HeadlessPort
   alias Minga.Test.Snapshot
 
@@ -80,7 +80,7 @@ defmodule Minga.Test.EditorCase do
     editor_opts =
       if shell, do: [{:shell, shell}, {:skip_persistence, true} | editor_opts], else: editor_opts
 
-    {:ok, editor} = Editor.start_link(editor_opts)
+    {:ok, editor} = MingaEditor.start_link(editor_opts)
 
     # Send ready event to trigger initial render
     ref = HeadlessPort.prepare_await(port)
@@ -120,7 +120,7 @@ defmodule Minga.Test.EditorCase do
     editing_model = Keyword.get(opts, :editing_model, :vim)
 
     {:ok, editor} =
-      Editor.start_link(
+      MingaEditor.start_link(
         name: :"headless_editor_#{id}",
         backend: :headless,
         port_manager: port,
@@ -382,7 +382,7 @@ defmodule Minga.Test.EditorCase do
   end
 
   @doc "Returns the current cursor shape."
-  @spec cursor_shape(editor_ctx()) :: Minga.Frontend.Protocol.cursor_shape()
+  @spec cursor_shape(editor_ctx()) :: MingaEditor.Frontend.Protocol.cursor_shape()
   def cursor_shape(%{port: port}) do
     case Process.get({:last_frame_snapshot, port}) do
       %{cursor_shape: shape} -> shape
@@ -409,7 +409,7 @@ defmodule Minga.Test.EditorCase do
   end
 
   @doc "Returns the full editor state (via :sys.get_state). Race-free."
-  @spec editor_state(editor_ctx()) :: Minga.Editor.State.t()
+  @spec editor_state(editor_ctx()) :: MingaEditor.State.t()
   def editor_state(%{editor: editor}) do
     :sys.get_state(editor)
   end
@@ -444,7 +444,7 @@ defmodule Minga.Test.EditorCase do
   @doc "Returns whether the window tree contains a split."
   @spec has_split?(editor_ctx()) :: boolean()
   def has_split?(%{editor: editor}) do
-    Minga.Editor.State.Windows.split?(:sys.get_state(editor).workspace.windows)
+    MingaEditor.State.Windows.split?(:sys.get_state(editor).workspace.windows)
   end
 
   @doc "Returns the number of windows."
@@ -462,11 +462,11 @@ defmodule Minga.Test.EditorCase do
   @doc "Returns true if a picker is currently open."
   @spec picker_open?(editor_ctx()) :: boolean()
   def picker_open?(%{editor: editor}) do
-    Minga.Editor.State.Picker.open?(:sys.get_state(editor).shell_state.picker_ui)
+    MingaEditor.State.Picker.open?(:sys.get_state(editor).shell_state.picker_ui)
   end
 
   @doc "Returns the active picker state, or nil."
-  @spec picker_state(editor_ctx()) :: Minga.UI.Picker.t() | nil
+  @spec picker_state(editor_ctx()) :: MingaEditor.UI.Picker.t() | nil
   def picker_state(%{editor: editor}) do
     :sys.get_state(editor).shell_state.picker_ui.picker
   end

@@ -7,9 +7,9 @@ defmodule Minga.Diagnostics.PickerSource do
   the cursor to that position.
   """
 
-  @behaviour Minga.UI.Picker.Source
+  @behaviour MingaEditor.UI.Picker.Source
 
-  alias Minga.UI.Picker.Item
+  alias MingaEditor.UI.Picker.Item
 
   alias Minga.Buffer
   alias Minga.Diagnostics

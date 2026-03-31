@@ -15,7 +15,7 @@ defmodule Minga.Command.Provider do
 
   ## Example
 
-      defmodule Minga.Editor.Commands.MyFeature do
+      defmodule MingaEditor.Commands.MyFeature do
         @behaviour Minga.Command.Provider
 
         alias Minga.Command

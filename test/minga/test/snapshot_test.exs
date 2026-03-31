@@ -134,9 +134,9 @@ defmodule Minga.Test.SnapshotTest do
     end
 
     test "handles nested modules" do
-      path = Snapshot.snapshot_path(Minga.Editor.PickerUITest, "after_open")
+      path = Snapshot.snapshot_path(MingaEditor.PickerUITest, "after_open")
 
-      assert path == "test/snapshots/minga/editor/picker_ui_test/after_open.snap"
+      assert path == "test/snapshots/minga_editor/picker_ui_test/after_open.snap"
     end
 
     test "handles top-level module" do

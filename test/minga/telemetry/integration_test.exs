@@ -10,7 +10,7 @@ defmodule Minga.Telemetry.IntegrationTest do
   use Minga.Test.EditingModelCase, async: false
 
   alias Minga.Buffer.Server, as: BufferServer
-  alias Minga.Editor
+  alias MingaEditor
 
   # async: false because we attach/detach global telemetry handlers.
 
@@ -37,7 +37,7 @@ defmodule Minga.Telemetry.IntegrationTest do
     {:ok, buffer} = BufferServer.start_link(content: "hello\nworld\nfoo")
 
     {:ok, editor} =
-      Editor.start_link(
+      MingaEditor.start_link(
         name: :"editor_telemetry_#{:erlang.unique_integer([:positive])}",
         port_manager: nil,
         buffer: buffer,

@@ -32,7 +32,7 @@ defmodule Minga.Command do
       %Minga.Command{
         name: :save,
         description: "Save the current file",
-        execute: fn state -> Minga.Editor.Commands.BufferManagement.execute(state, :save) end,
+        execute: fn state -> MingaEditor.Commands.BufferManagement.execute(state, :save) end,
         requires_buffer: true
       }
 
@@ -40,7 +40,7 @@ defmodule Minga.Command do
       %Minga.Command{
         name: :toggle_wrap,
         description: "Toggle word wrap",
-        execute: fn state -> Minga.Editor.Commands.BufferManagement.execute(state, :toggle_wrap) end,
+        execute: fn state -> MingaEditor.Commands.BufferManagement.execute(state, :toggle_wrap) end,
         requires_buffer: true,
         option_toggle: :wrap
       }

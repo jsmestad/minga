@@ -265,11 +265,12 @@ Merge order: Track A first (boundary check), then B and C (either order).
 
 ---
 
-## Wave 2: Namespace Split
+## Wave 2: Namespace Split ✅ DONE
 
 **Duration:** 1 week
 **Agents:** 1 (sequential PRs, too much file overlap for parallel work)
 **Gate:** Three namespaces exist, boundary check uses namespace prefixes, all tests pass
+**Completed:** 2026-03-31 — NS-1 (#1367), NS-2+NS-3 (#1370). Three namespaces active. 9 pre-existing violations tracked in #1368.
 
 ### NS-1: Create `MingaAgent.*` ✅ DONE
 
@@ -335,7 +336,7 @@ grep -rn "defmodule Minga\.Tool\." lib/minga_agent/ | head -5
 # Expected: 0
 ```
 
-### NS-2: Create `MingaEditor.*` (1 PR)
+### NS-2: Create `MingaEditor.*` ✅ DONE
 
 Move presentation modules to `lib/minga_editor/`.
 
@@ -376,7 +377,7 @@ grep -rn "alias MingaAgent" lib/minga/ | head -5
 # Expected: 0
 ```
 
-### NS-3: Update boundary check for new namespaces (1 PR)
+### NS-3: Update boundary check for new namespaces ✅ DONE (merged into NS-2)
 
 Update `mix check.layers` to use the three namespace prefixes instead of the module-level allowlist.
 
@@ -798,6 +799,8 @@ Buffer.Fork processes, three-way merge, self-description tools, documentation pa
 | 2026-03-31 | Wave 1 / Track B | #1366 | Severed all 7 upward Layer 0/1 → Layer 2 deps: LogMessageEvent + FaceOverridesChangedEvent added to Events; LSP (4 sites), Git, Buffer.Server, Agent.Session replaced direct Editor calls with broadcasts |
 | 2026-03-31 | Wave 1 / Track A | #1364 | Boundary check promoted to hard failure. Existing `Minga.Credo.DependencyDirectionCheck` already covered everything the planned `mix check.layers` task would do; flipped `exit_status: 0` to default (non-zero). |
 | 2026-03-31 | Wave 1 / Track C | — | All timer quarantine guards already in place; verified all sites in editor.ex and sub-modules; updated plan status and fixed verification command |
+| 2026-03-31 | Wave 2 / NS-1 | #1367 | Created `MingaAgent.*` namespace: 58 agent domain modules moved from `lib/minga/agent/` to `lib/minga_agent/`. Presentation modules stayed. |
+| 2026-03-31 | Wave 2 / NS-2+NS-3 | #1367 | Created `MingaEditor.*` namespace: 276 lib + 248 test files moved. Updated `DependencyDirectionCheck` for three-namespace architecture. NS-3 merged into NS-2. |
 
 ---
 
@@ -810,6 +813,14 @@ Notes from completed tracks that affect future waves. Tag the wave so agents can
 - **Wave 2 NS-1:** `edit_boundary.ex` was listed as a "presentation module" that should stay for NS-2, but it's actually a pure domain struct (no presentation deps). Moved to `lib/minga_agent/edit_boundary.ex` → `MingaAgent.EditBoundary` in NS-1. NS-2 no longer needs to handle it.
 
 - **Wave 2 NS-1:** Used a Python migration script (`scripts/ns1_migrate.py`) to automate the rename. The script: (1) git-moves 57 lib files + 47 test files, (2) applies word-boundary aware module renames across 146 files. Key edge case: `test/minga_agent/providers/pi_rpc_test.exs` needed its `@fake_pi` relative path adjusted from `../../../` to `../../` after the directory depth changed.
+
+- **Wave 2 NS-2:** The rename from `Minga.Editor` to `MingaEditor` exposed bare `Editor.` references in code that used `alias Minga.Editor` and then called `Editor.start_link`. After the rename, `alias MingaEditor` doesn't bring `Editor` into scope. Fixed 42 files with a script that replaced bare `Editor.` with `MingaEditor.` in code (not comments).
+
+- **Wave 2 NS-2:** The rename exposed 9 pre-existing Layer 1 → Layer 2 violations that were invisible when all modules lived under `Minga.*`. These are tracked in #1368. Added to `@allowed_references` temporarily.
+
+- **Wave 2 NS-2:** NS-3 (update boundary check for namespaces) was merged into NS-2 since the credo check needed fixing as part of the rename anyway. The check now recognizes `MingaEditor.*` as Layer 2 and `MingaAgent.*` as Layer 1, with a `minga_module?/1` helper that accepts all three namespace prefixes.
+
+- **Wave 2 NS-2:** Snapshot files under `test/snapshots/minga/integration/` moved to `test/snapshots/minga_editor/integration/` since snapshot paths are derived from module names. The `.dialyzer_ignore.exs` file also needed path updates.
 
 - **Wave 1 Track A:** The plan called for a new `mix check.layers` Mix task, but `Minga.Credo.DependencyDirectionCheck` (in `credo/checks/dependency_direction_check.exs`) already enforces the same rules via AST walking. It has its own `@allowed_references` allowlist for structural dispatch. Future waves that reference `mix check.layers` should use `mix credo --checks Minga.Credo.DependencyDirectionCheck` instead, or just rely on `make lint` which runs the full credo suite.
 

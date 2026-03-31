@@ -5,10 +5,10 @@ defmodule Minga.Tool.UninstallPickerSource do
   Shows only installed tools. Selecting one triggers uninstall.
   """
 
-  @behaviour Minga.UI.Picker.Source
+  @behaviour MingaEditor.UI.Picker.Source
 
   alias Minga.Tool.Manager, as: ToolManager
-  alias Minga.UI.Picker.Item
+  alias MingaEditor.UI.Picker.Item
 
   @impl true
   @spec title() :: String.t()
@@ -33,10 +33,10 @@ defmodule Minga.Tool.UninstallPickerSource do
   def on_select(%Item{id: name}, state) do
     case ToolManager.uninstall(name) do
       :ok ->
-        Minga.Editor.State.set_status(state, "Uninstalled #{name}")
+        MingaEditor.State.set_status(state, "Uninstalled #{name}")
 
       {:error, reason} ->
-        Minga.Editor.State.set_status(state, "Failed to uninstall #{name}: #{reason}")
+        MingaEditor.State.set_status(state, "Failed to uninstall #{name}: #{reason}")
     end
   end
 

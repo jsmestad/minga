@@ -55,7 +55,7 @@ defmodule Minga.SystemObserver do
     MingaAgent.Supervisor,
     # Conditional (Runtime may not be started in test/headless mode)
     Minga.Runtime.Supervisor,
-    Minga.Editor.Supervisor
+    MingaEditor.Supervisor
   ]
 
   # ── Types ─────────────────────────────────────────────────────────────────

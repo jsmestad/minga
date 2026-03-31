@@ -120,11 +120,11 @@ defmodule Minga.MixProject do
             Minga.API
           ],
           Editor: [
-            Minga.Editor,
-            Minga.Editor.Commands,
-            Minga.Editor.Viewport,
-            Minga.Editor.Window,
-            Minga.Editor.WindowTree
+            MingaEditor,
+            MingaEditor.Commands,
+            MingaEditor.Viewport,
+            MingaEditor.Window,
+            MingaEditor.WindowTree
           ],
           Buffer: [
             Minga.Buffer.Document,
@@ -162,7 +162,7 @@ defmodule Minga.MixProject do
             Minga.Keymap.Defaults,
             Minga.Keymap.Store,
             Minga.Keymap.KeyParser,
-            Minga.UI.WhichKey
+            MingaEditor.UI.WhichKey
           ],
           "Port Protocol": [
             Minga.Port.Protocol,

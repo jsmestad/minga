@@ -18,7 +18,7 @@ defmodule Minga.Command.Registry do
   Extensions register commands at runtime via `register/4` or
   `Minga.Config.command/3`. Both paths write to the same ETS table,
   so extension commands are immediately dispatchable through the same
-  `Minga.Editor.Commands.execute/2` lookup.
+  `MingaEditor.Commands.execute/2` lookup.
 
   ## Usage
 
@@ -38,27 +38,27 @@ defmodule Minga.Command.Registry do
   # the ETS table. This is the ONLY place that needs updating when
   # a new command module is added.
   @command_modules [
-    Minga.Editor.Commands.Movement,
-    Minga.Editor.Commands.Editing,
-    Minga.Editor.Commands.Operators,
-    Minga.Editor.Commands.Visual,
-    Minga.Editor.Commands.Search,
-    Minga.Editor.Commands.Marks,
-    Minga.Editor.Commands.BufferManagement,
-    Minga.Editor.Commands.Folding,
-    Minga.Editor.Commands.Diagnostics,
-    Minga.Editor.Commands.Lsp,
-    Minga.Editor.Commands.Git,
-    Minga.Editor.Commands.Project,
-    Minga.Editor.Commands.Agent,
-    Minga.Editor.Commands.FileTree,
-    Minga.Editor.Commands.Testing,
-    Minga.Editor.Commands.Extensions,
-    Minga.Editor.Commands.Macros,
-    Minga.Editor.Commands.Formatting,
-    Minga.Editor.Commands.UI,
-    Minga.Editor.Commands.Tool,
-    Minga.Editor.Commands.AgentGroup
+    MingaEditor.Commands.Movement,
+    MingaEditor.Commands.Editing,
+    MingaEditor.Commands.Operators,
+    MingaEditor.Commands.Visual,
+    MingaEditor.Commands.Search,
+    MingaEditor.Commands.Marks,
+    MingaEditor.Commands.BufferManagement,
+    MingaEditor.Commands.Folding,
+    MingaEditor.Commands.Diagnostics,
+    MingaEditor.Commands.Lsp,
+    MingaEditor.Commands.Git,
+    MingaEditor.Commands.Project,
+    MingaEditor.Commands.Agent,
+    MingaEditor.Commands.FileTree,
+    MingaEditor.Commands.Testing,
+    MingaEditor.Commands.Extensions,
+    MingaEditor.Commands.Macros,
+    MingaEditor.Commands.Formatting,
+    MingaEditor.Commands.UI,
+    MingaEditor.Commands.Tool,
+    MingaEditor.Commands.AgentGroup
   ]
 
   # Compile-time check: verify no duplicate command names across providers.
