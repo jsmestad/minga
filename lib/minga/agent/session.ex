@@ -1473,9 +1473,11 @@ defmodule Minga.Agent.Session do
         ""
       end
 
-    Minga.Editor.log_to_messages(
-      "[Agent] #{provider}/#{model} turn: in:#{format_k(i)} out:#{format_k(o)}#{cache_part} cost:$#{Float.round(cost, 4)}"
-    )
+    Minga.Events.broadcast(:log_message, %Minga.Events.LogMessageEvent{
+      text:
+        "[Agent] #{provider}/#{model} turn: in:#{format_k(i)} out:#{format_k(o)}#{cache_part} cost:$#{Float.round(cost, 4)}",
+      level: :info
+    })
   end
 
   @spec format_k(number()) :: String.t()

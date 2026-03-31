@@ -38,6 +38,8 @@ defmodule Minga.Events do
   | `:lsp_status_changed` | `LspStatusEvent` | `name: atom(), status: atom(), uri: String.t() \| nil` |
   | `:project_rebuilt` | `ProjectRebuiltEvent` | `root: String.t()` |
   | `:command_done`    | `CommandDoneEvent`    | `name: String.t(), exit_code: non_neg_integer()` |
+  | `:log_message`     | `LogMessageEvent`     | `text: String.t(), level: :info \| :warning \| :error` |
+  | `:face_overrides_changed` | `FaceOverridesChangedEvent` | `buffer: pid(), overrides: map()` |
 
   ## Why Registry?
 
@@ -157,6 +159,35 @@ defmodule Minga.Events do
           }
   end
 
+  defmodule LogMessageEvent do
+    @moduledoc """
+    Payload for `:log_message` events.
+
+    Sent by Layer 0/1 modules (LSP, Git, Agent) when they want to log to
+    `*Messages*` without importing `Minga.Editor`. The Editor subscribes
+    to this topic and routes the message through `MessageLog`.
+    """
+    @enforce_keys [:text, :level]
+    defstruct [:text, :level]
+
+    @type level :: :info | :warning | :error
+    @type t :: %__MODULE__{text: String.t(), level: level()}
+  end
+
+  defmodule FaceOverridesChangedEvent do
+    @moduledoc """
+    Payload for `:face_overrides_changed` events.
+
+    Sent by `Buffer.Server` when buffer-local face overrides change so
+    the Editor can pre-compute the merged face registry without a
+    GenServer call back into the buffer.
+    """
+    @enforce_keys [:buffer, :overrides]
+    defstruct [:buffer, :overrides]
+
+    @type t :: %__MODULE__{buffer: pid(), overrides: %{String.t() => keyword()}}
+  end
+
   defmodule SupervisorRestartedEvent do
     @moduledoc "Payload for `:supervisor_restarted` events. Published by `SystemObserver` when a monitored supervisor goes down."
     @enforce_keys [:name, :pid, :reason, :restarted_at]
@@ -192,6 +223,8 @@ defmodule Minga.Events do
           | :project_rebuilt
           | :command_done
           | :supervisor_restarted
+          | :log_message
+          | :face_overrides_changed
 
   @typedoc "Typed event payloads. Each topic has a specific struct."
   @type payload ::
@@ -206,6 +239,8 @@ defmodule Minga.Events do
           | DiagnosticsUpdatedEvent.t()
           | LspStatusEvent.t()
           | SupervisorRestartedEvent.t()
+          | LogMessageEvent.t()
+          | FaceOverridesChangedEvent.t()
 
   # ── Child spec ──────────────────────────────────────────────────────────────
 
@@ -296,6 +331,8 @@ defmodule Minga.Events do
   @spec broadcast(:diagnostics_updated, DiagnosticsUpdatedEvent.t()) :: :ok
   @spec broadcast(:lsp_status_changed, LspStatusEvent.t()) :: :ok
   @spec broadcast(:supervisor_restarted, SupervisorRestartedEvent.t()) :: :ok
+  @spec broadcast(:log_message, LogMessageEvent.t()) :: :ok
+  @spec broadcast(:face_overrides_changed, FaceOverridesChangedEvent.t()) :: :ok
   def broadcast(topic, %_{} = payload) when is_atom(topic) do
     Registry.dispatch(@registry, topic, fn entries ->
       for {pid, _value} <- entries do

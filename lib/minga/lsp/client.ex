@@ -263,7 +263,12 @@ defmodule Minga.LSP.Client do
       :error ->
         msg = "#{server_config.name}: #{server_config.command} not found on PATH"
         Minga.Log.warning(:lsp, msg)
-        Minga.Editor.log_to_warnings(msg)
+
+        Minga.Events.broadcast(:log_message, %Minga.Events.LogMessageEvent{
+          text: msg,
+          level: :warning
+        })
+
         {:stop, {:server_not_found, server_config.command}}
     end
   end
@@ -453,7 +458,9 @@ defmodule Minga.LSP.Client do
   def handle_info({port, {:exit_status, code}}, %{port: port} = state) do
     msg = "LSP server #{state.server_config.name} exited with code #{code}"
     Minga.Log.warning(:lsp, msg)
-    Minga.Editor.log_to_warnings(msg)
+
+    Minga.Events.broadcast(:log_message, %Minga.Events.LogMessageEvent{text: msg, level: :warning})
+
     broadcast_status_changed(state.server_config.name, :crashed, state.root_path)
     {:stop, {:server_exited, code}, %{state | port: nil, status: :shutdown}}
   end
@@ -467,7 +474,9 @@ defmodule Minga.LSP.Client do
   def handle_info({:EXIT, port, reason}, %{port: port} = state) do
     msg = "LSP server #{state.server_config.name} crashed: #{inspect(reason)}"
     Minga.Log.warning(:lsp, msg)
-    Minga.Editor.log_to_warnings(msg)
+
+    Minga.Events.broadcast(:log_message, %Minga.Events.LogMessageEvent{text: msg, level: :warning})
+
     broadcast_status_changed(state.server_config.name, :crashed, state.root_path)
     {:stop, {:port_crashed, reason}, %{state | port: nil, status: :shutdown}}
   end
@@ -600,7 +609,7 @@ defmodule Minga.LSP.Client do
   defp handle_method_response("initialize", {:error, error}, _from, state) do
     msg = "LSP #{state.server_config.name} initialization failed: #{inspect(error)}"
     Minga.Log.error(:lsp, msg)
-    Minga.Editor.log_to_warnings(msg)
+    Minga.Events.broadcast(:log_message, %Minga.Events.LogMessageEvent{text: msg, level: :error})
     state
   end
 
