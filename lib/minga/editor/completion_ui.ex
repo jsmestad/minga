@@ -11,7 +11,7 @@ defmodule Minga.Editor.CompletionUI do
   The doc preview appears to the right if there's room, to the left if not.
   """
 
-  alias Minga.Agent.Markdown
+  alias MingaAgent.Markdown
   alias Minga.Core.Face
   alias Minga.Editing.Completion
   alias Minga.Editor.DisplayList

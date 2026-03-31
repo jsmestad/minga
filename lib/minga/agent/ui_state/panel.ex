@@ -12,7 +12,7 @@ defmodule Minga.Agent.UIState.Panel do
   read-only field access in input handlers and renderers.
   """
 
-  alias Minga.Agent.Config, as: AgentConfig
+  alias MingaAgent.Config, as: AgentConfig
   alias Minga.Buffer
   alias Minga.Editing.Scroll
 
@@ -32,7 +32,7 @@ defmodule Minga.Agent.UIState.Panel do
           thinking_level: String.t(),
           input_focused: boolean(),
           display_start_index: non_neg_integer(),
-          mention_completion: Minga.Agent.FileMention.completion() | nil,
+          mention_completion: MingaAgent.FileMention.completion() | nil,
           pasted_blocks: [paste_block()],
           cached_line_index: [{non_neg_integer(), Minga.Agent.BufferSync.line_type()}],
           cached_styled_messages: [Minga.Agent.MarkdownHighlight.styled_lines()] | nil,

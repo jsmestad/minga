@@ -15,7 +15,7 @@ defmodule Minga.Editor.HoverPopup do
   4. Any keypress (except K/j/k when focused) dismisses the popup
   """
 
-  alias Minga.Agent.Markdown
+  alias MingaAgent.Markdown
   alias Minga.Editor.DisplayList
   alias Minga.Editor.FloatingWindow
   alias Minga.Editor.MarkdownStyles

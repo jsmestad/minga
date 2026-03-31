@@ -52,7 +52,7 @@ defmodule Minga.SystemObserver do
     Minga.LSP.Supervisor,
     Minga.Extension.Supervisor,
     Minga.Buffer.Supervisor,
-    Minga.Agent.Supervisor,
+    MingaAgent.Supervisor,
     # Conditional (Runtime may not be started in test/headless mode)
     Minga.Runtime.Supervisor,
     Minga.Editor.Supervisor

@@ -9,7 +9,7 @@ defmodule Minga.Agent.View.RenderInput do
   Both `PromptRenderer` and `DashboardRenderer` consume this struct.
   """
 
-  alias Minga.Agent.Session
+  alias MingaAgent.Session
   alias Minga.Agent.UIState
   alias Minga.Agent.ViewContext
   alias Minga.Editing.Scroll
@@ -22,7 +22,7 @@ defmodule Minga.Agent.View.RenderInput do
     :panel,
     :agent_ui,
     messages: [],
-    usage: %Minga.Agent.TurnUsage{},
+    usage: %MingaAgent.TurnUsage{},
     pending_approval: nil,
     session_title: "Minga Agent",
     lsp_servers: []
@@ -34,7 +34,7 @@ defmodule Minga.Agent.View.RenderInput do
           panel: panel_data(),
           agent_ui: agent_ui_data(),
           messages: list(),
-          usage: Minga.Agent.TurnUsage.t(),
+          usage: MingaAgent.TurnUsage.t(),
           pending_approval: map() | nil,
           session_title: String.t(),
           lsp_servers: [atom()]
@@ -53,7 +53,7 @@ defmodule Minga.Agent.View.RenderInput do
           provider_name: String.t(),
           thinking_level: String.t(),
           display_start_index: non_neg_integer(),
-          mention_completion: Minga.Agent.FileMention.completion() | nil,
+          mention_completion: MingaAgent.FileMention.completion() | nil,
           pasted_blocks: [UIState.paste_block()]
         }
 
@@ -137,8 +137,8 @@ defmodule Minga.Agent.View.RenderInput do
   end
 
   @doc "Returns a zero-value usage record."
-  @spec empty_usage() :: Minga.Agent.TurnUsage.t()
-  def empty_usage, do: Minga.Agent.TurnUsage.new()
+  @spec empty_usage() :: MingaAgent.TurnUsage.t()
+  def empty_usage, do: MingaAgent.TurnUsage.new()
 
   # ── Private helpers ─────────────────────────────────────────────────────────
 

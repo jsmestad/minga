@@ -11,11 +11,11 @@ defmodule Minga.Editor.Commands.Agent do
 
   alias Minga.Agent.BufferSync, as: AgentBufferSync
   alias Minga.Agent.DiffReview
-  alias Minga.Agent.FileMention
-  alias Minga.Agent.Markdown
-  alias Minga.Agent.Message
-  alias Minga.Agent.Session
-  alias Minga.Agent.SessionStore
+  alias MingaAgent.FileMention
+  alias MingaAgent.Markdown
+  alias MingaAgent.Message
+  alias MingaAgent.Session
+  alias MingaAgent.SessionStore
   alias Minga.Agent.SlashCommand
   alias Minga.Agent.UIState
   alias Minga.Agent.UIState.Panel

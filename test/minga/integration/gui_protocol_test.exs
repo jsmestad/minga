@@ -254,7 +254,7 @@ defmodule Minga.Integration.GUIProtocolTest do
     end
 
     test "gui_agent_chat with styled_tool_call round-trips", %{port: port} do
-      tc = %Minga.Agent.ToolCall{
+      tc = %MingaAgent.ToolCall{
         id: "tc-styled",
         name: "bash",
         status: :complete,
@@ -305,7 +305,7 @@ defmodule Minga.Integration.GUIProtocolTest do
     end
 
     test "gui_agent_chat with regular tool_call round-trips", %{port: port} do
-      tc = %Minga.Agent.ToolCall{
+      tc = %MingaAgent.ToolCall{
         id: "tc-regular",
         name: "read_file",
         status: :running,

@@ -11,7 +11,7 @@ defmodule Minga.Editor.State.Agent do
   @type status :: :idle | :thinking | :tool_executing | :error | nil
 
   @typedoc "Pending tool approval data."
-  @type approval :: Minga.Agent.ToolApproval.t()
+  @type approval :: MingaAgent.ToolApproval.t()
 
   @typedoc "Agent session state."
   @type t :: %__MODULE__{

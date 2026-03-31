@@ -114,7 +114,7 @@ defmodule Minga.Shell.Board do
     Minga.Log.info(:agent, "Board: dispatched agent card ##{card.id} (#{model}): #{task}")
 
     # Start an agent session for this card
-    case Minga.Agent.Supervisor.start_session(
+    case MingaAgent.Supervisor.start_session(
            provider_opts: [model: model],
            thinking_level: :normal
          ) do
@@ -125,7 +125,7 @@ defmodule Minga.Shell.Board do
           end)
 
         # Send the task as the initial prompt
-        Minga.Agent.Session.send_prompt(pid, task)
+        MingaAgent.Session.send_prompt(pid, task)
 
         Minga.Shell.Board.Persistence.save(shell_state)
         {shell_state, workspace}

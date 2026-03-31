@@ -17,7 +17,7 @@ defmodule Minga.Shell.Board.Input do
 
   @behaviour Minga.Input.Handler
 
-  alias Minga.Agent.Config, as: AgentConfig
+  alias MingaAgent.Config, as: AgentConfig
   alias Minga.Agent.UIState
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.VimState
@@ -142,7 +142,7 @@ defmodule Minga.Shell.Board.Input do
       # Kill the agent session if running
       if card.session do
         try do
-          Minga.Agent.Session.abort(card.session)
+          MingaAgent.Session.abort(card.session)
         catch
           :exit, _ -> :ok
         end
@@ -320,7 +320,7 @@ defmodule Minga.Shell.Board.Input do
       ]
     ]
 
-    case DynamicSupervisor.start_child(Minga.Agent.Supervisor, {Minga.Agent.Session, opts}) do
+    case DynamicSupervisor.start_child(MingaAgent.Supervisor, {MingaAgent.Session, opts}) do
       {:ok, pid} ->
         board = BoardState.update_card(board, card_id, &Card.attach_session(&1, pid))
 
@@ -330,7 +330,7 @@ defmodule Minga.Shell.Board.Input do
         state = %{state | buffer_monitors: monitors}
 
         # Subscribe editor to agent events
-        Minga.Agent.Session.subscribe(pid)
+        MingaAgent.Session.subscribe(pid)
 
         # Store session on agent state so events route correctly
         state =

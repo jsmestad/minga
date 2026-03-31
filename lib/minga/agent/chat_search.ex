@@ -7,7 +7,7 @@ defmodule Minga.Agent.ChatSearch do
   `{message_index, col_start, col_end}` tuples.
   """
 
-  alias Minga.Agent.Message
+  alias MingaAgent.Message
 
   @typedoc "A search match: message index, byte start, byte end."
   @type match :: {non_neg_integer(), non_neg_integer(), non_neg_integer()}

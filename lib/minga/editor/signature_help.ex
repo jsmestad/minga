@@ -17,7 +17,7 @@ defmodule Minga.Editor.SignatureHelp do
   6. Dismissed on `)`, Escape, or cursor movement outside the call
   """
 
-  alias Minga.Agent.Markdown
+  alias MingaAgent.Markdown
   alias Minga.Core.Face
   alias Minga.Editor.DisplayList
   alias Minga.Editor.FloatingWindow

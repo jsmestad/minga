@@ -64,7 +64,7 @@ defmodule Minga.Editor do
           | {:height, pos_integer()}
           | {:suppress_tool_prompts, boolean()}
 
-  alias Minga.Agent.Session, as: AgentSession
+  alias MingaAgent.Session, as: AgentSession
 
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.VimState

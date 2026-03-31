@@ -4,7 +4,7 @@ defmodule Minga.UI.Picker.AgentSessionSourceTest do
   alias Minga.UI.Picker.Context
   alias Minga.UI.Picker.Item
 
-  alias Minga.Agent.Session
+  alias MingaAgent.Session
   alias Minga.Agent.UIState
   alias Minga.Editor.State, as: EditorState
   alias Minga.Editor.State.Agent, as: AgentState
@@ -143,8 +143,8 @@ defmodule Minga.UI.Picker.AgentSessionSourceTest do
   # ── Helpers ───────────────────────────────────────────────────────────────
 
   defp start_test_session do
-    Minga.Agent.Supervisor.start_session(
-      provider: Minga.Agent.Providers.Native,
+    MingaAgent.Supervisor.start_session(
+      provider: MingaAgent.Providers.Native,
       model_name: "test-model",
       provider_opts: [
         llm_client: fn _req -> {:ok, %{status: 200, body: %{"choices" => []}}} end
@@ -153,7 +153,7 @@ defmodule Minga.UI.Picker.AgentSessionSourceTest do
   end
 
   defp stop_session(pid) do
-    Minga.Agent.Supervisor.stop_session(pid)
+    MingaAgent.Supervisor.stop_session(pid)
   end
 
   defp state_with_agent_tab(session_pid) do

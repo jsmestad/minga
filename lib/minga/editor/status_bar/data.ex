@@ -11,7 +11,7 @@ defmodule Minga.Editor.StatusBar.Data do
   - `{:agent, t:agent_data()}` — an agent chat window
   """
 
-  alias Minga.Agent.Session
+  alias MingaAgent.Session
   alias Minga.Buffer
   alias Minga.Diagnostics
   alias Minga.Editor.Editing

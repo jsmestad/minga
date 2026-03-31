@@ -325,7 +325,7 @@ defmodule Minga.Agent.ChatDecorations do
 
   # ── Tool call decorations ────────────────────────────────────────────────────
 
-  @spec tool_awaiting_approval?(Minga.Agent.ToolCall.t(), map() | nil) :: boolean()
+  @spec tool_awaiting_approval?(MingaAgent.ToolCall.t(), map() | nil) :: boolean()
   defp tool_awaiting_approval?(_tc, nil), do: false
 
   defp tool_awaiting_approval?(tc, approval) when is_map(approval) do
@@ -334,7 +334,7 @@ defmodule Minga.Agent.ChatDecorations do
 
   @spec apply_tool_call_decorations(
           Decorations.t(),
-          Minga.Agent.ToolCall.t(),
+          MingaAgent.ToolCall.t(),
           non_neg_integer(),
           non_neg_integer(),
           Minga.UI.Theme.Agent.t(),
@@ -400,7 +400,7 @@ defmodule Minga.Agent.ChatDecorations do
     decs
   end
 
-  @spec tool_status_display(Minga.Agent.ToolCall.t(), Minga.UI.Theme.Agent.t(), boolean()) ::
+  @spec tool_status_display(MingaAgent.ToolCall.t(), Minga.UI.Theme.Agent.t(), boolean()) ::
           {String.t(), non_neg_integer()}
   defp tool_status_display(_tc, theme, true = _awaiting) do
     {"?", theme.status_thinking}

@@ -1627,12 +1627,12 @@ defmodule Minga.Frontend.Protocol.GUI do
   # Computes a short summary for a tool call from its name and args.
   # Reuses summarize_tool_args/2 (shared with the approval banner).
   # Truncates to 100 chars max to keep the wire payload small.
-  @spec tool_call_summary(Minga.Agent.ToolCall.t()) :: String.t()
-  defp tool_call_summary(%Minga.Agent.ToolCall{name: name, args: args}) when is_map(args) do
+  @spec tool_call_summary(MingaAgent.ToolCall.t()) :: String.t()
+  defp tool_call_summary(%MingaAgent.ToolCall{name: name, args: args}) when is_map(args) do
     summarize_tool_args(name, args) |> String.slice(0, 100)
   end
 
-  defp tool_call_summary(%Minga.Agent.ToolCall{name: name} = tc) do
+  defp tool_call_summary(%MingaAgent.ToolCall{name: name} = tc) do
     args = Map.get(tc, :args) || %{}
     summarize_tool_args(name, args) |> String.slice(0, 100)
   end
@@ -1666,7 +1666,7 @@ defmodule Minga.Frontend.Protocol.GUI do
 
   @typedoc "A chat message that may carry pre-computed styled runs."
   @type gui_chat_message ::
-          Minga.Agent.Message.t()
+          MingaAgent.Message.t()
           | {:styled_assistant, [[styled_run()]]}
           | {:styled_tool_call,
              %{
@@ -2498,7 +2498,7 @@ defmodule Minga.Frontend.Protocol.GUI do
 
   # ── Shared encoding helpers for hover/overlay content ──
 
-  @spec encode_markdown_style(Minga.Agent.Markdown.style()) :: non_neg_integer()
+  @spec encode_markdown_style(MingaAgent.Markdown.style()) :: non_neg_integer()
   defp encode_markdown_style(:plain), do: 0
   defp encode_markdown_style(:bold), do: 1
   defp encode_markdown_style(:italic), do: 2
@@ -2514,7 +2514,7 @@ defmodule Minga.Frontend.Protocol.GUI do
   defp encode_markdown_style(:rule), do: 12
   defp encode_markdown_style(_), do: 0
 
-  @spec encode_line_type(Minga.Agent.Markdown.line_type()) :: non_neg_integer()
+  @spec encode_line_type(MingaAgent.Markdown.line_type()) :: non_neg_integer()
   defp encode_line_type(:text), do: 0
   defp encode_line_type(:code), do: 1
   defp encode_line_type({:code_header, _lang}), do: 2

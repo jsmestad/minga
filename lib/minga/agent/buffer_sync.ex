@@ -128,12 +128,12 @@ defmodule Minga.Agent.BufferSync do
   defp message_to_markdown({:assistant, text}), do: text
   defp message_to_markdown({:thinking, text, _collapsed}), do: text
 
-  defp message_to_markdown({:usage, %Minga.Agent.TurnUsage{input: i, output: o, cost: c}})
+  defp message_to_markdown({:usage, %MingaAgent.TurnUsage{input: i, output: o, cost: c}})
        when is_integer(c) do
     "↑#{i} ↓#{o} $#{Float.round(c * 1.0, 3)}"
   end
 
-  defp message_to_markdown({:usage, %Minga.Agent.TurnUsage{input: i, output: o, cost: c}})
+  defp message_to_markdown({:usage, %MingaAgent.TurnUsage{input: i, output: o, cost: c}})
        when is_float(c) do
     "↑#{i} ↓#{o} $#{Float.round(c, 3)}"
   end
