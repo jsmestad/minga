@@ -45,11 +45,12 @@ Remaining upward dependencies (Layer 0/1 modules importing from Editor):
 
 ---
 
-## Wave 1: Enforce Boundaries + Finish Stability
+## Wave 1: Enforce Boundaries + Finish Stability ✅ DONE
 
 **Duration:** 1 week
 **Agents:** 3 (one per track, all start from `main`)
 **Gate:** `make lint` (with boundary check) passes, `mix test.llm` passes 3x clean
+**Completed:** 2026-03-31 — All three tracks merged. Boundary check hard-enabled (#1364), upward deps severed (#1366), timer quarantine verified in-place.
 
 ### Track A: Boundary check (1 agent) ✅ DONE
 
