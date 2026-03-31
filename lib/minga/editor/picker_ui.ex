@@ -347,23 +347,40 @@ defmodule Minga.Editor.PickerUI do
       new_state = source.on_select(item, state)
       refresh_items(new_state)
     else
-      if Picker.Source.preview?(source) and previewed?(state) do
-        # Preview loaded a different buffer into the window. Close the
-        # picker and promote the previewed buffer to a proper new tab
-        # via add_buffer(:open). The tab bar was never modified by
-        # preview, so on_buffer_added will create a fresh tab.
-        previewed_pid = state.workspace.buffers.active
-        new_state = close(state)
-        EditorState.add_buffer(new_state, previewed_pid, context: :open)
-      else
-        new_state = close(state)
-        new_state = source.on_select(item, new_state)
+      select_item_and_close(state, item, source)
+    end
+  end
 
-        case Map.get(new_state, :pending_command) do
-          nil -> new_state
-          cmd -> {Map.delete(new_state, :pending_command), {:execute_command, cmd}}
-        end
-      end
+  @spec select_item_and_close(EditorState.t(), Picker.item(), module()) ::
+          EditorState.t() | {EditorState.t(), {:execute_command, atom()}}
+  defp select_item_and_close(state, item, source) do
+    if Picker.Source.preview?(source) and previewed?(state) do
+      promote_previewed_buffer(state)
+    else
+      run_select_and_close(state, item, source)
+    end
+  end
+
+  # Preview loaded a different buffer into the window. Close the picker and
+  # promote the previewed buffer to a proper new tab via add_buffer(:open).
+  # The tab bar was never modified by preview, so on_buffer_added will create
+  # a fresh tab.
+  @spec promote_previewed_buffer(EditorState.t()) :: EditorState.t()
+  defp promote_previewed_buffer(state) do
+    previewed_pid = state.workspace.buffers.active
+    new_state = close(state)
+    EditorState.add_buffer(new_state, previewed_pid, context: :open)
+  end
+
+  @spec run_select_and_close(EditorState.t(), Picker.item(), module()) ::
+          EditorState.t() | {EditorState.t(), {:execute_command, atom()}}
+  defp run_select_and_close(state, item, source) do
+    new_state = close(state)
+    new_state = source.on_select(item, new_state)
+
+    case Map.get(new_state, :pending_command) do
+      nil -> new_state
+      cmd -> {Map.delete(new_state, :pending_command), {:execute_command, cmd}}
     end
   end
 
