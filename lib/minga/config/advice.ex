@@ -38,7 +38,8 @@ defmodule Minga.Config.Advice do
         if some_condition?(state) do
           execute.(state)
         else
-          Minga.Editor.State.set_status(state, "Format skipped")
+          # Return state unchanged to skip the command
+          state
         end
       end)
 

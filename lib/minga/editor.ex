@@ -209,6 +209,8 @@ defmodule Minga.Editor do
     Minga.Events.subscribe(:tool_install_failed)
     Minga.Events.subscribe(:tool_uninstall_complete)
     Minga.Events.subscribe(:tool_missing)
+    Minga.Events.subscribe(:log_message)
+    Minga.Events.subscribe(:face_overrides_changed)
 
     # Monitor all initial buffers so we get :DOWN when they die.
     all_initial_pids =
@@ -608,30 +610,6 @@ defmodule Minga.Editor do
     {:noreply, state}
   end
 
-  # Buffer-local face overrides changed. Pre-compute the merged registry
-  # so the render pipeline reads from editor state with zero GenServer calls.
-  def handle_info({:face_overrides_changed, buf_pid, overrides}, state) do
-    registries =
-      if overrides == %{} do
-        Map.delete(state.face_override_registries, buf_pid)
-      else
-        # Get the base highlight for this buffer to merge overrides with
-        hl = Map.get(state.workspace.highlight.highlights, buf_pid)
-
-        merged =
-          if hl do
-            Minga.UI.Face.Registry.with_overrides(hl.face_registry, overrides)
-          else
-            base = Minga.UI.Face.Registry.from_theme(state.theme)
-            Minga.UI.Face.Registry.with_overrides(base, overrides)
-          end
-
-        Map.put(state.face_override_registries, buf_pid, merged)
-      end
-
-    {:noreply, %{state | face_override_registries: registries}}
-  end
-
   # Refresh the cached LSP status for the modeline indicator.
   # Fired after buffer open (with delay for async LSP initialization)
   # and periodically while LSP clients are connecting.
@@ -849,6 +827,47 @@ defmodule Minga.Editor do
        ) do
     apply_diagnostic_decorations(state, uri)
     schedule_render(state, 16)
+  end
+
+  defp dispatch_minga_event(
+         state,
+         :log_message,
+         %Minga.Events.LogMessageEvent{text: text, level: level},
+         _msg
+       ) do
+    case level do
+      :warning -> MessageLog.log(state, text, :warning)
+      :error -> MessageLog.log(state, text, :error)
+      _ -> log_message(state, text)
+    end
+  end
+
+  defp dispatch_minga_event(
+         state,
+         :face_overrides_changed,
+         %Minga.Events.FaceOverridesChangedEvent{buffer: buf_pid, overrides: overrides},
+         _msg
+       ) do
+    # Pre-compute the merged face registry so the render pipeline reads from
+    # editor state with zero GenServer calls back into the buffer.
+    registries =
+      if overrides == %{} do
+        Map.delete(state.face_override_registries, buf_pid)
+      else
+        hl = Map.get(state.workspace.highlight.highlights, buf_pid)
+
+        merged =
+          if hl do
+            Minga.UI.Face.Registry.with_overrides(hl.face_registry, overrides)
+          else
+            base = Minga.UI.Face.Registry.from_theme(state.theme)
+            Minga.UI.Face.Registry.with_overrides(base, overrides)
+          end
+
+        Map.put(state.face_override_registries, buf_pid, merged)
+      end
+
+    %{state | face_override_registries: registries}
   end
 
   defp dispatch_minga_event(state, _event, _payload, _msg), do: state

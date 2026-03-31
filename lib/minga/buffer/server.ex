@@ -1893,16 +1893,15 @@ defmodule Minga.Buffer.Server do
     :ok
   end
 
-  # Notifies the Editor process (if one is monitoring this buffer) that
-  # face overrides changed, so it can pre-compute the merged registry.
+  # Broadcasts a face_overrides_changed event so any subscriber (typically
+  # the Editor) can pre-compute the merged face registry. Using Events
+  # decouples Buffer.Server from the Editor module.
   @spec notify_face_overrides_changed(%{String.t() => keyword()}) :: :ok
   defp notify_face_overrides_changed(overrides) do
-    # The Editor monitors buffers and receives messages from them.
-    # Use a simple send to the process group; the Editor's handle_info
-    # will pick it up. If no Editor is running (tests), this is a no-op.
-    if editor = Process.whereis(Minga.Editor) do
-      send(editor, {:face_overrides_changed, self(), overrides})
-    end
+    Minga.Events.broadcast(:face_overrides_changed, %Minga.Events.FaceOverridesChangedEvent{
+      buffer: self(),
+      overrides: overrides
+    })
 
     :ok
   end

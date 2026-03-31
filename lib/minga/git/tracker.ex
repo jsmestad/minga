@@ -163,7 +163,11 @@ defmodule Minga.Git.Tracker do
       :ets.insert(@registry_table, {buffer_pid, git_pid})
       ref = Process.monitor(buffer_pid)
       rel_path = Path.relative_to(path, git_root)
-      Minga.Editor.log_to_messages("Git: tracking #{rel_path}")
+
+      Minga.Events.broadcast(:log_message, %Minga.Events.LogMessageEvent{
+        text: "Git: tracking #{rel_path}",
+        level: :info
+      })
 
       repo_counts = Map.update(state.repo_buffer_counts, git_root, 1, &(&1 + 1))
 
