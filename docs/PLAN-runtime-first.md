@@ -792,6 +792,7 @@ Buffer.Fork processes, three-way merge, self-description tools, documentation pa
 | Date | Wave / Track | PRs | What shipped |
 |------|-------------|-----|-------------|
 | pre-plan | Wave 1 (prior work) | various | A1-A4, B2-B3, C1-C4 from UI stability plan already shipped |
+| 2026-03-31 | Wave 1 / Track B | #1366 | Severed all 7 upward Layer 0/1 → Layer 2 deps: LogMessageEvent + FaceOverridesChangedEvent added to Events; LSP (4 sites), Git, Buffer.Server, Agent.Session replaced direct Editor calls with broadcasts |
 | 2026-03-31 | Wave 1 / Track A | #1364 | Boundary check promoted to hard failure. Existing `Minga.Credo.DependencyDirectionCheck` already covered everything the planned `mix check.layers` task would do; flipped `exit_status: 0` to default (non-zero). |
 | 2026-03-31 | Wave 1 / Track C | — | All timer quarantine guards already in place; verified all sites in editor.ex and sub-modules; updated plan status and fixed verification command |
 
