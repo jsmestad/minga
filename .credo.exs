@@ -25,7 +25,7 @@
           {Credo.Check.Design.TagTODO, false},
 
           # ── Dependency direction ──────────────────────────────────────────
-          {Minga.Credo.DependencyDirectionCheck, [exit_status: 0]},
+          {Minga.Credo.DependencyDirectionCheck, []},
           {Minga.Credo.NoProcessSleepCheck, []},
           {Minga.Credo.NoDirectLoggerCheck, [exit_status: 0]},
           {Minga.Credo.NoDirectStateMachineWriteCheck, []},
