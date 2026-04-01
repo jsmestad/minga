@@ -30,7 +30,8 @@ defmodule Minga.Services.Supervisor do
       ├── Minga.LSP.Supervisor               DynamicSupervisor for LSP clients
       ├── Minga.LSP.SyncServer               Subscribes to buffer events, manages LSP sync
       ├── Minga.Project                      Project root detection, file cache
-      └── MingaAgent.Supervisor             DynamicSupervisor for agent sessions
+      ├── MingaAgent.Supervisor             DynamicSupervisor for agent sessions
+      └── MingaAgent.SessionManager          Session ID → PID registry, lifecycle events
 
   Project is placed after LSP.SyncServer (not before) to match the
   dependency direction: SyncServer uses RootDetector which may consult
@@ -38,7 +39,7 @@ defmodule Minga.Services.Supervisor do
   `rest_for_one`, Project comes after SyncServer so a SyncServer crash
   cascades to Project and Agent.Supervisor (acceptable: LSP clients need
   project root re-detection). A Project crash cascades only to
-  Agent.Supervisor.
+  Agent.Supervisor and SessionManager.
   """
 
   use Supervisor
@@ -68,7 +69,8 @@ defmodule Minga.Services.Supervisor do
 
       # Project and agents (end of chain, minimal cascade)
       Minga.Project,
-      MingaAgent.Supervisor
+      MingaAgent.Supervisor,
+      MingaAgent.SessionManager
     ]
 
     Supervisor.init(children, strategy: :rest_for_one)
