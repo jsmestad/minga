@@ -1,306 +1,287 @@
 defmodule MingaEditor.Commands.MarksTest do
-  use Minga.Test.EditingModelCase, async: true
+  @moduledoc """
+  Tests for mark commands (set, jump-to-line, jump-to-exact, jump-to-last).
+
+  Calls `Marks.execute/2` directly on constructed EditorState structs with
+  a real BufferServer for cursor operations. No Editor GenServer needed.
+  """
+  use ExUnit.Case, async: true
 
   alias Minga.Buffer.Server, as: BufferServer
-  alias MingaEditor
+  alias MingaEditor.Commands.Marks
+  alias MingaEditor.State, as: EditorState
+  alias MingaEditor.VimState
+  alias MingaEditor.Viewport
+  alias MingaEditor.Workspace.State, as: WorkspaceState
 
-  # Three-line buffer: line 0 "hello", line 1 "  world", line 2 "foo"
+  # "hello\n  world\nfoo" — line 1 has leading spaces (first non-blank at col 2)
   @content "hello\n  world\nfoo"
 
-  defp start_editor(content \\ @content) do
-    {:ok, buffer} = BufferServer.start_link(content: content)
-
-    {:ok, editor} =
-      MingaEditor.start_link(
-        name: :"editor_marks_#{:erlang.unique_integer([:positive])}",
-        port_manager: nil,
-        buffer: buffer,
-        width: 40,
-        height: 10,
-        editing_model: :vim
-      )
-
-    # Drain init-phase messages (timers, PubSub subscriptions) so they
-    # don't interleave with key sequences in the test body.
-    _ = :sys.get_state(editor)
-
-    {editor, buffer}
+  defp start_buffer(content \\ @content) do
+    start_supervised!({BufferServer, content: content})
   end
 
-  # Moves the buffer cursor and drains the editor mailbox so no stale
-  # messages (events from concurrent tests) interleave with the next key.
-  defp move_cursor(editor, buffer, pos) do
-    BufferServer.move_to(buffer, pos)
-    _ = :sys.get_state(editor)
+  defp make_state(buffer, opts \\ []) do
+    marks = Keyword.get(opts, :marks, %{})
+    last_jump_pos = Keyword.get(opts, :last_jump_pos, nil)
+
+    vim = %VimState{
+      mode: :normal,
+      mode_state: Minga.Mode.initial_state(),
+      marks: marks,
+      last_jump_pos: last_jump_pos
+    }
+
+    %EditorState{
+      port_manager: nil,
+      workspace: %WorkspaceState{
+        viewport: Viewport.new(24, 80),
+        buffers: %MingaEditor.State.Buffers{active: buffer},
+        editing: vim
+      }
+    }
   end
 
-  defp send_key(editor, codepoint, mods \\ 0) do
-    send(editor, {:minga_input, {:key_press, codepoint, mods}})
-    _ = :sys.get_state(editor)
+  defp get_mark(state, buffer, char) do
+    get_in(state.workspace.editing.marks, [buffer, char])
   end
 
-  defp state(editor), do: :sys.get_state(editor)
+  # ── set_mark ────────────────────────────────────────────────────────────
 
-  # ── Setting marks ───────────────────────────────────────────────────────────
+  describe "set_mark" do
+    test "records current cursor position keyed by buffer and char" do
+      buf = start_buffer()
+      BufferServer.move_to(buf, {1, 3})
+      state = make_state(buf)
 
-  describe "setting marks with m{a-z}" do
-    test "m + letter records current cursor position" do
-      {editor, buffer} = start_editor()
-      # move to line 1, col 0
-      move_cursor(editor, buffer, {1, 3})
+      new_state = Marks.execute(state, {:set_mark, "a"})
 
-      send_key(editor, ?m)
-      send_key(editor, ?a)
-
-      s = state(editor)
-      assert get_in(s.workspace.editing.marks, [buffer, "a"]) == {1, 3}
+      assert get_mark(new_state, buf, "a") == {1, 3}
     end
 
-    test "setting the same mark again overwrites the previous position" do
-      {editor, buffer} = start_editor()
-      move_cursor(editor, buffer, {0, 0})
-      send_key(editor, ?m)
-      send_key(editor, ?z)
+    test "overwrites existing mark for same char" do
+      buf = start_buffer()
+      BufferServer.move_to(buf, {0, 0})
+      state = make_state(buf, marks: %{buf => %{"a" => {0, 0}}})
 
-      move_cursor(editor, buffer, {2, 2})
-      send_key(editor, ?m)
-      send_key(editor, ?z)
+      BufferServer.move_to(buf, {2, 1})
+      new_state = Marks.execute(state, {:set_mark, "a"})
 
-      s = state(editor)
-      assert get_in(s.workspace.editing.marks, [buffer, "z"]) == {2, 2}
+      assert get_mark(new_state, buf, "a") == {2, 1}
+    end
+
+    test "preserves other marks when setting a new one" do
+      buf = start_buffer()
+      BufferServer.move_to(buf, {0, 1})
+      state = make_state(buf, marks: %{buf => %{"a" => {0, 1}}})
+
+      BufferServer.move_to(buf, {2, 0})
+      new_state = Marks.execute(state, {:set_mark, "b"})
+
+      assert get_mark(new_state, buf, "a") == {0, 1}
+      assert get_mark(new_state, buf, "b") == {2, 0}
     end
 
     test "multiple different marks can coexist" do
-      {editor, buffer} = start_editor()
+      buf = start_buffer()
 
-      move_cursor(editor, buffer, {0, 1})
-      send_key(editor, ?m)
-      send_key(editor, ?a)
+      BufferServer.move_to(buf, {0, 1})
+      state = Marks.execute(make_state(buf), {:set_mark, "a"})
 
-      move_cursor(editor, buffer, {2, 0})
-      send_key(editor, ?m)
-      send_key(editor, ?b)
+      BufferServer.move_to(buf, {2, 0})
+      state = Marks.execute(state, {:set_mark, "b"})
 
-      s = state(editor)
-      assert get_in(s.workspace.editing.marks, [buffer, "a"]) == {0, 1}
-      assert get_in(s.workspace.editing.marks, [buffer, "b"]) == {2, 0}
-    end
-
-    test "incomplete m sequence (non-letter) cancels without effect" do
-      {editor, buffer} = start_editor()
-      move_cursor(editor, buffer, {1, 0})
-
-      # Press m then escape — should cancel
-      send_key(editor, ?m)
-      send_key(editor, 27)
-
-      s = state(editor)
-      assert Map.get(s.workspace.editing.marks, buffer, %{}) == %{}
+      assert get_mark(state, buf, "a") == {0, 1}
+      assert get_mark(state, buf, "b") == {2, 0}
     end
   end
 
-  # ── Jumping to marks: single-quote (line) ─────────────────────────────────
+  # ── jump_to_mark_line ──────────────────────────────────────────────────
 
-  describe "' + {a-z}: jump to first non-blank of marked line" do
+  describe "jump_to_mark_line" do
     test "jumps to first non-blank column on the marked line" do
-      {editor, buffer} = start_editor()
-      # Mark line 1 (which is "  world" — first non-blank at col 2)
-      move_cursor(editor, buffer, {1, 4})
-      send_key(editor, ?m)
-      send_key(editor, ?a)
+      buf = start_buffer()
+      # Mark line 1 at col 4 ("  world", first non-blank at col 2)
+      state = make_state(buf, marks: %{buf => %{"a" => {1, 4}}})
+      BufferServer.move_to(buf, {0, 0})
 
-      # Move away then jump back
-      move_cursor(editor, buffer, {0, 0})
-      send_key(editor, ?')
-      send_key(editor, ?a)
+      _new = Marks.execute(state, {:jump_to_mark_line, "a"})
 
-      assert BufferServer.cursor(buffer) == {1, 2}
+      assert BufferServer.cursor(buf) == {1, 2}
     end
 
-    test "jumping to an unset mark does nothing" do
-      {editor, buffer} = start_editor()
-      move_cursor(editor, buffer, {0, 4})
+    test "unset mark is a no-op" do
+      buf = start_buffer()
+      BufferServer.move_to(buf, {0, 4})
+      state = make_state(buf)
 
-      send_key(editor, ?')
-      send_key(editor, ?z)
+      _new = Marks.execute(state, {:jump_to_mark_line, "z"})
 
-      # cursor unchanged
-      assert BufferServer.cursor(buffer) == {0, 4}
+      assert BufferServer.cursor(buf) == {0, 4}
     end
 
-    test "jumping across lines updates last_jump_pos" do
-      {editor, buffer} = start_editor()
-      move_cursor(editor, buffer, {2, 0})
-      send_key(editor, ?m)
-      send_key(editor, ?a)
+    test "cross-line jump saves last_jump_pos" do
+      buf = start_buffer()
+      BufferServer.move_to(buf, {0, 0})
+      state = make_state(buf, marks: %{buf => %{"a" => {2, 0}}})
 
-      move_cursor(editor, buffer, {0, 0})
-      send_key(editor, ?')
-      send_key(editor, ?a)
+      new_state = Marks.execute(state, {:jump_to_mark_line, "a"})
 
-      s = state(editor)
-      assert s.workspace.editing.last_jump_pos == {0, 0}
+      assert new_state.workspace.editing.last_jump_pos == {0, 0}
     end
 
-    test "jumping within same line does not update last_jump_pos" do
-      {editor, buffer} = start_editor()
-      move_cursor(editor, buffer, {1, 2})
-      send_key(editor, ?m)
-      send_key(editor, ?a)
+    test "same-line jump does not save last_jump_pos" do
+      buf = start_buffer()
+      BufferServer.move_to(buf, {1, 5})
+      state = make_state(buf, marks: %{buf => %{"a" => {1, 2}}})
 
-      # Stay on same line but different col
-      move_cursor(editor, buffer, {1, 5})
-      send_key(editor, ?')
-      send_key(editor, ?a)
+      new_state = Marks.execute(state, {:jump_to_mark_line, "a"})
 
-      s = state(editor)
-      assert is_nil(s.workspace.editing.last_jump_pos)
+      assert is_nil(new_state.workspace.editing.last_jump_pos)
+    end
+
+    test "jumping to mark on empty line lands at col 0" do
+      buf = start_buffer("hello\n\nfoo")
+      BufferServer.move_to(buf, {0, 0})
+      state = make_state(buf, marks: %{buf => %{"a" => {1, 0}}})
+
+      _new = Marks.execute(state, {:jump_to_mark_line, "a"})
+
+      assert BufferServer.cursor(buf) == {1, 0}
     end
   end
 
-  # ── Jumping to marks: backtick (exact) ────────────────────────────────────
+  # ── jump_to_mark_exact ─────────────────────────────────────────────────
 
-  describe "` + {a-z}: jump to exact marked position" do
+  describe "jump_to_mark_exact" do
     test "jumps to the exact line and column of the mark" do
-      {editor, buffer} = start_editor()
-      move_cursor(editor, buffer, {1, 4})
-      send_key(editor, ?m)
-      send_key(editor, ?b)
+      buf = start_buffer()
+      BufferServer.move_to(buf, {0, 0})
+      state = make_state(buf, marks: %{buf => %{"b" => {1, 4}}})
 
-      move_cursor(editor, buffer, {0, 0})
-      send_key(editor, ?`)
-      send_key(editor, ?b)
+      _new = Marks.execute(state, {:jump_to_mark_exact, "b"})
 
-      assert BufferServer.cursor(buffer) == {1, 4}
+      assert BufferServer.cursor(buf) == {1, 4}
     end
 
-    test "jumping to an unset mark does nothing" do
-      {editor, buffer} = start_editor()
-      move_cursor(editor, buffer, {0, 3})
+    test "unset mark is a no-op" do
+      buf = start_buffer()
+      BufferServer.move_to(buf, {0, 3})
+      state = make_state(buf)
 
-      send_key(editor, ?`)
-      send_key(editor, ?x)
+      _new = Marks.execute(state, {:jump_to_mark_exact, "x"})
 
-      assert BufferServer.cursor(buffer) == {0, 3}
+      assert BufferServer.cursor(buf) == {0, 3}
     end
 
-    test "jumping across lines updates last_jump_pos" do
-      {editor, buffer} = start_editor()
-      move_cursor(editor, buffer, {2, 1})
-      send_key(editor, ?m)
-      send_key(editor, ?c)
+    test "cross-line jump saves last_jump_pos" do
+      buf = start_buffer()
+      BufferServer.move_to(buf, {0, 2})
+      state = make_state(buf, marks: %{buf => %{"c" => {2, 1}}})
 
-      move_cursor(editor, buffer, {0, 2})
-      send_key(editor, ?`)
-      send_key(editor, ?c)
+      new_state = Marks.execute(state, {:jump_to_mark_exact, "c"})
 
-      s = state(editor)
-      assert s.workspace.editing.last_jump_pos == {0, 2}
+      assert new_state.workspace.editing.last_jump_pos == {0, 2}
     end
   end
 
-  # ── Jump to last position: '' and `` ──────────────────────────────────────
+  # ── jump_to_last_pos_line ──────────────────────────────────────────────
 
-  describe "'' and `` jump to the position before the last mark jump" do
-    test "'' restores to first non-blank of the pre-jump line" do
-      {editor, buffer} = start_editor()
-      move_cursor(editor, buffer, {2, 0})
-      send_key(editor, ?m)
-      send_key(editor, ?a)
+  describe "jump_to_last_pos_line" do
+    test "jumps to first non-blank of the saved line" do
+      buf = start_buffer()
+      # last_jump_pos on line 1 ("  world", first non-blank at col 2)
+      BufferServer.move_to(buf, {2, 0})
+      state = make_state(buf, last_jump_pos: {1, 4})
 
-      # From line 0 col 4, jump to mark 'a' on line 2
-      move_cursor(editor, buffer, {0, 4})
-      send_key(editor, ?')
-      send_key(editor, ?a)
+      _new = Marks.execute(state, :jump_to_last_pos_line)
 
-      assert BufferServer.cursor(buffer) == {2, 0}
-
-      # Now '' should return to line 0 first non-blank (col 0)
-      send_key(editor, ?')
-      send_key(editor, ?')
-
-      assert BufferServer.cursor(buffer) == {0, 0}
+      assert BufferServer.cursor(buf) == {1, 2}
     end
 
-    test "`` restores to the exact pre-jump position" do
-      {editor, buffer} = start_editor()
-      move_cursor(editor, buffer, {2, 1})
-      send_key(editor, ?m)
-      send_key(editor, ?d)
+    test "updates last_jump_pos to pre-jump position" do
+      buf = start_buffer()
+      BufferServer.move_to(buf, {2, 0})
+      state = make_state(buf, last_jump_pos: {0, 3})
 
-      move_cursor(editor, buffer, {0, 3})
-      send_key(editor, ?`)
-      send_key(editor, ?d)
+      new_state = Marks.execute(state, :jump_to_last_pos_line)
 
-      assert BufferServer.cursor(buffer) == {2, 1}
-
-      # `` returns to exact position {0, 3}
-      send_key(editor, ?`)
-      send_key(editor, ?`)
-
-      assert BufferServer.cursor(buffer) == {0, 3}
+      assert new_state.workspace.editing.last_jump_pos == {2, 0}
     end
 
-    test "'' does nothing when no jump has been made yet" do
-      {editor, buffer} = start_editor()
-      move_cursor(editor, buffer, {1, 2})
+    test "nil last_jump_pos is a no-op" do
+      buf = start_buffer()
+      BufferServer.move_to(buf, {1, 2})
+      state = make_state(buf)
 
-      send_key(editor, ?')
-      send_key(editor, ?')
+      new_state = Marks.execute(state, :jump_to_last_pos_line)
 
-      # cursor unchanged
-      assert BufferServer.cursor(buffer) == {1, 2}
+      assert BufferServer.cursor(buf) == {1, 2}
+      assert is_nil(new_state.workspace.editing.last_jump_pos)
     end
 
-    test "`` does nothing when no jump has been made yet" do
-      {editor, buffer} = start_editor()
-      move_cursor(editor, buffer, {1, 2})
+    test "repeated calls toggle between two positions" do
+      buf = start_buffer()
+      BufferServer.move_to(buf, {2, 0})
+      state = make_state(buf, last_jump_pos: {0, 3})
 
-      send_key(editor, ?`)
-      send_key(editor, ?`)
+      # First call: jump to line 0, save {2, 0}
+      state = Marks.execute(state, :jump_to_last_pos_line)
+      assert elem(BufferServer.cursor(buf), 0) == 0
+      assert state.workspace.editing.last_jump_pos == {2, 0}
 
-      assert BufferServer.cursor(buffer) == {1, 2}
-    end
-
-    test "repeated '' toggles back and forth between two positions" do
-      {editor, buffer} = start_editor()
-      # Set mark 'a' at line 0
-      move_cursor(editor, buffer, {0, 0})
-      send_key(editor, ?m)
-      send_key(editor, ?a)
-
-      # Jump to mark 'a' from line 2; last_jump_pos becomes {2, 0}
-      move_cursor(editor, buffer, {2, 0})
-      send_key(editor, ?')
-      send_key(editor, ?a)
-      assert elem(BufferServer.cursor(buffer), 0) == 0
-
-      # First '' → back to pre-jump position (line 2); last_jump_pos becomes {0, 0}
-      send_key(editor, ?')
-      send_key(editor, ?')
-      assert elem(BufferServer.cursor(buffer), 0) == 2
-
-      # Second '' → back to line 0 again
-      send_key(editor, ?')
-      send_key(editor, ?')
-      assert elem(BufferServer.cursor(buffer), 0) == 0
+      # Second call: jump to line 2, save {0, 0}
+      _state = Marks.execute(state, :jump_to_last_pos_line)
+      assert elem(BufferServer.cursor(buf), 0) == 2
     end
   end
 
-  # ── Marks survive across edits ─────────────────────────────────────────────
+  # ── jump_to_last_pos_exact ─────────────────────────────────────────────
 
-  describe "mark persistence" do
-    test "marks survive within a buffer session after insertions" do
-      {editor, buffer} = start_editor()
-      move_cursor(editor, buffer, {1, 0})
-      send_key(editor, ?m)
-      send_key(editor, ?p)
+  describe "jump_to_last_pos_exact" do
+    test "jumps to the exact saved position" do
+      buf = start_buffer()
+      BufferServer.move_to(buf, {2, 1})
+      state = make_state(buf, last_jump_pos: {0, 3})
 
-      # Switch to insert and type something on a different line
-      move_cursor(editor, buffer, {0, 0})
+      _new = Marks.execute(state, :jump_to_last_pos_exact)
 
-      s = state(editor)
-      assert get_in(s.workspace.editing.marks, [buffer, "p"]) == {1, 0}
+      assert BufferServer.cursor(buf) == {0, 3}
+    end
+
+    test "updates last_jump_pos to pre-jump position" do
+      buf = start_buffer()
+      BufferServer.move_to(buf, {2, 1})
+      state = make_state(buf, last_jump_pos: {0, 3})
+
+      new_state = Marks.execute(state, :jump_to_last_pos_exact)
+
+      assert new_state.workspace.editing.last_jump_pos == {2, 1}
+    end
+
+    test "nil last_jump_pos is a no-op" do
+      buf = start_buffer()
+      BufferServer.move_to(buf, {1, 2})
+      state = make_state(buf)
+
+      new_state = Marks.execute(state, :jump_to_last_pos_exact)
+
+      assert BufferServer.cursor(buf) == {1, 2}
+      assert is_nil(new_state.workspace.editing.last_jump_pos)
+    end
+
+    test "repeated calls toggle between two exact positions" do
+      buf = start_buffer()
+      BufferServer.move_to(buf, {0, 3})
+      state = make_state(buf, last_jump_pos: {2, 1})
+
+      state = Marks.execute(state, :jump_to_last_pos_exact)
+      assert BufferServer.cursor(buf) == {2, 1}
+      assert state.workspace.editing.last_jump_pos == {0, 3}
+
+      state = Marks.execute(state, :jump_to_last_pos_exact)
+      assert BufferServer.cursor(buf) == {0, 3}
+      assert state.workspace.editing.last_jump_pos == {2, 1}
     end
   end
 end
