@@ -59,7 +59,7 @@ defmodule MingaAgent.Tools do
   alias ReqLLM.Tool
 
   @typedoc "Options passed to `all/1`."
-  @type tools_opts :: [project_root: String.t()]
+  @type tools_opts :: [project_root: String.t(), changeset: pid() | nil]
 
   @default_destructive_tools ~w(write_file edit_file multi_edit_file shell git_stage git_commit rename)
 
@@ -109,16 +109,17 @@ defmodule MingaAgent.Tools do
   @spec all(tools_opts()) :: [Tool.t()]
   def all(opts \\ []) do
     root = Keyword.get(opts, :project_root, File.cwd!())
+    cs = Keyword.get(opts, :changeset)
 
     [
-      read_file(root),
-      write_file(root),
-      edit_file(root),
-      multi_edit_file(root),
+      read_file(root, cs),
+      write_file(root, cs),
+      edit_file(root, cs),
+      multi_edit_file(root, cs),
       list_directory(root),
       find(root),
       grep(root),
-      shell(root),
+      shell(root, cs),
       subagent(root),
       git_status(root),
       git_diff(root),
@@ -139,8 +140,8 @@ defmodule MingaAgent.Tools do
 
   # ── Tool definitions ────────────────────────────────────────────────────────
 
-  @spec read_file(String.t()) :: Tool.t()
-  defp read_file(root) do
+  @spec read_file(String.t(), pid() | nil) :: Tool.t()
+  defp read_file(root, cs) do
     Tool.new!(
       name: "read_file",
       description: """
@@ -169,8 +170,21 @@ defmodule MingaAgent.Tools do
       },
       callback: fn args ->
         path = resolve_and_validate_path!(root, args["path"])
-        opts = build_read_opts(args)
-        ReadFile.execute(path, opts)
+
+        if MingaAgent.Changeset.ToolRouter.active?(cs) do
+          case MingaAgent.Changeset.ToolRouter.read_file(cs, path) do
+            {:ok, content} ->
+              opts = build_read_opts(args)
+              apply_read_slice(content, path, opts)
+
+            {:error, _} ->
+              opts = build_read_opts(args)
+              ReadFile.execute(path, opts)
+          end
+        else
+          opts = build_read_opts(args)
+          ReadFile.execute(path, opts)
+        end
       end
     )
   end
@@ -183,8 +197,8 @@ defmodule MingaAgent.Tools do
     opts
   end
 
-  @spec write_file(String.t()) :: Tool.t()
-  defp write_file(root) do
+  @spec write_file(String.t(), pid() | nil) :: Tool.t()
+  defp write_file(root, cs) do
     Tool.new!(
       name: "write_file",
       description: """
@@ -208,16 +222,29 @@ defmodule MingaAgent.Tools do
       callback: fn args ->
         path = resolve_and_validate_path!(root, args["path"])
 
-        case WriteFile.execute(path, args["content"]) do
-          {:ok, msg} -> {:ok, maybe_append_diagnostics(path, msg)}
-          error -> error
+        case MingaAgent.Changeset.ToolRouter.write_file(cs, path, args["content"]) do
+          :passthrough ->
+            case WriteFile.execute(path, args["content"]) do
+              {:ok, msg} -> {:ok, maybe_append_diagnostics(path, msg)}
+              error -> error
+            end
+
+          :ok ->
+            {:ok,
+             maybe_append_diagnostics(
+               path,
+               "wrote #{byte_size(args["content"])} bytes to #{path} (via changeset)"
+             )}
+
+          {:error, reason} ->
+            {:error, inspect(reason)}
         end
       end
     )
   end
 
-  @spec edit_file(String.t()) :: Tool.t()
-  defp edit_file(root) do
+  @spec edit_file(String.t(), pid() | nil) :: Tool.t()
+  defp edit_file(root, cs) do
     Tool.new!(
       name: "edit_file",
       description: """
@@ -246,16 +273,30 @@ defmodule MingaAgent.Tools do
       callback: fn args ->
         path = resolve_and_validate_path!(root, args["path"])
 
-        case EditFile.execute(path, args["old_text"], args["new_text"]) do
-          {:ok, msg} -> {:ok, maybe_append_diagnostics(path, msg)}
-          error -> error
+        case MingaAgent.Changeset.ToolRouter.edit_file(
+               cs,
+               path,
+               args["old_text"],
+               args["new_text"]
+             ) do
+          :passthrough ->
+            case EditFile.execute(path, args["old_text"], args["new_text"]) do
+              {:ok, msg} -> {:ok, maybe_append_diagnostics(path, msg)}
+              error -> error
+            end
+
+          :ok ->
+            {:ok, maybe_append_diagnostics(path, "edited #{path} (via changeset)")}
+
+          {:error, reason} ->
+            {:error, inspect(reason)}
         end
       end
     )
   end
 
-  @spec multi_edit_file(String.t()) :: Tool.t()
-  defp multi_edit_file(root) do
+  @spec multi_edit_file(String.t(), pid() | nil) :: Tool.t()
+  defp multi_edit_file(root, cs) do
     Tool.new!(
       name: "multi_edit_file",
       description: """
@@ -296,9 +337,13 @@ defmodule MingaAgent.Tools do
         path = resolve_and_validate_path!(root, args["path"])
         edits = args["edits"] || []
 
-        case MultiEditFile.execute(path, edits) do
-          {:ok, msg} -> {:ok, maybe_append_diagnostics(path, msg)}
-          error -> error
+        if MingaAgent.Changeset.ToolRouter.active?(cs) do
+          apply_multi_edit_via_changeset(cs, path, edits)
+        else
+          case MultiEditFile.execute(path, edits) do
+            {:ok, msg} -> {:ok, maybe_append_diagnostics(path, msg)}
+            error -> error
+          end
         end
       end
     )
@@ -415,8 +460,8 @@ defmodule MingaAgent.Tools do
     )
   end
 
-  @spec shell(String.t()) :: Tool.t()
-  defp shell(root) do
+  @spec shell(String.t(), pid() | nil) :: Tool.t()
+  defp shell(root, cs) do
     Tool.new!(
       name: "shell",
       description: """
@@ -442,7 +487,8 @@ defmodule MingaAgent.Tools do
       callback: fn args ->
         flush_before_shell()
         timeout_secs = min(args["timeout"] || 30, 300)
-        Shell.execute(args["command"], root, timeout_secs)
+        cwd = MingaAgent.Changeset.ToolRouter.working_dir(cs) || root
+        Shell.execute(args["command"], cwd, timeout_secs)
       end
     )
   end
@@ -964,5 +1010,90 @@ defmodule MingaAgent.Tools do
     end
 
     resolved
+  end
+
+  # Applies offset/limit slicing to content read from a changeset.
+  @spec apply_read_slice(String.t(), String.t(), keyword()) :: {:ok, String.t()}
+  defp apply_read_slice(content, _path, []) do
+    {:ok, content}
+  end
+
+  defp apply_read_slice(content, path, opts) do
+    lines = String.split(content, "\n")
+    total = length(lines)
+    offset = Keyword.get(opts, :offset, 1)
+    limit = Keyword.get(opts, :limit, total)
+
+    start_idx = max(offset - 1, 0)
+    sliced = Enum.slice(lines, start_idx, limit)
+    end_line = min(start_idx + limit, total)
+
+    header = "[lines #{offset}-#{end_line} of #{total}] #{path}\n"
+    {:ok, header <> Enum.join(sliced, "\n")}
+  end
+
+  # Applies multiple edits to a file through the changeset by reading,
+  # applying each edit sequentially, then writing the result back.
+  @spec apply_multi_edit_via_changeset(pid(), String.t(), [map()]) ::
+          {:ok, String.t()} | {:error, String.t()}
+  defp apply_multi_edit_via_changeset(cs, path, edits) do
+    alias MingaAgent.Changeset.ToolRouter
+
+    case ToolRouter.read_file(cs, path) do
+      {:ok, content} ->
+        {final_content, results} = reduce_edits(content, edits)
+        commit_multi_edits(cs, path, final_content, results)
+
+      {:error, reason} ->
+        {:error, "failed to read #{path}: #{inspect(reason)}"}
+    end
+  end
+
+  @spec reduce_edits(String.t(), [map()]) :: {String.t(), [{:ok | :error, String.t()}]}
+  defp reduce_edits(content, edits) do
+    {final, reversed} =
+      Enum.reduce(edits, {content, []}, fn edit, {current, acc} ->
+        old_text = edit["old_text"] || ""
+        new_text = edit["new_text"] || ""
+
+        if String.contains?(current, old_text) do
+          updated = String.replace(current, old_text, new_text, global: false)
+          {updated, [{:ok, old_text} | acc]}
+        else
+          {current, [{:error, old_text} | acc]}
+        end
+      end)
+
+    {final, Enum.reverse(reversed)}
+  end
+
+  @spec commit_multi_edits(pid(), String.t(), String.t(), [{:ok | :error, String.t()}]) ::
+          {:ok, String.t()} | {:error, String.t()}
+  defp commit_multi_edits(cs, path, final_content, results) do
+    ok_count = Enum.count(results, &match?({:ok, _}, &1))
+
+    if ok_count == 0 do
+      {:error, "no edits matched in #{path}"}
+    else
+      MingaAgent.Changeset.ToolRouter.write_file(cs, path, final_content)
+      msg = format_multi_edit_result(path, results, ok_count)
+      {:ok, maybe_append_diagnostics(path, msg)}
+    end
+  end
+
+  @spec format_multi_edit_result(String.t(), [{:ok | :error, String.t()}], non_neg_integer()) ::
+          String.t()
+  defp format_multi_edit_result(path, results, ok_count) do
+    base = "applied #{ok_count}/#{length(results)} edits to #{path} (via changeset)"
+
+    failed =
+      results
+      |> Enum.filter(&match?({:error, _}, &1))
+      |> Enum.map(fn {:error, text} -> String.slice(text, 0, 40) end)
+
+    case failed do
+      [] -> base
+      names -> base <> ". Failed: #{Enum.join(names, ", ")}"
+    end
   end
 end
