@@ -26,7 +26,7 @@ defmodule MingaEditor.Commands.AgentSession do
   def restart_session(state, message) do
     if AgentAccess.session(state) do
       try do
-        GenServer.stop(AgentAccess.session(state), :normal, 1000)
+        MingaAgent.SessionManager.stop_session_by_pid(AgentAccess.session(state))
       catch
         :exit, _ -> :ok
       end
@@ -131,14 +131,14 @@ defmodule MingaEditor.Commands.AgentSession do
 
   @spec start_and_subscribe(keyword()) :: {:ok, pid()} | {:error, term()}
   defp start_and_subscribe(opts) do
-    case MingaAgent.Supervisor.start_session(opts) do
-      {:ok, pid} ->
+    case MingaAgent.SessionManager.start_session(opts) do
+      {:ok, _session_id, pid} ->
         try do
           Session.subscribe(pid)
           {:ok, pid}
         catch
           :exit, reason ->
-            MingaAgent.Supervisor.stop_session(pid)
+            MingaAgent.SessionManager.stop_session_by_pid(pid)
             {:error, reason}
         end
 
