@@ -33,8 +33,8 @@ defmodule Minga.Application do
       │   ├── Minga.Config.Loader
       │   ├── Minga.LSP.Supervisor
       │   ├── Minga.LSP.SyncServer
-      │   ├── Minga.Project
-      │   └── MingaAgent.Supervisor
+      │   └── Minga.Project
+      ├── MingaAgent.Supervisor (DynamicSupervisor, one_for_one)
       ├── Minga.Runtime.Supervisor (one_for_one, conditional)
       │   ├── MingaEditor.Watchdog          (independent leaf)
       │   ├── Minga.FileWatcher              (independent leaf)
@@ -81,7 +81,8 @@ defmodule Minga.Application do
       Minga.Foundation.Supervisor,
       {Registry, keys: :unique, name: Minga.Buffer.Registry},
       {DynamicSupervisor, name: Minga.Buffer.Supervisor, strategy: :one_for_one},
-      Minga.Services.Supervisor
+      Minga.Services.Supervisor,
+      MingaAgent.Supervisor
     ]
 
     editor_children =
