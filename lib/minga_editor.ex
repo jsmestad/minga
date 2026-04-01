@@ -212,6 +212,7 @@ defmodule MingaEditor do
     Minga.Events.subscribe(:log_message)
     Minga.Events.subscribe(:face_overrides_changed)
     Minga.Events.subscribe(:agent_session_stopped)
+    Minga.Events.subscribe(:load_user_themes)
 
     # Monitor all initial buffers so we get :DOWN when they die.
     all_initial_pids =
@@ -867,6 +868,19 @@ defmodule MingaEditor do
     end
 
     Commands.BufferManagement.handle_agent_session_down(state, pid, reason)
+  end
+
+  defp dispatch_minga_event(state, :load_user_themes, _payload, _msg) do
+    alias MingaEditor.UI.Theme.Loader, as: ThemeLoader
+
+    {themes, errors} = ThemeLoader.load_all()
+    MingaEditor.UI.Theme.register_user_themes(themes)
+
+    for %{path: path, error: error} <- errors do
+      Minga.Log.warning(:editor, "Theme load error: #{path}: #{error}")
+    end
+
+    state
   end
 
   defp dispatch_minga_event(state, _event, _payload, _msg), do: state

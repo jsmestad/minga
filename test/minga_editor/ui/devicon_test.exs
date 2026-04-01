@@ -1,7 +1,7 @@
 defmodule Minga.DeviconTest do
   use ExUnit.Case, async: true
 
-  alias MingaEditor.UI.Devicon
+  alias Minga.Language.Devicon
 
   @all_filetypes [
     :bash,

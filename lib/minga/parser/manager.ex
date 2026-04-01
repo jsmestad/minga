@@ -7,7 +7,7 @@ defmodule Minga.Parser.Manager do
   forwarded to subscribers. Outgoing highlight commands are encoded and
   sent to the Port.
 
-  This is the parsing counterpart to `MingaEditor.Frontend.Manager` (which handles
+  This is the parsing counterpart to the frontend manager (which handles
   rendering). Separating parsing from rendering means every frontend gets
   syntax highlighting for free, and a parser crash does not kill the
   renderer.
@@ -30,12 +30,12 @@ defmodule Minga.Parser.Manager do
       {:minga_highlight, event}
 
   where `event` is one of the highlight response types from
-  `MingaEditor.Frontend.Protocol`.
+  `Minga.Parser.Protocol`.
   """
 
   use GenServer
 
-  alias MingaEditor.Frontend.Protocol
+  alias Minga.Parser.Protocol
 
   # ── Restart constants ──
 
@@ -343,6 +343,10 @@ defmodule Minga.Parser.Manager do
         broadcast(state.subscribers, {:minga_highlight, event})
         {:noreply, state}
 
+      :unknown ->
+        Minga.Log.warning(:port, "Parser: received unknown opcode")
+        {:noreply, state}
+
       {:error, reason} ->
         Minga.Log.warning(:port, "Parser: failed to decode event: #{inspect(reason)}")
         {:noreply, state}
@@ -429,9 +433,11 @@ defmodule Minga.Parser.Manager do
         "Parser crashed repeatedly (#{@max_restart_attempts} times in #{div(@restart_window_ms, 1000)}s), syntax highlighting disabled. Use :parser-restart to retry."
       )
 
-      MingaEditor.log_to_messages(
-        "Parser crashed repeatedly, syntax highlighting disabled. Use :parser-restart to retry."
-      )
+      Minga.Events.broadcast(:log_message, %Minga.Events.LogMessageEvent{
+        text:
+          "Parser crashed repeatedly, syntax highlighting disabled. Use :parser-restart to retry.",
+        level: :warning
+      })
 
       broadcast(state.subscribers, {:minga_highlight, :parser_gave_up})
       %{state | gave_up: true, restart_timestamps: recent}

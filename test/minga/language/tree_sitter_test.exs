@@ -2,7 +2,7 @@ defmodule Minga.Language.TreeSitterTest do
   use ExUnit.Case, async: false
 
   alias Minga.Language.TreeSitter
-  alias MingaEditor.UI.Highlight.Grammar, as: HLGrammar
+  alias Minga.Language.Grammar, as: HLGrammar
 
   @moduletag :tmp_dir
 

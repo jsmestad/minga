@@ -1,8 +1,8 @@
 defmodule MingaEditor.UI.Popup.RegistryTest do
   use ExUnit.Case, async: true
 
-  alias MingaEditor.UI.Popup.Registry
-  alias MingaEditor.UI.Popup.Rule
+  alias Minga.Popup.Registry
+  alias Minga.Popup.Rule
 
   setup do
     # Each test gets its own ETS table via a unique atom name.

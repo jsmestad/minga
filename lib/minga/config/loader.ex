@@ -32,8 +32,7 @@ defmodule Minga.Config.Loader do
   alias Minga.Extension.Registry, as: ExtRegistry
   alias Minga.Extension.Supervisor, as: ExtSupervisor
   alias Minga.Keymap
-  alias MingaEditor.UI.Popup.Registry, as: PopupRegistry
-  alias MingaEditor.UI.Theme.Loader, as: ThemeLoader
+  alias Minga.Popup.Registry, as: PopupRegistry
 
   @typedoc "Loader state: stores paths, loaded modules, and any errors from each stage."
   @type state :: %{
@@ -216,13 +215,7 @@ defmodule Minga.Config.Loader do
 
   @spec load_user_themes() :: :ok
   defp load_user_themes do
-    {themes, errors} = ThemeLoader.load_all()
-    MingaEditor.UI.Theme.register_user_themes(themes)
-
-    for %{path: path, error: error} <- errors do
-      Minga.Log.warning(:editor, "Theme load error: #{path}: #{error}")
-    end
-
+    Minga.Events.broadcast(:load_user_themes, %Minga.Events.LoadUserThemesEvent{})
     :ok
   end
 
@@ -359,7 +352,7 @@ defmodule Minga.Config.Loader do
 
   @spec register_default_popup_rules() :: :ok
   defp register_default_popup_rules do
-    alias MingaEditor.UI.Popup.Rule
+    alias Minga.Popup.Rule
 
     PopupRegistry.init()
 

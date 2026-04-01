@@ -41,8 +41,8 @@ defmodule Minga.Config do
   alias Minga.Config.Options
   alias Minga.Extension.Registry, as: ExtRegistry
   alias Minga.Keymap
-  alias MingaEditor.UI.Popup.Registry, as: PopupRegistry
-  alias MingaEditor.UI.Popup.Rule, as: PopupRule
+  alias Minga.Popup.Registry, as: PopupRegistry
+  alias Minga.Popup.Rule, as: PopupRule
 
   # ── Read options ───────────────────────────────────────────────────
 
@@ -326,7 +326,9 @@ defmodule Minga.Config do
         if state.diagnostics_count == 0 do
           execute.(state)
         else
-          MingaEditor.State.set_status(state, "Skipping format: has errors")
+          # In production, this state is the Editor's internal state.
+          # The advice callback can modify it to show a status message.
+          %{state | status_msg: "Skipping format: has errors"}
         end
       end
 
@@ -517,7 +519,7 @@ defmodule Minga.Config do
 
   ## Options
 
-  See `MingaEditor.UI.Popup.Rule` for the full list of supported options.
+  See `Minga.Popup.Rule` for the full list of supported options.
   """
   @spec popup(Regex.t() | String.t(), keyword()) :: :ok
   def popup(pattern, opts \\ []) when is_binary(pattern) or is_struct(pattern, Regex) do

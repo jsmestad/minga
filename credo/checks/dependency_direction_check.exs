@@ -117,22 +117,13 @@ defmodule Minga.Credo.DependencyDirectionCheck do
     # Frontend facade calls Protocol.GUI for GUI-specific config encoding
     # (line spacing, etc.). Same structural dispatch pattern.
     "MingaEditor.Frontend" => ["MingaEditor.Frontend.Protocol.GUI"],
-    # Pre-existing cross-layer refs exposed by Wave 2 namespace split.
-    # These existed when all modules were under Minga.* but were invisible
-    # because UI.* straddled Layer 1 and Layer 2. Fix in future waves.
-    "Minga.Project.FileTree.BufferSync" => ["MingaEditor.UI.Devicon"],
-    "Minga.Parser.Manager" => ["MingaEditor.Frontend.Protocol"],
-    "Minga.Language.TreeSitter" => ["MingaEditor.UI.Highlight.Grammar"],
-    "Minga.Config.Loader" => [
-      "MingaEditor.UI.Popup.Rule",
-      "MingaEditor.UI.Popup.Registry",
-      "MingaEditor.UI.Theme.Loader"
-    ],
-    "Minga.Config" => [
-      "MingaEditor.UI.Popup.Rule",
-      "MingaEditor.UI.Popup.Registry"
-    ],
-    "Minga.Application" => ["MingaEditor.UI.Highlight.Grammar"]
+    # All pre-existing cross-layer violations from #1368 have been resolved
+    # in Wave 6 Track B. Modules were moved to their correct layers:
+    # - Devicon → Minga.Language.Devicon
+    # - Grammar → Minga.Language.Grammar
+    # - Popup.Rule/Registry → Minga.Popup.Rule/Registry
+    # - Parser protocol → Minga.Parser.Protocol
+    # - Theme loading → Events broadcast
   }
 
   # Cross-cutting modules allowed everywhere.

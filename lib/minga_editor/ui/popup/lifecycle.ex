@@ -40,8 +40,8 @@ defmodule MingaEditor.UI.Popup.Lifecycle do
   alias MingaEditor.WindowTree
   alias Minga.Core.Face
   alias MingaEditor.UI.Popup.Active, as: PopupActive
-  alias MingaEditor.UI.Popup.Registry, as: PopupRegistry
-  alias MingaEditor.UI.Popup.Rule
+  alias Minga.Popup.Registry, as: PopupRegistry
+  alias Minga.Popup.Rule
   alias MingaEditor.Workspace.State, as: WorkspaceState
 
   @type state :: EditorState.t()
@@ -60,7 +60,7 @@ defmodule MingaEditor.UI.Popup.Lifecycle do
   @spec open_popup(state(), String.t(), pid(), keyword()) :: {:ok, state()} | :no_match
   def open_popup(state, buffer_name, buffer_pid, opts \\ [])
       when is_binary(buffer_name) and is_pid(buffer_pid) do
-    registry = Keyword.get(opts, :registry, MingaEditor.UI.Popup.Registry)
+    registry = Keyword.get(opts, :registry, Minga.Popup.Registry)
 
     case PopupRegistry.match(buffer_name, registry) do
       {:ok, rule} ->

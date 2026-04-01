@@ -201,6 +201,12 @@ defmodule Minga.Events do
           }
   end
 
+  defmodule LoadUserThemesEvent do
+    @moduledoc "Payload for `:load_user_themes` events. Signals that Config.Loader wants themes loaded."
+    defstruct []
+    @type t :: %__MODULE__{}
+  end
+
   # ── Types ───────────────────────────────────────────────────────────────────
 
   @typedoc "Known event topics."
@@ -228,6 +234,7 @@ defmodule Minga.Events do
           | :agent_session_stopped
           | :changeset_merged
           | :changeset_budget_exhausted
+          | :load_user_themes
 
   @typedoc "Typed event payloads. Each topic has a specific struct."
   @type payload ::
@@ -342,6 +349,7 @@ defmodule Minga.Events do
   @spec broadcast(:changeset_merged, MingaAgent.Changeset.MergedEvent.t()) :: :ok
   @spec broadcast(:changeset_budget_exhausted, MingaAgent.Changeset.BudgetExhaustedEvent.t()) ::
           :ok
+  @spec broadcast(:load_user_themes, LoadUserThemesEvent.t()) :: :ok
   def broadcast(topic, %_{} = payload) when is_atom(topic) do
     Registry.dispatch(@registry, topic, fn entries ->
       for {pid, _value} <- entries do
