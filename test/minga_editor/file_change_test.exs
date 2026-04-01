@@ -138,8 +138,6 @@ defmodule MingaEditor.FileChangeTest do
 
     # Send notification for a different file
     send(ctx.editor, {:file_changed_on_disk, "/tmp/nonexistent.txt"})
-    _ = :sys.get_state(ctx.editor)
-
     state = :sys.get_state(ctx.editor)
     assert state.workspace.pending_conflict == nil
     assert state.shell_state.status_msg == nil

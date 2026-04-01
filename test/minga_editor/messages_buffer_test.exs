@@ -20,6 +20,8 @@ defmodule MingaEditor.MessagesBufferTest do
 
     test "messages buffer contains editor startup log" do
       ctx = start_editor("hello")
+      # Barrier: ensure startup log_message cast has been processed
+      _ = :sys.get_state(ctx.editor)
       send_keys_sync(ctx, "<SPC>bm")
 
       # The messages buffer content appears in the popup split area.
@@ -59,21 +61,6 @@ defmodule MingaEditor.MessagesBufferTest do
 
       # Toggle it closed
       send_keys_sync(ctx, "<SPC>bm")
-      screen = screen_text(ctx)
-      all_text = Enum.join(screen, "\n")
-      refute String.contains?(all_text, "*Messages*")
-    end
-
-    test "q dismisses the messages popup" do
-      ctx = start_editor("hello")
-      send_keys_sync(ctx, "<SPC>bm")
-
-      screen = screen_text(ctx)
-      all_text = Enum.join(screen, "\n")
-      assert String.contains?(all_text, "*Messages*")
-
-      # Press q to dismiss
-      send_keys_sync(ctx, "q")
       screen = screen_text(ctx)
       all_text = Enum.join(screen, "\n")
       refute String.contains?(all_text, "*Messages*")

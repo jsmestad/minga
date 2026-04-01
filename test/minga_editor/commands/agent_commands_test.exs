@@ -16,7 +16,6 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
   alias Minga.Buffer.Server, as: BufferServer
   alias MingaEditor.Commands.Agent, as: AgentCommands
   alias MingaEditor.State, as: EditorState
-  alias MingaAgent.RuntimeState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Buffers

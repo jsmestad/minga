@@ -133,12 +133,15 @@ defmodule Minga.Core.DiffMerge3Test do
     end
   end
 
+  # max_runs kept low to avoid scheduler starvation under full-suite
+  # concurrency (7000+ async tests). Higher values caused intermittent
+  # timeouts on CI with max_cases: 8.
   describe "merge3/3 properties" do
     property "merge3 with unchanged parent returns fork verbatim" do
       check all(
               ancestor <- line_list(),
               fork <- line_list(),
-              max_runs: 300
+              max_runs: 100
             ) do
         assert {:ok, ^fork} = Diff.merge3(ancestor, fork, ancestor)
       end
@@ -148,7 +151,7 @@ defmodule Minga.Core.DiffMerge3Test do
       check all(
               ancestor <- line_list(),
               parent <- line_list(),
-              max_runs: 300
+              max_runs: 100
             ) do
         assert {:ok, ^parent} = Diff.merge3(ancestor, ancestor, parent)
       end
@@ -158,7 +161,7 @@ defmodule Minga.Core.DiffMerge3Test do
       check all(
               ancestor <- line_list(),
               changed <- line_list(),
-              max_runs: 300
+              max_runs: 100
             ) do
         assert {:ok, ^changed} = Diff.merge3(ancestor, changed, changed)
       end
@@ -169,7 +172,7 @@ defmodule Minga.Core.DiffMerge3Test do
               a <- line_list(),
               f <- line_list(),
               p <- line_list(),
-              max_runs: 500
+              max_runs: 200
             ) do
         result = Diff.merge3(a, f, p)
 

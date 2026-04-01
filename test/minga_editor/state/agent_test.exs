@@ -2,7 +2,6 @@ defmodule MingaEditor.State.AgentTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Server, as: BufferServer
-  alias MingaAgent.RuntimeState
   alias MingaEditor.State.Agent, as: AgentState
 
   defp new_agent do
