@@ -645,40 +645,29 @@ grep -rn "alias MingaEditor\|import MingaEditor" lib/minga/ lib/minga_agent/ | w
 **Agents:** 2 (one per track)
 **Gate:** Render pipeline reads from narrow contract, chrome skips rebuild when unchanged
 
-### Track A: RenderPipeline.Input contract (1 agent)
+### Track A: RenderPipeline.Input contract (1 agent) ✅ DONE
 
-**Files to read:**
-- `lib/minga_editor/render_pipeline.ex` → current `run/1` signature, what it reads from state
-- `lib/minga_editor/render_pipeline/scroll.ex` → what Scroll reads from state
-- `lib/minga_editor/render_pipeline/content.ex` → what Content reads from state
-- `lib/minga_editor/render_pipeline/chrome.ex` → what Chrome reads from state
-- `lib/minga_editor/render_pipeline/compose.ex` → what Compose reads from state
-- `lib/minga_editor/frontend/emit.ex` → what Emit reads from state
-- `lib/minga_editor/state.ex` → EditorState struct definition
+**Completed:** 2026-04-01 — All three PRs merged in #1383.
 
-**PR A-4.1: Define RenderPipeline.Input struct**
+**PR A-4.1: Define RenderPipeline.Input struct** ✅
 
-Create the narrow rendering contract. Read every field access inside the pipeline modules (grep for `state.workspace`, `state.shell_state`, `state.theme`, etc.) and bundle exactly those into the Input struct.
+Created `lib/minga_editor/render_pipeline/input.ex`. Input bundles ~21 fields from EditorState (13 top-level + workspace map with 11 fields), excluding ~13 GenServer-only fields. `Input.from_editor_state/1` builds it; `EditorState.apply_render_output/2` writes mutations back (Rule 2 compliant). The workspace is stored as a plain map field (not a WorkspaceState struct) so existing `state.workspace.X` pattern-matches work unchanged.
 
-**File to create:** `lib/minga_editor/render_pipeline/input.ex`
+**PR A-4.2: Wire pipeline to read from Input** ✅
 
-**PR A-4.2: Wire pipeline to read from Input**
+`RenderPipeline.run/1` takes `Input.t()`. `Renderer.render_buffer` does `Input.from_editor_state → run → apply_render_output`. All 6 pipeline stage modules thread Input. 27 files changed total. 8 downstream modules (TreeRenderer, ViewContext, StatusBarData, Title, Layout, SearchHighlight, SemanticWindow.Builder, MingaEditor.Editing) gained map-matching fallback clauses or widened specs to accept Input alongside EditorState. `TestHelpers.run_pipeline/1` wraps the conversion for existing pipeline tests.
 
-Change `RenderPipeline.run/1` to take `Input.t()`. Add `MingaEditor.State.build_render_input/1`. Fix every compile error: each broken reference is a field that needs to be in Input or logic that needs to move out of the pipeline.
+**PR A-4.3: Chrome dirty tracking** ✅
 
-**Files to modify:** `lib/minga_editor/render_pipeline.ex`, all files in `lib/minga_editor/render_pipeline/`, `lib/minga_editor/renderer.ex`
-
-**PR A-4.3: Chrome dirty tracking**
-
-Add `chrome_hash` to `Input.t()`. Hash the chrome inputs (tab bar data, modeline data, file tree state, agent panel state) at construction time. In the chrome stage, compare to previous hash. Skip rebuild when unchanged.
-
-**Files to modify:** `lib/minga_editor/render_pipeline/input.ex`, `lib/minga_editor/render_pipeline.ex` (chrome stage), `lib/minga_editor/shell/traditional/chrome.ex` or wherever chrome is built
+`Input.chrome_fingerprint/1` hashes 17 chrome-relevant fields via `:erlang.phash2` (vim mode, mode_state, tab_bar, status_msg, nav_flash, file_tree, completion, hover_popup, signature_help, whichkey, picker_ui, prompt_ui, agent state, viewport dimensions, window splits, bottom_panel, git_status_panel, plus active buffer cursor and version). The chrome stage compares against the previous frame's fingerprint (process dictionary cache) and reuses the cached `Chrome` result when unchanged.
 
 **Verification:**
 ```bash
 make lint && mix test.llm
-# Verify chrome skip works (add a temporary Minga.Log.debug in the chrome stage):
-# "chrome stage: skipped (hash unchanged)" should appear during idle typing
+# RenderPipeline.run takes Input.t():
+grep '@spec run(input())' lib/minga_editor/render_pipeline.ex
+# Chrome skip log (set :log_level_render to :debug):
+# "[render:chrome] skipped (fingerprint unchanged)" appears during idle viewing
 ```
 
 ---
@@ -712,7 +701,18 @@ make lint && mix test.llm
 ```bash
 make lint && mix test.llm
 # RenderPipeline.run takes Input.t(), not EditorState.t():
-grep "def run(%MingaEditor.RenderPipeline.Input{}" lib/minga_editor/render_pipeline.ex
+grep '@spec run(input())' lib/minga_editor/render_pipeline.ex
+# Should find the spec (input type aliases Input.t())
+# Chrome skip works:
+grep 'chrome_prev_fingerprint' lib/minga_editor/render_pipeline.ex
+# Should find the process dictionary cache check
+```
+
+Original gate command used `grep "def run(%MingaEditor.RenderPipeline.Input"}"` to check for a struct match in the function head. The actual implementation uses `@spec run(input())` with a type alias instead, which is idiomatic Elixir.
+
+Old verification block (superseded):
+```bash
+# grep "def run(%MingaEditor.RenderPipeline.Input{}" lib/minga_editor/render_pipeline.ex
 # Should find the function head
 ```
 
@@ -1861,5 +1861,13 @@ Notes from completed tracks that affect future waves. Tag the wave so agents can
 - **Wave 4 / Track B:** The plan listed only 4 fields for RuntimeState (`active_session_id`, `status`, `model_name`, `provider_name`). `error` and `pending_approval` were considered but kept on `MingaEditor.State.Agent` since they're cached projections for rendering, not domain state the headless runtime needs. `status` is the only field that genuinely represents domain lifecycle state. If Wave 5 needs error/approval in the headless path, they can move then.
 
 - **Wave 4 / Track B:** `MingaEditor.State.rebuild_agent_from_session/2` directly updates `State.Agent` fields via `%{agent | status: ..., pending_approval: ..., error: ...}` inside an `AgentAccess.update_agent` closure. This is a pre-existing Rule 2 violation (external module mutating a struct it doesn't own). Updated it to use `RuntimeState.set_status/2` for the status field. A proper fix would add a `State.Agent.rebuild_from_snapshot/3` function, but that's out of scope for this track.
+
+- **Wave 4 / Track A:** The plan called for `MingaEditor.State.build_render_input/1` but the function was named `Input.from_editor_state/1` on the Input module instead, with `EditorState.apply_render_output/2` for the write-back (Rule 2 compliance: EditorState owns its struct mutations). The plan's gate command (`grep "def run(%MingaEditor.RenderPipeline.Input{})"`) assumed a struct match in the function head, but the implementation uses `@spec run(input())` with a type alias, which is idiomatic Elixir.
+
+- **Wave 4 / Track A:** Input stores workspace fields as a plain map (not a WorkspaceState struct) so that existing `state.workspace.X` pattern-matches throughout the pipeline work unchanged. This was a pragmatic choice: updating every pattern-match site to read from Input fields directly would have been a much larger change with no functional benefit. The workspace map has the same keys as WorkspaceState.
+
+- **Wave 4 / Track A:** Wiring the pipeline exposed 8 downstream modules that pattern-matched on `%EditorState{}` or used EditorState-specific APIs (like `EditorState.split?/1`, `EditorState.tree_rect/1`). These were fixed with map-matching fallback clauses or by calling the underlying module directly (e.g., `Windows.split?` instead of `EditorState.split?`). Affected modules: TreeRenderer, ViewContext, StatusBarData, Title, Layout (TUI + GUI), SearchHighlight, SemanticWindow.Builder, MingaEditor.Editing. One `get_in(state, [:workspace, :buffers, :active])` in Title was also fixed (structs don't implement Access).
+
+- **Wave 4 / Track A:** Chrome fingerprinting uses `:erlang.phash2` over a tuple of 17+ fields plus active buffer cursor/version (fetched via GenServer call). The buffer cursor and version are included because the status bar displays them; without them, the chrome skip would cause a stale status bar during typing. The fingerprint is cached in the process dictionary (`chrome_prev_fingerprint`, `chrome_prev_result`) following the same pattern as emit tracking.
 
 - **Wave 1 / Track C:** The original verification command `grep ... | grep -v "headless"` was written incorrectly — it checks for the word "headless" on the *same line* as the timer call, but all guards are on a separate `if` line. The context-aware Python check is the correct approach. Updated the verification command in the Track C section above.
