@@ -149,6 +149,81 @@ defmodule MingaEditor.RenderPipeline.Input do
     }
   end
 
+  # ── Chrome dirty tracking ──────────────────────────────────────────────────
+
+  @doc """
+  Computes a fingerprint of chrome-relevant fields for dirty tracking.
+
+  The chrome stage is expensive (tab bar, status bar, file tree, overlays).
+  When the fingerprint matches the previous frame's, the chrome stage can
+  reuse cached draws. The fingerprint covers all fields that affect chrome
+  output; buffer content changes (which only affect the Content stage) do
+  not change the fingerprint.
+
+  Returns an integer hash suitable for fast equality comparison.
+  """
+  @spec chrome_fingerprint(t()) :: integer()
+  def chrome_fingerprint(%__MODULE__{} = input) do
+    # Hash the fields that drive chrome output. We use :erlang.phash2
+    # for speed (no crypto needed, just change detection).
+    #
+    # Includes the active buffer's cursor and version because the status
+    # bar displays cursor position, line count, and dirty state. These
+    # are fetched from the buffer GenServer, so we read them here to
+    # ensure the fingerprint changes when they do.
+    buf = input.workspace.buffers.active
+    {buf_cursor, buf_version} = buffer_fingerprint_data(buf)
+
+    :erlang.phash2({
+      # Buffer state for status bar (cursor pos, version/dirty)
+      buf_cursor,
+      buf_version,
+      # Mode affects status bar label, minibuffer content, cursor shape
+      input.workspace.editing.mode,
+      input.workspace.editing.mode_state,
+      # Tab bar state
+      input.shell_state |> Map.get(:tab_bar),
+      # Status message (flash messages in status bar)
+      input.shell_state |> Map.get(:status_msg),
+      # Nav flash overlay
+      input.shell_state |> Map.get(:nav_flash),
+      # File tree
+      input.workspace.file_tree,
+      # Completion overlay
+      input.workspace.completion,
+      # Hover popup and signature help
+      input.shell_state |> Map.get(:hover_popup),
+      input.shell_state |> Map.get(:signature_help),
+      # Which-key popup
+      input.shell_state |> Map.get(:whichkey),
+      # Picker UI
+      input.shell_state |> Map.get(:picker_ui),
+      # Prompt UI
+      input.shell_state |> Map.get(:prompt_ui),
+      # Agent state (status, pending approval)
+      input.shell_state |> Map.get(:agent),
+      # Viewport dimensions (overlay positioning)
+      input.workspace.viewport.rows,
+      input.workspace.viewport.cols,
+      # Window splits (separator rendering)
+      input.workspace.windows.tree,
+      # Bottom panel
+      input.shell_state |> Map.get(:bottom_panel),
+      # Git status panel
+      input.shell_state |> Map.get(:git_status_panel)
+    })
+  end
+
+  @spec buffer_fingerprint_data(pid() | nil) ::
+          {{non_neg_integer(), non_neg_integer()}, non_neg_integer()}
+  defp buffer_fingerprint_data(nil), do: {{0, 0}, 0}
+
+  defp buffer_fingerprint_data(buf) when is_pid(buf) do
+    {Minga.Buffer.cursor(buf), Minga.Buffer.version(buf)}
+  catch
+    :exit, _ -> {{0, 0}, 0}
+  end
+
   @doc """
   Syncs the active window's cursor from the buffer process.
 
