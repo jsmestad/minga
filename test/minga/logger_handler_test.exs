@@ -81,8 +81,8 @@ defmodule Minga.LoggerHandlerTest do
   end
 
   describe "flush_buffer/0" do
-    test "returns 0 when buffer is empty" do
-      assert LoggerHandler.flush_buffer() == 0
+    test "returns empty list when buffer is empty" do
+      assert LoggerHandler.flush_buffer() == []
     end
 
     test "clears the buffer after flushing" do
@@ -99,7 +99,7 @@ defmodule Minga.LoggerHandlerTest do
       assert :ets.info(@buffer_table, :size) == 0
     end
 
-    test "returns the count of flushed messages" do
+    test "returns the flushed message entries" do
       refute Process.whereis(MingaEditor)
 
       for i <- 1..3 do
@@ -107,7 +107,9 @@ defmodule Minga.LoggerHandlerTest do
         LoggerHandler.log(event, %{})
       end
 
-      assert LoggerHandler.flush_buffer() == 3
+      entries = LoggerHandler.flush_buffer()
+      assert length(entries) == 3
+      assert Enum.all?(entries, fn {text, level} -> is_binary(text) and level == :warning end)
     end
   end
 

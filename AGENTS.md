@@ -818,13 +818,11 @@ Any new modeline data (diagnostic counts, indent info, selection size, etc.) mus
 4. Test with edge cases (cursor outside delimiters, nested, empty)
 
 ### New or modified agent tool
-Agent tools live in `lib/minga/agent/tools/`. When adding or modifying a tool that reads or writes file content:
+Agent tools live in `lib/minga_agent/tools/`. When adding or modifying a tool that reads or writes file content:
 
-1. **Prefer `Minga.Buffer` over filesystem I/O.** If a buffer is open for the file, route through `Minga.Buffer`. Use `Minga.Buffer.content/1` instead of `File.read/1`, and `Minga.Buffer.apply_edit/6` instead of `File.write/2`. This gives you undo integration, tree-sitter sync, instant visibility, and no file watcher noise. Fall back to filesystem I/O only when no buffer exists for the file. See [BUFFER-AWARE-AGENTS.md](docs/BUFFER-AWARE-AGENTS.md) for the full rationale.
+1. **File tools route through `MingaAgent.ToolRouter`.** The router checks whether a buffer is open for the target path. If so, it creates a `Buffer.Fork` (lazy, on first write) for in-memory isolation. If a changeset overlay is active, it routes through that instead. Only when neither is available does it fall through to direct filesystem I/O. See [BUFFER-AWARE-AGENTS.md](docs/BUFFER-AWARE-AGENTS.md) for the design rationale.
 2. **Batch edits into a single call** rather than making N separate calls. One call = one undo entry, one version bump.
-3. **Test the tool function** in `test/minga/agent/tools/`.
-
-> **Note:** Buffer routing is being implemented in phases. Today, tools still use `File.read/write` directly. When wiring a tool to use buffers, follow the pattern in `BUFFER-AWARE-AGENTS.md` Phase 1.
+3. **Test the tool function** in `test/minga_agent/tools/`.
 
 ### New render command (requires BEAM + frontend changes)
 1. Add opcode constant and encoder in `Minga.Port.Protocol` (BEAM side, canonical source of truth)

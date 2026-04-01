@@ -185,11 +185,20 @@ defmodule MingaEditor do
     # Flush any log messages that arrived while the Editor was down
     # (e.g., supervisor crash reports from a previous Editor crash).
     # Must happen after *Messages* buffer is ready but before we return.
-    flushed = Minga.LoggerHandler.flush_buffer()
+    buffered_entries = Minga.LoggerHandler.flush_buffer()
 
     state =
-      if flushed > 0 do
-        log_message(state, "Replayed #{flushed} message(s) from before restart")
+      Enum.reduce(buffered_entries, state, fn {text, level}, acc ->
+        if level in [:warning, :error] do
+          acc |> log_message(text) |> MessageLog.log(text, :warning)
+        else
+          log_message(acc, text)
+        end
+      end)
+
+    state =
+      if buffered_entries != [] do
+        log_message(state, "Replayed #{length(buffered_entries)} message(s) from before restart")
       else
         state
       end
@@ -213,6 +222,7 @@ defmodule MingaEditor do
     Minga.Events.subscribe(:face_overrides_changed)
     Minga.Events.subscribe(:agent_session_stopped)
     Minga.Events.subscribe(:load_user_themes)
+    Minga.Events.subscribe(:extension_updates_available)
 
     # Monitor all initial buffers so we get :DOWN when they die.
     all_initial_pids =
@@ -348,15 +358,6 @@ defmodule MingaEditor do
   def handle_cast({:log_to_warnings, text}, state) do
     state = MessageLog.log(state, text, :warning)
     {:noreply, maybe_schedule_warning_popup(state)}
-  end
-
-  def handle_cast({:extension_updates_available, updates}, state) do
-    alias Minga.Mode.ExtensionConfirmState
-
-    ms = %ExtensionConfirmState{updates: updates}
-    new_state = EditorState.transition_mode(state, :extension_confirm, ms)
-    new_state = Renderer.render(new_state)
-    {:noreply, new_state}
   end
 
   def handle_cast(:render, state) do
@@ -881,6 +882,18 @@ defmodule MingaEditor do
     end
 
     state
+  end
+
+  defp dispatch_minga_event(
+         state,
+         :extension_updates_available,
+         %Minga.Extension.UpdatesAvailableEvent{updates: updates},
+         _msg
+       ) do
+    alias Minga.Mode.ExtensionConfirmState
+
+    ms = %ExtensionConfirmState{updates: updates}
+    EditorState.transition_mode(state, :extension_confirm, ms)
   end
 
   defp dispatch_minga_event(state, _event, _payload, _msg), do: state

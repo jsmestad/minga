@@ -8,7 +8,7 @@ defmodule Minga.LoggerHandler do
   1. Replaces the default `:logger_std_h` handler with a file-based one
      (writes to `~/.local/share/minga/minga.log`)
   2. Adds a custom handler that forwards messages to the `*Messages*` buffer
-     via `MingaEditor.log_to_messages/1`
+     via `Minga.Events` broadcasts
   3. Redirects the `:standard_error` IO device to the same log file so that
      raw BEAM warnings (e.g. `IO.warn/2`) don't corrupt the TUI either
 
@@ -22,7 +22,7 @@ defmodule Minga.LoggerHandler do
 
   ## Installation
 
-  Called from `MingaEditor.init/1` after the `*Messages*` buffer is ready:
+  Called from the Editor's `init/1` after the `*Messages*` buffer is ready:
 
       Minga.LoggerHandler.install()
 
@@ -30,7 +30,7 @@ defmodule Minga.LoggerHandler do
   are captured in the ETS buffer. `uninstall/0` is called only during
   clean application shutdown (`Application.stop/1`).
 
-  `install/0` is idempotent: safe to call on every `MingaEditor.init/1` even
+  `install/0` is idempotent: safe to call on every Editor init even
   when the handlers are already in place from a previous Editor lifetime.
   """
 
@@ -63,7 +63,7 @@ defmodule Minga.LoggerHandler do
   Install the custom handlers and redirect stderr to a log file.
 
   Idempotent: skips any handler or redirect that is already in place.
-  Safe to call on every `MingaEditor.init/1`, including restarts after a crash
+  Safe to call on every Editor init, including restarts after a crash
   where the handlers survived because `terminate/2` no longer tears them down.
 
   Returns the log file path for display in `*Messages*`.
@@ -119,34 +119,22 @@ defmodule Minga.LoggerHandler do
   @doc """
   Flush buffered log messages into the Editor.
 
-  Called from `MingaEditor.init/1` after `*Messages*` is ready. Replays all
+  Called from the Editor's `init/1` after `*Messages*` is ready. Replays all
   buffered messages in order, then clears the buffer. Messages that arrived
   while the Editor was down (e.g., supervisor crash reports) will appear
   in `*Messages*` as if they'd been logged normally.
   """
-  @spec flush_buffer() :: non_neg_integer()
+  @spec flush_buffer() :: [{String.t(), atom()}]
   def flush_buffer do
     case :ets.whereis(@buffer_table) do
       :undefined ->
-        0
+        []
 
       _ref ->
         entries = :ets.tab2list(@buffer_table)
         :ets.delete_all_objects(@buffer_table)
-        Enum.each(entries, &replay_entry/1)
-        length(entries)
+        Enum.map(entries, fn {_key, text, level} -> {text, level} end)
     end
-  end
-
-  @spec replay_entry({integer(), String.t(), atom()}) :: :ok
-  defp replay_entry({_key, text, level}) do
-    MingaEditor.log_to_messages(text)
-
-    if level in [:warning, :error] do
-      MingaEditor.log_to_warnings(text)
-    end
-
-    :ok
   end
 
   # ── :logger handler callbacks (OTP 21+) ────────────────────────────────────
@@ -169,16 +157,17 @@ defmodule Minga.LoggerHandler do
   def log(%{level: level, msg: msg, meta: meta}, _config) do
     text = format_message(level, msg, meta)
 
-    case Process.whereis(MingaEditor) do
-      nil ->
-        buffer_message(text, level)
+    # Buffer when no event subscribers are listening (Editor not started yet).
+    # Once the Editor subscribes to :log_message, broadcasts will reach it.
+    if Minga.Events.subscribers(:log_message) == [] do
+      buffer_message(text, level)
+    else
+      event_level = if level in [:warning, :error], do: :warning, else: :info
 
-      _pid ->
-        MingaEditor.log_to_messages(text)
-
-        if level in [:warning, :error] do
-          MingaEditor.log_to_warnings(text)
-        end
+      Minga.Events.broadcast(:log_message, %Minga.Events.LogMessageEvent{
+        text: text,
+        level: event_level
+      })
     end
   end
 

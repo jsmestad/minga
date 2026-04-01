@@ -65,6 +65,7 @@ defmodule Minga.Application do
     Minga.LoggerHandler.ensure_buffer_table()
     Grammar.init_registry()
     DevHandler.attach()
+    Minga.Config.ThemeRegistry.seed_builtin()
 
     # Prepend managed tools bin directory to PATH so System.find_executable
     # discovers managed tools. Done before supervisors start so LSP and

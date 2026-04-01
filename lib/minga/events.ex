@@ -236,6 +236,7 @@ defmodule Minga.Events do
           | :changeset_budget_exhausted
           | :load_user_themes
           | :buffer_fork_conflict
+          | :extension_updates_available
 
   @typedoc "Typed event payloads. Each topic has a specific struct."
   @type payload ::
@@ -351,6 +352,8 @@ defmodule Minga.Events do
   @spec broadcast(:changeset_budget_exhausted, MingaAgent.Changeset.BudgetExhaustedEvent.t()) ::
           :ok
   @spec broadcast(:load_user_themes, LoadUserThemesEvent.t()) :: :ok
+  @spec broadcast(:buffer_fork_conflict, map()) :: :ok
+  @spec broadcast(:extension_updates_available, Minga.Extension.UpdatesAvailableEvent.t()) :: :ok
   def broadcast(topic, %_{} = payload) when is_atom(topic) do
     Registry.dispatch(@registry, topic, fn entries ->
       for {pid, _value} <- entries do
