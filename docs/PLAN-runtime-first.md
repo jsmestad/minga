@@ -800,7 +800,7 @@ Buffer.Fork processes, three-way merge, self-description tools, documentation pa
 | 2026-03-31 | Wave 1 / Track A | #1364 | Boundary check promoted to hard failure. Existing `Minga.Credo.DependencyDirectionCheck` already covered everything the planned `mix check.layers` task would do; flipped `exit_status: 0` to default (non-zero). |
 | 2026-03-31 | Wave 1 / Track C | — | All timer quarantine guards already in place; verified all sites in editor.ex and sub-modules; updated plan status and fixed verification command |
 | 2026-03-31 | Wave 2 / NS-1 | #1367 | Created `MingaAgent.*` namespace: 58 agent domain modules moved from `lib/minga/agent/` to `lib/minga_agent/`. Presentation modules stayed. |
-| 2026-03-31 | Wave 2 / NS-2+NS-3 | #1367 | Created `MingaEditor.*` namespace: 276 lib + 248 test files moved. Updated `DependencyDirectionCheck` for three-namespace architecture. NS-3 merged into NS-2. |
+| 2026-03-31 | Wave 2 / NS-2+NS-3 | #1370 | Created `MingaEditor.*` namespace: 276 lib + 248 test files moved. Updated `DependencyDirectionCheck` for three-namespace architecture. NS-3 merged into NS-2. 9 pre-existing Layer 1→2 violations tracked in #1368. |
 
 ---
 
