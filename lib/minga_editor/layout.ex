@@ -92,7 +92,7 @@ defmodule MingaEditor.Layout do
   have a cached layout. The cache is invalidated on resize, file tree
   toggle, and agent panel toggle.
   """
-  @spec get(EditorState.t()) :: t()
+  @spec get(EditorState.t() | map()) :: t()
   def get(%{layout: %__MODULE__{} = cached}), do: cached
   def get(%{shell: shell} = state), do: shell.compute_layout(state)
 
@@ -102,7 +102,7 @@ defmodule MingaEditor.Layout do
   Call this once at the start of a render cycle or event handler, then
   read `state.layout` downstream.
   """
-  @spec put(EditorState.t()) :: EditorState.t()
+  @spec put(EditorState.t() | map()) :: map()
   def put(%{shell: shell} = state), do: %{state | layout: shell.compute_layout(state)}
 
   @doc """
@@ -118,7 +118,7 @@ defmodule MingaEditor.Layout do
   Delegates to the shell's `compute_layout` callback, which dispatches
   to the appropriate TUI or GUI layout module.
   """
-  @spec compute(EditorState.t()) :: t()
+  @spec compute(EditorState.t() | map()) :: t()
   def compute(%{shell: shell} = state) do
     shell.compute_layout(state)
   end

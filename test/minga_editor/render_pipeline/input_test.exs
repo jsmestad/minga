@@ -11,20 +11,20 @@ defmodule MingaEditor.RenderPipeline.InputTest do
   end
 
   describe "from_editor_state/1" do
-    test "extracts all workspace fields", %{state: state} do
+    test "extracts workspace fields into workspace map", %{state: state} do
       input = Input.from_editor_state(state)
 
-      assert input.windows == state.workspace.windows
-      assert input.buffers == state.workspace.buffers
-      assert input.viewport == state.workspace.viewport
-      assert input.editing == state.workspace.editing
-      assert input.highlight == state.workspace.highlight
-      assert input.file_tree == state.workspace.file_tree
-      assert input.agent_ui == state.workspace.agent_ui
-      assert input.completion == state.workspace.completion
-      assert input.document_highlights == state.workspace.document_highlights
-      assert input.search == state.workspace.search
-      assert input.keymap_scope == state.workspace.keymap_scope
+      assert input.workspace.windows == state.workspace.windows
+      assert input.workspace.buffers == state.workspace.buffers
+      assert input.workspace.viewport == state.workspace.viewport
+      assert input.workspace.editing == state.workspace.editing
+      assert input.workspace.highlight == state.workspace.highlight
+      assert input.workspace.file_tree == state.workspace.file_tree
+      assert input.workspace.agent_ui == state.workspace.agent_ui
+      assert input.workspace.completion == state.workspace.completion
+      assert input.workspace.document_highlights == state.workspace.document_highlights
+      assert input.workspace.search == state.workspace.search
+      assert input.workspace.keymap_scope == state.workspace.keymap_scope
     end
 
     test "extracts top-level state fields", %{state: state} do
@@ -52,8 +52,6 @@ defmodule MingaEditor.RenderPipeline.InputTest do
         :render_timer,
         :buffer_monitors,
         :focus_stack,
-        :lsp,
-        :parser_status,
         :pending_quit,
         :last_test_command,
         :session,
@@ -70,6 +68,15 @@ defmodule MingaEditor.RenderPipeline.InputTest do
                "Input should not include EditorState field #{inspect(field)}"
       end
     end
+
+    test "workspace field supports state.workspace.X pattern-matching", %{state: state} do
+      input = Input.from_editor_state(state)
+
+      # This is the key compatibility test: pipeline modules do
+      # %{workspace: %{editing: editing}} = state
+      assert %{workspace: %{editing: editing}} = input
+      assert editing == state.workspace.editing
+    end
   end
 
   describe "EditorState.apply_render_output/2" do
@@ -77,13 +84,14 @@ defmodule MingaEditor.RenderPipeline.InputTest do
       input = Input.from_editor_state(state)
 
       # Simulate a mutation the pipeline would make (new window in map)
-      win_id = input.windows.active
-      window = Map.get(input.windows.map, win_id)
+      win_id = input.workspace.windows.active
+      window = Map.get(input.workspace.windows.map, win_id)
 
       mutated_cache = %{window.render_cache | last_viewport_top: 42}
       mutated_window = %{window | render_cache: mutated_cache}
-      mutated_map = Map.put(input.windows.map, win_id, mutated_window)
-      mutated_input = %{input | windows: %{input.windows | map: mutated_map}}
+      mutated_map = Map.put(input.workspace.windows.map, win_id, mutated_window)
+      ws = input.workspace
+      mutated_input = %{input | workspace: %{ws | windows: %{ws.windows | map: mutated_map}}}
 
       result = EditorState.apply_render_output(state, mutated_input)
 
@@ -104,7 +112,6 @@ defmodule MingaEditor.RenderPipeline.InputTest do
     test "writes back layout", %{state: state} do
       input = Input.from_editor_state(state)
 
-      # Simulate layout computation
       layout = MingaEditor.Layout.compute(state)
       mutated_input = %{input | layout: layout}
 
@@ -114,18 +121,26 @@ defmodule MingaEditor.RenderPipeline.InputTest do
     end
   end
 
-  describe "workspace/1" do
-    test "returns workspace-shaped map with all fields", %{state: state} do
-      input = Input.from_editor_state(state)
-      ws = Input.workspace(input)
+  describe "sync_active_window_cursor/1" do
+    test "syncs cursor from buffer into active window", %{state: state} do
+      # Move cursor in the buffer
+      buf = state.workspace.buffers.active
+      Minga.Buffer.move_to(buf, {1, 0})
 
-      assert ws.windows == input.windows
-      assert ws.buffers == input.buffers
-      assert ws.viewport == input.viewport
-      assert ws.editing == input.editing
-      assert ws.highlight == input.highlight
-      assert ws.search == input.search
-      assert ws.keymap_scope == input.keymap_scope
+      input = Input.from_editor_state(state)
+      synced = Input.sync_active_window_cursor(input)
+
+      win_id = synced.workspace.windows.active
+      window = Map.get(synced.workspace.windows.map, win_id)
+      assert window.cursor == {1, 0}
+    end
+
+    test "no-op when no active buffer", %{state: state} do
+      ws = state.workspace
+      state = %{state | workspace: %{ws | buffers: %{ws.buffers | active: nil}}}
+      input = Input.from_editor_state(state)
+
+      assert Input.sync_active_window_cursor(input) == input
     end
   end
 end

@@ -12,10 +12,10 @@ defmodule MingaEditor.RenderPipeline.Compose do
 
   alias MingaEditor.RenderPipeline.Chrome
   alias MingaEditor.RenderPipeline.ComposeHelpers
-  alias MingaEditor.State, as: EditorState
+  alias MingaEditor.RenderPipeline.Input
 
-  @typedoc "Internal editor state."
-  @type state :: EditorState.t()
+  @typedoc "Render pipeline input."
+  @type state :: Input.t()
 
   @doc """
   Merges content WindowFrames and Chrome into a `Frame` struct.

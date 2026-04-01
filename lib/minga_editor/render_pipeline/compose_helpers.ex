@@ -13,10 +13,10 @@ defmodule MingaEditor.RenderPipeline.ComposeHelpers do
   alias MingaEditor.DisplayList.{Cursor, Overlay}
   alias MingaEditor.Layout
 
-  alias MingaEditor.State, as: EditorState
+  alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.State.AgentAccess
 
-  @type state :: EditorState.t()
+  @type state :: Input.t()
 
   # Agent input area = 3 rows (border + text + padding); cursor goes on the text row.
   @agent_input_height 3

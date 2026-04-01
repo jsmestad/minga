@@ -20,7 +20,7 @@ defmodule MingaEditor.Shell.Traditional.Chrome.GUI do
   alias MingaEditor.StatusBar.Data, as: StatusBarData
 
   @typedoc "Internal editor state."
-  @type state :: EditorState.t()
+  @type state :: EditorState.t() | MingaEditor.RenderPipeline.Input.t()
 
   @doc """
   Builds GUI chrome: status bar data and minibuffer data (for SwiftUI

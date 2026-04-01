@@ -14,7 +14,7 @@ defmodule MingaEditor.Renderer.SearchHighlight do
   @type search_match :: Match.t()
 
   @typedoc "Internal editor state."
-  @type state :: EditorState.t()
+  @type state :: EditorState.t() | MingaEditor.RenderPipeline.Input.t()
 
   @doc "Applies a live substitute preview when the user is typing `:%s/pat/repl`."
   @spec maybe_substitute_preview(state(), [String.t()], non_neg_integer()) ::

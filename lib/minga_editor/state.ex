@@ -162,7 +162,7 @@ defmodule MingaEditor.State do
   def apply_render_output(%__MODULE__{workspace: ws} = state, render_output) do
     %{
       state
-      | workspace: %{ws | windows: render_output.windows},
+      | workspace: %{ws | windows: render_output.workspace.windows},
         shell_state: render_output.shell_state,
         layout: render_output.layout
     }

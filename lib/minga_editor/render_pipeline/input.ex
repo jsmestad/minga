@@ -7,23 +7,28 @@ defmodule MingaEditor.RenderPipeline.Input do
   focus_stack, lsp, parser_status, pending_quit, session, git_remote_op, etc.).
 
   The Editor builds this before calling `RenderPipeline.run/1`. Pipeline stages
-  read from Input and never reach back into EditorState. Mutations that stages
-  need to carry forward (updated window caches, click regions) are returned via
-  `RenderPipeline.Output`.
+  read from Input and never reach back into EditorState. After the pipeline
+  completes, the caller writes mutations back via `EditorState.apply_render_output/2`.
+
+  ## Structural compatibility
+
+  Pipeline modules pattern-match on `state.workspace.X` throughout. Input keeps
+  a `workspace` field (a plain map, not a WorkspaceState struct) so those
+  pattern-matches work unchanged. Top-level fields (`theme`, `capabilities`,
+  `shell`, `shell_state`, etc.) are directly on Input, matching EditorState's
+  shape.
 
   ## Field sources
 
-  Fields are grouped by where they come from in EditorState:
-
   **From `state` (top-level):**
-  - `theme`, `capabilities`, `shell`, `shell_state`, `port_manager`,
-    `font_registry`, `message_store`, `face_override_registries`,
-    `editing_model`, `backend`, `layout`
+  `theme`, `capabilities`, `shell`, `shell_state`, `port_manager`,
+  `font_registry`, `message_store`, `face_override_registries`,
+  `editing_model`, `backend`, `layout`
 
-  **From `state.workspace` (per-tab editing context):**
-  - `windows`, `buffers`, `viewport`, `file_tree`, `highlight`,
-    `agent_ui`, `completion`, `editing`, `document_highlights`,
-    `search`, `keymap_scope`
+  **From `state.workspace` (per-tab editing context, stored as `workspace` map):**
+  `windows`, `buffers`, `viewport`, `file_tree`, `highlight`,
+  `agent_ui`, `completion`, `editing`, `document_highlights`,
+  `search`, `keymap_scope`
   """
 
   alias MingaEditor.Agent.UIState
@@ -32,6 +37,7 @@ defmodule MingaEditor.RenderPipeline.Input do
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.FileTree
   alias MingaEditor.State.Highlighting
+  alias MingaEditor.State.Mouse
   alias MingaEditor.State.Search
   alias MingaEditor.State.Windows
   alias MingaEditor.VimState
@@ -40,11 +46,12 @@ defmodule MingaEditor.RenderPipeline.Input do
   alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.Shell.Board.State, as: BoardState
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.LSP, as: LSPState
   alias MingaEditor.UI.FontRegistry
   alias MingaEditor.UI.Panel.MessageStore
   alias MingaEditor.UI.Theme
 
-  @enforce_keys [:port_manager, :theme, :capabilities, :shell, :windows, :viewport]
+  @enforce_keys [:port_manager, :theme, :capabilities, :shell, :workspace]
   defstruct [
     # Top-level state fields
     :port_manager,
@@ -58,22 +65,34 @@ defmodule MingaEditor.RenderPipeline.Input do
     :editing_model,
     :backend,
     :layout,
-    # Workspace fields
-    :windows,
-    :buffers,
-    :viewport,
-    :file_tree,
-    :highlight,
-    :agent_ui,
-    :completion,
-    :editing,
-    :document_highlights,
-    :search,
-    :keymap_scope
+    :lsp,
+    :parser_status,
+    # Workspace as a plain map (enables state.workspace.X pattern-matching)
+    :workspace
   ]
 
+  @typedoc """
+  Workspace-shaped map containing per-tab rendering fields.
+
+  Keeps the same `state.workspace.X` access pattern that pipeline modules
+  use, so existing pattern-matches work unchanged.
+  """
+  @type workspace :: %{
+          windows: Windows.t(),
+          buffers: Buffers.t(),
+          viewport: Viewport.t(),
+          file_tree: FileTree.t(),
+          highlight: Highlighting.t(),
+          agent_ui: UIState.t(),
+          completion: Completion.t() | nil,
+          editing: VimState.t(),
+          document_highlights: [EditorState.document_highlight()] | nil,
+          mouse: Mouse.t(),
+          search: Search.t(),
+          keymap_scope: Minga.Keymap.Scope.scope_name()
+        }
+
   @type t :: %__MODULE__{
-          # Top-level state fields
           port_manager: GenServer.server() | nil,
           theme: Theme.t(),
           capabilities: Capabilities.t(),
@@ -85,18 +104,9 @@ defmodule MingaEditor.RenderPipeline.Input do
           editing_model: :vim | :cua,
           backend: EditorState.backend(),
           layout: Layout.t() | nil,
-          # Workspace fields
-          windows: Windows.t(),
-          buffers: Buffers.t(),
-          viewport: Viewport.t(),
-          file_tree: FileTree.t(),
-          highlight: Highlighting.t(),
-          agent_ui: UIState.t(),
-          completion: Completion.t() | nil,
-          editing: VimState.t(),
-          document_highlights: [EditorState.document_highlight()] | nil,
-          search: Search.t(),
-          keymap_scope: Minga.Keymap.Scope.scope_name()
+          lsp: LSPState.t(),
+          parser_status: atom(),
+          workspace: workspace()
         }
 
   @doc """
@@ -109,7 +119,6 @@ defmodule MingaEditor.RenderPipeline.Input do
   @spec from_editor_state(EditorState.t()) :: t()
   def from_editor_state(%EditorState{workspace: ws} = state) do
     %__MODULE__{
-      # Top-level
       port_manager: state.port_manager,
       theme: state.theme,
       capabilities: state.capabilities,
@@ -121,49 +130,50 @@ defmodule MingaEditor.RenderPipeline.Input do
       editing_model: state.editing_model,
       backend: state.backend,
       layout: state.layout,
-      # Workspace
-      windows: ws.windows,
-      buffers: ws.buffers,
-      viewport: ws.viewport,
-      file_tree: ws.file_tree,
-      highlight: ws.highlight,
-      agent_ui: ws.agent_ui,
-      completion: ws.completion,
-      editing: ws.editing,
-      document_highlights: ws.document_highlights,
-      search: ws.search,
-      keymap_scope: ws.keymap_scope
+      lsp: state.lsp,
+      parser_status: state.parser_status,
+      workspace: %{
+        windows: ws.windows,
+        buffers: ws.buffers,
+        viewport: ws.viewport,
+        file_tree: ws.file_tree,
+        highlight: ws.highlight,
+        agent_ui: ws.agent_ui,
+        completion: ws.completion,
+        editing: ws.editing,
+        document_highlights: ws.document_highlights,
+        mouse: ws.mouse,
+        search: ws.search,
+        keymap_scope: ws.keymap_scope
+      }
     }
   end
 
-  # ── Workspace-shaped accessors ───────────────────────────────────────────
-  #
-  # Many pipeline modules pattern-match on `state.workspace.X`. These
-  # accessors let Input masquerade as EditorState for pattern matching
-  # during the transition period (PR A-4.2 will update call sites to
-  # use Input fields directly).
-
   @doc """
-  Returns a workspace-shaped map for backward compatibility.
+  Syncs the active window's cursor from the buffer process.
 
-  Pipeline modules that pattern-match on `state.workspace.X` can use
-  `input.workspace.X` during the transition. This is a temporary shim;
-  PR A-4.2 will update call sites to read from Input directly.
+  Equivalent to `EditorState.sync_active_window_cursor/1` but operates
+  on the Input's workspace map.
   """
-  @spec workspace(t()) :: map()
-  def workspace(%__MODULE__{} = input) do
-    %{
-      windows: input.windows,
-      buffers: input.buffers,
-      viewport: input.viewport,
-      file_tree: input.file_tree,
-      highlight: input.highlight,
-      agent_ui: input.agent_ui,
-      completion: input.completion,
-      editing: input.editing,
-      document_highlights: input.document_highlights,
-      search: input.search,
-      keymap_scope: input.keymap_scope
-    }
+  @spec sync_active_window_cursor(t()) :: t()
+  def sync_active_window_cursor(%__MODULE__{workspace: %{buffers: %{active: nil}}} = input),
+    do: input
+
+  def sync_active_window_cursor(
+        %__MODULE__{
+          workspace: %{windows: %{map: windows, active: id}, buffers: %{active: buf}} = ws
+        } = input
+      ) do
+    case Map.fetch(windows, id) do
+      {:ok, window} ->
+        cursor = Minga.Buffer.cursor(buf)
+        new_map = Map.put(windows, id, %{window | cursor: cursor})
+        %{input | workspace: %{ws | windows: %{ws.windows | map: new_map}}}
+
+      :error ->
+        input
+    end
+  catch
+    :exit, _ -> input
   end
 end

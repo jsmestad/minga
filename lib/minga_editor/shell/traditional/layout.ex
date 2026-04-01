@@ -16,7 +16,7 @@ defmodule MingaEditor.Shell.Traditional.Layout do
   Uses TUI layout (with tab bar, file tree, modeline rows) for terminal
   frontends and GUI layout (Metal viewport only) for native GUI frontends.
   """
-  @spec compute(EditorState.t()) :: Layout.t()
+  @spec compute(EditorState.t() | map()) :: Layout.t()
   def compute(state) do
     if MingaEditor.Frontend.gui?(state.capabilities) do
       Layout.GUI.compute(state)

@@ -32,8 +32,8 @@ defmodule MingaEditor.RenderPipeline do
 
   alias MingaEditor.RenderPipeline.Compose
   alias MingaEditor.RenderPipeline.Content
+  alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.RenderPipeline.Scroll
-  alias MingaEditor.State, as: EditorState
   alias MingaEditor.WindowTree
   alias MingaEditor.Frontend.Emit
   alias Minga.Telemetry
@@ -57,41 +57,41 @@ defmodule MingaEditor.RenderPipeline do
 
   # ── Orchestrator ───────────────────────────────────────────────────────────
 
-  @typedoc "Internal editor state."
-  @type state :: EditorState.t()
+  @typedoc "Render pipeline input (narrow contract from EditorState)."
+  @type input :: Input.t()
 
   @doc """
-  Runs the full render pipeline for the current editor state.
+  Runs the full render pipeline for the given Input.
 
-  Returns updated state with per-window render caches populated.
-  The caller must use the returned state for dirty-line tracking
-  to work across frames.
+  Returns updated Input with per-window render caches populated.
+  The caller applies mutations back to EditorState via
+  `EditorState.apply_render_output/2`.
   """
-  @spec run(state()) :: state()
-  def run(state) do
-    window_count = window_count(state)
+  @spec run(input()) :: input()
+  def run(input) do
+    window_count = window_count(input)
 
     Telemetry.span([:minga, :render, :pipeline], %{window_count: window_count}, fn ->
       # Pre-pipeline: sync cursor
-      state = EditorState.sync_active_window_cursor(state)
+      input = Input.sync_active_window_cursor(input)
 
       # Stage 1: Invalidation (global triggers: visual selection, search, theme)
-      state =
+      input =
         Telemetry.span([:minga, :render, :stage], %{stage: :invalidation}, fn ->
-          invalidate(state)
+          invalidate(input)
         end)
 
       # Stage 2: Layout
-      state =
+      input =
         Telemetry.span([:minga, :render, :stage], %{stage: :layout}, fn ->
-          compute_layout(state)
+          compute_layout(input)
         end)
 
-      layout = Layout.get(state)
+      layout = Layout.get(input)
 
-      debug_layout(state, layout)
+      debug_layout(input, layout)
 
-      run_windows_pipeline(state, layout)
+      run_windows_pipeline(input, layout)
     end)
   end
 
@@ -102,24 +102,24 @@ defmodule MingaEditor.RenderPipeline do
   Core rendering logic for buffer editing. Called directly by the
   pipeline dispatcher.
   """
-  @spec run_windows_pipeline(state(), Layout.t()) :: state()
-  def run_windows_pipeline(state, layout) do
+  @spec run_windows_pipeline(input(), Layout.t()) :: input()
+  def run_windows_pipeline(input, layout) do
     # Stage 3: Scroll (also runs per-window invalidation detection)
-    {scrolls, state} =
+    {scrolls, input} =
       Telemetry.span([:minga, :render, :stage], %{stage: :scroll}, fn ->
-        Scroll.scroll_windows(state, layout)
+        Scroll.scroll_windows(input, layout)
       end)
 
     # Stage 4: Content (skips clean lines, updates window caches)
-    {buffer_frames, cursor_info, state} =
+    {buffer_frames, cursor_info, input} =
       Telemetry.span([:minga, :render, :stage], %{stage: :content}, fn ->
-        Content.build_content(state, scrolls)
+        Content.build_content(input, scrolls)
       end)
 
     # Stage 4b: Agent chat window content (buffer pipeline + prompt chrome)
-    {agent_chat_frames, agent_cursor, state} =
+    {agent_chat_frames, agent_cursor, input} =
       Telemetry.span([:minga, :render, :stage], %{stage: :agent_content}, fn ->
-        Content.build_agent_chat_content(state, layout)
+        Content.build_agent_chat_content(input, layout)
       end)
 
     # If the agent chat window set a cursor, use it (overrides buffer cursor).
@@ -130,33 +130,32 @@ defmodule MingaEditor.RenderPipeline do
     # Stage 5: Chrome
     chrome =
       Telemetry.span([:minga, :render, :stage], %{stage: :chrome}, fn ->
-        state.shell.build_chrome(state, layout, scrolls, cursor_info)
+        input.shell.build_chrome(input, layout, scrolls, cursor_info)
       end)
 
-    # Cache click regions on state for mouse hit-testing
-    state =
-      EditorState.update_shell_state(
-        state,
-        &%{&1 | modeline_click_regions: chrome.modeline_click_regions}
-      )
+    # Cache click regions on input for mouse hit-testing write-back
+    ss = input.shell_state
 
-    state =
-      EditorState.update_shell_state(
-        state,
-        &%{&1 | tab_bar_click_regions: chrome.tab_bar_click_regions}
-      )
+    input = %{
+      input
+      | shell_state: %{
+          ss
+          | modeline_click_regions: chrome.modeline_click_regions,
+            tab_bar_click_regions: chrome.tab_bar_click_regions
+        }
+    }
 
     # Stage 6: Compose
     frame =
       Telemetry.span([:minga, :render, :stage], %{stage: :compose}, fn ->
-        Compose.compose_windows(window_frames, chrome, cursor_info, state)
+        Compose.compose_windows(window_frames, chrome, cursor_info, input)
       end)
 
     # Stage 7: Emit
     Telemetry.span([:minga, :render, :stage], %{stage: :emit}, fn ->
-      ctx = MingaEditor.Frontend.Emit.Context.from_editor_state(state)
+      ctx = MingaEditor.Frontend.Emit.Context.from_editor_state(input)
       Emit.emit(frame, ctx, chrome)
-      state
+      input
     end)
   end
 
@@ -177,9 +176,9 @@ defmodule MingaEditor.RenderPipeline do
     `Window.detect_context_change/2` using a fingerprint of the
     render context.
   """
-  @spec invalidate(state()) :: state()
-  def invalidate(state) do
-    state
+  @spec invalidate(input()) :: input()
+  def invalidate(input) do
+    input
   end
 
   # ── Stage 2: Layout ────────────────────────────────────────────────────────
@@ -190,21 +189,21 @@ defmodule MingaEditor.RenderPipeline do
   Thin wrapper around `Layout.put/1`. Returns the updated state with
   the layout cached for downstream stages.
   """
-  @spec compute_layout(state()) :: state()
-  def compute_layout(state) do
-    Layout.put(state)
+  @spec compute_layout(input()) :: input()
+  def compute_layout(input) do
+    Layout.put(input)
   end
 
-  @spec window_count(state()) :: non_neg_integer()
+  @spec window_count(input()) :: non_neg_integer()
   defp window_count(%{workspace: %{windows: %{tree: nil}}}), do: 0
 
   defp window_count(%{workspace: %{windows: %{tree: tree}}}) do
     WindowTree.count(tree)
   end
 
-  @spec debug_layout(state(), Layout.t()) :: :ok
-  defp debug_layout(state, layout) do
-    vp = state.workspace.viewport
+  @spec debug_layout(input(), Layout.t()) :: :ok
+  defp debug_layout(input, layout) do
+    vp = input.workspace.viewport
     ts = DateTime.utc_now() |> DateTime.to_string()
 
     log_lines = [

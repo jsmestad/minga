@@ -22,7 +22,7 @@ defmodule MingaEditor.Shell.Traditional.Chrome do
   frontend capabilities.
   """
   @spec build_chrome(
-          EditorState.t(),
+          EditorState.t() | MingaEditor.RenderPipeline.Input.t(),
           Layout.t(),
           %{Window.id() => WindowScroll.t()},
           Cursor.t() | nil

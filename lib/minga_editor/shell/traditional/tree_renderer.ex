@@ -81,13 +81,27 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
     )
   end
 
-  @spec render(EditorState.t()) :: [DisplayList.draw()]
+  @spec render(EditorState.t() | map()) :: [DisplayList.draw()]
   def render(%EditorState{workspace: %{file_tree: %{tree: nil}}}), do: []
+  def render(%{workspace: %{file_tree: %{tree: nil}}}), do: []
 
-  def render(%EditorState{workspace: %{file_tree: %{tree: tree, focused: focused}}} = state) do
-    # tree_rect/1 never returns nil here because the clause above already
-    # matched tree: nil and returned [].
-    rect = EditorState.tree_rect(state)
+  def render(%EditorState{} = state) do
+    render_from_workspace(state.workspace, state.theme, state)
+  end
+
+  def render(%{workspace: %{file_tree: %{tree: _tree}}} = state) do
+    render_from_workspace(state.workspace, state.theme, state)
+  end
+
+  def render(_state), do: []
+
+  @spec render_from_workspace(map(), MingaEditor.UI.Theme.t(), map()) :: [DisplayList.draw()]
+  defp render_from_workspace(
+         %{file_tree: %{tree: tree, focused: focused}} = _ws,
+         _theme,
+         state
+       ) do
+    rect = tree_rect_from_workspace(state.workspace)
 
     input = %RenderInput{
       tree: tree,
@@ -574,5 +588,16 @@ defmodule MingaEditor.Shell.Traditional.TreeRenderer do
     |> Enum.reject(&is_nil/1)
     |> Enum.map(&Path.expand/1)
     |> MapSet.new()
+  end
+
+  # Computes the tree rect from workspace data without requiring EditorState.
+  @spec tree_rect_from_workspace(map()) :: MingaEditor.WindowTree.rect() | nil
+  defp tree_rect_from_workspace(%{file_tree: %{tree: nil}}), do: nil
+
+  defp tree_rect_from_workspace(%{
+         viewport: %{rows: rows},
+         file_tree: %{tree: %Minga.Project.FileTree{width: tw}}
+       }) do
+    {1, 0, tw, rows - 2}
   end
 end

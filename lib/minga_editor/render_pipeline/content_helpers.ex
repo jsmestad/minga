@@ -23,7 +23,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
   alias MingaEditor.Renderer.Context
   alias MingaEditor.Renderer.Gutter
   alias MingaEditor.Renderer.SearchHighlight
-  alias MingaEditor.State, as: EditorState
+  alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.Window
   alias Minga.Core.WrapMap
   alias Minga.Git
@@ -31,7 +31,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
   alias Minga.Mode.VisualState
   alias MingaEditor.UI.Highlight
 
-  @type state :: EditorState.t()
+  @type state :: Input.t()
 
   @typedoc """
   Options passed to line rendering functions.

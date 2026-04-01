@@ -26,6 +26,7 @@ defmodule MingaEditor.Renderer do
   alias MingaEditor.DisplayList.{Cursor, Frame, Overlay}
   alias MingaEditor.PickerUI
   alias MingaEditor.RenderPipeline
+  alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.State, as: EditorState
 
   @typedoc "Internal editor state."
@@ -105,7 +106,9 @@ defmodule MingaEditor.Renderer do
   """
   @spec render_buffer(state()) :: state()
   def render_buffer(state) do
-    RenderPipeline.run(state)
+    input = Input.from_editor_state(state)
+    output = RenderPipeline.run(input)
+    EditorState.apply_render_output(state, output)
   rescue
     e ->
       msg = Exception.message(e)
