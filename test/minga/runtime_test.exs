@@ -17,7 +17,7 @@ defmodule Minga.RuntimeTest do
   # boot. Rather than fight named-process conflicts, we verify the
   # invariants on the running tree (same children, same guarantees).
   #
-  # The existing runtime_headless_test.exs checks process presence;
+  # The architecture_test.exs checks supervision tree shape;
   # this file checks functional correctness: tools registered, tools
   # executable, results correct.
 
