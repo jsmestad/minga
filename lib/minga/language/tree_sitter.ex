@@ -24,7 +24,7 @@ defmodule Minga.Language.TreeSitter do
   """
 
   alias Minga.Parser.Manager, as: ParserManager
-  alias MingaEditor.UI.Highlight.Grammar, as: HLGrammar
+  alias Minga.Language.Grammar, as: HLGrammar
 
   @doc """
   Returns the grammar cache directory path.

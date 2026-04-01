@@ -77,7 +77,7 @@ defmodule MingaEditor.Input.Popup do
       {id,
        %Window{
          popup_meta: %MingaEditor.UI.Popup.Active{
-           rule: %MingaEditor.UI.Popup.Rule{display: :float}
+           rule: %Minga.Popup.Rule{display: :float}
          }
        }} ->
         id

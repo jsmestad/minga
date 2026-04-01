@@ -1,7 +1,7 @@
 defmodule MingaEditor.UI.Highlight.InjectionRangeTest do
   use ExUnit.Case, async: true
 
-  alias MingaEditor.UI.Highlight.InjectionRange
+  alias Minga.Language.Highlight.InjectionRange
 
   describe "new/3" do
     test "creates an injection range" do

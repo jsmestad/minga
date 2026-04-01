@@ -1,4 +1,4 @@
-defmodule MingaEditor.UI.Highlight.Span do
+defmodule Minga.Language.Highlight.Span do
   @moduledoc """
   A highlight span representing a styled region of text.
 

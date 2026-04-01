@@ -454,7 +454,7 @@ defmodule MingaEditor.Commands.FileTree do
   defp open(state) do
     state = close_git_status_if_open(state)
 
-    root = Minga.Project.root() || File.cwd!()
+    root = state.workspace.file_tree.project_root || Minga.Project.root() || File.cwd!()
     tree = FileTree.new(root)
     tree = FileTree.refresh_git_status(tree)
     tree = reveal_active(tree, state.workspace.buffers.active)

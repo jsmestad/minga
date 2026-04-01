@@ -1055,7 +1055,7 @@ defmodule MingaEditor.Frontend.Emit.GUI do
       {_id,
        %{
          popup_meta: %MingaEditor.UI.Popup.Active{
-           rule: %MingaEditor.UI.Popup.Rule{display: :float}
+           rule: %Minga.Popup.Rule{display: :float}
          }
        } = w} ->
         w
@@ -1090,7 +1090,7 @@ defmodule MingaEditor.Frontend.Emit.GUI do
     %{visible: true, title: title, lines: lines, width: width, height: height}
   end
 
-  @spec resolve_float_dim(MingaEditor.UI.Popup.Rule.t(), :width | :height, pos_integer()) ::
+  @spec resolve_float_dim(Minga.Popup.Rule.t(), :width | :height, pos_integer()) ::
           pos_integer()
   defp resolve_float_dim(rule, dim, viewport_size) do
     val =

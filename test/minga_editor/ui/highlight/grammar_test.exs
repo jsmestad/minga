@@ -1,7 +1,7 @@
 defmodule MingaEditor.UI.Highlight.GrammarTest do
   use ExUnit.Case, async: true
 
-  alias MingaEditor.UI.Highlight.Grammar
+  alias Minga.Language.Grammar
 
   describe "language_for_filetype/1" do
     test "maps elixir" do

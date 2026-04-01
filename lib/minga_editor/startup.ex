@@ -86,6 +86,8 @@ defmodule MingaEditor.Startup do
     windows =
       if initial_window, do: %{initial_window_id => initial_window}, else: %{}
 
+    project_root = Keyword.get(opts, :project_root)
+
     workspace = %MingaEditor.Workspace.State{
       buffers: %Buffers{
         active: active_buf,
@@ -101,7 +103,8 @@ defmodule MingaEditor.Startup do
         active: initial_window_id,
         next_id: initial_window_id + 1
       },
-      keymap_scope: keymap_scope
+      keymap_scope: keymap_scope,
+      file_tree: %MingaEditor.State.FileTree{project_root: project_root}
     }
 
     editing_model =

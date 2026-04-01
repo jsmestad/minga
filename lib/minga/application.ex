@@ -54,7 +54,7 @@ defmodule Minga.Application do
   alias Minga.Config
   alias Minga.Telemetry.DevHandler
   alias Minga.Tool.Manager, as: ToolManager
-  alias MingaEditor.UI.Highlight.Grammar
+  alias Minga.Language.Grammar
 
   @impl true
   @spec start(Application.start_type(), term()) :: {:ok, pid()} | {:error, term()}

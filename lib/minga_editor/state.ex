@@ -911,7 +911,7 @@ defmodule MingaEditor.State do
         active_index: state.workspace.buffers.active_index
       },
       windows: windows,
-      file_tree: %FileTreeState{},
+      file_tree: %FileTreeState{project_root: state.workspace.file_tree.project_root},
       viewport: state.workspace.viewport,
       mouse: %Mouse{},
       highlight: %Highlighting{},
@@ -944,7 +944,7 @@ defmodule MingaEditor.State do
         active_index: 0
       },
       windows: windows,
-      file_tree: %FileTreeState{},
+      file_tree: %FileTreeState{project_root: state.workspace.file_tree.project_root},
       viewport: state.workspace.viewport,
       mouse: %Mouse{},
       highlight: %Highlighting{},

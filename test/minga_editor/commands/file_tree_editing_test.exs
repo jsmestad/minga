@@ -14,7 +14,7 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
       file = Path.join(dir, "test.txt")
       File.write!(file, "hello")
 
-      ctx = start_editor("hello", file_path: file)
+      ctx = start_editor("hello", file_path: file, project_root: dir)
 
       _state = send_keys_sync(ctx, "<SPC>op")
       state = send_keys_sync(ctx, "a")
@@ -28,7 +28,7 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
       file = Path.join(dir, "test.txt")
       File.write!(file, "hello")
 
-      ctx = start_editor("hello", file_path: file)
+      ctx = start_editor("hello", file_path: file, project_root: dir)
 
       _state = send_keys_sync(ctx, "<SPC>op")
       _state = send_keys_sync(ctx, "a")
@@ -46,7 +46,7 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
       file = Path.join(dir, "test.txt")
       File.write!(file, "hello")
 
-      ctx = start_editor("hello", file_path: file)
+      ctx = start_editor("hello", file_path: file, project_root: dir)
 
       _state = send_keys_sync(ctx, "<SPC>op")
       state = send_keys_sync(ctx, "A")
@@ -59,7 +59,7 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
       file = Path.join(dir, "test.txt")
       File.write!(file, "hello")
 
-      ctx = start_editor("hello", file_path: file)
+      ctx = start_editor("hello", file_path: file, project_root: dir)
 
       _state = send_keys_sync(ctx, "<SPC>op")
       _state = send_keys_sync(ctx, "A")
@@ -77,7 +77,7 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
       file = Path.join(dir, "target.txt")
       File.write!(file, "content")
 
-      ctx = start_editor("content", file_path: file)
+      ctx = start_editor("content", file_path: file, project_root: dir)
 
       _state = send_keys_sync(ctx, "<SPC>op")
       state = send_keys_sync(ctx, "R")
@@ -91,7 +91,7 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
       file = Path.join(dir, "target.txt")
       File.write!(file, "content")
 
-      ctx = start_editor("content", file_path: file)
+      ctx = start_editor("content", file_path: file, project_root: dir)
 
       # Open tree (reveals active file automatically), press R
       _state = send_keys_sync(ctx, "<SPC>op")
@@ -115,7 +115,7 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
       file = Path.join(dir, "test.txt")
       File.write!(file, "hello")
 
-      ctx = start_editor("hello", file_path: file)
+      ctx = start_editor("hello", file_path: file, project_root: dir)
 
       _state = send_keys_sync(ctx, "<SPC>op")
       _state = send_keys_sync(ctx, "a")
@@ -132,7 +132,7 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
       file = Path.join(dir, "test.txt")
       File.write!(file, "hello")
 
-      ctx = start_editor("hello", file_path: file)
+      ctx = start_editor("hello", file_path: file, project_root: dir)
 
       _state = send_keys_sync(ctx, "<SPC>op")
       _state = send_keys_sync(ctx, "a")
@@ -145,7 +145,7 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
       file = Path.join(dir, "test.txt")
       File.write!(file, "hello")
 
-      ctx = start_editor("hello", file_path: file)
+      ctx = start_editor("hello", file_path: file, project_root: dir)
 
       _state = send_keys_sync(ctx, "<SPC>op")
       _state = send_keys_sync(ctx, "a")
@@ -160,7 +160,7 @@ defmodule MingaEditor.Commands.FileTreeEditingTest do
       file = Path.join(dir, "same.txt")
       File.write!(file, "content")
 
-      ctx = start_editor("content", file_path: file)
+      ctx = start_editor("content", file_path: file, project_root: dir)
 
       _state = send_keys_sync(ctx, "<SPC>op")
       _state = send_keys_sync(ctx, "R")

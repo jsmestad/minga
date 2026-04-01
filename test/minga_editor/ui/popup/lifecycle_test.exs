@@ -11,8 +11,8 @@ defmodule MingaEditor.UI.Popup.LifecycleTest do
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
   alias MingaEditor.UI.Popup.Lifecycle
-  alias MingaEditor.UI.Popup.Registry, as: PopupRegistry
-  alias MingaEditor.UI.Popup.Rule
+  alias Minga.Popup.Registry, as: PopupRegistry
+  alias Minga.Popup.Rule
 
   # Lightweight fake buffer pid that responds to GenServer.call(:display_name)
   # so Layout.compute doesn't hang for 5 seconds on a default timeout.

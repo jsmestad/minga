@@ -39,7 +39,7 @@ defmodule MingaEditor.Workspace.State do
           lsp_pending: %{reference() => atom() | tuple()},
           completion: Completion.t() | nil,
           completion_trigger: CompletionTrigger.t(),
-          injection_ranges: %{pid() => [MingaEditor.UI.Highlight.InjectionRange.t()]},
+          injection_ranges: %{pid() => [Minga.Language.Highlight.InjectionRange.t()]},
           search: Search.t(),
           pending_conflict: {pid(), String.t()} | nil,
           editing: VimState.t(),
@@ -290,7 +290,7 @@ defmodule MingaEditor.Workspace.State do
   end
 
   @doc "Updates the injection ranges map."
-  @spec set_injection_ranges(t(), %{pid() => [MingaEditor.UI.Highlight.InjectionRange.t()]}) ::
+  @spec set_injection_ranges(t(), %{pid() => [Minga.Language.Highlight.InjectionRange.t()]}) ::
           t()
   def set_injection_ranges(%__MODULE__{} = wspace, ranges) do
     %{wspace | injection_ranges: ranges}

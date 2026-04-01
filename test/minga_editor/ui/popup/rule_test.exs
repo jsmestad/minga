@@ -1,7 +1,7 @@
 defmodule MingaEditor.UI.Popup.RuleTest do
   use ExUnit.Case, async: true
 
-  alias MingaEditor.UI.Popup.Rule
+  alias Minga.Popup.Rule
 
   describe "new/2" do
     test "creates a rule with string pattern and defaults" do

@@ -22,7 +22,7 @@ defmodule MingaEditor.UI.Popup.Active do
   """
 
   alias MingaEditor.Window
-  alias MingaEditor.UI.Popup.Rule
+  alias Minga.Popup.Rule
 
   @type t :: %__MODULE__{
           rule: Rule.t(),

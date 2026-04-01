@@ -1,7 +1,7 @@
 defmodule MingaEditor.UI.Highlight.SpanTest do
   use ExUnit.Case, async: true
 
-  alias MingaEditor.UI.Highlight.Span
+  alias Minga.Language.Highlight.Span
 
   describe "new/5" do
     test "creates a span with all fields" do
