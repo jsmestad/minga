@@ -236,26 +236,52 @@ Directories under `lib/minga/` group related modules. Some have a top-level entr
 
 The practical rule: **prefer the entry-point module when one exists**, because it gives you a stable API if the internals are reorganized. But reaching into `Buffer.Document` directly from `Editing.Motion` is fine when you need the data structure, not the GenServer. The Layer rules (Rule 1) are what actually prevent bad coupling, not module access.
 
+
+Minga uses three namespaces that enforce dependency direction: `Minga.*` (Layer 0), `MingaAgent.*` (Layer 1), `MingaEditor.*` (Layer 2). Dependencies flow downward only. A credo check enforces this at compile time. See `docs/ARCHITECTURE.md` for the full rationale.
+
+#### Layer 0: `lib/minga/` (Minga.*)
+
 | Directory | Entry point | What lives here |
-|-----------|------------|-----------------|
+|-----------|------------|------------------|
 | `buffer/` | `Minga.Buffer` | Document storage, gap buffer, undo/redo, edit deltas |
 | `editing/` | `Minga.Editing` | Motions, operators, text objects, search, auto-pair, completion, formatting |
 | `core/` | (none) | Pure data structures: IntervalTree, Decorations, Face, Diff, Unicode |
-| `editor/` | `Minga.Editor` | Editor GenServer, commands, rendering, layout, viewport, windows |
-| `shell/` | `Minga.Shell` | Shell behaviour + implementations (Traditional, Board) |
-| `input/` | `Minga.Input` | Input handler behaviour, focus stack, all handler modules |
 | `mode/` | `Minga.Mode` | Vim modal FSM behaviour + mode implementations |
-| `frontend/` | `Minga.Frontend` | Frontend communication, protocol encoding, capabilities |
-| `ui/` | `Minga.UI` | Themes, faces, highlighting, icons, fonts, picker, popups, which-key |
 | `config/` | `Minga.Config` | Options, hooks, advice, per-filetype overrides |
 | `keymap/` | `Minga.Keymap` | Key bindings, mode tries, scope management |
 | `lsp/` | `Minga.LSP` | Language server client, document sync, workspace edits |
 | `command/` | `Minga.Command` | Command struct, registry, provider behaviour |
 | `git/` | `Minga.Git` | Git operations, diff, blame, status |
-| `agent/` | `Minga.Agent` | AI agent sessions, tools, providers |
-| `language/` | `Minga.Language` | Language definitions, filetype detection, tree-sitter |
+| `language/` | `Minga.Language` | Language definitions, filetype detection, tree-sitter, grammar registry, devicons |
+| `parser/` | `Minga.Parser.Manager` | Tree-sitter parser Port management, `Minga.Parser.Protocol` (wire format) |
+| `popup/` | `Minga.Popup.Registry` | Popup rules and ETS registry (used by Config DSL, read by Editor) |
 | `session/` | `Minga.Session` | Session persistence, swap files, event recording |
 | `project/` | `Minga.Project` | Project root, file finding, project search, file tree, test detection |
+| `events.ex` | `Minga.Events` | Cross-cutting event bus (Registry-backed pub/sub) |
+
+#### Layer 1: `lib/minga_agent/` (MingaAgent.*)
+
+| Directory | Entry point | What lives here |
+|-----------|------------|------------------|
+| (root) | `MingaAgent.Runtime` | Public API facade for external clients |
+| `session*.ex` | `MingaAgent.SessionManager` | Agent session lifecycle, metadata |
+| `tool/` | `MingaAgent.Tool.Registry` | Tool specs, ETS registry, executor with advice integration |
+| `tools/` | (none) | Individual tool implementations (read_file, write_file, shell, etc.) |
+| `gateway/` | `MingaAgent.Gateway.Server` | WebSocket + JSON-RPC API gateway (Bandit/WebSock) |
+| `introspection.ex` | `MingaAgent.Introspection` | Runtime self-description for external clients |
+| `providers/` | (none) | LLM provider implementations (native, pi_rpc) |
+
+#### Layer 2: `lib/minga_editor/` (MingaEditor.*)
+
+| Directory | Entry point | What lives here |
+|-----------|------------|------------------|
+| (root) | `MingaEditor` | Editor GenServer, commands, rendering, layout, viewport, windows |
+| `shell/` | `MingaEditor.Shell` | Shell behaviour + implementations (Traditional, Board) |
+| `input/` | `MingaEditor.Input` | Input handler behaviour, focus stack, all handler modules |
+| `frontend/` | `MingaEditor.Frontend` | Frontend communication, protocol encoding, capabilities |
+| `ui/` | `MingaEditor.UI` | Themes, faces, highlighting, picker, prompts, which-key |
+| `workspace/` | `MingaEditor.Workspace.State` | Shared editing state across shells |
+| `agent/` | `MingaEditor.Agent.Events` | Agent UI state, view renderers, slash commands |
 
 ### Shell architecture
 

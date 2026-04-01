@@ -681,6 +681,65 @@ These guide what we build and how:
 
 ---
 
+## Three-Namespace Architecture
+
+Minga's Elixir code is split into three namespaces that enforce dependency direction at the module level. Dependencies flow downward only: Layer 0 never imports from Layer 1 or 2, Layer 1 never imports from Layer 2.
+
+```
+Layer 0: Minga.*          (pure foundations + stateful services)
+Layer 1: MingaAgent.*     (AI agent runtime)
+Layer 2: MingaEditor.*    (editor presentation + orchestration)
+```
+
+This isn't just organization for readability. A credo check (`Minga.Credo.DependencyDirectionCheck`) enforces these boundaries at compile time. Every `mix credo` run catches violations.
+
+**Layer 0 (`lib/minga/`)** contains everything the editor needs to function as a runtime: buffer management, language detection, config system, events, LSP client, git operations, project management, and the parser protocol. These modules have zero knowledge of how information is presented to users.
+
+**Layer 1 (`lib/minga_agent/`)** contains the AI agent runtime: session management, tool registry and execution, the API gateway, and changeset/overlay support. Agent code depends on Layer 0 (it reads buffers, uses events, calls into the config system) but never imports from MingaEditor.
+
+**Layer 2 (`lib/minga_editor/`)** contains the editor UI: the Editor GenServer, rendering pipeline, shells (Traditional, Board), input handling, themes, and all presentation logic. This layer consumes everything from Layers 0 and 1.
+
+The practical benefit: `Minga.Runtime.start/1` boots Layers 0 and 1 without any frontend. Agent sessions run, tools execute, buffers exist, all without a single pixel rendered. External clients connect through the API gateway and interact with a fully functional runtime.
+
+---
+
+## Headless Runtime
+
+`Minga.Runtime.start/1` boots the BEAM supervision tree without any frontend or editor process. Foundation services (events, config, keymaps), buffer management, application services (git, LSP, diagnostics), and the agent supervisor all start normally. What's missing: no `MingaEditor.Supervisor`, no frontend Port, no rendering pipeline.
+
+This is the entry point for headless use cases: CI pipelines running agent sessions, external tools that need Minga's buffer and language infrastructure, or test harnesses that want the full runtime without rendering overhead.
+
+Pass `gateway: [port: 4820]` to also start the API gateway (see below).
+
+---
+
+## API Gateway
+
+External clients connect to Minga through a WebSocket + JSON-RPC 2.0 gateway. The gateway exposes `MingaAgent.Runtime` (the stable public API for the agent runtime) to any client that speaks WebSocket: IDE extensions, CLI tools, web dashboards, CI pipelines.
+
+The gateway starts on-demand via `MingaAgent.Runtime.start_gateway/1` (or automatically when the headless runtime boots with `gateway: true`). Default port: 4820.
+
+**Request/response** uses standard JSON-RPC 2.0:
+
+```json
+{"jsonrpc": "2.0", "method": "session.start", "params": {}, "id": 1}
+{"jsonrpc": "2.0", "result": {"session_id": "session-1"}, "id": 1}
+```
+
+Available methods: `runtime.capabilities`, `runtime.describe_tools`, `runtime.describe_sessions`, `session.start`, `session.stop`, `session.prompt`, `session.abort`, `session.list`, `tool.execute`, `tool.list`.
+
+**Event streaming** pushes domain events as JSON-RPC notifications (no `id` field). When something happens in the runtime (session stopped, buffer saved, log message), connected clients receive it immediately:
+
+```json
+{"jsonrpc": "2.0", "method": "event.buffer_saved", "params": {"path": "lib/foo.ex"}}
+```
+
+The gateway does NOT expose rendered state or chrome opcodes. API clients get semantic queries (`describe_tools`, `describe_sessions`), not display lists. The macOS and TUI frontends keep their binary Port protocol for zero-overhead frame rendering. These are different abstraction levels serving different clients.
+
+See `lib/minga_agent/gateway/` for the implementation: `Server` (Bandit listener), `Router` (Plug), `WebSocket` (WebSock handler), `JsonRpc` (pure dispatch), `EventStream` (event subscription + formatting).
+
+---
+
 ## Trade-offs
 
 Honest accounting of what this architecture costs:
