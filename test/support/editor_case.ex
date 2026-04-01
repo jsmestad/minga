@@ -571,7 +571,8 @@ defmodule Minga.Test.EditorCase do
         height: ctx.height
       }
 
-      current = Snapshot.serialize(rows, metadata)
+      normalized_rows = Snapshot.normalize_volatile_rows(rows, ctx.width)
+      current = Snapshot.serialize(normalized_rows, metadata)
       path = Snapshot.snapshot_path(__MODULE__, name)
 
       if Snapshot.update_mode?() do

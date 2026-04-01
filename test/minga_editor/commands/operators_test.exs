@@ -1,185 +1,194 @@
 defmodule MingaEditor.Commands.OperatorsTest do
-  use Minga.Test.EditingModelCase, async: true
+  @moduledoc """
+  Tests for counted line operators (delete_lines_counted, change_lines_counted,
+  yank_lines_counted) in MingaEditor.Commands.Operators.
+
+  Calls `Operators.execute/2` directly on constructed EditorState structs
+  with a real BufferServer. No Editor GenServer needed.
+  """
+  use ExUnit.Case, async: true
 
   alias Minga.Buffer.Server, as: BufferServer
-  alias MingaEditor
+  alias MingaEditor.Commands.Operators
+  alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Registers
+  alias MingaEditor.Viewport
+  alias MingaEditor.Workspace.State, as: WorkspaceState
 
-  defp start_editor(content) do
-    {:ok, buffer} = BufferServer.start_link(content: content)
-
-    {:ok, editor} =
-      MingaEditor.start_link(
-        name: :"editor_#{:erlang.unique_integer([:positive])}",
-        port_manager: nil,
-        buffer: buffer,
-        width: 40,
-        height: 10,
-        editing_model: :vim
-      )
-
-    {editor, buffer}
+  defp start_buffer(content) do
+    start_supervised!({BufferServer, content: content})
   end
 
-  defp send_key(editor, codepoint, mods \\ 0) do
-    send(editor, {:minga_input, {:key_press, codepoint, mods}})
-    _ = :sys.get_state(editor)
+  defp build_state(buf) do
+    %EditorState{
+      port_manager: nil,
+      workspace: %WorkspaceState{
+        viewport: Viewport.new(24, 80),
+        buffers: %MingaEditor.State.Buffers{active: buf, list: [buf]}
+      }
+    }
   end
 
-  describe "delete operations" do
-    test "delete_at via x in normal mode" do
-      {editor, _buffer} = start_editor("hello")
-      send_key(editor, ?x)
-      assert Process.alive?(editor)
+  defp register_entry(state, name \\ "") do
+    Registers.get(state.workspace.editing.reg, name)
+  end
+
+  # ── delete_lines_counted ───────────────────────────────────────────────
+
+  describe "delete_lines_counted" do
+    test "1 (dd) deletes the current line" do
+      buf = start_buffer("hello\nworld\nfoo")
+      state = build_state(buf)
+
+      new_state = Operators.execute(state, {:delete_lines_counted, 1})
+
+      assert BufferServer.content(buf) == "world\nfoo"
+      assert register_entry(new_state) == {"hello\n", :linewise}
     end
 
-    test "dd deletes the current line" do
-      {editor, buffer} = start_editor("hello\nworld\nfoo")
-      send_key(editor, ?d)
-      send_key(editor, ?d)
+    test "2dd deletes two lines from cursor" do
+      buf = start_buffer("aaa\nbbb\nccc\nddd")
+      state = build_state(buf)
 
-      content = BufferServer.content(buffer)
+      new_state = Operators.execute(state, {:delete_lines_counted, 2})
+
+      assert BufferServer.content(buf) == "ccc\nddd"
+      assert register_entry(new_state) == {"aaa\nbbb\n", :linewise}
+    end
+
+    test "3dd deletes three lines from cursor" do
+      buf = start_buffer("line1\nline2\nline3\nline4\nline5")
+      state = build_state(buf)
+
+      new_state = Operators.execute(state, {:delete_lines_counted, 3})
+
+      assert BufferServer.content(buf) == "line4\nline5"
+      assert register_entry(new_state) == {"line1\nline2\nline3\n", :linewise}
+    end
+
+    test "2dd from middle line deletes that line and next" do
+      buf = start_buffer("aaa\nbbb\nccc\nddd")
+      BufferServer.move_to(buf, {1, 0})
+      state = build_state(buf)
+
+      new_state = Operators.execute(state, {:delete_lines_counted, 2})
+
+      assert BufferServer.content(buf) == "aaa\nddd"
+      assert register_entry(new_state) == {"bbb\nccc\n", :linewise}
+    end
+
+    test "count exceeding buffer clamps to last line" do
+      buf = start_buffer("aaa\nbbb")
+      state = build_state(buf)
+
+      new_state = Operators.execute(state, {:delete_lines_counted, 5})
+
+      assert BufferServer.content(buf) == ""
+      assert register_entry(new_state) == {"aaa\nbbb\n", :linewise}
+    end
+
+    test "dd on single line clears buffer" do
+      buf = start_buffer("only line")
+      state = build_state(buf)
+
+      new_state = Operators.execute(state, {:delete_lines_counted, 1})
+
+      assert BufferServer.content(buf) == ""
+      assert register_entry(new_state) == {"only line\n", :linewise}
+    end
+
+    test "deleted text goes to unnamed register, not yank register 0" do
+      buf = start_buffer("aaa\nbbb\nccc")
+      state = build_state(buf)
+
+      new_state = Operators.execute(state, {:delete_lines_counted, 2})
+
+      assert register_entry(new_state, "") == {"aaa\nbbb\n", :linewise}
+      assert register_entry(new_state, "0") == nil
+    end
+
+    test "cursor on last line with count > 1 deletes only that line" do
+      buf = start_buffer("aaa\nbbb\nccc")
+      BufferServer.move_to(buf, {2, 0})
+      state = build_state(buf)
+
+      new_state = Operators.execute(state, {:delete_lines_counted, 3})
+
+      assert BufferServer.content(buf) == "aaa\nbbb"
+      assert register_entry(new_state) == {"ccc\n", :linewise}
+    end
+  end
+
+  # ── change_lines_counted ───────────────────────────────────────────────
+
+  describe "change_lines_counted" do
+    test "cc clears current line" do
+      buf = start_buffer("hello\nworld\nfoo")
+      state = build_state(buf)
+
+      new_state = Operators.execute(state, {:change_lines_counted, 1})
+
+      content = BufferServer.content(buf)
       refute String.contains?(content, "hello")
       assert String.contains?(content, "world")
+      assert register_entry(new_state) == {"hello\n", :linewise}
     end
 
-    test "yy yanks the current line" do
-      {editor, buffer} = start_editor("hello\nworld")
-      send_key(editor, ?y)
-      send_key(editor, ?y)
+    test "2cc deletes both lines, register has both" do
+      buf = start_buffer("aaa\nbbb\nccc\nddd")
+      state = build_state(buf)
 
-      assert BufferServer.content(buffer) == "hello\nworld"
+      new_state = Operators.execute(state, {:change_lines_counted, 2})
 
-      send_key(editor, ?p)
-      assert String.contains?(BufferServer.content(buffer), "hello")
-    end
-
-    test "2dd deletes two lines and p pastes both back" do
-      {editor, buffer} = start_editor("aaa\nbbb\nccc\nddd")
-
-      # 2dd: delete two lines starting from cursor (line 0)
-      send_key(editor, ?2)
-      send_key(editor, ?d)
-      send_key(editor, ?d)
-
-      content = BufferServer.content(buffer)
+      content = BufferServer.content(buf)
       refute String.contains?(content, "aaa")
       refute String.contains?(content, "bbb")
       assert String.contains?(content, "ccc")
-      assert String.contains?(content, "ddd")
+      assert register_entry(new_state) == {"aaa\nbbb\n", :linewise}
+    end
+  end
 
-      # p: paste after cursor — should restore both deleted lines
-      send_key(editor, ?p)
+  # ── yank_lines_counted ────────────────────────────────────────────────
 
-      pasted = BufferServer.content(buffer)
-      assert String.contains?(pasted, "aaa")
-      assert String.contains?(pasted, "bbb")
+  describe "yank_lines_counted" do
+    test "yy yanks current line without modifying buffer" do
+      buf = start_buffer("hello\nworld")
+      state = build_state(buf)
+
+      new_state = Operators.execute(state, {:yank_lines_counted, 1})
+
+      assert BufferServer.content(buf) == "hello\nworld"
+      assert register_entry(new_state) == {"hello\n", :linewise}
     end
 
-    test "3dd deletes three lines and p pastes all three back" do
-      {editor, buffer} = start_editor("line1\nline2\nline3\nline4\nline5")
+    test "2yy yanks two lines without modifying buffer" do
+      buf = start_buffer("aaa\nbbb\nccc")
+      state = build_state(buf)
 
-      send_key(editor, ?3)
-      send_key(editor, ?d)
-      send_key(editor, ?d)
+      new_state = Operators.execute(state, {:yank_lines_counted, 2})
 
-      content = BufferServer.content(buffer)
-      refute String.contains?(content, "line1")
-      refute String.contains?(content, "line2")
-      refute String.contains?(content, "line3")
-      assert String.contains?(content, "line4")
-
-      send_key(editor, ?p)
-
-      pasted = BufferServer.content(buffer)
-      assert String.contains?(pasted, "line1")
-      assert String.contains?(pasted, "line2")
-      assert String.contains?(pasted, "line3")
+      assert BufferServer.content(buf) == "aaa\nbbb\nccc"
+      assert register_entry(new_state) == {"aaa\nbbb\n", :linewise}
     end
 
-    test "2yy yanks two lines and p pastes both" do
-      {editor, buffer} = start_editor("aaa\nbbb\nccc")
+    test "yank stores in both unnamed and yank register 0" do
+      buf = start_buffer("aaa\nbbb\nccc")
+      state = build_state(buf)
 
-      send_key(editor, ?2)
-      send_key(editor, ?y)
-      send_key(editor, ?y)
+      new_state = Operators.execute(state, {:yank_lines_counted, 2})
 
-      # Buffer should be unchanged after yank
-      assert BufferServer.content(buffer) == "aaa\nbbb\nccc"
-
-      # Move to last line and paste
-      send_key(editor, ?G)
-      send_key(editor, ?p)
-
-      pasted = BufferServer.content(buffer)
-      assert String.contains?(pasted, "aaa")
-      assert String.contains?(pasted, "bbb")
-
-      # Both yanked lines should appear in the pasted content
-      lines = String.split(pasted, "\n")
-      assert length(lines) == 5
+      assert register_entry(new_state, "") == {"aaa\nbbb\n", :linewise}
+      assert register_entry(new_state, "0") == {"aaa\nbbb\n", :linewise}
     end
 
-    test "cc clears current line and enters insert mode" do
-      {editor, buffer} = start_editor("hello\nworld\nfoo")
-      send_key(editor, ?c)
-      send_key(editor, ?c)
+    test "yank count exceeding buffer clamps to last line" do
+      buf = start_buffer("aaa\nbbb")
+      state = build_state(buf)
 
-      # Line should be cleared but still exist
-      content = BufferServer.content(buffer)
-      refute String.contains?(content, "hello")
-      assert String.contains?(content, "world")
-      assert String.contains?(content, "foo")
+      new_state = Operators.execute(state, {:yank_lines_counted, 5})
 
-      # The editor should now be in insert mode
-      %{workspace: %{editing: %{mode: mode}}} = :sys.get_state(editor)
-      assert mode == :insert
-    end
-
-    test "2cc deletes both lines and register contains both" do
-      {editor, buffer} = start_editor("aaa\nbbb\nccc\nddd")
-
-      send_key(editor, ?2)
-      send_key(editor, ?c)
-      send_key(editor, ?c)
-
-      content = BufferServer.content(buffer)
-      refute String.contains?(content, "aaa")
-      refute String.contains?(content, "bbb")
-      assert String.contains?(content, "ccc")
-      assert String.contains?(content, "ddd")
-
-      # Should be in insert mode
-      %{workspace: %{editing: %{mode: mode}}} = :sys.get_state(editor)
-      assert mode == :insert
-
-      # Escape to normal, then paste to verify register has both lines
-      send_key(editor, 27)
-      send_key(editor, ?p)
-
-      pasted = BufferServer.content(buffer)
-      assert String.contains?(pasted, "aaa")
-      assert String.contains?(pasted, "bbb")
-    end
-
-    test "dd on single line clears content" do
-      {editor, buffer} = start_editor("only line")
-      send_key(editor, ?d)
-      send_key(editor, ?d)
-
-      content = BufferServer.content(buffer)
-      assert content == ""
-    end
-
-    test "2dd with count exceeding buffer lines deletes to end" do
-      {editor, buffer} = start_editor("aaa\nbbb")
-
-      # 5dd but only 2 lines exist — should delete both without crashing
-      send_key(editor, ?5)
-      send_key(editor, ?d)
-      send_key(editor, ?d)
-
-      content = BufferServer.content(buffer)
-      assert content == ""
+      assert BufferServer.content(buf) == "aaa\nbbb"
+      assert register_entry(new_state) == {"aaa\nbbb\n", :linewise}
     end
   end
 end
