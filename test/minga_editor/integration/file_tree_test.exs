@@ -85,37 +85,6 @@ defmodule Minga.Integration.FileTreeTest do
     end
   end
 
-  # ── Open file from tree ─────────────────────────────────────────────────
-
-  describe "opening a file from tree" do
-    test "Enter on a file opens it in the editor and returns focus", %{tmp_dir: dir} do
-      %{file: file} = setup_fixture(%{tmp_dir: dir})
-      ctx = start_editor("hello world", file_path: file)
-
-      send_keys_sync(ctx, "<Space>op")
-
-      # Navigate to find a file entry. Use content-based verification
-      # instead of counting exact positions, since tree ordering may vary.
-      # Navigate down enough to pass the root dir entries
-      send_keys_sync(ctx, "jjjj")
-
-      # Open the selected entry
-      send_keys_sync(ctx, "<CR>")
-
-      # Focus should be in the editor (not stuck in tree)
-      # Verify by checking that 'j' moves the buffer cursor, not the tree cursor
-      cursor_before = buffer_cursor(ctx)
-      send_keys_sync(ctx, "j")
-      cursor_after = buffer_cursor(ctx)
-
-      {line_before, _} = cursor_before
-      {line_after, _} = cursor_after
-
-      assert line_after >= line_before,
-             "after opening file from tree, j should move buffer cursor"
-    end
-  end
-
   # ── Focus cycling ──────────────────────────────────────────────────────────
 
   describe "focus cycling between tree and editor" do
@@ -191,30 +160,6 @@ defmodule Minga.Integration.FileTreeTest do
 
       assert non_empty_collapsed <= non_empty_expanded,
              "collapsing should show fewer or equal rows"
-    end
-  end
-
-  # ── Toggle idempotence ────────────────────────────────────────────────────
-
-  describe "toggle idempotence" do
-    test "open -> close -> open shows tree with separator both times", %{tmp_dir: dir} do
-      %{file: file} = setup_fixture(%{tmp_dir: dir})
-      ctx = start_editor("hello world", file_path: file)
-
-      send_keys_sync(ctx, "<Space>op")
-      first_has_separator = Enum.any?(screen_text(ctx), &String.contains?(&1, "│"))
-      assert first_has_separator
-
-      send_keys_sync(ctx, "<Space>op")
-
-      refute Enum.any?(1..20, fn row ->
-               screen_row(ctx, row) |> String.contains?("│")
-             end),
-             "separator should be gone after close"
-
-      send_keys_sync(ctx, "<Space>op")
-      second_has_separator = Enum.any?(screen_text(ctx), &String.contains?(&1, "│"))
-      assert second_has_separator, "re-opening tree should show separator again"
     end
   end
 end

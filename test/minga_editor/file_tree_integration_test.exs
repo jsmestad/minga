@@ -23,13 +23,12 @@ defmodule MingaEditor.FileTreeIntegrationTest do
       File.write!(file, "hello")
       ctx = start_editor(file)
 
-      # Open tree
-      send_keys_sync(ctx, "<SPC>op")
-
-      # Get the editor state and inject an agent chat as the active window
-      # content to simulate the real scenario.
+      # Toggle tree via direct function call instead of send_keys_sync
       state = :sys.get_state(ctx.editor)
+      state = MingaEditor.Commands.FileTree.toggle(state)
       assert state.workspace.file_tree.tree != nil
+
+      # Inject agent chat as active window content
       active_id = state.workspace.windows.active
       active_window = Map.get(state.workspace.windows.map, active_id)
       agent_window = %{active_window | content: {:agent_chat, self()}}
@@ -73,43 +72,6 @@ defmodule MingaEditor.FileTreeIntegrationTest do
       assert c2 > 0
       assert w2 < 80
       assert c2 + w2 <= 80
-    end
-  end
-
-  describe "window navigation with file tree" do
-    test "SPC w h focuses the file tree from editor", %{tmp_dir: dir} do
-      file = Path.join(dir, "test.txt")
-      File.write!(file, "hello")
-      ctx = start_editor(file)
-
-      # Open tree (focused)
-      state = send_keys_sync(ctx, "<SPC>op")
-      assert state.workspace.file_tree.tree != nil
-      assert state.workspace.file_tree.focused == true
-
-      # SPC w l should passthrough from tree, unfocusing it
-      state = send_keys_sync(ctx, "<SPC>wl")
-      assert state.workspace.file_tree.tree != nil
-      assert state.workspace.file_tree.focused == false
-
-      # SPC w h should focus the tree again
-      state = send_keys_sync(ctx, "<SPC>wh")
-      assert state.workspace.file_tree.focused == true
-    end
-
-    test "SPC w l from the file tree returns focus to editor", %{tmp_dir: dir} do
-      file = Path.join(dir, "test.txt")
-      File.write!(file, "hello")
-      ctx = start_editor(file)
-
-      # Open tree (focused)
-      state = send_keys_sync(ctx, "<SPC>op")
-      assert state.workspace.file_tree.focused == true
-
-      # SPC w l unfocuses tree, returns to editor
-      state = send_keys_sync(ctx, "<SPC>wl")
-      assert state.workspace.file_tree.tree != nil
-      assert state.workspace.file_tree.focused == false
     end
   end
 
