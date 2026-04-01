@@ -11,7 +11,7 @@ defmodule Minga.Parser.IncrementalTest do
   # teardown can race with ExUnit's :standard_error capture/restore lifecycle
   use ExUnit.Case, async: false
 
-  alias Minga.Frontend.Protocol
+  alias MingaEditor.Frontend.Protocol
   alias Minga.Parser.Manager, as: ParserManager
 
   @moduletag :parser_integration

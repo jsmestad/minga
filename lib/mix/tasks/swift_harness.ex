@@ -8,7 +8,7 @@ defmodule Mix.Tasks.Swift.Harness do
 
   Compiles `macos/Sources/TestHarness/main.swift` along with the shared
   protocol files into `priv/minga-test-harness`. Required before running
-  `test/minga/integration/gui_protocol_test.exs`.
+  `test/minga_editor/integration/gui_protocol_test.exs`.
   """
 
   use Mix.Task

@@ -8,7 +8,7 @@ defmodule Minga.Mode.Visual do
   * `V` — linewise visual (selects whole lines)
 
   The selection spans from the **anchor** (cursor position when visual mode was
-  entered, injected into the FSM state by `Minga.Editor`) to the **current
+  entered, injected into the FSM state by `MingaEditor`) to the **current
   cursor position** (the moving end). All standard motion keys move the cursor
   end, extending or shrinking the selection.
 
@@ -59,7 +59,7 @@ defmodule Minga.Mode.Visual do
   # Special codepoints
   @escape 27
 
-  # Modifier flags (mirrors Minga.Frontend.Protocol)
+  # Modifier flags (mirrors MingaEditor.Frontend.Protocol)
   @ctrl 0x02
   @super 0x08
 

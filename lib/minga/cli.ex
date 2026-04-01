@@ -173,7 +173,7 @@ defmodule Minga.CLI do
 
         case wait_for_editor(interval, retries) do
           :ok ->
-            Minga.Editor.open_file(path)
+            MingaEditor.open_file(path)
 
           :timeout ->
             Minga.Log.error(:editor, "Editor process did not start in time")
@@ -194,7 +194,7 @@ defmodule Minga.CLI do
   defp wait_for_editor(_interval, 0), do: :timeout
 
   defp wait_for_editor(interval, retries) do
-    case Process.whereis(Minga.Editor) do
+    case Process.whereis(MingaEditor) do
       nil ->
         receive do
         after

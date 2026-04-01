@@ -8,7 +8,7 @@ defmodule Minga.DotRepeatTest do
   use Minga.Test.EditingModelCase, async: true
 
   alias Minga.Buffer.Server, as: BufferServer
-  alias Minga.Editor
+  alias MingaEditor
 
   @escape 27
 
@@ -18,7 +18,7 @@ defmodule Minga.DotRepeatTest do
     {:ok, buffer} = BufferServer.start_link(content: content)
 
     {:ok, editor} =
-      Editor.start_link(
+      MingaEditor.start_link(
         name: :"editor_#{:erlang.unique_integer([:positive])}",
         port_manager: nil,
         buffer: buffer,

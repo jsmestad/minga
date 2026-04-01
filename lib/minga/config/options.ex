@@ -21,7 +21,7 @@ defmodule Minga.Config.Options do
   | `:autopair`     | boolean                                        | `true`    |
   | `:scroll_margin`| non-negative integer                           | `5`       |
   | `:scroll_lines` | positive integer                               | `1`       |
-  | `:theme`        | theme name atom (see `Minga.UI.Theme.available/0`) | `:doom_one`|
+  | `:theme`        | theme name atom (see `MingaEditor.UI.Theme.available/0`) | `:doom_one`|
   | `:indent_with`  | `:spaces` or `:tabs`                            | `:spaces`  |
   | `:trim_trailing_whitespace` | boolean                             | `false`    |
   | `:insert_final_newline`     | boolean                             | `false`    |
@@ -789,11 +789,11 @@ defmodule Minga.Config.Options do
   defp validate_type(:any, _name, _value), do: :ok
 
   defp validate_type(:theme_atom, _name, value) when is_atom(value) do
-    if value in Minga.UI.Theme.available() do
+    if value in MingaEditor.UI.Theme.available() do
       :ok
     else
       {:error,
-       "theme must be one of #{inspect(Minga.UI.Theme.available())}, got: #{inspect(value)}"}
+       "theme must be one of #{inspect(MingaEditor.UI.Theme.available())}, got: #{inspect(value)}"}
     end
   end
 

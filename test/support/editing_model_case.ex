@@ -3,7 +3,7 @@ defmodule Minga.Test.EditingModelCase do
   Case template that pins the editing model before each test.
 
   Use this in test modules that create editors directly via
-  `Editor.start_link` (without going through `EditorCase`) and need
+  `MingaEditor.start_link` (without going through `EditorCase`) and need
   a specific editing model for key dispatch.
 
       use Minga.Test.EditingModelCase, async: true
@@ -14,7 +14,7 @@ defmodule Minga.Test.EditingModelCase do
   `@tag editing_model: :cua`.
 
   For tests that use `EditorCase`, the editing model is passed to
-  `Editor.start_link` via the `editing_model:` option and doesn't
+  `MingaEditor.start_link` via the `editing_model:` option and doesn't
   need this case template.
   """
 

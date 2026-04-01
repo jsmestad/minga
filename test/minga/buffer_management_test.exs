@@ -4,7 +4,7 @@ defmodule Minga.BufferManagementTest do
   ex commands correctly dispatch to buffer lifecycle operations.
 
   Buffer count, index, and state-level invariants are tested as pure
-  functions in `Editor.State.BufferLifecycleTest`. These tests focus on
+  functions in `MingaEditor.State.BufferLifecycleTest`. These tests focus on
   the keystroke-to-state-change plumbing.
   """
 

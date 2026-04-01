@@ -1,0 +1,459 @@
+defmodule MingaEditor.Window do
+  @moduledoc """
+  A window is a viewport into a buffer.
+
+  Each window holds a reference to a buffer process and its own independent
+  viewport (scroll position and dimensions). Multiple windows can reference
+  the same buffer; edits in one are visible in all.
+
+  ## Render cache and dirty-line tracking
+
+  Windows carry per-frame render state that enables incremental rendering.
+  Instead of rebuilding draw commands for every visible line on every frame,
+  the pipeline caches draws keyed by buffer line number and only re-renders
+  lines marked as dirty.
+
+  The dirty set uses two representations:
+  - `:all` means every line needs re-rendering (used for scroll, resize,
+    theme change, highlight update, and other wholesale invalidation)
+  - A map of specific buffer line numbers (`%{line => true}`) that need re-rendering
+    (used for edits that touch a few lines)
+
+  Gutter and content caches are separate because cursor movement with
+  relative line numbering dirties every gutter entry without changing
+  content. This avoids re-rendering line text when only line numbers change.
+
+  Tracking fields (`last_viewport_top`, `last_gutter_w`, `last_line_count`,
+  `last_cursor_line`, `last_buf_version`) store the values from the previous
+  frame. The Scroll stage compares current values against these to detect
+  full-invalidation triggers automatically.
+  """
+
+  alias Minga.Buffer
+  alias MingaEditor.DisplayList
+  alias MingaEditor.FoldMap
+  alias Minga.Editing.Fold.Range, as: FoldRange
+  alias MingaEditor.Viewport
+  alias MingaEditor.Window.Content
+  alias MingaEditor.Window.RenderCache
+  alias MingaEditor.UI.Popup.Active, as: PopupActive
+
+  @typedoc "Unique identifier for a window."
+  @type id :: pos_integer()
+
+  @type t :: %__MODULE__{
+          id: id(),
+          content: Content.t(),
+          buffer: pid(),
+          viewport: Viewport.t(),
+          cursor: Buffer.position(),
+          pinned: boolean(),
+          fold_map: FoldMap.t(),
+          fold_ranges: [FoldRange.t()],
+          textobject_positions: %{atom() => [{non_neg_integer(), non_neg_integer()}]},
+          popup_meta: PopupActive.t() | nil,
+          render_cache: RenderCache.t()
+        }
+
+  @enforce_keys [:id, :content, :buffer, :viewport]
+  defstruct [
+    :id,
+    :content,
+    :buffer,
+    :viewport,
+    cursor: {0, 0},
+    pinned: false,
+    fold_map: %FoldMap{folds: []},
+    fold_ranges: [],
+    textobject_positions: %{},
+    popup_meta: nil,
+    render_cache: %RenderCache{}
+  ]
+
+  @doc """
+  Creates a new window with the given id, buffer, and viewport dimensions.
+
+  Sets both `content` (the polymorphic content reference) and `buffer`
+  (backward-compatible pid field). During the migration, callers access
+  `window.buffer` directly. Once all callers are updated to use
+  `Content.buffer_pid(window.content)`, the `buffer` field will be removed.
+  """
+  @spec new(id(), pid(), pos_integer(), pos_integer()) :: t()
+  def new(id, buffer, rows, cols)
+      when is_integer(id) and id > 0 and is_pid(buffer) and
+             is_integer(rows) and rows > 0 and is_integer(cols) and cols > 0 do
+    %__MODULE__{
+      id: id,
+      content: Content.buffer(buffer),
+      buffer: buffer,
+      viewport: Viewport.new(rows, cols)
+    }
+  end
+
+  @doc """
+  Creates a new agent chat window.
+
+  The `buffer` field is set to the agent's `*Agent*` Buffer.Server pid
+  for backward compatibility with code that reads `window.buffer`. The
+  `content` field uses the `:agent_chat` tag so the render pipeline can
+  dispatch to the agent chat renderer.
+  """
+  @spec new_agent_chat(id(), pid(), pos_integer(), pos_integer()) :: t()
+  def new_agent_chat(id, agent_buffer, rows, cols)
+      when is_integer(id) and id > 0 and is_pid(agent_buffer) and
+             is_integer(rows) and rows > 0 and is_integer(cols) and cols > 0 do
+    %__MODULE__{
+      id: id,
+      content: Content.agent_chat(agent_buffer),
+      buffer: agent_buffer,
+      viewport: Viewport.new(rows, cols),
+      pinned: true,
+      render_cache: RenderCache.reset()
+    }
+  end
+
+  @doc "Creates a new window with the given id, buffer, viewport dimensions, and cursor position."
+  @spec new(id(), pid(), pos_integer(), pos_integer(), Buffer.position()) :: t()
+  def new(id, buffer, rows, cols, cursor)
+      when is_integer(id) and id > 0 and is_pid(buffer) and
+             is_integer(rows) and rows > 0 and is_integer(cols) and cols > 0 and
+             is_tuple(cursor) do
+    %__MODULE__{
+      id: id,
+      content: Content.buffer(buffer),
+      buffer: buffer,
+      viewport: Viewport.new(rows, cols),
+      cursor: cursor
+    }
+  end
+
+  @doc "Updates the viewport dimensions for this window, marking all lines dirty."
+  @spec resize(t(), non_neg_integer(), non_neg_integer()) :: t()
+  def resize(%__MODULE__{} = window, rows, cols)
+      when is_integer(rows) and rows > 0 and is_integer(cols) and cols > 0 do
+    window
+    |> invalidate()
+    |> Map.put(:viewport, Viewport.new(rows, cols))
+  end
+
+  # When a window is squeezed to zero dimensions (e.g., terminal resized
+  # too small with splits active), clamp to 1x1 to avoid downstream crashes.
+  def resize(%__MODULE__{} = window, rows, cols)
+      when is_integer(rows) and is_integer(cols) do
+    resize(window, max(rows, 1), max(cols, 1))
+  end
+
+  # ── Scroll helpers ──────────────────────────────────────────────────────────
+
+  @doc """
+  Scrolls the window's viewport by `delta` lines and updates pinned state.
+
+  Scrolling up always unpins. Scrolling down re-pins only when the viewport
+  reaches the bottom. `total_lines` is the buffer's line count.
+
+  Returns the updated window.
+  """
+  @spec scroll_viewport(t(), integer(), non_neg_integer()) :: t()
+  def scroll_viewport(%__MODULE__{} = window, 0, _total_lines), do: window
+
+  def scroll_viewport(%__MODULE__{viewport: vp} = window, delta, total_lines) do
+    visible = Viewport.content_rows(vp)
+    max_top = max(total_lines - visible, 0)
+    new_top = (vp.top + delta) |> max(0) |> min(max_top)
+    pinned = delta > 0 and new_top >= max_top
+
+    %{window | viewport: %{vp | top: new_top}, pinned: pinned}
+  end
+
+  # ── Popup queries ──────────────────────────────────────────────────────────
+
+  @doc "Returns true if this window is a popup (has popup metadata attached)."
+  @spec popup?(t()) :: boolean()
+  def popup?(%__MODULE__{popup_meta: nil}), do: false
+  def popup?(%__MODULE__{popup_meta: %PopupActive{}}), do: true
+
+  # ── Fold operations ────────────────────────────────────────────────────────
+
+  @doc "Returns true if this window has any active folds."
+  @spec has_folds?(t()) :: boolean()
+  def has_folds?(%__MODULE__{fold_map: fm}), do: not FoldMap.empty?(fm)
+
+  @doc "Finds the next textobject position of the given type after (row, col)."
+  @spec next_textobject(t(), atom(), {non_neg_integer(), non_neg_integer()}) ::
+          {non_neg_integer(), non_neg_integer()} | nil
+  def next_textobject(%__MODULE__{textobject_positions: positions}, type, {row, col}) do
+    positions
+    |> Map.get(type, [])
+    |> Enum.find(fn {r, c} -> r > row or (r == row and c > col) end)
+  end
+
+  @doc "Finds the previous textobject position of the given type before (row, col)."
+  @spec prev_textobject(t(), atom(), {non_neg_integer(), non_neg_integer()}) ::
+          {non_neg_integer(), non_neg_integer()} | nil
+  def prev_textobject(%__MODULE__{textobject_positions: positions}, type, {row, col}) do
+    positions
+    |> Map.get(type, [])
+    |> Enum.reverse()
+    |> Enum.find(fn {r, c} -> r < row or (r == row and c < col) end)
+  end
+
+  @doc "Toggles the fold at the given buffer line using the window's available fold ranges."
+  @spec toggle_fold(t(), non_neg_integer()) :: t()
+  def toggle_fold(%__MODULE__{fold_map: fm, fold_ranges: ranges} = window, line) do
+    new_fm = FoldMap.toggle(fm, line, ranges)
+
+    %{window | fold_map: new_fm}
+    |> clamp_cursor_to_visible()
+    |> invalidate()
+  end
+
+  @doc "Folds the range containing the given buffer line."
+  @spec fold_at(t(), non_neg_integer()) :: t()
+  def fold_at(%__MODULE__{fold_map: fm, fold_ranges: ranges} = window, line) do
+    case FoldMap.innermost_range(ranges, line) do
+      nil ->
+        window
+
+      range ->
+        %{window | fold_map: FoldMap.fold(fm, range)}
+        |> clamp_cursor_to_visible()
+        |> invalidate()
+    end
+  end
+
+  @doc "Unfolds the range containing the given buffer line."
+  @spec unfold_at(t(), non_neg_integer()) :: t()
+  def unfold_at(%__MODULE__{fold_map: fm} = window, line) do
+    new_fm = FoldMap.unfold_at(fm, line)
+
+    if new_fm == fm do
+      window
+    else
+      %{window | fold_map: new_fm} |> invalidate()
+    end
+  end
+
+  @doc "Folds all available ranges."
+  @spec fold_all(t()) :: t()
+  def fold_all(%__MODULE__{fold_ranges: ranges} = window) do
+    %{window | fold_map: FoldMap.fold_all(FoldMap.new(), ranges)}
+    |> clamp_cursor_to_visible()
+    |> invalidate()
+  end
+
+  @doc "Unfolds all folds."
+  @spec unfold_all(t()) :: t()
+  def unfold_all(%__MODULE__{} = window) do
+    %{window | fold_map: FoldMap.unfold_all(window.fold_map)}
+    |> invalidate()
+  end
+
+  # If the cursor is inside a folded (hidden) region, move it to the
+  # start of the fold that contains it. Also clamps the viewport top
+  # so the scroll stage doesn't start from a stale position.
+  @spec clamp_cursor_to_visible(t()) :: t()
+  defp clamp_cursor_to_visible(%__MODULE__{fold_map: fm, cursor: {line, col}} = window) do
+    window =
+      if FoldMap.folded?(fm, line) do
+        case FoldMap.fold_at(fm, line) do
+          {:ok, %FoldRange{start_line: start}} -> %{window | cursor: {start, col}}
+          :none -> window
+        end
+      else
+        window
+      end
+
+    # Clamp viewport top: after folding, the visible line count may shrink
+    # below the current viewport top, causing negative cursor screen rows.
+    # Map the cursor to visible-line space and ensure the viewport top
+    # doesn't exceed it.
+    {cursor_line, _} = window.cursor
+    visible_cursor = FoldMap.buffer_to_visible(fm, cursor_line)
+    vp = window.viewport
+
+    if vp.top > visible_cursor do
+      %{window | viewport: %{vp | top: max(visible_cursor - 5, 0)}}
+    else
+      window
+    end
+  end
+
+  @doc "Updates the available fold ranges (from a provider). Preserves existing folds that still exist in the new ranges."
+  @spec set_fold_ranges(t(), [FoldRange.t()]) :: t()
+  def set_fold_ranges(%__MODULE__{fold_map: fm} = window, new_ranges) do
+    # Keep existing folds that still match a range in the new set
+    surviving_folds =
+      Enum.filter(FoldMap.folds(fm), fn old_fold ->
+        Enum.any?(new_ranges, fn new_range ->
+          new_range.start_line == old_fold.start_line and
+            new_range.end_line == old_fold.end_line
+        end)
+      end)
+
+    new_fm = FoldMap.from_ranges(surviving_folds)
+
+    %{window | fold_ranges: new_ranges, fold_map: new_fm}
+    |> clamp_cursor_to_visible()
+  end
+
+  @doc "Unfolds any folds that contain the given lines (used by search auto-unfold)."
+  @spec unfold_containing(t(), [non_neg_integer()]) :: t()
+  def unfold_containing(%__MODULE__{fold_map: fm} = window, lines) do
+    new_fm = FoldMap.unfold_containing(fm, lines)
+
+    if new_fm == fm do
+      window
+    else
+      %{window | fold_map: new_fm} |> invalidate()
+    end
+  end
+
+  # ── Dirty-line tracking ───────────────────────────────────────────────────
+
+  @doc """
+  Marks specific buffer lines as needing re-render.
+
+  Pass `:all` to force a complete redraw (scroll, resize, theme change, etc.).
+  Pass a list of buffer line numbers for targeted invalidation (edits).
+  If the window is already fully dirty, adding specific lines is a no-op.
+  """
+  @spec mark_dirty(t(), [non_neg_integer()] | :all) :: t()
+  def mark_dirty(%__MODULE__{render_cache: cache} = window, lines) do
+    %{window | render_cache: RenderCache.mark_dirty(cache, lines)}
+  end
+
+  @doc """
+  Marks all lines dirty (full redraw needed).
+
+  Clears all caches and resets tracking fields to sentinels so the next
+  render pass starts from scratch. Use this when the window's buffer
+  changes, on resize, or any other event that makes all cached draws
+  invalid.
+  """
+  @spec invalidate(t()) :: t()
+  def invalidate(%__MODULE__{} = window) do
+    %{window | render_cache: RenderCache.reset()}
+  end
+
+  @doc """
+  Returns true if the given buffer line needs re-rendering.
+
+  Always true when `dirty_lines` is `:all`.
+  """
+  @spec dirty?(t(), non_neg_integer()) :: boolean()
+  def dirty?(%__MODULE__{render_cache: cache}, line), do: RenderCache.dirty?(cache, line)
+
+  @doc """
+  Checks current frame parameters against last-frame tracking fields
+  and returns the window with `dirty_lines: :all` if anything that
+  requires a full redraw has changed.
+
+  Structural triggers (checked here): viewport scroll, gutter width,
+  line count, buffer version, first frame (sentinel values).
+
+  Context triggers (checked separately via `detect_context_change/2`):
+  visual selection, search matches, syntax highlights, diagnostic signs,
+  git signs, viewport horizontal scroll, active status, theme colors.
+  """
+  @spec detect_invalidation(
+          t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: t()
+  def detect_invalidation(
+        %__MODULE__{render_cache: cache} = window,
+        viewport_top,
+        gutter_w,
+        line_count,
+        buf_version
+      ) do
+    %{
+      window
+      | render_cache:
+          RenderCache.detect_invalidation(cache, viewport_top, gutter_w, line_count, buf_version)
+    }
+  end
+
+  @doc """
+  Compares the current render context fingerprint against the last frame's.
+
+  If the fingerprint changed, marks all lines dirty. This catches changes
+  to visual selection, search matches, syntax highlights, diagnostic signs,
+  git signs, horizontal scroll, active/inactive status, and theme colors,
+  all of which affect every visible line's draw output.
+  """
+  @spec detect_context_change(t(), RenderCache.context_fingerprint()) :: t()
+  def detect_context_change(%__MODULE__{render_cache: cache} = window, fingerprint) do
+    %{window | render_cache: RenderCache.detect_context_change(cache, fingerprint)}
+  end
+
+  @doc """
+  Stores rendered gutter and content draws for a buffer line.
+
+  Does NOT remove the line from the dirty set; that happens in
+  `snapshot_after_render/5` when the full frame is complete.
+  """
+  @spec cache_line(
+          t(),
+          non_neg_integer(),
+          [DisplayList.draw()],
+          [DisplayList.draw()]
+        ) :: t()
+  def cache_line(%__MODULE__{render_cache: cache} = window, buf_line, gutter_draws, content_draws) do
+    %{window | render_cache: RenderCache.cache_line(cache, buf_line, gutter_draws, content_draws)}
+  end
+
+  @doc """
+  Snapshots tracking fields after a successful render pass.
+
+  Clears the dirty set and records the current frame's parameters so the
+  next frame can detect what changed. The context fingerprint captures
+  all per-frame render context inputs (visual selection, search matches,
+  syntax highlights, signs, etc.) so context changes trigger full redraws.
+  """
+  @spec snapshot_after_render(
+          t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          RenderCache.context_fingerprint()
+        ) :: t()
+  def snapshot_after_render(
+        %__MODULE__{render_cache: cache} = window,
+        viewport_top,
+        gutter_w,
+        line_count,
+        cursor_line,
+        buf_version,
+        ctx_fingerprint
+      ) do
+    %{
+      window
+      | render_cache:
+          RenderCache.snapshot(
+            cache,
+            viewport_top,
+            gutter_w,
+            line_count,
+            cursor_line,
+            buf_version,
+            ctx_fingerprint
+          )
+    }
+  end
+
+  @doc """
+  Prunes cache entries for buffer lines no longer in the visible range.
+
+  Keeps the cache bounded to avoid memory growth as the user scrolls
+  through a large file.
+  """
+  @spec prune_cache(t(), non_neg_integer(), non_neg_integer()) :: t()
+  def prune_cache(%__MODULE__{render_cache: cache} = window, first_visible, last_visible) do
+    %{window | render_cache: RenderCache.prune(cache, first_visible, last_visible)}
+  end
+end

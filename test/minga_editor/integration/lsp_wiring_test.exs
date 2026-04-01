@@ -1,0 +1,154 @@
+defmodule Minga.Integration.LspWiringTest do
+  @moduledoc """
+  Integration tests for LSP feature wiring in the Editor GenServer.
+
+  These tests verify that trigger messages (timer, save event, scroll)
+  route correctly through the Editor without crashing, and that LSP
+  responses with complex keys (tuple dispatch) are handled properly.
+
+  None of these tests require a real or mock LSP server. They test at
+  the GenServer message boundary: send a trigger, sync with
+  `:sys.get_state/1`, assert the editor is alive and state changed.
+  """
+  use Minga.Test.EditorCase, async: true
+
+  alias Minga.Events
+
+  # 50-line buffer for scroll tests
+  @scroll_content Enum.map_join(1..50, "\n", &"line #{&1}")
+
+  # ── Code lens / inlay hints on open ────────────────────────────────────────
+
+  describe "code lens and inlay hints on buffer open" do
+    test "timer message is handled without crash when no LSP client" do
+      ctx = start_editor("defmodule Foo do\n  def bar, do: :ok\nend")
+
+      # Simulate the deferred timer firing (normally 800ms after open).
+      # With no LSP client registered, code_lens/inlay_hints no-op gracefully.
+      send(ctx.editor, :request_code_lens_and_inlay_hints)
+
+      # Sync: if the handler crashed, get_state would raise.
+      state = :sys.get_state(ctx.editor)
+      assert state.workspace.editing.mode == :normal
+    end
+
+    test "timer message with no active buffer is gracefully handled" do
+      ctx = start_editor("hello")
+
+      # Remove the active buffer to simulate the edge case
+      :sys.replace_state(ctx.editor, fn state ->
+        put_in(state.workspace.buffers.active, nil)
+      end)
+
+      # Should not crash even with no active buffer
+      send(ctx.editor, :request_code_lens_and_inlay_hints)
+      state = :sys.get_state(ctx.editor)
+      assert is_map(state)
+    end
+  end
+
+  # ── Code lens / inlay hints on save ────────────────────────────────────────
+
+  describe "code lens and inlay hints on save" do
+    test "save event triggers lens and hint requests without crash" do
+      ctx = start_editor("hello world")
+
+      # Send a buffer_saved event (the Editor subscribes to this in init)
+      save_event = %Events.BufferEvent{buffer: ctx.buffer, path: "/tmp/test.ex"}
+      send(ctx.editor, {:minga_event, :buffer_saved, save_event})
+
+      # Sync and verify the editor is still alive
+      state = :sys.get_state(ctx.editor)
+      assert state.workspace.editing.mode == :normal
+    end
+  end
+
+  # ── Inlay hints on scroll ──────────────────────────────────────────────────
+
+  describe "inlay hints on scroll" do
+    test "scroll wheel skips inlay hint timer in headless mode" do
+      ctx = start_editor(@scroll_content)
+
+      # Scroll down with the mouse wheel
+      send_mouse(ctx, 10, 10, :wheel_down)
+
+      # In headless mode, the inlay hint debounce timer is quarantined
+      # (skipped) to avoid non-deterministic timer messages in tests.
+      state = :sys.get_state(ctx.editor)
+
+      assert state.lsp.inlay_hint_debounce_timer == nil,
+             "inlay hint debounce timer should be skipped in headless mode"
+    end
+  end
+
+  # ── Mouse hover LSP response routing ───────────────────────────────────────
+
+  describe "mouse hover LSP response routing" do
+    test "response with {:hover_mouse, row, col} creates popup at mouse position" do
+      ctx = start_editor("defmodule Foo do\n  def bar, do: :ok\nend")
+
+      # Inject a fake pending LSP request with a {:hover_mouse, row, col} key
+      ref = make_ref()
+
+      :sys.replace_state(ctx.editor, fn state ->
+        %{
+          state
+          | workspace: %{
+              state.workspace
+              | lsp_pending: Map.put(state.workspace.lsp_pending, ref, {:hover_mouse, 5, 20})
+            }
+        }
+      end)
+
+      # Send an LSP response for that ref
+      hover_result =
+        {:ok, %{"contents" => %{"kind" => "plaintext", "value" => "fn bar() :: :ok"}}}
+
+      send(ctx.editor, {:lsp_response, ref, hover_result})
+
+      # Wait for the response to be processed and render to complete
+      state =
+        wait_until(ctx, fn s -> s.shell_state.hover_popup != nil end,
+          max_attempts: 10,
+          interval_ms: 10,
+          message: "hover popup should be created from {:hover_mouse, ...} response"
+        )
+
+      assert state.shell_state.hover_popup != nil
+      assert state.shell_state.hover_popup.anchor_row == 5
+      assert state.shell_state.hover_popup.anchor_col == 20
+    end
+  end
+
+  # ── Selection range cleanup on mode exit ───────────────────────────────────
+
+  describe "selection range cleanup on visual mode exit" do
+    test "leaving visual mode clears selection range state" do
+      ctx = start_editor("hello world\nsecond line")
+
+      # Inject fake selection range state
+      :sys.replace_state(ctx.editor, fn state ->
+        %{
+          state
+          | lsp:
+              MingaEditor.State.LSP.set_selection_ranges(state.lsp, [
+                %{"range" => %{"start" => %{"line" => 0}, "end" => %{"line" => 1}}}
+              ])
+              |> Map.put(:selection_range_index, 1)
+        }
+      end)
+
+      # Enter visual mode then exit
+      send_keys_sync(ctx, "v")
+      assert editor_mode(ctx) == :visual
+
+      send_keys_sync(ctx, "<Esc>")
+      assert editor_mode(ctx) == :normal
+
+      # Selection range state should be cleared
+      state = :sys.get_state(ctx.editor)
+      assert state.lsp.selection_ranges == nil
+      assert state.lsp.selection_range_index == 0
+    end
+  end
+end

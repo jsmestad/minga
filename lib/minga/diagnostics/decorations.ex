@@ -38,7 +38,7 @@ defmodule Minga.Diagnostics.Decorations do
   The `gutter_colors` parameter provides the severity → color mapping
   from the current theme.
   """
-  @spec apply(pid(), String.t(), Minga.UI.Theme.Gutter.t(), GenServer.server()) :: :ok
+  @spec apply(pid(), String.t(), MingaEditor.UI.Theme.Gutter.t(), GenServer.server()) :: :ok
   def apply(buf_pid, uri, gutter_colors, diag_server \\ Diagnostics)
       when is_pid(buf_pid) and is_binary(uri) do
     diagnostics = Diagnostics.for_uri(diag_server, uri)
@@ -62,7 +62,7 @@ defmodule Minga.Diagnostics.Decorations do
 
   # ── Private ──────────────────────────────────────────────────────────
 
-  @spec add_diagnostic_ranges(Decorations.t(), [Diagnostic.t()], Minga.UI.Theme.Gutter.t()) ::
+  @spec add_diagnostic_ranges(Decorations.t(), [Diagnostic.t()], MingaEditor.UI.Theme.Gutter.t()) ::
           Decorations.t()
   defp add_diagnostic_ranges(decs, diagnostics, gutter_colors) do
     Enum.reduce(diagnostics, decs, fn diag, acc ->
@@ -70,7 +70,8 @@ defmodule Minga.Diagnostics.Decorations do
     end)
   end
 
-  @spec add_one(Decorations.t(), Diagnostic.t(), Minga.UI.Theme.Gutter.t()) :: Decorations.t()
+  @spec add_one(Decorations.t(), Diagnostic.t(), MingaEditor.UI.Theme.Gutter.t()) ::
+          Decorations.t()
   defp add_one(decs, %Diagnostic{range: range} = diag, gutter_colors) do
     start_pos = {range.start_line, range.start_col}
     end_pos = {range.end_line, range.end_col}
@@ -100,7 +101,8 @@ defmodule Minga.Diagnostics.Decorations do
     end
   end
 
-  @spec severity_color(Diagnostic.severity(), Minga.UI.Theme.Gutter.t()) :: non_neg_integer()
+  @spec severity_color(Diagnostic.severity(), MingaEditor.UI.Theme.Gutter.t()) ::
+          non_neg_integer()
   defp severity_color(:error, colors), do: colors.error_fg
   defp severity_color(:warning, colors), do: colors.warning_fg
   defp severity_color(:info, colors), do: colors.info_fg

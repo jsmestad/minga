@@ -21,14 +21,14 @@ defmodule Minga.Test.DisplayListAssertions do
 
   import ExUnit.Assertions
 
-  alias Minga.Editor.DisplayList
-  alias Minga.Editor.DisplayList.{Frame, WindowFrame}
-  alias Minga.Editor.Layout
-  alias Minga.Editor.RenderPipeline
-  alias Minga.Editor.RenderPipeline.Compose
-  alias Minga.Editor.RenderPipeline.Content
-  alias Minga.Editor.RenderPipeline.Scroll
-  alias Minga.Editor.State, as: EditorState
+  alias MingaEditor.DisplayList
+  alias MingaEditor.DisplayList.{Frame, WindowFrame}
+  alias MingaEditor.Layout
+  alias MingaEditor.RenderPipeline
+  alias MingaEditor.RenderPipeline.Compose
+  alias MingaEditor.RenderPipeline.Content
+  alias MingaEditor.RenderPipeline.Scroll
+  alias MingaEditor.State, as: EditorState
 
   # ── Frame rendering ───────────────────────────────────────────────────────
 
@@ -155,7 +155,7 @@ defmodule Minga.Test.DisplayListAssertions do
       expected_col = unquote(col)
       expected_shape = unquote(shape)
 
-      assert %Minga.Editor.DisplayList.Cursor{} = f.cursor,
+      assert %MingaEditor.DisplayList.Cursor{} = f.cursor,
              "Expected frame to have a cursor"
 
       assert f.cursor.row == expected_row,

@@ -35,7 +35,7 @@ defmodule Minga.Credo.DependencyDirectionCheckTest do
     test "flags Layer 0 module aliasing a Layer 2 module" do
       """
       defmodule Minga.Editing.Motion.SomeMotion do
-        alias Minga.Editor.State
+        alias MingaEditor.State
       end
       """
       |> check("lib/minga/editing/motion/some_motion.ex")
@@ -48,7 +48,7 @@ defmodule Minga.Credo.DependencyDirectionCheckTest do
     test "flags Mode FSM module depending on Editor" do
       """
       defmodule Minga.Mode.Normal do
-        alias Minga.Editor.Commands
+        alias MingaEditor.Commands
       end
       """
       |> check("lib/minga/mode/normal.ex")
@@ -70,7 +70,7 @@ defmodule Minga.Credo.DependencyDirectionCheckTest do
     test "flags Layer 1 module aliasing Editor (Layer 2)" do
       """
       defmodule Minga.LSP.Client do
-        alias Minga.Editor.State
+        alias MingaEditor.State
       end
       """
       |> check("lib/minga/lsp/client.ex")
@@ -83,7 +83,7 @@ defmodule Minga.Credo.DependencyDirectionCheckTest do
     test "flags Git module depending on Input handler" do
       """
       defmodule Minga.Git.Tracker do
-        alias Minga.Input.AgentPanel
+        alias MingaEditor.Input.AgentPanel
       end
       """
       |> check("lib/minga/git/tracker.ex")
@@ -93,7 +93,7 @@ defmodule Minga.Credo.DependencyDirectionCheckTest do
     test "flags Agent module depending on Shell" do
       """
       defmodule MingaAgent.Session do
-        alias Minga.Shell.Traditional
+        alias MingaEditor.Shell.Traditional
       end
       """
       |> check("lib/minga/agent/session.ex")
@@ -104,7 +104,7 @@ defmodule Minga.Credo.DependencyDirectionCheckTest do
   describe "valid downward dependencies" do
     test "Layer 2 may depend on Layer 1" do
       """
-      defmodule Minga.Editor.Commands.Foo do
+      defmodule MingaEditor.Commands.Foo do
         alias Minga.Buffer.Server
       end
       """
@@ -114,7 +114,7 @@ defmodule Minga.Credo.DependencyDirectionCheckTest do
 
     test "Layer 2 may depend on Layer 0" do
       """
-      defmodule Minga.Editor.Commands.Foo do
+      defmodule MingaEditor.Commands.Foo do
         alias Minga.Buffer.Document
         alias Minga.Core.Face
       end
@@ -176,7 +176,7 @@ defmodule Minga.Credo.DependencyDirectionCheckTest do
     test "skips test files entirely" do
       """
       defmodule Minga.Core.FaceTest do
-        alias Minga.Editor.State
+        alias MingaEditor.State
         alias Minga.Buffer.Server
       end
       """

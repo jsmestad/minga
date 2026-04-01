@@ -254,7 +254,7 @@ defmodule Minga.Editing do
   @doc "Is a macro currently being recorded? Returns {true, register} or false."
   @spec macro_recording_status(map()) :: {true, String.t()} | false
   def macro_recording_status(%{workspace: %{editing: vim}}) do
-    Minga.Editor.MacroRecorder.recording?(vim.macro_recorder)
+    MingaEditor.MacroRecorder.recording?(vim.macro_recorder)
   end
 
   # Builds a lightweight model state struct for behaviour dispatch.

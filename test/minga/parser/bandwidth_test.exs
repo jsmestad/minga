@@ -10,7 +10,7 @@ defmodule Minga.Parser.BandwidthTest do
 
   use ExUnit.Case, async: true
 
-  alias Minga.Frontend.Protocol
+  alias MingaEditor.Frontend.Protocol
 
   describe "IPC bandwidth comparison" do
     test "edit_buffer is orders of magnitude smaller than parse_buffer for single char insert" do

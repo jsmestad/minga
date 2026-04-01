@@ -155,7 +155,7 @@ jobs:
         run: mix swift.harness
 
       - name: Run BEAM-to-Swift protocol integration tests
-        run: mix test test/minga/integration/gui_protocol_test.exs --include swift_harness
+        run: mix test test/minga_editor/integration/gui_protocol_test.exs --include swift_harness
 
   dialyzer:
     name: Dialyzer

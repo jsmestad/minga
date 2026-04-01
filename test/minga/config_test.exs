@@ -8,7 +8,7 @@ defmodule Minga.ConfigTest do
   alias Minga.Extension.Registry, as: ExtRegistry
   alias Minga.Keymap.Active, as: KeymapActive
   alias Minga.Keymap.Bindings
-  alias Minga.UI.Popup.Registry, as: PopupRegistry
+  alias MingaEditor.UI.Popup.Registry, as: PopupRegistry
 
   setup do
     # Ensure required servers are running

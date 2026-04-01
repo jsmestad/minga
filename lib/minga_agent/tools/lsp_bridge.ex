@@ -4,7 +4,7 @@ defmodule MingaAgent.Tools.LspBridge do
 
   Encapsulates the file-path-to-LSP-client lookup chain that all agent
   LSP tools need. Also provides response parsing helpers extracted from
-  `Minga.Editor.LspActions` so agent tools and the editor share the same
+  `MingaEditor.LspActions` so agent tools and the editor share the same
   logic without the agent needing access to `EditorState`.
 
   The lookup chain:

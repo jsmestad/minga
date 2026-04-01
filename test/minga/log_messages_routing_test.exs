@@ -17,12 +17,12 @@ defmodule Minga.LogMessagesRoutingTest do
       Options.set(:log_level, :info)
       Options.set(:log_level_editor, :default)
 
-      # Register a fake Editor process so Process.whereis(Minga.Editor) finds it.
+      # Register a fake Editor process so Process.whereis(MingaEditor) finds it.
       test_pid = self()
 
       fake_editor =
         spawn(fn ->
-          Process.register(self(), Minga.Editor)
+          Process.register(self(), MingaEditor)
           send(test_pid, :registered)
 
           # Receive the cast from log_to_messages

@@ -3,7 +3,7 @@ defmodule Minga.API do
   Public API for interacting with the editor from eval (`M-:`).
 
   Provides user-friendly functions for common editor operations. All
-  functions default to the running `Minga.Editor` GenServer and the
+  functions default to the running `MingaEditor` GenServer and the
   active buffer. Pass an explicit `editor` PID to target a different
   instance.
 
@@ -25,7 +25,7 @@ defmodule Minga.API do
   @typedoc "Editor GenServer reference."
   @type editor :: GenServer.server()
 
-  @default_editor Minga.Editor
+  @default_editor MingaEditor
 
   # ── Buffer-level functions ──────────────────────────────────────────────────
   # These call Buffer directly for speed (no Editor GenServer round-trip).

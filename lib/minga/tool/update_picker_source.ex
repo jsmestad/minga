@@ -5,10 +5,10 @@ defmodule Minga.Tool.UpdatePickerSource do
   Shows installed tools. Selecting one triggers an update (uninstall + reinstall).
   """
 
-  @behaviour Minga.UI.Picker.Source
+  @behaviour MingaEditor.UI.Picker.Source
 
   alias Minga.Tool.Manager, as: ToolManager
-  alias Minga.UI.Picker.Item
+  alias MingaEditor.UI.Picker.Item
 
   @impl true
   @spec title() :: String.t()
@@ -33,10 +33,10 @@ defmodule Minga.Tool.UpdatePickerSource do
   def on_select(%Item{id: name}, state) do
     case ToolManager.update(name) do
       :ok ->
-        Minga.Editor.State.set_status(state, "Updating #{name}...")
+        MingaEditor.State.set_status(state, "Updating #{name}...")
 
       {:error, reason} ->
-        Minga.Editor.State.set_status(state, "Failed to update #{name}: #{reason}")
+        MingaEditor.State.set_status(state, "Failed to update #{name}: #{reason}")
     end
   end
 

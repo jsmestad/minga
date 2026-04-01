@@ -12,7 +12,7 @@ defmodule Minga.Extension.Updater do
      git repos or reinstall hex packages, recompile, and rollback on failure.
 
   All check functions run in a background `Task` so they don't block the
-  editor. Results are communicated back via `Minga.Editor.cast/1`.
+  editor. Results are communicated back via `MingaEditor.cast/1`.
   """
 
   alias Minga.Extension.Git, as: ExtGit
@@ -45,10 +45,10 @@ defmodule Minga.Extension.Updater do
 
     case updates do
       [] ->
-        Minga.Editor.log_to_messages("All extensions are up to date.")
+        MingaEditor.log_to_messages("All extensions are up to date.")
 
       _ ->
-        Minga.Editor.cast({:extension_updates_available, updates})
+        MingaEditor.cast({:extension_updates_available, updates})
     end
 
     :ok
@@ -66,14 +66,14 @@ defmodule Minga.Extension.Updater do
 
         case updates do
           [] ->
-            Minga.Editor.log_to_messages("#{name}: already up to date.")
+            MingaEditor.log_to_messages("#{name}: already up to date.")
 
           _ ->
-            Minga.Editor.cast({:extension_updates_available, updates})
+            MingaEditor.cast({:extension_updates_available, updates})
         end
 
       :error ->
-        Minga.Editor.log_to_messages("Extension #{name} not found in registry.")
+        MingaEditor.log_to_messages("Extension #{name} not found in registry.")
     end
 
     :ok
@@ -284,13 +284,13 @@ defmodule Minga.Extension.Updater do
 
   @spec report_results([update_result()]) :: :ok
   defp report_results([]) do
-    Minga.Editor.log_to_messages("No updates applied.")
+    MingaEditor.log_to_messages("No updates applied.")
   end
 
   defp report_results(results) do
     lines = Enum.map(results, &format_result/1)
     msg = Enum.join(["Extension update results:" | lines], "\n")
-    Minga.Editor.log_to_messages(msg)
+    MingaEditor.log_to_messages(msg)
   end
 
   @spec format_result(update_result()) :: String.t()

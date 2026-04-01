@@ -1,7 +1,7 @@
 defmodule Minga.Test.HeadlessPort do
   @moduledoc """
   Virtual port manager that captures render commands into an in-memory
-  screen grid. Drop-in replacement for `Minga.Frontend.Manager` in tests.
+  screen grid. Drop-in replacement for `MingaEditor.Frontend.Manager` in tests.
 
   Decodes `draw_text`, `set_cursor`, `set_cursor_shape`, `clear`, and
   `batch_end` commands from the editor's render pipeline into a queryable
@@ -18,9 +18,9 @@ defmodule Minga.Test.HeadlessPort do
 
   use GenServer
 
-  @behaviour Minga.Frontend.Adapter
+  @behaviour MingaEditor.Frontend.Adapter
 
-  alias Minga.Frontend.Protocol
+  alias MingaEditor.Frontend.Protocol
 
   @typedoc "A single cell in the screen grid."
   @type cell :: %{
@@ -66,7 +66,7 @@ defmodule Minga.Test.HeadlessPort do
             height: pos_integer(),
             grid: [[map()]],
             cursor: {non_neg_integer(), non_neg_integer()},
-            cursor_shape: Minga.Frontend.Protocol.cursor_shape(),
+            cursor_shape: MingaEditor.Frontend.Protocol.cursor_shape(),
             subscribers: [pid()],
             waiters: [{pid(), reference()}],
             frame_count: non_neg_integer()
@@ -76,7 +76,7 @@ defmodule Minga.Test.HeadlessPort do
   # ── Client API ──────────────────────────────────────────────────────────────
 
   @doc "Starts the headless port."
-  @impl Minga.Frontend.Adapter
+  @impl MingaEditor.Frontend.Adapter
   @spec start_link([start_opt()]) :: GenServer.on_start()
   def start_link(opts \\ []) do
     {name, opts} = Keyword.pop(opts, :name)
@@ -87,36 +87,36 @@ defmodule Minga.Test.HeadlessPort do
   # ── Frontend behaviour ────────────────────────────────────────────────────────
 
   @doc "Sends encoded render commands to the headless screen grid."
-  @impl Minga.Frontend.Adapter
+  @impl MingaEditor.Frontend.Adapter
   @spec send_commands(GenServer.server(), [binary()]) :: :ok
   def send_commands(server, commands) when is_list(commands) do
     GenServer.cast(server, {:send_commands, commands})
   end
 
   @doc "Subscribes the calling process to receive input events."
-  @impl Minga.Frontend.Adapter
+  @impl MingaEditor.Frontend.Adapter
   @spec subscribe(GenServer.server()) :: :ok
   def subscribe(server) do
     GenServer.call(server, {:subscribe, self()})
   end
 
   @doc "Returns the screen dimensions as `{width, height}`."
-  @impl Minga.Frontend.Adapter
+  @impl MingaEditor.Frontend.Adapter
   @spec terminal_size(GenServer.server()) :: {pos_integer(), pos_integer()} | nil
   def terminal_size(server) do
     GenServer.call(server, :terminal_size)
   end
 
   @doc "Returns whether the headless port is ready (always true)."
-  @impl Minga.Frontend.Adapter
+  @impl MingaEditor.Frontend.Adapter
   @spec ready?(GenServer.server()) :: boolean()
   def ready?(server) do
     GenServer.call(server, :ready?)
   end
 
   @doc "Returns default headless capabilities."
-  @impl Minga.Frontend.Adapter
-  @spec capabilities(GenServer.server()) :: Minga.Frontend.Capabilities.t()
+  @impl MingaEditor.Frontend.Adapter
+  @spec capabilities(GenServer.server()) :: MingaEditor.Frontend.Capabilities.t()
   def capabilities(server) do
     GenServer.call(server, :capabilities)
   end
@@ -253,7 +253,7 @@ defmodule Minga.Test.HeadlessPort do
   end
 
   def handle_call(:capabilities, _from, state) do
-    {:reply, Minga.Frontend.Capabilities.default(), state}
+    {:reply, MingaEditor.Frontend.Capabilities.default(), state}
   end
 
   def handle_call(:ready?, _from, state) do
