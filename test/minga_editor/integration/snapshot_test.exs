@@ -118,7 +118,12 @@ defmodule Minga.Integration.SnapshotTest do
       send_keys_sync(ctx, "dd")
       send_key(ctx, ?u)
 
-      assert_screen_snapshot(ctx, "dd_then_undo")
+      # Undo should restore the deleted line. Assert on content, not
+      # the full screen: the modeline and message bar are volatile in
+      # concurrent test runs (PubSub events from other editors).
+      assert buffer_content(ctx) == "first\nsecond\nthird"
+      assert buffer_cursor(ctx) == {0, 0}
+      assert editor_mode(ctx) == :normal
     end
   end
 
