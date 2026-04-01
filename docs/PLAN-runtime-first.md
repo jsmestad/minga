@@ -1831,6 +1831,7 @@ grep -rn "alias MingaEditor\|import MingaEditor" lib/minga/ lib/minga_agent/ | w
 | 2026-03-31 | Wave 1 / Track C | — | All timer quarantine guards already in place; verified all sites in editor.ex and sub-modules; updated plan status and fixed verification command |
 | 2026-03-31 | Wave 2 / NS-1 | #1367 | Created `MingaAgent.*` namespace: 58 agent domain modules moved from `lib/minga/agent/` to `lib/minga_agent/`. Presentation modules stayed. |
 | 2026-03-31 | Wave 2 / NS-2+NS-3 | #1370 | Created `MingaEditor.*` namespace: 276 lib + 248 test files moved. Updated `DependencyDirectionCheck` for three-namespace architecture. NS-3 merged into NS-2. 9 pre-existing Layer 1→2 violations tracked in #1368. |
+| 2026-04-01 | Wave 4 / Track A | #1383 | RenderPipeline.Input contract: (A-4.1) Input struct with from_editor_state/1 + apply_render_output/2, (A-4.2) pipeline wired to use Input.t() across all 6 stages, 27 files updated, (A-4.3) chrome dirty tracking via fingerprint, skips rebuild when chrome inputs unchanged. |
 | 2026-04-01 | Wave 4 / Track B | #1382 | Extracted `MingaAgent.RuntimeState` (4 domain fields: active_session_id, status, model_name, provider_name). Composed into `MingaEditor.State.Agent` via `runtime` field. Updated 6 lib files + 15 test files. |
 
 ---
