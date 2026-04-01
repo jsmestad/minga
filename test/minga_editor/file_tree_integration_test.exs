@@ -21,7 +21,7 @@ defmodule MingaEditor.FileTreeIntegrationTest do
     test "closing tree restores :agent scope when active window is agent chat", %{tmp_dir: dir} do
       file = Path.join(dir, "test.txt")
       File.write!(file, "hello")
-      ctx = start_editor(file)
+      ctx = start_editor(file, project_root: dir)
 
       # Toggle tree via direct function call instead of send_keys_sync
       state = :sys.get_state(ctx.editor)
@@ -42,7 +42,7 @@ defmodule MingaEditor.FileTreeIntegrationTest do
     test "closing tree restores :editor scope for regular buffer window", %{tmp_dir: dir} do
       file = Path.join(dir, "test.txt")
       File.write!(file, "hello")
-      ctx = start_editor(file)
+      ctx = start_editor(file, project_root: dir)
 
       send_keys_sync(ctx, "<SPC>op")
 
@@ -57,7 +57,7 @@ defmodule MingaEditor.FileTreeIntegrationTest do
     test "tree panel reduces editor viewport width", %{tmp_dir: dir} do
       file = Path.join(dir, "test.txt")
       File.write!(file, "hello")
-      ctx = start_editor(file, width: 80)
+      ctx = start_editor(file, width: 80, project_root: dir)
 
       # Before tree: screen_rect uses full width
       state = :sys.get_state(ctx.editor)
@@ -83,7 +83,7 @@ defmodule MingaEditor.FileTreeIntegrationTest do
       # the GenServer, avoiding flakiness from filesystem-dependent cursor indexing.
       File.write!(Path.join(dir, "main.ex"), "defmodule Main do\nend")
       File.write!(Path.join(dir, "other.ex"), "defmodule Other do\nend")
-      ctx = start_editor(Path.join(dir, "main.ex"))
+      ctx = start_editor(Path.join(dir, "main.ex"), project_root: dir)
 
       state_before = :sys.get_state(ctx.editor)
       original_buf = state_before.workspace.buffers.active
@@ -143,7 +143,7 @@ defmodule MingaEditor.FileTreeIntegrationTest do
     test "toggle opens file tree and clears git status panel", %{tmp_dir: dir} do
       file = Path.join(dir, "test.txt")
       File.write!(file, "hello")
-      ctx = start_editor(file)
+      ctx = start_editor(file, project_root: dir)
 
       # Get the editor state and inject git status panel
       state = :sys.get_state(ctx.editor)
@@ -170,7 +170,7 @@ defmodule MingaEditor.FileTreeIntegrationTest do
     test "toggle opens tree when no git_status_panel is active", %{tmp_dir: dir} do
       file = Path.join(dir, "test.txt")
       File.write!(file, "hello")
-      ctx = start_editor(file)
+      ctx = start_editor(file, project_root: dir)
 
       state = :sys.get_state(ctx.editor)
       assert state.shell_state.git_status_panel == nil
@@ -185,7 +185,7 @@ defmodule MingaEditor.FileTreeIntegrationTest do
     test "closing the file tree resets tree state and restores editor scope", %{tmp_dir: dir} do
       file = Path.join(dir, "test.txt")
       File.write!(file, "hello")
-      ctx = start_editor(file)
+      ctx = start_editor(file, project_root: dir)
 
       # Open file tree via toggle
       state = :sys.get_state(ctx.editor)
@@ -203,7 +203,7 @@ defmodule MingaEditor.FileTreeIntegrationTest do
     test "round-trip: git status -> file tree -> close restores editor scope", %{tmp_dir: dir} do
       file = Path.join(dir, "test.txt")
       File.write!(file, "hello")
-      ctx = start_editor(file)
+      ctx = start_editor(file, project_root: dir)
 
       state = :sys.get_state(ctx.editor)
       assert state.workspace.keymap_scope == :editor
@@ -238,7 +238,7 @@ defmodule MingaEditor.FileTreeIntegrationTest do
     test "Editor subscribes to :buffer_saved and refreshes file tree git status", %{tmp_dir: dir} do
       file = Path.join(dir, "save_test.ex")
       File.write!(file, "x = 1\n")
-      ctx = start_editor(file)
+      ctx = start_editor(file, project_root: dir)
 
       # Open the file tree
       state = send_keys_sync(ctx, "<SPC>op")

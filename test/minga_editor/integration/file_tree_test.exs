@@ -19,15 +19,17 @@ defmodule Minga.Integration.FileTreeTest do
     File.write!(Path.join(dir, "subdir/gamma.txt"), "gamma content")
 
     file = Path.join(dir, "alpha.txt")
-    %{file: file}
+    # project_root isolates the file tree to this test's tmp_dir,
+    # preventing concurrent tests from shifting the entry list.
+    %{file: file, project_root: dir}
   end
 
   # ── Toggle ─────────────────────────────────────────────────────────────────
 
   describe "file tree toggle (SPC o p)" do
     test "opening shows file tree panel with separator", %{tmp_dir: dir} do
-      %{file: file} = setup_fixture(%{tmp_dir: dir})
-      ctx = start_editor("hello world", file_path: file)
+      %{file: file, project_root: root} = setup_fixture(%{tmp_dir: dir})
+      ctx = start_editor("hello world", file_path: file, project_root: root)
 
       send_keys_sync(ctx, "<Space>op")
 
@@ -38,8 +40,8 @@ defmodule Minga.Integration.FileTreeTest do
     end
 
     test "closing restores full editor width", %{tmp_dir: dir} do
-      %{file: file} = setup_fixture(%{tmp_dir: dir})
-      ctx = start_editor("hello world", file_path: file)
+      %{file: file, project_root: root} = setup_fixture(%{tmp_dir: dir})
+      ctx = start_editor("hello world", file_path: file, project_root: root)
 
       # Open then close
       send_keys_sync(ctx, "<Space>op")
@@ -57,8 +59,8 @@ defmodule Minga.Integration.FileTreeTest do
 
   describe "file tree navigation" do
     test "j/k moves tree cursor", %{tmp_dir: dir} do
-      %{file: file} = setup_fixture(%{tmp_dir: dir})
-      ctx = start_editor("hello world", file_path: file)
+      %{file: file, project_root: root} = setup_fixture(%{tmp_dir: dir})
+      ctx = start_editor("hello world", file_path: file, project_root: root)
 
       send_keys_sync(ctx, "<Space>op")
       # Move down in tree
@@ -71,8 +73,8 @@ defmodule Minga.Integration.FileTreeTest do
 
   describe "focus return after tree interaction" do
     test "pressing Escape returns focus to editor", %{tmp_dir: dir} do
-      %{file: file} = setup_fixture(%{tmp_dir: dir})
-      ctx = start_editor("hello world", file_path: file)
+      %{file: file, project_root: root} = setup_fixture(%{tmp_dir: dir})
+      ctx = start_editor("hello world", file_path: file, project_root: root)
 
       send_keys_sync(ctx, "<Space>op")
       # Tree should be focused initially
@@ -89,8 +91,8 @@ defmodule Minga.Integration.FileTreeTest do
 
   describe "focus cycling between tree and editor" do
     test "Escape from tree returns focus to editor while keeping tree open", %{tmp_dir: dir} do
-      %{file: file} = setup_fixture(%{tmp_dir: dir})
-      ctx = start_editor("hello world", file_path: file)
+      %{file: file, project_root: root} = setup_fixture(%{tmp_dir: dir})
+      ctx = start_editor("hello world", file_path: file, project_root: root)
 
       send_keys_sync(ctx, "<Space>op")
       state = :sys.get_state(ctx.editor)
@@ -103,8 +105,8 @@ defmodule Minga.Integration.FileTreeTest do
     end
 
     test "opening a file from tree returns focus to editor", %{tmp_dir: dir} do
-      %{file: file} = setup_fixture(%{tmp_dir: dir})
-      ctx = start_editor("hello world", file_path: file)
+      %{file: file, project_root: root} = setup_fixture(%{tmp_dir: dir})
+      ctx = start_editor("hello world", file_path: file, project_root: root)
 
       send_keys_sync(ctx, "<Space>op")
       state = :sys.get_state(ctx.editor)
@@ -124,42 +126,40 @@ defmodule Minga.Integration.FileTreeTest do
 
   describe "nested directory expansion" do
     test "l expands a directory and shows children", %{tmp_dir: dir} do
-      %{file: file} = setup_fixture(%{tmp_dir: dir})
-      ctx = start_editor("hello world", file_path: file)
+      %{file: file, project_root: root} = setup_fixture(%{tmp_dir: dir})
+      ctx = start_editor("hello world", file_path: file, project_root: root)
 
       send_keys_sync(ctx, "<Space>op")
-      # Navigate to the subdir entry and expand with l
-      send_keys_sync(ctx, "j")
-
-      rows_before = screen_text(ctx)
+      # Cursor lands on alpha.txt (revealed active buffer).
+      # Navigate up to subdir/ and expand with l.
+      send_keys_sync(ctx, "gg")
       send_keys_sync(ctx, "l")
+
+      # After expanding subdir, the child file should be visible
       rows_after = screen_text(ctx)
 
-      # After expansion, there should be more content rows (children visible)
-      non_empty_before = Enum.count(rows_before, &(String.trim(&1) != ""))
-      non_empty_after = Enum.count(rows_after, &(String.trim(&1) != ""))
-
-      assert non_empty_after >= non_empty_before,
-             "expanding a directory should show at least as many rows"
+      assert Enum.any?(rows_after, &String.contains?(&1, "gamma.txt")),
+             "expanding subdir should show gamma.txt"
     end
 
     test "h collapses an expanded directory", %{tmp_dir: dir} do
-      %{file: file} = setup_fixture(%{tmp_dir: dir})
-      ctx = start_editor("hello world", file_path: file)
+      %{file: file, project_root: root} = setup_fixture(%{tmp_dir: dir})
+      ctx = start_editor("hello world", file_path: file, project_root: root)
 
       send_keys_sync(ctx, "<Space>op")
-      send_keys_sync(ctx, "j")
+      # Navigate to subdir/ and expand, then collapse.
+      send_keys_sync(ctx, "gg")
       send_keys_sync(ctx, "l")
+
+      # Verify gamma.txt is visible after expanding
       rows_expanded = screen_text(ctx)
+      assert Enum.any?(rows_expanded, &String.contains?(&1, "gamma.txt"))
 
       send_keys_sync(ctx, "h")
       rows_collapsed = screen_text(ctx)
 
-      non_empty_expanded = Enum.count(rows_expanded, &(String.trim(&1) != ""))
-      non_empty_collapsed = Enum.count(rows_collapsed, &(String.trim(&1) != ""))
-
-      assert non_empty_collapsed <= non_empty_expanded,
-             "collapsing should show fewer or equal rows"
+      refute Enum.any?(rows_collapsed, &String.contains?(&1, "gamma.txt")),
+             "collapsing subdir should hide gamma.txt"
     end
   end
 end

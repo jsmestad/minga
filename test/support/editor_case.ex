@@ -80,6 +80,12 @@ defmodule Minga.Test.EditorCase do
     editor_opts =
       if shell, do: [{:shell, shell}, {:skip_persistence, true} | editor_opts], else: editor_opts
 
+    # Thread project_root for file tree isolation in tests
+    project_root = Keyword.get(opts, :project_root)
+
+    editor_opts =
+      if project_root, do: [{:project_root, project_root} | editor_opts], else: editor_opts
+
     {:ok, editor} = MingaEditor.start_link(editor_opts)
 
     # Send ready event to trigger initial render

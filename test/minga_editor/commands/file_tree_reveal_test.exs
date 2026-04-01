@@ -39,7 +39,7 @@ defmodule MingaEditor.Commands.FileTreeRevealTest do
       file = Path.join(dir, "reveal_test.txt")
       File.write!(file, "hello")
 
-      ctx = start_editor("hello", file_path: file)
+      ctx = start_editor("hello", file_path: file, project_root: dir)
 
       # Tree starts closed
       state = :sys.get_state(ctx.editor)
@@ -61,7 +61,7 @@ defmodule MingaEditor.Commands.FileTreeRevealTest do
       file = Path.join(dir, "reveal_open_tree.txt")
       File.write!(file, "hello")
 
-      ctx = start_editor("hello", file_path: file)
+      ctx = start_editor("hello", file_path: file, project_root: dir)
 
       # Open the tree first
       _state = send_keys_sync(ctx, "<SPC>op")
@@ -83,7 +83,7 @@ defmodule MingaEditor.Commands.FileTreeRevealTest do
       file = Path.join(dir, "reveal_test2.txt")
       File.write!(file, "hello")
 
-      ctx = start_editor("hello", file_path: file)
+      ctx = start_editor("hello", file_path: file, project_root: dir)
 
       # Open the tree and reveal the file
       state = send_keys_sync(ctx, "<SPC>or")

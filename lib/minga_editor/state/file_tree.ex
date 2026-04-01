@@ -31,13 +31,15 @@ defmodule MingaEditor.State.FileTree do
           tree: FileTree.t() | nil,
           focused: boolean(),
           buffer: pid() | nil,
-          editing: editing() | nil
+          editing: editing() | nil,
+          project_root: String.t() | nil
         }
 
   defstruct tree: nil,
             focused: false,
             buffer: nil,
-            editing: nil
+            editing: nil,
+            project_root: nil
 
   @doc "Returns true when the file tree is open."
   @spec open?(t()) :: boolean()
