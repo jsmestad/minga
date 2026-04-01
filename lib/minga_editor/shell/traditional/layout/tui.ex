@@ -25,7 +25,7 @@ defmodule MingaEditor.Shell.Traditional.Layout.TUI do
   Computes TUI layout: tab bar at row 0, file tree left, agent panel bottom,
   editor area in the middle, status bar at rows - 2, minibuffer at the last row.
   """
-  @spec compute(EditorState.t()) :: Layout.t()
+  @spec compute(EditorState.t() | map()) :: Layout.t()
   def compute(state) do
     vp = state.workspace.viewport
     terminal = {0, 0, vp.cols, vp.rows}
@@ -72,7 +72,7 @@ defmodule MingaEditor.Shell.Traditional.Layout.TUI do
 
     # 6. Window layouts within the editor area.
     {window_layouts, horizontal_separators} =
-      if EditorState.split?(state) do
+      if MingaEditor.State.Windows.split?(state.workspace.windows) do
         Layout.compute_window_layouts_with_separators(
           state.workspace.windows.tree,
           editor_area,

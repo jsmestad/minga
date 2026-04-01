@@ -39,7 +39,7 @@ defmodule MingaEditor.SemanticWindow.Builder do
   alias Minga.LSP.SyncServer
   alias MingaEditor.UI.Highlight
 
-  @type state :: EditorState.t()
+  @type state :: EditorState.t() | MingaEditor.RenderPipeline.Input.t()
 
   @doc """
   Builds a `SemanticWindow` for one editor window.

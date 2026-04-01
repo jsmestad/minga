@@ -54,8 +54,17 @@ defmodule MingaEditor.Agent.ViewContext do
   Extracts only the fields agent renderers need, eliminating the
   `MingaEditor.State` dependency from agent view modules.
   """
-  @spec from_editor_state(EditorState.t()) :: t()
+  @spec from_editor_state(EditorState.t() | map()) :: t()
   def from_editor_state(%EditorState{} = state) do
+    build_context(state)
+  end
+
+  def from_editor_state(%{workspace: %{agent_ui: _}} = state) do
+    build_context(state)
+  end
+
+  @spec build_context(map()) :: t()
+  defp build_context(state) do
     agent = AgentAccess.agent(state)
 
     %__MODULE__{

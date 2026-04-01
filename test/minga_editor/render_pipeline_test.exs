@@ -63,7 +63,7 @@ defmodule MingaEditor.RenderPipelineTest do
   describe "run/1 (full pipeline)" do
     test "returns updated state with window caches" do
       state = base_state()
-      result = RenderPipeline.run(state)
+      result = run_pipeline(state)
 
       assert %EditorState{} = result
       assert_receive {:"$gen_cast", {:send_commands, commands}}
@@ -78,7 +78,7 @@ defmodule MingaEditor.RenderPipelineTest do
     test "produces commands for different viewport sizes" do
       for {rows, cols} <- [{10, 40}, {24, 80}, {50, 200}] do
         state = base_state(rows: rows, cols: cols)
-        result = RenderPipeline.run(state)
+        result = run_pipeline(state)
         assert %EditorState{} = result
         assert_receive {:"$gen_cast", {:send_commands, _}}
       end
@@ -92,7 +92,7 @@ defmodule MingaEditor.RenderPipelineTest do
       state = base_state(content: "line one\nline two\nline three")
 
       # Frame 1: first render populates caches
-      state = RenderPipeline.run(state)
+      state = run_pipeline(state)
       assert_receive {:"$gen_cast", {:send_commands, _}}
 
       [{win_id, window}] = Map.to_list(state.workspace.windows.map)
@@ -115,7 +115,7 @@ defmodule MingaEditor.RenderPipelineTest do
       buf = state.workspace.buffers.active
 
       # Frame 1
-      state = RenderPipeline.run(state)
+      state = run_pipeline(state)
       assert_receive {:"$gen_cast", {:send_commands, _}}
 
       [{win_id, window1}] = Map.to_list(state.workspace.windows.map)
@@ -144,14 +144,14 @@ defmodule MingaEditor.RenderPipelineTest do
       buf = state.workspace.buffers.active
 
       # Frame 1
-      state = RenderPipeline.run(state)
+      state = run_pipeline(state)
       assert_receive {:"$gen_cast", {:send_commands, cmds1}}
 
       # Edit
       BufferServer.insert_char(buf, "X")
 
       # Frame 2
-      state = RenderPipeline.run(state)
+      state = run_pipeline(state)
       assert_receive {:"$gen_cast", {:send_commands, cmds2}}
 
       # Both frames should produce valid commands
@@ -167,11 +167,11 @@ defmodule MingaEditor.RenderPipelineTest do
       state = base_state()
 
       # Render 3 times
-      state = RenderPipeline.run(state)
+      state = run_pipeline(state)
       assert_receive {:"$gen_cast", {:send_commands, _}}
-      state = RenderPipeline.run(state)
+      state = run_pipeline(state)
       assert_receive {:"$gen_cast", {:send_commands, _}}
-      state = RenderPipeline.run(state)
+      state = run_pipeline(state)
       assert_receive {:"$gen_cast", {:send_commands, _}}
 
       [{_win_id, window}] = Map.to_list(state.workspace.windows.map)
@@ -185,7 +185,7 @@ defmodule MingaEditor.RenderPipelineTest do
       state = base_state(content: lines, rows: 15, cols: 80)
 
       # Frame 1: full render
-      state = RenderPipeline.run(state)
+      state = run_pipeline(state)
       assert_receive {:"$gen_cast", {:send_commands, _}}
 
       [{win_id, window}] = Map.to_list(state.workspace.windows.map)
@@ -194,7 +194,7 @@ defmodule MingaEditor.RenderPipelineTest do
       assert map_size(window.render_cache.cached_gutter) > 0
 
       # Frame 2: no edits, no scroll, no cursor change
-      state = RenderPipeline.run(state)
+      state = run_pipeline(state)
       assert_receive {:"$gen_cast", {:send_commands, _}}
 
       window2 = Map.get(state.workspace.windows.map, win_id)
@@ -206,7 +206,7 @@ defmodule MingaEditor.RenderPipelineTest do
     test "window caches contain per-line gutter and content draws" do
       state = base_state(content: "aaa\nbbb\nccc")
 
-      state = RenderPipeline.run(state)
+      state = run_pipeline(state)
       assert_receive {:"$gen_cast", {:send_commands, _}}
 
       [{_win_id, window}] = Map.to_list(state.workspace.windows.map)
@@ -222,7 +222,7 @@ defmodule MingaEditor.RenderPipelineTest do
       state = base_state(content: "hello\nworld\nfoo")
 
       # Frame 1: fresh render
-      state = RenderPipeline.run(state)
+      state = run_pipeline(state)
       assert_receive {:"$gen_cast", {:send_commands, cmds1}}
 
       [{win_id, window1}] = Map.to_list(state.workspace.windows.map)
@@ -232,7 +232,7 @@ defmodule MingaEditor.RenderPipelineTest do
       assert cached_gutter_0 != nil
 
       # Frame 2: no changes, should reuse cache and produce identical output
-      state = RenderPipeline.run(state)
+      state = run_pipeline(state)
       assert_receive {:"$gen_cast", {:send_commands, cmds2}}
 
       window2 = Map.get(state.workspace.windows.map, win_id)
@@ -249,7 +249,7 @@ defmodule MingaEditor.RenderPipelineTest do
       buf = state.workspace.buffers.active
 
       # Frame 1
-      state = RenderPipeline.run(state)
+      state = run_pipeline(state)
       assert_receive {:"$gen_cast", {:send_commands, _}}
       [{win_id, _}] = Map.to_list(state.workspace.windows.map)
 
@@ -257,7 +257,7 @@ defmodule MingaEditor.RenderPipelineTest do
       BufferServer.insert_char(buf, "X")
 
       # Frame 2: should detect version change, redraw all
-      state = RenderPipeline.run(state)
+      state = run_pipeline(state)
       assert_receive {:"$gen_cast", {:send_commands, _}}
 
       window = Map.get(state.workspace.windows.map, win_id)
@@ -275,7 +275,7 @@ defmodule MingaEditor.RenderPipelineTest do
       BufferServer.set_option(state.workspace.buffers.active, :line_numbers, :absolute)
 
       # Frame 1: full render
-      state = RenderPipeline.run(state)
+      state = run_pipeline(state)
       assert_receive {:"$gen_cast", {:send_commands, _}}
 
       [{win_id, window}] = Map.to_list(state.workspace.windows.map)
@@ -306,7 +306,7 @@ defmodule MingaEditor.RenderPipelineTest do
       BufferServer.set_option(state.workspace.buffers.active, :line_numbers, :hybrid)
 
       # Frame 1
-      state = RenderPipeline.run(state)
+      state = run_pipeline(state)
       assert_receive {:"$gen_cast", {:send_commands, _}}
 
       # Move cursor
@@ -325,7 +325,7 @@ defmodule MingaEditor.RenderPipelineTest do
       state = base_state(content: "aaa\nbbb\nccc")
 
       # Frame 1
-      state = RenderPipeline.run(state)
+      state = run_pipeline(state)
       assert_receive {:"$gen_cast", {:send_commands, _}}
 
       [{win_id, window}] = Map.to_list(state.workspace.windows.map)
@@ -345,7 +345,7 @@ defmodule MingaEditor.RenderPipelineTest do
       }
 
       # Frame 2: context fingerprint will change due to visual selection
-      state = RenderPipeline.run(state)
+      state = run_pipeline(state)
       assert_receive {:"$gen_cast", {:send_commands, _}}
 
       window2 = Map.get(state.workspace.windows.map, win_id)
@@ -361,7 +361,7 @@ defmodule MingaEditor.RenderPipelineTest do
       lines = Enum.map_join(1..20, "\n", &"line #{&1}")
       state = base_state(content: lines, rows: 12, cols: 80)
 
-      state = RenderPipeline.run(state)
+      state = run_pipeline(state)
       assert_receive {:"$gen_cast", {:send_commands, _}}
 
       [{_win_id, window}] = Map.to_list(state.workspace.windows.map)

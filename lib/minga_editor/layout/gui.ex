@@ -29,7 +29,7 @@ defmodule MingaEditor.Layout.GUI do
 
     # All windows are no-modeline; the global SwiftUI status bar handles status display.
     {window_layouts, horizontal_separators} =
-      if EditorState.split?(state) do
+      if MingaEditor.State.Windows.split?(state.workspace.windows) do
         Layout.compute_window_layouts_with_separators(
           state.workspace.windows.tree,
           editor_area,

@@ -22,8 +22,9 @@ defmodule MingaEditor.Editing do
   # ── Vim-specific reads ─────────────────────────────────────────────────────
 
   @doc "Returns the current mode-specific state struct."
-  @spec mode_state(EditorState.t()) :: Mode.state()
+  @spec mode_state(EditorState.t() | map()) :: Mode.state()
   def mode_state(%EditorState{workspace: %{editing: vim}}), do: vim.mode_state
+  def mode_state(%{workspace: %{editing: vim}}), do: vim.mode_state
 
   @doc "Returns the visual anchor position from mode_state, or nil."
   @spec visual_anchor(EditorState.t()) :: {non_neg_integer(), non_neg_integer()} | nil

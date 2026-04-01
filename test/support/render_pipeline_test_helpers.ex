@@ -10,6 +10,7 @@ defmodule MingaEditor.RenderPipeline.TestHelpers do
   alias MingaEditor.DisplayList
   alias MingaEditor.DisplayList.{Cursor, Frame, WindowFrame}
   alias MingaEditor.Layout
+  alias MingaEditor.RenderPipeline.Input, as: PipelineInput
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.{Buffers, Highlighting, Windows}
   alias MingaEditor.Viewport
@@ -159,5 +160,19 @@ defmodule MingaEditor.RenderPipeline.TestHelpers do
         DisplayList.draw(height + 1, 0, " ", Minga.Core.Face.new(fg: 0xBBC2CF, bg: 0x282C34))
       ]
     }
+  end
+
+  @doc """
+  Runs the render pipeline with Input conversion.
+
+  Builds Input from EditorState, runs the pipeline, and applies the
+  output back to EditorState. Drop-in replacement for the old
+  `RenderPipeline.run(state)` pattern in tests.
+  """
+  @spec run_pipeline(EditorState.t()) :: EditorState.t()
+  def run_pipeline(state) do
+    input = PipelineInput.from_editor_state(state)
+    output = MingaEditor.RenderPipeline.run(input)
+    EditorState.apply_render_output(state, output)
   end
 end

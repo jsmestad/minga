@@ -23,13 +23,12 @@ defmodule MingaEditor.RenderPipeline.Content do
   alias MingaEditor.RenderPipeline.ContentHelpers
   alias MingaEditor.RenderPipeline.Scroll.WindowScroll
   alias MingaEditor.SemanticWindow
-  alias MingaEditor.State, as: EditorState
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.Viewport
   alias MingaEditor.Window
 
-  @typedoc "Internal editor state."
-  @type state :: EditorState.t()
+  @typedoc "Render pipeline input."
+  @type state :: Input.t()
 
   @doc """
   Builds display list draws for each window's buffer content.
@@ -228,11 +227,8 @@ defmodule MingaEditor.RenderPipeline.Content do
       |> Window.prune_cache(first_line, last_visible)
 
     new_map = Map.put(state.workspace.windows.map, scroll.win_id, updated_window)
-
-    state =
-      EditorState.update_workspace(state, fn ws ->
-        WorkspaceState.set_windows(ws, %{ws.windows | map: new_map})
-      end)
+    ws = state.workspace
+    state = %{state | workspace: %{ws | windows: %{ws.windows | map: new_map}}}
 
     {win_frame, cursor_info, state}
   end
@@ -475,8 +471,10 @@ defmodule MingaEditor.RenderPipeline.Content do
       )
       |> Window.prune_cache(first_line, last_visible)
 
-    # Persist the updated window back to state
-    state = put_in(state.workspace.windows.map[window.id], window)
+    # Persist the updated window back to input
+    ws = state.workspace
+    new_map = Map.put(ws.windows.map, window.id, window)
+    state = %{state | workspace: %{ws | windows: %{ws.windows | map: new_map}}}
 
     tilde_draws = build_tilde_draws(rendered_rows, chat_height, row_off, col_off)
 

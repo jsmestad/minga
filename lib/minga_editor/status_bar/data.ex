@@ -99,7 +99,7 @@ defmodule MingaEditor.StatusBar.Data do
   Inspects the active window's content type and returns the appropriate
   tagged variant. Called once per render frame before the Chrome stage.
   """
-  @spec from_state(EditorState.t()) :: t()
+  @spec from_state(EditorState.t() | map()) :: t()
   def from_state(state) do
     active_window = Map.get(state.workspace.windows.map, state.workspace.windows.active)
 
@@ -112,7 +112,7 @@ defmodule MingaEditor.StatusBar.Data do
 
   # ── Buffer variant ─────────────────────────────────────────────────────────
 
-  @spec build_buffer_data(EditorState.t()) :: buffer_data()
+  @spec build_buffer_data(EditorState.t() | map()) :: buffer_data()
   defp build_buffer_data(state) do
     buf = state.workspace.buffers.active
     {line, col} = if buf, do: Buffer.cursor(buf), else: {0, 0}
@@ -170,7 +170,7 @@ defmodule MingaEditor.StatusBar.Data do
 
   # ── Agent variant ──────────────────────────────────────────────────────────
 
-  @spec build_agent_data(EditorState.t()) :: agent_data()
+  @spec build_agent_data(EditorState.t() | map()) :: agent_data()
   defp build_agent_data(state) do
     agent = AgentAccess.agent(state)
     panel = AgentAccess.panel(state)

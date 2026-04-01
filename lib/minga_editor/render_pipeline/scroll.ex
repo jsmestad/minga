@@ -19,7 +19,7 @@ defmodule MingaEditor.RenderPipeline.Scroll do
   alias MingaEditor.Layout
   alias MingaEditor.Renderer.Gutter
   alias MingaEditor.Renderer.SearchHighlight
-  alias MingaEditor.State, as: EditorState
+  alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.Viewport
   alias MingaEditor.Window
 
@@ -103,8 +103,8 @@ defmodule MingaEditor.RenderPipeline.Scroll do
           }
   end
 
-  @typedoc "Internal editor state."
-  @type state :: EditorState.t()
+  @typedoc "Render pipeline input."
+  @type state :: Input.t()
 
   @doc """
   Per-window viewport adjustment and buffer data fetch.
@@ -113,16 +113,16 @@ defmodule MingaEditor.RenderPipeline.Scroll do
   windows map updated with invalidation results.
   """
   @spec scroll_windows(state(), Layout.t()) :: {%{Window.id() => WindowScroll.t()}, state()}
-  def scroll_windows(state, layout) do
+  def scroll_windows(input, layout) do
     layout.window_layouts
-    |> Enum.reduce({%{}, state}, fn {win_id, win_layout}, {acc, st} ->
+    |> Enum.reduce({%{}, input}, fn {win_id, win_layout}, {acc, st} ->
       window = Map.get(st.workspace.windows.map, win_id)
 
       if window == nil or window.buffer == nil or match?({:agent_chat, _}, window.content) do
         # Skip nil windows and agent chat windows (rendered by build_agent_chat_content)
         {acc, st}
       else
-        scroll_and_invalidate(state, st, acc, win_id, window, win_layout)
+        scroll_and_invalidate(input, st, acc, win_id, window, win_layout)
       end
     end)
   end

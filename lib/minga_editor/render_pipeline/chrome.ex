@@ -14,7 +14,7 @@ defmodule MingaEditor.RenderPipeline.Chrome do
   alias MingaEditor.HoverPopup
   alias MingaEditor.MinibufferData
   alias MingaEditor.SignatureHelp
-  alias MingaEditor.State, as: EditorState
+  alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.StatusBar.Data, as: StatusBarData
 
   # ── Result struct ──────────────────────────────────────────────────────────
@@ -47,8 +47,8 @@ defmodule MingaEditor.RenderPipeline.Chrome do
           regions: [binary()]
         }
 
-  @typedoc "Internal editor state."
-  @type state :: EditorState.t()
+  @typedoc "Editor state or render pipeline input."
+  @type state :: MingaEditor.State.t() | Input.t()
 
   # ── Shared helpers (used by shell chrome builders) ─────────────────────────
 

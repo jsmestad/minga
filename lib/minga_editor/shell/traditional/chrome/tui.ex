@@ -25,7 +25,7 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUI do
   alias MingaEditor.UI.Popup.Lifecycle, as: PopupLifecycle
 
   @typedoc "Internal editor state."
-  @type state :: EditorState.t()
+  @type state :: EditorState.t() | MingaEditor.RenderPipeline.Input.t()
 
   @doc """
   Builds TUI chrome: global status bar, tab bar, minibuffer, file tree,
@@ -46,7 +46,7 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUI do
 
     # Vertical split borders
     vertical_separators =
-      if EditorState.split?(state) do
+      if MingaEditor.State.Windows.split?(state.workspace.windows) do
         ChromeHelpers.render_separators(
           state.workspace.windows.tree,
           layout.editor_area,
