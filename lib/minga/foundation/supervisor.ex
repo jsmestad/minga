@@ -17,6 +17,7 @@ defmodule Minga.Foundation.Supervisor do
       ├── Minga.Keymap.Active          Active keymap state
       ├── Minga.Config.Hooks           Lifecycle hooks
       ├── Minga.Config.Advice          Before/after command advice (ETS)
+      ├── MingaAgent.Tool.Registry     Agent tool specs (ETS)
       └── Minga.Language.Filetype.Registry      Filetype detection
 
   Language.Registry is first because it has no dependencies and nothing
@@ -42,6 +43,7 @@ defmodule Minga.Foundation.Supervisor do
       Minga.Keymap.Active,
       Minga.Config.Hooks,
       Minga.Config.Advice,
+      MingaAgent.Tool.Registry,
       Minga.Language.Filetype.Registry
     ]
 
