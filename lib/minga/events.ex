@@ -225,6 +225,7 @@ defmodule Minga.Events do
           | :supervisor_restarted
           | :log_message
           | :face_overrides_changed
+          | :agent_session_stopped
 
   @typedoc "Typed event payloads. Each topic has a specific struct."
   @type payload ::
@@ -241,6 +242,7 @@ defmodule Minga.Events do
           | SupervisorRestartedEvent.t()
           | LogMessageEvent.t()
           | FaceOverridesChangedEvent.t()
+          | MingaAgent.SessionManager.SessionStoppedEvent.t()
 
   # ── Child spec ──────────────────────────────────────────────────────────────
 
@@ -333,6 +335,8 @@ defmodule Minga.Events do
   @spec broadcast(:supervisor_restarted, SupervisorRestartedEvent.t()) :: :ok
   @spec broadcast(:log_message, LogMessageEvent.t()) :: :ok
   @spec broadcast(:face_overrides_changed, FaceOverridesChangedEvent.t()) :: :ok
+  @spec broadcast(:agent_session_stopped, MingaAgent.SessionManager.SessionStoppedEvent.t()) ::
+          :ok
   def broadcast(topic, %_{} = payload) when is_atom(topic) do
     Registry.dispatch(@registry, topic, fn entries ->
       for {pid, _value} <- entries do
