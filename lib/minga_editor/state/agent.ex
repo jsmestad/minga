@@ -1,6 +1,11 @@
 defmodule MingaEditor.State.Agent do
   @moduledoc """
-  Agent session lifecycle state: session pid, monitors, status, approvals.
+  Agent session lifecycle state: session pid, status, approvals.
+
+  Lifecycle monitoring (Process.monitor) is handled exclusively by
+  `MingaAgent.SessionManager`, which broadcasts `:agent_session_stopped`
+  events via `Minga.Events`. The Editor subscribes to those events
+  instead of monitoring session PIDs directly.
 
   UI state (scroll, prompt, focus, search, toasts) lives in `UIState`
   on `EditorState.agent_ui`. This module holds only process-aware,
@@ -16,7 +21,6 @@ defmodule MingaEditor.State.Agent do
   @typedoc "Agent session state."
   @type t :: %__MODULE__{
           session: pid() | nil,
-          session_monitor: reference() | nil,
           status: status(),
           error: String.t() | nil,
           spinner_timer: {:ok, :timer.tref()} | nil,
@@ -26,7 +30,6 @@ defmodule MingaEditor.State.Agent do
         }
 
   defstruct session: nil,
-            session_monitor: nil,
             status: nil,
             error: nil,
             spinner_timer: nil,
@@ -48,19 +51,16 @@ defmodule MingaEditor.State.Agent do
 
   # ── Session lifecycle ───────────────────────────────────────────────────────
 
-  @doc "Stores the session pid, monitors it, and sets status to :idle. Archives the previous session."
+  @doc "Stores the session pid and sets status to :idle. Archives the previous session. Lifecycle monitoring is handled by SessionManager."
   @spec set_session(t(), pid()) :: t()
   def set_session(%__MODULE__{session: nil} = agent, pid) when is_pid(pid) do
-    ref = Process.monitor(pid)
-    %{agent | session: pid, session_monitor: ref, status: :idle}
+    %{agent | session: pid, status: :idle}
   end
 
-  def set_session(%__MODULE__{session: old_pid, session_monitor: old_ref} = agent, pid)
+  def set_session(%__MODULE__{session: old_pid} = agent, pid)
       when is_pid(pid) and is_pid(old_pid) do
-    if old_ref, do: Process.demonitor(old_ref, [:flush])
-    ref = Process.monitor(pid)
     history = [old_pid | agent.session_history] |> Enum.uniq()
-    %{agent | session: pid, session_monitor: ref, status: :idle, session_history: history}
+    %{agent | session: pid, status: :idle, session_history: history}
   end
 
   @doc "Sets the agent buffer pid."
@@ -77,34 +77,28 @@ defmodule MingaEditor.State.Agent do
     [agent.session | agent.session_history]
   end
 
-  @doc "Switches to a session from history, moving current to history. Swaps monitors."
+  @doc "Switches to a session from history, moving current to history. Lifecycle monitoring is handled by SessionManager."
   @spec switch_session(t(), pid()) :: t()
-  def switch_session(%__MODULE__{session: nil, session_monitor: old_ref} = agent, pid)
+  def switch_session(%__MODULE__{session: nil} = agent, pid)
       when is_pid(pid) do
-    if old_ref, do: Process.demonitor(old_ref, [:flush])
-    ref = Process.monitor(pid)
     history = List.delete(agent.session_history, pid)
-    %{agent | session: pid, session_monitor: ref, status: :idle, session_history: history}
+    %{agent | session: pid, status: :idle, session_history: history}
   end
 
-  def switch_session(%__MODULE__{session: current, session_monitor: old_ref} = agent, pid)
+  def switch_session(%__MODULE__{session: current} = agent, pid)
       when is_pid(pid) and is_pid(current) do
-    if old_ref, do: Process.demonitor(old_ref, [:flush])
-    ref = Process.monitor(pid)
-
     history =
       [current | agent.session_history]
       |> List.delete(pid)
       |> Enum.uniq()
 
-    %{agent | session: pid, session_monitor: ref, status: :idle, session_history: history}
+    %{agent | session: pid, status: :idle, session_history: history}
   end
 
-  @doc "Clears the session, demonitors it, and resets status to :idle."
+  @doc "Clears the session reference and resets status to :idle. Lifecycle monitoring is handled by SessionManager."
   @spec clear_session(t()) :: t()
-  def clear_session(%__MODULE__{session_monitor: ref} = agent) do
-    if ref, do: Process.demonitor(ref, [:flush])
-    %{agent | session: nil, session_monitor: nil, status: :idle}
+  def clear_session(%__MODULE__{} = agent) do
+    %{agent | session: nil, status: :idle}
   end
 
   # ── Tool approval ──────────────────────────────────────────────────────────

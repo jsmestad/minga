@@ -23,58 +23,37 @@ defmodule MingaEditor.State.AgentTest do
   end
 
   describe "session lifecycle" do
-    test "set_session stores pid, monitors it, and sets status to :idle" do
+    test "set_session stores pid and sets status to :idle" do
       pid = spawn(fn -> Process.sleep(:infinity) end)
       agent = new_agent() |> AgentState.set_session(pid)
       assert agent.session == pid
       assert agent.status == :idle
-      assert is_reference(agent.session_monitor)
     end
 
-    test "set_session demonitors previous session when replacing" do
+    test "set_session archives previous session when replacing" do
       pid1 = spawn(fn -> Process.sleep(:infinity) end)
       pid2 = spawn(fn -> Process.sleep(:infinity) end)
 
       agent =
         new_agent()
         |> AgentState.set_session(pid1)
+        |> AgentState.set_session(pid2)
 
-      old_ref = agent.session_monitor
-
-      agent = AgentState.set_session(agent, pid2)
       assert agent.session == pid2
-      assert agent.session_monitor != old_ref
-      # Old monitor should be flushed; killing pid1 should not deliver :DOWN
-      Process.exit(pid1, :kill)
-      refute_receive {:DOWN, ^old_ref, :process, ^pid1, _}, 50
+      assert pid1 in agent.session_history
     end
 
-    test "clear_session demonitors and nils the session" do
+    test "clear_session nils the session and resets status" do
       pid = spawn(fn -> Process.sleep(:infinity) end)
 
       agent =
         new_agent()
         |> AgentState.set_session(pid)
         |> AgentState.set_status(:thinking)
-
-      old_ref = agent.session_monitor
-      agent = AgentState.clear_session(agent)
+        |> AgentState.clear_session()
 
       assert agent.session == nil
-      assert agent.session_monitor == nil
       assert agent.status == :idle
-      # Old monitor should be flushed
-      Process.exit(pid, :kill)
-      refute_receive {:DOWN, ^old_ref, :process, ^pid, _}, 50
-    end
-
-    test "monitor delivers :DOWN when session process dies" do
-      pid = spawn(fn -> Process.sleep(:infinity) end)
-      agent = new_agent() |> AgentState.set_session(pid)
-      ref = agent.session_monitor
-
-      Process.exit(pid, :kill)
-      assert_receive {:DOWN, ^ref, :process, ^pid, :killed}, 500
     end
   end
 
@@ -149,7 +128,7 @@ defmodule MingaEditor.State.AgentTest do
       assert agent.session_history == []
     end
 
-    test "switch_session swaps monitors" do
+    test "switch_session updates active session without monitoring" do
       pid1 = spawn(fn -> Process.sleep(:infinity) end)
       pid2 = spawn(fn -> Process.sleep(:infinity) end)
 
@@ -157,12 +136,10 @@ defmodule MingaEditor.State.AgentTest do
         new_agent()
         |> AgentState.set_session(pid1)
         |> AgentState.set_session(pid2)
+        |> AgentState.switch_session(pid1)
 
-      old_ref = agent.session_monitor
-      agent = AgentState.switch_session(agent, pid1)
-
-      assert agent.session_monitor != old_ref
-      assert is_reference(agent.session_monitor)
+      assert agent.session == pid1
+      assert pid2 in agent.session_history
     end
   end
 end
