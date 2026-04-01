@@ -2067,7 +2067,7 @@ defmodule MingaEditor do
   # sees live updates (spinner → checkmark, etc.).
   @spec maybe_refresh_tool_picker(state()) :: state()
   defp maybe_refresh_tool_picker(
-         %{shell_state: %{picker_ui: %{source: Minga.Tool.PickerSource}}} = state
+         %{shell_state: %{picker_ui: %{source: MingaEditor.UI.Picker.Sources.Tool}}} = state
        ) do
     PickerUI.refresh_items(state)
   end

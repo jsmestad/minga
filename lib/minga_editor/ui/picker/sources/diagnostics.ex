@@ -1,4 +1,4 @@
-defmodule Minga.Diagnostics.PickerSource do
+defmodule MingaEditor.UI.Picker.Sources.Diagnostics do
   @moduledoc """
   Picker source for listing buffer diagnostics.
 
