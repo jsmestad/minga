@@ -140,7 +140,8 @@ defmodule MingaAgent.Providers.Native do
           internal_state: InternalState.t(),
           max_turns: pos_integer(),
           max_cost: float() | nil,
-          session_cost: float()
+          session_cost: float(),
+          fork_store: pid() | nil
         }
 
   # ── Provider callbacks ──────────────────────────────────────────────────────
@@ -236,7 +237,17 @@ defmodule MingaAgent.Providers.Native do
     max_cost = Keyword.get(opts, :max_cost, config.max_cost)
     llm_client = Keyword.get(opts, :llm_client, &ReqLLM.stream_text/3)
     provider_pid = self()
-    base_tools = Keyword.get(opts, :tools) || Tools.all(project_root: project_root)
+    # Start a fork store for in-memory buffer isolation. Forks are created
+    # lazily when agent tools write to files that have open buffers.
+    # Not linked: fork store crash degrades gracefully (tools fall through
+    # to changeset or direct I/O) rather than killing the provider.
+    {:ok, fork_store} = GenServer.start(MingaAgent.BufferForkStore, :ok)
+    Process.monitor(fork_store)
+
+    base_tools =
+      Keyword.get(opts, :tools) ||
+        Tools.all(project_root: project_root, fork_store: fork_store)
+
     internal_tools = build_internal_tools(provider_pid)
     tools = base_tools ++ internal_tools
     system_prompt = build_system_prompt(project_root)
@@ -266,7 +277,8 @@ defmodule MingaAgent.Providers.Native do
       internal_state: InternalState.new(),
       max_turns: max_turns,
       max_cost: max_cost,
-      session_cost: 0.0
+      session_cost: 0.0,
+      fork_store: fork_store
     }
 
     Minga.Log.info(:agent, "[Agent.Native] started with model=#{model} root=#{project_root}")
@@ -635,6 +647,16 @@ defmodule MingaAgent.Providers.Native do
     {:noreply, %{state | task: nil, streaming: false}}
   end
 
+  def handle_info({:DOWN, _ref, :process, pid, _reason}, %{fork_store: pid} = state)
+      when is_pid(pid) do
+    Minga.Log.warning(
+      :agent,
+      "[Agent.Native] fork store crashed, continuing without fork isolation"
+    )
+
+    {:noreply, %{state | fork_store: nil}}
+  end
+
   def handle_info({:DOWN, _ref, :process, _pid, _reason}, state) do
     {:noreply, state}
   end
@@ -642,6 +664,40 @@ defmodule MingaAgent.Providers.Native do
   def handle_info(_msg, state) do
     {:noreply, state}
   end
+
+  @impl true
+  def terminate(_reason, %{fork_store: fs} = _state) when is_pid(fs) do
+    # Merge all buffer forks back to their parent buffers on shutdown.
+    # Then stop the store (not linked, so we must clean up explicitly).
+    if Process.alive?(fs) do
+      results = MingaAgent.BufferForkStore.merge_all(fs)
+
+      Enum.each(results, fn
+        {_path, :ok} ->
+          :ok
+
+        {conflict_path, {:conflict, _hunks}} ->
+          Minga.Log.warning(
+            :agent,
+            "[Agent.Native] merge conflict on #{conflict_path}, keeping parent version"
+          )
+
+        {err_path, {:error, reason}} ->
+          Minga.Log.warning(
+            :agent,
+            "[Agent.Native] merge failed for #{err_path}: #{inspect(reason)}"
+          )
+      end)
+
+      MingaAgent.BufferForkStore.stop(fs)
+    end
+
+    :ok
+  catch
+    :exit, _ -> :ok
+  end
+
+  def terminate(_reason, _state), do: :ok
 
   # ── Agent turn loop (runs in a Task) ────────────────────────────────────────
 

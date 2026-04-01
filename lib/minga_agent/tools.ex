@@ -61,7 +61,11 @@ defmodule MingaAgent.Tools do
   alias ReqLLM.Tool
 
   @typedoc "Options passed to `all/1`."
-  @type tools_opts :: [project_root: String.t(), changeset: pid() | nil]
+  @type tools_opts :: [
+          project_root: String.t(),
+          changeset: pid() | nil,
+          fork_store: pid() | nil
+        ]
 
   @default_destructive_tools ~w(write_file edit_file multi_edit_file shell git_stage git_commit rename)
 
@@ -112,16 +116,18 @@ defmodule MingaAgent.Tools do
   def all(opts \\ []) do
     root = Keyword.get(opts, :project_root, File.cwd!())
     cs = Keyword.get(opts, :changeset)
+    fs = Keyword.get(opts, :fork_store)
+    router_ctx = MingaAgent.ToolRouter.context(fs, cs)
 
     [
-      read_file(root, cs),
-      write_file(root, cs),
-      edit_file(root, cs),
-      multi_edit_file(root, cs),
+      read_file(root, router_ctx),
+      write_file(root, router_ctx),
+      edit_file(root, router_ctx),
+      multi_edit_file(root, router_ctx),
       list_directory(root),
       find(root),
       grep(root),
-      shell(root, cs),
+      shell(root, router_ctx),
       subagent(root),
       git_status(root),
       git_diff(root),
@@ -144,8 +150,8 @@ defmodule MingaAgent.Tools do
 
   # ── Tool definitions ────────────────────────────────────────────────────────
 
-  @spec read_file(String.t(), pid() | nil) :: Tool.t()
-  defp read_file(root, cs) do
+  @spec read_file(String.t(), MingaAgent.ToolRouter.context()) :: Tool.t()
+  defp read_file(root, router_ctx) do
     Tool.new!(
       name: "read_file",
       description: """
@@ -175,19 +181,14 @@ defmodule MingaAgent.Tools do
       callback: fn args ->
         path = resolve_and_validate_path!(root, args["path"])
 
-        if MingaAgent.Changeset.ToolRouter.active?(cs) do
-          case MingaAgent.Changeset.ToolRouter.read_file(cs, path) do
-            {:ok, content} ->
-              opts = build_read_opts(args)
-              apply_read_slice(content, path, opts)
+        case MingaAgent.ToolRouter.read_file(router_ctx, path) do
+          {:ok, content} ->
+            opts = build_read_opts(args)
+            apply_read_slice(content, path, opts)
 
-            {:error, _} ->
-              opts = build_read_opts(args)
-              ReadFile.execute(path, opts)
-          end
-        else
-          opts = build_read_opts(args)
-          ReadFile.execute(path, opts)
+          {:error, _} ->
+            opts = build_read_opts(args)
+            ReadFile.execute(path, opts)
         end
       end
     )
@@ -201,8 +202,8 @@ defmodule MingaAgent.Tools do
     opts
   end
 
-  @spec write_file(String.t(), pid() | nil) :: Tool.t()
-  defp write_file(root, cs) do
+  @spec write_file(String.t(), MingaAgent.ToolRouter.context()) :: Tool.t()
+  defp write_file(root, router_ctx) do
     Tool.new!(
       name: "write_file",
       description: """
@@ -226,7 +227,7 @@ defmodule MingaAgent.Tools do
       callback: fn args ->
         path = resolve_and_validate_path!(root, args["path"])
 
-        case MingaAgent.Changeset.ToolRouter.write_file(cs, path, args["content"]) do
+        case MingaAgent.ToolRouter.write_file(router_ctx, path, args["content"]) do
           :passthrough ->
             case WriteFile.execute(path, args["content"]) do
               {:ok, msg} -> {:ok, maybe_append_diagnostics(path, msg)}
@@ -234,10 +235,12 @@ defmodule MingaAgent.Tools do
             end
 
           :ok ->
+            via = if router_ctx.fork_store, do: "fork", else: "changeset"
+
             {:ok,
              maybe_append_diagnostics(
                path,
-               "wrote #{byte_size(args["content"])} bytes to #{path} (via changeset)"
+               "wrote #{byte_size(args["content"])} bytes to #{path} (via #{via})"
              )}
 
           {:error, reason} ->
@@ -247,8 +250,8 @@ defmodule MingaAgent.Tools do
     )
   end
 
-  @spec edit_file(String.t(), pid() | nil) :: Tool.t()
-  defp edit_file(root, cs) do
+  @spec edit_file(String.t(), MingaAgent.ToolRouter.context()) :: Tool.t()
+  defp edit_file(root, router_ctx) do
     Tool.new!(
       name: "edit_file",
       description: """
@@ -277,8 +280,8 @@ defmodule MingaAgent.Tools do
       callback: fn args ->
         path = resolve_and_validate_path!(root, args["path"])
 
-        case MingaAgent.Changeset.ToolRouter.edit_file(
-               cs,
+        case MingaAgent.ToolRouter.edit_file(
+               router_ctx,
                path,
                args["old_text"],
                args["new_text"]
@@ -290,7 +293,8 @@ defmodule MingaAgent.Tools do
             end
 
           :ok ->
-            {:ok, maybe_append_diagnostics(path, "edited #{path} (via changeset)")}
+            via = if router_ctx.fork_store, do: "fork", else: "changeset"
+            {:ok, maybe_append_diagnostics(path, "edited #{path} (via #{via})")}
 
           {:error, reason} ->
             {:error, inspect(reason)}
@@ -299,8 +303,8 @@ defmodule MingaAgent.Tools do
     )
   end
 
-  @spec multi_edit_file(String.t(), pid() | nil) :: Tool.t()
-  defp multi_edit_file(root, cs) do
+  @spec multi_edit_file(String.t(), MingaAgent.ToolRouter.context()) :: Tool.t()
+  defp multi_edit_file(root, router_ctx) do
     Tool.new!(
       name: "multi_edit_file",
       description: """
@@ -341,8 +345,8 @@ defmodule MingaAgent.Tools do
         path = resolve_and_validate_path!(root, args["path"])
         edits = args["edits"] || []
 
-        if MingaAgent.Changeset.ToolRouter.active?(cs) do
-          apply_multi_edit_via_changeset(cs, path, edits)
+        if MingaAgent.ToolRouter.active?(router_ctx) do
+          apply_multi_edit_via_router(router_ctx, path, edits)
         else
           case MultiEditFile.execute(path, edits) do
             {:ok, msg} -> {:ok, maybe_append_diagnostics(path, msg)}
@@ -464,8 +468,8 @@ defmodule MingaAgent.Tools do
     )
   end
 
-  @spec shell(String.t(), pid() | nil) :: Tool.t()
-  defp shell(root, cs) do
+  @spec shell(String.t(), MingaAgent.ToolRouter.context()) :: Tool.t()
+  defp shell(root, router_ctx) do
     Tool.new!(
       name: "shell",
       description: """
@@ -491,7 +495,7 @@ defmodule MingaAgent.Tools do
       callback: fn args ->
         flush_before_shell()
         timeout_secs = min(args["timeout"] || 30, 300)
-        cwd = MingaAgent.Changeset.ToolRouter.working_dir(cs) || root
+        cwd = MingaAgent.ToolRouter.working_dir(router_ctx) || root
         Shell.execute(args["command"], cwd, timeout_secs)
       end
     )
@@ -1071,17 +1075,15 @@ defmodule MingaAgent.Tools do
     {:ok, header <> Enum.join(sliced, "\n")}
   end
 
-  # Applies multiple edits to a file through the changeset by reading,
+  # Applies multiple edits to a file through the tool router by reading,
   # applying each edit sequentially, then writing the result back.
-  @spec apply_multi_edit_via_changeset(pid(), String.t(), [map()]) ::
+  @spec apply_multi_edit_via_router(MingaAgent.ToolRouter.context(), String.t(), [map()]) ::
           {:ok, String.t()} | {:error, String.t()}
-  defp apply_multi_edit_via_changeset(cs, path, edits) do
-    alias MingaAgent.Changeset.ToolRouter
-
-    case ToolRouter.read_file(cs, path) do
+  defp apply_multi_edit_via_router(router_ctx, path, edits) do
+    case MingaAgent.ToolRouter.read_file(router_ctx, path) do
       {:ok, content} ->
         {final_content, results} = reduce_edits(content, edits)
-        commit_multi_edits(cs, path, final_content, results)
+        commit_multi_edits(router_ctx, path, final_content, results)
 
       {:error, reason} ->
         {:error, "failed to read #{path}: #{inspect(reason)}"}
@@ -1106,15 +1108,19 @@ defmodule MingaAgent.Tools do
     {final, Enum.reverse(reversed)}
   end
 
-  @spec commit_multi_edits(pid(), String.t(), String.t(), [{:ok | :error, String.t()}]) ::
-          {:ok, String.t()} | {:error, String.t()}
-  defp commit_multi_edits(cs, path, final_content, results) do
+  @spec commit_multi_edits(
+          MingaAgent.ToolRouter.context(),
+          String.t(),
+          String.t(),
+          [{:ok | :error, String.t()}]
+        ) :: {:ok, String.t()} | {:error, String.t()}
+  defp commit_multi_edits(router_ctx, path, final_content, results) do
     ok_count = Enum.count(results, &match?({:ok, _}, &1))
 
     if ok_count == 0 do
       {:error, "no edits matched in #{path}"}
     else
-      MingaAgent.Changeset.ToolRouter.write_file(cs, path, final_content)
+      MingaAgent.ToolRouter.write_file(router_ctx, path, final_content)
       msg = format_multi_edit_result(path, results, ok_count)
       {:ok, maybe_append_diagnostics(path, msg)}
     end
@@ -1123,7 +1129,7 @@ defmodule MingaAgent.Tools do
   @spec format_multi_edit_result(String.t(), [{:ok | :error, String.t()}], non_neg_integer()) ::
           String.t()
   defp format_multi_edit_result(path, results, ok_count) do
-    base = "applied #{ok_count}/#{length(results)} edits to #{path} (via changeset)"
+    base = "applied #{ok_count}/#{length(results)} edits to #{path} (via router)"
 
     failed =
       results

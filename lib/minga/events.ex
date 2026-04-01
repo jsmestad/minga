@@ -235,6 +235,7 @@ defmodule Minga.Events do
           | :changeset_merged
           | :changeset_budget_exhausted
           | :load_user_themes
+          | :buffer_fork_conflict
 
   @typedoc "Typed event payloads. Each topic has a specific struct."
   @type payload ::
