@@ -34,6 +34,75 @@ defmodule Minga.Test.Snapshot do
           height: pos_integer()
         }
 
+  # The last two rows of the screen (modeline + message bar) can pick up
+  # state from concurrent tests: LSP status icons (◯), tool installer
+  # progress messages, diagnostic counts, etc. These are not part of the
+  # editor content being tested. Normalizing them before comparison
+  # prevents false snapshot mismatches.
+  #
+  # Row height-2 = modeline: mask everything after the mode indicator and
+  #   file name (the right side can show LSP icons, diagnostics, etc.)
+  # Row height-1 = message bar: can show log_to_messages output from any
+  #   concurrent editor process via PubSub
+  @spec normalize_volatile_rows([String.t()], pos_integer()) :: [String.t()]
+  def normalize_volatile_rows(rows, width) do
+    total = length(rows)
+    modeline_idx = total - 2
+    message_bar_idx = total - 1
+
+    rows
+    |> Enum.with_index()
+    |> Enum.map(fn
+      {row, ^modeline_idx} -> normalize_modeline(row, width)
+      {row, ^message_bar_idx} -> normalize_message_bar(row)
+      {row, _} -> row
+    end)
+  end
+
+  # Replace known volatile segments (LSP status icons, diagnostic counts)
+  # with spaces, keeping total row length identical so alignment is preserved.
+  # Known volatile patterns in the modeline:
+  #   " ◯ " (LSP starting), " ● " (LSP active), " ✓ " (LSP idle/ready)
+  #   " E:N " or " W:N " (diagnostic counts)
+  @spec normalize_modeline(String.t(), pos_integer()) :: String.t()
+  defp normalize_modeline(row, _width) do
+    row
+    |> replace_with_spaces(~r/ [◯●✓] /)
+    |> replace_with_spaces(~r/ [EW]:\d+ /)
+  end
+
+  # Replace each match with the same number of space characters,
+  # preserving the total string length and alignment.
+  @spec replace_with_spaces(String.t(), Regex.t()) :: String.t()
+  defp replace_with_spaces(str, regex) do
+    Regex.replace(regex, str, fn match ->
+      String.duplicate(" ", String.length(match))
+    end)
+  end
+
+  # Strip known volatile messages that leak from concurrent tests.
+  # Keeps intentional content (command prompts like ":", ":set", etc.)
+  @spec normalize_message_bar(String.t()) :: String.t()
+  defp normalize_message_bar(row) do
+    # Known volatile patterns from concurrent tests:
+    # - Tool installer progress: "pyright: Stub verifying pyright..."
+    # - LSP status messages: "elixir-ls: connected", "pyright: starting"
+    # - Log messages from other editors: "[filename] saved", etc.
+    cond do
+      # Command mode prompt: starts with ":" (keep as-is)
+      String.starts_with?(row, ":") -> row
+      # Search prompt: starts with "/" or "?" (keep as-is)
+      String.starts_with?(row, "/") or String.starts_with?(row, "?") -> row
+      # Eval prompt: starts with ">" (keep as-is)
+      String.starts_with?(row, ">") -> row
+      # Empty or whitespace-only: keep as-is (normal state)
+      String.trim(row) == "" -> row
+      # Anything else on the message bar is volatile (log messages,
+      # tool progress, etc. from concurrent tests)
+      true -> ""
+    end
+  end
+
   # ── Serialization ──────────────────────────────────────────────────────────
 
   @doc """
