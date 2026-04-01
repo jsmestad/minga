@@ -35,12 +35,26 @@ defmodule MingaAgent.IntrospectionTest do
         assert tool.approval_level in [:auto, :ask, :deny]
       end
     end
+
+    test "includes introspection tools themselves" do
+      tools = Introspection.describe_tools()
+      names = Enum.map(tools, & &1.name)
+      assert "describe_runtime" in names
+      assert "describe_tools" in names
+    end
   end
 
   describe "describe_sessions/0" do
-    test "returns an empty list when no sessions are active" do
+    test "returns a list of session description maps" do
       sessions = Introspection.describe_sessions()
       assert is_list(sessions)
+
+      for session <- sessions do
+        assert Map.has_key?(session, :session_id)
+        assert Map.has_key?(session, :model_name)
+        assert Map.has_key?(session, :status)
+        assert Map.has_key?(session, :created_at)
+      end
     end
   end
 end
