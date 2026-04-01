@@ -148,8 +148,8 @@ defmodule MingaEditor.StatusBar.Data do
       buf_index: state.workspace.buffers.active_index + 1,
       buf_count: length(state.workspace.buffers.list),
       macro_recording: Minga.Editing.macro_recording_status(state),
-      agent_status: agent.status,
-      agent_theme_colors: if(agent.status, do: Theme.agent_theme(state.theme), else: nil),
+      agent_status: agent.runtime.status,
+      agent_theme_colors: if(agent.runtime.status, do: Theme.agent_theme(state.theme), else: nil),
       status_msg: state.shell_state.status_msg
     }
   end
@@ -204,10 +204,10 @@ defmodule MingaEditor.StatusBar.Data do
       mode: Minga.Editing.mode(state),
       mode_state: Editing.mode_state(state),
       model_name: model_name,
-      session_status: agent.status,
+      session_status: agent.runtime.status,
       message_count: message_count,
       macro_recording: Minga.Editing.macro_recording_status(state),
-      agent_status: agent.status,
+      agent_status: agent.runtime.status,
       agent_theme_colors: Theme.agent_theme(state.theme),
       # Background buffer context
       cursor_line: line,

@@ -5,6 +5,7 @@ defmodule MingaEditor.Input.AgentPanelNavTest do
   alias MingaEditor.Agent.UIState
   alias Minga.Buffer.Server, as: BufferServer
   alias MingaEditor.State, as: EditorState
+  alias MingaAgent.RuntimeState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.Input.AgentPanel
@@ -34,7 +35,7 @@ defmodule MingaEditor.Input.AgentPanelNavTest do
 
     {:ok, prompt_buf} = BufferServer.start_link(content: "")
 
-    agent = %AgentState{buffer: buf, status: :idle}
+    agent = %AgentState{buffer: buf, runtime: %RuntimeState{status: :idle}}
 
     base = UIState.new()
 

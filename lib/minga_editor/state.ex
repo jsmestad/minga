@@ -1197,7 +1197,7 @@ defmodule MingaEditor.State do
         %{
           agent
           | session: session_pid,
-            status: snapshot.status,
+            runtime: MingaAgent.RuntimeState.set_status(agent.runtime, snapshot.status),
             pending_approval: snapshot.pending_approval,
             error: snapshot.error
         }

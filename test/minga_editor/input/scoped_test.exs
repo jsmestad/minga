@@ -9,6 +9,7 @@ defmodule MingaEditor.Input.ScopedTest do
   alias Minga.Buffer.Server, as: BufferServer
 
   alias MingaEditor.State, as: EditorState
+  alias MingaAgent.RuntimeState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Buffers
@@ -29,7 +30,7 @@ defmodule MingaEditor.Input.ScopedTest do
     {:ok, prompt_buf} = BufferServer.start_link(content: "")
 
     agent = %AgentState{
-      status: :idle,
+      runtime: %RuntimeState{status: :idle},
       buffer: Keyword.get(opts, :agent_buffer, nil)
     }
 

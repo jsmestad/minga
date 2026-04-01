@@ -7,6 +7,7 @@ defmodule MingaEditor.UI.Picker.AgentSessionSourceTest do
   alias MingaAgent.Session
   alias MingaEditor.Agent.UIState
   alias MingaEditor.State, as: EditorState
+  alias MingaAgent.RuntimeState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
@@ -168,7 +169,7 @@ defmodule MingaEditor.UI.Picker.AgentSessionSourceTest do
 
     agent_ctx = %{
       shell_state: %MingaEditor.Shell.Traditional.State{
-        agent: %AgentState{session: session_pid, status: :idle}
+        agent: %AgentState{session: session_pid, runtime: %RuntimeState{status: :idle}}
       },
       agent_ui: %UIState{view: %UIState.View{active: true, focus: :chat}},
       windows: %Windows{},
@@ -181,7 +182,7 @@ defmodule MingaEditor.UI.Picker.AgentSessionSourceTest do
 
     tb = TabBar.update_context(tb, agent_tab.id, agent_ctx)
 
-    agent = %AgentState{session: session_pid, status: :idle}
+    agent = %AgentState{session: session_pid, runtime: %RuntimeState{status: :idle}}
     agentic = %UIState{view: %UIState.View{active: true, focus: :chat}}
 
     %EditorState{
@@ -207,7 +208,7 @@ defmodule MingaEditor.UI.Picker.AgentSessionSourceTest do
     # First agent tab is active
     tb = TabBar.switch_to(tb, tab1.id)
 
-    agent = %AgentState{session: session1, status: :idle}
+    agent = %AgentState{session: session1, runtime: %RuntimeState{status: :idle}}
     agentic = %UIState{view: %UIState.View{active: true, focus: :chat}}
 
     %EditorState{
@@ -231,7 +232,7 @@ defmodule MingaEditor.UI.Picker.AgentSessionSourceTest do
 
     agent_ctx = %{
       shell_state: %MingaEditor.Shell.Traditional.State{
-        agent: %AgentState{session: session_pid, status: :idle}
+        agent: %AgentState{session: session_pid, runtime: %RuntimeState{status: :idle}}
       },
       agent_ui: %UIState{view: %UIState.View{active: true, focus: :chat}},
       windows: %Windows{},

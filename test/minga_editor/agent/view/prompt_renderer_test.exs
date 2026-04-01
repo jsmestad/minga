@@ -6,6 +6,7 @@ defmodule MingaEditor.Agent.View.PromptRendererTest do
   alias MingaEditor.Agent.ViewContext
   alias Minga.Buffer.Server, as: BufferServer
   alias MingaEditor.State, as: EditorState
+  alias MingaAgent.RuntimeState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Highlighting
@@ -29,7 +30,7 @@ defmodule MingaEditor.Agent.View.PromptRendererTest do
 
     agent = %AgentState{
       session: nil,
-      status: :idle,
+      runtime: %RuntimeState{status: :idle},
       error: nil,
       spinner_timer: nil,
       buffer: nil

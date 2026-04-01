@@ -2,6 +2,10 @@ defmodule MingaEditor.State.Agent do
   @moduledoc """
   Agent session lifecycle state: session pid, status, approvals.
 
+  Domain-only state (status, model, provider, session ID) lives in the
+  composed `MingaAgent.RuntimeState` struct at `runtime`. Presentation
+  state (spinner timer, buffer pid, session history) stays on this struct.
+
   Lifecycle monitoring (Process.monitor) is handled exclusively by
   `MingaAgent.SessionManager`, which broadcasts `:agent_session_stopped`
   events via `Minga.Events`. The Editor subscribes to those events
@@ -12,16 +16,18 @@ defmodule MingaEditor.State.Agent do
   action-heavy fields that manage the agent session.
   """
 
-  @typedoc "Agent status."
-  @type status :: :idle | :thinking | :tool_executing | :error | nil
+  alias MingaAgent.RuntimeState
+
+  @typedoc "Agent status (delegated from RuntimeState)."
+  @type status :: RuntimeState.status()
 
   @typedoc "Pending tool approval data."
   @type approval :: MingaAgent.ToolApproval.t()
 
   @typedoc "Agent session state."
   @type t :: %__MODULE__{
+          runtime: RuntimeState.t(),
           session: pid() | nil,
-          status: status(),
           error: String.t() | nil,
           spinner_timer: {:ok, :timer.tref()} | nil,
           buffer: pid() | nil,
@@ -29,8 +35,8 @@ defmodule MingaEditor.State.Agent do
           session_history: [pid()]
         }
 
-  defstruct session: nil,
-            status: nil,
+  defstruct runtime: %RuntimeState{},
+            session: nil,
             error: nil,
             spinner_timer: nil,
             buffer: nil,
@@ -39,14 +45,20 @@ defmodule MingaEditor.State.Agent do
 
   # ── Status ──────────────────────────────────────────────────────────────────
 
-  @doc "Sets the agent status."
+  @doc "Returns the agent lifecycle status from RuntimeState."
+  @spec status(t()) :: status()
+  def status(%__MODULE__{runtime: rt}), do: rt.status
+
+  @doc "Sets the agent status (delegates to RuntimeState)."
   @spec set_status(t(), status()) :: t()
-  def set_status(%__MODULE__{} = agent, status), do: %{agent | status: status}
+  def set_status(%__MODULE__{} = agent, status) do
+    %{agent | runtime: RuntimeState.set_status(agent.runtime, status)}
+  end
 
   @doc "Sets the agent into an error state with a message."
   @spec set_error(t(), String.t()) :: t()
   def set_error(%__MODULE__{} = agent, message) do
-    %{agent | status: :error, error: message}
+    %{agent | runtime: RuntimeState.set_status(agent.runtime, :error), error: message}
   end
 
   # ── Session lifecycle ───────────────────────────────────────────────────────
@@ -54,13 +66,19 @@ defmodule MingaEditor.State.Agent do
   @doc "Stores the session pid and sets status to :idle. Archives the previous session. Lifecycle monitoring is handled by SessionManager."
   @spec set_session(t(), pid()) :: t()
   def set_session(%__MODULE__{session: nil} = agent, pid) when is_pid(pid) do
-    %{agent | session: pid, status: :idle}
+    %{agent | session: pid, runtime: RuntimeState.set_status(agent.runtime, :idle)}
   end
 
   def set_session(%__MODULE__{session: old_pid} = agent, pid)
       when is_pid(pid) and is_pid(old_pid) do
     history = [old_pid | agent.session_history] |> Enum.uniq()
-    %{agent | session: pid, status: :idle, session_history: history}
+
+    %{
+      agent
+      | session: pid,
+        runtime: RuntimeState.set_status(agent.runtime, :idle),
+        session_history: history
+    }
   end
 
   @doc "Sets the agent buffer pid."
@@ -82,7 +100,13 @@ defmodule MingaEditor.State.Agent do
   def switch_session(%__MODULE__{session: nil} = agent, pid)
       when is_pid(pid) do
     history = List.delete(agent.session_history, pid)
-    %{agent | session: pid, status: :idle, session_history: history}
+
+    %{
+      agent
+      | session: pid,
+        runtime: RuntimeState.set_status(agent.runtime, :idle),
+        session_history: history
+    }
   end
 
   def switch_session(%__MODULE__{session: current} = agent, pid)
@@ -92,13 +116,18 @@ defmodule MingaEditor.State.Agent do
       |> List.delete(pid)
       |> Enum.uniq()
 
-    %{agent | session: pid, status: :idle, session_history: history}
+    %{
+      agent
+      | session: pid,
+        runtime: RuntimeState.set_status(agent.runtime, :idle),
+        session_history: history
+    }
   end
 
   @doc "Clears the session reference and resets status to :idle. Lifecycle monitoring is handled by SessionManager."
   @spec clear_session(t()) :: t()
   def clear_session(%__MODULE__{} = agent) do
-    %{agent | session: nil, status: :idle}
+    %{agent | session: nil, runtime: RuntimeState.set_status(agent.runtime, :idle)}
   end
 
   # ── Tool approval ──────────────────────────────────────────────────────────
@@ -139,6 +168,5 @@ defmodule MingaEditor.State.Agent do
 
   @doc "Returns true if the agent is actively working."
   @spec busy?(t()) :: boolean()
-  def busy?(%__MODULE__{status: s}) when s in [:thinking, :tool_executing], do: true
-  def busy?(%__MODULE__{}), do: false
+  def busy?(%__MODULE__{runtime: rt}), do: RuntimeState.busy?(rt)
 end

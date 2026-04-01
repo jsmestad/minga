@@ -8,6 +8,7 @@ defmodule MingaEditor.Shell.Board.InputTest do
   use ExUnit.Case, async: true
 
   alias MingaEditor.State, as: EditorState
+  alias MingaAgent.RuntimeState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Windows
@@ -196,7 +197,11 @@ defmodule MingaEditor.Shell.Board.InputTest do
       # Simulate an active agent session on the board's agent singleton
       fake_pid = spawn(fn -> Process.sleep(:infinity) end)
 
-      board = %{state.shell_state | agent: %AgentState{session: fake_pid, status: :idle}}
+      board = %{
+        state.shell_state
+        | agent: %AgentState{session: fake_pid, runtime: %RuntimeState{status: :idle}}
+      }
+
       state = %{state | shell_state: board}
       assert AgentAccess.session(state) == fake_pid
 

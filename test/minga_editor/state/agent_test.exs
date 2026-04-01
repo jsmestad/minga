@@ -2,6 +2,7 @@ defmodule MingaEditor.State.AgentTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Server, as: BufferServer
+  alias MingaAgent.RuntimeState
   alias MingaEditor.State.Agent, as: AgentState
 
   defp new_agent do
@@ -12,12 +13,12 @@ defmodule MingaEditor.State.AgentTest do
   describe "status" do
     test "set_status updates the status field" do
       agent = new_agent() |> AgentState.set_status(:thinking)
-      assert agent.status == :thinking
+      assert agent.runtime.status == :thinking
     end
 
     test "set_error sets status to :error and stores the message" do
       agent = new_agent() |> AgentState.set_error("something broke")
-      assert agent.status == :error
+      assert agent.runtime.status == :error
       assert agent.error == "something broke"
     end
   end
@@ -27,7 +28,7 @@ defmodule MingaEditor.State.AgentTest do
       pid = spawn(fn -> Process.sleep(:infinity) end)
       agent = new_agent() |> AgentState.set_session(pid)
       assert agent.session == pid
-      assert agent.status == :idle
+      assert agent.runtime.status == :idle
     end
 
     test "set_session archives previous session when replacing" do
@@ -53,7 +54,7 @@ defmodule MingaEditor.State.AgentTest do
         |> AgentState.clear_session()
 
       assert agent.session == nil
-      assert agent.status == :idle
+      assert agent.runtime.status == :idle
     end
   end
 
