@@ -1,14 +1,22 @@
 # Buffer-Aware Agents
 
-How AI agents could edit in-memory buffers instead of the filesystem, and why the BEAM makes multi-agent concurrent editing surprisingly tractable.
+How AI agents edit in-memory buffers instead of the filesystem, and why the BEAM makes multi-agent concurrent editing surprisingly tractable.
 
 ---
 
-## The Problem Today
+## Status
 
-Right now, Minga's agent tools (`EditFile`, `WriteFile`, `ReadFile`) bypass the buffer entirely. They go straight to `File.read` and `File.write` on disk. Meanwhile, the `Buffer.Server` GenServer is sitting right there, holding the same file's content in a gap buffer with undo tracking, dirty state, tree-sitter sync, and a batch `apply_text_edits/2` API built for exactly this kind of programmatic editing.
+Phases 1 and 2 are shipped. Agent file tools route through `MingaAgent.ToolRouter`, which checks for open buffers (fork path) before falling through to the changeset overlay or direct filesystem I/O. Buffer forking with three-way merge works. Changeset overlays handle filesystem-level isolation for shell commands.
 
-The data flow looks like this:
+The sections below describe the design rationale and prior art analysis that motivated this work. Implementation details live in `MingaAgent.ToolRouter`, `MingaAgent.BufferForkStore`, `Minga.Buffer.Fork`, and `MingaAgent.Changeset`.
+
+---
+
+## The Problem (Before This Work)
+
+Minga's agent tools (`EditFile`, `WriteFile`, `ReadFile`) used to bypass the buffer entirely. They went straight to `File.read` and `File.write` on disk. Meanwhile, the `Buffer.Server` GenServer was sitting right there, holding the same file's content in a gap buffer with undo tracking, dirty state, tree-sitter sync, and a batch `apply_text_edits/2` API built for exactly this kind of programmatic editing.
+
+The old data flow looked like this:
 
 ```
 Agent wants to edit main.ex
@@ -26,7 +34,7 @@ File.write("main.ex", new)     ← writes back to disk
 User sees nothing until they reload the buffer
 ```
 
-The agent is walking around the house to come in through the back door when the front door is open.
+The agent was walking around the house to come in through the back door when the front door was open.
 
 This causes real problems:
 
@@ -386,16 +394,16 @@ For AI agents, this means: even with perfect CRDT merge, you still want a "run t
 
 ---
 
-## Summary: What to Build and When
+## Summary
 
 | Phase | What | Effort | Benefit |
 |-------|------|--------|---------|
-| **1** | Agent tools call `Buffer.Server` instead of `File.read/write` | Small (days) | Instant edits, undo, tree-sitter sync, no disk I/O |
-| **2** | Buffer forking with three-way merge per agent session | Medium (weeks) | Multi-agent concurrent editing without worktrees |
-| **3** | Selective flush-to-disk before shell commands | Small (days) | Agents can build/test against their in-memory edits |
-| **4** | CRDT-based merge (if Phase 2 proves insufficient) | Large (months) | True simultaneous editing of the same code region |
+| **1** | Agent tools route through `Buffer.Fork` for open buffers | ✅ Shipped | In-memory isolation, instant edits, undo integration |
+| **2** | Buffer forking with three-way merge per agent session | ✅ Shipped | Multi-agent concurrent editing without worktrees |
+| **3** | Filesystem overlay for shell commands | ✅ Shipped (via Changeset) | Agents can build/test against isolated edits |
+| **4** | CRDT-based merge (if three-way merge proves insufficient) | Not started | True simultaneous editing of the same code region |
 
-Each phase is independently shippable. Phase 1 is pure improvement with no new concepts. Phase 2 is the architectural leap. Phase 3 is a practical necessity that follows from Phase 2. Phase 4 is a research project that may never be needed.
+Phases 1-3 shipped as part of the runtime-first architecture work. Phase 4 is a research project that may never be needed. See the "When CRDTs Would Matter" section above for the conditions that would motivate it.
 
 ---
 

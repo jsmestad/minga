@@ -549,10 +549,7 @@ defmodule Minga.Tool.Manager do
 
   @spec log_message(String.t()) :: :ok
   defp log_message(text) do
-    if Process.whereis(MingaEditor) do
-      MingaEditor.log_to_messages(text)
-    end
-
+    Minga.Events.broadcast(:log_message, %Minga.Events.LogMessageEvent{text: text, level: :info})
     :ok
   end
 end

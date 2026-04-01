@@ -44,8 +44,8 @@ defmodule MingaEditor.Title do
   when dirty. Special buffers strip `*` markers. Agent view shows `Agent — ProjectName`.
   """
   @spec format_gui(state()) :: String.t()
-  def format_gui(%EditorState{} = state) do
-    ctx = EditorState.active_content_context(state)
+  def format_gui(state) do
+    ctx = build_content_context(state)
     project = ctx.directory
 
     case ctx.type do
@@ -63,6 +63,35 @@ defmodule MingaEditor.Title do
           "#{dirty_prefix}#{name} — Minga"
         end
     end
+  end
+
+  # Builds a content context from either EditorState or a plain map (Input).
+  # EditorState has active_content_context/1; for plain maps we replicate
+  # the logic using the workspace fields directly.
+  @spec build_content_context(state()) :: map()
+  defp build_content_context(%EditorState{} = state) do
+    EditorState.active_content_context(state)
+  end
+
+  defp build_content_context(%{workspace: %{buffers: %{active: buf}}} = _state)
+       when is_pid(buf) do
+    path = Minga.Buffer.file_path(buf)
+    name = Minga.Buffer.buffer_name(buf)
+    dirty = Minga.Buffer.dirty?(buf)
+    display_name = if path, do: Path.basename(path), else: name || "[no file]"
+    directory = if path, do: path |> Path.dirname() |> Path.basename(), else: ""
+
+    %{
+      type: :buffer,
+      display_name: display_name,
+      directory: directory,
+      dirty: dirty,
+      filetype: Minga.Buffer.filetype(buf) || :text
+    }
+  end
+
+  defp build_content_context(_state) do
+    %{type: :buffer, display_name: "[no file]", directory: "", dirty: false, filetype: :text}
   end
 
   @spec build_vars(state()) :: [{String.t(), String.t()}]

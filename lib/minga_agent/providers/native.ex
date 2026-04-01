@@ -141,7 +141,8 @@ defmodule MingaAgent.Providers.Native do
           max_turns: pos_integer(),
           max_cost: float() | nil,
           session_cost: float(),
-          fork_store: pid() | nil
+          fork_store: pid() | nil,
+          changeset: pid() | nil
         }
 
   # ── Provider callbacks ──────────────────────────────────────────────────────
@@ -244,9 +245,29 @@ defmodule MingaAgent.Providers.Native do
     {:ok, fork_store} = GenServer.start(MingaAgent.BufferForkStore, :ok)
     Process.monitor(fork_store)
 
+    # Optionally create a changeset for filesystem-level isolation.
+    # When enabled, file tools write to an overlay directory instead of
+    # the real project. Three-way merge on session completion.
+    changeset =
+      if Keyword.get(opts, :changeset, false) do
+        case MingaAgent.Changeset.create(project_root) do
+          {:ok, cs} ->
+            Process.monitor(cs)
+            cs
+
+          {:error, reason} ->
+            Minga.Log.warning(
+              :agent,
+              "[Agent.Native] changeset creation failed: #{inspect(reason)}"
+            )
+
+            nil
+        end
+      end
+
     base_tools =
       Keyword.get(opts, :tools) ||
-        Tools.all(project_root: project_root, fork_store: fork_store)
+        Tools.all(project_root: project_root, fork_store: fork_store, changeset: changeset)
 
     internal_tools = build_internal_tools(provider_pid)
     tools = base_tools ++ internal_tools
@@ -278,7 +299,8 @@ defmodule MingaAgent.Providers.Native do
       max_turns: max_turns,
       max_cost: max_cost,
       session_cost: 0.0,
-      fork_store: fork_store
+      fork_store: fork_store,
+      changeset: changeset
     }
 
     Minga.Log.info(:agent, "[Agent.Native] started with model=#{model} root=#{project_root}")
@@ -657,6 +679,16 @@ defmodule MingaAgent.Providers.Native do
     {:noreply, %{state | fork_store: nil}}
   end
 
+  def handle_info({:DOWN, _ref, :process, pid, _reason}, %{changeset: pid} = state)
+      when is_pid(pid) do
+    Minga.Log.warning(
+      :agent,
+      "[Agent.Native] changeset crashed, continuing without filesystem isolation"
+    )
+
+    {:noreply, %{state | changeset: nil}}
+  end
+
   def handle_info({:DOWN, _ref, :process, _pid, _reason}, state) do
     {:noreply, state}
   end
@@ -666,9 +698,20 @@ defmodule MingaAgent.Providers.Native do
   end
 
   @impl true
-  def terminate(_reason, %{fork_store: fs} = _state) when is_pid(fs) do
-    # Merge all buffer forks back to their parent buffers on shutdown.
-    # Then stop the store (not linked, so we must clean up explicitly).
+  def terminate(reason, state) do
+    cleanup_fork_store(state.fork_store)
+    cleanup_changeset(state.changeset, reason)
+    :ok
+  catch
+    :exit, _ -> :ok
+  end
+
+  # ── Terminate cleanup ──────────────────────────────────────────────────────
+
+  @spec cleanup_fork_store(pid() | nil) :: :ok
+  defp cleanup_fork_store(nil), do: :ok
+
+  defp cleanup_fork_store(fs) when is_pid(fs) do
     if Process.alive?(fs) do
       results = MingaAgent.BufferForkStore.merge_all(fs)
 
@@ -676,28 +719,50 @@ defmodule MingaAgent.Providers.Native do
         {_path, :ok} ->
           :ok
 
-        {conflict_path, {:conflict, _hunks}} ->
-          Minga.Log.warning(
-            :agent,
-            "[Agent.Native] merge conflict on #{conflict_path}, keeping parent version"
-          )
+        {p, {:conflict, _}} ->
+          Minga.Log.warning(:agent, "[Agent.Native] fork merge conflict on #{p}")
 
-        {err_path, {:error, reason}} ->
-          Minga.Log.warning(
-            :agent,
-            "[Agent.Native] merge failed for #{err_path}: #{inspect(reason)}"
-          )
+        {p, {:error, r}} ->
+          Minga.Log.warning(:agent, "[Agent.Native] fork merge failed for #{p}: #{inspect(r)}")
       end)
 
       MingaAgent.BufferForkStore.stop(fs)
     end
 
     :ok
-  catch
-    :exit, _ -> :ok
   end
 
-  def terminate(_reason, _state), do: :ok
+  @spec cleanup_changeset(pid() | nil, term()) :: :ok
+  defp cleanup_changeset(nil, _reason), do: :ok
+
+  defp cleanup_changeset(cs, reason) when is_pid(cs) do
+    if Process.alive?(cs) do
+      if reason == :normal or reason == :shutdown do
+        merge_changeset(cs)
+      else
+        MingaAgent.Changeset.discard(cs)
+      end
+    end
+
+    :ok
+  end
+
+  @spec merge_changeset(pid()) :: :ok
+  defp merge_changeset(cs) do
+    case MingaAgent.Changeset.merge(cs) do
+      :ok ->
+        Minga.Log.info(:agent, "[Agent.Native] changeset merged successfully")
+
+      {:ok, :merged_with_conflicts, _details} ->
+        Minga.Log.warning(:agent, "[Agent.Native] changeset merged with conflicts")
+
+      {:error, merge_reason} ->
+        Minga.Log.warning(
+          :agent,
+          "[Agent.Native] changeset merge failed: #{inspect(merge_reason)}"
+        )
+    end
+  end
 
   # ── Agent turn loop (runs in a Task) ────────────────────────────────────────
 

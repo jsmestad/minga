@@ -70,7 +70,9 @@ For the full technical story (supervision tree, port protocol, display list IR, 
 - **Vim-style modal editing.** Normal, Insert, Visual, Operator-Pending, Replace, and Search modes. Motions, operators, text objects (`iw`, `i"`, `a{`), registers, macros, marks, dot repeat.
 - **Space-leader commands.** Doom-style `SPC` menus with Which-Key popup. Discoverable from day one.
 - **Tree-sitter highlighting.** 39 languages compiled in. Instant on file open.
-- **Built-in AI agent.** Native LLM integration with streaming, tool use, inline diff review, and conversation management. Supports Anthropic, OpenAI, and Google models.
+- **Built-in AI agent.** Native LLM integration with streaming, tool use, inline diff review, and conversation management. Supports Anthropic, OpenAI, and Google models. Agent edits route through in-memory buffer forks for isolation, with three-way merge on completion.
+- **Headless runtime.** `Minga.Runtime.start/1` boots the full runtime (buffers, config, LSP, agent sessions) without any frontend. Use it for CI pipelines, scripting, or as a backend for external tools.
+- **API gateway.** External clients connect via WebSocket + JSON-RPC to start agent sessions, execute tools, and receive streaming events. No frontend required.
 - **Extensible in Elixir.** Commands, keybindings, hooks, advice system, extensions, hot reload. The config is the same language as the editor.
 - **Native frontends.** Terminal (Zig + libvaxis) and macOS (Swift + Metal). Same core, same config.
 - **Project management.** Auto-detected root, file finder, project search, recent files per project.

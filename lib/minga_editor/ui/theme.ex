@@ -544,7 +544,9 @@ defmodule MingaEditor.UI.Theme do
   def available do
     builtin = Map.keys(@themes)
     user = Map.keys(user_themes())
-    Enum.uniq(builtin ++ user) |> Enum.sort()
+    themes = Enum.uniq(builtin ++ user) |> Enum.sort()
+    Minga.Config.ThemeRegistry.register(themes)
+    themes
   end
 
   @doc "Returns the default theme name atom."
@@ -560,6 +562,8 @@ defmodule MingaEditor.UI.Theme do
   @spec register_user_themes(%{atom() => MingaEditor.UI.Theme.Loader.loaded_theme()}) :: :ok
   def register_user_themes(themes) when is_map(themes) do
     :persistent_term.put({__MODULE__, :user_themes}, themes)
+    # Sync the Layer 0 registry so Config.Options can validate theme names
+    _ = available()
     :ok
   end
 

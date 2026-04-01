@@ -108,7 +108,7 @@ defmodule Minga.Config.Completion do
       :theme_atom ->
         default = Options.default(option_name)
 
-        MingaEditor.UI.Theme.available()
+        Minga.Config.ThemeRegistry.available()
         |> Enum.map(fn theme ->
           theme_str = Atom.to_string(theme)
           is_default = theme == default
