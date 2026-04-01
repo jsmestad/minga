@@ -722,32 +722,1062 @@ grep "def run(%MingaEditor.RenderPipeline.Input{}" lib/minga_editor/render_pipel
 
 **Duration:** 3-4 weeks
 **Agents:** 3 (one per track)
-**Gate:** External clients can connect, start sessions, execute tools
+**Gate:** External clients can connect via WebSocket, start agent sessions, execute tools, and receive streaming events through `MingaAgent.Runtime`
 
-### Track A: MingaAgent.Runtime facade (1 agent)
+### Track A: MingaAgent.Runtime facade + Introspection (1 agent)
 
-Create the thin `defdelegate` module. Introspection.Describer. Runtime tools.
+Two separate modules. The facade is stable `defdelegate` glue that rarely changes. Introspection evolves as external clients demand new metadata. Bundling them means the facade's API surface churns when you add a new introspection field.
+
+**Files to read:**
+- `lib/minga_agent/session_manager.ex` → the lifecycle API this facade delegates to
+- `lib/minga_agent/tool/registry.ex` → ETS-backed tool lookup (read path)
+- `lib/minga_agent/tool/executor.ex` → tool execution pipeline with advice integration
+- `lib/minga_agent/tool/spec.ex` → tool spec struct (name, schema, callback, category, approval)
+- `lib/minga_agent/runtime_state.ex` → domain state struct (status, session_id, model, provider)
+- `lib/minga/runtime.ex` → headless entry point (boots supervision tree without frontend)
+- `lib/minga/events.ex` → event topics and payload structs for cross-component notifications
+
+**PR A-5.1: Create MingaAgent.Runtime facade**
+
+Thin `defdelegate` module unifying SessionManager, Tool.Registry, Tool.Executor, and RuntimeState into one entry point. This is the stable API surface that Track C (API Gateway) binds to.
+
+**File to create:** `lib/minga_agent/runtime.ex`
+
+```elixir
+defmodule MingaAgent.Runtime do
+  @moduledoc """
+  Public API for the Minga agent runtime.
+
+  Unifies session management, tool execution, and introspection into
+  a single entry point. External clients (API gateway, CLI tools, IDE
+  extensions) should call this module rather than reaching into
+  SessionManager, Tool.Registry, or Tool.Executor directly.
+
+  All functions here are Layer 1 (MingaAgent.*). They work in both
+  headless mode (`Minga.Runtime.start/1`) and full editor mode.
+  """
+
+  # ── Session lifecycle ────────────────────────────────────────────────────────
+
+  @doc "Starts a new agent session. Returns `{:ok, session_id, pid}`."
+  @spec start_session(keyword()) :: {:ok, String.t(), pid()} | {:error, term()}
+  defdelegate start_session(opts \\ []), to: MingaAgent.SessionManager
+
+  @doc "Stops a session by its human-readable ID."
+  @spec stop_session(String.t()) :: :ok | {:error, :not_found}
+  defdelegate stop_session(session_id), to: MingaAgent.SessionManager
+
+  @doc "Sends a user prompt to a session."
+  @spec send_prompt(String.t(), String.t()) :: :ok | {:error, term()}
+  defdelegate send_prompt(session_id, prompt), to: MingaAgent.SessionManager
+
+  @doc "Aborts the current operation on a session."
+  @spec abort(String.t()) :: :ok | {:error, :not_found}
+  defdelegate abort(session_id), to: MingaAgent.SessionManager
+
+  @doc "Lists all active sessions as `{id, pid, metadata}` tuples."
+  @spec list_sessions() :: [{String.t(), pid(), MingaAgent.SessionMetadata.t()}]
+  defdelegate list_sessions(), to: MingaAgent.SessionManager
+
+  @doc "Looks up the PID for a session ID."
+  @spec get_session(String.t()) :: {:ok, pid()} | {:error, :not_found}
+  defdelegate get_session(session_id), to: MingaAgent.SessionManager
+
+  # ── Tool operations ─────────────────────────────────────────────────────────
+
+  @doc "Executes a tool by name with the given arguments."
+  @spec execute_tool(String.t(), map()) :: MingaAgent.Tool.Executor.result()
+  defdelegate execute_tool(name, args), to: MingaAgent.Tool.Executor, as: :execute
+
+  @doc "Returns all registered tool specs."
+  @spec list_tools() :: [MingaAgent.Tool.Spec.t()]
+  defdelegate list_tools(), to: MingaAgent.Tool.Registry, as: :all
+
+  @doc "Looks up a tool spec by name."
+  @spec get_tool(String.t()) :: {:ok, MingaAgent.Tool.Spec.t()} | :error
+  defdelegate get_tool(name), to: MingaAgent.Tool.Registry, as: :lookup
+
+  @doc "Returns true if a tool with the given name is registered."
+  @spec tool_registered?(String.t()) :: boolean()
+  defdelegate tool_registered?(name), to: MingaAgent.Tool.Registry, as: :registered?
+
+  # ── Introspection ───────────────────────────────────────────────────────────
+
+  @doc "Returns a capabilities manifest describing the runtime."
+  @spec capabilities() :: MingaAgent.Introspection.capabilities_manifest()
+  defdelegate capabilities(), to: MingaAgent.Introspection
+
+  @doc "Returns structured descriptions of all registered tools."
+  @spec describe_tools() :: [MingaAgent.Introspection.tool_description()]
+  defdelegate describe_tools(), to: MingaAgent.Introspection
+
+  @doc "Returns structured descriptions of all active sessions."
+  @spec describe_sessions() :: [MingaAgent.Introspection.session_description()]
+  defdelegate describe_sessions(), to: MingaAgent.Introspection
+end
+```
+
+**Constraints:**
+- `MingaAgent.Runtime` must have `@moduledoc` and `@spec` on every public function
+- No logic beyond delegation. If removing all `defdelegate` lines and specs leaves more than ~10 lines, the module is doing too much.
+- Do NOT add state. This module is a routing table, not a GenServer.
+
+**Verification:**
+```bash
+make lint && mix test.llm
+# Facade compiles and delegates correctly:
+mix compile --warnings-as-errors
+# Smoke test: in an iex session with headless runtime, call each function:
+# MingaAgent.Runtime.list_tools() should return tool specs
+# MingaAgent.Runtime.list_sessions() should return []
+```
+
+---
+
+**PR A-5.2: Create MingaAgent.Introspection**
+
+Pure data transform module. Queries Tool.Registry (ETS) and SessionManager (GenServer), formats structured descriptions. No GenServer, no side effects beyond those reads.
+
+**File to create:** `lib/minga_agent/introspection.ex`
+
+```elixir
+defmodule MingaAgent.Introspection do
+  @moduledoc """
+  Runtime self-description for external clients.
+
+  Produces structured capability manifests, tool descriptions, and
+  session descriptions. All functions are pure data transforms over
+  the current registry and session state. No side effects.
+
+  External clients use this to discover what the runtime can do
+  before making requests. The API gateway (Track C) exposes these
+  as JSON-RPC methods.
+  """
+
+  alias MingaAgent.Tool.{Registry, Spec}
+  alias MingaAgent.SessionManager
+
+  @typedoc "Runtime capabilities manifest."
+  @type capabilities_manifest :: %{
+          version: String.t(),
+          tool_count: non_neg_integer(),
+          session_count: non_neg_integer(),
+          tool_categories: [Spec.category()],
+          features: [atom()]
+        }
+
+  @typedoc "Structured tool description for external clients."
+  @type tool_description :: %{
+          name: String.t(),
+          description: String.t(),
+          parameter_schema: map(),
+          category: Spec.category(),
+          approval_level: Spec.approval_level()
+        }
+
+  @typedoc "Structured session description for external clients."
+  @type session_description :: %{
+          session_id: String.t(),
+          model_name: String.t(),
+          provider_name: String.t(),
+          status: atom(),
+          created_at: DateTime.t()
+        }
+
+  @spec capabilities() :: capabilities_manifest()
+  def capabilities do
+    tools = Registry.all()
+    sessions = SessionManager.list_sessions()
+    categories = tools |> Enum.map(& &1.category) |> Enum.uniq() |> Enum.sort()
+
+    %{
+      version: Application.spec(:minga, :vsn) |> to_string(),
+      tool_count: length(tools),
+      session_count: length(sessions),
+      tool_categories: categories,
+      features: enabled_features()
+    }
+  end
+
+  @spec describe_tools() :: [tool_description()]
+  def describe_tools do
+    Registry.all()
+    |> Enum.map(fn %Spec{} = s ->
+      %{
+        name: s.name,
+        description: s.description,
+        parameter_schema: s.parameter_schema,
+        category: s.category,
+        approval_level: s.approval_level
+      }
+    end)
+  end
+
+  @spec describe_sessions() :: [session_description()]
+  def describe_sessions do
+    SessionManager.list_sessions()
+    |> Enum.map(fn {id, _pid, metadata} ->
+      %{
+        session_id: id,
+        model_name: metadata.model_name,
+        provider_name: Map.get(metadata, :provider_name, "unknown"),
+        status: Map.get(metadata, :status, :unknown),
+        created_at: metadata.created_at
+      }
+    end)
+  end
+
+  @spec enabled_features() :: [atom()]
+  defp enabled_features do
+    features = [:tools, :sessions, :events]
+    # Future: add :changesets when Track B lands, :buffer_fork when Wave 6 lands
+    features
+  end
+end
+```
+
+**Constraints:**
+- `MingaAgent.Introspection` is Layer 1. It reads from `MingaAgent.Tool.Registry` (Layer 1 ETS) and `MingaAgent.SessionManager` (Layer 1 GenServer). It must NOT import from `MingaEditor.*`.
+- Return plain maps, not structs. External clients (API gateway) will JSON-encode these directly. Structs require `@derive JSON.Encoder` and add coupling. Maps are the right choice for a serialization boundary.
+- The `capabilities/0` function is the "hello" handshake for external clients. Keep it cheap (two ETS reads + one GenServer call).
+
+**Verification:**
+```bash
+make lint && mix test.llm
+mix test test/minga_agent/introspection_test.exs
+```
+
+---
+
+**PR A-5.3: Register introspection as agent tools**
+
+Register `describe_runtime` and `describe_tools` as tools in Tool.Registry so the agent itself can introspect its own capabilities. This is the "self-describing runtime" concept: an LLM can call `describe_runtime` to discover what tools are available.
+
+**Files to modify:**
+- `lib/minga_agent/tools.ex` → add `describe_runtime` and `describe_tools` tool definitions to `all/1`
+
+**File to create:** `lib/minga_agent/tools/introspection.ex`
+
+```elixir
+defmodule MingaAgent.Tools.Introspection do
+  @moduledoc "Agent tools for runtime self-description."
+
+  alias MingaAgent.Introspection
+
+  @spec describe_runtime(map()) :: {:ok, String.t()}
+  def describe_runtime(_args) do
+    caps = Introspection.capabilities()
+    {:ok, format_capabilities(caps)}
+  end
+
+  @spec describe_tools(map()) :: {:ok, String.t()}
+  def describe_tools(_args) do
+    tools = Introspection.describe_tools()
+    {:ok, format_tools(tools)}
+  end
+
+  @spec format_capabilities(map()) :: String.t()
+  defp format_capabilities(caps) do
+    """
+    Minga Runtime v#{caps.version}
+    Tools: #{caps.tool_count} (#{Enum.join(caps.tool_categories, ", ")})
+    Sessions: #{caps.session_count}
+    Features: #{Enum.join(caps.features, ", ")}
+    """
+    |> String.trim()
+  end
+
+  @spec format_tools([map()]) :: String.t()
+  defp format_tools(tools) do
+    tools
+    |> Enum.map(fn t -> "- #{t.name} [#{t.category}]: #{t.description}" end)
+    |> Enum.join("\n")
+  end
+end
+```
+
+**Constraints:**
+- Tools return `{:ok, String.t()}` (formatted text), not raw maps. The agent consumes text, not structured data.
+- Keep both tools in the `:agent` category with `:auto` approval (read-only introspection, no side effects).
+
+**Verification:**
+```bash
+make lint && mix test.llm
+mix test test/minga_agent/tools/introspection_test.exs
+# Verify tools are registered:
+# MingaAgent.Tool.Registry.registered?("describe_runtime") should be true
+```
+
+---
 
 ### Track B: Changeset integration (1 agent)
 
-Port changeset experiment from experiments branch into `lib/minga_agent/changeset/`. Wire agent sessions to optionally use changesets.
+Port the changeset experiment from the `experiments` branch into the Minga layer structure. Changesets are opt-in per session (not always-on, not sub-session scope). When enabled, file tools route through a changeset overlay instead of directly modifying the filesystem. Three-way merge on session completion handles concurrent edits.
+
+**Why opt-in (not always-on):** ~70% of agent sessions write 0-2 files. Creating a filesystem overlay (50-250ms), maintaining hardlinks, and running a merge step on every session is waste for those sessions. The overhead only pays for itself on multi-file editing sessions where isolation and rollback matter.
+
+**Files to read:**
+- `experiments/changeset/lib/changeset.ex` (on `experiments` branch) → the facade API
+- `experiments/changeset/lib/changeset/server.ex` → GenServer lifecycle, modifications, history, budget
+- `experiments/changeset/lib/changeset/overlay.ex` → filesystem overlay (hardlinks, materialize, cleanup)
+- `experiments/changeset/lib/changeset/merge.ex` → three-way merge using Myers diff
+- `lib/minga/core/diff.ex` → existing `merge3/3` function (reuse this, don't port `Changeset.Merge`)
+- `lib/minga_agent/session.ex` → session GenServer, status lifecycle, tool dispatch
+- `lib/minga_agent/internal_state.ex` → session internal state struct
+- `lib/minga_agent/tools/write_file.ex` → current direct-write tool
+- `lib/minga_agent/tools/edit_file.ex` → current direct-edit tool
+- `lib/minga_agent/tools/read_file.ex` → current direct-read tool
+
+**PR B-5.1: Create Minga.Core.Overlay (Layer 0)**
+
+Pure filesystem overlay utilities. No GenServer, no budget, no merge. This is a data structure + utility functions. The overlay concept has nothing agent-specific about it; it's a filesystem primitive.
+
+**File to create:** `lib/minga/core/overlay.ex`
+
+Port from `experiments/changeset/lib/changeset/overlay.ex` with these changes:
+- Rename `Changeset.Overlay` to `Minga.Core.Overlay`
+- Keep the same struct fields: `overlay_dir`, `project_root`, `build_dir`, `link_mode`
+- Keep: `create/1`, `materialize_file/3`, `delete_file/2`, `deleted?/2`, `modified?/2`, `command_env/1`, `cleanup/1`
+- Keep: `detect_link_mode/2`, `mirror_directory/3`, `link_or_copy/3`, `find_any_file/1`, `remove_symlinks_recursive/1`
+- Add `@spec` to every public function, `@enforce_keys` on the struct
+- Add `@moduledoc` explaining the hardlink overlay strategy
+
+**Constraints:**
+- Layer 0 module: must NOT import from `MingaAgent.*` or `MingaEditor.*`
+- No `Process.sleep`, no GenServer calls, no side effects beyond filesystem operations
+- `@skip_dirs` must include `_build`, `.git`, `.elixir_ls`, `node_modules`, `.hex` (same as experiment)
+- `@symlink_dirs` must include `deps` (shared read-only)
+
+**Verification:**
+```bash
+make lint && mix test.llm
+mix test test/minga/core/overlay_test.exs
+```
+
+```elixir
+# test/minga/core/overlay_test.exs
+defmodule Minga.Core.OverlayTest do
+  use ExUnit.Case, async: true
+
+  alias Minga.Core.Overlay
+
+  setup do
+    dir = Path.join(System.tmp_dir!(), "overlay-test-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(dir)
+    File.write!(Path.join(dir, "hello.txt"), "original")
+    File.mkdir_p!(Path.join(dir, "lib"))
+    File.write!(Path.join(dir, "lib/foo.ex"), "defmodule Foo do\nend")
+    on_exit(fn -> File.rm_rf!(dir) end)
+    %{project: dir}
+  end
+
+  test "create mirrors project with hardlinks", %{project: project} do
+    {:ok, overlay} = Overlay.create(project)
+    assert File.exists?(Path.join(overlay.overlay_dir, "hello.txt"))
+    assert File.read!(Path.join(overlay.overlay_dir, "hello.txt")) == "original"
+    Overlay.cleanup(overlay)
+  end
+
+  test "materialize_file replaces hardlink with new content", %{project: project} do
+    {:ok, overlay} = Overlay.create(project)
+    :ok = Overlay.materialize_file(overlay, "hello.txt", "modified")
+    assert File.read!(Path.join(overlay.overlay_dir, "hello.txt")) == "modified"
+    # Original is untouched
+    assert File.read!(Path.join(project, "hello.txt")) == "original"
+    Overlay.cleanup(overlay)
+  end
+
+  test "modified? detects changed files", %{project: project} do
+    {:ok, overlay} = Overlay.create(project)
+    refute Overlay.modified?(overlay, "hello.txt")
+    :ok = Overlay.materialize_file(overlay, "hello.txt", "changed")
+    assert Overlay.modified?(overlay, "hello.txt")
+    Overlay.cleanup(overlay)
+  end
+end
+```
+
+---
+
+**PR B-5.2: Create MingaAgent.Changeset GenServer (Layer 1)**
+
+Port from `experiments/changeset/lib/changeset/server.ex`. Wraps `Minga.Core.Overlay` and adds: modification tracking, per-file undo history, budget system, and three-way merge via `Minga.Core.Diff.merge3/3` (NOT a ported `Changeset.Merge`).
+
+**Files to create:**
+- `lib/minga_agent/changeset.ex` → public API facade (replaces experiment's `Changeset` module)
+- `lib/minga_agent/changeset/server.ex` → GenServer (port from experiment's `Changeset.Server`)
+
+**Key differences from the experiment:**
+- Uses `Minga.Core.Overlay` instead of `Changeset.Overlay`
+- Uses `Minga.Core.Diff.merge3/3` instead of `Changeset.Merge.three_way/3` (verify the function signatures are compatible; the experiment splits on `"\n"` and calls `List.myers_difference/2`, while `Diff.merge3` takes line lists directly)
+- GenServer is `:temporary` restart (same as experiment)
+- Skip `Changeset.FastOverlay` (macOS APFS clones). The basic hardlink overlay works cross-platform. FastOverlay is a follow-up optimization.
+- Broadcasts `Minga.Events` on merge completion and budget exhaustion
+
+**File structure for `lib/minga_agent/changeset.ex`:**
+```elixir
+defmodule MingaAgent.Changeset do
+  @moduledoc """
+  In-memory changesets with filesystem overlays for agent editing.
+
+  A changeset tracks file edits without modifying the original project.
+  Edits are held in memory and materialized into a hardlink overlay where
+  external tools (compilers, test runners, linters) see a coherent view
+  of the project with changes applied.
+
+  ## Lifecycle
+
+      # Session starts with changeset: true
+      {:ok, cs} = MingaAgent.Changeset.create("/path/to/project")
+
+      # Agent file tools route through the changeset
+      :ok = MingaAgent.Changeset.write_file(cs, "lib/math.ex", new_content)
+      :ok = MingaAgent.Changeset.edit_file(cs, "lib/util.ex", "old", "new")
+
+      # External tools see changes through the overlay
+      {output, 0} = MingaAgent.Changeset.run(cs, "mix compile")
+
+      # Session ends: merge back with three-way merge
+      :ok = MingaAgent.Changeset.merge(cs)
+  """
+
+  alias MingaAgent.Changeset.Server
+
+  @type changeset :: pid()
+
+  @spec create(String.t(), keyword()) :: {:ok, changeset()} | {:error, term()}
+  @spec write_file(changeset(), String.t(), binary()) :: :ok | {:error, term()}
+  @spec edit_file(changeset(), String.t(), String.t(), String.t()) :: :ok | {:error, term()}
+  @spec read_file(changeset(), String.t()) :: {:ok, binary()} | {:error, term()}
+  @spec delete_file(changeset(), String.t()) :: :ok | {:error, term()}
+  @spec undo(changeset(), String.t()) :: :ok | {:error, :nothing_to_undo}
+  @spec reset(changeset()) :: :ok
+  @spec merge(changeset()) :: :ok | {:ok, :merged_with_conflicts, list()} | {:error, term()}
+  @spec discard(changeset()) :: :ok
+  @spec run(changeset(), String.t(), keyword()) :: {String.t(), non_neg_integer()}
+  @spec overlay_path(changeset()) :: String.t()
+  @spec modified_files(changeset()) :: %{modified: [String.t()], deleted: [String.t()]}
+  @spec summary(changeset()) :: [map()]
+  @spec record_attempt(changeset()) :: {:ok, pos_integer()} | {:budget_exhausted, pos_integer(), pos_integer()}
+  @spec attempt_info(changeset()) :: %{attempts: non_neg_integer(), budget: pos_integer() | :unlimited}
+
+  # All functions delegate to Server via GenServer.call
+  # (Port the delegation bodies from experiments/changeset/lib/changeset.ex)
+end
+```
+
+**Constraints:**
+- `MingaAgent.Changeset.Server` starts under `MingaAgent.Supervisor` (DynamicSupervisor), same as sessions
+- The `merge/1` call must use `Minga.Core.Diff.merge3/3`. Verify the interface: the experiment's `Changeset.Merge.three_way/3` takes `(ancestor_string, ours_string, theirs_string)` and splits on `"\n"` internally. `Minga.Core.Diff.merge3/3` may take line lists directly. Adapt the call site accordingly.
+- Broadcast `:changeset_merged` event on successful merge, `:changeset_budget_exhausted` on budget exhaustion. Add these topics and payload structs to `Minga.Events`.
+- `terminate/2` must call `Overlay.cleanup/1` (same as experiment) to prevent tmp dir leaks
+
+**Verification:**
+```bash
+make lint && mix test.llm
+mix test test/minga_agent/changeset/server_test.exs
+```
+
+---
+
+**PR B-5.3: Wire Session to optionally use Changeset**
+
+When `changeset: true` is passed to `SessionManager.start_session/1`, the session creates a `MingaAgent.Changeset` in its `init/1` and routes file tool calls through it.
+
+**Files to modify:**
+- `lib/minga_agent/internal_state.ex` → add `changeset: pid() | nil` field
+- `lib/minga_agent/session.ex` → create changeset in `init/1` when opted in, merge/discard in `terminate/2`
+- `lib/minga_agent/tools/write_file.ex` → check session's changeset; route through it if present
+- `lib/minga_agent/tools/edit_file.ex` → same routing
+- `lib/minga_agent/tools/multi_edit_file.ex` → same routing
+- `lib/minga_agent/tools/read_file.ex` → read from changeset if present (sees modified files)
+- `lib/minga_agent/tools/shell.ex` → run commands in overlay directory if changeset present
+
+**Tool routing pattern:**
+```elixir
+# In write_file.ex callback:
+defp do_write(path, content, session_pid) do
+  case get_changeset(session_pid) do
+    {:ok, cs} -> MingaAgent.Changeset.write_file(cs, path, content)
+    :none -> File.write(path, content)  # existing behavior
+  end
+end
+```
+
+The exact mechanism for tools to access the session's changeset depends on how tools currently receive context. Read the tool callback signatures in `lib/minga_agent/tools/*.ex` to determine whether the session PID or a context map is passed. The key constraint: tools must not need to know whether a changeset is active. They call a routing function that checks and delegates.
+
+**Budget integration:** When `MingaAgent.Changeset.record_attempt/1` returns `{:budget_exhausted, attempts, budget}`, the session should:
+1. Broadcast a `:changeset_budget_exhausted` event
+2. Set session status to `:error` with a descriptive message
+3. NOT auto-discard the changeset (let the user/client decide)
+
+**Merge on completion:** When the session transitions to `:idle` after the agent finishes, or on explicit `stop_session/1`:
+1. If changeset is active and dirty, call `MingaAgent.Changeset.merge/1`
+2. If merge returns `:ok`, broadcast `:changeset_merged` event
+3. If merge returns `{:ok, :merged_with_conflicts, details}`, broadcast `:changeset_conflict` event with the details. The Editor (or API client) handles conflict resolution.
+4. If the session is being discarded (user aborts), call `MingaAgent.Changeset.discard/1` instead of merge
+
+**Constraints:**
+- Do NOT modify `MingaAgent.Session` directly for the tool routing. The session is 1500+ lines. Instead, create a `MingaAgent.Changeset.ToolRouter` helper that tools call. This keeps the changeset awareness out of the Session GenServer.
+- The `changeset` field on InternalState is `pid() | nil`. The session monitors the changeset pid (it's a GenServer under `MingaAgent.Supervisor`). If the changeset crashes, the session clears the field and continues without isolation (graceful degradation).
+- Pass `project_root` from the session's context to `MingaAgent.Changeset.create/2`. The project root is available from `Minga.Project.root/0` or the session's init opts.
+
+**Verification:**
+```bash
+make lint && mix test.llm
+mix test test/minga_agent/changeset/tool_router_test.exs
+# Integration test: start a session with changeset: true, write a file,
+# verify the original is untouched, merge, verify the original is updated.
+mix test test/minga_agent/changeset/integration_test.exs
+```
+
+---
 
 ### Track C: API Gateway (1 agent)
 
-WebSocket handler, JSON-RPC handler, event streaming. All expose `MingaAgent.Runtime` over network protocols.
+WebSocket + JSON-RPC gateway exposing `MingaAgent.Runtime` to external clients. Uses Bandit + WebSock (~5 deps, all pure Elixir). Not Phoenix (15+ transitive deps for a single WebSocket endpoint). Not raw `:gen_tcp` (reimplementing RFC 6455 is not "build it right"). Not Unix domain socket with binary protocol (limits client ecosystem to custom implementations; WebSocket + JSON-RPC is universal).
 
-(Full detail for Wave 5 items should be written when Wave 4 is nearing completion. By then, the APIs these items build on will be stable and the file paths / line numbers will be accurate.)
+**Important: the macOS GUI keeps its Port protocol.** The Port is binary, zero-overhead, frame-paced, with automatic lifecycle management (BEAM exits, pipe closes, Swift process gets EOF). WebSocket adds latency, framing overhead, and reconnection complexity that have zero benefit for a co-located renderer. The API gateway is for external tools (IDEs, CLI agents, CI pipelines, web dashboards) that want semantic interaction, not frame rendering.
+
+**Chrome opcodes (0x70-0x78) are NOT exposed to API clients.** Chrome is rendering data optimized for native GUI widgets. API clients get semantic queries through the Runtime facade: `list_buffers`, `get_file_tree`, etc. Same underlying data, completely different abstraction level.
+
+**Files to read:**
+- `lib/minga_agent/runtime.ex` → the facade this gateway binds to (Track A output)
+- `lib/minga_agent/session_manager.ex` → session lifecycle API
+- `lib/minga/events.ex` → event bus for streaming notifications
+- `lib/minga_agent/session.ex` → event subscription pattern (`subscribe/2` uses raw `send/2`)
+- `lib/minga/application.ex` → supervision tree (gateway starts under MingaAgent.Supervisor)
+
+**PR C-5.1: Add Bandit + WebSock dependencies**
+
+**File to modify:** `mix.exs`
+
+Add to deps:
+```elixir
+{:bandit, "~> 1.6"},
+{:websock_adapter, "~> 0.5"}
+```
+
+Bandit pulls in `websock`, `thousand_island`, `hpax`, and `plug` as transitive deps. `plug` is already in the dep tree (optional dep of `req`). Net new deps: ~4.
+
+**Constraints:**
+- Run `mix deps.get && mix compile --warnings-as-errors` to verify no conflicts with existing deps
+- Do NOT add Phoenix, Ecto, or any framework-level deps
+
+**Verification:**
+```bash
+mix deps.get
+mix compile --warnings-as-errors
+make lint
+```
+
+---
+
+**PR C-5.2: Create Gateway modules**
+
+Five modules in `lib/minga_agent/gateway/`:
+
+**Files to create:**
+- `lib/minga_agent/gateway/server.ex` → GenServer that starts Bandit listener
+- `lib/minga_agent/gateway/router.ex` → Plug router: `/ws` routes to WebSocket, `/health` returns 200
+- `lib/minga_agent/gateway/websocket.ex` → WebSock behaviour implementation
+- `lib/minga_agent/gateway/json_rpc.ex` → Pure dispatch: decode JSON-RPC request, call Runtime, encode response
+- `lib/minga_agent/gateway/event_stream.ex` → Subscribes to Minga.Events, pushes JSON-RPC notifications to connected clients
+
+**`gateway/server.ex`:**
+```elixir
+defmodule MingaAgent.Gateway.Server do
+  @moduledoc """
+  Starts and owns the Bandit HTTP/WebSocket listener.
+
+  Does not start by default. Started on-demand when the headless runtime
+  boots with `gateway: true` or when `MingaAgent.Runtime.start_gateway/1`
+  is called. The Editor never starts this.
+  """
+  use GenServer
+
+  @default_port 4820
+
+  @spec start_link(keyword()) :: GenServer.on_start()
+  def start_link(opts \\ []) do
+    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+  end
+
+  @impl true
+  def init(opts) do
+    port = Keyword.get(opts, :port, @default_port)
+
+    {:ok, bandit_pid} =
+      Bandit.start_link(
+        plug: MingaAgent.Gateway.Router,
+        port: port,
+        scheme: :http
+      )
+
+    Minga.Log.info(:agent, "[Gateway] listening on port #{port}")
+    {:ok, %{bandit: bandit_pid, port: port}}
+  end
+
+  @impl true
+  def terminate(_reason, %{bandit: pid}) do
+    if Process.alive?(pid), do: Supervisor.stop(pid)
+    :ok
+  end
+end
+```
+
+**`gateway/router.ex`:**
+```elixir
+defmodule MingaAgent.Gateway.Router do
+  use Plug.Router
+
+  plug :match
+  plug :dispatch
+
+  get "/ws" do
+    conn
+    |> WebSockAdapter.upgrade(MingaAgent.Gateway.WebSocket, [], timeout: 60_000)
+    |> halt()
+  end
+
+  get "/health" do
+    send_resp(conn, 200, "ok")
+  end
+
+  match _ do
+    send_resp(conn, 404, "not found")
+  end
+end
+```
+
+**`gateway/websocket.ex`:**
+```elixir
+defmodule MingaAgent.Gateway.WebSocket do
+  @moduledoc """
+  WebSocket handler for external clients.
+
+  Each connection gets its own process (Bandit does this automatically).
+  On connect, subscribes to relevant Minga.Events topics for push
+  notifications. Incoming frames are JSON-RPC requests dispatched
+  through `Gateway.JsonRpc`.
+  """
+  @behaviour WebSock
+
+  alias MingaAgent.Gateway.{JsonRpc, EventStream}
+
+  @impl true
+  def init(_opts) do
+    event_state = EventStream.subscribe_all()
+    {:ok, %{events: event_state}}
+  end
+
+  @impl true
+  def handle_in({text, [opcode: :text]}, state) do
+    case JsonRpc.dispatch(text) do
+      {:ok, response_json} -> {:push, {:text, response_json}, state}
+      {:error, error_json} -> {:push, {:text, error_json}, state}
+      :notification -> {:ok, state}  # no response for notifications
+    end
+  end
+
+  @impl true
+  def handle_info({:minga_event, _topic, _payload} = event, state) do
+    case EventStream.format_notification(event) do
+      {:ok, json} -> {:push, {:text, json}, state}
+      :skip -> {:ok, state}
+    end
+  end
+
+  def handle_info(_msg, state), do: {:ok, state}
+
+  @impl true
+  def terminate(_reason, _state), do: :ok
+end
+```
+
+**`gateway/json_rpc.ex`:**
+
+Pure dispatch module. Takes a JSON string, decodes the JSON-RPC request, pattern-matches on the method name, calls `MingaAgent.Runtime.*`, and returns a JSON-RPC response string. No state, no side effects beyond what the delegated function does.
+
+```elixir
+defmodule MingaAgent.Gateway.JsonRpc do
+  @moduledoc """
+  JSON-RPC 2.0 request dispatch.
+
+  Pure function: decode request → call MingaAgent.Runtime → encode response.
+  Easy to test in isolation without WebSocket machinery.
+  """
+
+  alias MingaAgent.Runtime
+
+  @spec dispatch(String.t()) :: {:ok, String.t()} | {:error, String.t()} | :notification
+  def dispatch(json) when is_binary(json) do
+    case JSON.decode(json) do
+      {:ok, %{"jsonrpc" => "2.0", "method" => method, "params" => params, "id" => id}} ->
+        result = call_method(method, params)
+        {:ok, encode_response(id, result)}
+
+      {:ok, %{"jsonrpc" => "2.0", "method" => method, "params" => params}} ->
+        # Notification (no id): fire and forget
+        call_method(method, params)
+        :notification
+
+      {:ok, _} ->
+        {:error, encode_error(nil, -32600, "Invalid Request")}
+
+      {:error, _} ->
+        {:error, encode_error(nil, -32700, "Parse error")}
+    end
+  end
+
+  # ── Method dispatch ─────────────────────────────────────────────────────────
+
+  @spec call_method(String.t(), map()) :: {:ok, term()} | {:error, term()}
+  defp call_method("runtime.capabilities", _params), do: {:ok, Runtime.capabilities()}
+  defp call_method("runtime.describe_tools", _params), do: {:ok, Runtime.describe_tools()}
+  defp call_method("runtime.describe_sessions", _params), do: {:ok, Runtime.describe_sessions()}
+  defp call_method("session.start", params), do: start_session(params)
+  defp call_method("session.stop", %{"session_id" => id}), do: wrap(Runtime.stop_session(id))
+  defp call_method("session.prompt", %{"session_id" => id, "prompt" => p}), do: wrap(Runtime.send_prompt(id, p))
+  defp call_method("session.abort", %{"session_id" => id}), do: wrap(Runtime.abort(id))
+  defp call_method("session.list", _params), do: {:ok, Runtime.describe_sessions()}
+  defp call_method("tool.execute", %{"name" => n, "args" => a}), do: Runtime.execute_tool(n, a)
+  defp call_method("tool.list", _params), do: {:ok, Runtime.describe_tools()}
+  defp call_method(method, _params), do: {:error, {:method_not_found, method}}
+
+  # ── Helpers ─────────────────────────────────────────────────────────────────
+  # (encode_response, encode_error, start_session helper, wrap helper)
+end
+```
+
+**`gateway/event_stream.ex`:**
+
+Subscribes to `Minga.Events` topics on behalf of a WebSocket connection. Formats domain events as JSON-RPC notifications for push delivery. Exposes the domain events (`text_delta`, `tool_started`, `tool_ended`, `status_changed`, `approval_pending`), NOT rendered state.
+
+```elixir
+defmodule MingaAgent.Gateway.EventStream do
+  @moduledoc """
+  Event subscription and JSON-RPC notification formatting.
+
+  Subscribes to domain events from Minga.Events. Each WebSocket
+  connection calls `subscribe_all/0` in its init and receives
+  `{:minga_event, topic, payload}` messages that `format_notification/1`
+  converts to JSON-RPC notification strings.
+  """
+
+  @topics [
+    :agent_session_stopped,
+    :buffer_saved,
+    :buffer_changed,
+    :log_message,
+    :changeset_merged,
+    :changeset_budget_exhausted
+  ]
+
+  @spec subscribe_all() :: :ok
+  def subscribe_all do
+    Enum.each(@topics, &Minga.Events.subscribe/1)
+    :ok
+  end
+
+  @spec format_notification({:minga_event, atom(), term()}) :: {:ok, String.t()} | :skip
+  def format_notification({:minga_event, topic, payload}) do
+    case encode_event(topic, payload) do
+      nil -> :skip
+      params -> {:ok, JSON.encode!(%{jsonrpc: "2.0", method: "event.#{topic}", params: params})}
+    end
+  end
+
+  # Per-topic encoders that convert typed structs to JSON-safe maps
+  @spec encode_event(atom(), term()) :: map() | nil
+  defp encode_event(:agent_session_stopped, %{session_id: id, reason: reason}) do
+    %{session_id: id, reason: inspect(reason)}
+  end
+  defp encode_event(:log_message, %{text: text, level: level}) do
+    %{text: text, level: level}
+  end
+  defp encode_event(:buffer_saved, %{path: path}) do
+    %{path: path}
+  end
+  # ... other topics
+  defp encode_event(_topic, _payload), do: nil
+end
+```
+
+**Constraints:**
+- Gateway.Server starts under `MingaAgent.Supervisor`, NOT `Minga.Runtime.Supervisor`. It's a Layer 1 service.
+- Gateway does NOT start by default. Add a `start_gateway/1` function to `MingaAgent.Runtime` that starts it on-demand. The Editor boot path (`Minga.Application`) never starts it.
+- `Minga.Runtime.start/1` (headless entry point) accepts a `gateway: true` option that starts the gateway after the supervision tree is up.
+- Default port: 4820. Configurable via opts.
+- `json_rpc.ex` is a pure function module. No state, no GenServer. All dispatch goes through `MingaAgent.Runtime` (never directly to SessionManager or Tool.Executor).
+- JSON-RPC 2.0 compliance: method names use dot notation (`session.start`, `tool.execute`), errors use standard codes (-32700 parse, -32600 invalid, -32601 method not found, -32602 invalid params, -32603 internal).
+- Event streaming pushes domain events, NOT rendered state. API clients get incremental deltas (`text_delta`, `tool_started`), not full chat message lists.
+
+**Verification:**
+```bash
+make lint && mix test.llm
+mix test test/minga_agent/gateway/json_rpc_test.exs
+mix test test/minga_agent/gateway/event_stream_test.exs
+mix test test/minga_agent/gateway/integration_test.exs
+```
+
+```elixir
+# test/minga_agent/gateway/json_rpc_test.exs
+# Test the pure dispatch function without WebSocket machinery:
+test "runtime.capabilities returns a capabilities manifest" do
+  request = JSON.encode!(%{jsonrpc: "2.0", method: "runtime.capabilities", params: %{}, id: 1})
+  {:ok, response_json} = JsonRpc.dispatch(request)
+  response = JSON.decode!(response_json)
+  assert response["id"] == 1
+  assert response["result"]["tool_count"] >= 0
+end
+
+test "unknown method returns method_not_found error" do
+  request = JSON.encode!(%{jsonrpc: "2.0", method: "bogus", params: %{}, id: 2})
+  {:error, response_json} = JsonRpc.dispatch(request)
+  response = JSON.decode!(response_json)
+  assert response["error"]["code"] == -32601
+end
+```
+
+---
+
+**PR C-5.3: Wire gateway startup into Runtime**
+
+**Files to modify:**
+- `lib/minga_agent/runtime.ex` → add `start_gateway/1` function
+- `lib/minga/runtime.ex` → accept `gateway: true` opt, start gateway after supervision tree
+- `lib/minga_agent/supervisor.ex` → no changes needed (gateway starts as a child dynamically)
+
+**Verification:**
+```bash
+make lint && mix test.llm
+# End-to-end test: boot headless runtime with gateway, connect via WebSocket,
+# send JSON-RPC request, receive response:
+mix test test/minga_agent/gateway/integration_test.exs
+```
+
+```elixir
+# test/minga_agent/gateway/integration_test.exs
+defmodule MingaAgent.Gateway.IntegrationTest do
+  use ExUnit.Case, async: false
+  # async: false because we start a full supervision tree + network listener
+
+  test "external client connects and lists tools via JSON-RPC" do
+    {:ok, sup} = Minga.Runtime.start(gateway: [port: 0])  # port 0 = random available
+    # Get the actual port from the gateway server
+    # Connect via :gun or Mint WebSocket client
+    # Send: {"jsonrpc":"2.0","method":"tool.list","params":{},"id":1}
+    # Assert response contains tool descriptions
+    Supervisor.stop(sup)
+  end
+end
+```
+
+The exact WebSocket client library for tests depends on what's available. Options: `:gun` (Erlang, already available via Finch's deps), `Mint.WebSocket`, or `WebSockex`. Check `mix.lock` for what's already in the dep tree before adding a new test-only dep.
+
+### Wave 5 gate: EXTERNAL CLIENTS CONNECT
+
+This is the second product gate. After this, Minga is a platform.
+
+```bash
+make lint
+mix test.llm          # all pass
+# Runtime facade works:
+mix test test/minga_agent/runtime_test.exs
+mix test test/minga_agent/introspection_test.exs
+# Changeset works:
+mix test test/minga_agent/changeset/
+# Gateway works:
+mix test test/minga_agent/gateway/
+# End-to-end: boot headless + gateway, connect via WebSocket, execute a tool:
+mix test test/minga_agent/gateway/integration_test.exs
+# No upward deps:
+grep -rn "alias MingaEditor\|import MingaEditor" lib/minga/ lib/minga_agent/ | wc -l   # 0
+```
 
 ---
 
 ## Wave 6: Buffer Forking + Polish
 
 **Duration:** 3-4 weeks
-**Agents:** 2
+**Agents:** 2 (one per track)
+**Gate:** Agent sessions use buffer forks for open files, boundary allowlist is empty, docs are updated
 
-Buffer.Fork processes, three-way merge, self-description tools, documentation pass, boundary allowlist to zero.
+`Minga.Buffer.Fork` already exists and works (three-way merge via `Minga.Core.Diff.merge3`). This wave wires it into agent sessions as a complement to changesets, cleans up remaining boundary violations, and updates documentation.
 
-(Full detail written when Wave 5 nears completion.)
+**Key insight: Buffer.Fork and Changeset are complementary, not alternatives.** Buffer.Fork handles in-memory isolation for files that are open in a buffer (instant, no disk I/O, gives undo integration). Changeset handles filesystem-level isolation for files that aren't open in a buffer, or for running external tools that need a coherent filesystem view. A session can use both: Buffer.Fork for the 5 files the user has open, Changeset overlay for the 200 files the compiler needs to see.
+
+### Track A: Buffer.Fork wiring + self-description tools (1 agent)
+
+**Files to read:**
+- `lib/minga/buffer/fork.ex` → existing fork implementation (create, content, merge, ancestor_content)
+- `lib/minga/buffer/server.ex` → Buffer.Server GenServer (the parent that forks are created from)
+- `lib/minga_agent/changeset.ex` → changeset API (Wave 5 Track B output)
+- `lib/minga_agent/tools/write_file.ex` → file tool routing (Wave 5 Track B modified this)
+- `lib/minga_agent/tools/edit_file.ex` → same
+- `lib/minga_agent/tools/read_file.ex` → same
+- `lib/minga_agent/internal_state.ex` → session internal state (has `changeset` field from Wave 5)
+- `lib/minga_agent/introspection.ex` → introspection module (Wave 5 Track A output)
+
+**PR A-6.1: Wire Buffer.Fork into agent tool routing**
+
+Extend the tool routing from Wave 5 Track B (which routes through Changeset) to also use Buffer.Fork for files that are open in a buffer.
+
+**Decision tree for file tools:**
+```
+Agent writes to "lib/foo.ex":
+  1. Is there an open Buffer.Server for this path?
+     YES → Is there already a fork for this buffer?
+           YES → Route through fork
+           NO  → Create fork (Buffer.Fork.create(parent_pid)), store in session state, route through fork
+     NO  → Is there an active changeset?
+           YES → Route through changeset (filesystem overlay)
+           NO  → Direct file write (existing behavior)
+```
+
+**Files to modify:**
+- `lib/minga_agent/internal_state.ex` → add `buffer_forks: %{String.t() => pid()}` field (path to fork pid)
+- `lib/minga_agent/changeset/tool_router.ex` → rename to `lib/minga_agent/tool_router.ex` (it now handles both changesets and forks), add fork routing logic
+- `lib/minga_agent/tools/write_file.ex` → use updated tool router
+- `lib/minga_agent/tools/edit_file.ex` → use updated tool router
+- `lib/minga_agent/tools/read_file.ex` → read from fork if available
+
+**Fork lifecycle:**
+- Forks are created lazily (first write to an open buffer creates the fork)
+- Forks are stored in session state as `%{path => fork_pid}`
+- Session monitors each fork pid. If a fork crashes, remove it from state and fall back to changeset or direct write.
+- On session completion:
+  - For each fork, call `Buffer.Fork.merge/1`
+  - If merge returns `{:ok, merged_text}`, apply the merged text to the parent buffer via `Buffer.Server.replace_content/3`
+  - If merge returns `{:conflict, hunks}`, broadcast a `:buffer_fork_conflict` event. The Editor (or API client) handles conflict resolution.
+
+**Constraints:**
+- Buffer.Fork is Layer 0 (`Minga.Buffer.*`). Tool routing is Layer 1 (`MingaAgent.*`). The tool router calls `Buffer.Fork.create/1` and `Buffer.Fork.merge/1` (downward dependency, correct).
+- Finding open buffers by path: use `Minga.Buffer.Registry` (the `:unique` Registry). Look up the buffer pid by path. If no buffer is registered for the path, fall back to changeset/direct write.
+- Fork creation is synchronous in the tool callback. `Buffer.Fork.create/1` snapshots the parent's content (one GenServer call), which is fast (milliseconds for any reasonable file size).
+- Do NOT create forks eagerly at session start. Lazy creation avoids forking buffers the agent never touches.
+
+**Verification:**
+```bash
+make lint && mix test.llm
+mix test test/minga_agent/tool_router_test.exs
+```
+
+```elixir
+# test/minga_agent/tool_router_test.exs (additions to existing test from Wave 5)
+test "routes through buffer fork when buffer is open" do
+  # Start a buffer for "lib/foo.ex" with known content
+  {:ok, buf} = start_supervised({Minga.Buffer.Server, content: "original", path: "lib/foo.ex"})
+  # Register it in the buffer registry
+  Registry.register(Minga.Buffer.Registry, "lib/foo.ex", buf)
+
+  # Create session state with fork routing enabled
+  state = %{buffer_forks: %{}, changeset: nil}
+
+  # Route a write: should create a fork
+  {:ok, new_state} = ToolRouter.route_write(state, "lib/foo.ex", "modified")
+  assert Map.has_key?(new_state.buffer_forks, "lib/foo.ex")
+
+  # Original buffer is untouched
+  assert Minga.Buffer.Server.content(buf) == "original"
+
+  # Fork has the new content
+  fork_pid = new_state.buffer_forks["lib/foo.ex"]
+  assert Minga.Buffer.Fork.content(fork_pid) == "modified"
+end
+```
+
+---
+
+**PR A-6.2: Add `:changesets` and `:buffer_fork` to Introspection features**
+
+Update `MingaAgent.Introspection.enabled_features/0` to report `:changesets` and `:buffer_fork` as available features. External clients use this to know whether they can request changeset-enabled sessions.
+
+**File to modify:** `lib/minga_agent/introspection.ex`
+
+**Verification:**
+```bash
+make lint && mix test.llm
+mix test test/minga_agent/introspection_test.exs
+```
+
+---
+
+### Track B: Boundary cleanup + documentation (1 agent)
+
+**PR B-6.1: Resolve remaining Layer 1 → Layer 2 violations**
+
+The 9 pre-existing violations tracked in #1368 must be resolved. Same technique as Wave 1 Track B: replace direct imports with `Minga.Events` broadcasts or restructure so the dependency points downward.
+
+**Files to read:**
+- `#1368` issue → the specific 9 violations and which files contain them
+- `credo/checks/dependency_direction_check.exs` → the `@allowed_references` list (these are the violations)
+- `lib/minga/events.ex` → existing event topics for the broadcast pattern
+
+**For each violation:**
+1. Read the violating module and find the `MingaEditor.*` reference
+2. Determine whether it's a function call, type reference, or docstring reference
+3. For function calls: replace with `Minga.Events.broadcast/2` (add new event topic if needed, have the Editor subscribe in its startup)
+4. For type references: move the type to Layer 0 or Layer 1, or use a behaviour/protocol
+5. For docstring references: rewrite the doc to reference the concept, not the module
+
+**Constraints:**
+- After this PR, `@allowed_references` in the credo check must be empty (or contain only structural dispatch entries that archie has approved)
+- `make lint` must pass with zero violations
+- Each violation fix must have a test verifying the behavior still works (the event is received, the type is correct, etc.)
+
+**Verification:**
+```bash
+make lint && mix test.llm
+# Verify allowlist is empty:
+grep -A 20 "@allowed_references" credo/checks/dependency_direction_check.exs
+# Should show only structural dispatch entries, no Layer 1→2 violations
+```
+
+---
+
+**PR B-6.2: Documentation pass**
+
+Update docs to reflect the runtime-first architecture.
+
+**Files to modify:**
+- `docs/ARCHITECTURE.md` → add "Headless Runtime" section describing `Minga.Runtime`, the three-namespace layer architecture, and the API gateway. Update the supervision tree diagram to show `MingaAgent.Supervisor` as a top-level peer.
+- `docs/ARCHITECTURE.md` → add "API Gateway" section describing WebSocket + JSON-RPC, method names, event streaming.
+- `AGENTS.md` → update the module grouping table to reflect the three-namespace layout. Add `MingaAgent.*` and `MingaEditor.*` module directories.
+- `AGENTS.md` → add a "Changeset" subsection under "New or modified agent tool" explaining the opt-in changeset pattern and Buffer.Fork routing.
+- `README.md` → add a brief section on the headless runtime and API gateway for external integrators.
+
+**Constraints:**
+- Follow the project's documentation voice (read `docs/EXTENSIBILITY.md` or `docs/FOR-EMACS-USERS.md` for the tone). Why before how. Concrete examples. No em-dashes.
+- Cross-reference related docs. The architecture doc should link to PROTOCOL.md, GUI_PROTOCOL.md, and the new API gateway section.
+- Do NOT document FastOverlay, remote GUI connections, or other future work that hasn't been built. Document what exists.
+
+**Verification:**
+```bash
+# All links in docs are valid:
+grep -rn '\[.*\](.*\.md)' docs/ | while read line; do
+  file=$(echo "$line" | grep -oP '\(\K[^)]+\.md')
+  if [ ! -f "docs/$file" ] && [ ! -f "$file" ]; then
+    echo "BROKEN LINK: $line"
+  fi
+done
+# Expected: no broken links
+```
+
+### Wave 6 gate: PLATFORM POLISHED
+
+```bash
+make lint
+mix test.llm
+# Buffer.Fork routing works:
+mix test test/minga_agent/tool_router_test.exs
+# Boundary violations are zero:
+grep "@allowed_references" credo/checks/dependency_direction_check.exs
+# Should show only structural dispatch entries
+# No upward deps:
+grep -rn "alias MingaEditor\|import MingaEditor" lib/minga/ lib/minga_agent/ | wc -l   # 0
+```
 
 ---
 
@@ -759,8 +1789,8 @@ Buffer.Fork processes, three-way merge, self-description tools, documentation pa
 | 2 | 1 week | 1 | Three namespaces: `Minga.*`, `MingaAgent.*`, `MingaEditor.*` | Namespace boundary enforced |
 | 3 | 3 weeks | 3 | Tool registry, session manager, headless entry point | **Headless runtime boots** |
 | 4 | 3-4 weeks | 2 | RenderPipeline.Input contract, chrome dirty tracking | Pipeline reads narrow contract |
-| 5 | 3-4 weeks | 3 | Runtime facade, changesets, API gateway | External clients connect |
-| 6 | 3-4 weeks | 2 | Buffer forking, self-description, docs | Allowlist empty |
+| 5 | 3-4 weeks | 3 | Runtime facade + introspection, changeset integration, WebSocket + JSON-RPC gateway | **External clients connect** |
+| 6 | 3-4 weeks | 2 | Buffer.Fork routing, boundary violations to zero, documentation pass | Allowlist empty, docs updated |
 
 **Total: ~15-18 weeks, 2-3 agents average, peak 3.**
 
