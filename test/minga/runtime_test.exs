@@ -24,7 +24,7 @@ defmodule Minga.RuntimeTest do
   describe "tool registry" do
     test "built-in tools are registered" do
       tools = Registry.all()
-      assert length(tools) > 0
+      assert tools != []
 
       tool_names = Enum.map(tools, & &1.name)
 
