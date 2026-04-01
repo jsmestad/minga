@@ -211,6 +211,7 @@ defmodule MingaEditor do
     Minga.Events.subscribe(:tool_missing)
     Minga.Events.subscribe(:log_message)
     Minga.Events.subscribe(:face_overrides_changed)
+    Minga.Events.subscribe(:agent_session_stopped)
 
     # Monitor all initial buffers so we get :DOWN when they die.
     all_initial_pids =
@@ -687,22 +688,10 @@ defmodule MingaEditor do
     {:noreply, state}
   end
 
-  # Process died. Check agent session first, then buffer monitors.
-  def handle_info({:DOWN, ref, :process, pid, reason}, state) do
+  # Process died. Check buffer monitors and git remote tasks.
+  # Agent session deaths are handled via :agent_session_stopped events from SessionManager.
+  def handle_info({:DOWN, ref, :process, pid, _reason}, state) do
     case classify_down(state, ref, pid) do
-      :agent_session ->
-        if reason in [:normal, :shutdown] do
-          Minga.Log.info(:agent, "[Agent] Session #{inspect(pid)} stopped")
-        else
-          Minga.Log.error(
-            :agent,
-            "[Agent] Session #{inspect(pid)} crashed: #{inspect(reason, pretty: true, limit: 500)}"
-          )
-        end
-
-        state = Commands.BufferManagement.handle_agent_session_down(state, pid, reason)
-        {:noreply, state}
-
       :buffer ->
         Minga.Log.info(:editor, "Buffer process #{inspect(pid)} died, removing from state")
         state = EditorState.remove_dead_buffer(state, pid)
@@ -762,23 +751,15 @@ defmodule MingaEditor do
   # ── :DOWN classifier ────────────────────────────────────────────────────────
 
   @spec classify_down(EditorState.t(), reference(), pid()) ::
-          :agent_session | :buffer | {:git_remote_task, EditorState.t()} | :unknown
+          :buffer | {:git_remote_task, EditorState.t()} | :unknown
   defp classify_down(state, ref, pid) do
-    agent_pid = AgentAccess.session(state)
-    agent_monitor = AgentAccess.agent(state).session_monitor
-
-    case {agent_pid == pid and agent_monitor == ref, Map.has_key?(state.buffer_monitors, pid)} do
-      {true, _} ->
-        :agent_session
-
-      {_, true} ->
-        :buffer
-
-      _ ->
-        case Commands.Git.handle_remote_task_down(state, ref) do
-          :not_matched -> :unknown
-          updated_state -> {:git_remote_task, updated_state}
-        end
+    if Map.has_key?(state.buffer_monitors, pid) do
+      :buffer
+    else
+      case Commands.Git.handle_remote_task_down(state, ref) do
+        :not_matched -> :unknown
+        updated_state -> {:git_remote_task, updated_state}
+      end
     end
   end
 
@@ -868,6 +849,24 @@ defmodule MingaEditor do
       end
 
     %{state | face_override_registries: registries}
+  end
+
+  defp dispatch_minga_event(
+         state,
+         :agent_session_stopped,
+         %MingaAgent.SessionManager.SessionStoppedEvent{pid: pid, reason: reason},
+         _msg
+       ) do
+    if reason in [:normal, :shutdown] do
+      Minga.Log.info(:agent, "[Agent] Session #{inspect(pid)} stopped")
+    else
+      Minga.Log.error(
+        :agent,
+        "[Agent] Session #{inspect(pid)} crashed: #{inspect(reason, pretty: true, limit: 500)}"
+      )
+    end
+
+    Commands.BufferManagement.handle_agent_session_down(state, pid, reason)
   end
 
   defp dispatch_minga_event(state, _event, _payload, _msg), do: state
