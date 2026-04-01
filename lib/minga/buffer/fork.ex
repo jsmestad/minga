@@ -88,6 +88,19 @@ defmodule Minga.Buffer.Fork do
     GenServer.call(server, :ancestor_content)
   end
 
+  @doc "Replaces the entire content of the fork."
+  @spec replace_content(GenServer.server(), String.t()) :: :ok
+  def replace_content(server, content) when is_binary(content) do
+    GenServer.call(server, {:replace_content, content, :agent})
+  end
+
+  @doc "Finds and replaces text in the fork. Returns `{:ok, msg}` or `{:error, reason}`."
+  @spec find_and_replace(GenServer.server(), String.t(), String.t()) ::
+          {:ok, String.t()} | {:error, String.t()}
+  def find_and_replace(server, old_text, new_text) do
+    GenServer.call(server, {:find_and_replace, old_text, new_text, nil})
+  end
+
   @doc "Whether the fork has been edited since creation."
   @spec dirty?(GenServer.server()) :: boolean()
   def dirty?(server) do

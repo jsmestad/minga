@@ -17,6 +17,8 @@ defmodule MingaAgent.IntrospectionTest do
       assert :tools in caps.features
       assert :sessions in caps.features
       assert :events in caps.features
+      assert :changesets in caps.features
+      assert :buffer_fork in caps.features
     end
   end
 

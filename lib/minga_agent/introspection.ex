@@ -96,6 +96,6 @@ defmodule MingaAgent.Introspection do
 
   @spec enabled_features() :: [atom()]
   defp enabled_features do
-    [:tools, :sessions, :events]
+    [:tools, :sessions, :events, :changesets, :buffer_fork]
   end
 end
