@@ -925,7 +925,7 @@ Note: GUI chrome commands are sent after `batch_end`. They are separate from the
 |-----------|------|----------|
 | Encoder | `lib/minga/port/protocol/gui.ex` | Elixir |
 | Theme slot mapping | `lib/minga/theme/slots.ex` | Elixir |
-| Integration tests | `test/minga/integration/gui_protocol_test.exs` | Elixir |
+| Integration tests | `test/minga_editor/integration/gui_protocol_test.exs` | Elixir |
 
 ### macOS GUI
 
