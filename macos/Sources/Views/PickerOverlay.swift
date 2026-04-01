@@ -49,12 +49,8 @@ struct PickerOverlay: View {
                 }
                 .frame(width: panelWidth)
                 .background(
-                    VibrancyBackground(material: .popover)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                )
-                .background(
                     RoundedRectangle(cornerRadius: 8)
-                        .fill(theme.popupBg.opacity(0.5))
+                        .fill(theme.popupBg)
                         .shadow(color: .black.opacity(0.5), radius: 20, y: 8)
                 )
                 .overlay(
@@ -286,12 +282,8 @@ struct PickerOverlay: View {
         }
         .frame(width: 200)
         .background(
-            VibrancyBackground(material: .popover)
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-        )
-        .background(
             RoundedRectangle(cornerRadius: 8)
-                .fill(theme.popupBg.opacity(0.5))
+                .fill(theme.popupBg)
                 .shadow(color: .black.opacity(0.4), radius: 12, y: 4)
         )
         .overlay(

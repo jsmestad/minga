@@ -40,12 +40,8 @@ struct CompletionOverlay: View {
             .frame(width: popupWidth)
             .frame(maxHeight: CGFloat(min(state.items.count, maxVisibleItems)) * itemHeight + 8)
             .background(
-                VibrancyBackground(material: .popover)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-            )
-            .background(
                 RoundedRectangle(cornerRadius: 8)
-                    .fill(theme.popupBg.opacity(0.5))
+                    .fill(theme.popupBg)
                     .shadow(color: .black.opacity(0.4), radius: 12, y: 4)
             )
             .overlay(

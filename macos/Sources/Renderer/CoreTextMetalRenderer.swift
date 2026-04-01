@@ -598,8 +598,7 @@ final class CoreTextMetalRenderer {
             cursorQuad.color = cursorColor
             cursorQuad.alpha = 1.0
 
-            // Rounded corners on the block cursor (~3pt radius, snapped to backing pixels).
-            var cursorBgParams = BgParamsGPU(cornerRadius: round(3.0 * scale))
+            var cursorBgParams = BgParamsGPU(cornerRadius: 0.0)
             encoder.setRenderPipelineState(bgPipeline)
             encoder.setVertexBytes(&cursorQuad, length: MemoryLayout<QuadGPU>.stride, index: 0)
             encoder.setVertexBytes(&uniforms, length: MemoryLayout<CTUniformsGPU>.size, index: 1)

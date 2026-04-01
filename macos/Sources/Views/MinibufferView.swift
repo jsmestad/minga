@@ -51,16 +51,7 @@ struct MinibufferView: View {
             inputBar
         }
         .background {
-            // Frosted-glass vibrancy with theme tint overlay for color consistency.
-            // When Increase Contrast is on, use solid bg for readability.
-            if NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast {
-                theme.popupBg
-            } else {
-                ZStack {
-                    Color.clear.background(.ultraThinMaterial)
-                    theme.popupBg.opacity(0.6)
-                }
-            }
+            theme.popupBg
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Minibuffer")

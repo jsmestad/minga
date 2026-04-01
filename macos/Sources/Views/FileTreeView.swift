@@ -264,7 +264,7 @@ struct FileTreeView: View {
             }
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 4))
+            .background(theme.popupBg, in: RoundedRectangle(cornerRadius: 4))
         }
         .dropDestination(for: URL.self) { urls, _ in
             handleDrop(urls: urls, onto: entry)
