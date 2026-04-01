@@ -97,12 +97,6 @@ defmodule Minga.Credo.DependencyDirectionCheck do
     "MingaEditor.Agent.SlashCommand",
     "MingaEditor.Agent.DiffReview",
     "MingaEditor.Agent.DiffRenderer",
-    # Picker source implementations in other namespaces.
-    # These depend on Editor.State via on_select/on_cancel callbacks.
-    "Minga.Tool.PickerSource",
-    "Minga.Tool.UninstallPickerSource",
-    "Minga.Tool.UpdatePickerSource",
-    "Minga.Diagnostics.PickerSource"
   ]
 
   # Allowed cross-layer references for structural dispatch.

@@ -52,7 +52,7 @@ defmodule MingaEditor.Commands.UI do
         name: :diagnostics_list,
         description: "List buffer diagnostics",
         requires_buffer: true,
-        execute: fn state -> PickerUI.open(state, Minga.Diagnostics.PickerSource) end
+        execute: fn state -> PickerUI.open(state, MingaEditor.UI.Picker.Sources.Diagnostics) end
       },
       %Minga.Command{
         name: :filetype_menu,

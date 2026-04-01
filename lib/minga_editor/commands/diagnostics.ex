@@ -10,7 +10,7 @@ defmodule MingaEditor.Commands.Diagnostics do
 
   alias Minga.Buffer
   alias Minga.Diagnostics
-  alias Minga.Diagnostics.PickerSource, as: DiagPickerSource
+  alias MingaEditor.UI.Picker.Sources.Diagnostics, as: DiagPickerSource
   alias MingaEditor.PickerUI
   alias MingaEditor.State, as: EditorState
   alias Minga.LSP.Client

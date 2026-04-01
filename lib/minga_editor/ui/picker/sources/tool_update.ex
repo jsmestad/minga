@@ -1,8 +1,8 @@
-defmodule Minga.Tool.UninstallPickerSource do
+defmodule MingaEditor.UI.Picker.Sources.ToolUpdate do
   @moduledoc """
-  Picker source for uninstalling tools.
+  Picker source for updating installed tools.
 
-  Shows only installed tools. Selecting one triggers uninstall.
+  Shows installed tools. Selecting one triggers an update (uninstall + reinstall).
   """
 
   @behaviour MingaEditor.UI.Picker.Source
@@ -12,7 +12,7 @@ defmodule Minga.Tool.UninstallPickerSource do
 
   @impl true
   @spec title() :: String.t()
-  def title, do: "Uninstall Tool"
+  def title, do: "Update Tool"
 
   @impl true
   @spec candidates(term()) :: [Item.t()]
@@ -23,7 +23,7 @@ defmodule Minga.Tool.UninstallPickerSource do
       %Item{
         id: inst.name,
         label: "#{inst.name} v#{inst.version}",
-        description: "#{inst.method} • installed #{format_date(inst.installed_at)}"
+        description: "#{inst.method}"
       }
     end)
   end
@@ -31,21 +31,16 @@ defmodule Minga.Tool.UninstallPickerSource do
   @impl true
   @spec on_select(Item.t(), term()) :: term()
   def on_select(%Item{id: name}, state) do
-    case ToolManager.uninstall(name) do
+    case ToolManager.update(name) do
       :ok ->
-        MingaEditor.State.set_status(state, "Uninstalled #{name}")
+        MingaEditor.State.set_status(state, "Updating #{name}...")
 
       {:error, reason} ->
-        MingaEditor.State.set_status(state, "Failed to uninstall #{name}: #{reason}")
+        MingaEditor.State.set_status(state, "Failed to update #{name}: #{reason}")
     end
   end
 
   @impl true
   @spec on_cancel(term()) :: term()
   def on_cancel(state), do: state
-
-  @spec format_date(DateTime.t()) :: String.t()
-  defp format_date(dt) do
-    Calendar.strftime(dt, "%Y-%m-%d")
-  end
 end

@@ -12,9 +12,9 @@ defmodule MingaEditor.Commands.Tool do
   alias MingaEditor.PickerUI
   alias MingaEditor.State, as: EditorState
   alias Minga.Tool.Manager, as: ToolManager
-  alias Minga.Tool.PickerSource
-  alias Minga.Tool.UninstallPickerSource
-  alias Minga.Tool.UpdatePickerSource
+  alias MingaEditor.UI.Picker.Sources.Tool, as: PickerSource
+  alias MingaEditor.UI.Picker.Sources.ToolUninstall, as: UninstallPickerSource
+  alias MingaEditor.UI.Picker.Sources.ToolUpdate, as: UpdatePickerSource
 
   @type state :: EditorState.t()
 

@@ -1,4 +1,4 @@
-defmodule Minga.Tool.PickerSource do
+defmodule MingaEditor.UI.Picker.Sources.Tool do
   @moduledoc """
   Picker source for browsing and installing tools.
 
