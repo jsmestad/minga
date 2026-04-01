@@ -33,6 +33,8 @@ defmodule MingaAgent.Tools do
   | `workspace_symbols`| Search for symbols project-wide via LSP (read-only) |
   | `rename`          | Semantic rename across the project via LSP (destructive)|
   | `code_actions`    | List/apply LSP code actions (apply is destructive)   |
+  | `describe_runtime`| Describe the runtime's capabilities and features     |
+  | `describe_tools`  | List all available tools with descriptions            |
   """
 
   alias MingaAgent.Tools.DiagnosticFeedback
@@ -134,7 +136,9 @@ defmodule MingaAgent.Tools do
       lsp_document_symbols(root),
       lsp_workspace_symbols(),
       lsp_rename(root),
-      lsp_code_actions(root)
+      lsp_code_actions(root),
+      describe_runtime(),
+      describe_tools()
     ]
   end
 
@@ -941,6 +945,41 @@ defmodule MingaAgent.Tools do
         opts = if args["apply"], do: [{:apply, args["apply"]} | opts], else: opts
         LspCodeActions.execute(path, args["line"], opts)
       end
+    )
+  end
+
+  # ── Introspection tools ─────────────────────────────────────────────────────
+
+  @spec describe_runtime() :: Tool.t()
+  defp describe_runtime do
+    Tool.new!(
+      name: "describe_runtime",
+      description: """
+      Describe the Minga runtime's capabilities: version, available tool
+      categories, active session count, and enabled features. Use this
+      to understand what the runtime can do before making requests.
+      """,
+      parameter_schema: %{
+        "type" => "object",
+        "properties" => %{}
+      },
+      callback: &MingaAgent.Tools.Introspection.describe_runtime/1
+    )
+  end
+
+  @spec describe_tools() :: Tool.t()
+  defp describe_tools do
+    Tool.new!(
+      name: "describe_tools",
+      description: """
+      List all available tools with their names, categories, and
+      descriptions. Use this to discover what tools you can call.
+      """,
+      parameter_schema: %{
+        "type" => "object",
+        "properties" => %{}
+      },
+      callback: &MingaAgent.Tools.Introspection.describe_tools/1
     )
   end
 

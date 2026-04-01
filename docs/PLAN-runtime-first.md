@@ -724,7 +724,7 @@ Old verification block (superseded):
 **Agents:** 3 (one per track)
 **Gate:** External clients can connect via WebSocket, start agent sessions, execute tools, and receive streaming events through `MingaAgent.Runtime`
 
-### Track A: MingaAgent.Runtime facade + Introspection (1 agent)
+### Track A: MingaAgent.Runtime facade + Introspection (1 agent) ✅ DONE
 
 Two separate modules. The facade is stable `defdelegate` glue that rarely changes. Introspection evolves as external clients demand new metadata. Bundling them means the facade's API surface churns when you add a new introspection field.
 
@@ -1834,6 +1834,7 @@ grep -rn "alias MingaEditor\|import MingaEditor" lib/minga/ lib/minga_agent/ | w
 | 2026-04-01 | Wave 4 / Track A | #1383 | RenderPipeline.Input contract: (A-4.1) Input struct with from_editor_state/1 + apply_render_output/2, (A-4.2) pipeline wired to use Input.t() across all 6 stages, 27 files updated, (A-4.3) chrome dirty tracking via fingerprint, skips rebuild when chrome inputs unchanged. |
 | 2026-04-01 | Wave 4 / Track B | #1382 | Extracted `MingaAgent.RuntimeState` (4 domain fields: active_session_id, status, model_name, provider_name). Composed into `MingaEditor.State.Agent` via `runtime` field. Updated 6 lib files + 15 test files. |
 | 2026-04-01 | Wave 5 / Track C | #1385 | WebSocket + JSON-RPC API gateway: Bandit + WebSock deps, 7 new modules (Runtime facade, Introspection, Gateway.Server/Router/WebSocket/JsonRpc/EventStream). Gateway starts on-demand, default port 4820. 34 new tests including WS integration. Also created MingaAgent.Runtime and MingaAgent.Introspection (planned for Track A) since the gateway depends on them. |
+| 2026-04-01 | Wave 5 / Track A | #1387 | A-5.3: Self-describing introspection tools. `MingaAgent.Tools.Introspection` with `describe_runtime/1` and `describe_tools/1` registered in Tool.Registry (`:agent` category, `:auto` approval). A-5.1 and A-5.2 were already shipped by Track C (#1385); this PR added A-5.3 on top, plus enhanced introspection tests and registry categorization. Tool count 23→25. |
 
 ---
 
@@ -1878,5 +1879,7 @@ Notes from completed tracks that affect future waves. Tag the wave so agents can
 - **Wave 5 / Track C:** The WebSocket integration test uses raw `:gen_tcp` + manual HTTP upgrade + RFC 6455 frame encoding rather than adding a test-only WebSocket client dependency. This avoids adding deps but makes the test helpers (~60 lines) somewhat fragile. If more WebSocket tests are needed in Wave 6, consider adding `:gun` or `Mint.WebSocket` as a test-only dep.
 
 - **Wave 5 / Track C:** Zig binaries (`priv/minga-renderer`, `priv/minga-parser`) are not shared between git worktrees. New worktrees need the binaries copied from the main checkout or built from scratch. The custom `:minga_zig` Mix compiler triggers a rebuild if the binaries are missing, which fails if the Zig toolchain isn't set up in the worktree's environment.
+
+- **Wave 5 / Track A:** Track C (#1385) shipped A-5.1 (Runtime facade) and A-5.2 (Introspection) as dependencies of the gateway. Track A's scope reduced to A-5.3 only (introspection tools + registry categorization + enhanced tests). When rebasing Track A onto main after Track C merged, the shared files (`runtime.ex`, `introspection.ex`, and their tests) conflicted. Resolution: take Track C's versions as the base and layer Track A's additions on top. Future parallel tracks should coordinate on shared files or accept that later tracks may reduce to incremental additions.
 
 - **Wave 1 / Track C:** The original verification command `grep ... | grep -v "headless"` was written incorrectly — it checks for the word "headless" on the *same line* as the timer call, but all guards are on a separate `if` line. The context-aware Python check is the correct approach. Updated the verification command in the Track C section above.

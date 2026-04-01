@@ -181,6 +181,8 @@ defmodule MingaAgent.Tool.Registry do
   defp categorize("grep"), do: :filesystem
   defp categorize("shell"), do: :shell
   defp categorize("subagent"), do: :agent
+  defp categorize("describe_runtime"), do: :agent
+  defp categorize("describe_tools"), do: :agent
   defp categorize("git_status"), do: :git
   defp categorize("git_diff"), do: :git
   defp categorize("git_log"), do: :git
