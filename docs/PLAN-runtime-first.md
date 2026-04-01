@@ -683,7 +683,7 @@ make lint && mix test.llm
 
 ---
 
-### Track B: Extract Agent.RuntimeState (1 agent)
+### Track B: Extract Agent.RuntimeState (1 agent) ✅ DONE
 
 **Files to read:**
 - `lib/minga_editor/state/agent.ex` → current Agent state on EditorState
@@ -801,6 +801,7 @@ Buffer.Fork processes, three-way merge, self-description tools, documentation pa
 | 2026-03-31 | Wave 1 / Track C | — | All timer quarantine guards already in place; verified all sites in editor.ex and sub-modules; updated plan status and fixed verification command |
 | 2026-03-31 | Wave 2 / NS-1 | #1367 | Created `MingaAgent.*` namespace: 58 agent domain modules moved from `lib/minga/agent/` to `lib/minga_agent/`. Presentation modules stayed. |
 | 2026-03-31 | Wave 2 / NS-2+NS-3 | #1370 | Created `MingaEditor.*` namespace: 276 lib + 248 test files moved. Updated `DependencyDirectionCheck` for three-namespace architecture. NS-3 merged into NS-2. 9 pre-existing Layer 1→2 violations tracked in #1368. |
+| 2026-04-01 | Wave 4 / Track B | #1382 | Extracted `MingaAgent.RuntimeState` (4 domain fields: active_session_id, status, model_name, provider_name). Composed into `MingaEditor.State.Agent` via `runtime` field. Updated 6 lib files + 15 test files. |
 
 ---
 
@@ -825,5 +826,9 @@ Notes from completed tracks that affect future waves. Tag the wave so agents can
 - **Wave 1 Track A:** The plan called for a new `mix check.layers` Mix task, but `Minga.Credo.DependencyDirectionCheck` (in `credo/checks/dependency_direction_check.exs`) already enforces the same rules via AST walking. It has its own `@allowed_references` allowlist for structural dispatch. Future waves that reference `mix check.layers` should use `mix credo --checks Minga.Credo.DependencyDirectionCheck` instead, or just rely on `make lint` which runs the full credo suite.
 
 - **Wave 1 / Track C:** `lib/minga/editor/state/session.ex:start_timer` calls `Process.send_after` without an inline headless guard. In practice it is triple-protected: (1) `EditorCase` does not pass `session_dir`, so the nil-clause guard in `start_timer` fires before reaching the send; (2) `editor.ex:396` already wraps the call in `if new_state.backend != :headless`; (3) `session_handler.ex` only emits `{:restart_session_timer}` when `state.backend != :headless`. When Wave 2 moves `State.Session` out of `lib/minga/editor/`, consider adding a `backend` parameter to `start_timer` so the guard is internal and the function is self-contained.
+
+- **Wave 4 / Track B:** The plan listed only 4 fields for RuntimeState (`active_session_id`, `status`, `model_name`, `provider_name`). `error` and `pending_approval` were considered but kept on `MingaEditor.State.Agent` since they're cached projections for rendering, not domain state the headless runtime needs. `status` is the only field that genuinely represents domain lifecycle state. If Wave 5 needs error/approval in the headless path, they can move then.
+
+- **Wave 4 / Track B:** `MingaEditor.State.rebuild_agent_from_session/2` directly updates `State.Agent` fields via `%{agent | status: ..., pending_approval: ..., error: ...}` inside an `AgentAccess.update_agent` closure. This is a pre-existing Rule 2 violation (external module mutating a struct it doesn't own). Updated it to use `RuntimeState.set_status/2` for the status field. A proper fix would add a `State.Agent.rebuild_from_snapshot/3` function, but that's out of scope for this track.
 
 - **Wave 1 / Track C:** The original verification command `grep ... | grep -v "headless"` was written incorrectly — it checks for the word "headless" on the *same line* as the timer call, but all guards are on a separate `if` line. The context-aware Python check is the correct approach. Updated the verification command in the Track C section above.

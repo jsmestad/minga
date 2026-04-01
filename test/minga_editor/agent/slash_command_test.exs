@@ -4,6 +4,7 @@ defmodule MingaEditor.Agent.SlashCommandTest do
   alias MingaEditor.Agent.SlashCommand
   alias MingaEditor.Agent.UIState
   alias MingaEditor.State, as: EditorState
+  alias MingaAgent.RuntimeState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.Viewport
@@ -83,7 +84,7 @@ defmodule MingaEditor.Agent.SlashCommandTest do
           status_msg: nil,
           agent: %AgentState{
             session: session,
-            status: :idle,
+            runtime: %RuntimeState{status: :idle},
             error: nil,
             spinner_timer: nil,
             buffer: nil

@@ -583,9 +583,9 @@ defmodule MingaEditor.Frontend.Emit.GUI do
         text = safe_prompt_content(panel.prompt_buffer)
 
         {:erlang.phash2(
-           {:visible, ctx.shell_state.agent.status, ctx.shell_state.agent.pending_approval,
-            styled_len, panel.model_name, text, panel.message_version, view.help_visible,
-            ctx.editing.mode, panel.mention_completion}
+           {:visible, ctx.shell_state.agent.runtime.status,
+            ctx.shell_state.agent.pending_approval, styled_len, panel.model_name, text,
+            panel.message_version, view.help_visible, ctx.editing.mode, panel.mention_completion}
          ), text}
       else
         {:not_visible, ""}
@@ -697,7 +697,7 @@ defmodule MingaEditor.Frontend.Emit.GUI do
       %{
         visible: true,
         messages: gui_messages,
-        status: ctx.shell_state.agent.status || :idle,
+        status: ctx.shell_state.agent.runtime.status || :idle,
         model: ctx.agent_ui.panel.model_name,
         prompt: prompt_text,
         pending_approval: ctx.shell_state.agent.pending_approval,

@@ -404,7 +404,7 @@ defmodule MingaEditor.Commands.Agent do
       AgentAccess.session(state) == nil ->
         EditorState.set_status(state, "No agent session, try closing and reopening the panel")
 
-      AgentAccess.agent(state).status in [:thinking, :tool_executing] ->
+      AgentAccess.agent(state).runtime.status in [:thinking, :tool_executing] ->
         text = UIState.prompt_text(panel)
 
         if SlashCommand.slash_command?(text) do
@@ -433,7 +433,7 @@ defmodule MingaEditor.Commands.Agent do
   """
   @spec scope_ctrl_c(state()) :: state()
   def scope_ctrl_c(state) do
-    if AgentAccess.agent(state).status in [:thinking, :tool_executing] do
+    if AgentAccess.agent(state).runtime.status in [:thinking, :tool_executing] do
       abort_agent(state)
     else
       input_to_normal(state)
@@ -970,7 +970,7 @@ defmodule MingaEditor.Commands.Agent do
   @doc "Aborts agent operation if one is active."
   @spec scope_abort_if_active(state()) :: state()
   def scope_abort_if_active(state) do
-    if AgentAccess.agent(state).status in [:thinking, :tool_executing] do
+    if AgentAccess.agent(state).runtime.status in [:thinking, :tool_executing] do
       abort_agent(state)
     else
       state
@@ -1079,7 +1079,7 @@ defmodule MingaEditor.Commands.Agent do
 
   @spec abort_if_active(state()) :: state()
   defp abort_if_active(state) do
-    if AgentAccess.agent(state).status in [:thinking, :tool_executing] do
+    if AgentAccess.agent(state).runtime.status in [:thinking, :tool_executing] do
       abort_agent(state)
     else
       state

@@ -6,6 +6,7 @@ defmodule MingaEditor.Input.AgentMouseTest do
   alias MingaEditor.Layout
   alias MingaEditor.LayoutPreset
   alias MingaEditor.State, as: EditorState
+  alias MingaAgent.RuntimeState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Buffers
@@ -27,7 +28,7 @@ defmodule MingaEditor.Input.AgentMouseTest do
 
     agent = %AgentState{
       session: nil,
-      status: :idle,
+      runtime: %RuntimeState{status: :idle},
       error: nil,
       spinner_timer: nil,
       buffer: Keyword.get(opts, :agent_buffer, nil)

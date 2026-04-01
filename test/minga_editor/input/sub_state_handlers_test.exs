@@ -19,6 +19,7 @@ defmodule MingaEditor.Input.SubStateHandlersTest do
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editing.Scroll
   alias MingaEditor.State, as: EditorState
+  alias MingaAgent.RuntimeState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Buffers

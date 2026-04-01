@@ -66,7 +66,7 @@ defmodule MingaEditor.Agent.ViewContext do
       layout_rect: nil,
       editing: state.workspace.editing,
       buffers: state.workspace.buffers,
-      agent_status: agent.status,
+      agent_status: agent.runtime.status,
       pending_approval: agent.pending_approval
     }
   end

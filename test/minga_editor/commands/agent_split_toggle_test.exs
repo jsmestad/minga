@@ -7,6 +7,7 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
   alias Minga.Buffer.Server, as: BufferServer
   alias MingaEditor.Commands.Agent, as: AgentCommands
   alias MingaEditor.State, as: EditorState
+  alias MingaAgent.RuntimeState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Buffers
@@ -31,7 +32,7 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
 
     agent = %AgentState{
       session: Keyword.get(opts, :session, fake_session()),
-      status: :idle,
+      runtime: %RuntimeState{status: :idle},
       error: nil,
       spinner_timer: nil,
       buffer: agent_buf

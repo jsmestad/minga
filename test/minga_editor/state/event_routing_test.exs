@@ -4,6 +4,7 @@ defmodule MingaEditor.State.EventRoutingTest do
   alias MingaEditor.Agent.Events, as: AgentEvents
   alias MingaEditor.Agent.UIState
   alias MingaEditor.State, as: EditorState
+  alias MingaAgent.RuntimeState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.{Tab, TabBar}
@@ -21,7 +22,7 @@ defmodule MingaEditor.State.EventRoutingTest do
       },
       shell_state: %MingaEditor.Shell.Traditional.State{
         tab_bar: tb,
-        agent: %AgentState{session: session, status: :idle}
+        agent: %AgentState{session: session, runtime: %RuntimeState{status: :idle}}
       }
     }
 
@@ -34,7 +35,7 @@ defmodule MingaEditor.State.EventRoutingTest do
 
       {new_state, effects} = AgentEvents.handle(state, {:status_changed, :thinking})
 
-      assert AgentAccess.agent(new_state).status == :thinking
+      assert AgentAccess.agent(new_state).runtime.status == :thinking
       assert :render in effects
     end
 

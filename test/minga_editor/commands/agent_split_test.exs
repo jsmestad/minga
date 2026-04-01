@@ -5,6 +5,7 @@ defmodule MingaEditor.Commands.AgentSplitTest do
   alias Minga.Buffer.Server, as: BufferServer
   alias MingaEditor.Commands.Agent, as: AgentCommands
   alias MingaEditor.State, as: EditorState
+  alias MingaAgent.RuntimeState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
@@ -25,7 +26,7 @@ defmodule MingaEditor.Commands.AgentSplitTest do
     agent = %AgentState{
       buffer: agent_buf,
       session: fake_session,
-      status: :idle
+      runtime: %RuntimeState{status: :idle}
     }
 
     # File tab with context
