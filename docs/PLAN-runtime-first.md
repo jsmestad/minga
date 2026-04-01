@@ -421,7 +421,7 @@ grep -rn "defmodule Minga\.Tool\." lib/ | wc -l      # 0
 
 ---
 
-## Wave 3: Agent Runtime Foundation
+## Wave 3: Agent Runtime Foundation ✅ DONE
 
 Build the tool registry, session manager, and headless entry point.
 
@@ -639,7 +639,7 @@ grep -rn "alias MingaEditor\|import MingaEditor" lib/minga/ lib/minga_agent/ | w
 
 ---
 
-## Wave 4: Rendering Contract + Editor Decomposition
+## Wave 4: Rendering Contract + Editor Decomposition ✅ DONE
 
 **Duration:** 3-4 weeks
 **Agents:** 2 (one per track)
