@@ -225,7 +225,9 @@ defmodule Minga.MixProject do
       {:telemetry, "~> 1.0"},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:benchee, "~> 1.3", only: :dev, runtime: false},
-      {:exqlite, "~> 0.27"}
+      {:exqlite, "~> 0.27"},
+      {:bandit, "~> 1.6"},
+      {:websock_adapter, "~> 0.5"}
     ]
   end
 
