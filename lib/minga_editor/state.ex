@@ -145,6 +145,29 @@ defmodule MingaEditor.State do
     %{state | workspace: fun.(ws)}
   end
 
+  # ── Render pipeline write-back ─────────────────────────────────────────────
+
+  @doc """
+  Applies render pipeline mutations back to the editor state.
+
+  The render pipeline updates window caches (invalidation tracking,
+  context fingerprints), click regions, and layout during rendering.
+  This function writes those mutations back after the pipeline completes.
+
+  The `render_output` is a `RenderPipeline.Input` struct with the mutated
+  fields. Only `windows`, `shell_state`, and `layout` carry meaningful
+  changes; other fields are unchanged.
+  """
+  @spec apply_render_output(t(), MingaEditor.RenderPipeline.Input.t()) :: t()
+  def apply_render_output(%__MODULE__{workspace: ws} = state, render_output) do
+    %{
+      state
+      | workspace: %{ws | windows: render_output.windows},
+        shell_state: render_output.shell_state,
+        layout: render_output.layout
+    }
+  end
+
   @doc "Applies a function to the shell state and returns the updated state."
   @spec update_shell_state(t(), (ShellState.t() -> ShellState.t())) :: t()
   def update_shell_state(%{shell_state: ss} = state, fun) when is_function(fun, 1) do
