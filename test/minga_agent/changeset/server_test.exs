@@ -41,6 +41,31 @@ defmodule MingaAgent.Changeset.ServerTest do
       assert File.read!(Path.join(overlay, "lib/new.ex")) == "defmodule New do\nend"
       refute File.exists?(Path.join(project, "lib/new.ex"))
     end
+
+    test "rejects traversal before capturing or writing files", %{project: project} do
+      server = start_server(project)
+      escaped = Path.join(Path.dirname(project), "escape.txt")
+
+      assert {:error, :path_traversal} =
+               GenServer.call(server, {:write_file, "../escape.txt", "pwned"})
+
+      refute File.exists?(escaped)
+    end
+
+    test "failed overlay writes do not create undo history", %{project: project} do
+      dep_file = Path.join(project, "deps/some_dep/lib/real.ex")
+      File.mkdir_p!(Path.dirname(dep_file))
+      File.write!(dep_file, "original_dep")
+      server = start_server(project)
+
+      assert {:error, :symlink_traversal} =
+               GenServer.call(server, {:write_file, "deps/some_dep/lib/real.ex", "mutated"})
+
+      assert {:error, :nothing_to_undo} =
+               GenServer.call(server, {:undo, "deps/some_dep/lib/real.ex"})
+
+      assert File.read!(dep_file) == "original_dep"
+    end
   end
 
   describe "edit_file" do
@@ -66,6 +91,18 @@ defmodule MingaAgent.Changeset.ServerTest do
                  {:edit_file, "lib/foo.ex", "nonexistent text", "replacement"}
                )
     end
+
+    test "rejects traversal before reading files", %{project: project} do
+      server = start_server(project)
+      escaped = Path.join(Path.dirname(project), "escape.txt")
+      File.write!(escaped, "outside")
+
+      assert {:error, :path_traversal} =
+               GenServer.call(server, {:edit_file, "../escape.txt", "outside", "mutated"})
+
+      assert File.read!(escaped) == "outside"
+      File.rm!(escaped)
+    end
   end
 
   describe "delete_file" do
@@ -80,6 +117,17 @@ defmodule MingaAgent.Changeset.ServerTest do
       server = start_server(project)
 
       assert {:error, :file_not_found} = GenServer.call(server, {:delete_file, "nope.txt"})
+      assert {:error, :nothing_to_undo} = GenServer.call(server, {:undo, "nope.txt"})
+    end
+
+    test "rejects traversal before capturing or deleting files", %{project: project} do
+      server = start_server(project)
+      escaped = Path.join(Path.dirname(project), "escape.txt")
+      File.write!(escaped, "outside")
+
+      assert {:error, :path_traversal} = GenServer.call(server, {:delete_file, "../escape.txt"})
+      assert File.exists?(escaped)
+      File.rm!(escaped)
     end
   end
 
@@ -95,6 +143,15 @@ defmodule MingaAgent.Changeset.ServerTest do
       server = start_server(project)
 
       assert {:ok, "original content"} = GenServer.call(server, {:read_file, "hello.txt"})
+    end
+
+    test "rejects traversal before reading project files", %{project: project} do
+      server = start_server(project)
+      escaped = Path.join(Path.dirname(project), "escape.txt")
+      File.write!(escaped, "outside")
+
+      assert {:error, :path_traversal} = GenServer.call(server, {:read_file, "../escape.txt"})
+      File.rm!(escaped)
     end
   end
 
@@ -121,6 +178,12 @@ defmodule MingaAgent.Changeset.ServerTest do
       server = start_server(project)
 
       assert {:error, :nothing_to_undo} = GenServer.call(server, {:undo, "hello.txt"})
+    end
+
+    test "rejects traversal", %{project: project} do
+      server = start_server(project)
+
+      assert {:error, :path_traversal} = GenServer.call(server, {:undo, "../escape.txt"})
     end
   end
 

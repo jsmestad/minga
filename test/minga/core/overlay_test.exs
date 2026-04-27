@@ -54,10 +54,8 @@ defmodule Minga.Core.OverlayTest do
 
     test "returns error for non-existent project root" do
       bogus = Path.join(System.tmp_dir!(), "nonexistent-#{System.unique_integer([:positive])}")
-      # create will succeed on mkdir_p (it creates the overlay dir, not the project root)
-      # but the mirror step just skips because File.ls returns error
-      {:ok, overlay} = Overlay.create(bogus)
-      Overlay.cleanup(overlay)
+
+      assert {:error, {:invalid_project_root, ^bogus}} = Overlay.create(bogus)
     end
   end
 
@@ -82,6 +80,42 @@ defmodule Minga.Core.OverlayTest do
 
       Overlay.cleanup(overlay)
     end
+
+    test "rejects traversal that escapes the overlay", %{project: project} do
+      {:ok, overlay} = Overlay.create(project)
+      escaped = Path.join(Path.dirname(overlay.overlay_dir), "escape.txt")
+
+      assert {:error, :path_traversal} =
+               Overlay.materialize_file(overlay, "../escape.txt", "pwned")
+
+      refute File.exists?(escaped)
+
+      Overlay.cleanup(overlay)
+    end
+
+    test "allows normalized paths that stay inside the overlay", %{project: project} do
+      {:ok, overlay} = Overlay.create(project)
+
+      :ok = Overlay.materialize_file(overlay, "./lib/../hello.txt", "updated")
+      assert File.read!(Path.join(overlay.overlay_dir, "hello.txt")) == "updated"
+      assert File.read!(Path.join(project, "hello.txt")) == "original"
+
+      Overlay.cleanup(overlay)
+    end
+
+    test "rejects writes through symlinked directories", %{project: project} do
+      dep_file = Path.join(project, "deps/some_dep/lib/real.ex")
+      File.mkdir_p!(Path.dirname(dep_file))
+      File.write!(dep_file, "original_dep")
+      {:ok, overlay} = Overlay.create(project)
+
+      assert {:error, :symlink_traversal} =
+               Overlay.materialize_file(overlay, "deps/some_dep/lib/real.ex", "mutated")
+
+      assert File.read!(dep_file) == "original_dep"
+
+      Overlay.cleanup(overlay)
+    end
   end
 
   describe "delete_file/2" do
@@ -95,10 +129,42 @@ defmodule Minga.Core.OverlayTest do
       Overlay.cleanup(overlay)
     end
 
+    test "deleted? raises for traversal that escapes the overlay", %{project: project} do
+      {:ok, overlay} = Overlay.create(project)
+
+      assert_raise ArgumentError, fn ->
+        Overlay.deleted?(overlay, "../hello.txt")
+      end
+
+      Overlay.cleanup(overlay)
+    end
+
     test "returns error for non-existent file", %{project: project} do
       {:ok, overlay} = Overlay.create(project)
 
       assert {:error, :file_not_found} = Overlay.delete_file(overlay, "nope.txt")
+
+      Overlay.cleanup(overlay)
+    end
+
+    test "rejects traversal that escapes the overlay", %{project: project} do
+      {:ok, overlay} = Overlay.create(project)
+
+      assert {:error, :path_traversal} = Overlay.delete_file(overlay, "../hello.txt")
+
+      Overlay.cleanup(overlay)
+    end
+
+    test "rejects deletion through symlinked directories", %{project: project} do
+      dep_file = Path.join(project, "deps/some_dep/lib/real.ex")
+      File.mkdir_p!(Path.dirname(dep_file))
+      File.write!(dep_file, "original_dep")
+      {:ok, overlay} = Overlay.create(project)
+
+      assert {:error, :symlink_traversal} =
+               Overlay.delete_file(overlay, "deps/some_dep/lib/real.ex")
+
+      assert File.exists?(dep_file)
 
       Overlay.cleanup(overlay)
     end
@@ -127,6 +193,16 @@ defmodule Minga.Core.OverlayTest do
 
       :ok = Overlay.materialize_file(overlay, "brand_new.txt", "new")
       assert Overlay.modified?(overlay, "brand_new.txt")
+
+      Overlay.cleanup(overlay)
+    end
+
+    test "raises for traversal that escapes the overlay", %{project: project} do
+      {:ok, overlay} = Overlay.create(project)
+
+      assert_raise ArgumentError, fn ->
+        Overlay.modified?(overlay, "../hello.txt")
+      end
 
       Overlay.cleanup(overlay)
     end

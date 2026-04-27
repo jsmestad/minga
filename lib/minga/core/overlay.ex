@@ -44,6 +44,15 @@ defmodule Minga.Core.Overlay do
   """
   @spec create(String.t()) :: {:ok, t()} | {:error, term()}
   def create(project_root) do
+    if File.dir?(project_root) do
+      create_overlay(project_root)
+    else
+      {:error, {:invalid_project_root, project_root}}
+    end
+  end
+
+  @spec create_overlay(String.t()) :: {:ok, t()} | {:error, term()}
+  defp create_overlay(project_root) do
     id = Base.encode16(:crypto.strong_rand_bytes(8), case: :lower)
     overlay_dir = Path.join(System.tmp_dir!(), "minga-overlay-#{id}")
     build_dir = Path.join(overlay_dir, "_build")
@@ -75,13 +84,13 @@ defmodule Minga.Core.Overlay do
   """
   @spec materialize_file(t(), String.t(), binary()) :: :ok | {:error, term()}
   def materialize_file(%__MODULE__{} = overlay, relative_path, content) do
-    target = Path.join(overlay.overlay_dir, relative_path)
-    File.mkdir_p!(Path.dirname(target))
-
-    # Must delete before writing. Writing through a hardlink would
-    # modify the original file.
-    File.rm(target)
-    File.write(target, content)
+    with {:ok, target} <- safe_target(overlay, relative_path),
+         :ok <- File.mkdir_p(Path.dirname(target)) do
+      # Must delete before writing. Writing through a hardlink would
+      # modify the original file.
+      File.rm(target)
+      File.write(target, content)
+    end
   end
 
   @doc """
@@ -92,23 +101,23 @@ defmodule Minga.Core.Overlay do
   """
   @spec delete_file(t(), String.t()) :: :ok | {:error, term()}
   def delete_file(%__MODULE__{} = overlay, relative_path) do
-    target = Path.join(overlay.overlay_dir, relative_path)
+    with {:ok, target} <- safe_target(overlay, relative_path) do
+      case File.rm(target) do
+        :ok ->
+          marker = target <> ".__changeset_deleted__"
+          File.write!(marker, "")
+          :ok
 
-    case File.rm(target) do
-      :ok ->
-        marker = target <> ".__changeset_deleted__"
-        File.write!(marker, "")
-        :ok
-
-      {:error, :enoent} ->
-        {:error, :file_not_found}
+        {:error, :enoent} ->
+          {:error, :file_not_found}
+      end
     end
   end
 
   @doc "Returns true if a file was explicitly deleted in this overlay."
   @spec deleted?(t(), String.t()) :: boolean()
   def deleted?(%__MODULE__{} = overlay, relative_path) do
-    marker = Path.join(overlay.overlay_dir, relative_path <> ".__changeset_deleted__")
+    marker = safe_target!(overlay, relative_path <> ".__changeset_deleted__")
     File.exists?(marker)
   end
 
@@ -121,7 +130,7 @@ defmodule Minga.Core.Overlay do
   """
   @spec modified?(t(), String.t()) :: boolean()
   def modified?(%__MODULE__{} = overlay, relative_path) do
-    overlay_file = Path.join(overlay.overlay_dir, relative_path)
+    overlay_file = safe_target!(overlay, relative_path)
     project_file = Path.join(overlay.project_root, relative_path)
 
     case {File.stat(overlay_file), File.stat(project_file)} do
@@ -162,6 +171,69 @@ defmodule Minga.Core.Overlay do
   end
 
   # ── Private ─────────────────────────────────────────────────────────────────
+
+  @spec safe_target(t(), String.t()) ::
+          {:ok, String.t()} | {:error, :invalid_path | :path_traversal | :symlink_traversal}
+  defp safe_target(%__MODULE__{overlay_dir: overlay_dir}, relative_path) do
+    root = Path.expand(overlay_dir)
+    target = Path.join(root, relative_path) |> Path.expand()
+    validate_target(root, target)
+  end
+
+  @spec validate_target(String.t(), String.t()) ::
+          {:ok, String.t()} | {:error, :invalid_path | :path_traversal | :symlink_traversal}
+  defp validate_target(root, root), do: {:error, :invalid_path}
+
+  defp validate_target(root, target) do
+    if inside_directory?(target, root) do
+      reject_symlink_traversal(root, target)
+    else
+      {:error, :path_traversal}
+    end
+  end
+
+  @spec reject_symlink_traversal(String.t(), String.t()) ::
+          {:ok, String.t()} | {:error, :symlink_traversal}
+  defp reject_symlink_traversal(root, target) do
+    if symlink_traversal?(root, target) do
+      {:error, :symlink_traversal}
+    else
+      {:ok, target}
+    end
+  end
+
+  @spec safe_target!(t(), String.t()) :: String.t() | no_return()
+  defp safe_target!(%__MODULE__{} = overlay, relative_path) do
+    case safe_target(overlay, relative_path) do
+      {:ok, target} ->
+        target
+
+      {:error, reason} ->
+        raise ArgumentError, "unsafe overlay path #{inspect(relative_path)}: #{reason}"
+    end
+  end
+
+  @spec inside_directory?(String.t(), String.t()) :: boolean()
+  defp inside_directory?(path, root), do: String.starts_with?(path, root <> "/")
+
+  @spec symlink_traversal?(String.t(), String.t()) :: boolean()
+  defp symlink_traversal?(root, target) do
+    target
+    |> Path.relative_to(root)
+    |> Path.split()
+    |> Enum.reduce_while(root, fn component, parent ->
+      path = Path.join(parent, component)
+
+      case File.lstat(path) do
+        {:ok, %{type: :symlink}} -> {:halt, true}
+        _ -> {:cont, path}
+      end
+    end)
+    |> case do
+      true -> true
+      _path -> false
+    end
+  end
 
   @spec detect_link_mode(String.t(), String.t()) :: :hardlink | :copy
   defp detect_link_mode(project_root, overlay_dir) do
