@@ -59,15 +59,19 @@ defmodule MingaAgent.Changeset.Server do
 
   @impl GenServer
   def handle_call({:write_file, relative_path, content}, _from, state) do
-    path = normalize_path(relative_path)
-    state = capture_original(state, path)
-    state = push_history(state, path)
+    case normalize_path(state, relative_path) do
+      {:ok, path} ->
+        case Overlay.materialize_file(state.overlay, path, content) do
+          :ok ->
+            state = capture_original(state, path)
+            state = push_history(state, path)
+            state = put_in(state.modifications[path], content)
+            state = %{state | deletions: MapSet.delete(state.deletions, path)}
+            {:reply, :ok, state}
 
-    case Overlay.materialize_file(state.overlay, path, content) do
-      :ok ->
-        state = put_in(state.modifications[path], content)
-        state = %{state | deletions: MapSet.delete(state.deletions, path)}
-        {:reply, :ok, state}
+          {:error, reason} ->
+            {:reply, {:error, reason}, state}
+        end
 
       {:error, reason} ->
         {:reply, {:error, reason}, state}
@@ -75,24 +79,32 @@ defmodule MingaAgent.Changeset.Server do
   end
 
   def handle_call({:edit_file, relative_path, old_text, new_text}, _from, state) do
-    path = normalize_path(relative_path)
+    case normalize_path(state, relative_path) do
+      {:ok, path} ->
+        case apply_edit(state, path, old_text, new_text) do
+          {:ok, new_state} -> {:reply, :ok, new_state}
+          {:error, reason} -> {:reply, {:error, reason}, state}
+        end
 
-    case apply_edit(state, path, old_text, new_text) do
-      {:ok, new_state} -> {:reply, :ok, new_state}
-      {:error, reason} -> {:reply, {:error, reason}, state}
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
     end
   end
 
   def handle_call({:delete_file, relative_path}, _from, state) do
-    path = normalize_path(relative_path)
-    state = capture_original(state, path)
-    state = push_history(state, path)
+    case normalize_path(state, relative_path) do
+      {:ok, path} ->
+        case Overlay.delete_file(state.overlay, path) do
+          :ok ->
+            state = capture_original(state, path)
+            state = push_history(state, path)
+            state = %{state | deletions: MapSet.put(state.deletions, path)}
+            state = %{state | modifications: Map.delete(state.modifications, path)}
+            {:reply, :ok, state}
 
-    case Overlay.delete_file(state.overlay, path) do
-      :ok ->
-        state = %{state | deletions: MapSet.put(state.deletions, path)}
-        state = %{state | modifications: Map.delete(state.modifications, path)}
-        {:reply, :ok, state}
+          {:error, reason} ->
+            {:reply, {:error, reason}, state}
+        end
 
       {:error, reason} ->
         {:reply, {:error, reason}, state}
@@ -100,32 +112,17 @@ defmodule MingaAgent.Changeset.Server do
   end
 
   def handle_call({:undo, relative_path}, _from, state) do
-    path = normalize_path(relative_path)
-
-    case Map.get(state.history, path) do
-      [prev | rest] ->
-        state = put_in(state.history[path], rest)
-
-        if prev == :unmodified do
-          state = %{state | modifications: Map.delete(state.modifications, path)}
-          state = %{state | deletions: MapSet.delete(state.deletions, path)}
-          restore_original(state, path)
-          {:reply, :ok, state}
-        else
-          Overlay.materialize_file(state.overlay, path, prev)
-          state = put_in(state.modifications[path], prev)
-          state = %{state | deletions: MapSet.delete(state.deletions, path)}
-          {:reply, :ok, state}
-        end
-
-      _ ->
-        {:reply, {:error, :nothing_to_undo}, state}
+    case normalize_path(state, relative_path) do
+      {:ok, path} -> undo_path(path, state)
+      {:error, reason} -> {:reply, {:error, reason}, state}
     end
   end
 
   def handle_call({:read_file, relative_path}, _from, state) do
-    path = normalize_path(relative_path)
-    {:reply, current_content(state, path), state}
+    case normalize_path(state, relative_path) do
+      {:ok, path} -> {:reply, current_content(state, path), state}
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
   end
 
   def handle_call(:overlay_path, _from, state) do
@@ -317,6 +314,29 @@ defmodule MingaAgent.Changeset.Server do
 
   # ── Private helpers ─────────────────────────────────────────────────────────
 
+  @spec undo_path(String.t(), state()) :: {:reply, :ok | {:error, term()}, state()}
+  defp undo_path(path, state) do
+    case Map.get(state.history, path) do
+      [prev | rest] ->
+        state = put_in(state.history[path], rest)
+
+        if prev == :unmodified do
+          state = %{state | modifications: Map.delete(state.modifications, path)}
+          state = %{state | deletions: MapSet.delete(state.deletions, path)}
+          restore_original(state, path)
+          {:reply, :ok, state}
+        else
+          Overlay.materialize_file(state.overlay, path, prev)
+          state = put_in(state.modifications[path], prev)
+          state = %{state | deletions: MapSet.delete(state.deletions, path)}
+          {:reply, :ok, state}
+        end
+
+      _ ->
+        {:reply, {:error, :nothing_to_undo}, state}
+    end
+  end
+
   @spec apply_edit(state(), String.t(), String.t(), String.t()) ::
           {:ok, state()} | {:error, term()}
   defp apply_edit(state, path, old_text, new_text) do
@@ -397,11 +417,25 @@ defmodule MingaAgent.Changeset.Server do
     File.cp!(source, target)
   end
 
-  @spec normalize_path(String.t()) :: String.t()
-  defp normalize_path(path) do
-    path
-    |> String.trim_leading("/")
-    |> String.trim_leading("./")
+  @spec normalize_path(state(), String.t()) ::
+          {:ok, String.t()} | {:error, :invalid_path | :path_traversal}
+  defp normalize_path(state, path) do
+    root = Path.expand(state.project_root)
+    target = Path.join(root, path) |> Path.expand()
+
+    normalize_target(root, target)
+  end
+
+  @spec normalize_target(String.t(), String.t()) ::
+          {:ok, String.t()} | {:error, :invalid_path | :path_traversal}
+  defp normalize_target(root, root), do: {:error, :invalid_path}
+
+  defp normalize_target(root, target) do
+    if String.starts_with?(target, root <> "/") do
+      {:ok, Path.relative_to(target, root)}
+    else
+      {:error, :path_traversal}
+    end
   end
 
   @spec broadcast_merged(state()) :: :ok

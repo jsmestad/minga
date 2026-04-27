@@ -96,6 +96,35 @@ defmodule Minga.Test.SnapshotTest do
       assert diff =~ "+ line CHANGED"
     end
 
+    @tag :tmp_dir
+    test "ignores volatile modeline indicators in stored baselines and current output", %{
+      tmp_dir: dir
+    } do
+      path = Path.join(dir, "baseline.snap")
+
+      baseline = """
+      # Screen: 80x24
+      # Cursor: (1, 8) block
+      # Mode: normal
+      ────────────────────────────────────────────────────────────────────────────────
+      22│NORMAL  [no file] ●                                            Text  1:4  Top
+      ────────────────────────────────────────────────────────────────────────────────
+      """
+
+      current = """
+      # Screen: 80x24
+      # Cursor: (1, 8) block
+      # Mode: normal
+      ────────────────────────────────────────────────────────────────────────────────
+      22│NORMAL  [no file] ●   ◯                                        Text  1:4  Top
+      ────────────────────────────────────────────────────────────────────────────────
+      """
+
+      File.write!(path, baseline)
+
+      assert :match = Snapshot.compare(current, path)
+    end
+
     test "returns {:no_baseline, path} when file does not exist" do
       path = "/tmp/nonexistent_snapshot_#{System.unique_integer([:positive])}.snap"
       assert {:no_baseline, ^path} = Snapshot.compare("content", path)

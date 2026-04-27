@@ -67,7 +67,7 @@ defmodule Minga.Test.Snapshot do
   @spec normalize_modeline(String.t(), pos_integer()) :: String.t()
   defp normalize_modeline(row, _width) do
     row
-    |> replace_with_spaces(~r/ [◯●✓] /)
+    |> replace_with_spaces(~r/ [◯●✓] /u)
     |> replace_with_spaces(~r/ [EW]:\d+ /)
   end
 
@@ -155,14 +155,53 @@ defmodule Minga.Test.Snapshot do
   def compare(current, baseline_path) do
     case File.read(baseline_path) do
       {:ok, baseline} ->
-        if current == baseline do
+        canonical_current = normalize_serialized_snapshot(current)
+        canonical_baseline = normalize_serialized_snapshot(baseline)
+
+        if canonical_current == canonical_baseline do
           :match
         else
-          {:mismatch, build_diff(baseline, current)}
+          {:mismatch, build_diff(canonical_baseline, canonical_current)}
         end
 
       {:error, :enoent} ->
         {:no_baseline, baseline_path}
+    end
+  end
+
+  @spec normalize_serialized_snapshot(String.t()) :: String.t()
+  defp normalize_serialized_snapshot(snapshot) do
+    modeline_prefix = serialized_modeline_prefix(snapshot)
+
+    snapshot
+    |> String.split("\n")
+    |> Enum.map(&normalize_serialized_line(&1, modeline_prefix))
+    |> Enum.join("\n")
+  end
+
+  @spec serialized_modeline_prefix(String.t()) :: String.t() | nil
+  defp serialized_modeline_prefix(snapshot) do
+    case Regex.run(~r/# Screen: \d+x(\d+)/, snapshot) do
+      [_match, height] -> height |> String.to_integer() |> Kernel.-(2) |> row_prefix()
+      _ -> nil
+    end
+  end
+
+  @spec row_prefix(integer()) :: String.t() | nil
+  defp row_prefix(row) when row >= 0 do
+    row |> Integer.to_string() |> String.pad_leading(2, "0") |> Kernel.<>("│")
+  end
+
+  defp row_prefix(_row), do: nil
+
+  @spec normalize_serialized_line(String.t(), String.t() | nil) :: String.t()
+  defp normalize_serialized_line(line, nil), do: line
+
+  defp normalize_serialized_line(line, prefix) do
+    if String.starts_with?(line, prefix) do
+      prefix <> normalize_modeline(String.trim_leading(line, prefix), String.length(line))
+    else
+      line
     end
   end
 
