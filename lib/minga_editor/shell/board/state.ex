@@ -20,6 +20,7 @@ defmodule MingaEditor.Shell.Board.State do
   """
 
   alias MingaEditor.Shell.Board.Card
+  alias MingaEditor.State.ModalOverlay
 
   @type t :: %__MODULE__{
           cards: %{Card.id() => Card.t()},
@@ -43,6 +44,7 @@ defmodule MingaEditor.Shell.Board.State do
           hover_popup: nil,
           tab_bar: nil,
           agent: MingaEditor.State.Agent.t(),
+          modal: ModalOverlay.t(),
           bottom_panel: MingaEditor.BottomPanel.t(),
           git_status_panel: nil,
           modeline_click_regions: [],
@@ -71,6 +73,7 @@ defmodule MingaEditor.Shell.Board.State do
             hover_popup: nil,
             tab_bar: nil,
             agent: %MingaEditor.State.Agent{},
+            modal: :none,
             bottom_panel: %MingaEditor.BottomPanel{},
             git_status_panel: nil,
             modeline_click_regions: [],
@@ -84,6 +87,22 @@ defmodule MingaEditor.Shell.Board.State do
   @doc "Creates a fresh Board state with an empty card grid."
   @spec new() :: t()
   def new, do: %__MODULE__{}
+
+  @doc "Returns the active modal overlay value (`:none` when no modal is open)."
+  @spec modal(t()) :: ModalOverlay.t()
+  def modal(%__MODULE__{modal: m}), do: m
+
+  @doc """
+  Replaces the modal overlay value.
+
+  This is a low-level setter for `MingaEditor.State.ModalOverlay`. Normal
+  callers should use `ModalOverlay.open/3`, `transition/3`, `close/1`, or
+  `dismiss/1` rather than calling this directly.
+  """
+  @spec set_modal(t(), ModalOverlay.t()) :: t()
+  def set_modal(%__MODULE__{} = ss, modal) do
+    %{ss | modal: modal}
+  end
 
   @doc """
   Creates a new card and adds it to the board.

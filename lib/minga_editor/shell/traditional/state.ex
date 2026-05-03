@@ -17,6 +17,7 @@ defmodule MingaEditor.Shell.Traditional.State do
   alias MingaEditor.HoverPopup
   alias MingaEditor.NavFlash
   alias MingaEditor.State.Agent, as: AgentState
+  alias MingaEditor.State.ModalOverlay
   alias MingaEditor.State.Picker
   alias MingaEditor.State.Prompt
   alias MingaEditor.State.TabBar
@@ -35,6 +36,7 @@ defmodule MingaEditor.Shell.Traditional.State do
           git_status_panel: MingaEditor.Frontend.Protocol.GUI.git_status_data() | nil,
           tab_bar: TabBar.t() | nil,
           agent: AgentState.t(),
+          modal: ModalOverlay.t(),
           modeline_click_regions: [MingaEditor.Shell.Traditional.Modeline.click_region()],
           tab_bar_click_regions: [MingaEditor.Shell.Traditional.TabBarRenderer.click_region()],
           warning_popup_timer: reference() | nil,
@@ -55,6 +57,7 @@ defmodule MingaEditor.Shell.Traditional.State do
             git_status_panel: nil,
             tab_bar: nil,
             agent: %AgentState{},
+            modal: :none,
             modeline_click_regions: [],
             tab_bar_click_regions: [],
             warning_popup_timer: nil,
@@ -229,6 +232,24 @@ defmodule MingaEditor.Shell.Traditional.State do
   @spec set_agent(t(), AgentState.t()) :: t()
   def set_agent(%{} = ss, agent) do
     %{ss | agent: agent}
+  end
+
+  # ── Modal overlay ──────────────────────────────────────────────────────────
+
+  @doc "Returns the active modal overlay value (`:none` when no modal is open)."
+  @spec modal(t()) :: ModalOverlay.t()
+  def modal(%{modal: m}), do: m
+
+  @doc """
+  Replaces the modal overlay value.
+
+  This is a low-level setter for `MingaEditor.State.ModalOverlay`. Normal
+  callers should use `ModalOverlay.open/3`, `transition/3`, `close/1`, or
+  `dismiss/1` rather than calling this directly.
+  """
+  @spec set_modal(t(), ModalOverlay.t()) :: t()
+  def set_modal(%{} = ss, modal) do
+    %{ss | modal: modal}
   end
 
   # ── Tool prompt helpers ────────────────────────────────────────────────────
