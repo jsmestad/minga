@@ -72,12 +72,15 @@ defmodule MingaEditor.State do
   @typedoc "A document highlight range from the LSP server."
   @type document_highlight :: Minga.LSP.DocumentHighlight.t()
 
+  @type keymap_server :: GenServer.server()
+
   alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.Shell.Board.State, as: BoardState
 
   @enforce_keys [:port_manager, :workspace]
   defstruct backend: :headless,
             port_manager: nil,
+            keymap_server: Minga.Keymap.Active,
             workspace: nil,
             editing_model: :vim,
             shell: MingaEditor.Shell.Traditional,
@@ -109,6 +112,7 @@ defmodule MingaEditor.State do
   @type t :: %__MODULE__{
           backend: backend(),
           port_manager: GenServer.server() | nil,
+          keymap_server: keymap_server(),
           workspace: WorkspaceState.t(),
           editing_model: :vim | :cua,
           shell: module(),
@@ -138,6 +142,11 @@ defmodule MingaEditor.State do
           space_leader_timer: reference() | nil,
           stashed_board_state: MingaEditor.Shell.Board.State.t() | nil
         }
+
+  @doc "Returns the keymap server used for scope and binding lookups."
+  @spec keymap_server(t()) :: keymap_server()
+  def keymap_server(%__MODULE__{keymap_server: nil}), do: Minga.Keymap.Active
+  def keymap_server(%__MODULE__{keymap_server: keymap_server}), do: keymap_server
 
   # ── Workspace helpers ──────────────────────────────────────────────────────
 

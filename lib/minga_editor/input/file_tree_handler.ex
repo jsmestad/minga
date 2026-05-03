@@ -107,7 +107,7 @@ defmodule MingaEditor.Input.FileTreeHandler do
       vim_state =
         if Minga.Editing.active_model(state) == Minga.Editing.Model.CUA, do: :cua, else: :normal
 
-      case Keymap.resolve_scoped_key(:file_tree, vim_state, key) do
+      case Keymap.resolve_scoped_key(:file_tree, vim_state, key, keymap_context(state)) do
         {:command, command} ->
           {:handled, Commands.execute(state, command)}
 
@@ -162,6 +162,9 @@ defmodule MingaEditor.Input.FileTreeHandler do
     clamped = min(cursor_line, max_cursor)
     put_in(state.workspace.file_tree.tree, %{tree | cursor: clamped})
   end
+
+  @spec keymap_context(EditorState.t()) :: [{:keymap_server, GenServer.server()}]
+  defp keymap_context(state), do: [keymap_server: EditorState.keymap_server(state)]
 
   # ── File tree mouse helpers ────────────────────────────────────────────
 

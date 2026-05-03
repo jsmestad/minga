@@ -34,6 +34,8 @@ defmodule Minga.Config.Loader do
   alias Minga.Keymap
   alias Minga.Popup.Registry, as: PopupRegistry
 
+  @type keymap_server :: GenServer.server()
+
   @typedoc "Loader state: stores paths, loaded modules, and any errors from each stage."
   @type state :: %{
           config_path: String.t(),
@@ -42,7 +44,8 @@ defmodule Minga.Config.Loader do
           modules_errors: [String.t()],
           project_config_path: String.t() | nil,
           project_config_error: String.t() | nil,
-          after_error: String.t() | nil
+          after_error: String.t() | nil,
+          keymap_server: keymap_server()
         }
 
   # ── Client API ──────────────────────────────────────────────────────────────
@@ -50,8 +53,12 @@ defmodule Minga.Config.Loader do
   @doc "Starts the loader, compiles user modules, and evaluates all config files."
   @spec start_link(keyword()) :: Agent.on_start()
   def start_link(opts \\ []) do
-    {name, _opts} = Keyword.pop(opts, :name, __MODULE__)
-    Agent.start_link(fn -> load_all() end, name: name)
+    {name, opts} = Keyword.pop(opts, :name, __MODULE__)
+
+    keymap_server =
+      Keyword.get(opts, :keymap_server, Process.get(:minga_config_keymap, Minga.Keymap.Active))
+
+    Agent.start_link(fn -> load_all(keymap_server) end, name: name)
   end
 
   @doc """
@@ -123,16 +130,22 @@ defmodule Minga.Config.Loader do
     end
 
     # Reset all registries to defaults
+    keymap_server =
+      Agent.get(server, fn
+        %{keymap_server: keymap_server} -> keymap_server
+        _ -> Process.get(:minga_config_keymap, Minga.Keymap.Active)
+      end)
+
     Options.reset()
     Hooks.reset()
     Advice.reset()
-    Keymap.reset()
+    Keymap.reset(keymap_server)
     Command.reset_registry()
     ExtRegistry.reset()
     PopupRegistry.clear()
 
     # Re-run the full load sequence (includes starting extensions)
-    new_state = load_all()
+    new_state = load_all(keymap_server)
     Agent.update(server, fn _ -> new_state end)
 
     # Return error if any stage had problems
@@ -150,67 +163,78 @@ defmodule Minga.Config.Loader do
 
   # ── Private ─────────────────────────────────────────────────────────────────
 
-  @spec load_all() :: state()
-  defp load_all do
-    config_path = resolve_config_path()
-    config_dir = Path.dirname(config_path)
+  @spec load_all(keymap_server()) :: state()
+  defp load_all(keymap_server) do
+    previous_server = Process.put(:minga_config_keymap, keymap_server)
 
-    # 0. Register default popup rules (before user config so overrides work)
-    register_default_popup_rules()
+    try do
+      config_path = resolve_config_path()
+      config_dir = Path.dirname(config_path)
 
-    # 1. Compile user modules
-    {loaded_modules, modules_errors} = compile_user_modules(config_dir)
+      # 0. Register default popup rules (before user config so overrides work)
+      register_default_popup_rules()
 
-    # 2. Load user themes (before config eval so `set :theme, :my_custom` works)
-    load_user_themes()
+      # 1. Compile user modules
+      {loaded_modules, modules_errors} = compile_user_modules(config_dir)
 
-    # 3. Eval global config
-    custom_config? = cli_config_file() != nil
+      # 2. Load user themes (before config eval so `set :theme, :my_custom` works)
+      load_user_themes()
 
-    load_error =
-      case {custom_config?, File.exists?(config_path)} do
-        {true, false} ->
-          "Custom config not found: #{config_path} (using defaults)"
+      # 3. Eval global config
+      custom_config? = cli_config_file() != nil
 
-        _ ->
-          eval_if_exists(config_path)
+      load_error =
+        case {custom_config?, File.exists?(config_path)} do
+          {true, false} ->
+            "Custom config not found: #{config_path} (using defaults)"
+
+          _ ->
+            eval_if_exists(config_path)
+        end
+
+      load_error =
+        if custom_config? and load_error == nil and not String.ends_with?(config_path, ".exs") do
+          "Custom config path does not end in .exs: #{config_path} (file was loaded, but may not be valid Elixir)"
+        else
+          load_error
+        end
+
+      # 4. Eval project-local config
+      project_path = resolve_project_config_path()
+      project_config_error = eval_if_exists(project_path)
+
+      # 5. Eval after.exs
+      after_path = Path.join(config_dir, "after.exs")
+      after_error = eval_if_exists(after_path)
+
+      # 6. Apply log level from config
+      apply_log_level()
+
+      # 7. Start declared extensions (if the supervisor is running).
+      # Skip in test mode so user-installed extensions don't affect test
+      # determinism (e.g., extra keybindings altering which-key snapshots).
+      if Process.whereis(Minga.Extension.Supervisor) != nil &&
+           Application.get_env(:minga, :load_extensions, true) do
+        ExtSupervisor.start_all()
       end
 
-    load_error =
-      if custom_config? and load_error == nil and not String.ends_with?(config_path, ".exs") do
-        "Custom config path does not end in .exs: #{config_path} (file was loaded, but may not be valid Elixir)"
+      %{
+        config_path: config_path,
+        load_error: load_error,
+        loaded_modules: loaded_modules,
+        modules_errors: modules_errors,
+        project_config_path: project_path,
+        project_config_error: project_config_error,
+        after_error: after_error,
+        keymap_server: keymap_server
+      }
+    after
+      if is_nil(previous_server) do
+        Process.delete(:minga_config_keymap)
       else
-        load_error
+        Process.put(:minga_config_keymap, previous_server)
       end
-
-    # 4. Eval project-local config
-    project_path = resolve_project_config_path()
-    project_config_error = eval_if_exists(project_path)
-
-    # 5. Eval after.exs
-    after_path = Path.join(config_dir, "after.exs")
-    after_error = eval_if_exists(after_path)
-
-    # 6. Apply log level from config
-    apply_log_level()
-
-    # 7. Start declared extensions (if the supervisor is running).
-    # Skip in test mode so user-installed extensions don't affect test
-    # determinism (e.g., extra keybindings altering which-key snapshots).
-    if Process.whereis(Minga.Extension.Supervisor) != nil &&
-         Application.get_env(:minga, :load_extensions, true) do
-      ExtSupervisor.start_all()
     end
-
-    %{
-      config_path: config_path,
-      load_error: load_error,
-      loaded_modules: loaded_modules,
-      modules_errors: modules_errors,
-      project_config_path: project_path,
-      project_config_error: project_config_error,
-      after_error: after_error
-    }
   end
 
   @spec load_user_themes() :: :ok

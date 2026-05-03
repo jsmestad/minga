@@ -195,9 +195,11 @@ defmodule Minga.Keymap.Scope do
   @spec resolve_through_layers(module(), scope_name(), vim_state(), Bindings.key(), context()) ::
           resolve_result()
   defp resolve_through_layers(mod, scope_name, vim_state, key, context) do
+    keymap_server = context_server(context)
+
     tries = [
       # Layer 0: user overrides for this scope + vim state
-      user_scope_trie(scope_name, vim_state),
+      user_scope_trie(scope_name, vim_state, keymap_server),
       # Layer 1: vim-state-specific bindings from the scope module
       mod.keymap(vim_state, context),
       # Layer 2: shared bindings (cross vim-state)
@@ -212,9 +214,14 @@ defmodule Minga.Keymap.Scope do
     end)
   end
 
-  @spec user_scope_trie(scope_name(), vim_state()) :: Bindings.node_t()
-  defp user_scope_trie(scope_name, vim_state) do
-    KeymapActive.scope_trie(scope_name, vim_state)
+  @spec context_server(context()) :: GenServer.server()
+  defp context_server(context) do
+    Keyword.get(context, :keymap_server, Minga.Keymap.Active)
+  end
+
+  @spec user_scope_trie(scope_name(), vim_state(), GenServer.server()) :: Bindings.node_t()
+  defp user_scope_trie(scope_name, vim_state, keymap_server) do
+    KeymapActive.scope_trie(keymap_server, scope_name, vim_state)
   catch
     :exit, _ -> Bindings.new()
   end

@@ -627,7 +627,7 @@ defmodule MingaEditor.Commands do
     case Editing.mode_state(state) do
       %{leader_keys: ["m", "SPC"]} ->
         filetype = current_filetype(state)
-        ft_trie = filetype_trie_for(filetype)
+        ft_trie = filetype_trie_for(state, filetype)
 
         if ft_trie.children == %{} do
           {node, state}
@@ -650,9 +650,9 @@ defmodule MingaEditor.Commands do
     :exit, _ -> :text
   end
 
-  @spec filetype_trie_for(atom()) :: Bindings.node_t()
-  defp filetype_trie_for(filetype) do
-    Keymap.filetype_trie(filetype)
+  @spec filetype_trie_for(EditorState.t(), atom()) :: Bindings.node_t()
+  defp filetype_trie_for(state, filetype) do
+    Keymap.filetype_trie(EditorState.keymap_server(state), filetype)
   catch
     :exit, _ -> Bindings.new()
   end

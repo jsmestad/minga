@@ -44,6 +44,13 @@ defmodule Minga.Config do
   alias Minga.Popup.Registry, as: PopupRegistry
   alias Minga.Popup.Rule, as: PopupRule
 
+  @type keymap_server :: GenServer.server()
+
+  @spec keymap_server() :: keymap_server()
+  defp keymap_server do
+    Process.get(:minga_config_keymap, Minga.Keymap.Active)
+  end
+
   # ── Read options ───────────────────────────────────────────────────
 
   @doc """
@@ -264,9 +271,9 @@ defmodule Minga.Config do
 
     result =
       if filetype do
-        Keymap.bind(mode, key_str, command_name, description, filetype: filetype)
+        Keymap.bind(keymap_server(), mode, key_str, command_name, description, filetype: filetype)
       else
-        Keymap.bind(mode, key_str, command_name, description)
+        Keymap.bind(keymap_server(), mode, key_str, command_name, description)
       end
 
     case result do
@@ -292,7 +299,7 @@ defmodule Minga.Config do
   def bind(mode, key_str, command_name, description, opts)
       when is_atom(mode) and is_binary(key_str) and is_atom(command_name) and
              is_binary(description) and is_list(opts) do
-    case Keymap.bind(mode, key_str, command_name, description, opts) do
+    case Keymap.bind(keymap_server(), mode, key_str, command_name, description, opts) do
       :ok -> :ok
       {:error, reason} -> Minga.Log.warning(:config, "bind failed: #{reason}")
     end

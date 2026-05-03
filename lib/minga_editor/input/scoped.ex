@@ -58,7 +58,7 @@ defmodule MingaEditor.Input.Scoped do
     if Minga.Editing.active_model(state) == Minga.Editing.Model.CUA do
       key = {cp, mods}
 
-      case Keymap.resolve_scoped_key(:editor, :cua, key) do
+      case Keymap.resolve_scoped_key(:editor, :cua, key, keymap_context(state)) do
         {:command, command} ->
           {:handled, Commands.execute(state, command)}
 
@@ -227,7 +227,7 @@ defmodule MingaEditor.Input.Scoped do
         ) ::
           MingaEditor.Input.Handler.result()
   defp resolve_scope_key(state, scope_name, vim_state, key, cp, mods) do
-    case Keymap.resolve_scoped_key(scope_name, vim_state, key) do
+    case Keymap.resolve_scoped_key(scope_name, vim_state, key, keymap_context(state)) do
       {:command, command} ->
         {:handled, Commands.execute(state, command)}
 
@@ -305,4 +305,7 @@ defmodule MingaEditor.Input.Scoped do
           cursor_line >= start and cursor_line < start + text_len
       end)
   end
+
+  @spec keymap_context(EditorState.t()) :: [{:keymap_server, GenServer.server()}]
+  defp keymap_context(state), do: [keymap_server: EditorState.keymap_server(state)]
 end

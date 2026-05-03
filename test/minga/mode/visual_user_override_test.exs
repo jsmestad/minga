@@ -1,6 +1,6 @@
 defmodule Minga.Mode.Visual.UserOverrideTest do
   @moduledoc "Tests for user-defined visual mode bindings via Keymap.Active."
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Minga.Keymap.Active, as: KeymapActive
   alias Minga.Mode.Visual
@@ -10,25 +10,28 @@ defmodule Minga.Mode.Visual.UserOverrideTest do
     %VisualState{visual_anchor: anchor, visual_type: type}
   end
 
+  defp test_keymap_server do
+    Process.get(:minga_config_keymap, KeymapActive)
+  end
+
   defp visual_state_with_trie(anchor \\ {0, 0}, type \\ :char) do
-    global = KeymapActive.mode_trie(:visual)
+    global = KeymapActive.mode_trie(test_keymap_server(), :visual)
 
     %VisualState{visual_anchor: anchor, visual_type: type, mode_trie: global}
   end
 
   setup do
-    # KeymapActive is a global singleton; start_supervised! won't work until
-    # it accepts a name: param. See autoresearch.md for the planned refactor.
-    case KeymapActive.start_link() do
-      {:ok, _} -> :ok
-      {:error, {:already_started, _}} -> KeymapActive.reset()
-    end
+    keymap_server =
+      String.to_atom("visual_override_#{System.unique_integer([:positive])}_keymap")
+
+    start_supervised!({KeymapActive, name: keymap_server})
+    previous_keymap_server = Process.put(:minga_config_keymap, keymap_server)
 
     on_exit(fn ->
-      try do
-        KeymapActive.reset()
-      catch
-        :exit, _ -> :ok
+      if is_nil(previous_keymap_server) do
+        Process.delete(:minga_config_keymap)
+      else
+        Process.put(:minga_config_keymap, previous_keymap_server)
       end
     end)
 
@@ -37,7 +40,7 @@ defmodule Minga.Mode.Visual.UserOverrideTest do
 
   describe "user-defined visual-mode overrides" do
     test "Ctrl+X bound to :custom_cut executes the command" do
-      KeymapActive.bind(:visual, "C-x", :custom_cut, "Custom cut")
+      KeymapActive.bind(test_keymap_server(), :visual, "C-x", :custom_cut, "Custom cut")
 
       state = visual_state_with_trie()
       assert {:execute, :custom_cut, _} = Visual.handle_key({?x, 0x02}, state)
@@ -50,7 +53,7 @@ defmodule Minga.Mode.Visual.UserOverrideTest do
     end
 
     test "built-in visual keys still work when user overrides exist" do
-      KeymapActive.bind(:visual, "C-x", :custom_cut, "Custom cut")
+      KeymapActive.bind(test_keymap_server(), :visual, "C-x", :custom_cut, "Custom cut")
 
       state = visual_state()
       # Escape should still transition to normal

@@ -59,6 +59,7 @@ defmodule MingaEditor do
   @type start_opt ::
           {:name, GenServer.name()}
           | {:port_manager, GenServer.server()}
+          | {:keymap_server, GenServer.server()}
           | {:buffer, pid()}
           | {:width, pos_integer()}
           | {:height, pos_integer()}
