@@ -89,16 +89,19 @@ defmodule MingaEditor.UI.Picker.Source do
 
   @doc """
   Default `on_cancel` implementation: restores the buffer that was active
-  when the picker opened (stored in `picker_ui.restore`), or returns state
-  unchanged if no restore index was saved.
+  when the picker opened (stored in the picker payload's `restore` field),
+  or returns state unchanged if no restore index was saved.
   """
   @spec restore_or_keep(term()) :: term()
-  def restore_or_keep(%{shell_state: %{picker_ui: %{restore: idx}}} = state)
-      when is_integer(idx) do
-    EditorState.switch_buffer(state, idx)
-  end
+  def restore_or_keep(state) do
+    case state.shell_state.modal do
+      {:picker, %{picker_ui: %{restore: idx}}} when is_integer(idx) ->
+        EditorState.switch_buffer(state, idx)
 
-  def restore_or_keep(state), do: state
+      _ ->
+        state
+    end
+  end
 
   @doc """
   Returns whether a source module supports preview.

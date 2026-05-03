@@ -18,7 +18,6 @@ defmodule MingaEditor.Shell.Traditional.State do
   alias MingaEditor.NavFlash
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.ModalOverlay
-  alias MingaEditor.State.Picker
   alias MingaEditor.State.Prompt
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.WhichKey
@@ -29,7 +28,6 @@ defmodule MingaEditor.Shell.Traditional.State do
           hover_popup: HoverPopup.t() | nil,
           dashboard: Dashboard.state() | nil,
           status_msg: String.t() | nil,
-          picker_ui: Picker.t(),
           prompt_ui: Prompt.t(),
           whichkey: WhichKey.t(),
           bottom_panel: BottomPanel.t(),
@@ -50,7 +48,6 @@ defmodule MingaEditor.Shell.Traditional.State do
             hover_popup: nil,
             dashboard: nil,
             status_msg: nil,
-            picker_ui: %Picker{},
             prompt_ui: %Prompt{},
             whichkey: %WhichKey{},
             bottom_panel: %BottomPanel{},
@@ -136,24 +133,6 @@ defmodule MingaEditor.Shell.Traditional.State do
   @spec close_dashboard(t()) :: t()
   def close_dashboard(%{} = ss) do
     %{ss | dashboard: nil}
-  end
-
-  # ── Picker UI ──────────────────────────────────────────────────────────────
-
-  @doc "Returns the picker UI state."
-  @spec picker_ui(t()) :: Picker.t()
-  def picker_ui(%{picker_ui: pui}), do: pui
-
-  @doc "Replaces the picker UI state."
-  @spec set_picker_ui(t(), Picker.t()) :: t()
-  def set_picker_ui(%{} = ss, pui) do
-    %{ss | picker_ui: pui}
-  end
-
-  @doc "Applies a function to the picker UI state."
-  @spec update_picker_ui(t(), (Picker.t() -> Picker.t())) :: t()
-  def update_picker_ui(%{picker_ui: pui} = ss, fun) when is_function(fun, 1) do
-    %{ss | picker_ui: fun.(pui)}
   end
 
   # ── Prompt UI ──────────────────────────────────────────────────────────────

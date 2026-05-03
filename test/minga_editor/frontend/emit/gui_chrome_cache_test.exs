@@ -10,6 +10,8 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
   use ExUnit.Case, async: true
 
   alias MingaEditor.Renderer.Caches
+  alias MingaEditor.State.ModalOverlay
+  alias MingaEditor.State.ModalOverlay.Picker, as: PickerPayload
   alias MingaEditor.StatusBar.Data, as: StatusBarData
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.Frontend.Emit.GUI, as: EmitGUI
@@ -165,8 +167,8 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
       picker = MingaEditor.UI.Picker.new([item], title: "Test")
       state = gui_state()
 
-      picker_ui = %{state.shell_state.picker_ui | picker: picker, source: nil, action_menu: nil}
-      state = MingaEditor.State.set_picker_ui(state, picker_ui)
+      picker_state = %MingaEditor.State.Picker{picker: picker, source: nil, action_menu: nil}
+      state = ModalOverlay.open(state, :picker, PickerPayload.new(picker_state))
       sb_data = StatusBarData.from_state(state)
 
       {_ctx, caches} =

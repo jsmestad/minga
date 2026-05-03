@@ -20,7 +20,7 @@ defmodule MingaEditor.PromptUI do
   """
 
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.Picker, as: PickerState
+  alias MingaEditor.State.ModalOverlay
   alias MingaEditor.State.Prompt, as: PromptState
 
   @escape 27
@@ -173,10 +173,13 @@ defmodule MingaEditor.PromptUI do
   # ── Private ────────────────────────────────────────────────────────────────
 
   @spec maybe_close_picker(state()) :: state()
-  defp maybe_close_picker(%{shell_state: %{picker_ui: %PickerState{picker: nil}}} = state),
-    do: state
-
-  defp maybe_close_picker(state), do: EditorState.set_picker_ui(state, %PickerState{})
+  defp maybe_close_picker(state) do
+    if ModalOverlay.match(state.shell_state.modal, :picker) do
+      ModalOverlay.dismiss(state)
+    else
+      state
+    end
+  end
 
   @spec do_backspace(state(), PromptState.t()) :: state()
   defp do_backspace(state, %{cursor: 0} = _prompt), do: state

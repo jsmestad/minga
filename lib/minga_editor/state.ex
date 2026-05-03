@@ -18,13 +18,12 @@ defmodule MingaEditor.State do
   **Global fields** are shared across all tabs and never snapshotted:
   `port_manager`, `theme`, `render_timer`, `focus_stack`,
   `tab_bar`, `capabilities`, `layout`, `modeline_click_regions`,
-  `tab_bar_click_regions`, `agent`, `picker_ui`, `whichkey`.
+  `tab_bar_click_regions`, `agent`, `whichkey`.
 
   ## Composed sub-structs
 
   * `MingaEditor.Workspace.State`           — per-tab editing context (buffers, windows, vim, etc.)
   * `MingaEditor.Shell.Traditional.State`   — presentation state (nav_flash, hover, dashboard, etc.)
-  * `MingaEditor.State.Picker`       — picker instance, source, restore index
   * `MingaEditor.State.WhichKey`     — which-key popup node, timer, visibility
   * `MingaEditor.State.Registers`    — named registers and active register selection
   """
@@ -44,7 +43,6 @@ defmodule MingaEditor.State do
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Highlighting
   alias MingaEditor.State.Mouse
-  alias MingaEditor.State.Picker
   alias MingaEditor.State.Prompt
   alias MingaEditor.State.Registers
   alias MingaEditor.State.Search
@@ -210,13 +208,6 @@ defmodule MingaEditor.State do
   def set_dashboard(s, dash), do: update_shell_state(s, &ShellState.set_dashboard(&1, dash))
   @spec close_dashboard(t()) :: t()
   def close_dashboard(s), do: update_shell_state(s, &ShellState.close_dashboard/1)
-
-  @spec picker_ui(t()) :: Picker.t()
-  def picker_ui(%{shell_state: ss}), do: ShellState.picker_ui(ss)
-  @spec set_picker_ui(t(), Picker.t()) :: t()
-  def set_picker_ui(s, pui), do: update_shell_state(s, &ShellState.set_picker_ui(&1, pui))
-  @spec update_picker_ui(t(), (Picker.t() -> Picker.t())) :: t()
-  def update_picker_ui(s, fun), do: update_shell_state(s, &ShellState.update_picker_ui(&1, fun))
 
   @spec prompt_ui(t()) :: Prompt.t()
   def prompt_ui(%{shell_state: ss}), do: ShellState.prompt_ui(ss)

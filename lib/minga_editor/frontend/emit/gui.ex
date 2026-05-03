@@ -414,21 +414,28 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   # ── Picker ──
 
   @spec build_gui_picker_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
-  defp build_gui_picker_cmd(%{shell_state: %{picker_ui: %{picker: nil}}}, caches) do
-    if caches.last_gui_picker_fp != :closed do
-      picker_cmd = ProtocolGUI.encode_gui_picker(nil)
-      preview_cmd = ProtocolGUI.encode_gui_picker_preview(nil)
-      {IO.iodata_to_binary([picker_cmd, preview_cmd]), %{caches | last_gui_picker_fp: :closed}}
-    else
-      {nil, caches}
+  defp build_gui_picker_cmd(ctx, caches) do
+    case ctx.shell_state.modal do
+      {:picker, %{picker_ui: %{picker: picker, source: source, action_menu: action_menu}}}
+      when picker != nil ->
+        do_build_gui_picker_cmd(ctx, picker, source, action_menu, caches)
+
+      _ ->
+        if caches.last_gui_picker_fp != :closed do
+          picker_cmd = ProtocolGUI.encode_gui_picker(nil)
+          preview_cmd = ProtocolGUI.encode_gui_picker_preview(nil)
+
+          {IO.iodata_to_binary([picker_cmd, preview_cmd]),
+           %{caches | last_gui_picker_fp: :closed}}
+        else
+          {nil, caches}
+        end
     end
   end
 
-  defp build_gui_picker_cmd(
-         %{shell_state: %{picker_ui: %{picker: picker, source: source, action_menu: action_menu}}} =
-           ctx,
-         caches
-       ) do
+  @spec do_build_gui_picker_cmd(ctx(), term(), module() | nil, term(), Caches.t()) ::
+          {binary() | nil, Caches.t()}
+  defp do_build_gui_picker_cmd(ctx, picker, source, action_menu, caches) do
     # Preview content is NOT in the fingerprint: a file changing on disk while
     # the picker is open won't refresh the preview. Acceptable trade-off for
     # scroll perf since the picker isn't open during normal editing.
@@ -450,7 +457,9 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   # Build preview content for the currently selected picker item.
   # Returns a list of lines, where each line is a list of {text, fg_color, bold} segments.
   @spec build_picker_preview(ctx()) :: [[ProtocolGUI.preview_segment()]] | nil
-  defp build_picker_preview(%{shell_state: %{picker_ui: %{picker: picker}}} = ctx) do
+  defp build_picker_preview(
+         %{shell_state: %{modal: {:picker, %{picker_ui: %{picker: picker}}}}} = ctx
+       ) do
     case Picker.selected_item(picker) do
       nil ->
         nil

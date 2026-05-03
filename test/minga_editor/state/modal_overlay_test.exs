@@ -99,7 +99,6 @@ defmodule MingaEditor.State.ModalOverlayTest do
       result = ModalOverlay.open(state, :picker, payload)
 
       assert result.shell_state.modal == {:picker, payload}
-      assert result.shell_state.picker_ui == payload.picker_ui
     end
 
     test "writes the prompt legacy field" do
@@ -155,7 +154,6 @@ defmodule MingaEditor.State.ModalOverlayTest do
 
       assert result.shell_state.modal == {:prompt, prompt}
       assert result.shell_state.prompt_ui == prompt.prompt_ui
-      assert result.shell_state.picker_ui == %PickerLegacy{}
     end
 
     test "replacing completion with picker clears workspace.completion" do
@@ -168,7 +166,6 @@ defmodule MingaEditor.State.ModalOverlayTest do
 
       assert result.shell_state.modal == {:picker, picker}
       assert result.workspace.completion == nil
-      assert result.shell_state.picker_ui == picker.picker_ui
     end
 
     test "replacing dashboard clears the dashboard legacy field" do
@@ -219,7 +216,6 @@ defmodule MingaEditor.State.ModalOverlayTest do
       result = ModalOverlay.transition(state, :picker, picker)
 
       assert result.shell_state.modal == {:picker, picker}
-      assert result.shell_state.picker_ui == picker.picker_ui
       assert result.workspace.pending_conflict == nil
     end
   end
@@ -233,7 +229,6 @@ defmodule MingaEditor.State.ModalOverlayTest do
       result = ModalOverlay.close(state)
 
       assert result.shell_state.modal == :none
-      assert result.shell_state.picker_ui == %PickerLegacy{}
     end
 
     test "dismiss clears the active prompt and resets the legacy slot" do
@@ -266,14 +261,14 @@ defmodule MingaEditor.State.ModalOverlayTest do
   end
 
   describe "divergence assertion (dev/test only)" do
-    test "raises when picker_ui is mutated outside the gate" do
+    test "raises when prompt_ui is mutated outside the gate" do
       state =
         base_state()
-        |> ModalOverlay.open(:picker, picker_payload())
+        |> ModalOverlay.open(:prompt, prompt_payload())
 
       tampered =
-        update_in(state.shell_state.picker_ui, fn pui ->
-          %{pui | restore: 999}
+        update_in(state.shell_state.prompt_ui, fn pui ->
+          %{pui | cursor: 999}
         end)
 
       assert_raise RuntimeError, ~r/ModalOverlay divergence/, fn ->
@@ -295,15 +290,22 @@ defmodule MingaEditor.State.ModalOverlayTest do
 
     test "tolerates legacy mutation while modal is :none" do
       state = base_state()
-      tampered = EditorState.set_picker_ui(state, %PickerLegacy{restore: 42})
 
-      payload = prompt_payload()
-      result = ModalOverlay.open(tampered, :prompt, payload)
+      tampered =
+        put_in(state.shell_state.prompt_ui, %PromptLegacy{
+          handler: SomeHandler,
+          text: "x",
+          cursor: 1,
+          label: ":"
+        })
 
-      assert result.shell_state.modal == {:prompt, payload}
-      # The mutated picker_ui is preserved: the gate makes no claims about
+      payload = picker_payload()
+      result = ModalOverlay.open(tampered, :picker, payload)
+
+      assert result.shell_state.modal == {:picker, payload}
+      # The mutated prompt_ui is preserved: the gate makes no claims about
       # legacy fields whose variant is not currently tracked.
-      assert result.shell_state.picker_ui.restore == 42
+      assert result.shell_state.prompt_ui.text == "x"
     end
   end
 end

@@ -5,6 +5,8 @@ defmodule MingaEditor.DashboardTest do
   alias MingaEditor.Renderer
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
+  alias MingaEditor.State.ModalOverlay
+  alias MingaEditor.State.ModalOverlay.Picker, as: PickerPayload
   alias MingaEditor.State.Picker, as: PickerState
   alias MingaEditor.Viewport
   alias MingaEditor.UI.Picker
@@ -184,7 +186,12 @@ defmodule MingaEditor.DashboardTest do
         focus_stack: MingaEditor.Input.default_stack(),
         shell_state: %MingaEditor.Shell.Traditional.State{
           dashboard: Dashboard.new_state(),
-          picker_ui: %PickerState{picker: picker, source: MingaEditor.UI.Picker.FileSource}
+          modal:
+            {:picker,
+             PickerPayload.new(%PickerState{
+               picker: picker,
+               source: MingaEditor.UI.Picker.FileSource
+             })}
         },
         theme: MingaEditor.UI.Theme.get!(:doom_one)
       }
@@ -202,7 +209,7 @@ defmodule MingaEditor.DashboardTest do
       assert commands != []
 
       # Re-render without the picker to compare command counts
-      bare_state = MingaEditor.State.set_picker_ui(state, %PickerState{})
+      bare_state = ModalOverlay.dismiss(state)
       _new_bare = Renderer.render(bare_state)
       assert_receive {:"$gen_cast", {:send_commands, bare_commands}}
 

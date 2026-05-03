@@ -7,7 +7,7 @@ defmodule MingaEditor.UI.Picker.OptionScopeSource do
   buffer's local options) and "All Buffers (Default)" (writes to the
   global Options agent, affecting all buffers without a local override).
 
-  The picker context (stored in `state.shell_state.picker_ui.context`) must include:
+  The picker context (stored in the picker payload's `context` field) must include:
 
   * `:option_name` — the option atom
   * `:new_value` — the computed new value
@@ -28,21 +28,26 @@ defmodule MingaEditor.UI.Picker.OptionScopeSource do
 
   @impl true
   @spec candidates(Context.t()) :: [Item.t()]
-  def candidates(_ctx) do
+  def candidates(%Context{picker_ui: %{context: ctx}}) when is_map(ctx) do
     [
-      %Item{id: :buffer, label: "This Buffer", description: "Set for the current buffer only"},
       %Item{
-        id: :global,
+        id: {:buffer, ctx},
+        label: "This Buffer",
+        description: "Set for the current buffer only"
+      },
+      %Item{
+        id: {:global, ctx},
         label: "All Buffers (Default)",
         description: "Set the default for all buffers without a local override"
       }
     ]
   end
 
+  def candidates(_ctx), do: []
+
   @impl true
   @spec on_select(Item.t(), term()) :: term()
-  def on_select(%Item{id: scope}, state) when scope in [:buffer, :global] do
-    ctx = state.shell_state.picker_ui.context
+  def on_select(%Item{id: {scope, ctx}}, state) when scope in [:buffer, :global] do
     apply_scoped(scope, ctx.option_name, ctx.new_value, state)
   end
 

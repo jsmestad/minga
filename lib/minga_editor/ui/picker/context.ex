@@ -23,6 +23,7 @@ defmodule MingaEditor.UI.Picker.Context do
 
   alias MingaEditor.State
   alias MingaEditor.State.Buffers
+  alias MingaEditor.State.Picker, as: PickerState
   alias MingaEditor.State.Search
   alias MingaEditor.State.TabBar
   alias MingaEditor.Viewport
@@ -69,10 +70,15 @@ defmodule MingaEditor.UI.Picker.Context do
 
   @doc """
   Builds a picker context from the full editor state.
+
+  The optional `extra_context` is stored in `picker_ui.context` so that
+  sources invoked from `PickerUI.open/3` can read it before the picker
+  modal has been opened (i.e. when `shell_state.modal` is still `:none`).
   """
-  @spec from_editor_state(State.t()) :: t()
-  def from_editor_state(%State{} = state) do
+  @spec from_editor_state(State.t(), map() | nil) :: t()
+  def from_editor_state(%State{} = state, extra_context \\ nil) do
     agent_session = MingaEditor.State.AgentAccess.session(state)
+    picker_ui = picker_ui_from_modal(state, extra_context)
 
     %__MODULE__{
       buffers: state.workspace.buffers,
@@ -82,9 +88,20 @@ defmodule MingaEditor.UI.Picker.Context do
       viewport: state.workspace.viewport,
       tab_bar: state.shell_state.tab_bar,
       agent_session: agent_session,
-      picker_ui: state.shell_state.picker_ui,
+      picker_ui: picker_ui,
       capabilities: state.capabilities,
       theme: state.theme
     }
+  end
+
+  @spec picker_ui_from_modal(State.t(), map() | nil) :: PickerState.t()
+  defp picker_ui_from_modal(state, extra_context) do
+    base =
+      case state.shell_state.modal do
+        {:picker, %{picker_ui: pui}} -> pui
+        _ -> %PickerState{}
+      end
+
+    if extra_context, do: %{base | context: extra_context}, else: base
   end
 end

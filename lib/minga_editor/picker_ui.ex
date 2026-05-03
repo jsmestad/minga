@@ -19,6 +19,8 @@ defmodule MingaEditor.PickerUI do
   alias MingaEditor.DisplayList
   alias MingaEditor.FloatingWindow
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.ModalOverlay
+  alias MingaEditor.State.ModalOverlay.Picker, as: PickerPayload
   alias MingaEditor.State.Picker, as: PickerState
   alias MingaEditor.State.WhichKey, as: WhichKeyState
   alias MingaEditor.UI.Picker
@@ -82,16 +84,8 @@ defmodule MingaEditor.PickerUI do
   """
   @spec open(state(), module(), map() | nil) :: state()
   def open(state, source_module, context \\ nil) do
-    # Set context before calling candidates so sources can read it.
-    state_with_ctx =
-      if context do
-        EditorState.update_picker_ui(state, &%{&1 | context: context})
-      else
-        state
-      end
-
-    # Build Context for source
-    ctx = Context.from_editor_state(state_with_ctx)
+    # Pass context directly so sources can read it from ctx.picker_ui.context.
+    ctx = Context.from_editor_state(state, context)
     items = source_module.candidates(ctx)
 
     case items do
@@ -114,14 +108,16 @@ defmodule MingaEditor.PickerUI do
 
         layout = MingaEditor.UI.Picker.Source.layout(source_module)
 
-        EditorState.set_picker_ui(new_state, %PickerState{
+        picker_state = %PickerState{
           picker: picker,
           source: source_module,
           restore: state.workspace.buffers.active_index,
           restore_theme: state.theme,
           context: context,
           layout: layout
-        })
+        }
+
+        ModalOverlay.open(new_state, :picker, PickerPayload.new(picker_state))
     end
   end
 
@@ -138,23 +134,31 @@ defmodule MingaEditor.PickerUI do
 
   # Esc or C-g in action menu → close menu, return to picker
   def handle_key(
-        %{shell_state: %{picker_ui: %{action_menu: {_actions, _sel}}}} = state,
+        %{shell_state: %{modal: {:picker, %{picker_ui: %{action_menu: {_actions, _sel}}}}}} =
+          state,
         @escape,
         _mods
       ) do
-    EditorState.update_picker_ui(state, &%{&1 | action_menu: nil})
+    update_picker(state, &%{&1 | action_menu: nil})
   end
 
-  def handle_key(%{shell_state: %{picker_ui: %{action_menu: {_actions, _sel}}}} = state, ?g, mods)
+  def handle_key(
+        %{shell_state: %{modal: {:picker, %{picker_ui: %{action_menu: {_actions, _sel}}}}}} =
+          state,
+        ?g,
+        mods
+      )
       when band(mods, @ctrl) != 0 do
-    EditorState.update_picker_ui(state, &%{&1 | action_menu: nil})
+    update_picker(state, &%{&1 | action_menu: nil})
   end
 
   # Enter in action menu → execute selected action
   def handle_key(
         %{
           shell_state: %{
-            picker_ui: %{action_menu: {actions, sel}, picker: picker, source: source}
+            modal:
+              {:picker,
+               %{picker_ui: %{action_menu: {actions, sel}, picker: picker, source: source}}}
           }
         } = state,
         @enter,
@@ -162,38 +166,47 @@ defmodule MingaEditor.PickerUI do
       ) do
     case {Enum.at(actions, sel), Picker.selected_item(picker)} do
       {nil, _} ->
-        EditorState.update_picker_ui(state, &%{&1 | action_menu: nil})
+        update_picker(state, &%{&1 | action_menu: nil})
 
       {_, nil} ->
-        EditorState.update_picker_ui(state, &%{&1 | action_menu: nil})
+        update_picker(state, &%{&1 | action_menu: nil})
 
       {{_name, action_id}, item} ->
-        new_state = close(EditorState.update_picker_ui(state, &%{&1 | action_menu: nil}))
+        new_state = close(update_picker(state, &%{&1 | action_menu: nil}))
         source.on_action(action_id, item, new_state)
     end
   end
 
   # Arrow down / C-j / C-n in action menu → move selection down
-  def handle_key(%{shell_state: %{picker_ui: %{action_menu: {actions, sel}}}} = state, cp, mods)
+  def handle_key(
+        %{shell_state: %{modal: {:picker, %{picker_ui: %{action_menu: {actions, sel}}}}}} = state,
+        cp,
+        mods
+      )
       when (cp == ?j and band(mods, @ctrl) != 0) or
              (cp == ?n and band(mods, @ctrl) != 0) or
              cp == @arrow_down do
     new_sel = rem(sel + 1, length(actions))
-    EditorState.update_picker_ui(state, &%{&1 | action_menu: {actions, new_sel}})
+    update_picker(state, &%{&1 | action_menu: {actions, new_sel}})
   end
 
   # Arrow up / C-k / C-p in action menu → move selection up
-  def handle_key(%{shell_state: %{picker_ui: %{action_menu: {actions, sel}}}} = state, cp, mods)
+  def handle_key(
+        %{shell_state: %{modal: {:picker, %{picker_ui: %{action_menu: {actions, sel}}}}}} = state,
+        cp,
+        mods
+      )
       when (cp == ?k and band(mods, @ctrl) != 0) or
              (cp == ?p and band(mods, @ctrl) != 0) or
              cp == @arrow_up do
     new_sel = if sel == 0, do: length(actions) - 1, else: sel - 1
-    EditorState.update_picker_ui(state, &%{&1 | action_menu: {actions, new_sel}})
+    update_picker(state, &%{&1 | action_menu: {actions, new_sel}})
   end
 
   # Ignore all other keys while action menu is open
   def handle_key(
-        %{shell_state: %{picker_ui: %{action_menu: {_actions, _sel}}}} = state,
+        %{shell_state: %{modal: {:picker, %{picker_ui: %{action_menu: {_actions, _sel}}}}}} =
+          state,
         _cp,
         _mods
       ),
@@ -201,20 +214,29 @@ defmodule MingaEditor.PickerUI do
 
   # ── Normal picker handlers ─────────────────────────────────────────────────
 
-  def handle_key(%{shell_state: %{picker_ui: %{source: source}}} = state, @escape, _mods) do
+  def handle_key(
+        %{shell_state: %{modal: {:picker, %{picker_ui: %{source: source}}}}} = state,
+        @escape,
+        _mods
+      ) do
     new_state = source.on_cancel(state)
     close(new_state)
   end
 
   # C-g → cancel (Emacs-style)
-  def handle_key(%{shell_state: %{picker_ui: %{source: source}}} = state, ?g, mods)
+  def handle_key(
+        %{shell_state: %{modal: {:picker, %{picker_ui: %{source: source}}}}} = state,
+        ?g,
+        mods
+      )
       when band(mods, @ctrl) != 0 do
     new_state = source.on_cancel(state)
     close(new_state)
   end
 
   def handle_key(
-        %{shell_state: %{picker_ui: %{picker: picker, source: source}}} = state,
+        %{shell_state: %{modal: {:picker, %{picker_ui: %{picker: picker, source: source}}}}} =
+          state,
         @enter,
         _mods
       ) do
@@ -225,50 +247,71 @@ defmodule MingaEditor.PickerUI do
   end
 
   # C-j, C-n, or arrow down → move selection down
-  def handle_key(%{shell_state: %{picker_ui: %{picker: picker} = pui}} = state, cp, mods)
+  def handle_key(
+        %{shell_state: %{modal: {:picker, %{picker_ui: %{picker: picker}}}}} = state,
+        cp,
+        mods
+      )
       when (cp == ?j and band(mods, @ctrl) != 0) or
              (cp == ?n and band(mods, @ctrl) != 0) or
              cp == @arrow_down do
     new_picker = Picker.move_down(picker)
-    state = EditorState.set_picker_ui(state, %{pui | picker: new_picker})
+    state = update_picker(state, &%{&1 | picker: new_picker})
     maybe_preview_selection(state)
   end
 
   # C-k, C-p, or arrow up → move selection up
-  def handle_key(%{shell_state: %{picker_ui: %{picker: picker} = pui}} = state, cp, mods)
+  def handle_key(
+        %{shell_state: %{modal: {:picker, %{picker_ui: %{picker: picker}}}}} = state,
+        cp,
+        mods
+      )
       when (cp == ?k and band(mods, @ctrl) != 0) or
              (cp == ?p and band(mods, @ctrl) != 0) or
              cp == @arrow_up do
     new_picker = Picker.move_up(picker)
-    state = EditorState.set_picker_ui(state, %{pui | picker: new_picker})
+    state = update_picker(state, &%{&1 | picker: new_picker})
     maybe_preview_selection(state)
   end
 
   # C-v → page down
-  def handle_key(%{shell_state: %{picker_ui: %{picker: picker} = pui}} = state, ?v, mods)
+  def handle_key(
+        %{shell_state: %{modal: {:picker, %{picker_ui: %{picker: picker}}}}} = state,
+        ?v,
+        mods
+      )
       when band(mods, @ctrl) != 0 do
     new_picker = Picker.page_down(picker)
-    state = EditorState.set_picker_ui(state, %{pui | picker: new_picker})
+    state = update_picker(state, &%{&1 | picker: new_picker})
     maybe_preview_selection(state)
   end
 
   # M-v (Alt+v) → page up
-  def handle_key(%{shell_state: %{picker_ui: %{picker: picker} = pui}} = state, ?v, mods)
+  def handle_key(
+        %{shell_state: %{modal: {:picker, %{picker_ui: %{picker: picker}}}}} = state,
+        ?v,
+        mods
+      )
       when band(mods, @alt) != 0 do
     new_picker = Picker.page_up(picker)
-    state = EditorState.set_picker_ui(state, %{pui | picker: new_picker})
+    state = update_picker(state, &%{&1 | picker: new_picker})
     maybe_preview_selection(state)
   end
 
   # Tab → toggle multi-select mark on current item, then move down
-  def handle_key(%{shell_state: %{picker_ui: %{picker: picker} = pui}} = state, 9, _mods) do
+  def handle_key(
+        %{shell_state: %{modal: {:picker, %{picker_ui: %{picker: picker}}}}} = state,
+        9,
+        _mods
+      ) do
     new_picker = picker |> Picker.toggle_mark() |> Picker.move_down()
-    EditorState.set_picker_ui(state, %{pui | picker: new_picker})
+    update_picker(state, &%{&1 | picker: new_picker})
   end
 
   # C-o → open action menu for the selected item
   def handle_key(
-        %{shell_state: %{picker_ui: %{picker: picker, source: source}}} = state,
+        %{shell_state: %{modal: {:picker, %{picker_ui: %{picker: picker, source: source}}}}} =
+          state,
         ?o,
         mods
       )
@@ -282,7 +325,7 @@ defmodule MingaEditor.PickerUI do
 
         case actions do
           [] -> state
-          actions -> EditorState.update_picker_ui(state, &%{&1 | action_menu: {actions, 0}})
+          actions -> update_picker(state, &%{&1 | action_menu: {actions, 0}})
         end
     end
   end
@@ -291,7 +334,9 @@ defmodule MingaEditor.PickerUI do
   def handle_key(
         %{
           shell_state: %{
-            picker_ui: %{picker: picker, mode_prefix: prefix, original_source: orig} = pui
+            modal:
+              {:picker,
+               %{picker_ui: %{picker: picker, mode_prefix: prefix, original_source: orig}}}
           }
         } = state,
         cp,
@@ -304,13 +349,17 @@ defmodule MingaEditor.PickerUI do
     if new_picker.query == "" and prefix != "" and orig != nil do
       switch_back_to_original(state)
     else
-      state = EditorState.set_picker_ui(state, %{pui | picker: new_picker})
+      state = update_picker(state, &%{&1 | picker: new_picker})
       maybe_preview_selection(state)
     end
   end
 
   # Printable characters → filter (with mode-switch detection)
-  def handle_key(%{shell_state: %{picker_ui: %{picker: picker} = pui}} = state, codepoint, 0)
+  def handle_key(
+        %{shell_state: %{modal: {:picker, %{picker_ui: %{picker: picker}}}}} = state,
+        codepoint,
+        0
+      )
       when codepoint >= 32 and codepoint <= 0x10FFFF do
     char =
       try do
@@ -331,7 +380,7 @@ defmodule MingaEditor.PickerUI do
 
           :no_switch ->
             new_picker = Picker.type_char(picker, c)
-            state = EditorState.set_picker_ui(state, %{pui | picker: new_picker})
+            state = update_picker(state, &%{&1 | picker: new_picker})
             maybe_preview_selection(state)
         end
     end
@@ -515,8 +564,14 @@ defmodule MingaEditor.PickerUI do
   @spec render(state(), term()) ::
           {[DisplayList.draw()], {non_neg_integer(), non_neg_integer()} | nil}
   def render(state, viewport) do
+    picker_state =
+      case state.shell_state.modal do
+        {:picker, %{picker_ui: pui}} -> pui
+        _ -> %PickerState{}
+      end
+
     input = %RenderInput{
-      picker_state: state.shell_state.picker_ui,
+      picker_state: picker_state,
       theme_picker: state.theme.picker,
       viewport: viewport
     }
@@ -527,7 +582,7 @@ defmodule MingaEditor.PickerUI do
   @doc "Closes the picker and resets picker-related state."
   @spec close(state()) :: state()
   def close(state) do
-    EditorState.set_picker_ui(state, %PickerState{})
+    ModalOverlay.dismiss(state)
   end
 
   @doc """
@@ -536,9 +591,13 @@ defmodule MingaEditor.PickerUI do
   to update item status after an action.
   """
   @spec refresh_items(state()) :: state()
-  def refresh_items(%{shell_state: %{picker_ui: %{picker: nil}}} = state), do: state
+  def refresh_items(%{shell_state: %{modal: {:picker, %{picker_ui: %{picker: nil}}}}} = state),
+    do: state
 
-  def refresh_items(%{shell_state: %{picker_ui: %{picker: picker, source: source} = pui}} = state) do
+  def refresh_items(
+        %{shell_state: %{modal: {:picker, %{picker_ui: %{picker: picker, source: source}}}}} =
+          state
+      ) do
     ctx = Context.from_editor_state(state)
     items = source.candidates(ctx)
     refreshed = %{picker | items: items}
@@ -548,7 +607,22 @@ defmodule MingaEditor.PickerUI do
     max_sel = max(length(refreshed.filtered) - 1, 0)
     refreshed = %{refreshed | selected: min(picker.selected, max_sel)}
 
-    EditorState.set_picker_ui(state, %{pui | picker: refreshed})
+    update_picker(state, &%{&1 | picker: refreshed})
+  end
+
+  @doc """
+  Applies `fun` to the current PickerState inside the modal and writes back
+  via ModalOverlay.transition, keeping the modal sum type and consistency
+  check in sync.
+
+  Public so that `Input.Picker` (mouse handler) can update scroll position
+  without going through the full key-handling path.
+  """
+  @spec update_picker(state(), (PickerState.t() -> PickerState.t())) :: state()
+  def update_picker(state, fun) do
+    {:picker, payload} = state.shell_state.modal
+    new_pui = fun.(payload.picker_ui)
+    ModalOverlay.transition(state, :picker, %{payload | picker_ui: new_pui})
   end
 
   # ── Centered (floating) layout ───────────────────────────────────────────────
@@ -746,7 +820,11 @@ defmodule MingaEditor.PickerUI do
   # Only triggers on the first character in an empty query, for switchable sources.
   @spec maybe_switch_mode(state(), String.t(), String.t()) ::
           {:switched, state()} | :no_switch
-  defp maybe_switch_mode(%{shell_state: %{picker_ui: %{source: source}}} = state, char, query) do
+  defp maybe_switch_mode(
+         %{shell_state: %{modal: {:picker, %{picker_ui: %{source: source}}}}} = state,
+         char,
+         query
+       ) do
     if query == "" and source in @switchable_sources and Map.has_key?(@mode_prefixes, char) do
       target_source = Map.fetch!(@mode_prefixes, char)
       {:switched, switch_to_source(state, target_source, char)}
@@ -758,7 +836,11 @@ defmodule MingaEditor.PickerUI do
   # Switch the picker to a new source module, preserving the original source for switch-back.
   @spec switch_to_source(state(), module(), String.t()) :: state()
   defp switch_to_source(
-         %{shell_state: %{picker_ui: %{source: current_source} = pui}} = state,
+         %{
+           shell_state: %{
+             modal: {:picker, %{picker_ui: %{source: current_source, original_source: orig_src}}}
+           }
+         } = state,
          new_source,
          prefix
        ) do
@@ -768,23 +850,25 @@ defmodule MingaEditor.PickerUI do
     max_vis = max(5, min(max_vis, state.workspace.viewport.rows - 3))
     picker = Picker.new(items, title: new_source.title(), max_visible: max_vis)
     layout = MingaEditor.UI.Picker.Source.layout(new_source)
+    original = orig_src || current_source
 
-    original = pui.original_source || current_source
-
-    EditorState.set_picker_ui(state, %{
-      pui
-      | picker: picker,
-        source: new_source,
-        layout: layout,
-        original_source: original,
-        mode_prefix: prefix
-    })
+    update_picker(
+      state,
+      &%{
+        &1
+        | picker: picker,
+          source: new_source,
+          layout: layout,
+          original_source: original,
+          mode_prefix: prefix
+      }
+    )
   end
 
   # Switch back to the original source after the prefix is deleted.
   @spec switch_back_to_original(state()) :: state()
   defp switch_back_to_original(
-         %{shell_state: %{picker_ui: %{original_source: orig} = pui}} = state
+         %{shell_state: %{modal: {:picker, %{picker_ui: %{original_source: orig}}}}} = state
        ) do
     ctx = Context.from_editor_state(state)
     items = orig.candidates(ctx)
@@ -793,14 +877,17 @@ defmodule MingaEditor.PickerUI do
     picker = Picker.new(items, title: orig.title(), max_visible: max_vis)
     layout = MingaEditor.UI.Picker.Source.layout(orig)
 
-    EditorState.set_picker_ui(state, %{
-      pui
-      | picker: picker,
-        source: orig,
-        layout: layout,
-        original_source: nil,
-        mode_prefix: ""
-    })
+    update_picker(
+      state,
+      &%{
+        &1
+        | picker: picker,
+          source: orig,
+          layout: layout,
+          original_source: nil,
+          mode_prefix: ""
+      }
+    )
   end
 
   # ── Private helpers ──────────────────────────────────────────────────────────
@@ -810,7 +897,10 @@ defmodule MingaEditor.PickerUI do
   # Returns true when preview navigation changed the active buffer from
   # what it was when the picker opened (stored in picker_ui.restore).
   @spec previewed?(state()) :: boolean()
-  defp previewed?(%{shell_state: %{picker_ui: %{restore: restore}}, workspace: %{buffers: bs}})
+  defp previewed?(%{
+         shell_state: %{modal: {:picker, %{picker_ui: %{restore: restore}}}},
+         workspace: %{buffers: bs}
+       })
        when is_integer(restore) do
     bs.active_index != restore
   end
@@ -820,7 +910,8 @@ defmodule MingaEditor.PickerUI do
   # on_select update the current tab in-place instead of creating a new tab.
   @spec maybe_preview_selection(state()) :: state()
   defp maybe_preview_selection(
-         %{shell_state: %{picker_ui: %{picker: picker, source: source}}} = state
+         %{shell_state: %{modal: {:picker, %{picker_ui: %{picker: picker, source: source}}}}} =
+           state
        ) do
     if Picker.Source.preview?(source) do
       case Picker.selected_item(picker) do

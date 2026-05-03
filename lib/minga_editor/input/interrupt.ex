@@ -34,7 +34,7 @@ defmodule MingaEditor.Input.Interrupt do
   alias Minga.Editing.Completion
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.AgentAccess
-  alias MingaEditor.State.Picker
+  alias MingaEditor.State.ModalOverlay
   alias MingaEditor.State.WhichKey
   alias MingaEditor.VimState
   alias Minga.Mode
@@ -111,11 +111,12 @@ defmodule MingaEditor.Input.Interrupt do
   end
 
   @spec maybe_close_picker(EditorState.t(), [String.t()]) :: {EditorState.t(), [String.t()]}
-  defp maybe_close_picker(%{shell_state: %{picker_ui: %Picker{picker: nil}}} = state, resets),
-    do: {state, resets}
-
   defp maybe_close_picker(state, resets) do
-    {EditorState.set_picker_ui(state, %Picker{}), ["picker closed" | resets]}
+    if ModalOverlay.match(state.shell_state.modal, :picker) do
+      {ModalOverlay.dismiss(state), ["picker closed" | resets]}
+    else
+      {state, resets}
+    end
   end
 
   @spec maybe_close_whichkey(EditorState.t(), [String.t()]) :: {EditorState.t(), [String.t()]}

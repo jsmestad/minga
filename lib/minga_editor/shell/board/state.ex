@@ -36,7 +36,6 @@ defmodule MingaEditor.Shell.Board.State do
           # transitioning between shells or when the render pipeline runs
           # before the Board-specific renderer takes over.
           whichkey: MingaEditor.State.WhichKey.t(),
-          picker_ui: MingaEditor.State.Picker.t(),
           prompt_ui: MingaEditor.State.Prompt.t(),
           status_msg: String.t() | nil,
           dashboard: nil,
@@ -65,7 +64,6 @@ defmodule MingaEditor.Shell.Board.State do
             next_id: 1,
             # Compatibility fields (see type doc above)
             whichkey: %MingaEditor.State.WhichKey{},
-            picker_ui: %MingaEditor.State.Picker{},
             prompt_ui: %MingaEditor.State.Prompt{},
             status_msg: nil,
             dashboard: nil,

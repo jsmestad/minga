@@ -40,11 +40,9 @@ defmodule MingaEditor.LspActions.CodeActionTest do
 
       result = LspActions.handle_code_action_response(stub_state(), {:ok, actions})
 
-      # When PickerUI.open succeeds, it sets the picker source.
-      # When items are empty (which they won't be since we have actions),
-      # it returns state unchanged. The picker_ui.source being set confirms
-      # the picker was opened.
-      assert result.shell_state.picker_ui.source == MingaEditor.UI.Picker.CodeActionSource
+      # When PickerUI.open succeeds, the picker is active in the modal.
+      {:picker, %{picker_ui: picker_ui}} = result.shell_state.modal
+      assert picker_ui.source == MingaEditor.UI.Picker.CodeActionSource
     end
   end
 end
