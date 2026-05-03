@@ -85,6 +85,11 @@ defmodule MingaEditor.State.ModalOverlay do
 
   @assert_consistency Mix.env() in [:dev, :test]
 
+  # Single source of truth for the variant tag list. Adding a sixth modal
+  # later means adding to this attribute plus the `t()` and `payload()`
+  # types — the guards below stay correct automatically.
+  @variants [:picker, :prompt, :completion, :conflict, :dashboard]
+
   # ── Pure queries on the modal value ────────────────────────────────────────
 
   @doc "Returns the closed modal (`:none`)."
@@ -96,16 +101,12 @@ defmodule MingaEditor.State.ModalOverlay do
   """
   @spec tag(t()) :: :none | variant()
   def tag(:none), do: :none
-
-  def tag({tag, _payload}) when tag in [:picker, :prompt, :completion, :conflict, :dashboard],
-    do: tag
+  def tag({tag, _payload}) when tag in @variants, do: tag
 
   @doc "Returns true when a modal is currently active (`modal != :none`)."
   @spec active?(t()) :: boolean()
   def active?(:none), do: false
-
-  def active?({tag, _payload}) when tag in [:picker, :prompt, :completion, :conflict, :dashboard],
-    do: true
+  def active?({tag, _payload}) when tag in @variants, do: true
 
   @doc """
   Returns true when `modal` matches the given variant tag.
@@ -115,11 +116,7 @@ defmodule MingaEditor.State.ModalOverlay do
   """
   @spec match(t(), :none | variant()) :: boolean()
   def match(:none, :none), do: true
-
-  def match({tag, _payload}, tag)
-      when tag in [:picker, :prompt, :completion, :conflict, :dashboard],
-      do: true
-
+  def match({tag, _payload}, tag) when tag in @variants, do: true
   def match(_modal, _tag), do: false
 
   # ── Mutating gate functions on EditorState ─────────────────────────────────
@@ -190,6 +187,9 @@ defmodule MingaEditor.State.ModalOverlay do
           "ModalOverlay.open(#{inspect(variant)}) suppressed: conflict prompt is active"
         )
 
+        # Sticky-conflict early return: state is unchanged, so the entry
+        # assertion already proved consistency and there is nothing new to
+        # check on the way out.
         state
 
       _ ->
@@ -205,6 +205,10 @@ defmodule MingaEditor.State.ModalOverlay do
     |> mirror_to_legacy({variant, payload})
   end
 
+  # `_kind` is intentionally unused in the dual-write phase. It is plumbed
+  # through so future per-variant cleanup hooks (introduced once the legacy
+  # mirror is removed in #1427) can branch on `:close` vs `:dismiss` without
+  # changing the public API.
   @spec do_close(EditorState.t(), :close | :dismiss) :: EditorState.t()
   defp do_close(state, _kind) do
     state = assert_consistency!(state)
@@ -313,6 +317,16 @@ defmodule MingaEditor.State.ModalOverlay do
           if ss.dashboard != dash, do: raise_divergence!(:dashboard, dash, ss.dashboard)
           :ok
 
+        # NOTE for #1424+: the completion and conflict payloads live on
+        # shell_state.modal, but their legacy mirrors live on `workspace`,
+        # which is snapshotted per tab while shell_state is not. Once a
+        # caller actually opens one of these variants, switching tabs will
+        # swap workspace.completion / workspace.pending_conflict out from
+        # under the gate and trip this assertion on the next call. Resolve
+        # by either (a) clearing :modal on tab-switch via a hook, or
+        # (b) moving these variants' authoritative state onto workspace.
+        # This step intentionally does not pick — flagged in the next
+        # ticket's developer notes.
         {:completion, %CompletionPayload{completion: comp}} ->
           if ws.completion != comp, do: raise_divergence!(:completion, comp, ws.completion)
           :ok
