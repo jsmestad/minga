@@ -137,6 +137,11 @@ defmodule Minga.Integration.AgentCursorTest do
 
       send_keys_sync(ctx, "i")
       type_text(ctx, "hello")
+      # Belt-and-suspenders sync: the agent panel can emit a layout frame
+      # followed by a content frame, and `type_text` only waits for one
+      # frame per char. Force a port barrier so the captured snapshot
+      # reflects the post-render grid.
+      sync_screen(ctx)
 
       rows = screen_text(ctx)
       {cursor_row, _cursor_col} = screen_cursor(ctx)
