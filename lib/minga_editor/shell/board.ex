@@ -452,6 +452,15 @@ defmodule MingaEditor.Shell.Board do
   @spec set_tab_session(BoardState.t(), term(), pid() | nil) :: BoardState.t()
   def set_tab_session(shell_state, _tab_id, _session_pid), do: shell_state
 
+  @impl true
+  @spec active_session(BoardState.t()) :: pid() | nil
+  def active_session(%BoardState{} = shell_state) do
+    case BoardState.zoomed(shell_state) do
+      %Card{session: pid} -> pid
+      _ -> nil
+    end
+  end
+
   # -------------------------------------------------------------------
   # Agent event callbacks
   # -------------------------------------------------------------------

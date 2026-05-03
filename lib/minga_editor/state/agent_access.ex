@@ -51,9 +51,26 @@ defmodule MingaEditor.State.AgentAccess do
   def view(%{agent_ui: %UIState{view: v}}), do: v
   def view(_), do: View.new()
 
-  @doc "Returns the agent session pid, or nil."
+  @doc """
+  Returns the agent session pid for the user's current view, or `nil`.
+
+  Reads through the shell behaviour: Traditional returns the active tab's
+  session, Board returns the zoomed card's session. The session pid is
+  owned by the tab/card; `state.shell_state.agent` only caches the
+  rendering fields (status, error, pending_approval) for that session.
+  """
   @spec session(EditorState.t() | map()) :: pid() | nil
-  def session(state), do: agent(state).session
+  def session(%EditorState{shell: shell, shell_state: shell_state})
+      when is_atom(shell) and not is_nil(shell) do
+    shell.active_session(shell_state)
+  end
+
+  def session(%{shell: shell, shell_state: shell_state})
+      when is_atom(shell) and not is_nil(shell) do
+    shell.active_session(shell_state)
+  end
+
+  def session(_), do: nil
 
   @doc "Returns true if the agent panel input is focused."
   @spec input_focused?(EditorState.t() | map()) :: boolean()
