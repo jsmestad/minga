@@ -174,11 +174,12 @@ defmodule MingaEditor.StatusBar.Data do
   defp build_agent_data(state) do
     agent = AgentAccess.agent(state)
     panel = AgentAccess.panel(state)
+    session = AgentAccess.session(state)
 
     message_count =
-      if agent.session do
+      if session do
         try do
-          length(Session.messages(agent.session))
+          length(Session.messages(session))
         catch
           :exit, _ -> 0
         end

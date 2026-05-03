@@ -25,7 +25,6 @@ defmodule MingaEditor.Commands.AgentSplitTest do
 
     agent = %AgentState{
       buffer: agent_buf,
-      session: fake_session,
       runtime: %RuntimeState{status: :idle}
     }
 
@@ -44,8 +43,10 @@ defmodule MingaEditor.Commands.AgentSplitTest do
 
     file_tab = %{file_tab | context: file_context}
 
-    # Agent tab with context containing an agent_chat window
-    agent_tab = Tab.new_agent(2, "Agent")
+    # Agent tab with context containing an agent_chat window. The session
+    # pid lives on the tab; AgentAccess.session/1 reads it through the
+    # shell's active_session callback when this tab is active.
+    agent_tab = Tab.new_agent(2, "Agent") |> Tab.set_session(fake_session)
 
     agent_win = Window.new_agent_chat(1, agent_buf, 24, 80)
 
@@ -69,6 +70,7 @@ defmodule MingaEditor.Commands.AgentSplitTest do
 
     %EditorState{
       port_manager: self(),
+      shell: MingaEditor.Shell.Traditional,
       workspace: %MingaEditor.Workspace.State{
         viewport: Viewport.new(24, 80),
         buffers: %Buffers{active: buf, list: [buf]},

@@ -12,6 +12,8 @@ defmodule MingaEditor.AgentActivation do
   EditorState fields across workspace, agent, and windows.
   """
 
+  alias MingaAgent.RuntimeState
+  alias MingaAgent.Session, as: AgentSession
   alias MingaEditor.Agent.UIState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
@@ -36,7 +38,7 @@ defmodule MingaEditor.AgentActivation do
       state
     else
       state
-      |> attach_session(card.session)
+      |> refresh_agent_cache(card.session)
       |> set_agent_scope()
       |> set_agent_chat_window_content(card.session)
       |> focus_prompt()
@@ -46,27 +48,50 @@ defmodule MingaEditor.AgentActivation do
   @doc """
   Deactivates the agent view, reversing the activation steps.
 
-  Clears the session singleton, resets keymap scope to `:editor`,
-  and unfocuses the prompt. Does NOT modify `workspace.windows` —
-  that is handled by the workspace restore in zoom_out.
+  Resets the rendering cache (status/error/pending_approval) to idle,
+  resets keymap scope to `:editor`, and unfocuses the prompt. Does NOT
+  modify `workspace.windows` — that is handled by the workspace restore
+  in zoom_out. Does NOT clear the card's `:session` field; the session
+  keeps running in the background and the card retains its pid.
 
   Symmetric counterpart to `activate_for_card/2`.
   """
   @spec deactivate(EditorState.t()) :: EditorState.t()
   def deactivate(state) do
     state
-    |> clear_session()
+    |> reset_cache()
     |> reset_scope()
     |> unfocus_prompt()
   end
 
   # ── Private steps ───────────────────────────────────────────────────────
 
-  @spec attach_session(EditorState.t(), pid()) :: EditorState.t()
-  defp attach_session(state, session) do
-    AgentAccess.update_agent(state, fn a ->
-      AgentState.set_session(a, session)
-    end)
+  # Populates the rendering cache (status, error, pending_approval) from
+  # the session process. The session pid itself lives on the card, not
+  # on the agent struct.
+  @spec refresh_agent_cache(EditorState.t(), pid()) :: EditorState.t()
+  defp refresh_agent_cache(state, session) do
+    case agent_snapshot(session) do
+      nil ->
+        state
+
+      snapshot ->
+        AgentAccess.update_agent(state, fn agent ->
+          %{
+            agent
+            | runtime: RuntimeState.set_status(agent.runtime, snapshot.status),
+              pending_approval: snapshot.pending_approval,
+              error: snapshot.error
+          }
+        end)
+    end
+  end
+
+  @spec agent_snapshot(pid()) :: map() | nil
+  defp agent_snapshot(session_pid) do
+    AgentSession.editor_snapshot(session_pid)
+  catch
+    :exit, _ -> nil
   end
 
   @spec set_agent_scope(EditorState.t()) :: EditorState.t()
@@ -97,11 +122,9 @@ defmodule MingaEditor.AgentActivation do
 
   # ── Deactivation steps ─────────────────────────────────────────────────
 
-  @spec clear_session(EditorState.t()) :: EditorState.t()
-  defp clear_session(state) do
-    AgentAccess.update_agent(state, fn a ->
-      AgentState.clear_session(a)
-    end)
+  @spec reset_cache(EditorState.t()) :: EditorState.t()
+  defp reset_cache(state) do
+    AgentAccess.update_agent(state, &AgentState.reset_cache/1)
   end
 
   @spec reset_scope(EditorState.t()) :: EditorState.t()

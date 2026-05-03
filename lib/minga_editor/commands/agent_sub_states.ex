@@ -260,7 +260,7 @@ defmodule MingaEditor.Commands.AgentSubStates do
   @spec approve_tool(state()) :: state()
   def approve_tool(state) do
     agent = AgentAccess.agent(state)
-    session = agent.session
+    session = AgentAccess.session(state)
     approval = agent.pending_approval
 
     if is_pid(session) and is_map(approval) do
@@ -275,7 +275,7 @@ defmodule MingaEditor.Commands.AgentSubStates do
   @spec deny_tool(state()) :: state()
   def deny_tool(state) do
     agent = AgentAccess.agent(state)
-    session = agent.session
+    session = AgentAccess.session(state)
     approval = agent.pending_approval
 
     if is_pid(session) and is_map(approval) do

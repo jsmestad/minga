@@ -821,7 +821,7 @@ defmodule MingaEditor.Commands.BufferManagement do
 
     state = %{state | shell_state: board}
     state = AgentAccess.update_agent(state, &AgentState.stop_spinner_timer/1)
-    state = AgentAccess.update_agent(state, &AgentState.clear_session/1)
+    state = AgentAccess.update_agent(state, &AgentState.reset_cache/1)
 
     msg =
       if reason in [:normal, :shutdown],
@@ -852,7 +852,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   @spec scrub_agent_tab_state(state(), pid() | nil, Tab.agent_status()) :: state()
   defp scrub_agent_tab_state(state, session, tab_status \\ :idle) do
     state = AgentAccess.update_agent(state, &AgentState.stop_spinner_timer/1)
-    state = AgentAccess.update_agent(state, &AgentState.clear_session/1)
+    state = AgentAccess.update_agent(state, &AgentState.reset_cache/1)
 
     # Clear session and status on any tab that referenced this session.
     state =

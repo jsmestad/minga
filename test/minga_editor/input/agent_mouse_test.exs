@@ -27,7 +27,6 @@ defmodule MingaEditor.Input.AgentMouseTest do
     {:ok, _prompt_buf} = BufferServer.start_link(content: "")
 
     agent = %AgentState{
-      session: nil,
       runtime: %RuntimeState{status: :idle},
       error: nil,
       spinner_timer: nil,

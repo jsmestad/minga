@@ -72,7 +72,7 @@ defmodule MingaEditor.UI.Picker.Context do
   """
   @spec from_editor_state(State.t()) :: t()
   def from_editor_state(%State{} = state) do
-    agent_session = state.shell_state.agent.session
+    agent_session = MingaEditor.State.AgentAccess.session(state)
 
     %__MODULE__{
       buffers: state.workspace.buffers,

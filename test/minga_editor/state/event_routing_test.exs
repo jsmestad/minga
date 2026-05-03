@@ -13,16 +13,19 @@ defmodule MingaEditor.State.EventRoutingTest do
   defp make_state(opts \\ []) do
     session = opts[:session] || spawn(fn -> :timer.sleep(:infinity) end)
 
+    # Default fixture has only a file tab; tests that exercise per-tab
+    # routing add an agent tab and attach the session via Tab.set_session.
     tb = TabBar.new(Tab.new_file(1, "main.ex"))
 
     state = %EditorState{
       port_manager: self(),
+      shell: MingaEditor.Shell.Traditional,
       workspace: %MingaEditor.Workspace.State{
         viewport: Viewport.new(24, 80)
       },
       shell_state: %MingaEditor.Shell.Traditional.State{
         tab_bar: tb,
-        agent: %AgentState{session: session, runtime: %RuntimeState{status: :idle}}
+        agent: %AgentState{runtime: %RuntimeState{status: :idle}}
       }
     }
 

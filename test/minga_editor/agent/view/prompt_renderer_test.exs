@@ -29,7 +29,6 @@ defmodule MingaEditor.Agent.View.PromptRendererTest do
     BufferServer.set_cursor(prompt_buf, input_cursor)
 
     agent = %AgentState{
-      session: nil,
       runtime: %RuntimeState{status: :idle},
       error: nil,
       spinner_timer: nil,

@@ -26,11 +26,23 @@ defmodule Minga.Integration.MouseTest do
   end
 
   # Injects a stub agent session to avoid the ~700ms provider startup.
+  # The session pid lives on the active tab (or the agent tab once one
+  # exists); this is the only place test code should attach a session,
+  # and the editor reads it through the shell's active_session callback.
   defp inject_fake_session(%{editor: editor} = ctx) do
     {:ok, fake} = StubServer.start_link()
 
     :sys.replace_state(editor, fn state ->
-      MingaEditor.State.AgentAccess.update_agent(state, fn a -> %{a | session: fake} end)
+      tb = state.shell_state.tab_bar
+
+      target_tab =
+        MingaEditor.State.TabBar.find_by_kind(tb, :agent) ||
+          MingaEditor.State.TabBar.active(tb)
+
+      case target_tab do
+        nil -> state
+        tab -> MingaEditor.State.set_tab_session(state, tab.id, fake)
+      end
     end)
 
     ctx

@@ -332,11 +332,9 @@ defmodule MingaEditor.Shell.Board.Input do
         # Subscribe editor to agent events
         MingaAgent.Session.subscribe(pid)
 
-        # Store session on agent state so events route correctly
-        state =
-          MingaEditor.State.AgentAccess.update_agent(state, fn a ->
-            MingaEditor.State.Agent.set_session(a, pid)
-          end)
+        # The session pid lives on the card (set above via Card.attach_session).
+        # The rendering cache on state.shell_state.agent is repopulated when
+        # the user zooms into this card via AgentActivation.activate_for_card/2.
 
         Minga.Log.info(:agent, "Board: started agent session for card #{card_id} (#{model})")
         {board, state}
