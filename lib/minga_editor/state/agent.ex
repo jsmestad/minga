@@ -1,19 +1,25 @@
 defmodule MingaEditor.State.Agent do
   @moduledoc """
-  Agent session lifecycle state: session pid, status, approvals.
+  Agent rendering cache: status, error, pending approval, spinner timer,
+  and the agent buffer pid.
+
+  This struct is **not** the source of truth for the active agent session.
+  The session pid lives on the active `Tab` (Traditional shell) or the
+  zoomed `Card` (Board shell). `MingaEditor.State.AgentAccess.session/1`
+  reads it through the `Shell.active_session/1` callback.
+
+  After a tab switch, `MingaEditor.State.rebuild_agent_from_session/2`
+  repopulates the cache fields below from the incoming tab's session
+  process via `MingaAgent.Session.editor_snapshot/1`.
 
   Domain-only state (status, model, provider, session ID) lives in the
-  composed `MingaAgent.RuntimeState` struct at `runtime`. Presentation
-  state (spinner timer, buffer pid, session history) stays on this struct.
-
-  Lifecycle monitoring (Process.monitor) is handled exclusively by
+  composed `MingaAgent.RuntimeState` struct at `runtime`. Lifecycle
+  monitoring (Process.monitor) is handled exclusively by
   `MingaAgent.SessionManager`, which broadcasts `:agent_session_stopped`
-  events via `Minga.Events`. The Editor subscribes to those events
-  instead of monitoring session PIDs directly.
+  events via `Minga.Events`.
 
   UI state (scroll, prompt, focus, search, toasts) lives in `UIState`
-  on `EditorState.agent_ui`. This module holds only process-aware,
-  action-heavy fields that manage the agent session.
+  on `EditorState.workspace.agent_ui`.
   """
 
   alias MingaAgent.RuntimeState
@@ -24,24 +30,20 @@ defmodule MingaEditor.State.Agent do
   @typedoc "Pending tool approval data."
   @type approval :: MingaAgent.ToolApproval.t()
 
-  @typedoc "Agent session state."
+  @typedoc "Agent rendering cache."
   @type t :: %__MODULE__{
           runtime: RuntimeState.t(),
-          session: pid() | nil,
           error: String.t() | nil,
           spinner_timer: {:ok, :timer.tref()} | nil,
           buffer: pid() | nil,
-          pending_approval: approval() | nil,
-          session_history: [pid()]
+          pending_approval: approval() | nil
         }
 
   defstruct runtime: %RuntimeState{},
-            session: nil,
             error: nil,
             spinner_timer: nil,
             buffer: nil,
-            pending_approval: nil,
-            session_history: []
+            pending_approval: nil
 
   # ── Status ──────────────────────────────────────────────────────────────────
 
@@ -61,73 +63,33 @@ defmodule MingaEditor.State.Agent do
     %{agent | runtime: RuntimeState.set_status(agent.runtime, :error), error: message}
   end
 
-  # ── Session lifecycle ───────────────────────────────────────────────────────
+  # ── Cache reset ─────────────────────────────────────────────────────────────
 
-  @doc "Stores the session pid and sets status to :idle. Archives the previous session. Lifecycle monitoring is handled by SessionManager."
-  @spec set_session(t(), pid()) :: t()
-  def set_session(%__MODULE__{session: nil} = agent, pid) when is_pid(pid) do
-    %{agent | session: pid, runtime: RuntimeState.set_status(agent.runtime, :idle)}
-  end
+  @doc """
+  Resets the rendering cache to idle defaults.
 
-  def set_session(%__MODULE__{session: old_pid} = agent, pid)
-      when is_pid(pid) and is_pid(old_pid) do
-    history = [old_pid | agent.session_history] |> Enum.uniq()
-
+  Called when the active tab/card no longer has a session, or when its
+  session has been torn down. The session pid itself lives on the tab
+  or card, not on this struct, so callers must clear that separately
+  via `EditorState.set_tab_session/3` (Traditional) or by clearing the
+  card's `:session` field (Board).
+  """
+  @spec reset_cache(t()) :: t()
+  def reset_cache(%__MODULE__{} = agent) do
     %{
       agent
-      | session: pid,
-        runtime: RuntimeState.set_status(agent.runtime, :idle),
-        session_history: history
+      | runtime: RuntimeState.set_status(agent.runtime, :idle),
+        error: nil,
+        pending_approval: nil
     }
   end
+
+  # ── Buffer ──────────────────────────────────────────────────────────────────
 
   @doc "Sets the agent buffer pid."
   @spec set_buffer(t(), pid()) :: t()
   def set_buffer(%__MODULE__{} = agent, pid) when is_pid(pid) do
     %{agent | buffer: pid}
-  end
-
-  @doc "Returns all session pids (active + history), most recent first."
-  @spec all_sessions(t()) :: [pid()]
-  def all_sessions(%__MODULE__{session: nil} = agent), do: agent.session_history
-
-  def all_sessions(%__MODULE__{} = agent) do
-    [agent.session | agent.session_history]
-  end
-
-  @doc "Switches to a session from history, moving current to history. Lifecycle monitoring is handled by SessionManager."
-  @spec switch_session(t(), pid()) :: t()
-  def switch_session(%__MODULE__{session: nil} = agent, pid)
-      when is_pid(pid) do
-    history = List.delete(agent.session_history, pid)
-
-    %{
-      agent
-      | session: pid,
-        runtime: RuntimeState.set_status(agent.runtime, :idle),
-        session_history: history
-    }
-  end
-
-  def switch_session(%__MODULE__{session: current} = agent, pid)
-      when is_pid(pid) and is_pid(current) do
-    history =
-      [current | agent.session_history]
-      |> List.delete(pid)
-      |> Enum.uniq()
-
-    %{
-      agent
-      | session: pid,
-        runtime: RuntimeState.set_status(agent.runtime, :idle),
-        session_history: history
-    }
-  end
-
-  @doc "Clears the session reference and resets status to :idle. Lifecycle monitoring is handled by SessionManager."
-  @spec clear_session(t()) :: t()
-  def clear_session(%__MODULE__{} = agent) do
-    %{agent | session: nil, runtime: RuntimeState.set_status(agent.runtime, :idle)}
   end
 
   # ── Tool approval ──────────────────────────────────────────────────────────

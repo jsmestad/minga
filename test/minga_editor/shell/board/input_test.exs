@@ -8,8 +8,6 @@ defmodule MingaEditor.Shell.Board.InputTest do
   use ExUnit.Case, async: true
 
   alias MingaEditor.State, as: EditorState
-  alias MingaAgent.RuntimeState
-  alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Windows
   alias MingaEditor.Viewport
@@ -191,16 +189,18 @@ defmodule MingaEditor.Shell.Board.InputTest do
       assert new_state.shell_state.cards[1].workspace != nil
     end
 
-    test "clears agent session singleton on zoom-out" do
+    test "active agent session goes out of scope on zoom-out" do
+      # The session pid lives on the zoomed card. While zoomed, AgentAccess.session/1
+      # returns it; after zoom-out the card is no longer "the active view"
+      # (zoomed_into == nil), so active_session/1 reports nil. The session
+      # itself is not killed; the card retains its pid for the next zoom-in.
       state = editor_zoomed_into(3, 1)
-
-      # Simulate an active agent session on the board's agent singleton
       fake_pid = spawn(fn -> Process.sleep(:infinity) end)
 
-      board = %{
-        state.shell_state
-        | agent: %AgentState{session: fake_pid, runtime: %RuntimeState{status: :idle}}
-      }
+      board =
+        BoardState.update_card(state.shell_state, 1, fn card ->
+          MingaEditor.Shell.Board.Card.attach_session(card, fake_pid)
+        end)
 
       state = %{state | shell_state: board}
       assert AgentAccess.session(state) == fake_pid
@@ -208,6 +208,8 @@ defmodule MingaEditor.Shell.Board.InputTest do
       {:handled, new_state} = ZoomOut.handle_key(state, @escape, 0)
       assert new_state.shell_state.zoomed_into == nil
       assert AgentAccess.session(new_state) == nil
+      # The card still holds the pid so a subsequent zoom-in restores it.
+      assert new_state.shell_state.cards[1].session == fake_pid
     end
 
     test "passes through when not zoomed" do

@@ -807,12 +807,16 @@ defmodule MingaEditor.Commands.BufferManagement do
     card_status = if reason in [:normal, :shutdown], do: :done, else: :errored
     board = state.shell_state
 
-    # Find and update the card with this session
+    # Find the card with this session and clear its session pid (the
+    # process is dead, so AgentAccess.session/1 must not keep returning
+    # it). Update status in the same pass.
     board =
       case Enum.find(board.cards, fn {_id, card} -> card.session == session_pid end) do
         {card_id, _card} ->
           MingaEditor.Shell.Board.State.update_card(board, card_id, fn card ->
-            MingaEditor.Shell.Board.Card.set_status(card, card_status)
+            card
+            |> MingaEditor.Shell.Board.Card.set_status(card_status)
+            |> MingaEditor.Shell.Board.Card.detach_session()
           end)
 
         nil ->
@@ -821,7 +825,7 @@ defmodule MingaEditor.Commands.BufferManagement do
 
     state = %{state | shell_state: board}
     state = AgentAccess.update_agent(state, &AgentState.stop_spinner_timer/1)
-    state = AgentAccess.update_agent(state, &AgentState.clear_session/1)
+    state = AgentAccess.update_agent(state, &AgentState.reset_cache/1)
 
     msg =
       if reason in [:normal, :shutdown],
@@ -852,7 +856,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   @spec scrub_agent_tab_state(state(), pid() | nil, Tab.agent_status()) :: state()
   defp scrub_agent_tab_state(state, session, tab_status \\ :idle) do
     state = AgentAccess.update_agent(state, &AgentState.stop_spinner_timer/1)
-    state = AgentAccess.update_agent(state, &AgentState.clear_session/1)
+    state = AgentAccess.update_agent(state, &AgentState.reset_cache/1)
 
     # Clear session and status on any tab that referenced this session.
     state =

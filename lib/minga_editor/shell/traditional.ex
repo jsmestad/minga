@@ -290,6 +290,17 @@ defmodule MingaEditor.Shell.Traditional do
     %{shell_state | tab_bar: TabBar.update_tab(tb, tab_id, &Tab.set_session(&1, session_pid))}
   end
 
+  @impl true
+  @spec active_session(ShellState.t()) :: pid() | nil
+  def active_session(%ShellState{tab_bar: nil}), do: nil
+
+  def active_session(%ShellState{tab_bar: tb}) do
+    case TabBar.active(tb) do
+      %Tab{session: pid} -> pid
+      _ -> nil
+    end
+  end
+
   # -------------------------------------------------------------------
   # Buffer lifecycle helpers
   # -------------------------------------------------------------------

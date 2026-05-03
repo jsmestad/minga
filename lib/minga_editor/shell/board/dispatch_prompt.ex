@@ -11,8 +11,6 @@ defmodule MingaEditor.Shell.Board.DispatchPrompt do
   alias MingaAgent.Config, as: AgentConfig
   alias MingaAgent.Session, as: AgentSession
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.Agent, as: AgentState
-  alias MingaEditor.State.AgentAccess
   alias MingaEditor.Shell.Board.Card
   alias MingaEditor.Shell.Board.State, as: BoardState
 
@@ -63,8 +61,9 @@ defmodule MingaEditor.Shell.Board.DispatchPrompt do
         # Subscribe the editor to agent events
         AgentSession.subscribe(pid)
 
-        # Store session reference on the agent state so events route correctly
-        state = AgentAccess.update_agent(state, &AgentState.set_session(&1, pid))
+        # Card.session is the source of truth for routing; the rendering
+        # cache on state.shell_state.agent is populated when the card is
+        # zoomed into via AgentActivation.activate_for_card/2.
 
         # Send the task as the initial prompt
         AgentSession.send_prompt(pid, task)

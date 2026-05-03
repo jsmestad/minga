@@ -28,7 +28,11 @@ defmodule Minga.Test.StubServer do
   def handle_call(:status, _from, state), do: {:reply, :idle, state}
   def handle_call({:subscribe, _pid}, _from, state), do: {:reply, :ok, state}
   def handle_call({:unsubscribe, _pid}, _from, state), do: {:reply, :ok, state}
-  def handle_call(:editor_snapshot, _from, state), do: {:reply, %{}, state}
+
+  def handle_call(:editor_snapshot, _from, state) do
+    {:reply, %{status: :idle, pending_approval: nil, error: nil}, state}
+  end
+
   def handle_call(_msg, _from, state), do: {:reply, :ok, state}
 
   @impl GenServer

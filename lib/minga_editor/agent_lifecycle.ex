@@ -37,9 +37,7 @@ defmodule MingaEditor.AgentLifecycle do
   """
   @spec maybe_start_session(state()) :: state()
   def maybe_start_session(state) do
-    agent = AgentAccess.agent(state)
-
-    if agent.session == nil and LayoutPreset.has_agent_chat?(state) do
+    if AgentAccess.session(state) == nil and LayoutPreset.has_agent_chat?(state) do
       state = Commands.Agent.ensure_agent_session(state)
       cli_flags = Minga.CLI.startup_flags()
       maybe_load_auto_context(state, cli_flags)
@@ -100,11 +98,12 @@ defmodule MingaEditor.AgentLifecycle do
   @spec sync_buffer(state()) :: state()
   def sync_buffer(state) do
     agent = AgentAccess.agent(state)
+    session = AgentAccess.session(state)
 
-    if is_pid(agent.buffer) and is_pid(agent.session) do
+    if is_pid(agent.buffer) and is_pid(session) do
       messages =
         try do
-          AgentSession.messages(agent.session)
+          AgentSession.messages(session)
         catch
           :exit, _ -> []
         end
@@ -270,9 +269,10 @@ defmodule MingaEditor.AgentLifecycle do
   @spec update_styled_cache(state()) :: state()
   def update_styled_cache(state) do
     agent = AgentAccess.agent(state)
+    session = AgentAccess.session(state)
 
-    with true <- is_pid(agent.buffer) and is_pid(agent.session),
-         messages when messages != [] <- safe_messages(agent.session) do
+    with true <- is_pid(agent.buffer) and is_pid(session),
+         messages when messages != [] <- safe_messages(session) do
       styled = compute_styled_messages(state, agent.buffer, messages)
 
       AgentAccess.update_panel(state, fn p ->

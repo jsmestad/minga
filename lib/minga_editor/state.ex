@@ -1208,39 +1208,43 @@ defmodule MingaEditor.State do
   end
 
   @doc """
-  Rebuilds state.agent from the Session process when switching to an
-  agent tab. The Session is the source of truth for status, pending
-  approval, and error. The editor's agent field is a rendering cache,
-  not a source of truth.
+  Rebuilds the agent rendering cache from the Session process when
+  switching to an agent tab. The Session is the source of truth for
+  status, pending approval, and error; the cache lives on
+  `state.shell_state.agent` and is repopulated from the Tab's session
+  pid on every tab switch.
+
+  The session pid itself lives on `Tab.session` (see `set_tab_session/3`),
+  not on the agent cache. `AgentAccess.session/1` reads it through the
+  shell behaviour.
   """
   @spec rebuild_agent_from_session(t(), Tab.t()) :: t()
   def rebuild_agent_from_session(state, %Tab{kind: :agent, session: session_pid})
       when is_pid(session_pid) do
-    snapshot =
-      try do
-        AgentSession.editor_snapshot(session_pid)
-      catch
-        :exit, _ -> nil
-      end
+    case agent_snapshot(session_pid) do
+      nil ->
+        state
 
-    if snapshot do
-      AgentAccess.update_agent(state, fn agent ->
-        %{
-          agent
-          | session: session_pid,
-            runtime: MingaAgent.RuntimeState.set_status(agent.runtime, snapshot.status),
-            pending_approval: snapshot.pending_approval,
-            error: snapshot.error
-        }
-      end)
-    else
-      AgentAccess.update_agent(state, fn agent ->
-        %{agent | session: session_pid}
-      end)
+      snapshot ->
+        AgentAccess.update_agent(state, fn agent ->
+          %{
+            agent
+            | runtime: MingaAgent.RuntimeState.set_status(agent.runtime, snapshot.status),
+              pending_approval: snapshot.pending_approval,
+              error: snapshot.error
+          }
+        end)
     end
   end
 
   def rebuild_agent_from_session(state, _tab), do: state
+
+  @spec agent_snapshot(pid()) :: map() | nil
+  defp agent_snapshot(session_pid) do
+    AgentSession.editor_snapshot(session_pid)
+  catch
+    :exit, _ -> nil
+  end
 
   # ── Mode transitions ────────────────────────────────────────────────────────
 

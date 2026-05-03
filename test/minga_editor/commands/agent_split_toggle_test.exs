@@ -30,8 +30,9 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
     {:ok, prompt_buf} = BufferServer.start_link(content: "")
     agent_buf = BufferSync.start_buffer()
 
+    session_pid = Keyword.get(opts, :session, fake_session())
+
     agent = %AgentState{
-      session: Keyword.get(opts, :session, fake_session()),
       runtime: %RuntimeState{status: :idle},
       error: nil,
       spinner_timer: nil,
@@ -61,6 +62,7 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
 
     state = %EditorState{
       port_manager: self(),
+      shell: MingaEditor.Shell.Traditional,
       workspace: %MingaEditor.Workspace.State{
         viewport: Viewport.new(24, 80),
         editing: VimState.new(),
@@ -91,6 +93,7 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
       }
 
       {tb, at} = TabBar.add(tb, :agent, "Agent")
+      tb = TabBar.update_tab(tb, at.id, &Tab.set_session(&1, session_pid))
       tb = TabBar.update_context(tb, at.id, agent_ctx)
       tb = TabBar.switch_to(tb, file_tab.id)
 
@@ -118,6 +121,7 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
       }
 
       {tb, at} = TabBar.add(tb, :agent, "Agent")
+      tb = TabBar.update_tab(tb, at.id, &Tab.set_session(&1, session_pid))
       tb = TabBar.update_context(tb, at.id, agent_ctx)
       tb = TabBar.switch_to(tb, file_tab.id)
       MingaEditor.State.set_tab_bar(state, tb)

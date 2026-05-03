@@ -73,8 +73,12 @@ defmodule MingaEditor.Agent.SlashCommandTest do
     defp mock_state(opts \\ []) do
       session = Keyword.get(opts, :session)
 
+      tab =
+        MingaEditor.State.Tab.new_agent(1, "Agent") |> MingaEditor.State.Tab.set_session(session)
+
       %EditorState{
         port_manager: nil,
+        shell: MingaEditor.Shell.Traditional,
         workspace: %MingaEditor.Workspace.State{
           viewport: Viewport.new(24, 80),
           editing: VimState.new(),
@@ -82,8 +86,8 @@ defmodule MingaEditor.Agent.SlashCommandTest do
         },
         shell_state: %MingaEditor.Shell.Traditional.State{
           status_msg: nil,
+          tab_bar: MingaEditor.State.TabBar.new(tab),
           agent: %AgentState{
-            session: session,
             runtime: %RuntimeState{status: :idle},
             error: nil,
             spinner_timer: nil,

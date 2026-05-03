@@ -21,20 +21,47 @@ defmodule MingaEditor.Commands.AgentSession do
 
   # ── Session lifecycle ──────────────────────────────────────────────────────
 
-  @doc "Stops the current session and restarts if the panel is visible."
+  @doc """
+  Stops the current session and restarts if the panel is visible.
+
+  Traditional-shell only: restart cycles the session pid on the active
+  tab. The Board shell has its own per-card lifecycle (cards are
+  long-lived and own their session pid through zoom in/out), so a
+  generic "restart" without card context isn't meaningful there. Board
+  callers go through `Shell.Board.Input.start_and_attach_session/4`
+  for new sessions and rely on `:DOWN` handling for cleanup.
+  """
   @spec restart_session(state(), String.t()) :: state()
-  def restart_session(state, message) do
-    if AgentAccess.session(state) do
+  def restart_session(%{shell: MingaEditor.Shell.Traditional} = state, message) do
+    session = AgentAccess.session(state)
+
+    if session do
       try do
-        MingaAgent.SessionManager.stop_session_by_pid(AgentAccess.session(state))
+        MingaAgent.SessionManager.stop_session_by_pid(session)
       catch
         :exit, _ -> :ok
       end
     end
 
-    state = AgentAccess.update_agent(state, &AgentState.clear_session/1)
+    state = state |> clear_active_tab_session() |> reset_agent_cache()
     state = EditorState.set_status(state, message)
     if AgentAccess.panel(state).visible, do: start_agent_session(state), else: state
+  end
+
+  def restart_session(state, _message) do
+    EditorState.set_status(state, "Session restart is not supported on this shell")
+  end
+
+  @spec clear_active_tab_session(state()) :: state()
+  defp clear_active_tab_session(%{shell_state: %{tab_bar: %TabBar{active_id: id}}} = state) do
+    EditorState.set_tab_session(state, id, nil)
+  end
+
+  defp clear_active_tab_session(state), do: state
+
+  @spec reset_agent_cache(state()) :: state()
+  defp reset_agent_cache(state) do
+    AgentAccess.update_agent(state, &AgentState.reset_cache/1)
   end
 
   @doc "Starts a new agent session and subscribes to its events."
@@ -62,11 +89,12 @@ defmodule MingaEditor.Commands.AgentSession do
             state
           end
 
-        state = AgentAccess.update_agent(state, &AgentState.set_session(&1, pid))
-
         # Set the session PID on the agent tab that was just created
         # (or the active agent tab). find_sessionless_agent avoids the
         # ambiguity of find_by_kind(:agent) when multiple agent tabs exist.
+        # Tab.session is the source of truth; the rendering cache on
+        # state.shell_state.agent (status, error, pending_approval) is
+        # populated lazily on tab switch via rebuild_agent_from_session/2.
         state = assign_session_to_tab(state, pid)
 
         # Create an agent group for this session (if one doesn't exist yet)

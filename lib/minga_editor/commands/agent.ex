@@ -71,9 +71,12 @@ defmodule MingaEditor.Commands.Agent do
 
         case find_agent_tab(state) do
           %Tab{id: agent_id} ->
+            # Switch first, then ensure a session exists. AgentAccess.session/1
+            # is per-tab, so the start-if-missing check must run after the
+            # switch — otherwise it would always see nil from the file tab.
             state
-            |> maybe_start_session()
             |> EditorState.switch_tab(agent_id)
+            |> maybe_start_session()
 
           nil ->
             state
@@ -483,40 +486,6 @@ defmodule MingaEditor.Commands.Agent do
       end
 
     EditorState.set_status(state, msg)
-  end
-
-  @doc "Switches to an existing session by pid."
-  @spec switch_to_session(state(), pid()) :: state()
-  def switch_to_session(state, pid) when is_pid(pid) do
-    current = AgentAccess.session(state)
-
-    if pid == current do
-      state
-    else
-      # Unsubscribe from current session if one exists
-      if current do
-        Session.unsubscribe(current)
-      end
-
-      # Subscribe to the target session
-      Session.subscribe(pid)
-
-      # Switch in agent state (moves current to history, target to active)
-      state = update_agent(state, &AgentState.switch_session(&1, pid))
-
-      # Update the Tab's session reference for event routing
-      state =
-        case state do
-          %{shell_state: %{tab_bar: %TabBar{active_id: id}}} ->
-            EditorState.set_tab_session(state, id, pid)
-
-          _ ->
-            state
-        end
-
-      # Reset panel scroll and auto-scroll to reflect new session's content
-      AgentAccess.update_panel(state, fn p -> %{p | scroll: Minga.Editing.new_scroll()} end)
-    end
   end
 
   @doc "Scrolls the chat panel up by half the panel height."
@@ -1060,9 +1029,6 @@ defmodule MingaEditor.Commands.Agent do
     state = restore_queued_to_prompt(state, all_queued)
     EditorState.set_status(state, "Restored #{count} queued #{label} to editor")
   end
-
-  @spec update_agent(state(), (AgentState.t() -> AgentState.t())) :: state()
-  defp update_agent(state, fun), do: AgentAccess.update_agent(state, fun)
 
   @spec update_agent_ui(state(), (UIState.t() -> UIState.t())) :: state()
   defp update_agent_ui(state, fun), do: AgentAccess.update_agent_ui(state, fun)

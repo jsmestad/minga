@@ -78,6 +78,12 @@ defmodule MingaEditor.Shell.Board.Card do
     %{card | session: pid, status: :working}
   end
 
+  @doc "Detaches the agent session PID. Used after the session process has died."
+  @spec detach_session(t()) :: t()
+  def detach_session(%__MODULE__{} = card) do
+    %{card | session: nil}
+  end
+
   @doc "Stores a workspace snapshot on the card."
   @spec store_workspace(t(), map()) :: t()
   def store_workspace(%__MODULE__{} = card, workspace) when is_map(workspace) do

@@ -44,7 +44,6 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       end
 
     agent = %AgentState{
-      session: default_session,
       buffer: Keyword.get(opts, :agent_buffer, nil)
     }
 
@@ -56,11 +55,14 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       }
     }
 
-    file_tab = Tab.new_file(1, "test.ex")
-    tb = TabBar.new(file_tab)
+    # Active tab is an agent tab carrying the session pid; AgentAccess.session/1
+    # reads it through the Traditional shell's active_session/1.
+    agent_tab = Tab.new_agent(1, "Agent") |> Tab.set_session(default_session)
+    tb = TabBar.new(agent_tab)
 
     %EditorState{
       port_manager: nil,
+      shell: MingaEditor.Shell.Traditional,
       workspace: %MingaEditor.Workspace.State{
         viewport: Viewport.new(24, 80),
         editing: VimState.new(),

@@ -22,38 +22,24 @@ defmodule MingaEditor.State.AgentTest do
     end
   end
 
-  describe "session lifecycle" do
-    test "set_session stores pid and sets status to :idle" do
-      pid = spawn(fn -> Process.sleep(:infinity) end)
-      agent = new_agent() |> AgentState.set_session(pid)
-      assert agent.session == pid
-      assert agent.runtime.status == :idle
-    end
-
-    test "set_session archives previous session when replacing" do
-      pid1 = spawn(fn -> Process.sleep(:infinity) end)
-      pid2 = spawn(fn -> Process.sleep(:infinity) end)
-
+  describe "reset_cache" do
+    test "reset_cache clears error, pending_approval, and resets status to :idle" do
       agent =
         new_agent()
-        |> AgentState.set_session(pid1)
-        |> AgentState.set_session(pid2)
-
-      assert agent.session == pid2
-      assert pid1 in agent.session_history
-    end
-
-    test "clear_session nils the session and resets status" do
-      pid = spawn(fn -> Process.sleep(:infinity) end)
-
-      agent =
-        new_agent()
-        |> AgentState.set_session(pid)
+        |> AgentState.set_error("boom")
+        |> AgentState.set_pending_approval(%{tool_call_id: "x"})
         |> AgentState.set_status(:thinking)
-        |> AgentState.clear_session()
+        |> AgentState.reset_cache()
 
-      assert agent.session == nil
+      assert agent.error == nil
+      assert agent.pending_approval == nil
       assert agent.runtime.status == :idle
+    end
+
+    test "reset_cache preserves buffer pid (rendering stays on the same buffer)" do
+      buf = spawn(fn -> Process.sleep(:infinity) end)
+      agent = new_agent() |> AgentState.set_buffer(buf) |> AgentState.reset_cache()
+      assert agent.buffer == buf
     end
   end
 
@@ -63,83 +49,6 @@ defmodule MingaEditor.State.AgentTest do
       assert new_agent() |> AgentState.set_status(:tool_executing) |> AgentState.busy?()
       refute new_agent() |> AgentState.set_status(:idle) |> AgentState.busy?()
       refute AgentState.busy?(new_agent())
-    end
-  end
-
-  describe "session history" do
-    test "set_session archives previous session in history" do
-      pid1 = spawn(fn -> Process.sleep(:infinity) end)
-      pid2 = spawn(fn -> Process.sleep(:infinity) end)
-
-      agent =
-        new_agent()
-        |> AgentState.set_session(pid1)
-        |> AgentState.set_session(pid2)
-
-      assert agent.session == pid2
-      assert pid1 in agent.session_history
-    end
-
-    test "set_session with nil current does not add nil to history" do
-      pid = spawn(fn -> Process.sleep(:infinity) end)
-      agent = new_agent() |> AgentState.set_session(pid)
-      assert agent.session_history == []
-    end
-
-    test "all_sessions returns active + history" do
-      pid1 = spawn(fn -> Process.sleep(:infinity) end)
-      pid2 = spawn(fn -> Process.sleep(:infinity) end)
-
-      agent =
-        new_agent()
-        |> AgentState.set_session(pid1)
-        |> AgentState.set_session(pid2)
-
-      all = AgentState.all_sessions(agent)
-      assert pid2 in all
-      assert pid1 in all
-      assert hd(all) == pid2
-    end
-
-    test "all_sessions returns empty when no session" do
-      assert AgentState.all_sessions(new_agent()) == []
-    end
-
-    test "switch_session swaps active and moves old to history" do
-      pid1 = spawn(fn -> Process.sleep(:infinity) end)
-      pid2 = spawn(fn -> Process.sleep(:infinity) end)
-
-      agent =
-        new_agent()
-        |> AgentState.set_session(pid1)
-        |> AgentState.set_session(pid2)
-        |> AgentState.switch_session(pid1)
-
-      assert agent.session == pid1
-      assert pid2 in agent.session_history
-      refute pid1 in agent.session_history
-    end
-
-    test "switch_session with nil current just activates from history" do
-      pid = spawn(fn -> Process.sleep(:infinity) end)
-      agent = %AgentState{session: nil, session_history: [pid]}
-      agent = AgentState.switch_session(agent, pid)
-      assert agent.session == pid
-      assert agent.session_history == []
-    end
-
-    test "switch_session updates active session without monitoring" do
-      pid1 = spawn(fn -> Process.sleep(:infinity) end)
-      pid2 = spawn(fn -> Process.sleep(:infinity) end)
-
-      agent =
-        new_agent()
-        |> AgentState.set_session(pid1)
-        |> AgentState.set_session(pid2)
-        |> AgentState.switch_session(pid1)
-
-      assert agent.session == pid1
-      assert pid2 in agent.session_history
     end
   end
 end

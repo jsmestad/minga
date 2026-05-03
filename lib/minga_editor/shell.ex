@@ -201,4 +201,18 @@ defmodule MingaEditor.Shell do
   No-op for shells without tabs.
   """
   @callback set_tab_session(shell_state(), tab_id :: term(), pid() | nil) :: shell_state()
+
+  @doc """
+  Returns the agent session pid associated with the user's current view.
+
+  For Traditional, this is the active tab's `:session`. For Board, this is
+  the zoomed card's `:session`. Returns `nil` when no session is in scope
+  (no tab/card, or that tab/card has no session yet).
+
+  This callback is the source of truth for "which agent session is the user
+  looking at right now". The editor's `state.shell_state.agent` struct holds
+  rendering caches (status, error, pending_approval) populated from this pid;
+  the pid itself lives on the tab or card.
+  """
+  @callback active_session(shell_state()) :: pid() | nil
 end

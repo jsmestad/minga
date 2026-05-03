@@ -35,7 +35,6 @@ defmodule MingaEditor.Input.SubStateHandlersTest do
     {:ok, prompt_buf} = BufferServer.start_link(content: "")
 
     agent = %AgentState{
-      session: nil,
       pending_approval: Keyword.get(opts, :pending_approval, nil)
     }
 

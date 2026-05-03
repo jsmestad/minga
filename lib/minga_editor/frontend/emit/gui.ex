@@ -592,7 +592,7 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   defp build_gui_agent_chat_cmd(ctx, caches) do
     active_window = Map.get(ctx.windows.map, ctx.windows.active)
     is_agent_chat = active_window != nil && Content.agent_chat?(active_window.content)
-    session = ctx.shell_state.agent.session
+    session = ctx.shell.active_session(ctx.shell_state)
 
     # Compute fingerprint from cheap state fields to avoid calling
     # AgentSession.messages (expensive GenServer.call that allocates a
@@ -691,7 +691,7 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   defp build_agent_chat_data(ctx, prompt_text) do
     active_window = Map.get(ctx.windows.map, ctx.windows.active)
     is_agent_chat = active_window != nil && Content.agent_chat?(active_window.content)
-    session = ctx.shell_state.agent.session
+    session = ctx.shell.active_session(ctx.shell_state)
 
     if is_agent_chat && session do
       messages_with_ids =
