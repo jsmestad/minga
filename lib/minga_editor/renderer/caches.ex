@@ -13,12 +13,10 @@ defmodule MingaEditor.Renderer.Caches do
   - **Content** (`search_decoration_cache`, `doc_highlight_cache`): consumed by
     `ContentHelpers.build_render_ctx/3`; cleared when the fingerprint changes.
     `block_render_cache` is a within-frame cache reset after each window render.
-  - **Emit** (`emit_font_registry`, `emit_prev_*`, `last_title`, `last_window_bg`):
+  - **Emit** (`emit_prev_*`, `last_title`, `last_window_bg`):
     consumed by `Frontend.Emit` stage 7.
   - **GUI chrome** (`last_gui_*`): fingerprint caches inside `Emit.GUI`.
   """
-
-  alias MingaEditor.UI.FontRegistry
 
   @enforce_keys []
   defstruct [
@@ -34,10 +32,6 @@ defmodule MingaEditor.Renderer.Caches do
     block_render_cache: %{},
 
     # ── Emit stage ────────────────────────────────────────────────────────────
-    # Seed: EditorState.font_registry. Authoritative copy is accumulated by
-    # display_list.ex during draws_to_commands; this field will hold the
-    # seeded value once display_list.ex is migrated to explicit threading.
-    emit_font_registry: nil,
     emit_prev_viewport_tops: %{},
     emit_prev_content_rects: %{},
     emit_prev_gutter_ws: %{},
@@ -72,7 +66,6 @@ defmodule MingaEditor.Renderer.Caches do
           search_decoration_cache: term(),
           doc_highlight_cache: term(),
           block_render_cache: %{term() => term()},
-          emit_font_registry: FontRegistry.t() | nil,
           emit_prev_viewport_tops: %{term() => non_neg_integer()},
           emit_prev_content_rects: %{term() => term()},
           emit_prev_gutter_ws: %{term() => non_neg_integer()},

@@ -157,7 +157,7 @@ defmodule MingaEditor.State do
   This function writes those mutations back after the pipeline completes.
 
   The `render_output` is a `RenderPipeline.Input` struct with the mutated
-  fields. Only `windows`, `shell_state`, and `layout` carry meaningful
+  fields. Only `windows`, `shell_state`, `layout`, and `caches` carry meaningful
   changes; other fields are unchanged.
   """
   @spec apply_render_output(t(), MingaEditor.RenderPipeline.Input.t()) :: t()

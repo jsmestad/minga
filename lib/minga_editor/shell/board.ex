@@ -330,14 +330,8 @@ defmodule MingaEditor.Shell.Board do
     if BoardState.grid_view?(editor_state.shell_state) do
       render_board_grid(editor_state)
     else
-      # Zoomed into a card: dismiss the Board overlay on GUI,
-      # then render the editor workspace normally.
-      if MingaEditor.Frontend.gui?(editor_state.capabilities) do
-        # Send gui_board with visible=false to hide BoardView
-        ctx = EmitContext.from_editor_state(editor_state)
-        MingaEditor.Frontend.Emit.GUI.sync_swiftui_chrome(ctx)
-      end
-
+      # Zoomed into a card: render_buffer runs the full pipeline which includes
+      # Emit.emit → sync_swiftui_chrome, so no explicit chrome call is needed here.
       MingaEditor.Renderer.render_buffer(editor_state)
     end
   end
@@ -348,9 +342,18 @@ defmodule MingaEditor.Shell.Board do
 
     if gui? do
       # GUI: send the gui_board opcode so Swift shows BoardView.
-      # Also send chrome sync (status bar, theme, etc.).
+      # Thread caches so fingerprint-based skipping works across frames.
       ctx = EmitContext.from_editor_state(editor_state)
-      MingaEditor.Frontend.Emit.GUI.sync_swiftui_chrome(ctx)
+
+      {_ctx, new_caches} =
+        MingaEditor.Frontend.Emit.GUI.sync_swiftui_chrome(
+          ctx,
+          nil,
+          nil,
+          editor_state.caches
+        )
+
+      %{editor_state | caches: new_caches}
     else
       # TUI: render card grid as cell grid commands
       vp = editor_state.workspace.viewport
@@ -369,9 +372,8 @@ defmodule MingaEditor.Shell.Board do
 
       commands = DisplayList.to_commands(frame)
       MingaEditor.Frontend.send_commands(editor_state.port_manager, commands)
+      editor_state
     end
-
-    editor_state
   end
 
   @impl true

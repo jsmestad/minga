@@ -121,12 +121,7 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   """
   @spec sync_swiftui_chrome(ctx(), StatusBarData.t() | nil, MinibufferData.t() | nil, Caches.t()) ::
           {ctx(), Caches.t()}
-  def sync_swiftui_chrome(
-        ctx,
-        status_bar_data \\ nil,
-        minibuffer_data \\ nil,
-        caches \\ %Caches{}
-      ) do
+  def sync_swiftui_chrome(ctx, status_bar_data, minibuffer_data, caches) do
     sb_data = status_bar_data || ctx.status_bar_data
 
     # Use map_reduce to thread caches through each builder function.
@@ -154,8 +149,7 @@ defmodule MingaEditor.Frontend.Emit.GUI do
 
     {cmds, caches} =
       Enum.map_reduce(builders, caches, fn build_fn, acc_caches ->
-        {cmd, new_caches} = build_fn.(ctx, acc_caches)
-        {cmd, new_caches}
+        build_fn.(ctx, acc_caches)
       end)
 
     chrome_cmds = Enum.reject(cmds, &is_nil/1)
