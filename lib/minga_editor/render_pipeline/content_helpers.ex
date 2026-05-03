@@ -53,8 +53,13 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
 
   # ── Render context ─────────────────────────────────────────────────────────
 
-  @doc "Builds the per-frame render context for a window."
-  @spec build_render_ctx(state(), Window.t(), map()) :: Context.t()
+  @doc """
+  Builds the per-frame render context for a window.
+
+  Returns the context and an updated state with inter-frame caches
+  (search decorations, document-highlight decorations) written back.
+  """
+  @spec build_render_ctx(state(), Window.t(), map()) :: {Context.t(), state()}
   def build_render_ctx(state, window, params) do
     %{
       viewport: viewport,
@@ -90,25 +95,35 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
     # compose with tree-sitter syntax colors (bg overlay preserving fg).
     # Only rebuild when the match set actually changed (avoid per-frame
     # clear-and-reapply when nothing changed).
-
-    decorations =
-      maybe_update_search_decorations(
+    {decorations, search_cache} =
+      merge_search_decorations(
         decorations,
         search_matches,
         confirm_match,
-        state.theme.search
+        state.theme.search,
+        state.caches.search_decoration_cache
       )
 
-    decorations =
+    {decorations, doc_highlight_cache} =
       if is_active do
         merge_document_highlight_decorations(
           decorations,
           state.workspace.document_highlights,
-          state.theme
+          state.theme,
+          state.caches.doc_highlight_cache
         )
       else
-        decorations
+        {decorations, state.caches.doc_highlight_cache}
       end
+
+    state = %{
+      state
+      | caches: %{
+          state.caches
+          | search_decoration_cache: search_cache,
+            doc_highlight_cache: doc_highlight_cache
+        }
+    }
 
     cursorline_bg =
       if is_active and Config.get(:cursorline) do
@@ -119,7 +134,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
 
     is_gui = Map.get(params, :is_gui, false)
 
-    %Context{
+    ctx = %Context{
       viewport: viewport,
       visual_selection: visual_selection,
       search_matches: search_matches,
@@ -139,6 +154,8 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
       gutter_colors: state.theme.gutter,
       git_colors: state.theme.git
     }
+
+    {ctx, state}
   end
 
   # ── Line rendering ────────────────────────────────────────────────────────
@@ -279,9 +296,11 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
       wrap_index: wrap_index
     }
 
-    {gutters, contents_rev, screen_row, window} =
-      Enum.reduce(visible_line_map, {[], [], 0, window}, fn {buf_line, fold_info},
-                                                            {g, c, screen_row, win} ->
+    # block_render_cache is a within-window Map keyed by block ID.
+    # It's threaded through the reduce and discarded at the end (reset each window).
+    {gutters, contents_rev, screen_row, window, _block_cache} =
+      Enum.reduce(visible_line_map, {[], [], 0, window, %{}}, fn {buf_line, fold_info},
+                                                                 {g, c, screen_row, win, bc} ->
         case fold_info do
           {:virtual_line, vt} ->
             render_pos = %RenderPosition{
@@ -293,7 +312,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
             }
 
             c_cmds = render_virtual_line_entry(vt, render_pos)
-            {g, prepend_all(c, c_cmds), screen_row + 1, win}
+            {g, prepend_all(c, c_cmds), screen_row + 1, win, bc}
 
           {:block, block, line_idx} ->
             render_pos = %RenderPosition{
@@ -304,8 +323,8 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
               content_w: ctx.content_w
             }
 
-            c_cmds = render_block_entry(block, line_idx, render_pos)
-            {g, prepend_all(c, c_cmds), screen_row + 1, win}
+            {c_cmds, bc} = render_block_entry(block, line_idx, render_pos, bc)
+            {g, prepend_all(c, c_cmds), screen_row + 1, win, bc}
 
           {:decoration_fold, %FoldRegion{placeholder: placeholder} = fold}
           when placeholder != nil ->
@@ -320,22 +339,22 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
             fold_g = fold_gutter_indicator(fold_info, render_pos)
             segments = placeholder.(fold.start_line, fold.end_line, ctx.content_w)
             c_cmds = render_placeholder_segments(segments, render_pos)
-            {fold_g ++ g, prepend_all(c, c_cmds), screen_row + 1, win}
+            {fold_g ++ g, prepend_all(c, c_cmds), screen_row + 1, win, bc}
 
           _ ->
-            render_normal_entry(
-              buf_line,
-              fold_info,
-              screen_row,
-              render_opts,
-              win,
-              {g, c}
-            )
+            {ng, nc, new_screen_row, new_win} =
+              render_normal_entry(
+                buf_line,
+                fold_info,
+                screen_row,
+                render_opts,
+                win,
+                {g, c}
+              )
+
+            {ng, nc, new_screen_row, new_win, bc}
         end
       end)
-
-    # Clean up per-frame block render cache from process dictionary
-    clear_block_render_cache()
 
     {Enum.reverse(gutters), Enum.reverse(contents_rev), screen_row, window}
   end
@@ -432,14 +451,6 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
       concealed = ConcealRange.concealed_width_on_line(conceal, buf_line, line_len)
       replacement = ConcealRange.display_width(conceal)
       acc + max(concealed - replacement, 0)
-    end)
-  end
-
-  defp clear_block_render_cache do
-    Process.get_keys()
-    |> Enum.each(fn
-      {:block_render_cache, _} = key -> Process.delete(key)
-      _ -> :ok
     end)
   end
 
@@ -612,23 +623,24 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
 
   # Renders a single row of a block decoration by invoking its render callback
   # and extracting the line_idx-th row from the result.
-  @spec render_block_entry(Decorations.BlockDecoration.t(), non_neg_integer(), RenderPosition.t()) ::
-          [DisplayList.draw()]
-  defp render_block_entry(block, line_idx, pos) do
-    # Cache render callback result per block ID to avoid re-invoking
-    # for each line_idx of a multi-line block.
-    cache_key = {:block_render_cache, block.id}
-
-    lines =
-      case Process.get(cache_key) do
+  # block_cache is a within-window map threaded through the rendering loop;
+  # it avoids re-invoking the render callback for each line_idx of a multi-line block.
+  @spec render_block_entry(
+          Decorations.BlockDecoration.t(),
+          non_neg_integer(),
+          RenderPosition.t(),
+          %{term() => term()}
+        ) :: {[DisplayList.draw()], %{term() => term()}}
+  defp render_block_entry(block, line_idx, pos, block_cache) do
+    {lines, block_cache} =
+      case Map.get(block_cache, block.id) do
         nil ->
           result = block.render.(pos.content_w)
           normalized = Decorations.BlockDecoration.normalize_render_result(result)
-          Process.put(cache_key, normalized)
-          normalized
+          {normalized, Map.put(block_cache, block.id, normalized)}
 
         cached ->
-          cached
+          {cached, block_cache}
       end
 
     segments = Enum.at(lines, line_idx, [])
@@ -641,7 +653,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
         {[draw | acc], col + width}
       end)
 
-    Enum.reverse(draws)
+    {Enum.reverse(draws), block_cache}
   end
 
   @doc "Prepends draw commands to an accumulator."
@@ -702,13 +714,6 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
     end
   end
 
-  defp maybe_update_search_decorations(decs, matches, confirm_match, colors) do
-    cached = Process.get(:search_decoration_cache)
-    {result, new_cache} = merge_search_decorations(decs, matches, confirm_match, colors, cached)
-    Process.put(:search_decoration_cache, new_cache)
-    result
-  end
-
   defp rebuild_search_decorations(decs, [], _confirm, _colors) do
     Decorations.remove_group(decs, :search)
   end
@@ -751,28 +756,27 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
   # ── Document highlight decorations ──────────────────────────────────────────
 
   # Merges LSP document highlights into decorations with caching.
-  # Uses a process-dictionary cache keyed on the highlight list and base
-  # decorations version, matching the search highlight caching pattern.
+  # Returns {merged_decorations, updated_cache}.
   @spec merge_document_highlight_decorations(
           Decorations.t(),
           [Minga.LSP.DocumentHighlight.t()] | nil,
-          MingaEditor.UI.Theme.t()
-        ) :: Decorations.t()
-  defp merge_document_highlight_decorations(decs, nil, _theme), do: decs
-  defp merge_document_highlight_decorations(decs, [], _theme), do: decs
+          MingaEditor.UI.Theme.t(),
+          term()
+        ) :: {Decorations.t(), term()}
+  defp merge_document_highlight_decorations(decs, nil, _theme, cache), do: {decs, cache}
+  defp merge_document_highlight_decorations(decs, [], _theme, cache), do: {decs, cache}
 
-  defp merge_document_highlight_decorations(decs, highlights, theme) do
-    cached = Process.get(:doc_highlight_cache)
+  defp merge_document_highlight_decorations(decs, highlights, theme, cached) do
     fingerprint = {highlights, decs.version}
 
     case cached do
       {^fingerprint, cached_decs} ->
-        cached_decs
+        {cached_decs, cached}
 
       _ ->
         result = rebuild_document_highlight_decorations(decs, highlights, theme)
-        Process.put(:doc_highlight_cache, {fingerprint, result})
-        result
+        new_cache = {fingerprint, result}
+        {result, new_cache}
     end
   end
 

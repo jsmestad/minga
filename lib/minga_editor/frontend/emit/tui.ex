@@ -23,6 +23,7 @@ defmodule MingaEditor.Frontend.Emit.TUI do
   alias MingaEditor.Layout
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.Frontend.Protocol
+  alias MingaEditor.Renderer.Caches
 
   @typedoc "Emit context for the TUI stage."
   @type ctx :: Context.t()
@@ -43,9 +44,9 @@ defmodule MingaEditor.Frontend.Emit.TUI do
   Detects scroll regions from tracking state and uses scroll region
   optimization when possible, otherwise does a full redraw.
   """
-  @spec build_commands(Frame.t(), ctx()) :: [binary()]
-  def build_commands(frame, ctx) do
-    scroll_deltas = detect_scroll_regions(ctx)
+  @spec build_commands(Frame.t(), ctx(), Caches.t()) :: [binary()]
+  def build_commands(frame, ctx, caches) do
+    scroll_deltas = detect_scroll_regions(ctx, caches)
     build_commands_from_deltas(frame, scroll_deltas)
   end
 
@@ -80,10 +81,10 @@ defmodule MingaEditor.Frontend.Emit.TUI do
 
   # ── Scroll region detection ──────────────────────────────────────────────
 
-  @spec detect_scroll_regions(ctx()) :: [scroll_delta()] | nil
-  defp detect_scroll_regions(ctx) do
+  @spec detect_scroll_regions(ctx(), Caches.t()) :: [scroll_delta()] | nil
+  defp detect_scroll_regions(ctx, caches) do
     if scroll_optimization_enabled?() do
-      detect_scroll_regions_impl(ctx)
+      detect_scroll_regions_impl(ctx, caches)
     else
       nil
     end
@@ -94,17 +95,17 @@ defmodule MingaEditor.Frontend.Emit.TUI do
   @spec scroll_optimization_enabled?() :: boolean()
   defp scroll_optimization_enabled?, do: false
 
-  @spec detect_scroll_regions_impl(ctx()) :: [scroll_delta()] | nil
-  defp detect_scroll_regions_impl(ctx) do
-    prev_tops = Process.get(:emit_prev_viewport_tops)
-    prev_rects = Process.get(:emit_prev_content_rects)
-    prev_gutter_ws = Process.get(:emit_prev_gutter_ws)
+  @spec detect_scroll_regions_impl(ctx(), Caches.t()) :: [scroll_delta()] | nil
+  defp detect_scroll_regions_impl(ctx, caches) do
+    prev_tops = caches.emit_prev_viewport_tops
+    prev_rects = caches.emit_prev_content_rects
+    prev_gutter_ws = caches.emit_prev_gutter_ws
 
-    if is_nil(prev_tops) or is_nil(prev_rects) or is_nil(prev_gutter_ws) do
+    if prev_tops == %{} or prev_rects == %{} or prev_gutter_ws == %{} do
       nil
     else
       layout = ctx.layout
-      collect_scroll_deltas(ctx, layout, prev_tops, prev_rects, prev_gutter_ws)
+      collect_scroll_deltas(ctx, layout, prev_tops, prev_rects, prev_gutter_ws, caches)
     end
   end
 
@@ -113,16 +114,17 @@ defmodule MingaEditor.Frontend.Emit.TUI do
           Layout.t(),
           %{pos_integer() => non_neg_integer()},
           %{pos_integer() => Layout.rect()},
-          %{pos_integer() => non_neg_integer()}
+          %{pos_integer() => non_neg_integer()},
+          Caches.t()
         ) :: [scroll_delta()] | nil
-  defp collect_scroll_deltas(ctx, layout, prev_tops, prev_rects, prev_gutter_ws) do
+  defp collect_scroll_deltas(ctx, layout, prev_tops, prev_rects, prev_gutter_ws, caches) do
     current_win_ids = MapSet.new(Map.keys(layout.window_layouts))
     prev_win_ids = MapSet.new(Map.keys(prev_tops))
 
     if current_win_ids != prev_win_ids do
       nil
     else
-      prev_versions = Process.get(:emit_prev_buf_versions, %{})
+      prev_versions = caches.emit_prev_buf_versions
 
       prev = %{
         tops: prev_tops,

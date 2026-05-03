@@ -47,6 +47,7 @@ defmodule MingaEditor.RenderPipeline.Input do
   alias MingaEditor.Shell.Board.State, as: BoardState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.LSP, as: LSPState
+  alias MingaEditor.Renderer.Caches
   alias MingaEditor.UI.FontRegistry
   alias MingaEditor.UI.Panel.MessageStore
   alias MingaEditor.UI.Theme
@@ -68,7 +69,9 @@ defmodule MingaEditor.RenderPipeline.Input do
     :lsp,
     :parser_status,
     # Workspace as a plain map (enables state.workspace.X pattern-matching)
-    :workspace
+    :workspace,
+    # Render-pipeline caches (replaces process-dictionary entries)
+    caches: %Caches{}
   ]
 
   @typedoc """
@@ -106,6 +109,7 @@ defmodule MingaEditor.RenderPipeline.Input do
           layout: Layout.t() | nil,
           lsp: LSPState.t(),
           parser_status: atom(),
+          caches: Caches.t(),
           workspace: workspace()
         }
 
@@ -132,6 +136,7 @@ defmodule MingaEditor.RenderPipeline.Input do
       layout: state.layout,
       lsp: state.lsp,
       parser_status: state.parser_status,
+      caches: state.caches,
       workspace: %{
         windows: ws.windows,
         buffers: ws.buffers,

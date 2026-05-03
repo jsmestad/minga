@@ -75,23 +75,22 @@ defmodule MingaEditor.RenderPipeline.ChromeDirtyTest do
     test "second render with unchanged state skips chrome rebuild" do
       state = TestHelpers.base_state()
 
-      # First render: builds chrome fresh, caches fingerprint
-      _state = TestHelpers.run_pipeline(state)
-      fp_after_first = Process.get(:chrome_prev_fingerprint)
-      chrome_after_first = Process.get(:chrome_prev_result)
+      # First render: builds chrome fresh, caches fingerprint in returned state.
+      state1 = TestHelpers.run_pipeline(state)
+      fp_after_first = state1.caches.chrome_prev_fingerprint
+      chrome_after_first = state1.caches.chrome_prev_result
 
       assert fp_after_first != nil, "fingerprint should be cached after first render"
       assert chrome_after_first != nil, "chrome result should be cached after first render"
 
-      # Second render: fingerprint should match, reusing cached chrome
-      _state = TestHelpers.run_pipeline(state)
-      fp_after_second = Process.get(:chrome_prev_fingerprint)
-      chrome_after_second = Process.get(:chrome_prev_result)
+      # Second render: must thread state1 so caches survive between frames.
+      state2 = TestHelpers.run_pipeline(state1)
+      fp_after_second = state2.caches.chrome_prev_fingerprint
+      chrome_after_second = state2.caches.chrome_prev_result
 
       assert fp_after_second == fp_after_first,
              "fingerprint should be stable across unchanged frames"
 
-      # Same object reference means chrome was reused, not rebuilt
       assert chrome_after_second === chrome_after_first
     end
 
@@ -99,16 +98,16 @@ defmodule MingaEditor.RenderPipeline.ChromeDirtyTest do
       state = TestHelpers.base_state()
       buf = state.workspace.buffers.active
 
-      # First render
-      _state = TestHelpers.run_pipeline(state)
-      fp_before = Process.get(:chrome_prev_fingerprint)
+      # First render.
+      state1 = TestHelpers.run_pipeline(state)
+      fp_before = state1.caches.chrome_prev_fingerprint
 
-      # Move cursor (changes status bar data)
+      # Move cursor (changes status bar data).
       Minga.Buffer.move_to(buf, {1, 0})
 
-      # Second render: fingerprint should differ, forcing rebuild
-      _state = TestHelpers.run_pipeline(state)
-      fp_after = Process.get(:chrome_prev_fingerprint)
+      # Second render with caches from first frame so fingerprint comparison works.
+      state2 = TestHelpers.run_pipeline(state1)
+      fp_after = state2.caches.chrome_prev_fingerprint
 
       assert fp_before != fp_after, "cursor move should change chrome fingerprint"
     end
