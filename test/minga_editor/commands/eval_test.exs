@@ -83,13 +83,13 @@ defmodule MingaEditor.Commands.EvalTest do
     test "undefined variable returns error" do
       state = build_state()
 
-      # Capture stderr to suppress compiler diagnostic noise from Code.eval_string
-      _stderr =
-        ExUnit.CaptureIO.capture_io(:stderr, fn ->
-          send(self(), {:result, Eval.execute(state, {:eval_expression, "undefined_var"})})
-        end)
-
-      assert_received {:result, result}
+      # Note: `Code.eval_string("undefined_var")` writes a compiler diagnostic
+      # to stderr. We used to wrap this in `ExUnit.CaptureIO.capture_io(:stderr,
+      # ...)` to keep test output clean, but that races with other async tests
+      # over the global :standard_error process and crashes ExUnit.CaptureServer
+      # on CI (see PR #1442 for the failure trace). The diagnostic line is
+      # tolerable; correctness is what we care about here.
+      result = Eval.execute(state, {:eval_expression, "undefined_var"})
 
       assert result.shell_state.status_msg =~ "**"
     end
