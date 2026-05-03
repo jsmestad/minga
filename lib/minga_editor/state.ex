@@ -253,6 +253,11 @@ defmodule MingaEditor.State do
   @spec set_agent(t(), AgentState.t()) :: t()
   def set_agent(s, agent), do: update_shell_state(s, &ShellState.set_agent(&1, agent))
 
+  @spec modal(t()) :: MingaEditor.State.ModalOverlay.t()
+  def modal(%{shell_state: ss}), do: ShellState.modal(ss)
+  @spec set_modal(t(), MingaEditor.State.ModalOverlay.t()) :: t()
+  def set_modal(s, modal), do: update_shell_state(s, &ShellState.set_modal(&1, modal))
+
   # ── Convenience accessors ─────────────────────────────────────────────────
 
   @doc "Returns the active buffer pid."
