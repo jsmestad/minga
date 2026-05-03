@@ -2,17 +2,26 @@ defmodule MingaEditor.State.AgentAccess do
   @moduledoc """
   Direct accessors for agent state on EditorState.
 
-  Agent state is split across two locations:
+  Agent-related state is split across three locations:
 
-  - `state.agent` (`MingaEditor.State.Agent`) — session lifecycle (PIDs, monitors, status).
-    This is a global field on EditorState (not per-tab).
-  - `state.workspace.agent_ui` (`Agent.UIState`) — full UI state wrapping Panel and View.
-    This is a per-tab field in the workspace.
-  - `state.workspace.agent_ui.panel` (`UIState.Panel`) — prompt editing and chat display
-  - `state.workspace.agent_ui.view` (`UIState.View`) — layout, search, preview, toasts
+  - `state.shell_state.agent` (`MingaEditor.State.Agent`) — rendering
+    cache for the user's current view. Holds `runtime` (status), `error`,
+    `pending_approval`, `spinner_timer`, and `buffer`. Repopulated on
+    every tab/card switch from the active session's
+    `MingaAgent.Session.editor_snapshot/1`. **Not the source of truth
+    for the session pid.**
+  - The active session pid lives on `Tab.session` (Traditional shell)
+    or `Card.session` (Board shell). `session/1` reads it through
+    `Shell.active_session/1`.
+  - `state.workspace.agent_ui` (`Agent.UIState`) — full UI state
+    wrapping Panel and View. Per-tab.
+    - `state.workspace.agent_ui.panel` (`UIState.Panel`) — prompt
+      editing and chat display.
+    - `state.workspace.agent_ui.view` (`UIState.View`) — layout,
+      search, preview, toasts.
 
-  This module provides read/write functions so callers don't need to know
-  the field layout.
+  This module provides read/write functions so callers don't need to
+  know the field layout.
   """
 
   alias MingaEditor.Agent.UIState

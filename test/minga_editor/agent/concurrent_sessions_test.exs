@@ -103,12 +103,13 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
     end
   end
 
-  describe "tab switch mid-stream" do
-    test "mid-stream session is unaffected when its tab becomes inactive" do
-      # The "stream" here is represented by the session being alive and
-      # busy. Switching away from its tab must not kill it, must not
-      # route its events to the wrong tab (we read session pid by tab),
-      # and the originating tab's session pid must still be reachable.
+  describe "tab switch via switch_tab/2" do
+    test "switch_tab leaves the outgoing session pid reachable on its tab" do
+      # Note: per-tab event *routing* (so an event for the streaming
+      # session lands on its tab's UI, not the active tab's) is
+      # implemented in #1430. This test covers the lifecycle invariant
+      # that #1428 owns: after switching away from a tab, its session
+      # pid is still alive and still attached to the original tab.
       {:ok, streaming} = StubServer.start_link()
       {:ok, idle} = StubServer.start_link()
 
@@ -120,23 +121,52 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
       state = base_state(tabs, 1)
       assert AgentAccess.session(state) == streaming
 
-      # Switch from tab 1 to tab 2 while tab 1's session is "streaming".
-      switched =
-        EditorState.set_tab_bar(state, %{state.shell_state.tab_bar | active_id: 2})
+      # Use the public switch_tab/2 path so the :rebuild_agent_session
+      # effect runs; that's how the Editor switches tabs in production.
+      switched = EditorState.switch_tab(state, 2)
 
-      # Tab 2's session is now in scope; tab 1's session is still alive.
+      # Tab 2's session is now in scope; tab 1's session is still alive
+      # and still owned by tab 1.
       assert AgentAccess.session(switched) == idle
       assert Process.alive?(streaming)
 
-      # Tab 1's session pid is still reachable via Tab.session.
       tab_one = Enum.find(switched.shell_state.tab_bar.tabs, &(&1.id == 1))
       assert tab_one.session == streaming
 
-      # Switching back returns the streaming session as the active one.
-      back =
-        EditorState.set_tab_bar(switched, %{switched.shell_state.tab_bar | active_id: 1})
-
+      # Switching back restores the streaming session as the active one.
+      back = EditorState.switch_tab(switched, 1)
       assert AgentAccess.session(back) == streaming
+    end
+
+    test "switch_tab repopulates the rendering cache from the incoming tab's session" do
+      # The session struct on shell_state.agent is a rendering cache,
+      # not the source of truth. After switch_tab/2, status/error/
+      # pending_approval should reflect the *incoming* tab's session.
+      {:ok, session_a} = StubServer.start_link()
+      {:ok, session_b} = StubServer.start_link()
+
+      tabs = [
+        Tab.new_agent(1, "A") |> Tab.set_session(session_a),
+        Tab.new_agent(2, "B") |> Tab.set_session(session_b)
+      ]
+
+      state = base_state(tabs, 1)
+
+      # Pre-stale the cache so we can prove the rebuild happened: set a
+      # bogus error string. After switching tabs, rebuild_agent_from_session/2
+      # should overwrite it from session_b's snapshot (StubServer returns
+      # error: nil).
+      state =
+        AgentAccess.update_agent(state, fn a ->
+          %{a | error: "stale error from previous render"}
+        end)
+
+      switched = EditorState.switch_tab(state, 2)
+      cache = AgentAccess.agent(switched)
+
+      assert cache.error == nil
+      assert cache.runtime.status == :idle
+      assert cache.pending_approval == nil
     end
   end
 end

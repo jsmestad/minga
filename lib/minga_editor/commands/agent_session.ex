@@ -21,9 +21,18 @@ defmodule MingaEditor.Commands.AgentSession do
 
   # ── Session lifecycle ──────────────────────────────────────────────────────
 
-  @doc "Stops the current session and restarts if the panel is visible."
+  @doc """
+  Stops the current session and restarts if the panel is visible.
+
+  Traditional-shell only: restart cycles the session pid on the active
+  tab. The Board shell has its own per-card lifecycle (cards are
+  long-lived and own their session pid through zoom in/out), so a
+  generic "restart" without card context isn't meaningful there. Board
+  callers go through `Shell.Board.Input.start_and_attach_session/4`
+  for new sessions and rely on `:DOWN` handling for cleanup.
+  """
   @spec restart_session(state(), String.t()) :: state()
-  def restart_session(state, message) do
+  def restart_session(%{shell: MingaEditor.Shell.Traditional} = state, message) do
     session = AgentAccess.session(state)
 
     if session do
@@ -37,6 +46,10 @@ defmodule MingaEditor.Commands.AgentSession do
     state = state |> clear_active_tab_session() |> reset_agent_cache()
     state = EditorState.set_status(state, message)
     if AgentAccess.panel(state).visible, do: start_agent_session(state), else: state
+  end
+
+  def restart_session(state, _message) do
+    EditorState.set_status(state, "Session restart is not supported on this shell")
   end
 
   @spec clear_active_tab_session(state()) :: state()
