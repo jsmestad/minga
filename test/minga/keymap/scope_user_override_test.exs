@@ -6,10 +6,7 @@ defmodule Minga.Keymap.Scope.UserOverrideTest do
   alias Minga.Keymap.Scope
 
   setup do
-    keymap_server =
-      String.to_atom("scope_override_#{System.unique_integer([:positive])}_keymap")
-
-    start_supervised!({KeymapActive, name: keymap_server})
+    keymap_server = start_supervised!({KeymapActive, name: nil})
     previous_keymap_server = Process.put(:minga_config_keymap, keymap_server)
 
     on_exit(fn ->

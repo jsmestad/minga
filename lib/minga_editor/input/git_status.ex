@@ -32,7 +32,12 @@ defmodule MingaEditor.Input.GitStatus do
 
       binding_state = Minga.Editing.binding_state(state)
 
-      case Keymap.resolve_scoped_key(:git_status, binding_state, key, keymap_context(state)) do
+      case Keymap.resolve_scoped_key(
+             :git_status,
+             binding_state,
+             key,
+             EditorState.keymap_context(state)
+           ) do
         {:command, cmd} ->
           {:handled, execute_command(state, cmd)}
 
@@ -164,9 +169,6 @@ defmodule MingaEditor.Input.GitStatus do
   end
 
   defp execute_command(state, _cmd), do: state
-
-  @spec keymap_context(EditorState.t()) :: [{:keymap_server, GenServer.server()}]
-  defp keymap_context(state), do: [keymap_server: EditorState.keymap_server(state)]
 
   # ── TUI state helpers ──────────────────────────────────────────────────
 

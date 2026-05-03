@@ -49,13 +49,10 @@ defmodule MingaEditor.Input.DiffReview do
   defp dispatch_diff_key(state, cp) do
     key = {cp, 0}
 
-    case Keymap.resolve_scoped_key(:agent, :normal, key, keymap_context(state)) do
+    case Keymap.resolve_scoped_key(:agent, :normal, key, EditorState.keymap_context(state)) do
       {:command, command} -> {:handled, Commands.execute(state, command)}
       {:prefix, _node} -> {:handled, state}
       :not_found -> {:handled, state}
     end
   end
-
-  @spec keymap_context(EditorState.t()) :: [{:keymap_server, GenServer.server()}]
-  defp keymap_context(state), do: [keymap_server: EditorState.keymap_server(state)]
 end

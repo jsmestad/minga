@@ -21,10 +21,7 @@ defmodule Minga.ConfigTest do
         Options.set(:clipboard, :none)
     end
 
-    keymap_server =
-      String.to_atom("minga_test_keymap_#{System.unique_integer([:positive])}_config_test")
-
-    start_supervised!({KeymapActive, name: keymap_server})
+    keymap_server = start_supervised!({KeymapActive, name: nil})
     previous_keymap_server = Process.put(:minga_config_keymap, keymap_server)
 
     case CommandRegistry.start_link() do

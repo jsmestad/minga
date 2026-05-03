@@ -108,7 +108,9 @@ defmodule Minga.Keymap do
 
   @doc "Removes a key binding from a mode."
   @spec unbind(atom(), String.t()) :: :ok | {:error, String.t()}
+  @spec unbind(GenServer.server(), atom(), String.t()) :: :ok | {:error, String.t()}
   defdelegate unbind(mode, key_str), to: Active
+  defdelegate unbind(server, mode, key_str), to: Active
 
   @doc "Resets all bindings to defaults (discards user overrides)."
   @spec reset() :: :ok

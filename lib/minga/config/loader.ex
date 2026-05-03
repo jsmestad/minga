@@ -163,9 +163,15 @@ defmodule Minga.Config.Loader do
 
   # ── Private ─────────────────────────────────────────────────────────────────
 
+  # The process dictionary bridges `keymap_server` into `Minga.Config.bind/3,4,5`,
+  # which is invoked synchronously while `.exs` configs evaluate. Code that
+  # `Minga.Config.bind` from a separate process (e.g., a GenServer started
+  # by an extension callback) won't see this dict and will fall back to the
+  # global `Minga.Keymap.Active`. Extensions are skipped in test mode, so
+  # this only affects long-lived runtime callers.
   @spec load_all(keymap_server()) :: state()
   defp load_all(keymap_server) do
-    previous_server = Process.put(:minga_config_keymap, keymap_server)
+    previous_keymap_server = Process.put(:minga_config_keymap, keymap_server)
 
     try do
       config_path = resolve_config_path()
@@ -229,10 +235,10 @@ defmodule Minga.Config.Loader do
         keymap_server: keymap_server
       }
     after
-      if is_nil(previous_server) do
+      if is_nil(previous_keymap_server) do
         Process.delete(:minga_config_keymap)
       else
-        Process.put(:minga_config_keymap, previous_server)
+        Process.put(:minga_config_keymap, previous_keymap_server)
       end
     end
   end

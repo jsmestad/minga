@@ -145,8 +145,12 @@ defmodule MingaEditor.State do
 
   @doc "Returns the keymap server used for scope and binding lookups."
   @spec keymap_server(t()) :: keymap_server()
-  def keymap_server(%__MODULE__{keymap_server: nil}), do: Minga.Keymap.Active
   def keymap_server(%__MODULE__{keymap_server: keymap_server}), do: keymap_server
+
+  @doc "Returns the keymap context keyword list passed to scoped key resolution."
+  @spec keymap_context(t()) :: [{:keymap_server, keymap_server()}]
+  def keymap_context(%__MODULE__{} = state),
+    do: [keymap_server: keymap_server(state)]
 
   # ── Workspace helpers ──────────────────────────────────────────────────────
 

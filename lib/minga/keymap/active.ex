@@ -68,14 +68,29 @@ defmodule Minga.Keymap.Active do
 
   # ── GenServer (table lifecycle only) ────────────────────────────────────────
 
-  @doc "Starts the keymap store and creates the backing ETS table."
+  @doc """
+  Starts the keymap store and creates the backing ETS table.
+
+  Pass `name: nil` to start anonymously (no registered name, unnamed ETS
+  table). Useful for isolated test fixtures: pass the returned pid to
+  server-aware functions instead of generating per-test atoms.
+  """
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
-    {name, _opts} = Keyword.pop(opts, :name, __MODULE__)
-    GenServer.start_link(__MODULE__, name, name: name)
+    case Keyword.fetch(opts, :name) do
+      {:ok, nil} -> GenServer.start_link(__MODULE__, :anonymous, [])
+      {:ok, name} -> GenServer.start_link(__MODULE__, name, name: name)
+      :error -> GenServer.start_link(__MODULE__, __MODULE__, name: __MODULE__)
+    end
   end
 
   @impl GenServer
+  def init(:anonymous) do
+    table = :ets.new(:keymap_active, [:set, :public, read_concurrency: true])
+    seed_defaults(table)
+    {:ok, %{table: table}}
+  end
+
   def init(name) do
     table = :ets.new(table_name(name), [:set, :public, :named_table, read_concurrency: true])
     seed_defaults(table)
