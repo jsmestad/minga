@@ -129,8 +129,8 @@ defmodule MingaEditor.RenderPipeline do
 
     # Stage 5: Chrome (skip rebuild when inputs unchanged)
     chrome_fp = Input.chrome_fingerprint(input)
-    prev_chrome_fp = Process.get(:chrome_prev_fingerprint)
-    prev_chrome = Process.get(:chrome_prev_result)
+    prev_chrome_fp = input.caches.chrome_prev_fingerprint
+    prev_chrome = input.caches.chrome_prev_result
 
     chrome =
       if chrome_fp == prev_chrome_fp and prev_chrome != nil do
@@ -142,8 +142,10 @@ defmodule MingaEditor.RenderPipeline do
         end)
       end
 
-    Process.put(:chrome_prev_fingerprint, chrome_fp)
-    Process.put(:chrome_prev_result, chrome)
+    input = %{
+      input
+      | caches: %{input.caches | chrome_prev_fingerprint: chrome_fp, chrome_prev_result: chrome}
+    }
 
     # Cache click regions on input for mouse hit-testing write-back
     ss = input.shell_state
@@ -166,8 +168,8 @@ defmodule MingaEditor.RenderPipeline do
     # Stage 7: Emit
     Telemetry.span([:minga, :render, :stage], %{stage: :emit}, fn ->
       ctx = MingaEditor.Frontend.Emit.Context.from_editor_state(input)
-      Emit.emit(frame, ctx, chrome)
-      input
+      updated_caches = Emit.emit(frame, ctx, chrome, input.caches)
+      %{input | caches: updated_caches}
     end)
   end
 

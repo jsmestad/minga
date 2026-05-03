@@ -28,6 +28,7 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   alias MingaEditor.DisplayList.Frame
   alias MingaEditor.Layout
   alias MingaEditor.MinibufferData
+  alias MingaEditor.Renderer.Caches
   alias MingaEditor.Shell.Traditional.Chrome.Helpers, as: ChromeHelpers
   alias MingaEditor.RenderPipeline.ContentHelpers
   alias MingaEditor.State.TabBar
@@ -108,110 +109,119 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   send as separate port messages after the atomic Metal frame.
 
   Each chrome component uses fingerprint-based change detection via the
-  process dictionary to skip re-encoding and re-sending when nothing
-  changed. During j/k scroll, only the status bar (cursor position)
-  changes; everything else is skipped. All changed chrome commands are
-  batched into a single `MingaEditor.Frontend.send_commands` call to reduce
-  port write overhead.
+  `Caches` struct to skip re-encoding and re-sending when nothing changed.
+  During j/k scroll, only the status bar (cursor position) changes;
+  everything else is skipped. All changed chrome commands are batched into
+  a single `MingaEditor.Frontend.send_commands` call to reduce port write
+  overhead.
 
   `status_bar_data` is pre-computed by the Chrome stage and passed through
   to avoid re-calling Buffer for cursor/file info on the same frame.
   When nil (e.g. non-GUI fallback paths), it is computed here.
   """
-  @spec sync_swiftui_chrome(ctx(), StatusBarData.t() | nil, MinibufferData.t() | nil) :: ctx()
-  def sync_swiftui_chrome(ctx, status_bar_data \\ nil, minibuffer_data \\ nil) do
+  @spec sync_swiftui_chrome(ctx(), StatusBarData.t() | nil, MinibufferData.t() | nil, Caches.t()) ::
+          {ctx(), Caches.t()}
+  def sync_swiftui_chrome(ctx, status_bar_data, minibuffer_data, caches) do
     sb_data = status_bar_data || ctx.status_bar_data
 
-    # Collect changed chrome commands into a single list.
-    # Each build_gui_* function returns nil when the data hasn't changed
-    # (fingerprint cache hit), or an encoded binary when it has.
-    chrome_cmds =
-      [
-        build_gui_theme_cmd(ctx),
-        build_gui_tab_bar_cmd(ctx),
-        build_gui_agent_groups_cmd(ctx),
-        build_gui_file_tree_cmd(ctx),
-        build_gui_git_status_cmd(ctx),
-        build_gui_which_key_cmd(ctx),
-        build_gui_completion_cmd(ctx),
-        build_gui_breadcrumb_cmd(ctx),
-        build_gui_status_bar_cmd(ctx, sb_data),
-        build_gui_picker_cmd(ctx),
-        build_gui_agent_chat_cmd(ctx),
-        build_gui_minibuffer_cmd(ctx, minibuffer_data),
-        build_gui_hover_popup_cmd(ctx),
-        build_gui_signature_help_cmd(ctx),
-        build_gui_float_popup_cmd(ctx),
-        build_gui_board_cmd(ctx),
-        build_gui_agent_context_cmd(ctx),
-        build_gui_change_summary_cmd(ctx)
-      ]
-      |> Enum.reject(&is_nil/1)
+    # Use map_reduce to thread caches through each builder function.
+    # Each build_gui_* function returns {cmd | nil, updated_caches}.
+    builders = [
+      &build_gui_theme_cmd/2,
+      &build_gui_tab_bar_cmd/2,
+      &build_gui_agent_groups_cmd/2,
+      &build_gui_file_tree_cmd/2,
+      &build_gui_git_status_cmd/2,
+      &build_gui_which_key_cmd/2,
+      &build_gui_completion_cmd/2,
+      &build_gui_breadcrumb_cmd/2,
+      fn ctx, caches -> build_gui_status_bar_cmd(ctx, sb_data, caches) end,
+      &build_gui_picker_cmd/2,
+      &build_gui_agent_chat_cmd/2,
+      fn ctx, caches -> build_gui_minibuffer_cmd(ctx, minibuffer_data, caches) end,
+      &build_gui_hover_popup_cmd/2,
+      &build_gui_signature_help_cmd/2,
+      &build_gui_float_popup_cmd/2,
+      &build_gui_board_cmd/2,
+      &build_gui_agent_context_cmd/2,
+      &build_gui_change_summary_cmd/2
+    ]
 
-    # Bottom panel is special: it returns updated message_store state.
-    {panel_cmd, ctx} = build_gui_bottom_panel_cmd(ctx)
+    {cmds, caches} =
+      Enum.map_reduce(builders, caches, fn build_fn, acc_caches ->
+        build_fn.(ctx, acc_caches)
+      end)
+
+    chrome_cmds = Enum.reject(cmds, &is_nil/1)
+
+    # Bottom panel is special: it also returns updated ctx (for message_store).
+    {panel_cmd, ctx, caches} = build_gui_bottom_panel_cmd(ctx, caches)
     chrome_cmds = if panel_cmd, do: chrome_cmds ++ [panel_cmd], else: chrome_cmds
 
     if chrome_cmds != [] do
       MingaEditor.Frontend.send_commands(ctx.port_manager, chrome_cmds)
     end
 
-    ctx
+    {ctx, caches}
   end
 
   # ── Theme ──
 
-  @spec build_gui_theme_cmd(ctx()) :: binary() | nil
-  defp build_gui_theme_cmd(ctx) do
+  @spec build_gui_theme_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
+  defp build_gui_theme_cmd(ctx, caches) do
     theme_name = ctx.theme.name
 
-    if theme_name != Process.get(:last_gui_theme) do
-      Process.put(:last_gui_theme, theme_name)
-      ProtocolGUI.encode_gui_theme(ctx.theme)
+    if theme_name != caches.last_gui_theme do
+      {ProtocolGUI.encode_gui_theme(ctx.theme), %{caches | last_gui_theme: theme_name}}
+    else
+      {nil, caches}
     end
   end
 
   # ── Tab bar ──
 
-  @spec build_gui_tab_bar_cmd(ctx()) :: binary() | nil
+  @spec build_gui_tab_bar_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
 
   # Board: no tab bar (Board manages its own navigation)
-  defp build_gui_tab_bar_cmd(%{shell: MingaEditor.Shell.Board}), do: nil
+  defp build_gui_tab_bar_cmd(%{shell: MingaEditor.Shell.Board}, caches), do: {nil, caches}
 
-  defp build_gui_tab_bar_cmd(%{shell_state: %{tab_bar: %TabBar{} = tb}} = ctx) do
+  defp build_gui_tab_bar_cmd(%{shell_state: %{tab_bar: %TabBar{} = tb}} = ctx, caches) do
     active_buf = active_window_buffer(ctx)
     fp = :erlang.phash2({tb, active_buf})
 
-    if fp != Process.get(:last_gui_tab_bar_fp) do
-      Process.put(:last_gui_tab_bar_fp, fp)
-      ProtocolGUI.encode_gui_tab_bar(tb, active_buf)
+    if fp != caches.last_gui_tab_bar_fp do
+      {ProtocolGUI.encode_gui_tab_bar(tb, active_buf), %{caches | last_gui_tab_bar_fp: fp}}
+    else
+      {nil, caches}
     end
   end
 
-  defp build_gui_tab_bar_cmd(%{shell_state: %{tab_bar: nil}}), do: nil
+  defp build_gui_tab_bar_cmd(%{shell_state: %{tab_bar: nil}}, caches), do: {nil, caches}
 
-  @spec build_gui_agent_groups_cmd(ctx()) :: binary() | nil
-  defp build_gui_agent_groups_cmd(%{shell_state: %{tab_bar: %TabBar{} = tb}}) do
+  @spec build_gui_agent_groups_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
+  defp build_gui_agent_groups_cmd(%{shell_state: %{tab_bar: %TabBar{} = tb}}, caches) do
     # Only send workspace bar when agent workspaces exist (tier >= 1).
     # Also include workspace count so the GUI hides the indicator when
     # all agent workspaces are removed.
     if TabBar.has_agent_groups?(tb) do
       fp = :erlang.phash2(tb.agent_groups)
 
-      if fp != Process.get(:last_gui_agent_groups_fp) do
-        Process.put(:last_gui_agent_groups_fp, fp)
-        ProtocolGUI.encode_gui_agent_groups(tb)
+      if fp != caches.last_gui_agent_groups_fp do
+        {ProtocolGUI.encode_gui_agent_groups(tb), %{caches | last_gui_agent_groups_fp: fp}}
+      else
+        {nil, caches}
       end
     else
       # No agent workspaces: send empty workspace bar to clear the GUI
-      if Process.get(:last_gui_agent_groups_fp) != nil do
-        Process.put(:last_gui_agent_groups_fp, nil)
-        ProtocolGUI.encode_gui_agent_groups(tb)
+      if caches.last_gui_agent_groups_fp != nil do
+        {ProtocolGUI.encode_gui_agent_groups(tb), %{caches | last_gui_agent_groups_fp: nil}}
+      else
+        {nil, caches}
       end
     end
   end
 
-  defp build_gui_agent_groups_cmd(_), do: nil
+  defp build_gui_agent_groups_cmd(_ctx, caches), do: {nil, caches}
 
   @spec active_window_buffer(ctx()) :: pid() | nil
   defp active_window_buffer(%{windows: %{active: win_id, map: map}}) do
@@ -223,73 +233,83 @@ defmodule MingaEditor.Frontend.Emit.GUI do
 
   # ── File tree ──
 
-  @spec build_gui_file_tree_cmd(ctx()) :: binary() | nil
-  defp build_gui_file_tree_cmd(%{
-         file_tree: %{tree: %Minga.Project.FileTree{} = tree, editing: editing}
-       }) do
+  @spec build_gui_file_tree_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
+  defp build_gui_file_tree_cmd(
+         %{file_tree: %{tree: %Minga.Project.FileTree{} = tree, editing: editing}},
+         caches
+       ) do
     fp = :erlang.phash2({tree, editing})
 
-    if fp != Process.get(:last_gui_file_tree_fp) do
-      Process.put(:last_gui_file_tree_fp, fp)
-      ProtocolGUI.encode_gui_file_tree(tree, editing)
+    if fp != caches.last_gui_file_tree_fp do
+      {ProtocolGUI.encode_gui_file_tree(tree, editing), %{caches | last_gui_file_tree_fp: fp}}
+    else
+      {nil, caches}
     end
   end
 
-  defp build_gui_file_tree_cmd(_ctx) do
-    if Process.get(:last_gui_file_tree_fp) != :no_tree do
-      Process.put(:last_gui_file_tree_fp, :no_tree)
-      ProtocolGUI.encode_gui_file_tree(nil)
+  defp build_gui_file_tree_cmd(_ctx, caches) do
+    if caches.last_gui_file_tree_fp != :no_tree do
+      {ProtocolGUI.encode_gui_file_tree(nil), %{caches | last_gui_file_tree_fp: :no_tree}}
+    else
+      {nil, caches}
     end
   end
 
   # ── Git status panel ──
 
-  @spec build_gui_git_status_cmd(ctx()) :: binary() | nil
-  defp build_gui_git_status_cmd(%{shell_state: %{git_status_panel: %{} = data}}) do
+  @spec build_gui_git_status_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
+  defp build_gui_git_status_cmd(%{shell_state: %{git_status_panel: %{} = data}}, caches) do
     fp = :erlang.phash2(data)
 
-    if fp != Process.get(:last_gui_git_status_fp) do
-      Process.put(:last_gui_git_status_fp, fp)
-      ProtocolGUI.encode_gui_git_status(data)
+    if fp != caches.last_gui_git_status_fp do
+      {ProtocolGUI.encode_gui_git_status(data), %{caches | last_gui_git_status_fp: fp}}
+    else
+      {nil, caches}
     end
   end
 
-  defp build_gui_git_status_cmd(_ctx) do
-    if Process.get(:last_gui_git_status_fp) != :no_git do
-      Process.put(:last_gui_git_status_fp, :no_git)
+  defp build_gui_git_status_cmd(_ctx, caches) do
+    if caches.last_gui_git_status_fp != :no_git do
+      cmd =
+        ProtocolGUI.encode_gui_git_status(%{
+          repo_state: :not_a_repo,
+          branch: "",
+          ahead: 0,
+          behind: 0,
+          entries: []
+        })
 
-      ProtocolGUI.encode_gui_git_status(%{
-        repo_state: :not_a_repo,
-        branch: "",
-        ahead: 0,
-        behind: 0,
-        entries: []
-      })
+      {cmd, %{caches | last_gui_git_status_fp: :no_git}}
+    else
+      {nil, caches}
     end
   end
 
   # ── Which-key ──
 
-  @spec build_gui_which_key_cmd(ctx()) :: binary() | nil
-  defp build_gui_which_key_cmd(%{shell_state: %{whichkey: wk}}) do
+  @spec build_gui_which_key_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
+  defp build_gui_which_key_cmd(%{shell_state: %{whichkey: wk}}, caches) do
     fp = :erlang.phash2(wk)
 
-    if fp != Process.get(:last_gui_which_key_fp) do
-      Process.put(:last_gui_which_key_fp, fp)
-      ProtocolGUI.encode_gui_which_key(wk)
+    if fp != caches.last_gui_which_key_fp do
+      {ProtocolGUI.encode_gui_which_key(wk), %{caches | last_gui_which_key_fp: fp}}
+    else
+      {nil, caches}
     end
   end
 
   # ── Completion ──
 
-  @spec build_gui_completion_cmd(ctx()) :: binary() | nil
-  defp build_gui_completion_cmd(%{completion: comp} = ctx) do
+  @spec build_gui_completion_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
+  defp build_gui_completion_cmd(%{completion: comp} = ctx, caches) do
     {cursor_row, cursor_col} = current_cursor_screen_pos(ctx)
     fp = :erlang.phash2({comp, cursor_row, cursor_col})
 
-    if fp != Process.get(:last_gui_completion_fp) do
-      Process.put(:last_gui_completion_fp, fp)
-      ProtocolGUI.encode_gui_completion(comp, cursor_row, cursor_col)
+    if fp != caches.last_gui_completion_fp do
+      {ProtocolGUI.encode_gui_completion(comp, cursor_row, cursor_col),
+       %{caches | last_gui_completion_fp: fp}}
+    else
+      {nil, caches}
     end
   end
 
@@ -316,8 +336,8 @@ defmodule MingaEditor.Frontend.Emit.GUI do
 
   # ── Breadcrumb ──
 
-  @spec build_gui_breadcrumb_cmd(ctx()) :: binary() | nil
-  defp build_gui_breadcrumb_cmd(ctx) do
+  @spec build_gui_breadcrumb_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
+  defp build_gui_breadcrumb_cmd(ctx, caches) do
     file_path = active_buffer_path(ctx)
 
     root =
@@ -328,9 +348,10 @@ defmodule MingaEditor.Frontend.Emit.GUI do
 
     fp = :erlang.phash2({file_path, root})
 
-    if fp != Process.get(:last_gui_breadcrumb_fp) do
-      Process.put(:last_gui_breadcrumb_fp, fp)
-      ProtocolGUI.encode_gui_breadcrumb(file_path, root)
+    if fp != caches.last_gui_breadcrumb_fp do
+      {ProtocolGUI.encode_gui_breadcrumb(file_path, root), %{caches | last_gui_breadcrumb_fp: fp}}
+    else
+      {nil, caches}
     end
   end
 
@@ -346,9 +367,9 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   # Status bar changes on every scroll frame (cursor line), so it's always sent.
   # No fingerprint caching; the encoding cost is small (fixed-size struct).
 
-  @spec build_gui_status_bar_cmd(ctx(), StatusBarData.t()) :: binary()
-  defp build_gui_status_bar_cmd(_ctx, status_bar_data) do
-    ProtocolGUI.encode_gui_status_bar(status_bar_data)
+  @spec build_gui_status_bar_cmd(ctx(), StatusBarData.t(), Caches.t()) :: {binary(), Caches.t()}
+  defp build_gui_status_bar_cmd(_ctx, status_bar_data, caches) do
+    {ProtocolGUI.encode_gui_status_bar(status_bar_data), caches}
   end
 
   # ── Minibuffer ──
@@ -357,20 +378,24 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   # the last frame. Uses a content hash to avoid re-encoding and resending
   # identical minibuffer state every render cycle.
 
-  @spec build_gui_minibuffer_cmd(ctx(), MinibufferData.t() | nil) :: binary() | nil
-  defp build_gui_minibuffer_cmd(_ctx, %MinibufferData{} = data) do
+  @spec build_gui_minibuffer_cmd(ctx(), MinibufferData.t() | nil, Caches.t()) ::
+          {binary() | nil, Caches.t()}
+  defp build_gui_minibuffer_cmd(_ctx, %MinibufferData{} = data, caches) do
     fingerprint = minibuffer_fingerprint(data)
 
-    if fingerprint != Process.get(:last_gui_minibuffer) do
-      Process.put(:last_gui_minibuffer, fingerprint)
-      ProtocolGUI.encode_gui_minibuffer(data)
+    if fingerprint != caches.last_gui_minibuffer do
+      {ProtocolGUI.encode_gui_minibuffer(data), %{caches | last_gui_minibuffer: fingerprint}}
+    else
+      {nil, caches}
     end
   end
 
-  defp build_gui_minibuffer_cmd(_ctx, nil) do
-    if Process.get(:last_gui_minibuffer) != :hidden do
-      Process.put(:last_gui_minibuffer, :hidden)
-      ProtocolGUI.encode_gui_minibuffer(%MinibufferData{visible: false})
+  defp build_gui_minibuffer_cmd(_ctx, nil, caches) do
+    if caches.last_gui_minibuffer != :hidden do
+      {ProtocolGUI.encode_gui_minibuffer(%MinibufferData{visible: false}),
+       %{caches | last_gui_minibuffer: :hidden}}
+    else
+      {nil, caches}
     end
   end
 
@@ -388,34 +413,37 @@ defmodule MingaEditor.Frontend.Emit.GUI do
 
   # ── Picker ──
 
-  @spec build_gui_picker_cmd(ctx()) :: binary() | nil
-  defp build_gui_picker_cmd(%{shell_state: %{picker_ui: %{picker: nil}}}) do
-    if Process.get(:last_gui_picker_fp) != :closed do
-      Process.put(:last_gui_picker_fp, :closed)
+  @spec build_gui_picker_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
+  defp build_gui_picker_cmd(%{shell_state: %{picker_ui: %{picker: nil}}}, caches) do
+    if caches.last_gui_picker_fp != :closed do
       picker_cmd = ProtocolGUI.encode_gui_picker(nil)
       preview_cmd = ProtocolGUI.encode_gui_picker_preview(nil)
-      IO.iodata_to_binary([picker_cmd, preview_cmd])
+      {IO.iodata_to_binary([picker_cmd, preview_cmd]), %{caches | last_gui_picker_fp: :closed}}
+    else
+      {nil, caches}
     end
   end
 
   defp build_gui_picker_cmd(
          %{shell_state: %{picker_ui: %{picker: picker, source: source, action_menu: action_menu}}} =
-           ctx
+           ctx,
+         caches
        ) do
     # Preview content is NOT in the fingerprint: a file changing on disk while
     # the picker is open won't refresh the preview. Acceptable trade-off for
     # scroll perf since the picker isn't open during normal editing.
     fp = :erlang.phash2({picker.query, picker.selected, Picker.total(picker), action_menu})
 
-    if fp != Process.get(:last_gui_picker_fp) do
-      Process.put(:last_gui_picker_fp, fp)
+    if fp != caches.last_gui_picker_fp do
       has_preview = source != nil and Picker.Source.preview?(source)
       preview_lines = if has_preview, do: build_picker_preview(ctx)
       # Picker always pairs with its preview; concatenate so they arrive as
       # adjacent frames in the batched port write.
       picker_cmd = ProtocolGUI.encode_gui_picker(picker, has_preview, action_menu, 100)
       preview_cmd = ProtocolGUI.encode_gui_picker_preview(preview_lines)
-      IO.iodata_to_binary([picker_cmd, preview_cmd])
+      {IO.iodata_to_binary([picker_cmd, preview_cmd]), %{caches | last_gui_picker_fp: fp}}
+    else
+      {nil, caches}
     end
   end
 
@@ -560,8 +588,8 @@ defmodule MingaEditor.Frontend.Emit.GUI do
 
   # ── Agent chat ──
 
-  @spec build_gui_agent_chat_cmd(ctx()) :: binary() | nil
-  defp build_gui_agent_chat_cmd(ctx) do
+  @spec build_gui_agent_chat_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
+  defp build_gui_agent_chat_cmd(ctx, caches) do
     active_window = Map.get(ctx.windows.map, ctx.windows.active)
     is_agent_chat = active_window != nil && Content.agent_chat?(active_window.content)
     session = ctx.shell_state.agent.session
@@ -591,15 +619,16 @@ defmodule MingaEditor.Frontend.Emit.GUI do
         {:not_visible, ""}
       end
 
-    if fp != Process.get(:last_gui_agent_chat_fp) do
-      Process.put(:last_gui_agent_chat_fp, fp)
+    if fp != caches.last_gui_agent_chat_fp do
       data = build_agent_chat_data(ctx, prompt_text)
 
       if data.visible do
         log_agent_chat_message_stats(data.messages)
       end
 
-      ProtocolGUI.encode_gui_agent_chat(data)
+      {ProtocolGUI.encode_gui_agent_chat(data), %{caches | last_gui_agent_chat_fp: fp}}
+    else
+      {nil, caches}
     end
   end
 
@@ -976,25 +1005,27 @@ defmodule MingaEditor.Frontend.Emit.GUI do
 
   # ── Hover popup ──
 
-  @spec build_gui_hover_popup_cmd(ctx()) :: binary() | nil
-  defp build_gui_hover_popup_cmd(%{shell_state: %{hover_popup: popup}}) do
+  @spec build_gui_hover_popup_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
+  defp build_gui_hover_popup_cmd(%{shell_state: %{hover_popup: popup}}, caches) do
     fp = :erlang.phash2(popup)
 
-    if fp != Process.get(:last_gui_hover_popup_fp) do
-      Process.put(:last_gui_hover_popup_fp, fp)
-      ProtocolGUI.encode_gui_hover_popup(popup)
+    if fp != caches.last_gui_hover_popup_fp do
+      {ProtocolGUI.encode_gui_hover_popup(popup), %{caches | last_gui_hover_popup_fp: fp}}
+    else
+      {nil, caches}
     end
   end
 
   # ── Signature help ──
 
-  @spec build_gui_signature_help_cmd(ctx()) :: binary() | nil
-  defp build_gui_signature_help_cmd(%{shell_state: %{signature_help: sh}}) do
+  @spec build_gui_signature_help_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
+  defp build_gui_signature_help_cmd(%{shell_state: %{signature_help: sh}}, caches) do
     fp = :erlang.phash2(sh)
 
-    if fp != Process.get(:last_gui_signature_help_fp) do
-      Process.put(:last_gui_signature_help_fp, fp)
-      ProtocolGUI.encode_gui_signature_help(sh)
+    if fp != caches.last_gui_signature_help_fp do
+      {ProtocolGUI.encode_gui_signature_help(sh), %{caches | last_gui_signature_help_fp: fp}}
+    else
+      {nil, caches}
     end
   end
 
@@ -1025,27 +1056,30 @@ defmodule MingaEditor.Frontend.Emit.GUI do
 
   # ── Float popup ──
 
-  @spec build_gui_float_popup_cmd(ctx()) :: binary() | nil
-  defp build_gui_float_popup_cmd(ctx) do
+  @spec build_gui_float_popup_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
+  defp build_gui_float_popup_cmd(ctx, caches) do
     float_window = find_float_popup_window(ctx)
 
     fp = :erlang.phash2(float_window && {float_window.buffer, float_window.popup_meta})
 
-    if fp != Process.get(:last_gui_float_popup_fp) do
-      Process.put(:last_gui_float_popup_fp, fp)
+    if fp != caches.last_gui_float_popup_fp do
+      cmd =
+        if float_window do
+          data = build_float_popup_data(ctx, float_window)
+          ProtocolGUI.encode_gui_float_popup(data)
+        else
+          ProtocolGUI.encode_gui_float_popup(%{
+            visible: false,
+            title: "",
+            lines: [],
+            width: 0,
+            height: 0
+          })
+        end
 
-      if float_window do
-        data = build_float_popup_data(ctx, float_window)
-        ProtocolGUI.encode_gui_float_popup(data)
-      else
-        ProtocolGUI.encode_gui_float_popup(%{
-          visible: false,
-          title: "",
-          lines: [],
-          width: 0,
-          height: 0
-        })
-      end
+      {cmd, %{caches | last_gui_float_popup_fp: fp}}
+    else
+      {nil, caches}
     end
   end
 
@@ -1110,29 +1144,29 @@ defmodule MingaEditor.Frontend.Emit.GUI do
 
   # ── Bottom panel ──
 
-  # Bottom panel is special: it returns {cmd | nil, updated_state} because
+  # Bottom panel is special: it returns {cmd | nil, updated_ctx, updated_caches} because
   # encode_gui_bottom_panel may advance the message_store cursor when new
   # entries have arrived. We still fingerprint to skip encoding when the
   # panel hasn't changed.
-  @spec build_gui_bottom_panel_cmd(ctx()) :: {binary() | nil, ctx()}
+  @spec build_gui_bottom_panel_cmd(ctx(), Caches.t()) :: {binary() | nil, ctx(), Caches.t()}
   defp build_gui_bottom_panel_cmd(
-         %{shell_state: %{bottom_panel: panel}, message_store: store} = ctx
+         %{shell_state: %{bottom_panel: panel}, message_store: store} = ctx,
+         caches
        ) do
     fp = :erlang.phash2({panel, store})
 
-    if fp != Process.get(:last_gui_bottom_panel_fp) do
-      Process.put(:last_gui_bottom_panel_fp, fp)
+    if fp != caches.last_gui_bottom_panel_fp do
       {cmd, new_store} = ProtocolGUI.encode_gui_bottom_panel(panel, store)
-      {cmd, %{ctx | message_store: new_store}}
+      {cmd, %{ctx | message_store: new_store}, %{caches | last_gui_bottom_panel_fp: fp}}
     else
-      {nil, ctx}
+      {nil, ctx, caches}
     end
   end
 
   # ── Board ──
 
-  @spec build_gui_board_cmd(ctx()) :: binary() | nil
-  defp build_gui_board_cmd(%{shell: MingaEditor.Shell.Board, shell_state: board}) do
+  @spec build_gui_board_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
+  defp build_gui_board_cmd(%{shell: MingaEditor.Shell.Board, shell_state: board}, caches) do
     # Always send when Board is active so the GUI stays in sync.
     # The fingerprint covers card count, focused card, zoom state, and
     # card statuses so we skip encoding when nothing changed.
@@ -1144,83 +1178,95 @@ defmodule MingaEditor.Frontend.Emit.GUI do
         Enum.map(MingaEditor.Shell.Board.State.sorted_cards(board), &{&1.id, &1.status})
       })
 
-    if fp != Process.get(:last_gui_board_fp) do
-      Process.put(:last_gui_board_fp, fp)
-      ProtocolGUI.encode_gui_board(board)
+    if fp != caches.last_gui_board_fp do
+      {ProtocolGUI.encode_gui_board(board), %{caches | last_gui_board_fp: fp}}
+    else
+      {nil, caches}
     end
   end
 
   # Board not active: send visible=false once to dismiss.
   # Must NOT use a default Board.State (grid_view? returns true → visible=1).
   # Instead, build a minimal board with zoomed_into set so visible encodes as 0.
-  defp build_gui_board_cmd(_ctx) do
-    if Process.get(:last_gui_board_fp) != :dismissed do
-      Process.put(:last_gui_board_fp, :dismissed)
+  defp build_gui_board_cmd(_ctx, caches) do
+    if caches.last_gui_board_fp != :dismissed do
       # zoomed_into: 1 forces grid_view? → false → visible=0
       dismissed = %MingaEditor.Shell.Board.State{zoomed_into: 1}
-      ProtocolGUI.encode_gui_board(dismissed)
+      {ProtocolGUI.encode_gui_board(dismissed), %{caches | last_gui_board_fp: :dismissed}}
+    else
+      {nil, caches}
     end
   end
 
   # ── Agent context bar ──
 
-  @spec build_gui_agent_context_cmd(ctx()) :: binary() | nil
-  defp build_gui_agent_context_cmd(%{
-         shell: MingaEditor.Shell.Board,
-         shell_state: %{zoomed_into: nil}
-       }) do
-    send_hide_if_needed(:hidden)
+  @spec build_gui_agent_context_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
+  defp build_gui_agent_context_cmd(
+         %{shell: MingaEditor.Shell.Board, shell_state: %{zoomed_into: nil}},
+         caches
+       ) do
+    send_hide_if_needed(:hidden, caches)
   end
 
-  defp build_gui_agent_context_cmd(%{shell: MingaEditor.Shell.Board, shell_state: board}) do
+  defp build_gui_agent_context_cmd(%{shell: MingaEditor.Shell.Board, shell_state: board}, caches) do
     card = MingaEditor.Shell.Board.State.zoomed(board)
-    send_agent_context_if_applicable(board.zoomed_into, card)
+    send_agent_context_if_applicable(board.zoomed_into, card, caches)
   end
 
   # Not Board shell: hide context bar
-  defp build_gui_agent_context_cmd(_state) do
-    send_hide_if_needed(:not_board)
+  defp build_gui_agent_context_cmd(_state, caches) do
+    send_hide_if_needed(:not_board, caches)
   end
 
-  @spec send_hide_if_needed(atom()) :: binary() | nil
-  defp send_hide_if_needed(fp_key) do
-    if Process.get(:last_gui_agent_context_fp) != fp_key do
-      Process.put(:last_gui_agent_context_fp, fp_key)
-      encode_hidden_agent_context()
+  @spec send_hide_if_needed(atom(), Caches.t()) :: {binary() | nil, Caches.t()}
+  defp send_hide_if_needed(fp_key, caches) do
+    if caches.last_gui_agent_context_fp != fp_key do
+      {encode_hidden_agent_context(), %{caches | last_gui_agent_context_fp: fp_key}}
+    else
+      {nil, caches}
     end
   end
 
-  @spec send_agent_context_if_applicable(pos_integer(), MingaEditor.Shell.Board.Card.t() | nil) ::
-          binary() | nil
-  defp send_agent_context_if_applicable(card_id, card)
+  @spec send_agent_context_if_applicable(
+          pos_integer(),
+          MingaEditor.Shell.Board.Card.t() | nil,
+          Caches.t()
+        ) :: {binary() | nil, Caches.t()}
+  defp send_agent_context_if_applicable(card_id, card, caches)
        when is_map(card) and not is_nil(card) do
     if MingaEditor.Shell.Board.Card.you_card?(card) do
-      send_hide_if_needed(:you_card)
+      send_hide_if_needed(:you_card, caches)
     else
-      send_agent_context_for_card(card_id, card)
+      send_agent_context_for_card(card_id, card, caches)
     end
   end
 
-  defp send_agent_context_if_applicable(_card_id, _card) do
-    send_hide_if_needed(:you_card)
+  defp send_agent_context_if_applicable(_card_id, _card, caches) do
+    send_hide_if_needed(:you_card, caches)
   end
 
-  @spec send_agent_context_for_card(pos_integer(), MingaEditor.Shell.Board.Card.t()) ::
-          binary() | nil
-  defp send_agent_context_for_card(card_id, card) do
+  @spec send_agent_context_for_card(
+          pos_integer(),
+          MingaEditor.Shell.Board.Card.t(),
+          Caches.t()
+        ) :: {binary() | nil, Caches.t()}
+  defp send_agent_context_for_card(card_id, card, caches) do
     can_approve = card.status in [:needs_you, :done]
     fp = :erlang.phash2({card_id, card.task, card.created_at, card.status, can_approve})
 
-    if fp != Process.get(:last_gui_agent_context_fp) do
-      Process.put(:last_gui_agent_context_fp, fp)
+    if fp != caches.last_gui_agent_context_fp do
+      cmd =
+        ProtocolGUI.encode_gui_agent_context(
+          true,
+          card.task,
+          card.created_at,
+          card.status,
+          can_approve
+        )
 
-      ProtocolGUI.encode_gui_agent_context(
-        true,
-        card.task,
-        card.created_at,
-        card.status,
-        can_approve
-      )
+      {cmd, %{caches | last_gui_agent_context_fp: fp}}
+    else
+      {nil, caches}
     end
   end
 
@@ -1231,11 +1277,12 @@ defmodule MingaEditor.Frontend.Emit.GUI do
 
   # ── Change Summary ──
 
-  @spec build_gui_change_summary_cmd(ctx()) :: binary() | nil
+  @spec build_gui_change_summary_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
 
   # Change summary visible when zoomed into an agent card (not You card)
   defp build_gui_change_summary_cmd(
-         %{shell: MingaEditor.Shell.Board, shell_state: %{zoomed_into: card_id}} = _ctx
+         %{shell: MingaEditor.Shell.Board, shell_state: %{zoomed_into: card_id}} = _ctx,
+         caches
        )
        when card_id != nil do
     # TODO: Compute diff stats from the card's touched files
@@ -1245,17 +1292,21 @@ defmodule MingaEditor.Frontend.Emit.GUI do
 
     fp = :erlang.phash2({card_id, entries})
 
-    if fp != Process.get(:last_gui_change_summary_fp) do
-      Process.put(:last_gui_change_summary_fp, fp)
-      ProtocolGUI.encode_gui_change_summary(entries, selected_index)
+    if fp != caches.last_gui_change_summary_fp do
+      {ProtocolGUI.encode_gui_change_summary(entries, selected_index),
+       %{caches | last_gui_change_summary_fp: fp}}
+    else
+      {nil, caches}
     end
   end
 
   # Board grid or other shells: hide change summary
-  defp build_gui_change_summary_cmd(_ctx) do
-    if Process.get(:last_gui_change_summary_fp) != :hidden do
-      Process.put(:last_gui_change_summary_fp, :hidden)
-      ProtocolGUI.encode_gui_change_summary([], 0)
+  defp build_gui_change_summary_cmd(_ctx, caches) do
+    if caches.last_gui_change_summary_fp != :hidden do
+      {ProtocolGUI.encode_gui_change_summary([], 0),
+       %{caches | last_gui_change_summary_fp: :hidden}}
+    else
+      {nil, caches}
     end
   end
 

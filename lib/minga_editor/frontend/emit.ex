@@ -20,6 +20,7 @@ defmodule MingaEditor.Frontend.Emit do
   alias MingaEditor.Frontend.Emit.GUI, as: EmitGUI
   alias MingaEditor.Frontend.Emit.TUI, as: EmitTUI
   alias MingaEditor.Frontend.Protocol.GUIWindowContent
+  alias MingaEditor.Renderer.Caches
   alias Minga.Telemetry
 
   @typedoc "Emit context containing only the data emit needs."
@@ -31,24 +32,16 @@ defmodule MingaEditor.Frontend.Emit do
   frontend capabilities.
 
   Also sends title and window background color when they change
-  (side-channel writes).
+  (side-channel writes). Returns updated caches for write-back to EditorState.
   """
-  @spec emit(Frame.t(), ctx(), Chrome.t() | nil) :: :ok
-  def emit(frame, ctx, chrome \\ nil) do
-    # Make the font registry available for font_family → font_id resolution
-    # during draws_to_commands. Initialize only on first frame; subsequent
-    # frames reuse the accumulated registry so IDs are stable and register_font
-    # commands are only sent once per font family.
-    if Process.get(:emit_font_registry) == nil do
-      Process.put(:emit_font_registry, ctx.font_registry)
-    end
-
+  @spec emit(Frame.t(), ctx(), Chrome.t() | nil, Caches.t()) :: Caches.t()
+  def emit(frame, ctx, chrome \\ nil, caches \\ %Caches{}) do
     gui? = MingaEditor.Frontend.gui?(ctx.capabilities)
 
     if gui? do
-      emit_gui(frame, ctx, chrome)
+      emit_gui(frame, ctx, chrome, caches)
     else
-      emit_tui(frame, ctx)
+      emit_tui(frame, ctx, caches)
     end
   end
 
@@ -57,8 +50,8 @@ defmodule MingaEditor.Frontend.Emit do
   # message so they arrive atomically in one DispatchQueue.main.async block.
   # SwiftUI chrome (tab bar, file tree, status bar, etc.) is sent separately
   # since it doesn't affect the Metal render pass.
-  @spec emit_gui(Frame.t(), ctx(), Chrome.t() | nil) :: :ok
-  defp emit_gui(frame, ctx, chrome) do
+  @spec emit_gui(Frame.t(), ctx(), Chrome.t() | nil, Caches.t()) :: Caches.t()
+  defp emit_gui(frame, ctx, chrome, caches) do
     # Frame commands WITHOUT batch_end (we append it after Metal-critical chrome)
     frame_cmds =
       frame
@@ -78,42 +71,42 @@ defmodule MingaEditor.Frontend.Emit do
         metal_chrome_cmds ++
         [MingaEditor.Frontend.Protocol.encode_batch_end()]
 
-    update_tracking(ctx)
+    caches = update_tracking(ctx, caches)
 
     byte_count = IO.iodata_length(all_metal)
 
     Telemetry.span([:minga, :port, :emit], %{byte_count: byte_count}, fn ->
       MingaEditor.Frontend.send_commands(ctx.port_manager, all_metal)
-      send_title(ctx)
-      send_window_bg(ctx)
+      caches = send_title(ctx, caches)
+      caches = send_window_bg(ctx, caches)
 
       # SwiftUI chrome: separate messages, safe (no Metal impact)
       status_bar_data = chrome && chrome.status_bar_data
       minibuffer_data = chrome && chrome.minibuffer_data
-      EmitGUI.sync_swiftui_chrome(ctx, status_bar_data, minibuffer_data)
-      :ok
+      {_ctx, caches} = EmitGUI.sync_swiftui_chrome(ctx, status_bar_data, minibuffer_data, caches)
+      caches
     end)
   end
 
   # TUI emit: single send_commands call (already atomic).
-  @spec emit_tui(Frame.t(), ctx()) :: :ok
-  defp emit_tui(frame, ctx) do
-    commands = EmitTUI.build_commands(frame, ctx)
-    update_tracking(ctx)
+  @spec emit_tui(Frame.t(), ctx(), Caches.t()) :: Caches.t()
+  defp emit_tui(frame, ctx, caches) do
+    commands = EmitTUI.build_commands(frame, ctx, caches)
+    caches = update_tracking(ctx, caches)
     byte_count = IO.iodata_length(commands)
 
     Telemetry.span([:minga, :port, :emit], %{byte_count: byte_count}, fn ->
       MingaEditor.Frontend.send_commands(ctx.port_manager, commands)
-      send_title(ctx)
-      send_window_bg(ctx)
-      :ok
+      caches = send_title(ctx, caches)
+      caches = send_window_bg(ctx, caches)
+      caches
     end)
   end
 
   # ── Tracking state (shared) ──────────────────────────────────────────────
 
-  @spec update_tracking(ctx()) :: :ok
-  defp update_tracking(ctx) do
+  @spec update_tracking(ctx(), Caches.t()) :: Caches.t()
+  defp update_tracking(ctx, caches) do
     layout = ctx.layout
 
     tops =
@@ -154,11 +147,13 @@ defmodule MingaEditor.Frontend.Emit do
         end
       end)
 
-    Process.put(:emit_prev_viewport_tops, tops)
-    Process.put(:emit_prev_content_rects, rects)
-    Process.put(:emit_prev_gutter_ws, gutter_ws)
-    Process.put(:emit_prev_buf_versions, buf_versions)
-    :ok
+    %{
+      caches
+      | emit_prev_viewport_tops: tops,
+        emit_prev_content_rects: rects,
+        emit_prev_gutter_ws: gutter_ws,
+        emit_prev_buf_versions: buf_versions
+    }
   end
 
   # ── GUI window content (0x80) ────────────────────────────────────────────
@@ -176,27 +171,27 @@ defmodule MingaEditor.Frontend.Emit do
 
   # ── Side-channel writes (shared) ─────────────────────────────────────────
 
-  @spec send_title(ctx()) :: :ok
-  defp send_title(ctx) do
+  @spec send_title(ctx(), Caches.t()) :: Caches.t()
+  defp send_title(ctx, caches) do
     title = ctx.title
 
-    if title != Process.get(:last_title) do
-      Process.put(:last_title, title)
+    if title != caches.last_title do
       MingaEditor.Frontend.set_title(title)
+      %{caches | last_title: title}
+    else
+      caches
     end
-
-    :ok
   end
 
-  @spec send_window_bg(ctx()) :: :ok
-  defp send_window_bg(ctx) do
+  @spec send_window_bg(ctx(), Caches.t()) :: Caches.t()
+  defp send_window_bg(ctx, caches) do
     bg = ctx.theme.editor.bg
 
-    if bg != Process.get(:last_window_bg) do
-      Process.put(:last_window_bg, bg)
+    if bg != caches.last_window_bg do
       MingaEditor.Frontend.set_window_bg(bg)
+      %{caches | last_window_bg: bg}
+    else
+      caches
     end
-
-    :ok
   end
 end

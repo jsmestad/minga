@@ -97,6 +97,7 @@ defmodule MingaEditor.State do
             buffer_monitors: %{},
             face_override_registries: %{},
             font_registry: MingaEditor.UI.FontRegistry.new(),
+            caches: MingaEditor.Renderer.Caches.new(),
             session: %SessionState{},
             buffer_add_context: :open,
             space_leader_pending: false,
@@ -130,6 +131,7 @@ defmodule MingaEditor.State do
           buffer_monitors: %{pid() => reference()},
           face_override_registries: %{pid() => MingaEditor.UI.Face.Registry.t()},
           font_registry: MingaEditor.UI.FontRegistry.t(),
+          caches: MingaEditor.Renderer.Caches.t(),
           buffer_add_context: MingaEditor.Shell.buffer_add_context(),
           session: SessionState.t(),
           space_leader_pending: boolean(),
@@ -155,7 +157,7 @@ defmodule MingaEditor.State do
   This function writes those mutations back after the pipeline completes.
 
   The `render_output` is a `RenderPipeline.Input` struct with the mutated
-  fields. Only `windows`, `shell_state`, and `layout` carry meaningful
+  fields. Only `windows`, `shell_state`, `layout`, and `caches` carry meaningful
   changes; other fields are unchanged.
   """
   @spec apply_render_output(t(), MingaEditor.RenderPipeline.Input.t()) :: t()
@@ -164,7 +166,8 @@ defmodule MingaEditor.State do
       state
       | workspace: %{ws | windows: render_output.workspace.windows},
         shell_state: render_output.shell_state,
-        layout: render_output.layout
+        layout: render_output.layout,
+        caches: render_output.caches
     }
   end
 

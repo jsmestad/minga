@@ -98,8 +98,8 @@ defmodule MingaEditor.RenderPipeline.Content do
 
     cursor = {cursor_line, cursor_byte_col}
 
-    # Build per-frame render context
-    render_ctx =
+    # Build per-frame render context (also updates caches on state)
+    {render_ctx, state} =
       ContentHelpers.build_render_ctx(state, window, %{
         viewport: viewport,
         cursor: cursor,
@@ -389,8 +389,8 @@ defmodule MingaEditor.RenderPipeline.Content do
     gutter_w = MingaEditor.Renderer.Gutter.total_width(number_w)
     content_w = max(chat_width - gutter_w, 1)
 
-    # Build render context (includes decorations from the buffer)
-    render_ctx =
+    # Build render context (includes decorations from the buffer; also updates caches on state)
+    {render_ctx, state} =
       ContentHelpers.build_render_ctx(state, window, %{
         viewport: viewport,
         cursor: {cursor_line, cursor_byte_col},
