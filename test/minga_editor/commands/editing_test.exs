@@ -306,6 +306,11 @@ defmodule MingaEditor.Commands.EditingTest do
       send_key(editor, ?y)
       send_key(editor, ?y)
       send_key(editor, ?j)
+      # Cross-process barrier: confirm `j` has fully landed in BufferServer
+      # before we paste. `send_key`'s `:sys.get_state(editor)` only proves
+      # the editor process drained its mailbox, not that any async follow-up
+      # work the executor scheduled has applied to BufferServer state.
+      _ = BufferServer.cursor(buffer)
       send_key(editor, ?p)
 
       {line, col} = BufferServer.cursor(buffer)
