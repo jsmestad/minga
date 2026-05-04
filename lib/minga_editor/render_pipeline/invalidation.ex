@@ -53,7 +53,7 @@ defmodule MingaEditor.RenderPipeline.Invalidation do
 
   defstruct full_redraw: true,
             windows: %{},
-            chrome_regions: nil,
+            chrome_regions: MapSet.new(),
             global_reasons: []
 
   @doc """
