@@ -83,6 +83,38 @@ defmodule Minga.BufferManagementTest do
       assert active_content(ctx) == "alpha"
     end
 
+    @tag :tmp_dir
+    test "leader keys keep working through buffer cycling after :e", %{tmp_dir: tmp_dir} do
+      # Regression for #1476 (the snapshot bug surfaced via #1477's
+      # smart-cycle): after `:e <path>` the leaving mode's CommandState
+      # used to leak into the tab's editing.mode_state snapshot. When
+      # smart-cycle later restored that tab via tab-switch, the next
+      # leader keypress crashed with `KeyError, key :leader_trie not
+      # found in: %CommandState{}`. With the fix in #1476, every tab
+      # snapshot is a valid resting state, so leader handling stays
+      # alive across multiple cycle/`<SPC>` rounds.
+      path1 = Path.join(tmp_dir, "a.txt")
+      path2 = Path.join(tmp_dir, "b.txt")
+      path3 = Path.join(tmp_dir, "c.txt")
+      File.write!(path1, "alpha")
+      File.write!(path2, "beta")
+      File.write!(path3, "gamma")
+
+      ctx = start_editor("alpha", file_path: path1)
+      send_keys(ctx, ":e #{path2}<CR>")
+      send_keys(ctx, ":e #{path3}<CR>")
+
+      # Several leader rounds across cycle should never raise.
+      send_keys_sync(ctx, "<SPC>bn")
+      send_keys_sync(ctx, "<SPC>bn")
+      send_keys_sync(ctx, "<SPC>bp")
+      send_keys_sync(ctx, "<SPC>bn")
+
+      # Editor still alive and processing keys.
+      assert Process.alive?(ctx.editor)
+      assert active_content(ctx) in ["alpha", "beta", "gamma"]
+    end
+
     test "next/prev with single buffer is a no-op" do
       ctx = start_editor("only one")
 
