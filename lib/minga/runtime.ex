@@ -11,6 +11,7 @@ defmodule Minga.Runtime do
       ├── Minga.Foundation.Supervisor
       ├── Minga.Buffer.Registry
       ├── Minga.Buffer.Supervisor
+      ├── Minga.Buffer.Messages
       ├── Minga.Services.Supervisor
       └── MingaAgent.Supervisor
 
@@ -26,10 +27,14 @@ defmodule Minga.Runtime do
 
   @spec start(keyword()) :: {:ok, pid()} | {:error, term()}
   def start(opts \\ []) do
+    Minga.LoggerHandler.ensure_buffer_table()
+    Minga.LoggerHandler.install_messages_handler()
+
     children = [
       Minga.Foundation.Supervisor,
       {Registry, keys: :unique, name: Minga.Buffer.Registry},
       {DynamicSupervisor, name: Minga.Buffer.Supervisor, strategy: :one_for_one},
+      Minga.Buffer.Messages,
       Minga.Services.Supervisor,
       MingaAgent.Supervisor
     ]

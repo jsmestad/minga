@@ -62,6 +62,24 @@ defmodule MingaEditor.MessageLog do
   end
 
   @doc """
+  Appends an entry to the structured MessageStore without writing to the
+  shared `*Messages*` buffer.
+
+  Used by the editor's `:log_message` subscription so external broadcasts
+  (LSP, parser, git, agent) still surface in the GUI Messages tab. The
+  shared buffer is updated by `Minga.Buffer.Messages` directly from the
+  same broadcast, so we deliberately do not append twice here.
+  """
+  @spec append_to_store(EditorState.t(), String.t(), MessageStore.level()) ::
+          EditorState.t()
+  def append_to_store(state, text, level_override) do
+    {parsed_level, subsystem, _clean_text} = MessageStore.parse_prefix(text)
+    level = level_override || parsed_level
+
+    %{state | message_store: MessageStore.append(state.message_store, text, level, subsystem)}
+  end
+
+  @doc """
   Returns the appropriate log prefix for the frontend type.
   """
   @spec frontend_prefix(EditorState.t()) :: String.t()

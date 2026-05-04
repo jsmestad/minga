@@ -59,7 +59,7 @@ defmodule MingaEditor.Startup do
     subscribe_to_parser(Keyword.get(opts, :parser_manager))
     FileWatcherHelpers.maybe_watch_buffer(buffer)
 
-    {messages_buf, _} = start_special_buffers()
+    messages_buf = Minga.Buffer.messages()
 
     # Always ensure an active buffer exists. The editor's render pipeline,
     # command dispatch, and input routing all assume buffers.active is a
@@ -269,30 +269,6 @@ defmodule MingaEditor.Startup do
     Minga.Parser.Manager.subscribe(parser_manager)
   catch
     :exit, _ -> Minga.Log.warning(:editor, "Could not subscribe to parser manager")
-  end
-
-  @doc """
-  Starts the *Messages* special buffer.
-
-  The *Warnings* buffer was removed in #825; warnings now route through
-  *Messages* with level filtering in the GUI bottom panel.
-  """
-  @spec start_special_buffers() :: {pid() | nil, pid() | nil}
-  def start_special_buffers do
-    messages_buf = start_special_buffer("*Messages*", content: "", read_only: true)
-
-    {messages_buf, nil}
-  end
-
-  @spec start_special_buffer(String.t(), keyword()) :: pid() | nil
-  defp start_special_buffer(name, opts) do
-    child_opts =
-      [buffer_name: name, unlisted: true, persistent: true] ++ opts
-
-    case DynamicSupervisor.start_child(Minga.Buffer.Supervisor, {Buffer, child_opts}) do
-      {:ok, pid} -> pid
-      _ -> nil
-    end
   end
 
   @doc """

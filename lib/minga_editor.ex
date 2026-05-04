@@ -184,27 +184,6 @@ defmodule MingaEditor do
         log_message(state, "Editor started")
       end
 
-    # Flush any log messages that arrived while the Editor was down
-    # (e.g., supervisor crash reports from a previous Editor crash).
-    # Must happen after *Messages* buffer is ready but before we return.
-    buffered_entries = Minga.LoggerHandler.flush_buffer()
-
-    state =
-      Enum.reduce(buffered_entries, state, fn {text, level}, acc ->
-        if level in [:warning, :error] do
-          acc |> log_message(text) |> MessageLog.log(text, :warning)
-        else
-          log_message(acc, text)
-        end
-      end)
-
-    state =
-      if buffered_entries != [] do
-        log_message(state, "Replayed #{length(buffered_entries)} message(s) from before restart")
-      else
-        state
-      end
-
     state = Startup.apply_config_options(state)
     Minga.Events.subscribe(:diagnostics_updated)
     Minga.Events.subscribe(:lsp_status_changed)
@@ -856,11 +835,7 @@ defmodule MingaEditor do
          %Minga.Events.LogMessageEvent{text: text, level: level},
          _msg
        ) do
-    case level do
-      :warning -> MessageLog.log(state, text, :warning)
-      :error -> MessageLog.log(state, text, :error)
-      _ -> log_message(state, text)
-    end
+    MessageLog.append_to_store(state, text, level)
   end
 
   defp dispatch_minga_event(
