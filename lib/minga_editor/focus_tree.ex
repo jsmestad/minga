@@ -126,17 +126,28 @@ defmodule MingaEditor.FocusTree do
 
   defp hit_path(%TreeNode{} = node, row, col, acc) do
     if TreeNode.contains?(node, row, col) do
-      acc = [node | acc]
-
-      Enum.reduce_while(Enum.reverse(node.children), acc, fn child, inner_acc ->
-        case hit_path(child, row, col, inner_acc) do
-          ^inner_acc -> {:cont, inner_acc}
-          deeper -> {:halt, deeper}
-        end
-      end)
+      new_acc = [node | acc]
+      deepest_child_path(node.children, row, col, new_acc) || new_acc
     else
       acc
     end
+  end
+
+  # Walks children in reverse z-order and returns the first child path that
+  # extends beyond `acc` (i.e., a child whose subtree contained the point).
+  # Returns `nil` when no child contained the point so the caller falls back
+  # to its own `acc`.
+  @spec deepest_child_path([TreeNode.t()], non_neg_integer(), non_neg_integer(), [TreeNode.t()]) ::
+          [TreeNode.t()] | nil
+  defp deepest_child_path(children, row, col, acc) do
+    children
+    |> Enum.reverse()
+    |> Enum.find_value(fn child ->
+      case hit_path(child, row, col, acc) do
+        ^acc -> nil
+        deeper -> deeper
+      end
+    end)
   end
 
   # ── Builders ───────────────────────────────────────────────────────────────
