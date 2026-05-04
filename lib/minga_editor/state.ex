@@ -643,12 +643,13 @@ defmodule MingaEditor.State do
   minibuffer row and reserving space for the file tree panel when open.
   """
   @spec screen_rect(t()) :: WindowTree.rect()
-  def screen_rect(%__MODULE__{workspace: %{viewport: vp, file_tree: %{tree: nil}}}) do
+  def screen_rect(%__MODULE__{terminal_viewport: vp, workspace: %{file_tree: %{tree: nil}}}) do
     {0, 0, vp.cols, vp.rows - 1}
   end
 
   def screen_rect(%__MODULE__{
-        workspace: %{viewport: vp, file_tree: %{tree: %FileTree{width: tw}}}
+        terminal_viewport: vp,
+        workspace: %{file_tree: %{tree: %FileTree{width: tw}}}
       }) do
     # Tree occupies columns 0..tw-1, separator at column tw,
     # editor content starts at column tw+1.
@@ -661,7 +662,10 @@ defmodule MingaEditor.State do
   @spec tree_rect(t()) :: WindowTree.rect() | nil
   def tree_rect(%__MODULE__{workspace: %{file_tree: %{tree: nil}}}), do: nil
 
-  def tree_rect(%__MODULE__{workspace: %{viewport: vp, file_tree: %{tree: %FileTree{width: tw}}}}) do
+  def tree_rect(%__MODULE__{
+        terminal_viewport: vp,
+        workspace: %{file_tree: %{tree: %FileTree{width: tw}}}
+      }) do
     # Row 0 is the tab bar; file tree starts at row 1.
     {1, 0, tw, vp.rows - 2}
   end
