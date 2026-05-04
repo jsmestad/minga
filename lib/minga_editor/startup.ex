@@ -45,6 +45,7 @@ defmodule MingaEditor.Startup do
     backend = Keyword.get(opts, :backend, :headless)
     port_manager = Keyword.get(opts, :port_manager, MingaEditor.Frontend.Manager)
     keymap_server = Keyword.get(opts, :keymap_server, Minga.Keymap.default_server())
+    options_server = Keyword.get(opts, :options_server, Minga.Config.Options.default_server())
     width = Keyword.get(opts, :width, 80)
     height = Keyword.get(opts, :height, 24)
     buffer = Keyword.get(opts, :buffer)
@@ -118,6 +119,7 @@ defmodule MingaEditor.Startup do
       workspace: workspace,
       port_manager: port_manager,
       keymap_server: keymap_server,
+      options_server: options_server,
       editing_model: editing_model,
       focus_stack: MingaEditor.Input.default_stack(),
       shell: resolve_shell(opts),
@@ -327,20 +329,21 @@ defmodule MingaEditor.Startup do
   - `:line_spacing` — `1.0` → `1.2` (GUI text benefits from breathing room;
     TUI stays at 1.0 because terminal cells have fixed height)
   """
-  @spec apply_gui_defaults(MingaEditor.Frontend.Capabilities.t()) :: :ok
-  def apply_gui_defaults(caps) do
+  @spec apply_gui_defaults(MingaEditor.Frontend.Capabilities.t(), Minga.Config.Options.server()) ::
+          :ok
+  def apply_gui_defaults(caps, options_server \\ Minga.Config.Options.default_server()) do
     alias MingaEditor.Frontend.Capabilities
 
     if Capabilities.gui?(caps) do
       # Only override if the user hasn't explicitly set a preference.
       # :hybrid is the TUI default; if it's still :hybrid, the user
       # hasn't touched it, so we can safely switch to :absolute.
-      if Config.get(:line_numbers) == :hybrid do
-        Minga.Config.Options.set(:line_numbers, :absolute)
+      if Minga.Config.Options.get(options_server, :line_numbers) == :hybrid do
+        Minga.Config.Options.set(options_server, :line_numbers, :absolute)
       end
 
-      if Config.get(:line_spacing) == 1.0 do
-        Minga.Config.Options.set(:line_spacing, 1.2)
+      if Minga.Config.Options.get(options_server, :line_spacing) == 1.0 do
+        Minga.Config.Options.set(options_server, :line_spacing, 1.2)
       end
     end
 

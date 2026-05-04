@@ -1,5 +1,5 @@
 defmodule Minga.ConfigTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Minga.Command.Registry, as: CommandRegistry
   alias Minga.Config.Hooks
@@ -11,17 +11,14 @@ defmodule Minga.ConfigTest do
   alias Minga.Popup.Registry, as: PopupRegistry
 
   setup do
-    # Ensure required servers are running
-    case Options.start_link() do
-      {:ok, _} ->
-        :ok
-
-      {:error, {:already_started, _}} ->
-        Options.reset()
-        Options.set(:clipboard, :none)
-    end
-
+    # Per-test isolated singletons keep this suite async-safe. Tests that
+    # mutate global state (Options, Keymap.Active, Hooks, ExtRegistry,
+    # PopupRegistry, CommandRegistry) all read the test's process-dictionary
+    # bridge — Process.get(:minga_config_options) and :minga_config_keymap —
+    # via Minga.Config.{set,bind,for_filetype,…}.
+    options_server = start_supervised!({Options, name: nil})
     keymap_server = start_supervised!({KeymapActive, name: nil})
+    previous_options_server = Process.put(:minga_config_options, options_server)
     previous_keymap_server = Process.put(:minga_config_keymap, keymap_server)
 
     case CommandRegistry.start_link() do
@@ -65,20 +62,24 @@ defmodule Minga.ConfigTest do
         Process.put(:minga_config_keymap, previous_keymap_server)
       end
 
-      try do
-        Options.reset()
-        Options.set(:clipboard, :none)
-      catch
-        :exit, _ -> :ok
+      if is_nil(previous_options_server) do
+        Process.delete(:minga_config_options)
+      else
+        Process.put(:minga_config_options, previous_options_server)
       end
     end)
 
-    %{keymap_server: keymap_server}
+    %{keymap_server: keymap_server, options_server: options_server}
   end
 
   @spec test_keymap_server() :: GenServer.server()
   defp test_keymap_server do
     Process.get(:minga_config_keymap, KeymapActive)
+  end
+
+  @spec test_options_server() :: GenServer.server()
+  defp test_options_server do
+    Process.get(:minga_config_options, Options)
   end
 
   describe "use Minga.Config" do
@@ -244,15 +245,15 @@ defmodule Minga.ConfigTest do
     test "sets per-filetype option overrides" do
       Minga.Config.for_filetype(:go, tab_width: 8)
 
-      assert Options.get_for_filetype(:tab_width, :go) == 8
-      assert Options.get(:tab_width) == 2
+      assert Options.get_for_filetype(test_options_server(), :tab_width, :go) == 8
+      assert Options.get(test_options_server(), :tab_width) == 2
     end
 
     test "sets multiple options at once" do
       Minga.Config.for_filetype(:python, tab_width: 4, autopair: false)
 
-      assert Options.get_for_filetype(:tab_width, :python) == 4
-      assert Options.get_for_filetype(:autopair, :python) == false
+      assert Options.get_for_filetype(test_options_server(), :tab_width, :python) == 4
+      assert Options.get_for_filetype(test_options_server(), :autopair, :python) == false
     end
 
     test "raises for invalid option value" do

@@ -49,6 +49,11 @@ defmodule Minga.Config do
     Process.get(:minga_config_keymap, Keymap.default_server())
   end
 
+  @spec options_server() :: Options.server()
+  defp options_server do
+    Process.get(:minga_config_options, Options.default_server())
+  end
+
   # ── Read options ───────────────────────────────────────────────────
 
   @doc """
@@ -213,7 +218,7 @@ defmodule Minga.Config do
   """
   @spec set(Options.option_name(), term()) :: :ok
   def set(name, value) when is_atom(name) do
-    case Options.set(name, value) do
+    case Options.set(options_server(), name, value) do
       {:ok, _} -> :ok
       {:error, msg} -> raise ArgumentError, msg
     end
@@ -235,7 +240,7 @@ defmodule Minga.Config do
   @spec set_extension_option(atom(), atom(), term()) :: :ok
   def set_extension_option(extension, name, value)
       when is_atom(extension) and is_atom(name) do
-    case Options.set_extension_option(extension, name, value) do
+    case Options.set_extension_option(options_server(), extension, name, value) do
       {:ok, _} -> :ok
       {:error, msg} -> raise ArgumentError, msg
     end
@@ -448,7 +453,7 @@ defmodule Minga.Config do
   @spec for_filetype(atom(), keyword()) :: :ok
   def for_filetype(filetype, opts) when is_atom(filetype) and is_list(opts) do
     for {name, value} <- opts do
-      case Options.set_for_filetype(filetype, name, value) do
+      case Options.set_for_filetype(options_server(), filetype, name, value) do
         {:ok, _} -> :ok
         {:error, msg} -> raise ArgumentError, "for_filetype #{filetype}: #{msg}"
       end

@@ -35,6 +35,7 @@ defmodule Minga.Config.Loader do
   alias Minga.Popup.Registry, as: PopupRegistry
 
   @type keymap_server :: Keymap.server()
+  @type options_server :: Options.server()
 
   @typedoc "Loader state: stores paths, loaded modules, and any errors from each stage."
   @type state :: %{
@@ -45,7 +46,8 @@ defmodule Minga.Config.Loader do
           project_config_path: String.t() | nil,
           project_config_error: String.t() | nil,
           after_error: String.t() | nil,
-          keymap_server: keymap_server()
+          keymap_server: keymap_server(),
+          options_server: options_server()
         }
 
   # ── Client API ──────────────────────────────────────────────────────────────
@@ -71,7 +73,14 @@ defmodule Minga.Config.Loader do
         Process.get(:minga_config_keymap, Keymap.default_server())
       )
 
-    Agent.start_link(fn -> load_all(keymap_server) end, name: name)
+    options_server =
+      Keyword.get(
+        opts,
+        :options_server,
+        Process.get(:minga_config_options, Options.default_server())
+      )
+
+    Agent.start_link(fn -> load_all(keymap_server, options_server) end, name: name)
   end
 
   @doc """
@@ -143,20 +152,27 @@ defmodule Minga.Config.Loader do
     end
 
     # Reset all registries to defaults
-    keymap_server =
+    {keymap_server, options_server} =
       Agent.get(server, fn
-        %{keymap_server: keymap_server} ->
-          keymap_server
+        %{keymap_server: keymap_server, options_server: options_server} ->
+          {keymap_server, options_server}
 
-        # Defensive fallback: state shape predates the keymap_server field.
+        # Defensive fallback: state shape predates the *_server fields.
         # Unreachable in single-version processes; logged so a real schema
         # mismatch doesn't degrade silently.
         _ ->
-          Minga.Log.warning(:config, "loader state missing :keymap_server; using default")
-          Process.get(:minga_config_keymap, Keymap.default_server())
+          Minga.Log.warning(
+            :config,
+            "loader state missing :keymap_server/:options_server; using defaults"
+          )
+
+          {
+            Process.get(:minga_config_keymap, Keymap.default_server()),
+            Process.get(:minga_config_options, Options.default_server())
+          }
       end)
 
-    Options.reset()
+    Options.reset(options_server)
     Hooks.reset()
     Advice.reset()
     Keymap.reset(keymap_server)
@@ -165,7 +181,7 @@ defmodule Minga.Config.Loader do
     PopupRegistry.clear()
 
     # Re-run the full load sequence (includes starting extensions)
-    new_state = load_all(keymap_server)
+    new_state = load_all(keymap_server, options_server)
     Agent.update(server, fn _ -> new_state end)
 
     # Return error if any stage had problems
@@ -183,15 +199,16 @@ defmodule Minga.Config.Loader do
 
   # ── Private ─────────────────────────────────────────────────────────────────
 
-  # The process dictionary bridges `keymap_server` into `Minga.Config.bind/3,4,5`,
-  # which is invoked synchronously while `.exs` configs evaluate. Code that
-  # calls `Minga.Config.bind` from a separate process (e.g., a GenServer
-  # started by an extension callback) won't see this dict and will fall back
-  # to `Keymap.default_server/0`. Extensions are skipped in test mode, so
-  # this only affects long-lived runtime callers.
-  @spec load_all(keymap_server()) :: state()
-  defp load_all(keymap_server) do
+  # The process dictionary bridges `keymap_server` and `options_server` into
+  # `Minga.Config.bind/3,4,5` and `Minga.Config.set/2`, which run synchronously
+  # while `.exs` configs evaluate. Code that calls those helpers from a separate
+  # process (e.g., a GenServer started by an extension callback) won't see this
+  # dict and will fall back to the registered defaults. Extensions are skipped
+  # in test mode, so this only affects long-lived runtime callers.
+  @spec load_all(keymap_server(), options_server()) :: state()
+  defp load_all(keymap_server, options_server) do
     previous_keymap_server = Process.put(:minga_config_keymap, keymap_server)
+    previous_options_server = Process.put(:minga_config_options, options_server)
 
     try do
       config_path = resolve_config_path()
@@ -234,7 +251,7 @@ defmodule Minga.Config.Loader do
       after_error = eval_if_exists(after_path)
 
       # 6. Apply log level from config
-      apply_log_level()
+      apply_log_level(options_server)
 
       # 7. Start declared extensions (if the supervisor is running).
       # Skip in test mode so user-installed extensions don't affect test
@@ -252,16 +269,18 @@ defmodule Minga.Config.Loader do
         project_config_path: project_path,
         project_config_error: project_config_error,
         after_error: after_error,
-        keymap_server: keymap_server
+        keymap_server: keymap_server,
+        options_server: options_server
       }
     after
-      if is_nil(previous_keymap_server) do
-        Process.delete(:minga_config_keymap)
-      else
-        Process.put(:minga_config_keymap, previous_keymap_server)
-      end
+      restore_pdict(:minga_config_keymap, previous_keymap_server)
+      restore_pdict(:minga_config_options, previous_options_server)
     end
   end
+
+  @spec restore_pdict(atom(), term() | nil) :: term() | nil
+  defp restore_pdict(key, nil), do: Process.delete(key)
+  defp restore_pdict(key, value), do: Process.put(key, value)
 
   @spec load_user_themes() :: :ok
   defp load_user_themes do
@@ -269,9 +288,9 @@ defmodule Minga.Config.Loader do
     :ok
   end
 
-  @spec apply_log_level() :: :ok
-  defp apply_log_level do
-    level = Options.get(:log_level)
+  @spec apply_log_level(options_server()) :: :ok
+  defp apply_log_level(options_server) do
+    level = Options.get(options_server, :log_level)
 
     # Only apply the Minga log level if it is more restrictive than what
     # Mix config already set. This prevents the default :info from
