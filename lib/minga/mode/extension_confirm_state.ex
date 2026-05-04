@@ -7,10 +7,14 @@ defmodule Minga.Mode.ExtensionConfirmState do
   """
 
   @enforce_keys [:updates]
+  # `count` is unused by this mode, but `Minga.Mode.apply_result/2` runs
+  # `reset_count/1` (i.e. `%{state | count: nil}`) on every transition and
+  # execute, so the field must exist or the dispatcher raises KeyError.
   defstruct updates: [],
             current: 0,
             accepted: [],
-            show_details: false
+            show_details: false,
+            count: nil
 
   @typedoc "An update summary for display in the confirmation dialog."
   @type update_entry :: %{
@@ -27,6 +31,7 @@ defmodule Minga.Mode.ExtensionConfirmState do
           updates: [update_entry()],
           current: non_neg_integer(),
           accepted: [non_neg_integer()],
-          show_details: boolean()
+          show_details: boolean(),
+          count: non_neg_integer() | nil
         }
 end

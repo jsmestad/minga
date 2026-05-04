@@ -1,6 +1,7 @@
 defmodule Minga.Mode.ExtensionConfirmTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Mode
   alias Minga.Mode.ExtensionConfirm
   alias Minga.Mode.ExtensionConfirmState
 
@@ -112,6 +113,32 @@ defmodule Minga.Mode.ExtensionConfirmTest do
       s = %{state([@git_update, @pinned_update]) | current: 1}
       display = Minga.Mode.display(:extension_confirm, s)
       assert display =~ "(2 of 2)"
+    end
+  end
+
+  describe "Mode.process/3 reset_count" do
+    # Regression: Mode.apply_result/2 calls reset_count(state) on :transition,
+    # :execute, and :execute_then_transition results. reset_count does
+    # `%{state | count: nil}`, which raises KeyError if the struct lacks a
+    # :count field. ExtensionConfirmState was previously missing this field,
+    # so any non-:continue dispatch on this mode crashed in production.
+    test "Y on the last update routes through reset_count without raising" do
+      s = state([@git_update])
+
+      assert {new_mode, [:apply_extension_updates], new_state} =
+               Mode.process(:extension_confirm, {?Y, 0}, s)
+
+      assert new_mode == :normal
+      assert new_state.count == nil
+    end
+
+    test "Esc routes through reset_count without raising" do
+      s = state([@git_update])
+
+      assert {:normal, [:apply_extension_updates], new_state} =
+               Mode.process(:extension_confirm, {27, 0}, s)
+
+      assert new_state.count == nil
     end
   end
 end

@@ -1,10 +1,17 @@
 defmodule MingaEditor.EditorTest do
+  @moduledoc """
+  Integration smoke tests for the Editor GenServer: contracts the
+  GenServer itself owns (port roundtrip, file open, viewport
+  propagation, stale-timer dispatch, status_msg surfacing).
+  """
   use Minga.Test.EditingModelCase, async: true
 
   alias Minga.Buffer.Server, as: BufferServer
   alias MingaEditor
+  alias MingaEditor.Startup
+  alias MingaEditor.State, as: EditorState
+  alias MingaEditor.Viewport
 
-  # Helper: start a fresh editor with its own buffer.
   defp start_editor(content \\ "hello\nworld\nfoo") do
     {:ok, buffer} = BufferServer.start_link(content: content)
 
@@ -21,7 +28,6 @@ defmodule MingaEditor.EditorTest do
     {editor, buffer}
   end
 
-  # Helper: start editor with no buffer (splash screen)
   defp start_editor_no_buffer do
     {:ok, editor} =
       MingaEditor.start_link(
@@ -36,69 +42,54 @@ defmodule MingaEditor.EditorTest do
     editor
   end
 
-  defp send_key(editor, codepoint, mods \\ 0) do
-    send(editor, {:minga_input, {:key_press, codepoint, mods}})
-    _ = :sys.get_state(editor)
+  describe "build_initial_state/1" do
+    test "returns an EditorState in :normal mode with the buffer wired up" do
+      {:ok, buffer} = BufferServer.start_link(content: "hi")
+
+      state =
+        Startup.build_initial_state(
+          port_manager: nil,
+          buffer: buffer,
+          width: 40,
+          height: 10,
+          editing_model: :vim
+        )
+
+      assert state.workspace.editing.mode == :normal
+      assert Minga.Editing.mode(state) == :normal
+      assert state.workspace.buffers.active == buffer
+    end
+
+    test "creates a default [new 1] buffer when none is provided" do
+      state =
+        Startup.build_initial_state(
+          port_manager: nil,
+          buffer: nil,
+          width: 40,
+          height: 10,
+          editing_model: :vim
+        )
+
+      assert state.workspace.editing.mode == :normal
+      # Render pipeline / command dispatch / input routing all assume
+      # buffers.active is a pid, so Startup synthesises one when caller
+      # passes nil.
+      assert is_pid(state.workspace.buffers.active)
+    end
   end
 
-  describe "init" do
-    test "editor starts alive with Normal mode" do
+  describe "render/1" do
+    test "render cast doesn't crash with a buffer" do
       {editor, _buffer} = start_editor()
+      MingaEditor.render(editor)
+      _ = :sys.get_state(editor)
       assert Process.alive?(editor)
     end
 
-    test "editor starts with no buffer" do
+    test "render cast doesn't crash without a buffer" do
       editor = start_editor_no_buffer()
-      assert Process.alive?(editor)
-    end
-  end
-
-  describe "handle_info — resize" do
-    test "resize event updates viewport" do
-      {editor, _buffer} = start_editor()
-      send(editor, {:minga_input, {:resize, 120, 40}})
+      MingaEditor.render(editor)
       _ = :sys.get_state(editor)
-      assert Process.alive?(editor)
-    end
-  end
-
-  describe "handle_info — ready" do
-    test "ready event updates viewport" do
-      {editor, _buffer} = start_editor()
-      send(editor, {:minga_input, {:ready, 100, 30}})
-      _ = :sys.get_state(editor)
-      assert Process.alive?(editor)
-    end
-  end
-
-  describe "handle_info — unknown messages" do
-    test "unknown messages are ignored" do
-      {editor, _buffer} = start_editor()
-      send(editor, :some_random_message)
-      _ = :sys.get_state(editor)
-      assert Process.alive?(editor)
-    end
-
-    test "stale whichkey timeout is ignored" do
-      {editor, _buffer} = start_editor()
-      send(editor, {:whichkey_timeout, make_ref()})
-      _ = :sys.get_state(editor)
-      assert Process.alive?(editor)
-    end
-  end
-
-  describe "commands with no buffer" do
-    test "key presses with no buffer don't crash" do
-      editor = start_editor_no_buffer()
-
-      send_key(editor, ?h)
-      send_key(editor, ?j)
-      send_key(editor, ?i)
-      send_key(editor, ?d)
-      send_key(editor, ?d)
-      send_key(editor, ?u)
-      send_key(editor, ?p)
-
       assert Process.alive?(editor)
     end
   end
@@ -123,24 +114,44 @@ defmodule MingaEditor.EditorTest do
     end
   end
 
-  describe "render/1" do
-    test "render cast doesn't crash with a buffer" do
+  describe "resize" do
+    test "port-driven resize updates the workspace viewport" do
       {editor, _buffer} = start_editor()
-      MingaEditor.render(editor)
-      _ = :sys.get_state(editor)
-      assert Process.alive?(editor)
-    end
+      send(editor, {:minga_input, {:resize, 120, 40}})
+      state = :sys.get_state(editor)
 
-    test "render cast doesn't crash without a buffer" do
-      editor = start_editor_no_buffer()
-      MingaEditor.render(editor)
-      _ = :sys.get_state(editor)
-      assert Process.alive?(editor)
+      assert %Viewport{rows: 40, cols: 120} = state.workspace.viewport
     end
   end
 
-  describe "read-only buffer guard" do
-    test "entering insert mode on read-only buffer stays in normal mode" do
+  describe "ready" do
+    test "ready event seeds the workspace viewport columns" do
+      {editor, _buffer} = start_editor()
+      send(editor, {:minga_input, {:ready, 100, 30}})
+      state = :sys.get_state(editor)
+
+      assert state.workspace.viewport.cols == 100
+    end
+  end
+
+  describe "unknown handle_info messages" do
+    test "stray messages are dropped without crashing" do
+      {editor, _buffer} = start_editor()
+      ref = Process.monitor(editor)
+      send(editor, :some_random_message)
+      send(editor, {:unexpected, :tuple})
+      _ = :sys.get_state(editor)
+
+      refute_received {:DOWN, ^ref, :process, _, _}
+    end
+  end
+
+  describe "read-only buffer through the GenServer" do
+    # Layer-1 KeyDispatch behaviour is covered in
+    # test/minga_editor/commands/insert_entry_test.exs. This smoke test
+    # exists to catch regressions where Editor.handle_info swallows or
+    # rewrites the status_msg surfaced by KeyDispatch.
+    test "pressing i on a read-only buffer surfaces status_msg in shell_state" do
       {:ok, buffer} = BufferServer.start_link(content: "read only", read_only: true)
 
       {:ok, editor} =
@@ -153,31 +164,56 @@ defmodule MingaEditor.EditorTest do
           editing_model: :vim
         )
 
-      # Try pressing 'i' to enter insert mode
       send(editor, {:minga_input, {:key_press, ?i, 0}})
       state = :sys.get_state(editor)
+
       assert state.workspace.editing.mode == :normal
       assert state.shell_state.status_msg == "Buffer is read-only"
     end
+  end
 
-    test "entering replace mode on read-only buffer stays in normal mode" do
-      {:ok, buffer} = BufferServer.start_link(content: "read only", read_only: true)
+  describe "whichkey timeout" do
+    test "real-timer fires end-to-end and is ignored when ref is stale" do
+      {editor, _buffer} = start_editor()
+      before_whichkey = :sys.get_state(editor).shell_state.whichkey
 
-      {:ok, editor} =
-        MingaEditor.start_link(
-          name: :"editor_ro2_#{:erlang.unique_integer([:positive])}",
-          port_manager: nil,
-          buffer: buffer,
-          width: 40,
-          height: 10,
-          editing_model: :vim
-        )
+      # Ref does not match the editor's stored timer (nil by default), so the
+      # handler must hit its stale-ref branch and leave the popup hidden.
+      timer_ref = Process.send_after(editor, {:whichkey_timeout, make_ref()}, 0)
 
-      # Try pressing 'R' to enter replace mode
-      send(editor, {:minga_input, {:key_press, ?R, 0}})
+      assert :ok = await_timer_fired(timer_ref)
+      after_whichkey = :sys.get_state(editor).shell_state.whichkey
+
+      assert after_whichkey.show == before_whichkey.show
+      assert after_whichkey.timer == before_whichkey.timer
+    end
+
+    test "stale ref handler is a pure no-op (called directly with a fabricated ref)" do
+      {editor, _buffer} = start_editor()
       state = :sys.get_state(editor)
-      assert state.workspace.editing.mode == :normal
-      assert state.shell_state.status_msg == "Buffer is read-only"
+      assert EditorState.whichkey(state).timer == nil
+
+      # Any fresh ref differs from the nil-default timer, so the handler hits
+      # the stale-ref branch and returns state unchanged (pinned match below).
+      assert {:noreply, ^state} =
+               MingaEditor.handle_info({:whichkey_timeout, make_ref()}, state)
+    end
+  end
+
+  # Polls Process.read_timer/1 until the timer has been delivered. Bounded by
+  # 50 iterations of 1ms sleeps so the test fails loudly via :timeout instead
+  # of hanging if the timer wheel ever stalls.
+  defp await_timer_fired(ref, attempts \\ 50)
+  defp await_timer_fired(_ref, 0), do: :timeout
+
+  defp await_timer_fired(ref, attempts) do
+    case Process.read_timer(ref) do
+      false ->
+        :ok
+
+      _ms_left ->
+        Process.sleep(1)
+        await_timer_fired(ref, attempts - 1)
     end
   end
 end
