@@ -18,9 +18,8 @@ defmodule MingaEditor.Shell.Board.Input do
   @behaviour MingaEditor.Input.Handler
 
   alias MingaAgent.Config, as: AgentConfig
-  alias MingaEditor.Agent.UIState
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.VimState
+  alias MingaEditor.State.AgentAccess
   alias MingaEditor.Shell.Board
   alias MingaEditor.Shell.Board.Card
   alias MingaEditor.Shell.Board.State, as: BoardState
@@ -259,23 +258,18 @@ defmodule MingaEditor.Shell.Board.Input do
       state = %{state | shell_state: new_board}
 
       # Restore the card's workspace if it has one from a previous zoom.
-      # First zoom: reset workspace to clean state so activate_for_card
-      # operates on a fresh window, not the grid's window.
+      # First zoom: build a fresh agent-shaped workspace (own window with
+      # agent_chat content, agent scope, default agent_ui) so activate_for_card
+      # operates on a card-shaped window, not the grid's buffer window.
       state =
         case card.workspace do
           ws when is_map(ws) and map_size(ws) > 0 ->
             EditorState.restore_tab_context(state, ws)
 
           _ ->
-            fresh_ws = %{
-              state.workspace
-              | keymap_scope: :editor,
-                editing: VimState.new(),
-                completion: nil,
-                agent_ui: UIState.new()
-            }
-
-            %{state | workspace: fresh_ws}
+            agent_buf = AgentAccess.agent(state).buffer
+            fresh_context = EditorState.build_agent_card_workspace(state, agent_buf)
+            EditorState.restore_tab_context(state, fresh_context)
         end
 
       # For agent cards, activate the agentic view so the user sees

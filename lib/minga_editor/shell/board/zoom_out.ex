@@ -11,9 +11,9 @@ defmodule MingaEditor.Shell.Board.ZoomOut do
 
   @behaviour MingaEditor.Input.Handler
 
-  alias MingaEditor.AgentActivation
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.Shell.Board
+  alias MingaEditor.Shell.Board.AgentDeactivation
   alias MingaEditor.Shell.Board.Card
   alias MingaEditor.Shell.Board.State, as: BoardState
 
@@ -76,15 +76,18 @@ defmodule MingaEditor.Shell.Board.ZoomOut do
     board = %{board | zoomed_into: nil}
     state = %{state | shell_state: board}
 
-    # Restore the grid workspace if we have one
-    state =
-      if grid_workspace && is_map(grid_workspace) && map_size(grid_workspace) > 0 do
-        EditorState.restore_tab_context(state, grid_workspace)
-      else
-        state
-      end
+    # Reset the shell-level agent rendering cache before restoring the grid
+    # workspace so the grid does not render against the previous card's
+    # status, error, or pending approval.
+    state = AgentDeactivation.deactivate_agent_for_card(state)
 
-    # Deactivate the agent view (clear session, reset scope, unfocus prompt)
-    AgentActivation.deactivate(state)
+    # Restore the grid workspace if we have one. The restore replaces the
+    # workspace fields wholesale, so workspace-level activation state
+    # (keymap scope, agent_ui focus) is reset by the restore itself.
+    if grid_workspace && is_map(grid_workspace) && map_size(grid_workspace) > 0 do
+      EditorState.restore_tab_context(state, grid_workspace)
+    else
+      state
+    end
   end
 end

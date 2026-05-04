@@ -985,6 +985,42 @@ defmodule MingaEditor.State do
     }
   end
 
+  @doc """
+  Builds a fresh agent-shaped workspace context for a Board card on first zoom.
+
+  Returns a `Tab.context()` carrying a single agent-chat window sized to the
+  current viewport, with the agent keymap scope and a fresh `agent_ui`. The
+  caller restores it via `restore_tab_context/2` and then runs
+  `AgentActivation.activate_for_card/2` to attach the card's session pid to
+  the window content.
+
+  Falls back to an empty `Windows` map when no agent buffer is available;
+  the caller's activation step then becomes a no-op.
+  """
+  @spec build_agent_card_workspace(t(), pid() | nil) :: Tab.context()
+  def build_agent_card_workspace(%__MODULE__{} = state, agent_buf) do
+    rows = max(state.workspace.viewport.rows, 1)
+    cols = max(state.workspace.viewport.cols, 1)
+
+    windows = build_agent_card_windows(agent_buf, rows, cols)
+    build_agent_tab_defaults(state, windows, agent_buf)
+  end
+
+  @spec build_agent_card_windows(pid() | nil, pos_integer(), pos_integer()) :: Windows.t()
+  defp build_agent_card_windows(agent_buf, rows, cols) when is_pid(agent_buf) do
+    win_id = 1
+    agent_window = Window.new_agent_chat(win_id, agent_buf, rows, cols)
+
+    %Windows{
+      tree: WindowTree.new(win_id),
+      map: %{win_id => agent_window},
+      active: win_id,
+      next_id: win_id + 1
+    }
+  end
+
+  defp build_agent_card_windows(_agent_buf, _rows, _cols), do: %Windows{}
+
   # Migrates legacy contexts (old nested format or oldest
   # bare-field format) to the new flat format. If the context already
   # has the :buffers key (new format), returns it unchanged.
