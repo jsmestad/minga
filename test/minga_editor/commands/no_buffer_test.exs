@@ -1,10 +1,7 @@
 defmodule MingaEditor.Commands.NoBufferTest do
   @moduledoc """
   Layer-1 contract: when no buffer is active, every command that requires a
-  buffer returns state unchanged. This replaces the old Editor GenServer
-  smoke test that asserted `Process.alive?(editor)` after pressing keys
-  without a buffer (which was tautological — the GenServer ignores
-  unknown messages by design).
+  buffer returns state unchanged.
   """
   use ExUnit.Case, async: true
 
@@ -31,8 +28,6 @@ defmodule MingaEditor.Commands.NoBufferTest do
       {:ok, state: no_buffer_state()}
     end
 
-    # Atom commands looked up through the Command Registry; the buffer-required
-    # commands return state unchanged when buffers.active is nil.
     test "atom motion commands are no-ops", %{state: state} do
       for cmd <- [:move_left, :move_right, :move_up, :move_down] do
         assert Commands.execute(state, cmd) == state
@@ -45,7 +40,6 @@ defmodule MingaEditor.Commands.NoBufferTest do
       end
     end
 
-    # Tuple commands routed through guard_buffer/2.
     test "tuple commands are no-ops", %{state: state} do
       for cmd <- [
             {:insert_char, "x"},

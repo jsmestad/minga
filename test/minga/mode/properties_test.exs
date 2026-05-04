@@ -70,10 +70,6 @@ defmodule Minga.Mode.PropertiesTest do
     :delete_confirm
   ]
 
-  # ── Generators ────────────────────────────────────────────────────────────
-
-  # Builds a fresh `Mode.State` populated with the production keymap so
-  # leader/normal-binding lookups behave the same as in the editor.
   defp base_state do
     %{
       Mode.initial_state()
@@ -113,9 +109,9 @@ defmodule Minga.Mode.PropertiesTest do
     %DeleteConfirmState{path: "/tmp/x", name: "x", dir?: false}
   end
 
-  # Codepoints across the printable ASCII range plus control codes that the
-  # FSM recognises (Esc, Backspace, Enter, etc.). Keep modifiers small —
-  # the FSM only branches on Ctrl/Alt, not arbitrary masks.
+  # Codepoints span ASCII (0..127) so the generator hits printable characters
+  # plus control codes the FSM recognises (Esc, Backspace, Enter, etc.).
+  # Modifiers are kept to 0..7 because the FSM only branches on Ctrl/Alt.
   defp key_gen do
     gen all(
           codepoint <- StreamData.integer(0..127),
@@ -124,8 +120,6 @@ defmodule Minga.Mode.PropertiesTest do
       {codepoint, modifiers}
     end
   end
-
-  # ── Property 1: result shape and mode-enum closure ─────────────────────────
 
   property "Mode.process/3 always returns {mode, [command], state} with mode in the enum" do
     check all(
@@ -142,8 +136,6 @@ defmodule Minga.Mode.PropertiesTest do
     end
   end
 
-  # ── Property 2: Esc is a universal exit to :normal ─────────────────────────
-
   property "Escape from any mode lands in :normal" do
     check all(mode <- StreamData.member_of(@dispatchable_modes)) do
       state = default_mode_state(mode)
@@ -151,8 +143,6 @@ defmodule Minga.Mode.PropertiesTest do
       assert new_mode == :normal
     end
   end
-
-  # ── Sanity guard: enum coverage ────────────────────────────────────────────
 
   test "default_mode_state/1 covers every dispatchable mode" do
     for mode <- @dispatchable_modes do

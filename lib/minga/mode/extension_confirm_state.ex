@@ -7,6 +7,9 @@ defmodule Minga.Mode.ExtensionConfirmState do
   """
 
   @enforce_keys [:updates]
+  # `count` is unused by this mode, but `Minga.Mode.apply_result/2` runs
+  # `reset_count/1` (i.e. `%{state | count: nil}`) on every transition and
+  # execute, so the field must exist or the dispatcher raises KeyError.
   defstruct updates: [],
             current: 0,
             accepted: [],
