@@ -25,11 +25,8 @@ defmodule MingaEditor.State.Tab do
   @typedoc """
   Snapshotted per-tab state.
 
-  The context stores per-tab fields directly (buffers, windows, mode, etc.).
-  Empty context means a brand-new tab.
-
-  Legacy contexts with nested structure (old snapshot format) or
-  bare fields (oldest format) are auto-migrated on first restore.
+  Stores per-tab fields directly as a flat map (buffers, windows, editing,
+  etc.). Empty context means a brand-new tab.
   """
   @type context :: %{
           optional(:keymap_scope) => atom(),
@@ -45,19 +42,8 @@ defmodule MingaEditor.State.Tab do
           optional(:injection_ranges) => term(),
           optional(:search) => term(),
           optional(:editing) => MingaEditor.VimState.t(),
-          # Legacy: old contexts may have :vim instead of :editing
-          optional(:vim) => MingaEditor.VimState.t(),
           optional(:document_highlights) => term(),
-          optional(:agent_ui) => term(),
-          # Legacy fields kept for migration compatibility:
-          optional(:mode) => atom(),
-          optional(:mode_state) => term(),
-          optional(:reg) => term(),
-          optional(:marks) => term(),
-          optional(:last_jump_pos) => term(),
-          optional(:last_find_char) => term(),
-          optional(:change_recorder) => term(),
-          optional(:macro_recorder) => term()
+          optional(:agent_ui) => term()
         }
 
   @typedoc "Agent tab status (nil for file tabs)."

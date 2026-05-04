@@ -42,7 +42,6 @@ defmodule MingaEditor.State do
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Highlighting
   alias MingaEditor.State.Mouse
-  alias MingaEditor.State.Registers
   alias MingaEditor.State.Search
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
@@ -887,9 +886,6 @@ defmodule MingaEditor.State do
   The context carries workspace fields as a flat map. Empty context means a
   brand-new tab; we build defaults with the current active buffer and
   viewport dimensions.
-
-  Backward compatibility: old contexts with nested structure are migrated
-  to the new flat format via `maybe_migrate_legacy_context/2`.
   """
   @spec restore_tab_context(t(), Tab.context()) :: t()
   def restore_tab_context(%__MODULE__{} = state, context) when is_map(context) do
@@ -898,11 +894,8 @@ defmodule MingaEditor.State do
         build_file_tab_defaults(state)
       else
         context
-        |> maybe_migrate_legacy_context(state)
-        |> maybe_migrate_vim_fields()
       end
 
-    # Build a new workspace from the context fields
     ws = state.workspace
 
     new_ws =
@@ -1034,71 +1027,6 @@ defmodule MingaEditor.State do
 
   defp build_agent_card_windows(_agent_buf, _rows, _cols), do: %Windows{}
 
-  # Migrates legacy contexts (old nested format or oldest
-  # bare-field format) to the new flat format. If the context already
-  # has the :buffers key (new format), returns it unchanged.
-  @spec maybe_migrate_legacy_context(Tab.context(), t()) :: Tab.context()
-  defp maybe_migrate_legacy_context(%{buffers: _} = context, _state), do: context
-
-  defp maybe_migrate_legacy_context(%{surface_state: %{buffers: _} = ss} = context, _state) do
-    # Extract fields from old nested snapshot format
-    vim_map = ss.editing || %{}
-
-    vim = %VimState{
-      mode: Map.get(vim_map, :mode, :normal),
-      mode_state: Map.get(vim_map, :mode_state, Mode.initial_state()),
-      reg: Map.get(vim_map, :reg, %Registers{}),
-      marks: Map.get(vim_map, :marks, %{}),
-      last_jump_pos: Map.get(vim_map, :last_jump_pos),
-      last_find_char: Map.get(vim_map, :last_find_char)
-    }
-
-    %{
-      keymap_scope: Map.get(context, :keymap_scope, :editor),
-      buffers: ss.buffers,
-      windows: ss.windows,
-      file_tree: ss.file_tree,
-      viewport: ss.viewport,
-      mouse: Map.get(ss, :mouse, %Mouse{}),
-      highlight: Map.get(ss, :highlight, %Highlighting{}),
-      lsp_pending: Map.get(ss, :lsp_pending, %{}),
-      completion: Map.get(ss, :completion),
-      completion_trigger: Map.get(ss, :completion_trigger, CompletionTrigger.new()),
-      injection_ranges: Map.get(ss, :injection_ranges, %{}),
-      search: Map.get(ss, :search, %Search{}),
-      editing: vim
-    }
-  end
-
-  defp maybe_migrate_legacy_context(context, state) do
-    # Oldest format: bare fields like :active_buffer, :windows, :mode
-    ws = state.workspace
-
-    ws = maybe_restore_ws(ws, :windows, context)
-    ws = maybe_restore_ws(ws, :file_tree, context)
-
-    ws =
-      case Map.fetch(context, :active_buffer) do
-        {:ok, buf_pid} ->
-          idx = Map.get(context, :active_buffer_index, ws.buffers.active_index)
-          %{ws | buffers: %{ws.buffers | active: buf_pid, active_index: idx}}
-
-        :error ->
-          ws
-      end
-
-    ws = %{ws | keymap_scope: Map.get(context, :keymap_scope, :editor)}
-
-    # Build vim state from old fields (will be migrated by maybe_migrate_vim_fields)
-    # Preserve vim-related fields from the original context so they can be migrated
-    # Drop the vim field from the snapshot so maybe_migrate_vim_fields will migrate the flat fields
-    snapshot_workspace_fields(ws)
-    |> Map.drop([:vim, :editing])
-    |> Map.merge(
-      Map.take(context, [:mode, :mode_state, :reg, :marks, :last_jump_pos, :last_find_char])
-    )
-  end
-
   @spec log_switch_tab(TabBar.t(), Tab.id(), Tab.id()) :: :ok
   defp log_switch_tab(tb, current_id, target_id) do
     Log.debug(:editor, fn ->
@@ -1118,49 +1046,6 @@ defmodule MingaEditor.State do
       "[tab] switch_tab restored: scope=#{state.workspace.keymap_scope} buf=#{inspect(state.workspace.buffers.active)}"
     end)
   end
-
-  # Restores a workspace field from a context map.
-  @spec maybe_restore_ws(WorkspaceState.t(), atom(), Tab.context()) :: WorkspaceState.t()
-  defp maybe_restore_ws(ws, key, context) do
-    case Map.fetch(context, key) do
-      {:ok, value} -> Map.put(ws, key, value)
-      :error -> ws
-    end
-  end
-
-  # Migrates old contexts with separate vim fields to the new VimState substruct.
-  # The :editing and :vim guards are defensive: earlier migration steps strip
-  # these keys before calling here, but persisted session data may have them.
-  @dialyzer {:no_match, maybe_migrate_vim_fields: 1}
-  @spec maybe_migrate_vim_fields(Tab.context()) :: Tab.context()
-  defp maybe_migrate_vim_fields(%{editing: _} = context), do: context
-  defp maybe_migrate_vim_fields(%{vim: _} = context), do: context
-
-  defp maybe_migrate_vim_fields(%{mode: mode} = context) do
-    vim = %VimState{
-      mode: mode,
-      mode_state: Map.get(context, :mode_state, Mode.initial_state()),
-      reg: Map.get(context, :reg, %Registers{}),
-      marks: Map.get(context, :marks, %{}),
-      last_jump_pos: Map.get(context, :last_jump_pos),
-      last_find_char: Map.get(context, :last_find_char)
-    }
-
-    context
-    |> Map.drop([
-      :mode,
-      :mode_state,
-      :reg,
-      :marks,
-      :last_jump_pos,
-      :last_find_char,
-      :change_recorder,
-      :macro_recorder
-    ])
-    |> Map.put(:editing, vim)
-  end
-
-  defp maybe_migrate_vim_fields(context), do: context
 
   @doc """
   Pure variant of `switch_tab/2`. Returns `{state, effects}` instead of
