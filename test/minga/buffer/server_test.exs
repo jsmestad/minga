@@ -771,6 +771,48 @@ defmodule Minga.Buffer.ServerTest do
     end
   end
 
+  describe "last_undo_source/1 and last_redo_source/1" do
+    test "returns nil when stacks are empty" do
+      pid = start_supervised!({Server, content: "hello"})
+      assert Server.last_undo_source(pid) == nil
+      assert Server.last_redo_source(pid) == nil
+    end
+
+    test "returns source of most recent undo entry" do
+      pid = start_supervised!({Server, content: "hello world"})
+      Server.insert_char(pid, "X")
+      assert Server.last_undo_source(pid) == :user
+    end
+
+    test "returns :agent for agent edits" do
+      pid = start_supervised!({Server, content: "hello world"})
+      Server.find_and_replace(pid, "hello", "goodbye")
+      assert Server.last_undo_source(pid) == :agent
+    end
+
+    test "returns :lsp for LSP edits" do
+      pid = start_supervised!({Server, content: "hello"})
+      Server.apply_text_edits(pid, [{{0, 0}, {0, 5}, "goodbye"}])
+      assert Server.last_undo_source(pid) == :lsp
+    end
+
+    test "last_redo_source/1 returns source after undo" do
+      pid = start_supervised!({Server, content: "hello world"})
+      Server.find_and_replace(pid, "hello", "goodbye")
+      Server.undo(pid)
+      assert Server.last_redo_source(pid) == :agent
+    end
+
+    test "redo clears redo and updates undo source" do
+      pid = start_supervised!({Server, content: "hello world"})
+      Server.find_and_replace(pid, "hello", "goodbye")
+      Server.undo(pid)
+      Server.redo(pid)
+      assert Server.last_undo_source(pid) == :agent
+      assert Server.last_redo_source(pid) == nil
+    end
+  end
+
   describe "edit delta tracking" do
     test "insert_char records an insertion delta" do
       {:ok, pid} = Server.start_link(content: "hello")
