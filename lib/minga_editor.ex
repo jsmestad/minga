@@ -377,11 +377,12 @@ defmodule MingaEditor do
     line_spacing = Config.get(:line_spacing) || 1.0
     effective_height = Viewport.effective_rows(height, line_spacing)
 
+    vp = Viewport.new(effective_height, width)
+
     new_state = %{
-      EditorState.update_workspace(
-        state,
-        &WorkspaceState.set_viewport(&1, Viewport.new(effective_height, width))
-      )
+      (state
+       |> EditorState.set_terminal_viewport(vp)
+       |> EditorState.update_workspace(&WorkspaceState.set_viewport(&1, vp)))
       | capabilities: caps,
         layout: nil
     }
@@ -424,11 +425,12 @@ defmodule MingaEditor do
     line_spacing = Config.get(:line_spacing) || 1.0
     effective_height = Viewport.effective_rows(height, line_spacing)
 
+    vp = Viewport.new(effective_height, width)
+
     new_state =
-      EditorState.update_workspace(
-        state,
-        &WorkspaceState.set_viewport(&1, Viewport.new(effective_height, width))
-      )
+      state
+      |> EditorState.set_terminal_viewport(vp)
+      |> EditorState.update_workspace(&WorkspaceState.set_viewport(&1, vp))
 
     # Invalidate the cached layout so resize_all_windows computes fresh
     # rectangles from the new viewport dimensions.

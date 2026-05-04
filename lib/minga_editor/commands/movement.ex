@@ -600,7 +600,7 @@ defmodule MingaEditor.Commands.Movement do
 
   @spec content_width(state()) :: pos_integer()
   defp content_width(state) do
-    vp = Viewport.new(state.workspace.viewport.rows, state.workspace.viewport.cols)
+    vp = Viewport.new(state.terminal_viewport.rows, state.terminal_viewport.cols)
     line_count = Buffer.line_count(state.workspace.buffers.active)
     Viewport.content_cols(vp, line_count)
   end
@@ -649,10 +649,10 @@ defmodule MingaEditor.Commands.Movement do
   # ── Viewport helpers for scroll commands ──────────────────────────────────
 
   # Delegates to EditorState shared helpers.
-  defp active_viewport(state), do: EditorState.active_window_viewport(state)
+  defp active_viewport(state), do: EditorState.current_viewport(state)
 
   defp put_active_viewport(state, new_vp),
-    do: EditorState.put_active_window_viewport(state, new_vp)
+    do: EditorState.update_current_viewport(state, new_vp)
 
   @spec scroll_margin(pid()) :: non_neg_integer()
   defp scroll_margin(buf) do

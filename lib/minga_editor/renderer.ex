@@ -59,9 +59,9 @@ defmodule MingaEditor.Renderer do
   """
   @spec render_dashboard(state()) :: state()
   def render_dashboard(%{workspace: %{buffers: %{active: nil}}} = state) do
-    rows = state.workspace.viewport.rows
-    cols = state.workspace.viewport.cols
-    viewport = state.workspace.viewport
+    rows = state.terminal_viewport.rows
+    cols = state.terminal_viewport.cols
+    viewport = state.terminal_viewport
 
     # Dashboard state is initialized by the editor when buffers empty,
     # but fall back to an empty state if somehow nil.

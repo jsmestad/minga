@@ -223,7 +223,7 @@ defmodule MingaEditor.Shell.Board do
   @spec compute_board_tui_layout(term()) :: MingaEditor.Layout.t()
   defp compute_board_tui_layout(editor_state) do
     alias MingaEditor.Layout
-    vp = editor_state.workspace.viewport
+    vp = editor_state.terminal_viewport
     {rows, cols} = {vp.rows, vp.cols}
 
     if BoardState.grid_view?(editor_state.shell_state) do
@@ -278,7 +278,7 @@ defmodule MingaEditor.Shell.Board do
   defp build_zoom_context_bar(editor_state) do
     board = editor_state.shell_state
     card = BoardState.zoomed(board)
-    cols = editor_state.workspace.viewport.cols
+    cols = editor_state.terminal_viewport.cols
     theme = editor_state.theme
 
     if card do
@@ -361,7 +361,7 @@ defmodule MingaEditor.Shell.Board do
       %{editor_state | caches: new_caches}
     else
       # TUI: render card grid as cell grid commands
-      vp = editor_state.workspace.viewport
+      vp = editor_state.terminal_viewport
       board = editor_state.shell_state
 
       splash_draws =

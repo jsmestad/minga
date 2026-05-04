@@ -377,13 +377,13 @@ defmodule MingaEditor.LspActionsTest do
 
       state = %{fake_state() | backend: :zig}
 
-      ws = %{
-        state.workspace
-        | buffers: %{state.workspace.buffers | active: buf},
-          viewport: %{state.workspace.viewport | top: 10}
-      }
+      ws = %{state.workspace | buffers: %{state.workspace.buffers | active: buf}}
 
-      state = %{state | workspace: ws}
+      state = %{
+        state
+        | workspace: ws,
+          terminal_viewport: %{state.terminal_viewport | top: 10}
+      }
 
       result = LspActions.schedule_inlay_hints_on_scroll(state)
       assert result.lsp.inlay_hint_debounce_timer != nil
@@ -398,13 +398,13 @@ defmodule MingaEditor.LspActionsTest do
 
       state = fake_state()
 
-      ws = %{
-        state.workspace
-        | buffers: %{state.workspace.buffers | active: buf},
-          viewport: %{state.workspace.viewport | top: 10}
-      }
+      ws = %{state.workspace | buffers: %{state.workspace.buffers | active: buf}}
 
-      state = %{state | workspace: ws}
+      state = %{
+        state
+        | workspace: ws,
+          terminal_viewport: %{state.terminal_viewport | top: 10}
+      }
 
       result = LspActions.schedule_inlay_hints_on_scroll(state)
       assert result.lsp.inlay_hint_debounce_timer == nil
@@ -416,21 +416,18 @@ defmodule MingaEditor.LspActionsTest do
 
       state = %{fake_state() | backend: :zig}
 
-      ws = %{
-        state.workspace
-        | buffers: %{state.workspace.buffers | active: buf},
-          viewport: %{state.workspace.viewport | top: 5}
-      }
+      ws = %{state.workspace | buffers: %{state.workspace.buffers | active: buf}}
 
-      state = %{state | workspace: ws}
+      state = %{
+        state
+        | workspace: ws,
+          terminal_viewport: %{state.terminal_viewport | top: 5}
+      }
 
       state1 = LspActions.schedule_inlay_hints_on_scroll(state)
       timer1 = state1.lsp.inlay_hint_debounce_timer
 
-      state2 = %{
-        state1
-        | workspace: %{state1.workspace | viewport: %{state1.workspace.viewport | top: 15}}
-      }
+      state2 = %{state1 | terminal_viewport: %{state1.terminal_viewport | top: 15}}
 
       state2 = LspActions.schedule_inlay_hints_on_scroll(state2)
       timer2 = state2.lsp.inlay_hint_debounce_timer
@@ -621,10 +618,13 @@ defmodule MingaEditor.LspActionsTest do
   # ── Helpers ────────────────────────────────────────────────────────────────
 
   defp fake_state do
+    vp = Viewport.new(24, 80)
+
     %EditorState{
       port_manager: nil,
+      terminal_viewport: vp,
       workspace: %WorkspaceState{
-        viewport: Viewport.new(24, 80),
+        viewport: vp,
         highlight: %Highlighting{}
       }
     }

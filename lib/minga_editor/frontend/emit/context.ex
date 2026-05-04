@@ -80,7 +80,7 @@ defmodule MingaEditor.Frontend.Emit.Context do
       shell_state: state.shell_state,
       tab_bar: Map.get(state.shell_state, :tab_bar),
       buffers: state.workspace.buffers,
-      viewport: state.workspace.viewport,
+      viewport: state.terminal_viewport,
       file_tree: state.workspace.file_tree,
       highlight: state.workspace.highlight,
       agent_ui: state.workspace.agent_ui,

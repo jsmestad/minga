@@ -124,7 +124,7 @@ defmodule MingaEditor.Input.Picker do
   defp bottom_click_index(state, picker, row) do
     {visible, _} = PickerData.visible_items(picker)
     item_count = length(visible)
-    prompt_row = state.workspace.viewport.rows - 1
+    prompt_row = state.terminal_viewport.rows - 1
     first_item_row = prompt_row - item_count
     row - first_item_row
   end
@@ -132,7 +132,7 @@ defmodule MingaEditor.Input.Picker do
   # Centered: items start at the top of the FloatingWindow interior.
   @spec centered_click_index(EditorState.t(), PickerData.t(), integer()) :: integer()
   defp centered_click_index(state, _picker, row) do
-    vp_rows = state.workspace.viewport.rows
+    vp_rows = state.terminal_viewport.rows
 
     # Match the 60%x70% dimensions used by PickerUI.render_centered
     box_h = max(div(vp_rows * 70, 100), 1)
@@ -146,8 +146,8 @@ defmodule MingaEditor.Input.Picker do
   # Returns true when {row, col} falls inside the centered picker's box.
   @spec inside_centered_box?(EditorState.t(), integer(), integer()) :: boolean()
   defp inside_centered_box?(state, row, col) do
-    vp_rows = state.workspace.viewport.rows
-    vp_cols = state.workspace.viewport.cols
+    vp_rows = state.terminal_viewport.rows
+    vp_cols = state.terminal_viewport.cols
 
     box_w = max(div(vp_cols * 60, 100), 1)
     box_h = max(div(vp_rows * 70, 100), 1)

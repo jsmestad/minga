@@ -85,7 +85,7 @@ defmodule MingaEditor.UI.Picker.Context do
       editing: state.workspace.editing,
       file_tree: Map.get(state.workspace, :file_tree),
       search: state.workspace.search,
-      viewport: state.workspace.viewport,
+      viewport: state.terminal_viewport,
       tab_bar: state.shell_state.tab_bar,
       agent_session: agent_session,
       picker_ui: picker_ui,

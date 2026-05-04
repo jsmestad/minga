@@ -164,7 +164,7 @@ defmodule MingaEditor.UI.Popup.Lifecycle do
   @spec inside_float_box?(state(), Window.t(), integer(), integer()) :: boolean()
   defp inside_float_box?(state, window, row, col) do
     rule = window.popup_meta.rule
-    vp = state.workspace.viewport
+    vp = state.terminal_viewport
 
     box_w = resolve_float_dim(float_width(rule), vp.cols)
     box_h = resolve_float_dim(float_height(rule), vp.rows)
@@ -183,7 +183,7 @@ defmodule MingaEditor.UI.Popup.Lifecycle do
   @spec render_float_overlay(state(), Window.t()) :: DisplayList.Overlay.t()
   defp render_float_overlay(state, window) do
     rule = window.popup_meta.rule
-    vp = state.workspace.viewport
+    vp = state.terminal_viewport
     theme = state.theme.popup
 
     # Build content draws from the buffer

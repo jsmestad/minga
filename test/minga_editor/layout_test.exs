@@ -16,10 +16,13 @@ defmodule MingaEditor.LayoutTest do
   # ── Helpers ──────────────────────────────────────────────────────────────────
 
   defp new_state(rows, cols) do
+    vp = Viewport.new(rows, cols)
+
     %EditorState{
       port_manager: nil,
+      terminal_viewport: vp,
       workspace: %MingaEditor.Workspace.State{
-        viewport: Viewport.new(rows, cols),
+        viewport: vp,
         editing: VimState.new()
       }
     }
@@ -427,7 +430,8 @@ defmodule MingaEditor.LayoutTest do
       assert layout.file_tree != nil
       assert layout.agent_panel != nil
 
-      short_state = %{state | workspace: %{state.workspace | viewport: Viewport.new(7, 80)}}
+      vp = Viewport.new(7, 80)
+      short_state = %{state | workspace: %{state.workspace | viewport: vp}, terminal_viewport: vp}
       layout = Layout.compute(short_state)
       assert layout.agent_panel == nil
       assert layout.file_tree != nil
@@ -436,7 +440,14 @@ defmodule MingaEditor.LayoutTest do
     test "shrinking width collapses file tree, agent panel unaffected" do
       state = new_state(24, 80) |> with_window() |> with_file_tree(20) |> with_agent_panel()
 
-      narrow_state = %{state | workspace: %{state.workspace | viewport: Viewport.new(24, 25)}}
+      vp = Viewport.new(24, 25)
+
+      narrow_state = %{
+        state
+        | workspace: %{state.workspace | viewport: vp},
+          terminal_viewport: vp
+      }
+
       layout = Layout.compute(narrow_state)
       assert layout.file_tree == nil
       assert layout.agent_panel != nil
@@ -448,7 +459,8 @@ defmodule MingaEditor.LayoutTest do
       assert layout.agent_panel == nil
       assert layout.file_tree == nil
 
-      big_state = %{state | workspace: %{state.workspace | viewport: Viewport.new(30, 100)}}
+      vp = Viewport.new(30, 100)
+      big_state = %{state | workspace: %{state.workspace | viewport: vp}, terminal_viewport: vp}
       layout = Layout.compute(big_state)
       assert layout.agent_panel != nil
       assert layout.file_tree != nil
@@ -462,7 +474,8 @@ defmodule MingaEditor.LayoutTest do
       state = new_state(24, 80) |> with_window()
       layout1 = Layout.compute(state)
 
-      state2 = %{state | workspace: %{state.workspace | viewport: Viewport.new(40, 120)}}
+      vp = Viewport.new(40, 120)
+      state2 = %{state | workspace: %{state.workspace | viewport: vp}, terminal_viewport: vp}
       layout2 = Layout.compute(state2)
 
       assert layout2.terminal == {0, 0, 120, 40}

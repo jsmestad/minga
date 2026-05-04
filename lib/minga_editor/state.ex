@@ -88,6 +88,7 @@ defmodule MingaEditor.State do
             keymap_server: @default_keymap_server,
             options_server: @default_options_server,
             workspace: nil,
+            terminal_viewport: Viewport.new(24, 80),
             editing_model: :vim,
             shell: MingaEditor.Shell.Traditional,
             shell_state: %ShellState{},
@@ -121,6 +122,7 @@ defmodule MingaEditor.State do
           keymap_server: keymap_server(),
           options_server: options_server(),
           workspace: WorkspaceState.t(),
+          terminal_viewport: Viewport.t(),
           editing_model: :vim | :cua,
           shell: module(),
           shell_state: ShellState.t() | BoardState.t(),
@@ -551,31 +553,54 @@ defmodule MingaEditor.State do
   end
 
   @doc """
-  Returns the active window's viewport, falling back to `state.workspace.viewport`
-  when no window is active. Use this for scroll commands that need to
-  read/write the viewport of the focused window (not the terminal-level
-  viewport).
+  Returns the terminal-level viewport: total screen rows/cols reported by
+  the frontend on resize. Used for screen-spanning chrome (picker,
+  popups, dashboard, completion menu placement) and for layout
+  computation that needs the editor's full canvas.
+
+  This is distinct from `current_viewport/1`, which scopes to the
+  active window's viewport.
   """
-  @spec active_window_viewport(t()) :: Viewport.t()
-  def active_window_viewport(%__MODULE__{} = state) do
+  @spec terminal_viewport(t()) :: Viewport.t()
+  def terminal_viewport(%__MODULE__{terminal_viewport: vp}), do: vp
+
+  @doc """
+  Stores a new terminal viewport. Called by the editor's resize handler
+  when the frontend reports a new screen size.
+  """
+  @spec set_terminal_viewport(t(), Viewport.t()) :: t()
+  def set_terminal_viewport(%__MODULE__{} = state, %Viewport{} = vp) do
+    %{state | terminal_viewport: vp}
+  end
+
+  @doc """
+  Returns the viewport for the user's current focus: the active window's
+  viewport when a window is active, otherwise a derived terminal-size
+  viewport (the no-window dashboard case). Use this for scroll commands
+  that read/write the focused window's viewport.
+
+  Replaces the older `active_window_viewport/1` (renamed for symmetry
+  with `terminal_viewport/1`).
+  """
+  @spec current_viewport(t()) :: Viewport.t()
+  def current_viewport(%__MODULE__{} = state) do
     case active_window_struct(state) do
-      nil -> state.workspace.viewport
+      nil -> terminal_viewport(state)
       %Window{viewport: vp} -> vp
     end
   end
 
   @doc """
-  Updates the active window's viewport. Falls back to updating
-  `state.workspace.viewport` when no window is active.
-  """
-  @spec put_active_window_viewport(t(), Viewport.t()) :: t()
-  def put_active_window_viewport(%__MODULE__{} = state, new_vp) do
-    case active_window_struct(state) do
-      nil ->
-        put_in(state.workspace.viewport, new_vp)
+  Updates the active window's viewport. No-op when no window is active
+  (the dashboard case has no per-window viewport to write).
 
-      %Window{id: win_id} ->
-        update_window(state, win_id, fn w -> %{w | viewport: new_vp} end)
+  Replaces the older `put_active_window_viewport/2`.
+  """
+  @spec update_current_viewport(t(), Viewport.t()) :: t()
+  def update_current_viewport(%__MODULE__{} = state, %Viewport{} = new_vp) do
+    case active_window_struct(state) do
+      nil -> state
+      %Window{id: win_id} -> update_window(state, win_id, fn w -> %{w | viewport: new_vp} end)
     end
   end
 
@@ -618,12 +643,13 @@ defmodule MingaEditor.State do
   minibuffer row and reserving space for the file tree panel when open.
   """
   @spec screen_rect(t()) :: WindowTree.rect()
-  def screen_rect(%__MODULE__{workspace: %{viewport: vp, file_tree: %{tree: nil}}}) do
+  def screen_rect(%__MODULE__{terminal_viewport: vp, workspace: %{file_tree: %{tree: nil}}}) do
     {0, 0, vp.cols, vp.rows - 1}
   end
 
   def screen_rect(%__MODULE__{
-        workspace: %{viewport: vp, file_tree: %{tree: %FileTree{width: tw}}}
+        terminal_viewport: vp,
+        workspace: %{file_tree: %{tree: %FileTree{width: tw}}}
       }) do
     # Tree occupies columns 0..tw-1, separator at column tw,
     # editor content starts at column tw+1.
@@ -636,7 +662,10 @@ defmodule MingaEditor.State do
   @spec tree_rect(t()) :: WindowTree.rect() | nil
   def tree_rect(%__MODULE__{workspace: %{file_tree: %{tree: nil}}}), do: nil
 
-  def tree_rect(%__MODULE__{workspace: %{viewport: vp, file_tree: %{tree: %FileTree{width: tw}}}}) do
+  def tree_rect(%__MODULE__{
+        terminal_viewport: vp,
+        workspace: %{file_tree: %{tree: %FileTree{width: tw}}}
+      }) do
     # Row 0 is the tab bar; file tree starts at row 1.
     {1, 0, tw, vp.rows - 2}
   end
@@ -906,8 +935,8 @@ defmodule MingaEditor.State do
   @spec build_file_tab_defaults(t()) :: Tab.context()
   defp build_file_tab_defaults(state) do
     win_id = state.workspace.windows.next_id
-    rows = state.workspace.viewport.rows
-    cols = state.workspace.viewport.cols
+    rows = state.terminal_viewport.rows
+    cols = state.terminal_viewport.cols
     buf = state.workspace.buffers.active
 
     windows =
@@ -937,7 +966,7 @@ defmodule MingaEditor.State do
       },
       windows: windows,
       file_tree: %FileTreeState{project_root: state.workspace.file_tree.project_root},
-      viewport: state.workspace.viewport,
+      viewport: state.terminal_viewport,
       mouse: %Mouse{},
       highlight: %Highlighting{},
       lsp_pending: %{},
@@ -970,7 +999,7 @@ defmodule MingaEditor.State do
       },
       windows: windows,
       file_tree: %FileTreeState{project_root: state.workspace.file_tree.project_root},
-      viewport: state.workspace.viewport,
+      viewport: state.terminal_viewport,
       mouse: %Mouse{},
       highlight: %Highlighting{},
       lsp_pending: %{},

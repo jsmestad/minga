@@ -38,7 +38,7 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUI do
           Cursor.t() | nil
         ) :: Chrome.t()
   def build(state, layout, _scrolls, cursor_info) do
-    full_viewport = state.workspace.viewport
+    full_viewport = state.terminal_viewport
 
     # Global status bar (one render for the focused window)
     {status_bar_draws, status_bar_data, modeline_click_regions} =
@@ -147,8 +147,8 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUI do
       %{
         cursor_row: cur_row,
         cursor_col: cur_col,
-        viewport_rows: state.workspace.viewport.rows,
-        viewport_cols: state.workspace.viewport.cols
+        viewport_rows: state.terminal_viewport.rows,
+        viewport_cols: state.terminal_viewport.cols
       },
       state.theme
     )
