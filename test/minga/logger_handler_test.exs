@@ -1,6 +1,7 @@
 defmodule Minga.LoggerHandlerTest do
   use ExUnit.Case, async: false
 
+  alias Minga.Buffer
   alias Minga.LoggerHandler
 
   @buffer_table :minga_log_buffer
@@ -23,141 +24,76 @@ defmodule Minga.LoggerHandlerTest do
     end
   end
 
-  describe "log/2 buffering when Editor is down" do
-    test "buffers messages when Editor is not running" do
-      # Editor is not started in this test, so whereis returns nil
-      refute Process.whereis(MingaEditor)
+  describe "log/2 routing to the shared *Messages* buffer" do
+    test "appends entries to Minga.Buffer.messages/0" do
+      tag = "logger-handler-shared-#{System.unique_integer([:positive])}"
+      event = %{level: :error, msg: {:string, tag}, meta: %{}}
 
-      event = %{level: :error, msg: {:string, "boom"}, meta: %{}}
       LoggerHandler.log(event, %{})
 
-      entries = :ets.tab2list(@buffer_table)
-      assert length(entries) == 1
-      [{_key, text, level}] = entries
-      assert text == "[error] boom"
-      assert level == :error
+      buf = Buffer.messages()
+      assert is_pid(buf)
+      assert wait_for_text(buf, tag)
     end
 
-    test "buffers multiple messages in order" do
-      refute Process.whereis(MingaEditor)
+    test "preserves level prefix in the formatted text" do
+      tag = "logger-handler-level-#{System.unique_integer([:positive])}"
 
-      for i <- 1..5 do
-        event = %{level: :info, msg: {:string, "msg #{i}"}, meta: %{}}
-        LoggerHandler.log(event, %{})
-      end
+      LoggerHandler.log(%{level: :warning, msg: {:string, tag}, meta: %{}}, %{})
 
-      entries = :ets.tab2list(@buffer_table)
-      assert length(entries) == 5
-
-      texts = Enum.map(entries, fn {_key, text, _level} -> text end)
-
-      assert texts == [
-               "[info] msg 1",
-               "[info] msg 2",
-               "[info] msg 3",
-               "[info] msg 4",
-               "[info] msg 5"
-             ]
+      buf = Buffer.messages()
+      assert wait_for_text(buf, "[warning] " <> tag)
     end
 
-    test "trims buffer to max size" do
-      refute Process.whereis(MingaEditor)
+    test "formats erlang format strings" do
+      tag = "logger-handler-fmt-#{System.unique_integer([:positive])}"
 
-      # Buffer 60 messages (max is 50)
-      for i <- 1..60 do
-        event = %{level: :info, msg: {:string, "msg #{i}"}, meta: %{}}
-        LoggerHandler.log(event, %{})
-      end
+      LoggerHandler.log(
+        %{level: :info, msg: {~c"~s pid=~p", [tag, self()]}, meta: %{}},
+        %{}
+      )
 
-      size = :ets.info(@buffer_table, :size)
-      assert size == 50
-
-      # The oldest messages should have been trimmed, keeping 11..60
-      entries = :ets.tab2list(@buffer_table)
-      texts = Enum.map(entries, fn {_key, text, _level} -> text end)
-      assert hd(texts) == "[info] msg 11"
-      assert List.last(texts) == "[info] msg 60"
+      buf = Buffer.messages()
+      assert wait_for_text(buf, tag)
     end
   end
 
   describe "flush_buffer/0" do
-    test "returns empty list when buffer is empty" do
-      assert LoggerHandler.flush_buffer() == []
-    end
+    test "returns and clears entries that the LoggerHandler queued before any subscribers" do
+      :ets.insert(@buffer_table, {System.monotonic_time(:nanosecond), "test-flush", :info})
+      assert :ets.info(@buffer_table, :size) >= 1
 
-    test "clears the buffer after flushing" do
-      refute Process.whereis(MingaEditor)
-
-      event = %{level: :info, msg: {:string, "test"}, meta: %{}}
-      LoggerHandler.log(event, %{})
-      assert :ets.info(@buffer_table, :size) == 1
-
-      # flush_buffer sends casts to the Editor, which isn't running.
-      # The casts will be dropped (GenServer.cast to a nil pid is a no-op),
-      # but the buffer should still be cleared.
-      LoggerHandler.flush_buffer()
+      entries = LoggerHandler.flush_buffer()
+      assert Enum.any?(entries, fn {text, level} -> text == "test-flush" and level == :info end)
       assert :ets.info(@buffer_table, :size) == 0
     end
 
-    test "returns the flushed message entries" do
-      refute Process.whereis(MingaEditor)
-
-      for i <- 1..3 do
-        event = %{level: :warning, msg: {:string, "warn #{i}"}, meta: %{}}
-        LoggerHandler.log(event, %{})
-      end
-
-      entries = LoggerHandler.flush_buffer()
-      assert length(entries) == 3
-      assert Enum.all?(entries, fn {text, level} -> is_binary(text) and level == :warning end)
+    test "returns empty list when buffer is empty" do
+      assert LoggerHandler.flush_buffer() == []
     end
   end
 
-  describe "log/2 message formatting" do
-    test "formats string messages" do
-      refute Process.whereis(MingaEditor)
+  defp wait_for_text(buf, tag, timeout_ms \\ 500) do
+    deadline = System.monotonic_time(:millisecond) + timeout_ms
+    do_wait_for_text(buf, tag, deadline)
+  end
 
-      event = %{level: :info, msg: {:string, "hello world"}, meta: %{}}
-      LoggerHandler.log(event, %{})
+  defp do_wait_for_text(buf, tag, deadline) do
+    content = Buffer.content(buf)
 
-      [{_key, text, _level}] = :ets.tab2list(@buffer_table)
-      assert text == "[info] hello world"
+    if String.contains?(content, tag) do
+      true
+    else
+      retry_or_fail(buf, tag, deadline, content)
     end
+  end
 
-    test "formats report messages" do
-      refute Process.whereis(MingaEditor)
-
-      event = %{level: :error, msg: {:report, %{reason: :crashed}}, meta: %{}}
-      LoggerHandler.log(event, %{})
-
-      [{_key, text, _level}] = :ets.tab2list(@buffer_table)
-      assert text =~ "[error]"
-      assert text =~ "reason"
-    end
-
-    test "formats erlang format string messages" do
-      refute Process.whereis(MingaEditor)
-
-      event = %{level: :warning, msg: {~c"process ~p crashed", [self()]}, meta: %{}}
-      LoggerHandler.log(event, %{})
-
-      [{_key, text, _level}] = :ets.tab2list(@buffer_table)
-      assert text =~ "[warning] process"
-      assert text =~ "crashed"
-    end
-
-    test "preserves level for warning/error routing" do
-      refute Process.whereis(MingaEditor)
-
-      LoggerHandler.log(%{level: :error, msg: {:string, "err"}, meta: %{}}, %{})
-      LoggerHandler.log(%{level: :warning, msg: {:string, "warn"}, meta: %{}}, %{})
-      LoggerHandler.log(%{level: :info, msg: {:string, "info"}, meta: %{}}, %{})
-
-      entries = :ets.tab2list(@buffer_table)
-      levels = Enum.map(entries, fn {_key, _text, level} -> level end)
-      assert :error in levels
-      assert :warning in levels
-      assert :info in levels
+  defp retry_or_fail(buf, tag, deadline, content) do
+    if System.monotonic_time(:millisecond) >= deadline do
+      flunk("expected #{inspect(tag)} in *Messages* buffer; got:\n#{content}")
+    else
+      Process.sleep(10)
+      do_wait_for_text(buf, tag, deadline)
     end
   end
 end

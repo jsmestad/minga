@@ -143,10 +143,12 @@ defmodule Minga.Log do
     msg_priority = Map.fetch!(@level_priority, level)
 
     if otp_priority > msg_priority do
-      case Process.whereis(MingaEditor) do
-        nil -> :ok
-        _pid -> MingaEditor.log_to_messages("[#{subsystem}/#{level}] " <> message)
-      end
+      event_level = if level in [:warning, :error], do: :warning, else: :info
+
+      Minga.Events.broadcast(:log_message, %Minga.Events.LogMessageEvent{
+        text: "[#{subsystem}/#{level}] " <> message,
+        level: event_level
+      })
     end
 
     :ok

@@ -20,6 +20,7 @@ defmodule Minga.Application do
       │   └── Minga.Language.Filetype.Registry
       ├── Minga.Buffer.Registry (Registry, :unique)
       ├── Minga.Buffer.Supervisor (DynamicSupervisor, one_for_one)
+      ├── Minga.Buffer.Messages           (singleton *Messages* buffer owner)
       ├── Minga.Services.Supervisor (rest_for_one)
       │   ├── Minga.Services.Independent (one_for_one)
       │   │   ├── Minga.Git.Tracker
@@ -78,10 +79,16 @@ defmodule Minga.Application do
       System.put_env("PATH", "#{tools_bin}:#{current_path}")
     end
 
+    # Install the :log_message broadcast handler before the supervision
+    # tree starts so headless and pre-editor logs reach Minga.Buffer.Messages
+    # via the same path as logs from a running editor.
+    Minga.LoggerHandler.install_messages_handler()
+
     base_children = [
       Minga.Foundation.Supervisor,
       {Registry, keys: :unique, name: Minga.Buffer.Registry},
       {DynamicSupervisor, name: Minga.Buffer.Supervisor, strategy: :one_for_one},
+      Minga.Buffer.Messages,
       Minga.Services.Supervisor,
       MingaAgent.Supervisor
     ]

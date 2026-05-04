@@ -60,11 +60,35 @@ defmodule Minga.LoggerHandler do
   end
 
   @doc """
-  Install the custom handlers and redirect stderr to a log file.
+  Install just the custom `:log_message`-broadcast handler.
+
+  Called from `Minga.Application.start/2` and `Minga.Runtime.start/1` so the
+  broadcast path is live before any editor (or the gateway, or the singleton
+  `*Messages*` buffer owner) is up. Idempotent.
+
+  Unlike `install/0`, this does not replace the default `:logger` handler
+  and does not redirect stderr — those are TUI-only concerns and stay in
+  the editor's init path so headless and `mix` invocations keep stdout/stderr
+  output.
+  """
+  @spec install_messages_handler() :: :ok
+  def install_messages_handler do
+    unless handler_installed?(@handler_id) do
+      :logger.add_handler(@handler_id, __MODULE__, %{level: :all})
+    end
+
+    :ok
+  end
+
+  @doc """
+  Install the file handler and stderr redirect for TUI mode.
 
   Idempotent: skips any handler or redirect that is already in place.
   Safe to call on every Editor init, including restarts after a crash
   where the handlers survived because `terminate/2` no longer tears them down.
+
+  Also ensures the `:log_message` broadcast handler is installed (no-op if
+  the application boot already added it).
 
   Returns the log file path for display in `*Messages*`.
   """
@@ -86,9 +110,7 @@ defmodule Minga.LoggerHandler do
     end
 
     # 2. Add our custom handler that sends to *Messages*.
-    unless handler_installed?(@handler_id) do
-      :logger.add_handler(@handler_id, __MODULE__, %{level: :all})
-    end
+    install_messages_handler()
 
     # 3. Redirect :standard_error to the log file so IO.warn and raw BEAM
     #    warnings don't paint over the TUI. We open a unicode-mode file device
@@ -157,18 +179,27 @@ defmodule Minga.LoggerHandler do
   def log(%{level: level, msg: msg, meta: meta}, _config) do
     text = format_message(level, msg, meta)
 
-    # Buffer when no event subscribers are listening (Editor not started yet).
-    # Once the Editor subscribes to :log_message, broadcasts will reach it.
-    if Minga.Events.subscribers(:log_message) == [] do
-      buffer_message(text, level)
-    else
+    # Buffer when the Events registry isn't yet up (very early boot, before
+    # Foundation.Supervisor has started) or when no subscribers are listening
+    # yet (Minga.Buffer.Messages hasn't booted). Once the wrapper subscribes,
+    # broadcasts reach it directly and the ETS buffer is drained on its init.
+    if has_subscribers?() do
       event_level = if level in [:warning, :error], do: :warning, else: :info
 
       Minga.Events.broadcast(:log_message, %Minga.Events.LogMessageEvent{
         text: text,
         level: event_level
       })
+    else
+      buffer_message(text, level)
     end
+  end
+
+  @spec has_subscribers?() :: boolean()
+  defp has_subscribers? do
+    Minga.Events.subscribers(:log_message) != []
+  rescue
+    ArgumentError -> false
   end
 
   # ── Buffer for messages during Editor downtime ─────────────────────────────
