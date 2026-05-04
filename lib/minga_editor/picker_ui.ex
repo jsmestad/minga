@@ -77,14 +77,16 @@ defmodule MingaEditor.PickerUI do
   @doc """
   Opens the picker for the given source module.
 
-  An optional context map can be passed and will be stored in
-  `state.picker_ui.context` for the source's `on_select` callback
-  to read. Used by `OptionScopeSource` to pass the option name and
-  new value through the picker flow.
+  An optional context map can be passed; it is threaded into the
+  `Context` struct passed to `candidates/1` so sources can use it to
+  build items. Sources that need the context inside `on_select/2` must
+  embed it in each `Item.id` at candidate-build time, because the picker
+  is closed (modal reset to `:none`) before `on_select/2` runs. See
+  `OptionScopeSource` for the canonical pattern.
   """
   @spec open(state(), module(), map() | nil) :: state()
   def open(state, source_module, context \\ nil) do
-    # Pass context directly so sources can read it from ctx.picker_ui.context.
+    # Context flows into Context.from_editor_state so candidates/1 can read it.
     ctx = Context.from_editor_state(state, context)
     items = source_module.candidates(ctx)
 
@@ -622,7 +624,7 @@ defmodule MingaEditor.PickerUI do
   def update_picker(state, fun) do
     {:picker, payload} = state.shell_state.modal
     new_pui = fun.(payload.picker_ui)
-    ModalOverlay.transition(state, :picker, %{payload | picker_ui: new_pui})
+    ModalOverlay.transition(state, :picker, PickerPayload.put_picker_ui(payload, new_pui))
   end
 
   # ── Centered (floating) layout ───────────────────────────────────────────────
@@ -895,7 +897,7 @@ defmodule MingaEditor.PickerUI do
   # Preview: temporarily apply the source's on_select for the highlighted item.
   # Sets buffer_add_context to :preview so any add_buffer calls inside
   # Returns true when preview navigation changed the active buffer from
-  # what it was when the picker opened (stored in picker_ui.restore).
+  # what it was when the picker opened (stored in the picker payload's `restore` field).
   @spec previewed?(state()) :: boolean()
   defp previewed?(%{
          shell_state: %{modal: {:picker, %{picker_ui: %{restore: restore}}}},

@@ -43,7 +43,14 @@ defmodule MingaEditor.UI.Picker.Source do
   @doc "Returns the list of candidates to display in the picker."
   @callback candidates(Context.t()) :: [Picker.item()]
 
-  @doc "Called when the user selects an item. Returns the new editor state."
+  @doc """
+  Called when the user selects an item. Returns the new editor state.
+
+  Important: this callback runs *after* the picker has been closed
+  (`state.shell_state.modal` has been reset to `:none`). Any context the
+  callback needs must travel with the `Picker.item()` (typically embedded
+  in `Item.id`). Reading `state.shell_state.modal` here will see `:none`.
+  """
   @callback on_select(Picker.item(), state :: term()) :: term()
 
   @doc "Called when the user cancels the picker. Returns the new editor state."
@@ -64,6 +71,10 @@ defmodule MingaEditor.UI.Picker.Source do
   @doc """
   Executes an alternative action on a picker item.
   Called when the user selects an action from the C-o menu.
+
+  Like `on_select/2`, this runs *after* the picker has been closed. Any
+  context required must travel with the `Picker.item()`; do not read
+  `state.shell_state.modal` here.
   """
   @callback on_action(atom(), Picker.item(), state :: term()) :: term()
 

@@ -91,4 +91,61 @@ defmodule MingaEditor.UI.Picker.OptionScopeSourceTest do
       assert is_binary(OptionScopeSource.title())
     end
   end
+
+  describe "on_select after picker close (regression for context-in-id fix)" do
+    # `PickerUI.run_select_and_close/3` resets the modal to `:none` before
+    # invoking `on_select`. Previously this source read the picker context
+    # from `state.shell_state.picker_ui.context`, which had been cleared by
+    # the close, so the option was never applied. The fix carries the
+    # context inside `Item.id`. This test pins that contract by passing a
+    # state with `modal: :none` (matching what `on_select` actually sees in
+    # production).
+
+    test "applies buffer-scoped option when modal is already :none" do
+      {:ok, buf} = BufferServer.start_link(content: "hello")
+      assert BufferServer.get_option(buf, :wrap) == false
+
+      state = %{
+        workspace: %{buffers: %{active: buf}},
+        shell_state: %MingaEditor.Shell.Traditional.State{
+          status_msg: nil,
+          modal: :none
+        }
+      }
+
+      result =
+        OptionScopeSource.on_select(
+          %Item{id: {:buffer, @ctx}, label: "This Buffer", description: ""},
+          state
+        )
+
+      assert BufferServer.get_option(buf, :wrap) == true
+      assert result.shell_state.status_msg =~ "this buffer"
+    end
+
+    test "applies global-scoped option when modal is already :none" do
+      {:ok, buf} = BufferServer.start_link(content: "hello")
+      original = Options.get(:wrap)
+      ctx = %{option_name: :wrap, new_value: !original}
+
+      state = %{
+        workspace: %{buffers: %{active: buf}},
+        shell_state: %MingaEditor.Shell.Traditional.State{
+          status_msg: nil,
+          modal: :none
+        }
+      }
+
+      result =
+        OptionScopeSource.on_select(
+          %Item{id: {:global, ctx}, label: "All Buffers", description: ""},
+          state
+        )
+
+      assert Options.get(:wrap) == !original
+      assert result.shell_state.status_msg =~ "all buffers"
+
+      Options.set(:wrap, original)
+    end
+  end
 end

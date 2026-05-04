@@ -489,6 +489,23 @@ defmodule Minga.Test.EditorCase do
     end
   end
 
+  @doc """
+  Like `modal_picker/1` but raises with a clear message when no picker is
+  open. Use this in tests where the next step assumes the payload exists,
+  so the failure surfaces as "picker not open" instead of `nil.picker_ui`.
+  """
+  @spec modal_picker!(editor_ctx()) :: MingaEditor.State.ModalOverlay.Picker.t()
+  def modal_picker!(ctx) do
+    case modal_picker(ctx) do
+      nil ->
+        modal = :sys.get_state(ctx.editor).shell_state.modal
+        raise "expected picker payload, but modal was: #{inspect(modal)}"
+
+      payload ->
+        payload
+    end
+  end
+
   @doc "Returns the cell at a given screen row and col."
   @spec screen_cell(editor_ctx(), non_neg_integer(), non_neg_integer()) :: map()
   def screen_cell(%{port: port}, row, col) do
