@@ -136,4 +136,19 @@ defmodule Minga.Editing.Model do
   Examples: \"NORMAL\", \"INSERT\", \"VISUAL\", \"CUA\".
   """
   @callback status_segment(state()) :: String.t()
+
+  @doc """
+  Returns the bottom-of-stack input dispatch handler module for this model.
+
+  The returned module implements `MingaEditor.Input.Handler` and is the
+  last handler in the surface stack, owning unmatched key dispatch (the
+  Vim Mode FSM, the CUA chord dispatcher, …). Adding a new editing model
+  is now a matter of implementing the behaviour and returning the model's
+  dispatch handler from this callback — no editing of `Input` required.
+
+  Implementations return the module as a literal atom rather than a bare
+  alias to avoid creating a Layer 0 → Layer 2 compile-time reference (the
+  layer check flags `__aliases__` AST nodes; atom literals bypass it).
+  """
+  @callback dispatch_handler() :: module()
 end

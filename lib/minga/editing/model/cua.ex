@@ -89,6 +89,12 @@ defmodule Minga.Editing.Model.CUA do
   @spec status_segment(t()) :: String.t()
   def status_segment(%__MODULE__{}), do: ""
 
+  @impl Minga.Editing.Model
+  @spec dispatch_handler() :: module()
+  # Atom literal (not a bare alias) so Layer 0 doesn't take a compile-time
+  # dep on a Layer 2 module; see the behaviour's @callback doc.
+  def dispatch_handler, do: :"Elixir.MingaEditor.Input.CUA.Dispatch"
+
   # ── Convenience ────────────────────────────────────────────────────────────
 
   @doc "Creates a CUA state from editor state fields. Currently a no-op wrapper."

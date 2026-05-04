@@ -136,14 +136,13 @@ defmodule MingaEditor.Input do
 
   @doc """
   Returns the appropriate bottom-of-stack dispatch handler for the
-  active editing model.
+  active editing model. Each model owns its own handler module via the
+  `Minga.Editing.Model.dispatch_handler/0` callback; adding a new model
+  requires no changes here.
   """
   @spec editing_dispatch_handler(map()) :: module()
   def editing_dispatch_handler(state) do
-    case Minga.Editing.active_model(state) do
-      Minga.Editing.Model.Vim -> ModeFSM
-      Minga.Editing.Model.CUA -> MingaEditor.Input.CUA.Dispatch
-    end
+    Minga.Editing.active_model(state).dispatch_handler()
   end
 
   @doc """

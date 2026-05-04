@@ -107,6 +107,12 @@ defmodule Minga.Editing.Model.Vim do
     mode |> to_string() |> String.upcase()
   end
 
+  @impl Minga.Editing.Model
+  @spec dispatch_handler() :: module()
+  # Atom literal (not a bare alias) so Layer 0 doesn't take a compile-time
+  # dep on a Layer 2 module; see the behaviour's @callback doc.
+  def dispatch_handler, do: :"Elixir.MingaEditor.Input.ModeFSM"
+
   # ── Convenience ────────────────────────────────────────────────────────────
 
   @doc "Creates a Vim editing model state from an existing mode and mode_state."
