@@ -106,4 +106,19 @@ defmodule MingaEditor.Shell.Board.Card do
   @spec you_card?(t()) :: boolean()
   def you_card?(%__MODULE__{kind: :you}), do: true
   def you_card?(%__MODULE__{}), do: false
+
+  @doc """
+  Maps an agent session lifecycle status to the corresponding card status.
+
+  Agent sessions speak in `Tab.agent_status` (`:idle | :thinking | :tool_executing
+  | :error | nil`); cards have a richer status vocabulary intended for the Board
+  grid. This mapping is the single source of truth so foreground (active session)
+  and background (non-active session) routing apply the same translation.
+  """
+  @spec from_agent_status(MingaEditor.State.Tab.agent_status()) :: status()
+  def from_agent_status(:thinking), do: :working
+  def from_agent_status(:tool_executing), do: :iterating
+  def from_agent_status(:error), do: :errored
+  def from_agent_status(:idle), do: :done
+  def from_agent_status(_), do: :idle
 end
