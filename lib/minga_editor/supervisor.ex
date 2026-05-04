@@ -35,17 +35,33 @@ defmodule MingaEditor.Supervisor do
   def init(opts) do
     backend = Keyword.get(opts, :backend, :tui)
 
-    children = [
-      Minga.Parser.Manager,
-      {MingaEditor.Frontend.Manager, [backend: backend]},
-      {MingaEditor,
-       [
-         backend: backend,
-         swap_dir: Minga.Session.swap_dir(),
-         session_dir: Path.dirname(Minga.Session.session_file())
-       ]}
-    ]
+    children =
+      [
+        Minga.Parser.Manager,
+        {MingaEditor.Frontend.Manager, [backend: backend]}
+      ] ++
+        renderer_children() ++
+        [
+          {MingaEditor,
+           [
+             backend: backend,
+             swap_dir: Minga.Session.swap_dir(),
+             session_dir: Path.dirname(Minga.Session.session_file())
+           ]}
+        ]
 
     Supervisor.init(children, strategy: :rest_for_one)
+  end
+
+  # Renderer.Server lives between Frontend.Manager (port owner) and
+  # MingaEditor (input + state). Only started when the split-renderer
+  # feature flag is on; default off keeps current synchronous behavior.
+  @spec renderer_children() :: [Supervisor.child_spec()]
+  defp renderer_children do
+    if MingaEditor.Renderer.Server.enabled?() do
+      [MingaEditor.Renderer.Server]
+    else
+      []
+    end
   end
 end

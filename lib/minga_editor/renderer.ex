@@ -27,6 +27,7 @@ defmodule MingaEditor.Renderer do
   alias MingaEditor.PickerUI
   alias MingaEditor.RenderPipeline
   alias MingaEditor.RenderPipeline.Input
+  alias MingaEditor.Renderer.Server, as: RendererServer
   alias MingaEditor.State, as: EditorState
 
   @typedoc "Internal editor state."
@@ -50,6 +51,33 @@ defmodule MingaEditor.Renderer do
   @spec render(state()) :: state()
   def render(%{shell: shell} = state) do
     shell.render(state)
+  end
+
+  @doc """
+  Renders synchronously, or pushes a snapshot to the Renderer.Server when
+  the split-renderer feature flag is on. Returns the editor state — in
+  async mode unchanged (the Renderer's `{:render_done, ...}` writeback
+  will update caches and layout later).
+
+  Behind the flag this is the same call as `render/1`. Headless backends
+  always render synchronously regardless of the flag, since the test
+  harness depends on synchronous emit for determinism.
+  """
+  @spec render_or_async(state()) :: state()
+  def render_or_async(%{backend: :headless} = state), do: render(state)
+
+  def render_or_async(state) do
+    if RendererServer.enabled?() do
+      snapshot = Input.from_editor_state(state)
+      # Monotonic time stands in for a frame sequence number; the renderer
+      # only uses it for telemetry tagging and pending-snapshot identity.
+      seq = System.monotonic_time(:microsecond)
+      seq = if seq < 0, do: -seq, else: seq
+      RendererServer.cast_snapshot(snapshot, seq)
+      state
+    else
+      render(state)
+    end
   end
 
   @doc """
