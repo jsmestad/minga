@@ -56,7 +56,7 @@ defmodule MingaEditor.Supervisor do
   # Renderer.Server lives between Frontend.Manager (port owner) and
   # MingaEditor (input + state). Only started when the split-renderer
   # feature flag is on; default off keeps current synchronous behavior.
-  @spec renderer_children() :: [Supervisor.child_spec()]
+  @spec renderer_children() :: [module()]
   defp renderer_children do
     if MingaEditor.Renderer.Server.enabled?() do
       [MingaEditor.Renderer.Server]
