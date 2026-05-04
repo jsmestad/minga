@@ -699,32 +699,28 @@ defmodule Minga.Buffer.ServerTest do
       pid = start_supervised!({Server, content: "hello"})
       Server.insert_char(pid, "X")
 
-      %{undo_stack: [{_version, _doc, source} | _]} = :sys.get_state(pid)
-      assert source == :user
+      assert Server.last_undo_source(pid) == :user
     end
 
     test "agent edits (find_and_replace) are tagged :agent" do
       pid = start_supervised!({Server, content: "hello world"})
       Server.find_and_replace(pid, "hello", "goodbye")
 
-      %{undo_stack: [{_version, _doc, source} | _]} = :sys.get_state(pid)
-      assert source == :agent
+      assert Server.last_undo_source(pid) == :agent
     end
 
     test "agent batch edits (find_and_replace_batch) are tagged :agent" do
       pid = start_supervised!({Server, content: "hello world"})
       Server.find_and_replace_batch(pid, [{"hello", "goodbye"}])
 
-      %{undo_stack: [{_version, _doc, source} | _]} = :sys.get_state(pid)
-      assert source == :agent
+      assert Server.last_undo_source(pid) == :agent
     end
 
     test "LSP batch edits (apply_text_edits) are tagged :lsp" do
       pid = start_supervised!({Server, content: "hello"})
       Server.apply_text_edits(pid, [{{0, 0}, {0, 5}, "goodbye"}])
 
-      %{undo_stack: [{_version, _doc, source} | _]} = :sys.get_state(pid)
-      assert source == :lsp
+      assert Server.last_undo_source(pid) == :lsp
     end
 
     test "source metadata survives undo/redo round-trip" do
@@ -733,29 +729,25 @@ defmodule Minga.Buffer.ServerTest do
 
       # Undo pops the agent entry and creates a redo entry carrying the source
       Server.undo(pid)
-      %{redo_stack: [{_version, _doc, source} | _]} = :sys.get_state(pid)
-      assert source == :agent
+      assert Server.last_redo_source(pid) == :agent
 
       # Redo pushes it back to undo_stack
       Server.redo(pid)
-      %{undo_stack: [{_version, _doc, source} | _]} = :sys.get_state(pid)
-      assert source == :agent
+      assert Server.last_undo_source(pid) == :agent
     end
 
     test "replace_content with :agent source is tagged :agent" do
       pid = start_supervised!({Server, content: "hello"})
       Server.replace_content(pid, "goodbye", :agent)
 
-      %{undo_stack: [{_version, _doc, source} | _]} = :sys.get_state(pid)
-      assert source == :agent
+      assert Server.last_undo_source(pid) == :agent
     end
 
     test "replace_content defaults to :user source" do
       pid = start_supervised!({Server, content: "hello"})
       Server.replace_content(pid, "goodbye")
 
-      %{undo_stack: [{_version, _doc, source} | _]} = :sys.get_state(pid)
-      assert source == :user
+      assert Server.last_undo_source(pid) == :user
     end
 
     test "interleaved user and agent edits preserve correct sources" do
@@ -763,11 +755,14 @@ defmodule Minga.Buffer.ServerTest do
 
       Server.insert_char(pid, "X")
       Server.break_undo_coalescing(pid)
-      Server.find_and_replace(pid, "Xhello", "goodbye")
+      assert Server.last_undo_source(pid) == :user
 
-      %{undo_stack: [{_, _, agent_source}, {_, _, user_source} | _]} = :sys.get_state(pid)
-      assert agent_source == :agent
-      assert user_source == :user
+      Server.find_and_replace(pid, "Xhello", "goodbye")
+      assert Server.last_undo_source(pid) == :agent
+
+      # Undo the agent edit; the user entry below should now be at the head.
+      Server.undo(pid)
+      assert Server.last_undo_source(pid) == :user
     end
   end
 
@@ -962,9 +957,9 @@ defmodule Minga.Buffer.ServerTest do
       Server.flush_edits(pid, :lsp)
       Server.flush_edits(pid, :highlight)
 
-      # Check internal state: log should be trimmed
-      internal = :sys.get_state(pid)
-      assert internal.edit_log == []
+      # Once both registered consumers have caught up, the log is trimmed —
+      # a new consumer registering after the fact sees no historical deltas.
+      assert [] = Server.flush_edits(pid, :late_arrival)
     end
 
     test "new consumer starts from sequence 0 and gets entire log" do
@@ -1044,9 +1039,10 @@ defmodule Minga.Buffer.ServerTest do
       # Only one consumer has ever called flush_edits
       _deltas = Server.flush_edits(pid, :lsp)
 
-      # Internal log should be capped, not grow to 1100
-      internal = :sys.get_state(pid)
-      assert length(internal.edit_log) <= 1000
+      # A late-arriving consumer would see every retained entry (its cursor
+      # starts at 0). With the cap in place it sees at most 1000, not 1100.
+      late_deltas = Server.flush_edits(pid, :late_arrival)
+      assert length(late_deltas) <= 1000
     end
   end
 
