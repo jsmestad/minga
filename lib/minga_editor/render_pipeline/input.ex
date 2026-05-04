@@ -27,12 +27,15 @@ defmodule MingaEditor.RenderPipeline.Input do
 
   **From `state.workspace` (per-tab editing context, stored as `workspace` map):**
   `windows`, `buffers`, `viewport`, `file_tree`, `highlight`,
-  `agent_ui`, `completion`, `editing`, `document_highlights`,
+  `agent_ui`, `editing`, `document_highlights`,
   `search`, `keymap_scope`
+
+  Note: completion lives on `state.shell_state.modal` after #1426; the
+  fingerprint includes the modal sum type, so completion changes are
+  picked up there.
   """
 
   alias MingaEditor.Agent.UIState
-  alias Minga.Editing.Completion
   alias MingaEditor.Layout
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.FileTree
@@ -89,7 +92,6 @@ defmodule MingaEditor.RenderPipeline.Input do
           file_tree: FileTree.t(),
           highlight: Highlighting.t(),
           agent_ui: UIState.t(),
-          completion: Completion.t() | nil,
           editing: VimState.t(),
           document_highlights: [EditorState.document_highlight()] | nil,
           mouse: Mouse.t(),
