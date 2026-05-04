@@ -802,45 +802,70 @@ defmodule MingaEditor.Commands.BufferManagement do
     # Find the card with this session and clear its session pid (the
     # process is dead, so AgentAccess.session/1 must not keep returning
     # it). Update status in the same pass.
-    board =
+    {board, owned?} =
       case Enum.find(board.cards, fn {_id, card} -> card.session == session_pid end) do
         {card_id, _card} ->
-          MingaEditor.Shell.Board.State.update_card(board, card_id, fn card ->
-            card
-            |> MingaEditor.Shell.Board.Card.set_status(card_status)
-            |> MingaEditor.Shell.Board.Card.detach_session()
-          end)
+          updated =
+            MingaEditor.Shell.Board.State.update_card(board, card_id, fn card ->
+              card
+              |> MingaEditor.Shell.Board.Card.set_status(card_status)
+              |> MingaEditor.Shell.Board.Card.detach_session()
+            end)
+
+          {updated, true}
 
         nil ->
-          board
+          {board, false}
       end
 
     state = %{state | shell_state: board}
     state = AgentAccess.update_agent(state, &AgentState.stop_spinner_timer/1)
     state = AgentAccess.update_agent(state, &AgentState.reset_cache/1)
 
-    msg =
-      if reason in [:normal, :shutdown],
-        do: "Agent session ended",
-        else: "Agent session crashed"
+    if owned? do
+      msg =
+        if reason in [:normal, :shutdown],
+          do: "Agent session ended",
+          else: "Agent session crashed"
 
-    EditorState.set_status(state, msg)
+      EditorState.set_status(state, msg)
+    else
+      Minga.Log.debug(
+        :agent,
+        "ignoring session-down for non-owned pid #{inspect(session_pid)}"
+      )
+
+      state
+    end
   end
 
   def handle_agent_session_down(
-        %{shell_state: %{tab_bar: %TabBar{}}} = state,
+        %{shell_state: %{tab_bar: %TabBar{} = tb}} = state,
         session_pid,
         reason
       ) do
+    owned? =
+      Enum.any?(tb.tabs, &(&1.session == session_pid)) or
+        TabBar.find_group_by_session(tb, session_pid) != nil
+
     tab_status = if reason in [:normal, :shutdown], do: :idle, else: :error
     state = scrub_agent_tab_state(state, session_pid, tab_status)
 
-    msg =
-      if reason in [:normal, :shutdown],
-        do: "Agent session ended",
-        else: "Agent session crashed (SPC a n to restart)"
+    if owned? do
+      msg =
+        if reason in [:normal, :shutdown],
+          do: "Agent session ended",
+          else: "Agent session crashed (SPC a n to restart)"
 
-    EditorState.set_status(state, msg)
+      EditorState.set_status(state, msg)
+    else
+      Minga.Log.debug(
+        :agent,
+        "ignoring session-down for non-owned pid #{inspect(session_pid)}"
+      )
+
+      state
+    end
   end
 
   # Shared state cleanup for agent sessions: stops spinner, clears
