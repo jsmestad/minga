@@ -271,7 +271,7 @@ defmodule MingaEditor do
       {:ok, pid} ->
         new_state = register_buffer(state, pid, file_path)
         new_state = AgentLifecycle.maybe_set_auto_context(new_state, file_path, pid)
-        new_state = Renderer.render(new_state)
+        new_state = Renderer.render_or_async(new_state)
         {:reply, :ok, new_state}
 
       {:error, reason} ->
@@ -307,13 +307,13 @@ defmodule MingaEditor do
           state
       end
 
-    new_state = Renderer.render(new_state)
+    new_state = Renderer.render_or_async(new_state)
     {:reply, result, new_state}
   end
 
   def handle_call({:api_execute_command, cmd}, _from, state) do
     new_state = dispatch_command(state, cmd)
-    new_state = Renderer.render(new_state)
+    new_state = Renderer.render_or_async(new_state)
     {:reply, :ok, new_state}
   end
 
@@ -327,7 +327,7 @@ defmodule MingaEditor do
           EditorState.update_window(state, id, &Window.set_fold_ranges(&1, ranges))
       end
 
-    new_state = Renderer.render(new_state)
+    new_state = Renderer.render_or_async(new_state)
     {:reply, :ok, new_state}
   end
 
@@ -363,7 +363,7 @@ defmodule MingaEditor do
   end
 
   def handle_cast(:render, state) do
-    state = Renderer.render(state)
+    state = Renderer.render_or_async(state)
     {:noreply, state}
   end
 
@@ -388,7 +388,7 @@ defmodule MingaEditor do
     }
 
     Startup.send_font_config(new_state)
-    new_state = Renderer.render(new_state)
+    new_state = Renderer.render_or_async(new_state)
     # Setup highlighting after first paint with correct viewport
     new_state = setup_highlight_or_defer(new_state)
 
@@ -436,7 +436,7 @@ defmodule MingaEditor do
     # rectangles from the new viewport dimensions.
     new_state = Layout.invalidate(new_state)
     new_state = resize_all_windows(new_state)
-    new_state = Renderer.render(new_state)
+    new_state = Renderer.render_or_async(new_state)
     {:noreply, new_state}
   end
 
@@ -459,7 +459,7 @@ defmodule MingaEditor do
   # ── Paste event (bracketed paste from TUI, Cmd+V from GUI) ──
   def handle_info({:minga_input, {:paste_event, text}}, state) do
     new_state = handle_paste_event(state, text)
-    new_state = Renderer.render(new_state)
+    new_state = Renderer.render_or_async(new_state)
     {:noreply, new_state}
   end
 
@@ -467,7 +467,7 @@ defmodule MingaEditor do
   def handle_info({:file_changed_on_disk, path}, state) do
     new_state = FileWatcherHelpers.handle_file_change(state, path)
     new_state = log_message(new_state, "External change detected: #{path}")
-    new_state = Renderer.render(new_state)
+    new_state = Renderer.render_or_async(new_state)
     {:noreply, new_state}
   end
 
@@ -508,7 +508,7 @@ defmodule MingaEditor do
     if ref == state.shell_state.whichkey.timer do
       wk = EditorState.whichkey(state)
       new_state = EditorState.set_whichkey(state, %{wk | show: true})
-      {:noreply, Renderer.render(new_state)}
+      {:noreply, Renderer.render_or_async(new_state)}
     else
       # Stale timer — ignore.
       {:noreply, state}
@@ -576,27 +576,27 @@ defmodule MingaEditor do
       {:completion_resolve, pending} ->
         new_state = put_in(state.workspace.lsp_pending, pending)
         new_state = CompletionHandling.handle_resolve_response(new_state, result)
-        {:noreply, Renderer.render(new_state)}
+        {:noreply, Renderer.render_or_async(new_state)}
 
       {:signature_help, pending} ->
         new_state = put_in(state.workspace.lsp_pending, pending)
         new_state = CompletionHandling.handle_signature_help_response(new_state, result)
-        {:noreply, Renderer.render(new_state)}
+        {:noreply, Renderer.render_or_async(new_state)}
 
       {{:semantic_tokens, buf_pid}, pending} ->
         new_state = put_in(state.workspace.lsp_pending, pending)
         new_state = SemanticTokenSync.handle_response(new_state, buf_pid, result)
-        {:noreply, Renderer.render(new_state)}
+        {:noreply, Renderer.render_or_async(new_state)}
 
       {kind, pending} when is_atom(kind) ->
         new_state = put_in(state.workspace.lsp_pending, pending)
         new_state = dispatch_lsp_response(kind, new_state, result)
-        {:noreply, Renderer.render(new_state)}
+        {:noreply, Renderer.render_or_async(new_state)}
 
       {kind, pending} when is_tuple(kind) ->
         new_state = put_in(state.workspace.lsp_pending, pending)
         new_state = dispatch_lsp_response(kind, new_state, result)
-        {:noreply, Renderer.render(new_state)}
+        {:noreply, Renderer.render_or_async(new_state)}
 
       {nil, _} ->
         # Not a tracked request — try completion handler
@@ -637,8 +637,39 @@ defmodule MingaEditor do
   # Debounced render timer fired — perform the actual render.
   def handle_info(:debounced_render, state) do
     state = maybe_trigger_nav_flash(state)
-    state = Renderer.render(state)
+    state = Renderer.render_or_async(state)
     {:noreply, %{state | render_timer: nil}}
+  end
+
+  # Renderer.Server writeback (only fires when split-renderer is enabled).
+  #
+  # Known race the Phase-1 follow-up must address before turning the flag
+  # on in production: `windows` and `shell_state` carry both
+  # renderer-derived data (per-window render caches, click regions) AND
+  # editor-owned state that the input handlers may have mutated between
+  # snapshot-time and writeback-arrival. Merging the whole struct can
+  # regress those edits. Today the flag is off by default and the
+  # writeback path is dormant, so we accept the merge as-is. A future
+  # change should narrow the writeback contract to renderer-owned fields
+  # only (caches, layout, click regions, per-window render_cache) and
+  # leave `windows`/`shell_state` editor-owned.
+  def handle_info({:render_done, %{caches: caches, layout: layout} = wb}, state) do
+    ws = state.workspace
+    new_state = %{state | caches: caches, layout: layout}
+
+    new_state =
+      case Map.fetch(wb, :windows) do
+        {:ok, windows} -> %{new_state | workspace: %{ws | windows: windows}}
+        :error -> new_state
+      end
+
+    new_state =
+      case Map.fetch(wb, :shell_state) do
+        {:ok, ss} -> %{new_state | shell_state: ss}
+        :error -> new_state
+      end
+
+    {:noreply, new_state}
   end
 
   # Nav-flash timer step — advance the fade or clear the flash.
@@ -651,10 +682,10 @@ defmodule MingaEditor do
         case NavFlash.advance(flash) do
           {:continue, updated, effects} ->
             state = EditorState.set_nav_flash(state, apply_flash_effects(state, updated, effects))
-            {:noreply, Renderer.render(state)}
+            {:noreply, Renderer.render_or_async(state)}
 
           :done ->
-            {:noreply, Renderer.render(EditorState.cancel_nav_flash(state))}
+            {:noreply, Renderer.render_or_async(EditorState.cancel_nav_flash(state))}
         end
     end
   end
@@ -701,10 +732,10 @@ defmodule MingaEditor do
       :buffer ->
         Minga.Log.info(:editor, "Buffer process #{inspect(pid)} died, removing from state")
         state = EditorState.remove_dead_buffer(state, pid)
-        {:noreply, Renderer.render(state)}
+        {:noreply, Renderer.render_or_async(state)}
 
       {:git_remote_task, updated_state} ->
-        {:noreply, Renderer.render(updated_state)}
+        {:noreply, Renderer.render_or_async(updated_state)}
 
       :unknown ->
         {:noreply, state}
@@ -716,7 +747,7 @@ defmodule MingaEditor do
   # Mouse hover timeout: check if the mouse is over a diagnostic or symbol
   def handle_info(:mouse_hover_timeout, state) do
     state = MouseHoverTooltip.check_hover(state)
-    {:noreply, Renderer.render(state)}
+    {:noreply, Renderer.render_or_async(state)}
   end
 
   def handle_info(:dismiss_toast, state) do
@@ -1207,7 +1238,7 @@ defmodule MingaEditor do
   end
 
   defp apply_effect(state, {:handle_git_remote_result, ref, result}),
-    do: Renderer.render(Commands.Git.handle_remote_result(state, ref, result))
+    do: Renderer.render_or_async(Commands.Git.handle_remote_result(state, ref, result))
 
   # Dispatches a log effect to the appropriate Minga.Log function.
   @spec apply_log_effect(atom(), atom(), String.t()) :: :ok
@@ -1260,7 +1291,7 @@ defmodule MingaEditor do
   @spec handle_lsp_completion_response(reference(), term(), state()) :: {:noreply, state()}
   defp handle_lsp_completion_response(ref, result, state) do
     new_state = CompletionHandling.handle_response(state, ref, result)
-    new_state = Renderer.render(new_state)
+    new_state = Renderer.render_or_async(new_state)
     {:noreply, new_state}
   end
 
@@ -1290,7 +1321,7 @@ defmodule MingaEditor do
   # display to coalesce frames for.
   defp schedule_render(%{backend: :headless} = state, _delay_ms) do
     state = maybe_trigger_nav_flash(state)
-    state = Renderer.render(state)
+    state = Renderer.render_or_async(state)
     %{state | render_timer: nil}
   end
 
@@ -1997,7 +2028,7 @@ defmodule MingaEditor do
         new_win = %{window | viewport: new_vp}
         new_map = Map.put(win_map, active_win_id, new_win)
         new_state = put_in(state.workspace.windows.map, new_map)
-        Renderer.render(new_state)
+        Renderer.render_or_async(new_state)
     end
   end
 
@@ -2186,7 +2217,7 @@ defmodule MingaEditor do
   @doc false
   @spec do_render(state()) :: state()
   def do_render(state) do
-    Renderer.render(state)
+    Renderer.render_or_async(state)
   end
 
   @doc false
