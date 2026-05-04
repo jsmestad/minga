@@ -39,4 +39,14 @@ defmodule MingaEditor.State.ModalOverlay.Picker do
       opened_at: Keyword.get(opts, :opened_at, System.monotonic_time(:millisecond))
     }
   end
+
+  @doc """
+  Replaces the inner `picker_ui` state on the payload, preserving `owner`
+  and `opened_at`. This is the only sanctioned way to update the inner
+  state from outside this module (Rule 2: state ownership).
+  """
+  @spec put_picker_ui(t(), PickerState.t()) :: t()
+  def put_picker_ui(%__MODULE__{} = payload, %PickerState{} = picker_ui) do
+    %{payload | picker_ui: picker_ui}
+  end
 end

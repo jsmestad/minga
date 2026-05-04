@@ -20,27 +20,28 @@ defmodule MingaEditor.State.ModalOverlay do
 
   ## Migration phase: dual-write
 
-  This is step 1 of 5 (Epic #1421). The new `:modal` field has been
-  added to `Shell.Traditional.State` and `Shell.Board.State` but no
-  callers read it yet. To keep the migration safe, every gate function
-  here writes both:
+  This is step 2 of 5 (Epic #1421). The picker variant (#1424) has been
+  fully migrated — all reads and writes go through this gate, and
+  `picker_ui` has been removed from `Shell.Traditional.State`.
 
-  * `state.shell_state.modal` — the new sum-type field
-  * The variant's legacy field — `picker_ui`, `prompt_ui`, `dashboard`,
-    `workspace.completion`, or `workspace.pending_conflict`
+  The remaining variants still use dual-write: every gate function writes
+  both `state.shell_state.modal` and the variant's legacy field so that
+  existing readers continue to work during the migration:
 
-  Variant-by-variant migrations (#1424-#1426) point reads at the new
-  field one variant at a time. When all variants have migrated, #1427
-  removes the dual-write and adds a Credo rule that forbids direct
-  writes to the legacy fields.
+  * `prompt_ui` — legacy mirror for the `:prompt` variant
+  * `dashboard` — legacy mirror for the `:dashboard` variant
+  * `workspace.completion` — legacy mirror for `:completion`
+  * `workspace.pending_conflict` — legacy mirror for `:conflict`
 
-  Until then, **do not mutate `:modal` directly**: always call this
-  module's `open/3`, `transition/3`, `close/1`, or `dismiss/1`. Direct
-  mutation of the legacy fields is still permitted (existing call
-  sites have not been migrated), but a runtime assertion in `:dev` and
-  `:test` builds crashes when the gate detects that its tracked variant
-  has diverged from the legacy mirror. That surfaces stray writes in CI
-  rather than letting them drift silently.
+  Migrations #1425-#1426 point reads at the new field one variant at a
+  time. When all variants have migrated, #1427 removes the remaining
+  dual-writes and adds a Credo rule that forbids direct writes to the
+  legacy fields.
+
+  **Do not mutate `:modal` directly**: always call this module's
+  `open/3`, `transition/3`, `close/1`, or `dismiss/1`. A runtime
+  assertion in `:dev` and `:test` builds crashes when the gate detects
+  that its tracked variant has diverged from the legacy mirror.
 
   ## Replacement policy
 
@@ -62,7 +63,6 @@ defmodule MingaEditor.State.ModalOverlay do
   alias MingaEditor.State.ModalOverlay.Dashboard, as: DashboardPayload
   alias MingaEditor.State.ModalOverlay.Picker, as: PickerPayload
   alias MingaEditor.State.ModalOverlay.Prompt, as: PromptPayload
-  alias MingaEditor.State.Picker, as: PickerLegacy
   alias MingaEditor.State.Prompt, as: PromptLegacy
   alias MingaEditor.Workspace.State, as: WorkspaceState
 
@@ -234,7 +234,8 @@ defmodule MingaEditor.State.ModalOverlay do
         state
 
       {:picker, _} ->
-        EditorState.set_picker_ui(state, %PickerLegacy{})
+        # Picker has no legacy field — it was removed in #1424.
+        state
 
       {:prompt, _} ->
         EditorState.set_prompt_ui(state, %PromptLegacy{})
@@ -251,10 +252,9 @@ defmodule MingaEditor.State.ModalOverlay do
   end
 
   # Writes the payload's underlying state to the variant's legacy slot.
+  # The picker variant has no legacy field (#1424 removed it).
   @spec mirror_to_legacy(EditorState.t(), {variant(), payload()}) :: EditorState.t()
-  defp mirror_to_legacy(state, {:picker, %PickerPayload{picker_ui: pui}}) do
-    EditorState.set_picker_ui(state, pui)
-  end
+  defp mirror_to_legacy(state, {:picker, %PickerPayload{}}), do: state
 
   defp mirror_to_legacy(state, {:prompt, %PromptPayload{prompt_ui: pui}}) do
     EditorState.set_prompt_ui(state, pui)
@@ -305,8 +305,8 @@ defmodule MingaEditor.State.ModalOverlay do
         :none ->
           :ok
 
-        {:picker, %PickerPayload{picker_ui: pui}} ->
-          if ss.picker_ui != pui, do: raise_divergence!(:picker, pui, ss.picker_ui)
+        # Picker has no legacy field (#1424 removed it): no consistency check needed.
+        {:picker, %PickerPayload{}} ->
           :ok
 
         {:prompt, %PromptPayload{prompt_ui: pu}} ->

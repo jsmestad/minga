@@ -3,6 +3,8 @@ defmodule MingaEditor.Input.PickerMouseTest do
   use ExUnit.Case, async: true
 
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.ModalOverlay
+  alias MingaEditor.State.ModalOverlay.Picker, as: PickerPayload
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
   alias MingaEditor.Input.Picker, as: PickerInput
@@ -33,7 +35,9 @@ defmodule MingaEditor.Input.PickerMouseTest do
         viewport: Viewport.new(30, 80)
       },
       shell_state: %MingaEditor.Shell.Traditional.State{
-        picker_ui: %MingaEditor.State.Picker{picker: picker, source: TestSource}
+        modal:
+          {:picker,
+           PickerPayload.new(%MingaEditor.State.Picker{picker: picker, source: TestSource})}
       }
     }
   end
@@ -42,7 +46,8 @@ defmodule MingaEditor.Input.PickerMouseTest do
     test "wheel_down moves picker selection down" do
       state = picker_state([%{id: 1, label: "one"}, %{id: 2, label: "two"}])
       {:handled, new_state} = PickerInput.handle_mouse(state, 10, 10, :wheel_down, 0, :press, 1)
-      assert new_state.shell_state.picker_ui.picker.selected == 1
+      {:picker, %{picker_ui: %{picker: pui}}} = new_state.shell_state.modal
+      assert pui.selected == 1
     end
 
     test "wheel_up moves picker selection up" do
@@ -50,7 +55,8 @@ defmodule MingaEditor.Input.PickerMouseTest do
       # Move down first, then up
       {:handled, state} = PickerInput.handle_mouse(state, 10, 10, :wheel_down, 0, :press, 1)
       {:handled, new_state} = PickerInput.handle_mouse(state, 10, 10, :wheel_up, 0, :press, 1)
-      assert new_state.shell_state.picker_ui.picker.selected == 0
+      {:picker, %{picker_ui: %{picker: pui}}} = new_state.shell_state.modal
+      assert pui.selected == 0
     end
   end
 
@@ -64,7 +70,7 @@ defmodule MingaEditor.Input.PickerMouseTest do
       {:handled, new_state} = PickerInput.handle_mouse(state, 26, 10, :left, 0, :press, 1)
 
       # Picker should be closed
-      assert new_state.shell_state.picker_ui.picker == nil
+      assert new_state.shell_state.modal == :none
       # Source's on_select should have been called
       assert Map.has_key?(new_state, :selected_item)
     end
@@ -76,7 +82,7 @@ defmodule MingaEditor.Input.PickerMouseTest do
       # Click on row 0 (well above the picker)
       {:handled, new_state} = PickerInput.handle_mouse(state, 0, 10, :left, 0, :press, 1)
       # Picker should still be open
-      assert new_state.shell_state.picker_ui.picker != nil
+      assert ModalOverlay.match(new_state.shell_state.modal, :picker)
     end
   end
 
@@ -92,11 +98,13 @@ defmodule MingaEditor.Input.PickerMouseTest do
           viewport: Viewport.new(24, 80)
         },
         shell_state: %MingaEditor.Shell.Traditional.State{
-          picker_ui: %MingaEditor.State.Picker{
-            picker: picker,
-            source: TestSource,
-            layout: :centered
-          }
+          modal:
+            {:picker,
+             PickerPayload.new(%MingaEditor.State.Picker{
+               picker: picker,
+               source: TestSource,
+               layout: :centered
+             })}
         }
       }
     end
@@ -110,7 +118,7 @@ defmodule MingaEditor.Input.PickerMouseTest do
       # First item is at interior row 0 = screen row 5
       {:handled, new_state} = PickerInput.handle_mouse(state, 5, 20, :left, 0, :press, 1)
 
-      assert new_state.shell_state.picker_ui.picker == nil
+      assert new_state.shell_state.modal == :none
       assert Map.has_key?(new_state, :selected_item)
     end
 
@@ -122,7 +130,7 @@ defmodule MingaEditor.Input.PickerMouseTest do
       {:handled, new_state} = PickerInput.handle_mouse(state, 0, 0, :left, 0, :press, 1)
 
       # Picker should be closed (dismissed), no item selected
-      assert new_state.shell_state.picker_ui.picker == nil
+      assert new_state.shell_state.modal == :none
       refute Map.has_key?(new_state, :selected_item)
     end
 
@@ -133,7 +141,8 @@ defmodule MingaEditor.Input.PickerMouseTest do
       {:handled, new_state} =
         PickerInput.handle_mouse(state, 10, 20, :wheel_down, 0, :press, 1)
 
-      assert new_state.shell_state.picker_ui.picker.selected == 1
+      {:picker, %{picker_ui: %{picker: pui}}} = new_state.shell_state.modal
+      assert pui.selected == 1
     end
   end
 

@@ -7,7 +7,6 @@ defmodule MingaEditor.UI.Picker.CommandSourceTest do
   alias Minga.Command
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
-  alias MingaEditor.State.Picker, as: PickerState
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
   alias MingaEditor.UI.Picker.CommandSource
@@ -37,7 +36,7 @@ defmodule MingaEditor.UI.Picker.CommandSourceTest do
           buffers: %Buffers{active: buf, list: [buf], active_index: 0},
           editing: VimState.new()
         },
-        shell_state: %MingaEditor.Shell.Traditional.State{picker_ui: %PickerState{}}
+        shell_state: %MingaEditor.Shell.Traditional.State{}
       }
 
       result =
@@ -49,11 +48,12 @@ defmodule MingaEditor.UI.Picker.CommandSourceTest do
       # Should have opened the scope picker, not set pending_command
       assert is_nil(Map.get(result, :pending_command))
       # The scope picker should be open
-      assert result.shell_state.picker_ui.picker != nil
-      assert result.shell_state.picker_ui.source == MingaEditor.UI.Picker.OptionScopeSource
+      {:picker, %{picker_ui: picker_ui}} = result.shell_state.modal
+      assert picker_ui.picker != nil
+      assert picker_ui.source == MingaEditor.UI.Picker.OptionScopeSource
       # Context should carry the option info
-      assert result.shell_state.picker_ui.context.option_name == :wrap
-      assert is_boolean(result.shell_state.picker_ui.context.new_value)
+      assert picker_ui.context.option_name == :wrap
+      assert is_boolean(picker_ui.context.new_value)
     end
   end
 

@@ -14,24 +14,26 @@ defmodule MingaEditor.Input.Picker do
 
   alias MingaEditor.PickerUI
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.ModalOverlay
   alias MingaEditor.UI.Picker, as: PickerData
 
   @impl true
   @spec handle_key(state(), non_neg_integer(), non_neg_integer()) ::
           MingaEditor.Input.Handler.result()
-  def handle_key(%{shell_state: %{picker_ui: %{picker: picker}}} = state, codepoint, modifiers)
-      when is_struct(picker, PickerData) do
-    new_state =
-      case PickerUI.handle_key(state, codepoint, modifiers) do
-        {s, {:execute_command, cmd}} -> MingaEditor.dispatch_command(s, cmd)
-        s -> s
-      end
+  def handle_key(state, codepoint, modifiers) do
+    case ModalOverlay.match(state.shell_state.modal, :picker) do
+      true ->
+        new_state =
+          case PickerUI.handle_key(state, codepoint, modifiers) do
+            {s, {:execute_command, cmd}} -> MingaEditor.dispatch_command(s, cmd)
+            s -> s
+          end
 
-    {:handled, new_state}
-  end
+        {:handled, new_state}
 
-  def handle_key(state, _cp, _mods) do
-    {:passthrough, state}
+      false ->
+        {:passthrough, state}
+    end
   end
 
   @impl true
@@ -47,7 +49,11 @@ defmodule MingaEditor.Input.Picker do
 
   # Picker active: intercept scroll and clicks
   def handle_mouse(
-        %{shell_state: %{picker_ui: %{picker: %PickerData{} = picker, source: source}}} = state,
+        %{
+          shell_state: %{
+            modal: {:picker, %{picker_ui: %{picker: %PickerData{} = picker, source: source}}}
+          }
+        } = state,
         row,
         col,
         button,
@@ -58,15 +64,16 @@ defmodule MingaEditor.Input.Picker do
     case button do
       :wheel_down ->
         new_picker = PickerData.move_down(picker)
-        {:handled, EditorState.update_picker_ui(state, &%{&1 | picker: new_picker})}
+        {:handled, PickerUI.update_picker(state, &%{&1 | picker: new_picker})}
 
       :wheel_up ->
         new_picker = PickerData.move_up(picker)
-        {:handled, EditorState.update_picker_ui(state, &%{&1 | picker: new_picker})}
+        {:handled, PickerUI.update_picker(state, &%{&1 | picker: new_picker})}
 
       :left ->
-        if state.shell_state.picker_ui.layout == :centered and
-             not inside_centered_box?(state, row, col) do
+        {:picker, %{picker_ui: %{layout: layout}}} = state.shell_state.modal
+
+        if layout == :centered and not inside_centered_box?(state, row, col) do
           {:handled, PickerUI.close(state)}
         else
           {:handled, handle_picker_click(state, picker, source, row)}
@@ -87,7 +94,7 @@ defmodule MingaEditor.Input.Picker do
   @spec handle_picker_click(EditorState.t(), PickerData.t(), module(), integer()) ::
           EditorState.t()
   defp handle_picker_click(state, picker, source, row) do
-    layout = state.shell_state.picker_ui.layout
+    {:picker, %{picker_ui: %{layout: layout}}} = state.shell_state.modal
 
     clicked_idx =
       case layout do

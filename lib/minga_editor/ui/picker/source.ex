@@ -43,7 +43,14 @@ defmodule MingaEditor.UI.Picker.Source do
   @doc "Returns the list of candidates to display in the picker."
   @callback candidates(Context.t()) :: [Picker.item()]
 
-  @doc "Called when the user selects an item. Returns the new editor state."
+  @doc """
+  Called when the user selects an item. Returns the new editor state.
+
+  Important: this callback runs *after* the picker has been closed
+  (`state.shell_state.modal` has been reset to `:none`). Any context the
+  callback needs must travel with the `Picker.item()` (typically embedded
+  in `Item.id`). Reading `state.shell_state.modal` here will see `:none`.
+  """
   @callback on_select(Picker.item(), state :: term()) :: term()
 
   @doc "Called when the user cancels the picker. Returns the new editor state."
@@ -64,6 +71,10 @@ defmodule MingaEditor.UI.Picker.Source do
   @doc """
   Executes an alternative action on a picker item.
   Called when the user selects an action from the C-o menu.
+
+  Like `on_select/2`, this runs *after* the picker has been closed. Any
+  context required must travel with the `Picker.item()`; do not read
+  `state.shell_state.modal` here.
   """
   @callback on_action(atom(), Picker.item(), state :: term()) :: term()
 
@@ -89,16 +100,19 @@ defmodule MingaEditor.UI.Picker.Source do
 
   @doc """
   Default `on_cancel` implementation: restores the buffer that was active
-  when the picker opened (stored in `picker_ui.restore`), or returns state
-  unchanged if no restore index was saved.
+  when the picker opened (stored in the picker payload's `restore` field),
+  or returns state unchanged if no restore index was saved.
   """
   @spec restore_or_keep(term()) :: term()
-  def restore_or_keep(%{shell_state: %{picker_ui: %{restore: idx}}} = state)
-      when is_integer(idx) do
-    EditorState.switch_buffer(state, idx)
-  end
+  def restore_or_keep(state) do
+    case state.shell_state.modal do
+      {:picker, %{picker_ui: %{restore: idx}}} when is_integer(idx) ->
+        EditorState.switch_buffer(state, idx)
 
-  def restore_or_keep(state), do: state
+      _ ->
+        state
+    end
+  end
 
   @doc """
   Returns whether a source module supports preview.

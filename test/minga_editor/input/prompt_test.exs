@@ -22,8 +22,7 @@ defmodule MingaEditor.Input.PromptTest do
 
     %{
       shell_state: %MingaEditor.Shell.Traditional.State{
-        prompt_ui: prompt,
-        picker_ui: %MingaEditor.State.Picker{}
+        prompt_ui: prompt
       },
       submitted: nil,
       cancelled: nil

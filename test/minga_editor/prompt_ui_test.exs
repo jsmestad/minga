@@ -43,12 +43,11 @@ defmodule MingaEditor.PromptUITest do
   @delete 57_348
 
   defp make_state(overrides \\ %{}) do
-    shell_overrides = Map.take(overrides, [:prompt_ui, :picker_ui])
-    other_overrides = Map.drop(overrides, [:prompt_ui, :picker_ui])
+    shell_overrides = Map.take(overrides, [:prompt_ui])
+    other_overrides = Map.drop(overrides, [:prompt_ui])
 
     shell = %MingaEditor.Shell.Traditional.State{
-      prompt_ui: Map.get(shell_overrides, :prompt_ui, %PromptState{}),
-      picker_ui: Map.get(shell_overrides, :picker_ui, %MingaEditor.State.Picker{})
+      prompt_ui: Map.get(shell_overrides, :prompt_ui, %PromptState{})
     }
 
     base = %{
@@ -88,7 +87,12 @@ defmodule MingaEditor.PromptUITest do
     end
 
     test "closes active picker when opening prompt" do
-      picker_state = %MingaEditor.State.Picker{
+      alias MingaEditor.State, as: EditorState
+      alias MingaEditor.State.ModalOverlay
+      alias MingaEditor.State.ModalOverlay.Picker, as: PickerPayload
+      alias MingaEditor.Viewport
+
+      picker_struct = %MingaEditor.State.Picker{
         picker: %MingaEditor.UI.Picker{
           items: [],
           filtered: [],
@@ -99,11 +103,16 @@ defmodule MingaEditor.PromptUITest do
         source: SomeSource
       }
 
-      state = make_state(%{picker_ui: picker_state})
+      state = %EditorState{
+        port_manager: nil,
+        workspace: %MingaEditor.Workspace.State{viewport: Viewport.new(24, 80)}
+      }
+
+      state = ModalOverlay.open(state, :picker, PickerPayload.new(picker_struct))
       state = PromptUI.open(state, TestHandler)
 
       assert state.shell_state.prompt_ui.handler == TestHandler
-      assert state.shell_state.picker_ui.picker == nil
+      refute ModalOverlay.match(state.shell_state.modal, :picker)
     end
   end
 

@@ -5,6 +5,8 @@ defmodule MingaEditor.Input.InterruptTest do
   alias Minga.Editing.Completion
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
+  alias MingaEditor.State.ModalOverlay
+  alias MingaEditor.State.ModalOverlay.Picker, as: PickerPayload
   alias MingaEditor.State.Picker
   alias MingaEditor.State.WhichKey
   alias MingaEditor.Viewport
@@ -55,7 +57,7 @@ defmodule MingaEditor.Input.InterruptTest do
       assert {:handled, new_state} = Interrupt.handle_key(state, @ctrl_g, 0)
       assert new_state.workspace.keymap_scope == :editor
       assert new_state.workspace.editing.mode == :normal
-      assert new_state.shell_state.picker_ui.picker == nil
+      assert new_state.shell_state.modal == :none
       assert new_state.shell_state.whichkey.node == nil
     end
   end
@@ -150,10 +152,12 @@ defmodule MingaEditor.Input.InterruptTest do
     test "closes open picker" do
       state = base_state()
       picker = MingaEditor.UI.Picker.new(["a", "b", "c"])
-      state = MingaEditor.State.set_picker_ui(state, %Picker{picker: picker, source: nil})
+
+      state =
+        ModalOverlay.open(state, :picker, PickerPayload.new(%Picker{picker: picker, source: nil}))
 
       assert {:handled, new_state} = Interrupt.handle_key(state, @ctrl_g, 0)
-      assert new_state.shell_state.picker_ui.picker == nil
+      assert new_state.shell_state.modal == :none
     end
 
     test "dismisses which-key popup" do
@@ -211,14 +215,14 @@ defmodule MingaEditor.Input.InterruptTest do
           }
       }
 
-      state = MingaEditor.State.set_picker_ui(state, %Picker{picker: picker})
+      state = ModalOverlay.open(state, :picker, PickerPayload.new(%Picker{picker: picker}))
       state = MingaEditor.State.set_whichkey(state, %WhichKey{node: %{}, show: true})
       state = MingaEditor.State.set_status(state, "hello")
 
       assert {:handled, new_state} = Interrupt.handle_key(state, @ctrl_g, 0)
       assert new_state.workspace.keymap_scope == :editor
       assert new_state.workspace.editing.mode == :normal
-      assert new_state.shell_state.picker_ui.picker == nil
+      assert new_state.shell_state.modal == :none
       assert new_state.shell_state.whichkey.node == nil
       assert new_state.shell_state.whichkey.show == false
       assert new_state.workspace.pending_conflict == nil
