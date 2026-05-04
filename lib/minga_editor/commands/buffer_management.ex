@@ -21,6 +21,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
+  alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.Window
   alias Minga.Mode
@@ -579,43 +580,13 @@ defmodule MingaEditor.Commands.BufferManagement do
   # ── Private buffer helpers ────────────────────────────────────────────────
 
   @spec switch_to_buffer(state(), non_neg_integer()) :: state()
-  defp switch_to_buffer(
-         %{shell_state: %{tab_bar: %TabBar{} = tb}, workspace: %{buffers: %{list: buffers}}} =
-           state,
-         idx
-       ) do
-    target_buf = Enum.at(buffers, idx)
-
-    # Find the file tab whose context holds this buffer
-    case find_tab_for_buffer(tb, target_buf) do
-      nil ->
-        # No tab found, fall back to index-based switching
-        EditorState.switch_buffer(state, idx)
-
-      tab_id ->
-        EditorState.switch_tab(state, tab_id)
-    end
-  end
-
   defp switch_to_buffer(state, idx), do: EditorState.switch_buffer(state, idx)
-
-  alias MingaEditor.State.Tab
-
-  @spec find_tab_for_buffer(TabBar.t(), pid() | nil) :: Tab.id() | nil
-  defp find_tab_for_buffer(_tb, nil), do: nil
-
-  defp find_tab_for_buffer(%TabBar{tabs: tabs}, target_buf) do
-    Enum.find_value(tabs, fn
-      %{kind: :file, id: id, context: %{active_buffer: ^target_buf}} -> id
-      _ -> nil
-    end)
-  end
 
   @spec next_buffer(state()) :: state()
   defp next_buffer(
          %{workspace: %{buffers: %{list: [_, _ | _] = buffers, active_index: idx}}} = state
        ) do
-    cycle_buffer_in_tab(state, rem(idx + 1, Enum.count(buffers)))
+    EditorState.switch_buffer(state, rem(idx + 1, Enum.count(buffers)))
   end
 
   defp next_buffer(state), do: state
@@ -625,35 +596,10 @@ defmodule MingaEditor.Commands.BufferManagement do
          %{workspace: %{buffers: %{list: [_, _ | _] = buffers, active_index: idx}}} = state
        ) do
     count = Enum.count(buffers)
-    cycle_buffer_in_tab(state, rem(idx - 1 + count, count))
+    EditorState.switch_buffer(state, rem(idx - 1 + count, count))
   end
 
   defp prev_buffer(state), do: state
-
-  # Cycles the buffer in the current tab. If the target buffer already
-  # has its own file tab, switches to that tab instead.
-  @spec cycle_buffer_in_tab(state(), non_neg_integer()) :: state()
-  defp cycle_buffer_in_tab(%{shell_state: %{tab_bar: %TabBar{}}} = state, idx) do
-    target_buf = Enum.at(state.workspace.buffers.list, idx)
-
-    case find_tab_for_buffer(state.shell_state.tab_bar, target_buf) do
-      nil ->
-        # Buffer has no dedicated tab; switch in-place.
-        EditorState.switch_buffer(state, idx)
-
-      tab_id when tab_id == state.shell_state.tab_bar.active_id ->
-        # Buffer's tab is the current tab; switch in-place.
-        EditorState.switch_buffer(state, idx)
-
-      tab_id ->
-        # Buffer lives in another tab; switch to it.
-        EditorState.switch_tab(state, tab_id)
-    end
-  end
-
-  defp cycle_buffer_in_tab(state, idx) do
-    EditorState.switch_buffer(state, idx)
-  end
 
   @spec next_tab(state()) :: state()
   defp next_tab(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do

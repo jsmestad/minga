@@ -481,8 +481,6 @@ defmodule MingaEditor.Shell.Traditional do
   defp tab_has_active_buffer?(tab, pid) do
     case tab.context do
       %{buffers: %{active: ^pid}} -> true
-      %{surface_state: %{buffers: %{active: ^pid}}} -> true
-      %{active_buffer: ^pid} -> true
       _ -> false
     end
   end

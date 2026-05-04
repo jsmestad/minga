@@ -97,26 +97,29 @@ defmodule MingaEditor.State.SnapshotTest do
       assert restored.workspace.buffers.active == buf_b
     end
 
-    test "migrates legacy context with active_buffer field" do
+    test "older bare-field contexts are not migrated; only canonical keys are read" do
+      # Pre-#1440, contexts stored bare fields like :active_buffer / :mode and
+      # were silently migrated. Now restore_tab_context only reads canonical
+      # keys (those in WorkspaceState.field_names()), so legacy fields are
+      # ignored and the workspace falls back to whatever the live state already
+      # holds. No crash, no migration, no warning.
       {:ok, buf_a} = BufferServer.start_link(content: "a")
       {:ok, buf_b} = BufferServer.start_link(content: "b")
 
-      state = make_state(buffer: buf_a)
+      state = make_state(buffer: buf_a, mode: :normal, keymap_scope: :editor)
 
-      # Oldest format: bare fields like :active_buffer
-      ctx = %{
+      legacy_ctx = %{
         mode: :insert,
         mode_state: Mode.initial_state(),
-        keymap_scope: :editor,
         active_buffer: buf_b,
         active_buffer_index: 1
       }
 
-      restored = EditorState.restore_tab_context(state, ctx)
-      assert restored.workspace.keymap_scope == :editor
-      assert restored.workspace.editing.mode == :insert
-      assert restored.workspace.buffers.active == buf_b
-      assert restored.workspace.buffers.active_index == 1
+      restored = EditorState.restore_tab_context(state, legacy_ctx)
+
+      # The legacy keys are silently ignored — workspace fields stay as they were.
+      assert restored.workspace.editing.mode == :normal
+      assert restored.workspace.buffers.active == buf_a
     end
 
     test "handles empty context gracefully" do
