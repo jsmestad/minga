@@ -138,7 +138,8 @@ defmodule Minga.Buffer.State do
   separated by a pause.
   """
   @spec push_undo(t(), Document.t(), edit_source()) :: t()
-  def push_undo(%__MODULE__{} = state, new_buf, source) when source in [:user, :agent, :lsp] do
+  def push_undo(%__MODULE__{} = state, new_buf, source)
+      when source in [:user, :agent, :lsp, :recovery] do
     now = System.monotonic_time(:millisecond)
     elapsed = now - state.last_undo_at
 
@@ -174,7 +175,7 @@ defmodule Minga.Buffer.State do
   """
   @spec push_undo_force(t(), Document.t(), edit_source()) :: t()
   def push_undo_force(%__MODULE__{} = state, new_buf, source)
-      when source in [:user, :agent, :lsp] do
+      when source in [:user, :agent, :lsp, :recovery] do
     now = System.monotonic_time(:millisecond)
     entry = {state.version, state.document, source}
 

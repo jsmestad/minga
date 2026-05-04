@@ -605,6 +605,18 @@ defmodule Minga.Buffer.Server do
     GenServer.call(server, :redo)
   end
 
+  @doc "Returns the edit source of the most recent undo entry, or `nil` if the undo stack is empty."
+  @spec last_undo_source(GenServer.server()) :: Minga.Buffer.State.edit_source() | nil
+  def last_undo_source(server) do
+    GenServer.call(server, :last_undo_source)
+  end
+
+  @doc "Returns the edit source of the most recent redo entry, or `nil` if the redo stack is empty."
+  @spec last_redo_source(GenServer.server()) :: Minga.Buffer.State.edit_source() | nil
+  def last_redo_source(server) do
+    GenServer.call(server, :last_redo_source)
+  end
+
   @doc """
   Resets the undo coalescing timer so the next mutation starts a fresh
   undo entry. Call this at undo boundaries like mode transitions (e.g.,
@@ -1616,6 +1628,26 @@ defmodule Minga.Buffer.Server do
 
   def handle_call(:break_undo_coalescing, _from, state) do
     {:reply, :ok, BufState.break_undo_coalescing(state)}
+  end
+
+  def handle_call(:last_undo_source, _from, state) do
+    source =
+      case state.undo_stack do
+        [] -> nil
+        [{_version, _doc, source} | _] -> source
+      end
+
+    {:reply, source, state}
+  end
+
+  def handle_call(:last_redo_source, _from, state) do
+    source =
+      case state.redo_stack do
+        [] -> nil
+        [{_version, _doc, source} | _] -> source
+      end
+
+    {:reply, source, state}
   end
 
   # ── Decoration callbacks ──
