@@ -71,8 +71,9 @@ defmodule MingaEditor.Renderer do
       snapshot = Input.from_editor_state(state)
       # Monotonic time stands in for a frame sequence number; the renderer
       # only uses it for telemetry tagging and pending-snapshot identity.
-      seq = System.monotonic_time(:microsecond)
-      seq = if seq < 0, do: -seq, else: seq
+      # `abs/1` because monotonic_time/1 can return negative values and the
+      # @spec on cast_snapshot/3 requires a non_neg_integer.
+      seq = abs(System.monotonic_time(:microsecond))
       RendererServer.cast_snapshot(snapshot, seq)
       state
     else

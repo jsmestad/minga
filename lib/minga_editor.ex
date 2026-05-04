@@ -639,10 +639,18 @@ defmodule MingaEditor do
     {:noreply, %{state | render_timer: nil}}
   end
 
-  # Renderer.Server writeback (only fires when split-renderer is enabled):
-  # merge cache, layout, and click-region updates that the renderer
-  # computed in its own process. Stale frame_seqs still apply because
-  # regions are advisory and the next frame is in flight anyway.
+  # Renderer.Server writeback (only fires when split-renderer is enabled).
+  #
+  # Known race the Phase-1 follow-up must address before turning the flag
+  # on in production: `windows` and `shell_state` carry both
+  # renderer-derived data (per-window render caches, click regions) AND
+  # editor-owned state that the input handlers may have mutated between
+  # snapshot-time and writeback-arrival. Merging the whole struct can
+  # regress those edits. Today the flag is off by default and the
+  # writeback path is dormant, so we accept the merge as-is. A future
+  # change should narrow the writeback contract to renderer-owned fields
+  # only (caches, layout, click regions, per-window render_cache) and
+  # leave `windows`/`shell_state` editor-owned.
   def handle_info({:render_done, %{caches: caches, layout: layout} = wb}, state) do
     ws = state.workspace
     new_state = %{state | caches: caches, layout: layout}
