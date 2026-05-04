@@ -1,5 +1,9 @@
 defmodule Minga.ConfigTest do
-  use ExUnit.Case, async: true
+  # async: false because the test setup calls `PopupRegistry.clear()` on the
+  # global Minga.Popup.Registry ETS table, which would race with any
+  # concurrent test that depends on default popup rules being present (e.g.
+  # MessagesBufferTest's `*Messages*` toggle).
+  use ExUnit.Case, async: false
 
   alias Minga.Command.Registry, as: CommandRegistry
   alias Minga.Config.Hooks
