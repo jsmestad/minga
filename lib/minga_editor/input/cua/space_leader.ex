@@ -149,7 +149,9 @@ defmodule MingaEditor.Input.CUA.SpaceLeader do
   defp leader_trie(state) do
     Keymap.leader_trie(EditorState.keymap_server(state))
   catch
-    :exit, _ -> Minga.Keymap.Bindings.new()
+    :exit, _ ->
+      Minga.Log.warning(:config, "leader_trie unavailable; SPC bindings disabled this frame")
+      Minga.Keymap.Bindings.new()
   end
 
   @spec lookup_leader(Minga.Keymap.Bindings.node_t(), non_neg_integer(), non_neg_integer()) ::

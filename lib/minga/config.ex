@@ -44,11 +44,9 @@ defmodule Minga.Config do
   alias Minga.Popup.Registry, as: PopupRegistry
   alias Minga.Popup.Rule, as: PopupRule
 
-  @type keymap_server :: GenServer.server()
-
-  @spec keymap_server() :: keymap_server()
+  @spec keymap_server() :: Keymap.server()
   defp keymap_server do
-    Process.get(:minga_config_keymap, Minga.Keymap.Active)
+    Process.get(:minga_config_keymap, Keymap.default_server())
   end
 
   # ── Read options ───────────────────────────────────────────────────
@@ -273,7 +271,7 @@ defmodule Minga.Config do
       if filetype do
         Keymap.bind(keymap_server(), mode, key_str, command_name, description, filetype: filetype)
       else
-        Keymap.bind(keymap_server(), mode, key_str, command_name, description)
+        Keymap.bind(keymap_server(), mode, key_str, command_name, description, [])
       end
 
     case result do

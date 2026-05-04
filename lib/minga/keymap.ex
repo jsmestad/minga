@@ -11,6 +11,14 @@ defmodule Minga.Keymap do
   External callers use this facade for binding lookups, key resolution,
   and runtime rebinding. The `Keymap.Bindings` trie type appears in
   specs across mode dispatch and input handling code.
+
+  ## Server-aware API
+
+  Every binding-lookup and runtime-rebinding function takes an optional
+  `server` argument. When omitted, calls go to the singleton process
+  registered under the `default_server/0` name. Pass an explicit server
+  (pid or registered name) to target an isolated instance, e.g. per-test
+  fixtures or future per-tab keymaps.
   """
 
   alias Minga.Keymap.Active
@@ -21,53 +29,52 @@ defmodule Minga.Keymap do
   @typedoc "Supported editor modes."
   @type mode :: :normal | :insert | :visual | :command
 
+  @typedoc "Reference to a Keymap.Active GenServer (registered name or pid)."
+  @type server :: GenServer.server()
+
+  # Single source of truth for the default registered Keymap.Active. Other
+  # modules should call `default_server/0` rather than referencing `Active`
+  # directly so future renames or alternate defaults stay localized here.
+  @default_server Active
+
+  @doc "Returns the registered name of the default keymap server."
+  @spec default_server() :: server()
+  def default_server, do: @default_server
+
   # ── Binding lookup ─────────────────────────────────────────────────
 
   @doc "Returns the merged leader trie (defaults + user overrides)."
-  @spec leader_trie() :: Bindings.node_t()
-  @spec leader_trie(GenServer.server()) :: Bindings.node_t()
-  defdelegate leader_trie, to: Active
-  defdelegate leader_trie(server), to: Active
+  @spec leader_trie(server()) :: Bindings.node_t()
+  defdelegate leader_trie(server \\ @default_server), to: Active
 
   @doc "Returns the merged normal-mode single-key bindings."
-  @spec normal_bindings() :: %{Bindings.key() => {atom(), String.t()}}
-  @spec normal_bindings(GenServer.server()) :: %{Bindings.key() => {atom(), String.t()}}
-  defdelegate normal_bindings, to: Active
-  defdelegate normal_bindings(server), to: Active
+  @spec normal_bindings(server()) :: %{Bindings.key() => {atom(), String.t()}}
+  defdelegate normal_bindings(server \\ @default_server), to: Active
 
   @doc "Returns the mode-specific trie for the given mode."
-  @spec mode_trie(atom()) :: Bindings.node_t()
-  @spec mode_trie(GenServer.server(), atom()) :: Bindings.node_t()
-  defdelegate mode_trie(mode), to: Active
-  defdelegate mode_trie(server, mode), to: Active
+  @spec mode_trie(server(), atom()) :: Bindings.node_t()
+  def mode_trie(server \\ @default_server, mode), do: Active.mode_trie(server, mode)
 
   @doc "Returns the filetype-scoped trie (SPC m bindings)."
-  @spec filetype_trie(atom()) :: Bindings.node_t()
-  @spec filetype_trie(GenServer.server(), atom()) :: Bindings.node_t()
-  defdelegate filetype_trie(filetype), to: Active
-  defdelegate filetype_trie(server, filetype), to: Active
+  @spec filetype_trie(server(), atom()) :: Bindings.node_t()
+  def filetype_trie(server \\ @default_server, filetype),
+    do: Active.filetype_trie(server, filetype)
 
   @doc "Returns the scope-specific trie for a given scope and vim state."
-  @spec scope_trie(Scope.scope_name(), Scope.vim_state()) :: Bindings.node_t()
-  @spec scope_trie(GenServer.server(), Scope.scope_name(), Scope.vim_state()) :: Bindings.node_t()
-  defdelegate scope_trie(scope, vim_state), to: Active
-  defdelegate scope_trie(server, scope, vim_state), to: Active
+  @spec scope_trie(server(), Scope.scope_name(), Scope.vim_state()) :: Bindings.node_t()
+  def scope_trie(server \\ @default_server, scope, vim_state),
+    do: Active.scope_trie(server, scope, vim_state)
 
   @doc """
   Resolves a key press against a mode's merged bindings.
 
   Checks mode-specific trie first, then normal overrides.
-  Returns `{:command, name}` when a command is found, or `:not_found`.
+  Returns `{:command, atom()}` when a command is found, or `:not_found`.
   """
-  @spec resolve_binding(atom(), atom() | nil, Bindings.key()) ::
+  @spec resolve_binding(server(), atom(), atom() | nil, Bindings.key()) ::
           {:command, atom()} | :not_found
-  @spec resolve_binding(GenServer.server(), atom(), atom() | nil, Bindings.key()) ::
-          {:command, atom()} | :not_found
-  defdelegate resolve_binding(mode, filetype, key), to: Active, as: :resolve_mode_binding
-
-  defdelegate resolve_binding(server, mode, filetype, key),
-    to: Active,
-    as: :resolve_mode_binding
+  def resolve_binding(server \\ @default_server, mode, filetype, key),
+    do: Active.resolve_mode_binding(server, mode, filetype, key)
 
   # ── Key resolution (scoped dispatch) ───────────────────────────────
 
@@ -75,8 +82,8 @@ defmodule Minga.Keymap do
   Resolves a key press within a scope (e.g., `:editor`, `:agent`, `:file_tree`).
 
   Checks scope-specific bindings first, then falls through to the
-  scope's fallback chain. Returns `{:command, name, desc}`,
-  `{:prefix, node}`, or `:unbound`.
+  scope's fallback chain. Returns `Scope.resolve_result()`:
+  `{:command, atom()}`, `{:prefix, Bindings.node_t()}`, or `:not_found`.
   """
   @spec resolve_scoped_key(Scope.scope_name(), Scope.vim_state(), Bindings.key(), keyword()) ::
           Scope.resolve_result()
@@ -89,34 +96,28 @@ defmodule Minga.Keymap do
   @doc "Binds a key sequence to a command in the given mode."
   @spec bind(atom() | {atom(), atom()}, String.t(), atom(), String.t()) ::
           :ok | {:error, String.t()}
-  defdelegate bind(mode, key_str, command, description), to: Active
+  def bind(mode, key_str, command, description),
+    do: Active.bind(@default_server, mode, key_str, command, description, [])
 
   @doc "Binds a key sequence with options (e.g., `filetype:`)."
   @spec bind(atom() | {atom(), atom()}, String.t(), atom(), String.t(), keyword()) ::
           :ok | {:error, String.t()}
-  @spec bind(
-          GenServer.server(),
-          atom() | {atom(), atom()},
-          String.t(),
-          atom(),
-          String.t(),
-          keyword()
-        ) ::
+  def bind(mode, key_str, command, description, opts) when is_list(opts),
+    do: Active.bind(@default_server, mode, key_str, command, description, opts)
+
+  @doc "Binds a key sequence on an explicit keymap server."
+  @spec bind(server(), atom() | {atom(), atom()}, String.t(), atom(), String.t(), keyword()) ::
           :ok | {:error, String.t()}
-  defdelegate bind(mode, key_str, command, description, opts), to: Active
   defdelegate bind(server, mode, key_str, command, description, opts), to: Active
 
   @doc "Removes a key binding from a mode."
-  @spec unbind(atom(), String.t()) :: :ok | {:error, String.t()}
-  @spec unbind(GenServer.server(), atom(), String.t()) :: :ok | {:error, String.t()}
-  defdelegate unbind(mode, key_str), to: Active
-  defdelegate unbind(server, mode, key_str), to: Active
+  @spec unbind(server(), atom(), String.t()) :: :ok | {:error, String.t()}
+  def unbind(server \\ @default_server, mode, key_str),
+    do: Active.unbind(server, mode, key_str)
 
   @doc "Resets all bindings to defaults (discards user overrides)."
-  @spec reset() :: :ok
-  @spec reset(GenServer.server()) :: :ok
-  defdelegate reset, to: Active
-  defdelegate reset(server), to: Active
+  @spec reset(server()) :: :ok
+  defdelegate reset(server \\ @default_server), to: Active
 
   # ── Default bindings ───────────────────────────────────────────────
 

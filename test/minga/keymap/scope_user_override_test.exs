@@ -89,4 +89,38 @@ defmodule Minga.Keymap.Scope.UserOverrideTest do
                Scope.resolve_key(:agent, :normal, {?~, 0}, keymap_server: test_keymap_server())
     end
   end
+
+  describe ":keymap_server context routes to the requested server" do
+    # Discriminating tests: bind on server A, resolve against server B, prove
+    # the override is consulted. Without this, a regression that ignored the
+    # context would still pass the producer-and-asserter-share-a-server tests.
+    test "binding on server_a is not visible when resolving against server_b" do
+      server_a = start_supervised!({KeymapActive, name: nil}, id: :server_a)
+      server_b = start_supervised!({KeymapActive, name: nil}, id: :server_b)
+
+      KeymapActive.bind(server_a, {:agent, :normal}, "~", :only_on_a, "Only A")
+
+      assert {:command, :only_on_a} =
+               Scope.resolve_key(:agent, :normal, {?~, 0}, keymap_server: server_a)
+
+      # Server B has no override for `~`, so the agent default applies (which
+      # is :not_found for tilde, per the scope defaults).
+      assert :not_found =
+               Scope.resolve_key(:agent, :normal, {?~, 0}, keymap_server: server_b)
+    end
+
+    test "different bindings on server_a and server_b are honored independently" do
+      server_a = start_supervised!({KeymapActive, name: nil}, id: :server_a)
+      server_b = start_supervised!({KeymapActive, name: nil}, id: :server_b)
+
+      KeymapActive.bind(server_a, {:agent, :normal}, "y", :yank_a, "Yank A")
+      KeymapActive.bind(server_b, {:agent, :normal}, "y", :yank_b, "Yank B")
+
+      assert {:command, :yank_a} =
+               Scope.resolve_key(:agent, :normal, {?y, 0}, keymap_server: server_a)
+
+      assert {:command, :yank_b} =
+               Scope.resolve_key(:agent, :normal, {?y, 0}, keymap_server: server_b)
+    end
+  end
 end

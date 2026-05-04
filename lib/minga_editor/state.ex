@@ -72,7 +72,10 @@ defmodule MingaEditor.State do
   @typedoc "A document highlight range from the LSP server."
   @type document_highlight :: Minga.LSP.DocumentHighlight.t()
 
-  @type keymap_server :: GenServer.server()
+  @typedoc "Re-export of `Minga.Keymap.server/0` for editor-state callers."
+  @type keymap_server :: Minga.Keymap.server()
+
+  @default_keymap_server Minga.Keymap.default_server()
 
   alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.Shell.Board.State, as: BoardState
@@ -80,7 +83,7 @@ defmodule MingaEditor.State do
   @enforce_keys [:port_manager, :workspace]
   defstruct backend: :headless,
             port_manager: nil,
-            keymap_server: Minga.Keymap.Active,
+            keymap_server: @default_keymap_server,
             workspace: nil,
             editing_model: :vim,
             shell: MingaEditor.Shell.Traditional,

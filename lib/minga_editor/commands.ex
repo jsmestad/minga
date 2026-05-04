@@ -654,6 +654,12 @@ defmodule MingaEditor.Commands do
   defp filetype_trie_for(state, filetype) do
     Keymap.filetype_trie(EditorState.keymap_server(state), filetype)
   catch
-    :exit, _ -> Bindings.new()
+    :exit, _ ->
+      Minga.Log.warning(
+        :config,
+        "filetype_trie unavailable for #{inspect(filetype)}; using empty trie"
+      )
+
+      Bindings.new()
   end
 end

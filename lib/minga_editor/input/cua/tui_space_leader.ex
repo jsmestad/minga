@@ -184,6 +184,8 @@ defmodule MingaEditor.Input.CUA.TUISpaceLeader do
   defp leader_trie(state) do
     Keymap.leader_trie(EditorState.keymap_server(state))
   catch
-    :exit, _ -> Bindings.new()
+    :exit, _ ->
+      Minga.Log.warning(:config, "leader_trie unavailable; SPC bindings disabled this frame")
+      Bindings.new()
   end
 end

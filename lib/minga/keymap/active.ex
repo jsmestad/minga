@@ -296,19 +296,28 @@ defmodule Minga.Keymap.Active do
       bind(:normal, "SPC m t", :mix_test, "Run tests", filetype: :elixir)
       bind(:normal, "SPC m p", :markdown_preview, "Preview", filetype: :markdown)
   """
-  @spec bind(atom(), String.t(), atom(), String.t(), keyword()) ::
+  @spec bind(atom() | {atom(), atom()}, String.t(), atom(), String.t(), keyword()) ::
           :ok | {:error, String.t()}
-  @spec bind(GenServer.server(), atom(), String.t(), atom(), String.t(), keyword()) ::
-          :ok | {:error, String.t()}
+  @spec bind(
+          GenServer.server(),
+          atom() | {atom(), atom()},
+          String.t(),
+          atom(),
+          String.t(),
+          keyword()
+        ) :: :ok | {:error, String.t()}
   def bind(mode, key_str, command, description, opts),
     do: bind(__MODULE__, mode, key_str, command, description, opts)
 
   def bind(server, mode, key_str, command, description, opts)
-      when is_atom(mode) and is_binary(key_str) and is_atom(command) and is_binary(description) and
-             is_list(opts) do
+      when (is_atom(mode) or is_tuple(mode)) and is_binary(key_str) and is_atom(command) and
+             is_binary(description) and is_list(opts) do
+    # `:filetype` only applies to atom modes (`:normal` SPC m bindings, etc.).
+    # Scope bindings (tuple modes like `{:agent, :normal}`) ignore opts and
+    # fall through to the no-options path.
     filetype = Keyword.get(opts, :filetype)
 
-    if filetype do
+    if filetype && is_atom(mode) do
       bind_filetype(server, mode, filetype, key_str, command, description)
     else
       bind(server, mode, key_str, command, description)

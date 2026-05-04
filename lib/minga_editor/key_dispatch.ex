@@ -247,7 +247,9 @@ defmodule MingaEditor.KeyDispatch do
   defp fetch_leader_trie(state) do
     Keymap.leader_trie(EditorState.keymap_server(state))
   catch
-    :exit, _ -> Keymap.default_leader_trie()
+    :exit, _ ->
+      Minga.Log.warning(:config, "leader_trie unavailable; falling back to defaults")
+      Keymap.default_leader_trie()
   end
 
   @spec fetch_normal_bindings(EditorState.t()) :: %{
@@ -256,7 +258,9 @@ defmodule MingaEditor.KeyDispatch do
   defp fetch_normal_bindings(state) do
     Keymap.normal_bindings(EditorState.keymap_server(state))
   catch
-    :exit, _ -> Keymap.default_normal_bindings()
+    :exit, _ ->
+      Minga.Log.warning(:config, "normal_bindings unavailable; falling back to defaults")
+      Keymap.default_normal_bindings()
   end
 
   @spec fetch_mode_trie(EditorState.t(), Mode.mode(), atom()) ::
@@ -267,7 +271,9 @@ defmodule MingaEditor.KeyDispatch do
     ft = Minga.Keymap.Active.filetype_mode_trie(keymap_server, filetype, mode)
     merge_tries(global, ft)
   catch
-    :exit, _ -> nil
+    :exit, _ ->
+      Minga.Log.warning(:config, "mode_trie unavailable for #{inspect(mode)}; using nil")
+      nil
   end
 
   defp fetch_mode_trie(_state, _mode, _filetype), do: nil

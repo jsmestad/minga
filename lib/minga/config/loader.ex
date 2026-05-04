@@ -34,7 +34,7 @@ defmodule Minga.Config.Loader do
   alias Minga.Keymap
   alias Minga.Popup.Registry, as: PopupRegistry
 
-  @type keymap_server :: GenServer.server()
+  @type keymap_server :: Keymap.server()
 
   @typedoc "Loader state: stores paths, loaded modules, and any errors from each stage."
   @type state :: %{
@@ -50,13 +50,26 @@ defmodule Minga.Config.Loader do
 
   # ── Client API ──────────────────────────────────────────────────────────────
 
-  @doc "Starts the loader, compiles user modules, and evaluates all config files."
+  @doc """
+  Starts the loader, compiles user modules, and evaluates all config files.
+
+  When the loader is started under the application supervisor, the caller
+  process is the supervisor, so the `:minga_config_keymap` process-dict
+  fallback below reads the supervisor's pdict (effectively unset) and
+  resolves to `Keymap.default_server/0`. To target a non-default server at
+  boot, pass `:keymap_server` explicitly. The chosen server is persisted in
+  the loader's Agent state and re-read on `reload/1`.
+  """
   @spec start_link(keyword()) :: Agent.on_start()
   def start_link(opts \\ []) do
     {name, opts} = Keyword.pop(opts, :name, __MODULE__)
 
     keymap_server =
-      Keyword.get(opts, :keymap_server, Process.get(:minga_config_keymap, Minga.Keymap.Active))
+      Keyword.get(
+        opts,
+        :keymap_server,
+        Process.get(:minga_config_keymap, Keymap.default_server())
+      )
 
     Agent.start_link(fn -> load_all(keymap_server) end, name: name)
   end
@@ -132,8 +145,15 @@ defmodule Minga.Config.Loader do
     # Reset all registries to defaults
     keymap_server =
       Agent.get(server, fn
-        %{keymap_server: keymap_server} -> keymap_server
-        _ -> Process.get(:minga_config_keymap, Minga.Keymap.Active)
+        %{keymap_server: keymap_server} ->
+          keymap_server
+
+        # Defensive fallback: state shape predates the keymap_server field.
+        # Unreachable in single-version processes; logged so a real schema
+        # mismatch doesn't degrade silently.
+        _ ->
+          Minga.Log.warning(:config, "loader state missing :keymap_server; using default")
+          Process.get(:minga_config_keymap, Keymap.default_server())
       end)
 
     Options.reset()
@@ -165,9 +185,9 @@ defmodule Minga.Config.Loader do
 
   # The process dictionary bridges `keymap_server` into `Minga.Config.bind/3,4,5`,
   # which is invoked synchronously while `.exs` configs evaluate. Code that
-  # `Minga.Config.bind` from a separate process (e.g., a GenServer started
-  # by an extension callback) won't see this dict and will fall back to the
-  # global `Minga.Keymap.Active`. Extensions are skipped in test mode, so
+  # calls `Minga.Config.bind` from a separate process (e.g., a GenServer
+  # started by an extension callback) won't see this dict and will fall back
+  # to `Keymap.default_server/0`. Extensions are skipped in test mode, so
   # this only affects long-lived runtime callers.
   @spec load_all(keymap_server()) :: state()
   defp load_all(keymap_server) do
