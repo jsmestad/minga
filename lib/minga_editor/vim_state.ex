@@ -62,6 +62,50 @@ defmodule MingaEditor.VimState do
   end
 
   @doc """
+  Returns a vim state whose `mode_state` matches `mode`.
+
+  The Mode FSM carries the leaving mode's state through `Mode.apply_result/2`
+  so commands that fire on `:execute_then_transition` can read the leaving
+  state (e.g. `:yank_visual_selection` reads `%VisualState{}` to find the
+  selection range). During that window `workspace.editing.mode_state` is
+  the leaving struct while `mode` is already the new mode.
+
+  Code paths that snapshot the workspace into long-lived storage (tab
+  contexts, session save) must not capture that in-flight pair, because
+  restoring it would put `:normal` next to a `%CommandState{}` (or similar)
+  and break the next leader keypress with a `KeyError`. Call this before
+  snapshotting.
+
+  Pass-through if `mode_state` is already the right struct for `mode`.
+  Otherwise rebuild via `transition/3` with `nil` to use the default for
+  default-state modes; raises for context-required modes (which should
+  never be a snapshot's resting state).
+  """
+  @spec normalize(t()) :: t()
+  def normalize(%__MODULE__{mode: mode, mode_state: mode_state} = vim) do
+    if is_struct(mode_state, expected_struct(mode)) do
+      vim
+    else
+      transition(vim, mode, nil)
+    end
+  end
+
+  @spec expected_struct(Mode.mode()) :: module()
+  defp expected_struct(:normal), do: Minga.Mode.State
+  defp expected_struct(:insert), do: Minga.Mode.State
+  defp expected_struct(:command), do: Minga.Mode.CommandState
+  defp expected_struct(:eval), do: Minga.Mode.EvalState
+  defp expected_struct(:replace), do: Minga.Mode.ReplaceState
+  defp expected_struct(:visual), do: Minga.Mode.VisualState
+  defp expected_struct(:operator_pending), do: Minga.Mode.OperatorPendingState
+  defp expected_struct(:search), do: Minga.Mode.SearchState
+  defp expected_struct(:search_prompt), do: Minga.Mode.SearchPromptState
+  defp expected_struct(:substitute_confirm), do: Minga.Mode.SubstituteConfirmState
+  defp expected_struct(:extension_confirm), do: Minga.Mode.ExtensionConfirmState
+  defp expected_struct(:tool_confirm), do: Minga.Mode.ToolConfirmState
+  defp expected_struct(:delete_confirm), do: Minga.Mode.DeleteConfirmState
+
+  @doc """
   Transitions to a new mode, returning an updated VimState.
 
   This is the single gate function for all mode changes. Every mode

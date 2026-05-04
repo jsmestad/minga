@@ -8,6 +8,8 @@ defmodule MingaEditor.Workspace.StateTest do
 
   use ExUnit.Case, async: true
 
+  alias Minga.Mode
+  alias MingaEditor.VimState
   alias MingaEditor.Window.Content
   alias MingaEditor.Workspace.State, as: WorkspaceState
 
@@ -61,6 +63,49 @@ defmodule MingaEditor.Workspace.StateTest do
       assert result_window.content == {:agent_chat, agent_pid}
       # buffer field should remain unchanged (still the original, not new_buf)
       assert result_window.buffer == window.buffer
+    end
+  end
+
+  describe "to_tab_context/1" do
+    test "returns a flat map of workspace fields" do
+      ws = base_state().workspace
+      ctx = WorkspaceState.to_tab_context(ws)
+
+      assert is_map(ctx)
+      refute Map.has_key?(ctx, :__struct__)
+      assert ctx.buffers == ws.buffers
+      assert ctx.windows == ws.windows
+      assert ctx.viewport == ws.viewport
+    end
+
+    test "normalises an in-flight CommandState back to %Mode.State{} when mode is :normal" do
+      # Simulates the moment after Command.handle_key/2 returns
+      # `{:execute_then_transition, [...], :normal, %CommandState{input: ""}}`
+      # and the dispatch wrote that pair into workspace.editing before the
+      # ex-command ran (the same moment :e <path> would snapshot).
+      ws = base_state().workspace
+      mismatched = %VimState{mode: :normal, mode_state: %Mode.CommandState{input: ""}}
+      ws = %{ws | editing: mismatched}
+
+      ctx = WorkspaceState.to_tab_context(ws)
+
+      assert ctx.editing.mode == :normal
+      assert match?(%Mode.State{}, ctx.editing.mode_state)
+    end
+
+    test "passes through editing when mode_state already matches mode" do
+      ws = base_state().workspace
+      visual_state = %Mode.VisualState{visual_type: :char, visual_anchor: {3, 0}}
+      vim = %VimState{mode: :visual, mode_state: visual_state}
+      ws = %{ws | editing: vim}
+
+      ctx = WorkspaceState.to_tab_context(ws)
+
+      # Visual is a context-required mode and the snapshot already had a
+      # properly-typed VisualState — the visual_anchor must be preserved
+      # so the context can be restored verbatim.
+      assert ctx.editing.mode == :visual
+      assert ctx.editing.mode_state == visual_state
     end
   end
 end

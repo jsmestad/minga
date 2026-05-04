@@ -360,7 +360,7 @@ defmodule MingaEditor.Shell.Traditional do
       {shell_state, workspace}
     else
       # Snapshot current workspace onto outgoing tab
-      context = Map.from_struct(workspace)
+      context = WorkspaceState.to_tab_context(workspace)
       tb = TabBar.update_context(tb, current_id, context)
 
       # Switch pointer and restore target tab's workspace
@@ -382,7 +382,7 @@ defmodule MingaEditor.Shell.Traditional do
           {ShellState.t(), WorkspaceState.t()}
   defp open_buffer_from_agent_tab(%ShellState{tab_bar: tb} = shell_state, workspace, label) do
     # Snapshot current agent tab before leaving
-    context = Map.from_struct(workspace)
+    context = WorkspaceState.to_tab_context(workspace)
     tb = TabBar.update_context(tb, tb.active_id, context)
 
     # Create file tab (TabBar.add auto-activates it)
@@ -394,7 +394,7 @@ defmodule MingaEditor.Shell.Traditional do
     workspace = WorkspaceState.sync_active_window_buffer(workspace)
 
     # Snapshot the new tab's context
-    new_context = Map.from_struct(workspace)
+    new_context = WorkspaceState.to_tab_context(workspace)
     tb = TabBar.update_context(tb, new_tab.id, new_context)
 
     Log.debug(:editor, fn -> "[tab] on_buffer_added new tab=#{new_tab.id} label=#{label}" end)
@@ -409,7 +409,7 @@ defmodule MingaEditor.Shell.Traditional do
           {ShellState.t(), WorkspaceState.t()}
   defp open_buffer_in_file_tab(%ShellState{tab_bar: tb} = shell_state, workspace, label) do
     # Snapshot current tab before leaving
-    context = Map.from_struct(workspace)
+    context = WorkspaceState.to_tab_context(workspace)
     tb = TabBar.update_context(tb, tb.active_id, context)
 
     # Create file tab (TabBar.add auto-activates it)
@@ -417,7 +417,7 @@ defmodule MingaEditor.Shell.Traditional do
     workspace = WorkspaceState.sync_active_window_buffer(workspace)
 
     # Snapshot the new tab's context
-    new_context = Map.from_struct(workspace)
+    new_context = WorkspaceState.to_tab_context(workspace)
     tb = TabBar.update_context(tb, new_tab.id, new_context)
 
     {%{shell_state | tab_bar: tb}, workspace}
