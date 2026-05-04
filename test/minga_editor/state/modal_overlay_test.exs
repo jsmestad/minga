@@ -49,13 +49,16 @@ defmodule MingaEditor.State.ModalOverlayTest do
   end
 
   defp completion_payload(tab_id \\ 1) do
-    completion =
-      Completion.new(
-        [],
-        {0, 0}
-      )
+    completion = Completion.new([], {0, 0})
+    CompletionPayload.new(tab_id, completion: completion, opened_at: 1_003)
+  end
 
-    CompletionPayload.new(completion, tab_id, opened_at: 1_003)
+  defp tab_bar_with_active(id) do
+    %MingaEditor.State.TabBar{
+      tabs: [%MingaEditor.State.Tab{id: id, kind: :file, label: "test"}],
+      active_id: id,
+      next_id: id + 1
+    }
   end
 
   defp conflict_payload(buffer \\ self()) do
@@ -119,14 +122,14 @@ defmodule MingaEditor.State.ModalOverlayTest do
       assert result.shell_state.modal == {:dashboard, payload}
     end
 
-    test "writes the completion legacy field on workspace" do
+    test "writes the completion modal payload" do
       state = base_state()
       payload = completion_payload(7)
 
       result = ModalOverlay.open(state, :completion, payload)
 
       assert result.shell_state.modal == {:completion, payload}
-      assert result.workspace.completion == payload.completion
+      assert ModalOverlay.completion(result) == payload.completion
     end
 
     test "writes the conflict variant" do
@@ -152,7 +155,7 @@ defmodule MingaEditor.State.ModalOverlayTest do
       assert result.shell_state.modal == {:prompt, prompt}
     end
 
-    test "replacing completion with picker clears workspace.completion" do
+    test "replacing completion with picker clears the completion accessor" do
       state =
         base_state()
         |> ModalOverlay.open(:completion, completion_payload(1))
@@ -161,7 +164,7 @@ defmodule MingaEditor.State.ModalOverlayTest do
       result = ModalOverlay.open(state, :picker, picker)
 
       assert result.shell_state.modal == {:picker, picker}
-      assert result.workspace.completion == nil
+      assert ModalOverlay.completion(result) == nil
     end
 
     test "replacing dashboard with picker swaps the active modal" do
@@ -253,7 +256,7 @@ defmodule MingaEditor.State.ModalOverlayTest do
       assert result.shell_state.modal == :none
     end
 
-    test "close clears workspace.completion when a completion is active" do
+    test "close clears the completion accessor when a completion is active" do
       state =
         base_state()
         |> ModalOverlay.open(:completion, completion_payload(3))
@@ -261,7 +264,7 @@ defmodule MingaEditor.State.ModalOverlayTest do
       result = ModalOverlay.close(state)
 
       assert result.shell_state.modal == :none
-      assert result.workspace.completion == nil
+      assert ModalOverlay.completion(result) == nil
     end
 
     test "close on an idle state is a no-op" do
@@ -271,37 +274,44 @@ defmodule MingaEditor.State.ModalOverlayTest do
     end
   end
 
-  describe "divergence assertion (dev/test only)" do
-    test "raises when workspace.completion is cleared outside the gate" do
-      state =
+  describe "dismiss_if_stale/1" do
+    test "dismisses a completion modal whose owner doesn't match the active tab" do
+      state = %{
         base_state()
-        |> ModalOverlay.open(:completion, completion_payload(2))
+        | shell_state: %ShellState{
+            modal: :none,
+            tab_bar: tab_bar_with_active(99)
+          }
+      }
 
-      tampered = put_in(state.workspace.completion, nil)
+      state = ModalOverlay.open(state, :completion, completion_payload(1))
+      assert ModalOverlay.match(state.shell_state.modal, :completion)
 
-      assert_raise RuntimeError, ~r/ModalOverlay divergence/, fn ->
-        ModalOverlay.close(tampered)
-      end
+      result = ModalOverlay.dismiss_if_stale(state)
+      assert result.shell_state.modal == :none
     end
 
-    test "tolerates legacy mutation while modal is :none" do
-      state = base_state()
+    test "leaves completion alone when its owner matches the active tab" do
+      state = %{
+        base_state()
+        | shell_state: %ShellState{
+            modal: :none,
+            tab_bar: tab_bar_with_active(7)
+          }
+      }
 
-      # Stuff a stray completion onto workspace before any modal opens.
-      tampered =
-        put_in(
-          state.workspace.completion,
-          Completion.new([], {0, 0})
-        )
+      state = ModalOverlay.open(state, :completion, completion_payload(7))
+      result = ModalOverlay.dismiss_if_stale(state)
 
-      payload = picker_payload()
-      result = ModalOverlay.open(tampered, :picker, payload)
+      assert ModalOverlay.match(result.shell_state.modal, :completion)
+    end
 
-      # The gate clears completion when displacing it (it tracks completion
-      # via the legacy mirror), but only because completion was the
-      # previously-tracked variant. Here completion was never tracked, so
-      # it should be left as-is by `:picker`'s open path.
-      assert result.shell_state.modal == {:picker, payload}
+    test "no-op for non-completion modals" do
+      state =
+        base_state()
+        |> ModalOverlay.open(:picker, picker_payload())
+
+      assert ModalOverlay.dismiss_if_stale(state) == state
     end
   end
 end

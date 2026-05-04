@@ -148,7 +148,6 @@ defmodule MingaEditor.RenderPipeline.Input do
         file_tree: ws.file_tree,
         highlight: ws.highlight,
         agent_ui: ws.agent_ui,
-        completion: ws.completion,
         editing: ws.editing,
         document_highlights: ws.document_highlights,
         mouse: ws.mouse,
@@ -198,8 +197,6 @@ defmodule MingaEditor.RenderPipeline.Input do
       input.shell_state |> Map.get(:nav_flash),
       # File tree
       input.workspace.file_tree,
-      # Completion overlay
-      input.workspace.completion,
       # Hover popup and signature help
       input.shell_state |> Map.get(:hover_popup),
       input.shell_state |> Map.get(:signature_help),

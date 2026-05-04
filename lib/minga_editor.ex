@@ -564,10 +564,13 @@ defmodule MingaEditor do
   # Completion debounce timer fired — send the actual completion request
   def handle_info({:completion_debounce, clients, buffer_pid}, state) do
     new_bridge =
-      CompletionTrigger.flush_debounce(state.workspace.completion_trigger, clients, buffer_pid)
+      CompletionTrigger.flush_debounce(
+        MingaEditor.State.ModalOverlay.completion_trigger(state),
+        clients,
+        buffer_pid
+      )
 
-    {:noreply,
-     EditorState.update_workspace(state, &WorkspaceState.set_completion_trigger(&1, new_bridge))}
+    {:noreply, MingaEditor.State.ModalOverlay.put_completion_trigger(state, new_bridge)}
   end
 
   # LSP async response — route to the appropriate handler based on lsp.pending
@@ -1757,12 +1760,12 @@ defmodule MingaEditor do
   end
 
   defp handle_gui_action(state, {:completion_select, index}) do
-    case state.workspace.completion do
+    case MingaEditor.State.ModalOverlay.completion(state) do
       %Completion{} = comp ->
         updated = %{comp | selected: index}
 
         do_accept_completion(
-          EditorState.update_workspace(state, &WorkspaceState.set_completion(&1, updated)),
+          MingaEditor.State.ModalOverlay.update_completion(state, fn _ -> updated end),
           updated
         )
 

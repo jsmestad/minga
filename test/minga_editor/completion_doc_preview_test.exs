@@ -10,6 +10,8 @@ defmodule MingaEditor.CompletionDocPreviewTest do
   alias MingaEditor.CompletionHandling
   alias MingaEditor.CompletionUI
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.ModalOverlay
+  alias MingaEditor.State.ModalOverlay.Completion, as: CompletionPayload
   alias MingaEditor.Viewport
   alias MingaEditor.UI.Theme
   alias MingaEditor.Workspace.State, as: WorkspaceState
@@ -17,16 +19,22 @@ defmodule MingaEditor.CompletionDocPreviewTest do
   @theme Theme.get!(:doom_one)
 
   defp make_state(completion) do
-    ws = %WorkspaceState{
-      viewport: %Viewport{top: 0, left: 0, rows: 24, cols: 80},
-      completion: completion
-    }
+    ws = %WorkspaceState{viewport: %Viewport{top: 0, left: 0, rows: 24, cols: 80}}
+
+    modal =
+      case completion do
+        nil -> :none
+        %Completion{} -> {:completion, CompletionPayload.new(:tab1, completion: completion)}
+      end
 
     %EditorState{
       port_manager: self(),
-      workspace: ws
+      workspace: ws,
+      shell_state: %MingaEditor.Shell.Traditional.State{modal: modal}
     }
   end
+
+  defp completion_from(state), do: ModalOverlay.completion(state)
 
   # ── Completion item parsing ──────────────────────────────────────────────
 
@@ -97,7 +105,7 @@ defmodule MingaEditor.CompletionDocPreviewTest do
       state = make_state(completion)
       result = CompletionHandling.maybe_resolve_selected(state)
       # No timer set because documentation is already present
-      assert result.workspace.completion.resolve_timer == nil
+      assert completion_from(result).resolve_timer == nil
     end
 
     test "sets a resolve timer when documentation is empty" do
@@ -105,7 +113,7 @@ defmodule MingaEditor.CompletionDocPreviewTest do
       completion = Completion.new(items, {0, 0})
       state = %{make_state(completion) | backend: :zig}
       result = CompletionHandling.maybe_resolve_selected(state)
-      assert result.workspace.completion.resolve_timer != nil
+      assert completion_from(result).resolve_timer != nil
     end
 
     test "skips resolve timer in headless mode" do
@@ -113,7 +121,7 @@ defmodule MingaEditor.CompletionDocPreviewTest do
       completion = Completion.new(items, {0, 0})
       state = make_state(completion)
       result = CompletionHandling.maybe_resolve_selected(state)
-      assert result.workspace.completion.resolve_timer == nil
+      assert completion_from(result).resolve_timer == nil
     end
 
     test "skips when already resolved for this index" do
@@ -121,7 +129,7 @@ defmodule MingaEditor.CompletionDocPreviewTest do
       completion = %{Completion.new(items, {0, 0}) | last_resolved_index: 0}
       state = make_state(completion)
       result = CompletionHandling.maybe_resolve_selected(state)
-      assert result.workspace.completion.resolve_timer == nil
+      assert completion_from(result).resolve_timer == nil
     end
   end
 
@@ -136,9 +144,9 @@ defmodule MingaEditor.CompletionDocPreviewTest do
       resolved = %{"documentation" => %{"kind" => "markdown", "value" => "Full docs"}}
       result = CompletionHandling.handle_resolve_response(state, {:ok, resolved})
 
-      selected = Completion.selected_item(result.workspace.completion)
+      selected = Completion.selected_item(completion_from(result))
       assert selected.documentation == "Full docs"
-      assert result.workspace.completion.last_resolved_index == 0
+      assert completion_from(result).last_resolved_index == 0
     end
 
     test "handles plain string documentation in resolve response" do
@@ -149,7 +157,7 @@ defmodule MingaEditor.CompletionDocPreviewTest do
       resolved = %{"documentation" => "Plain text docs"}
       result = CompletionHandling.handle_resolve_response(state, {:ok, resolved})
 
-      selected = Completion.selected_item(result.workspace.completion)
+      selected = Completion.selected_item(completion_from(result))
       assert selected.documentation == "Plain text docs"
     end
 

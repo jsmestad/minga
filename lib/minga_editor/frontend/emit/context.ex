@@ -84,7 +84,7 @@ defmodule MingaEditor.Frontend.Emit.Context do
       file_tree: state.workspace.file_tree,
       highlight: state.workspace.highlight,
       agent_ui: state.workspace.agent_ui,
-      completion: state.workspace.completion,
+      completion: MingaEditor.State.ModalOverlay.completion(state),
       editing: state.workspace.editing,
       message_store: state.message_store,
       title: title,

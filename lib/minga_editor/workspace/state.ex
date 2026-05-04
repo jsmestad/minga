@@ -13,8 +13,6 @@ defmodule MingaEditor.Workspace.State do
   """
 
   alias MingaEditor.Agent.UIState
-  alias Minga.Editing.Completion
-  alias MingaEditor.CompletionTrigger
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Highlighting
@@ -37,8 +35,6 @@ defmodule MingaEditor.Workspace.State do
           mouse: Mouse.t(),
           highlight: Highlighting.t(),
           lsp_pending: %{reference() => atom() | tuple()},
-          completion: Completion.t() | nil,
-          completion_trigger: CompletionTrigger.t(),
           injection_ranges: %{pid() => [Minga.Language.Highlight.InjectionRange.t()]},
           search: Search.t(),
           editing: VimState.t(),
@@ -55,8 +51,6 @@ defmodule MingaEditor.Workspace.State do
             mouse: %Mouse{},
             highlight: %Highlighting{},
             lsp_pending: %{},
-            completion: nil,
-            completion_trigger: CompletionTrigger.new(),
             injection_ranges: %{},
             search: %Search{},
             editing: VimState.new(),
@@ -195,24 +189,6 @@ defmodule MingaEditor.Workspace.State do
   @spec set_keymap_scope(t(), Scope.scope_name()) :: t()
   def set_keymap_scope(%__MODULE__{} = wspace, scope) do
     %{wspace | keymap_scope: scope}
-  end
-
-  @doc "Updates the completion state."
-  @spec set_completion(t(), Completion.t() | nil) :: t()
-  def set_completion(%__MODULE__{} = wspace, completion) do
-    %{wspace | completion: completion}
-  end
-
-  @doc "Updates the completion trigger bridge."
-  @spec set_completion_trigger(t(), CompletionTrigger.t()) :: t()
-  def set_completion_trigger(%__MODULE__{} = wspace, trigger) do
-    %{wspace | completion_trigger: trigger}
-  end
-
-  @doc "Clears completion and resets the trigger bridge."
-  @spec clear_completion(t(), CompletionTrigger.t()) :: t()
-  def clear_completion(%__MODULE__{} = wspace, new_bridge) do
-    %{wspace | completion: nil, completion_trigger: new_bridge}
   end
 
   @doc "Updates the highlighting sub-struct."

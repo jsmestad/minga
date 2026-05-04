@@ -1085,6 +1085,10 @@ defmodule MingaEditor.State do
 
         state = restore_tab_context(state, target.context)
 
+        # If the active modal is completion belonging to the leaving tab,
+        # dismiss it so it doesn't follow us to the new tab.
+        state = MingaEditor.State.ModalOverlay.dismiss_if_stale(state)
+
         # Clear attention flag on the tab we're switching to.
         state =
           set_tab_bar(

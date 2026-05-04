@@ -143,7 +143,7 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUI do
   @spec build_completion_draws(state(), Cursor.t() | nil) :: [DisplayList.draw()]
   defp build_completion_draws(state, %Cursor{row: cur_row, col: cur_col}) do
     CompletionUI.render(
-      state.workspace.completion,
+      MingaEditor.State.ModalOverlay.completion(state),
       %{
         cursor_row: cur_row,
         cursor_col: cur_col,
