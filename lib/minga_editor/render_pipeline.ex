@@ -38,22 +38,11 @@ defmodule MingaEditor.RenderPipeline do
   alias MingaEditor.Frontend.Emit
   alias Minga.Telemetry
 
-  # ── Invalidation stub ──────────────────────────────────────────────────────
-
-  defmodule Invalidation do
-    @moduledoc """
-    Output of the invalidation stage.
-
-    Currently a stub that always requests a full redraw. Future work
-    (#164) will track dirty windows and lines for incremental rendering.
-    """
-
-    defstruct full_redraw: true
-
-    @type t :: %__MODULE__{
-            full_redraw: boolean()
-          }
-  end
+  # The Invalidation type lives in its own module
+  # (MingaEditor.RenderPipeline.Invalidation) carrying first-class
+  # per-window and per-region dirty info. Stage 1's producer always
+  # returns full_redraw: true today; the consumers' dirty-bit gating
+  # is the Phase 1/2 follow-up work in #1431.
 
   # ── Orchestrator ───────────────────────────────────────────────────────────
 

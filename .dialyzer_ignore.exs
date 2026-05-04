@@ -17,5 +17,8 @@
   {"lib/minga_editor/frontend/emit/gui.ex", :pattern_match},
   {"lib/minga_editor/frontend/emit/gui.ex", :pattern_match_cov},
   # build_gutter_entries return type narrowing after emit decoupling
-  {"lib/minga_editor/frontend/emit/gui.ex", :invalid_contract}
+  {"lib/minga_editor/frontend/emit/gui.ex", :invalid_contract},
+  # Invalidation.full_redraw/1 constructs a struct literal with
+  # chrome_regions: MapSet.new(); same opaque-MapSet limitation as Board.State.
+  {"lib/minga_editor/render_pipeline/invalidation.ex", :contract_with_opaque}
 ]
