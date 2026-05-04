@@ -10,7 +10,8 @@ defmodule Minga.Mode.ExtensionConfirmState do
   defstruct updates: [],
             current: 0,
             accepted: [],
-            show_details: false
+            show_details: false,
+            count: nil
 
   @typedoc "An update summary for display in the confirmation dialog."
   @type update_entry :: %{
@@ -27,6 +28,7 @@ defmodule Minga.Mode.ExtensionConfirmState do
           updates: [update_entry()],
           current: non_neg_integer(),
           accepted: [non_neg_integer()],
-          show_details: boolean()
+          show_details: boolean(),
+          count: non_neg_integer() | nil
         }
 end

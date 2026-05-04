@@ -17,6 +17,7 @@ defmodule Minga.Mode.PropertiesTest do
     CommandState,
     DeleteConfirmState,
     EvalState,
+    ExtensionConfirmState,
     OperatorPendingState,
     ReplaceState,
     SearchPromptState,
@@ -53,11 +54,6 @@ defmodule Minga.Mode.PropertiesTest do
   # are valid mode atoms in the FSM enum, but they're held by VisualState's
   # :visual_type field — the dispatcher routes both through Minga.Mode.Visual
   # via the :visual key.
-  #
-  # NOTE: :extension_confirm is intentionally omitted: its state struct
-  # has no `count` field, so `Mode.reset_count/1` raises a KeyError when
-  # the dispatcher applies a transition result. Re-add this mode once
-  # `ExtensionConfirmState` includes `count: nil`.
   @dispatchable_modes [
     :normal,
     :insert,
@@ -69,6 +65,7 @@ defmodule Minga.Mode.PropertiesTest do
     :search,
     :search_prompt,
     :substitute_confirm,
+    :extension_confirm,
     :tool_confirm,
     :delete_confirm
   ]
@@ -102,6 +99,10 @@ defmodule Minga.Mode.PropertiesTest do
       replacement: "y",
       original_content: "x"
     }
+  end
+
+  defp default_mode_state(:extension_confirm) do
+    %ExtensionConfirmState{updates: []}
   end
 
   defp default_mode_state(:tool_confirm) do
