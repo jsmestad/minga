@@ -44,6 +44,7 @@ defmodule MingaEditor.Startup do
   def build_initial_state(opts) do
     backend = Keyword.get(opts, :backend, :headless)
     port_manager = Keyword.get(opts, :port_manager, MingaEditor.Frontend.Manager)
+    keymap_server = Keyword.get(opts, :keymap_server, Minga.Keymap.default_server())
     width = Keyword.get(opts, :width, 80)
     height = Keyword.get(opts, :height, 24)
     buffer = Keyword.get(opts, :buffer)
@@ -116,6 +117,7 @@ defmodule MingaEditor.Startup do
       backend: backend,
       workspace: workspace,
       port_manager: port_manager,
+      keymap_server: keymap_server,
       editing_model: editing_model,
       focus_stack: MingaEditor.Input.default_stack(),
       shell: resolve_shell(opts),

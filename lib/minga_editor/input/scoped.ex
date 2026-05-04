@@ -58,7 +58,7 @@ defmodule MingaEditor.Input.Scoped do
     if Minga.Editing.active_model(state) == Minga.Editing.Model.CUA do
       key = {cp, mods}
 
-      case Keymap.resolve_scoped_key(:editor, :cua, key) do
+      case Keymap.resolve_scoped_key(:editor, :cua, key, EditorState.keymap_context(state)) do
         {:command, command} ->
           {:handled, Commands.execute(state, command)}
 
@@ -227,7 +227,7 @@ defmodule MingaEditor.Input.Scoped do
         ) ::
           MingaEditor.Input.Handler.result()
   defp resolve_scope_key(state, scope_name, vim_state, key, cp, mods) do
-    case Keymap.resolve_scoped_key(scope_name, vim_state, key) do
+    case Keymap.resolve_scoped_key(scope_name, vim_state, key, EditorState.keymap_context(state)) do
       {:command, command} ->
         {:handled, Commands.execute(state, command)}
 

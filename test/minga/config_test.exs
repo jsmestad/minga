@@ -21,10 +21,8 @@ defmodule Minga.ConfigTest do
         Options.set(:clipboard, :none)
     end
 
-    case KeymapActive.start_link() do
-      {:ok, _} -> :ok
-      {:error, {:already_started, _}} -> KeymapActive.reset()
-    end
+    keymap_server = start_supervised!({KeymapActive, name: nil})
+    previous_keymap_server = Process.put(:minga_config_keymap, keymap_server)
 
     case CommandRegistry.start_link() do
       {:ok, _} -> :ok
@@ -47,7 +45,7 @@ defmodule Minga.ConfigTest do
     on_exit(fn ->
       PopupRegistry.clear()
 
-      for mod <- [KeymapActive, Hooks] do
+      for mod <- [Hooks] do
         try do
           mod.reset()
         catch
@@ -61,6 +59,12 @@ defmodule Minga.ConfigTest do
         :exit, _ -> :ok
       end
 
+      if is_nil(previous_keymap_server) do
+        Process.delete(:minga_config_keymap)
+      else
+        Process.put(:minga_config_keymap, previous_keymap_server)
+      end
+
       try do
         Options.reset()
         Options.set(:clipboard, :none)
@@ -69,7 +73,12 @@ defmodule Minga.ConfigTest do
       end
     end)
 
-    :ok
+    %{keymap_server: keymap_server}
+  end
+
+  @spec test_keymap_server() :: GenServer.server()
+  defp test_keymap_server do
+    Process.get(:minga_config_keymap, KeymapActive)
   end
 
   describe "use Minga.Config" do
@@ -106,7 +115,7 @@ defmodule Minga.ConfigTest do
     test "adds a leader key binding" do
       Minga.Config.bind(:normal, "SPC g s", :git_status, "Git status")
 
-      trie = KeymapActive.leader_trie()
+      trie = KeymapActive.leader_trie(test_keymap_server())
       {:prefix, g_node} = Bindings.lookup(trie, {?g, 0})
       assert {:command, :git_status} = Bindings.lookup(g_node, {?s, 0})
     end
@@ -114,21 +123,21 @@ defmodule Minga.ConfigTest do
     test "binds insert-mode key" do
       Minga.Config.bind(:insert, "C-j", :next_line, "Next line")
 
-      trie = KeymapActive.mode_trie(:insert)
+      trie = KeymapActive.mode_trie(test_keymap_server(), :insert)
       assert {:command, :next_line} = Bindings.lookup(trie, {?j, 0x02})
     end
 
     test "binds visual-mode key" do
       Minga.Config.bind(:visual, "C-x", :custom_cut, "Custom cut")
 
-      trie = KeymapActive.mode_trie(:visual)
+      trie = KeymapActive.mode_trie(test_keymap_server(), :visual)
       assert {:command, :custom_cut} = Bindings.lookup(trie, {?x, 0x02})
     end
 
     test "binds scope-specific key" do
       Minga.Config.bind({:agent, :normal}, "y", :agent_copy, "Agent copy")
 
-      trie = KeymapActive.scope_trie(:agent, :normal)
+      trie = KeymapActive.scope_trie(test_keymap_server(), :agent, :normal)
       assert {:command, :agent_copy} = Bindings.lookup(trie, {?y, 0})
     end
 
@@ -142,7 +151,7 @@ defmodule Minga.ConfigTest do
     test "registers filetype-scoped binding" do
       Minga.Config.bind(:normal, "SPC m t", :mix_test, "Run tests", filetype: :elixir)
 
-      trie = KeymapActive.filetype_trie(:elixir)
+      trie = KeymapActive.filetype_trie(test_keymap_server(), :elixir)
       assert {:command, :mix_test} = Bindings.lookup(trie, {?t, 0})
     end
   end
@@ -158,7 +167,7 @@ defmodule Minga.ConfigTest do
       end
       """)
 
-      trie = KeymapActive.filetype_trie(:elixir)
+      trie = KeymapActive.filetype_trie(test_keymap_server(), :elixir)
       assert {:command, :mix_test} = Bindings.lookup(trie, {?t, 0})
       assert {:command, :mix_format} = Bindings.lookup(trie, {?f, 0})
     end
@@ -175,12 +184,12 @@ defmodule Minga.ConfigTest do
       """)
 
       # The "SPC z z" binding should be global (in leader trie), not scoped to :go
-      trie = KeymapActive.leader_trie()
+      trie = KeymapActive.leader_trie(test_keymap_server())
       {:prefix, z_node} = Bindings.lookup(trie, {?z, 0})
       assert {:command, :global_cmd} = Bindings.lookup(z_node, {?z, 0})
 
       # And not in the go filetype trie
-      go_trie = KeymapActive.filetype_trie(:go)
+      go_trie = KeymapActive.filetype_trie(test_keymap_server(), :go)
       assert :not_found = Bindings.lookup(go_trie, {?z, 0})
     end
   end

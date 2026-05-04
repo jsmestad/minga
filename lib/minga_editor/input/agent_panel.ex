@@ -90,7 +90,12 @@ defmodule MingaEditor.Input.AgentPanel do
       # need self-insert fallback for printable chars.
       key = {cp, mods}
 
-      case Keymap.resolve_scoped_key(:agent, binding_state, key) do
+      case Keymap.resolve_scoped_key(
+             :agent,
+             binding_state,
+             key,
+             EditorState.keymap_context(state)
+           ) do
         {:command, command} ->
           Commands.execute(state, command)
 
@@ -231,7 +236,12 @@ defmodule MingaEditor.Input.AgentPanel do
       # No prompt buffer, try scope bindings
       key = {cp, mods}
 
-      case Keymap.resolve_scoped_key(:agent, :input_normal, key) do
+      case Keymap.resolve_scoped_key(
+             :agent,
+             :input_normal,
+             key,
+             EditorState.keymap_context(state)
+           ) do
         {:command, command} -> Commands.execute(state, command)
         {:prefix, _node} -> state
         :not_found -> state

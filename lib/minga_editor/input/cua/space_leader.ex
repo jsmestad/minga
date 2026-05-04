@@ -34,7 +34,7 @@ defmodule MingaEditor.Input.CUA.SpaceLeader do
   @spec handle_chord(EditorState.t(), non_neg_integer(), non_neg_integer()) :: EditorState.t()
   def handle_chord(state, codepoint, modifiers) do
     if active?(state) do
-      trie = leader_trie()
+      trie = leader_trie(state)
 
       case lookup_leader(trie, codepoint, modifiers) do
         {:match, node} ->
@@ -65,7 +65,7 @@ defmodule MingaEditor.Input.CUA.SpaceLeader do
   @spec handle_retract(EditorState.t(), non_neg_integer(), non_neg_integer()) :: EditorState.t()
   def handle_retract(state, codepoint, modifiers) do
     if active?(state) do
-      trie = leader_trie()
+      trie = leader_trie(state)
 
       case lookup_leader(trie, codepoint, modifiers) do
         {:match, node} ->
@@ -145,11 +145,13 @@ defmodule MingaEditor.Input.CUA.SpaceLeader do
     end
   end
 
-  @spec leader_trie() :: Minga.Keymap.Bindings.node_t()
-  defp leader_trie do
-    Keymap.leader_trie()
+  @spec leader_trie(EditorState.t()) :: Minga.Keymap.Bindings.node_t()
+  defp leader_trie(state) do
+    Keymap.leader_trie(EditorState.keymap_server(state))
   catch
-    :exit, _ -> Minga.Keymap.Bindings.new()
+    :exit, _ ->
+      Minga.Log.warning(:config, "leader_trie unavailable; SPC bindings disabled this frame")
+      Minga.Keymap.Bindings.new()
   end
 
   @spec lookup_leader(Minga.Keymap.Bindings.node_t(), non_neg_integer(), non_neg_integer()) ::

@@ -51,6 +51,7 @@ defmodule Minga.Keymap.Scope do
   ignore context.
   """
 
+  alias Minga.Keymap
   alias Minga.Keymap.Active, as: KeymapActive
   alias Minga.Keymap.Bindings
 
@@ -195,9 +196,11 @@ defmodule Minga.Keymap.Scope do
   @spec resolve_through_layers(module(), scope_name(), vim_state(), Bindings.key(), context()) ::
           resolve_result()
   defp resolve_through_layers(mod, scope_name, vim_state, key, context) do
+    keymap_server = context_server(context)
+
     tries = [
       # Layer 0: user overrides for this scope + vim state
-      user_scope_trie(scope_name, vim_state),
+      user_scope_trie(scope_name, vim_state, keymap_server),
       # Layer 1: vim-state-specific bindings from the scope module
       mod.keymap(vim_state, context),
       # Layer 2: shared bindings (cross vim-state)
@@ -212,11 +215,41 @@ defmodule Minga.Keymap.Scope do
     end)
   end
 
-  @spec user_scope_trie(scope_name(), vim_state()) :: Bindings.node_t()
-  defp user_scope_trie(scope_name, vim_state) do
-    KeymapActive.scope_trie(scope_name, vim_state)
+  # Reads the keymap server from the resolution context. Production callers
+  # are expected to pass `EditorState.keymap_context(state)`. Setting
+  # `config :minga, :strict_keymap_context, true` (e.g., in dev/test) turns
+  # a missing key into a hard failure to catch forgotten threading at its
+  # source. Default behavior falls back to the singleton silently so a
+  # forgotten context can't crash the editor in production.
+  @spec context_server(context()) :: Keymap.server()
+  defp context_server(context) do
+    case Keyword.fetch(context, :keymap_server) do
+      {:ok, server} ->
+        server
+
+      :error ->
+        if Application.get_env(:minga, :strict_keymap_context, false) do
+          raise ArgumentError,
+                "Scope.resolve_key/4 called without :keymap_server in context. " <>
+                  "Pass EditorState.keymap_context(state)."
+        else
+          Keymap.default_server()
+        end
+    end
+  end
+
+  @spec user_scope_trie(scope_name(), vim_state(), Keymap.server()) :: Bindings.node_t()
+  defp user_scope_trie(scope_name, vim_state, keymap_server) do
+    KeymapActive.scope_trie(keymap_server, scope_name, vim_state)
   catch
-    :exit, _ -> Bindings.new()
+    :exit, _ ->
+      Minga.Log.warning(
+        :config,
+        "scope_trie unavailable for #{inspect(scope_name)}/#{inspect(vim_state)}; " <>
+          "using empty overrides"
+      )
+
+      Bindings.new()
   end
 
   @doc """

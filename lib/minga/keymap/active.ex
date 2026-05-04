@@ -68,14 +68,29 @@ defmodule Minga.Keymap.Active do
 
   # ── GenServer (table lifecycle only) ────────────────────────────────────────
 
-  @doc "Starts the keymap store and creates the backing ETS table."
+  @doc """
+  Starts the keymap store and creates the backing ETS table.
+
+  Pass `name: nil` to start anonymously (no registered name, unnamed ETS
+  table). Useful for isolated test fixtures: pass the returned pid to
+  server-aware functions instead of generating per-test atoms.
+  """
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
-    {name, _opts} = Keyword.pop(opts, :name, __MODULE__)
-    GenServer.start_link(__MODULE__, name, name: name)
+    case Keyword.fetch(opts, :name) do
+      {:ok, nil} -> GenServer.start_link(__MODULE__, :anonymous, [])
+      {:ok, name} -> GenServer.start_link(__MODULE__, name, name: name)
+      :error -> GenServer.start_link(__MODULE__, __MODULE__, name: __MODULE__)
+    end
   end
 
   @impl GenServer
+  def init(:anonymous) do
+    table = :ets.new(:keymap_active, [:set, :public, read_concurrency: true])
+    seed_defaults(table)
+    {:ok, %{table: table}}
+  end
+
   def init(name) do
     table = :ets.new(table_name(name), [:set, :public, :named_table, read_concurrency: true])
     seed_defaults(table)
@@ -281,19 +296,28 @@ defmodule Minga.Keymap.Active do
       bind(:normal, "SPC m t", :mix_test, "Run tests", filetype: :elixir)
       bind(:normal, "SPC m p", :markdown_preview, "Preview", filetype: :markdown)
   """
-  @spec bind(atom(), String.t(), atom(), String.t(), keyword()) ::
+  @spec bind(atom() | {atom(), atom()}, String.t(), atom(), String.t(), keyword()) ::
           :ok | {:error, String.t()}
-  @spec bind(GenServer.server(), atom(), String.t(), atom(), String.t(), keyword()) ::
-          :ok | {:error, String.t()}
+  @spec bind(
+          GenServer.server(),
+          atom() | {atom(), atom()},
+          String.t(),
+          atom(),
+          String.t(),
+          keyword()
+        ) :: :ok | {:error, String.t()}
   def bind(mode, key_str, command, description, opts),
     do: bind(__MODULE__, mode, key_str, command, description, opts)
 
   def bind(server, mode, key_str, command, description, opts)
-      when is_atom(mode) and is_binary(key_str) and is_atom(command) and is_binary(description) and
-             is_list(opts) do
+      when (is_atom(mode) or is_tuple(mode)) and is_binary(key_str) and is_atom(command) and
+             is_binary(description) and is_list(opts) do
+    # `:filetype` only applies to atom modes (`:normal` SPC m bindings, etc.).
+    # Scope bindings (tuple modes like `{:agent, :normal}`) ignore opts and
+    # fall through to the no-options path.
     filetype = Keyword.get(opts, :filetype)
 
-    if filetype do
+    if filetype && is_atom(mode) do
       bind_filetype(server, mode, filetype, key_str, command, description)
     else
       bind(server, mode, key_str, command, description)

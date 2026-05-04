@@ -95,7 +95,7 @@ end
 
 defmodule Minga.Mode.Insert.UserOverrideTest do
   @moduledoc "Tests for user-defined insert mode bindings via Keymap.Active."
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Minga.Keymap.Active, as: KeymapActive
   alias Minga.Keymap.Bindings
@@ -105,10 +105,14 @@ defmodule Minga.Mode.Insert.UserOverrideTest do
   defp fresh_state, do: Mode.initial_state()
 
   # Builds a mode_trie by merging filetype bindings on top of global insert bindings.
-  defp state_with_trie(filetype \\ :text) do
-    global = KeymapActive.mode_trie(:insert)
+  defp test_keymap_server do
+    Process.get(:minga_config_keymap, KeymapActive)
+  end
 
-    ft_trie = KeymapActive.filetype_mode_trie(filetype, :insert)
+  defp state_with_trie(filetype \\ :text) do
+    global = KeymapActive.mode_trie(test_keymap_server(), :insert)
+
+    ft_trie = KeymapActive.filetype_mode_trie(test_keymap_server(), filetype, :insert)
 
     mode_trie =
       Enum.reduce(ft_trie.children, global, fn {key, %{command: cmd, description: desc}}, acc ->
@@ -119,16 +123,14 @@ defmodule Minga.Mode.Insert.UserOverrideTest do
   end
 
   setup do
-    case KeymapActive.start_link() do
-      {:ok, _} -> :ok
-      {:error, {:already_started, _}} -> KeymapActive.reset()
-    end
+    keymap_server = start_supervised!({KeymapActive, name: nil})
+    previous_keymap_server = Process.put(:minga_config_keymap, keymap_server)
 
     on_exit(fn ->
-      try do
-        KeymapActive.reset()
-      catch
-        :exit, _ -> :ok
+      if is_nil(previous_keymap_server) do
+        Process.delete(:minga_config_keymap)
+      else
+        Process.put(:minga_config_keymap, previous_keymap_server)
       end
     end)
 
@@ -137,13 +139,13 @@ defmodule Minga.Mode.Insert.UserOverrideTest do
 
   describe "user-defined insert-mode overrides" do
     test "Ctrl+J bound to :next_line overrides default (continue)" do
-      KeymapActive.bind(:insert, "C-j", :next_line, "Next line")
+      KeymapActive.bind(test_keymap_server(), :insert, "C-j", :next_line, "Next line")
 
       assert {:execute, :next_line, _} = Insert.handle_key({?j, 0x02}, state_with_trie())
     end
 
     test "Ctrl+K bound to :prev_line overrides default (continue)" do
-      KeymapActive.bind(:insert, "C-k", :prev_line, "Prev line")
+      KeymapActive.bind(test_keymap_server(), :insert, "C-k", :prev_line, "Prev line")
 
       assert {:execute, :prev_line, _} = Insert.handle_key({?k, 0x02}, state_with_trie())
     end
@@ -154,7 +156,7 @@ defmodule Minga.Mode.Insert.UserOverrideTest do
     end
 
     test "built-in keys still work when user overrides exist" do
-      KeymapActive.bind(:insert, "C-j", :next_line, "Next line")
+      KeymapActive.bind(test_keymap_server(), :insert, "C-j", :next_line, "Next line")
       state = state_with_trie()
 
       # Escape should still transition to normal
@@ -170,27 +172,34 @@ defmodule Minga.Mode.Insert.UserOverrideTest do
 
   describe "filetype-scoped insert-mode overrides" do
     test "filetype binding fires when filetype matches" do
-      KeymapActive.bind(:insert, "C-j", :org_special, "Org special", filetype: :org)
+      KeymapActive.bind(test_keymap_server(), :insert, "C-j", :org_special, "Org special",
+        filetype: :org
+      )
 
       assert {:execute, :org_special, _} = Insert.handle_key({?j, 0x02}, state_with_trie(:org))
     end
 
     test "filetype binding does not fire for different filetype" do
-      KeymapActive.bind(:insert, "C-j", :org_special, "Org special", filetype: :org)
+      KeymapActive.bind(test_keymap_server(), :insert, "C-j", :org_special, "Org special",
+        filetype: :org
+      )
 
       assert {:continue, _} = Insert.handle_key({?j, 0x02}, state_with_trie(:elixir))
     end
 
     test "filetype binding shadows global binding for same key" do
-      KeymapActive.bind(:insert, "C-j", :global_next, "Global next")
-      KeymapActive.bind(:insert, "C-j", :org_special, "Org special", filetype: :org)
+      KeymapActive.bind(test_keymap_server(), :insert, "C-j", :global_next, "Global next")
+
+      KeymapActive.bind(test_keymap_server(), :insert, "C-j", :org_special, "Org special",
+        filetype: :org
+      )
 
       assert {:execute, :org_special, _} = Insert.handle_key({?j, 0x02}, state_with_trie(:org))
       assert {:execute, :global_next, _} = Insert.handle_key({?j, 0x02}, state_with_trie(:elixir))
     end
 
     test "global binding fires when no filetype binding exists" do
-      KeymapActive.bind(:insert, "C-k", :global_prev, "Global prev")
+      KeymapActive.bind(test_keymap_server(), :insert, "C-k", :global_prev, "Global prev")
 
       assert {:execute, :global_prev, _} = Insert.handle_key({?k, 0x02}, state_with_trie(:org))
     end

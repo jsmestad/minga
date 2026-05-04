@@ -231,42 +231,52 @@ defmodule MingaEditor.KeyDispatch do
   defp populate_mode_tries(%Minga.Mode.State{} = mode_state, mode, state) do
     %{
       mode_state
-      | leader_trie: fetch_leader_trie(),
-        normal_bindings: fetch_normal_bindings(),
-        mode_trie: fetch_mode_trie(mode, active_filetype(state))
+      | leader_trie: fetch_leader_trie(state),
+        normal_bindings: fetch_normal_bindings(state),
+        mode_trie: fetch_mode_trie(state, mode, active_filetype(state))
     }
   end
 
   defp populate_mode_tries(%{mode_trie: _} = mode_state, mode, state) do
-    %{mode_state | mode_trie: fetch_mode_trie(mode, active_filetype(state))}
+    %{mode_state | mode_trie: fetch_mode_trie(state, mode, active_filetype(state))}
   end
 
   defp populate_mode_tries(mode_state, _mode, _state), do: mode_state
 
-  @spec fetch_leader_trie() :: Minga.Keymap.Bindings.node_t()
-  defp fetch_leader_trie do
-    Keymap.leader_trie()
+  @spec fetch_leader_trie(EditorState.t()) :: Minga.Keymap.Bindings.node_t()
+  defp fetch_leader_trie(state) do
+    Keymap.leader_trie(EditorState.keymap_server(state))
   catch
-    :exit, _ -> Keymap.default_leader_trie()
+    :exit, _ ->
+      Minga.Log.warning(:config, "leader_trie unavailable; falling back to defaults")
+      Keymap.default_leader_trie()
   end
 
-  @spec fetch_normal_bindings() :: %{Minga.Keymap.Bindings.key() => {atom(), String.t()}}
-  defp fetch_normal_bindings do
-    Keymap.normal_bindings()
+  @spec fetch_normal_bindings(EditorState.t()) :: %{
+          Minga.Keymap.Bindings.key() => {atom(), String.t()}
+        }
+  defp fetch_normal_bindings(state) do
+    Keymap.normal_bindings(EditorState.keymap_server(state))
   catch
-    :exit, _ -> Keymap.default_normal_bindings()
+    :exit, _ ->
+      Minga.Log.warning(:config, "normal_bindings unavailable; falling back to defaults")
+      Keymap.default_normal_bindings()
   end
 
-  @spec fetch_mode_trie(Mode.mode(), atom()) :: Minga.Keymap.Bindings.node_t() | nil
-  defp fetch_mode_trie(mode, filetype) when mode in [:insert, :visual] do
-    global = Keymap.mode_trie(mode)
-    ft = Keymap.Active.filetype_mode_trie(filetype, mode)
+  @spec fetch_mode_trie(EditorState.t(), Mode.mode(), atom()) ::
+          Minga.Keymap.Bindings.node_t() | nil
+  defp fetch_mode_trie(state, mode, filetype) when mode in [:insert, :visual] do
+    keymap_server = EditorState.keymap_server(state)
+    global = Keymap.mode_trie(keymap_server, mode)
+    ft = Minga.Keymap.Active.filetype_mode_trie(keymap_server, filetype, mode)
     merge_tries(global, ft)
   catch
-    :exit, _ -> nil
+    :exit, _ ->
+      Minga.Log.warning(:config, "mode_trie unavailable for #{inspect(mode)}; using nil")
+      nil
   end
 
-  defp fetch_mode_trie(_mode, _filetype), do: nil
+  defp fetch_mode_trie(_state, _mode, _filetype), do: nil
 
   # Merges filetype-specific bindings on top of global mode bindings.
   # Filetype bindings override global ones on conflict (same key).

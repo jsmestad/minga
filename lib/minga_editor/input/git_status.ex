@@ -32,7 +32,12 @@ defmodule MingaEditor.Input.GitStatus do
 
       binding_state = Minga.Editing.binding_state(state)
 
-      case Keymap.resolve_scoped_key(:git_status, binding_state, key) do
+      case Keymap.resolve_scoped_key(
+             :git_status,
+             binding_state,
+             key,
+             EditorState.keymap_context(state)
+           ) do
         {:command, cmd} ->
           {:handled, execute_command(state, cmd)}
 

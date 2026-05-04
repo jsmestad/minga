@@ -70,12 +70,18 @@ defmodule MingaEditor.State do
   @typedoc "A document highlight range from the LSP server."
   @type document_highlight :: Minga.LSP.DocumentHighlight.t()
 
+  @typedoc "Re-export of `Minga.Keymap.server/0` for editor-state callers."
+  @type keymap_server :: Minga.Keymap.server()
+
+  @default_keymap_server Minga.Keymap.default_server()
+
   alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.Shell.Board.State, as: BoardState
 
   @enforce_keys [:port_manager, :workspace]
   defstruct backend: :headless,
             port_manager: nil,
+            keymap_server: @default_keymap_server,
             workspace: nil,
             editing_model: :vim,
             shell: MingaEditor.Shell.Traditional,
@@ -107,6 +113,7 @@ defmodule MingaEditor.State do
   @type t :: %__MODULE__{
           backend: backend(),
           port_manager: GenServer.server() | nil,
+          keymap_server: keymap_server(),
           workspace: WorkspaceState.t(),
           editing_model: :vim | :cua,
           shell: module(),
@@ -136,6 +143,15 @@ defmodule MingaEditor.State do
           space_leader_timer: reference() | nil,
           stashed_board_state: MingaEditor.Shell.Board.State.t() | nil
         }
+
+  @doc "Returns the keymap server used for scope and binding lookups."
+  @spec keymap_server(t()) :: keymap_server()
+  def keymap_server(%__MODULE__{keymap_server: keymap_server}), do: keymap_server
+
+  @doc "Returns the keymap context keyword list passed to scoped key resolution."
+  @spec keymap_context(t()) :: [{:keymap_server, keymap_server()}]
+  def keymap_context(%__MODULE__{} = state),
+    do: [keymap_server: keymap_server(state)]
 
   # ── Workspace helpers ──────────────────────────────────────────────────────
 

@@ -1,6 +1,6 @@
 defmodule Minga.Config.LoaderTest do
   # credo:disable-for-this-file Credo.Check.Refactor.Apply
-  # Not async because we manipulate XDG_CONFIG_HOME and the global Options/Hooks/Keymap servers
+  # Not async because we manipulate XDG_CONFIG_HOME and shared environment
   use ExUnit.Case, async: false
 
   alias Minga.Command.Registry, as: CommandRegistry
@@ -10,13 +10,24 @@ defmodule Minga.Config.LoaderTest do
   alias Minga.Keymap.Active, as: KeymapActive
 
   setup do
-    # Ensure all global servers are running (config eval needs them)
-    for {mod, _} <- [{Options, nil}, {Hooks, nil}, {KeymapActive, nil}, {CommandRegistry, nil}] do
+    keymap_server = start_supervised!({KeymapActive, name: nil})
+    previous_keymap_server = Process.put(:minga_config_keymap, keymap_server)
+
+    # Ensure other global servers are running (config eval needs them)
+    for {mod, _} <- [{Options, nil}, {Hooks, nil}, {CommandRegistry, nil}] do
       case mod.start_link() do
         {:ok, _} -> :ok
         {:error, {:already_started, _}} -> mod.reset()
       end
     end
+
+    on_exit(fn ->
+      if is_nil(previous_keymap_server) do
+        Process.delete(:minga_config_keymap)
+      else
+        Process.put(:minga_config_keymap, previous_keymap_server)
+      end
+    end)
 
     :ok
   end

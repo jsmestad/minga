@@ -107,7 +107,12 @@ defmodule MingaEditor.Input.FileTreeHandler do
       vim_state =
         if Minga.Editing.active_model(state) == Minga.Editing.Model.CUA, do: :cua, else: :normal
 
-      case Keymap.resolve_scoped_key(:file_tree, vim_state, key) do
+      case Keymap.resolve_scoped_key(
+             :file_tree,
+             vim_state,
+             key,
+             EditorState.keymap_context(state)
+           ) do
         {:command, command} ->
           {:handled, Commands.execute(state, command)}
 

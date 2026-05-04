@@ -75,7 +75,7 @@ defmodule MingaEditor.Input.CUA.TUISpaceLeader do
       state = cancel_timer(state)
       state = put_space_leader_pending(state, false)
 
-      trie = leader_trie()
+      trie = leader_trie(state)
       key = {cp, mods}
 
       case Map.get(trie.children, key) do
@@ -180,10 +180,12 @@ defmodule MingaEditor.Input.CUA.TUISpaceLeader do
     end
   end
 
-  @spec leader_trie() :: Bindings.node_t()
-  defp leader_trie do
-    Keymap.leader_trie()
+  @spec leader_trie(EditorState.t()) :: Bindings.node_t()
+  defp leader_trie(state) do
+    Keymap.leader_trie(EditorState.keymap_server(state))
   catch
-    :exit, _ -> Bindings.new()
+    :exit, _ ->
+      Minga.Log.warning(:config, "leader_trie unavailable; SPC bindings disabled this frame")
+      Bindings.new()
   end
 end
