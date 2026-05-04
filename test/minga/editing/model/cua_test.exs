@@ -281,4 +281,10 @@ defmodule Minga.Editing.Model.CUATest do
       assert cmds == [:search_prev]
     end
   end
+
+  describe "dispatch_handler/0" do
+    test "returns the CUA dispatch input handler module" do
+      assert CUA.dispatch_handler() == MingaEditor.Input.CUA.Dispatch
+    end
+  end
 end

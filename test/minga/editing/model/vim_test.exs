@@ -224,4 +224,10 @@ defmodule Minga.Editing.Model.VimTest do
       assert commands == [{:insert_char, "x"}]
     end
   end
+
+  describe "dispatch_handler/0" do
+    test "returns the ModeFSM input handler module" do
+      assert Vim.dispatch_handler() == MingaEditor.Input.ModeFSM
+    end
+  end
 end
