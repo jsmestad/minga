@@ -705,6 +705,27 @@ The practical benefit: `Minga.Runtime.start/1` boots Layers 0 and 1 without any 
 
 ---
 
+## State Scope: Daemon-Singleton vs Per-Editor
+
+Minga runs as a daemon: one BEAM process is one Minga server, and frontends (TUI, GUI) plus API clients are peers connected to it. The shape mirrors `emacs --daemon` with multiple `emacsclient` connections. This is the lens to use when deciding where new state belongs.
+
+**The diagnostic.** When a piece of state needs a home, ask: in `emacs --daemon` with two `emacsclient` connections open against the same server, would the user expect two of these or one? The answer dictates ownership.
+
+- **One per server → daemon-singleton.** Lives under `Minga.Foundation.Supervisor` (or an equivalent BEAM-level supervisor in the runtime tree). Available in `Minga.Runtime.start/1` headless mode without any editor running. Not parameterized through `EditorState`. Tests work around the singleton by asserting on tagged or otherwise observable behaviour, not by adding a per-editor parameter.
+  - Examples: the `*Messages*` buffer, the on-disk log file path, registered-name foundation services like `Minga.Popup.Registry` and `Minga.Config.Advice`, the agent supervisor, the API gateway listener.
+- **One per editor → per-editor state.** Lives in `EditorState` (or in a struct it owns). Where a globally registered server backs the state in production, threading the server's identity through `EditorState` via the **explicit-server-parameter pattern** (see `AGENTS.md:556-558`) lets each test's `EditorCase` use an isolated instance via `start_supervised!`.
+  - Examples: the keymap server (`Minga.Keymap.Active`, threaded via #1445), the options server (`Minga.Config.Options`, threaded via #1448), the events registry (planned: #1450), buffer/window/mode/cursor state, tab bar, file tree state, the per-tab agent UI.
+
+**Why the daemon-singleton path doesn't get the parameter pattern.** The explicit-server-parameter pattern exists to give tests isolated copies of state that *should be* one-per-editor in user terms but happens to be backed by a globally-registered server. Applying it to genuinely server-scoped state (one `*Messages*` buffer per Emacs daemon, one log file per process) gets the user model wrong: tests would assert on a per-editor scope that production cannot deliver. Worse, it commits the codebase to a multi-instance model that costs complexity for no user benefit.
+
+**Why the per-editor path doesn't get collapsed to a foundation singleton.** Conversely, daemon-singleton placement is wrong for state the user expects to differ per buffer or per frame. A keymap is conceptually attached to a buffer/mode, so `Keymap.Active` is per-editor even though only one Editor process exists in production today.
+
+**The boundary case.** If you find yourself reaching for "let's make this per-editor so the test can isolate it" on state that has Emacs daemon semantics, the test is the thing to change, not the state. Tag your log entries, scope your assertions to observable signals you triggered, or accept `:heavy` quarantine. Adding a per-editor parameter to genuinely shared state is a one-way door: every future caller has to thread the parameter, every future client has to pick which instance to talk to, and the daemon model erodes.
+
+This rule is the diagnostic the test-isolation epic (#1456) used to decide which singletons get migrated to the explicit-server-parameter pattern (Keymap.Active, Config.Options, Events registry, Git.Tracker, Config.Hooks) versus which stay as foundation singletons that tests work around (`*Messages*`, Popup.Registry, Config.Advice).
+
+---
+
 ## Headless Runtime
 
 `Minga.Runtime.start/1` boots the BEAM supervision tree without any frontend or editor process. Foundation services (events, config, keymaps), buffer management, application services (git, LSP, diagnostics), and the agent supervisor all start normally. What's missing: no `MingaEditor.Supervisor`, no frontend Port, no rendering pipeline.
