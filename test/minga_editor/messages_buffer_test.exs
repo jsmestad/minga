@@ -102,18 +102,30 @@ defmodule MingaEditor.MessagesBufferTest do
   end
 
   describe "shared singleton semantics" do
-    test "Minga.Buffer.messages/0 returns the same pid across editors" do
-      pid_before = Buffer.messages()
-      assert is_pid(pid_before)
-
+    test "two editors share the same *Messages* content" do
+      tag = unique_tag("two-editors")
       ctx_a = start_editor("a")
       ctx_b = start_editor("b")
+
+      emit_log(tag)
 
       state_a = :sys.get_state(ctx_a.editor)
       state_b = :sys.get_state(ctx_b.editor)
 
-      assert state_a.workspace.buffers.messages == pid_before
-      assert state_b.workspace.buffers.messages == pid_before
+      # Both editors read from the same singleton buffer pid, so a log
+      # entry emitted once is observable through either editor's handle.
+      assert String.contains?(Buffer.content(state_a.workspace.buffers.messages), tag)
+      assert String.contains?(Buffer.content(state_b.workspace.buffers.messages), tag)
+    end
+
+    test "starting an editor does not start a new *Messages* buffer" do
+      pid_before = Buffer.messages()
+      assert is_pid(pid_before)
+
+      _ctx = start_editor("hello")
+
+      assert Buffer.messages() == pid_before
+      assert Process.alive?(pid_before)
     end
 
     test "killing one editor does not kill the *Messages* buffer" do
@@ -137,6 +149,29 @@ defmodule MingaEditor.MessagesBufferTest do
       emit_log(tag)
 
       assert String.contains?(Buffer.content(Buffer.messages()), tag)
+    end
+  end
+
+  describe "MessageStore dual-write" do
+    # Regression coverage: external :log_message broadcasts must still
+    # update the per-editor MessageStore so the GUI Messages tab keeps
+    # rendering them after the singleton-buffer collapse.
+    test "external broadcasts append to the editor's MessageStore" do
+      tag = unique_tag("store-broadcast")
+      ctx = start_editor("hello")
+
+      Minga.Events.broadcast(:log_message, %Minga.Events.LogMessageEvent{
+        text: tag,
+        level: :warning
+      })
+
+      _ = :sys.get_state(ctx.editor)
+
+      state = :sys.get_state(ctx.editor)
+
+      assert Enum.any?(state.message_store.entries, fn entry ->
+               String.contains?(entry.text, tag) and entry.level == :warning
+             end)
     end
   end
 end

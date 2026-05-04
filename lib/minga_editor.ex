@@ -199,6 +199,7 @@ defmodule MingaEditor do
     Minga.Events.subscribe(:tool_install_failed)
     Minga.Events.subscribe(:tool_uninstall_complete)
     Minga.Events.subscribe(:tool_missing)
+    Minga.Events.subscribe(:log_message)
     Minga.Events.subscribe(:face_overrides_changed)
     Minga.Events.subscribe(:agent_session_stopped)
     Minga.Events.subscribe(:load_user_themes)
@@ -826,6 +827,15 @@ defmodule MingaEditor do
        ) do
     apply_diagnostic_decorations(state, uri)
     schedule_render(state, 16)
+  end
+
+  defp dispatch_minga_event(
+         state,
+         :log_message,
+         %Minga.Events.LogMessageEvent{text: text, level: level},
+         _msg
+       ) do
+    MessageLog.append_to_store(state, text, level)
   end
 
   defp dispatch_minga_event(

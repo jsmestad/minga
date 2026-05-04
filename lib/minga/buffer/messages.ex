@@ -19,30 +19,30 @@ defmodule Minga.Buffer.Messages do
 
   ## Boot order
 
-  This process must be alive **before** the LoggerHandler installs its
-  custom handler so that early-boot logs either land directly in the
-  buffer or are captured in the ETS pre-subscribe buffer and replayed
-  here on init.
+  `Minga.LoggerHandler.install_messages_handler/0` runs at application
+  start, before this process is supervised. Logs emitted during early
+  boot land in the LoggerHandler ETS pre-subscribe buffer; this process
+  drains that buffer in `init/1`, so no entries are lost.
   """
 
   use GenServer
 
   alias Minga.Buffer
-  alias Minga.Buffer.Document
   alias Minga.Events
   alias Minga.Events.LogMessageEvent
   alias Minga.LoggerHandler
 
   @max_lines 1000
 
-  @doc "Returns the pid of the singleton `*Messages*` buffer, or `nil` if not started."
+  @doc """
+  Returns the pid of the singleton `*Messages*` buffer, or `nil` if the
+  owner has never started successfully.
+
+  Reads from `:persistent_term` so it never blocks on the owner's mailbox,
+  even during heavy log bursts.
+  """
   @spec pid() :: pid() | nil
-  def pid do
-    case Process.whereis(__MODULE__) do
-      nil -> nil
-      owner -> GenServer.call(owner, :buffer_pid)
-    end
-  end
+  def pid, do: :persistent_term.get(__MODULE__, nil)
 
   @doc false
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -56,19 +56,18 @@ defmodule Minga.Buffer.Messages do
     Events.subscribe(:log_message)
 
     buffer = start_buffer()
+    :persistent_term.put(__MODULE__, buffer)
     monitor = Process.monitor(buffer)
 
     Enum.each(LoggerHandler.flush_buffer(), fn {text, _level} ->
-      append(buffer, text)
+      try do
+        append(buffer, text)
+      rescue
+        _ -> :ok
+      end
     end)
 
     {:ok, %{buffer: buffer, monitor: monitor}}
-  end
-
-  @impl true
-  @spec handle_call(:buffer_pid, GenServer.from(), map()) :: {:reply, pid(), map()}
-  def handle_call(:buffer_pid, _from, %{buffer: buffer} = state) do
-    {:reply, buffer, state}
   end
 
   @impl true
@@ -82,6 +81,7 @@ defmodule Minga.Buffer.Messages do
   end
 
   def handle_info({:DOWN, ref, :process, _pid, reason}, %{monitor: ref} = state) do
+    :persistent_term.erase(__MODULE__)
     {:stop, {:buffer_down, reason}, state}
   end
 
@@ -89,14 +89,19 @@ defmodule Minga.Buffer.Messages do
 
   @spec start_buffer() :: pid()
   defp start_buffer do
-    {:ok, pid} =
-      DynamicSupervisor.start_child(
-        Minga.Buffer.Supervisor,
-        {Buffer,
-         content: "", buffer_name: "*Messages*", unlisted: true, persistent: true, read_only: true}
-      )
-
-    pid
+    case DynamicSupervisor.start_child(
+           Minga.Buffer.Supervisor,
+           {Buffer,
+            content: "",
+            buffer_name: "*Messages*",
+            unlisted: true,
+            persistent: true,
+            read_only: true}
+         ) do
+      {:ok, pid} -> pid
+      {:error, {:already_started, pid}} -> pid
+      {:error, reason} -> raise "failed to start *Messages* buffer: #{inspect(reason)}"
+    end
   end
 
   @spec append(pid(), String.t()) :: :ok
@@ -114,12 +119,8 @@ defmodule Minga.Buffer.Messages do
     if line_count > @max_lines do
       excess = line_count - @max_lines
       content = Buffer.content(buffer)
-      lines = String.split(content, "\n")
-      trimmed = lines |> Enum.drop(excess) |> Enum.join("\n")
-
-      :sys.replace_state(buffer, fn s ->
-        %{s | document: Document.new(trimmed)}
-      end)
+      trimmed = content |> String.split("\n") |> Enum.drop(excess) |> Enum.join("\n")
+      Buffer.replace_content_force(buffer, trimmed)
     end
 
     :ok

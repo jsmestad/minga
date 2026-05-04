@@ -199,6 +199,11 @@ defmodule Minga.LoggerHandler do
   defp has_subscribers? do
     Minga.Events.subscribers(:log_message) != []
   rescue
+    # Registry.lookup/2 raises ArgumentError when the Events registry
+    # isn't started yet, which is expected during the very first phase
+    # of Application boot. Treat it as "no subscribers"; the entry will
+    # land in the LoggerHandler ETS pre-buffer and get drained by
+    # Minga.Buffer.Messages on init.
     ArgumentError -> false
   end
 
