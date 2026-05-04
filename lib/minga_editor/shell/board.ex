@@ -469,7 +469,26 @@ defmodule MingaEditor.Shell.Board do
   @spec on_agent_event(BoardState.t(), MingaEditor.Workspace.State.t(), pid(), term()) ::
           {BoardState.t(), MingaEditor.Workspace.State.t()}
   def on_agent_event(shell_state, workspace, session_pid, {:status_changed, status}) do
-    shell_state = update_card_by_session(shell_state, session_pid, &Card.set_status(&1, status))
+    card_status = Card.from_agent_status(status)
+
+    shell_state =
+      update_card_by_session(shell_state, session_pid, &Card.set_status(&1, card_status))
+
+    {shell_state, workspace}
+  end
+
+  # Cards have no separate attention flag; status :needs_you carries the alert.
+  def on_agent_event(shell_state, workspace, session_pid, {:approval_pending, _}) do
+    shell_state =
+      update_card_by_session(shell_state, session_pid, &Card.set_status(&1, :needs_you))
+
+    {shell_state, workspace}
+  end
+
+  def on_agent_event(shell_state, workspace, session_pid, {:error, _message}) do
+    shell_state =
+      update_card_by_session(shell_state, session_pid, &Card.set_status(&1, :errored))
+
     {shell_state, workspace}
   end
 

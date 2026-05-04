@@ -267,7 +267,10 @@ defmodule MingaEditor.Agent.Events do
 
     if session do
       update_board_card_by_session(state, session, fn card ->
-        MingaEditor.Shell.Board.Card.set_status(card, agent_status_to_card_status(status))
+        MingaEditor.Shell.Board.Card.set_status(
+          card,
+          MingaEditor.Shell.Board.Card.from_agent_status(status)
+        )
       end)
     else
       state
@@ -312,13 +315,6 @@ defmodule MingaEditor.Agent.Events do
         state
     end
   end
-
-  @spec agent_status_to_card_status(Tab.agent_status()) :: MingaEditor.Shell.Board.Card.status()
-  defp agent_status_to_card_status(:thinking), do: :working
-  defp agent_status_to_card_status(:tool_executing), do: :iterating
-  defp agent_status_to_card_status(:error), do: :errored
-  defp agent_status_to_card_status(:idle), do: :done
-  defp agent_status_to_card_status(_), do: :idle
 
   # Syncs the agent_status field on the current agent tab so the tab bar
   # can render status indicators without querying the Session process.

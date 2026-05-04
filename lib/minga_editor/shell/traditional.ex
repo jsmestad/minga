@@ -248,6 +248,20 @@ defmodule MingaEditor.Shell.Traditional do
     {%{shell_state | tab_bar: tb}, workspace}
   end
 
+  # A direct :error event raises attention so a background tab whose session
+  # crashes mid-stream still surfaces in the tab bar (the broader status_changed
+  # path also raises attention on :error, but a session can emit :error without
+  # a preceding :status_changed transition).
+  def on_agent_event(
+        %ShellState{tab_bar: %TabBar{} = tb} = shell_state,
+        workspace,
+        session_pid,
+        {:error, _message}
+      ) do
+    tb = TabBar.set_attention_by_session(tb, session_pid, true)
+    {%{shell_state | tab_bar: tb}, workspace}
+  end
+
   def on_agent_event(shell_state, workspace, _session_pid, _event) do
     {shell_state, workspace}
   end
