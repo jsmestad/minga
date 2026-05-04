@@ -17,7 +17,7 @@ defmodule MingaEditor.Layout.GUI do
   """
   @spec compute(EditorState.t()) :: Layout.t()
   def compute(state) do
-    vp = state.workspace.viewport
+    vp = state.terminal_viewport
     terminal = {0, 0, vp.cols, vp.rows}
 
     # Minibuffer takes the last row (stays in Metal for command-line input).

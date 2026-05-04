@@ -130,8 +130,8 @@ defmodule MingaEditor.LayoutPreset do
     else
       # Create a new agent chat window
       next_id = state.workspace.windows.next_id
-      rows = state.workspace.viewport.rows
-      cols = state.workspace.viewport.cols
+      rows = state.terminal_viewport.rows
+      cols = state.terminal_viewport.cols
       agent_window = Window.new_agent_chat(next_id, agent_buffer, rows, cols)
 
       # Split the active window to add the agent pane

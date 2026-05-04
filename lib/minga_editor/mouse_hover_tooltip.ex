@@ -29,7 +29,7 @@ defmodule MingaEditor.MouseHoverTooltip do
   def check_hover(%{workspace: %{mouse: %{hover_pos: {row, col}}}} = state) do
     # Convert screen position to buffer position
     buf = state.workspace.buffers.active
-    vp = state.workspace.viewport
+    vp = state.terminal_viewport
 
     buf_line = row + vp.top - 1
     # Approximate: col minus gutter width

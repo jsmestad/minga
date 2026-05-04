@@ -100,31 +100,31 @@ defmodule MingaEditor.Mouse do
       ) do
     total_lines = Buffer.line_count(buf)
     lines = scroll_lines(state)
-    vp = active_window_viewport(state)
+    vp = current_viewport(state)
     new_vp = scroll_viewport(vp, lines, total_lines)
-    put_active_window_viewport(state, new_vp) |> clamp_cursor_to_viewport(:down)
+    update_current_viewport(state, new_vp) |> clamp_cursor_to_viewport(:down)
   end
 
   def handle(%{workspace: %{buffers: %{active: buf}}} = state, _r, _c, :wheel_up, _m, :press, _cc) do
     total_lines = Buffer.line_count(buf)
     lines = scroll_lines(state)
-    vp = active_window_viewport(state)
+    vp = current_viewport(state)
     new_vp = scroll_viewport(vp, -lines, total_lines)
-    put_active_window_viewport(state, new_vp) |> clamp_cursor_to_viewport(:up)
+    update_current_viewport(state, new_vp) |> clamp_cursor_to_viewport(:up)
   end
 
   # ── Scroll wheel (horizontal) ──
 
   def handle(state, _r, _c, :wheel_right, _m, :press, _cc) do
-    vp = active_window_viewport(state)
+    vp = current_viewport(state)
     new_left = vp.left + @scroll_cols
-    put_active_window_viewport(state, %{vp | left: new_left})
+    update_current_viewport(state, %{vp | left: new_left})
   end
 
   def handle(state, _r, _c, :wheel_left, _m, :press, _cc) do
-    vp = active_window_viewport(state)
+    vp = current_viewport(state)
     new_left = max(vp.left - @scroll_cols, 0)
-    put_active_window_viewport(state, %{vp | left: new_left})
+    update_current_viewport(state, %{vp | left: new_left})
   end
 
   # ── Middle-click paste ──
@@ -995,7 +995,7 @@ defmodule MingaEditor.Mouse do
   end
 
   @spec scroll_left(state(), pid()) :: non_neg_integer()
-  defp scroll_left(state, _buf), do: active_window_viewport(state).left
+  defp scroll_left(state, _buf), do: current_viewport(state).left
 
   # ── Viewport helpers ───────────────────────────────────────────────────────
 
@@ -1016,7 +1016,7 @@ defmodule MingaEditor.Mouse do
   # - Scrolling DOWN: enforce top margin (push cursor toward bottom)
   @spec clamp_cursor_to_viewport(state(), :up | :down) :: state()
   defp clamp_cursor_to_viewport(%{workspace: %{buffers: %{active: buf}}} = state, direction) do
-    vp = active_window_viewport(state)
+    vp = current_viewport(state)
     {cursor_line, cursor_col} = Buffer.cursor(buf)
     {first_line, last_line} = Viewport.visible_range(vp)
 
@@ -1069,13 +1069,13 @@ defmodule MingaEditor.Mouse do
 
   @spec maybe_auto_scroll(state(), integer()) :: state()
   defp maybe_auto_scroll(%{workspace: %{buffers: %{active: buf}}} = state, row) when row <= 0 do
-    vp = active_window_viewport(state)
+    vp = current_viewport(state)
     page_move(buf, vp, -1)
     state
   end
 
   defp maybe_auto_scroll(%{workspace: %{buffers: %{active: buf}}} = state, row) do
-    vp = active_window_viewport(state)
+    vp = current_viewport(state)
     scroll_threshold = Viewport.content_rows(vp) - 1
     maybe_scroll_down(state, buf, vp, row, scroll_threshold)
   end
@@ -1258,10 +1258,10 @@ defmodule MingaEditor.Mouse do
   end
 
   # Delegates to EditorState shared helpers.
-  defp active_window_viewport(state), do: EditorState.active_window_viewport(state)
+  defp current_viewport(state), do: EditorState.current_viewport(state)
 
-  defp put_active_window_viewport(state, new_vp),
-    do: EditorState.put_active_window_viewport(state, new_vp)
+  defp update_current_viewport(state, new_vp),
+    do: EditorState.update_current_viewport(state, new_vp)
 
   @spec find_click_region(
           [MingaEditor.Shell.Traditional.Modeline.click_region()],

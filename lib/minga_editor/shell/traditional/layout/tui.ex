@@ -27,7 +27,7 @@ defmodule MingaEditor.Shell.Traditional.Layout.TUI do
   """
   @spec compute(EditorState.t() | map()) :: Layout.t()
   def compute(state) do
-    vp = state.workspace.viewport
+    vp = state.terminal_viewport
     terminal = {0, 0, vp.cols, vp.rows}
 
     # 0. Tab bar takes row 0.
@@ -189,8 +189,8 @@ defmodule MingaEditor.Shell.Traditional.Layout.TUI do
          total_cols
        ) do
     # Same logic as compute/1: reserve 2 rows at the bottom when possible, else 1.
-    bottom_reserve = if state.workspace.viewport.rows - 2 > @content_start, do: 2, else: 1
-    tree_height = state.workspace.viewport.rows - @content_start - bottom_reserve
+    bottom_reserve = if state.terminal_viewport.rows - 2 > @content_start, do: 2, else: 1
+    tree_height = state.terminal_viewport.rows - @content_start - bottom_reserve
     min_editor_w = 3
     max_tree_w = max(total_cols - 1 - min_editor_w, 1)
     clamped_tw = min(tw, max_tree_w)
@@ -208,7 +208,7 @@ defmodule MingaEditor.Shell.Traditional.Layout.TUI do
     panel = AgentAccess.panel(state)
 
     if panel.visible do
-      panel_height = div(state.workspace.viewport.rows * 35, 100)
+      panel_height = div(state.terminal_viewport.rows * 35, 100)
       editor_height = remaining_height - panel_height
       agent_row = @content_start + editor_height
       agent_rect = {agent_row, editor_col, editor_width, panel_height}

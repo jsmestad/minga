@@ -645,12 +645,12 @@ defmodule MingaEditor.CompletionHandling do
 
     if buf do
       {line, col} = Buffer.cursor(buf)
-      vp = state.workspace.viewport
+      vp = state.terminal_viewport
       screen_row = max(line - vp.top + 1, 1)
       screen_col = min(col + 4, vp.cols - 1)
       {screen_row, screen_col}
     else
-      {div(state.workspace.viewport.rows, 2), div(state.workspace.viewport.cols, 2)}
+      {div(state.terminal_viewport.rows, 2), div(state.terminal_viewport.cols, 2)}
     end
   end
 

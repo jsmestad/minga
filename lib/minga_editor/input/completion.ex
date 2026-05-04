@@ -107,7 +107,7 @@ defmodule MingaEditor.Input.Completion do
 
     # Popup position: same logic as CompletionUI
     {cursor_row, cursor_col} = cursor_screen_pos(state)
-    space_below = state.workspace.viewport.rows - cursor_row - 2
+    space_below = state.terminal_viewport.rows - cursor_row - 2
 
     popup_start_row =
       if space_below >= item_count do
@@ -121,8 +121,8 @@ defmodule MingaEditor.Input.Completion do
       Enum.map(Enum.take(visible, item_count), fn item -> String.length(item.label) + 4 end)
 
     popup_width = label_widths |> Enum.max(fn -> 20 end) |> max(20) |> min(50)
-    popup_width = min(popup_width, state.workspace.viewport.cols - cursor_col)
-    start_col = min(cursor_col, max(0, state.workspace.viewport.cols - popup_width))
+    popup_width = min(popup_width, state.terminal_viewport.cols - cursor_col)
+    start_col = min(cursor_col, max(0, state.terminal_viewport.cols - popup_width))
 
     clicked_idx = row - popup_start_row
 
@@ -151,7 +151,7 @@ defmodule MingaEditor.Input.Completion do
 
     if buf do
       {line, col} = Buffer.cursor(buf)
-      screen_row = line - state.workspace.viewport.top
+      screen_row = line - state.terminal_viewport.top
       total_lines = Buffer.line_count(buf)
 
       number_w =
@@ -160,7 +160,7 @@ defmodule MingaEditor.Input.Completion do
           else: Viewport.gutter_width(total_lines)
 
       gutter_w = MingaEditor.Renderer.Gutter.total_width(number_w)
-      screen_col = col + gutter_w - state.workspace.viewport.left
+      screen_col = col + gutter_w - state.terminal_viewport.left
 
       {max(screen_row, 0), max(screen_col, 0)}
     else

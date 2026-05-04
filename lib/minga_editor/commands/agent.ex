@@ -111,8 +111,8 @@ defmodule MingaEditor.Commands.Agent do
         # Build a windows context with an agent_chat window so the tab
         # renders through the buffer pipeline.
         win_id = 1
-        rows = max(state.workspace.viewport.rows, 1)
-        cols = max(state.workspace.viewport.cols, 1)
+        rows = max(state.terminal_viewport.rows, 1)
+        cols = max(state.terminal_viewport.cols, 1)
         agent_window = Window.new_agent_chat(win_id, agent_buf, rows, cols)
 
         windows = %Windows{
@@ -1040,7 +1040,7 @@ defmodule MingaEditor.Commands.Agent do
 
   @spec panel_height(state()) :: non_neg_integer()
   defp panel_height(state) do
-    div(state.workspace.viewport.rows * 35, 100)
+    div(state.terminal_viewport.rows * 35, 100)
   end
 
   @spec abort_if_active(state()) :: state()

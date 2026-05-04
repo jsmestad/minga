@@ -40,10 +40,13 @@ defmodule MingaEditor.RenderPipeline.TestHelpers do
     win_id = 1
     window = Window.new(win_id, buf, rows, cols)
 
+    vp = Viewport.new(rows, cols)
+
     %EditorState{
       port_manager: self(),
+      terminal_viewport: vp,
       workspace: %MingaEditor.Workspace.State{
-        viewport: Viewport.new(rows, cols),
+        viewport: vp,
         editing: VimState.new(),
         buffers: %Buffers{active: buf, list: [buf], active_index: 0},
         windows: %Windows{

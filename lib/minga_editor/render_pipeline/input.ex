@@ -70,6 +70,8 @@ defmodule MingaEditor.RenderPipeline.Input do
     :parser_status,
     # Workspace as a plain map (enables state.workspace.X pattern-matching)
     :workspace,
+    # Terminal-level viewport (screen dimensions reported by frontend on resize)
+    terminal_viewport: Viewport.new(24, 80),
     # Render-pipeline caches (replaces process-dictionary entries)
     caches: %Caches{}
   ]
@@ -110,6 +112,7 @@ defmodule MingaEditor.RenderPipeline.Input do
           lsp: LSPState.t(),
           parser_status: atom(),
           caches: Caches.t(),
+          terminal_viewport: Viewport.t(),
           workspace: workspace()
         }
 
@@ -137,6 +140,7 @@ defmodule MingaEditor.RenderPipeline.Input do
       lsp: state.lsp,
       parser_status: state.parser_status,
       caches: state.caches,
+      terminal_viewport: state.terminal_viewport,
       workspace: %{
         windows: ws.windows,
         buffers: ws.buffers,
@@ -210,8 +214,8 @@ defmodule MingaEditor.RenderPipeline.Input do
       # Agent state (status, pending approval)
       input.shell_state |> Map.get(:agent),
       # Viewport dimensions (overlay positioning)
-      input.workspace.viewport.rows,
-      input.workspace.viewport.cols,
+      input.terminal_viewport.rows,
+      input.terminal_viewport.cols,
       # Window splits (separator rendering)
       input.workspace.windows.tree,
       # Bottom panel

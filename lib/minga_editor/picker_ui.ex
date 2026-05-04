@@ -96,8 +96,8 @@ defmodule MingaEditor.PickerUI do
 
       _ ->
         # Use terminal height minus 3 (separator + prompt + at least 1 buffer line visible)
-        max_vis = state.workspace.viewport.rows - 3
-        max_vis = max(5, min(max_vis, state.workspace.viewport.rows - 3))
+        max_vis = state.terminal_viewport.rows - 3
+        max_vis = max(5, min(max_vis, state.terminal_viewport.rows - 3))
         picker = Picker.new(items, title: source_module.title(), max_visible: max_vis)
 
         # Clear whichkey state if active
@@ -848,8 +848,8 @@ defmodule MingaEditor.PickerUI do
        ) do
     ctx = Context.from_editor_state(state)
     items = new_source.candidates(ctx)
-    max_vis = state.workspace.viewport.rows - 3
-    max_vis = max(5, min(max_vis, state.workspace.viewport.rows - 3))
+    max_vis = state.terminal_viewport.rows - 3
+    max_vis = max(5, min(max_vis, state.terminal_viewport.rows - 3))
     picker = Picker.new(items, title: new_source.title(), max_visible: max_vis)
     layout = MingaEditor.UI.Picker.Source.layout(new_source)
     original = orig_src || current_source
@@ -874,8 +874,8 @@ defmodule MingaEditor.PickerUI do
        ) do
     ctx = Context.from_editor_state(state)
     items = orig.candidates(ctx)
-    max_vis = state.workspace.viewport.rows - 3
-    max_vis = max(5, min(max_vis, state.workspace.viewport.rows - 3))
+    max_vis = state.terminal_viewport.rows - 3
+    max_vis = max(5, min(max_vis, state.terminal_viewport.rows - 3))
     picker = Picker.new(items, title: orig.title(), max_visible: max_vis)
     layout = MingaEditor.UI.Picker.Source.layout(orig)
 

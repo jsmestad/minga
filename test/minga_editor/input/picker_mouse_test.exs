@@ -28,11 +28,14 @@ defmodule MingaEditor.Input.PickerMouseTest do
     picker =
       PickerData.new(items, max_visible: 10, title: "Test")
 
+    vp = Viewport.new(30, 80)
+
     %EditorState{
       port_manager: nil,
+      terminal_viewport: vp,
       workspace: %MingaEditor.Workspace.State{
         editing: VimState.new(),
-        viewport: Viewport.new(30, 80)
+        viewport: vp
       },
       shell_state: %MingaEditor.Shell.Traditional.State{
         modal:

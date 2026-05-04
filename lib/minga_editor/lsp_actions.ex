@@ -576,7 +576,7 @@ defmodule MingaEditor.LspActions do
 
           path ->
             uri = SyncServer.path_to_uri(path)
-            vp = state.workspace.viewport
+            vp = state.terminal_viewport
 
             params = %{
               "textDocument" => %{"uri" => uri},
@@ -630,14 +630,14 @@ defmodule MingaEditor.LspActions do
   end
 
   # Returns the viewport top for the active window, falling back to
-  # state.workspace.viewport.top. Uses EditorState.active_window_viewport when
-  # the state is a proper struct, otherwise reads state.workspace.viewport directly.
+  # state.terminal_viewport.top. Uses EditorState.current_viewport when
+  # the state is a proper struct, otherwise reads state.terminal_viewport directly.
   @spec effective_viewport_top(state()) :: non_neg_integer()
   defp effective_viewport_top(%EditorState{} = state) do
-    EditorState.active_window_viewport(state).top
+    EditorState.current_viewport(state).top
   end
 
-  defp effective_viewport_top(state), do: state.workspace.viewport.top
+  defp effective_viewport_top(state), do: state.terminal_viewport.top
 
   # ── Response handlers ──────────────────────────────────────────────────────
 
@@ -1471,12 +1471,12 @@ defmodule MingaEditor.LspActions do
     if buf do
       {line, col} = Buffer.cursor(buf)
       # Approximate screen position: line offset from viewport top + gutter
-      vp = state.workspace.viewport
+      vp = state.terminal_viewport
       screen_row = line - vp.top + 1
       screen_col = col + 4
       {clamp(screen_row, 1, vp.rows - 2), clamp(screen_col, 0, vp.cols - 1)}
     else
-      {div(state.workspace.viewport.rows, 2), div(state.workspace.viewport.cols, 2)}
+      {div(state.terminal_viewport.rows, 2), div(state.terminal_viewport.cols, 2)}
     end
   end
 
