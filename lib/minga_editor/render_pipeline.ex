@@ -89,8 +89,6 @@ defmodule MingaEditor.RenderPipeline do
 
       layout = Layout.get(input)
 
-      debug_layout(input, layout)
-
       run_windows_pipeline(input, layout)
     end)
   end
@@ -213,27 +211,5 @@ defmodule MingaEditor.RenderPipeline do
 
   defp window_count(%{workspace: %{windows: %{tree: tree}}}) do
     WindowTree.count(tree)
-  end
-
-  @spec debug_layout(input(), Layout.t()) :: :ok
-  defp debug_layout(input, layout) do
-    vp = input.workspace.viewport
-    ts = DateTime.utc_now() |> DateTime.to_string()
-
-    log_lines = [
-      "[#{ts}] viewport: #{vp.rows}x#{vp.cols}",
-      "  editor_area: #{inspect(layout.editor_area)}",
-      "  file_tree: #{inspect(layout.file_tree)}",
-      "  minibuffer: #{inspect(layout.minibuffer)}",
-      "  modeline: #{inspect(layout.window_layouts |> Map.values() |> Enum.map(& &1.modeline))}",
-      ""
-    ]
-
-    File.write("/tmp/minga_layout_debug.log", Enum.join(log_lines, "\n"), [:append])
-    :ok
-  rescue
-    e ->
-      Minga.Log.debug(:render, "Layout debug write failed: #{Exception.message(e)}")
-      :ok
   end
 end
