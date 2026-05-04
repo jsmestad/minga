@@ -60,7 +60,11 @@ defmodule MingaAgent.Notifier do
 
   @debounce_ms 5_000
 
-  @os_adapter Application.compile_env(:minga, :os_notify_adapter, MingaAgent.Notifier.OSAdapter.MacOS)
+  @os_adapter Application.compile_env(
+                :minga,
+                :os_notify_adapter,
+                MingaAgent.Notifier.OSAdapter.MacOS
+              )
 
   # ── Public API ──────────────────────────────────────────────────────────────
 
