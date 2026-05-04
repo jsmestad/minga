@@ -6,6 +6,8 @@ defmodule MingaEditor.Input.HandlerTest do
   alias Minga.Buffer.Server, as: BufferServer
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
+  alias MingaEditor.State.ModalOverlay
+  alias MingaEditor.State.ModalOverlay.Conflict, as: ConflictPayload
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
   alias MingaEditor.Frontend.Protocol
@@ -44,10 +46,10 @@ defmodule MingaEditor.Input.HandlerTest do
     test "handles 'r' key during conflict by reloading" do
       state = base_state()
       buf = state.workspace.buffers.active
-      state = %{state | workspace: %{state.workspace | pending_conflict: {buf, "/tmp/test.txt"}}}
+      state = ModalOverlay.open(state, :conflict, ConflictPayload.new(buf, "/tmp/test.txt"))
 
       assert {:handled, new_state} = ConflictPrompt.handle_key(state, ?r, 0)
-      assert new_state.workspace.pending_conflict == nil
+      refute ModalOverlay.match(new_state.shell_state.modal, :conflict)
       assert new_state.shell_state.status_msg =~ "reloaded"
     end
 
@@ -56,20 +58,20 @@ defmodule MingaEditor.Input.HandlerTest do
       File.write!(path, "hello\nworld")
       state = base_state(buffer_opts: [file_path: path])
       buf = state.workspace.buffers.active
-      state = %{state | workspace: %{state.workspace | pending_conflict: {buf, path}}}
+      state = ModalOverlay.open(state, :conflict, ConflictPayload.new(buf, path))
 
       assert {:handled, new_state} = ConflictPrompt.handle_key(state, ?k, 0)
-      assert new_state.workspace.pending_conflict == nil
+      refute ModalOverlay.match(new_state.shell_state.modal, :conflict)
     end
 
     test "swallows unrecognized keys during conflict" do
       state = base_state()
       buf = state.workspace.buffers.active
-      state = %{state | workspace: %{state.workspace | pending_conflict: {buf, "/tmp/test.txt"}}}
+      state = ModalOverlay.open(state, :conflict, ConflictPayload.new(buf, "/tmp/test.txt"))
 
       assert {:handled, new_state} = ConflictPrompt.handle_key(state, ?x, 0)
       # State unchanged except for swallowing the key
-      assert new_state.workspace.pending_conflict == {buf, "/tmp/test.txt"}
+      assert new_state.shell_state.modal == state.shell_state.modal
     end
   end
 

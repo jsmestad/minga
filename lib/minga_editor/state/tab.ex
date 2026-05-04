@@ -44,7 +44,6 @@ defmodule MingaEditor.State.Tab do
           optional(:completion_trigger) => term(),
           optional(:injection_ranges) => term(),
           optional(:search) => term(),
-          optional(:pending_conflict) => term(),
           optional(:editing) => MingaEditor.VimState.t(),
           # Legacy: old contexts may have :vim instead of :editing
           optional(:vim) => MingaEditor.VimState.t(),

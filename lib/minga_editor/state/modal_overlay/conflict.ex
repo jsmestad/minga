@@ -7,9 +7,9 @@ defmodule MingaEditor.State.ModalOverlay.Conflict do
   modal can be auto-dismissed when its buffer dies or the user switches
   away.
 
-  The legacy representation is `state.workspace.pending_conflict =
-  {buffer_pid, prompt_text}`. This struct mirrors that pair while making the
-  metadata explicit.
+  Before #1425 the conflict prompt lived as `state.workspace.pending_conflict
+  = {buffer_pid, prompt_text}`. This payload preserves that pair while
+  making the metadata explicit.
   """
 
   @type owner :: pid()

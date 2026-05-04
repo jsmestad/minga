@@ -46,9 +46,12 @@ defmodule MingaEditor.Input.RouterTest do
     end
 
     test "conflict prompt takes priority over mode FSM" do
+      alias MingaEditor.State.ModalOverlay
+      alias MingaEditor.State.ModalOverlay.Conflict, as: ConflictPayload
+
       state = base_state()
       buf = state.workspace.buffers.active
-      state = %{state | workspace: %{state.workspace | pending_conflict: {buf, "/tmp/test.txt"}}}
+      state = ModalOverlay.open(state, :conflict, ConflictPayload.new(buf, "/tmp/test.txt"))
 
       # 'j' is swallowed by conflict prompt, not forwarded to mode
       new_state = Router.dispatch(state, ?j, 0)

@@ -48,7 +48,7 @@ defmodule MingaEditor.FileChangeTest do
     _ = :sys.get_state(ctx.editor)
 
     state = :sys.get_state(ctx.editor)
-    assert state.workspace.pending_conflict != nil
+    assert MingaEditor.State.ModalOverlay.match(state.shell_state.modal, :conflict)
     assert state.shell_state.status_msg =~ "[r]eload"
     assert state.shell_state.status_msg =~ "[k]eep"
   end
@@ -78,7 +78,7 @@ defmodule MingaEditor.FileChangeTest do
 
     state = :sys.get_state(ctx.editor)
     assert state.shell_state.status_msg =~ "reloaded"
-    assert state.workspace.pending_conflict == nil
+    refute MingaEditor.State.ModalOverlay.match(state.shell_state.modal, :conflict)
   end
 
   @tag :tmp_dir
@@ -105,7 +105,7 @@ defmodule MingaEditor.FileChangeTest do
     assert String.contains?(content, "local")
 
     state = :sys.get_state(ctx.editor)
-    assert state.workspace.pending_conflict == nil
+    refute MingaEditor.State.ModalOverlay.match(state.shell_state.modal, :conflict)
   end
 
   @tag :tmp_dir
@@ -126,7 +126,7 @@ defmodule MingaEditor.FileChangeTest do
     _ = :sys.get_state(ctx.editor)
 
     state = :sys.get_state(ctx.editor)
-    assert state.workspace.pending_conflict != nil
+    assert MingaEditor.State.ModalOverlay.match(state.shell_state.modal, :conflict)
   end
 
   @tag :tmp_dir
@@ -139,7 +139,7 @@ defmodule MingaEditor.FileChangeTest do
     # Send notification for a different file
     send(ctx.editor, {:file_changed_on_disk, "/tmp/nonexistent.txt"})
     state = :sys.get_state(ctx.editor)
-    assert state.workspace.pending_conflict == nil
+    refute MingaEditor.State.ModalOverlay.match(state.shell_state.modal, :conflict)
     assert state.shell_state.status_msg == nil
   end
 

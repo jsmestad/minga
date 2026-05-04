@@ -34,7 +34,6 @@ defmodule MingaEditor.State do
 
   alias MingaEditor.BottomPanel
   alias MingaEditor.CompletionTrigger
-  alias MingaEditor.Dashboard
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.LSP, as: LSPState
@@ -43,7 +42,6 @@ defmodule MingaEditor.State do
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Highlighting
   alias MingaEditor.State.Mouse
-  alias MingaEditor.State.Prompt
   alias MingaEditor.State.Registers
   alias MingaEditor.State.Search
   alias MingaEditor.State.Tab
@@ -227,18 +225,6 @@ defmodule MingaEditor.State do
   def set_hover_popup(s, popup), do: update_shell_state(s, &ShellState.set_hover_popup(&1, popup))
   @spec dismiss_hover_popup(t()) :: t()
   def dismiss_hover_popup(s), do: update_shell_state(s, &ShellState.dismiss_hover_popup/1)
-
-  @spec dashboard(t()) :: Dashboard.state() | nil
-  def dashboard(%{shell_state: ss}), do: ShellState.dashboard(ss)
-  @spec set_dashboard(t(), Dashboard.state()) :: t()
-  def set_dashboard(s, dash), do: update_shell_state(s, &ShellState.set_dashboard(&1, dash))
-  @spec close_dashboard(t()) :: t()
-  def close_dashboard(s), do: update_shell_state(s, &ShellState.close_dashboard/1)
-
-  @spec prompt_ui(t()) :: Prompt.t()
-  def prompt_ui(%{shell_state: ss}), do: ShellState.prompt_ui(ss)
-  @spec set_prompt_ui(t(), Prompt.t()) :: t()
-  def set_prompt_ui(s, prompt), do: update_shell_state(s, &ShellState.set_prompt_ui(&1, prompt))
 
   @spec whichkey(t()) :: WhichKey.t()
   def whichkey(%{shell_state: ss}), do: ShellState.whichkey(ss)
@@ -945,7 +931,6 @@ defmodule MingaEditor.State do
       completion_trigger: CompletionTrigger.new(),
       injection_ranges: %{},
       search: %Search{},
-      pending_conflict: nil,
       editing: VimState.new(),
       document_highlights: nil,
       agent_ui: UIState.new()
@@ -978,7 +963,6 @@ defmodule MingaEditor.State do
       completion_trigger: CompletionTrigger.new(),
       injection_ranges: %{},
       search: %Search{},
-      pending_conflict: nil,
       editing: VimState.new(),
       document_highlights: nil,
       agent_ui: UIState.new()
@@ -1053,7 +1037,6 @@ defmodule MingaEditor.State do
       completion_trigger: Map.get(ss, :completion_trigger, CompletionTrigger.new()),
       injection_ranges: Map.get(ss, :injection_ranges, %{}),
       search: Map.get(ss, :search, %Search{}),
-      pending_conflict: Map.get(ss, :pending_conflict),
       editing: vim
     }
   end

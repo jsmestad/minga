@@ -32,4 +32,14 @@ defmodule MingaEditor.State.ModalOverlay.Prompt do
       opened_at: Keyword.get(opts, :opened_at, System.monotonic_time(:millisecond))
     }
   end
+
+  @doc """
+  Replaces the inner `prompt_ui` state on the payload, preserving `owner`
+  and `opened_at`. The only sanctioned way to update the inner state from
+  outside this module (Rule 2: state ownership).
+  """
+  @spec put_prompt_ui(t(), PromptState.t()) :: t()
+  def put_prompt_ui(%__MODULE__{} = payload, %PromptState{} = prompt_ui) do
+    %{payload | prompt_ui: prompt_ui}
+  end
 end

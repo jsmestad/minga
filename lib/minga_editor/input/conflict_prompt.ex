@@ -5,6 +5,10 @@ defmodule MingaEditor.Input.ConflictPrompt do
   When a buffer's file has been modified externally and the user hasn't
   responded yet, this handler intercepts all keys. `r` reloads the buffer
   from disk, `k` keeps the local version, and all other keys are swallowed.
+
+  The conflict prompt lives on `state.shell_state.modal` as
+  `{:conflict, %ModalOverlay.Conflict{}}`. While active, the gate's
+  conflict-sticky rule prevents other modals from opening on top.
   """
 
   @behaviour MingaEditor.Input.Handler
@@ -13,22 +17,31 @@ defmodule MingaEditor.Input.ConflictPrompt do
 
   alias Minga.Buffer
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.Workspace.State, as: WorkspaceState
+  alias MingaEditor.State.ModalOverlay
 
   @impl true
   @spec handle_key(state(), non_neg_integer(), non_neg_integer()) ::
           MingaEditor.Input.Handler.result()
-  def handle_key(%{workspace: %{pending_conflict: {buf, _path}}} = state, ?r, _mods)
+  def handle_key(
+        %{shell_state: %{modal: {:conflict, %{buffer: buf}}}} = state,
+        ?r,
+        _mods
+      )
       when is_pid(buf) do
     Buffer.reload(buf)
     name = Path.basename(Buffer.file_path(buf) || "buffer")
 
     {:handled,
-     EditorState.update_workspace(state, &WorkspaceState.set_pending_conflict(&1, nil))
+     state
+     |> ModalOverlay.dismiss()
      |> EditorState.set_status("#{name} reloaded (changed on disk)")}
   end
 
-  def handle_key(%{workspace: %{pending_conflict: {buf, _path}}} = state, ?k, _mods)
+  def handle_key(
+        %{shell_state: %{modal: {:conflict, %{buffer: buf}}}} = state,
+        ?k,
+        _mods
+      )
       when is_pid(buf) do
     buf_state = :sys.get_state(buf)
 
@@ -40,11 +53,10 @@ defmodule MingaEditor.Input.ConflictPrompt do
         :ok
     end
 
-    state = EditorState.update_workspace(state, &WorkspaceState.set_pending_conflict(&1, nil))
-    {:handled, EditorState.clear_status(state)}
+    {:handled, state |> ModalOverlay.dismiss() |> EditorState.clear_status()}
   end
 
-  def handle_key(%{workspace: %{pending_conflict: {_, _}}} = state, _cp, _mods) do
+  def handle_key(%{shell_state: %{modal: {:conflict, _}}} = state, _cp, _mods) do
     # Swallow all other keys while conflict prompt is active
     {:handled, state}
   end
