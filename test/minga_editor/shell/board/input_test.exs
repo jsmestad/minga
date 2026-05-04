@@ -7,11 +7,11 @@ defmodule MingaEditor.Shell.Board.InputTest do
   """
   use ExUnit.Case, async: true
 
+  alias MingaAgent.RuntimeState
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
-  alias MingaEditor.State.Windows
   alias MingaEditor.Viewport
-  alias MingaEditor.Window
   alias MingaEditor.Window.Content
   alias MingaEditor.Shell.Board
   alias MingaEditor.Shell.Board.Input, as: BoardInput
@@ -135,9 +135,11 @@ defmodule MingaEditor.Shell.Board.InputTest do
     end
 
     test "first-time zoom into agent card builds fresh workspace and activates agent view" do
-      # Set up a board with one agent card that has a session but no workspace
+      # Set up a board with one agent card that has a session but no workspace.
+      # The shell carries the agent buffer pid that the bootstrap helper uses
+      # to construct the agent-chat window.
       fake_session = spawn(fn -> Process.sleep(:infinity) end)
-      {:ok, buf_pid} = Minga.Buffer.start_link(content: "")
+      {:ok, agent_buf} = Minga.Buffer.start_link(content: "")
 
       board =
         BoardState.new()
@@ -145,34 +147,77 @@ defmodule MingaEditor.Shell.Board.InputTest do
           {b, _card} = BoardState.create_card(b, task: "Agent 1", session: fake_session)
           b
         end)
+        |> Map.put(:agent, %AgentState{buffer: agent_buf})
 
       # Ensure the focused card has workspace: nil (first-time zoom)
       focused_id = board.focused_card
       assert board.cards[focused_id].workspace == nil
 
-      # Build state with a window in the map so activate_for_card can set content
-      win = Window.new(1, buf_pid, 24, 80)
-      windows = %Windows{map: %{1 => win}, active: 1, next_id: 2}
-
+      # Start state has the grid's empty windows; the bootstrap helper
+      # replaces them with a fresh agent-chat window.
       state = %EditorState{
         port_manager: self(),
         shell: Board,
         shell_state: board,
-        workspace: %MingaEditor.Workspace.State{
-          viewport: Viewport.new(24, 80),
-          windows: windows
-        },
+        workspace: %MingaEditor.Workspace.State{viewport: Viewport.new(24, 80)},
         focus_stack: [BoardInput, MingaEditor.Input.GlobalBindings]
       }
 
       {:handled, new_state} = BoardInput.handle_key(state, @enter, 0)
 
-      # Agent activation should have set keymap scope to :agent
+      # Bootstrap should have set the agent keymap scope...
       assert new_state.workspace.keymap_scope == :agent
 
-      # Window content should be agent_chat
+      # ...and the active window must now be an agent-chat window backed by
+      # the card's session pid (set by AgentActivation, not the bootstrap).
       active_win = new_state.workspace.windows.map[new_state.workspace.windows.active]
       assert Content.agent_chat?(active_win.content)
+      assert active_win.content == Content.agent_chat(fake_session)
+      assert active_win.pinned == true
+    end
+
+    test "first-time zoom matches re-zoom shape (modulo prompt content)" do
+      # The acceptance criterion: first-zoom and re-zoom land in the same
+      # workspace shape — agent scope, agent-chat window, fresh agent_ui.
+      fake_session = spawn(fn -> Process.sleep(:infinity) end)
+      {:ok, agent_buf} = Minga.Buffer.start_link(content: "")
+
+      board =
+        BoardState.new()
+        |> then(fn b ->
+          {b, _card} = BoardState.create_card(b, task: "Agent 1", session: fake_session)
+          b
+        end)
+        |> Map.put(:agent, %AgentState{buffer: agent_buf})
+
+      state = %EditorState{
+        port_manager: self(),
+        shell: Board,
+        shell_state: board,
+        workspace: %MingaEditor.Workspace.State{viewport: Viewport.new(24, 80)},
+        focus_stack: [BoardInput, MingaEditor.Input.GlobalBindings]
+      }
+
+      # First zoom: bootstrap path
+      {:handled, after_first_zoom} = BoardInput.handle_key(state, @enter, 0)
+
+      # Zoom out then back in: snapshot/restore path
+      {:handled, after_zoom_out} = ZoomOut.handle_key(after_first_zoom, @escape, 0)
+      {:handled, after_second_zoom} = BoardInput.handle_key(after_zoom_out, @enter, 0)
+
+      # Both zoom-ins should produce the same shape.
+      assert after_first_zoom.workspace.keymap_scope ==
+               after_second_zoom.workspace.keymap_scope
+
+      first_win =
+        after_first_zoom.workspace.windows.map[after_first_zoom.workspace.windows.active]
+
+      second_win =
+        after_second_zoom.workspace.windows.map[after_second_zoom.workspace.windows.active]
+
+      assert Content.agent_chat?(first_win.content)
+      assert Content.agent_chat?(second_win.content)
+      assert first_win.content == second_win.content
     end
   end
 
@@ -210,6 +255,88 @@ defmodule MingaEditor.Shell.Board.InputTest do
       assert AgentAccess.session(new_state) == nil
       # The card still holds the pid so a subsequent zoom-in restores it.
       assert new_state.shell_state.cards[1].session == fake_pid
+    end
+
+    test "zoom-out clears the agent rendering cache so the grid view starts idle" do
+      # Card A is zoomed in with a busy/errored agent state cached on the
+      # shell. Zooming out must reset the cache so the grid isn't showing
+      # card A's status, error, or pending approval.
+      board =
+        BoardState.new()
+        |> then(fn b ->
+          {b, _card} = BoardState.create_card(b, task: "Agent A")
+          b
+        end)
+        |> Map.put(:agent, %AgentState{
+          runtime: %RuntimeState{status: :thinking},
+          error: "boom",
+          pending_approval: %{kind: :tool, name: "fake"}
+        })
+
+      board = BoardState.zoom_into(board, board.focused_card, %{fake: :grid_workspace})
+
+      state = %EditorState{
+        port_manager: self(),
+        shell: Board,
+        shell_state: board,
+        workspace: %MingaEditor.Workspace.State{viewport: Viewport.new(24, 80)},
+        focus_stack: [ZoomOut, MingaEditor.Input.GlobalBindings]
+      }
+
+      {:handled, new_state} = ZoomOut.handle_key(state, @escape, 0)
+
+      agent = AgentAccess.agent(new_state)
+      assert agent.runtime.status == :idle
+      assert agent.error == nil
+      assert agent.pending_approval == nil
+    end
+
+    test "zoom A → out → zoom B does not leak A's session into B's rendering cache" do
+      # Two cards with distinct sessions. After zooming through A and into
+      # B, the active session must report as B's pid (no leak from A).
+      session_a = spawn(fn -> Process.sleep(:infinity) end)
+      session_b = spawn(fn -> Process.sleep(:infinity) end)
+      {:ok, agent_buf} = Minga.Buffer.start_link(content: "")
+
+      board =
+        BoardState.new()
+        |> then(fn b ->
+          {b, _card_a} = BoardState.create_card(b, task: "A", session: session_a)
+          b
+        end)
+        |> then(fn b ->
+          {b, _card_b} = BoardState.create_card(b, task: "B", session: session_b)
+          b
+        end)
+        |> Map.put(:agent, %AgentState{buffer: agent_buf})
+
+      state = %EditorState{
+        port_manager: self(),
+        shell: Board,
+        shell_state: board,
+        workspace: %MingaEditor.Workspace.State{viewport: Viewport.new(24, 80)},
+        focus_stack: [BoardInput, ZoomOut, MingaEditor.Input.GlobalBindings]
+      }
+
+      # Focus A, zoom in.
+      board = BoardState.focus_card(state.shell_state, 1)
+      state = %{state | shell_state: board}
+      {:handled, state} = BoardInput.handle_key(state, @enter, 0)
+      assert AgentAccess.session(state) == session_a
+
+      # Zoom out: cache reset, grid view has no active session.
+      {:handled, state} = ZoomOut.handle_key(state, @escape, 0)
+      assert AgentAccess.session(state) == nil
+
+      # Focus B, zoom in. The active session must be B, not A.
+      board = BoardState.focus_card(state.shell_state, 2)
+      state = %{state | shell_state: board}
+      {:handled, state} = BoardInput.handle_key(state, @enter, 0)
+      assert AgentAccess.session(state) == session_b
+
+      # The cards still hold their original sessions.
+      assert state.shell_state.cards[1].session == session_a
+      assert state.shell_state.cards[2].session == session_b
     end
 
     test "passes through when not zoomed" do
