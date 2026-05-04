@@ -45,3 +45,7 @@ config :minga,
 # headless test harness. Setting :infinity prevents the timer from firing
 # while still allowing the which-key popup to render via explicit tests.
 config :minga, whichkey_timeout_ms: :infinity
+
+# Disable OS-level agent notifications (osascript) in tests to prevent
+# real macOS notifications from firing during the test suite.
+config :minga, os_notify_adapter: MingaAgent.Notifier.OSAdapter.Noop
