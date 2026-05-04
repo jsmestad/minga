@@ -15,7 +15,7 @@ defmodule MingaEditor.RenderPipeline.InvalidationTest do
       inv = %Invalidation{}
       assert inv.full_redraw == true
       assert inv.windows == %{}
-      assert MapSet.size(inv.chrome_regions) == 0
+      assert inv.chrome_regions == nil
       assert inv.global_reasons == []
     end
 
