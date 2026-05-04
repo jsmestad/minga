@@ -1,3 +1,42 @@
+defmodule MingaAgent.Notifier.OSAdapter do
+  @moduledoc false
+  @callback send_notification(title :: String.t(), message :: String.t()) :: :ok
+end
+
+defmodule MingaAgent.Notifier.OSAdapter.MacOS do
+  @moduledoc false
+  @behaviour MingaAgent.Notifier.OSAdapter
+
+  @spec send_notification(String.t(), String.t()) :: :ok
+  def send_notification(title, message) do
+    spawn(fn ->
+      System.cmd("osascript", [
+        "-e",
+        ~s(display notification "#{escape(message)}" with title "#{escape(title)}")
+      ])
+    end)
+
+    :ok
+  rescue
+    e ->
+      Minga.Log.debug(:agent, "OS notification failed: #{Exception.message(e)}")
+      :ok
+  end
+
+  @spec escape(String.t()) :: String.t()
+  defp escape(text) do
+    text |> String.replace("\\", "\\\\") |> String.replace("\"", "\\\"") |> String.slice(0, 200)
+  end
+end
+
+defmodule MingaAgent.Notifier.OSAdapter.Noop do
+  @moduledoc false
+  @behaviour MingaAgent.Notifier.OSAdapter
+
+  @spec send_notification(String.t(), String.t()) :: :ok
+  def send_notification(_title, _message), do: :ok
+end
+
 defmodule MingaAgent.Notifier do
   @moduledoc """
   Sends OS-level notifications when the agent needs user attention.
@@ -20,6 +59,12 @@ defmodule MingaAgent.Notifier do
   @type trigger :: :approval | :complete | :error
 
   @debounce_ms 5_000
+
+  @os_adapter Application.compile_env(
+                :minga,
+                :os_notify_adapter,
+                MingaAgent.Notifier.OSAdapter.MacOS
+              )
 
   # ── Public API ──────────────────────────────────────────────────────────────
 
@@ -98,34 +143,16 @@ defmodule MingaAgent.Notifier do
 
   @spec send_os_notification(trigger(), String.t()) :: :ok
   defp send_os_notification(trigger, message) do
-    title =
-      case trigger do
-        :approval -> "Minga: Approval Needed"
-        :complete -> "Minga: Agent Finished"
-        :error -> "Minga: Agent Error"
-      end
-
-    # macOS: use osascript for native notifications.
-    # Falls back silently on non-macOS.
-    spawn(fn ->
-      System.cmd("osascript", [
-        "-e",
-        ~s(display notification "#{escape_applescript(message)}" with title "#{escape_applescript(title)}")
-      ])
-    end)
-
-    :ok
-  rescue
-    e ->
-      Minga.Log.debug(:agent, "OS notification failed: #{Exception.message(e)}")
-      :ok
+    title = title_for(trigger)
+    @os_adapter.send_notification(title, message)
   end
 
-  @spec escape_applescript(String.t()) :: String.t()
-  defp escape_applescript(text) do
-    text
-    |> String.replace("\\", "\\\\")
-    |> String.replace("\"", "\\\"")
-    |> String.slice(0, 200)
+  @spec title_for(trigger()) :: String.t()
+  defp title_for(trigger) do
+    case trigger do
+      :approval -> "Minga: Approval Needed"
+      :complete -> "Minga: Agent Finished"
+      :error -> "Minga: Agent Error"
+    end
   end
 end
