@@ -27,6 +27,11 @@ defmodule MingaEditor.Shell.Traditional do
   """
 
   @behaviour MingaEditor.Shell
+  @behaviour MingaEditor.Shell.Layout
+  @behaviour MingaEditor.Shell.Chrome
+  @behaviour MingaEditor.Shell.InputRouter
+  @behaviour MingaEditor.Shell.BufferLifecycle
+  @behaviour MingaEditor.Shell.TabQueries
 
   alias MingaEditor.Agent.UIState
   alias Minga.Buffer

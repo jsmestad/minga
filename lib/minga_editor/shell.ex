@@ -1,22 +1,41 @@
 defmodule MingaEditor.Shell do
   @moduledoc """
-  Behaviour for pluggable presentation shells.
+  Umbrella behaviour for pluggable presentation shells.
 
-  A shell owns layout, chrome, input routing, and rendering for a
-  specific UX model. The traditional editor, The Board, and headless
-  mode are all shells. The workspace (core editing state) is shared;
-  the shell decides how to present it.
+  A shell owns layout, chrome, input routing, buffer lifecycle, and
+  tab queries. Each responsibility is a focused sub-behaviour:
+
+  - `MingaEditor.Shell.Layout`           — `compute_layout/1`
+  - `MingaEditor.Shell.Chrome`           — `build_chrome/4`, `render/1`
+  - `MingaEditor.Shell.InputRouter`      — `input_handlers/1`,
+    `handle_event/3`, `handle_gui_action/3`
+  - `MingaEditor.Shell.BufferLifecycle`  — `on_buffer_added/4`,
+    `on_buffer_switched/2`, `on_buffer_died/3`, `on_agent_event/4`
+  - `MingaEditor.Shell.TabQueries`       — `active_tab/1`,
+    `find_tab_by_buffer/2`, `active_tab_kind/1`, `set_tab_session/3`,
+    `active_session/1`
+
+  This umbrella declares only `init/1` (the constructor every shell
+  needs); all other callbacks live on their respective sub-behaviours.
+  Existing shells (`Traditional`, `Board`) implement the umbrella plus
+  every sub-behaviour. A future tab-less shell can implement just the
+  sub-behaviours it cares about (e.g., skip `TabQueries` entirely if
+  no tab UI is rendered) and `EditorState`/`AgentAccess` callers that
+  go through `Shell.active_session/1` will continue to work because
+  they read through the field, not the type.
 
   ## Implementation
 
-  Implement all callbacks in a module and set it as the `:shell` field
-  on `MingaEditor.State`. The Editor GenServer dispatches to the active
-  shell for presentation concerns.
+  Implement `init/1` plus the sub-behaviours your shell needs, then
+  set the module as the `:shell` field on `MingaEditor.State`. The
+  Editor GenServer dispatches to the active shell for presentation
+  concerns.
 
   ## Available shells
 
-  - `MingaEditor.Shell.Traditional` — tab-based editor with file tree, modeline,
-    picker, and agent panel. The default shell and the only one today.
+  - `MingaEditor.Shell.Traditional` — tab-based editor with file tree,
+    modeline, picker, and agent panel. The default shell.
+  - `MingaEditor.Shell.Board` — agent supervisor card view.
   """
 
   @typedoc "Shell-specific state. Each shell defines its own struct."
@@ -25,194 +44,16 @@ defmodule MingaEditor.Shell do
   @typedoc "Workspace state (the editing context shared by all shells)."
   @type workspace :: MingaEditor.Workspace.State.t()
 
-  @doc """
-  Initialize shell state from config and initial workspace.
+  @typedoc """
+  Why a buffer was added — re-exported here from `Shell.BufferLifecycle`
+  so existing call sites that use `MingaEditor.Shell.buffer_add_context/0`
+  keep compiling.
+  """
+  @type buffer_add_context :: MingaEditor.Shell.BufferLifecycle.buffer_add_context()
 
-  Called once during Editor startup. Returns the shell's initial state.
+  @doc """
+  Initialize shell state from config. Called once during Editor startup.
+  Returns the shell's initial state.
   """
   @callback init(opts :: keyword()) :: shell_state()
-
-  @doc """
-  Handle a shell-specific event (tool prompt, nav flash, git status, etc.).
-
-  Returns the updated shell state and workspace. The Editor GenServer
-  calls this for events that are presentation concerns, not core editing.
-  """
-  @callback handle_event(shell_state(), workspace(), event :: term()) ::
-              {shell_state(), workspace()}
-
-  @doc """
-  Handle a shell-specific GUI action from the native frontend.
-
-  Returns the updated shell state and workspace.
-  """
-  @callback handle_gui_action(shell_state(), workspace(), action :: term()) ::
-              {shell_state(), workspace()}
-
-  @doc """
-  Returns the input handler stack for this shell.
-
-  Overlay handlers (picker, completion, conflict prompt) sit above
-  the surface and intercept keys first. Surface handlers (dashboard,
-  file tree, agent panel, mode dispatch) handle keys when no overlay
-  claims them. The Editor walks overlays first, then surfaces.
-  """
-  @callback input_handlers(editor_state :: term()) :: %{overlay: [module()], surface: [module()]}
-
-  @doc """
-  Compute spatial layout for the current state.
-
-  Returns a layout struct with named rectangles for each UI region.
-  The shell decides what regions exist (tab bar, modeline, file tree,
-  editor panes, agent panel, bottom panel, etc.).
-  """
-  @callback compute_layout(editor_state :: term()) :: MingaEditor.Layout.t()
-
-  @doc """
-  Build chrome (tab bar, modeline, file tree, overlays, etc.).
-
-  Returns a chrome struct with draw lists for each UI region. The
-  shell decides which chrome elements exist and how they render.
-  """
-  @callback build_chrome(
-              editor_state :: term(),
-              layout :: MingaEditor.Layout.t(),
-              scrolls :: map(),
-              cursor_info :: term()
-            ) :: MingaEditor.RenderPipeline.Chrome.t()
-
-  @doc """
-  Render a complete frame.
-
-  Runs the full render pipeline (content, chrome, compose, emit) and
-  sends commands to the frontend. Returns updated state with cached
-  render data.
-  """
-  @callback render(editor_state :: term()) :: term()
-
-  # -------------------------------------------------------------------
-  # Buffer lifecycle callbacks
-  #
-  # The Editor GenServer calls these when buffers are added, switched,
-  # or die. Each shell decides how to present the change (e.g.,
-  # Traditional manages tab bar state, Board ignores or routes to cards).
-  #
-  # Callbacks receive (shell_state, workspace, ...) — never full
-  # EditorState — so they cannot touch process monitors, render timers,
-  # or port managers. Generic concerns stay in EditorState.
-  # -------------------------------------------------------------------
-
-  @typedoc """
-  Why a buffer was added. Shells use this to decide tab presentation.
-
-  - `:open` — permanent open (file tree, `:e`, LSP jump, picker confirm).
-    Creates a new tab or switches to an existing one.
-  - `:preview` — transient picker preview. Updates the current tab
-    in-place so navigating the picker doesn't spawn new tabs.
-  """
-  @type buffer_add_context :: :open | :preview
-
-  @doc """
-  A buffer was added to the workspace.
-
-  Called after the buffer pid is in `workspace.buffers` and monitored.
-  The shell decides how to present it (e.g., create/update tabs, route
-  to a card, or ignore). `context` tells the shell WHY the buffer was
-  added so it can choose the right presentation strategy.
-  """
-  @callback on_buffer_added(
-              shell_state(),
-              workspace(),
-              buffer_pid :: pid(),
-              context :: buffer_add_context()
-            ) ::
-              {shell_state(), workspace()}
-
-  @doc """
-  The active buffer changed.
-
-  Called after `workspace.buffers.active` has been updated. The shell
-  decides whether to sync the active window, update chrome, etc.
-  """
-  @callback on_buffer_switched(shell_state(), workspace()) ::
-              {shell_state(), workspace()}
-
-  @doc """
-  A buffer process died.
-
-  Called after the dead buffer has been removed from `workspace.buffers`.
-  The shell cleans up any references (tab entries, card associations, etc.).
-  """
-  @callback on_buffer_died(shell_state(), workspace(), dead_pid :: pid()) ::
-              {shell_state(), workspace()}
-
-  # -------------------------------------------------------------------
-  # Agent event callbacks
-  #
-  # Called by the Editor GenServer when an agent session emits an event
-  # for a background tab/card (not the active one). Each shell decides
-  # how to reflect the status change in its chrome (tab badges, card
-  # status icons, etc.).
-  # -------------------------------------------------------------------
-
-  @doc """
-  A background agent session emitted an event.
-
-  Called when `session_pid` is not the active session. The shell updates
-  its presentation state (tab badges, card status, attention flags, etc.).
-  """
-  @callback on_agent_event(
-              shell_state(),
-              workspace(),
-              session_pid :: pid(),
-              event :: term()
-            ) :: {shell_state(), workspace()}
-
-  # -------------------------------------------------------------------
-  # Tab query/mutation delegates
-  #
-  # EditorState delegates these to the active shell so it never
-  # pattern-matches on `tab_bar:` directly. Traditional implements
-  # with TabBar lookups; Board returns static defaults.
-  # -------------------------------------------------------------------
-
-  @doc """
-  Returns the currently active tab, or `nil` if the shell has no tabs.
-  """
-  @callback active_tab(shell_state()) :: MingaEditor.State.Tab.t() | nil
-
-  @doc """
-  Finds the file tab whose snapshotted workspace has `pid` as active buffer.
-
-  Returns `nil` if the shell has no tabs or no matching tab exists.
-  """
-  @callback find_tab_by_buffer(shell_state(), pid()) :: MingaEditor.State.Tab.t() | nil
-
-  @doc """
-  Returns the kind (`:file` or `:agent`) of the active tab.
-
-  Shells without tabs return `:file` (the default content kind).
-  """
-  @callback active_tab_kind(shell_state()) :: atom()
-
-  @doc """
-  Associates a session pid with a tab. Returns updated shell state.
-
-  No-op for shells without tabs.
-  """
-  @callback set_tab_session(shell_state(), tab_id :: term(), pid() | nil) :: shell_state()
-
-  @doc """
-  Returns the agent session pid associated with the user's current view.
-
-  For Traditional, this is the active tab's `:session`. For Board, this is
-  the zoomed card's `:session`. Returns `nil` when no session is in scope
-  (no tab/card, or that tab/card has no session yet).
-
-  This callback is the source of truth for "which agent session is the user
-  looking at right now". The editor's `state.shell_state.agent` struct holds
-  rendering caches (status, error, pending_approval) populated from this pid;
-  the pid itself lives on the tab or card.
-  """
-  @callback active_session(shell_state()) :: pid() | nil
 end
