@@ -191,6 +191,23 @@ defmodule Minga.Config.Options do
   @spec default_server() :: server()
   def default_server, do: @default_server
 
+  @doc """
+  Asserts that `server` is a valid `server/0` reference (pid or non-nil atom).
+
+  Raises `ArgumentError` otherwise. Use at boundaries that accept a caller-
+  supplied `:options_server` opt — bad values would otherwise silently
+  short-circuit later (e.g. `Process.get(:minga_config_options, default)`
+  returns `nil` if the key is set to `nil`, defeating the fallback).
+  """
+  @spec validate_server!(term()) :: server()
+  def validate_server!(server) when is_pid(server), do: server
+  def validate_server!(server) when is_atom(server) and not is_nil(server), do: server
+
+  def validate_server!(invalid) do
+    raise ArgumentError,
+          "expected Minga.Config.Options server (pid or non-nil atom), got: #{inspect(invalid)}"
+  end
+
   @option_specs [
     {:editing_model, {:enum, [:vim, :cua]}, :vim},
     {:space_leader, {:enum, [:chord, :off]}, :chord},
@@ -296,6 +313,10 @@ defmodule Minga.Config.Options do
 
   @impl GenServer
   def init(:anonymous) do
+    # The first arg to :ets.new/2 is a tag, not a table identity, when
+    # :named_table is omitted. Do NOT add :named_table here — multiple
+    # anonymous Options servers may run concurrently (per-test isolation),
+    # and a named ETS table can only exist once per BEAM node.
     table = :ets.new(:config_options, [:set, :public, read_concurrency: true])
     seed_defaults(table)
     {:ok, %{table: table}}

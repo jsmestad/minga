@@ -8,12 +8,15 @@ defmodule MingaEditor.State.OptionsServerThreadingTest do
   from the same server, picked from the process dictionary.
 
   Here we start two anonymous `Config.Options` servers, point an `EditorState`
-  at one of them, and assert that reads through `EditorState.options_server/1`
-  honor that choice rather than falling back to the singleton.
+  at one of them, and assert that the only `lib/` consumer of the field today
+  (`Startup.apply_gui_defaults/2`) actually mutates the server pointed to by
+  `EditorState.options_server/1` rather than falling back to the singleton.
   """
   use ExUnit.Case, async: true
 
   alias Minga.Config.Options
+  alias MingaEditor.Frontend.Capabilities
+  alias MingaEditor.Startup
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.Viewport
@@ -52,6 +55,24 @@ defmodule MingaEditor.State.OptionsServerThreadingTest do
     # server the state points at, even when both have written to the same key.
     assert Options.get(EditorState.options_server(state_a), :tab_width) == 4
     assert Options.get(EditorState.options_server(state_b), :tab_width) == 8
+  end
+
+  test "Startup.apply_gui_defaults writes through EditorState.options_server" do
+    # Drives the actual lib/ consumer: a stub that read EditorState.options_server
+    # but ignored its value would let writes leak to the default singleton, and
+    # this assertion would fail.
+    server_a = start_supervised!({Options, name: nil}, id: :gui_a)
+    server_b = start_supervised!({Options, name: nil}, id: :gui_b)
+    state_a = build_state(server_a)
+    gui_caps = %Capabilities{frontend_type: :native_gui}
+
+    Startup.apply_gui_defaults(gui_caps, EditorState.options_server(state_a))
+
+    assert Options.get(server_a, :line_numbers) == :absolute
+    assert Options.get(server_a, :line_spacing) == 1.2
+    # The unrelated server is untouched, proving isolation.
+    assert Options.get(server_b, :line_numbers) == :hybrid
+    assert Options.get(server_b, :line_spacing) == 1.0
   end
 
   test "EditorState defaults options_server to Minga.Config.Options.default_server/0" do

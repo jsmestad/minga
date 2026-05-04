@@ -45,7 +45,12 @@ defmodule MingaEditor.Startup do
     backend = Keyword.get(opts, :backend, :headless)
     port_manager = Keyword.get(opts, :port_manager, MingaEditor.Frontend.Manager)
     keymap_server = Keyword.get(opts, :keymap_server, Minga.Keymap.default_server())
-    options_server = Keyword.get(opts, :options_server, Minga.Config.Options.default_server())
+
+    options_server =
+      opts
+      |> Keyword.get(:options_server, Minga.Config.Options.default_server())
+      |> Minga.Config.Options.validate_server!()
+
     width = Keyword.get(opts, :width, 80)
     height = Keyword.get(opts, :height, 24)
     buffer = Keyword.get(opts, :buffer)
@@ -331,7 +336,7 @@ defmodule MingaEditor.Startup do
   """
   @spec apply_gui_defaults(MingaEditor.Frontend.Capabilities.t(), Minga.Config.Options.server()) ::
           :ok
-  def apply_gui_defaults(caps, options_server \\ Minga.Config.Options.default_server()) do
+  def apply_gui_defaults(caps, options_server) do
     alias MingaEditor.Frontend.Capabilities
 
     if Capabilities.gui?(caps) do

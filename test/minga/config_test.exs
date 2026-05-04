@@ -74,12 +74,12 @@ defmodule Minga.ConfigTest do
 
   @spec test_keymap_server() :: GenServer.server()
   defp test_keymap_server do
-    Process.get(:minga_config_keymap, KeymapActive)
+    Process.get(:minga_config_keymap, Minga.Keymap.default_server())
   end
 
   @spec test_options_server() :: GenServer.server()
   defp test_options_server do
-    Process.get(:minga_config_options, Options)
+    Process.get(:minga_config_options, Options.default_server())
   end
 
   describe "use Minga.Config" do

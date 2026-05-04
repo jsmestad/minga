@@ -51,10 +51,19 @@ defmodule Minga.Config do
 
   @spec options_server() :: Options.server()
   defp options_server do
-    Process.get(:minga_config_options, Options.default_server())
+    case Process.get(:minga_config_options) do
+      nil -> Options.default_server()
+      server -> Options.validate_server!(server)
+    end
   end
 
   # ── Read options ───────────────────────────────────────────────────
+  #
+  # Reads consult `options_server()` so callers running inside a
+  # `Loader.load_all/2` window see the per-test/per-editor server and not
+  # the global singleton. This matches the write path; without it, an .exs
+  # snippet like `if Config.get(:foo) == :x, do: set(:foo, :y)` would read
+  # from one server and write to another.
 
   @doc """
   Reads a config option value.
@@ -65,7 +74,7 @@ defmodule Minga.Config do
       Config.get(:theme)        #=> :doom_one
   """
   @spec get(Options.option_name()) :: term()
-  defdelegate get(name), to: Options
+  def get(name), do: Options.get(options_server(), name)
 
   @doc """
   Reads a config option, merging per-filetype overrides when present.
@@ -74,7 +83,8 @@ defmodule Minga.Config do
   otherwise falls back to the global value.
   """
   @spec get_for_filetype(Options.option_name(), atom() | nil) :: term()
-  defdelegate get_for_filetype(name, filetype), to: Options
+  def get_for_filetype(name, filetype),
+    do: Options.get_for_filetype(options_server(), name, filetype)
 
   @doc """
   Reads an extension option value.
@@ -84,13 +94,15 @@ defmodule Minga.Config do
       Config.get_extension_option(:minga_org, :conceal)  #=> true
   """
   @spec get_extension_option(atom(), atom()) :: term()
-  defdelegate get_extension_option(ext_name, opt_name), to: Options
+  def get_extension_option(ext_name, opt_name),
+    do: Options.get_extension_option(options_server(), ext_name, opt_name)
 
   @doc """
   Reads an extension option, merging per-filetype overrides when present.
   """
   @spec get_extension_option_for_filetype(atom(), atom(), atom() | nil) :: term()
-  defdelegate get_extension_option_for_filetype(ext_name, opt_name, filetype), to: Options
+  def get_extension_option_for_filetype(ext_name, opt_name, filetype),
+    do: Options.get_extension_option_for_filetype(options_server(), ext_name, opt_name, filetype)
 
   # ── Write options (non-raising) ────────────────────────────────────
 
@@ -101,22 +113,29 @@ defmodule Minga.Config do
   returns the result tuple for callers that handle errors themselves.
   """
   @spec set_option(Options.option_name(), term()) :: {:ok, term()} | {:error, String.t()}
-  defdelegate set_option(name, value), to: Options, as: :set
+  def set_option(name, value), do: Options.set(options_server(), name, value)
 
   @doc """
   Sets an extension option, returning `{:ok, value}` or `{:error, message}`.
   """
   @spec set_extension_option!(atom(), atom(), term()) :: {:ok, term()} | {:error, String.t()}
-  defdelegate set_extension_option!(ext_name, opt_name, value),
-    to: Options,
-    as: :set_extension_option
+  def set_extension_option!(ext_name, opt_name, value),
+    do: Options.set_extension_option(options_server(), ext_name, opt_name, value)
 
   @doc """
   Sets an extension option override for a specific filetype.
   """
   @spec set_extension_option_for_filetype(atom(), atom(), atom(), term()) ::
           {:ok, term()} | {:error, String.t()}
-  defdelegate set_extension_option_for_filetype(ext_name, filetype, opt_name, value), to: Options
+  def set_extension_option_for_filetype(ext_name, filetype, opt_name, value),
+    do:
+      Options.set_extension_option_for_filetype(
+        options_server(),
+        ext_name,
+        filetype,
+        opt_name,
+        value
+      )
 
   # ── Extension schema ───────────────────────────────────────────────
 
@@ -126,14 +145,16 @@ defmodule Minga.Config do
   Called by the extension supervisor when loading an extension.
   """
   @spec register_extension_schema(atom(), [Minga.Extension.option_spec()], keyword()) ::
-          :ok | {:error, [String.t()]}
-  defdelegate register_extension_schema(ext_name, schema, user_config), to: Options
+          :ok | {:error, String.t()}
+  def register_extension_schema(ext_name, schema, user_config),
+    do: Options.register_extension_schema(options_server(), ext_name, schema, user_config)
 
   @doc """
   Returns the registered option schema for an extension, or nil.
   """
   @spec extension_schema(atom()) :: [Minga.Extension.option_spec()] | nil
-  defdelegate extension_schema(ext_name), to: Options
+  def extension_schema(ext_name),
+    do: Options.extension_schema(options_server(), ext_name)
 
   # ── Command advice ─────────────────────────────────────────────────
 

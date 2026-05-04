@@ -48,7 +48,7 @@ defmodule Minga.Config.LoaderTest do
 
   @spec test_options_server() :: GenServer.server()
   defp test_options_server do
-    Process.get(:minga_config_options, Options)
+    Process.get(:minga_config_options, Options.default_server())
   end
 
   describe "config_path/1" do
@@ -416,6 +416,108 @@ defmodule Minga.Config.LoaderTest do
 
       assert {:error, msg} = Loader.reload(pid)
       assert is_binary(msg)
+    end
+  end
+
+  describe "pdict bridge isolation" do
+    test "Loader.start_link does not leak :minga_config_options into the caller pdict" do
+      # The bridge mutations happen inside the Agent process running load_all,
+      # not in the calling process. Verify nothing leaks back: the test's own
+      # pdict value (set by setup) must be unchanged after Loader runs.
+      {_dir, cleanup} = make_config_dir("")
+      on_exit(cleanup)
+
+      caller_before = Process.get(:minga_config_options)
+
+      name = :"loader_pdict_isolation_#{System.unique_integer([:positive])}"
+      {:ok, _pid} = Loader.start_link(name: name)
+
+      assert Process.get(:minga_config_options) == caller_before
+    end
+
+    test "user config raise during eval still completes the load with an error" do
+      # The Loader's try/after restores the pdict bridge regardless of whether
+      # eval_config_file's rescue caught the user-config raise. This test drives
+      # the raise path and confirms (a) the loader still starts cleanly and
+      # (b) the error is captured rather than crashing the Agent. If the bridge
+      # had leaked, subsequent Loader.load_error/1 calls would fail.
+      {_dir, cleanup} =
+        make_config_dir("""
+        use Minga.Config
+        raise "intentional config-eval failure"
+        """)
+
+      on_exit(cleanup)
+
+      caller_before = Process.get(:minga_config_options)
+
+      name = :"loader_raise_pdict_#{System.unique_integer([:positive])}"
+      {:ok, pid} = Loader.start_link(name: name)
+
+      assert is_binary(Loader.load_error(pid))
+      assert Process.get(:minga_config_options) == caller_before
+    end
+  end
+
+  describe "apply_log_level (via Loader)" do
+    test "raises Logger level when config sets a more restrictive level" do
+      # apply_log_level/1 only applies the config value when it's *more*
+      # restrictive than the current Logger level. Mix test config sets
+      # :warning, so :error is :gt :warning and should be applied.
+      original_level = Logger.level()
+      Logger.configure(level: :info)
+
+      {_dir, cleanup} =
+        make_config_dir("""
+        use Minga.Config
+        set :log_level, :error
+        """)
+
+      on_exit(fn ->
+        Logger.configure(level: original_level)
+        cleanup.()
+      end)
+
+      name = :"loader_log_level_raise_#{System.unique_integer([:positive])}"
+      {:ok, _pid} = Loader.start_link(name: name)
+
+      assert Logger.level() == :error
+    end
+
+    test "leaves Logger level alone when config is less restrictive than current" do
+      original_level = Logger.level()
+      Logger.configure(level: :error)
+
+      {_dir, cleanup} =
+        make_config_dir("""
+        use Minga.Config
+        set :log_level, :debug
+        """)
+
+      on_exit(fn ->
+        Logger.configure(level: original_level)
+        cleanup.()
+      end)
+
+      name = :"loader_log_level_keep_#{System.unique_integer([:positive])}"
+      {:ok, _pid} = Loader.start_link(name: name)
+
+      # :debug is not :gt :error, so Logger.configure must not have been
+      # called: the existing :error level wins.
+      assert Logger.level() == :error
+    end
+
+    test "rescues ArgumentError when Options ETS table does not exist" do
+      # Pointing the loader at a registered name with no backing ETS table
+      # would otherwise crash apply_log_level/1 on :ets.lookup. The narrow
+      # rescue keeps loader startup unaffected; everything else still runs.
+      {_dir, cleanup} = make_config_dir("")
+      on_exit(cleanup)
+
+      name = :"loader_log_level_rescue_#{System.unique_integer([:positive])}"
+
+      assert {:ok, _pid} =
+               Loader.start_link(name: name, options_server: :nonexistent_options_server)
     end
   end
 

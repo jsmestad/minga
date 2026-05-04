@@ -74,11 +74,12 @@ defmodule Minga.Config.Loader do
       )
 
     options_server =
-      Keyword.get(
-        opts,
+      opts
+      |> Keyword.get(
         :options_server,
         Process.get(:minga_config_options, Options.default_server())
       )
+      |> Options.validate_server!()
 
     Agent.start_link(fn -> load_all(keymap_server, options_server) end, name: name)
   end
@@ -172,7 +173,7 @@ defmodule Minga.Config.Loader do
           }
       end)
 
-    Options.reset(options_server)
+    maybe_reset_options(options_server)
     Hooks.reset()
     Advice.reset()
     Keymap.reset(keymap_server)
@@ -282,6 +283,27 @@ defmodule Minga.Config.Loader do
   defp restore_pdict(key, nil), do: Process.delete(key)
   defp restore_pdict(key, value), do: Process.put(key, value)
 
+  # Skips the reset if the persisted options_server is no longer alive (anonymous
+  # pid that crashed and was never restarted) or never registered. Otherwise
+  # `Options.reset/1` exits with :noproc, taking the loader Agent down with it.
+  @spec maybe_reset_options(options_server()) :: :ok
+  defp maybe_reset_options(server) do
+    if options_server_alive?(server) do
+      Options.reset(server)
+    else
+      Minga.Log.warning(
+        :config,
+        "Loader.reload: options_server #{inspect(server)} not alive, skipping reset"
+      )
+    end
+
+    :ok
+  end
+
+  @spec options_server_alive?(options_server()) :: boolean()
+  defp options_server_alive?(pid) when is_pid(pid), do: Process.alive?(pid)
+  defp options_server_alive?(name) when is_atom(name), do: Process.whereis(name) != nil
+
   @spec load_user_themes() :: :ok
   defp load_user_themes do
     Minga.Events.broadcast(:load_user_themes, %Minga.Events.LoadUserThemesEvent{})
@@ -303,8 +325,10 @@ defmodule Minga.Config.Loader do
 
     :ok
   rescue
-    # Options agent may not be running yet (e.g., during tests)
-    _ -> :ok
+    # The Options ETS table is not registered yet (typically the suite-wide
+    # singleton hasn't booted under test). Other failure modes — wrong
+    # log_level value, Logger crashes — are real bugs and should propagate.
+    ArgumentError -> :ok
   end
 
   @spec compile_user_modules(String.t()) :: {[module()], [String.t()]}
