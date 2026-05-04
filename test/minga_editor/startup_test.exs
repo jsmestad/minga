@@ -4,6 +4,7 @@ defmodule MingaEditor.StartupTest do
   use ExUnit.Case, async: false
 
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Config.Options
   alias MingaEditor.LayoutPreset
   alias MingaEditor.Startup
   alias MingaEditor.State, as: EditorState
@@ -42,88 +43,95 @@ defmodule MingaEditor.StartupTest do
     end
   end
 
-  describe "apply_gui_defaults/1" do
-    test "sets line_spacing to 1.2 for GUI frontend" do
-      gui_caps = %MingaEditor.Frontend.Capabilities{frontend_type: :native_gui}
-      Minga.Config.Options.set(:line_spacing, 1.0)
-
-      Startup.apply_gui_defaults(gui_caps)
-
-      assert Minga.Config.Options.get(:line_spacing) == 1.2
-    after
-      Minga.Config.Options.set(:line_spacing, 1.0)
-      Minga.Config.Options.set(:line_numbers, :hybrid)
+  describe "apply_gui_defaults/2" do
+    setup do
+      # Per-test isolated Options server keeps these cases from racing on the
+      # global singleton and lets us assert exactly which server received the
+      # writes (proving the threading argument is honored).
+      server = start_supervised!({Options, name: nil})
+      %{server: server}
     end
 
-    test "does not change line_spacing for TUI frontend" do
+    test "sets line_spacing to 1.2 for GUI frontend", %{server: server} do
+      gui_caps = %MingaEditor.Frontend.Capabilities{frontend_type: :native_gui}
+
+      Startup.apply_gui_defaults(gui_caps, server)
+
+      assert Options.get(server, :line_spacing) == 1.2
+    end
+
+    test "does not change line_spacing for TUI frontend", %{server: server} do
       tui_caps = %MingaEditor.Frontend.Capabilities{frontend_type: :tui}
-      Minga.Config.Options.set(:line_spacing, 1.0)
 
-      Startup.apply_gui_defaults(tui_caps)
+      Startup.apply_gui_defaults(tui_caps, server)
 
-      assert Minga.Config.Options.get(:line_spacing) == 1.0
+      assert Options.get(server, :line_spacing) == 1.0
     end
 
-    test "respects explicit user override to custom line_spacing in GUI mode" do
+    test "respects explicit user override to custom line_spacing in GUI mode",
+         %{server: server} do
       gui_caps = %MingaEditor.Frontend.Capabilities{frontend_type: :native_gui}
-      Minga.Config.Options.set(:line_spacing, 1.5)
+      {:ok, _} = Options.set(server, :line_spacing, 1.5)
 
-      Startup.apply_gui_defaults(gui_caps)
+      Startup.apply_gui_defaults(gui_caps, server)
 
-      assert Minga.Config.Options.get(:line_spacing) == 1.5
-    after
-      Minga.Config.Options.set(:line_spacing, 1.0)
-      Minga.Config.Options.set(:line_numbers, :hybrid)
+      assert Options.get(server, :line_spacing) == 1.5
     end
 
-    test "sets line_numbers to :absolute for GUI frontend" do
+    test "sets line_numbers to :absolute for GUI frontend", %{server: server} do
       gui_caps = %MingaEditor.Frontend.Capabilities{frontend_type: :native_gui}
 
       # Ensure the default is :hybrid before applying
-      assert Minga.Config.Options.get(:line_numbers) == :hybrid
+      assert Options.get(server, :line_numbers) == :hybrid
 
-      Startup.apply_gui_defaults(gui_caps)
+      Startup.apply_gui_defaults(gui_caps, server)
 
-      assert Minga.Config.Options.get(:line_numbers) == :absolute
-    after
-      Minga.Config.Options.set(:line_numbers, :hybrid)
-      Minga.Config.Options.set(:line_spacing, 1.0)
+      assert Options.get(server, :line_numbers) == :absolute
     end
 
-    test "does not change line_numbers for TUI frontend" do
+    test "does not change line_numbers for TUI frontend", %{server: server} do
       tui_caps = %MingaEditor.Frontend.Capabilities{frontend_type: :tui}
 
-      Startup.apply_gui_defaults(tui_caps)
+      Startup.apply_gui_defaults(tui_caps, server)
 
-      assert Minga.Config.Options.get(:line_numbers) == :hybrid
+      assert Options.get(server, :line_numbers) == :hybrid
     end
 
-    test "respects explicit user override to :relative in GUI mode" do
+    test "respects explicit user override to :relative in GUI mode", %{server: server} do
       gui_caps = %MingaEditor.Frontend.Capabilities{frontend_type: :native_gui}
+      {:ok, _} = Options.set(server, :line_numbers, :relative)
 
-      # Simulate user setting :relative before the ready handshake
-      Minga.Config.Options.set(:line_numbers, :relative)
+      Startup.apply_gui_defaults(gui_caps, server)
 
-      Startup.apply_gui_defaults(gui_caps)
-
-      assert Minga.Config.Options.get(:line_numbers) == :relative
-    after
-      Minga.Config.Options.set(:line_numbers, :hybrid)
+      assert Options.get(server, :line_numbers) == :relative
     end
 
-    test "respects explicit user override to :hybrid in GUI mode" do
+    test "respects explicit user override to :hybrid in GUI mode", %{server: server} do
       # Edge case: user explicitly wants :hybrid in GUI mode.
       # Our heuristic treats this as "not explicitly set" and overrides it.
       # This is an acknowledged tradeoff (ticket #728 notes this).
       gui_caps = %MingaEditor.Frontend.Capabilities{frontend_type: :native_gui}
 
-      Startup.apply_gui_defaults(gui_caps)
+      Startup.apply_gui_defaults(gui_caps, server)
 
       # :hybrid becomes :absolute because we can't distinguish "user set :hybrid"
       # from "default :hybrid". This is acceptable per ticket scope.
-      assert Minga.Config.Options.get(:line_numbers) == :absolute
-    after
-      Minga.Config.Options.set(:line_numbers, :hybrid)
+      assert Options.get(server, :line_numbers) == :absolute
+    end
+
+    test "writes land on the supplied server, not the default singleton" do
+      # End-to-end proof of the threading: two isolated servers, only the
+      # one passed to apply_gui_defaults/2 is mutated.
+      server_a = start_supervised!({Options, name: nil}, id: :gui_defaults_a)
+      server_b = start_supervised!({Options, name: nil}, id: :gui_defaults_b)
+      gui_caps = %MingaEditor.Frontend.Capabilities{frontend_type: :native_gui}
+
+      Startup.apply_gui_defaults(gui_caps, server_a)
+
+      assert Options.get(server_a, :line_numbers) == :absolute
+      assert Options.get(server_a, :line_spacing) == 1.2
+      assert Options.get(server_b, :line_numbers) == :hybrid
+      assert Options.get(server_b, :line_spacing) == 1.0
     end
   end
 

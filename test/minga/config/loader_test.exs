@@ -1,6 +1,11 @@
 defmodule Minga.Config.LoaderTest do
   # credo:disable-for-this-file Credo.Check.Refactor.Apply
-  # Not async because we manipulate XDG_CONFIG_HOME and shared environment
+  # Not async: the project-local config tests call `File.cd!/1` to point the
+  # loader at a temp project directory, but the BEAM cwd is process-global.
+  # Running these in parallel with other compilation work breaks
+  # `Code.compile_file/1` calls in unrelated suites. Per-test Options/Keymap
+  # servers handle the singleton-isolation goal of #1448; the env-and-cwd
+  # races are out of scope.
   use ExUnit.Case, async: false
 
   alias Minga.Command.Registry, as: CommandRegistry
@@ -10,11 +15,14 @@ defmodule Minga.Config.LoaderTest do
   alias Minga.Keymap.Active, as: KeymapActive
 
   setup do
+    options_server = start_supervised!({Options, name: nil})
     keymap_server = start_supervised!({KeymapActive, name: nil})
+    previous_options_server = Process.put(:minga_config_options, options_server)
     previous_keymap_server = Process.put(:minga_config_keymap, keymap_server)
 
-    # Ensure other global servers are running (config eval needs them)
-    for {mod, _} <- [{Options, nil}, {Hooks, nil}, {CommandRegistry, nil}] do
+    # Hooks/CommandRegistry remain global singletons (Tickets 8 and beyond);
+    # ensure they're running but not isolated per test.
+    for {mod, _} <- [{Hooks, nil}, {CommandRegistry, nil}] do
       case mod.start_link() do
         {:ok, _} -> :ok
         {:error, {:already_started, _}} -> mod.reset()
@@ -27,9 +35,20 @@ defmodule Minga.Config.LoaderTest do
       else
         Process.put(:minga_config_keymap, previous_keymap_server)
       end
+
+      if is_nil(previous_options_server) do
+        Process.delete(:minga_config_options)
+      else
+        Process.put(:minga_config_options, previous_options_server)
+      end
     end)
 
-    :ok
+    %{options_server: options_server, keymap_server: keymap_server}
+  end
+
+  @spec test_options_server() :: GenServer.server()
+  defp test_options_server do
+    Process.get(:minga_config_options, Options.default_server())
   end
 
   describe "config_path/1" do
@@ -72,8 +91,8 @@ defmodule Minga.Config.LoaderTest do
       {:ok, pid} = Loader.start_link(name: name)
 
       assert Loader.load_error(pid) == nil
-      assert Options.get(:tab_width) == 4
-      assert Options.get(:line_numbers) == :relative
+      assert Options.get(test_options_server(), :tab_width) == 4
+      assert Options.get(test_options_server(), :line_numbers) == :relative
     end
   end
 
@@ -239,7 +258,7 @@ defmodule Minga.Config.LoaderTest do
       {:ok, pid} = Loader.start_link(name: name)
 
       assert Loader.project_config_error(pid) == nil
-      assert Options.get(:tab_width) == 8
+      assert Options.get(test_options_server(), :tab_width) == 8
     end
 
     test "no error when .minga.exs does not exist" do
@@ -293,7 +312,7 @@ defmodule Minga.Config.LoaderTest do
       {:ok, pid} = Loader.start_link(name: name)
 
       assert Loader.after_error(pid) == nil
-      assert Options.get(:tab_width) == 6
+      assert Options.get(test_options_server(), :tab_width) == 6
     end
   end
 
@@ -309,7 +328,7 @@ defmodule Minga.Config.LoaderTest do
 
       name = :"loader_reload_#{System.unique_integer([:positive])}"
       {:ok, pid} = Loader.start_link(name: name)
-      assert Options.get(:tab_width) == 3
+      assert Options.get(test_options_server(), :tab_width) == 3
 
       # Change the config file
       File.write!(Path.join(minga_dir, "config.exs"), """
@@ -318,7 +337,7 @@ defmodule Minga.Config.LoaderTest do
       """)
 
       assert :ok = Loader.reload(pid)
-      assert Options.get(:tab_width) == 7
+      assert Options.get(test_options_server(), :tab_width) == 7
     end
 
     test "reload purges old user modules" do
@@ -400,6 +419,108 @@ defmodule Minga.Config.LoaderTest do
     end
   end
 
+  describe "pdict bridge isolation" do
+    test "Loader.start_link does not leak :minga_config_options into the caller pdict" do
+      # The bridge mutations happen inside the Agent process running load_all,
+      # not in the calling process. Verify nothing leaks back: the test's own
+      # pdict value (set by setup) must be unchanged after Loader runs.
+      {_dir, cleanup} = make_config_dir("")
+      on_exit(cleanup)
+
+      caller_before = Process.get(:minga_config_options)
+
+      name = :"loader_pdict_isolation_#{System.unique_integer([:positive])}"
+      {:ok, _pid} = Loader.start_link(name: name)
+
+      assert Process.get(:minga_config_options) == caller_before
+    end
+
+    test "user config raise during eval still completes the load with an error" do
+      # The Loader's try/after restores the pdict bridge regardless of whether
+      # eval_config_file's rescue caught the user-config raise. This test drives
+      # the raise path and confirms (a) the loader still starts cleanly and
+      # (b) the error is captured rather than crashing the Agent. If the bridge
+      # had leaked, subsequent Loader.load_error/1 calls would fail.
+      {_dir, cleanup} =
+        make_config_dir("""
+        use Minga.Config
+        raise "intentional config-eval failure"
+        """)
+
+      on_exit(cleanup)
+
+      caller_before = Process.get(:minga_config_options)
+
+      name = :"loader_raise_pdict_#{System.unique_integer([:positive])}"
+      {:ok, pid} = Loader.start_link(name: name)
+
+      assert is_binary(Loader.load_error(pid))
+      assert Process.get(:minga_config_options) == caller_before
+    end
+  end
+
+  describe "apply_log_level (via Loader)" do
+    test "raises Logger level when config sets a more restrictive level" do
+      # apply_log_level/1 only applies the config value when it's *more*
+      # restrictive than the current Logger level. Mix test config sets
+      # :warning, so :error is :gt :warning and should be applied.
+      original_level = Logger.level()
+      Logger.configure(level: :info)
+
+      {_dir, cleanup} =
+        make_config_dir("""
+        use Minga.Config
+        set :log_level, :error
+        """)
+
+      on_exit(fn ->
+        Logger.configure(level: original_level)
+        cleanup.()
+      end)
+
+      name = :"loader_log_level_raise_#{System.unique_integer([:positive])}"
+      {:ok, _pid} = Loader.start_link(name: name)
+
+      assert Logger.level() == :error
+    end
+
+    test "leaves Logger level alone when config is less restrictive than current" do
+      original_level = Logger.level()
+      Logger.configure(level: :error)
+
+      {_dir, cleanup} =
+        make_config_dir("""
+        use Minga.Config
+        set :log_level, :debug
+        """)
+
+      on_exit(fn ->
+        Logger.configure(level: original_level)
+        cleanup.()
+      end)
+
+      name = :"loader_log_level_keep_#{System.unique_integer([:positive])}"
+      {:ok, _pid} = Loader.start_link(name: name)
+
+      # :debug is not :gt :error, so Logger.configure must not have been
+      # called: the existing :error level wins.
+      assert Logger.level() == :error
+    end
+
+    test "rescues ArgumentError when Options ETS table does not exist" do
+      # Pointing the loader at a registered name with no backing ETS table
+      # would otherwise crash apply_log_level/1 on :ets.lookup. The narrow
+      # rescue keeps loader startup unaffected; everything else still runs.
+      {_dir, cleanup} = make_config_dir("")
+      on_exit(cleanup)
+
+      name = :"loader_log_level_rescue_#{System.unique_integer([:positive])}"
+
+      assert {:ok, _pid} =
+               Loader.start_link(name: name, options_server: :nonexistent_options_server)
+    end
+  end
+
   describe "--config CLI flag" do
     test "loader uses the custom config path when config_file flag is set" do
       # Create a custom config in a non-standard location
@@ -439,7 +560,7 @@ defmodule Minga.Config.LoaderTest do
       {:ok, pid} = Loader.start_link(name: name)
 
       # The custom config should have been loaded (tab_width = 42)
-      assert Options.get(:tab_width) == 42
+      assert Options.get(test_options_server(), :tab_width) == 42
       # config_path should return the custom path
       assert Loader.config_path(pid) == custom_path
       # No load errors
@@ -508,7 +629,7 @@ defmodule Minga.Config.LoaderTest do
       {:ok, pid} = Loader.start_link(name: name)
 
       # The file was loaded (tab_width changed), but a warning is shown
-      assert Options.get(:tab_width) == 7
+      assert Options.get(test_options_server(), :tab_width) == 7
       assert Loader.load_error(pid) =~ "does not end in .exs"
       assert Loader.load_error(pid) =~ custom_path
     end
@@ -560,7 +681,7 @@ defmodule Minga.Config.LoaderTest do
       {:ok, pid} = Loader.start_link(name: name)
 
       # Project-local config overrides the custom global config (last writer wins)
-      assert Options.get(:tab_width) == 99
+      assert Options.get(test_options_server(), :tab_width) == 99
       assert Loader.project_config_error(pid) == nil
     end
 
@@ -581,7 +702,7 @@ defmodule Minga.Config.LoaderTest do
       name = :"loader_no_flag_#{System.unique_integer([:positive])}"
       {:ok, pid} = Loader.start_link(name: name)
 
-      assert Options.get(:tab_width) == 5
+      assert Options.get(test_options_server(), :tab_width) == 5
       # config_path should be the standard XDG path
       assert Loader.config_path(pid) =~ "minga/config.exs"
     end
@@ -614,7 +735,7 @@ defmodule Minga.Config.LoaderTest do
 
       name = :"loader_reload_custom_#{System.unique_integer([:positive])}"
       {:ok, pid} = Loader.start_link(name: name)
-      assert Options.get(:tab_width) == 11
+      assert Options.get(test_options_server(), :tab_width) == 11
 
       # Change the custom config
       File.write!(custom_path, """
@@ -623,7 +744,7 @@ defmodule Minga.Config.LoaderTest do
       """)
 
       assert :ok = Loader.reload(pid)
-      assert Options.get(:tab_width) == 22
+      assert Options.get(test_options_server(), :tab_width) == 22
       # Path should still be the custom one
       assert Loader.config_path(pid) == custom_path
     end
@@ -641,16 +762,11 @@ defmodule Minga.Config.LoaderTest do
     File.write!(Path.join(minga_dir, "config.exs"), config_content)
     System.put_env("XDG_CONFIG_HOME", base)
 
+    # The per-test Options server started in setup is auto-cleaned by
+    # start_supervised!, so no explicit reset is needed here.
     cleanup = fn ->
       System.delete_env("XDG_CONFIG_HOME")
       File.rm_rf!(base)
-
-      try do
-        Options.reset()
-        Options.set(:clipboard, :none)
-      catch
-        :exit, _ -> :ok
-      end
     end
 
     {minga_dir, cleanup}

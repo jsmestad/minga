@@ -179,6 +179,35 @@ defmodule Minga.Config.Options do
   @typedoc "ETS table reference used for reads and writes."
   @type table :: :ets.table()
 
+  @typedoc "Reference to a Config.Options GenServer (registered name or pid)."
+  @type server :: GenServer.server()
+
+  # Single source of truth for the default registered Options server. Other
+  # modules call `default_server/0` rather than referencing `__MODULE__`
+  # directly so future renames or alternate defaults stay localized here.
+  @default_server __MODULE__
+
+  @doc "Returns the registered name of the default options server."
+  @spec default_server() :: server()
+  def default_server, do: @default_server
+
+  @doc """
+  Asserts that `server` is a valid `server/0` reference (pid or non-nil atom).
+
+  Raises `ArgumentError` otherwise. Use at boundaries that accept a caller-
+  supplied `:options_server` opt — bad values would otherwise silently
+  short-circuit later (e.g. `Process.get(:minga_config_options, default)`
+  returns `nil` if the key is set to `nil`, defeating the fallback).
+  """
+  @spec validate_server!(term()) :: server()
+  def validate_server!(server) when is_pid(server), do: server
+  def validate_server!(server) when is_atom(server) and not is_nil(server), do: server
+
+  def validate_server!(invalid) do
+    raise ArgumentError,
+          "expected Minga.Config.Options server (pid or non-nil atom), got: #{inspect(invalid)}"
+  end
+
   @option_specs [
     {:editing_model, {:enum, [:vim, :cua]}, :vim},
     {:space_leader, {:enum, [:chord, :off]}, :chord},
@@ -266,14 +295,33 @@ defmodule Minga.Config.Options do
 
   # ── GenServer (table lifecycle only) ────────────────────────────────────────
 
-  @doc "Starts the options registry and creates the backing ETS table."
+  @doc """
+  Starts the options registry and creates the backing ETS table.
+
+  Pass `name: nil` to start anonymously (no registered name, unnamed ETS
+  table). Useful for isolated test fixtures: pass the returned pid to
+  server-aware functions instead of generating per-test atoms.
+  """
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
-    {name, _opts} = Keyword.pop(opts, :name, __MODULE__)
-    GenServer.start_link(__MODULE__, name, name: name)
+    case Keyword.fetch(opts, :name) do
+      {:ok, nil} -> GenServer.start_link(__MODULE__, :anonymous, [])
+      {:ok, name} -> GenServer.start_link(__MODULE__, name, name: name)
+      :error -> GenServer.start_link(__MODULE__, __MODULE__, name: __MODULE__)
+    end
   end
 
   @impl GenServer
+  def init(:anonymous) do
+    # The first arg to :ets.new/2 is a tag, not a table identity, when
+    # :named_table is omitted. Do NOT add :named_table here — multiple
+    # anonymous Options servers may run concurrently (per-test isolation),
+    # and a named ETS table can only exist once per BEAM node.
+    table = :ets.new(:config_options, [:set, :public, read_concurrency: true])
+    seed_defaults(table)
+    {:ok, %{table: table}}
+  end
+
   def init(name) do
     table = :ets.new(table_name(name), [:set, :public, :named_table, read_concurrency: true])
     seed_defaults(table)
@@ -295,19 +343,14 @@ defmodule Minga.Config.Options do
   User config values that match a schema entry are validated and stored.
   Unknown keys produce a warning log. Type mismatches return an error.
   """
-  @spec register_extension_schema(atom(), [Minga.Extension.option_spec()], keyword()) ::
-          :ok | {:error, String.t()}
   @spec register_extension_schema(
-          GenServer.server(),
+          server(),
           atom(),
           [Minga.Extension.option_spec()],
           keyword()
         ) ::
           :ok | {:error, String.t()}
-  def register_extension_schema(ext_name, schema, user_config) when is_atom(ext_name),
-    do: register_extension_schema(__MODULE__, ext_name, schema, user_config)
-
-  def register_extension_schema(server, ext_name, schema, user_config)
+  def register_extension_schema(server \\ @default_server, ext_name, schema, user_config)
       when is_atom(ext_name) and is_list(schema) and is_list(user_config) do
     table = table_name(server)
 
@@ -386,12 +429,8 @@ defmodule Minga.Config.Options do
       Config.Options.get_extension_option(:minga_org, :conceal)
       # => true
   """
-  @spec get_extension_option(atom(), atom()) :: term()
-  @spec get_extension_option(GenServer.server(), atom(), atom()) :: term()
-  def get_extension_option(ext_name, opt_name) when is_atom(ext_name) and is_atom(opt_name),
-    do: get_extension_option(__MODULE__, ext_name, opt_name)
-
-  def get_extension_option(server, ext_name, opt_name)
+  @spec get_extension_option(server(), atom(), atom()) :: term()
+  def get_extension_option(server \\ @default_server, ext_name, opt_name)
       when is_atom(ext_name) and is_atom(opt_name) do
     table = table_name(server)
     key = {:extension, ext_name, opt_name}
@@ -410,14 +449,9 @@ defmodule Minga.Config.Options do
       Config.Options.set_extension_option(:minga_org, :conceal, false)
       # => {:ok, false}
   """
-  @spec set_extension_option(atom(), atom(), term()) :: {:ok, term()} | {:error, String.t()}
-  @spec set_extension_option(GenServer.server(), atom(), atom(), term()) ::
+  @spec set_extension_option(server(), atom(), atom(), term()) ::
           {:ok, term()} | {:error, String.t()}
-  def set_extension_option(ext_name, opt_name, value)
-      when is_atom(ext_name) and is_atom(opt_name),
-      do: set_extension_option(__MODULE__, ext_name, opt_name, value)
-
-  def set_extension_option(server, ext_name, opt_name, value)
+  def set_extension_option(server \\ @default_server, ext_name, opt_name, value)
       when is_atom(ext_name) and is_atom(opt_name) do
     table = table_name(server)
 
@@ -440,15 +474,15 @@ defmodule Minga.Config.Options do
 
       Config.Options.set_extension_option_for_filetype(:minga_org, :org, :conceal, false)
   """
-  @spec set_extension_option_for_filetype(atom(), atom(), atom(), term()) ::
+  @spec set_extension_option_for_filetype(server(), atom(), atom(), atom(), term()) ::
           {:ok, term()} | {:error, String.t()}
-  @spec set_extension_option_for_filetype(GenServer.server(), atom(), atom(), atom(), term()) ::
-          {:ok, term()} | {:error, String.t()}
-  def set_extension_option_for_filetype(ext_name, filetype, opt_name, value)
-      when is_atom(ext_name) and is_atom(filetype) and is_atom(opt_name),
-      do: set_extension_option_for_filetype(__MODULE__, ext_name, filetype, opt_name, value)
-
-  def set_extension_option_for_filetype(server, ext_name, filetype, opt_name, value)
+  def set_extension_option_for_filetype(
+        server \\ @default_server,
+        ext_name,
+        filetype,
+        opt_name,
+        value
+      )
       when is_atom(ext_name) and is_atom(filetype) and is_atom(opt_name) do
     table = table_name(server)
 
@@ -468,11 +502,8 @@ defmodule Minga.Config.Options do
   Checks filetype-specific override first, then falls back to the
   global extension option value.
   """
-  @spec get_extension_option_for_filetype(atom(), atom(), atom() | nil) :: term()
-  @spec get_extension_option_for_filetype(GenServer.server(), atom(), atom(), atom() | nil) ::
-          term()
-  def get_extension_option_for_filetype(ext_name, opt_name, filetype),
-    do: get_extension_option_for_filetype(__MODULE__, ext_name, opt_name, filetype)
+  @spec get_extension_option_for_filetype(server(), atom(), atom(), atom() | nil) :: term()
+  def get_extension_option_for_filetype(server \\ @default_server, ext_name, opt_name, filetype)
 
   def get_extension_option_for_filetype(server, ext_name, opt_name, nil),
     do: get_extension_option(server, ext_name, opt_name)
@@ -492,12 +523,8 @@ defmodule Minga.Config.Options do
   Returns the registered option schema for an extension, or `nil` if
   the extension has no schema.
   """
-  @spec extension_schema(atom()) :: [Minga.Extension.option_spec()] | nil
-  @spec extension_schema(GenServer.server(), atom()) :: [Minga.Extension.option_spec()] | nil
-  def extension_schema(ext_name) when is_atom(ext_name),
-    do: extension_schema(__MODULE__, ext_name)
-
-  def extension_schema(server, ext_name) when is_atom(ext_name) do
+  @spec extension_schema(server(), atom()) :: [Minga.Extension.option_spec()] | nil
+  def extension_schema(server \\ @default_server, ext_name) when is_atom(ext_name) do
     table = table_name(server)
 
     case :ets.lookup(table, {:extension_schema, ext_name}) do
@@ -512,12 +539,8 @@ defmodule Minga.Config.Options do
 
   Used by `SPC h v` (describe option) and other introspection features.
   """
-  @spec extension_option_description(atom(), atom()) :: String.t() | nil
-  @spec extension_option_description(GenServer.server(), atom(), atom()) :: String.t() | nil
-  def extension_option_description(ext_name, opt_name),
-    do: extension_option_description(__MODULE__, ext_name, opt_name)
-
-  def extension_option_description(server, ext_name, opt_name)
+  @spec extension_option_description(server(), atom(), atom()) :: String.t() | nil
+  def extension_option_description(server \\ @default_server, ext_name, opt_name)
       when is_atom(ext_name) and is_atom(opt_name) do
     table = table_name(server)
 
@@ -535,12 +558,9 @@ defmodule Minga.Config.Options do
   Returns `{:ok, value}` on success or `{:error, reason}` if the option
   name is unknown or the value has the wrong type.
   """
-  @spec set(option_name(), term()) :: {:ok, term()} | {:error, String.t()}
-  @spec set(GenServer.server(), option_name(), term()) :: {:ok, term()} | {:error, String.t()}
-  def set(name, value) when is_atom(name), do: set(__MODULE__, name, value)
-
-  def set(server, name, value) when is_atom(name) do
-    case validate(server, name, value) do
+  @spec set(server(), option_name(), term()) :: {:ok, term()} | {:error, String.t()}
+  def set(server \\ @default_server, name, value) when is_atom(name) do
+    case validate(name, value) do
       :ok ->
         :ets.insert(table_name(server), {name, value})
         {:ok, value}
@@ -553,11 +573,8 @@ defmodule Minga.Config.Options do
   @doc """
   Gets the current global value of an option, falling back to its default.
   """
-  @spec get(option_name()) :: term()
-  @spec get(GenServer.server(), option_name()) :: term()
-  def get(name) when is_atom(name), do: get(__MODULE__, name)
-
-  def get(server, name) when is_atom(name) do
+  @spec get(server(), option_name()) :: term()
+  def get(server \\ @default_server, name) when is_atom(name) do
     table = table_name(server)
 
     case :ets.lookup(table, name) do
@@ -572,10 +589,8 @@ defmodule Minga.Config.Options do
   Checks filetype-specific settings first, then falls back to the global
   value. If `filetype` is `nil`, returns the global value.
   """
-  @spec get_for_filetype(option_name(), atom() | nil) :: term()
-  @spec get_for_filetype(GenServer.server(), option_name(), atom() | nil) :: term()
-  def get_for_filetype(name, filetype) when is_atom(name),
-    do: get_for_filetype(__MODULE__, name, filetype)
+  @spec get_for_filetype(server(), option_name(), atom() | nil) :: term()
+  def get_for_filetype(server \\ @default_server, name, filetype)
 
   def get_for_filetype(server, name, nil), do: get(server, name)
 
@@ -593,16 +608,11 @@ defmodule Minga.Config.Options do
 
   The value is validated the same way as global options.
   """
-  @spec set_for_filetype(atom(), option_name(), term()) :: {:ok, term()} | {:error, String.t()}
-  @spec set_for_filetype(GenServer.server(), atom(), option_name(), term()) ::
+  @spec set_for_filetype(server(), atom(), option_name(), term()) ::
           {:ok, term()} | {:error, String.t()}
-  def set_for_filetype(filetype, name, value)
-      when is_atom(filetype) and is_atom(name),
-      do: set_for_filetype(__MODULE__, filetype, name, value)
-
-  def set_for_filetype(server, filetype, name, value)
+  def set_for_filetype(server \\ @default_server, filetype, name, value)
       when is_atom(filetype) and is_atom(name) do
-    case validate(server, name, value) do
+    case validate(name, value) do
       :ok ->
         :ets.insert(table_name(server), {{:filetype, filetype, name}, value})
         {:ok, value}
@@ -615,11 +625,8 @@ defmodule Minga.Config.Options do
   @doc """
   Returns all current global option values as a map.
   """
-  @spec all() :: %{option_name() => term()}
-  @spec all(GenServer.server()) :: %{option_name() => term()}
-  def all, do: all(__MODULE__)
-
-  def all(server) do
+  @spec all(server()) :: %{option_name() => term()}
+  def all(server \\ @default_server) do
     table = table_name(server)
 
     :ets.foldl(
@@ -635,11 +642,8 @@ defmodule Minga.Config.Options do
   @doc """
   Resets all options (global and per-filetype) to defaults.
   """
-  @spec reset() :: :ok
-  @spec reset(GenServer.server()) :: :ok
-  def reset, do: reset(__MODULE__)
-
-  def reset(server) do
+  @spec reset(server()) :: :ok
+  def reset(server \\ @default_server) do
     table = table_name(server)
     :ets.delete_all_objects(table)
     seed_defaults(table)
@@ -686,10 +690,10 @@ defmodule Minga.Config.Options do
   to validate buffer-local option overrides.
   """
   @spec validate_option(atom(), term()) :: :ok | {:error, String.t()}
-  def validate_option(name, value), do: validate(__MODULE__, name, value)
+  def validate_option(name, value), do: validate(name, value)
 
-  @spec validate(GenServer.server(), atom(), term()) :: :ok | {:error, String.t()}
-  defp validate(_server, name, value) do
+  @spec validate(atom(), term()) :: :ok | {:error, String.t()}
+  defp validate(name, value) do
     case Map.fetch(@types, name) do
       {:ok, type} ->
         validate_type(type, name, value)

@@ -73,7 +73,11 @@ defmodule MingaEditor.State do
   @typedoc "Re-export of `Minga.Keymap.server/0` for editor-state callers."
   @type keymap_server :: Minga.Keymap.server()
 
+  @typedoc "Re-export of `Minga.Config.Options.server/0` for editor-state callers."
+  @type options_server :: Minga.Config.Options.server()
+
   @default_keymap_server Minga.Keymap.default_server()
+  @default_options_server Minga.Config.Options.default_server()
 
   alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.Shell.Board.State, as: BoardState
@@ -82,6 +86,7 @@ defmodule MingaEditor.State do
   defstruct backend: :headless,
             port_manager: nil,
             keymap_server: @default_keymap_server,
+            options_server: @default_options_server,
             workspace: nil,
             editing_model: :vim,
             shell: MingaEditor.Shell.Traditional,
@@ -114,6 +119,7 @@ defmodule MingaEditor.State do
           backend: backend(),
           port_manager: GenServer.server() | nil,
           keymap_server: keymap_server(),
+          options_server: options_server(),
           workspace: WorkspaceState.t(),
           editing_model: :vim | :cua,
           shell: module(),
@@ -152,6 +158,10 @@ defmodule MingaEditor.State do
   @spec keymap_context(t()) :: [{:keymap_server, keymap_server()}]
   def keymap_context(%__MODULE__{} = state),
     do: [keymap_server: keymap_server(state)]
+
+  @doc "Returns the options server used for typed option lookups."
+  @spec options_server(t()) :: options_server()
+  def options_server(%__MODULE__{options_server: options_server}), do: options_server
 
   # ── Workspace helpers ──────────────────────────────────────────────────────
 

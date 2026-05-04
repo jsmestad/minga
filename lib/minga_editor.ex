@@ -60,6 +60,7 @@ defmodule MingaEditor do
           {:name, GenServer.name()}
           | {:port_manager, GenServer.server()}
           | {:keymap_server, GenServer.server()}
+          | {:options_server, GenServer.server()}
           | {:buffer, pid()}
           | {:width, pos_integer()}
           | {:height, pos_integer()}
@@ -371,7 +372,7 @@ defmodule MingaEditor do
   def handle_info({:minga_input, {:ready, width, height}}, state) do
     # Query capabilities from the frontend (may have been sent in extended ready).
     caps = Startup.fetch_capabilities(state.port_manager)
-    Startup.apply_gui_defaults(caps)
+    Startup.apply_gui_defaults(caps, EditorState.options_server(state))
 
     line_spacing = Config.get(:line_spacing) || 1.0
     effective_height = Viewport.effective_rows(height, line_spacing)
