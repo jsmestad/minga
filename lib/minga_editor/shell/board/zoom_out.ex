@@ -12,6 +12,7 @@ defmodule MingaEditor.Shell.Board.ZoomOut do
   @behaviour MingaEditor.Input.Handler
 
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.Workspace.State, as: WorkspaceState
   alias MingaEditor.Shell.Board
   alias MingaEditor.Shell.Board.AgentDeactivation
   alias MingaEditor.Shell.Board.Card
@@ -65,7 +66,7 @@ defmodule MingaEditor.Shell.Board.ZoomOut do
     grid_workspace = if card, do: card.workspace, else: nil
 
     # Store the live (zoomed) workspace onto the card for next zoom-in
-    live_workspace = Map.from_struct(state.workspace)
+    live_workspace = WorkspaceState.to_tab_context(state.workspace)
 
     board =
       BoardState.update_card(board, card_id, fn c ->

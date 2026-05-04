@@ -20,6 +20,7 @@ defmodule MingaEditor.Shell.Board.Input do
   alias MingaAgent.Config, as: AgentConfig
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.AgentAccess
+  alias MingaEditor.Workspace.State, as: WorkspaceState
   alias MingaEditor.Shell.Board
   alias MingaEditor.Shell.Board.Card
   alias MingaEditor.Shell.Board.State, as: BoardState
@@ -253,7 +254,7 @@ defmodule MingaEditor.Shell.Board.Input do
     if card do
       # Store the current workspace as the "board grid" snapshot on
       # the zoomed card. This gets restored when zooming back out.
-      current_workspace = Map.from_struct(state.workspace)
+      current_workspace = WorkspaceState.to_tab_context(state.workspace)
       new_board = BoardState.zoom_into(board, card.id, current_workspace)
       state = %{state | shell_state: new_board}
 
@@ -295,7 +296,7 @@ defmodule MingaEditor.Shell.Board.Input do
     {board, state} = start_and_attach_session(board, card.id, model, state)
 
     # Snapshot current workspace and zoom into the card
-    workspace_snapshot = Map.from_struct(state.workspace)
+    workspace_snapshot = WorkspaceState.to_tab_context(state.workspace)
     board = BoardState.zoom_into(board, card.id, workspace_snapshot)
     state = %{state | shell_state: board}
 
