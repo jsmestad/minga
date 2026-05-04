@@ -19,8 +19,8 @@ defmodule MingaEditor.Input.Completion do
   alias Minga.Editing.Completion
   alias MingaEditor.CompletionHandling
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.ModalOverlay
   alias MingaEditor.Viewport
-  alias MingaEditor.Workspace.State, as: WorkspaceState
 
   @ctrl MingaEditor.Input.mod_ctrl()
   @escape 27
@@ -34,14 +34,16 @@ defmodule MingaEditor.Input.Completion do
   @impl true
   @spec handle_key(state(), non_neg_integer(), non_neg_integer()) ::
           MingaEditor.Input.Handler.result()
-  def handle_key(
-        %{workspace: %{editing: %{mode: :insert}, completion: %Completion{} = completion}} = state,
-        cp,
-        mods
-      ) do
-    case do_handle(state, completion, cp, mods) do
-      {:handled, new_state} -> {:handled, new_state}
-      :passthrough -> {:passthrough, state}
+  def handle_key(%{workspace: %{editing: %{mode: :insert}}} = state, cp, mods) do
+    case ModalOverlay.completion(state) do
+      %Completion{} = completion ->
+        case do_handle(state, completion, cp, mods) do
+          {:handled, new_state} -> {:handled, new_state}
+          :passthrough -> {:passthrough, state}
+        end
+
+      _ ->
+        {:passthrough, state}
     end
   end
 
@@ -62,7 +64,7 @@ defmodule MingaEditor.Input.Completion do
 
   # Completion popup active: intercept scroll and clicks
   def handle_mouse(
-        %{workspace: %{editing: %{mode: :insert}, completion: %Completion{} = completion}} = state,
+        %{workspace: %{editing: %{mode: :insert}}} = state,
         row,
         col,
         button,
@@ -70,23 +72,9 @@ defmodule MingaEditor.Input.Completion do
         :press,
         _cc
       ) do
-    case button do
-      :wheel_down ->
-        {:handled,
-         EditorState.update_workspace(
-           state,
-           &WorkspaceState.set_completion(&1, Completion.move_down(completion))
-         )}
-
-      :wheel_up ->
-        {:handled,
-         EditorState.update_workspace(
-           state,
-           &WorkspaceState.set_completion(&1, Completion.move_up(completion))
-         )}
-
-      :left ->
-        handle_completion_click(state, completion, row, col)
+    case ModalOverlay.completion(state) do
+      %Completion{} = completion ->
+        do_handle_mouse(state, completion, row, col, button)
 
       _ ->
         {:passthrough, state}
@@ -95,6 +83,24 @@ defmodule MingaEditor.Input.Completion do
 
   def handle_mouse(state, _row, _col, _button, _mods, _event_type, _cc) do
     {:passthrough, state}
+  end
+
+  @spec do_handle_mouse(EditorState.t(), Completion.t(), integer(), integer(), atom()) ::
+          MingaEditor.Input.Handler.result()
+  defp do_handle_mouse(state, completion, row, col, button) do
+    case button do
+      :wheel_down ->
+        {:handled, ModalOverlay.update_completion(state, &Completion.move_down/1)}
+
+      :wheel_up ->
+        {:handled, ModalOverlay.update_completion(state, &Completion.move_up/1)}
+
+      :left ->
+        handle_completion_click(state, completion, row, col)
+
+      _ ->
+        {:passthrough, state}
+    end
   end
 
   # ── Completion click ─────────────────────────────────────────────────────
@@ -191,26 +197,16 @@ defmodule MingaEditor.Input.Completion do
   end
 
   # C-n or arrow down: move selection down
-  defp do_handle(state, completion, cp, mods)
+  defp do_handle(state, _completion, cp, mods)
        when (cp == ?n and band(mods, @ctrl) != 0) or cp == @arrow_down do
-    state =
-      EditorState.update_workspace(
-        state,
-        &WorkspaceState.set_completion(&1, Completion.move_down(completion))
-      )
-
+    state = ModalOverlay.update_completion(state, &Completion.move_down/1)
     {:handled, CompletionHandling.maybe_resolve_selected(state)}
   end
 
   # C-p or arrow up: move selection up
-  defp do_handle(state, completion, cp, mods)
+  defp do_handle(state, _completion, cp, mods)
        when (cp == ?p and band(mods, @ctrl) != 0) or cp == @arrow_up do
-    state =
-      EditorState.update_workspace(
-        state,
-        &WorkspaceState.set_completion(&1, Completion.move_up(completion))
-      )
-
+    state = ModalOverlay.update_completion(state, &Completion.move_up/1)
     {:handled, CompletionHandling.maybe_resolve_selected(state)}
   end
 

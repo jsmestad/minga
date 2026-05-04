@@ -18,47 +18,48 @@ defmodule MingaEditor.State.ModalOverlay do
       | {:conflict, ModalOverlay.Conflict.t()}
       | {:dashboard, ModalOverlay.Dashboard.t()}
 
-  ## Migration phase: dual-write
+  ## Migration status (#1421)
 
-  This is step 3 of 5 (Epic #1421). The picker, prompt, dashboard, and
-  conflict variants have been fully migrated — all reads and writes go
-  through this gate, and their legacy fields have been removed from
-  `Shell.Traditional.State` and `Workspace.State`.
-
-  The completion variant still uses dual-write: every gate function writes
-  both `state.shell_state.modal` and `workspace.completion` so existing
-  readers continue to work during the migration.
-
-  Migration #1426 points completion reads at the new field. When all
-  variants have migrated, #1427 removes the remaining dual-write and
-  adds a Credo rule that forbids direct writes to the legacy field.
+  All five variants are now tracked exclusively on `state.shell_state.modal`.
+  The legacy nullable fields (`shell_state.dashboard`, `shell_state.prompt_ui`,
+  `workspace.pending_conflict`, `workspace.completion`,
+  `workspace.completion_trigger`) have all been removed. #1427 finalises by
+  collapsing `Input.Interrupt` and adding a Credo enforcement rule.
 
   **Do not mutate `:modal` directly**: always call this module's
-  `open/3`, `transition/3`, `close/1`, or `dismiss/1`. A runtime
-  assertion in `:dev` and `:test` builds crashes when the gate detects
-  that its tracked variant has diverged from the legacy mirror.
+  `open/3`, `transition/3`, `close/1`, `dismiss/1`, `update_completion/2`,
+  or `update_completion_trigger/2`.
 
   ## Replacement policy
 
-  `open/3` while a modal is already active replaces the previous one and
-  clears its legacy slot. There is no queue. The exception is
-  `:conflict`: while a conflict prompt is active, other `open/3` calls
-  are logged and return state unchanged. This matches today's behavior
-  where `ConflictPrompt` sits before every other handler in the input
-  stack.
+  `open/3` while a modal is already active replaces the previous one. There
+  is no queue. The exception is `:conflict`: while a conflict prompt is
+  active, other `open/3` calls are logged and return state unchanged. This
+  matches the original behaviour where `ConflictPrompt` sat before every
+  other handler in the input stack.
 
   `transition/3` performs the same replacement but without the sticky
   rule; it is intended for FSM-style steps where the caller has already
   decided that a transition must happen (e.g., picker → prompt).
+
+  ## Per-tab semantics for completion
+
+  Completion is logically per-tab — it tracks the cursor of the buffer
+  that triggered it. The `Completion` payload carries an `owner` tab id;
+  `dismiss_if_stale/1` runs from `EditorState.switch_tab/2` after the new
+  context is restored, dismissing completion that no longer belongs to
+  the active tab. Other variants live on shell state, which isn't
+  snapshotted per tab, so they don't need this hook.
   """
 
+  alias Minga.Editing.Completion
+  alias MingaEditor.CompletionTrigger
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.ModalOverlay.Completion, as: CompletionPayload
   alias MingaEditor.State.ModalOverlay.Conflict, as: ConflictPayload
   alias MingaEditor.State.ModalOverlay.Dashboard, as: DashboardPayload
   alias MingaEditor.State.ModalOverlay.Picker, as: PickerPayload
   alias MingaEditor.State.ModalOverlay.Prompt, as: PromptPayload
-  alias MingaEditor.Workspace.State, as: WorkspaceState
 
   @type variant :: :picker | :prompt | :completion | :conflict | :dashboard
 
@@ -76,8 +77,6 @@ defmodule MingaEditor.State.ModalOverlay do
           | {:completion, CompletionPayload.t()}
           | {:conflict, ConflictPayload.t()}
           | {:dashboard, DashboardPayload.t()}
-
-  @assert_consistency Mix.env() in [:dev, :test]
 
   # Single source of truth for the variant tag list. Adding a sixth modal
   # later means adding to this attribute plus the `t()` and `payload()`
@@ -122,17 +121,21 @@ defmodule MingaEditor.State.ModalOverlay do
   to `open/3` for any other variant are logged and return state
   unchanged. To force a transition out of a conflict modal, call
   `close/1` or `dismiss/1` first, or use `transition/3`.
-
-  Dual-write phase: in addition to setting `state.shell_state.modal`,
-  this function mirrors the payload's underlying state into the variant's
-  legacy field so existing readers continue to work.
   """
   @spec open(EditorState.t(), variant(), payload()) :: EditorState.t()
   def open(%EditorState{} = state, variant, payload) do
-    state
-    |> assert_consistency!()
-    |> do_open(variant, payload)
-    |> assert_consistency!()
+    case state.shell_state.modal do
+      {:conflict, _} when variant != :conflict ->
+        Minga.Log.info(
+          :editor,
+          "ModalOverlay.open(#{inspect(variant)}) suppressed: conflict prompt is active"
+        )
+
+        state
+
+      _ ->
+        EditorState.set_modal(state, {variant, payload})
+    end
   end
 
   @doc """
@@ -144,10 +147,7 @@ defmodule MingaEditor.State.ModalOverlay do
   """
   @spec transition(EditorState.t(), variant(), payload()) :: EditorState.t()
   def transition(%EditorState{} = state, variant, payload) do
-    state
-    |> assert_consistency!()
-    |> do_set_modal(variant, payload)
-    |> assert_consistency!()
+    EditorState.set_modal(state, {variant, payload})
   end
 
   @doc """
@@ -162,150 +162,138 @@ defmodule MingaEditor.State.ModalOverlay do
   @doc """
   Dismisses the active modal as a cancellation.
 
-  Used when the user backs out (Esc, Ctrl-G). Behavior is identical to
-  `close/1` in the dual-write phase; the distinction exists so callers
-  can express intent and so future per-variant cleanup hooks can branch
-  on it.
+  Used when the user backs out (Esc, Ctrl-G). Identical to `close/1` —
+  the distinction exists so callers can express intent and future
+  per-variant cleanup hooks can branch on it.
   """
   @spec dismiss(EditorState.t()) :: EditorState.t()
   def dismiss(%EditorState{} = state), do: do_close(state, :dismiss)
 
-  # ── Internals ──────────────────────────────────────────────────────────────
-
-  @spec do_open(EditorState.t(), variant(), payload()) :: EditorState.t()
-  defp do_open(state, variant, payload) do
-    case state.shell_state.modal do
-      {:conflict, _} when variant != :conflict ->
-        Minga.Log.info(
-          :editor,
-          "ModalOverlay.open(#{inspect(variant)}) suppressed: conflict prompt is active"
-        )
-
-        # Sticky-conflict early return: state is unchanged, so the entry
-        # assertion already proved consistency and there is nothing new to
-        # check on the way out.
-        state
-
-      _ ->
-        do_set_modal(state, variant, payload)
-    end
-  end
-
-  @spec do_set_modal(EditorState.t(), variant(), payload()) :: EditorState.t()
-  defp do_set_modal(state, variant, payload) do
-    state
-    |> clear_displaced_legacy()
-    |> put_modal({variant, payload})
-    |> mirror_to_legacy({variant, payload})
-  end
-
-  # `_kind` is intentionally unused in the dual-write phase. It is plumbed
-  # through so future per-variant cleanup hooks (introduced once the legacy
-  # mirror is removed in #1427) can branch on `:close` vs `:dismiss` without
-  # changing the public API.
   @spec do_close(EditorState.t(), :close | :dismiss) :: EditorState.t()
   defp do_close(state, _kind) do
-    state = assert_consistency!(state)
-
     case state.shell_state.modal do
+      :none -> state
+      _ -> EditorState.set_modal(state, :none)
+    end
+  end
+
+  # ── Completion accessors and updaters ──────────────────────────────────────
+
+  @doc """
+  Returns the active `Completion.t()` when the modal is `{:completion, _}`,
+  otherwise `nil`. Read site for chrome rendering, render-pipeline input
+  build, and any code path that historically read `workspace.completion`.
+
+  Accepts any struct or map that carries `shell_state.modal` so the
+  RenderPipeline.Input flavour of state works the same as EditorState.
+  """
+  @spec completion(map()) :: Completion.t() | nil
+  def completion(%{shell_state: %{modal: {:completion, %CompletionPayload{} = p}}}),
+    do: p.completion
+
+  def completion(_), do: nil
+
+  @doc """
+  Returns the active `CompletionTrigger.t()` from the completion payload,
+  or a fresh trigger when no completion modal is active. Callers that just
+  want to consult the trigger lifecycle (debounce, pending refs) without
+  caring about completion state itself use this.
+  """
+  @spec completion_trigger(map()) :: CompletionTrigger.t()
+  def completion_trigger(%{shell_state: %{modal: {:completion, %CompletionPayload{} = p}}}),
+    do: p.trigger || CompletionTrigger.new()
+
+  def completion_trigger(_), do: CompletionTrigger.new()
+
+  @doc """
+  Updates the inner `Completion.t()` of the active completion modal via
+  `fun`. No-op when no completion modal is active. Use for menu-navigation
+  events (move_up/move_down) that mutate `Completion` without changing
+  the gate's variant.
+  """
+  @spec update_completion(EditorState.t(), (Completion.t() -> Completion.t())) :: EditorState.t()
+  def update_completion(%EditorState{} = state, fun) when is_function(fun, 1) do
+    case state.shell_state.modal do
+      {:completion, %CompletionPayload{completion: comp} = payload} ->
+        new_comp = fun.(comp)
+        new_payload = CompletionPayload.put_completion(payload, new_comp)
+        EditorState.set_modal(state, {:completion, new_payload})
+
+      _ ->
+        state
+    end
+  end
+
+  @doc """
+  Updates the completion trigger.
+
+  Behaviour by current modal:
+  - `:completion` — update the payload's trigger in place.
+  - `:none` and trigger has pending activity (debounce timer or pending
+    request) — open a new completion modal with `completion: nil` and the
+    given trigger so the bridge state has somewhere to live until the LSP
+    response arrives.
+  - `:none` and trigger is empty — no-op.
+  - any other variant — no-op (don't displace another modal for a backend
+    bookkeeping update).
+  """
+  @spec put_completion_trigger(EditorState.t(), CompletionTrigger.t()) :: EditorState.t()
+  def put_completion_trigger(%EditorState{} = state, trigger) do
+    case state.shell_state.modal do
+      {:completion, %CompletionPayload{} = payload} ->
+        new_payload = CompletionPayload.put_trigger(payload, trigger)
+        EditorState.set_modal(state, {:completion, new_payload})
+
       :none ->
-        state
+        if trigger_active?(trigger) do
+          payload = CompletionPayload.new(active_tab_id(state), trigger: trigger)
+          EditorState.set_modal(state, {:completion, payload})
+        else
+          state
+        end
 
       _ ->
         state
-        |> clear_displaced_legacy()
-        |> put_modal(:none)
-        |> assert_consistency!()
     end
   end
 
-  # Clears the legacy slot of whichever variant is currently tracked in
-  # `state.shell_state.modal`. No-op when the modal is `:none` or when the
-  # tracked variant has no legacy mirror left.
-  @spec clear_displaced_legacy(EditorState.t()) :: EditorState.t()
-  defp clear_displaced_legacy(state) do
+  @spec trigger_active?(CompletionTrigger.t()) :: boolean()
+  defp trigger_active?(%{
+         debounce_timer: timer,
+         pending_ref: ref,
+         pending_refs: refs
+       }) do
+    timer != nil or ref != nil or MapSet.size(refs) > 0
+  end
+
+  defp trigger_active?(_), do: false
+
+  # ── Per-tab dismissal hook ─────────────────────────────────────────────────
+
+  @doc """
+  Dismisses the active completion modal when its `owner` no longer
+  matches the now-active tab. Called from `EditorState.switch_tab/2` after
+  the target tab's context is restored.
+
+  Only completion has per-tab semantics; other modals live on shell state
+  and don't snapshot per tab, so this is a no-op for them.
+  """
+  @spec dismiss_if_stale(EditorState.t()) :: EditorState.t()
+  def dismiss_if_stale(%EditorState{} = state) do
     case state.shell_state.modal do
-      {:completion, _} ->
-        EditorState.update_workspace(state, &WorkspaceState.set_completion(&1, nil))
+      {:completion, %CompletionPayload{owner: owner}} ->
+        if active_tab_id(state) == owner do
+          state
+        else
+          dismiss(state)
+        end
 
       _ ->
         state
     end
   end
 
-  # Writes the payload's underlying state to the variant's legacy slot.
-  # Only completion still has a legacy mirror; the other variants are
-  # tracked exclusively on `shell_state.modal`.
-  @spec mirror_to_legacy(EditorState.t(), {variant(), payload()}) :: EditorState.t()
-  defp mirror_to_legacy(state, {:completion, %CompletionPayload{completion: comp}}) do
-    EditorState.update_workspace(state, &WorkspaceState.set_completion(&1, comp))
-  end
-
-  defp mirror_to_legacy(state, _other), do: state
-
-  @spec put_modal(EditorState.t(), t()) :: EditorState.t()
-  defp put_modal(state, modal) do
-    EditorState.set_modal(state, modal)
-  end
-
-  # ── Divergence assertion ───────────────────────────────────────────────────
-  #
-  # The assertion runs before and after every gate function in `:dev` and
-  # `:test`. When the gate is tracking a variant, the legacy slot for that
-  # variant must equal the payload's underlying state. Any mismatch means
-  # legacy state was mutated outside this gate; we crash so the offending
-  # caller surfaces in CI.
-  #
-  # When `:modal` is `:none`, the gate makes no claims about legacy slots —
-  # they remain managed by their pre-migration callers.
-
-  if @assert_consistency do
-    @spec assert_consistency!(EditorState.t()) :: EditorState.t()
-    defp assert_consistency!(%EditorState{} = state) do
-      check_consistency!(state)
-      state
-    end
-
-    @spec check_consistency!(EditorState.t()) :: :ok
-    defp check_consistency!(%EditorState{} = state) do
-      ws = state.workspace
-
-      case state.shell_state.modal do
-        :none ->
-          :ok
-
-        # Picker (#1424), prompt/dashboard/conflict (#1425): tracked
-        # exclusively on shell_state.modal — no legacy mirror to compare.
-        {tag, _} when tag in [:picker, :prompt, :dashboard, :conflict] ->
-          :ok
-
-        # NOTE for #1426: completion's legacy mirror lives on `workspace`,
-        # which is snapshotted per tab while shell_state is not. Once a
-        # caller actually opens this variant, switching tabs swaps
-        # workspace.completion out from under the gate and trips this
-        # assertion on the next call. Resolve by either (a) clearing
-        # :modal on tab-switch via a hook, or (b) moving completion's
-        # authoritative state onto workspace.
-        {:completion, %CompletionPayload{completion: comp}} ->
-          if ws.completion != comp, do: raise_divergence!(:completion, comp, ws.completion)
-          :ok
-      end
-    end
-
-    @spec raise_divergence!(variant(), term(), term()) :: no_return()
-    defp raise_divergence!(variant, expected, found) do
-      raise """
-      MingaEditor.State.ModalOverlay divergence: tracked variant #{inspect(variant)} \
-      diverges from its legacy mirror. The gate expected the legacy slot to equal \
-      the payload's underlying state, but found a different value. This means the \
-      legacy field was mutated without going through ModalOverlay.
-
-        expected: #{inspect(expected, pretty: true, limit: :infinity)}
-        found:    #{inspect(found, pretty: true, limit: :infinity)}
-      """
-    end
-  else
-    @spec assert_consistency!(EditorState.t()) :: EditorState.t()
-    defp assert_consistency!(state), do: state
-  end
+  @spec active_tab_id(EditorState.t()) :: term() | nil
+  defp active_tab_id(%EditorState{shell_state: %{tab_bar: %{active_id: id}}}), do: id
+  defp active_tab_id(%EditorState{}), do: nil
 end

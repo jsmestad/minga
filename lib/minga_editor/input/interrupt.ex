@@ -31,7 +31,6 @@ defmodule MingaEditor.Input.Interrupt do
   @type state :: MingaEditor.Input.Handler.handler_state()
 
   alias MingaEditor.Agent.UIState
-  alias Minga.Editing.Completion
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.ModalOverlay
@@ -141,12 +140,12 @@ defmodule MingaEditor.Input.Interrupt do
   end
 
   @spec maybe_close_completion(EditorState.t(), [String.t()]) :: {EditorState.t(), [String.t()]}
-  defp maybe_close_completion(%{workspace: %{completion: nil}} = state, resets),
-    do: {state, resets}
-
-  defp maybe_close_completion(%{workspace: %{completion: %Completion{}}} = state, resets) do
-    {EditorState.update_workspace(state, &WorkspaceState.set_completion(&1, nil)),
-     ["completion closed" | resets]}
+  defp maybe_close_completion(state, resets) do
+    if ModalOverlay.match(state.shell_state.modal, :completion) do
+      {ModalOverlay.dismiss(state), ["completion closed" | resets]}
+    else
+      {state, resets}
+    end
   end
 
   @spec maybe_clear_agent_prefix(EditorState.t(), [String.t()]) :: {EditorState.t(), [String.t()]}

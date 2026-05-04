@@ -182,10 +182,15 @@ defmodule MingaEditor.Input.InterruptTest do
     test "closes completion menu" do
       state = base_state()
       completion = %Completion{items: [], trigger_position: {0, 0}}
-      state = %{state | workspace: %{state.workspace | completion: completion}}
+
+      payload =
+        MingaEditor.State.ModalOverlay.Completion.new(:tab1, completion: completion)
+
+      state = ModalOverlay.open(state, :completion, payload)
 
       assert {:handled, new_state} = Interrupt.handle_key(state, @ctrl_g, 0)
-      assert new_state.workspace.completion == nil
+      assert MingaEditor.State.ModalOverlay.completion(new_state) == nil
+      refute ModalOverlay.match(new_state.shell_state.modal, :completion)
     end
 
     test "clears status message" do
@@ -200,24 +205,18 @@ defmodule MingaEditor.Input.InterruptTest do
     test "resets everything at once" do
       state = base_state()
       picker = MingaEditor.UI.Picker.new(["x"])
-      completion = %Completion{items: [], trigger_position: {0, 0}}
 
       vim = %{state.workspace.editing | mode: :visual, mode_state: Mode.initial_state()}
 
       state = %{
         state
-        | workspace: %{
-            state.workspace
-            | keymap_scope: :agent,
-              editing: vim,
-              completion: completion
-          }
+        | workspace: %{state.workspace | keymap_scope: :agent, editing: vim}
       }
 
       # Only one modal can be active at a time under the ModalOverlay sum
       # type, so this combined-reset case exercises picker plus the
-      # non-modal axes (scope/mode/whichkey/completion/status). The
-      # conflict-reset path has its own focused test above.
+      # non-modal axes (scope/mode/whichkey/status). The conflict-reset
+      # and completion-close paths have focused tests above.
       state = ModalOverlay.open(state, :picker, PickerPayload.new(%Picker{picker: picker}))
       state = MingaEditor.State.set_whichkey(state, %WhichKey{node: %{}, show: true})
       state = MingaEditor.State.set_status(state, "hello")
@@ -228,7 +227,6 @@ defmodule MingaEditor.Input.InterruptTest do
       assert new_state.shell_state.modal == :none
       assert new_state.shell_state.whichkey.node == nil
       assert new_state.shell_state.whichkey.show == false
-      assert new_state.workspace.completion == nil
       assert new_state.shell_state.status_msg == nil
     end
   end

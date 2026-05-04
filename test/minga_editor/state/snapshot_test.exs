@@ -59,8 +59,6 @@ defmodule MingaEditor.State.SnapshotTest do
       assert ctx.mouse == state.workspace.mouse
       assert ctx.highlight == state.workspace.highlight
       assert ctx.lsp_pending == state.workspace.lsp_pending
-      assert ctx.completion == state.workspace.completion
-      assert ctx.completion_trigger == state.workspace.completion_trigger
       assert ctx.injection_ranges == state.workspace.injection_ranges
       assert ctx.search == state.workspace.search
     end
