@@ -63,9 +63,14 @@ defmodule MingaEditor.Renderer do
     cols = state.terminal_viewport.cols
     viewport = state.terminal_viewport
 
-    # Dashboard state is initialized by the editor when buffers empty,
-    # but fall back to an empty state if somehow nil.
-    dash_state = state.shell_state.dashboard || Dashboard.new_state()
+    # Dashboard state lives on the modal overlay when the dashboard is
+    # open. Fall back to a fresh state when no dashboard modal is active
+    # (the renderer still draws the splash whenever no buffer is open).
+    dash_state =
+      case state.shell_state.modal do
+        {:dashboard, %{state: dash}} -> dash
+        _ -> Dashboard.new_state()
+      end
 
     splash_draws = Dashboard.render(cols, rows, state.theme, dash_state)
 

@@ -409,9 +409,8 @@ defmodule MingaEditor.Startup do
     MingaEditor.Shell.Board.init(opts)
   end
 
-  defp init_shell_state(MingaEditor.Shell.Traditional, dashboard, opts) do
+  defp init_shell_state(MingaEditor.Shell.Traditional, _dashboard, opts) do
     %MingaEditor.Shell.Traditional.State{
-      dashboard: dashboard,
       suppress_tool_prompts: Keyword.get(opts, :suppress_tool_prompts, false)
     }
   end

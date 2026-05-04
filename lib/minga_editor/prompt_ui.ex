@@ -7,7 +7,8 @@ defmodule MingaEditor.PromptUI do
   search queries). All functions are pure `state -> state` transformations.
 
   Prompts and pickers are mutually exclusive: opening a prompt closes any
-  active picker, and vice versa.
+  active picker. The replacement is handled automatically by
+  `MingaEditor.State.ModalOverlay.open/3`.
 
   ## Usage
 
@@ -21,6 +22,7 @@ defmodule MingaEditor.PromptUI do
 
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.ModalOverlay
+  alias MingaEditor.State.ModalOverlay.Prompt, as: PromptPayload
   alias MingaEditor.State.Prompt, as: PromptState
 
   @escape 27
@@ -41,9 +43,10 @@ defmodule MingaEditor.PromptUI do
   @doc """
   Opens a text input prompt with the given handler module.
 
-  Closes any active picker first. An optional `:default` value pre-fills
-  the input field. An optional `:context` map is stored for the handler
-  to read.
+  Replaces any active modal (the gate's replacement policy handles the
+  picker → prompt transition). An optional `:default` value pre-fills the
+  input field. An optional `:context` map is stored for the handler to
+  read.
 
   ## Options
 
@@ -56,15 +59,15 @@ defmodule MingaEditor.PromptUI do
     context = Keyword.get(opts, :context)
     label = handler_module.label()
 
-    state = maybe_close_picker(state)
-
-    EditorState.set_prompt_ui(state, %PromptState{
+    prompt_state = %PromptState{
       handler: handler_module,
       text: default_text,
       cursor: String.length(default_text),
       label: label,
       context: context
-    })
+    }
+
+    ModalOverlay.open(state, :prompt, PromptPayload.new(prompt_state))
   end
 
   @doc """
@@ -72,14 +75,14 @@ defmodule MingaEditor.PromptUI do
   """
   @spec close(state()) :: state()
   def close(state) do
-    EditorState.set_prompt_ui(state, %PromptState{})
+    ModalOverlay.dismiss(state)
   end
 
   @doc """
   Returns true if a prompt is currently open.
   """
   @spec open?(state()) :: boolean()
-  def open?(state), do: PromptState.open?(state.shell_state.prompt_ui)
+  def open?(state), do: ModalOverlay.match(state.shell_state.modal, :prompt)
 
   @doc """
   Handles a key event while the prompt is active.
@@ -89,7 +92,7 @@ defmodule MingaEditor.PromptUI do
   """
   @spec handle_key(state(), non_neg_integer(), non_neg_integer()) :: {state(), action()}
   def handle_key(state, key, _mods) do
-    prompt = state.shell_state.prompt_ui
+    {:prompt, %{prompt_ui: prompt}} = state.shell_state.modal
 
     case key do
       @escape ->
@@ -108,12 +111,12 @@ defmodule MingaEditor.PromptUI do
 
       @arrow_left ->
         new_cursor = max(0, prompt.cursor - 1)
-        {EditorState.set_prompt_ui(state, %{prompt | cursor: new_cursor}), nil}
+        {update_prompt(state, &%{&1 | cursor: new_cursor}), nil}
 
       @arrow_right ->
         max_pos = String.length(prompt.text)
         new_cursor = min(max_pos, prompt.cursor + 1)
-        {EditorState.set_prompt_ui(state, %{prompt | cursor: new_cursor}), nil}
+        {update_prompt(state, &%{&1 | cursor: new_cursor}), nil}
 
       _ ->
         {do_insert(state, prompt, key), nil}
@@ -128,7 +131,7 @@ defmodule MingaEditor.PromptUI do
   """
   @spec render_data(state()) :: {String.t(), String.t(), non_neg_integer()}
   def render_data(state) do
-    prompt = state.shell_state.prompt_ui
+    prompt = current_prompt(state)
     {prompt.label, prompt.text, prompt.cursor}
   end
 
@@ -141,9 +144,44 @@ defmodule MingaEditor.PromptUI do
   """
   @spec render(state(), MingaEditor.Viewport.t()) ::
           {[MingaEditor.DisplayList.draw()], {non_neg_integer(), non_neg_integer()} | nil}
-  def render(%{shell_state: %{prompt_ui: %PromptState{handler: nil}}}, _viewport), do: {[], nil}
+  def render(state, viewport) do
+    case state.shell_state.modal do
+      {:prompt, %{prompt_ui: %PromptState{handler: nil}}} ->
+        {[], nil}
 
-  def render(%{shell_state: %{prompt_ui: prompt}, theme: theme} = _state, viewport) do
+      {:prompt, %{prompt_ui: prompt}} ->
+        do_render(prompt, state.theme, viewport)
+
+      _ ->
+        {[], nil}
+    end
+  end
+
+  @doc """
+  Applies `fun` to the current PromptState inside the modal and writes
+  back via `ModalOverlay.transition`, keeping the modal sum type and
+  consistency check in sync.
+  """
+  @spec update_prompt(state(), (PromptState.t() -> PromptState.t())) :: state()
+  def update_prompt(state, fun) do
+    {:prompt, payload} = state.shell_state.modal
+    new_pui = fun.(payload.prompt_ui)
+    ModalOverlay.transition(state, :prompt, PromptPayload.put_prompt_ui(payload, new_pui))
+  end
+
+  # ── Private ────────────────────────────────────────────────────────────────
+
+  @spec current_prompt(state()) :: PromptState.t()
+  defp current_prompt(state) do
+    case state.shell_state.modal do
+      {:prompt, %{prompt_ui: prompt}} -> prompt
+      _ -> %PromptState{}
+    end
+  end
+
+  @spec do_render(PromptState.t(), MingaEditor.UI.Theme.t(), MingaEditor.Viewport.t()) ::
+          {[MingaEditor.DisplayList.draw()], {non_neg_integer(), non_neg_integer()}}
+  defp do_render(prompt, theme, viewport) do
     alias MingaEditor.DisplayList
     alias Minga.Core.Face
 
@@ -156,7 +194,6 @@ defmodule MingaEditor.PromptUI do
     label_face = Face.new(fg: pc.prompt_fg, bg: pc.prompt_bg)
     input_face = Face.new(fg: pc.fg, bg: pc.bg)
 
-    # Pad to fill the row
     total_len = label_len + String.length(text)
     padding = String.duplicate(" ", max(0, viewport.cols - total_len))
 
@@ -170,17 +207,6 @@ defmodule MingaEditor.PromptUI do
     {draws, cursor_pos}
   end
 
-  # ── Private ────────────────────────────────────────────────────────────────
-
-  @spec maybe_close_picker(state()) :: state()
-  defp maybe_close_picker(state) do
-    if ModalOverlay.match(state.shell_state.modal, :picker) do
-      ModalOverlay.dismiss(state)
-    else
-      state
-    end
-  end
-
   @spec do_backspace(state(), PromptState.t()) :: state()
   defp do_backspace(state, %{cursor: 0} = _prompt), do: state
 
@@ -189,7 +215,7 @@ defmodule MingaEditor.PromptUI do
     {before, after_} = Enum.split(graphemes, prompt.cursor)
     new_text = Enum.join(Enum.drop(before, -1)) <> Enum.join(after_)
     new_cursor = prompt.cursor - 1
-    EditorState.set_prompt_ui(state, %{prompt | text: new_text, cursor: new_cursor})
+    update_prompt(state, &%{&1 | text: new_text, cursor: new_cursor})
   end
 
   @spec do_delete(state(), PromptState.t()) :: state()
@@ -206,7 +232,7 @@ defmodule MingaEditor.PromptUI do
   defp do_delete_grapheme(state, prompt, graphemes) do
     {before, [_deleted | after_]} = Enum.split(graphemes, prompt.cursor)
     new_text = Enum.join(before) <> Enum.join(after_)
-    EditorState.set_prompt_ui(state, %{prompt | text: new_text})
+    update_prompt(state, &%{&1 | text: new_text})
   end
 
   @spec do_insert(state(), PromptState.t(), non_neg_integer()) :: state()
@@ -217,7 +243,7 @@ defmodule MingaEditor.PromptUI do
     {before, after_} = Enum.split(graphemes, prompt.cursor)
     new_text = Enum.join(before) <> char <> Enum.join(after_)
     new_cursor = prompt.cursor + 1
-    EditorState.set_prompt_ui(state, %{prompt | text: new_text, cursor: new_cursor})
+    update_prompt(state, &%{&1 | text: new_text, cursor: new_cursor})
   end
 
   defp do_insert(state, _prompt, _key), do: state

@@ -9,8 +9,9 @@ defmodule MingaEditor.FileWatcherHelpers do
 
   alias Minga.Buffer
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.ModalOverlay
+  alias MingaEditor.State.ModalOverlay.Conflict, as: ConflictPayload
   alias Minga.FileWatcher
-  alias MingaEditor.Workspace.State, as: WorkspaceState
 
   @type state :: EditorState.t()
 
@@ -74,8 +75,7 @@ defmodule MingaEditor.FileWatcherHelpers do
   defp handle_change(state, buf, path, _buf_state, _mtime, _size) do
     name = Path.basename(path)
 
-    state =
-      EditorState.update_workspace(state, &WorkspaceState.set_pending_conflict(&1, {buf, path}))
+    state = ModalOverlay.open(state, :conflict, ConflictPayload.new(buf, path))
 
     EditorState.set_status(state, "#{name} changed on disk. [r]eload / [k]eep")
   end

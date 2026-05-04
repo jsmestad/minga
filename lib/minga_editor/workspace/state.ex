@@ -41,7 +41,6 @@ defmodule MingaEditor.Workspace.State do
           completion_trigger: CompletionTrigger.t(),
           injection_ranges: %{pid() => [Minga.Language.Highlight.InjectionRange.t()]},
           search: Search.t(),
-          pending_conflict: {pid(), String.t()} | nil,
           editing: VimState.t(),
           document_highlights: [document_highlight()] | nil,
           agent_ui: UIState.t()
@@ -60,7 +59,6 @@ defmodule MingaEditor.Workspace.State do
             completion_trigger: CompletionTrigger.new(),
             injection_ranges: %{},
             search: %Search{},
-            pending_conflict: nil,
             editing: VimState.new(),
             document_highlights: nil,
             agent_ui: UIState.new()
@@ -251,12 +249,6 @@ defmodule MingaEditor.Workspace.State do
   @spec update_search(t(), (Search.t() -> Search.t())) :: t()
   def update_search(%__MODULE__{search: s} = wspace, fun) when is_function(fun, 1) do
     %{wspace | search: fun.(s)}
-  end
-
-  @doc "Sets the pending conflict state."
-  @spec set_pending_conflict(t(), {pid(), String.t()} | nil) :: t()
-  def set_pending_conflict(%__MODULE__{} = wspace, conflict) do
-    %{wspace | pending_conflict: conflict}
   end
 
   @doc "Updates the LSP pending requests map."

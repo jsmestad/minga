@@ -2,12 +2,12 @@ defmodule MingaEditor.State.ModalOverlay do
   @moduledoc """
   Tagged-union representation of input-capturing modal overlays.
 
-  Today the picker, prompt, completion menu, conflict prompt, and
-  dashboard live as independent nullable fields on shell state and
-  workspace state. The type system permits 32 combinations even though
-  only six are meaningful, and `MingaEditor.Input.Interrupt` resets eight
-  independent axes by hand. See `docs/UI-STATE-ANALYSIS.md` for the full
-  analysis.
+  Before this work, the picker, prompt, completion menu, conflict prompt,
+  and dashboard each lived as an independent nullable field on shell
+  state or workspace state. The type system permitted 32 combinations
+  even though only six were meaningful, and `MingaEditor.Input.Interrupt`
+  reset eight independent axes by hand. See `docs/UI-STATE-ANALYSIS.md`
+  for the full analysis.
 
   This module replaces those fields with a single sum type:
 
@@ -20,23 +20,18 @@ defmodule MingaEditor.State.ModalOverlay do
 
   ## Migration phase: dual-write
 
-  This is step 2 of 5 (Epic #1421). The picker variant (#1424) has been
-  fully migrated — all reads and writes go through this gate, and
-  `picker_ui` has been removed from `Shell.Traditional.State`.
+  This is step 3 of 5 (Epic #1421). The picker, prompt, dashboard, and
+  conflict variants have been fully migrated — all reads and writes go
+  through this gate, and their legacy fields have been removed from
+  `Shell.Traditional.State` and `Workspace.State`.
 
-  The remaining variants still use dual-write: every gate function writes
-  both `state.shell_state.modal` and the variant's legacy field so that
-  existing readers continue to work during the migration:
+  The completion variant still uses dual-write: every gate function writes
+  both `state.shell_state.modal` and `workspace.completion` so existing
+  readers continue to work during the migration.
 
-  * `prompt_ui` — legacy mirror for the `:prompt` variant
-  * `dashboard` — legacy mirror for the `:dashboard` variant
-  * `workspace.completion` — legacy mirror for `:completion`
-  * `workspace.pending_conflict` — legacy mirror for `:conflict`
-
-  Migrations #1425-#1426 point reads at the new field one variant at a
-  time. When all variants have migrated, #1427 removes the remaining
-  dual-writes and adds a Credo rule that forbids direct writes to the
-  legacy fields.
+  Migration #1426 points completion reads at the new field. When all
+  variants have migrated, #1427 removes the remaining dual-write and
+  adds a Credo rule that forbids direct writes to the legacy field.
 
   **Do not mutate `:modal` directly**: always call this module's
   `open/3`, `transition/3`, `close/1`, or `dismiss/1`. A runtime
@@ -63,7 +58,6 @@ defmodule MingaEditor.State.ModalOverlay do
   alias MingaEditor.State.ModalOverlay.Dashboard, as: DashboardPayload
   alias MingaEditor.State.ModalOverlay.Picker, as: PickerPayload
   alias MingaEditor.State.ModalOverlay.Prompt, as: PromptPayload
-  alias MingaEditor.State.Prompt, as: PromptLegacy
   alias MingaEditor.Workspace.State, as: WorkspaceState
 
   @type variant :: :picker | :prompt | :completion | :conflict | :dashboard
@@ -226,52 +220,28 @@ defmodule MingaEditor.State.ModalOverlay do
   end
 
   # Clears the legacy slot of whichever variant is currently tracked in
-  # `state.shell_state.modal`. No-op when the modal is `:none`.
+  # `state.shell_state.modal`. No-op when the modal is `:none` or when the
+  # tracked variant has no legacy mirror left.
   @spec clear_displaced_legacy(EditorState.t()) :: EditorState.t()
   defp clear_displaced_legacy(state) do
     case state.shell_state.modal do
-      :none ->
-        state
-
-      {:picker, _} ->
-        # Picker has no legacy field — it was removed in #1424.
-        state
-
-      {:prompt, _} ->
-        EditorState.set_prompt_ui(state, %PromptLegacy{})
-
-      {:dashboard, _} ->
-        EditorState.close_dashboard(state)
-
       {:completion, _} ->
         EditorState.update_workspace(state, &WorkspaceState.set_completion(&1, nil))
 
-      {:conflict, _} ->
-        EditorState.update_workspace(state, &WorkspaceState.set_pending_conflict(&1, nil))
+      _ ->
+        state
     end
   end
 
   # Writes the payload's underlying state to the variant's legacy slot.
-  # The picker variant has no legacy field (#1424 removed it).
+  # Only completion still has a legacy mirror; the other variants are
+  # tracked exclusively on `shell_state.modal`.
   @spec mirror_to_legacy(EditorState.t(), {variant(), payload()}) :: EditorState.t()
-  defp mirror_to_legacy(state, {:picker, %PickerPayload{}}), do: state
-
-  defp mirror_to_legacy(state, {:prompt, %PromptPayload{prompt_ui: pui}}) do
-    EditorState.set_prompt_ui(state, pui)
-  end
-
-  defp mirror_to_legacy(state, {:dashboard, %DashboardPayload{state: dash}}) do
-    EditorState.set_dashboard(state, dash)
-  end
-
   defp mirror_to_legacy(state, {:completion, %CompletionPayload{completion: comp}}) do
     EditorState.update_workspace(state, &WorkspaceState.set_completion(&1, comp))
   end
 
-  defp mirror_to_legacy(state, {:conflict, %ConflictPayload{} = conflict}) do
-    legacy = ConflictPayload.to_legacy(conflict)
-    EditorState.update_workspace(state, &WorkspaceState.set_pending_conflict(&1, legacy))
-  end
+  defp mirror_to_legacy(state, _other), do: state
 
   @spec put_modal(EditorState.t(), t()) :: EditorState.t()
   defp put_modal(state, modal) do
@@ -298,45 +268,26 @@ defmodule MingaEditor.State.ModalOverlay do
 
     @spec check_consistency!(EditorState.t()) :: :ok
     defp check_consistency!(%EditorState{} = state) do
-      ss = state.shell_state
       ws = state.workspace
 
-      case ss.modal do
+      case state.shell_state.modal do
         :none ->
           :ok
 
-        # Picker has no legacy field (#1424 removed it): no consistency check needed.
-        {:picker, %PickerPayload{}} ->
+        # Picker (#1424), prompt/dashboard/conflict (#1425): tracked
+        # exclusively on shell_state.modal — no legacy mirror to compare.
+        {tag, _} when tag in [:picker, :prompt, :dashboard, :conflict] ->
           :ok
 
-        {:prompt, %PromptPayload{prompt_ui: pu}} ->
-          if ss.prompt_ui != pu, do: raise_divergence!(:prompt, pu, ss.prompt_ui)
-          :ok
-
-        {:dashboard, %DashboardPayload{state: dash}} ->
-          if ss.dashboard != dash, do: raise_divergence!(:dashboard, dash, ss.dashboard)
-          :ok
-
-        # NOTE for #1424+: the completion and conflict payloads live on
-        # shell_state.modal, but their legacy mirrors live on `workspace`,
+        # NOTE for #1426: completion's legacy mirror lives on `workspace`,
         # which is snapshotted per tab while shell_state is not. Once a
-        # caller actually opens one of these variants, switching tabs will
-        # swap workspace.completion / workspace.pending_conflict out from
-        # under the gate and trip this assertion on the next call. Resolve
-        # by either (a) clearing :modal on tab-switch via a hook, or
-        # (b) moving these variants' authoritative state onto workspace.
-        # This step intentionally does not pick — flagged in the next
-        # ticket's developer notes.
+        # caller actually opens this variant, switching tabs swaps
+        # workspace.completion out from under the gate and trips this
+        # assertion on the next call. Resolve by either (a) clearing
+        # :modal on tab-switch via a hook, or (b) moving completion's
+        # authoritative state onto workspace.
         {:completion, %CompletionPayload{completion: comp}} ->
           if ws.completion != comp, do: raise_divergence!(:completion, comp, ws.completion)
-          :ok
-
-        {:conflict, %ConflictPayload{} = conflict} ->
-          expected = ConflictPayload.to_legacy(conflict)
-
-          if ws.pending_conflict != expected,
-            do: raise_divergence!(:conflict, expected, ws.pending_conflict)
-
           :ok
       end
     end

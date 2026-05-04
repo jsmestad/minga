@@ -2,10 +2,10 @@ defmodule MingaEditor.Input.Dashboard do
   @moduledoc """
   Input handler for the dashboard home screen.
 
-  Active only when no file buffer is open (`buffers.active == nil`).
-  Captures j/k and arrow keys for cursor navigation, Enter or SPC for
-  item selection, and passes everything else through so global bindings
-  (Ctrl+Q) still work.
+  Active when the dashboard modal is open (`state.shell_state.modal ==
+  {:dashboard, _}`). Captures j/k and arrow keys for cursor navigation,
+  Enter or SPC for item selection, and passes everything else through so
+  global bindings (Ctrl+Q) still work.
   """
 
   @behaviour MingaEditor.Input.Handler
@@ -15,7 +15,8 @@ defmodule MingaEditor.Input.Dashboard do
   alias MingaEditor.Commands
   alias MingaEditor.Commands.BufferManagement
   alias MingaEditor.Dashboard
-  alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.ModalOverlay
+  alias MingaEditor.State.ModalOverlay.Dashboard, as: DashboardPayload
 
   # Key codepoints
   @key_j ?j
@@ -31,16 +32,16 @@ defmodule MingaEditor.Input.Dashboard do
   @spec handle_key(state(), non_neg_integer(), non_neg_integer()) ::
           MingaEditor.Input.Handler.result()
   def handle_key(
-        %{workspace: %{buffers: %{active: nil}}, shell_state: %{dashboard: %{} = dash}} = state,
+        %{shell_state: %{modal: {:dashboard, %{state: %{} = dash}}}} = state,
         codepoint,
         _modifiers
       ) do
     case codepoint do
       cp when cp == @key_j or cp == @arrow_down ->
-        {:handled, EditorState.set_dashboard(state, Dashboard.cursor_down(dash))}
+        {:handled, transition_dashboard(state, Dashboard.cursor_down(dash))}
 
       cp when cp == @key_k or cp == @arrow_up ->
-        {:handled, EditorState.set_dashboard(state, Dashboard.cursor_up(dash))}
+        {:handled, transition_dashboard(state, Dashboard.cursor_up(dash))}
 
       cp when cp == @key_enter or cp == @key_space ->
         handle_select(state, dash)
@@ -52,7 +53,7 @@ defmodule MingaEditor.Input.Dashboard do
 
   def handle_key(state, _codepoint, _modifiers), do: {:passthrough, state}
 
-  @spec handle_select(EditorState.t(), Dashboard.state()) :: MingaEditor.Input.Handler.result()
+  @spec handle_select(state(), Dashboard.state()) :: MingaEditor.Input.Handler.result()
   defp handle_select(state, dash) do
     case Dashboard.selected_command(dash) do
       nil ->
@@ -62,14 +63,18 @@ defmodule MingaEditor.Input.Dashboard do
         root = safe_project_root()
         full_path = Path.join(root, path)
         state = BufferManagement.execute(state, {:execute_ex_command, {:edit, full_path}})
-        state = EditorState.close_dashboard(state)
-        {:handled, state}
+        {:handled, ModalOverlay.dismiss(state)}
 
       command when is_atom(command) ->
         state = Commands.execute(state, command)
-        state = EditorState.close_dashboard(state)
-        {:handled, state}
+        {:handled, ModalOverlay.dismiss(state)}
     end
+  end
+
+  @spec transition_dashboard(state(), Dashboard.state()) :: state()
+  defp transition_dashboard(state, new_dash) do
+    {:dashboard, payload} = state.shell_state.modal
+    ModalOverlay.transition(state, :dashboard, DashboardPayload.put_state(payload, new_dash))
   end
 
   defdelegate safe_project_root, to: Minga.Project, as: :resolve_root

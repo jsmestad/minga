@@ -13,12 +13,10 @@ defmodule MingaEditor.Shell.Traditional.State do
   """
 
   alias MingaEditor.BottomPanel
-  alias MingaEditor.Dashboard
   alias MingaEditor.HoverPopup
   alias MingaEditor.NavFlash
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.ModalOverlay
-  alias MingaEditor.State.Prompt
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.WhichKey
   alias Minga.Tool.Manager, as: ToolManager
@@ -26,9 +24,7 @@ defmodule MingaEditor.Shell.Traditional.State do
   @type t :: %__MODULE__{
           nav_flash: NavFlash.t() | nil,
           hover_popup: HoverPopup.t() | nil,
-          dashboard: Dashboard.state() | nil,
           status_msg: String.t() | nil,
-          prompt_ui: Prompt.t(),
           whichkey: WhichKey.t(),
           bottom_panel: BottomPanel.t(),
           git_status_panel: MingaEditor.Frontend.Protocol.GUI.git_status_data() | nil,
@@ -46,9 +42,7 @@ defmodule MingaEditor.Shell.Traditional.State do
 
   defstruct nav_flash: nil,
             hover_popup: nil,
-            dashboard: nil,
             status_msg: nil,
-            prompt_ui: %Prompt{},
             whichkey: %WhichKey{},
             bottom_panel: %BottomPanel{},
             git_status_panel: nil,
@@ -115,36 +109,6 @@ defmodule MingaEditor.Shell.Traditional.State do
   @spec dismiss_hover_popup(t()) :: t()
   def dismiss_hover_popup(%{} = ss) do
     %{ss | hover_popup: nil}
-  end
-
-  # ── Dashboard ──────────────────────────────────────────────────────────────
-
-  @doc "Returns the dashboard home screen state, or nil."
-  @spec dashboard(t()) :: Dashboard.state() | nil
-  def dashboard(%{dashboard: dash}), do: dash
-
-  @doc "Sets the dashboard home screen state."
-  @spec set_dashboard(t(), Dashboard.state()) :: t()
-  def set_dashboard(%{} = ss, dash) when is_map(dash) do
-    %{ss | dashboard: dash}
-  end
-
-  @doc "Closes the dashboard home screen."
-  @spec close_dashboard(t()) :: t()
-  def close_dashboard(%{} = ss) do
-    %{ss | dashboard: nil}
-  end
-
-  # ── Prompt UI ──────────────────────────────────────────────────────────────
-
-  @doc "Returns the prompt UI state."
-  @spec prompt_ui(t()) :: Prompt.t()
-  def prompt_ui(%{prompt_ui: p}), do: p
-
-  @doc "Replaces the prompt UI state."
-  @spec set_prompt_ui(t(), Prompt.t()) :: t()
-  def set_prompt_ui(%{} = ss, prompt) do
-    %{ss | prompt_ui: prompt}
   end
 
   # ── Which-key ──────────────────────────────────────────────────────────────

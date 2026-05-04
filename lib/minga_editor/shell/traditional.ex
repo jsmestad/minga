@@ -140,19 +140,38 @@ defmodule MingaEditor.Shell.Traditional do
   @impl true
   @spec on_buffer_added(ShellState.t(), WorkspaceState.t(), pid(), atom()) ::
           {ShellState.t(), WorkspaceState.t()}
-  def on_buffer_added(shell_state, workspace, buffer_pid, context \\ :open)
+  def on_buffer_added(shell_state, workspace, buffer_pid, context \\ :open) do
+    do_on_buffer_added(maybe_dismiss_dashboard(shell_state), workspace, buffer_pid, context)
+  end
 
-  def on_buffer_added(%ShellState{tab_bar: nil} = shell_state, workspace, _buffer_pid, _context) do
+  # Dismisses the dashboard modal when a buffer becomes active. The
+  # dashboard is the "no buffer" splash; once a buffer opens, the
+  # splash should disappear so it does not stick visually behind the
+  # buffer view. Other modal variants are left alone.
+  @spec maybe_dismiss_dashboard(ShellState.t()) :: ShellState.t()
+  defp maybe_dismiss_dashboard(%ShellState{modal: {:dashboard, _}} = shell_state),
+    do: ShellState.set_modal(shell_state, :none)
+
+  defp maybe_dismiss_dashboard(shell_state), do: shell_state
+
+  @spec do_on_buffer_added(ShellState.t(), WorkspaceState.t(), pid(), atom()) ::
+          {ShellState.t(), WorkspaceState.t()}
+  defp do_on_buffer_added(
+         %ShellState{tab_bar: nil} = shell_state,
+         workspace,
+         _buffer_pid,
+         _context
+       ) do
     workspace = WorkspaceState.sync_active_window_buffer(workspace)
     {shell_state, workspace}
   end
 
-  def on_buffer_added(
-        %ShellState{tab_bar: %TabBar{} = tb} = shell_state,
-        workspace,
-        buffer_pid,
-        context
-      ) do
+  defp do_on_buffer_added(
+         %ShellState{tab_bar: %TabBar{} = tb} = shell_state,
+         workspace,
+         buffer_pid,
+         context
+       ) do
     label = buffer_label(buffer_pid)
 
     Log.debug(:editor, fn ->

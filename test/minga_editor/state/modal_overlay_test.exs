@@ -92,7 +92,7 @@ defmodule MingaEditor.State.ModalOverlayTest do
   end
 
   describe "open/3 from :none" do
-    test "writes the modal field and mirrors picker payload to the legacy slot" do
+    test "writes the picker variant" do
       state = base_state()
       payload = picker_payload()
 
@@ -101,24 +101,22 @@ defmodule MingaEditor.State.ModalOverlayTest do
       assert result.shell_state.modal == {:picker, payload}
     end
 
-    test "writes the prompt legacy field" do
+    test "writes the prompt variant" do
       state = base_state()
       payload = prompt_payload()
 
       result = ModalOverlay.open(state, :prompt, payload)
 
       assert result.shell_state.modal == {:prompt, payload}
-      assert result.shell_state.prompt_ui == payload.prompt_ui
     end
 
-    test "writes the dashboard legacy field" do
+    test "writes the dashboard variant" do
       state = base_state()
       payload = dashboard_payload()
 
       result = ModalOverlay.open(state, :dashboard, payload)
 
       assert result.shell_state.modal == {:dashboard, payload}
-      assert result.shell_state.dashboard == payload.state
     end
 
     test "writes the completion legacy field on workspace" do
@@ -131,7 +129,7 @@ defmodule MingaEditor.State.ModalOverlayTest do
       assert result.workspace.completion == payload.completion
     end
 
-    test "writes the conflict legacy field as a {pid, message} tuple" do
+    test "writes the conflict variant" do
       state = base_state()
       buffer = self()
       payload = conflict_payload(buffer)
@@ -139,12 +137,11 @@ defmodule MingaEditor.State.ModalOverlayTest do
       result = ModalOverlay.open(state, :conflict, payload)
 
       assert result.shell_state.modal == {:conflict, payload}
-      assert result.workspace.pending_conflict == {buffer, payload.message}
     end
   end
 
   describe "open/3 displacement" do
-    test "replacing a picker with a prompt clears the picker legacy slot" do
+    test "replacing a picker with a prompt swaps the active modal" do
       state =
         base_state()
         |> ModalOverlay.open(:picker, picker_payload())
@@ -153,7 +150,6 @@ defmodule MingaEditor.State.ModalOverlayTest do
       result = ModalOverlay.open(state, :prompt, prompt)
 
       assert result.shell_state.modal == {:prompt, prompt}
-      assert result.shell_state.prompt_ui == prompt.prompt_ui
     end
 
     test "replacing completion with picker clears workspace.completion" do
@@ -168,7 +164,7 @@ defmodule MingaEditor.State.ModalOverlayTest do
       assert result.workspace.completion == nil
     end
 
-    test "replacing dashboard clears the dashboard legacy field" do
+    test "replacing dashboard with picker swaps the active modal" do
       state =
         base_state()
         |> ModalOverlay.open(:dashboard, dashboard_payload())
@@ -177,7 +173,6 @@ defmodule MingaEditor.State.ModalOverlayTest do
       result = ModalOverlay.open(state, :picker, picker)
 
       assert result.shell_state.modal == {:picker, picker}
-      assert result.shell_state.dashboard == nil
     end
   end
 
@@ -192,17 +187,25 @@ defmodule MingaEditor.State.ModalOverlayTest do
       assert result == state
     end
 
+    test "open(:prompt) while conflict is active is suppressed and returns state unchanged" do
+      state =
+        base_state()
+        |> ModalOverlay.open(:conflict, conflict_payload())
+
+      result = ModalOverlay.open(state, :prompt, prompt_payload())
+
+      assert result == state
+    end
+
     test "open(:conflict) over an existing conflict replaces (same-variant transition)" do
       state =
         base_state()
         |> ModalOverlay.open(:conflict, conflict_payload(self()))
 
-      other = self()
-      next = ConflictPayload.new(other, "different message", opened_at: 2_000)
+      next = ConflictPayload.new(self(), "different message", opened_at: 2_000)
       result = ModalOverlay.open(state, :conflict, next)
 
       assert result.shell_state.modal == {:conflict, next}
-      assert result.workspace.pending_conflict == {other, "different message"}
     end
   end
 
@@ -216,12 +219,11 @@ defmodule MingaEditor.State.ModalOverlayTest do
       result = ModalOverlay.transition(state, :picker, picker)
 
       assert result.shell_state.modal == {:picker, picker}
-      assert result.workspace.pending_conflict == nil
     end
   end
 
   describe "close/1 and dismiss/1" do
-    test "close clears the active picker and resets the legacy slot" do
+    test "close clears the active picker" do
       state =
         base_state()
         |> ModalOverlay.open(:picker, picker_payload())
@@ -231,7 +233,7 @@ defmodule MingaEditor.State.ModalOverlayTest do
       assert result.shell_state.modal == :none
     end
 
-    test "dismiss clears the active prompt and resets the legacy slot" do
+    test "dismiss clears the active prompt" do
       state =
         base_state()
         |> ModalOverlay.open(:prompt, prompt_payload())
@@ -239,7 +241,16 @@ defmodule MingaEditor.State.ModalOverlayTest do
       result = ModalOverlay.dismiss(state)
 
       assert result.shell_state.modal == :none
-      assert result.shell_state.prompt_ui == %PromptLegacy{}
+    end
+
+    test "dismiss clears an active conflict" do
+      state =
+        base_state()
+        |> ModalOverlay.open(:conflict, conflict_payload())
+
+      result = ModalOverlay.dismiss(state)
+
+      assert result.shell_state.modal == :none
     end
 
     test "close clears workspace.completion when a completion is active" do
@@ -261,21 +272,6 @@ defmodule MingaEditor.State.ModalOverlayTest do
   end
 
   describe "divergence assertion (dev/test only)" do
-    test "raises when prompt_ui is mutated outside the gate" do
-      state =
-        base_state()
-        |> ModalOverlay.open(:prompt, prompt_payload())
-
-      tampered =
-        update_in(state.shell_state.prompt_ui, fn pui ->
-          %{pui | cursor: 999}
-        end)
-
-      assert_raise RuntimeError, ~r/ModalOverlay divergence/, fn ->
-        ModalOverlay.close(tampered)
-      end
-    end
-
     test "raises when workspace.completion is cleared outside the gate" do
       state =
         base_state()
@@ -291,21 +287,21 @@ defmodule MingaEditor.State.ModalOverlayTest do
     test "tolerates legacy mutation while modal is :none" do
       state = base_state()
 
+      # Stuff a stray completion onto workspace before any modal opens.
       tampered =
-        put_in(state.shell_state.prompt_ui, %PromptLegacy{
-          handler: SomeHandler,
-          text: "x",
-          cursor: 1,
-          label: ":"
-        })
+        put_in(
+          state.workspace.completion,
+          Completion.new([], {0, 0})
+        )
 
       payload = picker_payload()
       result = ModalOverlay.open(tampered, :picker, payload)
 
+      # The gate clears completion when displacing it (it tracks completion
+      # via the legacy mirror), but only because completion was the
+      # previously-tracked variant. Here completion was never tracked, so
+      # it should be left as-is by `:picker`'s open path.
       assert result.shell_state.modal == {:picker, payload}
-      # The mutated prompt_ui is preserved: the gate makes no claims about
-      # legacy fields whose variant is not currently tracked.
-      assert result.shell_state.prompt_ui.text == "x"
     end
   end
 end

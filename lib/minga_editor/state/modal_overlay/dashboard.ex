@@ -35,4 +35,14 @@ defmodule MingaEditor.State.ModalOverlay.Dashboard do
       opened_at: Keyword.get(opts, :opened_at, System.monotonic_time(:millisecond))
     }
   end
+
+  @doc """
+  Replaces the inner dashboard state on the payload, preserving `owner` and
+  `opened_at`. The only sanctioned way to update the inner state from
+  outside this module (Rule 2: state ownership).
+  """
+  @spec put_state(t(), Dashboard.state()) :: t()
+  def put_state(%__MODULE__{} = payload, state) when is_map(state) do
+    %{payload | state: state}
+  end
 end

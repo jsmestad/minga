@@ -185,7 +185,6 @@ defmodule MingaEditor.DashboardTest do
         },
         focus_stack: MingaEditor.Input.default_stack(),
         shell_state: %MingaEditor.Shell.Traditional.State{
-          dashboard: Dashboard.new_state(),
           modal:
             {:picker,
              PickerPayload.new(%PickerState{

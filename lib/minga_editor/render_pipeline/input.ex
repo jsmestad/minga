@@ -205,12 +205,9 @@ defmodule MingaEditor.RenderPipeline.Input do
       input.shell_state |> Map.get(:signature_help),
       # Which-key popup
       input.shell_state |> Map.get(:whichkey),
-      # Modal overlay (sum type covering picker, completion, conflict,
-      # dashboard; prompt is still mirrored to :prompt_ui below until its
-      # migration lands)
+      # Modal overlay (sum type covering picker, prompt, dashboard,
+      # conflict, completion)
       input.shell_state |> Map.get(:modal),
-      # Prompt UI (legacy mirror; still read for invalidation parity)
-      input.shell_state |> Map.get(:prompt_ui),
       # Agent state (status, pending approval)
       input.shell_state |> Map.get(:agent),
       # Viewport dimensions (overlay positioning)

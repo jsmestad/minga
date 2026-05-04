@@ -132,12 +132,12 @@ defmodule MingaEditor.Input.Interrupt do
   end
 
   @spec maybe_close_conflict(EditorState.t(), [String.t()]) :: {EditorState.t(), [String.t()]}
-  defp maybe_close_conflict(%{workspace: %{pending_conflict: nil}} = state, resets),
-    do: {state, resets}
-
   defp maybe_close_conflict(state, resets) do
-    {EditorState.update_workspace(state, &WorkspaceState.set_pending_conflict(&1, nil)),
-     ["conflict prompt dismissed" | resets]}
+    if ModalOverlay.match(state.shell_state.modal, :conflict) do
+      {ModalOverlay.dismiss(state), ["conflict prompt dismissed" | resets]}
+    else
+      {state, resets}
+    end
   end
 
   @spec maybe_close_completion(EditorState.t(), [String.t()]) :: {EditorState.t(), [String.t()]}

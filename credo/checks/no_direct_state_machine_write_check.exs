@@ -47,7 +47,7 @@ defmodule Minga.Credo.NoDirectStateMachineWriteCheck do
         # VimState fields: must use VimState.set_*/transition instead of direct writes
         {:editing, [:mode_state, :marks, :last_jump_pos, :last_find_char, :macro_recorder, :change_recorder, :reg]},
         # Workspace.State fields: must use WorkspaceState.set_* instead of direct writes
-        {:workspace, [:keymap_scope, :completion, :completion_trigger, :highlight, :mouse, :document_highlights, :search, :pending_conflict, :lsp_pending, :viewport, :windows, :buffers, :agent_ui, :injection_ranges, :editing]}
+        {:workspace, [:keymap_scope, :completion, :completion_trigger, :highlight, :mouse, :document_highlights, :search, :lsp_pending, :viewport, :windows, :buffers, :agent_ui, :injection_ranges, :editing]}
       ],
       allowed_files: ["vim_state.ex", "state.ex", "workspace/state.ex"]
     ],

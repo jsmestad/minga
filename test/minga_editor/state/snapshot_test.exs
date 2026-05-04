@@ -63,7 +63,6 @@ defmodule MingaEditor.State.SnapshotTest do
       assert ctx.completion_trigger == state.workspace.completion_trigger
       assert ctx.injection_ranges == state.workspace.injection_ranges
       assert ctx.search == state.workspace.search
-      assert ctx.pending_conflict == state.workspace.pending_conflict
     end
   end
 
