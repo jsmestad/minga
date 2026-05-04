@@ -60,6 +60,13 @@ defmodule MingaEditor.RenderPipeline.Invalidation do
   Returns a fresh Invalidation requesting a full redraw — the safe
   default while incremental tracking is staged in.
   """
+  # `:no_opaque` because `chrome_regions: MapSet.new()` in the literal struct
+  # makes Dialyzer's inferred success type expose MapSet's opaque internal
+  # record (`%MapSet{:map => MapSet.internal(_)}`), which it then flags as a
+  # mismatch against the contract's `MapSet.t(region_tag())`. The contract is
+  # what callers should rely on; the inferred shape is an implementation
+  # detail of `MapSet.new/0`.
+  @dialyzer {:no_opaque, full_redraw: 1}
   @spec full_redraw([atom()]) :: t()
   def full_redraw(reasons \\ []) do
     %__MODULE__{
