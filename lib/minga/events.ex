@@ -260,7 +260,12 @@ defmodule Minga.Events do
           | SupervisorRestartedEvent.t()
           | LogMessageEvent.t()
           | FaceOverridesChangedEvent.t()
+          | LoadUserThemesEvent.t()
           | MingaAgent.SessionManager.SessionStoppedEvent.t()
+          | MingaAgent.Changeset.MergedEvent.t()
+          | MingaAgent.Changeset.BudgetExhaustedEvent.t()
+          | Minga.Extension.UpdatesAvailableEvent.t()
+          | map()
 
   # ── Child spec ──────────────────────────────────────────────────────────────
 
@@ -268,6 +273,7 @@ defmodule Minga.Events do
   Returns the child spec for the event bus Registry.
 
   Add this to your supervision tree before any process that subscribes.
+  Pass `name:` to start an isolated registry for tests.
   """
   @spec child_spec(keyword()) :: Supervisor.child_spec()
   def child_spec(opts) do
@@ -292,11 +298,19 @@ defmodule Minga.Events do
   @doc """
   Subscribes the calling process to a topic with metadata or a registry.
 
-  If the second argument is the name of a running Registry process, it is
-  treated as the event registry. Otherwise it is preserved as metadata on
-  the default registry for backward compatibility.
+  Pass `registry: name` to subscribe without metadata on an isolated registry.
+  Passing a running Registry name directly is also supported for the migration.
+  Otherwise the second argument is preserved as metadata on the default registry.
   """
-  @spec subscribe(topic(), registry() | term()) :: :ok
+  @spec subscribe(topic(), keyword() | registry() | term()) :: :ok
+  def subscribe(topic, opts) when is_atom(topic) and is_list(opts) do
+    if registry_opts?(opts) do
+      subscribe_topic(topic, [], Keyword.fetch!(opts, :registry))
+    else
+      subscribe_topic(topic, opts, default_registry())
+    end
+  end
+
   def subscribe(topic, registry_or_value) when is_atom(topic) do
     if registry_process?(registry_or_value) do
       subscribe_topic(topic, [], registry_or_value)
@@ -312,7 +326,12 @@ defmodule Minga.Events do
   which lets subscribers filter or tag their registrations. Subscribing
   with the same topic and value from the same process is a no-op.
   """
+  @spec subscribe(topic(), term(), keyword()) :: :ok
   @spec subscribe(topic(), term(), registry()) :: :ok
+  def subscribe(topic, value, opts) when is_atom(topic) and is_list(opts) do
+    subscribe_topic(topic, value, Keyword.get(opts, :registry, default_registry()))
+  end
+
   def subscribe(topic, value, registry) when is_atom(topic) do
     subscribe_topic(topic, value, registry)
   end
@@ -323,8 +342,10 @@ defmodule Minga.Events do
   Removes all registrations for this process under the given topic key.
   """
   @spec unsubscribe(topic()) :: :ok
-  @spec unsubscribe(topic(), registry()) :: :ok
-  def unsubscribe(topic, registry \\ default_registry()) when is_atom(topic) do
+  @spec unsubscribe(topic(), keyword() | registry()) :: :ok
+  def unsubscribe(topic, registry_or_opts \\ default_registry()) when is_atom(topic) do
+    registry = registry_from_arg(registry_or_opts)
+
     if registry_process?(registry) do
       Registry.unregister(registry, topic)
     end
@@ -337,13 +358,10 @@ defmodule Minga.Events do
   @doc """
   Broadcasts a typed payload to all subscribers of a topic.
 
-  Accepts `BufferEvent` for buffer topics and `ModeEvent` for mode changes.
-  Using structs with `@enforce_keys` means the compiler catches missing
-  fields and the type checker flags wrong field types at the call site,
-  before the event ever reaches subscribers.
-
-  Returns `:ok`. If no processes are subscribed to the topic, this is a
-  no-op with negligible cost.
+  Accepts typed payload structs for known topics. Returns `:ok`. If no
+  processes are subscribed to the topic, this is a no-op with negligible cost.
+  Pass `registry:` or a registry name as the third argument to broadcast through
+  an isolated registry.
   """
   @spec broadcast(:buffer_saved | :buffer_opened | :content_replaced, BufferEvent.t()) :: :ok
   @spec broadcast(:buffer_closed, BufferClosedEvent.t()) :: :ok
@@ -370,8 +388,10 @@ defmodule Minga.Events do
     broadcast(topic, payload, default_registry())
   end
 
-  @spec broadcast(topic(), payload() | map(), registry()) :: :ok
-  def broadcast(topic, payload, registry) when is_atom(topic) and is_map(payload) do
+  @spec broadcast(topic(), payload(), keyword()) :: :ok
+  @spec broadcast(topic(), payload(), registry()) :: :ok
+  def broadcast(topic, payload, registry_or_opts) when is_atom(topic) and is_map(payload) do
+    registry = registry_from_arg(registry_or_opts)
     if registry_process?(registry), do: dispatch(registry, topic, payload)
     :ok
   end
@@ -380,20 +400,20 @@ defmodule Minga.Events do
   Broadcasts `:buffer_changed` to all subscribers.
 
   Deprecated: use the 2-arity version that accepts a `BufferChangedEvent`
-  struct with delta and source fields. This 1-arity wrapper exists for
-  backward compatibility during migration.
+  struct with delta and source fields. This wrapper exists for backward
+  compatibility during migration.
   """
   @deprecated "Buffer.Server now broadcasts :buffer_changed automatically on every edit. No manual broadcast needed."
   @spec notify_buffer_changed(pid()) :: :ok
-  @spec notify_buffer_changed(pid(), registry()) :: :ok
-  def notify_buffer_changed(buf, registry \\ default_registry()) when is_pid(buf) do
+  @spec notify_buffer_changed(pid(), keyword() | registry()) :: :ok
+  def notify_buffer_changed(buf, registry_or_opts \\ default_registry()) when is_pid(buf) do
     broadcast(
       :buffer_changed,
       %BufferChangedEvent{
         buffer: buf,
         source: Minga.Buffer.EditSource.unknown()
       },
-      registry
+      registry_or_opts
     )
   end
 
@@ -406,8 +426,10 @@ defmodule Minga.Events do
   (use `broadcast/2` instead).
   """
   @spec subscribers(topic()) :: [pid()]
-  @spec subscribers(topic(), registry()) :: [pid()]
-  def subscribers(topic, registry \\ default_registry()) when is_atom(topic) do
+  @spec subscribers(topic(), keyword() | registry()) :: [pid()]
+  def subscribers(topic, registry_or_opts \\ default_registry()) when is_atom(topic) do
+    registry = registry_from_arg(registry_or_opts)
+
     if registry_process?(registry) do
       Registry.lookup(registry, topic) |> Enum.map(fn {pid, _} -> pid end)
     else
@@ -415,7 +437,7 @@ defmodule Minga.Events do
     end
   end
 
-  @spec dispatch(registry(), topic(), payload() | map()) :: :ok
+  @spec dispatch(registry(), topic(), payload()) :: :ok
   defp dispatch(registry, topic, payload) do
     Registry.dispatch(registry, topic, fn entries ->
       for {pid, _value} <- entries do
@@ -435,6 +457,17 @@ defmodule Minga.Events do
     end
 
     :ok
+  end
+
+  @spec registry_from_arg(keyword() | registry()) :: registry()
+  defp registry_from_arg(opts) when is_list(opts),
+    do: Keyword.get(opts, :registry, default_registry())
+
+  defp registry_from_arg(registry) when is_atom(registry), do: registry
+
+  @spec registry_opts?(list()) :: boolean()
+  defp registry_opts?(opts) do
+    Keyword.keyword?(opts) and Keyword.has_key?(opts, :registry)
   end
 
   @spec registry_process?(term()) :: boolean()
