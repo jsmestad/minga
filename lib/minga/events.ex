@@ -253,7 +253,12 @@ defmodule Minga.Events do
           | SupervisorRestartedEvent.t()
           | LogMessageEvent.t()
           | FaceOverridesChangedEvent.t()
+          | LoadUserThemesEvent.t()
           | MingaAgent.SessionManager.SessionStoppedEvent.t()
+          | MingaAgent.Changeset.MergedEvent.t()
+          | MingaAgent.Changeset.BudgetExhaustedEvent.t()
+          | Minga.Extension.UpdatesAvailableEvent.t()
+          | map()
 
   # ── Child spec ──────────────────────────────────────────────────────────────
 
@@ -261,10 +266,12 @@ defmodule Minga.Events do
   Returns the child spec for the event bus Registry.
 
   Add this to your supervision tree before any process that subscribes.
+  Pass `name:` to start an isolated registry for tests.
   """
   @spec child_spec(keyword()) :: Supervisor.child_spec()
-  def child_spec(_opts) do
-    Registry.child_spec(keys: :duplicate, name: @registry)
+  def child_spec(opts) do
+    registry = Keyword.get(opts, :name, @registry)
+    Registry.child_spec(keys: :duplicate, name: registry)
   end
 
   # ── Subscribe / Unsubscribe ─────────────────────────────────────────────────
@@ -279,35 +286,51 @@ defmodule Minga.Events do
   """
   @spec subscribe(topic()) :: :ok
   def subscribe(topic) when is_atom(topic) do
-    if Process.whereis(@registry) do
-      already? =
-        Registry.lookup(@registry, topic)
-        |> Enum.any?(fn {pid, _} -> pid == self() end)
-
-      unless already?, do: {:ok, _} = Registry.register(@registry, topic, [])
-    end
-
-    :ok
+    subscribe(topic, registry: @registry)
   end
 
   @doc """
   Subscribes the calling process to a topic with metadata.
 
   The metadata value is passed to the dispatch callback alongside the pid,
-  which lets subscribers filter or tag their registrations. Subscribing
-  with the same topic and value from the same process is a no-op.
+  which lets subscribers filter or tag their registrations. Pass `registry:`
+  as the second argument to subscribe without metadata on an isolated registry.
+  Subscribing with the same topic and value from the same process is a no-op.
   """
   @spec subscribe(topic(), term()) :: :ok
+  def subscribe(topic, opts) when is_atom(topic) and is_list(opts) do
+    if registry_opts?(opts) do
+      subscribe(topic, [], registry: Keyword.fetch!(opts, :registry))
+    else
+      subscribe(topic, opts, registry: @registry)
+    end
+  end
+
   def subscribe(topic, value) when is_atom(topic) do
-    if Process.whereis(@registry) do
+    subscribe(topic, value, registry: @registry)
+  end
+
+  @doc """
+  Subscribes the calling process to a topic with metadata on a specific registry.
+  """
+  @spec subscribe(topic(), term(), keyword()) :: :ok
+  def subscribe(topic, value, opts) when is_atom(topic) and is_list(opts) do
+    registry = Keyword.get(opts, :registry, @registry)
+
+    if Process.whereis(registry) do
       already? =
-        Registry.lookup(@registry, topic)
+        Registry.lookup(registry, topic)
         |> Enum.any?(fn {pid, v} -> pid == self() and v == value end)
 
-      unless already?, do: {:ok, _} = Registry.register(@registry, topic, value)
+      unless already?, do: {:ok, _} = Registry.register(registry, topic, value)
     end
 
     :ok
+  end
+
+  @spec registry_opts?(list()) :: boolean()
+  defp registry_opts?(opts) do
+    Keyword.keyword?(opts) and Keyword.has_key?(opts, :registry)
   end
 
   @doc """
@@ -331,7 +354,8 @@ defmodule Minga.Events do
   before the event ever reaches subscribers.
 
   Returns `:ok`. If no processes are subscribed to the topic, this is a
-  no-op with negligible cost.
+  no-op with negligible cost. Pass `registry:` as the third argument to
+  broadcast through an isolated registry.
   """
   @spec broadcast(:buffer_saved | :buffer_opened | :content_replaced, BufferEvent.t()) :: :ok
   @spec broadcast(:buffer_closed, BufferClosedEvent.t()) :: :ok
@@ -354,8 +378,15 @@ defmodule Minga.Events do
   @spec broadcast(:load_user_themes, LoadUserThemesEvent.t()) :: :ok
   @spec broadcast(:buffer_fork_conflict, map()) :: :ok
   @spec broadcast(:extension_updates_available, Minga.Extension.UpdatesAvailableEvent.t()) :: :ok
-  def broadcast(topic, %_{} = payload) when is_atom(topic) do
-    Registry.dispatch(@registry, topic, fn entries ->
+  def broadcast(topic, payload) when is_atom(topic) do
+    broadcast(topic, payload, registry: @registry)
+  end
+
+  @spec broadcast(topic(), payload(), keyword()) :: :ok
+  def broadcast(topic, payload, opts) when is_atom(topic) and is_list(opts) do
+    registry = Keyword.get(opts, :registry, @registry)
+
+    Registry.dispatch(registry, topic, fn entries ->
       for {pid, _value} <- entries do
         send(pid, {:minga_event, topic, payload})
       end
