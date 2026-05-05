@@ -139,7 +139,7 @@ defmodule MingaEditor.Commands.Lsp do
       case LSPSupervisor.ensure_client(config, root) do
         {:ok, _pid} ->
           Minga.Log.info(:lsp, "Started LSP server #{config.name}")
-          maybe_broadcast_buffer_opened(buf)
+          maybe_broadcast_buffer_opened(st, buf)
           {[{:ok, config.name} | results], st}
 
         {:error, reason} ->
@@ -153,12 +153,16 @@ defmodule MingaEditor.Commands.Lsp do
 
   # Re-broadcasts :buffer_opened so SyncServer attaches clients for newly
   # started LSP servers.
-  @spec maybe_broadcast_buffer_opened(pid()) :: :ok
-  defp maybe_broadcast_buffer_opened(buf) do
+  @spec maybe_broadcast_buffer_opened(state(), pid()) :: :ok
+  defp maybe_broadcast_buffer_opened(state, buf) do
     path = Buffer.file_path(buf)
 
     if path do
-      Minga.Events.broadcast(:buffer_opened, %Minga.Events.BufferEvent{buffer: buf, path: path})
+      Minga.Events.broadcast(
+        :buffer_opened,
+        %Minga.Events.BufferEvent{buffer: buf, path: path},
+        EditorState.events_registry(state)
+      )
     end
 
     :ok

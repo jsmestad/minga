@@ -48,7 +48,8 @@ defmodule Minga.LSP.SyncServer do
           debounce_timers: %{pid() => reference()},
           client_monitors: %{reference() => {buffer_pid :: pid(), client_pid :: pid()}},
           pending_tool_buffers: %{String.t() => [pid()]},
-          delta_accumulators: %{pid() => delta_accumulator()}
+          delta_accumulators: %{pid() => delta_accumulator()},
+          events_registry: Events.registry()
         }
 
   # ── Client API ─────────────────────────────────────────────────────────
@@ -80,7 +81,7 @@ defmodule Minga.LSP.SyncServer do
 
   @impl true
   @spec init(keyword()) :: {:ok, state()}
-  def init(_opts) do
+  def init(opts) do
     :ets.new(@registry_table, [
       :named_table,
       :public,
@@ -88,11 +89,13 @@ defmodule Minga.LSP.SyncServer do
       read_concurrency: true
     ])
 
-    Events.subscribe(:buffer_opened)
-    Events.subscribe(:buffer_saved)
-    Events.subscribe(:buffer_closed)
-    Events.subscribe(:buffer_changed)
-    Events.subscribe(:tool_install_complete)
+    events_registry = Keyword.get(opts, :events_registry, Events.default_registry())
+
+    Events.subscribe(:buffer_opened, events_registry)
+    Events.subscribe(:buffer_saved, events_registry)
+    Events.subscribe(:buffer_closed, events_registry)
+    Events.subscribe(:buffer_changed, events_registry)
+    Events.subscribe(:tool_install_complete, events_registry)
 
     {:ok,
      %{
@@ -101,7 +104,8 @@ defmodule Minga.LSP.SyncServer do
        pending_tool_buffers: %{},
        # Accumulated deltas per buffer pid. When a delta is nil (bulk op),
        # the value is set to :full_sync to force full content sync.
-       delta_accumulators: %{}
+       delta_accumulators: %{},
+       events_registry: events_registry
      }}
   end
 
@@ -232,7 +236,12 @@ defmodule Minga.LSP.SyncServer do
     results
     |> Enum.filter(&failed_with_recipe?/1)
     |> Enum.reduce(state, fn {config, _}, acc ->
-      Events.broadcast(:tool_missing, %ToolMissingEvent{command: config.command})
+      Events.broadcast(
+        :tool_missing,
+        %ToolMissingEvent{command: config.command},
+        state.events_registry
+      )
+
       track_buffer_for_command(acc, config.command, buffer_pid)
     end)
   end

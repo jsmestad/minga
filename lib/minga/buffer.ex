@@ -58,7 +58,9 @@ defmodule Minga.Buffer do
   undo integration, without depending on the Editor (Layer 2).
   """
   @spec ensure_for_path(String.t()) :: {:ok, pid()} | {:error, term()}
-  def ensure_for_path(path) when is_binary(path) do
+  @spec ensure_for_path(String.t(), Minga.Events.registry()) :: {:ok, pid()} | {:error, term()}
+  def ensure_for_path(path, events_registry \\ Minga.Events.default_registry())
+      when is_binary(path) do
     abs_path = Path.expand(path)
 
     case pid_for_path(abs_path) do
@@ -67,24 +69,29 @@ defmodule Minga.Buffer do
 
       :not_found ->
         if File.exists?(abs_path) do
-          start_buffer_for_path(abs_path)
+          start_buffer_for_path(abs_path, events_registry)
         else
           {:error, :enoent}
         end
     end
   end
 
-  @spec start_buffer_for_path(String.t()) :: {:ok, pid()} | {:error, term()}
-  defp start_buffer_for_path(abs_path) do
+  @spec start_buffer_for_path(String.t(), Minga.Events.registry()) ::
+          {:ok, pid()} | {:error, term()}
+  defp start_buffer_for_path(abs_path, events_registry) do
     case DynamicSupervisor.start_child(
            Minga.Buffer.Supervisor,
-           {__MODULE__, file_path: abs_path}
+           {__MODULE__, file_path: abs_path, events_registry: events_registry}
          ) do
       {:ok, pid} ->
-        Minga.Events.broadcast(:buffer_opened, %Minga.Events.BufferEvent{
-          buffer: pid,
-          path: abs_path
-        })
+        Minga.Events.broadcast(
+          :buffer_opened,
+          %Minga.Events.BufferEvent{
+            buffer: pid,
+            path: abs_path
+          },
+          events_registry
+        )
 
         {:ok, pid}
 

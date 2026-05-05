@@ -39,7 +39,8 @@ defmodule Minga.Git.Repo do
     ahead: 0,
     behind: 0,
     watcher_pid: nil,
-    debounce_ref: nil
+    debounce_ref: nil,
+    events_registry: Minga.Events.default_registry()
   ]
 
   @typedoc "Git.Repo internal state."
@@ -51,11 +52,15 @@ defmodule Minga.Git.Repo do
           ahead: non_neg_integer(),
           behind: non_neg_integer(),
           watcher_pid: pid() | nil,
-          debounce_ref: reference() | nil
+          debounce_ref: reference() | nil,
+          events_registry: Minga.Events.registry()
         }
 
   @typedoc "Options for starting a Git.Repo process."
-  @type start_opt :: {:git_root, String.t()} | {:project_root, String.t() | nil}
+  @type start_opt ::
+          {:git_root, String.t()}
+          | {:project_root, String.t() | nil}
+          | {:events_registry, Minga.Events.registry()}
 
   @typedoc "Summary of repo status for display."
   @type summary :: %{
@@ -109,8 +114,14 @@ defmodule Minga.Git.Repo do
   Returns `{:ok, pid}` if one already exists or was started successfully,
   or `{:error, reason}` if it couldn't be started.
   """
-  @spec ensure_started(String.t(), String.t() | nil) :: {:ok, pid()} | {:error, term()}
-  def ensure_started(git_root, project_root \\ nil) when is_binary(git_root) do
+  @spec ensure_started(String.t(), String.t() | nil, Minga.Events.registry()) ::
+          {:ok, pid()} | {:error, term()}
+  def ensure_started(
+        git_root,
+        project_root \\ nil,
+        events_registry \\ Minga.Events.default_registry()
+      )
+      when is_binary(git_root) do
     case lookup(git_root) do
       pid when is_pid(pid) ->
         {:ok, pid}
@@ -118,7 +129,8 @@ defmodule Minga.Git.Repo do
       nil ->
         DynamicSupervisor.start_child(
           @supervisor,
-          {__MODULE__, git_root: git_root, project_root: project_root}
+          {__MODULE__,
+           git_root: git_root, project_root: project_root, events_registry: events_registry}
         )
     end
   end
@@ -154,12 +166,14 @@ defmodule Minga.Git.Repo do
   def init(opts) do
     git_root = Keyword.fetch!(opts, :git_root)
     project_root = Keyword.get(opts, :project_root)
+    events_registry = Keyword.get(opts, :events_registry, Minga.Events.default_registry())
 
-    Minga.Events.subscribe(:buffer_saved)
+    Minga.Events.subscribe(:buffer_saved, events_registry)
 
     state = %__MODULE__{
       git_root: git_root,
-      project_root: project_root
+      project_root: project_root,
+      events_registry: events_registry
     }
 
     # Load initial status and branch synchronously so callers have data immediately
@@ -270,7 +284,8 @@ defmodule Minga.Git.Repo do
           branch: branch,
           ahead: ahead,
           behind: behind
-        }
+        },
+        state.events_registry
       )
     end
 

@@ -2,7 +2,7 @@
 name: reviewer
 description: Reviews Minga code for quality, enforces the Elixir standard, CI parity, and ensures touched code is left better than it was found.
 tools: read, grep, find, ls, bash
-model: claude-sonnet-4-5
+model: openai-codex/gpt-5.3-codex:medium
 ---
 
 You are a senior code quality reviewer for Minga, a BEAM-powered text editor with native GUI frontends (Swift/Metal, Zig TUI).

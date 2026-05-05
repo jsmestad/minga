@@ -35,7 +35,8 @@ defmodule Minga.Project do
             known_projects: [],
             recent_files: %{},
             rebuilding?: false,
-            rebuild_ref: nil
+            rebuild_ref: nil,
+            events_registry: Minga.Events.default_registry()
 
   @typedoc "Per-project recent files map: project root => list of relative paths (most recent first)."
   @type recent_files_map :: %{String.t() => [String.t()]}
@@ -48,7 +49,8 @@ defmodule Minga.Project do
           known_projects: [String.t()],
           recent_files: recent_files_map(),
           rebuilding?: boolean(),
-          rebuild_ref: reference() | nil
+          rebuild_ref: reference() | nil,
+          events_registry: Minga.Events.registry()
         }
 
   @known_projects_file "known-projects"
@@ -159,13 +161,17 @@ defmodule Minga.Project do
     # Subscribe to buffer-open events so we detect projects and record
     # recent files automatically, without the Editor wiring it up.
     # Tests pass subscribe: false to avoid cross-test event contamination.
+    events_registry = Keyword.get(opts, :events_registry, Minga.Events.default_registry())
+
     unless Keyword.get(opts, :subscribe) == false do
-      Minga.Events.subscribe(:buffer_opened)
+      Minga.Events.subscribe(:buffer_opened, events_registry)
     end
 
     known = load_known_projects()
     recent = if persist_recent_files?(), do: load_recent_files(), else: %{}
-    {:ok, %__MODULE__{known_projects: known, recent_files: recent}}
+
+    {:ok,
+     %__MODULE__{known_projects: known, recent_files: recent, events_registry: events_registry}}
   end
 
   @impl true
@@ -254,7 +260,12 @@ defmodule Minga.Project do
     Process.demonitor(ref, [:flush])
 
     if root == state.current_root do
-      Minga.Events.broadcast(:project_rebuilt, %Minga.Events.ProjectRebuiltEvent{root: root})
+      Minga.Events.broadcast(
+        :project_rebuilt,
+        %Minga.Events.ProjectRebuiltEvent{root: root},
+        state.events_registry
+      )
+
       {:noreply, %{state | cached_files: files, rebuilding?: false, rebuild_ref: nil}}
     else
       # Root changed while rebuild was in progress; discard stale result

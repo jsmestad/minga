@@ -61,7 +61,8 @@ defmodule Minga.Buffer.State do
             options: %{},
             explicit_options: MapSet.new(),
             swap_timer: nil,
-            swap_dir: nil
+            swap_dir: nil,
+            events_registry: Minga.Events.default_registry()
 
   @type t :: %__MODULE__{
           document: Document.t(),
@@ -89,7 +90,8 @@ defmodule Minga.Buffer.State do
           options: %{atom() => term()},
           explicit_options: MapSet.t(atom()),
           swap_timer: reference() | nil,
-          swap_dir: String.t() | nil
+          swap_dir: String.t() | nil,
+          events_registry: Minga.Events.registry()
         }
 
   @max_undo_stack 1000
