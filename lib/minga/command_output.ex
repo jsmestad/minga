@@ -23,7 +23,8 @@ defmodule Minga.CommandOutput do
           command: String.t() | nil,
           cwd: String.t() | nil,
           exit_code: non_neg_integer() | nil,
-          running?: boolean()
+          running?: boolean(),
+          events_registry: Minga.Events.registry()
         }
 
   defstruct name: nil,
@@ -33,7 +34,8 @@ defmodule Minga.CommandOutput do
             command: nil,
             cwd: nil,
             exit_code: nil,
-            running?: false
+            running?: false,
+            events_registry: Minga.Events.default_registry()
 
   # ── Public API ─────────────────────────────────────────────────────────────
 
@@ -108,7 +110,8 @@ defmodule Minga.CommandOutput do
   @spec init(keyword()) :: {:ok, t()}
   def init(opts) do
     name = Keyword.fetch!(opts, :name)
-    {:ok, %__MODULE__{name: name}}
+    events_registry = Keyword.get(opts, :events_registry, Minga.Events.default_registry())
+    {:ok, %__MODULE__{name: name, events_registry: events_registry}}
   end
 
   @impl true
@@ -160,7 +163,8 @@ defmodule Minga.CommandOutput do
 
     Minga.Events.broadcast(
       :command_done,
-      %Minga.Events.CommandDoneEvent{name: state.name, exit_code: code}
+      %Minga.Events.CommandDoneEvent{name: state.name, exit_code: code},
+      state.events_registry
     )
 
     {:noreply, %{state | port: nil, exit_code: code, running?: false}}

@@ -45,6 +45,7 @@ defmodule MingaEditor.Startup do
     backend = Keyword.get(opts, :backend, :headless)
     port_manager = Keyword.get(opts, :port_manager, MingaEditor.Frontend.Manager)
     keymap_server = Keyword.get(opts, :keymap_server, Minga.Keymap.default_server())
+    events_registry = Keyword.get(opts, :events_registry, Minga.Events.default_registry())
 
     options_server =
       opts
@@ -125,6 +126,7 @@ defmodule MingaEditor.Startup do
       port_manager: port_manager,
       keymap_server: keymap_server,
       options_server: options_server,
+      events_registry: events_registry,
       editing_model: editing_model,
       focus_stack: MingaEditor.Input.default_stack(),
       shell: resolve_shell(opts),

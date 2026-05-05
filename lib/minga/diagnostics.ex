@@ -396,7 +396,8 @@ defmodule Minga.Diagnostics do
   defp broadcast_diagnostics_updated(uri, source) do
     Minga.Events.broadcast(
       :diagnostics_updated,
-      %Minga.Events.DiagnosticsUpdatedEvent{uri: uri, source: source}
+      %Minga.Events.DiagnosticsUpdatedEvent{uri: uri, source: source},
+      Minga.Events.default_registry()
     )
   end
 

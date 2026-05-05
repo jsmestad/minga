@@ -47,7 +47,7 @@ defmodule Minga.Config.Hooks do
   @typedoc "Hook server state."
   @type state :: %{
           hooks: hooks(),
-          events_registry: atom()
+          events_registry: Minga.Events.registry()
         }
 
   # ── Client API ──────────────────────────────────────────────────────────────
@@ -112,7 +112,7 @@ defmodule Minga.Config.Hooks do
   @impl true
   @spec init(keyword()) :: {:ok, state()}
   def init(opts) do
-    events_registry = Keyword.get(opts, :events_registry, Minga.EventBus)
+    events_registry = Keyword.get(opts, :events_registry, Minga.Events.default_registry())
     state = initial_state(events_registry)
     subscribe_to_events(state)
     {:ok, state}
@@ -192,7 +192,7 @@ defmodule Minga.Config.Hooks do
     :ok
   end
 
-  @spec initial_state(atom()) :: state()
+  @spec initial_state(Minga.Events.registry()) :: state()
   defp initial_state(events_registry) do
     %{hooks: Map.new(@valid_events, &{&1, []}), events_registry: events_registry}
   end

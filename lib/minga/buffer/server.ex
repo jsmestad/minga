@@ -42,6 +42,7 @@ defmodule Minga.Buffer.Server do
           | {:read_only, boolean()}
           | {:unlisted, boolean()}
           | {:persistent, boolean()}
+          | {:events_registry, Minga.Events.registry()}
 
   @typedoc "Internal state of the buffer server."
   @type state :: BufState.t()
@@ -842,7 +843,8 @@ defmodule Minga.Buffer.Server do
           persistent: Keyword.get(opts, :persistent, false),
           options: seed_options(filetype),
           explicit_options: MapSet.new(),
-          swap_dir: Keyword.get(opts, :swap_dir)
+          swap_dir: Keyword.get(opts, :swap_dir),
+          events_registry: Keyword.get(opts, :events_registry, Minga.Events.default_registry())
         }
 
         register_path(path)
@@ -1364,13 +1366,13 @@ defmodule Minga.Buffer.Server do
 
   def handle_call({:remap_face, face_name, attrs}, _from, state) do
     overrides = Map.put(state.face_overrides, face_name, attrs)
-    notify_face_overrides_changed(overrides)
+    notify_face_overrides_changed(state, overrides)
     {:reply, :ok, %{state | face_overrides: overrides}}
   end
 
   def handle_call({:clear_face_override, face_name}, _from, state) do
     overrides = Map.delete(state.face_overrides, face_name)
-    notify_face_overrides_changed(overrides)
+    notify_face_overrides_changed(state, overrides)
     {:reply, :ok, %{state | face_overrides: overrides}}
   end
 
@@ -1728,7 +1730,7 @@ defmodule Minga.Buffer.Server do
 
   @impl true
   def handle_info({:deferred_broadcast, topic, payload}, state) do
-    Events.broadcast(topic, payload)
+    Events.broadcast(topic, payload, state.events_registry)
     {:noreply, state}
   end
 
@@ -1928,12 +1930,16 @@ defmodule Minga.Buffer.Server do
   # Broadcasts a face_overrides_changed event so any subscriber (typically
   # the Editor) can pre-compute the merged face registry. Using Events
   # decouples Buffer.Server from the Editor module.
-  @spec notify_face_overrides_changed(%{String.t() => keyword()}) :: :ok
-  defp notify_face_overrides_changed(overrides) do
-    Minga.Events.broadcast(:face_overrides_changed, %Minga.Events.FaceOverridesChangedEvent{
-      buffer: self(),
-      overrides: overrides
-    })
+  @spec notify_face_overrides_changed(BufState.t(), %{String.t() => keyword()}) :: :ok
+  defp notify_face_overrides_changed(state, overrides) do
+    Minga.Events.broadcast(
+      :face_overrides_changed,
+      %Minga.Events.FaceOverridesChangedEvent{
+        buffer: self(),
+        overrides: overrides
+      },
+      state.events_registry
+    )
 
     :ok
   end

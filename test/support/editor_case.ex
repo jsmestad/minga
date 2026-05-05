@@ -31,7 +31,8 @@ defmodule Minga.Test.EditorCase do
           buffer: pid(),
           port: pid(),
           width: pos_integer(),
-          height: pos_integer()
+          height: pos_integer(),
+          events_registry: Minga.Events.registry()
         }
   # ── Setup helpers ────────────────────────────────────────────────────────────
   @doc """
@@ -50,8 +51,12 @@ defmodule Minga.Test.EditorCase do
     file_path = Keyword.get(opts, :file_path)
     clipboard = Keyword.get(opts, :clipboard, :none)
     id = :erlang.unique_integer([:positive])
+
+    events_registry =
+      Keyword.get_lazy(opts, :events_registry, fn -> start_events_registry(id) end)
+
     {:ok, port} = HeadlessPort.start_link(width: width, height: height)
-    buffer_opts = [content: content]
+    buffer_opts = [content: content, events_registry: events_registry]
     buffer_opts = if file_path, do: [{:file_path, file_path} | buffer_opts], else: buffer_opts
     {:ok, buffer} = BufferServer.start_link(buffer_opts)
 
@@ -74,6 +79,7 @@ defmodule Minga.Test.EditorCase do
       width: width,
       height: height,
       editing_model: editing_model,
+      events_registry: events_registry,
       suppress_tool_prompts: true
     ]
 
@@ -106,7 +112,8 @@ defmodule Minga.Test.EditorCase do
       buffer: buffer,
       port: port,
       width: width,
-      height: height
+      height: height,
+      events_registry: events_registry
     })
   end
 
@@ -117,6 +124,10 @@ defmodule Minga.Test.EditorCase do
     height = Keyword.get(opts, :height, 24)
     clipboard = Keyword.get(opts, :clipboard, :none)
     id = :erlang.unique_integer([:positive])
+
+    events_registry =
+      Keyword.get_lazy(opts, :events_registry, fn -> start_events_registry(id) end)
+
     {:ok, port} = HeadlessPort.start_link(width: width, height: height)
 
     # Inject clipboard mode directly on the buffer so the Editor never
@@ -134,6 +145,7 @@ defmodule Minga.Test.EditorCase do
         width: width,
         height: height,
         editing_model: editing_model,
+        events_registry: events_registry,
         suppress_tool_prompts: true
       )
 
@@ -151,7 +163,8 @@ defmodule Minga.Test.EditorCase do
       buffer: buffer,
       port: port,
       width: width,
-      height: height
+      height: height,
+      events_registry: events_registry
     }
   end
 
@@ -418,6 +431,12 @@ defmodule Minga.Test.EditorCase do
   @spec editor_state(editor_ctx()) :: MingaEditor.State.t()
   def editor_state(%{editor: editor}) do
     :sys.get_state(editor)
+  end
+
+  @doc "Returns MessageStore entries after synchronizing with the editor process."
+  @spec message_store_entries(editor_ctx()) :: [map()]
+  def message_store_entries(%{editor: editor}) do
+    :sys.get_state(editor).message_store.entries
   end
 
   @doc "Returns the number of open buffers."
@@ -767,6 +786,14 @@ defmodule Minga.Test.EditorCase do
   end
 
   # ── Private helpers ──────────────────────────────────────────────────────────
+
+  @spec start_events_registry(pos_integer()) :: Minga.Events.registry()
+  defp start_events_registry(id) do
+    name = :"minga_events_#{id}"
+    start_supervised!({Minga.Events, name: name})
+    name
+  end
+
   @ctrl 0x02
   @spec parse_key_sequence(String.t()) :: [{non_neg_integer(), non_neg_integer()}]
   defp parse_key_sequence(seq), do: do_parse_keys(seq, [])

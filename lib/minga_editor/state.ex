@@ -73,8 +73,12 @@ defmodule MingaEditor.State do
   @typedoc "Re-export of `Minga.Config.Options.server/0` for editor-state callers."
   @type options_server :: Minga.Config.Options.server()
 
+  @typedoc "Event bus registry used by this editor instance."
+  @type events_registry :: Minga.Events.registry()
+
   @default_keymap_server Minga.Keymap.default_server()
   @default_options_server Minga.Config.Options.default_server()
+  @default_events_registry Minga.Events.default_registry()
 
   alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.Shell.Board.State, as: BoardState
@@ -84,6 +88,7 @@ defmodule MingaEditor.State do
             port_manager: nil,
             keymap_server: @default_keymap_server,
             options_server: @default_options_server,
+            events_registry: @default_events_registry,
             workspace: nil,
             terminal_viewport: Viewport.new(24, 80),
             editing_model: :vim,
@@ -118,6 +123,7 @@ defmodule MingaEditor.State do
           port_manager: GenServer.server() | nil,
           keymap_server: keymap_server(),
           options_server: options_server(),
+          events_registry: events_registry(),
           workspace: WorkspaceState.t(),
           terminal_viewport: Viewport.t(),
           editing_model: :vim | :cua,
@@ -161,6 +167,10 @@ defmodule MingaEditor.State do
   @doc "Returns the options server used for typed option lookups."
   @spec options_server(t()) :: options_server()
   def options_server(%__MODULE__{options_server: options_server}), do: options_server
+
+  @doc "Returns the event bus registry used by this editor instance."
+  @spec events_registry(t()) :: events_registry()
+  def events_registry(%__MODULE__{events_registry: events_registry}), do: events_registry
 
   # ── Workspace helpers ──────────────────────────────────────────────────────
 

@@ -27,8 +27,8 @@ defmodule Minga.Git.Tracker do
   @doc "Starts the git tracker."
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
-    {name, _opts} = Keyword.pop(opts, :name, __MODULE__)
-    GenServer.start_link(__MODULE__, [], name: name)
+    {name, opts} = Keyword.pop(opts, :name, __MODULE__)
+    GenServer.start_link(__MODULE__, opts, name: name)
   end
 
   @doc """
@@ -39,8 +39,9 @@ defmodule Minga.Git.Tracker do
   call from any process (including the renderer) without blocking.
   """
   @spec lookup(pid()) :: pid() | nil
-  def lookup(buffer_pid) when is_pid(buffer_pid) do
-    case :ets.lookup(@registry_table, buffer_pid) do
+  @spec lookup(pid(), atom()) :: pid() | nil
+  def lookup(buffer_pid, registry_table \\ @registry_table) when is_pid(buffer_pid) do
+    case :ets.lookup(registry_table, buffer_pid) do
       [{^buffer_pid, git_pid}] -> git_pid
       [] -> nil
     end
@@ -54,8 +55,9 @@ defmodule Minga.Git.Tracker do
   Same direct ETS read as `lookup/1`.
   """
   @spec tracked?(pid()) :: boolean()
-  def tracked?(buffer_pid) when is_pid(buffer_pid) do
-    :ets.member(@registry_table, buffer_pid)
+  @spec tracked?(pid(), atom()) :: boolean()
+  def tracked?(buffer_pid, registry_table \\ @registry_table) when is_pid(buffer_pid) do
+    :ets.member(registry_table, buffer_pid)
   rescue
     ArgumentError -> false
   end
@@ -64,24 +66,35 @@ defmodule Minga.Git.Tracker do
 
   @typep tracker_state :: %{
            monitors: %{reference() => {pid(), String.t()}},
-           repo_buffer_counts: %{String.t() => pos_integer()}
+           repo_buffer_counts: %{String.t() => pos_integer()},
+           events_registry: Minga.Events.registry(),
+           registry_table: atom()
          }
 
   @impl true
   @spec init(keyword()) :: {:ok, tracker_state()}
-  def init(_opts) do
-    :ets.new(@registry_table, [
+  def init(opts) do
+    events_registry = Keyword.get(opts, :events_registry, Minga.Events.default_registry())
+    registry_table = Keyword.get(opts, :registry_table, @registry_table)
+
+    :ets.new(registry_table, [
       :named_table,
       :public,
       :set,
       read_concurrency: true
     ])
 
-    Minga.Events.subscribe(:buffer_opened)
-    Minga.Events.subscribe(:buffer_saved)
-    Minga.Events.subscribe(:buffer_changed)
+    Minga.Events.subscribe(:buffer_opened, events_registry)
+    Minga.Events.subscribe(:buffer_saved, events_registry)
+    Minga.Events.subscribe(:buffer_changed, events_registry)
 
-    {:ok, %{monitors: %{}, repo_buffer_counts: %{}}}
+    {:ok,
+     %{
+       monitors: %{},
+       repo_buffer_counts: %{},
+       events_registry: events_registry,
+       registry_table: registry_table
+     }}
   end
 
   @impl true
@@ -91,7 +104,7 @@ defmodule Minga.Git.Tracker do
         state
       )
       when is_pid(buf) do
-    do_notify_change(buf)
+    do_notify_change(buf, state.registry_table)
     {:noreply, state}
   end
 
@@ -103,7 +116,7 @@ defmodule Minga.Git.Tracker do
     # Start Git.Repo for the git root (if not already running) before
     # per-buffer tracking. This ensures repo-wide state is available
     # for the status panel and modeline even before per-buffer diffs.
-    ensure_repo_for_path(path)
+    ensure_repo_for_path(path, state.events_registry)
     state = maybe_start_git_buffer(state, buf, path)
     {:noreply, state}
   end
@@ -113,7 +126,7 @@ defmodule Minga.Git.Tracker do
         state
       )
       when is_pid(buf) do
-    invalidate_on_save(buf)
+    invalidate_on_save(buf, state.registry_table)
     {:noreply, state}
   end
 
@@ -124,7 +137,7 @@ defmodule Minga.Git.Tracker do
 
       {{buffer_pid, git_root}, monitors} ->
         # Clean up the git buffer registry entry
-        :ets.delete(@registry_table, buffer_pid)
+        :ets.delete(state.registry_table, buffer_pid)
 
         # Decrement repo buffer count; stop Git.Repo when no buffers remain
         repo_counts = maybe_decrement_repo_count(state.repo_buffer_counts, git_root)
@@ -136,9 +149,9 @@ defmodule Minga.Git.Tracker do
 
   # ── Private ────────────────────────────────────────────────────────────
 
-  @spec do_notify_change(pid()) :: :ok
-  defp do_notify_change(buffer_pid) do
-    case lookup(buffer_pid) do
+  @spec do_notify_change(pid(), atom()) :: :ok
+  defp do_notify_change(buffer_pid, registry_table) do
+    case lookup(buffer_pid, registry_table) do
       nil ->
         :ok
 
@@ -160,14 +173,18 @@ defmodule Minga.Git.Tracker do
              Minga.Buffer.Supervisor,
              {GitBuffer, git_root: git_root, file_path: path, initial_content: content}
            ) do
-      :ets.insert(@registry_table, {buffer_pid, git_pid})
+      :ets.insert(state.registry_table, {buffer_pid, git_pid})
       ref = Process.monitor(buffer_pid)
       rel_path = Path.relative_to(path, git_root)
 
-      Minga.Events.broadcast(:log_message, %Minga.Events.LogMessageEvent{
-        text: "Git: tracking #{rel_path}",
-        level: :info
-      })
+      Minga.Events.broadcast(
+        :log_message,
+        %Minga.Events.LogMessageEvent{
+          text: "Git: tracking #{rel_path}",
+          level: :info
+        },
+        state.events_registry
+      )
 
       repo_counts = Map.update(state.repo_buffer_counts, git_root, 1, &(&1 + 1))
 
@@ -185,16 +202,16 @@ defmodule Minga.Git.Tracker do
     :exit, _ -> state
   end
 
-  @spec ensure_repo_for_path(String.t()) :: :ok
-  defp ensure_repo_for_path(path) do
+  @spec ensure_repo_for_path(String.t(), Minga.Events.registry()) :: :ok
+  defp ensure_repo_for_path(path, events_registry) do
     case Git.root_for(path) do
-      {:ok, git_root} -> ensure_repo(git_root)
+      {:ok, git_root} -> ensure_repo(git_root, events_registry)
       :not_git -> :ok
     end
   end
 
-  @spec ensure_repo(String.t()) :: :ok
-  defp ensure_repo(git_root) do
+  @spec ensure_repo(String.t(), Minga.Events.registry()) :: :ok
+  defp ensure_repo(git_root, events_registry) do
     project_root =
       try do
         Minga.Project.root()
@@ -202,7 +219,7 @@ defmodule Minga.Git.Tracker do
         :exit, _ -> nil
       end
 
-    case Git.Repo.ensure_started(git_root, project_root) do
+    case Git.Repo.ensure_started(git_root, project_root, events_registry) do
       {:ok, _pid} ->
         :ok
 
@@ -253,9 +270,9 @@ defmodule Minga.Git.Tracker do
     :exit, _ -> :ok
   end
 
-  @spec invalidate_on_save(pid()) :: :ok
-  defp invalidate_on_save(buf) do
-    case lookup(buf) do
+  @spec invalidate_on_save(pid(), atom()) :: :ok
+  defp invalidate_on_save(buf, registry_table) do
+    case lookup(buf, registry_table) do
       nil ->
         :ok
 
