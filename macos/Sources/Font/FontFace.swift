@@ -27,7 +27,7 @@ final class FontFace {
     /// Bold-italic variant, or nil if the font family doesn't have one.
     let ctFontBoldItalic: CTFont?
     /// Cell dimensions in points (for grid layout).
-    let cellWidth: Int
+    let cellWidth: CGFloat
     let cellHeight: Int
     /// Font metrics in points.
     let ascent: CGFloat
@@ -104,7 +104,7 @@ final class FontFace {
         self.leading = lead
 
         let advanceWidth = FontFace.monospaceAdvance(font)
-        self.cellWidth = Int(ceil(advanceWidth))
+        self.cellWidth = advanceWidth
         self.cellHeight = Int(ceil(asc + desc + lead))
 
         self.weightedFonts[weight] = font

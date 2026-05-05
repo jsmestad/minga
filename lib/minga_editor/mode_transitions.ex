@@ -29,6 +29,12 @@ defmodule MingaEditor.ModeTransitions do
     %{mode_state | visual_anchor: anchor}
   end
 
+  # Entering insert mode starts a fresh insert-change session.
+  def adjust(%{insert_changed: _} = mode_state, old_mode, :insert, _state)
+      when old_mode != :insert do
+    %{mode_state | insert_changed: false}
+  end
+
   # Entering command mode: ensure CommandState.
   def adjust(mode_state, old_mode, :command, _state) when old_mode != :command do
     case mode_state do

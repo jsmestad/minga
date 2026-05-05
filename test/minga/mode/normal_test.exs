@@ -26,8 +26,8 @@ defmodule Minga.Mode.NormalTest do
                Normal.handle_key({?a, 0}, fresh_state())
     end
 
-    test "A produces {:execute_then_transition, [:move_to_line_end], :insert, state}" do
-      assert {:execute_then_transition, [:move_to_line_end], :insert, _} =
+    test "A produces {:execute_then_transition, [:move_to_line_end, :move_right], :insert, state}" do
+      assert {:execute_then_transition, [:move_to_line_end, :move_right], :insert, _} =
                Normal.handle_key({?A, 0}, fresh_state())
     end
 

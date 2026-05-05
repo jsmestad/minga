@@ -21,6 +21,7 @@ defmodule MingaEditor.SemanticWindowTest do
   alias MingaEditor.SemanticWindow.Span
   alias MingaEditor.SemanticWindow.VisualRow
   alias MingaEditor.State, as: EditorState
+  alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Core.Face
 
   alias Minga.Editing.Search.Match, as: SearchMatchStruct
@@ -196,6 +197,17 @@ defmodule MingaEditor.SemanticWindowTest do
       assert wf.semantic.cursor_row == 0
       assert is_integer(cursor.row)
     end
+
+    test "block cursor at end of line renders over the final character cell" do
+      state = gui_state(content: "this")
+      :ok = BufferServer.move_to(state.workspace.buffers.active, {0, byte_size("this")})
+
+      {[wf], _cursor, _state} = build_content(state)
+
+      assert [%{text: "this"}] = wf.semantic.rows
+      assert wf.semantic.cursor_shape == :block
+      assert wf.semantic.cursor_col == 3
+    end
   end
 
   # ── Span.from_face/3 ──────────────────────────────────────────────────
@@ -273,18 +285,29 @@ defmodule MingaEditor.SemanticWindowTest do
       assert span.end_col == 17
     end
 
-    test "encodes font weight" do
-      face = Face.new(font_weight: :bold)
-      span = Span.from_face(face, 0, 10)
-
-      assert span.font_weight == 5
+    test "encodes font weight using the shared frontend protocol values" do
+      assert Span.from_face(Face.new(font_weight: :thin), 0, 10).font_weight == 0
+      assert Span.from_face(Face.new(font_weight: :light), 0, 10).font_weight == 1
+      assert Span.from_face(Face.new(font_weight: :regular), 0, 10).font_weight == 2
+      assert Span.from_face(Face.new(font_weight: :medium), 0, 10).font_weight == 3
+      assert Span.from_face(Face.new(font_weight: :semibold), 0, 10).font_weight == 4
+      assert Span.from_face(Face.new(font_weight: :bold), 0, 10).font_weight == 5
+      assert Span.from_face(Face.new(font_weight: :heavy), 0, 10).font_weight == 6
+      assert Span.from_face(Face.new(font_weight: :black), 0, 10).font_weight == 7
     end
 
-    test "nil font weight defaults to 0" do
+    test "nil font weight defaults to regular" do
       face = Face.new()
       span = Span.from_face(face, 0, 10)
 
-      assert span.font_weight == 0
+      assert span.font_weight == 2
+    end
+
+    test "bold attr without explicit font weight uses bold font weight" do
+      face = Face.new(bold: true)
+      span = Span.from_face(face, 0, 10)
+
+      assert span.font_weight == 5
     end
   end
 

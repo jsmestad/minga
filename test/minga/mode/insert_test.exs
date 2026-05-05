@@ -7,12 +7,22 @@ defmodule Minga.Mode.InsertTest do
   defp fresh_state, do: Mode.initial_state()
 
   describe "Escape key" do
-    test "Escape transitions to :normal" do
+    test "Escape transitions to :normal when insert mode did not change the buffer" do
       assert {:transition, :normal, _} = Insert.handle_key({27, 0}, fresh_state())
     end
 
-    test "Escape with any modifier still transitions to :normal" do
-      assert {:transition, :normal, _} = Insert.handle_key({27, 4}, fresh_state())
+    test "Escape moves cursor left after insert mode changed the buffer" do
+      state = %{fresh_state() | insert_changed: true}
+
+      assert {:execute_then_transition, [:move_left], :normal, _} =
+               Insert.handle_key({27, 0}, state)
+    end
+
+    test "Escape with any modifier still moves cursor left after insert mode changed the buffer" do
+      state = %{fresh_state() | insert_changed: true}
+
+      assert {:execute_then_transition, [:move_left], :normal, _} =
+               Insert.handle_key({27, 4}, state)
     end
   end
 

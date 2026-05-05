@@ -7,7 +7,7 @@ defmodule Minga.Git.BackendOperationsTest do
   with committed files and verifies the git CLI-backed operations.
   """
 
-  # async: false — spawns real git CLI processes, which can hit the BEAM erl_child_setup EPIPE race under concurrency.
+  # async: false, spawns real git CLI processes, which can hit the BEAM erl_child_setup EPIPE race under concurrency.
   use ExUnit.Case, async: false
 
   @moduletag timeout: 20_000

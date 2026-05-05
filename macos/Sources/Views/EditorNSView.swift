@@ -35,7 +35,7 @@ final class EditorNSView: MTKView {
     private var imeComposition = IMEComposition()
 
     /// Cell dimensions in points (used for mouse → cell coordinate mapping).
-    var cellWidth: CGFloat { CGFloat(fontFace.cellWidth) }
+    var cellWidth: CGFloat { fontFace.cellWidth }
     var cellHeight: CGFloat { CGFloat(fontFace.cellHeight) }
 
     /// Track last reported cell position to avoid flooding the Port with
@@ -256,7 +256,7 @@ final class EditorNSView: MTKView {
         self.fontFace = newFace
 
         // Recompute grid dimensions with the new cell size.
-        let newCellW = CGFloat(newFace.cellWidth)
+        let newCellW = newFace.cellWidth
         let newCellH = CGFloat(newFace.cellHeight)
         guard newCellW > 0, newCellH > 0 else { return }
 

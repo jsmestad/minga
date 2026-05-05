@@ -93,6 +93,14 @@ defmodule MingaEditor.SemanticWindow.Builder do
         :block
       end
 
+    display_cursor_col =
+      adjust_cursor_col_for_shape(
+        display_cursor_row,
+        display_cursor_col,
+        cursor_shape,
+        visual_rows
+      )
+
     # Hide the editor cursor when the minibuffer has focus (command, search,
     # eval, search_prompt modes). The native SwiftUI minibuffer shows its
     # own cursor; having two cursors visible is confusing.
@@ -351,6 +359,28 @@ defmodule MingaEditor.SemanticWindow.Builder do
     col = Decorations.buf_col_to_display_col(decorations, cursor_line, cursor_col)
     {row, col}
   end
+
+  @spec adjust_cursor_col_for_shape(
+          non_neg_integer(),
+          non_neg_integer(),
+          SemanticWindow.cursor_shape(),
+          [VisualRow.t()]
+        ) :: non_neg_integer()
+  defp adjust_cursor_col_for_shape(row, col, :block, visual_rows) do
+    row_width = visual_rows |> Enum.at(row) |> visual_row_width()
+
+    if row_width > 0 and col >= row_width do
+      row_width - 1
+    else
+      col
+    end
+  end
+
+  defp adjust_cursor_col_for_shape(_row, col, _shape, _visual_rows), do: col
+
+  @spec visual_row_width(VisualRow.t() | nil) :: non_neg_integer()
+  defp visual_row_width(nil), do: 0
+  defp visual_row_width(%VisualRow{text: text}), do: Unicode.display_width(text)
 
   # ── Diagnostics ────────────────────────────────────────────────────────
 

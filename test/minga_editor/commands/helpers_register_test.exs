@@ -11,12 +11,16 @@ defmodule MingaEditor.Commands.HelpersRegisterTest do
   """
   use ExUnit.Case, async: true
 
+  import Hammox
+
   alias MingaEditor.Commands.Helpers
   alias MingaEditor.Editing
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Registers
   alias MingaEditor.Viewport
   alias MingaEditor.Workspace.State, as: WorkspaceState
+
+  setup :verify_on_exit!
 
   defp make_state(active_register) do
     %EditorState{
@@ -202,10 +206,16 @@ defmodule MingaEditor.Commands.HelpersRegisterTest do
 
   describe "explicit + register" do
     test "writes to unnamed and yank, resets active" do
-      # Clipboard write is async and mocked elsewhere; we just verify
-      # the register routing (unnamed + yank + reset).
+      test_pid = self()
+
+      stub(Minga.Clipboard.Mock, :write, fn text ->
+        send(test_pid, {:clipboard_written, text})
+        :ok
+      end)
+
       state = make_state("+") |> put_reg("clip\n", :yank, :linewise)
 
+      assert_receive {:clipboard_written, "clip\n"}, 200
       assert get_reg(state, "") == {"clip\n", :linewise}
       assert get_reg(state, "0") == {"clip\n", :linewise}
       assert Editing.active_register(state) == ""

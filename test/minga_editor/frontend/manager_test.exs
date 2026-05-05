@@ -1,5 +1,6 @@
 defmodule MingaEditor.Frontend.ManagerTest do
-  use ExUnit.Case, async: true
+  # Uses real OS ports in connected-mode tests, so serialize to avoid BEAM erl_child_setup races.
+  use ExUnit.Case, async: false
 
   alias MingaEditor.Frontend.Manager
   alias MingaEditor.Frontend.Protocol

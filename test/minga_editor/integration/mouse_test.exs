@@ -17,7 +17,7 @@ defmodule Minga.Integration.MouseTest do
 
   # Sends a gui_action to the editor and waits for the frame to render.
   defp send_gui_action(%{editor: editor, port: port}, action) do
-    _ = :sys.get_state(editor)
+    _ = :sys.get_state(editor, 15_000)
     ref = HeadlessPort.prepare_await(port)
     send(editor, {:minga_input, {:gui_action, action}})
     {:ok, snapshot} = HeadlessPort.collect_frame(ref)
@@ -55,7 +55,7 @@ defmodule Minga.Integration.MouseTest do
     ctx = inject_fake_session(ctx)
     send_keys_sync(ctx, "<Space>aa")
 
-    state = :sys.get_state(ctx.editor)
+    state = editor_state(ctx)
 
     assert state.workspace.keymap_scope == :agent,
            "expected :agent scope after SPC a a, got #{state.workspace.keymap_scope}"
@@ -218,7 +218,7 @@ defmodule Minga.Integration.MouseTest do
       ctx = start_editor("hello world")
       {_ctx, _} = open_agent_split(ctx)
 
-      state = :sys.get_state(ctx.editor)
+      state = editor_state(ctx)
       assert state.workspace.keymap_scope == :agent
     end
 
@@ -228,7 +228,7 @@ defmodule Minga.Integration.MouseTest do
 
       # Toggle back
       send_keys_sync(ctx, "<Space>aa")
-      state = :sys.get_state(ctx.editor)
+      state = editor_state(ctx)
 
       assert state.workspace.keymap_scope == :editor,
              "toggling back should restore :editor scope, got #{state.workspace.keymap_scope}"
@@ -242,13 +242,13 @@ defmodule Minga.Integration.MouseTest do
       ctx = start_editor("hello world")
       {_ctx, _} = open_agent_split(ctx)
 
-      _state_before = :sys.get_state(ctx.editor)
+      _state_before = editor_state(ctx)
 
       # Agent chat window should be unpinned after scroll
       send_mouse(ctx, 5, 10, :wheel_down)
       send_mouse(ctx, 5, 10, :wheel_down)
 
-      state_after = :sys.get_state(ctx.editor)
+      state_after = editor_state(ctx)
 
       case EditorState.find_agent_chat_window(state_after) do
         nil ->
@@ -271,7 +271,7 @@ defmodule Minga.Integration.MouseTest do
       input_row = ctx.height - 3
       send_mouse(ctx, input_row, 10, :left)
 
-      state = :sys.get_state(ctx.editor)
+      state = editor_state(ctx)
 
       assert state.workspace.agent_ui.panel.input_focused,
              "clicking in the input area should focus the agent input"
@@ -285,7 +285,7 @@ defmodule Minga.Integration.MouseTest do
       input_row = ctx.height - 3
       send_mouse(ctx, input_row, 10, :left)
 
-      state = :sys.get_state(ctx.editor)
+      state = editor_state(ctx)
 
       assert state.workspace.agent_ui.panel.input_focused,
              "precondition: input should be focused after clicking input area"
@@ -293,7 +293,7 @@ defmodule Minga.Integration.MouseTest do
       # Click in the chat area (upper portion) to unfocus
       send_mouse(ctx, 3, 10, :left)
 
-      state = :sys.get_state(ctx.editor)
+      state = editor_state(ctx)
 
       refute state.workspace.agent_ui.panel.input_focused,
              "clicking in chat area should unfocus the agent input"
@@ -413,7 +413,7 @@ defmodule Minga.Integration.MouseTest do
       # Click in the editor area (right of file tree + gutter)
       editor_col = div(ctx.width, 2)
       send_mouse(ctx, 5, editor_col, :left)
-      state = :sys.get_state(ctx.editor)
+      state = editor_state(ctx)
 
       assert state.workspace.keymap_scope == :editor,
              "clicking in editor area should set :editor scope, got #{state.workspace.keymap_scope}"
@@ -446,7 +446,7 @@ defmodule Minga.Integration.MouseTest do
       end)
 
       # Verify precondition
-      state = :sys.get_state(ctx.editor)
+      state = editor_state(ctx)
       assert state.lsp.selection_ranges != nil
 
       # Click to exit visual mode; post_action_housekeeping should clear ranges
@@ -454,7 +454,7 @@ defmodule Minga.Integration.MouseTest do
 
       assert editor_mode(ctx) == :normal
 
-      state = :sys.get_state(ctx.editor)
+      state = editor_state(ctx)
 
       assert state.lsp.selection_ranges == nil,
              "mouse click exiting visual mode should clear LSP selection ranges"
@@ -465,7 +465,7 @@ defmodule Minga.Integration.MouseTest do
     test "gui_action select_tab runs full housekeeping pipeline" do
       ctx = start_editor("hello world\nsecond line\nthird line")
 
-      state = :sys.get_state(ctx.editor)
+      state = editor_state(ctx)
       tab_id = state.shell_state.tab_bar.active_id
 
       # Send a gui_action (select current tab). Before the refactoring,
@@ -478,7 +478,7 @@ defmodule Minga.Integration.MouseTest do
 
       # Verify the editor is still in a consistent state after the full
       # housekeeping pipeline ran.
-      state = :sys.get_state(ctx.editor)
+      state = editor_state(ctx)
       assert state.workspace.editing.mode == :normal
       assert state.workspace.buffers.active != nil
     end
@@ -486,7 +486,7 @@ defmodule Minga.Integration.MouseTest do
     test "mouse click after buffer switch runs shared housekeeping" do
       ctx = start_editor("first buffer content\nsecond line\nthird line")
 
-      state = :sys.get_state(ctx.editor)
+      state = editor_state(ctx)
       first_buffer = state.workspace.buffers.active
 
       # Add a second buffer and switch to it via state injection
@@ -497,7 +497,7 @@ defmodule Minga.Integration.MouseTest do
         EditorState.add_buffer(state, second_buffer)
       end)
 
-      state = :sys.get_state(ctx.editor)
+      state = editor_state(ctx)
       assert state.workspace.buffers.active == second_buffer
 
       # Switch back to first buffer
