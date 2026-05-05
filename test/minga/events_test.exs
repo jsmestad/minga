@@ -151,6 +151,13 @@ defmodule Minga.EventsTest do
       assert_receive {:minga_event, :mode_changed, %Events.ModeEvent{old: :normal, new: :insert}}
     end
 
+    test "subscribe accepts list metadata" do
+      Events.subscribe(:mode_changed, [:my_component])
+      Events.broadcast(:mode_changed, %Events.ModeEvent{old: :normal, new: :insert})
+
+      assert_receive {:minga_event, :mode_changed, %Events.ModeEvent{old: :normal, new: :insert}}
+    end
+
     test "subscribing with same topic and value twice delivers only one event" do
       Events.subscribe(:mode_changed, :my_component)
       Events.subscribe(:mode_changed, :my_component)

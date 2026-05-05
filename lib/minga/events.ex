@@ -266,6 +266,7 @@ defmodule Minga.Events do
   Returns the child spec for the event bus Registry.
 
   Add this to your supervision tree before any process that subscribes.
+  Pass `name:` to start an isolated registry for tests.
   """
   @spec child_spec(keyword()) :: Supervisor.child_spec()
   def child_spec(opts) do
@@ -292,16 +293,16 @@ defmodule Minga.Events do
   Subscribes the calling process to a topic with metadata.
 
   The metadata value is passed to the dispatch callback alongside the pid,
-  which lets subscribers filter or tag their registrations. Subscribing
-  with the same topic and value from the same process is a no-op.
+  which lets subscribers filter or tag their registrations. Pass `registry:`
+  as the second argument to subscribe without metadata on an isolated registry.
+  Subscribing with the same topic and value from the same process is a no-op.
   """
-  @spec subscribe(topic(), keyword() | term()) :: :ok
+  @spec subscribe(topic(), term()) :: :ok
   def subscribe(topic, opts) when is_atom(topic) and is_list(opts) do
-    registry = Keyword.get(opts, :registry)
-
-    case registry do
-      nil -> subscribe(topic, opts, registry: @registry)
-      registry -> subscribe(topic, [], registry: registry)
+    if registry_opts?(opts) do
+      subscribe(topic, [], registry: Keyword.fetch!(opts, :registry))
+    else
+      subscribe(topic, opts, registry: @registry)
     end
   end
 
@@ -327,6 +328,11 @@ defmodule Minga.Events do
     :ok
   end
 
+  @spec registry_opts?(list()) :: boolean()
+  defp registry_opts?(opts) do
+    Keyword.keyword?(opts) and Keyword.has_key?(opts, :registry)
+  end
+
   @doc """
   Unsubscribes the calling process from a topic.
 
@@ -348,7 +354,8 @@ defmodule Minga.Events do
   before the event ever reaches subscribers.
 
   Returns `:ok`. If no processes are subscribed to the topic, this is a
-  no-op with negligible cost.
+  no-op with negligible cost. Pass `registry:` as the third argument to
+  broadcast through an isolated registry.
   """
   @spec broadcast(:buffer_saved | :buffer_opened | :content_replaced, BufferEvent.t()) :: :ok
   @spec broadcast(:buffer_closed, BufferClosedEvent.t()) :: :ok
