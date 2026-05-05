@@ -7,6 +7,7 @@ defmodule Minga.Git.BackendOperationsTest do
   with committed files and verifies the git CLI-backed operations.
   """
 
+  # Uses real git OS processes; serialize to avoid BEAM erl_child_setup races.
   use ExUnit.Case, async: false
 
   @moduletag timeout: 20_000
@@ -14,6 +15,7 @@ defmodule Minga.Git.BackendOperationsTest do
   # Isolate from CI runner's global git config
   @git_env [
     {"GIT_CONFIG_NOSYSTEM", "1"},
+    {"GIT_CONFIG_GLOBAL", "/dev/null"},
     {"GIT_AUTHOR_NAME", "Test"},
     {"GIT_AUTHOR_EMAIL", "test@test.com"},
     {"GIT_COMMITTER_NAME", "Test"},

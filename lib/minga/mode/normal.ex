@@ -360,7 +360,7 @@ defmodule Minga.Mode.Normal do
   end
 
   def handle_key({?A, 0}, state) do
-    {:execute_then_transition, [:move_to_line_end], :insert, state}
+    {:execute_then_transition, [:move_to_line_end, :move_right], :insert, state}
   end
 
   def handle_key({?I, 0}, state) do

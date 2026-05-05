@@ -79,10 +79,10 @@ defmodule Minga.DotRepeatTest do
       send_key(editor, @escape)
       assert content(buffer) == "hi"
 
-      # . replays: enter insert at current cursor, type "hi", escape
-      # Cursor is at end of "hi" (no move-left on Escape in this editor)
+      # . replays the same insert before the normal-mode cursor.
+      # That cursor rests on the final inserted character after Escape.
       send_key(editor, ?.)
-      assert content(buffer) == "hihi"
+      assert content(buffer) == "hhii"
     end
 
     test "o + type text + Escape, then . opens line and types again" do

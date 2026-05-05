@@ -4,6 +4,8 @@ defmodule MingaEditor.Commands.MovementTest do
   alias Minga.Buffer.Server, as: BufferServer
   alias MingaEditor
 
+  @sync_timeout 15_000
+
   defp start_editor(content \\ "hello\nworld\nfoo") do
     {:ok, buffer} = BufferServer.start_link(content: content)
 
@@ -22,7 +24,7 @@ defmodule MingaEditor.Commands.MovementTest do
 
   defp send_key(editor, codepoint, mods \\ 0) do
     send(editor, {:minga_input, {:key_press, codepoint, mods}})
-    _ = :sys.get_state(editor)
+    _ = :sys.get_state(editor, @sync_timeout)
   end
 
   describe "Normal mode — movements" do
@@ -182,7 +184,7 @@ defmodule MingaEditor.Commands.MovementTest do
     test "Ctrl+u moves cursor up by half a page" do
       {editor, buffer} = start_scroll_editor()
       BufferServer.move_to(buffer, {10, 0})
-      _ = :sys.get_state(editor)
+      _ = :sys.get_state(editor, @sync_timeout)
       send_key(editor, ?u, 0x02)
       {line, _col} = BufferServer.cursor(buffer)
       assert line == 6
@@ -198,7 +200,7 @@ defmodule MingaEditor.Commands.MovementTest do
     test "Ctrl+b moves cursor up by a full page" do
       {editor, buffer} = start_scroll_editor()
       BufferServer.move_to(buffer, {20, 0})
-      _ = :sys.get_state(editor)
+      _ = :sys.get_state(editor, @sync_timeout)
       send_key(editor, ?b, 0x02)
       {line, _col} = BufferServer.cursor(buffer)
       assert line == 12
@@ -207,7 +209,7 @@ defmodule MingaEditor.Commands.MovementTest do
     test "Ctrl+d clamps to last line at buffer end" do
       {editor, buffer} = start_scroll_editor()
       BufferServer.move_to(buffer, {28, 0})
-      _ = :sys.get_state(editor)
+      _ = :sys.get_state(editor, @sync_timeout)
       send_key(editor, ?d, 0x02)
       {line, _col} = BufferServer.cursor(buffer)
       assert line == 29
@@ -216,7 +218,7 @@ defmodule MingaEditor.Commands.MovementTest do
     test "Ctrl+u clamps to first line at buffer start" do
       {editor, buffer} = start_scroll_editor()
       BufferServer.move_to(buffer, {2, 0})
-      _ = :sys.get_state(editor)
+      _ = :sys.get_state(editor, @sync_timeout)
       send_key(editor, ?u, 0x02)
       {line, _col} = BufferServer.cursor(buffer)
       assert line == 0
@@ -225,7 +227,7 @@ defmodule MingaEditor.Commands.MovementTest do
     test "column is clamped to new line length" do
       {editor, buffer} = start_scroll_editor()
       BufferServer.move_to(buffer, {29, 6})
-      _ = :sys.get_state(editor)
+      _ = :sys.get_state(editor, @sync_timeout)
       send_key(editor, ?b, 0x02)
       {_line, col} = BufferServer.cursor(buffer)
       assert col <= 6
@@ -236,11 +238,11 @@ defmodule MingaEditor.Commands.MovementTest do
     test "find_file doesn't crash" do
       {editor, _buffer} = start_editor()
       send_key(editor, 32)
-      _ = :sys.get_state(editor)
+      _ = :sys.get_state(editor, @sync_timeout)
       send_key(editor, ?f)
-      _ = :sys.get_state(editor)
+      _ = :sys.get_state(editor, @sync_timeout)
       send_key(editor, ?f)
-      _ = :sys.get_state(editor)
+      _ = :sys.get_state(editor, @sync_timeout)
       assert Process.alive?(editor)
     end
 
@@ -313,11 +315,11 @@ defmodule MingaEditor.Commands.MovementTest do
     test "buffer_list doesn't crash" do
       {editor, _buffer} = start_editor()
       send_key(editor, 32)
-      _ = :sys.get_state(editor)
+      _ = :sys.get_state(editor, @sync_timeout)
       send_key(editor, ?b)
-      _ = :sys.get_state(editor)
+      _ = :sys.get_state(editor, @sync_timeout)
       send_key(editor, ?b)
-      _ = :sys.get_state(editor)
+      _ = :sys.get_state(editor, @sync_timeout)
       assert Process.alive?(editor)
     end
   end

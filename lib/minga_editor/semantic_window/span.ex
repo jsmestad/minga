@@ -48,7 +48,7 @@ defmodule MingaEditor.SemanticWindow.Span do
            if(face.strikethrough, do: 1 <<< 3, else: 0)) |||
         if(face.underline_style == :curl, do: 1 <<< 4, else: 0)
 
-    font_weight = encode_font_weight(face.font_weight)
+    font_weight = encode_font_weight(face)
     font_id = encode_font_id(face.font_family)
 
     %__MODULE__{
@@ -62,14 +62,17 @@ defmodule MingaEditor.SemanticWindow.Span do
     }
   end
 
-  @spec encode_font_weight(Minga.Core.Face.font_weight() | nil) :: non_neg_integer()
-  defp encode_font_weight(nil), do: 0
-  defp encode_font_weight(:thin), do: 1
-  defp encode_font_weight(:light), do: 2
-  defp encode_font_weight(:regular), do: 3
-  defp encode_font_weight(:medium), do: 4
-  defp encode_font_weight(:bold), do: 5
-  defp encode_font_weight(:black), do: 6
+  @spec encode_font_weight(Minga.Core.Face.t()) :: non_neg_integer()
+  defp encode_font_weight(%Minga.Core.Face{font_weight: nil, bold: true}), do: 5
+  defp encode_font_weight(%Minga.Core.Face{font_weight: nil}), do: 2
+  defp encode_font_weight(%Minga.Core.Face{font_weight: :thin}), do: 0
+  defp encode_font_weight(%Minga.Core.Face{font_weight: :light}), do: 1
+  defp encode_font_weight(%Minga.Core.Face{font_weight: :regular}), do: 2
+  defp encode_font_weight(%Minga.Core.Face{font_weight: :medium}), do: 3
+  defp encode_font_weight(%Minga.Core.Face{font_weight: :semibold}), do: 4
+  defp encode_font_weight(%Minga.Core.Face{font_weight: :bold}), do: 5
+  defp encode_font_weight(%Minga.Core.Face{font_weight: :heavy}), do: 6
+  defp encode_font_weight(%Minga.Core.Face{font_weight: :black}), do: 7
 
   # Font ID resolution: checks the process dictionary for the emit font
   # registry (set during the Emit stage). Returns 0 (default font) when

@@ -59,7 +59,7 @@ defmodule Minga.Core.Face do
   @type underline_style :: :line | :curl | :dashed | :dotted | :double
 
   @typedoc "Font weight for GUI rendering."
-  @type font_weight :: :thin | :light | :regular | :medium | :bold | :black
+  @type font_weight :: :thin | :light | :regular | :medium | :semibold | :bold | :heavy | :black
 
   @typedoc "Font slant for GUI rendering."
   @type font_slant :: :roman | :italic | :oblique

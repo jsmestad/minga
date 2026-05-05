@@ -25,7 +25,7 @@ final class FontManager {
     private var secondaryFonts: [UInt8: FontFace] = [:]
 
     /// Cell dimensions from the primary font (all fonts use these for layout).
-    var cellWidth: Int { primary.cellWidth }
+    var cellWidth: CGFloat { primary.cellWidth }
     var cellHeight: Int { primary.cellHeight }
     var ascent: CGFloat { primary.ascent }
     var descent: CGFloat { primary.descent }
@@ -55,7 +55,7 @@ final class FontManager {
         let secondary = FontFace(name: name, size: size, scale: primary.scale,
                                   ligatures: primary.ligaturesEnabled, weight: 2)
 
-        if secondary.cellWidth != primary.cellWidth ||
+        if abs(secondary.cellWidth - primary.cellWidth) > 0.001 ||
            secondary.cellHeight != primary.cellHeight {
             PortLogger.warn(
                 "Font '\(name)' (id=\(id)) has different metrics " +

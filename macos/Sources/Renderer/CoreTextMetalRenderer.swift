@@ -46,6 +46,13 @@ struct BgParamsGPU {
     var cornerRadius: Float = 0.0
 }
 
+/// Cursor geometry in device pixels for the current render frame.
+struct RenderCursor {
+    let x: Float
+    let y: Float
+    let shape: CursorShape
+}
+
 /// Default background clear color (dark gray matching the default bg).
 /// Linear equivalents of sRGB (0.12, 0.12, 0.14).
 private let ctBgClearColorDefault = MTLClearColor(red: 0.01298, green: 0.01298, blue: 0.01681, alpha: 1.0)
@@ -308,6 +315,16 @@ final class CoreTextMetalRenderer {
         let gutterLeftMarginPx = gutterLeftMarginPt * scale
         let gutterPaddingPt: Float = frameState.gutterCol > 0 ? round(8.0 * scale) / scale : 0
         let gutterPaddingPx = gutterPaddingPt * scale
+
+        let renderCursor = CoreTextMetalRenderer.resolveCursor(
+            frameState: frameState,
+            windowContents: windowContents,
+            cellW: cellW,
+            displayCellH: displayCellH,
+            scale: scale,
+            gutterLeftMarginPx: gutterLeftMarginPx,
+            gutterPaddingPx: gutterPaddingPx
+        )
 
         // Build background quads and line texture instances.
         var bgQuads: [QuadGPU] = []
@@ -581,20 +598,10 @@ final class CoreTextMetalRenderer {
         // Pass 2: Cursor background (drawn BEFORE text so text is visible on top).
         // For block cursors, draw the cursor bg here so the text pass composites over it.
         // Beam and underline cursors are drawn AFTER text (pass 5).
-        // NOTE: Cursor position uses frameState.cursorRow/Col from the TUI cell-grid
-        // path, which the BEAM computes as gutter_w + (cursor_col - viewport.left).
-        // Horizontal scroll is already baked in. If the TUI rendering path is ever
-        // removed for GUI frontends, cursor positioning will need to use the semantic
-        // window's cursor_col and scroll_left instead.
-        if frameState.cursorVisible && cursorBlinkVisible && frameState.cursorShape == .block {
-            let cursorRow = Float(frameState.cursorRow)
-            let cursorCol = Float(frameState.cursorCol)
-            let cursorPadding: Float = (frameState.gutterCol > 0 && frameState.cursorCol >= frameState.gutterCol)
-                ? gutterLeftMarginPx + gutterPaddingPx : 0
-
+        if let renderCursor, cursorBlinkVisible, renderCursor.shape == .block {
             var cursorQuad = QuadGPU()
-            cursorQuad.position = SIMD2<Float>(cursorCol * cellW * scale + cursorPadding, cursorRow * displayCellH * scale)
-            cursorQuad.size = SIMD2<Float>(cellW * scale, displayCellH * scale)
+            cursorQuad.position = SIMD2<Float>(CoreTextMetalRenderer.snapToPixel(renderCursor.x), CoreTextMetalRenderer.snapToPixel(renderCursor.y))
+            cursorQuad.size = SIMD2<Float>(CoreTextMetalRenderer.snapToPixel(cellW * scale), CoreTextMetalRenderer.snapToPixel(displayCellH * scale))
             cursorQuad.color = cursorColor
             cursorQuad.alpha = 1.0
 
@@ -757,30 +764,25 @@ final class CoreTextMetalRenderer {
         // Pass 6: Cursor overlay for beam and underline shapes.
         // Block cursor is drawn in pass 2 (before text) so text shows on top.
         // Beam and underline are drawn AFTER text so they overlay it.
-        if frameState.cursorVisible && cursorBlinkVisible && frameState.cursorShape != .block {
-            let cursorRow = Float(frameState.cursorRow)
-            let cursorCol = Float(frameState.cursorCol)
-            let cursorPadding: Float = (frameState.gutterCol > 0 && frameState.cursorCol >= frameState.gutterCol)
-                ? gutterLeftMarginPx + gutterPaddingPx : 0
-
+        if let renderCursor, cursorBlinkVisible, renderCursor.shape != .block {
             var cursorQuad = QuadGPU()
             cursorQuad.color = cursorColor
             cursorQuad.alpha = 1.0
 
-            switch frameState.cursorShape {
+            switch renderCursor.shape {
             case .block:
                 break  // Handled in pass 2.
 
             case .beam:
                 let beamWidth: Float = 2.0 * scale
-                cursorQuad.position = SIMD2<Float>(cursorCol * cellW * scale + cursorPadding, cursorRow * displayCellH * scale)
-                cursorQuad.size = SIMD2<Float>(beamWidth, displayCellH * scale)
+                cursorQuad.position = SIMD2<Float>(CoreTextMetalRenderer.snapToPixel(renderCursor.x), CoreTextMetalRenderer.snapToPixel(renderCursor.y))
+                cursorQuad.size = SIMD2<Float>(CoreTextMetalRenderer.snapToPixel(beamWidth), CoreTextMetalRenderer.snapToPixel(displayCellH * scale))
 
             case .underline:
                 let ulHeight: Float = 2.0 * scale
-                let cellBottom = (cursorRow + 1) * displayCellH * scale
-                cursorQuad.position = SIMD2<Float>(cursorCol * cellW * scale + cursorPadding, cellBottom - ulHeight)
-                cursorQuad.size = SIMD2<Float>(cellW * scale, ulHeight)
+                let cellBottom = renderCursor.y + displayCellH * scale
+                cursorQuad.position = SIMD2<Float>(CoreTextMetalRenderer.snapToPixel(renderCursor.x), CoreTextMetalRenderer.snapToPixel(cellBottom - ulHeight))
+                cursorQuad.size = SIMD2<Float>(CoreTextMetalRenderer.snapToPixel(cellW * scale), CoreTextMetalRenderer.snapToPixel(ulHeight))
             }
 
             encoder.setRenderPipelineState(bgPipeline)
@@ -1055,6 +1057,56 @@ final class CoreTextMetalRenderer {
     }
 
     // MARK: - Private
+
+    /// Resolve the cursor position in the same coordinate system as the text renderer.
+    /// Semantic GUI window content is preferred because it carries window-relative cursor coordinates and horizontal scroll. Legacy frameState cursor data remains the fallback for transition frames and non-semantic surfaces.
+    nonisolated static func resolveCursor(
+        frameState: FrameState,
+        windowContents: [UInt16: GUIWindowContent],
+        cellW: Float,
+        displayCellH: Float,
+        scale: Float,
+        gutterLeftMarginPx: Float,
+        gutterPaddingPx: Float
+    ) -> RenderCursor? {
+        for (windowId, gutter) in frameState.windowGutters where gutter.isActive {
+            guard let content = windowContents[windowId] else { continue }
+            guard content.cursorVisible else { return nil }
+
+            let gutterWidth = Float(gutter.lineNumberWidth) + Float(gutter.signColWidth)
+            let contentColOffset = (Float(gutter.contentCol) + gutterWidth) * cellW * scale + gutterLeftMarginPx + gutterPaddingPx
+            let hScrollPx = Float(content.scrollLeft) * cellW * scale
+            let cursorCol = resolvedSemanticCursorCol(content)
+            let x = contentColOffset + Float(cursorCol) * cellW * scale - hScrollPx
+            let y = (Float(gutter.contentRow) + Float(content.cursorRow)) * displayCellH * scale
+            return RenderCursor(x: x, y: y, shape: content.cursorShape)
+        }
+
+        guard frameState.cursorVisible else { return nil }
+
+        let cursorPadding: Float = (frameState.gutterCol > 0 && frameState.cursorCol >= frameState.gutterCol)
+            ? gutterLeftMarginPx + gutterPaddingPx : 0
+        let x = Float(frameState.cursorCol) * cellW * scale + cursorPadding
+        let y = Float(frameState.cursorRow) * displayCellH * scale
+        return RenderCursor(x: x, y: y, shape: frameState.cursorShape)
+    }
+
+    /// Converts the semantic cursor column into the rendered column for the active cursor shape.
+    /// Insert-mode beam cursors use the insertion point exactly. Normal-mode block cursors render over a character cell, so an end-of-line insertion point must draw over the final rendered character instead of the next empty cell.
+    nonisolated static func resolvedSemanticCursorCol(_ content: GUIWindowContent) -> UInt16 {
+        guard content.cursorShape == .block else { return content.cursorCol }
+        guard Int(content.cursorRow) < content.rows.count else { return content.cursorCol }
+
+        let row = content.rows[Int(content.cursorRow)]
+        let width = displayWidth(row.text)
+        guard width > 0, Int(content.cursorCol) >= width else { return content.cursorCol }
+        return UInt16(width - 1)
+    }
+
+    /// Snap device-pixel coordinates so cursor edges stay crisp while logical cell width remains fractional.
+    nonisolated static func snapToPixel(_ value: Float) -> Float {
+        round(value)
+    }
 
     /// Convert a 24-bit RGB color to SIMD3<Float>. 0 maps to the provided default.
     private func colorFromU24(_ color: UInt32, default defaultColor: SIMD3<Float>) -> SIMD3<Float> {

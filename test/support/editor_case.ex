@@ -33,6 +33,9 @@ defmodule Minga.Test.EditorCase do
           width: pos_integer(),
           height: pos_integer()
         }
+
+  @sync_timeout 15_000
+
   # ── Setup helpers ────────────────────────────────────────────────────────────
   @doc """
   Starts an editor with headless port for render capture.
@@ -98,8 +101,8 @@ defmodule Minga.Test.EditorCase do
     # :setup_highlight, :debounced_render). Without this, a background
     # render can produce a spurious batch_end that satisfies the next
     # send_key's frame waiter before the key press is actually processed.
-    _ = :sys.get_state(editor)
-    _ = :sys.get_state(port)
+    _ = get_editor_state(editor)
+    _ = sync_port(port)
 
     Map.merge(ctx, %{
       editor: editor,
@@ -143,8 +146,8 @@ defmodule Minga.Test.EditorCase do
     Process.put({:last_frame_snapshot, port}, snapshot)
 
     # Drain deferred messages from :ready (see start_editor/2 comment).
-    _ = :sys.get_state(editor)
-    _ = :sys.get_state(port)
+    _ = get_editor_state(editor)
+    _ = sync_port(port)
 
     %{
       editor: editor,
@@ -165,7 +168,7 @@ defmodule Minga.Test.EditorCase do
   @spec inject_highlights(editor_ctx(), [String.t()], non_neg_integer(), [map()]) :: editor_ctx()
   def inject_highlights(ctx, capture_names, version \\ 1, spans) do
     # Flush pending messages (e.g. :setup_highlight from :ready)
-    _ = :sys.get_state(ctx.editor)
+    _ = get_editor_state(ctx.editor)
 
     # Ensure the active buffer has a registered parser buffer_id so the
     # highlight event handlers can route the message correctly. Previously
@@ -181,7 +184,7 @@ defmodule Minga.Test.EditorCase do
     send(ctx.editor, {:minga_input, {:highlight_names, buffer_id, capture_names}})
     send(ctx.editor, {:minga_input, {:highlight_spans, buffer_id, version, spans}})
     # Sync: ensure both messages have been processed before returning
-    _ = :sys.get_state(ctx.editor)
+    _ = get_editor_state(ctx.editor)
     ctx
   end
 
@@ -189,7 +192,7 @@ defmodule Minga.Test.EditorCase do
   # Returns the buffer_id (existing or newly assigned).
   @spec ensure_test_buffer_id(pid()) :: non_neg_integer()
   defp ensure_test_buffer_id(editor) do
-    state = :sys.get_state(editor)
+    state = get_editor_state(editor)
     buf = state.workspace.buffers.active
 
     if buf == nil do
@@ -233,7 +236,7 @@ defmodule Minga.Test.EditorCase do
     # Drain any pending async messages (timers, highlight events, etc.)
     # before registering the frame waiter. This prevents a pending render
     # from satisfying our waiter instead of the intended key's render.
-    _ = :sys.get_state(editor)
+    _ = get_editor_state(editor)
     ref = HeadlessPort.prepare_await(port)
     send(editor, {:minga_input, {:key_press, codepoint, mods}})
     {:ok, snapshot} = HeadlessPort.collect_frame(ref)
@@ -261,7 +264,7 @@ defmodule Minga.Test.EditorCase do
     # Clear any stale frame snapshot so assert_screen_snapshot falls back
     # to reading the live (post-render) grid from HeadlessPort.
     Process.delete({:last_frame_snapshot, port})
-    :sys.get_state(editor)
+    get_editor_state(editor)
   end
 
   @doc """
@@ -275,13 +278,13 @@ defmodule Minga.Test.EditorCase do
     parse_key_sequence(sequence)
     |> Enum.each(fn {cp, mods} ->
       send(editor, {:minga_input, {:key_press, cp, mods}})
-      :sys.get_state(editor)
+      get_editor_state(editor)
     end)
 
     # Clear any stale frame snapshot so assert_screen_snapshot falls back
     # to reading the live (post-render) grid from HeadlessPort.
     Process.delete({:last_frame_snapshot, port})
-    :sys.get_state(editor)
+    get_editor_state(editor)
   end
 
   @doc """
@@ -298,7 +301,7 @@ defmodule Minga.Test.EditorCase do
   """
   @spec sync_screen(editor_ctx()) :: :ok
   def sync_screen(%{port: port}) do
-    :sys.get_state(port)
+    sync_port(port)
     :ok
   end
 
@@ -402,10 +405,16 @@ defmodule Minga.Test.EditorCase do
     BufferServer.content(buffer)
   end
 
+  @spec get_editor_state(pid()) :: MingaEditor.State.t()
+  defp get_editor_state(editor), do: :sys.get_state(editor, @sync_timeout)
+
+  @spec sync_port(pid()) :: map()
+  defp sync_port(port), do: :sys.get_state(port, @sync_timeout)
+
   @doc "Returns the current editor mode."
   @spec editor_mode(editor_ctx()) :: atom()
   def editor_mode(%{editor: editor}) do
-    Minga.Editing.mode(:sys.get_state(editor))
+    Minga.Editing.mode(get_editor_state(editor))
   end
 
   @doc "Returns the buffer cursor position."
@@ -417,25 +426,25 @@ defmodule Minga.Test.EditorCase do
   @doc "Returns the full editor state (via :sys.get_state). Race-free."
   @spec editor_state(editor_ctx()) :: MingaEditor.State.t()
   def editor_state(%{editor: editor}) do
-    :sys.get_state(editor)
+    get_editor_state(editor)
   end
 
   @doc "Returns the number of open buffers."
   @spec buffer_count(editor_ctx()) :: non_neg_integer()
   def buffer_count(%{editor: editor}) do
-    length(:sys.get_state(editor).workspace.buffers.list)
+    length(get_editor_state(editor).workspace.buffers.list)
   end
 
   @doc "Returns the active buffer index (0-based)."
   @spec active_buffer_index(editor_ctx()) :: non_neg_integer()
   def active_buffer_index(%{editor: editor}) do
-    :sys.get_state(editor).workspace.buffers.active_index
+    get_editor_state(editor).workspace.buffers.active_index
   end
 
   @doc "Returns the active buffer pid."
   @spec active_buffer(editor_ctx()) :: pid() | nil
   def active_buffer(%{editor: editor}) do
-    :sys.get_state(editor).workspace.buffers.active
+    get_editor_state(editor).workspace.buffers.active
   end
 
   @doc "Returns the content of the active buffer."
@@ -450,31 +459,31 @@ defmodule Minga.Test.EditorCase do
   @doc "Returns whether the window tree contains a split."
   @spec has_split?(editor_ctx()) :: boolean()
   def has_split?(%{editor: editor}) do
-    MingaEditor.State.Windows.split?(:sys.get_state(editor).workspace.windows)
+    MingaEditor.State.Windows.split?(get_editor_state(editor).workspace.windows)
   end
 
   @doc "Returns the number of windows."
   @spec window_count(editor_ctx()) :: non_neg_integer()
   def window_count(%{editor: editor}) do
-    map_size(:sys.get_state(editor).workspace.windows.map)
+    map_size(get_editor_state(editor).workspace.windows.map)
   end
 
   @doc "Returns the active window id."
   @spec active_window_id(editor_ctx()) :: pos_integer()
   def active_window_id(%{editor: editor}) do
-    :sys.get_state(editor).workspace.windows.active
+    get_editor_state(editor).workspace.windows.active
   end
 
   @doc "Returns true if a picker is currently open."
   @spec picker_open?(editor_ctx()) :: boolean()
   def picker_open?(%{editor: editor}) do
-    MingaEditor.State.ModalOverlay.match(:sys.get_state(editor).shell_state.modal, :picker)
+    MingaEditor.State.ModalOverlay.match(get_editor_state(editor).shell_state.modal, :picker)
   end
 
   @doc "Returns the active picker state, or nil."
   @spec picker_state(editor_ctx()) :: MingaEditor.UI.Picker.t() | nil
   def picker_state(%{editor: editor}) do
-    case :sys.get_state(editor).shell_state.modal do
+    case get_editor_state(editor).shell_state.modal do
       {:picker, %{picker_ui: %{picker: picker}}} -> picker
       _ -> nil
     end
@@ -483,7 +492,7 @@ defmodule Minga.Test.EditorCase do
   @doc "Returns the picker payload (ModalOverlay.Picker) when a picker is open, or nil."
   @spec modal_picker(editor_ctx()) :: MingaEditor.State.ModalOverlay.Picker.t() | nil
   def modal_picker(%{editor: editor}) do
-    case :sys.get_state(editor).shell_state.modal do
+    case get_editor_state(editor).shell_state.modal do
       {:picker, payload} -> payload
       _ -> nil
     end
@@ -498,7 +507,7 @@ defmodule Minga.Test.EditorCase do
   def modal_picker!(ctx) do
     case modal_picker(ctx) do
       nil ->
-        modal = :sys.get_state(ctx.editor).shell_state.modal
+        modal = get_editor_state(ctx.editor).shell_state.modal
         raise "expected picker payload, but modal was: #{inspect(modal)}"
 
       payload ->
@@ -651,7 +660,7 @@ defmodule Minga.Test.EditorCase do
   end
 
   defp do_wait_until(editor, condition, remaining, interval, message) when remaining > 0 do
-    state = :sys.get_state(editor)
+    state = get_editor_state(editor)
 
     if condition.(state) do
       state
@@ -662,7 +671,7 @@ defmodule Minga.Test.EditorCase do
   end
 
   defp do_wait_until(editor, _condition, _remaining, _interval, message) do
-    state = :sys.get_state(editor)
+    state = get_editor_state(editor)
 
     raise ExUnit.AssertionError,
       message: "#{message}\nFinal state mode: #{Minga.Editing.mode(state)}"
@@ -691,8 +700,8 @@ defmodule Minga.Test.EditorCase do
   end
 
   defp do_wait_screen(editor, port, condition, remaining, interval, message) when remaining > 0 do
-    :sys.get_state(editor)
-    :sys.get_state(port)
+    get_editor_state(editor)
+    sync_port(port)
 
     if condition.() do
       :ok
@@ -704,8 +713,8 @@ defmodule Minga.Test.EditorCase do
 
   defp do_wait_screen(editor, port, _condition, _remaining, _interval, message) do
     # Sync both processes so any post-failure inspection sees stable state
-    state = :sys.get_state(editor)
-    :sys.get_state(port)
+    state = get_editor_state(editor)
+    sync_port(port)
 
     raise ExUnit.AssertionError,
       message: "#{message}\nFinal state mode: #{Minga.Editing.mode(state)}"
@@ -736,7 +745,7 @@ defmodule Minga.Test.EditorCase do
         event_type \\ :press,
         click_count \\ 1
       ) do
-    _ = :sys.get_state(editor)
+    _ = get_editor_state(editor)
     ref = HeadlessPort.prepare_await(port)
     send(editor, {:minga_input, {:mouse_event, row, col, button, mods, event_type, click_count}})
     {:ok, snapshot} = HeadlessPort.collect_frame(ref)
@@ -750,7 +759,7 @@ defmodule Minga.Test.EditorCase do
   """
   @spec send_resize(editor_ctx(), pos_integer(), pos_integer()) :: editor_ctx()
   def send_resize(%{editor: editor, port: port} = ctx, new_width, new_height) do
-    _ = :sys.get_state(editor)
+    _ = get_editor_state(editor)
     HeadlessPort.resize(port, new_width, new_height)
     ref = HeadlessPort.prepare_await(port)
     send(editor, {:minga_input, {:resize, new_width, new_height}})

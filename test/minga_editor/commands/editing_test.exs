@@ -42,12 +42,12 @@ defmodule MingaEditor.Commands.EditingTest do
       assert String.contains?(BufferServer.content(buffer), "x")
     end
 
-    test "A moves to line end and enters insert mode" do
+    test "A moves after line end and enters insert mode" do
       {editor, buffer} = start_editor("hi")
       send_key(editor, ?A)
       send_key(editor, ?!)
 
-      assert String.contains?(BufferServer.content(buffer), "!")
+      assert BufferServer.content(buffer) == "hi!"
     end
 
     test "I moves to line start and enters insert mode" do
@@ -119,6 +119,31 @@ defmodule MingaEditor.Commands.EditingTest do
       content_before = BufferServer.content(buffer)
       send_key(editor, ?l)
       assert BufferServer.content(buffer) == content_before
+    end
+
+    test "Escape from insert at end of line leaves normal cursor on the inserted character" do
+      {editor, buffer} = start_editor("")
+
+      send_key(editor, ?i)
+      Enum.each(~c"abc!", &send_key(editor, &1))
+      send_key(editor, 27)
+
+      assert BufferServer.content(buffer) == "abc!"
+      assert BufferServer.cursor(buffer) == {0, 3}
+    end
+
+    test "visual round trip after insert preserves normal cursor semantics for the next insert" do
+      {editor, buffer} = start_editor("")
+
+      send_key(editor, ?i)
+      Enum.each(~c"abc!", &send_key(editor, &1))
+      send_key(editor, 27)
+      send_key(editor, ?v)
+      send_key(editor, 27)
+      send_key(editor, ?i)
+      send_key(editor, ?X)
+
+      assert BufferServer.content(buffer) == "abcX!"
     end
   end
 

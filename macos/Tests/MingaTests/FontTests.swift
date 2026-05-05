@@ -7,6 +7,24 @@ import CoreText
 @Suite("FontFace resolution")
 @MainActor
 struct FontResolutionTests {
+    private func monospaceAdvance(_ font: CTFont) -> CGFloat {
+        var chars: [UniChar] = [0x4D]
+        var glyphs: [CGGlyph] = [0]
+        CTFontGetGlyphsForCharacters(font, &chars, &glyphs, 1)
+        var advance = CGSize.zero
+        CTFontGetAdvancesForGlyphs(font, .default, &glyphs, &advance, 1)
+        return advance.width
+    }
+
+    @Test("FontFace preserves CoreText fractional monospace advance")
+    func preservesFractionalAdvance() {
+        let face = FontFace(name: "Menlo", size: 13, scale: 2.0)
+        let naturalAdvance = monospaceAdvance(face.ctFont)
+
+        #expect(abs(face.cellWidth - naturalAdvance) < 0.001)
+        #expect(abs(naturalAdvance - ceil(naturalAdvance)) > 0.01)
+    }
+
     @Test("Load font by PostScript name")
     func loadByPostScript() {
         let face = FontFace(name: "Menlo-Regular", size: 13, scale: 2.0)
@@ -148,6 +166,16 @@ struct FontVariantTests {
 @Suite("FontManager")
 @MainActor
 struct FontManagerTests {
+    @Test("FontManager exposes primary fractional cell width")
+    func exposesPrimaryFractionalCellWidth() {
+        let fm = FontManager(name: "Menlo", size: 13, scale: 2.0)
+        #expect(abs(fm.cellWidth - fm.primary.cellWidth) < 0.001)
+
+        fm.setPrimaryFont(name: "Menlo", size: 17, scale: 2.0, ligatures: true, weight: 2)
+        #expect(abs(fm.cellWidth - fm.primary.cellWidth) < 0.001)
+        #expect(abs(fm.cellWidth - ceil(fm.cellWidth)) > 0.01)
+    }
+
     @Test("Primary font has correct metrics")
     func primaryMetrics() {
         let fm = FontManager(name: "Menlo", size: 13, scale: 2.0)

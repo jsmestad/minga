@@ -60,7 +60,8 @@ defmodule Minga.Mode.State do
           prefix_node: Bindings.node_t() | nil,
           prefix_keys: [String.t()],
           pending: pending(),
-          describe_key: DescribeKey.t() | nil
+          describe_key: DescribeKey.t() | nil,
+          insert_changed: boolean()
         }
 
   defstruct filetype: :text,
@@ -73,5 +74,6 @@ defmodule Minga.Mode.State do
             prefix_node: nil,
             prefix_keys: [],
             pending: nil,
-            describe_key: nil
+            describe_key: nil,
+            insert_changed: false
 end

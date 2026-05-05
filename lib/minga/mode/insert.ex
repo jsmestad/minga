@@ -41,19 +41,25 @@ defmodule Minga.Mode.Insert do
   """
   @spec handle_key(Mode.key(), Mode.state()) :: Mode.result()
 
-  # Escape → back to Normal (always, even if user has an override)
+  # Escape → back to Normal (always, even if user has an override).
+  # Insert mode tracks the insertion point after the last typed character.
+  # Normal mode rests on a character cell, so move left only after edits.
+  def handle_key({@escape, _mods}, %{insert_changed: true} = state) do
+    {:execute_then_transition, [:move_left], :normal, %{state | insert_changed: false}}
+  end
+
   def handle_key({@escape, _mods}, state) do
     {:transition, :normal, state}
   end
 
   # Backspace (ASCII DEL 127 or BS 8)
   def handle_key({cp, _mods}, state) when cp in [8, 127] do
-    {:execute, :delete_before, state}
+    {:execute, :delete_before, mark_insert_changed(state)}
   end
 
   # Enter
   def handle_key({@enter, _mods}, state) do
-    {:execute, :insert_newline, state}
+    {:execute, :insert_newline, mark_insert_changed(state)}
   end
 
   # Arrow keys — allow cursor movement without leaving Insert mode
@@ -92,7 +98,7 @@ defmodule Minga.Mode.Insert do
   defp handle_default({codepoint, 0}, state)
        when codepoint >= 32 and codepoint <= 0x10FFFF do
     char = <<codepoint::utf8>>
-    {:execute, {:insert_char, char}, state}
+    {:execute, {:insert_char, char}, mark_insert_changed(state)}
   rescue
     ArgumentError -> {:continue, state}
   end
@@ -101,6 +107,10 @@ defmodule Minga.Mode.Insert do
   defp handle_default(_key, state) do
     {:continue, state}
   end
+
+  @spec mark_insert_changed(Mode.state()) :: Mode.state()
+  defp mark_insert_changed(%{insert_changed: _} = state), do: %{state | insert_changed: true}
+  defp mark_insert_changed(state), do: state
 
   @spec resolve_mode_binding(map(), Mode.key()) :: {:command, atom()} | :not_found
   defp resolve_mode_binding(%{mode_trie: trie}, key) when trie != nil do

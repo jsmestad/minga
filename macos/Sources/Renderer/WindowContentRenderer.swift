@@ -90,7 +90,7 @@ final class WindowContentRenderer {
         self.fontManager = fontManager
         self.rasterizer = rasterizer
         self.scale = fontManager.scale
-        self.cellWidth = CGFloat(fontManager.cellWidth)
+        self.cellWidth = fontManager.cellWidth
         self.cellHeight = CGFloat(fontManager.cellHeight)
         self.ascent = fontManager.ascent
         self.descent = fontManager.primary.descent

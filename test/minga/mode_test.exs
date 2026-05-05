@@ -51,10 +51,10 @@ defmodule Minga.ModeTest do
       assert commands == [:move_right]
     end
 
-    test "A emits move_to_line_end then transitions to insert", %{state: state} do
+    test "A moves after line end then transitions to insert", %{state: state} do
       {new_mode, commands, _new_state} = Mode.process(:normal, {?A, 0}, state)
       assert new_mode == :insert
-      assert commands == [:move_to_line_end]
+      assert commands == [:move_to_line_end, :move_right]
     end
 
     test "I emits move_to_line_start then transitions to insert", %{state: state} do
@@ -164,10 +164,21 @@ defmodule Minga.ModeTest do
       {:ok, state: Mode.initial_state()}
     end
 
-    test "Escape transitions from insert to normal", %{state: state} do
+    test "Escape transitions from insert to normal without moving when nothing changed", %{
+      state: state
+    } do
       {new_mode, commands, _} = Mode.process(:insert, {27, 0}, state)
       assert new_mode == :normal
       assert commands == []
+    end
+
+    test "Escape transitions from insert to normal and moves cursor left after a change", %{
+      state: state
+    } do
+      state = %{state | insert_changed: true}
+      {new_mode, commands, _} = Mode.process(:insert, {27, 0}, state)
+      assert new_mode == :normal
+      assert commands == [:move_left]
     end
 
     test "printable character emits insert_char command", %{state: state} do
