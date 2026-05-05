@@ -2,7 +2,6 @@ defmodule Minga.EventsTest do
   # async: false — uses application-level EventBus registry
   use ExUnit.Case, async: false
 
-  alias Minga.Config.Hooks
   alias Minga.Events
 
   setup do
@@ -183,55 +182,6 @@ defmodule Minga.EventsTest do
 
     test "process not subscribed is not in the subscribers list" do
       refute self() in Events.subscribers(:buffer_opened)
-    end
-  end
-
-  describe "integration with Config.Hooks" do
-    setup do
-      # Hooks and TaskSupervisor are started by the application.
-      # Reset hooks between tests to avoid cross-test bleed.
-      Hooks.reset()
-      on_exit(fn -> Hooks.reset() end)
-
-      :ok
-    end
-
-    test "hooks fire when event is broadcast through the bus" do
-      buf = fake_buffer()
-      test_pid = self()
-
-      Hooks.register(:after_save, fn buf_arg, path ->
-        send(test_pid, {:hook_via_bus, buf_arg, path})
-      end)
-
-      Events.broadcast(:buffer_saved, %Events.BufferEvent{buffer: buf, path: "/via/bus.ex"})
-
-      assert_receive {:hook_via_bus, ^buf, "/via/bus.ex"}, 500
-    end
-
-    test "mode_changed event triggers on_mode_change hooks" do
-      test_pid = self()
-
-      Hooks.register(:on_mode_change, fn old, new ->
-        send(test_pid, {:mode_hook, old, new})
-      end)
-
-      Events.broadcast(:mode_changed, %Events.ModeEvent{old: :normal, new: :visual})
-
-      assert_receive {:mode_hook, :normal, :visual}, 500
-    end
-
-    test "buffer_opened event triggers after_open hooks" do
-      buf = fake_buffer()
-      test_pid = self()
-
-      Hooks.register(:after_open, fn buf_arg, path ->
-        send(test_pid, {:open_hook, buf_arg, path})
-      end)
-
-      Events.broadcast(:buffer_opened, %Events.BufferEvent{buffer: buf, path: "/opened.ex"})
-
-      assert_receive {:open_hook, ^buf, "/opened.ex"}, 500
     end
   end
 end

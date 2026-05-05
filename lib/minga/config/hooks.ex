@@ -41,16 +41,22 @@ defmodule Minga.Config.Hooks do
   @typedoc "Valid event names."
   @type event :: :after_save | :after_open | :on_mode_change
 
-  @typedoc "Hook state: event name → list of hook functions."
-  @type state :: %{event() => [function()]}
+  @typedoc "Registered hooks keyed by event name."
+  @type hooks :: %{event() => [function()]}
+
+  @typedoc "Hook server state."
+  @type state :: %{
+          hooks: hooks(),
+          events_registry: atom()
+        }
 
   # ── Client API ──────────────────────────────────────────────────────────────
 
   @doc "Starts the hooks registry and subscribes to the event bus."
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
-    {name, _opts} = Keyword.pop(opts, :name, __MODULE__)
-    GenServer.start_link(__MODULE__, [], name: name)
+    {name, opts} = Keyword.pop(opts, :name, __MODULE__)
+    GenServer.start_link(__MODULE__, opts, name: name)
   end
 
   @doc """
@@ -105,19 +111,21 @@ defmodule Minga.Config.Hooks do
 
   @impl true
   @spec init(keyword()) :: {:ok, state()}
-  def init(_opts) do
-    subscribe_to_events()
-    {:ok, initial_state()}
+  def init(opts) do
+    events_registry = Keyword.get(opts, :events_registry, Minga.EventBus)
+    state = initial_state(events_registry)
+    subscribe_to_events(state)
+    {:ok, state}
   end
 
   @impl true
   def handle_call({:register, event, fun}, _from, state) do
-    new_state = Map.update!(state, event, &[fun | &1])
+    new_state = %{state | hooks: Map.update!(state.hooks, event, &[fun | &1])}
     {:reply, :ok, new_state}
   end
 
-  def handle_call(:reset, _from, _state) do
-    {:reply, :ok, initial_state()}
+  def handle_call(:reset, _from, state) do
+    {:reply, :ok, initial_state(state.events_registry)}
   end
 
   @impl true
@@ -144,10 +152,10 @@ defmodule Minga.Config.Hooks do
 
   # ── Private ─────────────────────────────────────────────────────────────────
 
-  @spec subscribe_to_events() :: :ok
-  defp subscribe_to_events do
+  @spec subscribe_to_events(state()) :: :ok
+  defp subscribe_to_events(state) do
     for topic <- Map.keys(@topic_to_event) do
-      Minga.Events.subscribe(topic)
+      Minga.Events.subscribe(topic, registry: state.events_registry)
     end
 
     :ok
@@ -162,7 +170,7 @@ defmodule Minga.Config.Hooks do
 
   @spec do_run(state(), event(), [term()]) :: :ok
   defp do_run(state, event, args) do
-    hooks = Map.get(state, event, []) |> Enum.reverse()
+    hooks = Map.get(state.hooks, event, []) |> Enum.reverse()
 
     for hook <- hooks do
       Task.Supervisor.start_child(Minga.Eval.TaskSupervisor, fn ->
@@ -184,8 +192,8 @@ defmodule Minga.Config.Hooks do
     :ok
   end
 
-  @spec initial_state() :: state()
-  defp initial_state do
-    Map.new(@valid_events, &{&1, []})
+  @spec initial_state(atom()) :: state()
+  defp initial_state(events_registry) do
+    %{hooks: Map.new(@valid_events, &{&1, []}), events_registry: events_registry}
   end
 end
