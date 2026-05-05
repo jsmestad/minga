@@ -534,22 +534,17 @@ defmodule Minga.Tool.Manager do
 
   @spec broadcast(atom(), map()) :: :ok
   defp broadcast(topic, payload) do
-    unless is_nil(Process.whereis(Minga.EventBus)) do
-      Registry.dispatch(Minga.EventBus, topic, &notify_subscribers(&1, topic, payload))
-    end
-
-    :ok
-  end
-
-  @spec notify_subscribers([{pid(), term()}], atom(), map()) :: :ok
-  defp notify_subscribers(entries, topic, payload) do
-    for {pid, _value} <- entries, do: send(pid, {:minga_event, topic, payload})
-    :ok
+    Minga.Events.broadcast(topic, payload, Minga.Events.default_registry())
   end
 
   @spec log_message(String.t()) :: :ok
   defp log_message(text) do
-    Minga.Events.broadcast(:log_message, %Minga.Events.LogMessageEvent{text: text, level: :info})
+    Minga.Events.broadcast(
+      :log_message,
+      %Minga.Events.LogMessageEvent{text: text, level: :info},
+      Minga.Events.default_registry()
+    )
+
     :ok
   end
 end

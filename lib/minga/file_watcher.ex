@@ -27,7 +27,8 @@ defmodule Minga.FileWatcher do
             watcher: nil,
             watched_dirs: %{},
             watched_files: MapSet.new(),
-            pending: %{}
+            pending: %{},
+            events_registry: Minga.Events.default_registry()
 
   @typep state :: %__MODULE__{
            subscriber: pid() | nil,
@@ -35,7 +36,8 @@ defmodule Minga.FileWatcher do
            watched_dirs: %{String.t() => pos_integer()},
            watched_files: MapSet.t(String.t()),
            pending: %{String.t() => reference()},
-           debounce_ms: pos_integer()
+           debounce_ms: pos_integer(),
+           events_registry: Minga.Events.registry()
          }
 
   @default_debounce_ms 100
@@ -79,17 +81,19 @@ defmodule Minga.FileWatcher do
   def init(opts) do
     debounce_ms = Keyword.get(opts, :debounce_ms, @default_debounce_ms)
     subscriber = Keyword.get(opts, :subscriber)
+    events_registry = Keyword.get(opts, :events_registry, Minga.Events.default_registry())
 
     # Subscribe to buffer-open events so we automatically watch new files.
     # Opt-out via subscribe_events: false (used by tests to avoid global
     # event bus noise from concurrent tests flooding the watcher mailbox).
     if Keyword.get(opts, :subscribe_events, true) do
-      Minga.Events.subscribe(:buffer_opened)
+      Minga.Events.subscribe(:buffer_opened, events_registry)
     end
 
     state = %__MODULE__{
       subscriber: subscriber,
-      debounce_ms: debounce_ms
+      debounce_ms: debounce_ms,
+      events_registry: events_registry
     }
 
     {:ok, state}

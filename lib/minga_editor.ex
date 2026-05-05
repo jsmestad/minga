@@ -61,6 +61,7 @@ defmodule MingaEditor do
           | {:port_manager, GenServer.server()}
           | {:keymap_server, GenServer.server()}
           | {:options_server, GenServer.server()}
+          | {:events_registry, Minga.Events.registry()}
           | {:buffer, pid()}
           | {:width, pos_integer()}
           | {:height, pos_integer()}
@@ -185,25 +186,26 @@ defmodule MingaEditor do
       end
 
     state = Startup.apply_config_options(state)
-    Minga.Events.subscribe(:diagnostics_updated)
-    Minga.Events.subscribe(:lsp_status_changed)
+    events_registry = EditorState.events_registry(state)
+    Minga.Events.subscribe(:diagnostics_updated, events_registry)
+    Minga.Events.subscribe(:lsp_status_changed, events_registry)
 
     # Refresh file tree git status when any buffer is saved.
-    Minga.Events.subscribe(:buffer_saved)
-    Minga.Events.subscribe(:git_status_changed)
+    Minga.Events.subscribe(:buffer_saved, events_registry)
+    Minga.Events.subscribe(:git_status_changed, events_registry)
 
     # Tool manager progress: show install/update status in the status line.
-    Minga.Events.subscribe(:tool_install_started)
-    Minga.Events.subscribe(:tool_install_progress)
-    Minga.Events.subscribe(:tool_install_complete)
-    Minga.Events.subscribe(:tool_install_failed)
-    Minga.Events.subscribe(:tool_uninstall_complete)
-    Minga.Events.subscribe(:tool_missing)
-    Minga.Events.subscribe(:log_message)
-    Minga.Events.subscribe(:face_overrides_changed)
-    Minga.Events.subscribe(:agent_session_stopped)
-    Minga.Events.subscribe(:load_user_themes)
-    Minga.Events.subscribe(:extension_updates_available)
+    Minga.Events.subscribe(:tool_install_started, events_registry)
+    Minga.Events.subscribe(:tool_install_progress, events_registry)
+    Minga.Events.subscribe(:tool_install_complete, events_registry)
+    Minga.Events.subscribe(:tool_install_failed, events_registry)
+    Minga.Events.subscribe(:tool_uninstall_complete, events_registry)
+    Minga.Events.subscribe(:tool_missing, events_registry)
+    Minga.Events.subscribe(:log_message, events_registry)
+    Minga.Events.subscribe(:face_overrides_changed, events_registry)
+    Minga.Events.subscribe(:agent_session_stopped, events_registry)
+    Minga.Events.subscribe(:load_user_themes, events_registry)
+    Minga.Events.subscribe(:extension_updates_available, events_registry)
 
     # Monitor all initial buffers so we get :DOWN when they die.
     all_initial_pids =
@@ -1580,10 +1582,14 @@ defmodule MingaEditor do
     state = Commands.add_buffer(state, buffer_pid)
     state = log_message(state, "Opened: #{file_path}")
 
-    Minga.Events.broadcast(:buffer_opened, %Minga.Events.BufferEvent{
-      buffer: buffer_pid,
-      path: file_path
-    })
+    Minga.Events.broadcast(
+      :buffer_opened,
+      %Minga.Events.BufferEvent{
+        buffer: buffer_pid,
+        path: file_path
+      },
+      EditorState.events_registry(state)
+    )
 
     # Eagerly set up syntax highlighting for this specific buffer.
     # Uses the PID-targeted variant so each restored buffer gets its

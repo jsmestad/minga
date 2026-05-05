@@ -50,7 +50,14 @@ defmodule Minga.Events do
   a one-file change if distributed events are ever needed.
   """
 
-  @registry Minga.EventBus
+  @default_registry Minga.EventBus
+
+  @typedoc "Registry process name used by the event bus."
+  @type registry :: atom()
+
+  @doc "Returns the production event bus registry name."
+  @spec default_registry() :: registry()
+  def default_registry, do: @default_registry
 
   # ── Payload structs ─────────────────────────────────────────────────────────
 
@@ -263,14 +270,14 @@ defmodule Minga.Events do
   Add this to your supervision tree before any process that subscribes.
   """
   @spec child_spec(keyword()) :: Supervisor.child_spec()
-  def child_spec(_opts) do
-    Registry.child_spec(keys: :duplicate, name: @registry)
+  def child_spec(opts) do
+    Registry.child_spec(keys: :duplicate, name: Keyword.get(opts, :name, default_registry()))
   end
 
   # ── Subscribe / Unsubscribe ─────────────────────────────────────────────────
 
   @doc """
-  Subscribes the calling process to a topic.
+  Subscribes the calling process to a topic on the default registry.
 
   The process will be included in `Registry.dispatch/3` callbacks when
   `broadcast/2` is called for this topic. A process can subscribe to
@@ -279,35 +286,35 @@ defmodule Minga.Events do
   """
   @spec subscribe(topic()) :: :ok
   def subscribe(topic) when is_atom(topic) do
-    if Process.whereis(@registry) do
-      already? =
-        Registry.lookup(@registry, topic)
-        |> Enum.any?(fn {pid, _} -> pid == self() end)
-
-      unless already?, do: {:ok, _} = Registry.register(@registry, topic, [])
-    end
-
-    :ok
+    subscribe_topic(topic, [], default_registry())
   end
 
   @doc """
-  Subscribes the calling process to a topic with metadata.
+  Subscribes the calling process to a topic with metadata or a registry.
+
+  If the second argument is the name of a running Registry process, it is
+  treated as the event registry. Otherwise it is preserved as metadata on
+  the default registry for backward compatibility.
+  """
+  @spec subscribe(topic(), registry() | term()) :: :ok
+  def subscribe(topic, registry_or_value) when is_atom(topic) do
+    if registry_process?(registry_or_value) do
+      subscribe_topic(topic, [], registry_or_value)
+    else
+      subscribe_topic(topic, registry_or_value, default_registry())
+    end
+  end
+
+  @doc """
+  Subscribes the calling process to a topic with metadata on a registry.
 
   The metadata value is passed to the dispatch callback alongside the pid,
   which lets subscribers filter or tag their registrations. Subscribing
   with the same topic and value from the same process is a no-op.
   """
-  @spec subscribe(topic(), term()) :: :ok
-  def subscribe(topic, value) when is_atom(topic) do
-    if Process.whereis(@registry) do
-      already? =
-        Registry.lookup(@registry, topic)
-        |> Enum.any?(fn {pid, v} -> pid == self() and v == value end)
-
-      unless already?, do: {:ok, _} = Registry.register(@registry, topic, value)
-    end
-
-    :ok
+  @spec subscribe(topic(), term(), registry()) :: :ok
+  def subscribe(topic, value, registry) when is_atom(topic) do
+    subscribe_topic(topic, value, registry)
   end
 
   @doc """
@@ -316,8 +323,13 @@ defmodule Minga.Events do
   Removes all registrations for this process under the given topic key.
   """
   @spec unsubscribe(topic()) :: :ok
-  def unsubscribe(topic) when is_atom(topic) do
-    Registry.unregister(@registry, topic)
+  @spec unsubscribe(topic(), registry()) :: :ok
+  def unsubscribe(topic, registry \\ default_registry()) when is_atom(topic) do
+    if registry_process?(registry) do
+      Registry.unregister(registry, topic)
+    end
+
+    :ok
   end
 
   # ── Broadcast ───────────────────────────────────────────────────────────────
@@ -354,12 +366,14 @@ defmodule Minga.Events do
   @spec broadcast(:load_user_themes, LoadUserThemesEvent.t()) :: :ok
   @spec broadcast(:buffer_fork_conflict, map()) :: :ok
   @spec broadcast(:extension_updates_available, Minga.Extension.UpdatesAvailableEvent.t()) :: :ok
-  def broadcast(topic, %_{} = payload) when is_atom(topic) do
-    Registry.dispatch(@registry, topic, fn entries ->
-      for {pid, _value} <- entries do
-        send(pid, {:minga_event, topic, payload})
-      end
-    end)
+  def broadcast(topic, payload) when is_atom(topic) and is_map(payload) do
+    broadcast(topic, payload, default_registry())
+  end
+
+  @spec broadcast(topic(), payload() | map(), registry()) :: :ok
+  def broadcast(topic, payload, registry) when is_atom(topic) and is_map(payload) do
+    if registry_process?(registry), do: dispatch(registry, topic, payload)
+    :ok
   end
 
   @doc """
@@ -371,11 +385,16 @@ defmodule Minga.Events do
   """
   @deprecated "Buffer.Server now broadcasts :buffer_changed automatically on every edit. No manual broadcast needed."
   @spec notify_buffer_changed(pid()) :: :ok
-  def notify_buffer_changed(buf) when is_pid(buf) do
-    broadcast(:buffer_changed, %BufferChangedEvent{
-      buffer: buf,
-      source: Minga.Buffer.EditSource.unknown()
-    })
+  @spec notify_buffer_changed(pid(), registry()) :: :ok
+  def notify_buffer_changed(buf, registry \\ default_registry()) when is_pid(buf) do
+    broadcast(
+      :buffer_changed,
+      %BufferChangedEvent{
+        buffer: buf,
+        source: Minga.Buffer.EditSource.unknown()
+      },
+      registry
+    )
   end
 
   # ── Query ───────────────────────────────────────────────────────────────────
@@ -387,7 +406,38 @@ defmodule Minga.Events do
   (use `broadcast/2` instead).
   """
   @spec subscribers(topic()) :: [pid()]
-  def subscribers(topic) when is_atom(topic) do
-    Registry.lookup(@registry, topic) |> Enum.map(fn {pid, _} -> pid end)
+  @spec subscribers(topic(), registry()) :: [pid()]
+  def subscribers(topic, registry \\ default_registry()) when is_atom(topic) do
+    if registry_process?(registry) do
+      Registry.lookup(registry, topic) |> Enum.map(fn {pid, _} -> pid end)
+    else
+      []
+    end
   end
+
+  @spec dispatch(registry(), topic(), payload() | map()) :: :ok
+  defp dispatch(registry, topic, payload) do
+    Registry.dispatch(registry, topic, fn entries ->
+      for {pid, _value} <- entries do
+        send(pid, {:minga_event, topic, payload})
+      end
+    end)
+  end
+
+  @spec subscribe_topic(topic(), term(), registry()) :: :ok
+  defp subscribe_topic(topic, value, registry) do
+    if registry_process?(registry) do
+      already? =
+        Registry.lookup(registry, topic)
+        |> Enum.any?(fn {pid, v} -> pid == self() and v == value end)
+
+      unless already?, do: {:ok, _} = Registry.register(registry, topic, value)
+    end
+
+    :ok
+  end
+
+  @spec registry_process?(term()) :: boolean()
+  defp registry_process?(name) when is_atom(name), do: Process.whereis(name) != nil
+  defp registry_process?(_), do: false
 end

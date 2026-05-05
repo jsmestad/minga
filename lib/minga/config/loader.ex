@@ -306,7 +306,12 @@ defmodule Minga.Config.Loader do
 
   @spec load_user_themes() :: :ok
   defp load_user_themes do
-    Minga.Events.broadcast(:load_user_themes, %Minga.Events.LoadUserThemesEvent{})
+    Minga.Events.broadcast(
+      :load_user_themes,
+      %Minga.Events.LoadUserThemesEvent{},
+      Minga.Events.default_registry()
+    )
+
     :ok
   end
 

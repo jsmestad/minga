@@ -160,16 +160,16 @@ defmodule MingaEditor.MessagesBufferTest do
       tag = unique_tag("store-broadcast")
       ctx = start_editor("hello")
 
-      Minga.Events.broadcast(:log_message, %Minga.Events.LogMessageEvent{
-        text: tag,
-        level: :warning
-      })
+      Minga.Events.broadcast(
+        :log_message,
+        %Minga.Events.LogMessageEvent{
+          text: tag,
+          level: :warning
+        },
+        ctx.events_registry
+      )
 
-      _ = :sys.get_state(ctx.editor)
-
-      state = :sys.get_state(ctx.editor)
-
-      assert Enum.any?(state.message_store.entries, fn entry ->
+      assert Enum.any?(message_store_entries(ctx), fn entry ->
                String.contains?(entry.text, tag) and entry.level == :warning
              end)
     end

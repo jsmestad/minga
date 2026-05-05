@@ -717,7 +717,8 @@ defmodule MingaEditor.Commands.BufferManagement do
 
           Minga.Events.broadcast(
             :buffer_closed,
-            %Minga.Events.BufferClosedEvent{buffer: buf, path: path}
+            %Minga.Events.BufferClosedEvent{buffer: buf, path: path},
+            EditorState.events_registry(state)
           )
 
           GenServer.stop(buf, :normal)
