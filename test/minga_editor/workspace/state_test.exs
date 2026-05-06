@@ -66,6 +66,27 @@ defmodule MingaEditor.Workspace.StateTest do
     end
   end
 
+  describe "restore_tab_context/2" do
+    test "restores flat workspace fields from a tab context" do
+      ws = base_state().workspace
+      replacement = %{ws.buffers | active: nil, list: [], active_index: 0}
+
+      restored = WorkspaceState.restore_tab_context(ws, %{buffers: replacement})
+
+      assert restored.buffers == replacement
+      assert restored.windows == ws.windows
+      assert restored.viewport == ws.viewport
+    end
+
+    test "ignores fields that are not part of the workspace" do
+      ws = base_state().workspace
+
+      restored = WorkspaceState.restore_tab_context(ws, %{unknown_field: :ignored})
+
+      assert restored == ws
+    end
+  end
+
   describe "to_tab_context/1" do
     test "returns a flat map of workspace fields" do
       ws = base_state().workspace

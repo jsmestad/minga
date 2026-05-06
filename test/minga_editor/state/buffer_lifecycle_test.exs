@@ -44,6 +44,35 @@ defmodule MingaEditor.State.BufferLifecycleTest do
     EditorState.set_tab_bar(state, tb)
   end
 
+  @spec state_with_file_tab_for_path(String.t(), String.t()) :: {EditorState.t(), pid()}
+  defp state_with_file_tab_for_path(path, content) do
+    buf = start_file_buffer(path, content)
+    win_id = 1
+    window = Window.new(win_id, buf, 24, 80)
+
+    state = %EditorState{
+      port_manager: self(),
+      workspace: %WorkspaceState{
+        viewport: Viewport.new(24, 80),
+        editing: VimState.new(),
+        buffers: %Buffers{active: buf, list: [buf], active_index: 0},
+        windows: %Windows{
+          tree: WindowTree.new(win_id),
+          map: %{win_id => window},
+          active: win_id,
+          next_id: win_id + 1
+        }
+      }
+    }
+
+    tab = Tab.new_file(1, Path.basename(path))
+    context = EditorState.snapshot_tab_context(state)
+    tb = TabBar.new(tab)
+    tb = TabBar.update_context(tb, 1, context)
+
+    {EditorState.set_tab_bar(state, tb), buf}
+  end
+
   # Creates a state with an agent tab active and an agent_chat window.
   @spec state_with_agent_tab() :: {EditorState.t(), pid()}
   defp state_with_agent_tab do
@@ -80,6 +109,13 @@ defmodule MingaEditor.State.BufferLifecycleTest do
   @spec start_buffer(String.t()) :: pid()
   defp start_buffer(content) do
     {:ok, pid} = BufferServer.start_link(content: content)
+    pid
+  end
+
+  @spec start_file_buffer(String.t(), String.t()) :: pid()
+  defp start_file_buffer(path, content) do
+    File.write!(path, content)
+    {:ok, pid} = BufferServer.start_link(file_path: path)
     pid
   end
 
@@ -120,6 +156,79 @@ defmodule MingaEditor.State.BufferLifecycleTest do
       # The key invariant is that the new buffer is now active
       assert new_state.workspace.buffers.active == new_buf
       refute new_state.workspace.buffers.active == original_buf
+    end
+
+    test "opening a file from a file tab snapshots the outgoing tab before activating the new buffer" do
+      state = state_with_file_tab()
+      original_buf = state.workspace.buffers.active
+      opened_buf = start_buffer("opened")
+
+      {new_state, effects} = EditorState.add_buffer_pure(state, opened_buf, context: :open)
+
+      assert {:monitor, opened_buf} in effects
+
+      tb = new_state.shell_state.tab_bar
+      assert TabBar.count(tb) == 2
+      assert tb.active_id == 2
+      assert %Buffers{active: ^original_buf} = TabBar.get(tb, 1).context.buffers
+      assert %Buffers{active: ^opened_buf} = TabBar.get(tb, 2).context.buffers
+      assert new_state.workspace.buffers.active == opened_buf
+    end
+
+    test "opening a file from an agent tab snapshots the agent tab with the agent buffer" do
+      {state, agent_buf} = state_with_agent_tab()
+      file_buf = start_buffer("file content")
+
+      {new_state, _effects} = EditorState.add_buffer_pure(state, file_buf, context: :open)
+
+      tb = new_state.shell_state.tab_bar
+      agent_tab = TabBar.get(tb, 1)
+      file_tab = TabBar.active(tb)
+
+      assert agent_tab.kind == :agent
+      assert %Buffers{active: ^agent_buf} = agent_tab.context.buffers
+      assert agent_tab.context.keymap_scope == :agent
+      assert file_tab.kind == :file
+      assert %Buffers{active: ^file_buf} = file_tab.context.buffers
+      assert file_tab.context.keymap_scope == :editor
+    end
+
+    test "previewing a file does not overwrite the current tab context with the preview buffer" do
+      state = state_with_file_tab()
+      original_buf = state.workspace.buffers.active
+      preview_buf = start_buffer("preview")
+
+      {new_state, _effects} = EditorState.add_buffer_pure(state, preview_buf, context: :preview)
+
+      tb = new_state.shell_state.tab_bar
+      assert TabBar.count(tb) == 1
+      assert tb.active_id == 1
+      assert new_state.workspace.buffers.active == preview_buf
+      assert %Buffers{active: ^original_buf} = TabBar.get(tb, 1).context.buffers
+      assert new_state.buffer_add_context == :open
+    end
+
+    @tag :tmp_dir
+    test "opening a file that already has a tab snapshots the outgoing tab before switching", %{
+      tmp_dir: tmp_dir
+    } do
+      path1 = Path.join(tmp_dir, "one.ex")
+      path2 = Path.join(tmp_dir, "two.ex")
+      {state, buf1} = state_with_file_tab_for_path(path1, "one")
+      buf2 = start_file_buffer(path2, "two")
+
+      {state, _effects} = EditorState.add_buffer_pure(state, buf2, context: :open)
+      assert state.workspace.buffers.active == buf2
+
+      {new_state, effects} = EditorState.add_buffer_pure(state, buf1, context: :open)
+
+      assert effects == []
+
+      tb = new_state.shell_state.tab_bar
+      assert tb.active_id == 1
+      assert new_state.workspace.buffers.active == buf1
+      assert %Buffers{active: ^buf1} = TabBar.get(tb, 1).context.buffers
+      assert %Buffers{active: ^buf2} = TabBar.get(tb, 2).context.buffers
     end
 
     test "adds buffer when agent tab active (new file tab)" do

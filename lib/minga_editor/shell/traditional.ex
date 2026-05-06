@@ -138,10 +138,27 @@ defmodule MingaEditor.Shell.Traditional do
   # -------------------------------------------------------------------
 
   @impl true
+  @spec on_buffer_added(
+          ShellState.t(),
+          WorkspaceState.t(),
+          WorkspaceState.t(),
+          pid(),
+          atom()
+        ) :: {ShellState.t(), WorkspaceState.t()}
+  def on_buffer_added(shell_state, prev_workspace, workspace, buffer_pid, context) do
+    do_on_buffer_added(
+      maybe_dismiss_dashboard(shell_state),
+      prev_workspace,
+      workspace,
+      buffer_pid,
+      context
+    )
+  end
+
   @spec on_buffer_added(ShellState.t(), WorkspaceState.t(), pid(), atom()) ::
           {ShellState.t(), WorkspaceState.t()}
   def on_buffer_added(shell_state, workspace, buffer_pid, context \\ :open) do
-    do_on_buffer_added(maybe_dismiss_dashboard(shell_state), workspace, buffer_pid, context)
+    on_buffer_added(shell_state, workspace, workspace, buffer_pid, context)
   end
 
   # Dismisses the dashboard modal when a buffer becomes active. The
@@ -154,10 +171,16 @@ defmodule MingaEditor.Shell.Traditional do
 
   defp maybe_dismiss_dashboard(shell_state), do: shell_state
 
-  @spec do_on_buffer_added(ShellState.t(), WorkspaceState.t(), pid(), atom()) ::
-          {ShellState.t(), WorkspaceState.t()}
+  @spec do_on_buffer_added(
+          ShellState.t(),
+          WorkspaceState.t(),
+          WorkspaceState.t(),
+          pid(),
+          atom()
+        ) :: {ShellState.t(), WorkspaceState.t()}
   defp do_on_buffer_added(
          %ShellState{tab_bar: nil} = shell_state,
+         _prev_workspace,
          workspace,
          _buffer_pid,
          _context
@@ -168,6 +191,7 @@ defmodule MingaEditor.Shell.Traditional do
 
   defp do_on_buffer_added(
          %ShellState{tab_bar: %TabBar{} = tb} = shell_state,
+         prev_workspace,
          workspace,
          buffer_pid,
          context
@@ -180,7 +204,7 @@ defmodule MingaEditor.Shell.Traditional do
 
     case find_tab_for_buffer(tb, label) do
       %Tab{id: tab_id} ->
-        switch_to_buffer_tab(shell_state, workspace, tab_id)
+        switch_to_buffer_tab(shell_state, prev_workspace, workspace, tab_id)
 
       nil ->
         case {context, TabBar.active(tb).kind} do
@@ -192,10 +216,10 @@ defmodule MingaEditor.Shell.Traditional do
             {shell_state, workspace}
 
           {_, :agent} ->
-            open_buffer_from_agent_tab(shell_state, workspace, label)
+            open_buffer_from_agent_tab(shell_state, prev_workspace, workspace, label)
 
           {_, :file} ->
-            open_buffer_in_file_tab(shell_state, workspace, label)
+            open_buffer_in_file_tab(shell_state, prev_workspace, workspace, label)
         end
     end
   end
@@ -353,20 +377,31 @@ defmodule MingaEditor.Shell.Traditional do
   # Switch to an existing file tab that matches the buffer being opened.
   @spec switch_to_buffer_tab(ShellState.t(), WorkspaceState.t(), Tab.id()) ::
           {ShellState.t(), WorkspaceState.t()}
-  defp switch_to_buffer_tab(%ShellState{tab_bar: tb} = shell_state, workspace, target_id) do
+  defp switch_to_buffer_tab(shell_state, workspace, target_id) do
+    switch_to_buffer_tab(shell_state, workspace, workspace, target_id)
+  end
+
+  @spec switch_to_buffer_tab(ShellState.t(), WorkspaceState.t(), WorkspaceState.t(), Tab.id()) ::
+          {ShellState.t(), WorkspaceState.t()}
+  defp switch_to_buffer_tab(
+         %ShellState{tab_bar: tb} = shell_state,
+         prev_workspace,
+         workspace,
+         target_id
+       ) do
     current_id = tb.active_id
 
     if current_id == target_id do
       {shell_state, workspace}
     else
-      # Snapshot current workspace onto outgoing tab
-      context = WorkspaceState.to_tab_context(workspace)
+      # Snapshot the outgoing tab before the buffer-pool mutation that triggered this switch.
+      context = WorkspaceState.to_tab_context(prev_workspace)
       tb = TabBar.update_context(tb, current_id, context)
 
       # Switch pointer and restore target tab's workspace
       tb = TabBar.switch_to(tb, target_id)
       target = TabBar.active(tb)
-      workspace = restore_workspace(workspace, target.context)
+      workspace = WorkspaceState.restore_tab_context(workspace, target.context)
 
       # Clear attention flag on the tab we're switching to
       tb = TabBar.update_tab(tb, target_id, &Tab.set_attention(&1, false))
@@ -378,11 +413,20 @@ defmodule MingaEditor.Shell.Traditional do
 
   # Opens a file buffer when the active tab is an agent tab.
   # Creates a new file tab, resets agent UI state, and syncs the window.
-  @spec open_buffer_from_agent_tab(ShellState.t(), WorkspaceState.t(), String.t()) ::
-          {ShellState.t(), WorkspaceState.t()}
-  defp open_buffer_from_agent_tab(%ShellState{tab_bar: tb} = shell_state, workspace, label) do
+  @spec open_buffer_from_agent_tab(
+          ShellState.t(),
+          WorkspaceState.t(),
+          WorkspaceState.t(),
+          String.t()
+        ) :: {ShellState.t(), WorkspaceState.t()}
+  defp open_buffer_from_agent_tab(
+         %ShellState{tab_bar: tb} = shell_state,
+         prev_workspace,
+         workspace,
+         label
+       ) do
     # Snapshot current agent tab before leaving
-    context = WorkspaceState.to_tab_context(workspace)
+    context = WorkspaceState.to_tab_context(prev_workspace)
     tb = TabBar.update_context(tb, tb.active_id, context)
 
     # Create file tab (TabBar.add auto-activates it)
@@ -405,11 +449,20 @@ defmodule MingaEditor.Shell.Traditional do
   # Opens a file buffer when the active tab is already a file tab.
   # Creates a new file tab and syncs the buffer into the window.
   # Used for permanent opens: file tree, `:e`, picker confirm, LSP jump.
-  @spec open_buffer_in_file_tab(ShellState.t(), WorkspaceState.t(), String.t()) ::
-          {ShellState.t(), WorkspaceState.t()}
-  defp open_buffer_in_file_tab(%ShellState{tab_bar: tb} = shell_state, workspace, label) do
+  @spec open_buffer_in_file_tab(
+          ShellState.t(),
+          WorkspaceState.t(),
+          WorkspaceState.t(),
+          String.t()
+        ) :: {ShellState.t(), WorkspaceState.t()}
+  defp open_buffer_in_file_tab(
+         %ShellState{tab_bar: tb} = shell_state,
+         prev_workspace,
+         workspace,
+         label
+       ) do
     # Snapshot current tab before leaving
-    context = WorkspaceState.to_tab_context(workspace)
+    context = WorkspaceState.to_tab_context(prev_workspace)
     tb = TabBar.update_context(tb, tb.active_id, context)
 
     # Create file tab (TabBar.add auto-activates it)
@@ -422,18 +475,6 @@ defmodule MingaEditor.Shell.Traditional do
 
     {%{shell_state | tab_bar: tb}, workspace}
   end
-
-  @spec restore_workspace(WorkspaceState.t(), map()) :: WorkspaceState.t()
-  defp restore_workspace(workspace, context) when is_map(context) and map_size(context) > 0 do
-    Enum.reduce(WorkspaceState.field_names(), workspace, fn field, acc ->
-      case Map.fetch(context, field) do
-        {:ok, value} -> Map.put(acc, field, value)
-        :error -> acc
-      end
-    end)
-  end
-
-  defp restore_workspace(workspace, _context), do: workspace
 
   # Resets the active window's content type from agent_chat back to buffer.
   @spec reset_active_window_to_buffer(WorkspaceState.t()) :: WorkspaceState.t()

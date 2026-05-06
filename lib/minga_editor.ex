@@ -323,8 +323,7 @@ defmodule MingaEditor do
     # Register a buffer that was started by Buffer.ensure_for_path (called
     # from agent tools or Editor.ensure_buffer_for_path). Only register if
     # the buffer isn't already tracked in the workspace.
-    already_tracked? =
-      Enum.any?(state.workspace.buffers.list, fn {_, bp} -> bp == pid end)
+    already_tracked? = pid in state.workspace.buffers.list
 
     if already_tracked? do
       {:noreply, state}

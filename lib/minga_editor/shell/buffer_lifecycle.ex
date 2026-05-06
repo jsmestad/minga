@@ -24,9 +24,10 @@ defmodule MingaEditor.Shell.BufferLifecycle do
   """
   @type buffer_add_context :: :open | :preview
 
-  @doc "A buffer was added to the workspace."
+  @doc "A buffer was added to the workspace. Receives both the workspace before the buffer-pool mutation and the workspace after it, so shells can snapshot outgoing presentation state without capturing the newly activated buffer."
   @callback on_buffer_added(
               shell_state(),
+              prev_workspace :: workspace(),
               workspace(),
               buffer_pid :: pid(),
               context :: buffer_add_context()

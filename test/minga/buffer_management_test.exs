@@ -10,6 +10,9 @@ defmodule Minga.BufferManagementTest do
 
   use Minga.Test.EditorCase, async: true
 
+  alias MingaEditor.State.Buffers
+  alias MingaEditor.State.TabBar
+
   describe "single buffer baseline" do
     test "editor starts with one buffer" do
       ctx = start_editor("hello")
@@ -32,6 +35,13 @@ defmodule Minga.BufferManagementTest do
       send_keys(ctx, ":e #{path2}<CR>")
 
       assert active_content(ctx) == "second file"
+
+      state = editor_state(ctx)
+      tb = state.shell_state.tab_bar
+      assert %Buffers{active: original_buf} = TabBar.get(tb, 1).context.buffers
+      assert original_buf == ctx.buffer
+      assert %Buffers{active: active_buf} = TabBar.active(tb).context.buffers
+      assert active_buf == state.workspace.buffers.active
     end
 
     @tag :tmp_dir
@@ -70,17 +80,22 @@ defmodule Minga.BufferManagementTest do
       # Now on buffer 3/3 (gamma)
       assert active_content(ctx) == "gamma"
 
+      assert editor_state(ctx).shell_state.tab_bar.active_id == 3
+
       # SPC b n wraps to buffer 1 (alpha)
       send_keys_sync(ctx, "<SPC>bn")
       assert active_content(ctx) == "alpha"
+      assert editor_state(ctx).shell_state.tab_bar.active_id == 1
 
       # SPC b n to buffer 2 (beta)
       send_keys_sync(ctx, "<SPC>bn")
       assert active_content(ctx) == "beta"
+      assert editor_state(ctx).shell_state.tab_bar.active_id == 2
 
       # SPC b p back to buffer 1 (alpha)
       send_keys_sync(ctx, "<SPC>bp")
       assert active_content(ctx) == "alpha"
+      assert editor_state(ctx).shell_state.tab_bar.active_id == 1
     end
 
     @tag :tmp_dir

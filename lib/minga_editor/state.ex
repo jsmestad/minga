@@ -697,7 +697,7 @@ defmodule MingaEditor.State do
 
   Generic concerns (buffer pool) are handled here. Shell-specific
   presentation logic (tab bar, card routing) is dispatched through
-  `shell.on_buffer_added/4`. The only effect returned is `{:monitor, pid}`.
+  `shell.on_buffer_added/5`. The only effect returned is `{:monitor, pid}`.
 
   The buffer-add context is read from `state.buffer_add_context` (set by
   picker preview) or overridden via `opts[:context]`. After dispatch the
@@ -719,11 +719,18 @@ defmodule MingaEditor.State do
         Buffers.add(bs, pid)
       end
 
+    prev_workspace = state.workspace
     state = put_in(state.workspace.buffers, new_bs)
 
     # Dispatch to the active shell for presentation logic
     {shell_state, workspace} =
-      state.shell.on_buffer_added(state.shell_state, state.workspace, pid, context)
+      state.shell.on_buffer_added(
+        state.shell_state,
+        prev_workspace,
+        state.workspace,
+        pid,
+        context
+      )
 
     state = %{state | shell_state: shell_state, workspace: workspace, buffer_add_context: :open}
 
@@ -906,17 +913,7 @@ defmodule MingaEditor.State do
         context
       end
 
-    ws = state.workspace
-
-    new_ws =
-      Enum.reduce(WorkspaceState.field_names(), ws, fn field, acc ->
-        case Map.fetch(context, field) do
-          {:ok, value} -> Map.put(acc, field, value)
-          :error -> acc
-        end
-      end)
-
-    %{state | workspace: new_ws}
+    %{state | workspace: WorkspaceState.restore_tab_context(state.workspace, context)}
   end
 
   # Builds a file-tab context for a brand-new tab. Returns the flat format
