@@ -202,7 +202,7 @@ defmodule MingaEditor.Shell.Traditional do
       "[tab] on_buffer_added label=#{label} context=#{context} tab=#{tb.active_id}"
     end)
 
-    case find_tab_for_buffer(tb, label) do
+    case find_tab_for_buffer(tb, buffer_pid) do
       %Tab{id: tab_id} ->
         switch_to_buffer_tab(shell_state, prev_workspace, workspace, tab_id)
 
@@ -367,10 +367,10 @@ defmodule MingaEditor.Shell.Traditional do
   # Buffer lifecycle helpers
   # -------------------------------------------------------------------
 
-  @spec find_tab_for_buffer(TabBar.t(), String.t()) :: Tab.t() | nil
-  defp find_tab_for_buffer(%TabBar{tabs: tabs}, label) do
+  @spec find_tab_for_buffer(TabBar.t(), pid()) :: Tab.t() | nil
+  defp find_tab_for_buffer(%TabBar{tabs: tabs}, pid) when is_pid(pid) do
     Enum.find(tabs, fn tab ->
-      tab.kind == :file and tab.label == label
+      tab.kind == :file and tab_has_active_buffer?(tab, pid)
     end)
   end
 

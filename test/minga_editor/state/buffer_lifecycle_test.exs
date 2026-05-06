@@ -231,6 +231,31 @@ defmodule MingaEditor.State.BufferLifecycleTest do
       assert %Buffers{active: ^buf2} = TabBar.get(tb, 2).context.buffers
     end
 
+    @tag :tmp_dir
+    test "opening a different file with the same basename creates a distinct tab", %{
+      tmp_dir: tmp_dir
+    } do
+      dir1 = Path.join(tmp_dir, "one")
+      dir2 = Path.join(tmp_dir, "two")
+      File.mkdir_p!(dir1)
+      File.mkdir_p!(dir2)
+      path1 = Path.join(dir1, "same.ex")
+      path2 = Path.join(dir2, "same.ex")
+      {state, buf1} = state_with_file_tab_for_path(path1, "one")
+      buf2 = start_file_buffer(path2, "two")
+
+      {new_state, effects} = EditorState.add_buffer_pure(state, buf2, context: :open)
+
+      assert {:monitor, buf2} in effects
+      tb = new_state.shell_state.tab_bar
+      assert TabBar.count(tb) == 2
+      assert tb.active_id == 2
+      assert TabBar.get(tb, 1).label == "same.ex"
+      assert TabBar.get(tb, 2).label == "same.ex"
+      assert %Buffers{active: ^buf1} = TabBar.get(tb, 1).context.buffers
+      assert %Buffers{active: ^buf2} = TabBar.get(tb, 2).context.buffers
+    end
+
     test "adds buffer when agent tab active (new file tab)" do
       {state, _agent_buf} = state_with_agent_tab()
       file_buf = start_buffer("file content")

@@ -2,10 +2,7 @@ defmodule MingaEditor.Shell.BufferLifecycle do
   @moduledoc """
   Behaviour: shell-side reactions to buffer and agent events.
 
-  Carved out of `MingaEditor.Shell`. Callbacks receive
-  `(shell_state, workspace, ...)` — never full EditorState — so they
-  cannot touch process monitors, render timers, or port managers.
-  Generic concerns stay in EditorState.
+  Carved out of `MingaEditor.Shell`. Callbacks receive shell state and workspace values, never full EditorState, so they cannot touch process monitors, render timers, or port managers. Generic concerns stay in EditorState.
   """
 
   @typedoc "Shell-specific state. Each shell defines its own struct."

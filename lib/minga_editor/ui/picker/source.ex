@@ -120,7 +120,7 @@ defmodule MingaEditor.UI.Picker.Source do
   """
   @spec preview?(module()) :: boolean()
   def preview?(module) do
-    if function_exported?(module, :preview?, 0) do
+    if exported?(module, :preview?, 0) do
       module.preview?()
     else
       false
@@ -132,7 +132,7 @@ defmodule MingaEditor.UI.Picker.Source do
   """
   @spec has_actions?(module()) :: boolean()
   def has_actions?(module) do
-    function_exported?(module, :actions, 1) and function_exported?(module, :on_action, 3)
+    exported?(module, :actions, 1) and exported?(module, :on_action, 3)
   end
 
   @doc """
@@ -152,7 +152,7 @@ defmodule MingaEditor.UI.Picker.Source do
   """
   @spec layout(module()) :: layout()
   def layout(module) do
-    if function_exported?(module, :layout, 0) do
+    if exported?(module, :layout, 0) do
       module.layout()
     else
       :bottom
@@ -164,10 +164,15 @@ defmodule MingaEditor.UI.Picker.Source do
   """
   @spec keep_open_on_select?(module()) :: boolean()
   def keep_open_on_select?(module) do
-    if function_exported?(module, :keep_open_on_select?, 0) do
+    if exported?(module, :keep_open_on_select?, 0) do
       module.keep_open_on_select?()
     else
       false
     end
+  end
+
+  @spec exported?(module(), atom(), non_neg_integer()) :: boolean()
+  defp exported?(module, function, arity) do
+    Code.ensure_loaded?(module) and function_exported?(module, function, arity)
   end
 end
