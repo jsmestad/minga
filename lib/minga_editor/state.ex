@@ -33,7 +33,6 @@ defmodule MingaEditor.State do
   alias Minga.Buffer
 
   alias MingaEditor.BottomPanel
-  alias MingaEditor.CompletionTrigger
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.LSP, as: LSPState
@@ -894,7 +893,7 @@ defmodule MingaEditor.State do
 
   @spec snapshot_workspace_fields(WorkspaceState.t()) :: Tab.context()
   defp snapshot_workspace_fields(%WorkspaceState{} = ws) do
-    Map.from_struct(ws)
+    WorkspaceState.to_tab_context(ws)
   end
 
   @doc """
@@ -956,8 +955,6 @@ defmodule MingaEditor.State do
       mouse: %Mouse{},
       highlight: %Highlighting{},
       lsp_pending: %{},
-      completion: nil,
-      completion_trigger: CompletionTrigger.new(),
       injection_ranges: %{},
       search: %Search{},
       editing: VimState.new(),
@@ -988,8 +985,6 @@ defmodule MingaEditor.State do
       mouse: %Mouse{},
       highlight: %Highlighting{},
       lsp_pending: %{},
-      completion: nil,
-      completion_trigger: CompletionTrigger.new(),
       injection_ranges: %{},
       search: %Search{},
       editing: VimState.new(),

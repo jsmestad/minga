@@ -125,8 +125,7 @@ defmodule Minga.BufferManagementTest do
       send_keys_sync(ctx, "<SPC>bp")
       send_keys_sync(ctx, "<SPC>bn")
 
-      # Editor still alive and processing keys.
-      assert Process.alive?(ctx.editor)
+      # The synchronous content query proves the editor is still alive and processing keys.
       assert active_content(ctx) in ["alpha", "beta", "gamma"]
     end
 
