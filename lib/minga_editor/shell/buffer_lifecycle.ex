@@ -2,10 +2,7 @@ defmodule MingaEditor.Shell.BufferLifecycle do
   @moduledoc """
   Behaviour: shell-side reactions to buffer and agent events.
 
-  Carved out of `MingaEditor.Shell`. Callbacks receive
-  `(shell_state, workspace, ...)` — never full EditorState — so they
-  cannot touch process monitors, render timers, or port managers.
-  Generic concerns stay in EditorState.
+  Carved out of `MingaEditor.Shell`. Callbacks receive shell state and workspace values, never full EditorState, so they cannot touch process monitors, render timers, or port managers. Generic concerns stay in EditorState.
   """
 
   @typedoc "Shell-specific state. Each shell defines its own struct."
@@ -24,9 +21,10 @@ defmodule MingaEditor.Shell.BufferLifecycle do
   """
   @type buffer_add_context :: :open | :preview
 
-  @doc "A buffer was added to the workspace."
+  @doc "A buffer was added to the workspace. Receives both the workspace before the buffer-pool mutation and the workspace after it, so shells can snapshot outgoing presentation state without capturing the newly activated buffer."
   @callback on_buffer_added(
               shell_state(),
+              prev_workspace :: workspace(),
               workspace(),
               buffer_pid :: pid(),
               context :: buffer_add_context()

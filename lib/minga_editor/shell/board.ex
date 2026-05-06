@@ -411,13 +411,24 @@ defmodule MingaEditor.Shell.Board do
   # -------------------------------------------------------------------
 
   @impl true
-  @spec on_buffer_added(BoardState.t(), MingaEditor.Workspace.State.t(), pid(), atom()) ::
-          {BoardState.t(), MingaEditor.Workspace.State.t()}
-  def on_buffer_added(shell_state, workspace, _buffer_pid, _context \\ :open) do
+  @spec on_buffer_added(
+          BoardState.t(),
+          MingaEditor.Workspace.State.t(),
+          MingaEditor.Workspace.State.t(),
+          pid(),
+          atom()
+        ) :: {BoardState.t(), MingaEditor.Workspace.State.t()}
+  def on_buffer_added(shell_state, _prev_workspace, workspace, _buffer_pid, _context) do
     # Board: sync the active window buffer. A1's content-type guard
     # ensures agent_chat windows are left untouched.
     workspace = MingaEditor.Workspace.State.sync_active_window_buffer(workspace)
     {shell_state, workspace}
+  end
+
+  @spec on_buffer_added(BoardState.t(), MingaEditor.Workspace.State.t(), pid(), atom()) ::
+          {BoardState.t(), MingaEditor.Workspace.State.t()}
+  def on_buffer_added(shell_state, workspace, buffer_pid, context \\ :open) do
+    on_buffer_added(shell_state, workspace, workspace, buffer_pid, context)
   end
 
   @impl true

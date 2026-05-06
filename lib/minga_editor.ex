@@ -323,8 +323,7 @@ defmodule MingaEditor do
     # Register a buffer that was started by Buffer.ensure_for_path (called
     # from agent tools or Editor.ensure_buffer_for_path). Only register if
     # the buffer isn't already tracked in the workspace.
-    already_tracked? =
-      Enum.any?(state.workspace.buffers.list, fn {_, bp} -> bp == pid end)
+    already_tracked? = buffer_tracked?(state, pid)
 
     if already_tracked? do
       {:noreply, state}
@@ -1605,6 +1604,21 @@ defmodule MingaEditor do
 
     state
   end
+
+  @spec buffer_tracked?(state(), pid()) :: boolean()
+  defp buffer_tracked?(state, pid) when is_pid(pid) do
+    pid in state.workspace.buffers.list or buffer_tracked_in_tabs?(state, pid)
+  end
+
+  @spec buffer_tracked_in_tabs?(state(), pid()) :: boolean()
+  defp buffer_tracked_in_tabs?(%{shell_state: %{tab_bar: %{tabs: tabs}}}, pid) do
+    Enum.any?(tabs, fn
+      %{context: %{buffers: %{list: buffers}}} -> pid in buffers
+      _ -> false
+    end)
+  end
+
+  defp buffer_tracked_in_tabs?(_state, _pid), do: false
 
   # Like register_buffer but adds the buffer in the background without
   # switching the active window. Used by ensure_buffer_for_path so agent

@@ -9,9 +9,8 @@ defmodule MingaEditor.State.Tab do
 
   ## Context format
 
-  The canonical context is a flat map with per-tab fields (buffers, windows,
-  vim state, viewport, etc.) stored directly. Legacy contexts with nested
-  structure are auto-migrated on first restore.
+  The canonical context is a flat map with workspace fields (buffers, windows,
+  editing state, viewport, etc.) stored directly. Restore reads only fields that exist on `MingaEditor.Workspace.State`; unknown legacy fields are ignored.
   """
 
   # Tab contexts store per-tab fields directly as flat maps.
@@ -37,8 +36,6 @@ defmodule MingaEditor.State.Tab do
           optional(:mouse) => term(),
           optional(:highlight) => term(),
           optional(:lsp_pending) => term(),
-          optional(:completion) => term(),
-          optional(:completion_trigger) => term(),
           optional(:injection_ranges) => term(),
           optional(:search) => term(),
           optional(:editing) => MingaEditor.VimState.t(),

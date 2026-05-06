@@ -9,7 +9,7 @@ defmodule MingaEditor.Shell do
   - `MingaEditor.Shell.Chrome`           — `build_chrome/4`, `render/1`
   - `MingaEditor.Shell.InputRouter`      — `input_handlers/1`,
     `handle_event/3`, `handle_gui_action/3`
-  - `MingaEditor.Shell.BufferLifecycle`  — `on_buffer_added/4`,
+  - `MingaEditor.Shell.BufferLifecycle`  — `on_buffer_added/5`,
     `on_buffer_switched/2`, `on_buffer_died/3`, `on_agent_event/4`
   - `MingaEditor.Shell.TabQueries`       — `active_tab/1`,
     `find_tab_by_buffer/2`, `active_tab_kind/1`, `set_tab_session/3`,

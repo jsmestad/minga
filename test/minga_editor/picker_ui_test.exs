@@ -1,18 +1,76 @@
 defmodule MingaEditor.PickerUITest do
-  @moduledoc "Tests PickerUI.render with focused RenderInput (no EditorState needed)."
+  @moduledoc "Tests PickerUI rendering and picker-state transitions."
 
   use ExUnit.Case, async: true
 
+  alias Minga.Buffer.Server, as: BufferServer
   alias MingaEditor.PickerUI
   alias MingaEditor.PickerUI.RenderInput
+  alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Buffers
+  alias MingaEditor.State.ModalOverlay.Picker, as: PickerPayload
   alias MingaEditor.State.Picker, as: PickerState
-  alias MingaEditor.Viewport
+  alias MingaEditor.State.Tab
+  alias MingaEditor.State.TabBar
+  alias MingaEditor.State.Windows
+  alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.UI.Picker
   alias MingaEditor.UI.Picker.Item
   alias MingaEditor.UI.Theme
+  alias MingaEditor.Viewport
+  alias MingaEditor.VimState
+  alias MingaEditor.Window
+  alias MingaEditor.WindowTree
+  alias MingaEditor.Workspace.State, as: WorkspaceState
 
   defp theme_picker do
     Theme.get!(:doom_one).picker
+  end
+
+  defp preview_promotion_state do
+    {:ok, original_buf} = BufferServer.start_link(content: "original")
+    {:ok, preview_buf} = BufferServer.start_link(content: "preview")
+    win_id = 1
+    original_window = Window.new(win_id, original_buf, 24, 80)
+    preview_window = %{original_window | buffer: preview_buf, content: {:buffer, preview_buf}}
+
+    original_workspace = %WorkspaceState{
+      viewport: Viewport.new(24, 80),
+      editing: VimState.new(),
+      buffers: %Buffers{active: original_buf, list: [original_buf], active_index: 0},
+      windows: %Windows{
+        tree: WindowTree.new(win_id),
+        map: %{win_id => original_window},
+        active: win_id,
+        next_id: win_id + 1
+      }
+    }
+
+    preview_workspace = %{
+      original_workspace
+      | buffers: %Buffers{active: preview_buf, list: [original_buf, preview_buf], active_index: 1},
+        windows: %{original_workspace.windows | map: %{win_id => preview_window}}
+    }
+
+    tab = Tab.new_file(1, "original.ex")
+    tb = TabBar.new(tab)
+    tb = TabBar.update_context(tb, 1, WorkspaceState.to_tab_context(original_workspace))
+
+    picker = Picker.new([%Item{id: "preview", label: "preview.ex"}], title: "Files")
+
+    picker_state = %PickerState{
+      picker: picker,
+      source: MingaEditor.UI.Picker.FileSource,
+      restore: 0
+    }
+
+    state = %EditorState{
+      port_manager: self(),
+      workspace: preview_workspace,
+      shell_state: %ShellState{tab_bar: tb, modal: {:picker, PickerPayload.new(picker_state)}}
+    }
+
+    {state, original_buf, preview_buf}
   end
 
   describe "render/1 with RenderInput" do
@@ -84,6 +142,21 @@ defmodule MingaEditor.PickerUITest do
         assert is_binary(text)
         assert %Minga.Core.Face{} = style
       end)
+    end
+  end
+
+  describe "preview promotion" do
+    test "restores the original tab before creating the promoted preview tab" do
+      {state, original_buf, preview_buf} = preview_promotion_state()
+
+      new_state = PickerUI.handle_key(state, 13, 0)
+
+      tb = new_state.shell_state.tab_bar
+      assert new_state.shell_state.modal == :none
+      assert TabBar.count(tb) == 2
+      assert %Buffers{active: ^original_buf} = TabBar.get(tb, 1).context.buffers
+      assert %Buffers{active: ^preview_buf} = TabBar.get(tb, 2).context.buffers
+      assert new_state.workspace.buffers.active == preview_buf
     end
   end
 

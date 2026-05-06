@@ -419,8 +419,11 @@ defmodule MingaEditor.PickerUI do
   @spec promote_previewed_buffer(EditorState.t()) :: EditorState.t()
   defp promote_previewed_buffer(state) do
     previewed_pid = state.workspace.buffers.active
-    new_state = close(state)
-    EditorState.add_buffer(new_state, previewed_pid, context: :open)
+
+    state
+    |> restore_picker_origin()
+    |> close()
+    |> EditorState.add_buffer(previewed_pid, context: :open)
   end
 
   @spec run_select_and_close(EditorState.t(), Picker.item(), module()) ::
@@ -894,8 +897,19 @@ defmodule MingaEditor.PickerUI do
 
   # ── Private helpers ──────────────────────────────────────────────────────────
 
-  # Preview: temporarily apply the source's on_select for the highlighted item.
-  # Sets buffer_add_context to :preview so any add_buffer calls inside
+  # Restores the buffer that was active when the picker opened before promoting a preview.
+  # Preview leaves the tab bar unchanged, so the outgoing tab must be snapshotted from
+  # the original buffer, not the preview buffer currently shown in the window.
+  @spec restore_picker_origin(state()) :: state()
+  defp restore_picker_origin(
+         %{shell_state: %{modal: {:picker, %{picker_ui: %{restore: idx}}}}} = state
+       )
+       when is_integer(idx) do
+    EditorState.switch_buffer(state, idx)
+  end
+
+  defp restore_picker_origin(state), do: state
+
   # Returns true when preview navigation changed the active buffer from
   # what it was when the picker opened (stored in the picker payload's `restore` field).
   @spec previewed?(state()) :: boolean()
@@ -909,7 +923,9 @@ defmodule MingaEditor.PickerUI do
 
   defp previewed?(_state), do: false
 
-  # on_select update the current tab in-place instead of creating a new tab.
+  # Preview: temporarily apply the source's on_select for the highlighted item.
+  # Sets buffer_add_context to :preview so add_buffer calls inside on_select update
+  # the current tab in-place instead of creating a new tab.
   @spec maybe_preview_selection(state()) :: state()
   defp maybe_preview_selection(
          %{shell_state: %{modal: {:picker, %{picker_ui: %{picker: picker, source: source}}}}} =

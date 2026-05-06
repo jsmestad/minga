@@ -597,42 +597,70 @@ defmodule MingaEditor.Commands.BufferManagement do
   defp switch_to_buffer(state, idx), do: EditorState.switch_buffer(state, idx)
 
   @spec next_buffer(state()) :: state()
-  defp next_buffer(
-         %{workspace: %{buffers: %{list: [_, _ | _] = buffers, active_index: idx}}} = state
-       ) do
-    cycle_buffer_in_tab(state, rem(idx + 1, Enum.count(buffers)))
+  defp next_buffer(%{workspace: %{buffers: %{active: active, list: buffers}}} = state) do
+    buffers
+    |> buffer_cycle_order(state)
+    |> cycle_buffer_from_active(state, active, 1)
   end
 
   defp next_buffer(state), do: state
 
   @spec prev_buffer(state()) :: state()
-  defp prev_buffer(
-         %{workspace: %{buffers: %{list: [_, _ | _] = buffers, active_index: idx}}} = state
-       ) do
-    count = Enum.count(buffers)
-    cycle_buffer_in_tab(state, rem(idx - 1 + count, count))
+  defp prev_buffer(%{workspace: %{buffers: %{active: active, list: buffers}}} = state) do
+    buffers
+    |> buffer_cycle_order(state)
+    |> cycle_buffer_from_active(state, active, -1)
   end
 
   defp prev_buffer(state), do: state
 
-  # Cycles to the buffer at `idx`. If that buffer has its own dedicated
-  # file tab, switches to that tab so the tab bar tracks what the user
-  # sees; otherwise switches in-place inside the current tab. This keeps
-  # `SPC b n` / `SPC b p` consistent with the per-tab snapshot model:
-  # each open file should normally live in its own tab, and cycling
-  # buffers should move tab focus accordingly.
-  @spec cycle_buffer_in_tab(state(), non_neg_integer()) :: state()
-  defp cycle_buffer_in_tab(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, idx) do
-    target_buf = Enum.at(state.workspace.buffers.list, idx)
+  # Cycles through the current tab's buffer list plus active buffers from dedicated file tabs.
+  # Dedicated targets switch tab focus; inline targets switch in-place inside the current tab.
+  @spec cycle_buffer_from_active([pid()], state(), pid() | nil, 1 | -1) :: state()
+  defp cycle_buffer_from_active([_, _ | _] = buffers, state, active, step) do
+    active_index = Enum.find_index(buffers, &(&1 == active)) || 0
+    target_index = rem(active_index + step + length(buffers), length(buffers))
+    cycle_buffer_in_tab(state, Enum.at(buffers, target_index))
+  end
 
+  defp cycle_buffer_from_active(_buffers, state, _active, _step), do: state
+
+  @spec buffer_cycle_order([pid()], state()) :: [pid()]
+  defp buffer_cycle_order(buffers, %{shell_state: %{tab_bar: %TabBar{} = tb}}) do
+    tab_buffers = file_tab_buffers(tb)
+    buffers ++ Enum.reject(tab_buffers, &(&1 in buffers))
+  end
+
+  defp buffer_cycle_order(buffers, _state), do: buffers
+
+  @spec file_tab_buffers(TabBar.t()) :: [pid()]
+  defp file_tab_buffers(%TabBar{tabs: tabs}) do
+    Enum.flat_map(tabs, fn
+      %{kind: :file, context: %{buffers: %{active: pid}}} when is_pid(pid) -> [pid]
+      _ -> []
+    end)
+  end
+
+  @spec cycle_buffer_in_tab(state(), pid() | nil) :: state()
+  defp cycle_buffer_in_tab(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, target_buf) do
     case find_tab_for_buffer(tb, target_buf) do
-      nil -> EditorState.switch_buffer(state, idx)
-      tab_id when tab_id == tb.active_id -> EditorState.switch_buffer(state, idx)
+      nil -> switch_to_buffer_pid(state, target_buf)
+      tab_id when tab_id == tb.active_id -> switch_to_buffer_pid(state, target_buf)
       tab_id -> EditorState.switch_tab(state, tab_id)
     end
   end
 
-  defp cycle_buffer_in_tab(state, idx), do: EditorState.switch_buffer(state, idx)
+  defp cycle_buffer_in_tab(state, target_buf), do: switch_to_buffer_pid(state, target_buf)
+
+  @spec switch_to_buffer_pid(state(), pid() | nil) :: state()
+  defp switch_to_buffer_pid(state, nil), do: state
+
+  defp switch_to_buffer_pid(%{workspace: %{buffers: %{list: buffers}}} = state, target_buf) do
+    case Enum.find_index(buffers, &(&1 == target_buf)) do
+      nil -> state
+      idx -> EditorState.switch_buffer(state, idx)
+    end
+  end
 
   # Finds the file tab whose snapshotted context has `target_buf` as the
   # active buffer. Returns `nil` when no tab matches (the buffer was
@@ -733,6 +761,7 @@ defmodule MingaEditor.Commands.BufferManagement do
       MingaEditor.log_to_messages("Closed: #{buf_name}")
 
       new_buffers = List.delete_at(buffers, idx)
+      had_neighbor_tab? = has_neighbor_tab?(state)
 
       # Remove the current tab from the tab bar (if present).
       # TabBar.remove handles neighbor selection.
@@ -740,7 +769,7 @@ defmodule MingaEditor.Commands.BufferManagement do
 
       case new_buffers do
         [] ->
-          create_fallback_buffer(state, bs)
+          restore_neighbor_tab_or_create_fallback(state, bs, had_neighbor_tab?)
 
         _ ->
           new_idx = min(idx, Enum.count(new_buffers) - 1)
@@ -1060,6 +1089,29 @@ defmodule MingaEditor.Commands.BufferManagement do
     state
     |> remove_current_tab()
     |> restore_active_tab_context()
+  end
+
+  @spec has_neighbor_tab?(state()) :: boolean()
+  defp has_neighbor_tab?(%{shell_state: %{tab_bar: %TabBar{tabs: [_, _ | _]}}}), do: true
+  defp has_neighbor_tab?(_state), do: false
+
+  @spec restore_neighbor_tab_or_create_fallback(
+          state(),
+          MingaEditor.State.Buffers.t(),
+          boolean()
+        ) :: state()
+  defp restore_neighbor_tab_or_create_fallback(state, _old_buffers, true) do
+    state = restore_active_tab_context(state)
+
+    if state.workspace.buffers.active do
+      EditorState.sync_active_window_buffer(state)
+    else
+      create_fallback_buffer(state, state.workspace.buffers)
+    end
+  end
+
+  defp restore_neighbor_tab_or_create_fallback(state, old_buffers, false) do
+    create_fallback_buffer(state, old_buffers)
   end
 
   @spec remove_current_tab(state()) :: state()

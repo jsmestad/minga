@@ -62,6 +62,17 @@ defmodule MingaEditor.State.SnapshotTest do
       assert ctx.injection_ranges == state.workspace.injection_ranges
       assert ctx.search == state.workspace.search
     end
+
+    test "normalises transient editing state before snapshotting" do
+      state = make_state(mode: :normal)
+      command_state = %Mode.CommandState{input: ""}
+      state = put_in(state.workspace.editing, %VimState{mode: :normal, mode_state: command_state})
+
+      ctx = EditorState.snapshot_tab_context(state)
+
+      assert ctx.editing.mode == :normal
+      assert match?(%Mode.State{}, ctx.editing.mode_state)
+    end
   end
 
   describe "restore_tab_context/2" do

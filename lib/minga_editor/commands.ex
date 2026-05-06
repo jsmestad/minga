@@ -552,13 +552,19 @@ defmodule MingaEditor.Commands do
 
   # ── Public buffer helpers (called directly from Editor) ───────────────────
 
-  @doc "Starts a new buffer process for the given file path."
+  @doc "Returns the existing buffer for a file path, or starts one if needed."
   @spec start_buffer(String.t()) :: {:ok, pid()} | {:error, term()}
   def start_buffer(file_path) do
-    DynamicSupervisor.start_child(
-      Minga.Buffer.Supervisor,
-      {Minga.Buffer, file_path: file_path}
-    )
+    case Buffer.pid_for_path(file_path) do
+      {:ok, pid} ->
+        {:ok, pid}
+
+      :not_found ->
+        DynamicSupervisor.start_child(
+          Minga.Buffer.Supervisor,
+          {Minga.Buffer, file_path: file_path}
+        )
+    end
   end
 
   @doc "Adds a new buffer to the list and makes it active."
