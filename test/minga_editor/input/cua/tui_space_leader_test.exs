@@ -35,7 +35,7 @@ defmodule MingaEditor.Input.CUA.TUISpaceLeaderTest do
       send_key_sync(ctx, 0x20)
 
       state = editor_state(ctx)
-      assert state.space_leader_pending == true
+      assert state.shell_state.space_leader_pending == true
 
       # Send 'f' (leader prefix for +file)
       send_key_sync(ctx, ?f)
@@ -44,7 +44,7 @@ defmodule MingaEditor.Input.CUA.TUISpaceLeaderTest do
       # Leader mode should be active
       assert state.shell_state.whichkey.node != nil
       # Space should have been retracted
-      assert state.space_leader_pending == false
+      assert state.shell_state.space_leader_pending == false
       refute String.ends_with?(buffer_content(ctx), " ")
     end
   end
@@ -57,14 +57,14 @@ defmodule MingaEditor.Input.CUA.TUISpaceLeaderTest do
       send_key_sync(ctx, 0x20)
 
       state = editor_state(ctx)
-      assert state.space_leader_pending == true
+      assert state.shell_state.space_leader_pending == true
 
       # Send timeout directly (per AGENTS.md: send timer messages directly)
       send(ctx.editor, :space_leader_timeout)
       _ = :sys.get_state(ctx.editor)
 
       state = editor_state(ctx)
-      assert state.space_leader_pending == false
+      assert state.shell_state.space_leader_pending == false
       # Space should remain in buffer
       assert buffer_content(ctx) == " "
     end
@@ -79,7 +79,7 @@ defmodule MingaEditor.Input.CUA.TUISpaceLeaderTest do
       send_key_sync(ctx, ?!)
 
       state = editor_state(ctx)
-      assert state.space_leader_pending == false
+      assert state.shell_state.space_leader_pending == false
       # Space stays in buffer, '!' passes through to CUA.Dispatch
       assert String.starts_with?(buffer_content(ctx), " ")
     end
@@ -112,7 +112,7 @@ defmodule MingaEditor.Input.CUA.TUISpaceLeaderTest do
       send_key_sync(ctx, 0x20)
 
       state = editor_state(ctx)
-      assert state.space_leader_pending == false
+      assert state.shell_state.space_leader_pending == false
     end
   end
 end

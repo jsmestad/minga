@@ -50,7 +50,9 @@ defmodule MingaEditor.Shell.Board.State do
           signature_help: nil,
           tool_declined: MapSet.t(),
           tool_prompt_queue: [atom()],
-          suppress_tool_prompts: boolean()
+          suppress_tool_prompts: boolean(),
+          space_leader_pending: boolean(),
+          space_leader_timer: nil
         }
 
   defstruct cards: %{},
@@ -76,7 +78,9 @@ defmodule MingaEditor.Shell.Board.State do
             signature_help: nil,
             tool_declined: MapSet.new(),
             tool_prompt_queue: [],
-            suppress_tool_prompts: false
+            suppress_tool_prompts: false,
+            space_leader_pending: false,
+            space_leader_timer: nil
 
   @doc "Creates a fresh Board state with an empty card grid."
   @spec new() :: t()

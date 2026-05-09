@@ -17,8 +17,7 @@ defmodule MingaEditor.State do
 
   **Global fields** are shared across all tabs and never snapshotted:
   `port_manager`, `theme`, `render_timer`, `focus_stack`,
-  `tab_bar`, `capabilities`, `layout`, `modeline_click_regions`,
-  `tab_bar_click_regions`, `agent`, `whichkey`.
+  `capabilities`.
 
   ## Composed sub-structs
 
@@ -111,8 +110,6 @@ defmodule MingaEditor.State do
             caches: MingaEditor.Renderer.Caches.new(),
             session: %SessionState{},
             buffer_add_context: :open,
-            space_leader_pending: false,
-            space_leader_timer: nil,
             stashed_board_state: nil
 
   @type backend :: :tui | :native_gui | :headless
@@ -149,8 +146,6 @@ defmodule MingaEditor.State do
           caches: MingaEditor.Renderer.Caches.t(),
           buffer_add_context: MingaEditor.Shell.buffer_add_context(),
           session: SessionState.t(),
-          space_leader_pending: boolean(),
-          space_leader_timer: reference() | nil,
           stashed_board_state: MingaEditor.Shell.Board.State.t() | nil
         }
 
