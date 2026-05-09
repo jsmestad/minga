@@ -8,17 +8,28 @@ defmodule MingaAgent.Tools.Subagent do
   alias MingaAgent.Session
   alias MingaAgent.SessionManager
   alias MingaAgent.Subagent.Handle
+  alias MingaAgent.SubagentContext
   alias MingaAgent.Supervisor, as: AgentSupervisor
+
+  @typedoc "Provider override accepted by direct callers and the tool schema."
+  @type provider_override :: :native | :pi_rpc | module() | String.t() | nil
+
+  @typedoc "Context inherited from the parent agent session."
+  @type parent_context :: SubagentContext.t()
+
+  @typedoc "Resolved provider for a child session."
+  @type resolved_provider :: %{module: module(), name: String.t()}
 
   @typedoc "Options for subagent execution."
   @type opts :: [
           model: String.t() | nil,
+          provider: provider_override(),
+          parent_session: GenServer.server() | nil,
           project_root: String.t() | nil,
-          background: boolean(),
-          parent_session: pid() | nil,
-          provider: module(),
           provider_opts: keyword(),
-          session_manager: GenServer.server()
+          background: boolean(),
+          session_manager: GenServer.server(),
+          notifier: module() | {module(), term()}
         ]
 
   @subagent_timeout_ms 300_000
@@ -144,19 +155,52 @@ defmodule MingaAgent.Tools.Subagent do
     :exit, _ -> :ok
   end
 
+  # ── Session opts (shared by foreground and background) ─────────────────────
+
   @spec session_opts(opts()) :: keyword()
   defp session_opts(opts) do
-    project_root = Keyword.get(opts, :project_root, detect_project_root())
-    model = Keyword.get(opts, :model)
-    provider = Keyword.get(opts, :provider, MingaAgent.Providers.Native)
+    parent_ctx = parent_context(opts)
 
-    provider_opts =
-      opts
-      |> Keyword.get(:provider_opts, [])
-      |> Keyword.merge(build_provider_opts(project_root, model))
+    case resolve_provider(Keyword.get(opts, :provider), parent_ctx) do
+      {:ok, resolved_provider} ->
+        model = Keyword.get(opts, :model) || parent_ctx.model
 
-    [provider: provider, provider_opts: provider_opts, model_name: model || "unknown"]
-    |> maybe_put_notifier(opts)
+        project_root =
+          Keyword.get(opts, :project_root) || parent_ctx.project_root || detect_project_root()
+
+        thinking_level = parent_ctx.thinking_level
+        active_skill_names = parent_ctx.active_skill_names
+        extra_provider_opts = Keyword.get(opts, :provider_opts, [])
+
+        [
+          provider: resolved_provider.module,
+          model_name: model || "unknown",
+          startup_notice:
+            startup_notice(
+              Keyword.get(opts, :provider),
+              Keyword.get(opts, :model),
+              resolved_provider,
+              model
+            ),
+          provider_opts:
+            build_provider_opts(
+              project_root,
+              resolved_provider.name,
+              model,
+              thinking_level,
+              active_skill_names,
+              extra_provider_opts
+            )
+        ]
+        |> maybe_put_thinking_level(thinking_level)
+        |> maybe_put_notifier(opts)
+
+      {:error, reason} ->
+        # Fall back to a minimal opts that will produce a clear error at session start.
+        # This path is unlikely since resolve_provider only fails for unknown string overrides.
+        Minga.Log.warning(:agent, "[Subagent] provider resolution failed: #{reason}")
+        [provider: MingaAgent.Providers.Native, model_name: "unknown", provider_opts: []]
+    end
   end
 
   @spec maybe_put_notifier(keyword(), opts()) :: keyword()
@@ -167,24 +211,137 @@ defmodule MingaAgent.Tools.Subagent do
     end
   end
 
-  @spec build_provider_opts(String.t(), String.t() | nil) :: keyword()
-  defp build_provider_opts(project_root, model) do
-    opts = [
-      project_root: project_root,
-      provider: "native"
-    ]
-
-    if model do
-      [{:model, model} | opts]
-    else
-      opts
-    end
-  end
-
   @spec background_result(Handle.t()) :: String.t()
   defp background_result(%Handle{} = handle) do
     "Background subagent started. Handle: #{Handle.id(handle)}. Use the agent session picker to inspect its chat."
   end
+
+  # ── Context inheritance ────────────────────────────────────────────────────
+
+  @spec parent_context(opts()) :: parent_context()
+  defp parent_context(opts) do
+    case Keyword.get(opts, :parent_session) do
+      nil -> default_parent_context()
+      parent_session -> fetch_parent_context(parent_session)
+    end
+  end
+
+  @spec fetch_parent_context(GenServer.server()) :: parent_context()
+  defp fetch_parent_context(parent_session) do
+    Session.subagent_context(parent_session)
+  catch
+    :exit, {reason, _} ->
+      Minga.Log.warning(
+        :agent,
+        "[Subagent] parent session #{inspect(parent_session)} unreachable: #{inspect(reason)}"
+      )
+
+      default_parent_context()
+
+    :exit, reason ->
+      Minga.Log.warning(
+        :agent,
+        "[Subagent] parent session #{inspect(parent_session)} unreachable: #{inspect(reason)}"
+      )
+
+      default_parent_context()
+  end
+
+  @spec default_parent_context() :: parent_context()
+  defp default_parent_context do
+    SubagentContext.default()
+  end
+
+  @spec resolve_provider(provider_override(), parent_context()) ::
+          {:ok, resolved_provider()} | {:error, String.t()}
+  defp resolve_provider(nil, parent_context) do
+    {:ok, %{module: parent_context.provider_module, name: parent_context.provider_name}}
+  end
+
+  defp resolve_provider(:native, _parent_context) do
+    {:ok, %{module: MingaAgent.Providers.Native, name: "native"}}
+  end
+
+  defp resolve_provider(:pi_rpc, _parent_context) do
+    {:ok, %{module: MingaAgent.Providers.PiRpc, name: "pi_rpc"}}
+  end
+
+  defp resolve_provider(provider, _parent_context) when is_atom(provider) do
+    {:ok, %{module: provider, name: inspect(provider)}}
+  end
+
+  defp resolve_provider("native", parent_context), do: resolve_provider(:native, parent_context)
+  defp resolve_provider("pi_rpc", parent_context), do: resolve_provider(:pi_rpc, parent_context)
+
+  defp resolve_provider(provider, _parent_context) do
+    {:error, "Unknown subagent provider override: #{inspect(provider)}"}
+  end
+
+  @spec build_provider_opts(
+          String.t(),
+          String.t(),
+          String.t() | nil,
+          String.t() | nil,
+          [String.t()],
+          keyword()
+        ) :: keyword()
+  defp build_provider_opts(
+         project_root,
+         provider_name,
+         model,
+         thinking_level,
+         active_skill_names,
+         extra_provider_opts
+       ) do
+    [project_root: project_root, provider: provider_name]
+    |> maybe_put(:model, model)
+    |> maybe_put(:thinking_level, thinking_level)
+    |> maybe_put_active_skill_names(active_skill_names)
+    |> Keyword.merge(Keyword.delete(extra_provider_opts, :subscriber))
+  end
+
+  @spec maybe_put(keyword(), atom(), term()) :: keyword()
+  defp maybe_put(opts, _key, nil), do: opts
+  defp maybe_put(opts, key, value), do: Keyword.put(opts, key, value)
+
+  @spec maybe_put_active_skill_names(keyword(), [String.t()]) :: keyword()
+  defp maybe_put_active_skill_names(opts, []), do: opts
+
+  defp maybe_put_active_skill_names(opts, names),
+    do: Keyword.put(opts, :active_skill_names, names)
+
+  @spec maybe_put_thinking_level(keyword(), String.t() | nil) :: keyword()
+  defp maybe_put_thinking_level(opts, nil), do: opts
+
+  defp maybe_put_thinking_level(opts, thinking_level),
+    do: Keyword.put(opts, :thinking_level, thinking_level)
+
+  @spec startup_notice(
+          provider_override(),
+          String.t() | nil,
+          resolved_provider(),
+          String.t() | nil
+        ) ::
+          String.t() | nil
+  defp startup_notice(nil, nil, _resolved_provider, _model), do: nil
+
+  defp startup_notice(provider_override, model_override, resolved_provider, model) do
+    [provider_notice(provider_override, resolved_provider), model_notice(model_override, model)]
+    |> Enum.reject(&is_nil/1)
+    |> Enum.join(" · ")
+    |> then(&("Subagent overrides · " <> &1))
+  end
+
+  @spec provider_notice(provider_override(), resolved_provider()) :: String.t() | nil
+  defp provider_notice(nil, _resolved_provider), do: nil
+
+  defp provider_notice(_provider_override, resolved_provider),
+    do: "provider override: #{resolved_provider.name}"
+
+  @spec model_notice(String.t() | nil, String.t() | nil) :: String.t() | nil
+  defp model_notice(nil, _model), do: nil
+  defp model_notice(_model_override, nil), do: "model override: unknown"
+  defp model_notice(_model_override, model), do: "model override: #{model}"
 
   defdelegate detect_project_root, to: Minga.Project, as: :resolve_root
 end

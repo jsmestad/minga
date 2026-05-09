@@ -69,14 +69,26 @@ defmodule MingaAgent.ToolsTest do
       end
     end
 
-    test "subagent schema accepts optional background flag", %{tmp_dir: dir} do
+    test "subagent schema accepts optional background flag and provider overrides", %{
+      tmp_dir: dir
+    } do
       subagent = Tools.all(project_root: dir) |> Enum.find(&(&1.name == "subagent"))
       schema = subagent.parameter_schema
 
+      assert schema["required"] == ["task"]
+      assert Map.has_key?(schema["properties"], "task")
+
+      # Background flag
       assert schema["properties"]["background"]["type"] == "boolean"
-      assert "task" in schema["required"]
       refute "background" in schema["required"]
       assert subagent.description =~ "Background mode"
+
+      # Provider and model overrides
+      assert schema["properties"]["model"]["description"] =~ "Defaults to the parent's model"
+      assert schema["properties"]["provider"]["enum"] == ["native", "pi_rpc"]
+
+      assert schema["properties"]["provider"]["description"] =~
+               "Defaults to the parent's provider"
     end
   end
 

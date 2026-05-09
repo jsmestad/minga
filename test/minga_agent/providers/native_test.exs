@@ -59,6 +59,20 @@ defmodule MingaAgent.Providers.NativeTest do
     Native.start_link(merged)
   end
 
+  defp write_project_skill(dir, name, instructions) do
+    skill_dir = Path.join([dir, ".minga", "skills", name])
+    File.mkdir_p!(skill_dir)
+
+    File.write!(Path.join(skill_dir, "SKILL.md"), """
+    ---
+    name: #{name}
+    description: #{name} skill
+    ---
+
+    #{instructions}
+    """)
+  end
+
   # Wait for events with a helper that collects all events within a timeout.
   defp collect_events(timeout) do
     collect_events_acc([], timeout)
@@ -86,6 +100,29 @@ defmodule MingaAgent.Providers.NativeTest do
       assert {:ok, session_state} = Native.get_state(pid)
       assert session_state.model.provider == "native"
       assert session_state.is_streaming == false
+    end
+
+    test "get_state exposes context fields used by subagents", %{tmp_dir: dir} do
+      write_project_skill(dir, "plan", "PLAN SKILL 1419")
+
+      {:ok, pid} =
+        start_provider(tmp_dir: dir, thinking_level: "high", active_skill_names: ["plan"])
+
+      assert {:ok, session_state} = Native.get_state(pid)
+      assert session_state.model.id == "anthropic:claude-sonnet-4-20250514"
+      assert session_state.thinking_level == "high"
+      assert session_state.active_skill_names == ["plan"]
+      assert session_state.project_root == dir
+      assert session_state.system_prompt =~ "PLAN SKILL 1419"
+    end
+
+    test "system prompt includes project AGENTS.md instructions for the inherited project root",
+         %{tmp_dir: dir} do
+      File.write!(Path.join(dir, "AGENTS.md"), "PROJECT RULE 1419")
+      {:ok, pid} = start_provider(tmp_dir: dir)
+
+      assert {:ok, session_state} = Native.get_state(pid)
+      assert session_state.system_prompt =~ "PROJECT RULE 1419"
     end
   end
 

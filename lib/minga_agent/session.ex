@@ -32,6 +32,7 @@ defmodule MingaAgent.Session do
   alias MingaAgent.SessionMetadata
   alias MingaAgent.SessionStore
   alias MingaAgent.EditBoundary
+  alias MingaAgent.SubagentContext
   alias MingaAgent.ToolCall
   alias MingaAgent.TurnUsage
 
@@ -47,6 +48,9 @@ defmodule MingaAgent.Session do
           action: :created | :modified | :deleted,
           timestamp: integer()
         }
+
+  @typedoc "Context inherited by child subagent sessions."
+  @type subagent_context :: SubagentContext.t()
 
   @typedoc "Internal session state."
   @type state :: %{
@@ -126,6 +130,12 @@ defmodule MingaAgent.Session do
   @spec enter_exec(GenServer.server()) :: :ok
   def enter_exec(session) do
     GenServer.call(session, :enter_exec)
+  end
+
+  @doc "Returns the provider context that should be inherited by a subagent."
+  @spec subagent_context(GenServer.server()) :: subagent_context()
+  def subagent_context(session) do
+    GenServer.call(session, :subagent_context)
   end
 
   @doc "Returns the conversation messages."
@@ -488,7 +498,9 @@ defmodule MingaAgent.Session do
       provider_module: provider_module,
       provider_opts: provider_opts,
       status: :idle,
-      messages: [Message.system("Session started · #{timestamp}")],
+      messages: [
+        Message.system(initial_system_message(timestamp, Keyword.get(opts, :startup_notice)))
+      ],
       message_ids: [1],
       next_message_id: 2,
       subscribers: MapSet.new(),
@@ -744,6 +756,10 @@ defmodule MingaAgent.Session do
 
   def handle_call(:status, _from, state) do
     {:reply, state.status, state}
+  end
+
+  def handle_call(:subagent_context, _from, state) do
+    {:reply, build_subagent_context(state), state}
   end
 
   def handle_call(:messages, _from, state) do
@@ -1457,6 +1473,73 @@ defmodule MingaAgent.Session do
   @spec start_provider(state()) :: {:ok, pid()} | {:error, term()}
   defp start_provider(state) do
     state.provider_module.start_link(state.provider_opts)
+  end
+
+  @spec initial_system_message(String.t(), String.t() | nil) :: String.t()
+  defp initial_system_message(timestamp, nil), do: "Session started · #{timestamp}"
+  defp initial_system_message(timestamp, notice), do: "Session started · #{timestamp} · #{notice}"
+
+  @spec build_subagent_context(state()) :: subagent_context()
+  defp build_subagent_context(state) do
+    provider_state = provider_state(state)
+
+    %SubagentContext{
+      provider_module: state.provider_module,
+      provider_name: provider_name(provider_state, state),
+      model: provider_model(provider_state, state),
+      thinking_level: provider_thinking_level(provider_state),
+      active_skill_names: provider_active_skill_names(provider_state),
+      project_root: provider_project_root(provider_state, state)
+    }
+  end
+
+  @spec provider_state(state()) :: map()
+  defp provider_state(%{provider: nil}), do: %{}
+
+  defp provider_state(state) do
+    case state.provider_module.get_state(state.provider) do
+      {:ok, provider_state} when is_map(provider_state) -> provider_state
+      _other -> %{}
+    end
+  catch
+    :exit, _ -> %{}
+  end
+
+  @spec provider_name(map(), state()) :: String.t()
+  defp provider_name(%{model: %{provider: provider}}, _state) when is_binary(provider),
+    do: provider
+
+  defp provider_name(%{provider: provider}, _state) when is_binary(provider), do: provider
+  defp provider_name(_provider_state, state), do: state.provider_name
+
+  @spec provider_model(map(), state()) :: String.t() | nil
+  defp provider_model(%{model: %{id: id}}, _state) when is_binary(id), do: id
+  defp provider_model(%{model: model}, _state) when is_binary(model), do: model
+  defp provider_model(_provider_state, %{model_name: "unknown"}), do: nil
+  defp provider_model(_provider_state, state), do: state.model_name
+
+  @spec provider_thinking_level(map()) :: String.t() | nil
+  defp provider_thinking_level(%{thinking_level: level}) when is_binary(level), do: level
+  defp provider_thinking_level(_provider_state), do: nil
+
+  @spec provider_active_skill_names(map()) :: [String.t()]
+  defp provider_active_skill_names(%{active_skill_names: names}) when is_list(names) do
+    Enum.filter(names, &is_binary/1)
+  end
+
+  defp provider_active_skill_names(_provider_state), do: []
+
+  @spec provider_project_root(map(), state()) :: String.t() | nil
+  defp provider_project_root(%{project_root: project_root}, _state)
+       when is_binary(project_root) do
+    project_root
+  end
+
+  defp provider_project_root(_provider_state, state) do
+    case Keyword.get(state.provider_opts, :project_root) do
+      project_root when is_binary(project_root) -> project_root
+      _other -> nil
+    end
   end
 
   @spec format_error(term()) :: String.t()

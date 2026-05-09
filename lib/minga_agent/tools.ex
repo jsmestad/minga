@@ -65,7 +65,7 @@ defmodule MingaAgent.Tools do
           project_root: String.t(),
           changeset: pid() | nil,
           fork_store: pid() | nil,
-          parent_session: pid() | nil
+          parent_session: GenServer.server() | nil
         ]
 
   @default_destructive_tools ~w(write_file edit_file multi_edit_file shell git_stage git_commit rename)
@@ -504,7 +504,7 @@ defmodule MingaAgent.Tools do
     )
   end
 
-  @spec subagent(String.t(), pid() | nil) :: Tool.t()
+  @spec subagent(String.t(), GenServer.server() | nil) :: Tool.t()
   defp subagent(root, parent_session) do
     Tool.new!(
       name: "subagent",
@@ -527,6 +527,12 @@ defmodule MingaAgent.Tools do
             "description" =>
               "Model to use for the subagent (e.g., \"anthropic:claude-sonnet-4-20250514\"). Defaults to the parent's model."
           },
+          "provider" => %{
+            "type" => "string",
+            "enum" => ["native", "pi_rpc"],
+            "description" =>
+              "Provider to use for the subagent. Defaults to the parent's provider; explicit overrides are shown in the subagent's first system message."
+          },
           "background" => %{
             "type" => "boolean",
             "description" =>
@@ -539,6 +545,7 @@ defmodule MingaAgent.Tools do
         Subagent.execute(args["task"],
           project_root: root,
           model: args["model"],
+          provider: args["provider"],
           background: args["background"] == true,
           parent_session: parent_session
         )

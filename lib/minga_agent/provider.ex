@@ -45,7 +45,11 @@ defmodule MingaAgent.Provider do
 
   @typedoc "Session state returned by the provider."
   @type session_state :: %{
-          model: model_info() | nil,
+          optional(:system_prompt) => String.t() | nil,
+          optional(:thinking_level) => String.t() | nil,
+          optional(:active_skill_names) => [String.t()],
+          optional(:project_root) => String.t() | nil,
+          model: model_info() | String.t() | nil,
           is_streaming: boolean(),
           token_usage: Event.token_usage() | nil
         }
