@@ -1,6 +1,8 @@
 defmodule MingaEditor.Agent.SlashCommandTest do
   use ExUnit.Case, async: true
 
+  alias MingaAgent.Event
+  alias MingaAgent.Session
   alias MingaEditor.Agent.SlashCommand
   alias MingaEditor.Agent.UIState
   alias MingaEditor.State, as: EditorState
@@ -9,6 +11,91 @@ defmodule MingaEditor.Agent.SlashCommandTest do
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
+
+  defmodule StyleProvider do
+    @behaviour MingaAgent.Provider
+
+    use GenServer
+
+    @impl MingaAgent.Provider
+    def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
+
+    @impl MingaAgent.Provider
+    def send_prompt(pid, text), do: GenServer.cast(pid, {:prompt, text})
+
+    @impl MingaAgent.Provider
+    def abort(_pid), do: :ok
+
+    @impl MingaAgent.Provider
+    def new_session(pid), do: GenServer.call(pid, :new_session)
+
+    @impl MingaAgent.Provider
+    def get_state(pid), do: GenServer.call(pid, :get_state)
+
+    @impl MingaAgent.Provider
+    def list_output_styles(pid), do: GenServer.call(pid, :list_output_styles)
+
+    @impl MingaAgent.Provider
+    def select_output_style(pid, name), do: GenServer.call(pid, {:select_output_style, name})
+
+    @impl MingaAgent.Provider
+    def current_output_style(pid), do: GenServer.call(pid, :current_output_style)
+
+    @impl GenServer
+    def init(opts) do
+      subscriber = Keyword.fetch!(opts, :subscriber)
+
+      styles = [
+        %MingaAgent.OutputStyle{
+          name: "concise",
+          body: "Be concise.",
+          path: "/tmp/concise.md",
+          source: :global
+        },
+        %MingaAgent.OutputStyle{
+          name: "review",
+          body: "Review carefully.",
+          path: "/tmp/review.md",
+          source: :project
+        }
+      ]
+
+      {:ok, %{subscriber: subscriber, styles: styles, current: nil}}
+    end
+
+    @impl GenServer
+    def handle_call(:new_session, _from, state), do: {:reply, :ok, %{state | current: nil}}
+
+    def handle_call(:get_state, _from, state),
+      do:
+        {:reply,
+         {:ok, %{model: nil, is_streaming: false, token_usage: nil, output_style: state.current}},
+         state}
+
+    def handle_call(:list_output_styles, _from, state),
+      do: {:reply, {:ok, state.styles, state.current}, state}
+
+    def handle_call(:current_output_style, _from, state),
+      do: {:reply, {:ok, state.current}, state}
+
+    def handle_call({:select_output_style, nil}, _from, state),
+      do: {:reply, {:ok, nil}, %{state | current: nil}}
+
+    def handle_call({:select_output_style, name}, _from, state) do
+      if Enum.any?(state.styles, &(&1.name == name)) do
+        {:reply, {:ok, name}, %{state | current: name}}
+      else
+        {:reply, {:error, "Output style '#{name}' not found. Available styles: concise, review"},
+         state}
+      end
+    end
+
+    @impl GenServer
+    def handle_cast({:prompt, _text}, state) do
+      send(state.subscriber, {:agent_provider_event, %Event.AgentEnd{usage: nil}})
+      {:noreply, state}
+    end
+  end
 
   describe "slash_command?/1" do
     test "returns true for slash-prefixed text" do
@@ -143,6 +230,66 @@ defmodule MingaEditor.Agent.SlashCommandTest do
     test "/model with name sets model (triggers restart)" do
       {:ok, state} = SlashCommand.execute(mock_state(), "/model gpt-4o")
       assert AgentAccess.panel(state).model_name == "gpt-4o"
+    end
+
+    test "/style is registered and completed" do
+      names = SlashCommand.commands() |> Enum.map(& &1.name)
+      assert "style" in names
+
+      completions = SlashCommand.completions("/sty") |> Enum.map(& &1.name)
+      assert completions == ["style"]
+    end
+
+    test "/style lists available styles and current style" do
+      {:ok, session} = Session.start_link(provider: StyleProvider, provider_opts: [])
+      :sys.get_state(session)
+
+      {:ok, state} = SlashCommand.execute(mock_state(session: session), "/style")
+
+      assert state.shell_state.status_msg == "Current style: none"
+
+      assert Enum.any?(Session.messages(session), fn
+               {:system, text, :info} -> text =~ "Available styles" and text =~ "concise"
+               _ -> false
+             end)
+    end
+
+    test "/style <name> selects style and updates cached runtime" do
+      {:ok, session} = Session.start_link(provider: StyleProvider, provider_opts: [])
+      :sys.get_state(session)
+
+      {:ok, state} = SlashCommand.execute(mock_state(session: session), "/style review")
+
+      assert state.shell_state.agent.runtime.output_style == "review"
+      assert state.shell_state.status_msg == "Output style: review"
+      assert {:ok, "review"} = Session.current_output_style(session)
+    end
+
+    test "/style none and /style off clear selected style" do
+      {:ok, session} = Session.start_link(provider: StyleProvider, provider_opts: [])
+      :sys.get_state(session)
+      {:ok, state} = SlashCommand.execute(mock_state(session: session), "/style review")
+      assert state.shell_state.agent.runtime.output_style == "review"
+
+      {:ok, state} = SlashCommand.execute(state, "/style none")
+      assert state.shell_state.agent.runtime.output_style == nil
+      assert state.shell_state.status_msg == "Output style: none"
+
+      {:ok, state} = SlashCommand.execute(state, "/style review")
+      assert state.shell_state.agent.runtime.output_style == "review"
+      {:ok, state} = SlashCommand.execute(state, "/style off")
+      assert state.shell_state.agent.runtime.output_style == nil
+    end
+
+    test "/style unknown returns clear error and keeps previous selection" do
+      {:ok, session} = Session.start_link(provider: StyleProvider, provider_opts: [])
+      :sys.get_state(session)
+      {:ok, state} = SlashCommand.execute(mock_state(session: session), "/style concise")
+
+      assert {:error, message} = SlashCommand.execute(state, "/style missing")
+      assert message =~ "Output style 'missing' not found"
+      assert message =~ "Available styles: concise, review"
+      assert {:ok, "concise"} = Session.current_output_style(session)
     end
 
     test "/? is an alias for /help" do

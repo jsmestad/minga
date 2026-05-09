@@ -11,6 +11,8 @@ defmodule MingaEditor.Agent.SlashCommand do
   alias MingaAgent.Credentials
   alias MingaAgent.Instructions
   alias MingaAgent.Memory
+  alias MingaAgent.OutputStyles
+  alias MingaAgent.RuntimeState
   alias MingaAgent.Session
   alias MingaAgent.SessionExport
   alias MingaAgent.Skills
@@ -69,6 +71,10 @@ defmodule MingaEditor.Agent.SlashCommand do
     %Command{
       name: "skill",
       description: "Activate a skill: /skill:name, deactivate: /skill:off:name"
+    },
+    %Command{
+      name: "style",
+      description: "Select output style: /style, /style <name>, /style none"
     },
     %Command{
       name: "summarize",
@@ -138,6 +144,7 @@ defmodule MingaEditor.Agent.SlashCommand do
   defp dispatch(state, "export", "html"), do: do_export(state, :html)
   defp dispatch(state, "export", _args), do: do_export(state, :markdown)
   defp dispatch(state, "skills", _args), do: {:ok, do_skills(state)}
+  defp dispatch(state, "style", args), do: do_style(state, args)
   defp dispatch(state, "summarize", _args), do: do_summarize(state)
   defp dispatch(state, "remember", args), do: do_remember(state, args)
   defp dispatch(state, "memory", _args), do: {:ok, do_memory(state)}
@@ -449,6 +456,33 @@ defmodule MingaEditor.Agent.SlashCommand do
     root = detect_project_root()
     summary = Skills.summary(root)
     emit_system_message(state, summary)
+  end
+
+  @spec do_style(state(), String.t()) :: {:ok, state()} | {:error, String.t()}
+  defp do_style(state, "") do
+    with {:ok, session} <- require_session(state),
+         {:ok, styles, current} <- Session.list_output_styles(session) do
+      {:ok, emit_system_message(state, OutputStyles.summary(styles, current))}
+    end
+  end
+
+  defp do_style(state, args) do
+    name = String.trim(args)
+    selected = if name in ["none", "off"], do: nil, else: name
+
+    with {:ok, session} <- require_session(state),
+         {:ok, current} <- Session.select_output_style(session, selected) do
+      state = update_cached_output_style(state, current)
+      label = current || "none"
+      {:ok, emit_system_message(state, "Output style: #{label}")}
+    end
+  end
+
+  @spec update_cached_output_style(state(), String.t() | nil) :: state()
+  defp update_cached_output_style(state, name) do
+    AgentAccess.update_agent(state, fn agent ->
+      %{agent | runtime: RuntimeState.set_output_style(agent.runtime, name)}
+    end)
   end
 
   @spec do_activate_skill(state(), String.t()) :: {:ok, state()} | {:error, String.t()}

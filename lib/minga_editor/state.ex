@@ -1319,9 +1319,14 @@ defmodule MingaEditor.State do
 
       snapshot ->
         AgentAccess.update_agent(state, fn agent ->
+          runtime =
+            agent.runtime
+            |> MingaAgent.RuntimeState.set_status(snapshot.status)
+            |> MingaAgent.RuntimeState.set_output_style(Map.get(snapshot, :output_style))
+
           %{
             agent
-            | runtime: MingaAgent.RuntimeState.set_status(agent.runtime, snapshot.status),
+            | runtime: runtime,
               pending_approval: snapshot.pending_approval,
               error: snapshot.error
           }

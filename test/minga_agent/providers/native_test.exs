@@ -219,6 +219,58 @@ defmodule MingaAgent.Providers.NativeTest do
     end
   end
 
+  describe "output styles" do
+    test "starts with cached styles and no selection", %{tmp_dir: dir} do
+      global_dir = Path.join(dir, "global-styles")
+      File.mkdir_p!(global_dir)
+      File.write!(Path.join(global_dir, "concise.md"), "Use bullet-only summaries.")
+
+      {:ok, pid} = start_provider(tmp_dir: dir, output_styles_global_dir: global_dir)
+
+      assert {:ok, styles, nil} = Native.list_output_styles(pid)
+      assert Enum.map(styles, & &1.name) == ["concise"]
+      assert {:ok, nil} = Native.current_output_style(pid)
+      assert {:ok, state} = Native.get_state(pid)
+      refute state.system_prompt =~ "Use bullet-only summaries."
+    end
+
+    test "selecting prepends the style to the system prompt and clearing removes it", %{
+      tmp_dir: dir
+    } do
+      global_dir = Path.join(dir, "global-styles")
+      File.mkdir_p!(global_dir)
+      File.write!(Path.join(global_dir, "review.md"), "Review for edge cases.")
+
+      {:ok, pid} = start_provider(tmp_dir: dir, output_styles_global_dir: global_dir)
+
+      assert {:ok, "review"} = Native.select_output_style(pid, "review")
+      assert {:ok, "review"} = Native.current_output_style(pid)
+      assert {:ok, selected} = Native.get_state(pid)
+
+      assert String.starts_with?(
+               selected.system_prompt,
+               "## Output Style: review\n\nReview for edge cases."
+             )
+
+      assert {:ok, nil} = Native.select_output_style(pid, nil)
+      assert {:ok, cleared} = Native.get_state(pid)
+      refute cleared.system_prompt =~ "Review for edge cases."
+    end
+
+    test "unknown style keeps the previous selection", %{tmp_dir: dir} do
+      global_dir = Path.join(dir, "global-styles")
+      File.mkdir_p!(global_dir)
+      File.write!(Path.join(global_dir, "concise.md"), "Use bullet-only summaries.")
+
+      {:ok, pid} = start_provider(tmp_dir: dir, output_styles_global_dir: global_dir)
+      assert {:ok, "concise"} = Native.select_output_style(pid, "concise")
+
+      assert {:error, message} = Native.select_output_style(pid, "missing")
+      assert message =~ "Available styles: concise"
+      assert {:ok, "concise"} = Native.current_output_style(pid)
+    end
+  end
+
   describe "new_session" do
     test "resets conversation context", %{tmp_dir: dir} do
       {:ok, pid} = start_provider(tmp_dir: dir)
@@ -226,6 +278,20 @@ defmodule MingaAgent.Providers.NativeTest do
       assert :ok = Native.new_session(pid)
       assert {:ok, state} = Native.get_state(pid)
       assert state.is_streaming == false
+    end
+
+    test "resets output style to none and refreshes the cache", %{tmp_dir: dir} do
+      global_dir = Path.join(dir, "global-styles")
+      File.mkdir_p!(global_dir)
+      File.write!(Path.join(global_dir, "concise.md"), "Use bullet-only summaries.")
+
+      {:ok, pid} = start_provider(tmp_dir: dir, output_styles_global_dir: global_dir)
+      assert {:ok, "concise"} = Native.select_output_style(pid, "concise")
+      File.write!(Path.join(global_dir, "review.md"), "Review carefully.")
+
+      assert :ok = Native.new_session(pid)
+      assert {:ok, styles, nil} = Native.list_output_styles(pid)
+      assert Enum.map(styles, & &1.name) == ["concise", "review"]
     end
   end
 

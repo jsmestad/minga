@@ -225,6 +225,15 @@ defmodule MingaEditor.Agent.Events do
     {state, [{:render, 16}]}
   end
 
+  def handle(state, {:output_style_changed, name}) do
+    state =
+      AgentAccess.update_agent(state, fn agent ->
+        %{agent | runtime: MingaAgent.RuntimeState.set_output_style(agent.runtime, name)}
+      end)
+
+    {state, [:render]}
+  end
+
   # A message was queued (steer or follow-up): trigger render so the pending
   # display can update. The queue contents live in Session, not EditorState,
   # so no state mutation is needed here.

@@ -136,6 +136,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @section_message 0x07
   @section_recording 0x08
   @section_agent 0x09
+  @section_output_style 0x0A
 
   # gui_gutter sections
   @section_gutter_window 0x01
@@ -1187,6 +1188,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     0x07 - Message: status message
     0x08 - Recording: macro_recording
     0x09 - Agent: model_name, message_count, session_status, agent_status
+    0x0A - Output style: selected style name, or "none"
   """
   @spec encode_gui_status_bar(MingaEditor.StatusBar.Data.t()) :: binary()
   def encode_gui_status_bar({:buffer, d}) do
@@ -1221,6 +1223,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     filename = :erlang.iolist_to_binary([d.file_name || ""])
     diag_hint = :erlang.iolist_to_binary([d.diagnostic_hint || ""])
     message = :erlang.iolist_to_binary([d.status_msg || ""])
+    output_style = :erlang.iolist_to_binary([output_style_label(d)])
 
     # Shared sections (both buffer and agent variants)
     sections = [
@@ -1246,7 +1249,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           byte_size(filename)::16, filename::binary, byte_size(filetype)::8, filetype::binary>>
       ),
       encode_section(@section_message, <<byte_size(message)::16, message::binary>>),
-      encode_section(@section_recording, <<macro_byte::8>>)
+      encode_section(@section_recording, <<macro_byte::8>>),
+      encode_section(@section_output_style, <<byte_size(output_style)::8, output_style::binary>>)
     ]
 
     # Agent section (only when content_kind == 1)
@@ -1266,6 +1270,12 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
       sections ++ [encode_section(@section_agent, <<agent_byte::8>>)]
     end
   end
+
+  @spec output_style_label(map()) :: String.t()
+  defp output_style_label(%{output_style: style}) when is_binary(style), do: style
+  defp output_style_label(%{agent_status: nil}), do: ""
+  defp output_style_label(%{agent_status: _status}), do: "none"
+  defp output_style_label(_data), do: ""
 
   @spec encode_vim_mode(atom()) :: non_neg_integer()
   defp encode_vim_mode(:normal), do: 0

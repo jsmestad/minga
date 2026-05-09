@@ -55,6 +55,7 @@ defmodule MingaEditor.StatusBar.Data do
           buf_count: non_neg_integer(),
           macro_recording: {true, String.t()} | false,
           agent_status: AgentState.status(),
+          output_style: String.t() | nil,
           agent_theme_colors: Theme.Agent.t() | nil,
           status_msg: String.t() | nil
         }
@@ -68,6 +69,7 @@ defmodule MingaEditor.StatusBar.Data do
           message_count: non_neg_integer(),
           macro_recording: {true, String.t()} | false,
           agent_status: AgentState.status(),
+          output_style: String.t() | nil,
           agent_theme_colors: Theme.Agent.t() | nil,
           # Background buffer context (same fields as buffer_data)
           cursor_line: non_neg_integer(),
@@ -149,6 +151,7 @@ defmodule MingaEditor.StatusBar.Data do
       buf_count: length(state.workspace.buffers.list),
       macro_recording: Minga.Editing.macro_recording_status(state),
       agent_status: agent.runtime.status,
+      output_style: agent.runtime.output_style,
       agent_theme_colors: if(agent.runtime.status, do: Theme.agent_theme(state.theme), else: nil),
       status_msg: state.shell_state.status_msg
     }
@@ -209,6 +212,7 @@ defmodule MingaEditor.StatusBar.Data do
       message_count: message_count,
       macro_recording: Minga.Editing.macro_recording_status(state),
       agent_status: agent.runtime.status,
+      output_style: agent.runtime.output_style,
       agent_theme_colors: Theme.agent_theme(state.theme),
       # Background buffer context
       cursor_line: line,
@@ -340,6 +344,7 @@ defmodule MingaEditor.StatusBar.Data do
       buf_count: d.buf_count,
       macro_recording: d.macro_recording,
       agent_status: d.agent_status,
+      output_style: d.output_style,
       agent_theme_colors: d.agent_theme_colors,
       lsp_status: d.lsp_status,
       parser_status: d.parser_status,

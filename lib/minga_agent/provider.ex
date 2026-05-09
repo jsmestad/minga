@@ -47,7 +47,8 @@ defmodule MingaAgent.Provider do
   @type session_state :: %{
           model: model_info() | nil,
           is_streaming: boolean(),
-          token_usage: Event.token_usage() | nil
+          token_usage: Event.token_usage() | nil,
+          output_style: String.t() | nil
         }
 
   @doc """
@@ -76,6 +77,17 @@ defmodule MingaAgent.Provider do
   @doc "Returns available commands (extensions, skills, prompts) from the provider."
   @callback get_commands(provider()) :: {:ok, [map()]} | {:error, term()}
 
+  @doc "Lists discovered output styles and the current selection."
+  @callback list_output_styles(provider()) ::
+              {:ok, [MingaAgent.OutputStyle.t()], String.t() | nil} | {:error, term()}
+
+  @doc "Selects an output style for future turns, or clears it with nil."
+  @callback select_output_style(provider(), String.t() | nil) ::
+              {:ok, String.t() | nil} | {:error, term()}
+
+  @doc "Returns the current output style name, or nil when none is selected."
+  @callback current_output_style(provider()) :: {:ok, String.t() | nil} | {:error, term()}
+
   @doc ~S'Sets the thinking level (e.g. "low", "medium", "high").'
   @callback set_thinking_level(provider(), String.t()) :: :ok | {:error, term()}
 
@@ -91,6 +103,9 @@ defmodule MingaAgent.Provider do
   @optional_callbacks [
     get_available_models: 1,
     get_commands: 1,
+    list_output_styles: 1,
+    select_output_style: 2,
+    current_output_style: 1,
     set_thinking_level: 2,
     cycle_thinking_level: 1,
     cycle_model: 1,

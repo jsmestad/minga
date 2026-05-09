@@ -93,14 +93,45 @@ defmodule MingaAgent.SessionTest do
     end
 
     @impl MingaAgent.Provider
-    def get_state(_pid) do
-      {:ok, %{model: nil, is_streaming: false, token_usage: nil}}
+    def get_state(pid) do
+      GenServer.call(pid, :get_state)
+    end
+
+    @impl MingaAgent.Provider
+    def list_output_styles(pid) do
+      GenServer.call(pid, :list_output_styles)
+    end
+
+    @impl MingaAgent.Provider
+    def select_output_style(pid, name) do
+      GenServer.call(pid, {:select_output_style, name})
+    end
+
+    @impl MingaAgent.Provider
+    def current_output_style(pid) do
+      GenServer.call(pid, :current_output_style)
     end
 
     @impl GenServer
     def init(opts) do
       subscriber = Keyword.fetch!(opts, :subscriber)
-      {:ok, %{subscriber: subscriber}}
+
+      styles = [
+        %MingaAgent.OutputStyle{
+          name: "concise",
+          body: "Be concise.",
+          path: "/tmp/concise.md",
+          source: :global
+        },
+        %MingaAgent.OutputStyle{
+          name: "review",
+          body: "Review carefully.",
+          path: "/tmp/review.md",
+          source: :global
+        }
+      ]
+
+      {:ok, %{subscriber: subscriber, output_style: nil, output_styles: styles}}
     end
 
     @impl GenServer
@@ -125,7 +156,35 @@ defmodule MingaAgent.SessionTest do
     end
 
     def handle_cast(:abort, state), do: {:noreply, state}
-    def handle_cast(:new_session, state), do: {:noreply, state}
+    def handle_cast(:new_session, state), do: {:noreply, %{state | output_style: nil}}
+
+    @impl GenServer
+    def handle_call(:get_state, _from, state) do
+      {:reply,
+       {:ok,
+        %{model: nil, is_streaming: false, token_usage: nil, output_style: state.output_style}},
+       state}
+    end
+
+    def handle_call(:list_output_styles, _from, state) do
+      {:reply, {:ok, state.output_styles, state.output_style}, state}
+    end
+
+    def handle_call(:current_output_style, _from, state) do
+      {:reply, {:ok, state.output_style}, state}
+    end
+
+    def handle_call({:select_output_style, nil}, _from, state) do
+      {:reply, {:ok, nil}, %{state | output_style: nil}}
+    end
+
+    def handle_call({:select_output_style, name}, _from, state) do
+      if Enum.any?(state.output_styles, &(&1.name == name)) do
+        {:reply, {:ok, name}, %{state | output_style: name}}
+      else
+        {:reply, {:error, "missing"}, state}
+      end
+    end
 
     @impl GenServer
     def handle_call({:set_model, model}, _from, state) do
@@ -158,6 +217,7 @@ defmodule MingaAgent.SessionTest do
       )
 
     Session.subscribe(session)
+    :sys.get_state(session)
 
     %{session: session}
   end
@@ -305,6 +365,38 @@ defmodule MingaAgent.SessionTest do
       usage = Session.usage(session)
       assert usage.input == 0
       assert usage.cost == 0.0
+    end
+  end
+
+  describe "output styles" do
+    test "list/select/current routes through provider and editor snapshot includes selection", %{
+      session: session
+    } do
+      assert {:ok, styles, nil} = Session.list_output_styles(session)
+      assert Enum.map(styles, & &1.name) == ["concise", "review"]
+
+      assert {:ok, "review"} = Session.select_output_style(session, "review")
+      assert_receive {:agent_event, ^session, {:output_style_changed, "review"}}, 200
+      assert {:ok, "review"} = Session.current_output_style(session)
+      assert %{output_style: "review"} = Session.editor_snapshot(session)
+    end
+
+    test "unknown style leaves previous selection unchanged", %{session: session} do
+      assert {:ok, "concise"} = Session.select_output_style(session, "concise")
+      assert_receive {:agent_event, ^session, {:output_style_changed, "concise"}}, 200
+
+      assert {:error, "missing"} = Session.select_output_style(session, "missing")
+      refute_receive {:agent_event, ^session, {:output_style_changed, _}}, 50
+      assert {:ok, "concise"} = Session.current_output_style(session)
+    end
+
+    test "new_session resets output style", %{session: session} do
+      assert {:ok, "review"} = Session.select_output_style(session, "review")
+      assert_receive {:agent_event, ^session, {:output_style_changed, "review"}}, 200
+
+      assert :ok = Session.new_session(session)
+      assert_receive {:agent_event, ^session, {:output_style_changed, nil}}, 200
+      assert {:ok, nil} = Session.current_output_style(session)
     end
   end
 

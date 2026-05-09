@@ -19,13 +19,15 @@ defmodule MingaAgent.RuntimeState do
           active_session_id: String.t() | nil,
           status: status(),
           model_name: String.t() | nil,
-          provider_name: String.t() | nil
+          provider_name: String.t() | nil,
+          output_style: String.t() | nil
         }
 
   defstruct active_session_id: nil,
             status: nil,
             model_name: nil,
-            provider_name: nil
+            provider_name: nil,
+            output_style: nil
 
   # ── Status ──────────────────────────────────────────────────────────────────
 
@@ -51,4 +53,8 @@ defmodule MingaAgent.RuntimeState do
   @doc "Sets the provider name."
   @spec set_provider(t(), String.t() | nil) :: t()
   def set_provider(%__MODULE__{} = rt, name), do: %{rt | provider_name: name}
+
+  @doc "Sets the selected output style name."
+  @spec set_output_style(t(), String.t() | nil) :: t()
+  def set_output_style(%__MODULE__{} = rt, name), do: %{rt | output_style: name}
 end

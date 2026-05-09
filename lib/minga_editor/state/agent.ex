@@ -78,7 +78,10 @@ defmodule MingaEditor.State.Agent do
   def reset_cache(%__MODULE__{} = agent) do
     %{
       agent
-      | runtime: RuntimeState.set_status(agent.runtime, :idle),
+      | runtime:
+          agent.runtime
+          |> RuntimeState.set_status(:idle)
+          |> RuntimeState.set_output_style(nil),
         error: nil,
         pending_approval: nil
     }

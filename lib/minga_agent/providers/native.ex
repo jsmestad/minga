@@ -42,6 +42,8 @@ defmodule MingaAgent.Providers.Native do
   alias MingaAgent.Memory
   alias MingaAgent.ModelCatalog
   alias MingaAgent.ModelLimits
+  alias MingaAgent.OutputStyle
+  alias MingaAgent.OutputStyles
   alias MingaAgent.Retry
   alias MingaAgent.Session
   alias MingaAgent.Skills
@@ -137,6 +139,9 @@ defmodule MingaAgent.Providers.Native do
           interrupted: boolean(),
           last_user_prompt: String.t() | nil,
           active_skills: [Skills.skill()],
+          output_styles: [OutputStyle.t()],
+          selected_output_style: OutputStyle.t() | nil,
+          output_styles_global_dir: String.t() | nil,
           internal_state: InternalState.t(),
           max_turns: pos_integer(),
           max_cost: float() | nil,
@@ -196,6 +201,26 @@ defmodule MingaAgent.Providers.Native do
     GenServer.call(pid, :get_available_models, 10_000)
   end
 
+  @impl MingaAgent.Provider
+  @spec list_output_styles(GenServer.server()) ::
+          {:ok, [OutputStyle.t()], String.t() | nil} | {:error, term()}
+  def list_output_styles(pid) do
+    GenServer.call(pid, :list_output_styles)
+  end
+
+  @impl MingaAgent.Provider
+  @spec select_output_style(GenServer.server(), String.t() | nil) ::
+          {:ok, String.t() | nil} | {:error, term()}
+  def select_output_style(pid, name) when is_binary(name) or is_nil(name) do
+    GenServer.call(pid, {:select_output_style, name})
+  end
+
+  @impl MingaAgent.Provider
+  @spec current_output_style(GenServer.server()) :: {:ok, String.t() | nil} | {:error, term()}
+  def current_output_style(pid) do
+    GenServer.call(pid, :current_output_style)
+  end
+
   @doc "Manually triggers context compaction."
   @spec compact(GenServer.server()) :: {:ok, String.t()} | {:error, String.t()}
   def compact(pid) do
@@ -237,6 +262,8 @@ defmodule MingaAgent.Providers.Native do
     max_turns = Keyword.get(opts, :max_turns, config.max_turns)
     max_cost = Keyword.get(opts, :max_cost, config.max_cost)
     llm_client = Keyword.get(opts, :llm_client, &ReqLLM.stream_text/3)
+    output_styles_global_dir = Keyword.get(opts, :output_styles_global_dir)
+    output_styles = discover_output_styles(project_root, output_styles_global_dir)
     provider_pid = self()
     # Start a fork store for in-memory buffer isolation. Forks are created
     # lazily when agent tools write to files that have open buffers.
@@ -271,7 +298,7 @@ defmodule MingaAgent.Providers.Native do
 
     internal_tools = build_internal_tools(provider_pid)
     tools = base_tools ++ internal_tools
-    system_prompt = build_system_prompt(project_root)
+    system_prompt = build_system_prompt(project_root, [], nil)
     context = Context.new([Context.system(system_prompt)])
 
     # Resolve API key from credentials (env var or credentials file).
@@ -295,6 +322,9 @@ defmodule MingaAgent.Providers.Native do
       interrupted: false,
       last_user_prompt: nil,
       active_skills: [],
+      output_styles: output_styles,
+      selected_output_style: nil,
+      output_styles_global_dir: output_styles_global_dir,
       internal_state: InternalState.new(),
       max_turns: max_turns,
       max_cost: max_cost,
@@ -455,27 +485,63 @@ defmodule MingaAgent.Providers.Native do
     {:reply, {:ok, all, active_names}, state}
   end
 
+  def handle_call(:list_output_styles, _from, state) do
+    {:reply, {:ok, state.output_styles, selected_output_style_name(state)}, state}
+  end
+
+  def handle_call(:current_output_style, _from, state) do
+    {:reply, {:ok, selected_output_style_name(state)}, state}
+  end
+
+  def handle_call({:select_output_style, name}, _from, state) when name in [nil, ""] do
+    state = rebuild_system_prompt(%{state | selected_output_style: nil})
+    Minga.Log.info(:agent, "[Agent.Native] output style cleared")
+    {:reply, {:ok, nil}, state}
+  end
+
+  def handle_call({:select_output_style, name}, _from, state) when is_binary(name) do
+    case OutputStyles.find(state.output_styles, name) do
+      {:ok, style} ->
+        state = rebuild_system_prompt(%{state | selected_output_style: style})
+        Minga.Log.info(:agent, "[Agent.Native] output style set: #{style.name}")
+        {:reply, {:ok, style.name}, state}
+
+      :not_found ->
+        available = OutputStyles.available_names(state.output_styles)
+
+        {:reply, {:error, "Output style '#{name}' not found. Available styles: #{available}"},
+         state}
+    end
+  end
+
   def handle_call(:new_session, _from, state) do
     # Gracefully stop any running task (see :abort handler comment)
     if state.task do
       Task.shutdown(state.task, 150)
     end
 
-    system_prompt = build_system_prompt(state.project_root)
+    output_styles = discover_output_styles(state.project_root, state.output_styles_global_dir)
+    system_prompt = build_system_prompt(state.project_root, [], nil)
     context = Context.new([Context.system(system_prompt)])
 
-    state = %{state | context: context, task: nil, streaming: false, session_cost: 0.0}
+    state = %{
+      state
+      | context: context,
+        task: nil,
+        streaming: false,
+        active_skills: [],
+        output_styles: output_styles,
+        selected_output_style: nil,
+        session_cost: 0.0
+    }
+
     Minga.Log.info(:agent, "[Agent.Native] new session started")
 
     {:reply, :ok, state}
   end
 
   def handle_call(:get_state, _from, state) do
-    system_prompt =
-      case state.context.messages do
-        [%{role: :system, content: content} | _] when is_binary(content) -> content
-        _ -> nil
-      end
+    system_prompt = system_prompt_from_context(state.context)
 
     session_state = %{
       model: %{
@@ -485,7 +551,8 @@ defmodule MingaAgent.Providers.Native do
       },
       is_streaming: state.streaming,
       token_usage: nil,
-      system_prompt: system_prompt
+      system_prompt: system_prompt,
+      output_style: selected_output_style_name(state)
     }
 
     {:reply, {:ok, session_state}, state}
@@ -1516,20 +1583,18 @@ defmodule MingaAgent.Providers.Native do
     ]
   end
 
-  @spec build_system_prompt(String.t(), [Skills.skill()]) :: String.t()
-  defp build_system_prompt(project_root, active_skills \\ []) do
+  @spec build_system_prompt(String.t(), [Skills.skill()], OutputStyle.t() | nil) :: String.t()
+  defp build_system_prompt(project_root, active_skills, selected_output_style) do
+    style_section = OutputStyles.format_for_prompt(selected_output_style)
     base = resolve_base_prompt(project_root)
     instructions = Instructions.assemble(project_root)
     memory = Memory.for_prompt()
     skills_section = Skills.format_for_prompt(active_skills)
     append = read_config_string(:agent_append_system_prompt)
 
-    parts =
-      [base, instructions, memory, skills_section, append]
-      |> Enum.reject(&(is_nil(&1) or &1 == ""))
-      |> Enum.join("\n\n")
-
-    parts
+    [style_section, base, instructions, memory, skills_section, append]
+    |> Enum.reject(&(is_nil(&1) or &1 == ""))
+    |> Enum.join("\n\n")
   end
 
   @default_system_prompt_template """
@@ -1703,12 +1768,47 @@ defmodule MingaAgent.Providers.Native do
     end
   end
 
+  @spec discover_output_styles(String.t(), String.t() | nil) :: [OutputStyle.t()]
+  defp discover_output_styles(project_root, nil) do
+    OutputStyles.discover(project_root)
+  end
+
+  defp discover_output_styles(project_root, global_dir) when is_binary(global_dir) do
+    OutputStyles.discover(project_root, global_dir: global_dir)
+  end
+
+  @spec selected_output_style_name(state()) :: String.t() | nil
+  defp selected_output_style_name(%{selected_output_style: nil}), do: nil
+  defp selected_output_style_name(%{selected_output_style: %OutputStyle{name: name}}), do: name
+
+  @spec system_prompt_from_context(Context.t()) :: String.t() | nil
+  defp system_prompt_from_context(%Context{messages: [%{role: :system, content: content} | _]}) do
+    content_to_text(content)
+  end
+
+  defp system_prompt_from_context(%Context{}), do: nil
+
+  @spec content_to_text(String.t() | [term()] | term()) :: String.t() | nil
+  defp content_to_text(content) when is_binary(content), do: content
+
+  defp content_to_text(content) when is_list(content) do
+    Enum.map_join(content, "", &content_part_to_text/1)
+  end
+
+  defp content_to_text(_content), do: nil
+
+  @spec content_part_to_text(term()) :: String.t()
+  defp content_part_to_text(%{type: :text, text: text}) when is_binary(text), do: text
+  defp content_part_to_text(_part), do: ""
+
   @spec detect_project_root() :: String.t()
-  # Rebuilds the system prompt with current active skills and replaces it
+  # Rebuilds the system prompt with current active skills and output style, then replaces it
   # in the context's first message.
   @spec rebuild_system_prompt(state()) :: state()
   defp rebuild_system_prompt(state) do
-    new_prompt = build_system_prompt(state.project_root, state.active_skills)
+    new_prompt =
+      build_system_prompt(state.project_root, state.active_skills, state.selected_output_style)
+
     messages = state.context.messages
 
     updated_messages =

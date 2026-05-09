@@ -116,6 +116,40 @@ The two options are orthogonal. `:agent_tool_approval` controls *whether* to pro
 
 For the full option API, see [`Minga.Config.Options`](https://jsmestad.github.io/minga/Minga.Config.Options.html).
 
+## Agent output styles
+
+Output styles are small prompt files that change how the agent writes for one session. They are useful when you want the same agent to answer in a stricter review voice, a terse implementation voice, or a teaching voice without editing your global system prompt.
+
+Put global styles in:
+
+```text
+~/.config/minga/output-styles/
+```
+
+Put project-specific styles in:
+
+```text
+.minga/output-styles/
+```
+
+Each regular file becomes a style named after its filename stem. For example, `~/.config/minga/output-styles/review.md` creates the style `review`:
+
+```markdown
+You are in review mode.
+
+Be skeptical and concrete. Start with correctness risks, then test gaps, then maintainability concerns. Do not rewrite code unless asked. If the change is safe, say why in one short paragraph.
+```
+
+Select it from the agent prompt:
+
+```text
+/style review
+```
+
+Use `/style` to list available styles and the current selection. Use `/style none` or `/style off` to clear it. The modeline shows the current style as `style:<name>` and defaults to `style:none`. A style change affects the next agent turn in the current session. Starting a new session resets the style to `none`.
+
+Project styles override global styles with the same filename stem, so `.minga/output-styles/review.md` wins over `~/.config/minga/output-styles/review.md` for that project.
+
 ### Planned: buffer-aware agent options
 
 When agent tools are [routed through `Buffer.Server`](BUFFER-AWARE-AGENTS.md), additional configuration options will control the new editing behavior:

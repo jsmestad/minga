@@ -52,6 +52,7 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
           :buf_count => non_neg_integer(),
           :macro_recording => {true, String.t()} | false,
           optional(:agent_status) => MingaEditor.State.Agent.status(),
+          optional(:output_style) => String.t() | nil,
           optional(:agent_theme_colors) => MingaEditor.UI.Theme.Agent.t() | nil,
           optional(:mode_override) => String.t() | nil,
           optional(:lsp_status) => lsp_status(),
@@ -111,6 +112,7 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
     filetype_bg = bar_bg
 
     agent_segments = build_agent_segments(data, bar_bg)
+    output_style_segments = build_output_style_segments(data, bar_bg, ml)
     lsp_segments = build_lsp_segments(data, bar_bg, ml)
     parser_segments = build_parser_segments(data, bar_bg, ml)
     git_segments = build_git_segments(data, bar_bg, theme)
@@ -126,7 +128,8 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
         {@separator, info_bg, bar_bg, [], nil}
       ] ++
         git_segments ++
-        Enum.map(agent_segments, fn {text, fg, bg, opts} -> {text, fg, bg, opts, nil} end)
+        Enum.map(agent_segments, fn {text, fg, bg, opts} -> {text, fg, bg, opts, nil} end) ++
+        output_style_segments
 
     right_segments =
       diagnostic_segments ++
@@ -241,6 +244,21 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
     |> Enum.filter(fn {count, _, _} -> count > 0 end)
     |> Enum.map(fn {count, prefix, color} -> {" #{prefix}#{count}", color, bar_bg, [], nil} end)
   end
+
+  @spec build_output_style_segments(modeline_data(), non_neg_integer(), Theme.Modeline.t()) ::
+          [{String.t(), non_neg_integer(), non_neg_integer(), keyword(), atom() | nil}]
+  defp build_output_style_segments(data, bar_bg, ml) do
+    case output_style_label(data) do
+      nil -> []
+      style -> [{" style:#{style}", ml.info_fg, bar_bg, [], nil}]
+    end
+  end
+
+  @spec output_style_label(modeline_data()) :: String.t() | nil
+  defp output_style_label(%{output_style: style}) when is_binary(style), do: style
+  defp output_style_label(%{agent_status: nil}), do: nil
+  defp output_style_label(%{agent_status: _status}), do: "none"
+  defp output_style_label(_data), do: nil
 
   @spec build_agent_segments(modeline_data(), non_neg_integer()) ::
           [{String.t(), non_neg_integer(), non_neg_integer(), keyword()}]

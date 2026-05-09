@@ -135,7 +135,8 @@ defmodule MingaAgent.Session do
   @type editor_snapshot :: %{
           status: status(),
           pending_approval: map() | nil,
-          error: String.t() | nil
+          error: String.t() | nil,
+          output_style: String.t() | nil
         }
 
   @doc "Returns a snapshot of session state for the editor to rebuild AgentState."
@@ -220,6 +221,26 @@ defmodule MingaAgent.Session do
   @spec list_skills(GenServer.server()) :: {:ok, [map()], [String.t()]} | {:error, term()}
   def list_skills(session) do
     GenServer.call(session, :list_skills)
+  end
+
+  @doc "Lists discovered output styles and the current selection."
+  @spec list_output_styles(GenServer.server()) ::
+          {:ok, [MingaAgent.OutputStyle.t()], String.t() | nil} | {:error, term()}
+  def list_output_styles(session) do
+    GenServer.call(session, :list_output_styles)
+  end
+
+  @doc "Selects an output style by name, or clears it with nil."
+  @spec select_output_style(GenServer.server(), String.t() | nil) ::
+          {:ok, String.t() | nil} | {:error, term()}
+  def select_output_style(session, name) when is_binary(name) or is_nil(name) do
+    GenServer.call(session, {:select_output_style, name})
+  end
+
+  @doc "Returns the current output style name, or nil when none is selected."
+  @spec current_output_style(GenServer.server()) :: {:ok, String.t() | nil} | {:error, term()}
+  def current_output_style(session) do
+    GenServer.call(session, :current_output_style)
   end
 
   @doc "Generates a context artifact summarizing the current session."
@@ -669,6 +690,7 @@ defmodule MingaAgent.Session do
     state = reset_messages(state, [Message.system("Session cleared · #{timestamp}")])
 
     broadcast(state, {:status_changed, :idle})
+    broadcast(state, {:output_style_changed, nil})
     state = notify_messages_changed(state)
     {:reply, :ok, state}
   end
@@ -729,10 +751,13 @@ defmodule MingaAgent.Session do
   end
 
   def handle_call(:editor_snapshot, _from, state) do
+    output_style = current_output_style_from_provider(state)
+
     snapshot = %{
       status: state.status,
       pending_approval: state.pending_approval,
-      error: state.error_message
+      error: state.error_message,
+      output_style: output_style
     }
 
     {:reply, snapshot, state}
@@ -827,6 +852,40 @@ defmodule MingaAgent.Session do
 
   def handle_call(:list_skills, _from, state) do
     result = GenServer.call(state.provider, :list_skills)
+    {:reply, result, state}
+  end
+
+  def handle_call(:list_output_styles, _from, %{provider: nil} = state) do
+    {:reply, {:error, "No active provider"}, state}
+  end
+
+  def handle_call(:list_output_styles, _from, state) do
+    result = dispatch_optional(state.provider_module, :list_output_styles, [state.provider])
+    {:reply, result, state}
+  end
+
+  def handle_call({:select_output_style, _name}, _from, %{provider: nil} = state) do
+    {:reply, {:error, "No active provider"}, state}
+  end
+
+  def handle_call({:select_output_style, name}, _from, state) do
+    result =
+      dispatch_optional(state.provider_module, :select_output_style, [state.provider, name])
+
+    case result do
+      {:ok, selected} -> broadcast(state, {:output_style_changed, selected})
+      _ -> :ok
+    end
+
+    {:reply, result, state}
+  end
+
+  def handle_call(:current_output_style, _from, %{provider: nil} = state) do
+    {:reply, {:error, "No active provider"}, state}
+  end
+
+  def handle_call(:current_output_style, _from, state) do
+    result = dispatch_optional(state.provider_module, :current_output_style, [state.provider])
     {:reply, result, state}
   end
 
@@ -1381,6 +1440,16 @@ defmodule MingaAgent.Session do
     end
 
     %{state | pending_thinking_level: nil}
+  end
+
+  @spec current_output_style_from_provider(state()) :: String.t() | nil
+  defp current_output_style_from_provider(%{provider: nil}), do: nil
+
+  defp current_output_style_from_provider(state) do
+    case dispatch_optional(state.provider_module, :current_output_style, [state.provider]) do
+      {:ok, name} when is_binary(name) -> name
+      _ -> nil
+    end
   end
 
   # Calls an optional callback on the provider module. Returns `{:error, :not_supported}`

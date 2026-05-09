@@ -125,6 +125,7 @@ defmodule Minga.Integration.GUIProtocolTest do
            buf_count: 3,
            macro_recording: {true, "q"},
            agent_status: :thinking,
+           output_style: "review",
            agent_theme_colors: nil,
            status_msg: "Wrote foo.ex"
          }}
@@ -156,6 +157,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert decoded["git_deleted"] == 1
       assert decoded["filename"] == "foo.ex"
       assert decoded["diagnostic_hint"] == "✖ undefined function foo/0 [ElixirLS]"
+      assert decoded["output_style"] == "review"
     end
 
     test "gui_status_bar agent variant encodes and decodes correctly", %{port: port} do
@@ -169,6 +171,7 @@ defmodule Minga.Integration.GUIProtocolTest do
            message_count: 7,
            macro_recording: false,
            agent_status: :thinking,
+           output_style: "concise",
            agent_theme_colors: nil,
            # Background buffer context
            cursor_line: 10,
@@ -213,6 +216,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert decoded["git_deleted"] == 0
       assert decoded["filename"] == "editor.ex"
       assert decoded["diagnostic_hint"] == "⚠ unused variable [ElixirLS]"
+      assert decoded["output_style"] == "concise"
     end
 
     test "gui_agent_chat hidden encodes and decodes correctly", %{port: port} do

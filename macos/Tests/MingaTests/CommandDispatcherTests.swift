@@ -231,7 +231,7 @@ struct CommandDispatcherRoutingTests {
                                            macroRecording: 0, parserStatus: 0, agentStatus: 0,
                                            gitAdded: 5, gitModified: 3, gitDeleted: 1,
                                            icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0,
-                                           filename: "editor.ex", diagnosticHint: ""))
+                                           filename: "editor.ex", diagnosticHint: "", outputStyle: "review"))
 
         #expect(gui.statusBarState.mode == 1)
         #expect(gui.statusBarState.cursorLine == 42)
@@ -253,7 +253,7 @@ struct CommandDispatcherRoutingTests {
                                            macroRecording: 0, parserStatus: 0, agentStatus: 1,
                                            gitAdded: 3, gitModified: 2, gitDeleted: 0,
                                            icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0,
-                                           filename: "editor.ex", diagnosticHint: ""))
+                                           filename: "editor.ex", diagnosticHint: "", outputStyle: "review"))
 
         #expect(gui.statusBarState.contentKind == 1)
         #expect(gui.statusBarState.isAgentWindow == true)

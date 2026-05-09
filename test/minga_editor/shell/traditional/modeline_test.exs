@@ -156,6 +156,33 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
       {_commands, regions} = Modeline.render(0, 120, data)
       assert Enum.any?(regions, fn {_start, _end, cmd} -> cmd == :lsp_info end)
     end
+
+    test "hides output style before an agent session exists" do
+      {commands, _regions} = Modeline.render(0, 120, @base_data)
+      combined = Enum.map_join(commands, fn {_row, _col, text, _opts} -> text end)
+      refute String.contains?(combined, "style:")
+    end
+
+    test "shows output style none when an agent session exists" do
+      theme = MingaEditor.UI.Theme.get!(MingaEditor.UI.Theme.default())
+
+      data =
+        Map.merge(@base_data, %{
+          agent_status: :idle,
+          agent_theme_colors: MingaEditor.UI.Theme.agent_theme(theme)
+        })
+
+      {commands, _regions} = Modeline.render(0, 120, data)
+      combined = Enum.map_join(commands, fn {_row, _col, text, _opts} -> text end)
+      assert String.contains?(combined, "style:none")
+    end
+
+    test "shows selected output style" do
+      data = Map.put(@base_data, :output_style, "review")
+      {commands, _regions} = Modeline.render(0, 120, data)
+      combined = Enum.map_join(commands, fn {_row, _col, text, _opts} -> text end)
+      assert String.contains?(combined, "style:review")
+    end
   end
 
   describe "git branch and diff summary" do

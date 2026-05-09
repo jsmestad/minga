@@ -168,7 +168,7 @@ struct StatusBarViewViewTests {
             modelName: "", messageCount: 0, sessionStatus: 0,
             infoCount: 0, hintCount: 0, macroRecording: 0, parserStatus: 0, agentStatus: 0,
             gitAdded: 0, gitModified: 0, gitDeleted: 0,
-            icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: "", diagnosticHint: ""
+            icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: "", diagnosticHint: "", outputStyle: "none"
         ))
 
         let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: nil)
@@ -207,7 +207,7 @@ struct StatusBarViewViewTests {
             modelName: "claude-3-5-sonnet", messageCount: 7, sessionStatus: 0,
             infoCount: 0, hintCount: 0, macroRecording: 0, parserStatus: 0, agentStatus: 0,
             gitAdded: 0, gitModified: 0, gitDeleted: 0,
-            icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: "", diagnosticHint: ""
+            icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: "", diagnosticHint: "", outputStyle: "none"
         ))
 
         let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: nil)
@@ -231,7 +231,7 @@ struct StatusBarViewViewTests {
             modelName: "", messageCount: 0, sessionStatus: 0,
             infoCount: 0, hintCount: 0, macroRecording: 0, parserStatus: 0, agentStatus: 0,
             gitAdded: 0, gitModified: 0, gitDeleted: 0,
-            icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: "", diagnosticHint: ""
+            icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: "", diagnosticHint: "", outputStyle: "none"
         ))
 
         let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: nil)
@@ -252,7 +252,7 @@ struct StatusBarViewViewTests {
             modelName: "", messageCount: 0, sessionStatus: 0,
             infoCount: 0, hintCount: 0, macroRecording: 0, parserStatus: 0, agentStatus: 0,
             gitAdded: 0, gitModified: 0, gitDeleted: 0,
-            icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: "", diagnosticHint: ""
+            icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: "", diagnosticHint: "", outputStyle: "none"
         ))
 
         let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: nil)

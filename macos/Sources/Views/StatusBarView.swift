@@ -40,6 +40,7 @@ struct StatusBarUpdate: Sendable {
     let iconColorB: UInt8
     let filename: String
     let diagnosticHint: String
+    let outputStyle: String
 }
 
 @MainActor
@@ -77,6 +78,7 @@ final class StatusBarState {
     var iconColorB: UInt8 = 0
     var filename: String = ""
     var diagnosticHint: String = ""
+    var outputStyle: String = ""
 
     /// Updates status bar properties, guarding each assignment with an
     /// equality check to prevent redundant `@Observable` notifications.
@@ -113,6 +115,7 @@ final class StatusBarState {
         if self.iconColorB != data.iconColorB { self.iconColorB = data.iconColorB }
         if self.filename != data.filename { self.filename = data.filename }
         if self.diagnosticHint != data.diagnosticHint { self.diagnosticHint = data.diagnosticHint }
+        if self.outputStyle != data.outputStyle { self.outputStyle = data.outputStyle }
     }
 
     var modeName: String {
@@ -283,6 +286,10 @@ struct StatusBarView: View {
             // Agent status (thinking/executing/error; hidden when idle)
             agentStatusIcon
 
+            if !state.outputStyle.isEmpty {
+                outputStyleSegment
+            }
+
             // Git branch + diff stats
             if state.hasGit && !state.gitBranch.isEmpty {
                 gitSegment
@@ -291,6 +298,16 @@ struct StatusBarView: View {
             // Diagnostic counts (all 4 levels, theme-colored)
             diagnosticIndicators
         }
+    }
+
+    // MARK: - Output style
+
+    private var outputStyleSegment: some View {
+        Text("style:\(state.outputStyle)")
+            .font(.system(size: 11))
+            .foregroundStyle(theme.modelineBarFg.opacity(0.45))
+            .padding(.horizontal, 4)
+            .help("Agent output style")
     }
 
     // MARK: - Agent status icon
