@@ -1,6 +1,9 @@
 defmodule MingaAgent.Tool.ExecutorTest do
   use ExUnit.Case, async: true
 
+  alias MingaAgent.Config, as: AgentConfig
+  alias MingaAgent.Hooks.Hook
+  alias MingaAgent.Hooks.Result
   alias MingaAgent.Tool.Executor
   alias MingaAgent.Tool.Registry
   alias MingaAgent.Tool.Spec
@@ -90,6 +93,58 @@ defmodule MingaAgent.Tool.ExecutorTest do
     test "passes through {:error, reason} from callback", %{table: table} do
       register_tool(table, "failing", callback: fn _args -> {:error, :not_found} end)
       assert {:error, :not_found} = Executor.execute("failing", %{}, table)
+    end
+
+    test "runs matching PreToolUse hook before tool callback", %{table: table} do
+      test_pid = self()
+
+      register_tool(table, "echo",
+        callback: fn args ->
+          send(test_pid, {:callback_ran, args})
+          {:ok, "success"}
+        end
+      )
+
+      hook = %Hook{event: :pre_tool_use, tool_pattern: "echo", command: "policy"}
+      config = %AgentConfig{agent_hooks: [hook]}
+
+      runner = fn ^hook, payload ->
+        send(test_pid, {:hook_ran, payload.tool_name, payload.arguments})
+        Result.allow(hook)
+      end
+
+      assert {:ok, "success"} =
+               Executor.execute("echo", %{"msg" => "hello"}, table,
+                 config: config,
+                 hook_runner: runner
+               )
+
+      assert_received {:hook_ran, "echo", %{"msg" => "hello"}}
+      assert_received {:callback_ran, %{"msg" => "hello"}}
+    end
+
+    test "veto prevents tool callback", %{table: table} do
+      test_pid = self()
+
+      register_tool(table, "shell",
+        callback: fn _args ->
+          send(test_pid, :callback_ran)
+          {:ok, "should not run"}
+        end
+      )
+
+      hook = %Hook{event: :pre_tool_use, tool_pattern: "shell", command: "policy"}
+      config = %AgentConfig{agent_hooks: [hook]}
+      runner = fn ^hook, _payload -> Result.veto(hook, "blocked by policy", {:exit, 9}) end
+
+      assert {:error, {:hook_veto, message}} =
+               Executor.execute("shell", %{"command" => "date"}, table,
+                 config: config,
+                 hook_runner: runner
+               )
+
+      assert message =~ "blocked by policy"
+      refute_received :callback_ran
     end
   end
 

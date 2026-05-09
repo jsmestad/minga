@@ -91,7 +91,6 @@ pub fn build(b: *std.Build) void {
         .{ .name = "elisp", .has_scanner = false },
         .{ .name = "clojure", .has_scanner = false },
         .{ .name = "objc", .has_scanner = false },
-
     };
 
     var grammar_libs: [grammars.len]*std.Build.Step.Compile = undefined;
@@ -129,6 +128,18 @@ pub fn build(b: *std.Build) void {
     parser_exe.linkLibrary(ts_lib);
     for (grammar_libs) |gl| parser_exe.linkLibrary(gl);
     b.installArtifact(parser_exe);
+
+    // ── Hook runner executable (one-shot POSIX process-group helper) ─────
+    const hook_runner_exe = b.addExecutable(.{
+        .name = "minga-hook-runner",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/hook_runner_main.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    hook_runner_exe.root_module.link_libc = true;
+    b.installArtifact(hook_runner_exe);
 
     // Run step
     const run_cmd = b.addRunArtifact(exe);
@@ -172,6 +183,18 @@ pub fn build(b: *std.Build) void {
 
     const run_parser_tests = b.addRunArtifact(parser_tests);
     test_step.dependOn(&run_parser_tests.step);
+
+    const hook_runner_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/hook_runner_main.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    hook_runner_tests.root_module.link_libc = true;
+
+    const run_hook_runner_tests = b.addRunArtifact(hook_runner_tests);
+    test_step.dependOn(&run_hook_runner_tests.step);
 }
 
 /// Build a static library for a tree-sitter grammar.
@@ -223,5 +246,3 @@ fn addGrammar(
 
     return lib;
 }
-
-

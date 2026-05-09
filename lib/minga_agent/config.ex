@@ -18,6 +18,8 @@ defmodule MingaAgent.Config do
   4. If internal-only, the struct default is sufficient
   """
 
+  alias MingaAgent.Hooks.Hook
+
   @default_model "anthropic:claude-sonnet-4"
 
   defstruct [
@@ -35,10 +37,11 @@ defmodule MingaAgent.Config do
     max_retries: 3,
     max_cost: nil,
 
-    # Tool approval
+    # Tool approval and hooks
     tool_approval: :destructive,
     destructive_tools: ~w(write_file edit_file multi_edit_file shell git_stage git_commit),
     tool_permissions: nil,
+    agent_hooks: [],
 
     # System prompt
     system_prompt: "",
@@ -92,6 +95,7 @@ defmodule MingaAgent.Config do
           tool_approval: :destructive | :all | :none,
           destructive_tools: [String.t()],
           tool_permissions: map() | nil,
+          agent_hooks: [Hook.t()],
           system_prompt: String.t(),
           append_system_prompt: String.t(),
           api_base_url: String.t(),
@@ -140,6 +144,7 @@ defmodule MingaAgent.Config do
           ~w(write_file edit_file multi_edit_file shell git_stage git_commit)
         ),
       tool_permissions: get(:agent_tool_permissions, nil),
+      agent_hooks: normalize_hooks(get(:agent_hooks, [])),
       system_prompt: get(:agent_system_prompt, ""),
       append_system_prompt: get(:agent_append_system_prompt, ""),
       api_base_url: get(:agent_api_base_url, ""),
@@ -162,6 +167,21 @@ defmodule MingaAgent.Config do
   @doc "Returns the default model string (with provider prefix)."
   @spec default_model() :: String.t()
   def default_model, do: @default_model
+
+  @doc "Normalizes raw `:agent_hooks` config declarations into hook structs."
+  @spec normalize_hooks(term()) :: [Hook.t()]
+  def normalize_hooks(nil), do: []
+
+  def normalize_hooks(raw_hooks) when is_list(raw_hooks) do
+    raw_hooks
+    |> Enum.map(&Hook.normalize/1)
+    |> Enum.flat_map(fn
+      {:ok, hook} -> [hook]
+      {:error, message} -> raise ArgumentError, message
+    end)
+  end
+
+  def normalize_hooks(_raw_hooks), do: raise(ArgumentError, ":agent_hooks must be a list")
 
   @doc """
   Returns the configured model, falling back to the default.

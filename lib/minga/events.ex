@@ -39,6 +39,7 @@ defmodule Minga.Events do
   | `:project_rebuilt` | `ProjectRebuiltEvent` | `root: String.t()` |
   | `:command_done`    | `CommandDoneEvent`    | `name: String.t(), exit_code: non_neg_integer()` |
   | `:log_message`     | `LogMessageEvent`     | `text: String.t(), level: :info \| :warning \| :error` |
+  | `:agent_hook`      | `AgentHookEvent`        | `event, phase, tool_name, tool_call_id, tool_pattern` |
   | `:face_overrides_changed` | `FaceOverridesChangedEvent` | `buffer: pid(), overrides: map()` |
 
   ## Why Registry?
@@ -181,6 +182,23 @@ defmodule Minga.Events do
     @type t :: %__MODULE__{text: String.t(), level: level()}
   end
 
+  defmodule AgentHookEvent do
+    @moduledoc "Payload for `:agent_hook` lifecycle telemetry events."
+    @enforce_keys [:event, :phase, :tool_name, :tool_call_id, :tool_pattern]
+    defstruct [:event, :phase, :tool_name, :tool_call_id, :tool_pattern, :exit_status, :reason]
+
+    @type phase :: :started | :allowed | :vetoed
+    @type t :: %__MODULE__{
+            event: String.t(),
+            phase: phase(),
+            tool_name: String.t(),
+            tool_call_id: String.t(),
+            tool_pattern: String.t(),
+            exit_status: non_neg_integer() | nil,
+            reason: term()
+          }
+  end
+
   defmodule FaceOverridesChangedEvent do
     @moduledoc """
     Payload for `:face_overrides_changed` events.
@@ -239,6 +257,7 @@ defmodule Minga.Events do
           | :log_message
           | :face_overrides_changed
           | :agent_session_stopped
+          | :agent_hook
           | :changeset_merged
           | :changeset_budget_exhausted
           | :load_user_themes
@@ -259,6 +278,7 @@ defmodule Minga.Events do
           | LspStatusEvent.t()
           | SupervisorRestartedEvent.t()
           | LogMessageEvent.t()
+          | AgentHookEvent.t()
           | FaceOverridesChangedEvent.t()
           | LoadUserThemesEvent.t()
           | MingaAgent.SessionManager.SessionStoppedEvent.t()
@@ -382,6 +402,7 @@ defmodule Minga.Events do
   @spec broadcast(:changeset_budget_exhausted, MingaAgent.Changeset.BudgetExhaustedEvent.t()) ::
           :ok
   @spec broadcast(:load_user_themes, LoadUserThemesEvent.t()) :: :ok
+  @spec broadcast(:agent_hook, AgentHookEvent.t()) :: :ok
   @spec broadcast(:buffer_fork_conflict, map()) :: :ok
   @spec broadcast(:extension_updates_available, Minga.Extension.UpdatesAvailableEvent.t()) :: :ok
   def broadcast(topic, payload) when is_atom(topic) and is_map(payload) do

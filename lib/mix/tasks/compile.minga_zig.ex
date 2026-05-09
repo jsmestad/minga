@@ -13,6 +13,7 @@ defmodule Mix.Tasks.Compile.MingaZig do
   @priv_dir "priv"
   @renderer_name "minga-renderer"
   @parser_name "minga-parser"
+  @hook_runner_name "minga-hook-runner"
 
   # File extensions that should trigger a Zig rebuild when modified.
   @zig_source_extensions ~w(.zig .zon .c .h .scm)
@@ -21,10 +22,10 @@ defmodule Mix.Tasks.Compile.MingaZig do
   @spec run(keyword()) :: {:ok, []} | {:error, []}
   def run(_opts) do
     if File.dir?(@zig_dir) do
-      output = Path.join(@priv_dir, @renderer_name)
+      outputs = required_outputs()
 
-      if needs_rebuild?(output) do
-        compile_zig_backend("tui", @renderer_name)
+      if needs_rebuild?(outputs) do
+        compile_zig_backend("tui")
       else
         {:ok, []}
       end
@@ -33,12 +34,27 @@ defmodule Mix.Tasks.Compile.MingaZig do
     end
   end
 
-  @spec needs_rebuild?(String.t()) :: boolean()
-  defp needs_rebuild?(output_path) do
-    case File.stat(output_path, time: :posix) do
-      {:error, :enoent} -> true
-      {:ok, %{mtime: output_mtime}} -> any_source_newer?(output_mtime)
+  @spec required_outputs() :: [String.t()]
+  defp required_outputs do
+    Enum.map([@renderer_name, @parser_name, @hook_runner_name], &Path.join(@priv_dir, &1))
+  end
+
+  @spec needs_rebuild?([String.t()]) :: boolean()
+  defp needs_rebuild?(output_paths) do
+    case oldest_output_mtime(output_paths) do
+      nil -> true
+      output_mtime -> any_source_newer?(output_mtime)
     end
+  end
+
+  @spec oldest_output_mtime([String.t()]) :: integer() | nil
+  defp oldest_output_mtime(output_paths) do
+    Enum.reduce_while(output_paths, nil, fn path, oldest ->
+      case File.stat(path, time: :posix) do
+        {:ok, %{mtime: mtime}} -> {:cont, if(oldest, do: min(mtime, oldest), else: mtime)}
+        {:error, _reason} -> {:halt, nil}
+      end
+    end)
   end
 
   @spec any_source_newer?(integer()) :: boolean()
@@ -64,17 +80,20 @@ defmodule Mix.Tasks.Compile.MingaZig do
     end)
   end
 
-  @spec compile_zig_backend(String.t(), String.t()) :: {:ok, []} | {:error, []}
-  defp compile_zig_backend(backend, output_name) do
-    Mix.shell().info("Compiling Zig renderer (#{backend})...")
+  @spec compile_zig_backend(String.t()) :: {:ok, []} | {:error, []}
+  defp compile_zig_backend(backend) do
+    Mix.shell().info("Compiling Zig binaries (#{backend})...")
 
-    args = ["build"] ++ if(backend != "tui", do: ["-Dbackend=#{backend}"], else: [])
+    args =
+      ["build"] ++
+        zig_target_args() ++ if(backend != "tui", do: ["-Dbackend=#{backend}"], else: [])
 
     case System.cmd("zig", args, cd: @zig_dir, stderr_to_stdout: true) do
       {_output, 0} ->
-        Mix.shell().info("Zig renderer (#{backend}) compiled successfully")
-        copy_to_priv(@renderer_name, output_name)
-        copy_to_priv(@parser_name, @parser_name)
+        Mix.shell().info("Zig binaries (#{backend}) compiled successfully")
+        copy_to_priv(@renderer_name)
+        copy_to_priv(@parser_name)
+        copy_to_priv(@hook_runner_name)
         {:ok, []}
 
       {output, _code} ->
@@ -83,18 +102,27 @@ defmodule Mix.Tasks.Compile.MingaZig do
     end
   end
 
-  @spec copy_to_priv(String.t(), String.t()) :: :ok
-  defp copy_to_priv(src_name, dest_name) do
-    src = Path.join([@zig_dir, "zig-out", "bin", src_name])
+  @spec zig_target_args() :: [String.t()]
+  defp zig_target_args do
+    case {:os.type(), :erlang.system_info(:system_architecture) |> List.to_string()} do
+      {{:unix, :darwin}, "aarch64" <> _rest} -> ["-Dtarget=aarch64-macos.15.0"]
+      {{:unix, :darwin}, "x86_64" <> _rest} -> ["-Dtarget=x86_64-macos.15.0"]
+      _other -> []
+    end
+  end
+
+  @spec copy_to_priv(String.t()) :: :ok
+  defp copy_to_priv(name) do
+    src = Path.join([@zig_dir, "zig-out", "bin", name])
     File.mkdir_p!(@priv_dir)
-    dest = Path.join(@priv_dir, dest_name)
+    dest = Path.join(@priv_dir, name)
 
     if File.exists?(src) do
       File.cp!(src, dest)
       # Ensure executable
       File.chmod!(dest, 0o755)
       codesign_if_macos(dest)
-      Mix.shell().info("Copied renderer to #{dest}")
+      Mix.shell().info("Copied #{name} to #{dest}")
     end
 
     :ok

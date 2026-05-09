@@ -24,9 +24,18 @@ defmodule Mix.Tasks.Zig.Lint do
     end
 
     run_step("zig fmt --check", zig_root, ["fmt", "--check", "src/"])
-    run_step("zig build test", zig_root, ["build", "test"])
+    run_step("zig build test", zig_root, ["build", "test"] ++ zig_target_args())
 
     Mix.shell().info([:green, "Zig lint passed.", :reset])
+  end
+
+  @spec zig_target_args() :: [String.t()]
+  defp zig_target_args do
+    case {:os.type(), :erlang.system_info(:system_architecture) |> List.to_string()} do
+      {{:unix, :darwin}, "aarch64" <> _rest} -> ["-Dtarget=aarch64-macos.15.0"]
+      {{:unix, :darwin}, "x86_64" <> _rest} -> ["-Dtarget=x86_64-macos.15.0"]
+      _other -> []
+    end
   end
 
   @spec run_step(String.t(), String.t(), [String.t()]) :: :ok

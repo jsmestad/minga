@@ -15,6 +15,7 @@ defmodule MingaAgent.ConfigTest do
       assert is_boolean(config.prompt_cache)
       assert is_boolean(config.notifications)
       assert is_list(config.destructive_tools)
+      assert is_list(config.agent_hooks)
       assert is_list(config.notify_on)
     end
 
@@ -30,6 +31,7 @@ defmodule MingaAgent.ConfigTest do
       assert config.max_retries == 3
       assert config.max_cost == nil
       assert config.tool_approval == :destructive
+      assert config.agent_hooks == []
       assert config.prompt_cache == true
       assert config.compaction_threshold == 0.80
       assert config.compaction_keep_recent == 6
@@ -51,6 +53,20 @@ defmodule MingaAgent.ConfigTest do
   describe "default_model/0" do
     test "returns the Sonnet model string" do
       assert Config.default_model() =~ "anthropic:claude"
+    end
+  end
+
+  describe "normalize_hooks/1" do
+    test "normalizes PreToolUse hooks from config maps" do
+      assert [hook] =
+               Config.normalize_hooks([
+                 %{event: "PreToolUse", tool: "shell", command: "echo policy >&2"}
+               ])
+
+      assert hook.event == :pre_tool_use
+      assert hook.tool_pattern == "shell"
+      assert hook.command == "echo policy >&2"
+      assert hook.timeout_ms == 30_000
     end
   end
 end
