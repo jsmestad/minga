@@ -20,6 +20,7 @@ defmodule MingaEditor.UI.Theme.Catppuccin do
         split_border_fg: p.surface1,
         cursorline_bg: p.surface0,
         nav_flash_bg: p.surface1,
+        yank_flash_bg: p.surface1,
         highlight_read_bg: p.surface1,
         highlight_write_bg: p.surface2,
         selection_bg: p.surface2

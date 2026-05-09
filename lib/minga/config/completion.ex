@@ -358,6 +358,9 @@ defmodule Minga.Config.Completion do
   defp option_description(:nav_flash_threshold),
     do: "Minimum line distance to trigger the navigation flash."
 
+  defp option_description(:yank_flash),
+    do: "Flash the yanked region briefly after a yank operation."
+
   defp option_description(:parser_tree_ttl),
     do: "Seconds to keep unused tree-sitter parse trees in memory."
 

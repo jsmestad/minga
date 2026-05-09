@@ -330,6 +330,13 @@ defmodule MingaEditor.State do
   @spec cancel_nav_flash(t()) :: t()
   def cancel_nav_flash(s), do: update_shell_state(s, &ShellState.cancel_nav_flash/1)
 
+  @spec yank_flash(t()) :: MingaEditor.YankFlash.t() | nil
+  def yank_flash(%{shell_state: ss}), do: ShellState.yank_flash(ss)
+  @spec set_yank_flash(t(), MingaEditor.YankFlash.t()) :: t()
+  def set_yank_flash(s, flash), do: update_shell_state(s, &ShellState.set_yank_flash(&1, flash))
+  @spec cancel_yank_flash(t()) :: t()
+  def cancel_yank_flash(s), do: update_shell_state(s, &ShellState.cancel_yank_flash/1)
+
   @spec hover_popup(t()) :: MingaEditor.HoverPopup.t() | nil
   def hover_popup(%{shell_state: ss}), do: ShellState.hover_popup(ss)
   @spec set_hover_popup(t(), MingaEditor.HoverPopup.t()) :: t()

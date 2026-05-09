@@ -15,6 +15,7 @@ defmodule MingaEditor.Shell.Traditional.State do
   alias MingaEditor.BottomPanel
   alias MingaEditor.HoverPopup
   alias MingaEditor.NavFlash
+  alias MingaEditor.YankFlash
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.ModalOverlay
   alias MingaEditor.State.TabBar
@@ -23,6 +24,7 @@ defmodule MingaEditor.Shell.Traditional.State do
 
   @type t :: %__MODULE__{
           nav_flash: NavFlash.t() | nil,
+          yank_flash: YankFlash.t() | nil,
           hover_popup: HoverPopup.t() | nil,
           status_msg: String.t() | nil,
           whichkey: WhichKey.t(),
@@ -43,6 +45,7 @@ defmodule MingaEditor.Shell.Traditional.State do
         }
 
   defstruct nav_flash: nil,
+            yank_flash: nil,
             hover_popup: nil,
             status_msg: nil,
             whichkey: %WhichKey{},
@@ -95,6 +98,24 @@ defmodule MingaEditor.Shell.Traditional.State do
   @spec cancel_nav_flash(t()) :: t()
   def cancel_nav_flash(%{} = ss) do
     %{ss | nav_flash: nil}
+  end
+
+  # ── Yank flash ────────────────────────────────────────────────────────────
+
+  @doc "Returns the yank flash state, or nil when inactive."
+  @spec yank_flash(t()) :: YankFlash.t() | nil
+  def yank_flash(%{yank_flash: flash}), do: flash
+
+  @doc "Sets the yank flash state."
+  @spec set_yank_flash(t(), YankFlash.t()) :: t()
+  def set_yank_flash(%{} = ss, %YankFlash{} = flash) do
+    %{ss | yank_flash: flash}
+  end
+
+  @doc "Cancels the yank flash animation."
+  @spec cancel_yank_flash(t()) :: t()
+  def cancel_yank_flash(%{} = ss) do
+    %{ss | yank_flash: nil}
   end
 
   # ── Hover popup ────────────────────────────────────────────────────────────

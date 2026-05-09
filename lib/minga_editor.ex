@@ -37,6 +37,7 @@ defmodule MingaEditor do
   alias MingaEditor.LspActions
   alias MingaEditor.MessageLog
   alias MingaEditor.NavFlash
+  alias MingaEditor.YankFlash
   alias MingaEditor.Renderer
   alias MingaEditor.SemanticTokenSync
   alias MingaEditor.Startup
@@ -427,6 +428,7 @@ defmodule MingaEditor do
   # completion, render) exactly once.
   def handle_info({:minga_input, {:key_press, codepoint, modifiers}}, state) do
     state = cancel_nav_flash(state)
+    state = cancel_yank_flash(state)
 
     new_state =
       Minga.Telemetry.span([:minga, :input, :dispatch], %{}, fn ->
@@ -645,6 +647,27 @@ defmodule MingaEditor do
 
           :done ->
             {:noreply, Renderer.render_or_async(EditorState.cancel_nav_flash(state))}
+        end
+    end
+  end
+
+  # Yank-flash timer step — advance the fade or clear the flash.
+  def handle_info(:yank_flash_step, state) do
+    case state.shell_state.yank_flash do
+      nil ->
+        {:noreply, state}
+
+      %YankFlash{buf: buf} = flash ->
+        case YankFlash.advance(flash) do
+          {:continue, updated, effects} ->
+            update_yank_flash_decoration(buf, updated, state)
+            updated = apply_flash_effects(state, updated, effects)
+            state = EditorState.set_yank_flash(state, updated)
+            {:noreply, Renderer.render_or_async(state)}
+
+          :done ->
+            clear_yank_highlight(buf)
+            {:noreply, Renderer.render_or_async(EditorState.cancel_yank_flash(state))}
         end
     end
   end
@@ -1377,37 +1400,57 @@ defmodule MingaEditor do
     EditorState.cancel_nav_flash(state)
   end
 
-  # Executes side effects from NavFlash and returns the flash struct
-  # with the timer reference filled in.
-  @spec apply_flash_effects(state(), NavFlash.t(), [NavFlash.side_effect()]) :: NavFlash.t()
-  defp apply_flash_effects(state, flash, effects) do
-    Enum.reduce(effects, flash, fn
-      {:send_after, msg, interval}, acc ->
-        if state.backend != :headless do
-          ref = Process.send_after(self(), msg, interval)
-          %{acc | timer: ref}
-        else
-          acc
-        end
+  @spec cancel_yank_flash(state()) :: state()
+  defp cancel_yank_flash(%{shell_state: %{yank_flash: nil}} = state), do: state
 
-      {:cancel_timer, ref}, acc ->
-        Process.cancel_timer(ref)
-        acc
-    end)
+  defp cancel_yank_flash(%{shell_state: %{yank_flash: flash}} = state) do
+    effects = YankFlash.cancel_effects(flash)
+    execute_flash_effects(state, effects)
+    clear_yank_highlight(flash.buf)
+    EditorState.cancel_yank_flash(state)
   end
 
-  # Executes side effects without updating a flash struct (for cancellation).
-  @spec execute_flash_effects(state(), [NavFlash.side_effect()]) :: :ok
-  defp execute_flash_effects(state, effects) do
-    Enum.each(effects, fn
-      {:cancel_timer, ref} ->
-        Process.cancel_timer(ref)
+  @spec update_yank_flash_decoration(pid(), YankFlash.t(), state()) :: :ok
+  defp update_yank_flash_decoration(buf, flash, state) do
+    flash_bg = state.theme.editor.yank_flash_bg || YankFlash.default_flash_bg()
+    target_bg = state.theme.editor.bg
+    color = YankFlash.color_for_step(flash, flash_bg, target_bg)
 
-      {:send_after, msg, interval} ->
-        if state.backend != :headless do
-          Process.send_after(self(), msg, interval)
-        end
-    end)
+    {hl_start, hl_end} =
+      YankFlash.highlight_bounds(buf, flash.start_pos, flash.end_pos, flash.range_type)
+
+    try do
+      Buffer.remove_highlight_group(buf, YankFlash.flash_group())
+
+      Buffer.add_highlight(buf, hl_start, hl_end,
+        style: Minga.Core.Face.new(bg: color),
+        group: YankFlash.flash_group(),
+        priority: 50
+      )
+    catch
+      :exit, _ -> :ok
+    end
+
+    :ok
+  end
+
+  @spec clear_yank_highlight(pid()) :: :ok
+  defp clear_yank_highlight(buf) do
+    try do
+      Buffer.remove_highlight_group(buf, YankFlash.flash_group())
+    catch
+      :exit, _ -> :ok
+    end
+
+    :ok
+  end
+
+  defp apply_flash_effects(state, flash, effects) do
+    MingaEditor.FlashEffects.apply(state, flash, effects)
+  end
+
+  defp execute_flash_effects(state, effects) do
+    MingaEditor.FlashEffects.execute(state, effects)
   end
 
   # ── Key dispatch ─────────────────────────────────────────────────────────────
