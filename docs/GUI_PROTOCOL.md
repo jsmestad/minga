@@ -98,7 +98,7 @@ Flags bits:
   bit 1: is_dirty
   bit 2: is_agent (agent chat tab vs file tab)
   bit 3: has_attention
-  bits 4-7: agent_status (0=idle, 1=thinking, 2=tool_executing, 3=error, 4=plan)
+  bits 4-6: agent_status (0=idle, 1=thinking, 2=tool_executing, 3=error, 4=plan)
 
 group_id: workspace group this tab belongs to. 0 = manual/ungrouped workspace.
 Non-zero values match workspace IDs from gui_workspace_bar (0x86). The frontend

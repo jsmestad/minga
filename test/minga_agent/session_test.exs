@@ -216,7 +216,7 @@ defmodule MingaAgent.SessionTest do
     defp execution_mode(_status), do: :exec
 
     @spec maybe_emit_plan_refusal(pid(), Executor.result()) :: :ok
-    defp maybe_emit_plan_refusal(subscriber, {:error, {:plan_mode_refused, _name, message}}) do
+    defp maybe_emit_plan_refusal(subscriber, {:error, {:plan_mode_refused, message}}) do
       send(
         subscriber,
         {:agent_provider_event, %Event.SystemMessage{message: message, level: :info}}
@@ -307,8 +307,7 @@ defmodule MingaAgent.SessionTest do
       assert :ok = Session.enter_plan(session)
       assert :ok = Session.send_prompt(session, "write a file")
 
-      assert_receive {:provider_tool_result,
-                      {:error, {:plan_mode_refused, "write_file", message}}},
+      assert_receive {:provider_tool_result, {:error, {:plan_mode_refused, message}}},
                      200
 
       assert message =~ "Plan mode"
@@ -331,6 +330,46 @@ defmodule MingaAgent.SessionTest do
         {:agent_provider_event, %Event.ToolStart{tool_call_id: "tc", name: "read_file"}}
       )
 
+      assert Session.status(session) == :plan
+    end
+
+    test "AgentEnd preserves plan mode status" do
+      {:ok, session} =
+        Session.start_link(
+          provider: SlowMockProvider,
+          provider_opts: []
+        )
+
+      Session.subscribe(session)
+      assert :ok = Session.enter_plan(session)
+      assert :ok = Session.send_prompt(session, "hello")
+      SlowMockProvider.proceed(Session.get_provider(session))
+      assert_receive {:agent_event, _, :messages_changed}, 200
+      assert Session.status(session) == :plan
+    end
+
+    test "abort preserves plan mode", %{session: session} do
+      assert :ok = Session.enter_plan(session)
+      assert :ok = Session.abort(session)
+      assert Session.status(session) == :plan
+    end
+
+    test "enter_exec is a no-op when not in plan mode", %{session: session} do
+      msg_count_before = length(Session.messages(session))
+      assert :ok = Session.enter_exec(session)
+      assert Session.status(session) == :idle
+      assert length(Session.messages(session)) == msg_count_before
+    end
+
+    test "error event preserves plan mode", %{session: session} do
+      assert :ok = Session.enter_plan(session)
+
+      send(
+        session,
+        {:agent_provider_event, %Event.Error{message: "something broke"}}
+      )
+
+      # Sync via a GenServer.call to ensure the handle_info has been processed
       assert Session.status(session) == :plan
     end
   end

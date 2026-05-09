@@ -8,7 +8,7 @@ defmodule MingaAgent.Tool.PlanMode do
   alias MingaAgent.Tools
 
   @typedoc "Tool refusal reason returned to callers."
-  @type refusal :: {:plan_mode_refused, String.t(), String.t()}
+  @type refusal :: {:plan_mode_refused, String.t()}
 
   @doc "Returns true when the tool call must be blocked in plan mode."
   @spec blocked?(String.t(), map()) :: boolean()
@@ -25,6 +25,6 @@ defmodule MingaAgent.Tool.PlanMode do
   @doc "Returns the structured refusal tuple for a blocked plan-mode tool call."
   @spec refusal(String.t()) :: refusal()
   def refusal(name) when is_binary(name) do
-    {:plan_mode_refused, name, refusal_message(name)}
+    {:plan_mode_refused, refusal_message(name)}
   end
 end

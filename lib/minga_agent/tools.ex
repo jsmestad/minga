@@ -67,14 +67,13 @@ defmodule MingaAgent.Tools do
           fork_store: pid() | nil
         ]
 
-  @default_destructive_tools ~w(write_file edit_file multi_edit multi_edit_file shell git_stage git_commit rename)
+  @default_destructive_tools ~w(write_file edit_file multi_edit_file shell git_stage git_commit rename)
 
   @doc """
   Returns true if the named tool is classified as destructive.
 
-  Reads the configured list from `:agent_destructive_tools` (defaults to
-  `["write_file", "edit_file", "shell"]`). Accepts an optional list override
-  for testing without starting the Options agent.
+  Reads the configured list from `:agent_destructive_tools`. Accepts an
+  optional list override for testing without starting the Options agent.
 
   Some tools have conditional destructiveness based on their arguments.
   Pass the tool arguments map to check parameter-dependent cases like

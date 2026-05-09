@@ -226,6 +226,13 @@ defmodule MingaEditor.Agent.SlashCommandTest do
       assert Session.status(session) == :plan
     end
 
+    test "/skill:off:plan leaves plan mode" do
+      session = start_session()
+      :ok = Session.enter_plan(session)
+      {:ok, _state} = SlashCommand.execute(mock_state(session: session), "/skill:off:plan")
+      assert Session.status(session) == :idle
+    end
+
     test "/plan without an active session returns a clear error" do
       assert {:error, "No active agent session"} = SlashCommand.execute(mock_state(), "/plan")
     end

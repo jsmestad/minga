@@ -652,7 +652,7 @@ defmodule MingaAgent.Session do
     state = %{state | messages: messages, pending_approval: nil}
     state = append_system_message(state, "Aborted", :info)
     state = notify_messages_changed(state)
-    state = set_status(state, :idle)
+    state = set_idle_or_plan(state)
     {:reply, :ok, state}
   end
 
@@ -698,10 +698,14 @@ defmodule MingaAgent.Session do
     {:reply, :ok, state}
   end
 
-  def handle_call(:enter_exec, _from, state) do
+  def handle_call(:enter_exec, _from, %{status: :plan} = state) do
     state = append_system_message(state, exec_mode_message(), :info)
     state = notify_messages_changed(state)
     state = set_status(state, :idle)
+    {:reply, :ok, state}
+  end
+
+  def handle_call(:enter_exec, _from, state) do
     {:reply, :ok, state}
   end
 
@@ -1014,8 +1018,8 @@ defmodule MingaAgent.Session do
 
       {:error, reason} ->
         Minga.Log.error(:agent, "[Agent.Session] failed to start provider: #{inspect(reason)}")
-        state = set_status(state, :error)
         state = %{state | error_message: format_error(reason)}
+        state = set_error_status(state)
         broadcast(state, {:error, state.error_message})
         {:noreply, state}
     end
@@ -1028,8 +1032,8 @@ defmodule MingaAgent.Session do
 
   def handle_info({:DOWN, _ref, :process, pid, reason}, %{provider: pid} = state) do
     Minga.Log.warning(:agent, "[Agent.Session] provider process died: #{inspect(reason)}")
-    state = set_status(state, :error)
     state = %{state | provider: nil, error_message: "Agent provider crashed"}
+    state = set_error_status(state)
     broadcast(state, {:error, state.error_message})
 
     # Try to restart the provider after a brief delay
@@ -1210,7 +1214,7 @@ defmodule MingaAgent.Session do
 
   defp handle_provider_event(%Event.Error{message: message}, state) do
     Notifier.notify(:error, message)
-    state = set_status(state, :error)
+    state = set_error_status(state)
     state = %{state | error_message: message}
     state = append_system_message(state, "Error: #{message}", :error)
     broadcast(state, {:error, message})
@@ -1335,6 +1339,10 @@ defmodule MingaAgent.Session do
   @spec set_idle_or_plan(state()) :: state()
   defp set_idle_or_plan(%{status: :plan} = state), do: state
   defp set_idle_or_plan(state), do: set_status(state, :idle)
+
+  @spec set_error_status(state()) :: state()
+  defp set_error_status(%{status: :plan} = state), do: state
+  defp set_error_status(state), do: set_status(state, :error)
 
   @spec plan_mode_message() :: String.t()
   defp plan_mode_message do

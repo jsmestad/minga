@@ -159,7 +159,7 @@ defmodule MingaAgent.Tool.ExecutorTest do
         end
       )
 
-      assert {:error, {:plan_mode_refused, "write_file", message}} =
+      assert {:error, {:plan_mode_refused, message}} =
                Executor.execute("write_file", %{"path" => "x", "content" => "new"}, table, :plan)
 
       assert message =~ "Plan mode"
@@ -206,7 +206,7 @@ defmodule MingaAgent.Tool.ExecutorTest do
 
       assert_receive {:called, %{"path" => "x.ex"}}
 
-      assert {:error, {:plan_mode_refused, "code_actions", message}} =
+      assert {:error, {:plan_mode_refused, message}} =
                Executor.execute(
                  "code_actions",
                  %{"path" => "x.ex", "apply" => "Organize imports"},
@@ -230,7 +230,7 @@ defmodule MingaAgent.Tool.ExecutorTest do
           end
         )
 
-      assert {:error, {:plan_mode_refused, "git_commit", message}} =
+      assert {:error, {:plan_mode_refused, message}} =
                Executor.execute_approved(spec, %{"message" => "test"}, :plan)
 
       assert message =~ "git_commit"
