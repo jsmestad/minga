@@ -337,8 +337,8 @@ defmodule Minga.Mode.Visual do
     {:execute_then_transition, [:reindent_visual_selection], :normal, state}
   end
 
-  # d — delete selection, return to Normal
-  def handle_key({?d, 0}, state) do
+  # d / x: delete selection, return to Normal
+  def handle_key({key, 0}, state) when key in [?d, ?x] do
     {:execute_then_transition, [:delete_visual_selection], :normal, state}
   end
 

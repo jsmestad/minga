@@ -189,6 +189,35 @@ defmodule Minga.Mode.VisualTest do
     end
   end
 
+  describe "x deletes selection and transitions to Normal" do
+    test "x behaves exactly like d for visual delete" do
+      state = visual_state({0, 0}, :char)
+
+      assert Visual.handle_key({?x, 0}, state) == Visual.handle_key({?d, 0}, state)
+    end
+
+    test "x emits :delete_visual_selection and transitions to :normal" do
+      state = visual_state({0, 0}, :char)
+
+      assert {:execute_then_transition, [:delete_visual_selection], :normal, _} =
+               Visual.handle_key({?x, 0}, state)
+    end
+
+    test "Mode.process: x returns :normal mode with :delete_visual_selection command" do
+      state = visual_state()
+      {new_mode, commands, _} = Mode.process(:visual, {?x, 0}, state)
+      assert new_mode == :normal
+      assert commands == [:delete_visual_selection]
+    end
+
+    test "x works identically in linewise visual mode" do
+      state = visual_state({2, 0}, :line)
+
+      assert {:execute_then_transition, [:delete_visual_selection], :normal, _} =
+               Visual.handle_key({?x, 0}, state)
+    end
+  end
+
   describe "c — delete selection, transition to Insert" do
     test "c emits :delete_visual_selection and transitions to :insert" do
       state = visual_state({0, 3}, :char)
