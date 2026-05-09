@@ -3,9 +3,9 @@ defmodule MingaAgent.Session do
   Manages the lifecycle of one AI agent conversation.
 
   The session holds conversation history, tracks agent status, and
-  coordinates between the provider (pi RPC, etc.) and the editor UI.
-  It runs as a supervised GenServer under `Agent.Supervisor`, so a
-  crash here never affects buffers or the editor.
+  coordinates between the provider and the editor UI. It runs as a
+  supervised GenServer under `Agent.Supervisor`, so a crash here never
+  affects buffers or the editor.
 
   ## Status lifecycle
 
@@ -1347,7 +1347,6 @@ defmodule MingaAgent.Session do
   end
 
   @spec format_error(term()) :: String.t()
-  defp format_error({:pi_not_found, msg}), do: msg
   defp format_error({:spawn_failed, msg}), do: "Failed to start agent: #{msg}"
   defp format_error(reason), do: inspect(reason)
 
@@ -1396,7 +1395,7 @@ defmodule MingaAgent.Session do
 
   # Determines which provider module to use. If an explicit `:provider` option is
   # passed (common in tests and from the existing code), use that. Otherwise, delegate
-  # to the ProviderResolver which checks config and pi availability.
+  # to the ProviderResolver which checks config.
   @spec resolve_provider_module(keyword()) :: module()
   defp resolve_provider_module(opts) do
     case Keyword.fetch(opts, :provider) do

@@ -471,12 +471,6 @@ defmodule MingaEditor.Agent.UIState do
     %{state | panel: %{panel | thinking_level: level}}
   end
 
-  @doc "Sets the provider name."
-  @spec set_provider_name(t(), String.t()) :: t()
-  def set_provider_name(%__MODULE__{panel: panel} = state, provider) do
-    %{state | panel: %{panel | provider_name: provider}}
-  end
-
   @doc "Sets the model name."
   @spec set_model_name(t(), String.t()) :: t()
   def set_model_name(%__MODULE__{panel: panel} = state, model) do

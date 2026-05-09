@@ -231,7 +231,7 @@ defmodule Minga.Config.Options do
     {:wrap, :boolean, false},
     {:linebreak, :boolean, true},
     {:breakindent, :boolean, true},
-    {:agent_provider, {:enum, [:auto, :native, :pi_rpc]}, :auto},
+    {:agent_provider, {:enum, [:auto, :native]}, :auto},
     {:agent_model, :string_or_nil, nil},
     {:agent_tool_approval, {:enum, [:destructive, :all, :none]}, :destructive},
     {:agent_destructive_tools, :string_list,
@@ -733,6 +733,10 @@ defmodule Minga.Config.Options do
 
   defp validate_type(:atom, name, value) do
     {:error, "#{name} must be an atom, got: #{inspect(value)}"}
+  end
+
+  defp validate_type({:enum, _allowed}, :agent_provider, :pi_rpc) do
+    {:error, "agent_provider no longer supports :pi_rpc. Use :native instead."}
   end
 
   defp validate_type({:enum, allowed}, name, value) when is_atom(value) do

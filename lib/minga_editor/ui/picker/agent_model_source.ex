@@ -3,9 +3,8 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
   Picker source for AI agent models.
 
   Fetches available models from the active agent session and presents
-  them for selection. Works with both the pi-agent backend (which
-  returns `%{"models" => [...]}`) and the native provider (which
-  returns a flat list of model maps).
+  them for selection. The session returns native provider model maps,
+  so model selection only needs to update the model id.
 
   Selecting a model sets it via `set_model` on the editor state, which
   restarts the session with the new model.
@@ -44,16 +43,7 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
   @impl true
   @spec on_select(Item.t(), term()) :: term()
   def on_select(%Item{id: model_id}, state) when is_binary(model_id) do
-    # Native provider: model_id is the full "provider:model_name" string
     MingaEditor.Commands.Agent.set_model(state, model_id)
-  end
-
-  def on_select(%Item{id: {provider, model_id}}, state) do
-    # Pi-agent backend: separate provider and model_id
-    MingaEditor.Commands.Agent.set_provider(
-      MingaEditor.Commands.Agent.set_model(state, model_id),
-      provider
-    )
   end
 
   @impl true
@@ -62,16 +52,9 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
 
   # ── Private ─────────────────────────────────────────────────────────────────
 
-  # Handles both response formats:
-  # - Native provider returns {:ok, [model_map, ...]}
-  # - Pi-agent returns {:ok, %{"models" => [model_map, ...]}}
   @spec fetch_models(pid()) :: {:ok, [map()]} | {:error, term()}
   defp fetch_models(session) do
-    case Session.get_available_models(session) do
-      {:ok, %{"models" => models}} when is_list(models) -> {:ok, models}
-      {:ok, models} when is_list(models) -> {:ok, models}
-      other -> other
-    end
+    Session.get_available_models(session)
   end
 
   @spec format_model(map()) :: Item.t()

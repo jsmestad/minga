@@ -141,7 +141,6 @@ defmodule MingaEditor.Commands.AgentSession do
 
   @doc "Formats a session start error into a user-facing message."
   @spec format_session_error(term()) :: String.t()
-  def format_session_error({:pi_not_found, msg}) when is_binary(msg), do: msg
   def format_session_error({:noproc, _}), do: "Agent supervisor not running"
   def format_session_error(reason), do: "Failed to start session: #{inspect(reason)}"
 

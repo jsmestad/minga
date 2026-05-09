@@ -117,6 +117,15 @@ defmodule Minga.Config.CompletionTest do
       assert ConfigCompletion.option_value_items(:tab_width) == []
     end
 
+    test "returns native provider values for agent_provider" do
+      items = ConfigCompletion.option_value_items(:agent_provider)
+
+      labels = Enum.map(items, & &1.label)
+      assert ":auto" in labels
+      assert ":native" in labels
+      refute ":pi_rpc" in labels
+    end
+
     test "returns empty list for unknown options" do
       assert ConfigCompletion.option_value_items(:nonexistent) == []
     end

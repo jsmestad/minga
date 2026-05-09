@@ -21,7 +21,6 @@ FILES_TO_MOVE = [
     ("minga/agent/provider.ex",         "minga_agent/provider.ex"),
     ("minga/agent/provider_resolver.ex","minga_agent/provider_resolver.ex"),
     ("minga/agent/providers/native.ex", "minga_agent/providers/native.ex"),
-    ("minga/agent/providers/pi_rpc.ex", "minga_agent/providers/pi_rpc.ex"),
     # Messages / events / state
     ("minga/agent/message.ex",          "minga_agent/message.ex"),
     ("minga/agent/event.ex",            "minga_agent/event.ex"),  # Note: NOT events.ex
@@ -105,7 +104,6 @@ TEST_FILES_TO_MOVE = [
     ("minga/agent/notifier_test.exs",         "minga_agent/notifier_test.exs"),
     ("minga/agent/provider_resolver_test.exs","minga_agent/provider_resolver_test.exs"),
     ("minga/agent/providers/native_test.exs", "minga_agent/providers/native_test.exs"),
-    ("minga/agent/providers/pi_rpc_test.exs", "minga_agent/providers/pi_rpc_test.exs"),
     ("minga/agent/retry_test.exs",            "minga_agent/retry_test.exs"),
     ("minga/agent/session_export_test.exs",   "minga_agent/session_export_test.exs"),
     ("minga/agent/session_store_test.exs",    "minga_agent/session_store_test.exs"),
@@ -151,7 +149,6 @@ MODULE_RENAMES = [
     ("Minga.Agent.TokenEstimator",     "MingaAgent.TokenEstimator"),
     ("Minga.Agent.InternalState",      "MingaAgent.InternalState"),
     ("Minga.Agent.Providers.Native",   "MingaAgent.Providers.Native"),
-    ("Minga.Agent.Providers.PiRpc",    "MingaAgent.Providers.PiRpc"),
     ("Minga.Agent.ToolApproval",       "MingaAgent.ToolApproval"),
     ("Minga.Agent.FileMention",        "MingaAgent.FileMention"),
     ("Minga.Agent.ModelLimits",        "MingaAgent.ModelLimits"),
