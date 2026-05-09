@@ -87,6 +87,7 @@ defmodule Minga.Config.OptionsTest do
                agent_system_prompt: "",
                agent_append_system_prompt: "",
                agent_tool_permissions: nil,
+               agent_hooks: [],
                agent_diff_size_threshold: 1_048_576,
                whichkey_layout: :bottom,
                line_spacing: 1.0,

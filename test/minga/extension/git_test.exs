@@ -47,6 +47,12 @@ defmodule Minga.Extension.GitIntegrationTest do
   # Isolate from CI runner's global git config
   @git_env [
     {"GIT_CONFIG_NOSYSTEM", "1"},
+    {"GIT_CONFIG_GLOBAL", "/dev/null"},
+    {"GIT_CONFIG_COUNT", "2"},
+    {"GIT_CONFIG_KEY_0", "commit.gpgsign"},
+    {"GIT_CONFIG_VALUE_0", "false"},
+    {"GIT_CONFIG_KEY_1", "tag.gpgsign"},
+    {"GIT_CONFIG_VALUE_1", "false"},
     {"GIT_AUTHOR_NAME", "Test"},
     {"GIT_AUTHOR_EMAIL", "test@test.com"},
     {"GIT_COMMITTER_NAME", "Test"},
