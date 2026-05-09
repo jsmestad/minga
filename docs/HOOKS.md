@@ -21,7 +21,7 @@ set :agent_hooks, [
 
 `tool` can be an exact tool name, `*` for all tools, or a simple glob with `*` and `?`, such as `*_file`. Hooks run in the order you declare them. The first veto stops later hooks and prevents the tool from running.
 
-`timeout_ms` is optional. The default is `30_000` milliseconds. If a hook exceeds its timeout, Minga blocks the tool call, terminates the hook process tree on supported Unix systems, and shows a clear error in the agent chat. Hooks should not launch detached background processes; timeout cleanup is not a sandbox.
+`timeout_ms` is optional. The default is `30_000` milliseconds. If a hook exceeds its timeout, Minga blocks the tool call, terminates the POSIX process group it created for the hook, and shows a clear error in the agent chat. Hooks should not launch detached background processes; timeout cleanup is not a sandbox.
 
 ## PreToolUse payload
 
