@@ -180,6 +180,11 @@ defmodule MingaEditor.Shell.Board.StateTest do
       state = State.zoom_into(state, c2.id, %{})
       assert state.focused_card == c2.id
     end
+
+    test "ignores missing cards" do
+      state = State.new()
+      assert State.zoom_into(state, 999, %{workspace: :missing}) == state
+    end
   end
 
   describe "zoom_out/1" do

@@ -298,6 +298,18 @@ defmodule MingaEditor.State do
     }
   end
 
+  @doc "Switches to the Board shell and clears any stashed Board state."
+  @spec switch_to_board(t(), BoardState.t()) :: t()
+  def switch_to_board(%__MODULE__{} = state, %BoardState{} = board_state) do
+    %{
+      state
+      | shell: MingaEditor.Shell.Board,
+        shell_state: board_state,
+        layout: nil,
+        stashed_board_state: nil
+    }
+  end
+
   # ── Shell field delegates ────────────────────────────────────────────────
   # Thin wrappers that delegate to `ShellState` through `update_shell_state/2`.
   # Both `update_shell_state` and `ShellState` methods use bare-map patterns

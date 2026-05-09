@@ -202,8 +202,12 @@ defmodule MingaEditor.Shell.Board.State do
   """
   @spec zoom_into(t(), Card.id(), map()) :: t()
   def zoom_into(%__MODULE__{} = state, card_id, workspace_snapshot) do
-    state = update_card(state, card_id, &Card.store_workspace(&1, workspace_snapshot))
-    %{state | zoomed_into: card_id, focused_card: card_id}
+    if Map.has_key?(state.cards, card_id) do
+      state = update_card(state, card_id, &Card.store_workspace(&1, workspace_snapshot))
+      %{state | zoomed_into: card_id, focused_card: card_id}
+    else
+      state
+    end
   end
 
   @doc """

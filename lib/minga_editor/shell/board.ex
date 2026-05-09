@@ -33,7 +33,9 @@ defmodule MingaEditor.Shell.Board do
   alias MingaEditor.Renderer.Regions
   alias MingaEditor.Frontend.Emit.Context, as: EmitContext
   alias MingaEditor.Shell.Board.Card
+  alias MingaEditor.Shell.Board.SessionLifecycle
   alias MingaEditor.Shell.Board.State, as: BoardState
+  alias MingaEditor.Workspace.State, as: WorkspaceState
 
   @impl true
   @spec init(keyword()) :: MingaEditor.Shell.shell_state()
@@ -72,20 +74,10 @@ defmodule MingaEditor.Shell.Board do
     # GUI card click: focus, zoom in, activate agent view.
     # Same logic as Board.Input's Enter key handler.
     shell_state = BoardState.focus_card(shell_state, card_id)
-    workspace_snapshot = Map.from_struct(workspace)
+    card = BoardState.focused(shell_state)
+    workspace_snapshot = WorkspaceState.to_tab_context(workspace)
     shell_state = BoardState.zoom_into(shell_state, card_id, workspace_snapshot)
-
-    # Restore the card's workspace if it has one
-    card = BoardState.zoomed(shell_state)
-
-    workspace =
-      case card && card.workspace do
-        ws when is_map(ws) and map_size(ws) > 0 ->
-          struct!(MingaEditor.Workspace.State, ws)
-
-        _ ->
-          workspace
-      end
+    workspace = restore_workspace(card && card.workspace, workspace)
 
     # Agent activation (session, scope, window content, prompt focus) is
     # handled by Editor.AgentActivation.activate_for_card/2 after this
@@ -96,6 +88,9 @@ defmodule MingaEditor.Shell.Board do
   end
 
   def handle_gui_action(shell_state, workspace, {:board_close_card, card_id}) do
+    card = Map.get(shell_state.cards, card_id)
+    if card, do: SessionLifecycle.stop(card.session)
+
     shell_state = BoardState.remove_card(shell_state, card_id)
     MingaEditor.Shell.Board.Persistence.save(shell_state)
     {shell_state, workspace}
@@ -118,20 +113,11 @@ defmodule MingaEditor.Shell.Board do
 
     Minga.Log.info(:agent, "Board: dispatched agent card ##{card.id} (#{model}): #{task}")
 
-    # Start an agent session for this card
-    case MingaAgent.Supervisor.start_session(
-           provider_opts: [model: model],
-           thinking_level: :normal
-         ) do
+    opts = [provider_opts: [model: model], thinking_level: :normal]
+
+    case SessionLifecycle.start(opts) do
       {:ok, pid} ->
-        shell_state =
-          BoardState.update_card(shell_state, card.id, fn c ->
-            %{c | session: pid}
-          end)
-
-        # Send the task as the initial prompt
-        MingaAgent.Session.send_prompt(pid, task)
-
+        shell_state = BoardState.update_card(shell_state, card.id, &Card.attach_session(&1, pid))
         MingaEditor.Shell.Board.Persistence.save(shell_state)
         {shell_state, workspace}
 
@@ -141,11 +127,7 @@ defmodule MingaEditor.Shell.Board do
           "Board: failed to start session for card ##{card.id}: #{inspect(reason)}"
         )
 
-        shell_state =
-          BoardState.update_card(shell_state, card.id, fn c ->
-            %{c | status: :errored}
-          end)
-
+        shell_state = BoardState.update_card(shell_state, card.id, &Card.set_status(&1, :errored))
         MingaEditor.Shell.Board.Persistence.save(shell_state)
         {shell_state, workspace}
     end
@@ -531,12 +513,12 @@ defmodule MingaEditor.Shell.Board do
 
     if card do
       grid_workspace = card.workspace
-      live_workspace = Map.from_struct(workspace)
+      live_workspace = WorkspaceState.to_tab_context(workspace)
       updated_card = Card.store_workspace(card, live_workspace)
       shell_state = %{shell_state | cards: Map.put(shell_state.cards, card_id, updated_card)}
       shell_state = %{shell_state | zoomed_into: nil}
 
-      workspace = restore_grid_workspace(grid_workspace, workspace)
+      workspace = restore_workspace(grid_workspace, workspace)
 
       MingaEditor.Shell.Board.Persistence.save(shell_state)
       {shell_state, workspace}
@@ -545,14 +527,14 @@ defmodule MingaEditor.Shell.Board do
     end
   end
 
-  @spec restore_grid_workspace(map() | nil, MingaEditor.Workspace.State.t()) ::
+  @spec restore_workspace(map() | nil, MingaEditor.Workspace.State.t()) ::
           MingaEditor.Workspace.State.t()
-  defp restore_grid_workspace(grid_workspace, _fallback)
-       when is_map(grid_workspace) and map_size(grid_workspace) > 0 do
-    struct!(MingaEditor.Workspace.State, grid_workspace)
+  defp restore_workspace(workspace_snapshot, fallback)
+       when is_map(workspace_snapshot) and map_size(workspace_snapshot) > 0 do
+    WorkspaceState.restore_tab_context(fallback, workspace_snapshot)
   end
 
-  defp restore_grid_workspace(_grid_workspace, fallback), do: fallback
+  defp restore_workspace(_workspace_snapshot, fallback), do: fallback
 
   # Ensure a "You" card exists in restored board state (may have been removed in a bug).
   @spec ensure_you_card(BoardState.t()) :: BoardState.t()

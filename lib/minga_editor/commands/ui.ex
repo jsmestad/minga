@@ -109,33 +109,18 @@ defmodule MingaEditor.Commands.UI do
 
   @spec toggle_board(EditorState.t()) :: EditorState.t()
   defp toggle_board(%{shell: MingaEditor.Shell.Board} = state) do
-    # Stash Board state so we can restore it when toggling back
     board_state = state.shell_state
 
-    traditional_state = %MingaEditor.Shell.Traditional.State{
-      suppress_tool_prompts: board_state.suppress_tool_prompts
-    }
-
-    %{
-      state
-      | shell: MingaEditor.Shell.Traditional,
-        shell_state: traditional_state,
-        layout: nil,
-        stashed_board_state: board_state
-    }
+    EditorState.switch_from_board_to_traditional(
+      state,
+      board_state,
+      board_state.suppress_tool_prompts
+    )
   end
 
   defp toggle_board(state) do
-    # Restore stashed Board state, or create fresh if none
     board_state = Map.get(state, :stashed_board_state) || MingaEditor.Shell.Board.init()
-
-    %{
-      state
-      | shell: MingaEditor.Shell.Board,
-        shell_state: board_state,
-        layout: nil,
-        stashed_board_state: nil
-    }
+    EditorState.switch_to_board(state, board_state)
   end
 
   @spec execute_parser_restart(EditorState.t()) :: EditorState.t()

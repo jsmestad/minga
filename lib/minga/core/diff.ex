@@ -258,6 +258,10 @@ defmodule Minga.Core.Diff do
   """
   @spec merge3([String.t()], [String.t()], [String.t()]) ::
           {:ok, [String.t()]} | {:conflict, [merge_hunk()]}
+  def merge3(ancestor, fork, parent) when parent == ancestor, do: {:ok, fork}
+  def merge3(ancestor, fork, parent) when fork == ancestor, do: {:ok, parent}
+  def merge3(_ancestor, fork, parent) when fork == parent, do: {:ok, fork}
+
   def merge3(ancestor, fork, parent) do
     # Compute diffs from ancestor to each side
     fork_ops = List.myers_difference(ancestor, fork)

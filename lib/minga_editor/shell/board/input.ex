@@ -8,7 +8,7 @@ defmodule MingaEditor.Shell.Board.Input do
   - Arrow keys / h,j,k,l: navigate between cards
   - Enter: zoom into the focused card
   - Escape / q: switch back to Shell.Traditional
-  - n: dispatch a new agent (opens the dispatch prompt)
+  - n: create a new agent card and zoom into it
 
   All other keys pass through to global bindings (Ctrl+Q, Ctrl+S, etc.).
   When zoomed into a card, this handler is not in the stack; the
@@ -18,13 +18,12 @@ defmodule MingaEditor.Shell.Board.Input do
   @behaviour MingaEditor.Input.Handler
 
   alias MingaAgent.Config, as: AgentConfig
-  alias MingaAgent.Session, as: AgentSession
-  alias MingaAgent.SessionManager
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.Workspace.State, as: WorkspaceState
   alias MingaEditor.Shell.Board
   alias MingaEditor.Shell.Board.Card
+  alias MingaEditor.Shell.Board.SessionLifecycle
   alias MingaEditor.Shell.Board.State, as: BoardState
 
   # ── Key constants ──────────────────────────────────────────────────────
@@ -144,13 +143,7 @@ defmodule MingaEditor.Shell.Board.Input do
 
     if card && !Card.you_card?(card) do
       # Stop the agent session if running. SessionManager owns lifecycle events.
-      if card.session do
-        try do
-          SessionManager.stop_session_by_pid(card.session)
-        catch
-          :exit, _ -> :ok
-        end
-      end
+      SessionLifecycle.stop(card.session)
 
       new_board = BoardState.remove_card(board, card.id)
       state = EditorState.update_shell_state(state, fn _ -> new_board end)
@@ -345,25 +338,7 @@ defmodule MingaEditor.Shell.Board.Input do
 
   @spec start_session(keyword()) :: {:ok, pid()} | {:error, term()}
   defp start_session(opts) do
-    case SessionManager.start_session(opts) do
-      {:ok, _session_id, pid} ->
-        subscribe_session(pid)
-
-      {:error, reason} ->
-        {:error, reason}
-    end
-  catch
-    :exit, reason -> {:error, reason}
-  end
-
-  @spec subscribe_session(pid()) :: {:ok, pid()} | {:error, term()}
-  defp subscribe_session(pid) do
-    AgentSession.subscribe(pid)
-    {:ok, pid}
-  catch
-    :exit, reason ->
-      SessionManager.stop_session_by_pid(pid)
-      {:error, reason}
+    SessionLifecycle.start(opts)
   end
 
   defp resolve_model, do: AgentConfig.resolve_model()
