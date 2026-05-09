@@ -8,8 +8,6 @@ import Testing
 import Foundation
 import Metal
 
-@testable import Minga
-
 // MARK: - Stale Cache Cleanup (no GPU needed)
 
 @Suite("PipelineCache — Stale Cleanup")
