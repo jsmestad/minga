@@ -68,6 +68,16 @@ defmodule MingaAgent.ToolsTest do
         assert is_function(tool.callback, 1)
       end
     end
+
+    test "subagent schema accepts optional background flag", %{tmp_dir: dir} do
+      subagent = Tools.all(project_root: dir) |> Enum.find(&(&1.name == "subagent"))
+      schema = subagent.parameter_schema
+
+      assert schema["properties"]["background"]["type"] == "boolean"
+      assert "task" in schema["required"]
+      refute "background" in schema["required"]
+      assert subagent.description =~ "Background mode"
+    end
   end
 
   describe "destructive?/1" do

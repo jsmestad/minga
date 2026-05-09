@@ -205,6 +205,7 @@ defmodule MingaEditor do
     Minga.Events.subscribe(:log_message, events_registry)
     Minga.Events.subscribe(:face_overrides_changed, events_registry)
     Minga.Events.subscribe(:agent_session_stopped, events_registry)
+    Minga.Events.subscribe(:background_subagent_started, events_registry)
     Minga.Events.subscribe(:load_user_themes, events_registry)
     Minga.Events.subscribe(:extension_updates_available, events_registry)
 
@@ -864,6 +865,24 @@ defmodule MingaEditor do
       end
 
     %{state | face_override_registries: registries}
+  end
+
+  defp dispatch_minga_event(
+         state,
+         :background_subagent_started,
+         %MingaAgent.Subagent.Handle{} = handle,
+         _msg
+       ) do
+    MingaAgent.Session.subscribe(handle.pid, self())
+
+    {shell_state, workspace} =
+      state.shell.handle_event(
+        state.shell_state,
+        state.workspace,
+        {:background_subagent_started, handle}
+      )
+
+    %{state | shell_state: shell_state, workspace: workspace}
   end
 
   defp dispatch_minga_event(

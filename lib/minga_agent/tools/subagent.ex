@@ -1,53 +1,65 @@
 defmodule MingaAgent.Tools.Subagent do
   @moduledoc """
-  Spawns a child agent session to work on a subtask.
+  Starts a child agent session to work on a subtask.
 
-  The parent agent describes a task, the subagent executes it (with its own
-  tool calls and conversation), and returns a summary result. The subagent
-  runs as a separate `Agent.Session` process under `Agent.Supervisor`, so
-  crashes do not affect the parent.
-
-  The subagent's conversation is ephemeral (not saved to session history).
-  Only the final text response is returned to the parent as the tool result.
-
-  ## Blocking behavior
-
-  `execute/2` blocks the calling process (typically the parent agent's tool
-  execution task) for up to 5 minutes while waiting for the subagent to
-  finish. The parent agent cannot execute other tools concurrently during
-  this time. This is acceptable because tool execution already runs in an
-  isolated Task, but callers should be aware of the timeout.
+  Foreground sub-agents keep the historical blocking behavior: the tool call waits for the child to finish and returns the final assistant text. Background sub-agents are registered with `MingaAgent.SessionManager`, return a stable session handle immediately, and keep the child chat alive for later inspection.
   """
 
   alias MingaAgent.Session
+  alias MingaAgent.SessionManager
+  alias MingaAgent.Subagent.Handle
   alias MingaAgent.Supervisor, as: AgentSupervisor
 
   @typedoc "Options for subagent execution."
   @type opts :: [
           model: String.t() | nil,
-          project_root: String.t() | nil
+          project_root: String.t() | nil,
+          background: boolean(),
+          parent_session: pid() | nil,
+          provider: module(),
+          provider_opts: keyword(),
+          session_manager: GenServer.server()
         ]
 
   @subagent_timeout_ms 300_000
+  @provider_ready_retry_ms 10
+  @provider_ready_max_attempts 100
 
   @doc """
-  Spawns a subagent session, sends it the task, and blocks until it completes.
+  Runs a sub-agent task.
 
-  Returns the subagent's final text response, or an error if it times out
-  or crashes.
+  With `background: false` or no background option, waits for the child to finish and returns its final text. With `background: true`, returns immediately with the child session handle and leaves the child running.
   """
   @spec execute(String.t(), opts()) :: {:ok, String.t()} | {:error, String.t()}
   def execute(task, opts \\ []) when is_binary(task) do
+    if Keyword.get(opts, :background, false) do
+      start_background(task, opts)
+    else
+      start_foreground(task, opts)
+    end
+  end
+
+  @spec start_background(String.t(), opts()) :: {:ok, String.t()} | {:error, String.t()}
+  defp start_background(task, opts) do
+    manager = Keyword.get(opts, :session_manager, SessionManager)
+    parent_session = Keyword.get(opts, :parent_session)
     model = Keyword.get(opts, :model)
-    project_root = Keyword.get(opts, :project_root, detect_project_root())
 
-    session_opts =
-      [
-        provider: MingaAgent.Providers.Native,
-        provider_opts: build_provider_opts(project_root, model)
-      ]
+    case SessionManager.start_background_subagent(manager, parent_session, task,
+           session_opts: session_opts(opts),
+           model: model
+         ) do
+      {:ok, %Handle{} = handle} ->
+        {:ok, background_result(handle)}
 
-    case AgentSupervisor.start_session(session_opts) do
+      {:error, reason} ->
+        {:error, "Failed to start background subagent: #{inspect(reason)}"}
+    end
+  end
+
+  @spec start_foreground(String.t(), opts()) :: {:ok, String.t()} | {:error, String.t()}
+  defp start_foreground(task, opts) do
+    case AgentSupervisor.start_session(session_opts(opts)) do
       {:ok, session_pid} ->
         run_subagent(session_pid, task)
 
@@ -58,11 +70,9 @@ defmodule MingaAgent.Tools.Subagent do
 
   @spec run_subagent(pid(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
   defp run_subagent(session_pid, task) do
-    # Subscribe to receive events from the subagent
     :ok = Session.subscribe(session_pid)
 
-    # Send the task as a prompt
-    case Session.send_prompt(session_pid, task) do
+    case send_prompt_when_ready(session_pid, task, 0) do
       :ok ->
         result = collect_response(session_pid)
         cleanup(session_pid)
@@ -71,6 +81,23 @@ defmodule MingaAgent.Tools.Subagent do
       {:error, reason} ->
         cleanup(session_pid)
         {:error, "Subagent failed to start: #{inspect(reason)}"}
+    end
+  end
+
+  @spec send_prompt_when_ready(pid(), String.t(), non_neg_integer()) :: :ok | {:error, term()}
+  defp send_prompt_when_ready(session_pid, task, attempt) do
+    case Session.send_prompt(session_pid, task) do
+      :ok ->
+        :ok
+
+      {:error, :provider_not_ready} when attempt < @provider_ready_max_attempts ->
+        receive do
+        after
+          @provider_ready_retry_ms -> send_prompt_when_ready(session_pid, task, attempt + 1)
+        end
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -87,7 +114,6 @@ defmodule MingaAgent.Tools.Subagent do
         collect_response_loop(session_pid, text_acc <> delta, timeout)
 
       {:agent_event, ^session_pid, {:status_changed, :idle}} ->
-        # Agent finished
         result = String.trim(text_acc)
 
         if result == "" do
@@ -100,7 +126,6 @@ defmodule MingaAgent.Tools.Subagent do
         {:error, "Subagent error: #{message}"}
 
       {:agent_event, ^session_pid, _other_event} ->
-        # Ignore tool events, thinking events, etc.
         collect_response_loop(session_pid, text_acc, timeout)
     after
       timeout ->
@@ -119,10 +144,32 @@ defmodule MingaAgent.Tools.Subagent do
     :exit, _ -> :ok
   end
 
+  @spec session_opts(opts()) :: keyword()
+  defp session_opts(opts) do
+    project_root = Keyword.get(opts, :project_root, detect_project_root())
+    model = Keyword.get(opts, :model)
+    provider = Keyword.get(opts, :provider, MingaAgent.Providers.Native)
+
+    provider_opts =
+      opts
+      |> Keyword.get(:provider_opts, [])
+      |> Keyword.merge(build_provider_opts(project_root, model))
+
+    [provider: provider, provider_opts: provider_opts, model_name: model || "unknown"]
+    |> maybe_put_notifier(opts)
+  end
+
+  @spec maybe_put_notifier(keyword(), opts()) :: keyword()
+  defp maybe_put_notifier(session_opts, opts) do
+    case Keyword.fetch(opts, :notifier) do
+      {:ok, notifier} -> Keyword.put(session_opts, :notifier, notifier)
+      :error -> session_opts
+    end
+  end
+
   @spec build_provider_opts(String.t(), String.t() | nil) :: keyword()
   defp build_provider_opts(project_root, model) do
     opts = [
-      subscriber: self(),
       project_root: project_root,
       provider: "native"
     ]
@@ -132,6 +179,11 @@ defmodule MingaAgent.Tools.Subagent do
     else
       opts
     end
+  end
+
+  @spec background_result(Handle.t()) :: String.t()
+  defp background_result(%Handle{} = handle) do
+    "Background subagent started. Handle: #{Handle.id(handle)}. Use the agent session picker to inspect its chat."
   end
 
   defdelegate detect_project_root, to: Minga.Project, as: :resolve_root

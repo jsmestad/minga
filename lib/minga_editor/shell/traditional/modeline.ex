@@ -59,7 +59,9 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
           optional(:git_branch) => String.t() | nil,
           optional(:git_diff_summary) => git_diff_summary(),
           optional(:diagnostic_counts) =>
-            {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()} | nil
+            {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()} | nil,
+          optional(:background_subagent_count) => non_neg_integer(),
+          optional(:active_background_subagent_label) => String.t() | nil
         }
 
   @doc """
@@ -111,6 +113,7 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
     filetype_bg = bar_bg
 
     agent_segments = build_agent_segments(data, bar_bg)
+    background_agent_segments = build_background_agent_segments(data, bar_bg, ml)
     lsp_segments = build_lsp_segments(data, bar_bg, ml)
     parser_segments = build_parser_segments(data, bar_bg, ml)
     git_segments = build_git_segments(data, bar_bg, theme)
@@ -126,7 +129,8 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
         {@separator, info_bg, bar_bg, [], nil}
       ] ++
         git_segments ++
-        Enum.map(agent_segments, fn {text, fg, bg, opts} -> {text, fg, bg, opts, nil} end)
+        Enum.map(agent_segments, fn {text, fg, bg, opts} -> {text, fg, bg, opts, nil} end) ++
+        background_agent_segments
 
     right_segments =
       diagnostic_segments ++
@@ -255,6 +259,20 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
       {:tool_executing, c} -> [{" ⚡ ", c.status_tool, bar_bg, bold: true}]
       {:error, c} -> [{" ✗ ", c.status_error, bar_bg, bold: true}]
       _ -> []
+    end
+  end
+
+  @spec build_background_agent_segments(modeline_data(), non_neg_integer(), Theme.Modeline.t()) ::
+          [{String.t(), non_neg_integer(), non_neg_integer(), keyword(), atom() | nil}]
+  defp build_background_agent_segments(data, bar_bg, ml) do
+    count = Map.get(data, :background_subagent_count, 0)
+    label = Map.get(data, :active_background_subagent_label)
+
+    if count > 0 do
+      text = if label, do: " bg:#{count} #{label}", else: " bg:#{count}"
+      [{text, ml.info_fg, bar_bg, [], :agent_session_picker}]
+    else
+      []
     end
   end
 

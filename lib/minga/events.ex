@@ -41,6 +41,7 @@ defmodule Minga.Events do
   | `:log_message`     | `LogMessageEvent`     | `text: String.t(), level: :info \| :warning \| :error` |
   | `:agent_hook`      | `AgentHookEvent`        | `event, phase, tool_name, tool_call_id, tool_pattern` |
   | `:face_overrides_changed` | `FaceOverridesChangedEvent` | `buffer: pid(), overrides: map()` |
+  | `:background_subagent_started` | `MingaAgent.Subagent.Handle` | `session_id: String.t(), pid: pid(), task: String.t()` |
 
   ## Why Registry?
 
@@ -258,6 +259,7 @@ defmodule Minga.Events do
           | :face_overrides_changed
           | :agent_session_stopped
           | :agent_hook
+          | :background_subagent_started
           | :changeset_merged
           | :changeset_budget_exhausted
           | :load_user_themes
@@ -282,6 +284,7 @@ defmodule Minga.Events do
           | FaceOverridesChangedEvent.t()
           | LoadUserThemesEvent.t()
           | MingaAgent.SessionManager.SessionStoppedEvent.t()
+          | MingaAgent.Subagent.Handle.t()
           | MingaAgent.Changeset.MergedEvent.t()
           | MingaAgent.Changeset.BudgetExhaustedEvent.t()
           | Minga.Extension.UpdatesAvailableEvent.t()
@@ -398,6 +401,7 @@ defmodule Minga.Events do
   @spec broadcast(:face_overrides_changed, FaceOverridesChangedEvent.t()) :: :ok
   @spec broadcast(:agent_session_stopped, MingaAgent.SessionManager.SessionStoppedEvent.t()) ::
           :ok
+  @spec broadcast(:background_subagent_started, MingaAgent.Subagent.Handle.t()) :: :ok
   @spec broadcast(:changeset_merged, MingaAgent.Changeset.MergedEvent.t()) :: :ok
   @spec broadcast(:changeset_budget_exhausted, MingaAgent.Changeset.BudgetExhaustedEvent.t()) ::
           :ok

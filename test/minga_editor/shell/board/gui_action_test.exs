@@ -6,6 +6,7 @@ defmodule MingaEditor.Shell.Board.GUIActionTest do
 
   alias MingaAgent.Session
   alias MingaAgent.SessionManager
+  alias MingaAgent.Subagent.Handle
   alias MingaEditor.Shell.Board
   alias MingaEditor.Shell.Board.State, as: BoardState
   alias MingaEditor.Viewport
@@ -23,6 +24,30 @@ defmodule MingaEditor.Shell.Board.GUIActionTest do
     end)
 
     %{workspace: %WorkspaceState{viewport: Viewport.new(24, 80)}}
+  end
+
+  describe "handle_event/3" do
+    test "background_subagent_started creates an inspectable board card", %{workspace: workspace} do
+      handle =
+        Handle.new(
+          session_id: "session-42",
+          pid: self(),
+          task: "audit async renderer",
+          model: "test-model"
+        )
+
+      {board, _workspace} =
+        Board.handle_event(BoardState.new(), workspace, {:background_subagent_started, handle})
+
+      [card] = BoardState.sorted_cards(board)
+      assert card.session == self()
+      assert card.task =~ "session-42"
+      assert card.task =~ "audit async renderer"
+      assert card.model == "test-model"
+      assert card.status == :working
+      assert card.kind == :agent
+      assert is_map(card.workspace)
+    end
   end
 
   describe "handle_gui_action/3" do

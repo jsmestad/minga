@@ -221,7 +221,7 @@ final class CommandDispatcher {
         case .guiBreadcrumb(let segments):
             guiState.breadcrumbState.update(segments: segments)
 
-        case .guiStatusBar(let contentKind, let mode, let cursorLine, let cursorCol, let lineCount, let flags, let lspStatus, let gitBranch, let message, let filetype, let errorCount, let warningCount, let modelName, let messageCount, let sessionStatus, let infoCount, let hintCount, let macroRecording, let parserStatus, let agentStatus, let gitAdded, let gitModified, let gitDeleted, let icon, let iconColorR, let iconColorG, let iconColorB, let filename, let diagnosticHint):
+        case .guiStatusBar(let contentKind, let mode, let cursorLine, let cursorCol, let lineCount, let flags, let lspStatus, let gitBranch, let message, let filetype, let errorCount, let warningCount, let modelName, let messageCount, let sessionStatus, let infoCount, let hintCount, let macroRecording, let parserStatus, let agentStatus, let gitAdded, let gitModified, let gitDeleted, let icon, let iconColorR, let iconColorG, let iconColorB, let filename, let diagnosticHint, let backgroundSubagentCount, let backgroundSubagentLabel):
             let update = StatusBarUpdate(
                 contentKind: contentKind, mode: mode,
                 cursorLine: cursorLine, cursorCol: cursorCol, lineCount: lineCount,
@@ -233,7 +233,9 @@ final class CommandDispatcher {
                 parserStatus: parserStatus, agentStatus: agentStatus,
                 gitAdded: gitAdded, gitModified: gitModified, gitDeleted: gitDeleted,
                 icon: icon, iconColorR: iconColorR, iconColorG: iconColorG, iconColorB: iconColorB,
-                filename: filename, diagnosticHint: diagnosticHint
+                filename: filename, diagnosticHint: diagnosticHint,
+                backgroundSubagentCount: backgroundSubagentCount,
+                backgroundSubagentLabel: backgroundSubagentLabel
             )
             guiState.statusBarState.update(from: update)
             frameState.totalLineCount = lineCount

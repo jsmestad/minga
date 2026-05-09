@@ -27,6 +27,7 @@ defmodule MingaEditor.Shell.Board do
   @behaviour MingaEditor.Shell.BufferLifecycle
   @behaviour MingaEditor.Shell.TabQueries
 
+  alias MingaAgent.Subagent.Handle
   alias MingaEditor.DisplayList
   alias MingaEditor.DisplayList.{Cursor, Frame}
   alias MingaEditor.RenderPipeline.Chrome
@@ -62,8 +63,31 @@ defmodule MingaEditor.Shell.Board do
   @impl true
   @spec handle_event(BoardState.t(), MingaEditor.Workspace.State.t(), term()) ::
           {BoardState.t(), MingaEditor.Workspace.State.t()}
+  def handle_event(shell_state, workspace, {:background_subagent_started, %Handle{} = handle}) do
+    if card_for_session?(shell_state, handle.pid) do
+      {shell_state, workspace}
+    else
+      {shell_state, card} =
+        BoardState.create_card(shell_state,
+          task: Handle.label(handle),
+          model: handle.model,
+          status: :working,
+          kind: :agent,
+          session: handle.pid,
+          workspace: WorkspaceState.to_tab_context(workspace)
+        )
+
+      Minga.Log.info(
+        :agent,
+        "Board: added background sub-agent card ##{card.id}: #{Handle.label(handle)}"
+      )
+
+      MingaEditor.Shell.Board.Persistence.save(shell_state)
+      {shell_state, workspace}
+    end
+  end
+
   def handle_event(shell_state, workspace, _event) do
-    # TODO: handle agent status updates, card lifecycle events
     {shell_state, workspace}
   end
 
@@ -492,6 +516,11 @@ defmodule MingaEditor.Shell.Board do
 
   def on_agent_event(shell_state, workspace, _session_pid, _event) do
     {shell_state, workspace}
+  end
+
+  @spec card_for_session?(BoardState.t(), pid()) :: boolean()
+  defp card_for_session?(shell_state, session_pid) when is_pid(session_pid) do
+    Enum.any?(shell_state.cards, fn {_id, card} -> card.session == session_pid end)
   end
 
   @spec update_card_by_session(BoardState.t(), pid(), (Card.t() -> Card.t())) :: BoardState.t()

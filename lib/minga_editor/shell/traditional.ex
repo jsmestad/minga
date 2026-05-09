@@ -33,12 +33,16 @@ defmodule MingaEditor.Shell.Traditional do
   @behaviour MingaEditor.Shell.BufferLifecycle
   @behaviour MingaEditor.Shell.TabQueries
 
+  alias MingaEditor.Agent.BufferSync, as: AgentBufferSync
   alias MingaEditor.Agent.UIState
   alias Minga.Buffer
   alias MingaEditor.State.AgentGroup
+  alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
+  alias MingaEditor.State.Windows
   alias MingaEditor.Window
+  alias MingaEditor.WindowTree
   alias MingaEditor.Window.Content
   alias Minga.Log
   alias MingaEditor.Shell.Traditional.State, as: ShellState
@@ -53,6 +57,34 @@ defmodule MingaEditor.Shell.Traditional do
   @impl true
   @spec handle_event(ShellState.t(), MingaEditor.Workspace.State.t(), term()) ::
           {ShellState.t(), MingaEditor.Workspace.State.t()}
+  def handle_event(%ShellState{tab_bar: nil} = shell_state, workspace, _event) do
+    {shell_state, workspace}
+  end
+
+  def handle_event(
+        %ShellState{tab_bar: %TabBar{} = tb} = shell_state,
+        workspace,
+        {:background_subagent_started, %MingaAgent.Subagent.Handle{} = handle}
+      ) do
+    if TabBar.find_by_session(tb, handle.pid) do
+      {shell_state, workspace}
+    else
+      label = MingaAgent.Subagent.Handle.label(handle)
+      {tb, tab} = TabBar.insert(tb, :agent, label)
+
+      tab =
+        tab
+        |> Tab.set_session(handle.pid)
+        |> Tab.set_agent_status(:thinking)
+        |> Tab.mark_background_subagent(handle)
+
+      tb = TabBar.update_tab(tb, tab.id, fn _ -> tab end)
+      context = background_agent_context(workspace)
+      tb = TabBar.update_context(tb, tab.id, context)
+      {%{shell_state | tab_bar: tb}, workspace}
+    end
+  end
+
   def handle_event(shell_state, workspace, _event) do
     {shell_state, workspace}
   end
@@ -367,6 +399,43 @@ defmodule MingaEditor.Shell.Traditional do
   # -------------------------------------------------------------------
   # Buffer lifecycle helpers
   # -------------------------------------------------------------------
+
+  @spec background_agent_context(WorkspaceState.t()) :: Tab.context()
+  defp background_agent_context(workspace) do
+    agent_buf = AgentBufferSync.start_buffer()
+    rows = max(workspace.viewport.rows, 1)
+    cols = max(workspace.viewport.cols, 1)
+
+    context = WorkspaceState.to_tab_context(workspace)
+
+    context
+    |> Map.put(:keymap_scope, :agent)
+    |> Map.put(:agent_ui, UIState.new())
+    |> Map.put(:buffers, background_agent_buffers(agent_buf))
+    |> Map.put(:windows, background_agent_windows(agent_buf, rows, cols))
+  end
+
+  @spec background_agent_buffers(pid() | nil) :: Buffers.t()
+  defp background_agent_buffers(agent_buf) when is_pid(agent_buf) do
+    %Buffers{active: agent_buf, list: [agent_buf], active_index: 0}
+  end
+
+  defp background_agent_buffers(_agent_buf), do: %Buffers{}
+
+  @spec background_agent_windows(pid() | nil, pos_integer(), pos_integer()) :: Windows.t()
+  defp background_agent_windows(agent_buf, rows, cols) when is_pid(agent_buf) do
+    win_id = 1
+    agent_window = Window.new_agent_chat(win_id, agent_buf, rows, cols)
+
+    %Windows{
+      tree: WindowTree.new(win_id),
+      map: %{win_id => agent_window},
+      active: win_id,
+      next_id: win_id + 1
+    }
+  end
+
+  defp background_agent_windows(_agent_buf, _rows, _cols), do: %Windows{}
 
   @spec find_tab_for_buffer(TabBar.t(), pid()) :: Tab.t() | nil
   defp find_tab_for_buffer(%TabBar{tabs: tabs}, pid) when is_pid(pid) do

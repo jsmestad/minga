@@ -1222,6 +1222,11 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     diag_hint = :erlang.iolist_to_binary([d.diagnostic_hint || ""])
     message = :erlang.iolist_to_binary([d.status_msg || ""])
 
+    background_label =
+      :erlang.iolist_to_binary([Map.get(d, :active_background_subagent_label) || ""])
+
+    background_count = Map.get(d, :background_subagent_count, 0)
+
     # Shared sections (both buffer and agent variants)
     sections = [
       encode_section(@section_identity, <<content_kind::8, mode_byte::8, flags::8>>),
@@ -1259,11 +1264,19 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           encode_section(
             @section_agent,
             <<byte_size(model_name)::8, model_name::binary, d.message_count::32,
-              session_status_byte::8, agent_byte::8>>
+              session_status_byte::8, agent_byte::8, background_count::16,
+              byte_size(background_label)::16, background_label::binary>>
           )
         ]
     else
-      sections ++ [encode_section(@section_agent, <<agent_byte::8>>)]
+      sections ++
+        [
+          encode_section(
+            @section_agent,
+            <<agent_byte::8, background_count::16, byte_size(background_label)::16,
+              background_label::binary>>
+          )
+        ]
     end
   end
 

@@ -58,7 +58,8 @@ defmodule MingaEditor.State.Tab do
           session: pid() | nil,
           agent_status: agent_status(),
           attention: boolean(),
-          group_id: group_id()
+          group_id: group_id(),
+          background_subagent: MingaAgent.Subagent.Handle.t() | nil
         }
 
   @enforce_keys [:id, :kind]
@@ -69,7 +70,8 @@ defmodule MingaEditor.State.Tab do
             session: nil,
             agent_status: nil,
             attention: false,
-            group_id: 0
+            group_id: 0,
+            background_subagent: nil
 
   @doc "Creates a new file tab."
   @spec new_file(id(), String.t()) :: t()
@@ -128,4 +130,17 @@ defmodule MingaEditor.State.Tab do
   def set_group(%__MODULE__{} = tab, group_id) when is_integer(group_id) and group_id >= 0 do
     %{tab | group_id: group_id}
   end
+
+  @doc "Marks this tab as the UI projection of a background sub-agent."
+  @spec mark_background_subagent(t(), MingaAgent.Subagent.Handle.t()) :: t()
+  def mark_background_subagent(%__MODULE__{} = tab, %MingaAgent.Subagent.Handle{} = handle) do
+    %{tab | background_subagent: handle}
+  end
+
+  @doc "Returns true when this tab projects a background sub-agent."
+  @spec background_subagent?(t()) :: boolean()
+  def background_subagent?(%__MODULE__{background_subagent: %MingaAgent.Subagent.Handle{}}),
+    do: true
+
+  def background_subagent?(%__MODULE__{}), do: false
 end

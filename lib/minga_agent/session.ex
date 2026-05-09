@@ -64,6 +64,8 @@ defmodule MingaAgent.Session do
           pending_approval: pending_approval() | nil,
           model_name: String.t(),
           provider_name: String.t(),
+          notifier: module() | {module(), term()},
+          background_subagent: boolean(),
           save_timer: reference() | nil,
           branches: [Branch.t()],
           steering_queue: [String.t() | [ReqLLM.Message.ContentPart.t()]],
@@ -183,7 +185,13 @@ defmodule MingaAgent.Session do
   @doc "Subscribes the calling process to session events."
   @spec subscribe(GenServer.server()) :: :ok
   def subscribe(session) do
-    GenServer.call(session, {:subscribe, self()})
+    subscribe(session, self())
+  end
+
+  @doc "Subscribes the given process to session events."
+  @spec subscribe(GenServer.server(), pid()) :: :ok
+  def subscribe(session, pid) when is_pid(pid) do
+    GenServer.call(session, {:subscribe, pid})
   end
 
   @doc "Unsubscribes the calling process from session events."
@@ -473,6 +481,8 @@ defmodule MingaAgent.Session do
       pending_approval: nil,
       model_name: model_name,
       provider_name: provider_name,
+      notifier: Keyword.get(opts, :notifier, Notifier),
+      background_subagent: Keyword.get(opts, :background_subagent, false),
       save_timer: nil,
       created_at: DateTime.utc_now(),
       branches: [],
@@ -1033,7 +1043,7 @@ defmodule MingaAgent.Session do
   end
 
   defp handle_provider_event(%Event.AgentEnd{usage: usage}, state) do
-    Notifier.notify(:complete, "Agent finished")
+    notify(state, :complete, completion_notification(state))
 
     state =
       if usage do
@@ -1124,7 +1134,7 @@ defmodule MingaAgent.Session do
   end
 
   defp handle_provider_event(%Event.ToolApproval{} = event, state) do
-    Notifier.notify(:approval, "Approval needed: #{event.name}")
+    notify(state, :approval, "Approval needed: #{event.name}")
 
     approval = %MingaAgent.ToolApproval{
       tool_call_id: event.tool_call_id,
@@ -1176,12 +1186,28 @@ defmodule MingaAgent.Session do
   end
 
   defp handle_provider_event(%Event.Error{message: message}, state) do
-    Notifier.notify(:error, message)
+    notify(state, :error, message)
     state = set_status(state, :error)
     state = %{state | error_message: message}
     state = append_system_message(state, "Error: #{message}", :error)
     broadcast(state, {:error, message})
     state
+  end
+
+  @spec completion_notification(state()) :: String.t()
+  defp completion_notification(%{background_subagent: true, session_id: session_id}) do
+    "Sub-agent #{session_id} finished"
+  end
+
+  defp completion_notification(_state), do: "Agent finished"
+
+  @spec notify(state(), atom(), String.t()) :: :ok
+  defp notify(%{notifier: {module, arg}}, trigger, message) when is_atom(module) do
+    module.notify(trigger, message, arg)
+  end
+
+  defp notify(%{notifier: module}, trigger, message) when is_atom(module) do
+    module.notify(trigger, message)
   end
 
   # ── Message list helpers ────────────────────────────────────────────────────
