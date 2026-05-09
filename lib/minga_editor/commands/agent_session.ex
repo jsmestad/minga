@@ -29,7 +29,7 @@ defmodule MingaEditor.Commands.AgentSession do
   long-lived and own their session pid through zoom in/out), so a
   generic "restart" without card context isn't meaningful there. Board
   callers go through `Shell.Board.Input.start_and_attach_session/4`
-  for new sessions and rely on `:DOWN` handling for cleanup.
+  for new sessions and rely on `:agent_session_stopped` events for cleanup.
   """
   @spec restart_session(state(), String.t()) :: state()
   def restart_session(%{shell: MingaEditor.Shell.Traditional} = state, message) do

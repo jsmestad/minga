@@ -291,7 +291,9 @@ defmodule MingaEditor.Commands.Git do
         task_monitor = Process.monitor(task_pid)
 
         state
-        |> EditorState.set_git_remote_op({ref, task_monitor, {git_root, success_msg, error_prefix}})
+        |> EditorState.set_git_remote_op(
+          {ref, task_monitor, {git_root, success_msg, error_prefix}}
+        )
         |> EditorState.set_status(progress_msg)
 
       :not_git ->

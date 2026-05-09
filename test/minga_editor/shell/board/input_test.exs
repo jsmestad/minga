@@ -8,6 +8,7 @@ defmodule MingaEditor.Shell.Board.InputTest do
   use ExUnit.Case, async: true
 
   alias MingaAgent.RuntimeState
+  alias MingaAgent.SessionManager
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
@@ -55,6 +56,14 @@ defmodule MingaEditor.Shell.Board.InputTest do
     board = BoardState.zoom_into(state.shell_state, card_id, %{fake: :workspace})
     %{state | shell_state: board}
   end
+
+  defp stop_session(pid) when is_pid(pid) do
+    SessionManager.stop_session_by_pid(pid)
+  catch
+    :exit, _ -> :ok
+  end
+
+  defp stop_session(_pid), do: :ok
 
   # ── Grid navigation ────────────────────────────────────────────────────
 
@@ -356,7 +365,7 @@ defmodule MingaEditor.Shell.Board.InputTest do
   # ── New card dispatch ──────────────────────────────────────────────────
 
   describe "n creates and zooms into new card" do
-    test "creates a new card, starts agent session, and auto-zooms" do
+    test "creates a new card, starts a managed agent session, and auto-zooms" do
       state = editor_with_board(2)
       initial_count = BoardState.card_count(state.shell_state)
 
@@ -364,10 +373,14 @@ defmodule MingaEditor.Shell.Board.InputTest do
       assert BoardState.card_count(new_state.shell_state) == initial_count + 1
       assert new_state.shell_state.zoomed_into != nil
 
-      # New card should have a model set
       new_card_id = new_state.shell_state.zoomed_into
       card = new_state.shell_state.cards[new_card_id]
+      on_exit(fn -> stop_session(card.session) end)
+
       assert card.model != nil
+      assert is_pid(card.session)
+      assert {:ok, _session_id} = SessionManager.session_id_for_pid(card.session)
+      refute Map.has_key?(new_state.buffer_monitors, card.session)
     end
   end
 
@@ -383,6 +396,51 @@ defmodule MingaEditor.Shell.Board.InputTest do
       initial_count = BoardState.card_count(state.shell_state)
       {:handled, new_state} = BoardInput.handle_key(state, ?d, 0)
       assert BoardState.card_count(new_state.shell_state) == initial_count - 1
+    end
+
+    test "stops the managed session attached to the deleted card" do
+      {:ok, _session_id, session_pid} = SessionManager.start_session([])
+      on_exit(fn -> stop_session(session_pid) end)
+
+      state = editor_with_board(1)
+
+      board =
+        BoardState.update_card(state.shell_state, 1, fn card ->
+          MingaEditor.Shell.Board.Card.attach_session(card, session_pid)
+        end)
+
+      state = %{state | shell_state: board}
+
+      {:handled, new_state} = BoardInput.handle_key(state, ?d, 0)
+
+      assert BoardState.card_count(new_state.shell_state) == 0
+      assert SessionManager.session_id_for_pid(session_pid) == {:error, :not_found}
+    end
+  end
+
+  # ── Filter ─────────────────────────────────────────────────────────────
+
+  describe "filter mode" do
+    test "routes filter edits through BoardState operations" do
+      state = editor_with_board(3)
+
+      {:handled, state} = BoardInput.handle_key(state, ?/, 0)
+      assert state.shell_state.filter_mode == true
+      assert state.shell_state.filter_text == ""
+
+      {:handled, state} = BoardInput.handle_key(state, ?T, 0)
+      {:handled, state} = BoardInput.handle_key(state, ?2, 0)
+      assert state.shell_state.filter_text == "T2"
+
+      {:handled, state} = BoardInput.handle_key(state, @arrow_down, 0)
+      assert state.shell_state.filter_text == "T2"
+
+      {:handled, state} = BoardInput.handle_key(state, 127, 0)
+      assert state.shell_state.filter_text == "T"
+
+      {:handled, state} = BoardInput.handle_key(state, @escape, 0)
+      assert state.shell_state.filter_mode == false
+      assert state.shell_state.filter_text == ""
     end
   end
 

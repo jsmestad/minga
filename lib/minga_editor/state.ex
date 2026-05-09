@@ -114,6 +114,8 @@ defmodule MingaEditor.State do
 
   @type backend :: :tui | :native_gui | :headless
 
+  @type shell_state :: ShellState.t() | BoardState.t()
+
   @type t :: %__MODULE__{
           backend: backend(),
           port_manager: GenServer.server() | nil,
@@ -124,7 +126,7 @@ defmodule MingaEditor.State do
           terminal_viewport: Viewport.t(),
           editing_model: :vim | :cua,
           shell: module(),
-          shell_state: ShellState.t() | BoardState.t(),
+          shell_state: shell_state(),
           theme: Theme.t(),
           render_timer: reference() | nil,
           message_store: MessageStore.t(),
@@ -196,9 +198,27 @@ defmodule MingaEditor.State do
   end
 
   @doc "Applies a function to the shell state and returns the updated state."
-  @spec update_shell_state(t(), (ShellState.t() -> ShellState.t())) :: t()
+  @spec update_shell_state(t() | %{shell_state: shell_state()}, (shell_state() -> shell_state())) ::
+          t() | %{shell_state: shell_state()}
   def update_shell_state(%{shell_state: ss} = state, fun) when is_function(fun, 1) do
     %{state | shell_state: fun.(ss)}
+  end
+
+  @doc "Switches from the Board shell back to the Traditional shell and stashes the Board state."
+  @spec switch_from_board_to_traditional(t(), BoardState.t(), boolean()) :: t()
+  def switch_from_board_to_traditional(
+        %__MODULE__{} = state,
+        %BoardState{} = board_state,
+        suppress_tool_prompts
+      )
+      when is_boolean(suppress_tool_prompts) do
+    %{
+      state
+      | shell: MingaEditor.Shell.Traditional,
+        shell_state: %ShellState{suppress_tool_prompts: suppress_tool_prompts},
+        layout: nil,
+        stashed_board_state: board_state
+    }
   end
 
   # ── Shell field delegates ────────────────────────────────────────────────
