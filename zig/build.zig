@@ -124,9 +124,9 @@ pub fn build(b: *std.Build) void {
     });
     parser_exe.root_module.addIncludePath(b.path("vendor/tree-sitter/include"));
     parser_exe.root_module.link_libc = true;
-    parser_exe.addCSourceFile(.{ .file = b.path("src/regex_sizeof.c"), .flags = &.{"-std=c11"} });
-    parser_exe.linkLibrary(ts_lib);
-    for (grammar_libs) |gl| parser_exe.linkLibrary(gl);
+    parser_exe.root_module.addCSourceFile(.{ .file = b.path("src/regex_sizeof.c"), .flags = &.{"-std=c11"} });
+    parser_exe.root_module.linkLibrary(ts_lib);
+    for (grammar_libs) |gl| parser_exe.root_module.linkLibrary(gl);
     b.installArtifact(parser_exe);
 
     // ── Hook runner executable (one-shot POSIX process-group helper) ─────
@@ -177,9 +177,9 @@ pub fn build(b: *std.Build) void {
     parser_tests.root_module.addImport("build_options", build_options.createModule());
     parser_tests.root_module.addIncludePath(b.path("vendor/tree-sitter/include"));
     parser_tests.root_module.link_libc = true;
-    parser_tests.addCSourceFile(.{ .file = b.path("src/regex_sizeof.c"), .flags = &.{"-std=c11"} });
-    parser_tests.linkLibrary(ts_lib);
-    for (grammar_libs) |gl| parser_tests.linkLibrary(gl);
+    parser_tests.root_module.addCSourceFile(.{ .file = b.path("src/regex_sizeof.c"), .flags = &.{"-std=c11"} });
+    parser_tests.root_module.linkLibrary(ts_lib);
+    for (grammar_libs) |gl| parser_tests.root_module.linkLibrary(gl);
 
     const run_parser_tests = b.addRunArtifact(parser_tests);
     test_step.dependOn(&run_parser_tests.step);

@@ -142,10 +142,13 @@ pub fn drain(self: *Self) !usize {
     if (!self.hasPending()) return 0;
 
     const data = self.buf[self.read_pos..self.len];
-    const n = std.posix.write(self.fd, data) catch |err| {
-        if (err == error.WouldBlock) return 0;
-        return err;
-    };
+    const rc = std.c.write(self.fd, data.ptr, data.len);
+    if (rc < 0) {
+        const e = std.posix.errno(rc);
+        if (e == .AGAIN) return 0;
+        return std.posix.unexpectedErrno(e);
+    }
+    const n: usize = @intCast(rc);
 
     self.read_pos += n;
 
@@ -164,8 +167,9 @@ pub fn drain(self: *Self) !usize {
 pub fn flushBlocking(self: *Self) !void {
     while (self.hasPending()) {
         const data = self.buf[self.read_pos..self.len];
-        const n = try std.posix.write(self.fd, data);
-        self.read_pos += n;
+        const rc = std.c.write(self.fd, data.ptr, data.len);
+        if (rc < 0) return std.posix.unexpectedErrno(std.posix.errno(rc));
+        self.read_pos += @intCast(rc);
     }
     self.read_pos = 0;
     self.len = 0;
@@ -186,9 +190,10 @@ fn compact(self: *Self) void {
 
 /// Set a file descriptor to non-blocking mode.
 pub fn setNonBlocking(fd: std.posix.fd_t) void {
-    const flags = std.posix.fcntl(fd, std.posix.F.GETFL, 0) catch return;
-    const nonblock: u32 = @bitCast(std.posix.O{ .NONBLOCK = true });
-    _ = std.posix.fcntl(fd, std.posix.F.SETFL, flags | @as(usize, nonblock)) catch return;
+    const flags = std.c.fcntl(fd, std.c.F.GETFL);
+    if (flags < 0) return;
+    const nonblock_bits: c_int = @bitCast(@as(c_uint, @bitCast(std.c.O{ .NONBLOCK = true })));
+    _ = std.c.fcntl(fd, std.c.F.SETFL, flags | nonblock_bits);
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────
@@ -231,9 +236,10 @@ test "multiple enqueues accumulate" {
 
 test "drain writes to a pipe" {
     if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
-    const fds = try std.posix.pipe();
-    defer std.posix.close(fds[0]);
-    defer std.posix.close(fds[1]);
+    var fds: [2]std.posix.fd_t = undefined;
+    if (std.c.pipe(&fds) != 0) return error.PipeCreateFailed;
+    defer _ = std.c.close(fds[0]);
+    defer _ = std.c.close(fds[1]);
 
     setNonBlocking(fds[1]);
 

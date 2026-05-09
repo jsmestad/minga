@@ -699,8 +699,10 @@ pub fn decodeCommand(data: []const u8) DecodeError!RenderCommand {
         OP_BATCH_END => return .batch_end,
         OP_SET_CURSOR_SHAPE => {
             if (rest.len < 1) return error.Malformed;
-            const shape = std.meta.intToEnum(CursorShape, rest[0]) catch return error.Malformed;
-            return .{ .set_cursor_shape = shape };
+            switch (rest[0]) {
+                inline CURSOR_BLOCK, CURSOR_BEAM, CURSOR_UNDERLINE => |v| return .{ .set_cursor_shape = @enumFromInt(v) },
+                else => return error.Malformed,
+            }
         },
         OP_SET_TITLE => {
             if (rest.len < 2) return error.Malformed;
@@ -1714,38 +1716,48 @@ test "decode set_cursor truncated (only 3 bytes after opcode) returns malformed"
 // ── writeMessage ──────────────────────────────────────────────────────────────
 
 test "writeMessage writes correct 4-byte big-endian length prefix" {
-    var out: [12]u8 = undefined;
-    var fbs = std.io.fixedBufferStream(&out);
-    try writeMessage(fbs.writer(), "hello");
-    const written = fbs.getWritten();
-    // First 4 bytes: length = 5
+    var aw: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer aw.deinit();
+    try writeMessage(&aw.writer, "hello");
+    const written = aw.written();
     try std.testing.expectEqual(@as(u32, 5), std.mem.readInt(u32, written[0..4], .big));
-    // Payload follows
     try std.testing.expectEqualSlices(u8, "hello", written[4..9]);
 }
 
 test "writeMessage with empty payload writes length 0" {
-    var out: [8]u8 = undefined;
-    var fbs = std.io.fixedBufferStream(&out);
-    try writeMessage(fbs.writer(), "");
-    const written = fbs.getWritten();
+    var aw: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer aw.deinit();
+    try writeMessage(&aw.writer, "");
+    const written = aw.written();
     try std.testing.expectEqual(@as(usize, 4), written.len);
     try std.testing.expectEqual(@as(u32, 0), std.mem.readInt(u32, written[0..4], .big));
 }
 
 // ── readMessageLength ─────────────────────────────────────────────────────────
 
+const SliceReader = struct {
+    data: []const u8,
+    pos: usize = 0,
+
+    fn readAll(self: *SliceReader, buf: []u8) !usize {
+        const available = self.data[self.pos..];
+        const n = @min(buf.len, available.len);
+        @memcpy(buf[0..n], available[0..n]);
+        self.pos += n;
+        return n;
+    }
+};
+
 test "readMessageLength returns correct value for known bytes" {
-    const data = [_]u8{ 0x00, 0x00, 0x00, 0x2A }; // big-endian 42
-    var fbs = std.io.fixedBufferStream(&data);
-    const result = try readMessageLength(fbs.reader());
+    const data = [_]u8{ 0x00, 0x00, 0x00, 0x2A };
+    var reader = SliceReader{ .data = &data };
+    const result = try readMessageLength(&reader);
     try std.testing.expectEqual(@as(?u32, 42), result);
 }
 
 test "readMessageLength returns null on EOF (empty reader)" {
-    const data = [_]u8{};
-    var fbs = std.io.fixedBufferStream(&data);
-    const result = try readMessageLength(fbs.reader());
+    var reader = SliceReader{ .data = &.{} };
+    const result = try readMessageLength(&reader);
     try std.testing.expectEqual(@as(?u32, null), result);
 }
 

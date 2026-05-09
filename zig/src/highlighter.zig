@@ -74,7 +74,7 @@ pub const Highlighter = struct {
     textobject_query_cache: std.StringHashMapUnmanaged(*c.TSQuery),
     /// Currently active predicate table (set during setLanguage)
     current_predicates: ?*const predicates_mod.PredicateTable = null,
-    cache_mutex: std.Thread.Mutex = .{},
+    cache_mutex: std.atomic.Mutex = .unlocked,
     allocator: std.mem.Allocator,
 
     /// After `highlightWithInjections`, holds the injection language regions.
@@ -153,7 +153,7 @@ pub const Highlighter = struct {
     ) void {
         // Check if already compiled (e.g. by a setLanguage call on the main thread)
         {
-            self.cache_mutex.lock();
+            while (!self.cache_mutex.tryLock()) std.atomic.spinLoopHint();
             defer self.cache_mutex.unlock();
             if (cache.get(name) != null) return;
         }
@@ -173,7 +173,7 @@ pub const Highlighter = struct {
 
         // Insert into cache under lock
         {
-            self.cache_mutex.lock();
+            while (!self.cache_mutex.tryLock()) std.atomic.spinLoopHint();
             defer self.cache_mutex.unlock();
             // Double-check: main thread may have compiled it while we worked
             if (cache.get(name) != null) {
@@ -188,7 +188,7 @@ pub const Highlighter = struct {
 
     /// Build predicate table for a language's highlight query (background thread).
     fn prewarmPredicates(self: *Highlighter, name: []const u8) void {
-        self.cache_mutex.lock();
+        while (!self.cache_mutex.tryLock()) std.atomic.spinLoopHint();
         defer self.cache_mutex.unlock();
         if (self.predicate_cache.get(name) != null) return;
         const query = self.query_cache.get(name) orelse return;
@@ -267,7 +267,7 @@ pub const Highlighter = struct {
         // Restore cached queries (may have been pre-compiled on background thread),
         // or lazily compile from embedded source.
         {
-            self.cache_mutex.lock();
+            while (!self.cache_mutex.tryLock()) std.atomic.spinLoopHint();
             defer self.cache_mutex.unlock();
 
             // Highlight query
@@ -385,7 +385,7 @@ pub const Highlighter = struct {
         const lang = self.current_language orelse return error.NoLanguageSet;
         const name = self.current_language_name orelse return error.NoLanguageSet;
 
-        self.cache_mutex.lock();
+        while (!self.cache_mutex.tryLock()) std.atomic.spinLoopHint();
         defer self.cache_mutex.unlock();
 
         // If we already have a cached query for this language, skip recompilation
@@ -420,7 +420,7 @@ pub const Highlighter = struct {
         const lang = self.current_language orelse return error.NoLanguageSet;
         const name = self.current_language_name orelse return error.NoLanguageSet;
 
-        self.cache_mutex.lock();
+        while (!self.cache_mutex.tryLock()) std.atomic.spinLoopHint();
         defer self.cache_mutex.unlock();
 
         // If we already have a cached injection query, skip recompilation
@@ -455,7 +455,7 @@ pub const Highlighter = struct {
         const lang = self.current_language orelse return error.NoLanguageSet;
         const name = self.current_language_name orelse return error.NoLanguageSet;
 
-        self.cache_mutex.lock();
+        while (!self.cache_mutex.tryLock()) std.atomic.spinLoopHint();
         defer self.cache_mutex.unlock();
 
         if (self.fold_query_cache.get(name)) |cached| {
@@ -531,7 +531,7 @@ pub const Highlighter = struct {
         const lang = self.current_language orelse return error.NoLanguageSet;
         const name = self.current_language_name orelse return error.NoLanguageSet;
 
-        self.cache_mutex.lock();
+        while (!self.cache_mutex.tryLock()) std.atomic.spinLoopHint();
         defer self.cache_mutex.unlock();
 
         if (self.indent_query_cache.get(name)) |cached| {
@@ -643,7 +643,7 @@ pub const Highlighter = struct {
         const lang = self.current_language orelse return error.NoLanguageSet;
         const name = self.current_language_name orelse return error.NoLanguageSet;
 
-        self.cache_mutex.lock();
+        while (!self.cache_mutex.tryLock()) std.atomic.spinLoopHint();
         defer self.cache_mutex.unlock();
 
         if (self.textobject_query_cache.get(name)) |cached| {
@@ -803,7 +803,7 @@ pub const Highlighter = struct {
         defer c.ts_query_cursor_delete(cursor);
         c.ts_query_cursor_exec(cursor, tq, root);
 
-        var entries = std.ArrayListUnmanaged(TextobjectEntry){};
+        var entries: std.ArrayListUnmanaged(TextobjectEntry) = .empty;
 
         var match: c.TSQueryMatch = undefined;
         while (c.ts_query_cursor_next_match(cursor, &match)) {
@@ -1186,7 +1186,7 @@ pub const Highlighter = struct {
 
             // Look up the highlight query for this injection language
             const inj_hl_query = blk: {
-                self.cache_mutex.lock();
+                while (!self.cache_mutex.tryLock()) std.atomic.spinLoopHint();
                 defer self.cache_mutex.unlock();
                 if (self.query_cache.get(lang_name)) |cached| break :blk cached;
 
@@ -1275,7 +1275,7 @@ pub const Highlighter = struct {
 
             // Lookup predicate table for this injection language
             const inj_preds: ?*const predicates_mod.PredicateTable = blk: {
-                self.cache_mutex.lock();
+                while (!self.cache_mutex.tryLock()) std.atomic.spinLoopHint();
                 defer self.cache_mutex.unlock();
                 break :blk self.predicate_cache.getPtr(lang_name);
             };

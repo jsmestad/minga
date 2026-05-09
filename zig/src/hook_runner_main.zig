@@ -5,6 +5,71 @@ const std = @import("std");
 const posix = std.posix;
 const c = std.c;
 
+// ---------------------------------------------------------------------------
+// Thin wrappers for POSIX functions that moved from std.posix to std.c in
+// Zig 0.16. Each wrapper preserves the error-handling style used by the
+// call-sites (error union, void, or noreturn).
+// ---------------------------------------------------------------------------
+
+const PosixError = error{Unexpected};
+
+fn pipeFds() PosixError![2]posix.fd_t {
+    var fds: [2]posix.fd_t = undefined;
+    if (c.pipe(&fds) != 0) return error.Unexpected;
+    return fds;
+}
+
+fn forkPid() PosixError!posix.pid_t {
+    const pid = c.fork();
+    if (pid < 0) return error.Unexpected;
+    return @intCast(pid);
+}
+
+fn closeFd(fd: posix.fd_t) void {
+    _ = c.close(fd);
+}
+
+fn dup2Fd(old: posix.fd_t, new: posix.fd_t) PosixError!void {
+    if (c.dup2(old, new) < 0) return error.Unexpected;
+}
+
+fn setsidSafe() void {
+    _ = c.setsid();
+}
+
+const WriteFdError = error{ WouldBlock, BrokenPipe, Unexpected };
+
+fn writeFd(fd: posix.fd_t, buf: []const u8) WriteFdError!usize {
+    const result = c.write(fd, buf.ptr, buf.len);
+    if (result >= 0) return @intCast(result);
+    return switch (posix.errno(result)) {
+        .AGAIN => error.WouldBlock,
+        .PIPE => error.BrokenPipe,
+        else => error.Unexpected,
+    };
+}
+
+fn setNonBlockingFd(fd: posix.fd_t) void {
+    const flags = c.fcntl(fd, posix.F.GETFL);
+    if (flags < 0) return;
+    const nonblock: u32 = @bitCast(posix.O{ .NONBLOCK = true });
+    _ = c.fcntl(fd, posix.F.SETFL, flags | @as(c_int, @intCast(nonblock)));
+}
+
+const WaitResult = struct { pid: posix.pid_t, status: u32 };
+
+fn waitpidNonBlocking(pid: posix.pid_t) WaitResult {
+    var raw_status: c_int = 0;
+    const ret = c.waitpid(pid, &raw_status, c.W.NOHANG);
+    return .{ .pid = ret, .status = @bitCast(raw_status) };
+}
+
+fn milliTimestamp() i64 {
+    var ts: c.timespec = undefined;
+    _ = c.clock_gettime(c.CLOCK.REALTIME, &ts);
+    return @as(i64, ts.sec) * 1000 + @divTrunc(@as(i64, ts.nsec), 1_000_000);
+}
+
 const stderr_limit: usize = 64 * 1024;
 const truncation_marker = "\n[stderr truncated after 65536 bytes]\n";
 const kill_grace_ms: i64 = 50;
@@ -49,14 +114,14 @@ const StderrCapture = struct {
     }
 };
 
-/// Parses runner arguments, executes the hook, and writes the structured JSON result.
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const alloc = gpa.allocator();
+/// Module-level Io instance set during main(), used by writeResult/writeHelperError.
+var g_io: std.Io = undefined;
 
-    const args = try std.process.argsAlloc(alloc);
-    defer std.process.argsFree(alloc, args);
+/// Parses runner arguments, executes the hook, and writes the structured JSON result.
+pub fn main(init: std.process.Init) !void {
+    g_io = init.io;
+    const alloc = init.gpa;
+    const args = try init.minimal.args.toSlice(init.arena.allocator());
 
     if (args.len != 4) {
         try writeHelperError("usage: minga-hook-runner <timeout_ms> <payload_len> <command>");
@@ -93,38 +158,38 @@ pub fn main() !void {
 }
 
 fn runHook(alloc: std.mem.Allocator, command: []const u8, payload: []const u8, timeout_ms: u64) !RunResult {
-    var stdin_pipe = try posix.pipe();
+    var stdin_pipe = try pipeFds();
     errdefer closePipe(&stdin_pipe);
 
-    var stderr_pipe = try posix.pipe();
+    var stderr_pipe = try pipeFds();
     errdefer closePipe(&stderr_pipe);
 
-    const devnull = try posix.open("/dev/null", .{ .ACCMODE = .WRONLY }, 0);
-    defer posix.close(devnull);
+    const devnull = try posix.openatZ(posix.AT.FDCWD, "/dev/null", .{ .ACCMODE = .WRONLY }, 0);
+    defer closeFd(devnull);
 
     const command_z = try alloc.dupeZ(u8, command);
     defer alloc.free(command_z);
 
-    const pid = try posix.fork();
+    const pid = try forkPid();
 
     if (pid == 0) {
         childExec(stdin_pipe, stderr_pipe, devnull, command_z);
     }
 
-    posix.close(stdin_pipe[0]);
+    closeFd(stdin_pipe[0]);
     stdin_pipe[0] = -1;
-    posix.close(stderr_pipe[1]);
+    closeFd(stderr_pipe[1]);
     stderr_pipe[1] = -1;
     defer closeIfOpen(stdin_pipe[1]);
     defer closeIfOpen(stderr_pipe[0]);
 
-    setNonBlocking(stdin_pipe[1]);
-    setNonBlocking(stderr_pipe[0]);
+    setNonBlockingFd(stdin_pipe[1]);
+    setNonBlockingFd(stderr_pipe[0]);
 
     var stderr_capture = StderrCapture.init();
     defer stderr_capture.deinit(alloc);
 
-    const start_ms = std.time.milliTimestamp();
+    const start_ms = milliTimestamp();
     const timeout_i64: i64 = @intCast(timeout_ms);
     const deadline_ms = start_ms + timeout_i64;
     var payload_offset: usize = 0;
@@ -135,7 +200,7 @@ fn runHook(alloc: std.mem.Allocator, command: []const u8, payload: []const u8, t
     var status: u32 = 0;
 
     while (!child_done) {
-        const now = std.time.milliTimestamp();
+        const now = milliTimestamp();
         if (now >= deadline_ms and !timed_out) {
             timed_out = true;
             killProcessGroup(pid, posix.SIG.TERM);
@@ -145,7 +210,7 @@ fn runHook(alloc: std.mem.Allocator, command: []const u8, payload: []const u8, t
             killProcessGroup(pid, posix.SIG.KILL);
         }
 
-        const wait = posix.waitpid(pid, posix.W.NOHANG);
+        const wait = waitpidNonBlocking(pid);
         if (wait.pid == pid) {
             child_done = true;
             status = wait.status;
@@ -162,10 +227,10 @@ fn runHook(alloc: std.mem.Allocator, command: []const u8, payload: []const u8, t
         _ = posix.poll(&pollfds, poll_timeout) catch 0;
 
         if (stdin_open and pollfds[0].revents & posix.POLL.OUT != 0) {
-            const n = posix.write(stdin_pipe[1], payload[payload_offset..]) catch |err| switch (err) {
+            const n = writeFd(stdin_pipe[1], payload[payload_offset..]) catch |err| switch (err) {
                 error.WouldBlock => 0,
                 error.BrokenPipe => blk: {
-                    posix.close(stdin_pipe[1]);
+                    closeFd(stdin_pipe[1]);
                     stdin_pipe[1] = -1;
                     stdin_open = false;
                     break :blk 0;
@@ -175,14 +240,14 @@ fn runHook(alloc: std.mem.Allocator, command: []const u8, payload: []const u8, t
 
             payload_offset += n;
             if (payload_offset >= payload.len) {
-                posix.close(stdin_pipe[1]);
+                closeFd(stdin_pipe[1]);
                 stdin_pipe[1] = -1;
                 stdin_open = false;
             }
         }
 
         if (stdin_open and payload.len == 0) {
-            posix.close(stdin_pipe[1]);
+            closeFd(stdin_pipe[1]);
             stdin_pipe[1] = -1;
             stdin_open = false;
         }
@@ -195,7 +260,7 @@ fn runHook(alloc: std.mem.Allocator, command: []const u8, payload: []const u8, t
             };
 
             if (n == 0) {
-                posix.close(stderr_pipe[0]);
+                closeFd(stderr_pipe[0]);
                 stderr_pipe[0] = -1;
                 stderr_open = false;
             } else {
@@ -233,25 +298,27 @@ fn runHook(alloc: std.mem.Allocator, command: []const u8, payload: []const u8, t
 }
 
 fn childExec(stdin_pipe: [2]posix.fd_t, stderr_pipe: [2]posix.fd_t, devnull: posix.fd_t, command_z: [:0]const u8) noreturn {
-    _ = posix.setsid() catch {};
+    setsidSafe();
 
-    posix.close(stdin_pipe[1]);
-    posix.close(stderr_pipe[0]);
+    closeFd(stdin_pipe[1]);
+    closeFd(stderr_pipe[0]);
 
-    posix.dup2(stdin_pipe[0], posix.STDIN_FILENO) catch std.process.exit(127);
-    posix.dup2(devnull, posix.STDOUT_FILENO) catch std.process.exit(127);
-    posix.dup2(stderr_pipe[1], posix.STDERR_FILENO) catch std.process.exit(127);
+    dup2Fd(stdin_pipe[0], posix.STDIN_FILENO) catch std.process.exit(127);
+    dup2Fd(devnull, posix.STDOUT_FILENO) catch std.process.exit(127);
+    dup2Fd(stderr_pipe[1], posix.STDERR_FILENO) catch std.process.exit(127);
 
-    posix.close(stdin_pipe[0]);
-    posix.close(stderr_pipe[1]);
-    posix.close(devnull);
+    closeFd(stdin_pipe[0]);
+    closeFd(stderr_pipe[1]);
+    closeFd(devnull);
 
     const argv = [_:null]?[*:0]const u8{ "/bin/sh", "-c", command_z.ptr };
     const envp: [*:null]const ?[*:0]const u8 = @ptrCast(c.environ);
-    posix.execveZ("/bin/sh", &argv, envp) catch std.process.exit(127);
+    _ = c.execve("/bin/sh", &argv, envp);
+    // execve only returns on error
+    std.process.exit(127);
 }
 
-fn killProcessGroup(pid: posix.pid_t, signal: u6) void {
+fn killProcessGroup(pid: posix.pid_t, signal: posix.SIG) void {
     const group_pid: posix.pid_t = -pid;
     posix.kill(group_pid, signal) catch {};
 }
@@ -262,13 +329,7 @@ fn closePipe(pipe: *[2]posix.fd_t) void {
 }
 
 fn closeIfOpen(fd: posix.fd_t) void {
-    if (fd >= 0) posix.close(fd);
-}
-
-fn setNonBlocking(fd: posix.fd_t) void {
-    const flags = posix.fcntl(fd, posix.F.GETFL, 0) catch return;
-    const nonblock: u32 = @bitCast(posix.O{ .NONBLOCK = true });
-    _ = posix.fcntl(fd, posix.F.SETFL, flags | @as(usize, nonblock)) catch return;
+    if (fd >= 0) closeFd(fd);
 }
 
 fn readExact(fd: posix.fd_t, buf: []u8) !bool {
@@ -283,7 +344,7 @@ fn readExact(fd: posix.fd_t, buf: []u8) !bool {
 
 fn writeResult(result: RunResult) !void {
     var stdout_buf: [4096]u8 = undefined;
-    var stdout_writer_obj = std.fs.File.stdout().writer(&stdout_buf);
+    var stdout_writer_obj = std.Io.File.stdout().writer(g_io, &stdout_buf);
     const stdout = &stdout_writer_obj.interface;
 
     switch (result.status) {
@@ -312,7 +373,7 @@ fn writeResult(result: RunResult) !void {
 
 fn writeHelperError(message: []const u8) !void {
     var stdout_buf: [1024]u8 = undefined;
-    var stdout_writer_obj = std.fs.File.stdout().writer(&stdout_buf);
+    var stdout_writer_obj = std.Io.File.stdout().writer(g_io, &stdout_buf);
     const stdout = &stdout_writer_obj.interface;
     try stdout.writeAll("{\"status\":\"error\",\"message\":");
     try writeJsonString(stdout, message);

@@ -14,6 +14,15 @@ const vaxis = @import("vaxis");
 
 const Self = @This();
 
+/// Portable millisecond timestamp using libc clock_gettime.
+/// Replaces milliTimestamp() which was removed in Zig 0.16.
+fn milliTimestamp() i64 {
+    const c = std.c;
+    var ts: c.timespec = undefined;
+    _ = c.clock_gettime(c.CLOCK.REALTIME, &ts);
+    return @as(i64, ts.sec) * 1000 + @divTrunc(@as(i64, ts.nsec), 1_000_000);
+}
+
 /// How long to wait (in ms) after the last key was sent before
 /// considering the BEAM unresponsive. Only triggers if at least
 /// one key was sent since the last render.
@@ -35,7 +44,7 @@ showing: bool,
 
 /// Initialize with current time.
 pub fn init() Self {
-    const now = std.time.milliTimestamp();
+    const now = milliTimestamp();
     return .{
         .last_render_ms = now,
         .last_key_sent_ms = 0,
@@ -47,21 +56,21 @@ pub fn init() Self {
 /// Called when a batch_end command is received from the BEAM.
 /// Resets the unresponsive timer.
 pub fn onRenderReceived(self: *Self) void {
-    self.last_render_ms = std.time.milliTimestamp();
+    self.last_render_ms = milliTimestamp();
     self.keys_since_render = 0;
     self.showing = false;
 }
 
 /// Called when a key event is enqueued to the PortWriter.
 pub fn onKeySent(self: *Self) void {
-    self.last_key_sent_ms = std.time.milliTimestamp();
+    self.last_key_sent_ms = milliTimestamp();
     self.keys_since_render += 1;
 }
 
 /// Returns true if the BEAM appears unresponsive.
 pub fn isUnresponsive(self: *const Self) bool {
     if (self.keys_since_render == 0) return false;
-    const now = std.time.milliTimestamp();
+    const now = milliTimestamp();
     const elapsed = now - self.last_render_ms;
     return elapsed > TIMEOUT_MS;
 }
@@ -210,22 +219,22 @@ test "init starts non-unresponsive" {
 test "becomes unresponsive after timeout with pending keys" {
     var r = init();
     // Simulate: render came 4 seconds ago, key sent 1 second ago
-    r.last_render_ms = std.time.milliTimestamp() - 4000;
-    r.last_key_sent_ms = std.time.milliTimestamp() - 1000;
+    r.last_render_ms = milliTimestamp() - 4000;
+    r.last_key_sent_ms = milliTimestamp() - 1000;
     r.keys_since_render = 3;
     try std.testing.expect(r.isUnresponsive());
 }
 
 test "not unresponsive if no keys sent" {
     var r = init();
-    r.last_render_ms = std.time.milliTimestamp() - 10000;
+    r.last_render_ms = milliTimestamp() - 10000;
     r.keys_since_render = 0;
     try std.testing.expect(!r.isUnresponsive());
 }
 
 test "render resets unresponsive state" {
     var r = init();
-    r.last_render_ms = std.time.milliTimestamp() - 4000;
+    r.last_render_ms = milliTimestamp() - 4000;
     r.keys_since_render = 5;
     r.showing = true;
     r.onRenderReceived();

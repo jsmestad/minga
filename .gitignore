@@ -10,6 +10,7 @@ minga-*.tar
 # Zig
 zig/zig-out/
 zig/.zig-cache/
+zig/zig-pkg/
 
 # Swift / Xcode
 macos/.build/

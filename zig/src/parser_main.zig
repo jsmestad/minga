@@ -70,10 +70,8 @@ fn panicImpl(msg: []const u8, ret_addr: ?usize) noreturn {
 
 pub const panic = std.debug.FullPanic(panicImpl);
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const alloc = gpa.allocator();
+pub fn main(init: std.process.Init) !void {
+    const alloc = init.gpa;
 
     var hl = try highlighter_mod.Highlighter.init(alloc);
     defer hl.deinit();
@@ -81,7 +79,7 @@ pub fn main() !void {
 
     // Stdout (Port protocol channel).
     var stdout_buf: [4096]u8 = undefined;
-    var stdout_writer_obj = std.fs.File.stdout().writer(&stdout_buf);
+    var stdout_writer_obj = std.Io.File.stdout().writer(init.io, &stdout_buf);
     const stdout: *std.Io.Writer = &stdout_writer_obj.interface;
 
     // Enable protocol-routed logging (and panic messages) now that stdout is ready.
