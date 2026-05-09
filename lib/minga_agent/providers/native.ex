@@ -1463,7 +1463,6 @@ defmodule MingaAgent.Providers.Native do
     Session.status(session_pid) == :plan and PlanMode.blocked?(name, args)
   catch
     # Session crashed; fail-closed so destructive tools stay blocked.
-    # Session crashed; fail-closed so destructive tools stay blocked.
     :exit, _ -> PlanMode.blocked?(name, args)
   end
 
