@@ -169,13 +169,21 @@ defmodule MingaEditor.Frontend.Emit.GUI do
 
   @spec build_gui_theme_cmd(ctx(), Caches.t()) :: {binary() | nil, Caches.t()}
   defp build_gui_theme_cmd(ctx, caches) do
-    theme_name = ctx.theme.name
+    theme_fp = theme_fingerprint(ctx.theme)
 
-    if theme_name != caches.last_gui_theme do
-      {ProtocolGUI.encode_gui_theme(ctx.theme), %{caches | last_gui_theme: theme_name}}
+    if theme_fp != caches.last_gui_theme do
+      {ProtocolGUI.encode_gui_theme(ctx.theme), %{caches | last_gui_theme: theme_fp}}
     else
       {nil, caches}
     end
+  end
+
+  @spec theme_fingerprint(MingaEditor.UI.Theme.t()) :: integer()
+  defp theme_fingerprint(theme) do
+    :erlang.phash2({
+      theme.name,
+      MingaEditor.UI.Theme.Slots.to_color_pairs(theme)
+    })
   end
 
   # ── Tab bar ──
@@ -418,8 +426,11 @@ defmodule MingaEditor.Frontend.Emit.GUI do
 
   defp minibuffer_fingerprint(%MinibufferData{} = d) do
     {d.visible, d.mode, d.cursor_pos, d.prompt, d.input, d.context, d.selected_index,
-     length(d.candidates),
-     Enum.map(d.candidates, fn c -> {c.label, c.description, c.match_score} end)}
+     length(d.candidates), d.total_candidates,
+     Enum.map(d.candidates, fn c ->
+       {c.label, c.description, c.match_score, Map.get(c, :annotation, ""),
+        Map.get(c, :match_positions, [])}
+     end)}
   end
 
   # ── Picker ──

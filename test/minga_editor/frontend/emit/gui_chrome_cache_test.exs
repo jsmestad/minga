@@ -15,6 +15,7 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.StatusBar.Data, as: StatusBarData
+  alias MingaEditor.MinibufferData
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.Frontend.Emit.GUI, as: EmitGUI
   alias MingaEditor.Shell.Board.State, as: BoardState
@@ -116,6 +117,41 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
       assert length(all_cmds) > 1, "expected more than just status bar after theme change"
     end
 
+    test "theme cache changes when same-name theme colors change" do
+      state = gui_state()
+      sb_data = StatusBarData.from_state(state)
+
+      {_ctx, caches} =
+        EmitGUI.sync_swiftui_chrome(Context.from_editor_state(state), sb_data, nil, %Caches{})
+
+      flush_port_casts()
+
+      theme = state.theme
+
+      changed_theme = %{
+        theme
+        | editor: %{theme.editor | bg: Bitwise.bxor(theme.editor.bg, 0x000001)}
+      }
+
+      changed_state = %{state | theme: changed_theme}
+
+      {_ctx, caches2} =
+        EmitGUI.sync_swiftui_chrome(
+          Context.from_editor_state(changed_state),
+          StatusBarData.from_state(changed_state),
+          nil,
+          caches
+        )
+
+      casts = collect_port_casts()
+      all_cmds = List.flatten(casts)
+
+      assert Enum.any?(all_cmds, &match?(<<0x74, _::binary>>, &1)),
+             "expected gui_theme command when same-name colors change"
+
+      refute caches2.last_gui_theme == caches.last_gui_theme
+    end
+
     test "file tree cache key is populated after first call" do
       state = gui_state()
       sb_data = StatusBarData.from_state(state)
@@ -203,6 +239,50 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
       flush_port_casts()
 
       refute caches2.last_gui_picker_fp == caches.last_gui_picker_fp
+    end
+
+    test "minibuffer cache changes when encoded candidate metadata changes" do
+      state = gui_state()
+      sb_data = StatusBarData.from_state(state)
+
+      data_a =
+        minibuffer_data([
+          %{
+            label: "edit",
+            description: "Open file",
+            match_score: 80,
+            annotation: "file",
+            match_positions: [0]
+          }
+        ])
+
+      {_ctx, caches} =
+        EmitGUI.sync_swiftui_chrome(Context.from_editor_state(state), sb_data, data_a, %Caches{})
+
+      flush_port_casts()
+
+      data_b =
+        minibuffer_data([
+          %{
+            label: "edit",
+            description: "Open file",
+            match_score: 80,
+            annotation: "buffer",
+            match_positions: [1],
+            total_candidates: 2
+          }
+        ])
+
+      {_ctx, caches2} =
+        EmitGUI.sync_swiftui_chrome(Context.from_editor_state(state), sb_data, data_b, caches)
+
+      casts = collect_port_casts()
+      all_cmds = List.flatten(casts)
+
+      assert Enum.any?(all_cmds, &match?(<<0x7F, _::binary>>, &1)),
+             "expected gui_minibuffer command when encoded candidate metadata changes"
+
+      refute caches2.last_gui_minibuffer == caches.last_gui_minibuffer
     end
 
     test "agent group cache changes when active group changes" do
@@ -298,6 +378,20 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
     picker = MingaEditor.UI.Picker.new([item], title: "Test")
     picker_state = %MingaEditor.State.Picker{picker: picker, source: nil, action_menu: nil}
     ModalOverlay.open(state, :picker, PickerPayload.new(picker_state))
+  end
+
+  defp minibuffer_data([first | _] = candidates) do
+    %MinibufferData{
+      visible: true,
+      mode: 0,
+      cursor_pos: 1,
+      prompt: ":",
+      input: "e",
+      context: "",
+      selected_index: 0,
+      candidates: candidates,
+      total_candidates: Map.get(first, :total_candidates, length(candidates))
+    }
   end
 
   defp tab_bar_with_two_agent_groups do

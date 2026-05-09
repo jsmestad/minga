@@ -54,6 +54,9 @@ final class EditorNSView: MTKView {
     /// Installed when the view moves to a window.
     private var firstResponderGuard: FirstResponderGuard?
 
+    /// Window currently registered for key/resign notifications.
+    private weak var observedWindow: NSWindow?
+
     /// When true, the agent chat SwiftUI overlay is visible. The Metal
     /// surface is at opacity(0) so the SwiftUI overlay is not occluded
     /// by the NSView layer. A local key event monitor forwards keyboard
@@ -106,6 +109,9 @@ final class EditorNSView: MTKView {
     /// Task observing accessibility display options changes.
     private var accessibilityTask: Task<Void, Never>?
 
+    /// Task observing system scroller style changes.
+    private var scrollerStyleTask: Task<Void, Never>?
+
     init(encoder: InputEncoder, fontFace: FontFace, dispatcher: CommandDispatcher,
          coreTextRenderer: CoreTextMetalRenderer, fontManager: FontManager) {
         self.encoder = encoder
@@ -124,8 +130,6 @@ final class EditorNSView: MTKView {
         colorPixelFormat = .bgra8Unorm_srgb
         layer?.isOpaque = true
 
-        // Observe system scroller style preference.
-        observeScrollerStyle()
     }
 
     @available(*, unavailable)
@@ -138,6 +142,20 @@ final class EditorNSView: MTKView {
         blinkTask = nil
         accessibilityTask?.cancel()
         accessibilityTask = nil
+    }
+
+    /// Cleans up window-bound observers and monitors.
+    private func cleanupWindowResources() {
+        cleanupBlinkResources()
+        scrollerStyleTask?.cancel()
+        scrollerStyleTask = nil
+        scrollFadeWorkItem?.cancel()
+        scrollFadeWorkItem = nil
+        spaceGraceTimer?.cancel()
+        spaceGraceTimer = nil
+        removeWindowObservers()
+        removeAgentKeyMonitor()
+        firstResponderGuard = nil
     }
 
     override var acceptsFirstResponder: Bool { true }
@@ -274,10 +292,17 @@ final class EditorNSView: MTKView {
 
     // MARK: - Window lifecycle
 
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        if newWindow !== window {
+            cleanupWindowResources()
+        }
+        super.viewWillMove(toWindow: newWindow)
+    }
+
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         guard let window = window else {
-            cleanupBlinkResources()
+            cleanupWindowResources()
             return
         }
 
@@ -289,9 +314,22 @@ final class EditorNSView: MTKView {
         // saved frame is applied without a visible position jump.
         window.setFrameAutosaveName("MingaEditorWindow")
 
-        // Observe window becoming/losing key to manage first responder
-        // and cursor blink. SwiftUI can reassign first responder during
-        // layout passes.
+        installWindowObserversIfNeeded(for: window)
+
+        updateTrackingArea()
+        claimFirstResponder()
+        observeScrollerStyle()
+        observeAccessibilityChanges()
+        resetCursorBlink()
+    }
+
+    /// Registers for key-window notifications exactly once per window.
+    private func installWindowObserversIfNeeded(for window: NSWindow) {
+        guard observedWindow !== window else { return }
+
+        removeWindowObservers()
+        observedWindow = window
+
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(windowDidBecomeKey),
@@ -305,16 +343,23 @@ final class EditorNSView: MTKView {
             object: window
         )
 
-        // Install the first responder guard. This uses KVO to monitor
-        // first responder changes and immediately redirect them back
-        // to this editor view. Combined with .focusable(false) on all
-        // SwiftUI chrome, this ensures vim keybindings always work.
         firstResponderGuard = FirstResponderGuard(window: window, editorView: self)
+    }
 
-        updateTrackingArea()
-        claimFirstResponder()
-        observeAccessibilityChanges()
-        resetCursorBlink()
+    /// Removes key-window notifications from the previously observed window.
+    private func removeWindowObservers() {
+        guard let observedWindow else { return }
+        NotificationCenter.default.removeObserver(
+            self,
+            name: NSWindow.didBecomeKeyNotification,
+            object: observedWindow
+        )
+        NotificationCenter.default.removeObserver(
+            self,
+            name: NSWindow.didResignKeyNotification,
+            object: observedWindow
+        )
+        self.observedWindow = nil
     }
 
     /// Claim first responder after a short delay so SwiftUI's layout pass
@@ -484,6 +529,9 @@ final class EditorNSView: MTKView {
         guard agentKeyMonitor == nil else { return }
         agentKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp, .flagsChanged]) { [weak self] event in
             guard let self, self.agentChatVisible else { return event }
+            if event.type == .keyDown, Self.shouldYieldSystemCommandShortcut(event) {
+                return event
+            }
             // Yield to active text field editors (SwiftUI text selection).
             // The FirstResponderGuard also yields to NSText, but the
             // monitor fires before the responder chain so we check here too.
@@ -513,6 +561,19 @@ final class EditorNSView: MTKView {
 
     // MARK: - Keyboard
 
+    /// Returns true for bare system shortcuts that AppKit should handle.
+    static func shouldYieldSystemCommandShortcut(_ event: NSEvent) -> Bool {
+        let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard mods == .command else { return false }
+
+        switch event.charactersIgnoringModifiers {
+        case "q", "h", "m":
+            return true
+        default:
+            return false
+        }
+    }
+
     /// Intercept key equivalents (Cmd+key, etc.) before AppKit/SwiftUI
     /// can consume them for menus or focus navigation.
     ///
@@ -528,15 +589,10 @@ final class EditorNSView: MTKView {
             return false
         }
 
-        let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        if mods == .command {
-            switch event.charactersIgnoringModifiers {
-            case "q", "h", "m":
-                return false  // Let the system handle Quit, Hide, Minimize
-            default:
-                break
-            }
+        if Self.shouldYieldSystemCommandShortcut(event) {
+            return false
         }
+
         keyDown(with: event)
         return true
     }
@@ -854,12 +910,13 @@ final class EditorNSView: MTKView {
 
     /// Call once during setup to observe the system scroller style preference.
     func observeScrollerStyle() {
+        guard scrollerStyleTask == nil else { return }
         alwaysShowScrollbar = NSScroller.preferredScrollerStyle == .legacy
         if alwaysShowScrollbar {
             coreTextRenderer.scrollIndicatorAlpha = 1.0
         }
 
-        Task { @MainActor [weak self] in
+        scrollerStyleTask = Task { @MainActor [weak self] in
             for await _ in NotificationCenter.default.notifications(named: NSScroller.preferredScrollerStyleDidChangeNotification) {
                 guard let self else { return }
                 self.alwaysShowScrollbar = NSScroller.preferredScrollerStyle == .legacy
