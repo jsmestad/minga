@@ -20,9 +20,9 @@ config :minga, platform_module: Minga.Platform.Stub
 config :minga, editor_wait_params: {5, 4}
 
 # Use a lightweight stub provider for agent sessions in tests.
-# The real providers (Native, PiRpc) take ~700ms to start because they
-# load tools, resolve API keys, or spawn OS processes. The stub starts
-# instantly and satisfies the Session GenServer lifecycle.
+# The real native provider takes ~700ms to start because it loads tools
+# and resolves API keys. The stub starts instantly and satisfies the
+# Session GenServer lifecycle.
 config :minga, test_provider_module: Minga.Test.StubProvider
 
 # Disable user extension loading so tests are deterministic regardless

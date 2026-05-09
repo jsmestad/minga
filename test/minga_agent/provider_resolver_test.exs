@@ -1,9 +1,9 @@
 defmodule MingaAgent.ProviderResolverTest do
-  use ExUnit.Case, async: true
+  # Mutates the global :minga Application env to exercise provider resolution without the test override.
+  use ExUnit.Case, async: false
 
   alias MingaAgent.ProviderResolver
   alias MingaAgent.Providers.Native
-  alias MingaAgent.Providers.PiRpc
 
   describe "resolve/1" do
     test "returns Native for :native preference" do
@@ -12,16 +12,10 @@ defmodule MingaAgent.ProviderResolverTest do
       assert result.name == "native"
     end
 
-    test "returns PiRpc for :pi_rpc preference" do
-      result = ProviderResolver.resolve(:pi_rpc)
-      assert result.module == PiRpc
-      assert result.name == "pi_rpc"
-    end
-
-    test "returns a valid provider for :auto" do
+    test "returns Native for :auto preference" do
       result = ProviderResolver.resolve(:auto)
-      assert result.module in [Native, PiRpc]
-      assert is_binary(result.name)
+      assert result.module == Native
+      assert result.name in ["native (auto)", "native (auto, no credentials)"]
     end
   end
 
@@ -43,8 +37,8 @@ defmodule MingaAgent.ProviderResolverTest do
 
       try do
         result = ProviderResolver.resolve()
-        assert result.module in [Native, PiRpc]
-        assert is_binary(result.name)
+        assert result.module == Native
+        assert result.name in ["native (auto)", "native (auto, no credentials)"]
       after
         # Restore the override for other tests
         if override, do: Application.put_env(:minga, :test_provider_module, override)

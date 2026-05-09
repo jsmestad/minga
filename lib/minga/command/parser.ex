@@ -60,7 +60,6 @@ defmodule Minga.Command.Parser do
           | {:parser_restart, []}
           | {:agent_abort, []}
           | {:agent_new_session, []}
-          | {:agent_set_provider, [String.t()]}
           | {:agent_set_model, [String.t()]}
           | {:agent_pick_model, []}
           | {:agent_cycle_model, []}
@@ -148,7 +147,6 @@ defmodule Minga.Command.Parser do
   defp do_parse("agent-stop"), do: {:agent_abort, []}
   defp do_parse("agent-new"), do: {:agent_new_session, []}
   defp do_parse("agent-clear-history"), do: {:agent_clear_history, []}
-  defp do_parse("agent-provider " <> provider), do: {:agent_set_provider, [String.trim(provider)]}
   defp do_parse("agent-model " <> model), do: {:agent_set_model, [String.trim(model)]}
   defp do_parse("agent-models"), do: {:agent_pick_model, []}
   defp do_parse("agent-cycle-model"), do: {:agent_cycle_model, []}

@@ -236,7 +236,7 @@ defmodule Minga.Config.Completion do
   defp option_description(:breakindent), do: "Preserve indentation on wrapped continuation lines."
 
   defp option_description(:agent_provider),
-    do: "AI agent backend: auto-detect, native (built-in), or pi_rpc (delegated)."
+    do: "AI agent backend: auto-detect or native (built-in)."
 
   defp option_description(:agent_model),
     do: "Override the default AI model. Nil uses the provider's default."

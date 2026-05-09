@@ -598,13 +598,6 @@ defmodule MingaEditor.Commands.Agent do
     end
   end
 
-  @doc "Sets the agent provider and restarts the session."
-  @spec set_provider(state(), String.t()) :: state()
-  def set_provider(state, provider) do
-    state = update_agent_ui(state, &UIState.set_provider_name(&1, provider))
-    AgentSession.restart_session(state, "Provider: #{provider}")
-  end
-
   @doc "Sets the agent model without resetting conversation context."
   @spec set_model(state(), String.t()) :: state()
   def set_model(state, model) do

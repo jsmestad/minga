@@ -2,10 +2,10 @@ defmodule MingaAgent.Event do
   @moduledoc """
   Provider-agnostic event types for agent communication.
 
-  These structs represent the events that flow from a provider (pi RPC,
-  direct API, etc.) to the `Agent.Session`. The session uses them to
-  update conversation state, status, and UI without knowing anything
-  about the underlying provider protocol.
+  These structs represent the events that flow from a provider backend
+  to the `Agent.Session`. The session uses them to update conversation
+  state, status, and UI without knowing anything about the underlying
+  provider protocol.
   """
 
   @typedoc "Token usage statistics from a completed response."

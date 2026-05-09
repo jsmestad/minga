@@ -184,6 +184,10 @@ defmodule Minga.Command.ParserTest do
     test "partial command returns {:unknown, raw}" do
       assert {:unknown, "wo"} = Parser.parse("wo")
     end
+
+    test "agent-provider is no longer a dedicated command" do
+      assert {:unknown, "agent-provider native"} = Parser.parse("agent-provider native")
+    end
   end
 
   describe "set filetype commands" do

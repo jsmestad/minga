@@ -4,10 +4,9 @@ defmodule MingaAgent.ProviderResolver do
 
   The `:agent_provider` config option controls selection:
 
-  - `:auto` (default) — checks for native API credentials first, then falls
-    back to pi RPC if `pi` is on `$PATH`, then native with an auth prompt
-  - `:native` — always uses the native ReqLLM provider
-  - `:pi_rpc` — always uses the pi RPC provider
+  - `:auto` (default) - checks for native API credentials first, then starts
+    the native provider with an onboarding message if no credentials exist
+  - `:native` - always uses the native ReqLLM provider
 
   This module is called by the Session during init and by any code that
   starts a new agent session.
@@ -33,18 +32,17 @@ defmodule MingaAgent.ProviderResolver do
   @doc """
   Resolves the provider module based on the current config.
 
-  Returns a map with `:module` (the provider module to start) and `:name`
+  Returns a map with `:module` (the provider to start) and `:name`
   (a human-readable label for status messages).
   """
   @spec resolve() :: resolved()
   def resolve do
     # Allow tests to override the provider module via application env.
-    # This avoids starting real providers (~700ms) in tests that exercise
-    # session lifecycle without caring which provider backs it.
+    # This avoids starting real providers in tests that exercise session
+    # lifecycle without caring which provider backs it.
     case Application.get_env(:minga, :test_provider_module) do
       nil ->
-        preference = read_config_provider()
-        resolve(preference)
+        resolve(read_config_provider())
 
       module when is_atom(module) ->
         %Resolved{module: module, name: "test"}
@@ -54,38 +52,24 @@ defmodule MingaAgent.ProviderResolver do
   @doc """
   Resolves a specific provider preference to a module.
   """
-  @spec resolve(:auto | :native | :pi_rpc) :: resolved()
+  @spec resolve(:auto | :native) :: resolved()
   def resolve(:native) do
     %Resolved{module: MingaAgent.Providers.Native, name: "native"}
   end
 
-  def resolve(:pi_rpc) do
-    %Resolved{module: MingaAgent.Providers.PiRpc, name: "pi_rpc"}
-  end
-
   def resolve(:auto) do
-    resolve_auto()
+    resolve_auto(has_native_credentials?())
   end
 
   # Auto resolution priority:
   # 1. Native provider if any API credentials are configured (env or file)
-  # 2. Pi RPC if `pi` binary is on $PATH
-  # 3. Native provider with no credentials (will prompt user to authenticate)
-  @spec resolve_auto() :: resolved()
-  defp resolve_auto do
-    resolve_auto(has_native_credentials?(), pi_available?())
-  end
-
-  @spec resolve_auto(boolean(), boolean()) :: resolved()
-  defp resolve_auto(true, _pi_available) do
+  # 2. Native provider with no credentials (will prompt user to authenticate)
+  @spec resolve_auto(boolean()) :: resolved()
+  defp resolve_auto(true) do
     %Resolved{module: MingaAgent.Providers.Native, name: "native (auto)"}
   end
 
-  defp resolve_auto(false, true) do
-    %Resolved{module: MingaAgent.Providers.PiRpc, name: "pi_rpc (auto, no API keys)"}
-  end
-
-  defp resolve_auto(false, false) do
+  defp resolve_auto(false) do
     %Resolved{module: MingaAgent.Providers.Native, name: "native (auto, no credentials)"}
   end
 
@@ -104,12 +88,7 @@ defmodule MingaAgent.ProviderResolver do
     Credentials.any_configured?()
   end
 
-  @spec pi_available?() :: boolean()
-  defp pi_available? do
-    System.find_executable("pi") != nil
-  end
-
-  @spec read_config_provider() :: :auto | :native | :pi_rpc
+  @spec read_config_provider() :: :auto | :native
   defp read_config_provider do
     Config.get(:agent_provider)
   end

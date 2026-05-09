@@ -176,6 +176,15 @@ defmodule Minga.Config.OptionsTest do
       assert {:error, _} = Options.set(s, :line_numbers, "hybrid")
     end
 
+    test "agent_provider accepts native providers and rejects removed pi_rpc", %{server: s} do
+      assert {:ok, :auto} = Options.set(s, :agent_provider, :auto)
+      assert {:ok, :native} = Options.set(s, :agent_provider, :native)
+
+      assert {:error, msg} = Options.set(s, :agent_provider, :pi_rpc)
+      assert msg =~ "agent_provider no longer supports :pi_rpc"
+      assert msg =~ "Use :native instead"
+    end
+
     test "autopair rejects non-boolean", %{server: s} do
       assert {:error, msg} = Options.set(s, :autopair, 1)
       assert msg =~ "boolean"

@@ -269,7 +269,7 @@ Minga uses three namespaces that enforce dependency direction: `Minga.*` (Layer 
 | `tools/` | (none) | Individual tool implementations (read_file, write_file, shell, etc.) |
 | `gateway/` | `MingaAgent.Gateway.Server` | WebSocket + JSON-RPC API gateway (Bandit/WebSock) |
 | `introspection.ex` | `MingaAgent.Introspection` | Runtime self-description for external clients |
-| `providers/` | (none) | LLM provider implementations (native, pi_rpc) |
+| `providers/` | (none) | LLM provider implementations (native) |
 
 #### Layer 2: `lib/minga_editor/` (MingaEditor.*)
 
