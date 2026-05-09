@@ -204,7 +204,7 @@ defmodule MingaEditor.Frontend.Emit.GUI do
     # Also include workspace count so the GUI hides the indicator when
     # all agent workspaces are removed.
     if TabBar.has_agent_groups?(tb) do
-      fp = :erlang.phash2(tb.agent_groups)
+      fp = agent_groups_fingerprint(tb)
 
       if fp != caches.last_gui_agent_groups_fp do
         {ProtocolGUI.encode_gui_agent_groups(tb), %{caches | last_gui_agent_groups_fp: fp}}
@@ -222,6 +222,17 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   end
 
   defp build_gui_agent_groups_cmd(_ctx, caches), do: {nil, caches}
+
+  @spec agent_groups_fingerprint(TabBar.t()) :: integer()
+  defp agent_groups_fingerprint(%TabBar{} = tb) do
+    :erlang.phash2({
+      TabBar.active_group_id(tb),
+      Enum.map(tb.agent_groups, fn group ->
+        {group.id, group.label, group.icon, group.color, group.agent_status,
+         length(TabBar.tabs_in_group(tb, group.id))}
+      end)
+    })
+  end
 
   @spec active_window_buffer(ctx()) :: pid() | nil
   defp active_window_buffer(%{windows: %{active: win_id, map: map}}) do
@@ -439,10 +450,10 @@ defmodule MingaEditor.Frontend.Emit.GUI do
     # Preview content is NOT in the fingerprint: a file changing on disk while
     # the picker is open won't refresh the preview. Acceptable trade-off for
     # scroll perf since the picker isn't open during normal editing.
-    fp = :erlang.phash2({picker.query, picker.selected, Picker.total(picker), action_menu})
+    has_preview = source != nil and Picker.Source.preview?(source)
+    fp = picker_fingerprint(picker, has_preview, action_menu, 100)
 
     if fp != caches.last_gui_picker_fp do
-      has_preview = source != nil and Picker.Source.preview?(source)
       preview_lines = if has_preview, do: build_picker_preview(ctx)
       # Picker always pairs with its preview; concatenate so they arrive as
       # adjacent frames in the batched port write.
@@ -452,6 +463,30 @@ defmodule MingaEditor.Frontend.Emit.GUI do
     else
       {nil, caches}
     end
+  end
+
+  @spec picker_fingerprint(Picker.t(), boolean(), term(), non_neg_integer()) :: integer()
+  defp picker_fingerprint(picker, has_preview, action_menu, max_items) do
+    limit = if max_items > 0, do: max_items, else: picker.max_visible
+
+    visible_items =
+      picker.filtered
+      |> Enum.take(limit)
+      |> Enum.map(fn item ->
+        {item.id, item.label, item.description, item.annotation, item.icon_color, item.two_line,
+         item.match_positions, Picker.marked?(picker, item)}
+      end)
+
+    :erlang.phash2({
+      picker.title,
+      picker.query,
+      picker.selected,
+      length(picker.filtered),
+      length(picker.items),
+      has_preview,
+      visible_items,
+      action_menu
+    })
   end
 
   # Build preview content for the currently selected picker item.
@@ -618,11 +653,16 @@ defmodule MingaEditor.Frontend.Emit.GUI do
         view = ctx.agent_ui.view
         styled_len = length(panel.cached_styled_messages || [])
         text = safe_prompt_content(panel.prompt_buffer)
+        prompt_cursor = UIState.input_cursor(panel)
+        prompt_line_count = UIState.input_line_count(panel)
+        inner_width = max(ctx.viewport.cols - 10, 20)
+        visible_rows = PromptSemanticWindow.visible_rows(panel, inner_width)
 
         {:erlang.phash2(
            {:visible, ctx.shell_state.agent.runtime.status,
             ctx.shell_state.agent.pending_approval, styled_len, panel.model_name, text,
-            panel.message_version, view.help_visible, ctx.editing.mode, panel.mention_completion}
+            panel.message_version, view.help_visible, view.focus, ctx.editing.mode, prompt_cursor,
+            prompt_line_count, visible_rows, panel.mention_completion}
          ), text}
       else
         {:not_visible, ""}
@@ -1069,7 +1109,7 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   defp build_gui_float_popup_cmd(ctx, caches) do
     float_window = find_float_popup_window(ctx)
 
-    fp = :erlang.phash2(float_window && {float_window.buffer, float_window.popup_meta})
+    fp = float_popup_fingerprint(ctx, float_window)
 
     if fp != caches.last_gui_float_popup_fp do
       cmd =
@@ -1090,6 +1130,25 @@ defmodule MingaEditor.Frontend.Emit.GUI do
     else
       {nil, caches}
     end
+  end
+
+  @spec float_popup_fingerprint(ctx(), MingaEditor.Window.t() | nil) :: integer()
+  defp float_popup_fingerprint(_ctx, nil), do: :erlang.phash2(nil)
+
+  defp float_popup_fingerprint(ctx, window) do
+    rule = window.popup_meta.rule
+    vp = ctx.viewport
+    width = resolve_float_dim(rule, :width, vp.cols)
+    height = resolve_float_dim(rule, :height, vp.rows)
+
+    buffer_fp =
+      try do
+        {Buffer.buffer_name(window.buffer), Buffer.version(window.buffer)}
+      catch
+        :exit, _ -> :dead
+      end
+
+    :erlang.phash2({window.buffer, window.popup_meta, width, height, buffer_fp})
   end
 
   @spec find_float_popup_window(ctx()) :: MingaEditor.Window.t() | nil
@@ -1179,13 +1238,7 @@ defmodule MingaEditor.Frontend.Emit.GUI do
     # Always send when Board is active so the GUI stays in sync.
     # The fingerprint covers card count, focused card, zoom state, and
     # card statuses so we skip encoding when nothing changed.
-    fp =
-      :erlang.phash2({
-        MingaEditor.Shell.Board.State.card_count(board),
-        board.focused_card,
-        board.zoomed_into,
-        Enum.map(MingaEditor.Shell.Board.State.sorted_cards(board), &{&1.id, &1.status})
-      })
+    fp = board_fingerprint(board)
 
     if fp != caches.last_gui_board_fp do
       {ProtocolGUI.encode_gui_board(board), %{caches | last_gui_board_fp: fp}}
@@ -1205,6 +1258,25 @@ defmodule MingaEditor.Frontend.Emit.GUI do
     else
       {nil, caches}
     end
+  end
+
+  @spec board_fingerprint(MingaEditor.Shell.Board.State.t()) :: integer()
+  defp board_fingerprint(board) do
+    cards =
+      board
+      |> MingaEditor.Shell.Board.State.sorted_cards()
+      |> Enum.map(fn card ->
+        {card.id, card.status, card.kind, card.task, card.model, card.created_at,
+         card.recent_files, card.sparkline}
+      end)
+
+    :erlang.phash2({
+      board.focused_card,
+      board.zoomed_into,
+      board.filter_mode,
+      board.filter_text,
+      cards
+    })
   end
 
   # ── Agent context bar ──

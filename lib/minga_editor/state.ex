@@ -203,6 +203,83 @@ defmodule MingaEditor.State do
     }
   end
 
+  @doc """
+  Applies asynchronous renderer writeback without overwriting editor-owned state.
+
+  Split rendering runs from an older `RenderPipeline.Input` snapshot while the
+  Editor process continues handling input. The renderer may return stale copies
+  of windows and shell state, so this function only merges fields owned by the
+  renderer: global render caches, layout, per-window render caches, and chrome
+  click regions.
+  """
+  @spec apply_renderer_writeback(t(), map()) :: t()
+  def apply_renderer_writeback(%__MODULE__{} = state, %{caches: caches, layout: layout} = wb) do
+    state = %{state | caches: caches, layout: layout}
+    state = merge_renderer_windows_from_writeback(state, wb)
+    merge_renderer_shell_from_writeback(state, wb)
+  end
+
+  @spec merge_renderer_windows_from_writeback(t(), map()) :: t()
+  defp merge_renderer_windows_from_writeback(%__MODULE__{workspace: ws} = state, wb) do
+    case Map.fetch(wb, :windows) do
+      {:ok, %Windows{} = rendered_windows} ->
+        windows = merge_renderer_windows(ws.windows, rendered_windows)
+        %{state | workspace: %{ws | windows: windows}}
+
+      _ ->
+        state
+    end
+  end
+
+  @spec merge_renderer_windows(Windows.t(), Windows.t()) :: Windows.t()
+  defp merge_renderer_windows(%Windows{} = live_windows, %Windows{} = rendered_windows) do
+    map =
+      Map.new(live_windows.map, fn {id, live_window} ->
+        {id, merge_renderer_window(live_window, Map.get(rendered_windows.map, id))}
+      end)
+
+    %{live_windows | map: map}
+  end
+
+  @spec merge_renderer_window(Window.t(), Window.t() | nil) :: Window.t()
+  defp merge_renderer_window(%Window{} = live_window, %Window{} = rendered_window) do
+    %{live_window | render_cache: rendered_window.render_cache}
+  end
+
+  defp merge_renderer_window(%Window{} = live_window, _rendered_window), do: live_window
+
+  @spec merge_renderer_shell_from_writeback(t(), map()) :: t()
+  defp merge_renderer_shell_from_writeback(%__MODULE__{} = state, wb) do
+    case Map.fetch(wb, :shell_state) do
+      {:ok, rendered_shell_state} ->
+        %{
+          state
+          | shell_state: merge_renderer_shell_state(state.shell_state, rendered_shell_state)
+        }
+
+      :error ->
+        state
+    end
+  end
+
+  @spec merge_renderer_shell_state(ShellState.t() | BoardState.t(), term()) ::
+          ShellState.t() | BoardState.t()
+  defp merge_renderer_shell_state(live_shell_state, rendered_shell_state) do
+    live_shell_state
+    |> merge_renderer_shell_field(rendered_shell_state, :modeline_click_regions)
+    |> merge_renderer_shell_field(rendered_shell_state, :tab_bar_click_regions)
+  end
+
+  @spec merge_renderer_shell_field(ShellState.t() | BoardState.t(), term(), atom()) ::
+          ShellState.t() | BoardState.t()
+  defp merge_renderer_shell_field(live_shell_state, rendered_shell_state, field) do
+    if Map.has_key?(live_shell_state, field) and Map.has_key?(rendered_shell_state, field) do
+      Map.put(live_shell_state, field, Map.fetch!(rendered_shell_state, field))
+    else
+      live_shell_state
+    end
+  end
+
   @doc "Applies a function to the shell state and returns the updated state."
   @spec update_shell_state(t(), (ShellState.t() -> ShellState.t())) :: t()
   def update_shell_state(%{shell_state: ss} = state, fun) when is_function(fun, 1) do
@@ -760,10 +837,16 @@ defmodule MingaEditor.State do
   def switch_buffer(%__MODULE__{} = state, idx) do
     state = update_workspace(state, &WorkspaceState.switch_buffer(&1, idx))
 
-    {shell_state, workspace} =
-      state.shell.on_buffer_switched(state.shell_state, state.workspace)
+    case state.buffer_add_context do
+      :preview ->
+        %{state | buffer_add_context: :open}
 
-    %{state | shell_state: shell_state, workspace: workspace}
+      :open ->
+        {shell_state, workspace} =
+          state.shell.on_buffer_switched(state.shell_state, state.workspace)
+
+        %{state | shell_state: shell_state, workspace: workspace}
+    end
   end
 
   @doc """

@@ -102,10 +102,14 @@ defmodule MingaEditor.UI.Picker.FileSource do
           "[file_picker] existing buffer idx=#{idx} tab=#{inspect(tab && tab.id)}"
         )
 
-        if tab do
-          EditorState.switch_tab(state, tab.id)
-        else
+        if state.buffer_add_context == :preview do
           EditorState.switch_buffer(state, idx)
+        else
+          if tab do
+            EditorState.switch_tab(state, tab.id)
+          else
+            EditorState.switch_buffer(state, idx)
+          end
         end
     end
   end

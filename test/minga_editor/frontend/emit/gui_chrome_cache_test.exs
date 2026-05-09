@@ -12,9 +12,15 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
   alias MingaEditor.Renderer.Caches
   alias MingaEditor.State.ModalOverlay
   alias MingaEditor.State.ModalOverlay.Picker, as: PickerPayload
+  alias MingaEditor.State.Tab
+  alias MingaEditor.State.TabBar
   alias MingaEditor.StatusBar.Data, as: StatusBarData
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.Frontend.Emit.GUI, as: EmitGUI
+  alias MingaEditor.Shell.Board.State, as: BoardState
+  alias MingaEditor.Window
+  alias MingaEditor.WindowTree
+  alias MingaEditor.State.Windows
 
   import MingaEditor.RenderPipeline.TestHelpers
 
@@ -179,6 +185,90 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
       refute caches.last_gui_picker_fp in [:closed, nil]
     end
 
+    test "picker cache changes when visible item content changes" do
+      state = gui_state()
+      sb_data = StatusBarData.from_state(state)
+      state_a = open_test_picker(state, "a.txt")
+
+      {_ctx, caches} =
+        EmitGUI.sync_swiftui_chrome(Context.from_editor_state(state_a), sb_data, nil, %Caches{})
+
+      flush_port_casts()
+
+      state_b = open_test_picker(state, "b.txt")
+
+      {_ctx, caches2} =
+        EmitGUI.sync_swiftui_chrome(Context.from_editor_state(state_b), sb_data, nil, caches)
+
+      flush_port_casts()
+
+      refute caches2.last_gui_picker_fp == caches.last_gui_picker_fp
+    end
+
+    test "agent group cache changes when active group changes" do
+      state = gui_state()
+      tb = tab_bar_with_two_agent_groups()
+      state_a = put_in(state.shell_state.tab_bar, tb)
+      sb_data = StatusBarData.from_state(state_a)
+
+      {_ctx, caches} =
+        EmitGUI.sync_swiftui_chrome(Context.from_editor_state(state_a), sb_data, nil, %Caches{})
+
+      flush_port_casts()
+
+      [_, tab_b] = tb.tabs
+      state_b = put_in(state.shell_state.tab_bar, %{tb | active_id: tab_b.id})
+
+      {_ctx, caches2} =
+        EmitGUI.sync_swiftui_chrome(Context.from_editor_state(state_b), sb_data, nil, caches)
+
+      flush_port_casts()
+
+      refute caches2.last_gui_agent_groups_fp == caches.last_gui_agent_groups_fp
+    end
+
+    test "agent chat cache changes when prompt cursor moves without text changes" do
+      state = agent_chat_state()
+      sb_data = StatusBarData.from_state(state)
+
+      {_ctx, caches} =
+        EmitGUI.sync_swiftui_chrome(Context.from_editor_state(state), sb_data, nil, %Caches{})
+
+      flush_port_casts()
+
+      prompt = state.workspace.agent_ui.panel.prompt_buffer
+      Minga.Buffer.move_to(prompt, {0, 1})
+
+      {_ctx, caches2} =
+        EmitGUI.sync_swiftui_chrome(Context.from_editor_state(state), sb_data, nil, caches)
+
+      flush_port_casts()
+
+      refute caches2.last_gui_agent_chat_fp == caches.last_gui_agent_chat_fp
+    end
+
+    test "board cache changes when encoded card content changes without status changes" do
+      board = BoardState.new()
+      {board_a, card} = BoardState.create_card(board, task: "Original task", status: :idle)
+      state = %{gui_state() | shell: MingaEditor.Shell.Board, shell_state: board_a}
+      sb_data = StatusBarData.from_state(state)
+
+      {_ctx, caches} =
+        EmitGUI.sync_swiftui_chrome(Context.from_editor_state(state), sb_data, nil, %Caches{})
+
+      flush_port_casts()
+
+      board_b = BoardState.update_card(board_a, card.id, &%{&1 | task: "Updated task"})
+      state_b = %{state | shell_state: board_b}
+
+      {_ctx, caches2} =
+        EmitGUI.sync_swiftui_chrome(Context.from_editor_state(state_b), sb_data, nil, caches)
+
+      flush_port_casts()
+
+      refute caches2.last_gui_board_fp == caches.last_gui_board_fp
+    end
+
     test "agent chat survives dead prompt buffer process" do
       state = gui_state()
 
@@ -201,5 +291,49 @@ defmodule MingaEditor.Frontend.Emit.GUI.ChromeCacheTest do
 
       assert is_map(ctx)
     end
+  end
+
+  defp open_test_picker(state, label) do
+    item = %MingaEditor.UI.Picker.Item{id: "same-id", label: label}
+    picker = MingaEditor.UI.Picker.new([item], title: "Test")
+    picker_state = %MingaEditor.State.Picker{picker: picker, source: nil, action_menu: nil}
+    ModalOverlay.open(state, :picker, PickerPayload.new(picker_state))
+  end
+
+  defp tab_bar_with_two_agent_groups do
+    tb = TabBar.new(Tab.new_file(1, "a.ex"))
+    {tb, group_a} = TabBar.add_agent_group(tb, "A")
+    {tb, group_b} = TabBar.add_agent_group(tb, "B")
+    {tb, tab_b} = TabBar.insert(tb, :file, "b.ex")
+
+    tb
+    |> TabBar.move_tab_to_group(1, group_a.id)
+    |> TabBar.move_tab_to_group(tab_b.id, group_b.id)
+  end
+
+  defp agent_chat_state do
+    state = gui_state()
+    {:ok, chat_buf} = Minga.Buffer.start_link(content: "")
+    {:ok, prompt_buf} = Minga.Buffer.start_link(content: "ab")
+    {:ok, session} = Agent.start_link(fn -> nil end)
+    Agent.stop(session)
+
+    window = Window.new_agent_chat(1, chat_buf, 24, 80)
+
+    workspace = %{
+      state.workspace
+      | windows: %Windows{tree: WindowTree.new(1), map: %{1 => window}, active: 1, next_id: 2},
+        agent_ui: %{
+          state.workspace.agent_ui
+          | panel: %{state.workspace.agent_ui.panel | prompt_buffer: prompt_buf}
+        }
+    }
+
+    tab = Tab.new_agent(1, "Agent") |> Tab.set_session(session)
+    tb = TabBar.new(tab)
+
+    state
+    |> Map.put(:workspace, workspace)
+    |> put_in([Access.key(:shell_state), Access.key(:tab_bar)], tb)
   end
 end

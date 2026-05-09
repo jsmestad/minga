@@ -625,34 +625,10 @@ defmodule MingaEditor do
   end
 
   # Renderer.Server writeback (only fires when split-renderer is enabled).
-  #
-  # Known race the Phase-1 follow-up must address before turning the flag
-  # on in production: `windows` and `shell_state` carry both
-  # renderer-derived data (per-window render caches, click regions) AND
-  # editor-owned state that the input handlers may have mutated between
-  # snapshot-time and writeback-arrival. Merging the whole struct can
-  # regress those edits. Today the flag is off by default and the
-  # writeback path is dormant, so we accept the merge as-is. A future
-  # change should narrow the writeback contract to renderer-owned fields
-  # only (caches, layout, click regions, per-window render_cache) and
-  # leave `windows`/`shell_state` editor-owned.
-  def handle_info({:render_done, %{caches: caches, layout: layout} = wb}, state) do
-    ws = state.workspace
-    new_state = %{state | caches: caches, layout: layout}
-
-    new_state =
-      case Map.fetch(wb, :windows) do
-        {:ok, windows} -> %{new_state | workspace: %{ws | windows: windows}}
-        :error -> new_state
-      end
-
-    new_state =
-      case Map.fetch(wb, :shell_state) do
-        {:ok, ss} -> %{new_state | shell_state: ss}
-        :error -> new_state
-      end
-
-    {:noreply, new_state}
+  # The renderer returns stale snapshots of full window and shell structs, so
+  # EditorState narrows the merge to renderer-owned fields only.
+  def handle_info({:render_done, %{caches: _caches, layout: _layout} = wb}, state) do
+    {:noreply, EditorState.apply_renderer_writeback(state, wb)}
   end
 
   # Nav-flash timer step — advance the fade or clear the flash.
