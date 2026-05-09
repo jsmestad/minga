@@ -821,8 +821,9 @@ Any new modeline data (diagnostic counts, indent info, selection size, etc.) mus
 Agent tools live in `lib/minga_agent/tools/`. When adding or modifying a tool that reads or writes file content:
 
 1. **File tools route through `MingaAgent.ToolRouter`.** The router checks whether a buffer is open for the target path. If so, it creates a `Buffer.Fork` (lazy, on first write) for in-memory isolation. If a changeset overlay is active, it routes through that instead. Only when neither is available does it fall through to direct filesystem I/O. See [BUFFER-AWARE-AGENTS.md](docs/BUFFER-AWARE-AGENTS.md) for the design rationale.
-2. **Batch edits into a single call** rather than making N separate calls. One call = one undo entry, one version bump.
-3. **Test the tool function** in `test/minga_agent/tools/`.
+2. **Edit boundaries are not part of the current safety model.** The unused `MingaAgent.EditBoundary` API was removed because it advertised line-range restrictions that tool execution did not enforce. Do not reintroduce edit boundaries as session-only state. If bounded editing returns, it must be a full feature that passes boundary data through `ToolRouter` and enforces it consistently for buffer forks, changesets, direct file writes, `edit_file`, `multi_edit_file`, and `write_file`.
+3. **Batch edits into a single call** rather than making N separate calls. One call = one undo entry, one version bump.
+4. **Test the tool function** in `test/minga_agent/tools/`.
 
 ### New render command (requires BEAM + frontend changes)
 1. Add opcode constant and encoder in `Minga.Port.Protocol` (BEAM side, canonical source of truth)

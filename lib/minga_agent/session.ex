@@ -30,7 +30,6 @@ defmodule MingaAgent.Session do
   alias MingaAgent.ProviderResolver
   alias MingaAgent.SessionMetadata
   alias MingaAgent.SessionStore
-  alias MingaAgent.EditBoundary
   alias MingaAgent.ToolCall
   alias MingaAgent.TurnUsage
 
@@ -68,8 +67,7 @@ defmodule MingaAgent.Session do
           branches: [Branch.t()],
           steering_queue: [String.t() | [ReqLLM.Message.ContentPart.t()]],
           follow_up_queue: [String.t() | [ReqLLM.Message.ContentPart.t()]],
-          touched_files: %{String.t() => file_touch()},
-          boundaries: %{String.t() => EditBoundary.t()}
+          touched_files: %{String.t() => file_touch()}
         }
 
   # ── Public API ──────────────────────────────────────────────────────────────
@@ -348,39 +346,6 @@ defmodule MingaAgent.Session do
   end
 
   @doc """
-  Sets an edit boundary for the agent on the given file path.
-
-  The agent will be restricted to editing within the specified line range
-  (0-indexed, both inclusive). Edits outside the boundary are rejected with
-  a descriptive error message.
-  """
-  @spec set_boundary(GenServer.server(), String.t(), non_neg_integer(), non_neg_integer()) ::
-          :ok | {:error, String.t()}
-  def set_boundary(session, path, start_line, end_line)
-      when is_binary(path) and is_integer(start_line) and is_integer(end_line) do
-    GenServer.call(session, {:set_boundary, path, start_line, end_line})
-  end
-
-  @doc "Clears the edit boundary for the given file path, restoring full-buffer access."
-  @spec clear_boundary(GenServer.server(), String.t()) :: :ok
-  def clear_boundary(session, path) when is_binary(path) do
-    GenServer.call(session, {:clear_boundary, path})
-  end
-
-  @doc "Clears all edit boundaries for this session."
-  @spec clear_all_boundaries(GenServer.server()) :: :ok
-  def clear_all_boundaries(session) do
-    GenServer.call(session, :clear_all_boundaries)
-  end
-
-  @doc "Returns the edit boundary for the given file path, or nil if unbounded."
-  @spec boundary_for(GenServer.server(), String.t()) ::
-          {non_neg_integer(), non_neg_integer()} | nil
-  def boundary_for(session, path) when is_binary(path) do
-    GenServer.call(session, {:boundary_for, path})
-  end
-
-  @doc """
   Returns both queues and clears them. Used by abort (Ctrl-C) and dequeue (Alt+Up)
   so pending messages can be restored to the prompt input.
   """
@@ -478,8 +443,7 @@ defmodule MingaAgent.Session do
       branches: [],
       steering_queue: [],
       follow_up_queue: [],
-      touched_files: %{},
-      boundaries: %{}
+      touched_files: %{}
     }
 
     # Start provider asynchronously so init doesn't block
@@ -589,39 +553,6 @@ defmodule MingaAgent.Session do
     {:reply, files, state}
   end
 
-  def handle_call({:set_boundary, path, start_line, end_line}, _from, state) do
-    abs_path = Path.expand(path)
-
-    case EditBoundary.new(start_line, end_line) do
-      {:ok, boundary} ->
-        {:reply, :ok, %{state | boundaries: Map.put(state.boundaries, abs_path, boundary)}}
-
-      {:error, _} = err ->
-        {:reply, err, state}
-    end
-  end
-
-  def handle_call({:clear_boundary, path}, _from, state) do
-    abs_path = Path.expand(path)
-    {:reply, :ok, %{state | boundaries: Map.delete(state.boundaries, abs_path)}}
-  end
-
-  def handle_call(:clear_all_boundaries, _from, state) do
-    {:reply, :ok, %{state | boundaries: %{}}}
-  end
-
-  def handle_call({:boundary_for, path}, _from, state) do
-    abs_path = Path.expand(path)
-
-    result =
-      case Map.get(state.boundaries, abs_path) do
-        nil -> nil
-        %EditBoundary{start_line: s, end_line: e} -> {s, e}
-      end
-
-    {:reply, result, state}
-  end
-
   def handle_call(:abort, _from, %{provider: nil} = state) do
     {:reply, :ok, state}
   end
@@ -662,8 +593,7 @@ defmodule MingaAgent.Session do
         pending_approval: nil,
         steering_queue: [],
         follow_up_queue: [],
-        touched_files: %{},
-        boundaries: %{}
+        touched_files: %{}
     }
 
     state = reset_messages(state, [Message.system("Session cleared · #{timestamp}")])
@@ -692,8 +622,7 @@ defmodule MingaAgent.Session do
             pending_approval: nil,
             steering_queue: [],
             follow_up_queue: [],
-            touched_files: %{},
-            boundaries: %{}
+            touched_files: %{}
         }
 
         state = reset_messages(state, data.messages)
