@@ -109,7 +109,7 @@ struct KeyboardInputTests {
             (125, 57353), // Down
         ]
 
-        for (keyCode, expected) in arrows {
+        for (keyCode, _) in arrows {
             guard let event = keyEvent(keyCode: keyCode) else { continue }
             view.keyDown(with: event)
         }
@@ -200,6 +200,15 @@ struct KeyboardInputTests {
         view.keyDown(with: event)
 
         #expect(spy.keyPressCalls[0].modifiers & 0x08 != 0) // command bit
+    }
+
+    @Test("System command shortcuts are yielded to AppKit")
+    @MainActor func systemCommandShortcutsYield() throws {
+        guard let quit = keyEvent(keyCode: 12, modifiers: .command, characters: "q", charactersIgnoringModifiers: "q") else { return }
+        guard let modifiedQuit = keyEvent(keyCode: 12, modifiers: [.command, .shift], characters: "Q", charactersIgnoringModifiers: "q") else { return }
+
+        #expect(EditorNSView.shouldYieldSystemCommandShortcut(quit))
+        #expect(!EditorNSView.shouldYieldSystemCommandShortcut(modifiedQuit))
     }
 
     // MARK: - Control key bypass

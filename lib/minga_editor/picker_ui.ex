@@ -587,7 +587,9 @@ defmodule MingaEditor.PickerUI do
   @doc "Closes the picker and resets picker-related state."
   @spec close(state()) :: state()
   def close(state) do
-    ModalOverlay.dismiss(state)
+    state
+    |> EditorState.set_buffer_add_context(:open)
+    |> ModalOverlay.dismiss()
   end
 
   @doc """

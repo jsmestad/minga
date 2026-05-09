@@ -118,6 +118,65 @@ defmodule MingaEditor.RenderPipeline.InputTest do
     end
   end
 
+  describe "EditorState.apply_renderer_writeback/2" do
+    test "merges renderer-owned fields without overwriting newer editor-owned state", %{
+      state: state
+    } do
+      input = Input.from_editor_state(state)
+      win_id = state.workspace.windows.active
+      live_window = state.workspace.windows.map[win_id]
+
+      live_window = %{
+        live_window
+        | cursor: {2, 0},
+          viewport: %{live_window.viewport | top: 9}
+      }
+
+      state =
+        put_in(state.workspace.windows.map[win_id], live_window)
+        |> put_in([Access.key(:shell_state), Access.key(:status_msg)], "new status")
+
+      rendered_window = %{
+        live_window
+        | cursor: {0, 0},
+          viewport: %{live_window.viewport | top: 1},
+          render_cache: %{live_window.render_cache | last_viewport_top: 42}
+      }
+
+      rendered_windows = %{
+        state.workspace.windows
+        | map: %{win_id => rendered_window},
+          active: 999
+      }
+
+      rendered_shell_state = %{
+        state.shell_state
+        | status_msg: "old snapshot",
+          modeline_click_regions: [{:modeline, 1}],
+          tab_bar_click_regions: [{:tab, 2}]
+      }
+
+      writeback = %{
+        caches: input.caches,
+        layout: :rendered_layout,
+        windows: rendered_windows,
+        shell_state: rendered_shell_state
+      }
+
+      result = EditorState.apply_renderer_writeback(state, writeback)
+      result_window = result.workspace.windows.map[win_id]
+
+      assert result.layout == :rendered_layout
+      assert result_window.render_cache.last_viewport_top == 42
+      assert result_window.cursor == {2, 0}
+      assert result_window.viewport.top == 9
+      assert result.workspace.windows.active == win_id
+      assert result.shell_state.status_msg == "new status"
+      assert result.shell_state.modeline_click_regions == [{:modeline, 1}]
+      assert result.shell_state.tab_bar_click_regions == [{:tab, 2}]
+    end
+  end
+
   describe "sync_active_window_cursor/1" do
     test "syncs cursor from buffer into active window", %{state: state} do
       # Move cursor in the buffer

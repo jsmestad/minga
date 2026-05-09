@@ -236,6 +236,7 @@ defmodule MingaEditor.Shell.Traditional do
       %Tab{kind: :file} ->
         label = buffer_label(workspace.buffers.active)
         tb = TabBar.update_label(tb, tb.active_id, label)
+        tb = TabBar.update_context(tb, tb.active_id, WorkspaceState.to_tab_context(workspace))
         {%{shell_state | tab_bar: tb}, workspace}
 
       _ ->

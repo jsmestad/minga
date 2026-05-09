@@ -318,6 +318,56 @@ defmodule MingaEditor.State.BufferLifecycleTest do
     end
   end
 
+  describe "switch_buffer/2" do
+    test "refreshes the active file tab context after an in-place buffer switch" do
+      state = state_with_file_tab()
+      original_buf = state.workspace.buffers.active
+      other_buf = start_buffer("other")
+
+      state =
+        EditorState.update_workspace(state, fn workspace ->
+          %Buffers{} = buffers = workspace.buffers
+
+          %{
+            workspace
+            | buffers: %{buffers | list: [original_buf, other_buf]}
+          }
+        end)
+
+      new_state = EditorState.switch_buffer(state, 1)
+
+      assert new_state.workspace.buffers.active == other_buf
+
+      assert %Buffers{active: ^other_buf} =
+               TabBar.active(new_state.shell_state.tab_bar).context.buffers
+    end
+
+    test "preview buffer switch does not rewrite the active file tab context" do
+      state = state_with_file_tab()
+      original_buf = state.workspace.buffers.active
+      preview_buf = start_buffer("preview")
+
+      state =
+        EditorState.update_workspace(state, fn workspace ->
+          %Buffers{} = buffers = workspace.buffers
+
+          %{
+            workspace
+            | buffers: %{buffers | list: [original_buf, preview_buf]}
+          }
+        end)
+        |> EditorState.set_buffer_add_context(:preview)
+
+      new_state = EditorState.switch_buffer(state, 1)
+
+      assert new_state.workspace.buffers.active == preview_buf
+      assert new_state.buffer_add_context == :open
+
+      assert %Buffers{active: ^original_buf} =
+               TabBar.active(new_state.shell_state.tab_bar).context.buffers
+    end
+  end
+
   # ── close_buffer_pure/2 ────────────────────────────────────────────────────────
 
   describe "close_buffer_pure/2" do

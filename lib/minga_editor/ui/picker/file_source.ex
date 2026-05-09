@@ -91,23 +91,36 @@ defmodule MingaEditor.UI.Picker.FileSource do
         end
 
       idx ->
-        # If the buffer already has a tab, switch to that tab instead
-        # of just changing the buffer index. This correctly leaves
-        # agentic view when opening a file from an agent tab.
-        pid = Enum.at(state.workspace.buffers.list, idx)
-        tab = EditorState.find_tab_by_buffer(state, pid)
-
-        Log.debug(
-          :editor,
-          "[file_picker] existing buffer idx=#{idx} tab=#{inspect(tab && tab.id)}"
-        )
-
-        if tab do
-          EditorState.switch_tab(state, tab.id)
-        else
-          EditorState.switch_buffer(state, idx)
-        end
+        switch_existing_buffer(state, idx)
     end
+  end
+
+  @spec switch_existing_buffer(term(), non_neg_integer()) :: term()
+  defp switch_existing_buffer(state, idx) do
+    # Prefer existing tabs when opening from normal picker flow so agentic view exits cleanly.
+    pid = Enum.at(state.workspace.buffers.list, idx)
+    tab = EditorState.find_tab_by_buffer(state, pid)
+
+    Log.debug(
+      :editor,
+      "[file_picker] existing buffer idx=#{idx} tab=#{inspect(tab && tab.id)}"
+    )
+
+    switch_existing_buffer_target(state, idx, tab)
+  end
+
+  @spec switch_existing_buffer_target(term(), non_neg_integer(), term()) :: term()
+  defp switch_existing_buffer_target(state, idx, _tab)
+       when state.buffer_add_context == :preview do
+    EditorState.switch_buffer(state, idx)
+  end
+
+  defp switch_existing_buffer_target(state, _idx, %{id: tab_id}) do
+    EditorState.switch_tab(state, tab_id)
+  end
+
+  defp switch_existing_buffer_target(state, idx, _tab) do
+    EditorState.switch_buffer(state, idx)
   end
 
   @impl true

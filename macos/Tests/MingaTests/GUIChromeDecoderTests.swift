@@ -537,7 +537,7 @@ struct GUIStatusBarDecoderTests {
         var identity = Data()
         identity.append(0); identity.append(0); identity.append(0)
 
-        var unknown = Data([0xDE, 0xAD, 0xBE, 0xEF])
+        let unknown = Data([0xDE, 0xAD, 0xBE, 0xEF])
 
         var cursor = Data()
         appendU32(&cursor, 10)
