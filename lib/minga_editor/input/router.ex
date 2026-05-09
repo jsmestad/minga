@@ -210,7 +210,7 @@ defmodule MingaEditor.Input.Router do
        )
        when old_mode == :visual and ranges != nil do
     if Editing.mode(state) != :visual do
-      %{state | lsp: MingaEditor.State.LSP.clear_selection_ranges(state.lsp)}
+      EditorState.update_lsp(state, &MingaEditor.State.LSP.clear_selection_ranges/1)
     else
       state
     end

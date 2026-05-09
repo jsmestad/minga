@@ -94,7 +94,7 @@ defmodule MingaEditor.Commands.Testing do
   end
 
   defp execute_test(state, command, project_root) do
-    state = %{state | last_test_command: {command, project_root}}
+    state = EditorState.set_last_test_command(state, {command, project_root})
     Minga.CommandOutput.run("*test*", command, cwd: project_root)
     show_output(state)
   end

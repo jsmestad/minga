@@ -237,6 +237,27 @@ defmodule MingaEditor.Shell.Board.State do
     |> Enum.reject(&is_nil/1)
   end
 
+  @doc "Enters card filter mode with an empty query."
+  @spec enter_filter(t()) :: t()
+  def enter_filter(%__MODULE__{} = state), do: %{state | filter_mode: true, filter_text: ""}
+
+  @doc "Leaves card filter mode and clears the query."
+  @spec exit_filter(t()) :: t()
+  def exit_filter(%__MODULE__{} = state), do: %{state | filter_mode: false, filter_text: ""}
+
+  @doc "Appends a printable codepoint to the current filter query."
+  @spec append_filter_char(t(), integer()) :: t()
+  def append_filter_char(%__MODULE__{} = state, cp)
+      when is_integer(cp) and cp >= 32 and cp <= 0x10FFFF,
+      do: %{state | filter_text: state.filter_text <> <<cp::utf8>>}
+
+  def append_filter_char(%__MODULE__{} = state, _cp), do: state
+
+  @doc "Removes the last grapheme from the current filter query."
+  @spec delete_filter_char(t()) :: t()
+  def delete_filter_char(%__MODULE__{} = state),
+    do: %{state | filter_text: String.slice(state.filter_text, 0..-2//1)}
+
   @doc "Returns cards filtered by the current filter text, in display order."
   @spec filtered_cards(t()) :: [Card.t()]
   def filtered_cards(%__MODULE__{filter_mode: false} = state), do: sorted_cards(state)

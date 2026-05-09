@@ -10,6 +10,7 @@ defmodule MingaEditor.Shell.Board.DispatchPrompt do
 
   alias MingaAgent.Config, as: AgentConfig
   alias MingaAgent.Session, as: AgentSession
+  alias MingaAgent.SessionManager
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.Shell.Board.Card
   alias MingaEditor.Shell.Board.State, as: BoardState
@@ -44,38 +45,29 @@ defmodule MingaEditor.Shell.Board.DispatchPrompt do
     # Create the card
     {board, card} = BoardState.create_card(board, task: task, model: model, status: :working)
     board = BoardState.focus_card(board, card.id)
-    state = %{state | shell_state: board}
+    state = EditorState.update_shell_state(state, fn _ -> board end)
 
     # Start an agent session
     case start_session(model) do
       {:ok, pid} ->
         # Attach the session to the card
-        board = BoardState.update_card(state.shell_state, card.id, &Card.attach_session(&1, pid))
-        state = %{state | shell_state: board}
-
-        # Monitor the session for :DOWN
-        ref = Process.monitor(pid)
-        monitors = Map.put(state.buffer_monitors, pid, ref)
-        state = %{state | buffer_monitors: monitors}
-
-        # Subscribe the editor to agent events
-        AgentSession.subscribe(pid)
+        state =
+          EditorState.update_shell_state(state, fn b ->
+            BoardState.update_card(b, card.id, &Card.attach_session(&1, pid))
+          end)
 
         # Card.session is the source of truth for routing; the rendering
         # cache on state.shell_state.agent is populated when the card is
         # zoomed into via AgentActivation.activate_for_card/2.
 
-        # Send the task as the initial prompt
-        AgentSession.send_prompt(pid, task)
-
-        Minga.Log.info(:agent, "Board: dispatched agent for '#{task}' (#{model})")
-        state
+        handle_initial_prompt_result(state, pid, card.id, task, model)
 
       {:error, reason} ->
-        board =
-          BoardState.update_card(state.shell_state, card.id, &Card.set_status(&1, :errored))
+        state =
+          EditorState.update_shell_state(state, fn b ->
+            BoardState.update_card(b, card.id, &Card.set_status(&1, :errored))
+          end)
 
-        state = %{state | shell_state: board}
         EditorState.set_status(state, "Agent dispatch failed: #{inspect(reason)}")
     end
   end
@@ -89,13 +81,79 @@ defmodule MingaEditor.Shell.Board.DispatchPrompt do
       ]
     ]
 
-    case DynamicSupervisor.start_child(
-           MingaAgent.Supervisor,
-           {AgentSession, opts}
-         ) do
-      {:ok, pid} -> {:ok, pid}
-      {:error, reason} -> {:error, reason}
+    case SessionManager.start_session(opts) do
+      {:ok, _session_id, pid} ->
+        subscribe_session(pid)
+
+      {:error, reason} ->
+        {:error, reason}
     end
+  catch
+    :exit, reason -> {:error, reason}
+  end
+
+  @spec subscribe_session(pid()) :: {:ok, pid()} | {:error, term()}
+  defp subscribe_session(pid) do
+    AgentSession.subscribe(pid)
+    {:ok, pid}
+  catch
+    :exit, reason ->
+      stop_session(pid)
+      {:error, reason}
+  end
+
+  @spec handle_initial_prompt_result(
+          EditorState.t(),
+          pid(),
+          Card.id(),
+          String.t(),
+          String.t()
+        ) :: EditorState.t()
+  defp handle_initial_prompt_result(state, pid, card_id, task, model) do
+    case send_initial_prompt(pid, task) do
+      :ok ->
+        Minga.Log.info(:agent, "Board: dispatched agent for '#{task}' (#{model})")
+        state
+
+      {:queued, :steering} ->
+        Minga.Log.info(:agent, "Board: queued dispatch for '#{task}' (#{model})")
+        state
+
+      {:error, reason} ->
+        handle_initial_prompt_error(state, pid, card_id, reason)
+    end
+  end
+
+  @spec handle_initial_prompt_error(EditorState.t(), pid(), Card.id(), term()) :: EditorState.t()
+  defp handle_initial_prompt_error(state, pid, card_id, reason) do
+    stop_session(pid)
+
+    state
+    |> EditorState.update_shell_state(fn b ->
+      BoardState.update_card(b, card_id, &mark_card_errored/1)
+    end)
+    |> EditorState.set_status("Agent dispatch failed: #{inspect(reason)}")
+  end
+
+  @spec mark_card_errored(Card.t()) :: Card.t()
+  defp mark_card_errored(card) do
+    card
+    |> Card.set_status(:errored)
+    |> Card.detach_session()
+  end
+
+  @spec send_initial_prompt(pid(), String.t()) :: :ok | {:queued, :steering} | {:error, term()}
+  defp send_initial_prompt(pid, task) do
+    AgentSession.send_prompt(pid, task)
+  catch
+    :exit, reason -> {:error, reason}
+  end
+
+  @spec stop_session(pid()) :: :ok | {:error, :not_found}
+  defp stop_session(pid) do
+    SessionManager.stop_session_by_pid(pid)
+  catch
+    :exit, _ -> :ok
   end
 
   defp resolve_model, do: AgentConfig.resolve_model()

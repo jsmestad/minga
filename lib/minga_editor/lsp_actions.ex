@@ -168,7 +168,7 @@ defmodule MingaEditor.LspActions do
       _client ->
         if state.backend != :headless do
           timer = Process.send_after(self(), :document_highlight_debounce, @highlight_debounce_ms)
-          %{state | lsp: LSPState.set_highlight_timer(state.lsp, timer)}
+          EditorState.update_lsp(state, &LSPState.set_highlight_timer(&1, timer))
         else
           state
         end
@@ -185,7 +185,7 @@ defmodule MingaEditor.LspActions do
 
   @spec cancel_highlight_timer(state()) :: state()
   defp cancel_highlight_timer(state) do
-    %{state | lsp: LSPState.cancel_highlight_timer(state.lsp)}
+    EditorState.update_lsp(state, &LSPState.cancel_highlight_timer/1)
   end
 
   # ── Code actions ──────────────────────────────────────────────────────────
@@ -437,7 +437,7 @@ defmodule MingaEditor.LspActions do
       when is_list(ranges) and idx + 1 < length(ranges) do
     new_idx = idx + 1
     range = Enum.at(ranges, new_idx)
-    state = %{state | lsp: LSPState.expand_selection(state.lsp)}
+    state = EditorState.update_lsp(state, &LSPState.expand_selection/1)
     apply_selection_range(state, range)
   end
 
@@ -457,7 +457,7 @@ defmodule MingaEditor.LspActions do
       when is_list(ranges) and idx > 0 do
     new_idx = idx - 1
     range = Enum.at(ranges, new_idx)
-    state = %{state | lsp: LSPState.shrink_selection(state.lsp)}
+    state = EditorState.update_lsp(state, &LSPState.shrink_selection/1)
     apply_selection_range(state, range)
   end
 
@@ -620,13 +620,13 @@ defmodule MingaEditor.LspActions do
       timer =
         Process.send_after(self(), :inlay_hint_scroll_debounce, @inlay_hint_scroll_debounce_ms)
 
-      %{state | lsp: LSPState.set_inlay_hint_timer(state.lsp, timer, vp_top)}
+      EditorState.update_lsp(state, &LSPState.set_inlay_hint_timer(&1, timer, vp_top))
     end
   end
 
   @spec cancel_inlay_hint_timer(state()) :: state()
   defp cancel_inlay_hint_timer(state) do
-    %{state | lsp: LSPState.cancel_inlay_hint_timer(state.lsp)}
+    EditorState.update_lsp(state, &LSPState.cancel_inlay_hint_timer/1)
   end
 
   # Returns the viewport top for the active window, falling back to
@@ -1035,7 +1035,7 @@ defmodule MingaEditor.LspActions do
 
       [first | _] ->
         # Store the range chain for subsequent expand/shrink operations
-        state = %{state | lsp: LSPState.set_selection_ranges(state.lsp, ranges)}
+        state = EditorState.update_lsp(state, &LSPState.set_selection_ranges(&1, ranges))
         apply_selection_range(state, first)
     end
   end
@@ -1176,7 +1176,7 @@ defmodule MingaEditor.LspActions do
       end)
       |> Enum.filter(fn l -> l.title != nil end)
 
-    state = %{state | lsp: LSPState.set_code_lenses(state.lsp, parsed)}
+    state = EditorState.update_lsp(state, &LSPState.set_code_lenses(&1, parsed))
     LspDecorations.apply_code_lenses(state)
   end
 
@@ -1215,7 +1215,7 @@ defmodule MingaEditor.LspActions do
         }
       end)
 
-    state = %{state | lsp: LSPState.set_inlay_hints(state.lsp, parsed)}
+    state = EditorState.update_lsp(state, &LSPState.set_inlay_hints(&1, parsed))
     LspDecorations.apply_inlay_hints(state)
   end
 
@@ -1631,7 +1631,7 @@ defmodule MingaEditor.LspActions do
         range = lens["range"]
         {line, _col} = extract_position(range["start"])
         entry = %{line: line, title: title, data: lens}
-        state = %{state | lsp: LSPState.append_code_lens(state.lsp, entry)}
+        state = EditorState.update_lsp(state, &LSPState.append_code_lens(&1, entry))
         LspDecorations.apply_code_lenses(state)
     end
   end
