@@ -162,8 +162,10 @@ defmodule Minga.Integration.MouseTest do
       send_keys_sync(ctx, "<Space>op")
       cursor_before = buffer_cursor(ctx)
 
-      # Click in the tree area (col 2, well within tree panel)
-      send_mouse(ctx, 3, 2, :left)
+      # Click in the tree area (col 2, well within tree panel).
+      # This click may be a render no-op, so use a state barrier instead of send_mouse/4.
+      send(ctx.editor, {:minga_input, {:mouse_event, 3, 2, :left, 0, :press, 1}})
+      :sys.get_state(ctx.editor)
 
       cursor_after = buffer_cursor(ctx)
       assert cursor_after == cursor_before, "clicking tree should not move buffer cursor"

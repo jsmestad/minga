@@ -39,15 +39,10 @@ defmodule MingaEditor.Shell.BoardIntegrationTest do
       state = editor_state(ctx)
       assert state.shell == MingaEditor.Shell.Board
 
-      # Toggle back via :sys.replace_state (Board grid consumes
-      # unmodified keys, so SPC leader doesn't work from grid view).
+      # Execute the command directly because the Board grid consumes
+      # unmodified keys, so SPC leader doesn't work from grid view.
       :sys.replace_state(ctx.editor, fn state ->
-        %{
-          state
-          | shell: MingaEditor.Shell.Traditional,
-            shell_state: %MingaEditor.Shell.Traditional.State{},
-            layout: nil
-        }
+        MingaEditor.Commands.execute(state, :toggle_board)
       end)
 
       state = editor_state(ctx)

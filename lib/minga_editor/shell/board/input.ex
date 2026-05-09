@@ -8,7 +8,7 @@ defmodule MingaEditor.Shell.Board.Input do
   - Arrow keys / h,j,k,l: navigate between cards
   - Enter: zoom into the focused card
   - Escape / q: switch back to Shell.Traditional
-  - n: dispatch a new agent (opens the dispatch prompt)
+  - n: create a new agent card and zoom into it
 
   All other keys pass through to global bindings (Ctrl+Q, Ctrl+S, etc.).
   When zoomed into a card, this handler is not in the stack; the
@@ -144,13 +144,7 @@ defmodule MingaEditor.Shell.Board.Input do
 
     if card && !Card.you_card?(card) do
       # Stop the agent session if running. SessionManager owns lifecycle events.
-      if card.session do
-        try do
-          SessionManager.stop_session_by_pid(card.session)
-        catch
-          :exit, _ -> :ok
-        end
-      end
+      if card.session, do: stop_session(card.session)
 
       new_board = BoardState.remove_card(board, card.id)
       state = EditorState.update_shell_state(state, fn _ -> new_board end)
@@ -362,8 +356,15 @@ defmodule MingaEditor.Shell.Board.Input do
     {:ok, pid}
   catch
     :exit, reason ->
-      SessionManager.stop_session_by_pid(pid)
+      stop_session(pid)
       {:error, reason}
+  end
+
+  @spec stop_session(pid()) :: :ok | {:error, :not_found}
+  defp stop_session(pid) do
+    SessionManager.stop_session_by_pid(pid)
+  catch
+    :exit, _ -> :ok
   end
 
   defp resolve_model, do: AgentConfig.resolve_model()
