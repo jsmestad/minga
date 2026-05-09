@@ -18,13 +18,12 @@ defmodule MingaEditor.Shell.Board.Input do
   @behaviour MingaEditor.Input.Handler
 
   alias MingaAgent.Config, as: AgentConfig
-  alias MingaAgent.Session, as: AgentSession
-  alias MingaAgent.SessionManager
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.Workspace.State, as: WorkspaceState
   alias MingaEditor.Shell.Board
   alias MingaEditor.Shell.Board.Card
+  alias MingaEditor.Shell.Board.SessionLifecycle
   alias MingaEditor.Shell.Board.State, as: BoardState
 
   # ── Key constants ──────────────────────────────────────────────────────
@@ -144,7 +143,7 @@ defmodule MingaEditor.Shell.Board.Input do
 
     if card && !Card.you_card?(card) do
       # Stop the agent session if running. SessionManager owns lifecycle events.
-      if card.session, do: stop_session(card.session)
+      SessionLifecycle.stop(card.session)
 
       new_board = BoardState.remove_card(board, card.id)
       state = EditorState.update_shell_state(state, fn _ -> new_board end)
@@ -339,32 +338,7 @@ defmodule MingaEditor.Shell.Board.Input do
 
   @spec start_session(keyword()) :: {:ok, pid()} | {:error, term()}
   defp start_session(opts) do
-    case SessionManager.start_session(opts) do
-      {:ok, _session_id, pid} ->
-        subscribe_session(pid)
-
-      {:error, reason} ->
-        {:error, reason}
-    end
-  catch
-    :exit, reason -> {:error, reason}
-  end
-
-  @spec subscribe_session(pid()) :: {:ok, pid()} | {:error, term()}
-  defp subscribe_session(pid) do
-    AgentSession.subscribe(pid)
-    {:ok, pid}
-  catch
-    :exit, reason ->
-      stop_session(pid)
-      {:error, reason}
-  end
-
-  @spec stop_session(pid()) :: :ok | {:error, :not_found}
-  defp stop_session(pid) do
-    SessionManager.stop_session_by_pid(pid)
-  catch
-    :exit, _ -> :ok
+    SessionLifecycle.start(opts)
   end
 
   defp resolve_model, do: AgentConfig.resolve_model()
