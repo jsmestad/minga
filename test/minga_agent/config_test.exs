@@ -45,6 +45,14 @@ defmodule MingaAgent.ConfigTest do
       assert config.diff_size_threshold == 1_048_576
       assert config.session_retention_days == 30
       assert config.save_debounce_ms == 500
+      assert config.mcp_server == nil
+    end
+  end
+
+  describe "MCP config" do
+    test "resolves normalized server config from struct values" do
+      config = Config.resolve()
+      assert config.mcp_server == nil
     end
   end
 

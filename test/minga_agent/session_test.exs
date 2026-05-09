@@ -1,7 +1,12 @@
 defmodule MingaAgent.SessionTest do
   use ExUnit.Case, async: true
 
+  @moduletag :tmp_dir
+
   alias MingaAgent.Event
+  alias MingaAgent.MCP.FakeTransport
+  alias MingaAgent.MCP.ServerConfig
+  alias MingaAgent.Providers.Native
   alias MingaAgent.Session
   alias MingaAgent.SessionStore
 
@@ -146,6 +151,31 @@ defmodule MingaAgent.SessionTest do
   # all handle_info callbacks have run.
   defp await_turn_complete do
     assert_receive {:agent_event, _, {:status_changed, :idle}}, 200
+  end
+
+  defp mcp_session_builtin_tool do
+    ReqLLM.Tool.new!(
+      name: "builtin_echo",
+      description: "Builtin echo",
+      parameter_schema: %{"type" => "object", "properties" => %{}},
+      callback: fn _args -> {:ok, "builtin ok"} end
+    )
+  end
+
+  defp mcp_session_stream(chunks) do
+    {:ok, handle} =
+      ReqLLM.StreamResponse.MetadataHandle.start_link(fn ->
+        %{usage: %{}, finish_reason: :stop}
+      end)
+
+    {:ok,
+     %ReqLLM.StreamResponse{
+       stream: chunks,
+       metadata_handle: handle,
+       cancel: fn -> :ok end,
+       model: elem(ReqLLM.model("anthropic:claude-sonnet-4-20250514"), 1),
+       context: ReqLLM.Context.new()
+     }}
   end
 
   # ── Tests ───────────────────────────────────────────────────────────────────
@@ -1308,6 +1338,74 @@ defmodule MingaAgent.SessionTest do
       assert length(ids_after) == length(pairs_before) + 1
       assert List.last(ids_after) > max_id_before
       assert length(pairs_after) == length(Session.messages(session))
+    end
+  end
+
+  describe "MCP crash handling" do
+    test "adds a system message and can still run a builtin tool", %{tmp_dir: dir} do
+      test_pid = self()
+      call_count = :counters.new(1, [:atomics])
+
+      llm_client = fn _model, _messages, opts ->
+        send(test_pid, {:session_mcp_tools, Enum.map(opts[:tools], & &1.name)})
+        count = :counters.get(call_count, 1)
+        :counters.add(call_count, 1, 1)
+
+        chunks =
+          if count == 0 do
+            [
+              ReqLLM.StreamChunk.tool_call("builtin_echo", %{}, %{id: "tc_builtin", index: 0}),
+              ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
+            ]
+          else
+            [
+              ReqLLM.StreamChunk.text("still works"),
+              ReqLLM.StreamChunk.meta(%{finish_reason: :stop})
+            ]
+          end
+
+        mcp_session_stream(chunks)
+      end
+
+      {:ok, session} =
+        Session.start_link(
+          provider: Native,
+          provider_opts: [
+            model: "anthropic:claude-sonnet-4-20250514",
+            project_root: dir,
+            tools: [mcp_session_builtin_tool()],
+            config: %MingaAgent.Config{
+              mcp_server: %ServerConfig{name: "Local Tools", command: "ignored"},
+              tool_approval: :none
+            },
+            mcp_transport: FakeTransport,
+            mcp_transport_opts: [
+              tools: [%{"name" => "echo-text", "inputSchema" => %{"type" => "object"}}],
+              test_pid: self()
+            ],
+            llm_client: llm_client
+          ]
+        )
+
+      Session.subscribe(session)
+      _provider = Session.get_provider(session)
+      assert_receive {:mcp_transport_started, transport}
+      FakeTransport.crash(transport)
+
+      assert_receive {:agent_event, ^session, {:error, message}}, 500
+      assert message =~ "MCP server Local Tools stopped"
+      assert Enum.any?(Session.messages(session), &match?({:system, _text, :error}, &1))
+
+      assert :ok = Session.send_prompt(session, "continue")
+      await_turn_complete()
+      assert_receive {:session_mcp_tools, tool_names}, 500
+      assert "builtin_echo" in tool_names
+      refute "mcp_local_tools__echo_text" in tool_names
+
+      assert Enum.any?(Session.messages(session), fn
+               {:tool_call, %{name: "builtin_echo", status: :complete, is_error: false}} -> true
+               _ -> false
+             end)
     end
   end
 end
