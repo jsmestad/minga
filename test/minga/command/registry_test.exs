@@ -112,6 +112,7 @@ defmodule Minga.Command.RegistryTest do
           :agent_pick_model,
           :agent_cycle_model,
           :agent_summarize,
+          :agent_context_artifacts,
           :agent_cycle_thinking,
 
           # Line display

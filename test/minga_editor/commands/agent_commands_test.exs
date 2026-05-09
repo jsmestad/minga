@@ -162,6 +162,18 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
     end
   end
 
+  describe "context_artifacts/1" do
+    test "sets a status message when no context artifacts exist" do
+      state = AgentCommands.context_artifacts(base_state())
+      assert state.shell_state.status_msg == "No context artifacts found"
+    end
+
+    test "is registered as an agent command" do
+      names = AgentCommands.__commands__() |> Enum.map(& &1.name)
+      assert :agent_context_artifacts in names
+    end
+  end
+
   # ── abort_agent ──────────────────────────────────────────────────────────
 
   describe "abort_agent/1" do

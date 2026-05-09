@@ -80,7 +80,7 @@ defmodule MingaAgent.ContextArtifact do
     if File.dir?(dir) do
       dir
       |> File.ls!()
-      |> Enum.filter(&String.ends_with?(&1, ".md"))
+      |> Enum.filter(&session_summary?/1)
       |> Enum.sort()
       |> Enum.map(&Path.join(dir, &1))
     else
@@ -99,6 +99,11 @@ defmodule MingaAgent.ContextArtifact do
   def summarizable?(messages) do
     non_system = Enum.reject(messages, &(&1.role == :system))
     length(non_system) >= 2
+  end
+
+  @spec session_summary?(String.t()) :: boolean()
+  defp session_summary?(filename) do
+    String.starts_with?(filename, "session-summary-") and String.ends_with?(filename, ".md")
   end
 
   @spec short_id() :: String.t()

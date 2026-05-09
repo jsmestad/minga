@@ -75,6 +75,10 @@ defmodule MingaEditor.Agent.SlashCommand do
       description: "Generate a context artifact from this session for future use"
     },
     %Command{
+      name: "context",
+      description: "Pick a saved context artifact and insert it as an @mention"
+    },
+    %Command{
       name: "remember",
       description: "Save a learning to persistent memory: /remember <text>"
     },
@@ -139,6 +143,7 @@ defmodule MingaEditor.Agent.SlashCommand do
   defp dispatch(state, "export", _args), do: do_export(state, :markdown)
   defp dispatch(state, "skills", _args), do: {:ok, do_skills(state)}
   defp dispatch(state, "summarize", _args), do: do_summarize(state)
+  defp dispatch(state, "context", _args), do: {:ok, AgentCommands.context_artifacts(state)}
   defp dispatch(state, "remember", args), do: do_remember(state, args)
   defp dispatch(state, "memory", _args), do: {:ok, do_memory(state)}
   defp dispatch(state, "forget", _args), do: do_forget(state)

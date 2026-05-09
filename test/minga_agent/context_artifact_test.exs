@@ -91,16 +91,28 @@ defmodule MingaAgent.ContextArtifactTest do
   end
 
   describe "list/1" do
-    test "lists existing context artifacts", %{tmp_dir: dir} do
+    test "lists only session summary markdown artifacts", %{tmp_dir: dir} do
       context_dir = Path.join(dir, ".minga/context")
       File.mkdir_p!(context_dir)
-      File.write!(Path.join(context_dir, "session-summary-a.md"), "summary a")
       File.write!(Path.join(context_dir, "session-summary-b.md"), "summary b")
-      File.write!(Path.join(context_dir, "other.txt"), "not a summary")
+      File.write!(Path.join(context_dir, "session-summary-a.md"), "summary a")
+      File.write!(Path.join(context_dir, "other.md"), "not a session summary")
+      File.write!(Path.join(context_dir, "session-summary-c.txt"), "wrong extension")
 
       artifacts = ContextArtifact.list(dir)
-      assert length(artifacts) == 2
+      filenames = Enum.map(artifacts, &Path.basename/1)
+
+      assert filenames == ["session-summary-a.md", "session-summary-b.md"]
       assert Enum.all?(artifacts, &String.ends_with?(&1, ".md"))
+    end
+
+    test "returns empty list when context directory has no summaries", %{tmp_dir: dir} do
+      context_dir = Path.join(dir, ".minga/context")
+      File.mkdir_p!(context_dir)
+      File.write!(Path.join(context_dir, "notes.md"), "notes")
+      File.write!(Path.join(context_dir, "session-summary.txt"), "wrong name")
+
+      assert ContextArtifact.list(dir) == []
     end
 
     test "returns empty list when no context directory", %{tmp_dir: dir} do

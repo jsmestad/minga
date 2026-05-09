@@ -11,6 +11,7 @@ defmodule MingaEditor.Commands.Agent do
 
   alias MingaEditor.Agent.BufferSync, as: AgentBufferSync
   alias MingaEditor.Agent.DiffReview
+  alias MingaAgent.ContextArtifact
   alias MingaAgent.FileMention
   alias MingaAgent.Markdown
   alias MingaAgent.Message
@@ -569,6 +570,20 @@ defmodule MingaEditor.Commands.Agent do
         {:error, reason} ->
           EditorState.set_status(state, "Error: #{inspect(reason)}")
       end
+    end
+  end
+
+  @doc "Opens the picker for loading saved context artifacts into the prompt."
+  @spec context_artifacts(state()) :: state()
+  def context_artifacts(state) do
+    root = project_root()
+
+    case ContextArtifact.list(root) do
+      [] ->
+        EditorState.set_status(state, "No context artifacts found")
+
+      _artifacts ->
+        PickerUI.open(state, MingaEditor.UI.Picker.ContextArtifactSource, %{project_root: root})
     end
   end
 
@@ -1209,6 +1224,7 @@ defmodule MingaEditor.Commands.Agent do
     {:agent_new_session, "New AI agent session", :new_agent_session},
     {:agent_cycle_model, "Cycle AI agent model", :cycle_model},
     {:agent_summarize, "Summarize session to context artifact", :summarize},
+    {:agent_context_artifacts, "Load context artifact into prompt", :context_artifacts},
     {:agent_cycle_thinking, "Cycle AI thinking level", :cycle_thinking_level},
     {:agent_clear_history, "Clear all saved agent sessions", :clear_session_history},
     # Input commands shared between editor scope (side panel) and agent scope

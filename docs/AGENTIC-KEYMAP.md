@@ -101,6 +101,10 @@ See [Agent tool approval](CONFIGURATION.md#agent-tool-approval) for how to confi
 |-----|--------|
 | `s` | Open session switcher |
 | `SPC a h` | Browse session history (load past conversations) |
+| `SPC a e` | Summarize the current session to `.minga/context/` |
+| `SPC a c` | Pick a saved context artifact and insert it into the prompt as an `@` mention |
+
+Context artifacts are explicit handoff files. Minga never auto-loads them into new sessions because stale hidden context is hard to notice. Use `/context` or `SPC a c` when you want to continue from a saved summary; the picker inserts an `@.minga/context/session-summary-...md` mention, and the normal file-mention pipeline reads it when you submit.
 
 ### Panel Management
 
@@ -135,6 +139,8 @@ See [Agent tool approval](CONFIGURATION.md#agent-tool-approval) for how to confi
 | `SPC a s` | Stop / abort agent |
 | `SPC a m` | Pick agent model |
 | `SPC a T` | Cycle thinking level |
+| `SPC a e` | Summarize session to context artifact |
+| `SPC a c` | Load context artifact into the prompt |
 | `SPC a t` | Toggle agentic view (close) |
 
 ## Chat Input Mode
