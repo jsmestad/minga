@@ -98,7 +98,7 @@ Flags bits:
   bit 1: is_dirty
   bit 2: is_agent (agent chat tab vs file tab)
   bit 3: has_attention
-  bits 4-5: agent_status (0=idle, 1=thinking, 2=tool_executing, 3=error)
+  bits 4-7: agent_status (0=idle, 1=thinking, 2=tool_executing, 3=error, 4=plan)
 
 group_id: workspace group this tab belongs to. 0 = manual/ungrouped workspace.
 Non-zero values match workspace IDs from gui_workspace_bar (0x86). The frontend
@@ -210,9 +210,9 @@ LSP status: 0=none, 1=ready, 2=initializing, 3=starting, 4=error
 
 Parser status: 0=available, 1=unavailable, 2=restarting
 
-Agent status: 0=idle, 1=thinking, 2=tool_executing, 3=error
+Agent status: 0=idle, 1=thinking, 2=tool_executing, 3=error, 4=plan
 
-Session status (agent variant): 0=idle, 1=thinking, 2=tool_executing, 3=error
+Session status (agent variant): 0=idle, 1=thinking, 2=tool_executing, 3=error, 4=plan
 
 Macro recording: 0=not recording, 1-26=recording register a-z
 
@@ -689,7 +689,7 @@ Per workspace:
   + tab_count(2) + label_len(1) + label(label_len)
 
 kind: 0 = manual (default user workspace), 1 = agent
-agent_status: 0 = idle, 1 = thinking, 2 = tool_executing, 3 = error
+agent_status: 0 = idle, 1 = thinking, 2 = tool_executing, 3 = error, 4 = plan
 color: 24-bit sRGB accent color for group separators and workspace indicator
 tab_count: number of tabs currently in this workspace
 ```

@@ -18,6 +18,7 @@ defmodule MingaEditor.Agent.SlashCommand do
   alias Minga.Config
   alias MingaEditor.Commands.Agent, as: AgentCommands
   alias MingaEditor.PickerUI
+  alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
 
   @typedoc "Editor state (same as EditorState.t())."
@@ -39,6 +40,8 @@ defmodule MingaEditor.Agent.SlashCommand do
     },
     %Command{name: "model", description: "Set the model: /model <name>"},
     %Command{name: "help", description: "Show available slash commands"},
+    %Command{name: "plan", description: "Enter plan mode (destructive tools blocked)"},
+    %Command{name: "exec", description: "Leave plan mode and allow execution"},
     %Command{name: "sessions", description: "Browse and switch between sessions"},
     %Command{
       name: "auth",
@@ -128,6 +131,10 @@ defmodule MingaEditor.Agent.SlashCommand do
   defp dispatch(state, "model", args), do: do_model(state, args)
   defp dispatch(state, "help", _args), do: {:ok, do_help(state)}
   defp dispatch(state, "?", _args), do: {:ok, do_help(state)}
+  defp dispatch(state, "plan", _args), do: do_plan(state)
+  defp dispatch(state, "exec", _args), do: do_exec(state)
+  defp dispatch(state, "skill:plan", _args), do: do_plan(state)
+  defp dispatch(state, "skill:off:plan", _args), do: do_exec(state)
   defp dispatch(state, "sessions", _args), do: {:ok, do_sessions(state)}
   defp dispatch(state, "auth", args), do: {:ok, do_auth(state, args)}
   defp dispatch(state, "instructions", _args), do: {:ok, do_instructions(state)}
@@ -210,6 +217,34 @@ defmodule MingaEditor.Agent.SlashCommand do
     end
 
     MingaEditor.State.set_status(state, "Commands listed in chat")
+  end
+
+  @spec do_plan(state()) :: {:ok, state()} | {:error, String.t()}
+  defp do_plan(state) do
+    with {:ok, session} <- require_session(state) do
+      :ok = Session.enter_plan(session)
+
+      state =
+        state
+        |> AgentAccess.update_agent(&AgentState.set_status(&1, :plan))
+        |> MingaEditor.State.set_status("Plan mode enabled")
+
+      {:ok, state}
+    end
+  end
+
+  @spec do_exec(state()) :: {:ok, state()} | {:error, String.t()}
+  defp do_exec(state) do
+    with {:ok, session} <- require_session(state) do
+      :ok = Session.enter_exec(session)
+
+      state =
+        state
+        |> AgentAccess.update_agent(&AgentState.set_status(&1, :idle))
+        |> MingaEditor.State.set_status("Execution mode enabled")
+
+      {:ok, state}
+    end
   end
 
   @spec do_sessions(state()) :: state()

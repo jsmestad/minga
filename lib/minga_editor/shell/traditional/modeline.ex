@@ -251,6 +251,7 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
     case {status, colors} do
       {nil, _} -> []
       {:idle, c} -> [{" ◯ ", c.status_idle, bar_bg, []}]
+      {:plan, c} -> [{" PLAN ", c.status_thinking, bar_bg, bold: true}]
       {:thinking, c} -> [{" ⟳ ", c.status_thinking, bar_bg, bold: true}]
       {:tool_executing, c} -> [{" ⚡ ", c.status_tool, bar_bg, bold: true}]
       {:error, c} -> [{" ✗ ", c.status_error, bar_bg, bold: true}]

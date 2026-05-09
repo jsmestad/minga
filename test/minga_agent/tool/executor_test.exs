@@ -148,6 +148,96 @@ defmodule MingaAgent.Tool.ExecutorTest do
     end
   end
 
+  describe "plan mode" do
+    test "refuses destructive tools before the callback runs", %{table: table} do
+      parent = self()
+
+      register_tool(table, "write_file",
+        callback: fn args ->
+          send(parent, {:called, "write_file", args})
+          {:ok, "wrote"}
+        end
+      )
+
+      assert {:error, {:plan_mode_refused, "write_file", message}} =
+               Executor.execute("write_file", %{"path" => "x", "content" => "new"}, table, :plan)
+
+      assert message =~ "Plan mode"
+      assert message =~ "write_file"
+      assert message =~ "/exec"
+      refute_receive {:called, "write_file", _}, 20
+    end
+
+    test "allows read-only and search tools", %{table: table} do
+      parent = self()
+
+      register_tool(table, "read_file",
+        callback: fn _args ->
+          send(parent, {:called, "read_file"})
+          {:ok, "content"}
+        end
+      )
+
+      register_tool(table, "grep",
+        callback: fn _args ->
+          send(parent, {:called, "grep"})
+          {:ok, "matches"}
+        end
+      )
+
+      assert {:ok, "content"} = Executor.execute("read_file", %{"path" => "x"}, table, :plan)
+      assert {:ok, "matches"} = Executor.execute("grep", %{"pattern" => "x"}, table, :plan)
+      assert_receive {:called, "read_file"}
+      assert_receive {:called, "grep"}
+    end
+
+    test "refuses code actions only when applying changes", %{table: table} do
+      parent = self()
+
+      register_tool(table, "code_actions",
+        callback: fn args ->
+          send(parent, {:called, args})
+          {:ok, "actions"}
+        end
+      )
+
+      assert {:ok, "actions"} =
+               Executor.execute("code_actions", %{"path" => "x.ex"}, table, :plan)
+
+      assert_receive {:called, %{"path" => "x.ex"}}
+
+      assert {:error, {:plan_mode_refused, "code_actions", message}} =
+               Executor.execute(
+                 "code_actions",
+                 %{"path" => "x.ex", "apply" => "Organize imports"},
+                 table,
+                 :plan
+               )
+
+      assert message =~ "Plan mode"
+      refute_receive {:called, %{"apply" => "Organize imports"}}, 20
+    end
+
+    test "refuses already-approved destructive tools before callback runs", %{table: table} do
+      parent = self()
+
+      spec =
+        register_tool(table, "git_commit",
+          approval_level: :ask,
+          callback: fn _args ->
+            send(parent, :called)
+            {:ok, "committed"}
+          end
+        )
+
+      assert {:error, {:plan_mode_refused, "git_commit", message}} =
+               Executor.execute_approved(spec, %{"message" => "test"}, :plan)
+
+      assert message =~ "git_commit"
+      refute_receive :called, 20
+    end
+  end
+
   describe "execute_approved/2" do
     test "skips approval check and runs callback directly", %{table: table} do
       spec =

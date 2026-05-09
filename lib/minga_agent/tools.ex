@@ -67,7 +67,7 @@ defmodule MingaAgent.Tools do
           fork_store: pid() | nil
         ]
 
-  @default_destructive_tools ~w(write_file edit_file multi_edit_file shell git_stage git_commit rename)
+  @default_destructive_tools ~w(write_file edit_file multi_edit multi_edit_file shell git_stage git_commit rename)
 
   @doc """
   Returns true if the named tool is classified as destructive.

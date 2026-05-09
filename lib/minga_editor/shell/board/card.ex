@@ -110,12 +110,13 @@ defmodule MingaEditor.Shell.Board.Card do
   @doc """
   Maps an agent session lifecycle status to the corresponding card status.
 
-  Agent sessions speak in `Tab.agent_status` (`:idle | :thinking | :tool_executing
+  Agent sessions speak in `Tab.agent_status` (`:idle | :plan | :thinking | :tool_executing
   | :error | nil`); cards have a richer status vocabulary intended for the Board
   grid. This mapping is the single source of truth so foreground (active session)
   and background (non-active session) routing apply the same translation.
   """
   @spec from_agent_status(MingaEditor.State.Tab.agent_status()) :: status()
+  def from_agent_status(:plan), do: :needs_you
   def from_agent_status(:thinking), do: :working
   def from_agent_status(:tool_executing), do: :iterating
   def from_agent_status(:error), do: :errored
