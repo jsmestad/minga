@@ -123,14 +123,13 @@ defmodule MingaEditor.Shell.Board.Input do
 
     case Enum.at(cards, index) do
       nil -> {:handled, state}
-      card -> {:handled, %{state | shell_state: BoardState.focus_card(board, card.id)}}
+      card -> {:handled, EditorState.update_shell_state(state, &BoardState.focus_card(&1, card.id))}
     end
   end
 
   # /: open search filter
   defp dispatch_grid_key(state, ?/, 0) do
-    board = state.shell_state
-    {:handled, %{state | shell_state: %{board | filter_mode: true, filter_text: ""}}}
+    {:handled, EditorState.update_shell_state(state, fn b -> %{b | filter_mode: true, filter_text: ""} end)}
   end
 
   # d / x: delete the focused card (can't delete "You" card)
@@ -149,7 +148,7 @@ defmodule MingaEditor.Shell.Board.Input do
       end
 
       new_board = BoardState.remove_card(board, card.id)
-      state = %{state | shell_state: new_board}
+      state = EditorState.update_shell_state(state, fn _ -> new_board end)
       persist_board(state)
       {:handled, state}
     else
@@ -197,8 +196,7 @@ defmodule MingaEditor.Shell.Board.Input do
 
   # Escape: cancel filter
   defp dispatch_filter_key(state, @key_escape, 0) do
-    board = %{state.shell_state | filter_mode: false, filter_text: ""}
-    {:handled, %{state | shell_state: board}}
+    {:handled, EditorState.update_shell_state(state, fn b -> %{b | filter_mode: false, filter_text: ""} end)}
   end
 
   # Enter: select the first matching card and exit filter
@@ -206,7 +204,7 @@ defmodule MingaEditor.Shell.Board.Input do
     board = state.shell_state
     matches = BoardState.filtered_cards(board)
 
-    board =
+    new_board =
       case matches do
         [first | _] ->
           BoardState.focus_card(%{board | filter_mode: false, filter_text: ""}, first.id)
@@ -215,21 +213,21 @@ defmodule MingaEditor.Shell.Board.Input do
           %{board | filter_mode: false, filter_text: ""}
       end
 
-    {:handled, %{state | shell_state: board}}
+    {:handled, EditorState.update_shell_state(state, fn _ -> new_board end)}
   end
 
   # Backspace: delete last character
   defp dispatch_filter_key(state, @backspace, _mods) do
     board = state.shell_state
     new_text = String.slice(board.filter_text, 0..-2//1)
-    {:handled, %{state | shell_state: %{board | filter_text: new_text}}}
+    {:handled, EditorState.update_shell_state(state, fn b -> %{b | filter_text: new_text} end)}
   end
 
   # Printable characters: append to filter
   defp dispatch_filter_key(state, cp, _mods) when cp >= 32 do
     board = state.shell_state
     new_text = board.filter_text <> <<cp::utf8>>
-    {:handled, %{state | shell_state: %{board | filter_text: new_text}}}
+    {:handled, EditorState.update_shell_state(state, fn b -> %{b | filter_text: new_text} end)}
   end
 
   # Everything else: passthrough for Ctrl combos
@@ -243,7 +241,7 @@ defmodule MingaEditor.Shell.Board.Input do
     # Use the grid columns from the last computed layout, default to 3
     cols = grid_cols(state)
     new_board = BoardState.move_focus(board, direction, cols)
-    %{state | shell_state: new_board}
+    EditorState.update_shell_state(state, fn _ -> new_board end)
   end
 
   @spec zoom_into_focused(EditorState.t()) :: EditorState.t()
@@ -256,7 +254,7 @@ defmodule MingaEditor.Shell.Board.Input do
       # the zoomed card. This gets restored when zooming back out.
       current_workspace = WorkspaceState.to_tab_context(state.workspace)
       new_board = BoardState.zoom_into(board, card.id, current_workspace)
-      state = %{state | shell_state: new_board}
+      state = EditorState.update_shell_state(state, fn _ -> new_board end)
 
       # Restore the card's workspace if it has one from a previous zoom.
       # First zoom: build a fresh agent-shaped workspace (own window with
@@ -298,7 +296,7 @@ defmodule MingaEditor.Shell.Board.Input do
     # Snapshot current workspace and zoom into the card
     workspace_snapshot = WorkspaceState.to_tab_context(state.workspace)
     board = BoardState.zoom_into(board, card.id, workspace_snapshot)
-    state = %{state | shell_state: board}
+    state = EditorState.update_shell_state(state, fn _ -> board end)
 
     # Activate the agentic view for the new card
     card = board.cards[card.id]
@@ -320,9 +318,7 @@ defmodule MingaEditor.Shell.Board.Input do
         board = BoardState.update_card(board, card_id, &Card.attach_session(&1, pid))
 
         # Monitor session for :DOWN
-        ref = Process.monitor(pid)
-        monitors = Map.put(state.buffer_monitors, pid, ref)
-        state = %{state | buffer_monitors: monitors}
+        state = EditorState.monitor_buffer(state, pid)
 
         # Subscribe editor to agent events
         MingaAgent.Session.subscribe(pid)

@@ -128,10 +128,7 @@ defmodule MingaEditor.State do
           theme: Theme.t(),
           render_timer: reference() | nil,
           message_store: MessageStore.t(),
-          git_remote_op:
-            {msg_ref :: reference(), task_monitor :: reference(),
-             {git_root :: String.t(), success_msg :: String.t(), error_prefix :: String.t()}}
-            | nil,
+          git_remote_op: git_remote_op(),
           lsp: LSPState.t(),
           parser_status: MingaEditor.Shell.Traditional.Modeline.parser_status(),
           focus_stack: [module()],
@@ -265,6 +262,35 @@ defmodule MingaEditor.State do
   def modal(%{shell_state: ss}), do: ShellState.modal(ss)
   @spec set_modal(t(), MingaEditor.State.ModalOverlay.t()) :: t()
   def set_modal(s, modal), do: update_shell_state(s, &ShellState.set_modal(&1, modal))
+
+  # ── Global field accessors ─────────────────────────────────────────────────
+
+  @typedoc "The git_remote_op tracking tuple, or nil when no operation is in flight."
+  @type git_remote_op ::
+          {msg_ref :: reference(), task_monitor :: reference(),
+           {git_root :: String.t(), success_msg :: String.t(), error_prefix :: String.t()}}
+          | nil
+
+  @spec set_git_remote_op(t(), git_remote_op()) :: t()
+  def set_git_remote_op(%__MODULE__{} = state, op), do: %{state | git_remote_op: op}
+
+  @spec clear_git_remote_op(t()) :: t()
+  def clear_git_remote_op(%__MODULE__{} = state), do: %{state | git_remote_op: nil}
+
+  @spec set_pending_quit(t(), :quit | :quit_all) :: t()
+  def set_pending_quit(%__MODULE__{} = state, kind) when kind in [:quit, :quit_all],
+    do: %{state | pending_quit: kind}
+
+  @spec clear_pending_quit(t()) :: t()
+  def clear_pending_quit(%__MODULE__{} = state), do: %{state | pending_quit: nil}
+
+  @spec set_last_test_command(t(), {String.t(), String.t()}) :: t()
+  def set_last_test_command(%__MODULE__{} = state, {_cmd, _root} = val),
+    do: %{state | last_test_command: val}
+
+  @spec update_lsp(t(), (LSPState.t() -> LSPState.t())) :: t()
+  def update_lsp(%__MODULE__{lsp: lsp} = state, fun) when is_function(fun, 1),
+    do: %{state | lsp: fun.(lsp)}
 
   # ── Convenience accessors ─────────────────────────────────────────────────
 

@@ -234,7 +234,9 @@ defmodule MingaEditor.Commands.Git do
               "#{error_prefix}: #{reason}"
           end
 
-        EditorState.set_status(%{state | git_remote_op: nil}, status_msg)
+        state
+        |> EditorState.clear_git_remote_op()
+        |> EditorState.set_status(status_msg)
 
       _ ->
         # Stale result from a superseded operation; ignore
@@ -252,7 +254,9 @@ defmodule MingaEditor.Commands.Git do
   def handle_remote_task_down(state, monitor_ref) do
     case state.git_remote_op do
       {_msg_ref, ^monitor_ref, _context} ->
-        EditorState.set_status(%{state | git_remote_op: nil}, "Git operation failed unexpectedly")
+        state
+        |> EditorState.clear_git_remote_op()
+        |> EditorState.set_status("Git operation failed unexpectedly")
 
       _ ->
         :not_matched
@@ -286,7 +290,8 @@ defmodule MingaEditor.Commands.Git do
 
         task_monitor = Process.monitor(task_pid)
 
-        %{state | git_remote_op: {ref, task_monitor, {git_root, success_msg, error_prefix}}}
+        state
+        |> EditorState.set_git_remote_op({ref, task_monitor, {git_root, success_msg, error_prefix}})
         |> EditorState.set_status(progress_msg)
 
       :not_git ->

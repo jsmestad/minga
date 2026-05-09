@@ -92,7 +92,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   def execute(state, :force_quit_all), do: shutdown_editor(state)
 
   def execute(%{pending_quit: kind} = state, :confirm_quit_yes) when kind != nil do
-    state = %{state | pending_quit: nil}
+    state = EditorState.clear_pending_quit(state)
 
     case kind do
       :quit -> close_tab_or_quit(state)
@@ -101,7 +101,9 @@ defmodule MingaEditor.Commands.BufferManagement do
   end
 
   def execute(state, :confirm_quit_no) do
-    EditorState.clear_status(%{state | pending_quit: nil})
+    state
+    |> EditorState.clear_pending_quit()
+    |> EditorState.clear_status()
   end
 
   # ── Buffer navigation ─────────────────────────────────────────────────────
@@ -848,7 +850,7 @@ defmodule MingaEditor.Commands.BufferManagement do
           {board, false}
       end
 
-    state = %{state | shell_state: board}
+    state = EditorState.update_shell_state(state, fn _ -> board end)
     state = AgentAccess.update_agent(state, &AgentState.stop_spinner_timer/1)
     state = AgentAccess.update_agent(state, &AgentState.reset_cache/1)
 
@@ -969,10 +971,9 @@ defmodule MingaEditor.Commands.BufferManagement do
   @spec maybe_confirm_quit(state(), :quit | :quit_all) :: state()
   defp maybe_confirm_quit(state, kind) do
     if confirm_quit_enabled?() and any_buffer_dirty?(state) do
-      EditorState.set_status(
-        %{state | pending_quit: kind},
-        "Modified buffers exist. Really quit? (y/n)"
-      )
+      state
+      |> EditorState.set_pending_quit(kind)
+      |> EditorState.set_status("Modified buffers exist. Really quit? (y/n)")
     else
       case kind do
         :quit -> close_tab_or_quit(state)

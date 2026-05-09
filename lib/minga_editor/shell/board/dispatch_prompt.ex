@@ -44,19 +44,19 @@ defmodule MingaEditor.Shell.Board.DispatchPrompt do
     # Create the card
     {board, card} = BoardState.create_card(board, task: task, model: model, status: :working)
     board = BoardState.focus_card(board, card.id)
-    state = %{state | shell_state: board}
+    state = EditorState.update_shell_state(state, fn _ -> board end)
 
     # Start an agent session
     case start_session(model) do
       {:ok, pid} ->
         # Attach the session to the card
-        board = BoardState.update_card(state.shell_state, card.id, &Card.attach_session(&1, pid))
-        state = %{state | shell_state: board}
+        state =
+          EditorState.update_shell_state(state, fn b ->
+            BoardState.update_card(b, card.id, &Card.attach_session(&1, pid))
+          end)
 
         # Monitor the session for :DOWN
-        ref = Process.monitor(pid)
-        monitors = Map.put(state.buffer_monitors, pid, ref)
-        state = %{state | buffer_monitors: monitors}
+        state = EditorState.monitor_buffer(state, pid)
 
         # Subscribe the editor to agent events
         AgentSession.subscribe(pid)
@@ -72,10 +72,11 @@ defmodule MingaEditor.Shell.Board.DispatchPrompt do
         state
 
       {:error, reason} ->
-        board =
-          BoardState.update_card(state.shell_state, card.id, &Card.set_status(&1, :errored))
+        state =
+          EditorState.update_shell_state(state, fn b ->
+            BoardState.update_card(b, card.id, &Card.set_status(&1, :errored))
+          end)
 
-        state = %{state | shell_state: board}
         EditorState.set_status(state, "Agent dispatch failed: #{inspect(reason)}")
     end
   end
