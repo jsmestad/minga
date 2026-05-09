@@ -137,6 +137,7 @@ defmodule Minga.Keymap.Defaults do
     {[{?a, @none}, {?h, @none}], :agent_session_history, "Session history"},
     {[{?a, @none}, {?T, @none}], :agent_cycle_thinking, "Cycle thinking level"},
     {[{?a, @none}, {?e, @none}], :agent_summarize, "Summarize session to artifact"},
+    {[{?a, @none}, {?c, @none}], :agent_context_artifacts, "Load context artifact"},
     {[{?a, @none}, {?q, @none}], :agent_dequeue, "Dequeue queued messages to editor"},
     {[{?a, @none}, {?f, @none}], :agent_queue_follow_up, "Queue current input as follow-up"},
 

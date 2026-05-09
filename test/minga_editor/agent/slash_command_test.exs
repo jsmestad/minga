@@ -41,6 +41,7 @@ defmodule MingaEditor.Agent.SlashCommandTest do
       assert "stop" in names
       assert "thinking" in names
       assert "model" in names
+      assert "context" in names
     end
   end
 
@@ -61,6 +62,13 @@ defmodule MingaEditor.Agent.SlashCommandTest do
       matches = SlashCommand.completions("/he")
       names = Enum.map(matches, & &1.name)
       assert "help" in names
+    end
+
+    test "includes context artifact command by prefix" do
+      matches = SlashCommand.completions("/con")
+      names = Enum.map(matches, & &1.name)
+      assert "context" in names
+      assert "continue" in names
     end
 
     test "returns empty list for no match" do
@@ -143,6 +151,11 @@ defmodule MingaEditor.Agent.SlashCommandTest do
     test "/model with name sets model (triggers restart)" do
       {:ok, state} = SlashCommand.execute(mock_state(), "/model gpt-4o")
       assert AgentAccess.panel(state).model_name == "gpt-4o"
+    end
+
+    test "/context opens explicit context artifact loading path" do
+      {:ok, state} = SlashCommand.execute(mock_state(), "/context")
+      assert state.shell_state.status_msg == "No context artifacts found"
     end
 
     test "/? is an alias for /help" do

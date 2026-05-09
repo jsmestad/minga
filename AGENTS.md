@@ -824,6 +824,9 @@ Agent tools live in `lib/minga_agent/tools/`. When adding or modifying a tool th
 2. **Batch edits into a single call** rather than making N separate calls. One call = one undo entry, one version bump.
 3. **Test the tool function** in `test/minga_agent/tools/`.
 
+### Context artifacts
+Context artifacts in `.minga/context/session-summary-*.md` are explicit handoff files, not hidden memory. Minga must not auto-load them into new sessions. Users load one with `/context` or `SPC a c`, which inserts an `@.minga/context/...` mention into the prompt so the existing file-mention resolver reads it on submit. Keep this single ingestion path unless there is a new architecture decision that justifies hidden context.
+
 ### New render command (requires BEAM + frontend changes)
 1. Add opcode constant and encoder in `Minga.Port.Protocol` (BEAM side, canonical source of truth)
 2. **macOS GUI:** Add decoder in `macos/Sources/Protocol/ProtocolDecoder.swift`, constant in `ProtocolConstants.swift`, handler in `CommandDispatcher.swift`
