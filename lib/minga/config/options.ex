@@ -48,6 +48,7 @@ defmodule Minga.Config.Options do
   | `:cursorline`             | boolean                                        | `true`    |
   | `:nav_flash`              | boolean                                        | `true`    |
   | `:nav_flash_threshold`    | positive integer                               | `5`       |
+  | `:yank_flash`             | boolean                                        | `true`    |
   | `:log_level`              | `:debug` / `:info` / `:warning` / `:error` / `:none` | `:info` |
   | `:log_level_render`       | log level or `:default`                     | `:default`  |
   | `:log_level_lsp`          | log level or `:default`                     | `:default`  |
@@ -266,6 +267,7 @@ defmodule Minga.Config.Options do
     {:cursorline, :boolean, true},
     {:nav_flash, :boolean, true},
     {:nav_flash_threshold, :pos_integer, 5},
+    {:yank_flash, :boolean, true},
     {:whichkey_layout, {:enum, [:bottom, :float]}, :bottom},
     {:line_spacing, :float_or_nil, 1.0},
     {:font_family, :string, "Menlo"},

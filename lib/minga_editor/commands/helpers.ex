@@ -246,6 +246,110 @@ defmodule MingaEditor.Commands.Helpers do
 
   defp resolve_clipboard(_state), do: :none
 
+  # ── Yank flash ─────────────────────────────────────────────────────────────
+
+  alias Minga.Config
+  alias Minga.Core.Face
+  alias MingaEditor.YankFlash
+
+  @doc """
+  Starts a yank flash highlight on the yanked region if the feature is enabled.
+
+  When active, cancels any existing yank flash, adds a highlight decoration
+  to the buffer, and schedules the first timer step. No-op in headless mode
+  or when the `:yank_flash` config option is false.
+  """
+  @spec maybe_start_yank_flash(
+          state(),
+          pid(),
+          Buffer.position(),
+          Buffer.position(),
+          YankFlash.range_type()
+        ) :: state()
+  def maybe_start_yank_flash(state, buf, start_pos, end_pos, range_type) do
+    if state.backend != :headless and Config.get(:yank_flash) do
+      do_start_yank_flash(state, buf, start_pos, end_pos, range_type)
+    else
+      state
+    end
+  end
+
+  @spec do_start_yank_flash(
+          state(),
+          pid(),
+          Buffer.position(),
+          Buffer.position(),
+          YankFlash.range_type()
+        ) :: state()
+  defp do_start_yank_flash(state, buf, start_pos, end_pos, range_type) do
+    old_flash = EditorState.yank_flash(state)
+
+    if old_flash do
+      cancel_existing_yank_flash(old_flash)
+    end
+
+    {flash, effects} = YankFlash.start(buf, start_pos, end_pos, range_type)
+
+    flash_bg = yank_flash_color(state)
+    {hl_start, hl_end} = yank_highlight_bounds(buf, start_pos, end_pos, range_type)
+
+    try do
+      Buffer.add_highlight(buf, hl_start, hl_end,
+        style: Face.new(bg: flash_bg),
+        group: YankFlash.flash_group(),
+        priority: 50
+      )
+    catch
+      :exit, _ -> :ok
+    end
+
+    flash = MingaEditor.FlashEffects.apply(state, flash, effects)
+    EditorState.set_yank_flash(state, flash)
+  end
+
+  @spec cancel_existing_yank_flash(YankFlash.t()) :: :ok
+  defp cancel_existing_yank_flash(%YankFlash{buf: buf} = flash) do
+    for {:cancel_timer, ref} <- YankFlash.cancel_effects(flash) do
+      Process.cancel_timer(ref)
+    end
+
+    try do
+      Buffer.remove_highlight_group(buf, YankFlash.flash_group())
+    catch
+      :exit, _ -> :ok
+    end
+
+    :ok
+  end
+
+  @spec yank_flash_color(state()) :: non_neg_integer()
+  defp yank_flash_color(state) do
+    case state do
+      %{theme: %{editor: %{yank_flash_bg: bg}}} when bg != nil -> bg
+      _ -> 0x4B5263
+    end
+  end
+
+  @spec yank_highlight_bounds(pid(), Buffer.position(), Buffer.position(), YankFlash.range_type()) ::
+          {Buffer.position(), Buffer.position()}
+  defp yank_highlight_bounds(_buf, start_pos, end_pos, :charwise) do
+    {start_pos, end_pos}
+  end
+
+  defp yank_highlight_bounds(buf, {start_line, _}, {end_line, _}, :linewise) do
+    end_col =
+      try do
+        case Buffer.lines(buf, end_line, 1) do
+          [text] -> String.length(text)
+          _ -> 0
+        end
+      catch
+        :exit, _ -> 0
+      end
+
+    {{start_line, 0}, {end_line, end_col}}
+  end
+
   # ── Positional helpers ──────────────────────────────────────────────────────
 
   @doc "Returns the two positions sorted so the lesser comes first."
@@ -363,7 +467,8 @@ defmodule MingaEditor.Commands.Helpers do
 
       :yank ->
         text = Document.get_range(gb, start_pos, end_pos)
-        put_register(state, text, :yank)
+        state = put_register(state, text, :yank)
+        maybe_start_yank_flash(state, buf, start_pos, end_pos, :charwise)
     end
   end
 
@@ -386,7 +491,8 @@ defmodule MingaEditor.Commands.Helpers do
 
       {:yank, {start_pos, end_pos}} ->
         text = Document.get_range(gb, start_pos, end_pos)
-        put_register(state, text, :yank)
+        state = put_register(state, text, :yank)
+        maybe_start_yank_flash(state, buf, start_pos, end_pos, :charwise)
     end
   end
 

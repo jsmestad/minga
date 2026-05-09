@@ -92,7 +92,8 @@ defmodule MingaEditor.Commands.Operators do
     total = Buffer.line_count(buf)
     end_line = min(line + count - 1, total - 1)
     yanked = Buffer.lines_content(buf, line, end_line)
-    Helpers.put_register(state, yanked <> "\n", :yank, :linewise)
+    state = Helpers.put_register(state, yanked <> "\n", :yank, :linewise)
+    Helpers.maybe_start_yank_flash(state, buf, {line, 0}, {end_line, 0}, :linewise)
   end
 
   # ── Text object operators ─────────────────────────────────────────────────

@@ -104,6 +104,7 @@ defmodule Minga.Config.OptionsTest do
                cursorline: true,
                nav_flash: true,
                nav_flash_threshold: 5,
+               yank_flash: true,
                log_level_config: :default,
                log_level_port: :default,
                parser_tree_ttl: 300,

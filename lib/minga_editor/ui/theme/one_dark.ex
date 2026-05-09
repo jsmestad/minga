@@ -35,6 +35,7 @@ defmodule MingaEditor.UI.Theme.OneDark do
         split_border_fg: @syntax_guide,
         cursorline_bg: 0x2C323C,
         nav_flash_bg: 0x3E4451,
+        yank_flash_bg: 0x4B5263,
         highlight_read_bg: 0x3A3F4B,
         highlight_write_bg: 0x4A3F2B,
         selection_bg: 0x264F78
