@@ -125,25 +125,25 @@ defmodule MingaEditor.Input.CUA.TUISpaceLeader do
   # ── Private ──────────────────────────────────────────────────────────────
 
   @spec pending?(map()) :: boolean()
-  defp pending?(%{space_leader_pending: true}), do: true
+  defp pending?(%{shell_state: %{space_leader_pending: true}}), do: true
   defp pending?(_state), do: false
 
   @spec put_space_leader_pending(EditorState.t(), boolean()) :: EditorState.t()
   defp put_space_leader_pending(state, value) do
-    %{state | space_leader_pending: value}
+    %{state | shell_state: %{state.shell_state | space_leader_pending: value}}
   end
 
   @spec put_space_leader_timer(EditorState.t(), reference() | nil) :: EditorState.t()
   defp put_space_leader_timer(state, timer) do
-    %{state | space_leader_timer: timer}
+    %{state | shell_state: %{state.shell_state | space_leader_timer: timer}}
   end
 
   @spec cancel_timer(EditorState.t()) :: EditorState.t()
-  defp cancel_timer(%{space_leader_timer: nil} = state), do: state
+  defp cancel_timer(%{shell_state: %{space_leader_timer: nil}} = state), do: state
 
-  defp cancel_timer(%{space_leader_timer: timer} = state) do
+  defp cancel_timer(%{shell_state: %{space_leader_timer: timer}} = state) do
     Process.cancel_timer(timer)
-    %{state | space_leader_timer: nil}
+    %{state | shell_state: %{state.shell_state | space_leader_timer: nil}}
   end
 
   @spec retract_space(EditorState.t()) :: EditorState.t()

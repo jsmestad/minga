@@ -55,8 +55,6 @@ defmodule MingaEditor.RenderPipeline.InputTest do
         :last_test_command,
         :session,
         :git_remote_op,
-        :space_leader_pending,
-        :space_leader_timer,
         :last_cursor_line,
         :buffer_add_context,
         :stashed_board_state
