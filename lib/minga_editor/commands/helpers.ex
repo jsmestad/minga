@@ -291,7 +291,7 @@ defmodule MingaEditor.Commands.Helpers do
     {flash, effects} = YankFlash.start(buf, start_pos, end_pos, range_type)
 
     flash_bg = yank_flash_color(state)
-    {hl_start, hl_end} = yank_highlight_bounds(buf, start_pos, end_pos, range_type)
+    {hl_start, hl_end} = YankFlash.highlight_bounds(buf, start_pos, end_pos, range_type)
 
     try do
       Buffer.add_highlight(buf, hl_start, hl_end,
@@ -326,28 +326,8 @@ defmodule MingaEditor.Commands.Helpers do
   defp yank_flash_color(state) do
     case state do
       %{theme: %{editor: %{yank_flash_bg: bg}}} when bg != nil -> bg
-      _ -> 0x4B5263
+      _ -> YankFlash.default_flash_bg()
     end
-  end
-
-  @spec yank_highlight_bounds(pid(), Buffer.position(), Buffer.position(), YankFlash.range_type()) ::
-          {Buffer.position(), Buffer.position()}
-  defp yank_highlight_bounds(_buf, start_pos, end_pos, :charwise) do
-    {start_pos, end_pos}
-  end
-
-  defp yank_highlight_bounds(buf, {start_line, _}, {end_line, _}, :linewise) do
-    end_col =
-      try do
-        case Buffer.lines(buf, end_line, 1) do
-          [text] -> String.length(text)
-          _ -> 0
-        end
-      catch
-        :exit, _ -> 0
-      end
-
-    {{start_line, 0}, {end_line, end_col}}
   end
 
   # ── Positional helpers ──────────────────────────────────────────────────────

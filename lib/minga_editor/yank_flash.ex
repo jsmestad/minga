@@ -107,28 +107,39 @@ defmodule MingaEditor.YankFlash do
   Interpolates between `flash_bg` (step 0) and `target_bg` (final step)
   linearly.
   """
+  @default_flash_bg 0x4B5263
+
+  @spec default_flash_bg() :: non_neg_integer()
+  def default_flash_bg, do: @default_flash_bg
+
   @spec color_for_step(t(), non_neg_integer(), non_neg_integer()) :: non_neg_integer()
   def color_for_step(%__MODULE__{step: step, max_steps: max_steps}, flash_bg, target_bg) do
-    lerp_color(flash_bg, target_bg, step / max(max_steps - 1, 1))
+    MingaEditor.FlashEffects.lerp_color(flash_bg, target_bg, step / max(max_steps - 1, 1))
   end
 
-  @spec lerp_color(non_neg_integer(), non_neg_integer(), float()) :: non_neg_integer()
-  defp lerp_color(_from, to, t) when t >= 1.0, do: to
-  defp lerp_color(from, _to, t) when t <= 0.0, do: from
+  @doc """
+  Computes the highlight bounds for the flash decoration.
 
-  defp lerp_color(from, to, t) do
-    r1 = Bitwise.bsr(from, 16) |> Bitwise.band(0xFF)
-    g1 = Bitwise.bsr(from, 8) |> Bitwise.band(0xFF)
-    b1 = Bitwise.band(from, 0xFF)
+  Charwise ranges pass through unchanged. Linewise ranges expand to
+  full line width using the buffer's line content.
+  """
+  @spec highlight_bounds(pid(), position(), position(), range_type()) ::
+          {position(), position()}
+  def highlight_bounds(_buf, start_pos, end_pos, :charwise) do
+    {start_pos, end_pos}
+  end
 
-    r2 = Bitwise.bsr(to, 16) |> Bitwise.band(0xFF)
-    g2 = Bitwise.bsr(to, 8) |> Bitwise.band(0xFF)
-    b2 = Bitwise.band(to, 0xFF)
+  def highlight_bounds(buf, {start_line, _}, {end_line, _}, :linewise) do
+    end_col =
+      try do
+        case Minga.Buffer.lines(buf, end_line, 1) do
+          [text] -> String.length(text)
+          _ -> 0
+        end
+      catch
+        :exit, _ -> 0
+      end
 
-    r = round(r1 + (r2 - r1) * t)
-    g = round(g1 + (g2 - g1) * t)
-    b = round(b1 + (b2 - b1) * t)
-
-    Bitwise.bsl(r, 16) + Bitwise.bsl(g, 8) + b
+    {{start_line, 0}, {end_line, end_col}}
   end
 end

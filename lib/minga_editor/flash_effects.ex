@@ -51,4 +51,27 @@ defmodule MingaEditor.FlashEffects do
         end
     end)
   end
+
+  @doc """
+  Linear interpolation between two 24-bit RGB colors.
+  """
+  @spec lerp_color(non_neg_integer(), non_neg_integer(), float()) :: non_neg_integer()
+  def lerp_color(_from, to, t) when t >= 1.0, do: to
+  def lerp_color(from, _to, t) when t <= 0.0, do: from
+
+  def lerp_color(from, to, t) do
+    r1 = Bitwise.bsr(from, 16) |> Bitwise.band(0xFF)
+    g1 = Bitwise.bsr(from, 8) |> Bitwise.band(0xFF)
+    b1 = Bitwise.band(from, 0xFF)
+
+    r2 = Bitwise.bsr(to, 16) |> Bitwise.band(0xFF)
+    g2 = Bitwise.bsr(to, 8) |> Bitwise.band(0xFF)
+    b2 = Bitwise.band(to, 0xFF)
+
+    r = round(r1 + (r2 - r1) * t)
+    g = round(g1 + (g2 - g1) * t)
+    b = round(b1 + (b2 - b1) * t)
+
+    Bitwise.bsl(r, 16) + Bitwise.bsl(g, 8) + b
+  end
 end

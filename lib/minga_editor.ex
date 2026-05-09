@@ -666,12 +666,7 @@ defmodule MingaEditor do
             {:noreply, Renderer.render_or_async(state)}
 
           :done ->
-            try do
-              Buffer.remove_highlight_group(buf, YankFlash.flash_group())
-            catch
-              :exit, _ -> :ok
-            end
-
+            clear_yank_highlight(buf)
             {:noreply, Renderer.render_or_async(EditorState.cancel_yank_flash(state))}
         end
     end
@@ -1408,27 +1403,21 @@ defmodule MingaEditor do
   @spec cancel_yank_flash(state()) :: state()
   defp cancel_yank_flash(%{shell_state: %{yank_flash: nil}} = state), do: state
 
-  defp cancel_yank_flash(state) do
-    flash = EditorState.yank_flash(state)
+  defp cancel_yank_flash(%{shell_state: %{yank_flash: flash}} = state) do
     effects = YankFlash.cancel_effects(flash)
     execute_flash_effects(state, effects)
-
-    try do
-      Buffer.remove_highlight_group(flash.buf, YankFlash.flash_group())
-    catch
-      :exit, _ -> :ok
-    end
-
+    clear_yank_highlight(flash.buf)
     EditorState.cancel_yank_flash(state)
   end
 
   @spec update_yank_flash_decoration(pid(), YankFlash.t(), state()) :: :ok
   defp update_yank_flash_decoration(buf, flash, state) do
-    flash_bg = state.theme.editor.yank_flash_bg || 0x4B5263
+    flash_bg = state.theme.editor.yank_flash_bg || YankFlash.default_flash_bg()
     target_bg = state.theme.editor.bg
     color = YankFlash.color_for_step(flash, flash_bg, target_bg)
 
-    {hl_start, hl_end} = yank_flash_highlight_range(buf, flash)
+    {hl_start, hl_end} =
+      YankFlash.highlight_bounds(buf, flash.start_pos, flash.end_pos, flash.range_type)
 
     try do
       Buffer.remove_highlight_group(buf, YankFlash.flash_group())
@@ -1445,32 +1434,15 @@ defmodule MingaEditor do
     :ok
   end
 
-  @spec yank_flash_highlight_range(pid(), YankFlash.t()) ::
-          {Buffer.position(), Buffer.position()}
-  defp yank_flash_highlight_range(_buf, %YankFlash{
-         start_pos: sp,
-         end_pos: ep,
-         range_type: :charwise
-       }) do
-    {sp, ep}
-  end
+  @spec clear_yank_highlight(pid()) :: :ok
+  defp clear_yank_highlight(buf) do
+    try do
+      Buffer.remove_highlight_group(buf, YankFlash.flash_group())
+    catch
+      :exit, _ -> :ok
+    end
 
-  defp yank_flash_highlight_range(buf, %YankFlash{
-         start_pos: {sl, _},
-         end_pos: {el, _},
-         range_type: :linewise
-       }) do
-    end_col =
-      try do
-        case Buffer.lines(buf, el, 1) do
-          [text] -> String.length(text)
-          _ -> 0
-        end
-      catch
-        :exit, _ -> 0
-      end
-
-    {{sl, 0}, {el, end_col}}
+    :ok
   end
 
   defp apply_flash_effects(state, flash, effects) do
