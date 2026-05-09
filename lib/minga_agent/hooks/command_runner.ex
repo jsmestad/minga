@@ -12,28 +12,60 @@ defmodule MingaAgent.Hooks.CommandRunner do
   alias MingaAgent.Hooks.Result
 
   @payload_dir_attempts 5
+  @pgrep_paths ~w(/usr/bin/pgrep /bin/pgrep)
+  @kill_paths ~w(/bin/kill /usr/bin/kill)
 
   @doc "Runs a `PreToolUse` shell hook for a payload."
   @spec run_pre_tool_use(Hook.t(), PreToolUsePayload.t()) :: Result.t()
   def run_pre_tool_use(%Hook{} = hook, %PreToolUsePayload{} = payload) do
-    payload_json = Jason.encode!(PreToolUsePayload.to_map(payload))
-
-    case write_payload(payload_json) do
-      {:ok, payload_path} ->
-        try do
-          run_shell(hook, payload_path)
-        after
-          cleanup_payload(payload_path)
-        end
-
-      {:error, reason} ->
-        Result.veto(
-          hook,
-          "failed to prepare hook payload: #{inspect(reason)}",
-          {:failed_to_start, reason}
-        )
+    with {:ok, payload_json} <- encode_payload(payload),
+         {:ok, payload_path} <- write_payload(payload_json) do
+      try do
+        run_shell(hook, payload_path)
+      after
+        cleanup_payload(payload_path)
+      end
+    else
+      {:error, reason} -> payload_preparation_veto(hook, reason)
     end
   end
+
+  @spec encode_payload(PreToolUsePayload.t()) :: {:ok, String.t()} | {:error, term()}
+  defp encode_payload(%PreToolUsePayload{} = payload) do
+    case Jason.encode(PreToolUsePayload.to_map(payload)) do
+      {:ok, json} -> {:ok, json}
+      {:error, reason} -> {:error, safe_encode_reason(reason)}
+    end
+  rescue
+    e -> {:error, safe_encode_reason(e)}
+  catch
+    kind, _reason -> {:error, {:encode_failed, kind}}
+  end
+
+  @spec payload_preparation_veto(Hook.t(), term()) :: Result.t()
+  defp payload_preparation_veto(hook, reason) do
+    Result.veto(
+      hook,
+      "failed to prepare hook payload: #{format_prepare_reason(reason)}",
+      {:failed_to_start, reason}
+    )
+  end
+
+  @spec safe_encode_reason(Exception.t()) :: {:encode_failed, module()}
+  defp safe_encode_reason(%Protocol.UndefinedError{protocol: protocol}) do
+    {:encode_failed, protocol}
+  end
+
+  defp safe_encode_reason(%{__struct__: module}) when is_atom(module) do
+    {:encode_failed, module}
+  end
+
+  @spec format_prepare_reason(term()) :: String.t()
+  defp format_prepare_reason({:encode_failed, reason}) do
+    "could not JSON encode payload with #{inspect(reason)}"
+  end
+
+  defp format_prepare_reason(reason), do: inspect(reason)
 
   @spec write_payload(String.t()) :: {:ok, String.t()} | {:error, term()}
   defp write_payload(payload_json) do
@@ -193,9 +225,15 @@ defmodule MingaAgent.Hooks.CommandRunner do
 
   @spec child_pids(non_neg_integer()) :: [non_neg_integer()]
   defp child_pids(pid) do
-    case System.cmd("pgrep", ["-P", Integer.to_string(pid)], stderr_to_stdout: true) do
-      {output, 0} -> parse_pids(output)
-      {_output, _status} -> []
+    case executable_path(@pgrep_paths) do
+      nil ->
+        []
+
+      pgrep ->
+        case System.cmd(pgrep, ["-P", Integer.to_string(pid)], stderr_to_stdout: true) do
+          {output, 0} -> parse_pids(output)
+          {_output, _status} -> []
+        end
     end
   rescue
     ErlangError -> []
@@ -218,10 +256,19 @@ defmodule MingaAgent.Hooks.CommandRunner do
 
   @spec kill_pid(non_neg_integer()) :: :ok
   defp kill_pid(pid) do
-    System.cmd("kill", ["-KILL", Integer.to_string(pid)], stderr_to_stdout: true)
+    case executable_path(@kill_paths) do
+      nil -> :ok
+      kill -> System.cmd(kill, ["-KILL", Integer.to_string(pid)], stderr_to_stdout: true)
+    end
+
     :ok
   rescue
     ErlangError -> :ok
+  end
+
+  @spec executable_path([String.t()]) :: String.t() | nil
+  defp executable_path(paths) do
+    Enum.find(paths, &File.regular?/1)
   end
 
   @spec close_port(port()) :: :ok

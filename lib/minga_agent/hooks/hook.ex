@@ -31,7 +31,10 @@ defmodule MingaAgent.Hooks.Hook do
   @doc "Normalizes a user config hook declaration into a `%Hook{}`."
   @spec normalize(term()) :: {:ok, t()} | {:error, String.t()}
   def normalize(raw) when is_list(raw) do
-    raw |> Map.new() |> normalize()
+    case map_from_list(raw) do
+      {:ok, map} -> normalize(map)
+      :error -> {:error, "agent hook must be a map or keyword list"}
+    end
   end
 
   def normalize(raw) when is_map(raw) do
@@ -59,6 +62,13 @@ defmodule MingaAgent.Hooks.Hook do
   end
 
   def matches?(%__MODULE__{}, _event, _tool_name), do: false
+
+  @spec map_from_list(list()) :: {:ok, map()} | :error
+  defp map_from_list(raw) do
+    {:ok, Map.new(raw)}
+  rescue
+    ArgumentError -> :error
+  end
 
   @spec normalize_event(term()) :: {:ok, event()} | {:error, String.t()}
   defp normalize_event(nil), do: {:error, "agent hook requires :event"}

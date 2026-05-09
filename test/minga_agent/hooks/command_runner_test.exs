@@ -39,6 +39,21 @@ defmodule MingaAgent.Hooks.CommandRunnerTest do
     File.rmdir(tmp_root)
   end
 
+  test "vetoes when hook payload cannot be encoded as JSON" do
+    hook = %Hook{event: :pre_tool_use, tool_pattern: "*", command: "cat >/dev/null"}
+    payload = PreToolUsePayload.new("tc_1", "read_file", %{{:bad, :key} => "secret"})
+
+    assert %Result{
+             status: :veto,
+             reason: {:failed_to_start, {:encode_failed, String.Chars}},
+             stderr: stderr
+           } = CommandRunner.run_pre_tool_use(hook, payload)
+
+    assert stderr =~ "failed to prepare hook payload"
+    assert stderr =~ "String.Chars"
+    refute stderr =~ "secret"
+  end
+
   test "times out long-running hooks and returns a clear veto" do
     hook = %Hook{event: :pre_tool_use, tool_pattern: "*", command: "sleep 1", timeout_ms: 20}
     payload = PreToolUsePayload.new("tc_1", "read_file", %{"path" => "README.md"})

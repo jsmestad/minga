@@ -110,6 +110,10 @@ defmodule MingaAgent.Hooks.DispatcherTest do
              Hook.normalize(%{event: "PreToolUse", tool: "shell", command: "echo checking >&2"})
   end
 
+  test "normalization rejects malformed keyword-list declarations" do
+    assert {:error, "agent hook must be a map or keyword list"} = Hook.normalize(["bad"])
+  end
+
   defp hook(pattern) do
     %Hook{event: :pre_tool_use, tool_pattern: pattern, command: "echo checking >&2"}
   end
