@@ -54,7 +54,7 @@ defmodule MingaAgent.Tool.Executor do
   """
   @spec execute(String.t(), map()) :: result()
   def execute(name, args) when is_binary(name) and is_map(args) do
-    execute(name, args, MingaAgent.Tool.Registry, [])
+    execute(name, args, MingaAgent.Tool.Registry, :exec)
   end
 
   @spec execute(String.t(), map(), atom()) :: result()

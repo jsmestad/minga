@@ -1460,13 +1460,24 @@ defmodule MingaAgent.Providers.Native do
 
   @spec plan_mode_blocks_tool?(pid() | nil, String.t(), map()) :: boolean()
   defp plan_mode_blocks_tool?(session_pid, name, args) when is_pid(session_pid) do
-    Session.status(session_pid) == :plan and PlanMode.blocked?(name, args)
-  catch
-    # Session crashed; fail-closed so destructive tools stay blocked.
-    :exit, _ -> PlanMode.blocked?(name, args)
+    session_in_plan_mode?(session_pid) and PlanMode.blocked?(name, args)
   end
 
   defp plan_mode_blocks_tool?(_session_pid, _name, _args), do: false
+
+  @spec session_in_plan_mode?(pid()) :: boolean()
+  defp session_in_plan_mode?(session_pid) when is_pid(session_pid) do
+    case Process.info(session_pid, :dictionary) do
+      {:dictionary, dict} ->
+        Keyword.get(dict, :"$initial_call") == {Session, :init, 1} and
+          Session.status(session_pid) == :plan
+
+      nil ->
+        false
+    end
+  catch
+    :exit, _ -> false
+  end
 
   @spec emit_plan_mode_refusal(pid() | nil, String.t()) :: :ok
   defp emit_plan_mode_refusal(session_pid, message) when is_pid(session_pid) do

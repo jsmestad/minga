@@ -114,7 +114,7 @@ defmodule MingaAgent.Tool.ExecutorTest do
       end
 
       assert {:ok, "success"} =
-               Executor.execute("echo", %{"msg" => "hello"}, table,
+               Executor.execute("echo", %{"msg" => "hello"}, table, :exec,
                  config: config,
                  hook_runner: runner
                )
@@ -138,7 +138,7 @@ defmodule MingaAgent.Tool.ExecutorTest do
       runner = fn ^hook, _payload -> Result.veto(hook, "blocked by policy", {:exit, 9}) end
 
       assert {:error, {:hook_veto, message}} =
-               Executor.execute("shell", %{"command" => "date"}, table,
+               Executor.execute("shell", %{"command" => "date"}, table, :exec,
                  config: config,
                  hook_runner: runner
                )
