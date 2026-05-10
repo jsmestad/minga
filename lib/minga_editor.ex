@@ -174,12 +174,13 @@ defmodule MingaEditor do
 
     state = Startup.build_initial_state(opts)
 
-    # Resolve the Renderer.Server pid once at init. In production the
-    # supervisor starts Renderer.Server before MingaEditor (rest_for_one),
-    # so it's guaranteed to be registered. In tests that start the Editor
-    # standalone, this returns nil and render_or_async falls back to sync.
     renderer_pid = GenServer.whereis(MingaEditor.Renderer.Server)
-    state = %{state | renderer: renderer_pid}
+
+    if state.backend != :headless and is_nil(renderer_pid) do
+      Minga.Log.warning(:editor, "Renderer.Server not found at init; rendering synchronously")
+    end
+
+    state = EditorState.set_renderer(state, renderer_pid)
 
     # Logger redirect and startup messages
     tui_active? = state.backend == :tui

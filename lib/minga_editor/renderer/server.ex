@@ -141,19 +141,40 @@ defmodule MingaEditor.Renderer.Server do
       %{frame_seq: seq}
     )
 
-    if is_pid(state.editor_pid) or is_atom(state.editor_pid) do
-      writeback = %{
-        caches: output.caches,
-        layout: output.layout,
-        focus_tree: output.focus_tree,
-        shell_state: output.shell_state,
-        windows: output.workspace.windows,
-        frame_seq: seq
-      }
+    send_writeback(state.editor_pid, output, seq)
+    advance_pending(state)
+  rescue
+    e ->
+      Minga.Log.warning(:render, "Renderer frame #{seq} dropped: #{Exception.message(e)}")
+      advance_pending(state)
+  end
 
-      send(state.editor_pid, {:render_done, writeback})
-    end
+  def handle_info(_other, state), do: {:noreply, state}
 
+  # ── Helpers ────────────────────────────────────────────────────────────────
+
+  @spec send_writeback(pid() | atom() | nil, map(), non_neg_integer()) :: :ok
+  defp send_writeback(editor_pid, output, seq) when is_pid(editor_pid) or is_atom(editor_pid) do
+    writeback = %{
+      caches: output.caches,
+      layout: output.layout,
+      focus_tree: output.focus_tree,
+      shell_state: output.shell_state,
+      windows: output.workspace.windows,
+      frame_seq: seq
+    }
+
+    send(editor_pid, {:render_done, writeback})
+    :ok
+  end
+
+  defp send_writeback(_editor_pid, _output, seq) do
+    Minga.Log.warning(:render, "Renderer frame #{seq}: no editor_pid, writeback dropped")
+    :ok
+  end
+
+  @spec advance_pending(t()) :: {:noreply, t()}
+  defp advance_pending(state) do
     case state.pending do
       nil ->
         {:noreply, %{state | rendering?: false, in_flight: nil}}
@@ -163,10 +184,6 @@ defmodule MingaEditor.Renderer.Server do
         {:noreply, %{state | in_flight: {next_snap, next_seq, next_pushed_at}, pending: nil}}
     end
   end
-
-  def handle_info(_other, state), do: {:noreply, state}
-
-  # ── Helpers ────────────────────────────────────────────────────────────────
 
   @spec monotonic_now() :: integer()
   defp monotonic_now, do: System.monotonic_time(:microsecond)

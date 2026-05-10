@@ -88,11 +88,78 @@ defmodule MingaEditor.Renderer.ServerTest do
     end
   end
 
+  describe "do_render rescue (fault tolerance)" do
+    test "pipeline crash drops the frame and advances to pending without killing the server" do
+      {:ok, pid} = RendererServer.start_link(name: nil, editor_pid: self())
+
+      # Cast a snapshot that will crash the pipeline (stub_snapshot lacks
+      # required fields for RenderPipeline.run/1). The server should rescue
+      # and remain alive rather than crashing the supervision tree.
+      RendererServer.cast_snapshot(pid, stub_snapshot(), 42)
+
+      # Give the server time to process :do_render and rescue.
+      Process.sleep(50)
+
+      assert Process.alive?(pid)
+      state = :sys.get_state(pid)
+      refute state.rendering?
+      assert state.in_flight == nil
+
+      GenServer.stop(pid)
+    end
+
+    test "pipeline crash still drains pending snapshot into next attempt" do
+      {:ok, pid} = RendererServer.start_link(name: nil, editor_pid: self())
+
+      # First cast enters rendering. Second cast goes to pending.
+      RendererServer.cast_snapshot(pid, stub_snapshot(), 1)
+      :sys.get_state(pid)
+      RendererServer.cast_snapshot(pid, stub_snapshot(), 2)
+      :sys.get_state(pid)
+
+      # Both will crash, but the server drains pending after each rescue.
+      Process.sleep(100)
+
+      assert Process.alive?(pid)
+      state = :sys.get_state(pid)
+      refute state.rendering?
+      assert state.pending == nil
+      assert state.in_flight == nil
+
+      GenServer.stop(pid)
+    end
+  end
+
+  describe "render_or_async dispatch" do
+    test "non-nil renderer pid dispatches async (returns state unchanged)" do
+      {:ok, renderer} = RendererServer.start_link(name: nil, editor_pid: self())
+      state = build_editor_state(:tui, renderer)
+
+      result = MingaEditor.Renderer.render_or_async(state)
+
+      assert result == state
+
+      GenServer.stop(renderer)
+    end
+
+    test "nil renderer with non-headless backend falls back to sync render" do
+      state = build_editor_state(:tui, nil)
+      result = MingaEditor.Renderer.render_or_async(state)
+
+      # Sync path updates caches (state is mutated by the pipeline).
+      assert result != state
+    end
+
+    test "headless backend renders synchronously regardless of renderer pid" do
+      state = build_editor_state(:headless, nil)
+      result = MingaEditor.Renderer.render_or_async(state)
+
+      assert result != state
+    end
+  end
+
   # ── Helpers ────────────────────────────────────────────────────────────────
 
-  # Builds a syntactically valid Input. These tests inspect the server's
-  # state machine, not pipeline output, so the snapshot's contents only
-  # need to satisfy the struct's @enforce_keys.
   defp stub_snapshot do
     %Input{
       port_manager: self(),
@@ -103,6 +170,39 @@ defmodule MingaEditor.Renderer.ServerTest do
         windows: %MingaEditor.State.Windows{},
         viewport: Viewport.new(24, 80)
       }
+    }
+  end
+
+  defp build_editor_state(backend, renderer_pid) do
+    {:ok, buf} = Minga.Buffer.start_link(content: "test")
+
+    workspace = %MingaEditor.Workspace.State{
+      buffers: %MingaEditor.State.Buffers{
+        active: buf,
+        list: [buf],
+        active_index: 0,
+        messages: buf
+      },
+      viewport: Viewport.new(24, 80),
+      editing: MingaEditor.VimState.new(),
+      windows: %MingaEditor.State.Windows{
+        tree: MingaEditor.WindowTree.new(1),
+        map: %{1 => MingaEditor.Window.new(1, buf, 24, 80)},
+        active: 1,
+        next_id: 2
+      },
+      keymap_scope: :editor
+    }
+
+    {:ok, port} = Minga.Test.HeadlessPort.start_link(width: 80, height: 24)
+
+    %MingaEditor.State{
+      backend: backend,
+      port_manager: port,
+      workspace: workspace,
+      renderer: renderer_pid,
+      shell: MingaEditor.Shell.Traditional,
+      shell_state: %MingaEditor.Shell.Traditional.State{}
     }
   end
 end

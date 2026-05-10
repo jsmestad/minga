@@ -1,17 +1,19 @@
 defmodule MingaEditor.Supervisor do
   @moduledoc """
-  Supervises the editor runtime: tree-sitter parser, renderer, and Editor GenServer.
+  Supervises the editor runtime: parser, renderer server, and Editor GenServer.
 
   Uses `rest_for_one` to enforce the dependency chain:
 
       MingaEditor.Supervisor (rest_for_one)
-      ├── Minga.Parser.Manager     Tree-sitter parser Port
-      ├── MingaEditor.Frontend.Manager       Zig renderer Port
-      └── MingaEditor             Editor orchestration GenServer
+      ├── Minga.Parser.Manager            Tree-sitter parser Port
+      ├── MingaEditor.Frontend.Manager    Zig/Metal frontend Port
+      ├── MingaEditor.Renderer.Server     Async render pipeline
+      └── MingaEditor                     Editor orchestration GenServer
 
-  If Parser.Manager crashes, Port.Manager and Editor restart (Editor has
-  stale highlight state). If Port.Manager crashes, Editor restarts (Editor
-  can't render without the Port). An Editor crash restarts only the Editor.
+  If Parser.Manager crashes, everything below restarts. If Frontend.Manager
+  crashes, Renderer.Server and Editor restart. If Renderer.Server crashes,
+  Editor restarts (it holds a resolved pid that would be stale). An Editor
+  crash restarts only the Editor.
 
   This supervisor is conditionally started: it only appears in the
   supervision tree when the editor UI is active (not in test mode or

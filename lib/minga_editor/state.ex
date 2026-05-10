@@ -153,6 +153,10 @@ defmodule MingaEditor.State do
           stashed_board_state: MingaEditor.Shell.Board.State.t() | nil
         }
 
+  @spec set_renderer(t(), pid() | nil) :: t()
+  def set_renderer(%__MODULE__{} = state, pid) when is_pid(pid) or is_nil(pid),
+    do: %{state | renderer: pid}
+
   @doc "Returns the keymap server used for scope and binding lookups."
   @spec keymap_server(t()) :: keymap_server()
   def keymap_server(%__MODULE__{keymap_server: keymap_server}), do: keymap_server
@@ -206,7 +210,7 @@ defmodule MingaEditor.State do
   @doc """
   Applies asynchronous renderer writeback without overwriting editor-owned state.
 
-  Split rendering runs from an older `RenderPipeline.Input` snapshot while the
+  Async rendering runs from an older `RenderPipeline.Input` snapshot while the
   Editor process continues handling input. The renderer may return stale copies
   of windows and shell state, so this function only merges fields owned by the
   renderer: global render caches, layout, per-window render caches, and chrome
