@@ -266,35 +266,14 @@ defmodule MingaEditor.DisplayList do
   """
   @spec to_commands(Frame.t(), keyword()) :: [binary()]
   def to_commands(%Frame{} = frame, opts \\ []) do
-    window_draws =
-      Enum.flat_map(frame.windows, fn wf ->
-        {row_off, col_off, _w, _h} = wf.rect
-
-        # Window-relative draws get offset to absolute screen coordinates
-        gutter = layer_to_draws(wf.gutter)
-        lines = layer_to_draws(wf.lines)
-        tildes = layer_to_draws(wf.tilde_lines)
-
-        offset_draws(gutter ++ lines ++ tildes, row_off, col_off)
-      end)
-
     splash_draws =
       case frame.splash do
         nil -> []
         draws -> draws
       end
 
-    all_draws =
-      frame.tab_bar ++
-        frame.file_tree ++
-        frame.agentic_view ++
-        window_draws ++
-        frame.separators ++
-        frame.status_bar ++
-        frame.agent_panel ++
-        frame.minibuffer ++
-        splash_draws
-
+    before_windows = frame.tab_bar ++ frame.file_tree ++ frame.agentic_view
+    after_windows = frame.separators ++ frame.status_bar ++ frame.agent_panel ++ frame.minibuffer ++ splash_draws
     overlay_draws = Enum.flat_map(frame.overlays, fn %Overlay{draws: draws} -> draws end)
 
     tail =
@@ -313,7 +292,9 @@ defmodule MingaEditor.DisplayList do
 
     [Protocol.encode_clear()] ++
       frame.regions ++
-      draws_to_commands(all_draws) ++
+      draws_to_commands(before_windows) ++
+      windows_to_commands(frame.windows) ++
+      draws_to_commands(after_windows) ++
       draws_to_commands(overlay_draws) ++
       tail
   end
@@ -356,6 +337,28 @@ defmodule MingaEditor.DisplayList do
         reg_cmds = if new?, do: [Protocol.encode_register_font(font_id, family)], else: []
         {style_with_id, reg_cmds}
     end
+  end
+
+  @spec windows_to_commands([WindowFrame.t()]) :: [binary()]
+  defp windows_to_commands(windows) do
+    Enum.flat_map(windows, fn wf ->
+      {row_off, col_off, _w, _h} = wf.rect
+
+      layer_to_commands(wf.gutter, row_off, col_off) ++
+        layer_to_commands(wf.lines, row_off, col_off) ++
+        layer_to_commands(wf.tilde_lines, row_off, col_off)
+    end)
+  end
+
+  @spec layer_to_commands(render_layer(), non_neg_integer(), non_neg_integer()) :: [binary()]
+  defp layer_to_commands(layer, row_off, col_off) when is_map(layer) do
+    Enum.flat_map(layer, fn {row, runs} ->
+      Enum.flat_map(runs, fn {col, text, %Face{} = face} ->
+        style = Face.to_style(face)
+        {style, registration_cmds} = resolve_font_family(style)
+        registration_cmds ++ [Protocol.encode_draw_smart(row + row_off, col + col_off, text, style)]
+      end)
+    end)
   end
 
   # ── Layer ↔ draws ──────────────────────────────────────────────────────────
