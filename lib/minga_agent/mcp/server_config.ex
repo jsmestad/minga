@@ -126,7 +126,8 @@ defmodule MingaAgent.MCP.ServerConfig do
         normalize_env(env)
 
       other ->
-        {:error, "MCP server env must be a map of string keys and values, got: #{inspect(other)}"}
+        {:error,
+         "MCP server env must be a map of string or atom keys and string values, got: #{inspect(other)}"}
     end
   end
 
@@ -155,7 +156,8 @@ defmodule MingaAgent.MCP.ServerConfig do
     if Enum.all?(pairs, fn {key, value} -> is_binary(key) and is_binary(value) end) do
       {:ok, Map.new(pairs)}
     else
-      {:error, "MCP server env must contain string keys and values, got: #{inspect(env)}"}
+      {:error,
+       "MCP server env must contain string or atom keys and string values, got: #{inspect(env)}"}
     end
   end
 

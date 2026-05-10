@@ -17,7 +17,7 @@ defmodule MingaAgent.MCP.RegistryTest do
     }
   end
 
-  test "starts multiple healthy servers and builds a combined tool index" do
+  test "starts multiple healthy servers and returns all tools" do
     {registry, tools, failures} =
       Registry.start_all([config("Alpha"), config("Beta")], self(),
         transport: FakeTransport,

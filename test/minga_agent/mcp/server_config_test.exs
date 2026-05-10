@@ -31,6 +31,18 @@ defmodule MingaAgent.MCP.ServerConfigTest do
     assert config.enabled == false
   end
 
+  test "env errors explain atom keys are allowed but values must be strings" do
+    assert {:error, reason} =
+             ServerConfig.normalize(%{
+               name: "local-tools",
+               command: "node",
+               env: %{TOKEN: :not_a_string}
+             })
+
+    assert reason =~ "string or atom keys"
+    assert reason =~ "string values"
+  end
+
   test "rejects missing command" do
     assert {:error, reason} = ServerConfig.normalize(%{name: "local"})
     assert reason =~ "command is required"
