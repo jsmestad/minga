@@ -48,6 +48,7 @@ defmodule MingaEditor.Frontend.Protocol do
   @op_paste_event 0x06
   @op_gui_action 0x07
 
+  alias Minga.Core.Face
   alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
 
@@ -233,6 +234,18 @@ defmodule MingaEditor.Frontend.Protocol do
     fg = Keyword.get(style, :fg, 0xFFFFFF)
     bg = Keyword.get(style, :bg, 0x000000)
     attrs = encode_attrs(style)
+    text_len = byte_size(text)
+
+    <<@op_draw_text, row::16, col::16, fg::24, bg::24, attrs::8, text_len::16, text::binary>>
+  end
+
+  @doc "Encodes a draw_text command directly from a simple face."
+  @spec encode_draw_face(non_neg_integer(), non_neg_integer(), String.t(), Face.t()) :: binary()
+  def encode_draw_face(row, col, text, %Face{} = face)
+      when is_integer(row) and row >= 0 and is_integer(col) and col >= 0 and is_binary(text) do
+    fg = if face.fg && face.fg != 0xBBC2CF, do: face.fg, else: 0xFFFFFF
+    bg = if face.bg && face.bg != 0x282C34, do: face.bg, else: 0x000000
+    attrs = encode_face_attrs(face)
     text_len = byte_size(text)
 
     <<@op_draw_text, row::16, col::16, fg::24, bg::24, attrs::8, text_len::16, text::binary>>
@@ -705,6 +718,16 @@ defmodule MingaEditor.Frontend.Protocol do
     end)
     |> then(fn a -> if Keyword.get(style, :italic, false), do: a ||| @attr_italic, else: a end)
     |> then(fn a -> if Keyword.get(style, :reverse, false), do: a ||| @attr_reverse, else: a end)
+  end
+
+  @spec encode_face_attrs(Face.t()) :: non_neg_integer()
+  defp encode_face_attrs(%Face{} = face) do
+    import Bitwise
+
+    attrs = if face.bold, do: @attr_bold, else: 0
+    attrs = if face.underline, do: attrs ||| @attr_underline, else: attrs
+    attrs = if face.italic, do: attrs ||| @attr_italic, else: attrs
+    if face.reverse, do: attrs ||| @attr_reverse, else: attrs
   end
 
   @spec encode_attrs_extended(style()) :: non_neg_integer()

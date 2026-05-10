@@ -331,9 +331,7 @@ defmodule MingaEditor.DisplayList do
   @spec draws_to_commands([draw()]) :: [binary()]
   def draws_to_commands(draws) do
     Enum.flat_map(draws, fn {row, col, text, %Face{} = face} ->
-      style = Face.to_style(face)
-      {style, registration_cmds} = resolve_font_family(style)
-      registration_cmds ++ [Protocol.encode_draw_smart(row, col, text, style)]
+      draw_to_commands(row, col, text, face)
     end)
   end
 
@@ -375,11 +373,27 @@ defmodule MingaEditor.DisplayList do
   defp layer_to_commands(layer, row_off, col_off) when is_map(layer) do
     Enum.flat_map(layer, fn {row, runs} ->
       Enum.flat_map(runs, fn {col, text, %Face{} = face} ->
-        style = Face.to_style(face)
-        {style, registration_cmds} = resolve_font_family(style)
-        registration_cmds ++ [Protocol.encode_draw_smart(row + row_off, col + col_off, text, style)]
+        draw_to_commands(row + row_off, col + col_off, text, face)
       end)
     end)
+  end
+
+  @spec draw_to_commands(non_neg_integer(), non_neg_integer(), String.t(), Face.t()) :: [binary()]
+  defp draw_to_commands(row, col, text, %Face{} = face) do
+    if simple_draw_face?(face) do
+      [Protocol.encode_draw_face(row, col, text, face)]
+    else
+      style = Face.to_style(face)
+      {style, registration_cmds} = resolve_font_family(style)
+      registration_cmds ++ [Protocol.encode_draw_smart(row, col, text, style)]
+    end
+  end
+
+  @spec simple_draw_face?(Face.t()) :: boolean()
+  defp simple_draw_face?(%Face{} = face) do
+    face.strikethrough != true and (face.underline_style == nil or face.underline_style == :line) and
+      face.underline_color == nil and (face.blend == nil or face.blend == 100) and
+      face.font_family == nil and (face.font_weight == nil or face.font_weight == :regular)
   end
 
   # ── Layer ↔ draws ──────────────────────────────────────────────────────────
