@@ -81,6 +81,7 @@ pub const Highlighter = struct {
     last_highlight_conceal_count: usize = 0,
     /// Cached full highlight spans used to merge single-line incremental updates.
     cached_highlight_spans: []Span = &.{},
+    cached_has_active_injections: bool = false,
     has_changed_range: bool = false,
     changed_start_byte: u32 = 0,
     changed_end_byte: u32 = 0,
@@ -903,6 +904,7 @@ pub const Highlighter = struct {
             self.cached_highlight_spans = &.{};
         }
         self.has_changed_range = false;
+        self.cached_has_active_injections = false;
     }
 
     fn setChangedRangeForEdits(self: *Highlighter, edits: []const @import("protocol.zig").EditDelta, source: []const u8) void {
@@ -1025,7 +1027,7 @@ pub const Highlighter = struct {
 
         const root = c.ts_tree_root_node(tree);
 
-        if (self.has_changed_range and self.cached_highlight_spans.len > 0 and !try self.hasActiveInjectionRegions(inj_query, root, source)) {
+        if (self.has_changed_range and self.cached_highlight_spans.len > 0 and !self.cached_has_active_injections and !try self.hasActiveInjectionRegions(inj_query, root, source)) {
             return self.highlightChangedRange(query, root, source);
         }
 
@@ -1176,6 +1178,8 @@ pub const Highlighter = struct {
                 .language = lang_name,
             });
         }
+
+        self.cached_has_active_injections = regions.items.len > 0;
 
         // ── Expose injection regions for language-at-position queries ──
         // Free previous injection ranges, then save current ones.
@@ -1372,9 +1376,9 @@ pub const Highlighter = struct {
     }
 
     fn hasActiveInjectionRegions(self: *Highlighter, inj_query: *c.TSQuery, root: c.TSNode, source: []const u8) !bool {
-        const alloc = self.allocator;
         const inj_cursor = c.ts_query_cursor_new() orelse return error.CursorCreateFailed;
         defer c.ts_query_cursor_delete(inj_cursor);
+        if (self.has_changed_range) _ = c.ts_query_cursor_set_byte_range(inj_cursor, self.changed_start_byte, self.changed_end_byte);
         c.ts_query_cursor_exec(inj_cursor, inj_query, root);
 
         const inj_capture_count = c.ts_query_capture_count(inj_query);
@@ -1390,7 +1394,6 @@ pub const Highlighter = struct {
                 language_capture_id = @intCast(i);
             }
         }
-        _ = alloc;
         if (content_capture_id == null) return false;
 
         var inj_match: c.TSQueryMatch = undefined;
