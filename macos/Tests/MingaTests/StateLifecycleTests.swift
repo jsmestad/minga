@@ -295,17 +295,13 @@ struct AgentChatStateLifecycleTests {
         state.update(visible: true, status: 1, model: "claude", prompt: "fix bug",
                      promptLineCount: 1, promptCursorLine: 0, promptCursorCol: 0,
                      promptVimMode: 1, promptVisibleRows: 1,
-                     promptCompletion: nil, pendingToolName: "write_file",
-                     pendingToolSummary: "Writing config.toml",
-                     helpVisible: false, helpGroups: [],
+                     promptCompletion: nil, helpVisible: false, helpGroups: [],
                      rawMessages: raw)
 
         #expect(state.visible == true)
         #expect(state.status == 1)
         #expect(state.model == "claude")
         #expect(state.prompt == "fix bug")
-        #expect(state.pendingApproval?.toolName == "write_file")
-        #expect(state.pendingApproval?.summary == "Writing config.toml")
         #expect(state.messages.count == 6)
         #expect(state.isThinking == true)
         #expect(state.statusLabel == "thinking")
@@ -317,8 +313,7 @@ struct AgentChatStateLifecycleTests {
         state.update(visible: true, status: 1, model: "claude", prompt: "test",
                      promptLineCount: 1, promptCursorLine: 0, promptCursorCol: 0,
                      promptVimMode: 1, promptVisibleRows: 1,
-                     promptCompletion: nil, pendingToolName: nil, pendingToolSummary: "",
-                     helpVisible: false, helpGroups: [],
+                     promptCompletion: nil, helpVisible: false, helpGroups: [],
                      rawMessages: [Wire.ChatMessage(beamId: 1, content: .user(text: "hi"))])
         state.hide()
 
