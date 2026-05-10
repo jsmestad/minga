@@ -24,6 +24,11 @@ defmodule MingaAgent.MCP.ServerConfigTest do
     assert reason =~ "command is required"
   end
 
+  test "validates struct values" do
+    assert {:error, reason} = ServerConfig.normalize(%ServerConfig{name: "local", command: 123})
+    assert reason =~ "command must be a string"
+  end
+
   test "rejects wrong-typed atom keys instead of falling back to string keys" do
     assert {:error, reason} =
              ServerConfig.normalize(%{"name" => "local", name: false, command: "node"})

@@ -65,16 +65,16 @@ defmodule MingaAgent.MCP.Client do
 
   @doc "Returns listed MCP tools with original and safe names."
   @spec list_tools(GenServer.server()) :: {:ok, [MCPTool.t()]} | {:error, term()}
-  def list_tools(client), do: GenServer.call(client, :list_tools)
+  def list_tools(client), do: safe_call(client, :list_tools)
 
   @doc "Builds ReqLLM tools from the listed MCP tools."
   @spec reqllm_tools(GenServer.server()) :: {:ok, [Tool.t()]} | {:error, term()}
-  def reqllm_tools(client), do: GenServer.call(client, :reqllm_tools)
+  def reqllm_tools(client), do: safe_call(client, :reqllm_tools)
 
   @doc "Calls an MCP tool by its original server-declared name."
   @spec call_tool(GenServer.server(), String.t(), map()) :: {:ok, term()} | {:error, term()}
   def call_tool(client, original_name, args) when is_binary(original_name) and is_map(args) do
-    GenServer.call(client, {:call_tool, original_name, args}, 30_000)
+    safe_call(client, {:call_tool, original_name, args}, 30_000)
   end
 
   @impl GenServer
@@ -183,12 +183,17 @@ defmodule MingaAgent.MCP.Client do
 
   @spec normalize_config(keyword()) :: {:ok, ServerConfig.t()} | {:error, String.t()}
   defp normalize_config(opts) do
-    opts
-    |> Keyword.fetch!(:server_config)
-    |> ServerConfig.normalize()
-    |> case do
-      {:ok, nil} -> {:error, "MCP server config is required"}
-      other -> other
+    case Keyword.fetch(opts, :server_config) do
+      {:ok, server_config} ->
+        server_config
+        |> ServerConfig.normalize()
+        |> case do
+          {:ok, nil} -> {:error, "MCP server config is required"}
+          other -> other
+        end
+
+      :error ->
+        {:error, "MCP server config is required"}
     end
   end
 
@@ -253,6 +258,13 @@ defmodule MingaAgent.MCP.Client do
       parameter_schema: tool.input_schema,
       callback: fn args -> call_tool(client, original_name, args || %{}) end
     )
+  end
+
+  @spec safe_call(GenServer.server(), term(), timeout()) :: term()
+  defp safe_call(client, message, timeout \\ 5_000) do
+    GenServer.call(client, message, timeout)
+  catch
+    :exit, reason -> {:error, {:mcp_client_unavailable, reason}}
   end
 
   @spec stop_transport(module(), term()) :: :ok

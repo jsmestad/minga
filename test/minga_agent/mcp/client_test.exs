@@ -21,6 +21,11 @@ defmodule MingaAgent.MCP.ClientTest do
     }
   end
 
+  test "returns an error instead of raising when server config is missing" do
+    assert {:error, reason} = Client.start([])
+    assert reason =~ "config is required"
+  end
+
   test "initializes, sends initialized notification, and lists tools with safe names" do
     {:ok, client} =
       Client.start_link(
@@ -115,6 +120,20 @@ defmodule MingaAgent.MCP.ClientTest do
     assert {:error, message} = Client.call_tool(client, "echo-text", %{"text" => "hi"})
     assert message =~ "unavailable"
     assert Client.list_tools(client) == {:error, message}
+  end
+
+  test "call_tool returns an error when the client process is gone" do
+    {:ok, client} =
+      Client.start(
+        server_config: server_config(),
+        transport: FakeTransport,
+        transport_opts: [tools: [tool_def()]]
+      )
+
+    GenServer.stop(client)
+
+    assert {:error, {:mcp_client_unavailable, _reason}} =
+             Client.call_tool(client, "echo-text", %{"text" => "hi"})
   end
 
   test "transport crash notifies owner and makes future calls fail" do

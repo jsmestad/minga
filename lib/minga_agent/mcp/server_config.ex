@@ -21,7 +21,12 @@ defmodule MingaAgent.MCP.ServerConfig do
   @doc "Normalizes a user config map into a `ServerConfig` struct."
   @spec normalize(map() | t() | nil) :: {:ok, t() | nil} | {:error, String.t()}
   def normalize(nil), do: {:ok, nil}
-  def normalize(%__MODULE__{} = config), do: {:ok, config}
+
+  def normalize(%__MODULE__{} = config) do
+    config
+    |> Map.from_struct()
+    |> normalize()
+  end
 
   def normalize(config) when is_map(config) do
     with {:ok, name} <- fetch_string(config, :name),
