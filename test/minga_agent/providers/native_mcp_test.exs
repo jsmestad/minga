@@ -99,6 +99,36 @@ defmodule MingaAgent.Providers.NativeMCPTest do
     assert "todo_write" in tool_names
   end
 
+  test "invalid MCP config reports an error and keeps builtins available", %{tmp_dir: dir} do
+    test_pid = self()
+
+    client = fn _model, _messages, opts ->
+      send(test_pid, {:llm_tools_with_invalid_mcp, Enum.map(opts[:tools], & &1.name)})
+
+      [ReqLLM.StreamChunk.text("ok"), ReqLLM.StreamChunk.meta(%{finish_reason: :stop})]
+      |> build_stream_response()
+    end
+
+    {:ok, provider} =
+      start_provider(
+        tmp_dir: dir,
+        llm_client: client,
+        config: %AgentConfig{mcp_server: %{name: "Local Tools"}, tool_approval: :none}
+      )
+
+    assert_receive {:agent_provider_event, %Event.Error{message: message}}
+    assert message =~ "MCP config error"
+    assert message =~ "command is required"
+
+    assert :ok = Native.send_prompt(provider, "hello")
+    _events = collect_until_end()
+
+    assert_receive {:llm_tools_with_invalid_mcp, tool_names}
+    assert "builtin_echo" in tool_names
+    refute "mcp_local_tools__echo_text" in tool_names
+    assert "todo_write" in tool_names
+  end
+
   test "MCP tool call round-trips to the server", %{tmp_dir: dir} do
     call_count = :counters.new(1, [:atomics])
 

@@ -35,15 +35,6 @@ defmodule MingaAgent.MCP.ServerConfig do
   def normalize(other),
     do: {:error, "MCP server config must be a map or nil, got: #{inspect(other)}"}
 
-  @doc "Normalizes a user config map or raises `ArgumentError`."
-  @spec normalize!(map() | t() | nil) :: t() | nil
-  def normalize!(config) do
-    case normalize(config) do
-      {:ok, normalized} -> normalized
-      {:error, reason} -> raise ArgumentError, reason
-    end
-  end
-
   @spec fetch_string(map(), atom()) :: {:ok, String.t()} | {:error, String.t()}
   defp fetch_string(config, key) do
     case fetch(config, key) do

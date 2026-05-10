@@ -1916,6 +1916,7 @@ defmodule MingaAgent.Providers.Native do
   @spec format_error(term()) :: String.t()
   defp format_error(reason) when is_binary(reason), do: reason
   defp format_error(%{message: msg}) when is_binary(msg), do: msg
+  defp format_error(%{"message" => msg}) when is_binary(msg), do: msg
 
   defp format_error(:invalid_format) do
     ~s|Invalid model format. Expected "provider:model" (e.g., "anthropic:claude-sonnet-4"), | <>

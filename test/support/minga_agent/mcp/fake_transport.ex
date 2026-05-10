@@ -36,8 +36,6 @@ defmodule MingaAgent.MCP.FakeTransport do
 
   def crash(pid), do: GenServer.call(pid, :crash)
 
-  def calls(pid), do: GenServer.call(pid, :calls)
-
   @impl GenServer
   def init({owner, opts}) do
     tools = Keyword.get(opts, :tools, [])
@@ -48,8 +46,7 @@ defmodule MingaAgent.MCP.FakeTransport do
       owner: owner,
       tools: tools,
       call_results: call_results,
-      test_pid: test_pid,
-      calls: []
+      test_pid: test_pid
     }
 
     maybe_report(state, {:mcp_transport_started, self()})
@@ -82,7 +79,7 @@ defmodule MingaAgent.MCP.FakeTransport do
         "content" => [%{"type" => "text", "text" => "called #{name}"}]
       })
 
-    {:reply, {:ok, result}, %{state | calls: state.calls ++ [{name, args}]}}
+    {:reply, {:ok, result}, state}
   end
 
   def handle_call({:notify, message}, _from, state) do
@@ -93,10 +90,6 @@ defmodule MingaAgent.MCP.FakeTransport do
   def handle_call(:crash, _from, state) do
     send(state.owner, {:mcp_fake_transport_exit, self(), :boom})
     {:reply, :ok, state}
-  end
-
-  def handle_call(:calls, _from, state) do
-    {:reply, state.calls, state}
   end
 
   defp maybe_report(%{test_pid: nil}, _message), do: :ok

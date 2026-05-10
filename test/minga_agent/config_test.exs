@@ -2,6 +2,7 @@ defmodule MingaAgent.ConfigTest do
   @moduledoc "Tests for the centralized Agent.Config module."
   use ExUnit.Case, async: true
 
+  alias Minga.Config.Options
   alias MingaAgent.Config
 
   describe "resolve/0" do
@@ -50,9 +51,18 @@ defmodule MingaAgent.ConfigTest do
   end
 
   describe "MCP config" do
-    test "resolves normalized server config from struct values" do
+    test "defaults to nil" do
       config = Config.resolve()
       assert config.mcp_server == nil
+    end
+
+    test "keeps raw server maps so provider startup can report config errors" do
+      server = start_supervised!({Options, name: nil})
+      Process.put(:minga_config_options, server)
+
+      raw_config = %{name: "local"}
+      assert {:ok, ^raw_config} = Options.set(server, :agent_mcp_server, raw_config)
+      assert Config.resolve().mcp_server == raw_config
     end
   end
 

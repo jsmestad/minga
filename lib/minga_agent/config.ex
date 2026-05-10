@@ -99,7 +99,7 @@ defmodule MingaAgent.Config do
           append_system_prompt: String.t(),
           api_base_url: String.t(),
           api_endpoints: map() | nil,
-          mcp_server: MingaAgent.MCP.ServerConfig.t() | nil,
+          mcp_server: MingaAgent.MCP.ServerConfig.t() | map() | nil,
           compaction_threshold: float() | nil,
           compaction_keep_recent: pos_integer(),
           approval_timeout_ms: pos_integer(),
@@ -148,7 +148,7 @@ defmodule MingaAgent.Config do
       append_system_prompt: get(:agent_append_system_prompt, ""),
       api_base_url: get(:agent_api_base_url, ""),
       api_endpoints: get(:agent_api_endpoints, nil),
-      mcp_server: resolve_mcp_server(get(:agent_mcp_server, nil)),
+      mcp_server: get(:agent_mcp_server, nil),
       compaction_threshold: get(:agent_compaction_threshold, 0.80),
       compaction_keep_recent: get(:agent_compaction_keep_recent, 6),
       approval_timeout_ms: get(:agent_approval_timeout, 300_000),
@@ -209,14 +209,6 @@ defmodule MingaAgent.Config do
     case String.split(model, ":", parts: 2) do
       [_provider, name] -> name
       [name] -> name
-    end
-  end
-
-  @spec resolve_mcp_server(term()) :: MingaAgent.MCP.ServerConfig.t() | nil
-  defp resolve_mcp_server(value) do
-    case MingaAgent.MCP.ServerConfig.normalize(value) do
-      {:ok, config} -> config
-      {:error, reason} -> raise ArgumentError, reason
     end
   end
 
