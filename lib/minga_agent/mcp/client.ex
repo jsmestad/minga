@@ -140,9 +140,12 @@ defmodule MingaAgent.MCP.Client do
   @impl GenServer
   def handle_info(message, state) do
     case state.transport_mod.handle_transport_info(message, state.transport) do
-      {:down, reason} ->
+      {:down, reason} when state.alive ->
         notify_down(state, reason)
         {:noreply, %{state | alive: false}}
+
+      {:down, _reason} ->
+        {:noreply, state}
 
       :ignore ->
         {:noreply, state}
