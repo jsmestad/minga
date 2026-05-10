@@ -106,7 +106,7 @@ defmodule MingaAgent.Hooks.CommandRunner do
       ])
 
     os_pid = port_os_pid(port)
-    true = Port.command(port, payload_json)
+    send_payload_to_helper(port, payload_json)
     guard_deadline_ms = System.monotonic_time(:millisecond) + hook.timeout_ms + @guard_timeout_ms
     collect_helper_result(port, hook, "", guard_deadline_ms, os_pid)
   rescue
@@ -123,6 +123,18 @@ defmodule MingaAgent.Hooks.CommandRunner do
         "failed to start hook runner: #{inspect(kind)} #{inspect(reason)}",
         {:failed_to_start, {kind, reason}}
       )
+  end
+
+  @spec send_payload_to_helper(port(), String.t()) :: :ok
+  defp send_payload_to_helper(port, payload_json) do
+    case Port.command(port, payload_json) do
+      true -> :ok
+      false -> :ok
+    end
+  rescue
+    ArgumentError -> :ok
+  catch
+    :exit, _reason -> :ok
   end
 
   @spec collect_helper_result(port(), Hook.t(), String.t(), integer(), pos_integer() | nil) ::
