@@ -4,8 +4,8 @@
 Apply the same structural-update mentality from tree-sitter highlighting to editor rendering. The benchmark runs the headless editor on a 2,000-line buffer, sends repeated insert-mode keys, and measures end-to-end key latency plus render stage timings. Optimize for preserving previous render state and recomputing/emitting only what changed after a one-line edit, without breaking visible output.
 
 ## Metrics
-- **Primary**: `key_latency_us` (µs, lower is better) — median wall-clock time from key input to collected headless frame for insert-mode edits.
-- **Secondary**: `insert_p95_us`, `motion_latency_us`, `input_dispatch_us`, `render_us`, `port_emit_us`, `content_stage_us`, `chrome_stage_us`, `emit_stage_us` — tradeoff and localization metrics for tail latency and render/emit stages.
+- **Primary**: `render_us` (µs, lower is better) — median render pipeline duration for insert-mode edits.
+- **Secondary**: `key_latency_us`, `insert_p95_us`, `motion_latency_us`, `input_dispatch_us`, `port_emit_us`, `content_stage_us`, `chrome_stage_us`, `emit_stage_us` — tradeoff and localization metrics for end-to-end latency and render/emit stages.
 
 ## How to Run
 `./autoresearch.sh` outputs `METRIC name=value` lines from `mix run bench/key_latency_bench.exs`.
@@ -23,7 +23,7 @@ Apply the same structural-update mentality from tree-sitter highlighting to edit
 - Do not hardcode benchmark dimensions, document contents, or key sequences in production code.
 
 ## Constraints
-- Primary metric decides keep/discard. Keep only lower `key_latency_us` unless a secondary metric exposes a correctness or catastrophic regression.
+- Primary metric decides keep/discard. Keep only lower `render_us` unless a secondary metric exposes a correctness or catastrophic regression.
 - `./autoresearch.checks.sh` must pass before keeping any code change.
 - Preserve GUI-first architecture and TUI/headless compatibility.
 - Prefer structural update reductions: dirty-row caches, per-window render cache reuse, chrome fingerprinting, delta emit, avoiding full command-list/frame rebuilds, and incremental splicing over full recomputation.
