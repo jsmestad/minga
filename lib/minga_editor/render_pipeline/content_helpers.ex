@@ -179,6 +179,84 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
     end
   end
 
+  @doc "Renders non-wrapped, non-folded lines directly into render layers."
+  @spec render_lines_nowrap_layers([String.t()], map()) ::
+          {DisplayList.render_layer(), DisplayList.render_layer(), non_neg_integer(), Window.t()}
+  def render_lines_nowrap_layers(lines, opts) do
+    %{
+      first_line: first_line,
+      cursor_line: cursor_line,
+      ctx: ctx,
+      ln_style: ln_style,
+      gutter_w: gutter_w,
+      first_byte_off: first_byte_off,
+      row_off: row_off,
+      col_off: col_off,
+      window: window
+    } = opts
+
+    sign_w = Gutter.sign_column_width()
+    max_rows = length(lines)
+
+    highlight_segments_list =
+      if ctx.highlight do
+        lines_with_offsets = build_lines_with_offsets(lines, first_byte_off)
+        Highlight.styles_for_visible_lines(ctx.highlight, lines_with_offsets)
+      else
+        List.duplicate(nil, max_rows)
+      end
+
+    {gutter_layer, content_layer, _byte_off, window} =
+      lines
+      |> Enum.zip(highlight_segments_list)
+      |> Enum.with_index()
+      |> Enum.reduce(
+        {%{}, %{}, first_byte_off, window},
+        fn {{line_text, hl_segments}, screen_row}, {g_layer, c_layer, byte_off, win} ->
+          buf_line = first_line + screen_row
+          next_byte_off = byte_off + byte_size(line_text) + 1
+
+          if Window.dirty?(win, buf_line) do
+            {g_cmds, c_cmds, _rows} =
+              BufferLine.render(%{
+                line_text: line_text,
+                buf_line: buf_line,
+                cursor_line: cursor_line,
+                byte_offset: byte_off,
+                screen_row: screen_row,
+                ctx: ctx,
+                ln_style: ln_style,
+                gutter_w: gutter_w,
+                sign_w: sign_w,
+                wrap_entry: nil,
+                max_rows: max_rows,
+                row_offset: row_off,
+                col_offset: col_off,
+                highlight_segments: hl_segments
+              })
+
+            win = Window.cache_line(win, buf_line, g_cmds, c_cmds)
+            {put_draws(g_layer, g_cmds), put_draws(c_layer, c_cmds), next_byte_off, win}
+          else
+            g_cmds = Map.get(win.render_cache.cached_gutter, buf_line, [])
+            c_cmds = Map.get(win.render_cache.cached_content, buf_line, [])
+            {put_draws(g_layer, g_cmds), put_draws(c_layer, c_cmds), next_byte_off, win}
+          end
+        end
+      )
+
+    {gutter_layer, content_layer, length(lines), window}
+  end
+
+  @spec put_draws(DisplayList.render_layer(), [DisplayList.draw()]) :: DisplayList.render_layer()
+  defp put_draws(layer, []), do: layer
+
+  defp put_draws(layer, draws) do
+    Enum.reduce(draws, layer, fn {row, col, text, style}, acc ->
+      Map.update(acc, row, [{col, text, style}], fn runs -> runs ++ [{col, text, style}] end)
+    end)
+  end
+
   # Standard sequential rendering (no folds, zero overhead fast path)
   @spec render_lines_nowrap_sequential([String.t()], map()) ::
           {[DisplayList.draw()], [DisplayList.draw()], non_neg_integer(), Window.t()}
