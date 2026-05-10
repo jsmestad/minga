@@ -281,7 +281,7 @@ fn handleCommand(
         },
         .set_highlight_query => |shq| {
             if (buffers.getPtr(shq.buffer_id)) |bs| {
-                _ = activateBuffer(hl, bs);
+                if (!activateBuffer(hl, bs)) return;
                 hl.setHighlightQuery(shq.source) catch {};
                 saveTreeToBuffer(hl, bs);
             } else {
@@ -290,7 +290,7 @@ fn handleCommand(
         },
         .set_injection_query => |siq| {
             if (buffers.getPtr(siq.buffer_id)) |bs| {
-                _ = activateBuffer(hl, bs);
+                if (!activateBuffer(hl, bs)) return;
                 hl.setInjectionQuery(siq.source) catch {};
                 saveTreeToBuffer(hl, bs);
             } else {
@@ -299,7 +299,7 @@ fn handleCommand(
         },
         .set_fold_query => |sfq| {
             if (buffers.getPtr(sfq.buffer_id)) |bs| {
-                _ = activateBuffer(hl, bs);
+                if (!activateBuffer(hl, bs)) return;
                 hl.setFoldQuery(sfq.source) catch {};
                 saveTreeToBuffer(hl, bs);
             } else {
@@ -308,7 +308,7 @@ fn handleCommand(
         },
         .set_indent_query => |siq_cmd| {
             if (buffers.getPtr(siq_cmd.buffer_id)) |bs| {
-                _ = activateBuffer(hl, bs);
+                if (!activateBuffer(hl, bs)) return;
                 hl.setIndentQuery(siq_cmd.source) catch {};
                 saveTreeToBuffer(hl, bs);
             } else {
@@ -327,7 +327,7 @@ fn handleCommand(
         },
         .set_textobject_query => |stq| {
             if (buffers.getPtr(stq.buffer_id)) |bs| {
-                _ = activateBuffer(hl, bs);
+                if (!activateBuffer(hl, bs)) return;
                 hl.setTextobjectQuery(stq.source) catch {};
                 saveTreeToBuffer(hl, bs);
             } else {
@@ -365,18 +365,15 @@ fn handleCommand(
         },
         .query_language_at => |q| {
             if (buffers.getPtr(q.buffer_id)) |bs| {
-                _ = activateBuffer(hl, bs);
+                if (!activateBuffer(hl, bs)) {
+                    try sendLanguageAtResponse(stdout, q.request_id, null);
+                    return;
+                }
                 const lang = hl.languageAt(q.byte_offset);
                 saveTreeToBuffer(hl, bs);
-                var rbuf: [260]u8 = undefined;
-                const rlen = protocol.encodeLanguageAtResponse(&rbuf, q.request_id, lang) catch return;
-                try protocol.writeMessage(stdout, rbuf[0..rlen]);
-                try stdout.flush();
+                try sendLanguageAtResponse(stdout, q.request_id, lang);
             } else {
-                var rbuf: [260]u8 = undefined;
-                const rlen = protocol.encodeLanguageAtResponse(&rbuf, q.request_id, null) catch return;
-                try protocol.writeMessage(stdout, rbuf[0..rlen]);
-                try stdout.flush();
+                try sendLanguageAtResponse(stdout, q.request_id, null);
             }
         },
         .close_buffer => {
@@ -465,6 +462,14 @@ fn handleCloseBuffer(
         // BufferState.deinit frees the tree (if any) and source.
         bs.deinit(alloc);
     }
+}
+
+/// Send a language-at-position response to stdout.
+fn sendLanguageAtResponse(stdout: *std.Io.Writer, request_id: u32, language: ?[]const u8) !void {
+    var rbuf: [260]u8 = undefined;
+    const rlen = protocol.encodeLanguageAtResponse(&rbuf, request_id, language) catch return;
+    try protocol.writeMessage(stdout, rbuf[0..rlen]);
+    try stdout.flush();
 }
 
 /// Send textobject positions to stdout.
