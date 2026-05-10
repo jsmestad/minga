@@ -74,6 +74,8 @@ pub const Highlighter = struct {
     textobject_query_cache: std.StringHashMapUnmanaged(*c.TSQuery),
     /// Currently active predicate table (set during setLanguage)
     current_predicates: ?*const predicates_mod.PredicateTable = null,
+    /// Capture id for @conceal in the active highlight query, if present.
+    current_conceal_capture_id: ?u32 = null,
     cache_mutex: std.atomic.Mutex = .unlocked,
     allocator: std.mem.Allocator,
 
@@ -291,12 +293,13 @@ pub const Highlighter = struct {
                     }
                 }
             }
-            // Restore predicate table for current language
+            // Restore predicate table and hot capture metadata for current language
             if (self.predicate_cache.getPtr(name)) |cached_ptr| {
                 self.current_predicates = cached_ptr;
             } else {
                 self.current_predicates = null;
             }
+            self.current_conceal_capture_id = findCaptureId(self.query, "conceal");
 
             // Injection query
             if (self.injection_query_cache.get(name)) |cached| {
@@ -919,10 +922,7 @@ pub const Highlighter = struct {
                 const start = c.ts_node_start_byte(node);
                 const end = c.ts_node_end_byte(node);
 
-                // Check if this capture is @conceal (or has a conceal directive).
-                var cap_len: u32 = 0;
-                const cap_name = c.ts_query_capture_name_for_id(query, @intCast(cap.index), &cap_len);
-                const is_conceal_capture = std.mem.eql(u8, cap_name[0..cap_len], "conceal");
+                const is_conceal_capture = self.current_conceal_capture_id != null and cap.index == self.current_conceal_capture_id.?;
 
                 if (is_conceal_capture and conceal_replacement != null) {
                     // Emit a conceal span instead of a regular highlight span.
@@ -1004,10 +1004,7 @@ pub const Highlighter = struct {
                 const start = c.ts_node_start_byte(cap.node);
                 const end = c.ts_node_end_byte(cap.node);
 
-                // Check if this is a @conceal capture with a replacement directive.
-                var cap_len: u32 = 0;
-                const cap_name = c.ts_query_capture_name_for_id(query, @intCast(cap.index), &cap_len);
-                const is_conceal = std.mem.eql(u8, cap_name[0..cap_len], "conceal");
+                const is_conceal = self.current_conceal_capture_id != null and cap.index == self.current_conceal_capture_id.?;
 
                 if (is_conceal and conceal_replacement != null) {
                     try conceals.append(alloc, .{
@@ -1411,6 +1408,18 @@ fn getInjectionLanguagePredicate(query: *c.TSQuery, pattern_index: u32) ?[]const
 /// A byte range representing an injection region (for internal trimming).
 
 // ── Span ordering ─────────────────────────────────────────────────────────
+
+/// Find a capture id by name in a compiled query.
+fn findCaptureId(query: ?*c.TSQuery, target: []const u8) ?u32 {
+    const q = query orelse return null;
+    const count = c.ts_query_capture_count(q);
+    for (0..count) |i| {
+        var length: u32 = 0;
+        const name_ptr = c.ts_query_capture_name_for_id(q, @intCast(i), &length);
+        if (std.mem.eql(u8, name_ptr[0..length], target)) return @intCast(i);
+    }
+    return null;
+}
 
 /// Comparator for highlight spans.
 /// Order: start_byte ASC, layer DESC, pattern_index DESC, end_byte ASC.
