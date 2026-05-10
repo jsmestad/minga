@@ -360,9 +360,6 @@ defmodule Minga.Integration.MouseTest do
   # ── Multi-region dispatch ──────────────────────────────────────────────────
 
   describe "multi-region dispatch" do
-    # TODO: This test needs rework - clicking in editor area after file tree
-    # open doesn't set :editor scope due to mouse dispatch layout issue.
-    @tag :skip
     test "click dispatches to correct region when file tree is open" do
       ctx = start_editor("hello world")
 
@@ -419,6 +416,16 @@ defmodule Minga.Integration.MouseTest do
 
       assert state.workspace.keymap_scope == :editor,
              "clicking in editor area should set :editor scope, got #{state.workspace.keymap_scope}"
+
+      # Click back inside the file tree area and verify focus follows the click.
+      send_mouse(ctx, 5, max(tree_sep - 2, 0), :left)
+      state = editor_state(ctx)
+
+      assert FileTree.focused?(state.workspace.file_tree),
+             "clicking in file tree should focus the file tree"
+
+      assert state.workspace.keymap_scope == :file_tree,
+             "clicking in file tree should set :file_tree scope, got #{state.workspace.keymap_scope}"
     end
   end
 

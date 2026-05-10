@@ -23,7 +23,7 @@ defmodule MingaEditor.RenderPipeline.Input do
   **From `state` (top-level):**
   `theme`, `capabilities`, `shell`, `shell_state`, `port_manager`,
   `font_registry`, `message_store`, `face_override_registries`,
-  `editing_model`, `backend`, `layout`
+  `editing_model`, `backend`, `layout`, `focus_tree`
 
   **From `state.workspace` (per-tab editing context, stored as `workspace` map):**
   `windows`, `buffers`, `viewport`, `file_tree`, `highlight`,
@@ -69,6 +69,7 @@ defmodule MingaEditor.RenderPipeline.Input do
     :editing_model,
     :backend,
     :layout,
+    :focus_tree,
     :lsp,
     :parser_status,
     # Workspace as a plain map (enables state.workspace.X pattern-matching)
@@ -111,6 +112,7 @@ defmodule MingaEditor.RenderPipeline.Input do
           editing_model: :vim | :cua,
           backend: EditorState.backend(),
           layout: Layout.t() | nil,
+          focus_tree: MingaEditor.FocusTree.t() | nil,
           lsp: LSPState.t(),
           parser_status: atom(),
           caches: Caches.t(),
@@ -139,6 +141,7 @@ defmodule MingaEditor.RenderPipeline.Input do
       editing_model: state.editing_model,
       backend: state.backend,
       layout: state.layout,
+      focus_tree: state.focus_tree,
       lsp: state.lsp,
       parser_status: state.parser_status,
       caches: state.caches,

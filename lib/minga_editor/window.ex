@@ -135,7 +135,7 @@ defmodule MingaEditor.Window do
       when is_integer(rows) and rows > 0 and is_integer(cols) and cols > 0 do
     window
     |> invalidate()
-    |> Map.put(:viewport, Viewport.new(rows, cols))
+    |> set_viewport(Viewport.new(rows, cols))
   end
 
   # When a window is squeezed to zero dimensions (e.g., terminal resized
@@ -146,6 +146,12 @@ defmodule MingaEditor.Window do
   end
 
   # ── Scroll helpers ──────────────────────────────────────────────────────────
+
+  @doc "Stores the computed viewport for this window."
+  @spec set_viewport(t(), Viewport.t()) :: t()
+  def set_viewport(%__MODULE__{} = window, %Viewport{} = viewport) do
+    %{window | viewport: viewport}
+  end
 
   @doc """
   Scrolls the window's viewport by `delta` lines and updates pinned state.
@@ -165,6 +171,19 @@ defmodule MingaEditor.Window do
     pinned = delta > 0 and new_top >= max_top
 
     %{window | viewport: %{vp | top: new_top}, pinned: pinned}
+  end
+
+  @doc "Scrolls the window horizontally by display columns."
+  @spec scroll_horizontal(t(), integer()) :: t()
+  def scroll_horizontal(%__MODULE__{viewport: viewport} = window, delta) do
+    new_left = max(viewport.left + delta, 0)
+    %{window | viewport: %{viewport | left: new_left}}
+  end
+
+  @doc "Sets whether the window should stay pinned to the bottom while content streams."
+  @spec set_pinned(t(), boolean()) :: t()
+  def set_pinned(%__MODULE__{} = window, pinned?) when is_boolean(pinned?) do
+    %{window | pinned: pinned?}
   end
 
   # ── Popup queries ──────────────────────────────────────────────────────────

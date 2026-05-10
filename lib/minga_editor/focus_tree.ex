@@ -1,73 +1,171 @@
 defmodule MingaEditor.FocusTree do
   @moduledoc """
-  Tree of visible regions, built from the per-frame `Layout`.
+  Tree of visible regions, built from the per-frame `Layout` plus active overlays.
 
-  Mouse routing today is a flat hit-test stack: each input handler walks
-  the layout rects asking "am I responsible?" and the order of checks
-  encodes z-order implicitly. This module replaces that pattern with a
-  single tree built once per frame; `hit_test/3` walks it top-down to
-  find the deepest matching node, returning the node (and therefore its
-  handler module).
+  Mouse routing uses this tree instead of asking every handler to re-check screen coordinates. Hit-testing finds the deepest visible node at a position, and the router dispatches to that node's handler before bubbling to ancestors when a handler returns `{:passthrough, state}`.
 
-  ## Tree shape
-
-      viewport
-      ├─ file_tree (when present)
-      ├─ tab_bar (when present)
-      ├─ editor_area
-      │  ├─ window 1
-      │  │  ├─ gutter
-      │  │  ├─ buffer_content
-      │  │  └─ modeline
-      │  └─ window 2 (split, if any)
-      ├─ agent_panel (when present)
-      ├─ bottom_panel (when present)
-      ├─ status_bar (when present)
-      └─ minibuffer
-
-  Modal overlays and floats are inserted at the end of the children
-  list of the relevant parent node so the z-order resolves correctly:
-  the last child whose rect contains the click wins.
-
-  ## Status
-
-  This PR introduces the data structure, the basic builder, and the
-  `hit_test/3` API. Migration of the ad-hoc `inside_*?/2` predicates
-  in `Input.{Picker, Completion, AgentMouse, FileTreeHandler}` to use
-  the tree is staged as follow-up work — the existing predicates keep
-  working because the tree is purely additive at this layer.
+  Children are stored in rendered z-order from back to front. Hit-tests walk children in reverse order, so later siblings win when regions overlap.
   """
 
+  alias Minga.Buffer
+  alias Minga.Editing.Completion
+  alias MingaEditor.CompletionUI
   alias MingaEditor.FocusTree.Node, as: TreeNode
+  alias MingaEditor.Input
   alias MingaEditor.Layout
+  alias MingaEditor.Renderer.Gutter
+  alias MingaEditor.State.ModalOverlay
+  alias MingaEditor.UI.Picker, as: PickerData
+  alias MingaEditor.Viewport
+  alias MingaEditor.Window.Content
 
   @typedoc "Built focus tree, rooted at the viewport."
   @type t :: TreeNode.t()
 
-  @doc """
-  Builds a focus tree from a `Layout`. Pure; safe to call any time.
+  @typedoc "Mouse route ordered from deepest target to root for bubbling."
+  @type path :: [TreeNode.t()]
 
-  Modal overlays, hover popups, and floats are added by the caller via
-  `with_overlay/3` after construction so this function stays a pure
-  layout-to-tree projection without coupling to shell state.
-  """
+  @doc "Returns the cached focus tree from state, or builds one from the current state."
+  @spec get(map()) :: t()
+  def get(%{focus_tree: %TreeNode{} = cached}), do: cached
+  def get(state), do: from_state(state)
+
+  @doc "Builds a focus tree from editor or render-pipeline state."
+  @spec from_state(map()) :: t()
+  def from_state(state) do
+    layout = Layout.get(state)
+
+    layout
+    |> build_base(window_map(state), Input.editing_dispatch_handler(state))
+    |> add_modal_overlays(state, layout)
+    |> link_tree()
+  end
+
+  @doc "Builds a focus tree from a `Layout`. Pure; safe to call any time."
   @spec from_layout(Layout.t()) :: t()
   def from_layout(%Layout{} = layout) do
+    layout
+    |> build_base(%{}, Input.ModeFSM)
+    |> link_tree()
+  end
+
+  @doc "Adds a modal or float overlay node to the root in front of existing regions."
+  @spec with_overlay(t(), TreeNode.content_type(), TreeNode.rect(), keyword()) :: t()
+  def with_overlay(%TreeNode{children: children} = root, content_type, rect, opts \\ []) do
+    overlay = TreeNode.new(content_type, rect, opts)
+    %{root | children: children ++ [overlay]} |> link_tree()
+  end
+
+  @doc "Hit-tests `(row, col)` and returns the deepest node whose rect contains the point."
+  @spec hit_test(t(), integer(), integer()) :: TreeNode.t() | nil
+  def hit_test(%TreeNode{} = root, row, col) do
+    root
+    |> hit_path(row, col)
+    |> List.first()
+  end
+
+  @doc "Returns the bubble path ordered from deepest node to root."
+  @spec hit_path(t(), integer(), integer()) :: path()
+  def hit_path(%TreeNode{} = root, row, col) do
+    do_hit_path(root, row, col)
+  end
+
+  @doc "Returns the path starting at the deepest scrollable node under `(row, col)`."
+  @spec scroll_path(t(), integer(), integer()) :: path()
+  def scroll_path(%TreeNode{} = root, row, col) do
+    path = hit_path(root, row, col)
+
+    case Enum.find_index(path, & &1.scrollable?) do
+      nil -> []
+      index -> Enum.drop(path, index)
+    end
+  end
+
+  @doc "Links parent and sibling references throughout a tree."
+  @spec link_tree(t()) :: t()
+  def link_tree(%TreeNode{} = root) do
+    link_node(%{root | parent: nil, previous_sibling: nil, next_sibling: nil}, nil, nil, nil)
+  end
+
+  @spec do_hit_path(TreeNode.t(), integer(), integer()) :: path()
+  defp do_hit_path(%TreeNode{} = node, row, col) do
+    if TreeNode.contains?(node, row, col) do
+      node.children
+      |> deepest_child_path(row, col)
+      |> append_node_to_path(node)
+    else
+      []
+    end
+  end
+
+  @spec deepest_child_path([TreeNode.t()], integer(), integer()) :: path() | nil
+  defp deepest_child_path(children, row, col) do
+    children
+    |> Enum.reverse()
+    |> Enum.find_value(fn child ->
+      case do_hit_path(child, row, col) do
+        [] -> nil
+        path -> path
+      end
+    end)
+  end
+
+  @spec append_node_to_path(path() | nil, TreeNode.t()) :: path()
+  defp append_node_to_path(nil, node), do: [node]
+  defp append_node_to_path(path, node), do: path ++ [node]
+
+  @spec link_node(TreeNode.t(), TreeNode.id() | nil, TreeNode.id() | nil, TreeNode.id() | nil) ::
+          TreeNode.t()
+  defp link_node(%TreeNode{} = node, parent, previous_sibling, next_sibling) do
+    linked_children = link_children(node.children, node.id)
+
+    %{
+      node
+      | parent: parent,
+        previous_sibling: previous_sibling,
+        next_sibling: next_sibling,
+        children: linked_children
+    }
+  end
+
+  @spec link_children([TreeNode.t()], TreeNode.id()) :: [TreeNode.t()]
+  defp link_children(children, parent_id) do
+    ids = Enum.map(children, & &1.id)
+
+    children
+    |> Enum.with_index()
+    |> Enum.map(fn {child, index} ->
+      previous_id = sibling_id(ids, index - 1)
+      next_id = sibling_id(ids, index + 1)
+      link_node(child, parent_id, previous_id, next_id)
+    end)
+  end
+
+  @spec sibling_id([TreeNode.id()], integer()) :: TreeNode.id() | nil
+  defp sibling_id(ids, index) when index >= 0, do: Enum.at(ids, index)
+  defp sibling_id(_ids, _index), do: nil
+
+  # ── Builders ───────────────────────────────────────────────────────────────
+
+  @spec window_map(map()) :: map()
+  defp window_map(%{workspace: %{windows: %{map: map}}}) when is_map(map), do: map
+  defp window_map(_state), do: %{}
+
+  @spec build_base(Layout.t(), map(), module()) :: t()
+  defp build_base(%Layout{} = layout, window_map, bottom_handler) do
     {tr, tc, tw, th} = layout.terminal
 
-    # Children are listed in z-order from bottom (background) to top (overlays).
-    # hit_test/3 reverses this list to give later children priority — that's
-    # how file_tree paints over the editor_area at the same column range.
     children =
       []
-      |> maybe_add(layout.tab_bar, &TreeNode.new(:tab_bar, &1))
-      |> Kernel.++([editor_area_node(layout)])
-      |> maybe_add(layout.file_tree, &TreeNode.new(:file_tree, &1))
-      |> maybe_add(layout.agent_panel, &TreeNode.new(:agent_panel, &1))
-      |> maybe_add(layout.status_bar, &TreeNode.new(:status_bar, &1))
-      |> Kernel.++([TreeNode.new(:minibuffer, layout.minibuffer)])
+      |> maybe_add(layout.tab_bar, &TreeNode.new(:tab_bar, &1, handler: bottom_handler))
+      |> Kernel.++([editor_area_node(layout, window_map, bottom_handler)])
+      |> maybe_add(layout.file_tree, &file_tree_node/1)
+      |> maybe_add(layout.agent_panel, &agent_panel_node/1)
+      |> maybe_add(layout.status_bar, &TreeNode.new(:status_bar, &1, handler: bottom_handler))
+      |> Kernel.++([TreeNode.new(:minibuffer, layout.minibuffer, handler: bottom_handler)])
 
     %TreeNode{
+      id: :viewport,
       content_type: :viewport,
       rect: {tr, tc, tw, th},
       handler: nil,
@@ -77,115 +175,253 @@ defmodule MingaEditor.FocusTree do
     }
   end
 
-  @doc """
-  Adds a modal/float overlay node to the tree. Inserted as the last
-  child of the root so hit-tests resolve to it before the underlying
-  editor regions.
-  """
-  @spec with_overlay(t(), TreeNode.content_type(), TreeNode.rect(), keyword()) :: t()
-  def with_overlay(%TreeNode{children: children} = root, content_type, rect, opts \\ []) do
-    overlay = TreeNode.new(content_type, rect, opts)
-    %{root | children: children ++ [overlay]}
+  @spec file_tree_node(Layout.rect()) :: TreeNode.t()
+  defp file_tree_node(rect) do
+    TreeNode.new(:file_tree, rect,
+      handler: Input.FileTreeHandler,
+      scrollable?: true,
+      focusable?: true
+    )
   end
 
-  @doc """
-  Hit-tests `(row, col)` against the tree. Returns the deepest node
-  whose rect contains the point, or `nil` if no node matches.
-
-  Children are searched in reverse order so later children (rendered
-  on top) take precedence over earlier siblings.
-  """
-  @spec hit_test(t(), non_neg_integer(), non_neg_integer()) :: TreeNode.t() | nil
-  def hit_test(%TreeNode{} = root, row, col) do
-    if TreeNode.contains?(root, row, col) do
-      child_hit =
-        root.children
-        |> Enum.reverse()
-        |> Enum.find_value(fn child -> hit_test(child, row, col) end)
-
-      child_hit || root
-    else
-      nil
-    end
+  @spec agent_panel_node(Layout.rect()) :: TreeNode.t()
+  defp agent_panel_node(rect) do
+    TreeNode.new(:agent_panel, rect,
+      handler: Input.AgentMouse,
+      scrollable?: true,
+      focusable?: true
+    )
   end
 
-  @doc """
-  Walks from the deepest hit upward through the tree, yielding each
-  ancestor node. Useful for "bubble" dispatch — try the deepest
-  handler first, then bubble up if it returns `:passthrough`.
-
-  Returns a list of nodes ordered from deepest to root. The flat
-  hit-test stack (today's pattern) is equivalent to a one-element
-  list when the deepest match is the only candidate.
-  """
-  @spec hit_path(t(), non_neg_integer(), non_neg_integer()) :: [TreeNode.t()]
-  def hit_path(%TreeNode{} = root, row, col) do
-    hit_path(root, row, col, [])
-    |> Enum.reverse()
-  end
-
-  defp hit_path(%TreeNode{} = node, row, col, acc) do
-    if TreeNode.contains?(node, row, col) do
-      new_acc = [node | acc]
-      deepest_child_path(node.children, row, col, new_acc) || new_acc
-    else
-      acc
-    end
-  end
-
-  # Walks children in reverse z-order and returns the first child path that
-  # extends beyond `acc` (i.e., a child whose subtree contained the point).
-  # Returns `nil` when no child contained the point so the caller falls back
-  # to its own `acc`.
-  @spec deepest_child_path([TreeNode.t()], non_neg_integer(), non_neg_integer(), [TreeNode.t()]) ::
-          [TreeNode.t()] | nil
-  defp deepest_child_path(children, row, col, acc) do
-    children
-    |> Enum.reverse()
-    |> Enum.find_value(fn child ->
-      case hit_path(child, row, col, acc) do
-        ^acc -> nil
-        deeper -> deeper
-      end
-    end)
-  end
-
-  # ── Builders ───────────────────────────────────────────────────────────────
-
-  defp editor_area_node(%Layout{editor_area: rect, window_layouts: windows}) do
+  @spec editor_area_node(Layout.t(), map(), module()) :: TreeNode.t()
+  defp editor_area_node(
+         %Layout{editor_area: rect, window_layouts: windows},
+         window_map,
+         bottom_handler
+       ) do
     children =
       windows
       |> Enum.sort_by(fn {id, _} -> id end)
-      |> Enum.map(fn {win_id, wl} -> window_node(win_id, wl) end)
+      |> Enum.map(fn {win_id, wl} ->
+        window_node(win_id, wl, Map.get(window_map, win_id), bottom_handler)
+      end)
 
-    TreeNode.new(:editor_area, rect, children: children)
+    TreeNode.new(:editor_area, rect, handler: bottom_handler, children: children)
   end
 
-  defp window_node(win_id, win_layout) do
+  @spec window_node(term(), Layout.window_layout(), term(), module()) :: TreeNode.t()
+  defp window_node(win_id, win_layout, window, bottom_handler) do
+    agent_chat? = agent_chat_window?(window)
+    window_type = if agent_chat?, do: :agent_chat_window, else: :window
+    content_type = if agent_chat?, do: :agent_chat_content, else: :buffer_content
+    content_handler = if agent_chat?, do: Input.AgentMouse, else: bottom_handler
+
     children =
       [
-        TreeNode.new(:buffer_content, win_layout.content,
-          handler: nil,
+        TreeNode.new(content_type, win_layout.content,
+          handler: content_handler,
           scrollable?: true,
           focusable?: true,
           ref: win_id
         )
       ]
-      |> maybe_modeline(win_layout)
+      |> maybe_modeline(win_layout, win_id)
 
-    TreeNode.new(:window, win_layout.total,
+    TreeNode.new(window_type, win_layout.total,
       ref: win_id,
       focusable?: true,
+      handler: bottom_handler,
       children: children
     )
   end
 
-  defp maybe_modeline(children, %{modeline: {_, _, _, 0}}), do: children
+  @spec agent_chat_window?(term()) :: boolean()
+  defp agent_chat_window?(%{content: content}), do: Content.agent_chat?(content)
+  defp agent_chat_window?(_window), do: false
 
-  defp maybe_modeline(children, %{modeline: rect}) do
-    children ++ [TreeNode.new(:modeline, rect)]
+  @spec maybe_modeline([TreeNode.t()], Layout.window_layout(), term()) :: [TreeNode.t()]
+  defp maybe_modeline(children, %{modeline: {_, _, _, 0}}, _win_id), do: children
+
+  defp maybe_modeline(children, %{modeline: rect}, win_id) do
+    children ++ [TreeNode.new(:modeline, rect, handler: Input.ModeFSM, ref: win_id)]
   end
 
+  @spec maybe_add([TreeNode.t()], Layout.rect() | nil, (Layout.rect() -> TreeNode.t())) ::
+          [TreeNode.t()]
   defp maybe_add(children, nil, _build), do: children
   defp maybe_add(children, rect, build), do: children ++ [build.(rect)]
+
+  # ── Overlay builders ──────────────────────────────────────────────────────
+
+  @spec add_modal_overlays(t(), map(), Layout.t()) :: t()
+  defp add_modal_overlays(
+         %TreeNode{} = root,
+         %{shell_state: %{modal: {:picker, payload}}},
+         layout
+       ) do
+    add_picker_overlay(root, payload.picker_ui, layout)
+  end
+
+  defp add_modal_overlays(%TreeNode{} = root, state, layout) do
+    case ModalOverlay.completion(state) do
+      %Completion{} = completion -> add_completion_overlay(root, completion, state, layout)
+      _ -> root
+    end
+  end
+
+  @spec add_picker_overlay(t(), map(), Layout.t()) :: t()
+  defp add_picker_overlay(%TreeNode{} = root, %{picker: %PickerData{}, layout: :centered}, layout) do
+    backdrop =
+      TreeNode.new(:picker_backdrop, layout.terminal,
+        handler: Input.Picker,
+        scrollable?: true,
+        children: [
+          TreeNode.new(:picker, centered_picker_rect(layout),
+            handler: Input.Picker,
+            scrollable?: true,
+            focusable?: true
+          )
+        ]
+      )
+
+    append_root_child(root, backdrop)
+  end
+
+  defp add_picker_overlay(%TreeNode{} = root, %{picker: %PickerData{} = picker}, layout) do
+    backdrop =
+      TreeNode.new(:picker_backdrop, layout.terminal,
+        handler: Input.Picker,
+        scrollable?: true,
+        children: [
+          TreeNode.new(:picker, bottom_picker_rect(layout, picker),
+            handler: Input.Picker,
+            scrollable?: true,
+            focusable?: true
+          )
+        ]
+      )
+
+    append_root_child(root, backdrop)
+  end
+
+  defp add_picker_overlay(%TreeNode{} = root, _picker_state, _layout), do: root
+
+  @spec add_completion_overlay(t(), Completion.t(), map(), Layout.t()) :: t()
+  defp add_completion_overlay(%TreeNode{} = root, completion, state, layout) do
+    case CompletionUI.menu_rect(completion, completion_render_opts(state, layout)) do
+      nil ->
+        root
+
+      rect ->
+        backdrop =
+          TreeNode.new(:completion_backdrop, layout.terminal,
+            handler: Input.Completion,
+            scrollable?: true,
+            children: [
+              TreeNode.new(:completion_menu, rect,
+                handler: Input.Completion,
+                scrollable?: true,
+                focusable?: true
+              )
+            ]
+          )
+
+        append_root_child(root, backdrop)
+    end
+  end
+
+  @spec append_root_child(t(), TreeNode.t()) :: t()
+  defp append_root_child(%TreeNode{children: children} = root, child) do
+    %{root | children: children ++ [child]}
+  end
+
+  @spec centered_picker_rect(Layout.t()) :: Layout.rect()
+  defp centered_picker_rect(%Layout{terminal: {_row, _col, cols, rows}}) do
+    width = max(div(cols * 60, 100), 1)
+    height = max(div(rows * 70, 100), 1)
+    row = max(div(rows - height, 2), 0)
+    col = max(div(cols - width, 2), 0)
+    {row, col, width, height}
+  end
+
+  @spec bottom_picker_rect(Layout.t(), PickerData.t()) :: Layout.rect()
+  defp bottom_picker_rect(%Layout{terminal: {_row, _col, cols, rows}}, picker) do
+    {visible, _selected_offset} = PickerData.visible_items(picker)
+    item_count = length(visible)
+    prompt_row = rows - 1
+    separator_row = prompt_row - item_count - 1
+    first_row = max(separator_row, 0)
+    height = max(prompt_row - first_row + 1, 1)
+    {first_row, 0, cols, height}
+  end
+
+  @spec completion_render_opts(map(), Layout.t()) :: CompletionUI.render_opts()
+  defp completion_render_opts(state, layout) do
+    {cursor_row, cursor_col} = cursor_screen_pos(state, layout)
+
+    %{
+      cursor_row: cursor_row,
+      cursor_col: cursor_col,
+      viewport_rows: state.terminal_viewport.rows,
+      viewport_cols: state.terminal_viewport.cols
+    }
+  end
+
+  @spec cursor_screen_pos(map(), Layout.t()) :: {non_neg_integer(), non_neg_integer()}
+  defp cursor_screen_pos(%{workspace: %{buffers: %{active: buf}}} = state, layout)
+       when is_pid(buf) do
+    {line, col} = Buffer.cursor(buf)
+    total_lines = Buffer.line_count(buf)
+    line_number_style = Buffer.get_option(buf, :line_numbers)
+    number_width = if line_number_style == :none, do: 0, else: Viewport.gutter_width(total_lines)
+    gutter_width = Gutter.total_width(number_width)
+
+    state
+    |> cursor_origin(layout)
+    |> cursor_screen_pos_from_origin(line, col, gutter_width)
+  catch
+    :exit, _ -> {0, 0}
+  end
+
+  defp cursor_screen_pos(_state, _layout), do: {0, 0}
+
+  @spec cursor_origin(map(), Layout.t()) ::
+          {integer(), integer(), non_neg_integer(), non_neg_integer()}
+  defp cursor_origin(state, layout) do
+    with %{content: {row, col, _width, _height}} <- active_window_layout(layout, state),
+         %{viewport: viewport} <- active_window(state) do
+      {row, col, viewport.top, viewport.left}
+    else
+      _ -> {0, 0, state.terminal_viewport.top, state.terminal_viewport.left}
+    end
+  end
+
+  @spec cursor_screen_pos_from_origin(
+          {integer(), integer(), non_neg_integer(), non_neg_integer()},
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: {non_neg_integer(), non_neg_integer()}
+  defp cursor_screen_pos_from_origin({row, col, top, left}, line, cursor_col, gutter_width) do
+    screen_row = row + line - top
+    screen_col = col + cursor_col + gutter_width - left
+    {max(screen_row, 0), max(screen_col, 0)}
+  end
+
+  @spec active_window_layout(Layout.t(), map()) :: Layout.window_layout() | nil
+  defp active_window_layout(%Layout{window_layouts: layouts}, %{
+         workspace: %{windows: %{active: active}}
+       }) do
+    Map.get(layouts, active)
+  end
+
+  defp active_window_layout(_layout, _state), do: nil
+
+  @spec active_window(map()) :: term() | nil
+  defp active_window(%{workspace: %{windows: %{map: windows, active: active}}})
+       when is_map(windows) do
+    Map.get(windows, active)
+  end
+
+  defp active_window(_state), do: nil
 end

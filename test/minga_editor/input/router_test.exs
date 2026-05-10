@@ -2,6 +2,9 @@ defmodule MingaEditor.Input.RouterTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Test.InputRouterMouseProbe
+  alias MingaEditor.FocusTree
+  alias MingaEditor.FocusTree.Node, as: FocusNode
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.Viewport
@@ -25,6 +28,69 @@ defmodule MingaEditor.Input.RouterTest do
       },
       focus_stack: Input.default_stack()
     }
+  end
+
+  defp probe_tree(deep_ref) do
+    FocusTree.link_tree(%FocusNode{
+      id: :viewport,
+      content_type: :viewport,
+      rect: {0, 0, 20, 10},
+      children: [
+        FocusNode.new(:editor_area, {0, 0, 20, 10},
+          children: [
+            FocusNode.new(:window, {0, 0, 20, 10},
+              handler: InputRouterMouseProbe,
+              ref: :window,
+              children: [
+                FocusNode.new(:buffer_content, {0, 0, 20, 10},
+                  handler: InputRouterMouseProbe,
+                  ref: deep_ref,
+                  scrollable?: true
+                )
+              ]
+            )
+          ]
+        )
+      ]
+    })
+  end
+
+  defp overlapping_scroll_tree do
+    FocusTree.link_tree(%FocusNode{
+      id: :viewport,
+      content_type: :viewport,
+      rect: {0, 0, 20, 10},
+      children: [
+        FocusNode.new(:buffer_content, {0, 0, 20, 10},
+          handler: InputRouterMouseProbe,
+          ref: :editor,
+          scrollable?: true
+        ),
+        FocusNode.new(:file_tree, {0, 0, 8, 10},
+          handler: InputRouterMouseProbe,
+          ref: :tree,
+          scrollable?: true
+        )
+      ]
+    })
+  end
+
+  defp separator_gap_tree do
+    FocusTree.link_tree(%FocusNode{
+      id: :viewport,
+      content_type: :viewport,
+      rect: {0, 0, 20, 10},
+      children: [
+        FocusNode.new(:buffer_content, {0, 0, 10, 10},
+          handler: InputRouterMouseProbe,
+          ref: :left
+        ),
+        FocusNode.new(:buffer_content, {0, 11, 9, 10},
+          handler: InputRouterMouseProbe,
+          ref: :right
+        )
+      ]
+    })
   end
 
   # Flushes all messages from the process mailbox, returning the count.
@@ -102,6 +168,42 @@ defmodule MingaEditor.Input.RouterTest do
       # Should have moved down then up, back to line 0
       cursor = BufferServer.cursor(state.workspace.buffers.active)
       assert elem(cursor, 0) == 0
+    end
+  end
+
+  describe "dispatch_mouse/7" do
+    test "calls the deepest hit node handler first" do
+      state = %{base_state() | focus_tree: probe_tree(:deep)}
+
+      _state = Router.dispatch_mouse(state, 5, 5, :left, 0, :press, 1)
+
+      assert_receive {:mouse_probe, :buffer_content, :deep}
+      refute_receive {:mouse_probe, :window, :window}, 20
+    end
+
+    test "bubbles to ancestors when the child passes through" do
+      state = %{base_state() | focus_tree: probe_tree({:pass, :child})}
+
+      _state = Router.dispatch_mouse(state, 5, 5, :left, 0, :press, 1)
+
+      assert_receive {:mouse_probe, :buffer_content, {:pass, :child}}
+      assert_receive {:mouse_probe, :window, :window}
+    end
+
+    test "wheel events start at the deepest scrollable node under the cursor" do
+      state = %{base_state() | focus_tree: overlapping_scroll_tree()}
+
+      _state = Router.dispatch_mouse(state, 3, 3, :wheel_down, 0, :press, 1)
+
+      assert_receive {:mouse_probe, :file_tree, :tree}
+      refute_receive {:mouse_probe, :buffer_content, :editor}, 20
+    end
+
+    test "clicking a separator gap without a handler is a no-op" do
+      state = %{base_state() | focus_tree: separator_gap_tree()}
+
+      assert ^state = Router.dispatch_mouse(state, 3, 10, :left, 0, :press, 1)
+      refute_receive {:mouse_probe, _type, _ref}, 20
     end
   end
 

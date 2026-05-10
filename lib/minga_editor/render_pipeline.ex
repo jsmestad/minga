@@ -28,6 +28,7 @@ defmodule MingaEditor.RenderPipeline do
   is set to `:debug`. Attach custom handlers for histograms or alerting.
   """
 
+  alias MingaEditor.FocusTree
   alias MingaEditor.Layout
 
   alias MingaEditor.RenderPipeline.Compose
@@ -96,6 +97,9 @@ defmodule MingaEditor.RenderPipeline do
       Telemetry.span([:minga, :render, :stage], %{stage: :scroll}, fn ->
         Scroll.scroll_windows(input, layout)
       end)
+
+    # Scroll updates per-window viewports; rebuild the tree so overlay hit regions match what chrome renders.
+    input = %{input | focus_tree: FocusTree.from_state(input)}
 
     # Stage 4: Content (skips clean lines, updates window caches)
     {buffer_frames, cursor_info, input} =

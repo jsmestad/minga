@@ -102,6 +102,7 @@ defmodule MingaEditor.State do
             focus_stack: [],
             capabilities: %Capabilities{},
             layout: nil,
+            focus_tree: nil,
             last_cursor_line: nil,
             last_test_command: nil,
             pending_quit: nil,
@@ -137,6 +138,7 @@ defmodule MingaEditor.State do
           focus_stack: [module()],
           capabilities: Capabilities.t(),
           layout: MingaEditor.Layout.t() | nil,
+          focus_tree: MingaEditor.FocusTree.t() | nil,
           last_cursor_line: non_neg_integer() | nil,
           last_test_command: {String.t(), String.t()} | nil,
           pending_quit: :quit | :quit_all | nil,
@@ -194,6 +196,7 @@ defmodule MingaEditor.State do
       | workspace: %{ws | windows: render_output.workspace.windows},
         shell_state: render_output.shell_state,
         layout: render_output.layout,
+        focus_tree: render_output.focus_tree,
         caches: render_output.caches
     }
   end
@@ -209,7 +212,7 @@ defmodule MingaEditor.State do
   """
   @spec apply_renderer_writeback(t(), map()) :: t()
   def apply_renderer_writeback(%__MODULE__{} = state, %{caches: caches, layout: layout} = wb) do
-    state = %{state | caches: caches, layout: layout}
+    state = %{state | caches: caches, layout: layout, focus_tree: Map.get(wb, :focus_tree)}
     state = merge_renderer_windows_from_writeback(state, wb)
     merge_renderer_shell_from_writeback(state, wb)
   end
@@ -707,7 +710,7 @@ defmodule MingaEditor.State do
   def update_current_viewport(%__MODULE__{} = state, %Viewport{} = new_vp) do
     case active_window_struct(state) do
       nil -> state
-      %Window{id: win_id} -> update_window(state, win_id, fn w -> %{w | viewport: new_vp} end)
+      %Window{id: win_id} -> update_window(state, win_id, &Window.set_viewport(&1, new_vp))
     end
   end
 

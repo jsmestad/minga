@@ -3,6 +3,8 @@ defmodule MingaEditor.MouseTest do
 
   alias Minga.Buffer.Server, as: BufferServer
   alias MingaEditor
+  alias MingaEditor.Commands.Movement
+  alias MingaEditor.Layout
 
   # Content starts at row 1 because the tab bar occupies row 0.
   @content_row 1
@@ -48,6 +50,12 @@ defmodule MingaEditor.MouseTest do
   end
 
   defp state(editor), do: :sys.get_state(editor)
+
+  defp rightmost_window_layout(layout) do
+    Enum.max_by(layout.window_layouts, fn {_id, %{content: {_row, content_col, _w, _h}}} ->
+      content_col
+    end)
+  end
 
   describe "mouse scroll" do
     defp start_mouse_editor do
@@ -124,11 +132,34 @@ defmodule MingaEditor.MouseTest do
       assert line <= 29
     end
 
+    test "scroll over an inactive split window scrolls that window without moving focus" do
+      {editor, _buffer} = start_mouse_editor()
+
+      :sys.replace_state(editor, fn state -> Movement.execute(state, :split_vertical) end)
+      state = state(editor)
+      active_id = state.workspace.windows.active
+      layout = Layout.get(state)
+
+      {target_id, %{content: {row, col, _width, _height}}} =
+        rightmost_window_layout(layout)
+
+      assert target_id != active_id
+      target_before = Map.fetch!(state.workspace.windows.map, target_id).viewport.top
+      active_before = Map.fetch!(state.workspace.windows.map, active_id).viewport.top
+
+      send_mouse(editor, row + 1, col + 1, :wheel_down, :press)
+      state = state(editor)
+
+      assert state.workspace.windows.active == active_id
+      assert Map.fetch!(state.workspace.windows.map, active_id).viewport.top == active_before
+      assert Map.fetch!(state.workspace.windows.map, target_id).viewport.top > target_before
+    end
+
     test "scroll doesn't change mode" do
       {editor, _buffer} = start_mouse_editor()
       send_key(editor, ?i)
       send_mouse(editor, 0, 0, :wheel_down, :press)
-      assert Process.alive?(editor)
+      assert state(editor).workspace.editing.mode == :insert
     end
   end
 
@@ -168,6 +199,51 @@ defmodule MingaEditor.MouseTest do
       {line, _col} = BufferServer.cursor(buffer)
       # Verify cursor moved past the initial view (scrolled at least 4 lines).
       assert line >= 4
+    end
+
+    test "left click in an inactive split window focuses that window" do
+      {editor, _buffer} = start_mouse_editor()
+
+      :sys.replace_state(editor, fn state -> Movement.execute(state, :split_vertical) end)
+      state = state(editor)
+      active_id = state.workspace.windows.active
+      layout = Layout.get(state)
+
+      {target_id, %{content: {row, col, _width, _height}}} =
+        rightmost_window_layout(layout)
+
+      assert target_id != active_id
+
+      send_mouse(editor, row + 1, col + 1, :left, :press)
+      send_mouse(editor, row + 1, col + 1, :left, :release)
+
+      assert state(editor).workspace.windows.active == target_id
+    end
+
+    test "left click in a horizontally scrolled inactive split uses that window's scroll" do
+      {editor, buffer} = start_editor(String.duplicate("abcdefghijklmnopqrstuvwxyz", 2))
+
+      :sys.replace_state(editor, fn state -> Movement.execute(state, :split_vertical) end)
+      state = state(editor)
+      active_id = state.workspace.windows.active
+      layout = Layout.get(state)
+
+      {target_id, %{content: {row, col, _width, _height}}} =
+        rightmost_window_layout(layout)
+
+      assert target_id != active_id
+
+      send_mouse(editor, row, col + @gutter, :wheel_right, :press)
+      state = state(editor)
+      scrolled_left = Map.fetch!(state.workspace.windows.map, target_id).viewport.left
+      assert scrolled_left > 0
+      assert state.workspace.windows.active == active_id
+
+      send_mouse(editor, row, col + @gutter, :left, :press)
+
+      {_line, cursor_col} = BufferServer.cursor(buffer)
+      assert state(editor).workspace.windows.active == target_id
+      assert cursor_col == scrolled_left
     end
 
     test "left click on modeline row is ignored" do
@@ -212,6 +288,7 @@ defmodule MingaEditor.MouseTest do
       {line, col} = BufferServer.cursor(buffer)
       assert line == 1
       assert col == 2
+      assert state(editor).workspace.editing.mode == :normal
     end
 
     test "left click in command mode cancels command, returns to normal" do
@@ -222,6 +299,7 @@ defmodule MingaEditor.MouseTest do
       {line, col} = BufferServer.cursor(buffer)
       assert line == 1
       assert col == 2
+      assert state(editor).workspace.editing.mode == :normal
     end
 
     test "left click in insert mode moves cursor, stays functional" do

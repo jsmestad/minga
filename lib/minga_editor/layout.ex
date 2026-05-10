@@ -24,6 +24,7 @@ defmodule MingaEditor.Layout do
   """
 
   alias Minga.Buffer
+  alias MingaEditor.FocusTree
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.Window
   alias MingaEditor.WindowTree
@@ -103,14 +104,18 @@ defmodule MingaEditor.Layout do
   read `state.layout` downstream.
   """
   @spec put(EditorState.t() | map()) :: map()
-  def put(%{shell: shell} = state), do: %{state | layout: shell.compute_layout(state)}
+  def put(%{shell: shell} = state) do
+    layout = shell.compute_layout(state)
+    state = %{state | layout: layout}
+    %{state | focus_tree: FocusTree.from_state(state)}
+  end
 
   @doc """
   Invalidates the cached layout. Call when layout-affecting state changes
   (viewport resize, file tree toggle, agent panel toggle, window split/close).
   """
   @spec invalidate(EditorState.t()) :: EditorState.t()
-  def invalidate(state), do: %{state | layout: nil}
+  def invalidate(state), do: %{state | layout: nil, focus_tree: nil}
 
   @doc """
   Computes the complete layout for the current frame.

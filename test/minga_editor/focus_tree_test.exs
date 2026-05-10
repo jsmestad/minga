@@ -193,19 +193,63 @@ defmodule MingaEditor.FocusTreeTest do
   end
 
   describe "hit_path/3 — bubble dispatch" do
-    test "returns nodes from root to deepest" do
+    test "returns nodes from deepest to root" do
       tree = FocusTree.from_layout(single_window_layout())
       path = FocusTree.hit_path(tree, 5, 40)
 
       types = Enum.map(path, & &1.content_type)
-      assert types == [:viewport, :editor_area, :window, :buffer_content]
+      assert types == [:buffer_content, :window, :editor_area, :viewport]
     end
 
-    test "click on tab bar produces a one-deep bubble path under the viewport" do
+    test "click on tab bar bubbles from tab bar to viewport" do
       tree = FocusTree.from_layout(single_window_layout())
       path = FocusTree.hit_path(tree, 0, 5)
       types = Enum.map(path, & &1.content_type)
-      assert types == [:viewport, :tab_bar]
+      assert types == [:tab_bar, :viewport]
+    end
+
+    test "hit_test and hit_path agree on the deepest node" do
+      tree = FocusTree.from_layout(single_window_layout())
+      path = FocusTree.hit_path(tree, 5, 40)
+
+      assert List.first(path) == FocusTree.hit_test(tree, 5, 40)
+      assert Enum.all?(path, &TreeNode.contains?(&1, 5, 40))
+    end
+  end
+
+  describe "node references" do
+    test "children carry parent and sibling references" do
+      tree = FocusTree.from_layout(split_layout())
+      editor = Enum.find(tree.children, &(&1.content_type == :editor_area))
+      [left, right] = editor.children
+
+      assert editor.parent == :viewport
+      assert left.parent == :editor_area
+      assert left.previous_sibling == nil
+      assert left.next_sibling == right.id
+      assert right.previous_sibling == left.id
+      assert right.next_sibling == nil
+    end
+  end
+
+  describe "scroll_path/3" do
+    test "starts at the deepest scrollable node under the cursor" do
+      tree = FocusTree.from_layout(single_window_layout())
+      path = FocusTree.scroll_path(tree, 5, 40)
+
+      assert path |> List.first() |> Map.fetch!(:content_type) == :buffer_content
+
+      assert Enum.map(path, & &1.content_type) == [
+               :buffer_content,
+               :window,
+               :editor_area,
+               :viewport
+             ]
+    end
+
+    test "returns no route for non-scrollable chrome" do
+      tree = FocusTree.from_layout(single_window_layout())
+      assert FocusTree.scroll_path(tree, 0, 5) == []
     end
   end
 

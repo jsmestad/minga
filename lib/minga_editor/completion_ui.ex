@@ -53,29 +53,26 @@ defmodule MingaEditor.CompletionUI do
     end
   end
 
+  @doc "Returns the screen rect for the visible completion menu, or nil when it is empty."
+  @spec menu_rect(Completion.t() | nil, render_opts()) :: MingaEditor.Layout.rect() | nil
+  def menu_rect(nil, _opts), do: nil
+
+  def menu_rect(%Completion{} = completion, opts) do
+    {visible, _selected_offset} = Completion.visible_items(completion)
+
+    case menu_geometry(visible, opts) do
+      nil -> nil
+      %{row: row, col: col, width: width, height: height} -> {row, col, width, height}
+    end
+  end
+
   @spec do_render([Completion.item()], non_neg_integer(), render_opts(), map()) ::
           [DisplayList.draw()]
   defp do_render(items, selected_offset, opts, theme) do
-    item_count = min(length(items), @max_rows)
+    %{row: start_row, col: start_col, width: popup_width, height: item_count} =
+      menu_geometry(items, opts)
+
     visible_items = Enum.take(items, item_count)
-
-    # Calculate popup width based on longest label
-    label_widths = Enum.map(visible_items, fn item -> String.length(item.label) + 4 end)
-    popup_width = label_widths |> Enum.max() |> max(@min_width) |> min(@max_width)
-    popup_width = min(popup_width, opts.viewport_cols - opts.cursor_col)
-
-    # Position: below cursor if room, above if not
-    space_below = opts.viewport_rows - opts.cursor_row - 2
-    space_above = opts.cursor_row
-
-    {start_row, _direction} =
-      cond do
-        space_below >= item_count -> {opts.cursor_row + 1, :below}
-        space_above >= item_count -> {opts.cursor_row - item_count, :above}
-        true -> {opts.cursor_row + 1, :below}
-      end
-
-    start_col = min(opts.cursor_col, max(0, opts.viewport_cols - popup_width))
 
     # Theme colors (reuse picker colors)
     pc = theme.picker
@@ -104,6 +101,50 @@ defmodule MingaEditor.CompletionUI do
         []
       end
     end)
+  end
+
+  @spec menu_geometry([Completion.item()], render_opts()) ::
+          %{
+            row: non_neg_integer(),
+            col: non_neg_integer(),
+            width: pos_integer(),
+            height: pos_integer()
+          }
+          | nil
+  defp menu_geometry([], _opts), do: nil
+
+  defp menu_geometry(items, opts) do
+    item_count = min(length(items), @max_rows)
+    visible_items = Enum.take(items, item_count)
+    label_widths = Enum.map(visible_items, fn item -> String.length(item.label) + 4 end)
+    popup_width = label_widths |> Enum.max() |> max(@min_width) |> min(@max_width)
+    popup_width = min(popup_width, max(opts.viewport_cols - opts.cursor_col, 1))
+    start_row = menu_start_row(opts.cursor_row, opts.viewport_rows, item_count)
+    start_col = min(opts.cursor_col, max(0, opts.viewport_cols - popup_width))
+    %{row: start_row, col: start_col, width: popup_width, height: item_count}
+  end
+
+  @spec menu_start_row(non_neg_integer(), non_neg_integer(), pos_integer()) :: non_neg_integer()
+  defp menu_start_row(cursor_row, viewport_rows, item_count) do
+    space_below = viewport_rows - cursor_row - 2
+    space_above = cursor_row
+    choose_menu_start_row(cursor_row, item_count, space_below, space_above)
+  end
+
+  @spec choose_menu_start_row(non_neg_integer(), pos_integer(), integer(), non_neg_integer()) ::
+          non_neg_integer()
+  defp choose_menu_start_row(cursor_row, item_count, space_below, _space_above)
+       when space_below >= item_count do
+    cursor_row + 1
+  end
+
+  defp choose_menu_start_row(cursor_row, item_count, _space_below, space_above)
+       when space_above >= item_count do
+    cursor_row - item_count
+  end
+
+  defp choose_menu_start_row(cursor_row, _item_count, _space_below, _space_above) do
+    cursor_row + 1
   end
 
   @spec render_completion_item(

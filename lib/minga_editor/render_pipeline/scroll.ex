@@ -150,8 +150,9 @@ defmodule MingaEditor.RenderPipeline.Scroll do
 
       {:ok, scroll} ->
         updated_window =
-          Window.detect_invalidation(
-            window,
+          window
+          |> Window.set_viewport(scroll.viewport)
+          |> Window.detect_invalidation(
             scroll.viewport.top,
             scroll.gutter_w,
             scroll.snapshot.line_count,
@@ -218,15 +219,17 @@ defmodule MingaEditor.RenderPipeline.Scroll do
         FoldMap.buffer_to_visible(fold_map, cursor_line)
       end
 
-    # Vertical-only scroll: preserve horizontal scroll position (viewport.left)
-    # so that horizontal scroll from cursor tracking or mouse wheel persists.
-    # Passing cursor_col=0 would reset left to 0 via adjust_left.
-    # TODO: replace save/restore with Viewport.scroll_to_cursor_vertical/3
-    # that only modifies `top`. The same trap exists in mouse.ex:934 and
-    # content.ex:470 where {cursor_line, 0} silently resets left.
-    saved_left = viewport.left
-    viewport = Viewport.scroll_to_cursor(viewport, {visible_cursor_line, 0}, scroll_margin)
-    viewport = %{viewport | left: saved_left}
+    # Vertical-only scroll for the active window. Inactive windows preserve their
+    # own viewport so hover-wheel scrolling a split does not snap back to the
+    # inactive window's stored cursor during the render that follows the mouse event.
+    viewport =
+      maybe_scroll_active_window_to_cursor(
+        viewport,
+        visible_cursor_line,
+        scroll_margin,
+        is_active
+      )
+
     visible_rows = Viewport.content_rows(viewport)
 
     # Map viewport visible range back to buffer lines
@@ -297,7 +300,11 @@ defmodule MingaEditor.RenderPipeline.Scroll do
     # so the cursor triggers scroll when it reaches the content edge,
     # not the full viewport edge.
     viewport =
-      scroll_horizontal(viewport, cursor_line, cursor_col, wrap_on, content_w, scroll_margin)
+      if is_active do
+        scroll_horizontal(viewport, cursor_line, cursor_col, wrap_on, content_w, scroll_margin)
+      else
+        viewport
+      end
 
     # Substitution preview (active window only)
     {lines, preview_matches} =
@@ -328,6 +335,28 @@ defmodule MingaEditor.RenderPipeline.Scroll do
       buf_version: snapshot.version,
       visible_line_map: visible_line_map
     }
+  end
+
+  @spec maybe_scroll_active_window_to_cursor(
+          Viewport.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          boolean()
+        ) :: Viewport.t()
+  defp maybe_scroll_active_window_to_cursor(
+         viewport,
+         _visible_cursor_line,
+         _scroll_margin,
+         false
+       ),
+       do: viewport
+
+  defp maybe_scroll_active_window_to_cursor(viewport, visible_cursor_line, scroll_margin, true) do
+    saved_left = viewport.left
+
+    viewport
+    |> Viewport.scroll_to_cursor({visible_cursor_line, 0}, scroll_margin)
+    |> Map.put(:left, saved_left)
   end
 
   @spec fetch_decorations(pid()) :: Decorations.t()

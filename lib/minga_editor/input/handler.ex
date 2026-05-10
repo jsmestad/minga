@@ -61,13 +61,9 @@ defmodule MingaEditor.Input.Handler do
             ) :: result()
 
   @doc """
-  Processes a mouse event.
+  Processes a mouse event routed to this handler by the focus tree.
 
-  Returns `{:handled, state}` if this handler consumed the mouse event,
-  or `{:passthrough, state}` to forward it to the next handler.
-
-  The default implementation passes through all mouse events. Override
-  this callback to intercept mouse events for your UI region.
+  Returns `{:handled, state}` if this handler consumed the mouse event, or `{:passthrough, state}` to bubble to the routed node's ancestors.
   """
   @callback handle_mouse(
               handler_state(),
@@ -79,5 +75,21 @@ defmodule MingaEditor.Input.Handler do
               click_count :: pos_integer()
             ) :: result()
 
-  @optional_callbacks [handle_mouse: 7]
+  @doc """
+  Processes a mouse event with the focus-tree node that received it.
+
+  Handlers that need structural context, such as the routed file-tree rect or picker backdrop node, should implement this callback. Handlers that do not need the node can keep implementing `handle_mouse/7`.
+  """
+  @callback handle_mouse_at_node(
+              handler_state(),
+              MingaEditor.FocusTree.Node.t(),
+              row :: integer(),
+              col :: integer(),
+              button :: atom(),
+              modifiers :: non_neg_integer(),
+              event_type :: atom(),
+              click_count :: pos_integer()
+            ) :: result()
+
+  @optional_callbacks [handle_mouse: 7, handle_mouse_at_node: 8]
 end

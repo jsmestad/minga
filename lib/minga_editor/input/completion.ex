@@ -15,12 +15,12 @@ defmodule MingaEditor.Input.Completion do
 
   import Bitwise
 
-  alias Minga.Buffer
   alias Minga.Editing.Completion
   alias MingaEditor.CompletionHandling
+  alias MingaEditor.FocusTree
+  alias MingaEditor.FocusTree.Node, as: FocusNode
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.ModalOverlay
-  alias MingaEditor.Viewport
 
   @ctrl MingaEditor.Input.mod_ctrl()
   @escape 27
@@ -28,8 +28,6 @@ defmodule MingaEditor.Input.Completion do
   @enter 13
   @arrow_up 0x415B1B
   @arrow_down 0x425B1B
-
-  @max_rows 10
 
   @impl true
   @spec handle_key(state(), non_neg_integer(), non_neg_integer()) ::
@@ -62,11 +60,34 @@ defmodule MingaEditor.Input.Completion do
           pos_integer()
         ) :: MingaEditor.Input.Handler.result()
 
-  # Completion popup active: intercept scroll and clicks
-  def handle_mouse(
+  def handle_mouse(state, row, col, button, mods, event_type, click_count) do
+    case routed_completion_node(state, row, col, button) do
+      %FocusNode{} = node ->
+        handle_mouse_at_node(state, node, row, col, button, mods, event_type, click_count)
+
+      nil ->
+        {:passthrough, state}
+    end
+  end
+
+  @impl true
+  @spec handle_mouse_at_node(
+          state(),
+          FocusNode.t(),
+          integer(),
+          integer(),
+          atom(),
+          non_neg_integer(),
+          atom(),
+          pos_integer()
+        ) :: MingaEditor.Input.Handler.result()
+
+  # Completion popup active: intercept scroll and clicks routed by the focus tree.
+  def handle_mouse_at_node(
         %{workspace: %{editing: %{mode: :insert}}} = state,
+        %FocusNode{} = node,
         row,
-        col,
+        _col,
         button,
         _mods,
         :press,
@@ -74,103 +95,77 @@ defmodule MingaEditor.Input.Completion do
       ) do
     case ModalOverlay.completion(state) do
       %Completion{} = completion ->
-        do_handle_mouse(state, completion, row, col, button)
+        do_handle_mouse(state, node, completion, row, button)
 
       _ ->
         {:passthrough, state}
     end
   end
 
-  def handle_mouse(state, _row, _col, _button, _mods, _event_type, _cc) do
+  def handle_mouse_at_node(state, _node, _row, _col, _button, _mods, _event_type, _cc) do
     {:passthrough, state}
   end
 
-  @spec do_handle_mouse(EditorState.t(), Completion.t(), integer(), integer(), atom()) ::
+  @spec do_handle_mouse(EditorState.t(), FocusNode.t(), Completion.t(), integer(), atom()) ::
           MingaEditor.Input.Handler.result()
-  defp do_handle_mouse(state, completion, row, col, button) do
-    case button do
-      :wheel_down ->
-        {:handled, ModalOverlay.update_completion(state, &Completion.move_down/1)}
+  defp do_handle_mouse(state, _node, _completion, _row, :wheel_down) do
+    {:handled, ModalOverlay.update_completion(state, &Completion.move_down/1)}
+  end
 
-      :wheel_up ->
-        {:handled, ModalOverlay.update_completion(state, &Completion.move_up/1)}
+  defp do_handle_mouse(state, _node, _completion, _row, :wheel_up) do
+    {:handled, ModalOverlay.update_completion(state, &Completion.move_up/1)}
+  end
 
-      :left ->
-        handle_completion_click(state, completion, row, col)
+  defp do_handle_mouse(state, node, completion, row, :left) do
+    handle_completion_click(state, node, completion, row)
+  end
 
-      _ ->
-        {:passthrough, state}
-    end
+  defp do_handle_mouse(state, _node, _completion, _row, _button) do
+    {:passthrough, state}
   end
 
   # ── Completion click ─────────────────────────────────────────────────────
 
-  @spec handle_completion_click(EditorState.t(), Completion.t(), integer(), integer()) ::
-          MingaEditor.Input.Handler.result()
-  defp handle_completion_click(state, completion, row, col) do
-    {visible, _selected_offset} = Completion.visible_items(completion)
-    item_count = min(length(visible), @max_rows)
+  @spec routed_completion_node(EditorState.t(), integer(), integer(), atom()) ::
+          FocusNode.t() | nil
+  defp routed_completion_node(state, row, col, button) do
+    tree = FocusTree.from_state(state)
 
-    # Popup position: same logic as CompletionUI
-    {cursor_row, cursor_col} = cursor_screen_pos(state)
-    space_below = state.terminal_viewport.rows - cursor_row - 2
+    path =
+      if button in [:wheel_down, :wheel_up],
+        do: FocusTree.scroll_path(tree, row, col),
+        else: FocusTree.hit_path(tree, row, col)
 
-    popup_start_row =
-      if space_below >= item_count do
-        cursor_row + 1
-      else
-        cursor_row - item_count
-      end
-
-    # Check popup width for column hit-test
-    label_widths =
-      Enum.map(Enum.take(visible, item_count), fn item -> String.length(item.label) + 4 end)
-
-    popup_width = label_widths |> Enum.max(fn -> 20 end) |> max(20) |> min(50)
-    popup_width = min(popup_width, state.terminal_viewport.cols - cursor_col)
-    start_col = min(cursor_col, max(0, state.terminal_viewport.cols - popup_width))
-
-    clicked_idx = row - popup_start_row
-
-    if clicked_idx >= 0 and clicked_idx < item_count and
-         col >= start_col and col < start_col + popup_width do
-      # Navigate to the clicked item and accept it
-      target_item = Enum.at(visible, clicked_idx)
-
-      if target_item do
-        # Set selection to the clicked index, then accept
-        adjusted = set_completion_selected(completion, clicked_idx)
-        new_state = MingaEditor.do_accept_completion(state, adjusted)
-        {:handled, new_state}
-      else
-        {:handled, state}
-      end
-    else
-      # Click outside popup: dismiss completion
-      {:handled, MingaEditor.do_dismiss_completion(state)}
-    end
+    Enum.find(path, &(&1.handler == __MODULE__))
   end
 
-  @spec cursor_screen_pos(EditorState.t()) :: {non_neg_integer(), non_neg_integer()}
-  defp cursor_screen_pos(state) do
-    buf = state.workspace.buffers.active
+  @spec handle_completion_click(EditorState.t(), FocusNode.t(), Completion.t(), integer()) ::
+          MingaEditor.Input.Handler.result()
+  defp handle_completion_click(
+         state,
+         %FocusNode{content_type: :completion_backdrop},
+         _completion,
+         _row
+       ) do
+    {:handled, MingaEditor.do_dismiss_completion(state)}
+  end
 
-    if buf do
-      {line, col} = Buffer.cursor(buf)
-      screen_row = line - state.terminal_viewport.top
-      total_lines = Buffer.line_count(buf)
+  defp handle_completion_click(
+         state,
+         %FocusNode{rect: {start_row, _start_col, _width, _item_count}},
+         completion,
+         row
+       ) do
+    clicked_idx = row - start_row
+    target_item = completion |> Completion.visible_items() |> elem(0) |> Enum.at(clicked_idx)
 
-      number_w =
-        if state.line_numbers == :none,
-          do: 0,
-          else: Viewport.gutter_width(total_lines)
+    case target_item do
+      nil ->
+        {:handled, state}
 
-      gutter_w = MingaEditor.Renderer.Gutter.total_width(number_w)
-      screen_col = col + gutter_w - state.terminal_viewport.left
-
-      {max(screen_row, 0), max(screen_col, 0)}
-    else
-      {0, 0}
+      _item ->
+        adjusted = set_completion_selected(completion, clicked_idx)
+        {:handled, MingaEditor.do_accept_completion(state, adjusted)}
     end
   end
 

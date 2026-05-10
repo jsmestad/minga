@@ -23,6 +23,7 @@ defmodule MingaEditor.Input.CUA.Dispatch do
 
   alias Minga.Buffer
   alias MingaEditor.Commands
+  alias MingaEditor.FocusTree.Node, as: FocusNode
   alias MingaEditor.Mouse
   alias MingaEditor.State, as: EditorState
 
@@ -65,6 +66,22 @@ defmodule MingaEditor.Input.CUA.Dispatch do
         ) :: MingaEditor.Input.Handler.result()
   def handle_mouse(state, row, col, button, mods, event_type, click_count) do
     new_state = Mouse.handle(state, row, col, button, mods, event_type, click_count)
+    {:handled, new_state}
+  end
+
+  @impl true
+  @spec handle_mouse_at_node(
+          EditorState.t(),
+          FocusNode.t(),
+          integer(),
+          integer(),
+          atom(),
+          non_neg_integer(),
+          atom(),
+          pos_integer()
+        ) :: MingaEditor.Input.Handler.result()
+  def handle_mouse_at_node(state, node, row, col, button, mods, event_type, click_count) do
+    new_state = Mouse.handle_at_node(state, node, row, col, button, mods, event_type, click_count)
     {:handled, new_state}
   end
 end
