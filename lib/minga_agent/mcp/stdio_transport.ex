@@ -93,35 +93,47 @@ defmodule MingaAgent.MCP.StdioTransport do
     :exit, reason -> {:error, reason}
   end
 
-  @spec await_response(port(), term(), timeout()) :: {:ok, map()} | {:error, term()}
-  defp await_response(port, id, timeout), do: await_response(port, id, timeout, "")
+  @typep deadline :: integer() | :infinity
 
-  @spec await_response(port(), term(), timeout(), binary()) :: {:ok, map()} | {:error, term()}
-  defp await_response(port, id, timeout, buffered) do
+  @spec await_response(port(), term(), timeout()) :: {:ok, map()} | {:error, term()}
+  defp await_response(port, id, :infinity), do: await_response_until(port, id, :infinity, "")
+
+  defp await_response(port, id, timeout) when is_integer(timeout) and timeout >= 0 do
+    deadline = System.monotonic_time(:millisecond) + timeout
+    await_response_until(port, id, deadline, "")
+  end
+
+  @spec await_response_until(port(), term(), deadline(), binary()) ::
+          {:ok, map()} | {:error, term()}
+  defp await_response_until(port, id, deadline, buffered) do
     receive do
       {^port, {:data, {:noeol, chunk}}} ->
-        await_response(port, id, timeout, buffered <> chunk)
+        await_response_until(port, id, deadline, buffered <> chunk)
 
       {^port, {:data, {:eol, line}}} ->
-        handle_line(port, id, buffered <> line, timeout)
+        handle_line(port, id, buffered <> line, deadline)
 
       {^port, {:data, line}} when is_binary(line) ->
-        handle_line(port, id, buffered <> line, timeout)
+        handle_line(port, id, buffered <> line, deadline)
 
       {^port, {:exit_status, status}} ->
         {:error, {:exit_status, status}}
     after
-      timeout -> {:error, :timeout}
+      remaining_ms(deadline) -> {:error, :timeout}
     end
   end
 
-  @spec handle_line(port(), term(), binary(), timeout()) :: {:ok, map()} | {:error, term()}
-  defp handle_line(port, id, line, timeout) do
+  @spec handle_line(port(), term(), binary(), deadline()) :: {:ok, map()} | {:error, term()}
+  defp handle_line(port, id, line, deadline) do
     case Jason.decode(line) do
       {:ok, %{"id" => ^id, "result" => result}} -> {:ok, result}
       {:ok, %{"id" => ^id, "error" => error}} -> {:error, error}
-      {:ok, _notification_or_other_response} -> await_response(port, id, timeout)
+      {:ok, _notification_or_other_response} -> await_response_until(port, id, deadline, "")
       {:error, reason} -> {:error, {:invalid_json, reason}}
     end
   end
+
+  @spec remaining_ms(deadline()) :: non_neg_integer() | :infinity
+  defp remaining_ms(:infinity), do: :infinity
+  defp remaining_ms(deadline), do: max(deadline - System.monotonic_time(:millisecond), 0)
 end

@@ -66,6 +66,23 @@ defmodule MingaAgent.MCP.ClientTest do
     assert_receive {:mcp_tool_call, "echo-text", %{"text" => "hi"}}
   end
 
+  test "stops transport when handshake fails" do
+    assert {:error, :list_failed} =
+             Client.start(
+               server_config: server_config(),
+               transport: FakeTransport,
+               transport_opts: [
+                 tools: [tool_def()],
+                 request_errors: %{"tools/list" => :list_failed},
+                 test_pid: self()
+               ]
+             )
+
+    assert_receive {:mcp_transport_started, transport}
+    assert_receive {:mcp_transport_stopped, ^transport}
+    refute Process.alive?(transport)
+  end
+
   test "request exit error notifies owner and makes future calls fail" do
     {:ok, client} =
       Client.start_link(

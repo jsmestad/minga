@@ -24,7 +24,7 @@ defmodule MingaAgent.MCP.FakeTransport do
 
   @impl MingaAgent.MCP.Transport
   def stop(pid) when is_pid(pid) do
-    GenServer.stop(pid, :normal, 1_000)
+    GenServer.call(pid, :stop, 1_000)
     :ok
   catch
     :exit, _ -> :ok
@@ -58,12 +58,20 @@ defmodule MingaAgent.MCP.FakeTransport do
   @impl GenServer
   def handle_call({:request, %{"method" => "initialize"} = message}, _from, state) do
     maybe_report(state, {:mcp_request, message})
-    {:reply, {:ok, %{"protocolVersion" => "2024-11-05", "capabilities" => %{}}}, state}
+
+    case request_error(state, "initialize") do
+      {:error, reason} -> {:reply, {:error, reason}, state}
+      :none -> {:reply, {:ok, %{"protocolVersion" => "2024-11-05", "capabilities" => %{}}}, state}
+    end
   end
 
   def handle_call({:request, %{"method" => "tools/list"} = message}, _from, state) do
     maybe_report(state, {:mcp_request, message})
-    {:reply, {:ok, %{"tools" => state.tools}}, state}
+
+    case request_error(state, "tools/list") do
+      {:error, reason} -> {:reply, {:error, reason}, state}
+      :none -> {:reply, {:ok, %{"tools" => state.tools}}, state}
+    end
   end
 
   def handle_call(
@@ -76,11 +84,11 @@ defmodule MingaAgent.MCP.FakeTransport do
     args = params["arguments"] || %{}
     maybe_report(state, {:mcp_tool_call, name, args})
 
-    case Map.fetch(state.request_errors, name) do
-      {:ok, reason} ->
+    case request_error(state, name) do
+      {:error, reason} ->
         {:reply, {:error, reason}, state}
 
-      :error ->
+      :none ->
         result =
           Map.get(state.call_results, name, %{
             "content" => [%{"type" => "text", "text" => "called #{name}"}]
@@ -98,6 +106,18 @@ defmodule MingaAgent.MCP.FakeTransport do
   def handle_call(:crash, _from, state) do
     send(state.owner, {:mcp_fake_transport_exit, self(), :boom})
     {:reply, :ok, state}
+  end
+
+  def handle_call(:stop, _from, state) do
+    maybe_report(state, {:mcp_transport_stopped, self()})
+    {:stop, :normal, :ok, state}
+  end
+
+  defp request_error(state, name) do
+    case Map.fetch(state.request_errors, name) do
+      {:ok, reason} -> {:error, reason}
+      :error -> :none
+    end
   end
 
   defp maybe_report(%{test_pid: nil}, _message), do: :ok

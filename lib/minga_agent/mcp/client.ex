@@ -80,25 +80,18 @@ defmodule MingaAgent.MCP.Client do
   @impl GenServer
   @spec init(keyword()) :: {:ok, state()} | {:stop, term()}
   def init(opts) do
-    with {:ok, config} <- normalize_config(opts),
-         transport_mod = Keyword.get(opts, :transport, StdioTransport),
-         transport_opts = Keyword.get(opts, :transport_opts, []),
-         {:ok, transport} <- transport_mod.start(config, self(), transport_opts),
-         request_timeout = Keyword.get(opts, :request_timeout, @default_timeout),
-         {:ok, tools, next_id} <-
-           initialize_and_list(transport_mod, transport, config, request_timeout) do
-      state = %__MODULE__{
-        config: config,
-        transport_mod: transport_mod,
-        transport: transport,
-        tools: tools,
-        next_id: next_id,
-        notify_pid: Keyword.get(opts, :notify_pid),
-        alive: true,
-        request_timeout: request_timeout
-      }
+    with {:ok, config} <- normalize_config(opts) do
+      transport_mod = Keyword.get(opts, :transport, StdioTransport)
+      transport_opts = Keyword.get(opts, :transport_opts, [])
+      request_timeout = Keyword.get(opts, :request_timeout, @default_timeout)
 
-      {:ok, state}
+      case transport_mod.start(config, self(), transport_opts) do
+        {:ok, transport} ->
+          init_started_transport(opts, config, transport_mod, transport, request_timeout)
+
+        {:error, reason} ->
+          {:stop, reason}
+      end
     else
       {:error, reason} -> {:stop, reason}
     end
@@ -158,6 +151,30 @@ defmodule MingaAgent.MCP.Client do
     :ok
   catch
     :exit, _ -> :ok
+  end
+
+  @spec init_started_transport(keyword(), ServerConfig.t(), module(), term(), timeout()) ::
+          {:ok, state()} | {:stop, term()}
+  defp init_started_transport(opts, config, transport_mod, transport, request_timeout) do
+    case initialize_and_list(transport_mod, transport, config, request_timeout) do
+      {:ok, tools, next_id} ->
+        state = %__MODULE__{
+          config: config,
+          transport_mod: transport_mod,
+          transport: transport,
+          tools: tools,
+          next_id: next_id,
+          notify_pid: Keyword.get(opts, :notify_pid),
+          alive: true,
+          request_timeout: request_timeout
+        }
+
+        {:ok, state}
+
+      {:error, reason} ->
+        stop_transport(transport_mod, transport)
+        {:stop, reason}
+    end
   end
 
   @spec normalize_config(keyword()) :: {:ok, ServerConfig.t()} | {:error, String.t()}
@@ -221,6 +238,14 @@ defmodule MingaAgent.MCP.Client do
       parameter_schema: tool.input_schema,
       callback: fn args -> call_tool(client, original_name, args || %{}) end
     )
+  end
+
+  @spec stop_transport(module(), term()) :: :ok
+  defp stop_transport(transport_mod, transport) do
+    transport_mod.stop(transport)
+    :ok
+  catch
+    :exit, _ -> :ok
   end
 
   @spec maybe_mark_transport_down(state(), term()) :: state()
