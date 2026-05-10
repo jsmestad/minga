@@ -43,6 +43,8 @@ defmodule MingaAgent.Providers.Native do
   alias MingaAgent.Hooks.Result, as: HookResult
   alias MingaAgent.Instructions
   alias MingaAgent.InternalState
+  alias MingaAgent.MCP.Client, as: MCPClient
+  alias MingaAgent.MCP.ServerConfig, as: MCPServerConfig
   alias MingaAgent.Memory
   alias MingaAgent.ModelCatalog
   alias MingaAgent.ModelLimits
@@ -107,7 +109,7 @@ defmodule MingaAgent.Providers.Native do
             provider_pid: pid(),
             model: String.t(),
             config: MingaAgent.Config.t(),
-            tools: [ReqLLM.Tool.t()],
+            tools: [term()],
             thinking_level: String.t(),
             max_tokens: pos_integer(),
             max_retries: non_neg_integer(),
@@ -137,7 +139,7 @@ defmodule MingaAgent.Providers.Native do
           model: String.t(),
           config: AgentConfig.t(),
           context: Context.t(),
-          tools: [ReqLLM.Tool.t()],
+          tools: [term()],
           project_root: String.t(),
           thinking_level: String.t(),
           max_tokens: pos_integer(),
@@ -154,7 +156,9 @@ defmodule MingaAgent.Providers.Native do
           max_cost: float() | nil,
           session_cost: float(),
           fork_store: pid() | nil,
-          changeset: pid() | nil
+          changeset: pid() | nil,
+          mcp_client: pid() | nil,
+          mcp_tool_names: [String.t()]
         }
 
   # ── Provider callbacks ──────────────────────────────────────────────────────
@@ -282,8 +286,9 @@ defmodule MingaAgent.Providers.Native do
       Keyword.get(opts, :tools) ||
         Tools.all(project_root: project_root, fork_store: fork_store, changeset: changeset)
 
+    {mcp_client, mcp_tools, mcp_tool_names} = start_mcp_client(opts, config, subscriber)
     internal_tools = build_internal_tools(provider_pid)
-    tools = base_tools ++ internal_tools
+    tools = base_tools ++ mcp_tools ++ internal_tools
     system_prompt = build_system_prompt(project_root)
     context = Context.new([Context.system(system_prompt)])
 
@@ -314,7 +319,9 @@ defmodule MingaAgent.Providers.Native do
       max_cost: max_cost,
       session_cost: 0.0,
       fork_store: fork_store,
-      changeset: changeset
+      changeset: changeset,
+      mcp_client: mcp_client,
+      mcp_tool_names: mcp_tool_names
     }
 
     Minga.Log.info(:agent, "[Agent.Native] started with model=#{model} root=#{project_root}")
@@ -705,6 +712,24 @@ defmodule MingaAgent.Providers.Native do
     {:noreply, %{state | changeset: nil}}
   end
 
+  def handle_info({:mcp_client_down, pid, server_name, reason}, %{mcp_client: pid} = state)
+      when is_pid(pid) do
+    message =
+      "MCP server #{server_name} stopped: #{inspect(reason)}. Built-in tools remain available."
+
+    Minga.Log.warning(:agent, "[Agent.Native] #{message}")
+    notify(state.subscriber, %Event.Error{message: message})
+    {:noreply, remove_mcp_tools(state)}
+  end
+
+  def handle_info({:DOWN, _ref, :process, pid, reason}, %{mcp_client: pid} = state)
+      when is_pid(pid) do
+    message = "MCP client crashed: #{inspect(reason)}. Built-in tools remain available."
+    Minga.Log.warning(:agent, "[Agent.Native] #{message}")
+    notify(state.subscriber, %Event.Error{message: message})
+    {:noreply, remove_mcp_tools(state)}
+  end
+
   def handle_info({:DOWN, _ref, :process, _pid, _reason}, state) do
     {:noreply, state}
   end
@@ -717,9 +742,77 @@ defmodule MingaAgent.Providers.Native do
   def terminate(reason, state) do
     cleanup_fork_store(state.fork_store)
     cleanup_changeset(state.changeset, reason)
+    cleanup_mcp_client(state.mcp_client)
     :ok
   catch
     :exit, _ -> :ok
+  end
+
+  @spec start_mcp_client(keyword(), AgentConfig.t(), pid()) ::
+          {pid() | nil, [term()], [String.t()]}
+  defp start_mcp_client(opts, config, subscriber) do
+    server_config = Keyword.get(opts, :mcp_server, config.mcp_server)
+
+    case MCPServerConfig.normalize(server_config) do
+      {:ok, nil} ->
+        {nil, [], []}
+
+      {:ok, %MCPServerConfig{} = normalized} ->
+        do_start_mcp_client(opts, normalized, subscriber)
+
+      {:error, reason} ->
+        notify(subscriber, %Event.Error{message: "MCP config error: #{reason}"})
+        {nil, [], []}
+    end
+  end
+
+  @spec do_start_mcp_client(keyword(), MCPServerConfig.t(), pid()) ::
+          {pid() | nil, [term()], [String.t()]}
+  defp do_start_mcp_client(opts, server_config, subscriber) do
+    client_opts = [
+      server_config: server_config,
+      transport: Keyword.get(opts, :mcp_transport, MingaAgent.MCP.StdioTransport),
+      transport_opts: Keyword.get(opts, :mcp_transport_opts, []),
+      notify_pid: self(),
+      request_timeout: Keyword.get(opts, :mcp_request_timeout, 5_000)
+    ]
+
+    case MCPClient.start(client_opts) do
+      {:ok, client} ->
+        Process.monitor(client)
+
+        case MCPClient.reqllm_tools(client) do
+          {:ok, tools} ->
+            tool_names = Enum.map(tools, & &1.name)
+            {client, tools, tool_names}
+
+          {:error, reason} ->
+            cleanup_mcp_client(client)
+            notify_mcp_start_failure(subscriber, server_config.name, reason)
+            {nil, [], []}
+        end
+
+      {:error, reason} ->
+        notify_mcp_start_failure(subscriber, server_config.name, reason)
+        {nil, [], []}
+    end
+  end
+
+  @spec notify_mcp_start_failure(pid(), String.t(), term()) :: :ok
+  defp notify_mcp_start_failure(subscriber, server_name, reason) do
+    message =
+      "MCP server #{server_name} failed to start: #{format_error(reason)}. Built-in tools remain available."
+
+    Minga.Log.warning(:agent, "[Agent.Native] #{message}")
+    notify(subscriber, %Event.Error{message: message})
+    :ok
+  end
+
+  @spec remove_mcp_tools(map()) :: map()
+  defp remove_mcp_tools(state) do
+    cleanup_mcp_client(state.mcp_client)
+    tools = Enum.reject(state.tools, &(&1.name in state.mcp_tool_names))
+    %{state | tools: tools, mcp_client: nil, mcp_tool_names: []}
   end
 
   # ── Terminate cleanup ──────────────────────────────────────────────────────
@@ -761,6 +854,16 @@ defmodule MingaAgent.Providers.Native do
     end
 
     :ok
+  end
+
+  @spec cleanup_mcp_client(pid() | nil) :: :ok
+  defp cleanup_mcp_client(nil), do: :ok
+
+  defp cleanup_mcp_client(pid) when is_pid(pid) do
+    GenServer.stop(pid, :normal, 1_000)
+    :ok
+  catch
+    :exit, _ -> :ok
   end
 
   @spec merge_changeset(pid()) :: :ok
@@ -2077,6 +2180,7 @@ defmodule MingaAgent.Providers.Native do
   @spec format_error(term()) :: String.t()
   defp format_error(reason) when is_binary(reason), do: reason
   defp format_error(%{message: msg}) when is_binary(msg), do: msg
+  defp format_error(%{"message" => msg}) when is_binary(msg), do: msg
 
   defp format_error(:invalid_format) do
     ~s|Invalid model format. Expected "provider:model" (e.g., "anthropic:claude-sonnet-4"), | <>

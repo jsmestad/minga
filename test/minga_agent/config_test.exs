@@ -2,6 +2,7 @@ defmodule MingaAgent.ConfigTest do
   @moduledoc "Tests for the centralized Agent.Config module."
   use ExUnit.Case, async: true
 
+  alias Minga.Config.Options
   alias MingaAgent.Config
 
   describe "resolve/0" do
@@ -31,6 +32,10 @@ defmodule MingaAgent.ConfigTest do
       assert config.max_retries == 3
       assert config.max_cost == nil
       assert config.tool_approval == :destructive
+
+      assert config.destructive_tools ==
+               ~w(write_file edit_file multi_edit_file shell git_stage git_commit rename)
+
       assert config.agent_hooks == []
       assert config.prompt_cache == true
       assert config.compaction_threshold == 0.80
@@ -47,6 +52,23 @@ defmodule MingaAgent.ConfigTest do
       assert config.diff_size_threshold == 1_048_576
       assert config.session_retention_days == 30
       assert config.save_debounce_ms == 500
+      assert config.mcp_server == nil
+    end
+  end
+
+  describe "MCP config" do
+    test "defaults to nil" do
+      config = Config.resolve()
+      assert config.mcp_server == nil
+    end
+
+    test "keeps raw server maps so provider startup can report config errors" do
+      server = start_supervised!({Options, name: nil})
+      Process.put(:minga_config_options, server)
+
+      raw_config = %{name: "local"}
+      assert {:ok, ^raw_config} = Options.set(server, :agent_mcp_server, raw_config)
+      assert Config.resolve().mcp_server == raw_config
     end
   end
 

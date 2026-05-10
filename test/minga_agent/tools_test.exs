@@ -123,6 +123,10 @@ defmodule MingaAgent.ToolsTest do
       refute Tools.destructive?("foobar")
     end
 
+    test "MCP tools are destructive by default" do
+      assert Tools.destructive?("mcp_workspace__lookup", %{}, [])
+    end
+
     test "accepts a custom destructive list" do
       assert Tools.destructive?("read_file", %{}, ["read_file", "shell"])
       refute Tools.destructive?("write_file", %{}, ["read_file", "shell"])

@@ -93,6 +93,8 @@ defmodule MingaAgent.Tools do
     args["apply"] != nil
   end
 
+  def destructive?("mcp_" <> _rest, _args, _destructive_list), do: true
+
   def destructive?(name, _args, destructive_list) when is_list(destructive_list) do
     name in destructive_list
   end
