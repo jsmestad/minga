@@ -1,6 +1,7 @@
 defmodule MingaAgent.SessionStoreTest do
   use ExUnit.Case, async: true
 
+  alias MingaAgent.Branch
   alias MingaAgent.SessionStore
   alias MingaAgent.ToolCall
   alias MingaAgent.TurnUsage
@@ -11,7 +12,10 @@ defmodule MingaAgent.SessionStoreTest do
     %{
       id: id,
       timestamp: DateTime.to_iso8601(DateTime.utc_now()),
+      last_message_at: DateTime.to_iso8601(DateTime.utc_now()),
+      title: "Hello, how are you?",
       model_name: "claude-sonnet-4",
+      provider_name: "native",
       messages: [
         {:system, "Session started", :info},
         {:user, "Hello, how are you?"},
@@ -31,7 +35,9 @@ defmodule MingaAgent.SessionStoreTest do
         {:thinking, "Let me think about this...", true},
         {:usage, %TurnUsage{input: 100, output: 50, cache_read: 200, cache_write: 0, cost: 0.003}}
       ],
-      usage: %TurnUsage{input: 100, output: 50, cache_read: 200, cache_write: 0, cost: 0.003}
+      usage: %TurnUsage{input: 100, output: 50, cache_read: 200, cache_write: 0, cost: 0.003},
+      branches: [Branch.new("branch-1", [{:user, "branch prompt"}])],
+      memory: "- [2026-01-01 00:00 UTC] Use concise answers\n"
     }
   end
 
@@ -56,6 +62,18 @@ defmodule MingaAgent.SessionStoreTest do
       assert [{:user, "Hello, how are you?"}] = user_msgs
     end
 
+    test "preserves user message attachments" do
+      data = %{
+        sample_data()
+        | messages: [{:user, "see image", [%{filename: "chart.png", size_kb: 42}]}]
+      }
+
+      SessionStore.save(data)
+
+      {:ok, loaded} = SessionStore.load(data.id)
+      assert loaded.messages == [{:user, "see image", [%{filename: "chart.png", size_kb: 42}]}]
+    end
+
     test "preserves assistant messages" do
       data = sample_data()
       SessionStore.save(data)
@@ -74,6 +92,29 @@ defmodule MingaAgent.SessionStoreTest do
       assert tc.name == "read_file"
       assert tc.duration_ms == 42
       assert tc.status == :complete
+    end
+
+    test "loads corrupted message atoms defensively", %{tmp_dir: dir} do
+      sessions_dir = SessionStore.sessions_dir(dir)
+      File.mkdir_p!(sessions_dir)
+
+      File.write!(
+        Path.join(sessions_dir, "bad-atoms.json"),
+        JSON.encode!(%{
+          "id" => "bad-atoms",
+          "timestamp" => "2026-01-01T00:00:00Z",
+          "model_name" => "test-model",
+          "messages" => [
+            %{"type" => "system", "text" => "bad level", "level" => "surprise"},
+            %{"type" => "tool_call", "id" => "tc", "name" => "read_file", "status" => "surprise"}
+          ],
+          "usage" => %{}
+        })
+      )
+
+      assert {:ok, loaded} = SessionStore.load("bad-atoms", dir)
+      assert {:system, "bad level", :info} in loaded.messages
+      assert {:tool_call, %{status: :complete}} = List.last(loaded.messages)
     end
 
     test "preserves thinking messages" do
@@ -114,8 +155,26 @@ defmodule MingaAgent.SessionStoreTest do
       assert loaded.usage.cost == 0.003
     end
 
+    test "preserves resumable metadata, branches, and memory", %{tmp_dir: dir} do
+      data = sample_data()
+      SessionStore.save(data, dir)
+
+      {:ok, loaded} = SessionStore.load(data.id, dir)
+      assert loaded.title == "Hello, how are you?"
+      assert loaded.provider_name == "native"
+      assert [%Branch{name: "branch-1", messages: [{:user, "branch prompt"}]}] = loaded.branches
+      assert loaded.memory =~ "Use concise answers"
+    end
+
     test "returns error for nonexistent session" do
       assert {:error, _} = SessionStore.load("nonexistent-id")
+    end
+
+    test "returns error when the sessions directory cannot be created", %{tmp_dir: dir} do
+      blocked_base = Path.join(dir, "not-a-directory")
+      File.write!(blocked_base, "file blocks mkdir")
+
+      assert {:error, _reason} = SessionStore.save(sample_data("blocked"), blocked_base)
     end
   end
 
@@ -157,6 +216,46 @@ defmodule MingaAgent.SessionStoreTest do
       sessions = SessionStore.list()
       session = Enum.find(sessions, &(&1.id == data.id))
       assert session.model_name == "claude-sonnet-4"
+    end
+
+    test "metadata includes title, last message timestamp, turn count, and recent text", %{
+      tmp_dir: dir
+    } do
+      data = sample_data()
+      SessionStore.save(data, dir)
+
+      sessions = SessionStore.list(dir)
+      session = Enum.find(sessions, &(&1.id == data.id))
+      assert session.title == "Hello, how are you?"
+      assert session.last_message_at == data.last_message_at
+      assert session.turn_count == 1
+      assert session.recent_messages =~ "doing great"
+    end
+
+    test "sorts sessions by last message timestamp descending", %{tmp_dir: dir} do
+      old_data = %{
+        sample_data("old")
+        | timestamp: "2026-01-01T00:00:00Z",
+          last_message_at: "2026-01-01T00:00:00Z"
+      }
+
+      new_data = %{
+        sample_data("new")
+        | timestamp: "2026-01-01T00:00:00Z",
+          last_message_at: "2026-01-03T00:00:00Z"
+      }
+
+      middle_data = %{
+        sample_data("middle")
+        | timestamp: "2026-01-01T00:00:00Z",
+          last_message_at: "2026-01-02T00:00:00Z"
+      }
+
+      SessionStore.save(old_data, dir)
+      SessionStore.save(new_data, dir)
+      SessionStore.save(middle_data, dir)
+
+      assert SessionStore.list(dir) |> Enum.map(& &1.id) == ["new", "middle", "old"]
     end
   end
 

@@ -25,6 +25,7 @@ defmodule MingaAgent.Session do
   alias MingaAgent.Config, as: AgentConfig
   alias MingaAgent.Credentials
   alias MingaAgent.Event
+  alias MingaAgent.Memory
   alias MingaAgent.Message
   alias MingaAgent.Notifier
   alias MingaAgent.ProviderResolver
@@ -65,6 +66,9 @@ defmodule MingaAgent.Session do
           model_name: String.t(),
           provider_name: String.t(),
           save_timer: reference() | nil,
+          session_store_dir: String.t() | nil,
+          created_at: DateTime.t(),
+          last_message_at: DateTime.t(),
           branches: [Branch.t()],
           steering_queue: [String.t() | [ReqLLM.Message.ContentPart.t()]],
           follow_up_queue: [String.t() | [ReqLLM.Message.ContentPart.t()]],
@@ -177,9 +181,7 @@ defmodule MingaAgent.Session do
   @doc """
   Loads a previously saved session, replacing the current conversation history.
 
-  The provider's conversation context is not synced; the loaded messages
-  are for display only until the user sends a new prompt, which re-establishes
-  the provider context.
+  The current session is saved before replacement. The restored conversation history, branches, model, and metadata become the active session state.
   """
   @spec load_session(GenServer.server(), String.t()) :: :ok | {:error, term()}
   def load_session(session, session_id) when is_binary(session_id) do
@@ -469,6 +471,8 @@ defmodule MingaAgent.Session do
       |> Keyword.get(:provider, "unknown")
       |> to_string()
 
+    now = DateTime.utc_now()
+
     state = %{
       session_id: session_id,
       provider: nil,
@@ -486,7 +490,9 @@ defmodule MingaAgent.Session do
       model_name: model_name,
       provider_name: provider_name,
       save_timer: nil,
-      created_at: DateTime.utc_now(),
+      session_store_dir: Keyword.get(opts, :session_store_dir),
+      created_at: now,
+      last_message_at: now,
       branches: [],
       steering_queue: [],
       follow_up_queue: [],
@@ -661,7 +667,8 @@ defmodule MingaAgent.Session do
       state.provider_module.new_session(state.provider)
     end
 
-    timestamp = Calendar.strftime(DateTime.utc_now(), "%H:%M:%S UTC")
+    now = DateTime.utc_now()
+    timestamp = Calendar.strftime(now, "%H:%M:%S UTC")
 
     state = cancel_save_timer(state)
 
@@ -672,6 +679,8 @@ defmodule MingaAgent.Session do
         total_usage: TurnUsage.new(),
         error_message: nil,
         pending_approval: nil,
+        created_at: now,
+        last_message_at: now,
         steering_queue: [],
         follow_up_queue: [],
         touched_files: %{},
@@ -710,29 +719,12 @@ defmodule MingaAgent.Session do
   end
 
   def handle_call({:load_session, session_id}, _from, state) do
-    case SessionStore.load(session_id) do
+    case SessionStore.load(session_id, state.session_store_dir) do
       {:ok, data} ->
-        state = cancel_save_timer(state)
-
-        state = %{
-          state
-          | session_id: data.id,
-            total_usage: data.usage,
-            model_name: data.model_name,
-            status: :idle,
-            error_message: nil,
-            pending_approval: nil,
-            steering_queue: [],
-            follow_up_queue: [],
-            touched_files: %{},
-            boundaries: %{}
-        }
-
-        state = reset_messages(state, data.messages)
-
-        broadcast(state, {:status_changed, :idle})
-        state = notify_messages_changed(state)
-        {:reply, :ok, state}
+        case restore_loaded_session(state, data) do
+          {:ok, state} -> {:reply, :ok, state}
+          {:error, reason} -> {:reply, {:error, reason}, state}
+        end
 
       {:error, reason} ->
         {:reply, {:error, reason}, state}
@@ -771,12 +763,18 @@ defmodule MingaAgent.Session do
   end
 
   def handle_call(:metadata, _from, state) do
+    first_prompt = first_user_prompt(state.messages)
+
     meta = %SessionMetadata{
       id: state.session_id,
+      title: readable_title(first_prompt),
       model_name: state.model_name,
+      provider_name: state.provider_name,
       created_at: state.created_at,
+      last_message_at: state.last_message_at,
       message_count: length(state.messages),
-      first_prompt: first_user_prompt(state.messages),
+      turn_count: count_user_turns(state.messages),
+      first_prompt: first_prompt,
       cost: state.total_usage.cost,
       status: state.status
     }
@@ -1402,6 +1400,7 @@ defmodule MingaAgent.Session do
   @doc false
   @spec notify_messages_changed(state()) :: state()
   defp notify_messages_changed(state) do
+    state = %{state | last_message_at: DateTime.utc_now()}
     broadcast(state, :messages_changed)
     schedule_save(state)
   end
@@ -1490,17 +1489,143 @@ defmodule MingaAgent.Session do
     %{state | save_timer: nil}
   end
 
-  @spec save_to_disk(state()) :: :ok
+  @spec save_to_disk(state()) :: :ok | {:error, term()}
   defp save_to_disk(state) do
+    now = DateTime.to_iso8601(DateTime.utc_now())
+    last_message_at = DateTime.to_iso8601(state.last_message_at)
+
     data = %{
       id: state.session_id,
-      timestamp: DateTime.to_iso8601(DateTime.utc_now()),
+      timestamp: now,
+      last_message_at: last_message_at,
+      title: readable_title(first_user_prompt(state.messages)),
       model_name: state.model_name,
+      provider_name: state.provider_name,
       messages: state.messages,
-      usage: state.total_usage
+      usage: state.total_usage,
+      branches: state.branches,
+      memory: Memory.read(state.session_store_dir)
     }
 
-    SessionStore.save(data)
+    SessionStore.save(data, state.session_store_dir)
+  end
+
+  @spec restore_loaded_session(state(), SessionStore.session_data()) ::
+          {:ok, state()} | {:error, term()}
+  defp restore_loaded_session(state, data) do
+    case persist_current_before_replacement(state, data.id) do
+      :ok ->
+        state = cancel_save_timer(state)
+        loaded_at = parse_datetime(Map.get(data, :last_message_at)) || DateTime.utc_now()
+
+        state = %{
+          state
+          | session_id: data.id,
+            total_usage: data.usage,
+            model_name: data.model_name,
+            provider_name: Map.get(data, :provider_name, state.provider_name),
+            status: :idle,
+            error_message: nil,
+            pending_approval: nil,
+            created_at: loaded_at,
+            last_message_at: loaded_at,
+            branches: Map.get(data, :branches, []),
+            steering_queue: [],
+            follow_up_queue: [],
+            touched_files: %{},
+            boundaries: %{}
+        }
+
+        apply_loaded_model_to_provider(state)
+        finish_loaded_session_restore(state, data)
+
+      {:error, reason} ->
+        {:error, {:save_current_failed, reason}}
+    end
+  end
+
+  @spec finish_loaded_session_restore(state(), SessionStore.session_data()) ::
+          {:ok, state()} | {:error, term()}
+  defp finish_loaded_session_restore(state, data) do
+    case restore_memory_snapshot_if_recorded(state, data) do
+      :ok ->
+        state = reset_messages(state, data.messages)
+
+        broadcast(state, {:status_changed, :idle})
+        broadcast(state, :messages_changed)
+        {:ok, state}
+
+      {:error, reason} ->
+        {:error, {:memory_restore_failed, reason}}
+    end
+  end
+
+  @spec persist_current_before_replacement(state(), String.t()) :: :ok | {:error, term()}
+  defp persist_current_before_replacement(%{session_id: target_id}, target_id), do: :ok
+  defp persist_current_before_replacement(state, _target_id), do: save_to_disk(state)
+
+  @spec apply_loaded_model_to_provider(state()) :: :ok
+  defp apply_loaded_model_to_provider(%{provider: nil}), do: :ok
+
+  defp apply_loaded_model_to_provider(state) do
+    dispatch_optional(state.provider_module, :set_model, [state.provider, state.model_name])
+    :ok
+  catch
+    :exit, _ -> :ok
+  end
+
+  @spec restore_memory_snapshot_if_recorded(state(), SessionStore.session_data()) ::
+          :ok | {:error, term()}
+  defp restore_memory_snapshot_if_recorded(state, data) do
+    if Map.has_key?(data, :memory) do
+      restore_memory_snapshot(state, Map.get(data, :memory))
+    else
+      :ok
+    end
+  end
+
+  @spec restore_memory_snapshot(state(), String.t() | nil) :: :ok | {:error, term()}
+  defp restore_memory_snapshot(state, nil), do: Memory.clear(state.session_store_dir)
+
+  defp restore_memory_snapshot(state, memory) when is_binary(memory) do
+    path = Memory.path(state.session_store_dir)
+
+    with :ok <- File.mkdir_p(Path.dirname(path)) do
+      File.write(path, memory)
+    end
+  end
+
+  @spec parse_datetime(String.t() | nil) :: DateTime.t() | nil
+  defp parse_datetime(nil), do: nil
+
+  defp parse_datetime(value) when is_binary(value) do
+    case DateTime.from_iso8601(value) do
+      {:ok, dt, _offset} -> dt
+      _ -> nil
+    end
+  end
+
+  @spec count_user_turns([Message.t()]) :: non_neg_integer()
+  defp count_user_turns(messages) do
+    Enum.count(messages, fn
+      {:user, _} -> true
+      {:user, _, _attachments} -> true
+      _ -> false
+    end)
+  end
+
+  @spec readable_title(String.t() | nil) :: String.t() | nil
+  defp readable_title(nil), do: nil
+
+  defp readable_title(text) do
+    text
+    |> String.split("\n")
+    |> hd()
+    |> String.trim()
+    |> case do
+      "" -> nil
+      title -> title
+    end
   end
 
   @spec generate_session_id() :: String.t()

@@ -134,7 +134,7 @@ defmodule Minga.Keymap.Defaults do
     {[{?a, @none}, {?n, @none}], :agent_new_session, "New agent session"},
     {[{?a, @none}, {?m, @none}], :agent_pick_model, "Pick agent model"},
     {[{?a, @none}, {?M, @none}], :agent_cycle_model, "Cycle agent model"},
-    {[{?a, @none}, {?h, @none}], :agent_session_history, "Session history"},
+    {[{?a, @none}, {?h, @none}], :agent_session_history, "Resume session"},
     {[{?a, @none}, {?T, @none}], :agent_cycle_thinking, "Cycle thinking level"},
     {[{?a, @none}, {?e, @none}], :agent_summarize, "Summarize session to artifact"},
     {[{?a, @none}, {?q, @none}], :agent_dequeue, "Dequeue queued messages to editor"},

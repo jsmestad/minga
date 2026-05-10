@@ -149,6 +149,14 @@ defmodule Minga.Keymap.DefaultsTest do
       assert {:command, :selection_shrink} = Bindings.lookup(c_node, {?V, 0})
     end
 
+    # ── AI agent bindings ─────────────────────────────────────────────────────
+
+    test "SPC a h → :agent_session_history" do
+      trie = Defaults.leader_trie()
+      {:prefix, a_node} = Bindings.lookup(trie, {?a, 0})
+      assert {:command, :agent_session_history} = Bindings.lookup(a_node, {?h, 0})
+    end
+
     # ── Negative cases ─────────────────────────────────────────────────────────
 
     test "unknown leader prefix returns :not_found" do
