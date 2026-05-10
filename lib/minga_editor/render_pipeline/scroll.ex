@@ -393,11 +393,15 @@ defmodule MingaEditor.RenderPipeline.Scroll do
   end
 
   defp scroll_horizontal(vp, cursor_line, cursor_col, false = _wrap_on, content_w, scroll_margin) do
-    # Temporarily set cols to content_w (excluding gutter) so adjust_left
-    # triggers scroll at the content edge, not the full viewport edge.
-    content_vp = %{vp | cols: content_w}
-    adjusted = Viewport.scroll_to_cursor(content_vp, {cursor_line, cursor_col}, scroll_margin)
-    %{vp | left: adjusted.left}
+    if cursor_col >= vp.left and cursor_col < vp.left + content_w do
+      vp
+    else
+      # Temporarily set cols to content_w (excluding gutter) so adjust_left
+      # triggers scroll at the content edge, not the full viewport edge.
+      content_vp = %{vp | cols: content_w}
+      adjusted = Viewport.scroll_to_cursor(content_vp, {cursor_line, cursor_col}, scroll_margin)
+      %{vp | left: adjusted.left}
+    end
   end
 
   @spec scroll_margin(pid()) :: non_neg_integer()
