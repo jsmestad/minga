@@ -37,7 +37,7 @@ defmodule MingaAgent.Config do
 
     # Tool approval
     tool_approval: :destructive,
-    destructive_tools: ~w(write_file edit_file multi_edit_file shell git_stage git_commit),
+    destructive_tools: ~w(write_file edit_file multi_edit_file shell git_stage git_commit rename),
     tool_permissions: nil,
 
     # System prompt
@@ -141,7 +141,7 @@ defmodule MingaAgent.Config do
       destructive_tools:
         get(
           :agent_destructive_tools,
-          ~w(write_file edit_file multi_edit_file shell git_stage git_commit)
+          ~w(write_file edit_file multi_edit_file shell git_stage git_commit rename)
         ),
       tool_permissions: get(:agent_tool_permissions, nil),
       system_prompt: get(:agent_system_prompt, ""),

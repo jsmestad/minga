@@ -98,6 +98,10 @@ defmodule MingaAgent.MCP.Client do
   end
 
   @impl GenServer
+  def handle_call(:list_tools, _from, %{alive: false} = state) do
+    {:reply, {:error, unavailable_message(state)}, state}
+  end
+
   def handle_call(:list_tools, _from, state) do
     {:reply, {:ok, state.tools}, state}
   end

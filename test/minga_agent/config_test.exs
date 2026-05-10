@@ -31,6 +31,10 @@ defmodule MingaAgent.ConfigTest do
       assert config.max_retries == 3
       assert config.max_cost == nil
       assert config.tool_approval == :destructive
+
+      assert config.destructive_tools ==
+               ~w(write_file edit_file multi_edit_file shell git_stage git_commit rename)
+
       assert config.prompt_cache == true
       assert config.compaction_threshold == 0.80
       assert config.compaction_keep_recent == 6

@@ -94,6 +94,9 @@ defmodule MingaAgent.MCP.ServerConfig do
 
   @spec fetch(map(), atom()) :: term()
   defp fetch(config, key) do
-    Map.get(config, key) || Map.get(config, Atom.to_string(key))
+    case Map.fetch(config, key) do
+      {:ok, value} -> value
+      :error -> Map.get(config, Atom.to_string(key))
+    end
   end
 end

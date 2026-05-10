@@ -100,6 +100,7 @@ defmodule MingaAgent.MCP.ClientTest do
 
     assert {:error, message} = Client.call_tool(client, "echo-text", %{"text" => "hi"})
     assert message =~ "unavailable"
+    assert Client.list_tools(client) == {:error, message}
   end
 
   test "transport crash notifies owner and makes future calls fail" do
