@@ -151,8 +151,6 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUI do
     case state.caches.chrome_prev_result do
       %Chrome{status_bar_data: {:buffer, data}} when is_pid(buf) ->
         {line, col} = Buffer.cursor(buf)
-        line_count = Buffer.line_count(buf)
-        dirty = Buffer.dirty?(buf)
 
         {:buffer,
          %{
@@ -161,8 +159,6 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUI do
              mode_state: state.workspace.editing.mode_state,
              cursor_line: line,
              cursor_col: col,
-             line_count: line_count,
-             dirty: dirty,
              status_msg: state.shell_state.status_msg
          }}
 
