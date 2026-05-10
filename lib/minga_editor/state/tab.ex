@@ -13,6 +13,8 @@ defmodule MingaEditor.State.Tab do
   editing state, viewport, etc.) stored directly. Restore reads only fields that exist on `MingaEditor.Workspace.State`; unknown legacy fields are ignored.
   """
 
+  alias MingaEditor.State.Buffers
+
   # Tab contexts store per-tab fields directly as flat maps.
 
   @typedoc "Unique tab identifier."
@@ -143,4 +145,12 @@ defmodule MingaEditor.State.Tab do
     do: true
 
   def background_subagent?(%__MODULE__{}), do: false
+
+  @doc "Removes a dead buffer pid from this tab's context snapshot."
+  @spec scrub_buffer(t(), pid()) :: t()
+  def scrub_buffer(%__MODULE__{context: %{buffers: %Buffers{} = bs} = context} = tab, pid) do
+    %{tab | context: %{context | buffers: Buffers.remove(bs, pid)}}
+  end
+
+  def scrub_buffer(%__MODULE__{} = tab, _pid), do: tab
 end

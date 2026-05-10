@@ -617,4 +617,60 @@ defmodule MingaEditor.State.TabBarTest do
       assert TabBar.get_group(tb, ws.id).agent_status == :error
     end
   end
+
+  describe "scrub_dead_buffer/2" do
+    test "removes dead pid from inactive tab's context.buffers" do
+      alias MingaEditor.State.Buffers
+
+      dead = :dead_pid
+      live = :live_pid
+
+      tab1 = file_tab(1, "active")
+
+      tab2 = %{
+        file_tab(2, "inactive")
+        | context: %{buffers: %Buffers{list: [dead, live], active: dead, active_index: 0}}
+      }
+
+      tb = %TabBar{tabs: [tab1, tab2], active_id: 1, next_id: 3}
+      result = TabBar.scrub_dead_buffer(tb, dead)
+
+      scrubbed = TabBar.get(result, 2)
+      assert scrubbed.context.buffers.list == [live]
+      assert scrubbed.context.buffers.active == live
+      refute dead in scrubbed.context.buffers.list
+    end
+
+    test "no-op for tabs without context.buffers" do
+      tab1 = file_tab(1, "empty context")
+      tb = TabBar.new(tab1)
+      result = TabBar.scrub_dead_buffer(tb, :some_pid)
+
+      assert result == tb
+    end
+
+    test "scrubs multiple tabs in one pass" do
+      alias MingaEditor.State.Buffers
+
+      dead = :dead_pid
+
+      tab1 = %{
+        file_tab(1, "a")
+        | context: %{buffers: %Buffers{list: [dead], active: dead, active_index: 0}}
+      }
+
+      tab2 = %{
+        file_tab(2, "b")
+        | context: %{buffers: %Buffers{list: [:live, dead], active: :live, active_index: 0}}
+      }
+
+      tb = %TabBar{tabs: [tab1, tab2], active_id: 1, next_id: 3}
+      result = TabBar.scrub_dead_buffer(tb, dead)
+
+      assert TabBar.get(result, 1).context.buffers.list == []
+      assert TabBar.get(result, 1).context.buffers.active == nil
+      assert TabBar.get(result, 2).context.buffers.list == [:live]
+      refute dead in TabBar.get(result, 2).context.buffers.list
+    end
+  end
 end

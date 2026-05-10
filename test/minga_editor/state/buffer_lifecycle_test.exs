@@ -510,4 +510,113 @@ defmodule MingaEditor.State.BufferLifecycleTest do
              "window buffer pid should remain the agent buffer"
     end
   end
+
+  # ── Inactive tab scrubbing on buffer death ──────────────────────────────────
+
+  describe "close_buffer_pure/2 scrubs inactive tab snapshots" do
+    test "removes dead pid from inactive tab's context.buffers" do
+      # Tab A is active with buf_a; Tab B is inactive holding buf_b
+      buf_a = start_buffer("file A")
+      buf_b = start_buffer("file B")
+
+      win_id = 1
+      window = Window.new(win_id, buf_a, 24, 80)
+
+      state = %EditorState{
+        port_manager: self(),
+        workspace: %WorkspaceState{
+          viewport: Viewport.new(24, 80),
+          editing: VimState.new(),
+          buffers: %Buffers{active: buf_a, list: [buf_a, buf_b], active_index: 0},
+          windows: %Windows{
+            tree: WindowTree.new(win_id),
+            map: %{win_id => window},
+            active: win_id,
+            next_id: win_id + 1
+          }
+        }
+      }
+
+      state = EditorState.monitor_buffer(state, buf_a)
+      state = EditorState.monitor_buffer(state, buf_b)
+
+      # Set up two tabs: Tab A (active, id=1), Tab B (inactive, id=2)
+      tab_a = Tab.new_file(1, "a.ex")
+      {tb, tab_b} = TabBar.insert(TabBar.new(tab_a), :file, "b.ex")
+
+      # Snapshot Tab B with buf_b as its active buffer
+      tab_b_context = %{
+        buffers: %Buffers{active: buf_b, list: [buf_b], active_index: 0},
+        editing: VimState.new(),
+        viewport: Viewport.new(24, 80)
+      }
+
+      tb = TabBar.update_context(tb, tab_b.id, tab_b_context)
+
+      # Snapshot Tab A (active) with current workspace
+      context_a = EditorState.snapshot_tab_context(EditorState.set_tab_bar(state, tb))
+      tb = TabBar.update_context(tb, 1, context_a)
+      state = EditorState.set_tab_bar(state, tb)
+
+      # Kill buf_b via close_buffer_pure
+      {new_state, _effects} = EditorState.close_buffer_pure(state, buf_b)
+
+      # AC1 + AC2: Tab B's snapshot should be scrubbed
+      tb_after = EditorState.tab_bar(new_state)
+      tab_b_after = TabBar.get(tb_after, tab_b.id)
+
+      refute buf_b in tab_b_after.context.buffers.list
+      assert tab_b_after.context.buffers.active != buf_b
+
+      # AC3: Restoring Tab B's context produces a usable workspace
+      restored_ws = WorkspaceState.restore_tab_context(new_state.workspace, tab_b_after.context)
+      refute buf_b in restored_ws.buffers.list
+      assert restored_ws.buffers.active != buf_b
+    end
+
+    test "handles tab whose only buffer died (empty list after scrub)" do
+      buf_only = start_buffer("only buffer")
+      win_id = 1
+      window = Window.new(win_id, buf_only, 24, 80)
+
+      state = %EditorState{
+        port_manager: self(),
+        workspace: %WorkspaceState{
+          viewport: Viewport.new(24, 80),
+          editing: VimState.new(),
+          buffers: %Buffers{active: buf_only, list: [buf_only], active_index: 0},
+          windows: %Windows{
+            tree: WindowTree.new(win_id),
+            map: %{win_id => window},
+            active: win_id,
+            next_id: win_id + 1
+          }
+        }
+      }
+
+      state = EditorState.monitor_buffer(state, buf_only)
+
+      tab_a = Tab.new_file(1, "a.ex")
+      {tb, tab_b} = TabBar.insert(TabBar.new(tab_a), :file, "b.ex")
+
+      tab_b_context = %{
+        buffers: %Buffers{active: buf_only, list: [buf_only], active_index: 0},
+        editing: VimState.new(),
+        viewport: Viewport.new(24, 80)
+      }
+
+      tb = TabBar.update_context(tb, tab_b.id, tab_b_context)
+      context_a = EditorState.snapshot_tab_context(EditorState.set_tab_bar(state, tb))
+      tb = TabBar.update_context(tb, 1, context_a)
+      state = EditorState.set_tab_bar(state, tb)
+
+      {new_state, _effects} = EditorState.close_buffer_pure(state, buf_only)
+
+      tb_after = EditorState.tab_bar(new_state)
+      tab_b_after = TabBar.get(tb_after, tab_b.id)
+
+      assert tab_b_after.context.buffers.list == []
+      assert tab_b_after.context.buffers.active == nil
+    end
+  end
 end

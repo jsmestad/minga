@@ -1,6 +1,7 @@
 defmodule MingaEditor.State.TabTest do
   use ExUnit.Case, async: true
 
+  alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
 
   describe "new_file/2" do
@@ -74,6 +75,32 @@ defmodule MingaEditor.State.TabTest do
 
     test "defaults to false" do
       assert Tab.new_agent(1).attention == false
+    end
+  end
+
+  describe "scrub_buffer/2" do
+    test "removes dead pid from context.buffers" do
+      bs = %Buffers{list: [:dead, :live], active: :dead, active_index: 0}
+      tab = Tab.new_file(1) |> Tab.set_context(%{buffers: bs})
+
+      result = Tab.scrub_buffer(tab, :dead)
+
+      assert result.context.buffers.list == [:live]
+      assert result.context.buffers.active == :live
+    end
+
+    test "no-op when context is empty" do
+      tab = Tab.new_file(1)
+      result = Tab.scrub_buffer(tab, :some_pid)
+
+      assert result == tab
+    end
+
+    test "no-op when context has no buffers key" do
+      tab = Tab.new_file(1) |> Tab.set_context(%{editing: :normal})
+      result = Tab.scrub_buffer(tab, :some_pid)
+
+      assert result == tab
     end
   end
 end
