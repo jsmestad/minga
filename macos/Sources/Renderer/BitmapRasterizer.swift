@@ -42,6 +42,12 @@ final class BitmapRasterizer {
     /// Bitmap info flags for BGRA premultiplied alpha.
     private let bitmapInfo: UInt32
 
+    /// Reusable line rasterization context for repeated same-size rows.
+    private var lineContext: CGContext?
+    private var lineContextWidth: Int = 0
+    private var lineContextHeight: Int = 0
+    private var lineContextBytesPerRow: Int = 0
+
     init() {
         self.colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
         self.bitmapInfo = CGImageAlphaInfo.premultipliedFirst.rawValue
@@ -85,28 +91,9 @@ final class BitmapRasterizer {
         // Zero only the used region (not the full pool capacity).
         memset(ptr, 0, byteCount)
 
-        guard let ctx = CGContext(
-            data: ptr,
-            width: width,
-            height: height,
-            bitsPerComponent: 8,
-            bytesPerRow: bytesPerRow,
-            space: colorSpace,
-            bitmapInfo: bitmapInfo
-        ) else {
+        guard let ctx = lineRasterContext(width: width, height: height, bytesPerRow: bytesPerRow, data: ptr, scale: scale) else {
             return RasterizeResult(pointer: UnsafeRawPointer(ptr), bytesPerRow: bytesPerRow)
         }
-
-        // Retina scaling.
-        ctx.scaleBy(x: scale, y: scale)
-
-        // Font rendering quality.
-        ctx.setAllowsFontSmoothing(true)
-        ctx.setShouldSmoothFonts(true)
-        ctx.setAllowsFontSubpixelPositioning(true)
-        ctx.setShouldSubpixelPositionFonts(true)
-        ctx.setAllowsAntialiasing(true)
-        ctx.setShouldAntialias(true)
 
         // CoreText baseline positioning.
         ctx.textPosition = CGPoint(x: 0, y: descent)
@@ -197,5 +184,41 @@ final class BitmapRasterizer {
         pool?.deallocate()
         pool = .allocate(byteCount: byteCount, alignment: 16)
         poolByteCount = byteCount
+        lineContext = nil
+    }
+
+    private func lineRasterContext(width: Int, height: Int, bytesPerRow: Int, data: UnsafeMutableRawPointer, scale: CGFloat) -> CGContext? {
+        if let ctx = lineContext,
+           width == lineContextWidth,
+           height == lineContextHeight,
+           bytesPerRow == lineContextBytesPerRow {
+            return ctx
+        }
+
+        guard let ctx = CGContext(
+            data: data,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: bytesPerRow,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo
+        ) else {
+            return nil
+        }
+
+        ctx.scaleBy(x: scale, y: scale)
+        ctx.setAllowsFontSmoothing(true)
+        ctx.setShouldSmoothFonts(true)
+        ctx.setAllowsFontSubpixelPositioning(true)
+        ctx.setShouldSubpixelPositionFonts(true)
+        ctx.setAllowsAntialiasing(true)
+        ctx.setShouldAntialias(true)
+
+        lineContext = ctx
+        lineContextWidth = width
+        lineContextHeight = height
+        lineContextBytesPerRow = bytesPerRow
+        return ctx
     }
 }
