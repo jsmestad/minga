@@ -215,10 +215,10 @@ final class WindowContentRenderer {
         let attributedString = buildAttributedString(text: row.text, spans: row.spans)
         let ctLine = CTLineCreateWithAttributedString(attributedString)
 
-        var lineAscent: CGFloat = 0
-        var lineDescent: CGFloat = 0
-        var lineLeading: CGFloat = 0
-        let lineWidth = CTLineGetTypographicBounds(ctLine, &lineAscent, &lineDescent, &lineLeading)
+        let lineWidth =
+            row.text.utf8.allSatisfy({ $0 < 0x80 })
+            ? CGFloat(row.text.utf8.count) * cellWidth
+            : CTLineGetTypographicBounds(ctLine, nil, nil, nil)
 
         let pixelWidth = min(Int(ceil(lineWidth * scale)), maxLinePixelWidth)
         guard pixelWidth > 0, linePixelHeight > 0 else { return nil }
