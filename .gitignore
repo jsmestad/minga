@@ -10,6 +10,7 @@ minga-*.tar
 # Zig
 zig/zig-out/
 zig/.zig-cache/
+zig/zig-pkg/
 
 # Swift / Xcode
 macos/.build/
@@ -21,6 +22,7 @@ macos/Minga.xcodeproj/project.xcworkspace/xcuserdata/
 erl_crash.dump
 /priv/minga-renderer
 /priv/minga-parser
+/priv/minga-hook-runner
 /priv/minga-test-harness
 /burrito_out/
 
@@ -40,7 +42,6 @@ Thumbs.db
 # Environment
 .env
 .env.local
-PLAN.md
 PLAN.md
 .build/
 test/tmp/

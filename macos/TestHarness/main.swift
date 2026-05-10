@@ -334,6 +334,13 @@ func chatMessageToJSON(_ msg: Wire.ChatMessage) -> [String: Any] {
         result["kind"] = "styled_tool_call"; result["name"] = name; result["summary"] = summary
         result["status"] = Int(status); result["is_error"] = isError; result["collapsed"] = collapsed
         result["duration_ms"] = Int(durationMs); result["result_lines"] = linesJSON
+    case .approvalToolCall(let name, let summary, let toolCallId, let previewKind, let previewLines):
+        result["kind"] = "approval_tool_call"
+        result["name"] = name
+        result["summary"] = summary
+        result["tool_call_id"] = toolCallId
+        result["preview_kind"] = Int(previewKind)
+        result["preview_lines"] = previewLines
     case .system(let text, let isError):
         result["kind"] = "system"; result["text"] = text; result["is_error"] = isError
     case .usage(let input, let output, let cacheRead, let cacheWrite, let costMicros):

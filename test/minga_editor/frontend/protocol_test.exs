@@ -3,6 +3,21 @@ defmodule MingaEditor.Frontend.ProtocolTest do
 
   alias MingaEditor.Frontend.Protocol
 
+  defp gui_agent_chat_section!(sections, target_id),
+    do: do_gui_agent_chat_section!(sections, target_id)
+
+  defp do_gui_agent_chat_section!(
+         <<target_id::8, len::16, payload::binary-size(len), _rest::binary>>,
+         target_id
+       ),
+       do: payload
+
+  defp do_gui_agent_chat_section!(
+         <<_id::8, len::16, _payload::binary-size(len), rest::binary>>,
+         target_id
+       ),
+       do: do_gui_agent_chat_section!(rest, target_id)
+
   # ── Modifier helpers ──
 
   describe "modifier flags" do
@@ -1196,6 +1211,45 @@ defmodule MingaEditor.Frontend.ProtocolTest do
       encoded = ProtocolGUI.encode_gui_agent_chat(%{visible: false})
       # gui_agent_chat hidden
       assert <<0x78, 0::8>> = encoded
+    end
+
+    test "encodes inline approval tool call message" do
+      tc = MingaAgent.ToolCall.new("tc_1", "write_file", %{"path" => "demo.ex"})
+
+      approval = %{
+        tool_call_id: "tc_1",
+        preview:
+          MingaAgent.ToolApproval.Preview.new(:target, "demo.ex", ["file: demo.ex", "1 edit(s)"])
+      }
+
+      data = %{
+        visible: true,
+        messages: [{:approval_tool_call, tc, approval}],
+        status: :thinking,
+        model: "claude",
+        prompt: "",
+        pending_approval: nil
+      }
+
+      encoded = ProtocolGUI.encode_gui_agent_chat(data)
+
+      assert <<0x78, 7, sections::binary>> = encoded
+      messages_payload = gui_agent_chat_section!(sections, 0x06)
+
+      assert <<1::16, 0::32, 0x09::8, 0::8, name_len::16, rest::binary>> = messages_payload
+      assert <<name::binary-size(name_len), summary_len::16, rest::binary>> = rest
+      assert <<summary::binary-size(summary_len), id_len::16, rest::binary>> = rest
+
+      assert <<tool_call_id::binary-size(id_len), 3::8, 2::16, line1_len::16, rest::binary>> =
+               rest
+
+      assert <<line1::binary-size(line1_len), line2_len::16, rest::binary>> = rest
+      assert <<line2::binary-size(line2_len)>> = rest
+      assert name == "write_file"
+      assert summary == "demo.ex"
+      assert tool_call_id == "tc_1"
+      assert line1 == "file: demo.ex"
+      assert line2 == "1 edit(s)"
     end
 
     test "encodes styled_assistant message with styled runs" do

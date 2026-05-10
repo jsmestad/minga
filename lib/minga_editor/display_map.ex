@@ -98,15 +98,9 @@ defmodule MingaEditor.DisplayMap do
         total_lines,
         content_width \\ 80
       ) do
-    has_window_folds = not FoldMap.empty?(fold_map)
     closed_dec_folds = Decorations.closed_fold_regions(decorations)
-    has_virtual_lines = has_virtual_lines?(decorations)
-    has_blocks = Decorations.has_block_decorations?(decorations)
 
-    if not has_window_folds and closed_dec_folds == [] and not has_virtual_lines and
-         not has_blocks do
-      nil
-    else
+    if required?(fold_map, decorations, closed_dec_folds) do
       ctx = %{
         fold_map: fold_map,
         dec_folds: closed_dec_folds,
@@ -121,7 +115,30 @@ defmodule MingaEditor.DisplayMap do
         entries: entries,
         total_display_lines: length(entries)
       }
+    else
+      nil
     end
+  end
+
+  @doc "Returns true when folds, virtual lines, or block decorations require a display map."
+  @spec required?(FoldMap.t(), Decorations.t()) :: boolean()
+  def required?(%FoldMap{folds: []}, %Decorations{
+        fold_regions: [],
+        virtual_texts: [],
+        block_decorations: []
+      }),
+      do: false
+
+  def required?(fold_map, decorations) do
+    required?(fold_map, decorations, Decorations.closed_fold_regions(decorations))
+  end
+
+  @spec required?(FoldMap.t(), Decorations.t(), [FoldRegion.t()]) :: boolean()
+  defp required?(fold_map, decorations, closed_dec_folds) do
+    has_window_folds = not FoldMap.empty?(fold_map)
+    has_virtual_lines = has_virtual_lines?(decorations)
+    has_blocks = Decorations.has_block_decorations?(decorations)
+    has_window_folds or closed_dec_folds != [] or has_virtual_lines or has_blocks
   end
 
   # ── Public query API ─────────────────────────────────────────────────────

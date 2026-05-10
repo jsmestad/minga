@@ -257,8 +257,8 @@ defmodule MingaEditor.Agent.ChatDecorations do
          _streaming,
          pending_approval
        ) do
-    awaiting_approval = tool_awaiting_approval?(tc, pending_approval)
-    apply_tool_call_decorations(decs, tc, line, line_count, theme, awaiting_approval)
+    matching_approval = matching_tool_approval(tc, pending_approval)
+    apply_tool_call_decorations(decs, tc, line, line_count, theme, matching_approval)
   end
 
   defp apply_message_decorations(
@@ -325,11 +325,11 @@ defmodule MingaEditor.Agent.ChatDecorations do
 
   # ── Tool call decorations ────────────────────────────────────────────────────
 
-  @spec tool_awaiting_approval?(MingaAgent.ToolCall.t(), map() | nil) :: boolean()
-  defp tool_awaiting_approval?(_tc, nil), do: false
+  @spec matching_tool_approval(MingaAgent.ToolCall.t(), map() | nil) :: map() | nil
+  defp matching_tool_approval(_tc, nil), do: nil
 
-  defp tool_awaiting_approval?(tc, approval) when is_map(approval) do
-    Map.get(approval, :tool_call_id) == tc.id
+  defp matching_tool_approval(tc, approval) when is_map(approval) do
+    if Map.get(approval, :tool_call_id) == tc.id, do: approval, else: nil
   end
 
   @spec apply_tool_call_decorations(
@@ -338,9 +338,10 @@ defmodule MingaEditor.Agent.ChatDecorations do
           non_neg_integer(),
           non_neg_integer(),
           MingaEditor.UI.Theme.Agent.t(),
-          boolean()
+          map() | nil
         ) :: Decorations.t()
-  defp apply_tool_call_decorations(decs, tc, line, line_count, theme, awaiting_approval) do
+  defp apply_tool_call_decorations(decs, tc, line, line_count, theme, approval) do
+    awaiting_approval = approval != nil
     {status_icon, status_fg} = tool_status_display(tc, theme, awaiting_approval)
 
     has_result = tc.result != ""
@@ -387,17 +388,21 @@ defmodule MingaEditor.Agent.ChatDecorations do
     # Left border (│) on each content line
     decs = add_tool_border_virtual_text(decs, line, line_count, theme.tool_border)
 
-    # Bottom border
+    # Bottom border or pending approval card.
     last_line = line + line_count - 1
 
-    {_id, decs} =
-      add_block(decs, last_line,
-        placement: :below,
-        render: fn _w -> [{"└─", Face.new(fg: status_fg)}] end,
-        priority: 5
-      )
+    if awaiting_approval do
+      add_approval_card(decs, last_line, tc, approval, theme, status_fg)
+    else
+      {_id, decs} =
+        add_block(decs, last_line,
+          placement: :below,
+          render: fn _w -> [{"└─", Face.new(fg: status_fg)}] end,
+          priority: 5
+        )
 
-    decs
+      decs
+    end
   end
 
   @spec tool_status_display(MingaAgent.ToolCall.t(), MingaEditor.UI.Theme.Agent.t(), boolean()) ::
@@ -413,6 +418,73 @@ defmodule MingaEditor.Agent.ChatDecorations do
       :error -> {"✗", theme.status_error}
     end
   end
+
+  @spec add_approval_card(
+          Decorations.t(),
+          non_neg_integer(),
+          MingaAgent.ToolCall.t(),
+          map() | nil,
+          MingaEditor.UI.Theme.Agent.t(),
+          non_neg_integer()
+        ) :: Decorations.t()
+  defp add_approval_card(decs, line, tc, approval, theme, status_fg) do
+    preview = approval_preview(tc, approval)
+
+    {_id, decs} =
+      add_block(decs, line,
+        placement: :below,
+        render: fn _w -> approval_card_lines(preview, theme, status_fg) end,
+        priority: 6
+      )
+
+    decs
+  end
+
+  @spec approval_preview(MingaAgent.ToolCall.t(), map() | nil) ::
+          MingaAgent.ToolApproval.preview()
+  defp approval_preview(_tc, %{preview: preview}) when is_map(preview), do: preview
+
+  defp approval_preview(%{args: %{} = args, name: name}, _approval) do
+    MingaAgent.ToolApproval.build_preview(name, args)
+  end
+
+  @spec approval_card_lines(
+          MingaAgent.ToolApproval.preview(),
+          MingaEditor.UI.Theme.Agent.t(),
+          non_neg_integer()
+        ) :: [
+          {String.t(), Face.t()}
+        ]
+  defp approval_card_lines(preview, theme, status_fg) do
+    base = [
+      {"│ Approval required", Face.new(fg: status_fg, bold: true)},
+      {"\n│ #{preview_label(preview.kind)}: #{preview.summary}", Face.new(fg: theme.text_fg)}
+    ]
+
+    preview_lines =
+      preview.lines
+      |> Enum.take(6)
+      |> Enum.map(fn line -> {"\n│   #{line}", Face.new(fg: theme.text_fg)} end)
+
+    actions = [
+      {"\n│ ", Face.new(fg: status_fg)},
+      {"[y]", Face.new(fg: theme.tool_header, bold: true)},
+      {" approve  ", Face.new(fg: status_fg)},
+      {"[n]", Face.new(fg: theme.status_error, bold: true)},
+      {" deny  ", Face.new(fg: status_fg)},
+      {"[Y]", Face.new(fg: theme.tool_header, bold: true)},
+      {" approve all", Face.new(fg: status_fg)},
+      {"\n└─", Face.new(fg: status_fg)}
+    ]
+
+    base ++ preview_lines ++ actions
+  end
+
+  @spec preview_label(atom()) :: String.t()
+  defp preview_label(:diff), do: "Diff"
+  defp preview_label(:command), do: "Command"
+  defp preview_label(:target), do: "Target"
+  defp preview_label(_kind), do: "Args"
 
   @spec tool_header_render(
           String.t(),

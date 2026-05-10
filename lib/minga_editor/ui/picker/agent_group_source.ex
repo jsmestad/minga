@@ -88,6 +88,7 @@ defmodule MingaEditor.UI.Picker.AgentGroupSource do
   defp agent_status_text(%AgentGroup{agent_status: :tool_executing}),
     do: " \u{2699} executing"
 
+  defp agent_status_text(%AgentGroup{agent_status: :plan}), do: " ✎ plan"
   defp agent_status_text(%AgentGroup{agent_status: :error}), do: " \u{26A0} error"
   defp agent_status_text(%AgentGroup{agent_status: :idle}), do: " \u{2713} idle"
   defp agent_status_text(_), do: ""
@@ -99,6 +100,7 @@ defmodule MingaEditor.UI.Picker.AgentGroupSource do
   defp status_annotation(%AgentGroup{agent_status: :tool_executing}),
     do: "\u{2699} executing"
 
+  defp status_annotation(%AgentGroup{agent_status: :plan}), do: "✎ plan"
   defp status_annotation(%AgentGroup{agent_status: :error}), do: "\u{26A0} error"
   defp status_annotation(%AgentGroup{agent_status: :idle}), do: "\u{2713} idle"
   defp status_annotation(_), do: nil

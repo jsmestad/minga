@@ -37,6 +37,10 @@ defmodule MingaAgent.Providers.Native do
   alias MingaAgent.CostCalculator
   alias MingaAgent.Credentials
   alias MingaAgent.Event
+  alias MingaAgent.Hooks.CommandRunner
+  alias MingaAgent.Hooks.Dispatcher, as: HookDispatcher
+  alias MingaAgent.Hooks.PreToolUsePayload
+  alias MingaAgent.Hooks.Result, as: HookResult
   alias MingaAgent.Instructions
   alias MingaAgent.InternalState
   alias MingaAgent.MCP.Client, as: MCPClient
@@ -48,6 +52,7 @@ defmodule MingaAgent.Providers.Native do
   alias MingaAgent.Session
   alias MingaAgent.Skills
   alias MingaAgent.TokenEstimator
+  alias MingaAgent.Tool.PlanMode
   alias MingaAgent.Tools
   alias MingaAgent.Tools.Notebook
   alias MingaAgent.Tools.Shell
@@ -79,6 +84,7 @@ defmodule MingaAgent.Providers.Native do
       :max_tokens,
       :max_retries,
       :llm_client,
+      :hook_runner,
       :max_turns,
       :max_cost
     ]
@@ -91,6 +97,7 @@ defmodule MingaAgent.Providers.Native do
       :max_tokens,
       :max_retries,
       :llm_client,
+      :hook_runner,
       :max_turns,
       :max_cost,
       :session_pid,
@@ -107,6 +114,7 @@ defmodule MingaAgent.Providers.Native do
             max_tokens: pos_integer(),
             max_retries: non_neg_integer(),
             llm_client: term(),
+            hook_runner: MingaAgent.Providers.Native.hook_runner(),
             max_turns: pos_integer(),
             max_cost: float() | nil,
             session_pid: pid() | nil,
@@ -122,6 +130,9 @@ defmodule MingaAgent.Providers.Native do
   @type llm_client :: (String.t(), [ReqLLM.Message.t()], keyword() ->
                          {:ok, StreamResponse.t()} | {:error, term()})
 
+  @typedoc "Function that executes a matching hook."
+  @type hook_runner :: (MingaAgent.Hooks.Hook.t(), PreToolUsePayload.t() -> HookResult.t())
+
   @typedoc "Internal state for the native provider."
   @type state :: %{
           subscriber: pid(),
@@ -134,6 +145,7 @@ defmodule MingaAgent.Providers.Native do
           max_tokens: pos_integer(),
           max_retries: non_neg_integer(),
           llm_client: llm_client(),
+          hook_runner: hook_runner(),
           task: Task.t() | nil,
           streaming: boolean(),
           interrupted: boolean(),
@@ -241,6 +253,7 @@ defmodule MingaAgent.Providers.Native do
     max_turns = Keyword.get(opts, :max_turns, config.max_turns)
     max_cost = Keyword.get(opts, :max_cost, config.max_cost)
     llm_client = Keyword.get(opts, :llm_client, &ReqLLM.stream_text/3)
+    hook_runner = Keyword.get(opts, :hook_runner, &CommandRunner.run_pre_tool_use/2)
     provider_pid = self()
     # Start a fork store for in-memory buffer isolation. Forks are created
     # lazily when agent tools write to files that have open buffers.
@@ -295,6 +308,7 @@ defmodule MingaAgent.Providers.Native do
       max_tokens: max_tokens,
       max_retries: max_retries,
       llm_client: llm_client,
+      hook_runner: hook_runner,
       task: nil,
       streaming: false,
       interrupted: false,
@@ -355,6 +369,7 @@ defmodule MingaAgent.Providers.Native do
         max_tokens: state.max_tokens,
         max_retries: state.max_retries,
         llm_client: state.llm_client,
+        hook_runner: state.hook_runner,
         max_turns: state.max_turns,
         max_cost: state.max_cost,
         session_cost: state.session_cost
@@ -414,6 +429,7 @@ defmodule MingaAgent.Providers.Native do
       max_tokens: state.max_tokens,
       max_retries: state.max_retries,
       llm_client: state.llm_client,
+      hook_runner: state.hook_runner,
       max_turns: state.max_turns,
       max_cost: state.max_cost,
       session_cost: state.session_cost
@@ -1086,7 +1102,16 @@ defmodule MingaAgent.Providers.Native do
     assistant_msg = Context.assistant(text, tool_calls: reqllm_tool_calls)
     context = Context.append(context, assistant_msg)
 
-    context = execute_tools(lctx.provider_pid, context, tool_calls, lctx.tools, lctx.config)
+    context =
+      execute_tools(
+        lctx.provider_pid,
+        lctx.session_pid,
+        context,
+        tool_calls,
+        lctx.tools,
+        lctx.config,
+        lctx.hook_runner
+      )
 
     # Inject any steering messages queued by the user while tools were executing.
     context = inject_steering_messages(lctx, context)
@@ -1135,9 +1160,25 @@ defmodule MingaAgent.Providers.Native do
     end
   end
 
-  @spec execute_tools(pid(), Context.t(), [map()], [ReqLLM.Tool.t()], AgentConfig.t()) ::
+  @spec execute_tools(
+          pid(),
+          pid() | nil,
+          Context.t(),
+          [map()],
+          [ReqLLM.Tool.t()],
+          AgentConfig.t(),
+          hook_runner()
+        ) ::
           Context.t()
-  defp execute_tools(provider_pid, context, tool_calls, available_tools, config) do
+  defp execute_tools(
+         provider_pid,
+         session_pid,
+         context,
+         tool_calls,
+         available_tools,
+         config,
+         hook_runner
+       ) do
     initial_mode = approval_mode(config)
 
     {final_ctx, _mode} =
@@ -1145,7 +1186,15 @@ defmodule MingaAgent.Providers.Native do
         before_content = capture_file_before(tool_call)
 
         {result_text, is_error, new_mode} =
-          execute_with_approval(provider_pid, tool_call, available_tools, approval_mode, config)
+          execute_with_approval(
+            provider_pid,
+            session_pid,
+            tool_call,
+            available_tools,
+            approval_mode,
+            config,
+            hook_runner
+          )
 
         send(
           provider_pid,
@@ -1169,54 +1218,149 @@ defmodule MingaAgent.Providers.Native do
 
   @typep approval_mode :: :none | :ask | :ask_all | :approve_all
 
-  @spec execute_with_approval(pid(), map(), [ReqLLM.Tool.t()], approval_mode(), AgentConfig.t()) ::
+  @spec execute_with_approval(
+          pid(),
+          pid() | nil,
+          map(),
+          [ReqLLM.Tool.t()],
+          approval_mode(),
+          AgentConfig.t(),
+          hook_runner()
+        ) ::
           {String.t(), boolean(), approval_mode()}
-  defp execute_with_approval(provider_pid, tool_call, available_tools, mode, config) do
-    # Per-tool permissions override the global approval mode.
-    case tool_permission(tool_call.name, config) do
-      :allow ->
-        {result, is_error} = run_single_tool(tool_call, available_tools, provider_pid)
-        {result, is_error, mode}
+  defp execute_with_approval(
+         provider_pid,
+         session_pid,
+         tool_call,
+         available_tools,
+         mode,
+         config,
+         hook_runner
+       ) do
+    args = tool_call.arguments || %{}
 
-      :deny ->
-        {"Tool '#{tool_call.name}' is denied by per-tool permissions", true, mode}
+    if plan_mode_blocks_tool?(session_pid, tool_call.name, args) do
+      message = PlanMode.refusal_message(tool_call.name)
+      emit_plan_mode_refusal(session_pid, message)
+      {message, true, mode}
+    else
+      # Per-tool permissions override the global approval mode.
+      case tool_permission(tool_call.name, config) do
+        :allow ->
+          {result, is_error} =
+            run_single_tool(
+              tool_call,
+              available_tools,
+              provider_pid,
+              session_pid,
+              config,
+              hook_runner
+            )
 
-      :ask ->
-        request_approval(provider_pid, tool_call, available_tools, config)
+          {result, is_error, mode}
 
-      nil ->
-        # No per-tool override; fall through to global approval mode.
-        execute_with_global_mode(provider_pid, tool_call, available_tools, mode, config)
+        :deny ->
+          {"Tool '#{tool_call.name}' is denied by per-tool permissions", true, mode}
+
+        :ask ->
+          request_approval(
+            provider_pid,
+            session_pid,
+            tool_call,
+            available_tools,
+            config,
+            hook_runner
+          )
+
+        nil ->
+          # No per-tool override; fall through to global approval mode.
+          execute_with_global_mode(
+            provider_pid,
+            session_pid,
+            tool_call,
+            available_tools,
+            mode,
+            config,
+            hook_runner
+          )
+      end
     end
   end
 
   @spec execute_with_global_mode(
           pid(),
+          pid() | nil,
           map(),
           [ReqLLM.Tool.t()],
           approval_mode(),
-          AgentConfig.t()
+          AgentConfig.t(),
+          hook_runner()
         ) ::
           {String.t(), boolean(), approval_mode()}
-  defp execute_with_global_mode(provider_pid, tool_call, available_tools, :none, _config) do
-    {result, is_error} = run_single_tool(tool_call, available_tools, provider_pid)
+  defp execute_with_global_mode(
+         provider_pid,
+         session_pid,
+         tool_call,
+         available_tools,
+         :none,
+         config,
+         hook_runner
+       ) do
+    {result, is_error} =
+      run_single_tool(tool_call, available_tools, provider_pid, session_pid, config, hook_runner)
+
     {result, is_error, :none}
   end
 
-  defp execute_with_global_mode(provider_pid, tool_call, available_tools, :approve_all, _config) do
-    {result, is_error} = run_single_tool(tool_call, available_tools, provider_pid)
+  defp execute_with_global_mode(
+         provider_pid,
+         session_pid,
+         tool_call,
+         available_tools,
+         :approve_all,
+         config,
+         hook_runner
+       ) do
+    {result, is_error} =
+      run_single_tool(tool_call, available_tools, provider_pid, session_pid, config, hook_runner)
+
     {result, is_error, :approve_all}
   end
 
-  defp execute_with_global_mode(provider_pid, tool_call, available_tools, :ask_all, config) do
-    request_approval(provider_pid, tool_call, available_tools, config)
+  defp execute_with_global_mode(
+         provider_pid,
+         session_pid,
+         tool_call,
+         available_tools,
+         :ask_all,
+         config,
+         hook_runner
+       ) do
+    request_approval(provider_pid, session_pid, tool_call, available_tools, config, hook_runner)
   end
 
-  defp execute_with_global_mode(provider_pid, tool_call, available_tools, :ask, config) do
+  defp execute_with_global_mode(
+         provider_pid,
+         session_pid,
+         tool_call,
+         available_tools,
+         :ask,
+         config,
+         hook_runner
+       ) do
     if Tools.destructive?(tool_call.name, tool_call.arguments || %{}) do
-      request_approval(provider_pid, tool_call, available_tools, config)
+      request_approval(provider_pid, session_pid, tool_call, available_tools, config, hook_runner)
     else
-      {result, is_error} = run_single_tool(tool_call, available_tools, provider_pid)
+      {result, is_error} =
+        run_single_tool(
+          tool_call,
+          available_tools,
+          provider_pid,
+          session_pid,
+          config,
+          hook_runner
+        )
+
       {result, is_error, :ask}
     end
   end
@@ -1251,9 +1395,23 @@ defmodule MingaAgent.Providers.Native do
     end
   end
 
-  @spec request_approval(pid(), map(), [ReqLLM.Tool.t()], AgentConfig.t()) ::
+  @spec request_approval(
+          pid(),
+          pid() | nil,
+          map(),
+          [ReqLLM.Tool.t()],
+          AgentConfig.t(),
+          hook_runner()
+        ) ::
           {String.t(), boolean(), :ask | :approve_all}
-  defp request_approval(provider_pid, tool_call, available_tools, config) do
+  defp request_approval(
+         provider_pid,
+         session_pid,
+         tool_call,
+         available_tools,
+         config,
+         hook_runner
+       ) do
     # Send approval request through the event pipeline (Task → Provider → Session)
     send(
       provider_pid,
@@ -1269,11 +1427,29 @@ defmodule MingaAgent.Providers.Native do
     # Block until the user responds (or timeout after 5 minutes)
     receive do
       {:tool_approval_response, _tool_call_id, :approve} ->
-        {result, is_error} = run_single_tool(tool_call, available_tools, provider_pid)
+        {result, is_error} =
+          run_single_tool(
+            tool_call,
+            available_tools,
+            provider_pid,
+            session_pid,
+            config,
+            hook_runner
+          )
+
         {result, is_error, :ask}
 
       {:tool_approval_response, _tool_call_id, :approve_all} ->
-        {result, is_error} = run_single_tool(tool_call, available_tools, provider_pid)
+        {result, is_error} =
+          run_single_tool(
+            tool_call,
+            available_tools,
+            provider_pid,
+            session_pid,
+            config,
+            hook_runner
+          )
+
         {result, is_error, :approve_all}
 
       {:tool_approval_response, _tool_call_id, :reject} ->
@@ -1326,21 +1502,108 @@ defmodule MingaAgent.Providers.Native do
 
   defp maybe_emit_file_changed(_provider_pid, _tool_call, _before_content, _is_error), do: :ok
 
-  @spec run_single_tool(map(), [ReqLLM.Tool.t()], pid() | nil) ::
+  # Re-checks plan mode after approval: the user may have entered /plan between
+  # the approval prompt and the approval response.
+  @spec run_single_tool(
+          map(),
+          [ReqLLM.Tool.t()],
+          pid(),
+          pid() | nil,
+          AgentConfig.t(),
+          hook_runner()
+        ) ::
           {String.t(), boolean()}
-  defp run_single_tool(tool_call, available_tools, provider_pid) do
+  defp run_single_tool(tool_call, available_tools, provider_pid, session_pid, config, hook_runner) do
+    args = tool_call.arguments || %{}
+
+    if plan_mode_blocks_tool?(session_pid, tool_call.name, args) do
+      message = PlanMode.refusal_message(tool_call.name)
+      emit_plan_mode_refusal(session_pid, message)
+      {message, true}
+    else
+      run_single_tool_unchecked(tool_call, available_tools, provider_pid, config, hook_runner)
+    end
+  end
+
+  @spec run_single_tool_unchecked(map(), [ReqLLM.Tool.t()], pid(), AgentConfig.t(), hook_runner()) ::
+          {String.t(), boolean()}
+  defp run_single_tool_unchecked(tool_call, available_tools, provider_pid, config, hook_runner) do
     case Enum.find(available_tools, fn t -> t.name == tool_call.name end) do
       nil ->
         {"Tool '#{tool_call.name}' not found", true}
 
-      _tool when tool_call.name == "shell" and is_pid(provider_pid) ->
-        run_shell_with_streaming(tool_call, provider_pid)
-
       tool ->
-        case ReqLLM.Tool.execute(tool, tool_call.arguments) do
-          {:ok, result} -> {format_tool_result(result), false}
-          {:error, reason} -> {format_error(reason), true}
+        case dispatch_pre_tool_use(tool_call, config, hook_runner, provider_pid) do
+          :ok -> execute_found_tool(tool, tool_call, provider_pid)
+          {:error, %HookResult{} = result} -> {HookResult.message(result), true}
         end
+    end
+  end
+
+  @spec dispatch_pre_tool_use(map(), AgentConfig.t(), hook_runner(), pid()) ::
+          :ok | {:error, HookResult.t()}
+  defp dispatch_pre_tool_use(tool_call, config, hook_runner, provider_pid) do
+    payload = PreToolUsePayload.new(tool_call)
+
+    case HookDispatcher.pre_tool_use(config.agent_hooks, payload, runner: hook_runner) do
+      :ok ->
+        :ok
+
+      {:error, result} = error ->
+        emit_hook_veto(provider_pid, result)
+        error
+    end
+  end
+
+  @spec emit_hook_veto(pid(), HookResult.t()) :: :ok
+  defp emit_hook_veto(provider_pid, %HookResult{} = result) do
+    send(provider_pid, {:agent_event, %Event.Error{message: HookResult.message(result)}})
+    :ok
+  end
+
+  @spec plan_mode_blocks_tool?(pid() | nil, String.t(), map()) :: boolean()
+  defp plan_mode_blocks_tool?(session_pid, name, args) when is_pid(session_pid) do
+    session_in_plan_mode?(session_pid) and PlanMode.blocked?(name, args)
+  end
+
+  defp plan_mode_blocks_tool?(_session_pid, _name, _args), do: false
+
+  @spec session_in_plan_mode?(pid()) :: boolean()
+  defp session_in_plan_mode?(session_pid) when is_pid(session_pid) do
+    case Process.info(session_pid, :dictionary) do
+      {:dictionary, dict} ->
+        Keyword.get(dict, :"$initial_call") == {Session, :init, 1} and
+          Session.status(session_pid) == :plan
+
+      nil ->
+        false
+    end
+  catch
+    :exit, _ -> false
+  end
+
+  @spec emit_plan_mode_refusal(pid() | nil, String.t()) :: :ok
+  defp emit_plan_mode_refusal(session_pid, message) when is_pid(session_pid) do
+    send(
+      session_pid,
+      {:agent_provider_event, %Event.SystemMessage{message: message, level: :info}}
+    )
+
+    :ok
+  end
+
+  defp emit_plan_mode_refusal(_session_pid, _message), do: :ok
+
+  @spec execute_found_tool(ReqLLM.Tool.t(), map(), pid() | nil) :: {String.t(), boolean()}
+  defp execute_found_tool(_tool, %{name: "shell"} = tool_call, provider_pid)
+       when is_pid(provider_pid) do
+    run_shell_with_streaming(tool_call, provider_pid)
+  end
+
+  defp execute_found_tool(tool, tool_call, _provider_pid) do
+    case ReqLLM.Tool.execute(tool, tool_call.arguments) do
+      {:ok, result} -> {format_tool_result(result), false}
+      {:error, reason} -> {format_error(reason), true}
     end
   end
 

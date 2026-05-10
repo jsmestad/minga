@@ -1,6 +1,10 @@
 defmodule MingaEditor.Agent.SlashCommandTest do
-  use ExUnit.Case, async: true
+  # Uses XDG_CONFIG_HOME to verify /resume opens persisted sessions through the public slash command path.
+  use ExUnit.Case, async: false
 
+  alias MingaAgent.Session
+  alias MingaAgent.SessionStore
+  alias MingaAgent.TurnUsage
   alias MingaEditor.Agent.SlashCommand
   alias MingaEditor.Agent.UIState
   alias MingaEditor.State, as: EditorState
@@ -9,6 +13,51 @@ defmodule MingaEditor.Agent.SlashCommandTest do
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
+
+  @moduletag :tmp_dir
+
+  defmodule NoopProvider do
+    @behaviour MingaAgent.Provider
+
+    use GenServer
+
+    @impl MingaAgent.Provider
+    def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
+
+    @impl MingaAgent.Provider
+    def send_prompt(_pid, _text), do: :ok
+
+    @impl MingaAgent.Provider
+    def abort(_pid), do: :ok
+
+    @impl MingaAgent.Provider
+    def new_session(_pid), do: :ok
+
+    @impl MingaAgent.Provider
+    def get_state(_pid), do: {:ok, %{model: nil, is_streaming: false, token_usage: nil}}
+
+    @impl GenServer
+    def init(_opts), do: {:ok, %{}}
+  end
+
+  defp start_session do
+    start_supervised!({Session, provider: NoopProvider, provider_opts: []})
+  end
+
+  defp with_xdg_config(dir, fun) do
+    previous = System.get_env("XDG_CONFIG_HOME")
+    System.put_env("XDG_CONFIG_HOME", dir)
+
+    try do
+      fun.()
+    after
+      if previous do
+        System.put_env("XDG_CONFIG_HOME", previous)
+      else
+        System.delete_env("XDG_CONFIG_HOME")
+      end
+    end
+  end
 
   describe "slash_command?/1" do
     test "returns true for slash-prefixed text" do
@@ -41,6 +90,9 @@ defmodule MingaEditor.Agent.SlashCommandTest do
       assert "stop" in names
       assert "thinking" in names
       assert "model" in names
+      assert "plan" in names
+      assert "exec" in names
+      assert "resume" in names
     end
   end
 
@@ -158,6 +210,85 @@ defmodule MingaEditor.Agent.SlashCommandTest do
     test "command parsing trims whitespace" do
       {:ok, state} = SlashCommand.execute(mock_state(), "/help  ")
       assert state.shell_state.status_msg == "Commands listed in chat"
+    end
+
+    test "/resume opens the persisted agent session picker", %{tmp_dir: dir} do
+      with_xdg_config(dir, fn ->
+        SessionStore.save(
+          %{
+            id: "resume-target",
+            timestamp: "2026-01-01T00:00:00Z",
+            last_message_at: "2026-01-01T00:00:00Z",
+            title: "Resume target",
+            model_name: "test-model",
+            provider_name: "native",
+            messages: [{:user, "Resume target"}],
+            usage: %TurnUsage{}
+          },
+          dir
+        )
+
+        session = start_session()
+        {:ok, state} = SlashCommand.execute(mock_state(session: session), "/resume")
+
+        assert {:picker, %{picker_ui: picker_ui}} = state.shell_state.modal
+        assert picker_ui.source == MingaEditor.UI.Picker.AgentSessionSource
+        assert picker_ui.context == %{persisted_only: true}
+      end)
+    end
+
+    test "/sessions opens the same agent session picker" do
+      session = start_session()
+      {:ok, state} = SlashCommand.execute(mock_state(session: session), "/sessions")
+
+      assert {:picker, %{picker_ui: picker_ui}} = state.shell_state.modal
+      assert picker_ui.source == MingaEditor.UI.Picker.AgentSessionSource
+    end
+
+    test "/plan enters plan mode for the active session" do
+      session = start_session()
+      {:ok, state} = SlashCommand.execute(mock_state(session: session), "/plan")
+
+      assert Session.status(session) == :plan
+      assert state.shell_state.status_msg == "Plan mode enabled"
+      assert state.shell_state.agent.runtime.status == :plan
+
+      assert Enum.any?(Session.messages(session), fn
+               {:system, text, :info} -> text =~ "Plan mode" and text =~ "/exec"
+               _ -> false
+             end)
+    end
+
+    test "/exec leaves plan mode for the active session" do
+      session = start_session()
+      :ok = Session.enter_plan(session)
+      {:ok, state} = SlashCommand.execute(mock_state(session: session), "/exec")
+
+      assert Session.status(session) == :idle
+      assert state.shell_state.status_msg == "Execution mode enabled"
+      assert state.shell_state.agent.runtime.status == :idle
+
+      assert Enum.any?(Session.messages(session), fn
+               {:system, text, :info} -> text =~ "Execution mode" and text =~ "/plan"
+               _ -> false
+             end)
+    end
+
+    test "/skill:plan is rewritten to enter real plan mode" do
+      session = start_session()
+      {:ok, _state} = SlashCommand.execute(mock_state(session: session), "/skill:plan")
+      assert Session.status(session) == :plan
+    end
+
+    test "/skill:off:plan leaves plan mode" do
+      session = start_session()
+      :ok = Session.enter_plan(session)
+      {:ok, _state} = SlashCommand.execute(mock_state(session: session), "/skill:off:plan")
+      assert Session.status(session) == :idle
+    end
+
+    test "/plan without an active session returns a clear error" do
+      assert {:error, "No active agent session"} = SlashCommand.execute(mock_state(), "/plan")
     end
   end
 end

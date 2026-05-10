@@ -24,6 +24,12 @@ pub const Predicate = union(enum) {
         regex: ?*posix_regex.CompiledRegex,
         negate: bool,
     },
+    /// Fast path for simple `^x` match predicates.
+    starts_with_byte: struct {
+        capture_id: u32,
+        byte: u8,
+        negate: bool,
+    },
     /// `#eq? @capture "string"` or `#not-eq?`
     eq_string: struct {
         capture_id: u32,
@@ -49,6 +55,7 @@ pub const PredicateTable = struct {
     entries: []?[]const Predicate,
     /// Conceal replacement per pattern. null = no conceal, empty = hide entirely.
     conceal_replacements: []?[]const u8,
+    has_conceal_replacements: bool,
     allocator: std.mem.Allocator,
     /// Track compiled regexes for cleanup
     regexes: std.ArrayListUnmanaged(*posix_regex.CompiledRegex),
@@ -57,21 +64,24 @@ pub const PredicateTable = struct {
     pub fn init(query: *c.TSQuery, allocator: std.mem.Allocator) PredicateTable {
         const pattern_count = c.ts_query_pattern_count(query);
         const entries = allocator.alloc(?[]const Predicate, pattern_count) catch
-            return .{ .entries = &.{}, .conceal_replacements = &.{}, .allocator = allocator, .regexes = .empty };
+            return .{ .entries = &.{}, .conceal_replacements = &.{}, .has_conceal_replacements = false, .allocator = allocator, .regexes = .empty };
 
         const conceal_reps = allocator.alloc(?[]const u8, pattern_count) catch
-            return .{ .entries = &.{}, .conceal_replacements = &.{}, .allocator = allocator, .regexes = .empty };
+            return .{ .entries = &.{}, .conceal_replacements = &.{}, .has_conceal_replacements = false, .allocator = allocator, .regexes = .empty };
 
         var regexes: std.ArrayListUnmanaged(*posix_regex.CompiledRegex) = .empty;
+        var has_conceal_replacements = false;
 
         for (0..pattern_count) |i| {
             entries[i] = parsePattern(query, @intCast(i), allocator, &regexes);
             conceal_reps[i] = parseConcealDirective(query, @intCast(i));
+            if (conceal_reps[i] != null) has_conceal_replacements = true;
         }
 
         return .{
             .entries = entries,
             .conceal_replacements = conceal_reps,
+            .has_conceal_replacements = has_conceal_replacements,
             .allocator = allocator,
             .regexes = regexes,
         };
@@ -138,6 +148,11 @@ fn evaluateOne(pred: Predicate, match: c.TSQueryMatch, source: []const u8) bool 
             const re = mp.regex orelse return true; // regex failed to compile, skip
             const matches = posix_regex.matches(re, text);
             return if (mp.negate) !matches else matches;
+        },
+        .starts_with_byte => |sw| {
+            const text = captureText(match, sw.capture_id, source) orelse return sw.negate;
+            const matches = text.len > 0 and text[0] == sw.byte;
+            return if (sw.negate) !matches else matches;
         },
         .eq_string => |es| {
             const text = captureText(match, es.capture_id, source) orelse return es.negate;
@@ -268,6 +283,13 @@ fn parsePredicate(
         var plen: u32 = 0;
         const pptr = c.ts_query_string_value_for_id(query, args[1].value_id, &plen);
         const pattern = pptr[0..plen];
+        if (pattern.len == 2 and pattern[0] == '^') {
+            return .{ .starts_with_byte = .{
+                .capture_id = capture_id,
+                .byte = pattern[1],
+                .negate = negate,
+            } };
+        }
 
         // Compile regex
         const regex = posix_regex.compile(pattern, allocator);

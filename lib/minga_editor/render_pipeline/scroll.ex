@@ -155,7 +155,8 @@ defmodule MingaEditor.RenderPipeline.Scroll do
             scroll.viewport.top,
             scroll.gutter_w,
             scroll.snapshot.line_count,
-            scroll.buf_version
+            scroll.buf_version,
+            scroll.cursor_line
           )
 
         updated_window =
@@ -202,6 +203,7 @@ defmodule MingaEditor.RenderPipeline.Scroll do
     # Ctrl-e/y, zz/zt/zb, and mouse wheel scroll actually persist.
     # scroll_to_cursor only adjusts top when the cursor moves off-screen.
     wrap_on = wrap_enabled?(window.buffer)
+    scroll_margin = scroll_margin(window.buffer)
     fold_map = window.fold_map
     %Viewport{} = win_vp = window.viewport
     viewport = %{win_vp | rows: content_height, cols: content_width, reserved: 0}
@@ -223,7 +225,7 @@ defmodule MingaEditor.RenderPipeline.Scroll do
     # that only modifies `top`. The same trap exists in mouse.ex:934 and
     # content.ex:470 where {cursor_line, 0} silently resets left.
     saved_left = viewport.left
-    viewport = Viewport.scroll_to_cursor(viewport, {visible_cursor_line, 0}, window.buffer)
+    viewport = Viewport.scroll_to_cursor(viewport, {visible_cursor_line, 0}, scroll_margin)
     viewport = %{viewport | left: saved_left}
     visible_rows = Viewport.content_rows(viewport)
 
@@ -241,21 +243,26 @@ defmodule MingaEditor.RenderPipeline.Scroll do
     # The DisplayMap merges per-window folds, decoration folds, and virtual
     # lines into a unified mapping. Falls back to VisibleLines when there
     # are no decoration folds or virtual lines (pure window-fold case).
-    line_count_approx = Buffer.line_count(window.buffer)
     decorations = fetch_decorations(window.buffer)
 
     # Two-pass scroll: compute DisplayMap, then verify cursor is visible.
     # If decorations push the cursor off-screen, adjust first_line and recompute.
     {first_line, visible_line_map} =
-      compute_display_map_with_cursor_check(
-        fold_map,
-        decorations,
-        first_line,
-        visible_rows,
-        line_count_approx,
-        content_width,
-        cursor_line
-      )
+      if DisplayMap.required?(fold_map, decorations) do
+        line_count_approx = Buffer.line_count(window.buffer)
+
+        compute_display_map_with_cursor_check(
+          fold_map,
+          decorations,
+          first_line,
+          visible_rows,
+          line_count_approx,
+          content_width,
+          cursor_line
+        )
+      else
+        {first_line, nil}
+      end
 
     # Fetch buffer data: need to cover all visible buffer lines
     {fetch_first, fetch_count} =
@@ -290,7 +297,7 @@ defmodule MingaEditor.RenderPipeline.Scroll do
     # so the cursor triggers scroll when it reaches the content edge,
     # not the full viewport edge.
     viewport =
-      scroll_horizontal(viewport, cursor_line, cursor_col, wrap_on, content_w, window.buffer)
+      scroll_horizontal(viewport, cursor_line, cursor_col, wrap_on, content_w, scroll_margin)
 
     # Substitution preview (active window only)
     {lines, preview_matches} =
@@ -377,20 +384,38 @@ defmodule MingaEditor.RenderPipeline.Scroll do
           non_neg_integer(),
           boolean(),
           pos_integer(),
-          pid()
+          non_neg_integer()
         ) :: Viewport.t()
-  defp scroll_horizontal(vp, _cursor_line, _cursor_col, true = _wrap_on, _content_w, _buf) do
+  defp scroll_horizontal(
+         vp,
+         _cursor_line,
+         _cursor_col,
+         true = _wrap_on,
+         _content_w,
+         _scroll_margin
+       ) do
     # Wrapping: no horizontal scroll needed. Just reset left to 0.
     # Vertical scroll is handled separately above (save/restore pattern).
     %{vp | left: 0}
   end
 
-  defp scroll_horizontal(vp, cursor_line, cursor_col, false = _wrap_on, content_w, buf) do
-    # Temporarily set cols to content_w (excluding gutter) so adjust_left
-    # triggers scroll at the content edge, not the full viewport edge.
-    content_vp = %{vp | cols: content_w}
-    adjusted = Viewport.scroll_to_cursor(content_vp, {cursor_line, cursor_col}, buf)
-    %{vp | left: adjusted.left}
+  defp scroll_horizontal(vp, cursor_line, cursor_col, false = _wrap_on, content_w, scroll_margin) do
+    if cursor_col >= vp.left and cursor_col < vp.left + content_w do
+      vp
+    else
+      # Temporarily set cols to content_w (excluding gutter) so adjust_left
+      # triggers scroll at the content edge, not the full viewport edge.
+      content_vp = %{vp | cols: content_w}
+      adjusted = Viewport.scroll_to_cursor(content_vp, {cursor_line, cursor_col}, scroll_margin)
+      %{vp | left: adjusted.left}
+    end
+  end
+
+  @spec scroll_margin(pid()) :: non_neg_integer()
+  defp scroll_margin(buf) do
+    Buffer.get_option(buf, :scroll_margin)
+  catch
+    :exit, _ -> 5
   end
 
   @spec wrap_enabled?(pid()) :: boolean()
@@ -416,8 +441,11 @@ defmodule MingaEditor.RenderPipeline.Scroll do
   defp cursor_line_text(lines, cursor_line, first_line) do
     index = cursor_line - first_line
 
-    if index >= 0 and index < length(lines) do
-      Enum.at(lines, index)
+    if index >= 0 do
+      case Enum.fetch(lines, index) do
+        {:ok, line} -> line
+        :error -> ""
+      end
     else
       ""
     end

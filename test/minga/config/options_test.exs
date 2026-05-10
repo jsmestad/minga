@@ -88,6 +88,7 @@ defmodule Minga.Config.OptionsTest do
                agent_system_prompt: "",
                agent_append_system_prompt: "",
                agent_tool_permissions: nil,
+               agent_hooks: [],
                agent_diff_size_threshold: 1_048_576,
                whichkey_layout: :bottom,
                line_spacing: 1.0,
@@ -105,6 +106,7 @@ defmodule Minga.Config.OptionsTest do
                cursorline: true,
                nav_flash: true,
                nav_flash_threshold: 5,
+               yank_flash: true,
                log_level_config: :default,
                log_level_port: :default,
                parser_tree_ttl: 300,
@@ -174,6 +176,15 @@ defmodule Minga.Config.OptionsTest do
 
     test "line_numbers rejects string", %{server: s} do
       assert {:error, _} = Options.set(s, :line_numbers, "hybrid")
+    end
+
+    test "agent_provider accepts native providers and rejects removed pi_rpc", %{server: s} do
+      assert {:ok, :auto} = Options.set(s, :agent_provider, :auto)
+      assert {:ok, :native} = Options.set(s, :agent_provider, :native)
+
+      assert {:error, msg} = Options.set(s, :agent_provider, :pi_rpc)
+      assert msg =~ "agent_provider no longer supports :pi_rpc"
+      assert msg =~ "Use :native instead"
     end
 
     test "autopair rejects non-boolean", %{server: s} do

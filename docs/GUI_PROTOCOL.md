@@ -98,7 +98,7 @@ Flags bits:
   bit 1: is_dirty
   bit 2: is_agent (agent chat tab vs file tab)
   bit 3: has_attention
-  bits 4-5: agent_status (0=idle, 1=thinking, 2=tool_executing, 3=error)
+  bits 4-6: agent_status (0=idle, 1=thinking, 2=tool_executing, 3=error, 4=plan)
 
 group_id: workspace group this tab belongs to. 0 = manual/ungrouped workspace.
 Non-zero values match workspace IDs from gui_workspace_bar (0x86). The frontend
@@ -210,9 +210,9 @@ LSP status: 0=none, 1=ready, 2=initializing, 3=starting, 4=error
 
 Parser status: 0=available, 1=unavailable, 2=restarting
 
-Agent status: 0=idle, 1=thinking, 2=tool_executing, 3=error
+Agent status: 0=idle, 1=thinking, 2=tool_executing, 3=error, 4=plan
 
-Session status (agent variant): 0=idle, 1=thinking, 2=tool_executing, 3=error
+Session status (agent variant): 0=idle, 1=thinking, 2=tool_executing, 3=error, 4=plan
 
 Macro recording: 0=not recording, 1-26=recording register a-z
 
@@ -289,10 +289,11 @@ Agent conversation view state. Uses sectioned envelope: `opcode(1) + section_cou
 |-----------|------|--------|
 | 0x01 | Header | visible, status |
 | 0x02 | Model | model name |
-| 0x03 | Prompt | prompt text |
-| 0x04 | Pending | pending approval (tool name + summary) |
+| 0x03 | Prompt | prompt text plus prompt line/cursor/mode metadata |
+| 0x04 | Pending | legacy pending approval banner payload. Current BEAM frames send `0` and render approvals inline as message type `0x09`. |
 | 0x05 | Help | help overlay visibility + groups |
 | 0x06 | Messages | message_count + messages (same nested format as before) |
+| 0x07 | Completion | prompt completion popup state |
 
 **Legacy positional format (deprecated):**
 ```
@@ -309,11 +310,12 @@ Per message (type byte first):
   0x01 (user):      type(1) + text_len(4) + text
   0x02 (assistant):  type(1) + text_len(4) + text
   0x03 (thinking):   type(1) + collapsed(1) + text_len(4) + text
-  0x04 (tool_call):  type(1) + status(1) + error(1) + collapsed(1) + duration_ms(4) + name_len(2) + name + result_len(4) + result
+  0x04 (tool_call):  type(1) + status(1) + error(1) + collapsed(1) + duration_ms(4) + name_len(2) + name + summary_len(2) + summary + result_len(4) + result
   0x05 (system):     type(1) + level(1) + text_len(4) + text
   0x06 (usage):      type(1) + input(4) + output(4) + cache_read(4) + cache_write(4) + cost_micros(4)
   0x07 (styled_assistant): type(1) + line_count(2), per line: run_count(2), per run: text_len(2) + text + fg(3) + bg(3) + flags(1)
-  0x08 (styled_tool_call): type(1) + status(1) + error(1) + collapsed(1) + duration_ms(4) + name_len(2) + name + line_count(2), per line: run_count(2), per run: text_len(2) + text + fg(3) + bg(3) + flags(1)
+  0x08 (styled_tool_call): type(1) + status(1) + error(1) + collapsed(1) + duration_ms(4) + name_len(2) + name + summary_len(2) + summary + line_count(2), per line: run_count(2), per run: text_len(2) + text + fg(3) + bg(3) + flags(1)
+  0x09 (approval_tool_call): type(1) + status(1) + name_len(2) + name + summary_len(2) + summary + tool_call_id_len(2) + tool_call_id + preview_kind(1) + preview_line_count(2), per line: line_len(2) + line
 
 When hidden:
   opcode(1) + 0(1)
@@ -689,7 +691,7 @@ Per workspace:
   + tab_count(2) + label_len(1) + label(label_len)
 
 kind: 0 = manual (default user workspace), 1 = agent
-agent_status: 0 = idle, 1 = thinking, 2 = tool_executing, 3 = error
+agent_status: 0 = idle, 1 = thinking, 2 = tool_executing, 3 = error, 4 = plan
 color: 24-bit sRGB accent color for group separators and workspace indicator
 tab_count: number of tabs currently in this workspace
 ```

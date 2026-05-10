@@ -699,8 +699,10 @@ pub fn decodeCommand(data: []const u8) DecodeError!RenderCommand {
         OP_BATCH_END => return .batch_end,
         OP_SET_CURSOR_SHAPE => {
             if (rest.len < 1) return error.Malformed;
-            const shape = std.meta.intToEnum(CursorShape, rest[0]) catch return error.Malformed;
-            return .{ .set_cursor_shape = shape };
+            switch (rest[0]) {
+                inline CURSOR_BLOCK, CURSOR_BEAM, CURSOR_UNDERLINE => |v| return .{ .set_cursor_shape = @enumFromInt(v) },
+                else => return error.Malformed,
+            }
         },
         OP_SET_TITLE => {
             if (rest.len < 2) return error.Malformed;
@@ -905,16 +907,16 @@ pub fn decodeCommand(data: []const u8) DecodeError!RenderCommand {
             if (rest.len < 6) return error.Malformed;
             const name_len = std.mem.readInt(u16, rest[4..6], .big);
             if (rest.len < 6 + name_len) return error.Malformed;
-            // TUI ignores font config; just return a no-op clear.
-            return .clear;
+            // TUI ignores font config.
+            return .noop;
         },
         OP_REGISTER_FONT => {
             // font_id:1, name_len:2, name:bytes
             if (rest.len < 3) return error.Malformed;
             const name_len = std.mem.readInt(u16, rest[1..3], .big);
             if (rest.len < 3 + name_len) return error.Malformed;
-            // TUI ignores font registration; return no-op.
-            return .clear;
+            // TUI ignores font registration.
+            return .noop;
         },
         OP_SET_FONT_FALLBACK => {
             // count:1, then count * (name_len:2, name:bytes)
@@ -924,12 +926,12 @@ pub fn decodeCommand(data: []const u8) DecodeError!RenderCommand {
             var i: u8 = 0;
             while (i < count) : (i += 1) {
                 if (rest.len < offset + 2) return error.Malformed;
-                const name_len = std.mem.readInt(u16, rest[offset..][0..2], .big);
+                const name_len: usize = std.mem.readInt(u16, rest[offset..][0..2], .big);
                 offset += 2 + name_len;
                 if (rest.len < offset) return error.Malformed;
             }
-            // TUI ignores font fallback; just return a no-op clear.
-            return .clear;
+            // TUI ignores font fallback.
+            return .noop;
         },
         else => return error.UnknownOpcode,
     }
@@ -949,7 +951,7 @@ pub fn decodeCommand(data: []const u8) DecodeError!RenderCommand {
 ///   0x10 draw_text:       14 bytes + text_len
 pub fn commandSize(payload: []const u8) usize {
     if (payload.len == 0) return 0;
-    return switch (payload[0]) {
+    const decoded_size = switch (payload[0]) {
         OP_CLEAR => 1,
         OP_BATCH_END => 1,
         OP_SET_CURSOR => 5,
@@ -957,38 +959,38 @@ pub fn commandSize(payload: []const u8) usize {
         OP_DRAW_TEXT => blk: {
             // opcode(1) + row(2) + col(2) + fg(3) + bg(3) + attrs(1) + text_len(2) = 14 fixed bytes
             if (payload.len < 14) break :blk payload.len;
-            const text_len = std.mem.readInt(u16, payload[12..14], .big);
+            const text_len: usize = std.mem.readInt(u16, payload[12..14], .big);
             break :blk 14 + text_len;
         },
         OP_SET_LANGUAGE => blk: {
             // opcode(1) + buffer_id(4) + name_len(2) + name
             if (payload.len < 7) break :blk payload.len;
-            const name_len = std.mem.readInt(u16, payload[5..7], .big);
+            const name_len: usize = std.mem.readInt(u16, payload[5..7], .big);
             break :blk 7 + name_len;
         },
         OP_PARSE_BUFFER => blk: {
             // opcode(1) + buffer_id(4) + version(4) + source_len(4) + source
             if (payload.len < 13) break :blk payload.len;
-            const source_len = std.mem.readInt(u32, payload[9..13], .big);
+            const source_len: usize = std.mem.readInt(u32, payload[9..13], .big);
             break :blk 13 + source_len;
         },
         OP_SET_HIGHLIGHT_QUERY, OP_SET_INJECTION_QUERY, OP_SET_FOLD_QUERY, OP_SET_INDENT_QUERY, OP_SET_TEXTOBJECT_QUERY => blk: {
             // opcode(1) + buffer_id(4) + query_len(4) + query
             if (payload.len < 9) break :blk payload.len;
-            const query_len = std.mem.readInt(u32, payload[5..9], .big);
+            const query_len: usize = std.mem.readInt(u32, payload[5..9], .big);
             break :blk 9 + query_len;
         },
         OP_LOAD_GRAMMAR => blk: {
             if (payload.len < 3) break :blk payload.len;
-            const name_len = std.mem.readInt(u16, payload[1..3], .big);
+            const name_len: usize = std.mem.readInt(u16, payload[1..3], .big);
             const path_off: usize = 3 + name_len;
             if (payload.len < path_off + 2) break :blk payload.len;
-            const path_len = std.mem.readInt(u16, payload[path_off..][0..2], .big);
+            const path_len: usize = std.mem.readInt(u16, payload[path_off..][0..2], .big);
             break :blk path_off + 2 + path_len;
         },
         OP_SET_TITLE => blk: {
             if (payload.len < 3) break :blk payload.len;
-            const title_len = std.mem.readInt(u16, payload[1..3], .big);
+            const title_len: usize = std.mem.readInt(u16, payload[1..3], .big);
             break :blk 3 + title_len;
         },
         OP_QUERY_LANGUAGE_AT => 13, // opcode(1) + buffer_id(4) + request_id(4) + byte_offset(4)
@@ -996,7 +998,7 @@ pub fn commandSize(payload: []const u8) usize {
         OP_REQUEST_TEXTOBJECT => blk: {
             // opcode(1) + buffer_id(4) + request_id(4) + row(4) + col(4) + name_len(2) + name
             if (payload.len < 19) break :blk payload.len;
-            const nl = std.mem.readInt(u16, payload[17..19], .big);
+            const nl: usize = std.mem.readInt(u16, payload[17..19], .big);
             break :blk 19 + nl;
         },
         OP_CLOSE_BUFFER => 5, // opcode(1) + buffer_id(4)
@@ -1008,14 +1010,14 @@ pub fn commandSize(payload: []const u8) usize {
             for (0..edit_count) |_| {
                 // 9 × u32 fields + text_len:u32 = 40 bytes header per edit
                 if (off + 40 > payload.len) break :blk payload.len;
-                const text_len = std.mem.readInt(u32, payload[off + 36 ..][0..4], .big);
+                const text_len: usize = std.mem.readInt(u32, payload[off + 36 ..][0..4], .big);
                 off += 40 + text_len;
             }
             break :blk off;
         },
         OP_MEASURE_TEXT => blk: {
             if (payload.len < 7) break :blk payload.len;
-            const text_len = std.mem.readInt(u16, payload[5..7], .big);
+            const text_len: usize = std.mem.readInt(u16, payload[5..7], .big);
             break :blk 7 + text_len;
         },
         OP_SET_WINDOW_BG => 4, // opcode(1) + r(1) + g(1) + b(1)
@@ -1027,13 +1029,13 @@ pub fn commandSize(payload: []const u8) usize {
         OP_SET_FONT => blk: {
             // opcode(1) + size(2) + weight(1) + ligatures(1) + name_len(2) + name
             if (payload.len < 7) break :blk payload.len;
-            const name_len = std.mem.readInt(u16, payload[5..7], .big);
+            const name_len: usize = std.mem.readInt(u16, payload[5..7], .big);
             break :blk 7 + name_len;
         },
         OP_REGISTER_FONT => blk: {
             // opcode(1) + font_id(1) + name_len(2) + name
             if (payload.len < 4) break :blk payload.len;
-            const name_len = std.mem.readInt(u16, payload[2..4], .big);
+            const name_len: usize = std.mem.readInt(u16, payload[2..4], .big);
             break :blk 4 + name_len;
         },
         OP_SET_FONT_FALLBACK => blk: {
@@ -1044,7 +1046,7 @@ pub fn commandSize(payload: []const u8) usize {
             var i: u8 = 0;
             while (i < count) : (i += 1) {
                 if (payload.len < offset + 2) break :blk payload.len;
-                const name_len = std.mem.readInt(u16, payload[offset..][0..2], .big);
+                const name_len: usize = std.mem.readInt(u16, payload[offset..][0..2], .big);
                 offset += 2 + name_len;
             }
             break :blk offset;
@@ -1052,6 +1054,7 @@ pub fn commandSize(payload: []const u8) usize {
         // Unknown opcode: skip 1 byte so the loop always makes progress.
         else => 1,
     };
+    return @min(decoded_size, payload.len);
 }
 
 /// Fully decodes an edit_buffer command payload (after the opcode byte).
@@ -1339,6 +1342,16 @@ test "decode set_window_bg truncated returns malformed" {
     const data = [_]u8{ OP_SET_WINDOW_BG, 0x28, 0x2C };
     const result = decodeCommand(&data);
     try std.testing.expectError(error.Malformed, result);
+}
+
+test "decode font config commands as noops" {
+    const set_font = [_]u8{ OP_SET_FONT, 0x00, 0x0E, 0x04, 0x01, 0x00, 0x05 } ++ "Menlo".*;
+    const register_font = [_]u8{ OP_REGISTER_FONT, 0x01, 0x00, 0x05 } ++ "Menlo".*;
+    const set_fallback = [_]u8{ OP_SET_FONT_FALLBACK, 0x01, 0x00, 0x05 } ++ "Menlo".*;
+
+    try std.testing.expect((try decodeCommand(&set_font)) == .noop);
+    try std.testing.expect((try decodeCommand(&register_font)) == .noop);
+    try std.testing.expect((try decodeCommand(&set_fallback)) == .noop);
 }
 
 test "decode set_cursor_shape block" {
@@ -1714,38 +1727,48 @@ test "decode set_cursor truncated (only 3 bytes after opcode) returns malformed"
 // ── writeMessage ──────────────────────────────────────────────────────────────
 
 test "writeMessage writes correct 4-byte big-endian length prefix" {
-    var out: [12]u8 = undefined;
-    var fbs = std.io.fixedBufferStream(&out);
-    try writeMessage(fbs.writer(), "hello");
-    const written = fbs.getWritten();
-    // First 4 bytes: length = 5
+    var aw: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer aw.deinit();
+    try writeMessage(&aw.writer, "hello");
+    const written = aw.written();
     try std.testing.expectEqual(@as(u32, 5), std.mem.readInt(u32, written[0..4], .big));
-    // Payload follows
     try std.testing.expectEqualSlices(u8, "hello", written[4..9]);
 }
 
 test "writeMessage with empty payload writes length 0" {
-    var out: [8]u8 = undefined;
-    var fbs = std.io.fixedBufferStream(&out);
-    try writeMessage(fbs.writer(), "");
-    const written = fbs.getWritten();
+    var aw: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer aw.deinit();
+    try writeMessage(&aw.writer, "");
+    const written = aw.written();
     try std.testing.expectEqual(@as(usize, 4), written.len);
     try std.testing.expectEqual(@as(u32, 0), std.mem.readInt(u32, written[0..4], .big));
 }
 
 // ── readMessageLength ─────────────────────────────────────────────────────────
 
+const SliceReader = struct {
+    data: []const u8,
+    pos: usize = 0,
+
+    fn readAll(self: *SliceReader, buf: []u8) !usize {
+        const available = self.data[self.pos..];
+        const n = @min(buf.len, available.len);
+        @memcpy(buf[0..n], available[0..n]);
+        self.pos += n;
+        return n;
+    }
+};
+
 test "readMessageLength returns correct value for known bytes" {
-    const data = [_]u8{ 0x00, 0x00, 0x00, 0x2A }; // big-endian 42
-    var fbs = std.io.fixedBufferStream(&data);
-    const result = try readMessageLength(fbs.reader());
+    const data = [_]u8{ 0x00, 0x00, 0x00, 0x2A };
+    var reader = SliceReader{ .data = &data };
+    const result = try readMessageLength(&reader);
     try std.testing.expectEqual(@as(?u32, 42), result);
 }
 
 test "readMessageLength returns null on EOF (empty reader)" {
-    const data = [_]u8{};
-    var fbs = std.io.fixedBufferStream(&data);
-    const result = try readMessageLength(fbs.reader());
+    var reader = SliceReader{ .data = &.{} };
+    const result = try readMessageLength(&reader);
     try std.testing.expectEqual(@as(?u32, null), result);
 }
 
@@ -1780,6 +1803,11 @@ test "commandSize: batch_end is 1 byte" {
 test "commandSize: set_cursor is 5 bytes" {
     const data = [_]u8{ OP_SET_CURSOR, 0x00, 0x01, 0x00, 0x02 };
     try std.testing.expectEqual(@as(usize, 5), commandSize(&data));
+}
+
+test "commandSize: fixed-size commands clamp to available payload" {
+    const data = [_]u8{OP_CLOSE_BUFFER};
+    try std.testing.expectEqual(@as(usize, 1), commandSize(&data));
 }
 
 test "commandSize: set_cursor_shape is 2 bytes" {
@@ -1824,6 +1852,11 @@ test "commandSize: truncated draw_text returns remaining length" {
     // Only 3 bytes — malformed, returns what's left
     const data = [_]u8{ OP_DRAW_TEXT, 0x00, 0x01 };
     try std.testing.expectEqual(@as(usize, 3), commandSize(&data));
+}
+
+test "commandSize: truncated variable-size commands clamp to available payload" {
+    const data = [_]u8{ OP_SET_FONT_FALLBACK, 0x01, 0xFF, 0xFF };
+    try std.testing.expectEqual(@as(usize, data.len), commandSize(&data));
 }
 
 test "commandSize: unknown opcode returns 1" {

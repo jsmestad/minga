@@ -94,6 +94,7 @@ defmodule MingaEditor.UI.Theme do
       :split_border_fg,
       :cursorline_bg,
       :nav_flash_bg,
+      :yank_flash_bg,
       :highlight_read_bg,
       :highlight_write_bg,
       :selection_bg
@@ -106,6 +107,7 @@ defmodule MingaEditor.UI.Theme do
             split_border_fg: MingaEditor.UI.Theme.color(),
             cursorline_bg: MingaEditor.UI.Theme.color() | nil,
             nav_flash_bg: MingaEditor.UI.Theme.color() | nil,
+            yank_flash_bg: MingaEditor.UI.Theme.color() | nil,
             highlight_read_bg: MingaEditor.UI.Theme.color() | nil,
             highlight_write_bg: MingaEditor.UI.Theme.color() | nil,
             selection_bg: MingaEditor.UI.Theme.color() | nil

@@ -435,6 +435,7 @@ defmodule MingaEditor.Shell.Traditional.TabBarRenderer do
   defp tab_dirty_marker(_, _), do: ""
 
   @spec agent_status_indicator(Tab.t()) :: String.t()
+  defp agent_status_indicator(%Tab{kind: :agent, agent_status: :plan}), do: " ✎"
   defp agent_status_indicator(%Tab{kind: :agent, agent_status: :thinking}), do: " \u{25CF}"
   defp agent_status_indicator(%Tab{kind: :agent, agent_status: :tool_executing}), do: " \u{2699}"
   defp agent_status_indicator(%Tab{kind: :agent, agent_status: :error}), do: " \u{2717}"

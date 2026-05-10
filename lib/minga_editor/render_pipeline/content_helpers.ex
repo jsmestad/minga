@@ -149,7 +149,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
       is_gui: is_gui,
       has_sign_column: has_sign_column,
       decorations: decorations,
-      diagnostic_signs: diagnostic_signs_for_window(window),
+      diagnostic_signs: diagnostic_signs_for_path(Map.get(params, :file_path)),
       git_signs: git_signs_for_window(window),
       gutter_colors: state.theme.gutter,
       git_colors: state.theme.git
@@ -177,6 +177,102 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
     else
       render_lines_nowrap_sequential(lines, opts)
     end
+  end
+
+  @doc "Renders non-wrapped, non-folded lines directly into render layers."
+  @spec render_lines_nowrap_layers([String.t()], map()) ::
+          {DisplayList.render_layer(), DisplayList.render_layer(), non_neg_integer(), Window.t()}
+  def render_lines_nowrap_layers(lines, opts) do
+    %{
+      first_line: first_line,
+      cursor_line: cursor_line,
+      ctx: ctx,
+      ln_style: ln_style,
+      gutter_w: gutter_w,
+      first_byte_off: first_byte_off,
+      row_off: row_off,
+      col_off: col_off,
+      window: window
+    } = opts
+
+    sign_w = Gutter.sign_column_width()
+    max_rows = length(lines)
+    dirty_rows = dirty_screen_rows(lines, first_line, window)
+
+    highlight_segments_list =
+      if ctx.highlight do
+        if MapSet.size(dirty_rows) == max_rows do
+          lines_with_offsets = build_lines_with_offsets(lines, first_byte_off)
+          Highlight.styles_for_visible_lines(ctx.highlight, lines_with_offsets)
+        else
+          Highlight.styles_for_text_lines_masked(ctx.highlight, lines, first_byte_off, dirty_rows)
+        end
+      else
+        List.duplicate(nil, max_rows)
+      end
+
+    {gutter_layer, content_layer, _byte_off, window, _screen_row} =
+      Enum.zip_reduce(
+        lines,
+        highlight_segments_list,
+        {%{}, %{}, first_byte_off, window, 0},
+        fn line_text, hl_segments, {g_layer, c_layer, byte_off, win, screen_row} ->
+          buf_line = first_line + screen_row
+          next_byte_off = byte_off + byte_size(line_text) + 1
+
+          if Window.dirty?(win, buf_line) do
+            {g_cmds, c_cmds, _rows} =
+              BufferLine.render(%{
+                line_text: line_text,
+                buf_line: buf_line,
+                cursor_line: cursor_line,
+                byte_offset: byte_off,
+                screen_row: screen_row,
+                ctx: ctx,
+                ln_style: ln_style,
+                gutter_w: gutter_w,
+                sign_w: sign_w,
+                wrap_entry: nil,
+                max_rows: max_rows,
+                row_offset: row_off,
+                col_offset: col_off,
+                highlight_segments: hl_segments
+              })
+
+            win = Window.cache_line(win, buf_line, g_cmds, c_cmds)
+
+            {put_draws(g_layer, g_cmds), put_draws(c_layer, c_cmds), next_byte_off, win,
+             screen_row + 1}
+          else
+            g_cmds = Map.get(win.render_cache.cached_gutter, buf_line, [])
+            c_cmds = Map.get(win.render_cache.cached_content, buf_line, [])
+
+            {put_draws(g_layer, g_cmds), put_draws(c_layer, c_cmds), next_byte_off, win,
+             screen_row + 1}
+          end
+        end
+      )
+
+    {gutter_layer, content_layer, length(lines), window}
+  end
+
+  @spec dirty_screen_rows([String.t()], non_neg_integer(), Window.t()) ::
+          MapSet.t(non_neg_integer())
+  defp dirty_screen_rows(lines, first_line, window) do
+    lines
+    |> Enum.with_index()
+    |> Enum.reduce(MapSet.new(), fn {_line, index}, acc ->
+      if Window.dirty?(window, first_line + index), do: MapSet.put(acc, index), else: acc
+    end)
+  end
+
+  @spec put_draws(DisplayList.render_layer(), [DisplayList.draw()]) :: DisplayList.render_layer()
+  defp put_draws(layer, []), do: layer
+
+  defp put_draws(layer, draws) do
+    Enum.reduce(draws, layer, fn {row, col, text, style}, acc ->
+      Map.update(acc, row, [{col, text, style}], fn runs -> runs ++ [{col, text, style}] end)
+    end)
   end
 
   # Standard sequential rendering (no folds, zero overhead fast path)
@@ -816,23 +912,29 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
   @doc "Returns the decorations for a window's buffer."
   @spec window_decorations(Window.t()) :: Decorations.t()
   def window_decorations(%{buffer: buf}) when is_pid(buf) do
-    Buffer.decorations(buf)
-    |> Decorations.build_vt_line_cache()
+    buf
+    |> Buffer.decorations()
+    |> maybe_build_vt_line_cache()
   catch
     :exit, _ -> Decorations.new()
   end
 
   def window_decorations(_window), do: Decorations.new()
 
+  @spec maybe_build_vt_line_cache(Decorations.t()) :: Decorations.t()
+  defp maybe_build_vt_line_cache(%Decorations{virtual_texts: []} = decorations), do: decorations
+
+  defp maybe_build_vt_line_cache(%Decorations{} = decorations),
+    do: Decorations.build_vt_line_cache(decorations)
+
   @doc "Returns the highlight state for a window's buffer."
   @spec window_highlight(state(), Window.t()) :: MingaEditor.UI.Highlight.t() | nil
   def window_highlight(state, window) do
     hl =
-      Map.get(
-        state.workspace.highlight.highlights,
-        window.buffer,
-        MingaEditor.UI.Highlight.from_theme(state.theme)
-      )
+      case Map.fetch(state.workspace.highlight.highlights, window.buffer) do
+        {:ok, highlight} -> highlight
+        :error -> MingaEditor.UI.Highlight.from_theme(state.theme)
+      end
 
     if hl.capture_names == {} do
       nil
@@ -874,8 +976,16 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
   def diagnostic_signs_for_window(%{buffer: buf}) when is_pid(buf) do
     case Buffer.file_path(buf) do
       nil -> %{}
-      path -> Diagnostics.severity_by_line(SyncServer.path_to_uri(path))
+      path -> diagnostic_signs_for_path(path)
     end
+  end
+
+  @doc "Returns diagnostic signs for a buffer path."
+  @spec diagnostic_signs_for_path(String.t() | nil) :: %{non_neg_integer() => atom()}
+  def diagnostic_signs_for_path(nil), do: %{}
+
+  def diagnostic_signs_for_path(path) when is_binary(path) do
+    Diagnostics.severity_by_line(SyncServer.path_to_uri(path))
   end
 
   # ── Visual selection ───────────────────────────────────────────────────────
@@ -933,11 +1043,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
   @spec context_fingerprint(Context.t(), boolean()) ::
           MingaEditor.Window.RenderCache.context_fingerprint()
   def context_fingerprint(%Context{} = ctx, is_active) do
-    hl_id =
-      case ctx.highlight do
-        nil -> nil
-        hl -> hl.version
-      end
+    hl_id = nil
 
     {
       ctx.visual_selection,

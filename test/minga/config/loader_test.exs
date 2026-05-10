@@ -134,6 +134,27 @@ defmodule Minga.Config.LoaderTest do
     end
   end
 
+  describe "loading config with a removed agent provider" do
+    test "fails with a native-provider migration hint" do
+      {_dir, cleanup} =
+        make_config_dir("""
+        use Minga.Config
+
+        set :agent_provider, :pi_rpc
+        """)
+
+      on_exit(cleanup)
+
+      name = :"loader_legacy_provider_#{System.unique_integer([:positive])}"
+      {:ok, pid} = Loader.start_link(name: name)
+
+      error = Loader.load_error(pid)
+      assert is_binary(error)
+      assert error =~ "agent_provider no longer supports :pi_rpc"
+      assert error =~ "Use :native instead"
+    end
+  end
+
   describe "missing config file" do
     test "no error when config file does not exist" do
       empty_dir =

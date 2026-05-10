@@ -1018,6 +1018,32 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
                 }
                 messages.append(Wire.ChatMessage(beamId: beamId, content: .styledToolCall(name: stcName, summary: stcSummary, status: stcStatus, isError: stcIsError, collapsed: stcCollapsed, durationMs: stcDuration, resultLines: stcLines)))
                 pos = stcPos
+            case 0x09: // approval_tool_call
+                guard data.count >= pos + 8 else { throw ProtocolDecodeError.malformed }
+                let nameLen = Int(readU16(data, pos + 2))
+                guard data.count >= pos + 4 + nameLen + 2 else { throw ProtocolDecodeError.malformed }
+                let name = String(data: data[(pos + 4)..<(pos + 4 + nameLen)], encoding: .utf8) ?? ""
+                let summaryLen = Int(readU16(data, pos + 4 + nameLen))
+                guard data.count >= pos + 6 + nameLen + summaryLen + 2 else { throw ProtocolDecodeError.malformed }
+                let summary = String(data: data[(pos + 6 + nameLen)..<(pos + 6 + nameLen + summaryLen)], encoding: .utf8) ?? ""
+                let idLen = Int(readU16(data, pos + 6 + nameLen + summaryLen))
+                guard data.count >= pos + 8 + nameLen + summaryLen + idLen + 3 else { throw ProtocolDecodeError.malformed }
+                let toolCallId = String(data: data[(pos + 8 + nameLen + summaryLen)..<(pos + 8 + nameLen + summaryLen + idLen)], encoding: .utf8) ?? ""
+                let previewKind = data[pos + 8 + nameLen + summaryLen + idLen]
+                let lineCount = Int(readU16(data, pos + 9 + nameLen + summaryLen + idLen))
+                var approvalPos = pos + 11 + nameLen + summaryLen + idLen
+                var previewLines: [String] = []
+                previewLines.reserveCapacity(lineCount)
+                for _ in 0..<lineCount {
+                    guard data.count >= approvalPos + 2 else { throw ProtocolDecodeError.malformed }
+                    let lineLen = Int(readU16(data, approvalPos))
+                    guard data.count >= approvalPos + 2 + lineLen else { throw ProtocolDecodeError.malformed }
+                    let line = String(data: data[(approvalPos + 2)..<(approvalPos + 2 + lineLen)], encoding: .utf8) ?? ""
+                    previewLines.append(line)
+                    approvalPos += 2 + lineLen
+                }
+                messages.append(Wire.ChatMessage(beamId: beamId, content: .approvalToolCall(name: name, summary: summary, toolCallId: toolCallId, previewKind: previewKind, previewLines: previewLines)))
+                pos = approvalPos
             default:
                 break
             }

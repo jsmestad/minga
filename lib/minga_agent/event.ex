@@ -2,10 +2,10 @@ defmodule MingaAgent.Event do
   @moduledoc """
   Provider-agnostic event types for agent communication.
 
-  These structs represent the events that flow from a provider (pi RPC,
-  direct API, etc.) to the `Agent.Session`. The session uses them to
-  update conversation state, status, and UI without knowing anything
-  about the underlying provider protocol.
+  These structs represent the events that flow from a provider backend
+  to the `Agent.Session`. The session uses them to update conversation
+  state, status, and UI without knowing anything about the underlying
+  provider protocol.
   """
 
   @typedoc "Token usage statistics from a completed response."
@@ -22,6 +22,7 @@ defmodule MingaAgent.Event do
           | tool_end()
           | tool_approval()
           | tool_file_changed()
+          | system_message()
           | context_usage()
           | turn_limit_reached()
           | error()
@@ -74,6 +75,12 @@ defmodule MingaAgent.Event do
           path: String.t(),
           before_content: String.t(),
           after_content: String.t()
+        }
+
+  @typedoc "A provider-emitted system message for the chat transcript."
+  @type system_message :: %__MODULE__.SystemMessage{
+          message: String.t(),
+          level: MingaAgent.Message.system_level()
         }
 
   @typedoc "Pre-send estimated context usage."
@@ -172,6 +179,17 @@ defmodule MingaAgent.Event do
             path: String.t(),
             before_content: String.t(),
             after_content: String.t()
+          }
+  end
+
+  defmodule SystemMessage do
+    @moduledoc false
+    @enforce_keys [:message]
+    defstruct [:message, level: :info]
+
+    @type t :: %__MODULE__{
+            message: String.t(),
+            level: MingaAgent.Message.system_level()
           }
   end
 

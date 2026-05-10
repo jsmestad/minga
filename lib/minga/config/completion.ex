@@ -236,7 +236,7 @@ defmodule Minga.Config.Completion do
   defp option_description(:breakindent), do: "Preserve indentation on wrapped continuation lines."
 
   defp option_description(:agent_provider),
-    do: "AI agent backend: auto-detect, native (built-in), or pi_rpc (delegated)."
+    do: "AI agent backend: auto-detect or native (built-in)."
 
   defp option_description(:agent_model),
     do: "Override the default AI model. Nil uses the provider's default."
@@ -357,6 +357,9 @@ defmodule Minga.Config.Completion do
 
   defp option_description(:nav_flash_threshold),
     do: "Minimum line distance to trigger the navigation flash."
+
+  defp option_description(:yank_flash),
+    do: "Flash the yanked region briefly after a yank operation."
 
   defp option_description(:parser_tree_ttl),
     do: "Seconds to keep unused tree-sitter parse trees in memory."

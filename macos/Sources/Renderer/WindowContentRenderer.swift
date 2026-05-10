@@ -64,6 +64,9 @@ final class WindowContentRenderer {
     /// Updated from theme's editor_fg color slot each frame.
     var defaultFgRGB: UInt32 = 0xBBC2CF
 
+    /// Small cache for repeated syntax color conversions.
+    private var nsColorCache: [UInt32: NSColor] = [:]
+
     /// Font for pill badge text (1.5pt smaller than primary for visual hierarchy).
     private let pillFont: CTFont
 
@@ -212,10 +215,10 @@ final class WindowContentRenderer {
         let attributedString = buildAttributedString(text: row.text, spans: row.spans)
         let ctLine = CTLineCreateWithAttributedString(attributedString)
 
-        var lineAscent: CGFloat = 0
-        var lineDescent: CGFloat = 0
-        var lineLeading: CGFloat = 0
-        let lineWidth = CTLineGetTypographicBounds(ctLine, &lineAscent, &lineDescent, &lineLeading)
+        let lineWidth =
+            row.text.utf8.allSatisfy({ $0 < 0x80 })
+            ? CGFloat(row.text.utf8.count) * cellWidth
+            : CTLineGetTypographicBounds(ctLine, nil, nil, nil)
 
         let pixelWidth = min(Int(ceil(lineWidth * scale)), maxLinePixelWidth)
         guard pixelWidth > 0, linePixelHeight > 0 else { return nil }
@@ -401,6 +404,10 @@ final class WindowContentRenderer {
             return result
         }
 
+        if text.utf8.allSatisfy({ $0 < 0x80 }) {
+            return buildASCIIAttributedString(text: text, spans: spans, defaultFgColor: defaultFgColor, ligatures: ligatures)
+        }
+
         // Build display-column-to-String.Index mapping.
         // Each grapheme cluster maps to 1 or 2 display columns (CJK/fullwidth = 2).
         // columnIndex[displayCol] gives the String.Index at that display column.
@@ -478,6 +485,62 @@ final class WindowContentRenderer {
         return result
     }
 
+    private func buildASCIIAttributedString(text: String, spans: [GUIHighlightSpan], defaultFgColor: NSColor, ligatures: Int) -> NSAttributedString {
+        let result = NSMutableAttributedString()
+        let nsText = text as NSString
+        let totalDisplayCols = nsText.length
+        let defaultAttrs: [NSAttributedString.Key: Any] = [
+            .font: fontManager.primary.ctFont,
+            .foregroundColor: defaultFgColor,
+            .ligature: ligatures
+        ]
+        var lastCol = 0
+
+        for span in spans {
+            let spanStart = min(Int(span.startCol), totalDisplayCols)
+            let spanEnd = min(Int(span.endCol), totalDisplayCols)
+
+            if spanStart > lastCol {
+                appendASCII(text: nsText, start: lastCol, end: spanStart, attrs: defaultAttrs, to: result)
+            }
+
+            guard spanStart < spanEnd else { continue }
+
+            let font = resolveFont(for: span)
+            let fgColor = span.fg != 0 ? nsColor(from: span.fg) : defaultFgColor
+            var attrs: [NSAttributedString.Key: Any] = [
+                .font: font,
+                .foregroundColor: fgColor,
+                .ligature: ligatures
+            ]
+
+            if span.isUnderline {
+                attrs[.underlineStyle] = span.isCurl ? NSUnderlineStyle.thick.rawValue : NSUnderlineStyle.single.rawValue
+            }
+
+            if span.isStrikethrough {
+                attrs[.strikethroughStyle] = NSUnderlineStyle.single.rawValue
+                attrs[.strikethroughColor] = fgColor
+            }
+
+            let segment = nsText.substring(with: NSRange(location: spanStart, length: spanEnd - spanStart))
+            result.append(NSAttributedString(string: segment, attributes: attrs))
+            lastCol = spanEnd
+        }
+
+        if lastCol < totalDisplayCols {
+            appendASCII(text: nsText, start: lastCol, end: totalDisplayCols, attrs: defaultAttrs, to: result)
+        }
+
+        return result
+    }
+
+    private func appendASCII(text: NSString, start: Int, end: Int, attrs: [NSAttributedString.Key: Any], to result: NSMutableAttributedString) {
+        guard start < end else { return }
+        let segment = text.substring(with: NSRange(location: start, length: end - start))
+        result.append(NSAttributedString(string: segment, attributes: attrs))
+    }
+
     // MARK: - Display Column Mapping
 
     /// Builds a mapping from display column offset to String.Index.
@@ -544,10 +607,16 @@ final class WindowContentRenderer {
 
     /// Convert 24-bit RGB to NSColor.
     private func nsColor(from rgb: UInt32) -> NSColor {
+        if let cached = nsColorCache[rgb] {
+            return cached
+        }
+
         let r = CGFloat((rgb >> 16) & 0xFF) / 255.0
         let g = CGFloat((rgb >> 8) & 0xFF) / 255.0
         let b = CGFloat(rgb & 0xFF) / 255.0
-        return NSColor(red: r, green: g, blue: b, alpha: 1.0)
+        let color = NSColor(red: r, green: g, blue: b, alpha: 1.0)
+        nsColorCache[rgb] = color
+        return color
     }
 
 }

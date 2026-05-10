@@ -240,9 +240,6 @@ defmodule MingaEditor.Commands do
 
   # ── Agent tuple commands ──────────────────────────────────────────────────
 
-  def execute(state, {:agent_set_provider, [provider]}),
-    do: AgentCommands.set_provider(state, provider)
-
   def execute(state, {:agent_set_model, [model]}), do: AgentCommands.set_model(state, model)
 
   def execute(state, {:agent_self_insert, char}) do

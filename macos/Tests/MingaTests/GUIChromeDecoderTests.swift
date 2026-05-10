@@ -1165,6 +1165,32 @@ struct GUIAgentChatDecoderTests {
         #expect(tcResult == "file contents here")
     }
 
+    @Test("Decode gui_agent_chat with inline approval tool call (sectioned)")
+    func decodeApprovalToolCall() throws {
+        var msgs = Data()
+        appendU32(&msgs, 9)
+        msgs.append(0x09) // approval_tool_call
+        msgs.append(0) // status placeholder
+        appendString16(&msgs, "write_file")
+        appendString16(&msgs, "config.toml")
+        appendString16(&msgs, "tc_1")
+        msgs.append(3) // target preview
+        appendU16(&msgs, 2)
+        appendString16(&msgs, "file: config.toml")
+        appendString16(&msgs, "1 edit(s)")
+
+        let data = buildChatData(status: 2, model: "claude", messages: buildMessagesPayload(count: 1, msgs))
+        let (cmd, _) = try decodeCommand(data: data, offset: 0)
+        guard case .guiAgentChat(_, _, _, _, _, _, _, _, _, _, _, _, _, _, let messages) = cmd else { Issue.record("Expected .guiAgentChat"); return }
+        guard messages.count == 1 else { Issue.record("Expected 1 message"); return }
+        guard case .approvalToolCall(let name, let summary, let toolCallId, let previewKind, let previewLines) = messages[0].content else { Issue.record("Expected .approvalToolCall"); return }
+        #expect(name == "write_file")
+        #expect(summary == "config.toml")
+        #expect(toolCallId == "tc_1")
+        #expect(previewKind == 3)
+        #expect(previewLines == ["file: config.toml", "1 edit(s)"])
+    }
+
     @Test("Decode gui_agent_chat with system message (sectioned)")
     func decodeSystem() throws {
         var msgs = Data()

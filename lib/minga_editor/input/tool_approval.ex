@@ -1,6 +1,6 @@
 defmodule MingaEditor.Input.ToolApproval do
   @moduledoc """
-  Input handler for the tool approval sub-state (y/n/Y/N).
+  Input handler for the tool approval sub-state (y/n/Y).
 
   Active when `agent.pending_approval` is non-nil and the panel
   input is not focused. Handles y (approve), n (deny), Y (approve all),
@@ -31,6 +31,6 @@ defmodule MingaEditor.Input.ToolApproval do
   @spec dispatch_approval(EditorState.t(), non_neg_integer()) :: EditorState.t()
   defp dispatch_approval(state, ?y), do: Commands.execute(state, :agent_approve_tool)
   defp dispatch_approval(state, ?n), do: Commands.execute(state, :agent_deny_tool)
-  defp dispatch_approval(state, ?Y), do: Commands.execute(state, :agent_approve_tool)
+  defp dispatch_approval(state, ?Y), do: Commands.execute(state, :agent_approve_all_tools)
   defp dispatch_approval(state, _cp), do: state
 end

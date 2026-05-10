@@ -85,7 +85,18 @@ defmodule MingaEditor.Commands.Visual do
     # since the primary use case is copying text out of the chat.
     if agent_chat_window?(state), do: Minga.Clipboard.write(yanked)
 
-    state
+    {flash_start, flash_end} =
+      case visual_type do
+        :char ->
+          Helpers.sort_positions(anchor, cursor)
+
+        :line ->
+          {anchor_line, _} = anchor
+          {cursor_line, _} = cursor
+          {{min(anchor_line, cursor_line), 0}, {max(anchor_line, cursor_line), 0}}
+      end
+
+    Helpers.maybe_start_yank_flash(state, buf, flash_start, flash_end, reg_type)
   end
 
   def execute(

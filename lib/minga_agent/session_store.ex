@@ -15,25 +15,37 @@ defmodule MingaAgent.SessionStore do
   @type session_meta :: %{
           id: String.t(),
           timestamp: String.t(),
+          last_message_at: String.t(),
+          title: String.t(),
           model_name: String.t(),
+          provider_name: String.t(),
           preview: String.t(),
+          recent_messages: String.t(),
           message_count: non_neg_integer(),
+          turn_count: non_neg_integer(),
           cost: float()
         }
 
   @typedoc "Full session data for save/load."
   @type session_data :: %{
-          id: String.t(),
-          timestamp: String.t(),
-          model_name: String.t(),
-          messages: [map()],
-          usage: map()
+          required(:id) => String.t(),
+          required(:timestamp) => String.t(),
+          required(:model_name) => String.t(),
+          required(:messages) => [MingaAgent.Message.t()],
+          required(:usage) => MingaAgent.TurnUsage.t(),
+          optional(:last_message_at) => String.t(),
+          optional(:title) => String.t(),
+          optional(:provider_name) => String.t(),
+          optional(:branches) => [MingaAgent.Branch.t()],
+          optional(:memory) => String.t() | nil
         }
 
   @doc "Returns the sessions directory path."
-  @spec sessions_dir() :: String.t()
-  def sessions_dir do
-    config_dir = System.get_env("XDG_CONFIG_HOME") || Path.join(System.user_home!(), ".config")
+  @spec sessions_dir(String.t() | nil) :: String.t()
+  def sessions_dir(config_dir \\ nil) do
+    config_dir =
+      config_dir || System.get_env("XDG_CONFIG_HOME") || Path.join(System.user_home!(), ".config")
+
     Path.join([config_dir, "minga", "agent", "sessions"])
   end
 
@@ -43,19 +55,18 @@ defmodule MingaAgent.SessionStore do
   Creates the sessions directory if it doesn't exist. Writes atomically
   via a temp file to avoid corruption.
   """
-  @spec save(session_data()) :: :ok | {:error, term()}
-  def save(%{id: id} = data) when is_binary(id) do
-    dir = sessions_dir()
-    File.mkdir_p!(dir)
+  @spec save(session_data(), String.t() | nil) :: :ok | {:error, term()}
+  def save(%{id: id} = data, config_dir \\ nil) when is_binary(id) do
+    dir = sessions_dir(config_dir)
     path = Path.join(dir, "#{id}.json")
     tmp_path = path <> ".tmp"
-
     json = JSON.encode!(serialize(data))
 
-    case File.write(tmp_path, json) do
-      :ok ->
-        File.rename(tmp_path, path)
-
+    with :ok <- File.mkdir_p(dir),
+         :ok <- File.write(tmp_path, json),
+         :ok <- File.rename(tmp_path, path) do
+      :ok
+    else
       {:error, reason} ->
         Minga.Log.warning(:agent, "[SessionStore] failed to save #{id}: #{reason}")
         {:error, reason}
@@ -67,9 +78,9 @@ defmodule MingaAgent.SessionStore do
 
   Returns `{:ok, session_data}` or `{:error, reason}`.
   """
-  @spec load(String.t()) :: {:ok, session_data()} | {:error, term()}
-  def load(session_id) when is_binary(session_id) do
-    path = Path.join(sessions_dir(), "#{session_id}.json")
+  @spec load(String.t(), String.t() | nil) :: {:ok, session_data()} | {:error, term()}
+  def load(session_id, config_dir \\ nil) when is_binary(session_id) do
+    path = Path.join(sessions_dir(config_dir), "#{session_id}.json")
 
     with {:ok, json} <- File.read(path),
          {:ok, data} <- decode_json(json) do
@@ -80,11 +91,11 @@ defmodule MingaAgent.SessionStore do
   @doc """
   Lists all saved sessions as metadata (without full messages).
 
-  Returns sessions sorted by timestamp, most recent first.
+  Returns sessions sorted by last message timestamp, most recent first.
   """
-  @spec list() :: [session_meta()]
-  def list do
-    dir = sessions_dir()
+  @spec list(String.t() | nil) :: [session_meta()]
+  def list(config_dir \\ nil) do
+    dir = sessions_dir(config_dir)
 
     case File.ls(dir) do
       {:ok, files} ->
@@ -93,7 +104,7 @@ defmodule MingaAgent.SessionStore do
         |> Enum.reject(&String.ends_with?(&1, ".tmp"))
         |> Enum.map(fn file -> load_meta(Path.join(dir, file)) end)
         |> Enum.reject(&is_nil/1)
-        |> Enum.sort_by(& &1.timestamp, :desc)
+        |> Enum.sort_by(& &1.last_message_at, :desc)
 
       {:error, _} ->
         []
@@ -101,16 +112,16 @@ defmodule MingaAgent.SessionStore do
   end
 
   @doc "Deletes a saved session."
-  @spec delete(String.t()) :: :ok | {:error, term()}
-  def delete(session_id) when is_binary(session_id) do
-    path = Path.join(sessions_dir(), "#{session_id}.json")
+  @spec delete(String.t(), String.t() | nil) :: :ok | {:error, term()}
+  def delete(session_id, config_dir \\ nil) when is_binary(session_id) do
+    path = Path.join(sessions_dir(config_dir), "#{session_id}.json")
     File.rm(path)
   end
 
   @doc "Deletes all saved sessions."
-  @spec clear_all() :: :ok
-  def clear_all do
-    dir = sessions_dir()
+  @spec clear_all(String.t() | nil) :: :ok
+  def clear_all(config_dir \\ nil) do
+    dir = sessions_dir(config_dir)
 
     case File.ls(dir) do
       {:ok, files} ->
@@ -128,16 +139,16 @@ defmodule MingaAgent.SessionStore do
 
   Returns the number of sessions deleted.
   """
-  @spec prune(non_neg_integer()) :: non_neg_integer()
-  def prune(days) when is_integer(days) and days > 0 do
+  @spec prune(non_neg_integer(), String.t() | nil) :: non_neg_integer()
+  def prune(days, config_dir \\ nil) when is_integer(days) and days > 0 do
     cutoff = DateTime.add(DateTime.utc_now(), -days * 86_400, :second)
     cutoff_str = DateTime.to_iso8601(cutoff)
 
     pruned =
-      list()
+      list(config_dir)
       |> Enum.filter(fn meta -> meta.timestamp < cutoff_str end)
 
-    Enum.each(pruned, fn meta -> delete(meta.id) end)
+    Enum.each(pruned, fn meta -> delete(meta.id, config_dir) end)
     length(pruned)
   end
 
@@ -145,17 +156,28 @@ defmodule MingaAgent.SessionStore do
 
   @spec serialize(session_data()) :: map()
   defp serialize(data) do
+    messages = Map.get(data, :messages, [])
+    timestamp = Map.get(data, :timestamp) || DateTime.to_iso8601(DateTime.utc_now())
+
     %{
       "id" => data.id,
-      "timestamp" => data.timestamp,
+      "timestamp" => timestamp,
+      "last_message_at" => Map.get(data, :last_message_at, timestamp),
+      "title" => Map.get(data, :title) || title_from_messages(messages),
       "model_name" => data.model_name,
-      "messages" => Enum.map(data.messages, &serialize_message/1),
-      "usage" => serialize_usage(data.usage)
+      "provider_name" => Map.get(data, :provider_name, "unknown"),
+      "messages" => Enum.map(messages, &serialize_message/1),
+      "usage" => serialize_usage(data.usage),
+      "branches" => Enum.map(Map.get(data, :branches, []), &serialize_branch/1),
+      "memory" => Map.get(data, :memory)
     }
   end
 
   @spec serialize_message(MingaAgent.Message.t()) :: map()
-  defp serialize_message({:user, text, _attachments}), do: %{"type" => "user", "text" => text}
+  defp serialize_message({:user, text, attachments}) do
+    %{"type" => "user", "text" => text, "attachments" => attachments}
+  end
+
   defp serialize_message({:user, text}), do: %{"type" => "user", "text" => text}
   defp serialize_message({:assistant, text}), do: %{"type" => "assistant", "text" => text}
 
@@ -197,16 +219,34 @@ defmodule MingaAgent.SessionStore do
 
   @spec deserialize(map()) :: session_data()
   defp deserialize(data) do
-    %{
+    messages = Enum.map(data["messages"] || [], &deserialize_message/1)
+    timestamp = data["timestamp"] || ""
+
+    session = %{
       id: data["id"],
-      timestamp: data["timestamp"],
+      timestamp: timestamp,
+      last_message_at: data["last_message_at"] || timestamp,
+      title: data["title"] || title_from_messages(messages),
       model_name: data["model_name"] || "unknown",
-      messages: Enum.map(data["messages"] || [], &deserialize_message/1),
-      usage: deserialize_turn_usage(data["usage"] || %{})
+      provider_name: data["provider_name"] || "unknown",
+      messages: messages,
+      usage: deserialize_turn_usage(data["usage"] || %{}),
+      branches: Enum.map(data["branches"] || [], &deserialize_branch/1)
     }
+
+    if Map.has_key?(data, "memory") do
+      Map.put(session, :memory, data["memory"])
+    else
+      session
+    end
   end
 
   @spec deserialize_message(map()) :: MingaAgent.Message.t()
+  defp deserialize_message(%{"type" => "user", "text" => text, "attachments" => attachments})
+       when is_list(attachments) do
+    {:user, text, Enum.map(attachments, &deserialize_attachment/1)}
+  end
+
   defp deserialize_message(%{"type" => "user", "text" => text}), do: {:user, text}
   defp deserialize_message(%{"type" => "assistant", "text" => text}), do: {:assistant, text}
 
@@ -220,7 +260,7 @@ defmodule MingaAgent.SessionStore do
        id: raw["id"],
        name: raw["name"],
        args: raw["args"] || %{},
-       status: String.to_existing_atom(raw["status"] || "complete"),
+       status: deserialize_tool_status(raw["status"]),
        result: raw["result"] || "",
        is_error: raw["is_error"] || false,
        collapsed: raw["collapsed"] || true,
@@ -230,7 +270,7 @@ defmodule MingaAgent.SessionStore do
   end
 
   defp deserialize_message(%{"type" => "system", "text" => text, "level" => level}) do
-    {:system, text, String.to_existing_atom(level)}
+    {:system, text, deserialize_system_level(level)}
   end
 
   defp deserialize_message(%{"type" => "usage", "data" => data}) do
@@ -240,6 +280,42 @@ defmodule MingaAgent.SessionStore do
   # Fallback for unknown message types
   defp deserialize_message(%{"type" => type} = msg) do
     {:system, "Unknown message type: #{type} - #{inspect(msg)}", :info}
+  end
+
+  @spec deserialize_attachment(map()) :: MingaAgent.Message.image_attachment()
+  defp deserialize_attachment(attachment) do
+    %{
+      filename: attachment["filename"] || attachment[:filename] || "image",
+      size_kb: attachment["size_kb"] || attachment[:size_kb] || 0
+    }
+  end
+
+  @spec deserialize_tool_status(String.t() | nil) :: MingaAgent.ToolCall.status()
+  defp deserialize_tool_status("running"), do: :running
+  defp deserialize_tool_status("complete"), do: :complete
+  defp deserialize_tool_status("error"), do: :error
+  defp deserialize_tool_status(_status), do: :complete
+
+  @spec deserialize_system_level(String.t() | nil) :: MingaAgent.Message.system_level()
+  defp deserialize_system_level("error"), do: :error
+  defp deserialize_system_level(_level), do: :info
+
+  @spec serialize_branch(MingaAgent.Branch.t()) :: map()
+  defp serialize_branch(%MingaAgent.Branch{} = branch) do
+    %{
+      "name" => branch.name,
+      "messages" => Enum.map(branch.messages, &serialize_message/1),
+      "created_at" => DateTime.to_iso8601(branch.created_at)
+    }
+  end
+
+  @spec deserialize_branch(map()) :: MingaAgent.Branch.t()
+  defp deserialize_branch(data) do
+    %MingaAgent.Branch{
+      name: data["name"] || "branch",
+      messages: Enum.map(data["messages"] || [], &deserialize_message/1),
+      created_at: parse_datetime(data["created_at"])
+    }
   end
 
   @spec deserialize_turn_usage(map()) :: MingaAgent.TurnUsage.t()
@@ -253,6 +329,16 @@ defmodule MingaAgent.SessionStore do
     }
   end
 
+  @spec parse_datetime(String.t() | nil) :: DateTime.t()
+  defp parse_datetime(nil), do: DateTime.utc_now()
+
+  defp parse_datetime(value) do
+    case DateTime.from_iso8601(value) do
+      {:ok, dt, _offset} -> dt
+      _ -> DateTime.utc_now()
+    end
+  end
+
   # ── Private: metadata extraction ───────────────────────────────────────────
 
   @spec load_meta(String.t()) :: session_meta() | nil
@@ -260,29 +346,96 @@ defmodule MingaAgent.SessionStore do
     with {:ok, json} <- File.read(path),
          {:ok, data} <- decode_json(json) do
       messages = data["messages"] || []
-      first_user = Enum.find(messages, fn m -> m["type"] == "user" end)
-
-      preview =
-        case first_user do
-          %{"text" => text} -> String.slice(text, 0, 80)
-          nil -> "(empty)"
-        end
-
-      total_cost =
-        messages
-        |> Enum.filter(fn m -> m["type"] == "usage" end)
-        |> Enum.reduce(0.0, fn m, acc -> acc + (get_in(m, ["data", "cost"]) || 0.0) end)
+      preview = first_user_preview(messages)
+      timestamp = data["timestamp"] || ""
+      last_message_at = data["last_message_at"] || timestamp
 
       %{
         id: data["id"],
-        timestamp: data["timestamp"] || "",
+        timestamp: timestamp,
+        last_message_at: last_message_at,
+        title: data["title"] || preview,
         model_name: data["model_name"] || "unknown",
+        provider_name: data["provider_name"] || "unknown",
         preview: preview,
+        recent_messages: recent_messages(messages),
         message_count: length(messages),
-        cost: total_cost
+        turn_count: count_user_messages(messages),
+        cost: total_cost(data, messages)
       }
     else
       _ -> nil
+    end
+  end
+
+  @spec title_from_messages([MingaAgent.Message.t()]) :: String.t()
+  defp title_from_messages(messages) do
+    messages
+    |> Enum.find_value(fn
+      {:user, text} when is_binary(text) -> text
+      {:user, text, _attachments} when is_binary(text) -> text
+      _ -> nil
+    end)
+    |> readable_title()
+  end
+
+  @spec first_user_preview([map()]) :: String.t()
+  defp first_user_preview(messages) do
+    messages
+    |> Enum.find_value(fn
+      %{"type" => "user", "text" => text} when is_binary(text) -> text
+      _ -> nil
+    end)
+    |> readable_title()
+  end
+
+  @spec readable_title(String.t() | nil) :: String.t()
+  defp readable_title(nil), do: "(empty)"
+
+  defp readable_title(text) do
+    text
+    |> String.split("\n")
+    |> hd()
+    |> String.trim()
+    |> truncate(80)
+    |> case do
+      "" -> "(empty)"
+      title -> title
+    end
+  end
+
+  @spec recent_messages([map()]) :: String.t()
+  defp recent_messages(messages) do
+    messages
+    |> Enum.reverse()
+    |> Enum.filter(fn m -> m["type"] in ["user", "assistant"] end)
+    |> Enum.take(6)
+    |> Enum.reverse()
+    |> Enum.map_join(" ", fn m -> m["text"] || "" end)
+    |> String.replace(~r/\s+/, " ")
+    |> String.trim()
+    |> truncate(240)
+  end
+
+  @spec count_user_messages([map()]) :: non_neg_integer()
+  defp count_user_messages(messages) do
+    Enum.count(messages, fn m -> m["type"] == "user" end)
+  end
+
+  @spec total_cost(map(), [map()]) :: float()
+  defp total_cost(data, messages) do
+    case data["usage"] do
+      %{"cost" => cost} when is_number(cost) -> cost
+      _ -> Enum.reduce(messages, 0.0, fn m, acc -> acc + (get_in(m, ["data", "cost"]) || 0.0) end)
+    end
+  end
+
+  @spec truncate(String.t(), pos_integer()) :: String.t()
+  defp truncate(text, max_length) do
+    if String.length(text) > max_length do
+      String.slice(text, 0, max_length - 3) <> "..."
+    else
+      text
     end
   end
 

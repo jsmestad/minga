@@ -314,11 +314,11 @@ fn cellToStyle(cell: Cell) vaxis.Cell.Style {
 var g_winch: std.atomic.Value(bool) = .init(false);
 var g_quit: std.atomic.Value(bool) = .init(false);
 
-fn sigwinchHandler(_: c_int) callconv(.c) void {
+fn sigwinchHandler(_: std.posix.SIG) callconv(.c) void {
     g_winch.store(true, .release);
 }
 
-fn sigquitHandler(_: c_int) callconv(.c) void {
+fn sigquitHandler(_: std.posix.SIG) callconv(.c) void {
     g_quit.store(true, .release);
 }
 
@@ -369,7 +369,7 @@ pub const TuiRuntime = struct {
             return err;
         };
 
-        self.vx = try vaxis.init(alloc, .{
+        self.vx = try vaxis.init(root.g_io, alloc, root.g_env_map, .{
             // Request only "disambiguate" from the Kitty keyboard protocol.
             // This lets the terminal report modifiers on keys like Enter
             // (so Shift+Enter differs from Enter) without the side effects
@@ -385,7 +385,7 @@ pub const TuiRuntime = struct {
         });
 
         // Allocate screen buffers at the real terminal size.
-        const initial_ws = try vaxis.Tty.getWinsize(self.tty.fd);
+        const initial_ws = try self.tty.getWinsize();
         try self.vx.resize(alloc, self.tty.writer(), initial_ws);
 
         // Save the current terminal title so we can restore it on exit.
@@ -428,8 +428,8 @@ pub const TuiRuntime = struct {
         // final location on the caller's stack. init() returns by value, so
         // any stored pointers to self's fields (especially tty_write_buf)
         // are stale. We must reinitialize them here where self is stable.
-        const tty_file = std.fs.File{ .handle = self.tty.fd };
-        self.tty.tty_writer = .initStreaming(tty_file, &self.tty_write_buf);
+        self.tty.tty_writer = self.tty.fd.writerStreaming(root.g_io, &self.tty_write_buf);
+        vaxis.tty.global_tty = self.tty;
         self.surface.vx = &self.vx;
         self.surface.tty_writer = self.tty.writer();
         self.rend.surface = &self.surface;
@@ -454,14 +454,14 @@ pub const TuiRuntime = struct {
         // The ready event must be sent before entering non-blocking mode,
         // because the BEAM waits for it synchronously before proceeding.
         var stdout_buf: [4096]u8 = undefined;
-        var stdout_writer_obj = std.fs.File.stdout().writer(&stdout_buf);
+        var stdout_writer_obj = std.Io.File.stdout().writer(root.g_io, &stdout_buf);
         const blocking_stdout: *std.Io.Writer = &stdout_writer_obj.interface;
 
         // Enable log routing for startup messages (before event loop).
         root.g_port_writer = blocking_stdout;
 
         // Send ready event with initial dimensions and default capabilities.
-        const initial_ws = try vaxis.Tty.getWinsize(self.tty.fd);
+        const initial_ws = try self.tty.getWinsize();
         self.last_cols = initial_ws.cols;
         self.last_rows = initial_ws.rows;
         var ready_payload: [13]u8 = undefined;
@@ -514,7 +514,7 @@ pub const TuiRuntime = struct {
         // stdout (Zig→BEAM events, only polled when there's pending data).
         var pollfds = [3]std.posix.pollfd{
             .{ .fd = stdin_fd, .events = std.posix.POLL.IN, .revents = 0 },
-            .{ .fd = self.tty.fd, .events = std.posix.POLL.IN, .revents = 0 },
+            .{ .fd = self.tty.fd.handle, .events = std.posix.POLL.IN, .revents = 0 },
             .{ .fd = stdout_fd, .events = 0, .revents = 0 },
         };
 
@@ -614,15 +614,17 @@ pub const TuiRuntime = struct {
 
             // tty readable (terminal input)
             if (pollfds[1].revents & std.posix.POLL.IN != 0) {
-                const n = try std.posix.read(self.tty.fd, tty_read_buf[tty_read_start..]);
+                const read_start = tty_read_start;
+                const n = try self.tty.read(tty_read_buf[read_start..]);
                 if (n == 0) break :main_loop;
 
+                const total_read = read_start + n;
                 var seq_start: usize = 0;
-                tty_parse_loop: while (seq_start < n) {
-                    const result = try tty_parser.parse(tty_read_buf[seq_start..n], null);
+                tty_parse_loop: while (seq_start < total_read) {
+                    const result = try tty_parser.parse(tty_read_buf[seq_start..total_read], null);
                     if (result.n == 0) {
-                        const remaining_bytes = n - seq_start;
-                        std.mem.copyForwards(u8, tty_read_buf[0..remaining_bytes], tty_read_buf[seq_start..n]);
+                        const remaining_bytes = total_read - seq_start;
+                        std.mem.copyForwards(u8, tty_read_buf[0..remaining_bytes], tty_read_buf[seq_start..total_read]);
                         tty_read_start = remaining_bytes;
                         break :tty_parse_loop;
                     }
@@ -653,14 +655,14 @@ pub const TuiRuntime = struct {
     }
 
     fn pollResize(self: *TuiRuntime, pw: *port_writer) !void {
-        const ws = vaxis.Tty.getWinsize(self.tty.fd) catch return;
+        const ws = self.tty.getWinsize() catch return;
         if (ws.cols != self.last_cols or ws.rows != self.last_rows) {
             try self.applyResize(pw, ws);
         }
     }
 
     fn handleResize(self: *TuiRuntime, pw: *port_writer) !void {
-        const ws = try vaxis.Tty.getWinsize(self.tty.fd);
+        const ws = try self.tty.getWinsize();
         try self.applyResize(pw, ws);
     }
 
@@ -689,21 +691,27 @@ pub const TuiRuntime = struct {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /// Initializes a PosixTty, preferring the MINGA_TTY env var over /dev/tty.
+///
+/// The standard vaxis.Tty.init() always opens /dev/tty. We need custom
+/// initialization to support the MINGA_TTY env var, which lets the BEAM
+/// VM tell the renderer which TTY to use.
 fn initTty(buffer: []u8) !vaxis.Tty {
     const posix = std.posix;
+    const io = root.g_io;
 
-    const tty_path: [*:0]const u8 = std.posix.getenvZ("MINGA_TTY") orelse "/dev/tty";
+    const tty_path: [*:0]const u8 = std.c.getenv("MINGA_TTY") orelse "/dev/tty";
     std.log.info("Opening tty: {s}", .{tty_path});
 
-    const fd = try posix.openZ(tty_path, .{ .ACCMODE = .RDWR }, 0);
+    const fd = try posix.openatZ(posix.AT.FDCWD, tty_path, .{ .ACCMODE = .RDWR }, 0);
     const termios = try vaxis.Tty.makeRaw(fd);
 
-    const file = std.fs.File{ .handle = fd };
+    const file = std.Io.File{ .handle = fd, .flags = .{ .nonblocking = false } };
 
     const tty: vaxis.Tty = .{
-        .fd = fd,
+        .io = io,
+        .fd = file,
         .termios = termios,
-        .tty_writer = .initStreaming(file, buffer),
+        .tty_writer = file.writerStreaming(io, buffer),
     };
 
     vaxis.tty.global_tty = tty;
@@ -837,7 +845,7 @@ fn handleTtyEvent(self: *TuiRuntime, event: vaxis.Event, pw: *port_writer, recov
         .cap_color_scheme_updates => vx.caps.color_scheme_updates = true,
         .cap_multi_cursor => vx.caps.multi_cursor = true,
         .cap_da1 => {
-            std.Thread.Futex.wake(&vx.query_futex, 10);
+            std.Io.futexWake(vx.io, std.atomic.Value(u32), &vx.query_futex, 10);
             vx.queries_done.store(true, .unordered);
 
             try vx.enableDetectedFeatures(self.tty.writer());
@@ -981,16 +989,16 @@ test "cellToStyle max color values" {
 
 test "readExact on empty buf succeeds immediately" {
     if (builtin.os.tag == .windows) return error.SkipZigTest;
-    const fd = try std.posix.open("/dev/null", .{ .ACCMODE = .RDONLY }, 0);
-    defer std.posix.close(fd);
+    const fd = try std.posix.openatZ(std.posix.AT.FDCWD, "/dev/null", .{ .ACCMODE = .RDONLY }, 0);
+    defer _ = std.c.close(fd);
     const result = try readExact(fd, &[_]u8{});
     try std.testing.expect(result == true);
 }
 
 test "readExact returns false on EOF reading from /dev/null" {
     if (builtin.os.tag == .windows) return error.SkipZigTest;
-    const fd = try std.posix.open("/dev/null", .{ .ACCMODE = .RDONLY }, 0);
-    defer std.posix.close(fd);
+    const fd = try std.posix.openatZ(std.posix.AT.FDCWD, "/dev/null", .{ .ACCMODE = .RDONLY }, 0);
+    defer _ = std.c.close(fd);
     var buf: [4]u8 = undefined;
     const result = try readExact(fd, &buf);
     try std.testing.expect(result == false);
@@ -998,11 +1006,12 @@ test "readExact returns false on EOF reading from /dev/null" {
 
 test "readExact pipe: reads exact bytes written" {
     if (builtin.os.tag == .windows) return error.SkipZigTest;
-    const fds = try std.posix.pipe();
-    defer std.posix.close(fds[0]);
-    defer std.posix.close(fds[1]);
+    var fds: [2]std.posix.fd_t = undefined;
+    if (std.c.pipe(&fds) != 0) return error.PipeCreateFailed;
+    defer _ = std.c.close(fds[0]);
+    defer _ = std.c.close(fds[1]);
     const payload: []const u8 = "ABCD";
-    _ = try std.posix.write(fds[1], payload);
+    _ = std.c.write(fds[1], payload.ptr, payload.len);
     var buf: [4]u8 = undefined;
     const result = try readExact(fds[0], &buf);
     try std.testing.expect(result == true);
@@ -1011,11 +1020,12 @@ test "readExact pipe: reads exact bytes written" {
 
 test "readExact assembles bytes from partial writes" {
     if (builtin.os.tag == .windows) return error.SkipZigTest;
-    const fds = try std.posix.pipe();
-    defer std.posix.close(fds[0]);
-    defer std.posix.close(fds[1]);
-    _ = try std.posix.write(fds[1], "AB");
-    _ = try std.posix.write(fds[1], "CD");
+    var fds: [2]std.posix.fd_t = undefined;
+    if (std.c.pipe(&fds) != 0) return error.PipeCreateFailed;
+    defer _ = std.c.close(fds[0]);
+    defer _ = std.c.close(fds[1]);
+    _ = std.c.write(fds[1], "AB", 2);
+    _ = std.c.write(fds[1], "CD", 2);
     var buf: [4]u8 = undefined;
     const result = try readExact(fds[0], &buf);
     try std.testing.expect(result == true);

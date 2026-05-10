@@ -764,7 +764,8 @@ defmodule MingaEditor.Frontend.Emit.GUI do
       # Use cached styled runs for assistant messages when available.
       # This avoids recomputing tree-sitter/markdown styling per frame.
       styled_cache = ctx.agent_ui.panel.cached_styled_messages
-      gui_messages = build_gui_messages(messages_with_ids, styled_cache)
+      pending_approval = ctx.shell_state.agent.pending_approval
+      gui_messages = build_gui_messages(messages_with_ids, styled_cache, pending_approval)
 
       view = ctx.agent_ui.view
       help_visible = view.help_visible
@@ -789,7 +790,7 @@ defmodule MingaEditor.Frontend.Emit.GUI do
         status: ctx.shell_state.agent.runtime.status || :idle,
         model: ctx.agent_ui.panel.model_name,
         prompt: prompt_text,
-        pending_approval: ctx.shell_state.agent.pending_approval,
+        pending_approval: nil,
         help_visible: help_visible,
         help_groups: help_groups,
         prompt_line_count: UIState.input_line_count(panel),
@@ -811,27 +812,52 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   # Input: list of `{id, Message.t()}` pairs from `messages_with_ids/1`.
   # Uses Enum.zip (O(n)) instead of Enum.at in a loop (O(n²)) since this
   # runs every render frame at 60fps.
-  @spec build_gui_messages([{pos_integer(), term()}], [term()] | nil) :: [{pos_integer(), term()}]
-  defp build_gui_messages(messages_with_ids, nil), do: messages_with_ids
+  @spec build_gui_messages([{pos_integer(), term()}], [term()] | nil, map() | nil) :: [
+          {pos_integer(), term()}
+        ]
+  defp build_gui_messages(messages_with_ids, nil, pending_approval) do
+    Enum.map(messages_with_ids, &maybe_inline_approval(&1, pending_approval))
+  end
 
-  defp build_gui_messages(messages_with_ids, styled_cache) when is_list(styled_cache) do
+  defp build_gui_messages(messages_with_ids, styled_cache, pending_approval)
+       when is_list(styled_cache) do
     # Pad the cache to match message length if needed (messages may have grown)
     padded = pad_cache(styled_cache, length(messages_with_ids))
 
     Enum.zip(messages_with_ids, padded)
-    |> Enum.map(&maybe_style_message/1)
+    |> Enum.map(&maybe_style_message(&1, pending_approval))
   end
 
-  @spec maybe_style_message({{pos_integer(), term()}, term()}) :: {pos_integer(), term()}
-  defp maybe_style_message({{id, {:assistant, _text} = msg}, nil}), do: {id, msg}
+  @spec maybe_style_message({{pos_integer(), term()}, term()}, map() | nil) ::
+          {pos_integer(), term()}
+  defp maybe_style_message({{id, {:assistant, _text} = msg}, nil}, _pending_approval),
+    do: {id, msg}
 
-  defp maybe_style_message({{id, {:assistant, _text}}, styled_lines}),
+  defp maybe_style_message({{id, {:assistant, _text}}, styled_lines}, _pending_approval),
     do: {id, {:styled_assistant, styled_lines}}
 
-  defp maybe_style_message({{id, {:tool_call, tc}}, styled_lines}) when is_list(styled_lines),
-    do: {id, {:styled_tool_call, tc, styled_lines}}
+  defp maybe_style_message({{id, {:tool_call, tc} = msg}, styled_lines}, pending_approval) do
+    case maybe_inline_approval({id, msg}, pending_approval) do
+      {^id, {:approval_tool_call, _tc, _approval}} = approval_message ->
+        approval_message
 
-  defp maybe_style_message({{id, msg}, _cache_entry}), do: {id, msg}
+      {^id, {:tool_call, _tc}} when is_list(styled_lines) ->
+        {id, {:styled_tool_call, tc, styled_lines}}
+
+      unchanged ->
+        unchanged
+    end
+  end
+
+  defp maybe_style_message({{id, msg}, _cache_entry}, _pending_approval), do: {id, msg}
+
+  @spec maybe_inline_approval({pos_integer(), term()}, map() | nil) :: {pos_integer(), term()}
+  defp maybe_inline_approval({id, {:tool_call, tc}}, %{tool_call_id: tool_call_id} = approval)
+       when tc.id == tool_call_id do
+    {id, {:approval_tool_call, tc, approval}}
+  end
+
+  defp maybe_inline_approval({id, msg}, _pending_approval), do: {id, msg}
 
   @spec pad_cache([term()], non_neg_integer()) :: [term()]
   defp pad_cache(cache, target_len) when length(cache) >= target_len, do: cache

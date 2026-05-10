@@ -35,6 +35,7 @@ defmodule Minga.Config.Options do
   | `:breakindent`          | boolean                                    | `true`     |
   | `:agent_tool_approval`  | `:destructive`, `:all`, or `:none`          | `:destructive` |
   | `:agent_destructive_tools` | list of tool name strings                | `["write_file", "edit_file", "shell"]` |
+  | `:agent_hooks`            | list of agent hook declarations            | `[]`       |
   | `:agent_panel_split`      | positive integer (30-80)                   | `65`       |
   | `:startup_view`           | `:agent` or `:editor`                       | `:agent`   |
   | `:agent_auto_context`     | boolean                                     | `true`     |
@@ -49,6 +50,7 @@ defmodule Minga.Config.Options do
   | `:cursorline`             | boolean                                        | `true`    |
   | `:nav_flash`              | boolean                                        | `true`    |
   | `:nav_flash_threshold`    | positive integer                               | `5`       |
+  | `:yank_flash`             | boolean                                        | `true`    |
   | `:log_level`              | `:debug` / `:info` / `:warning` / `:error` / `:none` | `:info` |
   | `:log_level_render`       | log level or `:default`                     | `:default`  |
   | `:log_level_lsp`          | log level or `:default`                     | `:default`  |
@@ -108,6 +110,7 @@ defmodule Minga.Config.Options do
           | :agent_tool_approval
           | :agent_destructive_tools
           | :agent_tool_permissions
+          | :agent_hooks
           | :agent_session_retention_days
           | :agent_panel_split
           | :startup_view
@@ -233,12 +236,13 @@ defmodule Minga.Config.Options do
     {:wrap, :boolean, false},
     {:linebreak, :boolean, true},
     {:breakindent, :boolean, true},
-    {:agent_provider, {:enum, [:auto, :native, :pi_rpc]}, :auto},
+    {:agent_provider, {:enum, [:auto, :native]}, :auto},
     {:agent_model, :string_or_nil, nil},
     {:agent_tool_approval, {:enum, [:destructive, :all, :none]}, :destructive},
     {:agent_destructive_tools, :string_list,
      ["write_file", "edit_file", "multi_edit_file", "shell", "git_stage", "git_commit", "rename"]},
     {:agent_tool_permissions, :map_or_nil, nil},
+    {:agent_hooks, :any, []},
     {:agent_session_retention_days, :pos_integer, 30},
     {:agent_panel_split, :pos_integer, 65},
     {:startup_view, {:enum, [:agent, :editor]}, :agent},
@@ -269,6 +273,7 @@ defmodule Minga.Config.Options do
     {:cursorline, :boolean, true},
     {:nav_flash, :boolean, true},
     {:nav_flash_threshold, :pos_integer, 5},
+    {:yank_flash, :boolean, true},
     {:whichkey_layout, {:enum, [:bottom, :float]}, :bottom},
     {:line_spacing, :float_or_nil, 1.0},
     {:font_family, :string, "Menlo"},
@@ -738,6 +743,10 @@ defmodule Minga.Config.Options do
     {:error, "#{name} must be an atom, got: #{inspect(value)}"}
   end
 
+  defp validate_type({:enum, _allowed}, :agent_provider, :pi_rpc) do
+    {:error, "agent_provider no longer supports :pi_rpc. Use :native instead."}
+  end
+
   defp validate_type({:enum, allowed}, name, value) when is_atom(value) do
     if value in allowed do
       :ok
@@ -791,8 +800,8 @@ defmodule Minga.Config.Options do
   end
 
   # :any is used for options whose values are complex types (lists of atoms,
-  # nested keywords) that don't fit the simple type validators. Currently only
-  # used by :agent_notify_on which accepts a list of event atoms.
+  # nested keywords) that don't fit the simple type validators. Agent hooks use
+  # it because they are normalized by MingaAgent.Config into typed structs.
   defp validate_type(:any, _name, _value), do: :ok
 
   defp validate_type(:theme_atom, _name, value) when is_atom(value) do

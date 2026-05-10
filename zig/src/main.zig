@@ -85,10 +85,16 @@ const Runtime = switch (build_options.backend) {
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const alloc = gpa.allocator();
+/// Module-level Io instance, set during main() for file I/O operations.
+pub var g_io: std.Io = undefined;
+
+/// Module-level environment map, required by vaxis 0.6.0 for feature detection.
+pub var g_env_map: *std.process.Environ.Map = undefined;
+
+pub fn main(init: std.process.Init) !void {
+    g_io = init.io;
+    g_env_map = init.environ_map;
+    const alloc = init.gpa;
 
     var runtime = try Runtime.init(alloc);
     defer runtime.deinit();
