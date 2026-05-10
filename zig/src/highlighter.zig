@@ -79,6 +79,11 @@ pub const Highlighter = struct {
     /// Last highlight result sizes, used to pre-size hot-path result buffers.
     last_highlight_span_count: usize = 0,
     last_highlight_conceal_count: usize = 0,
+    /// Cached full highlight spans used to merge single-line incremental updates.
+    cached_highlight_spans: []Span = &.{},
+    has_changed_range: bool = false,
+    changed_start_byte: u32 = 0,
+    changed_end_byte: u32 = 0,
     cache_mutex: std.atomic.Mutex = .unlocked,
     allocator: std.mem.Allocator,
 
@@ -249,6 +254,9 @@ pub const Highlighter = struct {
         if (self.injection_ranges.len > 0) {
             self.allocator.free(self.injection_ranges);
         }
+        if (self.cached_highlight_spans.len > 0) {
+            self.allocator.free(self.cached_highlight_spans);
+        }
 
         if (self.tree) |t| c.ts_tree_delete(t);
         c.ts_parser_delete(self.parser);
@@ -267,6 +275,7 @@ pub const Highlighter = struct {
             c.ts_tree_delete(t);
             self.tree = null;
         }
+        self.clearHighlightCache();
         // Restore cached queries (may have been pre-compiled on background thread),
         // or lazily compile from embedded source.
         {
@@ -836,6 +845,7 @@ pub const Highlighter = struct {
     /// Stores a reference to the source for injection highlighting.
     pub fn parse(self: *Highlighter, source: []const u8) !void {
         if (self.tree) |t| c.ts_tree_delete(t);
+        self.has_changed_range = false;
 
         self.tree = c.ts_parser_parse_string(
             self.parser,
@@ -884,6 +894,37 @@ pub const Highlighter = struct {
         c.ts_tree_delete(old_tree);
         self.tree = new_tree;
         self.current_source = new_source;
+        self.setChangedRangeForEdits(edits, new_source);
+    }
+
+    fn clearHighlightCache(self: *Highlighter) void {
+        if (self.cached_highlight_spans.len > 0) {
+            self.allocator.free(self.cached_highlight_spans);
+            self.cached_highlight_spans = &.{};
+        }
+        self.has_changed_range = false;
+    }
+
+    fn setChangedRangeForEdits(self: *Highlighter, edits: []const @import("protocol.zig").EditDelta, source: []const u8) void {
+        if (edits.len != 1 or edits[0].start_row != edits[0].new_end_row) {
+            self.has_changed_range = false;
+            return;
+        }
+
+        const edit = edits[0];
+        var line_start: usize = @min(edit.start_byte, source.len);
+        while (line_start > 0 and source[line_start - 1] != '\n') : (line_start -= 1) {}
+        var line_end: usize = @min(edit.new_end_byte, source.len);
+        while (line_end < source.len and source[line_end] != '\n') : (line_end += 1) {}
+
+        self.changed_start_byte = @intCast(line_start);
+        self.changed_end_byte = @intCast(line_end);
+        self.has_changed_range = true;
+    }
+
+    fn refreshHighlightCache(self: *Highlighter, spans: []const Span) !void {
+        if (self.cached_highlight_spans.len > 0) self.allocator.free(self.cached_highlight_spans);
+        self.cached_highlight_spans = try self.allocator.dupe(Span, spans);
     }
 
     /// Run highlight query on the current tree, returning spans and conceal spans.
@@ -951,6 +992,7 @@ pub const Highlighter = struct {
         if (!spansAreSorted(spans.items)) std.mem.sortUnstable(Span, spans.items, {}, spanLessThan);
         self.last_highlight_span_count = spans.items.len;
         self.last_highlight_conceal_count = conceals.items.len;
+        try self.refreshHighlightCache(spans.items);
 
         // Collect capture names
         const pattern_count = c.ts_query_capture_count(query);
@@ -982,6 +1024,10 @@ pub const Highlighter = struct {
         const alloc = self.allocator;
 
         const root = c.ts_tree_root_node(tree);
+
+        if (self.has_changed_range and self.cached_highlight_spans.len > 0 and !try self.hasActiveInjectionRegions(inj_query, root, source)) {
+            return self.highlightChangedRange(query, root, source);
+        }
 
         // ── Phase 1: Outer highlight ──────────────────────────────────────
         const cursor = c.ts_query_cursor_new() orelse return error.CursorCreateFailed;
@@ -1071,6 +1117,7 @@ pub const Highlighter = struct {
             if (!spansAreSorted(spans.items)) std.mem.sortUnstable(Span, spans.items, {}, spanLessThan);
             self.last_highlight_span_count = spans.items.len;
             self.last_highlight_conceal_count = conceals.items.len;
+            try self.refreshHighlightCache(spans.items);
             const names = try alloc.alloc([]const u8, name_list.items.len);
             @memcpy(names, name_list.items);
             return .{
@@ -1311,12 +1358,125 @@ pub const Highlighter = struct {
         if (!spansAreSorted(spans.items)) std.mem.sortUnstable(Span, spans.items, {}, spanLessThan);
         self.last_highlight_span_count = spans.items.len;
         self.last_highlight_conceal_count = conceals.items.len;
+        try self.refreshHighlightCache(spans.items);
 
         const names = try alloc.alloc([]const u8, name_list.items.len);
         @memcpy(names, name_list.items);
 
         return .{
             .spans = try spans.toOwnedSlice(alloc),
+            .capture_names = names,
+            .conceal_spans = try conceals.toOwnedSlice(alloc),
+            .allocator = alloc,
+        };
+    }
+
+    fn hasActiveInjectionRegions(self: *Highlighter, inj_query: *c.TSQuery, root: c.TSNode, source: []const u8) !bool {
+        const alloc = self.allocator;
+        const inj_cursor = c.ts_query_cursor_new() orelse return error.CursorCreateFailed;
+        defer c.ts_query_cursor_delete(inj_cursor);
+        c.ts_query_cursor_exec(inj_cursor, inj_query, root);
+
+        const inj_capture_count = c.ts_query_capture_count(inj_query);
+        var content_capture_id: ?u32 = null;
+        var language_capture_id: ?u32 = null;
+        for (0..inj_capture_count) |i| {
+            var length: u32 = 0;
+            const name_ptr = c.ts_query_capture_name_for_id(inj_query, @intCast(i), &length);
+            const name = name_ptr[0..length];
+            if (std.mem.eql(u8, name, "injection.content")) {
+                content_capture_id = @intCast(i);
+            } else if (std.mem.eql(u8, name, "injection.language")) {
+                language_capture_id = @intCast(i);
+            }
+        }
+        _ = alloc;
+        if (content_capture_id == null) return false;
+
+        var inj_match: c.TSQueryMatch = undefined;
+        while (c.ts_query_cursor_next_match(inj_cursor, &inj_match)) {
+            var has_content = false;
+            var lang_from_capture: ?[]const u8 = null;
+            const caps = if (inj_match.captures == null) continue else inj_match.captures[0..inj_match.capture_count];
+            for (caps) |cap| {
+                if (cap.index == content_capture_id.?) {
+                    has_content = true;
+                } else if (language_capture_id != null and cap.index == language_capture_id.?) {
+                    const start = c.ts_node_start_byte(cap.node);
+                    const end = c.ts_node_end_byte(cap.node);
+                    if (end > start and end <= source.len) lang_from_capture = source[start..end];
+                }
+            }
+            if (!has_content) continue;
+            const lang_name = lang_from_capture orelse getInjectionLanguagePredicate(inj_query, inj_match.pattern_index) orelse continue;
+            if (self.languages.get(lang_name) != null) return true;
+        }
+        return false;
+    }
+
+    fn highlightChangedRange(self: *Highlighter, query: *c.TSQuery, root: c.TSNode, source: []const u8) !HighlightResult {
+        const alloc = self.allocator;
+        const start_byte = self.changed_start_byte;
+        const end_byte = self.changed_end_byte;
+
+        const cursor = c.ts_query_cursor_new() orelse return error.CursorCreateFailed;
+        defer c.ts_query_cursor_delete(cursor);
+        _ = c.ts_query_cursor_set_byte_range(cursor, start_byte, end_byte);
+        c.ts_query_cursor_exec(cursor, query, root);
+
+        var changed_spans: std.ArrayListUnmanaged(Span) = .empty;
+        defer changed_spans.deinit(alloc);
+        if (self.last_highlight_span_count > 0) try changed_spans.ensureTotalCapacity(alloc, @min(self.last_highlight_span_count, 256));
+
+        var conceals: std.ArrayListUnmanaged(ConcealSpan) = .empty;
+        errdefer conceals.deinit(alloc);
+
+        var match: c.TSQueryMatch = undefined;
+        while (c.ts_query_cursor_next_match(cursor, &match)) {
+            if (self.current_predicates) |preds| {
+                if (!preds.evaluate(match, source)) continue;
+            }
+
+            const captures = if (match.captures == null) continue else match.captures[0..match.capture_count];
+            for (captures) |cap| {
+                const node = cap.node;
+                const span_start = c.ts_node_start_byte(node);
+                const span_end = c.ts_node_end_byte(node);
+                if (span_end < start_byte or span_start > end_byte) continue;
+                try changed_spans.append(alloc, .{
+                    .start_byte = span_start,
+                    .end_byte = span_end,
+                    .capture_id = @intCast(cap.index),
+                    .pattern_index = @intCast(match.pattern_index),
+                    .layer = 0,
+                });
+            }
+        }
+
+        var merged: std.ArrayListUnmanaged(Span) = .empty;
+        errdefer merged.deinit(alloc);
+        try merged.ensureTotalCapacity(alloc, self.cached_highlight_spans.len + changed_spans.items.len);
+        for (self.cached_highlight_spans) |span| {
+            if (span.end_byte < start_byte or span.start_byte > end_byte) {
+                merged.appendAssumeCapacity(span);
+            }
+        }
+        try merged.appendSlice(alloc, changed_spans.items);
+        if (!spansAreSorted(merged.items)) std.mem.sortUnstable(Span, merged.items, {}, spanLessThan);
+        self.last_highlight_span_count = merged.items.len;
+        self.last_highlight_conceal_count = conceals.items.len;
+        try self.refreshHighlightCache(merged.items);
+
+        const capture_count = c.ts_query_capture_count(query);
+        const names = try alloc.alloc([]const u8, capture_count);
+        for (0..capture_count) |i| {
+            var length: u32 = 0;
+            const name_ptr = c.ts_query_capture_name_for_id(query, @intCast(i), &length);
+            names[i] = name_ptr[0..length];
+        }
+
+        return .{
+            .spans = try merged.toOwnedSlice(alloc),
             .capture_names = names,
             .conceal_spans = try conceals.toOwnedSlice(alloc),
             .allocator = alloc,
