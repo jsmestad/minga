@@ -518,42 +518,14 @@ defmodule MingaEditor.State do
          %__MODULE__{workspace: %{buffers: %Buffers{} = bs}, buffer_monitors: monitors} = state,
          pid
        ) do
-    # Clean up monitor ref
     monitors = Map.delete(monitors, pid)
-
-    # Remove from buffer list
-    new_list = Enum.reject(bs.list, &(&1 == pid))
-
-    # Clear special buffer slots if they match
-    messages = if bs.messages == pid, do: nil, else: bs.messages
-    help = if bs.help == pid, do: nil, else: bs.help
-
-    # Determine new active buffer
-    {new_active, new_index} =
-      case new_list do
-        [] ->
-          {nil, 0}
-
-        _ ->
-          new_index = min(bs.active_index, length(new_list) - 1)
-          {Enum.at(new_list, new_index), new_index}
-      end
-
-    new_bs = %Buffers{
-      bs
-      | list: new_list,
-        active: new_active,
-        active_index: new_index,
-        messages: messages,
-        help: help
-    }
+    new_bs = Buffers.remove(bs, pid)
 
     state = %{
       update_workspace(state, &WorkspaceState.set_buffers(&1, new_bs))
       | buffer_monitors: monitors
     }
 
-    # Clear agent buffer or prompt buffer if the dead pid matches
     state =
       if state.shell_state.agent.buffer == pid do
         AgentAccess.update_agent(state, fn a -> %{a | buffer: nil} end)
@@ -570,7 +542,10 @@ defmodule MingaEditor.State do
         state
       end
 
-    state
+    case tab_bar(state) do
+      nil -> state
+      tb -> set_tab_bar(state, TabBar.scrub_dead_buffer(tb, pid))
+    end
   end
 
   # ── Active content context ───────────────────────────────────────────────────

@@ -249,6 +249,12 @@ defmodule MingaEditor.State.TabBar do
     %{tb | tabs: new_tabs}
   end
 
+  @doc "Removes a dead buffer pid from all tab context snapshots."
+  @spec scrub_dead_buffer(t(), pid()) :: t()
+  def scrub_dead_buffer(%__MODULE__{tabs: tabs} = tb, pid) do
+    %{tb | tabs: Enum.map(tabs, &Tab.scrub_buffer(&1, pid))}
+  end
+
   @doc "Returns all tabs matching the given kind."
   @spec filter_by_kind(t(), Tab.kind()) :: [Tab.t()]
   def filter_by_kind(%__MODULE__{tabs: tabs}, kind) do

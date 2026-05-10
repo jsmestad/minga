@@ -56,4 +56,31 @@ defmodule MingaEditor.State.Buffers do
       idx -> %{bs | active_index: idx, active: pid}
     end
   end
+
+  @doc "Removes a buffer pid, selecting a neighbor as the new active."
+  @spec remove(t(), pid()) :: t()
+  def remove(%__MODULE__{} = bs, pid) do
+    new_list = Enum.reject(bs.list, &(&1 == pid))
+    messages = if bs.messages == pid, do: nil, else: bs.messages
+    help = if bs.help == pid, do: nil, else: bs.help
+
+    {new_active, new_index} =
+      case new_list do
+        [] ->
+          {nil, 0}
+
+        _ ->
+          idx = min(bs.active_index, length(new_list) - 1)
+          {Enum.at(new_list, idx), idx}
+      end
+
+    %__MODULE__{
+      bs
+      | list: new_list,
+        active: new_active,
+        active_index: new_index,
+        messages: messages,
+        help: help
+    }
+  end
 end
