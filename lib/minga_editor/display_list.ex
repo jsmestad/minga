@@ -330,9 +330,11 @@ defmodule MingaEditor.DisplayList do
   """
   @spec draws_to_commands([draw()]) :: [binary()]
   def draws_to_commands(draws) do
-    Enum.flat_map(draws, fn {row, col, text, %Face{} = face} ->
-      draw_to_commands(row, col, text, face)
+    draws
+    |> Enum.reduce([], fn {row, col, text, %Face{} = face}, acc ->
+      prepend_draw_commands(acc, row, col, text, face)
     end)
+    |> Enum.reverse()
   end
 
   # Resolves font_family in a style keyword list to a font_id.
@@ -371,21 +373,24 @@ defmodule MingaEditor.DisplayList do
 
   @spec layer_to_commands(render_layer(), non_neg_integer(), non_neg_integer()) :: [binary()]
   defp layer_to_commands(layer, row_off, col_off) when is_map(layer) do
-    Enum.flat_map(layer, fn {row, runs} ->
-      Enum.flat_map(runs, fn {col, text, %Face{} = face} ->
-        draw_to_commands(row + row_off, col + col_off, text, face)
+    layer
+    |> Enum.reduce([], fn {row, runs}, acc ->
+      Enum.reduce(runs, acc, fn {col, text, %Face{} = face}, row_acc ->
+        prepend_draw_commands(row_acc, row + row_off, col + col_off, text, face)
       end)
     end)
+    |> Enum.reverse()
   end
 
-  @spec draw_to_commands(non_neg_integer(), non_neg_integer(), String.t(), Face.t()) :: [binary()]
-  defp draw_to_commands(row, col, text, %Face{} = face) do
+  @spec prepend_draw_commands([binary()], non_neg_integer(), non_neg_integer(), String.t(), Face.t()) :: [binary()]
+  defp prepend_draw_commands(acc, row, col, text, %Face{} = face) do
     if simple_draw_face?(face) do
-      [Protocol.encode_draw_face(row, col, text, face)]
+      [Protocol.encode_draw_face(row, col, text, face) | acc]
     else
       style = Face.to_style(face)
       {style, registration_cmds} = resolve_font_family(style)
-      registration_cmds ++ [Protocol.encode_draw_smart(row, col, text, style)]
+      command = Protocol.encode_draw_smart(row, col, text, style)
+      Enum.reduce(registration_cmds ++ [command], acc, fn cmd, next_acc -> [cmd | next_acc] end)
     end
   end
 
