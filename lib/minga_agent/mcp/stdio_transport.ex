@@ -94,13 +94,19 @@ defmodule MingaAgent.MCP.StdioTransport do
   end
 
   @spec await_response(port(), term(), timeout()) :: {:ok, map()} | {:error, term()}
-  defp await_response(port, id, timeout) do
+  defp await_response(port, id, timeout), do: await_response(port, id, timeout, "")
+
+  @spec await_response(port(), term(), timeout(), binary()) :: {:ok, map()} | {:error, term()}
+  defp await_response(port, id, timeout, buffered) do
     receive do
+      {^port, {:data, {:noeol, chunk}}} ->
+        await_response(port, id, timeout, buffered <> chunk)
+
       {^port, {:data, {:eol, line}}} ->
-        handle_line(port, id, line, timeout)
+        handle_line(port, id, buffered <> line, timeout)
 
       {^port, {:data, line}} when is_binary(line) ->
-        handle_line(port, id, line, timeout)
+        handle_line(port, id, buffered <> line, timeout)
 
       {^port, {:exit_status, status}} ->
         {:error, {:exit_status, status}}

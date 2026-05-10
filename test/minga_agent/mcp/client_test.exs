@@ -66,6 +66,25 @@ defmodule MingaAgent.MCP.ClientTest do
     assert_receive {:mcp_tool_call, "echo-text", %{"text" => "hi"}}
   end
 
+  test "request exit error notifies owner and makes future calls fail" do
+    {:ok, client} =
+      Client.start_link(
+        server_config: server_config(),
+        transport: FakeTransport,
+        transport_opts: [
+          tools: [tool_def()],
+          request_errors: %{"echo-text" => {:exit_status, 1}}
+        ],
+        notify_pid: self()
+      )
+
+    assert {:error, {:exit_status, 1}} = Client.call_tool(client, "echo-text", %{"text" => "hi"})
+    assert_receive {:mcp_client_down, ^client, "Local Tools", {:exit_status, 1}}
+
+    assert {:error, message} = Client.call_tool(client, "echo-text", %{"text" => "hi"})
+    assert message =~ "unavailable"
+  end
+
   test "transport crash notifies owner and makes future calls fail" do
     {:ok, client} =
       Client.start_link(

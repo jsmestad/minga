@@ -794,6 +794,7 @@ defmodule MingaAgent.Providers.Native do
 
   @spec remove_mcp_tools(map()) :: map()
   defp remove_mcp_tools(state) do
+    cleanup_mcp_client(state.mcp_client)
     tools = Enum.reject(state.tools, &(&1.name in state.mcp_tool_names))
     %{state | tools: tools, mcp_client: nil, mcp_tool_names: []}
   end

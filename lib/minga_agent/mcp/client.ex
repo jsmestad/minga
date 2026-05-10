@@ -125,10 +125,13 @@ defmodule MingaAgent.MCP.Client do
   def handle_call({:call_tool, name, args}, _from, state) do
     {request, state} = next_request(state, "tools/call", %{"name" => name, "arguments" => args})
 
-    reply =
+    {reply, state} =
       case state.transport_mod.request(state.transport, request, state.request_timeout) do
-        {:ok, result} -> {:ok, result}
-        {:error, reason} -> {:error, reason}
+        {:ok, result} ->
+          {{:ok, result}, state}
+
+        {:error, reason} ->
+          {{:error, reason}, maybe_mark_transport_down(state, reason)}
       end
 
     {:reply, reply, state}
@@ -216,6 +219,25 @@ defmodule MingaAgent.MCP.Client do
       callback: fn args -> call_tool(client, original_name, args || %{}) end
     )
   end
+
+  @spec maybe_mark_transport_down(state(), term()) :: state()
+  defp maybe_mark_transport_down(%{alive: true} = state, reason) do
+    if transport_down_reason?(reason) do
+      notify_down(state, reason)
+      %{state | alive: false}
+    else
+      state
+    end
+  end
+
+  defp maybe_mark_transport_down(state, _reason), do: state
+
+  @spec transport_down_reason?(term()) :: boolean()
+  defp transport_down_reason?({:exit_status, _status}), do: true
+  defp transport_down_reason?(:badarg), do: true
+  defp transport_down_reason?(:closed), do: true
+  defp transport_down_reason?(:noproc), do: true
+  defp transport_down_reason?(_reason), do: false
 
   @spec unavailable_message(state()) :: String.t()
   defp unavailable_message(state), do: "MCP server #{state.config.name} is unavailable"

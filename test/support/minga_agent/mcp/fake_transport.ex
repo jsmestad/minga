@@ -40,12 +40,14 @@ defmodule MingaAgent.MCP.FakeTransport do
   def init({owner, opts}) do
     tools = Keyword.get(opts, :tools, [])
     call_results = Keyword.get(opts, :call_results, %{})
+    request_errors = Keyword.get(opts, :request_errors, %{})
     test_pid = Keyword.get(opts, :test_pid)
 
     state = %{
       owner: owner,
       tools: tools,
       call_results: call_results,
+      request_errors: request_errors,
       test_pid: test_pid
     }
 
@@ -74,12 +76,18 @@ defmodule MingaAgent.MCP.FakeTransport do
     args = params["arguments"] || %{}
     maybe_report(state, {:mcp_tool_call, name, args})
 
-    result =
-      Map.get(state.call_results, name, %{
-        "content" => [%{"type" => "text", "text" => "called #{name}"}]
-      })
+    case Map.fetch(state.request_errors, name) do
+      {:ok, reason} ->
+        {:reply, {:error, reason}, state}
 
-    {:reply, {:ok, result}, state}
+      :error ->
+        result =
+          Map.get(state.call_results, name, %{
+            "content" => [%{"type" => "text", "text" => "called #{name}"}]
+          })
+
+        {:reply, {:ok, result}, state}
+    end
   end
 
   def handle_call({:notify, message}, _from, state) do
