@@ -1,5 +1,6 @@
 const std = @import("std");
 const highlighter_mod = @import("highlighter.zig");
+const protocol = @import("protocol.zig");
 
 const line_count = 2000;
 const iterations = 160;
@@ -18,8 +19,8 @@ pub fn main() !void {
     try hl.parse(source.items);
 
     for (0..warmup_iterations) |i| {
-        try mutateOneLine(alloc, &source, i);
-        try hl.parse(source.items);
+        const edit = try mutateOneLine(alloc, &source, i);
+        try hl.parseIncremental(&.{edit}, source.items);
         var result = try hl.highlightWithInjections();
         result.deinit();
     }
@@ -34,10 +35,10 @@ pub fn main() !void {
     defer alloc.free(span_counts);
 
     for (0..iterations) |i| {
-        try mutateOneLine(alloc, &source, i + warmup_iterations);
+        const edit = try mutateOneLine(alloc, &source, i + warmup_iterations);
 
         const start_ns = nanoTimestamp();
-        try hl.parse(source.items);
+        try hl.parseIncremental(&.{edit}, source.items);
         const parse_ns = nanoTimestamp();
 
         var result = try hl.highlightWithInjections();
@@ -76,16 +77,31 @@ fn buildElixirSource(alloc: std.mem.Allocator) !std.ArrayListUnmanaged(u8) {
     return source;
 }
 
-fn mutateOneLine(alloc: std.mem.Allocator, source: *std.ArrayListUnmanaged(u8), iteration: usize) !void {
+fn mutateOneLine(alloc: std.mem.Allocator, source: *std.ArrayListUnmanaged(u8), iteration: usize) !protocol.EditDelta {
     const marker = "# benchmark line ";
-    const found = std.mem.lastIndexOf(u8, source.items, marker) orelse return;
+    const found = std.mem.lastIndexOf(u8, source.items, marker) orelse return error.MarkerNotFound;
     const start = found + marker.len;
+    var line_start = start;
+    while (line_start > 0 and source.items[line_start - 1] != '\n') : (line_start -= 1) {}
     var end = start;
     while (end < source.items.len and source.items[end] != '\n') : (end += 1) {}
 
     var buf: [32]u8 = undefined;
     const replacement = try std.fmt.bufPrint(&buf, "{d}", .{iteration});
+    const edit = protocol.EditDelta{
+        .start_byte = @intCast(start),
+        .old_end_byte = @intCast(end),
+        .new_end_byte = @intCast(start + replacement.len),
+        .start_row = line_count - 1,
+        .start_col = @intCast(start - line_start),
+        .old_end_row = line_count - 1,
+        .old_end_col = @intCast(end - line_start),
+        .new_end_row = line_count - 1,
+        .new_end_col = @intCast(start - line_start + replacement.len),
+        .inserted_text = replacement,
+    };
     try source.replaceRange(alloc, start, end - start, replacement);
+    return edit;
 }
 
 fn nanoTimestamp() u64 {

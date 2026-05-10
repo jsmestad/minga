@@ -1,10 +1,10 @@
 # Autoresearch: tree-sitter highlight speed
 
 ## Objective
-Make syntax highlighting fast enough that parser/highlight work never shows up as editor latency. The benchmark runs the Zig `minga-parser` highlighter directly on a 2,000-line Elixir-like buffer, warms up parsing and highlight query execution, then measures repeated full parse plus `highlightWithInjections` cycles after a small source mutation.
+Make syntax highlighting fast enough that parser/highlight work never shows up as editor latency. The benchmark runs the Zig `minga-parser` highlighter directly on a 2,000-line Elixir-like buffer, warms up parsing and highlight query execution, then measures repeated incremental parse plus `highlightWithInjections` cycles after a small source mutation.
 
 ## Metrics
-- **Primary**: `ts_update_highlight_us` (µs, lower is better) — median time for parse plus highlight query execution after one source mutation.
+- **Primary**: `ts_update_highlight_us` (µs, lower is better) — median time for incremental parse plus highlight query execution after one source mutation.
 - **Secondary**: `ts_update_highlight_p95_us`, `ts_parse_us`, `ts_highlight_us`, `ts_highlight_p95_us`, `ts_span_count`, `ts_line_count` — tradeoff and localization metrics for tail latency, parse/query split, output size, and workload size.
 
 ## How to Run
@@ -27,7 +27,7 @@ Make syntax highlighting fast enough that parser/highlight work never shows up a
 - Primary metric decides keep/discard. Keep only lower `ts_update_highlight_us` unless a secondary metric exposes a correctness or catastrophic regression.
 - `./autoresearch.checks.sh` must pass before keeping any code change.
 - Preserve user-visible highlighting behavior across frontends.
-- Prefer structural hot-path reductions: fewer query cursor allocations, fewer per-match C API calls, better reuse of capture names, cheaper sorting, less allocation churn, and safe incremental parse/query improvements.
+- Prefer structural hot-path reductions: correct incremental parse usage, changed-range highlighting, fewer full-document query passes, fewer query cursor allocations, fewer per-match C API calls, better reuse of capture names, cheaper sorting, and less allocation churn.
 
 ## What's Been Tried
 - Switched from Swift semantic rendering after reducing `swift_frame_us` from roughly 266µs to 165µs. New target focuses on the Zig tree-sitter parser/highlighter shared by all frontends.
