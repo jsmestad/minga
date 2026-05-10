@@ -200,9 +200,20 @@ defmodule MingaAgent.MCP.Client do
     with {:ok, _initialize_result} <- transport_mod.request(transport, initialize, timeout),
          :ok <- transport_mod.notify(transport, notification("notifications/initialized", %{})),
          {:ok, list_result} <-
-           transport_mod.request(transport, request(2, "tools/list", %{}), timeout) do
-      tools = MCPTool.from_list(config.name, Map.get(list_result, "tools", []))
+           transport_mod.request(transport, request(2, "tools/list", %{}), timeout),
+         {:ok, tools} <- listed_tools(config.name, list_result) do
       {:ok, tools, 3}
+    end
+  end
+
+  @spec listed_tools(String.t(), map()) :: {:ok, [MCPTool.t()]} | {:error, String.t()}
+  defp listed_tools(server_name, list_result) do
+    case Map.get(list_result, "tools", []) do
+      tools when is_list(tools) ->
+        {:ok, MCPTool.from_list(server_name, tools)}
+
+      other ->
+        {:error, "MCP tools/list response must contain a tools list, got: #{inspect(other)}"}
     end
   end
 

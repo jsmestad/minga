@@ -66,6 +66,20 @@ defmodule MingaAgent.MCP.ClientTest do
     assert_receive {:mcp_tool_call, "echo-text", %{"text" => "hi"}}
   end
 
+  test "rejects malformed tools/list results and stops transport" do
+    assert {:error, reason} =
+             Client.start(
+               server_config: server_config(),
+               transport: FakeTransport,
+               transport_opts: [tools: "not-a-list", test_pid: self()]
+             )
+
+    assert reason =~ "tools list"
+    assert_receive {:mcp_transport_started, transport}
+    assert_receive {:mcp_transport_stopped, ^transport}
+    refute Process.alive?(transport)
+  end
+
   test "stops transport when handshake fails" do
     assert {:error, :list_failed} =
              Client.start(
