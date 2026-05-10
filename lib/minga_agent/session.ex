@@ -35,7 +35,7 @@ defmodule MingaAgent.Session do
   alias MingaAgent.TurnUsage
 
   @typedoc "Agent session status."
-  @type status :: :idle | :thinking | :tool_executing | :error
+  @type status :: :idle | :plan | :thinking | :tool_executing | :error
 
   @typedoc "Pending tool approval data."
   @type pending_approval :: MingaAgent.ToolApproval.t()
@@ -108,6 +108,18 @@ defmodule MingaAgent.Session do
   @spec status(GenServer.server()) :: status()
   def status(session) do
     GenServer.call(session, :status)
+  end
+
+  @doc "Enters plan mode, where destructive tools are refused before execution."
+  @spec enter_plan(GenServer.server()) :: :ok
+  def enter_plan(session) do
+    GenServer.call(session, :enter_plan)
+  end
+
+  @doc "Leaves plan mode and returns the session to execution mode."
+  @spec enter_exec(GenServer.server()) :: :ok
+  def enter_exec(session) do
+    GenServer.call(session, :enter_exec)
   end
 
   @doc "Returns the conversation messages."
@@ -640,7 +652,7 @@ defmodule MingaAgent.Session do
     state = %{state | messages: messages, pending_approval: nil}
     state = append_system_message(state, "Aborted", :info)
     state = notify_messages_changed(state)
-    state = set_status(state, :idle)
+    state = set_idle_or_plan(state)
     {:reply, :ok, state}
   end
 
@@ -675,6 +687,26 @@ defmodule MingaAgent.Session do
 
   def handle_call(:session_id, _from, state) do
     {:reply, state.session_id, state}
+  end
+
+  def handle_call(:enter_plan, _from, state) do
+    reject_pending_approval(state.pending_approval)
+    state = %{state | pending_approval: nil}
+    state = append_system_message(state, plan_mode_message(), :info)
+    state = notify_messages_changed(state)
+    state = set_status(state, :plan)
+    {:reply, :ok, state}
+  end
+
+  def handle_call(:enter_exec, _from, %{status: :plan} = state) do
+    state = append_system_message(state, exec_mode_message(), :info)
+    state = notify_messages_changed(state)
+    state = set_status(state, :idle)
+    {:reply, :ok, state}
+  end
+
+  def handle_call(:enter_exec, _from, state) do
+    {:reply, :ok, state}
   end
 
   def handle_call({:load_session, session_id}, _from, state) do
@@ -986,8 +1018,8 @@ defmodule MingaAgent.Session do
 
       {:error, reason} ->
         Minga.Log.error(:agent, "[Agent.Session] failed to start provider: #{inspect(reason)}")
-        state = set_status(state, :error)
         state = %{state | error_message: format_error(reason)}
+        state = set_error_status(state)
         broadcast(state, {:error, state.error_message})
         {:noreply, state}
     end
@@ -1000,8 +1032,8 @@ defmodule MingaAgent.Session do
 
   def handle_info({:DOWN, _ref, :process, pid, reason}, %{provider: pid} = state) do
     Minga.Log.warning(:agent, "[Agent.Session] provider process died: #{inspect(reason)}")
-    state = set_status(state, :error)
     state = %{state | provider: nil, error_message: "Agent provider crashed"}
+    state = set_error_status(state)
     broadcast(state, {:error, state.error_message})
 
     # Try to restart the provider after a brief delay
@@ -1029,7 +1061,7 @@ defmodule MingaAgent.Session do
   @spec handle_provider_event(Event.t(), state()) :: state()
   defp handle_provider_event(%Event.AgentStart{}, state) do
     state = %{state | pending_approval: nil}
-    set_status(state, :thinking)
+    set_working_status(state, :thinking)
   end
 
   defp handle_provider_event(%Event.AgentEnd{usage: usage}, state) do
@@ -1055,7 +1087,7 @@ defmodule MingaAgent.Session do
 
     case all_pending do
       [] ->
-        set_status(state, :idle)
+        set_idle_or_plan(state)
 
       pending ->
         # Auto-send queued messages as a new turn. Combine all pending
@@ -1073,7 +1105,7 @@ defmodule MingaAgent.Session do
             state
 
           {:error, _reason} ->
-            set_status(state, :idle)
+            set_idle_or_plan(state)
         end
     end
   end
@@ -1112,7 +1144,7 @@ defmodule MingaAgent.Session do
   defp handle_provider_event(%Event.ToolStart{} = event, state) do
     msg = Message.tool_call(event.tool_call_id, event.name, event.args)
     state = append_msg(state, msg)
-    state = set_status(state, :tool_executing)
+    state = set_working_status(state, :tool_executing)
     broadcast(state, {:tool_started, event.name, event.args})
     notify_messages_changed(state)
   end
@@ -1121,6 +1153,11 @@ defmodule MingaAgent.Session do
     broadcast(state, {:file_changed, event.path, event.before_content, event.after_content})
     state = record_file_touch(state, event.path, event.before_content, event.after_content)
     state
+  end
+
+  defp handle_provider_event(%Event.SystemMessage{} = event, state) do
+    state = append_system_message(state, event.message, event.level)
+    notify_messages_changed(state)
   end
 
   defp handle_provider_event(%Event.ToolApproval{} = event, state) do
@@ -1177,7 +1214,7 @@ defmodule MingaAgent.Session do
 
   defp handle_provider_event(%Event.Error{message: message}, state) do
     Notifier.notify(:error, message)
-    state = set_status(state, :error)
+    state = set_error_status(state)
     state = %{state | error_message: message}
     state = append_system_message(state, "Error: #{message}", :error)
     broadcast(state, {:error, message})
@@ -1280,11 +1317,41 @@ defmodule MingaAgent.Session do
 
   # ── Status management ──────────────────────────────────────────────────────
 
+  @spec reject_pending_approval(pending_approval() | nil) :: :ok
+  defp reject_pending_approval(nil), do: :ok
+
+  defp reject_pending_approval(%{tool_call_id: tool_call_id, reply_to: reply_to}) do
+    send(reply_to, {:tool_approval_response, tool_call_id, :reject})
+    :ok
+  end
+
   @spec set_status(state(), status()) :: state()
   defp set_status(state, new_status) do
     state = %{state | status: new_status}
     broadcast(state, {:status_changed, new_status})
     state
+  end
+
+  @spec set_working_status(state(), :thinking | :tool_executing) :: state()
+  defp set_working_status(%{status: :plan} = state, _new_status), do: state
+  defp set_working_status(state, new_status), do: set_status(state, new_status)
+
+  @spec set_idle_or_plan(state()) :: state()
+  defp set_idle_or_plan(%{status: :plan} = state), do: state
+  defp set_idle_or_plan(state), do: set_status(state, :idle)
+
+  @spec set_error_status(state()) :: state()
+  defp set_error_status(%{status: :plan} = state), do: state
+  defp set_error_status(state), do: set_status(state, :error)
+
+  @spec plan_mode_message() :: String.t()
+  defp plan_mode_message do
+    "Plan mode enabled. Destructive tools are blocked before execution. Read-only and search tools still work. Use /exec when you are ready to make changes."
+  end
+
+  @spec exec_mode_message() :: String.t()
+  defp exec_mode_message do
+    "Execution mode enabled. Destructive tools can run again after normal approval checks. Use /plan to return to planning."
   end
 
   # ── Broadcasting ────────────────────────────────────────────────────────────

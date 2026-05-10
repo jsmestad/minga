@@ -373,6 +373,7 @@ struct TabBarView: View {
         case 1: return accent   // thinking
         case 2: return accent   // tool_executing
         case 3: return Color.red  // error
+        case 4: return theme.agentStatusNeedsYou  // plan
         default: return theme.tabInactiveFg  // idle
         }
     }

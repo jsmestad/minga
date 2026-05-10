@@ -47,6 +47,7 @@ defmodule MingaEditor.State.AgentTest do
     test "busy? is true for :thinking and :tool_executing" do
       assert new_agent() |> AgentState.set_status(:thinking) |> AgentState.busy?()
       assert new_agent() |> AgentState.set_status(:tool_executing) |> AgentState.busy?()
+      refute new_agent() |> AgentState.set_status(:plan) |> AgentState.busy?()
       refute new_agent() |> AgentState.set_status(:idle) |> AgentState.busy?()
       refute AgentState.busy?(new_agent())
     end

@@ -17,7 +17,7 @@ defmodule MingaEditor.State.AgentGroup do
   """
 
   @typedoc "Agent status for group display."
-  @type agent_status :: :idle | :thinking | :tool_executing | :error | nil
+  @type agent_status :: :idle | :plan | :thinking | :tool_executing | :error | nil
 
   @typedoc "SF Symbol name for group icon."
   @type icon :: String.t()
