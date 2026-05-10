@@ -1,4 +1,3 @@
 #!/usr/bin/env bash
 set -euo pipefail
-cd zig
-zig build highlight-bench -Doptimize=ReleaseFast
+MIX_ENV=test mix run bench/key_latency_bench.exs
