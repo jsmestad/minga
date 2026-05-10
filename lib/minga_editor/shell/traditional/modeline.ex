@@ -274,7 +274,7 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
 
     if count > 0 do
       text = if label, do: " bg:#{count} #{label}", else: " bg:#{count}"
-      [{text, ml.info_fg, bar_bg, [], :agent_session_picker}]
+      [{text, ml.info_fg, bar_bg, [], :agent_session_switcher}]
     else
       []
     end

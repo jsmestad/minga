@@ -699,7 +699,7 @@ defmodule MingaEditor do
         state.shell.on_agent_event(state.shell_state, state.workspace, session_pid, event)
 
       state = %{state | shell_state: shell_state, workspace: workspace}
-      {:noreply, state}
+      {:noreply, schedule_render(state, 16)}
     end
   end
 
@@ -882,7 +882,8 @@ defmodule MingaEditor do
         {:background_subagent_started, handle}
       )
 
-    %{state | shell_state: shell_state, workspace: workspace}
+    state = %{state | shell_state: shell_state, workspace: workspace}
+    schedule_render(state, 16)
   end
 
   defp dispatch_minga_event(
@@ -1148,6 +1149,12 @@ defmodule MingaEditor do
     else
       state
     end
+  end
+
+  defp apply_effect(state, {:rebuild_agent_session, %MingaEditor.State.Tab{kind: :agent} = tab}) do
+    state
+    |> EditorState.rebuild_agent_from_session(tab)
+    |> AgentLifecycle.sync_buffer()
   end
 
   defp apply_effect(state, {:rebuild_agent_session, tab}),

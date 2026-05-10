@@ -28,6 +28,7 @@ defmodule MingaEditor.State do
   """
 
   alias MingaAgent.Session, as: AgentSession
+  alias MingaEditor.Agent.BufferSync, as: AgentBufferSync
   alias MingaEditor.Agent.UIState
   alias Minga.Buffer
 
@@ -1320,6 +1321,8 @@ defmodule MingaEditor.State do
   @spec rebuild_agent_from_session(t(), Tab.t()) :: t()
   def rebuild_agent_from_session(state, %Tab{kind: :agent, session: session_pid})
       when is_pid(session_pid) do
+    state = bind_agent_buffer_from_active_window(state)
+
     case agent_snapshot(session_pid) do
       nil ->
         state
@@ -1337,6 +1340,17 @@ defmodule MingaEditor.State do
   end
 
   def rebuild_agent_from_session(state, _tab), do: state
+
+  @spec bind_agent_buffer_from_active_window(t()) :: t()
+  defp bind_agent_buffer_from_active_window(state) do
+    case find_agent_chat_window(state) do
+      {_win_id, %Window{content: {:agent_chat, _}, buffer: buffer}} when is_pid(buffer) ->
+        AgentAccess.update_agent(state, &AgentState.set_buffer(&1, buffer))
+
+      _ ->
+        state
+    end
+  end
 
   @spec agent_snapshot(pid()) :: map() | nil
   defp agent_snapshot(session_pid) do
@@ -1406,6 +1420,46 @@ defmodule MingaEditor.State do
   defp apply_buffer_effect(state, :start_spinner),
     do: maybe_restart_incoming_spinner(state)
 
+  defp apply_buffer_effect(state, {:rebuild_agent_session, %Tab{kind: :agent} = tab}) do
+    state
+    |> rebuild_agent_from_session(tab)
+    |> sync_active_agent_buffer()
+  end
+
   defp apply_buffer_effect(state, {:rebuild_agent_session, tab}),
     do: rebuild_agent_from_session(state, tab)
+
+  @spec sync_active_agent_buffer(t()) :: t()
+  defp sync_active_agent_buffer(state) do
+    agent = AgentAccess.agent(state)
+    session = AgentAccess.session(state)
+
+    if is_pid(agent.buffer) and is_pid(session) do
+      sync_agent_buffer_from_session(state, agent.buffer, session, agent.pending_approval)
+    else
+      state
+    end
+  end
+
+  @spec sync_agent_buffer_from_session(t(), pid(), pid(), term()) :: t()
+  defp sync_agent_buffer_from_session(state, buffer, session, pending_approval) do
+    messages = safe_session_messages(session)
+
+    case messages do
+      [] ->
+        state
+
+      _ ->
+        sync_opts = if pending_approval, do: [pending_approval: pending_approval], else: []
+        line_index = AgentBufferSync.sync(buffer, messages, sync_opts)
+        AgentAccess.update_panel(state, &%{&1 | cached_line_index: line_index})
+    end
+  end
+
+  @spec safe_session_messages(pid()) :: [term()]
+  defp safe_session_messages(session) do
+    AgentSession.messages(session)
+  catch
+    :exit, _ -> []
+  end
 end

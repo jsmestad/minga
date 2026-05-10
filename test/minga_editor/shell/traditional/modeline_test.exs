@@ -90,7 +90,8 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
 
       assert String.contains?(text, "bg:2")
       assert String.contains?(text, "session-3: tests")
-      assert Enum.any?(regions, fn {_start, _end, cmd} -> cmd == :agent_session_picker end)
+      assert Enum.any?(regions, fn {_start, _end, cmd} -> cmd == :agent_session_switcher end)
+      refute Enum.any?(regions, fn {_start, _end, cmd} -> cmd == :agent_session_picker end)
     end
 
     test "omits background subagent segment when none are running" do
