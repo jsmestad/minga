@@ -178,9 +178,8 @@ const BufferState = struct {
 
     /// Set the language name, taking an owned copy.
     fn setLanguageName(self: *BufferState, alloc: std.mem.Allocator, name: []const u8) !void {
+        const copy = try alloc.dupe(u8, name);
         if (self.language_name) |old| alloc.free(old);
-        const copy = try alloc.alloc(u8, name.len);
-        @memcpy(copy, name);
         self.language_name = copy;
     }
 
@@ -555,6 +554,19 @@ fn readExact(fd: std.posix.fd_t, buf: []u8) !bool {
 // ── BufferState.applyEdits tests ──────────────────────────────────────────────
 
 const testing = std.testing;
+
+test "setLanguageName keeps old name if replacing allocation fails" {
+    var backing: [3]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&backing);
+    const alloc = fba.allocator();
+
+    var bs: BufferState = .{};
+    defer bs.deinit(alloc);
+
+    try bs.setLanguageName(alloc, "zig");
+    try testing.expectError(error.OutOfMemory, bs.setLanguageName(alloc, "elixir"));
+    try testing.expectEqualStrings("zig", bs.language_name.?);
+}
 
 test "applyEdits: valid edit replaces text" {
     var bs: BufferState = .{};

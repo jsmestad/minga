@@ -190,6 +190,8 @@ fn runHook(alloc: std.mem.Allocator, command: []const u8, payload: []const u8, t
     defer stderr_capture.deinit(alloc);
 
     const start_ms = milliTimestamp();
+    const max_timeout_ms: u64 = @intCast(std.math.maxInt(i64) - start_ms);
+    if (timeout_ms > max_timeout_ms) return error.InvalidTimeout;
     const timeout_i64: i64 = @intCast(timeout_ms);
     const deadline_ms = start_ms + timeout_i64;
     var payload_offset: usize = 0;
