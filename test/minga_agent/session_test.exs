@@ -1,12 +1,15 @@
 defmodule MingaAgent.SessionTest do
   use ExUnit.Case, async: true
 
+  alias MingaAgent.Branch
   alias MingaAgent.Event
   alias MingaAgent.Session
   alias MingaAgent.SessionStore
   alias MingaAgent.Tool.Executor
   alias MingaAgent.Tool.Registry
   alias MingaAgent.Tool.Spec
+
+  @moduletag :tmp_dir
 
   # ── Mock provider ──────────────────────────────────────────────────────────
 
@@ -673,6 +676,124 @@ defmodule MingaAgent.SessionTest do
 
     test "load_session returns error for missing session", %{session: session} do
       assert {:error, _} = Session.load_session(session, "nonexistent")
+    end
+
+    test "load_session restores messages, model, provider metadata, and branches", %{tmp_dir: dir} do
+      {:ok, session} =
+        Session.start_link(
+          provider: MockProvider,
+          provider_opts: [],
+          session_store_dir: dir
+        )
+
+      SessionStore.save(
+        %{
+          id: "resumable-session",
+          timestamp: "2026-01-01T00:00:00Z",
+          last_message_at: "2026-01-02T00:00:00Z",
+          title: "Restore me",
+          model_name: "anthropic:claude-sonnet-4",
+          provider_name: "native",
+          messages: [{:user, "Restore me"}, {:assistant, "Restored reply"}],
+          usage: %MingaAgent.TurnUsage{
+            input: 20,
+            output: 10,
+            cache_read: 0,
+            cache_write: 0,
+            cost: 0.02
+          },
+          branches: [
+            Branch.new("branch-1", [{:user, "branched prompt"}, {:assistant, "branched reply"}])
+          ],
+          memory: "- [2026-01-01 00:00 UTC] Prefer direct answers\n"
+        },
+        dir
+      )
+
+      assert :ok = Session.load_session(session, "resumable-session")
+      assert Session.session_id(session) == "resumable-session"
+      assert Session.messages(session) == [{:user, "Restore me"}, {:assistant, "Restored reply"}]
+
+      meta = Session.metadata(session)
+      assert meta.model_name == "anthropic:claude-sonnet-4"
+      assert meta.provider_name == "native"
+      assert meta.turn_count == 1
+      assert DateTime.to_iso8601(meta.last_message_at) == "2026-01-02T00:00:00Z"
+      assert MingaAgent.Memory.read(dir) =~ "Prefer direct answers"
+
+      assert {:ok, branches} = Session.list_branches(session)
+      assert branches =~ "branch-1"
+      assert :ok = Session.switch_branch(session, 1)
+
+      assert Session.messages(session) == [
+               {:user, "branched prompt"},
+               {:assistant, "branched reply"}
+             ]
+    end
+
+    test "load_session leaves existing memory untouched for legacy sessions without a memory snapshot",
+         %{
+           tmp_dir: dir
+         } do
+      {:ok, session} =
+        Session.start_link(
+          provider: MockProvider,
+          provider_opts: [],
+          session_store_dir: dir
+        )
+
+      :ok = MingaAgent.Memory.append("keep this memory", dir)
+      sessions_dir = SessionStore.sessions_dir(dir)
+      File.mkdir_p!(sessions_dir)
+
+      File.write!(
+        Path.join(sessions_dir, "legacy-session.json"),
+        JSON.encode!(%{
+          "id" => "legacy-session",
+          "timestamp" => "2026-01-01T00:00:00Z",
+          "last_message_at" => "2026-01-01T00:00:00Z",
+          "title" => "Legacy",
+          "model_name" => "test-model",
+          "provider_name" => "native",
+          "messages" => [%{"type" => "user", "text" => "legacy prompt"}],
+          "usage" => %{}
+        })
+      )
+
+      assert :ok = Session.load_session(session, "legacy-session")
+      assert MingaAgent.Memory.read(dir) =~ "keep this memory"
+    end
+
+    test "load_session saves the current dirty session before replacement", %{tmp_dir: dir} do
+      {:ok, session} =
+        Session.start_link(
+          provider: MockProvider,
+          provider_opts: [],
+          session_store_dir: dir
+        )
+
+      current_id = Session.session_id(session)
+      Session.add_system_message(session, "unsaved local note")
+      :sys.get_state(session)
+
+      SessionStore.save(
+        %{
+          id: "target-session",
+          timestamp: "2026-01-01T00:00:00Z",
+          last_message_at: "2026-01-01T00:00:00Z",
+          title: "Target",
+          model_name: "test-model",
+          provider_name: "native",
+          messages: [{:user, "target prompt"}],
+          usage: %MingaAgent.TurnUsage{}
+        },
+        dir
+      )
+
+      assert :ok = Session.load_session(session, "target-session")
+      assert {:ok, saved_current} = SessionStore.load(current_id, dir)
+      assert {:system, "unsaved local note", :info} in saved_current.messages
+      assert Session.session_id(session) == "target-session"
     end
   end
 

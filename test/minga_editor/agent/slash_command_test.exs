@@ -1,7 +1,10 @@
 defmodule MingaEditor.Agent.SlashCommandTest do
-  use ExUnit.Case, async: true
+  # Uses XDG_CONFIG_HOME to verify /resume opens persisted sessions through the public slash command path.
+  use ExUnit.Case, async: false
 
   alias MingaAgent.Session
+  alias MingaAgent.SessionStore
+  alias MingaAgent.TurnUsage
   alias MingaEditor.Agent.SlashCommand
   alias MingaEditor.Agent.UIState
   alias MingaEditor.State, as: EditorState
@@ -10,6 +13,8 @@ defmodule MingaEditor.Agent.SlashCommandTest do
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
+
+  @moduletag :tmp_dir
 
   defmodule NoopProvider do
     @behaviour MingaAgent.Provider
@@ -37,6 +42,21 @@ defmodule MingaEditor.Agent.SlashCommandTest do
 
   defp start_session do
     start_supervised!({Session, provider: NoopProvider, provider_opts: []})
+  end
+
+  defp with_xdg_config(dir, fun) do
+    previous = System.get_env("XDG_CONFIG_HOME")
+    System.put_env("XDG_CONFIG_HOME", dir)
+
+    try do
+      fun.()
+    after
+      if previous do
+        System.put_env("XDG_CONFIG_HOME", previous)
+      else
+        System.delete_env("XDG_CONFIG_HOME")
+      end
+    end
   end
 
   describe "slash_command?/1" do
@@ -72,6 +92,7 @@ defmodule MingaEditor.Agent.SlashCommandTest do
       assert "model" in names
       assert "plan" in names
       assert "exec" in names
+      assert "resume" in names
     end
   end
 
@@ -189,6 +210,39 @@ defmodule MingaEditor.Agent.SlashCommandTest do
     test "command parsing trims whitespace" do
       {:ok, state} = SlashCommand.execute(mock_state(), "/help  ")
       assert state.shell_state.status_msg == "Commands listed in chat"
+    end
+
+    test "/resume opens the persisted agent session picker", %{tmp_dir: dir} do
+      with_xdg_config(dir, fn ->
+        SessionStore.save(
+          %{
+            id: "resume-target",
+            timestamp: "2026-01-01T00:00:00Z",
+            last_message_at: "2026-01-01T00:00:00Z",
+            title: "Resume target",
+            model_name: "test-model",
+            provider_name: "native",
+            messages: [{:user, "Resume target"}],
+            usage: %TurnUsage{}
+          },
+          dir
+        )
+
+        session = start_session()
+        {:ok, state} = SlashCommand.execute(mock_state(session: session), "/resume")
+
+        assert {:picker, %{picker_ui: picker_ui}} = state.shell_state.modal
+        assert picker_ui.source == MingaEditor.UI.Picker.AgentSessionSource
+        assert picker_ui.context == %{persisted_only: true}
+      end)
+    end
+
+    test "/sessions opens the same agent session picker" do
+      session = start_session()
+      {:ok, state} = SlashCommand.execute(mock_state(session: session), "/sessions")
+
+      assert {:picker, %{picker_ui: picker_ui}} = state.shell_state.modal
+      assert picker_ui.source == MingaEditor.UI.Picker.AgentSessionSource
     end
 
     test "/plan enters plan mode for the active session" do

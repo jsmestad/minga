@@ -1298,9 +1298,11 @@ defmodule MingaEditor.Commands.Agent do
       },
       %Minga.Command{
         name: :agent_session_history,
-        description: "Agent session history",
+        description: "Resume agent session",
         requires_buffer: false,
-        execute: fn state -> PickerUI.open(state, MingaEditor.UI.Picker.SessionHistorySource) end
+        execute: fn state ->
+          PickerUI.open(state, MingaEditor.UI.Picker.AgentSessionSource, %{persisted_only: true})
+        end
       }
     ]
 

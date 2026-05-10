@@ -42,6 +42,7 @@ defmodule MingaEditor.Agent.SlashCommand do
     %Command{name: "help", description: "Show available slash commands"},
     %Command{name: "plan", description: "Enter plan mode (destructive tools blocked)"},
     %Command{name: "exec", description: "Leave plan mode and allow execution"},
+    %Command{name: "resume", description: "Resume a saved agent session"},
     %Command{name: "sessions", description: "Browse and switch between sessions"},
     %Command{
       name: "auth",
@@ -135,6 +136,7 @@ defmodule MingaEditor.Agent.SlashCommand do
   defp dispatch(state, "exec", _args), do: do_exec(state)
   defp dispatch(state, "skill:plan", _args), do: do_plan(state)
   defp dispatch(state, "skill:off:plan", _args), do: do_exec(state)
+  defp dispatch(state, "resume", _args), do: {:ok, do_resume(state)}
   defp dispatch(state, "sessions", _args), do: {:ok, do_sessions(state)}
   defp dispatch(state, "auth", args), do: {:ok, do_auth(state, args)}
   defp dispatch(state, "instructions", _args), do: {:ok, do_instructions(state)}
@@ -245,6 +247,11 @@ defmodule MingaEditor.Agent.SlashCommand do
 
       {:ok, state}
     end
+  end
+
+  @spec do_resume(state()) :: state()
+  defp do_resume(state) do
+    PickerUI.open(state, MingaEditor.UI.Picker.AgentSessionSource, %{persisted_only: true})
   end
 
   @spec do_sessions(state()) :: state()
