@@ -386,7 +386,14 @@ defmodule MingaEditor.RenderPipeline.Scroll do
           pos_integer(),
           non_neg_integer()
         ) :: Viewport.t()
-  defp scroll_horizontal(vp, _cursor_line, _cursor_col, true = _wrap_on, _content_w, _scroll_margin) do
+  defp scroll_horizontal(
+         vp,
+         _cursor_line,
+         _cursor_col,
+         true = _wrap_on,
+         _content_w,
+         _scroll_margin
+       ) do
     # Wrapping: no horizontal scroll needed. Just reset left to 0.
     # Vertical scroll is handled separately above (save/restore pattern).
     %{vp | left: 0}

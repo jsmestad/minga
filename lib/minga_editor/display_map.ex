@@ -100,9 +100,7 @@ defmodule MingaEditor.DisplayMap do
       ) do
     closed_dec_folds = Decorations.closed_fold_regions(decorations)
 
-    if not required?(fold_map, decorations, closed_dec_folds) do
-      nil
-    else
+    if required?(fold_map, decorations, closed_dec_folds) do
       ctx = %{
         fold_map: fold_map,
         dec_folds: closed_dec_folds,
@@ -117,12 +115,19 @@ defmodule MingaEditor.DisplayMap do
         entries: entries,
         total_display_lines: length(entries)
       }
+    else
+      nil
     end
   end
 
   @doc "Returns true when folds, virtual lines, or block decorations require a display map."
   @spec required?(FoldMap.t(), Decorations.t()) :: boolean()
-  def required?(%FoldMap{folds: []}, %Decorations{fold_regions: [], virtual_texts: [], block_decorations: []}), do: false
+  def required?(%FoldMap{folds: []}, %Decorations{
+        fold_regions: [],
+        virtual_texts: [],
+        block_decorations: []
+      }),
+      do: false
 
   def required?(fold_map, decorations) do
     required?(fold_map, decorations, Decorations.closed_fold_regions(decorations))

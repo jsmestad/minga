@@ -191,7 +191,8 @@ defmodule MingaEditor.RenderPipeline.Input do
     chrome_fingerprint(input, fingerprint_data)
   end
 
-  @spec chrome_fingerprint(t(), {{non_neg_integer(), non_neg_integer()}, non_neg_integer()}) :: integer()
+  @spec chrome_fingerprint(t(), {{non_neg_integer(), non_neg_integer()}, non_neg_integer()}) ::
+          integer()
   def chrome_fingerprint(%__MODULE__{} = input, {buf_cursor, buf_version}) do
     # Hash the fields that drive chrome output. We use :erlang.phash2
     # for speed (no crypto needed, just change detection).

@@ -117,7 +117,14 @@ defmodule MingaEditor.Window.RenderCache do
           non_neg_integer()
         ) :: t()
   def detect_invalidation(%__MODULE__{} = cache, viewport_top, gutter_w, line_count, buf_version) do
-    detect_invalidation(cache, viewport_top, gutter_w, line_count, buf_version, cache.last_cursor_line)
+    detect_invalidation(
+      cache,
+      viewport_top,
+      gutter_w,
+      line_count,
+      buf_version,
+      cache.last_cursor_line
+    )
   end
 
   @spec detect_invalidation(
@@ -128,7 +135,14 @@ defmodule MingaEditor.Window.RenderCache do
           non_neg_integer(),
           non_neg_integer()
         ) :: t()
-  def detect_invalidation(%__MODULE__{} = cache, viewport_top, gutter_w, line_count, buf_version, cursor_line) do
+  def detect_invalidation(
+        %__MODULE__{} = cache,
+        viewport_top,
+        gutter_w,
+        line_count,
+        buf_version,
+        cursor_line
+      ) do
     first_frame = cache.last_buf_version < 0
 
     needs_full =

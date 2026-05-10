@@ -226,7 +226,8 @@ defmodule MingaEditor.DisplayList do
 
   def draws_to_layer_sorted([{row, col, text, style} | rest]) do
     {layer, current_row, runs_rev} =
-      Enum.reduce(rest, {%{}, row, [{col, text, style}]}, fn {next_row, col, text, style}, {layer, row, runs} ->
+      Enum.reduce(rest, {%{}, row, [{col, text, style}]}, fn {next_row, col, text, style},
+                                                             {layer, row, runs} ->
         if next_row == row do
           {layer, row, [{col, text, style} | runs]}
         else
@@ -294,7 +295,11 @@ defmodule MingaEditor.DisplayList do
       end
 
     before_windows = frame.tab_bar ++ frame.file_tree ++ frame.agentic_view
-    after_windows = frame.separators ++ frame.status_bar ++ frame.agent_panel ++ frame.minibuffer ++ splash_draws
+
+    after_windows =
+      frame.separators ++
+        frame.status_bar ++ frame.agent_panel ++ frame.minibuffer ++ splash_draws
+
     overlay_draws = Enum.flat_map(frame.overlays, fn %Overlay{draws: draws} -> draws end)
 
     tail =
@@ -382,7 +387,13 @@ defmodule MingaEditor.DisplayList do
     |> Enum.reverse()
   end
 
-  @spec prepend_draw_commands([binary()], non_neg_integer(), non_neg_integer(), String.t(), Face.t()) :: [binary()]
+  @spec prepend_draw_commands(
+          [binary()],
+          non_neg_integer(),
+          non_neg_integer(),
+          String.t(),
+          Face.t()
+        ) :: [binary()]
   defp prepend_draw_commands(acc, row, col, text, %Face{} = face) do
     if simple_draw_face?(face) do
       [Protocol.encode_draw_face(row, col, text, face) | acc]

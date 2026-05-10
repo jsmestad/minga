@@ -45,7 +45,7 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUI do
     {status_bar_draws, status_bar_data, modeline_click_regions} =
       build_status_bar(state, layout, Map.get(scrolls, state.workspace.windows.active))
 
-    stable_fp = stable_chrome_fingerprint(state, layout)
+    stable_fp = stable_chrome_fingerprint(state, layout, status_bar_data)
 
     stable =
       case state.caches.chrome_prev_result do
@@ -115,8 +115,8 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUI do
     }
   end
 
-  @spec stable_chrome_fingerprint(state(), Layout.t()) :: integer()
-  defp stable_chrome_fingerprint(state, layout) do
+  @spec stable_chrome_fingerprint(state(), Layout.t(), StatusBarData.t()) :: integer()
+  defp stable_chrome_fingerprint(state, layout, status_bar_data) do
     :erlang.phash2({
       layout.editor_area,
       layout.horizontal_separators,
@@ -125,6 +125,10 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUI do
       state.workspace.windows.tree,
       state.workspace.file_tree,
       state.shell_state |> Map.get(:tab_bar),
+      state.workspace.editing.mode,
+      state.workspace.editing.mode_state,
+      status_bar_dirty?(status_bar_data),
+      state.shell_state.status_msg,
       state.theme.name
     })
   end
@@ -151,16 +155,10 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUI do
     case state.caches.chrome_prev_result do
       %Chrome{status_bar_data: {:buffer, data}} when is_pid(buf) ->
         {line, col} = scroll_cursor(active_scroll, buf)
+        {line_count, dirty} = scroll_buffer_status(active_scroll, data)
 
         {:buffer,
-         %{
-           data
-           | mode: Minga.Editing.mode(state),
-             mode_state: state.workspace.editing.mode_state,
-             cursor_line: line,
-             cursor_col: col,
-             status_msg: state.shell_state.status_msg
-         }}
+         StatusBarData.refresh_cached_buffer_data(data, state, line, col, line_count, dirty)}
 
       _ ->
         StatusBarData.from_state(state)
@@ -169,9 +167,20 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUI do
     :exit, _ -> StatusBarData.from_state(state)
   end
 
+  @spec status_bar_dirty?(StatusBarData.t()) :: boolean()
+  defp status_bar_dirty?({:buffer, %{dirty: dirty}}), do: dirty
+  defp status_bar_dirty?({:agent, %{dirty: dirty}}), do: dirty
+
   @spec scroll_cursor(map() | nil, pid()) :: {non_neg_integer(), non_neg_integer()}
   defp scroll_cursor(%{cursor_line: line, cursor_byte_col: col}, _buf), do: {line, col}
   defp scroll_cursor(_active_scroll, buf), do: Buffer.cursor(buf)
+
+  @spec scroll_buffer_status(map() | nil, StatusBarData.buffer_data()) ::
+          {non_neg_integer(), boolean()}
+  defp scroll_buffer_status(%{snapshot: %{line_count: line_count, dirty: dirty}}, _data),
+    do: {line_count, dirty}
+
+  defp scroll_buffer_status(_active_scroll, data), do: {data.line_count, data.dirty}
 
   # ── Overlays ──────────────────────────────────────────────────────────────
 

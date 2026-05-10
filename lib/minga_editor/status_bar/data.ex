@@ -110,6 +110,28 @@ defmodule MingaEditor.StatusBar.Data do
     end
   end
 
+  @doc "Updates cached buffer status data with the dynamic fields that can change every frame."
+  @spec refresh_cached_buffer_data(
+          buffer_data(),
+          EditorState.t() | map(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          boolean()
+        ) :: buffer_data()
+  def refresh_cached_buffer_data(data, state, line, col, line_count, dirty) do
+    Map.merge(data, %{
+      mode: Minga.Editing.mode(state),
+      mode_state: Editing.mode_state(state),
+      cursor_line: line,
+      cursor_col: col,
+      line_count: line_count,
+      dirty: dirty,
+      macro_recording: Minga.Editing.macro_recording_status(state),
+      status_msg: state.shell_state.status_msg
+    })
+  end
+
   # ── Buffer variant ─────────────────────────────────────────────────────────
 
   @spec build_buffer_data(EditorState.t() | map()) :: buffer_data()
@@ -306,7 +328,8 @@ defmodule MingaEditor.StatusBar.Data do
     cursor_line_diagnostic_hint_from_path(file_path, line)
   end
 
-  @spec cursor_line_diagnostic_hint_from_path(String.t() | nil, non_neg_integer()) :: String.t() | nil
+  @spec cursor_line_diagnostic_hint_from_path(String.t() | nil, non_neg_integer()) ::
+          String.t() | nil
   defp cursor_line_diagnostic_hint_from_path(nil, _line), do: nil
 
   defp cursor_line_diagnostic_hint_from_path(path, line) do

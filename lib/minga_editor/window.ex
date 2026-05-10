@@ -397,7 +397,14 @@ defmodule MingaEditor.Window do
     %{
       window
       | render_cache:
-          RenderCache.detect_invalidation(cache, viewport_top, gutter_w, line_count, buf_version, cursor_line)
+          RenderCache.detect_invalidation(
+            cache,
+            viewport_top,
+            gutter_w,
+            line_count,
+            buf_version,
+            cursor_line
+          )
     }
   end
 
