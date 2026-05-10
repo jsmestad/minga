@@ -38,6 +38,8 @@ defmodule MingaEditor.Window do
   alias MingaEditor.Window.RenderCache
   alias MingaEditor.UI.Popup.Active, as: PopupActive
 
+  @compile {:inline, dirty?: 2}
+
   @typedoc "Unique identifier for a window."
   @type id :: pos_integer()
 

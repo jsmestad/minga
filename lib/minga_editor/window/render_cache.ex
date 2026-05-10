@@ -32,6 +32,8 @@ defmodule MingaEditor.Window.RenderCache do
 
   alias MingaEditor.DisplayList
 
+  @compile {:inline, dirty?: 2}
+
   @typedoc """
   Context fingerprint: a term derived from the render context that
   captures all per-frame inputs affecting every visible line. When
