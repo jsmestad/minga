@@ -18,17 +18,11 @@ defmodule MingaEditor.State.ModalOverlay do
       | {:conflict, ModalOverlay.Conflict.t()}
       | {:dashboard, ModalOverlay.Dashboard.t()}
 
-  ## Migration status (#1421)
-
-  All five variants are now tracked exclusively on `state.shell_state.modal`.
-  The legacy nullable fields (`shell_state.dashboard`, `shell_state.prompt_ui`,
-  `workspace.pending_conflict`, `workspace.completion`,
-  `workspace.completion_trigger`) have all been removed. #1427 finalises by
-  collapsing `Input.Interrupt` and adding a Credo enforcement rule.
+  The modal field is the only storage location for these five variants. There is no dual-write migration path and no dev/test divergence assertion; future modal changes must go through this gate directly.
 
   **Do not mutate `:modal` directly**: always call this module's
   `open/3`, `transition/3`, `close/1`, `dismiss/1`, `update_completion/2`,
-  or `update_completion_trigger/2`.
+  or `put_completion_trigger/2`.
 
   ## Replacement policy
 

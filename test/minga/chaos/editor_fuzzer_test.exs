@@ -10,8 +10,8 @@ defmodule Minga.Chaos.EditorFuzzerTest do
 
   ## Running
 
-      mix test test/minga/chaos/ --include chaos
-      mix test test/minga/chaos/ --include chaos --seed 12345  # reproduce
+      mix test.heavy test/minga/chaos/
+      mix test.heavy test/minga/chaos/ --seed 12345  # reproduce
   """
 
   # Mutates Application env (:minga, :shutdown_fn); must not run concurrently with other tests.
@@ -25,6 +25,7 @@ defmodule Minga.Chaos.EditorFuzzerTest do
   alias Minga.Test.HeadlessPort
 
   @moduletag :chaos
+  @moduletag :heavy
   @moduletag timeout: 180_000
 
   # Prevent :q/:qa/:wq from calling System.stop(0) and killing the VM.
@@ -111,7 +112,14 @@ defmodule Minga.Chaos.EditorFuzzerTest do
 
     {:ok, _snapshot} = HeadlessPort.collect_frame(ref)
 
-    %{editor: editor, buffer: buffer, port: port, width: width, height: height}
+    %{
+      editor: editor,
+      buffer: buffer,
+      port: port,
+      clipboard_table: clipboard_table,
+      width: width,
+      height: height
+    }
   end
 
   # ── Command implementations (called by PropEr) ──────────────────────────
@@ -342,21 +350,21 @@ defmodule Minga.Chaos.EditorFuzzerTest do
       # failure instead of the EXIT signal killing us.
       prev_trap = Process.flag(:trap_exit, true)
 
-      ctx = start_chaos_editor(content)
-      store_ctx(ctx)
+      try do
+        ctx = start_chaos_editor(content)
+        store_ctx(ctx)
 
-      {_history, _state, result} = run_commands(__MODULE__, cmds)
-
-      # Clean up
-      if Process.alive?(ctx.editor), do: GenServer.stop(ctx.editor, :normal, 1000)
-      if Process.alive?(ctx.port), do: GenServer.stop(ctx.port, :normal, 1000)
-
-      # Drain any EXIT messages from crashed child processes
-      drain_exit_messages()
-
-      Process.flag(:trap_exit, prev_trap)
-
-      result == :ok
+        try do
+          {_history, _state, result} = run_commands(__MODULE__, cmds)
+          result == :ok
+        after
+          cleanup_ctx(ctx)
+        end
+      after
+        Process.delete(:chaos_editor_ctx)
+        drain_exit_messages()
+        Process.flag(:trap_exit, prev_trap)
+      end
     end
   end
 
@@ -387,6 +395,30 @@ defmodule Minga.Chaos.EditorFuzzerTest do
         List.to_string(chars)
       end
     end
+  end
+
+  defp cleanup_ctx(%{
+         editor: editor,
+         buffer: buffer,
+         port: port,
+         clipboard_table: clipboard_table
+       }) do
+    stop_process(editor)
+    stop_process(port)
+    stop_process(buffer)
+    delete_table(clipboard_table)
+  end
+
+  defp stop_process(pid) when is_pid(pid) do
+    GenServer.stop(pid, :normal, 1000)
+  catch
+    :exit, _ -> :ok
+  end
+
+  defp delete_table(table) do
+    :ets.delete(table)
+  catch
+    :error, :badarg -> :ok
   end
 
   # Drain any {:EXIT, pid, reason} messages left in the mailbox from

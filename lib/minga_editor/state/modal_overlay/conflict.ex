@@ -38,8 +38,4 @@ defmodule MingaEditor.State.ModalOverlay.Conflict do
       opened_at: Keyword.get(opts, :opened_at, System.monotonic_time(:millisecond))
     }
   end
-
-  @doc "Returns the legacy `{buffer, message}` tuple shape."
-  @spec to_legacy(t()) :: {pid(), String.t()}
-  def to_legacy(%__MODULE__{buffer: buf, message: msg}), do: {buf, msg}
 end

@@ -3,24 +3,33 @@ defmodule MingaEditor.Input.InterruptTest do
 
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Editing.Completion
+  alias Minga.Mode
+  alias MingaEditor.Agent.UIState
+  alias MingaEditor.Dashboard
+  alias MingaEditor.HoverPopup
+  alias MingaEditor.Input
+  alias MingaEditor.Input.Interrupt
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.ModalOverlay
+  alias MingaEditor.State.ModalOverlay.Completion, as: CompletionPayload
   alias MingaEditor.State.ModalOverlay.Conflict, as: ConflictPayload
+  alias MingaEditor.State.ModalOverlay.Dashboard, as: DashboardPayload
   alias MingaEditor.State.ModalOverlay.Picker, as: PickerPayload
+  alias MingaEditor.State.ModalOverlay.Prompt, as: PromptPayload
   alias MingaEditor.State.Picker
+  alias MingaEditor.State.Prompt, as: PromptState
   alias MingaEditor.State.WhichKey
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
-  alias MingaEditor.Input
-  alias MingaEditor.Input.Interrupt
-  alias Minga.Mode
 
   @ctrl_g 7
+  @modal_variants [:picker, :prompt, :completion, :conflict, :dashboard]
 
   defp base_state(opts \\ []) do
     buf_opts = Keyword.get(opts, :buffer_opts, content: "hello\nworld")
-    {:ok, buf} = BufferServer.start_link(buf_opts)
+    buf = start_supervised!({BufferServer, buf_opts})
 
     %EditorState{
       port_manager: self(),
@@ -35,6 +44,76 @@ defmodule MingaEditor.Input.InterruptTest do
       },
       focus_stack: Input.default_stack()
     }
+  end
+
+  @spec open_modal_variant(EditorState.t(), ModalOverlay.variant()) :: EditorState.t()
+  defp open_modal_variant(state, :picker) do
+    picker = MingaEditor.UI.Picker.new(["x"])
+    ModalOverlay.open(state, :picker, PickerPayload.new(%Picker{picker: picker}))
+  end
+
+  defp open_modal_variant(state, :prompt) do
+    prompt = %PromptState{handler: __MODULE__, text: "query", cursor: 5, label: "Find"}
+    ModalOverlay.open(state, :prompt, PromptPayload.new(prompt))
+  end
+
+  defp open_modal_variant(state, :completion) do
+    completion = %Completion{items: [], trigger_position: {0, 0}}
+    ModalOverlay.open(state, :completion, CompletionPayload.new(:tab1, completion: completion))
+  end
+
+  defp open_modal_variant(state, :conflict) do
+    ModalOverlay.open(
+      state,
+      :conflict,
+      ConflictPayload.new(state.workspace.buffers.active, "/tmp/test.txt")
+    )
+  end
+
+  defp open_modal_variant(state, :dashboard) do
+    ModalOverlay.open(state, :dashboard, DashboardPayload.new(Dashboard.new_state()))
+  end
+
+  @spec dirty_interrupt_axes(EditorState.t()) :: {EditorState.t(), HoverPopup.t()}
+  defp dirty_interrupt_axes(state) do
+    hover = HoverPopup.new("hover docs", 3, 4)
+
+    mode_state = %{
+      Mode.initial_state()
+      | leader_node: %{?a => :noop},
+        prefix_node: %{?b => :noop},
+        pending: :replace,
+        count: 2
+    }
+
+    vim = %{state.workspace.editing | mode: :insert, mode_state: mode_state}
+
+    state = %{
+      state
+      | workspace: %{state.workspace | keymap_scope: :agent, editing: vim}
+    }
+
+    state =
+      state
+      |> EditorState.set_whichkey(%WhichKey{node: %{}, show: true})
+      |> EditorState.set_status("stale status")
+      |> EditorState.set_hover_popup(hover)
+      |> AgentAccess.update_agent_ui(&UIState.set_prefix(&1, :g))
+
+    {state, hover}
+  end
+
+  @spec assert_known_good_after_interrupt(EditorState.t(), HoverPopup.t()) :: true
+  defp assert_known_good_after_interrupt(state, hover) do
+    assert state.workspace.keymap_scope == :editor
+    assert state.workspace.editing.mode == :normal
+    assert state.workspace.editing.mode_state == Mode.initial_state()
+    assert state.shell_state.modal == :none
+    assert state.shell_state.whichkey.node == nil
+    assert state.shell_state.whichkey.show == false
+    assert AgentAccess.view(state).pending_prefix == nil
+    assert state.shell_state.status_msg == nil
+    assert state.shell_state.hover_popup == hover
   end
 
   describe "Ctrl-G basics" do
@@ -121,24 +200,39 @@ defmodule MingaEditor.Input.InterruptTest do
       assert new_state.workspace.editing.mode == :normal
     end
 
-    test "fresh mode_state clears prefix_node" do
+    test "fresh mode_state replaces stale non-normal mode state" do
       state = base_state()
-      mode_state = %{Mode.initial_state() | prefix_node: %{?a => :fold_toggle}}
-      vim = %{state.workspace.editing | mode: :normal, mode_state: mode_state}
+
+      vim = %{
+        state.workspace.editing
+        | mode: :normal,
+          mode_state: %Minga.Mode.CommandState{input: "w"}
+      }
+
       state = %{state | workspace: %{state.workspace | editing: vim}}
 
       assert {:handled, new_state} = Interrupt.handle_key(state, @ctrl_g, 0)
-      assert new_state.workspace.editing.mode_state.prefix_node == nil
+      assert new_state.workspace.editing.mode == :normal
+      assert new_state.workspace.editing.mode_state == Mode.initial_state()
     end
 
-    test "fresh mode_state clears leader_node" do
+    test "fresh mode_state clears leader sequence state" do
       state = base_state()
-      mode_state = %{Mode.initial_state() | leader_node: %{?b => {:command, :list_buffers}}}
+
+      mode_state = %{
+        Mode.initial_state()
+        | leader_node: %{?b => {:command, :list_buffers}},
+          leader_keys: ["SPC"],
+          prefix_node: %{?g => {:command, :goto_line}},
+          prefix_keys: ["g"],
+          insert_changed: true
+      }
+
       vim = %{state.workspace.editing | mode_state: mode_state}
       state = %{state | workspace: %{state.workspace | editing: vim}}
 
       assert {:handled, new_state} = Interrupt.handle_key(state, @ctrl_g, 0)
-      assert new_state.workspace.editing.mode_state.leader_node == nil
+      assert new_state.workspace.editing.mode_state == Mode.initial_state()
     end
 
     test "leaves :normal mode unchanged" do
@@ -202,32 +296,18 @@ defmodule MingaEditor.Input.InterruptTest do
   end
 
   describe "combined resets" do
-    test "resets everything at once" do
-      state = base_state()
-      picker = MingaEditor.UI.Picker.new(["x"])
+    for variant <- @modal_variants do
+      test "resets stale axes while dismissing #{variant} modal" do
+        variant = unquote(variant)
 
-      vim = %{state.workspace.editing | mode: :visual, mode_state: Mode.initial_state()}
+        {state, hover} =
+          base_state()
+          |> open_modal_variant(variant)
+          |> dirty_interrupt_axes()
 
-      state = %{
-        state
-        | workspace: %{state.workspace | keymap_scope: :agent, editing: vim}
-      }
-
-      # Only one modal can be active at a time under the ModalOverlay sum
-      # type, so this combined-reset case exercises picker plus the
-      # non-modal axes (scope/mode/whichkey/status). The conflict-reset
-      # and completion-close paths have focused tests above.
-      state = ModalOverlay.open(state, :picker, PickerPayload.new(%Picker{picker: picker}))
-      state = MingaEditor.State.set_whichkey(state, %WhichKey{node: %{}, show: true})
-      state = MingaEditor.State.set_status(state, "hello")
-
-      assert {:handled, new_state} = Interrupt.handle_key(state, @ctrl_g, 0)
-      assert new_state.workspace.keymap_scope == :editor
-      assert new_state.workspace.editing.mode == :normal
-      assert new_state.shell_state.modal == :none
-      assert new_state.shell_state.whichkey.node == nil
-      assert new_state.shell_state.whichkey.show == false
-      assert new_state.shell_state.status_msg == nil
+        assert {:handled, new_state} = Interrupt.handle_key(state, @ctrl_g, 0)
+        assert_known_good_after_interrupt(new_state, hover)
+      end
     end
   end
 

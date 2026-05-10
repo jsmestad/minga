@@ -1,7 +1,7 @@
 Code.require_file("credo/checks/dependency_direction_check.exs")
 
 defmodule Minga.Credo.DependencyDirectionCheckTest do
-  use Credo.Test.Case, async: false
+  use Credo.Test.Case, async: true
 
   alias Minga.Credo.DependencyDirectionCheck
 
