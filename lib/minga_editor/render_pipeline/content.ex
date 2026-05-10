@@ -109,6 +109,7 @@ defmodule MingaEditor.RenderPipeline.Content do
         gutter_w: gutter_w,
         content_w: content_w,
         has_sign_column: has_sign_column,
+        file_path: snapshot.file_path,
         is_active: is_active,
         is_gui: MingaEditor.Frontend.gui?(state.capabilities)
       })
@@ -135,15 +136,21 @@ defmodule MingaEditor.RenderPipeline.Content do
       fold_map: window.fold_map
     }
 
-    {gutter_draws, line_draws, rows_used, window} =
-      if wrap_on do
-        # Wrapping and folding are mutually exclusive for now.
-        # Strip fold-specific keys so the type matches line_render_opts.
-        wrap_opts = Map.drop(line_opts, [:visible_line_map, :fold_map])
-        {g, l, r} = ContentHelpers.render_lines_wrapped(lines, visible_rows, wrap_opts)
-        {g, l, r, window}
-      else
-        ContentHelpers.render_lines_nowrap(lines, line_opts)
+    {gutter_layer, line_layer, rows_used, window} =
+      cond do
+        wrap_on ->
+          # Wrapping and folding are mutually exclusive for now.
+          # Strip fold-specific keys so the type matches line_render_opts.
+          wrap_opts = Map.drop(line_opts, [:visible_line_map, :fold_map])
+          {g, l, r} = ContentHelpers.render_lines_wrapped(lines, visible_rows, wrap_opts)
+          {DisplayList.draws_to_layer_sorted(g), DisplayList.draws_to_layer_sorted(l), r, window}
+
+        scroll.visible_line_map == nil ->
+          ContentHelpers.render_lines_nowrap_layers(lines, line_opts)
+
+        true ->
+          {g, l, r, window} = ContentHelpers.render_lines_nowrap(lines, line_opts)
+          {DisplayList.draws_to_layer_sorted(g), DisplayList.draws_to_layer_sorted(l), r, window}
       end
 
     # Tilde lines for empty space below content
@@ -201,9 +208,9 @@ defmodule MingaEditor.RenderPipeline.Content do
 
     win_frame = %WindowFrame{
       rect: {0, 0, content_width, content_height},
-      gutter: DisplayList.draws_to_layer(gutter_draws),
-      lines: DisplayList.draws_to_layer(line_draws),
-      tilde_lines: DisplayList.draws_to_layer(tilde_draws),
+      gutter: gutter_layer,
+      lines: line_layer,
+      tilde_lines: DisplayList.draws_to_layer_sorted(tilde_draws),
       modeline: %{},
       cursor: buf_cursor,
       semantic: semantic

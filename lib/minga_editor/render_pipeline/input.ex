@@ -174,15 +174,33 @@ defmodule MingaEditor.RenderPipeline.Input do
   """
   @spec chrome_fingerprint(t()) :: integer()
   def chrome_fingerprint(%__MODULE__{} = input) do
+    buf = input.workspace.buffers.active
+    chrome_fingerprint(input, buffer_fingerprint_data(buf))
+  end
+
+  @spec chrome_fingerprint(t(), map()) :: integer()
+  def chrome_fingerprint(%__MODULE__{} = input, scrolls) when is_map(scrolls) do
+    active = input.workspace.windows.active
+
+    fingerprint_data =
+      case Map.get(scrolls, active) do
+        %{cursor_line: line, cursor_byte_col: col, buf_version: version} -> {{line, col}, version}
+        _ -> buffer_fingerprint_data(input.workspace.buffers.active)
+      end
+
+    chrome_fingerprint(input, fingerprint_data)
+  end
+
+  @spec chrome_fingerprint(t(), {{non_neg_integer(), non_neg_integer()}, non_neg_integer()}) ::
+          integer()
+  def chrome_fingerprint(%__MODULE__{} = input, {buf_cursor, buf_version}) do
     # Hash the fields that drive chrome output. We use :erlang.phash2
     # for speed (no crypto needed, just change detection).
     #
     # Includes the active buffer's cursor and version because the status
-    # bar displays cursor position, line count, and dirty state. These
-    # are fetched from the buffer GenServer, so we read them here to
-    # ensure the fingerprint changes when they do.
-    buf = input.workspace.buffers.active
-    {buf_cursor, buf_version} = buffer_fingerprint_data(buf)
+    # bar displays cursor position, line count, and dirty state. The render
+    # pipeline passes scroll-stage buffer data when available so this does
+    # not need duplicate GenServer calls in the hot path.
 
     :erlang.phash2({
       # Buffer state for status bar (cursor pos, version/dirty)

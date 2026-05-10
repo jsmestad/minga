@@ -205,9 +205,11 @@ defmodule MingaEditor.WindowTest do
       assert result.render_cache.dirty_lines == :all
     end
 
-    test "full invalidation when buffer version changed", %{window: window} do
+    test "targeted invalidation when buffer version changed without line count change", %{
+      window: window
+    } do
       result = Window.detect_invalidation(window, 0, 4, 100, 6)
-      assert result.render_cache.dirty_lines == :all
+      assert result.render_cache.dirty_lines == %{10 => true}
     end
 
     test "full invalidation on first frame (sentinel tracking values)", %{window: _window} do
@@ -399,11 +401,10 @@ defmodule MingaEditor.WindowTest do
 
       window = Window.snapshot_after_render(window, 0, 4, 100, 5, 1, :test_fp)
 
-      # User types a character on line 5 → buffer version bumps to 2
-      # The pipeline detects version change and marks :all dirty
-      # (conservative; future optimization can narrow this)
+      # User types a character on line 5 → buffer version bumps to 2.
+      # Same-line edits with unchanged line count only dirty the previous/current cursor line.
       window = Window.detect_invalidation(window, 0, 4, 100, 2)
-      assert window.render_cache.dirty_lines == :all
+      assert window.render_cache.dirty_lines == %{5 => true}
 
       # After rendering, snapshot with new version
       window = Window.snapshot_after_render(window, 0, 4, 100, 5, 2, :test_fp)

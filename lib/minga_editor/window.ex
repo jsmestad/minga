@@ -38,6 +38,8 @@ defmodule MingaEditor.Window do
   alias MingaEditor.Window.RenderCache
   alias MingaEditor.UI.Popup.Active, as: PopupActive
 
+  @compile {:inline, dirty?: 2}
+
   @typedoc "Unique identifier for a window."
   @type id :: pos_integer()
 
@@ -373,6 +375,36 @@ defmodule MingaEditor.Window do
       window
       | render_cache:
           RenderCache.detect_invalidation(cache, viewport_top, gutter_w, line_count, buf_version)
+    }
+  end
+
+  @spec detect_invalidation(
+          t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: t()
+  def detect_invalidation(
+        %__MODULE__{render_cache: cache} = window,
+        viewport_top,
+        gutter_w,
+        line_count,
+        buf_version,
+        cursor_line
+      ) do
+    %{
+      window
+      | render_cache:
+          RenderCache.detect_invalidation(
+            cache,
+            viewport_top,
+            gutter_w,
+            line_count,
+            buf_version,
+            cursor_line
+          )
     }
   end
 

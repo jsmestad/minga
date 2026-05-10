@@ -216,6 +216,28 @@ defmodule MingaEditor.DisplayList do
     end)
   end
 
+  @doc """
+  Groups row-sorted draws into a render layer in one pass.
+
+  Use this only when all draws for a row are contiguous and rows are emitted in ascending order.
+  """
+  @spec draws_to_layer_sorted([draw()]) :: render_layer()
+  def draws_to_layer_sorted([]), do: %{}
+
+  def draws_to_layer_sorted([{row, col, text, style} | rest]) do
+    {layer, current_row, runs_rev} =
+      Enum.reduce(rest, {%{}, row, [{col, text, style}]}, fn {next_row, col, text, style},
+                                                             {layer, row, runs} ->
+        if next_row == row do
+          {layer, row, [{col, text, style} | runs]}
+        else
+          {Map.put(layer, row, Enum.reverse(runs)), next_row, [{col, text, style}]}
+        end
+      end)
+
+    Map.put(layer, current_row, Enum.reverse(runs_rev))
+  end
+
   # ── Draw offsetting ────────────────────────────────────────────────────────
 
   @doc "Offsets draw tuples by the given row and column amounts."
@@ -266,34 +288,17 @@ defmodule MingaEditor.DisplayList do
   """
   @spec to_commands(Frame.t(), keyword()) :: [binary()]
   def to_commands(%Frame{} = frame, opts \\ []) do
-    window_draws =
-      Enum.flat_map(frame.windows, fn wf ->
-        {row_off, col_off, _w, _h} = wf.rect
-
-        # Window-relative draws get offset to absolute screen coordinates
-        gutter = layer_to_draws(wf.gutter)
-        lines = layer_to_draws(wf.lines)
-        tildes = layer_to_draws(wf.tilde_lines)
-
-        offset_draws(gutter ++ lines ++ tildes, row_off, col_off)
-      end)
-
     splash_draws =
       case frame.splash do
         nil -> []
         draws -> draws
       end
 
-    all_draws =
-      frame.tab_bar ++
-        frame.file_tree ++
-        frame.agentic_view ++
-        window_draws ++
-        frame.separators ++
-        frame.status_bar ++
-        frame.agent_panel ++
-        frame.minibuffer ++
-        splash_draws
+    before_windows = frame.tab_bar ++ frame.file_tree ++ frame.agentic_view
+
+    after_windows =
+      frame.separators ++
+        frame.status_bar ++ frame.agent_panel ++ frame.minibuffer ++ splash_draws
 
     overlay_draws = Enum.flat_map(frame.overlays, fn %Overlay{draws: draws} -> draws end)
 
@@ -313,7 +318,9 @@ defmodule MingaEditor.DisplayList do
 
     [Protocol.encode_clear()] ++
       frame.regions ++
-      draws_to_commands(all_draws) ++
+      draws_to_commands(before_windows) ++
+      windows_to_commands(frame.windows) ++
+      draws_to_commands(after_windows) ++
       draws_to_commands(overlay_draws) ++
       tail
   end
@@ -328,11 +335,11 @@ defmodule MingaEditor.DisplayList do
   """
   @spec draws_to_commands([draw()]) :: [binary()]
   def draws_to_commands(draws) do
-    Enum.flat_map(draws, fn {row, col, text, %Face{} = face} ->
-      style = Face.to_style(face)
-      {style, registration_cmds} = resolve_font_family(style)
-      registration_cmds ++ [Protocol.encode_draw_smart(row, col, text, style)]
+    draws
+    |> Enum.reduce([], fn {row, col, text, %Face{} = face}, acc ->
+      prepend_draw_commands(acc, row, col, text, face)
     end)
+    |> Enum.reverse()
   end
 
   # Resolves font_family in a style keyword list to a font_id.
@@ -356,6 +363,53 @@ defmodule MingaEditor.DisplayList do
         reg_cmds = if new?, do: [Protocol.encode_register_font(font_id, family)], else: []
         {style_with_id, reg_cmds}
     end
+  end
+
+  @spec windows_to_commands([WindowFrame.t()]) :: [binary()]
+  defp windows_to_commands(windows) do
+    Enum.flat_map(windows, fn wf ->
+      {row_off, col_off, _w, _h} = wf.rect
+
+      layer_to_commands(wf.gutter, row_off, col_off) ++
+        layer_to_commands(wf.lines, row_off, col_off) ++
+        layer_to_commands(wf.tilde_lines, row_off, col_off)
+    end)
+  end
+
+  @spec layer_to_commands(render_layer(), non_neg_integer(), non_neg_integer()) :: [binary()]
+  defp layer_to_commands(layer, row_off, col_off) when is_map(layer) do
+    layer
+    |> Enum.reduce([], fn {row, runs}, acc ->
+      Enum.reduce(runs, acc, fn {col, text, %Face{} = face}, row_acc ->
+        prepend_draw_commands(row_acc, row + row_off, col + col_off, text, face)
+      end)
+    end)
+    |> Enum.reverse()
+  end
+
+  @spec prepend_draw_commands(
+          [binary()],
+          non_neg_integer(),
+          non_neg_integer(),
+          String.t(),
+          Face.t()
+        ) :: [binary()]
+  defp prepend_draw_commands(acc, row, col, text, %Face{} = face) do
+    if simple_draw_face?(face) do
+      [Protocol.encode_draw_face(row, col, text, face) | acc]
+    else
+      style = Face.to_style(face)
+      {style, registration_cmds} = resolve_font_family(style)
+      command = Protocol.encode_draw_smart(row, col, text, style)
+      Enum.reduce(registration_cmds ++ [command], acc, fn cmd, next_acc -> [cmd | next_acc] end)
+    end
+  end
+
+  @spec simple_draw_face?(Face.t()) :: boolean()
+  defp simple_draw_face?(%Face{} = face) do
+    face.strikethrough != true and (face.underline_style == nil or face.underline_style == :line) and
+      face.underline_color == nil and (face.blend == nil or face.blend == 100) and
+      face.font_family == nil and (face.font_weight == nil or face.font_weight == :regular)
   end
 
   # ── Layer ↔ draws ──────────────────────────────────────────────────────────

@@ -115,7 +115,7 @@ defmodule MingaEditor.RenderPipeline do
     window_frames = buffer_frames ++ agent_chat_frames
 
     # Stage 5: Chrome (skip rebuild when inputs unchanged)
-    chrome_fp = Input.chrome_fingerprint(input)
+    chrome_fp = Input.chrome_fingerprint(input, scrolls)
     prev_chrome_fp = input.caches.chrome_prev_fingerprint
     prev_chrome = input.caches.chrome_prev_result
 

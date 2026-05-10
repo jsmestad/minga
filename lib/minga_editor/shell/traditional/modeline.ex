@@ -74,7 +74,10 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
     ml = theme.modeline
 
     {mode_fg, mode_bg} =
-      Map.get(ml.mode_colors, data.mode, {0x000000, ml.mode_colors.normal |> elem(1)})
+      case Map.fetch(ml.mode_colors, data.mode) do
+        {:ok, colors} -> colors
+        :error -> {0x000000, elem(ml.mode_colors.normal, 1)}
+      end
 
     bar_fg = ml.bar_fg
     bar_bg = ml.bar_bg
