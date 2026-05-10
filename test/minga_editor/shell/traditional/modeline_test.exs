@@ -122,6 +122,17 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
       assert Enum.any?(regions, fn {_start, _end, cmd} -> cmd == :filetype_menu end)
     end
 
+    test "agent plan mode indicator shows explicit PLAN text" do
+      theme = MingaEditor.UI.Theme.get!(:doom_one)
+      agent_colors = MingaEditor.UI.Theme.agent_theme(theme)
+      data = Map.merge(@base_data, %{agent_status: :plan, agent_theme_colors: agent_colors})
+      {commands, _regions} = Modeline.render(0, 120, data, theme)
+
+      combined = Enum.map_join(commands, fn {_row, _col, text, _opts} -> text end)
+      assert String.contains?(combined, "NORMAL")
+      assert String.contains?(combined, "PLAN")
+    end
+
     test "LSP indicator shows green dot when ready" do
       data = Map.put(@base_data, :lsp_status, :ready)
       {commands, _regions} = Modeline.render(0, 120, data)

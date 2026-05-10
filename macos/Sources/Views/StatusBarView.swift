@@ -173,6 +173,7 @@ final class StatusBarState {
         case 1: return "thinking"
         case 2: return "executing"
         case 3: return "error"
+        case 4: return "plan"
         default: return "idle"
         }
     }
@@ -322,6 +323,11 @@ struct StatusBarView: View {
             Image(systemName: "exclamationmark.circle.fill")
                 .font(.system(size: 9))
                 .foregroundStyle(theme.gutterErrorFg)
+                .frame(width: 14, height: barHeight)
+        case 4: // plan
+            Image(systemName: "pencil.and.outline")
+                .font(.system(size: 9))
+                .foregroundStyle(theme.agentStatusNeedsYou)
                 .frame(width: 14, height: barHeight)
         default: // idle: show nothing
             EmptyView()

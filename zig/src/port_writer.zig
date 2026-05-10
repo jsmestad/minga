@@ -33,9 +33,10 @@ dropped_count: u64,
 /// Initial buffer capacity.
 const INITIAL_CAPACITY: usize = 8192;
 
-/// Default max buffer size (64KB). If the BEAM is this far behind,
-/// dropping old key events is acceptable.
-const DEFAULT_MAX_SIZE: usize = 65536;
+/// Default max buffer size (128KB). If the BEAM is this far behind,
+/// dropping old key events is acceptable, while a max-size paste event
+/// still fits as one complete framed message.
+const DEFAULT_MAX_SIZE: usize = 128 * 1024;
 
 /// Initialize a new PortWriter for the given fd.
 pub fn init(alloc: std.mem.Allocator, fd: std.posix.fd_t) !Self {
@@ -67,6 +68,7 @@ pub fn deinit(self: *Self) void {
 /// so the BEAM never sees a corrupt frame.
 pub fn enqueue(self: *Self, payload: []const u8) !void {
     const frame_len = 4 + payload.len;
+    const effective_max = @max(self.max_size, frame_len);
 
     // Compact: move unread data to the front of the buffer.
     if (self.read_pos > 0) {
@@ -77,10 +79,10 @@ pub fn enqueue(self: *Self, payload: []const u8) !void {
     const pending = self.len;
     const needed = pending + frame_len;
 
-    if (needed > self.max_size) {
+    if (needed > effective_max) {
         // Drop whole messages from the front until enough space is free.
         var drop_pos: usize = 0;
-        while (drop_pos < pending and (pending - drop_pos + frame_len) > self.max_size) {
+        while (drop_pos < pending and (pending - drop_pos + frame_len) > effective_max) {
             if (drop_pos + 4 > pending) {
                 // Not enough bytes for a length prefix; drop everything.
                 drop_pos = pending;
@@ -107,10 +109,11 @@ pub fn enqueue(self: *Self, payload: []const u8) !void {
         }
     }
 
-    // Grow the buffer if needed (up to max_size).
+    // Grow the buffer if needed. A single oversized frame is allowed through
+    // intact so the BEAM never receives a corrupt partial message.
     const space_needed = self.len + frame_len;
     if (space_needed > self.buf.len) {
-        const new_cap = @min(self.max_size, @max(self.buf.len * 2, space_needed));
+        const new_cap = @min(effective_max, @max(self.buf.len * 2, space_needed));
         const new_buf = try self.alloc.realloc(self.buf, new_cap);
         self.buf = new_buf;
     }
@@ -142,10 +145,13 @@ pub fn drain(self: *Self) !usize {
     if (!self.hasPending()) return 0;
 
     const data = self.buf[self.read_pos..self.len];
-    const n = std.posix.write(self.fd, data) catch |err| {
-        if (err == error.WouldBlock) return 0;
-        return err;
-    };
+    const rc = std.c.write(self.fd, data.ptr, data.len);
+    if (rc < 0) {
+        const e = std.posix.errno(rc);
+        if (e == .AGAIN) return 0;
+        return std.posix.unexpectedErrno(e);
+    }
+    const n: usize = @intCast(rc);
 
     self.read_pos += n;
 
@@ -156,19 +162,6 @@ pub fn drain(self: *Self) !usize {
     }
 
     return n;
-}
-
-/// Flush all pending data, blocking until complete.
-/// Used during startup (ready event) when we need guaranteed delivery
-/// before entering the non-blocking event loop.
-pub fn flushBlocking(self: *Self) !void {
-    while (self.hasPending()) {
-        const data = self.buf[self.read_pos..self.len];
-        const n = try std.posix.write(self.fd, data);
-        self.read_pos += n;
-    }
-    self.read_pos = 0;
-    self.len = 0;
 }
 
 /// Compact the buffer by moving unread data to the front.
@@ -186,9 +179,10 @@ fn compact(self: *Self) void {
 
 /// Set a file descriptor to non-blocking mode.
 pub fn setNonBlocking(fd: std.posix.fd_t) void {
-    const flags = std.posix.fcntl(fd, std.posix.F.GETFL, 0) catch return;
-    const nonblock: u32 = @bitCast(std.posix.O{ .NONBLOCK = true });
-    _ = std.posix.fcntl(fd, std.posix.F.SETFL, flags | @as(usize, nonblock)) catch return;
+    const flags = std.c.fcntl(fd, std.c.F.GETFL);
+    if (flags < 0) return;
+    const nonblock_bits: c_int = @bitCast(@as(c_uint, @bitCast(std.c.O{ .NONBLOCK = true })));
+    _ = std.c.fcntl(fd, std.c.F.SETFL, flags | nonblock_bits);
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────
@@ -231,9 +225,10 @@ test "multiple enqueues accumulate" {
 
 test "drain writes to a pipe" {
     if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
-    const fds = try std.posix.pipe();
-    defer std.posix.close(fds[0]);
-    defer std.posix.close(fds[1]);
+    var fds: [2]std.posix.fd_t = undefined;
+    if (std.c.pipe(&fds) != 0) return error.PipeCreateFailed;
+    defer _ = std.c.close(fds[0]);
+    defer _ = std.c.close(fds[1]);
 
     setNonBlocking(fds[1]);
 
@@ -264,4 +259,16 @@ test "compact moves data to front" {
     pw.compact();
     try std.testing.expectEqual(@as(usize, 0), pw.read_pos);
     try std.testing.expectEqual(@as(usize, 4), pw.len);
+}
+
+test "enqueue preserves a single frame larger than max_size" {
+    var pw = try init(std.testing.allocator, 1);
+    defer pw.deinit();
+    pw.max_size = 8;
+
+    try pw.enqueue("payload larger than max");
+
+    try std.testing.expect(pw.pendingBytes() > pw.max_size);
+    try std.testing.expectEqual(@as(u32, 23), std.mem.readInt(u32, pw.buf[0..4], .big));
+    try std.testing.expectEqualSlices(u8, "payload larger than max", pw.buf[4..pw.len]);
 }

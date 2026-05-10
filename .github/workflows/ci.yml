@@ -26,7 +26,7 @@ jobs:
 
       - uses: mlugg/setup-zig@v2
         with:
-          version: 0.15.2
+          version: 0.16.0
 
       - name: Cache deps
         uses: actions/cache@v4
@@ -55,7 +55,7 @@ jobs:
 
       - uses: mlugg/setup-zig@v2
         with:
-          version: 0.15.2
+          version: 0.16.0
 
       - name: Cache deps
         uses: actions/cache@v4
@@ -78,7 +78,7 @@ jobs:
 
       - uses: mlugg/setup-zig@v2
         with:
-          version: 0.15.2
+          version: 0.16.0
 
       - name: Run Zig tests
         run: cd zig && zig build test
@@ -135,7 +135,7 @@ jobs:
 
       - uses: mlugg/setup-zig@v2
         with:
-          version: 0.15.2
+          version: 0.16.0
 
       - name: Install XcodeGen
         run: brew install xcodegen
@@ -172,7 +172,7 @@ jobs:
 
       - uses: mlugg/setup-zig@v2
         with:
-          version: 0.15.2
+          version: 0.16.0
 
       # Separate cache from test jobs: dialyzer needs _build/dev, not _build/test.
       # The PLT and compiled deps are both under _build/dev.
@@ -211,7 +211,7 @@ jobs:
 
       - uses: mlugg/setup-zig@v2
         with:
-          version: 0.15.2
+          version: 0.16.0
 
       - name: Cache deps
         uses: actions/cache@v4

@@ -114,6 +114,28 @@ defmodule MingaEditor.StatusBar.Data do
     end
   end
 
+  @doc "Updates cached buffer status data with the dynamic fields that can change every frame."
+  @spec refresh_cached_buffer_data(
+          buffer_data(),
+          EditorState.t() | map(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          boolean()
+        ) :: buffer_data()
+  def refresh_cached_buffer_data(data, state, line, col, line_count, dirty) do
+    Map.merge(data, %{
+      mode: Minga.Editing.mode(state),
+      mode_state: Editing.mode_state(state),
+      cursor_line: line,
+      cursor_col: col,
+      line_count: line_count,
+      dirty: dirty,
+      macro_recording: Minga.Editing.macro_recording_status(state),
+      status_msg: state.shell_state.status_msg
+    })
+  end
+
   # ── Buffer variant ─────────────────────────────────────────────────────────
 
   @spec build_buffer_data(EditorState.t() | map()) :: buffer_data()
@@ -124,13 +146,14 @@ defmodule MingaEditor.StatusBar.Data do
     file_name = if buf, do: buf_display_name(buf), else: "[no file]"
     dirty = buf != nil and Buffer.dirty?(buf)
     filetype = if buf, do: buffer_filetype(buf), else: :text
+    file_path = if buf, do: buffer_file_path(buf), else: nil
 
     {git_branch, git_diff_summary} = git_modeline_data(buf)
-    diagnostic_counts = diagnostic_modeline_data(buf)
+    diagnostic_counts = diagnostic_modeline_data_from_path(file_path)
 
     # Fetch diagnostic hint for the current cursor line (shown in status bar
     # center segment when idle, replaces the old cell-grid minibuffer hint)
-    diagnostic_hint = cursor_line_diagnostic_hint(buf, line)
+    diagnostic_hint = cursor_line_diagnostic_hint_from_path(file_path, line)
 
     agent = AgentAccess.agent(state)
     background = background_subagent_summary(state)
@@ -175,6 +198,13 @@ defmodule MingaEditor.StatusBar.Data do
     :exit, _ -> :text
   end
 
+  @spec buffer_file_path(pid()) :: String.t() | nil
+  defp buffer_file_path(buf) do
+    Buffer.file_path(buf)
+  catch
+    :exit, _ -> nil
+  end
+
   # ── Agent variant ──────────────────────────────────────────────────────────
 
   @spec build_agent_data(EditorState.t() | map()) :: agent_data()
@@ -203,10 +233,11 @@ defmodule MingaEditor.StatusBar.Data do
     file_name = if buf, do: buf_display_name(buf), else: "[no file]"
     dirty = buf != nil and Buffer.dirty?(buf)
     filetype = if buf, do: buffer_filetype(buf), else: :text
+    file_path = if buf, do: buffer_file_path(buf), else: nil
 
     {git_branch, git_diff_summary} = git_modeline_data(buf)
-    diagnostic_counts = diagnostic_modeline_data(buf)
-    diagnostic_hint = cursor_line_diagnostic_hint(buf, line)
+    diagnostic_counts = diagnostic_modeline_data_from_path(file_path)
+    diagnostic_hint = cursor_line_diagnostic_hint_from_path(file_path, line)
     background = background_subagent_summary(state)
 
     %{
@@ -272,10 +303,15 @@ defmodule MingaEditor.StatusBar.Data do
         :exit, _ -> nil
       end
 
-    case path do
-      nil -> nil
-      path -> Diagnostics.count_tuple(SyncServer.path_to_uri(path))
-    end
+    diagnostic_modeline_data_from_path(path)
+  end
+
+  @spec diagnostic_modeline_data_from_path(String.t() | nil) ::
+          {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()} | nil
+  defp diagnostic_modeline_data_from_path(nil), do: nil
+
+  defp diagnostic_modeline_data_from_path(path) do
+    Diagnostics.count_tuple(SyncServer.path_to_uri(path))
   end
 
   # ── Diagnostic hint for status bar ──────────────────────────────────────────
@@ -299,18 +335,19 @@ defmodule MingaEditor.StatusBar.Data do
         :exit, _ -> nil
       end
 
-    case file_path do
-      nil ->
-        nil
+    cursor_line_diagnostic_hint_from_path(file_path, line)
+  end
 
-      path ->
-        uri = SyncServer.path_to_uri(path)
+  @spec cursor_line_diagnostic_hint_from_path(String.t() | nil, non_neg_integer()) ::
+          String.t() | nil
+  defp cursor_line_diagnostic_hint_from_path(nil, _line), do: nil
 
-        uri
-        |> Diagnostics.for_uri()
-        |> Enum.find(fn d -> d.range.start_line == line end)
-        |> format_diagnostic_hint()
-    end
+  defp cursor_line_diagnostic_hint_from_path(path, line) do
+    path
+    |> SyncServer.path_to_uri()
+    |> Diagnostics.for_uri()
+    |> Enum.find(fn d -> d.range.start_line == line end)
+    |> format_diagnostic_hint()
   end
 
   @spec format_diagnostic_hint(Diagnostics.Diagnostic.t() | nil) :: String.t() | nil

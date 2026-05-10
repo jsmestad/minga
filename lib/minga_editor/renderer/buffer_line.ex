@@ -29,6 +29,8 @@ defmodule MingaEditor.Renderer.BufferLine do
   alias Minga.Core.WrapMap
   alias MingaEditor.UI.Highlight
 
+  @compile {:inline, render_single_row: 1}
+
   @typedoc """
   Per-line values that vary across lines in a render pass.
 

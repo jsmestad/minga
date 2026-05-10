@@ -131,8 +131,9 @@ defmodule MingaEditor.RenderPipelineTest do
       {_scrolls, state} = Scroll.scroll_windows(state, layout)
 
       window2 = Map.get(state.workspace.windows.map, win_id)
-      # Buffer version changed → full invalidation (conservative)
-      assert window2.render_cache.dirty_lines == :all
+
+      # Buffer version changed without a line-count change → only the edited cursor line is dirty.
+      assert window2.render_cache.dirty_lines == %{0 => true}
 
       # Verify version actually changed
       snapshot = BufferServer.render_snapshot(buf, 0, 3)

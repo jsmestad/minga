@@ -177,6 +177,12 @@ defmodule MingaEditor.LspActions do
 
   @doc "Cancels the debounce timer and clears highlights."
   @spec clear_document_highlights(state()) :: state()
+  def clear_document_highlights(
+        %{workspace: %{document_highlights: nil}, lsp: %{highlight_debounce_timer: nil}} = state
+      ) do
+    state
+  end
+
   def clear_document_highlights(state) do
     state
     |> cancel_highlight_timer()

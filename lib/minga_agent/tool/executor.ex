@@ -31,12 +31,16 @@ defmodule MingaAgent.Tool.Executor do
   alias MingaAgent.Hooks.Dispatcher, as: HookDispatcher
   alias MingaAgent.Hooks.PreToolUsePayload
   alias MingaAgent.Hooks.Result, as: HookResult
+  alias MingaAgent.Tool.PlanMode
   alias MingaAgent.Tool.Registry
   alias MingaAgent.Tool.Spec
 
   @typedoc "Result of tool execution."
   @type result :: {:ok, term()} | {:error, term()} | {:needs_approval, Spec.t(), map()}
   @type hook_runner :: (MingaAgent.Hooks.Hook.t(), PreToolUsePayload.t() -> HookResult.t())
+
+  @typedoc "Execution mode: `:exec` allows all tools, `:plan` refuses destructive tools before approval."
+  @type execution_mode :: :exec | :plan
 
   @doc """
   Executes a tool by name with the given arguments.
@@ -50,24 +54,32 @@ defmodule MingaAgent.Tool.Executor do
   """
   @spec execute(String.t(), map()) :: result()
   def execute(name, args) when is_binary(name) and is_map(args) do
-    execute(name, args, MingaAgent.Tool.Registry, [])
+    execute(name, args, MingaAgent.Tool.Registry, :exec)
   end
 
   @spec execute(String.t(), map(), atom()) :: result()
   def execute(name, args, registry_table)
       when is_binary(name) and is_map(args) and is_atom(registry_table) do
-    execute(name, args, registry_table, [])
+    execute(name, args, registry_table, :exec)
+  end
+
+  @spec execute(String.t(), map(), atom(), execution_mode()) :: result()
+  def execute(name, args, registry_table, mode)
+      when is_binary(name) and is_map(args) and is_atom(registry_table) and
+             mode in [:exec, :plan] do
+    execute(name, args, registry_table, mode, [])
   end
 
   @doc false
-  @spec execute(String.t(), map(), atom(), keyword()) :: result()
-  def execute(name, args, registry_table, opts)
-      when is_binary(name) and is_map(args) and is_atom(registry_table) and is_list(opts) do
+  @spec execute(String.t(), map(), atom(), execution_mode(), keyword()) :: result()
+  def execute(name, args, registry_table, mode, opts)
+      when is_binary(name) and is_map(args) and is_atom(registry_table) and
+             mode in [:exec, :plan] and is_list(opts) do
     config = Keyword.get_lazy(opts, :config, &AgentConfig.resolve/0)
     hook_runner = Keyword.get(opts, :hook_runner, &CommandRunner.run_pre_tool_use/2)
 
     case Registry.lookup(registry_table, name) do
-      {:ok, spec} -> check_and_execute(spec, args, config, hook_runner)
+      {:ok, spec} -> check_and_execute(spec, args, mode, config, hook_runner)
       :error -> {:error, {:tool_not_found, name}}
     end
   end
@@ -82,31 +94,52 @@ defmodule MingaAgent.Tool.Executor do
   """
   @spec execute_approved(Spec.t(), map()) :: {:ok, term()} | {:error, term()}
   def execute_approved(%Spec{} = spec, args) when is_map(args) do
-    execute_approved(spec, args, [])
+    execute_approved(spec, args, :exec)
   end
 
-  @doc false
-  @spec execute_approved(Spec.t(), map(), keyword()) :: {:ok, term()} | {:error, term()}
-  def execute_approved(%Spec{} = spec, args, opts) when is_map(args) and is_list(opts) do
-    config = Keyword.get_lazy(opts, :config, &AgentConfig.resolve/0)
-    hook_runner = Keyword.get(opts, :hook_runner, &CommandRunner.run_pre_tool_use/2)
-    run_callback(spec, args, config, hook_runner)
+  @doc """
+  Executes an already-approved tool in the given execution mode.
+
+  Plan mode still refuses destructive tools even when a prior approval exists.
+  """
+  @spec execute_approved(Spec.t(), map(), execution_mode()) :: {:ok, term()} | {:error, term()}
+  def execute_approved(%Spec{} = spec, args, mode) when is_map(args) and mode in [:exec, :plan] do
+    if plan_mode_blocked?(mode, spec.name, args) do
+      {:error, PlanMode.refusal(spec.name)}
+    else
+      config = AgentConfig.resolve()
+      hook_runner = &CommandRunner.run_pre_tool_use/2
+      run_callback(spec, args, config, hook_runner)
+    end
   end
 
   # ── Private ─────────────────────────────────────────────────────────────────
 
-  @spec check_and_execute(Spec.t(), map(), AgentConfig.t(), hook_runner()) :: result()
-  defp check_and_execute(%Spec{approval_level: :deny} = spec, _args, _config, _hook_runner) do
+  @spec check_and_execute(Spec.t(), map(), execution_mode(), AgentConfig.t(), hook_runner()) ::
+          result()
+  defp check_and_execute(%Spec{} = spec, args, :plan, config, hook_runner) do
+    if plan_mode_blocked?(:plan, spec.name, args) do
+      {:error, PlanMode.refusal(spec.name)}
+    else
+      check_and_execute(spec, args, :exec, config, hook_runner)
+    end
+  end
+
+  defp check_and_execute(%Spec{approval_level: :deny} = spec, _args, :exec, _config, _hook_runner) do
     {:error, {:tool_denied, spec.name}}
   end
 
-  defp check_and_execute(%Spec{approval_level: :ask} = spec, args, _config, _hook_runner) do
+  defp check_and_execute(%Spec{approval_level: :ask} = spec, args, :exec, _config, _hook_runner) do
     {:needs_approval, spec, args}
   end
 
-  defp check_and_execute(%Spec{approval_level: :auto} = spec, args, config, hook_runner) do
+  defp check_and_execute(%Spec{approval_level: :auto} = spec, args, :exec, config, hook_runner) do
     run_callback(spec, args, config, hook_runner)
   end
+
+  @spec plan_mode_blocked?(execution_mode(), String.t(), map()) :: boolean()
+  defp plan_mode_blocked?(:plan, name, args), do: PlanMode.blocked?(name, args)
+  defp plan_mode_blocked?(:exec, _name, _args), do: false
 
   @spec run_callback(Spec.t(), map(), AgentConfig.t(), hook_runner()) ::
           {:ok, term()} | {:error, term()}

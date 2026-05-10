@@ -13,11 +13,17 @@ defmodule MingaAgent.RuntimeStateTest do
       rt =
         %RuntimeState{}
         |> RuntimeState.set_status(:idle)
+        |> RuntimeState.set_status(:plan)
         |> RuntimeState.set_status(:thinking)
         |> RuntimeState.set_status(:tool_executing)
         |> RuntimeState.set_status(:idle)
 
       assert rt.status == :idle
+    end
+
+    test "supports plan mode" do
+      rt = %RuntimeState{} |> RuntimeState.set_status(:plan)
+      assert rt.status == :plan
     end
   end
 
@@ -32,6 +38,10 @@ defmodule MingaAgent.RuntimeStateTest do
 
     test "false for :idle" do
       refute RuntimeState.busy?(%RuntimeState{status: :idle})
+    end
+
+    test "false for :plan" do
+      refute RuntimeState.busy?(%RuntimeState{status: :plan})
     end
 
     test "false for :error" do

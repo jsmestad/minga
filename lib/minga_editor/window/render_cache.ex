@@ -32,6 +32,8 @@ defmodule MingaEditor.Window.RenderCache do
 
   alias MingaEditor.DisplayList
 
+  @compile {:inline, dirty?: 2}
+
   @typedoc """
   Context fingerprint: a term derived from the render context that
   captures all per-frame inputs affecting every visible line. When
@@ -115,6 +117,32 @@ defmodule MingaEditor.Window.RenderCache do
           non_neg_integer()
         ) :: t()
   def detect_invalidation(%__MODULE__{} = cache, viewport_top, gutter_w, line_count, buf_version) do
+    detect_invalidation(
+      cache,
+      viewport_top,
+      gutter_w,
+      line_count,
+      buf_version,
+      cache.last_cursor_line
+    )
+  end
+
+  @spec detect_invalidation(
+          t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: t()
+  def detect_invalidation(
+        %__MODULE__{} = cache,
+        viewport_top,
+        gutter_w,
+        line_count,
+        buf_version,
+        cursor_line
+      ) do
     first_frame = cache.last_buf_version < 0
 
     needs_full =
@@ -126,7 +154,11 @@ defmodule MingaEditor.Window.RenderCache do
     cache = if needs_full, do: %{cache | dirty_lines: :all}, else: cache
 
     if cache.last_buf_version != buf_version and cache.last_buf_version >= 0 do
-      %{cache | dirty_lines: :all}
+      if cache.last_line_count == line_count and cache.dirty_lines != :all do
+        mark_dirty(cache, [cache.last_cursor_line, cursor_line])
+      else
+        %{cache | dirty_lines: :all}
+      end
     else
       cache
     end

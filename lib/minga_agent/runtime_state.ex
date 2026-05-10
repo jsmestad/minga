@@ -12,7 +12,7 @@ defmodule MingaAgent.RuntimeState do
   """
 
   @typedoc "Agent lifecycle status."
-  @type status :: :idle | :thinking | :tool_executing | :error | nil
+  @type status :: :idle | :plan | :thinking | :tool_executing | :error | nil
 
   @typedoc "Domain-only agent runtime state."
   @type t :: %__MODULE__{

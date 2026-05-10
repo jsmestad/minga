@@ -430,10 +430,13 @@ defmodule MingaAgent.SessionManager do
     Session.metadata(pid)
   catch
     :exit, _ ->
+      now = DateTime.utc_now()
+
       %SessionMetadata{
         id: "unknown",
         model_name: "unknown",
-        created_at: DateTime.utc_now()
+        created_at: now,
+        last_message_at: now
       }
   end
 end

@@ -1,11 +1,14 @@
 defmodule MingaEditor.UI.Picker.AgentSessionSourceTest do
   use ExUnit.Case, async: true
 
+  alias MingaEditor.UI.Picker
   alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.Item
 
   alias MingaAgent.Session
+  alias MingaAgent.SessionStore
   alias MingaAgent.Subagent.Handle
+  alias MingaAgent.TurnUsage
   alias MingaEditor.Agent.UIState
   alias MingaEditor.State, as: EditorState
   alias MingaAgent.RuntimeState
@@ -17,6 +20,8 @@ defmodule MingaEditor.UI.Picker.AgentSessionSourceTest do
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
   alias MingaEditor.UI.Picker.AgentSessionSource
+
+  @moduletag :tmp_dir
 
   describe "title/0" do
     test "returns Sessions" do
@@ -124,6 +129,62 @@ defmodule MingaEditor.UI.Picker.AgentSessionSourceTest do
       stop_session(pid2)
     end
 
+    test "disk candidates show title, last timestamp, turn count, and most-recent-first order", %{
+      tmp_dir: dir
+    } do
+      save_disk_session(dir, "old", "Old planning", "2026-01-01T00:00:00Z", [
+        {:user, "Old planning"}
+      ])
+
+      save_disk_session(dir, "new", "New architecture", "2026-01-03T00:00:00Z", [
+        {:user, "New architecture"},
+        {:assistant, "Latest notes"}
+      ])
+
+      save_disk_session(dir, "middle", "Middle refactor", "2026-01-02T00:00:00Z", [
+        {:user, "Middle refactor"}
+      ])
+
+      ctx = Context.from_editor_state(state_without_agent_tabs(), %{session_store_dir: dir})
+      candidates = AgentSessionSource.candidates(ctx)
+      disk_entries = Enum.filter(candidates, fn %Item{id: {_, tag}} -> tag == :disk end)
+
+      assert Enum.map(disk_entries, fn %Item{id: {id, :disk}} -> id end) == [
+               "new",
+               "middle",
+               "old"
+             ]
+
+      assert [%Item{label: "New architecture", description: desc, annotation: "1 turn"} | _] =
+               disk_entries
+
+      assert desc =~ "Jan 03 00:00"
+      assert desc =~ "Latest notes"
+    end
+
+    test "disk candidates filter by title and recent message content", %{tmp_dir: dir} do
+      save_disk_session(dir, "auth", "Auth refactor", "2026-01-01T00:00:00Z", [
+        {:user, "Auth refactor"}
+      ])
+
+      save_disk_session(dir, "backoff", "Retry work", "2026-01-02T00:00:00Z", [
+        {:user, "Investigate client"},
+        {:assistant, "Use rate limit backoff"}
+      ])
+
+      ctx = Context.from_editor_state(state_without_agent_tabs(), %{session_store_dir: dir})
+      candidates = AgentSessionSource.candidates(ctx)
+
+      auth_picker =
+        Picker.new(candidates, title: AgentSessionSource.title()) |> Picker.filter("auth")
+
+      backoff_picker =
+        Picker.new(candidates, title: AgentSessionSource.title()) |> Picker.filter("backoff")
+
+      assert Enum.map(auth_picker.filtered, fn %Item{id: {id, :disk}} -> id end) == ["auth"]
+      assert Enum.map(backoff_picker.filtered, fn %Item{id: {id, :disk}} -> id end) == ["backoff"]
+    end
+
     test "background agent tab is not marked with bullet" do
       {:ok, pid1} = start_test_session()
       {:ok, pid2} = start_test_session()
@@ -137,9 +198,11 @@ defmodule MingaEditor.UI.Picker.AgentSessionSourceTest do
       # Active tab is the first one (pid1). Background tab (pid2) should not have bullet.
       bg_tabs =
         Enum.filter(candidates, fn
-          {{_, {:tab, id}}, _, _} -> id != state.shell_state.tab_bar.active_id
+          %Item{id: {_, {:tab, id}}} -> id != state.shell_state.tab_bar.active_id
           _ -> false
         end)
+
+      assert bg_tabs != []
 
       Enum.each(bg_tabs, fn %Item{label: label} ->
         refute String.contains?(label, "\u{2022}")
@@ -153,6 +216,26 @@ defmodule MingaEditor.UI.Picker.AgentSessionSourceTest do
   end
 
   describe "on_select/2" do
+    test "with disk entry restores the active session through the public session path", %{
+      tmp_dir: dir
+    } do
+      {:ok, pid} = start_test_session(session_store_dir: dir)
+
+      save_disk_session(dir, "saved-disk", "Saved session", "2026-01-01T00:00:00Z", [
+        {:user, "Saved session"},
+        {:assistant, "Loaded response"}
+      ])
+
+      state = state_with_agent_tab(pid)
+      item = %Item{id: {"saved-disk", :disk}, label: "Saved session", description: "desc"}
+      _result = AgentSessionSource.on_select(item, state)
+
+      assert Session.session_id(pid) == "saved-disk"
+      assert Session.messages(pid) == [{:user, "Saved session"}, {:assistant, "Loaded response"}]
+
+      stop_session(pid)
+    end
+
     test "with tab entry switches to that tab" do
       {:ok, pid} = start_test_session()
       Session.subscribe(pid)
@@ -177,10 +260,43 @@ defmodule MingaEditor.UI.Picker.AgentSessionSourceTest do
 
   # ── Helpers ───────────────────────────────────────────────────────────────
 
-  defp start_test_session do
+  defp save_disk_session(dir, id, title, last_message_at, messages) do
+    SessionStore.save(
+      %{
+        id: id,
+        timestamp: "2026-01-01T00:00:00Z",
+        last_message_at: last_message_at,
+        title: title,
+        model_name: "test-model",
+        provider_name: "native",
+        messages: messages,
+        usage: %TurnUsage{}
+      },
+      dir
+    )
+  end
+
+  defp state_without_agent_tabs do
+    %EditorState{
+      port_manager: self(),
+      workspace: %MingaEditor.Workspace.State{
+        viewport: Viewport.new(24, 80),
+        buffers: %Buffers{},
+        windows: %Windows{},
+        editing: VimState.new()
+      },
+      shell_state: %MingaEditor.Shell.Traditional.State{
+        tab_bar: TabBar.new(Tab.new_file(1, "main.ex")),
+        agent: %AgentState{}
+      }
+    }
+  end
+
+  defp start_test_session(opts \\ []) do
     MingaAgent.Supervisor.start_session(
       provider: MingaAgent.Providers.Native,
       model_name: "test-model",
+      session_store_dir: Keyword.get(opts, :session_store_dir),
       provider_opts: [
         llm_client: fn _req -> {:ok, %{status: 200, body: %{"choices" => []}}} end
       ]

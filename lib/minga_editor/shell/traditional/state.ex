@@ -78,6 +78,8 @@ defmodule MingaEditor.Shell.Traditional.State do
 
   @doc "Clears the transient status message."
   @spec clear_status(t()) :: t()
+  def clear_status(%{status_msg: nil} = ss), do: ss
+
   def clear_status(%{} = ss) do
     %{ss | status_msg: nil}
   end

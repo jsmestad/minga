@@ -650,6 +650,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   defp encode_agent_status(:thinking), do: 1
   defp encode_agent_status(:tool_executing), do: 2
   defp encode_agent_status(:error), do: 3
+  defp encode_agent_status(:plan), do: 4
   defp encode_agent_status(_), do: 0
 
   @spec tab_icon(Tab.t()) :: String.t()
@@ -669,7 +670,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     + tab_count(2) + label_len(1) + label(label_len) + icon_len(1) + icon(icon_len)
 
   Kind: 0 = manual, 1 = agent.
-  Agent status: 0 = idle, 1 = thinking, 2 = tool_executing, 3 = error.
+  Agent status: 0 = idle, 1 = thinking, 2 = tool_executing, 3 = error, 4 = plan.
   """
   @spec encode_gui_agent_groups(TabBar.t()) :: binary()
   def encode_gui_agent_groups(%TabBar{} = tb) do
@@ -1341,6 +1342,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   defp encode_agent_session_status(:thinking), do: 1
   defp encode_agent_session_status(:tool_executing), do: 2
   defp encode_agent_session_status(:error), do: 3
+  defp encode_agent_session_status(:plan), do: 4
   defp encode_agent_session_status(_), do: 0
 
   # ── Picker ──

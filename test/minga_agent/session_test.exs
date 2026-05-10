@@ -1,9 +1,15 @@
 defmodule MingaAgent.SessionTest do
   use ExUnit.Case, async: true
 
+  alias MingaAgent.Branch
   alias MingaAgent.Event
   alias MingaAgent.Session
   alias MingaAgent.SessionStore
+  alias MingaAgent.Tool.Executor
+  alias MingaAgent.Tool.Registry
+  alias MingaAgent.Tool.Spec
+
+  @moduletag :tmp_dir
 
   # ── Mock provider ──────────────────────────────────────────────────────────
 
@@ -138,6 +144,93 @@ defmodule MingaAgent.SessionTest do
     end
   end
 
+  defmodule PlanToolProvider do
+    @behaviour MingaAgent.Provider
+
+    use GenServer
+
+    @impl MingaAgent.Provider
+    def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
+
+    @impl MingaAgent.Provider
+    def send_prompt(pid, _text) do
+      GenServer.cast(pid, :attempt_write)
+      :ok
+    end
+
+    @impl MingaAgent.Provider
+    def abort(pid) do
+      GenServer.cast(pid, :abort)
+      :ok
+    end
+
+    @impl MingaAgent.Provider
+    def new_session(pid) do
+      GenServer.cast(pid, :new_session)
+      :ok
+    end
+
+    @impl MingaAgent.Provider
+    def get_state(_pid), do: {:ok, %{model: nil, is_streaming: false, token_usage: nil}}
+
+    @impl GenServer
+    def init(opts) do
+      subscriber = Keyword.fetch!(opts, :subscriber)
+      parent = Keyword.fetch!(opts, :parent)
+      registry = :"plan_tool_provider_#{System.unique_integer([:positive])}"
+
+      :ets.new(registry, [:named_table, :set, :public, read_concurrency: true])
+
+      spec =
+        Spec.new!(
+          name: "write_file",
+          description: "test write",
+          parameter_schema: %{},
+          callback: fn args ->
+            send(parent, {:write_callback_called, args})
+            {:ok, "wrote"}
+          end
+        )
+
+      Registry.register(registry, spec)
+      {:ok, %{subscriber: subscriber, parent: parent, registry: registry}}
+    end
+
+    @impl GenServer
+    def handle_cast(:attempt_write, state) do
+      result =
+        Executor.execute(
+          "write_file",
+          %{"path" => "plan-mode.txt", "content" => "changed"},
+          state.registry,
+          execution_mode(MingaAgent.Session.status(state.subscriber))
+        )
+
+      maybe_emit_plan_refusal(state.subscriber, result)
+      send(state.parent, {:provider_tool_result, result})
+      {:noreply, state}
+    end
+
+    def handle_cast(:abort, state), do: {:noreply, state}
+    def handle_cast(:new_session, state), do: {:noreply, state}
+
+    @spec execution_mode(MingaAgent.Session.status()) :: Executor.execution_mode()
+    defp execution_mode(:plan), do: :plan
+    defp execution_mode(_status), do: :exec
+
+    @spec maybe_emit_plan_refusal(pid(), Executor.result()) :: :ok
+    defp maybe_emit_plan_refusal(subscriber, {:error, {:plan_mode_refused, message}}) do
+      send(
+        subscriber,
+        {:agent_provider_event, %Event.SystemMessage{message: message, level: :info}}
+      )
+
+      :ok
+    end
+
+    defp maybe_emit_plan_refusal(_subscriber, _result), do: :ok
+  end
+
   # ── Helpers ─────────────────────────────────────────────────────────────────
 
   # Waits for all provider events to be processed by the session after
@@ -178,6 +271,109 @@ defmodule MingaAgent.SessionTest do
       assert usage.input == 0
       assert usage.output == 0
       assert usage.cost == 0.0
+    end
+  end
+
+  describe "plan mode" do
+    test "enter_plan sets status, broadcasts, and writes a system message", %{session: session} do
+      assert :ok = Session.enter_plan(session)
+      assert Session.status(session) == :plan
+      assert_receive {:agent_event, _, {:status_changed, :plan}}, 200
+
+      assert Enum.any?(Session.messages(session), fn
+               {:system, text, :info} -> text =~ "Plan mode" and text =~ "/exec"
+               _ -> false
+             end)
+    end
+
+    test "enter_exec leaves plan mode and writes a system message", %{session: session} do
+      assert :ok = Session.enter_plan(session)
+      assert :ok = Session.enter_exec(session)
+      assert Session.status(session) == :idle
+      assert_receive {:agent_event, _, {:status_changed, :plan}}, 200
+      assert_receive {:agent_event, _, {:status_changed, :idle}}, 200
+
+      assert Enum.any?(Session.messages(session), fn
+               {:system, text, :info} -> text =~ "Execution mode" and text =~ "/plan"
+               _ -> false
+             end)
+    end
+
+    test "provider write tool is refused through a real plan-mode session" do
+      {:ok, session} =
+        Session.start_link(
+          provider: PlanToolProvider,
+          provider_opts: [parent: self()]
+        )
+
+      Session.subscribe(session)
+      assert :ok = Session.enter_plan(session)
+      assert :ok = Session.send_prompt(session, "write a file")
+
+      assert_receive {:provider_tool_result, {:error, {:plan_mode_refused, message}}},
+                     200
+
+      assert message =~ "Plan mode"
+      assert message =~ "write_file"
+      assert message =~ "/exec"
+      refute_receive {:write_callback_called, _args}, 20
+
+      assert Enum.any?(Session.messages(session), fn
+               {:system, text, :info} -> text == message
+               _ -> false
+             end)
+    end
+
+    test "provider working events do not leave plan mode", %{session: session} do
+      assert :ok = Session.enter_plan(session)
+      send(session, {:agent_provider_event, %Event.AgentStart{}})
+
+      send(
+        session,
+        {:agent_provider_event, %Event.ToolStart{tool_call_id: "tc", name: "read_file"}}
+      )
+
+      assert Session.status(session) == :plan
+    end
+
+    test "AgentEnd preserves plan mode status" do
+      {:ok, session} =
+        Session.start_link(
+          provider: SlowMockProvider,
+          provider_opts: []
+        )
+
+      Session.subscribe(session)
+      assert :ok = Session.enter_plan(session)
+      assert :ok = Session.send_prompt(session, "hello")
+      SlowMockProvider.proceed(Session.get_provider(session))
+      assert_receive {:agent_event, _, :messages_changed}, 200
+      assert Session.status(session) == :plan
+    end
+
+    test "abort preserves plan mode", %{session: session} do
+      assert :ok = Session.enter_plan(session)
+      assert :ok = Session.abort(session)
+      assert Session.status(session) == :plan
+    end
+
+    test "enter_exec is a no-op when not in plan mode", %{session: session} do
+      msg_count_before = length(Session.messages(session))
+      assert :ok = Session.enter_exec(session)
+      assert Session.status(session) == :idle
+      assert length(Session.messages(session)) == msg_count_before
+    end
+
+    test "error event preserves plan mode", %{session: session} do
+      assert :ok = Session.enter_plan(session)
+
+      send(
+        session,
+        {:agent_provider_event, %Event.Error{message: "something broke"}}
+      )
+
+      # Sync via a GenServer.call to ensure the handle_info has been processed
+      assert Session.status(session) == :plan
     end
   end
 
@@ -480,6 +676,124 @@ defmodule MingaAgent.SessionTest do
 
     test "load_session returns error for missing session", %{session: session} do
       assert {:error, _} = Session.load_session(session, "nonexistent")
+    end
+
+    test "load_session restores messages, model, provider metadata, and branches", %{tmp_dir: dir} do
+      {:ok, session} =
+        Session.start_link(
+          provider: MockProvider,
+          provider_opts: [],
+          session_store_dir: dir
+        )
+
+      SessionStore.save(
+        %{
+          id: "resumable-session",
+          timestamp: "2026-01-01T00:00:00Z",
+          last_message_at: "2026-01-02T00:00:00Z",
+          title: "Restore me",
+          model_name: "anthropic:claude-sonnet-4",
+          provider_name: "native",
+          messages: [{:user, "Restore me"}, {:assistant, "Restored reply"}],
+          usage: %MingaAgent.TurnUsage{
+            input: 20,
+            output: 10,
+            cache_read: 0,
+            cache_write: 0,
+            cost: 0.02
+          },
+          branches: [
+            Branch.new("branch-1", [{:user, "branched prompt"}, {:assistant, "branched reply"}])
+          ],
+          memory: "- [2026-01-01 00:00 UTC] Prefer direct answers\n"
+        },
+        dir
+      )
+
+      assert :ok = Session.load_session(session, "resumable-session")
+      assert Session.session_id(session) == "resumable-session"
+      assert Session.messages(session) == [{:user, "Restore me"}, {:assistant, "Restored reply"}]
+
+      meta = Session.metadata(session)
+      assert meta.model_name == "anthropic:claude-sonnet-4"
+      assert meta.provider_name == "native"
+      assert meta.turn_count == 1
+      assert DateTime.to_iso8601(meta.last_message_at) == "2026-01-02T00:00:00Z"
+      assert MingaAgent.Memory.read(dir) =~ "Prefer direct answers"
+
+      assert {:ok, branches} = Session.list_branches(session)
+      assert branches =~ "branch-1"
+      assert :ok = Session.switch_branch(session, 1)
+
+      assert Session.messages(session) == [
+               {:user, "branched prompt"},
+               {:assistant, "branched reply"}
+             ]
+    end
+
+    test "load_session leaves existing memory untouched for legacy sessions without a memory snapshot",
+         %{
+           tmp_dir: dir
+         } do
+      {:ok, session} =
+        Session.start_link(
+          provider: MockProvider,
+          provider_opts: [],
+          session_store_dir: dir
+        )
+
+      :ok = MingaAgent.Memory.append("keep this memory", dir)
+      sessions_dir = SessionStore.sessions_dir(dir)
+      File.mkdir_p!(sessions_dir)
+
+      File.write!(
+        Path.join(sessions_dir, "legacy-session.json"),
+        JSON.encode!(%{
+          "id" => "legacy-session",
+          "timestamp" => "2026-01-01T00:00:00Z",
+          "last_message_at" => "2026-01-01T00:00:00Z",
+          "title" => "Legacy",
+          "model_name" => "test-model",
+          "provider_name" => "native",
+          "messages" => [%{"type" => "user", "text" => "legacy prompt"}],
+          "usage" => %{}
+        })
+      )
+
+      assert :ok = Session.load_session(session, "legacy-session")
+      assert MingaAgent.Memory.read(dir) =~ "keep this memory"
+    end
+
+    test "load_session saves the current dirty session before replacement", %{tmp_dir: dir} do
+      {:ok, session} =
+        Session.start_link(
+          provider: MockProvider,
+          provider_opts: [],
+          session_store_dir: dir
+        )
+
+      current_id = Session.session_id(session)
+      Session.add_system_message(session, "unsaved local note")
+      :sys.get_state(session)
+
+      SessionStore.save(
+        %{
+          id: "target-session",
+          timestamp: "2026-01-01T00:00:00Z",
+          last_message_at: "2026-01-01T00:00:00Z",
+          title: "Target",
+          model_name: "test-model",
+          provider_name: "native",
+          messages: [{:user, "target prompt"}],
+          usage: %MingaAgent.TurnUsage{}
+        },
+        dir
+      )
+
+      assert :ok = Session.load_session(session, "target-session")
+      assert {:ok, saved_current} = SessionStore.load(current_id, dir)
+      assert {:system, "unsaved local note", :info} in saved_current.messages
+      assert Session.session_id(session) == "target-session"
     end
   end
 

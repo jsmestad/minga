@@ -44,7 +44,7 @@ defmodule MingaEditor.State.Tab do
         }
 
   @typedoc "Agent tab status (nil for file tabs)."
-  @type agent_status :: :idle | :thinking | :tool_executing | :error | nil
+  @type agent_status :: :idle | :plan | :thinking | :tool_executing | :error | nil
 
   @typedoc "Workspace group id. 0 = manual/ungrouped workspace."
   @type group_id :: non_neg_integer()

@@ -76,7 +76,10 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
     ml = theme.modeline
 
     {mode_fg, mode_bg} =
-      Map.get(ml.mode_colors, data.mode, {0x000000, ml.mode_colors.normal |> elem(1)})
+      case Map.fetch(ml.mode_colors, data.mode) do
+        {:ok, colors} -> colors
+        :error -> {0x000000, elem(ml.mode_colors.normal, 1)}
+      end
 
     bar_fg = ml.bar_fg
     bar_bg = ml.bar_bg
@@ -255,6 +258,7 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
     case {status, colors} do
       {nil, _} -> []
       {:idle, c} -> [{" ◯ ", c.status_idle, bar_bg, []}]
+      {:plan, c} -> [{" PLAN ", c.status_thinking, bar_bg, bold: true}]
       {:thinking, c} -> [{" ⟳ ", c.status_thinking, bar_bg, bold: true}]
       {:tool_executing, c} -> [{" ⚡ ", c.status_tool, bar_bg, bold: true}]
       {:error, c} -> [{" ✗ ", c.status_error, bar_bg, bold: true}]
