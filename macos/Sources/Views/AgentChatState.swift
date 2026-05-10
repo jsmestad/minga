@@ -11,6 +11,7 @@ enum ChatMessageEntry: Identifiable {
     case thinking(id: Int, text: String, collapsed: Bool)
     case toolCall(id: Int, name: String, summary: String, status: UInt8, isError: Bool, collapsed: Bool, durationMs: UInt32, result: String)
     case styledToolCall(id: Int, name: String, summary: String, status: UInt8, isError: Bool, collapsed: Bool, durationMs: UInt32, resultLines: [[Wire.StyledTextRun]])
+    case approvalToolCall(id: Int, name: String, summary: String, previewKind: UInt8, previewLines: [String])
     case system(id: Int, text: String, isError: Bool)
     case usage(id: Int, input: UInt32, output: UInt32, cacheRead: UInt32, cacheWrite: UInt32, costMicros: UInt32)
 
@@ -20,6 +21,7 @@ enum ChatMessageEntry: Identifiable {
              .thinking(let id, _, _),
              .toolCall(let id, _, _, _, _, _, _, _),
              .styledToolCall(let id, _, _, _, _, _, _, _),
+             .approvalToolCall(let id, _, _, _, _),
              .system(let id, _, _),
              .usage(let id, _, _, _, _, _):
             return id
@@ -43,7 +45,6 @@ final class AgentChatState {
     var model: String = ""
     var prompt: String = ""
     var messages: [ChatMessageEntry] = []
-    var pendingApproval: PendingApproval?
     var helpVisible: Bool = false
     var helpGroups: [HelpGroup] = []
 
@@ -72,11 +73,6 @@ final class AgentChatState {
     /// Active completion popup for @-mention or /slash commands. Nil when no popup is showing.
     var promptCompletion: Wire.PromptCompletion?
 
-    struct PendingApproval {
-        let toolName: String
-        let summary: String
-    }
-
     var statusLabel: String {
         switch status {
         case 0: return "idle"
@@ -89,7 +85,7 @@ final class AgentChatState {
 
     var isThinking: Bool { status == 1 || status == 2 }
 
-    func update(visible: Bool, status: UInt8, model: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptVimMode: UInt8, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?, pendingToolName: String?, pendingToolSummary: String, helpVisible: Bool, helpGroups: [HelpGroup], rawMessages: [Wire.ChatMessage]) {
+    func update(visible: Bool, status: UInt8, model: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptVimMode: UInt8, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?, helpVisible: Bool, helpGroups: [HelpGroup], rawMessages: [Wire.ChatMessage]) {
         self.visible = visible
         self.status = status
         self.model = model
@@ -101,7 +97,6 @@ final class AgentChatState {
         self.promptVisibleRows = promptVisibleRows
         self.promptCompletion = promptCompletion
         self.promptVersion += 1
-        self.pendingApproval = pendingToolName.map { PendingApproval(toolName: $0, summary: pendingToolSummary) }
         self.helpVisible = helpVisible
         self.helpGroups = helpGroups
         self.messages = rawMessages.map { msg in
@@ -119,6 +114,8 @@ final class AgentChatState {
                 return .toolCall(id: id, name: name, summary: summary, status: st, isError: isError, collapsed: collapsed, durationMs: duration, result: result)
             case .styledToolCall(let name, let summary, let st, let isError, let collapsed, let duration, let resultLines):
                 return .styledToolCall(id: id, name: name, summary: summary, status: st, isError: isError, collapsed: collapsed, durationMs: duration, resultLines: resultLines)
+            case .approvalToolCall(let name, let summary, _, let previewKind, let previewLines):
+                return .approvalToolCall(id: id, name: name, summary: summary, previewKind: previewKind, previewLines: previewLines)
             case .system(let text, let isError):
                 return .system(id: id, text: text, isError: isError)
             case .usage(let inp, let outp, let cacheR, let cacheW, let costM):

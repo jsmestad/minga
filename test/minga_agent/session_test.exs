@@ -829,6 +829,9 @@ defmodule MingaAgent.SessionTest do
       assert_receive {:agent_event, _, {:approval_pending, data}}, 200
       assert data.name == "shell"
       assert data.tool_call_id == "tc1"
+      assert data.preview.kind == :command
+      assert data.preview.summary == "rm -rf /"
+      refute Map.has_key?(data, :reply_to)
     end
 
     test "respond_to_approval sends decision to reply_to pid", %{session: session} do
@@ -864,6 +867,26 @@ defmodule MingaAgent.SessionTest do
 
       :ok = Session.respond_to_approval(session, :reject)
       assert_receive {:tool_approval_response, "tc1", :reject}
+
+      messages = Session.messages(session)
+      assert Enum.any?(messages, &match?({:system, "Denied shell" <> _, :info}, &1))
+    end
+
+    test "respond_to_approval with :approve_all sends approve_all", %{session: session} do
+      approval = %Event.ToolApproval{
+        tool_call_id: "tc1",
+        name: "shell",
+        args: %{},
+        reply_to: self()
+      }
+
+      send(session, {:agent_provider_event, approval})
+      assert_receive {:agent_event, _, {:approval_pending, _}}, 200
+
+      :ok = Session.respond_to_approval(session, :approve_all)
+      assert_receive {:tool_approval_response, "tc1", :approve_all}
+      assert_receive {:agent_event, _, {:approval_resolved, :approve_all}}, 200
+      assert {:error, :no_pending_approval} = Session.respond_to_approval(session, :approve)
     end
 
     test "respond_to_approval with no pending returns error", %{session: session} do

@@ -258,28 +258,24 @@ defmodule MingaEditor.Commands.AgentSubStates do
 
   @doc "Approves the pending tool execution."
   @spec approve_tool(state()) :: state()
-  def approve_tool(state) do
-    agent = AgentAccess.agent(state)
-    session = AgentAccess.session(state)
-    approval = agent.pending_approval
+  def approve_tool(state), do: respond_to_tool_approval(state, :approve)
 
-    if is_pid(session) and is_map(approval) do
-      Session.respond_to_approval(session, :approve)
-      update_agent(state, &AgentState.clear_pending_approval/1)
-    else
-      state
-    end
-  end
+  @doc "Approves the current and all subsequent tool executions in this turn."
+  @spec approve_all_tools(state()) :: state()
+  def approve_all_tools(state), do: respond_to_tool_approval(state, :approve_all)
 
   @doc "Denies the pending tool execution."
   @spec deny_tool(state()) :: state()
-  def deny_tool(state) do
+  def deny_tool(state), do: respond_to_tool_approval(state, :reject)
+
+  @spec respond_to_tool_approval(state(), :approve | :approve_all | :reject) :: state()
+  defp respond_to_tool_approval(state, decision) do
     agent = AgentAccess.agent(state)
     session = AgentAccess.session(state)
     approval = agent.pending_approval
 
     if is_pid(session) and is_map(approval) do
-      Session.respond_to_approval(session, :reject)
+      Session.respond_to_approval(session, decision)
       update_agent(state, &AgentState.clear_pending_approval/1)
     else
       state

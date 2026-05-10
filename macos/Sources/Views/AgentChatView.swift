@@ -112,11 +112,6 @@ struct AgentChatView: View {
                 }
             }
 
-            // Approval banner (when tool needs user confirmation)
-            if let approval = state.pendingApproval {
-                approvalBanner(approval)
-            }
-
             // Prompt completion popup (floats above the prompt area)
             if let completion = state.promptCompletion {
                 promptCompletionPopup(completion)
@@ -209,6 +204,8 @@ struct AgentChatView: View {
             toolCallCard(messageIndex: id, name: name, summary: summary, status: status, isError: isError, collapsed: collapsed, durationMs: duration, result: result, resultLines: nil)
         case .styledToolCall(let id, let name, let summary, let status, let isError, let collapsed, let duration, let resultLines):
             toolCallCard(messageIndex: id, name: name, summary: summary, status: status, isError: isError, collapsed: collapsed, durationMs: duration, result: nil, resultLines: resultLines)
+        case .approvalToolCall(_, let name, let summary, let previewKind, let previewLines):
+            approvalToolCallCard(name: name, summary: summary, previewKind: previewKind, previewLines: previewLines)
         case .system(_, let text, let isError):
             systemMessage(text, isError: isError)
         case .usage(_, let input, let output, _, _, let costMicros):
@@ -470,69 +467,122 @@ struct AgentChatView: View {
         .foregroundStyle(theme.agentTextFg.opacity(0.3))
     }
 
-    // MARK: - Prompt
-
-    // MARK: - Approval banner
-
     @ViewBuilder
-    private func approvalBanner(_ approval: AgentChatState.PendingApproval) -> some View {
-        VStack(spacing: 6) {
-            Rectangle()
-                .fill(theme.agentCodeBorder.opacity(0.3))
-                .frame(height: 1)
+    private func approvalToolCallCard(name: String, summary: String, previewKind: UInt8, previewLines: [String]) -> some View {
+        let visiblePreviewLines = Array(previewLines.prefix(8))
 
-            HStack(spacing: 10) {
-                Image(systemName: "exclamationmark.shield")
-                    .font(.system(size: 14))
-                    .foregroundStyle(Color.orange)
+        VStack(alignment: .leading, spacing: 10) {
+            approvalToolCallHeader(name: name)
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Tool needs approval")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(theme.agentTextFg)
-
-                    HStack(spacing: 4) {
-                        Text(approval.toolName)
-                            .font(.system(size: 11, weight: .medium, design: .monospaced))
-                            .foregroundStyle(theme.agentToolHeader)
-
-                        if !approval.summary.isEmpty {
-                            Text(approval.summary)
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(theme.agentTextFg.opacity(0.6))
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-                        }
-                    }
-                }
-
-                Spacer()
-
-                Text("y")
-                    .font(.system(size: 11, weight: .bold, design: .monospaced))
-                    .foregroundStyle(Color.green)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(RoundedRectangle(cornerRadius: 4).fill(Color.green.opacity(0.1)))
-                Text("approve")
-                    .font(.system(size: 10))
-                    .foregroundStyle(theme.agentTextFg.opacity(0.5))
-
-                Text("n")
-                    .font(.system(size: 11, weight: .bold, design: .monospaced))
-                    .foregroundStyle(Color.red)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(RoundedRectangle(cornerRadius: 4).fill(Color.red.opacity(0.1)))
-                Text("reject")
-                    .font(.system(size: 10))
-                    .foregroundStyle(theme.agentTextFg.opacity(0.5))
+            if !summary.isEmpty {
+                approvalToolCallSummary(summary: summary, previewKind: previewKind)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-            .background(Color.orange.opacity(0.05))
+
+            if !visiblePreviewLines.isEmpty {
+                approvalPreviewLines(visiblePreviewLines)
+            }
+
+            approvalButtons
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(approvalCardBackground)
+        .overlay(approvalCardBorder)
+    }
+
+    private func approvalToolCallHeader(name: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.shield")
+                .font(.system(size: 13))
+                .foregroundStyle(Color.orange)
+
+            Text("Approval required")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(theme.agentTextFg)
+
+            Text(name)
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundStyle(theme.agentToolHeader)
+
+            Spacer()
         }
     }
+
+    private func approvalToolCallSummary(summary: String, previewKind: UInt8) -> some View {
+        Text("\(approvalPreviewLabel(previewKind)): \(summary)")
+            .font(.system(size: 11, design: .monospaced))
+            .foregroundStyle(theme.agentTextFg.opacity(0.75))
+            .lineLimit(2)
+    }
+
+    private func approvalPreviewLines(_ lines: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                approvalPreviewLine(line)
+            }
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(approvalPreviewBackground)
+        .overlay(approvalPreviewBorder)
+    }
+
+    private func approvalPreviewLine(_ line: String) -> some View {
+        Text(line)
+            .font(.system(size: 10, design: .monospaced))
+            .foregroundStyle(theme.agentTextFg.opacity(0.65))
+            .lineLimit(1)
+            .truncationMode(.tail)
+    }
+
+    private var approvalButtons: some View {
+        HStack(spacing: 8) {
+            Button("Approve") {
+                encoder?.sendKeyPress(codepoint: 0x79, modifiers: 0)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+
+            Button("Deny") {
+                encoder?.sendKeyPress(codepoint: 0x6E, modifiers: 0)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+
+            Button("Approve all") {
+                encoder?.sendKeyPress(codepoint: 0x59, modifiers: 0)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        }
+    }
+
+    private var approvalCardBackground: some View {
+        RoundedRectangle(cornerRadius: 10).fill(theme.agentCodeBg.opacity(0.9))
+    }
+
+    private var approvalCardBorder: some View {
+        RoundedRectangle(cornerRadius: 10).stroke(Color.orange.opacity(0.5), lineWidth: 1)
+    }
+
+    private var approvalPreviewBackground: some View {
+        RoundedRectangle(cornerRadius: 6).fill(theme.agentCodeBg.opacity(0.8))
+    }
+
+    private var approvalPreviewBorder: some View {
+        RoundedRectangle(cornerRadius: 6).stroke(theme.agentCodeBorder.opacity(0.35), lineWidth: 1)
+    }
+
+    private func approvalPreviewLabel(_ kind: UInt8) -> String {
+        switch kind {
+        case 1: return "Diff"
+        case 2: return "Command"
+        case 3: return "Target"
+        default: return "Args"
+        }
+    }
+
+    // MARK: - Prompt
 
     // MARK: - Prompt area
 
