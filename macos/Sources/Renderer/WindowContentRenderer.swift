@@ -486,6 +486,11 @@ final class WindowContentRenderer {
         let result = NSMutableAttributedString()
         let nsText = text as NSString
         let totalDisplayCols = nsText.length
+        let defaultAttrs: [NSAttributedString.Key: Any] = [
+            .font: fontManager.primary.ctFont,
+            .foregroundColor: defaultFgColor,
+            .ligature: ligatures
+        ]
         var lastCol = 0
 
         for span in spans {
@@ -493,7 +498,7 @@ final class WindowContentRenderer {
             let spanEnd = min(Int(span.endCol), totalDisplayCols)
 
             if spanStart > lastCol {
-                appendASCII(text: nsText, start: lastCol, end: spanStart, color: defaultFgColor, ligatures: ligatures, to: result)
+                appendASCII(text: nsText, start: lastCol, end: spanStart, attrs: defaultAttrs, to: result)
             }
 
             guard spanStart < spanEnd else { continue }
@@ -521,19 +526,14 @@ final class WindowContentRenderer {
         }
 
         if lastCol < totalDisplayCols {
-            appendASCII(text: nsText, start: lastCol, end: totalDisplayCols, color: defaultFgColor, ligatures: ligatures, to: result)
+            appendASCII(text: nsText, start: lastCol, end: totalDisplayCols, attrs: defaultAttrs, to: result)
         }
 
         return result
     }
 
-    private func appendASCII(text: NSString, start: Int, end: Int, color: NSColor, ligatures: Int, to result: NSMutableAttributedString) {
+    private func appendASCII(text: NSString, start: Int, end: Int, attrs: [NSAttributedString.Key: Any], to result: NSMutableAttributedString) {
         guard start < end else { return }
-        let attrs: [NSAttributedString.Key: Any] = [
-            .font: fontManager.primary.ctFont,
-            .foregroundColor: color,
-            .ligature: ligatures
-        ]
         let segment = text.substring(with: NSRange(location: start, length: end - start))
         result.append(NSAttributedString(string: segment, attributes: attrs))
     }
