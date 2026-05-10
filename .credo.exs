@@ -29,6 +29,7 @@
           {Minga.Credo.NoProcessSleepCheck, []},
           {Minga.Credo.NoDirectLoggerCheck, [exit_status: 0]},
           {Minga.Credo.NoDirectStateMachineWriteCheck, []},
+          {Minga.Credo.NoDirectModalOverlayWriteCheck, []},
 
           # ── Readability ────────────────────────────────────────────────────
           {Credo.Check.Readability.AliasOrder, false},

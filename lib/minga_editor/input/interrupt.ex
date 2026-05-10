@@ -16,12 +16,10 @@ defmodule MingaEditor.Input.Interrupt do
 
   - `keymap_scope` → `:editor`
   - Vim mode → `:normal` with fresh mode state
-  - Picker → closed
+  - Modal overlay → dismissed
   - Which-key popup → dismissed
-  - Conflict prompt → dismissed
-  - Completion menu → closed
-  - Status message → cleared
   - Agent pending prefix → cleared
+  - Status message → cleared
 
   A `*Messages*` log entry records what was reset for debuggability.
   """
@@ -61,12 +59,10 @@ defmodule MingaEditor.Input.Interrupt do
 
     {state, resets} = maybe_reset_scope(state, resets)
     {state, resets} = maybe_reset_mode(state, resets)
-    {state, resets} = maybe_close_picker(state, resets)
-    {state, resets} = maybe_close_whichkey(state, resets)
-    {state, resets} = maybe_close_conflict(state, resets)
-    {state, resets} = maybe_close_completion(state, resets)
+    {state, resets} = maybe_dismiss_modal(state, resets)
+    {state, resets} = maybe_clear_whichkey(state, resets)
     {state, resets} = maybe_clear_agent_prefix(state, resets)
-    state = EditorState.clear_status(state)
+    {state, resets} = maybe_clear_status(state, resets)
 
     {state, resets}
   end
@@ -99,53 +95,39 @@ defmodule MingaEditor.Input.Interrupt do
     end
   end
 
-  # Checks if mode_state has any pending state that should be cleared.
-  @spec mode_state_dirty?(Mode.state(), Mode.state()) :: boolean()
-  defp mode_state_dirty?(current, fresh) do
+  @spec mode_state_dirty?(term(), Minga.Mode.State.t()) :: boolean()
+  defp mode_state_dirty?(%Minga.Mode.State{} = current, %Minga.Mode.State{} = fresh) do
     current.leader_node != fresh.leader_node or
+      current.leader_keys != fresh.leader_keys or
       current.prefix_node != fresh.prefix_node or
+      current.prefix_keys != fresh.prefix_keys or
       current.pending != fresh.pending or
       current.describe_key != fresh.describe_key or
-      current.count != fresh.count
+      current.count != fresh.count or
+      current.insert_changed != fresh.insert_changed
   end
 
-  @spec maybe_close_picker(EditorState.t(), [String.t()]) :: {EditorState.t(), [String.t()]}
-  defp maybe_close_picker(state, resets) do
-    if ModalOverlay.match(state.shell_state.modal, :picker) do
-      {ModalOverlay.dismiss(state), ["picker closed" | resets]}
+  defp mode_state_dirty?(_current, _fresh), do: true
+
+  @spec maybe_dismiss_modal(EditorState.t(), [String.t()]) :: {EditorState.t(), [String.t()]}
+  defp maybe_dismiss_modal(state, resets) do
+    if ModalOverlay.active?(EditorState.modal(state)) do
+      {ModalOverlay.dismiss(state), ["modal dismissed" | resets]}
     else
       {state, resets}
     end
   end
 
-  @spec maybe_close_whichkey(EditorState.t(), [String.t()]) :: {EditorState.t(), [String.t()]}
-  defp maybe_close_whichkey(
+  @spec maybe_clear_whichkey(EditorState.t(), [String.t()]) :: {EditorState.t(), [String.t()]}
+  defp maybe_clear_whichkey(
          %{shell_state: %{whichkey: %WhichKey{node: nil, show: false}}} = state,
          resets
        ),
        do: {state, resets}
 
-  defp maybe_close_whichkey(state, resets) do
+  defp maybe_clear_whichkey(state, resets) do
     wk = EditorState.whichkey(state)
     {EditorState.set_whichkey(state, WhichKey.clear(wk)), ["which-key dismissed" | resets]}
-  end
-
-  @spec maybe_close_conflict(EditorState.t(), [String.t()]) :: {EditorState.t(), [String.t()]}
-  defp maybe_close_conflict(state, resets) do
-    if ModalOverlay.match(state.shell_state.modal, :conflict) do
-      {ModalOverlay.dismiss(state), ["conflict prompt dismissed" | resets]}
-    else
-      {state, resets}
-    end
-  end
-
-  @spec maybe_close_completion(EditorState.t(), [String.t()]) :: {EditorState.t(), [String.t()]}
-  defp maybe_close_completion(state, resets) do
-    if ModalOverlay.match(state.shell_state.modal, :completion) do
-      {ModalOverlay.dismiss(state), ["completion closed" | resets]}
-    else
-      {state, resets}
-    end
   end
 
   @spec maybe_clear_agent_prefix(EditorState.t(), [String.t()]) :: {EditorState.t(), [String.t()]}
@@ -158,6 +140,13 @@ defmodule MingaEditor.Input.Interrupt do
         new_state = AgentAccess.update_agent_ui(state, &UIState.clear_prefix/1)
         {new_state, ["agent prefix cleared" | resets]}
     end
+  end
+
+  @spec maybe_clear_status(EditorState.t(), [String.t()]) :: {EditorState.t(), [String.t()]}
+  defp maybe_clear_status(%{shell_state: %{status_msg: nil}} = state, resets), do: {state, resets}
+
+  defp maybe_clear_status(state, resets) do
+    {EditorState.clear_status(state), ["status cleared" | resets]}
   end
 
   # ── Logging ──────────────────────────────────────────────────────────────
