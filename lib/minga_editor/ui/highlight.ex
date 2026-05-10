@@ -171,6 +171,29 @@ defmodule MingaEditor.UI.Highlight do
     Enum.reverse(results_rev)
   end
 
+  @doc """
+  Batch-computes styled segments only for selected line indexes.
+
+  Clean lines return nil while the span watermark still advances through every visible line.
+  """
+  @spec styles_for_visible_lines_masked(t(), [{String.t(), non_neg_integer()}], MapSet.t(non_neg_integer()), style_resolver() | nil) ::
+          [[styled_segment()] | nil]
+  def styles_for_visible_lines_masked(hl, lines, dirty_rows, resolver \\ nil)
+
+  def styles_for_visible_lines_masked(%__MODULE__{spans: spans}, lines, dirty_rows, _resolver)
+      when (is_tuple(spans) and tuple_size(spans) == 0) or spans == [] do
+    lines
+    |> Enum.with_index()
+    |> Enum.map(fn {{text, _}, index} -> if MapSet.member?(dirty_rows, index), do: [{text, Face.new()}], else: nil end)
+  end
+
+  def styles_for_visible_lines_masked(%__MODULE__{spans: spans} = hl, lines, dirty_rows, resolver)
+      when is_tuple(spans) and is_list(lines) do
+    span_count = tuple_size(spans)
+    {results_rev, _watermark, _index} = batch_lines_masked(lines, spans, span_count, hl, resolver, dirty_rows, 0, 0, [])
+    Enum.reverse(results_rev)
+  end
+
   # ── Private: batch rendering ─────────────────────────────────────────
 
   @spec batch_lines(
@@ -198,6 +221,38 @@ defmodule MingaEditor.UI.Highlight do
       end
 
     batch_lines(rest, spans, count, hl, resolver, watermark, [segments | acc])
+  end
+
+  @spec batch_lines_masked(
+          [{String.t(), non_neg_integer()}],
+          tuple(),
+          non_neg_integer(),
+          t(),
+          style_resolver() | nil,
+          MapSet.t(non_neg_integer()),
+          non_neg_integer(),
+          non_neg_integer(),
+          [[styled_segment()] | nil]
+        ) :: {[[styled_segment()] | nil], non_neg_integer(), non_neg_integer()}
+  defp batch_lines_masked([], _spans, _count, _hl, _resolver, _dirty_rows, watermark, index, acc), do: {acc, watermark, index}
+
+  defp batch_lines_masked([{line_text, line_start} | rest], spans, count, hl, resolver, dirty_rows, watermark, index, acc) do
+    watermark = advance_watermark(spans, count, watermark, line_start)
+
+    segments =
+      if MapSet.member?(dirty_rows, index) do
+        line_end = line_start + byte_size(line_text)
+        overlapping = collect_overlapping(spans, count, watermark, line_start, line_end, [])
+
+        case overlapping do
+          [] -> [{line_text, Face.new()}]
+          _ -> build_segments(line_text, line_start, overlapping, hl, resolver)
+        end
+      else
+        nil
+      end
+
+    batch_lines_masked(rest, spans, count, hl, resolver, dirty_rows, watermark, index + 1, [segments | acc])
   end
 
   @spec advance_watermark(tuple(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::

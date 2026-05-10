@@ -197,11 +197,17 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
 
     sign_w = Gutter.sign_column_width()
     max_rows = length(lines)
+    dirty_rows = dirty_screen_rows(lines, first_line, window)
 
     highlight_segments_list =
       if ctx.highlight do
         lines_with_offsets = build_lines_with_offsets(lines, first_byte_off)
-        Highlight.styles_for_visible_lines(ctx.highlight, lines_with_offsets)
+
+        if MapSet.size(dirty_rows) == max_rows do
+          Highlight.styles_for_visible_lines(ctx.highlight, lines_with_offsets)
+        else
+          Highlight.styles_for_visible_lines_masked(ctx.highlight, lines_with_offsets, dirty_rows)
+        end
       else
         List.duplicate(nil, max_rows)
       end
@@ -246,6 +252,15 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
       )
 
     {gutter_layer, content_layer, length(lines), window}
+  end
+
+  @spec dirty_screen_rows([String.t()], non_neg_integer(), Window.t()) :: MapSet.t(non_neg_integer())
+  defp dirty_screen_rows(lines, first_line, window) do
+    lines
+    |> Enum.with_index()
+    |> Enum.reduce(MapSet.new(), fn {_line, index}, acc ->
+      if Window.dirty?(window, first_line + index), do: MapSet.put(acc, index), else: acc
+    end)
   end
 
   @spec put_draws(DisplayList.render_layer(), [DisplayList.draw()]) :: DisplayList.render_layer()
