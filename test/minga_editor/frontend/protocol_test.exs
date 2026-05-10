@@ -1198,6 +1198,32 @@ defmodule MingaEditor.Frontend.ProtocolTest do
       assert <<0x78, 0::8>> = encoded
     end
 
+    test "encodes inline approval tool call message" do
+      tc = MingaAgent.ToolCall.new("tc_1", "write_file", %{"path" => "demo.ex"})
+
+      approval = %{
+        tool_call_id: "tc_1",
+        preview: %{kind: :target, summary: "demo.ex", lines: ["file: demo.ex", "1 edit(s)"]}
+      }
+
+      data = %{
+        visible: true,
+        messages: [{:approval_tool_call, tc, approval}],
+        status: :thinking,
+        model: "claude",
+        prompt: "",
+        pending_approval: nil
+      }
+
+      encoded = ProtocolGUI.encode_gui_agent_chat(data)
+
+      assert <<0x78, 7, _sections::binary>> = encoded
+      assert :binary.match(encoded, <<0x09>>) != :nomatch
+      assert :binary.match(encoded, "write_file") != :nomatch
+      assert :binary.match(encoded, "demo.ex") != :nomatch
+      assert :binary.match(encoded, "1 edit(s)") != :nomatch
+    end
+
     test "encodes styled_assistant message with styled runs" do
       styled_lines = [
         [{"def ", 0xFF0000, 0, 1}, {"hello", 0xBBC2CF, 0, 0}],

@@ -90,7 +90,7 @@ defmodule MingaEditor.Agent.ChatDecorationsTest do
       refute Decorations.has_fold_regions?(result)
     end
 
-    test "tool call awaiting approval shows approval prompt in header" do
+    test "tool call awaiting approval shows inline approval card" do
       tc = %MingaAgent.ToolCall{
         id: "tc_123",
         name: "write_file",
@@ -110,18 +110,17 @@ defmodule MingaEditor.Agent.ChatDecorationsTest do
           pending_approval: pending_approval
         )
 
-      # Header block decoration should contain approval prompt text
-      {above, _below} = Decorations.blocks_for_line(result, 0)
-      assert length(above) == 1
+      {_above, below} = Decorations.blocks_for_line(result, 0)
+      assert length(below) == 1
 
-      [block_dec] = above
+      [block_dec] = below
       rendered = block_dec.render.(80)
 
-      # The rendered output should contain the approval prompt segments
       rendered_text = Enum.map_join(rendered, "", fn {text, _style} -> text end)
-      assert rendered_text =~ "Approve?"
+      assert rendered_text =~ "Approval required"
       assert rendered_text =~ "[y]"
       assert rendered_text =~ "[n]"
+      assert rendered_text =~ "[Y]"
     end
 
     test "tool call without matching approval shows normal header" do

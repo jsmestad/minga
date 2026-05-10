@@ -763,7 +763,7 @@ defmodule MingaAgent.Session do
   def handle_call(:editor_snapshot, _from, state) do
     snapshot = %{
       status: state.status,
-      pending_approval: state.pending_approval,
+      pending_approval: public_pending_approval(state.pending_approval),
       error: state.error_message
     }
 
@@ -790,12 +790,14 @@ defmodule MingaAgent.Session do
   end
 
   def handle_call({:respond_to_approval, decision}, _from, state) do
-    %{tool_call_id: tool_call_id, reply_to: reply_to} = state.pending_approval
+    %{tool_call_id: tool_call_id, reply_to: reply_to} = approval = state.pending_approval
 
     # Send the decision directly to the blocked Task process
     send(reply_to, {:tool_approval_response, tool_call_id, decision})
 
+    state = maybe_record_rejection(state, approval, decision)
     state = %{state | pending_approval: nil}
+    state = notify_messages_changed(state)
     broadcast(state, {:approval_resolved, decision})
     {:reply, :ok, state}
   end
@@ -1163,15 +1165,16 @@ defmodule MingaAgent.Session do
   defp handle_provider_event(%Event.ToolApproval{} = event, state) do
     Notifier.notify(:approval, "Approval needed: #{event.name}")
 
-    approval = %MingaAgent.ToolApproval{
-      tool_call_id: event.tool_call_id,
-      name: event.name,
-      args: event.args,
-      reply_to: event.reply_to
-    }
+    approval =
+      MingaAgent.ToolApproval.new(
+        tool_call_id: event.tool_call_id,
+        name: event.name,
+        args: event.args,
+        reply_to: event.reply_to
+      )
 
     state = %{state | pending_approval: approval}
-    broadcast(state, {:approval_pending, approval})
+    broadcast(state, {:approval_pending, MingaAgent.ToolApproval.public(approval)})
     state
   end
 
@@ -1272,6 +1275,23 @@ defmodule MingaAgent.Session do
     msg = Message.system(text, level)
     append_msg(state, msg)
   end
+
+  @spec maybe_record_rejection(state(), MingaAgent.ToolApproval.t(), atom()) :: state()
+  defp maybe_record_rejection(state, approval, :reject) do
+    append_system_message(
+      state,
+      "Denied #{approval.name}: the tool was refused and the agent was notified.",
+      :info
+    )
+  end
+
+  defp maybe_record_rejection(state, _approval, _decision), do: state
+
+  @spec public_pending_approval(MingaAgent.ToolApproval.t() | nil) :: map() | nil
+  defp public_pending_approval(nil), do: nil
+
+  defp public_pending_approval(%MingaAgent.ToolApproval{} = approval),
+    do: MingaAgent.ToolApproval.public(approval)
 
   @spec append_to_last_assistant([Message.t()], String.t()) ::
           {:updated, [Message.t()]} | {:appended, Message.t()}

@@ -290,7 +290,7 @@ Agent conversation view state. Uses sectioned envelope: `opcode(1) + section_cou
 | 0x01 | Header | visible, status |
 | 0x02 | Model | model name |
 | 0x03 | Prompt | prompt text |
-| 0x04 | Pending | pending approval (tool name + summary) |
+| 0x04 | Pending | legacy pending approval banner payload. Current BEAM frames send `0` and render approvals inline as message type `0x09`. |
 | 0x05 | Help | help overlay visibility + groups |
 | 0x06 | Messages | message_count + messages (same nested format as before) |
 
@@ -314,6 +314,7 @@ Per message (type byte first):
   0x06 (usage):      type(1) + input(4) + output(4) + cache_read(4) + cache_write(4) + cost_micros(4)
   0x07 (styled_assistant): type(1) + line_count(2), per line: run_count(2), per run: text_len(2) + text + fg(3) + bg(3) + flags(1)
   0x08 (styled_tool_call): type(1) + status(1) + error(1) + collapsed(1) + duration_ms(4) + name_len(2) + name + line_count(2), per line: run_count(2), per run: text_len(2) + text + fg(3) + bg(3) + flags(1)
+  0x09 (approval_tool_call): type(1) + status(1) + name_len(2) + name + summary_len(2) + summary + tool_call_id_len(2) + tool_call_id + preview_kind(1) + preview_line_count(2), per line: line_len(2) + line
 
 When hidden:
   opcode(1) + 0(1)

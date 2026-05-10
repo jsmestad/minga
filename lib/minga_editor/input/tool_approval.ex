@@ -31,6 +31,6 @@ defmodule MingaEditor.Input.ToolApproval do
   @spec dispatch_approval(EditorState.t(), non_neg_integer()) :: EditorState.t()
   defp dispatch_approval(state, ?y), do: Commands.execute(state, :agent_approve_tool)
   defp dispatch_approval(state, ?n), do: Commands.execute(state, :agent_deny_tool)
-  defp dispatch_approval(state, ?Y), do: Commands.execute(state, :agent_approve_tool)
+  defp dispatch_approval(state, ?Y), do: Commands.execute(state, :agent_approve_all_tools)
   defp dispatch_approval(state, _cp), do: state
 end

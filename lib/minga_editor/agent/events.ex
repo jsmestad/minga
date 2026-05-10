@@ -182,7 +182,7 @@ defmodule MingaEditor.Agent.Events do
   end
 
   def handle(state, {:approval_pending, approval}) do
-    cached = Map.take(approval, [:tool_call_id, :name, :args])
+    cached = Map.take(approval, [:tool_call_id, :name, :args, :preview])
     state = AgentAccess.update_agent(state, &AgentState.set_pending_approval(&1, cached))
 
     # Unfocus the prompt input so the ToolApproval input handler can
