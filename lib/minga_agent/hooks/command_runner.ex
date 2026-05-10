@@ -127,10 +127,8 @@ defmodule MingaAgent.Hooks.CommandRunner do
 
   @spec send_payload_to_helper(port(), String.t()) :: :ok
   defp send_payload_to_helper(port, payload_json) do
-    case Port.command(port, payload_json) do
-      true -> :ok
-      false -> :ok
-    end
+    Port.command(port, payload_json)
+    :ok
   rescue
     ArgumentError -> :ok
   catch
