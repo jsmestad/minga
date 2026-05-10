@@ -125,7 +125,7 @@ defmodule MingaAgent.MCP.Client do
     {reply, state} =
       case state.transport_mod.request(state.transport, request, state.request_timeout) do
         {:ok, result} ->
-          {{:ok, result}, state}
+          {tool_call_reply(result), state}
 
         {:error, reason} ->
           {{:error, reason}, maybe_mark_transport_down(state, reason)}
@@ -259,6 +259,10 @@ defmodule MingaAgent.MCP.Client do
       callback: fn args -> call_tool(client, original_name, args || %{}) end
     )
   end
+
+  @spec tool_call_reply(term()) :: {:ok, term()} | {:error, term()}
+  defp tool_call_reply(%{"isError" => true} = result), do: {:error, result}
+  defp tool_call_reply(result), do: {:ok, result}
 
   @spec safe_call(GenServer.server(), term(), timeout()) :: term()
   defp safe_call(client, message, timeout \\ 5_000) do

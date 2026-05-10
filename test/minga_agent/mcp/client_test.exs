@@ -57,6 +57,26 @@ defmodule MingaAgent.MCP.ClientTest do
     assert tool.parameter_schema == tool_def()["inputSchema"]
   end
 
+  test "call_tool returns MCP tool-level errors as errors" do
+    {:ok, client} =
+      Client.start_link(
+        server_config: server_config(),
+        transport: FakeTransport,
+        transport_opts: [
+          tools: [tool_def()],
+          call_results: %{
+            "echo-text" => %{
+              "isError" => true,
+              "content" => [%{"type" => "text", "text" => "tool failed"}]
+            }
+          }
+        ]
+      )
+
+    assert {:error, %{"isError" => true, "content" => [%{"text" => "tool failed"}]}} =
+             Client.call_tool(client, "echo-text", %{"text" => "hi"})
+  end
+
   test "call_tool sends the unprefixed original MCP name" do
     {:ok, client} =
       Client.start_link(
