@@ -7,6 +7,9 @@ defmodule MingaAgent.MCP.Tool do
   original `name` captured in the tool callback.
   """
 
+  @max_tool_name_length 64
+  @hash_length 8
+
   @enforce_keys [:server_name, :name, :safe_name, :description, :input_schema]
   defstruct [:server_name, :name, :safe_name, :description, :input_schema]
 
@@ -36,7 +39,8 @@ defmodule MingaAgent.MCP.Tool do
   @doc "Returns the safe provider-facing name for a MCP tool."
   @spec safe_name(String.t(), String.t()) :: String.t()
   def safe_name(server_name, tool_name) do
-    "mcp_#{sanitize(server_name)}__#{sanitize(tool_name)}"
+    base = "mcp_#{sanitize(server_name)}__#{sanitize(tool_name)}"
+    fit_name(base, "#{server_name}:#{tool_name}")
   end
 
   @spec from_map(String.t(), map(), MapSet.t(String.t())) ::
@@ -85,13 +89,33 @@ defmodule MingaAgent.MCP.Tool do
 
   @spec unique_name(String.t(), MapSet.t(String.t()), pos_integer()) :: String.t()
   defp unique_name(name, seen, index) do
-    candidate = "#{name}_#{index}"
+    suffix = "_#{index}"
+    candidate = String.slice(name, 0, @max_tool_name_length - String.length(suffix)) <> suffix
 
     if MapSet.member?(seen, candidate) do
       unique_name(name, seen, index + 1)
     else
       candidate
     end
+  end
+
+  @spec fit_name(String.t(), String.t()) :: String.t()
+  defp fit_name(name, fingerprint_source) do
+    if String.length(name) <= @max_tool_name_length do
+      name
+    else
+      suffix = "_" <> short_hash(fingerprint_source)
+      name_length = @max_tool_name_length - String.length(suffix)
+      String.slice(name, 0, name_length) <> suffix
+    end
+  end
+
+  @spec short_hash(String.t()) :: String.t()
+  defp short_hash(value) do
+    value
+    |> then(&:crypto.hash(:sha256, &1))
+    |> Base.encode16(case: :lower)
+    |> String.slice(0, @hash_length)
   end
 
   @spec sanitize(String.t()) :: String.t()
