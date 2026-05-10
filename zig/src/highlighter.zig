@@ -76,6 +76,9 @@ pub const Highlighter = struct {
     current_predicates: ?*const predicates_mod.PredicateTable = null,
     /// Capture id for @conceal in the active highlight query, if present.
     current_conceal_capture_id: ?u32 = null,
+    /// Last highlight result sizes, used to pre-size hot-path result buffers.
+    last_highlight_span_count: usize = 0,
+    last_highlight_conceal_count: usize = 0,
     cache_mutex: std.atomic.Mutex = .unlocked,
     allocator: std.mem.Allocator,
 
@@ -898,8 +901,10 @@ pub const Highlighter = struct {
         // Collect spans and conceal spans
         var spans: std.ArrayListUnmanaged(Span) = .empty;
         errdefer spans.deinit(alloc);
+        if (self.last_highlight_span_count > 0) try spans.ensureTotalCapacity(alloc, self.last_highlight_span_count);
         var conceals: std.ArrayListUnmanaged(ConcealSpan) = .empty;
         errdefer conceals.deinit(alloc);
+        if (self.last_highlight_conceal_count > 0) try conceals.ensureTotalCapacity(alloc, self.last_highlight_conceal_count);
 
         const source = self.current_source orelse &.{};
 
@@ -944,6 +949,8 @@ pub const Highlighter = struct {
 
         // Sort by (start_byte ASC, layer DESC, pattern_index DESC, end_byte ASC).
         std.mem.sortUnstable(Span, spans.items, {}, spanLessThan);
+        self.last_highlight_span_count = spans.items.len;
+        self.last_highlight_conceal_count = conceals.items.len;
 
         // Collect capture names
         const pattern_count = c.ts_query_capture_count(query);
@@ -983,8 +990,10 @@ pub const Highlighter = struct {
 
         var spans: std.ArrayListUnmanaged(Span) = .empty;
         errdefer spans.deinit(alloc);
+        if (self.last_highlight_span_count > 0) try spans.ensureTotalCapacity(alloc, self.last_highlight_span_count);
         var conceals: std.ArrayListUnmanaged(ConcealSpan) = .empty;
         errdefer conceals.deinit(alloc);
+        if (self.last_highlight_conceal_count > 0) try conceals.ensureTotalCapacity(alloc, self.last_highlight_conceal_count);
 
         var match: c.TSQueryMatch = undefined;
         while (c.ts_query_cursor_next_match(cursor, &match)) {
@@ -1060,6 +1069,8 @@ pub const Highlighter = struct {
             // Injection query has no @injection.content — nothing to inject.
             // Return plain highlight result.
             std.mem.sortUnstable(Span, spans.items, {}, spanLessThan);
+            self.last_highlight_span_count = spans.items.len;
+            self.last_highlight_conceal_count = conceals.items.len;
             const names = try alloc.alloc([]const u8, name_list.items.len);
             @memcpy(names, name_list.items);
             return .{
@@ -1298,6 +1309,8 @@ pub const Highlighter = struct {
         // with full metadata. The BEAM-side innermost-wins sweep resolves
         // overlaps using (layer DESC, width ASC, pattern_index DESC).
         std.mem.sortUnstable(Span, spans.items, {}, spanLessThan);
+        self.last_highlight_span_count = spans.items.len;
+        self.last_highlight_conceal_count = conceals.items.len;
 
         const names = try alloc.alloc([]const u8, name_list.items.len);
         @memcpy(names, name_list.items);
