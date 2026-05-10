@@ -211,44 +211,38 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
         List.duplicate(nil, max_rows)
       end
 
-    {gutter_layer, content_layer, _byte_off, window} =
-      lines
-      |> Enum.zip(highlight_segments_list)
-      |> Enum.with_index()
-      |> Enum.reduce(
-        {%{}, %{}, first_byte_off, window},
-        fn {{line_text, hl_segments}, screen_row}, {g_layer, c_layer, byte_off, win} ->
-          buf_line = first_line + screen_row
-          next_byte_off = byte_off + byte_size(line_text) + 1
+    {gutter_layer, content_layer, _byte_off, window, _screen_row} =
+      Enum.zip_reduce(lines, highlight_segments_list, {%{}, %{}, first_byte_off, window, 0}, fn line_text, hl_segments, {g_layer, c_layer, byte_off, win, screen_row} ->
+        buf_line = first_line + screen_row
+        next_byte_off = byte_off + byte_size(line_text) + 1
 
-          if Window.dirty?(win, buf_line) do
-            {g_cmds, c_cmds, _rows} =
-              BufferLine.render(%{
-                line_text: line_text,
-                buf_line: buf_line,
-                cursor_line: cursor_line,
-                byte_offset: byte_off,
-                screen_row: screen_row,
-                ctx: ctx,
-                ln_style: ln_style,
-                gutter_w: gutter_w,
-                sign_w: sign_w,
-                wrap_entry: nil,
-                max_rows: max_rows,
-                row_offset: row_off,
-                col_offset: col_off,
-                highlight_segments: hl_segments
-              })
+        if Window.dirty?(win, buf_line) do
+          {g_cmds, c_cmds, _rows} =
+            BufferLine.render(%{
+              line_text: line_text,
+              buf_line: buf_line,
+              cursor_line: cursor_line,
+              byte_offset: byte_off,
+              screen_row: screen_row,
+              ctx: ctx,
+              ln_style: ln_style,
+              gutter_w: gutter_w,
+              sign_w: sign_w,
+              wrap_entry: nil,
+              max_rows: max_rows,
+              row_offset: row_off,
+              col_offset: col_off,
+              highlight_segments: hl_segments
+            })
 
-            win = Window.cache_line(win, buf_line, g_cmds, c_cmds)
-            {put_draws(g_layer, g_cmds), put_draws(c_layer, c_cmds), next_byte_off, win}
-          else
-            g_cmds = Map.get(win.render_cache.cached_gutter, buf_line, [])
-            c_cmds = Map.get(win.render_cache.cached_content, buf_line, [])
-            {put_draws(g_layer, g_cmds), put_draws(c_layer, c_cmds), next_byte_off, win}
-          end
+          win = Window.cache_line(win, buf_line, g_cmds, c_cmds)
+          {put_draws(g_layer, g_cmds), put_draws(c_layer, c_cmds), next_byte_off, win, screen_row + 1}
+        else
+          g_cmds = Map.get(win.render_cache.cached_gutter, buf_line, [])
+          c_cmds = Map.get(win.render_cache.cached_content, buf_line, [])
+          {put_draws(g_layer, g_cmds), put_draws(c_layer, c_cmds), next_byte_off, win, screen_row + 1}
         end
-      )
+      end)
 
     {gutter_layer, content_layer, length(lines), window}
   end
