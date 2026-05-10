@@ -201,9 +201,9 @@ defmodule MingaEditor.RenderPipeline.Content do
 
     win_frame = %WindowFrame{
       rect: {0, 0, content_width, content_height},
-      gutter: DisplayList.draws_to_layer(gutter_draws),
-      lines: DisplayList.draws_to_layer(line_draws),
-      tilde_lines: DisplayList.draws_to_layer(tilde_draws),
+      gutter: DisplayList.draws_to_layer_sorted(gutter_draws),
+      lines: DisplayList.draws_to_layer_sorted(line_draws),
+      tilde_lines: DisplayList.draws_to_layer_sorted(tilde_draws),
       modeline: %{},
       cursor: buf_cursor,
       semantic: semantic

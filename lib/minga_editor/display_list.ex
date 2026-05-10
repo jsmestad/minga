@@ -216,6 +216,27 @@ defmodule MingaEditor.DisplayList do
     end)
   end
 
+  @doc """
+  Groups row-sorted draws into a render layer in one pass.
+
+  Use this only when all draws for a row are contiguous and rows are emitted in ascending order.
+  """
+  @spec draws_to_layer_sorted([draw()]) :: render_layer()
+  def draws_to_layer_sorted([]), do: %{}
+
+  def draws_to_layer_sorted([{row, col, text, style} | rest]) do
+    {layer, current_row, runs_rev} =
+      Enum.reduce(rest, {%{}, row, [{col, text, style}]}, fn {next_row, col, text, style}, {layer, row, runs} ->
+        if next_row == row do
+          {layer, row, [{col, text, style} | runs]}
+        else
+          {Map.put(layer, row, Enum.reverse(runs)), next_row, [{col, text, style}]}
+        end
+      end)
+
+    Map.put(layer, current_row, Enum.reverse(runs_rev))
+  end
+
   # ── Draw offsetting ────────────────────────────────────────────────────────
 
   @doc "Offsets draw tuples by the given row and column amounts."
