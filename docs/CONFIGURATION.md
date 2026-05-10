@@ -40,6 +40,7 @@ That's it. Save the file and restart Minga. Your options take effect immediately
 | `:agent_session_retention_days` | positive integer | `30` | Days to keep saved agent sessions before auto-pruning |
 | `:startup_view` | `:agent` or `:editor` | `:agent` | Which view to show on startup (see [Startup view](#startup-view) below) |
 | `:agent_auto_context` | boolean | `true` | Load CLI file as agent preview context on startup |
+| `:agent_mcp_servers` | list of maps | `[]` | MCP servers to launch for native agent sessions (see [MCP servers](MCP.md)) |
 | `:whichkey_layout` | `:bottom` or `:float` | `:bottom` | Which-key popup display mode (see [Which-key popup](#which-key-popup) below) |
 | `:font_family` | string | `"Menlo"` | Font family or name (see [Fonts](#fonts) below) |
 | `:font_size` | positive integer | `13` | Font size in points (see [Fonts](#fonts) below) |

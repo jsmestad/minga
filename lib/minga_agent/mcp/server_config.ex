@@ -8,14 +8,15 @@ defmodule MingaAgent.MCP.ServerConfig do
   """
 
   @enforce_keys [:name, :command]
-  defstruct [:name, :command, args: [], env: %{}]
+  defstruct [:name, :command, args: [], env: %{}, enabled: true]
 
   @typedoc "One MCP stdio server declaration."
   @type t :: %__MODULE__{
           name: String.t(),
           command: String.t(),
           args: [String.t()],
-          env: %{String.t() => String.t()}
+          env: %{String.t() => String.t()},
+          enabled: boolean()
         }
 
   @doc "Normalizes a user config map into a `ServerConfig` struct."
@@ -32,13 +33,69 @@ defmodule MingaAgent.MCP.ServerConfig do
     with {:ok, name} <- fetch_string(config, :name),
          {:ok, command} <- fetch_string(config, :command),
          {:ok, args} <- fetch_args(config),
-         {:ok, env} <- fetch_env(config) do
-      {:ok, %__MODULE__{name: name, command: command, args: args, env: env}}
+         {:ok, env} <- fetch_env(config),
+         {:ok, enabled} <- fetch_enabled(config) do
+      {:ok, %__MODULE__{name: name, command: command, args: args, env: env, enabled: enabled}}
     end
   end
 
   def normalize(other),
     do: {:error, "MCP server config must be a map or nil, got: #{inspect(other)}"}
+
+  @doc "Normalizes one or more MCP server configs, filters disabled entries, and rejects duplicate enabled server names."
+  @spec normalize_list(nil | map() | t() | [map() | t()]) :: {:ok, [t()]} | {:error, String.t()}
+  def normalize_list(nil), do: {:ok, []}
+  def normalize_list(%__MODULE__{} = config), do: normalize_list([config])
+  def normalize_list(config) when is_map(config), do: normalize_list([config])
+
+  def normalize_list(configs) when is_list(configs) do
+    configs
+    |> Enum.reduce_while({:ok, []}, &normalize_list_entry/2)
+    |> case do
+      {:ok, normalized} -> reject_duplicate_names(Enum.reverse(normalized))
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  def normalize_list(other),
+    do:
+      {:error, "MCP servers config must be a list of maps, a map, or nil, got: #{inspect(other)}"}
+
+  @spec normalize_list_entry(term(), {:ok, [t()]}) ::
+          {:cont, {:ok, [t()]}} | {:halt, {:error, String.t()}}
+  defp normalize_list_entry(nil, {:ok, _acc}) do
+    {:halt, {:error, "MCP servers config list cannot contain nil entries"}}
+  end
+
+  defp normalize_list_entry(config, {:ok, acc}) do
+    if disabled?(config) do
+      {:cont, {:ok, acc}}
+    else
+      case normalize(config) do
+        {:ok, %__MODULE__{} = normalized} -> {:cont, {:ok, [normalized | acc]}}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end
+  end
+
+  @spec disabled?(term()) :: boolean()
+  defp disabled?(config) when is_map(config), do: fetch(config, :enabled) == false
+  defp disabled?(_config), do: false
+
+  @spec reject_duplicate_names([t()]) :: {:ok, [t()]} | {:error, String.t()}
+  defp reject_duplicate_names(configs) do
+    duplicate_names =
+      configs
+      |> Enum.map(& &1.name)
+      |> Enum.frequencies()
+      |> Enum.filter(fn {_name, count} -> count > 1 end)
+      |> Enum.map(&elem(&1, 0))
+
+    case duplicate_names do
+      [] -> {:ok, configs}
+      names -> {:error, "MCP server names must be unique, duplicates: #{Enum.join(names, ", ")}"}
+    end
+  end
 
   @spec fetch_string(map(), atom()) :: {:ok, String.t()} | {:error, String.t()}
   defp fetch_string(config, key) do
@@ -70,6 +127,15 @@ defmodule MingaAgent.MCP.ServerConfig do
 
       other ->
         {:error, "MCP server env must be a map of string keys and values, got: #{inspect(other)}"}
+    end
+  end
+
+  @spec fetch_enabled(map()) :: {:ok, boolean()} | {:error, String.t()}
+  defp fetch_enabled(config) do
+    case fetch(config, :enabled) do
+      nil -> {:ok, true}
+      enabled when is_boolean(enabled) -> {:ok, enabled}
+      other -> {:error, "MCP server enabled must be a boolean, got: #{inspect(other)}"}
     end
   end
 
