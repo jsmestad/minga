@@ -64,6 +64,9 @@ final class WindowContentRenderer {
     /// Updated from theme's editor_fg color slot each frame.
     var defaultFgRGB: UInt32 = 0xBBC2CF
 
+    /// Small cache for repeated syntax color conversions.
+    private var nsColorCache: [UInt32: NSColor] = [:]
+
     /// Font for pill badge text (1.5pt smaller than primary for visual hierarchy).
     private let pillFont: CTFont
 
@@ -604,10 +607,16 @@ final class WindowContentRenderer {
 
     /// Convert 24-bit RGB to NSColor.
     private func nsColor(from rgb: UInt32) -> NSColor {
+        if let cached = nsColorCache[rgb] {
+            return cached
+        }
+
         let r = CGFloat((rgb >> 16) & 0xFF) / 255.0
         let g = CGFloat((rgb >> 8) & 0xFF) / 255.0
         let b = CGFloat(rgb & 0xFF) / 255.0
-        return NSColor(red: r, green: g, blue: b, alpha: 1.0)
+        let color = NSColor(red: r, green: g, blue: b, alpha: 1.0)
+        nsColorCache[rgb] = color
+        return color
     }
 
 }
