@@ -201,12 +201,11 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
 
     highlight_segments_list =
       if ctx.highlight do
-        lines_with_offsets = build_lines_with_offsets(lines, first_byte_off)
-
         if MapSet.size(dirty_rows) == max_rows do
+          lines_with_offsets = build_lines_with_offsets(lines, first_byte_off)
           Highlight.styles_for_visible_lines(ctx.highlight, lines_with_offsets)
         else
-          Highlight.styles_for_visible_lines_masked(ctx.highlight, lines_with_offsets, dirty_rows)
+          Highlight.styles_for_text_lines_masked(ctx.highlight, lines, first_byte_off, dirty_rows)
         end
       else
         List.duplicate(nil, max_rows)
