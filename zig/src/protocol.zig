@@ -907,16 +907,16 @@ pub fn decodeCommand(data: []const u8) DecodeError!RenderCommand {
             if (rest.len < 6) return error.Malformed;
             const name_len = std.mem.readInt(u16, rest[4..6], .big);
             if (rest.len < 6 + name_len) return error.Malformed;
-            // TUI ignores font config; just return a no-op clear.
-            return .clear;
+            // TUI ignores font config.
+            return .noop;
         },
         OP_REGISTER_FONT => {
             // font_id:1, name_len:2, name:bytes
             if (rest.len < 3) return error.Malformed;
             const name_len = std.mem.readInt(u16, rest[1..3], .big);
             if (rest.len < 3 + name_len) return error.Malformed;
-            // TUI ignores font registration; return no-op.
-            return .clear;
+            // TUI ignores font registration.
+            return .noop;
         },
         OP_SET_FONT_FALLBACK => {
             // count:1, then count * (name_len:2, name:bytes)
@@ -930,8 +930,8 @@ pub fn decodeCommand(data: []const u8) DecodeError!RenderCommand {
                 offset += 2 + name_len;
                 if (rest.len < offset) return error.Malformed;
             }
-            // TUI ignores font fallback; just return a no-op clear.
-            return .clear;
+            // TUI ignores font fallback.
+            return .noop;
         },
         else => return error.UnknownOpcode,
     }
@@ -1341,6 +1341,16 @@ test "decode set_window_bg truncated returns malformed" {
     const data = [_]u8{ OP_SET_WINDOW_BG, 0x28, 0x2C };
     const result = decodeCommand(&data);
     try std.testing.expectError(error.Malformed, result);
+}
+
+test "decode font config commands as noops" {
+    const set_font = [_]u8{ OP_SET_FONT, 0x00, 0x0E, 0x04, 0x01, 0x00, 0x05 } ++ "Menlo".*;
+    const register_font = [_]u8{ OP_REGISTER_FONT, 0x01, 0x00, 0x05 } ++ "Menlo".*;
+    const set_fallback = [_]u8{ OP_SET_FONT_FALLBACK, 0x01, 0x00, 0x05 } ++ "Menlo".*;
+
+    try std.testing.expect((try decodeCommand(&set_font)) == .noop);
+    try std.testing.expect((try decodeCommand(&register_font)) == .noop);
+    try std.testing.expect((try decodeCommand(&set_fallback)) == .noop);
 }
 
 test "decode set_cursor_shape block" {

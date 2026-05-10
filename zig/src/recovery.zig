@@ -32,10 +32,6 @@ const TIMEOUT_MS: i64 = 3000;
 /// Updated when a batch_end command arrives on stdin.
 last_render_ms: i64,
 
-/// Timestamp (ms) of the last key event sent to BEAM.
-/// Updated when a key_press is enqueued to the PortWriter.
-last_key_sent_ms: i64,
-
 /// Number of key events sent since the last render response.
 keys_since_render: u32,
 
@@ -47,7 +43,6 @@ pub fn init() Self {
     const now = milliTimestamp();
     return .{
         .last_render_ms = now,
-        .last_key_sent_ms = 0,
         .keys_since_render = 0,
         .showing = false,
     };
@@ -63,7 +58,6 @@ pub fn onRenderReceived(self: *Self) void {
 
 /// Called when a key event is enqueued to the PortWriter.
 pub fn onKeySent(self: *Self) void {
-    self.last_key_sent_ms = milliTimestamp();
     self.keys_since_render += 1;
 }
 
@@ -218,9 +212,8 @@ test "init starts non-unresponsive" {
 
 test "becomes unresponsive after timeout with pending keys" {
     var r = init();
-    // Simulate: render came 4 seconds ago, key sent 1 second ago
+    // Simulate: render came 4 seconds ago and keys are still waiting for a render response.
     r.last_render_ms = milliTimestamp() - 4000;
-    r.last_key_sent_ms = milliTimestamp() - 1000;
     r.keys_since_render = 3;
     try std.testing.expect(r.isUnresponsive());
 }

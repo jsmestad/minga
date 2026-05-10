@@ -429,6 +429,7 @@ pub const TuiRuntime = struct {
         // any stored pointers to self's fields (especially tty_write_buf)
         // are stale. We must reinitialize them here where self is stable.
         self.tty.tty_writer = self.tty.fd.writerStreaming(root.g_io, &self.tty_write_buf);
+        vaxis.tty.global_tty = self.tty;
         self.surface.vx = &self.vx;
         self.surface.tty_writer = self.tty.writer();
         self.rend.surface = &self.surface;
@@ -613,15 +614,17 @@ pub const TuiRuntime = struct {
 
             // tty readable (terminal input)
             if (pollfds[1].revents & std.posix.POLL.IN != 0) {
-                const n = try self.tty.read(tty_read_buf[tty_read_start..]);
+                const read_start = tty_read_start;
+                const n = try self.tty.read(tty_read_buf[read_start..]);
                 if (n == 0) break :main_loop;
 
+                const total_read = read_start + n;
                 var seq_start: usize = 0;
-                tty_parse_loop: while (seq_start < n) {
-                    const result = try tty_parser.parse(tty_read_buf[seq_start..n], null);
+                tty_parse_loop: while (seq_start < total_read) {
+                    const result = try tty_parser.parse(tty_read_buf[seq_start..total_read], null);
                     if (result.n == 0) {
-                        const remaining_bytes = n - seq_start;
-                        std.mem.copyForwards(u8, tty_read_buf[0..remaining_bytes], tty_read_buf[seq_start..n]);
+                        const remaining_bytes = total_read - seq_start;
+                        std.mem.copyForwards(u8, tty_read_buf[0..remaining_bytes], tty_read_buf[seq_start..total_read]);
                         tty_read_start = remaining_bytes;
                         break :tty_parse_loop;
                     }

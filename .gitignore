@@ -43,7 +43,6 @@ Thumbs.db
 .env
 .env.local
 PLAN.md
-PLAN.md
 .build/
 test/tmp/
 autoresearch.jsonl

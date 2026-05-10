@@ -167,14 +167,12 @@ const BufferState = struct {
             const start: usize = @intCast(edit.start_byte);
             const old_end: usize = @intCast(edit.old_end_byte);
 
-            // Stale delta: old_end before start, or start past source length.
+            // Stale delta: the byte range must fit the source mirror exactly.
             // This means the BEAM's view of the buffer doesn't match ours.
-            if (old_end < edit.start_byte or start > self.source.items.len) return error.StaleEdit;
-            const clamped_old_end = @min(old_end, self.source.items.len);
-            if (clamped_old_end < start) return error.StaleEdit;
+            if (old_end < start or start > self.source.items.len or old_end > self.source.items.len) return error.StaleEdit;
 
             // Replace [start..old_end) with inserted_text.
-            try self.source.replaceRange(alloc, start, clamped_old_end - start, edit.inserted_text);
+            try self.source.replaceRange(alloc, start, old_end - start, edit.inserted_text);
         }
     }
 
@@ -217,7 +215,9 @@ fn activateBuffer(hl: *highlighter_mod.Highlighter, bs: *BufferState) bool {
     if (lang_changed) {
         // setLanguage deletes hl.tree, but we're about to replace it
         // with the buffer's tree anyway.
-        _ = hl.setLanguage(lang_name);
+        if (!hl.setLanguage(lang_name)) return false;
+    } else if (hl.current_language == null) {
+        return false;
     }
 
     // Install this buffer's tree into the highlighter (may be null for first parse).
@@ -249,7 +249,7 @@ fn handleCommand(
             const bs = try getOrCreateBuffer(buffers, alloc, sl.buffer_id);
             bs.setLanguageName(alloc, sl.name) catch return;
             // Set the highlighter's active language so queries get loaded.
-            _ = hl.setLanguage(sl.name);
+            if (bs.language_name) |name| _ = hl.setLanguage(name);
         },
         .parse_buffer => |pb| {
             const bs = try getOrCreateBuffer(buffers, alloc, pb.buffer_id);
@@ -318,7 +318,7 @@ fn handleCommand(
         .request_indent => |req| {
             const bs = buffers.getPtr(req.buffer_id) orelse return;
             if (!activateBuffer(hl, bs)) return;
-            const level = hl.computeIndent(req.line, bs.source.items);
+            const level = hl.computeIndent(req.line);
             saveTreeToBuffer(hl, bs);
             var rbuf: [13]u8 = undefined;
             const rlen = protocol.encodeIndentResult(&rbuf, req.request_id, req.line, level);
@@ -661,26 +661,26 @@ test "applyEdits: valid insert at beginning of source" {
     try testing.expectEqualStrings("hello world", bs.source.items);
 }
 
-test "applyEdits: clamped_old_end < start returns StaleEdit" {
-    // old_end is valid (within source) but less than start after clamping.
+test "applyEdits: returns StaleEdit when old_end_byte exceeds source length" {
     var bs: BufferState = .{};
     defer bs.deinit(testing.allocator);
     try bs.setSource(testing.allocator, "hello world");
 
     const edits = [_]protocol.EditDelta{.{
-        .start_byte = 8,
-        .old_end_byte = 5, // clamped to 5, which is < start(8)
-        .new_end_byte = 8,
+        .start_byte = 6,
+        .old_end_byte = 50,
+        .new_end_byte = 10,
         .start_row = 0,
-        .start_col = 8,
+        .start_col = 6,
         .old_end_row = 0,
-        .old_end_col = 5,
+        .old_end_col = 50,
         .new_end_row = 0,
-        .new_end_col = 8,
-        .inserted_text = "",
+        .new_end_col = 10,
+        .inserted_text = "mars",
     }};
 
     try testing.expectError(error.StaleEdit, bs.applyEdits(testing.allocator, &edits));
+    try testing.expectEqualStrings("hello world", bs.source.items);
 }
 
 // Pull in tests from imported modules for the parser test step.

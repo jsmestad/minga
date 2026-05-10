@@ -84,7 +84,6 @@ pub const Highlighter = struct {
 
     /// Tracks background pre-compilation state.
     prewarm_thread: ?std.Thread = null,
-    prewarm_done: std.atomic.Value(bool) = .init(false),
 
     /// Initialize with compiled-in grammars registered.
     /// Spawns a background thread to pre-compile all embedded queries.
@@ -142,7 +141,6 @@ pub const Highlighter = struct {
                 self.prewarmOne(entry.name, textobj_source, &self.textobject_query_cache);
             }
         }
-        self.prewarm_done.store(true, .release);
     }
 
     fn prewarmOne(
@@ -567,7 +565,7 @@ pub const Highlighter = struct {
     /// 1. Find the deepest node at the start of the given line
     /// 2. Walk up ancestors, checking which ones match @indent or @outdent captures
     /// 3. Net indent = count of @indent ancestors - count of @outdent on this line
-    pub fn computeIndent(self: *Highlighter, line: u32, source: []const u8) i32 {
+    pub fn computeIndent(self: *Highlighter, line: u32) i32 {
         const iq = self.indent_query orelse return 0;
         const tree = self.tree orelse return 0;
         const root = c.ts_tree_root_node(tree);
@@ -587,9 +585,6 @@ pub const Highlighter = struct {
         }
 
         if (indent_id == null and outdent_id == null) return 0;
-
-        // Find byte offset of the start of the target line
-        const line_start = lineStartByte(source, line);
 
         // Run the query, scoped to the area around this line
         const cursor = c.ts_query_cursor_new() orelse return 0;
@@ -634,7 +629,6 @@ pub const Highlighter = struct {
             }
         }
 
-        _ = line_start;
         return indent_count;
     }
 
@@ -830,16 +824,6 @@ pub const Highlighter = struct {
         }.lessThan);
 
         return entries.toOwnedSlice(allocator) catch &.{};
-    }
-
-    /// Find the byte offset where a given line starts in the source.
-    fn lineStartByte(source: []const u8, target_line: u32) usize {
-        var line: u32 = 0;
-        for (source, 0..) |ch, i| {
-            if (line == target_line) return i;
-            if (ch == '\n') line += 1;
-        }
-        return source.len;
     }
 
     /// Parse source text. Full re-parse (no incremental).
