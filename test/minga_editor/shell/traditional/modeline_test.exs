@@ -78,6 +78,35 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
       assert Enum.any?(regions, fn {_start, _end, cmd} -> cmd == :buffer_list end)
     end
 
+    test "shows running background subagent count and active label" do
+      data =
+        Map.merge(@base_data, %{
+          background_subagent_count: 2,
+          active_background_subagent_label: "session-3: tests"
+        })
+
+      {commands, regions} = Modeline.render(0, 140, data)
+      text = Enum.map_join(commands, fn {_row, _col, segment, _opts} -> segment end)
+
+      assert String.contains?(text, "bg:2")
+      assert String.contains?(text, "session-3: tests")
+      assert Enum.any?(regions, fn {_start, _end, cmd} -> cmd == :agent_session_switcher end)
+      refute Enum.any?(regions, fn {_start, _end, cmd} -> cmd == :agent_session_picker end)
+    end
+
+    test "omits background subagent segment when none are running" do
+      data =
+        Map.merge(@base_data, %{
+          background_subagent_count: 0,
+          active_background_subagent_label: "unique-bg-label"
+        })
+
+      {commands, _regions} = Modeline.render(0, 140, data)
+      text = Enum.map_join(commands, fn {_row, _col, segment, _opts} -> segment end)
+
+      refute String.contains?(text, "unique-bg-label")
+    end
+
     test "filetype segment includes devicon for known filetype" do
       {commands, _regions} = Modeline.render(0, 120, @base_data)
 

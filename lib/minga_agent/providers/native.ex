@@ -284,7 +284,12 @@ defmodule MingaAgent.Providers.Native do
 
     base_tools =
       Keyword.get(opts, :tools) ||
-        Tools.all(project_root: project_root, fork_store: fork_store, changeset: changeset)
+        Tools.all(
+          project_root: project_root,
+          fork_store: fork_store,
+          changeset: changeset,
+          parent_session: subscriber
+        )
 
     {mcp_client, mcp_tools, mcp_tool_names} = start_mcp_client(opts, config, subscriber)
     internal_tools = build_internal_tools(provider_pid)

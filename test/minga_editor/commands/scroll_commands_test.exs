@@ -5,7 +5,7 @@ defmodule MingaEditor.Commands.ScrollCommandsTest do
   Verifies the full execute path: read cursor, scroll viewport,
   clamp cursor, write to the correct window's viewport.
   """
-  use Minga.Test.EditingModelCase, async: true
+  use ExUnit.Case, async: true
 
   alias Minga.Buffer.Server, as: BufferServer
   alias MingaEditor

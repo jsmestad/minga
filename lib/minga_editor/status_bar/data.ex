@@ -56,6 +56,8 @@ defmodule MingaEditor.StatusBar.Data do
           macro_recording: {true, String.t()} | false,
           agent_status: AgentState.status(),
           agent_theme_colors: Theme.Agent.t() | nil,
+          background_subagent_count: non_neg_integer(),
+          active_background_subagent_label: String.t() | nil,
           status_msg: String.t() | nil
         }
 
@@ -85,6 +87,8 @@ defmodule MingaEditor.StatusBar.Data do
           parser_status: parser_status(),
           buf_index: pos_integer(),
           buf_count: non_neg_integer(),
+          background_subagent_count: non_neg_integer(),
+          active_background_subagent_label: String.t() | nil,
           status_msg: String.t() | nil
         }
 
@@ -152,6 +156,7 @@ defmodule MingaEditor.StatusBar.Data do
     diagnostic_hint = cursor_line_diagnostic_hint_from_path(file_path, line)
 
     agent = AgentAccess.agent(state)
+    background = background_subagent_summary(state)
 
     %{
       mode: Minga.Editing.mode(state),
@@ -173,6 +178,8 @@ defmodule MingaEditor.StatusBar.Data do
       macro_recording: Minga.Editing.macro_recording_status(state),
       agent_status: agent.runtime.status,
       agent_theme_colors: if(agent.runtime.status, do: Theme.agent_theme(state.theme), else: nil),
+      background_subagent_count: background.count,
+      active_background_subagent_label: background.label,
       status_msg: state.shell_state.status_msg
     }
   end
@@ -231,6 +238,7 @@ defmodule MingaEditor.StatusBar.Data do
     {git_branch, git_diff_summary} = git_modeline_data(buf)
     diagnostic_counts = diagnostic_modeline_data_from_path(file_path)
     diagnostic_hint = cursor_line_diagnostic_hint_from_path(file_path, line)
+    background = background_subagent_summary(state)
 
     %{
       mode: Minga.Editing.mode(state),
@@ -256,6 +264,8 @@ defmodule MingaEditor.StatusBar.Data do
       parser_status: state.parser_status,
       buf_index: state.workspace.buffers.active_index + 1,
       buf_count: length(state.workspace.buffers.list),
+      background_subagent_count: background.count,
+      active_background_subagent_label: background.label,
       status_msg: state.shell_state.status_msg
     }
   end
@@ -382,7 +392,36 @@ defmodule MingaEditor.StatusBar.Data do
       parser_status: d.parser_status,
       git_branch: d.git_branch,
       git_diff_summary: d.git_diff_summary,
-      diagnostic_counts: d.diagnostic_counts
+      diagnostic_counts: d.diagnostic_counts,
+      background_subagent_count: d.background_subagent_count,
+      active_background_subagent_label: d.active_background_subagent_label
     }
   end
+
+  @spec background_subagent_summary(EditorState.t() | map()) :: %{
+          count: non_neg_integer(),
+          label: String.t() | nil
+        }
+  defp background_subagent_summary(%{shell_state: %{tab_bar: %MingaEditor.State.TabBar{} = tb}}) do
+    tabs = Enum.filter(tb.tabs, &MingaEditor.State.Tab.background_subagent?/1)
+    running = Enum.filter(tabs, &(&1.agent_status in [:thinking, :tool_executing]))
+    active = Enum.find(tabs, &(&1.id == tb.active_id))
+    selected = active || List.first(running) || List.first(tabs)
+
+    %{
+      count: length(running),
+      label: background_subagent_label(selected)
+    }
+  end
+
+  defp background_subagent_summary(_state), do: %{count: 0, label: nil}
+
+  @spec background_subagent_label(MingaEditor.State.Tab.t() | nil) :: String.t() | nil
+  defp background_subagent_label(%MingaEditor.State.Tab{
+         background_subagent: %MingaAgent.Subagent.Handle{} = handle
+       }) do
+    MingaAgent.Subagent.Handle.label(handle)
+  end
+
+  defp background_subagent_label(_tab), do: nil
 end

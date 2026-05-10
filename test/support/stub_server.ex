@@ -17,20 +17,26 @@ defmodule Minga.Test.StubServer do
   end
 
   @impl GenServer
-  def init(_opts), do: {:ok, %{}}
+  def init(opts), do: {:ok, Map.new(opts)}
 
   @impl GenServer
-  def handle_call(:messages, _from, state), do: {:reply, [], state}
+  def handle_call(:messages, _from, state), do: {:reply, Map.get(state, :messages, []), state}
 
   def handle_call(:usage, _from, state),
     do: {:reply, %{input: 0, output: 0, cache_read: 0, cache_write: 0, cost: 0.0}, state}
 
-  def handle_call(:status, _from, state), do: {:reply, :idle, state}
+  def handle_call(:status, _from, state), do: {:reply, Map.get(state, :status, :idle), state}
   def handle_call({:subscribe, _pid}, _from, state), do: {:reply, :ok, state}
   def handle_call({:unsubscribe, _pid}, _from, state), do: {:reply, :ok, state}
 
   def handle_call(:editor_snapshot, _from, state) do
-    {:reply, %{status: :idle, pending_approval: nil, error: nil}, state}
+    snapshot = %{
+      status: Map.get(state, :status, :idle),
+      pending_approval: Map.get(state, :pending_approval),
+      error: Map.get(state, :error)
+    }
+
+    {:reply, snapshot, state}
   end
 
   def handle_call(_msg, _from, state), do: {:reply, :ok, state}

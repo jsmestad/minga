@@ -12,14 +12,20 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
 
   use ExUnit.Case, async: true
 
+  alias Minga.Buffer
+  alias MingaEditor.Agent.BufferSync, as: AgentBufferSync
   alias MingaEditor.Agent.UIState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
+  alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
+  alias MingaEditor.State.Windows
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
+  alias MingaEditor.Window
+  alias MingaEditor.WindowTree
   alias Minga.Test.StubServer
 
   defp base_state(tabs, active_id) do
@@ -52,6 +58,26 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
     %{tb | active_id: active_id}
   end
 
+  defp agent_tab_context(agent_buf) do
+    rows = 24
+    cols = 80
+    win_id = 1
+    agent_window = Window.new_agent_chat(win_id, agent_buf, rows, cols)
+
+    %{
+      keymap_scope: :agent,
+      buffers: %Buffers{active: agent_buf, list: [agent_buf], active_index: 0},
+      windows: %Windows{
+        tree: WindowTree.new(win_id),
+        map: %{win_id => agent_window},
+        active: win_id,
+        next_id: win_id + 1
+      },
+      viewport: Viewport.new(rows, cols),
+      agent_ui: UIState.new()
+    }
+  end
+
   describe "two concurrent sessions in two tabs" do
     test "AgentAccess.session/1 resolves to the active tab's session" do
       {:ok, session_a} = StubServer.start_link()
@@ -80,9 +106,9 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
 
       state = base_state(tabs, 1)
 
-      # Sanity: both sessions are alive before the switch
-      assert Process.alive?(session_a)
-      assert Process.alive?(session_b)
+      # Sanity: both sessions respond before the switch.
+      assert GenServer.call(session_a, :status) == :idle
+      assert GenServer.call(session_b, :status) == :idle
       assert AgentAccess.session(state) == session_a
 
       # Switching tabs only repoints the active_id; it does not stop or
@@ -91,8 +117,8 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
         EditorState.set_tab_bar(state, %{state.shell_state.tab_bar | active_id: 2})
 
       assert AgentAccess.session(switched) == session_b
-      assert Process.alive?(session_a)
-      assert Process.alive?(session_b)
+      assert GenServer.call(session_a, :status) == :idle
+      assert GenServer.call(session_b, :status) == :idle
     end
 
     test "two tabs with no session report nil regardless of which is active" do
@@ -128,7 +154,7 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
       # Tab 2's session is now in scope; tab 1's session is still alive
       # and still owned by tab 1.
       assert AgentAccess.session(switched) == idle
-      assert Process.alive?(streaming)
+      assert GenServer.call(streaming, :status) == :idle
 
       tab_one = Enum.find(switched.shell_state.tab_bar.tabs, &(&1.id == 1))
       assert tab_one.session == streaming
@@ -167,6 +193,47 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
       assert cache.error == nil
       assert cache.runtime.status == :idle
       assert cache.pending_approval == nil
+    end
+
+    test "switch_tab binds and syncs a background agent tab's chat buffer" do
+      {:ok, background_session} =
+        StubServer.start_link(
+          messages: [
+            {:user, "inspect background session"},
+            {:assistant, "unique background answer"}
+          ]
+        )
+
+      stale_agent_buf = AgentBufferSync.start_buffer()
+      background_agent_buf = AgentBufferSync.start_buffer()
+
+      tabs = [
+        Tab.new_file(1, "main.ex"),
+        Tab.new_agent(2, "Background")
+        |> Tab.set_session(background_session)
+        |> Tab.set_context(agent_tab_context(background_agent_buf))
+      ]
+
+      state =
+        tabs
+        |> base_state(1)
+        |> AgentAccess.update_agent(&AgentState.set_buffer(&1, stale_agent_buf))
+
+      switched = EditorState.switch_tab(state, 2)
+
+      active_window =
+        Map.fetch!(switched.workspace.windows.map, switched.workspace.windows.active)
+
+      assert AgentAccess.session(switched) == background_session
+      assert {:agent_chat, ^background_agent_buf} = active_window.content
+      assert AgentAccess.agent(switched).buffer == background_agent_buf
+
+      background_content = Buffer.content(background_agent_buf)
+      stale_content = Buffer.content(stale_agent_buf)
+
+      assert background_content =~ "inspect background session"
+      assert background_content =~ "unique background answer"
+      refute stale_content =~ "unique background answer"
     end
   end
 end

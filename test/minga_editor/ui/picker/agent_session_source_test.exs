@@ -7,6 +7,7 @@ defmodule MingaEditor.UI.Picker.AgentSessionSourceTest do
 
   alias MingaAgent.Session
   alias MingaAgent.SessionStore
+  alias MingaAgent.Subagent.Handle
   alias MingaAgent.TurnUsage
   alias MingaEditor.Agent.UIState
   alias MingaEditor.State, as: EditorState
@@ -98,6 +99,36 @@ defmodule MingaEditor.UI.Picker.AgentSessionSourceTest do
       stop_session(pid)
     end
 
+    test "candidates include completed and failed background subagent tabs" do
+      {:ok, pid1} = start_test_session()
+      {:ok, pid2} = start_test_session()
+      Session.subscribe(pid1)
+      Session.subscribe(pid2)
+
+      state =
+        state_with_two_agent_tabs(pid1, pid2)
+        |> mark_all_agent_tabs_as_background([:idle, :error])
+
+      ctx = Context.from_editor_state(state)
+      candidates = AgentSessionSource.candidates(ctx)
+
+      tab_entries = Enum.filter(candidates, fn %Item{id: {_, tag}} -> match?({:tab, _}, tag) end)
+      assert length(tab_entries) >= 2
+
+      target =
+        Enum.find(tab_entries, fn %Item{id: {_, {:tab, id}}} ->
+          id != state.shell_state.tab_bar.active_id
+        end)
+
+      result = AgentSessionSource.on_select(target, state)
+      assert result.shell_state.tab_bar.active_id == elem(elem(target.id, 1), 1)
+
+      Session.unsubscribe(pid1)
+      Session.unsubscribe(pid2)
+      stop_session(pid1)
+      stop_session(pid2)
+    end
+
     test "disk candidates show title, last timestamp, turn count, and most-recent-first order", %{
       tmp_dir: dir
     } do
@@ -167,9 +198,11 @@ defmodule MingaEditor.UI.Picker.AgentSessionSourceTest do
       # Active tab is the first one (pid1). Background tab (pid2) should not have bullet.
       bg_tabs =
         Enum.filter(candidates, fn
-          {{_, {:tab, id}}, _, _} -> id != state.shell_state.tab_bar.active_id
+          %Item{id: {_, {:tab, id}}} -> id != state.shell_state.tab_bar.active_id
           _ -> false
         end)
+
+      assert bg_tabs != []
 
       Enum.each(bg_tabs, fn %Item{label: label} ->
         refute String.contains?(label, "\u{2022}")
@@ -272,6 +305,33 @@ defmodule MingaEditor.UI.Picker.AgentSessionSourceTest do
 
   defp stop_session(pid) do
     MingaAgent.Supervisor.stop_session(pid)
+  end
+
+  defp mark_all_agent_tabs_as_background(state, statuses) do
+    {tabs, _idx} =
+      Enum.map_reduce(state.shell_state.tab_bar.tabs, 0, fn
+        %Tab{kind: :agent, session: session} = tab, idx ->
+          status = Enum.at(statuses, idx, :idle)
+
+          handle =
+            Handle.new(
+              session_id: "session-#{idx + 1}",
+              pid: session,
+              task: "background #{idx + 1}"
+            )
+
+          tab =
+            tab
+            |> Tab.set_agent_status(status)
+            |> Tab.mark_background_subagent(handle)
+
+          {tab, idx + 1}
+
+        tab, idx ->
+          {tab, idx}
+      end)
+
+    put_in(state.shell_state.tab_bar.tabs, tabs)
   end
 
   defp state_with_agent_tab(session_pid) do

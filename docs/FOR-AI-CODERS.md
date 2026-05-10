@@ -138,6 +138,12 @@ The editor monitors agent processes and reflects their status:
 
 Running, thinking, writing, errored: the editor knows because it supervises the agent process.
 
+### Foreground and background sub-agents ✅
+
+Use the `subagent` tool in foreground mode when the parent needs the answer before it can continue. This is the default: omit `background` or pass `background: false`, and the parent waits for the child agent's final response as the tool result.
+
+Use `background: true` when the task is independent and may run for a while, such as writing docs, exploring a test failure, or auditing a separate module. The tool returns immediately with a stable child session handle. The child keeps its own chat, completion and failure notifications use the normal agent notifier, and the modeline/status bar shows how many background sub-agents are still running. Switch to the child with the normal agent session picker when you want to inspect the result.
+
 ### Inline diff review ✅
 
 When the agent edits a file, the diff appears in the preview pane immediately. Navigate hunks with `]c`/`[c`, accept with `y`, reject with `x`, bulk-accept with `Y`, bulk-reject with `X`. No context switching.

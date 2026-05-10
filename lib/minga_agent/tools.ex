@@ -64,7 +64,8 @@ defmodule MingaAgent.Tools do
   @type tools_opts :: [
           project_root: String.t(),
           changeset: pid() | nil,
-          fork_store: pid() | nil
+          fork_store: pid() | nil,
+          parent_session: pid() | nil
         ]
 
   @default_destructive_tools ~w(write_file edit_file multi_edit_file shell git_stage git_commit rename)
@@ -118,6 +119,7 @@ defmodule MingaAgent.Tools do
     root = Keyword.get(opts, :project_root, File.cwd!())
     cs = Keyword.get(opts, :changeset)
     fs = Keyword.get(opts, :fork_store)
+    parent_session = Keyword.get(opts, :parent_session)
     router_ctx = MingaAgent.ToolRouter.context(fs, cs)
 
     [
@@ -129,7 +131,7 @@ defmodule MingaAgent.Tools do
       find(root),
       grep(root),
       shell(root, router_ctx),
-      subagent(root),
+      subagent(root, parent_session),
       git_status(root),
       git_diff(root),
       git_log(root),
@@ -502,16 +504,16 @@ defmodule MingaAgent.Tools do
     )
   end
 
-  @spec subagent(String.t()) :: Tool.t()
-  defp subagent(root) do
+  @spec subagent(String.t(), pid() | nil) :: Tool.t()
+  defp subagent(root, parent_session) do
     Tool.new!(
       name: "subagent",
       description: """
-      Spawn a child agent to work on a subtask independently. The subagent
-      gets its own conversation, tool access, and runs in parallel with the
-      parent. Use this for independent subtasks that can be delegated:
-      refactoring a module, writing tests, updating docs, etc.
-      The subagent's final response text is returned as the tool result.
+      Spawn a child agent to work on a subtask. By default this is foreground:
+      the parent waits and receives the child agent's final response text.
+      Pass background: true for long-running independent work. Background mode
+      returns immediately with a stable session handle, keeps the child chat
+      available, and reports completion or failure through normal agent notifications.
       """,
       parameter_schema: %{
         "type" => "object",
@@ -524,12 +526,22 @@ defmodule MingaAgent.Tools do
             "type" => "string",
             "description" =>
               "Model to use for the subagent (e.g., \"anthropic:claude-sonnet-4-20250514\"). Defaults to the parent's model."
+          },
+          "background" => %{
+            "type" => "boolean",
+            "description" =>
+              "When true, return immediately with a stable child session handle instead of waiting for the final response. Defaults to false."
           }
         },
         "required" => ["task"]
       },
       callback: fn args ->
-        Subagent.execute(args["task"], project_root: root, model: args["model"])
+        Subagent.execute(args["task"],
+          project_root: root,
+          model: args["model"],
+          background: args["background"] == true,
+          parent_session: parent_session
+        )
       end
     )
   end

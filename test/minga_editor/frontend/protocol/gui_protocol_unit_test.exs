@@ -272,4 +272,82 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
       <<0x92, payload_len::16, _payload::binary-size(payload_len)>> = binary
     end
   end
+
+  describe "encode_gui_status_bar/1 background subagents" do
+    test "encodes background subagent count and label in buffer agent section" do
+      binary = ProtocolGUI.encode_gui_status_bar({:buffer, status_data()})
+      sections = status_sections(binary)
+
+      <<agent_status::8, count::16, label_len::16, label::binary-size(label_len)>> =
+        Map.fetch!(sections, 0x09)
+
+      assert agent_status == 1
+      assert count == 2
+      assert label == "session-3: tests"
+    end
+
+    test "encodes background subagent count and label in agent variant" do
+      data =
+        Map.merge(status_data(), %{
+          model_name: "Agent",
+          session_status: :thinking,
+          message_count: 4
+        })
+
+      binary = ProtocolGUI.encode_gui_status_bar({:agent, data})
+      sections = status_sections(binary)
+
+      <<model_len::8, _model::binary-size(model_len), 4::32, session_status::8, agent_status::8,
+        count::16, label_len::16, label::binary-size(label_len)>> = Map.fetch!(sections, 0x09)
+
+      assert session_status == 1
+      assert agent_status == 1
+      assert count == 2
+      assert label == "session-3: tests"
+    end
+  end
+
+  defp status_data do
+    %{
+      mode: :normal,
+      mode_state: Minga.Mode.initial_state(),
+      cursor_line: 0,
+      cursor_col: 0,
+      line_count: 1,
+      file_name: "test.ex",
+      filetype: :elixir,
+      dirty: false,
+      git_branch: nil,
+      git_diff_summary: nil,
+      diagnostic_counts: nil,
+      diagnostic_hint: nil,
+      lsp_status: :none,
+      parser_status: :available,
+      buf_index: 1,
+      buf_count: 1,
+      macro_recording: false,
+      agent_status: :thinking,
+      agent_theme_colors: nil,
+      background_subagent_count: 2,
+      active_background_subagent_label: "session-3: tests",
+      status_msg: nil
+    }
+  end
+
+  defp status_sections(<<0x76, count::8, rest::binary>>) do
+    parse_status_sections(rest, count, %{})
+  end
+
+  defp parse_status_sections(rest, 0, acc) do
+    assert rest == ""
+    acc
+  end
+
+  defp parse_status_sections(
+         <<id::8, len::16, payload::binary-size(len), rest::binary>>,
+         count,
+         acc
+       ) do
+    parse_status_sections(rest, count - 1, Map.put(acc, id, payload))
+  end
 end

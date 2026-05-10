@@ -40,6 +40,8 @@ struct StatusBarUpdate: Sendable {
     let iconColorB: UInt8
     let filename: String
     let diagnosticHint: String
+    let backgroundSubagentCount: UInt16
+    let backgroundSubagentLabel: String
 }
 
 @MainActor
@@ -77,6 +79,8 @@ final class StatusBarState {
     var iconColorB: UInt8 = 0
     var filename: String = ""
     var diagnosticHint: String = ""
+    var backgroundSubagentCount: UInt16 = 0
+    var backgroundSubagentLabel: String = ""
 
     /// Updates status bar properties, guarding each assignment with an
     /// equality check to prevent redundant `@Observable` notifications.
@@ -113,6 +117,8 @@ final class StatusBarState {
         if self.iconColorB != data.iconColorB { self.iconColorB = data.iconColorB }
         if self.filename != data.filename { self.filename = data.filename }
         if self.diagnosticHint != data.diagnosticHint { self.diagnosticHint = data.diagnosticHint }
+        if self.backgroundSubagentCount != data.backgroundSubagentCount { self.backgroundSubagentCount = data.backgroundSubagentCount }
+        if self.backgroundSubagentLabel != data.backgroundSubagentLabel { self.backgroundSubagentLabel = data.backgroundSubagentLabel }
     }
 
     var modeName: String {
@@ -135,6 +141,7 @@ final class StatusBarState {
     var isAgentWindow: Bool { contentKind == 1 }
     var isRecordingMacro: Bool { macroRecording > 0 }
     var hasGitDiffStats: Bool { gitAdded > 0 || gitModified > 0 || gitDeleted > 0 }
+    var hasRunningBackgroundSubagents: Bool { backgroundSubagentCount > 0 }
 
     /// The macro register character (a-z), or nil if not recording.
     var macroRegister: Character? {
@@ -284,6 +291,10 @@ struct StatusBarView: View {
             // Agent status (thinking/executing/error; hidden when idle)
             agentStatusIcon
 
+            if state.hasRunningBackgroundSubagents {
+                backgroundSubagentSegment
+            }
+
             // Git branch + diff stats
             if state.hasGit && !state.gitBranch.isEmpty {
                 gitSegment
@@ -321,6 +332,38 @@ struct StatusBarView: View {
         default: // idle: show nothing
             EmptyView()
         }
+    }
+
+    // MARK: - Background sub-agents
+
+    @ViewBuilder
+    private var backgroundSubagentSegment: some View {
+        Button(action: {
+            encoder?.sendExecuteCommand(name: "agent_session_switcher")
+        }) {
+            HStack(spacing: 3) {
+                Image(systemName: "person.2.wave.2.fill")
+                    .font(.system(size: 9, weight: .medium))
+                Text(backgroundSubagentText)
+                    .font(.system(size: 11))
+                    .lineLimit(1)
+            }
+            .foregroundStyle(theme.modelineBarFg.opacity(0.65))
+        }
+        .buttonStyle(.plain)
+        .help("Background sub-agents")
+        .padding(.horizontal, 6)
+        .onHover { isHovered in
+            if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+        }
+    }
+
+    private var backgroundSubagentText: String {
+        if state.backgroundSubagentLabel.isEmpty {
+            return "bg:\(state.backgroundSubagentCount)"
+        }
+
+        return "bg:\(state.backgroundSubagentCount) \(state.backgroundSubagentLabel)"
     }
 
     // MARK: - Git branch + diff stats

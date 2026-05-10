@@ -8,7 +8,7 @@ defmodule MingaEditor.Commands.InsertEntryTest do
   `KeyDispatch.guard_read_only/4` should keep the editor in :normal
   mode and emit the "Buffer is read-only" status message.
   """
-  use Minga.Test.EditingModelCase, async: true
+  use ExUnit.Case, async: true
 
   alias Minga.Buffer.Server, as: BufferServer
   alias MingaEditor.KeyDispatch

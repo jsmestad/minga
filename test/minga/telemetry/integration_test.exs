@@ -7,15 +7,13 @@ defmodule Minga.Telemetry.IntegrationTest do
   to send a real keystroke and assert telemetry events are emitted.
   """
 
-  use Minga.Test.EditingModelCase, async: false
+  # Attaches and detaches global telemetry handlers.
+  use ExUnit.Case, async: false
 
   alias Minga.Buffer.Server, as: BufferServer
   alias MingaEditor
 
-  # async: false because we attach/detach global telemetry handlers.
-
   setup do
-    # Pin vim mode (j = :move_down requires vim normal mode dispatch)
     self = self()
 
     # Attach a test handler that captures all minga telemetry stop events

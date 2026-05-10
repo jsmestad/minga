@@ -205,6 +205,7 @@ defmodule MingaEditor do
     Minga.Events.subscribe(:log_message, events_registry)
     Minga.Events.subscribe(:face_overrides_changed, events_registry)
     Minga.Events.subscribe(:agent_session_stopped, events_registry)
+    Minga.Events.subscribe(:background_subagent_started, events_registry)
     Minga.Events.subscribe(:load_user_themes, events_registry)
     Minga.Events.subscribe(:extension_updates_available, events_registry)
 
@@ -698,7 +699,7 @@ defmodule MingaEditor do
         state.shell.on_agent_event(state.shell_state, state.workspace, session_pid, event)
 
       state = %{state | shell_state: shell_state, workspace: workspace}
-      {:noreply, state}
+      {:noreply, schedule_render(state, 16)}
     end
   end
 
@@ -864,6 +865,25 @@ defmodule MingaEditor do
       end
 
     %{state | face_override_registries: registries}
+  end
+
+  defp dispatch_minga_event(
+         state,
+         :background_subagent_started,
+         %MingaAgent.Subagent.Handle{} = handle,
+         _msg
+       ) do
+    MingaAgent.Session.subscribe(handle.pid, self())
+
+    {shell_state, workspace} =
+      state.shell.handle_event(
+        state.shell_state,
+        state.workspace,
+        {:background_subagent_started, handle}
+      )
+
+    state = %{state | shell_state: shell_state, workspace: workspace}
+    schedule_render(state, 16)
   end
 
   defp dispatch_minga_event(
@@ -1129,6 +1149,12 @@ defmodule MingaEditor do
     else
       state
     end
+  end
+
+  defp apply_effect(state, {:rebuild_agent_session, %MingaEditor.State.Tab{kind: :agent} = tab}) do
+    state
+    |> EditorState.rebuild_agent_from_session(tab)
+    |> AgentLifecycle.sync_buffer()
   end
 
   defp apply_effect(state, {:rebuild_agent_session, tab}),

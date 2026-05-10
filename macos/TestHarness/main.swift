@@ -97,7 +97,7 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
     case .guiBreadcrumb(let segments):
         return ["type": "gui_breadcrumb", "segments": segments]
 
-    case .guiStatusBar(let contentKind, let mode, let cursorLine, let cursorCol, let lineCount, let flags, let lspStatus, let gitBranch, let message, let filetype, let errorCount, let warningCount, let modelName, let messageCount, let sessionStatus, let infoCount, let hintCount, let macroRecording, let parserStatus, let agentStatus, let gitAdded, let gitModified, let gitDeleted, let icon, let iconColorR, let iconColorG, let iconColorB, let filename, let diagnosticHint):
+    case .guiStatusBar(let contentKind, let mode, let cursorLine, let cursorCol, let lineCount, let flags, let lspStatus, let gitBranch, let message, let filetype, let errorCount, let warningCount, let modelName, let messageCount, let sessionStatus, let infoCount, let hintCount, let macroRecording, let parserStatus, let agentStatus, let gitAdded, let gitModified, let gitDeleted, let icon, let iconColorR, let iconColorG, let iconColorB, let filename, let diagnosticHint, let backgroundSubagentCount, let backgroundSubagentLabel):
         var result: [String: Any] = [:]
         result["type"] = "gui_status_bar"
         result["content_kind"] = Int(contentKind)
@@ -129,6 +129,8 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
         result["icon_color_b"] = Int(iconColorB)
         result["filename"] = filename
         result["diagnostic_hint"] = diagnosticHint
+        result["background_subagent_count"] = Int(backgroundSubagentCount)
+        result["background_subagent_label"] = backgroundSubagentLabel
         return result
 
     case .guiPicker(let visible, let selectedIndex, let filteredCount, let totalCount, let title, let query, let hasPreview, let items, let actionMenu):

@@ -45,6 +45,7 @@ defmodule MingaEditor.Renderer.Server do
 
   use GenServer
 
+  alias Minga.Telemetry
   alias MingaEditor.RenderPipeline
   alias MingaEditor.RenderPipeline.Input
 
@@ -114,7 +115,7 @@ defmodule MingaEditor.Renderer.Server do
     # In-flight render is still going. Drop the previous pending and replace
     # with this snapshot. Most-recent-wins.
     if state.pending do
-      :telemetry.execute([:minga, :render, :coalesced], %{count: 1}, %{
+      Telemetry.execute([:minga, :render, :coalesced], %{count: 1}, %{
         dropped_seq: elem(state.pending, 1),
         new_seq: seq
       })
@@ -132,15 +133,15 @@ defmodule MingaEditor.Renderer.Server do
   @spec handle_info(:do_render, t()) :: {:noreply, t()}
   def handle_info(:do_render, %__MODULE__{in_flight: {snap, seq, pushed_at}} = state) do
     output =
-      :telemetry.span(
+      Telemetry.span(
         [:minga, :render, :pipeline],
         %{frame_seq: seq},
-        fn -> {RenderPipeline.run(snap), %{}} end
+        fn -> RenderPipeline.run(snap) end
       )
 
     emit_complete_at = monotonic_now()
 
-    :telemetry.execute(
+    Telemetry.execute(
       [:minga, :render, :frame_latency],
       %{microseconds: emit_complete_at - pushed_at},
       %{frame_seq: seq}

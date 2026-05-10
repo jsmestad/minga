@@ -168,7 +168,8 @@ struct StatusBarViewViewTests {
             modelName: "", messageCount: 0, sessionStatus: 0,
             infoCount: 0, hintCount: 0, macroRecording: 0, parserStatus: 0, agentStatus: 0,
             gitAdded: 0, gitModified: 0, gitDeleted: 0,
-            icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: "", diagnosticHint: ""
+            icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: "", diagnosticHint: "",
+            backgroundSubagentCount: 0, backgroundSubagentLabel: ""
         ))
 
         let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: nil)
@@ -207,7 +208,8 @@ struct StatusBarViewViewTests {
             modelName: "claude-3-5-sonnet", messageCount: 7, sessionStatus: 0,
             infoCount: 0, hintCount: 0, macroRecording: 0, parserStatus: 0, agentStatus: 0,
             gitAdded: 0, gitModified: 0, gitDeleted: 0,
-            icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: "", diagnosticHint: ""
+            icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: "", diagnosticHint: "",
+            backgroundSubagentCount: 0, backgroundSubagentLabel: ""
         ))
 
         let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: nil)
@@ -231,7 +233,8 @@ struct StatusBarViewViewTests {
             modelName: "", messageCount: 0, sessionStatus: 0,
             infoCount: 0, hintCount: 0, macroRecording: 0, parserStatus: 0, agentStatus: 0,
             gitAdded: 0, gitModified: 0, gitDeleted: 0,
-            icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: "", diagnosticHint: ""
+            icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: "", diagnosticHint: "",
+            backgroundSubagentCount: 0, backgroundSubagentLabel: ""
         ))
 
         let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: nil)
@@ -252,7 +255,8 @@ struct StatusBarViewViewTests {
             modelName: "", messageCount: 0, sessionStatus: 0,
             infoCount: 0, hintCount: 0, macroRecording: 0, parserStatus: 0, agentStatus: 0,
             gitAdded: 0, gitModified: 0, gitDeleted: 0,
-            icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: "", diagnosticHint: ""
+            icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: "", diagnosticHint: "",
+            backgroundSubagentCount: 0, backgroundSubagentLabel: ""
         ))
 
         let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: nil)
@@ -262,6 +266,51 @@ struct StatusBarViewViewTests {
 
         #expect(strings.contains("3"))
         #expect(strings.contains("7"))
+    }
+
+    @Test("Background subagent segment shows count and label")
+    @MainActor func backgroundSubagentsShown() throws {
+        let state = StatusBarState()
+        state.update(from: StatusBarUpdate(
+            contentKind: 0, mode: 0, cursorLine: 1, cursorCol: 1,
+            lineCount: 1, flags: 0, lspStatus: 0, gitBranch: "",
+            message: "", filetype: "", errorCount: 0, warningCount: 0,
+            modelName: "", messageCount: 0, sessionStatus: 0,
+            infoCount: 0, hintCount: 0, macroRecording: 0, parserStatus: 0, agentStatus: 0,
+            gitAdded: 0, gitModified: 0, gitDeleted: 0,
+            icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: "", diagnosticHint: "",
+            backgroundSubagentCount: 2, backgroundSubagentLabel: "session-2: tests"
+        ))
+
+        let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: nil)
+        let body = try sut.inspect()
+        let texts = body.findAll(ViewInspectorQuery.text)
+        let strings = texts.compactMap { try? $0.string() }
+
+        #expect(strings.contains("bg:2 session-2: tests"))
+    }
+
+    @Test("Background subagent segment is hidden when count is zero")
+    @MainActor func backgroundSubagentsHidden() throws {
+        let state = StatusBarState()
+        state.update(from: StatusBarUpdate(
+            contentKind: 0, mode: 0, cursorLine: 1, cursorCol: 1,
+            lineCount: 1, flags: 0, lspStatus: 0, gitBranch: "",
+            message: "", filetype: "", errorCount: 0, warningCount: 0,
+            modelName: "", messageCount: 0, sessionStatus: 0,
+            infoCount: 0, hintCount: 0, macroRecording: 0, parserStatus: 0, agentStatus: 0,
+            gitAdded: 0, gitModified: 0, gitDeleted: 0,
+            icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: "", diagnosticHint: "",
+            backgroundSubagentCount: 0, backgroundSubagentLabel: "session-2: hidden"
+        ))
+
+        let sut = StatusBarView(state: state, theme: ThemeColors(), encoder: nil)
+        let body = try sut.inspect()
+        let texts = body.findAll(ViewInspectorQuery.text)
+        let strings = texts.compactMap { try? $0.string() }
+
+        #expect(!strings.contains("bg:0 session-2: hidden"))
+        #expect(!strings.contains("session-2: hidden"))
     }
 }
 

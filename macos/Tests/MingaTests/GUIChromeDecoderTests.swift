@@ -387,7 +387,9 @@ struct GUIStatusBarDecoderTests {
         recording.append(0) // macroRecording
 
         var agent = Data()
-        agent.append(0) // agentStatus (buffer variant: just 1 byte)
+        agent.append(0) // agentStatus
+        appendU16(&agent, 2) // backgroundSubagentCount
+        appendString16(&agent, "session-2: tests") // backgroundSubagentLabel
 
         let sections = [
             buildSection(SECTION_IDENTITY, identity),
@@ -416,7 +418,8 @@ struct GUIStatusBarDecoderTests {
                                   let infoCount, let hintCount, let macroRecording,
                                   let parserStatus, let agentStatus,
                                   let gitAdded, let gitModified, let gitDeleted,
-                                  _, _, _, _, let filename, _) = cmd else {
+                                  _, _, _, _, let filename, _, let backgroundSubagentCount,
+                                  let backgroundSubagentLabel) = cmd else {
             Issue.record("Expected .guiStatusBar"); return
         }
 
@@ -441,6 +444,8 @@ struct GUIStatusBarDecoderTests {
         #expect(gitModified == 3)
         #expect(gitDeleted == 1)
         #expect(filename == "editor.ex")
+        #expect(backgroundSubagentCount == 2)
+        #expect(backgroundSubagentLabel == "session-2: tests")
     }
 
     @Test("Decode gui_status_bar agent variant (sectioned format)")
@@ -484,12 +489,14 @@ struct GUIStatusBarDecoderTests {
         var recording = Data()
         recording.append(0)
 
-        // Agent section: model_name_len(1) + model_name + message_count(4) + session_status(1) + agent_status(1)
+        // Agent section: model_name_len(1) + model_name + message_count(4) + session_status(1) + agent_status(1) + background count/label
         var agent = Data()
         appendString8(&agent, "claude-3-5-sonnet")
         appendU32(&agent, 12) // messageCount
         agent.append(1) // sessionStatus
         agent.append(1) // agentStatus
+        appendU16(&agent, 3) // backgroundSubagentCount
+        appendString16(&agent, "session-3: agent tests") // backgroundSubagentLabel
 
         let sections = [
             buildSection(SECTION_IDENTITY, identity),
@@ -511,7 +518,7 @@ struct GUIStatusBarDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiStatusBar(let contentKind, _, let cursorLine, _, let lineCount, _, _, let gitBranch, _, let filetype, let errorCount, _, let modelName, let messageCount, let sessionStatus, _, let hintCount, _, _, let agentStatus, let gitAdded, let gitModified, _, _, _, _, _, let filename, _) = cmd else {
+        guard case .guiStatusBar(let contentKind, _, let cursorLine, _, let lineCount, _, _, let gitBranch, _, let filetype, let errorCount, _, let modelName, let messageCount, let sessionStatus, _, let hintCount, _, _, let agentStatus, let gitAdded, let gitModified, _, _, _, _, _, let filename, _, let backgroundSubagentCount, let backgroundSubagentLabel) = cmd else {
             Issue.record("Expected .guiStatusBar"); return
         }
 
@@ -529,6 +536,8 @@ struct GUIStatusBarDecoderTests {
         #expect(gitAdded == 3)
         #expect(gitModified == 2)
         #expect(filename == "editor.ex")
+        #expect(backgroundSubagentCount == 3)
+        #expect(backgroundSubagentLabel == "session-3: agent tests")
     }
 
     @Test("Unknown sections are skipped (forward compatibility)")
@@ -558,7 +567,7 @@ struct GUIStatusBarDecoderTests {
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiStatusBar(_, _, let cursorLine, let cursorCol, let lineCount, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = cmd else {
+        guard case .guiStatusBar(_, _, let cursorLine, let cursorCol, let lineCount, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = cmd else {
             Issue.record("Expected .guiStatusBar"); return
         }
 
@@ -580,7 +589,7 @@ struct GUIStatusBarDecoderTests {
 
         let (cmd, _) = try decodeCommand(data: data, offset: 0)
 
-        guard case .guiStatusBar(let contentKind, let mode, let cursorLine, _, _, _, _, let gitBranch, _, _, let errorCount, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = cmd else {
+        guard case .guiStatusBar(let contentKind, let mode, let cursorLine, _, _, _, _, let gitBranch, _, _, let errorCount, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = cmd else {
             Issue.record("Expected .guiStatusBar"); return
         }
 
