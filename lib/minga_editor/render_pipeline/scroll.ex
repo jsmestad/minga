@@ -430,8 +430,11 @@ defmodule MingaEditor.RenderPipeline.Scroll do
   defp cursor_line_text(lines, cursor_line, first_line) do
     index = cursor_line - first_line
 
-    if index >= 0 and index < length(lines) do
-      Enum.at(lines, index)
+    if index >= 0 do
+      case Enum.fetch(lines, index) do
+        {:ok, line} -> line
+        :error -> ""
+      end
     else
       ""
     end
