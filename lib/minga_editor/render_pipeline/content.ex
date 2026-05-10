@@ -109,6 +109,7 @@ defmodule MingaEditor.RenderPipeline.Content do
         gutter_w: gutter_w,
         content_w: content_w,
         has_sign_column: has_sign_column,
+        file_path: snapshot.file_path,
         is_active: is_active,
         is_gui: MingaEditor.Frontend.gui?(state.capabilities)
       })

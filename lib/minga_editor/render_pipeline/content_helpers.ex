@@ -149,7 +149,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
       is_gui: is_gui,
       has_sign_column: has_sign_column,
       decorations: decorations,
-      diagnostic_signs: diagnostic_signs_for_window(window),
+      diagnostic_signs: diagnostic_signs_for_path(Map.get(params, :file_path)),
       git_signs: git_signs_for_window(window),
       gutter_colors: state.theme.gutter,
       git_colors: state.theme.git
@@ -966,8 +966,16 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
   def diagnostic_signs_for_window(%{buffer: buf}) when is_pid(buf) do
     case Buffer.file_path(buf) do
       nil -> %{}
-      path -> Diagnostics.severity_by_line(SyncServer.path_to_uri(path))
+      path -> diagnostic_signs_for_path(path)
     end
+  end
+
+  @doc "Returns diagnostic signs for a buffer path."
+  @spec diagnostic_signs_for_path(String.t() | nil) :: %{non_neg_integer() => atom()}
+  def diagnostic_signs_for_path(nil), do: %{}
+
+  def diagnostic_signs_for_path(path) when is_binary(path) do
+    Diagnostics.severity_by_line(SyncServer.path_to_uri(path))
   end
 
   # ── Visual selection ───────────────────────────────────────────────────────
