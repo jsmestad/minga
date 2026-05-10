@@ -948,7 +948,7 @@ pub const Highlighter = struct {
         }
 
         // Sort by (start_byte ASC, layer DESC, pattern_index DESC, end_byte ASC).
-        std.mem.sortUnstable(Span, spans.items, {}, spanLessThan);
+        if (!spansAreSorted(spans.items)) std.mem.sortUnstable(Span, spans.items, {}, spanLessThan);
         self.last_highlight_span_count = spans.items.len;
         self.last_highlight_conceal_count = conceals.items.len;
 
@@ -1068,7 +1068,7 @@ pub const Highlighter = struct {
         if (content_capture_id == null) {
             // Injection query has no @injection.content — nothing to inject.
             // Return plain highlight result.
-            std.mem.sortUnstable(Span, spans.items, {}, spanLessThan);
+            if (!spansAreSorted(spans.items)) std.mem.sortUnstable(Span, spans.items, {}, spanLessThan);
             self.last_highlight_span_count = spans.items.len;
             self.last_highlight_conceal_count = conceals.items.len;
             const names = try alloc.alloc([]const u8, name_list.items.len);
@@ -1308,7 +1308,7 @@ pub const Highlighter = struct {
         // All spans (outer layer=0 + injection layer=1) are sent to the BEAM
         // with full metadata. The BEAM-side innermost-wins sweep resolves
         // overlaps using (layer DESC, width ASC, pattern_index DESC).
-        std.mem.sortUnstable(Span, spans.items, {}, spanLessThan);
+        if (!spansAreSorted(spans.items)) std.mem.sortUnstable(Span, spans.items, {}, spanLessThan);
         self.last_highlight_span_count = spans.items.len;
         self.last_highlight_conceal_count = conceals.items.len;
 
@@ -1432,6 +1432,15 @@ fn findCaptureId(query: ?*c.TSQuery, target: []const u8) ?u32 {
         if (std.mem.eql(u8, name_ptr[0..length], target)) return @intCast(i);
     }
     return null;
+}
+
+fn spansAreSorted(spans: []const Span) bool {
+    if (spans.len < 2) return true;
+    var i: usize = 1;
+    while (i < spans.len) : (i += 1) {
+        if (spanLessThan({}, spans[i], spans[i - 1])) return false;
+    }
+    return true;
 }
 
 /// Comparator for highlight spans.
