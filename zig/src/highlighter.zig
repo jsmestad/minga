@@ -1471,17 +1471,21 @@ pub const Highlighter = struct {
             }
         }
 
+        const cached = self.cached_highlight_spans;
+        var remove_start = lowerBoundSpanStart(cached, old_start_byte);
+        while (remove_start > 0 and cached[remove_start - 1].end_byte > old_start_byte) : (remove_start -= 1) {}
+        var remove_end = remove_start;
+        while (remove_end < cached.len and cached[remove_end].start_byte < old_end_byte) : (remove_end += 1) {}
+
         var merged: std.ArrayListUnmanaged(Span) = .empty;
         errdefer merged.deinit(alloc);
-        try merged.ensureTotalCapacity(alloc, self.cached_highlight_spans.len + changed_spans.items.len);
-        for (self.cached_highlight_spans) |span| {
-            if (span.end_byte <= old_start_byte) {
-                merged.appendAssumeCapacity(span);
-            } else if (span.start_byte >= old_end_byte) {
-                merged.appendAssumeCapacity(shiftSpan(span, self.changed_byte_delta));
-            }
-        }
+        const merged_len = cached.len - (remove_end - remove_start) + changed_spans.items.len;
+        try merged.ensureTotalCapacity(alloc, merged_len);
+        try merged.appendSlice(alloc, cached[0..remove_start]);
         try merged.appendSlice(alloc, changed_spans.items);
+        for (cached[remove_end..]) |span| {
+            merged.appendAssumeCapacity(shiftSpan(span, self.changed_byte_delta));
+        }
         if (!spansAreSorted(merged.items)) std.mem.sortUnstable(Span, merged.items, {}, spanLessThan);
         self.last_highlight_span_count = merged.items.len;
         self.last_highlight_conceal_count = conceals.items.len;
@@ -1612,6 +1616,20 @@ fn findCaptureId(query: ?*c.TSQuery, target: []const u8) ?u32 {
         if (std.mem.eql(u8, name_ptr[0..length], target)) return @intCast(i);
     }
     return null;
+}
+
+fn lowerBoundSpanStart(spans: []const Span, start_byte: u32) usize {
+    var low: usize = 0;
+    var high: usize = spans.len;
+    while (low < high) {
+        const mid = low + (high - low) / 2;
+        if (spans[mid].start_byte < start_byte) {
+            low = mid + 1;
+        } else {
+            high = mid;
+        }
+    }
+    return low;
 }
 
 fn shiftSpan(span: Span, delta: i64) Span {
