@@ -56,6 +56,14 @@ defmodule MingaEditor.State.FileTree do
   def editing?(%__MODULE__{editing: %{}}), do: true
   def editing?(%__MODULE__{}), do: false
 
+  @doc "Marks the file tree as focused."
+  @spec focus(t()) :: t()
+  def focus(%__MODULE__{} = ft), do: %{ft | focused: true}
+
+  @doc "Marks the file tree as unfocused."
+  @spec unfocus(t()) :: t()
+  def unfocus(%__MODULE__{} = ft), do: %{ft | focused: false}
+
   @doc "Returns the tree width, or 0 if the tree is not open."
   @spec width(t()) :: non_neg_integer()
   def width(%__MODULE__{tree: nil}), do: 0

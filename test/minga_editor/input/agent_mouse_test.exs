@@ -18,6 +18,7 @@ defmodule MingaEditor.Input.AgentMouseTest do
   alias MingaEditor.Window
   alias MingaEditor.Window.Content
   alias MingaEditor.Input.AgentMouse
+  alias MingaEditor.Input.Router
   alias Minga.Mode
 
   # ── Test helpers ───────────────────────────────────────────────────────────
@@ -59,8 +60,8 @@ defmodule MingaEditor.Input.AgentMouseTest do
     }
   end
 
-  defp with_agent_split(state) do
-    {:ok, agent_buf} = BufferServer.start_link(content: "")
+  defp with_agent_split(state, agent_content \\ "") do
+    {:ok, agent_buf} = BufferServer.start_link(content: agent_content)
 
     state =
       AgentAccess.update_agent(state, fn agent ->
@@ -145,6 +146,26 @@ defmodule MingaEditor.Input.AgentMouseTest do
 
       # Should not crash and should unpin
       assert %EditorState{} = new_state
+    end
+
+    test "focus-tree routing scrolls inactive agent chat window without moving focus" do
+      agent_content = Enum.map_join(1..80, "\n", &"agent line #{&1}")
+      state = base_state() |> with_agent_split(agent_content) |> Layout.put()
+      active_id = state.workspace.windows.active
+
+      {agent_win_id, _agent_window} =
+        Enum.find(state.workspace.windows.map, fn {_id, window} ->
+          Content.agent_chat?(window.content)
+        end)
+
+      refute active_id == agent_win_id
+      {row, col, _w, _h} = agent_chat_window_rect(state)
+      before_top = Map.fetch!(state.workspace.windows.map, agent_win_id).viewport.top
+
+      new_state = Router.dispatch_mouse(state, row + 2, col + 2, :wheel_down, 0, :press, 1)
+
+      assert new_state.workspace.windows.active == active_id
+      assert Map.fetch!(new_state.workspace.windows.map, agent_win_id).viewport.top > before_top
     end
 
     test "scroll over file viewer sidebar scrolls preview", %{state: state, rect: rect} do

@@ -10,13 +10,45 @@ defmodule MingaEditor.RenderPipelineTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Server, as: BufferServer
+  alias Minga.Editing.Completion
+  alias MingaEditor.FocusTree
   alias MingaEditor.Layout
   alias MingaEditor.RenderPipeline
   alias MingaEditor.RenderPipeline.Scroll
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.ModalOverlay
+  alias MingaEditor.State.ModalOverlay.Completion, as: CompletionPayload
   alias MingaEditor.Viewport
 
   import MingaEditor.RenderPipeline.TestHelpers
+
+  @spec completion_item(String.t()) :: Completion.item()
+  defp completion_item(label) do
+    %{
+      label: label,
+      kind: :text,
+      insert_text: label,
+      filter_text: label,
+      detail: "",
+      documentation: "",
+      sort_text: label,
+      text_edit: nil,
+      raw: nil
+    }
+  end
+
+  @spec find_focus_node(FocusTree.t() | nil, atom()) :: MingaEditor.FocusTree.Node.t() | nil
+  defp find_focus_node(nil, _content_type), do: nil
+
+  defp find_focus_node(
+         %MingaEditor.FocusTree.Node{content_type: content_type} = node,
+         content_type
+       ),
+       do: node
+
+  defp find_focus_node(%MingaEditor.FocusTree.Node{children: children}, content_type) do
+    Enum.find_value(children, &find_focus_node(&1, content_type))
+  end
 
   # ── Stage 1: Invalidation ─────────────────────────────────────────────────
 
@@ -82,6 +114,32 @@ defmodule MingaEditor.RenderPipelineTest do
         assert %EditorState{} = result
         assert_receive {:"$gen_cast", {:send_commands, _}}
       end
+    end
+
+    test "focus tree completion overlay uses the post-scroll viewport" do
+      state = base_state(content: long_content(80), rows: 10, cols: 80)
+      buffer = state.workspace.buffers.active
+      BufferServer.move_to(buffer, {60, 0})
+
+      completion = Completion.new([completion_item("alpha"), completion_item("beta")], {60, 0})
+
+      state =
+        ModalOverlay.open(
+          state,
+          :completion,
+          CompletionPayload.new(:test, completion: completion)
+        )
+
+      result = run_pipeline(state)
+      window = Map.fetch!(result.workspace.windows.map, result.workspace.windows.active)
+      node = find_focus_node(result.focus_tree, :completion_menu)
+
+      assert window.viewport.top > 0
+      assert node != nil
+      {row, col, _width, height} = node.rect
+      assert row >= 0
+      assert row + height <= result.terminal_viewport.rows
+      assert FocusTree.hit_test(result.focus_tree, row, col).content_type == :completion_menu
     end
   end
 

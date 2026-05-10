@@ -378,7 +378,7 @@ defmodule MingaEditor.RenderPipeline.Content do
     # a different viewport (e.g., snapped to bottom when pinned), causing
     # clicks to land on wrong buffer lines and visual selections to appear
     # off-screen.
-    window = %{window | viewport: viewport}
+    window = Window.set_viewport(window, viewport)
 
     visible_rows = Viewport.content_rows(viewport)
     {first_line, _} = Viewport.visible_range(viewport)

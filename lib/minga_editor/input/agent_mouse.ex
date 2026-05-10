@@ -28,11 +28,12 @@ defmodule MingaEditor.Input.AgentMouse do
   alias MingaEditor.Agent.View.PromptRenderer
   alias MingaEditor.Agent.ViewContext
   alias Minga.Config
+  alias MingaEditor.FocusTree
+  alias MingaEditor.FocusTree.Node, as: FocusNode
   alias MingaEditor.Layout
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.AgentAccess
-  alias MingaEditor.Window.Content
-  alias MingaEditor.WindowTree
+  alias MingaEditor.Window
 
   # Mouse event fields grouped for dispatch without exceeding max arity.
   @typep mouse_event :: %{
@@ -61,63 +62,70 @@ defmodule MingaEditor.Input.AgentMouse do
         ) :: MingaEditor.Input.Handler.result()
 
   def handle_mouse(state, row, col, button, mods, event_type, click_count) do
-    layout = Layout.get(state)
-    evt = %{button: button, mods: mods, event_type: event_type, click_count: click_count}
+    case routed_agent_node(state, row, col, button) do
+      %FocusNode{} = node ->
+        handle_mouse_at_node(state, node, row, col, button, mods, event_type, click_count)
 
-    case identify_agent_region(state, layout, row, col) do
-      {:agent_chat_window, win_id} ->
-        dispatch_window(state, layout, win_id, row, col, evt)
-
-      {:agent_panel, panel_rect} ->
-        {:handled, dispatch_panel(state, panel_rect, row, col, evt)}
-
-      :not_agent ->
+      nil ->
         {:passthrough, state}
     end
   end
 
-  # ── Region identification ──────────────────────────────────────────────────
-
-  @spec identify_agent_region(EditorState.t(), Layout.t(), integer(), integer()) ::
-          {:agent_chat_window, pos_integer()}
-          | {:agent_panel, Layout.rect()}
-          | :not_agent
-
-  defp identify_agent_region(state, layout, row, col) do
-    case find_agent_chat_window_at(state, layout, row, col) do
-      {:ok, win_id} ->
-        {:agent_chat_window, win_id}
-
-      :not_found ->
-        case layout.agent_panel do
-          {pr, pc, pw, ph} when row >= pr and row < pr + ph and col >= pc and col < pc + pw ->
-            {:agent_panel, {pr, pc, pw, ph}}
-
-          _ ->
-            :not_agent
-        end
-    end
+  @impl true
+  @spec handle_mouse_at_node(
+          state(),
+          FocusNode.t(),
+          integer(),
+          integer(),
+          atom(),
+          non_neg_integer(),
+          atom(),
+          pos_integer()
+        ) :: MingaEditor.Input.Handler.result()
+  def handle_mouse_at_node(
+        state,
+        %FocusNode{content_type: :agent_panel, rect: panel_rect},
+        row,
+        col,
+        button,
+        mods,
+        event_type,
+        click_count
+      ) do
+    evt = %{button: button, mods: mods, event_type: event_type, click_count: click_count}
+    {:handled, dispatch_panel(state, panel_rect, row, col, evt)}
   end
 
-  @spec find_agent_chat_window_at(EditorState.t(), Layout.t(), integer(), integer()) ::
-          {:ok, pos_integer()} | :not_found
-  defp find_agent_chat_window_at(%{workspace: %{windows: %{tree: nil}}}, _layout, _row, _col),
-    do: :not_found
+  def handle_mouse_at_node(
+        state,
+        %FocusNode{content_type: :agent_chat_content, ref: win_id},
+        row,
+        col,
+        button,
+        mods,
+        event_type,
+        click_count
+      )
+      when is_integer(win_id) and win_id > 0 do
+    layout = Layout.get(state)
+    evt = %{button: button, mods: mods, event_type: event_type, click_count: click_count}
+    dispatch_window(state, layout, win_id, row, col, evt)
+  end
 
-  defp find_agent_chat_window_at(state, layout, row, col) do
-    case WindowTree.window_at(state.workspace.windows.tree, layout.editor_area, row, col) do
-      {:ok, win_id, _rect} ->
-        window = Map.get(state.workspace.windows.map, win_id)
+  def handle_mouse_at_node(state, _node, _row, _col, _button, _mods, _event_type, _click_count) do
+    {:passthrough, state}
+  end
 
-        if window != nil and Content.agent_chat?(window.content) do
-          {:ok, win_id}
-        else
-          :not_found
-        end
+  @spec routed_agent_node(EditorState.t(), integer(), integer(), atom()) :: FocusNode.t() | nil
+  defp routed_agent_node(state, row, col, button) do
+    tree = FocusTree.from_state(state)
 
-      :error ->
-        :not_found
-    end
+    path =
+      if button in [:wheel_down, :wheel_up],
+        do: FocusTree.scroll_path(tree, row, col),
+        else: FocusTree.hit_path(tree, row, col)
+
+    Enum.find(path, &(&1.handler == __MODULE__))
   end
 
   # ── Agent chat window (split pane) dispatch ────────────────────────────────
@@ -146,7 +154,7 @@ defmodule MingaEditor.Input.AgentMouse do
 
     if col < cc + chat_width do
       # Chat area scroll: unpin and passthrough to Editor.Mouse
-      state = unpin_agent_chat_window(state)
+      state = unpin_agent_chat_window(state, win_id)
       {:passthrough, state}
     else
       # Preview area scroll: handled here (unique)
@@ -246,15 +254,9 @@ defmodule MingaEditor.Input.AgentMouse do
     rect
   end
 
-  @spec unpin_agent_chat_window(EditorState.t()) :: EditorState.t()
-  defp unpin_agent_chat_window(state) do
-    case EditorState.find_agent_chat_window(state) do
-      nil ->
-        state
-
-      {win_id, _window} ->
-        EditorState.update_window(state, win_id, fn w -> %{w | pinned: false} end)
-    end
+  @spec unpin_agent_chat_window(EditorState.t(), pos_integer()) :: EditorState.t()
+  defp unpin_agent_chat_window(state, win_id) do
+    EditorState.update_window(state, win_id, &Window.set_pinned(&1, false))
   end
 
   # Side panel chat scroll: updates UIState.scroll (used by the panel

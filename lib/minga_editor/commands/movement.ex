@@ -680,7 +680,7 @@ defmodule MingaEditor.Commands.Movement do
   defp maybe_repin_agent_chat(state) do
     case EditorState.active_window_struct(state) do
       %Window{id: win_id, content: {:agent_chat, _}} ->
-        EditorState.update_window(state, win_id, fn w -> %{w | pinned: true} end)
+        EditorState.update_window(state, win_id, &Window.set_pinned(&1, true))
 
       _ ->
         state

@@ -157,7 +157,7 @@ defmodule MingaEditor.MouseMultiClickTest do
           "a very long line that extends beyond the viewport width for testing horizontal scroll"
         )
 
-      send_mouse(editor, 0, 0, :wheel_right, :press)
+      send_mouse(editor, @content_row, @gutter, :wheel_right, :press)
 
       vp = active_window_viewport(editor)
       assert vp.left == 6
@@ -169,8 +169,8 @@ defmodule MingaEditor.MouseMultiClickTest do
           "a very long line that extends beyond the viewport width for testing horizontal scroll"
         )
 
-      send_mouse(editor, 0, 0, :wheel_right, :press)
-      send_mouse(editor, 0, 0, :wheel_left, :press)
+      send_mouse(editor, @content_row, @gutter, :wheel_right, :press)
+      send_mouse(editor, @content_row, @gutter, :wheel_left, :press)
 
       vp = active_window_viewport(editor)
       assert vp.left == 0
@@ -178,7 +178,7 @@ defmodule MingaEditor.MouseMultiClickTest do
 
     test "wheel_left doesn't go negative" do
       {editor, _buffer} = start_editor("hello")
-      send_mouse(editor, 0, 0, :wheel_left, :press)
+      send_mouse(editor, @content_row, @gutter, :wheel_left, :press)
 
       vp = active_window_viewport(editor)
       assert vp.left == 0

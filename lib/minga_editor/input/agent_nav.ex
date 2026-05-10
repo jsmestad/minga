@@ -35,6 +35,7 @@ defmodule MingaEditor.Input.AgentNav do
   alias Minga.Buffer
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.AgentAccess
+  alias MingaEditor.Window
 
   @impl true
   @spec handle_key(state(), non_neg_integer(), non_neg_integer()) ::
@@ -169,7 +170,7 @@ defmodule MingaEditor.Input.AgentNav do
         state
 
       {win_id, _window} ->
-        EditorState.update_window(state, win_id, fn w -> %{w | pinned: false} end)
+        EditorState.update_window(state, win_id, &Window.set_pinned(&1, false))
     end
   end
 end

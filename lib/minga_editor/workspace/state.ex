@@ -221,6 +221,12 @@ defmodule MingaEditor.Workspace.State do
     %{wspace | keymap_scope: scope}
   end
 
+  @doc "Replaces the file-tree sub-struct."
+  @spec set_file_tree(t(), FileTreeState.t()) :: t()
+  def set_file_tree(%__MODULE__{} = wspace, %FileTreeState{} = file_tree) do
+    %{wspace | file_tree: file_tree}
+  end
+
   @doc "Updates the highlighting sub-struct."
   @spec set_highlight(t(), Highlighting.t()) :: t()
   def set_highlight(%__MODULE__{} = wspace, highlight) do

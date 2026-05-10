@@ -32,10 +32,12 @@ defmodule MingaEditor.Mouse do
   alias Minga.Core.Decorations
   alias Minga.Core.Unicode
   alias MingaEditor.DisplayMap
+  alias MingaEditor.FocusTree.Node, as: FocusNode
   alias MingaEditor.FoldMap
   alias MingaEditor.Layout
   alias MingaEditor.Renderer.Gutter
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Mouse, as: MouseState
   alias MingaEditor.Workspace.State, as: WorkspaceState
   alias MingaEditor.State.WhichKey, as: WhichKeyState
@@ -59,6 +61,36 @@ defmodule MingaEditor.Mouse do
 
   @typedoc "Internal editor state."
   @type state :: EditorState.t()
+
+  @doc "Dispatches a mouse event routed to a focus-tree node."
+  @spec handle_at_node(
+          state(),
+          FocusNode.t(),
+          integer(),
+          integer(),
+          atom(),
+          non_neg_integer(),
+          atom(),
+          pos_integer()
+        ) :: state()
+  def handle_at_node(
+        state,
+        %FocusNode{content_type: content_type, ref: win_id},
+        row,
+        col,
+        button,
+        mods,
+        :press,
+        click_count
+      )
+      when content_type in [:buffer_content, :agent_chat_window] and
+             button in [:wheel_down, :wheel_up, :wheel_left, :wheel_right] do
+    handle_buffer_scroll_at_window(state, win_id, row, col, button, mods, click_count)
+  end
+
+  def handle_at_node(state, _node, row, col, button, mods, event_type, click_count) do
+    handle(state, row, col, button, mods, event_type, click_count)
+  end
 
   @doc "Dispatches a mouse event, returning updated state."
   @spec handle(
@@ -118,13 +150,19 @@ defmodule MingaEditor.Mouse do
   def handle(state, _r, _c, :wheel_right, _m, :press, _cc) do
     vp = current_viewport(state)
     new_left = vp.left + @scroll_cols
-    update_current_viewport(state, %{vp | left: new_left})
+
+    state
+    |> update_current_viewport(%{vp | left: new_left})
+    |> clamp_cursor_to_horizontal_viewport()
   end
 
   def handle(state, _r, _c, :wheel_left, _m, :press, _cc) do
     vp = current_viewport(state)
     new_left = max(vp.left - @scroll_cols, 0)
-    update_current_viewport(state, %{vp | left: new_left})
+
+    state
+    |> update_current_viewport(%{vp | left: new_left})
+    |> clamp_cursor_to_horizontal_viewport()
   end
 
   # ── Middle-click paste ──
@@ -280,6 +318,75 @@ defmodule MingaEditor.Mouse do
   # ── Ignore all other mouse events ──
 
   def handle(state, _row, _col, _button, _mods, _type, _cc), do: state
+
+  @spec handle_buffer_scroll_at_window(
+          state(),
+          term(),
+          integer(),
+          integer(),
+          atom(),
+          non_neg_integer(),
+          pos_integer()
+        ) :: state()
+  defp handle_buffer_scroll_at_window(
+         %{workspace: %{windows: %{active: win_id}}} = state,
+         win_id,
+         row,
+         col,
+         button,
+         mods,
+         click_count
+       ) do
+    handle(state, row, col, button, mods, :press, click_count)
+  end
+
+  defp handle_buffer_scroll_at_window(state, win_id, _row, _col, :wheel_down, _mods, _click_count) do
+    scroll_window_vertical(state, win_id, scroll_lines(state))
+  end
+
+  defp handle_buffer_scroll_at_window(state, win_id, _row, _col, :wheel_up, _mods, _click_count) do
+    scroll_window_vertical(state, win_id, -scroll_lines(state))
+  end
+
+  defp handle_buffer_scroll_at_window(
+         state,
+         win_id,
+         _row,
+         _col,
+         :wheel_right,
+         _mods,
+         _click_count
+       ) do
+    scroll_window_horizontal(state, win_id, @scroll_cols)
+  end
+
+  defp handle_buffer_scroll_at_window(state, win_id, _row, _col, :wheel_left, _mods, _click_count) do
+    scroll_window_horizontal(state, win_id, -@scroll_cols)
+  end
+
+  @spec scroll_window_vertical(state(), term(), integer()) :: state()
+  defp scroll_window_vertical(state, win_id, delta) do
+    case Map.fetch(state.workspace.windows.map, win_id) do
+      {:ok, %Window{buffer: buf} = window} when is_pid(buf) ->
+        total_lines = Buffer.line_count(buf)
+        updated = Window.scroll_viewport(window, delta, total_lines)
+        EditorState.update_window(state, win_id, fn _window -> updated end)
+
+      _ ->
+        state
+    end
+  end
+
+  @spec scroll_window_horizontal(state(), term(), integer()) :: state()
+  defp scroll_window_horizontal(state, win_id, delta) do
+    case Map.fetch(state.workspace.windows.map, win_id) do
+      {:ok, %Window{}} ->
+        EditorState.update_window(state, win_id, &Window.scroll_horizontal(&1, delta))
+
+      _ ->
+        state
+    end
+  end
 
   # ── Left press dispatcher ──────────────────────────────────────────────────
 
@@ -667,6 +774,7 @@ defmodule MingaEditor.Mouse do
         MingaEditor.dispatch_command(state, cmd)
 
       :not_modeline ->
+        state = maybe_unfocus_file_tree_for_content_click(state)
         state = maybe_focus_window_at(state, row, col)
 
         case mouse_to_buffer_pos(state, row, col) do
@@ -689,6 +797,19 @@ defmodule MingaEditor.Mouse do
         end
     end
   end
+
+  @spec maybe_unfocus_file_tree_for_content_click(state()) :: state()
+  defp maybe_unfocus_file_tree_for_content_click(
+         %{workspace: %{keymap_scope: :file_tree}} = state
+       ) do
+    EditorState.update_workspace(state, fn workspace ->
+      workspace
+      |> WorkspaceState.set_file_tree(FileTreeState.unfocus(workspace.file_tree))
+      |> WorkspaceState.set_keymap_scope(:editor)
+    end)
+  end
+
+  defp maybe_unfocus_file_tree_for_content_click(state), do: state
 
   @spec maybe_focus_window_at(state(), non_neg_integer(), non_neg_integer()) :: state()
   defp maybe_focus_window_at(%{workspace: %{windows: %{tree: nil}}} = state, _row, _col),
@@ -765,7 +886,7 @@ defmodule MingaEditor.Mouse do
         {cursor_line, _} = Buffer.cursor(buf)
         scroll_top = window_scroll_top(window, win_h, content_w, cursor_line, buf)
         local_row = row - win_row
-        local_col = max(col - win_col - gutter_w, 0) + scroll_left(state, buf)
+        local_col = max(col - win_col - gutter_w, 0) + current_viewport(state).left
 
         resolve_with_display_map(
           buf,
@@ -799,7 +920,7 @@ defmodule MingaEditor.Mouse do
         {cursor_line, _} = window.cursor
         scroll_top = window_scroll_top(window, content_h, content_w, cursor_line, buf)
         local_row = row - win_row
-        local_col = max(col - win_col - gutter_w, 0)
+        local_col = max(col - win_col - gutter_w, 0) + window.viewport.left
 
         resolve_with_display_map(
           buf,
@@ -994,9 +1115,6 @@ defmodule MingaEditor.Mouse do
     vp.top
   end
 
-  @spec scroll_left(state(), pid()) :: non_neg_integer()
-  defp scroll_left(state, _buf), do: current_viewport(state).left
-
   # ── Viewport helpers ───────────────────────────────────────────────────────
 
   @spec scroll_viewport(Viewport.t(), integer(), non_neg_integer()) :: Viewport.t()
@@ -1005,6 +1123,68 @@ defmodule MingaEditor.Mouse do
     max_top = max(0, total_lines - visible_rows)
     new_top = (vp.top + delta) |> max(0) |> min(max_top)
     %Viewport{vp | top: new_top}
+  end
+
+  @spec clamp_cursor_to_horizontal_viewport(state()) :: state()
+  defp clamp_cursor_to_horizontal_viewport(%{workspace: %{buffers: %{active: buf}}} = state)
+       when is_pid(buf) do
+    vp = current_viewport(state)
+    {line, byte_col} = Buffer.cursor(buf)
+    line_text = cursor_line_text(buf, line)
+    display_col = Unicode.display_col(line_text, byte_col)
+    target_col = horizontal_cursor_target(display_col, vp.left, vp.cols)
+
+    if target_col == display_col do
+      state
+    else
+      Buffer.move_to(buf, {line, byte_offset_for_visible_col(line_text, target_col)})
+      state
+    end
+  catch
+    :exit, _ -> state
+  end
+
+  defp clamp_cursor_to_horizontal_viewport(state), do: state
+
+  @spec horizontal_cursor_target(non_neg_integer(), non_neg_integer(), pos_integer()) ::
+          non_neg_integer()
+  defp horizontal_cursor_target(display_col, left, _cols) when display_col < left, do: left
+
+  defp horizontal_cursor_target(display_col, left, cols) when display_col >= left + cols do
+    left + cols - 1
+  end
+
+  defp horizontal_cursor_target(display_col, _left, _cols), do: display_col
+
+  @spec byte_offset_for_visible_col(String.t(), non_neg_integer()) :: non_neg_integer()
+  defp byte_offset_for_visible_col(_line_text, 0), do: 0
+
+  defp byte_offset_for_visible_col(line_text, target_col) do
+    line_text
+    |> Unicode.display_col_to_byte(target_col + 1)
+    |> advance_to_visible_col(line_text, target_col)
+  end
+
+  @spec advance_to_visible_col(non_neg_integer(), String.t(), non_neg_integer()) ::
+          non_neg_integer()
+  defp advance_to_visible_col(byte_col, line_text, target_col) do
+    display_col = Unicode.display_col(line_text, byte_col)
+
+    if display_col >= target_col or byte_col >= byte_size(line_text) do
+      byte_col
+    else
+      line_text
+      |> Unicode.next_grapheme_byte_offset(byte_col)
+      |> advance_to_visible_col(line_text, target_col)
+    end
+  end
+
+  @spec cursor_line_text(pid(), non_neg_integer()) :: String.t()
+  defp cursor_line_text(buf, line) do
+    case Buffer.lines(buf, line, 1) do
+      [text] -> text
+      _ -> ""
+    end
   end
 
   # Clamps the cursor to remain visible within the viewport, respecting

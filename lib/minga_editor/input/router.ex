@@ -17,6 +17,8 @@ defmodule MingaEditor.Input.Router do
   alias Minga.Buffer
   alias Minga.Editing
   alias MingaEditor
+  alias MingaEditor.FocusTree
+  alias MingaEditor.FocusTree.Node, as: FocusNode
   alias MingaEditor.LspActions
   alias MingaEditor.State, as: EditorState
 
@@ -27,6 +29,15 @@ defmodule MingaEditor.Input.Router do
           old_mode: atom(),
           old_cursor: {non_neg_integer(), non_neg_integer()} | nil
         }
+
+  @typep mouse_event :: %{
+           row: integer(),
+           col: integer(),
+           button: atom(),
+           mods: non_neg_integer(),
+           event_type: atom(),
+           click_count: pos_integer()
+         }
 
   @doc """
   Captures a snapshot of the editor state before an action runs.
@@ -294,13 +305,9 @@ defmodule MingaEditor.Input.Router do
   end
 
   @doc """
-  Dispatches a mouse event through the focus stack.
+  Dispatches a mouse event through the focus tree.
 
-  Walks the focus stack calling `handle_mouse/7` on each handler that
-  implements it. The first handler that returns `{:handled, state}` stops
-  the walk. Handlers that don't implement `handle_mouse/7` are skipped.
-
-  Returns the final state after dispatch.
+  Hit-testing resolves `(row, col)` to the deepest visible node. Dispatch starts at that node's handler and bubbles to ancestors when a handler returns `{:passthrough, state}`. Scroll-wheel events start at the deepest scrollable node under the cursor, so hover location controls scrolling independently of keyboard focus.
   """
   @spec dispatch_mouse(
           EditorState.t(),
@@ -312,73 +319,87 @@ defmodule MingaEditor.Input.Router do
           pos_integer()
         ) :: EditorState.t()
   def dispatch_mouse(state, row, col, button, mods, event_type, click_count) do
-    dispatch_mouse_split(state, row, col, button, mods, event_type, click_count)
+    event = %{
+      row: row,
+      col: col,
+      button: button,
+      mods: mods,
+      event_type: event_type,
+      click_count: click_count
+    }
+
+    state
+    |> FocusTree.get()
+    |> mouse_path(row, col, button)
+    |> dispatch_mouse_path(state, event)
   end
 
-  # Walks overlay handlers first for mouse events, then delegates to surface handlers.
-  @spec dispatch_mouse_split(
-          EditorState.t(),
-          integer(),
-          integer(),
-          atom(),
-          non_neg_integer(),
-          atom(),
-          pos_integer()
-        ) ::
-          EditorState.t()
-  defp dispatch_mouse_split(
-         %EditorState{shell: shell, shell_state: _ss} = state,
-         row,
-         col,
-         button,
-         mods,
-         et,
-         cc
-       ) do
-    %{overlay: overlay_handlers, surface: surface_handlers} = shell.input_handlers(state)
-
-    # Walk overlay handlers first for mouse events.
-    result =
-      Enum.reduce_while(overlay_handlers, {:passthrough, state}, fn handler, {_status, acc} ->
-        case try_mouse_handler(handler, acc, row, col, button, mods, et, cc) do
-          {:halt, new_state} -> {:halt, {:handled, new_state}}
-          {:cont, new_state} -> {:cont, {:passthrough, new_state}}
-        end
-      end)
-
-    case result do
-      {:handled, new_state} ->
-        new_state
-
-      {:passthrough, state_after_overlays} ->
-        # Delegate to surface-level mouse handlers.
-        Enum.reduce_while(surface_handlers, state_after_overlays, fn handler, acc ->
-          try_mouse_handler(handler, acc, row, col, button, mods, et, cc)
-        end)
+  @spec mouse_path(FocusTree.t(), integer(), integer(), atom()) :: FocusTree.path()
+  defp mouse_path(tree, row, col, button)
+       when button in [:wheel_down, :wheel_up, :wheel_left, :wheel_right] do
+    case FocusTree.scroll_path(tree, row, col) do
+      [] -> FocusTree.hit_path(tree, row, col)
+      path -> path
     end
   end
 
-  @spec try_mouse_handler(
-          module(),
-          EditorState.t(),
-          integer(),
-          integer(),
-          atom(),
-          non_neg_integer(),
-          atom(),
-          pos_integer()
-        ) ::
-          {:halt, EditorState.t()} | {:cont, EditorState.t()}
-  defp try_mouse_handler(handler, state, row, col, button, mods, event_type, click_count) do
-    Code.ensure_loaded(handler)
+  defp mouse_path(tree, row, col, _button), do: FocusTree.hit_path(tree, row, col)
 
-    if function_exported?(handler, :handle_mouse, 7) do
-      case handler.handle_mouse(state, row, col, button, mods, event_type, click_count) do
+  @spec dispatch_mouse_path(FocusTree.path(), EditorState.t(), mouse_event()) :: EditorState.t()
+  defp dispatch_mouse_path(path, state, event) do
+    Enum.reduce_while(path, state, fn node, acc ->
+      case dispatch_mouse_to_node(node, acc, event) do
         {:handled, new_state} -> {:halt, new_state}
         {:passthrough, new_state} -> {:cont, new_state}
       end
+    end)
+  end
+
+  @spec dispatch_mouse_to_node(FocusNode.t(), EditorState.t(), mouse_event()) ::
+          MingaEditor.Input.Handler.result()
+  defp dispatch_mouse_to_node(%FocusNode{handler: nil}, state, _event) do
+    {:passthrough, state}
+  end
+
+  defp dispatch_mouse_to_node(%FocusNode{handler: handler} = node, state, event) do
+    Code.ensure_loaded(handler)
+    call_mouse_handler(handler, node, state, event)
+  end
+
+  @spec call_mouse_handler(module(), FocusNode.t(), EditorState.t(), mouse_event()) ::
+          MingaEditor.Input.Handler.result()
+  defp call_mouse_handler(handler, node, state, event) do
+    if function_exported?(handler, :handle_mouse_at_node, 8) do
+      handler.handle_mouse_at_node(
+        state,
+        node,
+        event.row,
+        event.col,
+        event.button,
+        event.mods,
+        event.event_type,
+        event.click_count
+      )
     else
-      {:cont, state}
+      call_legacy_mouse_handler(handler, state, event)
+    end
+  end
+
+  @spec call_legacy_mouse_handler(module(), EditorState.t(), mouse_event()) ::
+          MingaEditor.Input.Handler.result()
+  defp call_legacy_mouse_handler(handler, state, event) do
+    if function_exported?(handler, :handle_mouse, 7) do
+      handler.handle_mouse(
+        state,
+        event.row,
+        event.col,
+        event.button,
+        event.mods,
+        event.event_type,
+        event.click_count
+      )
+    else
+      {:passthrough, state}
     end
   end
 

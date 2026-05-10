@@ -26,7 +26,7 @@ defmodule MingaEditor.Renderer.Server do
   `tab_bar_click_regions` as part of chrome rendering. These need to
   flow back to the Editor so subsequent mouse events can resolve
   click positions. The Renderer casts
-  `{:render_done, frame_seq, %{caches: c, layout: l, click_regions: cr}}`
+  `{:render_done, frame_seq, %{caches: c, layout: l, focus_tree: ft, click_regions: cr}}`
   back to the Editor after every emit; the Editor merges into its
   state via `apply_renderer_writeback/2`.
 
@@ -53,6 +53,7 @@ defmodule MingaEditor.Renderer.Server do
   @type writeback :: %{
           required(:caches) => MingaEditor.Renderer.Caches.t(),
           required(:layout) => MingaEditor.Layout.t() | nil,
+          required(:focus_tree) => MingaEditor.FocusTree.t() | nil,
           required(:shell_state) => term(),
           required(:windows) => term(),
           required(:frame_seq) => non_neg_integer()
@@ -151,6 +152,7 @@ defmodule MingaEditor.Renderer.Server do
       writeback = %{
         caches: output.caches,
         layout: output.layout,
+        focus_tree: output.focus_tree,
         shell_state: output.shell_state,
         windows: output.workspace.windows,
         frame_seq: seq
