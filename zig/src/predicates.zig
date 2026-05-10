@@ -24,6 +24,12 @@ pub const Predicate = union(enum) {
         regex: ?*posix_regex.CompiledRegex,
         negate: bool,
     },
+    /// Fast path for simple `^x` match predicates.
+    starts_with_byte: struct {
+        capture_id: u32,
+        byte: u8,
+        negate: bool,
+    },
     /// `#eq? @capture "string"` or `#not-eq?`
     eq_string: struct {
         capture_id: u32,
@@ -142,6 +148,11 @@ fn evaluateOne(pred: Predicate, match: c.TSQueryMatch, source: []const u8) bool 
             const re = mp.regex orelse return true; // regex failed to compile, skip
             const matches = posix_regex.matches(re, text);
             return if (mp.negate) !matches else matches;
+        },
+        .starts_with_byte => |sw| {
+            const text = captureText(match, sw.capture_id, source) orelse return sw.negate;
+            const matches = text.len > 0 and text[0] == sw.byte;
+            return if (sw.negate) !matches else matches;
         },
         .eq_string => |es| {
             const text = captureText(match, es.capture_id, source) orelse return es.negate;
@@ -272,6 +283,13 @@ fn parsePredicate(
         var plen: u32 = 0;
         const pptr = c.ts_query_string_value_for_id(query, args[1].value_id, &plen);
         const pattern = pptr[0..plen];
+        if (pattern.len == 2 and pattern[0] == '^') {
+            return .{ .starts_with_byte = .{
+                .capture_id = capture_id,
+                .byte = pattern[1],
+                .negate = negate,
+            } };
+        }
 
         // Compile regex
         const regex = posix_regex.compile(pattern, allocator);
