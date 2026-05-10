@@ -401,6 +401,10 @@ final class WindowContentRenderer {
             return result
         }
 
+        if text.utf8.allSatisfy({ $0 < 0x80 }) {
+            return buildASCIIAttributedString(text: text, spans: spans, defaultFgColor: defaultFgColor, ligatures: ligatures)
+        }
+
         // Build display-column-to-String.Index mapping.
         // Each grapheme cluster maps to 1 or 2 display columns (CJK/fullwidth = 2).
         // columnIndex[displayCol] gives the String.Index at that display column.
@@ -476,6 +480,63 @@ final class WindowContentRenderer {
         }
 
         return result
+    }
+
+    private func buildASCIIAttributedString(text: String, spans: [GUIHighlightSpan], defaultFgColor: NSColor, ligatures: Int) -> NSAttributedString {
+        let result = NSMutableAttributedString()
+        let totalDisplayCols = text.count
+        var lastCol = 0
+
+        for span in spans {
+            let spanStart = min(Int(span.startCol), totalDisplayCols)
+            let spanEnd = min(Int(span.endCol), totalDisplayCols)
+
+            if spanStart > lastCol {
+                appendASCII(text: text, start: lastCol, end: spanStart, color: defaultFgColor, ligatures: ligatures, to: result)
+            }
+
+            guard spanStart < spanEnd else { continue }
+
+            let font = resolveFont(for: span)
+            let fgColor = span.fg != 0 ? nsColor(from: span.fg) : defaultFgColor
+            var attrs: [NSAttributedString.Key: Any] = [
+                .font: font,
+                .foregroundColor: fgColor,
+                .ligature: ligatures
+            ]
+
+            if span.isUnderline {
+                attrs[.underlineStyle] = span.isCurl ? NSUnderlineStyle.thick.rawValue : NSUnderlineStyle.single.rawValue
+            }
+
+            if span.isStrikethrough {
+                attrs[.strikethroughStyle] = NSUnderlineStyle.single.rawValue
+                attrs[.strikethroughColor] = fgColor
+            }
+
+            let startIdx = text.index(text.startIndex, offsetBy: spanStart)
+            let endIdx = text.index(text.startIndex, offsetBy: spanEnd)
+            result.append(NSAttributedString(string: String(text[startIdx..<endIdx]), attributes: attrs))
+            lastCol = spanEnd
+        }
+
+        if lastCol < totalDisplayCols {
+            appendASCII(text: text, start: lastCol, end: totalDisplayCols, color: defaultFgColor, ligatures: ligatures, to: result)
+        }
+
+        return result
+    }
+
+    private func appendASCII(text: String, start: Int, end: Int, color: NSColor, ligatures: Int, to result: NSMutableAttributedString) {
+        guard start < end else { return }
+        let startIdx = text.index(text.startIndex, offsetBy: start)
+        let endIdx = text.index(text.startIndex, offsetBy: end)
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: fontManager.primary.ctFont,
+            .foregroundColor: color,
+            .ligature: ligatures
+        ]
+        result.append(NSAttributedString(string: String(text[startIdx..<endIdx]), attributes: attrs))
     }
 
     // MARK: - Display Column Mapping
