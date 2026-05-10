@@ -378,6 +378,29 @@ defmodule MingaEditor.Window do
     }
   end
 
+  @spec detect_invalidation(
+          t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: t()
+  def detect_invalidation(
+        %__MODULE__{render_cache: cache} = window,
+        viewport_top,
+        gutter_w,
+        line_count,
+        buf_version,
+        cursor_line
+      ) do
+    %{
+      window
+      | render_cache:
+          RenderCache.detect_invalidation(cache, viewport_top, gutter_w, line_count, buf_version, cursor_line)
+    }
+  end
+
   @doc """
   Compares the current render context fingerprint against the last frame's.
 

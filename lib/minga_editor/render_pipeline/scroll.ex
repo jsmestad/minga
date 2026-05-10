@@ -155,7 +155,8 @@ defmodule MingaEditor.RenderPipeline.Scroll do
             scroll.viewport.top,
             scroll.gutter_w,
             scroll.snapshot.line_count,
-            scroll.buf_version
+            scroll.buf_version,
+            scroll.cursor_line
           )
 
         updated_window =

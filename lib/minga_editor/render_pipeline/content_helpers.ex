@@ -933,11 +933,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
   @spec context_fingerprint(Context.t(), boolean()) ::
           MingaEditor.Window.RenderCache.context_fingerprint()
   def context_fingerprint(%Context{} = ctx, is_active) do
-    hl_id =
-      case ctx.highlight do
-        nil -> nil
-        hl -> hl.version
-      end
+    hl_id = nil
 
     {
       ctx.visual_selection,
