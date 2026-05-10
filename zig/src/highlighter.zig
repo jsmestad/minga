@@ -917,7 +917,7 @@ pub const Highlighter = struct {
 
             // Check for #set! conceal directive on this pattern.
             const conceal_replacement: ?[]const u8 = if (self.current_predicates) |preds|
-                preds.getConcealReplacement(@intCast(match.pattern_index))
+                if (preds.has_conceal_replacements) preds.getConcealReplacement(@intCast(match.pattern_index)) else null
             else
                 null;
 
@@ -1004,7 +1004,7 @@ pub const Highlighter = struct {
 
             // Check for #set! conceal directive on this pattern.
             const conceal_replacement: ?[]const u8 = if (self.current_predicates) |preds|
-                preds.getConcealReplacement(@intCast(match.pattern_index))
+                if (preds.has_conceal_replacements) preds.getConcealReplacement(@intCast(match.pattern_index)) else null
             else
                 null;
 

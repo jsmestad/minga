@@ -49,6 +49,7 @@ pub const PredicateTable = struct {
     entries: []?[]const Predicate,
     /// Conceal replacement per pattern. null = no conceal, empty = hide entirely.
     conceal_replacements: []?[]const u8,
+    has_conceal_replacements: bool,
     allocator: std.mem.Allocator,
     /// Track compiled regexes for cleanup
     regexes: std.ArrayListUnmanaged(*posix_regex.CompiledRegex),
@@ -57,21 +58,24 @@ pub const PredicateTable = struct {
     pub fn init(query: *c.TSQuery, allocator: std.mem.Allocator) PredicateTable {
         const pattern_count = c.ts_query_pattern_count(query);
         const entries = allocator.alloc(?[]const Predicate, pattern_count) catch
-            return .{ .entries = &.{}, .conceal_replacements = &.{}, .allocator = allocator, .regexes = .empty };
+            return .{ .entries = &.{}, .conceal_replacements = &.{}, .has_conceal_replacements = false, .allocator = allocator, .regexes = .empty };
 
         const conceal_reps = allocator.alloc(?[]const u8, pattern_count) catch
-            return .{ .entries = &.{}, .conceal_replacements = &.{}, .allocator = allocator, .regexes = .empty };
+            return .{ .entries = &.{}, .conceal_replacements = &.{}, .has_conceal_replacements = false, .allocator = allocator, .regexes = .empty };
 
         var regexes: std.ArrayListUnmanaged(*posix_regex.CompiledRegex) = .empty;
+        var has_conceal_replacements = false;
 
         for (0..pattern_count) |i| {
             entries[i] = parsePattern(query, @intCast(i), allocator, &regexes);
             conceal_reps[i] = parseConcealDirective(query, @intCast(i));
+            if (conceal_reps[i] != null) has_conceal_replacements = true;
         }
 
         return .{
             .entries = entries,
             .conceal_replacements = conceal_reps,
+            .has_conceal_replacements = has_conceal_replacements,
             .allocator = allocator,
             .regexes = regexes,
         };
