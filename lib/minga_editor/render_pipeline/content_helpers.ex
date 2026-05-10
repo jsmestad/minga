@@ -908,13 +908,18 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
   @doc "Returns the decorations for a window's buffer."
   @spec window_decorations(Window.t()) :: Decorations.t()
   def window_decorations(%{buffer: buf}) when is_pid(buf) do
-    Buffer.decorations(buf)
-    |> Decorations.build_vt_line_cache()
+    buf
+    |> Buffer.decorations()
+    |> maybe_build_vt_line_cache()
   catch
     :exit, _ -> Decorations.new()
   end
 
   def window_decorations(_window), do: Decorations.new()
+
+  @spec maybe_build_vt_line_cache(Decorations.t()) :: Decorations.t()
+  defp maybe_build_vt_line_cache(%Decorations{virtual_texts: []} = decorations), do: decorations
+  defp maybe_build_vt_line_cache(%Decorations{} = decorations), do: Decorations.build_vt_line_cache(decorations)
 
   @doc "Returns the highlight state for a window's buffer."
   @spec window_highlight(state(), Window.t()) :: MingaEditor.UI.Highlight.t() | nil
