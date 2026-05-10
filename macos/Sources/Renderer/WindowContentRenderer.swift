@@ -484,7 +484,8 @@ final class WindowContentRenderer {
 
     private func buildASCIIAttributedString(text: String, spans: [GUIHighlightSpan], defaultFgColor: NSColor, ligatures: Int) -> NSAttributedString {
         let result = NSMutableAttributedString()
-        let totalDisplayCols = text.count
+        let nsText = text as NSString
+        let totalDisplayCols = nsText.length
         var lastCol = 0
 
         for span in spans {
@@ -492,7 +493,7 @@ final class WindowContentRenderer {
             let spanEnd = min(Int(span.endCol), totalDisplayCols)
 
             if spanStart > lastCol {
-                appendASCII(text: text, start: lastCol, end: spanStart, color: defaultFgColor, ligatures: ligatures, to: result)
+                appendASCII(text: nsText, start: lastCol, end: spanStart, color: defaultFgColor, ligatures: ligatures, to: result)
             }
 
             guard spanStart < spanEnd else { continue }
@@ -514,29 +515,27 @@ final class WindowContentRenderer {
                 attrs[.strikethroughColor] = fgColor
             }
 
-            let startIdx = text.index(text.startIndex, offsetBy: spanStart)
-            let endIdx = text.index(text.startIndex, offsetBy: spanEnd)
-            result.append(NSAttributedString(string: String(text[startIdx..<endIdx]), attributes: attrs))
+            let segment = nsText.substring(with: NSRange(location: spanStart, length: spanEnd - spanStart))
+            result.append(NSAttributedString(string: segment, attributes: attrs))
             lastCol = spanEnd
         }
 
         if lastCol < totalDisplayCols {
-            appendASCII(text: text, start: lastCol, end: totalDisplayCols, color: defaultFgColor, ligatures: ligatures, to: result)
+            appendASCII(text: nsText, start: lastCol, end: totalDisplayCols, color: defaultFgColor, ligatures: ligatures, to: result)
         }
 
         return result
     }
 
-    private func appendASCII(text: String, start: Int, end: Int, color: NSColor, ligatures: Int, to result: NSMutableAttributedString) {
+    private func appendASCII(text: NSString, start: Int, end: Int, color: NSColor, ligatures: Int, to result: NSMutableAttributedString) {
         guard start < end else { return }
-        let startIdx = text.index(text.startIndex, offsetBy: start)
-        let endIdx = text.index(text.startIndex, offsetBy: end)
         let attrs: [NSAttributedString.Key: Any] = [
             .font: fontManager.primary.ctFont,
             .foregroundColor: color,
             .ligature: ligatures
         ]
-        result.append(NSAttributedString(string: String(text[startIdx..<endIdx]), attributes: attrs))
+        let segment = text.substring(with: NSRange(location: start, length: end - start))
+        result.append(NSAttributedString(string: segment, attributes: attrs))
     }
 
     // MARK: - Display Column Mapping
