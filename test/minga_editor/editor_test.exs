@@ -4,7 +4,7 @@ defmodule MingaEditor.EditorTest do
   GenServer itself owns (port roundtrip, file open, viewport
   propagation, stale-timer dispatch, status_msg surfacing).
   """
-  use Minga.Test.EditingModelCase, async: true
+  use ExUnit.Case, async: true
 
   alias Minga.Buffer.Server, as: BufferServer
   alias MingaEditor

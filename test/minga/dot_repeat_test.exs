@@ -5,7 +5,7 @@ defmodule Minga.DotRepeatTest do
   Tests the full flow through the Editor GenServer: key events →
   Mode FSM → ChangeRecorder → replay.
   """
-  use Minga.Test.EditingModelCase, async: true
+  use ExUnit.Case, async: true
 
   alias Minga.Buffer.Server, as: BufferServer
   alias MingaEditor

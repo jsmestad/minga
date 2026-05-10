@@ -1,6 +1,6 @@
 defmodule MingaEditor.MouseMultiClickTest do
   @moduledoc "Tests for multi-click selection, modifier clicks, and new mouse features."
-  use Minga.Test.EditingModelCase, async: true
+  use ExUnit.Case, async: true
 
   alias Minga.Buffer.Server, as: BufferServer
   alias MingaEditor

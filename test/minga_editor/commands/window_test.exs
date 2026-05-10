@@ -1,6 +1,6 @@
 defmodule MingaEditor.Commands.WindowTest do
   # Direct editor key-dispatch tests share global keymap/options servers, so CI concurrency can change leader routing.
-  use Minga.Test.EditingModelCase, async: false
+  use ExUnit.Case, async: false
 
   alias Minga.Buffer.Server, as: BufferServer
   alias MingaEditor
