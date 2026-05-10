@@ -38,12 +38,12 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUI do
           %{MingaEditor.Window.id() => WindowScroll.t()},
           Cursor.t() | nil
         ) :: Chrome.t()
-  def build(state, layout, _scrolls, cursor_info) do
+  def build(state, layout, scrolls, cursor_info) do
     full_viewport = state.terminal_viewport
 
     # Global status bar (one render for the focused window)
     {status_bar_draws, status_bar_data, modeline_click_regions} =
-      build_status_bar(state, layout)
+      build_status_bar(state, layout, Map.get(scrolls, state.workspace.windows.active))
 
     stable_fp = stable_chrome_fingerprint(state, layout)
 
@@ -129,28 +129,28 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUI do
     })
   end
 
-  @spec build_status_bar(state(), Layout.t()) ::
+  @spec build_status_bar(state(), Layout.t(), map() | nil) ::
           {[DisplayList.draw()], StatusBarData.t(),
            [MingaEditor.Shell.Traditional.Modeline.click_region()]}
-  defp build_status_bar(_state, %{status_bar: nil}) do
+  defp build_status_bar(_state, %{status_bar: nil}, _active_scroll) do
     {[], nil, []}
   end
 
-  defp build_status_bar(state, layout) do
+  defp build_status_bar(state, layout, active_scroll) do
     {sb_row, _sb_col, sb_width, _sb_h} = layout.status_bar
-    status_bar_data = cached_or_fresh_status_bar_data(state)
+    status_bar_data = cached_or_fresh_status_bar_data(state, active_scroll)
     modeline_data = StatusBarData.to_modeline_data(status_bar_data)
     {draws, click_regions} = Modeline.render(sb_row, sb_width, modeline_data, state.theme)
     {draws, status_bar_data, click_regions}
   end
 
-  @spec cached_or_fresh_status_bar_data(state()) :: StatusBarData.t()
-  defp cached_or_fresh_status_bar_data(state) do
+  @spec cached_or_fresh_status_bar_data(state(), map() | nil) :: StatusBarData.t()
+  defp cached_or_fresh_status_bar_data(state, active_scroll) do
     buf = state.workspace.buffers.active
 
     case state.caches.chrome_prev_result do
       %Chrome{status_bar_data: {:buffer, data}} when is_pid(buf) ->
-        {line, col} = Buffer.cursor(buf)
+        {line, col} = scroll_cursor(active_scroll, buf)
 
         {:buffer,
          %{
@@ -168,6 +168,10 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUI do
   catch
     :exit, _ -> StatusBarData.from_state(state)
   end
+
+  @spec scroll_cursor(map() | nil, pid()) :: {non_neg_integer(), non_neg_integer()}
+  defp scroll_cursor(%{cursor_line: line, cursor_byte_col: col}, _buf), do: {line, col}
+  defp scroll_cursor(_active_scroll, buf), do: Buffer.cursor(buf)
 
   # ── Overlays ──────────────────────────────────────────────────────────────
 
