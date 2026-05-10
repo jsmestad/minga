@@ -124,7 +124,7 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUI do
       state.workspace.windows.tree,
       state.workspace.file_tree,
       state.shell_state |> Map.get(:tab_bar),
-      state.theme
+      state.theme.name
     })
   end
 
