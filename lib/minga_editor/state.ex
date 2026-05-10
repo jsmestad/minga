@@ -85,6 +85,7 @@ defmodule MingaEditor.State do
   @enforce_keys [:port_manager, :workspace]
   defstruct backend: :headless,
             port_manager: nil,
+            renderer: nil,
             keymap_server: @default_keymap_server,
             options_server: @default_options_server,
             events_registry: @default_events_registry,
@@ -121,6 +122,7 @@ defmodule MingaEditor.State do
   @type t :: %__MODULE__{
           backend: backend(),
           port_manager: GenServer.server() | nil,
+          renderer: pid() | nil,
           keymap_server: keymap_server(),
           options_server: options_server(),
           events_registry: events_registry(),

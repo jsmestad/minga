@@ -53,15 +53,6 @@ defmodule MingaEditor.Supervisor do
     Supervisor.init(children, strategy: :rest_for_one)
   end
 
-  # Renderer.Server lives between Frontend.Manager (port owner) and
-  # MingaEditor (input + state). Only started when the split-renderer
-  # feature flag is on; default off keeps current synchronous behavior.
   @spec renderer_children() :: [module()]
-  defp renderer_children do
-    if MingaEditor.Renderer.Server.enabled?() do
-      [MingaEditor.Renderer.Server]
-    else
-      []
-    end
-  end
+  defp renderer_children, do: [MingaEditor.Renderer.Server]
 end

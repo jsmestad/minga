@@ -3,9 +3,7 @@ defmodule MingaEditor.Renderer.ServerTest do
   Unit tests for the standalone Renderer GenServer.
 
   Tests the snapshot/coalescing/writeback contract directly without
-  booting the editor. The server is normally started under
-  `MingaEditor.Supervisor` only when the `:split_renderer` flag is on;
-  these tests start a process per-test for isolation.
+  booting the editor. These tests start a process per-test for isolation.
 
   Tests that would require running the actual `RenderPipeline.run/1`
   are out of scope for unit tests — pipeline behavior is covered by
@@ -13,30 +11,11 @@ defmodule MingaEditor.Renderer.ServerTest do
   state-machine contract: idle → rendering, coalescing, telemetry.
   """
 
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.Renderer.Server, as: RendererServer
   alias MingaEditor.Viewport
-
-  describe "enabled?/0" do
-    test "returns false when the application env flag is unset" do
-      Application.delete_env(:minga, :split_renderer)
-      refute RendererServer.enabled?()
-    end
-
-    test "returns true when the flag is exactly true" do
-      Application.put_env(:minga, :split_renderer, true)
-      assert RendererServer.enabled?()
-      Application.delete_env(:minga, :split_renderer)
-    end
-
-    test "returns false when the flag is anything other than true" do
-      Application.put_env(:minga, :split_renderer, :maybe)
-      refute RendererServer.enabled?()
-      Application.delete_env(:minga, :split_renderer)
-    end
-  end
 
   describe "init/1 + start_link/1" do
     test "starts with no pending or in-flight snapshot" do

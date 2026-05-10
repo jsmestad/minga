@@ -174,6 +174,13 @@ defmodule MingaEditor do
 
     state = Startup.build_initial_state(opts)
 
+    # Resolve the Renderer.Server pid once at init. In production the
+    # supervisor starts Renderer.Server before MingaEditor (rest_for_one),
+    # so it's guaranteed to be registered. In tests that start the Editor
+    # standalone, this returns nil and render_or_async falls back to sync.
+    renderer_pid = GenServer.whereis(MingaEditor.Renderer.Server)
+    state = %{state | renderer: renderer_pid}
+
     # Logger redirect and startup messages
     tui_active? = state.backend == :tui
 
@@ -627,8 +634,7 @@ defmodule MingaEditor do
     {:noreply, %{state | render_timer: nil}}
   end
 
-  # Renderer.Server writeback (only fires when split-renderer is enabled).
-  # The renderer returns stale snapshots of full window and shell structs, so
+  # Renderer.Server writeback after each async frame completes.
   # EditorState narrows the merge to renderer-owned fields only.
   def handle_info({:render_done, %{caches: _caches, layout: _layout} = wb}, state) do
     {:noreply, EditorState.apply_renderer_writeback(state, wb)}

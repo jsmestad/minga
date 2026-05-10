@@ -5,10 +5,9 @@ defmodule MingaEditor.Renderer.Server do
 
   ## Lifecycle
 
-  Started by `MingaEditor.Supervisor` only when
-  `Application.get_env(:minga, :split_renderer, false)` is true. When
-  the flag is off, the Editor calls `MingaEditor.Renderer.render/1`
-  synchronously and this server is not in the supervision tree.
+  Started by `MingaEditor.Supervisor` for all non-headless backends.
+  The headless backend renders synchronously in-process for test
+  determinism; this server is not in the supervision tree in that case.
 
   ## Snapshot mechanics
 
@@ -38,9 +37,9 @@ defmodule MingaEditor.Renderer.Server do
 
   ## Determinism in tests
 
-  EditorCase and snapshot tests run with the flag off. The Editor's
-  existing synchronous render path keeps tests deterministic. This
-  server is not started in the test supervision tree by default.
+  EditorCase tests use the headless backend, which renders
+  synchronously in-process. This server is not started in the test
+  supervision tree.
   """
 
   use GenServer
@@ -93,12 +92,6 @@ defmodule MingaEditor.Renderer.Server do
   def cast_snapshot(server \\ __MODULE__, %Input{} = snapshot, frame_seq)
       when is_integer(frame_seq) and frame_seq >= 0 do
     GenServer.cast(server, {:render, snapshot, frame_seq, monotonic_now()})
-  end
-
-  @doc "Returns true when the split-renderer feature flag is enabled."
-  @spec enabled?() :: boolean()
-  def enabled? do
-    Application.get_env(:minga, :split_renderer, false) == true
   end
 
   # ── GenServer callbacks ───────────────────────────────────────────────────
