@@ -70,10 +70,8 @@ fn panicImpl(msg: []const u8, ret_addr: ?usize) noreturn {
 
 pub const panic = std.debug.FullPanic(panicImpl);
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const alloc = gpa.allocator();
+pub fn main(init: std.process.Init) !void {
+    const alloc = init.gpa;
 
     var hl = try highlighter_mod.Highlighter.init(alloc);
     defer hl.deinit();
@@ -81,7 +79,7 @@ pub fn main() !void {
 
     // Stdout (Port protocol channel).
     var stdout_buf: [4096]u8 = undefined;
-    var stdout_writer_obj = std.fs.File.stdout().writer(&stdout_buf);
+    var stdout_writer_obj = std.Io.File.stdout().writer(init.io, &stdout_buf);
     const stdout: *std.Io.Writer = &stdout_writer_obj.interface;
 
     // Enable protocol-routed logging (and panic messages) now that stdout is ready.
@@ -169,22 +167,19 @@ const BufferState = struct {
             const start: usize = @intCast(edit.start_byte);
             const old_end: usize = @intCast(edit.old_end_byte);
 
-            // Stale delta: old_end before start, or start past source length.
+            // Stale delta: the byte range must fit the source mirror exactly.
             // This means the BEAM's view of the buffer doesn't match ours.
-            if (old_end < edit.start_byte or start > self.source.items.len) return error.StaleEdit;
-            const clamped_old_end = @min(old_end, self.source.items.len);
-            if (clamped_old_end < start) return error.StaleEdit;
+            if (old_end < start or start > self.source.items.len or old_end > self.source.items.len) return error.StaleEdit;
 
             // Replace [start..old_end) with inserted_text.
-            try self.source.replaceRange(alloc, start, clamped_old_end - start, edit.inserted_text);
+            try self.source.replaceRange(alloc, start, old_end - start, edit.inserted_text);
         }
     }
 
     /// Set the language name, taking an owned copy.
     fn setLanguageName(self: *BufferState, alloc: std.mem.Allocator, name: []const u8) !void {
+        const copy = try alloc.dupe(u8, name);
         if (self.language_name) |old| alloc.free(old);
-        const copy = try alloc.alloc(u8, name.len);
-        @memcpy(copy, name);
         self.language_name = copy;
     }
 
@@ -219,7 +214,9 @@ fn activateBuffer(hl: *highlighter_mod.Highlighter, bs: *BufferState) bool {
     if (lang_changed) {
         // setLanguage deletes hl.tree, but we're about to replace it
         // with the buffer's tree anyway.
-        _ = hl.setLanguage(lang_name);
+        if (!hl.setLanguage(lang_name)) return false;
+    } else if (hl.current_language == null) {
+        return false;
     }
 
     // Install this buffer's tree into the highlighter (may be null for first parse).
@@ -251,7 +248,7 @@ fn handleCommand(
             const bs = try getOrCreateBuffer(buffers, alloc, sl.buffer_id);
             bs.setLanguageName(alloc, sl.name) catch return;
             // Set the highlighter's active language so queries get loaded.
-            _ = hl.setLanguage(sl.name);
+            if (bs.language_name) |name| _ = hl.setLanguage(name);
         },
         .parse_buffer => |pb| {
             const bs = try getOrCreateBuffer(buffers, alloc, pb.buffer_id);
@@ -283,7 +280,7 @@ fn handleCommand(
         },
         .set_highlight_query => |shq| {
             if (buffers.getPtr(shq.buffer_id)) |bs| {
-                _ = activateBuffer(hl, bs);
+                if (!activateBuffer(hl, bs)) return;
                 hl.setHighlightQuery(shq.source) catch {};
                 saveTreeToBuffer(hl, bs);
             } else {
@@ -292,7 +289,7 @@ fn handleCommand(
         },
         .set_injection_query => |siq| {
             if (buffers.getPtr(siq.buffer_id)) |bs| {
-                _ = activateBuffer(hl, bs);
+                if (!activateBuffer(hl, bs)) return;
                 hl.setInjectionQuery(siq.source) catch {};
                 saveTreeToBuffer(hl, bs);
             } else {
@@ -301,7 +298,7 @@ fn handleCommand(
         },
         .set_fold_query => |sfq| {
             if (buffers.getPtr(sfq.buffer_id)) |bs| {
-                _ = activateBuffer(hl, bs);
+                if (!activateBuffer(hl, bs)) return;
                 hl.setFoldQuery(sfq.source) catch {};
                 saveTreeToBuffer(hl, bs);
             } else {
@@ -310,7 +307,7 @@ fn handleCommand(
         },
         .set_indent_query => |siq_cmd| {
             if (buffers.getPtr(siq_cmd.buffer_id)) |bs| {
-                _ = activateBuffer(hl, bs);
+                if (!activateBuffer(hl, bs)) return;
                 hl.setIndentQuery(siq_cmd.source) catch {};
                 saveTreeToBuffer(hl, bs);
             } else {
@@ -320,7 +317,7 @@ fn handleCommand(
         .request_indent => |req| {
             const bs = buffers.getPtr(req.buffer_id) orelse return;
             if (!activateBuffer(hl, bs)) return;
-            const level = hl.computeIndent(req.line, bs.source.items);
+            const level = hl.computeIndent(req.line);
             saveTreeToBuffer(hl, bs);
             var rbuf: [13]u8 = undefined;
             const rlen = protocol.encodeIndentResult(&rbuf, req.request_id, req.line, level);
@@ -329,7 +326,7 @@ fn handleCommand(
         },
         .set_textobject_query => |stq| {
             if (buffers.getPtr(stq.buffer_id)) |bs| {
-                _ = activateBuffer(hl, bs);
+                if (!activateBuffer(hl, bs)) return;
                 hl.setTextobjectQuery(stq.source) catch {};
                 saveTreeToBuffer(hl, bs);
             } else {
@@ -367,18 +364,15 @@ fn handleCommand(
         },
         .query_language_at => |q| {
             if (buffers.getPtr(q.buffer_id)) |bs| {
-                _ = activateBuffer(hl, bs);
+                if (!activateBuffer(hl, bs)) {
+                    try sendLanguageAtResponse(stdout, q.request_id, null);
+                    return;
+                }
                 const lang = hl.languageAt(q.byte_offset);
                 saveTreeToBuffer(hl, bs);
-                var rbuf: [260]u8 = undefined;
-                const rlen = protocol.encodeLanguageAtResponse(&rbuf, q.request_id, lang) catch return;
-                try protocol.writeMessage(stdout, rbuf[0..rlen]);
-                try stdout.flush();
+                try sendLanguageAtResponse(stdout, q.request_id, lang);
             } else {
-                var rbuf: [260]u8 = undefined;
-                const rlen = protocol.encodeLanguageAtResponse(&rbuf, q.request_id, null) catch return;
-                try protocol.writeMessage(stdout, rbuf[0..rlen]);
-                try stdout.flush();
+                try sendLanguageAtResponse(stdout, q.request_id, null);
             }
         },
         .close_buffer => {
@@ -469,6 +463,14 @@ fn handleCloseBuffer(
     }
 }
 
+/// Send a language-at-position response to stdout.
+fn sendLanguageAtResponse(stdout: *std.Io.Writer, request_id: u32, language: ?[]const u8) !void {
+    var rbuf: [260]u8 = undefined;
+    const rlen = protocol.encodeLanguageAtResponse(&rbuf, request_id, language) catch return;
+    try protocol.writeMessage(stdout, rbuf[0..rlen]);
+    try stdout.flush();
+}
+
 /// Send textobject positions to stdout.
 fn sendTextobjectPositions(
     hl: *highlighter_mod.Highlighter,
@@ -552,6 +554,19 @@ fn readExact(fd: std.posix.fd_t, buf: []u8) !bool {
 // ── BufferState.applyEdits tests ──────────────────────────────────────────────
 
 const testing = std.testing;
+
+test "setLanguageName keeps old name if replacing allocation fails" {
+    var backing: [3]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&backing);
+    const alloc = fba.allocator();
+
+    var bs: BufferState = .{};
+    defer bs.deinit(alloc);
+
+    try bs.setLanguageName(alloc, "zig");
+    try testing.expectError(error.OutOfMemory, bs.setLanguageName(alloc, "elixir"));
+    try testing.expectEqualStrings("zig", bs.language_name.?);
+}
 
 test "applyEdits: valid edit replaces text" {
     var bs: BufferState = .{};
@@ -663,26 +678,26 @@ test "applyEdits: valid insert at beginning of source" {
     try testing.expectEqualStrings("hello world", bs.source.items);
 }
 
-test "applyEdits: clamped_old_end < start returns StaleEdit" {
-    // old_end is valid (within source) but less than start after clamping.
+test "applyEdits: returns StaleEdit when old_end_byte exceeds source length" {
     var bs: BufferState = .{};
     defer bs.deinit(testing.allocator);
     try bs.setSource(testing.allocator, "hello world");
 
     const edits = [_]protocol.EditDelta{.{
-        .start_byte = 8,
-        .old_end_byte = 5, // clamped to 5, which is < start(8)
-        .new_end_byte = 8,
+        .start_byte = 6,
+        .old_end_byte = 50,
+        .new_end_byte = 10,
         .start_row = 0,
-        .start_col = 8,
+        .start_col = 6,
         .old_end_row = 0,
-        .old_end_col = 5,
+        .old_end_col = 50,
         .new_end_row = 0,
-        .new_end_col = 8,
-        .inserted_text = "",
+        .new_end_col = 10,
+        .inserted_text = "mars",
     }};
 
     try testing.expectError(error.StaleEdit, bs.applyEdits(testing.allocator, &edits));
+    try testing.expectEqualStrings("hello world", bs.source.items);
 }
 
 // Pull in tests from imported modules for the parser test step.

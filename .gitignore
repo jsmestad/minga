@@ -10,6 +10,7 @@ minga-*.tar
 # Zig
 zig/zig-out/
 zig/.zig-cache/
+zig/zig-pkg/
 
 # Swift / Xcode
 macos/.build/
@@ -41,7 +42,6 @@ Thumbs.db
 # Environment
 .env
 .env.local
-PLAN.md
 PLAN.md
 .build/
 test/tmp/

@@ -34,7 +34,7 @@ pub const Face = struct {
     atlas: Atlas,
     cache: std.AutoHashMapUnmanaged(u32, Glyph),
     alloc: Allocator,
-    mutex: std.Thread.Mutex = .{},
+    mutex: std.atomic.Mutex = .unlocked,
 
     /// Cell dimensions in pixels — use these for grid layout.
     cell_width: u32,
@@ -70,7 +70,7 @@ pub const Face = struct {
 
     /// Look up a glyph by codepoint. Rasterizes on first access.
     pub fn getGlyph(self: *Face, codepoint: u32) !Glyph {
-        self.mutex.lock();
+        while (!self.mutex.tryLock()) std.atomic.spinLoopHint();
         defer self.mutex.unlock();
 
         if (self.cache.get(codepoint)) |g| return g;
