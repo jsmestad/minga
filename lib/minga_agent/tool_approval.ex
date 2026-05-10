@@ -8,17 +8,14 @@ defmodule MingaAgent.ToolApproval do
   handling, chat decorations, and GUI protocol encoding.
   """
 
+  alias MingaAgent.ToolApproval.Preview
   alias MingaAgent.ToolRouter
 
   @typedoc "Structured preview kind for an approval card."
-  @type preview_kind :: :diff | :command | :target | :args
+  @type preview_kind :: Preview.kind()
 
   @typedoc "A public, editor-safe approval preview."
-  @type preview :: %{
-          kind: preview_kind(),
-          summary: String.t(),
-          lines: [String.t()]
-        }
+  @type preview :: Preview.t()
 
   @typedoc "A pending tool approval."
   @type t :: %__MODULE__{
@@ -33,7 +30,7 @@ defmodule MingaAgent.ToolApproval do
   defstruct tool_call_id: nil,
             name: nil,
             args: %{},
-            preview: %{kind: :args, summary: "", lines: []},
+            preview: %Preview{kind: :args, summary: "", lines: []},
             reply_to: nil
 
   @doc "Creates a pending approval with a structured preview card."
@@ -70,62 +67,49 @@ defmodule MingaAgent.ToolApproval do
 
   @spec do_build_preview(String.t(), map()) :: preview()
   defp do_build_preview("shell", %{"command" => command} = args) do
-    cwd = Map.get(args, "cwd") || Map.get(args, "working_directory") || File.cwd!()
+    command = stringify_value(command)
 
-    %{
-      kind: :command,
-      summary: truncate(command, 120),
-      lines: ["$ #{command}", "cwd: #{cwd}"]
-    }
+    cwd =
+      stringify_value(Map.get(args, "cwd") || Map.get(args, "working_directory") || File.cwd!())
+
+    Preview.new(:command, truncate(command, 120), preview_lines(["$ #{command}", "cwd: #{cwd}"]))
   end
 
   defp do_build_preview("write_file", %{"path" => path} = args) when is_binary(path) do
-    content = Map.get(args, "content", "") |> to_string()
+    content = stringify_value(Map.get(args, "content", ""))
     before = read_existing(path)
     lines = diff_preview_lines(before, content)
 
-    %{
-      kind: :diff,
-      summary: path,
-      lines: ["file: #{path}" | lines]
-    }
+    Preview.new(:diff, path, preview_lines(["file: #{path}" | lines]))
   end
 
   defp do_build_preview(name, %{"path" => path} = args)
        when name in ["edit_file", "multi_edit_file"] do
-    %{
-      kind: :target,
-      summary: path,
-      lines: ["file: #{path}", edit_summary(name, args)]
-    }
+    path = stringify_value(path)
+
+    Preview.new(:target, path, preview_lines(["file: #{path}", edit_summary(name, args)]))
   end
 
   defp do_build_preview(name, %{"paths" => paths})
        when is_list(paths) and name in ["git_stage"] do
-    joined = Enum.map_join(paths, ", ", &to_string/1)
+    joined = Enum.map_join(paths, ", ", &stringify_value/1)
 
-    %{
-      kind: :target,
-      summary: joined,
-      lines: ["paths: #{joined}"]
-    }
+    Preview.new(:target, joined, preview_lines(["paths: #{joined}"]))
   end
 
   defp do_build_preview("git_commit", %{"message" => message}) do
-    %{
-      kind: :target,
-      summary: message,
-      lines: ["commit message: #{message}"]
-    }
+    message = stringify_value(message)
+
+    Preview.new(:target, message, preview_lines(["commit message: #{message}"]))
   end
 
   defp do_build_preview(_name, args) when map_size(args) == 0 do
-    %{kind: :args, summary: "", lines: []}
+    Preview.new(:args, "", [])
   end
 
   defp do_build_preview(_name, args) do
     summary = inspect(args, limit: 20, printable_limit: 120)
-    %{kind: :args, summary: summary, lines: [summary]}
+    Preview.new(:args, summary, [summary])
   end
 
   @spec read_existing(String.t()) :: String.t()
@@ -144,7 +128,6 @@ defmodule MingaAgent.ToolApproval do
     before_lines
     |> List.myers_difference(after_lines)
     |> Enum.flat_map(&diff_op_preview_lines/1)
-    |> Enum.reject(&(&1 == "+" or &1 == "-"))
     |> Enum.take(20)
     |> case do
       [] -> ["No textual changes detected"]
@@ -159,8 +142,8 @@ defmodule MingaAgent.ToolApproval do
 
   @spec edit_summary(String.t(), map()) :: String.t()
   defp edit_summary("edit_file", args) do
-    old_text = Map.get(args, "old_text") || Map.get(args, "find") || ""
-    new_text = Map.get(args, "new_text") || Map.get(args, "replace") || ""
+    old_text = stringify_value(Map.get(args, "old_text") || Map.get(args, "find") || "")
+    new_text = stringify_value(Map.get(args, "new_text") || Map.get(args, "replace") || "")
     "replace #{inspect(truncate(old_text, 40))} with #{inspect(truncate(new_text, 40))}"
   end
 
@@ -177,6 +160,13 @@ defmodule MingaAgent.ToolApproval do
       {key, value} -> {key, value}
     end)
   end
+
+  @spec stringify_value(term()) :: String.t()
+  defp stringify_value(value) when is_binary(value), do: value
+  defp stringify_value(value), do: inspect(value, printable_limit: 120)
+
+  @spec preview_lines([String.t()]) :: [String.t()]
+  defp preview_lines(lines), do: Enum.map(lines, &truncate(&1, 300))
 
   @spec truncate(String.t(), non_neg_integer()) :: String.t()
   defp truncate(text, max_len) when is_binary(text) do

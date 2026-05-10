@@ -123,6 +123,47 @@ defmodule MingaEditor.Agent.ChatDecorationsTest do
       assert rendered_text =~ "[Y]"
     end
 
+    test "tool call awaiting approval renders preview content" do
+      tc = %MingaAgent.ToolCall{
+        id: "tc_123",
+        name: "write_file",
+        status: :running,
+        result: "",
+        collapsed: false
+      }
+
+      decs = Decorations.new()
+      messages = [{:tool_call, tc}]
+      offsets = [{0, 0, 1}]
+
+      pending_approval = %{
+        tool_call_id: "tc_123",
+        name: "write_file",
+        args: %{},
+        preview:
+          MingaAgent.ToolApproval.Preview.new(:diff, "config.toml", [
+            "file: config.toml",
+            "-old",
+            "+new"
+          ])
+      }
+
+      result =
+        ChatDecorations.build_decorations(decs, messages, offsets, test_theme(),
+          pending_approval: pending_approval
+        )
+
+      {_above, below} = Decorations.blocks_for_line(result, 0)
+      [block_dec] = below
+      rendered = block_dec.render.(80)
+      rendered_text = Enum.map_join(rendered, "", fn {text, _style} -> text end)
+
+      assert rendered_text =~ "Approval required"
+      assert rendered_text =~ "config.toml"
+      assert rendered_text =~ "-old"
+      assert rendered_text =~ "+new"
+    end
+
     test "tool call without matching approval shows normal header" do
       tc = %MingaAgent.ToolCall{
         id: "tc_456",

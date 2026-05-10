@@ -163,7 +163,8 @@ defmodule MingaAgent.Session do
   on `receive`, then clears the pending approval and broadcasts
   the resolution to subscribers.
   """
-  @spec respond_to_approval(GenServer.server(), :approve | :reject | :approve_all) :: :ok
+  @spec respond_to_approval(GenServer.server(), :approve | :reject | :approve_all) ::
+          :ok | {:error, :no_pending_approval}
   def respond_to_approval(session, decision) when decision in [:approve, :reject, :approve_all] do
     GenServer.call(session, {:respond_to_approval, decision})
   end

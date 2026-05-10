@@ -11,7 +11,7 @@ enum ChatMessageEntry: Identifiable {
     case thinking(id: Int, text: String, collapsed: Bool)
     case toolCall(id: Int, name: String, summary: String, status: UInt8, isError: Bool, collapsed: Bool, durationMs: UInt32, result: String)
     case styledToolCall(id: Int, name: String, summary: String, status: UInt8, isError: Bool, collapsed: Bool, durationMs: UInt32, resultLines: [[Wire.StyledTextRun]])
-    case approvalToolCall(id: Int, name: String, summary: String, toolCallId: String, previewKind: UInt8, previewLines: [String])
+    case approvalToolCall(id: Int, name: String, summary: String, previewKind: UInt8, previewLines: [String])
     case system(id: Int, text: String, isError: Bool)
     case usage(id: Int, input: UInt32, output: UInt32, cacheRead: UInt32, cacheWrite: UInt32, costMicros: UInt32)
 
@@ -21,7 +21,7 @@ enum ChatMessageEntry: Identifiable {
              .thinking(let id, _, _),
              .toolCall(let id, _, _, _, _, _, _, _),
              .styledToolCall(let id, _, _, _, _, _, _, _),
-             .approvalToolCall(let id, _, _, _, _, _),
+             .approvalToolCall(let id, _, _, _, _),
              .system(let id, _, _),
              .usage(let id, _, _, _, _, _):
             return id
@@ -121,8 +121,8 @@ final class AgentChatState {
                 return .toolCall(id: id, name: name, summary: summary, status: st, isError: isError, collapsed: collapsed, durationMs: duration, result: result)
             case .styledToolCall(let name, let summary, let st, let isError, let collapsed, let duration, let resultLines):
                 return .styledToolCall(id: id, name: name, summary: summary, status: st, isError: isError, collapsed: collapsed, durationMs: duration, resultLines: resultLines)
-            case .approvalToolCall(let name, let summary, let toolCallId, let previewKind, let previewLines):
-                return .approvalToolCall(id: id, name: name, summary: summary, toolCallId: toolCallId, previewKind: previewKind, previewLines: previewLines)
+            case .approvalToolCall(let name, let summary, _, let previewKind, let previewLines):
+                return .approvalToolCall(id: id, name: name, summary: summary, previewKind: previewKind, previewLines: previewLines)
             case .system(let text, let isError):
                 return .system(id: id, text: text, isError: isError)
             case .usage(let inp, let outp, let cacheR, let cacheW, let costM):

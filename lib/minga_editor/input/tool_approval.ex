@@ -1,6 +1,6 @@
 defmodule MingaEditor.Input.ToolApproval do
   @moduledoc """
-  Input handler for the tool approval sub-state (y/n/Y/N).
+  Input handler for the tool approval sub-state (y/n/Y).
 
   Active when `agent.pending_approval` is non-nil and the panel
   input is not focused. Handles y (approve), n (deny), Y (approve all),

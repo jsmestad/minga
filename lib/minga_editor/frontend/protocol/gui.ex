@@ -1645,6 +1645,18 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   defp preview_kind_byte(:target), do: 3
   defp preview_kind_byte(_), do: 0
 
+  @spec preview_text_bytes(term(), pos_integer()) :: binary()
+  defp preview_text_bytes(value, max_length) when is_binary(value) do
+    value |> String.slice(0, max_length) |> :erlang.iolist_to_binary()
+  end
+
+  defp preview_text_bytes(value, max_length) do
+    value
+    |> inspect(printable_limit: max_length)
+    |> String.slice(0, max_length)
+    |> :erlang.iolist_to_binary()
+  end
+
   @spec summarize_tool_args(String.t(), map()) :: String.t()
   defp summarize_tool_args("shell", %{"command" => cmd}), do: cmd
   defp summarize_tool_args("shell", %{command: cmd}), do: cmd
@@ -1766,16 +1778,16 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   #   preview_line_count::16, [line_len::16, line]*
   defp encode_chat_message_body({:approval_tool_call, tc, approval}) do
     preview = Map.get(approval, :preview, MingaAgent.ToolApproval.build_preview(tc.name, tc.args))
-    name_bytes = :erlang.iolist_to_binary([tc.name])
-    summary_bytes = :erlang.iolist_to_binary([Map.get(preview, :summary, tool_call_summary(tc))])
-    id_bytes = :erlang.iolist_to_binary([Map.get(approval, :tool_call_id, tc.id)])
+    name_bytes = preview_text_bytes(tc.name, 120)
+    summary_bytes = preview_text_bytes(Map.get(preview, :summary, tool_call_summary(tc)), 300)
+    id_bytes = preview_text_bytes(Map.get(approval, :tool_call_id, tc.id), 120)
 
     line_binaries =
       preview
       |> Map.get(:lines, [])
       |> Enum.take(20)
       |> Enum.map(fn line ->
-        bytes = :erlang.iolist_to_binary([line])
+        bytes = preview_text_bytes(line, 1_000)
         <<byte_size(bytes)::16, bytes::binary>>
       end)
 

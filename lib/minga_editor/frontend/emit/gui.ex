@@ -836,8 +836,17 @@ defmodule MingaEditor.Frontend.Emit.GUI do
   defp maybe_style_message({{id, {:assistant, _text}}, styled_lines}, _pending_approval),
     do: {id, {:styled_assistant, styled_lines}}
 
-  defp maybe_style_message({{id, {:tool_call, _tc} = msg}, _styled_lines}, pending_approval) do
-    maybe_inline_approval({id, msg}, pending_approval)
+  defp maybe_style_message({{id, {:tool_call, tc} = msg}, styled_lines}, pending_approval) do
+    case maybe_inline_approval({id, msg}, pending_approval) do
+      {^id, {:approval_tool_call, _tc, _approval}} = approval_message ->
+        approval_message
+
+      {^id, {:tool_call, _tc}} when is_list(styled_lines) ->
+        {id, {:styled_tool_call, tc, styled_lines}}
+
+      unchanged ->
+        unchanged
+    end
   end
 
   defp maybe_style_message({{id, msg}, _cache_entry}, _pending_approval), do: {id, msg}

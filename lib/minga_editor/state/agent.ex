@@ -27,8 +27,13 @@ defmodule MingaEditor.State.Agent do
   @typedoc "Agent status (delegated from RuntimeState)."
   @type status :: RuntimeState.status()
 
-  @typedoc "Pending tool approval data."
-  @type approval :: MingaAgent.ToolApproval.t()
+  @typedoc "Public pending tool approval data cached for rendering."
+  @type approval :: %{
+          required(:tool_call_id) => String.t(),
+          required(:name) => String.t(),
+          required(:args) => map(),
+          optional(:preview) => MingaAgent.ToolApproval.preview()
+        }
 
   @typedoc "Agent rendering cache."
   @type t :: %__MODULE__{
