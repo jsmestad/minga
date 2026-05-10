@@ -5,6 +5,7 @@ const protocol = @import("protocol.zig");
 const line_count = 2000;
 const iterations = 160;
 const warmup_iterations = 20;
+const target_line = line_count / 2;
 
 pub fn main() !void {
     const alloc = std.heap.smp_allocator;
@@ -79,7 +80,7 @@ fn buildElixirSource(alloc: std.mem.Allocator) !std.ArrayListUnmanaged(u8) {
 
 fn mutateOneLine(alloc: std.mem.Allocator, source: *std.ArrayListUnmanaged(u8), iteration: usize) !protocol.EditDelta {
     const marker = "# benchmark line ";
-    const found = std.mem.lastIndexOf(u8, source.items, marker) orelse return error.MarkerNotFound;
+    const found = findNthMarker(source.items, marker, target_line) orelse return error.MarkerNotFound;
     const start = found + marker.len;
     var line_start = start;
     while (line_start > 0 and source.items[line_start - 1] != '\n') : (line_start -= 1) {}
@@ -102,6 +103,17 @@ fn mutateOneLine(alloc: std.mem.Allocator, source: *std.ArrayListUnmanaged(u8), 
     };
     try source.replaceRange(alloc, start, end - start, replacement);
     return edit;
+}
+
+fn findNthMarker(source: []const u8, marker: []const u8, target_index: usize) ?usize {
+    var search_start: usize = 0;
+    var current: usize = 0;
+    while (std.mem.indexOfPos(u8, source, search_start, marker)) |found| {
+        if (current == target_index) return found;
+        current += 1;
+        search_start = found + marker.len;
+    }
+    return null;
 }
 
 fn nanoTimestamp() u64 {

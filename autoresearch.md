@@ -1,7 +1,7 @@
 # Autoresearch: tree-sitter highlight speed
 
 ## Objective
-Make syntax highlighting fast enough that parser/highlight work never shows up as editor latency. The benchmark runs the Zig `minga-parser` highlighter directly on a 2,000-line Elixir-like buffer, warms up parsing and highlight query execution, then measures repeated incremental parse plus `highlightWithInjections` cycles after a small source mutation.
+Make syntax highlighting fast enough that parser/highlight work never shows up as editor latency. The benchmark runs the Zig `minga-parser` highlighter directly on a 2,000-line Elixir-like buffer, warms up parsing and highlight query execution, then measures repeated incremental parse plus `highlightWithInjections` cycles after a small source mutation in the middle of the file.
 
 ## Metrics
 - **Primary**: `ts_update_highlight_us` (µs, lower is better) — median time for incremental parse plus highlight query execution after one source mutation.

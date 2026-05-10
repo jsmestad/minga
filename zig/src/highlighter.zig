@@ -83,8 +83,11 @@ pub const Highlighter = struct {
     cached_highlight_spans: []Span = &.{},
     cached_has_active_injections: bool = false,
     has_changed_range: bool = false,
-    changed_start_byte: u32 = 0,
-    changed_end_byte: u32 = 0,
+    changed_old_start_byte: u32 = 0,
+    changed_old_end_byte: u32 = 0,
+    changed_new_start_byte: u32 = 0,
+    changed_new_end_byte: u32 = 0,
+    changed_byte_delta: i64 = 0,
     cache_mutex: std.atomic.Mutex = .unlocked,
     allocator: std.mem.Allocator,
 
@@ -919,8 +922,18 @@ pub const Highlighter = struct {
         var line_end: usize = @min(edit.new_end_byte, source.len);
         while (line_end < source.len and source[line_end] != '\n') : (line_end += 1) {}
 
-        self.changed_start_byte = @intCast(line_start);
-        self.changed_end_byte = @intCast(line_end);
+        const delta = @as(i64, edit.new_end_byte) - @as(i64, edit.old_end_byte);
+        const old_line_end = @as(i64, @intCast(line_end)) - delta;
+        if (old_line_end < @as(i64, @intCast(line_start))) {
+            self.has_changed_range = false;
+            return;
+        }
+
+        self.changed_old_start_byte = @intCast(line_start);
+        self.changed_old_end_byte = @intCast(old_line_end);
+        self.changed_new_start_byte = @intCast(line_start);
+        self.changed_new_end_byte = @intCast(line_end);
+        self.changed_byte_delta = delta;
         self.has_changed_range = true;
     }
 
@@ -1378,7 +1391,7 @@ pub const Highlighter = struct {
     fn hasActiveInjectionRegions(self: *Highlighter, inj_query: *c.TSQuery, root: c.TSNode, source: []const u8) !bool {
         const inj_cursor = c.ts_query_cursor_new() orelse return error.CursorCreateFailed;
         defer c.ts_query_cursor_delete(inj_cursor);
-        if (self.has_changed_range) _ = c.ts_query_cursor_set_byte_range(inj_cursor, self.changed_start_byte, self.changed_end_byte);
+        if (self.has_changed_range) _ = c.ts_query_cursor_set_byte_range(inj_cursor, self.changed_new_start_byte, self.changed_new_end_byte);
         c.ts_query_cursor_exec(inj_cursor, inj_query, root);
 
         const inj_capture_count = c.ts_query_capture_count(inj_query);
@@ -1419,8 +1432,10 @@ pub const Highlighter = struct {
 
     fn highlightChangedRange(self: *Highlighter, query: *c.TSQuery, root: c.TSNode, source: []const u8) !HighlightResult {
         const alloc = self.allocator;
-        const start_byte = self.changed_start_byte;
-        const end_byte = self.changed_end_byte;
+        const old_start_byte = self.changed_old_start_byte;
+        const old_end_byte = self.changed_old_end_byte;
+        const start_byte = self.changed_new_start_byte;
+        const end_byte = self.changed_new_end_byte;
 
         const cursor = c.ts_query_cursor_new() orelse return error.CursorCreateFailed;
         defer c.ts_query_cursor_delete(cursor);
@@ -1460,8 +1475,10 @@ pub const Highlighter = struct {
         errdefer merged.deinit(alloc);
         try merged.ensureTotalCapacity(alloc, self.cached_highlight_spans.len + changed_spans.items.len);
         for (self.cached_highlight_spans) |span| {
-            if (span.end_byte < start_byte or span.start_byte > end_byte) {
+            if (span.end_byte <= old_start_byte) {
                 merged.appendAssumeCapacity(span);
+            } else if (span.start_byte >= old_end_byte) {
+                merged.appendAssumeCapacity(shiftSpan(span, self.changed_byte_delta));
             }
         }
         try merged.appendSlice(alloc, changed_spans.items);
@@ -1595,6 +1612,18 @@ fn findCaptureId(query: ?*c.TSQuery, target: []const u8) ?u32 {
         if (std.mem.eql(u8, name_ptr[0..length], target)) return @intCast(i);
     }
     return null;
+}
+
+fn shiftSpan(span: Span, delta: i64) Span {
+    const start = @as(i64, span.start_byte) + delta;
+    const end = @as(i64, span.end_byte) + delta;
+    return .{
+        .start_byte = @intCast(start),
+        .end_byte = @intCast(end),
+        .capture_id = span.capture_id,
+        .pattern_index = span.pattern_index,
+        .layer = span.layer,
+    };
 }
 
 fn spansAreSorted(spans: []const Span) bool {
