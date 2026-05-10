@@ -83,7 +83,7 @@ defmodule Minga.Config.OptionsTest do
                agent_flush_before_shell: true,
                agent_api_base_url: "",
                agent_api_endpoints: nil,
-               agent_mcp_server: nil,
+               agent_mcp_servers: [],
                confirm_quit: true,
                agent_system_prompt: "",
                agent_append_system_prompt: "",
@@ -267,11 +267,12 @@ defmodule Minga.Config.OptionsTest do
       assert {:ok, true} = Options.set(s, :agent_auto_context, true)
     end
 
-    test "agent_mcp_server accepts map or nil", %{server: s} do
-      config = %{"name" => "local", "command" => "node"}
-      assert {:ok, ^config} = Options.set(s, :agent_mcp_server, config)
-      assert Options.get(s, :agent_mcp_server) == config
-      assert {:ok, nil} = Options.set(s, :agent_mcp_server, nil)
+    test "agent_mcp_servers accepts a list of maps", %{server: s} do
+      config = [%{"name" => "local", "command" => "node"}]
+      assert {:ok, ^config} = Options.set(s, :agent_mcp_servers, config)
+      assert Options.get(s, :agent_mcp_servers) == config
+      assert {:error, message} = Options.set(s, :agent_mcp_servers, %{"name" => "local"})
+      assert message =~ "list of maps"
     end
 
     test "agent_auto_context rejects non-boolean", %{server: s} do

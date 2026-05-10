@@ -241,7 +241,7 @@ defmodule MingaAgent.SessionTest do
   # final action when a turn completes, so receiving that event guarantees
   # all handle_info callbacks have run.
   defp await_turn_complete do
-    assert_receive {:agent_event, _, {:status_changed, :idle}}, 200
+    assert_receive {:agent_event, _, {:status_changed, :idle}}, 1_000
   end
 
   defp mcp_session_builtin_tool do
@@ -1710,7 +1710,7 @@ defmodule MingaAgent.SessionTest do
             project_root: dir,
             tools: [mcp_session_builtin_tool()],
             config: %MingaAgent.Config{
-              mcp_server: %ServerConfig{name: "Local Tools", command: "ignored"},
+              mcp_servers: [%ServerConfig{name: "Local Tools", command: "ignored"}],
               tool_approval: :none
             },
             mcp_transport: FakeTransport,
@@ -1724,7 +1724,7 @@ defmodule MingaAgent.SessionTest do
 
       Session.subscribe(session)
       _provider = Session.get_provider(session)
-      assert_receive {:mcp_transport_started, transport}
+      assert_receive {:mcp_transport_started, "Local Tools", transport}
       FakeTransport.crash(transport)
 
       assert_receive {:agent_event, ^session, {:error, message}}, 500

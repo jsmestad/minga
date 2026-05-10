@@ -43,7 +43,7 @@ defmodule MingaAgent.Providers.Native do
   alias MingaAgent.Hooks.Result, as: HookResult
   alias MingaAgent.Instructions
   alias MingaAgent.InternalState
-  alias MingaAgent.MCP.Client, as: MCPClient
+  alias MingaAgent.MCP.Registry, as: MCPRegistry
   alias MingaAgent.MCP.ServerConfig, as: MCPServerConfig
   alias MingaAgent.Memory
   alias MingaAgent.ModelCatalog
@@ -157,8 +157,7 @@ defmodule MingaAgent.Providers.Native do
           session_cost: float(),
           fork_store: pid() | nil,
           changeset: pid() | nil,
-          mcp_client: pid() | nil,
-          mcp_tool_names: [String.t()]
+          mcp_registry: MCPRegistry.t() | nil
         }
 
   # ── Provider callbacks ──────────────────────────────────────────────────────
@@ -291,8 +290,9 @@ defmodule MingaAgent.Providers.Native do
           parent_session: subscriber
         )
 
-    {mcp_client, mcp_tools, mcp_tool_names} = start_mcp_client(opts, config, subscriber)
     internal_tools = build_internal_tools(provider_pid)
+    reserved_tool_names = Enum.map(base_tools ++ internal_tools, & &1.name)
+    {mcp_registry, mcp_tools} = start_mcp_servers(opts, config, subscriber, reserved_tool_names)
     tools = base_tools ++ mcp_tools ++ internal_tools
     system_prompt = build_system_prompt(project_root)
     context = Context.new([Context.system(system_prompt)])
@@ -325,8 +325,7 @@ defmodule MingaAgent.Providers.Native do
       session_cost: 0.0,
       fork_store: fork_store,
       changeset: changeset,
-      mcp_client: mcp_client,
-      mcp_tool_names: mcp_tool_names
+      mcp_registry: mcp_registry
     }
 
     Minga.Log.info(:agent, "[Agent.Native] started with model=#{model} root=#{project_root}")
@@ -717,26 +716,34 @@ defmodule MingaAgent.Providers.Native do
     {:noreply, %{state | changeset: nil}}
   end
 
-  def handle_info({:mcp_client_down, pid, server_name, reason}, %{mcp_client: pid} = state)
-      when is_pid(pid) do
-    message =
-      "MCP server #{server_name} stopped: #{inspect(reason)}. Built-in tools remain available."
+  def handle_info({:mcp_client_down, pid, server_name, reason}, state) when is_pid(pid) do
+    case MCPRegistry.server_for_pid(state.mcp_registry, pid) do
+      ^server_name ->
+        message =
+          "MCP server #{server_name} stopped: #{inspect(reason)}. Built-in tools remain available."
 
-    Minga.Log.warning(:agent, "[Agent.Native] #{message}")
-    notify(state.subscriber, %Event.Error{message: message})
-    {:noreply, remove_mcp_tools(state)}
+        Minga.Log.warning(:agent, "[Agent.Native] #{message}")
+        notify(state.subscriber, %Event.Error{message: message})
+        {:noreply, remove_mcp_server_tools(state, server_name)}
+
+      _other ->
+        {:noreply, state}
+    end
   end
 
-  def handle_info({:DOWN, _ref, :process, pid, reason}, %{mcp_client: pid} = state)
-      when is_pid(pid) do
-    message = "MCP client crashed: #{inspect(reason)}. Built-in tools remain available."
-    Minga.Log.warning(:agent, "[Agent.Native] #{message}")
-    notify(state.subscriber, %Event.Error{message: message})
-    {:noreply, remove_mcp_tools(state)}
-  end
+  def handle_info({:DOWN, _ref, :process, pid, reason}, state) when is_pid(pid) do
+    case MCPRegistry.server_for_pid(state.mcp_registry, pid) do
+      server_name when is_binary(server_name) ->
+        message =
+          "MCP server #{server_name} crashed: #{inspect(reason)}. Built-in tools remain available."
 
-  def handle_info({:DOWN, _ref, :process, _pid, _reason}, state) do
-    {:noreply, state}
+        Minga.Log.warning(:agent, "[Agent.Native] #{message}")
+        notify(state.subscriber, %Event.Error{message: message})
+        {:noreply, remove_mcp_server_tools(state, server_name)}
+
+      _other ->
+        {:noreply, state}
+    end
   end
 
   def handle_info(_msg, state) do
@@ -747,77 +754,46 @@ defmodule MingaAgent.Providers.Native do
   def terminate(reason, state) do
     cleanup_fork_store(state.fork_store)
     cleanup_changeset(state.changeset, reason)
-    cleanup_mcp_client(state.mcp_client)
+    cleanup_mcp(state.mcp_registry)
     :ok
   catch
     :exit, _ -> :ok
   end
 
-  @spec start_mcp_client(keyword(), AgentConfig.t(), pid()) ::
-          {pid() | nil, [term()], [String.t()]}
-  defp start_mcp_client(opts, config, subscriber) do
-    server_config = Keyword.get(opts, :mcp_server, config.mcp_server)
+  @spec start_mcp_servers(keyword(), AgentConfig.t(), pid(), [String.t()]) ::
+          {MCPRegistry.t() | nil, [term()]}
+  defp start_mcp_servers(opts, config, subscriber, reserved_tool_names) do
+    server_configs = Keyword.get(opts, :mcp_servers, config.mcp_servers)
 
-    case MCPServerConfig.normalize(server_config) do
-      {:ok, nil} ->
-        {nil, [], []}
+    case MCPServerConfig.normalize_list(server_configs) do
+      {:ok, []} ->
+        {nil, []}
 
-      {:ok, %MCPServerConfig{} = normalized} ->
-        do_start_mcp_client(opts, normalized, subscriber)
+      {:ok, normalized} ->
+        registry_opts = [
+          transport: Keyword.get(opts, :mcp_transport, MingaAgent.MCP.StdioTransport),
+          transport_opts: Keyword.get(opts, :mcp_transport_opts, []),
+          notify_pid: self(),
+          request_timeout: Keyword.get(opts, :mcp_request_timeout, 5_000),
+          reserved_tool_names: reserved_tool_names
+        ]
+
+        {registry, tools, _failures} =
+          MCPRegistry.start_all(normalized, subscriber, registry_opts)
+
+        {registry, tools}
 
       {:error, reason} ->
         notify(subscriber, %Event.Error{message: "MCP config error: #{reason}"})
-        {nil, [], []}
+        {nil, []}
     end
   end
 
-  @spec do_start_mcp_client(keyword(), MCPServerConfig.t(), pid()) ::
-          {pid() | nil, [term()], [String.t()]}
-  defp do_start_mcp_client(opts, server_config, subscriber) do
-    client_opts = [
-      server_config: server_config,
-      transport: Keyword.get(opts, :mcp_transport, MingaAgent.MCP.StdioTransport),
-      transport_opts: Keyword.get(opts, :mcp_transport_opts, []),
-      notify_pid: self(),
-      request_timeout: Keyword.get(opts, :mcp_request_timeout, 5_000)
-    ]
-
-    case MCPClient.start(client_opts) do
-      {:ok, client} ->
-        Process.monitor(client)
-
-        case MCPClient.reqllm_tools(client) do
-          {:ok, tools} ->
-            tool_names = Enum.map(tools, & &1.name)
-            {client, tools, tool_names}
-
-          {:error, reason} ->
-            cleanup_mcp_client(client)
-            notify_mcp_start_failure(subscriber, server_config.name, reason)
-            {nil, [], []}
-        end
-
-      {:error, reason} ->
-        notify_mcp_start_failure(subscriber, server_config.name, reason)
-        {nil, [], []}
-    end
-  end
-
-  @spec notify_mcp_start_failure(pid(), String.t(), term()) :: :ok
-  defp notify_mcp_start_failure(subscriber, server_name, reason) do
-    message =
-      "MCP server #{server_name} failed to start: #{format_error(reason)}. Built-in tools remain available."
-
-    Minga.Log.warning(:agent, "[Agent.Native] #{message}")
-    notify(subscriber, %Event.Error{message: message})
-    :ok
-  end
-
-  @spec remove_mcp_tools(map()) :: map()
-  defp remove_mcp_tools(state) do
-    cleanup_mcp_client(state.mcp_client)
-    tools = Enum.reject(state.tools, &(&1.name in state.mcp_tool_names))
-    %{state | tools: tools, mcp_client: nil, mcp_tool_names: []}
+  @spec remove_mcp_server_tools(map(), String.t()) :: map()
+  defp remove_mcp_server_tools(state, server_name) do
+    {registry, removed_tool_names} = MCPRegistry.remove_server(state.mcp_registry, server_name)
+    tools = Enum.reject(state.tools, &(&1.name in removed_tool_names))
+    %{state | tools: tools, mcp_registry: registry}
   end
 
   # ── Terminate cleanup ──────────────────────────────────────────────────────
@@ -861,15 +837,8 @@ defmodule MingaAgent.Providers.Native do
     :ok
   end
 
-  @spec cleanup_mcp_client(pid() | nil) :: :ok
-  defp cleanup_mcp_client(nil), do: :ok
-
-  defp cleanup_mcp_client(pid) when is_pid(pid) do
-    GenServer.stop(pid, :normal, 1_000)
-    :ok
-  catch
-    :exit, _ -> :ok
-  end
+  @spec cleanup_mcp(MCPRegistry.t() | nil) :: :ok
+  defp cleanup_mcp(registry), do: MCPRegistry.stop_all(registry)
 
   @spec merge_changeset(pid()) :: :ok
   defp merge_changeset(cs) do

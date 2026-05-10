@@ -39,7 +39,7 @@ defmodule Minga.Config.Options do
   | `:agent_panel_split`      | positive integer (30-80)                   | `65`       |
   | `:startup_view`           | `:agent` or `:editor`                       | `:agent`   |
   | `:agent_auto_context`     | boolean                                     | `true`     |
-  | `:agent_mcp_server`       | map or `nil`                                | `nil`      |
+  | `:agent_mcp_servers`      | list of server config maps                  | `[]`       |
   | `:font_family`            | string (font name)                          | `"Menlo"`   |
   | `:font_size`              | positive integer (point size)               | `13`        |
   | `:font_weight`            | `:thin` / `:light` / `:regular` / `:medium` / `:semibold` / `:bold` / `:heavy` / `:black` | `:regular` |
@@ -128,7 +128,7 @@ defmodule Minga.Config.Options do
           | :agent_max_cost
           | :agent_api_base_url
           | :agent_api_endpoints
-          | :agent_mcp_server
+          | :agent_mcp_servers
           | :agent_compaction_threshold
           | :agent_compaction_keep_recent
           | :agent_approval_timeout
@@ -178,6 +178,7 @@ defmodule Minga.Config.Options do
           | :string_or_nil
           | :string_list
           | :map_or_nil
+          | :map_list
           | :float_or_nil
           | :any
 
@@ -260,7 +261,7 @@ defmodule Minga.Config.Options do
     {:agent_max_cost, :float_or_nil, nil},
     {:agent_api_base_url, :string, ""},
     {:agent_api_endpoints, :map_or_nil, nil},
-    {:agent_mcp_server, :map_or_nil, nil},
+    {:agent_mcp_servers, :map_list, []},
     {:agent_compaction_threshold, :float_or_nil, 0.8},
     {:agent_compaction_keep_recent, :pos_integer, 6},
     {:agent_approval_timeout, :pos_integer, 300_000},
@@ -789,6 +790,18 @@ defmodule Minga.Config.Options do
 
   defp validate_type(:map_or_nil, name, value) do
     {:error, "#{name} must be a map or nil, got: #{inspect(value)}"}
+  end
+
+  defp validate_type(:map_list, _name, value) when is_list(value) do
+    if Enum.all?(value, &is_map/1) do
+      :ok
+    else
+      {:error, "expected a list of maps, got non-map elements"}
+    end
+  end
+
+  defp validate_type(:map_list, name, value) do
+    {:error, "#{name} must be a list of maps, got: #{inspect(value)}"}
   end
 
   defp validate_type(:float_or_nil, _name, nil), do: :ok

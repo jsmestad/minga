@@ -176,6 +176,7 @@ defmodule Minga.Config.Completion do
   defp format_type(:string_or_nil), do: "string or nil"
   defp format_type(:string_list), do: "list of strings"
   defp format_type(:map_or_nil), do: "map or nil"
+  defp format_type(:map_list), do: "list of maps"
   defp format_type(:float_or_nil), do: "float or nil"
   defp format_type(:theme_atom), do: "theme"
   defp format_type(:any), do: "any"
@@ -294,6 +295,9 @@ defmodule Minga.Config.Completion do
 
   defp option_description(:agent_api_base_url), do: "Override the base URL for the agent API."
   defp option_description(:agent_api_endpoints), do: "Per-model API endpoint overrides as a map."
+
+  defp option_description(:agent_mcp_servers),
+    do: "List of MCP server configs to launch for native agent sessions."
 
   defp option_description(:agent_compaction_threshold),
     do: "Context window usage ratio that triggers automatic compaction. Nil to disable."
