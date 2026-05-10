@@ -242,21 +242,26 @@ defmodule MingaEditor.RenderPipeline.Scroll do
     # The DisplayMap merges per-window folds, decoration folds, and virtual
     # lines into a unified mapping. Falls back to VisibleLines when there
     # are no decoration folds or virtual lines (pure window-fold case).
-    line_count_approx = Buffer.line_count(window.buffer)
     decorations = fetch_decorations(window.buffer)
 
     # Two-pass scroll: compute DisplayMap, then verify cursor is visible.
     # If decorations push the cursor off-screen, adjust first_line and recompute.
     {first_line, visible_line_map} =
-      compute_display_map_with_cursor_check(
-        fold_map,
-        decorations,
-        first_line,
-        visible_rows,
-        line_count_approx,
-        content_width,
-        cursor_line
-      )
+      if DisplayMap.required?(fold_map, decorations) do
+        line_count_approx = Buffer.line_count(window.buffer)
+
+        compute_display_map_with_cursor_check(
+          fold_map,
+          decorations,
+          first_line,
+          visible_rows,
+          line_count_approx,
+          content_width,
+          cursor_line
+        )
+      else
+        {first_line, nil}
+      end
 
     # Fetch buffer data: need to cover all visible buffer lines
     {fetch_first, fetch_count} =
