@@ -80,20 +80,22 @@ defmodule MingaAgent.MCP.Client do
   @impl GenServer
   @spec init(keyword()) :: {:ok, state()} | {:stop, term()}
   def init(opts) do
-    with {:ok, config} <- normalize_config(opts) do
-      transport_mod = Keyword.get(opts, :transport, StdioTransport)
-      transport_opts = Keyword.get(opts, :transport_opts, [])
-      request_timeout = Keyword.get(opts, :request_timeout, @default_timeout)
+    case normalize_config(opts) do
+      {:ok, config} ->
+        transport_mod = Keyword.get(opts, :transport, StdioTransport)
+        transport_opts = Keyword.get(opts, :transport_opts, [])
+        request_timeout = Keyword.get(opts, :request_timeout, @default_timeout)
 
-      case transport_mod.start(config, self(), transport_opts) do
-        {:ok, transport} ->
-          init_started_transport(opts, config, transport_mod, transport, request_timeout)
+        case transport_mod.start(config, self(), transport_opts) do
+          {:ok, transport} ->
+            init_started_transport(opts, config, transport_mod, transport, request_timeout)
 
-        {:error, reason} ->
-          {:stop, reason}
-      end
-    else
-      {:error, reason} -> {:stop, reason}
+          {:error, reason} ->
+            {:stop, reason}
+        end
+
+      {:error, reason} ->
+        {:stop, reason}
     end
   end
 
