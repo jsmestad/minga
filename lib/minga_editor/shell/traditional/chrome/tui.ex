@@ -44,54 +44,88 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUI do
     {status_bar_draws, status_bar_data, modeline_click_regions} =
       build_status_bar(state, layout)
 
-    # Vertical split borders
-    vertical_separators =
-      if MingaEditor.State.Windows.split?(state.workspace.windows) do
-        ChromeHelpers.render_separators(
-          state.workspace.windows.tree,
-          layout.editor_area,
-          elem(layout.editor_area, 3),
-          state.theme
-        )
-      else
-        []
+    stable_fp = stable_chrome_fingerprint(state, layout)
+
+    stable =
+      case state.caches.chrome_prev_result do
+        %Chrome{stable_fingerprint: ^stable_fp} = prev ->
+          prev
+
+        _ ->
+          # Vertical split borders
+          vertical_separators =
+            if MingaEditor.State.Windows.split?(state.workspace.windows) do
+              ChromeHelpers.render_separators(
+                state.workspace.windows.tree,
+                layout.editor_area,
+                elem(layout.editor_area, 3),
+                state.theme
+              )
+            else
+              []
+            end
+
+          # Horizontal split separators (filename bars)
+          horizontal_separators =
+            ChromeHelpers.render_horizontal_separators(layout.horizontal_separators, state.theme)
+
+          separator_draws = vertical_separators ++ horizontal_separators
+
+          # File tree
+          tree_draws = TreeRenderer.render(state)
+
+          # Minibuffer
+          {minibuffer_row, _mbc, _mbw, _mbh} = layout.minibuffer
+          minibuffer_draw = Minibuffer.render(state, minibuffer_row, full_viewport.cols)
+
+          # Tab bar
+          {tab_bar_draws, tab_bar_regions} = ChromeHelpers.render_tab_bar(state, layout)
+
+          # Region definitions
+          regions = Regions.define_regions(layout)
+
+          %Chrome{
+            stable_fingerprint: stable_fp,
+            tab_bar: tab_bar_draws,
+            tab_bar_click_regions: tab_bar_regions,
+            minibuffer: [minibuffer_draw],
+            separators: separator_draws,
+            file_tree: tree_draws,
+            regions: regions
+          }
       end
-
-    # Horizontal split separators (filename bars)
-    horizontal_separators =
-      ChromeHelpers.render_horizontal_separators(layout.horizontal_separators, state.theme)
-
-    separator_draws = vertical_separators ++ horizontal_separators
-
-    # File tree
-    tree_draws = TreeRenderer.render(state)
-
-    # Minibuffer
-    {minibuffer_row, _mbc, _mbw, _mbh} = layout.minibuffer
-    minibuffer_draw = Minibuffer.render(state, minibuffer_row, full_viewport.cols)
 
     # Overlays (all types for TUI)
     overlays = build_overlays(state, full_viewport, cursor_info)
-
-    # Tab bar
-    {tab_bar_draws, tab_bar_regions} = ChromeHelpers.render_tab_bar(state, layout)
-
-    # Region definitions
-    regions = Regions.define_regions(layout)
 
     %Chrome{
       status_bar_draws: status_bar_draws,
       status_bar_data: status_bar_data,
       modeline_click_regions: modeline_click_regions,
-      tab_bar: tab_bar_draws,
-      tab_bar_click_regions: tab_bar_regions,
-      minibuffer: [minibuffer_draw],
-      separators: separator_draws,
-      file_tree: tree_draws,
+      tab_bar: stable.tab_bar,
+      tab_bar_click_regions: stable.tab_bar_click_regions,
+      minibuffer: stable.minibuffer,
+      separators: stable.separators,
+      file_tree: stable.file_tree,
       agent_panel: [],
       overlays: overlays,
-      regions: regions
+      regions: stable.regions,
+      stable_fingerprint: stable_fp
     }
+  end
+
+  @spec stable_chrome_fingerprint(state(), Layout.t()) :: integer()
+  defp stable_chrome_fingerprint(state, layout) do
+    :erlang.phash2({
+      layout.editor_area,
+      layout.horizontal_separators,
+      layout.minibuffer,
+      layout.status_bar,
+      state.workspace.windows.tree,
+      state.workspace.file_tree,
+      state.shell_state |> Map.get(:tab_bar),
+      state.theme
+    })
   end
 
   @spec build_status_bar(state(), Layout.t()) ::

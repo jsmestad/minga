@@ -30,7 +30,8 @@ defmodule MingaEditor.RenderPipeline.Chrome do
             file_tree: [],
             agent_panel: [],
             overlays: [],
-            regions: []
+            regions: [],
+            stable_fingerprint: nil
 
   @type t :: %__MODULE__{
           status_bar_draws: [DisplayList.draw()],
@@ -44,7 +45,8 @@ defmodule MingaEditor.RenderPipeline.Chrome do
           file_tree: [DisplayList.draw()],
           agent_panel: [DisplayList.draw()],
           overlays: [DisplayList.Overlay.t()],
-          regions: [binary()]
+          regions: [binary()],
+          stable_fingerprint: integer() | nil
         }
 
   @typedoc "Editor state or render pipeline input."
