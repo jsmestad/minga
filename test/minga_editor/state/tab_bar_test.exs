@@ -626,7 +626,11 @@ defmodule MingaEditor.State.TabBarTest do
       live = :live_pid
 
       tab1 = file_tab(1, "active")
-      tab2 = %{file_tab(2, "inactive") | context: %{buffers: %Buffers{list: [dead, live], active: dead, active_index: 0}}}
+
+      tab2 = %{
+        file_tab(2, "inactive")
+        | context: %{buffers: %Buffers{list: [dead, live], active: dead, active_index: 0}}
+      }
 
       tb = %TabBar{tabs: [tab1, tab2], active_id: 1, next_id: 3}
       result = TabBar.scrub_dead_buffer(tb, dead)
@@ -650,8 +654,15 @@ defmodule MingaEditor.State.TabBarTest do
 
       dead = :dead_pid
 
-      tab1 = %{file_tab(1, "a") | context: %{buffers: %Buffers{list: [dead], active: dead, active_index: 0}}}
-      tab2 = %{file_tab(2, "b") | context: %{buffers: %Buffers{list: [:live, dead], active: :live, active_index: 0}}}
+      tab1 = %{
+        file_tab(1, "a")
+        | context: %{buffers: %Buffers{list: [dead], active: dead, active_index: 0}}
+      }
+
+      tab2 = %{
+        file_tab(2, "b")
+        | context: %{buffers: %Buffers{list: [:live, dead], active: :live, active_index: 0}}
+      }
 
       tb = %TabBar{tabs: [tab1, tab2], active_id: 1, next_id: 3}
       result = TabBar.scrub_dead_buffer(tb, dead)
