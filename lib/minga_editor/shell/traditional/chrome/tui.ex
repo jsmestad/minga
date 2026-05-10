@@ -9,6 +9,7 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUI do
 
   alias MingaEditor.CompletionUI
   alias MingaEditor.DisplayList
+  alias Minga.Buffer
   alias MingaEditor.DisplayList.{Cursor, Overlay}
   alias MingaEditor.Layout
   alias MingaEditor.PickerUI
@@ -137,10 +138,39 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUI do
 
   defp build_status_bar(state, layout) do
     {sb_row, _sb_col, sb_width, _sb_h} = layout.status_bar
-    status_bar_data = StatusBarData.from_state(state)
+    status_bar_data = cached_or_fresh_status_bar_data(state)
     modeline_data = StatusBarData.to_modeline_data(status_bar_data)
     {draws, click_regions} = Modeline.render(sb_row, sb_width, modeline_data, state.theme)
     {draws, status_bar_data, click_regions}
+  end
+
+  @spec cached_or_fresh_status_bar_data(state()) :: StatusBarData.t()
+  defp cached_or_fresh_status_bar_data(state) do
+    buf = state.workspace.buffers.active
+
+    case state.caches.chrome_prev_result do
+      %Chrome{status_bar_data: {:buffer, data}} when is_pid(buf) ->
+        {line, col} = Buffer.cursor(buf)
+        line_count = Buffer.line_count(buf)
+        dirty = Buffer.dirty?(buf)
+
+        {:buffer,
+         %{
+           data
+           | mode: Minga.Editing.mode(state),
+             mode_state: state.workspace.editing.mode_state,
+             cursor_line: line,
+             cursor_col: col,
+             line_count: line_count,
+             dirty: dirty,
+             status_msg: state.shell_state.status_msg
+         }}
+
+      _ ->
+        StatusBarData.from_state(state)
+    end
+  catch
+    :exit, _ -> StatusBarData.from_state(state)
   end
 
   # ── Overlays ──────────────────────────────────────────────────────────────
