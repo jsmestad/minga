@@ -920,11 +920,10 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
   @spec window_highlight(state(), Window.t()) :: MingaEditor.UI.Highlight.t() | nil
   def window_highlight(state, window) do
     hl =
-      Map.get(
-        state.workspace.highlight.highlights,
-        window.buffer,
-        MingaEditor.UI.Highlight.from_theme(state.theme)
-      )
+      case Map.fetch(state.workspace.highlight.highlights, window.buffer) do
+        {:ok, highlight} -> highlight
+        :error -> MingaEditor.UI.Highlight.from_theme(state.theme)
+      end
 
     if hl.capture_names == {} do
       nil
