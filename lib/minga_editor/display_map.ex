@@ -122,6 +122,8 @@ defmodule MingaEditor.DisplayMap do
 
   @doc "Returns true when folds, virtual lines, or block decorations require a display map."
   @spec required?(FoldMap.t(), Decorations.t()) :: boolean()
+  def required?(%FoldMap{folds: []}, %Decorations{fold_regions: [], virtual_texts: [], block_decorations: []}), do: false
+
   def required?(fold_map, decorations) do
     required?(fold_map, decorations, Decorations.closed_fold_regions(decorations))
   end
