@@ -1,36 +1,33 @@
-# Autoresearch: Swift rendering speed
+# Autoresearch: tree-sitter highlight speed
 
 ## Objective
-Make the macOS GUI frontend feel as snappy as the headless BEAM path by reducing the measured Swift semantic window rendering cost for a realistic editing workload. The benchmark renders 80 visible semantic rows through `WindowContentRenderer` and `LineTextureAtlas`, warms the row texture cache, then measures 220 frame-style updates where one row changes and the rest are cache hits.
+Make syntax highlighting fast enough that parser/highlight work never shows up as editor latency. The benchmark runs the Zig `minga-parser` highlighter directly on a 2,000-line Elixir-like buffer, warms up parsing and highlight query execution, then measures repeated full parse plus `highlightWithInjections` cycles after a small source mutation.
 
 ## Metrics
-- **Primary**: `swift_frame_us` (µs, lower is better) — median time to render one semantic frame through the Swift window-content renderer and atlas path.
-- **Secondary**: `swift_frame_p95_us`, `swift_cold_frame_us`, `swift_cache_hit_frame_us`, `swift_rows` — tradeoff and localization metrics for tail latency, cold rasterization, all-cache-hit overhead, and workload size.
+- **Primary**: `ts_update_highlight_us` (µs, lower is better) — median time for parse plus highlight query execution after one source mutation.
+- **Secondary**: `ts_update_highlight_p95_us`, `ts_parse_us`, `ts_highlight_us`, `ts_highlight_p95_us`, `ts_span_count`, `ts_line_count` — tradeoff and localization metrics for tail latency, parse/query split, output size, and workload size.
 
 ## How to Run
 `./autoresearch.sh` outputs `METRIC name=value` lines.
 
 ## Files in Scope
-- `macos/Sources/Renderer/WindowContentRenderer.swift` — semantic row to attributed string, CoreText rasterization, texture and atlas upload path.
-- `macos/Sources/Renderer/BitmapRasterizer.swift` — pooled CoreGraphics/CoreText bitmap rasterization.
-- `macos/Sources/Renderer/LineTextureAtlas.swift`, `macos/Sources/Renderer/SlotAllocator.swift`, `macos/Sources/Renderer/CachedLineTexture.swift` — atlas allocation, cache hits, and uploads.
-- `macos/Sources/Renderer/CoreTextMetalRenderer.swift` — frame render loop that calls `WindowContentRenderer`, line instance construction, overlay quads, and Metal draw setup when benchmark work points there.
-- `macos/Sources/Font/FontFace.swift`, `macos/Sources/Font/FontManager.swift` — font lookup and per-span font selection hot paths.
-- `macos/Sources/Protocol/ProtocolDecoder.swift`, `macos/Sources/Renderer/CommandDispatcher.swift`, `macos/Sources/Renderer/WindowContent.swift` — semantic content decode and state update path when benchmark work points there.
-- `bench/swift_render_bench.swift`, `autoresearch.sh`, `autoresearch.checks.sh` — benchmark and validation harness.
+- `zig/src/highlighter.zig` — tree-sitter parsing, query execution, capture collection, predicate handling, sorting, capture-name construction, injections, folds, indents, and textobjects.
+- `zig/src/predicates.zig`, `zig/src/posix_regex.zig`, `zig/src/query_loader.zig` — predicate and query handling when profiling points there.
+- `zig/src/parser_main.zig`, `zig/src/protocol.zig`, `zig/src/port_writer.zig` — parser port protocol and response encoding when benchmark work points there.
+- `zig/src/highlight_bench.zig`, `zig/build.zig`, `autoresearch.sh`, `autoresearch.checks.sh` — benchmark and validation harness.
+- `zig/src/queries/**/*.scm` — highlight query shape, only when correctness is preserved and language behavior remains intended.
 
 ## Off Limits
-- Do not change public protocol wire formats unless a benchmark result clearly requires it and tests/docs are updated in the same kept experiment.
-- Do not skip rasterization, atlas upload, cache invalidation, or semantic content correctness to win the benchmark.
-- Do not make the Swift frontend interpret editor semantics; the BEAM remains the source of truth.
+- Do not skip parsing, query execution, predicate evaluation, sorting, injection handling, or capture-name output to win the benchmark.
+- Do not remove captures or weaken highlight correctness unless tests and intended behavior are updated in the same kept experiment.
+- Do not change public parser port protocol wire formats unless benchmark evidence clearly requires it and Elixir/Swift/Zig protocol tests are updated.
 - Do not add new dependencies for micro-optimizations.
-- Do not use private AppKit, CoreText, or Metal APIs.
 
 ## Constraints
-- Primary metric decides keep/discard. Keep only lower `swift_frame_us` unless a secondary metric exposes a correctness or catastrophic regression.
+- Primary metric decides keep/discard. Keep only lower `ts_update_highlight_us` unless a secondary metric exposes a correctness or catastrophic regression.
 - `./autoresearch.checks.sh` must pass before keeping any code change.
-- Preserve user-visible rendering behavior: text, styles, font fallback, cache invalidation, and atlas contents must remain correct.
-- Prefer structural hot-path reductions: fewer attributed-string allocations, fewer CoreText objects, better cache reuse, less atlas churn, less per-row work on cache hits.
+- Preserve user-visible highlighting behavior across frontends.
+- Prefer structural hot-path reductions: fewer query cursor allocations, fewer per-match C API calls, better reuse of capture names, cheaper sorting, less allocation churn, and safe incremental parse/query improvements.
 
 ## What's Been Tried
-- Switched from the headless BEAM keystroke benchmark after reaching about 1.8ms p50 internally. New target focuses on macOS Swift semantic rendering.
+- Switched from Swift semantic rendering after reducing `swift_frame_us` from roughly 266µs to 165µs. New target focuses on the Zig tree-sitter parser/highlighter shared by all frontends.

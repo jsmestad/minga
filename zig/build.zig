@@ -196,6 +196,26 @@ pub fn build(b: *std.Build) void {
 
     const run_hook_runner_tests = b.addRunArtifact(hook_runner_tests);
     test_step.dependOn(&run_hook_runner_tests.step);
+
+    // Tree-sitter highlight benchmark used by autoresearch.
+    const highlight_bench = b.addExecutable(.{
+        .name = "highlight-bench",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/highlight_bench.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    highlight_bench.root_module.addImport("build_options", build_options.createModule());
+    highlight_bench.root_module.addIncludePath(b.path("vendor/tree-sitter/include"));
+    highlight_bench.root_module.link_libc = true;
+    highlight_bench.root_module.addCSourceFile(.{ .file = b.path("src/regex_sizeof.c"), .flags = &.{"-std=c11"} });
+    highlight_bench.root_module.linkLibrary(ts_lib);
+    for (grammar_libs) |gl| highlight_bench.root_module.linkLibrary(gl);
+
+    const run_highlight_bench = b.addRunArtifact(highlight_bench);
+    const highlight_bench_step = b.step("highlight-bench", "Run tree-sitter highlight benchmark");
+    highlight_bench_step.dependOn(&run_highlight_bench.step);
 }
 
 /// Build a static library for a tree-sitter grammar.
