@@ -96,6 +96,7 @@ defmodule Minga.LSP.SyncServer do
     Events.subscribe(:buffer_closed, events_registry)
     Events.subscribe(:buffer_changed, events_registry)
     Events.subscribe(:tool_install_complete, events_registry)
+    Events.subscribe(:file_written, events_registry)
 
     {:ok,
      %{
@@ -129,6 +130,15 @@ defmodule Minga.LSP.SyncServer do
 
   def handle_info({:minga_event, :buffer_saved, %Events.BufferEvent{buffer: buf}}, state) do
     do_buffer_save(buf)
+    {:noreply, state}
+  end
+
+  def handle_info(
+        {:minga_event, :file_written,
+         %Events.FileWrittenEvent{path: path, change_type: change_type}},
+        state
+      ) do
+    notify_file_watchers(path, change_type)
     {:noreply, state}
   end
 
@@ -441,6 +451,22 @@ defmodule Minga.LSP.SyncServer do
       end
 
     {deltas, remaining}
+  end
+
+  # ── Private: file watcher notifications ───────────────────────────────
+
+  @spec notify_file_watchers(String.t(), Minga.Events.FileWrittenEvent.change_type()) :: :ok
+  defp notify_file_watchers(path, change_type) do
+    changes = [{path, change_type}]
+
+    LSPSupervisor.all_clients()
+    |> Enum.each(fn client_pid ->
+      try do
+        Client.notify_file_changes(client_pid, changes)
+      catch
+        :exit, _ -> :ok
+      end
+    end)
   end
 
   # ── Private: LSP notification helpers ──────────────────────────────────

@@ -31,6 +31,7 @@ defmodule Minga.LSP.Client do
   alias Minga.Diagnostics
   alias Minga.Diagnostics.Diagnostic
   alias Minga.LSP.Client.State
+  alias Minga.LSP.GlobMatcher
   alias Minga.LSP.JsonRpc
   alias Minga.LSP.PositionEncoding
   alias Minga.LSP.SemanticTokens
@@ -121,6 +122,19 @@ defmodule Minga.LSP.Client do
   @spec did_close(GenServer.server(), String.t()) :: :ok
   def did_close(server, uri) when is_binary(uri) do
     GenServer.cast(server, {:did_close, uri})
+  end
+
+  @doc """
+  Sends `workspace/didChangeWatchedFiles` for file changes matching registered watchers.
+
+  Accepts a list of `{path, change_type}` tuples where `change_type` is
+  `:created`, `:changed`, or `:deleted`. Filters against registered glob
+  patterns and watch kinds, then sends the notification for matching changes.
+  No-op when no watchers are registered or no changes match.
+  """
+  @spec notify_file_changes(GenServer.server(), [{String.t(), GlobMatcher.change_type()}]) :: :ok
+  def notify_file_changes(server, changes) when is_list(changes) do
+    GenServer.cast(server, {:notify_file_changes, changes})
   end
 
   @doc """
@@ -419,6 +433,16 @@ defmodule Minga.LSP.Client do
     {:noreply, state}
   end
 
+  def handle_cast({:notify_file_changes, changes}, %{status: :ready} = state) do
+    matching = filter_matching_changes(state, changes)
+
+    if matching != [] do
+      send_notification(state, "workspace/didChangeWatchedFiles", %{"changes" => matching})
+    end
+
+    {:noreply, state}
+  end
+
   # Ignore casts when not ready
   def handle_cast(_msg, state) do
     {:noreply, state}
@@ -529,14 +553,14 @@ defmodule Minga.LSP.Client do
     handle_server_request(method, id, params, state)
   end
 
-  defp handle_message(%{"method" => method, "params" => params}, state)
-       when is_binary(method) do
-    handle_server_notification(method, params, state)
-  end
-
   defp handle_message(%{"method" => method, "id" => id}, state)
        when is_binary(method) do
     handle_server_request(method, id, %{}, state)
+  end
+
+  defp handle_message(%{"method" => method, "params" => params}, state)
+       when is_binary(method) do
+    handle_server_notification(method, params, state)
   end
 
   defp handle_message(_msg, state), do: state
@@ -692,9 +716,29 @@ defmodule Minga.LSP.Client do
     state
   end
 
-  defp handle_server_request("client/registerCapability", id, _params, state) do
+  defp handle_server_request("client/registerCapability", id, params, state) do
     send_response(state, id, nil)
-    state
+    registrations = Map.get(params, "registrations", [])
+    new_watchers = extract_file_watchers(registrations)
+
+    if new_watchers != [] do
+      Minga.Log.debug(:lsp, "Registered #{length(new_watchers)} file watcher(s)")
+    end
+
+    %{state | file_watchers: state.file_watchers ++ new_watchers}
+  end
+
+  defp handle_server_request("client/unregisterCapability", id, params, state) do
+    send_response(state, id, nil)
+    # "unregisterations" is the LSP spec's spelling (intentionally misspelled on the wire)
+    unregistrations = Map.get(params, "unregisterations", [])
+
+    ids_to_remove =
+      for %{"id" => uid, "method" => "workspace/didChangeWatchedFiles"} <- unregistrations,
+          do: uid
+
+    remaining = Enum.reject(state.file_watchers, fn w -> w.id in ids_to_remove end)
+    %{state | file_watchers: remaining}
   end
 
   defp handle_server_request("workspace/configuration", id, params, state) do
@@ -750,6 +794,64 @@ defmodule Minga.LSP.Client do
   end
 
   defp fetch_configuration_path(_settings, _path), do: :error
+
+  # ── File Watcher Registration ─────────────────────────────────────────────
+
+  @default_watch_kind 7
+
+  @spec extract_file_watchers([map()]) :: [State.file_watcher()]
+  defp extract_file_watchers(registrations) do
+    registrations
+    |> Enum.filter(&(&1["method"] == "workspace/didChangeWatchedFiles"))
+    |> Enum.flat_map(fn reg ->
+      id = reg["id"] || ""
+      watchers = get_in(reg, ["registerOptions", "watchers"]) || []
+      Enum.flat_map(watchers, &compile_watcher(&1, id))
+    end)
+  end
+
+  @spec compile_watcher(map(), String.t()) :: [State.file_watcher()]
+  defp compile_watcher(watcher_spec, registration_id) do
+    pattern = watcher_spec["globPattern"]
+    kind = watcher_spec["kind"] || @default_watch_kind
+
+    case GlobMatcher.compile(pattern) do
+      {:ok, compiled} ->
+        [%{id: registration_id, pattern: compiled, kind: kind}]
+
+      {:error, _} ->
+        Minga.Log.warning(:lsp, "Invalid glob pattern in file watcher: #{inspect(pattern)}")
+        []
+    end
+  end
+
+  @spec filter_matching_changes(State.t(), [{String.t(), GlobMatcher.change_type()}]) :: [map()]
+  defp filter_matching_changes(%{file_watchers: []}, _changes), do: []
+
+  defp filter_matching_changes(state, changes) do
+    root = state.root_path
+
+    Enum.flat_map(changes, fn {path, change_type} ->
+      rel_path = Path.relative_to(path, root)
+
+      matched =
+        Enum.any?(state.file_watchers, fn watcher ->
+          GlobMatcher.matches?(watcher.pattern, rel_path) and
+            GlobMatcher.matches_kind?(watcher.kind, change_type)
+        end)
+
+      if matched do
+        [%{"uri" => "file://" <> path, "type" => change_type_to_lsp(change_type)}]
+      else
+        []
+      end
+    end)
+  end
+
+  @spec change_type_to_lsp(GlobMatcher.change_type()) :: 1 | 2 | 3
+  defp change_type_to_lsp(:created), do: 1
+  defp change_type_to_lsp(:changed), do: 2
+  defp change_type_to_lsp(:deleted), do: 3
 
   # ── Diagnostic Conversion ─────────────────────────────────────────────────
 
@@ -978,6 +1080,9 @@ defmodule Minga.LSP.Client do
       },
       "workspace" => %{
         "configuration" => true,
+        "didChangeWatchedFiles" => %{
+          "dynamicRegistration" => true
+        },
         "symbol" => %{
           "dynamicRegistration" => false,
           "symbolKind" => %{

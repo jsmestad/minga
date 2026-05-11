@@ -18,7 +18,8 @@ defmodule Minga.LSP.Client.State do
     open_documents: %{},
     capabilities: %{},
     semantic_token_legend: nil,
-    status: :starting
+    status: :starting,
+    file_watchers: []
   ]
 
   @typedoc "Client lifecycle status."
@@ -40,6 +41,13 @@ defmodule Minga.LSP.Client.State do
           version: pos_integer()
         }
 
+  @typedoc "A compiled file watcher from `client/registerCapability`."
+  @type file_watcher :: %{
+          id: String.t(),
+          pattern: Minga.LSP.GlobMatcher.compiled(),
+          kind: non_neg_integer()
+        }
+
   @type t :: %__MODULE__{
           server_config: ServerConfig.t(),
           root_path: String.t(),
@@ -52,6 +60,7 @@ defmodule Minga.LSP.Client.State do
           open_documents: %{String.t() => open_doc()},
           capabilities: map(),
           semantic_token_legend: {[String.t()], [String.t()]} | nil,
-          status: status()
+          status: status(),
+          file_watchers: [file_watcher()]
         }
 end

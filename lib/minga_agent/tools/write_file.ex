@@ -22,22 +22,27 @@ defmodule MingaAgent.Tools.WriteFile do
   """
   @spec execute(String.t(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
   def execute(path, content) when is_binary(path) and is_binary(content) do
-    case Buffer.pid_for_path(path) do
-      {:ok, pid} ->
-        # Buffer already open, replace content in-memory
-        execute_via_buffer(pid, path, content)
+    expanded = Path.expand(path)
 
-      :not_found ->
-        # Write to disk first (handles new file creation + parent dirs),
-        # then open a buffer so the user gets visibility and undo.
-        case execute_via_filesystem(path, content) do
-          {:ok, msg} ->
-            open_buffer_for_written_file(path)
-            {:ok, msg}
+    case Buffer.pid_for_path(expanded) do
+      {:ok, pid} -> execute_via_buffer(pid, expanded, content)
+      :not_found -> create_and_open(expanded, content)
+    end
+  end
 
-          error ->
-            error
-        end
+  @spec create_and_open(String.t(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
+  defp create_and_open(path, content) do
+    existed = File.exists?(path)
+
+    case execute_via_filesystem(path, content) do
+      {:ok, msg} ->
+        open_buffer_for_written_file(path)
+        change_type = if existed, do: :changed, else: :created
+        broadcast_file_written(path, change_type)
+        {:ok, msg}
+
+      error ->
+        error
     end
   end
 
@@ -82,5 +87,13 @@ defmodule MingaAgent.Tools.WriteFile do
       {:error, reason} ->
         {:error, "failed to create directory for #{path}: #{reason}"}
     end
+  end
+
+  @spec broadcast_file_written(String.t(), :created | :changed) :: :ok
+  defp broadcast_file_written(path, change_type) do
+    Minga.Events.broadcast(:file_written, %Minga.Events.FileWrittenEvent{
+      path: path,
+      change_type: change_type
+    })
   end
 end

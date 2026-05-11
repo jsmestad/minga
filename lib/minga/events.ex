@@ -118,6 +118,15 @@ defmodule Minga.Events do
     @type t :: %__MODULE__{command: String.t()}
   end
 
+  defmodule FileWrittenEvent do
+    @moduledoc "Payload for `:file_written` events. Published when a file is written to disk by an agent tool, FileWatcher, or external process."
+    @enforce_keys [:path, :change_type]
+    defstruct [:path, :change_type]
+
+    @type change_type :: :created | :changed | :deleted
+    @type t :: %__MODULE__{path: String.t(), change_type: change_type()}
+  end
+
   defmodule ProjectRebuiltEvent do
     @moduledoc "Payload for `:project_rebuilt` events. Published when the file cache rebuild completes."
     @enforce_keys [:root]
@@ -264,12 +273,14 @@ defmodule Minga.Events do
           | :changeset_budget_exhausted
           | :load_user_themes
           | :buffer_fork_conflict
+          | :file_written
           | :extension_updates_available
 
   @typedoc "Typed event payloads. Each topic has a specific struct."
   @type payload ::
           BufferEvent.t()
           | BufferClosedEvent.t()
+          | FileWrittenEvent.t()
           | BufferChangedEvent.t()
           | ModeEvent.t()
           | ToolMissingEvent.t()
@@ -408,6 +419,7 @@ defmodule Minga.Events do
   @spec broadcast(:load_user_themes, LoadUserThemesEvent.t()) :: :ok
   @spec broadcast(:agent_hook, AgentHookEvent.t()) :: :ok
   @spec broadcast(:buffer_fork_conflict, map()) :: :ok
+  @spec broadcast(:file_written, FileWrittenEvent.t()) :: :ok
   @spec broadcast(:extension_updates_available, Minga.Extension.UpdatesAvailableEvent.t()) :: :ok
   def broadcast(topic, payload) when is_atom(topic) and is_map(payload) do
     broadcast(topic, payload, default_registry())
