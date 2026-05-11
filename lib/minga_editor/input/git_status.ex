@@ -170,8 +170,13 @@ defmodule MingaEditor.Input.GitStatus do
 
         status_msg =
           case result do
-            :ok -> "Discarded #{entry.path}"
-            {:error, reason} -> "Discard failed: #{reason}"
+            :ok ->
+              "Discarded #{entry.path}"
+
+            {:error, reason} ->
+              msg = "Discard failed: #{reason}"
+              MingaEditor.log_to_messages(msg)
+              msg
           end
 
         state
@@ -354,7 +359,9 @@ defmodule MingaEditor.Input.GitStatus do
         EditorState.set_status(state, success_msg)
 
       {:error, reason} ->
-        EditorState.set_status(state, "#{error_prefix}: #{reason}")
+        error_msg = "#{error_prefix}: #{reason}"
+        MingaEditor.log_to_messages(error_msg)
+        EditorState.set_status(state, error_msg)
     end
   end
 

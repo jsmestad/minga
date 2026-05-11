@@ -637,19 +637,9 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   # ── Private buffer helpers ────────────────────────────────────────────────
 
-  @terminal_name "*terminal*"
-
   @spec execute_terminal(state()) :: state()
   defp execute_terminal(state) do
-    Minga.Terminal.Server.open(@terminal_name)
-
-    case Minga.Terminal.Server.buffer(@terminal_name) do
-      nil ->
-        EditorState.set_status(state, "Failed to open terminal buffer")
-
-      buf_pid ->
-        open_special_buffer(state, @terminal_name, buf_pid)
-    end
+    EditorState.set_status(state, "Terminal not yet available")
   end
 
   @spec switch_to_buffer(state(), non_neg_integer()) :: state()
