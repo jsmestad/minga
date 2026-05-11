@@ -338,6 +338,46 @@ defmodule MingaAgent.Providers.NativeTest do
       assert Enum.any?(events, &match?(%Event.TextDelta{}, &1))
       assert Enum.any?(events, &match?(%Event.AgentEnd{}, &1))
     end
+
+    test "passes is_error metadata on tool result message when tool fails", %{tmp_dir: dir} do
+      test_pid = self()
+      call_count = :counters.new(1, [:atomics])
+      messages_ref = make_ref()
+
+      client = fn _model, messages, _opts ->
+        count = :counters.get(call_count, 1)
+        :counters.add(call_count, 1, 1)
+        send(test_pid, {messages_ref, count, messages})
+
+        chunks =
+          if count == 0 do
+            [
+              ReqLLM.StreamChunk.tool_call("read_file", %{"path" => "nonexistent.txt"}, %{
+                id: "tc_err",
+                index: 0
+              }),
+              ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
+            ]
+          else
+            [
+              ReqLLM.StreamChunk.text("That file doesn't exist."),
+              ReqLLM.StreamChunk.meta(%{finish_reason: :stop})
+            ]
+          end
+
+        build_stream_response(chunks)
+      end
+
+      tools = Tools.all(project_root: dir)
+      {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client, tools: tools)
+      :ok = Native.send_prompt(pid, "Read nonexistent.txt")
+      _events = collect_events(1_000)
+
+      assert_received {^messages_ref, 1, messages}
+      tool_msg = Enum.find(messages, fn m -> m.role == :tool end)
+      assert tool_msg != nil
+      assert tool_msg.metadata[:is_error] == true
+    end
   end
 
   describe "send_prompt with LLM error" do

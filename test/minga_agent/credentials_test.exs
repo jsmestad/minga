@@ -5,7 +5,7 @@ defmodule MingaAgent.CredentialsTest do
 
   @test_dir "test/tmp/credentials_test"
 
-  @provider_env_vars ~w(ANTHROPIC_API_KEY OPENAI_API_KEY GOOGLE_API_KEY OPENROUTER_API_KEY GROQ_API_KEY)
+  @provider_env_vars ~w(ANTHROPIC_API_KEY OPENAI_API_KEY GOOGLE_API_KEY OPENROUTER_API_KEY GROQ_API_KEY MISTRAL_API_KEY DEEPSEEK_API_KEY)
 
   setup do
     # Clear all provider env vars so host machine state never leaks into tests
