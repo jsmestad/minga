@@ -1483,14 +1483,14 @@ defmodule MingaAgent.Session do
   defp build_subagent_context(state) do
     provider_state = provider_state(state)
 
-    %SubagentContext{
+    SubagentContext.new(
       provider_module: state.provider_module,
       provider_name: provider_name(provider_state, state),
       model: provider_model(provider_state, state),
       thinking_level: provider_thinking_level(provider_state),
       active_skill_names: provider_active_skill_names(provider_state),
       project_root: provider_project_root(provider_state, state)
-    }
+    )
   end
 
   @spec provider_state(state()) :: map()
@@ -1502,7 +1502,9 @@ defmodule MingaAgent.Session do
       _other -> %{}
     end
   catch
-    :exit, _ -> %{}
+    :exit, reason ->
+      Minga.Log.warning(:agent, "[Session] provider unreachable for subagent context: #{inspect(reason)}")
+      %{}
   end
 
   @spec provider_name(map(), state()) :: String.t()

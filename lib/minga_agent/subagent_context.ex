@@ -15,31 +15,32 @@ defmodule MingaAgent.SubagentContext do
           project_root: String.t() | nil
         }
 
-  @enforce_keys [
+  @enforce_keys [:provider_module, :provider_name]
+  defstruct [
     :provider_module,
     :provider_name,
     :model,
     :thinking_level,
-    :active_skill_names,
-    :project_root
+    :project_root,
+    active_skill_names: []
   ]
-  defstruct provider_module: MingaAgent.Providers.Native,
-            provider_name: "native",
-            model: nil,
-            thinking_level: nil,
-            active_skill_names: [],
-            project_root: nil
+
+  @doc "Builds a context from the given attributes."
+  @spec new(keyword()) :: t()
+  def new(attrs) when is_list(attrs) do
+    struct!(__MODULE__, attrs)
+  end
 
   @doc "Returns the default context used when no parent session is available."
   @spec default() :: t()
   def default do
-    %__MODULE__{
+    new(
       provider_module: MingaAgent.Providers.Native,
       provider_name: "native",
       model: nil,
       thinking_level: nil,
       active_skill_names: [],
       project_root: nil
-    }
+    )
   end
 end

@@ -494,6 +494,26 @@ defmodule MingaAgent.Tools.SubagentTest do
       assert {:ok, "blocked child response"} = Task.await(task, 1_000)
     end
 
+    test "falls back to default context when parent session is already dead", %{tmp_dir: dir} do
+      ref = make_ref()
+      parent = start_parent_session(dir, ref)
+      MingaAgent.Supervisor.stop_session(parent)
+      Process.sleep(50)
+
+      assert {:ok, "child response"} =
+               Subagent.execute("do child task",
+                 project_root: dir,
+                 parent_session: parent,
+                 provider: RecordingProvider,
+                 provider_opts: [test_pid: self(), test_ref: ref]
+               )
+
+      assert_child_started(ref, fn opts ->
+        refute Keyword.has_key?(opts, :thinking_level)
+        assert Keyword.get(opts, :active_skill_names, []) == []
+      end)
+    end
+
     test "stops the child session after success", %{tmp_dir: dir} do
       ref = make_ref()
       parent = start_parent_session(dir, ref)
