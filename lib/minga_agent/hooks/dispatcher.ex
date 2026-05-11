@@ -174,8 +174,10 @@ defmodule MingaAgent.Hooks.Dispatcher do
       reason: if(result, do: result.reason, else: nil)
     })
   rescue
-    ArgumentError -> :ok
+    e ->
+      Minga.Log.warning(:agent, "Hook event broadcast failed: #{Exception.message(e)}")
   catch
-    :exit, _ -> :ok
+    :exit, reason ->
+      Minga.Log.warning(:agent, "Hook event broadcast failed: #{inspect(reason)}")
   end
 end
