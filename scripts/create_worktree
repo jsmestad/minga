@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage: scripts/create_worktree <branch-name> [base-ref]
+
+Creates a worktree under ../minga-worktrees/ relative to the primary checkout and copies local Mix caches into it so the first mix command does not start cold.
+
+Run this from any Minga checkout when no mix command is active in the source checkout.
+USAGE
+}
+
+if [[ ${1:-} == "-h" || ${1:-} == "--help" ]]; then
+  usage
+  exit 0
+fi
+
+if [[ $# -lt 1 || $# -gt 2 ]]; then
+  usage >&2
+  exit 64
+fi
+
+branch=$1
+base_ref=${2:-main}
+repo_root=$(git rev-parse --show-toplevel)
+main_worktree=$(git -C "$repo_root" worktree list --porcelain | awk '
+  NR == 1 && $1 == "worktree" {
+    sub(/^worktree /, "")
+    print
+    exit
+  }
+')
+
+if [[ -z "$main_worktree" ]]; then
+  echo "Unable to locate the primary worktree" >&2
+  exit 1
+fi
+
+worktree_name=${branch//\//-}
+worktree_parent="$(cd "$main_worktree/.." && pwd -P)/minga-worktrees"
+worktree_path="$worktree_parent/$worktree_name"
+
+if [[ -e "$worktree_path" ]]; then
+  echo "Worktree path already exists: $worktree_path" >&2
+  exit 1
+fi
+
+mkdir -p "$worktree_parent"
+
+echo "Creating worktree: $worktree_path"
+git -C "$repo_root" worktree add "$worktree_path" -b "$branch" "$base_ref"
+
+source_lock="$repo_root/mix.lock"
+target_lock="$worktree_path/mix.lock"
+if [[ -f "$source_lock" && -f "$target_lock" ]] && ! cmp -s "$source_lock" "$target_lock"; then
+  echo "mix.lock differs between source checkout and new worktree; skipping cache copy." >&2
+  echo "Run mix deps.get in the new worktree." >&2
+  exit 0
+fi
+
+copy_dir() {
+  local name=$1
+  if [[ -d "$repo_root/$name" ]]; then
+    echo "Copying $name/"
+    rsync -a "$repo_root/$name/" "$worktree_path/$name/"
+  fi
+}
+
+copy_elixir_ls_plts() {
+  local source_dir="$repo_root/.elixir_ls"
+  local target_dir="$worktree_path/.elixir_ls"
+  if [[ ! -d "$source_dir" ]]; then
+    return 0
+  fi
+
+  shopt -s nullglob
+  local plts=("$source_dir"/iplt-*)
+  shopt -u nullglob
+
+  if [[ ${#plts[@]} -eq 0 ]]; then
+    return 0
+  fi
+
+  echo "Copying .elixir_ls PLTs"
+  mkdir -p "$target_dir"
+  rsync -a "${plts[@]}" "$target_dir/"
+}
+
+copy_dir deps
+copy_dir _build
+copy_elixir_ls_plts
+
+echo "Worktree ready: $worktree_path"
+echo "Next: cd $worktree_path && mix deps.get"

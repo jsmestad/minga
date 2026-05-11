@@ -136,16 +136,17 @@ All feature branches use git worktrees. This keeps the main checkout clean and l
 
 **Starting work:**
 
-1. Create the worktree and branch:
+1. Create the worktree and branch with the helper script:
    ```bash
-   git worktree add ../minga-worktrees/<branch-name> -b <branch-name>
+   scripts/create_worktree <branch-name>
    ```
-2. Do all work inside `../minga-worktrees/<branch-name>`. The agent's working directory must be set to the worktree, not the main checkout.
-3. The first build in a new worktree needs `mix deps.get` and a full compile. This is a one-time cost.
+2. Do all work inside the created worktree under `../minga-worktrees/`. The agent's working directory must be set to the worktree, not the main checkout.
+3. The helper copies `deps/`, `_build/`, and ElixirLS PLTs into the new worktree when `mix.lock` matches, which keeps first-run `mix` commands and Dialyzer fast. If the helper skips the copy, run `mix deps.get` and let the worktree rebuild normally.
+4. Run the helper from any Minga checkout, but only when no `mix` command is active in the source checkout or target worktree. Copying build caches while they are being written can produce confusing compile or Dialyzer failures.
 
 **After the PR is merged:**
 
-1. Clean up: `git worktree remove ../minga-worktrees/<branch-name>`
+1. Clean up using the path printed by `scripts/create_worktree`: `git worktree remove ../minga-worktrees/<worktree-name>`
 2. Prune stale refs: `git worktree prune`
 3. Pull main in the primary checkout: `cd <your-main-checkout> && git pull origin main`
 

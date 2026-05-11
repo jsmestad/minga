@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage: scripts/check-release-contents [release-dir]
+
+Fails if the repo-root scripts directory is present in an assembled release directory. The default release directory is _build/prod/rel/minga.
+USAGE
+}
+
+if [[ ${1:-} == "-h" || ${1:-} == "--help" ]]; then
+  usage
+  exit 0
+fi
+
+release_dir=${1:-_build/prod/rel/minga}
+
+if [[ ! -d "$release_dir" ]]; then
+  echo "Release directory not found: $release_dir" >&2
+  exit 1
+fi
+
+scripts_dir="$release_dir/scripts"
+leaked_paths=""
+
+if [[ -e "$scripts_dir" || -L "$scripts_dir" ]]; then
+  leaked_paths=$(find "$scripts_dir" -print)
+fi
+
+if [[ -n "$leaked_paths" ]]; then
+  echo "Repo-root scripts leaked into release:" >&2
+  echo "$leaked_paths" >&2
+  exit 1
+fi
+
+echo "Release contents check passed: no repo-root scripts found in $release_dir"
