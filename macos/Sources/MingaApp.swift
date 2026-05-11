@@ -600,8 +600,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let fm = FontManager(name: defaultFontName, size: defaultFontSize, scale: scale)
         self.fontManager = fm
 
-        // Initial grid dimensions.
-        let cols = UInt16(defaultWindowWidth / CGFloat(face.cellWidth))
+        // Initial grid dimensions (no gutter padding subtraction yet; the first
+        // setFrameSize call will send corrected cols once the gutter is established).
+        let cols = UInt16(max(defaultWindowWidth / CGFloat(face.cellWidth), 1))
         let rows = UInt16(defaultWindowHeight / CGFloat(face.cellHeight))
 
         // CoreText renderer.
@@ -859,7 +860,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Re-send ready event so the new BEAM knows our dimensions.
         if let nsView = editorNSView {
-            let cols = UInt16(nsView.bounds.width / CGFloat(nsView.cellWidth))
+            let gutterPad: CGFloat = nsView.dispatcher.frameState.gutterCol > 0 ? CoreTextMetalRenderer.gutterPixelPaddingPt : 0
+            let cols = UInt16(max((nsView.bounds.width - gutterPad) / CGFloat(nsView.cellWidth), 1))
             let rows = UInt16(nsView.bounds.height / CGFloat(nsView.cellHeight))
             enc.sendReady(cols: cols, rows: rows)
         }

@@ -278,7 +278,8 @@ final class EditorNSView: MTKView {
         let newCellH = CGFloat(newFace.cellHeight)
         guard newCellW > 0, newCellH > 0 else { return }
 
-        let newCols = UInt16(max(frame.width / newCellW, 1))
+        let gutterPad: CGFloat = dispatcher.frameState.gutterCol > 0 ? CoreTextMetalRenderer.gutterPixelPaddingPt : 0
+        let newCols = UInt16(max((frame.width - gutterPad) / newCellW, 1))
         let newRows = UInt16(max(frame.height / newCellH, 1))
 
         if newCols != dispatcher.frameState.cols || newRows != dispatcher.frameState.rows {
@@ -400,7 +401,8 @@ final class EditorNSView: MTKView {
 
         guard newSize.width > 0, newSize.height > 0 else { return }
 
-        let newCols = UInt16(max(newSize.width / cellWidth, 1))
+        let gutterPad: CGFloat = dispatcher.frameState.gutterCol > 0 ? CoreTextMetalRenderer.gutterPixelPaddingPt : 0
+        let newCols = UInt16(max((newSize.width - gutterPad) / cellWidth, 1))
         let newRows = UInt16(max(newSize.height / cellHeight, 1))
 
         if !readySent {
@@ -457,7 +459,8 @@ final class EditorNSView: MTKView {
         guard effectiveCellH > 0 else { return }
 
         let newRows = UInt16(max(frame.height / effectiveCellH, 1))
-        let cols = UInt16(max(frame.width / cellWidth, 1))
+        let gutterPad: CGFloat = dispatcher.frameState.gutterCol > 0 ? CoreTextMetalRenderer.gutterPixelPaddingPt : 0
+        let cols = UInt16(max((frame.width - gutterPad) / cellWidth, 1))
 
         if newRows != dispatcher.frameState.rows {
             dispatcher.frameState.resize(newCols: cols, newRows: newRows)
