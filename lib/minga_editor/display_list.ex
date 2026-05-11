@@ -343,26 +343,38 @@ defmodule MingaEditor.DisplayList do
   end
 
   # Resolves font_family in a style keyword list to a font_id.
-  # Uses the font registry from the process dictionary (set by Emit).
-  # Returns {updated_style, [register_font_commands]}.
-  @spec resolve_font_family(keyword()) :: {keyword(), [binary()]}
+  # Uses the render-local font registry installed by the render pipeline.
+  # Registration commands are emitted centrally by the Emit stage.
+  @spec resolve_font_family(keyword()) :: keyword()
   defp resolve_font_family(style) do
     case Keyword.pop(style, :font_family) do
       {nil, _} ->
-        {style, []}
+        style
 
       {family, rest} ->
-        registry = Process.get(:emit_font_registry) || MingaEditor.UI.FontRegistry.new()
-
-        {font_id, updated_registry, new?} =
-          MingaEditor.UI.FontRegistry.get_or_register(registry, family)
-
-        Process.put(:emit_font_registry, updated_registry)
-
-        style_with_id = if font_id > 0, do: [{:font_id, font_id} | rest], else: rest
-        reg_cmds = if new?, do: [Protocol.encode_register_font(font_id, family)], else: []
-        {style_with_id, reg_cmds}
+        resolve_registered_font_family(
+          family,
+          rest,
+          MingaEditor.UI.FontRegistry.process_registry()
+        )
     end
+  end
+
+  @spec resolve_registered_font_family(
+          String.t(),
+          keyword(),
+          MingaEditor.UI.FontRegistry.t() | nil
+        ) ::
+          keyword()
+  defp resolve_registered_font_family(_family, rest, nil), do: rest
+
+  defp resolve_registered_font_family(family, rest, registry) do
+    {font_id, updated_registry, _new?} =
+      MingaEditor.UI.FontRegistry.get_or_register(registry, family)
+
+    MingaEditor.UI.FontRegistry.put_process_registry(updated_registry)
+
+    if font_id > 0, do: [{:font_id, font_id} | rest], else: rest
   end
 
   @spec windows_to_commands([WindowFrame.t()]) :: [binary()]
@@ -398,10 +410,9 @@ defmodule MingaEditor.DisplayList do
     if simple_draw_face?(face) do
       [Protocol.encode_draw_face(row, col, text, face) | acc]
     else
-      style = Face.to_style(face)
-      {style, registration_cmds} = resolve_font_family(style)
+      style = face |> Face.to_style() |> resolve_font_family()
       command = Protocol.encode_draw_smart(row, col, text, style)
-      Enum.reduce(registration_cmds ++ [command], acc, fn cmd, next_acc -> [cmd | next_acc] end)
+      [command | acc]
     end
   end
 

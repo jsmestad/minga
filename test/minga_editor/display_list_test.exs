@@ -4,6 +4,7 @@ defmodule MingaEditor.DisplayListTest do
   alias MingaEditor.DisplayList
   alias MingaEditor.DisplayList.{Cursor, Frame, Overlay, WindowFrame}
   alias MingaEditor.Frontend.Protocol
+  alias MingaEditor.UI.FontRegistry
   alias Minga.Core.Face
 
   describe "draw/4" do
@@ -196,6 +197,21 @@ defmodule MingaEditor.DisplayListTest do
   end
 
   describe "draws_to_commands/1" do
+    test "font families fall back to primary font when no render-local registry is installed" do
+      draws = [
+        {0, 0, "hello", Face.new(font_family: "Fira Code")}
+      ]
+
+      commands = DisplayList.draws_to_commands(draws)
+
+      assert Enum.all?(commands, fn
+               <<0x52, _::binary>> -> false
+               _ -> true
+             end)
+
+      assert FontRegistry.process_registry() == nil
+    end
+
     test "converts draw tuples to protocol binaries" do
       draws = [
         {0, 0, "hello", Face.new()},

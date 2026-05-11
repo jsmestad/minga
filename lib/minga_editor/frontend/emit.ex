@@ -19,8 +19,10 @@ defmodule MingaEditor.Frontend.Emit do
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.Frontend.Emit.GUI, as: EmitGUI
   alias MingaEditor.Frontend.Emit.TUI, as: EmitTUI
+  alias MingaEditor.Frontend.Protocol
   alias MingaEditor.Frontend.Protocol.GUIWindowContent
   alias MingaEditor.Renderer.Caches
+  alias MingaEditor.UI.FontRegistry
   alias Minga.Telemetry
 
   @typedoc "Emit context containing only the data emit needs."
@@ -32,17 +34,23 @@ defmodule MingaEditor.Frontend.Emit do
   frontend capabilities.
 
   Also sends title and window background color when they change
-  (side-channel writes). Returns updated caches for write-back to EditorState.
+  (side-channel writes). Returns updated caches and the renderer-owned font
+  registry for write-back to the Renderer process.
   """
-  @spec emit(Frame.t(), ctx(), Chrome.t() | nil, Caches.t()) :: Caches.t()
+  @spec emit(Frame.t(), ctx(), Chrome.t() | nil, Caches.t()) :: {Caches.t(), FontRegistry.t()}
   def emit(frame, ctx, chrome \\ nil, caches \\ %Caches{}) do
-    gui? = MingaEditor.Frontend.gui?(ctx.capabilities)
+    FontRegistry.with_process_registry(ctx.font_registry, fn ->
+      gui? = MingaEditor.Frontend.gui?(ctx.capabilities)
 
-    if gui? do
-      emit_gui(frame, ctx, chrome, caches)
-    else
-      emit_tui(frame, ctx, caches)
-    end
+      caches =
+        if gui? do
+          emit_gui(frame, ctx, chrome, caches)
+        else
+          emit_tui(frame, ctx, caches)
+        end
+
+      {caches, FontRegistry.current_process_registry(ctx.font_registry)}
+    end)
   end
 
   # GUI emit: bundles all Metal-critical commands (frame content, window
@@ -69,8 +77,9 @@ defmodule MingaEditor.Frontend.Emit do
       frame_cmds ++
         window_content_cmds ++
         metal_chrome_cmds ++
-        [MingaEditor.Frontend.Protocol.encode_batch_end()]
+        [Protocol.encode_batch_end()]
 
+    all_metal = flush_font_registration_commands() ++ all_metal
     caches = update_tracking(ctx, caches)
 
     byte_count = IO.iodata_length(all_metal)
@@ -92,6 +101,7 @@ defmodule MingaEditor.Frontend.Emit do
   @spec emit_tui(Frame.t(), ctx(), Caches.t()) :: Caches.t()
   defp emit_tui(frame, ctx, caches) do
     commands = EmitTUI.build_commands(frame, ctx, caches)
+    commands = flush_font_registration_commands() ++ commands
     caches = update_tracking(ctx, caches)
     byte_count = IO.iodata_length(commands)
 
@@ -101,6 +111,24 @@ defmodule MingaEditor.Frontend.Emit do
       caches = send_window_bg(ctx, caches)
       caches
     end)
+  end
+
+  # ── Font registry context (shared) ───────────────────────────────────────
+
+  @spec flush_font_registration_commands() :: [binary()]
+  defp flush_font_registration_commands do
+    registry = FontRegistry.current_process_registry(FontRegistry.new())
+
+    commands =
+      registry
+      |> FontRegistry.pending_registrations()
+      |> Enum.map(fn {font_id, family} -> Protocol.encode_register_font(font_id, family) end)
+
+    registry
+    |> FontRegistry.mark_registered()
+    |> FontRegistry.put_process_registry()
+
+    commands
   end
 
   # ── Tracking state (shared) ──────────────────────────────────────────────

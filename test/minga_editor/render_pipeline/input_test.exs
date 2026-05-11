@@ -34,7 +34,7 @@ defmodule MingaEditor.RenderPipeline.InputTest do
       assert input.capabilities == state.capabilities
       assert input.shell == state.shell
       assert input.shell_state == state.shell_state
-      assert input.font_registry == state.font_registry
+      assert input.font_registry == MingaEditor.UI.FontRegistry.new()
       assert input.message_store == state.message_store
       assert input.editing_model == state.editing_model
       assert input.backend == state.backend
@@ -46,7 +46,7 @@ defmodule MingaEditor.RenderPipeline.InputTest do
       input = Input.from_editor_state(state)
       input_fields = input |> Map.from_struct() |> Map.keys() |> MapSet.new()
 
-      # These fields exist on EditorState but must NOT be in Input
+      # These GenServer-only or Editor-owned fields must NOT be in Input
       excluded = [
         :render_timer,
         :buffer_monitors,
@@ -66,6 +66,10 @@ defmodule MingaEditor.RenderPipeline.InputTest do
       end
     end
 
+    test "editor state no longer owns the font registry", %{state: state} do
+      refute Map.has_key?(Map.from_struct(state), :font_registry)
+    end
+
     test "workspace field supports state.workspace.X pattern-matching", %{state: state} do
       input = Input.from_editor_state(state)
 
@@ -73,6 +77,15 @@ defmodule MingaEditor.RenderPipeline.InputTest do
       # %{workspace: %{editing: editing}} = state
       assert %{workspace: %{editing: editing}} = input
       assert editing == state.workspace.editing
+    end
+
+    test "with_font_registry/2 attaches renderer-owned registry", %{state: state} do
+      input = Input.from_editor_state(state)
+
+      {_id, registry, true} =
+        MingaEditor.UI.FontRegistry.get_or_register(input.font_registry, "Fira Code")
+
+      assert Input.with_font_registry(input, registry).font_registry == registry
     end
   end
 

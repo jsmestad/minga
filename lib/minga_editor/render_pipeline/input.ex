@@ -22,8 +22,12 @@ defmodule MingaEditor.RenderPipeline.Input do
 
   **From `state` (top-level):**
   `theme`, `capabilities`, `shell`, `shell_state`, `port_manager`,
-  `font_registry`, `message_store`, `face_override_registries`,
+  `message_store`, `face_override_registries`,
   `editing_model`, `backend`, `layout`, `focus_tree`
+
+  `font_registry` is renderer-owned state. Editor-created snapshots carry a
+  fresh fallback registry; `Renderer.Server` injects its long-lived registry
+  before it runs the pipeline.
 
   **From `state.workspace` (per-tab editing context, stored as `workspace` map):**
   `windows`, `buffers`, `viewport`, `file_tree`, `highlight`,
@@ -63,7 +67,6 @@ defmodule MingaEditor.RenderPipeline.Input do
     :capabilities,
     :shell,
     :shell_state,
-    :font_registry,
     :message_store,
     :face_override_registries,
     :editing_model,
@@ -77,7 +80,10 @@ defmodule MingaEditor.RenderPipeline.Input do
     # Terminal-level viewport (screen dimensions reported by frontend on resize)
     terminal_viewport: Viewport.new(24, 80),
     # Render-pipeline caches (replaces process-dictionary entries)
-    caches: %Caches{}
+    caches: %Caches{},
+    # Renderer-owned font registration state. Editor snapshots use a fresh
+    # fallback; Renderer.Server replaces it with its persistent registry.
+    font_registry: FontRegistry.new()
   ]
 
   @typedoc """
@@ -135,7 +141,6 @@ defmodule MingaEditor.RenderPipeline.Input do
       capabilities: state.capabilities,
       shell: state.shell,
       shell_state: state.shell_state,
-      font_registry: state.font_registry,
       message_store: state.message_store,
       face_override_registries: state.face_override_registries,
       editing_model: state.editing_model,
@@ -160,6 +165,12 @@ defmodule MingaEditor.RenderPipeline.Input do
         keymap_scope: ws.keymap_scope
       }
     }
+  end
+
+  @doc "Returns a copy of the render input with the renderer-owned font registry attached."
+  @spec with_font_registry(t(), FontRegistry.t()) :: t()
+  def with_font_registry(%__MODULE__{} = input, %FontRegistry{} = font_registry) do
+    %{input | font_registry: font_registry}
   end
 
   # ── Chrome dirty tracking ──────────────────────────────────────────────────

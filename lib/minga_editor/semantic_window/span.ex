@@ -74,16 +74,22 @@ defmodule MingaEditor.SemanticWindow.Span do
   defp encode_font_weight(%Minga.Core.Face{font_weight: :heavy}), do: 6
   defp encode_font_weight(%Minga.Core.Face{font_weight: :black}), do: 7
 
-  # Font ID resolution: checks the process dictionary for the emit font
-  # registry (set during the Emit stage). Returns 0 (default font) when
-  # no registry is available or the family isn't registered.
+  # Font ID resolution: checks the render-local font registry installed by
+  # the pipeline. Returns 0 (default font) when no registry is available.
   @spec encode_font_id(String.t() | nil) :: non_neg_integer()
   defp encode_font_id(nil), do: 0
 
   defp encode_font_id(family) when is_binary(family) do
-    case Process.get(:emit_font_registry) do
-      nil -> 0
-      registry -> Map.get(registry, family, 0)
+    case MingaEditor.UI.FontRegistry.process_registry() do
+      nil ->
+        0
+
+      registry ->
+        {font_id, updated_registry, _new?} =
+          MingaEditor.UI.FontRegistry.get_or_register(registry, family)
+
+        MingaEditor.UI.FontRegistry.put_process_registry(updated_registry)
+        font_id
     end
   end
 end

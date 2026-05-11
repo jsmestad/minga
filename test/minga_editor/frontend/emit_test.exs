@@ -13,7 +13,9 @@ defmodule MingaEditor.Frontend.EmitTest do
   alias MingaEditor.Layout
   alias MingaEditor.Frontend.Emit
   alias MingaEditor.Frontend.Emit.Context
+  alias Minga.Core.Face
   alias MingaEditor.Renderer.Caches
+  alias MingaEditor.UI.FontRegistry
 
   import MingaEditor.RenderPipeline.TestHelpers
 
@@ -48,6 +50,53 @@ defmodule MingaEditor.Frontend.EmitTest do
     end
   end
 
+  describe "font registry ownership" do
+    test "returns updated font registry after styled draws allocate a font id" do
+      face = %Face{name: "test", fg: 0xFFFFFF, bg: 0x000000, font_family: "Fira Code"}
+
+      frame = %Frame{
+        cursor: Cursor.new(0, 0, :block),
+        splash: [{0, 0, "hello", face}]
+      }
+
+      state = base_state()
+      ctx = Context.from_editor_state(state)
+
+      {_caches, font_registry} = Emit.emit(frame, ctx, nil, %Caches{})
+      assert_receive {:"$gen_cast", {:send_commands, commands}}
+
+      assert FontRegistry.lookup(font_registry, "Fira Code") == 1
+      assert FontRegistry.pending_registrations(font_registry) == []
+
+      assert Enum.any?(commands, fn
+               <<0x52, 1, _::binary>> -> true
+               _ -> false
+             end)
+
+      refute Process.get(:emit_font_registry)
+    end
+
+    test "flushes font registrations allocated before emit" do
+      frame = %Frame{
+        cursor: Cursor.new(0, 0, :block),
+        splash: [DisplayList.draw(0, 0, "hello")]
+      }
+
+      {_id, registry, true} = FontRegistry.get_or_register(FontRegistry.new(), "Fira Code")
+      ctx = %{Context.from_editor_state(base_state()) | font_registry: registry}
+
+      {_caches, font_registry} = Emit.emit(frame, ctx, nil, %Caches{})
+      assert_receive {:"$gen_cast", {:send_commands, commands}}
+
+      assert FontRegistry.pending_registrations(font_registry) == []
+
+      assert Enum.any?(commands, fn
+               <<0x52, 1, _::binary>> -> true
+               _ -> false
+             end)
+    end
+  end
+
   describe "update_tracking (shared)" do
     test "writes viewport tracking state into returned caches" do
       frame = build_frame_with_window(base_state(), viewport_top: 0)
@@ -55,7 +104,7 @@ defmodule MingaEditor.Frontend.EmitTest do
       _layout = Layout.put(state)
       ctx = Context.from_editor_state(state)
 
-      caches = Emit.emit(frame, ctx, nil, %Caches{})
+      {caches, _font_registry} = Emit.emit(frame, ctx, nil, %Caches{})
       assert_receive {:"$gen_cast", {:send_commands, _}}
 
       assert is_map(caches.emit_prev_viewport_tops)
@@ -76,14 +125,14 @@ defmodule MingaEditor.Frontend.EmitTest do
       ctx = Context.from_editor_state(state)
       caches0 = %Caches{}
 
-      caches1 = Emit.emit(frame, ctx, nil, caches0)
+      {caches1, _font_registry} = Emit.emit(frame, ctx, nil, caches0)
       # Flush first commands + title
       assert_receive {:"$gen_cast", {:send_commands, _commands}}
 
       assert is_binary(caches1.last_title)
 
       # Emit again with same ctx; title should not be re-sent (cache hit)
-      caches2 = Emit.emit(frame, ctx, nil, caches1)
+      {caches2, _font_registry} = Emit.emit(frame, ctx, nil, caches1)
       assert_receive {:"$gen_cast", {:send_commands, _commands2}}
 
       assert caches2.last_title == caches1.last_title
@@ -101,13 +150,13 @@ defmodule MingaEditor.Frontend.EmitTest do
       ctx = Context.from_editor_state(state)
       caches0 = %Caches{}
 
-      caches1 = Emit.emit(frame, ctx, nil, caches0)
+      {caches1, _font_registry} = Emit.emit(frame, ctx, nil, caches0)
       assert_receive {:"$gen_cast", {:send_commands, _}}
 
       assert caches1.last_window_bg == state.theme.editor.bg
 
       # Emit again, should not re-send
-      caches2 = Emit.emit(frame, ctx, nil, caches1)
+      {caches2, _font_registry} = Emit.emit(frame, ctx, nil, caches1)
       assert_receive {:"$gen_cast", {:send_commands, _}}
       assert caches2.last_window_bg == caches1.last_window_bg
     end
