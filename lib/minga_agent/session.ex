@@ -28,7 +28,9 @@ defmodule MingaAgent.Session do
   alias MingaAgent.Hooks.Dispatcher, as: HookDispatcher
   alias MingaAgent.Hooks.SessionEndPayload
   alias MingaAgent.Hooks.SessionStartPayload
+  alias MingaAgent.Hooks.Result, as: HookResult
   alias MingaAgent.Hooks.StopPayload
+  alias MingaAgent.Hooks.UserPromptSubmitPayload
   alias MingaAgent.Memory
   alias MingaAgent.Message
   alias MingaAgent.Notifier
@@ -548,19 +550,22 @@ defmodule MingaAgent.Session do
   end
 
   def handle_call({:send_prompt, content}, _from, state) do
-    # Add user message to conversation.
-    # Content may be a plain string or a list of ContentPart structs
-    # (when images are attached via @image.png mentions).
-    {user_msg, send_content} = build_user_message(content)
-    state = append_msg(state, user_msg)
-    state = notify_messages_changed(state)
-
-    case state.provider_module.send_prompt(state.provider, send_content) do
+    case dispatch_user_prompt_submit(state, content) do
       :ok ->
-        {:reply, :ok, state}
+        {user_msg, send_content} = build_user_message(content)
+        state = append_msg(state, user_msg)
+        state = notify_messages_changed(state)
 
-      {:error, _} = err ->
-        {:reply, err, state}
+        case state.provider_module.send_prompt(state.provider, send_content) do
+          :ok ->
+            {:reply, :ok, state}
+
+          {:error, _} = err ->
+            {:reply, err, state}
+        end
+
+      {:error, %HookResult{} = result} ->
+        {:reply, {:error, {:hook_veto, HookResult.message(result)}}, state}
     end
   end
 
@@ -1904,6 +1909,21 @@ defmodule MingaAgent.Session do
     last_message = extract_last_assistant_text(state.messages)
     payload = StopPayload.new(state.session_id, :end_turn, last_message)
     HookDispatcher.stop(AgentConfig.resolve().agent_hooks, StopPayload.to_map(payload))
+  rescue
+    _ -> :ok
+  catch
+    _, _ -> :ok
+  end
+
+  @spec dispatch_user_prompt_submit(state(), String.t() | [term()]) ::
+          :ok | {:error, HookResult.t()}
+  defp dispatch_user_prompt_submit(state, content) do
+    payload = UserPromptSubmitPayload.new(state.session_id, content)
+
+    HookDispatcher.user_prompt_submit(
+      AgentConfig.resolve().agent_hooks,
+      UserPromptSubmitPayload.to_map(payload)
+    )
   rescue
     _ -> :ok
   catch

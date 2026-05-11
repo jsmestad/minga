@@ -13,7 +13,13 @@ defmodule MingaAgent.Hooks.Hook do
   @tool_events [:pre_tool_use, :post_tool_use]
 
   @typedoc "Supported hook event names."
-  @type event :: :pre_tool_use | :post_tool_use | :session_start | :session_end | :stop
+  @type event ::
+          :pre_tool_use
+          | :post_tool_use
+          | :session_start
+          | :session_end
+          | :stop
+          | :user_prompt_submit
 
   @typedoc "Normalized hook declaration."
   @type t :: %__MODULE__{
@@ -81,6 +87,7 @@ defmodule MingaAgent.Hooks.Hook do
   def event_label(:session_start), do: "SessionStart"
   def event_label(:session_end), do: "SessionEnd"
   def event_label(:stop), do: "Stop"
+  def event_label(:user_prompt_submit), do: "UserPromptSubmit"
 
   @spec map_from_list(list()) :: {:ok, map()} | :error
   defp map_from_list(raw) do
@@ -111,6 +118,10 @@ defmodule MingaAgent.Hooks.Hook do
   defp normalize_event(:Stop), do: {:ok, :stop}
   defp normalize_event("Stop"), do: {:ok, :stop}
   defp normalize_event("stop"), do: {:ok, :stop}
+  defp normalize_event(:user_prompt_submit), do: {:ok, :user_prompt_submit}
+  defp normalize_event(:UserPromptSubmit), do: {:ok, :user_prompt_submit}
+  defp normalize_event("UserPromptSubmit"), do: {:ok, :user_prompt_submit}
+  defp normalize_event("user_prompt_submit"), do: {:ok, :user_prompt_submit}
   defp normalize_event(other), do: {:error, "unsupported agent hook event: #{inspect(other)}"}
 
   @spec normalize_tool_pattern(map(), event()) :: {:ok, String.t() | nil} | {:error, String.t()}

@@ -97,6 +97,14 @@ defmodule MingaAgent.Hooks.Dispatcher do
     :ok
   end
 
+  @doc "Runs all matching `UserPromptSubmit` hooks (veto-capable)."
+  @spec user_prompt_submit([Hook.t()], map()) :: :ok | {:error, Result.t()}
+  @spec user_prompt_submit([Hook.t()], map(), keyword()) :: :ok | {:error, Result.t()}
+  def user_prompt_submit(hooks, payload_map, opts \\ [])
+      when is_list(hooks) and is_map(payload_map) do
+    dispatch(:user_prompt_submit, hooks, payload_map, Keyword.put(opts, :veto_capable, true))
+  end
+
   @spec run_matching_hooks([Hook.t()], Hook.event(), map(), runner(), boolean()) ::
           :ok | {:error, Result.t()}
   defp run_matching_hooks([], _event, _payload_map, _runner, _veto_capable), do: :ok

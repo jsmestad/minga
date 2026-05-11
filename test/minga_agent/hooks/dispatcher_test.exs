@@ -293,6 +293,35 @@ defmodule MingaAgent.Hooks.DispatcherTest do
     assert :ok = Dispatcher.stop([hook], payload, runner: runner)
   end
 
+  # ── UserPromptSubmit ────────────────────────────────────────────────────────
+
+  test "UserPromptSubmit hooks run and can veto" do
+    hook = session_hook(:user_prompt_submit)
+
+    runner = fn received_hook, _payload_map ->
+      Result.veto(received_hook, "blocked by policy", {:exit, 1})
+    end
+
+    payload = %{"event" => "UserPromptSubmit", "session_id" => "s_ups", "prompt" => "do something"}
+
+    assert {:error, %Result{status: :veto, stderr: "blocked by policy"}} =
+             Dispatcher.user_prompt_submit([hook], payload, runner: runner)
+  end
+
+  test "UserPromptSubmit hooks proceed when allowed" do
+    test_pid = self()
+    hook = session_hook(:user_prompt_submit)
+
+    runner = fn received_hook, _payload_map ->
+      send(test_pid, :ups_ran)
+      Result.allow(received_hook)
+    end
+
+    payload = %{"event" => "UserPromptSubmit", "session_id" => "s_ups2", "prompt" => "hello"}
+    assert :ok = Dispatcher.user_prompt_submit([hook], payload, runner: runner)
+    assert_receive :ups_ran
+  end
+
   # ── Normalization ──────────────────────────────────────────────────────────
 
   test "Session hooks do not require tool_pattern" do
