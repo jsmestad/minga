@@ -1554,6 +1554,10 @@ defmodule MingaAgent.Providers.Native do
       )
 
     HookDispatcher.post_tool_use(config.agent_hooks, PostToolUsePayload.to_map(payload))
+  rescue
+    e -> Minga.Log.warning(:agent, "PostToolUse hook dispatch failed: #{Exception.message(e)}")
+  catch
+    _, reason -> Minga.Log.warning(:agent, "PostToolUse hook dispatch failed: #{inspect(reason)}")
   end
 
   @spec dispatch_pre_compact(Context.t(), AgentConfig.t()) :: :ok | {:error, HookResult.t()}
@@ -1562,9 +1566,13 @@ defmodule MingaAgent.Providers.Native do
     payload = PreCompactPayload.new(message_count)
     HookDispatcher.pre_compact(config.agent_hooks, PreCompactPayload.to_map(payload))
   rescue
-    _ -> :ok
+    e ->
+      Minga.Log.warning(:agent, "PreCompact hook dispatch failed: #{Exception.message(e)}")
+      :ok
   catch
-    _, _ -> :ok
+    _, reason ->
+      Minga.Log.warning(:agent, "PreCompact hook dispatch failed: #{inspect(reason)}")
+      :ok
   end
 
   @spec emit_hook_veto(pid(), HookResult.t()) :: :ok

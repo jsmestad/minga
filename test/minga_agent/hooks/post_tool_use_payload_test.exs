@@ -4,7 +4,8 @@ defmodule MingaAgent.Hooks.PostToolUsePayloadTest do
   alias MingaAgent.Hooks.PostToolUsePayload
 
   test "new/5 builds a payload with all fields" do
-    payload = PostToolUsePayload.new("tc_1", "read_file", %{"path" => "a.txt"}, "file contents", false)
+    payload =
+      PostToolUsePayload.new("tc_1", "read_file", %{"path" => "a.txt"}, "file contents", false)
 
     assert payload.event == "PostToolUse"
     assert payload.tool_call_id == "tc_1"
@@ -54,7 +55,9 @@ defmodule MingaAgent.Hooks.PostToolUsePayloadTest do
   end
 
   test "new/1 defaults missing id to a generated value" do
-    payload = PostToolUsePayload.new(%{name: "test", arguments: %{}, result: "ok", is_error: false})
+    payload =
+      PostToolUsePayload.new(%{name: "test", arguments: %{}, result: "ok", is_error: false})
+
     assert String.starts_with?(payload.tool_call_id, "tool_")
   end
 

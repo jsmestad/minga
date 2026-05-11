@@ -4,6 +4,9 @@ defmodule MingaAgent.Hooks.PreCompactPayload do
 
   Sent to the hook command's stdin as JSON before context compaction runs.
   A non-zero exit from the hook vetoes compaction (context stays as-is).
+
+  `session_id` is optional because compaction runs inside the provider
+  process (`native.ex`), which does not have direct access to the session ID.
   """
 
   @derive {Jason.Encoder, only: [:event, :session_id, :message_count]}

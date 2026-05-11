@@ -1890,21 +1890,30 @@ defmodule MingaAgent.Session do
   @spec dispatch_session_start(state()) :: :ok
   defp dispatch_session_start(state) do
     payload = SessionStartPayload.new(state.session_id, state.model_name, state.provider_name)
-    HookDispatcher.session_start(AgentConfig.resolve().agent_hooks, SessionStartPayload.to_map(payload))
+
+    HookDispatcher.session_start(
+      AgentConfig.resolve().agent_hooks,
+      SessionStartPayload.to_map(payload)
+    )
   rescue
-    _ -> :ok
+    e -> Minga.Log.warning(:agent, "SessionStart hook dispatch failed: #{Exception.message(e)}")
   catch
-    _, _ -> :ok
+    _, reason ->
+      Minga.Log.warning(:agent, "SessionStart hook dispatch failed: #{inspect(reason)}")
   end
 
   @spec dispatch_session_end(state(), term()) :: :ok
   defp dispatch_session_end(state, reason) do
     payload = SessionEndPayload.new(state.session_id, reason, state.status)
-    HookDispatcher.session_end(AgentConfig.resolve().agent_hooks, SessionEndPayload.to_map(payload))
+
+    HookDispatcher.session_end(
+      AgentConfig.resolve().agent_hooks,
+      SessionEndPayload.to_map(payload)
+    )
   rescue
-    _ -> :ok
+    e -> Minga.Log.warning(:agent, "SessionEnd hook dispatch failed: #{Exception.message(e)}")
   catch
-    _, _ -> :ok
+    _, reason -> Minga.Log.warning(:agent, "SessionEnd hook dispatch failed: #{inspect(reason)}")
   end
 
   @spec dispatch_stop(state()) :: :ok
@@ -1913,19 +1922,24 @@ defmodule MingaAgent.Session do
     payload = StopPayload.new(state.session_id, :end_turn, last_message)
     HookDispatcher.stop(AgentConfig.resolve().agent_hooks, StopPayload.to_map(payload))
   rescue
-    _ -> :ok
+    e -> Minga.Log.warning(:agent, "Stop hook dispatch failed: #{Exception.message(e)}")
   catch
-    _, _ -> :ok
+    _, reason -> Minga.Log.warning(:agent, "Stop hook dispatch failed: #{inspect(reason)}")
   end
 
   @spec dispatch_notification(state(), atom(), String.t()) :: :ok
   defp dispatch_notification(state, trigger, message) do
     payload = NotificationPayload.new(state.session_id, trigger, message)
-    HookDispatcher.notification(AgentConfig.resolve().agent_hooks, NotificationPayload.to_map(payload))
+
+    HookDispatcher.notification(
+      AgentConfig.resolve().agent_hooks,
+      NotificationPayload.to_map(payload)
+    )
   rescue
-    _ -> :ok
+    e -> Minga.Log.warning(:agent, "Notification hook dispatch failed: #{Exception.message(e)}")
   catch
-    _, _ -> :ok
+    _, reason ->
+      Minga.Log.warning(:agent, "Notification hook dispatch failed: #{inspect(reason)}")
   end
 
   @spec dispatch_user_prompt_submit(state(), String.t() | [term()]) ::
@@ -1938,9 +1952,13 @@ defmodule MingaAgent.Session do
       UserPromptSubmitPayload.to_map(payload)
     )
   rescue
-    _ -> :ok
+    e ->
+      Minga.Log.warning(:agent, "UserPromptSubmit hook dispatch failed: #{Exception.message(e)}")
+      :ok
   catch
-    _, _ -> :ok
+    _, reason ->
+      Minga.Log.warning(:agent, "UserPromptSubmit hook dispatch failed: #{inspect(reason)}")
+      :ok
   end
 
   @spec extract_last_assistant_text([Message.t()]) :: String.t() | nil

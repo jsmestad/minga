@@ -76,7 +76,9 @@ defmodule MingaAgent.Hooks.ModuleRunnerTest do
     payload = %{"event" => "PreToolUse", "tool_name" => "shell", "tool_call_id" => "tc_mod"}
 
     assert :ok =
-             MingaAgent.Hooks.Dispatcher.dispatch(:pre_tool_use, [hook], payload, veto_capable: true)
+             MingaAgent.Hooks.Dispatcher.dispatch(:pre_tool_use, [hook], payload,
+               veto_capable: true
+             )
   end
 
   test "normalization accepts module hook config" do

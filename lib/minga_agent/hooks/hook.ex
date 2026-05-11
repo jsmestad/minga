@@ -38,7 +38,15 @@ defmodule MingaAgent.Hooks.Hook do
         }
 
   @enforce_keys [:event]
-  defstruct [:event, :tool_pattern, :command, :module, :function, type: :shell, timeout_ms: @default_timeout_ms]
+  defstruct [
+    :event,
+    :tool_pattern,
+    :command,
+    :module,
+    :function,
+    type: :shell,
+    timeout_ms: @default_timeout_ms
+  ]
 
   @doc "Returns the default per-hook timeout in milliseconds."
   @spec default_timeout_ms() :: pos_integer()
@@ -57,16 +65,18 @@ defmodule MingaAgent.Hooks.Hook do
     with {:ok, event} <- normalize_event(fetch(raw, :event)),
          {:ok, type} <- normalize_type(raw),
          {:ok, tool_pattern} <- normalize_tool_pattern(raw, event),
-         {:ok, fields} <- normalize_type_fields(raw, type),
+         {:ok, command, mod, fun} <- normalize_type_fields(raw, type),
          {:ok, timeout_ms} <- normalize_timeout(fetch(raw, :timeout_ms)) do
       {:ok,
        %__MODULE__{
          event: event,
          type: type,
          tool_pattern: tool_pattern,
+         command: command,
+         module: mod,
+         function: fun,
          timeout_ms: timeout_ms
-       }
-       |> Map.merge(fields)}
+       }}
     end
   end
 
@@ -108,41 +118,50 @@ defmodule MingaAgent.Hooks.Hook do
     ArgumentError -> :error
   end
 
+  @event_aliases Map.new(
+                   for {canonical, aliases} <- %{
+                         pre_tool_use: [:pre_tool_use, :PreToolUse, "PreToolUse", "pre_tool_use"],
+                         post_tool_use: [
+                           :post_tool_use,
+                           :PostToolUse,
+                           "PostToolUse",
+                           "post_tool_use"
+                         ],
+                         session_start: [
+                           :session_start,
+                           :SessionStart,
+                           "SessionStart",
+                           "session_start"
+                         ],
+                         session_end: [:session_end, :SessionEnd, "SessionEnd", "session_end"],
+                         stop: [:stop, :Stop, "Stop", "stop"],
+                         user_prompt_submit: [
+                           :user_prompt_submit,
+                           :UserPromptSubmit,
+                           "UserPromptSubmit",
+                           "user_prompt_submit"
+                         ],
+                         pre_compact: [:pre_compact, :PreCompact, "PreCompact", "pre_compact"],
+                         notification: [
+                           :notification,
+                           :Notification,
+                           "Notification",
+                           "notification"
+                         ]
+                       },
+                       alias_val <- aliases,
+                       do: {alias_val, canonical}
+                 )
+
   @spec normalize_event(term()) :: {:ok, event()} | {:error, String.t()}
   defp normalize_event(nil), do: {:error, "agent hook requires :event"}
-  defp normalize_event(:pre_tool_use), do: {:ok, :pre_tool_use}
-  defp normalize_event(:PreToolUse), do: {:ok, :pre_tool_use}
-  defp normalize_event("PreToolUse"), do: {:ok, :pre_tool_use}
-  defp normalize_event("pre_tool_use"), do: {:ok, :pre_tool_use}
-  defp normalize_event(:post_tool_use), do: {:ok, :post_tool_use}
-  defp normalize_event(:PostToolUse), do: {:ok, :post_tool_use}
-  defp normalize_event("PostToolUse"), do: {:ok, :post_tool_use}
-  defp normalize_event("post_tool_use"), do: {:ok, :post_tool_use}
-  defp normalize_event(:session_start), do: {:ok, :session_start}
-  defp normalize_event(:SessionStart), do: {:ok, :session_start}
-  defp normalize_event("SessionStart"), do: {:ok, :session_start}
-  defp normalize_event("session_start"), do: {:ok, :session_start}
-  defp normalize_event(:session_end), do: {:ok, :session_end}
-  defp normalize_event(:SessionEnd), do: {:ok, :session_end}
-  defp normalize_event("SessionEnd"), do: {:ok, :session_end}
-  defp normalize_event("session_end"), do: {:ok, :session_end}
-  defp normalize_event(:stop), do: {:ok, :stop}
-  defp normalize_event(:Stop), do: {:ok, :stop}
-  defp normalize_event("Stop"), do: {:ok, :stop}
-  defp normalize_event("stop"), do: {:ok, :stop}
-  defp normalize_event(:user_prompt_submit), do: {:ok, :user_prompt_submit}
-  defp normalize_event(:UserPromptSubmit), do: {:ok, :user_prompt_submit}
-  defp normalize_event("UserPromptSubmit"), do: {:ok, :user_prompt_submit}
-  defp normalize_event("user_prompt_submit"), do: {:ok, :user_prompt_submit}
-  defp normalize_event(:pre_compact), do: {:ok, :pre_compact}
-  defp normalize_event(:PreCompact), do: {:ok, :pre_compact}
-  defp normalize_event("PreCompact"), do: {:ok, :pre_compact}
-  defp normalize_event("pre_compact"), do: {:ok, :pre_compact}
-  defp normalize_event(:notification), do: {:ok, :notification}
-  defp normalize_event(:Notification), do: {:ok, :notification}
-  defp normalize_event("Notification"), do: {:ok, :notification}
-  defp normalize_event("notification"), do: {:ok, :notification}
-  defp normalize_event(other), do: {:error, "unsupported agent hook event: #{inspect(other)}"}
+
+  defp normalize_event(value) do
+    case Map.fetch(@event_aliases, value) do
+      {:ok, event} -> {:ok, event}
+      :error -> {:error, "unsupported agent hook event: #{inspect(value)}"}
+    end
+  end
 
   @spec normalize_tool_pattern(map(), event()) :: {:ok, String.t() | nil} | {:error, String.t()}
   defp normalize_tool_pattern(raw, event) do
@@ -161,12 +180,7 @@ defmodule MingaAgent.Hooks.Hook do
   @spec normalize_type(map()) :: {:ok, hook_type()} | {:error, String.t()}
   defp normalize_type(raw) do
     case fetch(raw, :type) do
-      nil ->
-        cond do
-          fetch(raw, :module) != nil -> {:ok, :module}
-          true -> {:ok, :shell}
-        end
-
+      nil -> infer_type(raw)
       :shell -> {:ok, :shell}
       "shell" -> {:ok, :shell}
       :module -> {:ok, :module}
@@ -175,12 +189,16 @@ defmodule MingaAgent.Hooks.Hook do
     end
   end
 
+  @spec infer_type(map()) :: {:ok, hook_type()}
+  defp infer_type(raw) do
+    if fetch(raw, :module) != nil, do: {:ok, :module}, else: {:ok, :shell}
+  end
+
   @spec normalize_type_fields(map(), hook_type()) ::
-          {:ok, %{command: String.t()} | %{module: module(), function: atom()}}
-          | {:error, String.t()}
+          {:ok, String.t() | nil, module() | nil, atom() | nil} | {:error, String.t()}
   defp normalize_type_fields(raw, :shell) do
     case normalize_non_empty_string(fetch(raw, :command), "shell hook requires :command") do
-      {:ok, command} -> {:ok, %{command: command}}
+      {:ok, command} -> {:ok, command, nil, nil}
       error -> error
     end
   end
@@ -188,7 +206,7 @@ defmodule MingaAgent.Hooks.Hook do
   defp normalize_type_fields(raw, :module) do
     with {:ok, mod} <- normalize_module(fetch(raw, :module)),
          {:ok, fun} <- normalize_function(fetch(raw, :function)) do
-      {:ok, %{module: mod, function: fun}}
+      {:ok, nil, mod, fun}
     end
   end
 
@@ -197,12 +215,14 @@ defmodule MingaAgent.Hooks.Hook do
   defp normalize_module(mod) when is_atom(mod), do: {:ok, mod}
 
   defp normalize_module(mod) when is_binary(mod) do
-    {:ok, String.to_existing_atom("Elixir." <> mod)}
+    full_name = if String.starts_with?(mod, "Elixir."), do: mod, else: "Elixir." <> mod
+    {:ok, String.to_existing_atom(full_name)}
   rescue
     ArgumentError -> {:error, "module hook :module #{inspect(mod)} is not a loaded module"}
   end
 
-  defp normalize_module(other), do: {:error, "module hook :module must be an atom, got: #{inspect(other)}"}
+  defp normalize_module(other),
+    do: {:error, "module hook :module must be an atom, got: #{inspect(other)}"}
 
   @spec normalize_function(term()) :: {:ok, atom()} | {:error, String.t()}
   defp normalize_function(nil), do: {:error, "module hook requires :function"}
@@ -214,7 +234,8 @@ defmodule MingaAgent.Hooks.Hook do
     ArgumentError -> {:error, "module hook :function #{inspect(fun)} is not a known atom"}
   end
 
-  defp normalize_function(other), do: {:error, "module hook :function must be an atom, got: #{inspect(other)}"}
+  defp normalize_function(other),
+    do: {:error, "module hook :function must be an atom, got: #{inspect(other)}"}
 
   @spec normalize_timeout(term()) :: {:ok, pos_integer()} | {:error, String.t()}
   defp normalize_timeout(nil), do: {:ok, @default_timeout_ms}

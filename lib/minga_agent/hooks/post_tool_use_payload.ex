@@ -8,7 +8,8 @@ defmodule MingaAgent.Hooks.PostToolUsePayload do
 
   @max_result_bytes 10_240
 
-  @derive {Jason.Encoder, only: [:event, :tool_call_id, :tool_name, :arguments, :result, :is_error]}
+  @derive {Jason.Encoder,
+           only: [:event, :tool_call_id, :tool_name, :arguments, :result, :is_error]}
   @enforce_keys [:tool_call_id, :tool_name, :arguments, :result, :is_error]
   defstruct [:tool_call_id, :tool_name, :arguments, :result, :is_error, event: "PostToolUse"]
 
@@ -76,6 +77,6 @@ defmodule MingaAgent.Hooks.PostToolUsePayload do
   defp truncate_result(result) when byte_size(result) <= @max_result_bytes, do: result
 
   defp truncate_result(result) do
-    binary_part(result, 0, @max_result_bytes) <> "\n... (truncated)"
+    String.slice(result, 0, @max_result_bytes) <> "\n... (truncated)"
   end
 end

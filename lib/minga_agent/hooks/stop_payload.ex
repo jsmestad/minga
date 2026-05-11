@@ -47,6 +47,6 @@ defmodule MingaAgent.Hooks.StopPayload do
   defp truncate_message(msg) when byte_size(msg) <= @max_message_bytes, do: msg
 
   defp truncate_message(msg) do
-    binary_part(msg, 0, @max_message_bytes) <> "\n... (truncated)"
+    String.slice(msg, 0, @max_message_bytes) <> "\n... (truncated)"
   end
 end

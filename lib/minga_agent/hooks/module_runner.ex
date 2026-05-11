@@ -42,7 +42,11 @@ defmodule MingaAgent.Hooks.ModuleRunner do
         )
 
       {:DOWN, ^ref, :process, ^pid, :normal} ->
-        Result.allow(hook)
+        Result.veto(
+          hook,
+          "module hook exited without responding",
+          {:failed_to_start, :no_response}
+        )
 
       {:DOWN, ^ref, :process, ^pid, reason} ->
         Result.veto(

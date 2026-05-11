@@ -194,6 +194,10 @@ defmodule MingaAgent.Tool.Executor do
       )
 
     HookDispatcher.post_tool_use(config.agent_hooks, PostToolUsePayload.to_map(payload))
+  rescue
+    e -> Minga.Log.warning(:agent, "PostToolUse hook dispatch failed: #{Exception.message(e)}")
+  catch
+    _, reason -> Minga.Log.warning(:agent, "PostToolUse hook dispatch failed: #{inspect(reason)}")
   end
 
   @spec execute_with_advice(Spec.t(), map(), atom()) :: {:ok, term()} | {:error, term()}

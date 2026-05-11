@@ -5,8 +5,8 @@ defmodule MingaAgent.Hooks.Dispatcher do
   The dispatcher is intentionally stateless. It receives a list of hooks from
   `MingaAgent.Config`, filters matching hooks in registration order, and asks a
   runner to execute each hook. For veto-capable events the first veto
-  short-circuits later hooks; for notification-only events vetoes are logged
-  but do not block.
+  short-circuits later hooks; for notification-only events vetoes are
+  broadcast as events and logged as warnings but do not block.
   """
 
   alias Minga.Events
