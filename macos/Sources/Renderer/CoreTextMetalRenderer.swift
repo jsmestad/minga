@@ -417,7 +417,8 @@ final class CoreTextMetalRenderer {
                 // so each texture is at most viewport-wide. Fixes gutter bleedthrough
                 // (no leftward position shift) and text truncation (texture always
                 // covers the visible portion).
-                let contentCols = max(Int(frameState.cols) - Int(gutter.lineNumberWidth) - Int(gutter.signColWidth), 1)
+                let gutterPaddingCols = Int(ceil((gutterLeftMarginPx + gutterPaddingPx) / (cellW * scale)))
+                let contentCols = max(Int(frameState.cols) - Int(gutter.lineNumberWidth) - Int(gutter.signColWidth) - gutterPaddingCols, 1)
                 let scrollLeftInt = Int(content.scrollLeft)
                 var clippedRows: [GUIVisualRow] = []
                 clippedRows.reserveCapacity(content.rows.count)
