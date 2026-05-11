@@ -51,28 +51,35 @@ defmodule MingaEditor.Commands.Formatting do
   defp supports_formatting?(client) do
     caps = Client.capabilities(client)
 
-    get_in(caps, ["documentFormattingProvider"]) == true or
-      get_in(caps, ["textDocument", "formatting", "provider"]) == true
+    match?(%{}, get_in(caps, ["documentFormattingProvider"])) or
+      get_in(caps, ["documentFormattingProvider"]) == true
   end
+
+  @lsp_format_timeout 5_000
 
   @spec request_lsp_format(state(), pid(), pid()) :: state()
   defp request_lsp_format(state, buf, client) do
     file_path = Buffer.file_path(buf)
     uri = SyncServer.path_to_uri(file_path)
+    tab_width = Buffer.get_option(buf, :tab_width) || 2
+    insert_spaces = Buffer.get_option(buf, :indent_with) != :tabs
 
-    ref = Client.request_formatting(client, uri)
+    params = %{
+      "textDocument" => %{"uri" => uri},
+      "options" => %{"tabSize" => tab_width, "insertSpaces" => insert_spaces}
+    }
 
-    receive do
-      {:lsp_response, ^ref, {:ok, edits}} ->
+    case Client.request_sync(client, "textDocument/formatting", params, @lsp_format_timeout) do
+      {:ok, edits} when is_list(edits) ->
         apply_lsp_edits(buf, edits)
         EditorState.set_status(state, "Formatted (LSP)")
 
-      {:lsp_response, ^ref, {:error, reason}} ->
+      {:ok, nil} ->
+        EditorState.set_status(state, "No formatting changes")
+
+      {:error, reason} ->
         Minga.Log.warning(:editor, "LSP formatting error: #{inspect(reason)}")
         EditorState.set_status(state, "Format error: LSP request failed")
-    after
-      5000 ->
-        EditorState.set_status(state, "Format error: LSP request timeout")
     end
   end
 
@@ -126,7 +133,7 @@ defmodule MingaEditor.Commands.Formatting do
 
           end_text ->
             before = String.slice(start_text, 0, start_col)
-            after_end = String.slice(end_text, end_col..-1)
+            after_end = String.slice(end_text, end_col..-1//1)
             replacement = before <> new_text <> after_end
 
             {before_lines, rest} = Enum.split(lines, start_line)

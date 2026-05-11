@@ -16,9 +16,9 @@ defmodule Minga.Language.Nix do
       grammar: "nix",
       language_servers: [
         %ServerConfig{
-          name: nil,
+          name: :nil_ls,
           command: "nil",
-          root_markers: ["flake.nix", ".flake8"]
+          root_markers: ["flake.nix", "shell.nix", "default.nix"]
         }
       ],
       root_markers: ["flake.nix"]

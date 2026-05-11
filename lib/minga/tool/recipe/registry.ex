@@ -199,7 +199,7 @@ defmodule Minga.Tool.Recipe.Registry do
     %Recipe{
       name: :dart_language_server,
       label: "Dart Language Server",
-      description: "Dart language server built into the Dart SDK",
+      description: "Dart language server built into the Dart SDK (install Dart SDK first)",
       provides: ["dart"],
       method: :github_release,
       package: "dart-lang/sdk",
@@ -232,7 +232,7 @@ defmodule Minga.Tool.Recipe.Registry do
     %Recipe{
       name: :sourcekit_lsp,
       label: "SourceKit-LSP",
-      description: "Swift language server powered by Swift compiler",
+      description: "Swift language server bundled with the Swift toolchain",
       provides: ["sourcekit-lsp"],
       method: :github_release,
       package: "apple/sourcekit-lsp",
@@ -287,16 +287,16 @@ defmodule Minga.Tool.Recipe.Registry do
     %Recipe{
       name: :ocamllsp,
       label: "OCaml LSP",
-      description: "Language server for OCaml",
+      description: "Language server for OCaml (install via opam install ocaml-lsp-server)",
       provides: ["ocamllsp"],
-      method: :npm,
+      method: :github_release,
       package: "ocaml-lsp-server",
       homepage: "https://github.com/ocaml/ocaml-lsp",
       category: :lsp_server,
       languages: [:ocaml]
     },
     %Recipe{
-      name: nil,
+      name: :nil_ls,
       label: "nil",
       description: "Language server for Nix",
       provides: ["nil"],
