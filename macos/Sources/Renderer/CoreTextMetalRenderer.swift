@@ -63,6 +63,11 @@ private let ctBgClearColorDefault = MTLClearColor(red: 0.01298, green: 0.01298, 
 /// in the render path, and all callers are on the main thread already.
 @MainActor
 final class CoreTextMetalRenderer {
+    /// Total gutter pixel padding in points (left margin + right separator gap).
+    /// Subtracted from the view width when computing cols for the BEAM so
+    /// `content_w` accurately reflects the visible content area.
+    static let gutterPixelPaddingPt: CGFloat = 14.0  // 6pt left margin + 8pt right gap
+
     let device: MTLDevice
     let commandQueue: MTLCommandQueue
     private let bgPipeline: MTLRenderPipelineState
@@ -417,8 +422,7 @@ final class CoreTextMetalRenderer {
                 // so each texture is at most viewport-wide. Fixes gutter bleedthrough
                 // (no leftward position shift) and text truncation (texture always
                 // covers the visible portion).
-                let gutterPaddingCols = Int(ceil((gutterLeftMarginPx + gutterPaddingPx) / (cellW * scale)))
-                let contentCols = max(Int(frameState.cols) - Int(gutter.lineNumberWidth) - Int(gutter.signColWidth) - gutterPaddingCols, 1)
+                let contentCols = max(Int(frameState.cols) - Int(gutter.lineNumberWidth) - Int(gutter.signColWidth), 1)
                 let scrollLeftInt = Int(content.scrollLeft)
                 var clippedRows: [GUIVisualRow] = []
                 clippedRows.reserveCapacity(content.rows.count)

@@ -601,7 +601,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.fontManager = fm
 
         // Initial grid dimensions.
-        let cols = UInt16(defaultWindowWidth / CGFloat(face.cellWidth))
+        let usableWidth = defaultWindowWidth - CoreTextMetalRenderer.gutterPixelPaddingPt
+        let cols = UInt16(max(usableWidth / CGFloat(face.cellWidth), 1))
         let rows = UInt16(defaultWindowHeight / CGFloat(face.cellHeight))
 
         // CoreText renderer.
@@ -859,7 +860,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Re-send ready event so the new BEAM knows our dimensions.
         if let nsView = editorNSView {
-            let cols = UInt16(nsView.bounds.width / CGFloat(nsView.cellWidth))
+            let usableWidth = nsView.bounds.width - CoreTextMetalRenderer.gutterPixelPaddingPt
+            let cols = UInt16(max(usableWidth / CGFloat(nsView.cellWidth), 1))
             let rows = UInt16(nsView.bounds.height / CGFloat(nsView.cellHeight))
             enc.sendReady(cols: cols, rows: rows)
         }
