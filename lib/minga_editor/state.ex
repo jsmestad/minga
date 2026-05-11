@@ -1027,11 +1027,22 @@ defmodule MingaEditor.State do
   """
   @spec restore_tab_context(t(), Tab.context()) :: t()
   def restore_tab_context(%__MODULE__{} = state, context) when is_map(context) do
-    context =
+    {context, state} =
       if map_size(context) == 0 do
-        build_file_tab_defaults(state)
+        synthesized = build_file_tab_defaults(state)
+
+        state =
+          case tab_bar(state) do
+            %TabBar{active_id: id} = tb ->
+              set_tab_bar(state, TabBar.update_context(tb, id, synthesized))
+
+            _ ->
+              state
+          end
+
+        {synthesized, state}
       else
-        context
+        {context, state}
       end
 
     %{state | workspace: WorkspaceState.restore_tab_context(state.workspace, context)}

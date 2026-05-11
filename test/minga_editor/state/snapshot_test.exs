@@ -137,6 +137,26 @@ defmodule MingaEditor.State.SnapshotTest do
       assert restored.workspace.editing.mode == :normal
       assert restored.workspace.keymap_scope == :editor
     end
+
+    test "writes synthesized defaults back into the active tab on empty context" do
+      {:ok, buf} = BufferServer.start_link(content: "new file")
+
+      tab = Tab.new_file(1, "new.ex")
+      tb = TabBar.new(tab)
+
+      state = make_state(buffer: buf, tab_bar: tb)
+      assert TabBar.active(tb).context == %{}
+
+      restored = EditorState.restore_tab_context(state, %{})
+
+      updated_tb = restored.shell_state.tab_bar
+      stored_ctx = TabBar.get(updated_tb, tab.id).context
+
+      assert map_size(stored_ctx) > 0
+      assert stored_ctx.keymap_scope == :editor
+      assert stored_ctx.editing.mode == :normal
+      assert stored_ctx.buffers.active == buf
+    end
   end
 
   describe "switch_tab/2" do
@@ -180,6 +200,24 @@ defmodule MingaEditor.State.SnapshotTest do
       tb = TabBar.new(Tab.new_file(1, "a"))
       state = make_state(tab_bar: tb)
       assert EditorState.switch_tab(state, 1) == state
+    end
+
+    test "switching to a brand-new tab writes context into tab bar immediately" do
+      {:ok, buf} = BufferServer.start_link(content: "original")
+
+      tab_a = Tab.new_file(1, "a.ex")
+      tb = TabBar.new(tab_a)
+
+      {tb, tab_b} = TabBar.add(tb, :file, "b.ex")
+      tb = TabBar.switch_to(tb, tab_a.id)
+      assert TabBar.get(tb, tab_b.id).context == %{}
+
+      state = make_state(buffer: buf, tab_bar: tb, mode: :normal, keymap_scope: :editor)
+      switched = EditorState.switch_tab(state, tab_b.id)
+
+      stored_ctx = TabBar.get(switched.shell_state.tab_bar, tab_b.id).context
+      assert map_size(stored_ctx) > 0
+      assert stored_ctx.buffers.active == buf
     end
 
     test "switching with nil tab_bar is a no-op" do
