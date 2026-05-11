@@ -5,7 +5,7 @@ defmodule MingaAgent.CredentialsTest do
 
   @test_dir "test/tmp/credentials_test"
 
-  @provider_env_vars ~w(ANTHROPIC_API_KEY OPENAI_API_KEY GOOGLE_API_KEY OPENROUTER_API_KEY GROQ_API_KEY)
+  @provider_env_vars ~w(ANTHROPIC_API_KEY OPENAI_API_KEY GOOGLE_API_KEY OPENROUTER_API_KEY GROQ_API_KEY MISTRAL_API_KEY DEEPSEEK_API_KEY)
 
   setup do
     # Clear all provider env vars so host machine state never leaks into tests
@@ -107,8 +107,8 @@ defmodule MingaAgent.CredentialsTest do
   describe "status/0" do
     test "reports unconfigured when nothing is set" do
       statuses = Credentials.status()
-      # 5 key-based providers + 1 Ollama (auto-detected)
-      assert length(statuses) == 6
+      # 7 key-based providers + 1 Ollama (auto-detected)
+      assert length(statuses) == 8
     end
 
     test "reports configured with correct source" do

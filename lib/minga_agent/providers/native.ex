@@ -1183,7 +1183,11 @@ defmodule MingaAgent.Providers.Native do
 
         maybe_emit_file_changed(provider_pid, tool_call, before_content, is_error)
 
-        tool_result_msg = Context.tool_result_message(tool_call.name, tool_call.id, result_text)
+        meta = if is_error, do: %{is_error: true}, else: %{}
+
+        tool_result_msg =
+          Context.tool_result_message(tool_call.name, tool_call.id, result_text, meta)
+
         {Context.append(ctx, tool_result_msg), new_mode}
       end)
 

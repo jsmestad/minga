@@ -43,7 +43,9 @@ defmodule MingaAgent.Credentials do
     "openai" => "OPENAI_API_KEY",
     "google" => "GOOGLE_API_KEY",
     "openrouter" => "OPENROUTER_API_KEY",
-    "groq" => "GROQ_API_KEY"
+    "groq" => "GROQ_API_KEY",
+    "mistral" => "MISTRAL_API_KEY",
+    "deepseek" => "DEEPSEEK_API_KEY"
   }
 
   # Maps provider names to their API key dashboard URLs.
@@ -52,7 +54,9 @@ defmodule MingaAgent.Credentials do
     "openai" => "https://platform.openai.com/api-keys",
     "google" => "https://aistudio.google.com/apikey",
     "openrouter" => "https://openrouter.ai/keys",
-    "groq" => "https://console.groq.com/keys"
+    "groq" => "https://console.groq.com/keys",
+    "mistral" => "https://console.mistral.ai/api-keys",
+    "deepseek" => "https://platform.deepseek.com/api_keys"
   }
 
   # Ollama doesn't use an API key; it's auto-detected when the local server
