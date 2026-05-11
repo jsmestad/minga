@@ -7,16 +7,22 @@ defmodule MingaEditor.Commands.MovementTest do
   @sync_timeout 15_000
 
   defp start_editor(content \\ "hello\nworld\nfoo") do
-    {:ok, buffer} = BufferServer.start_link(content: content)
+    id = :erlang.unique_integer([:positive])
+    events_registry = :"movement_events_#{id}"
+    start_supervised!({Minga.Events, name: events_registry})
+
+    {:ok, buffer} = BufferServer.start_link(content: content, events_registry: events_registry)
 
     {:ok, editor} =
       MingaEditor.start_link(
-        name: :"editor_#{:erlang.unique_integer([:positive])}",
+        name: :"editor_#{id}",
         port_manager: nil,
         buffer: buffer,
         width: 40,
         height: 10,
-        editing_model: :vim
+        editing_model: :vim,
+        events_registry: events_registry,
+        suppress_tool_prompts: true
       )
 
     {editor, buffer}
@@ -28,6 +34,22 @@ defmodule MingaEditor.Commands.MovementTest do
   end
 
   describe "Normal mode — movements" do
+    test "default bus tool prompts cannot interrupt movement dispatch" do
+      {editor, buffer} = start_editor("hello")
+      state = :sys.get_state(editor, @sync_timeout)
+
+      refute editor in Minga.Events.subscribers(:tool_missing)
+      assert editor in Minga.Events.subscribers(:tool_missing, state.events_registry)
+
+      Minga.Events.broadcast(:tool_missing, %Minga.Events.ToolMissingEvent{command: "rg"})
+      send_key(editor, ?l)
+
+      assert BufferServer.cursor(buffer) == {0, 1}
+      state = :sys.get_state(editor, @sync_timeout)
+      assert state.workspace.editing.mode == :normal
+      assert state.shell_state.tool_prompt_queue == []
+    end
+
     test "h moves cursor left" do
       {editor, buffer} = start_editor("hello")
       send_key(editor, ?l)
