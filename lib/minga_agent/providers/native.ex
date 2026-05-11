@@ -290,11 +290,12 @@ defmodule MingaAgent.Providers.Native do
           parent_session: subscriber
         )
 
+    active_skills = load_active_skills(project_root, Keyword.get(opts, :active_skill_names, []))
     internal_tools = build_internal_tools(provider_pid)
     reserved_tool_names = Enum.map(base_tools ++ internal_tools, & &1.name)
     {mcp_registry, mcp_tools} = start_mcp_servers(opts, config, subscriber, reserved_tool_names)
     tools = base_tools ++ mcp_tools ++ internal_tools
-    system_prompt = build_system_prompt(project_root)
+    system_prompt = build_system_prompt(project_root, active_skills)
     context = Context.new([Context.system(system_prompt)])
 
     # Resolve API key from credentials (env var or credentials file).
@@ -318,7 +319,7 @@ defmodule MingaAgent.Providers.Native do
       streaming: false,
       interrupted: false,
       last_user_prompt: nil,
-      active_skills: [],
+      active_skills: active_skills,
       internal_state: InternalState.new(),
       max_turns: max_turns,
       max_cost: max_cost,
@@ -488,7 +489,7 @@ defmodule MingaAgent.Providers.Native do
       Task.shutdown(state.task, 150)
     end
 
-    system_prompt = build_system_prompt(state.project_root)
+    system_prompt = build_system_prompt(state.project_root, state.active_skills)
     context = Context.new([Context.system(system_prompt)])
 
     state = %{state | context: context, task: nil, streaming: false, session_cost: 0.0}
@@ -498,11 +499,7 @@ defmodule MingaAgent.Providers.Native do
   end
 
   def handle_call(:get_state, _from, state) do
-    system_prompt =
-      case state.context.messages do
-        [%{role: :system, content: content} | _] when is_binary(content) -> content
-        _ -> nil
-      end
+    system_prompt = system_prompt_from_context(state.context)
 
     session_state = %{
       model: %{
@@ -512,7 +509,10 @@ defmodule MingaAgent.Providers.Native do
       },
       is_streaming: state.streaming,
       token_usage: nil,
-      system_prompt: system_prompt
+      system_prompt: system_prompt,
+      thinking_level: state.thinking_level,
+      active_skill_names: Enum.map(state.active_skills, & &1.name),
+      project_root: state.project_root
     }
 
     {:reply, {:ok, session_state}, state}
@@ -1860,8 +1860,48 @@ defmodule MingaAgent.Providers.Native do
     ]
   end
 
+  @spec system_prompt_from_context(Context.t()) :: String.t() | nil
+  defp system_prompt_from_context(%Context{
+         messages: [%ReqLLM.Message{role: :system, content: content} | _messages]
+       }) do
+    text_from_content(content)
+  end
+
+  defp system_prompt_from_context(_context), do: nil
+
+  @spec text_from_content(String.t() | [term()]) :: String.t() | nil
+  defp text_from_content(content) when is_binary(content), do: content
+
+  defp text_from_content(content) when is_list(content) do
+    content
+    |> Enum.map(&content_part_text/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.join("\n")
+  end
+
+  @spec content_part_text(term()) :: String.t()
+  defp content_part_text(%{text: text}) when is_binary(text), do: text
+  defp content_part_text(_part), do: ""
+
+  @spec load_active_skills(String.t(), [String.t()]) :: [Skills.skill()]
+  defp load_active_skills(_project_root, []), do: []
+
+  defp load_active_skills(project_root, names) do
+    names
+    |> Enum.uniq()
+    |> Enum.flat_map(&load_active_skill(project_root, &1))
+  end
+
+  @spec load_active_skill(String.t(), String.t()) :: [Skills.skill()]
+  defp load_active_skill(project_root, name) do
+    case Skills.find(name, project_root) do
+      {:ok, skill} -> [skill]
+      :not_found -> []
+    end
+  end
+
   @spec build_system_prompt(String.t(), [Skills.skill()]) :: String.t()
-  defp build_system_prompt(project_root, active_skills \\ []) do
+  defp build_system_prompt(project_root, active_skills) do
     base = resolve_base_prompt(project_root)
     instructions = Instructions.assemble(project_root)
     memory = Memory.for_prompt()
