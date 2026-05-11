@@ -590,8 +590,8 @@ defmodule Minga.LSP.Client do
 
   @spec handle_method_response(
           String.t(),
-          {:ok, term()} | {:error, map()},
-          GenServer.from() | nil,
+          {:ok, term()} | {:error, term()},
+          State.pending_from(),
           State.t()
         ) :: State.t()
   defp handle_method_response("initialize", {:ok, result}, _from, state) do
