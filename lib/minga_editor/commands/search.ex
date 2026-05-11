@@ -320,7 +320,7 @@ defmodule MingaEditor.Commands.Search do
           }
       }
 
-      if state.backend == :native_gui and state.port_manager do
+      if state.backend in [:gui, :native_gui] and state.port_manager do
         MingaEditor.Frontend.clipboard_write(state.port_manager, text, :find)
       end
 

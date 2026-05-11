@@ -7,11 +7,11 @@ defmodule Minga.Runtime.Supervisor do
       Runtime.Supervisor (one_for_one)
       ├── MingaEditor.Watchdog      SIGUSR1 recovery (independent leaf)
       ├── Minga.FileWatcher          FSEvents/inotify watcher (independent leaf)
-      └── MingaEditor.Supervisor    Parser → Port → Editor (rest_for_one)
+      └── MingaEditor.Supervisor    Parser → Port → Renderer → Editor (rest_for_one)
 
   A FileWatcher crash restarts only FileWatcher. A Watchdog crash restarts
   only Watchdog. Neither cascades into the MingaEditor.Supervisor or each other.
-  The tight Parser → Port → Editor cascade is handled internally by
+  The tight Parser → Port → Renderer → Editor cascade is handled internally by
   MingaEditor.Supervisor's own `rest_for_one` strategy.
 
   This supervisor is conditionally started: it only appears in the tree
@@ -44,8 +44,8 @@ defmodule Minga.Runtime.Supervisor do
       # depend on it structurally. A filesystem watcher flake restarts only
       # FileWatcher, not the renderer.
       Minga.FileWatcher,
-      # Editor.Supervisor groups the tightly-coupled trio with rest_for_one:
-      # Parser crash → Port + Editor restart, Port crash → Editor restart.
+      # Editor.Supervisor groups the tightly-coupled render path with rest_for_one:
+      # Parser crash → Port + Renderer + Editor restart, Port crash → Renderer + Editor restart.
       {MingaEditor.Supervisor, [backend: backend]}
     ]
 

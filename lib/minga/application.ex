@@ -42,6 +42,7 @@ defmodule Minga.Application do
       │   └── MingaEditor.Supervisor (rest_for_one)
       │       ├── Minga.Parser.Manager
       │       ├── MingaEditor.Frontend.Manager
+      │       ├── MingaEditor.Renderer.Server
       │       └── MingaEditor
       └── Minga.SystemObserver               (always-on process observer)
 

@@ -54,32 +54,32 @@ defmodule MingaEditor.Renderer do
   end
 
   @doc """
-  Renders synchronously, or pushes a snapshot to the Renderer.Server when
-  the split-renderer feature flag is on. Returns the editor state — in
-  async mode unchanged (the Renderer's `{:render_done, ...}` writeback
-  will update caches and layout later).
+  Pushes a render snapshot to the Renderer.Server for async rendering.
+  Returns the editor state unchanged; the Renderer's `{:render_done, ...}`
+  writeback will update caches and layout later.
 
-  Behind the flag this is the same call as `render/1`. Headless backends
-  always render synchronously regardless of the flag, since the test
-  harness depends on synchronous emit for determinism.
+  Falls back to synchronous render when no Renderer.Server is available
+  (headless backend, or Editor started outside the supervisor in tests),
+  or when the active shell cannot use the async RenderPipeline path.
   """
   @spec render_or_async(state()) :: state()
   def render_or_async(%{backend: :headless} = state), do: render(state)
 
-  def render_or_async(state) do
-    if RendererServer.enabled?() do
+  def render_or_async(%{renderer: pid} = state) when is_pid(pid) do
+    if async_render?(state) do
       snapshot = Input.from_editor_state(state)
-      # Monotonic time stands in for a frame sequence number; the renderer
-      # only uses it for telemetry tagging and pending-snapshot identity.
-      # `abs/1` because monotonic_time/1 can return negative values and the
-      # @spec on cast_snapshot/3 requires a non_neg_integer.
-      seq = abs(System.monotonic_time(:microsecond))
-      RendererServer.cast_snapshot(snapshot, seq)
+      seq = System.unique_integer([:positive, :monotonic])
+      RendererServer.cast_snapshot(pid, snapshot, seq)
       state
     else
       render(state)
     end
   end
+
+  def render_or_async(state), do: render(state)
+
+  @spec async_render?(state()) :: boolean()
+  defp async_render?(%{shell: shell} = state), do: shell.async_render?(state)
 
   @doc """
   Renders the dashboard home screen (no active buffer).

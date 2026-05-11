@@ -59,13 +59,20 @@ defmodule MingaEditor do
   @typedoc "Options for starting the editor."
   @type start_opt ::
           {:name, GenServer.name()}
+          | {:backend, MingaEditor.State.backend()}
           | {:port_manager, GenServer.server()}
+          | {:parser_manager, GenServer.server()}
           | {:keymap_server, GenServer.server()}
           | {:options_server, GenServer.server()}
           | {:events_registry, Minga.Events.registry()}
           | {:buffer, pid()}
           | {:width, pos_integer()}
           | {:height, pos_integer()}
+          | {:editing_model, :vim | :cua}
+          | {:shell, :traditional | :board | module()}
+          | {:project_root, String.t() | nil}
+          | {:swap_dir, String.t()}
+          | {:session_dir, String.t()}
           | {:suppress_tool_prompts, boolean()}
 
   alias MingaAgent.Session, as: AgentSession
@@ -174,6 +181,14 @@ defmodule MingaEditor do
 
     state = Startup.build_initial_state(opts)
 
+    renderer_pid = renderer_pid_for_backend(state.backend)
+
+    if state.backend != :headless and is_nil(renderer_pid) do
+      Minga.Log.warning(:editor, "Renderer.Server not found at init; rendering synchronously")
+    end
+
+    state = EditorState.set_renderer(state, renderer_pid)
+
     # Logger redirect and startup messages
     tui_active? = state.backend == :tui
 
@@ -246,6 +261,10 @@ defmodule MingaEditor do
     # init. Cleanup happens in Application.stop/1 (clean shutdown only).
     :ok
   end
+
+  @spec renderer_pid_for_backend(EditorState.backend()) :: pid() | nil
+  defp renderer_pid_for_backend(:headless), do: nil
+  defp renderer_pid_for_backend(_backend), do: GenServer.whereis(MingaEditor.Renderer.Server)
 
   @impl true
   @spec handle_call(term(), GenServer.from(), state()) :: {:reply, term(), state()}
@@ -627,8 +646,7 @@ defmodule MingaEditor do
     {:noreply, %{state | render_timer: nil}}
   end
 
-  # Renderer.Server writeback (only fires when split-renderer is enabled).
-  # The renderer returns stale snapshots of full window and shell structs, so
+  # Renderer.Server writeback after each async frame completes.
   # EditorState narrows the merge to renderer-owned fields only.
   def handle_info({:render_done, %{caches: _caches, layout: _layout} = wb}, state) do
     {:noreply, EditorState.apply_renderer_writeback(state, wb)}

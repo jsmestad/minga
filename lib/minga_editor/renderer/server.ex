@@ -5,10 +5,9 @@ defmodule MingaEditor.Renderer.Server do
 
   ## Lifecycle
 
-  Started by `MingaEditor.Supervisor` only when
-  `Application.get_env(:minga, :split_renderer, false)` is true. When
-  the flag is off, the Editor calls `MingaEditor.Renderer.render/1`
-  synchronously and this server is not in the supervision tree.
+  Started by `MingaEditor.Supervisor` for all non-headless backends.
+  The headless backend renders synchronously in-process for test
+  determinism; this server is not in the supervision tree in that case.
 
   ## Snapshot mechanics
 
@@ -25,10 +24,9 @@ defmodule MingaEditor.Renderer.Server do
   The render pipeline computes `modeline_click_regions` and
   `tab_bar_click_regions` as part of chrome rendering. These need to
   flow back to the Editor so subsequent mouse events can resolve
-  click positions. The Renderer casts
-  `{:render_done, frame_seq, %{caches: c, layout: l, focus_tree: ft, click_regions: cr}}`
-  back to the Editor after every emit; the Editor merges into its
-  state via `apply_renderer_writeback/2`.
+  click positions. The Renderer sends `{:render_done, writeback}`
+  back to the Editor after every emit; the Editor merges renderer-owned
+  fields from that payload via `apply_renderer_writeback/2`.
 
   ## Telemetry
 
@@ -38,9 +36,9 @@ defmodule MingaEditor.Renderer.Server do
 
   ## Determinism in tests
 
-  EditorCase and snapshot tests run with the flag off. The Editor's
-  existing synchronous render path keeps tests deterministic. This
-  server is not started in the test supervision tree by default.
+  EditorCase tests use the headless backend, which renders
+  synchronously in-process. This server is not started in the test
+  supervision tree.
   """
 
   use GenServer
@@ -48,6 +46,9 @@ defmodule MingaEditor.Renderer.Server do
   alias Minga.Telemetry
   alias MingaEditor.RenderPipeline
   alias MingaEditor.RenderPipeline.Input
+
+  @typedoc "Render pipeline output after a frame has run."
+  @type render_output :: Input.t()
 
   @typedoc "Click-region writeback payload sent to the Editor after each frame."
   @type writeback :: %{
@@ -59,9 +60,12 @@ defmodule MingaEditor.Renderer.Server do
           required(:frame_seq) => non_neg_integer()
         }
 
+  @typedoc "Editor process reference used for renderer writebacks."
+  @type editor_ref :: pid() | atom() | nil
+
   @typedoc "Renderer server state."
   @type t :: %__MODULE__{
-          editor_pid: pid() | nil,
+          editor_pid: editor_ref(),
           rendering?: boolean(),
           pending: {Input.t(), non_neg_integer(), integer()} | nil,
           in_flight: {Input.t(), non_neg_integer(), integer()} | nil
@@ -93,12 +97,6 @@ defmodule MingaEditor.Renderer.Server do
   def cast_snapshot(server \\ __MODULE__, %Input{} = snapshot, frame_seq)
       when is_integer(frame_seq) and frame_seq >= 0 do
     GenServer.cast(server, {:render, snapshot, frame_seq, monotonic_now()})
-  end
-
-  @doc "Returns true when the split-renderer feature flag is enabled."
-  @spec enabled?() :: boolean()
-  def enabled? do
-    Application.get_env(:minga, :split_renderer, false) == true
   end
 
   # ── GenServer callbacks ───────────────────────────────────────────────────
@@ -148,19 +146,64 @@ defmodule MingaEditor.Renderer.Server do
       %{frame_seq: seq}
     )
 
-    if is_pid(state.editor_pid) or is_atom(state.editor_pid) do
-      writeback = %{
-        caches: output.caches,
-        layout: output.layout,
-        focus_tree: output.focus_tree,
-        shell_state: output.shell_state,
-        windows: output.workspace.windows,
-        frame_seq: seq
-      }
+    send_writeback(state.editor_pid, output, seq)
+    advance_pending(state)
+  rescue
+    e ->
+      trace = Exception.format_stacktrace(__STACKTRACE__) |> String.slice(0, 500)
 
-      send(state.editor_pid, {:render_done, writeback})
+      Minga.Log.warning(
+        :render,
+        "Renderer frame #{seq} dropped: #{Exception.message(e)}\n#{trace}"
+      )
+
+      advance_pending(state)
+  end
+
+  def handle_info(_other, state), do: {:noreply, state}
+
+  # ── Helpers ────────────────────────────────────────────────────────────────
+
+  @spec send_writeback(editor_ref(), render_output(), non_neg_integer()) :: :ok
+  defp send_writeback(nil, _output, seq) do
+    Minga.Log.warning(:render, "Renderer frame #{seq}: no editor_pid, writeback dropped")
+    :ok
+  end
+
+  defp send_writeback(editor_pid, output, seq) when is_pid(editor_pid) do
+    send(editor_pid, {:render_done, writeback_from_output(output, seq)})
+    :ok
+  end
+
+  defp send_writeback(editor_name, output, seq) when is_atom(editor_name) do
+    case Process.whereis(editor_name) do
+      nil ->
+        Minga.Log.warning(
+          :render,
+          "Renderer frame #{seq}: editor #{inspect(editor_name)} not registered, writeback dropped"
+        )
+
+        :ok
+
+      editor_pid ->
+        send_writeback(editor_pid, output, seq)
     end
+  end
 
+  @spec writeback_from_output(render_output(), non_neg_integer()) :: writeback()
+  defp writeback_from_output(output, seq) do
+    %{
+      caches: output.caches,
+      layout: output.layout,
+      focus_tree: output.focus_tree,
+      shell_state: output.shell_state,
+      windows: output.workspace.windows,
+      frame_seq: seq
+    }
+  end
+
+  @spec advance_pending(t()) :: {:noreply, t()}
+  defp advance_pending(state) do
     case state.pending do
       nil ->
         {:noreply, %{state | rendering?: false, in_flight: nil}}
@@ -170,10 +213,6 @@ defmodule MingaEditor.Renderer.Server do
         {:noreply, %{state | in_flight: {next_snap, next_seq, next_pushed_at}, pending: nil}}
     end
   end
-
-  def handle_info(_other, state), do: {:noreply, state}
-
-  # ── Helpers ────────────────────────────────────────────────────────────────
 
   @spec monotonic_now() :: integer()
   defp monotonic_now, do: System.monotonic_time(:microsecond)

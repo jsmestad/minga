@@ -85,6 +85,7 @@ defmodule MingaEditor.State do
   @enforce_keys [:port_manager, :workspace]
   defstruct backend: :headless,
             port_manager: nil,
+            renderer: nil,
             keymap_server: @default_keymap_server,
             options_server: @default_options_server,
             events_registry: @default_events_registry,
@@ -114,13 +115,14 @@ defmodule MingaEditor.State do
             buffer_add_context: :open,
             stashed_board_state: nil
 
-  @type backend :: :tui | :native_gui | :headless
+  @type backend :: :tui | :gui | :native_gui | :headless
 
   @type shell_state :: ShellState.t() | BoardState.t()
 
   @type t :: %__MODULE__{
           backend: backend(),
           port_manager: GenServer.server() | nil,
+          renderer: pid() | nil,
           keymap_server: keymap_server(),
           options_server: options_server(),
           events_registry: events_registry(),
@@ -150,6 +152,10 @@ defmodule MingaEditor.State do
           session: SessionState.t(),
           stashed_board_state: MingaEditor.Shell.Board.State.t() | nil
         }
+
+  @spec set_renderer(t(), pid() | nil) :: t()
+  def set_renderer(%__MODULE__{} = state, pid) when is_pid(pid) or is_nil(pid),
+    do: %{state | renderer: pid}
 
   @doc "Returns the keymap server used for scope and binding lookups."
   @spec keymap_server(t()) :: keymap_server()
@@ -204,7 +210,7 @@ defmodule MingaEditor.State do
   @doc """
   Applies asynchronous renderer writeback without overwriting editor-owned state.
 
-  Split rendering runs from an older `RenderPipeline.Input` snapshot while the
+  Async rendering runs from an older `RenderPipeline.Input` snapshot while the
   Editor process continues handling input. The renderer may return stale copies
   of windows and shell state, so this function only merges fields owned by the
   renderer: global render caches, layout, per-window render caches, and chrome

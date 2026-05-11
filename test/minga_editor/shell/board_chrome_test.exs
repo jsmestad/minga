@@ -14,6 +14,7 @@ defmodule MingaEditor.Shell.Board.ChromeTest do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.Shell.Board
   alias MingaEditor.Shell.Board.State, as: BoardState
+  alias MingaEditor.Shell.Traditional
 
   import MingaEditor.RenderPipeline.TestHelpers
 
@@ -45,6 +46,22 @@ defmodule MingaEditor.Shell.Board.ChromeTest do
 
   defp context_bar_text(chrome) do
     Enum.map_join(chrome.tab_bar, fn {_row, _col, text, _face} -> text end)
+  end
+
+  # ── Async render eligibility ─────────────────────────────────────────────
+
+  describe "async_render?/1" do
+    test "Board grid view opts out of async rendering" do
+      refute Board.async_render?(grid_board_state())
+    end
+
+    test "Board zoomed view allows async rendering" do
+      assert Board.async_render?(zoomed_board_state())
+    end
+
+    test "Traditional shell allows async rendering" do
+      assert Traditional.async_render?(base_state())
+    end
   end
 
   # ── Grid view ────────────────────────────────────────────────────────────

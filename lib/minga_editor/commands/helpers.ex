@@ -222,7 +222,7 @@ defmodule MingaEditor.Commands.Helpers do
 
     # Also send the clipboard write opcode to native GUI frontends.
     # This writes to NSPasteboard directly, avoiding the pbcopy subprocess.
-    if state.backend == :native_gui and state.port_manager do
+    if state.backend in [:gui, :native_gui] and state.port_manager do
       MingaEditor.Frontend.clipboard_write(state.port_manager, text)
     end
 
