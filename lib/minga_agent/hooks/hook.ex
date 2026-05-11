@@ -3,25 +3,27 @@ defmodule MingaAgent.Hooks.Hook do
   Normalized agent hook declaration.
 
   Hooks are declared in user config as maps or keyword lists, then normalized
-  by `MingaAgent.Config.resolve/0` into this struct. Only `:pre_tool_use` is
-  executable today, but the event field is explicit so later lifecycle events
-  can share the same config shape.
+  by `MingaAgent.Config.resolve/0` into this struct. The event field selects
+  the lifecycle point; `tool_pattern` is required only for tool-related events
+  (`:pre_tool_use`, `:post_tool_use`).
   """
 
   @default_timeout_ms 30_000
 
+  @tool_events [:pre_tool_use, :post_tool_use]
+
   @typedoc "Supported hook event names."
-  @type event :: :pre_tool_use
+  @type event :: :pre_tool_use | :post_tool_use
 
   @typedoc "Normalized hook declaration."
   @type t :: %__MODULE__{
           event: event(),
-          tool_pattern: String.t(),
+          tool_pattern: String.t() | nil,
           command: String.t(),
           timeout_ms: pos_integer()
         }
 
-  @enforce_keys [:event, :tool_pattern, :command]
+  @enforce_keys [:event, :command]
   defstruct [:event, :tool_pattern, :command, timeout_ms: @default_timeout_ms]
 
   @doc "Returns the default per-hook timeout in milliseconds."
@@ -39,7 +41,7 @@ defmodule MingaAgent.Hooks.Hook do
 
   def normalize(raw) when is_map(raw) do
     with {:ok, event} <- normalize_event(fetch(raw, :event)),
-         {:ok, tool_pattern} <- normalize_tool_pattern(raw),
+         {:ok, tool_pattern} <- normalize_tool_pattern(raw, event),
          {:ok, command} <- normalize_command(fetch(raw, :command)),
          {:ok, timeout_ms} <- normalize_timeout(fetch(raw, :timeout_ms)) do
       {:ok,
@@ -54,6 +56,11 @@ defmodule MingaAgent.Hooks.Hook do
 
   def normalize(_raw), do: {:error, "agent hook must be a map or keyword list"}
 
+  @doc "Returns true when this hook applies to the given non-tool event."
+  @spec matches?(t(), event()) :: boolean()
+  def matches?(%__MODULE__{event: event}, event), do: true
+  def matches?(%__MODULE__{}, _event), do: false
+
   @doc "Returns true when this hook applies to the event and tool name."
   @spec matches?(t(), event(), String.t()) :: boolean()
   def matches?(%__MODULE__{event: event, tool_pattern: pattern}, event, tool_name)
@@ -62,6 +69,15 @@ defmodule MingaAgent.Hooks.Hook do
   end
 
   def matches?(%__MODULE__{}, _event, _tool_name), do: false
+
+  @doc "Returns true if the event is tool-related and uses `tool_pattern` matching."
+  @spec tool_event?(event()) :: boolean()
+  def tool_event?(event), do: event in @tool_events
+
+  @doc "Returns the human-readable label for an event atom."
+  @spec event_label(event()) :: String.t()
+  def event_label(:pre_tool_use), do: "PreToolUse"
+  def event_label(:post_tool_use), do: "PostToolUse"
 
   @spec map_from_list(list()) :: {:ok, map()} | :error
   defp map_from_list(raw) do
@@ -76,14 +92,24 @@ defmodule MingaAgent.Hooks.Hook do
   defp normalize_event(:PreToolUse), do: {:ok, :pre_tool_use}
   defp normalize_event("PreToolUse"), do: {:ok, :pre_tool_use}
   defp normalize_event("pre_tool_use"), do: {:ok, :pre_tool_use}
+  defp normalize_event(:post_tool_use), do: {:ok, :post_tool_use}
+  defp normalize_event(:PostToolUse), do: {:ok, :post_tool_use}
+  defp normalize_event("PostToolUse"), do: {:ok, :post_tool_use}
+  defp normalize_event("post_tool_use"), do: {:ok, :post_tool_use}
   defp normalize_event(other), do: {:error, "unsupported agent hook event: #{inspect(other)}"}
 
-  @spec normalize_tool_pattern(map()) :: {:ok, String.t()} | {:error, String.t()}
-  defp normalize_tool_pattern(raw) do
-    raw
-    |> fetch(:tool_pattern)
-    |> fallback(fetch(raw, :tool))
-    |> normalize_non_empty_string("agent hook requires :tool_pattern or :tool")
+  @spec normalize_tool_pattern(map(), event()) :: {:ok, String.t() | nil} | {:error, String.t()}
+  defp normalize_tool_pattern(raw, event) do
+    value =
+      raw
+      |> fetch(:tool_pattern)
+      |> fallback(fetch(raw, :tool))
+
+    if event in @tool_events do
+      normalize_non_empty_string(value, "agent hook requires :tool_pattern or :tool")
+    else
+      {:ok, nil}
+    end
   end
 
   @spec normalize_command(term()) :: {:ok, String.t()} | {:error, String.t()}

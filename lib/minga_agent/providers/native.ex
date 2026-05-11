@@ -39,6 +39,7 @@ defmodule MingaAgent.Providers.Native do
   alias MingaAgent.Event
   alias MingaAgent.Hooks.CommandRunner
   alias MingaAgent.Hooks.Dispatcher, as: HookDispatcher
+  alias MingaAgent.Hooks.PostToolUsePayload
   alias MingaAgent.Hooks.PreToolUsePayload
   alias MingaAgent.Hooks.Result, as: HookResult
   alias MingaAgent.Instructions
@@ -1181,6 +1182,7 @@ defmodule MingaAgent.Providers.Native do
            }}
         )
 
+        dispatch_post_tool_use(tool_call, result_text, is_error, config)
         maybe_emit_file_changed(provider_pid, tool_call, before_content, is_error)
 
         meta = if is_error, do: %{is_error: true}, else: %{}
@@ -1531,6 +1533,20 @@ defmodule MingaAgent.Providers.Native do
         emit_hook_veto(provider_pid, result)
         error
     end
+  end
+
+  @spec dispatch_post_tool_use(map(), String.t(), boolean(), AgentConfig.t()) :: :ok
+  defp dispatch_post_tool_use(tool_call, result_text, is_error, config) do
+    payload =
+      PostToolUsePayload.new(
+        to_string(tool_call.id),
+        to_string(tool_call.name),
+        tool_call.arguments || %{},
+        result_text,
+        is_error
+      )
+
+    HookDispatcher.post_tool_use(config.agent_hooks, PostToolUsePayload.to_map(payload))
   end
 
   @spec emit_hook_veto(pid(), HookResult.t()) :: :ok

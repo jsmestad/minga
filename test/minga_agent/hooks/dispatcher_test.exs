@@ -3,6 +3,7 @@ defmodule MingaAgent.Hooks.DispatcherTest do
 
   alias MingaAgent.Hooks.Dispatcher
   alias MingaAgent.Hooks.Hook
+  alias MingaAgent.Hooks.PostToolUsePayload
   alias MingaAgent.Hooks.PreToolUsePayload
   alias MingaAgent.Hooks.Result
 
@@ -114,7 +115,121 @@ defmodule MingaAgent.Hooks.DispatcherTest do
     assert {:error, "agent hook must be a map or keyword list"} = Hook.normalize(["bad"])
   end
 
+  # ── PostToolUse ──────────────────────────────────────────────────────────────
+
+  test "PostToolUse hooks run after tool execution" do
+    test_pid = self()
+    hook = post_hook("read_file")
+    payload = PostToolUsePayload.new("tc_post_1", "read_file", %{}, "result", false)
+
+    runner = fn received_hook, _payload_map ->
+      send(test_pid, :post_hook_ran)
+      Result.allow(received_hook)
+    end
+
+    assert :ok =
+             Dispatcher.post_tool_use([hook], PostToolUsePayload.to_map(payload), runner: runner)
+
+    assert_receive :post_hook_ran
+  end
+
+  test "PostToolUse veto is ignored (notification-only)" do
+    hook = post_hook("*")
+    payload = PostToolUsePayload.new("tc_post_2", "shell", %{}, "result", false)
+
+    runner = fn received_hook, _payload_map ->
+      Result.veto(received_hook, "tried to block", {:exit, 1})
+    end
+
+    assert :ok =
+             Dispatcher.post_tool_use([hook], PostToolUsePayload.to_map(payload), runner: runner)
+  end
+
+  test "PostToolUse non-matching hooks do not run" do
+    test_pid = self()
+    hook = post_hook("write_file")
+    payload = PostToolUsePayload.new("tc_post_3", "read_file", %{}, "result", false)
+
+    runner = fn received_hook, _payload_map ->
+      send(test_pid, :unexpected)
+      Result.allow(received_hook)
+    end
+
+    Dispatcher.post_tool_use([hook], PostToolUsePayload.to_map(payload), runner: runner)
+    refute_receive :unexpected, 20
+  end
+
+  test "PostToolUse broadcasts lifecycle events" do
+    Minga.Events.subscribe(:agent_hook)
+
+    hook = post_hook("shell")
+    payload = PostToolUsePayload.new("tc_post_event", "shell", %{"cmd" => "ls"}, "ok", false)
+
+    runner = fn received_hook, _payload_map -> Result.allow(received_hook) end
+
+    Dispatcher.post_tool_use([hook], PostToolUsePayload.to_map(payload), runner: runner)
+
+    assert_receive {:minga_event, :agent_hook,
+                    %Minga.Events.AgentHookEvent{
+                      event: "PostToolUse",
+                      phase: :started,
+                      tool_name: "shell",
+                      tool_call_id: "tc_post_event"
+                    }}
+
+    assert_receive {:minga_event, :agent_hook,
+                    %Minga.Events.AgentHookEvent{
+                      event: "PostToolUse",
+                      phase: :allowed,
+                      tool_name: "shell",
+                      tool_call_id: "tc_post_event"
+                    }}
+  end
+
+  test "PostToolUse normalization accepts PostToolUse event name variants" do
+    assert {:ok, %Hook{event: :post_tool_use}} =
+             Hook.normalize(%{event: "PostToolUse", tool: "shell", command: "echo ok"})
+
+    assert {:ok, %Hook{event: :post_tool_use}} =
+             Hook.normalize(%{event: :post_tool_use, tool: "*", command: "echo ok"})
+  end
+
+  # ── generic dispatch ───────────────────────────────────────────────────────
+
+  test "dispatch/4 with veto_capable: false ignores veto and continues" do
+    test_pid = self()
+    hook1 = %Hook{event: :post_tool_use, tool_pattern: "*", command: "echo first"}
+    hook2 = %Hook{event: :post_tool_use, tool_pattern: "*", command: "echo second"}
+
+    runner = fn hook, _map ->
+      case hook.command do
+        "echo first" ->
+          send(test_pid, :first)
+          Result.veto(hook, "nope", {:exit, 1})
+
+        "echo second" ->
+          send(test_pid, :second)
+          Result.allow(hook)
+      end
+    end
+
+    payload_map = %{"tool_name" => "shell", "tool_call_id" => "tc_gen"}
+
+    assert :ok =
+             Dispatcher.dispatch(:post_tool_use, [hook1, hook2], payload_map,
+               runner: runner,
+               veto_capable: false
+             )
+
+    assert_receive :first
+    assert_receive :second
+  end
+
   defp hook(pattern) do
     %Hook{event: :pre_tool_use, tool_pattern: pattern, command: "echo checking >&2"}
+  end
+
+  defp post_hook(pattern) do
+    %Hook{event: :post_tool_use, tool_pattern: pattern, command: "echo post >&2"}
   end
 end

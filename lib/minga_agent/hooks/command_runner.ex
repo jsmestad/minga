@@ -15,16 +15,16 @@ defmodule MingaAgent.Hooks.CommandRunner do
   @typedoc "Options used by tests to inject helper behavior."
   @type run_opts :: [helper_path: String.t()]
 
-  @doc "Runs a `PreToolUse` shell hook for a payload."
-  @spec run_pre_tool_use(Hook.t(), PreToolUsePayload.t()) :: Result.t()
-  def run_pre_tool_use(%Hook{} = hook, %PreToolUsePayload{} = payload) do
-    run_pre_tool_use(hook, payload, [])
+  @doc "Runs a shell hook with any Jason-encodable payload map."
+  @spec run(Hook.t(), map()) :: Result.t()
+  def run(%Hook{} = hook, payload_map) when is_map(payload_map) do
+    run(hook, payload_map, [])
   end
 
   @doc false
-  @spec run_pre_tool_use(Hook.t(), PreToolUsePayload.t(), run_opts()) :: Result.t()
-  def run_pre_tool_use(%Hook{} = hook, %PreToolUsePayload{} = payload, opts) when is_list(opts) do
-    with {:ok, payload_json} <- encode_payload(payload),
+  @spec run(Hook.t(), map(), run_opts()) :: Result.t()
+  def run(%Hook{} = hook, payload_map, opts) when is_map(payload_map) and is_list(opts) do
+    with {:ok, payload_json} <- encode_map(payload_map),
          {:ok, helper_path} <- helper_path(opts) do
       run_helper(hook, helper_path, payload_json)
     else
@@ -32,9 +32,21 @@ defmodule MingaAgent.Hooks.CommandRunner do
     end
   end
 
-  @spec encode_payload(PreToolUsePayload.t()) :: {:ok, String.t()} | {:error, term()}
-  defp encode_payload(%PreToolUsePayload{} = payload) do
-    case Jason.encode(PreToolUsePayload.to_map(payload)) do
+  @doc "Runs a `PreToolUse` shell hook for a payload."
+  @spec run_pre_tool_use(Hook.t(), PreToolUsePayload.t()) :: Result.t()
+  def run_pre_tool_use(%Hook{} = hook, %PreToolUsePayload{} = payload) do
+    run(hook, PreToolUsePayload.to_map(payload))
+  end
+
+  @doc false
+  @spec run_pre_tool_use(Hook.t(), PreToolUsePayload.t(), run_opts()) :: Result.t()
+  def run_pre_tool_use(%Hook{} = hook, %PreToolUsePayload{} = payload, opts) when is_list(opts) do
+    run(hook, PreToolUsePayload.to_map(payload), opts)
+  end
+
+  @spec encode_map(map()) :: {:ok, String.t()} | {:error, term()}
+  defp encode_map(payload_map) do
+    case Jason.encode(payload_map) do
       {:ok, json} -> {:ok, json}
       {:error, reason} -> {:error, safe_encode_reason(reason)}
     end
@@ -224,7 +236,8 @@ defmodule MingaAgent.Hooks.CommandRunner do
 
   @spec timeout_stderr(Hook.t(), String.t()) :: String.t()
   defp timeout_stderr(hook, stderr) do
-    message = "PreToolUse hook timed out after #{hook.timeout_ms}ms and was killed"
+    label = Hook.event_label(hook.event)
+    message = "#{label} hook timed out after #{hook.timeout_ms}ms and was killed"
 
     case String.trim(stderr) do
       "" -> message
