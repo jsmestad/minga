@@ -7,8 +7,11 @@ defmodule MingaEditor.RenderPipeline.ScrollTest do
 
   alias MingaEditor.Layout
   alias MingaEditor.RenderPipeline
+  alias MingaEditor.RenderPipeline.Content
+  alias MingaEditor.RenderPipeline.Invalidation
   alias MingaEditor.RenderPipeline.Scroll
   alias MingaEditor.RenderPipeline.Scroll.WindowScroll
+  alias MingaEditor.RenderPipeline.WindowDirty
   alias MingaEditor.State, as: EditorState
 
   import MingaEditor.RenderPipeline.TestHelpers
@@ -20,6 +23,22 @@ defmodule MingaEditor.RenderPipeline.ScrollTest do
     layout = Layout.get(state)
     {scrolls, state} = Scroll.scroll_windows(state, layout)
     {scrolls, state, layout}
+  end
+
+  defp clean_invalidation(win_id) do
+    %Invalidation{
+      full_redraw: false,
+      windows: %{win_id => WindowDirty.clean()},
+      chrome_regions: MapSet.new()
+    }
+  end
+
+  defp trace_messages(pid) do
+    receive do
+      {:trace, ^pid, :receive, msg} -> [msg | trace_messages(pid)]
+    after
+      0 -> []
+    end
   end
 
   describe "scroll_windows/2" do
@@ -78,6 +97,26 @@ defmodule MingaEditor.RenderPipeline.ScrollTest do
 
       # First frame: sentinel values trigger full invalidation
       assert window.render_cache.dirty_lines == :all
+    end
+
+    test "clean windows skip render_snapshot on later frames" do
+      state = base_state(content: "alpha\nbeta\ngamma")
+      {scrolls, state, layout} = run_through_scroll(state)
+      {_frames, _cursor, state} = Content.build_content(state, scrolls)
+      win_id = state.workspace.windows.active
+      buf = state.workspace.buffers.active
+      invalidation = clean_invalidation(win_id)
+
+      :erlang.trace(buf, true, [:receive])
+      {_scrolls, _state} = Scroll.scroll_windows(state, layout, invalidation)
+      :erlang.trace(buf, false, [:receive])
+
+      messages = trace_messages(buf)
+
+      refute Enum.any?(messages, fn
+               {:"$gen_call", _from, {:render_snapshot, _first, _count}} -> true
+               _ -> false
+             end)
     end
   end
 end

@@ -32,6 +32,21 @@ defmodule MingaEditor.Frontend.EmitTest do
       assert [<<0x12>> | _] = commands
     end
 
+    test "TUI path omits clear for an undamaged frame" do
+      frame = %Frame{
+        cursor: Cursor.new(0, 0, :block),
+        splash: [DisplayList.draw(0, 0, "hello")],
+        damage: false
+      }
+
+      state = base_state()
+      ctx = Context.from_editor_state(state)
+      Emit.emit(frame, ctx)
+
+      assert_receive {:"$gen_cast", {:send_commands, commands}}
+      refute Enum.member?(commands, <<0x12>>)
+    end
+
     test "GUI path produces commands (no clear expected for GUI with to_commands)" do
       frame = %Frame{
         cursor: Cursor.new(0, 0, :block),

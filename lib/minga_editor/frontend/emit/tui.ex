@@ -58,7 +58,7 @@ defmodule MingaEditor.Frontend.Emit.TUI do
   """
   @spec build_commands_from_deltas(Frame.t(), [scroll_delta()] | nil) :: [binary()]
   def build_commands_from_deltas(frame, nil) do
-    DisplayList.to_commands(frame)
+    DisplayList.to_commands(frame, clear: frame.damage)
   end
 
   def build_commands_from_deltas(frame, scroll_deltas) do

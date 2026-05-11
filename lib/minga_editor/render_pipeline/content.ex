@@ -21,7 +21,9 @@ defmodule MingaEditor.RenderPipeline.Content do
 
   alias Minga.Core.Face
   alias MingaEditor.RenderPipeline.ContentHelpers
+  alias MingaEditor.RenderPipeline.Invalidation
   alias MingaEditor.RenderPipeline.Scroll.WindowScroll
+  alias MingaEditor.RenderPipeline.WindowDirty
   alias MingaEditor.SemanticWindow
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.Viewport
@@ -37,12 +39,13 @@ defmodule MingaEditor.RenderPipeline.Content do
   without modeline; modeline is in the Chrome stage) and the absolute
   cursor position for the active window.
   """
-  @spec build_content(state(), %{Window.id() => WindowScroll.t()}) ::
+  @spec build_content(state(), %{Window.id() => WindowScroll.t()}, Invalidation.t() | nil) ::
           {[WindowFrame.t()], Cursor.t() | nil, state()}
-  def build_content(state, scrolls) do
+  def build_content(state, scrolls, invalidation \\ nil) do
     {frames, cursor_info, state} =
-      Enum.reduce(scrolls, {[], nil, state}, fn {_win_id, scroll}, {frames, cursor_info, st} ->
-        {wf, ci, st} = build_window_content(st, scroll)
+      Enum.reduce(scrolls, {[], nil, state}, fn {win_id, scroll}, {frames, cursor_info, st} ->
+        dirty = Invalidation.window_dirty(invalidation, win_id)
+        {wf, ci, st} = build_window_content(st, scroll, dirty)
         new_cursor = if scroll.is_active and ci != nil, do: ci, else: cursor_info
         {[wf | frames], new_cursor, st}
       end)
@@ -71,9 +74,20 @@ defmodule MingaEditor.RenderPipeline.Content do
 
   # ── Private ──────────────────────────────────────────────────────────────
 
-  @spec build_window_content(state(), WindowScroll.t()) ::
+  @spec build_window_content(state(), WindowScroll.t(), WindowDirty.t()) ::
           {WindowFrame.t(), Cursor.t() | nil, state()}
-  defp build_window_content(state, scroll) do
+  defp build_window_content(state, scroll, dirty) do
+    scroll = apply_window_dirty(scroll, dirty)
+
+    case reusable_window_frame(scroll) do
+      {:ok, frame} -> {frame, frame.cursor, state}
+      :rebuild -> rebuild_window_content(state, scroll)
+    end
+  end
+
+  @spec rebuild_window_content(state(), WindowScroll.t()) ::
+          {WindowFrame.t(), Cursor.t() | nil, state()}
+  defp rebuild_window_content(state, scroll) do
     %WindowScroll{
       win_layout: win_layout,
       is_active: is_active,
@@ -137,21 +151,7 @@ defmodule MingaEditor.RenderPipeline.Content do
     }
 
     {gutter_layer, line_layer, rows_used, window} =
-      cond do
-        wrap_on ->
-          # Wrapping and folding are mutually exclusive for now.
-          # Strip fold-specific keys so the type matches line_render_opts.
-          wrap_opts = Map.drop(line_opts, [:visible_line_map, :fold_map])
-          {g, l, r} = ContentHelpers.render_lines_wrapped(lines, visible_rows, wrap_opts)
-          {DisplayList.draws_to_layer_sorted(g), DisplayList.draws_to_layer_sorted(l), r, window}
-
-        scroll.visible_line_map == nil ->
-          ContentHelpers.render_lines_nowrap_layers(lines, line_opts)
-
-        true ->
-          {g, l, r, window} = ContentHelpers.render_lines_nowrap(lines, line_opts)
-          {DisplayList.draws_to_layer_sorted(g), DisplayList.draws_to_layer_sorted(l), r, window}
-      end
+      render_window_layers(wrap_on, scroll.visible_line_map, lines, visible_rows, line_opts)
 
     # Tilde lines for empty space below content
     tilde_draws =
@@ -228,16 +228,76 @@ defmodule MingaEditor.RenderPipeline.Content do
         gutter_w,
         snapshot.line_count,
         cursor_line,
+        cursor_byte_col,
         scroll.buf_version,
         ctx_fp
       )
       |> Window.prune_cache(first_line, last_visible)
+      |> Window.cache_window_frame(win_frame)
 
     new_map = Map.put(state.workspace.windows.map, scroll.win_id, updated_window)
     ws = state.workspace
     state = %{state | workspace: %{ws | windows: %{ws.windows | map: new_map}}}
 
     {win_frame, cursor_info, state}
+  end
+
+  @spec render_window_layers(boolean(), list() | nil, [String.t()], pos_integer(), map()) ::
+          {DisplayList.render_layer(), DisplayList.render_layer(), non_neg_integer(), Window.t()}
+  defp render_window_layers(true, _visible_line_map, lines, visible_rows, line_opts) do
+    # Wrapping and folding are mutually exclusive for now.
+    # Strip fold-specific keys so the type matches line_render_opts.
+    wrap_opts = Map.drop(line_opts, [:visible_line_map, :fold_map])
+
+    {gutter, line_draws, rows} =
+      ContentHelpers.render_lines_wrapped(lines, visible_rows, wrap_opts)
+
+    {
+      DisplayList.draws_to_layer_sorted(gutter),
+      DisplayList.draws_to_layer_sorted(line_draws),
+      rows,
+      Map.fetch!(line_opts, :window)
+    }
+  end
+
+  defp render_window_layers(false, nil, lines, _visible_rows, line_opts) do
+    ContentHelpers.render_lines_nowrap_layers(lines, line_opts)
+  end
+
+  defp render_window_layers(false, _visible_line_map, lines, _visible_rows, line_opts) do
+    {gutter, line_draws, rows, window} = ContentHelpers.render_lines_nowrap(lines, line_opts)
+
+    {
+      DisplayList.draws_to_layer_sorted(gutter),
+      DisplayList.draws_to_layer_sorted(line_draws),
+      rows,
+      window
+    }
+  end
+
+  @spec apply_window_dirty(WindowScroll.t(), WindowDirty.t()) :: WindowScroll.t()
+  defp apply_window_dirty(%WindowScroll{window: window} = scroll, %WindowDirty{mode: :all}) do
+    %{scroll | window: Window.mark_dirty(window, :all)}
+  end
+
+  defp apply_window_dirty(
+         %WindowScroll{window: window} = scroll,
+         %WindowDirty{mode: :rows} = dirty
+       ) do
+    %{scroll | window: Window.mark_dirty(window, Map.keys(dirty.dirty_rows))}
+  end
+
+  defp apply_window_dirty(%WindowScroll{} = scroll, %WindowDirty{mode: :clean}), do: scroll
+
+  @spec reusable_window_frame(WindowScroll.t()) :: {:ok, WindowFrame.t()} | :rebuild
+  defp reusable_window_frame(%WindowScroll{window: window}) do
+    cache = window.render_cache
+
+    if cache.dirty_lines == %{} and cache.last_window_frame != nil do
+      {:ok, %{cache.last_window_frame | changed: false}}
+    else
+      :rebuild
+    end
   end
 
   defp maybe_render_agent_window(
@@ -473,6 +533,7 @@ defmodule MingaEditor.RenderPipeline.Content do
         gutter_w,
         line_count,
         cursor_line,
+        cursor_byte_col,
         buf_version,
         ctx_fp
       )

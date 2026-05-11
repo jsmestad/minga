@@ -13,6 +13,7 @@ defmodule MingaEditor.RenderPipeline.Compose do
   alias MingaEditor.RenderPipeline.Chrome
   alias MingaEditor.RenderPipeline.ComposeHelpers
   alias MingaEditor.RenderPipeline.Input
+  alias MingaEditor.RenderPipeline.Invalidation
 
   @typedoc "Render pipeline input."
   @type state :: Input.t()
@@ -27,9 +28,10 @@ defmodule MingaEditor.RenderPipeline.Compose do
           [WindowFrame.t()],
           Chrome.t(),
           Cursor.t() | nil,
-          state()
+          state(),
+          Invalidation.t() | nil
         ) :: Frame.t()
-  def compose_windows(window_frames, chrome, cursor_info, state) do
+  def compose_windows(window_frames, chrome, cursor_info, state, invalidation \\ nil) do
     layout = Layout.get(state)
 
     # Resolve cursor from window frames, overlays, and fallbacks.
@@ -68,8 +70,15 @@ defmodule MingaEditor.RenderPipeline.Compose do
       agent_panel: chrome.agent_panel,
       minibuffer: chrome.minibuffer,
       overlays: chrome.overlays,
-      regions: chrome.regions
+      regions: chrome.regions,
+      damage: frame_damage?(window_frames, invalidation)
     }
+  end
+
+  @spec frame_damage?([WindowFrame.t()], Invalidation.t() | nil) :: boolean()
+  defp frame_damage?(window_frames, invalidation) do
+    Enum.any?(window_frames, fn frame -> frame.changed end) or
+      Invalidation.chrome_dirty?(invalidation)
   end
 
   # Resolves the final frame cursor from the priority chain.

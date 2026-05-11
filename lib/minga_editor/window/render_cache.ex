@@ -31,6 +31,7 @@ defmodule MingaEditor.Window.RenderCache do
   """
 
   alias MingaEditor.DisplayList
+  alias MingaEditor.DisplayList.WindowFrame
 
   @compile {:inline, dirty?: 2}
 
@@ -53,8 +54,10 @@ defmodule MingaEditor.Window.RenderCache do
           last_gutter_w: integer(),
           last_line_count: integer(),
           last_cursor_line: integer(),
+          last_cursor_col: integer(),
           last_buf_version: integer(),
-          last_context_fingerprint: context_fingerprint()
+          last_context_fingerprint: context_fingerprint(),
+          last_window_frame: WindowFrame.t() | nil
         }
 
   defstruct dirty_lines: %{},
@@ -64,8 +67,10 @@ defmodule MingaEditor.Window.RenderCache do
             last_gutter_w: -1,
             last_line_count: -1,
             last_cursor_line: -1,
+            last_cursor_col: -1,
             last_buf_version: -1,
-            last_context_fingerprint: nil
+            last_context_fingerprint: nil,
+            last_window_frame: nil
 
   @doc """
   Returns a fresh cache with all lines dirty and no cached draws.
@@ -220,6 +225,38 @@ defmodule MingaEditor.Window.RenderCache do
         buf_version,
         ctx_fingerprint
       ) do
+    snapshot(
+      cache,
+      viewport_top,
+      gutter_w,
+      line_count,
+      cursor_line,
+      cache.last_cursor_col,
+      buf_version,
+      ctx_fingerprint
+    )
+  end
+
+  @spec snapshot(
+          t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          context_fingerprint()
+        ) :: t()
+  def snapshot(
+        %__MODULE__{} = cache,
+        viewport_top,
+        gutter_w,
+        line_count,
+        cursor_line,
+        cursor_col,
+        buf_version,
+        ctx_fingerprint
+      ) do
     %{
       cache
       | dirty_lines: %{},
@@ -227,9 +264,16 @@ defmodule MingaEditor.Window.RenderCache do
         last_gutter_w: gutter_w,
         last_line_count: line_count,
         last_cursor_line: cursor_line,
+        last_cursor_col: cursor_col,
         last_buf_version: buf_version,
         last_context_fingerprint: ctx_fingerprint
     }
+  end
+
+  @doc "Stores the last fully composed window frame for clean-window reuse."
+  @spec store_window_frame(t(), WindowFrame.t()) :: t()
+  def store_window_frame(%__MODULE__{} = cache, %WindowFrame{} = frame) do
+    %{cache | last_window_frame: frame}
   end
 
   @doc """

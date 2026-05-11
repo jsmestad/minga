@@ -11,6 +11,7 @@ defmodule MingaEditor.RenderPipeline.Scroll do
   """
 
   alias Minga.Buffer
+  alias Minga.Buffer.RenderSnapshot
   alias Minga.Core.Decorations
   alias Minga.Core.Unicode
   alias MingaEditor.DisplayMap
@@ -20,6 +21,8 @@ defmodule MingaEditor.RenderPipeline.Scroll do
   alias MingaEditor.Renderer.Gutter
   alias MingaEditor.Renderer.SearchHighlight
   alias MingaEditor.RenderPipeline.Input
+  alias MingaEditor.RenderPipeline.Invalidation
+  alias MingaEditor.RenderPipeline.WindowDirty
   alias MingaEditor.Viewport
   alias MingaEditor.Window
 
@@ -112,8 +115,9 @@ defmodule MingaEditor.RenderPipeline.Scroll do
   Returns `{scrolls, updated_state}` where `updated_state` has the
   windows map updated with invalidation results.
   """
-  @spec scroll_windows(state(), Layout.t()) :: {%{Window.id() => WindowScroll.t()}, state()}
-  def scroll_windows(input, layout) do
+  @spec scroll_windows(state(), Layout.t(), Invalidation.t() | nil) ::
+          {%{Window.id() => WindowScroll.t()}, state()}
+  def scroll_windows(input, layout, invalidation \\ nil) do
     layout.window_layouts
     |> Enum.reduce({%{}, input}, fn {win_id, win_layout}, {acc, st} ->
       window = Map.get(st.workspace.windows.map, win_id)
@@ -122,7 +126,8 @@ defmodule MingaEditor.RenderPipeline.Scroll do
         # Skip nil windows and agent chat windows (rendered by build_agent_chat_content)
         {acc, st}
       else
-        scroll_and_invalidate(input, st, acc, win_id, window, win_layout)
+        dirty = Invalidation.window_dirty(invalidation, win_id)
+        scroll_and_invalidate(input, st, acc, win_id, window, win_layout, dirty)
       end
     end)
   end
@@ -139,12 +144,13 @@ defmodule MingaEditor.RenderPipeline.Scroll do
           %{Window.id() => WindowScroll.t()},
           Window.id(),
           Window.t(),
-          Layout.window_layout()
+          Layout.window_layout(),
+          WindowDirty.t()
         ) :: {%{Window.id() => WindowScroll.t()}, state()}
-  defp scroll_and_invalidate(state, st, acc, win_id, window, win_layout) do
+  defp scroll_and_invalidate(state, st, acc, win_id, window, win_layout, dirty) do
     is_active = win_id == state.workspace.windows.active
 
-    case safe_scroll_window(st, win_id, window, win_layout, is_active) do
+    case safe_scroll_window(st, win_id, window, win_layout, is_active, dirty) do
       :skip ->
         {acc, st}
 
@@ -176,10 +182,16 @@ defmodule MingaEditor.RenderPipeline.Scroll do
 
   # Wraps scroll_window with a catch for dead buffer processes. Returns
   # {:ok, scroll} on success, :skip if the buffer died mid-call.
-  @spec safe_scroll_window(state(), Window.id(), Window.t(), Layout.window_layout(), boolean()) ::
-          {:ok, WindowScroll.t()} | :skip
-  defp safe_scroll_window(state, win_id, window, win_layout, is_active) do
-    {:ok, scroll_window(state, win_id, window, win_layout, is_active)}
+  @spec safe_scroll_window(
+          state(),
+          Window.id(),
+          Window.t(),
+          Layout.window_layout(),
+          boolean(),
+          WindowDirty.t()
+        ) :: {:ok, WindowScroll.t()} | :skip
+  defp safe_scroll_window(state, win_id, window, win_layout, is_active, dirty) do
+    {:ok, scroll_window(state, win_id, window, win_layout, is_active, dirty)}
   catch
     :exit, _ ->
       Minga.Log.debug(:render, "[scroll] skipped window #{win_id}: buffer process dead")
@@ -191,9 +203,10 @@ defmodule MingaEditor.RenderPipeline.Scroll do
           Window.id(),
           Window.t(),
           Layout.window_layout(),
-          boolean()
+          boolean(),
+          WindowDirty.t()
         ) :: WindowScroll.t()
-  defp scroll_window(state, win_id, window, win_layout, is_active) do
+  defp scroll_window(state, win_id, window, win_layout, is_active, dirty) do
     {_row_off, _col_off, content_width, content_height} = win_layout.content
 
     # Cursor: active window reads live from buffer; inactive uses stored
@@ -279,9 +292,15 @@ defmodule MingaEditor.RenderPipeline.Scroll do
           {buf_first, buf_last - buf_first + 1}
       end
 
-    snapshot = Buffer.render_snapshot(window.buffer, fetch_first, fetch_count)
-    lines = snapshot.lines
-    line_count = snapshot.line_count
+    {snapshot, lines, line_count} =
+      fetch_window_lines(
+        window.buffer,
+        fetch_first,
+        fetch_count,
+        cursor_line,
+        cursor_byte_col,
+        dirty
+      )
 
     # Cursor byte → display col
     cursor_line_text = cursor_line_text(lines, cursor_line, first_line)
@@ -335,6 +354,59 @@ defmodule MingaEditor.RenderPipeline.Scroll do
       buf_version: snapshot.version,
       visible_line_map: visible_line_map
     }
+  end
+
+  @spec fetch_window_lines(
+          pid(),
+          non_neg_integer(),
+          pos_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          WindowDirty.t()
+        ) :: {RenderSnapshot.t(), [String.t()], non_neg_integer()}
+  defp fetch_window_lines(
+         buffer,
+         fetch_first,
+         fetch_count,
+         _cursor_line,
+         _cursor_col,
+         %WindowDirty{
+           mode: mode
+         }
+       )
+       when mode in [:all, :rows] do
+    snapshot = Buffer.render_snapshot(buffer, fetch_first, fetch_count)
+    {snapshot, snapshot.lines, snapshot.line_count}
+  end
+
+  defp fetch_window_lines(
+         buffer,
+         fetch_first,
+         _fetch_count,
+         cursor_line,
+         cursor_col,
+         %WindowDirty{
+           mode: :clean
+         }
+       ) do
+    line_count = Buffer.line_count(buffer)
+    version = Buffer.version(buffer)
+
+    snapshot = %RenderSnapshot{
+      cursor: {cursor_line, cursor_col},
+      line_count: line_count,
+      lines: [],
+      file_path: Buffer.file_path(buffer),
+      filetype: Buffer.filetype(buffer),
+      buffer_type: Buffer.buffer_type(buffer),
+      dirty: Buffer.dirty?(buffer),
+      name: Buffer.buffer_name(buffer),
+      read_only: Buffer.read_only?(buffer),
+      first_line_byte_offset: fetch_first,
+      version: version
+    }
+
+    {snapshot, [], line_count}
   end
 
   @spec maybe_scroll_active_window_to_cursor(

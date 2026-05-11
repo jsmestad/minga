@@ -34,6 +34,7 @@ defmodule MingaEditor.RenderPipeline do
   alias MingaEditor.RenderPipeline.Compose
   alias MingaEditor.RenderPipeline.Content
   alias MingaEditor.RenderPipeline.Input
+  alias MingaEditor.RenderPipeline.Invalidation
   alias MingaEditor.RenderPipeline.Scroll
   alias MingaEditor.WindowTree
   alias MingaEditor.Frontend.Emit
@@ -92,10 +93,12 @@ defmodule MingaEditor.RenderPipeline do
   """
   @spec run_windows_pipeline(input(), Layout.t()) :: input()
   def run_windows_pipeline(input, layout) do
+    invalidation = Invalidation.from_input(input, layout)
+
     # Stage 3: Scroll (also runs per-window invalidation detection)
     {scrolls, input} =
       Telemetry.span([:minga, :render, :stage], %{stage: :scroll}, fn ->
-        Scroll.scroll_windows(input, layout)
+        Scroll.scroll_windows(input, layout, invalidation)
       end)
 
     # Scroll updates per-window viewports; rebuild the tree so overlay hit regions match what chrome renders.
@@ -104,7 +107,7 @@ defmodule MingaEditor.RenderPipeline do
     # Stage 4: Content (skips clean lines, updates window caches)
     {buffer_frames, cursor_info, input} =
       Telemetry.span([:minga, :render, :stage], %{stage: :content}, fn ->
-        Content.build_content(input, scrolls)
+        Content.build_content(input, scrolls, invalidation)
       end)
 
     # Stage 4b: Agent chat window content (buffer pipeline + prompt chrome)
@@ -153,7 +156,7 @@ defmodule MingaEditor.RenderPipeline do
     # Stage 6: Compose
     frame =
       Telemetry.span([:minga, :render, :stage], %{stage: :compose}, fn ->
-        Compose.compose_windows(window_frames, chrome, cursor_info, input)
+        Compose.compose_windows(window_frames, chrome, cursor_info, input, invalidation)
       end)
 
     # Stage 7: Emit

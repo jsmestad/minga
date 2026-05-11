@@ -104,7 +104,8 @@ defmodule MingaEditor.DisplayList do
               tilde_lines: %{},
               modeline: %{},
               cursor: nil,
-              semantic: nil
+              semantic: nil,
+              changed: true
 
     @type t :: %__MODULE__{
             rect: Layout.rect(),
@@ -113,7 +114,8 @@ defmodule MingaEditor.DisplayList do
             tilde_lines: DisplayList.render_layer(),
             modeline: DisplayList.render_layer(),
             cursor: Cursor.t() | nil,
-            semantic: SemanticWindow.t() | nil
+            semantic: SemanticWindow.t() | nil,
+            changed: boolean()
           }
   end
 
@@ -159,7 +161,8 @@ defmodule MingaEditor.DisplayList do
               regions: [],
               splash: nil,
               title: nil,
-              window_bg: nil
+              window_bg: nil,
+              damage: true
 
     @type t :: %__MODULE__{
             cursor: Cursor.t(),
@@ -175,7 +178,8 @@ defmodule MingaEditor.DisplayList do
             regions: [binary()],
             splash: [DisplayList.draw()] | nil,
             title: String.t() | nil,
-            window_bg: non_neg_integer() | nil
+            window_bg: non_neg_integer() | nil,
+            damage: boolean()
           }
   end
 
@@ -316,7 +320,9 @@ defmodule MingaEditor.DisplayList do
         ]
       end
 
-    [Protocol.encode_clear()] ++
+    clear = if Keyword.get(opts, :clear, true), do: [Protocol.encode_clear()], else: []
+
+    clear ++
       frame.regions ++
       draws_to_commands(before_windows) ++
       windows_to_commands(frame.windows) ++

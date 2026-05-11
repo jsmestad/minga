@@ -456,6 +456,15 @@ defmodule MingaEditor.Window do
     %{window | render_cache: RenderCache.cache_line(cache, buf_line, gutter_draws, content_draws)}
   end
 
+  @doc "Stores the last rendered window frame for clean-window reuse."
+  @spec cache_window_frame(t(), DisplayList.WindowFrame.t()) :: t()
+  def cache_window_frame(
+        %__MODULE__{render_cache: cache} = window,
+        %DisplayList.WindowFrame{} = frame
+      ) do
+    %{window | render_cache: RenderCache.store_window_frame(cache, frame)}
+  end
+
   @doc """
   Snapshots tracking fields after a successful render pass.
 
@@ -491,6 +500,42 @@ defmodule MingaEditor.Window do
             gutter_w,
             line_count,
             cursor_line,
+            buf_version,
+            ctx_fingerprint
+          )
+    }
+  end
+
+  @spec snapshot_after_render(
+          t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          RenderCache.context_fingerprint()
+        ) :: t()
+  def snapshot_after_render(
+        %__MODULE__{render_cache: cache} = window,
+        viewport_top,
+        gutter_w,
+        line_count,
+        cursor_line,
+        cursor_col,
+        buf_version,
+        ctx_fingerprint
+      ) do
+    %{
+      window
+      | render_cache:
+          RenderCache.snapshot(
+            cache,
+            viewport_top,
+            gutter_w,
+            line_count,
+            cursor_line,
+            cursor_col,
             buf_version,
             ctx_fingerprint
           )
