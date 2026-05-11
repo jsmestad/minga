@@ -149,6 +149,9 @@ jobs:
       - run: mix deps.get --only prod
       - run: mix release minga
 
+      - name: Check release contents
+        run: scripts/check-release-contents _build/prod/rel/minga
+
       - name: Smoke test
         run: |
           binary="burrito_out/${{ matrix.artifact }}"
@@ -217,6 +220,9 @@ jobs:
           fi
           echo "app_path=$APP_PATH" >> "$GITHUB_OUTPUT"
           echo "Found: $APP_PATH"
+
+      - name: Check app release contents
+        run: scripts/check-release-contents "${{ steps.find_app.outputs.app_path }}/Contents/Resources/release"
 
       # Import Developer ID certificate into a temporary keychain
       - name: Import signing certificate
