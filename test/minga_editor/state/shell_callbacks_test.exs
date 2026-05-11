@@ -73,21 +73,68 @@ defmodule MingaEditor.State.ShellCallbacksTest do
   # ── on_buffer_switched via switch_buffer/2 ───────────────────────────────────
 
   describe "switch_buffer/2 dispatches on_buffer_switched" do
-    test "Traditional: updates tab label when switching buffers" do
+    test "Traditional: tab context.buffers.active tracks workspace after switch" do
       state = state_with_file_tab()
       buf2 = start_buffer("second.ex")
       state = EditorState.add_buffer(state, buf2)
 
-      # Now switch to buf2 (index 1)
       new_state = EditorState.switch_buffer(state, 1)
 
-      # The active buffer changed
       assert new_state.workspace.buffers.active == buf2
 
-      # Traditional's on_buffer_switched updates the tab label
-      tb = new_state.shell_state.tab_bar
-      active_tab = TabBar.active(tb)
-      assert active_tab.kind == :file
+      active_tab = TabBar.active(new_state.shell_state.tab_bar)
+      assert active_tab.context.buffers.active == buf2
+      assert active_tab.context.buffers.active == new_state.workspace.buffers.active
+    end
+
+    test "Traditional: find_tab_by_buffer returns active tab after switch" do
+      state = state_with_file_tab()
+      buf2 = start_buffer("second.ex")
+      state = EditorState.add_buffer(state, buf2)
+
+      new_state = EditorState.switch_buffer(state, 1)
+
+      tab = EditorState.find_tab_by_buffer(new_state, buf2)
+      assert %Tab{kind: :file} = tab
+      assert tab.id == new_state.shell_state.tab_bar.active_id
+    end
+
+    test "Traditional: dirty marker queries correct buffer after switch" do
+      state = state_with_file_tab()
+      buf1 = state.workspace.buffers.active
+      buf2 = start_buffer("clean.ex")
+      state = EditorState.add_buffer(state, buf2)
+
+      BufferServer.insert_char(buf1, "x")
+      assert BufferServer.dirty?(buf1)
+      refute BufferServer.dirty?(buf2)
+
+      new_state = EditorState.switch_buffer(state, 1)
+
+      active_tab = TabBar.active(new_state.shell_state.tab_bar)
+      tab_buf = active_tab.context.buffers.active
+      assert tab_buf == buf2
+      refute BufferServer.dirty?(tab_buf)
+    end
+
+    test "Traditional: repeated switch_buffer cycles maintain snapshot invariant" do
+      state = state_with_file_tab()
+      buf2 = start_buffer("second.ex")
+      buf3 = start_buffer("third.ex")
+      state = EditorState.add_buffer(state, buf2)
+      state = EditorState.add_buffer(state, buf3)
+
+      state = EditorState.switch_buffer(state, 1)
+      assert TabBar.active(state.shell_state.tab_bar).context.buffers.active == buf2
+
+      state = EditorState.switch_buffer(state, 2)
+      assert TabBar.active(state.shell_state.tab_bar).context.buffers.active == buf3
+
+      state = EditorState.switch_buffer(state, 0)
+      buf1 = state.workspace.buffers.active
+      assert TabBar.active(state.shell_state.tab_bar).context.buffers.active == buf1
+
+      assert EditorState.find_tab_by_buffer(state, buf1) != nil
     end
 
     test "no tab bar: switch_buffer still works" do

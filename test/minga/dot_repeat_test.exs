@@ -15,16 +15,20 @@ defmodule Minga.DotRepeatTest do
   # ── Helpers ──────────────────────────────────────────────────────────────────
 
   defp start_editor(content) do
-    {:ok, buffer} = BufferServer.start_link(content: content)
+    id = :erlang.unique_integer([:positive])
+    events_registry = :"dot_repeat_events_#{id}"
+    {:ok, _} = Registry.start_link(keys: :duplicate, name: events_registry)
+    {:ok, buffer} = BufferServer.start_link(content: content, events_registry: events_registry)
 
     {:ok, editor} =
       MingaEditor.start_link(
-        name: :"editor_#{:erlang.unique_integer([:positive])}",
+        name: :"editor_#{id}",
         port_manager: nil,
         buffer: buffer,
         width: 80,
         height: 24,
-        editing_model: :vim
+        editing_model: :vim,
+        events_registry: events_registry
       )
 
     {editor, buffer}
