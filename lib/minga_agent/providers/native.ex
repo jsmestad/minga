@@ -1568,13 +1568,11 @@ defmodule MingaAgent.Providers.Native do
   rescue
     e ->
       Minga.Log.warning(:agent, "PreCompact hook dispatch failed: #{Exception.message(e)}")
-
-      {:error,
-       %HookResult{status: :veto, stderr: "hook dispatch failed: #{Exception.message(e)}"}}
+      {:error, HookResult.dispatch_error(Exception.message(e))}
   catch
     _, reason ->
       Minga.Log.warning(:agent, "PreCompact hook dispatch failed: #{inspect(reason)}")
-      {:error, %HookResult{status: :veto, stderr: "hook dispatch failed: #{inspect(reason)}"}}
+      {:error, HookResult.dispatch_error(inspect(reason))}
   end
 
   @spec emit_hook_veto(pid(), HookResult.t()) :: :ok

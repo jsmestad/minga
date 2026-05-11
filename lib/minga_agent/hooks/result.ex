@@ -42,6 +42,12 @@ defmodule MingaAgent.Hooks.Result do
     %__MODULE__{status: :veto, hook: hook, stderr: stderr, reason: reason}
   end
 
+  @doc "Builds a veto result for dispatch-level failures (no hook context available)."
+  @spec dispatch_error(String.t()) :: t()
+  def dispatch_error(detail) when is_binary(detail) do
+    %__MODULE__{status: :veto, stderr: "hook dispatch failed: #{detail}", reason: {:failed_to_start, :dispatch_error}}
+  end
+
   @doc "Returns a concise user-facing error for a veto result."
   @spec message(t()) :: String.t()
   def message(%__MODULE__{status: :veto, stderr: stderr, reason: :timeout, hook: hook}) do

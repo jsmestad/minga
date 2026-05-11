@@ -1955,13 +1955,11 @@ defmodule MingaAgent.Session do
   rescue
     e ->
       Minga.Log.warning(:agent, "UserPromptSubmit hook dispatch failed: #{Exception.message(e)}")
-
-      {:error,
-       %HookResult{status: :veto, stderr: "hook dispatch failed: #{Exception.message(e)}"}}
+      {:error, HookResult.dispatch_error(Exception.message(e))}
   catch
     _, caught ->
       Minga.Log.warning(:agent, "UserPromptSubmit hook dispatch failed: #{inspect(caught)}")
-      {:error, %HookResult{status: :veto, stderr: "hook dispatch failed: #{inspect(caught)}"}}
+      {:error, HookResult.dispatch_error(inspect(caught))}
   end
 
   @spec extract_last_assistant_text([Message.t()]) :: String.t() | nil
