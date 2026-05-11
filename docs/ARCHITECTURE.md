@@ -17,12 +17,15 @@ graph LR
         BUF["Buffer<br/>GenServers"]
         CMD["Commands &<br/>Keymaps"]
         MODE["Mode FSM<br/>normal/insert/visual"]
-        PORT["Port.Manager"]
+        RENDER["Renderer.Server"]
+        PORT["Frontend.Manager"]
 
         ED2 <--> BUF
         ED2 <--> CMD
         ED2 <--> MODE
-        ED2 --> PORT
+        ED2 --> RENDER
+        RENDER --> PORT
+        ED2 <--> PORT
     end
 
     subgraph SWIFT["Swift + Metal (macOS)"]
@@ -236,7 +239,7 @@ graph TD
 
 ### Runtime tier
 
-The tightly-coupled trio that handles rendering and user interaction. `rest_for_one` means if the Port Manager (renderer) fails, the Editor restarts too since it depends on the renderer. But buffers are untouched: your undo history, cursor positions, and unsaved changes are all preserved.
+The runtime tier handles rendering and user interaction. `rest_for_one` keeps the render path ordered: if Frontend.Manager fails, the Renderer.Server and Editor restart because both depend on the frontend port. If Renderer.Server fails, the Editor restarts because it holds the renderer pid. Buffers are untouched: your undo history, cursor positions, and unsaved changes are all preserved.
 
 ```mermaid
 graph TD
@@ -245,15 +248,20 @@ graph TD
     RT --> FW["FileWatcher"]
     RT --> EDSUP["Editor.Supervisor<br/><i>rest_for_one</i>"]
     EDSUP --> PARSER["Parser.Manager"]
-    EDSUP --> PM["Port.Manager"]
+    EDSUP --> PM["Frontend.Manager"]
+    EDSUP --> RENDER["Renderer.Server"]
     EDSUP --> ED["Editor"]
 
+    ED -. "snapshots" .-> RENDER
+    RENDER -. "writebacks" .-> ED
+    RENDER -. "render commands" .-> PM
     PM -. "stdin/stdout<br/>Port protocol" .-> FE["Frontend<br/><i>Swift/Metal, GTK4, or Zig/libvaxis</i>"]
     PARSER -. "stdin/stdout<br/>Port protocol" .-> ZIG_P["minga-parser<br/><i>Zig + tree-sitter</i>"]
 
     style RT fill:#b7950b,stroke:#9a7d0a,color:#fff
     style EDSUP fill:#6c3483,stroke:#4a235a,color:#fff
     style PM fill:#b7950b,stroke:#9a7d0a,color:#fff
+    style RENDER fill:#b7950b,stroke:#9a7d0a,color:#fff
     style ED fill:#b7950b,stroke:#9a7d0a,color:#fff
     style WD fill:#b7950b,stroke:#9a7d0a,color:#fff
     style FW fill:#b7950b,stroke:#9a7d0a,color:#fff
@@ -295,7 +303,7 @@ Zig fills two roles: the TUI terminal renderer and the tree-sitter parser proces
 
 NIFs (Native Implemented Functions) run inside the BEAM process. A failure in a NIF takes down the entire Erlang VM: every buffer, every process, everything. This directly contradicts Minga's isolation model.
 
-A Port is an OS-level process boundary. A frontend can crash completely, and the BEAM keeps running. The supervisor detects the Port died, restarts the Port Manager, and the Editor re-renders. Your data stays intact because it lives in completely separate processes.
+A Port is an OS-level process boundary. A frontend can crash completely, and the BEAM keeps running. The supervisor detects the Port died, restarts the Frontend.Manager, Renderer.Server, and Editor, then the Editor re-renders from buffer state. Your data stays intact because it lives in completely separate processes.
 
 ---
 
@@ -373,8 +381,9 @@ Here's what happens when you press `dd` (delete a line) in normal mode. The enti
 ```mermaid
 sequenceDiagram
     participant FE as Frontend<br/>(Swift, GTK4, or Zig)
-    participant PM as Port.Manager
+    participant PM as Frontend.Manager
     participant Ed as Editor
+    participant Render as Renderer.Server
     participant Mode as Mode.Normal
     participant Buf as Buffer.Server
 
@@ -394,9 +403,11 @@ sequenceDiagram
     Ed->>Buf: Operator.delete_line()
     Buf->>Buf: update gap buffer + push undo
 
-    Note over Ed,Term: Render cycle
-    Ed->>Ed: build render snapshot
-    Ed->>PM: [clear, draw_text x N, set_cursor, batch_end]
+    Note over Ed,Render: Render cycle
+    Ed->>Render: render snapshot
+    Render->>Render: layout, content, chrome, compose
+    Render->>PM: [clear, draw_text x N, set_cursor, batch_end]
+    Render-->>Ed: renderer-owned cache writeback
     PM->>FE: render commands via stdin
     FE->>FE: render to screen (Metal/GTK4/terminal)
 ```
@@ -480,29 +491,33 @@ Tree-sitter parsing runs in the Zig process to avoid sending parse trees across 
 ```mermaid
 sequenceDiagram
     participant Ed as Editor
-    participant PM as Port.Manager
-    participant Zig as Zig Process
+    participant Parser as Parser.Manager
+    participant Zig as minga-parser
     participant TS as Tree-sitter
+    participant Render as Renderer.Server
+    participant FM as Frontend.Manager
+    participant FE as Frontend
 
     Note over Ed: File opened, filetype detected
-    Ed->>PM: set_language("elixir")
-    PM->>Zig: 0x20 Set Language
+    Ed->>Parser: set_language("elixir")
+    Parser->>Zig: 0x20 Set Language
 
-    Ed->>PM: parse_buffer(version, content)
-    PM->>Zig: 0x21 Parse Buffer
+    Ed->>Parser: parse_buffer(version, content)
+    Parser->>Zig: 0x21 Parse Buffer
     Zig->>TS: parse with grammar
     TS-->>Zig: syntax tree
     Zig->>Zig: run highlight query
 
-    Zig->>PM: 0x31 highlight_names
-    Zig->>PM: 0x30 highlight_spans
-    PM->>Ed: spans + capture names
+    Zig->>Parser: 0x31 highlight_names
+    Zig->>Parser: 0x30 highlight_spans
+    Parser->>Ed: spans + capture names
 
-    Note over Ed: Map captures → theme colors
-    Ed->>Ed: slice visible lines at span boundaries
-    Ed->>PM: draw_text with per-segment colors
-    PM->>Zig: 0x10 Draw Text commands
-    Zig->>Zig: render colored text to terminal
+    Note over Ed,Render: Next render frame
+    Ed->>Render: render snapshot with highlight spans
+    Render->>Render: slice visible lines at span boundaries
+    Render->>FM: draw_text with per-segment colors
+    FM->>FE: render commands
+    FE->>FE: render colored text
 ```
 
 All 39 grammars are compiled into the Zig binary. Highlight queries are embedded via `@embedFile` and pre-compiled on a background thread at startup. First-file highlighting appears in ~16ms.

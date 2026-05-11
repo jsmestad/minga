@@ -15,6 +15,8 @@ defmodule MingaEditor.Renderer.ServerTest do
 
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.Renderer.Server, as: RendererServer
+  alias MingaEditor.Shell.Board
+  alias MingaEditor.Shell.Board.State, as: BoardState
   alias MingaEditor.Viewport
 
   describe "snapshot coalescing (in-flight → pending replacement)" do
@@ -176,6 +178,28 @@ defmodule MingaEditor.Renderer.ServerTest do
       assert server_state.in_flight == nil
       refute_receive {:render_done, _writeback}, 50
     end
+
+    test "Board grid renders synchronously even when renderer pid is present" do
+      renderer = start_renderer(self())
+      state = build_board_grid_state(renderer)
+
+      :sys.replace_state(renderer, fn server_state ->
+        %{server_state | rendering?: true, in_flight: {stub_snapshot(), 0, 0}, pending: nil}
+      end)
+
+      frame_ref = Minga.Test.HeadlessPort.prepare_await(state.port_manager)
+      result = MingaEditor.Renderer.render_or_async(state)
+      assert {:ok, screen} = Minga.Test.HeadlessPort.collect_frame(frame_ref)
+
+      rows = screen_rows(screen)
+      assert Enum.any?(rows, &String.contains?(&1, "The Board"))
+      assert Enum.any?(rows, &String.contains?(&1, "Fix split renderer"))
+
+      server_state = :sys.get_state(renderer)
+      assert result == state
+      assert server_state.pending == nil
+      assert {_, 0, 0} = server_state.in_flight
+    end
   end
 
   # ── Helpers ────────────────────────────────────────────────────────────────
@@ -220,6 +244,16 @@ defmodule MingaEditor.Renderer.ServerTest do
         viewport: Viewport.new(24, 80)
       }
     }
+  end
+
+  defp screen_rows(%{grid: grid}) do
+    Enum.map(grid, fn row -> Enum.map_join(row, & &1.char) end)
+  end
+
+  defp build_board_grid_state(renderer_pid) do
+    state = build_editor_state(:tui, renderer_pid)
+    {board, _card} = BoardState.create_card(BoardState.new(), task: "Fix split renderer")
+    %{state | shell: Board, shell_state: board}
   end
 
   defp build_editor_state(backend, renderer_pid) do

@@ -59,13 +59,20 @@ defmodule MingaEditor do
   @typedoc "Options for starting the editor."
   @type start_opt ::
           {:name, GenServer.name()}
+          | {:backend, MingaEditor.State.backend()}
           | {:port_manager, GenServer.server()}
+          | {:parser_manager, GenServer.server()}
           | {:keymap_server, GenServer.server()}
           | {:options_server, GenServer.server()}
           | {:events_registry, Minga.Events.registry()}
           | {:buffer, pid()}
           | {:width, pos_integer()}
           | {:height, pos_integer()}
+          | {:editing_model, :vim | :cua}
+          | {:shell, :traditional | :board | module()}
+          | {:project_root, String.t() | nil}
+          | {:swap_dir, String.t()}
+          | {:session_dir, String.t()}
           | {:suppress_tool_prompts, boolean()}
 
   alias MingaAgent.Session, as: AgentSession

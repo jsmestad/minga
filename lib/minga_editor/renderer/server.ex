@@ -24,10 +24,9 @@ defmodule MingaEditor.Renderer.Server do
   The render pipeline computes `modeline_click_regions` and
   `tab_bar_click_regions` as part of chrome rendering. These need to
   flow back to the Editor so subsequent mouse events can resolve
-  click positions. The Renderer casts
-  `{:render_done, frame_seq, %{caches: c, layout: l, focus_tree: ft, click_regions: cr}}`
-  back to the Editor after every emit; the Editor merges into its
-  state via `apply_renderer_writeback/2`.
+  click positions. The Renderer sends `{:render_done, writeback}`
+  back to the Editor after every emit; the Editor merges renderer-owned
+  fields from that payload via `apply_renderer_writeback/2`.
 
   ## Telemetry
 
@@ -151,7 +150,13 @@ defmodule MingaEditor.Renderer.Server do
     advance_pending(state)
   rescue
     e ->
-      Minga.Log.warning(:render, "Renderer frame #{seq} dropped: #{Exception.message(e)}")
+      trace = Exception.format_stacktrace(__STACKTRACE__) |> String.slice(0, 500)
+
+      Minga.Log.warning(
+        :render,
+        "Renderer frame #{seq} dropped: #{Exception.message(e)}\n#{trace}"
+      )
+
       advance_pending(state)
   end
 

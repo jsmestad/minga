@@ -19,6 +19,9 @@ defmodule MingaEditor.Shell.Chrome do
               cursor_info :: term()
             ) :: MingaEditor.RenderPipeline.Chrome.t()
 
+  @doc "Returns true when the shell's current state can safely render through the asynchronous RenderPipeline path."
+  @callback async_render?(editor_state :: term()) :: boolean()
+
   @doc """
   Runs the full render pipeline (content, chrome, compose, emit) and
   sends commands to the frontend. Returns updated state with cached

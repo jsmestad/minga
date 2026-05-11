@@ -336,6 +336,15 @@ defmodule MingaEditor.Shell.Board do
   defp zoom_status_face(_, theme), do: Minga.Core.Face.new(fg: 0x5C6370, bg: theme.editor.bg)
 
   @impl true
+  @spec async_render?(term()) :: boolean()
+  def async_render?(%{
+        shell_state: %BoardState{} = board_state,
+        workspace: %{buffers: %{active: active}}
+      }) do
+    not BoardState.grid_view?(board_state) and is_pid(active)
+  end
+
+  @impl true
   @spec render(term()) :: term()
   def render(editor_state) do
     if BoardState.grid_view?(editor_state.shell_state) do

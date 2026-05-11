@@ -153,6 +153,14 @@ defmodule MingaEditor.Shell.Traditional do
     to: MingaEditor.Shell.Traditional.Chrome
 
   @impl true
+  @spec async_render?(term()) :: boolean()
+  def async_render?(%{shell: __MODULE__, workspace: %{buffers: %{active: active}}})
+      when is_pid(active),
+      do: true
+
+  def async_render?(%{shell: __MODULE__}), do: false
+
+  @impl true
   @spec render(term()) :: term()
   defdelegate render(editor_state), to: MingaEditor.Shell.Traditional.Renderer
 

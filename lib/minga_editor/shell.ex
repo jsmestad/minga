@@ -5,13 +5,13 @@ defmodule MingaEditor.Shell do
   A shell owns layout, chrome, input routing, buffer lifecycle, and
   tab queries. Each responsibility is a focused sub-behaviour:
 
-  - `MingaEditor.Shell.Layout`           — `compute_layout/1`
-  - `MingaEditor.Shell.Chrome`           — `build_chrome/4`, `render/1`
-  - `MingaEditor.Shell.InputRouter`      — `input_handlers/1`,
+  - `MingaEditor.Shell.Layout` - `compute_layout/1`
+  - `MingaEditor.Shell.Chrome` - `build_chrome/4`, `async_render?/1`, `render/1`
+  - `MingaEditor.Shell.InputRouter` - `input_handlers/1`,
     `handle_event/3`, `handle_gui_action/3`
-  - `MingaEditor.Shell.BufferLifecycle`  — `on_buffer_added/5`,
+  - `MingaEditor.Shell.BufferLifecycle` - `on_buffer_added/5`,
     `on_buffer_switched/2`, `on_buffer_died/3`, `on_agent_event/4`
-  - `MingaEditor.Shell.TabQueries`       — `active_tab/1`,
+  - `MingaEditor.Shell.TabQueries` - `active_tab/1`,
     `find_tab_by_buffer/2`, `active_tab_kind/1`, `set_tab_session/3`,
     `active_session/1`
 
