@@ -376,6 +376,83 @@ final class WindowContentRenderer {
         return hasher.finalize()
     }
 
+    // MARK: - Horizontal Scroll Clipping
+
+    /// Clips a visual row's text and spans to the visible viewport window.
+    ///
+    /// Drops `scrollLeft` display columns from the start and keeps at most
+    /// `viewportCols` display columns. Span boundaries are adjusted to
+    /// the clipped coordinate system (0-based from the visible left edge).
+    func clipRowToViewport(_ row: GUIVisualRow, scrollLeft: Int, viewportCols: Int) -> GUIVisualRow {
+        let text = row.text
+        guard !text.isEmpty else { return row }
+
+        let totalDisplayCols: Int
+        let clippedText: String
+
+        if text.utf8.allSatisfy({ $0 < 0x80 }) {
+            totalDisplayCols = text.count
+            let clipStart = min(scrollLeft, totalDisplayCols)
+            let clipEnd = min(scrollLeft + viewportCols, totalDisplayCols)
+            guard clipStart < clipEnd else {
+                return GUIVisualRow(rowType: row.rowType, bufLine: row.bufLine,
+                                   contentHash: scrollContentHash(row.contentHash, scrollLeft: scrollLeft),
+                                   text: "", spans: [])
+            }
+            let startIndex = text.index(text.startIndex, offsetBy: clipStart)
+            let endIndex = text.index(text.startIndex, offsetBy: clipEnd)
+            clippedText = String(text[startIndex..<endIndex])
+        } else {
+            let columnMap = buildDisplayColumnMap(for: text)
+            totalDisplayCols = max(columnMap.count - 1, 0)
+            let clipStart = min(scrollLeft, totalDisplayCols)
+            let clipEnd = min(scrollLeft + viewportCols, totalDisplayCols)
+            guard clipStart < clipEnd, clipEnd < columnMap.count else {
+                return GUIVisualRow(rowType: row.rowType, bufLine: row.bufLine,
+                                   contentHash: scrollContentHash(row.contentHash, scrollLeft: scrollLeft),
+                                   text: "", spans: [])
+            }
+            let startIdx = columnMap[clipStart]
+            let endIdx = columnMap[clipEnd]
+            clippedText = String(text[startIdx..<endIdx])
+        }
+
+        let clippedSpans = clipSpans(row.spans, scrollLeft: scrollLeft, viewportCols: viewportCols)
+        let newHash = scrollContentHash(row.contentHash, scrollLeft: scrollLeft)
+
+        return GUIVisualRow(
+            rowType: row.rowType, bufLine: row.bufLine,
+            contentHash: newHash, text: clippedText, spans: clippedSpans
+        )
+    }
+
+    private func clipSpans(_ spans: [GUIHighlightSpan], scrollLeft: Int, viewportCols: Int) -> [GUIHighlightSpan] {
+        spans.compactMap { span in
+            let spanStart = Int(span.startCol)
+            let spanEnd = Int(span.endCol)
+
+            guard spanEnd > scrollLeft, spanStart < scrollLeft + viewportCols else { return nil }
+
+            let newStart = UInt16(max(spanStart - scrollLeft, 0))
+            let newEnd = UInt16(min(spanEnd - scrollLeft, viewportCols))
+            guard newStart < newEnd else { return nil }
+
+            return GUIHighlightSpan(
+                startCol: newStart, endCol: newEnd,
+                fg: span.fg, bg: span.bg,
+                attrs: span.attrs, fontWeight: span.fontWeight, fontId: span.fontId
+            )
+        }
+    }
+
+    private func scrollContentHash(_ baseHash: UInt32, scrollLeft: Int) -> UInt32 {
+        guard scrollLeft > 0 else { return baseHash }
+        var hasher = Hasher()
+        hasher.combine(baseHash)
+        hasher.combine(scrollLeft)
+        return UInt32(truncatingIfNeeded: hasher.finalize())
+    }
+
     // MARK: - Attributed String Building
 
     /// Builds an NSAttributedString from composed text and pre-resolved spans.

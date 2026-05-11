@@ -412,16 +412,30 @@ final class CoreTextMetalRenderer {
                     semanticOverlayQuads.append(quad)
                 }
 
-                // Render line textures from semantic content into atlas.
-                for (rowIdx, row) in content.rows.enumerated() {
-                    if let atlas, let entry = wcr.renderRowToAtlas(displayRow: UInt16(rowIdx), row: row, atlas: atlas) {
+                // Pre-clip all rows to the visible viewport window.
+                // Drops scrollLeft columns from the start and limits to viewport width,
+                // so each texture is at most viewport-wide. Fixes gutter bleedthrough
+                // (no leftward position shift) and text truncation (texture always
+                // covers the visible portion).
+                let contentCols = max(Int(frameState.cols) - Int(gutter.lineNumberWidth) - Int(gutter.signColWidth), 1)
+                let scrollLeftInt = Int(content.scrollLeft)
+                var clippedRows: [GUIVisualRow] = []
+                clippedRows.reserveCapacity(content.rows.count)
+                for row in content.rows {
+                    clippedRows.append(
+                        wcr.clipRowToViewport(row, scrollLeft: scrollLeftInt, viewportCols: contentCols)
+                    )
+                }
+
+                // Render pre-clipped line textures into atlas.
+                for (rowIdx, clippedRow) in clippedRows.enumerated() {
+                    if let atlas, let entry = wcr.renderRowToAtlas(displayRow: UInt16(rowIdx), row: clippedRow, atlas: atlas) {
                         let yPos = windowRowOffset + Float(rowIdx) * displayCellH * scale
-                        // Center text vertically within the expanded row when line spacing > 1.0.
                         let textYOffset = (displayCellH - cellH) * scale * 0.5
 
                         let (uvOrigin, uvSize) = atlas.uvForSlot(entry.slotIndex, pixelWidth: entry.pixelWidth)
                         var lineGPU = LineGPU()
-                        lineGPU.position = SIMD2<Float>(contentColOffset - hScrollPx, yPos + textYOffset)
+                        lineGPU.position = SIMD2<Float>(contentColOffset, yPos + textYOffset)
                         lineGPU.size = SIMD2<Float>(Float(entry.pixelWidth), Float(entry.pixelHeight))
                         lineGPU.uvOrigin = uvOrigin
                         lineGPU.uvSize = uvSize
@@ -437,13 +451,10 @@ final class CoreTextMetalRenderer {
                     }
 
                     for (rowIndex, rowAnnotations) in annotationsByRow {
-                        // Re-call renderRowToAtlas to get the cached line width.
-                        // Returns the entry computed in the content pass above
-                        // (content hash matches, no re-rasterization).
                         let linePixelWidth: Float
-                        if Int(rowIndex) < content.rows.count {
-                            let row = content.rows[Int(rowIndex)]
-                            if let lineEntry = wcr.renderRowToAtlas(displayRow: rowIndex, row: row, atlas: atlas) {
+                        if Int(rowIndex) < clippedRows.count {
+                            let clippedRow = clippedRows[Int(rowIndex)]
+                            if let lineEntry = wcr.renderRowToAtlas(displayRow: rowIndex, row: clippedRow, atlas: atlas) {
                                 linePixelWidth = Float(lineEntry.pixelWidth)
                             } else {
                                 linePixelWidth = 0
@@ -453,7 +464,7 @@ final class CoreTextMetalRenderer {
                         }
 
                         let rowY = windowRowOffset + Float(rowIndex) * displayCellH * scale
-                        var cursorX = contentColOffset - hScrollPx + linePixelWidth
+                        var cursorX = contentColOffset + linePixelWidth
                             + Float(wcr.annotationGap) * scale
 
                         for (annIdx, ann) in rowAnnotations.enumerated() {
