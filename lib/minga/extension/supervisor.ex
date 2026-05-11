@@ -364,35 +364,11 @@ defmodule Minga.Extension.Supervisor do
       {:error, "error: #{inspect(kind)} #{inspect(reason)}"}
   end
 
-  # Compiles extension files using ParallelCompiler (resolves cross-module
-  # references) while suppressing stderr output. Diagnostics are captured
-  # via Code.with_diagnostics and routed to *Messages* instead.
-  #
-  # The stderr redirect is wrapped in `:global.trans` because
-  # `Process.register(_, :standard_error)` mutates a globally-registered
-  # name. Concurrent callers (e.g., async tests that each load an
-  # extension) would otherwise race and crash with
-  # "the name is already taken". Compilation is already slow
-  # (~250ms per extension), so serializing it is not a real perf hit.
+  # Compiles extension files using ParallelCompiler so cross-module references resolve.
+  # Diagnostics go through Code.with_diagnostics, not global :standard_error mutation.
   @spec compile_quietly([String.t()]) :: {{:ok, module()} | {:error, String.t()}, [map()]}
   defp compile_quietly(files) do
-    :global.trans({__MODULE__, self()}, fn -> do_compile_quietly(files) end)
-  end
-
-  @spec do_compile_quietly([String.t()]) :: {{:ok, module()} | {:error, String.t()}, [map()]}
-  defp do_compile_quietly(files) do
-    {:ok, string_io} = StringIO.open("")
-    original_stderr = Process.whereis(:standard_error)
-    Process.unregister(:standard_error)
-    Process.register(string_io, :standard_error)
-
-    try do
-      Code.with_diagnostics(fn -> parallel_compile_and_find(files) end)
-    after
-      Process.unregister(:standard_error)
-      Process.register(original_stderr, :standard_error)
-      StringIO.close(string_io)
-    end
+    Code.with_diagnostics(fn -> parallel_compile_and_find(files) end)
   end
 
   @spec parallel_compile_and_find([String.t()]) :: {:ok, module()} | {:error, String.t()}
