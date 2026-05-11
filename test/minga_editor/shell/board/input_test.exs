@@ -230,6 +230,104 @@ defmodule MingaEditor.Shell.Board.InputTest do
     end
   end
 
+  # ── Persisted card session start ─────────────────────────────────────────
+
+  describe "zoom into persisted agent card (no live session)" do
+    test "starts a new session and activates the agent view" do
+      {:ok, agent_buf} = Minga.Buffer.start_link(content: "")
+
+      board =
+        BoardState.new()
+        |> then(fn b ->
+          {b, _card} = BoardState.create_card(b, task: "Fix tests", model: "test-model")
+          b
+        end)
+        |> Map.put(:agent, %AgentState{buffer: agent_buf})
+
+      focused_id = board.focused_card
+      assert board.cards[focused_id].session == nil
+
+      state = %EditorState{
+        port_manager: self(),
+        shell: Board,
+        shell_state: board,
+        workspace: %MingaEditor.Workspace.State{viewport: Viewport.new(24, 80)},
+        focus_stack: [BoardInput, MingaEditor.Input.GlobalBindings]
+      }
+
+      {:handled, new_state} = BoardInput.handle_key(state, @enter, 0)
+
+      card = new_state.shell_state.cards[focused_id]
+      on_exit(fn -> stop_session(card.session) end)
+
+      assert is_pid(card.session)
+      assert card.status == :working
+      assert new_state.workspace.keymap_scope == :agent
+    end
+
+    test "uses the card's persisted model for the new session" do
+      {:ok, agent_buf} = Minga.Buffer.start_link(content: "")
+
+      board =
+        BoardState.new()
+        |> then(fn b ->
+          {b, _card} = BoardState.create_card(b, task: "Refactor", model: "persisted-model")
+          b
+        end)
+        |> Map.put(:agent, %AgentState{buffer: agent_buf})
+
+      state = %EditorState{
+        port_manager: self(),
+        shell: Board,
+        shell_state: board,
+        workspace: %MingaEditor.Workspace.State{viewport: Viewport.new(24, 80)},
+        focus_stack: [BoardInput, MingaEditor.Input.GlobalBindings]
+      }
+
+      {:handled, new_state} = BoardInput.handle_key(state, @enter, 0)
+
+      focused_id = new_state.shell_state.focused_card
+      card = new_state.shell_state.cards[focused_id]
+      on_exit(fn -> stop_session(card.session) end)
+
+      assert is_pid(card.session)
+    end
+
+    test "does not double-start when card already has a session" do
+      {:ok, agent_buf} = Minga.Buffer.start_link(content: "")
+      fake_session = spawn(fn -> Process.sleep(:infinity) end)
+
+      board =
+        BoardState.new()
+        |> then(fn b ->
+          {b, _card} =
+            BoardState.create_card(b,
+              task: "Already running",
+              model: "test-model",
+              session: fake_session
+            )
+
+          b
+        end)
+        |> Map.put(:agent, %AgentState{buffer: agent_buf})
+
+      focused_id = board.focused_card
+
+      state = %EditorState{
+        port_manager: self(),
+        shell: Board,
+        shell_state: board,
+        workspace: %MingaEditor.Workspace.State{viewport: Viewport.new(24, 80)},
+        focus_stack: [BoardInput, MingaEditor.Input.GlobalBindings]
+      }
+
+      {:handled, new_state} = BoardInput.handle_key(state, @enter, 0)
+
+      card = new_state.shell_state.cards[focused_id]
+      assert card.session == fake_session
+    end
+  end
+
   # ── Zoom out ───────────────────────────────────────────────────────────
 
   describe "Escape zooms out when zoomed" do

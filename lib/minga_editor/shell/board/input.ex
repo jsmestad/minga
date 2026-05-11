@@ -276,8 +276,11 @@ defmodule MingaEditor.Shell.Board.Input do
             EditorState.restore_tab_context(state, fresh_context)
         end
 
-      # For agent cards, activate the agentic view so the user sees
-      # the agent chat, not a plain buffer
+      # For persisted agent cards with no live session, start one now.
+      {new_board, state} = SessionLifecycle.ensure_session(state.shell_state, card, state)
+      state = EditorState.update_shell_state(state, fn _ -> new_board end)
+      card = new_board.cards[card.id]
+
       MingaEditor.AgentActivation.activate_for_card(state, card)
     else
       state
