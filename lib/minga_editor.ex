@@ -1728,6 +1728,12 @@ defmodule MingaEditor do
     case action do
       {:board_select_card, card_id} ->
         card = Map.get(shell_state.cards, card_id)
+
+        {new_board, state} =
+          MingaEditor.Shell.Board.SessionLifecycle.ensure_session(state.shell_state, card, state)
+
+        state = EditorState.update_shell_state(state, fn _ -> new_board end)
+        card = new_board.cards[card_id]
         MingaEditor.AgentActivation.activate_for_card(state, card)
 
       _ ->
