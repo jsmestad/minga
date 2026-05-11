@@ -422,13 +422,19 @@ You do NOT have the option to:
 - Re-run and hope it passes. If it failed once, understand why before re-running.
 - Skip the test suite because "I only changed one file."
 
-**Before commit: one reviewer, one verdict.** The reviewer subagent is the single gate. It runs CI checks, reviews code quality, and verifies acceptance criteria. One call:
+**First diff before advisors.** When a ticket has Developer Notes or clear acceptance criteria, implement the first working diff before calling advisory subagents unless there is a hard trigger: unresolved architecture choice, unclear test layer for risky behavior, security/privacy boundary, cross-platform contract decision, or the user explicitly asks for upfront advice. Before any pre-implementation advisory call, write: `Pre-implementation advisor needed because: ...`. If you cannot give a concrete hard-trigger reason, skip the subagent and implement first.
+
+**Bug hunting is separate from acceptance review.** Use bug-hunting passes after code exists for large, cross-module, stateful, async, rendering, protocol, or agent-tooling diffs, or after a prior pass found a real correctness bug. Bug hunting should look for logic errors, state/data-flow mistakes, race conditions, silent failures, and drift from AGENTS.md or Developer Notes. Prefer focused PR Toolkit agents such as `prtk-code-reviewer` for logic errors and AGENTS.md deviations, plus narrower PR Toolkit agents when the risk is specific. If a bug-hunting pass finds a real correctness, data-loss, concurrency, rendering, security, or acceptance bug, another broad bug-hunting pass is justified after the fix. If it finds only process, style, or small mechanical issues, use a targeted re-check or self-check instead.
+
+**Before commit: one reviewer, one verdict.** The reviewer subagent is the final acceptance and merge-safety gate, not an iterative development loop or primary bug hunter. Run it once after you have self-checked the diff and run the relevant validation:
 
 ```
-subagent({ agent: "reviewer", task: "Review for commit. Ticket: #{N}. Run: git diff main", agentScope: "both", confirmProjectAgents: false })
+subagent({ agent: "reviewer", task: "Review for commit. Ticket: #{N}. Run: git diff main", agentScope: "both" })
 ```
 
-The reviewer runs `make lint` and `mix test.llm` itself and blocks on any failure. It also checks each acceptance criterion against the diff. If it returns BLOCKED, fix the issues and re-run. The reviewer always starts from scratch to avoid confirmation bias on re-review.
+The reviewer verifies acceptance criteria, hard project rules, validation evidence, and merge safety. It should not be used after every fresh-eyes fix, every amend, every rebase, or every small cleanup. If it returns BLOCKED, fix the listed blockers and run one targeted re-review limited to those blockers. Do not request another broad review unless the fix materially changes architecture, API contract, security surface, data model, or acceptance scope.
+
+Reviewer must not block solely because `test-advisor` was not consulted when Developer Notes, acceptance criteria, or nearby tests already prescribe a reasonable test strategy. Block for missing coverage, weak tests, failing validation, unsafe behavior, or explicit hard project gates, not missing advisory evidence.
 
 Example:
 
