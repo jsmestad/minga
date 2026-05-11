@@ -112,6 +112,19 @@ defmodule MingaAgent.Hooks.ModuleRunnerTest do
              Hook.normalize(%{event: "PreToolUse", tool: "*", type: :module, function: :check})
   end
 
+  test "normalization accepts module name with Elixir. prefix" do
+    full_name = "Elixir.MingaAgent.Hooks.ModuleRunnerTest.AllowPolicy"
+
+    assert {:ok, %Hook{module: AllowPolicy}} =
+             Hook.normalize(%{
+               event: "PreToolUse",
+               tool: "*",
+               type: :module,
+               module: full_name,
+               function: :check
+             })
+  end
+
   defp module_hook(mod, fun, timeout_ms \\ 30_000) do
     %Hook{
       event: :pre_tool_use,

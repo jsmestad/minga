@@ -404,6 +404,23 @@ defmodule MingaAgent.Hooks.DispatcherTest do
              Hook.normalize(%{event: "SessionEnd", command: "echo end"})
   end
 
+  test "event aliases normalize all supported events" do
+    for {atom_form, string_form} <- [
+          {:session_start, "SessionStart"},
+          {:session_end, "SessionEnd"},
+          {:stop, "Stop"},
+          {:user_prompt_submit, "UserPromptSubmit"},
+          {:pre_compact, "PreCompact"},
+          {:notification, "Notification"}
+        ] do
+      assert {:ok, %Hook{event: ^atom_form}} =
+               Hook.normalize(%{event: string_form, command: "echo ok"})
+
+      assert {:ok, %Hook{event: ^atom_form}} =
+               Hook.normalize(%{event: atom_form, command: "echo ok"})
+    end
+  end
+
   defp hook(pattern) do
     %Hook{event: :pre_tool_use, tool_pattern: pattern, command: "echo checking >&2"}
   end

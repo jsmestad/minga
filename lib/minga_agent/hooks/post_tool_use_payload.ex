@@ -77,6 +77,7 @@ defmodule MingaAgent.Hooks.PostToolUsePayload do
   defp truncate_result(result) when byte_size(result) <= @max_result_bytes, do: result
 
   defp truncate_result(result) do
-    String.slice(result, 0, @max_result_bytes) <> "\n... (truncated)"
+    truncated = String.byte_slice(result, 0, @max_result_bytes)
+    truncated <> "\n... (truncated)"
   end
 end
