@@ -2,6 +2,7 @@ defmodule Minga.Language.Nix do
   @moduledoc "Nix language definition"
 
   alias Minga.Language
+  alias Minga.LSP.ServerConfig
 
   @spec definition() :: Language.t()
   def definition do
@@ -12,7 +13,15 @@ defmodule Minga.Language.Nix do
       extensions: ["nix"],
       icon: "\u{F0313}",
       icon_color: 0x7EBAE4,
-      grammar: "nix"
+      grammar: "nix",
+      language_servers: [
+        %ServerConfig{
+          name: nil,
+          command: "nil",
+          root_markers: ["flake.nix", ".flake8"]
+        }
+      ],
+      root_markers: ["flake.nix"]
     }
   end
 end

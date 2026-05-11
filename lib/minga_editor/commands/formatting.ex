@@ -1,6 +1,10 @@
 defmodule MingaEditor.Commands.Formatting do
   @moduledoc """
   Buffer formatting command.
+
+  Supports formatting via LSP (if available) or external formatters.
+  Attempts LSP formatting first if the language server is ready and supports formatting.
+  Falls back to configured external formatters if LSP is unavailable.
   """
 
   @behaviour Minga.Command.Provider
@@ -9,12 +13,135 @@ defmodule MingaEditor.Commands.Formatting do
   alias MingaEditor.State, as: EditorState
   alias Minga.Mode.ToolConfirmState
   alias Minga.Tool.Recipe.Registry, as: RecipeRegistry
+  alias Minga.LSP.Client
+  alias Minga.LSP.SyncServer
 
   @typedoc "Internal editor state."
   @type state :: EditorState.t()
 
   @spec format_buffer(state()) :: state()
   def format_buffer(%{workspace: %{buffers: %{active: buf}}} = state) when is_pid(buf) do
+    case try_lsp_format(state, buf) do
+      {:ok, state} ->
+        state
+
+      :not_available ->
+        try_external_format(state, buf)
+    end
+  end
+
+  def format_buffer(state), do: EditorState.set_status(state, "No buffer to format")
+
+  # ── LSP Formatting ────────────────────────────────────────────────────────
+
+  @spec try_lsp_format(state(), pid()) :: {:ok, state()} | :not_available
+  defp try_lsp_format(state, buf) when is_pid(buf) do
+    clients = SyncServer.clients_for_buffer(buf)
+
+    case Enum.find(clients, &supports_formatting?/1) do
+      nil ->
+        :not_available
+
+      client ->
+        {:ok, request_lsp_format(state, buf, client)}
+    end
+  end
+
+  @spec supports_formatting?(pid()) :: boolean()
+  defp supports_formatting?(client) do
+    caps = Client.capabilities(client)
+
+    get_in(caps, ["documentFormattingProvider"]) == true or
+      get_in(caps, ["textDocument", "formatting", "provider"]) == true
+  end
+
+  @spec request_lsp_format(state(), pid(), pid()) :: state()
+  defp request_lsp_format(state, buf, client) do
+    file_path = Buffer.file_path(buf)
+    uri = SyncServer.path_to_uri(file_path)
+
+    ref = Client.request_formatting(client, uri)
+
+    receive do
+      {:lsp_response, ^ref, {:ok, edits}} ->
+        apply_lsp_edits(buf, edits)
+        EditorState.set_status(state, "Formatted (LSP)")
+
+      {:lsp_response, ^ref, {:error, reason}} ->
+        Minga.Log.warning(:editor, "LSP formatting error: #{inspect(reason)}")
+        EditorState.set_status(state, "Format error: LSP request failed")
+    after
+      5000 ->
+        EditorState.set_status(state, "Format error: LSP request timeout")
+    end
+  end
+
+  @spec apply_lsp_edits(pid(), [map()]) :: :ok
+  defp apply_lsp_edits(buf, edits) when is_pid(buf) and is_list(edits) do
+    if edits != [] do
+      {cursor_line, cursor_col} = Buffer.cursor(buf)
+      content = Buffer.content(buf)
+
+      new_content =
+        Enum.reduce(Enum.reverse(edits), content, fn edit, acc ->
+          range = Map.get(edit, "range", %{})
+          new_text = Map.get(edit, "newText", "")
+          start_line = get_in(range, ["start", "line"]) || 0
+          start_col = get_in(range, ["start", "character"]) || 0
+          end_line = get_in(range, ["end", "line"]) || 0
+          end_col = get_in(range, ["end", "character"]) || 0
+
+          apply_single_edit(acc, start_line, start_col, end_line, end_col, new_text)
+        end)
+
+      Buffer.replace_content(buf, new_content)
+      line_count = Buffer.line_count(buf)
+      safe_line = min(cursor_line, max(line_count - 1, 0))
+      Buffer.move_to(buf, {safe_line, cursor_col})
+      MingaEditor.log_to_messages("Formatted (LSP)")
+    end
+
+    :ok
+  end
+
+  @spec apply_single_edit(
+          String.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          String.t()
+        ) :: String.t()
+  defp apply_single_edit(content, start_line, start_col, end_line, end_col, new_text) do
+    lines = String.split(content, "\n")
+
+    case Enum.at(lines, start_line) do
+      nil ->
+        content
+
+      start_text ->
+        case Enum.at(lines, end_line) do
+          nil ->
+            content
+
+          end_text ->
+            before = String.slice(start_text, 0, start_col)
+            after_end = String.slice(end_text, end_col..-1)
+            replacement = before <> new_text <> after_end
+
+            {before_lines, rest} = Enum.split(lines, start_line)
+            {_removed, after_lines} = Enum.split(rest, end_line - start_line + 1)
+
+            new_lines = before_lines ++ [replacement] ++ after_lines
+            Enum.join(new_lines, "\n")
+        end
+    end
+  end
+
+  # ── External Formatter ────────────────────────────────────────────────────
+
+  @spec try_external_format(state(), pid()) :: state()
+  defp try_external_format(state, buf) do
     filetype = Buffer.filetype(buf)
     file_path = Buffer.file_path(buf)
     spec = Minga.Editing.resolve_formatter(filetype, file_path)
@@ -33,8 +160,6 @@ defmodule MingaEditor.Commands.Formatting do
         end
     end
   end
-
-  def format_buffer(state), do: EditorState.set_status(state, "No buffer to format")
 
   # ── Private helpers ───────────────────────────────────────────────────────
 

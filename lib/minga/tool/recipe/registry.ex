@@ -173,6 +173,149 @@ defmodule Minga.Tool.Recipe.Registry do
       category: :lsp_server,
       languages: [:c, :cpp],
       asset_pattern: &Minga.Tool.Recipe.Registry.clangd_asset?/2
+    },
+    %Recipe{
+      name: :jdtls,
+      label: "Eclipse JDT Language Server",
+      description: "Java language server powered by Eclipse",
+      provides: ["jdtls"],
+      method: :github_release,
+      package: "eclipse-jdtls/eclipse.jdt.ls",
+      homepage: "https://github.com/eclipse-jdtls/eclipse.jdt.ls",
+      category: :lsp_server,
+      languages: [:java]
+    },
+    %Recipe{
+      name: :omnisharp,
+      label: "OmniSharp",
+      description: "C# language server powered by Roslyn",
+      provides: ["omnisharp"],
+      method: :github_release,
+      package: "OmniSharp/omnisharp-roslyn",
+      homepage: "https://github.com/OmniSharp/omnisharp-roslyn",
+      category: :lsp_server,
+      languages: [:c_sharp]
+    },
+    %Recipe{
+      name: :dart_language_server,
+      label: "Dart Language Server",
+      description: "Dart language server built into the Dart SDK",
+      provides: ["dart"],
+      method: :github_release,
+      package: "dart-lang/sdk",
+      homepage: "https://dart.dev",
+      category: :lsp_server,
+      languages: [:dart]
+    },
+    %Recipe{
+      name: :intelephense,
+      label: "Intelephense",
+      description: "PHP language server with code intelligence",
+      provides: ["intelephense"],
+      method: :npm,
+      package: "intelephense",
+      homepage: "https://intelephense.com",
+      category: :lsp_server,
+      languages: [:php]
+    },
+    %Recipe{
+      name: :kotlin_language_server,
+      label: "Kotlin Language Server",
+      description: "Kotlin language server",
+      provides: ["kotlin-language-server"],
+      method: :github_release,
+      package: "fwcd/kotlin-language-server",
+      homepage: "https://github.com/fwcd/kotlin-language-server",
+      category: :lsp_server,
+      languages: [:kotlin]
+    },
+    %Recipe{
+      name: :sourcekit_lsp,
+      label: "SourceKit-LSP",
+      description: "Swift language server powered by Swift compiler",
+      provides: ["sourcekit-lsp"],
+      method: :github_release,
+      package: "apple/sourcekit-lsp",
+      homepage: "https://github.com/apple/sourcekit-lsp",
+      category: :lsp_server,
+      languages: [:swift]
+    },
+    %Recipe{
+      name: :erlang_ls,
+      label: "Erlang Language Server",
+      description: "Language server for Erlang and OTP",
+      provides: ["erlang_ls"],
+      method: :github_release,
+      package: "erlang-ls/erlang_ls",
+      homepage: "https://erlang-ls.github.io",
+      category: :lsp_server,
+      languages: [:erlang]
+    },
+    %Recipe{
+      name: :gleam_lsp,
+      label: "Gleam LSP",
+      description: "Language server for Gleam (built into gleam binary)",
+      provides: ["gleam"],
+      method: :github_release,
+      package: "gleam-lang/gleam",
+      homepage: "https://gleam.run",
+      category: :lsp_server,
+      languages: [:gleam]
+    },
+    %Recipe{
+      name: :haskell_language_server,
+      label: "Haskell Language Server",
+      description: "Language server for Haskell",
+      provides: ["haskell-language-server-wrapper"],
+      method: :github_release,
+      package: "haskell/haskell-language-server",
+      homepage: "https://github.com/haskell/haskell-language-server",
+      category: :lsp_server,
+      languages: [:haskell]
+    },
+    %Recipe{
+      name: :metals,
+      label: "Metals",
+      description: "Language server for Scala powered by the compiler",
+      provides: ["metals"],
+      method: :github_release,
+      package: "scalameta/metals",
+      homepage: "https://scalameta.org/metals",
+      category: :lsp_server,
+      languages: [:scala]
+    },
+    %Recipe{
+      name: :ocamllsp,
+      label: "OCaml LSP",
+      description: "Language server for OCaml",
+      provides: ["ocamllsp"],
+      method: :npm,
+      package: "ocaml-lsp-server",
+      homepage: "https://github.com/ocaml/ocaml-lsp",
+      category: :lsp_server,
+      languages: [:ocaml]
+    },
+    %Recipe{
+      name: nil,
+      label: "nil",
+      description: "Language server for Nix",
+      provides: ["nil"],
+      method: :github_release,
+      package: "oxalica/nil",
+      homepage: "https://github.com/oxalica/nil",
+      category: :lsp_server,
+      languages: [:nix]
+    },
+    %Recipe{
+      name: :terraform_ls,
+      label: "Terraform Language Server",
+      description: "Language server for Terraform and HCL",
+      provides: ["terraform-ls"],
+      method: :github_release,
+      package: "hashicorp/terraform-ls",
+      homepage: "https://github.com/hashicorp/terraform-ls",
+      category: :lsp_server,
+      languages: [:hcl]
     }
   ]
 
