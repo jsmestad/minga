@@ -28,6 +28,7 @@ defmodule MingaAgent.Session do
   alias MingaAgent.Hooks.Dispatcher, as: HookDispatcher
   alias MingaAgent.Hooks.SessionEndPayload
   alias MingaAgent.Hooks.SessionStartPayload
+  alias MingaAgent.Hooks.NotificationPayload
   alias MingaAgent.Hooks.Result, as: HookResult
   alias MingaAgent.Hooks.StopPayload
   alias MingaAgent.Hooks.UserPromptSubmitPayload
@@ -1269,11 +1270,13 @@ defmodule MingaAgent.Session do
   defp completion_notification(_state), do: "Agent finished"
 
   @spec notify(state(), atom(), String.t()) :: :ok
-  defp notify(%{notifier: {module, arg}}, trigger, message) when is_atom(module) do
+  defp notify(%{notifier: {module, arg}} = state, trigger, message) when is_atom(module) do
+    dispatch_notification(state, trigger, message)
     module.notify(trigger, message, arg)
   end
 
-  defp notify(%{notifier: module}, trigger, message) when is_atom(module) do
+  defp notify(%{notifier: module} = state, trigger, message) when is_atom(module) do
+    dispatch_notification(state, trigger, message)
     module.notify(trigger, message)
   end
 
@@ -1909,6 +1912,16 @@ defmodule MingaAgent.Session do
     last_message = extract_last_assistant_text(state.messages)
     payload = StopPayload.new(state.session_id, :end_turn, last_message)
     HookDispatcher.stop(AgentConfig.resolve().agent_hooks, StopPayload.to_map(payload))
+  rescue
+    _ -> :ok
+  catch
+    _, _ -> :ok
+  end
+
+  @spec dispatch_notification(state(), atom(), String.t()) :: :ok
+  defp dispatch_notification(state, trigger, message) do
+    payload = NotificationPayload.new(state.session_id, trigger, message)
+    HookDispatcher.notification(AgentConfig.resolve().agent_hooks, NotificationPayload.to_map(payload))
   rescue
     _ -> :ok
   catch

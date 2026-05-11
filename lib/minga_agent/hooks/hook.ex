@@ -20,6 +20,8 @@ defmodule MingaAgent.Hooks.Hook do
           | :session_end
           | :stop
           | :user_prompt_submit
+          | :pre_compact
+          | :notification
 
   @typedoc "Normalized hook declaration."
   @type t :: %__MODULE__{
@@ -88,6 +90,8 @@ defmodule MingaAgent.Hooks.Hook do
   def event_label(:session_end), do: "SessionEnd"
   def event_label(:stop), do: "Stop"
   def event_label(:user_prompt_submit), do: "UserPromptSubmit"
+  def event_label(:pre_compact), do: "PreCompact"
+  def event_label(:notification), do: "Notification"
 
   @spec map_from_list(list()) :: {:ok, map()} | :error
   defp map_from_list(raw) do
@@ -122,6 +126,14 @@ defmodule MingaAgent.Hooks.Hook do
   defp normalize_event(:UserPromptSubmit), do: {:ok, :user_prompt_submit}
   defp normalize_event("UserPromptSubmit"), do: {:ok, :user_prompt_submit}
   defp normalize_event("user_prompt_submit"), do: {:ok, :user_prompt_submit}
+  defp normalize_event(:pre_compact), do: {:ok, :pre_compact}
+  defp normalize_event(:PreCompact), do: {:ok, :pre_compact}
+  defp normalize_event("PreCompact"), do: {:ok, :pre_compact}
+  defp normalize_event("pre_compact"), do: {:ok, :pre_compact}
+  defp normalize_event(:notification), do: {:ok, :notification}
+  defp normalize_event(:Notification), do: {:ok, :notification}
+  defp normalize_event("Notification"), do: {:ok, :notification}
+  defp normalize_event("notification"), do: {:ok, :notification}
   defp normalize_event(other), do: {:error, "unsupported agent hook event: #{inspect(other)}"}
 
   @spec normalize_tool_pattern(map(), event()) :: {:ok, String.t() | nil} | {:error, String.t()}

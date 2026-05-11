@@ -105,6 +105,23 @@ defmodule MingaAgent.Hooks.Dispatcher do
     dispatch(:user_prompt_submit, hooks, payload_map, Keyword.put(opts, :veto_capable, true))
   end
 
+  @doc "Runs all matching `PreCompact` hooks (veto-capable)."
+  @spec pre_compact([Hook.t()], map()) :: :ok | {:error, Result.t()}
+  @spec pre_compact([Hook.t()], map(), keyword()) :: :ok | {:error, Result.t()}
+  def pre_compact(hooks, payload_map, opts \\ [])
+      when is_list(hooks) and is_map(payload_map) do
+    dispatch(:pre_compact, hooks, payload_map, Keyword.put(opts, :veto_capable, true))
+  end
+
+  @doc "Runs all matching `Notification` hooks (notification-only)."
+  @spec notification([Hook.t()], map()) :: :ok
+  @spec notification([Hook.t()], map(), keyword()) :: :ok
+  def notification(hooks, payload_map, opts \\ [])
+      when is_list(hooks) and is_map(payload_map) do
+    dispatch(:notification, hooks, payload_map, Keyword.put(opts, :veto_capable, false))
+    :ok
+  end
+
   @spec run_matching_hooks([Hook.t()], Hook.event(), map(), runner(), boolean()) ::
           :ok | {:error, Result.t()}
   defp run_matching_hooks([], _event, _payload_map, _runner, _veto_capable), do: :ok

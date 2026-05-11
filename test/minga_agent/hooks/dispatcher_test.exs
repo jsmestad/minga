@@ -322,6 +322,62 @@ defmodule MingaAgent.Hooks.DispatcherTest do
     assert_receive :ups_ran
   end
 
+  # ── PreCompact ──────────────────────────────────────────────────────────────
+
+  test "PreCompact hooks can veto compaction" do
+    hook = session_hook(:pre_compact)
+
+    runner = fn received_hook, _payload_map ->
+      Result.veto(received_hook, "preserve context", {:exit, 1})
+    end
+
+    payload = %{"event" => "PreCompact", "message_count" => 50}
+
+    assert {:error, %Result{status: :veto}} =
+             Dispatcher.pre_compact([hook], payload, runner: runner)
+  end
+
+  test "PreCompact hooks proceed when allowed" do
+    test_pid = self()
+    hook = session_hook(:pre_compact)
+
+    runner = fn received_hook, _payload_map ->
+      send(test_pid, :compact_allowed)
+      Result.allow(received_hook)
+    end
+
+    payload = %{"event" => "PreCompact", "message_count" => 10}
+    assert :ok = Dispatcher.pre_compact([hook], payload, runner: runner)
+    assert_receive :compact_allowed
+  end
+
+  # ── Notification ───────────────────────────────────────────────────────────
+
+  test "Notification hooks run and are notification-only" do
+    test_pid = self()
+    hook = session_hook(:notification)
+
+    runner = fn received_hook, _payload_map ->
+      send(test_pid, :notif_ran)
+      Result.allow(received_hook)
+    end
+
+    payload = %{"event" => "Notification", "session_id" => "s_n", "kind" => "complete", "message" => "done"}
+    assert :ok = Dispatcher.notification([hook], payload, runner: runner)
+    assert_receive :notif_ran
+  end
+
+  test "Notification veto is ignored" do
+    hook = session_hook(:notification)
+
+    runner = fn received_hook, _payload_map ->
+      Result.veto(received_hook, "blocked", {:exit, 1})
+    end
+
+    payload = %{"event" => "Notification", "session_id" => "s_n2", "kind" => "error", "message" => "fail"}
+    assert :ok = Dispatcher.notification([hook], payload, runner: runner)
+  end
+
   # ── Normalization ──────────────────────────────────────────────────────────
 
   test "Session hooks do not require tool_pattern" do
