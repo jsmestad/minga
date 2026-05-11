@@ -157,6 +157,7 @@ defmodule MingaAgent.Tools.MultiEditFile do
     if final_content != original_content do
       case File.write(path, final_content) do
         :ok ->
+          broadcast_file_written(path)
           {:ok, format_report(path, results, succeeded, failed, total)}
 
         {:error, reason} ->
@@ -195,5 +196,13 @@ defmodule MingaAgent.Tools.MultiEditFile do
     else
       summary <> "\n" <> details
     end
+  end
+
+  @spec broadcast_file_written(String.t()) :: :ok
+  defp broadcast_file_written(path) do
+    Minga.Events.broadcast(:file_written, %Minga.Events.FileWrittenEvent{
+      path: Path.expand(path),
+      change_type: :changed
+    })
   end
 end

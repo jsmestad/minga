@@ -237,6 +237,12 @@ defmodule Minga.FileWatcher do
 
   defp notify_subscriber(pid, path) do
     send(pid, {:file_changed_on_disk, path})
+
+    Minga.Events.broadcast(:file_written, %Minga.Events.FileWrittenEvent{
+      path: path,
+      change_type: :changed
+    })
+
     :ok
   end
 
