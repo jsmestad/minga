@@ -94,6 +94,8 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       assert_opcode(expected, "tool_update", 0x13)
       assert_opcode(expected, "tool_dismiss", 0x14)
       assert_opcode(expected, "agent_tool_toggle", 0x15)
+      assert_opcode(expected, "system_will_sleep", 0x34)
+      assert_opcode(expected, "system_did_wake", 0x35)
     end
   end
 

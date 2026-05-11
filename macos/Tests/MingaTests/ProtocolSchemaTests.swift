@@ -133,6 +133,8 @@ struct ProtocolSchemaSwiftTests {
         #expect(try schemaHex(actions, "tool_uninstall") == GUI_ACTION_TOOL_UNINSTALL)
         #expect(try schemaHex(actions, "tool_update") == GUI_ACTION_TOOL_UPDATE)
         #expect(try schemaHex(actions, "tool_dismiss") == GUI_ACTION_TOOL_DISMISS)
+        #expect(try schemaHex(actions, "system_will_sleep") == GUI_ACTION_SYSTEM_WILL_SLEEP)
+        #expect(try schemaHex(actions, "system_did_wake") == GUI_ACTION_SYSTEM_DID_WAKE)
     }
 
     @Test("GUI window content opcode matches schema")

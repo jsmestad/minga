@@ -741,6 +741,8 @@ opcode(1) + action_type(1) + payload...
 | 0x1D | git_commit | msg_len(2) + msg(msg_len) | Commit with message |
 | 0x1E | git_open_file | path_len(2) + path(path_len) | Open file in editor |
 | 0x2F | scroll_to_line | line(4) | Scroll viewport to target line (from scroll indicator click/drag) |
+| 0x34 | system_will_sleep | (empty) | System is about to sleep |
+| 0x35 | system_did_wake | (empty) | System woke and BEAM should refresh external state |
 
 ## Theme Color Slots
 

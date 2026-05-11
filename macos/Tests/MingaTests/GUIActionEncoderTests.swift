@@ -43,6 +43,24 @@ struct GUIActionEncoderTests {
         #expect(spy.guiActions == [.newTab])
     }
 
+    @Test("sendSystemWillSleep records action")
+    func systemWillSleep() {
+        let spy = SpyEncoder()
+        let encoder: InputEncoder = spy
+        encoder.sendSystemWillSleep()
+
+        #expect(spy.guiActions == [.systemWillSleep])
+    }
+
+    @Test("sendSystemDidWake records action")
+    func systemDidWake() {
+        let spy = SpyEncoder()
+        let encoder: InputEncoder = spy
+        encoder.sendSystemDidWake()
+
+        #expect(spy.guiActions == [.systemDidWake])
+    }
+
     @Test("sendFileTreeClick records index")
     func fileTreeClick() {
         let spy = SpyEncoder()

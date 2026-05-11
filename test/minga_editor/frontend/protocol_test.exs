@@ -928,6 +928,16 @@ defmodule MingaEditor.Frontend.ProtocolTest do
       assert {:ok, {:gui_action, :new_tab}} = Protocol.decode_event(payload)
     end
 
+    test "system_will_sleep with no payload" do
+      payload = <<0x07, 0x34>>
+      assert {:ok, {:gui_action, :system_will_sleep}} = Protocol.decode_event(payload)
+    end
+
+    test "system_did_wake with no payload" do
+      payload = <<0x07, 0x35>>
+      assert {:ok, {:gui_action, :system_did_wake}} = Protocol.decode_event(payload)
+    end
+
     test "file_tree_new_file with parent_index" do
       payload = <<0x07, 0x0D, 0x00, 0x05>>
       assert {:ok, {:gui_action, {:file_tree_new_file, 5}}} = Protocol.decode_event(payload)

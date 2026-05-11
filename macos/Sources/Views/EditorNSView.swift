@@ -47,6 +47,10 @@ final class EditorNSView: MTKView {
     /// setFrameSize so we send the actual window dimensions, not hardcoded defaults.
     private var readySent = false
 
+    /// Whether macOS has put the displays to sleep. BEAM state may keep changing,
+    /// but the Metal surface must not schedule GPU work until screens wake.
+    private var isScreenAsleep = false
+
     /// Last viewport top used for scroll indicator change detection.
     private var lastViewportTopForScroll: UInt32 = 0xFFFF_FFFF
 
@@ -169,6 +173,8 @@ final class EditorNSView: MTKView {
         blinkTask?.cancel()
         cursorBlinkVisible = true
 
+        guard !isScreenAsleep else { return }
+
         // Don't blink when Accessibility > Reduce Motion is on.
         guard !SystemBlinkTiming.blinkingDisabled else { return }
 
@@ -196,6 +202,21 @@ final class EditorNSView: MTKView {
     func stopCursorBlink() {
         blinkTask?.cancel()
         cursorBlinkVisible = true
+        guard !isScreenAsleep else { return }
+        needsDisplay = true
+    }
+
+    /// Pauses Metal rendering and cursor blinking while the screens are asleep.
+    func pauseForScreenSleep() {
+        isScreenAsleep = true
+        blinkTask?.cancel()
+        cursorBlinkVisible = true
+    }
+
+    /// Resumes Metal rendering after screen wake and forces one fresh frame.
+    func resumeAfterScreenWake() {
+        isScreenAsleep = false
+        resetCursorBlink()
         needsDisplay = true
     }
 
@@ -225,6 +246,7 @@ final class EditorNSView: MTKView {
     /// Schedule a render on the next vsync. Multiple calls between vsyncs
     /// are coalesced by MTKView into a single draw() call.
     func renderFrame() {
+        guard !isScreenAsleep else { return }
         needsDisplay = true
     }
 
@@ -234,6 +256,7 @@ final class EditorNSView: MTKView {
 
     /// Called by MTKView's display link at vsync when needsDisplay is true.
     override func draw(_ dirtyRect: NSRect) {
+        guard !isScreenAsleep else { return }
         guard let drawable = currentDrawable else { return }
         let scale = Float(window?.backingScaleFactor ?? 2.0)
 

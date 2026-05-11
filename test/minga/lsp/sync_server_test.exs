@@ -13,6 +13,43 @@ defmodule Minga.LSP.SyncServerTest do
     end
   end
 
+  describe "resync_buffers/1" do
+    test "clears stale clients, monitors, timers, and deltas before reopening" do
+      buf =
+        start_supervised!({BufferServer, content: "hello", file_path: "/tmp/resync.txt"})
+
+      client = spawn(fn -> receive do: (_ -> :ok) end)
+      timer = Process.send_after(self(), :unused_sync_timer, 60_000)
+      on_exit(fn -> Process.cancel_timer(timer) end)
+      on_exit(fn -> Process.exit(client, :kill) end)
+
+      :ets.insert(SyncServer.Registry, {buf, [client]})
+
+      :sys.replace_state(SyncServer, fn state ->
+        ref = Process.monitor(client)
+
+        %{
+          state
+          | client_monitors: Map.put(state.client_monitors, ref, {buf, client}),
+            debounce_timers: Map.put(state.debounce_timers, buf, timer),
+            delta_accumulators: Map.put(state.delta_accumulators, buf, :full_sync)
+        }
+      end)
+
+      SyncServer.resync_buffers([buf])
+
+      state = :sys.get_state(SyncServer)
+      assert SyncServer.clients_for_buffer(buf) == []
+
+      refute Enum.any?(state.client_monitors, fn {_ref, {buffer_pid, _client_pid}} ->
+               buffer_pid == buf
+             end)
+
+      refute Map.has_key?(state.debounce_timers, buf)
+      refute Map.has_key?(state.delta_accumulators, buf)
+    end
+  end
+
   describe "event bus integration" do
     test "buffer_opened for non-file buffer is a no-op" do
       buf = start_supervised!({BufferServer, content: "scratch"})

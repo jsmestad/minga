@@ -179,6 +179,23 @@ defmodule Minga.LSP.Supervisor do
     end
   end
 
+  @doc """
+  Restarts every running LSP client managed by this supervisor.
+
+  The client keys are captured before any process is stopped, so restarting one
+  client cannot hide the remaining clients from the sweep.
+  """
+  @spec restart_all_clients(GenServer.server()) :: [
+          {{atom(), String.t()}, {:ok, pid()} | {:error, term()}}
+        ]
+  def restart_all_clients(supervisor \\ __MODULE__) do
+    supervisor
+    |> all_clients()
+    |> Enum.flat_map(&client_key/1)
+    |> Enum.uniq()
+    |> Enum.map(fn key -> {key, restart_client(supervisor, key)} end)
+  end
+
   # ── Supervisor Callbacks ───────────────────────────────────────────────────
 
   @impl true
@@ -188,6 +205,15 @@ defmodule Minga.LSP.Supervisor do
   end
 
   # ── Private ────────────────────────────────────────────────────────────────
+
+  @spec client_key(pid()) :: [{atom(), String.t()}]
+  defp client_key(pid) do
+    server_name = Client.server_name(pid)
+    root_path = GenServer.call(pid, :root_path)
+    [{server_name, root_path}]
+  catch
+    :exit, _ -> []
+  end
 
   @spec start_client(
           GenServer.server(),

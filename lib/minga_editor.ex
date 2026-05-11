@@ -18,7 +18,9 @@ defmodule MingaEditor do
   alias Minga.Buffer
   alias Minga.Config
   alias Minga.Editing.Completion
+  alias Minga.FileWatcher
   alias Minga.Git
+  alias Minga.LSP.Supervisor, as: LspSupervisor
 
   alias Minga.Diagnostics.Decorations, as: DiagDecorations
   alias Minga.Session
@@ -1715,6 +1717,24 @@ defmodule MingaEditor do
   # Route gui_actions through the active Shell first. Shells that handle
   # the action return updated state; unhandled actions fall through to
   # the Traditional-specific handlers below.
+  defp handle_gui_action(state, :system_will_sleep) do
+    Minga.Log.info(:editor, "System will sleep")
+    state
+  end
+
+  defp handle_gui_action(state, :system_did_wake) do
+    Minga.Log.info(:editor, "System did wake; refreshing files, LSP, and git")
+    FileWatcher.check_all()
+    refresh_current_git_repo()
+    LspSupervisor.restart_all_clients()
+    LspSyncServer.resync_buffers(buffers_for_lsp_resync(state))
+
+    state
+    |> EditorState.invalidate_all_windows()
+    |> Layout.invalidate()
+    |> Renderer.render_or_async()
+  end
+
   defp handle_gui_action(%{shell: MingaEditor.Shell.Board} = state, action) do
     {shell_state, workspace} =
       MingaEditor.Shell.Board.handle_gui_action(state.shell_state, state.workspace, action)
@@ -2168,6 +2188,34 @@ defmodule MingaEditor do
       :not_git -> nil
     end
   end
+
+  @spec refresh_current_git_repo() :: :ok
+  defp refresh_current_git_repo do
+    case resolve_git_root() do
+      nil -> :ok
+      git_root -> refresh_git_repo(git_root)
+    end
+  end
+
+  @spec buffers_for_lsp_resync(state()) :: [pid()]
+  defp buffers_for_lsp_resync(state) do
+    active_buffers = Enum.filter(state.workspace.buffers.list, &is_pid/1)
+
+    tab_buffers =
+      case EditorState.tab_bar(state) do
+        %MingaEditor.State.TabBar{tabs: tabs} -> Enum.flat_map(tabs, &tab_buffer_list/1)
+        _ -> []
+      end
+
+    Enum.uniq(active_buffers ++ tab_buffers)
+  end
+
+  @spec tab_buffer_list(MingaEditor.State.Tab.t() | term()) :: [pid()]
+  defp tab_buffer_list(%MingaEditor.State.Tab{context: %{buffers: %Buffers{list: buffers}}}) do
+    Enum.filter(buffers, &is_pid/1)
+  end
+
+  defp tab_buffer_list(_tab), do: []
 
   @spec refresh_git_repo(String.t()) :: :ok
   defp refresh_git_repo(git_root) do
