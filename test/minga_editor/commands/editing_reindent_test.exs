@@ -12,16 +12,22 @@ defmodule MingaEditor.Commands.EditingReindentTest do
   alias MingaEditor
 
   defp start_editor(content) do
-    {:ok, buffer} = BufferServer.start_link(content: content)
+    id = :erlang.unique_integer([:positive])
+    events_registry = :"reindent_events_#{id}"
+    start_supervised!({Minga.Events, name: events_registry})
+
+    {:ok, buffer} = BufferServer.start_link(content: content, events_registry: events_registry)
 
     {:ok, editor} =
       MingaEditor.start_link(
-        name: :"reindent_editor_#{:erlang.unique_integer([:positive])}",
+        name: :"reindent_editor_#{id}",
         port_manager: nil,
         buffer: buffer,
         width: 80,
         height: 24,
-        editing_model: :vim
+        editing_model: :vim,
+        events_registry: events_registry,
+        suppress_tool_prompts: true
       )
 
     {editor, buffer}
@@ -122,6 +128,20 @@ defmodule MingaEditor.Commands.EditingReindentTest do
 
       state = :sys.get_state(editor)
       assert state.workspace.editing.mode == :normal
+    end
+
+    test "default bus tool prompts cannot interrupt reindent dispatch" do
+      {editor, _buffer} = start_editor("hello world")
+      state = :sys.get_state(editor)
+
+      refute editor in Minga.Events.subscribers(:tool_missing)
+      assert editor in Minga.Events.subscribers(:tool_missing, state.events_registry)
+
+      Minga.Events.broadcast(:tool_missing, %Minga.Events.ToolMissingEvent{command: "rg"})
+      state = :sys.get_state(editor)
+
+      assert state.workspace.editing.mode == :normal
+      assert state.shell_state.tool_prompt_queue == []
     end
   end
 
