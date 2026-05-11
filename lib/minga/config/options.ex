@@ -26,6 +26,7 @@ defmodule Minga.Config.Options do
   | `:trim_trailing_whitespace` | boolean                             | `false`    |
   | `:insert_final_newline`     | boolean                             | `false`    |
   | `:format_on_save`           | boolean                             | `false`    |
+  | `:auto_save_delay_ms`       | non-negative integer (0 disables)   | `1000`     |
   | `:formatter`    | string or `nil`                                  | `nil`      |
   | `:title_format` | string with `{placeholder}` tokens               | `"{filename} {dirty}({directory}) - Minga"` |
   | `:recent_files_limit` | positive integer                            | `200`      |
@@ -97,6 +98,7 @@ defmodule Minga.Config.Options do
           | :trim_trailing_whitespace
           | :insert_final_newline
           | :format_on_save
+          | :auto_save_delay_ms
           | :formatter
           | :title_format
           | :recent_files_limit
@@ -229,6 +231,7 @@ defmodule Minga.Config.Options do
     {:trim_trailing_whitespace, :boolean, false},
     {:insert_final_newline, :boolean, false},
     {:format_on_save, :boolean, false},
+    {:auto_save_delay_ms, :non_neg_integer, 1000},
     {:formatter, :string_or_nil, nil},
     {:title_format, :string, "{filename} {dirty}({directory}) - Minga"},
     {:recent_files_limit, :pos_integer, 200},

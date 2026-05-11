@@ -41,6 +41,7 @@ defmodule Minga.Config.OptionsTest do
                trim_trailing_whitespace: false,
                insert_final_newline: false,
                format_on_save: false,
+               auto_save_delay_ms: 1000,
                formatter: nil,
                title_format: "{filename} {dirty}({directory}) - Minga",
                recent_files_limit: 200,
@@ -142,6 +143,14 @@ defmodule Minga.Config.OptionsTest do
       assert Options.get(s, :scroll_margin) == 0
     end
 
+    test "set and get auto_save_delay_ms", %{server: s} do
+      assert Options.get(s, :auto_save_delay_ms) == 1000
+      assert {:ok, 0} = Options.set(s, :auto_save_delay_ms, 0)
+      assert Options.get(s, :auto_save_delay_ms) == 0
+      assert {:ok, 250} = Options.set(s, :auto_save_delay_ms, 250)
+      assert Options.get(s, :auto_save_delay_ms) == 250
+    end
+
     test "set and get startup_view", %{server: s} do
       assert Options.get(s, :startup_view) == :agent
       assert {:ok, :editor} = Options.set(s, :startup_view, :editor)
@@ -194,6 +203,10 @@ defmodule Minga.Config.OptionsTest do
 
     test "scroll_margin rejects negative", %{server: s} do
       assert {:error, _} = Options.set(s, :scroll_margin, -1)
+    end
+
+    test "auto_save_delay_ms rejects negative", %{server: s} do
+      assert {:error, _} = Options.set(s, :auto_save_delay_ms, -1)
     end
 
     test "unknown option returns error", %{server: s} do

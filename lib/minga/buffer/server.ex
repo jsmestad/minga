@@ -1435,7 +1435,7 @@ defmodule Minga.Buffer.Server do
             explicit_options: MapSet.put(state.explicit_options, name)
         }
 
-        {:reply, {:ok, value}, new_state}
+        {:reply, {:ok, value}, apply_option_change(new_state, name)}
 
       {:error, _} = err ->
         {:reply, err, state}
@@ -1763,10 +1763,31 @@ defmodule Minga.Buffer.Server do
     {:noreply, %{state | swap_timer: nil}}
   end
 
+  def handle_info(
+        {:auto_save, token},
+        %{buffer_type: :file, file_path: path, dirty: true, auto_save_token: token} = state
+      )
+      when is_binary(path) do
+    if auto_save_enabled?(state) do
+      auto_save_file(state, path)
+    else
+      {:noreply, clear_auto_save_timer(state)}
+    end
+  end
+
+  def handle_info({:auto_save, token}, %{auto_save_token: token} = state) do
+    {:noreply, clear_auto_save_timer(state)}
+  end
+
+  def handle_info({:auto_save, _token}, state) do
+    {:noreply, state}
+  end
+
   @impl true
   @spec terminate(term(), state()) :: :ok
   def terminate(_reason, state) do
-    # Clean up swap file on orderly shutdown (buffer closed, editor quit).
+    # Clean up timers and swap files on orderly shutdown (buffer closed, editor quit).
+    state = cancel_auto_save_timer(state)
     delete_swap_file(state)
     :ok
   end
@@ -1971,6 +1992,7 @@ defmodule Minga.Buffer.Server do
     :trim_trailing_whitespace,
     :insert_final_newline,
     :format_on_save,
+    :auto_save_delay_ms,
     :formatter,
     :line_numbers
   ]
@@ -2003,7 +2025,8 @@ defmodule Minga.Buffer.Server do
   # Different mtime OR different size = changed.
   @spec file_changed_on_disk?(BufState.t(), integer() | nil, non_neg_integer() | nil) ::
           boolean()
-  defp file_changed_on_disk?(%{mtime: nil}, _disk_mtime, _disk_size), do: false
+  defp file_changed_on_disk?(%{mtime: nil}, nil, _disk_size), do: false
+  defp file_changed_on_disk?(%{mtime: nil}, _disk_mtime, _disk_size), do: true
   defp file_changed_on_disk?(_state, nil, _disk_size), do: false
 
   defp file_changed_on_disk?(state, disk_mtime, disk_size) do
@@ -2045,17 +2068,27 @@ defmodule Minga.Buffer.Server do
   @spec mark_dirty(state()) :: state()
   defp mark_dirty(state) do
     state = BufState.mark_dirty(state)
-    schedule_swap_write(state)
+    state = schedule_swap_write(state)
+    schedule_auto_save(state)
   end
 
   @spec sync_dirty(state()) :: state()
-  defp sync_dirty(state), do: BufState.sync_dirty(state)
+  defp sync_dirty(state) do
+    state = BufState.sync_dirty(state)
+
+    if state.dirty do
+      schedule_auto_save(state)
+    else
+      cancel_auto_save_timer(state)
+    end
+  end
 
   @spec mark_saved(state()) :: state()
   defp mark_saved(state) do
     state = BufState.mark_saved(state)
     :ok = delete_swap_file(state)
-    cancel_swap_timer(state)
+    state = cancel_swap_timer(state)
+    cancel_auto_save_timer(state)
   end
 
   # Schedule a debounced swap file write. Cancels any pending timer
@@ -2076,6 +2109,93 @@ defmodule Minga.Buffer.Server do
   defp cancel_swap_timer(%{swap_timer: ref} = state) when is_reference(ref) do
     Process.cancel_timer(ref)
     %{state | swap_timer: nil}
+  end
+
+  @spec apply_option_change(state(), atom()) :: state()
+  defp apply_option_change(%{dirty: true} = state, :auto_save_delay_ms),
+    do: schedule_auto_save(state)
+
+  defp apply_option_change(state, :auto_save_delay_ms), do: cancel_auto_save_timer(state)
+  defp apply_option_change(state, _name), do: state
+
+  @spec auto_save_file(state(), String.t()) :: {:noreply, state()}
+  defp auto_save_file(state, path) do
+    {disk_mtime, disk_size} = file_stat_info(path)
+
+    if file_changed_on_disk?(state, disk_mtime, disk_size) do
+      {:noreply, clear_auto_save_timer(state)}
+    else
+      write_auto_save_file(state, path)
+    end
+  end
+
+  @spec write_auto_save_file(state(), String.t()) :: {:noreply, state()}
+  defp write_auto_save_file(state, path) do
+    content = Document.content(state.document)
+
+    case write_file(path, content) do
+      :ok ->
+        {new_mtime, new_size} = file_stat_info(path)
+        Minga.Log.info(:editor, "Auto-saved: #{Path.basename(path)}")
+        {:noreply, mark_saved(%{state | mtime: new_mtime, file_size: new_size})}
+
+      {:error, reason} ->
+        Minga.Log.warning(
+          :editor,
+          "Failed to auto-save #{Path.basename(path)}: #{inspect(reason)}"
+        )
+
+        {:noreply, clear_auto_save_timer(state)}
+    end
+  end
+
+  @spec auto_save_enabled?(state()) :: boolean()
+  defp auto_save_enabled?(state) do
+    case resolve_option(state, :auto_save_delay_ms) do
+      delay when is_integer(delay) and delay > 0 -> true
+      _ -> false
+    end
+  end
+
+  # Schedule a debounced auto-save. A value of 0 disables auto-save.
+  @spec schedule_auto_save(state()) :: state()
+  defp schedule_auto_save(%{buffer_type: :file, file_path: path} = state) when is_binary(path) do
+    delay_ms = resolve_option(state, :auto_save_delay_ms)
+
+    case delay_ms do
+      delay when is_integer(delay) and delay > 0 ->
+        state = cancel_auto_save_timer(state)
+        token = make_ref()
+        timer = Process.send_after(self(), {:auto_save, token}, delay)
+        %{state | auto_save_timer: timer, auto_save_token: token}
+
+      _ ->
+        cancel_auto_save_timer(state)
+    end
+  end
+
+  defp schedule_auto_save(state), do: state
+
+  @spec cancel_auto_save_timer(state()) :: state()
+  defp cancel_auto_save_timer(%{auto_save_timer: nil} = state), do: clear_auto_save_timer(state)
+
+  defp cancel_auto_save_timer(%{auto_save_timer: timer, auto_save_token: token} = state)
+       when is_reference(timer) and is_reference(token) do
+    Process.cancel_timer(timer)
+    flush_auto_save_message(token)
+    clear_auto_save_timer(state)
+  end
+
+  @spec clear_auto_save_timer(state()) :: state()
+  defp clear_auto_save_timer(state), do: %{state | auto_save_timer: nil, auto_save_token: nil}
+
+  @spec flush_auto_save_message(reference()) :: :ok
+  defp flush_auto_save_message(token) do
+    receive do
+      {:auto_save, ^token} -> :ok
+    after
+      0 -> :ok
+    end
   end
 
   @spec delete_swap_file(state()) :: :ok

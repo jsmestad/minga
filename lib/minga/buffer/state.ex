@@ -61,6 +61,8 @@ defmodule Minga.Buffer.State do
             options: %{},
             explicit_options: MapSet.new(),
             swap_timer: nil,
+            auto_save_timer: nil,
+            auto_save_token: nil,
             swap_dir: nil,
             events_registry: Minga.Events.default_registry()
 
@@ -90,6 +92,8 @@ defmodule Minga.Buffer.State do
           options: %{atom() => term()},
           explicit_options: MapSet.t(atom()),
           swap_timer: reference() | nil,
+          auto_save_timer: reference() | nil,
+          auto_save_token: reference() | nil,
           swap_dir: String.t() | nil,
           events_registry: Minga.Events.registry()
         }
