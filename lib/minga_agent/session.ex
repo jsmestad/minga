@@ -1503,7 +1503,11 @@ defmodule MingaAgent.Session do
     end
   catch
     :exit, reason ->
-      Minga.Log.warning(:agent, "[Session] provider unreachable for subagent context: #{inspect(reason)}")
+      Minga.Log.warning(
+        :agent,
+        "[Session] provider unreachable for subagent context: #{inspect(reason)}"
+      )
+
       %{}
   end
 
