@@ -66,6 +66,16 @@ defmodule Minga.Command.ParserTest do
     end
   end
 
+  describe "parse/1 — range prefixes" do
+    test "% for whole buffer still works with %s" do
+      assert {:substitute, "old", "new", []} = Parser.parse("%s/old/new/")
+    end
+
+    test "single number is treated as goto_line, not a range" do
+      assert {:goto_line, 42} = Parser.parse("42")
+    end
+  end
+
   describe "parse/1 — buffer navigation commands" do
     test ":buffers parses to {:buffers, []}" do
       assert {:buffers, []} = Parser.parse("buffers")

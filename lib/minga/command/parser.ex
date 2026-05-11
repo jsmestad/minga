@@ -102,6 +102,37 @@ defmodule Minga.Command.Parser do
   @typedoc "Flags for :%s substitution."
   @type substitute_flag :: :global | :confirm
 
+  @spec parse_range(String.t()) :: {range() | :no_range, String.t()}
+  defp parse_range(input) do
+    case input do
+      "%" <> rest -> {:whole_buffer, rest}
+      "." <> rest -> {:current_line, rest}
+      "$" <> rest -> {:last_line, rest}
+      "'<,'>'" <> rest -> {:visual, rest}
+      input -> parse_numeric_range(input)
+    end
+  end
+
+  @spec parse_numeric_range(String.t()) :: {range() | :no_range, String.t()}
+  defp parse_numeric_range(input) do
+    case Integer.parse(input) do
+      {start, "," <> rest} ->
+        case Integer.parse(rest) do
+          {end_line, rest} when end_line > 0 and start > 0 ->
+            {{:absolute, start, end_line}, rest}
+
+          _ ->
+            {:no_range, input}
+        end
+
+      {line, rest} when line > 0 ->
+        {{:absolute, line, line}, rest}
+
+      _ ->
+        {:no_range, input}
+    end
+  end
+
   @doc """
   Parses a command-line string (without the leading `:`) and returns a
   `t:parsed/0` value.
@@ -132,7 +163,29 @@ defmodule Minga.Command.Parser do
   @spec parse(String.t()) :: parsed()
   def parse(input) when is_binary(input) do
     trimmed = String.trim(input)
-    do_parse(trimmed)
+    parse_with_range(trimmed)
+  end
+
+  @spec parse_with_range(String.t()) :: parsed()
+  defp parse_with_range(input) do
+    case parse_range(input) do
+      {:no_range, _} ->
+        do_parse(input)
+
+      {_range, rest} ->
+        parse_after_range(input, rest)
+    end
+  end
+
+  @spec parse_after_range(String.t(), String.t()) :: parsed()
+  defp parse_after_range(original, rest) do
+    trimmed_rest = String.trim_leading(rest)
+
+    if trimmed_rest == "" do
+      do_parse(original)
+    else
+      do_parse(trimmed_rest)
+    end
   end
 
   # ── Private helpers ──────────────────────────────────────────────────────────
