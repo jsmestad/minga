@@ -1,7 +1,7 @@
 defmodule MingaEditor.Renderer.Server do
   @moduledoc """
-  Standalone renderer GenServer. Owns the render pipeline so a slow
-  frame doesn't block input dispatch in the Editor process.
+  Standalone renderer GenServer. Owns the render pipeline and font registry
+  so a slow frame doesn't block input dispatch in the Editor process.
 
   ## Lifecycle
 
@@ -46,6 +46,7 @@ defmodule MingaEditor.Renderer.Server do
   alias Minga.Telemetry
   alias MingaEditor.RenderPipeline
   alias MingaEditor.RenderPipeline.Input
+  alias MingaEditor.UI.FontRegistry
 
   @typedoc "Render pipeline output after a frame has run."
   @type render_output :: Input.t()
@@ -68,13 +69,15 @@ defmodule MingaEditor.Renderer.Server do
           editor_pid: editor_ref(),
           rendering?: boolean(),
           pending: {Input.t(), non_neg_integer(), integer()} | nil,
-          in_flight: {Input.t(), non_neg_integer(), integer()} | nil
+          in_flight: {Input.t(), non_neg_integer(), integer()} | nil,
+          font_registry: FontRegistry.t()
         }
 
   defstruct editor_pid: nil,
             rendering?: false,
             pending: nil,
-            in_flight: nil
+            in_flight: nil,
+            font_registry: FontRegistry.new()
 
   # ── API ────────────────────────────────────────────────────────────────────
 
@@ -135,7 +138,7 @@ defmodule MingaEditor.Renderer.Server do
       Telemetry.span(
         [:minga, :render, :pipeline],
         %{frame_seq: seq},
-        fn -> RenderPipeline.run(snap) end
+        fn -> snap |> Input.with_font_registry(state.font_registry) |> RenderPipeline.run() end
       )
 
     emit_complete_at = monotonic_now()
@@ -146,6 +149,7 @@ defmodule MingaEditor.Renderer.Server do
       %{frame_seq: seq}
     )
 
+    state = %{state | font_registry: output.font_registry}
     send_writeback(state.editor_pid, output, seq)
     advance_pending(state)
   rescue

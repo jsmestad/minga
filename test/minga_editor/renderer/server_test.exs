@@ -17,6 +17,7 @@ defmodule MingaEditor.Renderer.ServerTest do
   alias MingaEditor.Renderer.Server, as: RendererServer
   alias MingaEditor.Shell.Board
   alias MingaEditor.Shell.Board.State, as: BoardState
+  alias MingaEditor.UI.FontRegistry
   alias MingaEditor.Viewport
 
   describe "snapshot coalescing (in-flight → pending replacement)" do
@@ -103,6 +104,25 @@ defmodule MingaEditor.Renderer.ServerTest do
   end
 
   describe "successful async render" do
+    test "renderer owns font registry outside editor state" do
+      renderer = start_renderer(self())
+      state = build_editor_state(:tui, nil)
+      snapshot = Input.from_editor_state(state)
+
+      {_id, registry, true} = FontRegistry.get_or_register(FontRegistry.new(), "Fira Code")
+
+      :sys.replace_state(renderer, fn server_state ->
+        %{server_state | font_registry: registry}
+      end)
+
+      RendererServer.cast_snapshot(renderer, snapshot, 124)
+
+      assert_receive {:render_done, %{frame_seq: 124}}
+      server_state = drain_renderer_until_idle(renderer)
+      assert FontRegistry.lookup(server_state.font_registry, "Fira Code") == 1
+      refute Map.has_key?(Map.from_struct(state), :font_registry)
+    end
+
     test "sends render_done writeback and emits a frame" do
       renderer = start_renderer(self())
       state = build_editor_state(:tui, nil)

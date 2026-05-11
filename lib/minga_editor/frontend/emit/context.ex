@@ -2,9 +2,9 @@ defmodule MingaEditor.Frontend.Emit.Context do
   @moduledoc """
   Focused data contract for the emit pipeline.
 
-  Contains exactly what the emit stage needs from the editor state,
-  decoupling it from `MingaEditor.State.t()`. The Editor builds this context
-  in the render pipeline's Emit stage before calling `Emit.emit/3`.
+  Contains exactly what the emit stage needs from the render pipeline input,
+  decoupling it from `MingaEditor.State.t()`. The pipeline builds this context
+  in the Emit stage before calling `Emit.emit/4`.
   """
 
   alias MingaEditor.Agent.UIState
@@ -64,7 +64,7 @@ defmodule MingaEditor.Frontend.Emit.Context do
             title: "Minga",
             status_bar_data: nil
 
-  @doc "Builds an emit context from the full editor state."
+  @doc "Builds an emit context from render pipeline input."
   @spec from_editor_state(map()) :: t()
   def from_editor_state(state) do
     title = compute_title(state)
@@ -73,7 +73,7 @@ defmodule MingaEditor.Frontend.Emit.Context do
       port_manager: state.port_manager,
       capabilities: state.capabilities,
       theme: state.theme,
-      font_registry: state.font_registry,
+      font_registry: Map.get(state, :font_registry, FontRegistry.new()),
       windows: state.workspace.windows,
       layout: MingaEditor.Layout.get(state),
       shell: state.shell,

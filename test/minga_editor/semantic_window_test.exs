@@ -21,6 +21,7 @@ defmodule MingaEditor.SemanticWindowTest do
   alias MingaEditor.SemanticWindow.Span
   alias MingaEditor.SemanticWindow.VisualRow
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.UI.FontRegistry
   alias Minga.Buffer.Server, as: BufferServer
   alias Minga.Core.Face
 
@@ -46,6 +47,25 @@ defmodule MingaEditor.SemanticWindowTest do
       |> Enum.sort_by(fn {col, _text, _style} -> col end)
       |> Enum.map_join(fn {_col, text, _style} -> text end)
     end)
+  end
+
+  # ── Font registry ─────────────────────────────────────────────────────
+
+  describe "font registry" do
+    test "semantic spans allocate font ids through the render-local registry" do
+      face = %Face{name: "semantic-font", fg: 0xFFFFFF, bg: 0x000000, font_family: "Fira Code"}
+
+      span =
+        FontRegistry.with_process_registry(FontRegistry.new(), fn ->
+          span = Span.from_face(face, 0, 5)
+          registry = FontRegistry.process_registry()
+          assert FontRegistry.pending_registrations(registry) == [{1, "Fira Code"}]
+          span
+        end)
+
+      assert span.font_id == 1
+      assert FontRegistry.process_registry() == nil
+    end
   end
 
   # ── GUI vs TUI gating ─────────────────────────────────────────────────

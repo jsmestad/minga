@@ -37,6 +37,7 @@ defmodule MingaEditor.RenderPipeline do
   alias MingaEditor.RenderPipeline.Scroll
   alias MingaEditor.WindowTree
   alias MingaEditor.Frontend.Emit
+  alias MingaEditor.UI.FontRegistry
   alias Minga.Telemetry
 
   # The Invalidation type lives in its own module
@@ -59,6 +60,13 @@ defmodule MingaEditor.RenderPipeline do
   """
   @spec run(input()) :: input()
   def run(input) do
+    FontRegistry.with_process_registry(input.font_registry, fn ->
+      run_stages(input)
+    end)
+  end
+
+  @spec run_stages(input()) :: input()
+  defp run_stages(input) do
     window_count = window_count(input)
 
     Telemetry.span([:minga, :render, :pipeline], %{window_count: window_count}, fn ->
@@ -158,9 +166,10 @@ defmodule MingaEditor.RenderPipeline do
 
     # Stage 7: Emit
     Telemetry.span([:minga, :render, :stage], %{stage: :emit}, fn ->
+      input = %{input | font_registry: FontRegistry.current_process_registry(input.font_registry)}
       ctx = MingaEditor.Frontend.Emit.Context.from_editor_state(input)
-      updated_caches = Emit.emit(frame, ctx, chrome, input.caches)
-      %{input | caches: updated_caches}
+      {updated_caches, updated_font_registry} = Emit.emit(frame, ctx, chrome, input.caches)
+      %{input | caches: updated_caches, font_registry: updated_font_registry}
     end)
   end
 
