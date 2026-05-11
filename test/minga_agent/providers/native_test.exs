@@ -1,10 +1,10 @@
 defmodule MingaAgent.Providers.NativeTest do
   use ExUnit.Case, async: true
 
+  alias MingaAgent.Config, as: AgentConfig
   alias MingaAgent.Event
   alias MingaAgent.Providers.Native
   alias MingaAgent.Tools
-  alias Minga.Config.Options
   alias ReqLLM.StreamResponse.MetadataHandle
 
   @moduletag :tmp_dir
@@ -51,12 +51,18 @@ defmodule MingaAgent.Providers.NativeTest do
     defaults = [
       subscriber: self(),
       model: "anthropic:claude-sonnet-4-20250514",
+      config: %AgentConfig{},
       project_root: opts[:tmp_dir] || System.tmp_dir!(),
-      tools: []
+      tools: [],
+      skip_api_key_env: true
     ]
 
     merged = Keyword.merge(defaults, opts)
     Native.start_link(merged)
+  end
+
+  defp agent_config(fields) do
+    struct!(AgentConfig, fields)
   end
 
   defp write_project_skill(dir, name, instructions) do
@@ -152,6 +158,47 @@ defmodule MingaAgent.Providers.NativeTest do
       assert {:ok, %{"level" => "high"}} = Native.cycle_thinking_level(pid)
       assert {:ok, %{"level" => "off"}} = Native.cycle_thinking_level(pid)
     end
+
+    test "send_prompt passes semantic reasoning_effort for each provider", %{tmp_dir: dir} do
+      cases = [
+        {"anthropic:claude-sonnet-4-20250514", "high", :high},
+        {"openai:o4-mini", "medium", :medium},
+        {"deepseek:deepseek-reasoner", "low", :low},
+        {"openai:o3-mini", "off", nil}
+      ]
+
+      Enum.each(cases, fn {model, thinking_level, expected_effort} ->
+        test_pid = self()
+        ref = make_ref()
+
+        client = fn captured_model, _messages, opts ->
+          send(test_pid, {ref, captured_model, opts})
+          build_stream_response([ReqLLM.StreamChunk.text("ok")])
+        end
+
+        {:ok, pid} =
+          start_provider(
+            tmp_dir: dir,
+            model: model,
+            thinking_level: thinking_level,
+            llm_client: client
+          )
+
+        assert :ok = Native.send_prompt(pid, "test")
+        assert_receive {^ref, ^model, opts}, 2_000
+
+        if expected_effort do
+          assert Keyword.get(opts, :reasoning_effort) == expected_effort
+        else
+          refute Keyword.has_key?(opts, :reasoning_effort)
+        end
+
+        provider_options = Keyword.get(opts, :provider_options, [])
+        refute Keyword.has_key?(provider_options, :additional_model_request_fields)
+
+        collect_events(500)
+      end)
+    end
   end
 
   describe "set_model" do
@@ -206,6 +253,16 @@ defmodule MingaAgent.Providers.NativeTest do
 
       assert {:ok, state} = Native.get_state(pid)
       assert state.model.id == "openai:gpt-4o"
+    end
+
+    test "set_model preserves the semantic thinking level across providers", %{tmp_dir: dir} do
+      {:ok, pid} = start_provider(tmp_dir: dir, thinking_level: "medium")
+
+      assert :ok = Native.set_model(pid, "openai:o4-mini")
+
+      assert {:ok, state} = Native.get_state(pid)
+      assert state.model.id == "openai:o4-mini"
+      assert state.thinking_level == "medium"
     end
   end
 
@@ -900,7 +957,7 @@ defmodule MingaAgent.Providers.NativeTest do
   end
 
   describe "custom API base URL" do
-    test "MINGA_API_BASE_URL env var injects base_url into stream opts", %{tmp_dir: dir} do
+    test "API base URL override injects base_url into stream opts", %{tmp_dir: dir} do
       test_pid = self()
 
       capturing_client = fn _model, _messages, opts ->
@@ -908,9 +965,13 @@ defmodule MingaAgent.Providers.NativeTest do
         build_stream_response([{:text, "ok"}])
       end
 
-      System.put_env("MINGA_API_BASE_URL", "https://gateway.corp.com/v1")
+      {:ok, pid} =
+        start_provider(
+          tmp_dir: dir,
+          llm_client: capturing_client,
+          config: agent_config(api_base_url_override: "https://gateway.corp.com/v1")
+        )
 
-      {:ok, pid} = start_provider(tmp_dir: dir, llm_client: capturing_client)
       :ok = Native.send_prompt(pid, "test")
 
       assert_receive {:captured_opts, opts}, 2_000
@@ -918,19 +979,15 @@ defmodule MingaAgent.Providers.NativeTest do
 
       # Collect remaining events so the process winds down
       collect_events(500)
-    after
-      System.delete_env("MINGA_API_BASE_URL")
     end
 
-    test "no base_url when env var is not set", %{tmp_dir: dir} do
+    test "no base_url when no base URL config is set", %{tmp_dir: dir} do
       test_pid = self()
 
       capturing_client = fn _model, _messages, opts ->
         send(test_pid, {:captured_opts, opts})
         build_stream_response([{:text, "ok"}])
       end
-
-      System.delete_env("MINGA_API_BASE_URL")
 
       {:ok, pid} = start_provider(tmp_dir: dir, llm_client: capturing_client)
       :ok = Native.send_prompt(pid, "test")
@@ -949,21 +1006,21 @@ defmodule MingaAgent.Providers.NativeTest do
         build_stream_response([{:text, "ok"}])
       end
 
-      System.delete_env("MINGA_API_BASE_URL")
-
-      # Set both global and per-provider endpoints
-      Options.set(:agent_api_base_url, "https://global.example.com/v1")
-
-      Options.set(:agent_api_endpoints, %{
-        "anthropic" => "https://anthropic-gw.corp.com/v1",
-        "openai" => "https://openai-gw.corp.com/v1"
-      })
+      config =
+        agent_config(
+          api_base_url: "https://global.example.com/v1",
+          api_endpoints: %{
+            "anthropic" => "https://anthropic-gw.corp.com/v1",
+            "openai" => "https://openai-gw.corp.com/v1"
+          }
+        )
 
       {:ok, pid} =
         start_provider(
           tmp_dir: dir,
           llm_client: capturing_client,
-          model: "anthropic:claude-sonnet-4-20250514"
+          model: "anthropic:claude-sonnet-4-20250514",
+          config: config
         )
 
       :ok = Native.send_prompt(pid, "test")
@@ -972,9 +1029,6 @@ defmodule MingaAgent.Providers.NativeTest do
       assert Keyword.get(opts, :base_url) == "https://anthropic-gw.corp.com/v1"
 
       collect_events(500)
-    after
-      Options.set(:agent_api_base_url, "")
-      Options.set(:agent_api_endpoints, nil)
     end
 
     test "global base_url is used when no per-provider match", %{tmp_dir: dir} do
@@ -985,16 +1039,18 @@ defmodule MingaAgent.Providers.NativeTest do
         build_stream_response([{:text, "ok"}])
       end
 
-      System.delete_env("MINGA_API_BASE_URL")
-
-      Options.set(:agent_api_base_url, "https://global.example.com/v1")
-      Options.set(:agent_api_endpoints, %{"openai" => "https://openai-only.com/v1"})
+      config =
+        agent_config(
+          api_base_url: "https://global.example.com/v1",
+          api_endpoints: %{"openai" => "https://openai-only.com/v1"}
+        )
 
       {:ok, pid} =
         start_provider(
           tmp_dir: dir,
           llm_client: capturing_client,
-          model: "anthropic:claude-sonnet-4-20250514"
+          model: "anthropic:claude-sonnet-4-20250514",
+          config: config
         )
 
       :ok = Native.send_prompt(pid, "test")
@@ -1003,12 +1059,9 @@ defmodule MingaAgent.Providers.NativeTest do
       assert Keyword.get(opts, :base_url) == "https://global.example.com/v1"
 
       collect_events(500)
-    after
-      Options.set(:agent_api_base_url, "")
-      Options.set(:agent_api_endpoints, nil)
     end
 
-    test "env var overrides per-provider endpoint", %{tmp_dir: dir} do
+    test "base URL override takes precedence over per-provider endpoint", %{tmp_dir: dir} do
       test_pid = self()
 
       capturing_client = fn _model, _messages, opts ->
@@ -1016,19 +1069,19 @@ defmodule MingaAgent.Providers.NativeTest do
         build_stream_response([{:text, "ok"}])
       end
 
-      System.put_env("MINGA_API_BASE_URL", "https://env-override.com/v1")
-      Options.set(:agent_api_endpoints, %{"anthropic" => "https://should-lose.com"})
+      config =
+        agent_config(
+          api_base_url_override: "https://env-override.com/v1",
+          api_endpoints: %{"anthropic" => "https://should-lose.com"}
+        )
 
-      {:ok, pid} = start_provider(tmp_dir: dir, llm_client: capturing_client)
+      {:ok, pid} = start_provider(tmp_dir: dir, llm_client: capturing_client, config: config)
       :ok = Native.send_prompt(pid, "test")
 
       assert_receive {:captured_opts, opts}, 2_000
       assert Keyword.get(opts, :base_url) == "https://env-override.com/v1"
 
       collect_events(500)
-    after
-      System.delete_env("MINGA_API_BASE_URL")
-      Options.set(:agent_api_endpoints, nil)
     end
   end
 
