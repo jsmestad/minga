@@ -60,6 +60,12 @@ defmodule Minga.Command.Parser do
   * `{:buffer_prev, []}` — move to previous buffer (`:bprev` / `:bp`)
   * `{:goto_line, n}` — jump to line *n* (`:<number>`)
   * `{:substitute, pattern, replacement, flags}` — `:%s/old/new/flags`
+  * `{:sort, range, flags}` — sort lines in range (`:sort` / `:%sort`)
+  * `{:read, filename}` — read file into buffer at cursor (`:read` / `:r`)
+  * `{:shell_command, command}` — run shell command and show output (`:!ls`)
+  * `{:global, pattern, command}` — run ex command on matching lines (`:g/pat/cmd`)
+  * `{:normal, range, keystrokes}` — execute normal mode keystrokes on a range of lines (`:normal`)
+  * `{:terminal, []}` — toggle integrated terminal (`:terminal`)
   * `{:unknown, raw}` — unrecognised command
   """
   @type parsed ::
@@ -96,11 +102,20 @@ defmodule Minga.Command.Parser do
           | {:set, atom()}
           | {:setglobal, atom()}
           | {:substitute, String.t(), String.t(), [substitute_flag()]}
+          | {:sort, range(), [sort_flag()]}
+          | {:read, String.t()}
+          | {:shell_command, String.t()}
+          | {:global, String.t(), String.t()}
+          | {:normal, range(), String.t()}
           | {:rename, String.t()}
+          | {:terminal, []}
           | {:unknown, String.t()}
 
   @typedoc "Flags for :%s substitution."
   @type substitute_flag :: :global | :confirm
+
+  @typedoc "Flags for :sort command (reverse, numeric, unique)."
+  @type sort_flag :: :reverse | :numeric | :unique
 
   @spec parse_range(String.t()) :: {range() | :no_range, String.t()}
   defp parse_range(input) do
@@ -172,20 +187,33 @@ defmodule Minga.Command.Parser do
       {:no_range, _} ->
         do_parse(input)
 
-      {_range, rest} ->
-        parse_after_range(input, rest)
+      {range, rest} ->
+        parse_after_range(range, input, rest)
     end
   end
 
-  @spec parse_after_range(String.t(), String.t()) :: parsed()
-  defp parse_after_range(original, rest) do
+  @spec parse_after_range(range(), String.t(), String.t()) :: parsed()
+  defp parse_after_range(range, original, rest) do
     trimmed_rest = String.trim_leading(rest)
 
     if trimmed_rest == "" do
       do_parse(original)
     else
-      do_parse(trimmed_rest)
+      apply_range_to_command(range, do_parse(trimmed_rest))
     end
+  end
+
+  @spec apply_range_to_command(range(), parsed()) :: parsed()
+  defp apply_range_to_command(range, {:sort, :whole_buffer, flags}) do
+    {:sort, range, flags}
+  end
+
+  defp apply_range_to_command(range, {:normal, :whole_buffer, keys}) do
+    {:normal, range, keys}
+  end
+
+  defp apply_range_to_command(_range, other) do
+    other
   end
 
   # ── Private helpers ──────────────────────────────────────────────────────────
@@ -244,6 +272,7 @@ defmodule Minga.Command.Parser do
   defp do_parse("split"), do: {:split_horizontal, []}
   defp do_parse("sp"), do: {:split_horizontal, []}
   defp do_parse("close"), do: {:window_close, []}
+  defp do_parse("terminal"), do: {:terminal, []}
   defp do_parse("rename " <> name), do: {:rename, String.trim(name)}
   defp do_parse("buffers"), do: {:buffers, []}
   defp do_parse("ls"), do: {:buffers, []}
@@ -251,6 +280,67 @@ defmodule Minga.Command.Parser do
   defp do_parse("bn"), do: {:buffer_next, []}
   defp do_parse("bprev"), do: {:buffer_prev, []}
   defp do_parse("bp"), do: {:buffer_prev, []}
+
+  defp do_parse("sort"), do: {:sort, :whole_buffer, []}
+
+  defp do_parse("sort " <> rest) do
+    flags = parse_sort_flags(String.trim(rest))
+    {:sort, :whole_buffer, flags}
+  end
+
+  defp do_parse("read " <> rest) do
+    filename = String.trim(rest)
+
+    if filename == "" do
+      {:unknown, "read"}
+    else
+      {:read, filename}
+    end
+  end
+
+  defp do_parse("r " <> rest) do
+    filename = String.trim(rest)
+
+    if filename == "" do
+      {:unknown, "r"}
+    else
+      {:read, filename}
+    end
+  end
+
+  defp do_parse("!" <> command) do
+    {:shell_command, String.trim(command)}
+  end
+
+  defp do_parse("g" <> rest) do
+    case rest do
+      "/" <> rest ->
+        parse_global_command(rest)
+
+      _ ->
+        {:unknown, "g" <> rest}
+    end
+  end
+
+  defp do_parse("normal " <> keys) do
+    trimmed = String.trim(keys)
+
+    if trimmed == "" do
+      {:unknown, "normal"}
+    else
+      {:normal, :whole_buffer, trimmed}
+    end
+  end
+
+  defp do_parse("norm " <> keys) do
+    trimmed = String.trim(keys)
+
+    if trimmed == "" do
+      {:unknown, "norm"}
+    else
+      {:normal, :whole_buffer, trimmed}
+    end
+  end
 
   defp do_parse("set number"), do: {:set, :number}
   defp do_parse("set nu"), do: {:set, :number}
@@ -367,5 +457,29 @@ defmodule Minga.Command.Parser do
       _ -> []
     end)
     |> Enum.uniq()
+  end
+
+  @spec parse_sort_flags(String.t()) :: [sort_flag()]
+  defp parse_sort_flags(flags_str) do
+    flags_str
+    |> String.graphemes()
+    |> Enum.flat_map(fn
+      "r" -> [:reverse]
+      "n" -> [:numeric]
+      "u" -> [:unique]
+      _ -> []
+    end)
+    |> Enum.uniq()
+  end
+
+  @spec parse_global_command(String.t()) :: parsed()
+  defp parse_global_command(input) do
+    case split_on_unescaped(input, "/") do
+      {pattern, rest} ->
+        {:global, pattern, rest}
+
+      :no_match ->
+        {:unknown, "g/" <> input}
+    end
   end
 end

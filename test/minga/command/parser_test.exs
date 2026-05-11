@@ -271,4 +271,158 @@ defmodule Minga.Command.ParserTest do
       assert {:parser_restart, []} = Parser.parse("ParserRestart")
     end
   end
+
+  describe "parse/1 — sort command" do
+    test ":sort parses to {:sort, :whole_buffer, []}" do
+      assert {:sort, :whole_buffer, []} = Parser.parse("sort")
+    end
+
+    test ":sort r parses with reverse flag" do
+      assert {:sort, :whole_buffer, [:reverse]} = Parser.parse("sort r")
+    end
+
+    test ":sort n parses with numeric flag" do
+      assert {:sort, :whole_buffer, [:numeric]} = Parser.parse("sort n")
+    end
+
+    test ":sort rn parses with reverse and numeric flags" do
+      result = Parser.parse("sort rn")
+      assert {:sort, :whole_buffer, flags} = result
+      assert :reverse in flags
+      assert :numeric in flags
+    end
+
+    test ":sort ru parses with reverse and unique flags" do
+      result = Parser.parse("sort ru")
+      assert {:sort, :whole_buffer, flags} = result
+      assert :reverse in flags
+      assert :unique in flags
+    end
+
+    test ":% sort parses with range" do
+      assert {:sort, :whole_buffer, []} = Parser.parse("%sort")
+    end
+
+    test ":1,10 sort parses with numeric range" do
+      assert {:sort, {:absolute, 1, 10}, []} = Parser.parse("1,10sort")
+    end
+
+    test ":1,10 sort r parses with numeric range and flags" do
+      assert {:sort, {:absolute, 1, 10}, [:reverse]} = Parser.parse("1,10sort r")
+    end
+  end
+
+  describe "parse/1 — read/r command" do
+    test ":read file.txt parses to {:read, filename}" do
+      assert {:read, "file.txt"} = Parser.parse("read file.txt")
+    end
+
+    test ":r file.txt parses to {:read, filename}" do
+      assert {:read, "file.txt"} = Parser.parse("r file.txt")
+    end
+
+    test ":read with path containing spaces" do
+      assert {:read, "path/to/file.txt"} = Parser.parse("read path/to/file.txt")
+    end
+
+    test ":read with no filename falls back to unknown" do
+      assert {:unknown, "read"} = Parser.parse("read")
+    end
+  end
+
+  describe "parse/1 — shell command" do
+    test ":!ls parses to {:shell_command, cmd}" do
+      assert {:shell_command, "ls"} = Parser.parse("!ls")
+    end
+
+    test ":!make test parses with full command" do
+      assert {:shell_command, "make test"} = Parser.parse("!make test")
+    end
+
+    test ":! with no command parses to empty string" do
+      assert {:shell_command, ""} = Parser.parse("!")
+    end
+  end
+
+  describe "parse/1 — global command" do
+    test ":g/pattern/cmd parses to {:global, pattern, cmd}" do
+      assert {:global, "pattern", "cmd"} = Parser.parse("g/pattern/cmd")
+    end
+
+    test ":g/foo/delete parses pattern and command" do
+      assert {:global, "foo", "delete"} = Parser.parse("g/foo/delete")
+    end
+
+    test ":g/test/s/old/new/g parses substitute as command" do
+      assert {:global, "test", "s/old/new/g"} = Parser.parse("g/test/s/old/new/g")
+    end
+
+    test ":g/pattern/cmd without trailing slash" do
+      assert {:global, "pattern", "cmd"} = Parser.parse("g/pattern/cmd")
+    end
+
+    test ":g without slash falls back to unknown" do
+      assert {:unknown, _} = Parser.parse("gpattern")
+    end
+  end
+
+  describe "parse/1 — normal command" do
+    test ":normal dd parses to {:normal, :whole_buffer, keys}" do
+      assert {:normal, :whole_buffer, "dd"} = Parser.parse("normal dd")
+    end
+
+    test ":norm w parses to {:normal, :whole_buffer, keys}" do
+      assert {:normal, :whole_buffer, "w"} = Parser.parse("norm w")
+    end
+
+    test ":normal j parses single key" do
+      assert {:normal, :whole_buffer, "j"} = Parser.parse("normal j")
+    end
+
+    test ":normal with multiple keys" do
+      assert {:normal, :whole_buffer, "dw"} = Parser.parse("normal dw")
+    end
+
+    test ":normal with ^" do
+      assert {:normal, :whole_buffer, "^d"} = Parser.parse("normal ^d")
+    end
+
+    test ":normal with gJ (g motion)" do
+      assert {:normal, :whole_buffer, "gJ"} = Parser.parse("normal gJ")
+    end
+
+    test ":% normal dd parses with whole_buffer range" do
+      assert {:normal, :whole_buffer, "dd"} = Parser.parse("%normal dd")
+    end
+
+    test ":1,5 normal w parses with numeric range" do
+      assert {:normal, {:absolute, 1, 5}, "w"} = Parser.parse("1,5normal w")
+    end
+
+    test ":. normal dd parses with current_line range" do
+      assert {:normal, :current_line, "dd"} = Parser.parse(".normal dd")
+    end
+
+    test ":$ normal dd parses with last_line range" do
+      assert {:normal, :last_line, "dd"} = Parser.parse("$normal dd")
+    end
+
+    test ":normal with no keys falls back to unknown" do
+      assert {:unknown, "normal"} = Parser.parse("normal")
+    end
+
+    test ":norm with no keys falls back to unknown" do
+      assert {:unknown, "norm"} = Parser.parse("norm")
+    end
+
+    test ":normal with only spaces falls back to unknown" do
+      assert {:unknown, "normal"} = Parser.parse("normal    ")
+    end
+  end
+
+  describe "parse/1 — terminal command" do
+    test ":terminal parses to {:terminal, []}" do
+      assert {:terminal, []} = Parser.parse("terminal")
+    end
+  end
 end
