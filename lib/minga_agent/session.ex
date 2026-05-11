@@ -1955,7 +1955,9 @@ defmodule MingaAgent.Session do
   rescue
     e ->
       Minga.Log.warning(:agent, "UserPromptSubmit hook dispatch failed: #{Exception.message(e)}")
-      {:error, %HookResult{status: :veto, stderr: "hook dispatch failed: #{Exception.message(e)}"}}
+
+      {:error,
+       %HookResult{status: :veto, stderr: "hook dispatch failed: #{Exception.message(e)}"}}
   catch
     _, caught ->
       Minga.Log.warning(:agent, "UserPromptSubmit hook dispatch failed: #{inspect(caught)}")
