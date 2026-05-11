@@ -25,6 +25,13 @@ defmodule Minga.LSP.JsonRpc do
   @typedoc "A decoded JSON-RPC message as a map."
   @type message :: map()
 
+  @typedoc "A JSON-RPC request or response ID."
+  @type id :: integer() | String.t()
+
+  @typedoc "A JSON value that can be encoded in a JSON-RPC message."
+  @type json_value ::
+          nil | boolean() | number() | String.t() | [json_value()] | %{String.t() => json_value()}
+
   @doc """
   Encodes a JSON-RPC request (has an `id`, expects a response).
 
@@ -67,8 +74,8 @@ defmodule Minga.LSP.JsonRpc do
   @doc """
   Encodes a JSON-RPC success response.
   """
-  @spec encode_response(integer(), map()) :: iodata()
-  def encode_response(id, result) when is_integer(id) and is_map(result) do
+  @spec encode_response(id(), json_value()) :: iodata()
+  def encode_response(id, result) when is_integer(id) or is_binary(id) do
     encode(%{
       "jsonrpc" => "2.0",
       "id" => id,
@@ -79,9 +86,9 @@ defmodule Minga.LSP.JsonRpc do
   @doc """
   Encodes a JSON-RPC error response.
   """
-  @spec encode_error_response(integer(), integer(), String.t()) :: iodata()
+  @spec encode_error_response(id(), integer(), String.t()) :: iodata()
   def encode_error_response(id, code, message)
-      when is_integer(id) and is_integer(code) and is_binary(message) do
+      when (is_integer(id) or is_binary(id)) and is_integer(code) and is_binary(message) do
     encode(%{
       "jsonrpc" => "2.0",
       "id" => id,

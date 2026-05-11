@@ -27,6 +27,7 @@ defmodule Minga.LSP.Client do
 
   use GenServer
 
+  alias Minga.Config
   alias Minga.Diagnostics
   alias Minga.Diagnostics.Diagnostic
   alias Minga.LSP.Client.State
@@ -523,6 +524,11 @@ defmodule Minga.LSP.Client do
     handle_response(id, {:error, error}, state)
   end
 
+  defp handle_message(%{"method" => method, "id" => id, "params" => params}, state)
+       when is_binary(method) do
+    handle_server_request(method, id, params, state)
+  end
+
   defp handle_message(%{"method" => method, "params" => params}, state)
        when is_binary(method) do
     handle_server_notification(method, params, state)
@@ -530,13 +536,12 @@ defmodule Minga.LSP.Client do
 
   defp handle_message(%{"method" => method, "id" => id}, state)
        when is_binary(method) do
-    # Server request — respond with empty result for now
     handle_server_request(method, id, %{}, state)
   end
 
   defp handle_message(_msg, state), do: state
 
-  @spec handle_response(integer(), {:ok, map()} | {:error, map()}, State.t()) :: State.t()
+  @spec handle_response(JsonRpc.id(), {:ok, term()} | {:error, map()}, State.t()) :: State.t()
   defp handle_response(id, result, state) do
     case Map.pop(state.pending, id) do
       {nil, _pending} ->
@@ -561,7 +566,7 @@ defmodule Minga.LSP.Client do
 
   @spec handle_method_response(
           String.t(),
-          {:ok, map()} | {:error, map()},
+          {:ok, term()} | {:error, map()},
           GenServer.from() | nil,
           State.t()
         ) :: State.t()
@@ -681,22 +686,70 @@ defmodule Minga.LSP.Client do
 
   defp handle_server_notification(_method, _params, state), do: state
 
-  @spec handle_server_request(String.t(), integer(), map(), State.t()) :: State.t()
+  @spec handle_server_request(String.t(), JsonRpc.id(), map(), State.t()) :: State.t()
   defp handle_server_request("window/workDoneProgress/create", id, _params, state) do
-    send_response(state, id, %{})
+    send_response(state, id, nil)
     state
   end
 
   defp handle_server_request("client/registerCapability", id, _params, state) do
-    send_response(state, id, %{})
+    send_response(state, id, nil)
+    state
+  end
+
+  defp handle_server_request("workspace/configuration", id, params, state) do
+    settings = Config.get_lsp_settings(state.server_config)
+    results = Enum.map(configuration_items(params), &configuration_item(settings, &1))
+
+    send_response(state, id, results)
     state
   end
 
   defp handle_server_request(method, id, _params, state) do
     Minga.Log.debug(:lsp, "Unhandled server request: #{method} (id=#{id})")
-    send_response(state, id, %{})
+    send_error_response(state, id, -32_601, "Method not found: #{method}")
     state
   end
+
+  @spec configuration_items(map()) :: [term()]
+  defp configuration_items(%{"items" => items}) when is_list(items), do: items
+  defp configuration_items(_params), do: []
+
+  @spec configuration_item(map(), term()) :: term()
+  defp configuration_item(settings, %{"section" => section}) when is_binary(section) do
+    configuration_section(settings, section)
+  end
+
+  defp configuration_item(settings, _item), do: settings
+
+  @spec configuration_section(map(), String.t()) :: term()
+  defp configuration_section(settings, section) do
+    case fetch_configuration_section(settings, section) do
+      {:ok, value} -> value
+      :error -> %{}
+    end
+  end
+
+  @spec fetch_configuration_section(map(), String.t()) :: {:ok, term()} | :error
+  defp fetch_configuration_section(settings, section) do
+    case Map.fetch(settings, section) do
+      {:ok, value} -> {:ok, value}
+      :error -> fetch_configuration_path(settings, String.split(section, "."))
+    end
+  end
+
+  @spec fetch_configuration_path(term(), [String.t()]) :: {:ok, term()} | :error
+  defp fetch_configuration_path(settings, [key]) when is_map(settings),
+    do: Map.fetch(settings, key)
+
+  defp fetch_configuration_path(settings, [key | rest]) when is_map(settings) do
+    case Map.fetch(settings, key) do
+      {:ok, value} -> fetch_configuration_path(value, rest)
+      :error -> :error
+    end
+  end
+
+  defp fetch_configuration_path(_settings, _path), do: :error
 
   # ── Diagnostic Conversion ─────────────────────────────────────────────────
 
@@ -785,9 +838,15 @@ defmodule Minga.LSP.Client do
     port_send(state.port, msg)
   end
 
-  @spec send_response(State.t(), integer(), map()) :: :ok
+  @spec send_response(State.t(), JsonRpc.id(), JsonRpc.json_value()) :: :ok
   defp send_response(state, id, result) do
     msg = JsonRpc.encode_response(id, result)
+    port_send(state.port, msg)
+  end
+
+  @spec send_error_response(State.t(), JsonRpc.id(), integer(), String.t()) :: :ok
+  defp send_error_response(state, id, code, message) do
+    msg = JsonRpc.encode_error_response(id, code, message)
     port_send(state.port, msg)
   end
 
@@ -918,6 +977,7 @@ defmodule Minga.LSP.Client do
         }
       },
       "workspace" => %{
+        "configuration" => true,
         "symbol" => %{
           "dynamicRegistration" => false,
           "symbolKind" => %{

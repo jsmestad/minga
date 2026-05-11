@@ -60,6 +60,41 @@ defmodule Minga.LSP.JsonRpcTest do
       assert decoded["result"] == %{"capabilities" => %{}}
       refute Map.has_key?(decoded, "error")
     end
+
+    test "accepts list results" do
+      msg = JsonRpc.encode_response(2, [%{"enabled" => true}, %{}])
+      binary = IO.iodata_to_binary(msg)
+
+      [_headers, json] = String.split(binary, "\r\n\r\n", parts: 2)
+      decoded = JSON.decode!(json)
+
+      assert decoded["jsonrpc"] == "2.0"
+      assert decoded["id"] == 2
+      assert decoded["result"] == [%{"enabled" => true}, %{}]
+    end
+
+    test "accepts string ids" do
+      msg = JsonRpc.encode_response("configuration-1", [%{}])
+      binary = IO.iodata_to_binary(msg)
+
+      [_headers, json] = String.split(binary, "\r\n\r\n", parts: 2)
+      decoded = JSON.decode!(json)
+
+      assert decoded["id"] == "configuration-1"
+      assert decoded["result"] == [%{}]
+    end
+
+    test "accepts nil results" do
+      msg = JsonRpc.encode_response(3, nil)
+      binary = IO.iodata_to_binary(msg)
+
+      [_headers, json] = String.split(binary, "\r\n\r\n", parts: 2)
+      decoded = JSON.decode!(json)
+
+      assert decoded["id"] == 3
+      assert Map.has_key?(decoded, "result")
+      assert decoded["result"] == nil
+    end
   end
 
   describe "encode_error_response/3" do
@@ -74,6 +109,18 @@ defmodule Minga.LSP.JsonRpcTest do
       assert decoded["id"] == 1
       assert decoded["error"]["code"] == -32_600
       assert decoded["error"]["message"] == "Invalid Request"
+    end
+
+    test "accepts string ids" do
+      msg = JsonRpc.encode_error_response("unknown-1", -32_601, "Method not found")
+      binary = IO.iodata_to_binary(msg)
+
+      [_headers, json] = String.split(binary, "\r\n\r\n", parts: 2)
+      decoded = JSON.decode!(json)
+
+      assert decoded["id"] == "unknown-1"
+      assert decoded["error"]["code"] == -32_601
+      assert decoded["error"]["message"] == "Method not found"
     end
   end
 

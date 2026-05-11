@@ -9,10 +9,12 @@ defmodule Minga.Config.LoaderTest do
   use ExUnit.Case, async: false
 
   alias Minga.Command.Registry, as: CommandRegistry
+  alias Minga.Config
   alias Minga.Config.Hooks
   alias Minga.Config.Loader
   alias Minga.Config.Options
   alias Minga.Keymap.Active, as: KeymapActive
+  alias Minga.LSP.ServerConfig
 
   setup do
     options_server = start_supervised!({Options, name: nil})
@@ -93,6 +95,100 @@ defmodule Minga.Config.LoaderTest do
       assert Loader.load_error(pid) == nil
       assert Options.get(test_options_server(), :tab_width) == 4
       assert Options.get(test_options_server(), :line_numbers) == :relative
+    end
+  end
+
+  describe "loading LSP settings" do
+    test "deep-merges user lsp_settings with server defaults" do
+      {_dir, cleanup} =
+        make_config_dir("""
+        use Minga.Config
+
+        lsp_settings :mock_lsp,
+          mock_lsp: [nested: [enabled: false], extra: true]
+        """)
+
+      on_exit(cleanup)
+
+      name = :"loader_lsp_settings_#{System.unique_integer([:positive])}"
+      {:ok, pid} = Loader.start_link(name: name)
+
+      server_config = %ServerConfig{
+        name: :mock_lsp,
+        command: "mock-lsp",
+        settings: %{
+          "mock_lsp" => %{
+            "nested" => %{"enabled" => true, "default" => 1},
+            "value" => 2
+          }
+        }
+      }
+
+      assert Loader.lsp_settings(pid) == %{
+               mock_lsp: %{
+                 "mock_lsp" => %{"nested" => %{"enabled" => false}, "extra" => true}
+               }
+             }
+
+      assert Config.get_lsp_settings(server_config, pid) == %{
+               "mock_lsp" => %{
+                 "nested" => %{"enabled" => false, "default" => 1},
+                 "value" => 2,
+                 "extra" => true
+               }
+             }
+    end
+
+    test "supports exact LSP section keys with punctuation" do
+      {_dir, cleanup} =
+        make_config_dir("""
+        use Minga.Config
+
+        lsp_settings :rust_analyzer, %{
+          "rust-analyzer" => %{"cargo" => %{"allFeatures" => false}}
+        }
+        """)
+
+      on_exit(cleanup)
+
+      name = :"loader_lsp_section_keys_#{System.unique_integer([:positive])}"
+      {:ok, pid} = Loader.start_link(name: name)
+
+      server_config = %ServerConfig{
+        name: :rust_analyzer,
+        command: "rust-analyzer",
+        settings: %{
+          "rust-analyzer" => %{
+            "cargo" => %{"allFeatures" => true},
+            "procMacro" => %{"enable" => true}
+          }
+        }
+      }
+
+      assert Config.get_lsp_settings(server_config, pid) == %{
+               "rust-analyzer" => %{
+                 "cargo" => %{"allFeatures" => false},
+                 "procMacro" => %{"enable" => true}
+               }
+             }
+    end
+
+    test "preserves empty list setting values" do
+      {_dir, cleanup} =
+        make_config_dir("""
+        use Minga.Config
+
+        lsp_settings :mock_lsp, features: []
+        """)
+
+      on_exit(cleanup)
+
+      name = :"loader_lsp_empty_list_#{System.unique_integer([:positive])}"
+      {:ok, pid} = Loader.start_link(name: name)
+
+      server_config = %ServerConfig{name: :mock_lsp, command: "mock-lsp"}
+
+      assert Config.get_lsp_settings(server_config, pid) == %{"features" => []}
     end
   end
 

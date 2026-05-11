@@ -127,6 +127,30 @@ When agent tools are [routed through `Buffer.Server`](BUFFER-AWARE-AGENTS.md), a
 
 These options don't exist yet. See [BUFFER-AWARE-AGENTS.md](BUFFER-AWARE-AGENTS.md) for the design.
 
+## LSP settings
+
+Some language servers ask the editor for project settings with `workspace/configuration`. Use `lsp_settings/2` when you want Minga to answer those requests for a server.
+
+The first argument is the server name from the language definition. The second argument is the settings map that server expects. Minga deep-merges your settings with built-in language defaults, and your config wins when both define the same key.
+
+```elixir
+# Disable rust-analyzer's all-features cargo check default
+lsp_settings :rust_analyzer, %{
+  "rust-analyzer" => %{
+    "cargo" => %{"allFeatures" => false}
+  }
+}
+
+# Disable TypeScript formatting through typescript-language-server
+lsp_settings :typescript_language_server, %{
+  "typescript" => %{
+    "format" => %{"enable" => false}
+  }
+}
+```
+
+Use string keys when the LSP section contains punctuation, such as `"rust-analyzer"`. Atom keys are converted to strings, which works well for simple nested keys like `format` and `enable`.
+
 ## Startup view
 
 Minga boots into the full-screen agentic view by default. The chat panel is visible, the input is focused, and an agent session starts automatically. You're ready to talk to the agent the moment Minga opens.

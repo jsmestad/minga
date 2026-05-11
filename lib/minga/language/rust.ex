@@ -19,7 +19,13 @@ defmodule Minga.Language.Rust do
         %ServerConfig{
           name: :rust_analyzer,
           command: "rust-analyzer",
-          root_markers: ["Cargo.toml"]
+          root_markers: ["Cargo.toml"],
+          settings: %{
+            "rust-analyzer" => %{
+              "cargo" => %{"allFeatures" => true},
+              "procMacro" => %{"enable" => true}
+            }
+          }
         }
       ],
       root_markers: ["Cargo.toml"],

@@ -6,6 +6,8 @@
 # Supports:
 # - initialize/initialized handshake
 # - textDocument/didOpen, didChange, didSave, didClose
+# - Optional workspace/configuration request after initialized
+# - Optional unknown server request after initialized
 # - Publishes a diagnostic on didOpen (for testing)
 # - shutdown/exit lifecycle
 
@@ -89,7 +91,8 @@ defmodule MockServer do
   end
 
   defp handle_message(%{"method" => "initialized"}) do
-    # No response needed
+    if request_configuration?(), do: send_configuration_request()
+    if request_unknown?(), do: send_unknown_request()
     :ok
   end
 
@@ -126,6 +129,18 @@ defmodule MockServer do
     :ok
   end
 
+  defp handle_message(%{"id" => "configuration-900", "result" => result}) when is_list(result) do
+    send_test_diagnostic("file:///tmp/configuration-test.ex", "CONFIG", JSON.encode!(result))
+  end
+
+  defp handle_message(%{"id" => "unknown-900", "error" => %{"code" => code} = error}) do
+    send_test_diagnostic(
+      "file:///tmp/unknown-request-test.ex",
+      "UNKNOWN",
+      "#{code}:#{error["message"]}"
+    )
+  end
+
   defp handle_message(%{"method" => "shutdown", "id" => id}) do
     send_response(id, nil)
   end
@@ -152,9 +167,54 @@ defmodule MockServer do
     write_message(msg)
   end
 
+  defp send_configuration_request do
+    send_request("configuration-900", "workspace/configuration", %{
+      "items" => [
+        %{"scopeUri" => "file:///tmp/configuration-test.ex", "section" => "mock_lsp.nested"},
+        %{"scopeUri" => "file:///tmp/configuration-test.ex", "section" => "missing"},
+        %{"scopeUri" => "file:///tmp/configuration-test.ex"}
+      ]
+    })
+  end
+
+  defp send_unknown_request do
+    send_request("unknown-900", "mock/unknown", %{})
+  end
+
+  defp send_request(id, method, params) do
+    msg = %{"jsonrpc" => "2.0", "id" => id, "method" => method, "params" => params}
+    write_message(msg)
+  end
+
   defp send_notification(method, params) do
     msg = %{"jsonrpc" => "2.0", "method" => method, "params" => params}
     write_message(msg)
+  end
+
+  defp request_configuration? do
+    "--request-configuration" in System.argv()
+  end
+
+  defp request_unknown? do
+    "--request-unknown" in System.argv()
+  end
+
+  defp send_test_diagnostic(uri, code, message) do
+    send_notification("textDocument/publishDiagnostics", %{
+      "uri" => uri,
+      "diagnostics" => [
+        %{
+          "range" => %{
+            "start" => %{"line" => 0, "character" => 0},
+            "end" => %{"line" => 0, "character" => 1}
+          },
+          "severity" => 3,
+          "source" => "mock_lsp",
+          "message" => message,
+          "code" => code
+        }
+      ]
+    })
   end
 
   defp write_message(msg) do

@@ -2,21 +2,13 @@ defmodule Minga.LSP.ServerRegistry do
   @moduledoc """
   Maps filetypes to language server configurations.
 
-  A pure module with hardcoded defaults for well-known language servers,
-  following the pattern established by `Minga.Language.Filetype`. No GenServer,
-  no config files — if the server binary is on `$PATH`, it just works.
+  A pure lookup module over `Minga.Language` definitions. If the server binary is on `$PATH`, it just works.
 
   ## Adding a new server
 
-  Add an entry to `@servers` mapping a filetype atom to a list of
-  `ServerConfig` structs. Multiple servers per filetype are supported
-  (e.g., TypeScript files may use both `typescript-language-server` and
-  `eslint`).
+  Add a `ServerConfig` to the relevant language definition under `lib/minga/language/`. Multiple servers per filetype are supported, such as using both `typescript-language-server` and `eslint` for TypeScript.
 
-  ## Future
-
-  A config file (`~/.config/minga/lsp.exs`) will allow users to override
-  or extend these defaults without modifying source code.
+  Users can override per-server settings from `config.exs` with `Minga.Config.lsp_settings/2`.
   """
 
   alias Minga.LSP.ServerConfig
