@@ -174,7 +174,7 @@ defmodule MingaEditor do
 
     state = Startup.build_initial_state(opts)
 
-    renderer_pid = GenServer.whereis(MingaEditor.Renderer.Server)
+    renderer_pid = renderer_pid_for_backend(state.backend)
 
     if state.backend != :headless and is_nil(renderer_pid) do
       Minga.Log.warning(:editor, "Renderer.Server not found at init; rendering synchronously")
@@ -254,6 +254,10 @@ defmodule MingaEditor do
     # init. Cleanup happens in Application.stop/1 (clean shutdown only).
     :ok
   end
+
+  @spec renderer_pid_for_backend(EditorState.backend()) :: pid() | nil
+  defp renderer_pid_for_backend(:headless), do: nil
+  defp renderer_pid_for_backend(_backend), do: GenServer.whereis(MingaEditor.Renderer.Server)
 
   @impl true
   @spec handle_call(term(), GenServer.from(), state()) :: {:reply, term(), state()}

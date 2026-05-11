@@ -48,6 +48,9 @@ defmodule MingaEditor.Renderer.Server do
   alias MingaEditor.RenderPipeline
   alias MingaEditor.RenderPipeline.Input
 
+  @typedoc "Render pipeline output after a frame has run."
+  @type render_output :: Input.t()
+
   @typedoc "Click-region writeback payload sent to the Editor after each frame."
   @type writeback :: %{
           required(:caches) => MingaEditor.Renderer.Caches.t(),
@@ -58,9 +61,12 @@ defmodule MingaEditor.Renderer.Server do
           required(:frame_seq) => non_neg_integer()
         }
 
+  @typedoc "Editor process reference used for renderer writebacks."
+  @type editor_ref :: pid() | atom() | nil
+
   @typedoc "Renderer server state."
   @type t :: %__MODULE__{
-          editor_pid: pid() | nil,
+          editor_pid: editor_ref(),
           rendering?: boolean(),
           pending: {Input.t(), non_neg_integer(), integer()} | nil,
           in_flight: {Input.t(), non_neg_integer(), integer()} | nil
@@ -153,9 +159,35 @@ defmodule MingaEditor.Renderer.Server do
 
   # ── Helpers ────────────────────────────────────────────────────────────────
 
-  @spec send_writeback(pid() | atom() | nil, map(), non_neg_integer()) :: :ok
-  defp send_writeback(editor_pid, output, seq) when is_pid(editor_pid) or is_atom(editor_pid) do
-    writeback = %{
+  @spec send_writeback(editor_ref(), render_output(), non_neg_integer()) :: :ok
+  defp send_writeback(nil, _output, seq) do
+    Minga.Log.warning(:render, "Renderer frame #{seq}: no editor_pid, writeback dropped")
+    :ok
+  end
+
+  defp send_writeback(editor_pid, output, seq) when is_pid(editor_pid) do
+    send(editor_pid, {:render_done, writeback_from_output(output, seq)})
+    :ok
+  end
+
+  defp send_writeback(editor_name, output, seq) when is_atom(editor_name) do
+    case Process.whereis(editor_name) do
+      nil ->
+        Minga.Log.warning(
+          :render,
+          "Renderer frame #{seq}: editor #{inspect(editor_name)} not registered, writeback dropped"
+        )
+
+        :ok
+
+      editor_pid ->
+        send_writeback(editor_pid, output, seq)
+    end
+  end
+
+  @spec writeback_from_output(render_output(), non_neg_integer()) :: writeback()
+  defp writeback_from_output(output, seq) do
+    %{
       caches: output.caches,
       layout: output.layout,
       focus_tree: output.focus_tree,
@@ -163,14 +195,6 @@ defmodule MingaEditor.Renderer.Server do
       windows: output.workspace.windows,
       frame_seq: seq
     }
-
-    send(editor_pid, {:render_done, writeback})
-    :ok
-  end
-
-  defp send_writeback(_editor_pid, _output, seq) do
-    Minga.Log.warning(:render, "Renderer frame #{seq}: no editor_pid, writeback dropped")
-    :ok
   end
 
   @spec advance_pending(t()) :: {:noreply, t()}

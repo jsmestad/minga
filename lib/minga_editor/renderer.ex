@@ -66,7 +66,7 @@ defmodule MingaEditor.Renderer do
 
   def render_or_async(%{renderer: pid} = state) when is_pid(pid) do
     snapshot = Input.from_editor_state(state)
-    seq = abs(System.monotonic_time(:microsecond))
+    seq = System.unique_integer([:positive, :monotonic])
     RendererServer.cast_snapshot(pid, snapshot, seq)
     state
   end

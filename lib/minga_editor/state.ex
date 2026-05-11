@@ -115,7 +115,7 @@ defmodule MingaEditor.State do
             buffer_add_context: :open,
             stashed_board_state: nil
 
-  @type backend :: :tui | :native_gui | :headless
+  @type backend :: :tui | :gui | :native_gui | :headless
 
   @type shell_state :: ShellState.t() | BoardState.t()
 

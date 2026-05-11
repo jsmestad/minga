@@ -6,7 +6,7 @@ defmodule MingaEditor.Renderer.ServerTest do
   booting the editor. These tests start a process per-test for isolation.
 
   Tests that would require running the actual `RenderPipeline.run/1`
-  are out of scope for unit tests — pipeline behavior is covered by
+  are out of scope for unit tests; pipeline behavior is covered by
   the existing render pipeline test suite. These tests focus on the
   state-machine contract: idle → rendering, coalescing, telemetry.
   """
@@ -17,39 +17,20 @@ defmodule MingaEditor.Renderer.ServerTest do
   alias MingaEditor.Renderer.Server, as: RendererServer
   alias MingaEditor.Viewport
 
-  describe "init/1 + start_link/1" do
-    test "starts with no pending or in-flight snapshot" do
-      {:ok, pid} = RendererServer.start_link(name: nil, editor_pid: self())
-      state = :sys.get_state(pid)
-
-      assert state.editor_pid == self()
-      refute state.rendering?
-      assert state.pending == nil
-      assert state.in_flight == nil
-
-      GenServer.stop(pid)
-    end
-  end
-
   describe "snapshot coalescing (in-flight → pending replacement)" do
     setup do
-      {:ok, pid} = RendererServer.start_link(name: nil, editor_pid: self())
+      pid = start_renderer(self())
 
       # Park the server in "rendering" so subsequent casts go to pending.
       :sys.replace_state(pid, fn s ->
         %{s | rendering?: true, in_flight: {stub_snapshot(), 0, 0}}
       end)
 
-      on_exit(fn ->
-        if Process.alive?(pid), do: GenServer.stop(pid)
-      end)
-
       %{pid: pid}
     end
 
     test "first pending snapshot is stored without a coalesce event", %{pid: pid} do
-      handler = fn name, m, meta, parent -> send(parent, {:tel, name, m, meta}) end
-      :telemetry.attach("test-coalesce-first", [:minga, :render, :coalesced], handler, self())
+      attach_coalesce_handler()
 
       RendererServer.cast_snapshot(pid, stub_snapshot(), 1)
       :sys.get_state(pid)
@@ -57,13 +38,10 @@ defmodule MingaEditor.Renderer.ServerTest do
 
       assert {_, 1, _} = state.pending
       refute_receive {:tel, [:minga, :render, :coalesced], _, _}, 50
-
-      :telemetry.detach("test-coalesce-first")
     end
 
     test "subsequent pending snapshot replaces the prior one with a telemetry event", %{pid: pid} do
-      handler = fn name, m, meta, parent -> send(parent, {:tel, name, m, meta}) end
-      :telemetry.attach("test-coalesce-replace", [:minga, :render, :coalesced], handler, self())
+      attach_coalesce_handler()
 
       RendererServer.cast_snapshot(pid, stub_snapshot(), 1)
       :sys.get_state(pid)
@@ -83,82 +61,153 @@ defmodule MingaEditor.Renderer.ServerTest do
 
       assert_receive {:tel, [:minga, :render, :coalesced], %{count: 1},
                       %{dropped_seq: 2, new_seq: 3}}
-
-      :telemetry.detach("test-coalesce-replace")
     end
   end
 
   describe "do_render rescue (fault tolerance)" do
     test "pipeline crash drops the frame and advances to pending without killing the server" do
-      {:ok, pid} = RendererServer.start_link(name: nil, editor_pid: self())
+      pid = start_renderer(self())
 
       # Cast a snapshot that will crash the pipeline (stub_snapshot lacks
       # required fields for RenderPipeline.run/1). The server should rescue
       # and remain alive rather than crashing the supervision tree.
       RendererServer.cast_snapshot(pid, stub_snapshot(), 42)
 
-      # Give the server time to process :do_render and rescue.
-      Process.sleep(50)
-
-      assert Process.alive?(pid)
-      state = :sys.get_state(pid)
+      state = drain_renderer_until_idle(pid)
       refute state.rendering?
       assert state.in_flight == nil
-
-      GenServer.stop(pid)
     end
 
     test "pipeline crash still drains pending snapshot into next attempt" do
-      {:ok, pid} = RendererServer.start_link(name: nil, editor_pid: self())
+      pid = start_renderer(self())
 
-      # First cast enters rendering. Second cast goes to pending.
-      RendererServer.cast_snapshot(pid, stub_snapshot(), 1)
-      :sys.get_state(pid)
-      RendererServer.cast_snapshot(pid, stub_snapshot(), 2)
-      :sys.get_state(pid)
+      :sys.replace_state(pid, fn state ->
+        %{
+          state
+          | rendering?: true,
+            in_flight: {stub_snapshot(), 1, 0},
+            pending: {stub_snapshot(), 2, 0}
+        }
+      end)
+
+      send(pid, :do_render)
 
       # Both will crash, but the server drains pending after each rescue.
-      Process.sleep(100)
-
-      assert Process.alive?(pid)
-      state = :sys.get_state(pid)
+      state = drain_renderer_until_idle(pid)
       refute state.rendering?
       assert state.pending == nil
       assert state.in_flight == nil
+    end
+  end
 
-      GenServer.stop(pid)
+  describe "successful async render" do
+    test "sends render_done writeback and emits a frame" do
+      renderer = start_renderer(self())
+      state = build_editor_state(:tui, nil)
+      snapshot = Input.from_editor_state(state)
+      frame_ref = Minga.Test.HeadlessPort.prepare_await(state.port_manager)
+
+      RendererServer.cast_snapshot(renderer, snapshot, 123)
+
+      assert_receive {:render_done,
+                      %{
+                        frame_seq: 123,
+                        caches: %MingaEditor.Renderer.Caches{},
+                        layout: %MingaEditor.Layout{},
+                        shell_state: %MingaEditor.Shell.Traditional.State{},
+                        windows: %MingaEditor.State.Windows{}
+                      }}
+
+      assert {:ok, _screen} = Minga.Test.HeadlessPort.collect_frame(frame_ref)
+      state = drain_renderer_until_idle(renderer)
+      refute state.rendering?
     end
   end
 
   describe "render_or_async dispatch" do
     test "non-nil renderer pid dispatches async (returns state unchanged)" do
-      {:ok, renderer} = RendererServer.start_link(name: nil, editor_pid: self())
+      renderer = start_renderer(self())
       state = build_editor_state(:tui, renderer)
 
+      :sys.replace_state(renderer, fn server_state ->
+        %{server_state | rendering?: true, in_flight: {stub_snapshot(), 0, 0}}
+      end)
+
       result = MingaEditor.Renderer.render_or_async(state)
+      server_state = :sys.get_state(renderer)
+      assert {_, seq, _} = server_state.pending
 
       assert result == state
-
-      GenServer.stop(renderer)
+      assert is_integer(seq) and seq > 0
     end
 
     test "nil renderer with non-headless backend falls back to sync render" do
       state = build_editor_state(:tui, nil)
+      assert Minga.Test.HeadlessPort.frame_count(state.port_manager) == 0
+
       result = MingaEditor.Renderer.render_or_async(state)
 
-      # Sync path updates caches (state is mutated by the pipeline).
-      assert result != state
+      assert result.layout != nil
+      assert Minga.Test.HeadlessPort.frame_count(state.port_manager) > 0
     end
 
-    test "headless backend renders synchronously regardless of renderer pid" do
+    test "headless backend renders synchronously with no renderer pid" do
       state = build_editor_state(:headless, nil)
+      assert Minga.Test.HeadlessPort.frame_count(state.port_manager) == 0
+
       result = MingaEditor.Renderer.render_or_async(state)
 
-      assert result != state
+      assert result.layout != nil
+      assert Minga.Test.HeadlessPort.frame_count(state.port_manager) > 0
+    end
+
+    test "headless backend renders synchronously even when renderer pid is present" do
+      renderer = start_renderer(self())
+      state = build_editor_state(:headless, renderer)
+      assert Minga.Test.HeadlessPort.frame_count(state.port_manager) == 0
+
+      result = MingaEditor.Renderer.render_or_async(state)
+      server_state = :sys.get_state(renderer)
+
+      assert result.layout != nil
+      assert Minga.Test.HeadlessPort.frame_count(state.port_manager) > 0
+      refute server_state.rendering?
+      assert server_state.pending == nil
+      assert server_state.in_flight == nil
+      refute_receive {:render_done, _writeback}, 50
     end
   end
 
   # ── Helpers ────────────────────────────────────────────────────────────────
+
+  defp start_renderer(editor_pid) do
+    start_supervised!({RendererServer, name: nil, editor_pid: editor_pid})
+  end
+
+  defp attach_coalesce_handler do
+    handler_id = {__MODULE__, :coalesced, make_ref()}
+
+    handler = fn name, measurements, metadata, parent ->
+      send(parent, {:tel, name, measurements, metadata})
+    end
+
+    :ok = :telemetry.attach(handler_id, [:minga, :render, :coalesced], handler, self())
+    on_exit(fn -> :telemetry.detach(handler_id) end)
+  end
+
+  defp drain_renderer_until_idle(pid, attempts \\ 8)
+
+  defp drain_renderer_until_idle(pid, 0), do: :sys.get_state(pid)
+
+  defp drain_renderer_until_idle(pid, attempts) do
+    state = :sys.get_state(pid)
+
+    if state.rendering? do
+      drain_renderer_until_idle(pid, attempts - 1)
+    else
+      state
+    end
+  end
 
   defp stub_snapshot do
     %Input{
@@ -174,7 +223,7 @@ defmodule MingaEditor.Renderer.ServerTest do
   end
 
   defp build_editor_state(backend, renderer_pid) do
-    {:ok, buf} = Minga.Buffer.start_link(content: "test")
+    buf = start_supervised!({Minga.Buffer, content: "test"})
 
     workspace = %MingaEditor.Workspace.State{
       buffers: %MingaEditor.State.Buffers{
@@ -194,7 +243,7 @@ defmodule MingaEditor.Renderer.ServerTest do
       keymap_scope: :editor
     }
 
-    {:ok, port} = Minga.Test.HeadlessPort.start_link(width: 80, height: 24)
+    port = start_supervised!({Minga.Test.HeadlessPort, width: 80, height: 24})
 
     %MingaEditor.State{
       backend: backend,
