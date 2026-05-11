@@ -217,6 +217,7 @@ defmodule MingaEditor.State.SnapshotTest do
 
       stored_ctx = TabBar.get(switched.shell_state.tab_bar, tab_b.id).context
       assert map_size(stored_ctx) > 0
+      assert stored_ctx.keymap_scope == :editor
       assert stored_ctx.buffers.active == buf
     end
 
