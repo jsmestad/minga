@@ -70,6 +70,24 @@ defmodule MingaAgent.Hooks.Dispatcher do
     :ok
   end
 
+  @doc "Runs all matching `SessionStart` hooks (notification-only)."
+  @spec session_start([Hook.t()], map()) :: :ok
+  @spec session_start([Hook.t()], map(), keyword()) :: :ok
+  def session_start(hooks, payload_map, opts \\ [])
+      when is_list(hooks) and is_map(payload_map) do
+    dispatch(:session_start, hooks, payload_map, Keyword.put(opts, :veto_capable, false))
+    :ok
+  end
+
+  @doc "Runs all matching `SessionEnd` hooks (notification-only)."
+  @spec session_end([Hook.t()], map()) :: :ok
+  @spec session_end([Hook.t()], map(), keyword()) :: :ok
+  def session_end(hooks, payload_map, opts \\ [])
+      when is_list(hooks) and is_map(payload_map) do
+    dispatch(:session_end, hooks, payload_map, Keyword.put(opts, :veto_capable, false))
+    :ok
+  end
+
   @spec run_matching_hooks([Hook.t()], Hook.event(), map(), runner(), boolean()) ::
           :ok | {:error, Result.t()}
   defp run_matching_hooks([], _event, _payload_map, _runner, _veto_capable), do: :ok

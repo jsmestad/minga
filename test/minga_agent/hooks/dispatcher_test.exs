@@ -225,11 +225,64 @@ defmodule MingaAgent.Hooks.DispatcherTest do
     assert_receive :second
   end
 
+  # ── SessionStart / SessionEnd ────────────────────────────────────────────────
+
+  test "SessionStart hooks run and are notification-only" do
+    test_pid = self()
+    hook = session_hook(:session_start)
+
+    runner = fn received_hook, _payload_map ->
+      send(test_pid, :session_start_ran)
+      Result.allow(received_hook)
+    end
+
+    payload = %{"event" => "SessionStart", "session_id" => "s1"}
+    assert :ok = Dispatcher.session_start([hook], payload, runner: runner)
+    assert_receive :session_start_ran
+  end
+
+  test "SessionEnd hooks run and are notification-only" do
+    test_pid = self()
+    hook = session_hook(:session_end)
+
+    runner = fn received_hook, _payload_map ->
+      send(test_pid, :session_end_ran)
+      Result.allow(received_hook)
+    end
+
+    payload = %{"event" => "SessionEnd", "session_id" => "s2", "reason" => "normal"}
+    assert :ok = Dispatcher.session_end([hook], payload, runner: runner)
+    assert_receive :session_end_ran
+  end
+
+  test "SessionStart veto is ignored" do
+    hook = session_hook(:session_start)
+
+    runner = fn received_hook, _payload_map ->
+      Result.veto(received_hook, "blocked", {:exit, 1})
+    end
+
+    payload = %{"event" => "SessionStart", "session_id" => "s3"}
+    assert :ok = Dispatcher.session_start([hook], payload, runner: runner)
+  end
+
+  test "Session hooks do not require tool_pattern" do
+    assert {:ok, %Hook{event: :session_start, tool_pattern: nil}} =
+             Hook.normalize(%{event: "SessionStart", command: "echo start"})
+
+    assert {:ok, %Hook{event: :session_end, tool_pattern: nil}} =
+             Hook.normalize(%{event: "SessionEnd", command: "echo end"})
+  end
+
   defp hook(pattern) do
     %Hook{event: :pre_tool_use, tool_pattern: pattern, command: "echo checking >&2"}
   end
 
   defp post_hook(pattern) do
     %Hook{event: :post_tool_use, tool_pattern: pattern, command: "echo post >&2"}
+  end
+
+  defp session_hook(event) do
+    %Hook{event: event, tool_pattern: nil, command: "echo hook >&2"}
   end
 end

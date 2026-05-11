@@ -13,7 +13,7 @@ defmodule MingaAgent.Hooks.Hook do
   @tool_events [:pre_tool_use, :post_tool_use]
 
   @typedoc "Supported hook event names."
-  @type event :: :pre_tool_use | :post_tool_use
+  @type event :: :pre_tool_use | :post_tool_use | :session_start | :session_end
 
   @typedoc "Normalized hook declaration."
   @type t :: %__MODULE__{
@@ -78,6 +78,8 @@ defmodule MingaAgent.Hooks.Hook do
   @spec event_label(event()) :: String.t()
   def event_label(:pre_tool_use), do: "PreToolUse"
   def event_label(:post_tool_use), do: "PostToolUse"
+  def event_label(:session_start), do: "SessionStart"
+  def event_label(:session_end), do: "SessionEnd"
 
   @spec map_from_list(list()) :: {:ok, map()} | :error
   defp map_from_list(raw) do
@@ -96,6 +98,14 @@ defmodule MingaAgent.Hooks.Hook do
   defp normalize_event(:PostToolUse), do: {:ok, :post_tool_use}
   defp normalize_event("PostToolUse"), do: {:ok, :post_tool_use}
   defp normalize_event("post_tool_use"), do: {:ok, :post_tool_use}
+  defp normalize_event(:session_start), do: {:ok, :session_start}
+  defp normalize_event(:SessionStart), do: {:ok, :session_start}
+  defp normalize_event("SessionStart"), do: {:ok, :session_start}
+  defp normalize_event("session_start"), do: {:ok, :session_start}
+  defp normalize_event(:session_end), do: {:ok, :session_end}
+  defp normalize_event(:SessionEnd), do: {:ok, :session_end}
+  defp normalize_event("SessionEnd"), do: {:ok, :session_end}
+  defp normalize_event("session_end"), do: {:ok, :session_end}
   defp normalize_event(other), do: {:error, "unsupported agent hook event: #{inspect(other)}"}
 
   @spec normalize_tool_pattern(map(), event()) :: {:ok, String.t() | nil} | {:error, String.t()}

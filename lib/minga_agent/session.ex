@@ -25,6 +25,9 @@ defmodule MingaAgent.Session do
   alias MingaAgent.Config, as: AgentConfig
   alias MingaAgent.Credentials
   alias MingaAgent.Event
+  alias MingaAgent.Hooks.Dispatcher, as: HookDispatcher
+  alias MingaAgent.Hooks.SessionEndPayload
+  alias MingaAgent.Hooks.SessionStartPayload
   alias MingaAgent.Memory
   alias MingaAgent.Message
   alias MingaAgent.Notifier
@@ -1041,6 +1044,7 @@ defmodule MingaAgent.Session do
         state = %{state | provider: pid}
         state = apply_pending_thinking_level(state)
         state = maybe_show_auth_onboarding(state)
+        dispatch_session_start(state)
         {:noreply, state}
 
       {:error, reason} ->
@@ -1849,7 +1853,9 @@ defmodule MingaAgent.Session do
   end
 
   @impl GenServer
-  def terminate(reason, _state) do
+  def terminate(reason, state) do
+    dispatch_session_end(state, reason)
+
     case reason do
       :normal ->
         :ok
@@ -1866,5 +1872,27 @@ defmodule MingaAgent.Session do
           "[Agent.Session] crashed: #{inspect(reason, pretty: true, limit: 1000)}"
         )
     end
+  end
+
+  # ── Hook dispatching ──────────────────────────────────────────────────────
+
+  @spec dispatch_session_start(state()) :: :ok
+  defp dispatch_session_start(state) do
+    payload = SessionStartPayload.new(state.session_id, state.model_name, state.provider_name)
+    HookDispatcher.session_start(AgentConfig.resolve().agent_hooks, SessionStartPayload.to_map(payload))
+  rescue
+    _ -> :ok
+  catch
+    _, _ -> :ok
+  end
+
+  @spec dispatch_session_end(state(), term()) :: :ok
+  defp dispatch_session_end(state, reason) do
+    payload = SessionEndPayload.new(state.session_id, reason, state.status)
+    HookDispatcher.session_end(AgentConfig.resolve().agent_hooks, SessionEndPayload.to_map(payload))
+  rescue
+    _ -> :ok
+  catch
+    _, _ -> :ok
   end
 end
