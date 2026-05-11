@@ -107,8 +107,8 @@ defmodule MingaAgent.CredentialsTest do
   describe "status/0" do
     test "reports unconfigured when nothing is set" do
       statuses = Credentials.status()
-      # 5 key-based providers + 1 Ollama (auto-detected)
-      assert length(statuses) == 6
+      # 7 key-based providers + 1 Ollama (auto-detected)
+      assert length(statuses) == 8
     end
 
     test "reports configured with correct source" do

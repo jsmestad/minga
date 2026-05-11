@@ -219,7 +219,7 @@ defmodule Minga.MixProject do
       {:stream_data, "~> 1.0", only: [:test, :dev]},
       {:propcheck, "~> 1.5", only: :test},
       {:ex_doc, "~> 0.35", only: :dev, runtime: false},
-      {:req_llm, "~> 1.6"},
+      {:req_llm, "~> 1.11"},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:hammox, "~> 0.7", only: :test},
       {:telemetry, "~> 1.0"},
