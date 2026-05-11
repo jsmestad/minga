@@ -35,6 +35,8 @@ protocol InputEncoder: AnyObject, Sendable {
     func sendBreadcrumbClick(index: UInt8)
     func sendTogglePanel(panel: UInt8)
     func sendNewTab()
+    func sendSystemWillSleep()
+    func sendSystemDidWake()
 
     // Bottom panel actions
     func sendPanelSwitchTab(index: UInt8)
@@ -376,6 +378,22 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         var buf = Data(count: 2)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_NEW_TAB
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: system_will_sleep. Layout: opcode(1) + action_type(1).
+    func sendSystemWillSleep() {
+        var buf = Data(count: 2)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_SYSTEM_WILL_SLEEP
+        writeFrame(buf)
+    }
+
+    /// Send a gui_action: system_did_wake. Layout: opcode(1) + action_type(1).
+    func sendSystemDidWake() {
+        var buf = Data(count: 2)
+        buf[0] = OP_GUI_ACTION
+        buf[1] = GUI_ACTION_SYSTEM_DID_WAKE
         writeFrame(buf)
     }
 

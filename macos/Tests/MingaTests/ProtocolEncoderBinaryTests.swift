@@ -250,6 +250,22 @@ struct EncoderGUIActionTests {
         #expect(payload[1] == GUI_ACTION_NEW_TAB)
     }
 
+    @Test("system_will_sleep is just opcode + action_type")
+    func systemWillSleepLayout() {
+        let payload = captureFrame { $0.sendSystemWillSleep() }
+
+        #expect(payload.count == 2)
+        #expect(payload[1] == GUI_ACTION_SYSTEM_WILL_SLEEP)
+    }
+
+    @Test("system_did_wake is just opcode + action_type")
+    func systemDidWakeLayout() {
+        let payload = captureFrame { $0.sendSystemDidWake() }
+
+        #expect(payload.count == 2)
+        #expect(payload[1] == GUI_ACTION_SYSTEM_DID_WAKE)
+    }
+
     @Test("panel_switch_tab encodes tab index")
     func panelSwitchTabLayout() {
         let payload = captureFrame { $0.sendPanelSwitchTab(index: 2) }

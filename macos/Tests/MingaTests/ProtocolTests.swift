@@ -298,6 +298,8 @@ final class SpyEncoder: InputEncoder, Sendable {
         case breadcrumbClick(index: UInt8)
         case togglePanel(panel: UInt8)
         case newTab
+        case systemWillSleep
+        case systemDidWake
         case panelSwitchTab(index: UInt8)
         case panelDismiss
         case panelResize(heightPercent: UInt8)
@@ -382,6 +384,8 @@ final class SpyEncoder: InputEncoder, Sendable {
     func sendBreadcrumbClick(index: UInt8) { state.withLock { $0.guiActions.append(.breadcrumbClick(index: index)) } }
     func sendTogglePanel(panel: UInt8) { state.withLock { $0.guiActions.append(.togglePanel(panel: panel)) } }
     func sendNewTab() { state.withLock { $0.guiActions.append(.newTab) } }
+    func sendSystemWillSleep() { state.withLock { $0.guiActions.append(.systemWillSleep) } }
+    func sendSystemDidWake() { state.withLock { $0.guiActions.append(.systemDidWake) } }
     func sendPanelSwitchTab(index: UInt8) { state.withLock { $0.guiActions.append(.panelSwitchTab(index: index)) } }
     func sendPanelDismiss() { state.withLock { $0.guiActions.append(.panelDismiss) } }
     func sendPanelResize(heightPercent: UInt8) { state.withLock { $0.guiActions.append(.panelResize(heightPercent: heightPercent)) } }

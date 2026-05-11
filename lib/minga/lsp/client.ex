@@ -338,19 +338,11 @@ defmodule Minga.LSP.Client do
 
   @impl true
   def handle_cast({:did_open, uri, language_id, text}, %{status: :ready} = state) do
-    doc = %{uri: uri, version: 1}
-    state = %{state | open_documents: Map.put(state.open_documents, uri, doc)}
+    {:noreply, send_did_open(state, uri, language_id, text)}
+  end
 
-    send_notification(state, "textDocument/didOpen", %{
-      "textDocument" => %{
-        "uri" => uri,
-        "languageId" => language_id,
-        "version" => 1,
-        "text" => text
-      }
-    })
-
-    {:noreply, state}
+  def handle_cast({:did_open, uri, language_id, text}, state) do
+    {:noreply, queue_document_open(state, uri, language_id, text)}
   end
 
   def handle_cast({:did_change, uri, text}, %{status: :ready} = state) do
@@ -370,6 +362,10 @@ defmodule Minga.LSP.Client do
 
         {:noreply, state}
     end
+  end
+
+  def handle_cast({:did_change, uri, text}, state) do
+    {:noreply, update_queued_document_text(state, uri, text)}
   end
 
   def handle_cast({:did_change_incremental, uri, changes}, %{status: :ready} = state) do
@@ -425,6 +421,10 @@ defmodule Minga.LSP.Client do
     else
       {:noreply, state}
     end
+  end
+
+  def handle_cast({:did_close, uri}, state) do
+    {:noreply, %{state | pending_document_opens: Map.delete(state.pending_document_opens, uri)}}
   end
 
   def handle_cast({:async_request, method, params, caller, ref}, %{status: :ready} = state) do
@@ -590,8 +590,8 @@ defmodule Minga.LSP.Client do
 
   @spec handle_method_response(
           String.t(),
-          {:ok, term()} | {:error, map()},
-          GenServer.from() | nil,
+          {:ok, term()} | {:error, term()},
+          State.pending_from(),
           State.t()
         ) :: State.t()
   defp handle_method_response("initialize", {:ok, result}, _from, state) do
@@ -626,13 +626,15 @@ defmodule Minga.LSP.Client do
 
     broadcast_status_changed(state.server_config.name, :ready, state.root_path)
 
-    %{
+    state = %{
       state
       | capabilities: capabilities,
         encoding: encoding,
         status: :ready,
         semantic_token_legend: legend
     }
+
+    flush_queued_document_opens(state)
   end
 
   defp handle_method_response("initialize", {:error, error}, _from, state) do
@@ -896,6 +898,54 @@ defmodule Minga.LSP.Client do
   defp convert_code(code) when is_integer(code), do: code
   defp convert_code(code) when is_binary(code), do: code
   defp convert_code(code), do: inspect(code)
+
+  # ── Document Sync Helpers ─────────────────────────────────────────────────
+
+  @spec send_did_open(State.t(), String.t(), String.t(), String.t()) :: State.t()
+  defp send_did_open(state, uri, language_id, text) do
+    doc = %{uri: uri, version: 1}
+    state = %{state | open_documents: Map.put(state.open_documents, uri, doc)}
+
+    send_notification(state, "textDocument/didOpen", %{
+      "textDocument" => %{
+        "uri" => uri,
+        "languageId" => language_id,
+        "version" => 1,
+        "text" => text
+      }
+    })
+
+    state
+  end
+
+  @spec queue_document_open(State.t(), String.t(), String.t(), String.t()) :: State.t()
+  defp queue_document_open(state, uri, language_id, text) do
+    pending_open = %{uri: uri, language_id: language_id, text: text}
+    pending = Map.put(state.pending_document_opens, uri, pending_open)
+    %{state | pending_document_opens: pending}
+  end
+
+  @spec update_queued_document_text(State.t(), String.t(), String.t()) :: State.t()
+  defp update_queued_document_text(state, uri, text) do
+    case Map.fetch(state.pending_document_opens, uri) do
+      {:ok, pending_open} ->
+        pending = Map.put(state.pending_document_opens, uri, Map.put(pending_open, :text, text))
+        %{state | pending_document_opens: pending}
+
+      :error ->
+        state
+    end
+  end
+
+  @spec flush_queued_document_opens(State.t()) :: State.t()
+  defp flush_queued_document_opens(state) do
+    pending_opens = Map.values(state.pending_document_opens)
+    state = %{state | pending_document_opens: %{}}
+
+    Enum.reduce(pending_opens, state, fn %{uri: uri, language_id: language_id, text: text}, acc ->
+      send_did_open(acc, uri, language_id, text)
+    end)
+  end
 
   # ── Port & Protocol Helpers ────────────────────────────────────────────────
 

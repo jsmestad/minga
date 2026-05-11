@@ -78,6 +78,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   | 0x1F       | agent_group_rename     |
   | 0x20       | agent_group_set_icon   |
   | 0x21       | agent_group_close      |
+  | 0x34       | system_will_sleep      |
+  | 0x35       | system_did_wake        |
 
   """
 
@@ -220,6 +222,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_file_tree_rename 0x31
   @gui_action_file_tree_duplicate 0x32
   @gui_action_file_tree_move 0x33
+  @gui_action_system_will_sleep 0x34
+  @gui_action_system_did_wake 0x35
 
   # ── Types ──
 
@@ -277,6 +281,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           | {:file_tree_duplicate, index :: non_neg_integer()}
           | {:file_tree_move, source_index :: non_neg_integer(),
              target_dir_index :: non_neg_integer()}
+          | :system_will_sleep
+          | :system_did_wake
 
   # ═══════════════════════════════════════════════════════════════════════════
   # Encoding (BEAM → Frontend)
@@ -2064,6 +2070,12 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
         <<source_index::16, target_dir_index::16>>
       ),
       do: {:ok, {:file_tree_move, source_index, target_dir_index}}
+
+  def decode_gui_action(@gui_action_system_will_sleep, <<>>),
+    do: {:ok, :system_will_sleep}
+
+  def decode_gui_action(@gui_action_system_did_wake, <<>>),
+    do: {:ok, :system_did_wake}
 
   def decode_gui_action(_, _), do: :error
 

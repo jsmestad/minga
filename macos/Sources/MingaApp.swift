@@ -573,6 +573,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var fontFace: FontFace?
     private var fontManager: FontManager?
     private var editorNSView: EditorNSView?
+    private var workspaceNotificationTasks: [Task<Void, Never>] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Ignore SIGPIPE so broken pipe writes return EPIPE instead of
@@ -674,6 +675,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         nsView.statusBarState = appState.gui.statusBarState
         self.editorNSView = nsView
         appState.editorNSView = nsView
+        observeWorkspaceLifecycleNotifications()
         os_signpost(.event, log: startupLog, name: "EditorViewCreated")
 
         disp.onFrameReady = { [weak nsView] in
@@ -797,6 +799,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        cancelWorkspaceLifecycleNotifications()
         protocolReader?.stop()
     }
 
@@ -814,6 +817,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 manager.bufferFileURL(url)
             }
         }
+    }
+
+    // MARK: - Workspace lifecycle notifications
+
+    /// Registers macOS sleep and screen sleep observers.
+    private func observeWorkspaceLifecycleNotifications() {
+        cancelWorkspaceLifecycleNotifications()
+
+        workspaceNotificationTasks = [
+            Task { @MainActor [weak self] in
+                for await _ in NSWorkspace.shared.notificationCenter.notifications(named: NSWorkspace.willSleepNotification) {
+                    guard let self else { return }
+                    PortLogger.info("System will sleep")
+                    self.encoder?.sendSystemWillSleep()
+                }
+            },
+            Task { @MainActor [weak self] in
+                for await _ in NSWorkspace.shared.notificationCenter.notifications(named: NSWorkspace.didWakeNotification) {
+                    guard let self else { return }
+                    PortLogger.info("System did wake")
+                    self.encoder?.sendSystemDidWake()
+                }
+            },
+            Task { @MainActor [weak self] in
+                for await _ in NSWorkspace.shared.notificationCenter.notifications(named: NSWorkspace.screensDidSleepNotification) {
+                    guard let self else { return }
+                    PortLogger.info("Screens did sleep; pausing Metal rendering")
+                    self.editorNSView?.pauseForScreenSleep()
+                }
+            },
+            Task { @MainActor [weak self] in
+                for await _ in NSWorkspace.shared.notificationCenter.notifications(named: NSWorkspace.screensDidWakeNotification) {
+                    guard let self else { return }
+                    PortLogger.info("Screens did wake; resuming Metal rendering")
+                    self.editorNSView?.resumeAfterScreenWake()
+                }
+            }
+        ]
+    }
+
+    /// Cancels macOS sleep and screen sleep observers.
+    private func cancelWorkspaceLifecycleNotifications() {
+        for task in workspaceNotificationTasks {
+            task.cancel()
+        }
+        workspaceNotificationTasks = []
     }
 
     // MARK: - Protocol reconnection (after BEAM restart)

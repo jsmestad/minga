@@ -77,6 +77,19 @@ defmodule Minga.LSP.SyncServer do
     ArgumentError -> []
   end
 
+  @doc """
+  Reattaches open buffers to their language servers after client restart.
+
+  This clears stale client monitors and ETS entries for the given buffers, then
+  runs the same document-open path used for `:buffer_opened` events. It is used
+  after system wake, when LSP clients may have been restarted while buffers stay
+  open in the editor.
+  """
+  @spec resync_buffers([pid()], GenServer.server()) :: :ok
+  def resync_buffers(buffer_pids, server \\ __MODULE__) when is_list(buffer_pids) do
+    GenServer.cast(server, {:resync_buffers, buffer_pids})
+  end
+
   # ── GenServer callbacks ────────────────────────────────────────────────
 
   @impl true
@@ -109,6 +122,19 @@ defmodule Minga.LSP.SyncServer do
        events_registry: events_registry
      }}
   end
+
+  @impl true
+  @spec handle_cast(term(), state()) :: {:noreply, state()}
+  def handle_cast({:resync_buffers, buffer_pids}, state) when is_list(buffer_pids) do
+    state =
+      buffer_pids
+      |> Enum.uniq()
+      |> Enum.reduce(state, fn buffer_pid, acc -> resync_buffer(acc, buffer_pid) end)
+
+    {:noreply, state}
+  end
+
+  def handle_cast(_msg, state), do: {:noreply, state}
 
   @impl true
   @spec handle_info(term(), state()) :: {:noreply, state()}
@@ -169,6 +195,17 @@ defmodule Minga.LSP.SyncServer do
   # ── Private: buffer lifecycle ──────────────────────────────────────────
 
   @spec do_buffer_open(state(), pid()) :: state()
+  @spec resync_buffer(state(), pid() | term()) :: state()
+  defp resync_buffer(state, buffer_pid) when is_pid(buffer_pid) do
+    state = demonitor_clients_for_buffer(state, buffer_pid)
+    state = cancel_debounce(state, buffer_pid)
+    state = %{state | delta_accumulators: Map.delete(state.delta_accumulators, buffer_pid)}
+    :ets.delete(@registry_table, buffer_pid)
+    do_buffer_open(state, buffer_pid)
+  end
+
+  defp resync_buffer(state, _buffer_pid), do: state
+
   defp do_buffer_open(state, buffer_pid) do
     filetype = Buffer.filetype(buffer_pid)
     file_path = Buffer.file_path(buffer_pid)

@@ -105,4 +105,31 @@ defmodule Minga.LSP.SupervisorTest do
       assert pid2 in clients
     end
   end
+
+  describe "restart_all_clients/1" do
+    test "restarts each running server root pair", %{supervisor: sup} do
+      config = MockLSPServer.server_config()
+      root1 = System.tmp_dir!()
+      root2 = Path.join(System.tmp_dir!(), "restart_all_proj")
+      File.mkdir_p!(root2)
+
+      {:ok, pid1} = LSPSupervisor.ensure_client(sup, config, root1)
+      {:ok, pid2} = LSPSupervisor.ensure_client(sup, config, root2)
+      await_ready(pid1)
+      await_ready(pid2)
+
+      results = LSPSupervisor.restart_all_clients(sup)
+
+      assert {{:mock_lsp, ^root1}, {:ok, new_pid1}} =
+               Enum.find(results, fn {key, _result} -> key == {:mock_lsp, root1} end)
+
+      assert {{:mock_lsp, ^root2}, {:ok, new_pid2}} =
+               Enum.find(results, fn {key, _result} -> key == {:mock_lsp, root2} end)
+
+      assert new_pid1 != pid1
+      assert new_pid2 != pid2
+      assert is_pid(new_pid1)
+      assert is_pid(new_pid2)
+    end
+  end
 end
