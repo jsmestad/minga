@@ -28,6 +28,7 @@ defmodule Minga.LSP.ServerRegistryTest do
       assert config.name == :rust_analyzer
       assert config.command == "rust-analyzer"
       assert "Cargo.toml" in config.root_markers
+      assert get_in(config.settings, ["rust-analyzer", "procMacro", "enable"]) == true
     end
 
     test "returns server configs for C" do
@@ -102,6 +103,7 @@ defmodule Minga.LSP.ServerRegistryTest do
         assert is_list(config.args), "#{filetype}: args must be list"
         assert is_list(config.root_markers), "#{filetype}: root_markers must be list"
         assert is_map(config.init_options), "#{filetype}: init_options must be map"
+        assert is_map(config.settings), "#{filetype}: settings must be map"
       end
     end
   end

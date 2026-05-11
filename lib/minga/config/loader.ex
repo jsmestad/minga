@@ -46,6 +46,7 @@ defmodule Minga.Config.Loader do
           project_config_path: String.t() | nil,
           project_config_error: String.t() | nil,
           after_error: String.t() | nil,
+          lsp_settings: %{atom() => map()},
           keymap_server: keymap_server(),
           options_server: options_server()
         }
@@ -127,6 +128,24 @@ defmodule Minga.Config.Loader do
   def after_error, do: after_error(__MODULE__)
   def after_error(server), do: Agent.get(server, & &1.after_error)
 
+  @doc "Returns LSP settings overrides loaded from user config."
+  @spec lsp_settings() :: %{atom() => map()}
+  @spec lsp_settings(GenServer.server()) :: %{atom() => map()}
+  def lsp_settings, do: lsp_settings(__MODULE__)
+
+  def lsp_settings(server) when is_atom(server) do
+    case Process.whereis(server) do
+      nil -> %{}
+      _pid -> get_lsp_settings(server)
+    end
+  end
+
+  def lsp_settings(server) when is_pid(server) do
+    if Process.alive?(server), do: get_lsp_settings(server), else: %{}
+  end
+
+  def lsp_settings(server), do: get_lsp_settings(server)
+
   @doc """
   Reloads all config from scratch.
 
@@ -200,16 +219,17 @@ defmodule Minga.Config.Loader do
 
   # ── Private ─────────────────────────────────────────────────────────────────
 
-  # The process dictionary bridges `keymap_server` and `options_server` into
-  # `Minga.Config.bind/3,4,5` and `Minga.Config.set/2`, which run synchronously
-  # while `.exs` configs evaluate. Code that calls those helpers from a separate
-  # process (e.g., a GenServer started by an extension callback) won't see this
-  # dict and will fall back to the registered defaults. Extensions are skipped
-  # in test mode, so this only affects long-lived runtime callers.
+  # The process dictionary bridges per-loader state into config DSL functions,
+  # which run synchronously while `.exs` configs evaluate. Code that calls those
+  # helpers from a separate process (e.g., a GenServer started by an extension
+  # callback) won't see this dict and will fall back to registered defaults.
+  # Extensions are skipped in test mode, so this only affects long-lived runtime
+  # callers.
   @spec load_all(keymap_server(), options_server()) :: state()
   defp load_all(keymap_server, options_server) do
     previous_keymap_server = Process.put(:minga_config_keymap, keymap_server)
     previous_options_server = Process.put(:minga_config_options, options_server)
+    previous_lsp_settings = Process.put(:minga_config_lsp_settings, %{})
 
     try do
       config_path = resolve_config_path()
@@ -262,6 +282,8 @@ defmodule Minga.Config.Loader do
         ExtSupervisor.start_all()
       end
 
+      lsp_settings = Process.get(:minga_config_lsp_settings, %{})
+
       %{
         config_path: config_path,
         load_error: load_error,
@@ -270,18 +292,25 @@ defmodule Minga.Config.Loader do
         project_config_path: project_path,
         project_config_error: project_config_error,
         after_error: after_error,
+        lsp_settings: lsp_settings,
         keymap_server: keymap_server,
         options_server: options_server
       }
     after
       restore_pdict(:minga_config_keymap, previous_keymap_server)
       restore_pdict(:minga_config_options, previous_options_server)
+      restore_pdict(:minga_config_lsp_settings, previous_lsp_settings)
     end
   end
 
   @spec restore_pdict(atom(), term() | nil) :: term() | nil
   defp restore_pdict(key, nil), do: Process.delete(key)
   defp restore_pdict(key, value), do: Process.put(key, value)
+
+  @spec get_lsp_settings(GenServer.server()) :: %{atom() => map()}
+  defp get_lsp_settings(server) do
+    Agent.get(server, fn state -> Map.get(state, :lsp_settings, %{}) end)
+  end
 
   # Skips the reset if the persisted options_server is no longer alive (anonymous
   # pid that crashed and was never restarted) or never registered. Otherwise

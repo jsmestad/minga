@@ -41,8 +41,12 @@ defmodule Minga.Config do
   alias Minga.Config.Options
   alias Minga.Extension.Registry, as: ExtRegistry
   alias Minga.Keymap
+  alias Minga.LSP.ServerConfig
+  alias Minga.LSP.ServerRegistry
   alias Minga.Popup.Registry, as: PopupRegistry
   alias Minga.Popup.Rule, as: PopupRule
+
+  @type lsp_settings :: %{String.t() => term()}
 
   @spec keymap_server() :: Keymap.server()
   defp keymap_server do
@@ -103,6 +107,37 @@ defmodule Minga.Config do
   @spec get_extension_option_for_filetype(atom(), atom(), atom() | nil) :: term()
   def get_extension_option_for_filetype(ext_name, opt_name, filetype),
     do: Options.get_extension_option_for_filetype(options_server(), ext_name, opt_name, filetype)
+
+  @doc """
+  Returns merged LSP settings for a server.
+
+  Language defaults from `ServerConfig.settings` are deep-merged with user overrides from `lsp_settings/2`. User config wins when both maps define the same nested key.
+  """
+  @spec get_lsp_settings(ServerConfig.t() | atom()) :: lsp_settings()
+  @spec get_lsp_settings(ServerConfig.t() | atom(), GenServer.server()) :: lsp_settings()
+  def get_lsp_settings(server_or_name, loader \\ Loader)
+
+  def get_lsp_settings(%ServerConfig{} = server_config, loader) do
+    overrides = loader |> Loader.lsp_settings() |> Map.get(server_config.name, %{})
+
+    server_config.settings
+    |> normalize_settings()
+    |> deep_merge(overrides)
+  end
+
+  def get_lsp_settings(server_name, loader) when is_atom(server_name) do
+    defaults =
+      case ServerRegistry.find_config(server_name) do
+        %ServerConfig{} = server_config -> server_config.settings
+        nil -> %{}
+      end
+
+    overrides = loader |> Loader.lsp_settings() |> Map.get(server_name, %{})
+
+    defaults
+    |> normalize_settings()
+    |> deep_merge(overrides)
+  end
 
   # ── Write options (non-raising) ────────────────────────────────────
 
@@ -484,6 +519,25 @@ defmodule Minga.Config do
   end
 
   @doc """
+  Sets per-server LSP settings.
+
+  Settings are deep-merged with language defaults from `ServerConfig.settings`. Use the server name from the language definition, such as `:lexical`, `:rust_analyzer`, or `:typescript_language_server`.
+
+  ## Examples
+
+      lsp_settings :rust_analyzer, %{"rust-analyzer" => %{"cargo" => %{"allFeatures" => false}}}
+      lsp_settings :typescript_language_server, %{"typescript" => %{"format" => %{"enable" => false}}}
+  """
+  @spec lsp_settings(atom(), keyword() | map()) :: :ok
+  def lsp_settings(server_name, settings) when is_atom(server_name) and is_list(settings) do
+    put_lsp_settings(server_name, normalize_settings(settings))
+  end
+
+  def lsp_settings(server_name, settings) when is_atom(server_name) and is_map(settings) do
+    put_lsp_settings(server_name, normalize_settings(settings))
+  end
+
+  @doc """
   Declares filetype-scoped keybindings.
 
   Bindings declared inside the block are scoped to the given filetype
@@ -634,4 +688,55 @@ defmodule Minga.Config do
 
     ExtRegistry.register_hex(name, package, rest)
   end
+
+  @spec put_lsp_settings(atom(), lsp_settings()) :: :ok
+  defp put_lsp_settings(server_name, settings) do
+    existing = Process.get(:minga_config_lsp_settings, %{})
+    merged = Map.update(existing, server_name, settings, &deep_merge(&1, settings))
+    Process.put(:minga_config_lsp_settings, merged)
+    :ok
+  end
+
+  @spec normalize_settings(keyword() | map()) :: lsp_settings()
+  defp normalize_settings(settings) when is_list(settings) do
+    settings
+    |> Map.new(fn {key, value} -> {normalize_key(key), normalize_value(value)} end)
+  end
+
+  defp normalize_settings(settings) when is_map(settings) do
+    settings
+    |> Map.new(fn {key, value} -> {normalize_key(key), normalize_value(value)} end)
+  end
+
+  @spec normalize_value(term()) :: term()
+  defp normalize_value([]), do: []
+
+  defp normalize_value(value) when is_list(value) do
+    if Keyword.keyword?(value) do
+      normalize_settings(value)
+    else
+      Enum.map(value, &normalize_value/1)
+    end
+  end
+
+  defp normalize_value(value) when is_map(value), do: normalize_settings(value)
+  defp normalize_value(value), do: value
+
+  @spec normalize_key(term()) :: String.t()
+  defp normalize_key(key) when is_atom(key), do: Atom.to_string(key)
+  defp normalize_key(key) when is_binary(key), do: key
+  defp normalize_key(key), do: to_string(key)
+
+  @spec deep_merge(lsp_settings(), lsp_settings()) :: lsp_settings()
+  defp deep_merge(left, right) when is_map(left) and is_map(right) do
+    Map.merge(left, right, fn _key, left_value, right_value ->
+      merge_lsp_setting(left_value, right_value)
+    end)
+  end
+
+  @spec merge_lsp_setting(term(), term()) :: term()
+  defp merge_lsp_setting(left, right) when is_map(left) and is_map(right),
+    do: deep_merge(left, right)
+
+  defp merge_lsp_setting(_left, right), do: right
 end

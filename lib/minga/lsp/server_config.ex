@@ -6,13 +6,15 @@ defmodule Minga.LSP.ServerConfig do
             command: nil,
             args: [],
             root_markers: [],
-            init_options: %{}
+            init_options: %{},
+            settings: %{}
 
   @type t :: %__MODULE__{
           name: atom(),
           command: String.t(),
           args: [String.t()],
           root_markers: [String.t()],
-          init_options: map()
+          init_options: map(),
+          settings: map()
         }
 end

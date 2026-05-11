@@ -11,19 +11,32 @@ defmodule Minga.LSP.ClientTest do
   alias Minga.LSP.Client
   alias Minga.Test.MockLSPServer
 
-  setup do
+  @ready_timeout 10_000
+
+  setup context do
     diag_server = start_supervised!({Diagnostics, name: :"diag_#{System.unique_integer()}"})
+    server_settings = Map.get(context, :server_settings, %{})
+
+    server_config =
+      MockLSPServer.server_config(
+        request_configuration: Map.get(context, :request_configuration, false),
+        request_unknown: Map.get(context, :request_unknown, false),
+        settings: server_settings
+      )
+
+    if Map.get(context, :request_configuration, false) or
+         Map.get(context, :request_unknown, false) do
+      Minga.Events.subscribe(:diagnostics_updated)
+    end
+
+    # Subscribe to LSP status events and wait for the client to be ready.
+    Minga.Events.subscribe(:lsp_status_changed)
 
     client =
       start_supervised!(
         {Client,
-         server_config: MockLSPServer.server_config(),
-         root_path: System.tmp_dir!(),
-         diagnostics: diag_server}
+         server_config: server_config, root_path: System.tmp_dir!(), diagnostics: diag_server}
       )
-
-    # Subscribe to LSP status events and wait for the client to be ready.
-    Minga.Events.subscribe(:lsp_status_changed)
 
     case Client.status(client) do
       :ready ->
@@ -32,7 +45,7 @@ defmodule Minga.LSP.ClientTest do
       _ ->
         assert_receive {:minga_event, :lsp_status_changed,
                         %Minga.Events.LspStatusEvent{name: :mock_lsp, status: :ready}},
-                       5_000
+                       @ready_timeout
     end
 
     %{client: client, diag_server: diag_server}
@@ -133,6 +146,49 @@ defmodule Minga.LSP.ClientTest do
     end
   end
 
+  describe "workspace/configuration" do
+    @tag request_configuration: true,
+         server_settings: %{
+           "mock_lsp" => %{
+             "nested" => %{"enabled" => true},
+             "value" => 1
+           }
+         }
+    test "responds to server configuration requests with section results", %{
+      diag_server: diag_server
+    } do
+      assert_receive {:minga_event, :diagnostics_updated,
+                      %Minga.Events.DiagnosticsUpdatedEvent{
+                        uri: "file:///tmp/configuration-test.ex"
+                      }},
+                     5_000
+
+      [diag] = Diagnostics.for_uri(diag_server, "file:///tmp/configuration-test.ex")
+
+      assert JSON.decode!(diag.message) == [
+               %{"enabled" => true},
+               %{},
+               %{"mock_lsp" => %{"nested" => %{"enabled" => true}, "value" => 1}}
+             ]
+    end
+  end
+
+  describe "server requests" do
+    @tag request_unknown: true
+    test "unhandled requests receive a method-not-found error", %{diag_server: diag_server} do
+      assert_receive {:minga_event, :diagnostics_updated,
+                      %Minga.Events.DiagnosticsUpdatedEvent{
+                        uri: "file:///tmp/unknown-request-test.ex"
+                      }},
+                     5_000
+
+      [diag] = Diagnostics.for_uri(diag_server, "file:///tmp/unknown-request-test.ex")
+
+      assert diag.code == "UNKNOWN"
+      assert diag.message == "-32601:Method not found: mock/unknown"
+    end
+  end
+
   describe "status events" do
     test "client broadcasts :lsp_status_changed with :stopped on shutdown", %{client: client} do
       # Setup already proved :ready fires (via assert_receive). Test :stopped.
@@ -160,8 +216,7 @@ defmodule Minga.LSP.ClientTest do
 
       assert is_reference(ref)
 
-      # The mock server doesn't handle completion, so we'll get a timeout.
-      # The key thing is the request was sent without crashing.
+      # This test only verifies the async request can be sent without crashing.
       assert Client.status(client) == :ready
     end
 

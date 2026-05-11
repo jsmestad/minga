@@ -23,17 +23,32 @@ defmodule Minga.Test.MockLSPServer do
     Path.join([__DIR__, "mock_lsp_server_script.exs"])
   end
 
+  @typedoc "Options for the mock server config."
+  @type server_config_opt ::
+          {:request_configuration, boolean()} | {:request_unknown, boolean()} | {:settings, map()}
+
   @doc """
   Returns a ServerConfig struct suitable for `LSP.Client.start_link/1`.
 
   Uses `elixir` as the command with the mock script as the argument.
   """
-  @spec server_config() :: Minga.LSP.ServerRegistry.server_config()
-  def server_config do
+  @spec server_config([server_config_opt()]) :: Minga.LSP.ServerRegistry.server_config()
+  def server_config(opts \\ []) do
+    request_args =
+      [
+        {Keyword.get(opts, :request_configuration, false), "--request-configuration"},
+        {Keyword.get(opts, :request_unknown, false), "--request-unknown"}
+      ]
+      |> Enum.flat_map(fn
+        {true, arg} -> [arg]
+        {false, _arg} -> []
+      end)
+
     %Minga.LSP.ServerConfig{
       name: :mock_lsp,
       command: "elixir",
-      args: [script_path()]
+      args: [script_path() | request_args],
+      settings: Keyword.get(opts, :settings, %{})
     }
   end
 end
