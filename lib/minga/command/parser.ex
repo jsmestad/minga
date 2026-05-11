@@ -65,7 +65,6 @@ defmodule Minga.Command.Parser do
   * `{:shell_command, command}` — run shell command and show output (`:!ls`)
   * `{:global, pattern, command}` — run ex command on matching lines (`:g/pat/cmd`)
   * `{:normal, range, keystrokes}` — execute normal mode keystrokes on a range of lines (`:normal`)
-  * `{:terminal, []}` — toggle integrated terminal (`:terminal`)
   * `{:unknown, raw}` — unrecognised command
   """
   @type parsed ::
@@ -108,7 +107,6 @@ defmodule Minga.Command.Parser do
           | {:global, String.t(), String.t()}
           | {:normal, range(), String.t()}
           | {:rename, String.t()}
-          | {:terminal, []}
           | {:unknown, String.t()}
 
   @typedoc "Flags for :%s substitution."
@@ -272,7 +270,6 @@ defmodule Minga.Command.Parser do
   defp do_parse("split"), do: {:split_horizontal, []}
   defp do_parse("sp"), do: {:split_horizontal, []}
   defp do_parse("close"), do: {:window_close, []}
-  defp do_parse("terminal"), do: {:terminal, []}
   defp do_parse("rename " <> name), do: {:rename, String.trim(name)}
   defp do_parse("buffers"), do: {:buffers, []}
   defp do_parse("ls"), do: {:buffers, []}

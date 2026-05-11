@@ -443,10 +443,6 @@ defmodule MingaEditor.Commands.BufferManagement do
     execute_shell_command(state, command)
   end
 
-  def execute(state, {:execute_ex_command, {:terminal, []}}) do
-    execute_terminal(state)
-  end
-
   def execute(
         %{workspace: %{buffers: %{active: buf}}} = state,
         {:execute_ex_command, {:global, pattern, command}}
@@ -1248,119 +1244,18 @@ defmodule MingaEditor.Commands.BufferManagement do
     spec = Minga.Editing.resolve_formatter(filetype, file_path)
     buf_name = Helpers.buffer_display_name(buf)
 
-    case try_lsp_format_on_save(buf) do
-      {:ok, _formatted} ->
-        MingaEditor.log_to_messages("Format-on-save (LSP): #{buf_name}")
+    case spec do
+      nil ->
         state
 
-      :not_available ->
-        maybe_run_external_formatter_on_save(state, buf, spec, buf_name)
-    end
-  end
+      _ ->
+        command = spec |> String.split() |> List.first()
 
-  @spec maybe_run_external_formatter_on_save(state(), pid(), String.t() | nil, String.t()) ::
-          state()
-  defp maybe_run_external_formatter_on_save(state, _buf, nil, _buf_name), do: state
-
-  defp maybe_run_external_formatter_on_save(state, buf, spec, buf_name) do
-    command = spec |> String.split() |> List.first()
-
-    if System.find_executable(command) do
-      run_formatter_with_spec(state, buf, spec, buf_name)
-    else
-      queue_formatter_tool_prompt(state, command)
-    end
-  end
-
-  @spec try_lsp_format_on_save(pid()) :: {:ok, String.t()} | :not_available
-  defp try_lsp_format_on_save(buf) when is_pid(buf) do
-    alias Minga.LSP.Client
-    alias Minga.LSP.SyncServer
-
-    clients = SyncServer.clients_for_buffer(buf)
-
-    case Enum.find(clients, fn client ->
-           caps = Client.capabilities(client)
-
-           get_in(caps, ["documentFormattingProvider"]) == true or
-             get_in(caps, ["textDocument", "formatting", "provider"]) == true
-         end) do
-      nil ->
-        :not_available
-
-      client ->
-        file_path = Buffer.file_path(buf)
-        uri = SyncServer.path_to_uri(file_path)
-        ref = Client.request_formatting(client, uri)
-
-        receive do
-          {:lsp_response, ^ref, {:ok, edits}} ->
-            content = Buffer.content(buf)
-            new_content = apply_lsp_edits_to_content(content, edits)
-
-            if new_content != content do
-              {cursor_line, cursor_col} = Buffer.cursor(buf)
-              Buffer.replace_content(buf, new_content)
-              line_count = Buffer.line_count(buf)
-              safe_line = min(cursor_line, max(line_count - 1, 0))
-              Buffer.move_to(buf, {safe_line, cursor_col})
-            end
-
-            {:ok, new_content}
-
-          {:lsp_response, ^ref, {:error, _reason}} ->
-            :not_available
-        after
-          1000 ->
-            :not_available
-        end
-    end
-  end
-
-  @spec apply_lsp_edits_to_content(String.t(), [map()]) :: String.t()
-  defp apply_lsp_edits_to_content(content, edits) when is_list(edits) do
-    Enum.reduce(Enum.reverse(edits), content, fn edit, acc ->
-      range = Map.get(edit, "range", %{})
-      new_text = Map.get(edit, "newText", "")
-      start_line = get_in(range, ["start", "line"]) || 0
-      start_col = get_in(range, ["start", "character"]) || 0
-      end_line = get_in(range, ["end", "line"]) || 0
-      end_col = get_in(range, ["end", "character"]) || 0
-
-      apply_single_lsp_edit(acc, start_line, start_col, end_line, end_col, new_text)
-    end)
-  end
-
-  @spec apply_single_lsp_edit(
-          String.t(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
-          String.t()
-        ) :: String.t()
-  defp apply_single_lsp_edit(content, start_line, start_col, end_line, end_col, new_text) do
-    lines = String.split(content, "\n")
-
-    case Enum.at(lines, start_line) do
-      nil ->
-        content
-
-      start_text ->
-        case Enum.at(lines, end_line) do
-          nil ->
-            content
-
-          end_text ->
-            before = String.slice(start_text, 0, start_col)
-            after_end = String.slice(end_text, end_col..-1)
-            replacement = before <> new_text <> after_end
-
-            {before_lines, rest} = Enum.split(lines, start_line)
-            {_removed, after_lines} = Enum.split(rest, end_line - start_line + 1)
-
-            new_lines = before_lines ++ [replacement] ++ after_lines
-            Enum.join(new_lines, "\n")
+        if System.find_executable(command) do
+          run_formatter_with_spec(state, buf, spec, buf_name)
+        else
+          # Formatter binary not found; queue a tool prompt if a recipe exists
+          queue_formatter_tool_prompt(state, command)
         end
     end
   end
@@ -1731,7 +1626,7 @@ defmodule MingaEditor.Commands.BufferManagement do
         ]) :: state()
   defp execute_sort(state, buf, range, flags) do
     total_lines = Buffer.line_count(buf)
-    {start_line, end_line} = resolve_range(range, total_lines)
+    {start_line, end_line} = resolve_range(range, buf, total_lines)
 
     if start_line < 0 or end_line >= total_lines or start_line > end_line do
       EditorState.set_status(state, "Invalid range: #{start_line + 1},#{end_line + 1}")
@@ -1783,7 +1678,7 @@ defmodule MingaEditor.Commands.BufferManagement do
     end
   end
 
-  @spec numeric_sort_key(String.t()) :: non_neg_integer()
+  @spec numeric_sort_key(String.t()) :: integer()
   defp numeric_sort_key(line) do
     case Integer.parse(String.trim_leading(line)) do
       {num, _} -> num
@@ -1832,21 +1727,6 @@ defmodule MingaEditor.Commands.BufferManagement do
     end
   end
 
-  # ── :terminal command ──────────────────────────────────────────────────────
-
-  @spec execute_terminal(state()) :: state()
-  defp execute_terminal(state) do
-    Minga.Terminal.Server.open("*terminal*")
-
-    case Minga.Terminal.Server.buffer("*terminal*") do
-      nil ->
-        EditorState.set_status(state, "Failed to open terminal")
-
-      buffer_pid ->
-        Commands.add_buffer(state, buffer_pid)
-    end
-  end
-
   # ── :global command ────────────────────────────────────────────────────────
 
   @spec execute_global(state(), pid(), String.t(), String.t()) :: state()
@@ -1857,7 +1737,14 @@ defmodule MingaEditor.Commands.BufferManagement do
     matching_lines =
       lines
       |> Enum.with_index()
-      |> Enum.filter(fn {line, _idx} -> String.contains?(line, pattern) end)
+      |> Enum.filter(fn {line, _idx} ->
+        try do
+          regex = Regex.compile!(pattern)
+          Regex.match?(regex, line)
+        rescue
+          Regex.CompileError -> String.contains?(line, pattern)
+        end
+      end)
 
     case matching_lines do
       [] ->
@@ -1877,7 +1764,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   @spec execute_normal(state(), pid(), Minga.Command.Parser.range(), String.t()) :: state()
   defp execute_normal(state, buf, range, keys) do
     total_lines = Buffer.line_count(buf)
-    {start_line, end_line} = resolve_range(range, total_lines)
+    {start_line, end_line} = resolve_range(range, buf, total_lines)
 
     if start_line < 0 or end_line >= total_lines or start_line > end_line do
       EditorState.set_status(state, "Invalid range: #{start_line + 1},#{end_line + 1}")
@@ -1938,7 +1825,7 @@ defmodule MingaEditor.Commands.BufferManagement do
         {36, 0}
 
       "\\" ->
-        {27, 0}
+        {92, 0}
 
       c ->
         case String.to_charlist(c) do
@@ -1950,25 +1837,27 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   # ── Range resolution ───────────────────────────────────────────────────────
 
-  @spec resolve_range(Minga.Command.Parser.range(), pos_integer()) ::
+  @spec resolve_range(Minga.Command.Parser.range(), pid(), pos_integer()) ::
           {non_neg_integer(), non_neg_integer()}
-  defp resolve_range(:whole_buffer, total_lines) do
+  defp resolve_range(:whole_buffer, _buf, total_lines) do
     {0, max(0, total_lines - 1)}
   end
 
-  defp resolve_range(:current_line, _total_lines) do
-    {0, 0}
+  defp resolve_range(:current_line, buf, _total_lines) do
+    {line, _col} = Buffer.cursor(buf)
+    {line, line}
   end
 
-  defp resolve_range(:last_line, total_lines) do
+  defp resolve_range(:last_line, _buf, total_lines) do
     {max(0, total_lines - 1), max(0, total_lines - 1)}
   end
 
-  defp resolve_range(:visual, _total_lines) do
+  # TODO: resolve actual visual selection marks when available
+  defp resolve_range(:visual, _buf, _total_lines) do
     {0, 0}
   end
 
-  defp resolve_range({:absolute, start, finish}, _total_lines) do
+  defp resolve_range({:absolute, start, finish}, _buf, _total_lines) do
     start_line = max(0, start - 1)
     end_line = max(0, finish - 1)
     {start_line, end_line}

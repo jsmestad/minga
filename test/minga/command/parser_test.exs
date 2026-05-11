@@ -419,10 +419,4 @@ defmodule Minga.Command.ParserTest do
       assert {:unknown, "normal"} = Parser.parse("normal    ")
     end
   end
-
-  describe "parse/1 — terminal command" do
-    test ":terminal parses to {:terminal, []}" do
-      assert {:terminal, []} = Parser.parse("terminal")
-    end
-  end
 end
