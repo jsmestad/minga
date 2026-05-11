@@ -50,17 +50,31 @@ defmodule Minga.Buffer.MtimeTest do
 
     {:ok, buf} = BufferServer.start_link(file_path: path)
 
-    # Simulate external modification — different size triggers detection
-    # even within the same second
+    # Simulate external modification, different size triggers detection even within the same second.
     File.write!(path, "externally modified with longer content")
 
     BufferServer.insert_char(buf, "x")
     result = BufferServer.save(buf)
 
     assert result == {:error, :file_changed}
-    # Buffer should still be dirty — save was rejected
     state = :sys.get_state(buf)
     assert state.dirty == true
+  end
+
+  @tag :tmp_dir
+  test ":w ignores metadata-only changes when file content still matches", %{tmp_dir: tmp_dir} do
+    path = Path.join(tmp_dir, "touched.txt")
+    File.write!(path, "original")
+
+    {:ok, buf} = BufferServer.start_link(file_path: path)
+    original_mtime = :sys.get_state(buf).mtime
+    File.touch!(path, original_mtime + 10)
+
+    BufferServer.insert_char(buf, "x")
+
+    assert BufferServer.save(buf) == :ok
+    assert File.read!(path) == "xoriginal"
+    refute BufferServer.dirty?(buf)
   end
 
   @tag :tmp_dir
@@ -70,7 +84,7 @@ defmodule Minga.Buffer.MtimeTest do
 
     {:ok, buf} = BufferServer.start_link(file_path: path)
 
-    # Simulate external modification — different size
+    # Simulate external modification with a different size.
     File.write!(path, "externally modified with longer content")
 
     BufferServer.insert_char(buf, "forced")

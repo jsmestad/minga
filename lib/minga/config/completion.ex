@@ -219,6 +219,10 @@ defmodule Minga.Config.Completion do
   defp option_description(:format_on_save),
     do: "Run the configured formatter when saving a buffer."
 
+  defp option_description(:auto_save_delay_ms),
+    do:
+      "Debounce before dirty file-backed buffers auto-save, in milliseconds. Set to 0 to disable."
+
   defp option_description(:formatter),
     do:
       "External formatter command (e.g., \"mix format\"). Nil uses the default for the filetype."

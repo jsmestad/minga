@@ -4,7 +4,7 @@ defmodule Minga.Buffer.Server do
 
   Each open file gets its own `Buffer.Server` process, managed by
   the `Buffer.Supervisor` (DynamicSupervisor). If a buffer process
-  crashes, only that buffer is lost — all other buffers and the
+  crashes, only that buffer is lost, and all other buffers and the
   editor continue running.
 
   ## Examples
@@ -837,6 +837,7 @@ defmodule Minga.Buffer.Server do
           buffer_type: buffer_type,
           mtime: mtime,
           file_size: size,
+          file_hash: saved_content_hash(path, mtime, text),
           name: Keyword.get(opts, :buffer_name),
           read_only: read_only,
           unlisted: Keyword.get(opts, :unlisted, false),
@@ -873,6 +874,7 @@ defmodule Minga.Buffer.Server do
             dirty: false,
             mtime: mtime,
             file_size: size,
+            file_hash: content_hash(text),
             decorations: Decorations.new(),
             undo_stack: [],
             redo_stack: []
@@ -1135,10 +1137,19 @@ defmodule Minga.Buffer.Server do
     if file_changed_on_disk?(state, disk_mtime, disk_size) do
       {:reply, {:error, :file_changed}, state}
     else
-      case write_file(state.file_path, Document.content(state.document)) do
+      content = Document.content(state.document)
+
+      case write_file(state.file_path, content) do
         :ok ->
           {new_mtime, new_size} = file_stat_info(state.file_path)
-          {:reply, :ok, mark_saved(%{state | mtime: new_mtime, file_size: new_size})}
+
+          {:reply, :ok,
+           mark_saved(%{
+             state
+             | mtime: new_mtime,
+               file_size: new_size,
+               file_hash: content_hash(content)
+           })}
 
         {:error, reason} ->
           {:reply, {:error, reason}, state}
@@ -1156,10 +1167,19 @@ defmodule Minga.Buffer.Server do
   end
 
   def handle_call(:force_save, _from, state) do
-    case write_file(state.file_path, Document.content(state.document)) do
+    content = Document.content(state.document)
+
+    case write_file(state.file_path, content) do
       :ok ->
         {new_mtime, new_size} = file_stat_info(state.file_path)
-        {:reply, :ok, mark_saved(%{state | mtime: new_mtime, file_size: new_size})}
+
+        {:reply, :ok,
+         mark_saved(%{
+           state
+           | mtime: new_mtime,
+             file_size: new_size,
+             file_hash: content_hash(content)
+         })}
 
       {:error, reason} ->
         {:reply, {:error, reason}, state}
@@ -1201,6 +1221,7 @@ defmodule Minga.Buffer.Server do
             dirty: false,
             mtime: new_mtime,
             file_size: new_size,
+            file_hash: content_hash(text),
             undo_stack: [],
             redo_stack: [],
             decorations: Decorations.new()
@@ -1215,14 +1236,22 @@ defmodule Minga.Buffer.Server do
   end
 
   def handle_call({:save_as, file_path}, _from, state) do
-    case write_file(file_path, Document.content(state.document)) do
+    content = Document.content(state.document)
+
+    case write_file(file_path, content) do
       :ok ->
         {new_mtime, new_size} = file_stat_info(file_path)
         unregister_path(state.file_path)
         register_path(file_path)
 
         {:reply, :ok,
-         mark_saved(%{state | file_path: file_path, mtime: new_mtime, file_size: new_size})}
+         mark_saved(%{
+           state
+           | file_path: file_path,
+             mtime: new_mtime,
+             file_size: new_size,
+             file_hash: content_hash(content)
+         })}
 
       {:error, reason} ->
         {:reply, {:error, reason}, state}
@@ -1435,7 +1464,7 @@ defmodule Minga.Buffer.Server do
             explicit_options: MapSet.put(state.explicit_options, name)
         }
 
-        {:reply, {:ok, value}, new_state}
+        {:reply, {:ok, value}, apply_option_change(new_state, name)}
 
       {:error, _} = err ->
         {:reply, err, state}
@@ -1763,10 +1792,31 @@ defmodule Minga.Buffer.Server do
     {:noreply, %{state | swap_timer: nil}}
   end
 
+  def handle_info(
+        {:auto_save, token},
+        %{buffer_type: :file, file_path: path, dirty: true, auto_save_token: token} = state
+      )
+      when is_binary(path) do
+    if auto_save_enabled?(state) do
+      auto_save_file(state, path)
+    else
+      {:noreply, clear_auto_save_timer(state)}
+    end
+  end
+
+  def handle_info({:auto_save, token}, %{auto_save_token: token} = state) do
+    {:noreply, clear_auto_save_timer(state)}
+  end
+
+  def handle_info({:auto_save, _token}, state) do
+    {:noreply, state}
+  end
+
   @impl true
   @spec terminate(term(), state()) :: :ok
   def terminate(_reason, state) do
-    # Clean up swap file on orderly shutdown (buffer closed, editor quit).
+    # Clean up timers and swap files on orderly shutdown (buffer closed, editor quit).
+    state = cancel_auto_save_timer(state)
     delete_swap_file(state)
     :ok
   end
@@ -1971,6 +2021,7 @@ defmodule Minga.Buffer.Server do
     :trim_trailing_whitespace,
     :insert_final_newline,
     :format_on_save,
+    :auto_save_delay_ms,
     :formatter,
     :line_numbers
   ]
@@ -1998,17 +2049,36 @@ defmodule Minga.Buffer.Server do
     end
   end
 
-  # Detects external changes by comparing mtime and file size.
-  # Same mtime + same size = no change (covers same-second writes that don't alter size).
-  # Different mtime OR different size = changed.
+  # Detects external changes by comparing mtime, file size, and saved-content hash.
+  # The hash closes the same-second, same-size hole in coarse filesystem mtimes.
   @spec file_changed_on_disk?(BufState.t(), integer() | nil, non_neg_integer() | nil) ::
           boolean()
-  defp file_changed_on_disk?(%{mtime: nil}, _disk_mtime, _disk_size), do: false
+  defp file_changed_on_disk?(%{mtime: nil}, nil, _disk_size), do: false
+  defp file_changed_on_disk?(%{mtime: nil}, _disk_mtime, _disk_size), do: true
   defp file_changed_on_disk?(_state, nil, _disk_size), do: false
 
   defp file_changed_on_disk?(state, disk_mtime, disk_size) do
-    disk_mtime > state.mtime or disk_size != state.file_size
+    metadata_changed? = disk_mtime != state.mtime or disk_size != state.file_size
+
+    case saved_content_status(state) do
+      :same -> false
+      :changed -> true
+      :unknown -> metadata_changed?
+    end
   end
+
+  @typep saved_content_status :: :same | :changed | :unknown
+
+  @spec saved_content_status(BufState.t()) :: saved_content_status()
+  defp saved_content_status(%{file_path: path, file_hash: hash})
+       when is_binary(path) and is_binary(hash) do
+    case File.read(path) do
+      {:ok, content} -> if content_hash(content) == hash, do: :same, else: :changed
+      {:error, _reason} -> :changed
+    end
+  end
+
+  defp saved_content_status(_state), do: :unknown
 
   @spec file_stat_info(String.t()) :: {integer() | nil, non_neg_integer() | nil}
   defp file_stat_info(path) do
@@ -2017,6 +2087,16 @@ defmodule Minga.Buffer.Server do
       {:error, _} -> {nil, nil}
     end
   end
+
+  @spec content_hash(String.t()) :: binary()
+  defp content_hash(content), do: :crypto.hash(:sha256, content)
+
+  @spec saved_content_hash(String.t() | nil, integer() | nil, String.t()) :: binary() | nil
+  defp saved_content_hash(path, mtime, content) when is_binary(path) and is_integer(mtime) do
+    content_hash(content)
+  end
+
+  defp saved_content_hash(_path, _mtime, _content), do: nil
 
   # Delegates to BufState for time-based undo coalescing.
   @spec push_undo(state(), Document.t(), BufState.edit_source()) :: state()
@@ -2045,17 +2125,27 @@ defmodule Minga.Buffer.Server do
   @spec mark_dirty(state()) :: state()
   defp mark_dirty(state) do
     state = BufState.mark_dirty(state)
-    schedule_swap_write(state)
+    state = schedule_swap_write(state)
+    schedule_auto_save(state)
   end
 
   @spec sync_dirty(state()) :: state()
-  defp sync_dirty(state), do: BufState.sync_dirty(state)
+  defp sync_dirty(state) do
+    state = BufState.sync_dirty(state)
+
+    if state.dirty do
+      schedule_auto_save(state)
+    else
+      cancel_auto_save_timer(state)
+    end
+  end
 
   @spec mark_saved(state()) :: state()
   defp mark_saved(state) do
     state = BufState.mark_saved(state)
     :ok = delete_swap_file(state)
-    cancel_swap_timer(state)
+    state = cancel_swap_timer(state)
+    cancel_auto_save_timer(state)
   end
 
   # Schedule a debounced swap file write. Cancels any pending timer
@@ -2076,6 +2166,152 @@ defmodule Minga.Buffer.Server do
   defp cancel_swap_timer(%{swap_timer: ref} = state) when is_reference(ref) do
     Process.cancel_timer(ref)
     %{state | swap_timer: nil}
+  end
+
+  @spec apply_option_change(state(), atom()) :: state()
+  defp apply_option_change(%{dirty: true} = state, :auto_save_delay_ms),
+    do: schedule_auto_save(state)
+
+  defp apply_option_change(state, :auto_save_delay_ms), do: cancel_auto_save_timer(state)
+  defp apply_option_change(state, _name), do: state
+
+  @spec auto_save_file(state(), String.t()) :: {:noreply, state()}
+  defp auto_save_file(state, path) do
+    case File.stat(path, time: :posix) do
+      {:ok, %{mtime: disk_mtime, size: disk_size}} ->
+        maybe_write_auto_save_file(state, path, disk_mtime, disk_size)
+
+      {:error, :enoent} when is_nil(state.mtime) ->
+        write_auto_save_file(state, path)
+
+      {:error, :enoent} ->
+        skip_auto_save(state, path, "file was deleted on disk")
+
+      {:error, reason} ->
+        skip_auto_save(state, path, "could not stat file: #{inspect(reason)}")
+    end
+  end
+
+  @spec maybe_write_auto_save_file(state(), String.t(), integer(), non_neg_integer()) ::
+          {:noreply, state()}
+  defp maybe_write_auto_save_file(state, path, disk_mtime, disk_size) do
+    if file_changed_on_disk?(state, disk_mtime, disk_size) do
+      skip_auto_save(state, path, "file changed on disk")
+    else
+      write_auto_save_file(state, path)
+    end
+  end
+
+  @spec skip_auto_save(state(), String.t(), String.t()) :: {:noreply, state()}
+  defp skip_auto_save(state, path, reason) do
+    log_to_messages(
+      state,
+      "Auto-save skipped for #{display_path(path)}: #{reason}; reload or save explicitly.",
+      :warning
+    )
+
+    {:noreply, clear_auto_save_timer(state)}
+  end
+
+  @spec write_auto_save_file(state(), String.t()) :: {:noreply, state()}
+  defp write_auto_save_file(state, path) do
+    content = Document.content(state.document)
+
+    case write_file(path, content) do
+      :ok ->
+        {new_mtime, new_size} = file_stat_info(path)
+
+        new_state =
+          mark_saved(%{
+            state
+            | mtime: new_mtime,
+              file_size: new_size,
+              file_hash: content_hash(content)
+          })
+
+        log_to_messages(new_state, "Auto-saved: #{display_path(path)}", :info)
+        broadcast_buffer_saved(new_state, path)
+        {:noreply, new_state}
+
+      {:error, reason} ->
+        log_to_messages(
+          state,
+          "Failed to auto-save #{display_path(path)}: #{inspect(reason)}",
+          :warning
+        )
+
+        {:noreply, clear_auto_save_timer(state)}
+    end
+  end
+
+  @spec broadcast_buffer_saved(state(), String.t()) :: :ok
+  defp broadcast_buffer_saved(state, path) do
+    Events.broadcast(
+      :buffer_saved,
+      %Events.BufferEvent{buffer: self(), path: path},
+      state.events_registry
+    )
+  end
+
+  @spec log_to_messages(state(), String.t(), Events.LogMessageEvent.level()) :: :ok
+  defp log_to_messages(state, text, level) do
+    Events.broadcast(
+      :log_message,
+      %Events.LogMessageEvent{text: text, level: level},
+      state.events_registry
+    )
+  end
+
+  @spec display_path(String.t()) :: String.t()
+  defp display_path(path), do: Path.relative_to_cwd(path)
+
+  @spec auto_save_enabled?(state()) :: boolean()
+  defp auto_save_enabled?(state) do
+    case resolve_option(state, :auto_save_delay_ms) do
+      delay when is_integer(delay) and delay > 0 -> true
+      _ -> false
+    end
+  end
+
+  # Schedule a debounced auto-save. A value of 0 disables auto-save.
+  @spec schedule_auto_save(state()) :: state()
+  defp schedule_auto_save(%{buffer_type: :file, file_path: path} = state) when is_binary(path) do
+    delay_ms = resolve_option(state, :auto_save_delay_ms)
+
+    case delay_ms do
+      delay when is_integer(delay) and delay > 0 ->
+        state = cancel_auto_save_timer(state)
+        token = make_ref()
+        timer = Process.send_after(self(), {:auto_save, token}, delay)
+        %{state | auto_save_timer: timer, auto_save_token: token}
+
+      _ ->
+        cancel_auto_save_timer(state)
+    end
+  end
+
+  defp schedule_auto_save(state), do: state
+
+  @spec cancel_auto_save_timer(state()) :: state()
+  defp cancel_auto_save_timer(%{auto_save_timer: nil} = state), do: clear_auto_save_timer(state)
+
+  defp cancel_auto_save_timer(%{auto_save_timer: timer, auto_save_token: token} = state)
+       when is_reference(timer) and is_reference(token) do
+    Process.cancel_timer(timer)
+    flush_auto_save_message(token)
+    clear_auto_save_timer(state)
+  end
+
+  @spec clear_auto_save_timer(state()) :: state()
+  defp clear_auto_save_timer(state), do: %{state | auto_save_timer: nil, auto_save_token: nil}
+
+  @spec flush_auto_save_message(reference()) :: :ok
+  defp flush_auto_save_message(token) do
+    receive do
+      {:auto_save, ^token} -> :ok
+    after
+      0 -> :ok
+    end
   end
 
   @spec delete_swap_file(state()) :: :ok

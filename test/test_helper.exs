@@ -37,5 +37,9 @@ ExUnit.start(capture_log: true, exclude: [:pi | swift_exclude])
 # test clipboard behavior set clipboard: :unnamedplus in their setup.
 Minga.Config.Options.set(:clipboard, :none)
 
+# Disable auto-save globally in tests to avoid background disk writes from
+# unrelated file-buffer tests. Auto-save tests opt in per buffer.
+Minga.Config.Options.set(:auto_save_delay_ms, 0)
+
 # Tests that create editors directly should pass `editing_model:` to
 # `MingaEditor.start_link/1` instead of mutating global config.

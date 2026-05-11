@@ -31,6 +31,7 @@ That's it. Save the file and restart Minga. Your options take effect immediately
 | `:trim_trailing_whitespace` | boolean | `false` | Strip trailing whitespace on save |
 | `:insert_final_newline` | boolean | `false` | Ensure file ends with a newline on save |
 | `:format_on_save` | boolean | `false` | Run the filetype's formatter before saving |
+| `:auto_save_delay_ms` | non-negative integer | `1000` | Debounce before dirty file-backed buffers auto-save; `0` disables auto-save |
 | `:formatter` | string or `nil` | `nil` | Override the default formatter command (see [Formatters](#formatters)) |
 | `:title_format` | string | `"{filename} {dirty}({directory}) - Minga"` | Terminal window title format (see [Window Title](#window-title)) |
 | `:recent_files_limit` | positive integer | `200` | Max recent files tracked per project |
@@ -117,15 +118,16 @@ The two options are orthogonal. `:agent_tool_approval` controls *whether* to pro
 
 For the full option API, see [`Minga.Config.Options`](https://jsmestad.github.io/minga/Minga.Config.Options.html).
 
-### Planned: buffer-aware agent options
+### Buffer-aware agent options
 
-When agent tools are [routed through `Buffer.Server`](BUFFER-AWARE-AGENTS.md), additional configuration options will control the new editing behavior:
+When agent tools are [routed through `Buffer.Server`](BUFFER-AWARE-AGENTS.md), file-backed buffers auto-save after `:auto_save_delay_ms` so agent edits are not stranded only in memory. Set it to `0` if you want every dirty buffer to wait for an explicit save.
 
-- Whether agent edits auto-save to disk or stay in-memory until explicit save
+Some buffer-aware controls are still planned:
+
 - Whether buffer forks merge automatically (clean merges only) or always go through diff review
 - Whether to flush dirty buffers before agent shell commands
 
-These options don't exist yet. See [BUFFER-AWARE-AGENTS.md](BUFFER-AWARE-AGENTS.md) for the design.
+See [BUFFER-AWARE-AGENTS.md](BUFFER-AWARE-AGENTS.md) for the design.
 
 ## LSP settings
 

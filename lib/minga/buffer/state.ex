@@ -20,11 +20,11 @@ defmodule Minga.Buffer.State do
   @typedoc """
   Buffer type controlling behavior:
 
-  * `:file` — (default) normal file buffer, supports save/dirty/undo
-  * `:nofile` — no file association, implicitly read-only, no save
-  * `:nowrite` — has a file path for display but cannot save
-  * `:prompt` — like `:nofile` but the last line is editable (for agent input, command input)
-  * `:terminal` — backed by an external process writing into the buffer
+  * `:file`: (default) normal file buffer, supports save/dirty/undo
+  * `:nofile`: no file association, implicitly read-only, no save
+  * `:nowrite`: has a file path for display but cannot save
+  * `:prompt`: like `:nofile` but the last line is editable (for agent input, command input)
+  * `:terminal`: backed by an external process writing into the buffer
   """
   @type buffer_type :: :file | :nofile | :nowrite | :prompt | :terminal
 
@@ -45,6 +45,7 @@ defmodule Minga.Buffer.State do
             saved_version: 0,
             mtime: nil,
             file_size: nil,
+            file_hash: nil,
             undo_stack: [],
             redo_stack: [],
             last_undo_at: 0,
@@ -61,6 +62,8 @@ defmodule Minga.Buffer.State do
             options: %{},
             explicit_options: MapSet.new(),
             swap_timer: nil,
+            auto_save_timer: nil,
+            auto_save_token: nil,
             swap_dir: nil,
             events_registry: Minga.Events.default_registry()
 
@@ -74,6 +77,7 @@ defmodule Minga.Buffer.State do
           saved_version: non_neg_integer(),
           mtime: integer() | nil,
           file_size: non_neg_integer() | nil,
+          file_hash: binary() | nil,
           undo_stack: [stack_entry()],
           redo_stack: [stack_entry()],
           last_undo_at: integer(),
@@ -90,6 +94,8 @@ defmodule Minga.Buffer.State do
           options: %{atom() => term()},
           explicit_options: MapSet.t(atom()),
           swap_timer: reference() | nil,
+          auto_save_timer: reference() | nil,
+          auto_save_token: reference() | nil,
           swap_dir: String.t() | nil,
           events_registry: Minga.Events.registry()
         }
