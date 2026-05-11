@@ -98,6 +98,44 @@ defmodule Minga.LSP.ClientTest do
       assert diag.range.start_col == 0
     end
 
+    test "didOpen before initialization is sent once the client becomes ready", %{
+      diag_server: diag_server
+    } do
+      uri = "file:///tmp/queued_open.ex"
+
+      root_path =
+        Path.join(System.tmp_dir!(), "queued_open_#{System.unique_integer([:positive])}")
+
+      File.mkdir_p!(root_path)
+      Minga.Events.subscribe(:lsp_status_changed)
+      Minga.Events.subscribe(:diagnostics_updated)
+
+      client =
+        start_supervised!(
+          Supervisor.child_spec(
+            {Client,
+             server_config: MockLSPServer.server_config(),
+             root_path: root_path,
+             diagnostics: diag_server},
+            id: :queued_open_lsp_client
+          )
+        )
+
+      Client.did_open(client, uri, "elixir", "defmodule QueuedOpen do\nend\n")
+
+      assert_receive {:minga_event, :lsp_status_changed,
+                      %Minga.Events.LspStatusEvent{name: :mock_lsp, status: :ready}},
+                     5_000
+
+      assert_receive {:minga_event, :diagnostics_updated,
+                      %Minga.Events.DiagnosticsUpdatedEvent{uri: ^uri}},
+                     5_000
+
+      state = :sys.get_state(client)
+      assert Map.has_key?(state.open_documents, uri)
+      assert state.pending_document_opens == %{}
+    end
+
     test "didChange does not crash", %{client: client} do
       Client.did_open(client, @uri, "elixir", "original")
       :sys.get_state(client)

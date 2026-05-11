@@ -15,6 +15,7 @@ defmodule Minga.LSP.Client.State do
     next_id: 1,
     started_at: nil,
     pending: %{},
+    pending_document_opens: %{},
     open_documents: %{},
     capabilities: %{},
     semantic_token_legend: nil,
@@ -33,6 +34,13 @@ defmodule Minga.LSP.Client.State do
           method: String.t(),
           from: pending_from(),
           timer: reference() | nil
+        }
+
+  @typedoc "A document open notification queued until the client is ready."
+  @type pending_document_open :: %{
+          uri: String.t(),
+          language_id: String.t(),
+          text: String.t()
         }
 
   @typedoc "An open document tracked by version."
@@ -57,6 +65,7 @@ defmodule Minga.LSP.Client.State do
           started_at: integer() | nil,
           next_id: pos_integer(),
           pending: %{integer() => pending_entry()},
+          pending_document_opens: %{String.t() => pending_document_open()},
           open_documents: %{String.t() => open_doc()},
           capabilities: map(),
           semantic_token_legend: {[String.t()], [String.t()]} | nil,
