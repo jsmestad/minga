@@ -12,6 +12,7 @@ defmodule MingaAgent.Hooks.Dispatcher do
   alias Minga.Events
   alias MingaAgent.Hooks.CommandRunner
   alias MingaAgent.Hooks.Hook
+  alias MingaAgent.Hooks.ModuleRunner
   alias MingaAgent.Hooks.PreToolUsePayload
   alias MingaAgent.Hooks.Result
 
@@ -22,7 +23,7 @@ defmodule MingaAgent.Hooks.Dispatcher do
   @spec dispatch(Hook.event(), [Hook.t()], map(), keyword()) :: :ok | {:error, Result.t()}
   def dispatch(event, hooks, payload_map, opts \\ [])
       when is_atom(event) and is_list(hooks) and is_map(payload_map) and is_list(opts) do
-    runner = Keyword.get(opts, :runner, &CommandRunner.run/2)
+    runner_override = Keyword.get(opts, :runner)
     veto_capable = Keyword.get(opts, :veto_capable, true)
     tool_name = Map.get(payload_map, "tool_name")
 
@@ -33,7 +34,7 @@ defmodule MingaAgent.Hooks.Dispatcher do
         Enum.filter(hooks, &Hook.matches?(&1, event))
       end
 
-    run_matching_hooks(matching, event, payload_map, runner, veto_capable)
+    run_matching_hooks(matching, event, payload_map, runner_override, veto_capable)
   end
 
   @doc "Runs all matching `PreToolUse` hooks in registration order."
@@ -122,17 +123,18 @@ defmodule MingaAgent.Hooks.Dispatcher do
     :ok
   end
 
-  @spec run_matching_hooks([Hook.t()], Hook.event(), map(), runner(), boolean()) ::
+  @spec run_matching_hooks([Hook.t()], Hook.event(), map(), runner() | nil, boolean()) ::
           :ok | {:error, Result.t()}
-  defp run_matching_hooks([], _event, _payload_map, _runner, _veto_capable), do: :ok
+  defp run_matching_hooks([], _event, _payload_map, _runner_override, _veto_capable), do: :ok
 
-  defp run_matching_hooks([hook | rest], event, payload_map, runner, veto_capable) do
+  defp run_matching_hooks([hook | rest], event, payload_map, runner_override, veto_capable) do
+    runner = runner_override || runner_for_hook(hook)
     broadcast(:started, event, hook, payload_map, nil)
 
     case runner.(hook, payload_map) do
       %Result{status: :allow} = result ->
         broadcast(:allowed, event, hook, payload_map, result)
-        run_matching_hooks(rest, event, payload_map, runner, veto_capable)
+        run_matching_hooks(rest, event, payload_map, runner_override, veto_capable)
 
       %Result{status: :veto} = result ->
         broadcast(:vetoed, event, hook, payload_map, result)
@@ -145,10 +147,14 @@ defmodule MingaAgent.Hooks.Dispatcher do
             "#{Hook.event_label(event)} hook veto ignored (notification-only): #{Result.message(result)}"
           )
 
-          run_matching_hooks(rest, event, payload_map, runner, veto_capable)
+          run_matching_hooks(rest, event, payload_map, runner_override, veto_capable)
         end
     end
   end
+
+  @spec runner_for_hook(Hook.t()) :: runner()
+  defp runner_for_hook(%Hook{type: :module}), do: &ModuleRunner.run/2
+  defp runner_for_hook(%Hook{}), do: &CommandRunner.run/2
 
   @spec broadcast(
           :started | :allowed | :vetoed,

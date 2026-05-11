@@ -302,7 +302,11 @@ defmodule MingaAgent.Hooks.DispatcherTest do
       Result.veto(received_hook, "blocked by policy", {:exit, 1})
     end
 
-    payload = %{"event" => "UserPromptSubmit", "session_id" => "s_ups", "prompt" => "do something"}
+    payload = %{
+      "event" => "UserPromptSubmit",
+      "session_id" => "s_ups",
+      "prompt" => "do something"
+    }
 
     assert {:error, %Result{status: :veto, stderr: "blocked by policy"}} =
              Dispatcher.user_prompt_submit([hook], payload, runner: runner)
@@ -362,7 +366,13 @@ defmodule MingaAgent.Hooks.DispatcherTest do
       Result.allow(received_hook)
     end
 
-    payload = %{"event" => "Notification", "session_id" => "s_n", "kind" => "complete", "message" => "done"}
+    payload = %{
+      "event" => "Notification",
+      "session_id" => "s_n",
+      "kind" => "complete",
+      "message" => "done"
+    }
+
     assert :ok = Dispatcher.notification([hook], payload, runner: runner)
     assert_receive :notif_ran
   end
@@ -374,7 +384,13 @@ defmodule MingaAgent.Hooks.DispatcherTest do
       Result.veto(received_hook, "blocked", {:exit, 1})
     end
 
-    payload = %{"event" => "Notification", "session_id" => "s_n2", "kind" => "error", "message" => "fail"}
+    payload = %{
+      "event" => "Notification",
+      "session_id" => "s_n2",
+      "kind" => "error",
+      "message" => "fail"
+    }
+
     assert :ok = Dispatcher.notification([hook], payload, runner: runner)
   end
 

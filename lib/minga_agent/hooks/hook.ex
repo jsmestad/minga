@@ -23,16 +23,22 @@ defmodule MingaAgent.Hooks.Hook do
           | :pre_compact
           | :notification
 
+  @typedoc "Hook type: shell command or in-process Elixir module."
+  @type hook_type :: :shell | :module
+
   @typedoc "Normalized hook declaration."
   @type t :: %__MODULE__{
           event: event(),
+          type: hook_type(),
           tool_pattern: String.t() | nil,
-          command: String.t(),
+          command: String.t() | nil,
+          module: module() | nil,
+          function: atom() | nil,
           timeout_ms: pos_integer()
         }
 
-  @enforce_keys [:event, :command]
-  defstruct [:event, :tool_pattern, :command, timeout_ms: @default_timeout_ms]
+  @enforce_keys [:event]
+  defstruct [:event, :tool_pattern, :command, :module, :function, type: :shell, timeout_ms: @default_timeout_ms]
 
   @doc "Returns the default per-hook timeout in milliseconds."
   @spec default_timeout_ms() :: pos_integer()
@@ -49,16 +55,18 @@ defmodule MingaAgent.Hooks.Hook do
 
   def normalize(raw) when is_map(raw) do
     with {:ok, event} <- normalize_event(fetch(raw, :event)),
+         {:ok, type} <- normalize_type(raw),
          {:ok, tool_pattern} <- normalize_tool_pattern(raw, event),
-         {:ok, command} <- normalize_command(fetch(raw, :command)),
+         {:ok, fields} <- normalize_type_fields(raw, type),
          {:ok, timeout_ms} <- normalize_timeout(fetch(raw, :timeout_ms)) do
       {:ok,
        %__MODULE__{
          event: event,
+         type: type,
          tool_pattern: tool_pattern,
-         command: command,
          timeout_ms: timeout_ms
-       }}
+       }
+       |> Map.merge(fields)}
     end
   end
 
@@ -150,9 +158,63 @@ defmodule MingaAgent.Hooks.Hook do
     end
   end
 
-  @spec normalize_command(term()) :: {:ok, String.t()} | {:error, String.t()}
-  defp normalize_command(value),
-    do: normalize_non_empty_string(value, "agent hook requires :command")
+  @spec normalize_type(map()) :: {:ok, hook_type()} | {:error, String.t()}
+  defp normalize_type(raw) do
+    case fetch(raw, :type) do
+      nil ->
+        cond do
+          fetch(raw, :module) != nil -> {:ok, :module}
+          true -> {:ok, :shell}
+        end
+
+      :shell -> {:ok, :shell}
+      "shell" -> {:ok, :shell}
+      :module -> {:ok, :module}
+      "module" -> {:ok, :module}
+      other -> {:error, "agent hook type must be :shell or :module, got: #{inspect(other)}"}
+    end
+  end
+
+  @spec normalize_type_fields(map(), hook_type()) ::
+          {:ok, %{command: String.t()} | %{module: module(), function: atom()}}
+          | {:error, String.t()}
+  defp normalize_type_fields(raw, :shell) do
+    case normalize_non_empty_string(fetch(raw, :command), "shell hook requires :command") do
+      {:ok, command} -> {:ok, %{command: command}}
+      error -> error
+    end
+  end
+
+  defp normalize_type_fields(raw, :module) do
+    with {:ok, mod} <- normalize_module(fetch(raw, :module)),
+         {:ok, fun} <- normalize_function(fetch(raw, :function)) do
+      {:ok, %{module: mod, function: fun}}
+    end
+  end
+
+  @spec normalize_module(term()) :: {:ok, module()} | {:error, String.t()}
+  defp normalize_module(nil), do: {:error, "module hook requires :module"}
+  defp normalize_module(mod) when is_atom(mod), do: {:ok, mod}
+
+  defp normalize_module(mod) when is_binary(mod) do
+    {:ok, String.to_existing_atom("Elixir." <> mod)}
+  rescue
+    ArgumentError -> {:error, "module hook :module #{inspect(mod)} is not a loaded module"}
+  end
+
+  defp normalize_module(other), do: {:error, "module hook :module must be an atom, got: #{inspect(other)}"}
+
+  @spec normalize_function(term()) :: {:ok, atom()} | {:error, String.t()}
+  defp normalize_function(nil), do: {:error, "module hook requires :function"}
+  defp normalize_function(fun) when is_atom(fun), do: {:ok, fun}
+
+  defp normalize_function(fun) when is_binary(fun) do
+    {:ok, String.to_existing_atom(fun)}
+  rescue
+    ArgumentError -> {:error, "module hook :function #{inspect(fun)} is not a known atom"}
+  end
+
+  defp normalize_function(other), do: {:error, "module hook :function must be an atom, got: #{inspect(other)}"}
 
   @spec normalize_timeout(term()) :: {:ok, pos_integer()} | {:error, String.t()}
   defp normalize_timeout(nil), do: {:ok, @default_timeout_ms}
