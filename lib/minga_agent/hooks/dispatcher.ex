@@ -88,6 +88,15 @@ defmodule MingaAgent.Hooks.Dispatcher do
     :ok
   end
 
+  @doc "Runs all matching `Stop` hooks (notification-only)."
+  @spec stop([Hook.t()], map()) :: :ok
+  @spec stop([Hook.t()], map(), keyword()) :: :ok
+  def stop(hooks, payload_map, opts \\ [])
+      when is_list(hooks) and is_map(payload_map) do
+    dispatch(:stop, hooks, payload_map, Keyword.put(opts, :veto_capable, false))
+    :ok
+  end
+
   @spec run_matching_hooks([Hook.t()], Hook.event(), map(), runner(), boolean()) ::
           :ok | {:error, Result.t()}
   defp run_matching_hooks([], _event, _payload_map, _runner, _veto_capable), do: :ok

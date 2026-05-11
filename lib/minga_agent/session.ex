@@ -28,6 +28,7 @@ defmodule MingaAgent.Session do
   alias MingaAgent.Hooks.Dispatcher, as: HookDispatcher
   alias MingaAgent.Hooks.SessionEndPayload
   alias MingaAgent.Hooks.SessionStartPayload
+  alias MingaAgent.Hooks.StopPayload
   alias MingaAgent.Memory
   alias MingaAgent.Message
   alias MingaAgent.Notifier
@@ -1110,6 +1111,8 @@ defmodule MingaAgent.Session do
         state
       end
 
+    dispatch_stop(state)
+
     # Collect pending messages from both queues. Steering messages that arrived
     # after the last tool call (or just before AgentEnd) would otherwise be
     # orphaned because dequeue_steering is only called between tool calls during
@@ -1894,5 +1897,26 @@ defmodule MingaAgent.Session do
     _ -> :ok
   catch
     _, _ -> :ok
+  end
+
+  @spec dispatch_stop(state()) :: :ok
+  defp dispatch_stop(state) do
+    last_message = extract_last_assistant_text(state.messages)
+    payload = StopPayload.new(state.session_id, :end_turn, last_message)
+    HookDispatcher.stop(AgentConfig.resolve().agent_hooks, StopPayload.to_map(payload))
+  rescue
+    _ -> :ok
+  catch
+    _, _ -> :ok
+  end
+
+  @spec extract_last_assistant_text([Message.t()]) :: String.t() | nil
+  defp extract_last_assistant_text(messages) do
+    messages
+    |> Enum.reverse()
+    |> Enum.find_value(fn
+      %{role: :assistant, content: content} when is_binary(content) -> content
+      _ -> nil
+    end)
   end
 end

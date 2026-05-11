@@ -266,6 +266,35 @@ defmodule MingaAgent.Hooks.DispatcherTest do
     assert :ok = Dispatcher.session_start([hook], payload, runner: runner)
   end
 
+  # ── Stop ────────────────────────────────────────────────────────────────────
+
+  test "Stop hooks run and are notification-only" do
+    test_pid = self()
+    hook = session_hook(:stop)
+
+    runner = fn received_hook, _payload_map ->
+      send(test_pid, :stop_ran)
+      Result.allow(received_hook)
+    end
+
+    payload = %{"event" => "Stop", "session_id" => "s_stop", "reason" => "end_turn"}
+    assert :ok = Dispatcher.stop([hook], payload, runner: runner)
+    assert_receive :stop_ran
+  end
+
+  test "Stop veto is ignored" do
+    hook = session_hook(:stop)
+
+    runner = fn received_hook, _payload_map ->
+      Result.veto(received_hook, "blocked", {:exit, 1})
+    end
+
+    payload = %{"event" => "Stop", "session_id" => "s_stop2"}
+    assert :ok = Dispatcher.stop([hook], payload, runner: runner)
+  end
+
+  # ── Normalization ──────────────────────────────────────────────────────────
+
   test "Session hooks do not require tool_pattern" do
     assert {:ok, %Hook{event: :session_start, tool_pattern: nil}} =
              Hook.normalize(%{event: "SessionStart", command: "echo start"})
