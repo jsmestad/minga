@@ -49,6 +49,7 @@ defmodule MingaAgent.Config do
 
     # API endpoint
     api_base_url: "",
+    api_base_url_override: nil,
     api_endpoints: nil,
 
     # MCP
@@ -102,6 +103,7 @@ defmodule MingaAgent.Config do
           system_prompt: String.t(),
           append_system_prompt: String.t(),
           api_base_url: String.t(),
+          api_base_url_override: String.t() | nil,
           api_endpoints: map() | nil,
           mcp_servers: [MingaAgent.MCP.ServerConfig.t() | map()],
           compaction_threshold: float() | nil,
@@ -152,6 +154,7 @@ defmodule MingaAgent.Config do
       system_prompt: get(:agent_system_prompt, ""),
       append_system_prompt: get(:agent_append_system_prompt, ""),
       api_base_url: get(:agent_api_base_url, ""),
+      api_base_url_override: non_empty_env("MINGA_API_BASE_URL"),
       api_endpoints: get(:agent_api_endpoints, nil),
       mcp_servers: get(:agent_mcp_servers, []),
       compaction_threshold: get(:agent_compaction_threshold, 0.80),
@@ -229,6 +232,14 @@ defmodule MingaAgent.Config do
     case String.split(model, ":", parts: 2) do
       [_provider, name] -> name
       [name] -> name
+    end
+  end
+
+  @spec non_empty_env(String.t()) :: String.t() | nil
+  defp non_empty_env(name) do
+    case System.get_env(name) do
+      value when is_binary(value) and value != "" -> value
+      _ -> nil
     end
   end
 

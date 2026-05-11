@@ -192,6 +192,31 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
     end
   end
 
+  describe "cycle_model/1" do
+    test "updates model and thinking level from the session response" do
+      {:ok, session} =
+        StubServer.start_link(
+          cycle_model:
+            {:ok,
+             %{
+               "model" => "openai:o4-mini",
+               "index" => 2,
+               "total" => 3,
+               "thinking_level" => "high"
+             }}
+        )
+
+      state = base_state(session: session)
+      state = AgentAccess.update_agent_ui(state, &UIState.set_thinking_level(&1, "medium"))
+
+      new_state = AgentCommands.cycle_model(state)
+
+      assert AgentAccess.panel(new_state).model_name == "openai:o4-mini"
+      assert AgentAccess.panel(new_state).thinking_level == "high"
+      assert new_state.shell_state.status_msg == "Model: openai:o4-mini [2/3]"
+    end
+  end
+
   # ── scope_* guard functions ──────────────────────────────────────────────
   # These functions guard on agentic/panel state. Test the guard behavior.
 

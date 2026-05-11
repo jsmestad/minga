@@ -579,8 +579,9 @@ defmodule MingaEditor.Commands.Agent do
       EditorState.set_status(state, "No agent session")
     else
       case Session.cycle_model(AgentAccess.session(state)) do
-        {:ok, %{"model" => model, "index" => index, "total" => total}} ->
+        {:ok, %{"model" => model, "index" => index, "total" => total} = result} ->
           state = update_agent_ui(state, &UIState.set_model_name(&1, model))
+          state = maybe_update_thinking_level(state, Map.get(result, "thinking_level"))
 
           Session.add_system_message(
             AgentAccess.session(state),
@@ -597,6 +598,13 @@ defmodule MingaEditor.Commands.Agent do
       end
     end
   end
+
+  @spec maybe_update_thinking_level(state(), term()) :: state()
+  defp maybe_update_thinking_level(state, level) when is_binary(level) do
+    update_agent_ui(state, &UIState.set_thinking_level(&1, level))
+  end
+
+  defp maybe_update_thinking_level(state, _level), do: state
 
   @doc "Sets the agent model without resetting conversation context."
   @spec set_model(state(), String.t()) :: state()

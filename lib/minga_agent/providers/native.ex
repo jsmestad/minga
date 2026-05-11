@@ -65,10 +65,10 @@ defmodule MingaAgent.Providers.Native do
   # Thinking levels and cycle order (not config-driven; mode-specific constants).
 
   @thinking_levels %{
-    "off" => 0,
-    "low" => 4_096,
-    "medium" => 16_384,
-    "high" => 32_768
+    "off" => nil,
+    "low" => :low,
+    "medium" => :medium,
+    "high" => :high
   }
 
   @thinking_cycle ["off", "low", "medium", "high"]
@@ -300,8 +300,11 @@ defmodule MingaAgent.Providers.Native do
 
     # Resolve API key from credentials (env var or credentials file).
     # If found in the file but not in the env, set the env var so ReqLLM
-    # picks it up automatically.
-    ensure_api_key_in_env(model)
+    # picks it up automatically. Tests can disable this to avoid mutating
+    # process-wide environment state.
+    unless Keyword.get(opts, :skip_api_key_env, false) do
+      ensure_api_key_in_env(model)
+    end
 
     state = %{
       subscriber: subscriber,
@@ -519,7 +522,7 @@ defmodule MingaAgent.Providers.Native do
   end
 
   def handle_call({:set_thinking_level, level}, _from, state) do
-    if Map.has_key?(@thinking_levels, level) do
+    if valid_thinking_level?(level) do
       Minga.Log.info(:agent, "[Agent.Native] thinking level set to #{level}")
       {:reply, :ok, %{state | thinking_level: level}}
     else
@@ -582,23 +585,31 @@ defmodule MingaAgent.Providers.Native do
   end
 
   def handle_call(:cycle_model, _from, state) do
-    model_list = read_config_model_list()
+    model_list = config_model_list(state.config)
 
     if model_list == [] do
       {:reply, {:error, "No model rotation configured. Set :agent_models in your config."}, state}
     else
       {next_model, next_thinking} = parse_model_entry(next_in_cycle(model_list, state.model))
+      thinking_level = next_thinking || state.thinking_level
 
       new_state = %{
         state
         | model: next_model,
-          thinking_level: next_thinking || state.thinking_level
+          thinking_level: thinking_level
       }
 
       total = length(model_list)
       index = Enum.find_index(model_list, &String.starts_with?(&1, next_model)) || 0
 
-      {:reply, {:ok, %{"model" => next_model, "index" => index + 1, "total" => total}}, new_state}
+      response = %{
+        "model" => next_model,
+        "index" => index + 1,
+        "total" => total,
+        "thinking_level" => thinking_level
+      }
+
+      {:reply, {:ok, response}, new_state}
     end
   end
 
@@ -1713,21 +1724,16 @@ defmodule MingaAgent.Providers.Native do
         opts
       end
 
+    maybe_add_reasoning_effort(opts, thinking_level)
+  end
+
+  @spec maybe_add_reasoning_effort(keyword(), String.t()) :: keyword()
+  defp maybe_add_reasoning_effort(opts, thinking_level) do
     case Map.get(@thinking_levels, thinking_level) do
-      budget when is_integer(budget) and budget > 0 ->
-        # Merge thinking config into existing provider_options
-        existing = Keyword.get(opts, :provider_options, [])
+      effort when effort in [:low, :medium, :high] ->
+        Keyword.put(opts, :reasoning_effort, effort)
 
-        merged =
-          Keyword.merge(existing,
-            additional_model_request_fields: %{
-              thinking: %{type: "enabled", budget_tokens: budget}
-            }
-          )
-
-        Keyword.put(opts, :provider_options, merged)
-
-      _ ->
+      nil ->
         opts
     end
   end
@@ -1743,14 +1749,14 @@ defmodule MingaAgent.Providers.Native do
 
   # Resolves the API base URL for the current request. Precedence:
   #
-  # 1. MINGA_API_BASE_URL env var (global override for all providers)
+  # 1. MINGA_API_BASE_URL captured in AgentConfig.resolve/0 (global override for all providers)
   # 2. Per-provider endpoint from :agent_api_endpoints map
   # 3. Global :agent_api_base_url config
   # 4. No override (use provider default)
   @spec maybe_add_base_url(keyword(), String.t(), AgentConfig.t()) :: keyword()
   defp maybe_add_base_url(opts, model, config) do
     url =
-      non_empty(System.get_env("MINGA_API_BASE_URL")) ||
+      non_empty(config.api_base_url_override) ||
         per_provider_url(model, config) ||
         non_empty(config.api_base_url)
 
@@ -2027,13 +2033,9 @@ defmodule MingaAgent.Providers.Native do
     end
   end
 
-  # read_config_model_list is still needed by cycle_model which reads
-  # the list at call time (not at init). This will migrate when the
-  # remaining consumer functions are updated to use config from state.
-  @spec read_config_model_list() :: [String.t()]
-  defp read_config_model_list do
-    Config.get(:agent_models)
-  end
+  @spec config_model_list(AgentConfig.t()) :: [String.t()]
+  defp config_model_list(%AgentConfig{models: models}) when is_list(models), do: models
+  defp config_model_list(_config), do: []
 
   # Works with both LoopCtx and state since both have max_cost/session_cost fields.
   @spec over_budget?(LoopCtx.t() | state()) :: boolean()
@@ -2081,11 +2083,24 @@ defmodule MingaAgent.Providers.Native do
   # Parses "provider:model:thinking_level" or "provider:model" into {model_str, thinking | nil}.
   @spec parse_model_entry(String.t()) :: {String.t(), String.t() | nil}
   defp parse_model_entry(entry) do
-    case String.split(entry, ":") do
-      [provider, model, thinking] -> {"#{provider}:#{model}", thinking}
-      _ -> {entry, nil}
+    parts = String.split(entry, ":")
+
+    case Enum.reverse(parts) do
+      [thinking | reversed_model_parts] when reversed_model_parts != [] ->
+        if valid_thinking_level?(thinking) do
+          model = reversed_model_parts |> Enum.reverse() |> Enum.join(":")
+          {model, thinking}
+        else
+          {entry, nil}
+        end
+
+      _ ->
+        {entry, nil}
     end
   end
+
+  @spec valid_thinking_level?(String.t()) :: boolean()
+  defp valid_thinking_level?(level), do: Map.has_key?(@thinking_levels, level)
 
   @spec detect_project_root() :: String.t()
   # Rebuilds the system prompt with current active skills and replaces it
