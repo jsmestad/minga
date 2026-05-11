@@ -47,7 +47,7 @@ defmodule MingaEditor.Frontend.EmitTest do
       refute Enum.member?(commands, <<0x12>>)
     end
 
-    test "GUI path produces commands (no clear expected for GUI with to_commands)" do
+    test "GUI path produces commands" do
       frame = %Frame{
         cursor: Cursor.new(0, 0, :block),
         splash: [DisplayList.draw(0, 0, "hello")]
@@ -60,6 +60,21 @@ defmodule MingaEditor.Frontend.EmitTest do
       assert_receive {:"$gen_cast", {:send_commands, commands}}
       assert is_list(commands)
       assert Enum.all?(commands, &is_binary/1)
+    end
+
+    test "GUI path omits clear for an undamaged frame" do
+      frame = %Frame{
+        cursor: Cursor.new(0, 0, :block),
+        splash: [DisplayList.draw(0, 0, "hello")],
+        damage: false
+      }
+
+      state = gui_state()
+      ctx = Context.from_editor_state(state)
+      Emit.emit(frame, ctx)
+
+      assert_receive {:"$gen_cast", {:send_commands, commands}}
+      refute Enum.member?(commands, <<0x12>>)
     end
   end
 

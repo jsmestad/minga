@@ -187,16 +187,26 @@ defmodule MingaEditor.RenderPipeline.Input do
 
     fingerprint_data =
       case Map.get(scrolls, active) do
-        %{cursor_line: line, cursor_byte_col: col, buf_version: version} -> {{line, col}, version}
-        _ -> buffer_fingerprint_data(input.workspace.buffers.active)
+        %{
+          cursor_line: line,
+          cursor_byte_col: col,
+          buf_version: version,
+          snapshot: %{dirty: dirty?}
+        } ->
+          {{line, col}, version, dirty?}
+
+        _ ->
+          buffer_fingerprint_data(input.workspace.buffers.active)
       end
 
     chrome_fingerprint(input, fingerprint_data)
   end
 
-  @spec chrome_fingerprint(t(), {{non_neg_integer(), non_neg_integer()}, non_neg_integer()}) ::
-          integer()
-  def chrome_fingerprint(%__MODULE__{} = input, {buf_cursor, buf_version}) do
+  @spec chrome_fingerprint(
+          t(),
+          {{non_neg_integer(), non_neg_integer()}, non_neg_integer(), boolean()}
+        ) :: integer()
+  def chrome_fingerprint(%__MODULE__{} = input, {buf_cursor, buf_version, dirty?}) do
     # Hash the fields that drive chrome output. We use :erlang.phash2
     # for speed (no crypto needed, just change detection).
     #
@@ -209,6 +219,7 @@ defmodule MingaEditor.RenderPipeline.Input do
       # Buffer state for status bar (cursor pos, version/dirty)
       buf_cursor,
       buf_version,
+      dirty?,
       # Mode affects status bar label, minibuffer content, cursor shape
       input.workspace.editing.mode,
       input.workspace.editing.mode_state,
@@ -243,13 +254,13 @@ defmodule MingaEditor.RenderPipeline.Input do
   end
 
   @spec buffer_fingerprint_data(pid() | nil) ::
-          {{non_neg_integer(), non_neg_integer()}, non_neg_integer()}
-  defp buffer_fingerprint_data(nil), do: {{0, 0}, 0}
+          {{non_neg_integer(), non_neg_integer()}, non_neg_integer(), boolean()}
+  defp buffer_fingerprint_data(nil), do: {{0, 0}, 0, false}
 
   defp buffer_fingerprint_data(buf) when is_pid(buf) do
-    {Minga.Buffer.cursor(buf), Minga.Buffer.version(buf)}
+    {Minga.Buffer.cursor(buf), Minga.Buffer.version(buf), Minga.Buffer.dirty?(buf)}
   catch
-    :exit, _ -> {{0, 0}, 0}
+    :exit, _ -> {{0, 0}, 0, false}
   end
 
   @doc """

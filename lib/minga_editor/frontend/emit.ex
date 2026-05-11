@@ -56,7 +56,7 @@ defmodule MingaEditor.Frontend.Emit do
     frame_cmds =
       frame
       |> EmitGUI.filter_frame_for_gui()
-      |> DisplayList.to_commands(batch_end: false)
+      |> DisplayList.to_commands(batch_end: false, clear: frame.damage)
 
     # Semantic window content (0x80 opcode)
     window_content_cmds = build_gui_window_content_commands(frame)

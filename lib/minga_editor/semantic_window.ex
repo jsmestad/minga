@@ -73,4 +73,12 @@ defmodule MingaEditor.SemanticWindow do
           annotations: [ResolvedAnnotation.t()],
           full_refresh: boolean()
         }
+
+  @doc "Returns semantic window content with an updated cursor shape."
+  @spec with_cursor_shape(t() | nil, cursor_shape()) :: t() | nil
+  def with_cursor_shape(nil, _shape), do: nil
+
+  def with_cursor_shape(%__MODULE__{} = semantic, shape) do
+    %{semantic | cursor_shape: shape}
+  end
 end

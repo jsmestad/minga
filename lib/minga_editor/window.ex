@@ -23,15 +23,13 @@ defmodule MingaEditor.Window do
   relative line numbering dirties every gutter entry without changing
   content. This avoids re-rendering line text when only line numbers change.
 
-  Tracking fields (`last_viewport_top`, `last_gutter_w`, `last_line_count`,
-  `last_cursor_line`, `last_buf_version`) store the values from the previous
-  frame. The Scroll stage compares current values against these to detect
-  full-invalidation triggers automatically.
+  Tracking fields (`last_viewport_top`, `last_gutter_w`, `last_line_count`, `last_cursor_line`, `last_cursor_col`, `last_buf_version`, `last_content_rect`, and the context fingerprint) store values from the previous frame. The render pipeline compares current values against these to detect full-invalidation triggers and reuse `last_window_frame` only when the cached output is still valid.
   """
 
   alias Minga.Buffer
   alias MingaEditor.DisplayList
   alias MingaEditor.FoldMap
+  alias MingaEditor.Layout
   alias Minga.Editing.Fold.Range, as: FoldRange
   alias MingaEditor.Viewport
   alias MingaEditor.Window.Content
@@ -540,6 +538,18 @@ defmodule MingaEditor.Window do
             ctx_fingerprint
           )
     }
+  end
+
+  @doc "Stores the content rect used by the last rendered window frame."
+  @spec cache_content_rect(t(), Layout.rect()) :: t()
+  def cache_content_rect(%__MODULE__{render_cache: cache} = window, content_rect) do
+    %{window | render_cache: RenderCache.store_content_rect(cache, content_rect)}
+  end
+
+  @doc "Stores the last rendered buffer dirty flag for clean-window metadata reuse."
+  @spec cache_buffer_dirty(t(), boolean()) :: t()
+  def cache_buffer_dirty(%__MODULE__{render_cache: cache} = window, dirty?) do
+    %{window | render_cache: RenderCache.store_buffer_dirty(cache, dirty?)}
   end
 
   @doc """

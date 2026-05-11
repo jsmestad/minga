@@ -206,6 +206,10 @@ defmodule MingaEditor.RenderPipeline.Scroll do
           boolean(),
           WindowDirty.t()
         ) :: WindowScroll.t()
+  defp scroll_window(state, win_id, window, win_layout, is_active, %WindowDirty{mode: :clean}) do
+    clean_window_scroll(state, win_id, window, win_layout, is_active)
+  end
+
   defp scroll_window(state, win_id, window, win_layout, is_active, dirty) do
     {_row_off, _col_off, content_width, content_height} = win_layout.content
 
@@ -302,9 +306,7 @@ defmodule MingaEditor.RenderPipeline.Scroll do
         dirty
       )
 
-    # Cursor byte → display col
-    cursor_line_text = cursor_line_text(lines, cursor_line, first_line)
-    cursor_col = Unicode.display_col(cursor_line_text, cursor_byte_col)
+    cursor_col = cursor_display_col(lines, cursor_line, cursor_byte_col, first_line)
 
     # Gutter dimensions
     line_number_style = Buffer.get_option(window.buffer, :line_numbers)
@@ -319,11 +321,15 @@ defmodule MingaEditor.RenderPipeline.Scroll do
     # so the cursor triggers scroll when it reaches the content edge,
     # not the full viewport edge.
     viewport =
-      if is_active do
-        scroll_horizontal(viewport, cursor_line, cursor_col, wrap_on, content_w, scroll_margin)
-      else
-        viewport
-      end
+      maybe_scroll_horizontal(
+        viewport,
+        cursor_line,
+        cursor_col,
+        wrap_on,
+        content_w,
+        scroll_margin,
+        is_active
+      )
 
     # Substitution preview (active window only)
     {lines, preview_matches} =
@@ -356,6 +362,51 @@ defmodule MingaEditor.RenderPipeline.Scroll do
     }
   end
 
+  @spec clean_window_scroll(state(), Window.id(), Window.t(), Layout.window_layout(), boolean()) ::
+          WindowScroll.t()
+  defp clean_window_scroll(_state, win_id, window, win_layout, is_active) do
+    {_row_off, _col_off, content_width, content_height} = win_layout.content
+    cache = window.render_cache
+    viewport = %{window.viewport | rows: content_height, cols: content_width, reserved: 0}
+    gutter_w = max(cache.last_gutter_w, 0)
+
+    snapshot = %RenderSnapshot{
+      cursor: {max(cache.last_cursor_line, 0), max(cache.last_cursor_col, 0)},
+      line_count: max(cache.last_line_count, 1),
+      lines: [],
+      file_path: nil,
+      filetype: :text,
+      buffer_type: :scratch,
+      dirty: cache.last_buffer_dirty,
+      name: nil,
+      read_only: false,
+      first_line_byte_offset: 0,
+      version: max(cache.last_buf_version, 0)
+    }
+
+    %WindowScroll{
+      win_id: win_id,
+      window: window,
+      win_layout: win_layout,
+      is_active: is_active,
+      viewport: viewport,
+      cursor_line: max(cache.last_cursor_line, 0),
+      cursor_byte_col: max(cache.last_cursor_col, 0),
+      cursor_col: max(cache.last_cursor_col, 0),
+      first_line: viewport.top,
+      lines: [],
+      snapshot: snapshot,
+      gutter_w: gutter_w,
+      content_w: max(content_width - gutter_w, 1),
+      has_sign_column: false,
+      preview_matches: [],
+      line_number_style: :absolute,
+      wrap_on: false,
+      buf_version: snapshot.version,
+      visible_line_map: nil
+    }
+  end
+
   @spec fetch_window_lines(
           pid(),
           non_neg_integer(),
@@ -379,34 +430,47 @@ defmodule MingaEditor.RenderPipeline.Scroll do
     {snapshot, snapshot.lines, snapshot.line_count}
   end
 
-  defp fetch_window_lines(
-         buffer,
-         fetch_first,
-         _fetch_count,
+  @spec cursor_display_col(
+          [String.t()],
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: non_neg_integer()
+  defp cursor_display_col(lines, cursor_line, cursor_byte_col, first_line) do
+    cursor_line_text = cursor_line_text(lines, cursor_line, first_line)
+    Unicode.display_col(cursor_line_text, cursor_byte_col)
+  end
+
+  @spec maybe_scroll_horizontal(
+          Viewport.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          boolean(),
+          pos_integer(),
+          non_neg_integer(),
+          boolean()
+        ) :: Viewport.t()
+  defp maybe_scroll_horizontal(
+         viewport,
+         _cursor_line,
+         _cursor_col,
+         _wrap_on,
+         _content_w,
+         _margin,
+         false
+       ),
+       do: viewport
+
+  defp maybe_scroll_horizontal(
+         viewport,
          cursor_line,
          cursor_col,
-         %WindowDirty{
-           mode: :clean
-         }
+         wrap_on,
+         content_w,
+         margin,
+         true
        ) do
-    line_count = Buffer.line_count(buffer)
-    version = Buffer.version(buffer)
-
-    snapshot = %RenderSnapshot{
-      cursor: {cursor_line, cursor_col},
-      line_count: line_count,
-      lines: [],
-      file_path: Buffer.file_path(buffer),
-      filetype: Buffer.filetype(buffer),
-      buffer_type: Buffer.buffer_type(buffer),
-      dirty: Buffer.dirty?(buffer),
-      name: Buffer.buffer_name(buffer),
-      read_only: Buffer.read_only?(buffer),
-      first_line_byte_offset: fetch_first,
-      version: version
-    }
-
-    {snapshot, [], line_count}
+    scroll_horizontal(viewport, cursor_line, cursor_col, wrap_on, content_w, margin)
   end
 
   @spec maybe_scroll_active_window_to_cursor(

@@ -42,9 +42,9 @@ defmodule MingaEditor.RenderPipeline do
 
   # The Invalidation type lives in its own module
   # (MingaEditor.RenderPipeline.Invalidation) carrying first-class
-  # per-window and per-region dirty info. Stage 1's producer always
-  # returns full_redraw: true today; the consumers' dirty-bit gating
-  # is the Phase 1/2 follow-up work in #1431.
+  # per-window and per-region dirty info. Stage 1 synthesizes dirty entries
+  # from render caches and cheap metadata before downstream stages apply
+  # their own safety checks.
 
   # ── Orchestrator ───────────────────────────────────────────────────────────
 
@@ -170,7 +170,7 @@ defmodule MingaEditor.RenderPipeline do
   # ── Stage 1: Invalidation ─────────────────────────────────────────────────
 
   @doc """
-  Invalidation stage (Stage 1). Currently a pass-through.
+  Invalidation stage (Stage 1). Currently a pass-through wrapper.
 
   All invalidation is handled by two mechanisms downstream:
 

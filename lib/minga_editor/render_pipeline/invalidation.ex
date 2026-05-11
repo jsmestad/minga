@@ -23,13 +23,9 @@ defmodule MingaEditor.RenderPipeline.Invalidation do
     `:focus_change`, etc.). Carried for telemetry; no behavioral
     effect today.
 
-  ## Phase 1 status
+  ## Dirty classification
 
-  This struct is the contract Stage 1 will produce when the dirty
-  tracking arrives. Today the producer always returns a struct with
-  `full_redraw: true` and empty maps, so behavior is unchanged.
-  Stage 2 (#1431 Phase 2) implements the per-row dirty algebra and
-  Stage 3 lifts it into the pipeline consumers.
+  Stage 1 now builds per-window dirty entries from render caches and cheap current metadata. Downstream stages still keep their own safety checks, so a clean classification only skips work when the existing cache proves the frame is reusable.
   """
 
   alias Minga.Buffer
@@ -111,18 +107,21 @@ defmodule MingaEditor.RenderPipeline.Invalidation do
 
   @spec dirty_windows(Input.t(), Layout.t()) :: %{integer() => WindowDirty.t()}
   defp dirty_windows(input, layout) do
-    Map.new(layout.window_layouts, fn {win_id, _win_layout} ->
+    Map.new(layout.window_layouts, fn {win_id, win_layout} ->
       window = Map.get(input.workspace.windows.map, win_id)
-      {win_id, dirty_for_window(input, window)}
+      {win_id, dirty_for_window(input, window, win_layout)}
     end)
   end
 
-  @spec dirty_for_window(Input.t(), MingaEditor.Window.t() | nil) :: WindowDirty.t()
-  defp dirty_for_window(_input, nil), do: WindowDirty.all(:missing_window)
+  @spec dirty_for_window(Input.t(), MingaEditor.Window.t() | nil, Layout.window_layout()) ::
+          WindowDirty.t()
+  defp dirty_for_window(_input, nil, _win_layout), do: WindowDirty.all(:missing_window)
 
-  defp dirty_for_window(_input, %{content: {:agent_chat, _}}), do: WindowDirty.all(:agent_chat)
+  defp dirty_for_window(_input, %{content: {:agent_chat, _}}, _win_layout) do
+    WindowDirty.all(:agent_chat)
+  end
 
-  defp dirty_for_window(input, window) do
+  defp dirty_for_window(input, window, win_layout) do
     cache = window.render_cache
 
     case cache.dirty_lines do
@@ -133,22 +132,29 @@ defmodule MingaEditor.RenderPipeline.Invalidation do
         WindowDirty.rows(Map.keys(dirty), :cached_rows)
 
       _ ->
-        dirty_from_context(input, window)
+        dirty_from_context(input, window, win_layout)
     end
   end
 
-  @spec dirty_from_context(Input.t(), MingaEditor.Window.t()) :: WindowDirty.t()
-  defp dirty_from_context(input, window) do
-    if context_requires_rebuild?(input, window) do
+  @spec dirty_from_context(Input.t(), MingaEditor.Window.t(), Layout.window_layout()) ::
+          WindowDirty.t()
+  defp dirty_from_context(input, window, win_layout) do
+    if context_requires_rebuild?(input, window, win_layout) do
       WindowDirty.all(:context_changed)
     else
       dirty_from_metadata(input, window)
     end
   end
 
-  @spec context_requires_rebuild?(Input.t(), MingaEditor.Window.t()) :: boolean()
-  defp context_requires_rebuild?(input, window) do
-    visual_context_changed?(input, window) or decorations_changed?(window)
+  @spec context_requires_rebuild?(Input.t(), MingaEditor.Window.t(), Layout.window_layout()) ::
+          boolean()
+  defp context_requires_rebuild?(input, window, win_layout) do
+    visual_context_changed?(input, window) or
+      viewport_context_changed?(window, win_layout) or
+      active_context_changed?(input, window) or
+      search_context_active_or_cached?(input, window) or
+      sign_context_changed?(window) or
+      decorations_changed?(window)
   end
 
   @spec visual_context_changed?(Input.t(), MingaEditor.Window.t()) :: boolean()
@@ -162,6 +168,107 @@ defmodule MingaEditor.RenderPipeline.Invalidation do
     do: visual_selection
 
   defp cached_visual_selection(_fingerprint), do: nil
+
+  @spec viewport_context_changed?(MingaEditor.Window.t(), Layout.window_layout()) :: boolean()
+  defp viewport_context_changed?(window, win_layout) do
+    {_row, _col, content_width, _content_height} = win_layout.content
+    cache = window.render_cache
+    line_count = safe_line_count(window.buffer, cache.last_line_count)
+    gutter_w = current_gutter_width(window.buffer, line_count, cache.last_gutter_w)
+    content_w = max(content_width - gutter_w, 1)
+
+    cache.last_content_rect != win_layout.content or
+      cache.last_viewport_top != window.viewport.top or
+      cached_viewport_left(cache.last_context_fingerprint) != window.viewport.left or
+      cached_viewport_cols(cache.last_context_fingerprint) != content_width or
+      cached_content_w(cache.last_context_fingerprint) != content_w
+  end
+
+  @spec cached_viewport_left(term()) :: non_neg_integer() | nil
+  defp cached_viewport_left({_, _, _, _, _, viewport_left, _, _, _, _, _}), do: viewport_left
+  defp cached_viewport_left(_fingerprint), do: nil
+
+  @spec cached_viewport_cols(term()) :: pos_integer() | nil
+  defp cached_viewport_cols({_, _, _, _, _, _, viewport_cols, _, _, _, _}), do: viewport_cols
+  defp cached_viewport_cols(_fingerprint), do: nil
+
+  @spec cached_content_w(term()) :: pos_integer() | nil
+  defp cached_content_w({_, _, _, _, _, _, _, content_w, _, _, _}), do: content_w
+  defp cached_content_w(_fingerprint), do: nil
+
+  @spec active_context_changed?(Input.t(), MingaEditor.Window.t()) :: boolean()
+  defp active_context_changed?(input, window) do
+    cached_active?(window.render_cache.last_context_fingerprint) !=
+      (window.id == input.workspace.windows.active)
+  end
+
+  @spec cached_active?(term()) :: boolean() | nil
+  defp cached_active?({_, _, _, _, _, _, _, _, active?, _, _}), do: active?
+  defp cached_active?(_fingerprint), do: nil
+
+  @spec search_context_active_or_cached?(Input.t(), MingaEditor.Window.t()) :: boolean()
+  defp search_context_active_or_cached?(input, window) do
+    search_mode?(input.workspace.editing.mode) or
+      active_search_pattern?(input) or
+      cached_search_matches?(window.render_cache.last_context_fingerprint) or
+      cached_confirm_match?(window.render_cache.last_context_fingerprint)
+  end
+
+  @spec search_mode?(atom()) :: boolean()
+  defp search_mode?(mode) when mode in [:search, :command, :substitute_confirm], do: true
+  defp search_mode?(_mode), do: false
+
+  @spec active_search_pattern?(Input.t()) :: boolean()
+  defp active_search_pattern?(input) do
+    pattern = input.workspace.search.last_pattern
+    is_binary(pattern) and pattern != ""
+  end
+
+  @spec cached_search_matches?(term()) :: boolean()
+  defp cached_search_matches?({_, search_matches, _, _, _, _, _, _, _, _, _}) do
+    search_matches != []
+  end
+
+  defp cached_search_matches?(_fingerprint), do: false
+
+  @spec cached_confirm_match?(term()) :: boolean()
+  defp cached_confirm_match?({_, _, _, _, _, _, _, _, _, confirm_match, _}) do
+    confirm_match != nil
+  end
+
+  defp cached_confirm_match?(_fingerprint), do: false
+
+  @spec sign_context_changed?(MingaEditor.Window.t()) :: boolean()
+  defp sign_context_changed?(window) do
+    cached_diagnostic_signs(window.render_cache.last_context_fingerprint) !=
+      safe_diagnostic_signs(window) or
+      cached_git_signs(window.render_cache.last_context_fingerprint) != safe_git_signs(window)
+  end
+
+  @spec safe_diagnostic_signs(MingaEditor.Window.t()) :: %{non_neg_integer() => atom()}
+  defp safe_diagnostic_signs(window) do
+    MingaEditor.RenderPipeline.ContentHelpers.diagnostic_signs_for_window(window)
+  catch
+    :exit, _ -> %{}
+  end
+
+  @spec safe_git_signs(MingaEditor.Window.t()) :: %{non_neg_integer() => atom()}
+  defp safe_git_signs(window) do
+    MingaEditor.RenderPipeline.ContentHelpers.git_signs_for_window(window)
+  catch
+    :exit, _ -> %{}
+  end
+
+  @spec cached_diagnostic_signs(term()) :: %{non_neg_integer() => atom()} | nil
+  defp cached_diagnostic_signs({_, _, _, diagnostic_signs, _, _, _, _, _, _, _}) do
+    diagnostic_signs
+  end
+
+  defp cached_diagnostic_signs(_fingerprint), do: nil
+
+  @spec cached_git_signs(term()) :: %{non_neg_integer() => atom()} | nil
+  defp cached_git_signs({_, _, _, _, git_signs, _, _, _, _, _, _}), do: git_signs
+  defp cached_git_signs(_fingerprint), do: nil
 
   @spec decorations_changed?(MingaEditor.Window.t()) :: boolean()
   defp decorations_changed?(window) do
@@ -202,12 +309,14 @@ defmodule MingaEditor.RenderPipeline.Invalidation do
     {cursor_line, cursor_col} = current_cursor(input, window)
     line_count = safe_line_count(window.buffer, cache.last_line_count)
     version = safe_version(window.buffer, cache.last_buf_version)
+    dirty? = safe_dirty?(window.buffer, cache.last_buffer_dirty)
     gutter_w = current_gutter_width(window.buffer, line_count, cache.last_gutter_w)
 
     classify_metadata_change(
       cache,
       line_count,
       version,
+      dirty?,
       gutter_w,
       cursor_line,
       cursor_col,
@@ -221,6 +330,7 @@ defmodule MingaEditor.RenderPipeline.Invalidation do
           MingaEditor.Window.RenderCache.t(),
           non_neg_integer(),
           non_neg_integer(),
+          boolean(),
           non_neg_integer(),
           non_neg_integer(),
           non_neg_integer(),
@@ -230,6 +340,7 @@ defmodule MingaEditor.RenderPipeline.Invalidation do
          cache,
          line_count,
          version,
+         dirty?,
          gutter_w,
          cursor_line,
          cursor_col,
@@ -240,8 +351,25 @@ defmodule MingaEditor.RenderPipeline.Invalidation do
     if first_frame or line_count != cache.last_line_count or gutter_w != cache.last_gutter_w do
       WindowDirty.all(:structural_change)
     else
-      classify_version_change(cache, version, cursor_line, cursor_col, buffer)
+      classify_dirty_flag_change(cache, version, dirty?, cursor_line, cursor_col, buffer)
     end
+  end
+
+  @spec classify_dirty_flag_change(
+          MingaEditor.Window.RenderCache.t(),
+          non_neg_integer(),
+          boolean(),
+          non_neg_integer(),
+          non_neg_integer(),
+          pid()
+        ) :: WindowDirty.t()
+  defp classify_dirty_flag_change(cache, _version, dirty?, _cursor_line, _cursor_col, _buffer)
+       when dirty? != cache.last_buffer_dirty do
+    WindowDirty.all(:buffer_dirty_changed)
+  end
+
+  defp classify_dirty_flag_change(cache, version, _dirty?, cursor_line, cursor_col, buffer) do
+    classify_version_change(cache, version, cursor_line, cursor_col, buffer)
   end
 
   @spec classify_version_change(
@@ -320,6 +448,13 @@ defmodule MingaEditor.RenderPipeline.Invalidation do
   @spec safe_version(pid(), non_neg_integer()) :: non_neg_integer()
   defp safe_version(buffer, fallback) do
     Buffer.version(buffer)
+  catch
+    :exit, _ -> fallback
+  end
+
+  @spec safe_dirty?(pid(), boolean()) :: boolean()
+  defp safe_dirty?(buffer, fallback) do
+    Buffer.dirty?(buffer)
   catch
     :exit, _ -> fallback
   end

@@ -5,6 +5,7 @@ defmodule MingaEditor.RenderPipeline.ScrollTest do
 
   use ExUnit.Case, async: true
 
+  alias Minga.Buffer
   alias MingaEditor.Layout
   alias MingaEditor.RenderPipeline
   alias MingaEditor.RenderPipeline.Content
@@ -13,6 +14,7 @@ defmodule MingaEditor.RenderPipeline.ScrollTest do
   alias MingaEditor.RenderPipeline.Scroll.WindowScroll
   alias MingaEditor.RenderPipeline.WindowDirty
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.Window
 
   import MingaEditor.RenderPipeline.TestHelpers
 
@@ -117,6 +119,45 @@ defmodule MingaEditor.RenderPipeline.ScrollTest do
                {:"$gen_call", _from, {:render_snapshot, _first, _count}} -> true
                _ -> false
              end)
+    end
+
+    test "clean active windows preserve horizontal scroll without fetched lines" do
+      state = base_state(content: "alpha beta gamma delta epsilon zeta eta theta")
+      {:ok, false} = Buffer.set_option(state.workspace.buffers.active, :wrap, false)
+      {scrolls, state, layout} = run_through_scroll(state)
+      {_frames, _cursor, state} = Content.build_content(state, scrolls)
+      win_id = state.workspace.windows.active
+
+      scrolled_window =
+        state.workspace.windows.map
+        |> Map.fetch!(win_id)
+        |> Window.scroll_horizontal(12)
+
+      state = put_in(state.workspace.windows.map[win_id], scrolled_window)
+      invalidation = clean_invalidation(win_id)
+
+      {scrolls, state} = Scroll.scroll_windows(state, layout, invalidation)
+      scroll = Map.fetch!(scrolls, win_id)
+      updated_window = Map.fetch!(state.workspace.windows.map, win_id)
+
+      assert scroll.lines == []
+      assert scroll.viewport.left == 12
+      assert updated_window.viewport.left == 12
+    end
+
+    test "clean windows reuse cached buffer dirty status" do
+      state = base_state(content: "alpha\nbeta\ngamma")
+      {scrolls, state, layout} = run_through_scroll(state)
+      {_frames, _cursor, state} = Content.build_content(state, scrolls)
+      win_id = state.workspace.windows.active
+
+      state = put_in(state.workspace.windows.map[win_id].render_cache.last_buffer_dirty, true)
+      invalidation = clean_invalidation(win_id)
+
+      {scrolls, _state} = Scroll.scroll_windows(state, layout, invalidation)
+      scroll = Map.fetch!(scrolls, win_id)
+
+      assert scroll.snapshot.dirty == true
     end
   end
 end

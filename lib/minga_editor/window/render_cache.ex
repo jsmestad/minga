@@ -23,15 +23,12 @@ defmodule MingaEditor.Window.RenderCache do
   ## Tracking fields
 
   `last_viewport_top`, `last_gutter_w`, `last_line_count`, `last_cursor_line`,
-  and `last_buf_version` store values from the previous frame. The Scroll
-  stage compares current values against these to detect full-invalidation
-  triggers. `last_context_fingerprint` captures all per-frame render context
-  inputs (visual selection, search matches, syntax highlights, signs, etc.)
-  so context changes trigger full redraws.
+  `last_cursor_col`, `last_buf_version`, and `last_content_rect` store values from the previous frame. The invalidation and scroll stages compare current values against these to decide whether a cached frame is safe to reuse. `last_context_fingerprint` captures per-frame render context inputs (visual selection, search matches, syntax highlights, signs, etc.), and `last_window_frame` stores the complete reusable frame for clean windows.
   """
 
   alias MingaEditor.DisplayList
   alias MingaEditor.DisplayList.WindowFrame
+  alias MingaEditor.Layout
 
   @compile {:inline, dirty?: 2}
 
@@ -56,6 +53,8 @@ defmodule MingaEditor.Window.RenderCache do
           last_cursor_line: integer(),
           last_cursor_col: integer(),
           last_buf_version: integer(),
+          last_buffer_dirty: boolean(),
+          last_content_rect: Layout.rect() | nil,
           last_context_fingerprint: context_fingerprint(),
           last_window_frame: WindowFrame.t() | nil
         }
@@ -69,6 +68,8 @@ defmodule MingaEditor.Window.RenderCache do
             last_cursor_line: -1,
             last_cursor_col: -1,
             last_buf_version: -1,
+            last_buffer_dirty: false,
+            last_content_rect: nil,
             last_context_fingerprint: nil,
             last_window_frame: nil
 
@@ -268,6 +269,18 @@ defmodule MingaEditor.Window.RenderCache do
         last_buf_version: buf_version,
         last_context_fingerprint: ctx_fingerprint
     }
+  end
+
+  @doc "Stores the content rect used by the last rendered window frame."
+  @spec store_content_rect(t(), Layout.rect()) :: t()
+  def store_content_rect(%__MODULE__{} = cache, content_rect) do
+    %{cache | last_content_rect: content_rect}
+  end
+
+  @doc "Stores the last rendered buffer dirty flag for clean-window metadata reuse."
+  @spec store_buffer_dirty(t(), boolean()) :: t()
+  def store_buffer_dirty(%__MODULE__{} = cache, dirty?) when is_boolean(dirty?) do
+    %{cache | last_buffer_dirty: dirty?}
   end
 
   @doc "Stores the last fully composed window frame for clean-window reuse."

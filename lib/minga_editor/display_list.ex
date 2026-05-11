@@ -81,6 +81,12 @@ defmodule MingaEditor.DisplayList do
     def new(row, col, shape) when is_integer(row) and is_integer(col) do
       %__MODULE__{row: row, col: col, shape: shape}
     end
+
+    @doc "Returns the cursor with an updated shape."
+    @spec with_shape(t(), shape()) :: t()
+    def with_shape(%__MODULE__{} = cursor, shape) do
+      %{cursor | shape: shape}
+    end
   end
 
   defmodule WindowFrame do
@@ -117,6 +123,22 @@ defmodule MingaEditor.DisplayList do
             semantic: SemanticWindow.t() | nil,
             changed: boolean()
           }
+
+    @doc "Marks a cached frame as unchanged for frame-damage calculation."
+    @spec mark_unchanged(t()) :: t()
+    def mark_unchanged(%__MODULE__{} = frame), do: %{frame | changed: false}
+
+    @doc "Updates the cached cursor shape for both cell and semantic render data."
+    @spec with_cursor_shape(t(), Cursor.shape()) :: t()
+    def with_cursor_shape(%__MODULE__{cursor: nil} = frame, _shape), do: frame
+
+    def with_cursor_shape(%__MODULE__{cursor: cursor, semantic: semantic} = frame, shape) do
+      %{
+        frame
+        | cursor: Cursor.with_shape(cursor, shape),
+          semantic: SemanticWindow.with_cursor_shape(semantic, shape)
+      }
+    end
   end
 
   defmodule Overlay do
@@ -289,6 +311,8 @@ defmodule MingaEditor.DisplayList do
   - `batch_end: false` — omit the trailing `batch_end` command. Used by
     the GUI emit path which appends Metal-critical chrome commands before
     sending `batch_end` to ensure atomic frame delivery.
+  - `clear: false` — omit the leading clear command when the frame has no
+    window or chrome damage.
   """
   @spec to_commands(Frame.t(), keyword()) :: [binary()]
   def to_commands(%Frame{} = frame, opts \\ []) do

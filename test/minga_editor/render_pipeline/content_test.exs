@@ -97,6 +97,22 @@ defmodule MingaEditor.RenderPipeline.ContentTest do
       assert cursor == frame.cursor
     end
 
+    test "clean active windows refresh cached cursor shape" do
+      state = base_state(content: "alpha\nbeta\ngamma")
+      {scrolls, state, layout} = run_through_scroll(state)
+      {_frames, _cursor, state} = Content.build_content(state, scrolls)
+      win_id = state.workspace.windows.active
+      clean = invalidation(win_id, WindowDirty.clean())
+
+      state = put_in(state.workspace.editing.mode, :insert)
+      {scrolls, state} = Scroll.scroll_windows(state, layout, clean)
+      {[frame], cursor, _state} = Content.build_content(state, scrolls, clean)
+
+      assert frame.changed == false
+      assert frame.cursor.shape == :beam
+      assert cursor.shape == :beam
+    end
+
     test "row dirty windows merge rebuilt rows with cached rows" do
       state = base_state(content: "alpha\nbeta\ngamma")
       {scrolls, state, layout} = run_through_scroll(state)

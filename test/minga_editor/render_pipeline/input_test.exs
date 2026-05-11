@@ -177,6 +177,24 @@ defmodule MingaEditor.RenderPipeline.InputTest do
     end
   end
 
+  describe "chrome_fingerprint/2" do
+    test "changes when active scroll dirty status changes", %{state: state} do
+      input = Input.from_editor_state(state)
+      win_id = input.workspace.windows.active
+
+      clean_scrolls = %{
+        win_id => %{cursor_line: 0, cursor_byte_col: 0, buf_version: 1, snapshot: %{dirty: false}}
+      }
+
+      dirty_scrolls = %{
+        win_id => %{cursor_line: 0, cursor_byte_col: 0, buf_version: 1, snapshot: %{dirty: true}}
+      }
+
+      refute Input.chrome_fingerprint(input, clean_scrolls) ==
+               Input.chrome_fingerprint(input, dirty_scrolls)
+    end
+  end
+
   describe "sync_active_window_cursor/1" do
     test "syncs cursor from buffer into active window", %{state: state} do
       # Move cursor in the buffer

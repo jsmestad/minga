@@ -79,7 +79,7 @@ defmodule MingaEditor.RenderPipeline.Content do
   defp build_window_content(state, scroll, dirty) do
     scroll = apply_window_dirty(scroll, dirty)
 
-    case reusable_window_frame(scroll) do
+    case reusable_window_frame(state, scroll) do
       {:ok, frame} -> {frame, frame.cursor, state}
       :rebuild -> rebuild_window_content(state, scroll)
     end
@@ -232,6 +232,8 @@ defmodule MingaEditor.RenderPipeline.Content do
         scroll.buf_version,
         ctx_fp
       )
+      |> Window.cache_content_rect(win_layout.content)
+      |> Window.cache_buffer_dirty(snapshot.dirty)
       |> Window.prune_cache(first_line, last_visible)
       |> Window.cache_window_frame(win_frame)
 
@@ -289,15 +291,27 @@ defmodule MingaEditor.RenderPipeline.Content do
 
   defp apply_window_dirty(%WindowScroll{} = scroll, %WindowDirty{mode: :clean}), do: scroll
 
-  @spec reusable_window_frame(WindowScroll.t()) :: {:ok, WindowFrame.t()} | :rebuild
-  defp reusable_window_frame(%WindowScroll{window: window}) do
+  @spec reusable_window_frame(state(), WindowScroll.t()) :: {:ok, WindowFrame.t()} | :rebuild
+  defp reusable_window_frame(state, %WindowScroll{window: window, is_active: is_active}) do
     cache = window.render_cache
 
     if cache.dirty_lines == %{} and cache.last_window_frame != nil do
-      {:ok, %{cache.last_window_frame | changed: false}}
+      frame =
+        cache.last_window_frame
+        |> refresh_cursor_shape(state, is_active)
+        |> WindowFrame.mark_unchanged()
+
+      {:ok, frame}
     else
       :rebuild
     end
+  end
+
+  @spec refresh_cursor_shape(WindowFrame.t(), state(), boolean()) :: WindowFrame.t()
+  defp refresh_cursor_shape(%WindowFrame{} = frame, _state, false), do: frame
+
+  defp refresh_cursor_shape(%WindowFrame{} = frame, state, true) do
+    WindowFrame.with_cursor_shape(frame, Minga.Editing.cursor_shape(state))
   end
 
   defp maybe_render_agent_window(
