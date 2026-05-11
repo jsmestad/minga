@@ -459,6 +459,10 @@ defmodule MingaEditor.Commands.BufferManagement do
     execute_normal(state, buf, range, keys)
   end
 
+  def execute(state, {:execute_ex_command, {:terminal, []}}) do
+    execute_terminal(state)
+  end
+
   def execute(state, {:execute_ex_command, {:unknown, raw}}) do
     Minga.Log.debug(:editor, "Unknown ex command: #{raw}")
     state
@@ -632,6 +636,21 @@ defmodule MingaEditor.Commands.BufferManagement do
   end
 
   # ── Private buffer helpers ────────────────────────────────────────────────
+
+  @terminal_name "*terminal*"
+
+  @spec execute_terminal(state()) :: state()
+  defp execute_terminal(state) do
+    Minga.Terminal.Server.open(@terminal_name)
+
+    case Minga.Terminal.Server.buffer(@terminal_name) do
+      nil ->
+        EditorState.set_status(state, "Failed to open terminal buffer")
+
+      buf_pid ->
+        open_special_buffer(state, @terminal_name, buf_pid)
+    end
+  end
 
   @spec switch_to_buffer(state(), non_neg_integer()) :: state()
   defp switch_to_buffer(
