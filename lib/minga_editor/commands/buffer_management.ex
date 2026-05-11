@@ -1244,18 +1244,140 @@ defmodule MingaEditor.Commands.BufferManagement do
     spec = Minga.Editing.resolve_formatter(filetype, file_path)
     buf_name = Helpers.buffer_display_name(buf)
 
-    case spec do
-      nil ->
+    case try_lsp_format_on_save(buf) do
+      {:ok, _formatted} ->
+        MingaEditor.log_to_messages("Format-on-save (LSP): #{buf_name}")
         state
 
-      _ ->
-        command = spec |> String.split() |> List.first()
+      :not_available ->
+        run_external_formatter_on_save(state, buf, spec, buf_name)
+    end
+  end
 
-        if System.find_executable(command) do
-          run_formatter_with_spec(state, buf, spec, buf_name)
-        else
-          # Formatter binary not found; queue a tool prompt if a recipe exists
-          queue_formatter_tool_prompt(state, command)
+  @spec run_external_formatter_on_save(state(), pid(), String.t() | nil, String.t()) :: state()
+  defp run_external_formatter_on_save(state, _buf, nil, _buf_name), do: state
+
+  defp run_external_formatter_on_save(state, buf, spec, buf_name) do
+    command = spec |> String.split() |> List.first()
+
+    if System.find_executable(command) do
+      run_formatter_with_spec(state, buf, spec, buf_name)
+    else
+      queue_formatter_tool_prompt(state, command)
+    end
+  end
+
+  # ── LSP format-on-save ─────────────────────────────────────────────────
+
+  # Timeout for LSP formatting during save. Shorter than the interactive
+  # formatting timeout (5s) because save should feel instant.
+  @lsp_format_on_save_timeout 1_000
+
+  @spec try_lsp_format_on_save(pid()) :: {:ok, String.t()} | :not_available
+  defp try_lsp_format_on_save(buf) when is_pid(buf) do
+    clients = Minga.LSP.SyncServer.clients_for_buffer(buf)
+
+    case Enum.find(clients, &lsp_supports_formatting?/1) do
+      nil ->
+        :not_available
+
+      client ->
+        do_lsp_format_on_save(buf, client)
+    end
+  end
+
+  @spec lsp_supports_formatting?(pid()) :: boolean()
+  defp lsp_supports_formatting?(client) do
+    caps = Minga.LSP.Client.capabilities(client)
+
+    get_in(caps, ["documentFormattingProvider"]) == true or
+      get_in(caps, ["textDocument", "formatting", "provider"]) == true
+  end
+
+  @spec do_lsp_format_on_save(pid(), pid()) :: {:ok, String.t()} | :not_available
+  defp do_lsp_format_on_save(buf, client) do
+    file_path = Buffer.file_path(buf)
+    uri = Minga.LSP.SyncServer.path_to_uri(file_path)
+    tab_size = Buffer.get_option(buf, :tab_width) || 2
+    insert_spaces = Buffer.get_option(buf, :indent_with) == :spaces
+
+    params = %{
+      "textDocument" => %{"uri" => uri},
+      "options" => %{"tabSize" => tab_size, "insertSpaces" => insert_spaces}
+    }
+
+    case Minga.LSP.Client.request_sync(
+           client,
+           "textDocument/formatting",
+           params,
+           @lsp_format_on_save_timeout
+         ) do
+      {:ok, edits} when is_list(edits) ->
+        content = Buffer.content(buf)
+        new_content = apply_lsp_edits_to_content(content, edits)
+
+        if new_content != content do
+          {cursor_line, cursor_col} = Buffer.cursor(buf)
+          Buffer.replace_content(buf, new_content)
+          line_count = Buffer.line_count(buf)
+          safe_line = min(cursor_line, max(line_count - 1, 0))
+          Buffer.move_to(buf, {safe_line, cursor_col})
+        end
+
+        {:ok, new_content}
+
+      {:ok, nil} ->
+        :not_available
+
+      {:error, _reason} ->
+        :not_available
+    end
+  end
+
+  @spec apply_lsp_edits_to_content(String.t(), [map()]) :: String.t()
+  defp apply_lsp_edits_to_content(content, edits) when is_list(edits) do
+    Enum.reduce(Enum.reverse(edits), content, fn edit, acc ->
+      range = Map.get(edit, "range", %{})
+      new_text = Map.get(edit, "newText", "")
+      start_line = get_in(range, ["start", "line"]) || 0
+      start_col = get_in(range, ["start", "character"]) || 0
+      end_line = get_in(range, ["end", "line"]) || 0
+      end_col = get_in(range, ["end", "character"]) || 0
+
+      apply_single_lsp_edit(acc, start_line, start_col, end_line, end_col, new_text)
+    end)
+  end
+
+  @spec apply_single_lsp_edit(
+          String.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          String.t()
+        ) :: String.t()
+  defp apply_single_lsp_edit(content, start_line, start_col, end_line, end_col, new_text) do
+    lines = String.split(content, "\n")
+
+    case Enum.at(lines, start_line) do
+      nil ->
+        content
+
+      start_text ->
+        case Enum.at(lines, end_line) do
+          nil ->
+            content
+
+          end_text ->
+            before = String.slice(start_text, 0, start_col)
+            after_end = String.slice(end_text, end_col..-1//1)
+            replacement = before <> new_text <> after_end
+
+            {before_lines, rest} = Enum.split(lines, start_line)
+            {_removed, after_lines} = Enum.split(rest, end_line - start_line + 1)
+
+            new_lines = before_lines ++ [replacement] ++ after_lines
+            Enum.join(new_lines, "\n")
         end
     end
   end

@@ -242,6 +242,51 @@ defmodule Minga.LSP.Client do
     })
   end
 
+  @doc """
+  Requests formatting for the entire document.
+
+  Returns a reference. The response will be delivered as
+  `{:lsp_response, ref, {:ok, [text_edits]}}` with an array of TextEdit objects,
+  or empty array if no changes needed.
+  """
+  @spec request_formatting(GenServer.server(), String.t()) :: reference()
+  def request_formatting(server, uri) when is_binary(uri) do
+    request(server, "textDocument/formatting", %{
+      "textDocument" => %{"uri" => uri},
+      "options" => %{
+        "tabSize" => 2,
+        "insertSpaces" => true
+      }
+    })
+  end
+
+  @doc """
+  Requests formatting for a specific range of a document.
+
+  The range is specified as `{start_line, start_col, end_line, end_col}`.
+  Returns a reference. The response will be delivered as
+  `{:lsp_response, ref, {:ok, [text_edits]}}`.
+  """
+  @spec request_range_formatting(
+          GenServer.server(),
+          String.t(),
+          {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()}
+        ) :: reference()
+  def request_range_formatting(server, uri, {start_line, start_col, end_line, end_col})
+      when is_binary(uri) do
+    request(server, "textDocument/rangeFormatting", %{
+      "textDocument" => %{"uri" => uri},
+      "range" => %{
+        "start" => %{"line" => start_line, "character" => start_col},
+        "end" => %{"line" => end_line, "character" => end_col}
+      },
+      "options" => %{
+        "tabSize" => 2,
+        "insertSpaces" => true
+      }
+    })
+  end
+
   @doc "Sends a shutdown request and exit notification to the server."
   @spec shutdown(GenServer.server()) :: :ok
   def shutdown(server) do
@@ -1125,6 +1170,12 @@ defmodule Minga.LSP.Client do
           "dynamicRegistration" => false
         },
         "inlayHint" => %{
+          "dynamicRegistration" => false
+        },
+        "formatting" => %{
+          "dynamicRegistration" => false
+        },
+        "rangeFormatting" => %{
           "dynamicRegistration" => false
         }
       },
