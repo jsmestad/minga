@@ -1398,6 +1398,12 @@ defmodule MingaEditor.State do
   defp apply_buffer_effect(state, :start_spinner),
     do: maybe_restart_incoming_spinner(state)
 
+  # Race safety: agent events queued during the blocking editor_snapshot/1 call
+  # cannot misroute. GenServer serialisation means no handle_info runs until this
+  # callback returns. Once it does, stale events from the outgoing session fail
+  # the AgentAccess.session/1 identity check (minga_editor.ex:692) and fall into
+  # the background path, where find_by_session matches by session pid (unique per
+  # tab, never reassigned on switch). See #1401 for the full analysis.
   defp apply_buffer_effect(state, {:rebuild_agent_session, %Tab{kind: :agent} = tab}) do
     state
     |> rebuild_agent_from_session(tab)
