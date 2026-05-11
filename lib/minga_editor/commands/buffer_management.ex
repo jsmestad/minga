@@ -407,6 +407,58 @@ defmodule MingaEditor.Commands.BufferManagement do
     end
   end
 
+  def execute(state, {:execute_ex_command, {:buffers, []}}) do
+    execute(state, :buffer_list_all)
+  end
+
+  def execute(state, {:execute_ex_command, {:buffer_next, []}}) do
+    execute(state, :buffer_next)
+  end
+
+  def execute(state, {:execute_ex_command, {:buffer_prev, []}}) do
+    execute(state, :buffer_prev)
+  end
+
+  def execute(
+        %{workspace: %{buffers: %{active: buf}}} = state,
+        {:execute_ex_command, {:sort, range, flags}}
+      )
+      when is_pid(buf) do
+    execute_sort(state, buf, range, flags)
+  end
+
+  def execute(
+        %{workspace: %{buffers: %{active: buf}}} = state,
+        {:execute_ex_command, {:read, filename}}
+      )
+      when is_pid(buf) and is_binary(filename) do
+    execute_read(state, buf, filename)
+  end
+
+  def execute(
+        state,
+        {:execute_ex_command, {:shell_command, command}}
+      )
+      when is_binary(command) do
+    execute_shell_command(state, command)
+  end
+
+  def execute(
+        %{workspace: %{buffers: %{active: buf}}} = state,
+        {:execute_ex_command, {:global, pattern, command}}
+      )
+      when is_pid(buf) and is_binary(pattern) and is_binary(command) do
+    execute_global(state, buf, pattern, command)
+  end
+
+  def execute(
+        %{workspace: %{buffers: %{active: buf}}} = state,
+        {:execute_ex_command, {:normal, range, keys}}
+      )
+      when is_pid(buf) and is_binary(keys) do
+    execute_normal(state, buf, range, keys)
+  end
+
   def execute(state, {:execute_ex_command, {:unknown, raw}}) do
     Minga.Log.debug(:editor, "Unknown ex command: #{raw}")
     state
@@ -1565,5 +1617,249 @@ defmodule MingaEditor.Commands.BufferManagement do
   defp setup_highlight_or_defer(state) do
     send(self(), :setup_highlight)
     state
+  end
+
+  # ── :sort command ──────────────────────────────────────────────────────────
+
+  @spec execute_sort(state(), pid(), Minga.Command.Parser.range(), [
+          Minga.Command.Parser.sort_flag()
+        ]) :: state()
+  defp execute_sort(state, buf, range, flags) do
+    total_lines = Buffer.line_count(buf)
+    {start_line, end_line} = resolve_range(range, buf, total_lines)
+
+    if start_line < 0 or end_line >= total_lines or start_line > end_line do
+      EditorState.set_status(state, "Invalid range: #{start_line + 1},#{end_line + 1}")
+    else
+      content = Buffer.content(buf)
+      lines = String.split(content, "\n")
+
+      sorted_lines = do_sort(lines, start_line, end_line, flags)
+      new_content = Enum.join(sorted_lines, "\n")
+
+      Buffer.replace_content(buf, new_content)
+      EditorState.set_status(state, "Sorted lines #{start_line + 1}-#{end_line + 1}")
+    end
+  end
+
+  @spec do_sort([String.t()], non_neg_integer(), non_neg_integer(), [
+          Minga.Command.Parser.sort_flag()
+        ]) :: [String.t()]
+  defp do_sort(lines, start_line, end_line, flags) do
+    before = Enum.slice(lines, 0, start_line)
+    to_sort = Enum.slice(lines, start_line, end_line - start_line + 1)
+    after_lines = Enum.slice(lines, end_line + 1, length(lines))
+
+    sorted =
+      to_sort
+      |> then(&apply_sort_flags(&1, flags))
+      |> then(&if(:unique in flags, do: Enum.uniq(&1), else: &1))
+
+    before ++ sorted ++ after_lines
+  end
+
+  @spec apply_sort_flags([String.t()], [Minga.Command.Parser.sort_flag()]) :: [String.t()]
+  defp apply_sort_flags(lines, flags) do
+    sorted = do_apply_sort_flags(lines, flags)
+
+    if :reverse in flags do
+      Enum.reverse(sorted)
+    else
+      sorted
+    end
+  end
+
+  @spec do_apply_sort_flags([String.t()], [Minga.Command.Parser.sort_flag()]) :: [String.t()]
+  defp do_apply_sort_flags(lines, flags) do
+    if :numeric in flags do
+      Enum.sort_by(lines, &numeric_sort_key/1)
+    else
+      Enum.sort(lines)
+    end
+  end
+
+  @spec numeric_sort_key(String.t()) :: integer()
+  defp numeric_sort_key(line) do
+    case Integer.parse(String.trim_leading(line)) do
+      {num, _} -> num
+      :error -> 0
+    end
+  end
+
+  # ── :read command ──────────────────────────────────────────────────────────
+
+  @spec execute_read(state(), pid(), String.t()) :: state()
+  defp execute_read(state, buf, filename) do
+    expanded_path = Path.expand(filename)
+
+    case File.read(expanded_path) do
+      {:ok, content} ->
+        cursor = Buffer.cursor(buf)
+        {_line, col} = cursor
+
+        content_to_insert =
+          if col == 0 do
+            content <> "\n"
+          else
+            "\n" <> content <> "\n"
+          end
+
+        Buffer.insert_text(buf, content_to_insert)
+        EditorState.set_status(state, "Read #{expanded_path}")
+
+      {:error, reason} ->
+        EditorState.set_status(state, "Failed to read #{filename}: #{inspect(reason)}")
+    end
+  end
+
+  # ── :! command ─────────────────────────────────────────────────────────────
+
+  @spec execute_shell_command(state(), String.t()) :: state()
+  defp execute_shell_command(state, command) do
+    Minga.CommandOutput.run("*shell*", command)
+
+    case Minga.CommandOutput.buffer("*shell*") do
+      nil ->
+        EditorState.set_status(state, "Failed to create output buffer")
+
+      buffer_pid ->
+        Commands.add_buffer(state, buffer_pid)
+    end
+  end
+
+  # ── :global command ────────────────────────────────────────────────────────
+
+  @spec execute_global(state(), pid(), String.t(), String.t()) :: state()
+  defp execute_global(state, buf, pattern, command) do
+    content = Buffer.content(buf)
+    lines = String.split(content, "\n")
+
+    matching_lines =
+      lines
+      |> Enum.with_index()
+      |> Enum.filter(fn {line, _idx} ->
+        try do
+          regex = Regex.compile!(pattern)
+          Regex.match?(regex, line)
+        rescue
+          Regex.CompileError -> String.contains?(line, pattern)
+        end
+      end)
+
+    case matching_lines do
+      [] ->
+        EditorState.set_status(state, "Pattern not found: #{pattern}")
+
+      matches ->
+        Enum.reduce(matches, state, fn {_line_content, idx}, acc_state ->
+          Buffer.move_to(buf, {idx, 0})
+          parsed_cmd = Minga.Command.Parser.parse(command)
+          execute(acc_state, {:execute_ex_command, parsed_cmd})
+        end)
+    end
+  end
+
+  # ── :normal command ────────────────────────────────────────────────────────
+
+  @spec execute_normal(state(), pid(), Minga.Command.Parser.range(), String.t()) :: state()
+  defp execute_normal(state, buf, range, keys) do
+    total_lines = Buffer.line_count(buf)
+    {start_line, end_line} = resolve_range(range, buf, total_lines)
+
+    if start_line < 0 or end_line >= total_lines or start_line > end_line do
+      EditorState.set_status(state, "Invalid range: #{start_line + 1},#{end_line + 1}")
+    else
+      state
+      |> feed_keys_on_range(buf, start_line, end_line, keys)
+      |> then(fn s ->
+        EditorState.set_status(s, "Normal executed on #{start_line + 1}-#{end_line + 1}")
+      end)
+    end
+  end
+
+  @spec feed_keys_on_range(state(), pid(), non_neg_integer(), non_neg_integer(), String.t()) ::
+          state()
+  defp feed_keys_on_range(state, buf, start_line, end_line, keys) do
+    Enum.reduce(start_line..end_line, state, fn line_idx, acc_state ->
+      Buffer.move_to(buf, {line_idx, 0})
+      feed_keys_to_fsm(acc_state, keys)
+    end)
+  end
+
+  @spec feed_keys_to_fsm(state(), String.t()) :: state()
+  defp feed_keys_to_fsm(%{workspace: %{editing: vim}} = state, keys) do
+    key_list = String.graphemes(keys)
+
+    {final_vim, final_state} =
+      Enum.reduce(key_list, {vim, state}, fn key_str, {vim_state, acc_state} ->
+        key_tuple = string_to_key_tuple(key_str)
+
+        {new_mode, commands, new_mode_state} =
+          Minga.Mode.process(vim_state.mode, key_tuple, vim_state.mode_state)
+
+        updated_vim =
+          if new_mode == vim_state.mode do
+            MingaEditor.VimState.set_mode_state(vim_state, new_mode_state)
+          else
+            MingaEditor.VimState.transition(vim_state, new_mode, new_mode_state)
+          end
+
+        updated_state =
+          Enum.reduce(List.wrap(commands), acc_state, fn cmd, s ->
+            Commands.execute(s, cmd)
+          end)
+
+        {updated_vim, updated_state}
+      end)
+
+    put_in(final_state.workspace.editing, final_vim)
+  end
+
+  @spec string_to_key_tuple(String.t()) :: Minga.Mode.key()
+  defp string_to_key_tuple(key_str) do
+    case key_str do
+      "^" ->
+        {94, 0}
+
+      "$" ->
+        {36, 0}
+
+      "\\" ->
+        {92, 0}
+
+      c ->
+        case String.to_charlist(c) do
+          [code] -> {code, 0}
+          _ -> {32, 0}
+        end
+    end
+  end
+
+  # ── Range resolution ───────────────────────────────────────────────────────
+
+  @spec resolve_range(Minga.Command.Parser.range(), pid(), pos_integer()) ::
+          {non_neg_integer(), non_neg_integer()}
+  defp resolve_range(:whole_buffer, _buf, total_lines) do
+    {0, max(0, total_lines - 1)}
+  end
+
+  defp resolve_range(:current_line, buf, _total_lines) do
+    {line, _col} = Buffer.cursor(buf)
+    {line, line}
+  end
+
+  defp resolve_range(:last_line, _buf, total_lines) do
+    {max(0, total_lines - 1), max(0, total_lines - 1)}
+  end
+
+  # TODO: resolve actual visual selection marks when available
+  defp resolve_range(:visual, _buf, _total_lines) do
+    {0, 0}
+  end
+
+  defp resolve_range({:absolute, start, finish}, _buf, _total_lines) do
+    start_line = max(0, start - 1)
+    end_line = max(0, finish - 1)
+    {start_line, end_line}
   end
 end
