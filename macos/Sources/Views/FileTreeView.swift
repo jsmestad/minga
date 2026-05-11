@@ -25,6 +25,8 @@ struct FileTreeView: View {
     @State private var hoveredEntryId: UInt32? = nil
     @State private var scrollOffset: CGFloat = 0
     @State private var dropTargetEntryId: UInt32? = nil
+    @State private var lastClickEntryId: UInt32? = nil
+    @State private var lastClickTime: Date? = nil
 
     var body: some View {
         VStack(spacing: 0) {
@@ -242,17 +244,8 @@ struct FileTreeView: View {
             hoveredEntryId = isHovered ? entry.id : nil
             if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
         }
-        .onTapGesture(count: 2) {
-            // Double-click: always open (files open permanently)
-            encoder?.sendFileTreeClick(index: UInt16(entry.index))
-        }
         .onTapGesture {
-            // Single-click: toggle directories, select/preview files
-            if entry.isDir {
-                encoder?.sendFileTreeToggle(index: UInt16(entry.index))
-            } else {
-                encoder?.sendFileTreeClick(index: UInt16(entry.index))
-            }
+            handleEntryTap(entry)
         }
         .contextMenu { entryContextMenu(entry) }
         .draggable(URL(fileURLWithPath: fileTreeState.fullPath(for: entry))) {
@@ -333,6 +326,32 @@ struct FileTreeView: View {
     private func copyToClipboard(_ string: String) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(string, forType: .string)
+    }
+
+    // MARK: - Click handling
+
+    /// Handles single and double-click without SwiftUI's 300ms delay.
+    /// Uses a 250ms window to detect double-clicks internally.
+    private func handleEntryTap(_ entry: FileTreeEntry) {
+        let now = Date()
+        let timeSinceLastClick = lastClickTime.map { now.timeIntervalSince($0) } ?? .infinity
+        let isDoubleClick = lastClickEntryId == entry.id && timeSinceLastClick < 0.25
+
+        if isDoubleClick {
+            // Double-click: always open (files open permanently)
+            encoder?.sendFileTreeClick(index: UInt16(entry.index))
+            lastClickEntryId = nil
+            lastClickTime = nil
+        } else {
+            // Single-click: toggle directories, select/preview files
+            if entry.isDir {
+                encoder?.sendFileTreeToggle(index: UInt16(entry.index))
+            } else {
+                encoder?.sendFileTreeClick(index: UInt16(entry.index))
+            }
+            lastClickEntryId = entry.id
+            lastClickTime = now
+        }
     }
 
     // MARK: - Drop handling

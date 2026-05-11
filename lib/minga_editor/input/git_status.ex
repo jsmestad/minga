@@ -114,12 +114,6 @@ defmodule MingaEditor.Input.GitStatus do
     end)
   end
 
-  defp execute_command(state, :git_status_discard) do
-    with_selected_file(state, fn entry, _git_root ->
-      EditorState.set_status(state, "Discard #{entry.path}? (not yet implemented in TUI)")
-    end)
-  end
-
   defp execute_command(state, :git_status_stage_all) do
     case resolve_git_root() do
       nil ->
@@ -156,6 +150,90 @@ defmodule MingaEditor.Input.GitStatus do
     end)
   end
 
+  defp execute_command(state, :git_status_open_diff) do
+    with_selected_file(state, fn entry, git_root ->
+      open_diff_for_entry(state, git_root, entry)
+    end)
+  end
+
+  defp execute_command(state, :git_status_discard) do
+    with_selected_file(state, fn entry, git_root ->
+      update_tui_state(state, &put_discard_confirmation(&1, entry, git_root))
+    end)
+  end
+
+  defp execute_command(state, :git_status_confirm_discard) do
+    case get_discard_confirmation(state) do
+      {entry, git_root} ->
+        result = Git.discard(git_root, entry.path)
+        refresh_repo(git_root)
+
+        status_msg =
+          case result do
+            :ok -> "Discarded #{entry.path}"
+            {:error, reason} -> "Discard failed: #{reason}"
+          end
+
+        state
+        |> update_tui_state(&clear_discard_confirmation/1)
+        |> EditorState.set_status(status_msg)
+
+      nil ->
+        state
+    end
+  end
+
+  defp execute_command(state, :git_status_cancel_discard) do
+    update_tui_state(state, &clear_discard_confirmation/1)
+  end
+
+  defp execute_command(state, :git_status_push) do
+    case resolve_git_root() do
+      nil ->
+        EditorState.set_status(state, "Not in a git repository")
+
+      git_root ->
+        do_git_remote_op(state, git_root, &Git.push/1, "Pushing…", "Pushed", "Push failed")
+    end
+  end
+
+  defp execute_command(state, :git_status_pull) do
+    case resolve_git_root() do
+      nil ->
+        EditorState.set_status(state, "Not in a git repository")
+
+      git_root ->
+        do_git_remote_op(state, git_root, &Git.pull/1, "Pulling…", "Pulled", "Pull failed")
+    end
+  end
+
+  defp execute_command(state, :git_status_fetch) do
+    case resolve_git_root() do
+      nil ->
+        EditorState.set_status(state, "Not in a git repository")
+
+      git_root ->
+        do_git_remote_op(
+          state,
+          git_root,
+          &Git.fetch_remotes/1,
+          "Fetching…",
+          "Fetched",
+          "Fetch failed"
+        )
+    end
+  end
+
+  defp execute_command(state, :git_status_amend) do
+    case resolve_git_root() do
+      nil ->
+        EditorState.set_status(state, "Not in a git repository")
+
+      git_root ->
+        update_tui_state(state, &put_amend_mode(&1, git_root))
+    end
+  end
+
   defp execute_command(state, :git_status_start_commit) do
     EditorState.set_status(
       state,
@@ -171,6 +249,114 @@ defmodule MingaEditor.Input.GitStatus do
   defp execute_command(state, _cmd), do: state
 
   # ── TUI state helpers ──────────────────────────────────────────────────
+
+  @spec open_diff_for_entry(EditorState.t(), String.t(), Git.StatusEntry.t()) :: EditorState.t()
+  defp open_diff_for_entry(state, git_root, entry) do
+    closed_state =
+      EditorState.update_workspace(state, &WorkspaceState.set_keymap_scope(&1, :editor))
+      |> EditorState.close_git_status_panel()
+
+    open_diff_in_editor(closed_state, git_root, entry.path)
+  end
+
+  @spec open_diff_in_editor(EditorState.t(), String.t(), String.t()) :: EditorState.t()
+  defp open_diff_in_editor(state, git_root, rel_path) do
+    abs_path = Path.join(git_root, rel_path)
+
+    case Git.show_head(git_root, rel_path) do
+      {:ok, base_content} ->
+        open_diff_with_content(state, abs_path, rel_path, base_content)
+
+      :error ->
+        EditorState.set_status(state, "File not in git HEAD")
+    end
+  end
+
+  @spec open_diff_with_content(EditorState.t(), String.t(), String.t(), String.t()) ::
+          EditorState.t()
+  defp open_diff_with_content(state, abs_path, rel_path, base_content) do
+    case File.read(abs_path) do
+      {:ok, current_content} ->
+        build_and_open_diff_buffer(state, rel_path, base_content, current_content)
+
+      {:error, reason} ->
+        EditorState.set_status(state, "Could not read file: #{inspect(reason)}")
+    end
+  end
+
+  @spec build_and_open_diff_buffer(EditorState.t(), String.t(), String.t(), String.t()) ::
+          EditorState.t()
+  defp build_and_open_diff_buffer(state, rel_path, base_content, current_content) do
+    diff_result = Minga.Core.DiffView.build(base_content, current_content)
+    filename = Path.basename(rel_path)
+    filetype = Minga.Language.detect_filetype(filename)
+
+    case Buffer.start_link(
+           content: diff_result.text,
+           buffer_type: :nofile,
+           read_only: true,
+           buffer_name: "#{filename} [diff]",
+           filetype: filetype
+         ) do
+      {:ok, diff_buf} ->
+        state = Commands.add_buffer(state, diff_buf)
+
+        EditorState.set_status(
+          state,
+          "Diff: #{filename} (#{length(diff_result.hunk_lines)} hunks)"
+        )
+
+      {:error, reason} ->
+        EditorState.set_status(state, "Failed to open diff: #{inspect(reason)}")
+    end
+  end
+
+  @spec put_discard_confirmation(TuiState.t(), Git.StatusEntry.t(), String.t()) :: TuiState.t()
+  defp put_discard_confirmation(tui, entry, git_root) do
+    %{tui | discard_confirmation: {entry, git_root}}
+  end
+
+  @spec get_discard_confirmation(EditorState.t()) :: {Git.StatusEntry.t(), String.t()} | nil
+  defp get_discard_confirmation(state) do
+    case EditorState.git_status_panel(state) do
+      nil ->
+        nil
+
+      panel ->
+        tui = Map.get(panel, :tui_state) || build_initial_tui_state(panel)
+        tui.discard_confirmation
+    end
+  end
+
+  @spec clear_discard_confirmation(TuiState.t()) :: TuiState.t()
+  defp clear_discard_confirmation(tui) do
+    %{tui | discard_confirmation: nil}
+  end
+
+  @spec put_amend_mode(TuiState.t(), String.t()) :: TuiState.t()
+  defp put_amend_mode(tui, _git_root) do
+    %{tui | amend_mode: not tui.amend_mode}
+  end
+
+  @spec do_git_remote_op(
+          EditorState.t(),
+          String.t(),
+          (String.t() -> :ok | {:error, String.t()}),
+          String.t(),
+          String.t(),
+          String.t()
+        ) :: EditorState.t()
+  defp do_git_remote_op(state, git_root, operation, _progress_msg, success_msg, error_prefix) do
+    # For now, just run synchronously. Could be improved with async later.
+    case operation.(git_root) do
+      :ok ->
+        refresh_repo(git_root)
+        EditorState.set_status(state, success_msg)
+
+      {:error, reason} ->
+        EditorState.set_status(state, "#{error_prefix}: #{reason}")
+    end
+  end
 
   @spec open_file_in_editor(EditorState.t(), String.t()) :: EditorState.t()
   defp open_file_in_editor(state, abs_path) do
