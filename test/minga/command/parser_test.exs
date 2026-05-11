@@ -66,6 +66,32 @@ defmodule Minga.Command.ParserTest do
     end
   end
 
+  describe "parse/1 — buffer navigation commands" do
+    test ":buffers parses to {:buffers, []}" do
+      assert {:buffers, []} = Parser.parse("buffers")
+    end
+
+    test ":ls parses to {:buffers, []}" do
+      assert {:buffers, []} = Parser.parse("ls")
+    end
+
+    test ":bnext parses to {:buffer_next, []}" do
+      assert {:buffer_next, []} = Parser.parse("bnext")
+    end
+
+    test ":bn parses to {:buffer_next, []}" do
+      assert {:buffer_next, []} = Parser.parse("bn")
+    end
+
+    test ":bprev parses to {:buffer_prev, []}" do
+      assert {:buffer_prev, []} = Parser.parse("bprev")
+    end
+
+    test ":bp parses to {:buffer_prev, []}" do
+      assert {:buffer_prev, []} = Parser.parse("bp")
+    end
+  end
+
   describe "parse/1 — goto line" do
     test ":42 parses to {:goto_line, 42}" do
       assert {:goto_line, 42} = Parser.parse("42")

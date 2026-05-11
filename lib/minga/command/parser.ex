@@ -5,6 +5,8 @@ defmodule Minga.Command.Parser do
   Converts a raw string (without the leading `:`) into a structured
   `t:parsed/0` value that the editor can act on.
 
+  Supports Vim-style range prefixes (1,10 | % | . | $ | '<,'>) on all commands.
+
   ## Supported commands
 
   | Input            | Result                         |
@@ -19,8 +21,25 @@ defmodule Minga.Command.Parser do
   | `e <filename>`   | `{:edit, filename}`            |
   | `e!`             | `{:force_edit, []}`            |
   | `<number>`       | `{:goto_line, number}`         |
+  | `1,10s/x/y/`     | `{:substitute, range, ...}`    |
   | anything else    | `{:unknown, original_string}`  |
   """
+
+  @typedoc """
+  Range specification for ex commands.
+
+  * `{:absolute, start_line, end_line}` — absolute line numbers (1-indexed)
+  * `:whole_buffer` — entire buffer (%)
+  * `:current_line` — current line (.)
+  * `:last_line` — last line in buffer ($)
+  * `{:visual}` — visual selection ('<,'>)
+  """
+  @type range ::
+          {:absolute, pos_integer(), pos_integer()}
+          | :whole_buffer
+          | :current_line
+          | :last_line
+          | :visual
 
   @typedoc """
   Structured result of parsing a command-line string.
@@ -36,6 +55,9 @@ defmodule Minga.Command.Parser do
   * `{:edit, filename}` — open a file (`:e filename`)
   * `{:force_edit, []}` — reload current buffer from disk (`:e!`)
   * `{:new_buffer, []}` — create a new empty buffer (`:new` / `:enew`)
+  * `{:buffers, []}` — list open buffers (`:buffers` / `:ls`)
+  * `{:buffer_next, []}` — move to next buffer (`:bnext` / `:bn`)
+  * `{:buffer_prev, []}` — move to previous buffer (`:bprev` / `:bp`)
   * `{:goto_line, n}` — jump to line *n* (`:<number>`)
   * `{:substitute, pattern, replacement, flags}` — `:%s/old/new/flags`
   * `{:unknown, raw}` — unrecognised command
@@ -53,6 +75,9 @@ defmodule Minga.Command.Parser do
           | {:force_edit, []}
           | {:checktime, []}
           | {:new_buffer, []}
+          | {:buffers, []}
+          | {:buffer_next, []}
+          | {:buffer_prev, []}
           | {:lsp_info, []}
           | {:extensions, []}
           | {:extension_update, []}
@@ -167,6 +192,12 @@ defmodule Minga.Command.Parser do
   defp do_parse("sp"), do: {:split_horizontal, []}
   defp do_parse("close"), do: {:window_close, []}
   defp do_parse("rename " <> name), do: {:rename, String.trim(name)}
+  defp do_parse("buffers"), do: {:buffers, []}
+  defp do_parse("ls"), do: {:buffers, []}
+  defp do_parse("bnext"), do: {:buffer_next, []}
+  defp do_parse("bn"), do: {:buffer_next, []}
+  defp do_parse("bprev"), do: {:buffer_prev, []}
+  defp do_parse("bp"), do: {:buffer_prev, []}
 
   defp do_parse("set number"), do: {:set, :number}
   defp do_parse("set nu"), do: {:set, :number}

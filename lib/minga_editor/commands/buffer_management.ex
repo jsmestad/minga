@@ -407,6 +407,18 @@ defmodule MingaEditor.Commands.BufferManagement do
     end
   end
 
+  def execute(state, {:execute_ex_command, {:buffers, []}}) do
+    execute(state, :buffer_list_all)
+  end
+
+  def execute(state, {:execute_ex_command, {:buffer_next, []}}) do
+    execute(state, :buffer_next)
+  end
+
+  def execute(state, {:execute_ex_command, {:buffer_prev, []}}) do
+    execute(state, :buffer_prev)
+  end
+
   def execute(state, {:execute_ex_command, {:unknown, raw}}) do
     Minga.Log.debug(:editor, "Unknown ex command: #{raw}")
     state
