@@ -4,7 +4,7 @@ defmodule Minga.Buffer.Server do
 
   Each open file gets its own `Buffer.Server` process, managed by
   the `Buffer.Supervisor` (DynamicSupervisor). If a buffer process
-  crashes, only that buffer is lost — all other buffers and the
+  crashes, only that buffer is lost, and all other buffers and the
   editor continue running.
 
   ## Examples
@@ -837,6 +837,7 @@ defmodule Minga.Buffer.Server do
           buffer_type: buffer_type,
           mtime: mtime,
           file_size: size,
+          file_hash: saved_content_hash(path, mtime, text),
           name: Keyword.get(opts, :buffer_name),
           read_only: read_only,
           unlisted: Keyword.get(opts, :unlisted, false),
@@ -873,6 +874,7 @@ defmodule Minga.Buffer.Server do
             dirty: false,
             mtime: mtime,
             file_size: size,
+            file_hash: content_hash(text),
             decorations: Decorations.new(),
             undo_stack: [],
             redo_stack: []
@@ -1135,10 +1137,19 @@ defmodule Minga.Buffer.Server do
     if file_changed_on_disk?(state, disk_mtime, disk_size) do
       {:reply, {:error, :file_changed}, state}
     else
-      case write_file(state.file_path, Document.content(state.document)) do
+      content = Document.content(state.document)
+
+      case write_file(state.file_path, content) do
         :ok ->
           {new_mtime, new_size} = file_stat_info(state.file_path)
-          {:reply, :ok, mark_saved(%{state | mtime: new_mtime, file_size: new_size})}
+
+          {:reply, :ok,
+           mark_saved(%{
+             state
+             | mtime: new_mtime,
+               file_size: new_size,
+               file_hash: content_hash(content)
+           })}
 
         {:error, reason} ->
           {:reply, {:error, reason}, state}
@@ -1156,10 +1167,19 @@ defmodule Minga.Buffer.Server do
   end
 
   def handle_call(:force_save, _from, state) do
-    case write_file(state.file_path, Document.content(state.document)) do
+    content = Document.content(state.document)
+
+    case write_file(state.file_path, content) do
       :ok ->
         {new_mtime, new_size} = file_stat_info(state.file_path)
-        {:reply, :ok, mark_saved(%{state | mtime: new_mtime, file_size: new_size})}
+
+        {:reply, :ok,
+         mark_saved(%{
+           state
+           | mtime: new_mtime,
+             file_size: new_size,
+             file_hash: content_hash(content)
+         })}
 
       {:error, reason} ->
         {:reply, {:error, reason}, state}
@@ -1201,6 +1221,7 @@ defmodule Minga.Buffer.Server do
             dirty: false,
             mtime: new_mtime,
             file_size: new_size,
+            file_hash: content_hash(text),
             undo_stack: [],
             redo_stack: [],
             decorations: Decorations.new()
@@ -1215,14 +1236,22 @@ defmodule Minga.Buffer.Server do
   end
 
   def handle_call({:save_as, file_path}, _from, state) do
-    case write_file(file_path, Document.content(state.document)) do
+    content = Document.content(state.document)
+
+    case write_file(file_path, content) do
       :ok ->
         {new_mtime, new_size} = file_stat_info(file_path)
         unregister_path(state.file_path)
         register_path(file_path)
 
         {:reply, :ok,
-         mark_saved(%{state | file_path: file_path, mtime: new_mtime, file_size: new_size})}
+         mark_saved(%{
+           state
+           | file_path: file_path,
+             mtime: new_mtime,
+             file_size: new_size,
+             file_hash: content_hash(content)
+         })}
 
       {:error, reason} ->
         {:reply, {:error, reason}, state}
@@ -2020,9 +2049,8 @@ defmodule Minga.Buffer.Server do
     end
   end
 
-  # Detects external changes by comparing mtime and file size.
-  # Same mtime + same size = no change (covers same-second writes that don't alter size).
-  # Different mtime OR different size = changed.
+  # Detects external changes by comparing mtime, file size, and saved-content hash.
+  # The hash closes the same-second, same-size hole in coarse filesystem mtimes.
   @spec file_changed_on_disk?(BufState.t(), integer() | nil, non_neg_integer() | nil) ::
           boolean()
   defp file_changed_on_disk?(%{mtime: nil}, nil, _disk_size), do: false
@@ -2030,8 +2058,27 @@ defmodule Minga.Buffer.Server do
   defp file_changed_on_disk?(_state, nil, _disk_size), do: false
 
   defp file_changed_on_disk?(state, disk_mtime, disk_size) do
-    disk_mtime > state.mtime or disk_size != state.file_size
+    metadata_changed? = disk_mtime != state.mtime or disk_size != state.file_size
+
+    case saved_content_status(state) do
+      :same -> false
+      :changed -> true
+      :unknown -> metadata_changed?
+    end
   end
+
+  @typep saved_content_status :: :same | :changed | :unknown
+
+  @spec saved_content_status(BufState.t()) :: saved_content_status()
+  defp saved_content_status(%{file_path: path, file_hash: hash})
+       when is_binary(path) and is_binary(hash) do
+    case File.read(path) do
+      {:ok, content} -> if content_hash(content) == hash, do: :same, else: :changed
+      {:error, _reason} -> :changed
+    end
+  end
+
+  defp saved_content_status(_state), do: :unknown
 
   @spec file_stat_info(String.t()) :: {integer() | nil, non_neg_integer() | nil}
   defp file_stat_info(path) do
@@ -2040,6 +2087,16 @@ defmodule Minga.Buffer.Server do
       {:error, _} -> {nil, nil}
     end
   end
+
+  @spec content_hash(String.t()) :: binary()
+  defp content_hash(content), do: :crypto.hash(:sha256, content)
+
+  @spec saved_content_hash(String.t() | nil, integer() | nil, String.t()) :: binary() | nil
+  defp saved_content_hash(path, mtime, content) when is_binary(path) and is_integer(mtime) do
+    content_hash(content)
+  end
+
+  defp saved_content_hash(_path, _mtime, _content), do: nil
 
   # Delegates to BufState for time-based undo coalescing.
   @spec push_undo(state(), Document.t(), BufState.edit_source()) :: state()
@@ -2120,13 +2177,40 @@ defmodule Minga.Buffer.Server do
 
   @spec auto_save_file(state(), String.t()) :: {:noreply, state()}
   defp auto_save_file(state, path) do
-    {disk_mtime, disk_size} = file_stat_info(path)
+    case File.stat(path, time: :posix) do
+      {:ok, %{mtime: disk_mtime, size: disk_size}} ->
+        maybe_write_auto_save_file(state, path, disk_mtime, disk_size)
 
+      {:error, :enoent} when is_nil(state.mtime) ->
+        write_auto_save_file(state, path)
+
+      {:error, :enoent} ->
+        skip_auto_save(state, path, "file was deleted on disk")
+
+      {:error, reason} ->
+        skip_auto_save(state, path, "could not stat file: #{inspect(reason)}")
+    end
+  end
+
+  @spec maybe_write_auto_save_file(state(), String.t(), integer(), non_neg_integer()) ::
+          {:noreply, state()}
+  defp maybe_write_auto_save_file(state, path, disk_mtime, disk_size) do
     if file_changed_on_disk?(state, disk_mtime, disk_size) do
-      {:noreply, clear_auto_save_timer(state)}
+      skip_auto_save(state, path, "file changed on disk")
     else
       write_auto_save_file(state, path)
     end
+  end
+
+  @spec skip_auto_save(state(), String.t(), String.t()) :: {:noreply, state()}
+  defp skip_auto_save(state, path, reason) do
+    log_to_messages(
+      state,
+      "Auto-save skipped for #{display_path(path)}: #{reason}; reload or save explicitly.",
+      :warning
+    )
+
+    {:noreply, clear_auto_save_timer(state)}
   end
 
   @spec write_auto_save_file(state(), String.t()) :: {:noreply, state()}
@@ -2136,18 +2220,50 @@ defmodule Minga.Buffer.Server do
     case write_file(path, content) do
       :ok ->
         {new_mtime, new_size} = file_stat_info(path)
-        Minga.Log.info(:editor, "Auto-saved: #{Path.basename(path)}")
-        {:noreply, mark_saved(%{state | mtime: new_mtime, file_size: new_size})}
+
+        new_state =
+          mark_saved(%{
+            state
+            | mtime: new_mtime,
+              file_size: new_size,
+              file_hash: content_hash(content)
+          })
+
+        log_to_messages(new_state, "Auto-saved: #{display_path(path)}", :info)
+        broadcast_buffer_saved(new_state, path)
+        {:noreply, new_state}
 
       {:error, reason} ->
-        Minga.Log.warning(
-          :editor,
-          "Failed to auto-save #{Path.basename(path)}: #{inspect(reason)}"
+        log_to_messages(
+          state,
+          "Failed to auto-save #{display_path(path)}: #{inspect(reason)}",
+          :warning
         )
 
         {:noreply, clear_auto_save_timer(state)}
     end
   end
+
+  @spec broadcast_buffer_saved(state(), String.t()) :: :ok
+  defp broadcast_buffer_saved(state, path) do
+    Events.broadcast(
+      :buffer_saved,
+      %Events.BufferEvent{buffer: self(), path: path},
+      state.events_registry
+    )
+  end
+
+  @spec log_to_messages(state(), String.t(), Events.LogMessageEvent.level()) :: :ok
+  defp log_to_messages(state, text, level) do
+    Events.broadcast(
+      :log_message,
+      %Events.LogMessageEvent{text: text, level: level},
+      state.events_registry
+    )
+  end
+
+  @spec display_path(String.t()) :: String.t()
+  defp display_path(path), do: Path.relative_to_cwd(path)
 
   @spec auto_save_enabled?(state()) :: boolean()
   defp auto_save_enabled?(state) do

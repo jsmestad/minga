@@ -16,19 +16,20 @@ defmodule Minga.Buffer.AutoSaveTest do
     path = Path.join(dir, "auto-save.txt")
     File.write!(path, "hello")
     {:ok, pid} = Server.start_link(file_path: path)
-    assert {:ok, @delay_ms} = Server.set_option(pid, :auto_save_delay_ms, @delay_ms)
+    assert {:ok, 1} = Server.set_option(pid, :auto_save_delay_ms, 1)
 
     Events.subscribe(:log_message)
+    Events.subscribe(:buffer_saved)
 
     try do
       :ok = Server.insert_text(pid, "!")
-      token = :sys.get_state(pid).auto_save_token
-      send(pid, {:auto_save, token})
 
-      assert_log_contains("Auto-saved: auto-save.txt")
+      assert_buffer_saved(path)
+      assert_log_contains("Auto-saved: #{Path.relative_to_cwd(path)}")
       assert File.read!(path) == "!hello"
       refute Server.dirty?(pid)
     after
+      Events.unsubscribe(:buffer_saved)
       Events.unsubscribe(:log_message)
     end
   end
@@ -160,15 +161,81 @@ defmodule Minga.Buffer.AutoSaveTest do
     {:ok, pid} = Server.start_link(file_path: path)
     assert {:ok, @delay_ms} = Server.set_option(pid, :auto_save_delay_ms, @delay_ms)
 
-    :ok = Server.insert_text(pid, "buffer")
+    Events.subscribe(:log_message)
+
+    try do
+      :ok = Server.insert_text(pid, "buffer")
+      token = :sys.get_state(pid).auto_save_token
+      File.write!(path, "external")
+
+      send(pid, {:auto_save, token})
+      :sys.get_state(pid)
+
+      assert_log_contains(
+        "Auto-save skipped for #{Path.relative_to_cwd(path)}: file changed on disk"
+      )
+
+      assert File.read!(path) == "external"
+      assert Server.dirty?(pid)
+    after
+      Events.unsubscribe(:log_message)
+    end
+  end
+
+  test "auto-save skips when an existing file changes before the timer fires", %{tmp_dir: dir} do
+    path = Path.join(dir, "externally-modified.txt")
+    File.write!(path, "hello")
+    {:ok, pid} = Server.start_link(file_path: path)
+    assert {:ok, @delay_ms} = Server.set_option(pid, :auto_save_delay_ms, @delay_ms)
+
+    original_mtime = :sys.get_state(pid).mtime
+    :ok = Server.insert_text(pid, "!")
     token = :sys.get_state(pid).auto_save_token
-    File.write!(path, "external")
+    File.write!(path, "HELLO")
+    File.touch!(path, original_mtime)
 
-    send(pid, {:auto_save, token})
-    :sys.get_state(pid)
+    Events.subscribe(:log_message)
 
-    assert File.read!(path) == "external"
-    assert Server.dirty?(pid)
+    try do
+      send(pid, {:auto_save, token})
+      :sys.get_state(pid)
+
+      assert_log_contains(
+        "Auto-save skipped for #{Path.relative_to_cwd(path)}: file changed on disk"
+      )
+
+      assert File.read!(path) == "HELLO"
+      assert Server.dirty?(pid)
+    after
+      Events.unsubscribe(:log_message)
+    end
+  end
+
+  test "auto-save skips when an existing file is deleted before the timer fires", %{tmp_dir: dir} do
+    path = Path.join(dir, "externally-deleted.txt")
+    File.write!(path, "hello")
+    {:ok, pid} = Server.start_link(file_path: path)
+    assert {:ok, @delay_ms} = Server.set_option(pid, :auto_save_delay_ms, @delay_ms)
+
+    :ok = Server.insert_text(pid, "!")
+    token = :sys.get_state(pid).auto_save_token
+    File.rm!(path)
+
+    Events.subscribe(:log_message)
+
+    try do
+      send(pid, {:auto_save, token})
+      :sys.get_state(pid)
+
+      assert_log_contains(
+        "Auto-save skipped for #{Path.relative_to_cwd(path)}: file was deleted on disk"
+      )
+
+      refute File.exists?(path)
+      assert Server.dirty?(pid)
+    after
+      Events.unsubscribe(:log_message)
+    end
   end
 
   test "stopping a buffer cancels the pending auto-save timer", %{tmp_dir: dir} do
@@ -198,6 +265,16 @@ defmodule Minga.Buffer.AutoSaveTest do
         end
     after
       500 -> flunk("expected log message containing #{inspect(text)}")
+    end
+  end
+
+  defp assert_buffer_saved(path) do
+    receive do
+      {:minga_event, :buffer_saved, %Events.BufferEvent{buffer: buffer, path: ^path}}
+      when is_pid(buffer) ->
+        :ok
+    after
+      500 -> flunk("expected buffer_saved event for #{inspect(path)}")
     end
   end
 end
