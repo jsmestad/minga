@@ -29,6 +29,7 @@ defmodule MingaAgent.Tool.Executor do
   alias MingaAgent.Config, as: AgentConfig
   alias MingaAgent.Hooks.CommandRunner
   alias MingaAgent.Hooks.Dispatcher, as: HookDispatcher
+  alias MingaAgent.Hooks.PostToolUsePayload
   alias MingaAgent.Hooks.PreToolUsePayload
   alias MingaAgent.Hooks.Result, as: HookResult
   alias MingaAgent.Tool.PlanMode
@@ -145,8 +146,13 @@ defmodule MingaAgent.Tool.Executor do
           {:ok, term()} | {:error, term()}
   defp run_callback(%Spec{} = spec, args, config, hook_runner) do
     case dispatch_pre_tool_use(spec, args, config, hook_runner) do
-      :ok -> run_callback_with_advice(spec, args)
-      {:error, %HookResult{} = result} -> {:error, {:hook_veto, HookResult.message(result)}}
+      :ok ->
+        result = run_callback_with_advice(spec, args)
+        dispatch_post_tool_use(spec, args, result, config)
+        result
+
+      {:error, %HookResult{} = result} ->
+        {:error, {:hook_veto, HookResult.message(result)}}
     end
   end
 
@@ -167,6 +173,31 @@ defmodule MingaAgent.Tool.Executor do
       PreToolUsePayload.new("direct_#{:erlang.unique_integer([:positive])}", spec.name, args)
 
     HookDispatcher.pre_tool_use(config.agent_hooks, payload, runner: hook_runner)
+  end
+
+  @spec dispatch_post_tool_use(Spec.t(), map(), {:ok, term()} | {:error, term()}, AgentConfig.t()) ::
+          :ok
+  defp dispatch_post_tool_use(%Spec{} = spec, args, result, config) do
+    {result_text, is_error} =
+      case result do
+        {:ok, value} -> {inspect(value), false}
+        {:error, reason} -> {inspect(reason), true}
+      end
+
+    payload =
+      PostToolUsePayload.new(
+        "direct_#{:erlang.unique_integer([:positive])}",
+        spec.name,
+        args,
+        result_text,
+        is_error
+      )
+
+    HookDispatcher.post_tool_use(config.agent_hooks, PostToolUsePayload.to_map(payload))
+  rescue
+    e -> Minga.Log.warning(:agent, "PostToolUse hook dispatch failed: #{Exception.message(e)}")
+  catch
+    _, reason -> Minga.Log.warning(:agent, "PostToolUse hook dispatch failed: #{inspect(reason)}")
   end
 
   @spec execute_with_advice(Spec.t(), map(), atom()) :: {:ok, term()} | {:error, term()}

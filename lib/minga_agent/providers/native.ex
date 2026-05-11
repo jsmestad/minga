@@ -39,6 +39,8 @@ defmodule MingaAgent.Providers.Native do
   alias MingaAgent.Event
   alias MingaAgent.Hooks.CommandRunner
   alias MingaAgent.Hooks.Dispatcher, as: HookDispatcher
+  alias MingaAgent.Hooks.PostToolUsePayload
+  alias MingaAgent.Hooks.PreCompactPayload
   alias MingaAgent.Hooks.PreToolUsePayload
   alias MingaAgent.Hooks.Result, as: HookResult
   alias MingaAgent.Instructions
@@ -548,21 +550,27 @@ defmodule MingaAgent.Providers.Native do
   end
 
   def handle_call(:compact, _from, state) do
-    compact_opts = [
-      model: state.model,
-      llm_client: summary_client(state.llm_client, state.config)
-    ]
+    case dispatch_pre_compact(state.context, state.config) do
+      :ok ->
+        compact_opts = [
+          model: state.model,
+          llm_client: summary_client(state.llm_client, state.config)
+        ]
 
-    case Compaction.compact(state.context, compact_opts) do
-      {:compacted, new_context, summary_info} ->
-        notify(state.subscriber, %Event.TextDelta{delta: "\n📦 #{summary_info}\n"})
-        {:reply, {:ok, summary_info}, %{state | context: new_context}}
+        case Compaction.compact(state.context, compact_opts) do
+          {:compacted, new_context, summary_info} ->
+            notify(state.subscriber, %Event.TextDelta{delta: "\n📦 #{summary_info}\n"})
+            {:reply, {:ok, summary_info}, %{state | context: new_context}}
 
-      {:ok, _context} ->
-        {:reply, {:ok, "Context is already small enough, no compaction needed."}, state}
+          {:ok, _context} ->
+            {:reply, {:ok, "Context is already small enough, no compaction needed."}, state}
 
-      {:error, reason} ->
-        {:reply, {:error, reason}, state}
+          {:error, reason} ->
+            {:reply, {:error, reason}, state}
+        end
+
+      {:error, _result} ->
+        {:reply, {:error, "compaction blocked by hook"}, state}
     end
   end
 
@@ -1181,6 +1189,7 @@ defmodule MingaAgent.Providers.Native do
            }}
         )
 
+        dispatch_post_tool_use(tool_call, result_text, is_error, config)
         maybe_emit_file_changed(provider_pid, tool_call, before_content, is_error)
 
         meta = if is_error, do: %{is_error: true}, else: %{}
@@ -1533,6 +1542,39 @@ defmodule MingaAgent.Providers.Native do
     end
   end
 
+  @spec dispatch_post_tool_use(map(), String.t(), boolean(), AgentConfig.t()) :: :ok
+  defp dispatch_post_tool_use(tool_call, result_text, is_error, config) do
+    payload =
+      PostToolUsePayload.new(
+        to_string(tool_call.id),
+        to_string(tool_call.name),
+        tool_call.arguments || %{},
+        result_text,
+        is_error
+      )
+
+    HookDispatcher.post_tool_use(config.agent_hooks, PostToolUsePayload.to_map(payload))
+  rescue
+    e -> Minga.Log.warning(:agent, "PostToolUse hook dispatch failed: #{Exception.message(e)}")
+  catch
+    _, reason -> Minga.Log.warning(:agent, "PostToolUse hook dispatch failed: #{inspect(reason)}")
+  end
+
+  @spec dispatch_pre_compact(Context.t(), AgentConfig.t()) :: :ok | {:error, HookResult.t()}
+  defp dispatch_pre_compact(context, config) do
+    message_count = length(context.messages)
+    payload = PreCompactPayload.new(message_count)
+    HookDispatcher.pre_compact(config.agent_hooks, PreCompactPayload.to_map(payload))
+  rescue
+    e ->
+      Minga.Log.warning(:agent, "PreCompact hook dispatch failed: #{Exception.message(e)}")
+      {:error, HookResult.dispatch_error(Exception.message(e))}
+  catch
+    _, reason ->
+      Minga.Log.warning(:agent, "PreCompact hook dispatch failed: #{inspect(reason)}")
+      {:error, HookResult.dispatch_error(inspect(reason))}
+  end
+
   @spec emit_hook_veto(pid(), HookResult.t()) :: :ok
   defp emit_hook_veto(provider_pid, %HookResult{} = result) do
     send(provider_pid, {:agent_event, %Event.Error{message: HookResult.message(result)}})
@@ -1618,6 +1660,17 @@ defmodule MingaAgent.Providers.Native do
   # Checks if context needs compaction and performs it, notifying the subscriber.
   @spec maybe_compact_context(loop_ctx(), Context.t()) :: Context.t()
   defp maybe_compact_context(lctx, context) do
+    case dispatch_pre_compact(context, lctx.config) do
+      :ok ->
+        do_maybe_compact(lctx, context)
+
+      {:error, _result} ->
+        context
+    end
+  end
+
+  @spec do_maybe_compact(loop_ctx(), Context.t()) :: Context.t()
+  defp do_maybe_compact(lctx, context) do
     compact_opts = [
       model: lctx.model,
       llm_client: summary_client(lctx.llm_client, lctx.config)

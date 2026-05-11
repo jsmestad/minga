@@ -194,16 +194,16 @@ defmodule Minga.Events do
 
   defmodule AgentHookEvent do
     @moduledoc "Payload for `:agent_hook` lifecycle telemetry events."
-    @enforce_keys [:event, :phase, :tool_name, :tool_call_id, :tool_pattern]
+    @enforce_keys [:event, :phase]
     defstruct [:event, :phase, :tool_name, :tool_call_id, :tool_pattern, :exit_status, :reason]
 
     @type phase :: :started | :allowed | :vetoed
     @type t :: %__MODULE__{
             event: String.t(),
             phase: phase(),
-            tool_name: String.t(),
-            tool_call_id: String.t(),
-            tool_pattern: String.t(),
+            tool_name: String.t() | nil,
+            tool_call_id: String.t() | nil,
+            tool_pattern: String.t() | nil,
             exit_status: non_neg_integer() | nil,
             reason: term()
           }

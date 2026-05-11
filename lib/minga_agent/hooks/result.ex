@@ -42,26 +42,46 @@ defmodule MingaAgent.Hooks.Result do
     %__MODULE__{status: :veto, hook: hook, stderr: stderr, reason: reason}
   end
 
+  @doc "Builds a veto result for dispatch-level failures (no hook context available)."
+  @spec dispatch_error(String.t()) :: t()
+  def dispatch_error(detail) when is_binary(detail) do
+    %__MODULE__{
+      status: :veto,
+      stderr: "hook dispatch failed: #{detail}",
+      reason: {:failed_to_start, :dispatch_error}
+    }
+  end
+
   @doc "Returns a concise user-facing error for a veto result."
   @spec message(t()) :: String.t()
   def message(%__MODULE__{status: :veto, stderr: stderr, reason: :timeout, hook: hook}) do
+    label = event_label(hook)
+
     details =
-      non_empty(stderr) || "PreToolUse hook timed out after #{hook.timeout_ms}ms and was killed"
+      non_empty(stderr) || "#{label} hook timed out after #{hook.timeout_ms}ms and was killed"
 
-    "PreToolUse hook vetoed tool execution: #{details}"
+    "#{label} hook vetoed execution: #{details}"
   end
 
-  def message(%__MODULE__{status: :veto, stderr: stderr, reason: {:exit, status}}) do
+  def message(%__MODULE__{status: :veto, stderr: stderr, reason: {:exit, status}, hook: hook}) do
+    label = event_label(hook)
     details = non_empty(stderr) || "hook exited with status #{status}"
-    "PreToolUse hook vetoed tool execution: #{details}"
+    "#{label} hook vetoed execution: #{details}"
   end
 
-  def message(%__MODULE__{status: :veto, stderr: stderr}) do
+  def message(%__MODULE__{status: :veto, stderr: stderr, hook: hook}) do
+    label = event_label(hook)
     details = non_empty(stderr) || "hook failed"
-    "PreToolUse hook vetoed tool execution: #{details}"
+    "#{label} hook vetoed execution: #{details}"
   end
 
-  def message(%__MODULE__{}), do: "PreToolUse hook allowed tool execution"
+  def message(%__MODULE__{hook: hook}) do
+    "#{event_label(hook)} hook allowed execution"
+  end
+
+  @spec event_label(Hook.t() | nil) :: String.t()
+  defp event_label(%Hook{event: event}), do: Hook.event_label(event)
+  defp event_label(nil), do: "Hook"
 
   @spec non_empty(String.t()) :: String.t() | nil
   defp non_empty(text) do

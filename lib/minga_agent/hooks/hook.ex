@@ -3,26 +3,50 @@ defmodule MingaAgent.Hooks.Hook do
   Normalized agent hook declaration.
 
   Hooks are declared in user config as maps or keyword lists, then normalized
-  by `MingaAgent.Config.resolve/0` into this struct. Only `:pre_tool_use` is
-  executable today, but the event field is explicit so later lifecycle events
-  can share the same config shape.
+  by `MingaAgent.Config.resolve/0` into this struct. The event field selects
+  the lifecycle point; `tool_pattern` is required only for tool-related events
+  (`:pre_tool_use`, `:post_tool_use`).
   """
 
   @default_timeout_ms 30_000
 
+  @tool_events [:pre_tool_use, :post_tool_use]
+
   @typedoc "Supported hook event names."
-  @type event :: :pre_tool_use
+  @type event ::
+          :pre_tool_use
+          | :post_tool_use
+          | :session_start
+          | :session_end
+          | :stop
+          | :user_prompt_submit
+          | :pre_compact
+          | :notification
+
+  @typedoc "Hook type: shell command or in-process Elixir module."
+  @type hook_type :: :shell | :module
 
   @typedoc "Normalized hook declaration."
   @type t :: %__MODULE__{
           event: event(),
-          tool_pattern: String.t(),
-          command: String.t(),
+          type: hook_type(),
+          tool_pattern: String.t() | nil,
+          command: String.t() | nil,
+          module: module() | nil,
+          function: atom() | nil,
           timeout_ms: pos_integer()
         }
 
-  @enforce_keys [:event, :tool_pattern, :command]
-  defstruct [:event, :tool_pattern, :command, timeout_ms: @default_timeout_ms]
+  @enforce_keys [:event]
+  defstruct [
+    :event,
+    :tool_pattern,
+    :command,
+    :module,
+    :function,
+    type: :shell,
+    timeout_ms: @default_timeout_ms
+  ]
 
   @doc "Returns the default per-hook timeout in milliseconds."
   @spec default_timeout_ms() :: pos_integer()
@@ -39,20 +63,29 @@ defmodule MingaAgent.Hooks.Hook do
 
   def normalize(raw) when is_map(raw) do
     with {:ok, event} <- normalize_event(fetch(raw, :event)),
-         {:ok, tool_pattern} <- normalize_tool_pattern(raw),
-         {:ok, command} <- normalize_command(fetch(raw, :command)),
+         {:ok, type} <- normalize_type(raw),
+         {:ok, tool_pattern} <- normalize_tool_pattern(raw, event),
+         {:ok, command, mod, fun} <- normalize_type_fields(raw, type),
          {:ok, timeout_ms} <- normalize_timeout(fetch(raw, :timeout_ms)) do
       {:ok,
        %__MODULE__{
          event: event,
+         type: type,
          tool_pattern: tool_pattern,
          command: command,
+         module: mod,
+         function: fun,
          timeout_ms: timeout_ms
        }}
     end
   end
 
   def normalize(_raw), do: {:error, "agent hook must be a map or keyword list"}
+
+  @doc "Returns true when this hook applies to the given non-tool event."
+  @spec matches?(t(), event()) :: boolean()
+  def matches?(%__MODULE__{event: event}, event), do: true
+  def matches?(%__MODULE__{}, _event), do: false
 
   @doc "Returns true when this hook applies to the event and tool name."
   @spec matches?(t(), event(), String.t()) :: boolean()
@@ -63,6 +96,21 @@ defmodule MingaAgent.Hooks.Hook do
 
   def matches?(%__MODULE__{}, _event, _tool_name), do: false
 
+  @doc "Returns true if the event is tool-related and uses `tool_pattern` matching."
+  @spec tool_event?(event()) :: boolean()
+  def tool_event?(event), do: event in @tool_events
+
+  @doc "Returns the human-readable label for an event atom."
+  @spec event_label(event()) :: String.t()
+  def event_label(:pre_tool_use), do: "PreToolUse"
+  def event_label(:post_tool_use), do: "PostToolUse"
+  def event_label(:session_start), do: "SessionStart"
+  def event_label(:session_end), do: "SessionEnd"
+  def event_label(:stop), do: "Stop"
+  def event_label(:user_prompt_submit), do: "UserPromptSubmit"
+  def event_label(:pre_compact), do: "PreCompact"
+  def event_label(:notification), do: "Notification"
+
   @spec map_from_list(list()) :: {:ok, map()} | :error
   defp map_from_list(raw) do
     {:ok, Map.new(raw)}
@@ -70,25 +118,124 @@ defmodule MingaAgent.Hooks.Hook do
     ArgumentError -> :error
   end
 
+  @event_aliases Map.new(
+                   for {canonical, aliases} <- %{
+                         pre_tool_use: [:pre_tool_use, :PreToolUse, "PreToolUse", "pre_tool_use"],
+                         post_tool_use: [
+                           :post_tool_use,
+                           :PostToolUse,
+                           "PostToolUse",
+                           "post_tool_use"
+                         ],
+                         session_start: [
+                           :session_start,
+                           :SessionStart,
+                           "SessionStart",
+                           "session_start"
+                         ],
+                         session_end: [:session_end, :SessionEnd, "SessionEnd", "session_end"],
+                         stop: [:stop, :Stop, "Stop", "stop"],
+                         user_prompt_submit: [
+                           :user_prompt_submit,
+                           :UserPromptSubmit,
+                           "UserPromptSubmit",
+                           "user_prompt_submit"
+                         ],
+                         pre_compact: [:pre_compact, :PreCompact, "PreCompact", "pre_compact"],
+                         notification: [
+                           :notification,
+                           :Notification,
+                           "Notification",
+                           "notification"
+                         ]
+                       },
+                       alias_val <- aliases,
+                       do: {alias_val, canonical}
+                 )
+
   @spec normalize_event(term()) :: {:ok, event()} | {:error, String.t()}
   defp normalize_event(nil), do: {:error, "agent hook requires :event"}
-  defp normalize_event(:pre_tool_use), do: {:ok, :pre_tool_use}
-  defp normalize_event(:PreToolUse), do: {:ok, :pre_tool_use}
-  defp normalize_event("PreToolUse"), do: {:ok, :pre_tool_use}
-  defp normalize_event("pre_tool_use"), do: {:ok, :pre_tool_use}
-  defp normalize_event(other), do: {:error, "unsupported agent hook event: #{inspect(other)}"}
 
-  @spec normalize_tool_pattern(map()) :: {:ok, String.t()} | {:error, String.t()}
-  defp normalize_tool_pattern(raw) do
-    raw
-    |> fetch(:tool_pattern)
-    |> fallback(fetch(raw, :tool))
-    |> normalize_non_empty_string("agent hook requires :tool_pattern or :tool")
+  defp normalize_event(value) do
+    case Map.fetch(@event_aliases, value) do
+      {:ok, event} -> {:ok, event}
+      :error -> {:error, "unsupported agent hook event: #{inspect(value)}"}
+    end
   end
 
-  @spec normalize_command(term()) :: {:ok, String.t()} | {:error, String.t()}
-  defp normalize_command(value),
-    do: normalize_non_empty_string(value, "agent hook requires :command")
+  @spec normalize_tool_pattern(map(), event()) :: {:ok, String.t() | nil} | {:error, String.t()}
+  defp normalize_tool_pattern(raw, event) do
+    value =
+      raw
+      |> fetch(:tool_pattern)
+      |> fallback(fetch(raw, :tool))
+
+    if event in @tool_events do
+      normalize_non_empty_string(value, "agent hook requires :tool_pattern or :tool")
+    else
+      {:ok, nil}
+    end
+  end
+
+  @spec normalize_type(map()) :: {:ok, hook_type()} | {:error, String.t()}
+  defp normalize_type(raw) do
+    case fetch(raw, :type) do
+      nil -> infer_type(raw)
+      :shell -> {:ok, :shell}
+      "shell" -> {:ok, :shell}
+      :module -> {:ok, :module}
+      "module" -> {:ok, :module}
+      other -> {:error, "agent hook type must be :shell or :module, got: #{inspect(other)}"}
+    end
+  end
+
+  @spec infer_type(map()) :: {:ok, hook_type()}
+  defp infer_type(raw) do
+    if fetch(raw, :module) != nil, do: {:ok, :module}, else: {:ok, :shell}
+  end
+
+  @spec normalize_type_fields(map(), hook_type()) ::
+          {:ok, String.t() | nil, module() | nil, atom() | nil} | {:error, String.t()}
+  defp normalize_type_fields(raw, :shell) do
+    case normalize_non_empty_string(fetch(raw, :command), "shell hook requires :command") do
+      {:ok, command} -> {:ok, command, nil, nil}
+      error -> error
+    end
+  end
+
+  defp normalize_type_fields(raw, :module) do
+    with {:ok, mod} <- normalize_module(fetch(raw, :module)),
+         {:ok, fun} <- normalize_function(fetch(raw, :function)) do
+      {:ok, nil, mod, fun}
+    end
+  end
+
+  @spec normalize_module(term()) :: {:ok, module()} | {:error, String.t()}
+  defp normalize_module(nil), do: {:error, "module hook requires :module"}
+  defp normalize_module(mod) when is_atom(mod), do: {:ok, mod}
+
+  defp normalize_module(mod) when is_binary(mod) do
+    full_name = if String.starts_with?(mod, "Elixir."), do: mod, else: "Elixir." <> mod
+    {:ok, String.to_existing_atom(full_name)}
+  rescue
+    ArgumentError -> {:error, "module hook :module #{inspect(mod)} is not a loaded module"}
+  end
+
+  defp normalize_module(other),
+    do: {:error, "module hook :module must be an atom, got: #{inspect(other)}"}
+
+  @spec normalize_function(term()) :: {:ok, atom()} | {:error, String.t()}
+  defp normalize_function(nil), do: {:error, "module hook requires :function"}
+  defp normalize_function(fun) when is_atom(fun), do: {:ok, fun}
+
+  defp normalize_function(fun) when is_binary(fun) do
+    {:ok, String.to_existing_atom(fun)}
+  rescue
+    ArgumentError -> {:error, "module hook :function #{inspect(fun)} is not a known atom"}
+  end
+
+  defp normalize_function(other),
+    do: {:error, "module hook :function must be an atom, got: #{inspect(other)}"}
 
   @spec normalize_timeout(term()) :: {:ok, pos_integer()} | {:error, String.t()}
   defp normalize_timeout(nil), do: {:ok, @default_timeout_ms}
