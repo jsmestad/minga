@@ -78,7 +78,7 @@ defmodule MingaEditor.RenderPipeline.Input do
     # Workspace as a plain map (enables state.workspace.X pattern-matching)
     :workspace,
     # Terminal-level viewport (screen dimensions reported by frontend on resize)
-    terminal_viewport: Viewport.new(50, 160),
+    terminal_viewport: Viewport.new(24, 80),
     # Render-pipeline caches (replaces process-dictionary entries)
     caches: %Caches{},
     # Renderer-owned font registration state. Editor snapshots use a fresh

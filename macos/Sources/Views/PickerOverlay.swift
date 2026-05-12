@@ -33,15 +33,13 @@ struct PickerOverlay: View {
                             encoder?.sendKeyPress(codepoint: 27, modifiers: 0)
                         }
 
-                    let maxListHeight = max(geo.size.height * 0.5, 200)
-
                     VStack(spacing: 0) {
                         searchField
 
                         Divider()
                             .overlay(theme.popupBorder.opacity(0.3))
 
-                        resultsList(maxListHeight: maxListHeight)
+                        resultsList(maxListHeight: max(geo.size.height * 0.5, 200))
 
                         if !state.items.isEmpty {
                             Divider()

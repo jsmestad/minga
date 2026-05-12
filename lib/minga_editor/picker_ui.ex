@@ -456,8 +456,7 @@ defmodule MingaEditor.PickerUI do
       }) do
     {visible, selected_offset} = Picker.visible_items(picker)
 
-    # Clamp to available vertical space: prompt takes 1 row, separator takes 1 row,
-    # leave at least 1 row of editor content visible at the top.
+    # Clamp so items + separator + prompt never exceed viewport height.
     max_items_for_viewport = max(viewport.rows - 3, 1)
     visible = Enum.take(visible, max_items_for_viewport)
     selected_offset = min(selected_offset, max(length(visible) - 1, 0))
