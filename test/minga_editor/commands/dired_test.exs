@@ -87,7 +87,7 @@ defmodule MingaEditor.Commands.DiredTest do
       state = send_keys_sync(ctx, ":w<CR>")
 
       assert state.workspace.dired.confirming?
-      assert length(state.workspace.dired.pending_ops) > 0
+      assert state.workspace.dired.pending_ops != []
       assert state.shell_state.status_msg =~ "apply? (y/n)"
     end
   end

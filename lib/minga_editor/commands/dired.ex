@@ -164,18 +164,7 @@ defmodule MingaEditor.Commands.Dired do
     with %{dired: %{active?: true, dired: dired, buffer: buf}} <- state.workspace,
          {cursor_line, _col} <- Buffer.cursor(buf),
          %{} = entry <- Dired.entry_at_line(dired, cursor_line) do
-      open_cmd = if :os.type() == {:unix, :darwin}, do: "open", else: "xdg-open"
-
-      Task.start(fn ->
-        case System.cmd(open_cmd, [entry.path], stderr_to_stdout: true) do
-          {_, 0} ->
-            :ok
-
-          {output, code} ->
-            Minga.Log.warning(:editor, "#{open_cmd} exited #{code}: #{String.trim(output)}")
-        end
-      end)
-
+      spawn_external_open(entry.path)
       EditorState.set_status(state, "Opened #{entry.name}")
     else
       _ -> EditorState.set_status(state, "No entry at cursor")
@@ -192,18 +181,7 @@ defmodule MingaEditor.Commands.Dired do
     case state.workspace.dired do
       %{active?: true, dired: %Dired{directory: dir}, buffer: buf, original_entries: original} ->
         ops = compute_pending_ops(buf, original, dir)
-
-        if ops == [] do
-          EditorState.set_status(state, "No changes to apply")
-        else
-          summary = format_operations_summary(ops)
-
-          state
-          |> EditorState.update_workspace(fn ws ->
-            WorkspaceState.set_dired(ws, DiredState.enter_confirmation(ws.dired, ops))
-          end)
-          |> EditorState.set_status("#{summary} — apply? (y/n)")
-        end
+        maybe_enter_confirmation(state, ops)
 
       _ ->
         state
@@ -371,6 +349,32 @@ defmodule MingaEditor.Commands.Dired do
   end
 
   @spec report_apply_result(state(), non_neg_integer(), [{Dired.operation(), term()}]) :: state()
+  @spec maybe_enter_confirmation(state(), [Dired.operation()]) :: state()
+  defp maybe_enter_confirmation(state, []), do: EditorState.set_status(state, "No changes to apply")
+
+  defp maybe_enter_confirmation(state, ops) do
+    summary = format_operations_summary(ops)
+
+    state
+    |> EditorState.update_workspace(fn ws ->
+      WorkspaceState.set_dired(ws, DiredState.enter_confirmation(ws.dired, ops))
+    end)
+    |> EditorState.set_status("#{summary} — apply? (y/n)")
+  end
+
+  @spec spawn_external_open(String.t()) :: {:ok, pid()}
+  defp spawn_external_open(path) do
+    open_cmd = if :os.type() == {:unix, :darwin}, do: "open", else: "xdg-open"
+
+    Task.start(fn ->
+      {output, code} = System.cmd(open_cmd, [path], stderr_to_stdout: true)
+
+      if code != 0 do
+        Minga.Log.warning(:editor, "#{open_cmd} exited #{code}: #{String.trim(output)}")
+      end
+    end)
+  end
+
   defp report_apply_result(state, successes, []) do
     EditorState.set_status(state, "Applied #{successes} operation(s)")
   end
