@@ -64,7 +64,12 @@ defmodule MingaEditor.Input.Dired do
     end
   end
 
-  @spec handle_prefix_continuation(state(), Minga.Keymap.Bindings.node_t(), non_neg_integer(), non_neg_integer()) ::
+  @spec handle_prefix_continuation(
+          state(),
+          Minga.Keymap.Bindings.node_t(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) ::
           MingaEditor.Input.Handler.result()
   defp handle_prefix_continuation(state, node, cp, mods) do
     state = clear_pending_prefix(state)

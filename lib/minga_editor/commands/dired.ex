@@ -168,8 +168,11 @@ defmodule MingaEditor.Commands.Dired do
 
       Task.start(fn ->
         case System.cmd(open_cmd, [entry.path], stderr_to_stdout: true) do
-          {_, 0} -> :ok
-          {output, code} -> Minga.Log.warning(:editor, "#{open_cmd} exited #{code}: #{String.trim(output)}")
+          {_, 0} ->
+            :ok
+
+          {output, code} ->
+            Minga.Log.warning(:editor, "#{open_cmd} exited #{code}: #{String.trim(output)}")
         end
       end)
 
@@ -382,10 +385,17 @@ defmodule MingaEditor.Commands.Dired do
   end
 
   @spec format_error({Dired.operation(), term()}) :: String.t()
-  defp format_error({{:rename, old, new}, reason}), do: "rename #{Path.basename(old)} -> #{Path.basename(new)}: #{inspect(reason)}"
-  defp format_error({{:delete, path}, reason}), do: "delete #{Path.basename(path)}: #{inspect(reason)}"
-  defp format_error({{:create, path}, reason}), do: "create #{Path.basename(path)}: #{inspect(reason)}"
-  defp format_error({{:mkdir, path}, reason}), do: "mkdir #{Path.basename(path)}: #{inspect(reason)}"
+  defp format_error({{:rename, old, new}, reason}),
+    do: "rename #{Path.basename(old)} -> #{Path.basename(new)}: #{inspect(reason)}"
+
+  defp format_error({{:delete, path}, reason}),
+    do: "delete #{Path.basename(path)}: #{inspect(reason)}"
+
+  defp format_error({{:create, path}, reason}),
+    do: "create #{Path.basename(path)}: #{inspect(reason)}"
+
+  defp format_error({{:mkdir, path}, reason}),
+    do: "mkdir #{Path.basename(path)}: #{inspect(reason)}"
 
   @spec format_op_name(Dired.operation()) :: String.t()
   defp format_op_name({:rename, old, _new}), do: "rename #{Path.basename(old)}"
@@ -449,7 +459,7 @@ defmodule MingaEditor.Commands.Dired do
 
     if buf do
       case Buffer.file_path(buf) do
-        {:ok, path} when is_binary(path) -> Path.dirname(path)
+        path when is_binary(path) -> Path.dirname(path)
         _ -> File.cwd!()
       end
     else

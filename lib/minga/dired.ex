@@ -153,7 +153,12 @@ defmodule Minga.Dired do
   defp entry_from_stat(full_path, name, stat, symlink?, target) do
     dir? = stat.type == :directory
     executable? = Bitwise.band(stat.mode, 0o111) != 0 and not dir?
-    mtime = if stat.mtime, do: NaiveDateTime.from_erl!(stat.mtime), else: nil
+
+    mtime =
+      case stat.mtime do
+        {_date, _time} = erl -> NaiveDateTime.from_erl!(erl)
+        _ -> nil
+      end
 
     %Entry{
       path: full_path,
@@ -186,7 +191,10 @@ defmodule Minga.Dired do
 
   @spec format_name(entry()) :: String.t()
   defp format_name(%Entry{dir?: true, name: name}), do: name <> "/"
-  defp format_name(%Entry{symlink?: true, name: name, target: target}), do: "#{name}@ -> #{target}"
+
+  defp format_name(%Entry{symlink?: true, name: name, target: target}),
+    do: "#{name}@ -> #{target}"
+
   defp format_name(%Entry{executable?: true, name: name}), do: name <> "*"
   defp format_name(%Entry{name: name}), do: name
 
@@ -309,7 +317,9 @@ defmodule Minga.Dired do
     max_len = max(length(original_names), length(normalized_current))
 
     original_padded = original_names ++ List.duplicate(nil, max_len - length(original_names))
-    current_padded = normalized_current ++ List.duplicate(nil, max_len - length(normalized_current))
+
+    current_padded =
+      normalized_current ++ List.duplicate(nil, max_len - length(normalized_current))
 
     {renames, remaining_deletes, remaining_creates} =
       original_padded
