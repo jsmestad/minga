@@ -348,9 +348,9 @@ defmodule MingaEditor.Commands.Dired do
     Dired.diff_operations(original_entries, current_names, directory)
   end
 
-  @spec report_apply_result(state(), non_neg_integer(), [{Dired.operation(), term()}]) :: state()
   @spec maybe_enter_confirmation(state(), [Dired.operation()]) :: state()
-  defp maybe_enter_confirmation(state, []), do: EditorState.set_status(state, "No changes to apply")
+  defp maybe_enter_confirmation(state, []),
+    do: EditorState.set_status(state, "No changes to apply")
 
   defp maybe_enter_confirmation(state, ops) do
     summary = format_operations_summary(ops)
@@ -375,6 +375,7 @@ defmodule MingaEditor.Commands.Dired do
     end)
   end
 
+  @spec report_apply_result(state(), non_neg_integer(), [{Dired.operation(), term()}]) :: state()
   defp report_apply_result(state, successes, []) do
     EditorState.set_status(state, "Applied #{successes} operation(s)")
   end
