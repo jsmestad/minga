@@ -206,7 +206,7 @@ defmodule Minga.Dired do
     do: String.pad_leading("#{div(size, 1024 * 1024 * 1024)}G", 7)
 
   @spec format_date(NaiveDateTime.t() | nil) :: String.t()
-  defp format_date(nil), do: "             "
+  defp format_date(nil), do: "--- -- --:--"
 
   defp format_date(dt) do
     month = Enum.at(~w[Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec], dt.month - 1)

@@ -23,8 +23,9 @@ defmodule Minga.Keymap.Scope.DiredScopeTest do
       assert {:command, :dired_close} = Scope.resolve_key(:dired, :normal, {@escape, 0})
     end
 
-    test "g. resolves to dired_toggle_hidden (prefix sequence)" do
-      assert {:prefix, _node} = Scope.resolve_key(:dired, :normal, {?g, 0})
+    test "g. resolves to dired_toggle_hidden" do
+      {:prefix, node} = Scope.resolve_key(:dired, :normal, {?g, 0})
+      assert {:command, :dired_toggle_hidden} = Scope.resolve_key_in_node(node, {?., 0})
     end
 
     test "gs resolves to dired_cycle_sort via prefix" do

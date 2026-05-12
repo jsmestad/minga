@@ -14,14 +14,16 @@ defmodule MingaEditor.State.Dired do
           dired: Dired.t() | nil,
           buffer: pid() | nil,
           original_entries: [Dired.entry()],
-          confirming?: boolean()
+          confirming?: boolean(),
+          pending_ops: [Dired.operation()]
         }
 
   defstruct active?: false,
             dired: nil,
             buffer: nil,
             original_entries: [],
-            confirming?: false
+            confirming?: false,
+            pending_ops: []
 
   @spec active?(t()) :: boolean()
   def active?(%__MODULE__{active?: active}), do: active
@@ -44,5 +46,20 @@ defmodule MingaEditor.State.Dired do
   @spec set_confirming(t(), boolean()) :: t()
   def set_confirming(%__MODULE__{} = state, confirming?) do
     %{state | confirming?: confirming?}
+  end
+
+  @spec set_pending_ops(t(), [Dired.operation()]) :: t()
+  def set_pending_ops(%__MODULE__{} = state, ops) do
+    %{state | pending_ops: ops}
+  end
+
+  @spec enter_confirmation(t(), [Dired.operation()]) :: t()
+  def enter_confirmation(%__MODULE__{} = state, ops) do
+    %{state | confirming?: true, pending_ops: ops}
+  end
+
+  @spec exit_confirmation(t()) :: t()
+  def exit_confirmation(%__MODULE__{} = state) do
+    %{state | confirming?: false, pending_ops: []}
   end
 end

@@ -185,26 +185,18 @@ defmodule MingaEditor.Commands.Dired do
   def execute(state, :dired_apply_changes) do
     case state.workspace.dired do
       %{active?: true, dired: %Dired{}, buffer: buf, original_entries: original} ->
-        content = Buffer.content(buf)
-        current_names = Dired.parse_listing(content)
-        ops = Dired.diff_operations(original, current_names)
+        ops = compute_pending_ops(buf, original)
 
         if ops == [] do
           EditorState.set_status(state, "No changes to apply")
         else
           summary = format_operations_summary(ops)
 
-          state =
-            state
-            |> EditorState.update_workspace(
-              &WorkspaceState.set_dired(
-                &1,
-                DiredState.set_confirming(state.workspace.dired, true)
-              )
-            )
-            |> EditorState.set_status("#{summary} — apply? (y/n)")
-
-          put_in(state.workspace.dired.confirming?, true)
+          state
+          |> EditorState.update_workspace(fn ws ->
+            WorkspaceState.set_dired(ws, DiredState.enter_confirmation(ws.dired, ops))
+          end)
+          |> EditorState.set_status("#{summary} — apply? (y/n)")
         end
 
       _ ->
@@ -214,9 +206,8 @@ defmodule MingaEditor.Commands.Dired do
 
   def execute(state, :dired_confirm_apply) do
     case state.workspace.dired do
-      %{active?: true, dired: %Dired{directory: dir}, buffer: buf, original_entries: original} ->
+      %{active?: true, dired: %Dired{directory: dir}, pending_ops: ops} when ops != [] ->
         state = clear_confirming(state)
-        ops = compute_pending_ops(buf, original)
         {successes, errors} = apply_operations(ops, dir)
         state = refresh_dired_buffer(state)
         report_apply_result(state, successes, errors)
@@ -362,11 +353,8 @@ defmodule MingaEditor.Commands.Dired do
 
   @spec clear_confirming(state()) :: state()
   defp clear_confirming(state) do
-    new_dired = DiredState.set_confirming(state.workspace.dired, false)
-
-    state
-    |> EditorState.update_workspace(&WorkspaceState.set_dired(&1, new_dired))
-    |> put_in([Access.key(:workspace), Access.key(:dired), Access.key(:confirming?)], false)
+    new_dired = DiredState.exit_confirmation(state.workspace.dired)
+    EditorState.update_workspace(state, &WorkspaceState.set_dired(&1, new_dired))
   end
 
   @spec compute_pending_ops(pid(), [Dired.entry()]) :: [Dired.operation()]
@@ -382,10 +370,25 @@ defmodule MingaEditor.Commands.Dired do
   end
 
   defp report_apply_result(state, successes, errors) do
-    error_msg = Enum.map_join(errors, "; ", fn {_op, reason} -> inspect(reason) end)
-    Minga.Log.error(:editor, "Dired errors: #{error_msg}")
-    EditorState.set_status(state, "Applied #{successes}, #{length(errors)} error(s)")
+    error_details = Enum.map_join(errors, "; ", &format_error/1)
+    Minga.Log.error(:editor, "Dired errors: #{error_details}")
+
+    {first_op, first_reason} = hd(errors)
+    hint = "#{format_op_name(first_op)}: #{inspect(first_reason)}"
+    EditorState.set_status(state, "Applied #{successes}, #{length(errors)} error(s) — #{hint}")
   end
+
+  @spec format_error({Dired.operation(), term()}) :: String.t()
+  defp format_error({{:rename, old, new}, reason}), do: "rename #{old} -> #{new}: #{inspect(reason)}"
+  defp format_error({{:delete, path}, reason}), do: "delete #{Path.basename(path)}: #{inspect(reason)}"
+  defp format_error({{:create, name}, reason}), do: "create #{name}: #{inspect(reason)}"
+  defp format_error({{:mkdir, name}, reason}), do: "mkdir #{name}: #{inspect(reason)}"
+
+  @spec format_op_name(Dired.operation()) :: String.t()
+  defp format_op_name({:rename, old, _new}), do: "rename #{old}"
+  defp format_op_name({:delete, path}), do: "delete #{Path.basename(path)}"
+  defp format_op_name({:create, name}), do: "create #{name}"
+  defp format_op_name({:mkdir, name}), do: "mkdir #{name}"
 
   # ── File operations ──────────────────────────────────────────────────────
 

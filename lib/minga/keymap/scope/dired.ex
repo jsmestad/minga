@@ -53,7 +53,7 @@ defmodule Minga.Keymap.Scope.Dired do
          {"gs", "Cycle sort order (name → size → date → extension)"},
          {"gd", "Toggle detail columns"},
          {"gx", "Open with system application"},
-         {"g (alone)", "Refresh listing"}
+         {"gr", "Refresh listing"}
        ]},
       {"Editing",
        [

@@ -278,6 +278,29 @@ defmodule Minga.DiredTest do
       assert {:delete, "/d/delete_me.txt"} in ops
       assert {:create, "brand_new.txt"} in ops
     end
+
+    test "all entries deleted produces delete ops for each" do
+      entries = [
+        %{name: "a.txt", path: "/d/a.txt"},
+        %{name: "b.txt", path: "/d/b.txt"}
+      ]
+
+      ops = Dired.diff_operations(entries, [])
+      assert length(ops) == 2
+      assert {:delete, "/d/a.txt"} in ops
+      assert {:delete, "/d/b.txt"} in ops
+    end
+
+    test "duplicate names in current list treats extra as create" do
+      entries = [%{name: "a.txt", path: "/d/a.txt"}]
+      ops = Dired.diff_operations(entries, ["a.txt", "a.txt"])
+
+      assert {:create, "a.txt"} in ops
+    end
+
+    test "empty original and empty current produces no ops" do
+      assert Dired.diff_operations([], []) == []
+    end
   end
 
   describe "entry_at_line/2" do
