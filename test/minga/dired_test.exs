@@ -2,6 +2,7 @@ defmodule Minga.DiredTest do
   use ExUnit.Case, async: true
 
   alias Minga.Dired
+  alias Minga.Dired.Entry
 
   @moduletag :tmp_dir
 
@@ -17,6 +18,13 @@ defmodule Minga.DiredTest do
       assert "gamma" in names
       assert "alpha.ex" in names
       assert "beta.txt" in names
+    end
+
+    test "entries are Entry structs", %{tmp_dir: dir} do
+      File.write!(Path.join(dir, "hello.txt"), "")
+
+      assert {:ok, dired} = Dired.read_directory(dir)
+      assert [%Entry{name: "hello.txt"}] = dired.entries
     end
 
     test "sorts directories first, then alphabetically", %{tmp_dir: dir} do
@@ -94,7 +102,7 @@ defmodule Minga.DiredTest do
 
   describe "format_entry/2" do
     test "appends / to directories" do
-      entry = %{
+      entry = %Entry{
         name: "lib",
         dir?: true,
         symlink?: false,
@@ -110,7 +118,7 @@ defmodule Minga.DiredTest do
     end
 
     test "appends * to executables" do
-      entry = %{
+      entry = %Entry{
         name: "run.sh",
         dir?: false,
         symlink?: false,
@@ -126,7 +134,7 @@ defmodule Minga.DiredTest do
     end
 
     test "shows symlink target" do
-      entry = %{
+      entry = %Entry{
         name: "link",
         dir?: false,
         symlink?: true,
@@ -142,7 +150,7 @@ defmodule Minga.DiredTest do
     end
 
     test "plain file has no indicator" do
-      entry = %{
+      entry = %Entry{
         name: "file.txt",
         dir?: false,
         symlink?: false,
@@ -158,7 +166,7 @@ defmodule Minga.DiredTest do
     end
 
     test "includes details when show_details is true" do
-      entry = %{
+      entry = %Entry{
         name: "file.txt",
         dir?: false,
         symlink?: false,
@@ -220,86 +228,86 @@ defmodule Minga.DiredTest do
     end
   end
 
-  describe "diff_operations/2" do
+  describe "diff_operations/3" do
     test "detects no changes" do
       entries = [
-        %{name: "a.txt", path: "/d/a.txt"},
-        %{name: "b.txt", path: "/d/b.txt"}
+        %Entry{name: "a.txt", path: "/d/a.txt"},
+        %Entry{name: "b.txt", path: "/d/b.txt"}
       ]
 
-      assert Dired.diff_operations(entries, ["a.txt", "b.txt"]) == []
+      assert Dired.diff_operations(entries, ["a.txt", "b.txt"], "/d") == []
     end
 
-    test "detects renames by position" do
+    test "detects renames by position with absolute paths" do
       entries = [
-        %{name: "old.txt", path: "/d/old.txt"},
-        %{name: "keep.txt", path: "/d/keep.txt"}
+        %Entry{name: "old.txt", path: "/d/old.txt"},
+        %Entry{name: "keep.txt", path: "/d/keep.txt"}
       ]
 
-      ops = Dired.diff_operations(entries, ["new.txt", "keep.txt"])
-      assert {:rename, "old.txt", "new.txt"} in ops
+      ops = Dired.diff_operations(entries, ["new.txt", "keep.txt"], "/d")
+      assert {:rename, "/d/old.txt", "/d/new.txt"} in ops
     end
 
-    test "detects deletions" do
+    test "detects deletions with absolute paths" do
       entries = [
-        %{name: "a.txt", path: "/d/a.txt"},
-        %{name: "b.txt", path: "/d/b.txt"}
+        %Entry{name: "a.txt", path: "/d/a.txt"},
+        %Entry{name: "b.txt", path: "/d/b.txt"}
       ]
 
-      ops = Dired.diff_operations(entries, ["a.txt"])
+      ops = Dired.diff_operations(entries, ["a.txt"], "/d")
       assert {:delete, "/d/b.txt"} in ops
     end
 
-    test "detects file creation" do
-      entries = [%{name: "a.txt", path: "/d/a.txt"}]
-      ops = Dired.diff_operations(entries, ["a.txt", "new.txt"])
+    test "detects file creation with absolute path" do
+      entries = [%Entry{name: "a.txt", path: "/d/a.txt"}]
+      ops = Dired.diff_operations(entries, ["a.txt", "new.txt"], "/d")
 
-      assert {:create, "new.txt"} in ops
+      assert {:create, "/d/new.txt"} in ops
     end
 
-    test "detects directory creation" do
-      entries = [%{name: "a.txt", path: "/d/a.txt"}]
-      ops = Dired.diff_operations(entries, ["a.txt", "newdir/"])
+    test "detects directory creation with absolute path" do
+      entries = [%Entry{name: "a.txt", path: "/d/a.txt"}]
+      ops = Dired.diff_operations(entries, ["a.txt", "newdir/"], "/d")
 
-      assert {:mkdir, "newdir/"} in ops
+      assert {:mkdir, "/d/newdir"} in ops
     end
 
-    test "handles mixed operations" do
+    test "handles mixed operations with absolute paths" do
       entries = [
-        %{name: "old.txt", path: "/d/old.txt"},
-        %{name: "delete_me.txt", path: "/d/delete_me.txt"},
-        %{name: "keep.txt", path: "/d/keep.txt"}
+        %Entry{name: "old.txt", path: "/d/old.txt"},
+        %Entry{name: "delete_me.txt", path: "/d/delete_me.txt"},
+        %Entry{name: "keep.txt", path: "/d/keep.txt"}
       ]
 
       current = ["renamed.txt", "keep.txt", "brand_new.txt"]
-      ops = Dired.diff_operations(entries, current)
+      ops = Dired.diff_operations(entries, current, "/d")
 
-      assert {:rename, "old.txt", "renamed.txt"} in ops
+      assert {:rename, "/d/old.txt", "/d/renamed.txt"} in ops
       assert {:delete, "/d/delete_me.txt"} in ops
-      assert {:create, "brand_new.txt"} in ops
+      assert {:create, "/d/brand_new.txt"} in ops
     end
 
     test "all entries deleted produces delete ops for each" do
       entries = [
-        %{name: "a.txt", path: "/d/a.txt"},
-        %{name: "b.txt", path: "/d/b.txt"}
+        %Entry{name: "a.txt", path: "/d/a.txt"},
+        %Entry{name: "b.txt", path: "/d/b.txt"}
       ]
 
-      ops = Dired.diff_operations(entries, [])
+      ops = Dired.diff_operations(entries, [], "/d")
       assert length(ops) == 2
       assert {:delete, "/d/a.txt"} in ops
       assert {:delete, "/d/b.txt"} in ops
     end
 
     test "duplicate names in current list treats extra as create" do
-      entries = [%{name: "a.txt", path: "/d/a.txt"}]
-      ops = Dired.diff_operations(entries, ["a.txt", "a.txt"])
+      entries = [%Entry{name: "a.txt", path: "/d/a.txt"}]
+      ops = Dired.diff_operations(entries, ["a.txt", "a.txt"], "/d")
 
-      assert {:create, "a.txt"} in ops
+      assert {:create, "/d/a.txt"} in ops
     end
 
     test "empty original and empty current produces no ops" do
-      assert Dired.diff_operations([], []) == []
+      assert Dired.diff_operations([], [], "/d") == []
     end
   end
 
@@ -307,8 +315,8 @@ defmodule Minga.DiredTest do
     test "returns the entry at the given line index" do
       dired = %Dired{
         entries: [
-          %{name: "first", path: "/d/first"},
-          %{name: "second", path: "/d/second"}
+          %Entry{name: "first", path: "/d/first"},
+          %Entry{name: "second", path: "/d/second"}
         ]
       }
 

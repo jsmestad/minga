@@ -1,3 +1,36 @@
+defmodule Minga.Dired.Entry do
+  @moduledoc """
+  A single directory entry with filesystem metadata.
+
+  Used by `Minga.Dired` to represent files, directories, and symlinks.
+  """
+
+  @enforce_keys [:path, :name]
+  defstruct [
+    :path,
+    :name,
+    dir?: false,
+    symlink?: false,
+    target: nil,
+    executable?: false,
+    size: 0,
+    mtime: nil,
+    mode: 0
+  ]
+
+  @type t :: %__MODULE__{
+          path: String.t(),
+          name: String.t(),
+          dir?: boolean(),
+          symlink?: boolean(),
+          target: String.t() | nil,
+          executable?: boolean(),
+          size: non_neg_integer(),
+          mtime: NaiveDateTime.t() | nil,
+          mode: non_neg_integer()
+        }
+end
+
 defmodule Minga.Dired do
   @moduledoc """
   Pure data structure and functions for Oil.nvim-style directory buffers.
@@ -10,20 +43,11 @@ defmodule Minga.Dired do
   """
 
   alias __MODULE__
+  alias Minga.Dired.Entry
 
   @type sort_key :: :name | :size | :date | :extension
 
-  @type entry :: %{
-          path: String.t(),
-          name: String.t(),
-          dir?: boolean(),
-          symlink?: boolean(),
-          target: String.t() | nil,
-          executable?: boolean(),
-          size: non_neg_integer(),
-          mtime: NaiveDateTime.t() | nil,
-          mode: non_neg_integer()
-        }
+  @type entry :: Entry.t()
 
   @type operation ::
           {:rename, String.t(), String.t()}
@@ -113,7 +137,7 @@ defmodule Minga.Dired do
   @spec entry_from_stat(String.t(), String.t(), File.Stat.t() | nil, boolean(), String.t() | nil) ::
           entry()
   defp entry_from_stat(full_path, name, nil, symlink?, target) do
-    %{
+    %Entry{
       path: full_path,
       name: name,
       dir?: false,
@@ -131,7 +155,7 @@ defmodule Minga.Dired do
     executable? = Bitwise.band(stat.mode, 0o111) != 0 and not dir?
     mtime = if stat.mtime, do: NaiveDateTime.from_erl!(stat.mtime), else: nil
 
-    %{
+    %Entry{
       path: full_path,
       name: name,
       dir?: dir?,
@@ -161,10 +185,10 @@ defmodule Minga.Dired do
   end
 
   @spec format_name(entry()) :: String.t()
-  defp format_name(%{dir?: true, name: name}), do: name <> "/"
-  defp format_name(%{symlink?: true, name: name, target: target}), do: "#{name}@ -> #{target}"
-  defp format_name(%{executable?: true, name: name}), do: name <> "*"
-  defp format_name(%{name: name}), do: name
+  defp format_name(%Entry{dir?: true, name: name}), do: name <> "/"
+  defp format_name(%Entry{symlink?: true, name: name, target: target}), do: "#{name}@ -> #{target}"
+  defp format_name(%Entry{executable?: true, name: name}), do: name <> "*"
+  defp format_name(%Entry{name: name}), do: name
 
   @spec format_listing(t()) :: String.t()
   def format_listing(%Dired{entries: entries, show_details: show_details}) do
@@ -272,8 +296,8 @@ defmodule Minga.Dired do
 
   # ── Diffing ──────────────────────────────────────────────────────────────
 
-  @spec diff_operations([entry()], [String.t()]) :: [operation()]
-  def diff_operations(original_entries, current_names) do
+  @spec diff_operations([entry()], [String.t()], String.t()) :: [operation()]
+  def diff_operations(original_entries, current_names, directory) do
     original_names = Enum.map(original_entries, & &1.name)
     original_set = MapSet.new(original_names)
     current_set = MapSet.new(current_names)
@@ -290,7 +314,12 @@ defmodule Minga.Dired do
         handle_diff_pair(orig, curr, original_set, current_set, rn, del, cre)
       end)
 
-    rename_ops = Enum.reverse(renames)
+    rename_ops =
+      renames
+      |> Enum.reverse()
+      |> Enum.map(fn {:rename, old_name, new_name} ->
+        {:rename, Path.join(directory, old_name), Path.join(directory, new_name)}
+      end)
 
     renamed_old = MapSet.new(rename_ops, fn {:rename, old, _} -> old end)
     renamed_new = MapSet.new(rename_ops, fn {:rename, _, new} -> new end)
@@ -298,22 +327,20 @@ defmodule Minga.Dired do
     delete_ops =
       remaining_deletes
       |> Enum.reverse()
+      |> Enum.map(&Path.join(directory, &1))
       |> Enum.reject(&MapSet.member?(renamed_old, &1))
-      |> Enum.map(fn name ->
-        entry = Enum.find(original_entries, &(&1.name == name))
-        {:delete, entry.path}
-      end)
+      |> Enum.map(fn path -> {:delete, path} end)
 
     create_ops =
       remaining_creates
       |> Enum.reverse()
-      |> Enum.reject(&MapSet.member?(renamed_new, &1))
+      |> Enum.reject(&MapSet.member?(renamed_new, Path.join(directory, &1)))
       |> Enum.uniq()
       |> Enum.map(fn name ->
         if String.ends_with?(name, "/") do
-          {:mkdir, name}
+          {:mkdir, Path.join(directory, name)}
         else
-          {:create, name}
+          {:create, Path.join(directory, name)}
         end
       end)
 

@@ -184,8 +184,8 @@ defmodule MingaEditor.Commands.Dired do
 
   def execute(state, :dired_apply_changes) do
     case state.workspace.dired do
-      %{active?: true, dired: %Dired{}, buffer: buf, original_entries: original} ->
-        ops = compute_pending_ops(buf, original)
+      %{active?: true, dired: %Dired{directory: dir}, buffer: buf, original_entries: original} ->
+        ops = compute_pending_ops(buf, original, dir)
 
         if ops == [] do
           EditorState.set_status(state, "No changes to apply")
@@ -206,9 +206,9 @@ defmodule MingaEditor.Commands.Dired do
 
   def execute(state, :dired_confirm_apply) do
     case state.workspace.dired do
-      %{active?: true, dired: %Dired{directory: dir}, pending_ops: ops} when ops != [] ->
+      %{active?: true, dired: %Dired{}, pending_ops: ops} when ops != [] ->
         state = clear_confirming(state)
-        {successes, errors} = apply_operations(ops, dir)
+        {successes, errors} = apply_operations(ops)
         state = refresh_dired_buffer(state)
         report_apply_result(state, successes, errors)
 
@@ -357,11 +357,11 @@ defmodule MingaEditor.Commands.Dired do
     EditorState.update_workspace(state, &WorkspaceState.set_dired(&1, new_dired))
   end
 
-  @spec compute_pending_ops(pid(), [Dired.entry()]) :: [Dired.operation()]
-  defp compute_pending_ops(buf, original_entries) do
+  @spec compute_pending_ops(pid(), [Dired.entry()], String.t()) :: [Dired.operation()]
+  defp compute_pending_ops(buf, original_entries, directory) do
     content = Buffer.content(buf)
     current_names = Dired.parse_listing(content)
-    Dired.diff_operations(original_entries, current_names)
+    Dired.diff_operations(original_entries, current_names, directory)
   end
 
   @spec report_apply_result(state(), non_neg_integer(), [{Dired.operation(), term()}]) :: state()
@@ -379,34 +379,32 @@ defmodule MingaEditor.Commands.Dired do
   end
 
   @spec format_error({Dired.operation(), term()}) :: String.t()
-  defp format_error({{:rename, old, new}, reason}), do: "rename #{old} -> #{new}: #{inspect(reason)}"
+  defp format_error({{:rename, old, new}, reason}), do: "rename #{Path.basename(old)} -> #{Path.basename(new)}: #{inspect(reason)}"
   defp format_error({{:delete, path}, reason}), do: "delete #{Path.basename(path)}: #{inspect(reason)}"
-  defp format_error({{:create, name}, reason}), do: "create #{name}: #{inspect(reason)}"
-  defp format_error({{:mkdir, name}, reason}), do: "mkdir #{name}: #{inspect(reason)}"
+  defp format_error({{:create, path}, reason}), do: "create #{Path.basename(path)}: #{inspect(reason)}"
+  defp format_error({{:mkdir, path}, reason}), do: "mkdir #{Path.basename(path)}: #{inspect(reason)}"
 
   @spec format_op_name(Dired.operation()) :: String.t()
-  defp format_op_name({:rename, old, _new}), do: "rename #{old}"
+  defp format_op_name({:rename, old, _new}), do: "rename #{Path.basename(old)}"
   defp format_op_name({:delete, path}), do: "delete #{Path.basename(path)}"
-  defp format_op_name({:create, name}), do: "create #{name}"
-  defp format_op_name({:mkdir, name}), do: "mkdir #{name}"
+  defp format_op_name({:create, path}), do: "create #{Path.basename(path)}"
+  defp format_op_name({:mkdir, path}), do: "mkdir #{Path.basename(path)}"
 
   # ── File operations ──────────────────────────────────────────────────────
 
-  @spec apply_operations([Dired.operation()], String.t()) ::
+  @spec apply_operations([Dired.operation()]) ::
           {non_neg_integer(), [{Dired.operation(), term()}]}
-  defp apply_operations(ops, dir) do
+  defp apply_operations(ops) do
     Enum.reduce(ops, {0, []}, fn op, {ok_count, errors} ->
-      case apply_single_operation(op, dir) do
+      case apply_single_operation(op) do
         :ok -> {ok_count + 1, errors}
         {:error, reason} -> {ok_count, [{op, reason} | errors]}
       end
     end)
   end
 
-  @spec apply_single_operation(Dired.operation(), String.t()) :: :ok | {:error, term()}
-  defp apply_single_operation({:rename, old_name, new_name}, dir) do
-    old_path = Path.join(dir, old_name)
-    new_path = Path.join(dir, new_name)
+  @spec apply_single_operation(Dired.operation()) :: :ok | {:error, term()}
+  defp apply_single_operation({:rename, old_path, new_path}) do
     parent = Path.dirname(new_path)
 
     case ensure_directory(parent) do
@@ -415,15 +413,14 @@ defmodule MingaEditor.Commands.Dired do
     end
   end
 
-  defp apply_single_operation({:delete, path}, _dir) do
+  defp apply_single_operation({:delete, path}) do
     case File.rm_rf(path) do
       {:ok, _} -> :ok
       {:error, reason, _} -> {:error, reason}
     end
   end
 
-  defp apply_single_operation({:create, name}, dir) do
-    path = Path.join(dir, name)
+  defp apply_single_operation({:create, path}) do
     parent = Path.dirname(path)
 
     case ensure_directory(parent) do
@@ -432,8 +429,7 @@ defmodule MingaEditor.Commands.Dired do
     end
   end
 
-  defp apply_single_operation({:mkdir, name}, dir) do
-    path = Path.join(dir, String.trim_trailing(name, "/"))
+  defp apply_single_operation({:mkdir, path}) do
     File.mkdir_p(path)
   end
 
