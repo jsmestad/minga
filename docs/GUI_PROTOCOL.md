@@ -884,7 +884,7 @@ Fields:
 - `guide_count`: number of guide columns that follow
 - `col`: character column offset from content start (not screen left). The frontend converts to pixel position using `col * cellWidth + gutterPixelWidth`
 - `line_count`: number of visible lines with indent level data that follow
-- `indent_level`: effective indent level for this visible line (0-255, capped). A guide at column `col` should only be drawn on a line whose `indent_level >= col / tab_width`. Blank lines inherit the indent level of the next non-blank line below them so guides span through blank lines
+- `indent_level`: effective indent level for this visible line (0-255, capped). A guide at column `col` should only be drawn on a line whose `indent_level > col / tab_width` (strict greater-than, so guides appear only in whitespace, not at the text-start column). Blank lines inherit the indent level of the next non-blank line below them so guides span through blank lines
 
 The `line_count` + `indent_levels` section is optional for backward compatibility. If `payload_length` does not leave room for it after the guide columns, the frontend should fall back to drawing full-height guide columns (the pre-v0.4 behavior).
 
