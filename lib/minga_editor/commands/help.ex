@@ -567,7 +567,12 @@ defmodule MingaEditor.Commands.Help do
 
   @spec current_option_value(state(), Options.option_name(), atom() | nil, pid() | nil) :: term()
   defp current_option_value(state, name, filetype, buffer) when is_pid(buffer) do
-    Buffer.get_option(buffer, name)
+    options_server = EditorState.options_server(state)
+
+    case Map.fetch(Buffer.local_options(buffer), name) do
+      {:ok, value} -> value
+      :error -> Options.get_for_filetype(options_server, name, filetype)
+    end
   catch
     :exit, _ -> Options.get_for_filetype(EditorState.options_server(state), name, filetype)
   end

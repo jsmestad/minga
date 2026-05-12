@@ -82,10 +82,13 @@ defmodule MingaEditor.UI.Picker.OptionSource do
 
   @spec current_value(Options.server(), Options.option_name(), atom() | nil, pid() | nil) ::
           term()
-  defp current_value(_options_server, name, _filetype, buffer) when is_pid(buffer) do
-    Buffer.get_option(buffer, name)
+  defp current_value(options_server, name, filetype, buffer) when is_pid(buffer) do
+    case Map.fetch(Buffer.local_options(buffer), name) do
+      {:ok, value} -> value
+      :error -> Options.get_for_filetype(options_server, name, filetype)
+    end
   catch
-    :exit, _ -> nil
+    :exit, _ -> Options.get_for_filetype(options_server, name, filetype)
   end
 
   defp current_value(options_server, name, filetype, _buffer) do

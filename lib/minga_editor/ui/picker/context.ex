@@ -69,8 +69,8 @@ defmodule MingaEditor.UI.Picker.Context do
           agent_session: pid() | nil,
           picker_ui: map(),
           capabilities: map(),
-          keymap_server: State.keymap_server(),
-          options_server: State.options_server(),
+          keymap_server: State.keymap_server() | nil,
+          options_server: State.options_server() | nil,
           theme: Theme.t()
         }
 

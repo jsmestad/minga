@@ -6,6 +6,8 @@ defmodule MingaEditor.Commands.HelpTest do
   alias Minga.Keymap.Active, as: ActiveKeymap
   alias MingaEditor.Commands.Help
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.UI.Picker.Context
+  alias MingaEditor.UI.Picker.OptionSource
   alias MingaEditor.State.Buffers
   alias MingaEditor.Viewport
 
@@ -151,6 +153,29 @@ defmodule MingaEditor.Commands.HelpTest do
       assert content =~ "Description:"
     end
 
+    test "uses the editor options server for non-buffer-local option values" do
+      state = build_state()
+      Minga.Config.Options.set(state.options_server, :agent_model, "test-model")
+
+      result = Help.describe_option(state, :agent_model)
+      content = BufferServer.content(result.workspace.buffers.help)
+
+      assert content =~ "Current value: \"test-model\""
+      assert content =~ "Set by: default → config.exs"
+    end
+
+    test "uses filetype-scoped values from the editor options server" do
+      state = build_state()
+      BufferServer.set_filetype(state.workspace.buffers.active, :go)
+      Minga.Config.Options.set_for_filetype(state.options_server, :go, :agent_model, "go-model")
+
+      result = Help.describe_option(state, :agent_model)
+      content = BufferServer.content(result.workspace.buffers.help)
+
+      assert content =~ "Current value: \"go-model\""
+      assert content =~ "Set by: default → filetype :go"
+    end
+
     test "includes buffer-local provenance in option help" do
       state = build_state()
       BufferServer.set_option(state.workspace.buffers.active, :tab_width, 6)
@@ -160,6 +185,32 @@ defmodule MingaEditor.Commands.HelpTest do
 
       assert content =~ "Current value: 6"
       assert content =~ "Set by: default → buffer-local"
+    end
+
+    test "option picker uses the editor options server for non-buffer-local values" do
+      state = build_state()
+      Minga.Config.Options.set(state.options_server, :agent_model, "test-model")
+      context = Context.from_editor_state(state)
+
+      item = Enum.find(OptionSource.candidates(context), &(&1.id == :agent_model))
+
+      assert item.description =~ "\"test-model\""
+      assert item.annotation == "modified"
+    end
+
+    test "option picker falls back to the editor options server if the active buffer died" do
+      state = build_state()
+      Minga.Config.Options.set(state.options_server, :agent_model, "test-model")
+      buffer = state.workspace.buffers.active
+      monitor = Process.monitor(buffer)
+
+      GenServer.stop(buffer)
+      assert_receive {:DOWN, ^monitor, :process, ^buffer, _reason}
+
+      context = Context.from_editor_state(state)
+      item = Enum.find(OptionSource.candidates(context), &(&1.id == :agent_model))
+
+      assert item.description =~ "\"test-model\""
     end
 
     test "shows extension option metadata" do

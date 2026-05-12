@@ -14,56 +14,9 @@ defmodule Minga.Config.Options do
 
   ## Supported options
 
-  | Option          | Type                                          | Default   |
-  |-----------------|-----------------------------------------------|-----------|
-  | `:tab_width`    | positive integer                               | `2`       |
-  | `:line_numbers` | `:hybrid`, `:absolute`, `:relative`, `:none`   | `:hybrid` |
-  | `:autopair`     | boolean                                        | `true`    |
-  | `:scroll_margin`| non-negative integer                           | `5`       |
-  | `:scroll_lines` | positive integer                               | `1`       |
-  | `:theme`        | theme name atom (see `Minga.Config.ThemeRegistry.available/0`) | `:doom_one`|
-  | `:indent_with`  | `:spaces` or `:tabs`                            | `:spaces`  |
-  | `:trim_trailing_whitespace` | boolean                             | `false`    |
-  | `:insert_final_newline`     | boolean                             | `false`    |
-  | `:format_on_save`           | boolean                             | `false`    |
-  | `:auto_save_delay_ms`       | non-negative integer (0 disables)   | `1000`     |
-  | `:formatter`    | string or `nil`                                  | `nil`      |
-  | `:title_format` | string with `{placeholder}` tokens               | `"{filename} {dirty}({directory}) - Minga"` |
-  | `:recent_files_limit` | positive integer                            | `200`      |
-  | `:persist_recent_files` | boolean                                  | `true`     |
-  | `:wrap`                 | boolean                                    | `false`    |
-  | `:linebreak`            | boolean                                    | `true`     |
-  | `:breakindent`          | boolean                                    | `true`     |
-  | `:agent_tool_approval`  | `:destructive`, `:all`, or `:none`          | `:destructive` |
-  | `:agent_destructive_tools` | list of tool name strings                | `["write_file", "edit_file", "shell"]` |
-  | `:agent_hooks`            | list of agent hook declarations            | `[]`       |
-  | `:agent_panel_split`      | positive integer (30-80)                   | `65`       |
-  | `:startup_view`           | `:agent` or `:editor`                       | `:agent`   |
-  | `:agent_auto_context`     | boolean                                     | `true`     |
-  | `:agent_mcp_servers`      | list of server config maps                  | `[]`       |
-  | `:font_family`            | string (font name)                          | `"Menlo"`   |
-  | `:font_size`              | positive integer (point size)               | `13`        |
-  | `:font_weight`            | `:thin` / `:light` / `:regular` / `:medium` / `:semibold` / `:bold` / `:heavy` / `:black` | `:regular` |
-  | `:font_ligatures`         | boolean                                     | `true`      |
-  | `:font_fallback`          | list of font family strings                 | `[]`        |
-  | `:prettify_symbols`       | boolean                                     | `false`     |
-  | `:whichkey_layout`        | `:bottom` or `:float`                       | `:bottom`   |
-  | `:cursorline`             | boolean                                        | `true`    |
-  | `:nav_flash`              | boolean                                        | `true`    |
-  | `:nav_flash_threshold`    | positive integer                               | `5`       |
-  | `:yank_flash`             | boolean                                        | `true`    |
-  | `:log_level`              | `:debug` / `:info` / `:warning` / `:error` / `:none` | `:info` |
-  | `:log_level_render`       | log level or `:default`                     | `:default`  |
-  | `:log_level_lsp`          | log level or `:default`                     | `:default`  |
-  | `:log_level_agent`        | log level or `:default`                     | `:default`  |
-  | `:log_level_editor`       | log level or `:default`                     | `:default`  |
-  | `:log_level_config`       | log level or `:default`                     | `:default`  |
-  | `:log_level_port`         | log level or `:default`                     | `:default`  |
-  | `:event_retention_days`   | positive integer (days to keep event log)    | `90`        |
+  Option metadata lives in `@option_specs`, including each option's type, default value, and user-facing description. Use `option_specs/0` for the full list, `describe/1` for one built-in option, and `extension_option_specs/1` for extension-registered options.
 
-  Log level options control per-subsystem verbosity. Subsystem options
-  default to `:default` (inherit from `:log_level`). See `Minga.Log`
-  for the filtering API.
+  Log level options control per-subsystem verbosity. Subsystem options default to `:default` (inherit from `:log_level`). See `Minga.Log` for the filtering API.
 
   ## Per-filetype overrides
 
