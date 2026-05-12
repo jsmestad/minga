@@ -95,9 +95,7 @@ defmodule MingaEditor.PickerUI do
         state
 
       _ ->
-        # Use terminal height minus 3 (separator + prompt + at least 1 buffer line visible)
-        max_vis = state.terminal_viewport.rows - 3
-        max_vis = max(5, min(max_vis, state.terminal_viewport.rows - 3))
+        max_vis = max(state.terminal_viewport.rows - 3, 5)
         picker = Picker.new(items, title: source_module.title(), max_visible: max_vis)
 
         # Clear whichkey state if active
@@ -457,6 +455,12 @@ defmodule MingaEditor.PickerUI do
         viewport: viewport
       }) do
     {visible, selected_offset} = Picker.visible_items(picker)
+
+    # Clamp to available vertical space: prompt takes 1 row, separator takes 1 row,
+    # leave at least 1 row of editor content visible at the top.
+    max_items_for_viewport = max(viewport.rows - 3, 1)
+    visible = Enum.take(visible, max_items_for_viewport)
+    selected_offset = min(selected_offset, max(length(visible) - 1, 0))
     item_count = length(visible)
 
     # Layout: items grow upward from row N-2, prompt on row N-1
@@ -853,8 +857,7 @@ defmodule MingaEditor.PickerUI do
        ) do
     ctx = Context.from_editor_state(state)
     items = new_source.candidates(ctx)
-    max_vis = state.terminal_viewport.rows - 3
-    max_vis = max(5, min(max_vis, state.terminal_viewport.rows - 3))
+    max_vis = max(state.terminal_viewport.rows - 3, 5)
     picker = Picker.new(items, title: new_source.title(), max_visible: max_vis)
     layout = MingaEditor.UI.Picker.Source.layout(new_source)
     original = orig_src || current_source
@@ -879,8 +882,7 @@ defmodule MingaEditor.PickerUI do
        ) do
     ctx = Context.from_editor_state(state)
     items = orig.candidates(ctx)
-    max_vis = state.terminal_viewport.rows - 3
-    max_vis = max(5, min(max_vis, state.terminal_viewport.rows - 3))
+    max_vis = max(state.terminal_viewport.rows - 3, 5)
     picker = Picker.new(items, title: orig.title(), max_visible: max_vis)
     layout = MingaEditor.UI.Picker.Source.layout(orig)
 
