@@ -1102,6 +1102,14 @@ defmodule Minga.Buffer.ServerTest do
       assert updated[:wrap] == false
     end
 
+    test "local_option_overrides returns only explicitly set options" do
+      {:ok, pid} = Server.start_link(content: "hello")
+      assert Server.local_option_overrides(pid) == %{}
+
+      Server.set_option(pid, :tab_width, 4)
+      assert Server.local_option_overrides(pid) == %{tab_width: 4}
+    end
+
     test "filetype default wins over global when seeded at creation" do
       # Set filetype override BEFORE creating buffer (eager seeding)
       Options.set_for_filetype(:go, :tab_width, 8)

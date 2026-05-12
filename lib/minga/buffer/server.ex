@@ -519,12 +519,19 @@ defmodule Minga.Buffer.Server do
   end
 
   @doc """
-  Returns all buffer-local option overrides (not the resolved values,
-  just the overrides set on this buffer).
+  Returns all buffer option values currently cached on this buffer.
   """
   @spec local_options(GenServer.server()) :: %{atom() => term()}
   def local_options(server) do
     GenServer.call(server, :local_options)
+  end
+
+  @doc """
+  Returns only options explicitly overridden on this buffer.
+  """
+  @spec local_option_overrides(GenServer.server()) :: %{atom() => term()}
+  def local_option_overrides(server) do
+    GenServer.call(server, :local_option_overrides)
   end
 
   @doc "Appends text to the end of the buffer, bypassing read-only. For programmatic writes."
@@ -1473,6 +1480,11 @@ defmodule Minga.Buffer.Server do
 
   def handle_call(:local_options, _from, state) do
     {:reply, state.options, state}
+  end
+
+  def handle_call(:local_option_overrides, _from, state) do
+    overrides = Map.take(state.options, MapSet.to_list(state.explicit_options))
+    {:reply, overrides, state}
   end
 
   def handle_call({:append, text}, _from, state) do
