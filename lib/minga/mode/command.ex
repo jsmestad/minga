@@ -28,6 +28,8 @@ defmodule Minga.Mode.Command do
 
   @behaviour Minga.Mode
 
+  import Bitwise
+
   alias Minga.Command.Parser, as: CommandParser
   alias Minga.Mode
   alias Minga.Mode.CommandState
@@ -36,6 +38,7 @@ defmodule Minga.Mode.Command do
   @escape 27
   @enter 13
   @tab 9
+  @ctrl 0x02
 
   # Arrow key codepoints sent by libvaxis (exclude from printable range)
   @arrow_up 57_352
@@ -51,7 +54,13 @@ defmodule Minga.Mode.Command do
   """
   @spec handle_key(Mode.key(), CommandState.t()) :: Mode.result()
 
-  # Enter → parse the accumulated input and emit an :execute_ex_command
+  # Enter → execute the highlighted candidate if navigated, otherwise parse raw input
+  def handle_key({@enter, _mods}, %CommandState{input: input, candidate_index: idx} = state)
+      when idx != 0 do
+    {:execute_then_transition, [{:execute_command_candidate, input, idx}], :normal,
+     %{state | input: ""}}
+  end
+
   def handle_key({@enter, _mods}, %CommandState{input: input} = state) do
     parsed = CommandParser.parse(input)
     {:execute_then_transition, [{:execute_ex_command, parsed}], :normal, %{state | input: ""}}
@@ -91,6 +100,18 @@ defmodule Minga.Mode.Command do
 
   # Arrow down → move candidate selection down
   def handle_key({@arrow_down, _mods}, %CommandState{candidate_index: idx} = state) do
+    {:continue, %{state | candidate_index: idx + 1}}
+  end
+
+  # C-p → move candidate selection up (vim convention)
+  def handle_key({?p, mods}, %CommandState{candidate_index: idx} = state)
+      when band(mods, @ctrl) != 0 do
+    {:continue, %{state | candidate_index: idx - 1}}
+  end
+
+  # C-n → move candidate selection down (vim convention)
+  def handle_key({?n, mods}, %CommandState{candidate_index: idx} = state)
+      when band(mods, @ctrl) != 0 do
     {:continue, %{state | candidate_index: idx + 1}}
   end
 

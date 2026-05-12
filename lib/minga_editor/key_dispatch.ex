@@ -18,9 +18,12 @@ defmodule MingaEditor.KeyDispatch do
   alias MingaEditor.Commands
   alias MingaEditor.Editing
   alias MingaEditor.MacroReplay
+  alias MingaEditor.MinibufferData
   alias MingaEditor.ModeTransitions
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.AgentAccess
+  alias MingaEditor.State.ModalOverlay
+  alias MingaEditor.State.ModalOverlay.CommandCompletion, as: CommandCompletionPayload
   alias Minga.Keymap
   alias Minga.Mode
 
@@ -80,6 +83,8 @@ defmodule MingaEditor.KeyDispatch do
         EditorState.events_registry(base_state)
       )
     end
+
+    base_state = sync_command_completion_overlay(base_state, old_mode, new_mode)
 
     after_commands =
       Enum.reduce(commands, base_state, fn cmd, acc ->
@@ -225,6 +230,35 @@ defmodule MingaEditor.KeyDispatch do
   catch
     :exit, _ -> :text
   end
+
+  # ── Command completion overlay lifecycle ──────────────────────────────────
+
+  @spec sync_command_completion_overlay(EditorState.t(), Mode.mode(), Mode.mode()) ::
+          EditorState.t()
+  defp sync_command_completion_overlay(state, _old_mode, :command) do
+    ms = Editing.mode_state(state)
+    {candidates, total} = MinibufferData.complete_ex_command(ms.input)
+    selected = MinibufferData.clamp_index(ms.candidate_index, length(candidates))
+
+    payload =
+      CommandCompletionPayload.new(
+        candidates: candidates,
+        selected: selected,
+        filter_text: ms.input,
+        total: total
+      )
+
+    ModalOverlay.open(state, :command_completion, payload)
+  end
+
+  defp sync_command_completion_overlay(state, :command, new_mode) when new_mode != :command do
+    case state.shell_state.modal do
+      {:command_completion, _} -> ModalOverlay.close(state)
+      _ -> state
+    end
+  end
+
+  defp sync_command_completion_overlay(state, _old_mode, _new_mode), do: state
 
   # ── Mode trie population ──────────────────────────────────────────────────
   # Populates leader_trie, normal_bindings, and mode_trie on the mode state
