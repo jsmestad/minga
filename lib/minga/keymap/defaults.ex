@@ -75,6 +75,7 @@ defmodule Minga.Keymap.Defaults do
     # ── Help ──────────────────────────────────────────────────────────────────
     {[{?h, @none}, {?b, @none}], :describe_bindings, "Describe bindings"},
     {[{?h, @none}, {?c, @none}], :describe_command, "Describe command"},
+    {[{?h, @none}, {?f, @none}], :describe_function, "Describe function"},
     {[{?h, @none}, {?k, @none}], :describe_key, "Describe key"},
     {[{?h, @none}, {?l, @none}], :describe_lossage, "Show keystroke history"},
     {[{?h, @none}, {?v, @none}], :describe_option, "Describe option"},

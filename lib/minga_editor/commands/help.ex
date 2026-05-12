@@ -8,13 +8,13 @@ defmodule MingaEditor.Commands.Help do
   @behaviour Minga.Command.Provider
 
   alias Minga.Buffer
-  alias Minga.Buffer.Document
   alias Minga.Command
   alias Minga.Config.Options
   alias Minga.Keymap
   alias Minga.Keymap.Bindings
   alias Minga.Keymap.Defaults
   alias MingaEditor.Commands
+  alias MingaEditor.HighlightSync
   alias MingaEditor.KeystrokeHistory
   alias MingaEditor.PickerUI
   alias MingaEditor.State, as: EditorState
@@ -56,6 +56,12 @@ defmodule MingaEditor.Commands.Help do
         description: "Show keystroke history",
         requires_buffer: false,
         execute: fn state -> execute(state, :describe_lossage) end
+      },
+      %Command{
+        name: :describe_function,
+        description: "Describe function",
+        requires_buffer: false,
+        execute: fn state -> execute(state, :describe_function) end
       }
     ]
   end
@@ -95,14 +101,19 @@ defmodule MingaEditor.Commands.Help do
     show_in_buffer(state, "*Keystrokes*", lossage_content(state))
   end
 
+  def execute(state, :describe_function) do
+    PickerUI.open(state, MingaEditor.UI.Picker.HelpSource)
+  end
+
   def execute(state, {:describe_option_named, name}) when is_binary(name) do
     describe_option_named(state, name)
   end
 
   @doc "Shows content in the shared `*Help*` buffer."
   @spec show_in_help_buffer(state(), String.t()) :: state()
-  def show_in_help_buffer(state, content) do
-    show_in_buffer(state, "*Help*", content)
+  @spec show_in_help_buffer(state(), String.t(), keyword()) :: state()
+  def show_in_help_buffer(state, content, opts \\ []) do
+    show_in_buffer(state, "*Help*", content, default_help_options(opts))
   end
 
   @doc "Shows the option help page for `name`."
@@ -830,17 +841,32 @@ defmodule MingaEditor.Commands.Help do
 
   # ── Special buffers ────────────────────────────────────────────────────────
 
-  @spec show_in_buffer(state(), String.t(), String.t()) :: state()
-  defp show_in_buffer(state, "*Help*", content) do
-    {state, help_buf} = ensure_help_buffer(state)
-    replace_help_content(help_buf, content)
-    switch_to_buffer(state, help_buf)
+  @spec default_help_options(keyword()) :: keyword()
+  defp default_help_options(opts) do
+    Keyword.put(opts, :filetype, Keyword.get(opts, :filetype) || :text)
   end
 
-  defp show_in_buffer(state, buffer_name, content) do
+  @spec show_in_buffer(state(), String.t(), String.t(), keyword()) :: state()
+  defp show_in_buffer(state, buffer_name, content, opts \\ [])
+
+  defp show_in_buffer(state, "*Help*", content, opts) do
+    {state, help_buf} = ensure_help_buffer(state)
+    replace_help_content(help_buf, content)
+    apply_help_options(help_buf, opts)
+
+    state
+    |> switch_to_buffer(help_buf)
+    |> setup_highlight_or_defer()
+  end
+
+  defp show_in_buffer(state, buffer_name, content, opts) do
     {state, buffer} = ensure_named_buffer(state, buffer_name)
     replace_help_content(buffer, content)
-    switch_to_buffer(state, buffer)
+    apply_help_options(buffer, opts)
+
+    state
+    |> switch_to_buffer(buffer)
+    |> setup_highlight_or_defer()
   end
 
   @spec ensure_help_buffer(state()) :: {state(), pid()}
@@ -903,8 +929,7 @@ defmodule MingaEditor.Commands.Help do
 
     state =
       if idx do
-        put_in(state.workspace.buffers.active_index, idx)
-        |> then(fn s -> put_in(s.workspace.buffers.active, buffer) end)
+        EditorState.switch_buffer(state, idx)
       else
         Commands.add_buffer(state, buffer)
       end
@@ -914,11 +939,26 @@ defmodule MingaEditor.Commands.Help do
 
   @spec replace_help_content(pid(), String.t()) :: :ok
   defp replace_help_content(buf, content) do
-    :sys.replace_state(buf, fn s ->
-      %{s | document: Document.new(content)}
-    end)
-
+    :ok = Buffer.replace_content_force(buf, content)
     Buffer.move_to(buf, {0, 0})
+  end
+
+  @spec apply_help_options(pid(), keyword()) :: :ok
+  defp apply_help_options(buf, opts) do
+    case Keyword.fetch(opts, :filetype) do
+      {:ok, filetype} when is_atom(filetype) -> Buffer.set_filetype(buf, filetype)
+      _ -> :ok
+    end
+  end
+
+  @spec setup_highlight_or_defer(state()) :: state()
+  defp setup_highlight_or_defer(%{backend: :headless} = state) do
+    HighlightSync.setup_for_buffer(state)
+  end
+
+  defp setup_highlight_or_defer(state) do
+    send(self(), :setup_highlight)
+    state
   end
 
   # ── Command description ─────────────────────────────────────────────────────

@@ -117,6 +117,12 @@ defmodule Minga.Keymap.DefaultsTest do
 
     # ── Help bindings ──────────────────────────────────────────────────────────
 
+    test "SPC h f → :describe_function" do
+      trie = Defaults.leader_trie()
+      {:prefix, h_node} = Bindings.lookup(trie, {?h, 0})
+      assert {:command, :describe_function} = Bindings.lookup(h_node, {?f, 0})
+    end
+
     test "SPC h k → :describe_key" do
       trie = Defaults.leader_trie()
       {:prefix, h_node} = Bindings.lookup(trie, {?h, 0})

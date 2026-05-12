@@ -64,11 +64,13 @@ defmodule MingaEditor.Commands.HelpTest do
       state = build_state()
       result1 = Help.execute(state, {:describe_key_result, "j", :move_down, "Move cursor down"})
       help_pid = result1.workspace.buffers.help
+      version = BufferServer.version(help_pid)
 
       result2 =
         Help.execute(result1, {:describe_key_result, "k", :move_up, "Move cursor up"})
 
       assert result2.workspace.buffers.help == help_pid
+      assert BufferServer.version(help_pid) > version
 
       content = BufferServer.content(help_pid)
       assert content =~ "Command:     move_up"
@@ -380,6 +382,31 @@ defmodule MingaEditor.Commands.HelpTest do
       result = Help.execute(state, {:describe_key_result, "j", :move_down, "Move cursor down"})
 
       assert BufferServer.read_only?(result.workspace.buffers.help)
+    end
+
+    test "help buffer can be shown as markdown" do
+      state = build_state()
+      result = Help.show_in_help_buffer(state, "# Help\n", filetype: :markdown)
+
+      assert BufferServer.filetype(result.workspace.buffers.help) == :markdown
+    end
+
+    test "help commands without an explicit filetype reset the help buffer to text" do
+      state = build_state()
+      result = Help.show_in_help_buffer(state, "# Help\n", filetype: :markdown)
+
+      result = Help.execute(result, {:describe_key_result, "j", :move_down, "Move cursor down"})
+
+      assert BufferServer.filetype(result.workspace.buffers.help) == :text
+    end
+
+    test "nil help buffer filetype resets to text" do
+      state = build_state()
+      result = Help.show_in_help_buffer(state, "# Help\n", filetype: :markdown)
+
+      result = Help.show_in_help_buffer(result, "Plain help\n", filetype: nil)
+
+      assert BufferServer.filetype(result.workspace.buffers.help) == :text
     end
   end
 
