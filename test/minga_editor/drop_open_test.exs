@@ -1,7 +1,8 @@
 defmodule MingaEditor.DropOpenTest do
   @moduledoc """
-  Tests for the gui_action {:open_file, path} handler's file-vs-directory branching,
-  exercised via drag-and-drop from Finder or the macOS Open With menu.
+  Tests for the gui_action {:open_file, path} handler's file-vs-directory
+  branching. This handler is triggered by drag-and-drop from Finder, the
+  macOS Open With menu, and `open -a Minga` from the terminal.
   """
 
   use Minga.Test.EditorCase, async: true
@@ -54,6 +55,7 @@ defmodule MingaEditor.DropOpenTest do
       state = editor_state(ctx)
 
       assert length(state.workspace.buffers.list) == initial_count
+      assert Minga.Buffer.Server.file_path(state.workspace.buffers.active) == path
     end
   end
 

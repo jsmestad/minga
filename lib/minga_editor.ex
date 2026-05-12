@@ -1907,7 +1907,7 @@ defmodule MingaEditor do
     if File.dir?(path) do
       open_dropped_directory(state, path)
     else
-      open_dropped_file(state, path)
+      open_file_by_path(state, path)
     end
   end
 
@@ -2113,29 +2113,9 @@ defmodule MingaEditor do
     end
   end
 
-  @spec open_dropped_file(state(), String.t()) :: state()
-  defp open_dropped_file(state, path) do
-    idx =
-      Enum.find_index(state.workspace.buffers.list, fn buf ->
-        try do
-          Buffer.file_path(buf) == path
-        catch
-          :exit, _ -> false
-        end
-      end)
-
-    case idx do
-      nil ->
-        case Commands.start_buffer(path) do
-          {:ok, pid} -> Commands.add_buffer(state, pid)
-          {:error, _reason} -> EditorState.set_status(state, "Could not open #{path}")
-        end
-
-      i ->
-        EditorState.switch_buffer(state, i)
-    end
-  end
-
+  # Project.switch/1 is a cast; the picker opens against current state while the
+  # file cache rebuilds asynchronously. BEAM message ordering from the Editor
+  # process guarantees the cast reaches Project before any subsequent call.
   @spec open_dropped_directory(state(), String.t()) :: state()
   defp open_dropped_directory(state, dir_path) do
     Minga.Project.switch(dir_path)
