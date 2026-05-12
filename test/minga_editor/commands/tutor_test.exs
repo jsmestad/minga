@@ -83,6 +83,22 @@ defmodule MingaEditor.Commands.TutorTest do
       assert BufferServer.content(tutor_buf) =~ "M i n g a   T u t o r"
     end
 
+    test "creates a new buffer when the previous tutor buffer process died" do
+      state = build_state()
+      result = Tutor.execute(state, :tutor)
+      old_tutor = result.workspace.buffers.active
+
+      GenServer.stop(old_tutor)
+      refute Process.alive?(old_tutor)
+
+      result2 = Tutor.execute(result, :tutor)
+      new_tutor = result2.workspace.buffers.active
+
+      assert Process.alive?(new_tutor)
+      assert new_tutor != old_tutor
+      assert BufferServer.buffer_name(new_tutor) == "*Tutor*"
+    end
+
     test "sets a status message" do
       state = build_state()
       result = Tutor.execute(state, :tutor)
