@@ -208,6 +208,16 @@ defmodule Minga.Command.ParserTest do
     end
   end
 
+  describe "parse/1 — describe commands" do
+    test ":describe opens the option picker" do
+      assert {:describe_option, []} = Parser.parse("describe")
+    end
+
+    test ":describe option parses the option name" do
+      assert {:describe_option_named, ["tab_width"]} = Parser.parse("describe tab_width")
+    end
+  end
+
   describe "parse/1 — unknown commands" do
     test "unrecognised command returns {:unknown, raw}" do
       assert {:unknown, "xyz"} = Parser.parse("xyz")

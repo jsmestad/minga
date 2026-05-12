@@ -18,6 +18,8 @@ defmodule MingaEditor.UI.Picker.Context do
   - `agent_session` — agent session PID (if available)
   - `picker_ui` — picker UI state (context map for sources)
   - `capabilities` — frontend capabilities (GUI detection, etc.)
+  - `keymap_server` — keymap server used by this editor instance
+  - `options_server` — options server used by this editor instance
   - `theme` — active theme
   """
 
@@ -52,6 +54,8 @@ defmodule MingaEditor.UI.Picker.Context do
     :agent_session,
     :picker_ui,
     :capabilities,
+    :keymap_server,
+    :options_server,
     :theme
   ]
 
@@ -65,6 +69,8 @@ defmodule MingaEditor.UI.Picker.Context do
           agent_session: pid() | nil,
           picker_ui: map(),
           capabilities: map(),
+          keymap_server: State.keymap_server(),
+          options_server: State.options_server(),
           theme: Theme.t()
         }
 
@@ -90,6 +96,8 @@ defmodule MingaEditor.UI.Picker.Context do
       agent_session: agent_session,
       picker_ui: picker_ui,
       capabilities: state.capabilities,
+      keymap_server: State.keymap_server(state),
+      options_server: State.options_server(state),
       theme: state.theme
     }
   end

@@ -361,6 +361,10 @@ defmodule Minga.Buffer do
   @spec set_option(server(), atom(), term()) :: {:ok, term()} | {:error, String.t()}
   defdelegate set_option(server, name, value), to: Server
 
+  @doc "Returns only options explicitly overridden on this buffer."
+  @spec local_option_overrides(server()) :: %{atom() => term()}
+  defdelegate local_option_overrides(server), to: Server
+
   # ── Snapshots ──────────────────────────────────────────────────────
 
   @doc "Capture a snapshot of the document state (for undo boundaries and tab switching)."

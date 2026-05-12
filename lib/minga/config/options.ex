@@ -165,8 +165,25 @@ defmodule Minga.Config.Options do
   @typedoc "Line number display style."
   @type line_number_style :: :hybrid | :absolute | :relative | :none
 
-  @typedoc "Option spec: `{name, type_descriptor, default_value}`."
-  @type option_spec :: {option_name(), type_descriptor(), term()}
+  @typedoc "Option spec: `{name, type_descriptor, default_value, description}`."
+  @type option_spec :: {option_name(), type_descriptor(), term(), String.t()}
+
+  @typedoc "Human-readable metadata for one option."
+  @type option_metadata :: %{
+          name: option_name(),
+          type: type_descriptor(),
+          default: term(),
+          description: String.t()
+        }
+
+  @typedoc "Human-readable metadata for an extension option."
+  @type extension_option_metadata :: %{
+          extension: atom(),
+          name: atom(),
+          type: type_descriptor(),
+          default: term(),
+          description: String.t()
+        }
 
   @type type_descriptor ::
           :pos_integer
@@ -217,93 +234,143 @@ defmodule Minga.Config.Options do
   end
 
   @option_specs [
-    {:editing_model, {:enum, [:vim, :cua]}, :vim},
-    {:space_leader, {:enum, [:chord, :off]}, :chord},
-    {:tab_width, :pos_integer, 2},
-    {:line_numbers, {:enum, [:hybrid, :absolute, :relative, :none]}, :hybrid},
-    {:show_gutter_separator, :boolean, true},
-    {:autopair, :boolean, true},
-    {:scroll_margin, :non_neg_integer, 5},
-    {:scroll_lines, :pos_integer, 1},
-    {:theme, :theme_atom, :doom_one},
-    {:indent_with, {:enum, [:spaces, :tabs]}, :spaces},
-    {:indent_guides, :boolean, true},
-    {:trim_trailing_whitespace, :boolean, false},
-    {:insert_final_newline, :boolean, false},
-    {:format_on_save, :boolean, false},
-    {:auto_save_delay_ms, :non_neg_integer, 1000},
-    {:formatter, :string_or_nil, nil},
-    {:title_format, :string, "{filename} {dirty}({directory}) - Minga"},
-    {:recent_files_limit, :pos_integer, 200},
-    {:persist_recent_files, :boolean, true},
-    {:clipboard, {:enum, [:unnamedplus, :unnamed, :none]}, :unnamedplus},
-    {:wrap, :boolean, false},
-    {:linebreak, :boolean, true},
-    {:breakindent, :boolean, true},
-    {:agent_provider, {:enum, [:auto, :native]}, :auto},
-    {:agent_model, :string_or_nil, nil},
-    {:agent_tool_approval, {:enum, [:destructive, :all, :none]}, :destructive},
+    {:editing_model, {:enum, [:vim, :cua]}, :vim,
+     "Editing model used for text input and selection."},
+    {:space_leader, {:enum, [:chord, :off]}, :chord,
+     "How the Space key enters leader-key sequences in normal mode."},
+    {:tab_width, :pos_integer, 2, "Number of spaces per tab stop."},
+    {:line_numbers, {:enum, [:hybrid, :absolute, :relative, :none]}, :hybrid,
+     "Line number style shown in the editor gutter."},
+    {:show_gutter_separator, :boolean, true,
+     "Whether to draw a separator between the gutter and buffer text."},
+    {:autopair, :boolean, true, "Whether insert mode automatically inserts matching delimiters."},
+    {:scroll_margin, :non_neg_integer, 5,
+     "Minimum number of context lines kept around the cursor while scrolling."},
+    {:scroll_lines, :pos_integer, 1, "Number of lines moved for each wheel-scroll step."},
+    {:theme, :theme_atom, :doom_one, "Active color theme."},
+    {:indent_with, {:enum, [:spaces, :tabs]}, :spaces,
+     "Whether indentation inserts spaces or tab characters."},
+    {:indent_guides, :boolean, true, "Whether indentation guide decorations are shown."},
+    {:trim_trailing_whitespace, :boolean, false,
+     "Whether trailing whitespace is removed before saving."},
+    {:insert_final_newline, :boolean, false, "Whether files are saved with a final newline."},
+    {:format_on_save, :boolean, false, "Whether the configured formatter runs before saving."},
+    {:auto_save_delay_ms, :non_neg_integer, 1000,
+     "Delay before automatic save work runs; zero disables the timer."},
+    {:formatter, :string_or_nil, nil, "External formatter command for the current buffer."},
+    {:title_format, :string, "{filename} {dirty}({directory}) - Minga",
+     "Window title template with placeholder tokens."},
+    {:recent_files_limit, :pos_integer, 200, "Maximum number of recent files to keep."},
+    {:persist_recent_files, :boolean, true,
+     "Whether recent files are written to disk between sessions."},
+    {:clipboard, {:enum, [:unnamedplus, :unnamed, :none]}, :unnamedplus,
+     "Clipboard register integration mode."},
+    {:wrap, :boolean, false, "Whether long visual lines wrap in editor windows."},
+    {:linebreak, :boolean, true, "Whether wrapped lines break at word boundaries when possible."},
+    {:breakindent, :boolean, true,
+     "Whether wrapped line continuations align with the original indentation."},
+    {:agent_provider, {:enum, [:auto, :native]}, :auto, "Agent provider backend selection."},
+    {:agent_model, :string_or_nil, nil, "Default model used by new agent sessions."},
+    {:agent_tool_approval, {:enum, [:destructive, :all, :none]}, :destructive,
+     "When agent tool calls require user approval."},
     {:agent_destructive_tools, :string_list,
-     ["write_file", "edit_file", "multi_edit_file", "shell", "git_stage", "git_commit", "rename"]},
-    {:agent_tool_permissions, :map_or_nil, nil},
-    {:agent_hooks, :any, []},
-    {:agent_session_retention_days, :pos_integer, 30},
-    {:agent_panel_split, :pos_integer, 65},
-    {:startup_view, {:enum, [:agent, :editor]}, :agent},
-    {:agent_auto_context, :boolean, true},
-    {:agent_max_tokens, :pos_integer, 16_384},
-    {:agent_max_retries, :non_neg_integer, 3},
-    {:agent_models, :string_list, []},
-    {:agent_prompt_cache, :boolean, true},
-    {:agent_notifications, :boolean, true},
-    {:agent_notify_on, :any, [:approval, :complete, :error]},
-    {:agent_system_prompt, :string, ""},
-    {:agent_append_system_prompt, :string, ""},
-    {:agent_diff_size_threshold, :pos_integer, 1_048_576},
-    {:agent_max_turns, :pos_integer, 100},
-    {:agent_max_cost, :float_or_nil, nil},
-    {:agent_api_base_url, :string, ""},
-    {:agent_api_endpoints, :map_or_nil, nil},
-    {:agent_mcp_servers, :map_list, []},
-    {:agent_compaction_threshold, :float_or_nil, 0.8},
-    {:agent_compaction_keep_recent, :pos_integer, 6},
-    {:agent_approval_timeout, :pos_integer, 300_000},
-    {:agent_subagent_timeout, :pos_integer, 300_000},
-    {:agent_mention_max_file_size, :pos_integer, 262_144},
-    {:agent_notify_debounce, :pos_integer, 5_000},
-    {:agent_diagnostic_feedback, :boolean, true},
-    {:agent_flush_before_shell, :boolean, true},
-    {:confirm_quit, :boolean, true},
-    {:cursorline, :boolean, true},
-    {:nav_flash, :boolean, true},
-    {:nav_flash_threshold, :pos_integer, 5},
-    {:yank_flash, :boolean, true},
-    {:whichkey_layout, {:enum, [:bottom, :float]}, :bottom},
-    {:line_spacing, :float_or_nil, 1.0},
-    {:font_family, :string, "Menlo"},
-    {:font_size, :pos_integer, 13},
+     ["write_file", "edit_file", "multi_edit_file", "shell", "git_stage", "git_commit", "rename"],
+     "Tool names treated as destructive for approval prompts."},
+    {:agent_tool_permissions, :map_or_nil, nil, "Per-tool permission overrides for agent tools."},
+    {:agent_hooks, :any, [], "Agent lifecycle hook declarations loaded from config."},
+    {:agent_session_retention_days, :pos_integer, 30,
+     "Number of days to retain persisted agent sessions."},
+    {:agent_panel_split, :pos_integer, 65,
+     "Percentage of available width assigned to the agent panel."},
+    {:startup_view, {:enum, [:agent, :editor]}, :agent, "Initial view shown when Minga starts."},
+    {:agent_auto_context, :boolean, true,
+     "Whether the active buffer is automatically included in agent context."},
+    {:agent_max_tokens, :pos_integer, 16_384, "Maximum token budget sent to the agent provider."},
+    {:agent_max_retries, :non_neg_integer, 3,
+     "Maximum retry attempts for failed agent provider requests."},
+    {:agent_models, :string_list, [],
+     "Additional model identifiers shown in agent model pickers."},
+    {:agent_prompt_cache, :boolean, true,
+     "Whether prompt caching hints are enabled for supported providers."},
+    {:agent_notifications, :boolean, true,
+     "Whether agent events can produce user notifications."},
+    {:agent_notify_on, :any, [:approval, :complete, :error],
+     "Agent event kinds that trigger notifications."},
+    {:agent_system_prompt, :string, "", "Replacement system prompt text for agent sessions."},
+    {:agent_append_system_prompt, :string, "",
+     "Additional text appended to the default agent system prompt."},
+    {:agent_diff_size_threshold, :pos_integer, 1_048_576,
+     "Maximum diff size shown inline before truncation or summarization."},
+    {:agent_max_turns, :pos_integer, 100, "Maximum number of turns allowed in an agent session."},
+    {:agent_max_cost, :float_or_nil, nil, "Optional cost ceiling for an agent session."},
+    {:agent_api_base_url, :string, "", "Base URL override for agent API requests."},
+    {:agent_api_endpoints, :map_or_nil, nil,
+     "Provider endpoint overrides for agent API requests."},
+    {:agent_mcp_servers, :map_list, [], "MCP server definitions made available to the agent."},
+    {:agent_compaction_threshold, :float_or_nil, 0.8,
+     "Conversation-size threshold that triggers agent context compaction."},
+    {:agent_compaction_keep_recent, :pos_integer, 6,
+     "Number of recent conversation turns preserved during compaction."},
+    {:agent_approval_timeout, :pos_integer, 300_000,
+     "Milliseconds before an agent approval prompt times out."},
+    {:agent_subagent_timeout, :pos_integer, 300_000,
+     "Milliseconds before a delegated subagent task times out."},
+    {:agent_mention_max_file_size, :pos_integer, 262_144,
+     "Maximum file size in bytes that can be inlined from an agent mention."},
+    {:agent_notify_debounce, :pos_integer, 5_000,
+     "Milliseconds used to debounce repeated agent notifications."},
+    {:agent_diagnostic_feedback, :boolean, true,
+     "Whether diagnostics are fed back into agent context."},
+    {:agent_flush_before_shell, :boolean, true,
+     "Whether pending agent output flushes before shell tools run."},
+    {:confirm_quit, :boolean, true,
+     "Whether quitting with unsaved changes asks for confirmation."},
+    {:cursorline, :boolean, true, "Whether the current cursor line is highlighted."},
+    {:nav_flash, :boolean, true, "Whether large cursor jumps briefly highlight the destination."},
+    {:nav_flash_threshold, :pos_integer, 5,
+     "Minimum jump distance that triggers navigation flash."},
+    {:yank_flash, :boolean, true,
+     "Whether yanked text briefly highlights after yank operations."},
+    {:whichkey_layout, {:enum, [:bottom, :float]}, :bottom, "Layout used for which-key popups."},
+    {:line_spacing, :float_or_nil, 1.0, "Additional line spacing multiplier for GUI frontends."},
+    {:font_family, :string, "Menlo", "Primary editor font family used by GUI frontends."},
+    {:font_size, :pos_integer, 13, "Editor font size in points for GUI frontends."},
     {:font_weight, {:enum, [:thin, :light, :regular, :medium, :semibold, :bold, :heavy, :black]},
-     :regular},
-    {:font_ligatures, :boolean, true},
-    {:font_fallback, :string_list, []},
-    {:prettify_symbols, :boolean, false},
-    {:log_level, {:enum, [:debug, :info, :warning, :error, :none]}, :info},
-    {:log_level_render, {:enum, [:default, :debug, :info, :warning, :error, :none]}, :default},
-    {:log_level_lsp, {:enum, [:default, :debug, :info, :warning, :error, :none]}, :default},
-    {:log_level_agent, {:enum, [:default, :debug, :info, :warning, :error, :none]}, :default},
-    {:log_level_editor, {:enum, [:default, :debug, :info, :warning, :error, :none]}, :default},
-    {:log_level_config, {:enum, [:default, :debug, :info, :warning, :error, :none]}, :default},
-    {:log_level_port, {:enum, [:default, :debug, :info, :warning, :error, :none]}, :default},
-    {:parser_tree_ttl, :integer, 300},
-    {:event_retention_days, :pos_integer, 90},
-    {:default_shell, {:enum, [:traditional, :board]}, :traditional}
+     :regular, "Editor font weight used by GUI frontends."},
+    {:font_ligatures, :boolean, true, "Whether GUI frontends enable font ligatures."},
+    {:font_fallback, :string_list, [],
+     "Fallback font families used when the primary font lacks a glyph."},
+    {:prettify_symbols, :boolean, false,
+     "Whether symbolic text substitutions are rendered in buffers."},
+    {:log_level, {:enum, [:debug, :info, :warning, :error, :none]}, :info,
+     "Default log verbosity for all subsystems."},
+    {:log_level_render, {:enum, [:default, :debug, :info, :warning, :error, :none]}, :default,
+     "Render subsystem log verbosity override."},
+    {:log_level_lsp, {:enum, [:default, :debug, :info, :warning, :error, :none]}, :default,
+     "LSP subsystem log verbosity override."},
+    {:log_level_agent, {:enum, [:default, :debug, :info, :warning, :error, :none]}, :default,
+     "Agent subsystem log verbosity override."},
+    {:log_level_editor, {:enum, [:default, :debug, :info, :warning, :error, :none]}, :default,
+     "Editor subsystem log verbosity override."},
+    {:log_level_config, {:enum, [:default, :debug, :info, :warning, :error, :none]}, :default,
+     "Config subsystem log verbosity override."},
+    {:log_level_port, {:enum, [:default, :debug, :info, :warning, :error, :none]}, :default,
+     "Port protocol subsystem log verbosity override."},
+    {:parser_tree_ttl, :integer, 300, "Seconds to keep cached parser trees alive."},
+    {:event_retention_days, :pos_integer, 90,
+     "Number of days to keep persisted event log entries."},
+    {:default_shell, {:enum, [:traditional, :board]}, :traditional,
+     "Shell implementation opened by default."}
   ]
-
   @valid_names Enum.map(@option_specs, &elem(&1, 0))
 
-  @defaults Map.new(@option_specs, fn {name, _type, default} -> {name, default} end)
+  @defaults Map.new(@option_specs, fn {name, _type, default, _description} -> {name, default} end)
 
-  @types Map.new(@option_specs, fn {name, type, _default} -> {name, type} end)
+  @types Map.new(@option_specs, fn {name, type, _default, _description} -> {name, type} end)
+
+  @descriptions Map.new(@option_specs, fn {name, _type, _default, description} ->
+                  {name, description}
+                end)
 
   # ── GenServer (table lifecycle only) ────────────────────────────────────────
 
@@ -684,7 +751,79 @@ defmodule Minga.Config.Options do
   def type_for(name) when is_atom(name), do: Map.get(@types, name)
 
   @doc """
-  Returns the full option spec list: `[{name, type, default}]`.
+  Returns metadata for an option, or `nil` if unknown.
+  """
+  @spec describe(atom()) :: option_metadata() | nil
+  def describe(name) when is_atom(name) do
+    with {:ok, type} <- Map.fetch(@types, name),
+         {:ok, default} <- Map.fetch(@defaults, name),
+         {:ok, description} <- Map.fetch(@descriptions, name) do
+      %{name: name, type: type, default: default, description: description}
+    else
+      :error -> nil
+    end
+  end
+
+  @doc """
+  Returns the config-level provenance chain for an option's effective value.
+  """
+  @spec provenance(option_name(), atom() | nil) :: [String.t()]
+  @spec provenance(server(), option_name(), atom() | nil) :: [String.t()]
+  def provenance(name, filetype), do: provenance(@default_server, name, filetype)
+
+  def provenance(server, name, filetype) when is_atom(name) do
+    ["default"]
+    |> maybe_append(global_override?(server, name), "config.exs")
+    |> maybe_append(filetype_override?(server, name, filetype), "filetype #{inspect(filetype)}")
+  end
+
+  @doc """
+  Returns metadata for all registered extension options.
+  """
+  @spec extension_option_specs(server()) :: [extension_option_metadata()]
+  def extension_option_specs(server \\ @default_server) do
+    table = table_name(server)
+
+    :ets.foldl(
+      fn
+        {{:extension_schema, extension}, schema}, acc
+        when is_atom(extension) and is_list(schema) ->
+          extension_specs(extension, schema) ++ acc
+
+        _entry, acc ->
+          acc
+      end,
+      [],
+      table
+    )
+    |> Enum.sort_by(&{&1.extension, &1.name})
+  end
+
+  @doc """
+  Returns metadata for a registered extension option, or `nil` if unknown.
+  """
+  @spec describe_extension_option(server(), atom(), atom()) :: extension_option_metadata() | nil
+  def describe_extension_option(server \\ @default_server, extension, name)
+      when is_atom(extension) and is_atom(name) do
+    Enum.find(extension_option_specs(server), &(&1.extension == extension and &1.name == name))
+  end
+
+  @doc """
+  Returns the config-level provenance chain for an extension option's effective value.
+  """
+  @spec extension_provenance(server(), atom(), atom(), atom() | nil) :: [String.t()]
+  def extension_provenance(server \\ @default_server, extension, name, filetype)
+      when is_atom(extension) and is_atom(name) do
+    ["default"]
+    |> maybe_append(extension_global_override?(server, extension, name), "config.exs")
+    |> maybe_append(
+      extension_filetype_override?(server, extension, name, filetype),
+      "filetype #{inspect(filetype)}"
+    )
+  end
+
+  @doc """
+  Returns the full option spec list: `[{name, type, default, description}]`.
 
   Used by `Config.Completion` to generate completion items with
   type and default information in the detail text.
@@ -835,6 +974,59 @@ defmodule Minga.Config.Options do
   end
 
   # ── Private helpers ─────────────────────────────────────────────────────────
+
+  @spec maybe_append([String.t()], boolean(), String.t()) :: [String.t()]
+  defp maybe_append(chain, true, label), do: chain ++ [label]
+  defp maybe_append(chain, false, _label), do: chain
+
+  @spec global_override?(server(), atom()) :: boolean()
+  defp global_override?(server, name) do
+    case Map.fetch(@defaults, name) do
+      {:ok, default} -> get(server, name) != default
+      :error -> false
+    end
+  end
+
+  @spec filetype_override?(server(), atom(), atom() | nil) :: boolean()
+  defp filetype_override?(_server, _name, nil), do: false
+
+  defp filetype_override?(server, name, filetype) when is_atom(filetype) do
+    table = table_name(server)
+    :ets.lookup(table, {:filetype, filetype, name}) != []
+  rescue
+    ArgumentError -> false
+  end
+
+  @spec extension_specs(atom(), [Minga.Extension.option_spec()]) :: [extension_option_metadata()]
+  defp extension_specs(extension, schema) do
+    Enum.map(schema, fn {name, type, default, description} ->
+      %{
+        extension: extension,
+        name: name,
+        type: type,
+        default: default,
+        description: description
+      }
+    end)
+  end
+
+  @spec extension_global_override?(server(), atom(), atom()) :: boolean()
+  defp extension_global_override?(server, extension, name) do
+    case describe_extension_option(server, extension, name) do
+      %{default: default} -> get_extension_option(server, extension, name) != default
+      nil -> false
+    end
+  end
+
+  @spec extension_filetype_override?(server(), atom(), atom(), atom() | nil) :: boolean()
+  defp extension_filetype_override?(_server, _extension, _name, nil), do: false
+
+  defp extension_filetype_override?(server, extension, name, filetype) when is_atom(filetype) do
+    table = table_name(server)
+    :ets.lookup(table, {:filetype, filetype, {:extension, extension, name}}) != []
+  rescue
+    ArgumentError -> false
+  end
 
   @spec extension_default(:ets.table(), atom(), atom()) :: term() | nil
   defp extension_default(table, ext_name, opt_name) do

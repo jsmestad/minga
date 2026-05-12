@@ -73,7 +73,9 @@ defmodule Minga.Keymap.Defaults do
     {[{?q, @none}, {?q, @none}], :quit_all, "Quit editor"},
 
     # ── Help ──────────────────────────────────────────────────────────────────
+    {[{?h, @none}, {?b, @none}], :describe_bindings, "Describe bindings"},
     {[{?h, @none}, {?k, @none}], :describe_key, "Describe key"},
+    {[{?h, @none}, {?v, @none}], :describe_option, "Describe option"},
     {[{?h, @none}, {?r, @none}], :reload_config, "Reload config"},
     {[{?h, @none}, {?t, @none}], :theme_picker, "Pick theme"},
     {[{?h, @none}, {?e, @none}, {?l, @none}], :extension_list, "List extensions"},
@@ -228,6 +230,12 @@ defmodule Minga.Keymap.Defaults do
   """
   @spec all_bindings() :: [{[Bindings.key()], atom(), String.t()}]
   def all_bindings, do: @leader_bindings
+
+  @doc """
+  Returns leader group prefixes as `{key_sequence, label}` tuples.
+  """
+  @spec group_prefixes() :: [{[Bindings.key()], String.t()}]
+  def group_prefixes, do: @group_prefixes
 
   # filetype_bindings/0 is defined below with all SPC m bindings
 

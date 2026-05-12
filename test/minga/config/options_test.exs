@@ -592,24 +592,82 @@ defmodule Minga.Config.OptionsTest do
   end
 
   describe "option_specs/0" do
-    test "returns a list of {name, type, default} tuples" do
+    test "returns a list of {name, type, default, description} tuples" do
       specs = Options.option_specs()
 
       assert is_list(specs)
       assert length(specs) == length(Options.valid_names())
 
-      for {name, _type, _default} <- specs do
+      for {name, _type, _default, description} <- specs do
         assert is_atom(name)
         assert name in Options.valid_names()
+        assert is_binary(description)
+        assert description != ""
       end
     end
 
     test "specs match valid_names and defaults" do
       specs = Options.option_specs()
 
-      for {name, _type, default} <- specs do
+      for {name, _type, default, _description} <- specs do
         assert Options.default(name) == default
       end
+    end
+  end
+
+  describe "describe/1" do
+    test "returns option metadata for known options" do
+      assert %{
+               name: :tab_width,
+               type: :pos_integer,
+               default: 2,
+               description: description
+             } = Options.describe(:tab_width)
+
+      assert description =~ "tab"
+    end
+
+    test "returns nil for unknown options" do
+      assert Options.describe(:does_not_exist) == nil
+    end
+  end
+
+  describe "provenance/3" do
+    test "reports default, global, and filetype config sources", %{server: s} do
+      assert Options.provenance(s, :tab_width, :go) == ["default"]
+
+      Options.set(s, :tab_width, 4)
+      assert Options.provenance(s, :tab_width, :go) == ["default", "config.exs"]
+
+      Options.set_for_filetype(s, :go, :tab_width, 8)
+
+      assert Options.provenance(s, :tab_width, :go) == [
+               "default",
+               "config.exs",
+               "filetype :go"
+             ]
+    end
+  end
+
+  describe "extension option introspection" do
+    test "lists and describes registered extension options", %{server: s} do
+      Options.register_extension_schema(s, :minga_org, @schema, [])
+
+      assert %{extension: :minga_org, name: :conceal, default: true} =
+               Options.describe_extension_option(s, :minga_org, :conceal)
+
+      assert Enum.any?(Options.extension_option_specs(s), &(&1.extension == :minga_org))
+    end
+
+    test "reports extension option provenance", %{server: s} do
+      Options.register_extension_schema(s, :minga_org, @schema, conceal: false)
+      Options.set_extension_option_for_filetype(s, :minga_org, :org, :conceal, true)
+
+      assert Options.extension_provenance(s, :minga_org, :conceal, :org) == [
+               "default",
+               "config.exs",
+               "filetype :org"
+             ]
     end
   end
 end

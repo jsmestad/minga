@@ -88,6 +88,8 @@ defmodule Minga.Command.Parser do
           | {:extension_update, []}
           | {:extension_update_all, []}
           | {:parser_restart, []}
+          | {:describe_option, []}
+          | {:describe_option_named, [String.t()]}
           | {:agent_abort, []}
           | {:agent_new_session, []}
           | {:agent_set_model, [String.t()]}
@@ -265,6 +267,8 @@ defmodule Minga.Command.Parser do
   defp do_parse("ToolList"), do: {:tool_list, []}
   defp do_parse("ToolManage"), do: {:tool_manage, []}
   defp do_parse("warnings"), do: {:view_warnings, []}
+  defp do_parse("describe"), do: {:describe_option, []}
+  defp do_parse("describe " <> name), do: {:describe_option_named, [String.trim(name)]}
   defp do_parse("vsplit"), do: {:split_vertical, []}
   defp do_parse("vs"), do: {:split_vertical, []}
   defp do_parse("split"), do: {:split_horizontal, []}

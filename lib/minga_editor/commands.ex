@@ -505,6 +505,14 @@ defmodule MingaEditor.Commands do
     ExtCommands.update(state)
   end
 
+  def execute(state, {:execute_ex_command, {:describe_option, []}}) do
+    Help.execute(state, :describe_option)
+  end
+
+  def execute(state, {:execute_ex_command, {:describe_option_named, [name]}}) do
+    Help.execute(state, {:describe_option_named, name})
+  end
+
   def execute(state, {:execute_ex_command, {:rename, new_name}}) do
     LspActions.rename(state, new_name)
   end
