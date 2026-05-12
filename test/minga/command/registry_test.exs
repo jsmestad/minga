@@ -63,6 +63,8 @@ defmodule Minga.Command.RegistryTest do
           :command_palette,
           :find_file,
           :search_project,
+          :search_buffer,
+          :search_and_replace,
           :theme_picker,
           :set_language,
           :diagnostics_list,

@@ -15,6 +15,7 @@ defmodule MingaEditor.Commands.Search do
   alias MingaEditor.Window
   alias MingaEditor.Workspace.State, as: WorkspaceState
   alias Minga.Mode
+  alias Minga.Mode.CommandState
   alias Minga.Mode.SearchState
   alias Minga.Project.ProjectSearch
 
@@ -522,6 +523,22 @@ defmodule MingaEditor.Commands.Search do
         requires_buffer: false,
         execute: fn state ->
           EditorState.transition_mode(state, :search_prompt, %Minga.Mode.SearchPromptState{})
+        end
+      },
+      %Minga.Command{
+        name: :search_buffer,
+        description: "Search in buffer",
+        requires_buffer: true,
+        execute: fn state ->
+          EditorState.transition_mode(state, :search, %SearchState{direction: :forward})
+        end
+      },
+      %Minga.Command{
+        name: :search_and_replace,
+        description: "Search and replace",
+        requires_buffer: true,
+        execute: fn state ->
+          EditorState.transition_mode(state, :command, %CommandState{input: "%s/"})
         end
       }
     ]
