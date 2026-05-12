@@ -23,7 +23,9 @@ defmodule Minga.Git.Buffer do
           base_lines: [String.t()],
           hunks: [Diff.hunk()],
           signs: %{non_neg_integer() => Diff.hunk_type()},
-          branch: String.t() | nil
+          branch: String.t() | nil,
+          blame_enabled: boolean(),
+          blame_cache: %{non_neg_integer() => map()} | nil
         }
 
   # ── Client API ─────────────────────────────────────────────────────────────
@@ -68,6 +70,24 @@ defmodule Minga.Git.Buffer do
   @spec hunk_at(GenServer.server(), non_neg_integer()) :: Diff.hunk() | nil
   def hunk_at(server, line) when is_integer(line) do
     GenServer.call(server, {:hunk_at, line})
+  end
+
+  @doc "Toggles blame annotations and fetches blame data if enabling."
+  @spec toggle_blame(GenServer.server()) :: :ok
+  def toggle_blame(server) do
+    GenServer.call(server, :toggle_blame)
+  end
+
+  @doc "Returns whether blame annotations are currently enabled."
+  @spec blame_enabled?(GenServer.server()) :: boolean()
+  def blame_enabled?(server) do
+    GenServer.call(server, :blame_enabled?)
+  end
+
+  @doc "Returns the cached blame data, or nil if not fetched."
+  @spec blame_data(GenServer.server()) :: %{non_neg_integer() => map()} | nil
+  def blame_data(server) do
+    GenServer.call(server, :blame_data)
   end
 
   @doc "Returns the git root path."
@@ -134,7 +154,9 @@ defmodule Minga.Git.Buffer do
       base_lines: base_lines,
       hunks: hunks,
       signs: signs,
-      branch: branch
+      branch: branch,
+      blame_enabled: false,
+      blame_cache: nil
     }
 
     {:ok, state}
@@ -170,6 +192,27 @@ defmodule Minga.Git.Buffer do
     {:reply, state.relative_path, state}
   end
 
+  def handle_call(:toggle_blame, _from, state) do
+    new_enabled = not state.blame_enabled
+
+    new_cache =
+      if new_enabled and state.blame_cache == nil do
+        fetch_blame_data(state.git_root, state.relative_path)
+      else
+        state.blame_cache
+      end
+
+    {:reply, :ok, %{state | blame_enabled: new_enabled, blame_cache: new_cache}}
+  end
+
+  def handle_call(:blame_enabled?, _from, state) do
+    {:reply, state.blame_enabled, state}
+  end
+
+  def handle_call(:blame_data, _from, state) do
+    {:reply, state.blame_cache, state}
+  end
+
   @impl true
   def handle_cast({:update, content}, state) do
     current_lines = split_lines(content)
@@ -184,7 +227,16 @@ defmodule Minga.Git.Buffer do
     hunks = Diff.diff_lines(base_lines, current_lines)
     signs = Diff.signs_for_hunks(hunks)
     branch = read_branch(state.git_root)
-    {:noreply, %{state | base_lines: base_lines, hunks: hunks, signs: signs, branch: branch}}
+
+    {:noreply,
+     %{
+       state
+       | base_lines: base_lines,
+         hunks: hunks,
+         signs: signs,
+         branch: branch,
+         blame_cache: nil
+     }}
   end
 
   # ── Private ────────────────────────────────────────────────────────────────
@@ -213,6 +265,14 @@ defmodule Minga.Git.Buffer do
     case Git.show_head(git_root, relative_path) do
       {:ok, content} -> split_lines(content)
       :error -> []
+    end
+  end
+
+  @spec fetch_blame_data(String.t(), String.t()) :: %{non_neg_integer() => map()} | nil
+  defp fetch_blame_data(git_root, relative_path) do
+    case Git.blame_file(git_root, relative_path) do
+      {:ok, data} -> data
+      :error -> nil
     end
   end
 

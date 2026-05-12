@@ -22,6 +22,9 @@ defmodule MingaEditor.Shell.Traditional.State do
   alias MingaEditor.State.WhichKey
   alias Minga.Tool.Manager, as: ToolManager
 
+  @typedoc "Metadata for an active git commit message buffer."
+  @type commit_meta :: %{git_root: String.t(), amend: boolean(), buffer_pid: pid()} | nil
+
   @type t :: %__MODULE__{
           nav_flash: NavFlash.t() | nil,
           yank_flash: YankFlash.t() | nil,
@@ -41,7 +44,9 @@ defmodule MingaEditor.Shell.Traditional.State do
           tool_prompt_queue: [atom()],
           suppress_tool_prompts: boolean(),
           space_leader_pending: boolean(),
-          space_leader_timer: reference() | nil
+          space_leader_timer: reference() | nil,
+          git_commit_meta: commit_meta(),
+          git_commit_prefix: Minga.Keymap.Bindings.node_t() | nil
         }
 
   defstruct nav_flash: nil,
@@ -62,7 +67,9 @@ defmodule MingaEditor.Shell.Traditional.State do
             tool_prompt_queue: [],
             suppress_tool_prompts: false,
             space_leader_pending: false,
-            space_leader_timer: nil
+            space_leader_timer: nil,
+            git_commit_meta: nil,
+            git_commit_prefix: nil
 
   # ── Status message ─────────────────────────────────────────────────────────
 
@@ -220,6 +227,34 @@ defmodule MingaEditor.Shell.Traditional.State do
   @spec set_modal(t(), ModalOverlay.t()) :: t()
   def set_modal(%{} = ss, modal) do
     %{ss | modal: modal}
+  end
+
+  # ── Git commit message buffer ──────────────────────────────────────────────
+
+  @doc "Returns the git commit metadata, or nil if no commit buffer is active."
+  @spec git_commit_meta(t()) :: commit_meta()
+  def git_commit_meta(%{git_commit_meta: meta}), do: meta
+
+  @doc "Sets the git commit metadata for an active commit buffer."
+  @spec set_git_commit_meta(t(), commit_meta()) :: t()
+  def set_git_commit_meta(%{} = ss, meta) do
+    %{ss | git_commit_meta: meta}
+  end
+
+  @doc "Clears the git commit metadata and prefix state."
+  @spec clear_git_commit(t()) :: t()
+  def clear_git_commit(%{} = ss) do
+    %{ss | git_commit_meta: nil, git_commit_prefix: nil}
+  end
+
+  @doc "Returns the pending prefix node for git commit key sequences, or nil."
+  @spec git_commit_prefix(t()) :: Minga.Keymap.Bindings.node_t() | nil
+  def git_commit_prefix(%{git_commit_prefix: prefix}), do: prefix
+
+  @doc "Sets the pending prefix node for git commit key sequences."
+  @spec set_git_commit_prefix(t(), Minga.Keymap.Bindings.node_t() | nil) :: t()
+  def set_git_commit_prefix(%{} = ss, prefix) do
+    %{ss | git_commit_prefix: prefix}
   end
 
   # ── Tool prompt helpers ────────────────────────────────────────────────────

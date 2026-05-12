@@ -197,6 +197,46 @@ defmodule Minga.Git.System do
   end
 
   @impl true
+  @spec commit_amend(String.t(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
+  def commit_amend(git_root, message) when is_binary(git_root) and is_binary(message) do
+    case System.cmd("git", ["commit", "--amend", "-m", message],
+           cd: git_root,
+           stderr_to_stdout: true
+         ) do
+      {output, 0} ->
+        short_hash =
+          case Regex.run(~r"\[[\w/.-]+ ([a-f0-9]+)\]", output) do
+            [_, hash] -> hash
+            _ -> "unknown"
+          end
+
+        {:ok, short_hash}
+
+      {output, _} ->
+        {:error, "git commit --amend failed: #{String.trim(output)}"}
+    end
+  rescue
+    e in [ErlangError, ArgumentError] ->
+      {:error, "git commit --amend error: #{Exception.message(e)}"}
+  end
+
+  @impl true
+  @spec blame_file(String.t(), String.t()) ::
+          {:ok, %{non_neg_integer() => Minga.Git.Backend.blame_info()}} | :error
+  def blame_file(git_root, relative_path)
+      when is_binary(git_root) and is_binary(relative_path) do
+    case System.cmd("git", ["blame", "--porcelain", relative_path],
+           cd: git_root,
+           stderr_to_stdout: true
+         ) do
+      {output, 0} -> {:ok, parse_porcelain_blame_file(output)}
+      _ -> :error
+    end
+  rescue
+    _ -> :error
+  end
+
+  @impl true
   @spec ahead_behind(String.t()) :: {:ok, non_neg_integer(), non_neg_integer()} | :error
   def ahead_behind(git_root) when is_binary(git_root) do
     case System.cmd("git", ["rev-list", "--left-right", "--count", "HEAD...@{upstream}"],
@@ -608,5 +648,131 @@ defmodule Minga.Git.System do
       end)
 
     "#{author} (#{date}): #{summary}"
+  end
+
+  @spec parse_porcelain_blame_file(String.t()) :: %{
+          non_neg_integer() => Minga.Git.Backend.blame_info()
+        }
+  defp parse_porcelain_blame_file(output) do
+    output
+    |> String.split("\n")
+    |> parse_blame_lines(%{}, %{}, nil)
+  end
+
+  # Recursive parser for porcelain blame output. Accumulates per-commit
+  # metadata in `commits` and builds the final `result` map keyed by
+  # 0-indexed line number.
+  @spec parse_blame_lines(
+          [String.t()],
+          %{String.t() => Minga.Git.Backend.blame_info()},
+          %{non_neg_integer() => Minga.Git.Backend.blame_info()},
+          {String.t(), non_neg_integer(), map()} | nil
+        ) :: %{non_neg_integer() => Minga.Git.Backend.blame_info()}
+  defp parse_blame_lines([], _commits, result, _current), do: result
+
+  defp parse_blame_lines(["" | rest], commits, result, current) do
+    parse_blame_lines(rest, commits, result, current)
+  end
+
+  defp parse_blame_lines([line | rest], commits, result, current) do
+    parse_blame_line(line, rest, commits, result, current)
+  end
+
+  @spec parse_blame_line(
+          String.t(),
+          [String.t()],
+          %{String.t() => Minga.Git.Backend.blame_info()},
+          %{non_neg_integer() => Minga.Git.Backend.blame_info()},
+          {String.t(), non_neg_integer(), map()} | nil
+        ) :: %{non_neg_integer() => Minga.Git.Backend.blame_info()}
+
+  # Content line (starts with tab): finalize this entry
+  defp parse_blame_line(<<?\t, _content::binary>>, rest, commits, result, {sha, final_line, meta}) do
+    info = finalize_blame_entry(sha, meta, commits)
+    commits = Map.put_new(commits, sha, info)
+    # Store as 0-indexed
+    result = Map.put(result, final_line - 1, info)
+    parse_blame_lines(rest, commits, result, nil)
+  end
+
+  # Header line: 40-char SHA + original_line + final_line [+ num_lines]
+  defp parse_blame_line(line, rest, commits, result, nil) do
+    case parse_blame_header(line) do
+      {:ok, sha, final_line} ->
+        # Check if we already have metadata for this commit
+        case Map.fetch(commits, sha) do
+          {:ok, info} ->
+            # Reuse: skip metadata lines until we hit the content line
+            parse_blame_lines(rest, commits, Map.put(result, final_line - 1, info), nil)
+
+          :error ->
+            parse_blame_lines(rest, commits, result, {sha, final_line, %{}})
+        end
+
+      :not_header ->
+        # Unknown line, skip
+        parse_blame_lines(rest, commits, result, nil)
+    end
+  end
+
+  # Metadata line while accumulating fields for a commit
+  defp parse_blame_line("author " <> name, rest, commits, result, {sha, fl, meta}) do
+    parse_blame_lines(rest, commits, result, {sha, fl, Map.put(meta, :author, name)})
+  end
+
+  defp parse_blame_line("author-time " <> ts, rest, commits, result, {sha, fl, meta}) do
+    date = format_unix_timestamp(ts)
+    parse_blame_lines(rest, commits, result, {sha, fl, Map.put(meta, :date, date)})
+  end
+
+  defp parse_blame_line("summary " <> msg, rest, commits, result, {sha, fl, meta}) do
+    parse_blame_lines(rest, commits, result, {sha, fl, Map.put(meta, :summary, msg)})
+  end
+
+  # Other metadata fields (author-mail, committer, etc.): skip
+  defp parse_blame_line(_line, rest, commits, result, current) do
+    parse_blame_lines(rest, commits, result, current)
+  end
+
+  @spec parse_blame_header(String.t()) ::
+          {:ok, String.t(), non_neg_integer()} | :not_header
+  defp parse_blame_header(line) do
+    case String.split(line, " ") do
+      [sha, _orig, final | _] when byte_size(sha) == 40 ->
+        case Integer.parse(final) do
+          {final_line, _} -> {:ok, sha, final_line}
+          :error -> :not_header
+        end
+
+      _ ->
+        :not_header
+    end
+  end
+
+  @spec finalize_blame_entry(
+          String.t(),
+          map(),
+          %{String.t() => Minga.Git.Backend.blame_info()}
+        ) :: Minga.Git.Backend.blame_info()
+  defp finalize_blame_entry(sha, meta, commits) do
+    case Map.fetch(commits, sha) do
+      {:ok, existing} ->
+        existing
+
+      :error ->
+        %{
+          author: Map.get(meta, :author, "unknown"),
+          date: Map.get(meta, :date, ""),
+          summary: Map.get(meta, :summary, "")
+        }
+    end
+  end
+
+  @spec format_unix_timestamp(String.t()) :: String.t()
+  defp format_unix_timestamp(ts) do
+    case Integer.parse(ts) do
+      {unix, _} -> DateTime.from_unix!(unix) |> Calendar.strftime("%Y-%m-%d")
+      _ -> ""
+    end
   end
 end

@@ -373,6 +373,20 @@ defmodule MingaEditor.State do
   @spec close_git_status_panel(t()) :: t()
   def close_git_status_panel(s), do: update_shell_state(s, &ShellState.close_git_status_panel/1)
 
+  @spec git_commit_meta(t()) :: ShellState.commit_meta()
+  def git_commit_meta(%{shell_state: ss}), do: ShellState.git_commit_meta(ss)
+  @spec set_git_commit_meta(t(), ShellState.commit_meta()) :: t()
+  def set_git_commit_meta(s, meta),
+    do: update_shell_state(s, &ShellState.set_git_commit_meta(&1, meta))
+
+  @spec clear_git_commit(t()) :: t()
+  def clear_git_commit(s), do: update_shell_state(s, &ShellState.clear_git_commit/1)
+  @spec git_commit_prefix(t()) :: Minga.Keymap.Bindings.node_t() | nil
+  def git_commit_prefix(%{shell_state: ss}), do: ShellState.git_commit_prefix(ss)
+  @spec set_git_commit_prefix(t(), Minga.Keymap.Bindings.node_t() | nil) :: t()
+  def set_git_commit_prefix(s, prefix),
+    do: update_shell_state(s, &ShellState.set_git_commit_prefix(&1, prefix))
+
   @spec tab_bar(t()) :: TabBar.t() | nil
   def tab_bar(%{shell_state: ss}), do: ShellState.tab_bar(ss)
   @spec set_tab_bar(t(), TabBar.t() | nil) :: t()

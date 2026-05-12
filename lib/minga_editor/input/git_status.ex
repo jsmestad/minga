@@ -235,15 +235,18 @@ defmodule MingaEditor.Input.GitStatus do
         EditorState.set_status(state, "Not in a git repository")
 
       git_root ->
-        update_tui_state(state, &put_amend_mode(&1, git_root))
+        open_commit_buffer(state, git_root, true)
     end
   end
 
   defp execute_command(state, :git_status_start_commit) do
-    EditorState.set_status(
-      state,
-      "Commit message input (use :git-commit <message> in command mode)"
-    )
+    case resolve_git_root() do
+      nil ->
+        EditorState.set_status(state, "Not in a git repository")
+
+      git_root ->
+        open_commit_buffer(state, git_root, false)
+    end
   end
 
   defp execute_command(state, :git_status_close) do
@@ -336,11 +339,6 @@ defmodule MingaEditor.Input.GitStatus do
   @spec clear_discard_confirmation(TuiState.t()) :: TuiState.t()
   defp clear_discard_confirmation(tui) do
     %{tui | discard_confirmation: nil}
-  end
-
-  @spec put_amend_mode(TuiState.t(), String.t()) :: TuiState.t()
-  defp put_amend_mode(tui, _git_root) do
-    %{tui | amend_mode: not tui.amend_mode}
   end
 
   @spec do_git_remote_op(
@@ -545,4 +543,45 @@ defmodule MingaEditor.Input.GitStatus do
       nil -> 0
     end
   end
+
+  # ── Commit buffer helpers ─────────────────────────────────────────────────
+
+  @spec open_commit_buffer(EditorState.t(), String.t(), boolean()) :: EditorState.t()
+  defp open_commit_buffer(state, git_root, amend) do
+    initial_content = commit_buffer_content(git_root, amend)
+
+    case Buffer.start_link(
+           content: initial_content,
+           buffer_type: :nofile,
+           read_only: false,
+           buffer_name: "COMMIT_EDITMSG"
+         ) do
+      {:ok, buf_pid} ->
+        state = Commands.add_buffer(state, buf_pid)
+
+        meta = %{git_root: git_root, amend: amend, buffer_pid: buf_pid}
+        state = EditorState.set_git_commit_meta(state, meta)
+
+        state =
+          EditorState.update_workspace(
+            state,
+            &WorkspaceState.set_keymap_scope(&1, :git_commit)
+          )
+
+        EditorState.transition_mode(state, :insert)
+
+      {:error, reason} ->
+        EditorState.set_status(state, "Failed to open commit buffer: #{inspect(reason)}")
+    end
+  end
+
+  @spec commit_buffer_content(String.t(), boolean()) :: String.t()
+  defp commit_buffer_content(git_root, true) do
+    case Git.log(git_root, count: 1) do
+      {:ok, [%{message: msg} | _]} -> msg
+      _ -> ""
+    end
+  end
+
+  defp commit_buffer_content(_git_root, false), do: ""
 end

@@ -24,6 +24,12 @@ defmodule Minga.Git.Backend do
             ) ::
               {:ok, String.t()} | :error
 
+  @typedoc "Blame info for a single line."
+  @type blame_info :: %{author: String.t(), date: String.t(), summary: String.t()}
+
+  @callback blame_file(git_root :: String.t(), relative_path :: String.t()) ::
+              {:ok, %{non_neg_integer() => blame_info()}} | :error
+
   @callback status(git_root :: String.t()) ::
               {:ok, [Minga.Git.status_entry()]} | {:error, String.t()}
 
@@ -37,6 +43,9 @@ defmodule Minga.Git.Backend do
               :ok | {:error, String.t()}
 
   @callback commit(git_root :: String.t(), message :: String.t()) ::
+              {:ok, String.t()} | {:error, String.t()}
+
+  @callback commit_amend(git_root :: String.t(), message :: String.t()) ::
               {:ok, String.t()} | {:error, String.t()}
 
   @callback stage_patch(git_root :: String.t(), patch :: String.t()) ::

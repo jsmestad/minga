@@ -117,6 +117,16 @@ defmodule Minga.Git.Stub do
   def blame_line(_git_root, _relative_path, _line_number), do: :error
 
   @impl true
+  @spec blame_file(String.t(), String.t()) ::
+          {:ok, %{non_neg_integer() => Minga.Git.Backend.blame_info()}} | :error
+  def blame_file(git_root, relative_path) do
+    case :ets.lookup(@table, {:blame_file, Path.expand(git_root), relative_path}) do
+      [{_, data}] -> {:ok, data}
+      [] -> {:ok, %{}}
+    end
+  end
+
+  @impl true
   @spec status(String.t()) :: {:ok, [Minga.Git.status_entry()]}
   def status(git_root) do
     case :ets.lookup(@table, {:status, Path.expand(git_root)}) do
@@ -150,6 +160,10 @@ defmodule Minga.Git.Stub do
   @impl true
   @spec commit(String.t(), String.t()) :: {:ok, String.t()}
   def commit(_git_root, _message), do: {:ok, "stub000"}
+
+  @impl true
+  @spec commit_amend(String.t(), String.t()) :: {:ok, String.t()}
+  def commit_amend(_git_root, _message), do: {:ok, "stub001"}
 
   @impl true
   @spec stage_patch(String.t(), String.t()) :: :ok

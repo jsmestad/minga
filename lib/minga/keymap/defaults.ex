@@ -114,7 +114,7 @@ defmodule Minga.Keymap.Defaults do
     {[{?g, @none}, {?s, @none}], :git_stage_hunk, "Stage hunk"},
     {[{?g, @none}, {?r, @none}], :git_revert_hunk, "Revert hunk"},
     {[{?g, @none}, {?v, @none}], :git_preview_hunk, "Preview hunk"},
-    {[{?g, @none}, {?b, @none}], :git_blame_line, "Blame line"},
+    {[{?g, @none}, {?b, @none}], :git_blame_toggle, "Toggle blame"},
 
     # ── Project ────────────────────────────────────────────────────────────────
     {[{?p, @none}, {?f, @none}], :project_find_file, "Find file in project"},

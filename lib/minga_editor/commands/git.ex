@@ -32,7 +32,9 @@ defmodule MingaEditor.Commands.Git do
     {:git_stage_hunk, "Stage hunk", true},
     {:git_revert_hunk, "Revert hunk", true},
     {:git_preview_hunk, "Preview hunk", true},
-    {:git_blame_line, "Blame line", true}
+    {:git_blame_toggle, "Toggle blame", true},
+    {:git_commit_execute, "Commit", false},
+    {:git_commit_abort, "Abort commit", false}
   ]
 
   @spec execute(state(), atom()) :: state()
@@ -153,19 +155,62 @@ defmodule MingaEditor.Commands.Git do
     end)
   end
 
-  # ── Blame line ─────────────────────────────────────────────────────────────
+  # ── Toggle blame annotations ───────────────────────────────────────────────
 
-  def execute(state, :git_blame_line) do
+  def execute(state, :git_blame_toggle) do
     with_git_buffer(state, fn git_pid, buf ->
-      {cursor_line, _col} = Buffer.cursor(buf)
-      git_root = Git.Buffer.git_root(git_pid)
-      rel_path = Git.Buffer.relative_path(git_pid)
+      Git.Buffer.toggle_blame(git_pid)
+      enabled = Git.Buffer.blame_enabled?(git_pid)
 
-      case Git.blame_line(git_root, rel_path, cursor_line) do
-        {:ok, blame_text} -> EditorState.set_status(state, blame_text)
-        :error -> EditorState.set_status(state, "Blame unavailable")
+      if enabled do
+        apply_blame_annotations(state, git_pid, buf)
+      else
+        Buffer.batch_decorations(buf, fn decs ->
+          Minga.Core.Decorations.remove_group(decs, :git_blame)
+        end)
+
+        EditorState.set_status(state, "Blame annotations disabled")
       end
     end)
+  end
+
+  # ── Commit message buffer ─────────────────────────────────────────────────
+
+  def execute(state, :git_commit_execute) do
+    case EditorState.git_commit_meta(state) do
+      nil ->
+        EditorState.set_status(state, "No commit in progress")
+
+      %{git_root: git_root, amend: amend, buffer_pid: buf_pid} ->
+        {content, _cursor} = Buffer.content_and_cursor(buf_pid)
+        message = strip_commit_comments(content)
+
+        if String.trim(message) == "" do
+          state = close_commit_buffer(state, buf_pid)
+          EditorState.set_status(state, "Aborting commit due to empty message")
+        else
+          result =
+            if amend do
+              Git.commit_amend(git_root, message)
+            else
+              Git.commit(git_root, message)
+            end
+
+          state = close_commit_buffer(state, buf_pid)
+          handle_commit_result(state, result, git_root, amend)
+        end
+    end
+  end
+
+  def execute(state, :git_commit_abort) do
+    case EditorState.git_commit_meta(state) do
+      nil ->
+        EditorState.set_status(state, "No commit in progress")
+
+      %{buffer_pid: buf_pid} ->
+        state = close_commit_buffer(state, buf_pid)
+        EditorState.set_status(state, "Commit aborted")
+    end
   end
 
   # ── Private ────────────────────────────────────────────────────────────────
@@ -410,6 +455,127 @@ defmodule MingaEditor.Commands.Git do
   defp get_base_lines(git_pid) do
     # Access the base_lines from the git buffer's state
     :sys.get_state(git_pid).base_lines
+  end
+
+  # ── Commit buffer helpers ─────────────────────────────────────────────────
+
+  @spec strip_commit_comments(String.t()) :: String.t()
+  defp strip_commit_comments(content) do
+    content
+    |> String.split("\n")
+    |> Enum.reject(&String.starts_with?(&1, "#"))
+    |> Enum.join("\n")
+    |> String.trim()
+  end
+
+  @spec close_commit_buffer(state(), pid()) :: state()
+  defp close_commit_buffer(state, buf_pid) do
+    # Restore scope: if git status panel is open, go back to git_status; otherwise editor
+    restore_scope =
+      if EditorState.git_status_panel(state) != nil,
+        do: :git_status,
+        else: :editor
+
+    state = EditorState.clear_git_commit(state)
+    state = EditorState.transition_mode(state, :normal)
+
+    state =
+      EditorState.update_workspace(state, &WorkspaceState.set_keymap_scope(&1, restore_scope))
+
+    # Remove the commit buffer from the buffer list
+    buffers = state.workspace.buffers
+    buf_list = buffers.list
+    idx = Enum.find_index(buf_list, &(&1 == buf_pid))
+
+    # Stop the buffer process
+    try do
+      GenServer.stop(buf_pid, :normal)
+    catch
+      :exit, _ -> :ok
+    end
+
+    case idx do
+      nil ->
+        state
+
+      i ->
+        new_list = List.delete_at(buf_list, i)
+        new_idx = min(max(i - 1, 0), max(length(new_list) - 1, 0))
+        new_active = Enum.at(new_list, new_idx)
+
+        put_in(state.workspace.buffers, %{
+          buffers
+          | list: new_list,
+            active_index: new_idx,
+            active: new_active
+        })
+        |> EditorState.sync_active_window_buffer()
+    end
+  end
+
+  @spec handle_commit_result(
+          state(),
+          {:ok, String.t()} | {:error, String.t()},
+          String.t(),
+          boolean()
+        ) ::
+          state()
+  defp handle_commit_result(state, {:ok, short_hash}, git_root, amend) do
+    refresh_repo(git_root)
+    verb = if amend, do: "Amended", else: "Committed"
+    EditorState.set_status(state, "#{verb} [#{short_hash}]")
+  end
+
+  defp handle_commit_result(state, {:error, reason}, _git_root, _amend) do
+    MingaEditor.log_to_messages("Commit failed: #{reason}")
+    EditorState.set_status(state, "Commit failed: #{reason}")
+  end
+
+  # ── Blame annotation helpers ──────────────────────────────────────────────
+
+  @spec apply_blame_annotations(state(), pid(), pid()) :: state()
+  defp apply_blame_annotations(state, git_pid, buf) do
+    case Git.Buffer.blame_data(git_pid) do
+      nil ->
+        EditorState.set_status(state, "Blame data unavailable")
+
+      blame_data when map_size(blame_data) == 0 ->
+        EditorState.set_status(state, "Blame annotations enabled (no data)")
+
+      blame_data ->
+        alias Minga.Core.Decorations
+
+        Buffer.batch_decorations(buf, fn decs ->
+          decs = Decorations.remove_group(decs, :git_blame)
+
+          Enum.reduce(blame_data, decs, fn {line, info}, acc ->
+            text = format_blame_annotation(info)
+
+            {_id, acc} =
+              Decorations.add_annotation(acc, line, text,
+                kind: :inline_text,
+                fg: 0x6B7280,
+                group: :git_blame,
+                priority: -10
+              )
+
+            acc
+          end)
+        end)
+
+        EditorState.set_status(state, "Blame annotations enabled")
+    end
+  end
+
+  @spec format_blame_annotation(Minga.Git.blame_info()) :: String.t()
+  defp format_blame_annotation(%{author: author, date: date, summary: summary}) do
+    text = "#{author} (#{date}): #{summary}"
+
+    if String.length(text) > 60 do
+      String.slice(text, 0, 57) <> "..."
+    else
+      text
+    end
   end
 
   @impl Minga.Command.Provider

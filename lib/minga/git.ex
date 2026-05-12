@@ -100,6 +100,19 @@ defmodule Minga.Git do
   def blame_line(git_root, relative_path, line_number),
     do: impl().blame_line(git_root, relative_path, line_number)
 
+  @typedoc "Blame info for a single line."
+  @type blame_info :: %{author: String.t(), date: String.t(), summary: String.t()}
+
+  @doc """
+  Gets blame information for all lines of a file.
+
+  Returns `{:ok, %{0-indexed-line => blame_info}}` or `:error`.
+  """
+  @spec blame_file(String.t(), String.t()) ::
+          {:ok, %{non_neg_integer() => blame_info()}} | :error
+  def blame_file(git_root, relative_path),
+    do: impl().blame_file(git_root, relative_path)
+
   @doc """
   Returns a structured list of changed files with their status.
   """
@@ -133,6 +146,12 @@ defmodule Minga.Git do
   """
   @spec commit(String.t(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
   def commit(git_root, message), do: impl().commit(git_root, message)
+
+  @doc """
+  Amends the last commit with the given message.
+  """
+  @spec commit_amend(String.t(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
+  def commit_amend(git_root, message), do: impl().commit_amend(git_root, message)
 
   @doc """
   Returns the current branch name for a git repository.

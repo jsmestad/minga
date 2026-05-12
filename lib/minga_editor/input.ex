@@ -26,6 +26,7 @@ defmodule MingaEditor.Input do
   alias MingaEditor.Input.Dashboard
   alias MingaEditor.Input.DiffReview
   alias MingaEditor.Input.FileTreeHandler
+  alias MingaEditor.Input.GitCommit
   alias MingaEditor.Input.GitStatus
   alias MingaEditor.Input.GlobalBindings
   alias MingaEditor.Input.Hover
@@ -122,6 +123,7 @@ defmodule MingaEditor.Input do
       DiffReview,
       AgentPanel,
       FileTreeHandler,
+      GitCommit,
       GitStatus,
       Popup,
       MingaEditor.Input.CUA.TUISpaceLeader,

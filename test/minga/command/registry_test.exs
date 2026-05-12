@@ -95,7 +95,9 @@ defmodule Minga.Command.RegistryTest do
           :git_stage_hunk,
           :git_revert_hunk,
           :git_preview_hunk,
-          :git_blame_line,
+          :git_blame_toggle,
+          :git_commit_execute,
+          :git_commit_abort,
 
           # Folding
           :fold_toggle,

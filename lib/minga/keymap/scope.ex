@@ -29,6 +29,7 @@ defmodule Minga.Keymap.Scope do
   * `:agent` — agent chat view (Board zoom or side panel)
   * `:file_tree` — file tree panel
   * `:git_status` — git status panel
+  * `:git_commit` — git commit message buffer
 
   ## Resolution layers
 
@@ -59,7 +60,7 @@ defmodule Minga.Keymap.Scope do
   @type context :: keyword()
 
   @typedoc "A scope name atom."
-  @type scope_name :: :editor | :agent | :file_tree | :git_status
+  @type scope_name :: :editor | :agent | :file_tree | :git_status | :git_commit
 
   @typedoc "Vim state relevant to scope resolution."
   @type vim_state :: :normal | :insert | :input_normal | :cua
@@ -144,7 +145,8 @@ defmodule Minga.Keymap.Scope do
     editor: Minga.Keymap.Scope.Editor,
     agent: Minga.Keymap.Scope.Agent,
     file_tree: Minga.Keymap.Scope.FileTree,
-    git_status: Minga.Keymap.Scope.GitStatus
+    git_status: Minga.Keymap.Scope.GitStatus,
+    git_commit: Minga.Keymap.Scope.GitCommit
   }
 
   @doc "Returns the scope module for a given scope name."
