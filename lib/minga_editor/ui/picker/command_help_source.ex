@@ -46,7 +46,7 @@ defmodule MingaEditor.UI.Picker.CommandHelpSource do
   @impl true
   @spec on_select(Item.t(), term()) :: term()
   def on_select(%Item{id: command_name}, state) do
-    Help.execute(state, {:describe_command_named, Atom.to_string(command_name)})
+    Help.execute(state, {:describe_command_named, command_name})
   end
 
   @impl true

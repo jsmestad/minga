@@ -47,7 +47,7 @@ defmodule MingaEditor.UI.Picker.CommandHelpSourceTest do
       candidates = CommandHelpSource.candidates(build_context())
 
       assert is_list(candidates)
-      assert length(candidates) > 0
+      assert candidates != []
       assert Enum.all?(candidates, &match?(%Item{}, &1))
     end
 

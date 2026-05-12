@@ -279,7 +279,6 @@ defmodule MingaEditor.Commands.HelpTest do
       assert content =~ "Command:     save"
       assert content =~ "Description: Save the current file"
       assert content =~ "Keybinding:  SPC f s"
-      assert content =~ "Source:      built-in"
       assert content =~ "Scope:       any"
     end
 
@@ -354,6 +353,15 @@ defmodule MingaEditor.Commands.HelpTest do
 
       content = BufferServer.content(result.workspace.buffers.help)
       assert content =~ "# Command: describe_bindings"
+    end
+
+    test "error message uses normalized name without colon" do
+      state = build_state()
+      result = Help.execute(state, {:describe_command_named, ":not_a_real_command"})
+
+      content = BufferServer.content(result.workspace.buffers.help)
+      assert content =~ "Unknown command: not_a_real_command"
+      refute content =~ "Unknown command: :not_a_real_command"
     end
 
     test "CommandHelpSource.on_select opens help buffer for command" do

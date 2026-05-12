@@ -72,6 +72,10 @@ defmodule MingaEditor.Commands.Help do
     PickerUI.open(state, MingaEditor.UI.Picker.CommandHelpSource)
   end
 
+  def execute(state, {:describe_command_named, name}) when is_atom(name) do
+    describe_command_by_atom(state, name)
+  end
+
   def execute(state, {:describe_command_named, name}) when is_binary(name) do
     describe_command_named(state, name)
   end
@@ -731,6 +735,19 @@ defmodule MingaEditor.Commands.Help do
 
   # ── Command description ─────────────────────────────────────────────────────
 
+  @spec describe_command_by_atom(state(), atom()) :: state()
+  defp describe_command_by_atom(state, name) when is_atom(name) do
+    case Command.lookup(name) do
+      {:ok, cmd} ->
+        keybind_map = build_reverse_keybind_map()
+        content = format_describe_command(cmd, keybind_map)
+        show_in_help_buffer(state, content)
+
+      :error ->
+        show_in_help_buffer(state, "Unknown command: #{name}\n")
+    end
+  end
+
   @spec describe_command_named(state(), String.t()) :: state()
   defp describe_command_named(state, raw_name) do
     normalized = raw_name |> String.trim() |> String.trim_leading(":")
@@ -749,11 +766,10 @@ defmodule MingaEditor.Commands.Help do
         show_in_help_buffer(state, content)
 
       _ ->
-        show_in_help_buffer(state, "Unknown command: #{raw_name}\n")
+        show_in_help_buffer(state, "Unknown command: #{normalized}\n")
     end
   end
 
-  @doc "Formats a detailed command help page."
   @spec format_describe_command(Command.t(), %{atom() => [String.t()]}) :: String.t()
   def format_describe_command(%Command{} = cmd, keybind_map) do
     bindings = Map.get(keybind_map, cmd.name, [])
@@ -761,7 +777,6 @@ defmodule MingaEditor.Commands.Help do
     keybinding_lines =
       case bindings do
         [] -> "none"
-        [single] -> single
         multiple -> Enum.join(multiple, "\n             ")
       end
 
@@ -773,7 +788,6 @@ defmodule MingaEditor.Commands.Help do
       "Command:     #{cmd.name}",
       "Description: #{cmd.description}",
       "Keybinding:  #{keybinding_lines}",
-      "Source:      built-in",
       "Scope:       #{scope_str}",
       ""
     ]
@@ -786,6 +800,8 @@ defmodule MingaEditor.Commands.Help do
   Merges leader bindings (prefixed with "SPC "), normal mode bindings,
   and filetype bindings (prefixed with "SPC m ") into a single map where
   each command maps to a list of all its bound key sequences.
+
+  Reads from `Defaults` only; user overrides from `Keymap.Active` are not included.
   """
   @spec build_reverse_keybind_map() :: %{atom() => [String.t()]}
   def build_reverse_keybind_map do
