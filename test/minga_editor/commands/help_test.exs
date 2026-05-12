@@ -6,7 +6,9 @@ defmodule MingaEditor.Commands.HelpTest do
   alias Minga.Keymap.Active, as: ActiveKeymap
   alias MingaEditor.Commands.Help
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.UI.Picker.CommandHelpSource
   alias MingaEditor.UI.Picker.Context
+  alias MingaEditor.UI.Picker.Item
   alias MingaEditor.UI.Picker.OptionSource
   alias MingaEditor.State.Buffers
   alias MingaEditor.Viewport
@@ -230,6 +232,145 @@ defmodule MingaEditor.Commands.HelpTest do
       assert content =~ "Current value: false"
       assert content =~ "Set by: default → config.exs"
       assert content =~ "Hide markup syntax."
+    end
+  end
+
+  describe "build_reverse_keybind_map" do
+    test "includes leader bindings with SPC prefix" do
+      map = Help.build_reverse_keybind_map()
+      assert "SPC f s" in Map.get(map, :save, [])
+    end
+
+    test "includes normal mode bindings" do
+      map = Help.build_reverse_keybind_map()
+      assert "j" in Map.get(map, :move_down, [])
+    end
+
+    test "includes filetype bindings with SPC m prefix" do
+      map = Help.build_reverse_keybind_map()
+      assert "SPC m a" in Map.get(map, :alternate_file, [])
+    end
+
+    test "commands with no binding return empty list" do
+      map = Help.build_reverse_keybind_map()
+      assert Map.get(map, :nonexistent_command_xyz, []) == []
+    end
+
+    test "commands with multiple bindings collect all of them" do
+      map = Help.build_reverse_keybind_map()
+      bindings = Map.get(map, :search_project, [])
+      assert "SPC s p" in bindings
+      assert "SPC /" in bindings
+    end
+  end
+
+  describe "format_describe_command" do
+    test "formats command with keybinding" do
+      cmd = %Minga.Command{
+        name: :save,
+        description: "Save the current file",
+        execute: fn s -> s end
+      }
+
+      keybind_map = %{save: ["SPC f s"]}
+      content = Help.format_describe_command(cmd, keybind_map)
+
+      assert content =~ "# Command: save"
+      assert content =~ "Command:     save"
+      assert content =~ "Description: Save the current file"
+      assert content =~ "Keybinding:  SPC f s"
+      assert content =~ "Scope:       any"
+    end
+
+    test "formats command with no keybinding" do
+      cmd = %Minga.Command{
+        name: :some_command,
+        description: "A command",
+        execute: fn s -> s end
+      }
+
+      content = Help.format_describe_command(cmd, %{})
+      assert content =~ "Keybinding:  none"
+    end
+
+    test "formats command with multiple keybindings" do
+      cmd = %Minga.Command{
+        name: :search_project,
+        description: "Search project",
+        execute: fn s -> s end
+      }
+
+      keybind_map = %{search_project: ["SPC s p", "SPC /"]}
+      content = Help.format_describe_command(cmd, keybind_map)
+
+      assert content =~ "Keybinding:  SPC s p"
+      assert content =~ "SPC /"
+    end
+
+    test "formats scoped command" do
+      cmd = %Minga.Command{
+        name: :agent_abort,
+        description: "Stop agent",
+        execute: fn s -> s end,
+        scope: :agent
+      }
+
+      content = Help.format_describe_command(cmd, %{})
+      assert content =~ "Scope:       :agent"
+    end
+  end
+
+  describe "describe_command" do
+    test "opens *Help* buffer with command description" do
+      state = build_state()
+      result = Help.execute(state, {:describe_command_named, "describe_bindings"})
+
+      content = BufferServer.content(result.workspace.buffers.help)
+      assert content =~ "# Command: describe_bindings"
+      assert content =~ "Description: Describe bindings"
+      assert content =~ "Keybinding:  SPC h b"
+    end
+
+    test "shows unknown command message for invalid name" do
+      state = build_state()
+      result = Help.execute(state, {:describe_command_named, "not_a_real_command_xyz"})
+
+      content = BufferServer.content(result.workspace.buffers.help)
+      assert content =~ "Unknown command: not_a_real_command_xyz"
+    end
+
+    test "shows unknown command for valid atom that is not a registered command" do
+      state = build_state()
+      result = Help.execute(state, {:describe_command_named, "true"})
+
+      content = BufferServer.content(result.workspace.buffers.help)
+      assert content =~ "Unknown command: true"
+    end
+
+    test "strips leading colon from command name" do
+      state = build_state()
+      result = Help.execute(state, {:describe_command_named, ":describe_bindings"})
+
+      content = BufferServer.content(result.workspace.buffers.help)
+      assert content =~ "# Command: describe_bindings"
+    end
+
+    test "error message uses normalized name without colon" do
+      state = build_state()
+      result = Help.execute(state, {:describe_command_named, ":not_a_real_command"})
+
+      content = BufferServer.content(result.workspace.buffers.help)
+      assert content =~ "Unknown command: not_a_real_command"
+      refute content =~ "Unknown command: :not_a_real_command"
+    end
+
+    test "CommandHelpSource.on_select opens help buffer for command" do
+      state = build_state()
+      result = CommandHelpSource.on_select(%Item{id: :describe_bindings, label: ""}, state)
+
+      content = BufferServer.content(result.workspace.buffers.help)
+      assert content =~ "# Command: describe_bindings"
+      assert content =~ "Keybinding:  SPC h b"
     end
   end
 

@@ -505,6 +505,14 @@ defmodule MingaEditor.Commands do
     ExtCommands.update(state)
   end
 
+  def execute(state, {:execute_ex_command, {:describe_command, []}}) do
+    Help.execute(state, :describe_command)
+  end
+
+  def execute(state, {:execute_ex_command, {:describe_command_named, [name]}}) do
+    Help.execute(state, {:describe_command_named, name})
+  end
+
   def execute(state, {:execute_ex_command, {:describe_option, []}}) do
     Help.execute(state, :describe_option)
   end
