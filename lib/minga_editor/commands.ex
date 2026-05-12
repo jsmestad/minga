@@ -462,6 +462,10 @@ defmodule MingaEditor.Commands do
     end
   end
 
+  def execute(state, {:execute_command_candidate, input, candidate_index}) do
+    execute_command_candidate(state, input, candidate_index)
+  end
+
   # ── Ex commands (tuple dispatch) ──────────────────────────────────────────
 
   def execute(state, {:execute_ex_command, {:lsp_info, []}}),
@@ -601,10 +605,8 @@ defmodule MingaEditor.Commands do
   @spec accept_command_candidate(state()) :: state()
   defp accept_command_candidate(state) do
     ms = Editing.mode_state(state)
-    {candidates, _total} = MinibufferData.complete_ex_command(ms.input)
-    idx = MinibufferData.clamp_index(ms.candidate_index, length(candidates))
 
-    case Enum.at(candidates, idx) do
+    case resolve_command_candidate(ms.input, ms.candidate_index) do
       nil ->
         state
 
@@ -612,6 +614,25 @@ defmodule MingaEditor.Commands do
         new_ms = %{ms | input: label, candidate_index: 0}
         Editing.update_mode_state(state, fn _ -> new_ms end)
     end
+  end
+
+  @spec execute_command_candidate(state(), String.t(), integer()) :: state()
+  defp execute_command_candidate(state, input, candidate_index) do
+    case resolve_command_candidate(input, candidate_index) do
+      nil ->
+        EditorState.set_status(state, "No matching command")
+
+      %{label: label} ->
+        parsed = Minga.Command.Parser.parse(label)
+        BufferManagement.execute(state, {:execute_ex_command, parsed})
+    end
+  end
+
+  @spec resolve_command_candidate(String.t(), integer()) :: map() | nil
+  defp resolve_command_candidate(input, candidate_index) do
+    {candidates, _total} = MinibufferData.complete_ex_command(input)
+    idx = MinibufferData.clamp_index(candidate_index, length(candidates))
+    Enum.at(candidates, idx)
   end
 
   # ── Filetype trie substitution ────────────────────────────────────────────
