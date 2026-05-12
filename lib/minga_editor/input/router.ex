@@ -427,7 +427,7 @@ defmodule MingaEditor.Input.Router do
   @spec record_keystroke(EditorState.t(), non_neg_integer(), non_neg_integer(), atom()) ::
           EditorState.t()
   defp record_keystroke(state, codepoint, modifiers, mode_before) do
-    entry = %{
+    entry = %KeystrokeHistory.Entry{
       key: {codepoint, modifiers},
       mode_before: mode_before,
       mode_after: Editing.mode(state),

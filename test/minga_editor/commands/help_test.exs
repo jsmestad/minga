@@ -243,6 +243,18 @@ defmodule MingaEditor.Commands.HelpTest do
   end
 
   describe "describe_lossage" do
+    alias MingaEditor.KeystrokeHistory
+    alias MingaEditor.KeystrokeHistory.Entry
+
+    defp make_lossage_entry(opts) do
+      %Entry{
+        key: Keyword.get(opts, :key, {?j, 0}),
+        mode_before: Keyword.get(opts, :mode_before, :normal),
+        mode_after: Keyword.get(opts, :mode_after, :normal),
+        timestamp: Keyword.get(opts, :timestamp, 1_715_500_800_000)
+      }
+    end
+
     test "creates *Keystrokes* buffer with empty history message" do
       state = build_state()
       result = Help.execute(state, :describe_lossage)
@@ -268,19 +280,9 @@ defmodule MingaEditor.Commands.HelpTest do
       state = build_state()
 
       history =
-        MingaEditor.KeystrokeHistory.new()
-        |> MingaEditor.KeystrokeHistory.record(%{
-          key: {?j, 0},
-          mode_before: :normal,
-          mode_after: :normal,
-          timestamp: 1_715_500_800_000
-        })
-        |> MingaEditor.KeystrokeHistory.record(%{
-          key: {?k, 0},
-          mode_before: :normal,
-          mode_after: :normal,
-          timestamp: 1_715_500_801_000
-        })
+        KeystrokeHistory.new()
+        |> KeystrokeHistory.record(make_lossage_entry(key: {?j, 0}, timestamp: 1_715_500_800_000))
+        |> KeystrokeHistory.record(make_lossage_entry(key: {?k, 0}, timestamp: 1_715_500_801_000))
 
       state = %{state | keystroke_history: history}
       result = Help.execute(state, :describe_lossage)
@@ -291,23 +293,20 @@ defmodule MingaEditor.Commands.HelpTest do
       assert content =~ "k"
     end
 
-    test "annotates mode transitions" do
+    test "annotates mode transitions between groups" do
       state = build_state()
 
       history =
-        MingaEditor.KeystrokeHistory.new()
-        |> MingaEditor.KeystrokeHistory.record(%{
-          key: {?j, 0},
-          mode_before: :normal,
-          mode_after: :normal,
-          timestamp: 1_715_500_800_000
-        })
-        |> MingaEditor.KeystrokeHistory.record(%{
-          key: {?h, 0},
-          mode_before: :insert,
-          mode_after: :insert,
-          timestamp: 1_715_500_802_000
-        })
+        KeystrokeHistory.new()
+        |> KeystrokeHistory.record(make_lossage_entry(key: {?j, 0}, timestamp: 1_715_500_800_000))
+        |> KeystrokeHistory.record(
+          make_lossage_entry(
+            key: {?h, 0},
+            mode_before: :insert,
+            mode_after: :insert,
+            timestamp: 1_715_500_802_000
+          )
+        )
 
       state = %{state | keystroke_history: history}
       result = Help.execute(state, :describe_lossage)
@@ -316,23 +315,43 @@ defmodule MingaEditor.Commands.HelpTest do
       assert content =~ "── mode: insert ──"
     end
 
+    test "shows mode change arrow on single entry" do
+      state = build_state()
+
+      history =
+        KeystrokeHistory.new()
+        |> KeystrokeHistory.record(
+          make_lossage_entry(key: {?i, 0}, mode_before: :normal, mode_after: :insert)
+        )
+
+      state = %{state | keystroke_history: history}
+      result = Help.execute(state, :describe_lossage)
+
+      content = BufferServer.content(result.workspace.buffers.active)
+      assert content =~ "→ insert"
+    end
+
     test "groups operator-pending sequences" do
       state = build_state()
 
       history =
-        MingaEditor.KeystrokeHistory.new()
-        |> MingaEditor.KeystrokeHistory.record(%{
-          key: {?d, 0},
-          mode_before: :normal,
-          mode_after: :operator_pending,
-          timestamp: 1_715_500_800_000
-        })
-        |> MingaEditor.KeystrokeHistory.record(%{
-          key: {?w, 0},
-          mode_before: :operator_pending,
-          mode_after: :normal,
-          timestamp: 1_715_500_800_100
-        })
+        KeystrokeHistory.new()
+        |> KeystrokeHistory.record(
+          make_lossage_entry(
+            key: {?d, 0},
+            mode_before: :normal,
+            mode_after: :operator_pending,
+            timestamp: 1_715_500_800_000
+          )
+        )
+        |> KeystrokeHistory.record(
+          make_lossage_entry(
+            key: {?w, 0},
+            mode_before: :operator_pending,
+            mode_after: :normal,
+            timestamp: 1_715_500_800_100
+          )
+        )
 
       state = %{state | keystroke_history: history}
       result = Help.execute(state, :describe_lossage)
@@ -341,31 +360,48 @@ defmodule MingaEditor.Commands.HelpTest do
       assert content =~ "d w"
     end
 
-    test "collapses insert runs into compact display" do
+    test "3 insert chars are shown individually, not collapsed" do
       state = build_state()
 
       entries =
-        Enum.map(?a..?h, fn cp ->
-          %{
+        Enum.map(?a..?c, fn cp ->
+          make_lossage_entry(
             key: {cp, 0},
             mode_before: :insert,
             mode_after: :insert,
             timestamp: 1_715_500_800_000 + cp
-          }
+          )
         end)
 
-      history =
-        Enum.reduce(
-          entries,
-          MingaEditor.KeystrokeHistory.new(),
-          &MingaEditor.KeystrokeHistory.record(&2, &1)
-        )
+      history = Enum.reduce(entries, KeystrokeHistory.new(), &KeystrokeHistory.record(&2, &1))
 
       state = %{state | keystroke_history: history}
       result = Help.execute(state, :describe_lossage)
 
       content = BufferServer.content(result.workspace.buffers.active)
-      assert content =~ "8 chars"
+      refute content =~ "chars"
+    end
+
+    test "4+ insert chars are collapsed into compact display" do
+      state = build_state()
+
+      entries =
+        Enum.map(?a..?h, fn cp ->
+          make_lossage_entry(
+            key: {cp, 0},
+            mode_before: :insert,
+            mode_after: :insert,
+            timestamp: 1_715_500_800_000 + cp
+          )
+        end)
+
+      history = Enum.reduce(entries, KeystrokeHistory.new(), &KeystrokeHistory.record(&2, &1))
+
+      state = %{state | keystroke_history: history}
+      result = Help.execute(state, :describe_lossage)
+
+      content = BufferServer.content(result.workspace.buffers.active)
+      assert content =~ "(8 chars)"
     end
   end
 end

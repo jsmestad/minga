@@ -789,18 +789,26 @@ defmodule MingaEditor.Commands.Help do
 
   @spec format_insert_char({non_neg_integer(), non_neg_integer()}) :: String.t()
   defp format_insert_char({cp, _mods}) when cp >= 32 and cp < 127, do: <<cp::utf8>>
-  defp format_insert_char({cp, _mods}) when cp >= 127, do: <<cp::utf8>>
+  defp format_insert_char({cp, _mods}) when cp > 127 and cp <= 0x10FFFF, do: <<cp::utf8>>
   defp format_insert_char(_key), do: "·"
 
-  @spec format_timestamp(integer()) :: String.t()
-  defp format_timestamp(ms) do
+  @spec format_timestamp(non_neg_integer()) :: String.t()
+  defp format_timestamp(ms) when is_integer(ms) and ms >= 0 do
     seconds = div(ms, 1000)
     millis = rem(ms, 1000)
-    {:ok, dt} = DateTime.from_unix(seconds)
-    pad2 = &String.pad_leading(Integer.to_string(&1), 2, "0")
-    pad3 = &String.pad_leading(Integer.to_string(&1), 3, "0")
-    "#{pad2.(dt.hour)}:#{pad2.(dt.minute)}:#{pad2.(dt.second)}.#{pad3.(millis)}"
+
+    case DateTime.from_unix(seconds) do
+      {:ok, dt} ->
+        pad2 = &String.pad_leading(Integer.to_string(&1), 2, "0")
+        pad3 = &String.pad_leading(Integer.to_string(&1), 3, "0")
+        "#{pad2.(dt.hour)}:#{pad2.(dt.minute)}:#{pad2.(dt.second)}.#{pad3.(millis)}"
+
+      {:error, _} ->
+        "??:??:??.???"
+    end
   end
+
+  defp format_timestamp(_ms), do: "??:??:??.???"
 
   # ── Special buffers ────────────────────────────────────────────────────────
 

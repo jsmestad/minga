@@ -3,9 +3,10 @@ defmodule MingaEditor.KeystrokeHistoryTest do
   use ExUnit.Case, async: true
 
   alias MingaEditor.KeystrokeHistory
+  alias MingaEditor.KeystrokeHistory.Entry
 
   defp make_entry(opts \\ []) do
-    %{
+    %Entry{
       key: Keyword.get(opts, :key, {?j, 0}),
       mode_before: Keyword.get(opts, :mode_before, :normal),
       mode_after: Keyword.get(opts, :mode_after, :normal),
@@ -17,7 +18,6 @@ defmodule MingaEditor.KeystrokeHistoryTest do
     test "creates empty history with default max size" do
       h = KeystrokeHistory.new()
       assert h.entries == []
-      assert h.count == 0
       assert h.max_size == 200
     end
   end
@@ -26,7 +26,7 @@ defmodule MingaEditor.KeystrokeHistoryTest do
     test "creates empty history with custom max size" do
       h = KeystrokeHistory.new(5)
       assert h.max_size == 5
-      assert h.count == 0
+      assert KeystrokeHistory.size(h) == 0
     end
   end
 
@@ -96,6 +96,19 @@ defmodule MingaEditor.KeystrokeHistoryTest do
         end)
 
       assert KeystrokeHistory.size(h) == 5
+    end
+
+    test "max_size of 1 keeps only the latest entry" do
+      h = KeystrokeHistory.new(1)
+
+      h =
+        h
+        |> KeystrokeHistory.record(make_entry(key: {?a, 0}))
+        |> KeystrokeHistory.record(make_entry(key: {?b, 0}))
+
+      assert KeystrokeHistory.size(h) == 1
+      [entry] = KeystrokeHistory.entries(h)
+      assert entry.key == {?b, 0}
     end
   end
 

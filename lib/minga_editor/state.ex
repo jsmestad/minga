@@ -115,7 +115,7 @@ defmodule MingaEditor.State do
             session: %SessionState{},
             buffer_add_context: :open,
             stashed_board_state: nil,
-            keystroke_history: %KeystrokeHistory{}
+            keystroke_history: KeystrokeHistory.new()
 
   @type backend :: :tui | :gui | :native_gui | :headless
 
