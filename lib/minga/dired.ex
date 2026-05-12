@@ -267,7 +267,7 @@ defmodule Minga.Dired do
 
   @spec strip_detail_prefix(String.t()) :: String.t()
   defp strip_detail_prefix(line) do
-    case Regex.run(~r/^[dl-][rwx-]{9}\s+\S+\s+\w+\s+\d+\s+\d+:\d+\s+(.+)$/, line) do
+    case Regex.run(~r/^[dl-][rwx-]{9}\s+\S+\s+\S+\s+\S+\s+\S+\s+(.+)$/, line) do
       [_, name] -> name
       _ -> line
     end

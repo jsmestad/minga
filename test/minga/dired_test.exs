@@ -226,6 +226,11 @@ defmodule Minga.DiredTest do
       line = "-rw-r--r--    1234 Mar 15 10:30 file.txt"
       assert Dired.parse_listing(line) == ["file.txt"]
     end
+
+    test "strips detail prefix with nil mtime placeholder" do
+      line = "-rw-r--r--       0 --- -- --:-- broken.txt"
+      assert Dired.parse_listing(line) == ["broken.txt"]
+    end
   end
 
   describe "diff_operations/3" do
