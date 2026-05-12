@@ -50,5 +50,11 @@ defmodule MingaEditor.Commands.NoBufferTest do
         assert Commands.execute(state, cmd) == state
       end
     end
+
+    test "search commands are no-ops", %{state: state} do
+      for cmd <- [:search_buffer, :search_and_replace] do
+        assert Commands.execute(state, cmd) == state
+      end
+    end
   end
 end
