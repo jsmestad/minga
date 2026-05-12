@@ -77,6 +77,9 @@ final class EditorNSView: MTKView {
     /// interception when NSWindow subclassing isn't available.
     private var agentKeyMonitor: Any?
 
+    /// Border overlay shown during file drag-and-drop hover.
+    private var dropHighlightLayer: CAShapeLayer?
+
     /// Status bar state from the BEAM. Used by the space leader key-chord
     /// logic to check whether insert mode is active (SPC is always literal
     /// in insert mode, never a leader key).
@@ -342,6 +345,8 @@ final class EditorNSView: MTKView {
         window.setFrameAutosaveName("MingaEditorWindow")
 
         installWindowObserversIfNeeded(for: window)
+
+        registerForDraggedTypes([.fileURL])
 
         updateTrackingArea()
         claimFirstResponder()
@@ -1288,5 +1293,63 @@ private func mapKeyCode(_ event: NSEvent) -> UInt32? {
     case 103: return 57374  // F11
     case 111: return 57375  // F12
     default:  return nil
+    }
+}
+
+// MARK: - Drag and drop
+
+extension EditorNSView {
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard sender.draggingPasteboard.canReadObject(
+            forClasses: [NSURL.self],
+            options: [.urlReadingFileURLsOnly: true]
+        ) else {
+            return []
+        }
+        showDropHighlight()
+        return .copy
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        hideDropHighlight()
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        hideDropHighlight()
+
+        guard let urls = sender.draggingPasteboard.readObjects(
+            forClasses: [NSURL.self],
+            options: [.urlReadingFileURLsOnly: true]
+        ) as? [URL], !urls.isEmpty else {
+            return false
+        }
+
+        for url in urls {
+            encoder.sendOpenFile(path: url.path)
+        }
+
+        claimFirstResponder()
+        return true
+    }
+
+    private func showDropHighlight() {
+        guard dropHighlightLayer == nil, let metalLayer = layer else { return }
+        let highlight = CAShapeLayer()
+        highlight.path = CGPath(
+            roundedRect: bounds.insetBy(dx: 2, dy: 2),
+            cornerWidth: 6,
+            cornerHeight: 6,
+            transform: nil
+        )
+        highlight.strokeColor = NSColor.controlAccentColor.cgColor
+        highlight.fillColor = NSColor.controlAccentColor.withAlphaComponent(0.08).cgColor
+        highlight.lineWidth = 3
+        metalLayer.addSublayer(highlight)
+        dropHighlightLayer = highlight
+    }
+
+    private func hideDropHighlight() {
+        dropHighlightLayer?.removeFromSuperlayer()
+        dropHighlightLayer = nil
     }
 }
