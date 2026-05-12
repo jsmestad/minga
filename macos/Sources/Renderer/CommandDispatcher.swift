@@ -34,6 +34,10 @@ final class CommandDispatcher {
     /// this to trigger a GPU frame.
     var onFrameReady: (() -> Void)?
 
+    /// Called after each `batch_end` command so recovery logic knows the
+    /// BEAM is still responding to input.
+    var onBatchEnd: (() -> Void)?
+
     /// Called when the window title should change.
     var onTitleChanged: ((String) -> Void)?
 
@@ -103,6 +107,7 @@ final class CommandDispatcher {
                 firstRender()
                 onFirstRender = nil
             }
+            onBatchEnd?()
             onFrameReady?()
 
         case .setTitle(let title):

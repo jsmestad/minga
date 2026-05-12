@@ -169,6 +169,12 @@ final class BEAMProcessManager {
         return urls
     }
 
+    /// Sends SIGUSR1 to the BEAM so the Watchdog restarts the editor core while preserving buffers.
+    func sendRecoveryRestartSignal() {
+        guard let proc = process, proc.isRunning else { return }
+        kill(proc.processIdentifier, SIGUSR1)
+    }
+
     /// Sends SIGTERM to the BEAM and waits briefly for clean shutdown.
     /// Used during Cmd+Q / applicationShouldTerminate.
     func shutdownGracefully(timeout: TimeInterval = 3.0) {

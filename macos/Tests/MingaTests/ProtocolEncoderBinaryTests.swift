@@ -13,6 +13,7 @@ private func captureFrame(_ action: (ProtocolEncoder) -> Void) -> Data {
     let pipe = Pipe()
     let encoder = ProtocolEncoder(output: pipe.fileHandleForWriting)
     action(encoder)
+    #expect(encoder.waitForPendingWritesForTesting())
     // Close write end so read doesn't block
     pipe.fileHandleForWriting.closeFile()
     let raw = pipe.fileHandleForReading.readDataToEndOfFile()
@@ -338,6 +339,7 @@ struct EncoderFrameHeaderTests {
         let pipe = Pipe()
         let encoder = ProtocolEncoder(output: pipe.fileHandleForWriting)
         encoder.sendResize(cols: 80, rows: 24)
+        #expect(encoder.waitForPendingWritesForTesting())
         pipe.fileHandleForWriting.closeFile()
         let raw = pipe.fileHandleForReading.readDataToEndOfFile()
 
