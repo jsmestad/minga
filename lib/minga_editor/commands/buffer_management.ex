@@ -37,6 +37,14 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   # ── Save / quit ───────────────────────────────────────────────────────────
 
+  def execute(%{workspace: %{dired: %{active?: true}}} = state, :save) do
+    MingaEditor.Commands.Dired.execute(state, :dired_apply_changes)
+  end
+
+  def execute(%{workspace: %{dired: %{active?: true}}} = state, :force_save) do
+    MingaEditor.Commands.Dired.execute(state, :dired_apply_changes)
+  end
+
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :save) do
     state = apply_pre_save_transforms(state, buf)
 
@@ -218,6 +226,14 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   def execute(state, {:execute_ex_command, {:save_quit_all, []}}) do
     state |> save_all_buffers() |> shutdown_editor()
+  end
+
+  def execute(state, {:execute_ex_command, {:dired, nil}}) do
+    MingaEditor.Commands.Dired.execute(state, :dired_open)
+  end
+
+  def execute(state, {:execute_ex_command, {:dired, path}}) when is_binary(path) do
+    MingaEditor.Commands.Dired.open_directory(state, path)
   end
 
   def execute(state, {:execute_ex_command, {:edit, file_path}}) do

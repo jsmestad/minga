@@ -441,4 +441,30 @@ defmodule Minga.Command.ParserTest do
       assert {:unknown, "normal"} = Parser.parse("normal    ")
     end
   end
+
+  describe "parse/1 — dired / oil commands" do
+    test ":dired parses to {:dired, nil}" do
+      assert {:dired, nil} = Parser.parse("dired")
+    end
+
+    test ":oil parses to {:dired, nil}" do
+      assert {:dired, nil} = Parser.parse("oil")
+    end
+
+    test ":dired with path" do
+      assert {:dired, "/tmp/foo"} = Parser.parse("dired /tmp/foo")
+    end
+
+    test ":oil with path" do
+      assert {:dired, "/tmp/foo"} = Parser.parse("oil /tmp/foo")
+    end
+
+    test ":dired with whitespace-only arg" do
+      assert {:dired, nil} = Parser.parse("dired   ")
+    end
+
+    test ":oil with whitespace-only arg" do
+      assert {:dired, nil} = Parser.parse("oil   ")
+    end
+  end
 end

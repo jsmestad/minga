@@ -1,0 +1,505 @@
+defmodule MingaEditor.Commands.Dired do
+  @moduledoc """
+  Commands for Oil.nvim-style directory buffers.
+
+  The directory listing is an editable buffer. Saving diffs current
+  content against the original listing and applies file operations
+  (renames, deletes, creates). Navigation keys open files or enter
+  directories.
+  """
+
+  @behaviour Minga.Command.Provider
+
+  alias Minga.Buffer
+  alias Minga.Command
+  alias Minga.Dired
+  alias MingaEditor.Commands
+  alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Dired, as: DiredState
+  alias MingaEditor.Workspace.State, as: WorkspaceState
+
+  @type state :: EditorState.t()
+
+  @impl Minga.Command.Provider
+  @spec __commands__() :: [Command.t()]
+  def __commands__ do
+    [
+      %Command{
+        name: :dired_open,
+        description: "Open directory (Dired)",
+        requires_buffer: false,
+        execute: fn state -> execute(state, :dired_open) end
+      },
+      %Command{
+        name: :dired_open_entry,
+        description: "Open file / enter directory",
+        requires_buffer: false,
+        execute: fn state -> execute(state, :dired_open_entry) end
+      },
+      %Command{
+        name: :dired_parent,
+        description: "Go to parent directory",
+        requires_buffer: false,
+        execute: fn state -> execute(state, :dired_parent) end
+      },
+      %Command{
+        name: :dired_close,
+        description: "Close directory buffer",
+        requires_buffer: false,
+        execute: fn state -> execute(state, :dired_close) end
+      },
+      %Command{
+        name: :dired_toggle_hidden,
+        description: "Toggle hidden files",
+        requires_buffer: false,
+        execute: fn state -> execute(state, :dired_toggle_hidden) end
+      },
+      %Command{
+        name: :dired_cycle_sort,
+        description: "Cycle sort order",
+        requires_buffer: false,
+        execute: fn state -> execute(state, :dired_cycle_sort) end
+      },
+      %Command{
+        name: :dired_toggle_details,
+        description: "Toggle detail columns",
+        requires_buffer: false,
+        execute: fn state -> execute(state, :dired_toggle_details) end
+      },
+      %Command{
+        name: :dired_open_external,
+        description: "Open with system application",
+        requires_buffer: false,
+        execute: fn state -> execute(state, :dired_open_external) end
+      },
+      %Command{
+        name: :dired_refresh,
+        description: "Refresh directory listing",
+        requires_buffer: false,
+        execute: fn state -> execute(state, :dired_refresh) end
+      },
+      %Command{
+        name: :dired_apply_changes,
+        description: "Apply directory changes",
+        requires_buffer: false,
+        execute: fn state -> execute(state, :dired_apply_changes) end
+      },
+      %Command{
+        name: :dired_confirm_apply,
+        description: "Confirm and apply changes",
+        requires_buffer: false,
+        execute: fn state -> execute(state, :dired_confirm_apply) end
+      },
+      %Command{
+        name: :dired_cancel_apply,
+        description: "Cancel pending changes",
+        requires_buffer: false,
+        execute: fn state -> execute(state, :dired_cancel_apply) end
+      }
+    ]
+  end
+
+  # ── Command dispatch ─────────────────────────────────────────────────────
+
+  @spec execute(state(), atom()) :: state()
+
+  def execute(state, :dired_open) do
+    dir = current_directory(state)
+    open_directory(state, dir)
+  end
+
+  def execute(state, :dired_open_entry) do
+    with %{dired: %{active?: true, dired: dired, buffer: buf}} <- state.workspace,
+         {cursor_line, _col} <- Buffer.cursor(buf),
+         %{} = entry <- Dired.entry_at_line(dired, cursor_line) do
+      if entry.dir? do
+        navigate_to_directory(state, entry.path)
+      else
+        open_file(state, entry.path)
+      end
+    else
+      _ -> EditorState.set_status(state, "No entry at cursor")
+    end
+  end
+
+  def execute(state, :dired_parent) do
+    case state.workspace.dired do
+      %{active?: true, dired: %Dired{directory: dir}} ->
+        parent = Dired.parent_directory(dir)
+
+        if parent != dir do
+          navigate_to_directory(state, parent)
+        else
+          state
+        end
+
+      _ ->
+        state
+    end
+  end
+
+  def execute(state, :dired_close) do
+    close_dired(state)
+  end
+
+  def execute(state, :dired_toggle_hidden) do
+    with_dired_update(state, fn dired ->
+      Dired.with_show_hidden(dired, !dired.show_hidden)
+    end)
+  end
+
+  def execute(state, :dired_cycle_sort) do
+    with_dired_update(state, fn dired ->
+      Dired.with_sort_by(dired, Dired.next_sort_key(dired.sort_by))
+    end)
+  end
+
+  def execute(state, :dired_toggle_details) do
+    with_dired_update(state, fn dired ->
+      Dired.with_show_details(dired, !dired.show_details)
+    end)
+  end
+
+  def execute(state, :dired_open_external) do
+    with %{dired: %{active?: true, dired: dired, buffer: buf}} <- state.workspace,
+         {cursor_line, _col} <- Buffer.cursor(buf),
+         %{} = entry <- Dired.entry_at_line(dired, cursor_line) do
+      spawn_external_open(entry.path)
+      EditorState.set_status(state, "Opened #{entry.name}")
+    else
+      _ -> EditorState.set_status(state, "No entry at cursor")
+    end
+  end
+
+  def execute(state, :dired_refresh) do
+    with_dired_update(state, fn dired ->
+      Dired.refresh(dired)
+    end)
+  end
+
+  def execute(state, :dired_apply_changes) do
+    case state.workspace.dired do
+      %{active?: true, dired: %Dired{directory: dir}, buffer: buf, original_entries: original} ->
+        ops = compute_pending_ops(buf, original, dir)
+        maybe_enter_confirmation(state, ops)
+
+      _ ->
+        state
+    end
+  end
+
+  def execute(state, :dired_confirm_apply) do
+    case state.workspace.dired do
+      %{active?: true, dired: %Dired{}, pending_ops: ops} when ops != [] ->
+        state = clear_confirming(state)
+        {successes, errors} = apply_operations(ops)
+        state = refresh_dired_buffer(state)
+        report_apply_result(state, successes, errors)
+
+      _ ->
+        state
+    end
+  end
+
+  def execute(state, :dired_cancel_apply) do
+    state = clear_confirming(state)
+    EditorState.set_status(state, "Cancelled")
+  end
+
+  # ── Opening ──────────────────────────────────────────────────────────────
+
+  @spec open_directory(state(), String.t()) :: state()
+  def open_directory(state, dir) do
+    with {:ok, dired} <- Dired.read_directory(dir),
+         {:ok, pid} <- start_dired_buffer(dired) do
+      dired_state = DiredState.activate(%DiredState{}, dired, pid)
+
+      state
+      |> Commands.add_buffer(pid)
+      |> EditorState.update_workspace(fn ws ->
+        ws
+        |> WorkspaceState.set_dired(dired_state)
+        |> WorkspaceState.set_keymap_scope(:dired)
+      end)
+      |> EditorState.set_status("Dired: #{dired.directory}")
+    else
+      {:error, reason} ->
+        EditorState.set_status(state, "Cannot open directory: #{inspect(reason)}")
+    end
+  end
+
+  @spec start_dired_buffer(Dired.t()) :: {:ok, pid()} | {:error, term()}
+  defp start_dired_buffer(%Dired{} = dired) do
+    listing = Dired.format_listing(dired)
+
+    DynamicSupervisor.start_child(
+      Minga.Buffer.Supervisor,
+      {Minga.Buffer,
+       content: listing,
+       buffer_type: :nofile,
+       buffer_name: "*Dired: #{dired.directory}*",
+       read_only: false,
+       unlisted: true,
+       filetype: :dired}
+    )
+  end
+
+  # ── Navigation ───────────────────────────────────────────────────────────
+
+  @spec navigate_to_directory(state(), String.t()) :: state()
+  defp navigate_to_directory(state, dir) do
+    case state.workspace.dired do
+      %{active?: true, dired: old_dired, buffer: buf} ->
+        case Dired.read_directory(dir,
+               show_hidden: old_dired.show_hidden,
+               sort_by: old_dired.sort_by,
+               show_details: old_dired.show_details
+             ) do
+          {:ok, new_dired} ->
+            listing = Dired.format_listing(new_dired)
+            Buffer.replace_content_force(buf, listing)
+            Buffer.move_to(buf, {0, 0})
+            dired_state = DiredState.update_dired(state.workspace.dired, new_dired)
+
+            state
+            |> EditorState.update_workspace(&WorkspaceState.set_dired(&1, dired_state))
+            |> EditorState.set_status("Dired: #{new_dired.directory}")
+
+          {:error, reason} ->
+            EditorState.set_status(state, "Cannot open directory: #{inspect(reason)}")
+        end
+
+      _ ->
+        state
+    end
+  end
+
+  @spec open_file(state(), String.t()) :: state()
+  defp open_file(state, file_path) do
+    state = close_dired(state)
+
+    case Commands.start_buffer(file_path) do
+      {:ok, pid} -> Commands.add_buffer(state, pid)
+      {:error, _} -> EditorState.set_status(state, "Cannot open: #{file_path}")
+    end
+  end
+
+  # ── Close ────────────────────────────────────────────────────────────────
+
+  @spec close_dired(state()) :: state()
+  defp close_dired(state) do
+    case state.workspace.dired do
+      %{active?: true, buffer: buf} when is_pid(buf) ->
+        state =
+          EditorState.update_workspace(state, fn ws ->
+            ws
+            |> WorkspaceState.set_dired(DiredState.deactivate(ws.dired))
+            |> WorkspaceState.set_keymap_scope(:editor)
+          end)
+
+        Commands.execute(state, :kill_buffer)
+
+      _ ->
+        EditorState.update_workspace(state, &WorkspaceState.set_keymap_scope(&1, :editor))
+    end
+  end
+
+  # ── Update helpers ───────────────────────────────────────────────────────
+
+  @spec with_dired_update(state(), (Dired.t() -> {:ok, Dired.t()} | {:error, term()})) :: state()
+  defp with_dired_update(state, update_fn) do
+    case state.workspace.dired do
+      %{active?: true, dired: %Dired{} = dired, buffer: buf} ->
+        case update_fn.(dired) do
+          {:ok, new_dired} ->
+            listing = Dired.format_listing(new_dired)
+            Buffer.replace_content_force(buf, listing)
+            Buffer.move_to(buf, {0, 0})
+            dired_state = DiredState.update_dired(state.workspace.dired, new_dired)
+
+            state
+            |> EditorState.update_workspace(&WorkspaceState.set_dired(&1, dired_state))
+            |> EditorState.set_status(status_for_dired(new_dired))
+
+          {:error, reason} ->
+            EditorState.set_status(state, "Dired error: #{inspect(reason)}")
+        end
+
+      _ ->
+        state
+    end
+  end
+
+  @spec refresh_dired_buffer(state()) :: state()
+  defp refresh_dired_buffer(state) do
+    with_dired_update(state, fn dired -> Dired.refresh(dired) end)
+  end
+
+  @spec clear_confirming(state()) :: state()
+  defp clear_confirming(state) do
+    new_dired = DiredState.exit_confirmation(state.workspace.dired)
+    EditorState.update_workspace(state, &WorkspaceState.set_dired(&1, new_dired))
+  end
+
+  @spec compute_pending_ops(pid(), [Dired.entry()], String.t()) :: [Dired.operation()]
+  defp compute_pending_ops(buf, original_entries, directory) do
+    content = Buffer.content(buf)
+    current_names = Dired.parse_listing(content)
+    Dired.diff_operations(original_entries, current_names, directory)
+  end
+
+  @spec maybe_enter_confirmation(state(), [Dired.operation()]) :: state()
+  defp maybe_enter_confirmation(state, []),
+    do: EditorState.set_status(state, "No changes to apply")
+
+  defp maybe_enter_confirmation(state, ops) do
+    summary = format_operations_summary(ops)
+
+    state
+    |> EditorState.update_workspace(fn ws ->
+      WorkspaceState.set_dired(ws, DiredState.enter_confirmation(ws.dired, ops))
+    end)
+    |> EditorState.set_status("#{summary} — apply? (y/n)")
+  end
+
+  @spec spawn_external_open(String.t()) :: {:ok, pid()}
+  defp spawn_external_open(path) do
+    open_cmd = if :os.type() == {:unix, :darwin}, do: "open", else: "xdg-open"
+
+    Task.start(fn ->
+      {output, code} = System.cmd(open_cmd, [path], stderr_to_stdout: true)
+
+      if code != 0 do
+        Minga.Log.warning(:editor, "#{open_cmd} exited #{code}: #{String.trim(output)}")
+      end
+    end)
+  end
+
+  @spec report_apply_result(state(), non_neg_integer(), [{Dired.operation(), term()}]) :: state()
+  defp report_apply_result(state, successes, []) do
+    EditorState.set_status(state, "Applied #{successes} operation(s)")
+  end
+
+  defp report_apply_result(state, successes, errors) do
+    error_details = Enum.map_join(errors, "; ", &format_error/1)
+    Minga.Log.error(:editor, "Dired errors: #{error_details}")
+
+    {first_op, first_reason} = hd(errors)
+    hint = "#{format_op_name(first_op)}: #{inspect(first_reason)}"
+    EditorState.set_status(state, "Applied #{successes}, #{length(errors)} error(s) — #{hint}")
+  end
+
+  @spec format_error({Dired.operation(), term()}) :: String.t()
+  defp format_error({{:rename, old, new}, reason}),
+    do: "rename #{Path.basename(old)} -> #{Path.basename(new)}: #{inspect(reason)}"
+
+  defp format_error({{:delete, path}, reason}),
+    do: "delete #{Path.basename(path)}: #{inspect(reason)}"
+
+  defp format_error({{:create, path}, reason}),
+    do: "create #{Path.basename(path)}: #{inspect(reason)}"
+
+  defp format_error({{:mkdir, path}, reason}),
+    do: "mkdir #{Path.basename(path)}: #{inspect(reason)}"
+
+  @spec format_op_name(Dired.operation()) :: String.t()
+  defp format_op_name({:rename, old, _new}), do: "rename #{Path.basename(old)}"
+  defp format_op_name({:delete, path}), do: "delete #{Path.basename(path)}"
+  defp format_op_name({:create, path}), do: "create #{Path.basename(path)}"
+  defp format_op_name({:mkdir, path}), do: "mkdir #{Path.basename(path)}"
+
+  # ── File operations ──────────────────────────────────────────────────────
+
+  @spec apply_operations([Dired.operation()]) ::
+          {non_neg_integer(), [{Dired.operation(), term()}]}
+  defp apply_operations(ops) do
+    Enum.reduce(ops, {0, []}, fn op, {ok_count, errors} ->
+      case apply_single_operation(op) do
+        :ok -> {ok_count + 1, errors}
+        {:error, reason} -> {ok_count, [{op, reason} | errors]}
+      end
+    end)
+  end
+
+  @spec apply_single_operation(Dired.operation()) :: :ok | {:error, term()}
+  defp apply_single_operation({:rename, old_path, new_path}) do
+    parent = Path.dirname(new_path)
+
+    case ensure_directory(parent) do
+      :ok -> File.rename(old_path, new_path)
+      error -> error
+    end
+  end
+
+  defp apply_single_operation({:delete, path}) do
+    case File.rm_rf(path) do
+      {:ok, _} -> :ok
+      {:error, reason, _} -> {:error, reason}
+    end
+  end
+
+  defp apply_single_operation({:create, path}) do
+    parent = Path.dirname(path)
+
+    case ensure_directory(parent) do
+      :ok -> File.touch(path)
+      error -> error
+    end
+  end
+
+  defp apply_single_operation({:mkdir, path}) do
+    File.mkdir_p(path)
+  end
+
+  @spec ensure_directory(String.t()) :: :ok | {:error, term()}
+  defp ensure_directory(path) do
+    if File.dir?(path), do: :ok, else: File.mkdir_p(path)
+  end
+
+  # ── Status helpers ───────────────────────────────────────────────────────
+
+  @spec current_directory(state()) :: String.t()
+  defp current_directory(state) do
+    buf = state.workspace.buffers.active
+
+    if buf do
+      case Buffer.file_path(buf) do
+        path when is_binary(path) -> Path.dirname(path)
+        _ -> File.cwd!()
+      end
+    else
+      File.cwd!()
+    end
+  end
+
+  @spec status_for_dired(Dired.t()) :: String.t()
+  defp status_for_dired(%Dired{directory: dir, sort_by: sort, show_hidden: hidden}) do
+    sort_label = "sort:#{sort}"
+    hidden_label = if hidden, do: "hidden:on", else: "hidden:off"
+    "Dired: #{dir} [#{sort_label} #{hidden_label}]"
+  end
+
+  @spec format_operations_summary([Dired.operation()]) :: String.t()
+  defp format_operations_summary(ops) do
+    counts =
+      Enum.frequencies_by(ops, fn
+        {:rename, _, _} -> :rename
+        {:delete, _} -> :delete
+        {:create, _} -> :create
+        {:mkdir, _} -> :mkdir
+      end)
+
+    parts =
+      Enum.flat_map(
+        [{:rename, "rename"}, {:delete, "delete"}, {:create, "create"}, {:mkdir, "mkdir"}],
+        fn {key, label} ->
+          case Map.get(counts, key) do
+            nil -> []
+            n -> ["#{n} #{label}"]
+          end
+        end
+      )
+
+    Enum.join(parts, ", ")
+  end
+end

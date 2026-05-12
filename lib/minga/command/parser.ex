@@ -112,6 +112,7 @@ defmodule Minga.Command.Parser do
           | {:global, String.t(), String.t()}
           | {:normal, range(), String.t()}
           | {:rename, String.t()}
+          | {:dired, String.t() | nil}
           | {:unknown, String.t()}
 
   @typedoc "Flags for :%s substitution."
@@ -379,6 +380,19 @@ defmodule Minga.Command.Parser do
 
   defp do_parse("%s" <> rest), do: parse_substitute(rest)
   defp do_parse("s" <> rest), do: parse_substitute(rest)
+
+  defp do_parse("dired"), do: {:dired, nil}
+  defp do_parse("oil"), do: {:dired, nil}
+
+  defp do_parse("dired " <> rest) do
+    path = String.trim(rest)
+    if path == "", do: {:dired, nil}, else: {:dired, path}
+  end
+
+  defp do_parse("oil " <> rest) do
+    path = String.trim(rest)
+    if path == "", do: {:dired, nil}, else: {:dired, path}
+  end
 
   defp do_parse("e " <> rest) do
     filename = String.trim(rest)
