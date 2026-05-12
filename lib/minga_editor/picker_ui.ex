@@ -459,8 +459,8 @@ defmodule MingaEditor.PickerUI do
     # Clamp so items + separator + prompt never exceed viewport height.
     max_items_for_viewport = max(viewport.rows - 3, 1)
     visible = Enum.take(visible, max_items_for_viewport)
-    selected_offset = min(selected_offset, max(length(visible) - 1, 0))
     item_count = length(visible)
+    selected_offset = if item_count > 0, do: min(selected_offset, item_count - 1), else: 0
 
     # Layout: items grow upward from row N-2, prompt on row N-1
     prompt_row = viewport.rows - 1
