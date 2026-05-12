@@ -258,4 +258,34 @@ defmodule MingaEditor.Input.RouterTest do
       assert line == 1
     end
   end
+
+  describe "keystroke recording" do
+    alias MingaEditor.KeystrokeHistory
+
+    test "dispatch records a keystroke in the history" do
+      state = base_state()
+      assert KeystrokeHistory.size(state.keystroke_history) == 0
+
+      state = Router.dispatch(state, ?j, 0)
+
+      assert KeystrokeHistory.size(state.keystroke_history) == 1
+      [entry] = KeystrokeHistory.entries(state.keystroke_history)
+      assert entry.key == {?j, 0}
+      assert entry.mode_before == :normal
+    end
+
+    test "multiple dispatches accumulate entries" do
+      state = base_state()
+
+      state =
+        state
+        |> Router.dispatch(?j, 0)
+        |> Router.dispatch(?k, 0)
+        |> Router.dispatch(?l, 0)
+
+      assert KeystrokeHistory.size(state.keystroke_history) == 3
+      keys = Enum.map(KeystrokeHistory.entries(state.keystroke_history), & &1.key)
+      assert keys == [{?j, 0}, {?k, 0}, {?l, 0}]
+    end
+  end
 end

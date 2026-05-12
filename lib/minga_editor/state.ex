@@ -33,6 +33,7 @@ defmodule MingaEditor.State do
   alias Minga.Buffer
 
   alias MingaEditor.BottomPanel
+  alias MingaEditor.KeystrokeHistory
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.LSP, as: LSPState
@@ -113,7 +114,8 @@ defmodule MingaEditor.State do
             caches: MingaEditor.Renderer.Caches.new(),
             session: %SessionState{},
             buffer_add_context: :open,
-            stashed_board_state: nil
+            stashed_board_state: nil,
+            keystroke_history: KeystrokeHistory.new()
 
   @type backend :: :tui | :gui | :native_gui | :headless
 
@@ -149,7 +151,8 @@ defmodule MingaEditor.State do
           caches: MingaEditor.Renderer.Caches.t(),
           buffer_add_context: MingaEditor.Shell.buffer_add_context(),
           session: SessionState.t(),
-          stashed_board_state: MingaEditor.Shell.Board.State.t() | nil
+          stashed_board_state: MingaEditor.Shell.Board.State.t() | nil,
+          keystroke_history: KeystrokeHistory.t()
         }
 
   @spec set_renderer(t(), pid() | nil) :: t()

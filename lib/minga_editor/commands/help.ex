@@ -15,6 +15,7 @@ defmodule MingaEditor.Commands.Help do
   alias Minga.Keymap.Bindings
   alias Minga.Keymap.Defaults
   alias MingaEditor.Commands
+  alias MingaEditor.KeystrokeHistory
   alias MingaEditor.PickerUI
   alias MingaEditor.State, as: EditorState
   alias Minga.Mode
@@ -49,6 +50,12 @@ defmodule MingaEditor.Commands.Help do
         description: "Describe option",
         requires_buffer: false,
         execute: fn state -> execute(state, :describe_option) end
+      },
+      %Command{
+        name: :describe_lossage,
+        description: "Show keystroke history",
+        requires_buffer: false,
+        execute: fn state -> execute(state, :describe_lossage) end
       }
     ]
   end
@@ -82,6 +89,10 @@ defmodule MingaEditor.Commands.Help do
 
   def execute(state, :describe_option) do
     PickerUI.open(state, MingaEditor.UI.Picker.OptionSource)
+  end
+
+  def execute(state, :describe_lossage) do
+    show_in_buffer(state, "*Keystrokes*", lossage_content(state))
   end
 
   def execute(state, {:describe_option_named, name}) when is_binary(name) do
@@ -639,6 +650,183 @@ defmodule MingaEditor.Commands.Help do
   defp format_type(:float_or_nil), do: "positive number or nil"
   defp format_type(:any), do: "any"
   defp format_type({:enum, values}), do: "one of: #{Enum.map_join(values, ", ", &inspect/1)}"
+
+  # ── Lossage formatting ─────────────────────────────────────────────────────
+
+  @spec lossage_content(state()) :: String.t()
+  defp lossage_content(state) do
+    entries = KeystrokeHistory.entries(state.keystroke_history)
+
+    case entries do
+      [] ->
+        "# Keystroke History\n\nNo keystrokes recorded yet.\n"
+
+      _ ->
+        groups = group_keystrokes(entries)
+        lines = format_keystroke_groups(groups)
+
+        [
+          "# Keystroke History (last #{length(entries)} keys)",
+          "",
+          String.pad_trailing("Time", 13) <>
+            String.pad_trailing("Mode", 18) <>
+            String.pad_trailing("Keys", 20) <>
+            "Info",
+          String.duplicate("─", 70)
+          | lines
+        ]
+        |> Enum.join("\n")
+        |> ensure_trailing_newline()
+    end
+  end
+
+  @typep keystroke_group :: %{
+           entries: [KeystrokeHistory.entry()],
+           kind: :operator_sequence | :insert_run | :single
+         }
+
+  @spec group_keystrokes([KeystrokeHistory.entry()]) :: [keystroke_group()]
+  defp group_keystrokes(entries) do
+    entries
+    |> Enum.chunk_while(
+      nil,
+      &keystroke_chunk_fun/2,
+      &keystroke_chunk_after/1
+    )
+  end
+
+  @spec keystroke_chunk_fun(KeystrokeHistory.entry(), nil | keystroke_group()) ::
+          {:cont, keystroke_group()} | {:cont, keystroke_group(), keystroke_group()}
+  defp keystroke_chunk_fun(entry, nil) do
+    {:cont, start_group(entry)}
+  end
+
+  defp keystroke_chunk_fun(entry, %{kind: :insert_run} = group) do
+    if entry.mode_before == :insert and entry.mode_after == :insert do
+      {:cont, %{group | entries: group.entries ++ [entry]}}
+    else
+      {:cont, group, start_group(entry)}
+    end
+  end
+
+  defp keystroke_chunk_fun(entry, %{kind: :operator_sequence} = group) do
+    if entry.mode_before == :operator_pending do
+      {:cont, %{group | entries: group.entries ++ [entry]}}
+    else
+      {:cont, group, start_group(entry)}
+    end
+  end
+
+  defp keystroke_chunk_fun(entry, %{kind: :single} = group) do
+    if entry.mode_before == :operator_pending do
+      prev = %{group | kind: :operator_sequence}
+      {:cont, %{prev | entries: prev.entries ++ [entry]}}
+    else
+      {:cont, group, start_group(entry)}
+    end
+  end
+
+  @spec keystroke_chunk_after(nil | keystroke_group()) ::
+          {:cont, keystroke_group(), nil} | {:cont, nil}
+  defp keystroke_chunk_after(nil), do: {:cont, nil}
+  defp keystroke_chunk_after(group), do: {:cont, group, nil}
+
+  @spec start_group(KeystrokeHistory.entry()) :: keystroke_group()
+  defp start_group(entry) do
+    kind =
+      if entry.mode_before == :insert and entry.mode_after == :insert,
+        do: :insert_run,
+        else: :single
+
+    %{entries: [entry], kind: kind}
+  end
+
+  @spec format_keystroke_groups([keystroke_group()]) :: [String.t()]
+  defp format_keystroke_groups(groups) do
+    groups
+    |> Enum.reduce({[], nil}, fn group, {lines, prev_mode} ->
+      first_entry = hd(group.entries)
+      mode = first_entry.mode_before
+
+      mode_annotation =
+        if prev_mode != nil and prev_mode != mode do
+          ["", "  ── mode: #{mode} ──", ""]
+        else
+          []
+        end
+
+      last_entry = List.last(group.entries)
+      next_mode = last_entry.mode_after
+      group_lines = format_group(group)
+
+      {lines ++ mode_annotation ++ group_lines, next_mode}
+    end)
+    |> elem(0)
+  end
+
+  @spec format_group(keystroke_group()) :: [String.t()]
+  defp format_group(%{kind: :insert_run, entries: entries}) when length(entries) > 3 do
+    first = hd(entries)
+    count = length(entries)
+    keys = Enum.map_join(entries, "", fn e -> format_insert_char(e.key) end)
+    display = if String.length(keys) > 18, do: String.slice(keys, 0, 15) <> "...", else: keys
+
+    [
+      String.pad_trailing(format_timestamp(first.timestamp), 13) <>
+        String.pad_trailing("insert", 18) <>
+        String.pad_trailing(inspect(display), 20) <>
+        "(#{count} chars)"
+    ]
+  end
+
+  defp format_group(%{kind: :operator_sequence, entries: entries}) do
+    first = hd(entries)
+    keys = Enum.map_join(entries, " ", fn e -> Bindings.format_key(e.key) end)
+    last = List.last(entries)
+    mode_note = if first.mode_before != last.mode_after, do: "→ #{last.mode_after}", else: ""
+
+    [
+      String.pad_trailing(format_timestamp(first.timestamp), 13) <>
+        String.pad_trailing(to_string(first.mode_before), 18) <>
+        String.pad_trailing(keys, 20) <>
+        mode_note
+    ]
+  end
+
+  defp format_group(%{entries: entries}) do
+    Enum.map(entries, fn entry ->
+      key_str = Bindings.format_key(entry.key)
+      mode_note = if entry.mode_before != entry.mode_after, do: "→ #{entry.mode_after}", else: ""
+
+      String.pad_trailing(format_timestamp(entry.timestamp), 13) <>
+        String.pad_trailing(to_string(entry.mode_before), 18) <>
+        String.pad_trailing(key_str, 20) <>
+        mode_note
+    end)
+  end
+
+  @spec format_insert_char({non_neg_integer(), non_neg_integer()}) :: String.t()
+  defp format_insert_char({cp, _mods}) when cp >= 32 and cp < 127, do: <<cp::utf8>>
+  defp format_insert_char({cp, _mods}) when cp > 127 and cp <= 0x10FFFF, do: <<cp::utf8>>
+  defp format_insert_char(_key), do: "·"
+
+  @spec format_timestamp(non_neg_integer()) :: String.t()
+  defp format_timestamp(ms) when is_integer(ms) and ms >= 0 do
+    seconds = div(ms, 1000)
+    millis = rem(ms, 1000)
+
+    case DateTime.from_unix(seconds) do
+      {:ok, dt} ->
+        pad2 = &String.pad_leading(Integer.to_string(&1), 2, "0")
+        pad3 = &String.pad_leading(Integer.to_string(&1), 3, "0")
+        "#{pad2.(dt.hour)}:#{pad2.(dt.minute)}:#{pad2.(dt.second)}.#{pad3.(millis)}"
+
+      {:error, _} ->
+        "??:??:??.???"
+    end
+  end
+
+  defp format_timestamp(_ms), do: "??:??:??.???"
 
   # ── Special buffers ────────────────────────────────────────────────────────
 

@@ -382,4 +382,167 @@ defmodule MingaEditor.Commands.HelpTest do
       assert BufferServer.read_only?(result.workspace.buffers.help)
     end
   end
+
+  describe "describe_lossage" do
+    alias MingaEditor.KeystrokeHistory
+    alias MingaEditor.KeystrokeHistory.Entry
+
+    defp make_lossage_entry(opts) do
+      %Entry{
+        key: Keyword.get(opts, :key, {?j, 0}),
+        mode_before: Keyword.get(opts, :mode_before, :normal),
+        mode_after: Keyword.get(opts, :mode_after, :normal),
+        timestamp: Keyword.get(opts, :timestamp, 1_715_500_800_000)
+      }
+    end
+
+    test "creates *Keystrokes* buffer with empty history message" do
+      state = build_state()
+      result = Help.execute(state, :describe_lossage)
+
+      buf = result.workspace.buffers.active
+      assert Process.alive?(buf)
+      assert BufferServer.buffer_name(buf) == "*Keystrokes*"
+
+      content = BufferServer.content(buf)
+      assert content =~ "Keystroke History"
+      assert content =~ "No keystrokes recorded yet."
+    end
+
+    test "*Keystrokes* buffer is read-only" do
+      state = build_state()
+      result = Help.execute(state, :describe_lossage)
+
+      buf = result.workspace.buffers.active
+      assert BufferServer.read_only?(buf)
+    end
+
+    test "shows formatted keystrokes when history has entries" do
+      state = build_state()
+
+      history =
+        KeystrokeHistory.new()
+        |> KeystrokeHistory.record(make_lossage_entry(key: {?j, 0}, timestamp: 1_715_500_800_000))
+        |> KeystrokeHistory.record(make_lossage_entry(key: {?k, 0}, timestamp: 1_715_500_801_000))
+
+      state = %{state | keystroke_history: history}
+      result = Help.execute(state, :describe_lossage)
+
+      content = BufferServer.content(result.workspace.buffers.active)
+      assert content =~ "Keystroke History (last 2 keys)"
+      assert content =~ "j"
+      assert content =~ "k"
+    end
+
+    test "annotates mode transitions between groups" do
+      state = build_state()
+
+      history =
+        KeystrokeHistory.new()
+        |> KeystrokeHistory.record(make_lossage_entry(key: {?j, 0}, timestamp: 1_715_500_800_000))
+        |> KeystrokeHistory.record(
+          make_lossage_entry(
+            key: {?h, 0},
+            mode_before: :insert,
+            mode_after: :insert,
+            timestamp: 1_715_500_802_000
+          )
+        )
+
+      state = %{state | keystroke_history: history}
+      result = Help.execute(state, :describe_lossage)
+
+      content = BufferServer.content(result.workspace.buffers.active)
+      assert content =~ "── mode: insert ──"
+    end
+
+    test "shows mode change arrow on single entry" do
+      state = build_state()
+
+      history =
+        KeystrokeHistory.new()
+        |> KeystrokeHistory.record(
+          make_lossage_entry(key: {?i, 0}, mode_before: :normal, mode_after: :insert)
+        )
+
+      state = %{state | keystroke_history: history}
+      result = Help.execute(state, :describe_lossage)
+
+      content = BufferServer.content(result.workspace.buffers.active)
+      assert content =~ "→ insert"
+    end
+
+    test "groups operator-pending sequences" do
+      state = build_state()
+
+      history =
+        KeystrokeHistory.new()
+        |> KeystrokeHistory.record(
+          make_lossage_entry(
+            key: {?d, 0},
+            mode_before: :normal,
+            mode_after: :operator_pending,
+            timestamp: 1_715_500_800_000
+          )
+        )
+        |> KeystrokeHistory.record(
+          make_lossage_entry(
+            key: {?w, 0},
+            mode_before: :operator_pending,
+            mode_after: :normal,
+            timestamp: 1_715_500_800_100
+          )
+        )
+
+      state = %{state | keystroke_history: history}
+      result = Help.execute(state, :describe_lossage)
+
+      content = BufferServer.content(result.workspace.buffers.active)
+      assert content =~ "d w"
+    end
+
+    test "3 insert chars are shown individually, not collapsed" do
+      state = build_state()
+
+      entries =
+        Enum.map(?a..?c, fn cp ->
+          make_lossage_entry(
+            key: {cp, 0},
+            mode_before: :insert,
+            mode_after: :insert,
+            timestamp: 1_715_500_800_000 + cp
+          )
+        end)
+
+      history = Enum.reduce(entries, KeystrokeHistory.new(), &KeystrokeHistory.record(&2, &1))
+
+      state = %{state | keystroke_history: history}
+      result = Help.execute(state, :describe_lossage)
+
+      content = BufferServer.content(result.workspace.buffers.active)
+      refute content =~ "chars"
+    end
+
+    test "4+ insert chars are collapsed into compact display" do
+      state = build_state()
+
+      entries =
+        Enum.map(?a..?h, fn cp ->
+          make_lossage_entry(
+            key: {cp, 0},
+            mode_before: :insert,
+            mode_after: :insert,
+            timestamp: 1_715_500_800_000 + cp
+          )
+        end)
+
+      history = Enum.reduce(entries, KeystrokeHistory.new(), &KeystrokeHistory.record(&2, &1))
+
+      state = %{state | keystroke_history: history}
+      result = Help.execute(state, :describe_lossage)
+
+      content = BufferServer.content(result.workspace.buffers.active)
+      assert content =~ "(8 chars)"
+    end
+  end
 end

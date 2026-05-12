@@ -19,6 +19,7 @@ defmodule MingaEditor.Input.Router do
   alias MingaEditor
   alias MingaEditor.FocusTree
   alias MingaEditor.FocusTree.Node, as: FocusNode
+  alias MingaEditor.KeystrokeHistory
   alias MingaEditor.LspActions
   alias MingaEditor.State, as: EditorState
 
@@ -108,6 +109,7 @@ defmodule MingaEditor.Input.Router do
     state = EditorState.clear_status(state)
 
     state = dispatch_split(state, codepoint, modifiers)
+    state = record_keystroke(state, codepoint, modifiers, old_mode)
 
     post_key_housekeeping(
       state,
@@ -420,6 +422,19 @@ defmodule MingaEditor.Input.Router do
         {:passthrough, new_state} -> {:cont, {:passthrough, new_state}}
       end
     end)
+  end
+
+  @spec record_keystroke(EditorState.t(), non_neg_integer(), non_neg_integer(), atom()) ::
+          EditorState.t()
+  defp record_keystroke(state, codepoint, modifiers, mode_before) do
+    entry = %KeystrokeHistory.Entry{
+      key: {codepoint, modifiers},
+      mode_before: mode_before,
+      mode_after: Editing.mode(state),
+      timestamp: :os.system_time(:millisecond)
+    }
+
+    %{state | keystroke_history: KeystrokeHistory.record(state.keystroke_history, entry)}
   end
 
   @spec buffer_version(EditorState.t()) :: non_neg_integer()
