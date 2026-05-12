@@ -548,7 +548,7 @@ defmodule MingaEditor.Input.GitStatus do
 
   @spec open_commit_buffer(EditorState.t(), String.t(), boolean()) :: EditorState.t()
   defp open_commit_buffer(state, git_root, amend) do
-    initial_content = commit_buffer_content(git_root, amend)
+    {initial_content, warning} = commit_buffer_content(git_root, amend)
 
     case Buffer.start_link(
            content: initial_content,
@@ -568,20 +568,21 @@ defmodule MingaEditor.Input.GitStatus do
             &WorkspaceState.set_keymap_scope(&1, :git_commit)
           )
 
-        EditorState.transition_mode(state, :insert)
+        state = EditorState.transition_mode(state, :insert)
+        if warning, do: EditorState.set_status(state, warning), else: state
 
       {:error, reason} ->
         EditorState.set_status(state, "Failed to open commit buffer: #{inspect(reason)}")
     end
   end
 
-  @spec commit_buffer_content(String.t(), boolean()) :: String.t()
+  @spec commit_buffer_content(String.t(), boolean()) :: {String.t(), String.t() | nil}
   defp commit_buffer_content(git_root, true) do
     case Git.log(git_root, count: 1) do
-      {:ok, [%{message: msg} | _]} -> msg
-      _ -> ""
+      {:ok, [%{message: msg} | _]} -> {msg, nil}
+      _ -> {"", "Could not load previous commit message for amend"}
     end
   end
 
-  defp commit_buffer_content(_git_root, false), do: ""
+  defp commit_buffer_content(_git_root, false), do: {"", nil}
 end

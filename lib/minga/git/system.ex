@@ -229,11 +229,21 @@ defmodule Minga.Git.System do
            cd: git_root,
            stderr_to_stdout: true
          ) do
-      {output, 0} -> {:ok, parse_porcelain_blame_file(output)}
-      _ -> :error
+      {output, 0} ->
+        {:ok, parse_porcelain_blame_file(output)}
+
+      {output, code} ->
+        Minga.Log.warning(
+          :git,
+          "git blame failed (exit #{code}): #{String.slice(output, 0, 200)}"
+        )
+
+        :error
     end
   rescue
-    _ -> :error
+    e ->
+      Minga.Log.warning(:git, "git blame error: #{Exception.message(e)}")
+      :error
   end
 
   @impl true

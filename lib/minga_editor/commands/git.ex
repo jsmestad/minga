@@ -182,22 +182,19 @@ defmodule MingaEditor.Commands.Git do
         EditorState.set_status(state, "No commit in progress")
 
       %{git_root: git_root, amend: amend, buffer_pid: buf_pid} ->
-        {content, _cursor} = Buffer.content_and_cursor(buf_pid)
-        message = strip_commit_comments(content)
+        content =
+          try do
+            {text, _cursor} = Buffer.content_and_cursor(buf_pid)
+            text
+          catch
+            :exit, _ -> nil
+          end
 
-        if String.trim(message) == "" do
+        if is_nil(content) do
           state = close_commit_buffer(state, buf_pid)
-          EditorState.set_status(state, "Aborting commit due to empty message")
+          EditorState.set_status(state, "Commit buffer lost")
         else
-          result =
-            if amend do
-              Git.commit_amend(git_root, message)
-            else
-              Git.commit(git_root, message)
-            end
-
-          state = close_commit_buffer(state, buf_pid)
-          handle_commit_result(state, result, git_root, amend)
+          execute_commit(state, content, git_root, amend, buf_pid)
         end
     end
   end
@@ -214,6 +211,26 @@ defmodule MingaEditor.Commands.Git do
   end
 
   # ── Private ────────────────────────────────────────────────────────────────
+
+  @spec execute_commit(state(), String.t(), String.t(), boolean(), pid()) :: state()
+  defp execute_commit(state, content, git_root, amend, buf_pid) do
+    message = strip_commit_comments(content)
+
+    if String.trim(message) == "" do
+      state = close_commit_buffer(state, buf_pid)
+      EditorState.set_status(state, "Aborting commit due to empty message")
+    else
+      result =
+        if amend do
+          Git.commit_amend(git_root, message)
+        else
+          Git.commit(git_root, message)
+        end
+
+      state = close_commit_buffer(state, buf_pid)
+      handle_commit_result(state, result, git_root, amend)
+    end
+  end
 
   # Mutual exclusivity: close file tree when opening git status.
   @spec close_file_tree_if_open(state()) :: state()
@@ -482,35 +499,14 @@ defmodule MingaEditor.Commands.Git do
     state =
       EditorState.update_workspace(state, &WorkspaceState.set_keymap_scope(&1, restore_scope))
 
-    # Remove the commit buffer from the buffer list
-    buffers = state.workspace.buffers
-    buf_list = buffers.list
-    idx = Enum.find_index(buf_list, &(&1 == buf_pid))
-
-    # Stop the buffer process
     try do
       GenServer.stop(buf_pid, :normal)
     catch
       :exit, _ -> :ok
     end
 
-    case idx do
-      nil ->
-        state
-
-      i ->
-        new_list = List.delete_at(buf_list, i)
-        new_idx = min(max(i - 1, 0), max(length(new_list) - 1, 0))
-        new_active = Enum.at(new_list, new_idx)
-
-        put_in(state.workspace.buffers, %{
-          buffers
-          | list: new_list,
-            active_index: new_idx,
-            active: new_active
-        })
-        |> EditorState.sync_active_window_buffer()
-    end
+    {state, _effects} = EditorState.close_buffer_pure(state, buf_pid)
+    state
   end
 
   @spec handle_commit_result(

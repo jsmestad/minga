@@ -235,6 +235,7 @@ defmodule Minga.Git.Buffer do
          hunks: hunks,
          signs: signs,
          branch: branch,
+         blame_enabled: false,
          blame_cache: nil
      }}
   end
