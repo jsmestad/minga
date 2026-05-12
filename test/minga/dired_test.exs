@@ -206,8 +206,8 @@ defmodule Minga.DiredTest do
       assert Dired.parse_listing(text) == ["alpha.ex", "beta.txt"]
     end
 
-    test "strips directory indicator" do
-      assert Dired.parse_listing("lib/\ntest/\n") == ["lib", "test"]
+    test "preserves directory indicator for mkdir detection" do
+      assert Dired.parse_listing("lib/\ntest/\n") == ["lib/", "test/"]
     end
 
     test "strips executable indicator" do
@@ -342,16 +342,16 @@ defmodule Minga.DiredTest do
   end
 
   describe "round-trip: format then parse" do
-    test "parse_listing recovers original names from format_listing", %{tmp_dir: dir} do
+    test "parse_listing recovers names from format_listing (dirs keep /)", %{tmp_dir: dir} do
       File.write!(Path.join(dir, "hello.ex"), "")
       File.mkdir_p!(Path.join(dir, "subdir"))
 
       assert {:ok, dired} = Dired.read_directory(dir)
       listing = Dired.format_listing(dired)
       parsed = Dired.parse_listing(listing)
-      original_names = Enum.map(dired.entries, & &1.name)
 
-      assert parsed == original_names
+      expected = Enum.map(dired.entries, fn e -> if e.dir?, do: e.name <> "/", else: e.name end)
+      assert parsed == expected
     end
 
     test "round-trips with detail columns", %{tmp_dir: dir} do
@@ -361,9 +361,9 @@ defmodule Minga.DiredTest do
       assert {:ok, dired} = Dired.read_directory(dir, show_details: true)
       listing = Dired.format_listing(dired)
       parsed = Dired.parse_listing(listing)
-      original_names = Enum.map(dired.entries, & &1.name)
 
-      assert parsed == original_names
+      expected = Enum.map(dired.entries, fn e -> if e.dir?, do: e.name <> "/", else: e.name end)
+      assert parsed == expected
     end
   end
 end

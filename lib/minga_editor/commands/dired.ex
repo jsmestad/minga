@@ -118,7 +118,7 @@ defmodule MingaEditor.Commands.Dired do
         open_file(state, entry.path)
       end
     else
-      _ -> state
+      _ -> EditorState.set_status(state, "No entry at cursor")
     end
   end
 
@@ -172,7 +172,7 @@ defmodule MingaEditor.Commands.Dired do
 
       EditorState.set_status(state, "Opened #{entry.name}")
     else
-      _ -> state
+      _ -> EditorState.set_status(state, "No entry at cursor")
     end
   end
 

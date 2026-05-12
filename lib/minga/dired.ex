@@ -290,8 +290,10 @@ defmodule Minga.Dired do
 
   @spec strip_trailing_indicator(String.t()) :: String.t()
   defp strip_trailing_indicator(name) do
-    String.trim_trailing(name, "/")
-    |> String.trim_trailing("*")
+    case String.last(name) do
+      "*" -> String.slice(name, 0..-2//1)
+      _ -> name
+    end
   end
 
   # ── Diffing ──────────────────────────────────────────────────────────────
@@ -299,13 +301,15 @@ defmodule Minga.Dired do
   @spec diff_operations([entry()], [String.t()], String.t()) :: [operation()]
   def diff_operations(original_entries, current_names, directory) do
     original_names = Enum.map(original_entries, & &1.name)
-    original_set = MapSet.new(original_names)
-    current_set = MapSet.new(current_names)
+    normalized_current = Enum.map(current_names, &strip_dir_suffix/1)
 
-    max_len = max(length(original_names), length(current_names))
+    original_set = MapSet.new(original_names)
+    current_set = MapSet.new(normalized_current)
+
+    max_len = max(length(original_names), length(normalized_current))
 
     original_padded = original_names ++ List.duplicate(nil, max_len - length(original_names))
-    current_padded = current_names ++ List.duplicate(nil, max_len - length(current_names))
+    current_padded = normalized_current ++ List.duplicate(nil, max_len - length(normalized_current))
 
     {renames, remaining_deletes, remaining_creates} =
       original_padded
@@ -337,7 +341,10 @@ defmodule Minga.Dired do
       |> Enum.reject(&MapSet.member?(renamed_new, Path.join(directory, &1)))
       |> Enum.uniq()
       |> Enum.map(fn name ->
-        if String.ends_with?(name, "/") do
+        raw = Enum.find(current_names, fn raw -> strip_dir_suffix(raw) == name end)
+        is_dir = raw != nil and String.ends_with?(raw, "/")
+
+        if is_dir do
           {:mkdir, Path.join(directory, name)}
         else
           {:create, Path.join(directory, name)}
@@ -345,6 +352,11 @@ defmodule Minga.Dired do
       end)
 
     rename_ops ++ delete_ops ++ create_ops
+  end
+
+  @spec strip_dir_suffix(String.t()) :: String.t()
+  defp strip_dir_suffix(name) do
+    if String.ends_with?(name, "/"), do: String.slice(name, 0..-2//1), else: name
   end
 
   @spec handle_diff_pair(

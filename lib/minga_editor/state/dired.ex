@@ -43,16 +43,6 @@ defmodule MingaEditor.State.Dired do
     %{state | dired: dired, original_entries: dired.entries}
   end
 
-  @spec set_confirming(t(), boolean()) :: t()
-  def set_confirming(%__MODULE__{} = state, confirming?) do
-    %{state | confirming?: confirming?}
-  end
-
-  @spec set_pending_ops(t(), [Dired.operation()]) :: t()
-  def set_pending_ops(%__MODULE__{} = state, ops) do
-    %{state | pending_ops: ops}
-  end
-
   @spec enter_confirmation(t(), [Dired.operation()]) :: t()
   def enter_confirmation(%__MODULE__{} = state, ops) do
     %{state | confirming?: true, pending_ops: ops}
