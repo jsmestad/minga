@@ -88,6 +88,7 @@ defmodule MingaEditor do
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Buffers
+  alias MingaEditor.State.Tab.Context, as: TabContext
 
   alias MingaEditor.MinibufferData
   alias MingaEditor.MouseHoverTooltip
@@ -1677,10 +1678,7 @@ defmodule MingaEditor do
 
   @spec buffer_tracked_in_tabs?(state(), pid()) :: boolean()
   defp buffer_tracked_in_tabs?(%{shell_state: %{tab_bar: %{tabs: tabs}}}, pid) do
-    Enum.any?(tabs, fn
-      %{context: %{buffers: %{list: buffers}}} -> pid in buffers
-      _ -> false
-    end)
+    Enum.any?(tabs, fn tab -> pid in tab_buffer_list(tab) end)
   end
 
   defp buffer_tracked_in_tabs?(_state, _pid), do: false
@@ -2211,8 +2209,11 @@ defmodule MingaEditor do
   end
 
   @spec tab_buffer_list(MingaEditor.State.Tab.t() | term()) :: [pid()]
-  defp tab_buffer_list(%MingaEditor.State.Tab{context: %{buffers: %Buffers{list: buffers}}}) do
-    Enum.filter(buffers, &is_pid/1)
+  defp tab_buffer_list(%MingaEditor.State.Tab{context: context}) when is_map(context) do
+    case TabContext.to_workspace_map(context) do
+      %{buffers: %Buffers{list: buffers}} -> Enum.filter(buffers, &is_pid/1)
+      _ -> []
+    end
   end
 
   defp tab_buffer_list(_tab), do: []

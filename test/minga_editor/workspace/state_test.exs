@@ -10,6 +10,7 @@ defmodule MingaEditor.Workspace.StateTest do
 
   alias Minga.Mode
   alias MingaEditor.VimState
+  alias MingaEditor.State.Tab.Context
   alias MingaEditor.Window.Content
   alias MingaEditor.Workspace.State, as: WorkspaceState
 
@@ -88,15 +89,15 @@ defmodule MingaEditor.Workspace.StateTest do
   end
 
   describe "to_tab_context/1" do
-    test "returns a flat map of workspace fields" do
+    test "returns a typed context of workspace fields" do
       ws = base_state().workspace
       ctx = WorkspaceState.to_tab_context(ws)
 
-      assert is_map(ctx)
-      refute Map.has_key?(ctx, :__struct__)
+      assert %Context{} = ctx
       assert ctx.buffers == ws.buffers
       assert ctx.windows == ws.windows
       assert ctx.viewport == ws.viewport
+      assert Enum.sort(WorkspaceState.field_names()) == Enum.sort(ctx.present_fields)
     end
 
     test "normalises an in-flight CommandState back to %Mode.State{} when mode is :normal" do

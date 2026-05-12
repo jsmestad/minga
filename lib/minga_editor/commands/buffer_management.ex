@@ -21,7 +21,9 @@ defmodule MingaEditor.Commands.BufferManagement do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
+  alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
+  alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.TabBar
   alias MingaEditor.Window
   alias Minga.Mode
@@ -698,9 +700,11 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   @spec file_tab_buffers(TabBar.t()) :: [pid()]
   defp file_tab_buffers(%TabBar{tabs: tabs}) do
-    Enum.flat_map(tabs, fn
-      %{kind: :file, context: %{buffers: %{active: pid}}} when is_pid(pid) -> [pid]
-      _ -> []
+    Enum.flat_map(tabs, fn tab ->
+      case tab_context_active_buffer(tab) do
+        pid when is_pid(pid) -> [pid]
+        _ -> []
+      end
     end)
   end
 
@@ -733,10 +737,26 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   defp find_tab_for_buffer(%TabBar{tabs: tabs}, target_buf) do
     Enum.find_value(tabs, fn
-      %{kind: :file, id: id, context: %{buffers: %{active: ^target_buf}}} -> id
-      _ -> nil
+      %{kind: :file, id: id} = tab ->
+        case tab_context_active_buffer(tab) do
+          ^target_buf -> id
+          _ -> nil
+        end
+
+      _ ->
+        nil
     end)
   end
+
+  @spec tab_context_active_buffer(Tab.t() | term()) :: pid() | nil
+  defp tab_context_active_buffer(%{context: context}) when is_map(context) do
+    case TabContext.to_workspace_map(context) do
+      %{buffers: %Buffers{active: pid}} when is_pid(pid) -> pid
+      _ -> nil
+    end
+  end
+
+  defp tab_context_active_buffer(_tab), do: nil
 
   @spec next_tab(state()) :: state()
   defp next_tab(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state) do
@@ -1192,8 +1212,12 @@ defmodule MingaEditor.Commands.BufferManagement do
   @spec restore_active_tab_context(state()) :: state()
   defp restore_active_tab_context(state) do
     case EditorState.active_tab(state) do
-      %Tab{context: context} when is_map(context) and map_size(context) > 0 ->
-        EditorState.restore_tab_context(state, context)
+      %Tab{context: context} when is_map(context) ->
+        if TabContext.empty?(context) do
+          state
+        else
+          EditorState.restore_tab_context(state, context)
+        end
 
       _ ->
         state

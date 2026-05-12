@@ -22,7 +22,9 @@ defmodule MingaEditor.Shell.Traditional.TabBarRenderer do
   alias Minga.Core.Face
   alias Minga.Core.Unicode
   alias MingaEditor.DisplayList
+  alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
+  alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.TabBar
   alias Minga.Language
   alias MingaEditor.UI.Devicon
@@ -442,8 +444,12 @@ defmodule MingaEditor.Shell.Traditional.TabBarRenderer do
   defp agent_status_indicator(_), do: ""
 
   @spec tab_active_buffer(Tab.t()) :: pid() | nil
-  defp tab_active_buffer(%Tab{context: %{buffers: %{active: buf}}}), do: buf
-  defp tab_active_buffer(_), do: nil
+  defp tab_active_buffer(%Tab{context: context}) do
+    case TabContext.to_workspace_map(context) do
+      %{buffers: %Buffers{active: buf}} -> buf
+      _ -> nil
+    end
+  end
 
   @spec tab_bar_colors(Theme.t()) :: map()
   defp tab_bar_colors(%Theme{tab_bar: %Theme.TabBar{} = tb}), do: Map.from_struct(tb)

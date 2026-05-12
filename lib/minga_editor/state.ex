@@ -43,6 +43,7 @@ defmodule MingaEditor.State do
   alias MingaEditor.State.Mouse
   alias MingaEditor.State.Search
   alias MingaEditor.State.Tab
+  alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.WhichKey
   alias MingaEditor.State.Windows
@@ -1001,9 +1002,9 @@ defmodule MingaEditor.State do
   # ── Tab bar helpers ───────────────────────────────────────────────────────
 
   @doc """
-  Captures the current per-tab fields into a context map.
+  Captures the current per-tab fields into a context struct.
 
-  The returned map is stored in the outgoing tab so it can be restored
+  The returned struct is stored in the outgoing tab so it can be restored
   when the user switches back.
   """
   @spec snapshot_tab_context(t()) :: Tab.context()
@@ -1025,14 +1026,12 @@ defmodule MingaEditor.State do
   @doc """
   Writes a tab context back into the live editor state.
 
-  The context carries workspace fields as a flat map. Empty context means a
-  brand-new tab; we build defaults with the current active buffer and
-  viewport dimensions.
+  The context carries workspace fields as an explicit struct. Empty context means a brand-new tab; we build defaults with the current active buffer and viewport dimensions.
   """
-  @spec restore_tab_context(t(), Tab.context()) :: t()
+  @spec restore_tab_context(t(), Tab.context() | Tab.legacy_context()) :: t()
   def restore_tab_context(%__MODULE__{} = state, context) when is_map(context) do
     {context, state} =
-      if map_size(context) == 0 do
+      if TabContext.empty?(context) do
         synthesized = build_file_tab_defaults(state)
 
         state =
@@ -1046,14 +1045,13 @@ defmodule MingaEditor.State do
 
         {synthesized, state}
       else
-        {context, state}
+        {TabContext.from_map(context), state}
       end
 
     %{state | workspace: WorkspaceState.restore_tab_context(state.workspace, context)}
   end
 
-  # Builds a file-tab context for a brand-new tab. Returns the flat format
-  # with per-tab fields directly.
+  # Builds a typed file-tab context for a brand-new tab.
   @spec build_file_tab_defaults(t()) :: Tab.context()
   defp build_file_tab_defaults(state) do
     win_id = state.workspace.windows.next_id
@@ -1079,7 +1077,7 @@ defmodule MingaEditor.State do
         %Windows{}
       end
 
-    %{
+    TabContext.from_workspace_map(%{
       keymap_scope: :editor,
       buffers: %Buffers{
         active: buf,
@@ -1097,7 +1095,7 @@ defmodule MingaEditor.State do
       editing: VimState.new(),
       document_highlights: nil,
       agent_ui: UIState.new()
-    }
+    })
   end
 
   @doc """
@@ -1109,7 +1107,7 @@ defmodule MingaEditor.State do
   """
   @spec build_agent_tab_defaults(t(), Windows.t(), pid() | nil) :: Tab.context()
   def build_agent_tab_defaults(state, windows, agent_buf) do
-    %{
+    TabContext.from_workspace_map(%{
       keymap_scope: :agent,
       buffers: %Buffers{
         active: agent_buf,
@@ -1127,7 +1125,7 @@ defmodule MingaEditor.State do
       editing: VimState.new(),
       document_highlights: nil,
       agent_ui: UIState.new()
-    }
+    })
   end
 
   @doc """

@@ -186,7 +186,7 @@ defmodule MingaEditor.State.TabBar do
   end
 
   @doc "Updates the context of the tab with the given id."
-  @spec update_context(t(), Tab.id(), Tab.context()) :: t()
+  @spec update_context(t(), Tab.id(), Tab.context() | Tab.legacy_context()) :: t()
   def update_context(%__MODULE__{tabs: tabs} = tb, id, context) do
     new_tabs =
       Enum.map(tabs, fn

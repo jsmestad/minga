@@ -3,19 +3,16 @@ defmodule MingaEditor.State.Tab do
   A single tab in the tab bar.
 
   Each tab has a unique id, a kind (`:file` or `:agent`), a display label,
-  and a context map that stores snapshotted per-tab state when the tab is
+  and a typed context that stores snapshotted per-tab state when the tab is
   inactive. The active tab's context is "live" on EditorState; inactive
   tabs carry a frozen snapshot that gets restored when you switch to them.
 
   ## Context format
 
-  The canonical context is a flat map with workspace fields (buffers, windows,
-  editing state, viewport, etc.) stored directly. Restore reads only fields that exist on `MingaEditor.Workspace.State`; unknown legacy fields are ignored.
+  The canonical context is `MingaEditor.State.Tab.Context`, a struct with explicit workspace fields. Restore still accepts legacy maps for migration, including empty maps for brand-new tabs.
   """
 
-  alias MingaEditor.State.Buffers
-
-  # Tab contexts store per-tab fields directly as flat maps.
+  alias MingaEditor.State.Tab.Context
 
   @typedoc "Unique tab identifier."
   @type id :: pos_integer()
@@ -26,24 +23,12 @@ defmodule MingaEditor.State.Tab do
   @typedoc """
   Snapshotted per-tab state.
 
-  Stores per-tab fields directly as a flat map (buffers, windows, editing,
-  etc.). Empty context means a brand-new tab.
+  Stores per-tab workspace fields in an explicit struct. Empty context means a brand-new tab.
   """
-  @type context :: %{
-          optional(:keymap_scope) => atom(),
-          optional(:buffers) => term(),
-          optional(:windows) => term(),
-          optional(:file_tree) => term(),
-          optional(:viewport) => term(),
-          optional(:mouse) => term(),
-          optional(:highlight) => term(),
-          optional(:lsp_pending) => term(),
-          optional(:injection_ranges) => term(),
-          optional(:search) => term(),
-          optional(:editing) => MingaEditor.VimState.t(),
-          optional(:document_highlights) => term(),
-          optional(:agent_ui) => term()
-        }
+  @type context :: Context.t()
+
+  @typedoc "Legacy context map accepted at migration boundaries."
+  @type legacy_context :: Context.legacy()
 
   @typedoc "Agent tab status (nil for file tabs)."
   @type agent_status :: :idle | :plan | :thinking | :tool_executing | :error | nil
@@ -68,7 +53,7 @@ defmodule MingaEditor.State.Tab do
   defstruct id: nil,
             kind: nil,
             label: "",
-            context: %{},
+            context: Context.empty(),
             session: nil,
             agent_status: nil,
             attention: false,
@@ -94,9 +79,13 @@ defmodule MingaEditor.State.Tab do
   end
 
   @doc "Stores a context snapshot into the tab."
-  @spec set_context(t(), context()) :: t()
-  def set_context(%__MODULE__{} = tab, context) when is_map(context) do
+  @spec set_context(t(), context() | legacy_context()) :: t()
+  def set_context(%__MODULE__{} = tab, %Context{} = context) do
     %{tab | context: context}
+  end
+
+  def set_context(%__MODULE__{} = tab, context) when is_map(context) do
+    %{tab | context: Context.from_map(context)}
   end
 
   @doc "Returns true if this is a file tab."
@@ -148,9 +137,7 @@ defmodule MingaEditor.State.Tab do
 
   @doc "Removes a dead buffer pid from this tab's context snapshot."
   @spec scrub_buffer(t(), pid()) :: t()
-  def scrub_buffer(%__MODULE__{context: %{buffers: %Buffers{} = bs} = context} = tab, pid) do
-    %{tab | context: %{context | buffers: Buffers.remove(bs, pid)}}
+  def scrub_buffer(%__MODULE__{context: context} = tab, pid) do
+    %{tab | context: Context.scrub_buffer(context, pid)}
   end
-
-  def scrub_buffer(%__MODULE__{} = tab, _pid), do: tab
 end

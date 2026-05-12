@@ -3,6 +3,8 @@ defmodule MingaEditor.State.TabTest do
 
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
+  alias MingaEditor.State.Tab.Context
+  alias MingaEditor.VimState
 
   describe "new_file/2" do
     test "creates a file tab with default label" do
@@ -10,7 +12,7 @@ defmodule MingaEditor.State.TabTest do
       assert tab.id == 1
       assert tab.kind == :file
       assert tab.label == ""
-      assert tab.context == %{}
+      assert Context.empty?(tab.context)
     end
 
     test "creates a file tab with a label" do
@@ -41,10 +43,45 @@ defmodule MingaEditor.State.TabTest do
   end
 
   describe "set_context/2" do
-    test "stores a context snapshot" do
-      ctx = %{mode: :insert, keymap_scope: :editor}
+    test "stores a context snapshot as a typed struct" do
+      editing = VimState.new()
+      ctx = %{editing: editing, keymap_scope: :editor}
       tab = Tab.new_file(1) |> Tab.set_context(ctx)
-      assert tab.context == ctx
+      assert %Context{} = tab.context
+      assert tab.context.editing == editing
+      assert tab.context.keymap_scope == :editor
+    end
+
+    test "migrates legacy vim field into editing" do
+      legacy_vim = VimState.new()
+      tab = Tab.new_file(1) |> Tab.set_context(%{vim: legacy_vim})
+      assert tab.context.editing == legacy_vim
+    end
+
+    test "honors encoded present fields during migration" do
+      tab = Tab.new_file(1) |> Tab.set_context(%{"present_fields" => [], "editing" => nil})
+      assert Context.empty?(tab.context)
+    end
+
+    test "drops malformed legacy fields instead of marking them present" do
+      tab = Tab.new_file(1) |> Tab.set_context(%{editing: :insert})
+      assert Context.empty?(tab.context)
+    end
+
+    test "drops invalid keymap scopes" do
+      tab = Tab.new_file(1) |> Tab.set_context(%{keymap_scope: :unknown_scope})
+      assert Context.empty?(tab.context)
+    end
+
+    test "ignores malformed present_fields on externally built structs" do
+      context = %Context{present_fields: [:missing_field, "keymap_scope"], keymap_scope: :editor}
+      assert Context.to_workspace_map(context) == %{keymap_scope: :editor}
+    end
+
+    test "drops malformed values from externally built structs" do
+      context = %Context{present_fields: [:keymap_scope], keymap_scope: :unknown_scope}
+      assert Context.empty?(context)
+      assert Context.to_workspace_map(context) == %{}
     end
   end
 
@@ -97,7 +134,7 @@ defmodule MingaEditor.State.TabTest do
     end
 
     test "no-op when context has no buffers key" do
-      tab = Tab.new_file(1) |> Tab.set_context(%{editing: :normal})
+      tab = Tab.new_file(1) |> Tab.set_context(%{editing: VimState.new()})
       result = Tab.scrub_buffer(tab, :some_pid)
 
       assert result == tab

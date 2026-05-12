@@ -39,6 +39,7 @@ defmodule MingaEditor.Shell.Traditional do
   alias MingaEditor.State.AgentGroup
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
+  alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Windows
   alias MingaEditor.Window
@@ -414,13 +415,14 @@ defmodule MingaEditor.Shell.Traditional do
     rows = max(workspace.viewport.rows, 1)
     cols = max(workspace.viewport.cols, 1)
 
-    context = WorkspaceState.to_tab_context(workspace)
-
-    context
-    |> Map.put(:keymap_scope, :agent)
-    |> Map.put(:agent_ui, UIState.new())
-    |> Map.put(:buffers, background_agent_buffers(agent_buf))
-    |> Map.put(:windows, background_agent_windows(agent_buf, rows, cols))
+    workspace
+    |> WorkspaceState.to_tab_context()
+    |> TabContext.put_fields(%{
+      keymap_scope: :agent,
+      agent_ui: UIState.new(),
+      buffers: background_agent_buffers(agent_buf),
+      windows: background_agent_windows(agent_buf, rows, cols)
+    })
   end
 
   @spec background_agent_buffers(pid() | nil) :: Buffers.t()
@@ -597,9 +599,9 @@ defmodule MingaEditor.Shell.Traditional do
   defp buffer_label(_), do: "[unknown]"
 
   @spec tab_has_active_buffer?(Tab.t(), pid()) :: boolean()
-  defp tab_has_active_buffer?(tab, pid) do
-    case tab.context do
-      %{buffers: %{active: ^pid}} -> true
+  defp tab_has_active_buffer?(%Tab{context: context}, pid) do
+    case TabContext.to_workspace_map(context) do
+      %{buffers: %Buffers{active: ^pid}} -> true
       _ -> false
     end
   end

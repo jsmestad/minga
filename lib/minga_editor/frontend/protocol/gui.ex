@@ -87,7 +87,9 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   alias Minga.Buffer
   alias MingaEditor.MinibufferData
+  alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
+  alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.TabBar
   alias Minga.Language
   alias MingaEditor.UI.Devicon
@@ -644,12 +646,18 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   end
 
   @spec resolve_tab_buffer(Tab.t(), 0 | 1, pid() | nil) :: pid() | nil
-  defp resolve_tab_buffer(%{context: %{buffers: %{active: pid}}}, _is_active, _buf)
-       when is_pid(pid),
-       do: pid
+  defp resolve_tab_buffer(%{context: context}, is_active, buf) when is_map(context) do
+    case TabContext.to_workspace_map(context) do
+      %{buffers: %Buffers{active: pid}} when is_pid(pid) -> pid
+      _ -> active_tab_buffer(is_active, buf)
+    end
+  end
 
-  defp resolve_tab_buffer(_tab, 1, buf) when is_pid(buf), do: buf
-  defp resolve_tab_buffer(_tab, _is_active, _buf), do: nil
+  defp resolve_tab_buffer(_tab, is_active, buf), do: active_tab_buffer(is_active, buf)
+
+  @spec active_tab_buffer(0 | 1, pid() | nil) :: pid() | nil
+  defp active_tab_buffer(1, buf) when is_pid(buf), do: buf
+  defp active_tab_buffer(_is_active, _buf), do: nil
 
   @spec encode_agent_status(atom() | nil) :: non_neg_integer()
   defp encode_agent_status(:idle), do: 0
