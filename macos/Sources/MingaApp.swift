@@ -18,8 +18,8 @@ private let defaultFontName = "Menlo"
 private let defaultFontSize: CGFloat = 13.0
 
 /// Default window dimensions in pixels.
-private let defaultWindowWidth: CGFloat = 800
-private let defaultWindowHeight: CGFloat = 600
+private let defaultWindowWidth: CGFloat = 1200
+private let defaultWindowHeight: CGFloat = 800
 
 @main
 struct MingaApp: App {

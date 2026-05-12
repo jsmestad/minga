@@ -14,7 +14,6 @@ struct PickerOverlay: View {
 
     private let panelWidth: CGFloat = 600
     private let itemHeight: CGFloat = 24
-    private let maxListHeight: CGFloat = 440
 
     /// Transition animation duration. Respects reduced motion.
     private var animDuration: Double {
@@ -23,46 +22,48 @@ struct PickerOverlay: View {
 
     var body: some View {
         if state.visible {
-            ZStack {
-                // Dimmed background: click to dismiss (like Spotlight, Alfred, Xcode Open Quickly)
-                Color.black.opacity(0.3)
-                    .ignoresSafeArea()
-                    .accessibilityHidden(true)
-                    .onTapGesture {
-                        // Send Escape to the BEAM to dismiss the picker via the normal mode transition
-                        encoder?.sendKeyPress(codepoint: 27, modifiers: 0)
-                    }
+            GeometryReader { geo in
+                ZStack {
+                    // Dimmed background: click to dismiss (like Spotlight, Alfred, Xcode Open Quickly)
+                    Color.black.opacity(0.3)
+                        .ignoresSafeArea()
+                        .accessibilityHidden(true)
+                        .onTapGesture {
+                            // Send Escape to the BEAM to dismiss the picker via the normal mode transition
+                            encoder?.sendKeyPress(codepoint: 27, modifiers: 0)
+                        }
 
-                VStack(spacing: 0) {
-                    searchField
+                    VStack(spacing: 0) {
+                        searchField
 
-                    Divider()
-                        .overlay(theme.popupBorder.opacity(0.3))
-
-                    resultsList
-
-                    if !state.items.isEmpty {
                         Divider()
                             .overlay(theme.popupBorder.opacity(0.3))
-                        bottomBar
+
+                        resultsList(maxListHeight: max(geo.size.height * 0.5, 200))
+
+                        if !state.items.isEmpty {
+                            Divider()
+                                .overlay(theme.popupBorder.opacity(0.3))
+                            bottomBar
+                        }
                     }
-                }
-                .frame(width: panelWidth)
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(theme.popupBg)
-                        .shadow(color: .black.opacity(0.5), radius: 20, y: 8)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .strokeBorder(theme.popupBorder.opacity(0.4), lineWidth: 1)
-                )
-                .overlay(alignment: .center) {
-                    if let menu = state.actionMenu {
-                        actionMenuOverlay(menu)
+                    .frame(width: panelWidth)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(theme.popupBg)
+                            .shadow(color: .black.opacity(0.5), radius: 20, y: 8)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .strokeBorder(theme.popupBorder.opacity(0.4), lineWidth: 1)
+                    )
+                    .overlay(alignment: .center) {
+                        if let menu = state.actionMenu {
+                            actionMenuOverlay(menu)
+                        }
                     }
+                    .offset(y: -60)
                 }
-                .offset(y: -60)
             }
             .transition(.opacity.animation(.easeInOut(duration: animDuration)))
         }
@@ -102,7 +103,7 @@ struct PickerOverlay: View {
     // MARK: - Results list
 
     @ViewBuilder
-    private var resultsList: some View {
+    private func resultsList(maxListHeight: CGFloat) -> some View {
         ScrollViewReader { proxy in
             ScrollView(.vertical, showsIndicators: true) {
                 LazyVStack(spacing: 0) {
