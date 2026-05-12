@@ -1508,15 +1508,20 @@ defmodule MingaEditor.Frontend.Emit.GUI do
         :exit, _ -> []
       end
 
-    guides = Minga.Core.IndentGuide.compute(lines, tab_width, cursor_col)
-    encode_guides(guides, win_id, tab_width)
+    {guides, indent_levels} = Minga.Core.IndentGuide.compute_with_levels(lines, tab_width, cursor_col)
+    encode_guides(guides, win_id, tab_width, indent_levels)
   end
 
-  @spec encode_guides([Minga.Core.IndentGuide.guide()], pos_integer(), pos_integer()) ::
+  @spec encode_guides(
+          [Minga.Core.IndentGuide.guide()],
+          pos_integer(),
+          pos_integer(),
+          [non_neg_integer()]
+        ) ::
           [binary()]
-  defp encode_guides([], win_id, _tab_width), do: return_empty_guides(win_id)
+  defp encode_guides([], win_id, _tab_width, _indent_levels), do: return_empty_guides(win_id)
 
-  defp encode_guides(guides, win_id, tab_width) do
+  defp encode_guides(guides, win_id, tab_width, indent_levels) do
     active_guide = Enum.find(guides, fn g -> g.active end)
     active_col = if active_guide, do: active_guide.col, else: 0xFFFF
 
@@ -1524,7 +1529,8 @@ defmodule MingaEditor.Frontend.Emit.GUI do
       window_id: win_id,
       tab_width: tab_width,
       active_guide_col: active_col,
-      guide_cols: Enum.map(guides, & &1.col)
+      guide_cols: Enum.map(guides, & &1.col),
+      line_indent_levels: indent_levels
     }
 
     [ProtocolGUI.encode_gui_indent_guides(guide_data)]

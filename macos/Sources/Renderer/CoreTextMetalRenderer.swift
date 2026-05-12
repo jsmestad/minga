@@ -564,39 +564,70 @@ final class CoreTextMetalRenderer {
 
         // Pass 1.25: Indent guides (vertical lines at indentation levels).
         // Drawn after bg fills but before text, cursor, and selection overlays.
+        // When per-line indent levels are available, draw segments only in
+        // leading whitespace so guides don't bleed through text content.
         for (_, guideData) in frameState.windowIndentGuides {
             guard !guideData.guideCols.isEmpty else { continue }
 
-            // Find the window gutter to get the content offset for this window.
             guard let gutter = frameState.windowGutters[guideData.windowId] else { continue }
             let gutterWidth = Float(gutter.lineNumberWidth) + Float(gutter.signColWidth)
             let windowContentColOffset = (Float(gutter.contentCol) + gutterWidth) * cellW * scale + gutterLeftMarginPx + gutterPaddingPx
             let contentTopY = Float(gutter.contentRow) * cellH * scale
-            let contentHeightPx = Float(gutter.contentHeight) * cellH * scale
+            let lineCellH = cellH * scale
+
+            let inactiveFg = colorFromU24(frameState.gutterColors.fg, default: SIMD3<Float>(0.33, 0.33, 0.33))
+            let tabW = max(UInt16(guideData.tabWidth), 1)
 
             var guideQuads: [QuadGPU] = []
-            guideQuads.reserveCapacity(guideData.guideCols.count)
 
-            // Default foreground color from theme, at low alpha.
-            let inactiveFg = colorFromU24(frameState.gutterColors.fg, default: SIMD3<Float>(0.33, 0.33, 0.33))
-
-            for col in guideData.guideCols {
-                let guideX = windowContentColOffset + Float(col) * cellW * scale
-                let isActive = col == guideData.activeGuideCol
-
-                var quad = QuadGPU()
-                quad.position = SIMD2<Float>(guideX, contentTopY)
-                quad.size = SIMD2<Float>(1.0 * scale, contentHeightPx)
-                quad.color = inactiveFg
-                quad.alpha = isActive ? 0.4 : 0.15
-                guideQuads.append(quad)
+            if guideData.lineIndentLevels.isEmpty {
+                let contentHeightPx = Float(gutter.contentHeight) * cellH * scale
+                guideQuads.reserveCapacity(guideData.guideCols.count)
+                for col in guideData.guideCols {
+                    let guideX = windowContentColOffset + Float(col) * cellW * scale
+                    let isActive = col == guideData.activeGuideCol
+                    var quad = QuadGPU()
+                    quad.position = SIMD2<Float>(guideX, contentTopY)
+                    quad.size = SIMD2<Float>(1.0 * scale, contentHeightPx)
+                    quad.color = inactiveFg
+                    quad.alpha = isActive ? 0.4 : 0.15
+                    guideQuads.append(quad)
+                }
+            } else {
+                guideQuads.reserveCapacity(guideData.guideCols.count * guideData.lineIndentLevels.count)
+                for (lineIdx, level) in guideData.lineIndentLevels.enumerated() {
+                    let lineY = contentTopY + Float(lineIdx) * lineCellH
+                    for col in guideData.guideCols {
+                        let guideLevel = col / tabW
+                        // Strict < so guides appear only in whitespace, not at the text-start column.
+                        guard guideLevel < level else { continue }
+                        let guideX = windowContentColOffset + Float(col) * cellW * scale
+                        let isActive = col == guideData.activeGuideCol
+                        var quad = QuadGPU()
+                        quad.position = SIMD2<Float>(guideX, lineY)
+                        quad.size = SIMD2<Float>(1.0 * scale, lineCellH)
+                        quad.color = inactiveFg
+                        quad.alpha = isActive ? 0.4 : 0.15
+                        guideQuads.append(quad)
+                    }
+                }
             }
 
             if !guideQuads.isEmpty {
                 encoder.setRenderPipelineState(bgPipeline)
-                encoder.setVertexBytes(&guideQuads, length: guideQuads.count * MemoryLayout<QuadGPU>.stride, index: 0)
-                encoder.setVertexBytes(&uniforms, length: MemoryLayout<CTUniformsGPU>.size, index: 1)
-                encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: guideQuads.count)
+                // setVertexBytes is capped at 4 KB of inline data by Metal.
+                let maxPerBatch = 4096 / MemoryLayout<QuadGPU>.stride
+                var batchStart = 0
+                while batchStart < guideQuads.count {
+                    let batchCount = min(guideQuads.count - batchStart, maxPerBatch)
+                    guideQuads.withUnsafeMutableBufferPointer { ptr in
+                        let base = ptr.baseAddress! + batchStart
+                        encoder.setVertexBytes(base, length: batchCount * MemoryLayout<QuadGPU>.stride, index: 0)
+                    }
+                    encoder.setVertexBytes(&uniforms, length: MemoryLayout<CTUniformsGPU>.size, index: 1)
+                    encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: batchCount)
+                    batchStart += batchCount
+                }
             }
         }
 

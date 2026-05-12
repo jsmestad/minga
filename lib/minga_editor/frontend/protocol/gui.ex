@@ -912,32 +912,39 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           window_id: non_neg_integer(),
           tab_width: pos_integer(),
           active_guide_col: non_neg_integer(),
-          guide_cols: [non_neg_integer()]
+          guide_cols: [non_neg_integer()],
+          line_indent_levels: [non_neg_integer()]
         }
 
   @doc """
   Encodes a gui_indent_guides command for one window.
 
   Uses the forward-compatible 0x90+ format: opcode(1) + payload_length(2) + payload.
-  Payload: window_id(2) + tab_width(1) + active_guide_col(2) + guide_count(1) + guide_cols(2 each).
+  Payload: window_id(2) + tab_width(1) + active_guide_col(2) + guide_count(1) + guide_cols(2 each)
+           + line_count(2) + indent_levels(1 each).
 
   `active_guide_col` of 0xFFFF means no active guide. Guide columns are
   character-unit offsets from the content start (not screen left).
+  `line_indent_levels` gives the effective indent level per visible line so the
+  frontend can draw guide segments only in whitespace, not through text.
   """
   @spec encode_gui_indent_guides(indent_guide_data()) :: binary()
   def encode_gui_indent_guides(%{
         window_id: win_id,
         tab_width: tab_width,
         active_guide_col: active_col,
-        guide_cols: cols
+        guide_cols: cols,
+        line_indent_levels: levels
       }) do
     guide_count = length(cols)
     guide_bytes = for col <- cols, into: <<>>, do: <<col::16>>
-    # 2 (win_id) + 1 (tab_width) + 2 (active_col) + 1 (guide_count) + 2*guide_count
-    payload_len = 6 + 2 * guide_count
+    line_count = length(levels)
+    level_bytes = for lvl <- levels, into: <<>>, do: <<min(lvl, 255)::8>>
+    # 2 (win_id) + 1 (tab_width) + 2 (active_col) + 1 (guide_count) + 2*guide_count + 2 (line_count) + line_count
+    payload_len = 6 + 2 * guide_count + 2 + line_count
 
     <<@op_gui_indent_guides, payload_len::16, win_id::16, tab_width::8, active_col::16,
-      guide_count::8, guide_bytes::binary>>
+      guide_count::8, guide_bytes::binary, line_count::16, level_bytes::binary>>
   end
 
   @doc """
