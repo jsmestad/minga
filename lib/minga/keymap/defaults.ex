@@ -74,6 +74,7 @@ defmodule Minga.Keymap.Defaults do
 
     # ── Help ──────────────────────────────────────────────────────────────────
     {[{?h, @none}, {?b, @none}], :describe_bindings, "Describe bindings"},
+    {[{?h, @none}, {?c, @none}], :describe_command, "Describe command"},
     {[{?h, @none}, {?k, @none}], :describe_key, "Describe key"},
     {[{?h, @none}, {?v, @none}], :describe_option, "Describe option"},
     {[{?h, @none}, {?r, @none}], :reload_config, "Reload config"},

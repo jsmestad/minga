@@ -39,6 +39,12 @@ defmodule MingaEditor.Commands.Help do
         execute: fn state -> execute(state, :describe_bindings) end
       },
       %Command{
+        name: :describe_command,
+        description: "Describe command",
+        requires_buffer: false,
+        execute: fn state -> execute(state, :describe_command) end
+      },
+      %Command{
         name: :describe_option,
         description: "Describe option",
         requires_buffer: false,
@@ -60,6 +66,14 @@ defmodule MingaEditor.Commands.Help do
 
   def execute(state, :describe_bindings) do
     show_in_buffer(state, "*Bindings*", bindings_content(state))
+  end
+
+  def execute(state, :describe_command) do
+    PickerUI.open(state, MingaEditor.UI.Picker.CommandHelpSource)
+  end
+
+  def execute(state, {:describe_command_named, name}) when is_binary(name) do
+    describe_command_named(state, name)
   end
 
   def execute(state, :describe_option) do
@@ -713,6 +727,91 @@ defmodule MingaEditor.Commands.Help do
     end)
 
     Buffer.move_to(buf, {0, 0})
+  end
+
+  # ── Command description ─────────────────────────────────────────────────────
+
+  @spec describe_command_named(state(), String.t()) :: state()
+  defp describe_command_named(state, raw_name) do
+    name =
+      raw_name
+      |> String.trim()
+      |> String.trim_leading(":")
+      |> String.to_existing_atom()
+
+    case Command.lookup(name) do
+      {:ok, cmd} ->
+        keybind_map = build_reverse_keybind_map()
+        content = format_describe_command(cmd, keybind_map)
+        show_in_help_buffer(state, content)
+
+      :error ->
+        show_in_help_buffer(state, "Unknown command: #{raw_name}\n")
+    end
+  rescue
+    ArgumentError ->
+      show_in_help_buffer(state, "Unknown command: #{raw_name}\n")
+  end
+
+  @doc "Formats a detailed command help page."
+  @spec format_describe_command(Command.t(), %{atom() => [String.t()]}) :: String.t()
+  def format_describe_command(%Command{} = cmd, keybind_map) do
+    bindings = Map.get(keybind_map, cmd.name, [])
+
+    keybinding_lines =
+      case bindings do
+        [] -> "none"
+        [single] -> single
+        multiple -> Enum.join(multiple, "\n             ")
+      end
+
+    scope_str = if cmd.scope, do: inspect(cmd.scope), else: "any"
+
+    [
+      "# Command: #{cmd.name}",
+      "",
+      "Command:     #{cmd.name}",
+      "Description: #{cmd.description}",
+      "Keybinding:  #{keybinding_lines}",
+      "Source:      built-in",
+      "Scope:       #{scope_str}",
+      ""
+    ]
+    |> Enum.join("\n")
+  end
+
+  @doc """
+  Builds a reverse lookup map from command atoms to their key sequence strings.
+
+  Merges leader bindings (prefixed with "SPC "), normal mode bindings,
+  and filetype bindings (prefixed with "SPC m ") into a single map where
+  each command maps to a list of all its bound key sequences.
+  """
+  @spec build_reverse_keybind_map() :: %{atom() => [String.t()]}
+  def build_reverse_keybind_map do
+    leader =
+      Defaults.all_bindings()
+      |> Enum.map(fn {keys, command, _desc} ->
+        key_str = "SPC " <> Enum.map_join(keys, " ", &Bindings.format_key/1)
+        {command, key_str}
+      end)
+
+    normal =
+      Defaults.normal_bindings()
+      |> Enum.map(fn {key, {command, _desc}} ->
+        {command, Bindings.format_key(key)}
+      end)
+
+    filetype =
+      Defaults.filetype_bindings()
+      |> Enum.map(fn {_ft, keys, command, _desc} ->
+        key_str = "SPC m " <> Enum.map_join(keys, " ", &Bindings.format_key/1)
+        {command, key_str}
+      end)
+
+    (leader ++ normal ++ filetype)
+    |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
+    |> Map.new(fn {cmd, key_strs} -> {cmd, Enum.uniq(key_strs)} end)
   end
 
   # ── Shared helpers ─────────────────────────────────────────────────────────

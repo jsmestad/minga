@@ -216,6 +216,18 @@ defmodule Minga.Command.ParserTest do
     test ":describe option parses the option name" do
       assert {:describe_option_named, ["tab_width"]} = Parser.parse("describe tab_width")
     end
+
+    test ":describe-command opens the command picker" do
+      assert {:describe_command, []} = Parser.parse("describe-command")
+    end
+
+    test ":describe-command with name parses the command name" do
+      assert {:describe_command_named, ["save"]} = Parser.parse("describe-command save")
+    end
+
+    test ":describe-command trims whitespace from name" do
+      assert {:describe_command_named, ["save"]} = Parser.parse("describe-command   save  ")
+    end
   end
 
   describe "parse/1 — unknown commands" do
