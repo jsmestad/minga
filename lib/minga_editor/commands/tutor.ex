@@ -37,7 +37,11 @@ defmodule MingaEditor.Commands.Tutor do
       nil ->
         {:ok, pid} = start_tutor_buffer(content)
         state = Commands.add_buffer(state, pid)
-        EditorState.set_status(state, "Welcome to the Minga Tutorial! Follow the instructions to learn.")
+
+        EditorState.set_status(
+          state,
+          "Welcome to the Minga Tutorial! Follow the instructions to learn."
+        )
 
       pid ->
         replace_content(pid, content)
