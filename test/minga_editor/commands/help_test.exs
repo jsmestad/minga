@@ -241,4 +241,131 @@ defmodule MingaEditor.Commands.HelpTest do
       assert BufferServer.read_only?(result.workspace.buffers.help)
     end
   end
+
+  describe "describe_lossage" do
+    test "creates *Keystrokes* buffer with empty history message" do
+      state = build_state()
+      result = Help.execute(state, :describe_lossage)
+
+      buf = result.workspace.buffers.active
+      assert Process.alive?(buf)
+      assert BufferServer.buffer_name(buf) == "*Keystrokes*"
+
+      content = BufferServer.content(buf)
+      assert content =~ "Keystroke History"
+      assert content =~ "No keystrokes recorded yet."
+    end
+
+    test "*Keystrokes* buffer is read-only" do
+      state = build_state()
+      result = Help.execute(state, :describe_lossage)
+
+      buf = result.workspace.buffers.active
+      assert BufferServer.read_only?(buf)
+    end
+
+    test "shows formatted keystrokes when history has entries" do
+      state = build_state()
+
+      history =
+        MingaEditor.KeystrokeHistory.new()
+        |> MingaEditor.KeystrokeHistory.record(%{
+          key: {?j, 0},
+          mode_before: :normal,
+          mode_after: :normal,
+          timestamp: 1_715_500_800_000
+        })
+        |> MingaEditor.KeystrokeHistory.record(%{
+          key: {?k, 0},
+          mode_before: :normal,
+          mode_after: :normal,
+          timestamp: 1_715_500_801_000
+        })
+
+      state = %{state | keystroke_history: history}
+      result = Help.execute(state, :describe_lossage)
+
+      content = BufferServer.content(result.workspace.buffers.active)
+      assert content =~ "Keystroke History (last 2 keys)"
+      assert content =~ "j"
+      assert content =~ "k"
+    end
+
+    test "annotates mode transitions" do
+      state = build_state()
+
+      history =
+        MingaEditor.KeystrokeHistory.new()
+        |> MingaEditor.KeystrokeHistory.record(%{
+          key: {?j, 0},
+          mode_before: :normal,
+          mode_after: :normal,
+          timestamp: 1_715_500_800_000
+        })
+        |> MingaEditor.KeystrokeHistory.record(%{
+          key: {?h, 0},
+          mode_before: :insert,
+          mode_after: :insert,
+          timestamp: 1_715_500_802_000
+        })
+
+      state = %{state | keystroke_history: history}
+      result = Help.execute(state, :describe_lossage)
+
+      content = BufferServer.content(result.workspace.buffers.active)
+      assert content =~ "── mode: insert ──"
+    end
+
+    test "groups operator-pending sequences" do
+      state = build_state()
+
+      history =
+        MingaEditor.KeystrokeHistory.new()
+        |> MingaEditor.KeystrokeHistory.record(%{
+          key: {?d, 0},
+          mode_before: :normal,
+          mode_after: :operator_pending,
+          timestamp: 1_715_500_800_000
+        })
+        |> MingaEditor.KeystrokeHistory.record(%{
+          key: {?w, 0},
+          mode_before: :operator_pending,
+          mode_after: :normal,
+          timestamp: 1_715_500_800_100
+        })
+
+      state = %{state | keystroke_history: history}
+      result = Help.execute(state, :describe_lossage)
+
+      content = BufferServer.content(result.workspace.buffers.active)
+      assert content =~ "d w"
+    end
+
+    test "collapses insert runs into compact display" do
+      state = build_state()
+
+      entries =
+        Enum.map(?a..?h, fn cp ->
+          %{
+            key: {cp, 0},
+            mode_before: :insert,
+            mode_after: :insert,
+            timestamp: 1_715_500_800_000 + cp
+          }
+        end)
+
+      history =
+        Enum.reduce(
+          entries,
+          MingaEditor.KeystrokeHistory.new(),
+          &MingaEditor.KeystrokeHistory.record(&2, &1)
+        )
+
+      state = %{state | keystroke_history: history}
+      result = Help.execute(state, :describe_lossage)
+
+      content = BufferServer.content(result.workspace.buffers.active)
+      assert content =~ "8 chars"
+    end
+  end
 end
