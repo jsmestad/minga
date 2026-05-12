@@ -61,7 +61,17 @@ defmodule Minga.Keymap.Scope.GitStatus do
          {"S", "Stage all"},
          {"U", "Unstage all"},
          {"o / Enter", "Open file in editor"},
-         {"cc", "Start commit (enter message)"}
+         {"p", "Preview diff"},
+         {"P", "Push to remote"},
+         {"l", "Pull from remote"},
+         {"f", "Fetch from remote"},
+         {"cc", "Start commit (enter message)"},
+         {"ca", "Amend last commit"}
+       ]},
+      {"Discard Confirmation",
+       [
+         {"y", "Confirm discard"},
+         {"n / Esc", "Cancel discard"}
        ]},
       {"View",
        [
@@ -87,10 +97,19 @@ defmodule Minga.Keymap.Scope.GitStatus do
     |> Bindings.bind([{?d, 0}], :git_status_discard, "Discard changes")
     |> Bindings.bind([{?S, 0}], :git_status_stage_all, "Stage all")
     |> Bindings.bind([{?U, 0}], :git_status_unstage_all, "Unstage all")
+    # Diff and remote operations
+    |> Bindings.bind([{?p, 0}], :git_status_open_diff, "Preview diff")
+    |> Bindings.bind([{?P, 0}], :git_status_push, "Push to remote")
+    |> Bindings.bind([{?l, 0}], :git_status_pull, "Pull from remote")
+    |> Bindings.bind([{?f, 0}], :git_status_fetch, "Fetch from remote")
     # Open/commit
     |> Bindings.bind([{?o, 0}], :git_status_open_file, "Open file")
     |> Bindings.bind([{@enter, 0}], :git_status_open_file, "Open file")
     |> Bindings.bind([{?c, 0}, {?c, 0}], :git_status_start_commit, "Start commit")
+    |> Bindings.bind([{?c, 0}, {?a, 0}], :git_status_amend, "Amend last commit")
+    # Discard confirmation
+    |> Bindings.bind([{?y, 0}], :git_status_confirm_discard, "Confirm discard")
+    |> Bindings.bind([{?n, 0}], :git_status_cancel_discard, "Cancel discard")
     # Close
     |> Bindings.bind([{?q, 0}], :git_status_close, "Close git status")
     |> Bindings.bind([{@escape, 0}], :git_status_close, "Close git status")

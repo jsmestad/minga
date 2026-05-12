@@ -18,6 +18,7 @@ struct SidebarContainer: View {
     private let sidebarMaxWidth: CGFloat = 360
 
     @State private var isDraggingResize: Bool = false
+    @State private var dragStartWidth: CGFloat = 0
 
     var body: some View {
         HStack(spacing: 0) {
@@ -59,8 +60,11 @@ struct SidebarContainer: View {
             .gesture(
                 DragGesture(minimumDistance: 1)
                     .onChanged { value in
-                        isDraggingResize = true
-                        let newWidth = sidebarWidth + value.translation.width
+                        if !isDraggingResize {
+                            isDraggingResize = true
+                            dragStartWidth = sidebarWidth
+                        }
+                        let newWidth = dragStartWidth + value.translation.width
                         sidebarWidth = min(max(newWidth, sidebarMinWidth), sidebarMaxWidth)
                     }
                     .onEnded { _ in

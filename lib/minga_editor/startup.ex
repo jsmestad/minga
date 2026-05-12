@@ -120,6 +120,14 @@ defmodule MingaEditor.Startup do
         Minga.Config.get(:editing_model)
       end)
 
+    # Warn if CUA is active on TUI backend
+    if editing_model == :cua and backend == :tui do
+      Minga.Log.warning(
+        :editor,
+        "CUA mode is not fully supported on TUI. Some keybindings may not work as expected. Consider using Vim mode (set editing_model = 'vim' in config)."
+      )
+    end
+
     state = %EditorState{
       backend: backend,
       workspace: workspace,
