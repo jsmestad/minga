@@ -167,7 +167,10 @@ defmodule MingaEditor.Commands.Dired do
       open_cmd = if :os.type() == {:unix, :darwin}, do: "open", else: "xdg-open"
 
       Task.start(fn ->
-        System.cmd(open_cmd, [entry.path], stderr_to_stdout: true)
+        case System.cmd(open_cmd, [entry.path], stderr_to_stdout: true) do
+          {_, 0} -> :ok
+          {output, code} -> Minga.Log.warning(:editor, "#{open_cmd} exited #{code}: #{String.trim(output)}")
+        end
       end)
 
       EditorState.set_status(state, "Opened #{entry.name}")

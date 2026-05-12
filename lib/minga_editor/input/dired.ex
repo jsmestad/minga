@@ -18,6 +18,7 @@ defmodule MingaEditor.Input.Dired do
   alias MingaEditor.Commands
   alias MingaEditor.State, as: EditorState
   alias Minga.Keymap
+  alias Minga.Keymap.Scope
 
   @impl true
   @spec handle_key(state(), non_neg_integer(), non_neg_integer()) ::
@@ -32,6 +33,17 @@ defmodule MingaEditor.Input.Dired do
   end
 
   def handle_key(%{workspace: %{keymap_scope: :dired}} = state, cp, mods) do
+    case pending_prefix(state) do
+      nil -> handle_fresh_key(state, cp, mods)
+      node -> handle_prefix_continuation(state, node, cp, mods)
+    end
+  end
+
+  def handle_key(state, _cp, _mods), do: {:passthrough, state}
+
+  @spec handle_fresh_key(state(), non_neg_integer(), non_neg_integer()) ::
+          MingaEditor.Input.Handler.result()
+  defp handle_fresh_key(state, cp, mods) do
     key = {cp, mods}
     binding_state = Minga.Editing.binding_state(state)
 
@@ -44,15 +56,30 @@ defmodule MingaEditor.Input.Dired do
       {:command, command} ->
         {:handled, Commands.execute(state, command)}
 
-      {:prefix, _node} ->
-        {:passthrough, state}
+      {:prefix, node} ->
+        {:handled, put_pending_prefix(state, node)}
 
       :not_found ->
         {:passthrough, state}
     end
   end
 
-  def handle_key(state, _cp, _mods), do: {:passthrough, state}
+  @spec handle_prefix_continuation(state(), Minga.Keymap.Bindings.node_t(), non_neg_integer(), non_neg_integer()) ::
+          MingaEditor.Input.Handler.result()
+  defp handle_prefix_continuation(state, node, cp, mods) do
+    state = clear_pending_prefix(state)
+
+    case Scope.resolve_key_in_node(node, {cp, mods}) do
+      {:command, command} ->
+        {:handled, Commands.execute(state, command)}
+
+      {:prefix, next_node} ->
+        {:handled, put_pending_prefix(state, next_node)}
+
+      :not_found ->
+        {:passthrough, state}
+    end
+  end
 
   @impl true
   @spec handle_mouse(
@@ -86,5 +113,20 @@ defmodule MingaEditor.Input.Dired do
 
   defp handle_confirmation_key(state, _cp, _mods) do
     {:handled, state}
+  end
+
+  # ── Prefix tracking ───────────────────────────────────────────────────
+
+  @spec pending_prefix(state()) :: Minga.Keymap.Bindings.node_t() | nil
+  defp pending_prefix(state), do: state.workspace.dired.pending_prefix
+
+  @spec put_pending_prefix(state(), Minga.Keymap.Bindings.node_t()) :: state()
+  defp put_pending_prefix(state, node) do
+    put_in(state.workspace.dired.pending_prefix, node)
+  end
+
+  @spec clear_pending_prefix(state()) :: state()
+  defp clear_pending_prefix(state) do
+    put_in(state.workspace.dired.pending_prefix, nil)
   end
 end

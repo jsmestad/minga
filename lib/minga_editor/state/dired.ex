@@ -15,7 +15,8 @@ defmodule MingaEditor.State.Dired do
           buffer: pid() | nil,
           original_entries: [Dired.entry()],
           confirming?: boolean(),
-          pending_ops: [Dired.operation()]
+          pending_ops: [Dired.operation()],
+          pending_prefix: Minga.Keymap.Bindings.node_t() | nil
         }
 
   defstruct active?: false,
@@ -23,7 +24,8 @@ defmodule MingaEditor.State.Dired do
             buffer: nil,
             original_entries: [],
             confirming?: false,
-            pending_ops: []
+            pending_ops: [],
+            pending_prefix: nil
 
   @spec active?(t()) :: boolean()
   def active?(%__MODULE__{active?: active}), do: active
