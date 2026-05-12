@@ -1749,7 +1749,7 @@ defmodule MingaEditor.Commands.BufferManagement do
         requires_buffer: true,
         execute: fn state -> execute(state, :toggle_wrap) end,
         option_toggle: :wrap
-      },
+      }
     ]
 
     standard ++ tabs ++ scoped
