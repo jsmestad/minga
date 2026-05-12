@@ -5,6 +5,7 @@ defmodule MingaEditor.State.SnapshotTest do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
+  alias MingaEditor.State.Tab.Context
   alias MingaEditor.State.TabBar
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
@@ -131,6 +132,35 @@ defmodule MingaEditor.State.SnapshotTest do
       assert restored.workspace.buffers.active == buf_a
     end
 
+    test "migrates legacy vim field into editing" do
+      state = make_state(mode: :normal)
+      legacy_vim = %VimState{mode: :insert, mode_state: Mode.initial_state()}
+
+      restored = EditorState.restore_tab_context(state, %{vim: legacy_vim})
+
+      assert restored.workspace.editing == legacy_vim
+    end
+
+    test "restores string-key encoded contexts using present_fields" do
+      {:ok, buf_a} = BufferServer.start_link(content: "a")
+      {:ok, buf_b} = BufferServer.start_link(content: "b")
+      state = make_state(buffer: buf_a, keymap_scope: :editor)
+      legacy_vim = %VimState{mode: :insert, mode_state: Mode.initial_state()}
+      buffers = %Buffers{active: buf_b, list: [buf_b], active_index: 0}
+
+      restored =
+        EditorState.restore_tab_context(state, %{
+          "version" => 1,
+          "present_fields" => ["buffers", "editing"],
+          "vim" => legacy_vim,
+          "buffers" => buffers
+        })
+
+      assert restored.workspace.editing == legacy_vim
+      assert restored.workspace.buffers == buffers
+      assert restored.workspace.keymap_scope == :editor
+    end
+
     test "handles empty context gracefully" do
       state = make_state()
       restored = EditorState.restore_tab_context(state, %{})
@@ -145,14 +175,14 @@ defmodule MingaEditor.State.SnapshotTest do
       tb = TabBar.new(tab)
 
       state = make_state(buffer: buf, tab_bar: tb)
-      assert TabBar.active(tb).context == %{}
+      assert Context.empty?(TabBar.active(tb).context)
 
       restored = EditorState.restore_tab_context(state, %{})
 
       updated_tb = restored.shell_state.tab_bar
       stored_ctx = TabBar.get(updated_tb, tab.id).context
 
-      assert map_size(stored_ctx) > 0
+      refute Context.empty?(stored_ctx)
       assert stored_ctx.keymap_scope == :editor
       assert stored_ctx.editing.mode == :normal
       assert stored_ctx.buffers.active == buf
@@ -210,13 +240,13 @@ defmodule MingaEditor.State.SnapshotTest do
 
       {tb, tab_b} = TabBar.add(tb, :file, "b.ex")
       tb = TabBar.switch_to(tb, tab_a.id)
-      assert TabBar.get(tb, tab_b.id).context == %{}
+      assert Context.empty?(TabBar.get(tb, tab_b.id).context)
 
       state = make_state(buffer: buf, tab_bar: tb, mode: :normal, keymap_scope: :editor)
       switched = EditorState.switch_tab(state, tab_b.id)
 
       stored_ctx = TabBar.get(switched.shell_state.tab_bar, tab_b.id).context
-      assert map_size(stored_ctx) > 0
+      refute Context.empty?(stored_ctx)
       assert stored_ctx.keymap_scope == :editor
       assert stored_ctx.buffers.active == buf
     end

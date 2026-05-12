@@ -4,6 +4,7 @@ defmodule MingaEditor.State.TabBarTest do
   alias MingaEditor.State.AgentGroup
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
+  alias MingaEditor.VimState
 
   defp file_tab(id, label \\ ""), do: Tab.new_file(id, label)
 
@@ -155,9 +156,9 @@ defmodule MingaEditor.State.TabBarTest do
   describe "update_context/3" do
     test "stores context on the given tab" do
       tb = TabBar.new(file_tab(1))
-      ctx = %{mode: :insert}
-      tb = TabBar.update_context(tb, 1, ctx)
-      assert TabBar.get(tb, 1).context == ctx
+      editing = VimState.new()
+      tb = TabBar.update_context(tb, 1, %{editing: editing})
+      assert TabBar.get(tb, 1).context.editing == editing
     end
   end
 
@@ -627,10 +628,11 @@ defmodule MingaEditor.State.TabBarTest do
 
       tab1 = file_tab(1, "active")
 
-      tab2 = %{
+      tab2 =
         file_tab(2, "inactive")
-        | context: %{buffers: %Buffers{list: [dead, live], active: dead, active_index: 0}}
-      }
+        |> Tab.set_context(%{
+          buffers: %Buffers{list: [dead, live], active: dead, active_index: 0}
+        })
 
       tb = %TabBar{tabs: [tab1, tab2], active_id: 1, next_id: 3}
       result = TabBar.scrub_dead_buffer(tb, dead)
@@ -654,15 +656,15 @@ defmodule MingaEditor.State.TabBarTest do
 
       dead = :dead_pid
 
-      tab1 = %{
+      tab1 =
         file_tab(1, "a")
-        | context: %{buffers: %Buffers{list: [dead], active: dead, active_index: 0}}
-      }
+        |> Tab.set_context(%{buffers: %Buffers{list: [dead], active: dead, active_index: 0}})
 
-      tab2 = %{
+      tab2 =
         file_tab(2, "b")
-        | context: %{buffers: %Buffers{list: [:live, dead], active: :live, active_index: 0}}
-      }
+        |> Tab.set_context(%{
+          buffers: %Buffers{list: [:live, dead], active: :live, active_index: 0}
+        })
 
       tb = %TabBar{tabs: [tab1, tab2], active_id: 1, next_id: 3}
       result = TabBar.scrub_dead_buffer(tb, dead)

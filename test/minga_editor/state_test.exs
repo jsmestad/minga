@@ -419,7 +419,7 @@ defmodule MingaEditor.StateTest do
       # The new file tab's snapshotted context should also have the correct
       # window content type, so switching tabs restores it properly.
       active_tab = TabBar.active(new_state.shell_state.tab_bar)
-      tab_windows = active_tab.context[:windows]
+      tab_windows = active_tab.context.windows
 
       if tab_windows do
         active_win_id = tab_windows.active

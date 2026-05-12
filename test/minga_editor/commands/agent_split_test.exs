@@ -10,6 +10,7 @@ defmodule MingaEditor.Commands.AgentSplitTest do
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
+  alias MingaEditor.State.Windows
   alias MingaEditor.Viewport
   alias MingaEditor.Window
   alias MingaEditor.Window.Content
@@ -33,7 +34,7 @@ defmodule MingaEditor.Commands.AgentSplitTest do
 
     file_context = %{
       keymap_scope: :editor,
-      windows: %{
+      windows: %Windows{
         tree: {:leaf, 1},
         map: %{1 => window},
         active: 1,
@@ -41,7 +42,7 @@ defmodule MingaEditor.Commands.AgentSplitTest do
       }
     }
 
-    file_tab = %{file_tab | context: file_context}
+    file_tab = Tab.set_context(file_tab, file_context)
 
     # Agent tab with context containing an agent_chat window. The session
     # pid lives on the tab; AgentAccess.session/1 reads it through the
@@ -52,7 +53,7 @@ defmodule MingaEditor.Commands.AgentSplitTest do
 
     agent_context = %{
       keymap_scope: :agent,
-      windows: %{
+      windows: %Windows{
         tree: {:leaf, 1},
         map: %{1 => agent_win},
         active: 1,
@@ -60,7 +61,7 @@ defmodule MingaEditor.Commands.AgentSplitTest do
       }
     }
 
-    agent_tab = %{agent_tab | context: agent_context}
+    agent_tab = Tab.set_context(agent_tab, agent_context)
 
     tb = %TabBar{
       tabs: [file_tab, agent_tab],
@@ -74,7 +75,7 @@ defmodule MingaEditor.Commands.AgentSplitTest do
       workspace: %MingaEditor.Workspace.State{
         viewport: Viewport.new(24, 80),
         buffers: %Buffers{active: buf, list: [buf]},
-        windows: %MingaEditor.State.Windows{
+        windows: %Windows{
           tree: {:leaf, 1},
           map: %{1 => window},
           active: 1,

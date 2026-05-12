@@ -18,6 +18,7 @@ defmodule MingaEditor.Workspace.State do
   alias MingaEditor.State.Highlighting
   alias MingaEditor.State.Mouse
   alias MingaEditor.State.Search
+  alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.Windows
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
@@ -58,17 +59,11 @@ defmodule MingaEditor.Workspace.State do
             agent_ui: UIState.new()
 
   @doc "Returns the list of field names (for snapshot/restore compatibility)."
-  @spec field_names() :: [atom()]
-  def field_names do
-    %__MODULE__{viewport: %Viewport{top: 0, left: 0, rows: 1, cols: 1}}
-    |> Map.keys()
-    |> Enum.reject(&(&1 == :__struct__))
-  end
+  @spec field_names() :: [TabContext.field_name()]
+  def field_names, do: TabContext.field_names()
 
   @doc """
-  Converts a workspace into a flat-map tab context suitable for storing
-  on a `MingaEditor.State.Tab` and later restoring via
-  `restore_tab_context/2`.
+  Converts a workspace into a typed tab context suitable for storing on a `MingaEditor.State.Tab` and later restoring via `restore_tab_context/2`.
 
   The single chokepoint for snapshots. Beyond the `Map.from_struct/1`
   conversion, this normalises `editing` so the snapshotted vim state is a
@@ -77,22 +72,20 @@ defmodule MingaEditor.Workspace.State do
   Use this everywhere the editor captures `state.workspace` into a tab
   context.
   """
-  @spec to_tab_context(t()) :: map()
+  @spec to_tab_context(t()) :: TabContext.t()
   def to_tab_context(%__MODULE__{} = ws) do
     ws
     |> Map.update!(:editing, &VimState.normalize/1)
     |> Map.from_struct()
+    |> TabContext.from_workspace_map()
   end
 
-  @doc "Restores a flat tab context into a workspace. Empty contexts are ignored by this pure helper; EditorState handles brand-new tab defaults because those need editor dimensions."
-  @spec restore_tab_context(t(), map()) :: t()
+  @doc "Restores a tab context into a workspace. Empty contexts are ignored by this pure helper; EditorState handles brand-new tab defaults because those need editor dimensions."
+  @spec restore_tab_context(t(), TabContext.t() | TabContext.legacy()) :: t()
   def restore_tab_context(%__MODULE__{} = ws, context) when is_map(context) do
-    Enum.reduce(field_names(), ws, fn field, acc ->
-      case Map.fetch(context, field) do
-        {:ok, value} -> Map.put(acc, field, value)
-        :error -> acc
-      end
-    end)
+    context
+    |> TabContext.to_workspace_map()
+    |> Enum.reduce(ws, fn {field, value}, acc -> Map.put(acc, field, value) end)
   end
 
   # ── Pure workspace operations ─────────────────────────────────────────────

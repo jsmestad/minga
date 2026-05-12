@@ -9,6 +9,7 @@ defmodule MingaEditor.Shell.Board.GUIActionTest do
   alias MingaAgent.Subagent.Handle
   alias MingaEditor.Shell.Board
   alias MingaEditor.Shell.Board.State, as: BoardState
+  alias MingaEditor.State.Tab.Context
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
   alias MingaEditor.Workspace.State, as: WorkspaceState
@@ -115,7 +116,7 @@ defmodule MingaEditor.Shell.Board.GUIActionTest do
       zoomed = board.cards[card.id]
       assert board.focused_card == card.id
       assert board.zoomed_into == card.id
-      refute Map.has_key?(zoomed.workspace, :__struct__)
+      assert %Context{} = zoomed.workspace
       assert zoomed.workspace.editing.mode == :normal
       assert %Minga.Mode.State{} = zoomed.workspace.editing.mode_state
       assert restored_workspace.viewport.rows == 10

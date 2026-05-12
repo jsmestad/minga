@@ -198,7 +198,7 @@ defmodule MingaEditor.State.TabSwitchTest do
       # Tab 1's context should be snapshotted (preserved for later restore)
       tb = new_state.shell_state.tab_bar
       tab1 = TabBar.get(tb, 1)
-      assert tab1.context[:buffers].active == buf1
+      assert tab1.context.buffers.active == buf1
     end
 
     test "file-to-agent sets keymap_scope to :agent" do
@@ -222,7 +222,7 @@ defmodule MingaEditor.State.TabSwitchTest do
 
       # The file tab's context should be snapshotted
       file_tab = TabBar.get(tb, file_tab_id)
-      assert file_tab.context[:keymap_scope] == :editor
+      assert file_tab.context.keymap_scope == :editor
     end
 
     test "agent-to-file sets keymap_scope to :editor" do
@@ -242,7 +242,7 @@ defmodule MingaEditor.State.TabSwitchTest do
       # The agent tab's context should be preserved
       tb = new_state.shell_state.tab_bar
       agent_tab = TabBar.get(tb, agent_tab_id)
-      assert agent_tab.context[:keymap_scope] == :agent
+      assert agent_tab.context.keymap_scope == :agent
     end
 
     test "round-trip invariant: switch away and back restores equivalent state" do
