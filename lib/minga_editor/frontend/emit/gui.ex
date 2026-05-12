@@ -1508,7 +1508,9 @@ defmodule MingaEditor.Frontend.Emit.GUI do
         :exit, _ -> []
       end
 
-    {guides, indent_levels} = Minga.Core.IndentGuide.compute_with_levels(lines, tab_width, cursor_col)
+    {guides, indent_levels} =
+      Minga.Core.IndentGuide.compute_with_levels(lines, tab_width, cursor_col)
+
     encode_guides(guides, win_id, tab_width, indent_levels)
   end
 

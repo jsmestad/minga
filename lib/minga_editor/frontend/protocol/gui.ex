@@ -940,6 +940,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     guide_bytes = for col <- cols, into: <<>>, do: <<col::16>>
     line_count = length(levels)
     level_bytes = for lvl <- levels, into: <<>>, do: <<min(lvl, 255)::8>>
+
     # 2 (win_id) + 1 (tab_width) + 2 (active_col) + 1 (guide_count) + 2*guide_count + 2 (line_count) + line_count
     payload_len = 6 + 2 * guide_count + 2 + line_count
 

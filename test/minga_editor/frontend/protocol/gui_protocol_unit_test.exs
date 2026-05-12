@@ -266,8 +266,8 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
 
       binary = ProtocolGUI.encode_gui_indent_guides(data)
 
-      <<0x91, _len::16, _win::16, _tw::8, _active::16, _count::8, _col::16,
-        line_count::16, levels::binary>> = binary
+      <<0x91, _len::16, _win::16, _tw::8, _active::16, _count::8, _col::16, line_count::16,
+        levels::binary>> = binary
 
       assert line_count == 4
       assert levels == <<255, 0, 255, 255>>
