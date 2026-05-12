@@ -92,6 +92,7 @@ defmodule Minga.Command.Parser do
           | {:describe_command_named, [String.t()]}
           | {:describe_option, []}
           | {:describe_option_named, [String.t()]}
+          | {:tutor, []}
           | {:agent_abort, []}
           | {:agent_new_session, []}
           | {:agent_set_model, [String.t()]}
@@ -279,6 +280,8 @@ defmodule Minga.Command.Parser do
   defp do_parse("sp"), do: {:split_horizontal, []}
   defp do_parse("close"), do: {:window_close, []}
   defp do_parse("rename " <> name), do: {:rename, String.trim(name)}
+  defp do_parse("Tutor"), do: {:tutor, []}
+  defp do_parse("tutor"), do: {:tutor, []}
   defp do_parse("buffers"), do: {:buffers, []}
   defp do_parse("ls"), do: {:buffers, []}
   defp do_parse("bnext"), do: {:buffer_next, []}

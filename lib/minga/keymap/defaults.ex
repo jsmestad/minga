@@ -82,6 +82,7 @@ defmodule Minga.Keymap.Defaults do
     {[{?h, @none}, {?e, @none}, {?l, @none}], :extension_list, "List extensions"},
     {[{?h, @none}, {?e, @none}, {?u, @none}], :extension_update_all, "Update all extensions"},
     {[{?h, @none}, {?e, @none}, {?U, @none}], :extension_update, "Update extension"},
+    {[{?h, @none}, {?T, @none}], :tutor, "Interactive tutorial"},
 
     # ── Code ────────────────────────────────────────────────────────────────────
     {[{?c, @none}, {?a, @none}], :code_action, "Code actions"},

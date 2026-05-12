@@ -1,0 +1,289 @@
+===============================================================================
+=    W e l c o m e   t o   t h e   M i n g a   T u t o r                     =
+===============================================================================
+
+Minga is a modal text editor. This tutorial teaches you the basics by
+having you edit this text directly. Each lesson explains a concept, then
+gives you practice lines to try it on. Take your time; there is no rush.
+
+TIP: If you mess up a practice line, type  u  to undo your last change.
+     You can rerun  :Tutor  at any time to get a fresh copy.
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                        Lesson 1: MOVING THE CURSOR
+
+In Normal mode (the mode you start in), these keys move the cursor:
+
+      h   move left
+      j   move down
+      k   move up
+      l   move right
+
+Practice: move the cursor to the X on each line below, then press  x  to
+delete it.
+
+  The coXw jumped over the moon.
+  ThXe quick brown fox.
+  Hello worXld!
+
+TIP: If you get stuck, press  Esc  to return to Normal mode.
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                        Lesson 2: ENTERING INSERT MODE
+
+To type new text, you need to enter Insert mode. There are several ways:
+
+      i   insert before the cursor
+      a   insert after the cursor
+      o   open a new line below and insert
+      O   open a new line above and insert
+
+Press  Esc  to return to Normal mode when you are done typing.
+
+Practice 1: position your cursor on the [ ] below and press  i  to insert
+the missing word, then press  Esc  when done.
+
+  The quick brown fox [ ] over the lazy dog.
+  Minga is a [ ] text editor.
+
+Practice 2: move to the end of each line and press  a  to append text.
+
+  This sentence is not
+  Learning Minga is
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                        Lesson 3: DELETING TEXT
+
+In Normal mode you can delete text without entering Insert mode:
+
+      x    delete the character under the cursor
+      dd   delete the entire line
+      dw   delete from the cursor to the start of the next word
+      d$   delete from the cursor to the end of the line
+      D    same as d$ (shorthand)
+
+Practice 1: delete the EXTRA words using  dw .
+
+  The quick EXTRA brown fox jumped over the EXTRA lazy dog.
+  Minga EXTRA uses the EXTRA BEAM for all state.
+
+Practice 2: delete these entire lines using  dd .
+
+  DELETE THIS LINE.
+  THIS LINE SHOULD ALSO GO.
+  REMOVE ME TOO.
+
+Practice 3: place your cursor on the | and use  d$  to delete to end of line.
+
+  This part stays. | but this part should go away.
+  Keep this. | remove everything after here.
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                        Lesson 4: UNDO AND REDO
+
+Made a mistake? No problem:
+
+      u       undo the last change
+      Ctrl-r  redo (undo the undo)
+
+Practice: delete some words on the line below using  dw , then press  u
+repeatedly to bring them back. Try  Ctrl-r  to redo your deletions.
+
+  The quick brown fox jumped over the lazy dog near the river bank.
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                        Lesson 5: MOTIONS AND COUNTS
+
+You can combine a count with a motion to move faster:
+
+      2w   move forward 2 words
+      3j   move down 3 lines
+      5l   move right 5 characters
+      0    move to the start of the line
+      $    move to the end of the line
+      gg   move to the first line of the file
+      G    move to the last line of the file
+
+Counts also work with operators:
+
+      3dd  delete 3 lines
+      2dw  delete 2 words
+      d2w  also delete 2 words (count can go on either side)
+
+Practice: use  3dd  to delete exactly 3 lines below.
+
+  DELETE LINE ONE
+  DELETE LINE TWO
+  DELETE LINE THREE
+  This line should remain.
+
+Practice: use  2dw  to delete the first 2 words of this line.
+
+  REMOVE THESE but keep the rest of this sentence intact.
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                        Lesson 6: VISUAL MODE
+
+Visual mode lets you select text before acting on it:
+
+      v    character-wise visual mode (select individual characters)
+      V    line-wise visual mode (select whole lines)
+
+Once you have a selection, you can:
+
+      d    delete the selection
+      y    yank (copy) the selection
+      c    change the selection (delete and enter Insert mode)
+
+Practice 1: press  V  to select the two lines marked DELETE, then press  d .
+
+  Keep this line.
+  DELETE THIS LINE
+  DELETE THIS LINE TOO
+  Keep this line as well.
+
+Practice 2: use  v  to select the word REPLACE below, then press  c  to
+change it to something else. Press  Esc  when done.
+
+  The REPLACE sat on the mat.
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                        Lesson 7: YANK, PUT, AND REGISTERS
+
+Yank (copy) and put (paste) work with any motion or visual selection:
+
+      yy   yank the entire current line
+      yw   yank from cursor to start of next word
+      p    put (paste) after the cursor
+      P    put (paste) before the cursor
+
+Practice: yank the KEEP line with  yy , move to the blank line, press  p .
+
+  KEEP THIS LINE (yank me with yy)
+
+  (move here and press p to paste)
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                        Lesson 8: SEARCH
+
+Search jumps the cursor to matching text:
+
+      /pattern   search forward for "pattern"
+      ?pattern   search backward for "pattern"
+      n          jump to the next match
+      N          jump to the previous match
+      *          search forward for the word under the cursor
+
+Practice: type  /needle  and press Enter to find the hidden word.
+
+  You are looking for a very specific word hidden in this haystack
+  of text. Keep searching through these lines until you find the
+  needle somewhere in these practice sentences. Once found, press
+  n  to cycle through the remaining matches. There is one more
+  needle hiding further down.
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                        Lesson 9: THE LEADER KEY
+
+Minga uses  SPC  (spacebar) as the leader key. Pressing it in Normal mode
+opens the which-key popup, showing all available command groups.
+
+Try it now: press  SPC  and wait for the popup to appear. You will see
+groups like:
+
+      f   +file         (file operations)
+      b   +buffer        (buffer switching)
+      s   +search        (search commands)
+      c   +code          (LSP actions)
+      h   +help          (help and options)
+      a   +agent         (AI agent)
+      g   +git           (git operations)
+
+Press  Esc  or  q  to close the popup without choosing anything.
+
+Practice: press  SPC  to open which-key, look at the groups, then press
+Esc  to close it. Do this a few times to get comfortable with the popup.
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                        Lesson 10: FILE AND BUFFER NAVIGATION
+
+Minga's most-used leader commands for navigating files and buffers:
+
+      SPC f f   find file (fuzzy finder for files in the project)
+      SPC f r   recent files
+      SPC f p   open your config file
+      SPC b b   switch between open buffers
+      SPC b d   close the current buffer
+
+Practice: press  SPC b b  to see the buffer list. You should see *Tutor*
+listed. Press  Esc  to cancel and stay in the tutorial.
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                        Lesson 11: THE AGENT PANEL
+
+Minga has a built-in AI agent you can chat with for help:
+
+      SPC a a   toggle the agent panel
+      SPC a n   start a new agent session
+      SPC a m   pick a model
+
+Practice: press  SPC a a  to open the agent panel, look around, then
+press  SPC a a  again to close it and return to the tutorial.
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                        Lesson 12: EX COMMANDS
+
+You have been using  :Tutor  to open this tutorial. The  :  key opens the
+command line at the bottom of the screen, where you can type commands:
+
+      :w         save the current file
+      :q         quit (close the current buffer)
+      :wq        save and quit
+      :e path    open a file at the given path
+      :buffers   list open buffers
+
+Since this tutorial buffer is not backed by a file,  :w  will not do
+anything harmful. Try it if you like.
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                        Lesson 13: PUTTING IT ALL TOGETHER
+
+Here is a final exercise combining what you have learned.
+
+  1. Delete the line that says "REMOVE ME" using  dd
+  2. Change the word BROKEN to "fixed" using  cw
+  3. Yank the line that says "COPY ME" with  yy
+  4. Paste it below the blank line with  p
+  5. Search for "congratulations" with  /congratulations
+
+  REMOVE ME
+  The status is BROKEN and needs attention.
+  COPY ME
+
+  (paste above this line)
+
+  If you made it this far, congratulations! You know enough to be
+  productive in Minga.
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+SUMMARY
+
+  h/j/k/l .......... move cursor          v/V ........ visual select
+  i/a/o/O .......... enter Insert mode     y/p ........ yank and put
+  Esc .............. back to Normal mode   / .......... search forward
+  x ................ delete character      n/N ........ next/prev match
+  dd ............... delete line           u/Ctrl-r ... undo/redo
+  dw ............... delete word           SPC ........ leader key
+  d$/D ............. delete to end         :command ... ex command
+
+  SPC f f .. find file       SPC a a .. agent panel
+  SPC b b .. buffers         SPC h T .. reopen this tutorial
+  SPC f p .. config file     :Tutor ... reopen this tutorial
+
+  To learn more, press  SPC h b  to see all keybindings, or
+  press  SPC h v  to browse options.
+
+  Happy editing!
+
+===============================================================================
