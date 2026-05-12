@@ -6,7 +6,9 @@ defmodule MingaEditor.Commands.HelpTest do
   alias Minga.Keymap.Active, as: ActiveKeymap
   alias MingaEditor.Commands.Help
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.UI.Picker.CommandHelpSource
   alias MingaEditor.UI.Picker.Context
+  alias MingaEditor.UI.Picker.Item
   alias MingaEditor.UI.Picker.OptionSource
   alias MingaEditor.State.Buffers
   alias MingaEditor.Viewport
@@ -336,6 +338,31 @@ defmodule MingaEditor.Commands.HelpTest do
 
       content = BufferServer.content(result.workspace.buffers.help)
       assert content =~ "Unknown command: not_a_real_command_xyz"
+    end
+
+    test "shows unknown command for valid atom that is not a registered command" do
+      state = build_state()
+      result = Help.execute(state, {:describe_command_named, "true"})
+
+      content = BufferServer.content(result.workspace.buffers.help)
+      assert content =~ "Unknown command: true"
+    end
+
+    test "strips leading colon from command name" do
+      state = build_state()
+      result = Help.execute(state, {:describe_command_named, ":describe_bindings"})
+
+      content = BufferServer.content(result.workspace.buffers.help)
+      assert content =~ "# Command: describe_bindings"
+    end
+
+    test "CommandHelpSource.on_select opens help buffer for command" do
+      state = build_state()
+      result = CommandHelpSource.on_select(%Item{id: :describe_bindings, label: ""}, state)
+
+      content = BufferServer.content(result.workspace.buffers.help)
+      assert content =~ "# Command: describe_bindings"
+      assert content =~ "Keybinding:  SPC h b"
     end
   end
 

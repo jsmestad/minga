@@ -733,24 +733,24 @@ defmodule MingaEditor.Commands.Help do
 
   @spec describe_command_named(state(), String.t()) :: state()
   defp describe_command_named(state, raw_name) do
-    name =
-      raw_name
-      |> String.trim()
-      |> String.trim_leading(":")
-      |> String.to_existing_atom()
+    normalized = raw_name |> String.trim() |> String.trim_leading(":")
 
-    case Command.lookup(name) do
+    name =
+      try do
+        String.to_existing_atom(normalized)
+      rescue
+        ArgumentError -> nil
+      end
+
+    case name && Command.lookup(name) do
       {:ok, cmd} ->
         keybind_map = build_reverse_keybind_map()
         content = format_describe_command(cmd, keybind_map)
         show_in_help_buffer(state, content)
 
-      :error ->
+      _ ->
         show_in_help_buffer(state, "Unknown command: #{raw_name}\n")
     end
-  rescue
-    ArgumentError ->
-      show_in_help_buffer(state, "Unknown command: #{raw_name}\n")
   end
 
   @doc "Formats a detailed command help page."
