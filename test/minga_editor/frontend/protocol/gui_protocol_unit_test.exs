@@ -194,12 +194,12 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
         window_id: 1,
         tab_width: 2,
         active_guide_col: 4,
-        guide_cols: [2, 4]
+        guide_cols: [2, 4],
+        line_indent_levels: [1, 2, 2, 1, 0]
       }
 
       binary = ProtocolGUI.encode_gui_indent_guides(data)
 
-      # 0x91 opcode, payload_len, window_id, tab_width, active_col, guide_count, cols
       <<0x91, payload_len::16, win_id::16, tw::8, active_col::16, count::8, rest::binary>> =
         binary
 
@@ -207,11 +207,14 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
       assert tw == 2
       assert active_col == 4
       assert count == 2
-      assert payload_len == 6 + 2 * 2
+      # 6 (header) + 2*2 (guide cols) + 2 (line_count) + 5 (levels)
+      assert payload_len == 6 + 2 * 2 + 2 + 5
 
-      <<col1::16, col2::16>> = rest
+      <<col1::16, col2::16, line_count::16, levels::binary>> = rest
       assert col1 == 2
       assert col2 == 4
+      assert line_count == 5
+      assert levels == <<1, 2, 2, 1, 0>>
     end
 
     test "encodes empty guide list" do
@@ -232,18 +235,42 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
         window_id: 2,
         tab_width: 4,
         active_guide_col: 8,
-        guide_cols: cols
+        guide_cols: cols,
+        line_indent_levels: [2, 4, 4, 3, 1]
       }
 
       binary = ProtocolGUI.encode_gui_indent_guides(data)
 
-      <<0x91, _len::16, _win::16, _tw::8, _active::16, count::8, col_data::binary>> = binary
+      <<0x91, _len::16, _win::16, _tw::8, _active::16, count::8, rest::binary>> = binary
+
+      col_bytes_len = count * 2
+      <<col_data::binary-size(col_bytes_len), line_count::16, levels::binary>> = rest
 
       decoded_cols =
         for <<col::16 <- col_data>>, do: col
 
       assert count == 4
       assert decoded_cols == cols
+      assert line_count == 5
+      assert levels == <<2, 4, 4, 3, 1>>
+    end
+
+    test "indent levels above 255 are clamped to fit uint8 wire format" do
+      data = %{
+        window_id: 1,
+        tab_width: 2,
+        active_guide_col: 0xFFFF,
+        guide_cols: [2],
+        line_indent_levels: [300, 0, 256, 255]
+      }
+
+      binary = ProtocolGUI.encode_gui_indent_guides(data)
+
+      <<0x91, _len::16, _win::16, _tw::8, _active::16, _count::8, _col::16, line_count::16,
+        levels::binary>> = binary
+
+      assert line_count == 4
+      assert levels == <<255, 0, 255, 255>>
     end
   end
 

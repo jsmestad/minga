@@ -47,18 +47,35 @@ defmodule Minga.Core.IndentGuide do
   def compute(lines, tab_width, cursor_col)
       when is_list(lines) and is_integer(tab_width) and tab_width > 0 and
              is_integer(cursor_col) and cursor_col >= 0 do
-    # Compute the effective indentation level of each line, propagating
-    # through blank lines by looking ahead to the next non-blank line.
+    {guides, _levels} = compute_with_levels(lines, tab_width, cursor_col)
+    guides
+  end
+
+  @doc """
+  Like `compute/3` but also returns the per-line effective indent levels.
+
+  Returns `{guides, indent_levels}` where `indent_levels` has one entry
+  per input line. Use this when the caller needs both guide columns and
+  per-line indentation (e.g. to send over the wire for per-line rendering).
+  """
+  @spec compute_with_levels(
+          lines :: [String.t()],
+          tab_width :: pos_integer(),
+          cursor_col :: non_neg_integer()
+        ) ::
+          {[guide()], [non_neg_integer()]}
+  def compute_with_levels(lines, tab_width, cursor_col)
+      when is_list(lines) and is_integer(tab_width) and tab_width > 0 and
+             is_integer(cursor_col) and cursor_col >= 0 do
     indent_levels = effective_indent_levels(lines, tab_width)
 
-    # Find the maximum indentation level across all visible lines.
     max_level =
       case indent_levels do
         [] -> 0
         levels -> Enum.max(levels)
       end
 
-    build_guides(indent_levels, max_level, tab_width, cursor_col)
+    {build_guides(indent_levels, max_level, tab_width, cursor_col), indent_levels}
   end
 
   @doc """

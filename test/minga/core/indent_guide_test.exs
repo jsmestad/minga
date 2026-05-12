@@ -83,6 +83,23 @@ defmodule Minga.Core.IndentGuideTest do
 
   # ── compute/3 ──
 
+  describe "compute_with_levels/3" do
+    test "returns same guides as compute/3 and levels with one entry per line" do
+      lines = ["def foo", "  bar", "", "  baz", "end"]
+      {guides, levels} = IndentGuide.compute_with_levels(lines, @tw, 2)
+
+      assert guides == IndentGuide.compute(lines, @tw, 2)
+      assert length(levels) == length(lines)
+    end
+
+    test "empty input returns empty guides and empty levels" do
+      {guides, levels} = IndentGuide.compute_with_levels([], @tw, 0)
+
+      assert guides == []
+      assert levels == []
+    end
+  end
+
   describe "compute/3" do
     test "flat code produces no guides" do
       assert IndentGuide.compute(["a", "b", "c"], @tw, 0) == []

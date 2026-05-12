@@ -383,4 +383,6 @@ struct IndentGuideData: Sendable {
     let activeGuideCol: UInt16
     /// Character columns where guides appear (content-relative, not screen-relative).
     let guideCols: [UInt16]
+    /// Per visible line indent level. Empty if the sender omitted per-line data (legacy); renderer falls back to full-height guides.
+    let lineIndentLevels: [UInt8]
 }

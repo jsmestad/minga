@@ -865,13 +865,16 @@ This convention is enforced on the BEAM side: all new opcodes >= 0x90 must use t
 
 ### 0x91 — gui_indent_guides
 
-Sends indent guide column positions for one window. Each guide is a vertical line the frontend draws at the given character column. The active guide (containing the cursor) is identified so the frontend can highlight it.
+Sends indent guide column positions and per-line indent levels for one window. Each guide is a vertical line the frontend draws at the given character column. The active guide (containing the cursor) is identified so the frontend can highlight it. Per-line indent levels let the frontend draw guide segments only in leading whitespace, preventing guides from bleeding through text content.
 
 ```
-opcode(1=0x91) + payload_length(2) + window_id(2) + tab_width(1) + active_guide_col(2) + guide_count(1) + guide_cols...
+opcode(1=0x91) + payload_length(2) + window_id(2) + tab_width(1) + active_guide_col(2) + guide_count(1) + guide_cols... + line_count(2) + indent_levels...
 
 Per guide:
   col(2)
+
+Per line:
+  indent_level(1)
 ```
 
 Fields:
@@ -880,6 +883,10 @@ Fields:
 - `active_guide_col`: the character column of the active guide (0xFFFF = no active guide)
 - `guide_count`: number of guide columns that follow
 - `col`: character column offset from content start (not screen left). The frontend converts to pixel position using `col * cellWidth + gutterPixelWidth`
+- `line_count`: number of visible lines with indent level data that follow
+- `indent_level`: effective indent level for this visible line (0-255, capped). A guide at column `col` should only be drawn on a line whose `indent_level > col / tab_width` (strict greater-than, so guides appear only in whitespace, not at the text-start column). Blank lines inherit the indent level of the next non-blank line below them so guides span through blank lines
+
+The `line_count` + `indent_levels` section is optional for backward compatibility. If `payload_length` does not leave room for it after the guide columns, the frontend should fall back to drawing full-height guide columns (the pre-v0.4 behavior).
 
 The BEAM sends this per frame as part of the atomic Metal command batch. Guides are gated by the `indent_guides` config option (default `true`). When disabled, no opcode is sent.
 

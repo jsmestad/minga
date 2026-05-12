@@ -1944,8 +1944,21 @@ func decodeCommand(data: Data, offset: Int) throws -> (RenderCommand?, Int) {
             igCols.append(readU16(data, igPos))
             igPos += 2
         }
+        var igLineLevels: [UInt8] = []
+        let igEnd = rest + 2 + igPayloadLen
+        if igPos + 2 <= igEnd {
+            let igLineCount = Int(readU16(data, igPos))
+            igPos += 2
+            igLineLevels.reserveCapacity(igLineCount)
+            for _ in 0..<igLineCount {
+                guard igPos < igEnd else { break }
+                igLineLevels.append(data[igPos])
+                igPos += 1
+            }
+        }
         let igData = IndentGuideData(windowId: igWinId, tabWidth: igTabWidth,
-                                     activeGuideCol: igActiveCol, guideCols: igCols)
+                                     activeGuideCol: igActiveCol, guideCols: igCols,
+                                     lineIndentLevels: igLineLevels)
         return (.guiIndentGuides(data: igData), 1 + 2 + igPayloadLen)
 
     case OP_GUI_LINE_SPACING:
