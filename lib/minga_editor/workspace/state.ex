@@ -14,6 +14,7 @@ defmodule MingaEditor.Workspace.State do
 
   alias MingaEditor.Agent.UIState
   alias MingaEditor.State.Buffers
+  alias MingaEditor.State.Dired, as: DiredState
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Highlighting
   alias MingaEditor.State.Mouse
@@ -32,6 +33,7 @@ defmodule MingaEditor.Workspace.State do
           buffers: Buffers.t(),
           windows: Windows.t(),
           file_tree: FileTreeState.t(),
+          dired: DiredState.t(),
           viewport: Viewport.t(),
           mouse: Mouse.t(),
           highlight: Highlighting.t(),
@@ -48,6 +50,7 @@ defmodule MingaEditor.Workspace.State do
             buffers: %Buffers{},
             windows: %Windows{},
             file_tree: %FileTreeState{},
+            dired: %DiredState{},
             viewport: nil,
             mouse: %Mouse{},
             highlight: %Highlighting{},
@@ -218,6 +221,12 @@ defmodule MingaEditor.Workspace.State do
   @spec set_file_tree(t(), FileTreeState.t()) :: t()
   def set_file_tree(%__MODULE__{} = wspace, %FileTreeState{} = file_tree) do
     %{wspace | file_tree: file_tree}
+  end
+
+  @doc "Replaces the dired sub-struct."
+  @spec set_dired(t(), DiredState.t()) :: t()
+  def set_dired(%__MODULE__{} = wspace, %DiredState{} = dired) do
+    %{wspace | dired: dired}
   end
 
   @doc "Updates the highlighting sub-struct."

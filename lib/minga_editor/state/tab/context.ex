@@ -8,6 +8,7 @@ defmodule MingaEditor.State.Tab.Context do
   alias Minga.Keymap.Scope
   alias MingaEditor.Agent.UIState
   alias MingaEditor.State.Buffers
+  alias MingaEditor.State.Dired, as: DiredState
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Highlighting
   alias MingaEditor.State.Mouse
@@ -23,6 +24,7 @@ defmodule MingaEditor.State.Tab.Context do
     :buffers,
     :windows,
     :file_tree,
+    :dired,
     :viewport,
     :mouse,
     :highlight,
@@ -40,6 +42,7 @@ defmodule MingaEditor.State.Tab.Context do
           | :buffers
           | :windows
           | :file_tree
+          | :dired
           | :viewport
           | :mouse
           | :highlight
@@ -63,6 +66,7 @@ defmodule MingaEditor.State.Tab.Context do
           buffers: Buffers.t() | nil,
           windows: Windows.t() | nil,
           file_tree: FileTreeState.t() | nil,
+          dired: DiredState.t() | nil,
           viewport: Viewport.t() | nil,
           mouse: Mouse.t() | nil,
           highlight: Highlighting.t() | nil,
@@ -80,6 +84,7 @@ defmodule MingaEditor.State.Tab.Context do
             buffers: nil,
             windows: nil,
             file_tree: nil,
+            dired: nil,
             viewport: nil,
             mouse: nil,
             highlight: nil,
@@ -202,6 +207,7 @@ defmodule MingaEditor.State.Tab.Context do
   defp valid_field?(:buffers, %Buffers{}), do: true
   defp valid_field?(:windows, %Windows{}), do: true
   defp valid_field?(:file_tree, %FileTreeState{}), do: true
+  defp valid_field?(:dired, %DiredState{}), do: true
   defp valid_field?(:viewport, %Viewport{}), do: true
   defp valid_field?(:mouse, %Mouse{}), do: true
   defp valid_field?(:highlight, %Highlighting{}), do: true

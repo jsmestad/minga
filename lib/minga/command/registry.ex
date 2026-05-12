@@ -52,6 +52,7 @@ defmodule Minga.Command.Registry do
     MingaEditor.Commands.Project,
     MingaEditor.Commands.Agent,
     MingaEditor.Commands.FileTree,
+    MingaEditor.Commands.Dired,
     MingaEditor.Commands.Testing,
     MingaEditor.Commands.Extensions,
     MingaEditor.Commands.Macros,
