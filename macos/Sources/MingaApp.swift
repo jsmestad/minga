@@ -11,6 +11,7 @@
 
 import SwiftUI
 import AppKit
+import Darwin
 import os
 
 /// Default font settings.
@@ -570,6 +571,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var protocolReader: ProtocolReader?
     private var encoder: ProtocolEncoder?
     private var dispatcher: CommandDispatcher?
+    private var recoveryManager: RecoveryManager?
     private var fontFace: FontFace?
     private var fontManager: FontManager?
     private var editorNSView: EditorNSView?
@@ -668,16 +670,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         self.dispatcher = disp
 
+        // Recovery manager tracks key input and render responses so Ctrl-G
+        // can present a native restart dialog if the BEAM stops responding.
+        let recovery = RecoveryManager { [weak self] in
+            if let manager = self?.beamManager {
+                manager.sendRecoveryRestartSignal()
+            } else {
+                let parentPid = getppid()
+                if parentPid > 1 { kill(parentPid, SIGUSR1) }
+            }
+        }
+        self.recoveryManager = recovery
+
         // Create the editor view.
         let nsView = EditorNSView(encoder: enc, fontFace: face, dispatcher: disp,
                                    coreTextRenderer: ctRenderer, fontManager: fm)
         nsView.guiState = appState.gui
         nsView.statusBarState = appState.gui.statusBarState
+        nsView.recoveryManager = recovery
         self.editorNSView = nsView
         appState.editorNSView = nsView
         observeWorkspaceLifecycleNotifications()
         os_signpost(.event, log: startupLog, name: "EditorViewCreated")
 
+        disp.onBatchEnd = { [weak recovery] in
+            recovery?.onRenderReceived()
+        }
         disp.onFrameReady = { [weak nsView] in
             nsView?.renderFrame()
         }

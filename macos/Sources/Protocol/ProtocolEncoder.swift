@@ -1,9 +1,11 @@
 /// Encodes input events from the GUI to the BEAM via stdout.
 ///
 /// All events are length-prefixed with a 4-byte big-endian header
-/// (`{:packet, 4}` framing). The encoder writes directly to stdout
-/// with a lock to prevent interleaved writes from multiple threads.
+/// (`{:packet, 4}` framing). The encoder enqueues frames on a serial
+/// write queue and drains stdout asynchronously so UI threads never block
+/// behind pipe backpressure.
 
+import Darwin
 import Foundation
 
 /// Protocol for sending input events to the BEAM. The real implementation
@@ -110,24 +112,78 @@ extension InputEncoder {
 /// -1 with `errno = EPIPE`, which we handle by marking the encoder as
 /// disconnected and silently dropping subsequent writes.
 final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
-    private let lock = NSLock()
     private let fd: Int32
+    private let writeQueue = DispatchQueue(label: "minga.encoder.write", qos: .userInteractive)
+    private let writeQueueKey = DispatchSpecificKey<Void>()
+    private let maxBufferSize: Int
+    private let retryDelay: DispatchTimeInterval = .milliseconds(10)
+
     /// Once a write fails with EPIPE, all subsequent writes are dropped.
     private var connected: Bool = true
+    private var writeBuffer = Data()
+    private var bufferSize: Int = 0
+    private var drainRetryScheduled: Bool = false
+    private var droppedCount: UInt64 = 0
 
     /// Creates an encoder. Defaults to stdout for production use.
     /// Pass a pipe's write handle for testing binary layout.
-    init(output: FileHandle = .standardOutput) {
+    init(output: FileHandle = .standardOutput, maxBufferSize: Int = 64 * 1024) {
         self.fd = output.fileDescriptor
+        self.maxBufferSize = maxBufferSize
+        writeQueue.setSpecific(key: writeQueueKey, value: ())
+        setNonBlocking(fd: fd)
     }
 
     /// Mark the encoder as disconnected. Called by the reader's
     /// `onDisconnect` callback so writes stop immediately without
     /// waiting for the next EPIPE.
     func disconnect() {
-        lock.lock()
-        defer { lock.unlock() }
-        connected = false
+        writeQueue.async { [weak self] in
+            guard let self else { return }
+            self.connected = false
+            self.writeBuffer.removeAll(keepingCapacity: false)
+            self.bufferSize = 0
+        }
+    }
+
+    /// Snapshot of dropped messages for diagnostics and tests.
+    var droppedMessageCount: UInt64 {
+        if DispatchQueue.getSpecific(key: writeQueueKey) != nil {
+            return droppedCount
+        }
+        return writeQueue.sync { droppedCount }
+    }
+
+    /// Snapshot of buffered bytes for diagnostics and tests.
+    var bufferedByteCount: Int {
+        if DispatchQueue.getSpecific(key: writeQueueKey) != nil {
+            return bufferSize
+        }
+        return writeQueue.sync { bufferSize }
+    }
+
+    /// Snapshot of currently buffered framed bytes for unit tests.
+    func bufferedDataForTesting() -> Data {
+        if DispatchQueue.getSpecific(key: writeQueueKey) != nil {
+            return writeBuffer
+        }
+        return writeQueue.sync { writeBuffer }
+    }
+
+    /// Blocks until previously enqueued writes have had a chance to drain.
+    /// This is for unit tests only; production callers must not use it.
+    @discardableResult
+    func waitForPendingWritesForTesting(timeout: TimeInterval = 1.0) -> Bool {
+        if DispatchQueue.getSpecific(key: writeQueueKey) != nil {
+            return true
+        }
+
+        let semaphore = DispatchSemaphore(value: 0)
+        writeQueue.async { [weak self] in
+            self?.drainBuffer()
+            semaphore.signal()
+        }
+        return semaphore.wait(timeout: .now() + timeout) == .success
     }
 
     /// Send the ready event with initial dimensions and capabilities.
@@ -746,18 +802,25 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
 
     // MARK: - Private
 
-    /// Write a length-prefixed frame using POSIX `write()`.
+    /// Enqueue a length-prefixed frame for asynchronous POSIX `write()`.
     ///
     /// `FileHandle.write()` raises an ObjC `NSFileHandleOperationException`
     /// on EPIPE that Swift cannot catch, zombifying the app. POSIX `write()`
     /// returns -1 and sets `errno = EPIPE`, which we handle by flipping
-    /// `connected` to false.
+    /// `connected` to false. The file descriptor is non-blocking, so pipe
+    /// backpressure returns EAGAIN instead of freezing the caller.
     private func writeFrame(_ payload: Data) {
-        lock.lock()
-        defer { lock.unlock() }
+        let frame = makeFrame(payload)
+        writeQueue.async { [weak self] in
+            guard let self, self.connected else { return }
+            self.writeBuffer.append(frame)
+            self.bufferSize += frame.count
+            self.dropOldestFramesIfNeeded()
+            self.drainBuffer()
+        }
+    }
 
-        guard connected else { return }
-
+    private func makeFrame(_ payload: Data) -> Data {
         var frame = Data(count: 4 + payload.count)
         let len = UInt32(payload.count)
         frame[0] = UInt8((len >> 24) & 0xFF)
@@ -765,23 +828,88 @@ final class ProtocolEncoder: InputEncoder, @unchecked Sendable {
         frame[2] = UInt8((len >> 8) & 0xFF)
         frame[3] = UInt8(len & 0xFF)
         frame.replaceSubrange(4..<(4 + payload.count), with: payload)
+        return frame
+    }
 
-        frame.withUnsafeBytes { buffer in
-            guard let ptr = buffer.baseAddress else { return }
-            var remaining = frame.count
-            var offset = 0
-            while remaining > 0 {
-                let written = Darwin.write(fd, ptr + offset, remaining)
-                if written < 0 {
-                    if errno == EINTR { continue }
-                    // EPIPE or other fatal error: pipe is broken.
-                    connected = false
-                    return
-                }
-                offset += written
-                remaining -= written
+    private func drainBuffer() {
+        guard connected else { return }
+
+        while bufferSize > 0 {
+            let written = writeBuffer.withUnsafeBytes { buffer -> Int in
+                guard let ptr = buffer.baseAddress else { return 0 }
+                return Darwin.write(fd, ptr, bufferSize)
             }
+
+            if written > 0 {
+                writeBuffer.removeSubrange(0..<written)
+                bufferSize -= written
+                continue
+            }
+
+            if written == 0 {
+                scheduleDrainRetry()
+                return
+            }
+
+            let error = errno
+            if error == EINTR {
+                continue
+            }
+            if error == EAGAIN || error == EWOULDBLOCK {
+                scheduleDrainRetry()
+                return
+            }
+
+            connected = false
+            writeBuffer.removeAll(keepingCapacity: false)
+            bufferSize = 0
+            return
         }
+    }
+
+    private func scheduleDrainRetry() {
+        guard !drainRetryScheduled, connected else { return }
+        drainRetryScheduled = true
+        writeQueue.asyncAfter(deadline: .now() + retryDelay) { [weak self] in
+            guard let self else { return }
+            self.drainRetryScheduled = false
+            self.drainBuffer()
+        }
+    }
+
+    private func dropOldestFramesIfNeeded() {
+        guard bufferSize > maxBufferSize else { return }
+
+        var droppedThisPass: UInt64 = 0
+        while bufferSize > maxBufferSize, writeBuffer.count >= 4 {
+            let payloadLength = Int(writeBuffer[0]) << 24 | Int(writeBuffer[1]) << 16 | Int(writeBuffer[2]) << 8 | Int(writeBuffer[3])
+            let frameLength = 4 + payloadLength
+            guard frameLength > 4, frameLength <= writeBuffer.count else {
+                writeBuffer.removeAll(keepingCapacity: false)
+                bufferSize = 0
+                droppedThisPass += 1
+                break
+            }
+
+            // A single valid frame can be slightly larger than the default
+            // threshold, for example a maximum-size paste event. Preserve it
+            // rather than silently dropping user input before a drain attempt.
+            guard frameLength < writeBuffer.count else { break }
+
+            writeBuffer.removeSubrange(0..<frameLength)
+            bufferSize -= frameLength
+            droppedThisPass += 1
+        }
+
+        guard droppedThisPass > 0 else { return }
+        droppedCount += droppedThisPass
+        PortLogger.warn("GUI output buffer exceeded \(maxBufferSize) bytes; dropped \(droppedThisPass) oldest messages (total \(droppedCount))")
+    }
+
+    private func setNonBlocking(fd: Int32) {
+        let flags = fcntl(fd, F_GETFL, 0)
+        guard flags >= 0 else { return }
+        _ = fcntl(fd, F_SETFL, flags | O_NONBLOCK)
     }
 
     private func writeU16(_ buf: inout Data, _ offset: Int, _ value: UInt16) {

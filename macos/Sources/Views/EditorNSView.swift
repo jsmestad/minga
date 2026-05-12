@@ -29,6 +29,9 @@ final class EditorNSView: MTKView {
     /// GUI state for semantic window content (0x80) and theme colors.
     var guiState: GUIState?
 
+    /// Tracks BEAM responsiveness and handles Ctrl-G recovery.
+    var recoveryManager: RecoveryManager?
+
     private var trackingArea: NSTrackingArea?
 
     /// IME composition state (marked text tracking).
@@ -627,6 +630,13 @@ final class EditorNSView: MTKView {
         resetCursorBlink()
         let mods = modifierBits(from: event.modifierFlags)
 
+        if event.modifierFlags.contains(.control),
+           event.charactersIgnoringModifiers == "g",
+           recoveryManager?.handleCtrlG() == true
+        {
+            return
+        }
+
         // ── Space leader key-chord interception ──
         // When SPC is pending or held, intercept chord keys before any
         // other processing. Skip when:
@@ -640,7 +650,7 @@ final class EditorNSView: MTKView {
                     // User holding SPC for repeated spaces. Cancel chord detection.
                     cancelSpaceGrace()
                     spaceKeyDown = false
-                    encoder.sendKeyPress(codepoint: 0x20, modifiers: 0)
+                    sendKeyPress(codepoint: 0x20, modifiers: 0)
                     return
                 }
 
@@ -652,7 +662,7 @@ final class EditorNSView: MTKView {
                     // Grace period expired. Send the space now.
                     self.spacePending = false
                     self.spaceKeyDown = true
-                    self.encoder.sendKeyPress(codepoint: 0x20, modifiers: 0)
+                    self.sendKeyPress(codepoint: 0x20, modifiers: 0)
                 }
                 spaceGraceTimer?.cancel()
                 spaceGraceTimer = timer
@@ -667,7 +677,7 @@ final class EditorNSView: MTKView {
                 cancelSpaceGrace()
                 spacePending = false
                 spaceKeyDown = false
-                encoder.sendSpaceLeaderChord(codepoint: codepoint(from: event, mods: mods), modifiers: mods)
+                sendSpaceLeaderChord(codepoint: codepoint(from: event, mods: mods), modifiers: mods)
                 return
             }
 
@@ -675,7 +685,7 @@ final class EditorNSView: MTKView {
                 // Fallback chord: SPC was already sent (grace timer fired).
                 // Tell BEAM to retract the space and enter leader.
                 spaceKeyDown = false
-                encoder.sendSpaceLeaderRetract(codepoint: codepoint(from: event, mods: mods), modifiers: mods)
+                sendSpaceLeaderRetract(codepoint: codepoint(from: event, mods: mods), modifiers: mods)
                 return
             }
         }
@@ -720,7 +730,7 @@ final class EditorNSView: MTKView {
                     return
                 }
             }
-            encoder.sendKeyPress(codepoint: codepoint, modifiers: mods)
+            sendKeyPress(codepoint: codepoint, modifiers: mods)
             return
         }
 
@@ -733,7 +743,7 @@ final class EditorNSView: MTKView {
                 ? event.charactersIgnoringModifiers : event.characters
             if let characters = chars, !characters.isEmpty {
                 for scalar in characters.unicodeScalars {
-                    encoder.sendKeyPress(codepoint: scalar.value, modifiers: textMods)
+                    sendKeyPress(codepoint: scalar.value, modifiers: textMods)
                 }
             }
             return
@@ -765,7 +775,7 @@ final class EditorNSView: MTKView {
                 // Send the space now (clean, no flash).
                 cancelSpaceGrace()
                 spacePending = false
-                encoder.sendKeyPress(codepoint: 0x20, modifiers: 0)
+                sendKeyPress(codepoint: 0x20, modifiers: 0)
             }
             spaceKeyDown = false
         }
@@ -1041,8 +1051,24 @@ final class EditorNSView: MTKView {
     /// Send committed text from IME to the BEAM as individual key presses.
     private func commitIMEText(_ text: String) {
         for scalar in text.unicodeScalars {
-            encoder.sendKeyPress(codepoint: scalar.value, modifiers: 0)
+            sendKeyPress(codepoint: scalar.value, modifiers: 0)
         }
+    }
+
+    /// Sends a key press and updates recovery tracking in one place.
+    private func sendKeyPress(codepoint: UInt32, modifiers: UInt8) {
+        recoveryManager?.onKeySent()
+        encoder.sendKeyPress(codepoint: codepoint, modifiers: modifiers)
+    }
+
+    private func sendSpaceLeaderChord(codepoint: UInt32, modifiers: UInt8) {
+        recoveryManager?.onKeySent()
+        encoder.sendSpaceLeaderChord(codepoint: codepoint, modifiers: modifiers)
+    }
+
+    private func sendSpaceLeaderRetract(codepoint: UInt32, modifiers: UInt8) {
+        recoveryManager?.onKeySent()
+        encoder.sendSpaceLeaderRetract(codepoint: codepoint, modifiers: modifiers)
     }
 
     // MARK: - Helpers

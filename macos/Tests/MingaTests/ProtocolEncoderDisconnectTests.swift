@@ -20,6 +20,7 @@ struct EncoderDisconnectTests {
 
         // Send one frame before disconnect (should succeed).
         encoder.sendReady(cols: 80, rows: 24)
+        #expect(encoder.waitForPendingWritesForTesting())
 
         // Disconnect the encoder.
         encoder.disconnect()
@@ -33,6 +34,7 @@ struct EncoderDisconnectTests {
         encoder.sendLog(level: 1, message: "test")
         encoder.sendSelectTab(id: 1)
         encoder.sendExecuteCommand(name: "quit")
+        #expect(encoder.waitForPendingWritesForTesting())
 
         // Close write end and read everything that was written.
         pipe.fileHandleForWriting.closeFile()
@@ -53,6 +55,7 @@ struct EncoderDisconnectTests {
 
         // Should not crash. Writes should still be dropped.
         encoder.sendKeyPress(codepoint: 0x61, modifiers: 0)
+        #expect(encoder.waitForPendingWritesForTesting())
 
         pipe.fileHandleForWriting.closeFile()
         let raw = pipe.fileHandleForReading.readDataToEndOfFile()
@@ -83,6 +86,7 @@ struct EncoderDisconnectTests {
         encoder.sendKeyPress(codepoint: 0x62, modifiers: 0)
         encoder.sendResize(cols: 100, rows: 50)
         encoder.sendPasteEvent(text: "should be dropped")
+        #expect(encoder.waitForPendingWritesForTesting())
     }
 
     @Test("encoder survives rapid writes to a broken pipe")
@@ -100,6 +104,7 @@ struct EncoderDisconnectTests {
         for i: UInt32 in 0..<100 {
             encoder.sendKeyPress(codepoint: 0x61 + (i % 26), modifiers: 0)
         }
+        #expect(encoder.waitForPendingWritesForTesting())
     }
 
     // MARK: - Thread safety
@@ -128,6 +133,8 @@ struct EncoderDisconnectTests {
                 encoder.disconnect()
             }
         }
+
+        #expect(encoder.waitForPendingWritesForTesting())
 
         // If we get here without crashing or deadlocking, the test passes.
         // Close the pipe so it doesn't leak.
