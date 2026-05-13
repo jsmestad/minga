@@ -41,7 +41,9 @@ defmodule MingaEditor.Commands.Editing do
     {:comment_visual_selection, "Toggle comment on selection", true},
     {:indent_visual_selection, "Indent visual selection", true},
     {:dedent_visual_selection, "Dedent visual selection", true},
-    {:reindent_visual_selection, "Re-indent visual selection", true}
+    {:reindent_visual_selection, "Re-indent visual selection", true},
+    {:cmd_copy, "Copy to system clipboard (Cmd+C)", true},
+    {:cmd_cut, "Cut to system clipboard (Cmd+X)", true}
   ]
 
   @spec execute(state(), Mode.command()) :: state()
@@ -491,6 +493,57 @@ defmodule MingaEditor.Commands.Editing do
     state
   end
 
+  # ── Menu bar copy/cut (Cmd+C / Cmd+X) ─────────────────────────────────────
+
+  def execute(
+        %{
+          workspace: %{
+            buffers: %{active: buf},
+            editing: %{mode: :visual, mode_state: %VisualState{} = ms}
+          }
+        } = state,
+        :cmd_copy
+      ) do
+    cursor = Buffer.cursor(buf)
+    {yanked, reg_type} = cmd_visual_yank_text(buf, ms, cursor)
+    state = Helpers.put_register(state, yanked, :yank, reg_type)
+    Helpers.force_clipboard_sync(state, yanked)
+  end
+
+  def execute(%{workspace: %{buffers: %{active: buf}}} = state, :cmd_copy) when is_pid(buf) do
+    {line, _col} = Buffer.cursor(buf)
+    yanked = Buffer.lines_content(buf, line, line) <> "\n"
+    state = Helpers.put_register(state, yanked, :yank, :linewise)
+    Helpers.force_clipboard_sync(state, yanked)
+  end
+
+  def execute(
+        %{
+          workspace: %{
+            buffers: %{active: buf},
+            editing: %{mode: :visual, mode_state: %VisualState{} = ms}
+          }
+        } = state,
+        :cmd_cut
+      ) do
+    cursor = Buffer.cursor(buf)
+    {yanked, reg_type} = cmd_visual_delete_text(buf, ms, cursor)
+    state = Helpers.put_register(state, yanked, :delete, reg_type)
+    Helpers.force_clipboard_sync(state, yanked)
+  end
+
+  def execute(%{workspace: %{buffers: %{active: buf}}} = state, :cmd_cut) when is_pid(buf) do
+    if Buffer.read_only?(buf) do
+      EditorState.set_status(state, "Buffer is read-only")
+    else
+      {line, _col} = Buffer.cursor(buf)
+      yanked = Buffer.lines_content(buf, line, line) <> "\n"
+      Buffer.delete_lines(buf, line, line)
+      state = Helpers.put_register(state, yanked, :delete, :linewise)
+      Helpers.force_clipboard_sync(state, yanked)
+    end
+  end
+
   # ── Private comment helpers ──────────────────────────────────────────────
 
   @spec toggle_comment(pid(), non_neg_integer(), non_neg_integer(), state()) :: :ok
@@ -914,6 +967,44 @@ defmodule MingaEditor.Commands.Editing do
       |> String.graphemes()
       |> List.first()
       |> then(&(&1 || ""))
+    end
+  end
+
+  # ── Private cmd_copy/cmd_cut helpers ──────────────────────────────────────
+
+  @spec cmd_visual_yank_text(pid(), VisualState.t(), {non_neg_integer(), non_neg_integer()}) ::
+          {String.t(), Registers.reg_type()}
+  defp cmd_visual_yank_text(buf, ms, cursor) do
+    case ms.visual_type do
+      :char ->
+        {Buffer.text_between_inclusive(buf, ms.visual_anchor, cursor), :charwise}
+
+      :line ->
+        {anchor_line, _} = ms.visual_anchor
+        {cursor_line, _} = cursor
+        start_line = min(anchor_line, cursor_line)
+        end_line = max(anchor_line, cursor_line)
+        {Buffer.lines_content(buf, start_line, end_line) <> "\n", :linewise}
+    end
+  end
+
+  @spec cmd_visual_delete_text(pid(), VisualState.t(), {non_neg_integer(), non_neg_integer()}) ::
+          {String.t(), Registers.reg_type()}
+  defp cmd_visual_delete_text(buf, ms, cursor) do
+    case ms.visual_type do
+      :char ->
+        text = Buffer.text_between_inclusive(buf, ms.visual_anchor, cursor)
+        Buffer.delete_range(buf, ms.visual_anchor, cursor)
+        {text, :charwise}
+
+      :line ->
+        {anchor_line, _} = ms.visual_anchor
+        {cursor_line, _} = cursor
+        start_line = min(anchor_line, cursor_line)
+        end_line = max(anchor_line, cursor_line)
+        text = Buffer.lines_content(buf, start_line, end_line)
+        Buffer.delete_lines(buf, start_line, end_line)
+        {text <> "\n", :linewise}
     end
   end
 

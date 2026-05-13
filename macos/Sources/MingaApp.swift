@@ -36,11 +36,82 @@ struct MingaApp: App {
                 .focusEffectDisabled()
         }
         .windowStyle(.titleBar)
-        // Remove default menu keyboard shortcuts that would intercept
-        // keys before our NSView sees them.
         .commands {
-            CommandGroup(replacing: .textEditing) {}
+            MingaMenuCommands(appState: appDelegate.appState)
         }
+    }
+}
+
+/// Native menu bar for Minga.
+///
+/// Items that map to editor commands send the appropriate event to the
+/// BEAM via the protocol encoder. Items that are purely macOS-native
+/// (Minimize, Zoom, Full Screen, Quit) use standard AppKit behavior.
+struct MingaMenuCommands: Commands {
+    let appState: AppState
+
+    private var encoder: InputEncoder? { appState.encoder }
+
+    var body: some Commands {
+        // Replace the default text editing commands (Cmd+C/V/X/Z/A) with
+        // our own versions that route through the BEAM.
+        CommandGroup(replacing: .textEditing) {
+            Button("Undo") { encoder?.sendKeyPress(codepoint: 0x75, modifiers: 0) }
+                .keyboardShortcut("z", modifiers: .command)
+            Button("Redo") { encoder?.sendKeyPress(codepoint: 0x72, modifiers: 0x02) }
+                .keyboardShortcut("z", modifiers: [.command, .shift])
+
+            Divider()
+
+            Button("Cut") { encoder?.sendCmdCut() }
+                .keyboardShortcut("x", modifiers: .command)
+            Button("Copy") { encoder?.sendCmdCopy() }
+                .keyboardShortcut("c", modifiers: .command)
+            Button("Paste") { pasteFromClipboard() }
+                .keyboardShortcut("v", modifiers: .command)
+            Button("Select All") { encoder?.sendExecuteCommand(name: "select_all") }
+                .keyboardShortcut("a", modifiers: .command)
+
+            Divider()
+
+            Button("Find…") { encoder?.sendKeyPress(codepoint: 0x2F, modifiers: 0) }
+                .keyboardShortcut("f", modifiers: .command)
+        }
+
+        // File menu: New, Open, Save, Close Window.
+        // SwiftUI provides the default "New Window" item; we replace it with
+        // "New Buffer" which opens an empty scratch buffer in the BEAM.
+        CommandGroup(replacing: .newItem) {
+            Button("New Buffer") { encoder?.sendExecuteCommand(name: "new_buffer") }
+                .keyboardShortcut("n", modifiers: .command)
+        }
+
+        CommandGroup(after: .newItem) {
+            Button("Open…") { encoder?.sendExecuteCommand(name: "find_file") }
+                .keyboardShortcut("o", modifiers: .command)
+
+            Divider()
+
+            Button("Save") { encoder?.sendExecuteCommand(name: "save") }
+                .keyboardShortcut("s", modifiers: .command)
+
+            Divider()
+
+            Button("Close Tab") { encoder?.sendExecuteCommand(name: "quit") }
+                .keyboardShortcut("w", modifiers: .command)
+        }
+
+        // View menu
+        CommandMenu("View") {
+            Button("Toggle File Tree") { encoder?.sendTogglePanel(panel: 0) }
+                .keyboardShortcut("b", modifiers: .command)
+        }
+    }
+
+    /// Reads the system pasteboard and sends a paste event to the BEAM.
+    private func pasteFromClipboard() {
+        guard let text = NSPasteboard.general.string(forType: .string) else { return }
+        encoder?.sendPasteEvent(text: text)
     }
 }
 

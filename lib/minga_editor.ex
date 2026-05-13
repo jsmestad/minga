@@ -2321,6 +2321,14 @@ defmodule MingaEditor do
     end
   end
 
+  defp handle_gui_action(state, :cmd_copy) do
+    Commands.Editing.execute(state, :cmd_copy)
+  end
+
+  defp handle_gui_action(state, :cmd_cut) do
+    Commands.Editing.execute(state, :cmd_cut)
+  end
+
   defp handle_gui_action(state, {:git_open_file, path}) do
     case resolve_git_root() do
       nil ->
