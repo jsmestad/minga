@@ -32,7 +32,8 @@ defmodule MingaEditor.Shell.Traditional.OnBufferAddedTest do
 
       {:ok, buf} = BufferServer.start_link(content: "hello")
 
-      {new_shell, _ws} = Traditional.on_buffer_added(shell_state, blank_workspace(), buf, :open)
+      {new_shell, _ws, _effects} =
+        Traditional.on_buffer_added(shell_state, blank_workspace(), buf, :open)
 
       assert new_shell.modal == :none
     end
@@ -49,7 +50,8 @@ defmodule MingaEditor.Shell.Traditional.OnBufferAddedTest do
 
       {:ok, buf} = BufferServer.start_link(content: "hello")
 
-      {new_shell, _ws} = Traditional.on_buffer_added(shell_state, blank_workspace(), buf, :open)
+      {new_shell, _ws, _effects} =
+        Traditional.on_buffer_added(shell_state, blank_workspace(), buf, :open)
 
       assert new_shell.modal == {:picker, picker_payload}
     end
@@ -58,7 +60,8 @@ defmodule MingaEditor.Shell.Traditional.OnBufferAddedTest do
       shell_state = %ShellState{modal: :none}
       {:ok, buf} = BufferServer.start_link(content: "hello")
 
-      {new_shell, _ws} = Traditional.on_buffer_added(shell_state, blank_workspace(), buf, :open)
+      {new_shell, _ws, _effects} =
+        Traditional.on_buffer_added(shell_state, blank_workspace(), buf, :open)
 
       assert new_shell.modal == :none
     end

@@ -28,15 +28,15 @@ defmodule MingaEditor.Shell.BufferLifecycle do
               workspace(),
               buffer_pid :: pid(),
               context :: buffer_add_context()
-            ) :: {shell_state(), workspace()}
+            ) :: {shell_state(), workspace(), [MingaEditor.effect()]}
 
   @doc "The active buffer changed."
   @callback on_buffer_switched(shell_state(), workspace()) ::
-              {shell_state(), workspace()}
+              {shell_state(), workspace(), [MingaEditor.effect()]}
 
   @doc "A buffer process died."
   @callback on_buffer_died(shell_state(), workspace(), dead_pid :: pid()) ::
-              {shell_state(), workspace()}
+              {shell_state(), workspace(), [MingaEditor.effect()]}
 
   @doc """
   An agent session emitted an event. The shell reflects the status
@@ -49,5 +49,5 @@ defmodule MingaEditor.Shell.BufferLifecycle do
               workspace(),
               session_pid :: pid(),
               event :: term()
-            ) :: {shell_state(), workspace()}
+            ) :: {shell_state(), workspace(), [MingaEditor.effect()]}
 end

@@ -723,10 +723,11 @@ defmodule MingaEditor do
     else
       # Background session: dispatch to shell for presentation updates
       # (tab badges, card status, attention flags, etc.)
-      {shell_state, workspace} =
+      {shell_state, workspace, shell_effects} =
         state.shell.on_agent_event(state.shell_state, state.workspace, session_pid, event)
 
       state = %{state | shell_state: shell_state, workspace: workspace}
+      state = apply_effects(state, shell_effects)
       {:noreply, schedule_render(state, 16)}
     end
   end
