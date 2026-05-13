@@ -7,6 +7,7 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
 
   @behaviour MingaEditor.UI.Picker.Source
 
+  alias Minga.Distribution.ConnectionManager
   alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.Item
 
@@ -16,6 +17,7 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
   alias MingaEditor.State.AgentAccess
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
+  alias MingaEditor.Commands.Agent
 
   @impl true
   @spec title() :: String.t()
@@ -33,7 +35,7 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
     if persisted_only?(ctx) do
       disk
     else
-      live = tab_candidates(tb)
+      live = tab_candidates(tb) ++ remote_candidates()
       live_ids = MapSet.new(live, fn %Item{id: {id, _}} -> id end)
 
       live ++
@@ -47,6 +49,10 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
   @spec on_select(Item.t(), term()) :: term()
   def on_select(%Item{id: {_id, {:tab, tab_id}}}, state) do
     EditorState.switch_tab(state, tab_id)
+  end
+
+  def on_select(%Item{id: {_id, {:remote, server_name, session_id, remote_pid}}}, state) do
+    Agent.connect_remote_session(state, server_name, session_id, remote_pid)
   end
 
   def on_select(%Item{id: {session_id, :disk}}, state) do
@@ -96,6 +102,44 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
     {:ok, Session.metadata(pid)}
   catch
     :exit, _ -> :error
+  end
+
+  @spec remote_candidates() :: [Item.t()]
+  defp remote_candidates do
+    ConnectionManager.connected_nodes()
+    |> Enum.filter(fn {_server_name, _node, status} -> status == :connected end)
+    |> Enum.flat_map(&remote_sessions_for_node/1)
+  end
+
+  @spec remote_sessions_for_node({String.t(), node(), atom()}) :: [Item.t()]
+  defp remote_sessions_for_node({server_name, remote_node, _status}) do
+    case :erpc.call(remote_node, MingaAgent.SessionManager, :list_sessions, [], 5_000) do
+      sessions -> Enum.map(sessions, &remote_session_item(server_name, &1))
+    end
+  catch
+    :exit, reason ->
+      Minga.Log.warning(
+        :distribution,
+        "Failed to list sessions on #{server_name}: #{inspect(reason)}"
+      )
+
+      []
+  end
+
+  @spec remote_session_item(String.t(), {String.t(), pid(), Session.metadata()}) :: Item.t()
+  defp remote_session_item(server_name, {session_id, remote_pid, meta}) do
+    %Item{
+      id: {{:remote, server_name, session_id}, {:remote, server_name, session_id, remote_pid}},
+      label: "[#{server_name}] #{truncate_prompt(meta.title || meta.first_prompt || session_id)}",
+      description: remote_description(meta),
+      annotation: Atom.to_string(meta.status)
+    }
+  end
+
+  @spec remote_description(Session.metadata()) :: String.t()
+  defp remote_description(meta) do
+    created = Calendar.strftime(meta.created_at, "%b %d %H:%M")
+    "#{meta.provider_name}/#{meta.model_name} · #{meta.message_count} msgs · #{created}"
   end
 
   @spec disk_candidates(Context.t()) :: [Item.t()]

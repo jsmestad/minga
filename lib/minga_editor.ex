@@ -13,6 +13,7 @@ defmodule MingaEditor do
 
   use GenServer
 
+  alias MingaEditor.Agent.BufferSync, as: AgentBufferSync
   alias MingaEditor.Agent.Events
   alias MingaEditor.Agent.UIState
   alias Minga.Buffer
@@ -43,6 +44,10 @@ defmodule MingaEditor do
   alias MingaEditor.Renderer
   alias MingaEditor.SemanticTokenSync
   alias MingaEditor.Startup
+  alias MingaEditor.State.Agent, as: AgentState
+  alias MingaEditor.State.Remote
+  alias MingaEditor.State.Tab
+  alias MingaEditor.State.TabBar
   alias MingaEditor.Viewport
 
   alias MingaEditor.Handlers.FileEventHandler
@@ -224,6 +229,8 @@ defmodule MingaEditor do
     Minga.Events.subscribe(:face_overrides_changed, events_registry)
     Minga.Events.subscribe(:agent_session_stopped, events_registry)
     Minga.Events.subscribe(:background_subagent_started, events_registry)
+    Minga.Events.subscribe(:node_connected, events_registry)
+    Minga.Events.subscribe(:node_disconnected, events_registry)
     Minga.Events.subscribe(:load_user_themes, events_registry)
     Minga.Events.subscribe(:extension_updates_available, events_registry)
 
@@ -890,6 +897,24 @@ defmodule MingaEditor do
 
   defp dispatch_minga_event(
          state,
+         :node_connected,
+         %Minga.Distribution.Events.NodeConnectedEvent{} = event,
+         _msg
+       ) do
+    handle_node_connected(state, event)
+  end
+
+  defp dispatch_minga_event(
+         state,
+         :node_disconnected,
+         %Minga.Distribution.Events.NodeDisconnectedEvent{} = event,
+         _msg
+       ) do
+    handle_node_disconnected(state, event)
+  end
+
+  defp dispatch_minga_event(
+         state,
          :background_subagent_started,
          %MingaAgent.Subagent.Handle{} = handle,
          _msg
@@ -951,6 +976,199 @@ defmodule MingaEditor do
   end
 
   defp dispatch_minga_event(state, _event, _payload, _msg), do: state
+
+  @spec handle_node_connected(EditorState.t(), Minga.Distribution.Events.NodeConnectedEvent.t()) ::
+          EditorState.t()
+  defp handle_node_connected(state, %{server_name: server_name, node: remote_node}) do
+    sessions = discover_remote_sessions(remote_node, server_name)
+
+    state =
+      EditorState.update_remote(state, fn remote ->
+        remote
+        |> Remote.put_sessions(server_name, sessions)
+        |> Remote.put_server_status(server_name, :connected)
+      end)
+
+    state = reconnect_remote_tabs(state, server_name, remote_node)
+    count = length(sessions)
+    status = remote_connected_status(server_name, count)
+    EditorState.set_status(state, status)
+  end
+
+  @spec handle_node_disconnected(
+          EditorState.t(),
+          Minga.Distribution.Events.NodeDisconnectedEvent.t()
+        ) :: EditorState.t()
+  defp handle_node_disconnected(state, %{server_name: server_name}) do
+    state =
+      EditorState.update_remote(state, &Remote.put_server_status(&1, server_name, :disconnected))
+
+    state = mark_remote_tabs(state, server_name, :disconnected)
+
+    if active_remote_server?(state, server_name) do
+      state
+      |> AgentAccess.update_agent(&AgentState.stop_spinner_timer/1)
+      |> AgentAccess.update_agent(
+        &AgentState.set_error(&1, "[#{server_name}] disconnected, reconnecting...")
+      )
+      |> EditorState.set_status("[#{server_name}] disconnected, reconnecting...")
+    else
+      EditorState.set_status(state, "[#{server_name}] disconnected, reconnecting...")
+    end
+  end
+
+  @spec discover_remote_sessions(node(), String.t()) :: [Remote.session_entry()]
+  defp discover_remote_sessions(remote_node, server_name) do
+    :erpc.call(remote_node, MingaAgent.SessionManager, :list_sessions, [], 5_000)
+  catch
+    :exit, reason ->
+      Minga.Log.warning(
+        :distribution,
+        "Failed to discover sessions on #{server_name}: #{inspect(reason)}"
+      )
+
+      []
+  end
+
+  @spec remote_connected_status(String.t(), non_neg_integer()) :: String.t()
+  defp remote_connected_status(server_name, 0),
+    do: "Connected to #{server_name} (no active sessions)"
+
+  defp remote_connected_status(server_name, count),
+    do: "Connected to #{server_name} (#{count} active sessions)"
+
+  @spec reconnect_remote_tabs(EditorState.t(), String.t(), node()) :: EditorState.t()
+  defp reconnect_remote_tabs(
+         %{shell_state: %{tab_bar: %TabBar{} = tb}} = state,
+         server_name,
+         remote_node
+       ) do
+    Enum.reduce(tb.tabs, state, fn
+      %Tab{server_name: ^server_name, remote_session_id: session_id} = tab, acc
+      when is_binary(session_id) ->
+        reconnect_remote_tab(acc, tab, remote_node, session_id)
+
+      _tab, acc ->
+        acc
+    end)
+  end
+
+  defp reconnect_remote_tabs(state, _server_name, _remote_node), do: state
+
+  @spec reconnect_remote_tab(EditorState.t(), Tab.t(), node(), String.t()) :: EditorState.t()
+  defp reconnect_remote_tab(state, tab, remote_node, session_id) do
+    case remote_session_pid(remote_node, session_id) do
+      {:ok, pid} ->
+        restore_remote_tab(state, tab, pid)
+
+      {:error, :not_found} ->
+        restore_remote_session_from_store(state, tab, remote_node, session_id)
+
+      {:error, _reason} ->
+        mark_remote_tab_status(state, tab, :disconnected)
+    end
+  end
+
+  @spec remote_session_pid(node(), String.t()) :: {:ok, pid()} | {:error, term()}
+  defp remote_session_pid(remote_node, session_id) do
+    :erpc.call(remote_node, MingaAgent.SessionManager, :get_session, [session_id], 5_000)
+  catch
+    :exit, reason -> {:error, {:remote_unavailable, reason}}
+  end
+
+  @spec restore_remote_session_from_store(EditorState.t(), Tab.t(), node(), String.t()) ::
+          EditorState.t()
+  defp restore_remote_session_from_store(state, tab, remote_node, session_id) do
+    case remote_session_data(remote_node, session_id) do
+      {:ok, %{messages: messages}} -> restore_ended_remote_tab(state, tab, messages)
+      {:error, _reason} -> mark_remote_tab_status(state, tab, :unavailable)
+    end
+  end
+
+  @spec remote_session_data(node(), String.t()) ::
+          {:ok, MingaAgent.SessionStore.session_data()} | {:error, term()}
+  defp remote_session_data(remote_node, session_id) do
+    :erpc.call(remote_node, MingaAgent.SessionStore, :load, [session_id], 5_000)
+  catch
+    :exit, reason -> {:error, {:remote_unavailable, reason}}
+  end
+
+  @spec restore_ended_remote_tab(EditorState.t(), Tab.t(), [term()]) :: EditorState.t()
+  defp restore_ended_remote_tab(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, tab, messages) do
+    tb = TabBar.update_tab(tb, tab.id, &Tab.set_connection_status(&1, :ended))
+    state = EditorState.set_tab_bar(state, tb)
+
+    if tb.active_id == tab.id do
+      case AgentAccess.agent(state).buffer do
+        pid when is_pid(pid) -> AgentBufferSync.sync(pid, messages)
+        _ -> :ok
+      end
+
+      state
+      |> AgentAccess.update_agent(&AgentState.set_error(&1, "Remote session ended"))
+      |> EditorState.set_status("Remote session ended")
+    else
+      state
+    end
+  end
+
+  defp restore_ended_remote_tab(state, _tab, _messages), do: state
+
+  @spec restore_remote_tab(EditorState.t(), Tab.t(), pid()) :: EditorState.t()
+  defp restore_remote_tab(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, %Tab{} = tab, pid) do
+    MingaAgent.Session.subscribe(pid, self())
+
+    tb =
+      TabBar.update_tab(tb, tab.id, fn remote_tab ->
+        remote_tab
+        |> Tab.set_session(pid)
+        |> Tab.set_connection_status(:connected)
+      end)
+
+    state = EditorState.set_tab_bar(state, tb)
+
+    if tb.active_id == tab.id do
+      state
+      |> EditorState.rebuild_agent_from_session(
+        tab
+        |> Tab.set_session(pid)
+        |> Tab.set_connection_status(:connected)
+      )
+      |> AgentLifecycle.sync_buffer()
+    else
+      state
+    end
+  catch
+    :exit, _reason -> mark_remote_tab_status(state, tab, :disconnected)
+  end
+
+  defp restore_remote_tab(state, _tab, _pid), do: state
+
+  @spec mark_remote_tabs(EditorState.t(), String.t(), Tab.connection_status()) :: EditorState.t()
+  defp mark_remote_tabs(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, server_name, status) do
+    EditorState.set_tab_bar(state, TabBar.set_remote_connection_status(tb, server_name, status))
+  end
+
+  defp mark_remote_tabs(state, _server_name, _status), do: state
+
+  @spec mark_remote_tab_status(EditorState.t(), Tab.t(), Tab.connection_status()) ::
+          EditorState.t()
+  defp mark_remote_tab_status(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, tab, status) do
+    EditorState.set_tab_bar(
+      state,
+      TabBar.update_tab(tb, tab.id, &Tab.set_connection_status(&1, status))
+    )
+  end
+
+  defp mark_remote_tab_status(state, _tab, _status), do: state
+
+  @spec active_remote_server?(EditorState.t(), String.t()) :: boolean()
+  defp active_remote_server?(state, server_name) do
+    case state.shell.active_tab(state.shell_state) do
+      %Tab{server_name: ^server_name} -> true
+      _ -> false
+    end
+  end
 
   # ── LSP response dispatch ──────────────────────────────────────────────────
 

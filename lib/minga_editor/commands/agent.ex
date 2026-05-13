@@ -193,6 +193,22 @@ defmodule MingaEditor.Commands.Agent do
     end
   end
 
+  @doc "Starts a local session, or opens a server picker when remotes are connected."
+  @spec start_session_picker(state()) :: state()
+  def start_session_picker(state) do
+    if connected_remote_servers?() do
+      PickerUI.open(state, MingaEditor.UI.Picker.RemoteServerSource)
+    else
+      new_agent_session(state)
+    end
+  end
+
+  @doc "Connects to an existing remote session from the session picker."
+  @spec connect_remote_session(state(), String.t(), String.t(), pid()) :: state()
+  def connect_remote_session(state, server_name, session_id, remote_pid) do
+    AgentSession.connect_remote_session(state, server_name, session_id, remote_pid)
+  end
+
   @doc "Submits the current input text as a prompt."
   @spec submit_prompt(state()) :: state()
   def submit_prompt(state) do
@@ -227,24 +243,24 @@ defmodule MingaEditor.Commands.Agent do
 
   @spec send_prompt_to_llm(state(), String.t()) :: state()
   defp send_prompt_to_llm(state, text) do
-    # Resolve @file mentions before sending to the LLM.
-    # Returns either a string (text only) or a list of ContentPart (when images are present).
-    model = AgentAccess.panel(state).model_name
+    if remote_session_disconnected?(state) do
+      EditorState.set_status(state, "Session disconnected. Your prompt will be preserved.")
+    else
+      model = AgentAccess.panel(state).model_name
 
-    case resolve_mentions(text, model: model) do
-      {:ok, resolved} ->
-        state
-        |> clear_input_after_submit()
-        |> deliver_prompt(resolved)
+      case resolve_prompt_for_session(state, text, model) do
+        {:ok, resolved} ->
+          state
+          |> clear_input_after_submit()
+          |> deliver_prompt(resolved)
 
-      {:error, msg} ->
-        EditorState.set_status(state, msg)
+        {:error, msg} ->
+          EditorState.set_status(state, msg)
+      end
     end
   catch
-    # The :DOWN monitor clears stale session PIDs, but there's a race window:
-    # the session can die while we're mid-call (before :DOWN is processed).
-    # This is the user-facing hot path (Enter to send), so catch it here.
-    :exit, _ -> EditorState.set_status(state, "Agent session crashed, SPC a n to restart")
+    :exit, _ ->
+      EditorState.set_status(state, "Agent session unavailable. Your prompt was preserved.")
   end
 
   # Clears the input and resets diff baselines after a prompt is submitted.
@@ -283,19 +299,64 @@ defmodule MingaEditor.Commands.Agent do
 
   @spec send_follow_up_to_llm(state(), String.t()) :: state()
   defp send_follow_up_to_llm(state, text) do
-    model = AgentAccess.panel(state).model_name
+    if remote_session_disconnected?(state) do
+      EditorState.set_status(state, "Session disconnected. Your prompt will be preserved.")
+    else
+      model = AgentAccess.panel(state).model_name
 
-    case resolve_mentions(text, model: model) do
-      {:ok, resolved} ->
-        state
-        |> update_agent_ui(&UIState.clear_input_and_scroll/1)
-        |> deliver_follow_up(resolved)
+      case resolve_prompt_for_session(state, text, model) do
+        {:ok, resolved} ->
+          state
+          |> update_agent_ui(&UIState.clear_input_and_scroll/1)
+          |> deliver_follow_up(resolved)
 
-      {:error, msg} ->
-        EditorState.set_status(state, msg)
+        {:error, msg} ->
+          EditorState.set_status(state, msg)
+      end
     end
   catch
-    :exit, _ -> EditorState.set_status(state, "Agent session crashed, SPC a n to restart")
+    :exit, _ ->
+      EditorState.set_status(state, "Agent session unavailable. Your prompt was preserved.")
+  end
+
+  @spec resolve_prompt_for_session(state(), String.t(), String.t()) ::
+          {:ok, String.t() | [ReqLLM.Message.ContentPart.t()]} | {:error, String.t()}
+  defp resolve_prompt_for_session(state, text, model) do
+    if remote_session?(state) do
+      {:ok, text}
+    else
+      resolve_mentions(text, model: model)
+    end
+  end
+
+  @spec connected_remote_servers?() :: boolean()
+  defp connected_remote_servers? do
+    Minga.Distribution.ConnectionManager.connected_nodes()
+    |> Enum.any?(fn {_name, _node, status} -> status == :connected end)
+  end
+
+  @spec remote_session?(state()) :: boolean()
+  defp remote_session?(state) do
+    case AgentAccess.session(state) do
+      pid when is_pid(pid) -> node(pid) != node()
+      _ -> false
+    end
+  end
+
+  @spec remote_session_disconnected?(state()) :: boolean()
+  defp remote_session_disconnected?(state) do
+    case AgentAccess.session(state) do
+      pid when is_pid(pid) and node(pid) != node() -> remote_node_disconnected?(node(pid))
+      _ -> false
+    end
+  end
+
+  @spec remote_node_disconnected?(node()) :: boolean()
+  defp remote_node_disconnected?(remote_node) do
+    case Minga.Distribution.ConnectionManager.server_name_for_node(remote_node) do
+      {:ok, server_name} -> not Minga.Distribution.ConnectionManager.connected?(server_name)
+      {:error, :not_found} -> true
+    end
   end
 
   @spec deliver_follow_up(state(), String.t() | [ReqLLM.Message.ContentPart.t()]) :: state()
@@ -471,6 +532,10 @@ defmodule MingaEditor.Commands.Agent do
     state = AgentAccess.update_agent_ui(state, fn _a -> UIState.new() end)
     AgentSession.start_agent_session(state)
   end
+
+  @doc "Stops the current agent session process."
+  @spec stop_current_session(state()) :: state()
+  def stop_current_session(state), do: AgentSession.stop_current_session(state)
 
   @doc "Clears all saved agent sessions from disk."
   @spec clear_session_history(state()) :: state()
@@ -1209,8 +1274,9 @@ defmodule MingaEditor.Commands.Agent do
     {:toggle_agentic_view, "Toggle agent split pane", :toggle_agentic_view},
     {:toggle_agent_split, "Toggle agent split", :toggle_agent_split},
     {:cycle_agent_tabs, "Cycle agent tabs (opens split if none)", :cycle_agent_tabs},
-    {:agent_abort, "Stop AI agent", :abort_agent},
-    {:agent_new_session, "New AI agent session", :new_agent_session},
+    {:agent_abort, "Abort current AI agent turn", :abort_agent},
+    {:agent_stop_session, "Stop AI agent session", :stop_current_session},
+    {:agent_new_session, "New AI agent session", :start_session_picker},
     {:agent_cycle_model, "Cycle AI agent model", :cycle_model},
     {:agent_summarize, "Summarize session to context artifact", :summarize},
     {:agent_cycle_thinking, "Cycle AI thinking level", :cycle_thinking_level},

@@ -234,10 +234,12 @@ defmodule Minga.Keymap.Scope.Agent do
          {"Ctrl-l", "Clear display"},
          {"s", "Session switcher"},
          {"SPC a n", "New session"},
-         {"SPC a s", "Stop agent"},
+         {"SPC a s", "Abort agent turn"},
+         {"SPC a S", "Stop agent session"},
          {"SPC a q", "Dequeue to editor"},
          {"SPC a f", "Queue follow-up from input"},
          {"SPC a m", "Pick model"},
+         {"SPC a o", "Open remote file"},
          {"SPC a T", "Cycle thinking level"}
        ]},
       {"Panel",

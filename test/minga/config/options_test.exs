@@ -110,6 +110,7 @@ defmodule Minga.Config.OptionsTest do
                yank_flash: true,
                log_level_config: :default,
                log_level_port: :default,
+               log_level_distribution: :default,
                parser_tree_ttl: 300,
                event_retention_days: 90,
                default_shell: :traditional

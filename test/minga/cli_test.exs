@@ -117,6 +117,55 @@ defmodule Minga.CLITest do
       assert message =~ "--config"
     end
 
+    test "--headless sets headless flag" do
+      assert {:open, nil, %{headless: true}} = CLI.parse_args(["--headless"])
+    end
+
+    test "--name, --cookie, --host, and --port set distribution flags" do
+      cookie = "abcdefghijklmnopqrstuvwxyz123456"
+
+      assert {:open, nil,
+              %{
+                node_name: "minga@host",
+                cookie: ^cookie,
+                gateway_host: "127.0.0.1",
+                gateway_port: 4900
+              }} =
+               CLI.parse_args([
+                 "--headless",
+                 "--name",
+                 "minga@host",
+                 "--cookie",
+                 cookie,
+                 "--host",
+                 "127.0.0.1",
+                 "--port",
+                 "4900"
+               ])
+    end
+
+    test "--cookie-file sets expanded cookie file path" do
+      assert {:open, nil, %{cookie_file: path}} =
+               CLI.parse_args(["--cookie-file", "~/minga.cookie"])
+
+      assert path == Path.expand("~/minga.cookie")
+    end
+
+    test "--sname sets short name mode" do
+      assert {:open, nil, %{node_name: "minga", short_name: true}} =
+               CLI.parse_args(["--sname", "minga"])
+    end
+
+    test "--port validates numeric range" do
+      assert {:error, message} = CLI.parse_args(["--port", "70000"])
+      assert message =~ "--port requires a TCP port"
+    end
+
+    test "--host rejects hostnames and malformed IP addresses" do
+      assert {:error, message} = CLI.parse_args(["--host", "example.com"])
+      assert message =~ "--host requires a valid IP address"
+    end
+
     test "unknown flag returns error" do
       assert {:error, message} = CLI.parse_args(["--unknown"])
       assert message =~ "unknown flag: --unknown"

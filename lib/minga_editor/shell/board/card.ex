@@ -24,9 +24,14 @@ defmodule MingaEditor.Shell.Board.Card do
 
   @type id :: pos_integer()
 
+  @type connection_status :: :connected | :disconnected | :ended | :unavailable | nil
+
   @type t :: %__MODULE__{
           id: id(),
           session: pid() | nil,
+          server_name: String.t() | nil,
+          remote_session_id: String.t() | nil,
+          connection_status: connection_status(),
           workspace: map() | nil,
           task: String.t(),
           status: status(),
@@ -40,6 +45,9 @@ defmodule MingaEditor.Shell.Board.Card do
   @enforce_keys [:id, :task]
   defstruct id: nil,
             session: nil,
+            server_name: nil,
+            remote_session_id: nil,
+            connection_status: nil,
             workspace: nil,
             task: "",
             status: :idle,
@@ -56,6 +64,9 @@ defmodule MingaEditor.Shell.Board.Card do
       id: id,
       task: Keyword.get(attrs, :task, ""),
       session: Keyword.get(attrs, :session),
+      server_name: Keyword.get(attrs, :server_name),
+      remote_session_id: Keyword.get(attrs, :remote_session_id),
+      connection_status: Keyword.get(attrs, :connection_status),
       model: Keyword.get(attrs, :model),
       workspace: Keyword.get(attrs, :workspace),
       status: Keyword.get(attrs, :status, :idle),
@@ -77,6 +88,46 @@ defmodule MingaEditor.Shell.Board.Card do
   def attach_session(%__MODULE__{} = card, pid) when is_pid(pid) do
     %{card | session: pid, status: :working}
   end
+
+  @doc "Marks this card as backed by a remote session."
+  @spec attach_remote_session(t(), String.t(), String.t(), pid()) :: t()
+  def attach_remote_session(%__MODULE__{} = card, server_name, session_id, pid)
+      when is_binary(server_name) and is_binary(session_id) and is_pid(pid) do
+    %{
+      card
+      | session: pid,
+        server_name: server_name,
+        remote_session_id: session_id,
+        connection_status: :connected,
+        status: :working
+    }
+  end
+
+  @doc "Updates remote connection status."
+  @spec set_connection_status(t(), connection_status()) :: t()
+  def set_connection_status(%__MODULE__{} = card, status)
+      when status in [:connected, :disconnected, :ended, :unavailable, nil] do
+    %{card | connection_status: status}
+  end
+
+  @doc "Returns a display task with the remote server prefix when present."
+  @spec display_task(t()) :: String.t()
+  def display_task(%__MODULE__{task: task, server_name: server_name, connection_status: status})
+      when is_binary(server_name) do
+    "[#{server_name}] #{base_task(task)}#{status_suffix(status)}"
+  end
+
+  def display_task(%__MODULE__{task: task}), do: base_task(task)
+
+  @spec base_task(String.t()) :: String.t()
+  defp base_task(""), do: "Untitled"
+  defp base_task(task), do: task
+
+  @spec status_suffix(connection_status()) :: String.t()
+  defp status_suffix(:disconnected), do: " [disconnected]"
+  defp status_suffix(:ended), do: " [ended]"
+  defp status_suffix(:unavailable), do: " [unavailable]"
+  defp status_suffix(_status), do: ""
 
   @doc "Detaches the agent session PID. Used after the session process has died."
   @spec detach_session(t()) :: t()

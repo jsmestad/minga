@@ -51,6 +51,7 @@ defmodule Minga.Command.Registry do
     MingaEditor.Commands.Git,
     MingaEditor.Commands.Project,
     MingaEditor.Commands.Agent,
+    MingaEditor.Commands.RemoteFiles,
     MingaEditor.Commands.FileTree,
     MingaEditor.Commands.Dired,
     MingaEditor.Commands.Testing,

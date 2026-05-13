@@ -1,6 +1,6 @@
 defmodule MingaAgent.Gateway.IntegrationTest do
+  # Starts a Bandit listener on a network port.
   use ExUnit.Case, async: false
-  # async: false because we start a Bandit listener on a network port
 
   import Bitwise
 
@@ -9,10 +9,11 @@ defmodule MingaAgent.Gateway.IntegrationTest do
   @moduletag timeout: 15_000
 
   setup do
-    # Start gateway on a random port to avoid conflicts
-    {:ok, pid} = start_supervised({Server, port: 0})
+    # Start gateway on a random loopback port to avoid conflicts.
+    token = "test-token-#{System.unique_integer([:positive])}"
+    {:ok, pid} = start_supervised({Server, port: 0, auth_token: token})
     port = Server.port(pid)
-    {:ok, port: port}
+    {:ok, port: port, token: token}
   end
 
   describe "health endpoint" do
@@ -27,8 +28,8 @@ defmodule MingaAgent.Gateway.IntegrationTest do
   end
 
   describe "WebSocket JSON-RPC" do
-    test "runtime.capabilities returns tool count", %{port: port} do
-      {:ok, ws} = ws_connect(port)
+    test "runtime.capabilities returns tool count", %{port: port, token: token} do
+      {:ok, ws} = ws_connect(port, token)
 
       request =
         JSON.encode!(%{jsonrpc: "2.0", method: "runtime.capabilities", params: %{}, id: 1})
@@ -43,8 +44,8 @@ defmodule MingaAgent.Gateway.IntegrationTest do
       ws_close(ws)
     end
 
-    test "tool.list returns tool descriptions", %{port: port} do
-      {:ok, ws} = ws_connect(port)
+    test "tool.list returns tool descriptions", %{port: port, token: token} do
+      {:ok, ws} = ws_connect(port, token)
 
       request = JSON.encode!(%{jsonrpc: "2.0", method: "tool.list", params: %{}, id: 2})
       :ok = ws_send(ws, request)
@@ -56,8 +57,8 @@ defmodule MingaAgent.Gateway.IntegrationTest do
       ws_close(ws)
     end
 
-    test "unknown method returns error", %{port: port} do
-      {:ok, ws} = ws_connect(port)
+    test "unknown method returns error", %{port: port, token: token} do
+      {:ok, ws} = ws_connect(port, token)
 
       request = JSON.encode!(%{jsonrpc: "2.0", method: "bogus", params: %{}, id: 3})
       :ok = ws_send(ws, request)
@@ -75,7 +76,7 @@ defmodule MingaAgent.Gateway.IntegrationTest do
   # We use raw TCP + manual WebSocket handshake to avoid adding a test-only
   # WebSocket client dependency. This is sufficient for JSON-RPC testing.
 
-  defp ws_connect(port) do
+  defp ws_connect(port, token) do
     {:ok, socket} = :gen_tcp.connect(~c"127.0.0.1", port, [:binary, active: false, packet: :raw])
 
     key = Base.encode64(:crypto.strong_rand_bytes(16))
@@ -87,6 +88,7 @@ defmodule MingaAgent.Gateway.IntegrationTest do
         "Connection: Upgrade\r\n" <>
         "Sec-WebSocket-Key: #{key}\r\n" <>
         "Sec-WebSocket-Version: 13\r\n" <>
+        "Authorization: Bearer #{token}\r\n" <>
         "\r\n"
 
     :ok = :gen_tcp.send(socket, upgrade_request)

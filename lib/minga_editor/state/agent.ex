@@ -111,6 +111,12 @@ defmodule MingaEditor.State.Agent do
     %{agent | pending_approval: nil}
   end
 
+  @doc "Applies the render-cache fields returned by an agent session snapshot."
+  @spec apply_session_snapshot(t(), status(), approval() | nil, String.t() | nil) :: t()
+  def apply_session_snapshot(%__MODULE__{} = agent, status, pending_approval, error) do
+    %{set_status(agent, status) | pending_approval: pending_approval, error: error}
+  end
+
   # ── Spinner timer ───────────────────────────────────────────────────────────
 
   @doc "Starts the spinner timer if not already running."

@@ -111,6 +111,7 @@ defmodule Minga.Config.Options do
           | :nav_flash_threshold
           | :log_level_config
           | :log_level_port
+          | :log_level_distribution
           | :parser_tree_ttl
           | :event_retention_days
           | :default_shell
@@ -309,6 +310,8 @@ defmodule Minga.Config.Options do
      "Config subsystem log verbosity override."},
     {:log_level_port, {:enum, [:default, :debug, :info, :warning, :error, :none]}, :default,
      "Port protocol subsystem log verbosity override."},
+    {:log_level_distribution, {:enum, [:default, :debug, :info, :warning, :error, :none]},
+     :default, "Distribution subsystem log verbosity override."},
     {:parser_tree_ttl, :integer, 300, "Seconds to keep cached parser trees alive."},
     {:event_retention_days, :pos_integer, 90,
      "Number of days to keep persisted event log entries."},

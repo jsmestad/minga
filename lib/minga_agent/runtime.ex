@@ -79,6 +79,8 @@ defmodule MingaAgent.Runtime do
 
   Options:
     * `:port` - TCP port to listen on (default: 4820)
+    * `:ip` - bind address (default: `{127, 0, 0, 1}`)
+    * `:auth_token` - bearer token required for `/ws`; when absent, WebSocket access is disabled
   """
   @spec start_gateway(keyword()) :: {:ok, pid()} | {:error, term()}
   def start_gateway(opts \\ []) do

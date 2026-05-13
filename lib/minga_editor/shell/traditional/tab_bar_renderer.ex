@@ -416,8 +416,7 @@ defmodule MingaEditor.Shell.Traditional.TabBarRenderer do
     do: Devicon.icon(Language.detect_filetype(label))
 
   @spec tab_label(Tab.t()) :: String.t()
-  defp tab_label(%Tab{label: ""}), do: "[No Name]"
-  defp tab_label(%Tab{label: label}), do: label
+  defp tab_label(%Tab{} = tab), do: Tab.display_label(tab)
 
   @spec tab_dirty_marker(Tab.t(), map()) :: String.t()
   defp tab_dirty_marker(%Tab{kind: :file} = tab, _colors) do

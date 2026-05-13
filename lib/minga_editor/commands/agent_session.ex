@@ -16,6 +16,9 @@ defmodule MingaEditor.Commands.AgentSession do
   alias MingaEditor.State.AgentGroup
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
+  alias MingaEditor.State.Windows
+  alias MingaEditor.Window
+  alias MingaEditor.WindowTree
 
   @type state :: EditorState.t()
 
@@ -107,6 +110,61 @@ defmodule MingaEditor.Commands.AgentSession do
     end
   end
 
+  @doc "Connects the local GUI to an existing remote agent session."
+  @spec connect_remote_session(state(), String.t(), String.t(), pid()) :: state()
+  def connect_remote_session(state, server_name, session_id, remote_pid)
+      when is_binary(server_name) and is_binary(session_id) and is_pid(remote_pid) do
+    case subscribe_and_snapshot(remote_pid) do
+      {:ok, messages, snapshot} ->
+        {state, tab_id, buffer} = create_remote_agent_tab(state, server_name)
+        AgentBufferSync.sync(buffer, messages)
+
+        state
+        |> set_remote_tab(tab_id, server_name, session_id, remote_pid)
+        |> AgentAccess.update_agent(&AgentState.set_buffer(&1, buffer))
+        |> rebuild_agent_from_tab(tab_id)
+        |> apply_remote_snapshot(snapshot)
+        |> ensure_agent_workspace(remote_pid)
+        |> EditorState.set_status("Connected to #{server_name} session #{session_id}")
+
+      {:error, reason} ->
+        EditorState.set_status(state, "Remote session unavailable: #{inspect(reason)}")
+    end
+  end
+
+  @doc "Starts a new agent session on a connected remote server and opens it locally."
+  @spec start_remote_session(state(), String.t()) :: state()
+  def start_remote_session(state, server_name) when is_binary(server_name) do
+    case Minga.Distribution.ConnectionManager.node_for_server(server_name) do
+      {:ok, remote_node} ->
+        start_remote_session_on_node(state, server_name, remote_node)
+
+      {:error, :disconnected} ->
+        EditorState.set_status(state, "Remote server #{server_name} is disconnected")
+
+      {:error, :not_found} ->
+        EditorState.set_status(state, "Unknown remote server #{server_name}")
+    end
+  end
+
+  @doc "Stops the current agent session, routing remote sessions to their remote manager."
+  @spec stop_current_session(state()) :: state()
+  def stop_current_session(state) do
+    case AgentAccess.session(state) do
+      nil ->
+        state
+
+      session when node(session) == node() ->
+        MingaAgent.SessionManager.stop_session_by_pid(session)
+        state
+
+      session ->
+        stop_remote_session(state, session)
+    end
+  catch
+    :exit, reason -> EditorState.set_status(state, "Failed to stop session: #{inspect(reason)}")
+  end
+
   # ── Code block helpers ─────────────────────────────────────────────────────
 
   @doc """
@@ -120,24 +178,36 @@ defmodule MingaEditor.Commands.AgentSession do
     name = buffer_name_for_language(language)
     filetype = filetype_from_language(language)
 
-    {:ok, buf} =
-      Buffer.start_link(
-        content: content,
-        buffer_name: name,
-        filetype: filetype
-      )
+    case Buffer.start_link(content: content, buffer_name: name, filetype: filetype) do
+      {:ok, buf} ->
+        state
+        |> put_in([Access.key(:workspace), Access.key(:buffers), Access.key(:active)], buf)
+        |> maybe_log_code_block_opened(language)
 
-    state = put_in(state.workspace.buffers.active, buf)
-
-    if AgentAccess.session(state) do
-      Session.add_system_message(
-        AgentAccess.session(state),
-        "Opened #{if(language == "", do: "text", else: language)} code block in buffer"
-      )
+      {:error, reason} ->
+        EditorState.set_status(state, "Failed to open code block: #{inspect(reason)}")
     end
-
-    state
   end
+
+  @spec maybe_log_code_block_opened(state(), String.t()) :: state()
+  defp maybe_log_code_block_opened(state, language) do
+    case AgentAccess.session(state) do
+      nil ->
+        state
+
+      session ->
+        Session.add_system_message(
+          session,
+          "Opened #{code_block_language_label(language)} code block in buffer"
+        )
+
+        state
+    end
+  end
+
+  @spec code_block_language_label(String.t()) :: String.t()
+  defp code_block_language_label(""), do: "text"
+  defp code_block_language_label(language), do: language
 
   @doc "Formats a session start error into a user-facing message."
   @spec format_session_error(term()) :: String.t()
@@ -173,6 +243,158 @@ defmodule MingaEditor.Commands.AgentSession do
         {:error, reason}
     end
   end
+
+  @spec start_remote_session_on_node(state(), String.t(), node()) :: state()
+  defp start_remote_session_on_node(state, server_name, remote_node) do
+    case remote_start_session(remote_node, remote_session_opts(state)) do
+      {:ok, session_id, remote_pid} ->
+        connect_remote_session(state, server_name, session_id, remote_pid)
+
+      {:error, reason} ->
+        EditorState.set_status(state, "Failed to start remote session: #{inspect(reason)}")
+    end
+  end
+
+  @spec remote_session_opts(state()) :: keyword()
+  defp remote_session_opts(state) do
+    panel = AgentAccess.panel(state)
+    [thinking_level: panel.thinking_level]
+  end
+
+  @spec remote_start_session(node(), keyword()) :: {:ok, String.t(), pid()} | {:error, term()}
+  defp remote_start_session(remote_node, opts) do
+    :erpc.call(remote_node, MingaAgent.SessionManager, :start_session, [opts], 10_000)
+  catch
+    :exit, reason -> {:error, {:remote_unavailable, reason}}
+  end
+
+  @spec subscribe_and_snapshot(pid()) :: {:ok, [term()], map()} | {:error, term()}
+  defp subscribe_and_snapshot(remote_pid) do
+    Session.subscribe(remote_pid, self())
+    messages = Session.messages(remote_pid)
+    snapshot = Session.editor_snapshot(remote_pid)
+    {:ok, messages, snapshot}
+  catch
+    :exit, reason -> {:error, reason}
+  end
+
+  @spec create_remote_agent_tab(state(), String.t()) :: {state(), Tab.id(), pid()}
+  defp create_remote_agent_tab(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, _server_name) do
+    state = ensure_agent_buffer(state)
+    buffer = AgentAccess.agent(state).buffer
+    rows = max(state.terminal_viewport.rows, 1)
+    cols = max(state.terminal_viewport.cols, 1)
+    win_id = 1
+    agent_window = Window.new_agent_chat(win_id, buffer, rows, cols)
+
+    windows = %Windows{
+      tree: WindowTree.new(win_id),
+      map: %{win_id => agent_window},
+      active: win_id,
+      next_id: win_id + 1
+    }
+
+    context = EditorState.build_agent_tab_defaults(state, windows, buffer)
+    {tb, tab} = TabBar.add(tb, :agent, "Agent")
+    tb = TabBar.update_context(tb, tab.id, context)
+    state = EditorState.set_tab_bar(state, tb)
+    {state, tab.id, buffer}
+  end
+
+  defp create_remote_agent_tab(state, _server_name) do
+    state = ensure_agent_buffer(state)
+    {state, 0, AgentAccess.agent(state).buffer}
+  end
+
+  @spec ensure_agent_buffer(state()) :: state()
+  defp ensure_agent_buffer(state) do
+    case AgentAccess.agent(state).buffer do
+      pid when is_pid(pid) -> state
+      _ -> create_agent_buffer(state)
+    end
+  end
+
+  @spec create_agent_buffer(state()) :: state()
+  defp create_agent_buffer(state) do
+    case AgentBufferSync.start_buffer() do
+      pid when is_pid(pid) ->
+        state = AgentAccess.update_agent(state, &AgentState.set_buffer(&1, pid))
+        state = EditorState.monitor_buffer(state, pid)
+        AgentLifecycle.setup_agent_highlight(state)
+
+      _ ->
+        state
+    end
+  end
+
+  @spec set_remote_tab(state(), Tab.id(), String.t(), String.t(), pid()) :: state()
+  defp set_remote_tab(
+         %{shell_state: %{tab_bar: %TabBar{} = tb}} = state,
+         tab_id,
+         server_name,
+         session_id,
+         remote_pid
+       ) do
+    tb =
+      TabBar.update_tab(
+        tb,
+        tab_id,
+        &Tab.set_remote_session(&1, server_name, session_id, remote_pid)
+      )
+
+    EditorState.set_tab_bar(state, tb)
+  end
+
+  defp set_remote_tab(state, _tab_id, _server_name, _session_id, _remote_pid), do: state
+
+  @spec rebuild_agent_from_tab(state(), Tab.id()) :: state()
+  defp rebuild_agent_from_tab(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, tab_id) do
+    case TabBar.get(tb, tab_id) do
+      %Tab{} = tab -> EditorState.rebuild_agent_from_session(state, tab)
+      nil -> state
+    end
+  end
+
+  defp rebuild_agent_from_tab(state, _tab_id), do: state
+
+  @spec apply_remote_snapshot(state(), Session.editor_snapshot()) :: state()
+  defp apply_remote_snapshot(state, %{
+         status: status,
+         pending_approval: pending_approval,
+         error: error
+       }) do
+    AgentAccess.update_agent(state, fn agent ->
+      AgentState.apply_session_snapshot(agent, status, pending_approval, error)
+    end)
+  end
+
+  @spec stop_remote_session(state(), pid()) :: state()
+  defp stop_remote_session(%{shell_state: %{tab_bar: %TabBar{} = tb}} = state, session) do
+    case TabBar.find_by_session(tb, session) do
+      %Tab{remote_session_id: session_id} when is_binary(session_id) ->
+        case :erpc.call(
+               node(session),
+               MingaAgent.SessionManager,
+               :stop_session,
+               [session_id],
+               5_000
+             ) do
+          :ok ->
+            state
+
+          {:error, reason} ->
+            EditorState.set_status(state, "Failed to stop remote session: #{inspect(reason)}")
+        end
+
+      _ ->
+        EditorState.set_status(state, "Remote session id is unavailable")
+    end
+  catch
+    :exit, reason ->
+      EditorState.set_status(state, "Remote server unavailable: #{inspect(reason)}")
+  end
+
+  defp stop_remote_session(state, _session), do: state
 
   @spec buffer_name_for_language(String.t()) :: String.t()
   defp buffer_name_for_language(""), do: "*Agent: text*"
