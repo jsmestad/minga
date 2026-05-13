@@ -43,7 +43,7 @@ defmodule Minga.Events do
   | `:face_overrides_changed` | `FaceOverridesChangedEvent` | `buffer: pid(), overrides: map()` |
   | `:background_subagent_started` | `MingaAgent.Subagent.Handle` | `session_id: String.t(), pid: pid(), task: String.t()` |
   | `:node_connected` | `Minga.Distribution.Events.NodeConnectedEvent` | `server_name, node, connected_at` |
-  | `:node_disconnected` | `Minga.Distribution.Events.NodeDisconnectedEvent` | `server_name, node, reason` |
+  | `:node_disconnected` | `Minga.Distribution.Events.NodeDisconnectedEvent` | `server_name, node, reason, disconnected_at` |
 
   ## Why Registry?
 

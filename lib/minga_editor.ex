@@ -1017,7 +1017,7 @@ defmodule MingaEditor do
     end
   end
 
-  @spec discover_remote_sessions(node(), String.t()) :: [Remote.session_entry()]
+  @spec discover_remote_sessions(node(), String.t()) :: [Remote.remote_session_entry()]
   defp discover_remote_sessions(remote_node, server_name) do
     :erpc.call(remote_node, MingaAgent.SessionManager, :list_sessions, [], 5_000)
   catch

@@ -11,8 +11,11 @@ defmodule Minga.Distribution.ConnectionManager do
   alias Minga.Distribution.Events.NodeConnectedEvent
   alias Minga.Distribution.Events.NodeDisconnectedEvent
 
-  @type connection_status :: :connected | :disconnected
-  @type connected_node :: {String.t(), node(), connection_status()}
+  @type public_connection_status :: :connected | :disconnected
+  @type connected_node :: {String.t(), node(), public_connection_status()}
+  @type connect_fun :: (node() -> boolean() | :ignored)
+  @type monitor_fun :: (node(), boolean() -> term())
+  @type set_cookie_fun :: (node(), atom() -> term())
   @type server_state :: %{
           node: node(),
           cookie: atom(),
@@ -25,7 +28,10 @@ defmodule Minga.Distribution.ConnectionManager do
   @type state :: %{
           servers: %{String.t() => server_state()},
           node_to_server: %{node() => String.t()},
-          events_registry: Minga.Events.registry()
+          events_registry: Minga.Events.registry(),
+          connect_fun: connect_fun(),
+          monitor_fun: monitor_fun(),
+          set_cookie_fun: set_cookie_fun()
         }
 
   @doc "Starts the connection manager."
@@ -38,7 +44,7 @@ defmodule Minga.Distribution.ConnectionManager do
     end
   end
 
-  @doc "Returns every configured remote node with its current connection status."
+  @doc "Returns every configured remote node with its public connection status. In-progress reconnect attempts are reported as disconnected."
   @spec connected_nodes() :: [connected_node()]
   def connected_nodes do
     call_or_default(:connected_nodes, [])
@@ -62,7 +68,7 @@ defmodule Minga.Distribution.ConnectionManager do
     call_or_default({:connected?, server_name}, false)
   end
 
-  @doc "Returns the exponential backoff delay for a retry count."
+  @doc "Returns the retry delay for `retry_count`, starting at 1s and doubling until the 30s cap."
   @spec backoff_ms(non_neg_integer()) :: pos_integer()
   def backoff_ms(retry_count) when is_integer(retry_count) and retry_count >= 0 do
     min(1_000 * Integer.pow(2, retry_count), 30_000)
@@ -74,7 +80,13 @@ defmodule Minga.Distribution.ConnectionManager do
     servers = Keyword.get_lazy(opts, :servers, fn -> load_servers(opts) end)
 
     state =
-      new_state(servers, Keyword.get(opts, :events_registry, Minga.Events.default_registry()))
+      new_state(
+        servers,
+        Keyword.get(opts, :events_registry, Minga.Events.default_registry()),
+        Keyword.get(opts, :connect_fun, &Node.connect/1),
+        Keyword.get(opts, :monitor_fun, &Node.monitor/2),
+        Keyword.get(opts, :set_cookie_fun, &Node.set_cookie/2)
+      )
 
     if map_size(state.servers) > 0 and Keyword.get(opts, :connect_on_init, true) do
       send(self(), :connect_all)
@@ -142,8 +154,14 @@ defmodule Minga.Distribution.ConnectionManager do
     end
   end
 
-  @spec new_state([Config.server_entry()], Minga.Events.registry()) :: state()
-  defp new_state(entries, events_registry) do
+  @spec new_state(
+          [Config.server_entry()],
+          Minga.Events.registry(),
+          connect_fun(),
+          monitor_fun(),
+          set_cookie_fun()
+        ) :: state()
+  defp new_state(entries, events_registry, connect_fun, monitor_fun, set_cookie_fun) do
     servers =
       Map.new(entries, fn %{name: name, node: node, cookie: cookie} ->
         {name,
@@ -159,10 +177,18 @@ defmodule Minga.Distribution.ConnectionManager do
       end)
 
     node_to_server = Map.new(entries, fn %{name: name, node: node} -> {node, name} end)
-    %{servers: servers, node_to_server: node_to_server, events_registry: events_registry}
+
+    %{
+      servers: servers,
+      node_to_server: node_to_server,
+      events_registry: events_registry,
+      connect_fun: connect_fun,
+      monitor_fun: monitor_fun,
+      set_cookie_fun: set_cookie_fun
+    }
   end
 
-  @spec public_status(:connected | :disconnected | :connecting) :: connection_status()
+  @spec public_status(:connected | :disconnected | :connecting) :: public_connection_status()
   defp public_status(:connected), do: :connected
   defp public_status(_status), do: :disconnected
 
@@ -211,9 +237,9 @@ defmodule Minga.Distribution.ConnectionManager do
   @spec attempt_connect(state(), String.t(), server_state()) :: state()
   defp attempt_connect(state, server_name, server) do
     state = put_server(state, server_name, server)
-    Node.set_cookie(server.node, server.cookie)
+    state.set_cookie_fun.(server.node, server.cookie)
 
-    case Node.connect(server.node) do
+    case state.connect_fun.(server.node) do
       true -> mark_connected(state, server_name, server)
       false -> schedule_retry(state, server_name, server)
       :ignored -> schedule_retry(state, server_name, server)
@@ -227,7 +253,7 @@ defmodule Minga.Distribution.ConnectionManager do
 
   @spec mark_connected(state(), String.t(), server_state()) :: state()
   defp mark_connected(state, server_name, server) do
-    monitor_node(server.node, server.monitored?)
+    monitor_node(state, server.node, server.monitored?)
     connected_at = DateTime.utc_now()
 
     server = %{
@@ -254,15 +280,20 @@ defmodule Minga.Distribution.ConnectionManager do
     put_server(state, server_name, server)
   end
 
-  @spec monitor_node(node(), boolean()) :: :ok
-  defp monitor_node(_node, true), do: :ok
+  @spec monitor_node(state(), node(), boolean()) :: :ok
+  defp monitor_node(_state, _node, true), do: :ok
 
-  defp monitor_node(node, false) do
-    Node.monitor(node, true)
+  defp monitor_node(state, node, false) do
+    state.monitor_fun.(node, true)
     :ok
   end
 
   @spec schedule_retry(state(), String.t(), server_state()) :: state()
+  defp schedule_retry(state, server_name, %{retry_timer: timer} = server)
+       when is_reference(timer) do
+    put_server(state, server_name, %{server | status: :disconnected})
+  end
+
   defp schedule_retry(state, server_name, server) do
     delay = backoff_ms(server.retry_count)
     timer = Process.send_after(self(), {:reconnect, server_name}, delay)

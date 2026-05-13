@@ -66,7 +66,9 @@ defmodule Minga.Distribution.Config do
       normalized = %{name: name, node: node, cookie: cookie}
       {:cont, {:ok, [normalized | entries]}}
     else
-      {:halt, {:error, "invalid server entry: cookie must be at least 32 characters"}}
+      {:halt,
+       {:error,
+        "invalid server entry: cookie must be at least 32 bytes and contain only letters, numbers, dot, underscore, at, or hyphen"}}
     end
   end
 

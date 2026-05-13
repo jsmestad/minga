@@ -35,6 +35,26 @@ defmodule Minga.Distribution.ConfigTest do
     assert Config.load(path) == []
   end
 
+  test "load/1 rejects cookies with unsupported characters" do
+    path =
+      temp_file(
+        "bad_cookie_chars.exs",
+        ~s([%{name: "home", node: :node, cookie: :abcdefghijklmnopqrstuvwxyz12345/}])
+      )
+
+    assert Config.load(path) == []
+  end
+
+  test "load/1 returns [] when config evaluation raises" do
+    path = temp_file("raising_servers.exs", ~s(raise "boom"))
+    assert Config.load(path) == []
+  end
+
+  test "load/1 returns [] when config has a syntax error" do
+    path = temp_file("syntax_error_servers.exs", "[")
+    assert Config.load(path) == []
+  end
+
   @spec temp_file(String.t(), String.t()) :: String.t()
   defp temp_file(name, content) do
     dir = Path.join(System.tmp_dir!(), "minga-config-test-#{System.unique_integer([:positive])}")

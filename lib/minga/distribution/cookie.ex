@@ -6,7 +6,7 @@ defmodule Minga.Distribution.Cookie do
   @doc "Reads a cookie from a regular 0600-style file."
   @spec read_file(String.t()) :: {:ok, String.t()} | {:error, term()}
   def read_file(path) when is_binary(path) do
-    with {:ok, %File.Stat{type: :regular, mode: mode}} <- File.stat(path),
+    with {:ok, %File.Stat{type: :regular, mode: mode}} <- File.lstat(path),
          :ok <- validate_mode(mode),
          {:ok, content} <- File.read(path) do
       {:ok, String.trim(content)}
