@@ -225,6 +225,30 @@ A VSCode-style context key system would replace the handler chain with declarati
 
 ---
 
+## Resolved
+
+The following issues from this analysis were addressed by Epic #1395 (Tabbar state survives common workflows):
+
+| Symptom | Root Cause | Fix |
+|---|---|---|
+| Dead buffer pid activated on tab restore | `restore_tab_context` didn't validate buffer liveness | #1594: `Buffers.scrub_dead_active/1` guard in restore path |
+| Agent spinner not cancelled when opening file from agent tab | Shell buffer callbacks had no effects channel | #1597: `on_buffer_added` et al. return `{shell_state, workspace, [effect()]}` |
+| Agent tab context stale after buffer switch | `on_buffer_switched` only updated `:file` tabs | #1598: context update for all tab kinds |
+| Fragile `Map.from_struct(workspace)` snapshot | Intermediate map representation leaked all workspace fields | #1596: direct `TabContext.from_workspace/1` struct-to-struct copy |
+| No guard against future `Map.from_struct` regression | Ad-hoc snapshots could reappear | #1599: custom Credo check `NoRawWorkspaceSnapshotCheck` (EX9006) |
+
+**Still open (out of scope for #1395):**
+- Recommendation 1 (modal overlay as tagged union) — the product-type overlay problem remains
+- Recommendation 2 (agent deactivation on zoom-out) — Board-specific; separate epic if regressions surface
+- Recommendation 4 (context key system) — future structural change
+- Board `Map.from_struct(workspace)` corruption in `zoom_into`/`zoom_out`/`create_new_card` — separate epic per #1395 scope exclusion
+
+### Recommendation 3: Shell-owned state transitions
+
+Partially resolved by #1597. Shell buffer callbacks now return effects, giving the Editor visibility into presentation-layer state changes. The full proposal (making the shell own all state transitions) remains open as a future direction.
+
+---
+
 ## Relationship to Existing Work
 
 | Document | Scope | Overlap |
