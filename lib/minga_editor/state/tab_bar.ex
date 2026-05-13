@@ -311,6 +311,29 @@ defmodule MingaEditor.State.TabBar do
     Enum.any?(tabs, & &1.attention)
   end
 
+  @doc "Returns the remote agent tab for a server/session id pair."
+  @spec find_by_remote_session(t(), String.t(), String.t()) :: Tab.t() | nil
+  def find_by_remote_session(%__MODULE__{tabs: tabs}, server_name, session_id)
+      when is_binary(server_name) and is_binary(session_id) do
+    Enum.find(tabs, fn
+      %Tab{kind: :agent, server_name: ^server_name, remote_session_id: ^session_id} -> true
+      _ -> false
+    end)
+  end
+
+  @doc "Updates all tabs for a remote server to the given connection status."
+  @spec set_remote_connection_status(t(), String.t(), Tab.connection_status()) :: t()
+  def set_remote_connection_status(%__MODULE__{tabs: tabs} = tb, server_name, status)
+      when is_binary(server_name) do
+    new_tabs =
+      Enum.map(tabs, fn
+        %Tab{server_name: ^server_name} = tab -> Tab.set_connection_status(tab, status)
+        tab -> tab
+      end)
+
+    %{tb | tabs: new_tabs}
+  end
+
   @doc "Sets the attention flag on the tab matching the given session pid."
   @spec set_attention_by_session(t(), pid(), boolean()) :: t()
   def set_attention_by_session(%__MODULE__{} = tb, session_pid, value)

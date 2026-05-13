@@ -615,7 +615,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
     icon = tab_icon(tab)
     icon_bytes = :erlang.iolist_to_binary([icon])
-    label_bytes = :erlang.iolist_to_binary([tab.label])
+    label_bytes = :erlang.iolist_to_binary([MingaEditor.State.Tab.display_label(tab)])
 
     <<flags::8, tab.id::32, group_id::16, byte_size(icon_bytes)::8, icon_bytes::binary,
       byte_size(label_bytes)::16, label_bytes::binary>>
@@ -761,7 +761,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
     is_focused = if card.id == focused_id, do: 1, else: 0
     flags = Bitwise.bor(is_you, Bitwise.bsl(is_focused, 1))
 
-    task_bytes = :erlang.iolist_to_binary([card.task])
+    task_bytes = :erlang.iolist_to_binary([MingaEditor.Shell.Board.Card.display_task(card)])
     model_bytes = :erlang.iolist_to_binary([card.model || ""])
 
     # Send Unix timestamp so Swift can compute elapsed time locally

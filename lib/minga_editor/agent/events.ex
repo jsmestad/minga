@@ -16,7 +16,9 @@ defmodule MingaEditor.Agent.Events do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.AgentAccess
+  alias Minga.Buffer
   alias MingaEditor.State.AgentGroup
+  alias MingaEditor.State.Remote
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
 
@@ -152,6 +154,8 @@ defmodule MingaEditor.Agent.Events do
   end
 
   def handle(state, {:file_changed, path, before_content, after_content}) do
+    {state, remote_effects} = reload_remote_buffer_if_open(state, path, after_content)
+
     state =
       AgentAccess.update_agent_ui(state, &UIState.record_baseline(&1, path, before_content))
 
@@ -172,12 +176,12 @@ defmodule MingaEditor.Agent.Events do
 
     case review do
       nil ->
-        {state, [{:render, 16}]}
+        {state, [{:render, 16} | remote_effects]}
 
       _ ->
         state = update_preview(state, &Preview.set_diff(&1, review))
         state = AgentAccess.update_agent_ui(state, &UIState.set_focus(&1, :file_viewer))
-        {state, [:render]}
+        {state, [:render | remote_effects]}
     end
   end
 
@@ -245,6 +249,45 @@ defmodule MingaEditor.Agent.Events do
   end
 
   # ── Private ────────────────────────────────────────────────────────────────
+
+  @spec reload_remote_buffer_if_open(EditorState.t(), String.t(), String.t()) ::
+          {EditorState.t(), [effect()]}
+  defp reload_remote_buffer_if_open(state, path, after_content) do
+    case current_remote_server(state) do
+      {:ok, server_name} -> reload_remote_buffer(state, server_name, path, after_content)
+      :error -> {state, []}
+    end
+  end
+
+  @spec current_remote_server(EditorState.t()) :: {:ok, String.t()} | :error
+  defp current_remote_server(state) do
+    case AgentAccess.session(state) do
+      pid when is_pid(pid) and node(pid) != node() ->
+        case Minga.Distribution.ConnectionManager.server_name_for_node(node(pid)) do
+          {:ok, server_name} -> {:ok, server_name}
+          {:error, :not_found} -> :error
+        end
+
+      _ ->
+        :error
+    end
+  end
+
+  @spec reload_remote_buffer(EditorState.t(), String.t(), String.t(), String.t()) ::
+          {EditorState.t(), [effect()]}
+  defp reload_remote_buffer(state, server_name, path, after_content) do
+    case Remote.buffer(state.remote, server_name, path) do
+      pid when is_pid(pid) ->
+        Buffer.replace_content_force(pid, after_content)
+        {state, [{:log_message, "Agent updated #{Path.basename(path)}"}]}
+
+      _ ->
+        {state, []}
+    end
+  catch
+    :exit, reason ->
+      {state, [{:log_warning, "Failed to reload remote file #{path}: #{inspect(reason)}"}]}
+  end
 
   @spec update_preview(EditorState.t(), (Preview.t() -> Preview.t())) :: EditorState.t()
   defp update_preview(state, fun) do

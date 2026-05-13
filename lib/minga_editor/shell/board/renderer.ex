@@ -188,7 +188,7 @@ defmodule MingaEditor.Shell.Board.Renderer do
     # Row 2: Task description (bold)
     draws =
       if content_start + 1 <= content_end do
-        task = pad_right(card.task, inner_width)
+        task = pad_right(Card.display_task(card), inner_width)
 
         [
           DisplayList.draw(content_start + 1, col, @v <> " " <> task <> " " <> @v, faces.content)

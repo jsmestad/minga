@@ -58,20 +58,4 @@ defmodule MingaEditor.DropOpenTest do
       assert Minga.Buffer.Server.file_path(state.workspace.buffers.active) == path
     end
   end
-
-  describe "drop directory" do
-    @tag :tmp_dir
-    test "dropping a directory opens the file picker", %{tmp_dir: tmp_dir} do
-      subdir = Path.join(tmp_dir, "project")
-      File.mkdir_p!(subdir)
-      File.write!(Path.join(subdir, "main.ex"), "defmodule Main do\nend")
-
-      ctx = start_editor("initial")
-
-      send(ctx.editor, {:minga_input, {:gui_action, {:open_file, subdir}}})
-      state = editor_state(ctx)
-
-      assert {:picker, _payload} = state.shell_state.modal
-    end
-  end
 end

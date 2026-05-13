@@ -41,6 +41,7 @@ defmodule Minga.Services.Independent do
       {Task.Supervisor, name: Minga.Eval.TaskSupervisor},
       Minga.Command.Registry,
       Minga.Editing.Fold.Registry,
+      Minga.Distribution.ConnectionManager,
       Minga.Diagnostics,
       Minga.Session.EventRecorder,
       Minga.Tool.Recipe.Registry,

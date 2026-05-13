@@ -36,6 +36,16 @@ defmodule MingaEditor.Commands.AgentSessionDownTest do
     TabBar.update_tab(tb, agent_tab.id, &Tab.set_session(&1, session_pid))
   end
 
+  defp tab_bar_with_remote_session(session_pid) do
+    {tb, agent_tab} = TabBar.insert(empty_tab_bar(), :agent, "Agent")
+
+    TabBar.update_tab(
+      tb,
+      agent_tab.id,
+      &Tab.set_remote_session(&1, "home", "session-1", session_pid)
+    )
+  end
+
   describe "handle_agent_session_down/3 with TabBar shell" do
     test "ignores crash for session not referenced by any tab" do
       state =
@@ -91,6 +101,17 @@ defmodule MingaEditor.Commands.AgentSessionDownTest do
       result = BufferManagement.handle_agent_session_down(state, session_pid, :killed)
 
       assert result.shell_state.status_msg == "Agent session crashed (SPC a n to restart)"
+    end
+
+    test "preserves remote tab on noconnection" do
+      session_pid = spawn(fn -> :ok end)
+      state = build_state(tab_bar_with_remote_session(session_pid))
+
+      result = BufferManagement.handle_agent_session_down(state, session_pid, :noconnection)
+      remote_tab = Enum.find(result.shell_state.tab_bar.tabs, &(&1.session == session_pid))
+
+      assert remote_tab.connection_status == :disconnected
+      assert result.shell_state.status_msg == "[home] disconnected, reconnecting..."
     end
   end
 end

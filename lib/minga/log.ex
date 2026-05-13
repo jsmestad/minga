@@ -16,6 +16,7 @@ defmodule Minga.Log do
   | `:editor`  | `:log_level_editor` | General editor operations and commands   |
   | `:config`  | `:log_level_config` | Config loading, hooks, advice, extensions|
   | `:port`    | `:log_level_port`   | Port/parser process management            |
+  | `:distribution` | `:log_level_distribution` | Remote BEAM node connections       |
 
   ## Usage
 
@@ -36,7 +37,7 @@ defmodule Minga.Log do
 
   require Logger
 
-  @type subsystem :: :render | :lsp | :agent | :editor | :config | :port
+  @type subsystem :: :render | :lsp | :agent | :editor | :config | :port | :distribution
 
   @type level :: :debug | :info | :warning | :error
 
@@ -61,7 +62,8 @@ defmodule Minga.Log do
     agent: :log_level_agent,
     editor: :log_level_editor,
     config: :log_level_config,
-    port: :log_level_port
+    port: :log_level_port,
+    distribution: :log_level_distribution
   }
 
   @doc "Logs a debug message for the given subsystem (if its level permits)."

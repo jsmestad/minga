@@ -289,7 +289,7 @@ defmodule MingaEditor.Shell.Board do
 
     if card do
       icon = zoom_status_icon(card.status)
-      task = if card.task == "", do: "Untitled", else: card.task
+      task = MingaEditor.Shell.Board.Card.display_task(card)
       model = if card.model, do: " · #{card.model}", else: ""
       hint = "ESC back to Board"
 

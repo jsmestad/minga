@@ -2,25 +2,20 @@ defmodule Mix.Tasks.Minga do
   @shortdoc "Launch the Minga text editor"
 
   @moduledoc """
-  Launches the Minga text editor.
+  Launches Minga.
 
   ## Usage
 
       mix minga [filename]
       mix minga +gui [filename]
+      mix minga --headless
 
   ## Options
 
-      +gui    Launch the native macOS GUI instead of the TUI
+      +gui        Launch the native macOS GUI instead of the TUI
+      --headless  Launch services, agent runtime, and Gateway without an editor frontend
 
-  The `+gui` flag uses a `+` prefix to avoid conflicts with Mix's
-  built-in option parser.
-
-  ## Examples
-
-      mix minga README.md       # Open a file in TUI
-      mix minga +gui README.md  # Open a file in GUI
-      mix minga                 # Start with empty buffer
+  The `+gui` flag uses a `+` prefix to avoid conflicts with Mix's built-in option parser.
   """
 
   use Mix.Task
@@ -29,20 +24,20 @@ defmodule Mix.Tasks.Minga do
   @spec run([String.t()]) :: :ok
   def run(args) do
     {gui?, remaining_args} = extract_gui_flag(args)
+    headless? = Minga.CLI.headless_args?(remaining_args)
 
-    # Enable the editor (Port Manager + Editor GenServer) before app.start
-    Application.put_env(:minga, :start_editor, true)
+    unless headless? do
+      Application.put_env(:minga, :start_editor, true)
+    end
 
-    if gui? do
+    if gui? and not headless? do
       Application.put_env(:minga, :backend, :gui)
     end
 
-    # Ensure the application is started
     Mix.Task.run("app.start")
     Minga.CLI.main(remaining_args)
 
-    # Keep the process alive
-    unless "--help" in args or "-h" in args do
+    unless help_args?(args) do
       receive do
       end
     end
@@ -57,5 +52,10 @@ defmodule Mix.Tasks.Minga do
     else
       {false, args}
     end
+  end
+
+  @spec help_args?([String.t()]) :: boolean()
+  defp help_args?(args) do
+    "--help" in args or "-h" in args
   end
 end

@@ -95,8 +95,7 @@ defmodule Minga.Application do
     ]
 
     editor_children =
-      if Application.get_env(:minga, :start_editor, false) or
-           Burrito.Util.running_standalone?() do
+      if start_editor?() do
         backend = Application.get_env(:minga, :backend, :tui)
 
         [
@@ -153,6 +152,19 @@ defmodule Minga.Application do
     end
 
     :ok
+  end
+
+  @spec start_editor?() :: boolean()
+  defp start_editor? do
+    Application.get_env(:minga, :start_editor, false) or
+      (Burrito.Util.running_standalone?() and not standalone_headless?())
+  end
+
+  @spec standalone_headless?() :: boolean()
+  defp standalone_headless? do
+    Minga.CLI.headless_args?(Burrito.Util.Args.argv())
+  rescue
+    _ -> false
   end
 
   @spec prune_old_sessions() :: :ok

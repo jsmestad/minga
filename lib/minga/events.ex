@@ -42,6 +42,8 @@ defmodule Minga.Events do
   | `:agent_hook`      | `AgentHookEvent`        | `event, phase, tool_name, tool_call_id, tool_pattern` |
   | `:face_overrides_changed` | `FaceOverridesChangedEvent` | `buffer: pid(), overrides: map()` |
   | `:background_subagent_started` | `MingaAgent.Subagent.Handle` | `session_id: String.t(), pid: pid(), task: String.t()` |
+  | `:node_connected` | `Minga.Distribution.Events.NodeConnectedEvent` | `server_name, node, connected_at` |
+  | `:node_disconnected` | `Minga.Distribution.Events.NodeDisconnectedEvent` | `server_name, node, reason` |
 
   ## Why Registry?
 
@@ -269,6 +271,8 @@ defmodule Minga.Events do
           | :agent_session_stopped
           | :agent_hook
           | :background_subagent_started
+          | :node_connected
+          | :node_disconnected
           | :changeset_merged
           | :changeset_budget_exhausted
           | :load_user_themes
@@ -296,6 +300,8 @@ defmodule Minga.Events do
           | LoadUserThemesEvent.t()
           | MingaAgent.SessionManager.SessionStoppedEvent.t()
           | MingaAgent.Subagent.Handle.t()
+          | Minga.Distribution.Events.NodeConnectedEvent.t()
+          | Minga.Distribution.Events.NodeDisconnectedEvent.t()
           | MingaAgent.Changeset.MergedEvent.t()
           | MingaAgent.Changeset.BudgetExhaustedEvent.t()
           | Minga.Extension.UpdatesAvailableEvent.t()
@@ -413,6 +419,8 @@ defmodule Minga.Events do
   @spec broadcast(:agent_session_stopped, MingaAgent.SessionManager.SessionStoppedEvent.t()) ::
           :ok
   @spec broadcast(:background_subagent_started, MingaAgent.Subagent.Handle.t()) :: :ok
+  @spec broadcast(:node_connected, Minga.Distribution.Events.NodeConnectedEvent.t()) :: :ok
+  @spec broadcast(:node_disconnected, Minga.Distribution.Events.NodeDisconnectedEvent.t()) :: :ok
   @spec broadcast(:changeset_merged, MingaAgent.Changeset.MergedEvent.t()) :: :ok
   @spec broadcast(:changeset_budget_exhausted, MingaAgent.Changeset.BudgetExhaustedEvent.t()) ::
           :ok

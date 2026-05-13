@@ -920,6 +920,18 @@ defmodule MingaEditor.Commands.BufferManagement do
   clears the spinner, agent state, tab session/status, and agent group.
   """
   @spec handle_agent_session_down(state(), pid(), term()) :: state()
+  def handle_agent_session_down(state, session_pid, :noconnection) do
+    handle_remote_session_disconnected(state, session_pid)
+  end
+
+  def handle_agent_session_down(state, session_pid, {:nodedown, _node}) do
+    handle_remote_session_disconnected(state, session_pid)
+  end
+
+  def handle_agent_session_down(state, session_pid, {:noconnection, _node}) do
+    handle_remote_session_disconnected(state, session_pid)
+  end
+
   def handle_agent_session_down(
         %{shell: MingaEditor.Shell.Board} = state,
         session_pid,
@@ -996,6 +1008,50 @@ defmodule MingaEditor.Commands.BufferManagement do
       state
     end
   end
+
+  @spec handle_remote_session_disconnected(state(), pid()) :: state()
+  defp handle_remote_session_disconnected(
+         %{shell_state: %{tab_bar: %TabBar{} = tb}} = state,
+         session_pid
+       ) do
+    case TabBar.find_by_session(tb, session_pid) do
+      %Tab{id: tab_id, server_name: server_name} when is_binary(server_name) ->
+        tb = TabBar.update_tab(tb, tab_id, &Tab.set_connection_status(&1, :disconnected))
+
+        state
+        |> EditorState.set_tab_bar(tb)
+        |> AgentAccess.update_agent(&AgentState.stop_spinner_timer/1)
+        |> AgentAccess.update_agent(&AgentState.set_error(&1, "Disconnected from #{server_name}"))
+        |> EditorState.set_status("[#{server_name}] disconnected, reconnecting...")
+
+      _ ->
+        state
+    end
+  end
+
+  defp handle_remote_session_disconnected(%{shell: MingaEditor.Shell.Board} = state, session_pid) do
+    board = state.shell_state
+
+    board =
+      case Enum.find(board.cards, fn {_id, card} -> card.session == session_pid end) do
+        {card_id, _card} ->
+          MingaEditor.Shell.Board.State.update_card(
+            board,
+            card_id,
+            &MingaEditor.Shell.Board.Card.set_connection_status(&1, :disconnected)
+          )
+
+        nil ->
+          board
+      end
+
+    state
+    |> EditorState.update_shell_state(fn _ -> board end)
+    |> AgentAccess.update_agent(&AgentState.stop_spinner_timer/1)
+    |> EditorState.set_status("Remote agent disconnected, reconnecting...")
+  end
+
+  defp handle_remote_session_disconnected(state, _session_pid), do: state
 
   # Shared state cleanup for agent sessions: stops spinner, clears
   # agent state session, clears Tab.session/agent_status, removes group.

@@ -33,6 +33,9 @@ defmodule MingaEditor.State.Tab do
   @typedoc "Agent tab status (nil for file tabs)."
   @type agent_status :: :idle | :plan | :thinking | :tool_executing | :error | nil
 
+  @typedoc "Remote connection status for a tab backed by a remote session."
+  @type connection_status :: :connected | :disconnected | :ended | :unavailable | nil
+
   @typedoc "Workspace group id. 0 = manual/ungrouped workspace."
   @type group_id :: non_neg_integer()
 
@@ -44,6 +47,9 @@ defmodule MingaEditor.State.Tab do
           context: context(),
           session: pid() | nil,
           agent_status: agent_status(),
+          server_name: String.t() | nil,
+          remote_session_id: String.t() | nil,
+          connection_status: connection_status(),
           attention: boolean(),
           group_id: group_id(),
           background_subagent: MingaAgent.Subagent.Handle.t() | nil
@@ -56,6 +62,9 @@ defmodule MingaEditor.State.Tab do
             context: Context.empty(),
             session: nil,
             agent_status: nil,
+            server_name: nil,
+            remote_session_id: nil,
+            connection_status: nil,
             attention: false,
             group_id: 0,
             background_subagent: nil
@@ -103,6 +112,56 @@ defmodule MingaEditor.State.Tab do
   def set_session(%__MODULE__{} = tab, pid) do
     %{tab | session: pid}
   end
+
+  @doc "Marks the tab as backed by a remote agent session."
+  @spec set_remote_session(t(), String.t(), String.t(), pid()) :: t()
+  def set_remote_session(%__MODULE__{} = tab, server_name, session_id, pid)
+      when is_binary(server_name) and is_binary(session_id) and is_pid(pid) do
+    %{
+      tab
+      | server_name: server_name,
+        remote_session_id: session_id,
+        session: pid,
+        connection_status: :connected
+    }
+  end
+
+  @doc "Updates remote connection status for the tab."
+  @spec set_connection_status(t(), connection_status()) :: t()
+  def set_connection_status(%__MODULE__{} = tab, status)
+      when status in [:connected, :disconnected, :ended, :unavailable, nil] do
+    %{tab | connection_status: status}
+  end
+
+  @doc "Returns true when this tab is backed by a remote session."
+  @spec remote?(t()) :: boolean()
+  def remote?(%__MODULE__{server_name: server_name}) when is_binary(server_name), do: true
+  def remote?(%__MODULE__{}), do: false
+
+  @doc "Returns the display label including any remote server prefix."
+  @spec display_label(t()) :: String.t()
+  def display_label(%__MODULE__{label: "", server_name: nil}), do: "[No Name]"
+
+  def display_label(%__MODULE__{
+        label: label,
+        server_name: server_name,
+        connection_status: status
+      })
+      when is_binary(server_name) do
+    "[#{server_name}] #{base_label(label)}#{status_suffix(status)}"
+  end
+
+  def display_label(%__MODULE__{label: label}), do: base_label(label)
+
+  @spec base_label(String.t()) :: String.t()
+  defp base_label(""), do: "[No Name]"
+  defp base_label(label), do: label
+
+  @spec status_suffix(connection_status()) :: String.t()
+  defp status_suffix(:disconnected), do: " [disconnected]"
+  defp status_suffix(:ended), do: " [ended]"
+  defp status_suffix(:unavailable), do: " [unavailable]"
+  defp status_suffix(_status), do: ""
 
   @doc "Sets the agent status on a tab (for tab bar rendering)."
   @spec set_agent_status(t(), agent_status()) :: t()

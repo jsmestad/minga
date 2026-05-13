@@ -42,6 +42,7 @@ defmodule MingaEditor.State do
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Highlighting
   alias MingaEditor.State.Mouse
+  alias MingaEditor.State.Remote
   alias MingaEditor.State.Search
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Context, as: TabContext
@@ -114,6 +115,7 @@ defmodule MingaEditor.State do
             caches: MingaEditor.Renderer.Caches.new(),
             session: %SessionState{},
             buffer_add_context: :open,
+            remote: %Remote{},
             stashed_board_state: nil,
             keystroke_history: KeystrokeHistory.new()
 
@@ -150,6 +152,7 @@ defmodule MingaEditor.State do
           face_override_registries: %{pid() => MingaEditor.UI.Face.Registry.t()},
           caches: MingaEditor.Renderer.Caches.t(),
           buffer_add_context: MingaEditor.Shell.buffer_add_context(),
+          remote: Remote.t(),
           session: SessionState.t(),
           stashed_board_state: MingaEditor.Shell.Board.State.t() | nil,
           keystroke_history: KeystrokeHistory.t()
@@ -415,6 +418,12 @@ defmodule MingaEditor.State do
   @spec set_last_test_command(t(), {String.t(), String.t()}) :: t()
   def set_last_test_command(%__MODULE__{} = state, {_cmd, _root} = val),
     do: %{state | last_test_command: val}
+
+  @doc "Applies a function to remote session state."
+  @spec update_remote(t(), (Remote.t() -> Remote.t())) :: t()
+  def update_remote(%__MODULE__{remote: remote} = state, fun) when is_function(fun, 1) do
+    %{state | remote: fun.(remote)}
+  end
 
   @spec update_lsp(t(), (LSPState.t() -> LSPState.t())) :: t()
   def update_lsp(%__MODULE__{lsp: lsp} = state, fun) when is_function(fun, 1),
