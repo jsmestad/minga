@@ -83,7 +83,7 @@ defmodule MingaEditor.Commands.CmdCopyCutTest do
   end
 
   describe "cmd_copy in visual mode" do
-    test "copies charwise selection" do
+    test "copies charwise selection and transitions to normal mode" do
       buf = start_buffer("hello world")
       BufferServer.move_to(buf, {0, 4})
       state = build_state(buf) |> with_visual_mode(buf, {0, 0}, :char)
@@ -92,6 +92,7 @@ defmodule MingaEditor.Commands.CmdCopyCutTest do
 
       assert register_entry(new_state) == {"hello", :charwise}
       assert BufferServer.content(buf) == "hello world"
+      assert new_state.workspace.editing.mode == :normal
       assert_receive {:clipboard_written, "hello"}, 200
     end
 
@@ -155,7 +156,7 @@ defmodule MingaEditor.Commands.CmdCopyCutTest do
   end
 
   describe "cmd_cut in visual mode" do
-    test "deletes charwise selection" do
+    test "deletes charwise selection and transitions to normal mode" do
       buf = start_buffer("hello world")
       BufferServer.move_to(buf, {0, 4})
       state = build_state(buf) |> with_visual_mode(buf, {0, 0}, :char)
@@ -164,6 +165,7 @@ defmodule MingaEditor.Commands.CmdCopyCutTest do
 
       assert register_entry(new_state) == {"hello", :charwise}
       assert BufferServer.content(buf) == " world"
+      assert new_state.workspace.editing.mode == :normal
       assert_receive {:clipboard_written, "hello"}, 200
     end
 
