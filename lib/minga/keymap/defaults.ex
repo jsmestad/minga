@@ -122,6 +122,7 @@ defmodule Minga.Keymap.Defaults do
     {[{?g, @none}, {?r, @none}], :git_revert_hunk, "Revert hunk"},
     {[{?g, @none}, {?v, @none}], :git_preview_hunk, "Preview hunk"},
     {[{?g, @none}, {?b, @none}], :git_blame_line, "Blame line"},
+    {[{?g, @none}, {?D, @none}], :git_diff_toggle_staged, "Toggle staged/unstaged diff"},
 
     # ── Project ────────────────────────────────────────────────────────────────
     {[{?p, @none}, {?f, @none}], :project_find_file, "Find file in project"},

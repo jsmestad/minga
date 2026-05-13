@@ -111,6 +111,7 @@ defmodule MingaEditor.State do
             last_test_command: nil,
             pending_quit: nil,
             buffer_monitors: %{},
+            diff_views: %{},
             face_override_registries: %{},
             caches: MingaEditor.Renderer.Caches.new(),
             session: %SessionState{},
@@ -149,6 +150,7 @@ defmodule MingaEditor.State do
           last_test_command: {String.t(), String.t()} | nil,
           pending_quit: :quit | :quit_all | nil,
           buffer_monitors: %{pid() => reference()},
+          diff_views: %{pid() => diff_view_info()},
           face_override_registries: %{pid() => MingaEditor.UI.Face.Registry.t()},
           caches: MingaEditor.Renderer.Caches.t(),
           buffer_add_context: MingaEditor.Shell.buffer_add_context(),
@@ -396,6 +398,15 @@ defmodule MingaEditor.State do
 
   # ── Global field accessors ─────────────────────────────────────────────────
 
+  @typedoc "Metadata for an open diff view buffer."
+  @type diff_view_info :: %{
+          source_buf: pid() | nil,
+          git_root: String.t(),
+          rel_path: String.t(),
+          staged: boolean(),
+          line_metadata: [Minga.Core.DiffView.line_meta()]
+        }
+
   @typedoc "The git_remote_op tracking tuple, or nil when no operation is in flight."
   @type git_remote_op ::
           {msg_ref :: reference(), task_monitor :: reference(),
@@ -407,6 +418,25 @@ defmodule MingaEditor.State do
 
   @spec clear_git_remote_op(t()) :: t()
   def clear_git_remote_op(%__MODULE__{} = state), do: %{state | git_remote_op: nil}
+
+  @spec register_diff_view(t(), pid(), diff_view_info()) :: t()
+  def register_diff_view(%__MODULE__{} = state, diff_buf, info) when is_pid(diff_buf),
+    do: %{state | diff_views: Map.put(state.diff_views, diff_buf, info)}
+
+  @spec unregister_diff_view(t(), pid()) :: t()
+  def unregister_diff_view(%__MODULE__{} = state, diff_buf) when is_pid(diff_buf),
+    do: %{state | diff_views: Map.delete(state.diff_views, diff_buf)}
+
+  @spec diff_view_info(t(), pid() | nil) :: diff_view_info() | nil
+  def diff_view_info(%__MODULE__{}, nil), do: nil
+
+  def diff_view_info(%__MODULE__{} = state, diff_buf) when is_pid(diff_buf),
+    do: Map.get(state.diff_views, diff_buf)
+
+  @spec diff_view_for_source(t(), pid()) :: {pid(), diff_view_info()} | nil
+  def diff_view_for_source(%__MODULE__{} = state, source_buf) when is_pid(source_buf) do
+    Enum.find(state.diff_views, fn {_diff_buf, info} -> info.source_buf == source_buf end)
+  end
 
   @spec set_pending_quit(t(), :quit | :quit_all) :: t()
   def set_pending_quit(%__MODULE__{} = state, kind) when kind in [:quit, :quit_all],
@@ -561,6 +591,8 @@ defmodule MingaEditor.State do
       else
         state
       end
+
+    state = unregister_diff_view(state, pid)
 
     case tab_bar(state) do
       nil -> state

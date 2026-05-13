@@ -210,6 +210,9 @@ defmodule MingaEditor.Renderer.Gutter do
       :modified ->
         DisplayList.draw(screen_row, col_offset, "▎ ", Face.new(fg: git_colors.modified_fg))
 
+      :removed ->
+        DisplayList.draw(screen_row, col_offset, "- ", Face.new(fg: git_colors.deleted_fg))
+
       :deleted ->
         DisplayList.draw(screen_row, col_offset, "▁ ", Face.new(fg: git_colors.deleted_fg))
     end

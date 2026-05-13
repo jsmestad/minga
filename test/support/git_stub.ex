@@ -113,6 +113,15 @@ defmodule Minga.Git.Stub do
   end
 
   @impl true
+  @spec show_staged(String.t(), String.t()) :: {:ok, String.t()} | :error
+  def show_staged(git_root, relative_path) do
+    case :ets.lookup(@table, {:staged, Path.expand(git_root), relative_path}) do
+      [{_, content}] -> {:ok, content}
+      [] -> :error
+    end
+  end
+
+  @impl true
   @spec blame_line(String.t(), String.t(), non_neg_integer()) :: :error
   def blame_line(_git_root, _relative_path, _line_number), do: :error
 
