@@ -1,5 +1,9 @@
 defmodule MingaEditor.Commands.RemoteFiles do
-  @moduledoc "Commands for browsing remote files in read-only local buffers."
+  @moduledoc """
+  Commands for browsing and editing remote files in local buffers.
+
+  Remote files edit at local buffer speed and save through Erlang distribution. LSP features are intentionally disabled for these buffers because language servers run on the remote machine, not in the local editor workspace.
+  """
 
   @behaviour Minga.Command.Provider
 
@@ -29,7 +33,7 @@ defmodule MingaEditor.Commands.RemoteFiles do
     end
   end
 
-  @doc "Opens a remote file as a local read-only buffer."
+  @doc "Opens a remote file as a local editable buffer backed by remote file I/O."
   @spec open_remote_file(state(), String.t(), String.t()) :: state()
   def open_remote_file(state, server_name, remote_path)
       when is_binary(server_name) and is_binary(remote_path) do
@@ -61,24 +65,26 @@ defmodule MingaEditor.Commands.RemoteFiles do
   defp open_remote_file(state, server_name, remote_node, remote_path) do
     case RemoteFile.read(remote_node, remote_path) do
       {:ok, content} ->
-        start_remote_buffer(state, server_name, remote_path, content)
+        start_remote_buffer(state, server_name, remote_node, remote_path, content)
 
       {:error, reason} ->
         EditorState.set_status(state, "Failed to read remote file: #{inspect(reason)}")
     end
   end
 
-  @spec start_remote_buffer(state(), String.t(), String.t(), binary()) :: state()
-  defp start_remote_buffer(state, server_name, remote_path, content) do
+  @spec start_remote_buffer(state(), String.t(), node(), String.t(), binary()) :: state()
+  defp start_remote_buffer(state, server_name, remote_node, remote_path, content) do
     name = "[#{server_name}] #{Path.basename(remote_path)}"
     filetype = Language.detect_filetype(remote_path)
 
     case Buffer.start_link(
            content: content,
+           file_path: remote_path,
            buffer_name: name,
            filetype: filetype,
-           read_only: true,
-           buffer_type: :nofile
+           storage: {:remote, remote_node, remote_path},
+           read_only: false,
+           buffer_type: :file
          ) do
       {:ok, buffer} ->
         state

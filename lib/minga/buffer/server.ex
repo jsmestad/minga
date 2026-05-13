@@ -38,6 +38,7 @@ defmodule Minga.Buffer.Server do
           | {:name, GenServer.name()}
           | {:buffer_name, String.t()}
           | {:buffer_type, BufState.buffer_type()}
+          | {:storage, BufState.storage()}
           | {:filetype, atom()}
           | {:read_only, boolean()}
           | {:unlisted, boolean()}
@@ -259,6 +260,12 @@ defmodule Minga.Buffer.Server do
     GenServer.call(server, {:replace_content_force, new_content})
   end
 
+  @doc "Replaces content and records it as the saved base revision."
+  @spec replace_saved_content(GenServer.server(), String.t()) :: :ok
+  def replace_saved_content(server, new_content) when is_binary(new_content) do
+    GenServer.call(server, {:replace_saved_content, new_content})
+  end
+
   @doc "Returns the full text content of the buffer."
   @spec content(GenServer.server()) :: String.t()
   def content(server) do
@@ -469,6 +476,12 @@ defmodule Minga.Buffer.Server do
   @spec read_only?(GenServer.server()) :: boolean()
   def read_only?(server) do
     GenServer.call(server, :read_only?)
+  end
+
+  @doc "Returns the buffer storage backend."
+  @spec storage(GenServer.server()) :: BufState.storage()
+  def storage(server) do
+    GenServer.call(server, :storage)
   end
 
   @doc "Returns whether the buffer is unlisted (hidden from buffer picker)."
@@ -813,8 +826,9 @@ defmodule Minga.Buffer.Server do
 
     file_path = Keyword.get(opts, :file_path)
     initial_content = Keyword.get(opts, :content, "")
+    storage = Keyword.get(opts, :storage, :local)
 
-    case load_content(file_path, initial_content) do
+    case load_content(storage, file_path, initial_content) do
       {:ok, text, path, {mtime, size}} ->
         filetype =
           case Keyword.get(opts, :filetype) do
@@ -841,6 +855,7 @@ defmodule Minga.Buffer.Server do
           document: Document.new(text),
           file_path: path,
           filetype: filetype,
+          storage: storage,
           buffer_type: buffer_type,
           mtime: mtime,
           file_size: size,
@@ -866,12 +881,12 @@ defmodule Minga.Buffer.Server do
   @impl true
   @spec handle_call(term(), GenServer.from(), state()) :: {:reply, term(), state()}
   def handle_call({:open, file_path}, _from, state) do
-    case File.read(file_path) do
+    case read_file(state, file_path) do
       {:ok, text} ->
         first_line = text |> String.split("\n", parts: 2) |> List.first("")
         filetype = Language.detect_filetype_from_content(file_path, first_line)
 
-        {mtime, size} = file_stat_info(file_path)
+        {mtime, size} = file_stat_info(state, file_path)
 
         new_state = %{
           state
@@ -1139,16 +1154,16 @@ defmodule Minga.Buffer.Server do
   end
 
   def handle_call(:save, _from, state) do
-    {disk_mtime, disk_size} = file_stat_info(state.file_path)
+    {disk_mtime, disk_size} = file_stat_info(state, state.file_path)
 
     if file_changed_on_disk?(state, disk_mtime, disk_size) do
       {:reply, {:error, :file_changed}, state}
     else
       content = Document.content(state.document)
 
-      case write_file(state.file_path, content) do
+      case write_file(state, state.file_path, content) do
         :ok ->
-          {new_mtime, new_size} = file_stat_info(state.file_path)
+          {new_mtime, new_size} = file_stat_info(state, state.file_path)
 
           {:reply, :ok,
            mark_saved(%{
@@ -1176,9 +1191,9 @@ defmodule Minga.Buffer.Server do
   def handle_call(:force_save, _from, state) do
     content = Document.content(state.document)
 
-    case write_file(state.file_path, content) do
+    case write_file(state, state.file_path, content) do
       :ok ->
-        {new_mtime, new_size} = file_stat_info(state.file_path)
+        {new_mtime, new_size} = file_stat_info(state, state.file_path)
 
         {:reply, :ok,
          mark_saved(%{
@@ -1198,7 +1213,7 @@ defmodule Minga.Buffer.Server do
   end
 
   def handle_call(:reload, _from, state) do
-    case File.read(state.file_path) do
+    case read_file(state, state.file_path) do
       {:ok, text} ->
         {line, col} = Document.cursor(state.document)
         new_buf = Document.new(text)
@@ -1219,7 +1234,7 @@ defmodule Minga.Buffer.Server do
         first_line = text |> String.split("\n", parts: 2) |> List.first("")
         filetype = Language.detect_filetype_from_content(state.file_path, first_line)
 
-        {new_mtime, new_size} = file_stat_info(state.file_path)
+        {new_mtime, new_size} = file_stat_info(state, state.file_path)
 
         new_state = %{
           state
@@ -1245,9 +1260,9 @@ defmodule Minga.Buffer.Server do
   def handle_call({:save_as, file_path}, _from, state) do
     content = Document.content(state.document)
 
-    case write_file(file_path, content) do
+    case write_file(state, file_path, content) do
       :ok ->
-        {new_mtime, new_size} = file_stat_info(file_path)
+        {new_mtime, new_size} = file_stat_info(state, file_path)
         unregister_path(state.file_path)
         register_path(file_path)
 
@@ -1285,6 +1300,29 @@ defmodule Minga.Buffer.Server do
       state
       | document: new_buf,
         version: state.version + 1,
+        pending_edits: [],
+        decorations: Decorations.new()
+    }
+
+    defer_content_replaced(new_state)
+    {:reply, :ok, new_state}
+  end
+
+  def handle_call({:replace_saved_content, new_content}, _from, state) do
+    new_buf = Document.new(new_content)
+    {mtime, size} = file_stat_info(state, state.file_path)
+
+    new_state = %{
+      state
+      | document: new_buf,
+        dirty: false,
+        version: state.version + 1,
+        saved_version: state.version + 1,
+        mtime: mtime,
+        file_size: size,
+        file_hash: content_hash(new_content),
+        undo_stack: [],
+        redo_stack: [],
         pending_edits: [],
         decorations: Decorations.new()
     }
@@ -1441,6 +1479,10 @@ defmodule Minga.Buffer.Server do
 
   def handle_call(:read_only?, _from, state) do
     {:reply, state.read_only, state}
+  end
+
+  def handle_call(:storage, _from, state) do
+    {:reply, state.storage, state}
   end
 
   def handle_call(:unlisted?, _from, state) do
@@ -2049,13 +2091,13 @@ defmodule Minga.Buffer.Server do
 
   @typep file_meta :: {integer() | nil, non_neg_integer() | nil}
 
-  @spec load_content(String.t() | nil, String.t()) ::
+  @spec load_content(BufState.storage(), String.t() | nil, String.t()) ::
           {:ok, String.t(), String.t() | nil, file_meta()} | {:error, term()}
-  defp load_content(nil, initial_content), do: {:ok, initial_content, nil, {nil, nil}}
+  defp load_content(_storage, nil, initial_content), do: {:ok, initial_content, nil, {nil, nil}}
 
-  defp load_content(file_path, _initial_content) do
-    case File.read(file_path) do
-      {:ok, text} -> {:ok, text, file_path, file_stat_info(file_path)}
+  defp load_content(storage, file_path, _initial_content) do
+    case read_file(storage, file_path) do
+      {:ok, text} -> {:ok, text, file_path, file_stat_info(storage, file_path)}
       {:error, :enoent} -> {:ok, "", file_path, {nil, nil}}
       {:error, reason} -> {:error, reason}
     end
@@ -2082,9 +2124,9 @@ defmodule Minga.Buffer.Server do
   @typep saved_content_status :: :same | :changed | :unknown
 
   @spec saved_content_status(BufState.t()) :: saved_content_status()
-  defp saved_content_status(%{file_path: path, file_hash: hash})
+  defp saved_content_status(%{file_path: path, file_hash: hash} = state)
        when is_binary(path) and is_binary(hash) do
-    case File.read(path) do
+    case read_file(state, path) do
       {:ok, content} -> if content_hash(content) == hash, do: :same, else: :changed
       {:error, _reason} -> :changed
     end
@@ -2092,12 +2134,37 @@ defmodule Minga.Buffer.Server do
 
   defp saved_content_status(_state), do: :unknown
 
-  @spec file_stat_info(String.t()) :: {integer() | nil, non_neg_integer() | nil}
-  defp file_stat_info(path) do
-    case File.stat(path, time: :posix) do
+  @spec read_file(BufState.t() | BufState.storage(), String.t()) ::
+          {:ok, String.t()} | {:error, term()}
+  defp read_file(%{storage: storage}, path), do: read_file(storage, path)
+  defp read_file(:local, path), do: File.read(path)
+
+  defp read_file({:remote, node, _base_path}, path) do
+    :erpc.call(node, Minga.Distribution.File, :read_local, [path, 1_000_000], 5_000)
+  catch
+    :exit, reason -> {:error, {:remote_unavailable, reason}}
+  end
+
+  @spec file_stat_info(BufState.t() | BufState.storage(), String.t() | nil) ::
+          {integer() | nil, non_neg_integer() | nil}
+  defp file_stat_info(_state_or_storage, nil), do: {nil, nil}
+
+  defp file_stat_info(state_or_storage, path) do
+    case file_stat_result(state_or_storage, path) do
       {:ok, %{mtime: mtime, size: size}} -> {mtime, size}
       {:error, _} -> {nil, nil}
     end
+  end
+
+  @spec file_stat_result(BufState.t() | BufState.storage(), String.t()) ::
+          {:ok, File.Stat.t()} | {:error, term()}
+  defp file_stat_result(%{storage: storage}, path), do: file_stat_result(storage, path)
+  defp file_stat_result(:local, path), do: File.stat(path, time: :posix)
+
+  defp file_stat_result({:remote, node, _base_path}, path) do
+    :erpc.call(node, File, :stat, [path, [time: :posix]], 5_000)
+  catch
+    :exit, reason -> {:error, {:remote_unavailable, reason}}
   end
 
   @spec content_hash(String.t()) :: binary()
@@ -2189,7 +2256,7 @@ defmodule Minga.Buffer.Server do
 
   @spec auto_save_file(state(), String.t()) :: {:noreply, state()}
   defp auto_save_file(state, path) do
-    case File.stat(path, time: :posix) do
+    case file_stat_result(state, path) do
       {:ok, %{mtime: disk_mtime, size: disk_size}} ->
         maybe_write_auto_save_file(state, path, disk_mtime, disk_size)
 
@@ -2229,9 +2296,9 @@ defmodule Minga.Buffer.Server do
   defp write_auto_save_file(state, path) do
     content = Document.content(state.document)
 
-    case write_file(path, content) do
+    case write_file(state, path, content) do
       :ok ->
-        {new_mtime, new_size} = file_stat_info(path)
+        {new_mtime, new_size} = file_stat_info(state, path)
 
         new_state =
           mark_saved(%{
@@ -2334,8 +2401,8 @@ defmodule Minga.Buffer.Server do
 
   defp delete_swap_file(_state), do: :ok
 
-  @spec write_file(String.t(), String.t()) :: :ok | {:error, term()}
-  defp write_file(file_path, content) do
+  @spec write_file(BufState.t(), String.t(), String.t()) :: :ok | {:error, term()}
+  defp write_file(%{storage: :local}, file_path, content) do
     file_path
     |> Path.dirname()
     |> File.mkdir_p()
@@ -2343,6 +2410,12 @@ defmodule Minga.Buffer.Server do
       :ok -> File.write(file_path, content)
       error -> error
     end
+  end
+
+  defp write_file(%{storage: {:remote, node, _base_path}}, file_path, content) do
+    :erpc.call(node, File, :write, [file_path, content], 10_000)
+  catch
+    :exit, reason -> {:error, {:remote_unavailable, reason}}
   end
 
   # ── Edit delta tracking ──

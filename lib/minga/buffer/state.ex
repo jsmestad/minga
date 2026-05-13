@@ -28,6 +28,9 @@ defmodule Minga.Buffer.State do
   """
   @type buffer_type :: :file | :nofile | :nowrite | :prompt | :terminal
 
+  @typedoc "File storage backend for buffer file I/O. Remote buffers still edit locally, but open/save/stat calls route through Erlang distribution."
+  @type storage :: :local | {:remote, node(), String.t()}
+
   @typedoc "The source of an edit for undo/redo attribution."
   @type edit_source :: :user | :agent | :lsp | :recovery
 
@@ -39,6 +42,7 @@ defmodule Minga.Buffer.State do
   defstruct document: nil,
             file_path: nil,
             filetype: :text,
+            storage: :local,
             buffer_type: :file,
             dirty: false,
             version: 0,
@@ -71,6 +75,7 @@ defmodule Minga.Buffer.State do
           document: Document.t(),
           file_path: String.t() | nil,
           filetype: atom(),
+          storage: storage(),
           buffer_type: buffer_type(),
           dirty: boolean(),
           version: non_neg_integer(),

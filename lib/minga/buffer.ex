@@ -220,6 +220,9 @@ defmodule Minga.Buffer do
   @spec replace_content_force(server(), String.t()) :: :ok
   defdelegate replace_content_force(server, new_content), to: Server
 
+  @spec replace_saved_content(server(), String.t()) :: :ok
+  defdelegate replace_saved_content(server, new_content), to: Server
+
   @doc "Find and replace the first occurrence of `old_text` with `new_text`."
   @spec find_and_replace(server(), String.t(), String.t(), Server.boundary()) ::
           {:ok, String.t()} | {:error, String.t()}
@@ -334,6 +337,9 @@ defmodule Minga.Buffer do
   @doc "Whether the buffer is read-only."
   @spec read_only?(server()) :: boolean()
   defdelegate read_only?(server), to: Server
+
+  @spec storage(server()) :: Minga.Buffer.State.storage()
+  defdelegate storage(server), to: Server
 
   @doc "Whether the buffer is hidden from buffer lists."
   @spec unlisted?(server()) :: boolean()
