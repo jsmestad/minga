@@ -56,6 +56,12 @@ defmodule MingaEditor.Renderer.InvisibleCharsTest do
       assert result == [{"h", 1}, {" ", 1}, {"i", 1}]
     end
 
+    test "interior spaces after tabs are not replaced" do
+      pairs = [{"	", 0}, {" ", 1}, {"x", 1}]
+      result = Line.substitute_invisible_pairs(pairs, 4)
+      assert result == [{"→", 1}, {" ", 1}, {" ", 1}, {" ", 1}, {" ", 1}, {"x", 1}]
+    end
+
     test "line with only spaces becomes all dots" do
       pairs = [{" ", 1}, {" ", 1}, {" ", 1}]
       result = Line.substitute_invisible_pairs(pairs, 4)

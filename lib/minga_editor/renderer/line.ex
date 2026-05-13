@@ -71,6 +71,7 @@ defmodule MingaEditor.Renderer.Line do
 
     has_conceals = Decorations.has_conceal_ranges?(ctx.decorations)
 
+    # Conceals first: invisible substitution must see conceal-adjusted positions
     concealed_pairs =
       if has_conceals do
         raw_pairs
@@ -437,21 +438,21 @@ defmodule MingaEditor.Renderer.Line do
   @doc false
   @spec substitute_invisible_pairs([grapheme_pair()], pos_integer()) :: [grapheme_pair()]
   def substitute_invisible_pairs(pairs, tab_width) do
-    trailing_start = trailing_ws_start_pairs(pairs)
+    trailing_idx = trailing_ws_start_index(pairs)
 
-    {result, _col} =
-      Enum.reduce(pairs, {[], 0}, fn {g, w}, {acc, col} ->
+    {result, _col, _idx} =
+      Enum.reduce(pairs, {[], 0, 0}, fn {g, w}, {acc, col, idx} ->
         case g do
           "\t" ->
             fill = tab_fill(col, tab_width)
             expanded = [{"→", 1} | List.duplicate({" ", 1}, fill - 1)]
-            {Enum.reverse(expanded) ++ acc, col + fill}
+            {Enum.reverse(expanded) ++ acc, col + fill, idx + 1}
 
-          " " when col >= trailing_start ->
-            {[{"·", 1} | acc], col + 1}
+          " " when idx >= trailing_idx ->
+            {[{"·", 1} | acc], col + 1, idx + 1}
 
           _ ->
-            {[{g, w} | acc], col + w}
+            {[{g, w} | acc], col + w, idx + 1}
         end
       end)
 
@@ -462,14 +463,14 @@ defmodule MingaEditor.Renderer.Line do
           [{String.t(), Face.t()}]
   defp apply_invisible_chars(segments, tab_width, ws_face) do
     full_text = Enum.map_join(segments, fn {text, _} -> text end)
-    trailing_start = trailing_ws_start_text(full_text)
+    trailing_idx = trailing_ws_start_index_text(full_text)
 
-    {result, _col} =
-      Enum.reduce(segments, {[], 0}, fn {text, face}, {acc, col} ->
-        {seg_parts, new_col} =
-          transform_segment_text(text, face, col, tab_width, trailing_start, ws_face)
+    {result, _col, _idx} =
+      Enum.reduce(segments, {[], 0, 0}, fn {text, face}, {acc, col, idx} ->
+        {seg_parts, new_col, new_idx} =
+          transform_segment_text(text, face, col, idx, tab_width, trailing_idx, ws_face)
 
-        {seg_parts ++ acc, new_col}
+        {seg_parts ++ acc, new_col, new_idx}
       end)
 
     Enum.reverse(result)
@@ -479,34 +480,36 @@ defmodule MingaEditor.Renderer.Line do
           String.t(),
           Face.t(),
           non_neg_integer(),
+          non_neg_integer(),
           pos_integer(),
           non_neg_integer(),
           Face.t()
-        ) :: {[{String.t(), Face.t()}], non_neg_integer()}
-  defp transform_segment_text(text, face, col, tab_width, trailing_start, ws_face) do
+        ) :: {[{String.t(), Face.t()}], non_neg_integer(), non_neg_integer()}
+  defp transform_segment_text(text, face, col, idx, tab_width, trailing_idx, ws_face) do
     graphemes = String.graphemes(text)
 
-    {parts, current_run, current_face, new_col} =
-      Enum.reduce(graphemes, {[], "", face, col}, fn g, {parts, run, run_face, c} ->
+    {parts, current_run, current_face, new_col, new_idx} =
+      Enum.reduce(graphemes, {[], "", face, col, idx}, fn g, {parts, run, run_face, c, i} ->
         case g do
           "\t" ->
             fill = tab_fill(c, tab_width)
             tab_text = "→" <> String.duplicate(" ", fill - 1)
             parts = flush_run(parts, run, run_face)
-            {[{tab_text, ws_face} | parts], "", face, c + fill}
+            {[{tab_text, ws_face} | parts], "", face, c + fill, i + 1}
 
-          " " when c >= trailing_start ->
+          " " when i >= trailing_idx ->
             parts = flush_run(parts, run, run_face)
-            {[{"·", ws_face} | parts], "", face, c + 1}
+            {[{"·", ws_face} | parts], "", face, c + 1, i + 1}
 
           _ ->
             w = Unicode.grapheme_width(g)
-            append_grapheme(parts, run, run_face, face, g, c + w)
+            {p, r, f, nc} = append_grapheme(parts, run, run_face, face, g, c + w)
+            {p, r, f, nc, i + 1}
         end
       end)
 
     parts = flush_run(parts, current_run, current_face)
-    {parts, new_col}
+    {parts, new_col, new_idx}
   end
 
   @spec flush_run([{String.t(), Face.t()}], String.t(), Face.t()) :: [{String.t(), Face.t()}]
@@ -530,37 +533,33 @@ defmodule MingaEditor.Renderer.Line do
   end
 
   @spec tab_fill(non_neg_integer(), pos_integer()) :: pos_integer()
-  defp tab_fill(col, tab_width) do
-    fill = tab_width - rem(col, tab_width)
-    if fill == 0, do: tab_width, else: fill
-  end
+  defp tab_fill(col, tab_width), do: tab_width - rem(col, tab_width)
 
-  @spec trailing_ws_start_pairs([grapheme_pair()]) :: non_neg_integer()
-  defp trailing_ws_start_pairs(pairs) do
+  # Returns the grapheme index where trailing whitespace begins.
+  @spec trailing_ws_start_index([grapheme_pair()]) :: non_neg_integer()
+  defp trailing_ws_start_index(pairs) do
     {last_non_ws, _} =
-      Enum.reduce(pairs, {0, 0}, fn {g, w}, {last, col} ->
+      Enum.reduce(pairs, {0, 0}, fn {g, _w}, {last, idx} ->
         case g do
-          " " -> {last, col + w}
-          "\t" -> {last, col + w}
-          _ -> {col + w, col + w}
+          " " -> {last, idx + 1}
+          "\t" -> {last, idx + 1}
+          _ -> {idx + 1, idx + 1}
         end
       end)
 
     last_non_ws
   end
 
-  @spec trailing_ws_start_text(String.t()) :: non_neg_integer()
-  defp trailing_ws_start_text(text) do
-    graphemes = String.graphemes(text)
-
+  @spec trailing_ws_start_index_text(String.t()) :: non_neg_integer()
+  defp trailing_ws_start_index_text(text) do
     {last_non_ws, _} =
-      Enum.reduce(graphemes, {0, 0}, fn g, {last, col} ->
-        w = Unicode.grapheme_width(g)
-
+      text
+      |> String.graphemes()
+      |> Enum.reduce({0, 0}, fn g, {last, idx} ->
         case g do
-          " " -> {last, col + w}
-          "\t" -> {last, col + w}
-          _ -> {col + w, col + w}
+          " " -> {last, idx + 1}
+          "\t" -> {last, idx + 1}
+          _ -> {idx + 1, idx + 1}
         end
       end)
 

@@ -1063,7 +1063,8 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
       is_active,
       ctx.confirm_match,
       ctx.decorations.version,
-      ctx.show_invisible
+      ctx.show_invisible,
+      ctx.tab_width
     }
   end
 
