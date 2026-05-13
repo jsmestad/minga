@@ -16,6 +16,7 @@ defmodule MingaEditor.State.Tab.Context do
   alias MingaEditor.State.Windows
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
+  alias MingaEditor.Workspace.State, as: WorkspaceState
 
   @version 1
 
@@ -114,7 +115,33 @@ defmodule MingaEditor.State.Tab.Context do
     end
   end
 
-  @doc "Builds a complete context from canonical workspace fields."
+  @doc "Creates a tab context directly from a workspace struct, without intermediate map conversion."
+  @spec from_workspace(WorkspaceState.t()) :: t()
+  def from_workspace(%WorkspaceState{} = ws) do
+    editing = VimState.normalize(ws.editing)
+
+    %__MODULE__{
+      version: @version,
+      keymap_scope: ws.keymap_scope,
+      buffers: ws.buffers,
+      windows: ws.windows,
+      file_tree: ws.file_tree,
+      dired: ws.dired,
+      viewport: ws.viewport,
+      mouse: ws.mouse,
+      highlight: ws.highlight,
+      lsp_pending: ws.lsp_pending,
+      injection_ranges: ws.injection_ranges,
+      search: ws.search,
+      editing: editing,
+      document_highlights: ws.document_highlights,
+      agent_ui: ws.agent_ui,
+      present_fields: @workspace_fields
+    }
+  end
+
+  @doc deprecated:
+         "Use from_workspace/1 for struct inputs. This remains for legacy map inputs only."
   @spec from_workspace_map(map()) :: t()
   def from_workspace_map(map) when is_map(map), do: from_map(map)
 

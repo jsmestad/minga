@@ -341,6 +341,89 @@ defmodule MingaEditor.State.SnapshotTest do
     end
   end
 
+  describe "from_workspace/1 (direct struct-to-struct)" do
+    test "produces identical output to the legacy Map.from_struct path" do
+      {:ok, buf} = BufferServer.start_link(content: "hello")
+
+      ws = %MingaEditor.Workspace.State{
+        viewport: Viewport.new(24, 80),
+        editing: %VimState{mode: :insert, mode_state: Mode.initial_state()},
+        buffers: %Buffers{active: buf, list: [buf]},
+        keymap_scope: :agent
+      }
+
+      # New direct path
+      new_ctx = Context.from_workspace(ws)
+
+      # Old path: normalize editing, Map.from_struct, from_workspace_map
+      old_ctx =
+        ws
+        |> Map.update!(:editing, &VimState.normalize/1)
+        |> Map.from_struct()
+        |> Context.from_workspace_map()
+
+      # All workspace data fields must match exactly
+      assert new_ctx.version == old_ctx.version
+      assert new_ctx.keymap_scope == old_ctx.keymap_scope
+      assert new_ctx.buffers == old_ctx.buffers
+      assert new_ctx.windows == old_ctx.windows
+      assert new_ctx.file_tree == old_ctx.file_tree
+      assert new_ctx.dired == old_ctx.dired
+      assert new_ctx.viewport == old_ctx.viewport
+      assert new_ctx.mouse == old_ctx.mouse
+      assert new_ctx.highlight == old_ctx.highlight
+      assert new_ctx.lsp_pending == old_ctx.lsp_pending
+      assert new_ctx.injection_ranges == old_ctx.injection_ranges
+      assert new_ctx.search == old_ctx.search
+      assert new_ctx.editing == old_ctx.editing
+      assert new_ctx.document_highlights == old_ctx.document_highlights
+      assert new_ctx.agent_ui == old_ctx.agent_ui
+
+      # present_fields contain the same fields (order is not semantically significant)
+      assert Enum.sort(new_ctx.present_fields) == Enum.sort(old_ctx.present_fields)
+
+      # Both produce the same workspace map on round-trip
+      assert Context.to_workspace_map(new_ctx) == Context.to_workspace_map(old_ctx)
+    end
+
+    test "round-trips through to_workspace_map preserving all fields" do
+      {:ok, buf} = BufferServer.start_link(content: "round-trip")
+
+      ws = %MingaEditor.Workspace.State{
+        viewport: Viewport.new(30, 100),
+        editing: %VimState{mode: :normal, mode_state: Mode.initial_state()},
+        buffers: %Buffers{active: buf, list: [buf]},
+        keymap_scope: :editor
+      }
+
+      ctx = Context.from_workspace(ws)
+      restored_map = Context.to_workspace_map(ctx)
+
+      assert restored_map.keymap_scope == :editor
+      assert restored_map.editing.mode == :normal
+      assert restored_map.buffers.active == buf
+      assert restored_map.viewport == ws.viewport
+      assert restored_map.windows == ws.windows
+      assert restored_map.mouse == ws.mouse
+      assert restored_map.highlight == ws.highlight
+      assert restored_map.search == ws.search
+    end
+
+    test "normalises transient vim state" do
+      ws = %MingaEditor.Workspace.State{
+        viewport: Viewport.new(24, 80),
+        editing: %VimState{mode: :normal, mode_state: %Mode.CommandState{input: ""}},
+        buffers: %Buffers{},
+        keymap_scope: :editor
+      }
+
+      ctx = Context.from_workspace(ws)
+
+      assert ctx.editing.mode == :normal
+      assert match?(%Mode.State{}, ctx.editing.mode_state)
+    end
+  end
+
   describe "active_tab/1 and active_tab_kind/1" do
     test "returns the active tab" do
       tb = TabBar.new(Tab.new_file(1, "a"))
