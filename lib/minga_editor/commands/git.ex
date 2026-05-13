@@ -9,6 +9,7 @@ defmodule MingaEditor.Commands.Git do
   alias Minga.Buffer
   alias Minga.Core.Diff
   alias Minga.Core.DiffView
+  alias Minga.Core.Face
   alias MingaEditor.Commands
   alias MingaEditor.PickerUI
   alias MingaEditor.State, as: EditorState
@@ -32,7 +33,8 @@ defmodule MingaEditor.Commands.Git do
     {:git_stage_hunk, "Stage hunk", true},
     {:git_revert_hunk, "Revert hunk", true},
     {:git_preview_hunk, "Preview hunk", true},
-    {:git_blame_line, "Blame line", true}
+    {:git_blame_line, "Blame line", true},
+    {:git_diff_toggle_staged, "Toggle diff staged/unstaged", true}
   ]
 
   @spec execute(state(), atom()) :: state()
@@ -76,6 +78,11 @@ defmodule MingaEditor.Commands.Git do
     with_git_buffer(state, fn git_pid, buf ->
       open_diff_view(state, git_pid, buf)
     end)
+  end
+
+  def execute(state, :git_diff_toggle_staged) do
+    active_buf = state.workspace.buffers.active
+    toggle_diff_staged(state, active_buf)
   end
 
   # ── Navigation ─────────────────────────────────────────────────────────────
@@ -175,17 +182,19 @@ defmodule MingaEditor.Commands.Git do
   defp close_file_tree_if_open(%{workspace: %{file_tree: %{tree: nil}}} = state), do: state
   defp close_file_tree_if_open(state), do: Commands.FileTree.close(state)
 
-  @spec open_diff_view(state(), pid(), pid()) :: state()
-  defp open_diff_view(state, git_pid, buf) do
-    git_root = Git.Buffer.git_root(git_pid)
-    rel_path = Git.Buffer.relative_path(git_pid)
-    {current_content, _cursor} = Buffer.content_and_cursor(buf)
+  @doc """
+  Opens a diff view for a file specified by path.
 
-    base_content =
-      case Git.show_head(git_root, rel_path) do
-        {:ok, content} -> content
-        :error -> ""
-      end
+  Used by the git status panel when opening diffs for files that may not
+  have an open buffer. Creates a temporary buffer for the current content
+  and opens a diff view against HEAD.
+  """
+  @spec open_diff_for_path(state(), String.t(), String.t(), String.t(), String.t(), keyword()) ::
+          state()
+  def open_diff_for_path(state, git_root, rel_path, _abs_path, current_content, opts \\ []) do
+    base_content = head_content(git_root, rel_path)
+    staged = Keyword.get(opts, :staged, false)
+    label = if staged, do: "staged", else: "unstaged"
 
     diff_result = DiffView.build(base_content, current_content)
     filename = Path.basename(rel_path)
@@ -195,20 +204,275 @@ defmodule MingaEditor.Commands.Git do
            content: diff_result.text,
            buffer_type: :nofile,
            read_only: true,
-           buffer_name: "#{filename} [diff]",
+           buffer_name: "#{filename} [diff:#{label}]",
            filetype: filetype
          ) do
       {:ok, diff_buf} ->
-        state = Commands.add_buffer(state, diff_buf)
+        apply_diff_decorations(diff_buf, diff_result.line_metadata, state.theme)
 
-        EditorState.set_status(
-          state,
-          "Diff: #{filename} (#{length(diff_result.hunk_lines)} hunks)"
+        diff_info = %{
+          source_buf: nil,
+          git_root: git_root,
+          rel_path: rel_path,
+          staged: staged,
+          line_metadata: diff_result.line_metadata
+        }
+
+        state
+        |> EditorState.register_diff_view(diff_buf, diff_info)
+        |> Commands.add_buffer(diff_buf)
+        |> EditorState.set_status(
+          "Diff (#{label}): #{filename} (#{length(diff_result.hunk_lines)} hunks)"
         )
 
       {:error, reason} ->
         EditorState.set_status(state, "Failed to open diff: #{inspect(reason)}")
     end
+  end
+
+  @spec open_diff_view(state(), pid(), pid()) :: state()
+  defp open_diff_view(state, git_pid, buf) do
+    open_diff_view(state, git_pid, buf, _staged = false)
+  end
+
+  @spec open_diff_view(state(), pid(), pid(), boolean()) :: state()
+  defp open_diff_view(state, git_pid, buf, staged) do
+    git_root = Git.Buffer.git_root(git_pid)
+    rel_path = Git.Buffer.relative_path(git_pid)
+
+    {base_content, current_content} = diff_contents(git_root, rel_path, buf, staged)
+
+    diff_result = DiffView.build(base_content, current_content)
+    filename = Path.basename(rel_path)
+    filetype = Language.detect_filetype(filename)
+    label = if staged, do: "staged", else: "unstaged"
+
+    case Buffer.start_link(
+           content: diff_result.text,
+           buffer_type: :nofile,
+           read_only: true,
+           buffer_name: "#{filename} [diff:#{label}]",
+           filetype: filetype
+         ) do
+      {:ok, diff_buf} ->
+        apply_diff_decorations(diff_buf, diff_result.line_metadata, state.theme)
+
+        diff_info = %{
+          source_buf: buf,
+          git_root: git_root,
+          rel_path: rel_path,
+          staged: staged,
+          line_metadata: diff_result.line_metadata
+        }
+
+        state
+        |> EditorState.register_diff_view(diff_buf, diff_info)
+        |> Commands.add_buffer(diff_buf)
+        |> EditorState.set_status(
+          "Diff (#{label}): #{filename} (#{length(diff_result.hunk_lines)} hunks)"
+        )
+
+      {:error, reason} ->
+        EditorState.set_status(state, "Failed to open diff: #{inspect(reason)}")
+    end
+  end
+
+  @spec diff_contents(String.t(), String.t(), pid(), boolean()) :: {String.t(), String.t()}
+  defp diff_contents(git_root, rel_path, buf, false) do
+    base_content = head_content(git_root, rel_path)
+    {current_content, _cursor} = Buffer.content_and_cursor(buf)
+    {base_content, current_content}
+  end
+
+  defp diff_contents(git_root, rel_path, _buf, true) do
+    base_content = head_content(git_root, rel_path)
+    {base_content, staged_content(git_root, rel_path)}
+  end
+
+  @spec head_content(String.t(), String.t()) :: String.t()
+  defp head_content(git_root, rel_path) do
+    case Git.show_head(git_root, rel_path) do
+      {:ok, content} -> content
+      :error -> ""
+    end
+  end
+
+  @spec staged_content(String.t(), String.t()) :: String.t()
+  defp staged_content(git_root, rel_path) do
+    case Git.show_staged(git_root, rel_path) do
+      {:ok, content} -> content
+      :error -> staged_content_fallback(git_root, rel_path)
+    end
+  end
+
+  @spec staged_content_fallback(String.t(), String.t()) :: String.t()
+  defp staged_content_fallback(git_root, rel_path) do
+    if staged_deleted?(git_root, rel_path), do: "", else: head_content(git_root, rel_path)
+  end
+
+  @spec staged_deleted?(String.t(), String.t()) :: boolean()
+  defp staged_deleted?(git_root, rel_path) do
+    case Git.status(git_root) do
+      {:ok, entries} -> Enum.any?(entries, &staged_deleted_entry?(&1, rel_path))
+      {:error, _reason} -> false
+    end
+  end
+
+  @spec staged_deleted_entry?(Git.StatusEntry.t(), String.t()) :: boolean()
+  defp staged_deleted_entry?(
+         %Git.StatusEntry{path: path, status: :deleted, staged: true},
+         rel_path
+       ),
+       do: path == rel_path
+
+  defp staged_deleted_entry?(%Git.StatusEntry{}, _rel_path), do: false
+
+  @spec apply_diff_decorations(pid(), [DiffView.line_meta()], MingaEditor.UI.Theme.t()) :: :ok
+  defp apply_diff_decorations(diff_buf, line_metadata, theme) do
+    Buffer.batch_decorations(diff_buf, fn decs ->
+      apply_diff_decorations_to(decs, line_metadata, theme)
+    end)
+  end
+
+  @spec apply_line_decoration(
+          Minga.Core.Decorations.t(),
+          DiffView.line_meta(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: Minga.Core.Decorations.t()
+  defp apply_line_decoration(decs, %{type: :added}, line_idx, added_bg, _removed_bg, _fold_fg) do
+    {_id, decs} =
+      Minga.Core.Decorations.add_highlight(decs, {line_idx, 0}, {line_idx, 9999},
+        style: Face.new(bg: added_bg),
+        priority: 1,
+        group: :diff
+      )
+
+    decs
+  end
+
+  defp apply_line_decoration(decs, %{type: :removed}, line_idx, _added_bg, removed_bg, _fold_fg) do
+    {_id, decs} =
+      Minga.Core.Decorations.add_highlight(decs, {line_idx, 0}, {line_idx, 9999},
+        style: Face.new(bg: removed_bg),
+        priority: 1,
+        group: :diff
+      )
+
+    decs
+  end
+
+  defp apply_line_decoration(decs, %{type: :fold}, line_idx, _added_bg, _removed_bg, fold_fg) do
+    {_id, decs} =
+      Minga.Core.Decorations.add_highlight(decs, {line_idx, 0}, {line_idx, 9999},
+        style: Face.new(fg: fold_fg, italic: true),
+        priority: 1,
+        group: :diff
+      )
+
+    decs
+  end
+
+  defp apply_line_decoration(decs, _meta, _line_idx, _added_bg, _removed_bg, _fold_fg), do: decs
+
+  @spec tint_color(non_neg_integer(), non_neg_integer(), float()) :: non_neg_integer()
+  defp tint_color(fg, bg, alpha) do
+    fg_r = Bitwise.bsr(fg, 16) |> Bitwise.band(0xFF)
+    fg_g = Bitwise.bsr(fg, 8) |> Bitwise.band(0xFF)
+    fg_b = Bitwise.band(fg, 0xFF)
+
+    bg_r = Bitwise.bsr(bg, 16) |> Bitwise.band(0xFF)
+    bg_g = Bitwise.bsr(bg, 8) |> Bitwise.band(0xFF)
+    bg_b = Bitwise.band(bg, 0xFF)
+
+    r = round(fg_r * alpha + bg_r * (1.0 - alpha))
+    g = round(fg_g * alpha + bg_g * (1.0 - alpha))
+    b = round(fg_b * alpha + bg_b * (1.0 - alpha))
+
+    Bitwise.bsl(r, 16) + Bitwise.bsl(g, 8) + b
+  end
+
+  @spec toggle_diff_staged(state(), pid()) :: state()
+  defp toggle_diff_staged(state, active_buf) do
+    case EditorState.diff_view_info(state, active_buf) do
+      nil ->
+        EditorState.set_status(state, "Not a diff view")
+
+      %{source_buf: nil} ->
+        EditorState.set_status(state, "Cannot toggle staged: diff opened from status panel")
+
+      %{source_buf: source_buf, staged: staged} ->
+        new_staged = not staged
+        git_pid = Git.tracking_pid(source_buf)
+
+        if git_pid do
+          GenServer.stop(active_buf, :normal)
+          state = EditorState.unregister_diff_view(state, active_buf)
+          open_diff_view(state, git_pid, source_buf, new_staged)
+        else
+          EditorState.set_status(state, "Source buffer no longer tracked by git")
+        end
+    end
+  end
+
+  @doc """
+  Refreshes all open diff views whose source buffer matches the saved path.
+
+  Called by `MingaEditor.handle_info/2` on `:buffer_saved` events.
+  """
+  @spec refresh_diff_views_for_buffer(state(), pid()) :: state()
+  def refresh_diff_views_for_buffer(state, saved_buf) do
+    diff_views = EditorState.diff_views_for_source(state, saved_buf)
+
+    Enum.reduce(diff_views, state, fn {diff_buf,
+                                       %{git_root: git_root, rel_path: rel_path, staged: staged}},
+                                      acc ->
+      refresh_diff_buffer(acc, diff_buf, saved_buf, git_root, rel_path, staged)
+    end)
+  end
+
+  @spec refresh_diff_buffer(state(), pid(), pid(), String.t(), String.t(), boolean()) :: state()
+  defp refresh_diff_buffer(state, diff_buf, source_buf, git_root, rel_path, staged) do
+    {base_content, current_content} = diff_contents(git_root, rel_path, source_buf, staged)
+    diff_result = DiffView.build(base_content, current_content)
+
+    Buffer.replace_content_with_decorations(
+      diff_buf,
+      diff_result.text,
+      fn _decs ->
+        decs = Minga.Core.Decorations.new()
+        apply_diff_decorations_to(decs, diff_result.line_metadata, state.theme)
+      end
+    )
+
+    diff_info = %{
+      source_buf: source_buf,
+      git_root: git_root,
+      rel_path: rel_path,
+      staged: staged,
+      line_metadata: diff_result.line_metadata
+    }
+
+    EditorState.register_diff_view(state, diff_buf, diff_info)
+  end
+
+  @spec apply_diff_decorations_to(
+          Minga.Core.Decorations.t(),
+          [DiffView.line_meta()],
+          MingaEditor.UI.Theme.t()
+        ) :: Minga.Core.Decorations.t()
+  defp apply_diff_decorations_to(decs, line_metadata, theme) do
+    added_bg = tint_color(theme.git.added_fg, theme.editor.bg, 0.15)
+    removed_bg = tint_color(theme.git.deleted_fg, theme.editor.bg, 0.15)
+    fold_fg = theme.gutter.fg
+
+    line_metadata
+    |> Enum.with_index()
+    |> Enum.reduce(decs, fn {meta, line_idx}, decs ->
+      apply_line_decoration(decs, meta, line_idx, added_bg, removed_bg, fold_fg)
+    end)
   end
 
   @doc """

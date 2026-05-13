@@ -17,6 +17,9 @@ defmodule Minga.Git.Backend do
   @callback show_head(git_root :: String.t(), relative_path :: String.t()) ::
               {:ok, String.t()} | :error
 
+  @callback show_staged(git_root :: String.t(), relative_path :: String.t()) ::
+              {:ok, String.t()} | :error
+
   @callback blame_line(
               git_root :: String.t(),
               relative_path :: String.t(),

@@ -153,7 +153,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
       has_sign_column: has_sign_column,
       decorations: decorations,
       diagnostic_signs: diagnostic_signs_for_path(Map.get(params, :file_path)),
-      git_signs: git_signs_for_window(window),
+      git_signs: diff_or_git_signs(state, window),
       gutter_colors: state.theme.gutter,
       git_colors: state.theme.git,
       show_invisible: show_invisible,
@@ -959,6 +959,29 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
       nil -> hl
       registry -> %{hl | face_registry: registry}
     end
+  end
+
+  @spec diff_or_git_signs(state(), Window.t()) :: %{non_neg_integer() => atom()}
+  defp diff_or_git_signs(%{diff_views: diff_views}, %{buffer: buf} = window)
+       when is_pid(buf) and is_map(diff_views) do
+    case Map.get(diff_views, buf) do
+      nil -> git_signs_for_window(window)
+      info -> diff_signs_from_metadata(info.line_metadata)
+    end
+  end
+
+  defp diff_or_git_signs(_state, window), do: git_signs_for_window(window)
+
+  @spec diff_signs_from_metadata([Minga.Core.DiffView.line_meta()]) ::
+          %{non_neg_integer() => atom()}
+  defp diff_signs_from_metadata(line_metadata) do
+    line_metadata
+    |> Enum.with_index()
+    |> Enum.reduce(%{}, fn
+      {%{type: :added}, idx}, acc -> Map.put(acc, idx, :added)
+      {%{type: :removed}, idx}, acc -> Map.put(acc, idx, :removed)
+      _, acc -> acc
+    end)
   end
 
   @doc "Returns git signs for a window's buffer."
