@@ -76,7 +76,7 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUI do
           separator_draws = vertical_separators ++ horizontal_separators
 
           # Sidebar: git status panel replaces file tree when active
-          tree_draws = sidebar_draws(state)
+          tree_draws = sidebar_draws(state, layout)
 
           # Minibuffer
           {minibuffer_row, _mbc, _mbw, _mbh} = layout.minibuffer
@@ -133,12 +133,12 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUI do
     }
   end
 
-  @spec sidebar_draws(state()) :: [DisplayList.draw()]
-  defp sidebar_draws(%{workspace: %{keymap_scope: :git_status}} = state) do
-    GitStatusRenderer.render(state)
+  @spec sidebar_draws(state(), Layout.t()) :: [DisplayList.draw()]
+  defp sidebar_draws(%{workspace: %{keymap_scope: :git_status}} = state, layout) do
+    GitStatusRenderer.render(state, layout.file_tree)
   end
 
-  defp sidebar_draws(state), do: TreeRenderer.render(state)
+  defp sidebar_draws(state, _layout), do: TreeRenderer.render(state)
 
   @spec stable_chrome_fingerprint(state(), Layout.t(), StatusBarData.t()) :: integer()
   defp stable_chrome_fingerprint(state, layout, status_bar_data) do
@@ -152,6 +152,7 @@ defmodule MingaEditor.Shell.Traditional.Chrome.TUI do
       state.workspace.keymap_scope,
       state.shell_state |> Map.get(:tab_bar),
       state.shell_state |> Map.get(:git_status_panel),
+      state.shell_state |> Map.get(:git_status_tui_state),
       state.workspace.editing.mode,
       state.workspace.editing.mode_state,
       status_bar_dirty?(status_bar_data),

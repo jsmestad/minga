@@ -3,8 +3,8 @@ defmodule MingaEditor.Shell.Traditional.GitStatusRenderer do
   TUI renderer for the git status panel sidebar.
 
   Renders section headers (Staged, Changes, Untracked, Conflicts) with file
-  rows inside each section, using the pre-computed `TuiState.flat_entries`
-  for cursor tracking and collapsed section support.
+  rows inside each section. Shared git status data provides repo and file
+  status; TUI-only shell state provides cursor and collapsed-section state.
 
   Follows the same `[DisplayList.draw()]` pattern as `TreeRenderer`.
   """
@@ -12,7 +12,8 @@ defmodule MingaEditor.Shell.Traditional.GitStatusRenderer do
   alias Minga.Core.Face
   alias Minga.Git.StatusEntry
   alias MingaEditor.DisplayList
-  alias MingaEditor.Input.GitStatus.TuiState
+  alias MingaEditor.Layout
+  alias MingaEditor.Shell.Traditional.GitStatus.TuiState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.UI.Theme
 
@@ -33,45 +34,45 @@ defmodule MingaEditor.Shell.Traditional.GitStatusRenderer do
   }
 
   @doc """
-  Renders the git status panel as a list of draw commands.
+  Renders the git status panel into the given sidebar rect.
 
-  Returns an empty list when no panel is active or no file tree rect is
-  available to render into.
+  Returns an empty list when no panel is active or the layout did not reserve a sidebar rect.
   """
-  @spec render(state()) :: [DisplayList.draw()]
-  def render(state) do
+  @spec render(state(), Layout.rect() | nil) :: [DisplayList.draw()]
+  def render(_state, nil), do: []
+
+  def render(state, rect) do
     case EditorState.git_status_panel(state) do
       nil -> []
-      panel -> do_render(panel, sidebar_rect(state), state.theme)
+      panel -> do_render(panel, tui_state(state), rect, state.theme)
     end
   end
 
-  @spec do_render(
-          map(),
-          {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()},
-          Theme.t()
-        ) ::
-          [DisplayList.draw()]
-  defp do_render(panel, {row_off, col_off, width, height}, theme) do
-    case Map.get(panel, :tui_state) do
-      nil -> render_empty(row_off, col_off, width, height, theme)
-      tui -> render_panel(panel, tui, row_off, col_off, width, height, theme)
-    end
+  @spec do_render(map(), TuiState.t(), Layout.rect(), Theme.t()) :: [DisplayList.draw()]
+  defp do_render(panel, tui, {row_off, col_off, width, height}, theme) do
+    entries = Map.get(panel, :entries) || []
+    flat_entries = TuiState.flat_entries(tui, entries)
+    render_panel(panel, tui, flat_entries, row_off, col_off, width, height, theme)
   end
+
+  @spec tui_state(state()) :: TuiState.t()
+  defp tui_state(%{shell_state: %{git_status_tui_state: %TuiState{} = tui}}), do: tui
+  defp tui_state(_state), do: TuiState.new()
 
   @spec render_panel(
           map(),
           TuiState.t(),
+          [TuiState.flat_entry()],
           non_neg_integer(),
           non_neg_integer(),
           non_neg_integer(),
           non_neg_integer(),
           Theme.t()
         ) :: [DisplayList.draw()]
-  defp render_panel(panel, tui, row_off, col_off, width, height, theme) do
-    branch = Map.get(panel, :branch, "")
-    ahead = Map.get(panel, :ahead, 0)
-    behind = Map.get(panel, :behind, 0)
+  defp render_panel(panel, tui, flat_entries, row_off, col_off, width, height, theme) do
+    branch = Map.get(panel, :branch) || ""
+    ahead = Map.get(panel, :ahead) || 0
+    behind = Map.get(panel, :behind) || 0
 
     header_text = header_text(branch, ahead, behind)
     header_display = String.slice(header_text, 0, width) |> String.pad_trailing(width)
@@ -89,7 +90,7 @@ defmodule MingaEditor.Shell.Traditional.GitStatusRenderer do
     scroll_offset = scroll_offset(tui.cursor_index, content_rows)
 
     entry_draws =
-      tui.flat_entries
+      flat_entries
       |> Enum.with_index()
       |> Enum.drop(scroll_offset)
       |> Enum.take(content_rows)
@@ -100,10 +101,8 @@ defmodule MingaEditor.Shell.Traditional.GitStatusRenderer do
         render_flat_entry(entry, row, col_off, width, is_cursor, theme)
       end)
 
-    visible_count = min(length(tui.flat_entries) - scroll_offset, content_rows)
-
+    visible_count = max(min(length(flat_entries) - scroll_offset, content_rows), 0)
     blank_draws = render_blanks(visible_count, content_rows, row_off + 1, col_off, width, theme)
-
     sep_col = col_off + width
     sep_draws = render_separator(sep_col, row_off, height, theme)
 
@@ -215,50 +214,14 @@ defmodule MingaEditor.Shell.Traditional.GitStatusRenderer do
     end
   end
 
-  @spec render_separator(
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
-          Theme.t()
-        ) :: [DisplayList.draw()]
+  @spec render_separator(non_neg_integer(), non_neg_integer(), non_neg_integer(), Theme.t()) :: [
+          DisplayList.draw()
+        ]
   defp render_separator(col, row_off, height, theme) do
     sep_face = Face.new(fg: theme.tree.separator_fg)
 
     for row <- row_off..(row_off + height - 1) do
       DisplayList.draw(row, col, "│", sep_face)
     end
-  end
-
-  @spec render_empty(
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
-          Theme.t()
-        ) :: [DisplayList.draw()]
-  defp render_empty(row_off, col_off, width, height, theme) do
-    text = "  Loading..."
-    display = String.slice(text, 0, width) |> String.pad_trailing(width)
-
-    header = [
-      DisplayList.draw(row_off, col_off, display, Face.new(fg: theme.tree.fg))
-    ]
-
-    blanks = render_blanks(1, height, row_off + 1, col_off, width, theme)
-    sep = render_separator(col_off + width, row_off, height, theme)
-
-    header ++ blanks ++ sep
-  end
-
-  @spec sidebar_rect(state()) ::
-          {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()}
-  defp sidebar_rect(%{workspace: %{file_tree: %{tree: %Minga.Project.FileTree{width: tw}}} = ws}) do
-    rows = ws.viewport.rows
-    {1, 0, tw, rows - 2}
-  end
-
-  defp sidebar_rect(%{workspace: %{viewport: %{rows: rows, cols: cols}}}) do
-    width = min(max(div(cols, 4), 20), 40)
-    {1, 0, width, rows - 2}
   end
 end

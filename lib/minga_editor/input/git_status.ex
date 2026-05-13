@@ -16,7 +16,9 @@ defmodule MingaEditor.Input.GitStatus do
   alias MingaEditor.State, as: EditorState
   alias Minga.Git
   alias MingaEditor.Input
-  alias MingaEditor.Input.GitStatus.TuiState
+  alias MingaEditor.Layout
+  alias MingaEditor.Shell.Traditional.GitStatus.TuiState
+  alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias Minga.Keymap
   alias MingaEditor.PromptUI
   alias MingaEditor.UI.Prompt.GitCommit, as: CommitPrompt
@@ -64,34 +66,23 @@ defmodule MingaEditor.Input.GitStatus do
 
   @spec execute_command(EditorState.t(), atom()) :: EditorState.t()
   defp execute_command(state, :git_status_next) do
-    update_tui_state(state, fn tui ->
-      next_idx = min(tui.cursor_index + 1, length(tui.flat_entries) - 1)
-      %{tui | cursor_index: max(next_idx, 0)}
-    end)
+    update_tui_state(state, &TuiState.next/2)
   end
 
   defp execute_command(state, :git_status_prev) do
-    update_tui_state(state, fn tui ->
-      %{tui | cursor_index: max(tui.cursor_index - 1, 0)}
-    end)
+    update_tui_state(state, fn tui, _entries -> TuiState.prev(tui) end)
   end
 
   defp execute_command(state, :git_status_next_section) do
-    update_tui_state(state, fn tui ->
-      next = find_next_section(tui.flat_entries, tui.cursor_index)
-      %{tui | cursor_index: next}
-    end)
+    update_tui_state(state, &TuiState.next_section/2)
   end
 
   defp execute_command(state, :git_status_prev_section) do
-    update_tui_state(state, fn tui ->
-      prev = find_prev_section(tui.flat_entries, tui.cursor_index)
-      %{tui | cursor_index: prev}
-    end)
+    update_tui_state(state, &TuiState.prev_section/2)
   end
 
   defp execute_command(state, :git_status_toggle_section) do
-    update_tui_state(state, &toggle_current_section/1)
+    update_tui_state(state, &TuiState.toggle_current_section/2)
   end
 
   defp execute_command(state, :git_status_stage) do
@@ -144,9 +135,7 @@ defmodule MingaEditor.Input.GitStatus do
     with_selected_file(state, fn entry, git_root ->
       abs_path = Path.join(git_root, entry.path)
 
-      closed_state =
-        EditorState.update_workspace(state, &WorkspaceState.set_keymap_scope(&1, :editor))
-        |> EditorState.close_git_status_panel()
+      closed_state = close_panel(state)
 
       open_file_in_editor(closed_state, abs_path)
     end)
@@ -160,7 +149,9 @@ defmodule MingaEditor.Input.GitStatus do
 
   defp execute_command(state, :git_status_discard) do
     with_selected_file(state, fn entry, git_root ->
-      update_tui_state(state, &put_discard_confirmation(&1, entry, git_root))
+      update_tui_state(state, fn tui, _entries ->
+        TuiState.request_discard(tui, entry, git_root)
+      end)
     end)
   end
 
@@ -182,7 +173,7 @@ defmodule MingaEditor.Input.GitStatus do
           end
 
         state
-        |> update_tui_state(&clear_discard_confirmation/1)
+        |> update_tui_state(fn tui, _entries -> TuiState.clear_discard_confirmation(tui) end)
         |> EditorState.set_status(status_msg)
 
       nil ->
@@ -191,7 +182,7 @@ defmodule MingaEditor.Input.GitStatus do
   end
 
   defp execute_command(state, :git_status_cancel_discard) do
-    update_tui_state(state, &clear_discard_confirmation/1)
+    update_tui_state(state, fn tui, _entries -> TuiState.clear_discard_confirmation(tui) end)
   end
 
   defp execute_command(state, :git_status_push) do
@@ -236,8 +227,8 @@ defmodule MingaEditor.Input.GitStatus do
       nil ->
         EditorState.set_status(state, "Not in a git repository")
 
-      git_root ->
-        update_tui_state(state, &put_amend_mode(&1, git_root))
+      _git_root ->
+        update_tui_state(state, fn tui, _entries -> TuiState.toggle_amend(tui) end)
     end
   end
 
@@ -246,19 +237,25 @@ defmodule MingaEditor.Input.GitStatus do
   end
 
   defp execute_command(state, :git_status_close) do
-    state = EditorState.update_workspace(state, &WorkspaceState.set_keymap_scope(&1, :editor))
-    EditorState.close_git_status_panel(state)
+    close_panel(state)
   end
 
   defp execute_command(state, _cmd), do: state
 
   # ── TUI state helpers ──────────────────────────────────────────────────
 
+  @spec close_panel(EditorState.t()) :: EditorState.t()
+  defp close_panel(state) do
+    state
+    |> EditorState.update_workspace(&WorkspaceState.set_keymap_scope(&1, :editor))
+    |> EditorState.close_git_status_panel()
+    |> Layout.invalidate()
+    |> EditorState.invalidate_all_windows()
+  end
+
   @spec open_diff_for_entry(EditorState.t(), String.t(), Git.StatusEntry.t()) :: EditorState.t()
   defp open_diff_for_entry(state, git_root, %Git.StatusEntry{} = entry) do
-    closed_state =
-      EditorState.update_workspace(state, &WorkspaceState.set_keymap_scope(&1, :editor))
-      |> EditorState.close_git_status_panel()
+    closed_state = close_panel(state)
 
     open_diff_in_editor(closed_state, git_root, entry)
   end
@@ -298,31 +295,12 @@ defmodule MingaEditor.Input.GitStatus do
     end
   end
 
-  @spec put_discard_confirmation(TuiState.t(), Git.StatusEntry.t(), String.t()) :: TuiState.t()
-  defp put_discard_confirmation(tui, entry, git_root) do
-    %{tui | discard_confirmation: {entry, git_root}}
-  end
-
   @spec get_discard_confirmation(EditorState.t()) :: {Git.StatusEntry.t(), String.t()} | nil
   defp get_discard_confirmation(state) do
     case EditorState.git_status_panel(state) do
-      nil ->
-        nil
-
-      panel ->
-        tui = Map.get(panel, :tui_state) || build_initial_tui_state(panel)
-        tui.discard_confirmation
+      nil -> nil
+      _panel -> git_status_tui_state(state).discard_confirmation
     end
-  end
-
-  @spec clear_discard_confirmation(TuiState.t()) :: TuiState.t()
-  defp clear_discard_confirmation(tui) do
-    %{tui | discard_confirmation: nil}
-  end
-
-  @spec put_amend_mode(TuiState.t(), String.t()) :: TuiState.t()
-  defp put_amend_mode(tui, _git_root) do
-    %{tui | amend_mode: not tui.amend_mode}
   end
 
   @spec do_git_remote_op(
@@ -370,36 +348,20 @@ defmodule MingaEditor.Input.GitStatus do
     end
   end
 
-  @spec toggle_current_section(TuiState.t()) :: TuiState.t()
-  defp toggle_current_section(%TuiState{} = tui) do
-    case Enum.at(tui.flat_entries, tui.cursor_index) do
-      {:section_header, section, _count} ->
-        collapsed = toggle_collapsed(tui.collapsed, section)
-        rebuild_flat_entries(%{tui | collapsed: collapsed})
-
-      _ ->
-        tui
-    end
-  end
-
-  @spec toggle_collapsed(%{atom() => true}, atom()) :: %{atom() => true}
-  defp toggle_collapsed(collapsed, section) do
-    if Map.has_key?(collapsed, section) do
-      Map.delete(collapsed, section)
-    else
-      Map.put(collapsed, section, true)
-    end
-  end
-
-  @spec update_tui_state(EditorState.t(), (TuiState.t() -> TuiState.t())) :: EditorState.t()
+  @spec update_tui_state(EditorState.t(), (TuiState.t(), [Git.StatusEntry.t()] -> TuiState.t())) ::
+          EditorState.t()
   defp update_tui_state(%{shell_state: %{git_status_panel: nil}} = state, _fun), do: state
 
   defp update_tui_state(state, fun) do
     panel = EditorState.git_status_panel(state)
-    tui = Map.get(panel, :tui_state) || build_initial_tui_state(panel)
-    updated = fun.(tui)
-    updated_panel = Map.put(panel, :tui_state, updated)
-    EditorState.set_git_status_panel(state, updated_panel)
+    entries = Map.get(panel, :entries) || []
+    tui = git_status_tui_state(state)
+
+    updated =
+      fun.(tui, entries)
+      |> TuiState.clamp_cursor(entries)
+
+    EditorState.update_shell_state(state, &ShellState.set_git_status_tui_state(&1, updated))
   end
 
   @spec with_selected_file(EditorState.t(), (Git.StatusEntry.t(), String.t() -> EditorState.t())) ::
@@ -411,11 +373,12 @@ defmodule MingaEditor.Input.GitStatus do
 
       git_root ->
         panel = EditorState.git_status_panel(state)
-        tui = Map.get(panel || %{}, :tui_state) || build_initial_tui_state(panel || %{})
+        entries = Map.get(panel || %{}, :entries) || []
+        tui = git_status_tui_state(state)
 
-        case Enum.at(tui.flat_entries, tui.cursor_index) do
-          {:file, _section, entry} -> fun.(entry, git_root)
-          _ -> state
+        case TuiState.selected_file(tui, entries) do
+          %Git.StatusEntry{} = entry -> fun.(entry, git_root)
+          nil -> state
         end
     end
   end
@@ -438,93 +401,7 @@ defmodule MingaEditor.Input.GitStatus do
     end
   end
 
-  @spec build_initial_tui_state(map()) :: TuiState.t()
-  defp build_initial_tui_state(panel_data) do
-    entries = Map.get(panel_data, :entries, [])
-
-    tui = %TuiState{
-      cursor_index: 0,
-      collapsed: %{},
-      flat_entries: [],
-      entries: entries
-    }
-
-    rebuild_flat_entries(tui)
-  end
-
-  @spec rebuild_flat_entries(TuiState.t()) :: TuiState.t()
-  defp rebuild_flat_entries(%TuiState{} = tui) do
-    sections = [
-      {:conflicts, fn e -> e.status == :conflict end},
-      {:staged, fn e -> e.staged and e.status != :conflict and e.status != :untracked end},
-      {:changes, fn e -> not e.staged and e.status != :conflict and e.status != :untracked end},
-      {:untracked, fn e -> e.status == :untracked end}
-    ]
-
-    flat =
-      Enum.flat_map(sections, fn {section_name, filter_fn} ->
-        is_collapsed = Map.has_key?(tui.collapsed, section_name)
-        build_section_entries(tui.entries, section_name, filter_fn, is_collapsed)
-      end)
-
-    %{tui | flat_entries: flat}
-  end
-
-  @spec build_section_entries(
-          [Git.StatusEntry.t()],
-          atom(),
-          (Git.StatusEntry.t() -> boolean()),
-          boolean()
-        ) :: [TuiState.flat_entry()]
-  defp build_section_entries(entries, section_name, filter_fn, is_collapsed) do
-    section_entries = Enum.filter(entries, filter_fn)
-
-    case section_entries do
-      [] ->
-        []
-
-      _ ->
-        header = [{:section_header, section_name, length(section_entries)}]
-
-        if is_collapsed do
-          header
-        else
-          file_entries = Enum.map(section_entries, &{:file, section_name, &1})
-          header ++ file_entries
-        end
-    end
-  end
-
-  @spec find_next_section([TuiState.flat_entry()], non_neg_integer()) :: non_neg_integer()
-  defp find_next_section(flat_entries, current_idx) do
-    result =
-      flat_entries
-      |> Enum.with_index()
-      |> Enum.find(fn
-        {{:section_header, _, _}, idx} -> idx > current_idx
-        _ -> false
-      end)
-
-    case result do
-      {_, idx} -> idx
-      nil -> current_idx
-    end
-  end
-
-  @spec find_prev_section([TuiState.flat_entry()], non_neg_integer()) :: non_neg_integer()
-  defp find_prev_section(flat_entries, current_idx) do
-    result =
-      flat_entries
-      |> Enum.with_index()
-      |> Enum.reverse()
-      |> Enum.find(fn
-        {{:section_header, _, _}, idx} -> idx < current_idx
-        _ -> false
-      end)
-
-    case result do
-      {_, idx} -> idx
-      nil -> 0
-    end
-  end
+  @spec git_status_tui_state(EditorState.t()) :: TuiState.t()
+  defp git_status_tui_state(%{shell_state: %{git_status_tui_state: %TuiState{} = tui}}), do: tui
+  defp git_status_tui_state(_state), do: TuiState.new()
 end

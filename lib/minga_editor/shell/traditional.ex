@@ -58,6 +58,10 @@ defmodule MingaEditor.Shell.Traditional do
   @impl true
   @spec handle_event(ShellState.t(), MingaEditor.Workspace.State.t(), term()) ::
           {ShellState.t(), MingaEditor.Workspace.State.t()}
+  def handle_event(%ShellState{} = shell_state, workspace, {:git_status_changed, entries}) do
+    {ShellState.refresh_git_status_tui_state(shell_state, entries), workspace}
+  end
+
   def handle_event(%ShellState{tab_bar: nil} = shell_state, workspace, _event) do
     {shell_state, workspace}
   end
@@ -152,6 +156,10 @@ defmodule MingaEditor.Shell.Traditional do
           MingaEditor.RenderPipeline.Chrome.t()
   defdelegate build_chrome(editor_state, layout, scrolls, cursor_info),
     to: MingaEditor.Shell.Traditional.Chrome
+
+  @impl true
+  @spec chrome_fingerprint(term()) :: term()
+  defdelegate chrome_fingerprint(editor_state), to: MingaEditor.Shell.Traditional.Chrome
 
   @impl true
   @spec async_render?(term()) :: boolean()

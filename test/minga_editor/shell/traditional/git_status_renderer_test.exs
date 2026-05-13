@@ -2,14 +2,17 @@ defmodule MingaEditor.Shell.Traditional.GitStatusRendererTest do
   @moduledoc "Tests for TUI git status panel rendering."
   use ExUnit.Case, async: true
 
-  alias MingaEditor.Shell.Traditional.GitStatusRenderer
-  alias MingaEditor.Input.GitStatus.TuiState
   alias Minga.Git.StatusEntry
+  alias MingaEditor.Shell.Traditional.GitStatus.TuiState
+  alias MingaEditor.Shell.Traditional.GitStatusRenderer
+
+  @rect {1, 0, 30, 21}
 
   defp base_state(panel, opts \\ []) do
     theme = MingaEditor.UI.Theme.get!(:doom_one)
     viewport_rows = Keyword.get(opts, :rows, 24)
     viewport_cols = Keyword.get(opts, :cols, 80)
+    tui_state = Keyword.get(opts, :tui_state)
 
     %{
       workspace: %{
@@ -17,69 +20,36 @@ defmodule MingaEditor.Shell.Traditional.GitStatusRendererTest do
         viewport: %{rows: viewport_rows, cols: viewport_cols},
         keymap_scope: :git_status
       },
-      shell_state: %{git_status_panel: panel},
+      shell_state: %{git_status_panel: panel, git_status_tui_state: tui_state},
       theme: theme
     }
   end
 
-  defp make_panel(entries, tui_overrides \\ %{}) do
-    tui = build_tui_state(entries, tui_overrides)
-
+  defp make_panel(entries) do
     %{
       repo_state: :normal,
       branch: "main",
       ahead: 0,
       behind: 0,
-      entries: entries,
-      tui_state: tui
-    }
-  end
-
-  defp build_tui_state(entries, overrides) do
-    base = %TuiState{
-      cursor_index: Map.get(overrides, :cursor_index, 0),
-      collapsed: Map.get(overrides, :collapsed, %{}),
-      flat_entries: [],
       entries: entries
     }
-
-    sections = [
-      {:conflicts, fn e -> e.status == :conflict end},
-      {:staged, fn e -> e.staged and e.status != :conflict and e.status != :untracked end},
-      {:changes, fn e -> not e.staged and e.status != :conflict and e.status != :untracked end},
-      {:untracked, fn e -> e.status == :untracked end}
-    ]
-
-    flat =
-      Enum.flat_map(sections, fn {section_name, filter_fn} ->
-        is_collapsed = Map.has_key?(base.collapsed, section_name)
-        build_section(entries, section_name, filter_fn, is_collapsed)
-      end)
-
-    %{base | flat_entries: flat}
   end
 
-  defp build_section(entries, section_name, filter_fn, is_collapsed) do
-    section_entries = Enum.filter(entries, filter_fn)
-
-    case {section_entries, is_collapsed} do
-      {[], _} ->
-        []
-
-      {_, true} ->
-        [{:section_header, section_name, length(section_entries)}]
-
-      _ ->
-        header = [{:section_header, section_name, length(section_entries)}]
-        file_entries = Enum.map(section_entries, &{:file, section_name, &1})
-        header ++ file_entries
-    end
+  defp make_tui_state(overrides) do
+    TuiState.new()
+    |> Map.merge(overrides)
   end
 
-  describe "render/1" do
+  describe "render/2" do
     test "returns empty list when no panel is active" do
       state = base_state(nil)
-      assert GitStatusRenderer.render(state) == []
+      assert GitStatusRenderer.render(state, @rect) == []
+    end
+
+    test "returns empty list when layout did not reserve a sidebar" do
+      entries = [%StatusEntry{path: "file.ex", status: :modified, staged: false}]
+      state = base_state(make_panel(entries))
+      assert GitStatusRenderer.render(state, nil) == []
     end
 
     test "renders header with branch name" do
@@ -89,10 +59,23 @@ defmodule MingaEditor.Shell.Traditional.GitStatusRendererTest do
 
       panel = make_panel(entries)
       state = base_state(panel)
-      draws = GitStatusRenderer.render(state)
+      draws = GitStatusRenderer.render(state, @rect)
 
       header_draw = hd(draws)
       assert String.contains?(elem(header_draw, 2), "main")
+    end
+
+    test "renders entries without persisted tui state" do
+      entries = [
+        %StatusEntry{path: "unstaged.ex", status: :modified, staged: false}
+      ]
+
+      state = base_state(make_panel(entries))
+      draws = GitStatusRenderer.render(state, @rect)
+
+      texts = Enum.map(draws, fn d -> elem(d, 2) end)
+      assert Enum.any?(texts, &String.contains?(&1, "Changes"))
+      assert Enum.any?(texts, &String.contains?(&1, "unstaged"))
     end
 
     test "renders section headers with counts" do
@@ -104,7 +87,7 @@ defmodule MingaEditor.Shell.Traditional.GitStatusRendererTest do
 
       panel = make_panel(entries)
       state = base_state(panel)
-      draws = GitStatusRenderer.render(state)
+      draws = GitStatusRenderer.render(state, @rect)
 
       texts = Enum.map(draws, fn d -> elem(d, 2) end)
       assert Enum.any?(texts, &String.contains?(&1, "Staged"))
@@ -121,7 +104,7 @@ defmodule MingaEditor.Shell.Traditional.GitStatusRendererTest do
 
       panel = make_panel(entries)
       state = base_state(panel)
-      draws = GitStatusRenderer.render(state)
+      draws = GitStatusRenderer.render(state, @rect)
 
       texts = Enum.map(draws, fn d -> elem(d, 2) end)
       assert Enum.any?(texts, &String.contains?(&1, "A "))
@@ -135,9 +118,9 @@ defmodule MingaEditor.Shell.Traditional.GitStatusRendererTest do
         %StatusEntry{path: "file2.ex", status: :modified, staged: false}
       ]
 
-      panel = make_panel(entries, %{collapsed: %{changes: true}})
-      state = base_state(panel)
-      draws = GitStatusRenderer.render(state)
+      panel = make_panel(entries)
+      state = base_state(panel, tui_state: make_tui_state(%{collapsed: %{changes: true}}))
+      draws = GitStatusRenderer.render(state, @rect)
 
       texts = Enum.map(draws, fn d -> elem(d, 2) end)
       assert Enum.any?(texts, &String.contains?(&1, "Changes"))
@@ -148,7 +131,7 @@ defmodule MingaEditor.Shell.Traditional.GitStatusRendererTest do
       entries = [%StatusEntry{path: "file.ex", status: :modified, staged: false}]
       panel = make_panel(entries)
       state = base_state(panel)
-      draws = GitStatusRenderer.render(state)
+      draws = GitStatusRenderer.render(state, @rect)
 
       sep_draws = Enum.filter(draws, fn d -> elem(d, 2) == "│" end)
       assert sep_draws != []
@@ -164,7 +147,7 @@ defmodule MingaEditor.Shell.Traditional.GitStatusRendererTest do
       }
 
       state = base_state(panel)
-      draws = GitStatusRenderer.render(state)
+      draws = GitStatusRenderer.render(state, @rect)
 
       header_text = elem(hd(draws), 2)
       assert String.contains?(header_text, "↑3")

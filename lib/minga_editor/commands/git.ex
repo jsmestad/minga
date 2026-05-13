@@ -11,6 +11,7 @@ defmodule MingaEditor.Commands.Git do
   alias Minga.Core.DiffView
   alias Minga.Core.Face
   alias MingaEditor.Commands
+  alias MingaEditor.Layout
   alias MingaEditor.PickerUI
   alias MingaEditor.State, as: EditorState
   alias Minga.Git
@@ -43,8 +44,11 @@ defmodule MingaEditor.Commands.Git do
 
   def execute(state, :git_status_toggle) do
     if state.workspace.keymap_scope == :git_status do
-      state = EditorState.update_workspace(state, &WorkspaceState.set_keymap_scope(&1, :editor))
-      EditorState.close_git_status_panel(state)
+      state
+      |> EditorState.update_workspace(&WorkspaceState.set_keymap_scope(&1, :editor))
+      |> EditorState.close_git_status_panel()
+      |> Layout.invalidate()
+      |> EditorState.invalidate_all_windows()
     else
       open_git_status_panel(state)
     end
@@ -605,7 +609,10 @@ defmodule MingaEditor.Commands.Git do
         state =
           EditorState.update_workspace(state, &WorkspaceState.set_keymap_scope(&1, :git_status))
 
-        EditorState.set_git_status_panel(state, panel_data)
+        state
+        |> EditorState.set_git_status_panel(panel_data)
+        |> Layout.invalidate()
+        |> EditorState.invalidate_all_windows()
     end
   end
 

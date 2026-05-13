@@ -3,6 +3,8 @@ defmodule MingaEditor.RenderPipeline.ChromeDirtyTest do
 
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.RenderPipeline.TestHelpers
+  alias MingaEditor.Shell.Traditional.GitStatus.TuiState
+  alias MingaEditor.Shell.Traditional.State, as: ShellState
 
   describe "chrome_fingerprint/1" do
     test "same input produces same fingerprint" do
@@ -54,6 +56,20 @@ defmodule MingaEditor.RenderPipeline.ChromeDirtyTest do
       ws = input.workspace
       ft = %{ws.file_tree | focused: true}
       input2 = %{input | workspace: %{ws | file_tree: ft}}
+      fp2 = Input.chrome_fingerprint(input2)
+
+      assert fp1 != fp2
+    end
+
+    test "shell-owned chrome state changes fingerprint through shell hook" do
+      state = TestHelpers.base_state()
+      input = Input.from_editor_state(state)
+      fp1 = Input.chrome_fingerprint(input)
+
+      shell_state =
+        ShellState.set_git_status_tui_state(state.shell_state, %{TuiState.new() | cursor_index: 1})
+
+      input2 = Input.from_editor_state(%{state | shell_state: shell_state})
       fp2 = Input.chrome_fingerprint(input2)
 
       assert fp1 != fp2
